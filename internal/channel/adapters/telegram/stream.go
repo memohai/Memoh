@@ -382,6 +382,8 @@ func (s *telegramOutboundStream) sendToolCallMessage(
 	p channel.ToolCallPresentation,
 ) error {
 	text, parseMode := renderToolCallPresentation(p)
+	rich := renderTelegramToolCallRichMessage(p)
+	useRich := strings.TrimSpace(rich.HTML) != "" && sendTextForTest == nil && testEditFunc == nil
 	if text == "" {
 		return nil
 	}
@@ -399,15 +401,24 @@ func (s *telegramOutboundStream) sendToolCallMessage(
 				return err
 			}
 			editErr := error(nil)
-			switch {
-			case p.Status == channel.ToolCallStatusApprovalRequired && len(tcActions(tc)) > 0 && testEditFunc == nil:
-				editErr = editTelegramMessageTextWithActions(bot, existing.chatID, existing.msgID, text, parseMode, tcActions(tc))
-			case (p.Status == channel.ToolCallStatusCompleted || p.Status == channel.ToolCallStatusFailed) && existing.hasActions && testEditFunc == nil:
-				editErr = editTelegramMessageTextWithActions(bot, existing.chatID, existing.msgID, text, parseMode, nil)
-			case testEditFunc != nil:
-				editErr = testEditFunc(bot, existing.chatID, existing.msgID, text, parseMode)
-			default:
-				editErr = editTelegramMessageText(bot, existing.chatID, existing.msgID, text, parseMode)
+			if useRich {
+				actions := []channel.Action(nil)
+				if p.Status == channel.ToolCallStatusApprovalRequired && len(tcActions(tc)) > 0 {
+					actions = tcActions(tc)
+				}
+				editErr = editTelegramRichMessage(bot, existing.chatID, existing.msgID, rich, actions)
+			}
+			if editErr != nil || !useRich {
+				switch {
+				case p.Status == channel.ToolCallStatusApprovalRequired && len(tcActions(tc)) > 0 && testEditFunc == nil:
+					editErr = editTelegramMessageTextWithActions(bot, existing.chatID, existing.msgID, text, parseMode, tcActions(tc))
+				case (p.Status == channel.ToolCallStatusCompleted || p.Status == channel.ToolCallStatusFailed) && existing.hasActions && testEditFunc == nil:
+					editErr = editTelegramMessageTextWithActions(bot, existing.chatID, existing.msgID, text, parseMode, nil)
+				case testEditFunc != nil:
+					editErr = testEditFunc(bot, existing.chatID, existing.msgID, text, parseMode)
+				default:
+					editErr = editTelegramMessageText(bot, existing.chatID, existing.msgID, text, parseMode)
+				}
 			}
 			if editErr == nil {
 				if p.Status != channel.ToolCallStatusApprovalRequired {
@@ -439,9 +450,23 @@ func (s *telegramOutboundStream) sendToolCallMessage(
 		msgID   int
 		sendErr error
 	)
-	if len(tcActions(tc)) > 0 {
+	sentRich := false
+	if useRich {
+		chatID, msgID, sendErr = sendTelegramRichMessageReturnMessage(bot, s.target, rich, replyTo, tcActions(tc))
+		sentRich = sendErr == nil && msgID != 0
+		if !sentRich && sendErr != nil && s.adapter != nil && s.adapter.logger != nil {
+			s.adapter.logger.Warn("telegram: rich tool-call send failed, falling back to text",
+				slog.String("call_id", callID),
+				slog.Any("error", sendErr),
+			)
+		}
+	}
+	if sendErr != nil || !useRich {
+		sendErr = nil
+	}
+	if !sentRich && len(tcActions(tc)) > 0 {
 		chatID, msgID, sendErr = sendTelegramTextWithActionsReturnMessage(bot, s.target, text, replyTo, parseMode, tcActions(tc))
-	} else {
+	} else if !sentRich {
 		chatID, msgID, sendErr = sendTelegramTextReturnMessage(bot, s.target, text, replyTo, parseMode)
 	}
 	if sendErr != nil {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -49,6 +50,115 @@ func TestSlackDescriptorDoesNotAdvertiseEdit(t *testing.T) {
 	if NewSlackAdapter(nil).Descriptor().Capabilities.Edit {
 		t.Fatal("Slack descriptor should not advertise edit support")
 	}
+}
+
+func TestSlackOutboundStreamSendToolCallMessagePostsBlocks(t *testing.T) {
+	t.Parallel()
+
+	var gotText string
+	var gotBlocks string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat.postMessage" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		gotText = r.Form.Get("text")
+		gotBlocks = r.Form.Get("blocks")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"channel":"C123","ts":"1710000000.000000"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	stream := &slackOutboundStream{
+		adapter: &SlackAdapter{},
+		target:  "C123",
+		api:     slack.New(testBotToken, slack.OptionAPIURL(server.URL+"/")),
+	}
+	p := channel.ToolCallPresentation{
+		Emoji:    "💻",
+		ToolName: "exec",
+		Status:   channel.ToolCallStatusCompleted,
+		Header:   "$ pnpm test <unit>",
+		Body: []channel.ToolCallBlock{
+			{Type: channel.ToolCallBlockText, Text: "stdout: ok & done"},
+			{Type: channel.ToolCallBlockLink, Title: "trace <report>", URL: "https://example.test/run?x=1&y=2", Desc: "open it"},
+			{Type: channel.ToolCallBlockCode, Title: "stderr", Text: "line 1\nline 2"},
+		},
+		Footer: "exit=0",
+	}
+
+	if err := stream.sendToolCallMessage(context.Background(), &channel.StreamToolCall{CallID: "call-1"}, p); err != nil {
+		t.Fatalf("sendToolCallMessage: %v", err)
+	}
+
+	if gotText == "" {
+		t.Fatal("expected fallback text")
+	}
+	if gotBlocks == "" {
+		t.Fatal("expected Slack Block Kit blocks")
+	}
+	var blocks []map[string]any
+	if err := json.Unmarshal([]byte(gotBlocks), &blocks); err != nil {
+		t.Fatalf("decode blocks: %v (blocks=%q)", err, gotBlocks)
+	}
+	if len(blocks) < 4 {
+		t.Fatalf("expected multiple blocks, got %#v", blocks)
+	}
+	if blocks[0]["type"] != "section" {
+		t.Fatalf("expected first block to be section, got %#v", blocks[0])
+	}
+	firstText, _ := blocks[0]["text"].(map[string]any)
+	if firstText["type"] != "mrkdwn" {
+		t.Fatalf("expected first block to use mrkdwn text, got %#v", firstText)
+	}
+	firstTextValue, _ := firstText["text"].(string)
+	if !strings.Contains(firstTextValue, "*💻 exec · completed*") || !strings.Contains(firstTextValue, "$ pnpm test &lt;unit&gt;") {
+		t.Fatalf("unexpected first block text: %q", firstTextValue)
+	}
+	secondText := slackBlockText(t, blocks[1])
+	if !strings.Contains(secondText, "stdout: ok &amp; done") {
+		t.Fatalf("expected escaped text block, got %q", secondText)
+	}
+	thirdText := slackBlockText(t, blocks[2])
+	if !strings.Contains(thirdText, "<https://example.test/run?x=1&amp;y=2|trace &lt;report&gt;>") {
+		t.Fatalf("expected Slack link markup, got %q", thirdText)
+	}
+}
+
+func TestRenderSlackToolCallBlockDoesNotLinkUnsafeURL(t *testing.T) {
+	t.Parallel()
+
+	got := renderSlackToolCallBlock(channel.ToolCallBlock{
+		Type:  channel.ToolCallBlockLink,
+		Title: "trace",
+		URL:   "javascript:alert(1)",
+		Desc:  "open <!channel> <https://evil.test|link>",
+	})
+
+	for _, disallowed := range []string{"<javascript:", "|trace>", "<!channel>", "<https://evil.test|link>"} {
+		if strings.Contains(got, disallowed) {
+			t.Fatalf("expected unsafe link block to avoid %q, got %q", disallowed, got)
+		}
+	}
+	if !strings.Contains(got, "trace") || !strings.Contains(got, "&lt;!channel&gt;") {
+		t.Fatalf("expected escaped fallback text, got %q", got)
+	}
+}
+
+func slackBlockText(t *testing.T, block map[string]any) string {
+	t.Helper()
+
+	text, ok := block["text"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected text object, got %#v", block["text"])
+	}
+	value, ok := text["text"].(string)
+	if !ok {
+		t.Fatalf("expected text value, got %#v", text["text"])
+	}
+	return value
 }
 
 func TestSlackResolveOutboundTargetUsesDMForUserID(t *testing.T) {
