@@ -594,6 +594,12 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 			slog.String("bot_id", bot.ID),
 			slog.Any("error", err),
 		)
+		if recordErr := h.botService.RecordContainerSetupFailure(lifecycleCtx, bot.ID, "setup", err); recordErr != nil {
+			h.logger.Warn("record bot container setup failure failed",
+				slog.String("bot_id", bot.ID),
+				slog.Any("error", recordErr),
+			)
+		}
 		if _, readyErr := h.botService.MarkReady(lifecycleCtx, bot.ID); readyErr != nil {
 			h.logger.Error("failed to update bot status to ready after stream create failure",
 				slog.String("bot_id", bot.ID),
@@ -606,6 +612,12 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 		return nil
 	}
 
+	if clearErr := h.botService.ClearContainerSetupFailure(lifecycleCtx, bot.ID); clearErr != nil {
+		h.logger.Warn("clear bot container setup failure failed",
+			slog.String("bot_id", bot.ID),
+			slog.Any("error", clearErr),
+		)
+	}
 	readyBot, err := h.botService.MarkReady(lifecycleCtx, bot.ID)
 	if err != nil {
 		h.logger.Error("failed to update bot status to ready after stream create",
