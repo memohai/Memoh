@@ -15,6 +15,7 @@ import (
 	dbpkg "github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/session"
 )
 
@@ -25,19 +26,29 @@ type SessionLister interface {
 	ListByBot(ctx context.Context, botID string) ([]session.Session, error)
 }
 
-// HistoryProvider exposes list_sessions and search_messages tools.
+// HistoryMessageReader is the minimal interface for reading persisted messages.
+type HistoryMessageReader interface {
+	ListLatest(ctx context.Context, botID string, limit int32) ([]messagepkg.Message, error)
+	ListBefore(ctx context.Context, botID string, before time.Time, limit int32) ([]messagepkg.Message, error)
+	ListLatestBySession(ctx context.Context, sessionID string, limit int32) ([]messagepkg.Message, error)
+	ListBeforeBySession(ctx context.Context, sessionID string, before time.Time, limit int32) ([]messagepkg.Message, error)
+}
+
+// HistoryProvider exposes list_sessions, get_messages, and search_messages tools.
 type HistoryProvider struct {
 	sessions SessionLister
+	messages HistoryMessageReader
 	queries  dbstore.Queries
 	logger   *slog.Logger
 }
 
-func NewHistoryProvider(log *slog.Logger, sessions SessionLister, queries dbstore.Queries) *HistoryProvider {
+func NewHistoryProvider(log *slog.Logger, sessions SessionLister, messages HistoryMessageReader, queries dbstore.Queries) *HistoryProvider {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &HistoryProvider{
 		sessions: sessions,
+		messages: messages,
 		queries:  queries,
 		logger:   log.With(slog.String("tool", "history")),
 	}
@@ -75,6 +86,35 @@ func (p *HistoryProvider) Tools(_ context.Context, sess SessionContext) ([]sdk.T
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return p.execListSessions(ctx.Context, s, inputAsMap(input))
+			},
+		})
+	}
+
+	if p.messages != nil {
+		s := sess
+		tools = append(tools, sdk.Tool{
+			Name:        "get_messages",
+			Description: "Get recent messages from a chat session. Defaults to the current session. Use list_sessions to find other session IDs. Results are returned oldest-first.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_id": map[string]any{
+						"type":        "string",
+						"description": "Session ID to read. Defaults to the current session when omitted.",
+					},
+					"before": map[string]any{
+						"type":        "string",
+						"description": "ISO 8601 timestamp cursor. When provided, returns messages created before this time.",
+					},
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Maximum number of messages to return. Default 30, max 100.",
+					},
+				},
+				"required": []string{},
+			},
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
+				return p.execGetMessages(ctx.Context, s, inputAsMap(input))
 			},
 		})
 	}
@@ -198,6 +238,98 @@ func (p *HistoryProvider) execListSessions(ctx context.Context, sess SessionCont
 }
 
 // ---------------------------------------------------------------------------
+// get_messages
+// ---------------------------------------------------------------------------
+
+func (p *HistoryProvider) execGetMessages(ctx context.Context, sess SessionContext, args map[string]any) (any, error) {
+	botID := strings.TrimSpace(sess.BotID)
+	if botID == "" {
+		return nil, errors.New("bot_id is required")
+	}
+
+	limit := int32(30)
+	if v, ok, err := IntArg(args, "limit"); err != nil {
+		return nil, err
+	} else if ok && v > 0 {
+		if v > 100 {
+			v = 100
+		}
+		limit = int32(v) //nolint:gosec // upper-bounded above
+	}
+
+	sessionID := strings.TrimSpace(StringArg(args, "session_id"))
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(sess.SessionID)
+	}
+	if sessionID != "" && sessionID != strings.TrimSpace(sess.SessionID) {
+		if err := p.ensureSessionBelongsToBot(ctx, botID, sessionID); err != nil {
+			return nil, err
+		}
+	}
+
+	var (
+		messages []messagepkg.Message
+		err      error
+		before   time.Time
+	)
+	if rawBefore := StringArg(args, "before"); rawBefore != "" {
+		before, err = parseFlexibleTime(rawBefore)
+		if err != nil {
+			return nil, err
+		}
+		if sessionID != "" {
+			messages, err = p.messages.ListBeforeBySession(ctx, sessionID, before, limit)
+		} else {
+			messages, err = p.messages.ListBefore(ctx, botID, before, limit)
+		}
+	} else if sessionID != "" {
+		messages, err = p.messages.ListLatestBySession(ctx, sessionID, limit)
+		reverseHistoryMessages(messages)
+	} else {
+		messages, err = p.messages.ListLatest(ctx, botID, limit)
+		reverseHistoryMessages(messages)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]map[string]any, 0, len(messages))
+	for _, msg := range messages {
+		results = append(results, formatHistoryMessage(sess, msg))
+	}
+
+	out := map[string]any{
+		"ok":       true,
+		"bot_id":   botID,
+		"count":    len(results),
+		"messages": results,
+	}
+	if sessionID != "" {
+		out["session_id"] = sessionID
+	}
+	if !before.IsZero() {
+		out["before"] = sess.FormatTime(before)
+	}
+	return out, nil
+}
+
+func (p *HistoryProvider) ensureSessionBelongsToBot(ctx context.Context, botID, sessionID string) error {
+	if p.sessions == nil {
+		return errors.New("session lookup is not configured")
+	}
+	sessions, err := p.sessions.ListByBot(ctx, botID)
+	if err != nil {
+		return err
+	}
+	for _, item := range sessions {
+		if item.ID == sessionID {
+			return nil
+		}
+	}
+	return errors.New("session_id does not belong to the current bot")
+}
+
+// ---------------------------------------------------------------------------
 // search_messages
 // ---------------------------------------------------------------------------
 
@@ -283,6 +415,55 @@ func (p *HistoryProvider) execSearchMessages(ctx context.Context, sess SessionCo
 		"count":    len(messages),
 		"messages": messages,
 	}, nil
+}
+
+func formatHistoryMessage(sess SessionContext, msg messagepkg.Message) map[string]any {
+	entry := map[string]any{
+		"id":         msg.ID,
+		"session_id": msg.SessionID,
+		"role":       msg.Role,
+		"text":       extractTextContent(msg.Content),
+		"created_at": sess.FormatTime(msg.CreatedAt),
+	}
+	if strings.TrimSpace(msg.Platform) != "" {
+		entry["platform"] = msg.Platform
+	}
+	if strings.TrimSpace(msg.SenderDisplayName) != "" {
+		entry["sender"] = msg.SenderDisplayName
+	}
+	if strings.TrimSpace(msg.SenderChannelIdentityID) != "" {
+		entry["contact_id"] = msg.SenderChannelIdentityID
+	}
+	if strings.TrimSpace(msg.ExternalMessageID) != "" {
+		entry["external_message_id"] = msg.ExternalMessageID
+	}
+	if strings.TrimSpace(msg.SourceReplyToMessageID) != "" {
+		entry["source_reply_to_message_id"] = msg.SourceReplyToMessageID
+	}
+	if len(msg.Assets) > 0 {
+		assets := make([]map[string]any, 0, len(msg.Assets))
+		for _, asset := range msg.Assets {
+			item := map[string]any{
+				"content_hash": asset.ContentHash,
+				"role":         asset.Role,
+				"ordinal":      asset.Ordinal,
+				"mime":         asset.Mime,
+				"name":         asset.Name,
+			}
+			if asset.SizeBytes > 0 {
+				item["size_bytes"] = asset.SizeBytes
+			}
+			assets = append(assets, item)
+		}
+		entry["assets"] = assets
+	}
+	return entry
+}
+
+func reverseHistoryMessages(messages []messagepkg.Message) {
+	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+		messages[i], messages[j] = messages[j], messages[i]
+	}
 }
 
 // extractTextContent deserialises the JSONB content column (a ModelMessage)
@@ -459,6 +640,7 @@ func dedupeHistoryNames(names []string) []string {
 }
 
 var timeFormats = []string{
+	time.RFC3339Nano,
 	time.RFC3339,
 	"2006-01-02T15:04:05",
 	"2006-01-02 15:04:05",
