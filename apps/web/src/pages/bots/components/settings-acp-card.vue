@@ -225,7 +225,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useQueryCache } from '@pinia/colada'
 import { Button, Input, Label, Switch } from '@memohai/ui'
 import { LoaderCircle } from 'lucide-vue-next'

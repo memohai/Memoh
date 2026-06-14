@@ -342,6 +342,19 @@ definitions:
       ok:
         type: boolean
     type: object
+  adapters.MemoryCompactCapability:
+    properties:
+      archive:
+        type: boolean
+      native:
+        type: boolean
+      reason:
+        type: string
+      rebuild_index:
+        type: boolean
+      semantic:
+        type: boolean
+    type: object
   adapters.MemoryItem:
     properties:
       agent_id:
@@ -378,6 +391,8 @@ definitions:
     properties:
       can_manual_sync:
         type: boolean
+      compact:
+        $ref: '#/definitions/adapters.MemoryCompactCapability'
       encoder:
         $ref: '#/definitions/adapters.HealthStatus'
       indexed_count:
@@ -1825,6 +1840,88 @@ definitions:
       provider:
         type: string
     type: object
+  fetchproviders.CreateRequest:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      name:
+        type: string
+      provider:
+        $ref: '#/definitions/fetchproviders.ProviderName'
+    type: object
+  fetchproviders.GetResponse:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      created_at:
+        type: string
+      enable:
+        type: boolean
+      id:
+        type: string
+      name:
+        type: string
+      provider:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  fetchproviders.ProviderConfigSchema:
+    properties:
+      fields:
+        additionalProperties:
+          $ref: '#/definitions/fetchproviders.ProviderFieldSchema'
+        type: object
+    type: object
+  fetchproviders.ProviderFieldSchema:
+    properties:
+      description:
+        type: string
+      enum:
+        items:
+          type: string
+        type: array
+      example: {}
+      required:
+        type: boolean
+      title:
+        type: string
+      type:
+        type: string
+    type: object
+  fetchproviders.ProviderMeta:
+    properties:
+      config_schema:
+        $ref: '#/definitions/fetchproviders.ProviderConfigSchema'
+      display_name:
+        type: string
+      provider:
+        type: string
+    type: object
+  fetchproviders.ProviderName:
+    enum:
+    - native
+    - jina
+    - cloudflare_markdown
+    type: string
+    x-enum-varnames:
+    - ProviderNative
+    - ProviderJina
+    - ProviderCloudflareMarkdown
+  fetchproviders.UpdateRequest:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      enable:
+        type: boolean
+      name:
+        type: string
+      provider:
+        $ref: '#/definitions/fetchproviders.ProviderName'
+    type: object
   github_com_memohai_memoh_internal_mcp.Connection:
     properties:
       auth_type:
@@ -3186,6 +3283,8 @@ definitions:
         items:
           type: string
         type: array
+      thinking_mode:
+        type: string
     type: object
   models.ModelType:
     enum:
@@ -3523,6 +3622,8 @@ definitions:
           type: string
         type: array
       skipped:
+        type: integer
+      updated:
         type: integer
     type: object
   providers.OAuthAccount:
@@ -3870,6 +3971,8 @@ definitions:
         type: string
       display_enabled:
         type: boolean
+      fetch_provider_id:
+        type: string
       heartbeat_enabled:
         type: boolean
       heartbeat_interval:
@@ -3967,6 +4070,8 @@ definitions:
         type: string
       display_enabled:
         type: boolean
+      fetch_provider_id:
+        type: string
       heartbeat_enabled:
         type: boolean
       heartbeat_interval:
@@ -7010,6 +7115,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "501":
+          description: Not Implemented
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
         "503":
           description: Service Unavailable
           schema:
@@ -9604,6 +9713,163 @@ paths:
       summary: OAuth2 callback for email providers
       tags:
       - email-oauth
+  /fetch-providers:
+    get:
+      consumes:
+      - application/json
+      description: List configured fetch providers
+      parameters:
+      - description: Provider filter (native)
+        in: query
+        name: provider
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/fetchproviders.GetResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List fetch providers
+      tags:
+      - fetch-providers
+    post:
+      consumes:
+      - application/json
+      description: Create a fetch provider configuration
+      parameters:
+      - description: Fetch provider configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/fetchproviders.CreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/fetchproviders.GetResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create a fetch provider
+      tags:
+      - fetch-providers
+  /fetch-providers/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Delete fetch provider by ID
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete a fetch provider
+      tags:
+      - fetch-providers
+    get:
+      consumes:
+      - application/json
+      description: Get fetch provider by ID
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/fetchproviders.GetResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a fetch provider
+      tags:
+      - fetch-providers
+    put:
+      consumes:
+      - application/json
+      description: Update fetch provider by ID
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Updated configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/fetchproviders.UpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/fetchproviders.GetResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update a fetch provider
+      tags:
+      - fetch-providers
+  /fetch-providers/meta:
+    get:
+      description: List available fetch provider types and config schemas
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/fetchproviders.ProviderMeta'
+            type: array
+      summary: List fetch provider metadata
+      tags:
+      - fetch-providers
   /memory-providers:
     get:
       description: List configured memory providers

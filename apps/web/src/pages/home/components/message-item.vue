@@ -234,7 +234,7 @@
       <!-- Assistant message blocks -->
       <div
         v-else
-        class="space-y-3"
+        class="space-y-1.5"
       >
         <!-- Bot name label -->
         <!-- <p
@@ -245,52 +245,49 @@
         </p> -->
 
         <template
-          v-for="(block, i) in message.messages"
-          :key="i"
+          v-for="node in renderNodes"
+          :key="node.key"
         >
-          <!-- Thinking block -->
-          <ThinkingBlock
-            v-if="block.type === 'reasoning'"
-            :block="(block as ThinkingBlockType)"
-            :streaming="isAssistantBlockStreaming(i)"
+          <!-- Process segment: consecutive tool + reasoning blocks. A single
+               item renders as a bare row; multiple collapse into one group. -->
+          <ToolCallGroup
+            v-if="node.kind === 'process'"
+            :items="node.items"
+            :active="message.streaming && node.lastIndex === message.messages.length - 1"
           />
 
-          <!-- Tool call block -->
-          <ToolCallBlock
-            v-else-if="block.type === 'tool' && isVisibleAssistantBlock(block)"
-            :block="(block as ToolCallBlockType)"
-          />
+          <template v-else>
+            <!-- Text block -->
+            <div
+              v-if="node.block.type === 'text' && node.block.content"
+              class="prose prose-sm dark:prose-invert max-w-none [&_p]:my-0! [&_p+p]:mt-2! [&_ul]:my-1.5! [&_ol]:my-1.5! [&_li]:my-0.5! [&_:is(h1,h2,h3,h4,h5,h6)]:mt-2.5! [&_:is(h1,h2,h3,h4,h5,h6)]:mb-1! [&>*:first-child]:mt-0! [&>*:last-child]:mb-0!"
+            >
+              <MarkdownRender
+                :content="node.block.content"
+                :is-dark="isDark"
+                :smooth-streaming="isAssistantBlockStreaming(node.index)"
+                :typewriter="isAssistantBlockStreaming(node.index)"
+                :fade="isAssistantBlockStreaming(node.index)"
+                custom-id="chat-msg"
+              />
+            </div>
 
-          <!-- Text block -->
-          <div
-            v-else-if="block.type === 'text' && block.content"
-            class="prose prose-sm dark:prose-invert max-w-none *:first:mt-0"
-          >
-            <MarkdownRender
-              :content="block.content"
-              :is-dark="isDark"
-              :smooth-streaming="isAssistantBlockStreaming(i)"
-              :typewriter="isAssistantBlockStreaming(i)"
-              :fade="isAssistantBlockStreaming(i)"
-              custom-id="chat-msg"
+            <!-- Error block -->
+            <div
+              v-else-if="node.block.type === 'error' && node.block.content"
+              class="flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            >
+              <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
+              <span class="min-w-0 whitespace-pre-wrap break-words">{{ node.block.content }}</span>
+            </div>
+
+            <!-- Attachment block -->
+            <AttachmentBlock
+              v-else-if="node.block.type === 'attachments'"
+              :block="(node.block as AttachmentBlockType)"
+              :on-open-media="onOpenMedia"
             />
-          </div>
-
-          <!-- Error block -->
-          <div
-            v-else-if="block.type === 'error' && block.content"
-            class="flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-          >
-            <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
-            <span class="min-w-0 whitespace-pre-wrap break-words">{{ block.content }}</span>
-          </div>
-
-          <!-- Attachment block -->
-          <AttachmentBlock
-            v-else-if="block.type === 'attachments'"
-            :block="(block as AttachmentBlockType)"
-            :on-open-media="onOpenMedia"
-          />
+          </template>
         </template>
 
         <!-- Streaming indicator -->
@@ -312,6 +309,18 @@
   </div>
 </template>
 
+<script lang="ts">
+import { setCustomComponents } from 'markstream-vue'
+import ChatCodeBlock from './chat-code-block.vue'
+
+// Replace markstream's heavy Monaco code block (and its font-size/expand/preview
+// toolbar that surfaced raw i18n keys) with a clean integral code block, scoped
+// to the chat renderer id ("chat-msg"). Both `code_block` and `shell` are mapped
+// to the same component so shell/bash blocks render identically (no separate
+// terminal "run" toolbar / language chrome). Runs once at module load.
+setCustomComponents('chat-msg', { code_block: ChatCodeBlock, shell: ChatCodeBlock })
+</script>
+
 <script setup lang="ts">
 import { computed, toRef, useTemplateRef, watch } from 'vue'
 import { CircleAlert, LoaderCircle } from 'lucide-vue-next'
@@ -319,8 +328,9 @@ import { formatRelativeTime, formatDateTime } from '@/utils/date-time'
 import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
-import ThinkingBlock from './thinking-block.vue'
-import ToolCallBlock from './tool-call-block.vue'
+import ToolCallGroup from './tool-call-group.vue'
+import { isReadOnlyTool } from './tool-call-registry'
+import { finalizeReasoning, markReasoningSeen } from './reasoning-timing'
 import AttachmentBlock from './attachment-block.vue'
 import BackgroundTaskBlock from './background-task-block.vue'
 import HeartbeatTriggerBlock from './heartbeat-trigger-block.vue'
@@ -334,8 +344,8 @@ import type {
   AttachmentItem,
   ChatMessage,
   ContentBlock,
-  ThinkingBlock as ThinkingBlockType,
   ToolCallBlock as ToolCallBlockType,
+  ThinkingBlock as ThinkingBlockType,
   AttachmentBlock as AttachmentBlockType,
 } from '@/store/chat-list'
 
@@ -487,6 +497,79 @@ function isVisibleAssistantBlock(block: ContentBlock): boolean {
   if (block.type === 'attachments') return block.attachments.length > 0
   return true
 }
+
+// Project the flat assistant block list into render nodes.
+//  - A "process" node is a run of consecutive tool + reasoning blocks. It splits
+//    by tool category (read-only "explore" vs side-effecting "action") so reads
+//    and edits don't merge into one bucket; reasoning rides along with whichever
+//    segment it sits next to (it is never rendered standalone).
+//  - Every other block type (text / error / attachments) keeps its place.
+// Keyed by stable block id.
+type ProcessNode = { kind: 'process'; key: string; items: ContentBlock[]; cat: 'explore' | 'action' | null; lastIndex: number }
+type BlockNode = { kind: 'block'; key: string; block: ContentBlock; index: number }
+type RenderNode = ProcessNode | BlockNode
+
+const renderNodes = computed<RenderNode[]>(() => {
+  if (props.message.role !== 'assistant') return []
+  const nodes: RenderNode[] = []
+  let run: ProcessNode | null = null
+  props.message.messages.forEach((block, index) => {
+    if (!isVisibleAssistantBlock(block)) return
+    if (block.type === 'tool' || block.type === 'reasoning') {
+      const cat = block.type === 'tool'
+        ? (isReadOnlyTool((block as ToolCallBlockType).toolName) ? 'explore' : 'action')
+        : null
+      if (!run) {
+        run = { kind: 'process', key: `p${block.id}`, items: [block], cat, lastIndex: index }
+        nodes.push(run)
+      } else if (cat !== null && run.cat !== null && cat !== run.cat) {
+        // Category switch (e.g. finished reading, now editing) → new segment.
+        run = { kind: 'process', key: `p${block.id}`, items: [block], cat, lastIndex: index }
+        nodes.push(run)
+      } else {
+        run.items.push(block)
+        run.lastIndex = index
+        if (run.cat === null && cat !== null) run.cat = cat
+      }
+    } else {
+      run = null
+      nodes.push({ kind: 'block', key: `b${block.type}-${block.id}`, block, index })
+    }
+  })
+  return nodes
+})
+
+// Centralized reasoning timing. The stream carries no duration, so we measure
+// it client-side: stamp a reasoning block the first time it appears mid-stream,
+// and finalize it once a later block supersedes it (or the turn ends). This
+// covers every reasoning step — including ones immediately followed by a tool
+// call — so they show a real "Thought for Ns" instead of a bare "Thought".
+watch(
+  () => (props.message.role === 'assistant' && props.message.streaming
+    ? props.message.messages.map(block => `${block.type}:${block.id}`).join('|')
+    : ''),
+  () => {
+    if (props.message.role !== 'assistant' || !props.message.streaming) return
+    const blocks = props.message.messages
+    blocks.forEach((block, index) => {
+      if (block.type !== 'reasoning') return
+      const content = (block as ThinkingBlockType).content ?? ''
+      markReasoningSeen(content)
+      if (index < blocks.length - 1) finalizeReasoning(content)
+    })
+  },
+  { immediate: true },
+)
+
+watch(
+  () => props.message.role === 'assistant' && props.message.streaming,
+  (streaming, was) => {
+    if (!was || streaming || props.message.role !== 'assistant') return
+    props.message.messages.forEach((block) => {
+      if (block.type === 'reasoning') finalizeReasoning((block as ThinkingBlockType).content ?? '')
+    })
+  },
+)
 
 const relativeTimestamp = computed(() =>
   formatRelativeTime(props.message.timestamp, { locale: locale.value }),

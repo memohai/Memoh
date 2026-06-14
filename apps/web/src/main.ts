@@ -1,4 +1,8 @@
 import { createApp } from 'vue'
+// Inter Variable (full 100-900 weight axis). The design system's fractional
+// weights (360/450/520 etc. and the chat body) only interpolate with a variable
+// font; without this, a locally-installed static Inter snaps them to 100-steps.
+import '@fontsource-variable/inter'
 import 'markstream-vue/index.css'
 import './style.css'
 import App from './App.vue'

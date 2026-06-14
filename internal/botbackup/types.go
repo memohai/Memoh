@@ -228,6 +228,7 @@ type backupDependencies struct {
 	Providers       any `json:"providers,omitempty"`
 	Models          any `json:"models,omitempty"`
 	SearchProviders any `json:"search_providers,omitempty"`
+	FetchProviders  any `json:"fetch_providers,omitempty"`
 	MemoryProviders any `json:"memory_providers,omitempty"`
 	EmailProviders  any `json:"email_providers,omitempty"`
 }

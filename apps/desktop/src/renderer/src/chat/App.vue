@@ -1,18 +1,67 @@
 <script setup lang="ts">
-import { provide } from 'vue'
-import { RouterView } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, provide } from 'vue'
+import { RouterView, useRouter, useRoute } from 'vue-router'
 import { Toaster } from '@memohai/ui'
-import 'vue-sonner/style.css'
 import { useSettingsStore } from '@memohai/web/store/settings'
+import { useUpdateStore } from '@memohai/web/store/update'
 import { DesktopShellKey } from '@memohai/web/lib/desktop-shell'
+import MainSection from '@memohai/web/pages/main-section/index.vue'
 
 provide(DesktopShellKey, true)
 useSettingsStore()
+const updateStore = useUpdateStore()
+
+// Persistent chat shell + settings overlay, mirroring apps/web App.vue: keeps the
+// chat dockview/scroll alive (DOM attached, full-size) while in settings, so
+// returning has no black flash / re-scroll / relayout.
+const route = useRoute()
+const isChatRoute = computed(() => route.name === 'home' || route.name === 'bot')
+const isSettingsRoute = computed(() => route.path.startsWith('/settings'))
+const isAppArea = computed(() => isChatRoute.value || isSettingsRoute.value)
+
+// Dev-only: toggle the component wall / design-token reference with
+// Cmd/Ctrl+Shift+D. No-op (and not registered) in production builds.
+const router = useRouter()
+function onDevKey(e: KeyboardEvent) {
+  if (!import.meta.env.DEV) return
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
+    e.preventDefault()
+    const onWall = router.currentRoute.value.path.startsWith('/dev/')
+    void router.push(onWall ? '/' : '/dev/components')
+  }
+}
+onMounted(() => {
+  if (import.meta.env.DEV) window.addEventListener('keydown', onDevKey)
+  // Check for updates once at app launch (only when signed in), so detection no
+  // longer depends on the user opening the About page. Surfaces a toast only if
+  // a newer release exists; failures are silent.
+  if (localStorage.getItem('token')) void updateStore.checkAtStartup()
+})
+onBeforeUnmount(() => window.removeEventListener('keydown', onDevKey))
 </script>
 
 <template>
-  <section class="[&_input]:shadow-none!">
-    <RouterView />
-    <Toaster position="top-center" />
+  <section>
+    <MainSection v-if="isAppArea" />
+    <!-- Permanent fixed overlay layer (see apps/web App.vue): TRANSPARENT wrapper
+         toggled with `visibility` only. settings-section paints its own opaque
+         bg, so chat (not black) shows behind its slide/fade. No v-if (avoids
+         compositor layer teardown flash), no opacity transition. -->
+    <RouterView v-slot="{ Component }">
+      <div
+        class="fixed inset-0 z-40"
+        :class="isSettingsRoute ? 'visible' : 'pointer-events-none invisible'"
+      >
+        <component
+          :is="Component"
+          v-if="isSettingsRoute"
+        />
+      </div>
+      <component
+        :is="Component"
+        v-if="!isAppArea"
+      />
+    </RouterView>
+    <Toaster position="top-right" />
   </section>
 </template>

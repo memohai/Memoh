@@ -1,247 +1,259 @@
 <template>
-  <section class="absolute inset-0 flex flex-col bg-background">
-    <div class="flex-1 relative">
-      <MasterDetailSidebarLayout
-        class="[&_td:last-child]:w-45"
-      >
-        <template #sidebar-header>
-          <!-- Bot Identity Header -->
-          <div class="p-4 pb-3 flex flex-col">
-            <div class="flex items-center gap-3">
-              <!-- Avatar -->
-              <div class="group/avatar relative size-12 shrink-0 rounded-full overflow-hidden bg-muted">
-                <Avatar class="size-12 rounded-full">
-                  <AvatarImage
-                    v-if="bot?.avatar_url"
-                    :src="bot.avatar_url"
-                    :alt="bot.display_name"
-                  />
-                  <AvatarFallback class="text-lg">
-                    {{ avatarFallback }}
-                  </AvatarFallback>
-                </Avatar>
-                <!-- Edit Overlay -->
+  <!-- Reuse the settings view's open/close motion: slide-in from the right on
+       enter, faster slide-out on leave, holding navigation until leave plays.
+       Same curve/timing as settings-section/index.vue. -->
+  <Transition
+    appear
+    enter-active-class="transition-all duration-[90ms] ease-out"
+    enter-from-class="opacity-0 translate-x-2.5"
+    leave-active-class="transition-all duration-[40ms] ease-in"
+    leave-to-class="opacity-0 translate-x-2.5"
+    @after-leave="onAfterLeave"
+  >
+    <section
+      v-if="show"
+      class="absolute inset-0 flex flex-col bg-background"
+    >
+      <div class="flex-1 relative">
+        <MasterDetailSidebarLayout
+          flush
+          class="[&_td:last-child]:w-45"
+        >
+          <template #sidebar-header>
+            <!-- Back: a full-width row at the very top — same position, size and
+                 style as the settings sidebar's < Settings — so returning lands
+                 the affordance in the exact same spot. Identity sits just below as
+                 a floating card, which anchors the header and keeps back from
+                 reading as a stray nav row — no hairline needed. -->
+            <div
+              class="px-4 pb-3 flex flex-col"
+              :class="macTrafficReserve ? 'pt-[48px] [-webkit-app-region:drag]' : 'pt-[18px]'"
+            >
+              <NavItem
+                class="[-webkit-app-region:no-drag]"
+                @click="goBack()"
+              >
+                <ChevronLeft class="size-3.5 shrink-0" />
+                <span>{{ backLabel }}</span>
+              </NavItem>
+
+              <!-- Identity floats as a card — same recipe as the bots-list persona
+                   cards (bg-card + border + menu-shell radius), just tighter padding.
+                   Wrapping it gives the header a real visual anchor: the round avatar
+                   no longer sits bare against the nav-hover edge, so back + name read
+                   as one settled block instead of two misaligned centers. The card
+                   border replaces the old hairline, so no divider above or below. -->
+              <div class="mt-3 flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card p-3">
+                <!-- Avatar -->
+                <div class="group/avatar relative size-12 shrink-0 rounded-full overflow-hidden bg-muted">
+                  <Avatar class="size-12 rounded-full">
+                    <AvatarImage
+                      v-if="bot?.avatar_url"
+                      :src="bot.avatar_url"
+                      :alt="bot.display_name"
+                    />
+                    <AvatarFallback class="text-lg">
+                      {{ avatarFallback }}
+                    </AvatarFallback>
+                  </Avatar>
+                  <!-- Edit Overlay -->
+                  <button
+                    type="button"
+                    class="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100"
+                    :title="$t('common.edit')"
+                    :aria-label="$t('common.edit')"
+                    :disabled="!bot || botLifecyclePending"
+                    @click="handleEditAvatar"
+                  >
+                    <SquarePen class="size-4 text-white" />
+                  </button>
+                </div>
+              
+                <!-- Info Block -->
+                <div class="min-w-0 flex-1 flex flex-col justify-center">
+                  <div class="group/name flex items-center gap-1 relative min-w-0">
+                    <template v-if="isEditingBotName && bot">
+                      <Input
+                        ref="editNameInputRef"
+                        v-model="botNameDraft"
+                        class="h-7 w-full text-xs px-2 pr-6 shadow-none"
+                        :placeholder="$t('bots.displayNamePlaceholder')"
+                        :disabled="isSavingBotName"
+                        @keydown.enter.prevent="handleConfirmBotName"
+                        @keydown.esc.prevent="handleCancelBotName"
+                        @blur="handleConfirmBotName"
+                      />
+                      <div class="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-50 pointer-events-none">
+                        <Check class="size-3" />
+                      </div>
+                    </template>
+                    <template v-else>
+                      <h2 class="truncate text-sm font-semibold text-foreground">
+                        {{ botNameDraft.trim() || bot?.display_name || botId }}
+                      </h2>
+                      <button
+                        v-if="bot"
+                        type="button"
+                        class="opacity-0 group-hover/name:opacity-100 p-1 shrink-0"
+                        :disabled="botLifecyclePending"
+                        @click="handleStartEditBotName"
+                      >
+                        <SquarePen class="size-3 text-muted-foreground" />
+                      </button>
+                    </template>
+                  </div>
+                
+                  <!-- Status: an inline dot + label living inside the white identity
+                       card — no filled pill, so it never reads as a black blob on
+                       white. A success dot for a healthy/active bot echoes the right
+                       pane's green "Healthy"; an issue turns dot + label destructive;
+                       a healthy-but-inactive bot dims to a muted dot; lifecycle shows
+                       a spinner. Bot type trails as a muted footnote. All semantic
+                       tokens, so light and dark stay in sync. -->
+                  <div class="mt-1 flex items-center gap-1.5 text-[11px]">
+                    <template v-if="bot">
+                      <LoaderCircle
+                        v-if="bot.status === 'creating' || bot.status === 'deleting'"
+                        class="size-2.5 shrink-0 animate-spin text-muted-foreground"
+                      />
+                      <span
+                        v-else
+                        class="size-1.5 shrink-0 rounded-full"
+                        :class="statusVariant === 'destructive'
+                          ? 'bg-destructive'
+                          : statusVariant === 'secondary'
+                            ? 'bg-muted-foreground/40'
+                            : 'bg-success'"
+                      />
+                      <span
+                        class="font-medium"
+                        :class="statusVariant === 'destructive' ? 'text-destructive' : 'text-muted-foreground'"
+                        :title="hasIssue ? issueTitle : undefined"
+                      >{{ statusLabel }}</span>
+                      <span
+                        v-if="bot.type"
+                        class="text-muted-foreground/60"
+                      >· {{ botTypeLabel }}</span>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            
+              <!-- Search Input -->
+              <div class="mt-3 relative">
+                <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
+                <Input
+                  v-model="searchQuery"
+                  type="text"
+                  name="bot-settings-search"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  autocorrect="off"
+                  spellcheck="false"
+                  class="pl-8 pr-8 h-8 text-xs"
+                  :placeholder="$t('common.search')"
+                />
                 <button
+                  v-if="searchQuery"
                   type="button"
-                  class="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100"
-                  :title="$t('common.edit')"
-                  :aria-label="$t('common.edit')"
-                  :disabled="!bot || botLifecyclePending"
-                  @click="handleEditAvatar"
+                  class="absolute right-2 top-1/2 -translate-y-1/2 size-4 flex items-center justify-center rounded-full hover:bg-muted text-muted-foreground shrink-0"
+                  @click="searchQuery = ''"
                 >
-                  <SquarePen class="size-4 text-white" />
+                  <X class="size-2.5" />
                 </button>
               </div>
-              
-              <!-- Info Block -->
-              <div class="min-w-0 flex-1 flex flex-col justify-center">
-                <div class="group/name flex items-center gap-1 relative min-w-0">
-                  <template v-if="isEditingBotName && bot">
-                    <Input
-                      ref="editNameInputRef"
-                      v-model="botNameDraft"
-                      class="h-7 w-full text-xs px-2 pr-6 shadow-none"
-                      :placeholder="$t('bots.displayNamePlaceholder')"
-                      :disabled="isSavingBotName"
-                      @keydown.enter.prevent="handleConfirmBotName"
-                      @keydown.esc.prevent="handleCancelBotName"
-                      @blur="handleConfirmBotName"
-                    />
-                    <div class="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-50 pointer-events-none">
-                      <Check class="size-3" />
-                    </div>
-                  </template>
-                  <template v-else>
-                    <h2 class="truncate text-sm font-semibold text-foreground">
-                      {{ botNameDraft.trim() || bot?.display_name || botId }}
-                    </h2>
-                    <button
-                      v-if="bot"
-                      type="button"
-                      class="opacity-0 group-hover/name:opacity-100 p-1 shrink-0"
-                      :disabled="botLifecyclePending"
-                      @click="handleStartEditBotName"
-                    >
-                      <SquarePen class="size-3 text-muted-foreground" />
-                    </button>
-                  </template>
-                </div>
-                
-                <!-- Status Badge (Flat Industrial Style) -->
-                <div class="mt-0.5">
-                  <div
-                    v-if="bot"
-                    class="inline-flex items-center h-5 bg-[#27272a] rounded-full px-2 gap-1.5"
-                    :title="hasIssue ? issueTitle : undefined"
-                  >
-                    <LoaderCircle
-                      v-if="bot.status === 'creating' || bot.status === 'deleting'"
-                      class="size-2.5 animate-spin text-[#d0d0d4]"
-                    />
-                    <div
-                      v-else
-                      class="size-1.5 rounded-full"
-                      :class="statusVariant === 'destructive' ? 'bg-destructive' : 'bg-success'"
-                    />
-                    <span class="text-[10px] font-medium text-[#d0d0d4]">{{ statusLabel }}</span>
-                  </div>
-                  <span
-                    v-if="bot?.type"
-                    class="text-[10px] text-muted-foreground ml-1.5"
-                  >{{ botTypeLabel }}</span>
-                </div>
-              </div>
-            </div>
-            
-            <!-- Search Input -->
-            <div class="mt-4 relative">
-              <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
-              <Input
-                v-model="searchQuery"
-                type="text"
-                name="bot-settings-search"
-                autocomplete="off"
-                autocapitalize="off"
-                autocorrect="off"
-                spellcheck="false"
-                class="pl-8 h-8 text-xs bg-transparent shadow-none focus-visible:ring-0"
-                :placeholder="$t('common.search')"
-              />
-              <button
-                v-if="searchQuery"
-                type="button"
-                class="absolute right-2 top-1/2 -translate-y-1/2 size-4 flex items-center justify-center rounded-full hover:bg-muted text-muted-foreground shrink-0"
-                @click="searchQuery = ''"
-              >
-                <X class="size-2.5" />
-              </button>
-            </div>
-          </div>
-        </template>
-
-        <template #sidebar-content>
-          <!-- Search Results View -->
-          <div
-            v-if="searchQuery"
-            class="flex flex-col gap-1"
-          >
-            <div
-              v-if="searchResults.length === 0"
-              class="px-3 py-4 text-xs text-muted-foreground text-center"
-            >
-              {{ $t('common.noData') }}
-            </div>
-            <SidebarMenu
-              v-else
-              class="m-0 p-0 gap-1"
-            >
-              <SidebarMenuItem
-                v-for="(result, idx) in searchResults"
-                :key="idx"
-              >
-                <SidebarMenuButton
-                  as-child
-                  class="justify-start py-0! px-0 h-11 before:hidden"
-                >
-                  <button
-                    class="w-full flex flex-col items-start justify-center py-2 px-3 text-left border border-transparent transition-colors hover:bg-accent hover:text-accent-foreground rounded-md group/result"
-                    @click="() => { activeTab = result.tab; searchQuery = '' }"
-                  >
-                    <span class="text-xs font-medium text-foreground group-hover/result:text-accent-foreground">{{ result.translatedTitle }}</span>
-                    <span class="text-[10px] text-muted-foreground mt-1 flex items-center gap-1 group-hover/result:text-accent-foreground/70">
-                      <component
-                        :is="tabList.find(t => t.value === result.tab)?.icon"
-                        class="size-3 opacity-70"
-                      />
-                      {{ $t(`bots.tabs.${result.tab}`) }}
-                    </span>
-                  </button>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </div>
-
-          <!-- Normal Grouped View -->
-          <template v-else>
-            <div
-              v-for="(group, idx) in groupedTabs"
-              :key="group.key"
-              :class="idx > 0 ? 'mt-4' : ''"
-              class="flex flex-col gap-0.5"
-            >
-              <SidebarMenu
-                v-for="tab in group.items"
-                :key="tab.value"
-                class="m-0 p-0"
-              >
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    as-child
-                    :is-active="activeTab === tab.value"
-                    class="justify-start py-0! px-0 h-10 before:hidden"
-                  >
-                    <Toggle
-                      class="w-full justify-start h-10 px-3 text-xs font-medium border-0 bg-transparent! transition-colors gap-3"
-                      :model-value="isActive(tab.value).value"
-                      @update:model-value="(isSelect: boolean) => {
-                        if (isSelect) {
-                          activeTab = tab.value
-                        }
-                      }"
-                    >
-                      <component
-                        :is="tab.icon"
-                        v-if="tab.icon"
-                        class="size-4 shrink-0"
-                      />
-                      <span class="whitespace-nowrap">{{ $t(tab.label) }}</span>
-                    </Toggle>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
             </div>
           </template>
-        </template>
 
-        <template #sidebar-footer />
-
-        <template #detail>
-          <div class="absolute inset-0 overflow-y-auto bg-background">
-            <!-- Ensure consistent padding matching Box-in-Box bento architecture -->
-            <div class="px-6 pt-4 pb-4">
-              <KeepAlive>
-                <component
-                  :is="activeComponent?.component"
-                  v-bind="activeComponent?.params"
-                />
-              </KeepAlive>
+          <template #sidebar-content>
+            <!-- Same NavItem rows as the settings sidebar; search narrows the
+               groups in place instead of swapping to a separate result list. -->
+            <div class="px-2 pb-2">
+              <template v-if="displayGroups.length">
+                <div
+                  v-for="(group, idx) in displayGroups"
+                  :key="group.key"
+                  :class="idx > 0 ? 'mt-4' : ''"
+                >
+                  <SidebarMenu class="m-0 gap-1 p-0">
+                    <SidebarMenuItem
+                      v-for="tab in group.items"
+                      :key="tab.value"
+                    >
+                      <NavItem
+                        :active="activeTab === tab.value"
+                        :aria-current="activeTab === tab.value ? 'page' : undefined"
+                        @click="selectTab(tab.value)"
+                      >
+                        <component
+                          :is="tab.icon"
+                          v-if="tab.icon"
+                          :stroke-width="1.75"
+                          class="size-4 shrink-0"
+                        />
+                        <span class="whitespace-nowrap">{{ $t(tab.label) }}</span>
+                      </NavItem>
+                    </SidebarMenuItem>
+                  </SidebarMenu>
+                </div>
+              </template>
+              <div
+                v-else
+                class="px-3 py-6 text-center text-xs text-muted-foreground"
+              >
+                {{ $t('common.noData') }}
+              </div>
             </div>
-          </div>
-        </template>
-      </MasterDetailSidebarLayout>
-    </div>
+          </template>
 
-    <AvatarEditDialog
-      v-model:open="avatarDialogOpen"
-      v-model:avatar-url="avatarUrlModel"
-      :fallback-text="avatarFallback"
-    />
-  </section>
+          <template #sidebar-footer />
+
+          <template #detail>
+            <div class="absolute inset-0 overflow-y-auto bg-background">
+              <!-- Top drag strip over the detail pane only (mac desktop), so the
+                   window stays draggable beside the sidebar. No fill/border — it
+                   shares --background with the content, so the sidebar's vertical
+                   edge stays the only divider, unbroken to the top. -->
+              <div
+                v-if="macTrafficReserve"
+                class="h-8 shrink-0 [-webkit-app-region:drag]"
+              />
+              <!-- Ensure consistent padding matching Box-in-Box bento architecture -->
+              <div class="px-6 pt-4 pb-4">
+                <KeepAlive>
+                  <component
+                    :is="activeComponent?.component"
+                    v-bind="activeComponent?.params"
+                  />
+                </KeepAlive>
+              </div>
+            </div>
+          </template>
+        </MasterDetailSidebarLayout>
+      </div>
+
+      <AvatarEditDialog
+        v-model:open="avatarDialogOpen"
+        v-model:avatar-url="avatarUrlModel"
+        :fallback-text="avatarFallback"
+      />
+    </section>
+  </Transition>
 </template>
 
 <script setup lang="ts">
 import {
   Avatar, AvatarImage, AvatarFallback, Input,
-  SidebarMenu, SidebarMenuButton, SidebarMenuItem, Toggle
+  SidebarMenu, SidebarMenuItem,
 } from '@memohai/ui'
 import {
   SquarePen, LoaderCircle, Check, Search, X, LayoutDashboard, Settings, MessageSquare,
   BrainCircuit, ShieldAlert, HeartPulse, Database, Mail, Link, Clock, Server, FileBox, Zap,
-  Monitor, Globe, Bot as BotIcon, PackageOpen
+  Monitor, Globe, Bot as BotIcon, PackageOpen, ChevronLeft
 } from 'lucide-vue-next'
-import { computed, ref, watch, onMounted, toValue, nextTick } from 'vue'
-import { useRoute } from 'vue-router'
-import { toast } from 'vue-sonner'
+import { computed, ref, watch, onMounted, toValue, nextTick, inject } from 'vue'
+import { useRoute, onBeforeRouteLeave } from 'vue-router'
+import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import {
@@ -278,9 +290,12 @@ import AvatarEditDialog from './components/avatar-edit-dialog.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
+import { useBackAffordance } from '@/composables/useBackOr'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
+import NavItem from '@/components/settings-sidebar/nav-item.vue'
+import { DesktopShellKey } from '@/lib/desktop-shell'
 import { resolveBotWorkspaceBackend } from '@/utils/bot-workspace'
 import { filterBotDetailsTabs, type BotDetailsTabRule } from '@/utils/bot-detail-tabs'
 type BotCheck = BotsBotCheck
@@ -289,6 +304,38 @@ type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: 
 
 const route = useRoute()
 const { t } = useI18n()
+
+// macOS desktop: this page renders its own full-height sidebar (no full-width
+// topbar above it), so the sidebar header clears the traffic lights and the
+// detail pane gets its own top drag strip. Same computation as settings-section.
+const desktopShell = inject(DesktopShellKey, false)
+const macTrafficReserve = computed(() =>
+  desktopShell
+  && typeof navigator !== 'undefined'
+  && navigator.platform.toLowerCase().includes('mac'),
+)
+
+// Back follows real navigation history (router.back) and only falls back to the
+// bots list on a cold load — so entering a bot from Scheduled Jobs, a chat, or
+// any future surface returns where the user came from rather than a fixed page.
+// The label mirrors that destination instead of always reading "Bots".
+const { onBack: goBack, label: backLabel } = useBackAffordance({ name: 'bots' })
+
+// Reuse the settings view's open/close motion (see settings-section): this bot
+// view slides in on enter and slides out on leave, holding navigation until the
+// leave animation finishes. Tab switches change only the query, not the route
+// record, so they don't trigger this — only entering/leaving the bot does.
+const show = ref(true)
+let pendingRouteLeave: (() => void) | null = null
+onBeforeRouteLeave((_to, _from, next) => {
+  show.value = false
+  pendingRouteLeave = next
+})
+function onAfterLeave(): void {
+  pendingRouteLeave?.()
+  pendingRouteLeave = null
+}
+
 // The route param may be a name slug or a UUID; resolve it to the canonical
 // bot UUID so child tabs keep operating on UUIDs.
 const routeIdentifier = computed(() => {
@@ -394,19 +441,28 @@ const searchIndex = computed(() => {
   }))
 })
 
-const searchResults = computed(() => {
-  const query = searchQuery.value.toLowerCase().trim()
-  if (!query) return []
-  const visibleTabs = new Set(tabList.value.map(tab => tab.value))
-  
-  return searchIndex.value.filter(item => {
-    if (!visibleTabs.has(item.tab)) return false
-    return item.translatedTitle.toLowerCase().includes(query) || 
-           item.keywords.some(k => k.toLowerCase().includes(query)) ||
-           t(`bots.tabs.${item.tab}`).toLowerCase().includes(query) ||
-           item.tab.toLowerCase().includes(query)
-  })
-})
+const normalizedQuery = computed(() => searchQuery.value.trim().toLowerCase())
+
+// Match a tab against the search box: its title, its tab key, and the keyword
+// index so deep settings (e.g. "telegram", "qdrant") still surface the tab.
+function tabMatches(tab: { value: string, label: string }): boolean {
+  const q = normalizedQuery.value
+  if (!q) return true
+  if (t(tab.label).toLowerCase().includes(q)) return true
+  if (t(`bots.tabs.${tab.value}`).toLowerCase().includes(q)) return true
+  if (tab.value.toLowerCase().includes(q)) return true
+  return searchIndex.value.some(item =>
+    item.tab === tab.value && (
+      item.translatedTitle.toLowerCase().includes(q)
+      || item.keywords.some(k => k.toLowerCase().includes(q))
+    ),
+  )
+}
+
+function selectTab(value: string): void {
+  activeTab.value = value
+  searchQuery.value = ''
+}
 
 const groupedTabs = computed(() => {
   const coreKeys = ['overview', 'general', 'channels']
@@ -422,9 +478,12 @@ const groupedTabs = computed(() => {
   ].filter(g => g.items.length > 0)
 })
 
-const isActive = (name: string) => computed(() => {
-  return activeTab.value === name
-})
+// Narrow the grouped nav in place while searching; drop emptied groups.
+const displayGroups = computed(() =>
+  groupedTabs.value
+    .map(group => ({ ...group, items: group.items.filter(tabMatches) }))
+    .filter(group => group.items.length > 0),
+)
 
 const activeComponent = computed(() => {
   return tabList.value.find(tab => tab.value === activeTab.value)

@@ -227,6 +227,28 @@ func (s *Service) ListByProviderIDAndType(ctx context.Context, providerID string
 	return s.convertToGetResponseList(dbModels), nil
 }
 
+// GetByProviderAndModelID retrieves a model by provider and model_id.
+func (s *Service) GetByProviderAndModelID(ctx context.Context, providerID, modelID string) (GetResponse, error) {
+	if strings.TrimSpace(providerID) == "" {
+		return GetResponse{}, errors.New("provider id is required")
+	}
+	if strings.TrimSpace(modelID) == "" {
+		return GetResponse{}, errors.New("model_id is required")
+	}
+	uuid, err := db.ParseUUID(providerID)
+	if err != nil {
+		return GetResponse{}, fmt.Errorf("invalid provider id: %w", err)
+	}
+	dbModel, err := s.queries.GetModelByProviderAndModelID(ctx, sqlc.GetModelByProviderAndModelIDParams{
+		ProviderID: uuid,
+		ModelID:    modelID,
+	})
+	if err != nil {
+		return GetResponse{}, fmt.Errorf("failed to get model by provider and model_id: %w", err)
+	}
+	return s.convertToGetResponse(dbModel), nil
+}
+
 // UpdateByID updates a model by its internal UUID.
 func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) (GetResponse, error) {
 	uuid, err := db.ParseUUID(id)
@@ -270,6 +292,15 @@ func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) 
 	}
 
 	return s.convertToGetResponse(updated), nil
+}
+
+// UpdateByProviderAndModelID updates a model within one provider namespace.
+func (s *Service) UpdateByProviderAndModelID(ctx context.Context, providerID, modelID string, req UpdateRequest) (GetResponse, error) {
+	current, err := s.GetByProviderAndModelID(ctx, providerID, modelID)
+	if err != nil {
+		return GetResponse{}, err
+	}
+	return s.UpdateByID(ctx, current.ID, req)
 }
 
 // UpdateByModelID updates a model by its model_id field.

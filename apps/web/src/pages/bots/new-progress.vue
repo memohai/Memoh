@@ -47,11 +47,10 @@
 </template>
 
 <script setup lang="ts">
-import { Avatar, AvatarImage, AvatarFallback, Button } from '@memohai/ui'
+import { Avatar, AvatarImage, AvatarFallback, Button, toast } from '@memohai/ui'
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
-import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useQueryCache } from '@pinia/colada'
 import { getBotsQueryKey } from '@memohai/sdk/colada'

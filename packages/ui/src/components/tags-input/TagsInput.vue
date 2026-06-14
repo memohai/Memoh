@@ -17,10 +17,16 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
   <TagsInputRoot
     v-slot="slotProps"
     v-bind="forwarded"
+    data-slot="tags-input"
     :class="cn(
-      'flex flex-wrap gap-2 items-center rounded-lg border border-input bg-background px-2 py-1 text-xs transition-[color,box-shadow] outline-none',
-      'focus-within:border-ring focus-within:ring-ring/20 focus-within:ring-2',
-      'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
+      // Same field language as Input/Textarea/InputGroup — transparent fill + one
+      // inset --field-edge hairline (driven by style.css), invalid turns it
+      // destructive. Focus-within only nudges the edge to ENGAGED (not the near-black
+      // solid we reserve for single-line fields) so a big multi-row tag box never
+      // reads as a heavy black-boxed card.
+      // min-h-9 matches a single-line input so an empty field has real presence;
+      // py-1.5 + gap-1.5 give the chips + typing line room to breathe and wrap.
+      'flex min-h-9 flex-wrap items-center gap-1.5 rounded-md px-2 py-1.5 text-body outline-none',
       props.class)"
   >
     <slot v-bind="slotProps" />

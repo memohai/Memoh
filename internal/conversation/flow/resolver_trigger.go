@@ -374,7 +374,7 @@ func (r *Resolver) deliverBackgroundNotifications(ctx context.Context, botID, se
 			continue
 		}
 
-		for _, uiMessage := range converter.HandleEvent(uiStreamEventFromAgentEvent(event)) {
+		for _, uiMessage := range converter.HandleEvent(conversation.UIStreamEventFromAgentEvent(event)) {
 			r.publishBackgroundAgentStream(botID, sessionID, map[string]any{
 				"type": "message",
 				"data": uiMessage,
@@ -452,56 +452,4 @@ func (r *Resolver) publishBackgroundAgentStream(botID, sessionID string, stream 
 		BotID: botID,
 		Data:  data,
 	})
-}
-
-func uiStreamEventFromAgentEvent(event agentpkg.StreamEvent) conversation.UIMessageStreamEvent {
-	attachments := make([]conversation.UIAttachment, 0, len(event.Attachments))
-	for _, attachment := range event.Attachments {
-		attachments = append(attachments, conversation.UIAttachment{
-			ID:          strings.TrimSpace(attachment.ContentHash),
-			Type:        normalizeUIAttachmentType(attachment.Type, attachment.Mime),
-			Path:        strings.TrimSpace(attachment.Path),
-			URL:         strings.TrimSpace(attachment.URL),
-			Name:        strings.TrimSpace(attachment.Name),
-			ContentHash: strings.TrimSpace(attachment.ContentHash),
-			Mime:        strings.TrimSpace(attachment.Mime),
-			Size:        attachment.Size,
-			Metadata:    attachment.Metadata,
-		})
-	}
-
-	return conversation.UIMessageStreamEvent{
-		Type:        string(event.Type),
-		Delta:       event.Delta,
-		ToolName:    event.ToolName,
-		ToolCallID:  event.ToolCallID,
-		Input:       event.Input,
-		Output:      event.Result,
-		Progress:    event.Progress,
-		Attachments: attachments,
-		Error:       event.Error,
-		ApprovalID:  event.ApprovalID,
-		UserInputID: event.UserInputID,
-		ShortID:     event.ShortID,
-		Status:      event.Status,
-		Metadata:    event.Metadata,
-	}
-}
-
-func normalizeUIAttachmentType(kind, mime string) string {
-	normalizedKind := strings.ToLower(strings.TrimSpace(kind))
-	if normalizedKind != "" {
-		return normalizedKind
-	}
-	normalizedMime := strings.ToLower(strings.TrimSpace(mime))
-	switch {
-	case strings.HasPrefix(normalizedMime, "image/"):
-		return "image"
-	case strings.HasPrefix(normalizedMime, "audio/"):
-		return "audio"
-	case strings.HasPrefix(normalizedMime, "video/"):
-		return "video"
-	default:
-		return "file"
-	}
 }

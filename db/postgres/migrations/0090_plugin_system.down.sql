@@ -12,4 +12,3 @@ ALTER TABLE mcp_connections
   DROP COLUMN IF EXISTS managed_by_plugin_installation_id;
 
 DROP TABLE IF EXISTS bot_plugin_installations;
-

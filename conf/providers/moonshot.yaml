@@ -10,6 +10,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
 
   - model_id: kimi-k2-thinking
     name: Kimi K2 Thinking
@@ -17,6 +19,8 @@ models:
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
 
   - model_id: kimi-k2-thinking-turbo
     name: Kimi K2 Thinking Turbo
@@ -24,6 +28,8 @@ models:
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
 
   - model_id: kimi-k2-0905-preview
     name: Kimi K2 0905 Preview

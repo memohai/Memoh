@@ -8,6 +8,7 @@ import { RouterView } from 'vue-router'
 import { i18nRef } from './i18n'
 import { useUserStore } from '@/store/user'
 import { ensureOnboarding } from '@/router-guards/onboarding'
+import { installBackHistory } from '@/composables/useBackOr'
 
 const routes = [
   {
@@ -16,13 +17,19 @@ const routes = [
     component: () => import('@/pages/onboarding/index.vue'),
   },
   {
+    // Chat area. The chat UI (main-section: sidebar + dockview) is mounted
+    // persistently in App.vue, NOT here — these routes exist only so the URL
+    // (/, /bot/:name) matches and the breadcrumb/active-bot sync works. Their
+    // components render nothing; App.vue shows the persistent MainSection on
+    // these route names. This is what lets chat survive a trip into settings
+    // (fixed overlay) without unmounting/relayout/re-scroll.
     path: '/',
-    component: () => import('@/pages/main-section/index.vue'),
+    component: { render: () => null },
     children: [
       {
         name: 'home',
         path: '',
-        component: () => import('@/pages/home/index.vue'),
+        component: { render: () => null },
         meta: {
           breadcrumb: i18nRef('sidebar.chat'),
         },
@@ -30,7 +37,7 @@ const routes = [
       {
         name: 'bot',
         path: '/bot/:botName?',
-        component: () => import('@/pages/home/index.vue'),
+        component: { render: () => null },
         meta: {
           breadcrumb: i18nRef('sidebar.chat'),
         },
@@ -115,20 +122,22 @@ const routes = [
         },
       },
       {
-        name: 'speech',
-        path: 'speech',
-        component: () => import('@/pages/speech/index.vue'),
+        name: 'voice',
+        path: 'voice',
+        component: () => import('@/pages/voice/index.vue'),
         meta: {
-          breadcrumb: i18nRef('sidebar.speech'),
+          breadcrumb: i18nRef('sidebar.voice'),
         },
       },
+      // Speech and transcription merged into the Voice page; keep the old paths
+      // working for existing links/bookmarks.
       {
-        name: 'transcription',
+        path: 'speech',
+        redirect: { name: 'voice' },
+      },
+      {
         path: 'transcription',
-        component: () => import('@/pages/transcription/index.vue'),
-        meta: {
-          breadcrumb: i18nRef('sidebar.transcription'),
-        },
+        redirect: { name: 'voice' },
       },
       {
         name: 'email',
@@ -229,12 +238,28 @@ const routes = [
     path: '/oauth/mcp/callback',
     component: () => import('@/pages/oauth/mcp-callback.vue'),
   },
+  // Dev-only component wall. Registered ONLY in dev builds, so the chunk and
+  // its auth-bypass guard never exist in production. Reached by setting the
+  // `memoh:dev-tools` localStorage flag and navigating to /dev/components.
+  ...(import.meta.env.DEV
+    ? [
+        {
+          name: 'dev-components',
+          path: '/dev/components',
+          component: () => import('@/pages/dev/components/index.vue'),
+        },
+      ]
+    : []),
 ]
 
 const router = createRouter({
   history: createWebHistory(),
   routes,
 })
+
+// Track the previous route so history-following back affordances work the same
+// on web and on the desktop shell's memory-history router. See useBackOr.
+installBackHistory(router)
 
 // Handle chunk load errors (e.g. user aborted refresh, network failure, new deployment)
 router.onError((error) => {
@@ -251,6 +276,14 @@ router.onError((error) => {
 })
 
 router.beforeEach(async (to) => {
+  // Dev component wall: only reachable in dev builds with the flag set.
+  if (to.path.startsWith('/dev/')) {
+    return import.meta.env.DEV
+      && localStorage.getItem('memoh:dev-tools') === '1'
+      ? true
+      : { path: '/' }
+  }
+
   const token = localStorage.getItem('token')
 
   if (to.fullPath === '/login') {

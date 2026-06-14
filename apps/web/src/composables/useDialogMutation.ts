@@ -1,4 +1,4 @@
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 interface DialogMutationOptions {

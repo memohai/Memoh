@@ -49,6 +49,7 @@ type Bot struct {
 	Metadata               string         `json:"metadata"`
 	CreatedAt              string         `json:"created_at"`
 	UpdatedAt              string         `json:"updated_at"`
+	FetchProviderID        sql.NullString `json:"fetch_provider_id"`
 }
 
 type BotAclRule struct {
@@ -343,6 +344,16 @@ type EmailProvider struct {
 	Name      string `json:"name"`
 	Provider  string `json:"provider"`
 	Config    string `json:"config"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+type FetchProvider struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Provider  string `json:"provider"`
+	Config    string `json:"config"`
+	Enable    int64  `json:"enable"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 }

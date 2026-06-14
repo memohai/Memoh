@@ -136,6 +136,7 @@ func (r *Registry) GlobalHelp(localizers ...*i18n.Localizer) string {
 	var b strings.Builder
 	b.WriteString(MdBold(t.T("cmd.help.availableCommands")) + "\n\n")
 	b.WriteString("- /help — " + t.T("cmd.help.top.help") + "\n")
+	b.WriteString("- /start — " + t.T("cmd.help.top.start") + "\n")
 	b.WriteString("- /new — " + t.T("cmd.help.top.new") + "\n")
 	b.WriteString("- /stop — " + t.T("cmd.help.top.stop") + "\n")
 	for _, name := range r.order {

@@ -1,37 +1,32 @@
+import { h } from 'vue'
 import {
   createRouter,
   createMemoryHistory,
+  RouterView,
   type RouteLocationNormalized,
   type RouteRecordRaw,
 } from 'vue-router'
-import { SETTINGS_ROUTE_SPECS, type SettingsRouteSpec } from '../shared/settings-routes'
+import { SETTINGS_DEFAULT_PATH, SETTINGS_ROUTE_SPECS } from '../shared/settings-routes'
 import { ensureOnboarding } from '@memohai/web/router-guards/onboarding'
+import { useUserStore } from '@memohai/web/store/user'
+import { installBackHistory } from '@memohai/web/composables/useBackOr'
 
-// Chat-window router. Owns ONLY chat-related routes — visiting `/settings`
-// (e.g. via the chat sidebar's settings button or any reused @memohai/web
-// component that pushes `name: 'bot-detail'`, `name: 'bots'`, etc.) is
-// intercepted in a navigation guard and forwarded to the main process,
-// which focuses the dedicated settings BrowserWindow and instructs it to
-// router.push the requested path. Memory history matches Electron's file://
-// runtime cleanly and keeps the URL bar irrelevant.
+import type { SettingsRouteSpec } from '../shared/settings-routes'
 
-// Stub component used by the settings name placeholders below. The
-// `beforeEach` guard returns `false` before vue-router ever renders these,
-// so the placeholder never instantiates — it exists purely so that
-// `router.push({ name: 'bot-detail', params: { botName } })` resolves to a
-// concrete `/settings/...` path that we can hand off to the IPC bridge.
-const SettingsRouteStub = { render: () => null }
-
-function mapSettingsStub(spec: SettingsRouteSpec): RouteRecordRaw {
-  return {
+// Map settings route specs to actual components instead of stubs
+const mapSpecToRoute = (spec: SettingsRouteSpec): RouteRecordRaw => {
+  const route = {
     path: spec.path,
-    component: SettingsRouteStub,
+    component: spec.loader ?? { render: () => h(RouterView) },
     ...(spec.name ? { name: spec.name } : {}),
-    ...(spec.children ? { children: spec.children.map(mapSettingsStub) } : {}),
-  }
+    ...(spec.meta ? { meta: spec.meta } : {}),
+    ...(spec.children ? { children: spec.children.map(mapSpecToRoute) } : {}),
+  } satisfies RouteRecordRaw
+
+  return route
 }
 
-const settingsStubs: RouteRecordRaw[] = SETTINGS_ROUTE_SPECS.map(mapSettingsStub)
+const realSettingsRoutes: RouteRecordRaw[] = SETTINGS_ROUTE_SPECS.map(mapSpecToRoute)
 
 const routes: RouteRecordRaw[] = [
   {
@@ -44,18 +39,22 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@memohai/web/pages/onboarding/index.vue'),
   },
   {
+    // Chat area: UI is mounted persistently in chat/App.vue (MainSection), not
+    // here. These routes exist only for URL matching / active-bot sync; their
+    // components render nothing. Mirrors apps/web router.ts. This lets chat
+    // survive a trip into settings (fixed overlay) without unmount/relayout.
     path: '/',
-    component: () => import('@memohai/web/pages/main-section/index.vue'),
+    component: { render: () => null },
     children: [
       {
         name: 'home',
         path: '',
-        component: () => import('@memohai/web/pages/home/index.vue'),
+        component: { render: () => null },
       },
       {
         name: 'bot',
         path: '/bot/:botName?/:sessionId?',
-        component: () => import('@memohai/web/pages/home/index.vue'),
+        component: { render: () => null },
       },
       {
         // Backwards-compatible redirect for legacy UUID-based chat links.
@@ -79,13 +78,34 @@ const routes: RouteRecordRaw[] = [
     path: '/oauth/mcp/callback',
     component: () => import('@memohai/web/pages/oauth/mcp-callback.vue'),
   },
-  ...settingsStubs,
+  // Dev-only component wall / design-token reference. Registered only in dev
+  // builds. Open with Cmd/Ctrl+Shift+D (see chat/App.vue) or, from devtools,
+  // `window.__memohRouter.push('/dev/components')`.
+  ...(import.meta.env.DEV
+    ? [
+        {
+          name: 'dev-components',
+          path: '/dev/components',
+          component: () => import('@memohai/web/pages/dev/components/index.vue'),
+        } satisfies RouteRecordRaw,
+      ]
+    : []),
+  {
+    path: '/settings',
+    component: () => import('@memohai/web/pages/settings-section/index.vue'),
+    redirect: SETTINGS_DEFAULT_PATH,
+    children: realSettingsRoutes,
+  },
 ]
 
 const router = createRouter({
   history: createMemoryHistory(),
   routes,
 })
+
+// Memory history keeps no readable back-stack, so back affordances rely on this
+// afterEach-based tracker instead of history state. See useBackOr.
+installBackHistory(router)
 
 router.onError((error: Error) => {
   const isChunkLoadError =
@@ -101,36 +121,13 @@ router.onError((error: Error) => {
 })
 
 router.beforeEach(async (to: RouteLocationNormalized) => {
-  if (to.path === '/connect') {
-    return { name: 'Login' }
+  // Dev component wall: allow in dev builds, never reachable in prod.
+  if (to.path.startsWith('/dev/')) {
+    return import.meta.env.DEV ? true : { path: '/' }
   }
 
-  // Settings lives in its own BrowserWindow. Any in-app navigation aimed at
-  // the settings tree — whether via path (`router.push('/settings/bots')`)
-  // or via name resolved through the placeholder stubs above
-  // (`router.push({ name: 'bot-detail', params: { botId }, query: { tab } })`)
-  // — is forwarded to the main process. The handler focuses an existing
-  // settings window or creates one, then asks the renderer to push the same
-  // full path internally. Returning `false` aborts the in-place navigation
-  // so the chat window stays where it was.
-  //
-  // Must run before the auth check below — otherwise an anonymous user
-  // bouncing through a settings link would be sent to /login on the chat
-  // side instead of opening settings.
-  if (to.path === '/settings' || to.path.startsWith('/settings/')) {
-    const openSettings = window.api?.window?.openSettings
-    if (typeof openSettings === 'function') {
-      void openSettings(to.fullPath)
-    } else {
-      // Most common cause: a long-running `electron-vite dev` session is
-      // serving a renderer page paired with a preload bundle that pre-dates
-      // the IPC surface. Restart the dev process or reload the window.
-      console.warn(
-        '[chat-router] window.api.window.openSettings unavailable; ' +
-        'preload may be stale (restart electron-vite dev) or running outside Electron',
-      )
-    }
-    return false
+  if (to.path === '/connect') {
+    return { name: 'Login' }
   }
 
   const token = localStorage.getItem('token')
@@ -142,6 +139,12 @@ router.beforeEach(async (to: RouteLocationNormalized) => {
   }
   if (!token) {
     return { name: 'Login' }
+  }
+  if (to.meta.adminOnly) {
+    const userStore = useUserStore()
+    if (String(userStore.userInfo.role).toLowerCase() !== 'admin') {
+      return { name: 'bots' }
+    }
   }
 
   // Onboarding: redirect completed users away, let incomplete users through
@@ -157,5 +160,15 @@ router.beforeEach(async (to: RouteLocationNormalized) => {
 
   return true
 })
+
+window.api?.window?.onSettingsNavigate?.((target: string) => {
+  void router.push(target)
+})
+
+// Dev convenience: reach the component wall from devtools without a URL bar
+// (memory history). e.g. `window.__memohRouter.push('/dev/components')`.
+if (import.meta.env.DEV) {
+  ;(window as unknown as { __memohRouter?: typeof router }).__memohRouter = router
+}
 
 export default router

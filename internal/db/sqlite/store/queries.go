@@ -46,6 +46,44 @@ func (q *Queries) ApproveToolApprovalRequest(ctx context.Context, arg pgsqlc.App
 	return result, nil
 }
 
+func (q *Queries) CancelPendingToolApprovalsBySession(ctx context.Context, arg pgsqlc.CancelPendingToolApprovalsBySessionParams) ([]pgsqlc.ToolApprovalRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.CancelPendingToolApprovalsBySessionParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.CancelPendingToolApprovalsBySession(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ToolApprovalRequest
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) CancelPendingUserInputsBySession(ctx context.Context, arg pgsqlc.CancelPendingUserInputsBySessionParams) ([]pgsqlc.UserInputRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.CancelPendingUserInputsBySessionParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.CancelPendingUserInputsBySession(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.UserInputRequest
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (q *Queries) ClearMCPOAuthTokens(ctx context.Context, connectionID pgtype.UUID) error {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return errSQLiteQueriesNotConfigured
@@ -1159,6 +1197,25 @@ func (q *Queries) CreateScheduleLog(ctx context.Context, arg pgsqlc.CreateSchedu
 	return result, nil
 }
 
+func (q *Queries) CreateFetchProvider(ctx context.Context, arg pgsqlc.CreateFetchProviderParams) (pgsqlc.FetchProvider, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.FetchProvider{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.CreateFetchProviderParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.FetchProvider{}, err
+	}
+	out, err := q.store.queries.CreateFetchProvider(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.FetchProvider{}, mapQueryErr(err)
+	}
+	var result pgsqlc.FetchProvider
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.FetchProvider{}, err
+	}
+	return result, nil
+}
+
 func (q *Queries) CreateSearchProvider(ctx context.Context, arg pgsqlc.CreateSearchProviderParams) (pgsqlc.SearchProvider, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return pgsqlc.SearchProvider{}, errSQLiteQueriesNotConfigured
@@ -1582,6 +1639,18 @@ func (q *Queries) DeleteScheduleLogsBySchedule(ctx context.Context, scheduleID p
 		return err
 	}
 	err := q.store.queries.DeleteScheduleLogsBySchedule(ctx, sqliteScheduleID)
+	return mapQueryErr(err)
+}
+
+func (q *Queries) DeleteFetchProvider(ctx context.Context, id pgtype.UUID) error {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return errSQLiteQueriesNotConfigured
+	}
+	var sqliteId string
+	if err := convertValue(id, &sqliteId); err != nil {
+		return err
+	}
+	err := q.store.queries.DeleteFetchProvider(ctx, sqliteId)
 	return mapQueryErr(err)
 }
 
@@ -2540,6 +2609,44 @@ func (q *Queries) GetScheduleByID(ctx context.Context, id pgtype.UUID) (pgsqlc.S
 	var result pgsqlc.Schedule
 	if err := convertValue(out, &result); err != nil {
 		return pgsqlc.Schedule{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) GetFetchProviderByID(ctx context.Context, id pgtype.UUID) (pgsqlc.FetchProvider, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.FetchProvider{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteId string
+	if err := convertValue(id, &sqliteId); err != nil {
+		return pgsqlc.FetchProvider{}, err
+	}
+	out, err := q.store.queries.GetFetchProviderByID(ctx, sqliteId)
+	if err != nil {
+		return pgsqlc.FetchProvider{}, mapQueryErr(err)
+	}
+	var result pgsqlc.FetchProvider
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.FetchProvider{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) GetFetchProviderByName(ctx context.Context, name string) (pgsqlc.FetchProvider, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.FetchProvider{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteName string
+	if err := convertValue(name, &sqliteName); err != nil {
+		return pgsqlc.FetchProvider{}, err
+	}
+	out, err := q.store.queries.GetFetchProviderByName(ctx, sqliteName)
+	if err != nil {
+		return pgsqlc.FetchProvider{}, mapQueryErr(err)
+	}
+	var result pgsqlc.FetchProvider
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.FetchProvider{}, err
 	}
 	return result, nil
 }
@@ -3907,6 +4014,40 @@ func (q *Queries) ListSchedulesByBot(ctx context.Context, botID pgtype.UUID) ([]
 	return result, nil
 }
 
+func (q *Queries) ListFetchProviders(ctx context.Context) ([]pgsqlc.FetchProvider, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	out, err := q.store.queries.ListFetchProviders(ctx)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.FetchProvider
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListFetchProvidersByProvider(ctx context.Context, provider string) ([]pgsqlc.FetchProvider, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteProvider string
+	if err := convertValue(provider, &sqliteProvider); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListFetchProvidersByProvider(ctx, sqliteProvider)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.FetchProvider
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (q *Queries) ListSearchProviders(ctx context.Context) ([]pgsqlc.SearchProvider, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured
@@ -5029,6 +5170,25 @@ func (q *Queries) UpdateSchedule(ctx context.Context, arg pgsqlc.UpdateScheduleP
 	var result pgsqlc.Schedule
 	if err := convertValue(out, &result); err != nil {
 		return pgsqlc.Schedule{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) UpdateFetchProvider(ctx context.Context, arg pgsqlc.UpdateFetchProviderParams) (pgsqlc.FetchProvider, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.FetchProvider{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.UpdateFetchProviderParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.FetchProvider{}, err
+	}
+	out, err := q.store.queries.UpdateFetchProvider(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.FetchProvider{}, mapQueryErr(err)
+	}
+	var result pgsqlc.FetchProvider
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.FetchProvider{}, err
 	}
 	return result, nil
 }

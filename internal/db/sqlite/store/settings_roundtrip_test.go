@@ -28,6 +28,7 @@ func TestSQLiteCommandUILanguageRoundTrip(t *testing.T) {
 	execAll(t, conn, `
 CREATE TABLE models (id TEXT PRIMARY KEY);
 CREATE TABLE search_providers (id TEXT PRIMARY KEY);
+CREATE TABLE fetch_providers (id TEXT PRIMARY KEY);
 CREATE TABLE memory_providers (id TEXT PRIMARY KEY);
 CREATE TABLE bots (
   id TEXT PRIMARY KEY,
@@ -48,6 +49,7 @@ CREATE TABLE bots (
   title_model_id TEXT,
   image_model_id TEXT,
   search_provider_id TEXT,
+  fetch_provider_id TEXT,
   memory_provider_id TEXT,
   tts_model_id TEXT,
   transcription_model_id TEXT,
@@ -63,8 +65,12 @@ CREATE TABLE bots (
 `)
 
 	botID := "00000000-0000-0000-0000-000000000001"
+	fetchProviderID := "00000000-0000-0000-0000-000000000002"
 	if _, err := conn.ExecContext(ctx, `INSERT INTO bots (id) VALUES (?)`, botID); err != nil {
 		t.Fatalf("insert bot: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `INSERT INTO fetch_providers (id) VALUES (?)`, fetchProviderID); err != nil {
+		t.Fatalf("insert fetch provider: %v", err)
 	}
 
 	store, err := New(conn)
@@ -112,5 +118,48 @@ CREATE TABLE bots (
 	}
 	if reread.CommandUiLanguage != "zh" {
 		t.Fatalf("persisted CommandUiLanguage = %q, want zh", reread.CommandUiLanguage)
+	}
+
+	withFetchProvider, err := q.UpsertBotSettings(ctx, pgsqlc.UpsertBotSettingsParams{
+		ID:                  mustUUID(t, botID),
+		Language:            "en",
+		CommandUiLanguage:   "zh",
+		ReasoningEffort:     "medium",
+		HeartbeatInterval:   30,
+		HeartbeatPrompt:     "",
+		CompactionThreshold: 100000,
+		CompactionRatio:     80,
+		ToolApprovalConfig:  []byte("{}"),
+		OverlayProvider:     "",
+		OverlayConfig:       []byte("{}"),
+		FetchProviderIDSet:  true,
+		FetchProviderID:     mustUUID(t, fetchProviderID),
+	})
+	if err != nil {
+		t.Fatalf("upsert fetch provider: %v", err)
+	}
+	if !withFetchProvider.FetchProviderID.Valid {
+		t.Fatalf("upsert RETURNING FetchProviderID is not valid")
+	}
+
+	cleared, err := q.UpsertBotSettings(ctx, pgsqlc.UpsertBotSettingsParams{
+		ID:                  mustUUID(t, botID),
+		Language:            "en",
+		CommandUiLanguage:   "zh",
+		ReasoningEffort:     "medium",
+		HeartbeatInterval:   30,
+		HeartbeatPrompt:     "",
+		CompactionThreshold: 100000,
+		CompactionRatio:     80,
+		ToolApprovalConfig:  []byte("{}"),
+		OverlayProvider:     "",
+		OverlayConfig:       []byte("{}"),
+		FetchProviderIDSet:  true,
+	})
+	if err != nil {
+		t.Fatalf("clear fetch provider: %v", err)
+	}
+	if cleared.FetchProviderID.Valid {
+		t.Fatalf("cleared FetchProviderID valid = true, want false")
 	}
 }

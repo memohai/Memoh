@@ -1,6 +1,11 @@
 <!-- eslint-disable vue/no-mutating-props -->
 <template>
-  <div class="space-y-4 rounded-md border border-border bg-background p-4 shadow-none">
+  <!-- id is a scroll anchor: the Overview "choose a model" reminder navigates
+       here with ?section=interaction, and bot-settings.vue scrolls to it. -->
+  <div
+    id="settings-section-interaction"
+    class="space-y-4 rounded-md border border-border bg-background p-4 shadow-none"
+  >
     <!-- Header Section -->
     <div class="space-y-0.5">
       <h4 class="text-xs font-medium text-foreground">
@@ -100,7 +105,7 @@ import { Label, Separator, Popover, PopoverTrigger, PopoverContent, Button, Swit
 import { Lightbulb, ChevronDown } from 'lucide-vue-next'
 import ModelSelect from './model-select.vue'
 import ReasoningEffortSelect from './reasoning-effort-select.vue'
-import { EFFORT_LABELS, EFFORT_OPACITY, REASONING_EFFORT_DISABLE } from './reasoning-effort'
+import { EFFORT_LABELS, EFFORT_OPACITY, REASONING_EFFORT_DISABLE, availableEffortsForMode, resolveEffortLevels, resolveThinkingMode } from './reasoning-effort'
 import type { SettingsSettings, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 
 const props = defineProps<{
@@ -109,31 +114,39 @@ const props = defineProps<{
   providers: ProvidersGetResponse[]
 }>()
 
-const chatModelSupportsReasoning = computed(() => {
-  if (!props.form.chat_model_id) return false
-  const m = props.models.find((m) => m.id === props.form.chat_model_id)
-  return !!m?.config?.compatibilities?.includes('reasoning')
+const chatModelConfig = computed(() => {
+  if (!props.form.chat_model_id) return undefined
+  return props.models.find((m) => m.id === props.form.chat_model_id)?.config
 })
 
-const availableReasoningEfforts = computed(() => {
-  if (!props.form.chat_model_id) return ['low', 'medium', 'high']
+const chatModelClientType = computed(() => {
+  if (!props.form.chat_model_id) return undefined
   const model = props.models.find((m) => m.id === props.form.chat_model_id)
-  const efforts = ((model?.config as { reasoning_efforts?: string[] } | undefined)?.reasoning_efforts ?? [])
-    .filter((effort) => ['none', 'low', 'medium', 'high', 'xhigh'].includes(effort))
-  return efforts.length > 0 ? efforts : ['low', 'medium', 'high']
+  return props.providers.find((p) => p.id === model?.provider_id)?.client_type
 })
 
-watch(availableReasoningEfforts, (efforts) => {
-  if (props.form.reasoning_enabled && !efforts.includes(props.form.reasoning_effort)) {
+const thinkingMode = computed(() => resolveThinkingMode(chatModelConfig.value))
+
+const chatModelSupportsReasoning = computed(() => thinkingMode.value !== 'none')
+
+const effortLevels = computed(() => resolveEffortLevels(chatModelConfig.value, chatModelClientType.value))
+
+const availableReasoningEfforts = computed(() =>
+  availableEffortsForMode(thinkingMode.value, effortLevels.value),
+)
+
+watch([effortLevels, thinkingMode], ([levels]) => {
+  const current = props.form.reasoning_effort
+  if (props.form.reasoning_enabled && (!current || !levels.includes(current))) {
     // eslint-disable-next-line vue/no-mutating-props
-    props.form.reasoning_effort = efforts.includes('medium') ? 'medium' : efforts[0] ?? 'medium'
+    props.form.reasoning_effort = levels.includes('medium') ? 'medium' : levels[0] ?? 'medium'
   }
 }, { immediate: true })
 
 const reasoningPopoverOpen = ref(false)
 
 const reasoningFormValue = computed({
-  get: () => props.form.reasoning_enabled ? props.form.reasoning_effort : REASONING_EFFORT_DISABLE,
+  get: () => (props.form.reasoning_enabled ? (props.form.reasoning_effort ?? 'medium') : REASONING_EFFORT_DISABLE),
   set: (v: string) => {
     if (v === REASONING_EFFORT_DISABLE) {
       // eslint-disable-next-line vue/no-mutating-props

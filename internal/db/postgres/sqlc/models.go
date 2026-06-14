@@ -23,6 +23,7 @@ type Bot struct {
 	ReasoningEffort        string             `json:"reasoning_effort"`
 	ChatModelID            pgtype.UUID        `json:"chat_model_id"`
 	SearchProviderID       pgtype.UUID        `json:"search_provider_id"`
+	FetchProviderID        pgtype.UUID        `json:"fetch_provider_id"`
 	MemoryProviderID       pgtype.UUID        `json:"memory_provider_id"`
 	HeartbeatEnabled       bool               `json:"heartbeat_enabled"`
 	HeartbeatInterval      int32              `json:"heartbeat_interval"`
@@ -342,6 +343,16 @@ type EmailProvider struct {
 	Name      string             `json:"name"`
 	Provider  string             `json:"provider"`
 	Config    []byte             `json:"config"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type FetchProvider struct {
+	ID        pgtype.UUID        `json:"id"`
+	Name      string             `json:"name"`
+	Provider  string             `json:"provider"`
+	Config    []byte             `json:"config"`
+	Enable    bool               `json:"enable"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }

@@ -15,6 +15,11 @@
     "models": "models",
     "rangeAll": "All"
   },
+  "startWelcome": {
+    "title": "👋 Hi there!",
+    "intro": "Just send me a message and we'll get going.",
+    "tip": "New here? {help} shows what I can do. {new} starts a clean slate anytime."
+  },
   "newSession": {
     "title": "✨ New {mode} started.",
     "modeChat": "chat",
@@ -152,6 +157,7 @@
       "availableCommands": "Available commands",
       "top": {
         "help": "show this help",
+        "start": "show the welcome message",
         "new": "start a new conversation",
         "stop": "stop the current reply",
         "approve": "approve the latest or specified pending tool call",
@@ -460,6 +466,7 @@
     }
   },
   "menu": {
+    "start": "Show the welcome message",
     "help": "Show available commands",
     "new": "Start a new conversation",
     "stop": "Stop the current reply",

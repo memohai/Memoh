@@ -334,8 +334,18 @@ func filterNonEmpty(ss []string) []string {
 	return out
 }
 
-const compactSystemPrompt = `You are a memory compaction assistant. Given a list of memories and a target count, consolidate them into fewer, higher-quality entries.
+const compactSystemPrompt = `You are a long-term memory compaction assistant. The user message is JSON with "memories", "target_count", and optional "decay_days".
 
-Merge duplicate or overlapping facts. Drop obsolete or low-value entries. Keep the most important and recent information.
+Goal:
+- Return roughly target_count durable memory entries; prefer being slightly under target_count over keeping weak entries.
+- Cluster related memories by topic and merge each cluster into one standalone, information-dense sentence when natural.
+- Preserve safety-critical facts, stable preferences, identity/profile facts, active plans with dates, and explicit user instructions.
+- Resolve conflicts using recency, explicit "current/changed" wording, and stronger evidence; keep previous values only when the change history is itself useful.
+- Drop duplicates, stale low-value details, transient test/debug/acceptance artifacts, and facts that are not useful as long-term memory.
+- Apply decay_days as a priority signal: old memories are easier to merge or drop unless they are safety-critical or clearly durable.
+- Do not invent facts, IDs, dates, causes, or preferences not present in the input.
 
-Return a JSON array of concise fact strings representing the compacted memory set.`
+Output rules:
+- Return a JSON array only.
+- Each array item must be a concise fact string.
+- Do not wrap the JSON in Markdown or add explanatory text.`

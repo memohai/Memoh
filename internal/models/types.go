@@ -49,11 +49,32 @@ const (
 )
 
 const (
-	ReasoningEffortNone   = "none"
-	ReasoningEffortLow    = "low"
-	ReasoningEffortMedium = "medium"
-	ReasoningEffortHigh   = "high"
-	ReasoningEffortXHigh  = "xhigh"
+	ReasoningEffortNone    = "none"
+	ReasoningEffortMinimal = "minimal"
+	ReasoningEffortLow     = "low"
+	ReasoningEffortMedium  = "medium"
+	ReasoningEffortHigh    = "high"
+	ReasoningEffortXHigh   = "xhigh"
+	ReasoningEffortMax     = "max"
+)
+
+// ThinkingMode describes how a model's extended-thinking control behaves. It is
+// the capability-discovery output that the UI and wire layer key off of.
+//
+//   - toggle:        user can turn thinking on/off (most reasoning/hybrid models,
+//     incl. OpenAI). "off" wire behavior is provider-specific (see adapter).
+//   - adaptive:      user can turn thinking on/off; when on, the provider uses
+//     adaptive thinking (Claude 4.6+/4.7/4.8).
+//   - only_adaptive: legacy alias for adaptive retained for branch-local imports.
+//   - none:          model has no thinking concept.
+//
+// An empty value means "unknown" and is treated as a transitional state that
+// falls back to the legacy CompatReasoning flag (see Model.SupportsReasoning).
+const (
+	ThinkingModeAdaptive     = "adaptive"
+	ThinkingModeToggle       = "toggle"
+	ThinkingModeOnlyAdaptive = "only_adaptive"
+	ThinkingModeNone         = "none"
 )
 
 // validCompatibilities enumerates accepted compatibility tokens.
@@ -62,19 +83,34 @@ var validCompatibilities = map[string]struct{}{
 }
 
 var validReasoningEfforts = map[string]struct{}{
-	ReasoningEffortNone:   {},
-	ReasoningEffortLow:    {},
-	ReasoningEffortMedium: {},
-	ReasoningEffortHigh:   {},
-	ReasoningEffortXHigh:  {},
+	ReasoningEffortNone:    {},
+	ReasoningEffortMinimal: {},
+	ReasoningEffortLow:     {},
+	ReasoningEffortMedium:  {},
+	ReasoningEffortHigh:    {},
+	ReasoningEffortXHigh:   {},
+	ReasoningEffortMax:     {},
+}
+
+var validThinkingModes = map[string]struct{}{
+	ThinkingModeAdaptive:     {},
+	ThinkingModeToggle:       {},
+	ThinkingModeOnlyAdaptive: {},
+	ThinkingModeNone:         {},
 }
 
 // ModelConfig holds the JSONB config stored per model.
+//
+// ReasoningEfforts is the model's effort-level list (a.k.a. effort_levels in the
+// design doc); the JSON key stays "reasoning_efforts" for backward compatibility.
+// ThinkingMode is the discovered thinking behavior; empty = unknown (legacy data),
+// resolved via SupportsReasoning / ResolveThinkingMode.
 type ModelConfig struct {
 	Dimensions       *int     `json:"dimensions,omitempty"`
 	Compatibilities  []string `json:"compatibilities,omitempty"`
 	ContextWindow    *int     `json:"context_window,omitempty"`
 	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
+	ThinkingMode     string   `json:"thinking_mode,omitempty"`
 }
 
 type Model struct {
@@ -113,6 +149,11 @@ func (m *Model) Validate() error {
 			return errors.New("invalid reasoning effort: " + effort)
 		}
 	}
+	if m.Config.ThinkingMode != "" {
+		if _, ok := validThinkingModes[m.Config.ThinkingMode]; !ok {
+			return errors.New("invalid thinking mode: " + m.Config.ThinkingMode)
+		}
+	}
 	return nil
 }
 
@@ -124,6 +165,37 @@ func (m *Model) HasCompatibility(c string) bool {
 		}
 	}
 	return false
+}
+
+// SupportsReasoning reports whether the model supports extended thinking. It
+// prefers the new ThinkingMode field and falls back to the legacy
+// CompatReasoning flag for models discovered before the thinking-mode schema
+// existed (transitional; resolved naturally on next model re-fetch).
+func (m *Model) SupportsReasoning() bool {
+	switch m.Config.ThinkingMode {
+	case ThinkingModeToggle, ThinkingModeAdaptive, ThinkingModeOnlyAdaptive:
+		return true
+	case ThinkingModeNone:
+		return false
+	default: // unknown / empty → legacy bridge
+		return m.HasCompatibility(CompatReasoning)
+	}
+}
+
+// ResolveThinkingMode returns the effective ThinkingMode, bridging legacy data:
+// unknown + reasoning compat → toggle; unknown without it → none.
+func (m *Model) ResolveThinkingMode() string {
+	switch m.Config.ThinkingMode {
+	case ThinkingModeToggle, ThinkingModeAdaptive, ThinkingModeNone:
+		return m.Config.ThinkingMode
+	case ThinkingModeOnlyAdaptive:
+		return ThinkingModeAdaptive
+	default:
+		if m.HasCompatibility(CompatReasoning) {
+			return ThinkingModeToggle
+		}
+		return ThinkingModeNone
+	}
 }
 
 type AddRequest Model

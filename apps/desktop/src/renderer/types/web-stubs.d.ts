@@ -30,6 +30,7 @@ declare module '@memohai/web/i18n' {
 declare module '@memohai/web/api-client' {
   export interface SetupApiClientOptions {
     baseUrl?: string
+    fetch?: typeof fetch
     onUnauthorized?: () => void
   }
   export interface SdkUrlOptions {
@@ -168,6 +169,19 @@ declare module '@memohai/web/store/capabilities' {
   }
 }
 
+declare module '@memohai/web/store/update' {
+  export function useUpdateStore(): {
+    checking: boolean
+    checked: boolean
+    hasUpdate: boolean
+    latestVersion: string
+    releaseBody: string
+    releaseUrl: string
+    check: () => Promise<boolean>
+    checkAtStartup: () => Promise<void>
+  }
+}
+
 declare module '@memohai/web/composables/useDialogMutation' {
   export function useDialogMutation(): {
     run: <T>(action: () => Promise<T>, options?: { fallbackMessage?: string, onSuccess?: () => void }) => Promise<T | undefined>
@@ -186,6 +200,17 @@ declare module '@memohai/web/utils/timezones' {
 declare module '@memohai/web/lib/desktop-shell' {
   import type { InjectionKey } from 'vue'
   export const DesktopShellKey: InjectionKey<boolean>
+}
+
+declare module '@memohai/web/composables/useBackOr' {
+  import type { ComputedRef } from 'vue'
+  import type { RouteLocationRaw, Router } from 'vue-router'
+  export function installBackHistory(router: Router): void
+  export function useBackOr(fallback: RouteLocationRaw): () => void
+  export function useBackAffordance(fallback: RouteLocationRaw): {
+    onBack: () => void
+    label: ComputedRef<string>
+  }
 }
 
 declare module '@memohai/web/style.css'

@@ -16,6 +16,7 @@ import { KEYBOARD_REGISTRY } from '@memohai/web/composables/useKeyboardCommand'
 import { registerWorkspaceTabCommands } from '@memohai/web/pages/home/commands/workspace-tab-commands'
 import { useWorkspaceTabsStore } from '@memohai/web/store/workspace-tabs'
 
+import '@fontsource-variable/inter'
 import 'markstream-vue/index.css'
 import '@memohai/web/style.css'
 import './desktop-shell.css'

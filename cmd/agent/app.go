@@ -62,6 +62,7 @@ import (
 	emailgeneric "github.com/memohai/memoh/internal/email/adapters/generic"
 	emailgmail "github.com/memohai/memoh/internal/email/adapters/gmail"
 	emailmailgun "github.com/memohai/memoh/internal/email/adapters/mailgun"
+	"github.com/memohai/memoh/internal/fetchproviders"
 	"github.com/memohai/memoh/internal/handlers"
 	"github.com/memohai/memoh/internal/healthcheck"
 	channelchecker "github.com/memohai/memoh/internal/healthcheck/checkers/channel"
@@ -263,8 +264,11 @@ func provideMemoryLLM(modelsService *models.Service, settingsService *settings.S
 
 func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatService *conversation.Service, accountService *accounts.Service, provider bridge.Provider, queries dbstore.Queries, cfg config.Config) *memprovider.Registry {
 	registry := memprovider.NewRegistry(log)
-	fileRuntime := handlers.NewBuiltinMemoryRuntime(provider)
 	fileStore := storefs.New(log, provider)
+	var fileRuntime any
+	if provider != nil {
+		fileRuntime = membuiltin.NewFileRuntime(fileStore)
+	}
 	registry.RegisterFactory(string(memprovider.ProviderBuiltin), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
 		runtime, err := membuiltin.NewBuiltinRuntimeFromConfig(log, providerConfig, fileRuntime, fileStore, queries, cfg)
 		if err != nil {
@@ -371,10 +375,12 @@ func provideACPRunner(log *slog.Logger, manager *workspace.Manager) *acpclient.R
 	return acpclient.NewRunner(log, manager)
 }
 
-func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, containerdHandler *handlers.ContainerdHandler) *acpagent.SessionPool {
+func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler) *acpagent.SessionPool {
 	pool := acpagent.NewSessionPool(log, runner, botService, sessionService)
 	pool.SetToolGateway(toolGateway)
 	pool.SetToolSessionContextStore(toolContexts)
+	pool.SetToolApprovalService(toolApproval)
+	pool.SetUserInputService(userInput)
 	containerdHandler.SetACPRuntimeResolver(pool)
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
@@ -575,7 +581,7 @@ func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg 
 	return handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, botService, accountService, policyService)
 }
 
-func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, emailService *emailpkg.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, memoryProviderService *memprovider.Service, manager *workspace.Manager) *botbackup.Service {
+func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, emailService *emailpkg.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, memoryProviderService *memprovider.Service, manager *workspace.Manager) *botbackup.Service {
 	return botbackup.New(botbackup.Params{
 		Logger:          log,
 		DB:              conn,
@@ -590,6 +596,7 @@ func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbsto
 		Providers:       providerService,
 		Models:          modelsService,
 		SearchProviders: searchProviderService,
+		FetchProviders:  fetchProviderService,
 		MemoryProviders: memoryProviderService,
 		Workspace:       manager,
 	})
@@ -612,13 +619,12 @@ func provideOAuthService(log *slog.Logger, queries dbstore.Queries, cfg config.C
 	return mcp.NewOAuthService(log, queries, callbackURL)
 }
 
-func provideACPToolSource(log *slog.Logger, toolApproval *toolapproval.Service, userInput *userinput.Service, toolContexts *mcp.ToolSessionContextStore, eventHub *event.Hub) *agenttools.NativeToolSource {
+func provideACPToolSource(log *slog.Logger, toolApproval *toolapproval.Service, userInput *userinput.Service, toolContexts *mcp.ToolSessionContextStore) *agenttools.NativeToolSource {
 	return agenttools.NewNativeToolSource(log, nil, agenttools.NativeToolSourceOptions{
-		AllowAll:          true,
-		Approval:          toolApproval,
-		ApprovalPublisher: eventHub,
-		UserInput:         userInput,
-		ToolEvents:        toolContexts,
+		AllowAll:   true,
+		Approval:   toolApproval,
+		UserInput:  userInput,
+		ToolEvents: toolContexts,
 	})
 }
 
@@ -655,7 +661,7 @@ func provideBackgroundManager(log *slog.Logger) *background.Manager {
 	return background.New(log)
 }
 
-func provideToolProviders(log *slog.Logger, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, sessionService *sessionpkg.Service, bgManager *background.Manager) []agenttools.ToolProvider {
+func provideToolProviders(log *slog.Logger, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, sessionService *sessionpkg.Service, bgManager *background.Manager) []agenttools.ToolProvider {
 	var assetResolver messaging.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
@@ -671,7 +677,7 @@ func provideToolProviders(log *slog.Logger, channelManager *channel.Manager, reg
 		agenttools.NewContainerProvider(log, manager, bgManager, config.DefaultDataMount),
 		agenttools.NewBrowserProvider(log, settingsService, manager, manager, config.DefaultDataMount),
 		agenttools.NewEmailProvider(log, emailService, emailManager),
-		agenttools.NewWebFetchProvider(log),
+		agenttools.NewWebFetchProvider(log, settingsService, fetchProviderService),
 		agenttools.NewSpawnProvider(log, settingsService, modelsService, queries, sessionService, bgManager),
 		agenttools.NewSkillProvider(log),
 		agenttools.NewTTSProvider(log, settingsService, audioService, channelManager, registry),
@@ -998,10 +1004,11 @@ func startMemoryProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, mpService *
 				log.Warn("failed to ensure default memory provider", slog.Any("error", err))
 				return nil
 			}
-			if _, regErr := registry.Instantiate(resp.ID, resp.Provider, resp.Config); regErr != nil {
-				log.Warn("failed to instantiate default memory provider", slog.Any("error", regErr))
+			count, regErr := mpService.InstantiateAll(ctx)
+			if regErr != nil {
+				log.Warn("failed to instantiate memory providers", slog.Any("error", regErr))
 			} else {
-				log.Info("default memory provider ready", slog.String("id", resp.ID), slog.String("provider", resp.Provider))
+				log.Info("memory providers ready", slog.Int("count", count), slog.String("default_id", resp.ID), slog.String("default_provider", resp.Provider))
 			}
 			return nil
 		},
@@ -1013,6 +1020,17 @@ func startSearchProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, spService *
 		OnStart: func(ctx context.Context) error {
 			if err := spService.EnsureDefaults(ctx); err != nil {
 				log.Warn("failed to ensure default search providers", slog.Any("error", err))
+			}
+			return nil
+		},
+	})
+}
+
+func startFetchProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, fpService *fetchproviders.Service) {
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			if err := fpService.EnsureDefaults(ctx); err != nil {
+				log.Warn("failed to ensure default fetch providers", slog.Any("error", err))
 			}
 			return nil
 		},
@@ -1184,7 +1202,7 @@ func (c *lazyLLMClient) Decide(ctx context.Context, req memprovider.DecideReques
 }
 
 func (c *lazyLLMClient) Compact(ctx context.Context, req memprovider.CompactRequest) (memprovider.CompactResponse, error) {
-	client, err := c.resolve(ctx, "")
+	client, err := c.resolve(ctx, req.BotID)
 	if err != nil {
 		return memprovider.CompactResponse{}, err
 	}

@@ -33,6 +33,8 @@ models:
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 204800
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
 
   - model_id: MiniMax-M2.1
     name: MiniMax M2.1
@@ -47,6 +49,8 @@ models:
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 204800
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
 
   - model_id: MiniMax-M2
     name: MiniMax M2

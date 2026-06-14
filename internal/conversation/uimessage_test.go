@@ -587,6 +587,40 @@ func TestUIMessageStreamConverterAccumulatesToolProgress(t *testing.T) {
 	}
 }
 
+func TestUIMessageStreamConverterUpdatesToolApprovalDecision(t *testing.T) {
+	t.Parallel()
+
+	converter := NewUIMessageStreamConverter()
+	pending := converter.HandleEvent(UIMessageStreamEvent{
+		Type:       "tool_approval_request",
+		ToolName:   "exec",
+		ToolCallID: "call-1",
+		Input:      map[string]any{"command": "pwd"},
+		ApprovalID: "approval-1",
+		ShortID:    7,
+		Status:     "pending",
+	})
+	if len(pending) != 1 || pending[0].Approval == nil || !pending[0].Approval.CanApprove {
+		t.Fatalf("pending approval snapshot = %#v", pending)
+	}
+
+	approved := converter.HandleEvent(UIMessageStreamEvent{
+		Type:       "tool_approval_request",
+		ToolName:   "exec",
+		ToolCallID: "call-1",
+		Input:      map[string]any{"command": "pwd"},
+		ApprovalID: "approval-1",
+		ShortID:    7,
+		Status:     "approved",
+	})
+	if len(approved) != 1 || approved[0].ID != pending[0].ID {
+		t.Fatalf("approved approval snapshot = %#v, want same tool block", approved)
+	}
+	if approved[0].Approval == nil || approved[0].Approval.Status != "approved" || approved[0].Approval.CanApprove {
+		t.Fatalf("approved approval state = %#v", approved[0].Approval)
+	}
+}
+
 func TestUIMessageStreamConverterMergesRepeatedToolCallStart(t *testing.T) {
 	t.Parallel()
 

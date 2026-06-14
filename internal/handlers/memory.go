@@ -2,22 +2,15 @@ package handlers
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"path"
-	"sort"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/config"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 	"github.com/memohai/memoh/internal/settings"
@@ -94,10 +87,12 @@ func (h *MemoryHandler) SetSettingsService(svc *settings.Service) {
 	h.settingsService = svc
 }
 
-// resolveProvider returns the memory provider for a bot, or nil if not configured.
-func (h *MemoryHandler) resolveProvider(ctx context.Context, botID string) memprovider.Provider {
+// resolveProvider returns the memory provider for a bot. An explicitly selected
+// provider must be available; only bots without a selected provider may fall
+// back to the builtin default.
+func (h *MemoryHandler) resolveProvider(ctx context.Context, botID string) (memprovider.Provider, error) {
 	if h.memoryRegistry == nil {
-		return nil
+		return nil, nil
 	}
 	if h.settingsService != nil {
 		botSettings, err := h.settingsService.GetBot(ctx, botID)
@@ -106,17 +101,18 @@ func (h *MemoryHandler) resolveProvider(ctx context.Context, botID string) mempr
 			if providerID != "" {
 				p, getErr := h.memoryRegistry.Get(providerID)
 				if getErr == nil {
-					return p
+					return p, nil
 				}
 				h.logger.Warn("memory provider lookup failed", slog.String("provider_id", providerID), slog.Any("error", getErr))
+				return nil, fmt.Errorf("configured memory provider is unavailable: %w", getErr)
 			}
 		}
 	}
 	p, err := h.memoryRegistry.Get(defaultBuiltinProviderID)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	return p
+	return p, nil
 }
 
 // SetMCPClientProvider sets the gRPC client provider for filesystem persistence.
@@ -143,7 +139,11 @@ func (h *MemoryHandler) Register(e *echo.Echo) {
 }
 
 func (h *MemoryHandler) checkService(ctx context.Context, botID string) (memprovider.Provider, error) {
-	if p := h.resolveProvider(ctx, botID); p != nil {
+	p, err := h.resolveProvider(ctx, botID)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
+	}
+	if p != nil {
 		return p, nil
 	}
 	return nil, echo.NewHTTPError(http.StatusServiceUnavailable, "memory service not available")
@@ -422,6 +422,7 @@ func (h *MemoryHandler) ChatDeleteOne(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
+// @Failure 501 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
 // @Router /bots/{bot_id}/memory/compact [post].
 func (h *MemoryHandler) ChatCompact(c echo.Context) error {
@@ -453,6 +454,14 @@ func (h *MemoryHandler) ChatCompact(c echo.Context) error {
 	provider, checkErr := h.checkService(c.Request().Context(), botID)
 	if checkErr != nil {
 		return checkErr
+	}
+	capability := semanticCompactCapability(provider)
+	if !capability.Semantic {
+		reason := strings.TrimSpace(capability.Reason)
+		if reason == "" {
+			reason = "selected memory provider does not support semantic compact"
+		}
+		return echo.NewHTTPError(http.StatusNotImplemented, reason)
 	}
 
 	scope := scopes[0]
@@ -579,6 +588,7 @@ func (h *MemoryHandler) ChatStatus(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+	status.Compact = semanticCompactCapability(provider)
 	return c.JSON(http.StatusOK, status)
 }
 
@@ -635,6 +645,21 @@ func buildNamespaceFilters(namespace, scopeID string, extra map[string]any) map[
 	return filters
 }
 
+func semanticCompactCapability(provider memprovider.Provider) memprovider.MemoryCompactCapability {
+	if provider == nil {
+		return memprovider.MemoryCompactCapability{Reason: "memory service not available"}
+	}
+	semanticProvider, ok := provider.(memprovider.SemanticCompactProvider)
+	if !ok {
+		return memprovider.MemoryCompactCapability{Reason: "selected memory provider does not support semantic compact"}
+	}
+	capability := semanticProvider.SemanticCompactCapability()
+	if !capability.Semantic && strings.TrimSpace(capability.Reason) == "" {
+		capability.Reason = "selected memory provider does not support semantic compact"
+	}
+	return capability
+}
+
 func deduplicateMemoryItems(items []memprovider.MemoryItem) []memprovider.MemoryItem {
 	if len(items) == 0 {
 		return items
@@ -668,381 +693,4 @@ func (h *MemoryHandler) requireBotAccess(c echo.Context) (string, error) {
 		return "", err
 	}
 	return botID, nil
-}
-
-// NewBuiltinMemoryRuntime keeps provider architecture while using file memory backend.
-func NewBuiltinMemoryRuntime(p bridge.Provider) any {
-	if p == nil {
-		return nil
-	}
-	return &fileMemoryRuntime{store: storefs.New(nil, p)}
-}
-
-type fileMemoryRuntime struct {
-	store *storefs.Service
-}
-
-func (r *fileMemoryRuntime) Add(ctx context.Context, req memprovider.AddRequest) (memprovider.SearchResponse, error) {
-	botID, err := runtimeBotID(req.BotID, req.Filters)
-	if err != nil {
-		return memprovider.SearchResponse{}, err
-	}
-	text := strings.TrimSpace(req.Message)
-	if text == "" && len(req.Messages) > 0 {
-		parts := make([]string, 0, len(req.Messages))
-		for _, m := range req.Messages {
-			content := strings.TrimSpace(m.Content)
-			if content == "" {
-				continue
-			}
-			role := strings.ToUpper(strings.TrimSpace(m.Role))
-			if role == "" {
-				role = "MESSAGE"
-			}
-			parts = append(parts, "["+role+"] "+content)
-		}
-		text = strings.Join(parts, "\n")
-	}
-	if text == "" {
-		return memprovider.SearchResponse{}, echo.NewHTTPError(http.StatusBadRequest, "message is required")
-	}
-	now := time.Now().UTC().Format(time.RFC3339)
-	item := memprovider.MemoryItem{
-		ID:        botID + ":" + "mem_" + strconv.FormatInt(time.Now().UTC().UnixNano(), 10),
-		Memory:    text,
-		Hash:      runtimeHash(text),
-		CreatedAt: now,
-		UpdatedAt: now,
-		Metadata:  req.Metadata,
-		BotID:     botID,
-	}
-	itemsToPersist := []storefs.MemoryItem{runtimeToStoreItem(item)}
-	if err := r.store.PersistMemories(ctx, botID, itemsToPersist, req.Filters); err != nil {
-		return memprovider.SearchResponse{}, err
-	}
-	return memprovider.SearchResponse{Results: []memprovider.MemoryItem{item}}, nil
-}
-
-func (r *fileMemoryRuntime) Search(ctx context.Context, req memprovider.SearchRequest) (memprovider.SearchResponse, error) {
-	botID, err := runtimeBotID(req.BotID, req.Filters)
-	if err != nil {
-		return memprovider.SearchResponse{}, err
-	}
-	items, err := r.store.ReadAllMemoryFiles(ctx, botID)
-	if err != nil {
-		return memprovider.SearchResponse{}, err
-	}
-	query := strings.ToLower(strings.TrimSpace(req.Query))
-	results := make([]memprovider.MemoryItem, 0, len(items))
-	for _, item := range items {
-		score := runtimeScore(query, item.Memory)
-		if query != "" && score <= 0 {
-			continue
-		}
-		item.BotID = botID
-		item.Score = score
-		results = append(results, runtimeFromStoreItem(item))
-	}
-	sort.Slice(results, func(i, j int) bool {
-		if results[i].Score == results[j].Score {
-			return results[i].UpdatedAt > results[j].UpdatedAt
-		}
-		return results[i].Score > results[j].Score
-	})
-	if req.Limit > 0 && len(results) > req.Limit {
-		results = results[:req.Limit]
-	}
-	return memprovider.SearchResponse{Results: results}, nil
-}
-
-func (r *fileMemoryRuntime) GetAll(ctx context.Context, req memprovider.GetAllRequest) (memprovider.SearchResponse, error) {
-	botID, err := runtimeBotID(req.BotID, req.Filters)
-	if err != nil {
-		return memprovider.SearchResponse{}, err
-	}
-	items, err := r.store.ReadAllMemoryFiles(ctx, botID)
-	if err != nil {
-		return memprovider.SearchResponse{}, err
-	}
-	for i := range items {
-		items[i].BotID = botID
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt > items[j].UpdatedAt })
-	if req.Limit > 0 && len(items) > req.Limit {
-		items = items[:req.Limit]
-	}
-	return memprovider.SearchResponse{Results: runtimeFromStoreItems(items)}, nil
-}
-
-func (r *fileMemoryRuntime) Update(ctx context.Context, req memprovider.UpdateRequest) (memprovider.MemoryItem, error) {
-	memoryID := strings.TrimSpace(req.MemoryID)
-	if memoryID == "" {
-		return memprovider.MemoryItem{}, echo.NewHTTPError(http.StatusBadRequest, "memory_id is required")
-	}
-	botID := runtimeBotIDFromMemoryID(memoryID)
-	if botID == "" {
-		return memprovider.MemoryItem{}, echo.NewHTTPError(http.StatusBadRequest, "invalid memory_id")
-	}
-	items, err := r.store.ReadAllMemoryFiles(ctx, botID)
-	if err != nil {
-		return memprovider.MemoryItem{}, err
-	}
-	var existing *memprovider.MemoryItem
-	for i := range items {
-		if strings.TrimSpace(items[i].ID) == memoryID {
-			item := runtimeFromStoreItem(items[i])
-			existing = &item
-			break
-		}
-	}
-	if existing == nil {
-		return memprovider.MemoryItem{}, echo.NewHTTPError(http.StatusNotFound, "memory not found")
-	}
-	text := strings.TrimSpace(req.Memory)
-	if text == "" {
-		return memprovider.MemoryItem{}, echo.NewHTTPError(http.StatusBadRequest, "memory is required")
-	}
-	if err := r.store.RemoveMemories(ctx, botID, []string{memoryID}); err != nil {
-		return memprovider.MemoryItem{}, err
-	}
-	existing.Memory = text
-	existing.Hash = runtimeHash(text)
-	existing.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	itemsToPersist := []storefs.MemoryItem{runtimeToStoreItem(*existing)}
-	if err := r.store.PersistMemories(ctx, botID, itemsToPersist, nil); err != nil {
-		return memprovider.MemoryItem{}, err
-	}
-	return *existing, nil
-}
-
-func (r *fileMemoryRuntime) Delete(ctx context.Context, memoryID string) (memprovider.DeleteResponse, error) {
-	return r.DeleteBatch(ctx, []string{memoryID})
-}
-
-func (r *fileMemoryRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (memprovider.DeleteResponse, error) {
-	grouped := map[string][]string{}
-	for _, id := range memoryIDs {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		botID := runtimeBotIDFromMemoryID(id)
-		if botID == "" {
-			continue
-		}
-		grouped[botID] = append(grouped[botID], id)
-	}
-	for botID, ids := range grouped {
-		if err := r.store.RemoveMemories(ctx, botID, ids); err != nil {
-			return memprovider.DeleteResponse{}, err
-		}
-	}
-	return memprovider.DeleteResponse{Message: "Memories deleted successfully!"}, nil
-}
-
-func (r *fileMemoryRuntime) DeleteAll(ctx context.Context, req memprovider.DeleteAllRequest) (memprovider.DeleteResponse, error) {
-	botID, err := runtimeBotID(req.BotID, req.Filters)
-	if err != nil {
-		return memprovider.DeleteResponse{}, err
-	}
-	if err := r.store.RemoveAllMemories(ctx, botID); err != nil {
-		return memprovider.DeleteResponse{}, err
-	}
-	return memprovider.DeleteResponse{Message: "All memories deleted successfully!"}, nil
-}
-
-func (r *fileMemoryRuntime) Compact(ctx context.Context, filters map[string]any, ratio float64, _ int) (memprovider.CompactResult, error) {
-	botID, err := runtimeBotID("", filters)
-	if err != nil {
-		return memprovider.CompactResult{}, err
-	}
-	if ratio <= 0 || ratio > 1 {
-		return memprovider.CompactResult{}, echo.NewHTTPError(http.StatusBadRequest, "ratio must be in range (0, 1]")
-	}
-	items, err := r.store.ReadAllMemoryFiles(ctx, botID)
-	if err != nil {
-		return memprovider.CompactResult{}, err
-	}
-	before := len(items)
-	if before == 0 {
-		return memprovider.CompactResult{BeforeCount: 0, AfterCount: 0, Ratio: ratio, Results: []memprovider.MemoryItem{}}, nil
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt > items[j].UpdatedAt })
-	target := int(float64(before) * ratio)
-	if target < 1 {
-		target = 1
-	}
-	if target > before {
-		target = before
-	}
-	keptStore := append([]storefs.MemoryItem(nil), items[:target]...)
-	if err := r.store.RebuildFiles(ctx, botID, keptStore, filters); err != nil {
-		return memprovider.CompactResult{}, err
-	}
-	kept := runtimeFromStoreItems(keptStore)
-	return memprovider.CompactResult{
-		BeforeCount: before,
-		AfterCount:  len(kept),
-		Ratio:       ratio,
-		Results:     kept,
-	}, nil
-}
-
-func (r *fileMemoryRuntime) Usage(ctx context.Context, filters map[string]any) (memprovider.UsageResponse, error) {
-	botID, err := runtimeBotID("", filters)
-	if err != nil {
-		return memprovider.UsageResponse{}, err
-	}
-	items, err := r.store.ReadAllMemoryFiles(ctx, botID)
-	if err != nil {
-		return memprovider.UsageResponse{}, err
-	}
-	var usage memprovider.UsageResponse
-	usage.Count = len(items)
-	for _, item := range items {
-		usage.TotalTextBytes += int64(len(item.Memory))
-	}
-	if usage.Count > 0 {
-		usage.AvgTextBytes = usage.TotalTextBytes / int64(usage.Count)
-	}
-	usage.EstimatedStorageBytes = usage.TotalTextBytes
-	return usage, nil
-}
-
-func (*fileMemoryRuntime) Mode() string {
-	return "off"
-}
-
-func (r *fileMemoryRuntime) Status(ctx context.Context, botID string) (memprovider.MemoryStatusResponse, error) {
-	fileCount, err := r.store.CountMemoryFiles(ctx, botID)
-	if err != nil {
-		return memprovider.MemoryStatusResponse{}, err
-	}
-	items, err := r.store.ReadAllMemoryFiles(ctx, botID)
-	if err != nil {
-		return memprovider.MemoryStatusResponse{}, err
-	}
-	return memprovider.MemoryStatusResponse{
-		ProviderType:      "builtin",
-		MemoryMode:        "off",
-		CanManualSync:     false,
-		SourceDir:         path.Join(config.DefaultDataMount, "memory"),
-		OverviewPath:      path.Join(config.DefaultDataMount, "MEMORY.md"),
-		MarkdownFileCount: fileCount,
-		SourceCount:       len(items),
-	}, nil
-}
-
-func (r *fileMemoryRuntime) Rebuild(ctx context.Context, botID string) (memprovider.RebuildResult, error) {
-	items, err := r.store.ReadAllMemoryFiles(ctx, botID)
-	if err != nil {
-		return memprovider.RebuildResult{}, err
-	}
-	if err := r.store.SyncOverview(ctx, botID); err != nil {
-		return memprovider.RebuildResult{}, err
-	}
-	return memprovider.RebuildResult{
-		FsCount:      len(items),
-		StorageCount: len(items),
-	}, nil
-}
-
-func runtimeBotID(botID string, filters map[string]any) (string, error) {
-	botID = strings.TrimSpace(botID)
-	if botID == "" {
-		botID = strings.TrimSpace(runtimeAny(filters, "bot_id"))
-	}
-	if botID == "" {
-		botID = strings.TrimSpace(runtimeAny(filters, "scopeId"))
-	}
-	if botID == "" {
-		return "", echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
-	}
-	return botID, nil
-}
-
-func runtimeBotIDFromMemoryID(memoryID string) string {
-	parts := strings.SplitN(strings.TrimSpace(memoryID), ":", 2)
-	if len(parts) != 2 {
-		return ""
-	}
-	return strings.TrimSpace(parts[0])
-}
-
-func runtimeAny(m map[string]any, key string) string {
-	if m == nil {
-		return ""
-	}
-	v, ok := m[key]
-	if !ok || v == nil {
-		return ""
-	}
-	return strings.TrimSpace(fmt.Sprint(v))
-}
-
-func runtimeHash(text string) string {
-	sum := sha256.Sum256([]byte(strings.TrimSpace(text)))
-	return hex.EncodeToString(sum[:])
-}
-
-func runtimeScore(query, memory string) float64 {
-	if query == "" {
-		return 1
-	}
-	memory = strings.ToLower(memory)
-	if strings.Contains(memory, query) {
-		return 1
-	}
-	tokens := strings.Fields(query)
-	if len(tokens) == 0 {
-		return 0
-	}
-	hits := 0
-	for _, t := range tokens {
-		if strings.Contains(memory, t) {
-			hits++
-		}
-	}
-	return float64(hits) / float64(len(tokens))
-}
-
-func runtimeToStoreItem(item memprovider.MemoryItem) storefs.MemoryItem {
-	return storefs.MemoryItem{
-		ID:        item.ID,
-		Memory:    item.Memory,
-		Hash:      item.Hash,
-		CreatedAt: item.CreatedAt,
-		UpdatedAt: item.UpdatedAt,
-		Score:     item.Score,
-		Metadata:  item.Metadata,
-		BotID:     item.BotID,
-		AgentID:   item.AgentID,
-		RunID:     item.RunID,
-	}
-}
-
-func runtimeFromStoreItem(item storefs.MemoryItem) memprovider.MemoryItem {
-	return memprovider.MemoryItem{
-		ID:        item.ID,
-		Memory:    item.Memory,
-		Hash:      item.Hash,
-		CreatedAt: item.CreatedAt,
-		UpdatedAt: item.UpdatedAt,
-		Score:     item.Score,
-		Metadata:  item.Metadata,
-		BotID:     item.BotID,
-		AgentID:   item.AgentID,
-		RunID:     item.RunID,
-	}
-}
-
-func runtimeFromStoreItems(items []storefs.MemoryItem) []memprovider.MemoryItem {
-	if len(items) == 0 {
-		return []memprovider.MemoryItem{}
-	}
-	out := make([]memprovider.MemoryItem, 0, len(items))
-	for _, item := range items {
-		out = append(out, runtimeFromStoreItem(item))
-	}
-	return out
 }

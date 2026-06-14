@@ -21,10 +21,11 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
     v-bind="forwarded"
     :class="
       cn(
-        'peer size-4 shrink-0 rounded border border-border bg-background transition-all outline-none',
-        'data-[state=checked]:bg-background data-[state=checked]:text-text-foreground data-[state=checked]:border-border',
+        'peer relative size-3.5 shrink-0 rounded-2xs border outline-none cursor-pointer',
+        // hit-slop: clickable area extends well beyond the visual box
+        `before:absolute before:-inset-2 before:content-['']`,
         'focus-visible:ring-2 focus-visible:ring-ring/20',
-        'disabled:cursor-not-allowed disabled:opacity-50',
+        'disabled:cursor-not-allowed disabled:opacity-40',
         props.class
       )"
   >
@@ -33,7 +34,10 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
       class="grid place-content-center text-current transition-none"
     >
       <slot v-bind="slotProps">
-        <Check class="size-3.5" />
+        <Check
+          class="size-2.5"
+          :stroke-width="3"
+        />
       </slot>
     </CheckboxIndicator>
   </CheckboxRoot>

@@ -14,7 +14,8 @@ import (
 )
 
 type fakeSparseStore struct {
-	items map[string]storefs.MemoryItem
+	items   map[string]storefs.MemoryItem
+	archive []storefs.MemoryItem
 }
 
 func newFakeSparseStore(items ...storefs.MemoryItem) *fakeSparseStore {
@@ -59,6 +60,11 @@ func (s *fakeSparseStore) RebuildFiles(_ context.Context, _ string, items []stor
 		s.items[item.ID] = item
 	}
 	return nil
+}
+
+func (s *fakeSparseStore) ArchiveAndRebuildFiles(ctx context.Context, _ string, active []storefs.MemoryItem, archived []storefs.MemoryItem, _ map[string]any) error {
+	s.archive = append([]storefs.MemoryItem(nil), archived...)
+	return s.RebuildFiles(ctx, "", active, nil)
 }
 
 func (*fakeSparseStore) SyncOverview(context.Context, string) error { return nil }

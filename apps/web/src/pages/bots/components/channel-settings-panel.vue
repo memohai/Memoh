@@ -418,7 +418,7 @@
 import { Button, Input, Label, Switch, Spinner, Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@memohai/ui'
 import { Eye, EyeOff } from 'lucide-vue-next'
 import { reactive, watch, computed, ref, toRaw } from 'vue'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { useMutation } from '@pinia/colada'
 import { putBotsByIdChannelByPlatform, deleteBotsByIdChannelByPlatform, patchBotsByIdChannelByPlatformStatus } from '@memohai/sdk'

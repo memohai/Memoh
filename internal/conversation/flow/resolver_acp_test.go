@@ -10,16 +10,21 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/acpagent"
 	"github.com/memohai/memoh/internal/acpclient"
 	agentpkg "github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/agent/event"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
+	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
+	"github.com/memohai/memoh/internal/toolapproval"
+	"github.com/memohai/memoh/internal/userinput"
 )
 
 const (
@@ -93,11 +98,320 @@ func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 	}
 
 	events := drainAgentEvents(t, eventCh)
-	if !containsStreamEvent(events, agentpkg.EventAgentStart) || !containsStreamEvent(events, agentpkg.EventAgentEnd) {
+	if !containsStreamEvent(events, agentpkg.EventStart) || !containsStreamEvent(events, agentpkg.EventEnd) {
 		t.Fatalf("events = %#v, want agent start/end", events)
 	}
 	if !containsTextDelta(events, "streamed from acp") {
 		t.Fatalf("events = %#v, want ACP stream delta", events)
+	}
+}
+
+func TestStreamChatWSPersistsACPUserInputProjectionBeforePromptReturns(t *testing.T) {
+	t.Parallel()
+
+	streamed := []event.StreamEvent{
+		{
+			Type:       event.ToolCallStart,
+			ToolCallID: "ask-1",
+			ToolName:   userinput.ToolNameAskUser,
+			Input: map[string]any{
+				"questions": []any{
+					map[string]any{
+						"id":   "q1",
+						"text": "Pick one",
+						"type": "single_choice",
+						"options": []any{
+							map[string]any{"id": "a", "label": "A"},
+						},
+					},
+				},
+			},
+		},
+		{
+			Type:        event.UserInputRequest,
+			ToolCallID:  "ask-1",
+			ToolName:    userinput.ToolNameAskUser,
+			UserInputID: "input-1",
+			ShortID:     1,
+			Status:      userinput.StatusPending,
+			Input: map[string]any{
+				"questions": []any{
+					map[string]any{
+						"id":   "q1",
+						"text": "Pick one",
+						"type": "single_choice",
+						"options": []any{
+							map[string]any{"id": "a", "label": "A"},
+						},
+					},
+				},
+			},
+			Metadata: map[string]any{
+				"user_input_id": "input-1",
+				"short_id":      1,
+				"status":        userinput.StatusPending,
+				"ui_payload": map[string]any{
+					"questions": []any{
+						map[string]any{
+							"id":   "q1",
+							"text": "Pick one",
+							"type": "single_choice",
+							"options": []any{
+								map[string]any{"id": "a", "label": "A"},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			Type:        event.UserInputRequest,
+			ToolCallID:  "ask-1",
+			ToolName:    userinput.ToolNameAskUser,
+			UserInputID: "input-1",
+			ShortID:     1,
+			Status:      userinput.StatusCanceled,
+			Input: map[string]any{
+				"questions": []any{
+					map[string]any{
+						"id":   "q1",
+						"text": "Pick one",
+						"type": "single_choice",
+						"options": []any{
+							map[string]any{"id": "a", "label": "A"},
+						},
+					},
+				},
+			},
+			Metadata: map[string]any{
+				"user_input_id": "input-1",
+				"short_id":      1,
+				"status":        userinput.StatusCanceled,
+				"ui_payload": map[string]any{
+					"questions": []any{
+						map[string]any{
+							"id":   "q1",
+							"text": "Pick one",
+							"type": "single_choice",
+							"options": []any{
+								map[string]any{"id": "a", "label": "A"},
+							},
+						},
+					},
+				},
+			},
+		},
+		{Type: event.TextDelta, Delta: "done"},
+	}
+	messages := &recordingMessageService{}
+	pool := &recordingACPPrompter{
+		result: withTranscriptOutput(acpclient.PromptResult{
+			Events: streamed,
+		}),
+		streamEvents: streamed,
+		afterEvents: func() {
+			if len(messages.persisted) != 3 {
+				t.Fatalf("persisted before ACP prompt returned = %d, want user + pending + terminal decision projections", len(messages.persisted))
+			}
+			if messages.persisted[0].Role != "user" || messages.persisted[1].Role != "assistant" || messages.persisted[2].Role != "assistant" {
+				t.Fatalf("leading persisted roles = %q, %q, %q", messages.persisted[0].Role, messages.persisted[1].Role, messages.persisted[2].Role)
+			}
+		},
+	}
+	resolver := &Resolver{
+		messageService: messages,
+		acpPool:        pool,
+		sessionService: &fakeBackgroundSessionService{
+			getFn: func(_ context.Context, sessionID string) (session.Session, error) {
+				return session.Session{
+					ID:    sessionID,
+					BotID: "bot-1",
+					Type:  session.TypeACPAgent,
+					Metadata: map[string]any{
+						"acp_agent_id": "codex",
+						"project_path": "/data/app",
+					},
+				}, nil
+			},
+		},
+		logger: slog.New(slog.DiscardHandler),
+	}
+
+	if err := resolver.StreamChatWS(
+		context.Background(),
+		conversation.ChatRequest{
+			BotID:          "bot-1",
+			SessionID:      "session-1",
+			Query:          "inspect the app",
+			CurrentChannel: "web",
+		},
+		make(chan WSStreamEvent, 8),
+		make(chan struct{}),
+	); err != nil {
+		t.Fatalf("StreamChatWS() error = %v", err)
+	}
+
+	if len(messages.persisted) != 4 {
+		t.Fatalf("persisted %d messages, want user + pending projection + terminal projection + final assistant", len(messages.persisted))
+	}
+	pendingProjection := persistedModelMessage(t, messages.persisted[1].Content)
+	pendingCalls := extractAssistantToolCallParts(pendingProjection)
+	if len(pendingCalls) != 1 || pendingCalls[0].ToolCallID != "ask-1" {
+		t.Fatalf("pending projected tool calls = %#v, want ask-1", pendingCalls)
+	}
+	if got := toolCallMetadataStatus(pendingCalls[0], "user_input"); got != userinput.StatusPending {
+		t.Fatalf("pending projection status = %q, want pending", got)
+	}
+	terminalProjection := persistedModelMessage(t, messages.persisted[2].Content)
+	terminalCalls := extractAssistantToolCallParts(terminalProjection)
+	if len(terminalCalls) != 1 || terminalCalls[0].ToolCallID != "ask-1" {
+		t.Fatalf("terminal projected tool calls = %#v, want ask-1", terminalCalls)
+	}
+	if got := toolCallMetadataStatus(terminalCalls[0], "user_input"); got != userinput.StatusCanceled {
+		t.Fatalf("terminal projection status = %q, want canceled", got)
+	}
+	final := persistedModelMessage(t, messages.persisted[3].Content)
+	if got := final.TextContent(); got != "done" {
+		t.Fatalf("final assistant text = %q, want done", got)
+	}
+	if calls := extractAssistantToolCallParts(final); len(calls) != 0 {
+		t.Fatalf("final assistant duplicated projected tool calls: %#v", calls)
+	}
+	turns := conversation.ConvertMessagesToUITurns(recordedMessages(messages.persisted))
+	if len(turns) != 2 || turns[1].Role != "assistant" {
+		t.Fatalf("restored UI turns = %#v, want user + assistant", turns)
+	}
+	toolBlocks := 0
+	for _, block := range turns[1].Messages {
+		if block.Type != conversation.UIMessageTool {
+			continue
+		}
+		toolBlocks++
+		if block.ToolCallID != "ask-1" || block.UserInput == nil || block.UserInput.Status != userinput.StatusCanceled || block.UserInput.CanRespond {
+			t.Fatalf("restored tool block = %#v, want canceled ask_user", block)
+		}
+	}
+	if toolBlocks != 1 {
+		t.Fatalf("restored tool block count = %d, want 1", toolBlocks)
+	}
+}
+
+func TestStreamChatWSPersistsACPApprovalProjectionTerminalState(t *testing.T) {
+	t.Parallel()
+
+	streamed := []event.StreamEvent{
+		{
+			Type:       event.ToolCallStart,
+			ToolCallID: "write-1",
+			ToolName:   "write",
+			Input:      map[string]any{"path": "/data/review.txt"},
+		},
+		{
+			Type:       event.ToolApprovalRequest,
+			ToolCallID: "write-1",
+			ToolName:   "write",
+			ApprovalID: "approval-1",
+			ShortID:    3,
+			Status:     toolapproval.StatusPending,
+			Input:      map[string]any{"path": "/data/review.txt"},
+		},
+		{
+			Type:       event.ToolApprovalRequest,
+			ToolCallID: "write-1",
+			ToolName:   "write",
+			ApprovalID: "approval-1",
+			ShortID:    3,
+			Status:     toolapproval.StatusApproved,
+			Input:      map[string]any{"path": "/data/review.txt"},
+		},
+		{
+			Type:       event.ToolCallEnd,
+			ToolCallID: "write-1",
+			ToolName:   "write",
+			Result:     map[string]any{"ok": true},
+		},
+		{Type: event.TextDelta, Delta: "done"},
+	}
+	messages := &recordingMessageService{}
+	pool := &recordingACPPrompter{
+		result:       withTranscriptOutput(acpclient.PromptResult{Events: streamed}),
+		streamEvents: streamed,
+	}
+	resolver := &Resolver{
+		messageService: messages,
+		acpPool:        pool,
+		sessionService: &fakeBackgroundSessionService{
+			getFn: func(_ context.Context, sessionID string) (session.Session, error) {
+				return session.Session{
+					ID:    sessionID,
+					BotID: "bot-1",
+					Type:  session.TypeACPAgent,
+					Metadata: map[string]any{
+						"acp_agent_id": "codex",
+						"project_path": "/data/app",
+					},
+				}, nil
+			},
+		},
+		logger: slog.New(slog.DiscardHandler),
+	}
+
+	if err := resolver.StreamChatWS(
+		context.Background(),
+		conversation.ChatRequest{
+			BotID:          "bot-1",
+			SessionID:      "session-1",
+			Query:          "write the review",
+			CurrentChannel: "web",
+		},
+		make(chan WSStreamEvent, 8),
+		make(chan struct{}),
+	); err != nil {
+		t.Fatalf("StreamChatWS() error = %v", err)
+	}
+
+	if len(messages.persisted) != 4 {
+		t.Fatalf("persisted %d messages, want user + pending approval projection + terminal approval projection + final assistant", len(messages.persisted))
+	}
+	pendingProjection := persistedModelMessage(t, messages.persisted[1].Content)
+	pendingCalls := extractAssistantToolCallParts(pendingProjection)
+	if len(pendingCalls) != 1 || pendingCalls[0].ToolCallID != "write-1" {
+		t.Fatalf("pending projected tool calls = %#v, want write-1", pendingCalls)
+	}
+	if got := toolCallMetadataStatus(pendingCalls[0], "approval"); got != toolapproval.StatusPending {
+		t.Fatalf("pending projection status = %q, want pending", got)
+	}
+	terminalProjection := persistedModelMessage(t, messages.persisted[2].Content)
+	terminalCalls := extractAssistantToolCallParts(terminalProjection)
+	if len(terminalCalls) != 1 || terminalCalls[0].ToolCallID != "write-1" {
+		t.Fatalf("terminal projected tool calls = %#v, want write-1", terminalCalls)
+	}
+	if got := toolCallMetadataStatus(terminalCalls[0], "approval"); got != toolapproval.StatusApproved {
+		t.Fatalf("terminal projection status = %q, want approved", got)
+	}
+	final := persistedModelMessage(t, messages.persisted[3].Content)
+	if got := final.TextContent(); got != "done" {
+		t.Fatalf("final assistant text = %q, want done", got)
+	}
+	if calls := extractAssistantToolCallParts(final); len(calls) != 0 {
+		t.Fatalf("final assistant duplicated projected approval tool calls: %#v", calls)
+	}
+	turns := conversation.ConvertMessagesToUITurns(recordedMessages(messages.persisted))
+	if len(turns) != 2 || turns[1].Role != "assistant" {
+		t.Fatalf("restored UI turns = %#v, want user + assistant", turns)
+	}
+	toolBlocks := 0
+	for _, block := range turns[1].Messages {
+		if block.Type != conversation.UIMessageTool {
+			continue
+		}
+		toolBlocks++
+		if block.ToolCallID != "write-1" || block.Approval == nil || block.Approval.Status != toolapproval.StatusApproved || block.Approval.CanApprove {
+			t.Fatalf("restored tool block = %#v, want approved write", block)
+		}
+	}
+	if toolBlocks != 1 {
+		t.Fatalf("restored tool block count = %d, want 1", toolBlocks)
 	}
 }
 
@@ -166,10 +480,10 @@ func TestPersistACPRoundUsesDedicatedSessionMetadata(t *testing.T) {
 		},
 		"codex",
 		"/data/app",
-		acpclient.PromptResult{
+		withTranscriptOutput(acpclient.PromptResult{
 			Text:       "done",
 			StopReason: "end_turn",
-		},
+		}),
 		nil,
 	)
 	if err != nil {
@@ -205,25 +519,25 @@ func TestPersistACPRoundStoresACPEventsAsNativeToolMessages(t *testing.T) {
 		conversation.ChatRequest{BotID: "bot-1", SessionID: "session-1", Query: "inspect"},
 		"codex",
 		"/data/app",
-		acpclient.PromptResult{
-			Events: []acpclient.StreamEvent{
-				{Type: acpclient.StreamEventTextDelta, Delta: "Before"},
+		withTranscriptOutput(acpclient.PromptResult{
+			Events: []event.StreamEvent{
+				{Type: event.TextDelta, Delta: "Before"},
 				{
-					Type:       acpclient.StreamEventToolCallStart,
+					Type:       event.ToolCallStart,
 					ToolCallID: "read-1",
 					ToolName:   "read",
 					Input:      map[string]any{"path": "README.md"},
 				},
 				{
-					Type:       acpclient.StreamEventToolCallEnd,
+					Type:       event.ToolCallEnd,
 					ToolCallID: "read-1",
 					ToolName:   "read",
 					Result:     map[string]any{"ok": true},
 				},
-				{Type: acpclient.StreamEventTextDelta, Delta: "After"},
+				{Type: event.TextDelta, Delta: "After"},
 			},
 			StopReason: "end_turn",
-		},
+		}),
 		nil,
 	)
 	if err != nil {
@@ -261,6 +575,46 @@ func TestPersistACPRoundStoresACPEventsAsNativeToolMessages(t *testing.T) {
 	}
 }
 
+func TestFilterACPProjectedOutputKeepsToolResults(t *testing.T) {
+	t.Parallel()
+
+	filtered := filterACPProjectedOutput([]sdk.Message{
+		{
+			Role: sdk.MessageRoleAssistant,
+			Content: []sdk.MessagePart{
+				sdk.ToolCallPart{ToolCallID: "ask-1", ToolName: "ask_user"},
+				sdk.TextPart{Text: "done"},
+			},
+		},
+		{
+			Role: sdk.MessageRoleTool,
+			Content: []sdk.MessagePart{
+				sdk.ToolResultPart{
+					ToolCallID: "ask-1",
+					ToolName:   userinput.ToolNameAskUser,
+					Result:     "answer: A",
+				},
+			},
+		},
+	}, map[string]struct{}{"ask-1": {}})
+
+	if len(filtered) != 2 {
+		t.Fatalf("filtered messages = %d, want assistant + tool result", len(filtered))
+	}
+	for _, part := range filtered[0].Content {
+		if _, ok := part.(sdk.ToolCallPart); ok {
+			t.Fatalf("projected assistant tool call was not filtered: %#v", filtered[0].Content)
+		}
+	}
+	if len(filtered[1].Content) != 1 {
+		t.Fatalf("tool message content = %#v, want one result", filtered[1].Content)
+	}
+	result, ok := filtered[1].Content[0].(sdk.ToolResultPart)
+	if !ok || result.ToolCallID != "ask-1" || result.Result != "answer: A" {
+		t.Fatalf("tool result was not preserved: %#v", filtered[1].Content[0])
+	}
+}
+
 func TestPersistACPRoundStoresACPThoughtsAsReasoningParts(t *testing.T) {
 	t.Parallel()
 
@@ -275,13 +629,13 @@ func TestPersistACPRoundStoresACPThoughtsAsReasoningParts(t *testing.T) {
 		conversation.ChatRequest{BotID: "bot-1", SessionID: "session-1", Query: "inspect"},
 		"codex",
 		"/data/app",
-		acpclient.PromptResult{
-			Events: []acpclient.StreamEvent{
-				{Type: acpclient.StreamEventReasoningDelta, Delta: "I should inspect first."},
-				{Type: acpclient.StreamEventTextDelta, Delta: "Done"},
+		withTranscriptOutput(acpclient.PromptResult{
+			Events: []event.StreamEvent{
+				{Type: event.ReasoningDelta, Delta: "I should inspect first."},
+				{Type: event.TextDelta, Delta: "Done"},
 			},
 			StopReason: "end_turn",
-		},
+		}),
 		nil,
 	)
 	if err != nil {
@@ -379,7 +733,7 @@ func TestStreamACPAgentWSFailurePersistsRoundAndSkipsMemory(t *testing.T) {
 		t.Fatalf("assistant error metadata = %#v", messages.persisted[1].Metadata)
 	}
 	events := drainAgentEvents(t, eventCh)
-	if !containsStreamEvent(events, agentpkg.EventAgentAbort) {
+	if !containsStreamEvent(events, agentpkg.EventAbort) {
 		t.Fatalf("events = %#v, want agent abort", events)
 	}
 	select {
@@ -397,9 +751,9 @@ func TestStreamACPAgentWSSuccessStoresMemory(t *testing.T) {
 	registry := memprovider.NewRegistry(slog.New(slog.DiscardHandler))
 	registry.Register(storeRoundMemoryProviderID, memory)
 	pool := &recordingACPPrompter{
-		result: acpclient.PromptResult{
-			Events: []acpclient.StreamEvent{{Type: acpclient.StreamEventTextDelta, Delta: "done"}},
-		},
+		result: withTranscriptOutput(acpclient.PromptResult{
+			Events: []event.StreamEvent{{Type: event.TextDelta, Delta: "done"}},
+		}),
 	}
 	resolver := &Resolver{
 		messageService:  messages,
@@ -477,68 +831,19 @@ func TestACPFailureResultPreservesPartialOutput(t *testing.T) {
 	}
 }
 
-func TestMapACPStandardToolCallEvent(t *testing.T) {
-	t.Parallel()
-
-	events := mapACPStreamEvent(acpclient.StreamEvent{
-		Type:       acpclient.StreamEventToolCallEnd,
-		ToolCallID: "read-1",
-		ToolName:   "read",
-		Input:      map[string]any{"path": "README.md"},
-		Result:     map[string]any{"ok": true},
-	})
-	if len(events) != 1 {
-		t.Fatalf("events len = %d, want 1", len(events))
-	}
-	if events[0].Type != agentpkg.EventToolCallEnd || events[0].ToolName != "read" || events[0].ToolCallID != "read-1" {
-		t.Fatalf("event = %#v, want standard read tool end", events[0])
-	}
-}
-
-func TestMapACPUserInputRequestEvent(t *testing.T) {
-	t.Parallel()
-
-	events := mapACPStreamEvent(acpclient.StreamEvent{
-		Type:        acpclient.StreamEventUserInputRequest,
-		ToolCallID:  "mcp-http-call-1",
-		ToolName:    "ask_user",
-		Input:       map[string]any{"questions": []any{map[string]any{"text": "Which plan?", "kind": "single_select"}}},
-		UserInputID: "input-1",
-		ShortID:     3,
-		Status:      "pending",
-		Metadata: map[string]any{
-			"user_input_id": "input-1",
-			"ui_payload":    map[string]any{"version": 2},
-		},
-	})
-	if len(events) != 1 {
-		t.Fatalf("events len = %d, want 1", len(events))
-	}
-	event := events[0]
-	if event.Type != agentpkg.EventUserInputRequest || event.ToolCallID != "mcp-http-call-1" {
-		t.Fatalf("event = %#v, want user input request on same tool call", event)
-	}
-	if event.UserInputID != "input-1" || event.ShortID != 3 || event.Status != "pending" {
-		t.Fatalf("event user input fields = %#v", event)
-	}
-	if event.Metadata["user_input_id"] != "input-1" {
-		t.Fatalf("event metadata = %#v", event.Metadata)
-	}
-}
-
 func TestACPResultOutputMessagesPersistsUserInputMetadata(t *testing.T) {
 	t.Parallel()
 
-	output := acpResultOutputMessages(acpclient.PromptResult{
-		Events: []acpclient.StreamEvent{
+	output := transcriptModelMessages(acpclient.PromptResult{
+		Events: []event.StreamEvent{
 			{
-				Type:       acpclient.StreamEventToolCallStart,
+				Type:       event.ToolCallStart,
 				ToolCallID: "mcp-http-call-1",
 				ToolName:   "ask_user",
 				Input:      map[string]any{"questions": []any{map[string]any{"text": "Which plan?", "kind": "single_select"}}},
 			},
 			{
-				Type:        acpclient.StreamEventUserInputRequest,
+				Type:        event.UserInputRequest,
 				ToolCallID:  "mcp-http-call-1",
 				ToolName:    "ask_user",
 				UserInputID: "input-1",
@@ -581,18 +886,147 @@ func TestACPResultOutputMessagesPersistsUserInputMetadata(t *testing.T) {
 	}
 }
 
-func TestMapACPReasoningDeltaEvent(t *testing.T) {
+func TestACPResultOutputMessagesPersistsToolApprovalMetadata(t *testing.T) {
 	t.Parallel()
 
-	events := mapACPStreamEvent(acpclient.StreamEvent{
-		Type:  acpclient.StreamEventReasoningDelta,
-		Delta: "I should inspect the workspace first.",
+	output := transcriptModelMessages(acpclient.PromptResult{
+		Events: []event.StreamEvent{
+			{
+				Type:       event.ToolCallStart,
+				ToolCallID: "write-1",
+				ToolName:   "write",
+				Input:      map[string]any{"path": "/data/review.txt"},
+			},
+			{
+				Type:       event.ToolApprovalRequest,
+				ToolCallID: "write-1",
+				ToolName:   "write",
+				ApprovalID: "approval-1",
+				ShortID:    4,
+				Status:     toolapproval.StatusPending,
+			},
+		},
 	})
-	if len(events) != 1 {
-		t.Fatalf("events len = %d, want 1", len(events))
+	if len(output) != 1 || output[0].Role != "assistant" {
+		t.Fatalf("output = %#v, want one assistant message", output)
 	}
-	if events[0].Type != agentpkg.EventReasoningDelta || events[0].Delta != "I should inspect the workspace first." {
-		t.Fatalf("event = %#v, want reasoning delta", events[0])
+	var parts []struct {
+		Type             string         `json:"type"`
+		ToolCallID       string         `json:"toolCallId"`
+		ProviderMetadata map[string]any `json:"providerMetadata"`
+	}
+	if err := json.Unmarshal(output[0].Content, &parts); err != nil {
+		t.Fatalf("unmarshal assistant content: %v", err)
+	}
+	if len(parts) != 1 || parts[0].Type != "tool-call" || parts[0].ToolCallID != "write-1" {
+		t.Fatalf("assistant parts = %#v", parts)
+	}
+	approval, ok := parts[0].ProviderMetadata["approval"].(map[string]any)
+	if !ok {
+		t.Fatalf("provider metadata = %#v, want approval", parts[0].ProviderMetadata)
+	}
+	if approval["approval_id"] != "approval-1" || approval["status"] != toolapproval.StatusPending {
+		t.Fatalf("approval metadata = %#v", approval)
+	}
+	if approval["short_id"] != float64(4) {
+		t.Fatalf("approval short_id = %#v, want 4", approval["short_id"])
+	}
+}
+
+func TestACPResultOutputMessagesPersistsResolvedToolApprovalMetadata(t *testing.T) {
+	t.Parallel()
+
+	output := transcriptModelMessages(acpclient.PromptResult{
+		Events: []event.StreamEvent{
+			{
+				Type:       event.ToolCallStart,
+				ToolCallID: "write-1",
+				ToolName:   "write",
+				Input:      map[string]any{"path": "/data/review.txt"},
+			},
+			{
+				Type:       event.ToolApprovalRequest,
+				ToolCallID: "write-1",
+				ToolName:   "write",
+				ApprovalID: "approval-1",
+				ShortID:    4,
+				Status:     toolapproval.StatusPending,
+			},
+			{
+				Type:       event.ToolApprovalRequest,
+				ToolCallID: "write-1",
+				ToolName:   "write",
+				ApprovalID: "approval-1",
+				ShortID:    4,
+				Status:     toolapproval.StatusApproved,
+			},
+		},
+	})
+	if len(output) != 1 || output[0].Role != "assistant" {
+		t.Fatalf("output = %#v, want one assistant message", output)
+	}
+	var parts []struct {
+		Type             string         `json:"type"`
+		ToolCallID       string         `json:"toolCallId"`
+		ProviderMetadata map[string]any `json:"providerMetadata"`
+	}
+	if err := json.Unmarshal(output[0].Content, &parts); err != nil {
+		t.Fatalf("unmarshal assistant content: %v", err)
+	}
+	if len(parts) != 1 || parts[0].Type != "tool-call" || parts[0].ToolCallID != "write-1" {
+		t.Fatalf("assistant parts = %#v", parts)
+	}
+	approval, ok := parts[0].ProviderMetadata["approval"].(map[string]any)
+	if !ok {
+		t.Fatalf("provider metadata = %#v, want approval", parts[0].ProviderMetadata)
+	}
+	if approval["approval_id"] != "approval-1" || approval["status"] != toolapproval.StatusApproved || approval["can_approve"] != false {
+		t.Fatalf("approval metadata = %#v", approval)
+	}
+}
+
+func TestACPResultOutputMessagesMergesApprovalBeforeToolStart(t *testing.T) {
+	t.Parallel()
+
+	output := transcriptModelMessages(acpclient.PromptResult{
+		Events: []event.StreamEvent{
+			{
+				Type:       event.ToolApprovalRequest,
+				ToolCallID: "exec-1",
+				ToolName:   "exec",
+				Input:      map[string]any{"command": "pwd"},
+				ApprovalID: "approval-1",
+				ShortID:    1,
+				Status:     toolapproval.StatusPending,
+			},
+			{
+				Type:       event.ToolCallStart,
+				ToolCallID: "exec-1",
+				ToolName:   "exec",
+				Input:      map[string]any{"command": "pwd"},
+			},
+		},
+	})
+	if len(output) != 1 || output[0].Role != "assistant" {
+		t.Fatalf("output = %#v, want one assistant message", output)
+	}
+	var parts []struct {
+		Type             string         `json:"type"`
+		ToolCallID       string         `json:"toolCallId"`
+		Input            map[string]any `json:"input"`
+		ProviderMetadata map[string]any `json:"providerMetadata"`
+	}
+	if err := json.Unmarshal(output[0].Content, &parts); err != nil {
+		t.Fatalf("unmarshal assistant content: %v", err)
+	}
+	if len(parts) != 1 || parts[0].Type != "tool-call" || parts[0].ToolCallID != "exec-1" {
+		t.Fatalf("assistant parts = %#v, want one merged tool-call", parts)
+	}
+	if parts[0].Input["command"] != "pwd" {
+		t.Fatalf("merged input = %#v, want pwd", parts[0].Input)
+	}
+	if _, ok := parts[0].ProviderMetadata["approval"].(map[string]any); !ok {
+		t.Fatalf("provider metadata = %#v, want approval", parts[0].ProviderMetadata)
 	}
 }
 
@@ -648,10 +1082,13 @@ func TestShouldGenerateSessionTitleAllowsACPPlaceholderTitle(t *testing.T) {
 }
 
 type recordingACPPrompter struct {
-	calls  int
-	input  acpagent.PromptInput
-	result acpclient.PromptResult
-	err    error
+	calls        int
+	input        acpagent.PromptInput
+	result       acpclient.PromptResult
+	err          error
+	onPrompt     func()
+	streamEvents []event.StreamEvent
+	afterEvents  func()
 }
 
 type storeRoundMemoryProvider struct {
@@ -694,8 +1131,20 @@ func flowTestUUID(value string) pgtype.UUID {
 func (p *recordingACPPrompter) Prompt(_ context.Context, input acpagent.PromptInput) (acpclient.PromptResult, error) {
 	p.calls++
 	p.input = input
+	if p.onPrompt != nil {
+		p.onPrompt()
+	}
 	if input.Sink != nil {
-		input.Sink.EmitACPEvent(acpclient.StreamEvent{Type: acpclient.StreamEventTextDelta, Delta: "streamed from acp"})
+		events := p.streamEvents
+		if len(events) == 0 {
+			events = []event.StreamEvent{{Type: event.TextDelta, Delta: "streamed from acp"}}
+		}
+		for _, ev := range events {
+			input.Sink.EmitStreamEvent(ev)
+		}
+	}
+	if p.afterEvents != nil {
+		p.afterEvents()
 	}
 	return p.result, p.err
 }
@@ -762,4 +1211,43 @@ func persistedModelMessage(t *testing.T, content json.RawMessage) conversation.M
 		t.Fatalf("decode persisted content: %v", err)
 	}
 	return msg
+}
+
+func toolCallMetadataStatus(call sdk.ToolCallPart, key string) string {
+	raw, ok := call.ProviderMetadata[key].(map[string]any)
+	if !ok {
+		return ""
+	}
+	status, _ := raw["status"].(string)
+	return status
+}
+
+func recordedMessages(inputs []messagepkg.PersistInput) []messagepkg.Message {
+	messages := make([]messagepkg.Message, 0, len(inputs))
+	for _, input := range inputs {
+		messages = append(messages, messagepkg.Message{
+			BotID:          input.BotID,
+			SessionID:      input.SessionID,
+			Role:           input.Role,
+			Content:        input.Content,
+			DisplayContent: input.DisplayText,
+			Metadata:       input.Metadata,
+		})
+	}
+	return messages
+}
+
+// transcriptModelMessages builds model messages from streamed ACP events.
+func transcriptModelMessages(result acpclient.PromptResult) []conversation.ModelMessage {
+	output := sdkMessagesToModelMessages(acpclient.TranscriptFromEvents(result.Events, result.Text))
+	if len(output) == 0 {
+		return []conversation.ModelMessage{{Role: "assistant", Content: conversation.NewTextContent("")}}
+	}
+	return output
+}
+
+// withTranscriptOutput fills PromptResult.Output from streamed events.
+func withTranscriptOutput(result acpclient.PromptResult) acpclient.PromptResult {
+	result.Output = acpclient.TranscriptFromEvents(result.Events, result.Text)
+	return result
 }

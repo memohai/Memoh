@@ -57,6 +57,65 @@ func (q *Queries) ApproveToolApprovalRequest(ctx context.Context, arg ApproveToo
 	return i, err
 }
 
+const cancelPendingToolApprovalsBySession = `-- name: CancelPendingToolApprovalsBySession :many
+UPDATE tool_approval_requests
+SET status = 'cancelled',
+    decision_reason = $1,
+    decided_at = now()
+WHERE bot_id = $2
+  AND session_id = $3
+  AND status = 'pending'
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
+`
+
+type CancelPendingToolApprovalsBySessionParams struct {
+	Reason    string      `json:"reason"`
+	BotID     pgtype.UUID `json:"bot_id"`
+	SessionID pgtype.UUID `json:"session_id"`
+}
+
+func (q *Queries) CancelPendingToolApprovalsBySession(ctx context.Context, arg CancelPendingToolApprovalsBySessionParams) ([]ToolApprovalRequest, error) {
+	rows, err := q.db.Query(ctx, cancelPendingToolApprovalsBySession, arg.Reason, arg.BotID, arg.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ToolApprovalRequest
+	for rows.Next() {
+		var i ToolApprovalRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.RouteID,
+			&i.ChannelIdentityID,
+			&i.ToolCallID,
+			&i.ToolName,
+			&i.ToolInput,
+			&i.ShortID,
+			&i.Status,
+			&i.DecisionReason,
+			&i.RequestedByChannelIdentityID,
+			&i.DecidedByChannelIdentityID,
+			&i.RequestedMessageID,
+			&i.PromptMessageID,
+			&i.PromptExternalMessageID,
+			&i.SourcePlatform,
+			&i.ReplyTarget,
+			&i.ConversationType,
+			&i.CreatedAt,
+			&i.DecidedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createToolApprovalRequest = `-- name: CreateToolApprovalRequest :one
 INSERT INTO tool_approval_requests (
   bot_id,
@@ -92,7 +151,10 @@ INSERT INTO tool_approval_requests (
   $12
 )
 ON CONFLICT (session_id, tool_call_id) DO UPDATE
-SET tool_input = EXCLUDED.tool_input
+SET tool_input = CASE
+  WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.tool_input
+  ELSE tool_approval_requests.tool_input
+END
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
 `
 

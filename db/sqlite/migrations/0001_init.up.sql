@@ -99,6 +99,17 @@ CREATE TABLE IF NOT EXISTS search_providers (
   CONSTRAINT search_providers_name_unique UNIQUE (name)
 );
 
+CREATE TABLE IF NOT EXISTS fetch_providers (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  config TEXT NOT NULL DEFAULT '{}',
+  enable INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fetch_providers_name_unique UNIQUE (name)
+);
+
 CREATE TABLE IF NOT EXISTS models (
   id TEXT PRIMARY KEY,
   model_id TEXT NOT NULL,
@@ -153,6 +164,7 @@ CREATE TABLE IF NOT EXISTS bots (
   reasoning_effort TEXT NOT NULL DEFAULT 'medium',
   chat_model_id TEXT REFERENCES models(id) ON DELETE SET NULL,
   search_provider_id TEXT REFERENCES search_providers(id) ON DELETE SET NULL,
+  fetch_provider_id TEXT REFERENCES fetch_providers(id) ON DELETE SET NULL,
   memory_provider_id TEXT REFERENCES memory_providers(id) ON DELETE SET NULL,
   heartbeat_enabled INTEGER NOT NULL DEFAULT 0,
   heartbeat_interval INTEGER NOT NULL DEFAULT 1440,
@@ -180,7 +192,7 @@ CREATE TABLE IF NOT EXISTS bots (
   CONSTRAINT bots_type_check CHECK (type IN ('personal', 'public')),
   CONSTRAINT bots_status_check CHECK (status IN ('creating', 'ready', 'deleting')),
   CONSTRAINT bots_acl_default_effect_check CHECK (acl_default_effect IN ('allow', 'deny')),
-  CONSTRAINT bots_reasoning_effort_check CHECK (reasoning_effort IN ('none', 'low', 'medium', 'high', 'xhigh')),
+  -- reasoning_effort is a free-form capability-driven tier string; no CHECK constraint (see 0018).
   CONSTRAINT bots_name_format_check CHECK (
     name GLOB '[a-z0-9]*'
     AND name NOT GLOB '*[^a-z0-9-]*'

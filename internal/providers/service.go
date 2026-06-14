@@ -304,59 +304,74 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 	if err != nil {
 		return nil, fmt.Errorf("get provider: %w", err)
 	}
-	if models.ClientType(provider.ClientType) == models.ClientTypeGitHubCopilot {
-		creds, err := s.ResolveModelCredentials(ctx, provider)
-		if err != nil {
-			return nil, err
-		}
-		sdkProvider := memohcopilot.NewProvider(creds.APIKey, nil)
-		if result := sdkProvider.Test(ctx); result.Status != sdk.ProviderStatusOK {
-			return nil, fmt.Errorf("github copilot provider test failed: %s", result.Message)
-		}
 
-		catalog := githubcopilot.Catalog()
-		remoteModels := make([]RemoteModel, 0, len(catalog))
-		for _, model := range catalog {
-			remoteModels = append(remoteModels, RemoteModel{
-				ID:      model.ID,
-				Name:    model.DisplayName,
-				Object:  "model",
-				OwnedBy: "github-copilot",
-				Type:    "chat",
-				Compatibilities: []string{
-					models.CompatVision,
-					models.CompatToolCall,
-					models.CompatReasoning,
-				},
-			})
-		}
-		return remoteModels, nil
+	var remoteModels []RemoteModel
+	switch {
+	case models.ClientType(provider.ClientType) == models.ClientTypeGitHubCopilot:
+		remoteModels, err = s.fetchGitHubCopilotModels(ctx, provider)
+	case supportsOAuth(provider):
+		remoteModels = fetchCodexCatalogModels()
+	default:
+		remoteModels, err = s.fetchRemoteModelsViaSDK(ctx, provider)
 	}
-	if supportsOAuth(provider) {
-		catalog := openaicodex.Catalog()
-		remoteModels := make([]RemoteModel, 0, len(catalog))
-		for _, model := range catalog {
-			compatibilities := make([]string, 0, 2)
-			if model.SupportsToolCall {
-				compatibilities = append(compatibilities, models.CompatToolCall)
-			}
-			if model.SupportsReasoning {
-				compatibilities = append(compatibilities, models.CompatReasoning)
-			}
-			remoteModels = append(remoteModels, RemoteModel{
-				ID:               model.ID,
-				Name:             model.DisplayName,
-				Object:           "model",
-				OwnedBy:          "openai-codex",
-				Type:             "chat",
-				Compatibilities:  compatibilities,
-				ReasoningEfforts: append([]string(nil), model.ReasoningEfforts...),
-			})
-		}
-		return remoteModels, nil
+	if err != nil {
+		return nil, err
 	}
 
-	return s.fetchRemoteModelsViaSDK(ctx, provider)
+	return remoteModels, nil
+}
+
+func (s *Service) fetchGitHubCopilotModels(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, error) {
+	creds, err := s.ResolveModelCredentials(ctx, provider)
+	if err != nil {
+		return nil, err
+	}
+	sdkProvider := memohcopilot.NewProvider(creds.APIKey, nil)
+	if result := sdkProvider.Test(ctx); result.Status != sdk.ProviderStatusOK {
+		return nil, fmt.Errorf("github copilot provider test failed: %s", result.Message)
+	}
+
+	catalog := githubcopilot.Catalog()
+	remoteModels := make([]RemoteModel, 0, len(catalog))
+	for _, model := range catalog {
+		remoteModels = append(remoteModels, RemoteModel{
+			ID:      model.ID,
+			Name:    model.DisplayName,
+			Object:  "model",
+			OwnedBy: "github-copilot",
+			Type:    "chat",
+			Compatibilities: []string{
+				models.CompatVision,
+				models.CompatToolCall,
+				models.CompatReasoning,
+			},
+		})
+	}
+	return remoteModels, nil
+}
+
+func fetchCodexCatalogModels() []RemoteModel {
+	catalog := openaicodex.Catalog()
+	remoteModels := make([]RemoteModel, 0, len(catalog))
+	for _, model := range catalog {
+		compatibilities := make([]string, 0, 2)
+		if model.SupportsToolCall {
+			compatibilities = append(compatibilities, models.CompatToolCall)
+		}
+		if model.SupportsReasoning {
+			compatibilities = append(compatibilities, models.CompatReasoning)
+		}
+		remoteModels = append(remoteModels, RemoteModel{
+			ID:               model.ID,
+			Name:             model.DisplayName,
+			Object:           "model",
+			OwnedBy:          "openai-codex",
+			Type:             "chat",
+			Compatibilities:  compatibilities,
+			ReasoningEfforts: append([]string(nil), model.ReasoningEfforts...),
+		})
+	}
+	return remoteModels
 }
 
 func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, error) {

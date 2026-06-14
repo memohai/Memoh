@@ -1,123 +1,105 @@
 <template>
-  <MainLayout>
-    <template #sidebar>
-      <SettingsSidebar />
-    </template>
-    <template #main>
-      <SidebarInset class="flex flex-col overflow-hidden">
-        <!-- Universal Settings Breadcrumb per Figma 5:937 & 5:807 -->
-        <header
-          v-if="breadcrumbs.length > 0"
-          class="h-10 flex items-center px-6 shrink-0 border-b border-border/40"
+  <!-- Opaque bg-background: this view is rendered into App.vue's transparent
+       fixed overlay, so it must paint its own backdrop to cover the persistent
+       chat behind it. (The overlay wrapper is intentionally transparent so the
+       chat — not a black layer — shows through during this view's slide/fade.) -->
+  <div class="flex h-dvh flex-col overflow-hidden bg-background">
+    <div class="min-h-0 flex-1">
+      <!-- Whole settings view (sidebar + content) slides in from the right on open,
+           faster slide-out on leave; navigation is held until the leave plays. -->
+      <Transition
+        appear
+        enter-active-class="transition-all duration-[90ms] ease-out"
+        enter-from-class="opacity-0 translate-x-2.5"
+        leave-active-class="transition-all duration-[40ms] ease-in"
+        leave-to-class="opacity-0 translate-x-2.5"
+        @after-leave="onAfterLeave"
+      >
+        <div
+          v-if="show"
+          class="h-full"
         >
-          <Breadcrumb class="w-full">
-            <BreadcrumbList class="gap-1.5 flex-nowrap">
-              <template
-                v-for="(item, index) in breadcrumbs"
-                :key="index"
-              >
-                <BreadcrumbItem
-                  v-if="!item.isLast"
-                  class="shrink-0"
-                >
-                  <BreadcrumbLink
-                    as-child
-                    class="text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <router-link :to="item.to">
-                      <span class="text-[11px] font-medium leading-none">{{ item.label }}</span>
-                    </router-link>
-                  </BreadcrumbLink>
-                </BreadcrumbItem>
-                <BreadcrumbSeparator
-                  v-if="!item.isLast"
-                  class="text-muted-foreground/50 shrink-0 select-none"
-                >
-                  <span class="text-[10px] font-normal">/</span>
-                </BreadcrumbSeparator>
-                <BreadcrumbItem
-                  v-else
-                  class="min-w-0 flex-1"
-                >
-                  <BreadcrumbPage class="text-foreground text-[11px] font-medium truncate leading-none">
-                    {{ item.label }}
-                  </BreadcrumbPage>
-                </BreadcrumbItem>
-              </template>
-            </BreadcrumbList>
-          </Breadcrumb>
-        </header>
-
-        <section class="flex-1 relative min-h-0 overflow-y-auto">
-          <router-view v-slot="{ Component }">
-            <KeepAlive>
-              <component :is="Component" />
-            </KeepAlive>
-          </router-view>
-        </section>
-      </SidebarInset>
-    </template>
-  </MainLayout>
+          <MainLayout>
+            <template #sidebar>
+              <!-- De-nest: inside a single bot, its own nav (rendered by
+                   bots/detail.vue) takes over this column, so the settings nav
+                   steps aside instead of stacking a second sidebar beside it.
+                   The sidebar is h-dvh, so its right border now runs unbroken from
+                   the very top — there's no full-width topbar cutting across it.
+                   The macOS traffic lights are cleared by the sidebar's own top
+                   drag row (mac-traffic-reserve), mirroring the chat SideBar. -->
+              <SettingsSidebar
+                v-if="!isBotDetail"
+                :mac-traffic-reserve="macTrafficReserve"
+              />
+            </template>
+            <template #main>
+              <SidebarInset class="flex flex-col overflow-hidden">
+                <!-- Top drag strip over the content pane only (not full-width), so
+                     the window stays draggable up here while the sidebar's vertical
+                     edge reads as the single continuous divider. No border/fill —
+                     it shares --background with the content below. Skipped for bot
+                     detail: that route renders its OWN full-height sidebar inside
+                     #main (MasterDetailSidebarLayout), so a strip here would sit
+                     ON TOP of it and push its divider down — bot detail handles its
+                     own top drag/traffic clearance instead. -->
+                <div
+                  v-if="desktopShell && !isBotDetail"
+                  class="h-8 shrink-0 [-webkit-app-region:drag]"
+                />
+                <section class="flex-1 relative min-h-0 overflow-y-auto [scrollbar-gutter:stable]">
+                  <router-view v-slot="{ Component }">
+                    <KeepAlive>
+                      <component :is="Component" />
+                    </KeepAlive>
+                  </router-view>
+                </section>
+              </SidebarInset>
+            </template>
+          </MainLayout>
+        </div>
+      </Transition>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { computed, toValue } from 'vue'
-import { useRoute } from 'vue-router'
-import { useQuery } from '@pinia/colada'
-import { getBotsById } from '@memohai/sdk'
-import {
-  SidebarInset,
-  Breadcrumb,
-  BreadcrumbList,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from '@memohai/ui'
+import { computed, inject, ref } from 'vue'
+import { onBeforeRouteLeave, useRoute } from 'vue-router'
+import { SidebarInset } from '@memohai/ui'
 import MainLayout from '@/layout/main-layout/index.vue'
 import SettingsSidebar from '@/components/settings-sidebar/index.vue'
+import { DesktopShellKey } from '@/lib/desktop-shell'
+
+const desktopShell = inject(DesktopShellKey, false)
+
+// macOS desktop only: the settings sidebar now runs to the very top of the window
+// (the old full-width topbar is gone), so its header must clear the traffic lights.
+// Mirrors main-section's computation.
+const macTrafficReserve = computed(() =>
+  desktopShell
+  && typeof navigator !== 'undefined'
+  && navigator.platform.toLowerCase().includes('mac'),
+)
 
 const route = useRoute()
+// On a single bot's detail page the bot's own nav owns the left column, so we
+// drop the settings nav here to avoid two stacked sidebars (the "three-column"
+// nesting). Every other settings route keeps the settings nav.
+const isBotDetail = computed(() => route.name === 'bot-detail')
 
-// Fetch bot data in the layout to ensure reactive breadcrumb updates for bot-detail
-const { data: bot } = useQuery({
-  key: () => ['bot', route.params.botName as string],
-  query: async () => {
-    const { data } = await getBotsById({
-      path: { id: route.params.botName as string },
-      throwOnError: true,
-    })
-    return data
-  },
-  enabled: () => route.name === 'bot-detail' && !!route.params.botName,
+// Page transition: slide-in from the right on open, faster slide-out on leave.
+// We hold the navigation until the leave animation has played.
+const show = ref(true)
+let pendingNext: (() => void) | null = null
+
+onBeforeRouteLeave((_to, _from, next) => {
+  show.value = false
+  pendingNext = next
 })
 
-const breadcrumbs = computed(() => {
-  const items = []
-  const matched = route.matched
-  for (const m of matched) {
-    if (m.meta && m.meta.breadcrumb) {
-      let label = ''
-      // Special case for bot-detail to use the reactive display name
-      if (m.name === 'bot-detail' && bot.value?.display_name) {
-        label = bot.value.display_name
-      } else {
-        const b = m.meta.breadcrumb
-        label = typeof b === 'function' ? b(route) : toValue(b)
-      }
-
-      if (label) {
-        items.push({
-          label,
-          to: m.name ? { name: m.name } : m.path,
-          isLast: false,
-        })
-      }
-    }
-  }
-  if (items.length > 0) {
-    items[items.length - 1].isLast = true
-  }
-  return items
-})
+function onAfterLeave(): void {
+  pendingNext?.()
+  pendingNext = null
+}
 </script>

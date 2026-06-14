@@ -1,5 +1,12 @@
 {
   "common": {
+    "toast": {
+      "notice": "提示",
+      "success": "成功",
+      "error": "错误",
+      "warning": "警告",
+      "info": "提示"
+    },
     "confirm": "确认",
     "cancel": "取消",
     "back": "返回",
@@ -24,6 +31,7 @@
     "export": "导出",
     "copy": "复制",
     "copied": "已复制到剪贴板",
+    "copyFailed": "复制失败",
     "tabAddSingle": "添加单个",
     "tabImportJson": "导入 JSON",
     "copyAsJson": "复制为 JSON",
@@ -95,9 +103,14 @@
     "settings": "系统设置",
     "webSearch": "搜索引擎",
     "memory": "记忆管理",
+    "group": {
+      "integrations": "集成",
+      "account": "账户"
+    },
     "network": "网络配置",
     "speech": "语音合成",
     "transcription": "语音转写",
+    "voice": "语音",
     "email": "邮件服务",
     "profile": "个人资料",
     "home": "首页",
@@ -107,7 +120,9 @@
     "people": "成员",
     "appearance": "外观定制",
     "supermarket": "应用市场",
-    "about": "关于"
+    "about": "关于",
+    "switchBot": "切换智能体",
+    "manageBots": "管理智能体"
   },
   "breadcrumb": {
     "main": "首页"
@@ -148,6 +163,8 @@
     "profileUpdated": "个人资料已更新",
     "profileUpdateFailed": "个人资料更新失败",
     "changePassword": "修改密码",
+    "accountSection": "账户",
+    "sessionSection": "会话",
     "currentPassword": "当前密码",
     "newPassword": "新密码",
     "confirmPassword": "确认新密码",
@@ -164,6 +181,7 @@
     "themePlaceholder": "选择主题",
     "themeLight": "浅色",
     "themeDark": "深色",
+    "themeSystem": "跟随系统",
     "appearance": {
       "title": "外观定制",
       "description": "个性化你的界面：语言、主题及全局配色方案。",
@@ -171,8 +189,17 @@
       "interfaceDescription": "这些设置将立即生效并保存在本地设备上。",
       "colorScheme": "配色方案",
       "colorSchemeDescription": "为品牌、状态和 UI 元素选择一套调色盘。",
+      "typography": "字体与字号",
+      "uiFontFamily": "界面字体",
+      "uiFontFamilyDescription": "替换默认界面字体",
+      "uiFontSize": "界面字号",
+      "uiFontSizeDescription": "缩放界面文字和控件",
+      "codeFontFamily": "代码字体",
+      "codeFontFamilyDescription": "替换默认代码字体",
+      "codeFontSize": "代码字号",
+      "codeFontSizeDescription": "应用于代码编辑器、代码块与终端",
       "colorSchemes": {
-        "memoh": "Memoh (默认)",
+        "memoh": "Memoh",
         "ocean": "海洋",
         "forest": "森林",
         "rose": "玫瑰",
@@ -194,15 +221,9 @@
   },
   "people": {
     "title": "成员",
-    "subtitle": "工作区成员",
     "members": "成员列表",
     "member": "成员",
-    "memberCount": "共 {count} 位成员",
-    "totalMembers": "总数",
-    "activeMembers": "已启用",
-    "admins": "管理员",
     "newMember": "新建成员",
-    "newMemberDescription": "创建一个工作区登录账号。",
     "memberName": "名称",
     "displayNamePlaceholder": "可选显示名称",
     "usernamePlaceholder": "用户名",
@@ -239,16 +260,25 @@
     "empty": "暂无成员"
   },
   "about": {
+    "tagline": "开源多智能体平台",
+    "description": "多个 AI Agent，各自拥有独立的电脑与长期记忆。",
+    "updatesSection": "更新",
+    "currentVersion": "当前版本 v{version}",
+    "checkHint": "前往 GitHub 检查最新版本。",
     "checkForUpdates": "检查更新",
-    "checking": "正在检查更新...",
+    "checking": "检查中…",
     "upToDate": "已是最新版本",
     "newVersionAvailable": "发现新版本: v{version}",
+    "newVersionTitle": "新版本 v{version} 已发布",
+    "newVersionDesc": "GitHub 上已有更新版本",
+    "whatsChanged": "更新内容",
     "releaseNotes": "更新日志",
     "viewOnGitHub": "在 GitHub 上查看",
     "checkFailed": "检查更新失败",
     "github": "GitHub",
     "docs": "技术文档",
-    "feedback": "问题反馈"
+    "feedback": "问题反馈",
+    "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
     "greeting": "你好！有什么我可以帮你的吗？",
@@ -259,14 +289,23 @@
     "thinking": "思考中…",
     "thinkingInProgress": "思考中…",
     "thinkingDone": "思考完成",
+    "process": {
+      "browse": "浏览 {count} 个文件",
+      "edit": "修改 {count} 个文件",
+      "run": "运行 {count} 条命令",
+      "steps": "{count} 步",
+      "thought": "已思考",
+      "thoughtBriefly": "略作思考",
+      "thoughtSeconds": "已思考 {seconds} 秒"
+    },
     "currentBot": "当前 Bot",
     "inputPlaceholder": "输入你的问题…",
     "readonlyHint": "该聊天为只读",
     "readonlyPlaceholder": "该聊天为只读，无法发送消息",
     "send": "发送",
     "sendFailed": "消息发送失败",
-    "timelineAnswer": "回复",
-    "timelineMessage": "消息",
+    "minimapLabel": "对话导航",
+    "minimapEarlier": "更早的消息加载后显示",
     "startChat": "开始聊天",
     "noBot": "暂无可用 Bot，请先创建 Bot",
     "newChat": "开启新对话",
@@ -279,7 +318,14 @@
       "failed": "后台任务失败",
       "stalled": "后台任务需要处理",
       "killed": "后台任务已终止",
-      "updated": "后台任务已更新"
+      "updated": "后台任务已更新",
+      "pillRunning": "{count} 个运行中",
+      "pillDone": "{count} 个已完成",
+      "pillRunningAria": "{count} 个后台任务运行中，滚动查看",
+      "pillDoneAria": "{count} 个后台任务已完成"
+    },
+    "rail": {
+      "thinking": "{count} 次思考"
     },
     "readonly": "只读",
     "replyTo": "回复 {sender}",
@@ -316,6 +362,7 @@
       "transcribe_audio": "转录音频",
       "generate_image": "生成图像",
       "spawn": "派遣 {count} 个子代理",
+      "clustered": "{count} 次工具调用",
       "use_skill": "使用技能",
       "browser_action": "浏览器 {action}",
       "browser_observe": "观察浏览器 {action}",
@@ -444,12 +491,14 @@
     "reasoningOff": "关闭",
     "reasoningAdaptive": "自适应",
     "reasoningNone": "无",
+    "reasoningMinimal": "极简",
     "reasoningLow": "低",
     "reasoningMedium": "中",
     "reasoningHigh": "高",
     "reasoningXHigh": "极高",
+    "reasoningMax": "最大",
     "sessions": "会话",
-    "newSession": "新建会话",
+    "newSession": "新对话",
     "deleteSession": "删除会话",
     "deleteSessionConfirm": "确定要删除此会话吗？",
     "renameSession": "重命名会话",
@@ -459,6 +508,9 @@
     "sessionTitle": "会话",
     "untitledSession": "未命名会话",
     "noSessions": "暂无会话",
+    "recents": "最近",
+    "quickActions": "快捷操作",
+    "scheduledJobs": "定时任务",
     "sessionTypeHeartbeat": "心跳",
     "sessionTypeSchedule": "定时任务",
     "sessionTypeSubagent": "子智能体",
@@ -473,8 +525,9 @@
     "noModels": "暂无可用模型",
     "acpAttachmentsUnsupported": "ACP 会话暂不支持附件。",
     "sessionFilterAll": "全部",
-    "sessionSourcePrefix": "来自：",
     "searchSessionPlaceholder": "搜索",
+    "searchSessions": "搜索对话记录",
+    "noSearchResults": "没有匹配的对话",
     "heartbeatTrigger": "心跳触发",
     "heartbeatTime": "触发时间",
     "heartbeatInterval": "间隔",
@@ -498,25 +551,28 @@
     "compactNow": "立即压缩",
     "compactSuccess": "上下文压缩完成",
     "compactFailed": "上下文压缩失败",
-    "activityTabSessions": "会话",
-    "activityTabFiles": "文件",
-    "activityTabTerminal": "终端",
-    "activityTabSkills": "技能",
-    "activityTabMcp": "MCP",
-    "activityTabSchedule": "定时任务",
-    "skillsEmpty": "暂无技能",
-    "untitledSkill": "未命名技能",
-    "mcpEmpty": "暂无 MCP 连接",
-    "untitledMcp": "未命名连接",
-    "mcpInactive": "未激活",
-    "mcpOpenInSettings": "在设置中查看",
-    "mcpManageInSettings": "管理 MCP",
-    "scheduleEmpty": "暂无定时任务",
-    "untitledSchedule": "未命名任务",
-    "scheduleManageInSettings": "管理定时任务",
-    "emptyWorkspace": "暂无打开的标签页",
-    "emptyWorkspaceHint": "从左侧打开会话或文件",
+    "sessionStreaming": "生成中",
+    "topBar": {
+      "hideWorkbench": "隐藏侧边栏",
+      "showWorkbench": "显示侧边栏",
+      "goBack": "后退",
+      "goForward": "前进"
+    },
+    "activityBar": {
+      "sessions": "对话",
+      "files": "文件",
+      "search": "搜索"
+    },
+    "workspaceEmpty": "暂无打开的标签页",
+    "workspaceEmptyHint": "从侧栏选择会话，或打开文件、终端、浏览器",
+    "tabMenu": {
+      "close": "关闭",
+      "closeOthers": "关闭其他",
+      "closeAll": "关闭全部"
+    },
     "tabClose": "关闭标签页",
+    "openPreviewToSide": "在侧边打开预览",
+    "previewTab": "预览：{name}",
     "sessionInfoRingAria": "会话信息",
     "sessionInfoTooltipHint": "悬停查看会话信息",
     "sessionActions": "会话操作",
@@ -525,8 +581,7 @@
       "openBrowser": "打开浏览器",
       "openDisplay": "打开桌面窗口",
       "menu": "标签页操作",
-      "closeAll": "关闭全部",
-      "closeFinished": "关闭已保存和结束的"
+      "closeAll": "关闭全部"
     },
     "browser": {
       "title": "浏览器",
@@ -642,6 +697,7 @@
   "provider": {
     "add": "添加服务商",
     "addBtn": "添加",
+    "searchPlaceholder": "搜索服务商…",
     "preset": "预设",
     "presetPlaceholder": "选择预设或自定义服务商",
     "presetSearchPlaceholder": "搜索预设…",
@@ -656,7 +712,7 @@
     "deleteConfirm": "确定要删除这个服务商吗？",
     "saveChanges": "保存修改",
     "emptyTitle": "暂无服务商",
-    "emptyDescription": "请先添加模型服务商，才能配置模型",
+    "emptyDescription": "添加服务商以接入模型服务，供 Bot 使用。",
     "testConnection": "测试连接",
     "reachable": "可连接",
     "unreachable": "不可连接",
@@ -714,12 +770,18 @@
     }
   },
   "webSearch": {
-    "title": "搜索提供方",
-    "add": "添加搜索提供方",
+    "title": "网页搜索",
+    "add": "添加",
+    "addFetch": "添加抓取提供方",
     "empty": "暂无搜索提供方",
-    "provider": "提供方类型",
+    "emptyFetch": "暂无抓取提供方",
+    "provider": "类型",
+    "fetchProvider": "抓取提供方类型",
+    "searchProviders": "搜索",
+    "fetchProviders": "抓取",
     "selectHint": "请选择或新建一个搜索提供方",
     "unsupportedProvider": "该提供方暂未实现配置面板",
+    "nativeManaged": "Native 由 Memoh 管理，并始终保持启用。",
     "saveSuccess": "搜索提供方配置已保存",
     "deleteSuccess": "搜索提供方配置已删除",
     "deleteFailed": "删除搜索提供方配置失败",
@@ -727,7 +789,10 @@
     "emptyTitle": "暂无搜索提供方",
     "emptyDescription": "请先添加搜索提供方，才能配置搜索功能",
     "deleteConfirm": "确定删除该搜索提供方？删除后无法恢复。",
+    "deleteFetchConfirm": "确定删除该抓取提供方？删除后无法恢复。",
     "providerNames": {
+      "native": "Native",
+      "cloudflare_markdown": "Cloudflare Markdown",
       "brave": "Brave",
       "bing": "Bing",
       "google": "Google",
@@ -740,6 +805,10 @@
       "bocha": "博查",
       "duckduckgo": "DuckDuckGo",
       "yandex": "Yandex"
+    },
+    "fetchProviderNames": {
+      "jina": "Jina Reader",
+      "cloudflare_markdown": "Cloudflare Markdown"
     }
   },
   "memory": {
@@ -758,6 +827,10 @@
     "namePlaceholder": "输入提供方名称",
     "builtinMode": "内置记忆模式",
     "builtinModeDescription": "选择内置记忆提供方为 Bot 存储和检索记忆的方式。",
+    "modeLabel": "记忆方式",
+    "modeHint": "决定智能体如何存取长期记忆。",
+    "advanced": "高级",
+    "advancedHint": "面向进阶场景的自定义记忆后端。",
     "sparseSectionTitle": "稀疏检索",
     "denseSectionTitle": "稠密检索",
     "sparseInstallHint": "Sparse 模式依赖可选的 sparse 服务。安装时请启用 sparse 选项，或在 Docker Compose 中启动 sparse profile。",
@@ -776,13 +849,13 @@
     "collectionUnavailable": "不可用",
     "modeNames": {
       "off": "关闭",
-      "sparse": "稀疏",
-      "dense": "稠密"
+      "sparse": "关键词",
+      "dense": "语义"
     },
     "modeDescriptions": {
-      "off": "保持当前基于文件的内置记忆行为，不启用 Qdrant 检索。",
-      "sparse": "使用本地 OpenSearch 稀疏模型，并通过 Qdrant 进行记忆索引与检索。",
-      "dense": "使用所选 embedding 模型 API 生成 dense 向量，并直接写入/检索 Qdrant。"
+      "off": "不建立长期记忆索引，仅保留基础的文件记忆。",
+      "sparse": "用关键词匹配检索记忆，依赖可选的稀疏检索服务。",
+      "dense": "用向量模型把记忆转成向量，按语义相近度检索。"
     },
     "providerNames": {
       "builtin": "内置",
@@ -805,6 +878,14 @@
     "actionSuccess": "操作已完成",
     "name": "名称",
     "namePlaceholder": "输入配置名称"
+  },
+  "voice": {
+    "title": "语音",
+    "speakTitle": "朗读",
+    "speakHint": "把回复读成语音。",
+    "listenTitle": "聆听",
+    "listenHint": "把语音转成文字。",
+    "empty": "暂无可用后端，添加具备语音能力的服务商即可。"
   },
   "speech": {
     "title": "语音合成",
@@ -1310,8 +1391,6 @@
       "importFailed": "导入 Bot 备份失败"
     },
     "checks": {
-      "lastSync": "上次同步",
-      "statusTitle": "健康检查",
       "status": {
         "issue": "需要关注",
         "stable": "运行正常",
@@ -1320,20 +1399,14 @@
         "error": "错误",
         "unknown": "未知"
       },
-      "vitalityTitle": "活跃度",
-      "vitalityUnit": "次事件",
       "diagnosticTitle": "诊断信息",
       "diagnosticSubtitle": "实时系统诊断指标。",
       "expandAll": "全部展开",
       "collapse": "收起",
-      "title": "运行时检查",
-      "subtitle": "查看当前健康状态与异常详情。",
-      "ok": "无异常",
       "hasIssue": "存在异常",
       "issueCount": "{count} 个异常",
       "empty": "暂无检查项",
       "loadFailed": "加载运行时检查失败",
-      "actions": {},
       "titles": {
         "containerInit": "容器初始化",
         "containerRecord": "容器记录",
@@ -1351,8 +1424,36 @@
         "botDelete": "Bot 删除"
       }
     },
+    "overview": {
+      "issueHint": "查看诊断",
+      "platformsTitle": "平台",
+      "platformsEmpty": "还没连接任何平台",
+      "platformsEmptyHint": "连接一个平台，开始和这个 bot 对话",
+      "connectAction": "去连接",
+      "configTitle": "配置",
+      "modelLabel": "模型",
+      "modelNone": "未选择模型",
+      "reasoningBadge": "推理",
+      "memoryLabel": "记忆",
+      "memoryCount": "已索引 {count} 条记忆",
+      "memoryNone": "关闭",
+      "usageTitle": "用量 · 近 30 天",
+      "usageTotal": "总计",
+      "usageInput": "输入",
+      "usageOutput": "输出",
+      "usageCacheHit": "缓存命中",
+      "usageNone": "暂无用量",
+      "runtimeTitle": "运行状态",
+      "runtimeSampledAt": "更新于 {time}",
+      "runtimeStopped": "容器未运行 — 启动后即可查看实时资源占用。",
+      "runtimeNoMetrics": "暂时无法获取资源占用。",
+      "remindersTitle": "待处理",
+      "reminderModelTitle": "选择一个模型",
+      "reminderModelHint": "这个 bot 需要先设置模型才能回复。",
+      "reminderAction": "去设置"
+    },
     "tabs": {
-      "overviewSubtitle": "系统健康概览与核心指标。",
+      "overviewSubtitle": "这个 bot 此刻活在哪、怎么配的",
       "overview": "概览",
       "general": "通用",
       "desktop": "桌面",
@@ -1674,6 +1775,8 @@
       "titleModelPlaceholder": "未启用（不自动生成标题）",
       "searchProvider": "搜索提供方",
       "searchProviderPlaceholder": "选择搜索提供方",
+      "fetchProvider": "网页抓取提供方",
+      "fetchProviderPlaceholder": "选择网页抓取提供方",
       "memoryProvider": "记忆提供方",
       "memoryProviderPlaceholder": "选择记忆提供方（为空则禁用）",
       "memoryModePreview": "当前内置模式：{mode}",
@@ -2085,10 +2188,16 @@
       "compactDecayDate": "以此日期之前的记忆会被优先压缩",
       "compactSuccess": "记忆压缩成功",
       "compactFailed": "记忆压缩失败",
+      "compactUnsupported": "当前记忆提供方不支持语义记忆压缩。",
+      "compactChecking": "正在检查记忆压缩支持状态...",
+      "compactStatusUnavailable": "无法检查记忆压缩支持状态。",
+      "compactNoMemories": "没有可压缩的记忆",
       "selectConversation": "选择对话",
       "fromConversation": "从已有对话创建",
       "noConversations": "暂无历史对话",
       "idCopied": "ID 已复制",
+      "copyFailed": "复制失败",
+      "historyLoadFailed": "加载历史消息失败",
       "deleteConfirm": "确定要删除这条记忆吗？此操作无法撤销。"
     },
     "plugins": {
@@ -2342,6 +2451,10 @@
   },
   "usage": {
     "title": "用量统计",
+    "filters": "筛选",
+    "overview": "概览",
+    "customRange": "自定义范围",
+    "customRangePlaceholder": "选择日期范围",
     "selectBot": "选择 Bot",
     "selectBotPlaceholder": "选择一个 Bot 查看用量",
     "timeRange": "时间范围",

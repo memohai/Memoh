@@ -5,6 +5,7 @@ import { reactiveOmit } from '@vueuse/core'
 import {
   DropdownMenuSeparator,
 } from 'reka-ui'
+import { menuSeparatorClass } from '#/lib/menu'
 import { cn } from '#/lib/utils'
 
 const props = defineProps<DropdownMenuSeparatorProps & {
@@ -18,6 +19,6 @@ const delegatedProps = reactiveOmit(props, 'class')
   <DropdownMenuSeparator
     data-slot="dropdown-menu-separator"
     v-bind="delegatedProps"
-    :class="cn('bg-border -mx-1 my-1 h-px', props.class)"
+    :class="cn(menuSeparatorClass, props.class)"
   />
 </template>

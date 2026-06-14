@@ -29,7 +29,7 @@ driver = "postgres"
 # production Docker Compose image.
 backend = "containerd"
 # registry = "memoh.cn"  # Uncomment for China mainland mirror
-default_image = "debian:bookworm-slim"
+default_image = "memohai/workspace:debian"
 image_pull_policy = "if_not_present"
 # containerd snapshotter and CNI settings for bot workspace containers.
 snapshotter = "overlayfs"

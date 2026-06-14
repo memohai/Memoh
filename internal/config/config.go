@@ -31,8 +31,8 @@ const (
 	DefaultQdrantCollection      = "memory"
 	DefaultRuntimeDir            = "/opt/memoh/runtime"
 	DefaultBaseImage             = "debian:bookworm-slim"
-	DefaultVNCImage              = "memohai/vnc:debian"
-	DefaultVNCMirrorImage        = "memoh.cn/memohai/vnc:debian"
+	DefaultWorkspaceImage        = "memohai/workspace:debian"
+	DefaultWorkspaceMirrorImage  = "memoh.cn/memohai/workspace:debian"
 	DefaultTimezone              = "UTC"
 	DefaultContainerdRuntimeType = "io.containerd.runc.v2"
 
@@ -252,8 +252,8 @@ func WorkspaceImagePullCandidates(ref string) []string {
 	if normalized == "" {
 		return nil
 	}
-	if normalized == NormalizeImageRef(DefaultVNCImage) {
-		return []string{normalized, DefaultVNCMirrorImage}
+	if normalized == NormalizeImageRef(DefaultWorkspaceImage) {
+		return []string{normalized, DefaultWorkspaceMirrorImage}
 	}
 	return []string{normalized}
 }

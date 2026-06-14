@@ -49,7 +49,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import { Button, Spinner } from '@memohai/ui'

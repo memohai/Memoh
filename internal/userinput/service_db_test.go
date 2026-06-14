@@ -10,6 +10,7 @@ import (
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db"
 	sqlitestore "github.com/memohai/memoh/internal/db/sqlite/store"
+	"github.com/memohai/memoh/internal/decision"
 )
 
 const (
@@ -24,7 +25,7 @@ func newSQLiteUserInputService(t *testing.T) *Service {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	// One :memory: database per pooled connection — force a single shared
+	// One :memory: database per pooled connection - force a single shared
 	// connection so the waiter goroutine sees the schema.
 	conn.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = conn.Close() })
@@ -140,7 +141,7 @@ func TestServiceSubmitLifecycleNotifiesWaiter(t *testing.T) {
 		t.Fatalf("unexpected normalized payload: %#v", req.UIPayload)
 	}
 
-	waitCtx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	waitCtx, cancel := context.WithTimeout(context.Background(), decision.DefaultFallbackInterval/5)
 	defer cancel()
 	waited := make(chan Request, 1)
 	waitErr := make(chan error, 1)
@@ -178,9 +179,9 @@ func TestServiceSubmitLifecycleNotifiesWaiter(t *testing.T) {
 		t.Fatalf("unexpected result answers: %#v", submitted.Result)
 	}
 
-	// The wait context (4s) is shorter than the fallback ticker (5s), so a
-	// timely return here proves the Submit broadcast woke the waiter, not the
-	// polling safety net.
+	// The wait context is shorter than the fallback ticker, so a timely return
+	// here proves the Submit broadcast woke the waiter, not the polling safety
+	// net.
 	select {
 	case resolved := <-waited:
 		if resolved.Status != StatusSubmitted {
@@ -201,6 +202,41 @@ func TestServiceSubmitLifecycleNotifiesWaiter(t *testing.T) {
 	}
 }
 
+func TestServiceCreatePendingDoesNotReuseTerminalRequest(t *testing.T) {
+	// Not parallel: concurrent :memory: opens race in modernc sqlite's
+	// global initializer and fail under -race.
+
+	svc := newSQLiteUserInputService(t)
+	req := createTestPending(t, svc, nil)
+	if _, err := svc.Submit(context.Background(), SubmitInput{
+		RequestID: req.ID,
+		Answers:   []QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
+	}); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	_, err := svc.CreatePending(context.Background(), CreatePendingInput{
+		BotID:      testBotID,
+		SessionID:  testSessionID,
+		ToolCallID: "call-1",
+		Input: map[string]any{
+			"questions": []any{
+				map[string]any{
+					"text": "Which plan?",
+					"kind": QuestionKindSingleSelect,
+					"options": []any{
+						map[string]any{"label": "Plan A"},
+						map[string]any{"label": "Plan B"},
+					},
+				},
+			},
+		},
+	})
+	if !errors.Is(err, ErrAlreadyDecided) {
+		t.Fatalf("CreatePending() error = %v, want ErrAlreadyDecided", err)
+	}
+}
+
 func TestServiceWaitForRegisteredResponseUsesExistingWaiter(t *testing.T) {
 	// Not parallel: concurrent :memory: opens race in modernc sqlite's
 	// global initializer and fail under -race.
@@ -210,7 +246,7 @@ func TestServiceWaitForRegisteredResponseUsesExistingWaiter(t *testing.T) {
 	release := svc.RegisterWaiter(req.ID)
 	defer release()
 
-	waitCtx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	waitCtx, cancel := context.WithTimeout(context.Background(), decision.DefaultFallbackInterval/5)
 	defer cancel()
 	waited := make(chan Request, 1)
 	waitErr := make(chan error, 1)
@@ -223,12 +259,8 @@ func TestServiceWaitForRegisteredResponseUsesExistingWaiter(t *testing.T) {
 		waited <- resolved
 	}()
 
-	time.Sleep(25 * time.Millisecond)
-	svc.mu.Lock()
-	waiterCount := svc.waiterCount[req.ID]
-	svc.mu.Unlock()
-	if waiterCount != 1 {
-		t.Fatalf("registered wait count = %d, want only the caller-owned waiter", waiterCount)
+	if !svc.HasWaiter(req.ID) {
+		t.Fatal("registered waiter was lost")
 	}
 
 	if _, err := svc.Submit(context.Background(), SubmitInput{
@@ -257,17 +289,26 @@ func TestServiceCancelNotifiesWaiter(t *testing.T) {
 	svc := newSQLiteUserInputService(t)
 	req := createTestPending(t, svc, nil)
 
-	waitCtx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	waitCtx, cancel := context.WithTimeout(context.Background(), decision.DefaultFallbackInterval/5)
 	defer cancel()
 	waited := make(chan Request, 1)
+	waitErr := make(chan error, 1)
 	go func() {
 		resolved, err := svc.WaitForResponse(waitCtx, req.ID)
 		if err != nil {
-			t.Errorf("wait for response: %v", err)
+			waitErr <- err
 			return
 		}
 		waited <- resolved
 	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for !svc.HasWaiter(req.ID) {
+		if time.Now().After(deadline) {
+			t.Fatal("waiter never registered")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 
 	canceled, err := svc.Cancel(context.Background(), CancelInput{RequestID: req.ID, Reason: "user input timed out"})
 	if err != nil {
@@ -282,6 +323,8 @@ func TestServiceCancelNotifiesWaiter(t *testing.T) {
 		if resolved.Status != StatusCanceled {
 			t.Fatalf("waited status = %q", resolved.Status)
 		}
+	case err := <-waitErr:
+		t.Fatalf("wait for response: %v", err)
 	case <-waitCtx.Done():
 		t.Fatal("waiter was not notified before the fallback ticker")
 	}
@@ -319,7 +362,7 @@ func TestServiceCreatePendingIsIdempotentPerToolCall(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("submit duplicate row: %v", err)
 	}
-	third, err := svc.CreatePending(context.Background(), CreatePendingInput{
+	_, err = svc.CreatePending(context.Background(), CreatePendingInput{
 		BotID:      testBotID,
 		SessionID:  testSessionID,
 		ToolCallID: "call-1",
@@ -329,11 +372,8 @@ func TestServiceCreatePendingIsIdempotentPerToolCall(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("create duplicate after submit: %v", err)
-	}
-	if third.ID != first.ID || third.Status != StatusSubmitted {
-		t.Fatalf("duplicate after submit = %#v, want same submitted row", third)
+	if !errors.Is(err, ErrAlreadyDecided) {
+		t.Fatalf("create duplicate after submit error = %v, want ErrAlreadyDecided", err)
 	}
 }
 
@@ -457,6 +497,43 @@ func TestServiceExpiredRequestIsClosed(t *testing.T) {
 		Answers:   []QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
 	}); err != nil {
 		t.Fatalf("submit live: %v", err)
+	}
+}
+
+func TestServiceACPMCPMarkerRoundtrip(t *testing.T) {
+	// Not parallel: concurrent :memory: opens race in modernc sqlite's
+	// global initializer and fail under -race.
+
+	svc := newSQLiteUserInputService(t)
+	marked, err := svc.CreatePending(context.Background(), CreatePendingInput{
+		BotID:            testBotID,
+		SessionID:        testSessionID,
+		ToolCallID:       "acp-mcp-call",
+		ProviderMetadata: map[string]any{"source": ProviderSourceACPMCP},
+		Input: map[string]any{
+			"questions": []any{
+				map[string]any{"text": "Proceed?", "kind": QuestionKindText},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create acp pending: %v", err)
+	}
+	got, err := svc.Get(context.Background(), marked.ID)
+	if err != nil {
+		t.Fatalf("get acp pending: %v", err)
+	}
+	if !IsACPMCPRequest(got) {
+		t.Fatalf("IsACPMCPRequest = false after round trip, metadata = %#v", got.ProviderMetadata)
+	}
+
+	plain := createTestPendingWithCallID(t, svc, nil, "native-call")
+	gotPlain, err := svc.Get(context.Background(), plain.ID)
+	if err != nil {
+		t.Fatalf("get native pending: %v", err)
+	}
+	if IsACPMCPRequest(gotPlain) {
+		t.Fatalf("native request misclassified as ACP/MCP: %#v", gotPlain.ProviderMetadata)
 	}
 }
 

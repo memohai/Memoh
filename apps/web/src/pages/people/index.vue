@@ -1,69 +1,20 @@
 <template>
-  <section class="max-w-7xl mx-auto px-4 pt-2 pb-10 md:px-6 md:pt-4 md:pb-12">
-    <div class="space-y-6">
-      <header class="flex flex-col gap-4 border-b border-border/50 pb-4 sm:flex-row sm:items-center sm:justify-between">
-        <div class="min-w-0">
-          <h1 class="text-lg font-semibold">
-            {{ t('people.title') }}
-          </h1>
-          <p class="mt-1 text-xs text-muted-foreground">
-            {{ t('people.subtitle') }}
-          </p>
-        </div>
-        <div class="flex items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-sm"
-            :title="t('common.refresh')"
-            :aria-label="t('common.refresh')"
-            :disabled="loading"
-            @click="loadUsers"
-          >
-            <RefreshCw
-              class="size-4"
-              :class="loading ? 'animate-spin' : ''"
-            />
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            class="gap-2"
-            @click="openCreateDialog"
-          >
-            <UserPlus class="size-4" />
-            {{ t('people.newMember') }}
-          </Button>
-        </div>
-      </header>
+  <section class="mx-auto max-w-3xl px-6 pt-10 pb-12">
+    <header class="mb-6 flex items-center justify-between gap-4 px-2">
+      <h1 class="text-lg font-semibold">
+        {{ t('people.title') }}
+      </h1>
+      <Button
+        type="button"
+        size="sm"
+        @click="openCreateDialog"
+      >
+        <UserPlus class="size-4" />
+        {{ t('people.newMember') }}
+      </Button>
+    </header>
 
-      <div class="grid gap-3 sm:grid-cols-3">
-        <div class="rounded-md border bg-background p-4">
-          <p class="text-[11px] font-medium uppercase tracking-normal text-muted-foreground">
-            {{ t('people.totalMembers') }}
-          </p>
-          <p class="mt-2 text-2xl font-semibold tabular-nums">
-            {{ users.length }}
-          </p>
-        </div>
-        <div class="rounded-md border bg-background p-4">
-          <p class="text-[11px] font-medium uppercase tracking-normal text-muted-foreground">
-            {{ t('people.activeMembers') }}
-          </p>
-          <p class="mt-2 text-2xl font-semibold tabular-nums">
-            {{ activeCount }}
-          </p>
-        </div>
-        <div class="rounded-md border bg-background p-4">
-          <p class="text-[11px] font-medium uppercase tracking-normal text-muted-foreground">
-            {{ t('people.admins') }}
-          </p>
-          <p class="mt-2 text-2xl font-semibold tabular-nums">
-            {{ adminCount }}
-          </p>
-        </div>
-      </div>
-
+    <div class="space-y-8">
       <Alert
         v-if="loadError"
         variant="destructive"
@@ -72,158 +23,154 @@
         <AlertDescription>{{ loadError }}</AlertDescription>
       </Alert>
 
-      <Card>
-        <CardHeader class="flex flex-row items-center justify-between gap-3">
-          <div>
-            <CardTitle class="text-sm">
-              {{ t('people.members') }}
-            </CardTitle>
-            <CardDescription class="text-xs">
-              {{ t('people.memberCount', { count: users.length }) }}
-            </CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div
-            v-if="loading && users.length === 0"
-            class="space-y-2"
-          >
-            <Skeleton
-              v-for="index in 5"
-              :key="index"
-              class="h-12 w-full"
-            />
-          </div>
+      <section class="space-y-2.5">
+        <h2 class="px-2 text-[13px] font-medium text-muted-foreground">
+          {{ membersTitle }}
+        </h2>
 
-          <Table v-else>
-            <TableHeader>
-              <TableRow>
-                <TableHead class="min-w-64">
-                  {{ t('people.member') }}
-                </TableHead>
-                <TableHead>{{ t('people.role') }}</TableHead>
-                <TableHead>{{ t('common.status') }}</TableHead>
-                <TableHead>{{ t('people.lastLogin') }}</TableHead>
-                <TableHead class="w-32 text-right">
-                  {{ t('common.actions') }}
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow v-if="users.length === 0">
-                <TableCell
-                  colspan="5"
-                  class="h-28 text-center text-muted-foreground"
-                >
-                  {{ t('people.empty') }}
-                </TableCell>
-              </TableRow>
-              <TableRow
-                v-for="user in users"
-                :key="user.id"
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{{ t('people.member') }}</TableHead>
+              <TableHead>{{ t('people.role') }}</TableHead>
+              <TableHead>{{ t('common.status') }}</TableHead>
+              <TableHead>{{ t('people.lastLogin') }}</TableHead>
+              <TableHead class="w-24 text-right">
+                {{ t('common.actions') }}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow v-if="loading && users.length === 0">
+              <TableCell
+                :colspan="5"
+                class="p-0"
               >
-                <TableCell class="min-w-64">
-                  <div class="flex items-center gap-3">
-                    <Avatar class="size-9 shrink-0">
-                      <AvatarImage
-                        v-if="user.avatar_url"
-                        :src="user.avatar_url"
-                        :alt="memberName(user)"
-                      />
-                      <AvatarFallback>{{ memberInitials(user) }}</AvatarFallback>
-                    </Avatar>
-                    <div class="min-w-0">
-                      <div class="flex items-center gap-2">
-                        <p class="truncate text-xs font-medium">
-                          {{ memberName(user) }}
-                        </p>
-                        <Badge
-                          v-if="isSelf(user)"
-                          variant="outline"
-                          size="sm"
-                        >
-                          {{ t('people.you') }}
-                        </Badge>
-                      </div>
-                      <p class="mt-0.5 truncate text-[11px] text-muted-foreground">
-                        @{{ user.username }}
-                        <span v-if="user.email"> · {{ user.email }}</span>
-                      </p>
-                    </div>
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <Badge
-                    :variant="normalizeRole(user.role) === 'admin' ? 'secondary' : 'outline'"
-                    size="sm"
-                  >
-                    {{ roleLabel(user.role) }}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  <div class="flex items-center gap-2">
-                    <Switch
-                      :model-value="!!user.is_active"
-                      :disabled="isSelf(user) || isUserPending(user)"
-                      :aria-label="t('people.toggleStatus', { name: memberName(user) })"
-                      @update:model-value="(value) => updateUserStatus(user, !!value)"
+                <div class="space-y-2 p-3">
+                  <Skeleton
+                    v-for="index in 5"
+                    :key="index"
+                    class="h-10 w-full"
+                  />
+                </div>
+              </TableCell>
+            </TableRow>
+            <TableRow v-else-if="users.length === 0">
+              <TableCell
+                :colspan="5"
+                class="h-28 text-center text-muted-foreground"
+              >
+                {{ t('people.empty') }}
+              </TableCell>
+            </TableRow>
+            <TableRow
+              v-for="user in users"
+              v-else
+              :key="user.id"
+            >
+              <TableCell>
+                <div class="flex items-center gap-3">
+                  <Avatar class="size-9 shrink-0">
+                    <AvatarImage
+                      v-if="user.avatar_url"
+                      :src="user.avatar_url"
+                      :alt="memberName(user)"
                     />
-                    <span class="text-[11px] text-muted-foreground">
-                      {{ user.is_active ? t('common.active') : t('common.inactive') }}
-                    </span>
+                    <AvatarFallback>{{ memberInitials(user) }}</AvatarFallback>
+                  </Avatar>
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                      <p class="truncate text-xs font-medium">
+                        {{ memberName(user) }}
+                      </p>
+                      <Badge
+                        v-if="isSelf(user)"
+                        variant="outline"
+                        size="sm"
+                      >
+                        {{ t('people.you') }}
+                      </Badge>
+                    </div>
+                    <p class="mt-0.5 truncate text-[11px] text-muted-foreground">
+                      @{{ user.username }}
+                      <span v-if="user.email"> · {{ user.email }}</span>
+                    </p>
                   </div>
-                </TableCell>
-                <TableCell class="text-muted-foreground">
-                  {{ formatMemberDate(user.last_login_at, t('people.never')) }}
-                </TableCell>
-                <TableCell>
-                  <div class="flex justify-end gap-1">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      :title="t('people.resetPassword')"
-                      :aria-label="t('people.resetPasswordFor', { name: memberName(user) })"
-                      :disabled="isUserPending(user)"
-                      @click="openResetDialog(user)"
-                    >
-                      <KeyRound class="size-4" />
-                    </Button>
-                    <ConfirmPopover
-                      :title="t('people.removeMember')"
-                      :message="t('people.removeConfirm', { name: memberName(user) })"
-                      :confirm-text="t('people.removeMember')"
-                      variant="destructive"
-                      :loading="isUserPending(user)"
-                      @confirm="removeMember(user)"
-                    >
-                      <template #trigger>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          :title="t('people.removeMember')"
-                          :aria-label="t('people.removeMemberFor', { name: memberName(user) })"
-                          :disabled="isSelf(user) || isUserPending(user)"
-                        >
-                          <Trash2 class="size-4" />
-                        </Button>
-                      </template>
-                    </ConfirmPopover>
-                  </div>
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+                </div>
+              </TableCell>
+              <TableCell>
+                <Badge
+                  variant="outline"
+                  size="sm"
+                >
+                  {{ roleLabel(user.role) }}
+                </Badge>
+              </TableCell>
+              <TableCell>
+                <div class="flex items-center gap-2">
+                  <Switch
+                    :model-value="!!user.is_active"
+                    :disabled="isSelf(user) || isUserPending(user)"
+                    :aria-label="t('people.toggleStatus', { name: memberName(user) })"
+                    @update:model-value="(value) => updateUserStatus(user, !!value)"
+                  />
+                  <span class="text-[11px] text-muted-foreground">
+                    {{ user.is_active ? t('common.active') : t('common.inactive') }}
+                  </span>
+                </div>
+              </TableCell>
+              <TableCell class="text-muted-foreground">
+                {{ formatMemberDate(user.last_login_at, t('people.never')) }}
+              </TableCell>
+              <TableCell>
+                <div class="flex justify-end gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    :title="t('people.resetPassword')"
+                    :aria-label="t('people.resetPasswordFor', { name: memberName(user) })"
+                    :disabled="isUserPending(user)"
+                    @click="openResetDialog(user)"
+                  >
+                    <KeyRound class="size-4" />
+                  </Button>
+                  <ConfirmPopover
+                    :title="t('people.removeMember')"
+                    :message="t('people.removeConfirm', { name: memberName(user) })"
+                    :confirm-text="t('people.removeMember')"
+                    variant="destructive"
+                    :loading="isUserPending(user)"
+                    @confirm="removeMember(user)"
+                  >
+                    <template #trigger>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        :title="t('people.removeMember')"
+                        :aria-label="t('people.removeMemberFor', { name: memberName(user) })"
+                        :disabled="isSelf(user) || isUserPending(user)"
+                      >
+                        <Trash2 class="size-4" />
+                      </Button>
+                    </template>
+                  </ConfirmPopover>
+                </div>
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </section>
     </div>
 
     <Dialog v-model:open="createDialogOpen">
-      <DialogContent class="sm:max-w-xl">
+      <DialogContent
+        class="sm:max-w-xl"
+        :aria-describedby="undefined"
+      >
         <DialogHeader>
           <DialogTitle>{{ t('people.newMember') }}</DialogTitle>
-          <DialogDescription>{{ t('people.newMemberDescription') }}</DialogDescription>
         </DialogHeader>
 
         <div class="grid gap-4">
@@ -259,33 +206,6 @@
           </div>
           <div class="grid gap-2 sm:grid-cols-2">
             <div class="grid gap-2">
-              <Label for="people-create-role">{{ t('people.role') }}</Label>
-              <Select v-model="createForm.role">
-                <SelectTrigger id="people-create-role">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="member">
-                    {{ t('people.roles.member') }}
-                  </SelectItem>
-                  <SelectItem value="admin">
-                    {{ t('people.roles.admin') }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div class="flex items-center justify-between rounded-md border p-3">
-              <div>
-                <Label>{{ t('people.activeOnCreate') }}</Label>
-                <p class="mt-1 text-[11px] text-muted-foreground">
-                  {{ t('people.activeOnCreateHint') }}
-                </p>
-              </div>
-              <Switch v-model="createForm.isActive" />
-            </div>
-          </div>
-          <div class="grid gap-2 sm:grid-cols-2">
-            <div class="grid gap-2">
               <Label for="people-create-password">{{ t('auth.password') }}</Label>
               <Input
                 id="people-create-password"
@@ -304,9 +224,37 @@
               />
             </div>
           </div>
+          <div class="grid gap-2">
+            <Label for="people-create-role">{{ t('people.role') }}</Label>
+            <Select v-model="createForm.role">
+              <SelectTrigger id="people-create-role">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="member">
+                  {{ t('people.roles.member') }}
+                </SelectItem>
+                <SelectItem value="admin">
+                  {{ t('people.roles.admin') }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div class="flex items-center justify-between gap-4 border-t pt-4">
+            <div class="space-y-0.5">
+              <Label>{{ t('people.activeOnCreate') }}</Label>
+              <p class="text-[11px] text-muted-foreground">
+                {{ t('people.activeOnCreateHint') }}
+              </p>
+            </div>
+            <Switch
+              v-model="createForm.isActive"
+              class="shrink-0"
+            />
+          </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter class="mt-2">
           <Button
             type="button"
             variant="outline"
@@ -389,8 +337,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
-import { KeyRound, RefreshCw, Trash2, UserPlus } from 'lucide-vue-next'
+import { toast } from '@memohai/ui'
+import { KeyRound, Trash2, UserPlus } from 'lucide-vue-next'
 import {
   Alert,
   AlertDescription,
@@ -400,11 +348,6 @@ import {
   AvatarImage,
   Badge,
   Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -478,8 +421,11 @@ const resetForm = reactive({
   confirmPassword: '',
 })
 
-const activeCount = computed(() => users.value.filter(user => !!user.is_active).length)
-const adminCount = computed(() => users.value.filter(user => normalizeRole(user.role) === 'admin').length)
+const membersTitle = computed(() =>
+  users.value.length
+    ? `${t('people.members')} · ${users.value.length}`
+    : t('people.members'),
+)
 const currentUserId = computed(() => userStore.userInfo.id)
 const resetTargetName = computed(() => resetTarget.value ? memberName(resetTarget.value) : '')
 

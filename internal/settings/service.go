@@ -221,6 +221,17 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 		searchProviderUUID = providerID
 	}
+	fetchProviderUUID := pgtype.UUID{}
+	fetchProviderIDSet := req.FetchProviderID != nil
+	if req.FetchProviderID != nil {
+		if value := strings.TrimSpace(*req.FetchProviderID); value != "" {
+			providerID, err := db.ParseUUID(value)
+			if err != nil {
+				return Settings{}, err
+			}
+			fetchProviderUUID = providerID
+		}
+	}
 	memoryProviderUUID := pgtype.UUID{}
 	if value := strings.TrimSpace(req.MemoryProviderID); value != "" {
 		providerID, err := db.ParseUUID(value)
@@ -296,6 +307,8 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		TitleModelID:           titleModelUUID,
 		ImageModelID:           imageModelUUID,
 		SearchProviderID:       searchProviderUUID,
+		FetchProviderIDSet:     fetchProviderIDSet,
+		FetchProviderID:        fetchProviderUUID,
 		MemoryProviderID:       memoryProviderUUID,
 		TtsModelID:             ttsModelUUID,
 		TranscriptionModelID:   transcriptionModelUUID,
@@ -376,13 +389,12 @@ func normalizeBotSetting(language string, commandUILanguage string, aclDefaultEf
 	return settings
 }
 
+// isValidReasoningEffort accepts the full effort tier range. Effort is now a
+// free-form tier string (models expose their own supported levels via capability
+// discovery), so we only reject empty/whitespace values here; the specific tiers
+// a given model accepts are enforced upstream, not by this generic setting.
 func isValidReasoningEffort(effort string) bool {
-	switch effort {
-	case "none", "low", "medium", "high", "xhigh":
-		return true
-	default:
-		return false
-	}
+	return strings.TrimSpace(effort) != ""
 }
 
 func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
@@ -403,6 +415,7 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.TitleModelID,
 		row.ImageModelID,
 		row.SearchProviderID,
+		row.FetchProviderID,
 		row.MemoryProviderID,
 		row.TtsModelID,
 		row.TranscriptionModelID,
@@ -434,6 +447,7 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.TitleModelID,
 		row.ImageModelID,
 		row.SearchProviderID,
+		row.FetchProviderID,
 		row.MemoryProviderID,
 		row.TtsModelID,
 		row.TranscriptionModelID,
@@ -464,6 +478,7 @@ func normalizeBotSettingsFields(
 	titleModelID pgtype.UUID,
 	imageModelID pgtype.UUID,
 	searchProviderID pgtype.UUID,
+	fetchProviderID pgtype.UUID,
 	memoryProviderID pgtype.UUID,
 	ttsModelID pgtype.UUID,
 	transcriptionModelID pgtype.UUID,
@@ -496,6 +511,9 @@ func normalizeBotSettingsFields(
 	}
 	if searchProviderID.Valid {
 		settings.SearchProviderID = uuid.UUID(searchProviderID.Bytes).String()
+	}
+	if fetchProviderID.Valid {
+		settings.FetchProviderID = uuid.UUID(fetchProviderID.Bytes).String()
 	}
 	if memoryProviderID.Valid {
 		settings.MemoryProviderID = uuid.UUID(memoryProviderID.Bytes).String()

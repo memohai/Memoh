@@ -324,9 +324,9 @@ func TestWorkspaceImagePullPolicyDefaultsAndNormalizes(t *testing.T) {
 	}
 }
 
-func TestWorkspaceImagePullCandidatesAddsVNCMirror(t *testing.T) {
-	got := WorkspaceImagePullCandidates("memohai/vnc:debian")
-	want := []string{"docker.io/memohai/vnc:debian", "memoh.cn/memohai/vnc:debian"}
+func TestWorkspaceImagePullCandidatesAddsWorkspaceMirror(t *testing.T) {
+	got := WorkspaceImagePullCandidates("memohai/workspace:debian")
+	want := []string{"docker.io/memohai/workspace:debian", "memoh.cn/memohai/workspace:debian"}
 	if len(got) != len(want) {
 		t.Fatalf("candidate count = %d, want %d (%v)", len(got), len(want), got)
 	}

@@ -1,85 +1,59 @@
 <template>
   <Card
-    class="flex flex-col cursor-pointer hover:border-foreground/20 hover:bg-accent/20"
+    class="group flex cursor-pointer flex-row items-start gap-3 p-4 transition-colors hover:border-foreground/20 hover:bg-accent/20"
     role="button"
     tabindex="0"
     @click="openDetail"
     @keydown.enter.prevent="openDetail"
     @keydown.space.prevent="openDetail"
   >
-    <CardHeader class="pb-3">
-      <div class="flex items-start gap-3">
-        <div class="size-9 shrink-0 rounded-md bg-accent flex items-center justify-center overflow-hidden">
-          <ProviderIcon
-            v-if="iconValue"
-            :icon="iconValue"
-            size="20"
-            class="size-5 object-contain"
-          >
-            <PackageOpen class="size-4 text-muted-foreground" />
-          </ProviderIcon>
-          <PackageOpen
-            v-else
-            class="size-4 text-muted-foreground"
-          />
-        </div>
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-1.5">
-            <CardTitle
-              class="text-sm truncate"
-              :title="plugin.name"
-            >
-              {{ plugin.name }}
-            </CardTitle>
-            <a
-              v-if="plugin.homepage"
-              :href="plugin.homepage"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-              @click.stop
-            >
-              <ExternalLink class="size-3" />
-            </a>
-          </div>
-          <div class="flex items-center gap-1.5 mt-1">
-            <span
-              v-if="plugin.author?.name"
-              class="text-[11px] text-muted-foreground truncate"
-            >
-              {{ plugin.author.name }}
-            </span>
-          </div>
-        </div>
+    <div class="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md bg-accent">
+      <ProviderIcon
+        v-if="iconValue"
+        :icon="iconValue"
+        size="20"
+        class="size-5 object-contain"
+      >
+        <PackageOpen class="size-4 text-muted-foreground" />
+      </ProviderIcon>
+      <PackageOpen
+        v-else
+        class="size-4 text-muted-foreground"
+      />
+    </div>
+
+    <div class="min-w-0 flex-1">
+      <div class="flex items-center gap-1.5">
+        <h3
+          class="truncate text-sm font-medium"
+          :title="plugin.name"
+        >
+          {{ plugin.name }}
+        </h3>
+        <a
+          v-if="plugin.homepage"
+          :href="plugin.homepage"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+          @click.stop
+        >
+          <ExternalLink class="size-3" />
+        </a>
       </div>
-    </CardHeader>
-    <CardContent class="flex-1 pb-3">
-      <p class="text-xs text-muted-foreground line-clamp-2">
+      <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">
         {{ plugin.description }}
       </p>
-    </CardContent>
-    <CardFooter class="pt-0 flex items-center justify-between gap-2">
-      <div class="flex flex-wrap gap-1 min-w-0 overflow-hidden">
-        <Badge
-          v-for="tag in plugin.tags?.slice(0, 3)"
-          :key="tag"
-          variant="secondary"
-          size="sm"
-          class="cursor-pointer hover:bg-foreground hover:text-background transition-colors"
-          @click.stop="$emit('tag-click', tag)"
-        >
-          {{ tag }}
-        </Badge>
-      </div>
-      <Button
-        size="sm"
-        class="shrink-0 self-end"
-        @click.stop="$emit('install', plugin)"
-      >
-        <Download class="size-3.5 mr-1.5" />
-        {{ $t('supermarket.install') }}
-      </Button>
-    </CardFooter>
+    </div>
+
+    <Button
+      size="sm"
+      class="shrink-0"
+      @click.stop="$emit('install', plugin)"
+    >
+      <Download class="mr-1.5 size-3.5" />
+      {{ $t('supermarket.install') }}
+    </Button>
   </Card>
 </template>
 
@@ -87,7 +61,7 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Download, ExternalLink, PackageOpen } from 'lucide-vue-next'
-import { Card, CardHeader, CardTitle, CardContent, CardFooter, Badge, Button } from '@memohai/ui'
+import { Card, Button } from '@memohai/ui'
 import type { PluginsManifest } from '@memohai/sdk'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 
@@ -96,7 +70,6 @@ const props = defineProps<{
 }>()
 
 defineEmits<{
-  'tag-click': [tag: string]
   'install': [plugin: PluginsManifest]
 }>()
 

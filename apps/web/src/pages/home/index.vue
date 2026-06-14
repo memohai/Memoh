@@ -1,28 +1,36 @@
 <template>
   <div class="flex h-full overflow-hidden">
-    <template v-if="currentBotId">
-      <ChatSidebar ref="sidebarRef" />
-      <ChatWorkspace />
-    </template>
+    <ChatWorkspace v-if="currentBotId" />
+    <div
+      v-else
+      class="flex-1 flex items-center justify-center bg-card"
+    >
+      <div class="text-center px-6">
+        <p class="text-xs font-medium text-foreground">
+          {{ t('chat.selectBot') }}
+        </p>
+        <p class="mt-1 text-xs text-muted-foreground">
+          {{ t('chat.selectBotHint') }}
+        </p>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, provide, nextTick } from 'vue'
+import { watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { getBotsById } from '@memohai/sdk'
 import { useChatStore } from '@/store/chat-list'
-import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { ACP_NO_PROJECT_MODE, createACPNoProjectPath, normalizeACPAgentID } from '@/utils/acp'
-import { openInFileManagerKey } from './composables/useFileManagerProvider'
-import ChatSidebar from './components/chat-sidebar.vue'
 import ChatWorkspace from './components/chat-workspace.vue'
 
 const route = useRoute()
 const router = useRouter()
+const { t } = useI18n()
 const chatStore = useChatStore()
-const workspaceTabs = useWorkspaceTabsStore()
 const { currentBotId, bots } = storeToRefs(chatStore)
 
 // Resolve a bot UUID from a URL name slug. Prefers the already-loaded bot list,
@@ -54,33 +62,18 @@ async function resolveBotNameFromId(botId: string): Promise<string | null> {
   }
 }
 
-const sidebarRef = ref<InstanceType<typeof ChatSidebar> | null>(null)
-
-const FILE_MANAGER_ROOT = '/data'
-
-function normalizeFileManagerPath(path: string): string {
-  const trimmedPath = path.trim()
-  if (!trimmedPath) return FILE_MANAGER_ROOT
-  if (trimmedPath === FILE_MANAGER_ROOT || trimmedPath.startsWith(`${FILE_MANAGER_ROOT}/`)) {
-    return trimmedPath
-  }
-  if (trimmedPath === '/') return FILE_MANAGER_ROOT
-  if (trimmedPath.startsWith('/')) {
-    return `${FILE_MANAGER_ROOT}${trimmedPath}`
-  }
-  return `${FILE_MANAGER_ROOT}/${trimmedPath}`
-}
-
-provide(openInFileManagerKey, (path: string, isDir = false) => {
-  const normalizedPath = normalizeFileManagerPath(path)
-  if (isDir) {
-    void nextTick(() => sidebarRef.value?.openFilesAt(normalizedPath))
-  } else {
-    workspaceTabs.openFile(normalizedPath)
-  }
-})
-
 let suppressUrlSync = false
+
+// home is now mounted persistently (via main-container, which App.vue keeps
+// alive across chat↔settings) rather than torn down when leaving chat. So these
+// route watchers keep running while the user is in settings. The settings route
+// shares the :botName param, so without this guard the route.params.botName
+// watcher would "canonicalize" that UUID and router.replace back to /bot/<name>,
+// yanking the user out of settings. URL sync must only run while a chat route
+// (home/bot) is current. route.name is the reliable signal (no mount/unmount
+// timing to race).
+const CHAT_ROUTE_NAMES = new Set(['home', 'bot'])
+const isChatRoute = () => CHAT_ROUTE_NAMES.has(route.name as string)
 
 // One-shot guard so concurrent syncStoreFromUrl() calls can't both start a
 // session for the same redirect. Set synchronously before the first await.
@@ -108,7 +101,7 @@ async function maybeStartACPSession() {
   try {
     if (agentId) {
       const { session } = await chatStore.createACPSession({ agentId, projectMode: ACP_NO_PROJECT_MODE, projectPath: createACPNoProjectPath() })
-      workspaceTabs.openChat(session.id, session.title)
+      await chatStore.selectSession(session.id)
     }
   } catch {
     // Bot may not have the agent enabled; user can still pick it from the composer.
@@ -145,6 +138,9 @@ void syncStoreFromUrl((route.params.botName as string) ?? '')
 
 watch(currentBotId, async (newBotId) => {
   if (suppressUrlSync) return
+  // Don't touch the URL while a non-chat route (e.g. settings) is current — home
+  // stays mounted behind the settings overlay and must not redirect away from it.
+  if (!isChatRoute()) return
   const storeBot = (newBotId ?? '').trim()
   if (!storeBot) {
     if (route.name !== 'home') {
@@ -164,6 +160,9 @@ watch(currentBotId, async (newBotId) => {
 watch(
   () => route.params.botName,
   (paramBotName) => {
+    // Only sync on a chat route. The settings route shares the :botName param;
+    // reacting to its changes would bounce the user back to chat (see above).
+    if (!isChatRoute()) return
     void syncStoreFromUrl((paramBotName as string) ?? '')
   },
 )

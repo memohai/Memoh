@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, watch, computed, onBeforeUnmount, defineAsyncComponent, h } from 'vue'
+import { ref, watch, computed, onBeforeUnmount } from 'vue'
 import { appKeyboardCommands } from '@/lib/keyboard-commands'
 import { useKeyboardCommand } from '@/composables/useKeyboardCommand'
 import { isFileSaveEligible } from './file-save-command'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
-import { File, Download, Save } from 'lucide-vue-next'
+import { toast } from '@memohai/ui'
+import { File, Download } from 'lucide-vue-next'
 import { Button, Spinner } from '@memohai/ui'
 import {
   getBotsByBotIdContainerFsRead,
@@ -15,32 +15,10 @@ import {
 import type { HandlersFsFileInfo } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
-import PreviewModeToggle, { type PreviewMode } from '@/components/preview-mode-toggle/index.vue'
 import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
-import { isTextFile, isImageFile, isMarkdownFile, isHtmlFile } from './utils'
+import { isTextFile, isImageFile } from './utils'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
-
-const AsyncLoading = {
-  render: () =>
-    h(
-      'div',
-      { class: 'flex h-full items-center justify-center text-muted-foreground' },
-      [h(Spinner, { class: 'mr-2' })],
-    ),
-}
-
-const MarkdownPreview = defineAsyncComponent({
-  loader: () => import('@/components/markdown-preview/index.vue'),
-  loadingComponent: AsyncLoading,
-  delay: 120,
-})
-
-const HtmlPreview = defineAsyncComponent({
-  loader: () => import('@/components/html-preview/index.vue'),
-  loadingComponent: AsyncLoading,
-  delay: 120,
-})
 
 const props = defineProps<{
   botId: string
@@ -65,12 +43,7 @@ const filename = computed(() => props.file.name ?? '')
 const filePath = computed(() => props.file.path ?? '')
 const isText = computed(() => isTextFile(filename.value))
 const isImage = computed(() => isImageFile(filename.value))
-const isMd = computed(() => isMarkdownFile(filename.value))
-const isHtml = computed(() => isHtmlFile(filename.value))
-const hasPreviewToggle = computed(() => isText.value && (isMd.value || isHtml.value))
 const isDirty = computed(() => content.value !== originalContent.value)
-
-const mode = ref<PreviewMode>('raw')
 
 watch(isDirty, (dirty) => {
   emit('update:dirty', dirty)
@@ -154,9 +127,6 @@ watch(() => props.file.path, () => {
   cleanupImageUrl()
   content.value = ''
   originalContent.value = ''
-  // Default mode: rich preview for markdown, raw source for HTML/other text.
-  if (isMd.value) mode.value = 'preview'
-  else mode.value = 'raw'
   if (isText.value) {
     void loadTextContent()
   } else if (isImage.value) {
@@ -182,8 +152,7 @@ watch(fsChangedAt, () => {
 
 // Save on Cmd/Ctrl+S via the shared keyboard layer. The handler is scoped to this
 // component's lifetime: it returns true only for an editable, dirty text file, so
-// the browser keeps its native save behavior in every other state. The
-// cross-platform mod key is handled by the binding table.
+// the browser keeps its native save behavior in every other state.
 useKeyboardCommand(appKeyboardCommands.saveActiveFile, () => {
   if (!isFileSaveEligible({
     readonly: props.readonly ?? false,
@@ -203,33 +172,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="relative flex h-full flex-col overflow-hidden">
-    <div
-      v-if="hasPreviewToggle || isText"
-      class="absolute top-2 right-2 z-10 flex items-center gap-2"
-    >
-      <PreviewModeToggle
-        v-if="hasPreviewToggle"
-        v-model="mode"
-      />
-      <Button
-        v-if="!readonly && isText && (!hasPreviewToggle || mode === 'raw')"
-        type="button"
-        size="sm"
-        class="gap-1.5 bg-primary text-primary-foreground shadow-md hover:bg-brand-hover disabled:bg-primary/40 disabled:text-primary-foreground/80"
-        :disabled="!isDirty || saving"
-        :title="t('bots.files.save')"
-        @click="handleSave"
-      >
-        <Spinner v-if="saving" />
-        <Save
-          v-else
-          class="size-3.5"
-        />
-        {{ t('bots.files.save') }}
-      </Button>
-    </div>
-
+  <div class="flex h-full flex-col overflow-hidden bg-surface-editor">
     <div class="flex-1 min-h-0 overflow-hidden">
       <div
         v-if="loading"
@@ -238,18 +181,6 @@ onBeforeUnmount(() => {
         <Spinner class="mr-2" />
         {{ t('common.loading') }}
       </div>
-
-      <MarkdownPreview
-        v-else-if="isText && isMd && mode === 'preview'"
-        :content="content"
-        class="h-full"
-      />
-
-      <HtmlPreview
-        v-else-if="isText && isHtml && mode === 'preview'"
-        :content="content"
-        class="h-full"
-      />
 
       <MonacoEditor
         v-else-if="isText"

@@ -1,0 +1,87 @@
+/* Memoh dockview theme: maps dockview's --dv-* variables onto the design
+ * tokens from @memohai/ui style.css so the dock chrome follows light/dark
+ * and any future palette swap automatically.
+ *
+ * Two-plane editor model (VS-Code): the active tab and the view it owns both
+ * sit on --surface-editor, so the selected tab reads as continuous with its
+ * pane. The tab strip and every unselected tab sit on --surface-chrome — the
+ * same recessed chrome as the left rail. Because the two planes differ in BOTH
+ * light and dark (see apps/web/src/style.css), the active tab "punches through"
+ * the strip by its FILL alone: no painted divider, no overflow fight, and no
+ * brand top-accent needed (the old inset highlight is gone). */
+.dockview-theme-memoh {
+  --dv-group-view-background-color: var(--surface-editor);
+
+  --dv-tabs-and-actions-container-background-color: var(--surface-chrome);
+  --dv-tabs-and-actions-container-height: 36px;
+  --dv-tabs-and-actions-container-font-size: 12px;
+
+  /* Active group: visible tab drops to the editor surface (continuous with the
+   * pane below); hidden tabs blend into the strip. */
+  --dv-activegroup-visiblepanel-tab-background-color: var(--surface-editor);
+  --dv-activegroup-visiblepanel-tab-color: var(--foreground);
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-activegroup-hiddenpanel-tab-color: var(--muted-foreground);
+
+  /* Inactive group: its selected tab must still read as selected (same editor
+   * surface, just a dimmer label — VS Code's unfocused-active tab). Without this
+   * the second pane's current tab looked grey/unselected after a split. */
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--surface-editor);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--muted-foreground);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--muted-foreground);
+
+  --dv-tab-divider-color: transparent;
+  --dv-tab-font-size: 12px;
+
+  --dv-separator-border: var(--border);
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: var(--ring);
+
+  --dv-drag-over-background-color: var(--sidebar-accent);
+  --dv-drag-over-border-color: var(--ring);
+
+  --dv-icon-hover-background-color: var(--ui-hover);
+  --dv-scrollbar-background-color: var(--border);
+
+  --dv-context-menu-background-color: var(--popover);
+  --dv-context-menu-color: var(--foreground);
+
+  --dv-border-radius: 0px;
+  --dv-tab-border-radius: 0px;
+  /* No top margin: a 4px top margin made tabs sit low and a tab visibly "jump
+   * up" the moment it became active (the active tab dropped the margin). Zero
+   * keeps active and inactive tabs vertically identical. */
+  --dv-tab-margin: 0;
+
+  --dv-floating-border: 1px solid var(--border);
+}
+
+/* The custom tab content (workspace-tab.vue) owns its own padding/ellipsis; the
+ * .dv-tab container only carries the chip background (from the --dv-* vars above)
+ * and the width clamp so a long title truncates rather than ballooning the strip
+ * — short titles ("New Chat") still get a fuller chip than a cramped sliver. */
+.dockview-theme-memoh .dv-tab {
+  box-sizing: border-box;
+  padding: 0;
+  transition: background-color 0.12s ease;
+  min-width: 8rem;
+  max-width: 15rem;
+}
+
+/* Hover lifts UNSELECTED tabs only — the active tab never hovers (VS Code). */
+.dockview-theme-memoh .dv-tab:not(.dv-active-tab):hover {
+  background-color: var(--ui-hover);
+}
+
+/* Active tab = editor surface, continuous with the pane below. The two planes
+ * differ in both light and dark, so the fill step alone marks the active tab —
+ * no top-accent line, no divider. */
+.dockview-theme-memoh .dv-tab.dv-active-tab {
+  background-color: var(--surface-editor);
+}
+
+.dockview-theme-memoh .dv-right-actions-container,
+.dockview-theme-memoh .dv-left-actions-container {
+  align-items: center;
+}

@@ -429,13 +429,25 @@ func formatWebFetch(tc *StreamToolCall, status ToolCallStatus) ToolCallPresentat
 		p.Body = append(p.Body, ToolCallBlock{Type: ToolCallBlockLink, URL: url})
 	}
 	format := pickStringField(res, "format")
+	provider := pickStringField(res, "providerName", "provider")
 	length := 0
 	if v, ok := numericField(res, "length"); ok {
 		length = int(v)
 	}
 	footer := format
+	if provider != "" {
+		if footer == "" {
+			footer = provider
+		} else {
+			footer = fmt.Sprintf("%s · %s", provider, footer)
+		}
+	}
 	if length > 0 {
-		footer = fmt.Sprintf("%s · %d chars", footer, length)
+		if footer == "" {
+			footer = fmt.Sprintf("%d chars", length)
+		} else {
+			footer = fmt.Sprintf("%s · %d chars", footer, length)
+		}
 	}
 	p.Footer = strings.TrimSpace(footer)
 	return p

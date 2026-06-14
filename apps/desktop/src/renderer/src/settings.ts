@@ -10,6 +10,7 @@ import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 import i18n from '@memohai/web/i18n'
 import { setupApiClient } from '@memohai/web/api-client'
 
+import '@fontsource-variable/inter'
 import 'markstream-vue/index.css'
 import '@memohai/web/style.css'
 import './desktop-shell.css'

@@ -1,64 +1,39 @@
 package agent
 
-import "encoding/json"
+import "github.com/memohai/memoh/internal/agent/event"
+
+// Stream event aliases keep existing consumers source-compatible while the
+// shared event types live in internal/agent/event.
 
 // StreamEventType identifies the kind of stream event.
-type StreamEventType string
-
-const (
-	EventAgentStart          StreamEventType = "agent_start"
-	EventTextStart           StreamEventType = "text_start"
-	EventTextDelta           StreamEventType = "text_delta"
-	EventTextEnd             StreamEventType = "text_end"
-	EventReasoningStart      StreamEventType = "reasoning_start"
-	EventReasoningDelta      StreamEventType = "reasoning_delta"
-	EventReasoningEnd        StreamEventType = "reasoning_end"
-	EventToolCallInputStart  StreamEventType = "tool_call_input_start"
-	EventToolCallStart       StreamEventType = "tool_call_start"
-	EventToolCallProgress    StreamEventType = "tool_call_progress"
-	EventToolCallEnd         StreamEventType = "tool_call_end"
-	EventToolApprovalRequest StreamEventType = "tool_approval_request"
-	EventUserInputRequest    StreamEventType = "user_input_request"
-	EventAttachment          StreamEventType = "attachment_delta"
-	EventReaction            StreamEventType = "reaction_delta"
-	EventSpeech              StreamEventType = "speech_delta"
-	EventAgentEnd            StreamEventType = "agent_end"
-	EventAgentAbort          StreamEventType = "agent_abort"
-	EventRetry               StreamEventType = "retry"
-	EventProgress            StreamEventType = "progress"
-	EventError               StreamEventType = "error"
-)
+type StreamEventType = event.StreamEventType
 
 // StreamEvent is emitted by the agent during streaming.
-type StreamEvent struct {
-	Type           StreamEventType  `json:"type"`
-	Delta          string           `json:"delta,omitempty"`
-	ToolName       string           `json:"toolName,omitempty"`
-	ToolCallID     string           `json:"toolCallId,omitempty"`
-	ApprovalID     string           `json:"approvalId,omitempty"`
-	UserInputID    string           `json:"userInputId,omitempty"`
-	ShortID        int              `json:"shortId,omitempty"`
-	Status         string           `json:"status,omitempty"`
-	Input          any              `json:"input,omitempty"`
-	Metadata       map[string]any   `json:"metadata,omitempty"`
-	Progress       any              `json:"progress,omitempty"`
-	Result         any              `json:"result,omitempty"`
-	Attachments    []FileAttachment `json:"attachments,omitempty"`
-	Reactions      []ReactionItem   `json:"reactions,omitempty"`
-	Speeches       []SpeechItem     `json:"speeches,omitempty"`
-	Messages       json.RawMessage  `json:"messages,omitempty"`
-	Usage          json.RawMessage  `json:"usage,omitempty"`
-	Reasoning      []string         `json:"reasoning,omitempty"`
-	Error          string           `json:"error,omitempty"`
-	Attempt        int              `json:"attempt,omitempty"`
-	MaxAttempt     int              `json:"maxAttempt,omitempty"`
-	RetryError     string           `json:"retryError,omitempty"`
-	StepNumber     int              `json:"stepNumber,omitempty"`
-	TotalSteps     int              `json:"totalSteps,omitempty"`
-	ProgressStatus string           `json:"progressStatus,omitempty"`
-}
+type StreamEvent = event.StreamEvent
 
-// IsTerminal returns true for events that signal end of stream.
-func (e StreamEvent) IsTerminal() bool {
-	return e.Type == EventAgentEnd || e.Type == EventAgentAbort
-}
+const (
+	EventAgentStart          = event.AgentStart
+	EventStart               = event.AgentStart
+	EventTextStart           = event.TextStart
+	EventTextDelta           = event.TextDelta
+	EventTextEnd             = event.TextEnd
+	EventReasoningStart      = event.ReasoningStart
+	EventReasoningDelta      = event.ReasoningDelta
+	EventReasoningEnd        = event.ReasoningEnd
+	EventToolCallInputStart  = event.ToolCallInputStart
+	EventToolCallStart       = event.ToolCallStart
+	EventToolCallProgress    = event.ToolCallProgress
+	EventToolCallEnd         = event.ToolCallEnd
+	EventToolApprovalRequest = event.ToolApprovalRequest
+	EventUserInputRequest    = event.UserInputRequest
+	EventAttachment          = event.Attachment
+	EventReaction            = event.Reaction
+	EventSpeech              = event.Speech
+	EventAgentEnd            = event.AgentEnd
+	EventEnd                 = event.AgentEnd
+	EventAgentAbort          = event.AgentAbort
+	EventAbort               = event.AgentAbort
+	EventRetry               = event.Retry
+	EventProgress            = event.Progress
+	EventError               = event.Error
+)

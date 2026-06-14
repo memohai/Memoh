@@ -27,6 +27,7 @@ import (
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	emailpkg "github.com/memohai/memoh/internal/email"
+	fetchpkg "github.com/memohai/memoh/internal/fetchproviders"
 	"github.com/memohai/memoh/internal/mcp"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	modelpkg "github.com/memohai/memoh/internal/models"
@@ -59,6 +60,7 @@ type Service struct {
 	providers       *providerpkg.Service
 	models          *modelpkg.Service
 	searchProviders *searchpkg.Service
+	fetchProviders  *fetchpkg.Service
 	memoryProviders *memprovider.Service
 	workspace       WorkspaceData
 }
@@ -77,6 +79,7 @@ type Params struct {
 	Providers       *providerpkg.Service
 	Models          *modelpkg.Service
 	SearchProviders *searchpkg.Service
+	FetchProviders  *fetchpkg.Service
 	MemoryProviders *memprovider.Service
 	Workspace       WorkspaceData
 }
@@ -100,6 +103,7 @@ func New(params Params) *Service {
 		providers:       params.Providers,
 		models:          params.Models,
 		searchProviders: params.SearchProviders,
+		fetchProviders:  params.FetchProviders,
 		memoryProviders: params.MemoryProviders,
 		workspace:       params.Workspace,
 	}
@@ -184,6 +188,9 @@ func (s *Service) Export(ctx context.Context, botID string, opts ExportOptions, 
 			return err
 		}
 		if err := writer.writeJSON("dependencies/search_providers.json", "search_providers", data.Dependencies.SearchProviders, opts); err != nil {
+			return err
+		}
+		if err := writer.writeJSON("dependencies/fetch_providers.json", "fetch_providers", data.Dependencies.FetchProviders, opts); err != nil {
 			return err
 		}
 		if err := writer.writeJSON("dependencies/memory_providers.json", "memory_providers", data.Dependencies.MemoryProviders, opts); err != nil {
@@ -386,6 +393,14 @@ func (s *Service) collectDependencies(ctx context.Context, cfg settings.Settings
 			warnings = append(warnings, "search provider dependency missing: "+cfg.SearchProviderID)
 		}
 	}
+	fetchProviders := []fetchpkg.GetResponse{}
+	if s.fetchProviders != nil && cfg.FetchProviderID != "" {
+		if item, err := s.fetchProviders.Get(ctx, cfg.FetchProviderID); err == nil {
+			fetchProviders = append(fetchProviders, item)
+		} else {
+			warnings = append(warnings, "fetch provider dependency missing: "+cfg.FetchProviderID)
+		}
+	}
 	memoryProviders := []memprovider.ProviderGetResponse{}
 	if s.memoryProviders != nil && cfg.MemoryProviderID != "" {
 		if item, err := s.memoryProviders.Get(ctx, cfg.MemoryProviderID); err == nil {
@@ -399,6 +414,7 @@ func (s *Service) collectDependencies(ctx context.Context, cfg settings.Settings
 		Providers:       providers,
 		Models:          models,
 		SearchProviders: searchProviders,
+		FetchProviders:  fetchProviders,
 		MemoryProviders: memoryProviders,
 		EmailProviders:  emailProviders,
 	}, warnings

@@ -29,10 +29,10 @@ const ICONS: Record<string, Component> = {
 }
 
 const CLASSES: Record<string, string> = {
-  'tool-call': 'border-blue-500/30 text-blue-600 dark:border-blue-400/30 dark:text-blue-400',
-  'vision': 'border-purple-500/30 text-purple-600 dark:border-purple-400/30 dark:text-purple-400',
-  'image-output': 'border-pink-500/30 text-pink-600 dark:border-pink-400/30 dark:text-pink-400',
-  'reasoning': 'border-amber-500/30 text-amber-600 dark:border-amber-400/30 dark:text-amber-400',
+  'tool-call': 'border-capability-tool-border text-capability-tool',
+  'vision': 'border-capability-vision-border text-capability-vision',
+  'image-output': 'border-capability-image-border text-capability-image',
+  'reasoning': 'border-capability-reasoning-border text-capability-reasoning',
 }
 
 function iconOf(cap: string): Component {

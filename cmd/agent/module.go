@@ -19,6 +19,7 @@ import (
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/conversation"
 	emailpkg "github.com/memohai/memoh/internal/email"
+	"github.com/memohai/memoh/internal/fetchproviders"
 	"github.com/memohai/memoh/internal/handlers"
 	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/mcp"
@@ -72,6 +73,7 @@ func options() fx.Option {
 			toolapproval.NewService,
 			userinput.NewService,
 			provideProvidersService,
+			fetchproviders.NewService,
 			searchproviders.NewService,
 			policy.NewService,
 			mcp.NewConnectionService,
@@ -132,6 +134,7 @@ func options() fx.Option {
 			provideServerHandler(provideProviderOAuthHandler),
 			provideServerHandler(provideACPCodexOAuthServerHandler),
 			provideServerHandler(provideACPClaudeCodeOAuthServerHandler),
+			provideServerHandler(handlers.NewFetchProvidersHandler),
 			provideServerHandler(handlers.NewSearchProvidersHandler),
 			provideServerHandler(handlers.NewModelsHandler),
 			provideServerHandler(handlers.NewSettingsHandler),
@@ -172,6 +175,7 @@ func options() fx.Option {
 			startRegistrySync,
 			startAudioProviderBootstrap,
 			startMemoryProviderBootstrap,
+			startFetchProviderBootstrap,
 			startSearchProviderBootstrap,
 			startScheduleService,
 			startHeartbeatService,

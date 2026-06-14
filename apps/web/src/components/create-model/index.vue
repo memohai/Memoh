@@ -4,7 +4,7 @@
       v-model:open="open"
       :title="title === 'edit' ? $t('models.editModel') : $t('models.addModel')"
       :cancel-text="$t('common.cancel')"
-      :submit-text="title === 'edit' ? $t('common.save') : $t('models.addModel')"
+      :submit-text="title === 'edit' ? $t('common.confirm') : $t('models.addModel')"
       :submit-disabled="!canSubmit"
       :loading="isLoading"
       @submit="addModel"

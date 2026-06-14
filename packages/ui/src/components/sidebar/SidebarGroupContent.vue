@@ -11,7 +11,7 @@ const props = defineProps<{
   <div
     data-slot="sidebar-group-content"
     data-sidebar="group-content"
-    :class="cn('w-full text-xs', props.class)"
+    :class="cn('w-full text-body', props.class)"
   >
     <slot />
   </div>

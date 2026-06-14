@@ -178,14 +178,15 @@ func (h *Handler) CurrentContext(ctx context.Context, botID string) (CurrentCont
 // topLevelCommands are standalone commands (no sub-actions) that IsCommand
 // recognises and that are handled outside the regular resource-group dispatch
 // (the channel inbound processor has the routing context they need). Only
-// /help, /new, /stop are advertised in /help output — /approve and /reject are
-// internal tool-approval protocol verbs that users discover via the inline
-// approval prompt, not via the help listing.
+// /help, /start, /new, /stop are advertised in /help output — /approve and
+// /reject are internal tool-approval protocol verbs that users discover via the
+// inline approval prompt, not via the help listing.
 //
 // The map carries no per-key data — membership is the only fact callers need.
 // Localized descriptions for the advertised entries live under `cmd.help.top.*`
 // in the i18n catalog.
 var topLevelCommands = map[string]struct{}{
+	"start":   {},
 	"new":     {},
 	"stop":    {},
 	"approve": {},

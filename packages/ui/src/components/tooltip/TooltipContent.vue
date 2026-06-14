@@ -2,7 +2,7 @@
 import type { TooltipContentEmits, TooltipContentProps } from 'reka-ui'
 import type { HTMLAttributes } from 'vue'
 import { reactiveOmit } from '@vueuse/core'
-import { TooltipArrow, TooltipContent, TooltipPortal, useForwardPropsEmits } from 'reka-ui'
+import { TooltipContent, TooltipPortal, useForwardPropsEmits } from 'reka-ui'
 import { cn } from '#/lib/utils'
 
 defineOptions({
@@ -21,21 +21,21 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
 
 <template>
   <TooltipPortal>
+    <!-- A terse hint, NOT a content surface: an inverted TRUE-black bubble (--tooltip,
+         a standalone near-pure-black ink that flips to near-white in dark mode) clearly
+         separates it from the light Popover / HoverCard cards. No border (the fill is
+         its own edge), no arrow and no shadow, for a clean flat pill. Small radius +
+         tight padding keep the hint compact. -->
     <TooltipContent
       data-slot="tooltip-content"
       v-bind="{ ...forwarded, ...$attrs }"
       :class="cn(
-        'z-50 w-fit max-w-80 rounded-lg border border-border px-3 py-2 text-xs whitespace-normal break-words',
-        'bg-popover text-popover-foreground shadow-md',
-        'animate-in fade-in-0 zoom-in-95',
-        'data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95',
-        'data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2',
+        'z-50 w-fit max-w-80 rounded-sm px-2 py-1 text-body font-medium whitespace-normal break-words',
+        'bg-[color:var(--tooltip)] text-[color:var(--tooltip-foreground)]',
         props.class
       )"
     >
       <slot />
-
-      <TooltipArrow class="z-50 size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-[2px] bg-popover fill-popover" />
     </TooltipContent>
   </TooltipPortal>
 </template>

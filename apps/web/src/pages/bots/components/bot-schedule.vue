@@ -277,7 +277,7 @@
                   v-if="isSaving"
                   class="mr-1.5 size-3.5"
                 />
-                {{ formMode === 'create' ? $t('common.create') : $t('common.save') }}
+                {{ formMode === 'create' ? $t('common.create') : $t('common.confirm') }}
               </Button>
             </div>
           </form>
@@ -404,7 +404,7 @@
                       />
                       <span
                         class="text-[11px] font-semibold min-w-[42px] transition-colors"
-                        :class="item.enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-foreground/70'"
+                        :class="item.enabled ? 'text-success-foreground' : 'text-foreground/70'"
                       >
                         {{ item.enabled ? $t('common.enabled') : $t('common.disabled') }}
                       </span>
@@ -508,7 +508,7 @@
 import { Calendar, Pencil, Plus, Trash2, X, RefreshCw } from 'lucide-vue-next'
 import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useQueryCache } from '@pinia/colada'
 import {
   Button, Badge, Input, Label, Spinner, Switch, Textarea,

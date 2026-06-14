@@ -1,0 +1,235 @@
+<script setup lang="ts">
+import { computed, inject, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useDark } from '@vueuse/core'
+import {
+  ChevronRight,
+  Download,
+  FileArchive,
+  FolderPlus,
+  LoaderCircle,
+  SquarePen,
+  Trash2,
+  Upload,
+} from 'lucide-vue-next'
+import {
+  Checkbox,
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@memohai/ui'
+import type { HandlersFsFileInfo } from '@memohai/sdk'
+import { isArchiveFile, sortDirsFirst } from './utils'
+import { resolveFileIcon } from './file-icon'
+import { FileTreeKey } from './file-tree-context'
+
+const props = defineProps<{
+  entry: HandlersFsFileInfo
+  depth: number
+}>()
+
+const { t } = useI18n()
+const ctx = inject(FileTreeKey)
+if (!ctx) throw new Error('FileTreeNode must be used within a FileTree provider')
+const tree = ctx
+const isDark = useDark()
+
+const expanded = ref(false)
+const loaded = ref(false)
+const loading = ref(false)
+const children = ref<HandlersFsFileInfo[]>([])
+const rowEl = ref<HTMLElement | null>(null)
+
+const path = computed(() => props.entry.path ?? '')
+const selectionMode = computed(() => tree.selectionMode.value)
+const canWrite = computed(() => tree.canWrite.value)
+const isActive = computed(() => !!path.value && tree.activePath.value === path.value)
+const selected = computed(() => !!path.value && tree.isSelected(path.value))
+const isArchive = computed(() => isArchiveFile(props.entry.name))
+
+// Folders show only the disclosure chevron (no folder glyph); files map to a
+// Seti type glyph by name/extension (color tracks the active theme).
+const fileIcon = computed(() => resolveFileIcon(props.entry.name ?? '', isDark.value))
+
+async function loadChildren() {
+  if (!props.entry.isDir || !path.value) return
+  loading.value = true
+  try {
+    children.value = sortDirsFirst(await tree.listDirectory(path.value))
+    loaded.value = true
+  } finally {
+    loading.value = false
+  }
+}
+
+async function expand() {
+  expanded.value = true
+  if (!loaded.value) await loadChildren()
+}
+
+function onRowClick() {
+  if (selectionMode.value && path.value) {
+    tree.toggleSelect(props.entry, !selected.value)
+    return
+  }
+  if (props.entry.isDir) {
+    if (expanded.value) expanded.value = false
+    else void expand()
+  } else {
+    tree.openFile(props.entry)
+  }
+}
+
+// Re-fetch an expanded folder's children when the workspace changes.
+watch(() => tree.refreshKey.value, () => {
+  if (expanded.value) void loadChildren()
+})
+
+// Reveal (deep-link): expand the chain of ancestor folders leading to the
+// target, and scroll the target row into view.
+function isOnRevealPath(): boolean {
+  const reveal = tree.revealPath.value
+  if (!reveal || !props.entry.isDir || !path.value) return false
+  return reveal === path.value || reveal.startsWith(`${path.value}/`)
+}
+
+watch(() => tree.revealPath.value, async (reveal) => {
+  if (isOnRevealPath() && !expanded.value) {
+    await expand()
+  }
+  if (reveal && reveal === path.value) {
+    requestAnimationFrame(() => rowEl.value?.scrollIntoView({ block: 'nearest' }))
+  }
+}, { immediate: true })
+
+function onCheckbox(checked: boolean | 'indeterminate') {
+  tree.toggleSelect(props.entry, checked === true)
+}
+</script>
+
+<template>
+  <ContextMenu>
+    <ContextMenuTrigger as-child>
+      <div
+        ref="rowEl"
+        class="group/row flex h-[22px] cursor-pointer items-center pr-2 pl-2 text-[13px] transition-colors select-none"
+        :class="isActive
+          ? 'bg-sidebar-accent text-foreground'
+          : 'text-foreground/90 hover:bg-[color:var(--sidebar-hover)]'"
+        @click="onRowClick"
+      >
+        <!-- Indentation: one 8px column per ancestor level. The guide rule is
+             transparent at rest and fades in on row hover (VS Code's tree). -->
+        <span
+          v-for="g in depth"
+          :key="g"
+          class="h-full w-2 shrink-0 self-stretch border-l border-transparent group-hover/row:border-[color:var(--border)]"
+        />
+
+        <Checkbox
+          v-if="selectionMode"
+          :model-value="selected"
+          class="mr-1.5 shrink-0"
+          :aria-label="t('bots.files.selectItem', { name: entry.name ?? '' })"
+          @click.stop
+          @update:model-value="onCheckbox"
+        />
+
+        <!-- Single 16px leading column: folders show the disclosure chevron,
+             files show their Seti type glyph — both at the same x so names align
+             at every depth (the chevron takes the icon's old slot). -->
+        <span class="flex size-4 shrink-0 items-center justify-center">
+          <ChevronRight
+            v-if="entry.isDir"
+            class="size-3.5 text-muted-foreground transition-transform duration-100"
+            :class="{ 'rotate-90': expanded }"
+          />
+          <span
+            v-else
+            class="seti-icon"
+            :style="{ color: fileIcon.color }"
+          >{{ fileIcon.char }}</span>
+        </span>
+        <span class="ml-1.5 min-w-0 flex-1 truncate">{{ entry.name }}</span>
+      </div>
+    </ContextMenuTrigger>
+    <ContextMenuContent>
+      <template v-if="entry.isDir && canWrite">
+        <ContextMenuItem @select="tree.requestNewFolder(entry)">
+          <FolderPlus class="mr-2 size-3.5" />
+          {{ t('bots.files.newFolder') }}
+        </ContextMenuItem>
+        <ContextMenuItem @select="tree.requestUpload(entry)">
+          <Upload class="mr-2 size-3.5" />
+          {{ t('bots.files.upload') }}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+      </template>
+      <ContextMenuItem @select="tree.requestDownload(entry)">
+        <Download class="mr-2 size-3.5" />
+        {{ t('bots.files.download') }}
+      </ContextMenuItem>
+      <ContextMenuItem
+        v-if="canWrite && !entry.isDir && isArchive"
+        @select="tree.requestExtract(entry)"
+      >
+        <FileArchive class="mr-2 size-3.5" />
+        {{ t('bots.files.extract') }}
+      </ContextMenuItem>
+      <ContextMenuItem
+        v-if="canWrite"
+        @select="tree.requestRename(entry)"
+      >
+        <SquarePen class="mr-2 size-3.5" />
+        {{ t('bots.files.rename') }}
+      </ContextMenuItem>
+      <ContextMenuSeparator v-if="canWrite" />
+      <ContextMenuItem
+        v-if="canWrite"
+        class="text-destructive focus:text-destructive"
+        @select="tree.requestDelete(entry)"
+      >
+        <Trash2 class="mr-2 size-3.5" />
+        {{ t('bots.files.delete') }}
+      </ContextMenuItem>
+    </ContextMenuContent>
+  </ContextMenu>
+
+  <template v-if="entry.isDir && expanded">
+    <div
+      v-if="loading && children.length === 0"
+      class="flex h-[22px] items-center pr-2 pl-2 text-[13px] text-muted-foreground"
+    >
+      <span
+        v-for="g in depth + 1"
+        :key="g"
+        class="h-full w-2 shrink-0 self-stretch"
+      />
+      <LoaderCircle class="size-3.5 animate-spin" />
+    </div>
+    <FileTreeNode
+      v-for="child in children"
+      v-else
+      :key="child.path"
+      :entry="child"
+      :depth="depth + 1"
+    />
+  </template>
+</template>
+
+<style scoped>
+/* Seti glyphs are a private-use-area icon font; render at the 16px column size
+ * with no smoothing artifacts. The @font-face for the family lives in
+ * ./seti/seti.css (imported by ./file-icon). */
+.seti-icon {
+  font-family: 'seti';
+  font-size: 16px;
+  line-height: 1;
+  font-style: normal;
+  font-weight: normal;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+</style>

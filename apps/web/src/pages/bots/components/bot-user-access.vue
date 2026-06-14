@@ -213,13 +213,13 @@ import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { Plus, Trash2, Globe, User } from 'lucide-vue-next'
-import { toast } from 'vue-sonner'
 import {
   Button,
   Label,
   Checkbox,
   Avatar,
   AvatarImage,
+  toast,
   AvatarFallback,
   Spinner,
   Badge,
