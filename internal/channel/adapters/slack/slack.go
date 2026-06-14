@@ -129,6 +129,7 @@ func (*SlackAdapter) Descriptor() channel.Descriptor {
 		Capabilities: channel.ChannelCapabilities{
 			Text:           true,
 			Markdown:       true,
+			RichText:       true,
 			Reply:          true,
 			Attachments:    true,
 			Media:          true,
@@ -588,7 +589,11 @@ func (a *SlackAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg 
 }
 
 func (a *SlackAdapter) sendSlackMessage(ctx context.Context, api *slack.Client, channelID string, msg channel.PreparedOutboundMessage) error {
-	text := truncateSlackText(msg.Message.Message.PlainText())
+	body := renderSlackMessagePartsMrkdwn(msg.Message.Message)
+	if body == "" {
+		body = msg.Message.Message.PlainText()
+	}
+	text := truncateSlackText(body)
 	threadTS := ""
 	if msg.Message.Message.Reply != nil && msg.Message.Message.Reply.MessageID != "" {
 		threadTS = msg.Message.Message.Reply.MessageID
