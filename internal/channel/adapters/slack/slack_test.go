@@ -127,6 +127,26 @@ func TestSlackOutboundStreamSendToolCallMessagePostsBlocks(t *testing.T) {
 	}
 }
 
+func TestRenderSlackToolCallBlockDoesNotLinkUnsafeURL(t *testing.T) {
+	t.Parallel()
+
+	got := renderSlackToolCallBlock(channel.ToolCallBlock{
+		Type:  channel.ToolCallBlockLink,
+		Title: "trace",
+		URL:   "javascript:alert(1)",
+		Desc:  "open <!channel> <https://evil.test|link>",
+	})
+
+	for _, disallowed := range []string{"<javascript:", "|trace>", "<!channel>", "<https://evil.test|link>"} {
+		if strings.Contains(got, disallowed) {
+			t.Fatalf("expected unsafe link block to avoid %q, got %q", disallowed, got)
+		}
+	}
+	if !strings.Contains(got, "trace") || !strings.Contains(got, "&lt;!channel&gt;") {
+		t.Fatalf("expected escaped fallback text, got %q", got)
+	}
+}
+
 func slackBlockText(t *testing.T, block map[string]any) string {
 	t.Helper()
 

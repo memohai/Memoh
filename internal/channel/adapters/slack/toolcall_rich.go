@@ -70,7 +70,7 @@ func renderSlackToolCallBlock(block channel.ToolCallBlock) string {
 		if title == "" {
 			title = url
 		}
-		if url == "" {
+		if url == "" || !isAllowedSlackRichHref(url) {
 			return slackEscapeMrkdwn(strings.TrimSpace(strings.Join([]string{title, desc}, "\n")))
 		}
 		value := "<" + slackEscapeLinkURL(url) + "|" + slackEscapeMrkdwn(title) + ">"

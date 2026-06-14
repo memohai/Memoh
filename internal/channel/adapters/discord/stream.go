@@ -242,7 +242,7 @@ func (s *discordOutboundStream) sendToolCallMessage(tc *channel.StreamToolCall, 
 				return nil
 			}
 			if payload.Embed != nil {
-				if _, err := s.session.ChannelMessageEdit(s.target, msgID, text); err == nil {
+				if _, err := s.session.ChannelMessageEditComplex(discordToolCallMessageEdit(s.target, msgID, discordToolCallPayload{Content: text})); err == nil {
 					s.forgetToolCallMessage(callID)
 					return nil
 				}
@@ -265,7 +265,8 @@ func (s *discordOutboundStream) sendToolCallMessage(tc *channel.StreamToolCall, 
 
 func (s *discordOutboundStream) discordToolCallMessageSend(payload discordToolCallPayload) *discordgo.MessageSend {
 	messageSend := &discordgo.MessageSend{
-		Content: payload.Content,
+		Content:         payload.Content,
+		AllowedMentions: discordNoAllowedMentions(),
 	}
 	if payload.Embed != nil {
 		messageSend.Embeds = []*discordgo.MessageEmbed{payload.Embed}
@@ -281,10 +282,15 @@ func (s *discordOutboundStream) discordToolCallMessageSend(payload discordToolCa
 
 func discordToolCallMessageEdit(channelID, messageID string, payload discordToolCallPayload) *discordgo.MessageEdit {
 	edit := discordgo.NewMessageEdit(channelID, messageID).SetContent(payload.Content)
+	edit.AllowedMentions = discordNoAllowedMentions()
 	if payload.Embed != nil {
 		edit.SetEmbeds([]*discordgo.MessageEmbed{payload.Embed})
 	}
 	return edit
+}
+
+func discordNoAllowedMentions() *discordgo.MessageAllowedMentions {
+	return &discordgo.MessageAllowedMentions{Parse: []discordgo.AllowedMentionType{}}
 }
 
 func (s *discordOutboundStream) lookupToolCallMessage(callID string) (string, bool) {

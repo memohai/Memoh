@@ -30,8 +30,8 @@ func renderDiscordToolCallMessage(p channel.ToolCallPresentation) discordToolCal
 	}
 
 	embed := &discordgo.MessageEmbed{
-		Title:       truncateDiscordEmbedText(toolCallTitle(p), discordToolCallMaxEmbedTitle),
-		Description: truncateDiscordEmbedText(toolCallDescription(p), discordToolCallMaxEmbedDescription),
+		Title:       truncateDiscordEmbedText(escapeDiscordInlineMarkdown(toolCallTitle(p)), discordToolCallMaxEmbedTitle),
+		Description: truncateDiscordEmbedText(escapeDiscordInlineMarkdown(toolCallDescription(p)), discordToolCallMaxEmbedDescription),
 		Color:       discordToolCallStatusColor(p.Status),
 	}
 
@@ -52,7 +52,7 @@ func renderDiscordToolCallMessage(p channel.ToolCallPresentation) discordToolCal
 	}
 	if footer != "" {
 		embed.Footer = &discordgo.MessageEmbedFooter{
-			Text: truncateDiscordEmbedText(footer, discordToolCallMaxEmbedFooter),
+			Text: truncateDiscordEmbedText(escapeDiscordInlineMarkdown(footer), discordToolCallMaxEmbedFooter),
 		}
 	}
 
@@ -69,20 +69,22 @@ func renderDiscordToolCallField(block channel.ToolCallBlock) *discordgo.MessageE
 			title = "Link"
 		}
 		value := ""
-		if url != "" {
-			value = "[" + discordEscapeLinkText(title) + "](" + discordEscapeLinkURL(url) + ")"
+		if url != "" && isAllowedDiscordRichHref(url) {
+			value = "[" + escapeDiscordLinkText(title) + "](" + discordEscapeLinkURL(url) + ")"
+		} else if title != "" {
+			value = escapeDiscordInlineMarkdown(title)
 		}
 		if desc != "" {
 			if value != "" {
 				value += "\n"
 			}
-			value += desc
+			value += escapeDiscordInlineMarkdown(desc)
 		}
 		if value == "" {
 			return nil
 		}
 		return &discordgo.MessageEmbedField{
-			Name:  truncateDiscordEmbedText(title, discordToolCallMaxEmbedFieldName),
+			Name:  truncateDiscordEmbedText(escapeDiscordInlineMarkdown(title), discordToolCallMaxEmbedFieldName),
 			Value: truncateDiscordEmbedText(value, discordToolCallMaxEmbedFieldValue),
 		}
 	case channel.ToolCallBlockCode:
@@ -94,9 +96,10 @@ func renderDiscordToolCallField(block channel.ToolCallBlock) *discordgo.MessageE
 		if name == "" {
 			name = "Output"
 		}
-		value := "```\n" + text + "\n```"
+		fence := selectBacktickFence(text, 3)
+		value := fence + "\n" + text + "\n" + fence
 		return &discordgo.MessageEmbedField{
-			Name:  truncateDiscordEmbedText(name, discordToolCallMaxEmbedFieldName),
+			Name:  truncateDiscordEmbedText(escapeDiscordInlineMarkdown(name), discordToolCallMaxEmbedFieldName),
 			Value: truncateDiscordEmbedText(value, discordToolCallMaxEmbedFieldValue),
 		}
 	default:
@@ -109,8 +112,8 @@ func renderDiscordToolCallField(block channel.ToolCallBlock) *discordgo.MessageE
 			name = "Details"
 		}
 		return &discordgo.MessageEmbedField{
-			Name:  truncateDiscordEmbedText(name, discordToolCallMaxEmbedFieldName),
-			Value: truncateDiscordEmbedText(text, discordToolCallMaxEmbedFieldValue),
+			Name:  truncateDiscordEmbedText(escapeDiscordInlineMarkdown(name), discordToolCallMaxEmbedFieldName),
+			Value: truncateDiscordEmbedText(escapeDiscordInlineMarkdown(text), discordToolCallMaxEmbedFieldValue),
 		}
 	}
 }
@@ -150,12 +153,6 @@ func discordToolCallStatusColor(status channel.ToolCallStatus) int {
 	default:
 		return 0x5865f2
 	}
-}
-
-func discordEscapeLinkText(text string) string {
-	text = strings.ReplaceAll(text, "\\", "\\\\")
-	text = strings.ReplaceAll(text, "]", "\\]")
-	return text
 }
 
 func discordEscapeLinkURL(url string) string {

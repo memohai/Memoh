@@ -123,6 +123,14 @@ func TestDiscordOutboundStreamSendToolCallMessagePostsEmbed(t *testing.T) {
 	if payload["content"] == "" {
 		t.Fatalf("expected fallback content, got %#v", payload)
 	}
+	allowedMentions, ok := payload["allowed_mentions"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected allowed_mentions to disable fallback pings, got %#v", payload["allowed_mentions"])
+	}
+	parse, ok := allowedMentions["parse"].([]any)
+	if !ok || len(parse) != 0 {
+		t.Fatalf("expected no allowed mention parse types, got %#v", allowedMentions["parse"])
+	}
 	embeds, ok := payload["embeds"].([]any)
 	if !ok || len(embeds) != 1 {
 		t.Fatalf("expected one embed, got %#v", payload["embeds"])
@@ -147,5 +155,45 @@ func TestDiscordOutboundStreamSendToolCallMessagePostsEmbed(t *testing.T) {
 	footer, ok := embed["footer"].(map[string]any)
 	if !ok || footer["text"] != "exit=0" {
 		t.Fatalf("expected footer text, got %#v", embed["footer"])
+	}
+}
+
+func TestRenderDiscordToolCallMessageEscapesEmbedMarkdown(t *testing.T) {
+	t.Parallel()
+
+	payload := renderDiscordToolCallMessage(channel.ToolCallPresentation{
+		Emoji:    "💻",
+		ToolName: "exec <@123>",
+		Status:   channel.ToolCallStatusCompleted,
+		Header:   "run [evil](https://evil.test) <@123>",
+		Body: []channel.ToolCallBlock{
+			{Type: channel.ToolCallBlockText, Title: "stdout <@123>", Text: "ok [evil](https://evil.test) <@123>"},
+			{Type: channel.ToolCallBlockLink, Title: "trace] bad", URL: "javascript:alert(1)", Desc: "open [evil](https://evil.test) <@123>"},
+			{Type: channel.ToolCallBlockCode, Title: "stderr", Text: "line 1\n```\nline 2"},
+		},
+		Footer: "exit <@123>",
+	})
+
+	if payload.Embed == nil {
+		t.Fatal("expected embed")
+	}
+	for _, text := range []string{
+		payload.Embed.Title,
+		payload.Embed.Description,
+		payload.Embed.Footer.Text,
+		payload.Embed.Fields[0].Name,
+		payload.Embed.Fields[0].Value,
+		payload.Embed.Fields[1].Name,
+		payload.Embed.Fields[1].Value,
+	} {
+		for _, disallowed := range []string{"<@123>", "[evil](", "](javascript:"} {
+			if strings.Contains(text, disallowed) {
+				t.Fatalf("expected embed text to avoid %q, got %q", disallowed, text)
+			}
+		}
+	}
+	codeValue := payload.Embed.Fields[2].Value
+	if !strings.HasPrefix(codeValue, "````\n") || !strings.HasSuffix(codeValue, "\n````") {
+		t.Fatalf("expected code block to use a longer fence, got %q", codeValue)
 	}
 }

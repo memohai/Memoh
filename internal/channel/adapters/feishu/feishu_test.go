@@ -398,6 +398,35 @@ func TestProcessFeishuCardMarkdown(t *testing.T) {
 	}
 }
 
+func TestRenderFeishuToolCallCardLarkMDEscapesUnsafeMarkdown(t *testing.T) {
+	t.Parallel()
+
+	got := renderFeishuToolCallCardLarkMD(channel.ToolCallPresentation{
+		Emoji:    "💻",
+		ToolName: `exec <at id="all"></at>`,
+		Status:   channel.ToolCallStatusCompleted,
+		Header:   `run [evil](https://evil.test) <at id="all"></at>`,
+		Body: []channel.ToolCallBlock{
+			{Type: channel.ToolCallBlockText, Title: `stdout <at id="all"></at>`, Text: `ok [evil](https://evil.test) <at id="all"></at>`},
+			{Type: channel.ToolCallBlockLink, Title: "trace] bad", URL: "javascript:alert(1)", Desc: `open [evil](https://evil.test) <at id="all"></at>`},
+			{Type: channel.ToolCallBlockCode, Title: "stderr", Text: "line 1\n```\nline 2"},
+		},
+		Footer: `exit <at id="all"></at>`,
+	})
+
+	if got == "" {
+		t.Fatal("expected rendered card body")
+	}
+	for _, disallowed := range []string{`<at id="all"></at>`, "[evil](", "](javascript:"} {
+		if strings.Contains(got, disallowed) {
+			t.Fatalf("expected tool-call card body to avoid %q, got %q", disallowed, got)
+		}
+	}
+	if !strings.Contains(got, "````\nline 1\n```\nline 2\n````") {
+		t.Fatalf("expected code block to use a longer fence, got %q", got)
+	}
+}
+
 func TestExtractFeishuInboundMentionFallbackNoBotID(t *testing.T) {
 	t.Parallel()
 

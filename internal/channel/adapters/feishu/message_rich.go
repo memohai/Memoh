@@ -154,10 +154,7 @@ var escapeFeishuInlineLarkMD = strings.NewReplacer(
 func escapeFeishuLinkText(text string) string {
 	text = strings.ReplaceAll(text, "\r", "")
 	text = strings.ReplaceAll(text, "\n", " ")
-	text = strings.ReplaceAll(text, `\`, `\\`)
-	text = strings.ReplaceAll(text, "[", `\[`)
-	text = strings.ReplaceAll(text, "]", `\]`)
-	return text
+	return escapeFeishuInlineLarkMD(text)
 }
 
 // escapeFeishuLinkURL strips control whitespace and percent-encodes the

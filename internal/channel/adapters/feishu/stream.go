@@ -321,6 +321,10 @@ func extractReadableFromJSON(text string) string {
 
 func buildFeishuCardContent(text string) (string, error) {
 	body := processFeishuCardMarkdown(strings.TrimSpace(text))
+	return buildFeishuCardContentFromLarkMD(body)
+}
+
+func buildFeishuCardContentFromLarkMD(body string) (string, error) {
 	card := map[string]any{
 		"config": map[string]any{
 			"wide_screen_mode": true,
@@ -378,7 +382,7 @@ func (s *feishuOutboundStream) renderToolCallCard(
 	tc *channel.StreamToolCall,
 	p channel.ToolCallPresentation,
 ) error {
-	text := strings.TrimSpace(channel.RenderToolCallMessageMarkdown(p))
+	text := renderFeishuToolCallCardLarkMD(p)
 	if text == "" {
 		return nil
 	}
@@ -416,7 +420,7 @@ func (s *feishuOutboundStream) renderToolCallCard(
 }
 
 func (s *feishuOutboundStream) patchToolCallCard(ctx context.Context, messageID, text string) error {
-	content, err := buildFeishuCardContent(text)
+	content, err := buildFeishuCardContentFromLarkMD(text)
 	if err != nil {
 		return err
 	}
@@ -463,7 +467,7 @@ func (s *feishuOutboundStream) forgetToolCallMessage(callID string) {
 }
 
 func (s *feishuOutboundStream) sendToolCallCard(ctx context.Context, text string) (string, error) {
-	content, err := buildFeishuCardContent(text)
+	content, err := buildFeishuCardContentFromLarkMD(text)
 	if err != nil {
 		return "", err
 	}
