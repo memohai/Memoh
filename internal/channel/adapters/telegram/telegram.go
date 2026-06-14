@@ -760,7 +760,7 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 	for key, value := range metadata {
 		meta[key] = value
 	}
-	mentionParts := extractTelegramMentionParts(raw)
+	mentionParts := extractTelegramMessageParts(raw)
 
 	return channel.InboundMessage{
 		Channel: Type,
@@ -1564,55 +1564,6 @@ func buildTelegramAnimation(target string, file tgbotapi.RequestFileData) (tgbot
 	animation := tgbotapi.NewAnimation(chatID, file)
 	animation.ChannelUsername = channelUsername
 	return animation, nil
-}
-
-// extractTelegramMentionParts extracts structured mention parts from Telegram message entities.
-func extractTelegramMentionParts(msg *tgbotapi.Message) []channel.MessagePart {
-	if msg == nil {
-		return nil
-	}
-	text := msg.Text
-	if text == "" {
-		text = msg.Caption
-	}
-	entities := make([]tgbotapi.MessageEntity, 0, len(msg.Entities)+len(msg.CaptionEntities))
-	entities = append(entities, msg.Entities...)
-	entities = append(entities, msg.CaptionEntities...)
-
-	var parts []channel.MessagePart
-	for _, entity := range entities {
-		switch entity.Type {
-		case "mention":
-			if text != "" && entity.Offset >= 0 && entity.Offset+entity.Length <= len([]rune(text)) {
-				runes := []rune(text)
-				mentionText := string(runes[entity.Offset : entity.Offset+entity.Length])
-				parts = append(parts, channel.MessagePart{
-					Type: channel.MessagePartMention,
-					Text: mentionText,
-				})
-			}
-		case "text_mention":
-			if entity.User != nil {
-				name := strings.TrimSpace(entity.User.FirstName + " " + entity.User.LastName)
-				if name == "" {
-					name = entity.User.UserName
-				}
-				displayText := "@" + name
-				meta := map[string]any{
-					"user_id": strconv.FormatInt(entity.User.ID, 10),
-				}
-				if entity.User.UserName != "" {
-					meta["username"] = entity.User.UserName
-				}
-				parts = append(parts, channel.MessagePart{
-					Type:     channel.MessagePartMention,
-					Text:     displayText,
-					Metadata: meta,
-				})
-			}
-		}
-	}
-	return parts
 }
 
 func isTelegramBotMentioned(msg *tgbotapi.Message, botUsername string) bool {
