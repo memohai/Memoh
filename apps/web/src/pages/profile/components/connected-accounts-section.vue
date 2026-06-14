@@ -1,19 +1,101 @@
 <template>
-  <div class="rounded-md border bg-background shadow-sm">
-    <div class="p-4 md:p-6 space-y-4">
-      <div class="flex items-start justify-between gap-3">
-        <div class="space-y-1">
-          <h3 class="text-sm font-medium">
-            {{ $t('settings.connectedAccounts.title') }}
-          </h3>
-          <p class="text-xs text-muted-foreground max-w-md">
+  <SettingsSection :title="$t('settings.connectedAccounts.title')">
+    <!-- No linkable IM bot: linking needs a bot that can receive /link, so the
+         only useful action here is going to set one up. -->
+    <div
+      v-if="!checkingImBot && !hasLinkableImBot"
+      class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 py-3"
+    >
+      <div class="min-w-0">
+        <div class="text-sm font-medium text-foreground">
+          {{ $t('settings.connectedAccounts.noImBotTitle') }}
+        </div>
+        <p class="mt-0.5 text-xs text-muted-foreground">
+          {{ $t('settings.connectedAccounts.noImBotHint') }}
+        </p>
+      </div>
+      <Button
+        variant="outline"
+        size="sm"
+        class="shrink-0"
+        @click="goToBots"
+      >
+        {{ $t('settings.connectedAccounts.goToBots') }}
+        <ArrowRight class="ml-1.5 size-3.5" />
+      </Button>
+    </div>
+
+    <!-- Loading bound identities -->
+    <div
+      v-else-if="isLoading"
+      class="mx-4 flex min-h-[3.75rem] items-center justify-center py-3"
+    >
+      <Spinner class="size-5 text-muted-foreground/50" />
+    </div>
+
+    <template v-else>
+      <!-- Bound identities -->
+      <div
+        v-for="binding in bindings"
+        :key="binding.id"
+        class="mx-4 flex min-h-[3.75rem] items-center gap-3 border-b border-border py-3 last:border-b-0"
+      >
+        <Avatar class="size-8 shrink-0">
+          <AvatarImage
+            :src="binding.channel_identity_avatar_url || ''"
+            :alt="bindingLabel(binding)"
+          />
+          <AvatarFallback class="text-xs">
+            {{ bindingLabel(binding).slice(0, 2).toUpperCase() }}
+          </AvatarFallback>
+        </Avatar>
+        <div class="min-w-0 flex-1">
+          <div class="truncate text-sm font-medium text-foreground">
+            {{ bindingLabel(binding) }}
+          </div>
+          <div
+            v-if="binding.channel_type"
+            class="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground"
+          >
+            <ChannelIcon
+              :channel="binding.channel_type"
+              size="1em"
+            />
+            <span>{{ channelTypeDisplayName(t, binding.channel_type) }}</span>
+          </div>
+        </div>
+        <ConfirmPopover
+          :message="$t('settings.connectedAccounts.disconnectConfirm')"
+          :confirm-text="$t('settings.connectedAccounts.disconnect')"
+          @confirm="() => onDisconnect(binding)"
+        >
+          <template #trigger>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              class="shrink-0 text-muted-foreground hover:text-destructive"
+              :disabled="isRowBusy(binding)"
+            >
+              <Trash2 class="size-4" />
+            </Button>
+          </template>
+        </ConfirmPopover>
+      </div>
+
+      <!-- Link action: empty-state title when none yet, otherwise "link another" -->
+      <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
+        <div class="min-w-0">
+          <div class="text-sm font-medium text-foreground">
+            {{ bindings.length === 0 ? $t('settings.connectedAccounts.empty') : $t('settings.connectedAccounts.linkAnother') }}
+          </div>
+          <p class="mt-0.5 text-xs text-muted-foreground">
             {{ $t('settings.connectedAccounts.subtitle') }}
           </p>
         </div>
         <Button
-          v-if="hasLinkableImBot"
           variant="outline"
           size="sm"
+          class="shrink-0"
           :disabled="issuing"
           @click="onIssue"
         >
@@ -29,162 +111,88 @@
         </Button>
       </div>
 
-      <!-- No IM bot: cannot receive /link, so guide instead of issuing a dead code -->
-      <div
-        v-if="!checkingImBot && !hasLinkableImBot"
-        class="rounded-md border border-dashed border-border/70 bg-muted/20 p-3 space-y-1"
-      >
-        <p class="text-[11px] font-medium text-foreground">
-          {{ $t('settings.connectedAccounts.noImBotTitle') }}
-        </p>
-        <p class="text-[11px] text-muted-foreground">
-          {{ $t('settings.connectedAccounts.noImBotHint') }}
-        </p>
-      </div>
-
       <!-- Active link code with live countdown -->
       <div
-        v-else-if="activeCode"
-        class="rounded-md border border-dashed border-border/70 bg-muted/20 p-3 space-y-2"
+        v-if="activeCode"
+        class="mx-4 space-y-2.5 border-b border-border py-4 last:border-b-0"
       >
         <div class="flex items-center justify-between gap-2">
-          <p class="text-[11px] font-medium text-foreground">
-            {{ $t('settings.connectedAccounts.codeTitle') }}
+          <p class="text-xs text-muted-foreground">
+            {{ $t('settings.connectedAccounts.codeInstruction') }}
           </p>
           <span
-            class="text-[10px] tabular-nums"
+            class="shrink-0 text-xs tabular-nums"
             :class="expired ? 'text-destructive' : 'text-muted-foreground'"
           >
             {{ expired ? $t('settings.connectedAccounts.expired') : $t('settings.connectedAccounts.expiresIn', { time: remainingLabel }) }}
           </span>
         </div>
-        <p class="text-[11px] text-muted-foreground">
-          {{ $t('settings.connectedAccounts.codeInstruction') }}
-        </p>
         <div class="flex items-center gap-2">
-          <code
-            class="flex-1 rounded bg-background border px-2.5 py-1.5 font-mono text-xs select-all transition-colors"
-            :class="expired ? 'border-border/40 text-muted-foreground/50 line-through' : 'border-border/50'"
-          >
-            /link {{ activeCode }}
-          </code>
+          <Input
+            :model-value="`/link ${activeCode}`"
+            readonly
+            tabindex="-1"
+            size="sm"
+            class="flex-1 cursor-default select-none pointer-events-none font-mono [&:read-only:not(:disabled)]:bg-transparent [&:read-only:not(:disabled)]:text-foreground [&:read-only:not(:disabled)]:cursor-default"
+            :class="expired ? 'line-through opacity-60' : ''"
+          />
           <Button
             v-if="!expired"
-            variant="ghost"
+            variant="outline"
             size="sm"
-            class="h-8 text-[11px] shrink-0"
+            class="shrink-0"
             @click="copyCode"
           >
             <Check
               v-if="copied"
-              class="mr-1 size-3.5"
+              class="mr-1.5 size-3.5"
             />
             <Copy
               v-else
-              class="mr-1 size-3.5"
+              class="mr-1.5 size-3.5"
             />
             {{ copied ? $t('settings.connectedAccounts.copied') : $t('settings.connectedAccounts.copy') }}
           </Button>
           <Button
             v-else
-            variant="ghost"
+            variant="outline"
             size="sm"
-            class="h-8 text-[11px] shrink-0"
+            class="shrink-0"
             :disabled="issuing"
             @click="onIssue"
           >
             <Spinner
               v-if="issuing"
-              class="mr-1 size-3.5"
+              class="mr-1.5 size-3.5"
             />
             <RefreshCw
               v-else
-              class="mr-1 size-3.5"
+              class="mr-1.5 size-3.5"
             />
             {{ $t('settings.connectedAccounts.connect') }}
           </Button>
         </div>
       </div>
-
-      <!-- Loading bound identities -->
-      <div
-        v-if="isLoading"
-        class="flex justify-center py-6"
-      >
-        <Spinner class="size-5 text-muted-foreground/50" />
-      </div>
-
-      <!-- Empty -->
-      <p
-        v-else-if="bindings.length === 0"
-        class="text-[11px] text-muted-foreground/70 italic"
-      >
-        {{ $t('settings.connectedAccounts.empty') }}
-      </p>
-
-      <!-- Bound identities -->
-      <div
-        v-else
-        class="space-y-2"
-      >
-        <div
-          v-for="binding in bindings"
-          :key="binding.id"
-          class="flex items-center gap-3 rounded-lg border border-border/60 bg-background/70 px-3 py-2.5"
-        >
-          <Avatar class="size-7 shrink-0 border border-border/40">
-            <AvatarImage
-              :src="binding.channel_identity_avatar_url || ''"
-              :alt="bindingLabel(binding)"
-            />
-            <AvatarFallback class="text-[10px]">
-              {{ bindingLabel(binding).slice(0, 2).toUpperCase() }}
-            </AvatarFallback>
-          </Avatar>
-          <div class="min-w-0 flex-1">
-            <div class="truncate text-xs font-medium text-foreground">
-              {{ bindingLabel(binding) }}
-            </div>
-            <div
-              v-if="binding.channel_type"
-              class="flex items-center gap-1 truncate text-[10px] text-muted-foreground"
-            >
-              <ChannelIcon
-                :channel="binding.channel_type"
-                size="1em"
-              />
-              <span>{{ channelTypeDisplayName(t, binding.channel_type) }}</span>
-            </div>
-          </div>
-          <ConfirmPopover
-            :message="$t('settings.connectedAccounts.disconnectConfirm')"
-            :confirm-text="$t('settings.connectedAccounts.disconnect')"
-            @confirm="() => onDisconnect(binding)"
-          >
-            <template #trigger>
-              <Button
-                variant="ghost"
-                size="icon"
-                class="size-7 text-muted-foreground hover:text-destructive shadow-none"
-                :disabled="isRowBusy(binding)"
-              >
-                <Trash2 class="size-3.5" />
-              </Button>
-            </template>
-          </ConfirmPopover>
-        </div>
-      </div>
-    </div>
-  </div>
+    </template>
+  </SettingsSection>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onActivated, onBeforeUnmount } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { Plus, Trash2, Copy, Check, RefreshCw } from 'lucide-vue-next'
+import { Plus, Trash2, Copy, Check, RefreshCw, ArrowRight } from 'lucide-vue-next'
 import { toast } from '@memohai/ui'
-import { Button, Spinner, Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
+import {
+  Button,
+  Spinner,
+  Avatar,
+  AvatarImage,
+  AvatarFallback,
+  Input,
+} from '@memohai/ui'
+import SettingsSection from '@/components/settings/section.vue'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -200,6 +208,7 @@ import {
 import type { ChannelaccessBinding } from '@memohai/sdk'
 
 const { t } = useI18n()
+const router = useRouter()
 const queryCache = useQueryCache()
 
 const issuing = ref(false)
@@ -208,6 +217,17 @@ const expiresAtMs = ref(0)
 const nowMs = ref(Date.now())
 const copied = ref(false)
 const busyIds = ref<Set<string>>(new Set())
+
+// Account count captured when a code is issued. Once a new binding appears past
+// this baseline, the code has been consumed — so the code block is cleared.
+const bindingsCountAtIssue = ref(0)
+
+function clearActiveCode() {
+  activeCode.value = ''
+  expiresAtMs.value = 0
+  copied.value = false
+  stopTicker()
+}
 
 let ticker: ReturnType<typeof setInterval> | undefined
 let pollTick = 0
@@ -240,8 +260,16 @@ const { data: bindingsData, isLoading, refetch: refetchBindings } = useQuery({
 
 const bindings = computed<ChannelaccessBinding[]>(() => bindingsData.value?.items ?? [])
 
+// A live code is being polled in the background; when a new account shows up the
+// code has just been used, so retire it instead of leaving a stale countdown.
+watch(() => bindings.value.length, (count) => {
+  if (activeCode.value && count > bindingsCountAtIssue.value) {
+    clearActiveCode()
+  }
+})
+
 // Whether the user has any bot connected to an IM channel that could receive /link.
-const { data: hasImBotData, isLoading: checkingImBot } = useQuery({
+const { data: hasImBotData, isLoading: checkingImBot, refetch: refetchHasImBot } = useQuery({
   key: () => ['user-has-im-bot'],
   query: async (): Promise<boolean> => {
     const [botsRes, channelsRes] = await Promise.all([
@@ -272,6 +300,18 @@ const { data: hasImBotData, isLoading: checkingImBot } = useQuery({
 })
 
 const hasLinkableImBot = computed(() => hasImBotData.value === true)
+
+// Settings pages stay alive under <KeepAlive>, so the IM-bot check and bindings
+// keep a stale value after the user connects a channel elsewhere and returns.
+// Re-fetch both whenever the page is re-activated to reflect the latest state.
+onActivated(() => {
+  void refetchHasImBot()
+  void refetchBindings()
+})
+
+function goToBots() {
+  void router.push({ name: 'bots' })
+}
 
 function bindingLabel(binding: ChannelaccessBinding): string {
   return binding.channel_identity_display_name
@@ -313,6 +353,7 @@ async function onIssue() {
   issuing.value = true
   try {
     const { data } = await postUsersMeChannelLinks({ body: {}, throwOnError: true })
+    bindingsCountAtIssue.value = bindings.value.length
     activeCode.value = data?.token ?? ''
     expiresAtMs.value = data?.expires_at ? new Date(data.expires_at).getTime() : 0
     copied.value = false
