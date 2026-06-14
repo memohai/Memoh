@@ -122,6 +122,91 @@ func TestRenderFeishuMessagePartsLarkMD(t *testing.T) {
 			want: "kept",
 		},
 		{
+			name: "inline text neutralizes link injection",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: "click [evil](https://evil.test)"},
+			}},
+			want:     `click \[evil\](https://evil.test)`,
+			excludes: []string{"[evil]("},
+		},
+		{
+			name: "inline text neutralizes at-mention injection",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: `ping <at id="all"></at>`},
+			}},
+			want: `ping \<at id="all"\>\</at\>`,
+		},
+		{
+			name: "inline text escapes inline code marker",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: "use `code` here"},
+			}},
+			want: "use \\`code\\` here",
+		},
+		{
+			name: "styled inline text cannot break out of bold wrapper",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: "x**y", Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+			}},
+			want: `**x\*\*y**`,
+		},
+		{
+			name: "styled italic escapes inner asterisks",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: "a*b", Styles: []channel.MessageTextStyle{channel.MessageStyleItalic}},
+			}},
+			want: `*a\*b*`,
+		},
+		{
+			name: "inline code style with backtick uses longer fence and padding",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: "a`b", Styles: []channel.MessageTextStyle{channel.MessageStyleCode}},
+			}},
+			want: "`` a`b ``",
+		},
+		{
+			name: "code block with triple backticks uses fence of four",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartCodeBlock, Text: "outer ``` end"},
+			}},
+			want: "````\nouter ``` end\n````",
+		},
+		{
+			name: "code block with longer backtick run grows fence",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartCodeBlock, Text: "wow ````` here"},
+			}},
+			want: "``````\nwow ````` here\n``````",
+		},
+		{
+			name: "link text open bracket is escaped",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartLink, Text: "see [docs", URL: "https://example.test"},
+			}},
+			want: `[see \[docs](https://example.test)`,
+		},
+		{
+			name: "link text newline collapses to space",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartLink, Text: "see\ndocs", URL: "https://example.test"},
+			}},
+			want: "[see docs](https://example.test)",
+		},
+		{
+			name: "link url paren is encoded",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartLink, Text: "wiki", URL: "https://example.test/page)x"},
+			}},
+			want: "[wiki](https://example.test/page%29x)",
+		},
+		{
+			name: "mention text escapes markdown chars",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartMention, Text: "@alice [extra]"},
+			}},
+			want: `@alice \[extra\]`,
+		},
+		{
 			name: "empty parts returns empty",
 			msg:  channel.Message{Parts: nil},
 			want: "",
