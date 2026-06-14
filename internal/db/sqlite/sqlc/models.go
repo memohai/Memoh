@@ -25,6 +25,7 @@ type Bot struct {
 	ReasoningEffort        string         `json:"reasoning_effort"`
 	ChatModelID            sql.NullString `json:"chat_model_id"`
 	SearchProviderID       sql.NullString `json:"search_provider_id"`
+	FetchProviderID        sql.NullString `json:"fetch_provider_id"`
 	MemoryProviderID       sql.NullString `json:"memory_provider_id"`
 	HeartbeatEnabled       int64          `json:"heartbeat_enabled"`
 	HeartbeatInterval      int64          `json:"heartbeat_interval"`
@@ -49,7 +50,6 @@ type Bot struct {
 	Metadata               string         `json:"metadata"`
 	CreatedAt              string         `json:"created_at"`
 	UpdatedAt              string         `json:"updated_at"`
-	FetchProviderID        sql.NullString `json:"fetch_provider_id"`
 }
 
 type BotAclRule struct {
