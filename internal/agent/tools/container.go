@@ -130,6 +130,33 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 			},
 		},
 		{
+			Name: "apply_patch",
+			Description: fmt.Sprintf(`Apply a structured patch %s. Supports adding, deleting, updating, and moving files.
+
+Patch format:
+*** Begin Patch
+*** Add File: path
++new line
+*** Update File: path
+@@
+-old line
++new line
+*** Delete File: path
+*** End Patch
+
+Use apply_patch for multi-file or structured edits. Use edit for a single exact text replacement and write for full-file overwrite.`, workspace.locationDescription),
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"patch": map[string]any{"type": "string", "description": "Patch body using the apply_patch format. Paths are relative to the workspace by default, or absolute paths supported by the workspace backend."},
+				},
+				"required": []string{"patch"},
+			},
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
+				return p.execApplyPatch(ctx.Context, sess, input)
+			},
+		},
+		{
 			Name: "exec",
 			Description: fmt.Sprintf(`Execute a shell command %s. Runs in %s by default.
 
