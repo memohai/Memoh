@@ -56,10 +56,58 @@ display_style_enabled() {
 }
 
 has_macos_theme_assets() {
-  { [ -d "$HOME/.themes/WhiteSur-Dark-alt" ] || [ -d "$HOME/.themes/WhiteSur-Dark" ] || [ -d "$HOME/.themes/WhiteSur-Dark-solid" ] || [ -d "$HOME/.local/share/themes/WhiteSur-Dark-alt" ] || [ -d "$HOME/.local/share/themes/WhiteSur-Dark" ] || [ -d "$HOME/.local/share/themes/WhiteSur-Dark-solid" ]; } &&
-    { [ -d "$HOME/.local/share/icons/WhiteSur" ] || [ -d "$HOME/.icons/WhiteSur" ] || [ -d "$HOME/.local/share/icons/WhiteSur-dark" ] || [ -d "$HOME/.icons/WhiteSur-dark" ]; } &&
-    { [ -d "$HOME/.local/share/plank/themes/macOS Dark" ] || [ -d "$HOME/.local/share/plank/themes/Big Sur Dark" ]; } &&
-    find "$HOME/.local/share/backgrounds/WhiteSur" -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \) 2>/dev/null | grep -q .
+  has_one_dir \
+    "$HOME/.themes/WhiteSur-Dark-alt" \
+    "$HOME/.themes/WhiteSur-Dark" \
+    "$HOME/.themes/WhiteSur-Dark-solid" \
+    "$HOME/.local/share/themes/WhiteSur-Dark-alt" \
+    "$HOME/.local/share/themes/WhiteSur-Dark" \
+    "$HOME/.local/share/themes/WhiteSur-Dark-solid" \
+    /usr/local/share/themes/WhiteSur-Dark-alt \
+    /usr/local/share/themes/WhiteSur-Dark \
+    /usr/local/share/themes/WhiteSur-Dark-solid \
+    /usr/share/themes/WhiteSur-Dark-alt \
+    /usr/share/themes/WhiteSur-Dark \
+    /usr/share/themes/WhiteSur-Dark-solid &&
+    has_one_dir \
+      "$HOME/.local/share/icons/WhiteSur" \
+      "$HOME/.icons/WhiteSur" \
+      "$HOME/.local/share/icons/WhiteSur-dark" \
+      "$HOME/.icons/WhiteSur-dark" \
+      /usr/local/share/icons/WhiteSur \
+      /usr/local/share/icons/WhiteSur-dark \
+      /usr/share/icons/WhiteSur \
+      /usr/share/icons/WhiteSur-dark &&
+    has_one_dir \
+      "$HOME/.local/share/plank/themes/macOS Dark" \
+      "$HOME/.local/share/plank/themes/Big Sur Dark" \
+      "/usr/local/share/plank/themes/macOS Dark" \
+      "/usr/local/share/plank/themes/Big Sur Dark" \
+      "/usr/share/plank/themes/macOS Dark" \
+      "/usr/share/plank/themes/Big Sur Dark" &&
+    has_macos_wallpaper_assets
+}
+
+has_one_dir() {
+  for dir in "$@"; do
+    [ -d "$dir" ] && return 0
+  done
+  return 1
+}
+
+has_macos_wallpaper_assets() {
+  for dir in "$HOME/.local/share/backgrounds/WhiteSur" /usr/local/share/backgrounds/WhiteSur /usr/share/backgrounds/WhiteSur; do
+    [ -d "$dir" ] || continue
+    find "$dir" -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \) 2>/dev/null | grep -q . && return 0
+  done
+  return 1
+}
+
+install_macos_assets_globally() {
+  case "${MEMOH_DISPLAY_INSTALL_ASSETS_GLOBAL:-}" in
+    1|true|True|TRUE|yes|Yes|YES|on|On|ON) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 clone_or_update_theme_repo() {
@@ -82,7 +130,18 @@ install_macos_theme_assets() {
   has_cmd bash || return 0
 
   theme_cache="${XDG_CACHE_HOME:-$HOME/.cache}/memoh-display-themes"
-  mkdir -p "$theme_cache" "$HOME/.themes" "$HOME/.icons" "$HOME/.local/share/icons" "$HOME/.local/share/plank/themes" "$HOME/.local/share/backgrounds/WhiteSur"
+  if install_macos_assets_globally; then
+    theme_dest=/usr/local/share/themes
+    icon_dest=/usr/local/share/icons
+    plank_dest=/usr/local/share/plank/themes
+    wallpaper_dest=/usr/local/share/backgrounds/WhiteSur
+  else
+    theme_dest="$HOME/.themes"
+    icon_dest="$HOME/.local/share/icons"
+    plank_dest="$HOME/.local/share/plank/themes"
+    wallpaper_dest="$HOME/.local/share/backgrounds/WhiteSur"
+  fi
+  mkdir -p "$theme_cache" "$theme_dest" "$icon_dest" "$plank_dest" "$wallpaper_dest"
 
   progress 58 desktop "Installing macOS desktop theme"
 
@@ -91,7 +150,7 @@ install_macos_theme_assets() {
       cd "$theme_cache/WhiteSur-gtk-theme"
       export SUDO_USER="${SUDO_USER:-root}"
       run_limited "${MEMOH_THEME_INSTALL_TIMEOUT:-240}" ./install.sh \
-        -d "$HOME/.themes" \
+        -d "$theme_dest" \
         -n WhiteSur \
         -c dark \
         -o normal \
@@ -106,7 +165,7 @@ install_macos_theme_assets() {
     (
       cd "$theme_cache/WhiteSur-icon-theme"
       run_limited "${MEMOH_THEME_INSTALL_TIMEOUT:-180}" ./install.sh \
-        -d "$HOME/.local/share/icons" \
+        -d "$icon_dest" \
         -n WhiteSur \
         -t default \
         -a
@@ -121,29 +180,30 @@ install_macos_theme_assets() {
   fi
 
   if clone_or_update_theme_repo https://github.com/x64Bits/plank-themes.git "$theme_cache/plank-themes"; then
-    find "$theme_cache/plank-themes" -mindepth 1 -maxdepth 1 -type d ! -name .git -exec cp -a {} "$HOME/.local/share/plank/themes/" \; 2>/dev/null || true
+    find "$theme_cache/plank-themes" -mindepth 1 -maxdepth 1 -type d ! -name .git -exec cp -a {} "$plank_dest/" \; 2>/dev/null || true
   fi
 
   if clone_or_update_theme_repo https://github.com/vinceliuice/WhiteSur-wallpapers.git "$theme_cache/WhiteSur-wallpapers"; then
-    find "$theme_cache/WhiteSur-wallpapers" -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \) -exec cp -a {} "$HOME/.local/share/backgrounds/WhiteSur/" \; 2>/dev/null || true
+    find "$theme_cache/WhiteSur-wallpapers" -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \) -exec cp -a {} "$wallpaper_dest/" \; 2>/dev/null || true
   fi
 }
 
 install_debian_style_extras() {
   display_style_enabled || return 0
+  has_macos_theme_assets && return 0
   if [ "${MEMOH_APT_INDEX_UPDATED:-0}" != "1" ]; then
     apt_get update && MEMOH_APT_INDEX_UPDATED=1 || true
   fi
-  has_macos_theme_assets && return 0
   progress 54 desktop "Installing macOS desktop theme dependencies"
-  install_debian_optional sudo git unzip bash sassc libglib2.0-bin libglib2.0-dev-bin libglib2.0-dev libxml2-utils gtk2-engines-murrine gtk2-engines-pixbuf plank papirus-icon-theme arc-theme fonts-inter gnome-themes-extra bibata-cursor-theme xfce4-appmenu-plugin xfce4-windowck-plugin appmenu-gtk2-module appmenu-gtk3-module appmenu-registrar
+  install_debian_optional sudo git unzip bash sassc libglib2.0-bin libglib2.0-dev-bin libglib2.0-dev libxml2-utils librsvg2-common gtk2-engines-murrine gtk2-engines-pixbuf plank papirus-icon-theme arc-theme fonts-inter gnome-themes-extra bibata-cursor-theme xfce4-appmenu-plugin xfce4-windowck-plugin appmenu-gtk2-module appmenu-gtk3-module appmenu-registrar
+  has_macos_theme_assets && return 0
   install_macos_theme_assets
 }
 
 install_alpine_style_extras() {
   display_style_enabled || return 0
   has_macos_theme_assets && return 0
-  install_alpine_optional sudo git unzip bash sassc glib-dev libxml2-utils plank papirus-icon-theme arc-theme font-inter
+  install_alpine_optional sudo git unzip bash sassc glib-dev libxml2-utils librsvg plank papirus-icon-theme arc-theme font-inter
   install_macos_theme_assets
 }
 

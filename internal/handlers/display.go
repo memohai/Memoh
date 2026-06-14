@@ -217,7 +217,10 @@ func (h *ContainerdHandler) CloseDisplaySession(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-const displayPrepareProgressPrefix = "__MEMOH_DISPLAY_PROGRESS__"
+const (
+	displayPrepareProgressPrefix = "__MEMOH_DISPLAY_PROGRESS__"
+	displayDesktopStyleVersion   = "2026-06-14.10"
+)
 
 type displayPrepareStreamEvent struct {
 	Type    string `json:"type"`
@@ -411,6 +414,12 @@ func appendLimitedLine(builder *strings.Builder, line string) {
 }
 
 func displayPrepareCommand() string {
+	return displayDesktopScriptPreamble() + `
+` + displayApplyStyleScript() + `
+` + displayPrepareMainCommand
+}
+
+func displayDesktopScriptPreamble() string {
 	return `cat >/tmp/memoh-desktop-install.sh <<'MEMOH_DESKTOP_INSTALL'
 ` + strings.TrimRight(displayPrepareInstallScript(), "\n") + `
 MEMOH_DESKTOP_INSTALL
@@ -419,7 +428,7 @@ cat >/tmp/memoh-desktop-style.sh <<'MEMOH_DESKTOP_STYLE'
 ` + strings.TrimRight(displayPrepareStyleScript(), "\n") + `
 MEMOH_DESKTOP_STYLE
 chmod 0755 /tmp/memoh-desktop-style.sh
-` + displayPrepareMainCommand
+`
 }
 
 func displayPrepareInstallScript() string {
@@ -437,16 +446,79 @@ func displayPrepareStyleScript() string {
 }
 
 func displayApplyStyleCommand() string {
-	return `cat >/tmp/memoh-desktop-install.sh <<'MEMOH_DESKTOP_INSTALL'
-` + strings.TrimRight(displayPrepareInstallScript(), "\n") + `
-MEMOH_DESKTOP_INSTALL
-chmod 0755 /tmp/memoh-desktop-install.sh
-cat >/tmp/memoh-desktop-style.sh <<'MEMOH_DESKTOP_STYLE'
-` + strings.TrimRight(displayPrepareStyleScript(), "\n") + `
-MEMOH_DESKTOP_STYLE
-chmod 0755 /tmp/memoh-desktop-style.sh
-cat >/tmp/memoh-desktop-apply-style.sh <<'MEMOH_DESKTOP_APPLY_STYLE'
+	return displayDesktopScriptPreamble() + `
+` + displayApplyStyleScript() + `
+/bin/sh /tmp/memoh-desktop-apply-style.sh --if-needed`
+}
+
+func displayApplyStyleScript() string {
+	return `cat >/tmp/memoh-desktop-apply-style.sh <<'MEMOH_DESKTOP_APPLY_STYLE'
 #!/bin/sh
+
+style_version='` + displayDesktopStyleVersion + `'
+style_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/memoh"
+style_marker="$style_config_dir/display-style.version"
+style_lock=/tmp/memoh-desktop-style.lock
+style_log=/tmp/memoh-desktop-style.log
+
+style_enabled() {
+  style="${MEMOH_DISPLAY_DESKTOP_STYLE:-macos}"
+  case "$style" in
+    ""|0|false|False|FALSE|off|Off|OFF|none|None|NONE) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+style_is_current() {
+  [ -r "$style_marker" ] && [ "$(cat "$style_marker" 2>/dev/null || true)" = "$style_version" ]
+}
+
+if [ "${1:-}" = "--check" ]; then
+  style_enabled || exit 0
+  style_is_current
+  exit $?
+fi
+
+mode="${1:---if-needed}"
+style_enabled || exit 0
+if { [ "$mode" = "--if-needed" ] || [ "$mode" = "--ensure" ]; } && style_is_current; then
+  exit 0
+fi
+
+acquire_style_lock() {
+  wait_seconds="$1"
+  if mkdir "$style_lock" 2>/dev/null; then
+    return 0
+  fi
+  i=0
+  while [ "$i" -lt "$wait_seconds" ]; do
+    if [ "$mode" = "--if-needed" ] && style_is_current; then
+      exit 0
+    fi
+    [ -d "$style_lock" ] || break
+    sleep 1
+    i=$((i + 1))
+  done
+  mkdir "$style_lock" 2>/dev/null
+}
+
+wait_seconds=30
+case "$mode" in
+  --ensure|--force) wait_seconds=120 ;;
+esac
+if ! acquire_style_lock "$wait_seconds"; then
+  if [ "$mode" = "--if-needed" ]; then
+    echo "Another desktop style apply is running; skipping retry." >&2
+    exit 0
+  fi
+  echo "Another desktop style apply is still running." >&2
+  exit 1
+fi
+trap 'rmdir "$style_lock" 2>/dev/null || true' EXIT INT TERM
+
+if { [ "$mode" = "--if-needed" ] || [ "$mode" = "--ensure" ]; } && style_is_current; then
+  exit 0
+fi
 
 progress() { :; }
 has_cmd() { command -v "$1" >/dev/null 2>&1; }
@@ -473,18 +545,88 @@ is_alpine() {
 
 . /tmp/memoh-desktop-install.sh
 
-style_lock=/tmp/memoh-desktop-style.lock
-if mkdir "$style_lock" 2>/dev/null; then
-  trap 'rmdir "$style_lock" 2>/dev/null || true' EXIT INT TERM
-else
+install_style_extras_for_current_os
+rm -f "$style_log"
+if /bin/sh /tmp/memoh-desktop-style.sh >"$style_log" 2>&1; then
+  mkdir -p "$style_config_dir"
+  printf '%s\n' "$style_version" >"$style_marker"
   exit 0
 fi
 
-install_style_extras_for_current_os
-/bin/sh /tmp/memoh-desktop-style.sh
+status=$?
+echo "Desktop style apply failed with exit code $status. Log tail:" >&2
+tail -n 80 "$style_log" >&2 2>/dev/null || true
+exit "$status"
 MEMOH_DESKTOP_APPLY_STYLE
-chmod 0755 /tmp/memoh-desktop-apply-style.sh
-/bin/sh /tmp/memoh-desktop-apply-style.sh`
+chmod 0755 /tmp/memoh-desktop-apply-style.sh`
+}
+
+func displayStyleStatusCommand() string {
+	return `style_version='` + displayDesktopStyleVersion + `'
+style="${MEMOH_DISPLAY_DESKTOP_STYLE:-macos}"
+case "$style" in
+  ""|0|false|False|FALSE|off|Off|OFF|none|None|NONE) exit 0 ;;
+esac
+style_marker="${XDG_CONFIG_HOME:-$HOME/.config}/memoh/display-style.version"
+[ -r "$style_marker" ] && [ "$(cat "$style_marker" 2>/dev/null || true)" = "$style_version" ]`
+}
+
+func displayStyleLogTailCommand() string {
+	return `tail -n 80 /tmp/memoh-desktop-style.log 2>/dev/null || true`
+}
+
+func trimDisplayLog(text string) string {
+	text = strings.TrimSpace(text)
+	if len(text) <= 6000 {
+		return text
+	}
+	return text[len(text)-6000:]
+}
+
+func displayStyleApplyNeedsRun(ctx context.Context, client *bridge.Client) bool {
+	if client == nil {
+		return false
+	}
+	result, err := client.Exec(ctx, displayStyleStatusCommand(), "/", 15)
+	return err != nil || result == nil || result.ExitCode != 0
+}
+
+func displayStyleLogTail(ctx context.Context, client *bridge.Client) string {
+	if client == nil {
+		return ""
+	}
+	result, err := client.Exec(ctx, displayStyleLogTailCommand(), "/", 15)
+	if err != nil || result == nil {
+		return ""
+	}
+	return result.Stdout + result.Stderr
+}
+
+func displayStyleLogArgs(ctx context.Context, client *bridge.Client, botID string, result *bridge.ExecResult) []any {
+	exitCode := -1
+	stdout := ""
+	stderr := ""
+	if result != nil {
+		exitCode = int(result.ExitCode)
+		stdout = trimDisplayLog(result.Stdout)
+		stderr = trimDisplayLog(result.Stderr)
+	}
+	args := []any{
+		slog.String("bot_id", botID),
+		slog.Int("exit_code", exitCode),
+	}
+	if stderr != "" {
+		args = append(args, slog.String("stderr", stderr))
+	}
+	if stdout != "" {
+		args = append(args, slog.String("stdout", stdout))
+	}
+	if stdout == "" && stderr == "" {
+		if tail := trimDisplayLog(displayStyleLogTail(ctx, client)); tail != "" {
+			args = append(args, slog.String("style_log_tail", tail))
+		}
+	}
+	return args
 }
 
 func (h *ContainerdHandler) applyDisplayStyleAsync(ctx context.Context, botID string) {
@@ -501,6 +643,9 @@ func (h *ContainerdHandler) applyDisplayStyleAsync(ctx context.Context, botID st
 			}
 			return
 		}
+		if !displayStyleApplyNeedsRun(runCtx, client) {
+			return
+		}
 		result, err := client.Exec(runCtx, displayApplyStyleCommand(), "/", 540)
 		if err != nil {
 			if h.logger != nil {
@@ -508,13 +653,8 @@ func (h *ContainerdHandler) applyDisplayStyleAsync(ctx context.Context, botID st
 			}
 			return
 		}
-		if result != nil && result.ExitCode != 0 && h.logger != nil {
-			h.logger.Warn(
-				"display desktop style exited non-zero",
-				slog.String("bot_id", botID),
-				slog.Int("exit_code", int(result.ExitCode)),
-				slog.String("stderr", strings.TrimSpace(result.Stderr)),
-			)
+		if (result == nil || result.ExitCode != 0) && h.logger != nil {
+			h.logger.Warn("display desktop style exited non-zero", displayStyleLogArgs(runCtx, client, botID, result)...)
 		}
 	}()
 }
@@ -736,8 +876,11 @@ start_desktop_session() {
 display_socket_ready() {
   xvnc_running && [ -S "$X_SOCKET" ] && awk -v port="$(printf '%04X' "$RFB_PORT")" 'toupper($2) ~ ":" port "$" && $4 == "0A" { found = 1 } END { exit found ? 0 : 1 }' /proc/net/tcp /proc/net/tcp6 2>/dev/null
 }
+desktop_style_current() {
+  /bin/sh /tmp/memoh-desktop-apply-style.sh --check >/dev/null 2>&1
+}
 display_ready() {
-  display_socket_ready && find_browser >/dev/null 2>&1 && has_desktop
+  display_socket_ready && find_browser >/dev/null 2>&1 && has_desktop && desktop_style_current
 }
 
 . /tmp/memoh-desktop-install.sh
@@ -781,7 +924,6 @@ else
     exit 1
   fi
 fi
-install_style_extras_for_current_os
 
 XVNC="$(find_xvnc || true)"
 BROWSER="$(find_browser || true)"
@@ -849,7 +991,9 @@ if [ -S "$X_SOCKET" ]; then
   fi
 fi
 start_desktop_session
-nohup /bin/sh /tmp/memoh-desktop-style.sh >/tmp/memoh-desktop-style.log 2>&1 &
+
+progress 90 styling "Applying desktop style"
+/bin/sh /tmp/memoh-desktop-apply-style.sh --ensure
 
 progress 94 browser "Launching browser"
 if ! browser_cdp_running; then

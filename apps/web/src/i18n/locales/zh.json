@@ -606,6 +606,7 @@
         "browser": "正在安装 Chrome 和 CJK 字体",
         "starting": "正在启动 VNC 显示器",
         "desktop": "正在启动桌面环境",
+        "styling": "正在应用桌面样式",
         "complete": "桌面已就绪",
         "default": "正在准备桌面",
         "failed": "桌面准备失败",
