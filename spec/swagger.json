@@ -71,11 +71,6 @@
         },
         "/auth/refresh": {
             "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
                 "description": "Issue a new JWT using the existing claims with updated expiration",
                 "tags": [
                     "auth"
@@ -100,7 +95,12 @@
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             }
         },
         "/bots": {
