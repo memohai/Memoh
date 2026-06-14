@@ -378,7 +378,7 @@ func (p *SpawnProvider) execSpawn(ctx context.Context, session SessionContext, a
 }
 
 // execSpawnBackground registers the batch as a background spawn task and
-// returns immediately. Branches derive from the task context so bg_status
+// returns immediately. Branches derive from the task context so kill_background
 // kill can cancel them; the join notification carries each branch's report.
 func (p *SpawnProvider) execSpawnBackground(
 	ctx context.Context,
@@ -398,7 +398,7 @@ func (p *SpawnProvider) execSpawnBackground(
 			"isError": true,
 			"content": []map[string]any{{
 				"type": "text",
-				"text": fmt.Sprintf("%s. Check running tasks with bg_status (and kill stale ones) before starting more.", err),
+				"text": fmt.Sprintf("%s. Check running tasks with list_background and kill stale ones with kill_background before starting more.", err),
 			}},
 		}, nil
 	}

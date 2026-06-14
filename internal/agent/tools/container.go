@@ -160,18 +160,42 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 			},
 		},
 		{
-			Name:        "bg_status",
-			Description: "Check the status of background tasks or kill a running one.",
+			Name:        "list_background",
+			Description: "List background tasks for the current session.",
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
+				return p.execListBackground(ctx.Context, sess, inputAsMap(input))
+			},
+		},
+		{
+			Name:        "get_background_status",
+			Description: "Get the status and details of a background task.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"action":  map[string]any{"type": "string", "enum": []string{"list", "status", "kill"}, "description": "Action to perform: list all tasks, get status of one task, or kill a running task"},
-					"task_id": map[string]any{"type": "string", "description": "Task ID (required for status and kill actions)"},
+					"task_id": map[string]any{"type": "string", "description": "Task ID"},
 				},
-				"required": []string{"action"},
+				"required": []string{"task_id"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execBgStatus(ctx.Context, sess, inputAsMap(input))
+				return p.execGetBackgroundStatus(ctx.Context, sess, inputAsMap(input))
+			},
+		},
+		{
+			Name:        "kill_background",
+			Description: "Kill a running background task.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"task_id": map[string]any{"type": "string", "description": "Task ID"},
+				},
+				"required": []string{"task_id"},
+			},
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
+				return p.execKillBackground(ctx.Context, sess, inputAsMap(input))
 			},
 		},
 	}, nil
@@ -801,94 +825,96 @@ func (p *ContainerProvider) execExecBackground(
 	}, nil
 }
 
-// execBgStatus handles the bg_status tool for listing/checking/killing background tasks.
-func (p *ContainerProvider) execBgStatus(_ context.Context, session SessionContext, args map[string]any) (any, error) {
+func (p *ContainerProvider) execListBackground(_ context.Context, session SessionContext, _ map[string]any) (any, error) {
 	if p.bgManager == nil {
 		return nil, errors.New("background task manager not available")
 	}
 
-	action := strings.TrimSpace(StringArg(args, "action"))
-	taskID := strings.TrimSpace(StringArg(args, "task_id"))
-
-	switch action {
-	case "list":
-		snapshots := p.bgManager.ListSnapshotsForSession(session.BotID, session.SessionID)
-		entries := make([]map[string]any, 0, len(snapshots))
-		for _, s := range snapshots {
-			entry := map[string]any{
-				"task_id":     s.TaskID,
-				"kind":        string(s.Kind),
-				"description": s.Description,
-				"status":      string(s.Status),
-				"started_at":  session.FormatTime(s.StartedAt),
-			}
-			if s.Kind != background.KindSpawn {
-				entry["command"] = truncateStr(s.Command, 120)
-				entry["output_file"] = s.OutputFile
-			}
-			entries = append(entries, entry)
-		}
-		return map[string]any{"tasks": entries, "count": len(entries)}, nil
-
-	case "status":
-		if taskID == "" {
-			return nil, errors.New("task_id is required for status action")
-		}
-		task := p.bgManager.GetForSession(session.BotID, session.SessionID, taskID)
-		if task == nil {
-			return nil, fmt.Errorf("task %s not found", taskID)
-		}
-		s := task.Snapshot()
-		result := map[string]any{
+	snapshots := p.bgManager.ListSnapshotsForSession(session.BotID, session.SessionID)
+	entries := make([]map[string]any, 0, len(snapshots))
+	for _, s := range snapshots {
+		entry := map[string]any{
 			"task_id":     s.TaskID,
 			"kind":        string(s.Kind),
 			"description": s.Description,
 			"status":      string(s.Status),
 			"started_at":  session.FormatTime(s.StartedAt),
 		}
-		if s.Status != background.TaskRunning {
-			result["completed_at"] = session.FormatTime(s.CompletedAt)
+		if s.Kind != background.KindSpawn {
+			entry["command"] = truncateStr(s.Command, 120)
+			entry["output_file"] = s.OutputFile
 		}
-		if s.Kind == background.KindSpawn {
-			if len(s.Branches) > 0 {
-				branches := make([]map[string]any, 0, len(s.Branches))
-				for _, br := range s.Branches {
-					b := map[string]any{"task": br.Task, "status": string(br.Status)}
-					if br.ChildSessionID != "" {
-						b["session_id"] = br.ChildSessionID
-					}
-					if br.Report != "" {
-						b["report"] = br.Report
-					}
-					if br.Error != "" {
-						b["error"] = br.Error
-					}
-					branches = append(branches, b)
+		entries = append(entries, entry)
+	}
+	return map[string]any{"tasks": entries, "count": len(entries)}, nil
+}
+
+func (p *ContainerProvider) execGetBackgroundStatus(_ context.Context, session SessionContext, args map[string]any) (any, error) {
+	if p.bgManager == nil {
+		return nil, errors.New("background task manager not available")
+	}
+
+	taskID := strings.TrimSpace(StringArg(args, "task_id"))
+	if taskID == "" {
+		return nil, errors.New("task_id is required")
+	}
+	task := p.bgManager.GetForSession(session.BotID, session.SessionID, taskID)
+	if task == nil {
+		return nil, fmt.Errorf("task %s not found", taskID)
+	}
+	s := task.Snapshot()
+	result := map[string]any{
+		"task_id":     s.TaskID,
+		"kind":        string(s.Kind),
+		"description": s.Description,
+		"status":      string(s.Status),
+		"started_at":  session.FormatTime(s.StartedAt),
+	}
+	if s.Status != background.TaskRunning {
+		result["completed_at"] = session.FormatTime(s.CompletedAt)
+	}
+	if s.Kind == background.KindSpawn {
+		if len(s.Branches) > 0 {
+			branches := make([]map[string]any, 0, len(s.Branches))
+			for _, br := range s.Branches {
+				b := map[string]any{"task": br.Task, "status": string(br.Status)}
+				if br.ChildSessionID != "" {
+					b["session_id"] = br.ChildSessionID
 				}
-				result["branches"] = branches
+				if br.Report != "" {
+					b["report"] = br.Report
+				}
+				if br.Error != "" {
+					b["error"] = br.Error
+				}
+				branches = append(branches, b)
 			}
-			return result, nil
-		}
-		result["command"] = s.Command
-		result["output_file"] = s.OutputFile
-		if s.Status != background.TaskRunning {
-			result["exit_code"] = s.ExitCode
-			result["output_tail"] = s.OutputTail
+			result["branches"] = branches
 		}
 		return result, nil
-
-	case "kill":
-		if taskID == "" {
-			return nil, errors.New("task_id is required for kill action")
-		}
-		if err := p.bgManager.KillForSession(session.BotID, session.SessionID, taskID); err != nil {
-			return nil, err
-		}
-		return map[string]any{"ok": true, "message": fmt.Sprintf("Task %s has been killed.", taskID)}, nil
-
-	default:
-		return nil, fmt.Errorf("unknown action: %s (expected: list, status, kill)", action)
 	}
+	result["command"] = s.Command
+	result["output_file"] = s.OutputFile
+	if s.Status != background.TaskRunning {
+		result["exit_code"] = s.ExitCode
+		result["output_tail"] = s.OutputTail
+	}
+	return result, nil
+}
+
+func (p *ContainerProvider) execKillBackground(_ context.Context, session SessionContext, args map[string]any) (any, error) {
+	if p.bgManager == nil {
+		return nil, errors.New("background task manager not available")
+	}
+
+	taskID := strings.TrimSpace(StringArg(args, "task_id"))
+	if taskID == "" {
+		return nil, errors.New("task_id is required")
+	}
+	if err := p.bgManager.KillForSession(session.BotID, session.SessionID, taskID); err != nil {
+		return nil, err
+	}
+	return map[string]any{"ok": true, "message": fmt.Sprintf("Task %s has been killed.", taskID)}, nil
 }
 
 func truncateStr(s string, n int) string {
