@@ -147,6 +147,52 @@ func TestBuildApplyPatchPlanRejectsMissingContextBeforeCommitPlan(t *testing.T) 
 	}
 }
 
+func TestBuildApplyPatchPlanRejectsAddOverExistingFile(t *testing.T) {
+	patch := `*** Begin Patch
+*** Add File: existing.txt
++new
+*** End Patch`
+	hunks, err := parseApplyPatch(patch)
+	if err != nil {
+		t.Fatalf("parseApplyPatch() error = %v", err)
+	}
+
+	_, err = buildApplyPatchPlan(context.Background(), applyPatchFakeFS{
+		files: map[string]string{"existing.txt": "old\n"},
+	}, "/data", hunks)
+	if err == nil {
+		t.Fatal("expected existing-file add error")
+	}
+	if !strings.Contains(err.Error(), "cannot add existing file") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBuildApplyPatchPlanInsertionOnlyUsesContext(t *testing.T) {
+	patch := `*** Begin Patch
+*** Update File: notes.txt
+@@ heading
++inserted
+*** End Patch`
+	hunks, err := parseApplyPatch(patch)
+	if err != nil {
+		t.Fatalf("parseApplyPatch() error = %v", err)
+	}
+
+	plan, err := buildApplyPatchPlan(context.Background(), applyPatchFakeFS{
+		files: map[string]string{"notes.txt": "intro\nheading\noutro\n"},
+	}, "/data", hunks)
+	if err != nil {
+		t.Fatalf("buildApplyPatchPlan() error = %v", err)
+	}
+	if len(plan.operations) != 1 {
+		t.Fatalf("expected 1 operation, got %d", len(plan.operations))
+	}
+	if got, want := plan.operations[0].content, "intro\nheading\ninserted\noutro\n"; got != want {
+		t.Fatalf("patched content = %q, want %q", got, want)
+	}
+}
+
 func TestNormalizeApplyPatchPathRejectsRelativeTraversal(t *testing.T) {
 	if _, err := normalizeApplyPatchPath("../outside.txt", "/data"); err == nil {
 		t.Fatal("expected traversal path to be rejected")

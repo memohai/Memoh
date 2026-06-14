@@ -41,6 +41,15 @@ func needsApproval(cfg settings.ToolApprovalConfig, toolName string, input any) 
 			return false
 		}
 		return true
+	case "apply_patch":
+		// apply_patch can add, edit, delete, and move multiple files from a
+		// freeform patch body. Without a single path to compare against bypass
+		// globs, require approval whenever file mutations are configured for
+		// review or force-review rules exist.
+		return cfg.Write.RequireApproval ||
+			cfg.Edit.RequireApproval ||
+			len(cfg.Write.ForceReviewGlobs) > 0 ||
+			len(cfg.Edit.ForceReviewGlobs) > 0
 	case "exec":
 		exe, ok := simpleExecutable(readString(args, "command"))
 		if !ok {

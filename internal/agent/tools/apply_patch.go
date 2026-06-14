@@ -466,8 +466,11 @@ func buildApplyPatchPlan(ctx context.Context, fs applyPatchReadFS, defaultWorkDi
 			if err != nil {
 				return nil, err
 			}
-			if info.exists && info.isDir {
-				return nil, fmt.Errorf("cannot add file over directory: %s", path)
+			if info.exists {
+				if info.isDir {
+					return nil, fmt.Errorf("cannot add file over directory: %s", path)
+				}
+				return nil, fmt.Errorf("cannot add existing file: %s", path)
 			}
 			files[path] = applyPatchVirtualFile{exists: true, content: hunk.contents, contentLoaded: true}
 			plan.operations = append(plan.operations, applyPatchOperation{kind: applyPatchOperationWrite, path: path, content: hunk.contents})
@@ -625,6 +628,7 @@ func computeApplyPatchReplacements(originalLines []string, path string, chunks [
 	replacements := make([]applyPatchReplacement, 0, len(chunks))
 	lineIndex := 0
 	for _, chunk := range chunks {
+		hasChangeContext := chunk.changeContext != nil
 		if chunk.changeContext != nil {
 			idx, ok := seekApplyPatchSequence(originalLines, []string{*chunk.changeContext}, lineIndex, false)
 			if !ok {
@@ -634,10 +638,11 @@ func computeApplyPatchReplacements(originalLines []string, path string, chunks [
 		}
 		if len(chunk.oldLines) == 0 {
 			insertionIdx := len(originalLines)
-			if len(originalLines) > 0 && originalLines[len(originalLines)-1] == "" {
-				insertionIdx = len(originalLines) - 1
+			if hasChangeContext {
+				insertionIdx = lineIndex
 			}
 			replacements = append(replacements, applyPatchReplacement{start: insertionIdx, newLines: append([]string(nil), chunk.newLines...)})
+			lineIndex = insertionIdx + len(chunk.newLines)
 			continue
 		}
 
