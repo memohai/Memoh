@@ -17,6 +17,10 @@
     <template v-else>
       <section class="flex-1 relative w-full px-3 sm:px-5 lg:px-8">
         <section class="absolute inset-0">
+          <div
+            aria-hidden="true"
+            class="pointer-events-none absolute inset-x-0 top-0 z-10 h-10 bg-gradient-to-b from-surface-editor to-transparent"
+          />
           <ScrollArea
             ref="scrollContainer"
             :class="`${transitionScroll?'opacity-100':'opacity-0'} h-full`"
@@ -87,14 +91,49 @@
             </div>
           </ScrollArea>
 
-          <ChatMinimap
-            v-if="isActive && !loadingChats"
-            :scroll-el="scrollEl"
-            :content-el="descEl"
-            :messages="messages"
-            :has-more-older="hasMoreOlder"
-            @navigate="handleMinimapNavigate"
-          />
+          <div
+            v-if="showScrollRail"
+            class="group/rail hidden md:flex absolute inset-y-0 right-4 z-10 w-96 flex-col items-end justify-center pointer-events-none"
+            @mouseenter="scheduleRailOpen"
+            @mouseleave="scheduleRailClose"
+          >
+            <!-- Collapsed: uniform tick marks -->
+            <div
+              class="flex max-h-[60vh] flex-col items-end justify-center gap-2 py-2 pointer-events-auto transition-opacity duration-150"
+              :class="railOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'"
+            >
+              <span
+                v-for="seg in railSegments"
+                :key="seg.id"
+                class="h-0.5 w-4 shrink-0 rounded-full transition-colors duration-150"
+                :class="seg.id === activeRailId
+                  ? 'bg-foreground/70'
+                  : 'bg-muted-foreground/30 group-hover/rail:bg-muted-foreground/55'"
+              />
+            </div>
+
+            <!-- Expanded: user-prompt select panel -->
+            <div
+              v-if="railOpen"
+              class="absolute right-0 top-1/2 w-80 -translate-y-1/2 overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-lg pointer-events-auto"
+              @mouseenter="scheduleRailOpen"
+              @mouseleave="scheduleRailClose"
+            >
+              <div
+                class="max-h-[min(60vh,480px)] overflow-y-auto overscroll-contain p-1.5 outline-none [mask-image:linear-gradient(to_bottom,transparent,black_10px,black_calc(100%-10px),transparent)] scrollbar-none"
+              >
+                <button
+                  v-for="seg in railSegments"
+                  :key="seg.id"
+                  type="button"
+                  class="flex h-8 w-full items-center rounded-md px-3 text-left text-[13px] text-foreground hover:bg-[var(--overlay-hover)]"
+                  @click="scrollToRailSegment(seg)"
+                >
+                  <span class="truncate">{{ seg.preview }}</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </section>
       </section>
 
@@ -639,7 +678,6 @@ import { getAcpProfiles, getModels, getProviders, getBotsByBotIdSettings } from 
 import type { AcpclientModelInfo, AcpprofilePublicProfile, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import MessageItem from './message-item.vue'
-import ChatMinimap from './chat-minimap.vue'
 import { animateScrollTo } from './chat-minimap'
 import BgTaskPill from './bg-task-pill.vue'
 import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'
@@ -660,6 +698,13 @@ interface PendingUserInputDraft {
   customSelected: boolean
   customText: string
   text: string
+}
+
+interface ScrollRailSegment {
+  id: string
+  label: string
+  preview: string
+  index: number
 }
 
 const props = withDefaults(defineProps<{
@@ -1111,6 +1156,99 @@ const { height } = useElementBounding(descEl)
 let highlightTimer: ReturnType<typeof setTimeout> | null = null
 let cancelScrollTween: (() => void) | null = null
 
+// --- Scroll rail ---
+const railSegments = ref<ScrollRailSegment[]>([])
+const activeRailId = ref('')
+const railOpen = ref(false)
+let railRaf = 0
+let railOpenTimer: ReturnType<typeof setTimeout> | null = null
+let railCloseTimer: ReturnType<typeof setTimeout> | null = null
+
+function getRailSegmentText(msg: (typeof messages.value)[number]): string {
+  if (msg.role === 'user') return msg.text?.trim().replace(/\s+/g, ' ') || ''
+  return ''
+}
+
+function rebuildRailSegments() {
+  const segments: ScrollRailSegment[] = []
+  messages.value.forEach((msg) => {
+    if (msg.role !== 'user') return
+    const preview = getRailSegmentText(msg)
+    if (!preview) return
+    segments.push({
+      id: msg.id,
+      label: `Message ${segments.length + 1}`,
+      preview,
+      index: segments.length,
+    })
+  })
+  railSegments.value = segments
+}
+
+function syncActiveRailFromScroll() {
+  const root = scrollEl.value
+  if (!root || !railSegments.value.length) return
+  const viewAnchor = root.scrollTop + 8
+  let best = railSegments.value[0]!.id
+  let bestDist = Number.POSITIVE_INFINITY
+  for (const seg of railSegments.value) {
+    const el = root.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(seg.id)}"]`)
+    if (!el) continue
+    const top = root.scrollTop + el.getBoundingClientRect().top - root.getBoundingClientRect().top
+    const dist = Math.abs(top - viewAnchor)
+    if (dist < bestDist) { bestDist = dist; best = seg.id }
+  }
+  activeRailId.value = best
+}
+
+watch(() => messages.value.map(m => `${m.id}:${m.role}`).join('|'), () => {
+  rebuildRailSegments()
+}, { flush: 'post', immediate: true })
+
+useScroll(scrollEl, {
+  onScroll() {
+    if (railRaf) return
+    railRaf = requestAnimationFrame(() => {
+      railRaf = 0
+      syncActiveRailFromScroll()
+    })
+  },
+})
+
+function scheduleRailOpen() {
+  if (railCloseTimer) { clearTimeout(railCloseTimer); railCloseTimer = null }
+  if (railOpen.value || railOpenTimer) return
+  railOpenTimer = setTimeout(() => { railOpen.value = true; railOpenTimer = null }, 80)
+}
+
+function scheduleRailClose() {
+  if (railOpenTimer) { clearTimeout(railOpenTimer); railOpenTimer = null }
+  if (!railOpen.value || railCloseTimer) return
+  railCloseTimer = setTimeout(() => { railOpen.value = false; railCloseTimer = null }, 150)
+}
+
+const showScrollRail = computed(() =>
+  isActive.value && !loadingChats.value && railSegments.value.length > 1,
+)
+
+function scrollToRailSegment(seg: ScrollRailSegment) {
+  activeRailId.value = seg.id
+  railOpen.value = false
+  void nextTick(() => {
+    const root = scrollEl.value
+    const target = findMessageElement(seg.id)
+    if (!root || !target) return
+    isAutoScroll.value = false
+    isInstant.value = false
+    const scrollMargin = Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0
+    startScrollTween(root, () => {
+      const el = findMessageElement(seg.id)
+      return el ? getElementAbsoluteTop(el, root) - scrollMargin : root.scrollTop
+    })
+  })
+}
+// --- End scroll rail ---
+
 onBeforeUnmount(() => {
   stopAuthSessionCleanup()
   if (highlightTimer) clearTimeout(highlightTimer)
@@ -1151,10 +1289,6 @@ function scrollViewportTo(getTop: () => number) {
   const root = scrollEl.value
   if (!root) return
   startScrollTween(root, getTop)
-}
-
-function handleMinimapNavigate(messageId: string) {
-  void scrollToMessage(messageId)
 }
 
 function scrollToBottom() {
