@@ -61,7 +61,7 @@ func writeDiscordRichLinkPart(b *strings.Builder, part channel.MessagePart) {
 		return
 	}
 	b.WriteString("[")
-	b.WriteString(discordEscapeLinkText(text))
+	b.WriteString(escapeDiscordLinkText(text))
 	b.WriteString("](")
 	b.WriteString(discordEscapeLinkURL(url))
 	b.WriteString(")")
@@ -75,28 +75,31 @@ func writeDiscordRichCodeBlockPart(b *strings.Builder, part channel.MessagePart)
 	if b.Len() > 0 {
 		b.WriteString("\n\n")
 	}
+	fence := selectBacktickFence(text, 3)
 	lang := discordRichLanguage(part.Language)
-	b.WriteString("```")
+	b.WriteString(fence)
 	b.WriteString(lang)
 	b.WriteString("\n")
 	b.WriteString(text)
-	b.WriteString("\n```")
+	b.WriteString("\n")
+	b.WriteString(fence)
 }
 
 func renderDiscordRichStyledInline(text string, styles []channel.MessageTextStyle) string {
 	if hasDiscordRichTextStyle(styles, channel.MessageStyleCode) {
-		return "`" + text + "`"
+		return wrapDiscordInlineCode(text)
 	}
+	escaped := escapeDiscordInlineMarkdown(text)
 	if hasDiscordRichTextStyle(styles, channel.MessageStyleStrikethrough) {
-		text = "~~" + text + "~~"
+		escaped = "~~" + escaped + "~~"
 	}
 	if hasDiscordRichTextStyle(styles, channel.MessageStyleItalic) {
-		text = "*" + text + "*"
+		escaped = "*" + escaped + "*"
 	}
 	if hasDiscordRichTextStyle(styles, channel.MessageStyleBold) {
-		text = "**" + text + "**"
+		escaped = "**" + escaped + "**"
 	}
-	return text
+	return escaped
 }
 
 func hasDiscordRichTextStyle(styles []channel.MessageTextStyle, want channel.MessageTextStyle) bool {
@@ -128,4 +131,67 @@ func isAllowedDiscordRichHref(href string) bool {
 		strings.HasPrefix(href, "http://") ||
 		strings.HasPrefix(href, "mailto:") ||
 		strings.HasPrefix(href, "tel:")
+}
+
+// escapeDiscordInlineMarkdown neutralises the markdown control characters that
+// could let attacker-supplied text forge links, mentions, code spans, or break
+// out of an enclosing style wrapper. `\` must come first so subsequent escapes
+// are themselves preserved.
+var escapeDiscordInlineMarkdown = strings.NewReplacer(
+	`\`, `\\`,
+	"`", "\\`",
+	`*`, `\*`,
+	`_`, `\_`,
+	`~`, `\~`,
+	`[`, `\[`,
+	`]`, `\]`,
+	`<`, `\<`,
+	`>`, `\>`,
+	`|`, `\|`,
+).Replace
+
+// escapeDiscordLinkText escapes the characters that can prematurely close or
+// split a `[text](url)` label, and collapses control whitespace that would
+// otherwise stop Discord from parsing the link.
+func escapeDiscordLinkText(text string) string {
+	text = strings.ReplaceAll(text, "\r", "")
+	text = strings.ReplaceAll(text, "\n", " ")
+	text = strings.ReplaceAll(text, `\`, `\\`)
+	text = strings.ReplaceAll(text, "[", `\[`)
+	text = strings.ReplaceAll(text, "]", `\]`)
+	return text
+}
+
+// selectBacktickFence returns a run of backticks long enough to safely fence
+// `text`, with at least `min` backticks. Used by code blocks (min=3) and the
+// inline-code wrapper.
+func selectBacktickFence(text string, min int) string {
+	maxRun, cur := 0, 0
+	for _, r := range text {
+		if r == '`' {
+			cur++
+			if cur > maxRun {
+				maxRun = cur
+			}
+			continue
+		}
+		cur = 0
+	}
+	n := min
+	if maxRun >= n {
+		n = maxRun + 1
+	}
+	return strings.Repeat("`", n)
+}
+
+// wrapDiscordInlineCode wraps text as inline code, growing the backtick fence
+// when text already contains backticks and padding with a space when the text
+// starts or ends with a backtick.
+func wrapDiscordInlineCode(text string) string {
+	fence := selectBacktickFence(text, 1)
+	pad := ""
+	if strings.ContainsRune(text, '`') {
+		pad = " "
+	}
+	return fence + pad + text + pad + fence
 }
