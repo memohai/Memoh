@@ -581,11 +581,14 @@ func (a *FeishuAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg
 		return nil
 	}
 
-	text := strings.TrimSpace(msg.Message.Message.PlainText())
-	if text == "" {
+	body := renderFeishuMessagePartsLarkMD(msg.Message.Message)
+	if body == "" {
+		body = strings.TrimSpace(msg.Message.Message.PlainText())
+	}
+	if body == "" {
 		return errors.New("message is required")
 	}
-	content, err := buildFeishuCardContent(text)
+	content, err := buildFeishuCardContent(body)
 	if err != nil {
 		return err
 	}
