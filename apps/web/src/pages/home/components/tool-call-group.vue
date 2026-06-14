@@ -128,7 +128,7 @@ function labelFor(tool: ToolCallBlockType): string {
 const BROWSE_TOOLS = new Set([
   'read', 'list', 'web_search', 'web_fetch', 'search_memory', 'search_messages',
   'get_contacts', 'list_sessions', 'list_email', 'read_email', 'list_email_accounts',
-  'list_schedule', 'get_schedule',
+  'list_schedule', 'get_schedule', 'list_skills',
 ])
 const RUN_TOOLS = new Set(['exec'])
 const EDIT_TOOLS = new Set(['write', 'edit'])
