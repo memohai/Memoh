@@ -4,6 +4,7 @@
     ref="filesPaneRef"
     :bot-id="currentBotId"
     :can-write="canWorkspaceWrite"
+    :bot-name="currentBot?.display_name || currentBot?.name || ''"
   />
   <div
     v-else

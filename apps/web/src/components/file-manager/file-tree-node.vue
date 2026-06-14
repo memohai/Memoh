@@ -193,27 +193,31 @@ function onCheckbox(checked: boolean | 'indeterminate') {
     </ContextMenuContent>
   </ContextMenu>
 
-  <!-- Keep children mounted after first load to avoid re-mount cost on
+  <!-- Loading spinner: kept outside the display:contents wrapper so the
+       browser can composite the animation layer correctly. -->
+  <div
+    v-if="entry.isDir && expanded && loading && children.length === 0"
+    class="flex h-[27px] items-center mx-1 mb-px pl-1 pr-1 text-[13.5px] leading-[27px] tracking-normal font-[350] text-muted-foreground [-webkit-font-smoothing:auto]"
+  >
+    <span
+      v-for="g in depth + 1"
+      :key="g"
+      class="h-full w-2 shrink-0 self-stretch"
+    />
+    <span class="flex size-6 shrink-0 items-center justify-center">
+      <LoaderCircle class="size-3.5 animate-spin" />
+    </span>
+  </div>
+
+  <!-- Children: kept mounted after first load to avoid re-mount cost on
        close/reopen. display:contents when expanded (no layout impact),
        display:none when collapsed (hidden but alive). -->
   <div
-    v-if="entry.isDir && (expanded || loaded)"
+    v-if="entry.isDir && (expanded || loaded) && children.length > 0"
     :class="expanded ? 'contents' : 'hidden'"
   >
-    <div
-      v-if="loading && children.length === 0"
-      class="flex h-[27px] items-center mx-1 mb-px pl-1 pr-1 text-[13.5px] leading-[27px] tracking-normal font-[350] text-muted-foreground [-webkit-font-smoothing:auto]"
-    >
-      <span
-        v-for="g in depth + 1"
-        :key="g"
-        class="h-full w-2 shrink-0 self-stretch"
-      />
-      <LoaderCircle class="size-3.5 animate-spin" />
-    </div>
     <FileTreeNode
       v-for="child in children"
-      v-else
       :key="child.path"
       :entry="child"
       :depth="depth + 1"
