@@ -2301,7 +2301,6 @@
     },
     "schedule": {
       "title": "Schedule",
-      "subtitle": "Configure automated tasks. Use the visual builder or cron expressions for precise control.",
       "loadFailed": "Load failed",
       "empty": "No tasks scheduled",
       "name": "Name",
@@ -2323,6 +2322,10 @@
       "saveSuccess": "Task saved",
       "saveFailed": "Save failed",
       "dangerZoneDesc": "Task deletion is permanent. Proceed with caution.",
+      "moreOptions": "More options",
+      "sortName": "By name",
+      "sortStatus": "By status",
+      "sortNextRun": "By next run",
       "form": {
         "name": "Task Name",
         "namePlaceholder": "e.g. Daily Briefing",

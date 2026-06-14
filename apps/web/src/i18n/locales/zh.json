@@ -2297,7 +2297,6 @@
     },
     "schedule": {
       "title": "定时任务",
-      "subtitle": "配置自动化指令。通过可视化工具或 Cron 表达式控制执行周期。",
       "loadFailed": "加载失败",
       "empty": "暂无定时任务",
       "name": "名称",
@@ -2319,6 +2318,10 @@
       "saveSuccess": "任务已保存",
       "saveFailed": "保存失败",
       "dangerZoneDesc": "任务删除后无法恢复，请谨慎操作。",
+      "moreOptions": "更多选项",
+      "sortName": "按名称",
+      "sortStatus": "按状态",
+      "sortNextRun": "按下次触发",
       "form": {
         "name": "任务名称",
         "namePlaceholder": "例如：每日日报",
