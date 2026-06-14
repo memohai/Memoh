@@ -1,43 +1,46 @@
 <template>
   <Popover v-model:open="open">
     <PopoverTrigger as-child>
-      <Button
-        variant="outline"
-        role="combobox"
+      <button
+        data-slot="select-trigger"
+        data-size="default"
+        :data-placeholder="displayLabel ? undefined : ''"
+        type="button"
         :aria-expanded="open"
         :aria-label="placeholder || 'Select model'"
-        class="w-full justify-between font-normal shadow-none h-9 text-xs"
+        :class="[selectTriggerClass, 'w-full']"
       >
         <span
-          class="truncate"
+          class="line-clamp-1"
           :title="displayLabel || placeholder"
         >
           {{ displayLabel || placeholder }}
         </span>
-        <Search
-          class="ml-2 size-3.5 shrink-0 text-muted-foreground"
-        />
-      </Button>
+        <ChevronsUpDown class="opacity-50" />
+      </button>
     </PopoverTrigger>
     <PopoverContent
-      class="w-[var(--reka-popover-trigger-width)] p-0 shadow-md rounded-xl"
-      align="start"
+      menu
+      align="end"
+      class="min-w-[var(--reka-popover-trigger-width)] w-80 p-0"
     >
-      <ModelOptions
-        v-model="selected"
-        :models="models"
-        :providers="providers"
-        :model-type="modelType"
-        :open="open"
-      />
+      <div class="flex flex-col overflow-hidden rounded-[var(--radius-menu-shell)] border border-[color:var(--border-menu)] bg-popover text-popover-foreground shadow-[var(--shadow-dropdown)]">
+        <ModelOptions
+          v-model="selected"
+          :models="models"
+          :providers="providers"
+          :model-type="modelType"
+          :open="open"
+        />
+      </div>
     </PopoverContent>
   </Popover>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Search } from 'lucide-vue-next'
-import { Popover, PopoverTrigger, PopoverContent, Button } from '@memohai/ui'
+import { ChevronsUpDown } from 'lucide-vue-next'
+import { Popover, PopoverTrigger, PopoverContent, selectTriggerClass } from '@memohai/ui'
 import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import ModelOptions from './model-options.vue'
 

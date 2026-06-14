@@ -2322,10 +2322,21 @@
       "saveSuccess": "Task saved",
       "saveFailed": "Save failed",
       "dangerZoneDesc": "Task deletion is permanent. Proceed with caution.",
+      "deleteTitle": "Delete task",
       "moreOptions": "More options",
       "sortName": "By name",
       "sortStatus": "By status",
       "sortNextRun": "By next run",
+      "picker": {
+        "every": "Every",
+        "minutes": "minutes",
+        "atMinute": "at minute",
+        "at": "at",
+        "day": "day",
+        "hour": "Hour",
+        "minute": "Minute",
+        "runs": "runs"
+      },
       "form": {
         "name": "Task Name",
         "namePlaceholder": "e.g. Daily Briefing",
