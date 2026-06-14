@@ -564,7 +564,7 @@ function runMigrations(command: { command: string, cwd: string, configPath: stri
     return
   }
   const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`
-  if (output.includes('Dirty database version 2')) {
+  if (dirtyMigrationVersion(output) === 2) {
     appendLog('repairing dirty database version 2')
     const forceResult = runServerCommand(command, ['migrate', 'force', '2'])
     if (forceResult.status === 0) {
@@ -577,6 +577,14 @@ function runMigrations(command: { command: string, cwd: string, configPath: stri
     throw new Error(`local server migration dirty repair failed: ${formatCommandFailure(forceResult)}`)
   }
   throw new Error(`local server migration failed: ${formatCommandFailure(result)}`)
+}
+
+function dirtyMigrationVersion(output: string): number | null {
+  const match = output.match(/\bDirty database version (\d+)\b/)
+  if (!match) {
+    return null
+  }
+  return Number.parseInt(match[1], 10)
 }
 
 function runServerCommand(

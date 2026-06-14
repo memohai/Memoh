@@ -1781,6 +1781,10 @@ export type HandlersEmailOAuthStatusResponse = {
     provider?: string;
 };
 
+export type HandlersForkBranchRequest = {
+    message_id?: string;
+};
+
 export type HandlersFsOpResponse = {
     ok?: boolean;
 };
@@ -1834,6 +1838,10 @@ export type HandlersOauthDiscoverRequest = {
 export type HandlersOauthExchangeRequest = {
     code?: string;
     state?: string;
+};
+
+export type HandlersSetActiveBranchRequest = {
+    branch_id?: string;
 };
 
 export type HandlersSkillsOpResponse = {
@@ -1998,6 +2006,8 @@ export type McpUpsertRequest = {
 export type MessageMessage = {
     assets?: Array<MessageMessageAsset>;
     bot_id?: string;
+    branch_id?: string;
+    branch_seq?: number;
     compact_id?: string;
     content?: Array<number>;
     created_at?: string;
@@ -2415,6 +2425,41 @@ export type SearchprovidersUpdateRequest = {
     provider?: SearchprovidersProviderName;
 };
 
+export type SessionBranchGraph = {
+    active_branch_id?: string;
+    branches?: Array<SessionBranchNode>;
+    turns?: Array<SessionBranchTurn>;
+};
+
+export type SessionBranchNode = {
+    active?: boolean;
+    created_at?: string;
+    fork_from_message_id?: string;
+    fork_from_seq?: number;
+    id?: string;
+    parent_branch_id?: string;
+    preview?: SessionTurnPreview;
+    session_id?: string;
+    title?: string;
+    updated_at?: string;
+};
+
+export type SessionBranchTurn = {
+    active?: boolean;
+    assistant_message_id?: string;
+    branch_id?: string;
+    branch_seq?: number;
+    created_at?: string;
+    depth?: number;
+    fork_from_seq?: number;
+    id?: string;
+    parent_turn_id?: string;
+    pending?: boolean;
+    preview?: SessionTurnPreview;
+    title?: string;
+    user_message_id?: string;
+};
+
 export type SessionSession = {
     bot_id?: string;
     channel_type?: string;
@@ -2433,6 +2478,13 @@ export type SessionSession = {
     title?: string;
     type?: string;
     updated_at?: string;
+};
+
+export type SessionTurnPreview = {
+    assistant_text?: string;
+    message_id?: string;
+    timestamp?: string;
+    user_text?: string;
 };
 
 export type SettingsSettings = {
@@ -7724,6 +7776,142 @@ export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponses = {
 };
 
 export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponse = PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponses[keyof PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponses];
+
+export type GetBotsByBotIdSessionsBySessionIdBranchesData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/branches';
+};
+
+export type GetBotsByBotIdSessionsBySessionIdBranchesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdBranchesError = GetBotsByBotIdSessionsBySessionIdBranchesErrors[keyof GetBotsByBotIdSessionsBySessionIdBranchesErrors];
+
+export type GetBotsByBotIdSessionsBySessionIdBranchesResponses = {
+    /**
+     * OK
+     */
+    200: SessionBranchGraph;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdBranchesResponse = GetBotsByBotIdSessionsBySessionIdBranchesResponses[keyof GetBotsByBotIdSessionsBySessionIdBranchesResponses];
+
+export type PatchBotsByBotIdSessionsBySessionIdBranchesActiveData = {
+    /**
+     * Active branch
+     */
+    body: HandlersSetActiveBranchRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/branches/active';
+};
+
+export type PatchBotsByBotIdSessionsBySessionIdBranchesActiveErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PatchBotsByBotIdSessionsBySessionIdBranchesActiveError = PatchBotsByBotIdSessionsBySessionIdBranchesActiveErrors[keyof PatchBotsByBotIdSessionsBySessionIdBranchesActiveErrors];
+
+export type PatchBotsByBotIdSessionsBySessionIdBranchesActiveResponses = {
+    /**
+     * OK
+     */
+    200: SessionBranchGraph;
+};
+
+export type PatchBotsByBotIdSessionsBySessionIdBranchesActiveResponse = PatchBotsByBotIdSessionsBySessionIdBranchesActiveResponses[keyof PatchBotsByBotIdSessionsBySessionIdBranchesActiveResponses];
+
+export type PostBotsByBotIdSessionsBySessionIdBranchesForkData = {
+    /**
+     * Fork source
+     */
+    body: HandlersForkBranchRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/branches/fork';
+};
+
+export type PostBotsByBotIdSessionsBySessionIdBranchesForkErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdSessionsBySessionIdBranchesForkError = PostBotsByBotIdSessionsBySessionIdBranchesForkErrors[keyof PostBotsByBotIdSessionsBySessionIdBranchesForkErrors];
+
+export type PostBotsByBotIdSessionsBySessionIdBranchesForkResponses = {
+    /**
+     * Created
+     */
+    201: SessionBranchGraph;
+};
+
+export type PostBotsByBotIdSessionsBySessionIdBranchesForkResponse = PostBotsByBotIdSessionsBySessionIdBranchesForkResponses[keyof PostBotsByBotIdSessionsBySessionIdBranchesForkResponses];
 
 export type PostBotsByBotIdSessionsBySessionIdCompactData = {
     body?: never;

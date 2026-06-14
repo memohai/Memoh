@@ -139,6 +139,8 @@ type BotHistoryMessage struct {
 	ID                      pgtype.UUID        `json:"id"`
 	BotID                   pgtype.UUID        `json:"bot_id"`
 	SessionID               pgtype.UUID        `json:"session_id"`
+	BranchID                pgtype.UUID        `json:"branch_id"`
+	BranchSeq               pgtype.Int8        `json:"branch_seq"`
 	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
 	SenderAccountUserID     pgtype.UUID        `json:"sender_account_user_id"`
 	SourceMessageID         pgtype.Text        `json:"source_message_id"`
@@ -214,11 +216,23 @@ type BotSession struct {
 	Type            string             `json:"type"`
 	Title           string             `json:"title"`
 	Metadata        []byte             `json:"metadata"`
+	ActiveBranchID  pgtype.UUID        `json:"active_branch_id"`
 	ParentSessionID pgtype.UUID        `json:"parent_session_id"`
 	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type BotSessionBranch struct {
+	ID                pgtype.UUID        `json:"id"`
+	SessionID         pgtype.UUID        `json:"session_id"`
+	ParentBranchID    pgtype.UUID        `json:"parent_branch_id"`
+	ForkFromMessageID pgtype.UUID        `json:"fork_from_message_id"`
+	ForkFromSeq       pgtype.Int8        `json:"fork_from_seq"`
+	Title             pgtype.Text        `json:"title"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
 type BotSessionEvent struct {

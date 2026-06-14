@@ -2948,6 +2948,11 @@ definitions:
       provider:
         type: string
     type: object
+  handlers.forkBranchRequest:
+    properties:
+      message_id:
+        type: string
+    type: object
   handlers.fsOpResponse:
     properties:
       ok:
@@ -3029,6 +3034,11 @@ definitions:
       code:
         type: string
       state:
+        type: string
+    type: object
+  handlers.setActiveBranchRequest:
+    properties:
+      branch_id:
         type: string
     type: object
   handlers.skillsOpResponse:
@@ -3284,6 +3294,10 @@ definitions:
         type: array
       bot_id:
         type: string
+      branch_id:
+        type: string
+      branch_seq:
+        type: integer
       compact_id:
         type: string
       content:
@@ -4036,6 +4050,71 @@ definitions:
       provider:
         $ref: '#/definitions/searchproviders.ProviderName'
     type: object
+  session.BranchGraph:
+    properties:
+      active_branch_id:
+        type: string
+      branches:
+        items:
+          $ref: '#/definitions/session.BranchNode'
+        type: array
+      turns:
+        items:
+          $ref: '#/definitions/session.BranchTurn'
+        type: array
+    type: object
+  session.BranchNode:
+    properties:
+      active:
+        type: boolean
+      created_at:
+        type: string
+      fork_from_message_id:
+        type: string
+      fork_from_seq:
+        type: integer
+      id:
+        type: string
+      parent_branch_id:
+        type: string
+      preview:
+        $ref: '#/definitions/session.TurnPreview'
+      session_id:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  session.BranchTurn:
+    properties:
+      active:
+        type: boolean
+      assistant_message_id:
+        type: string
+      branch_id:
+        type: string
+      branch_seq:
+        type: integer
+      created_at:
+        type: string
+      depth:
+        type: integer
+      fork_from_seq:
+        type: integer
+      id:
+        type: string
+      parent_turn_id:
+        type: string
+      pending:
+        type: boolean
+      preview:
+        $ref: '#/definitions/session.TurnPreview'
+      title:
+        type: string
+      user_message_id:
+        type: string
+    type: object
   session.Session:
     properties:
       bot_id:
@@ -4065,6 +4144,17 @@ definitions:
       type:
         type: string
       updated_at:
+        type: string
+    type: object
+  session.TurnPreview:
+    properties:
+      assistant_text:
+        type: string
+      message_id:
+        type: string
+      timestamp:
+        type: string
+      user_text:
         type: string
     type: object
   settings.Settings:
@@ -8337,6 +8427,121 @@ paths:
       summary: Set ACP session runtime model
       tags:
       - acp
+  /bots/{bot_id}/sessions/{session_id}/branches:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/session.BranchGraph'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List session branches
+      tags:
+      - sessions
+  /bots/{bot_id}/sessions/{session_id}/branches/active:
+    patch:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Active branch
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.setActiveBranchRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/session.BranchGraph'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Switch the active session branch
+      tags:
+      - sessions
+  /bots/{bot_id}/sessions/{session_id}/branches/fork:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Fork source
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.forkBranchRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/session.BranchGraph'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Fork a session branch from an assistant message
+      tags:
+      - sessions
   /bots/{bot_id}/sessions/{session_id}/compact:
     post:
       description: Run context compaction synchronously for a session

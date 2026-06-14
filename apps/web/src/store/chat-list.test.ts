@@ -8,6 +8,9 @@ const api = vi.hoisted(() => ({
   createSession: vi.fn(),
   deleteSession: vi.fn(),
   fetchSessions: vi.fn(),
+  fetchSessionBranches: vi.fn(),
+  forkSessionBranch: vi.fn(),
+  setActiveSessionBranch: vi.fn(),
   fetchBots: vi.fn(),
   fetchMessagesUI: vi.fn(),
   sendLocalChannelMessage: vi.fn(),
@@ -25,6 +28,8 @@ const api = vi.hoisted(() => ({
 const toast = vi.hoisted(() => ({
   error: vi.fn(),
 }))
+
+const ASSISTANT_MESSAGE_ID = '11111111-1111-4111-8111-111111111111'
 
 vi.mock('@/composables/api/useChat', () => api)
 vi.mock('vue-sonner', () => ({ toast }))
@@ -102,6 +107,21 @@ describe('chat-list store', () => {
       { id: 'bot-1', status: 'active', name: 'Bot' },
     ])
     api.fetchSessions.mockResolvedValue([])
+    api.fetchSessionBranches.mockResolvedValue({
+      active_branch_id: 'branch-root',
+      branches: [{ id: 'branch-root', session_id: 'session-1', active: true }],
+    })
+    api.forkSessionBranch.mockResolvedValue({
+      active_branch_id: 'branch-fork',
+      branches: [
+        { id: 'branch-root', session_id: 'session-1' },
+        { id: 'branch-fork', session_id: 'session-1', parent_branch_id: 'branch-root', active: true },
+      ],
+    })
+    api.setActiveSessionBranch.mockResolvedValue({
+      active_branch_id: 'branch-root',
+      branches: [{ id: 'branch-root', session_id: 'session-1', active: true }],
+    })
     api.createSession.mockResolvedValue({
       id: 'session-1',
       bot_id: 'bot-1',
@@ -1630,5 +1650,95 @@ describe('chat-list store', () => {
     streamHandler?.({ type: 'end', stream_id: streamB, session_id: 'session-b' } as UIStreamEvent)
     await first
     await second
+  })
+
+  it('forks and switches branches without sending a new message', async () => {
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-1', bot_id: 'bot-1', title: 'Main', type: 'chat' },
+    ])
+    api.fetchMessagesUI
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: 'u1', role: 'user', text: 'question', timestamp: '2026-01-01T00:00:00Z' },
+      ])
+      .mockResolvedValueOnce([
+        { id: 'u2', role: 'user', text: 'root question', timestamp: '2026-01-01T00:01:00Z' },
+      ])
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await store.forkMessage(ASSISTANT_MESSAGE_ID)
+
+    expect(api.forkSessionBranch).toHaveBeenCalledWith('bot-1', 'session-1', ASSISTANT_MESSAGE_ID)
+    expect(api.fetchMessagesUI).toHaveBeenCalledTimes(2)
+    expect(store.branchGraph?.active_branch_id).toBe('branch-fork')
+    expect(store.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'user', text: 'question' }),
+    ]))
+    expect(sentWSMessages).toHaveLength(0)
+
+    await store.switchBranch('branch-root')
+
+    expect(api.setActiveSessionBranch).toHaveBeenCalledWith('bot-1', 'session-1', 'branch-root')
+    expect(api.fetchMessagesUI).toHaveBeenCalledTimes(3)
+    expect(store.branchGraph?.active_branch_id).toBe('branch-root')
+    expect(store.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'user', text: 'root question' }),
+    ]))
+    expect(sentWSMessages).toHaveLength(0)
+  })
+
+  it('does not call the fork API for temporary frontend message ids', async () => {
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-1', bot_id: 'bot-1', title: 'Main', type: 'chat' },
+    ])
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await store.forkMessage('assistant-message-1')
+
+    expect(api.forkSessionBranch).not.toHaveBeenCalled()
+    expect(sentWSMessages).toHaveLength(0)
+  })
+
+  it('refreshes the branch graph after the current session stream is persisted', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      { type: 'message', data: { id: 0, type: 'text', content: 'reply' } } as UIStreamEvent,
+      { type: 'end' } as UIStreamEvent,
+    ]
+    api.fetchMessagesUI
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: 'u1', role: 'user', text: 'hello', timestamp: '2026-01-01T00:00:00Z' },
+        {
+          id: 'a1',
+          role: 'assistant',
+          messages: [{ id: 0, type: 'text', content: 'reply' }],
+          timestamp: '2026-01-01T00:00:01Z',
+        },
+      ])
+    api.fetchSessionBranches
+      .mockResolvedValueOnce({
+        active_branch_id: 'branch-root',
+        branches: [{ id: 'branch-root', session_id: 'session-1', active: true }],
+        turns: [],
+      })
+      .mockResolvedValueOnce({
+        active_branch_id: 'branch-root',
+        branches: [{ id: 'branch-root', session_id: 'session-1', active: true }],
+        turns: [{ id: 'a1', branch_id: 'branch-root', active: true }],
+      })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const result = await store.sendMessage('hello')
+    await flushPromises()
+
+    expect(result).toMatchObject({ ok: true })
+    expect(api.fetchSessionBranches).toHaveBeenCalledTimes(2)
+    expect(store.branchGraph?.turns).toEqual([
+      expect.objectContaining({ id: 'a1', branch_id: 'branch-root' }),
+    ])
   })
 })

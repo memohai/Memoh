@@ -226,6 +226,7 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 				Attachments:       attachments,
 				Reply:             reply,
 				Forward:           forward,
+				Branch:            uiBranchInfoFromMessage(raw),
 				Timestamp:         raw.CreatedAt,
 				Platform:          resolveUIPersistencePlatform(raw),
 				ExternalMessageID: strings.TrimSpace(raw.ExternalMessageID),
@@ -315,6 +316,7 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			result = append(result, UITurn{
 				Role:              "assistant",
 				Messages:          assistantMessages,
+				Branch:            uiBranchInfoFromMessage(raw),
 				Timestamp:         raw.CreatedAt,
 				Platform:          resolveUIPersistencePlatform(raw),
 				ExternalMessageID: strings.TrimSpace(raw.ExternalMessageID),
@@ -346,12 +348,24 @@ func newPendingAssistantTurn(raw messagepkg.Message) *uiPendingAssistantTurn {
 	return &uiPendingAssistantTurn{
 		Turn: UITurn{
 			Role:              "assistant",
+			Branch:            uiBranchInfoFromMessage(raw),
 			Timestamp:         raw.CreatedAt,
 			Platform:          resolveUIPersistencePlatform(raw),
 			ExternalMessageID: strings.TrimSpace(raw.ExternalMessageID),
 			ID:                strings.TrimSpace(raw.ID),
 		},
 		ToolIndexes: map[string]int{},
+	}
+}
+
+func uiBranchInfoFromMessage(raw messagepkg.Message) *UIBranchInfo {
+	branchID := strings.TrimSpace(raw.BranchID)
+	if branchID == "" {
+		return nil
+	}
+	return &UIBranchInfo{
+		BranchID: branchID,
+		Seq:      raw.BranchSeq,
 	}
 }
 

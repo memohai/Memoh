@@ -446,6 +446,7 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   type TEXT NOT NULL DEFAULT 'chat' CHECK (type IN ('chat', 'heartbeat', 'schedule', 'subagent', 'discuss', 'acp_agent')),
   title TEXT NOT NULL DEFAULT '',
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  active_branch_id UUID,
   parent_session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
   created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -459,6 +460,24 @@ CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_active ON bot_sessions(bot_id, d
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_parent ON bot_sessions(parent_session_id) WHERE parent_session_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_created_by_user_id ON bot_sessions(created_by_user_id) WHERE created_by_user_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_created_by ON bot_sessions(bot_id, created_by_user_id, deleted_at);
+
+-- bot_session_branches: version paths inside a user-visible session.
+CREATE TABLE IF NOT EXISTS bot_session_branches (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id UUID NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
+  parent_branch_id UUID REFERENCES bot_session_branches(id) ON DELETE SET NULL,
+  fork_from_message_id UUID,
+  fork_from_seq BIGINT,
+  title TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_session_branches_root
+  ON bot_session_branches(session_id)
+  WHERE parent_branch_id IS NULL AND fork_from_message_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_bot_session_branches_session ON bot_session_branches(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_bot_session_branches_parent ON bot_session_branches(parent_branch_id) WHERE parent_branch_id IS NOT NULL;
 
 -- Add FK from routes to sessions (deferred to avoid circular dependency during CREATE).
 ALTER TABLE bot_channel_routes
@@ -489,6 +508,8 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
+  branch_id UUID REFERENCES bot_session_branches(id) ON DELETE SET NULL,
+  branch_seq BIGINT,
   sender_channel_identity_id UUID REFERENCES channel_identities(id),
   sender_account_user_id UUID REFERENCES users(id),
   source_message_id TEXT,
@@ -508,6 +529,11 @@ CREATE INDEX IF NOT EXISTS idx_bot_history_messages_bot_created ON bot_history_m
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_compact ON bot_history_messages(compact_id);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session
   ON bot_history_messages(session_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_history_messages_branch_seq
+  ON bot_history_messages(branch_id, branch_seq)
+  WHERE branch_id IS NOT NULL AND branch_seq IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_branch
+  ON bot_history_messages(branch_id, branch_seq);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_source
   ON bot_history_messages(session_id, source_message_id);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_reply

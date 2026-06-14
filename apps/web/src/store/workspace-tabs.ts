@@ -1081,6 +1081,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   const sidebarOpen = useLocalStorage('workspace-sidebar-open', true)
   const sidebarWidth = useLocalStorage('workspace-sidebar-width', 256)
   const workbenchOpen = useLocalStorage('workspace-workbench-open', true)
+  const branchSidebarOpen = useLocalStorage('workspace-branch-sidebar-open', true)
+  const branchSidebarWidth = useLocalStorage('workspace-branch-sidebar-width', 280)
 
 
   // Push/pull model (see main-section + sidebar): the rail is in flow and slides
@@ -1112,6 +1114,18 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   function hideWorkbench() {
     setWorkbench(false)
+  }
+
+  function toggleBranchSidebar() {
+    branchSidebarOpen.value = !branchSidebarOpen.value
+  }
+
+  function showBranchSidebar() {
+    branchSidebarOpen.value = true
+  }
+
+  function hideBranchSidebar() {
+    branchSidebarOpen.value = false
   }
 
   // ---- bottom panel actions -------------------------------------------------
@@ -1206,7 +1220,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     sidebarView,
     sidebarOpen,
     workbenchOpen,
+    branchSidebarOpen,
     sidebarWidth,
+    branchSidebarWidth,
     pendingFilesPath,
     registerApi,
     releaseApi,
@@ -1214,6 +1230,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     toggleWorkbench,
     showWorkbench,
     hideWorkbench,
+    toggleBranchSidebar,
+    showBranchSidebar,
+    hideBranchSidebar,
     openChat,
     setChatTitle,
     openFile,

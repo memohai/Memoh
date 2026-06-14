@@ -100,6 +100,53 @@ export interface UIForwardRef {
   date?: number
 }
 
+export interface UIBranchInfo {
+  branch_id?: string
+  seq?: number
+}
+
+export interface BranchTurnPreview {
+  user_text?: string
+  assistant_text?: string
+  message_id?: string
+  timestamp?: string
+}
+
+export interface BranchNode {
+  id: string
+  session_id: string
+  parent_branch_id?: string
+  fork_from_message_id?: string
+  fork_from_seq?: number
+  title?: string
+  active?: boolean
+  preview?: BranchTurnPreview
+  created_at?: string
+  updated_at?: string
+}
+
+export interface BranchTurn {
+  id: string
+  branch_id: string
+  parent_turn_id?: string
+  title?: string
+  assistant_message_id?: string
+  user_message_id?: string
+  branch_seq?: number
+  depth?: number
+  active?: boolean
+  pending?: boolean
+  preview?: BranchTurnPreview
+  fork_from_seq?: number
+  created_at?: string
+}
+
+export interface BranchGraph {
+  active_branch_id?: string
+  branches: BranchNode[]
+  turns?: BranchTurn[]
+}
+
 export interface UITextMessage {
   id: number
   type: 'text'
@@ -196,6 +243,7 @@ export interface UIUserTurn {
   attachments?: UIAttachment[]
   reply?: UIReplyRef
   forward?: UIForwardRef
+  branch?: UIBranchInfo
   timestamp: string
   platform?: string
   sender_display_name?: string
@@ -208,6 +256,7 @@ export interface UIUserTurn {
 export interface UIAssistantTurn {
   role: 'assistant'
   messages: UIMessage[]
+  branch?: UIBranchInfo
   timestamp: string
   platform?: string
   external_message_id?: string

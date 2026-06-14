@@ -28,12 +28,25 @@ CREATE TABLE channel_identities (
 );
 CREATE TABLE bot_sessions (
   id TEXT PRIMARY KEY,
-  channel_type TEXT
+  channel_type TEXT,
+  active_branch_id TEXT
+);
+CREATE TABLE bot_session_branches (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
+  parent_branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
+  fork_from_message_id TEXT,
+  fork_from_seq INTEGER,
+  title TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE bot_history_messages (
   id TEXT PRIMARY KEY,
   bot_id TEXT NOT NULL,
   session_id TEXT,
+  branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
+  branch_seq INTEGER,
   sender_channel_identity_id TEXT,
   sender_account_user_id TEXT,
   source_message_id TEXT,
@@ -50,23 +63,30 @@ CREATE TABLE bot_history_messages (
 
 	botID := "00000000-0000-0000-0000-000000002001"
 	sessionID := "00000000-0000-0000-0000-000000002002"
-	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id, channel_type) VALUES (?, ?)`, sessionID, "local"); err != nil {
+	branchID := "00000000-0000-0000-0000-000000002010"
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id, channel_type, active_branch_id) VALUES (?, ?, ?)`, sessionID, "local", branchID); err != nil {
 		t.Fatalf("insert session: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_session_branches (id, session_id, created_at, updated_at) VALUES (?, ?, ?, ?)`, branchID, sessionID, "2026-06-13 19:53:50", "2026-06-13 19:53:50"); err != nil {
+		t.Fatalf("insert branch: %v", err)
 	}
 	for _, item := range []struct {
 		id      string
 		role    string
 		content string
+		seq     int
 	}{
-		{"00000000-0000-0000-0000-000000002003", "user", `{"role":"user","content":"hello"}`},
-		{"00000000-0000-0000-0000-000000002004", "assistant", `{"role":"assistant","content":"hi"}`},
+		{"00000000-0000-0000-0000-000000002003", "user", `{"role":"user","content":"hello"}`, 1},
+		{"00000000-0000-0000-0000-000000002004", "assistant", `{"role":"assistant","content":"hi"}`, 2},
 	} {
 		_, err := conn.ExecContext(ctx, `
-INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, created_at)
-VALUES (?, ?, ?, ?, ?, ?)`,
+INSERT INTO bot_history_messages (id, bot_id, session_id, branch_id, branch_seq, role, content, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 			item.id,
 			botID,
 			sessionID,
+			branchID,
+			item.seq,
 			item.role,
 			item.content,
 			"2026-06-13 19:53:50",

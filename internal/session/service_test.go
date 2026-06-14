@@ -3,8 +3,10 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -244,6 +246,129 @@ func TestUpdateTypeAndMetadataACPAgentRunsPolicy(t *testing.T) {
 	}
 }
 
+func TestBranchForkServiceCreatesSiblingBranchesAndSwitches(t *testing.T) {
+	ctx := context.Background()
+	sessionID := "00000000-0000-0000-0000-000000000100"
+	rootBranchID := "00000000-0000-0000-0000-000000000101"
+	firstForkID := "00000000-0000-0000-0000-000000000102"
+	secondForkID := "00000000-0000-0000-0000-000000000103"
+	userID := "00000000-0000-0000-0000-000000000201"
+	assistantID := "00000000-0000-0000-0000-000000000202"
+	rootAssistantAfterForkID := "00000000-0000-0000-0000-000000000204"
+	userMessageID := "00000000-0000-0000-0000-000000000301"
+	sessionUUID := mustPGUUID(sessionID)
+	rootBranchUUID := mustPGUUID(rootBranchID)
+	assistantUUID := mustPGUUID(assistantID)
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	queries := &branchServiceQueries{
+		sessionID: sessionUUID,
+		activeID:  rootBranchUUID,
+		nextBranchIDs: []pgtype.UUID{
+			mustPGUUID(firstForkID),
+			mustPGUUID(secondForkID),
+		},
+		forkMessages: map[string]sqlc.GetMessageForSessionBranchForkRow{
+			assistantID: {
+				ID:        assistantUUID,
+				SessionID: sessionUUID,
+				BranchID:  rootBranchUUID,
+				BranchSeq: pgtype.Int8{Int64: 2, Valid: true},
+				Role:      "assistant",
+				CreatedAt: pgtype.Timestamptz{Time: now.Add(time.Minute), Valid: true},
+			},
+			userMessageID: {
+				ID:        mustPGUUID(userMessageID),
+				SessionID: sessionUUID,
+				BranchID:  rootBranchUUID,
+				BranchSeq: pgtype.Int8{Int64: 1, Valid: true},
+				Role:      "user",
+				CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
+			},
+		},
+		branches: []sqlc.ListSessionBranchesRow{
+			{
+				ID:             rootBranchUUID,
+				SessionID:      sessionUUID,
+				CreatedAt:      pgtype.Timestamptz{Time: now, Valid: true},
+				UpdatedAt:      pgtype.Timestamptz{Time: now, Valid: true},
+				ActiveBranchID: rootBranchUUID,
+			},
+		},
+		turns: []sqlc.ListSessionBranchTurnMessagesRow{
+			{
+				AssistantID:          assistantUUID,
+				SessionID:            sessionUUID,
+				BranchID:             rootBranchUUID,
+				BranchSeq:            pgtype.Int8{Int64: 2, Valid: true},
+				AssistantDisplayText: pgtype.Text{String: "root answer", Valid: true},
+				AssistantCreatedAt:   pgtype.Timestamptz{Time: now.Add(time.Minute), Valid: true},
+				UserID:               mustPGUUID(userID),
+				UserDisplayText:      pgtype.Text{String: "root question", Valid: true},
+				UserCreatedAt:        pgtype.Timestamptz{Time: now, Valid: true},
+			},
+			{
+				AssistantID:          mustPGUUID(rootAssistantAfterForkID),
+				SessionID:            sessionUUID,
+				BranchID:             rootBranchUUID,
+				BranchSeq:            pgtype.Int8{Int64: 4, Valid: true},
+				AssistantDisplayText: pgtype.Text{String: "root continuation", Valid: true},
+				AssistantCreatedAt:   pgtype.Timestamptz{Time: now.Add(3 * time.Minute), Valid: true},
+			},
+		},
+	}
+	svc := NewService(nil, queries)
+
+	graph, err := svc.ForkBranchFromMessage(ctx, sessionID, assistantID)
+	if err != nil {
+		t.Fatalf("ForkBranchFromMessage(first) error = %v", err)
+	}
+	if graph.ActiveBranchID != firstForkID {
+		t.Fatalf("active branch = %q, want %q", graph.ActiveBranchID, firstForkID)
+	}
+	if len(graph.Branches) != 2 {
+		t.Fatalf("branches = %d, want 2", len(graph.Branches))
+	}
+	firstFork := graph.Branches[1]
+	if firstFork.ParentBranchID != rootBranchID || firstFork.ForkFromMessageID != assistantID || firstFork.ForkFromSeq != 2 {
+		t.Fatalf("first fork = %#v", firstFork)
+	}
+	pending := findBranchTurn(graph.Turns, "pending-"+firstForkID)
+	if pending == nil || !pending.Pending || pending.ParentTurnID != assistantID || !pending.Active {
+		t.Fatalf("pending first fork turn = %#v", pending)
+	}
+
+	graph, err = svc.ForkBranchFromMessage(ctx, sessionID, assistantID)
+	if err != nil {
+		t.Fatalf("ForkBranchFromMessage(second) error = %v", err)
+	}
+	if graph.ActiveBranchID != secondForkID {
+		t.Fatalf("active branch = %q, want %q", graph.ActiveBranchID, secondForkID)
+	}
+	if len(graph.Branches) != 3 {
+		t.Fatalf("branches = %d, want 3", len(graph.Branches))
+	}
+	if graph.Branches[1].ParentBranchID != rootBranchID || graph.Branches[2].ParentBranchID != rootBranchID {
+		t.Fatalf("fork branches are not siblings: %#v", graph.Branches)
+	}
+
+	graph, err = svc.SetActiveBranch(ctx, sessionID, rootBranchID)
+	if err != nil {
+		t.Fatalf("SetActiveBranch(root) error = %v", err)
+	}
+	if graph.ActiveBranchID != rootBranchID {
+		t.Fatalf("active branch = %q, want %q", graph.ActiveBranchID, rootBranchID)
+	}
+	rootAfterFork := findBranchTurn(graph.Turns, rootAssistantAfterForkID)
+	if rootAfterFork == nil || !rootAfterFork.Active {
+		t.Fatalf("root continuation turn = %#v", rootAfterFork)
+	}
+
+	if _, err := svc.ForkBranchFromMessage(ctx, sessionID, userMessageID); !errors.Is(err, ErrForkSourceNotAssistant) {
+		t.Fatalf("ForkBranchFromMessage(user) error = %v, want %v", err, ErrForkSourceNotAssistant)
+	}
+}
+
 type acpPolicyQueries struct {
 	dbstore.Queries
 	bot      sqlc.GetBotByIDRow
@@ -329,4 +454,84 @@ func mustSessionJSON(value map[string]any) []byte {
 		panic(err)
 	}
 	return data
+}
+
+type branchServiceQueries struct {
+	dbstore.Queries
+	sessionID     pgtype.UUID
+	activeID      pgtype.UUID
+	nextBranchIDs []pgtype.UUID
+	forkMessages  map[string]sqlc.GetMessageForSessionBranchForkRow
+	branches      []sqlc.ListSessionBranchesRow
+	previews      []sqlc.ListSessionBranchPreviewMessagesRow
+	turns         []sqlc.ListSessionBranchTurnMessagesRow
+}
+
+func (q *branchServiceQueries) GetActiveSessionBranch(context.Context, pgtype.UUID) (pgtype.UUID, error) {
+	return q.activeID, nil
+}
+
+func (q *branchServiceQueries) GetRootSessionBranch(context.Context, pgtype.UUID) (pgtype.UUID, error) {
+	return q.branches[0].ID, nil
+}
+
+func (q *branchServiceQueries) SetActiveSessionBranch(_ context.Context, params sqlc.SetActiveSessionBranchParams) error {
+	q.activeID = params.BranchID
+	for i := range q.branches {
+		q.branches[i].ActiveBranchID = params.BranchID
+	}
+	return nil
+}
+
+func (q *branchServiceQueries) GetMessageForSessionBranchFork(_ context.Context, params sqlc.GetMessageForSessionBranchForkParams) (sqlc.GetMessageForSessionBranchForkRow, error) {
+	row, ok := q.forkMessages[params.MessageID.String()]
+	if !ok {
+		return sqlc.GetMessageForSessionBranchForkRow{}, ErrForkMessageNotFound
+	}
+	return row, nil
+}
+
+func (q *branchServiceQueries) CreateSessionBranchFromMessage(_ context.Context, params sqlc.CreateSessionBranchFromMessageParams) (pgtype.UUID, error) {
+	if len(q.nextBranchIDs) == 0 {
+		return pgtype.UUID{}, errors.New("no branch ids left")
+	}
+	id := q.nextBranchIDs[0]
+	q.nextBranchIDs = q.nextBranchIDs[1:]
+	q.branches = append(q.branches, sqlc.ListSessionBranchesRow{
+		ID:                id,
+		SessionID:         params.SessionID,
+		ParentBranchID:    params.ParentBranchID,
+		ForkFromMessageID: params.ForkFromMessageID,
+		ForkFromSeq:       params.ForkFromSeq,
+		CreatedAt:         pgtype.Timestamptz{Time: time.Date(2026, 1, 1, 12, len(q.branches), 0, 0, time.UTC), Valid: true},
+		UpdatedAt:         pgtype.Timestamptz{Time: time.Date(2026, 1, 1, 12, len(q.branches), 0, 0, time.UTC), Valid: true},
+		ActiveBranchID:    q.activeID,
+	})
+	return id, nil
+}
+
+func (q *branchServiceQueries) ListSessionBranches(context.Context, pgtype.UUID) ([]sqlc.ListSessionBranchesRow, error) {
+	rows := make([]sqlc.ListSessionBranchesRow, len(q.branches))
+	copy(rows, q.branches)
+	for i := range rows {
+		rows[i].ActiveBranchID = q.activeID
+	}
+	return rows, nil
+}
+
+func (q *branchServiceQueries) ListSessionBranchPreviewMessages(context.Context, pgtype.UUID) ([]sqlc.ListSessionBranchPreviewMessagesRow, error) {
+	return q.previews, nil
+}
+
+func (q *branchServiceQueries) ListSessionBranchTurnMessages(context.Context, pgtype.UUID) ([]sqlc.ListSessionBranchTurnMessagesRow, error) {
+	return q.turns, nil
+}
+
+func findBranchTurn(turns []BranchTurn, id string) *BranchTurn {
+	for i := range turns {
+		if turns[i].ID == id {
+			return &turns[i]
+		}
+	}
+	return nil
 }

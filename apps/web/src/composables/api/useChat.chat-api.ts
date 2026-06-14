@@ -8,12 +8,15 @@ import {
   postBotsByBotIdSessions,
   postBotsByBotIdSessionsBySessionIdAcpRuntime,
   deleteBotsByBotIdSessionsBySessionId,
+  getBotsByBotIdSessionsBySessionIdBranches,
   patchBotsByBotIdAcpRuntimesByRuntimeIdModel,
+  patchBotsByBotIdSessionsBySessionIdBranchesActive,
   patchBotsByBotIdSessionsBySessionId,
   patchBotsByBotIdSessionsBySessionIdAcpRuntimeModel,
+  postBotsByBotIdSessionsBySessionIdBranchesFork,
 } from '@memohai/sdk'
 import type { AcpagentRuntimeStatus } from '@memohai/sdk'
-import type { Bot, SessionSummary } from './useChat.types'
+import type { Bot, BranchGraph, SessionSummary } from './useChat.types'
 
 export interface CreateSessionOptions {
   title?: string
@@ -147,4 +150,30 @@ export async function deleteAllMessages(botId: string): Promise<void> {
     path: { bot_id: botId },
     throwOnError: true,
   })
+}
+
+export async function fetchSessionBranches(botId: string, sessionId: string): Promise<BranchGraph> {
+  const { data } = await getBotsByBotIdSessionsBySessionIdBranches({
+    path: { bot_id: botId.trim(), session_id: sessionId.trim() },
+    throwOnError: true,
+  })
+  return data as BranchGraph
+}
+
+export async function forkSessionBranch(botId: string, sessionId: string, messageId: string): Promise<BranchGraph> {
+  const { data } = await postBotsByBotIdSessionsBySessionIdBranchesFork({
+    path: { bot_id: botId.trim(), session_id: sessionId.trim() },
+    body: { message_id: messageId.trim() },
+    throwOnError: true,
+  })
+  return data as BranchGraph
+}
+
+export async function setActiveSessionBranch(botId: string, sessionId: string, branchId: string): Promise<BranchGraph> {
+  const { data } = await patchBotsByBotIdSessionsBySessionIdBranchesActive({
+    path: { bot_id: botId.trim(), session_id: sessionId.trim() },
+    body: { branch_id: branchId.trim() },
+    throwOnError: true,
+  })
+  return data as BranchGraph
 }

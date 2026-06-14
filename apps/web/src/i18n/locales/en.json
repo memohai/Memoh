@@ -423,6 +423,22 @@
     "sendFailed": "Message failed to send",
     "minimapLabel": "Conversation outline",
     "minimapEarlier": "Earlier messages appear as they load",
+    "copyReply": "Copy reply",
+    "copyFailed": "Copy failed",
+    "forkReply": "Fork from reply",
+    "branchHistory": {
+      "tab": "Branch",
+      "title": "Branch history",
+      "empty": "No branch turns yet",
+      "count": "{count} branches",
+      "loading": "Loading branches",
+      "active": "Active",
+      "switch": "Switch branch",
+      "branchLabel": "Branch {index}",
+      "turnLabel": "Turn {index}",
+      "pendingTurn": "Waiting for the next turn",
+      "noPreview": "No preview yet"
+    },
     "startChat": "Start Chat",
     "noBot": "No bots available, please create a bot first",
     "newChat": "New Session",
@@ -689,7 +705,9 @@
       "hideWorkbench": "Hide sidebar",
       "showWorkbench": "Show sidebar",
       "goBack": "Back",
-      "goForward": "Forward"
+      "goForward": "Forward",
+      "hideBranchSidebar": "Hide branch sidebar",
+      "showBranchSidebar": "Show branch sidebar"
     },
     "activityBar": {
       "sessions": "Chat",

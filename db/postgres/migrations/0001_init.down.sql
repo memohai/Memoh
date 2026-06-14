@@ -15,6 +15,7 @@ DROP TABLE IF EXISTS bot_workspace_resource_limits;
 DROP TABLE IF EXISTS containers;
 DROP TABLE IF EXISTS user_input_requests;
 DROP TABLE IF EXISTS bot_history_messages;
+DROP TABLE IF EXISTS bot_session_branches;
 DROP TABLE IF EXISTS bot_channel_routes;
 DROP TABLE IF EXISTS channel_identity_bind_codes;
 DROP TABLE IF EXISTS bot_preauth_keys;

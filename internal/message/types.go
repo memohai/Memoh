@@ -24,6 +24,8 @@ type Message struct {
 	ID                      string          `json:"id"`
 	BotID                   string          `json:"bot_id"`
 	SessionID               string          `json:"session_id,omitempty"`
+	BranchID                string          `json:"branch_id,omitempty"`
+	BranchSeq               int64           `json:"branch_seq,omitempty"`
 	SenderChannelIdentityID string          `json:"sender_channel_identity_id,omitempty"`
 	SenderUserID            string          `json:"sender_user_id,omitempty"`
 	SenderDisplayName       string          `json:"sender_display_name,omitempty"`
@@ -59,6 +61,7 @@ type AssetRef struct {
 type PersistInput struct {
 	BotID                   string
 	SessionID               string
+	BranchID                string
 	SenderChannelIdentityID string
 	SenderUserID            string
 	ExternalMessageID       string

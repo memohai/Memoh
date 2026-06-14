@@ -140,6 +140,8 @@ type BotHistoryMessage struct {
 	ID                      string         `json:"id"`
 	BotID                   string         `json:"bot_id"`
 	SessionID               sql.NullString `json:"session_id"`
+	BranchID                sql.NullString `json:"branch_id"`
+	BranchSeq               sql.NullInt64  `json:"branch_seq"`
 	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
 	SenderAccountUserID     sql.NullString `json:"sender_account_user_id"`
 	SourceMessageID         sql.NullString `json:"source_message_id"`
@@ -215,11 +217,23 @@ type BotSession struct {
 	Type            string         `json:"type"`
 	Title           string         `json:"title"`
 	Metadata        string         `json:"metadata"`
+	ActiveBranchID  sql.NullString `json:"active_branch_id"`
 	ParentSessionID sql.NullString `json:"parent_session_id"`
+	CreatedByUserID sql.NullString `json:"created_by_user_id"`
 	CreatedAt       string         `json:"created_at"`
 	UpdatedAt       string         `json:"updated_at"`
 	DeletedAt       sql.NullString `json:"deleted_at"`
-	CreatedByUserID sql.NullString `json:"created_by_user_id"`
+}
+
+type BotSessionBranch struct {
+	ID                string         `json:"id"`
+	SessionID         string         `json:"session_id"`
+	ParentBranchID    sql.NullString `json:"parent_branch_id"`
+	ForkFromMessageID sql.NullString `json:"fork_from_message_id"`
+	ForkFromSeq       sql.NullInt64  `json:"fork_from_seq"`
+	Title             sql.NullString `json:"title"`
+	CreatedAt         string         `json:"created_at"`
+	UpdatedAt         string         `json:"updated_at"`
 }
 
 type BotSessionEvent struct {

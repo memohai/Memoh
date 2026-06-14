@@ -90,6 +90,7 @@ type UITurn struct {
 	Attachments       []UIAttachment    `json:"attachments,omitempty"`
 	Reply             *UIReplyRef       `json:"reply,omitempty"`
 	Forward           *UIForwardRef     `json:"forward,omitempty"`
+	Branch            *UIBranchInfo     `json:"branch,omitempty"`
 	BackgroundTask    *UIBackgroundTask `json:"background_task,omitempty"`
 	Timestamp         time.Time         `json:"timestamp"`
 	Platform          string            `json:"platform,omitempty"`
@@ -98,6 +99,12 @@ type UITurn struct {
 	SenderUserID      string            `json:"sender_user_id,omitempty"`
 	ExternalMessageID string            `json:"external_message_id,omitempty"`
 	ID                string            `json:"id,omitempty"`
+}
+
+// UIBranchInfo identifies the in-session branch path a turn belongs to.
+type UIBranchInfo struct {
+	BranchID string `json:"branch_id,omitempty"`
+	Seq      int64  `json:"seq,omitempty"`
 }
 
 // UIBackgroundTask is the compact background exec state sent to the Web UI.

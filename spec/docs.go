@@ -6360,6 +6360,180 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/sessions/{session_id}/branches": {
+            "get": {
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "List session branches",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/session.BranchGraph"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/sessions/{session_id}/branches/active": {
+            "patch": {
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Switch the active session branch",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Active branch",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.setActiveBranchRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/session.BranchGraph"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/sessions/{session_id}/branches/fork": {
+            "post": {
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Fork a session branch from an assistant message",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Fork source",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.forkBranchRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/session.BranchGraph"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/sessions/{session_id}/compact": {
             "post": {
                 "description": "Run context compaction synchronously for a session",
@@ -16324,6 +16498,14 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.forkBranchRequest": {
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.fsOpResponse": {
             "type": "object",
             "properties": {
@@ -16447,6 +16629,14 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "state": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.setActiveBranchRequest": {
+            "type": "object",
+            "properties": {
+                "branch_id": {
                     "type": "string"
                 }
             }
@@ -16835,6 +17025,12 @@ const docTemplate = `{
                 },
                 "bot_id": {
                     "type": "string"
+                },
+                "branch_id": {
+                    "type": "string"
+                },
+                "branch_seq": {
+                    "type": "integer"
                 },
                 "compact_id": {
                     "type": "string"
@@ -17958,6 +18154,105 @@ const docTemplate = `{
                 }
             }
         },
+        "session.BranchGraph": {
+            "type": "object",
+            "properties": {
+                "active_branch_id": {
+                    "type": "string"
+                },
+                "branches": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/session.BranchNode"
+                    }
+                },
+                "turns": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/session.BranchTurn"
+                    }
+                }
+            }
+        },
+        "session.BranchNode": {
+            "type": "object",
+            "properties": {
+                "active": {
+                    "type": "boolean"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "fork_from_message_id": {
+                    "type": "string"
+                },
+                "fork_from_seq": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "parent_branch_id": {
+                    "type": "string"
+                },
+                "preview": {
+                    "$ref": "#/definitions/session.TurnPreview"
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "session.BranchTurn": {
+            "type": "object",
+            "properties": {
+                "active": {
+                    "type": "boolean"
+                },
+                "assistant_message_id": {
+                    "type": "string"
+                },
+                "branch_id": {
+                    "type": "string"
+                },
+                "branch_seq": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "depth": {
+                    "type": "integer"
+                },
+                "fork_from_seq": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "parent_turn_id": {
+                    "type": "string"
+                },
+                "pending": {
+                    "type": "boolean"
+                },
+                "preview": {
+                    "$ref": "#/definitions/session.TurnPreview"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "user_message_id": {
+                    "type": "string"
+                }
+            }
+        },
         "session.Session": {
             "type": "object",
             "properties": {
@@ -18000,6 +18295,23 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "session.TurnPreview": {
+            "type": "object",
+            "properties": {
+                "assistant_text": {
+                    "type": "string"
+                },
+                "message_id": {
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                },
+                "user_text": {
                     "type": "string"
                 }
             }

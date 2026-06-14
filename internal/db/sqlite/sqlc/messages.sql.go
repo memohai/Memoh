@@ -25,7 +25,7 @@ func (q *Queries) CountMessagesByBot(ctx context.Context, botID string) (int64, 
 
 const createMessage = `-- name: CreateMessage :one
 INSERT INTO bot_history_messages (
-  id, bot_id, session_id, sender_channel_identity_id, sender_account_user_id,
+  id, bot_id, session_id, branch_id, branch_seq, sender_channel_identity_id, sender_account_user_id,
   source_message_id, source_reply_to_message_id, role, content, metadata,
   usage, model_id, event_id, display_text
 )
@@ -38,6 +38,14 @@ VALUES (
   ?1,
   ?2,
   ?3,
+  CASE
+    WHEN ?3 IS NULL THEN NULL
+    ELSE (
+      SELECT COALESCE(MAX(existing.branch_seq), 0) + 1
+      FROM bot_history_messages existing
+      WHERE existing.branch_id = ?3
+    )
+  END,
   ?4,
   ?5,
   ?6,
@@ -47,10 +55,11 @@ VALUES (
   ?10,
   ?11,
   ?12,
-  ?13
+  ?13,
+  ?14
 )
 RETURNING
-  id, bot_id, session_id, sender_channel_identity_id,
+  id, bot_id, session_id, branch_id, branch_seq, sender_channel_identity_id,
   sender_account_user_id AS sender_user_id,
   source_message_id AS external_message_id,
   source_reply_to_message_id, role, content, metadata, usage,
@@ -60,6 +69,7 @@ RETURNING
 type CreateMessageParams struct {
 	BotID                   string         `json:"bot_id"`
 	SessionID               sql.NullString `json:"session_id"`
+	BranchID                sql.NullString `json:"branch_id"`
 	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
 	SenderUserID            sql.NullString `json:"sender_user_id"`
 	ExternalMessageID       sql.NullString `json:"external_message_id"`
@@ -77,6 +87,8 @@ type CreateMessageRow struct {
 	ID                      string         `json:"id"`
 	BotID                   string         `json:"bot_id"`
 	SessionID               sql.NullString `json:"session_id"`
+	BranchID                sql.NullString `json:"branch_id"`
+	BranchSeq               sql.NullInt64  `json:"branch_seq"`
 	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
 	SenderAccountUserID     sql.NullString `json:"sender_account_user_id"`
 	SourceMessageID         sql.NullString `json:"source_message_id"`
@@ -94,6 +106,7 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (C
 	row := q.db.QueryRowContext(ctx, createMessage,
 		arg.BotID,
 		arg.SessionID,
+		arg.BranchID,
 		arg.SenderChannelIdentityID,
 		arg.SenderUserID,
 		arg.ExternalMessageID,
@@ -111,6 +124,8 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (C
 		&i.ID,
 		&i.BotID,
 		&i.SessionID,
+		&i.BranchID,
+		&i.BranchSeq,
 		&i.SenderChannelIdentityID,
 		&i.SenderAccountUserID,
 		&i.SourceMessageID,
@@ -124,6 +139,71 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (C
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const createRootSessionBranch = `-- name: CreateRootSessionBranch :one
+INSERT INTO bot_session_branches (id, session_id)
+VALUES (
+  lower(hex(randomblob(4))) || '-' ||
+  lower(hex(randomblob(2))) || '-' ||
+  '4' || substr(lower(hex(randomblob(2))), 2) || '-' ||
+  substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' ||
+  lower(hex(randomblob(6))),
+  ?1
+)
+RETURNING id
+`
+
+func (q *Queries) CreateRootSessionBranch(ctx context.Context, sessionID string) (string, error) {
+	row := q.db.QueryRowContext(ctx, createRootSessionBranch, sessionID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
+const createSessionBranchFromMessage = `-- name: CreateSessionBranchFromMessage :one
+INSERT INTO bot_session_branches (
+  id,
+  session_id,
+  parent_branch_id,
+  fork_from_message_id,
+  fork_from_seq,
+  title
+)
+VALUES (
+  lower(hex(randomblob(4))) || '-' ||
+  lower(hex(randomblob(2))) || '-' ||
+  '4' || substr(lower(hex(randomblob(2))), 2) || '-' ||
+  substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' ||
+  lower(hex(randomblob(6))),
+  ?1,
+  ?2,
+  ?3,
+  ?4,
+  ?5
+)
+RETURNING id
+`
+
+type CreateSessionBranchFromMessageParams struct {
+	SessionID         string         `json:"session_id"`
+	ParentBranchID    sql.NullString `json:"parent_branch_id"`
+	ForkFromMessageID sql.NullString `json:"fork_from_message_id"`
+	ForkFromSeq       sql.NullInt64  `json:"fork_from_seq"`
+	Title             sql.NullString `json:"title"`
+}
+
+func (q *Queries) CreateSessionBranchFromMessage(ctx context.Context, arg CreateSessionBranchFromMessageParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, createSessionBranchFromMessage,
+		arg.SessionID,
+		arg.ParentBranchID,
+		arg.ForkFromMessageID,
+		arg.ForkFromSeq,
+		arg.Title,
+	)
+	var id string
+	err := row.Scan(&id)
+	return id, err
 }
 
 const deleteMessagesByBot = `-- name: DeleteMessagesByBot :exec
@@ -146,9 +226,37 @@ func (q *Queries) DeleteMessagesBySession(ctx context.Context, sessionID sql.Nul
 	return err
 }
 
+const getActiveSessionBranch = `-- name: GetActiveSessionBranch :one
+SELECT active_branch_id
+FROM bot_sessions
+WHERE id = ?1
+`
+
+func (q *Queries) GetActiveSessionBranch(ctx context.Context, sessionID string) (sql.NullString, error) {
+	row := q.db.QueryRowContext(ctx, getActiveSessionBranch, sessionID)
+	var active_branch_id sql.NullString
+	err := row.Scan(&active_branch_id)
+	return active_branch_id, err
+}
+
 const getMessageByExternalIDBySession = `-- name: GetMessageByExternalIDBySession :one
+WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_seq, depth) AS (
+  SELECT b.id, b.parent_branch_id, NULL, 0
+  FROM bot_sessions s
+  JOIN bot_session_branches b ON b.id = COALESCE(s.active_branch_id, (
+    SELECT rb.id FROM bot_session_branches rb
+    WHERE rb.session_id = s.id AND rb.parent_branch_id IS NULL AND rb.fork_from_message_id IS NULL
+    ORDER BY rb.created_at ASC LIMIT 1
+  ))
+  WHERE s.id = ?1
+  UNION ALL
+  SELECT parent.id, parent.parent_branch_id, child.fork_from_seq, bp.depth + 1
+  FROM branch_path bp
+  JOIN bot_session_branches child ON child.id = bp.branch_id
+  JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+)
 SELECT
-  m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
+  m.id, m.bot_id, m.session_id, m.branch_id, m.branch_seq, m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
@@ -159,9 +267,14 @@ SELECT
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
+LEFT JOIN branch_path bp ON bp.branch_id = m.branch_id
 WHERE m.session_id = ?1
   AND m.source_message_id = ?2
-ORDER BY m.created_at DESC
+  AND (
+    m.branch_id IS NULL
+    OR (bp.branch_id IS NOT NULL AND (bp.max_seq IS NULL OR m.branch_seq <= bp.max_seq))
+  )
+ORDER BY COALESCE(bp.depth, -1) ASC, COALESCE(m.branch_seq, 0) DESC, m.created_at DESC
 LIMIT 1
 `
 
@@ -174,6 +287,8 @@ type GetMessageByExternalIDBySessionRow struct {
 	ID                      string         `json:"id"`
 	BotID                   string         `json:"bot_id"`
 	SessionID               sql.NullString `json:"session_id"`
+	BranchID                sql.NullString `json:"branch_id"`
+	BranchSeq               sql.NullInt64  `json:"branch_seq"`
 	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
 	SenderUserID            sql.NullString `json:"sender_user_id"`
 	ExternalMessageID       sql.NullString `json:"external_message_id"`
@@ -197,6 +312,8 @@ func (q *Queries) GetMessageByExternalIDBySession(ctx context.Context, arg GetMe
 		&i.ID,
 		&i.BotID,
 		&i.SessionID,
+		&i.BranchID,
+		&i.BranchSeq,
 		&i.SenderChannelIdentityID,
 		&i.SenderUserID,
 		&i.ExternalMessageID,
@@ -215,9 +332,68 @@ func (q *Queries) GetMessageByExternalIDBySession(ctx context.Context, arg GetMe
 	return i, err
 }
 
+const getMessageForSessionBranchFork = `-- name: GetMessageForSessionBranchFork :one
+SELECT
+  m.id,
+  m.session_id,
+  m.branch_id,
+  m.branch_seq,
+  m.role,
+  m.created_at
+FROM bot_history_messages m
+WHERE m.id = ?1
+  AND m.session_id = ?2
+LIMIT 1
+`
+
+type GetMessageForSessionBranchForkParams struct {
+	MessageID string         `json:"message_id"`
+	SessionID sql.NullString `json:"session_id"`
+}
+
+type GetMessageForSessionBranchForkRow struct {
+	ID        string         `json:"id"`
+	SessionID sql.NullString `json:"session_id"`
+	BranchID  sql.NullString `json:"branch_id"`
+	BranchSeq sql.NullInt64  `json:"branch_seq"`
+	Role      string         `json:"role"`
+	CreatedAt string         `json:"created_at"`
+}
+
+func (q *Queries) GetMessageForSessionBranchFork(ctx context.Context, arg GetMessageForSessionBranchForkParams) (GetMessageForSessionBranchForkRow, error) {
+	row := q.db.QueryRowContext(ctx, getMessageForSessionBranchFork, arg.MessageID, arg.SessionID)
+	var i GetMessageForSessionBranchForkRow
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.BranchID,
+		&i.BranchSeq,
+		&i.Role,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getRootSessionBranch = `-- name: GetRootSessionBranch :one
+SELECT id
+FROM bot_session_branches
+WHERE session_id = ?1
+  AND parent_branch_id IS NULL
+  AND fork_from_message_id IS NULL
+ORDER BY created_at ASC
+LIMIT 1
+`
+
+func (q *Queries) GetRootSessionBranch(ctx context.Context, sessionID string) (string, error) {
+	row := q.db.QueryRowContext(ctx, getRootSessionBranch, sessionID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
 const listActiveMessagesSince = `-- name: ListActiveMessagesSince :many
 SELECT
-  m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
+  m.id, m.bot_id, m.session_id, m.branch_id, m.branch_seq, m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
@@ -243,6 +419,8 @@ type ListActiveMessagesSinceRow struct {
 	ID                      string         `json:"id"`
 	BotID                   string         `json:"bot_id"`
 	SessionID               sql.NullString `json:"session_id"`
+	BranchID                sql.NullString `json:"branch_id"`
+	BranchSeq               sql.NullInt64  `json:"branch_seq"`
 	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
 	SenderUserID            sql.NullString `json:"sender_user_id"`
 	ExternalMessageID       sql.NullString `json:"external_message_id"`
@@ -273,6 +451,8 @@ func (q *Queries) ListActiveMessagesSince(ctx context.Context, arg ListActiveMes
 			&i.ID,
 			&i.BotID,
 			&i.SessionID,
+			&i.BranchID,
+			&i.BranchSeq,
 			&i.SenderChannelIdentityID,
 			&i.SenderUserID,
 			&i.ExternalMessageID,
@@ -303,8 +483,23 @@ func (q *Queries) ListActiveMessagesSince(ctx context.Context, arg ListActiveMes
 }
 
 const listActiveMessagesSinceBySession = `-- name: ListActiveMessagesSinceBySession :many
+WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_seq, depth) AS (
+  SELECT b.id, b.parent_branch_id, NULL, 0
+  FROM bot_sessions s
+  JOIN bot_session_branches b ON b.id = COALESCE(s.active_branch_id, (
+    SELECT rb.id FROM bot_session_branches rb
+    WHERE rb.session_id = s.id AND rb.parent_branch_id IS NULL AND rb.fork_from_message_id IS NULL
+    ORDER BY rb.created_at ASC LIMIT 1
+  ))
+  WHERE s.id = ?1
+  UNION ALL
+  SELECT parent.id, parent.parent_branch_id, child.fork_from_seq, bp.depth + 1
+  FROM branch_path bp
+  JOIN bot_session_branches child ON child.id = bp.branch_id
+  JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+)
 SELECT
-  m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
+  m.id, m.bot_id, m.session_id, m.branch_id, m.branch_seq, m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
@@ -315,10 +510,15 @@ SELECT
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
+LEFT JOIN branch_path bp ON bp.branch_id = m.branch_id
 WHERE m.session_id = ?1
   AND m.created_at >= strftime('%Y-%m-%d %H:%M:%S', ?2)
+  AND (
+    m.branch_id IS NULL
+    OR (bp.branch_id IS NOT NULL AND (bp.max_seq IS NULL OR m.branch_seq <= bp.max_seq))
+  )
   AND (json_extract(m.metadata, '$.trigger_mode') IS NULL OR json_extract(m.metadata, '$.trigger_mode') != 'passive_sync')
-ORDER BY m.created_at ASC
+ORDER BY COALESCE(bp.depth, 2147483647) DESC, COALESCE(m.branch_seq, 9223372036854775807) ASC, m.created_at ASC
 `
 
 type ListActiveMessagesSinceBySessionParams struct {
@@ -330,6 +530,8 @@ type ListActiveMessagesSinceBySessionRow struct {
 	ID                      string         `json:"id"`
 	BotID                   string         `json:"bot_id"`
 	SessionID               sql.NullString `json:"session_id"`
+	BranchID                sql.NullString `json:"branch_id"`
+	BranchSeq               sql.NullInt64  `json:"branch_seq"`
 	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
 	SenderUserID            sql.NullString `json:"sender_user_id"`
 	ExternalMessageID       sql.NullString `json:"external_message_id"`
@@ -360,6 +562,8 @@ func (q *Queries) ListActiveMessagesSinceBySession(ctx context.Context, arg List
 			&i.ID,
 			&i.BotID,
 			&i.SessionID,
+			&i.BranchID,
+			&i.BranchSeq,
 			&i.SenderChannelIdentityID,
 			&i.SenderUserID,
 			&i.ExternalMessageID,
@@ -391,7 +595,7 @@ func (q *Queries) ListActiveMessagesSinceBySession(ctx context.Context, arg List
 
 const listMessages = `-- name: ListMessages :many
 SELECT
-  m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
+  m.id, m.bot_id, m.session_id, m.branch_id, m.branch_seq, m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
@@ -411,6 +615,8 @@ type ListMessagesRow struct {
 	ID                      string         `json:"id"`
 	BotID                   string         `json:"bot_id"`
 	SessionID               sql.NullString `json:"session_id"`
+	BranchID                sql.NullString `json:"branch_id"`
+	BranchSeq               sql.NullInt64  `json:"branch_seq"`
 	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
 	SenderUserID            sql.NullString `json:"sender_user_id"`
 	ExternalMessageID       sql.NullString `json:"external_message_id"`
@@ -440,6 +646,8 @@ func (q *Queries) ListMessages(ctx context.Context, botID string) ([]ListMessage
 			&i.ID,
 			&i.BotID,
 			&i.SessionID,
+			&i.BranchID,
+			&i.BranchSeq,
 			&i.SenderChannelIdentityID,
 			&i.SenderUserID,
 			&i.ExternalMessageID,
@@ -469,8 +677,23 @@ func (q *Queries) ListMessages(ctx context.Context, botID string) ([]ListMessage
 }
 
 const listMessagesAfterBySession = `-- name: ListMessagesAfterBySession :many
+WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_seq, depth) AS (
+  SELECT b.id, b.parent_branch_id, NULL, 0
+  FROM bot_sessions s
+  JOIN bot_session_branches b ON b.id = COALESCE(s.active_branch_id, (
+    SELECT rb.id FROM bot_session_branches rb
+    WHERE rb.session_id = s.id AND rb.parent_branch_id IS NULL AND rb.fork_from_message_id IS NULL
+    ORDER BY rb.created_at ASC LIMIT 1
+  ))
+  WHERE s.id = ?1
+  UNION ALL
+  SELECT parent.id, parent.parent_branch_id, child.fork_from_seq, bp.depth + 1
+  FROM branch_path bp
+  JOIN bot_session_branches child ON child.id = bp.branch_id
+  JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+)
 SELECT
-  m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
+  m.id, m.bot_id, m.session_id, m.branch_id, m.branch_seq, m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
@@ -481,9 +704,14 @@ SELECT
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
+LEFT JOIN branch_path bp ON bp.branch_id = m.branch_id
 WHERE m.session_id = ?1
   AND m.created_at > strftime('%Y-%m-%d %H:%M:%S', ?2)
-ORDER BY m.created_at ASC
+  AND (
+    m.branch_id IS NULL
+    OR (bp.branch_id IS NOT NULL AND (bp.max_seq IS NULL OR m.branch_seq <= bp.max_seq))
+  )
+ORDER BY COALESCE(bp.depth, 2147483647) DESC, COALESCE(m.branch_seq, 9223372036854775807) ASC, m.created_at ASC
 LIMIT ?3
 `
 
@@ -497,6 +725,8 @@ type ListMessagesAfterBySessionRow struct {
 	ID                      string         `json:"id"`
 	BotID                   string         `json:"bot_id"`
 	SessionID               sql.NullString `json:"session_id"`
+	BranchID                sql.NullString `json:"branch_id"`
+	BranchSeq               sql.NullInt64  `json:"branch_seq"`
 	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
 	SenderUserID            sql.NullString `json:"sender_user_id"`
 	ExternalMessageID       sql.NullString `json:"external_message_id"`
@@ -526,6 +756,8 @@ func (q *Queries) ListMessagesAfterBySession(ctx context.Context, arg ListMessag
 			&i.ID,
 			&i.BotID,
 			&i.SessionID,
+			&i.BranchID,
+			&i.BranchSeq,
 			&i.SenderChannelIdentityID,
 			&i.SenderUserID,
 			&i.ExternalMessageID,
@@ -556,7 +788,7 @@ func (q *Queries) ListMessagesAfterBySession(ctx context.Context, arg ListMessag
 
 const listMessagesBefore = `-- name: ListMessagesBefore :many
 SELECT
-  m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
+  m.id, m.bot_id, m.session_id, m.branch_id, m.branch_seq, m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
@@ -583,6 +815,8 @@ type ListMessagesBeforeRow struct {
 	ID                      string         `json:"id"`
 	BotID                   string         `json:"bot_id"`
 	SessionID               sql.NullString `json:"session_id"`
+	BranchID                sql.NullString `json:"branch_id"`
+	BranchSeq               sql.NullInt64  `json:"branch_seq"`
 	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
 	SenderUserID            sql.NullString `json:"sender_user_id"`
 	ExternalMessageID       sql.NullString `json:"external_message_id"`
@@ -612,6 +846,8 @@ func (q *Queries) ListMessagesBefore(ctx context.Context, arg ListMessagesBefore
 			&i.ID,
 			&i.BotID,
 			&i.SessionID,
+			&i.BranchID,
+			&i.BranchSeq,
 			&i.SenderChannelIdentityID,
 			&i.SenderUserID,
 			&i.ExternalMessageID,
@@ -641,8 +877,23 @@ func (q *Queries) ListMessagesBefore(ctx context.Context, arg ListMessagesBefore
 }
 
 const listMessagesBeforeBySession = `-- name: ListMessagesBeforeBySession :many
+WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_seq, depth) AS (
+  SELECT b.id, b.parent_branch_id, NULL, 0
+  FROM bot_sessions s
+  JOIN bot_session_branches b ON b.id = COALESCE(s.active_branch_id, (
+    SELECT rb.id FROM bot_session_branches rb
+    WHERE rb.session_id = s.id AND rb.parent_branch_id IS NULL AND rb.fork_from_message_id IS NULL
+    ORDER BY rb.created_at ASC LIMIT 1
+  ))
+  WHERE s.id = ?1
+  UNION ALL
+  SELECT parent.id, parent.parent_branch_id, child.fork_from_seq, bp.depth + 1
+  FROM branch_path bp
+  JOIN bot_session_branches child ON child.id = bp.branch_id
+  JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+)
 SELECT
-  m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
+  m.id, m.bot_id, m.session_id, m.branch_id, m.branch_seq, m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
@@ -653,9 +904,14 @@ SELECT
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
+LEFT JOIN branch_path bp ON bp.branch_id = m.branch_id
 WHERE m.session_id = ?1
   AND m.created_at < strftime('%Y-%m-%d %H:%M:%S', ?2)
-ORDER BY m.created_at DESC
+  AND (
+    m.branch_id IS NULL
+    OR (bp.branch_id IS NOT NULL AND (bp.max_seq IS NULL OR m.branch_seq <= bp.max_seq))
+  )
+ORDER BY COALESCE(bp.depth, -1) ASC, COALESCE(m.branch_seq, 0) DESC, m.created_at DESC
 LIMIT ?3
 `
 
@@ -669,6 +925,8 @@ type ListMessagesBeforeBySessionRow struct {
 	ID                      string         `json:"id"`
 	BotID                   string         `json:"bot_id"`
 	SessionID               sql.NullString `json:"session_id"`
+	BranchID                sql.NullString `json:"branch_id"`
+	BranchSeq               sql.NullInt64  `json:"branch_seq"`
 	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
 	SenderUserID            sql.NullString `json:"sender_user_id"`
 	ExternalMessageID       sql.NullString `json:"external_message_id"`
@@ -698,6 +956,8 @@ func (q *Queries) ListMessagesBeforeBySession(ctx context.Context, arg ListMessa
 			&i.ID,
 			&i.BotID,
 			&i.SessionID,
+			&i.BranchID,
+			&i.BranchSeq,
 			&i.SenderChannelIdentityID,
 			&i.SenderUserID,
 			&i.ExternalMessageID,
@@ -727,8 +987,34 @@ func (q *Queries) ListMessagesBeforeBySession(ctx context.Context, arg ListMessa
 }
 
 const listMessagesBySession = `-- name: ListMessagesBySession :many
+WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_seq, depth) AS (
+  SELECT
+    b.id,
+    b.parent_branch_id,
+    NULL,
+    0
+  FROM bot_sessions s
+  JOIN bot_session_branches b ON b.id = COALESCE(
+    s.active_branch_id,
+    (
+      SELECT rb.id
+      FROM bot_session_branches rb
+      WHERE rb.session_id = s.id
+        AND rb.parent_branch_id IS NULL
+        AND rb.fork_from_message_id IS NULL
+      ORDER BY rb.created_at ASC
+      LIMIT 1
+    )
+  )
+  WHERE s.id = ?1
+  UNION ALL
+  SELECT parent.id, parent.parent_branch_id, child.fork_from_seq, bp.depth + 1
+  FROM branch_path bp
+  JOIN bot_session_branches child ON child.id = bp.branch_id
+  JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+)
 SELECT
-  m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
+  m.id, m.bot_id, m.session_id, m.branch_id, m.branch_seq, m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
@@ -739,8 +1025,13 @@ SELECT
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
+LEFT JOIN branch_path bp ON bp.branch_id = m.branch_id
 WHERE m.session_id = ?1
-ORDER BY m.created_at ASC
+  AND (
+    m.branch_id IS NULL
+    OR (bp.branch_id IS NOT NULL AND (bp.max_seq IS NULL OR m.branch_seq <= bp.max_seq))
+  )
+ORDER BY COALESCE(bp.depth, 2147483647) DESC, COALESCE(m.branch_seq, 9223372036854775807) ASC, m.created_at ASC
 LIMIT 10000
 `
 
@@ -748,6 +1039,8 @@ type ListMessagesBySessionRow struct {
 	ID                      string         `json:"id"`
 	BotID                   string         `json:"bot_id"`
 	SessionID               sql.NullString `json:"session_id"`
+	BranchID                sql.NullString `json:"branch_id"`
+	BranchSeq               sql.NullInt64  `json:"branch_seq"`
 	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
 	SenderUserID            sql.NullString `json:"sender_user_id"`
 	ExternalMessageID       sql.NullString `json:"external_message_id"`
@@ -777,6 +1070,8 @@ func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID sql.NullS
 			&i.ID,
 			&i.BotID,
 			&i.SessionID,
+			&i.BranchID,
+			&i.BranchSeq,
 			&i.SenderChannelIdentityID,
 			&i.SenderUserID,
 			&i.ExternalMessageID,
@@ -807,7 +1102,7 @@ func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID sql.NullS
 
 const listMessagesLatest = `-- name: ListMessagesLatest :many
 SELECT
-  m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
+  m.id, m.bot_id, m.session_id, m.branch_id, m.branch_seq, m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
@@ -832,6 +1127,8 @@ type ListMessagesLatestRow struct {
 	ID                      string         `json:"id"`
 	BotID                   string         `json:"bot_id"`
 	SessionID               sql.NullString `json:"session_id"`
+	BranchID                sql.NullString `json:"branch_id"`
+	BranchSeq               sql.NullInt64  `json:"branch_seq"`
 	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
 	SenderUserID            sql.NullString `json:"sender_user_id"`
 	ExternalMessageID       sql.NullString `json:"external_message_id"`
@@ -861,6 +1158,8 @@ func (q *Queries) ListMessagesLatest(ctx context.Context, arg ListMessagesLatest
 			&i.ID,
 			&i.BotID,
 			&i.SessionID,
+			&i.BranchID,
+			&i.BranchSeq,
 			&i.SenderChannelIdentityID,
 			&i.SenderUserID,
 			&i.ExternalMessageID,
@@ -890,8 +1189,23 @@ func (q *Queries) ListMessagesLatest(ctx context.Context, arg ListMessagesLatest
 }
 
 const listMessagesLatestBySession = `-- name: ListMessagesLatestBySession :many
+WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_seq, depth) AS (
+  SELECT b.id, b.parent_branch_id, NULL, 0
+  FROM bot_sessions s
+  JOIN bot_session_branches b ON b.id = COALESCE(s.active_branch_id, (
+    SELECT rb.id FROM bot_session_branches rb
+    WHERE rb.session_id = s.id AND rb.parent_branch_id IS NULL AND rb.fork_from_message_id IS NULL
+    ORDER BY rb.created_at ASC LIMIT 1
+  ))
+  WHERE s.id = ?1
+  UNION ALL
+  SELECT parent.id, parent.parent_branch_id, child.fork_from_seq, bp.depth + 1
+  FROM branch_path bp
+  JOIN bot_session_branches child ON child.id = bp.branch_id
+  JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+)
 SELECT
-  m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
+  m.id, m.bot_id, m.session_id, m.branch_id, m.branch_seq, m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
@@ -902,8 +1216,13 @@ SELECT
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
+LEFT JOIN branch_path bp ON bp.branch_id = m.branch_id
 WHERE m.session_id = ?1
-ORDER BY m.created_at DESC
+  AND (
+    m.branch_id IS NULL
+    OR (bp.branch_id IS NOT NULL AND (bp.max_seq IS NULL OR m.branch_seq <= bp.max_seq))
+  )
+ORDER BY COALESCE(bp.depth, -1) ASC, COALESCE(m.branch_seq, 0) DESC, m.created_at DESC
 LIMIT ?2
 `
 
@@ -916,6 +1235,8 @@ type ListMessagesLatestBySessionRow struct {
 	ID                      string         `json:"id"`
 	BotID                   string         `json:"bot_id"`
 	SessionID               sql.NullString `json:"session_id"`
+	BranchID                sql.NullString `json:"branch_id"`
+	BranchSeq               sql.NullInt64  `json:"branch_seq"`
 	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
 	SenderUserID            sql.NullString `json:"sender_user_id"`
 	ExternalMessageID       sql.NullString `json:"external_message_id"`
@@ -945,6 +1266,8 @@ func (q *Queries) ListMessagesLatestBySession(ctx context.Context, arg ListMessa
 			&i.ID,
 			&i.BotID,
 			&i.SessionID,
+			&i.BranchID,
+			&i.BranchSeq,
 			&i.SenderChannelIdentityID,
 			&i.SenderUserID,
 			&i.ExternalMessageID,
@@ -975,7 +1298,7 @@ func (q *Queries) ListMessagesLatestBySession(ctx context.Context, arg ListMessa
 
 const listMessagesSince = `-- name: ListMessagesSince :many
 SELECT
-  m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
+  m.id, m.bot_id, m.session_id, m.branch_id, m.branch_seq, m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
@@ -1000,6 +1323,8 @@ type ListMessagesSinceRow struct {
 	ID                      string         `json:"id"`
 	BotID                   string         `json:"bot_id"`
 	SessionID               sql.NullString `json:"session_id"`
+	BranchID                sql.NullString `json:"branch_id"`
+	BranchSeq               sql.NullInt64  `json:"branch_seq"`
 	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
 	SenderUserID            sql.NullString `json:"sender_user_id"`
 	ExternalMessageID       sql.NullString `json:"external_message_id"`
@@ -1029,6 +1354,8 @@ func (q *Queries) ListMessagesSince(ctx context.Context, arg ListMessagesSincePa
 			&i.ID,
 			&i.BotID,
 			&i.SessionID,
+			&i.BranchID,
+			&i.BranchSeq,
 			&i.SenderChannelIdentityID,
 			&i.SenderUserID,
 			&i.ExternalMessageID,
@@ -1058,8 +1385,23 @@ func (q *Queries) ListMessagesSince(ctx context.Context, arg ListMessagesSincePa
 }
 
 const listMessagesSinceBySession = `-- name: ListMessagesSinceBySession :many
+WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_seq, depth) AS (
+  SELECT b.id, b.parent_branch_id, NULL, 0
+  FROM bot_sessions s
+  JOIN bot_session_branches b ON b.id = COALESCE(s.active_branch_id, (
+    SELECT rb.id FROM bot_session_branches rb
+    WHERE rb.session_id = s.id AND rb.parent_branch_id IS NULL AND rb.fork_from_message_id IS NULL
+    ORDER BY rb.created_at ASC LIMIT 1
+  ))
+  WHERE s.id = ?1
+  UNION ALL
+  SELECT parent.id, parent.parent_branch_id, child.fork_from_seq, bp.depth + 1
+  FROM branch_path bp
+  JOIN bot_session_branches child ON child.id = bp.branch_id
+  JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+)
 SELECT
-  m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
+  m.id, m.bot_id, m.session_id, m.branch_id, m.branch_seq, m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
@@ -1070,9 +1412,14 @@ SELECT
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
+LEFT JOIN branch_path bp ON bp.branch_id = m.branch_id
 WHERE m.session_id = ?1
   AND m.created_at >= strftime('%Y-%m-%d %H:%M:%S', ?2)
-ORDER BY m.created_at ASC
+  AND (
+    m.branch_id IS NULL
+    OR (bp.branch_id IS NOT NULL AND (bp.max_seq IS NULL OR m.branch_seq <= bp.max_seq))
+  )
+ORDER BY COALESCE(bp.depth, 2147483647) DESC, COALESCE(m.branch_seq, 9223372036854775807) ASC, m.created_at ASC
 `
 
 type ListMessagesSinceBySessionParams struct {
@@ -1084,6 +1431,8 @@ type ListMessagesSinceBySessionRow struct {
 	ID                      string         `json:"id"`
 	BotID                   string         `json:"bot_id"`
 	SessionID               sql.NullString `json:"session_id"`
+	BranchID                sql.NullString `json:"branch_id"`
+	BranchSeq               sql.NullInt64  `json:"branch_seq"`
 	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
 	SenderUserID            sql.NullString `json:"sender_user_id"`
 	ExternalMessageID       sql.NullString `json:"external_message_id"`
@@ -1113,6 +1462,8 @@ func (q *Queries) ListMessagesSinceBySession(ctx context.Context, arg ListMessag
 			&i.ID,
 			&i.BotID,
 			&i.SessionID,
+			&i.BranchID,
+			&i.BranchSeq,
 			&i.SenderChannelIdentityID,
 			&i.SenderUserID,
 			&i.ExternalMessageID,
@@ -1306,12 +1657,269 @@ func (q *Queries) ListObservedConversationsByChannelType(ctx context.Context, ar
 	return items, nil
 }
 
+const listSessionBranchPreviewMessages = `-- name: ListSessionBranchPreviewMessages :many
+WITH targets AS (
+  SELECT
+    b.id AS branch_id,
+    CASE
+      WHEN b.fork_from_seq IS NOT NULL THEN b.parent_branch_id
+      ELSE b.id
+    END AS preview_branch_id,
+    COALESCE(b.fork_from_seq, (
+      SELECT MIN(m.branch_seq)
+      FROM bot_history_messages m
+      WHERE m.branch_id = b.id
+        AND m.role = 'assistant'
+    )) AS preview_seq
+  FROM bot_session_branches b
+  WHERE b.session_id = ?1
+)
+SELECT
+  m.id, m.bot_id, m.session_id, t.branch_id AS branch_id, m.branch_seq, m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.event_id, m.display_text, m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM targets t
+JOIN bot_history_messages m ON m.branch_id = t.preview_branch_id
+  AND m.branch_seq IN (t.preview_seq - 1, t.preview_seq)
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE t.preview_branch_id IS NOT NULL AND t.preview_seq IS NOT NULL
+ORDER BY m.branch_id, m.branch_seq ASC, m.created_at ASC
+`
+
+type ListSessionBranchPreviewMessagesRow struct {
+	ID                      string         `json:"id"`
+	BotID                   string         `json:"bot_id"`
+	SessionID               sql.NullString `json:"session_id"`
+	BranchID                string         `json:"branch_id"`
+	BranchSeq               sql.NullInt64  `json:"branch_seq"`
+	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
+	SenderUserID            sql.NullString `json:"sender_user_id"`
+	ExternalMessageID       sql.NullString `json:"external_message_id"`
+	SourceReplyToMessageID  sql.NullString `json:"source_reply_to_message_id"`
+	Role                    string         `json:"role"`
+	Content                 string         `json:"content"`
+	Metadata                string         `json:"metadata"`
+	Usage                   sql.NullString `json:"usage"`
+	EventID                 sql.NullString `json:"event_id"`
+	DisplayText             sql.NullString `json:"display_text"`
+	CreatedAt               string         `json:"created_at"`
+	SenderDisplayName       sql.NullString `json:"sender_display_name"`
+	SenderAvatarUrl         sql.NullString `json:"sender_avatar_url"`
+	Platform                sql.NullString `json:"platform"`
+}
+
+func (q *Queries) ListSessionBranchPreviewMessages(ctx context.Context, sessionID string) ([]ListSessionBranchPreviewMessagesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listSessionBranchPreviewMessages, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSessionBranchPreviewMessagesRow
+	for rows.Next() {
+		var i ListSessionBranchPreviewMessagesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.BranchID,
+			&i.BranchSeq,
+			&i.SenderChannelIdentityID,
+			&i.SenderUserID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.Role,
+			&i.Content,
+			&i.Metadata,
+			&i.Usage,
+			&i.EventID,
+			&i.DisplayText,
+			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
+			&i.Platform,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSessionBranchTurnMessages = `-- name: ListSessionBranchTurnMessages :many
+SELECT
+  a.id AS assistant_id,
+  a.bot_id,
+  a.session_id,
+  a.branch_id,
+  a.branch_seq,
+  a.content AS assistant_content,
+  a.display_text AS assistant_display_text,
+  a.created_at AS assistant_created_at,
+  u.id AS user_id,
+  u.content AS user_content,
+  u.display_text AS user_display_text,
+  u.created_at AS user_created_at
+FROM bot_session_branches b
+JOIN bot_history_messages a ON a.branch_id = b.id
+  AND a.role = 'assistant'
+LEFT JOIN bot_history_messages u ON u.branch_id = a.branch_id
+  AND u.branch_seq = a.branch_seq - 1
+  AND u.role = 'user'
+WHERE b.session_id = ?1
+ORDER BY b.created_at ASC, a.branch_seq ASC, a.created_at ASC
+`
+
+type ListSessionBranchTurnMessagesRow struct {
+	AssistantID          string         `json:"assistant_id"`
+	BotID                string         `json:"bot_id"`
+	SessionID            sql.NullString `json:"session_id"`
+	BranchID             sql.NullString `json:"branch_id"`
+	BranchSeq            sql.NullInt64  `json:"branch_seq"`
+	AssistantContent     string         `json:"assistant_content"`
+	AssistantDisplayText sql.NullString `json:"assistant_display_text"`
+	AssistantCreatedAt   string         `json:"assistant_created_at"`
+	UserID               sql.NullString `json:"user_id"`
+	UserContent          sql.NullString `json:"user_content"`
+	UserDisplayText      sql.NullString `json:"user_display_text"`
+	UserCreatedAt        sql.NullString `json:"user_created_at"`
+}
+
+func (q *Queries) ListSessionBranchTurnMessages(ctx context.Context, sessionID string) ([]ListSessionBranchTurnMessagesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listSessionBranchTurnMessages, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSessionBranchTurnMessagesRow
+	for rows.Next() {
+		var i ListSessionBranchTurnMessagesRow
+		if err := rows.Scan(
+			&i.AssistantID,
+			&i.BotID,
+			&i.SessionID,
+			&i.BranchID,
+			&i.BranchSeq,
+			&i.AssistantContent,
+			&i.AssistantDisplayText,
+			&i.AssistantCreatedAt,
+			&i.UserID,
+			&i.UserContent,
+			&i.UserDisplayText,
+			&i.UserCreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSessionBranches = `-- name: ListSessionBranches :many
+SELECT
+  b.id,
+  b.session_id,
+  b.parent_branch_id,
+  b.fork_from_message_id,
+  b.fork_from_seq,
+  b.title,
+  b.created_at,
+  b.updated_at,
+  s.active_branch_id
+FROM bot_session_branches b
+JOIN bot_sessions s ON s.id = b.session_id
+WHERE b.session_id = ?1
+ORDER BY b.created_at ASC, b.id ASC
+`
+
+type ListSessionBranchesRow struct {
+	ID                string         `json:"id"`
+	SessionID         string         `json:"session_id"`
+	ParentBranchID    sql.NullString `json:"parent_branch_id"`
+	ForkFromMessageID sql.NullString `json:"fork_from_message_id"`
+	ForkFromSeq       sql.NullInt64  `json:"fork_from_seq"`
+	Title             sql.NullString `json:"title"`
+	CreatedAt         string         `json:"created_at"`
+	UpdatedAt         string         `json:"updated_at"`
+	ActiveBranchID    sql.NullString `json:"active_branch_id"`
+}
+
+func (q *Queries) ListSessionBranches(ctx context.Context, sessionID string) ([]ListSessionBranchesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listSessionBranches, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSessionBranchesRow
+	for rows.Next() {
+		var i ListSessionBranchesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.ParentBranchID,
+			&i.ForkFromMessageID,
+			&i.ForkFromSeq,
+			&i.Title,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ActiveBranchID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUncompactedMessagesBySession = `-- name: ListUncompactedMessagesBySession :many
-SELECT id, bot_id, session_id, role, content, usage, sender_channel_identity_id, compact_id, created_at
-FROM bot_history_messages
-WHERE session_id = ?1
-  AND compact_id IS NULL
-ORDER BY created_at ASC
+WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_seq, depth) AS (
+  SELECT b.id, b.parent_branch_id, NULL, 0
+  FROM bot_sessions s
+  JOIN bot_session_branches b ON b.id = COALESCE(s.active_branch_id, (
+    SELECT rb.id FROM bot_session_branches rb
+    WHERE rb.session_id = s.id AND rb.parent_branch_id IS NULL AND rb.fork_from_message_id IS NULL
+    ORDER BY rb.created_at ASC LIMIT 1
+  ))
+  WHERE s.id = ?1
+  UNION ALL
+  SELECT parent.id, parent.parent_branch_id, child.fork_from_seq, bp.depth + 1
+  FROM branch_path bp
+  JOIN bot_session_branches child ON child.id = bp.branch_id
+  JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+)
+SELECT m.id, m.bot_id, m.session_id, m.role, m.content, m.usage, m.sender_channel_identity_id, m.compact_id, m.created_at
+FROM bot_history_messages m
+LEFT JOIN branch_path bp ON bp.branch_id = m.branch_id
+WHERE m.session_id = ?1
+  AND m.compact_id IS NULL
+  AND (
+    m.branch_id IS NULL
+    OR (bp.branch_id IS NOT NULL AND (bp.max_seq IS NULL OR m.branch_seq <= bp.max_seq))
+  )
+ORDER BY COALESCE(bp.depth, 2147483647) DESC, COALESCE(m.branch_seq, 9223372036854775807) ASC, m.created_at ASC
 `
 
 type ListUncompactedMessagesBySessionRow struct {
@@ -1481,4 +2089,27 @@ func (q *Queries) SearchMessages(ctx context.Context, arg SearchMessagesParams) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const setActiveSessionBranch = `-- name: SetActiveSessionBranch :exec
+UPDATE bot_sessions
+SET active_branch_id = ?1,
+    updated_at = CURRENT_TIMESTAMP
+WHERE bot_sessions.id = ?2
+  AND EXISTS (
+    SELECT 1
+    FROM bot_session_branches b
+    WHERE b.id = ?1
+      AND b.session_id = ?2
+  )
+`
+
+type SetActiveSessionBranchParams struct {
+	BranchID  sql.NullString `json:"branch_id"`
+	SessionID string         `json:"session_id"`
+}
+
+func (q *Queries) SetActiveSessionBranch(ctx context.Context, arg SetActiveSessionBranchParams) error {
+	_, err := q.db.ExecContext(ctx, setActiveSessionBranch, arg.BranchID, arg.SessionID)
+	return err
 }

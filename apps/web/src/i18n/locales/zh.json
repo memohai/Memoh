@@ -423,6 +423,22 @@
     "sendFailed": "消息发送失败",
     "minimapLabel": "对话导航",
     "minimapEarlier": "更早的消息加载后显示",
+    "copyReply": "复制回复",
+    "copyFailed": "复制失败",
+    "forkReply": "从回复分叉",
+    "branchHistory": {
+      "tab": "分支",
+      "title": "分支历史",
+      "empty": "暂无可展示的分支回合",
+      "count": "{count} 个分支",
+      "loading": "正在加载分支",
+      "active": "当前",
+      "switch": "切换分支",
+      "branchLabel": "分支 {index}",
+      "turnLabel": "回合 {index}",
+      "pendingTurn": "等待下一次对话",
+      "noPreview": "暂无缩略内容"
+    },
     "startChat": "开始聊天",
     "noBot": "暂无可用 Bot，请先创建 Bot",
     "newChat": "新会话",
@@ -689,7 +705,9 @@
       "hideWorkbench": "隐藏侧边栏",
       "showWorkbench": "显示侧边栏",
       "goBack": "后退",
-      "goForward": "前进"
+      "goForward": "前进",
+      "hideBranchSidebar": "隐藏分支侧边栏",
+      "showBranchSidebar": "显示分支侧边栏"
     },
     "activityBar": {
       "sessions": "对话",

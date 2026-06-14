@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	dbpkg "github.com/memohai/memoh/internal/db"
@@ -41,6 +42,36 @@ func NewService(log *slog.Logger, queries dbstore.Queries, publishers ...event.P
 	}
 }
 
+func (s *DBService) ensureActiveBranchForSession(ctx context.Context, sessionID pgtype.UUID) (pgtype.UUID, error) {
+	branchID, err := s.queries.GetActiveSessionBranch(ctx, sessionID)
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+	if branchID.Valid {
+		return branchID, nil
+	}
+
+	branchID, err = s.queries.GetRootSessionBranch(ctx, sessionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		branchID, err = s.queries.CreateRootSessionBranch(ctx, sessionID)
+		if err != nil {
+			// Another writer may have created the root branch between the read and insert.
+			if existing, getErr := s.queries.GetRootSessionBranch(ctx, sessionID); getErr == nil {
+				branchID = existing
+			} else {
+				return pgtype.UUID{}, err
+			}
+		}
+	} else if err != nil {
+		return pgtype.UUID{}, err
+	}
+
+	if err := s.queries.SetActiveSessionBranch(ctx, sqlc.SetActiveSessionBranchParams{SessionID: sessionID, BranchID: branchID}); err != nil {
+		return pgtype.UUID{}, err
+	}
+	return branchID, nil
+}
+
 // Persist writes a single message to bot_history_messages.
 func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, error) {
 	pgBotID, err := dbpkg.ParseUUID(input.BotID)
@@ -52,6 +83,17 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 	if err != nil {
 		return Message{}, fmt.Errorf("invalid session id: %w", err)
 	}
+	pgBranchID, err := parseOptionalUUID(input.BranchID)
+	if err != nil {
+		return Message{}, fmt.Errorf("invalid branch id: %w", err)
+	}
+	if !pgBranchID.Valid && pgSessionID.Valid {
+		pgBranchID, err = s.ensureActiveBranchForSession(ctx, pgSessionID)
+		if err != nil {
+			return Message{}, fmt.Errorf("ensure session branch: %w", err)
+		}
+	}
+
 	pgSenderChannelIdentityID, err := parseOptionalUUID(input.SenderChannelIdentityID)
 	if err != nil {
 		return Message{}, fmt.Errorf("invalid sender channel identity id: %w", err)
@@ -82,6 +124,7 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 	row, err := s.queries.CreateMessage(ctx, sqlc.CreateMessageParams{
 		BotID:                   pgBotID,
 		SessionID:               pgSessionID,
+		BranchID:                pgBranchID,
 		SenderChannelIdentityID: pgSenderChannelIdentityID,
 		SenderUserID:            pgSenderUserID,
 		ExternalMessageID:       toPgText(input.ExternalMessageID),
@@ -442,6 +485,8 @@ func toMessageFromCreate(row sqlc.CreateMessageRow) Message {
 		row.ID,
 		row.BotID,
 		row.SessionID,
+		row.BranchID,
+		row.BranchSeq,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
 		pgtype.Text{},
@@ -472,6 +517,8 @@ func toMessageFromListRow(row sqlc.ListMessagesRow) Message {
 		row.ID,
 		row.BotID,
 		row.SessionID,
+		row.BranchID,
+		row.BranchSeq,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
 		row.SenderDisplayName,
@@ -494,6 +541,8 @@ func toMessageFromSessionListRow(row sqlc.ListMessagesBySessionRow) Message {
 		row.ID,
 		row.BotID,
 		row.SessionID,
+		row.BranchID,
+		row.BranchSeq,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
 		row.SenderDisplayName,
@@ -516,6 +565,8 @@ func toMessageFromSinceRow(row sqlc.ListMessagesSinceRow) Message {
 		row.ID,
 		row.BotID,
 		row.SessionID,
+		row.BranchID,
+		row.BranchSeq,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
 		row.SenderDisplayName,
@@ -538,6 +589,8 @@ func toMessageFromSinceBySessionRow(row sqlc.ListMessagesSinceBySessionRow) Mess
 		row.ID,
 		row.BotID,
 		row.SessionID,
+		row.BranchID,
+		row.BranchSeq,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
 		row.SenderDisplayName,
@@ -560,6 +613,8 @@ func toMessageFromActiveSinceRow(row sqlc.ListActiveMessagesSinceRow) Message {
 		row.ID,
 		row.BotID,
 		row.SessionID,
+		row.BranchID,
+		row.BranchSeq,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
 		row.SenderDisplayName,
@@ -586,6 +641,8 @@ func toMessageFromActiveSinceBySessionRow(row sqlc.ListActiveMessagesSinceBySess
 		row.ID,
 		row.BotID,
 		row.SessionID,
+		row.BranchID,
+		row.BranchSeq,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
 		row.SenderDisplayName,
@@ -612,6 +669,8 @@ func toMessageFromLatestRow(row sqlc.ListMessagesLatestRow) Message {
 		row.ID,
 		row.BotID,
 		row.SessionID,
+		row.BranchID,
+		row.BranchSeq,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
 		row.SenderDisplayName,
@@ -634,6 +693,8 @@ func toMessageFromLatestBySessionRow(row sqlc.ListMessagesLatestBySessionRow) Me
 		row.ID,
 		row.BotID,
 		row.SessionID,
+		row.BranchID,
+		row.BranchSeq,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
 		row.SenderDisplayName,
@@ -656,6 +717,8 @@ func toMessageFromBeforeRow(row sqlc.ListMessagesBeforeRow) Message {
 		row.ID,
 		row.BotID,
 		row.SessionID,
+		row.BranchID,
+		row.BranchSeq,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
 		row.SenderDisplayName,
@@ -678,6 +741,8 @@ func toMessageFromBeforeBySessionRow(row sqlc.ListMessagesBeforeBySessionRow) Me
 		row.ID,
 		row.BotID,
 		row.SessionID,
+		row.BranchID,
+		row.BranchSeq,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
 		row.SenderDisplayName,
@@ -700,6 +765,8 @@ func toMessageFromExternalIDBySessionRow(row sqlc.GetMessageByExternalIDBySessio
 		row.ID,
 		row.BotID,
 		row.SessionID,
+		row.BranchID,
+		row.BranchSeq,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
 		row.SenderDisplayName,
@@ -722,6 +789,8 @@ func toMessageFromAfterBySessionRow(row sqlc.ListMessagesAfterBySessionRow) Mess
 		row.ID,
 		row.BotID,
 		row.SessionID,
+		row.BranchID,
+		row.BranchSeq,
 		row.SenderChannelIdentityID,
 		row.SenderUserID,
 		row.SenderDisplayName,
@@ -743,6 +812,8 @@ func toMessageFields(
 	id pgtype.UUID,
 	botID pgtype.UUID,
 	sessionID pgtype.UUID,
+	branchID pgtype.UUID,
+	branchSeq pgtype.Int8,
 	senderChannelIdentityID pgtype.UUID,
 	senderUserID pgtype.UUID,
 	senderDisplayName pgtype.Text,
@@ -762,6 +833,7 @@ func toMessageFields(
 		ID:                      id.String(),
 		BotID:                   botID.String(),
 		SessionID:               sessionID.String(),
+		BranchID:                branchID.String(),
 		SenderChannelIdentityID: senderChannelIdentityID.String(),
 		SenderUserID:            senderUserID.String(),
 		SenderDisplayName:       dbpkg.TextToString(senderDisplayName),
@@ -775,6 +847,9 @@ func toMessageFields(
 		Usage:                   json.RawMessage(usage),
 		DisplayContent:          dbpkg.TextToString(displayText),
 		CreatedAt:               createdAt.Time,
+	}
+	if branchSeq.Valid {
+		m.BranchSeq = branchSeq.Int64
 	}
 	if eventID.Valid {
 		m.EventID = eventID.String()

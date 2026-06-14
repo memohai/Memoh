@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/acpprofile"
@@ -35,6 +36,52 @@ type Session struct {
 	RouteConversationType string         `json:"route_conversation_type,omitempty"`
 }
 
+// BranchGraph is the session branch graph returned to the Web UI.
+type BranchGraph struct {
+	ActiveBranchID string       `json:"active_branch_id,omitempty"`
+	Branches       []BranchNode `json:"branches"`
+	Turns          []BranchTurn `json:"turns"`
+}
+
+// BranchNode is a single in-session branch node.
+type BranchNode struct {
+	ID                string      `json:"id"`
+	SessionID         string      `json:"session_id"`
+	ParentBranchID    string      `json:"parent_branch_id,omitempty"`
+	ForkFromMessageID string      `json:"fork_from_message_id,omitempty"`
+	ForkFromSeq       int64       `json:"fork_from_seq,omitempty"`
+	Title             string      `json:"title,omitempty"`
+	Active            bool        `json:"active"`
+	Preview           TurnPreview `json:"preview"`
+	CreatedAt         time.Time   `json:"created_at"`
+	UpdatedAt         time.Time   `json:"updated_at"`
+}
+
+// BranchTurn is one request/reply card in the branch graph.
+type BranchTurn struct {
+	ID           string      `json:"id"`
+	BranchID     string      `json:"branch_id"`
+	ParentTurnID string      `json:"parent_turn_id,omitempty"`
+	Title        string      `json:"title,omitempty"`
+	AssistantID  string      `json:"assistant_message_id,omitempty"`
+	UserID       string      `json:"user_message_id,omitempty"`
+	BranchSeq    int64       `json:"branch_seq,omitempty"`
+	Depth        int         `json:"depth"`
+	Active       bool        `json:"active"`
+	Pending      bool        `json:"pending,omitempty"`
+	Preview      TurnPreview `json:"preview"`
+	ForkFromSeq  int64       `json:"fork_from_seq,omitempty"`
+	CreatedAt    time.Time   `json:"created_at,omitempty"`
+}
+
+// TurnPreview summarizes one user request + assistant reply turn.
+type TurnPreview struct {
+	UserText      string    `json:"user_text,omitempty"`
+	AssistantText string    `json:"assistant_text,omitempty"`
+	MessageID     string    `json:"message_id,omitempty"`
+	Timestamp     time.Time `json:"timestamp,omitempty"`
+}
+
 const (
 	TypeChat              = "chat"
 	TypeHeartbeat         = "heartbeat"
@@ -47,10 +94,13 @@ const (
 )
 
 var (
-	ErrACPAgentIDRequired    = errors.New("acp_agent_id is required for acp_agent sessions")
-	ErrACPProjectPathMissing = errors.New("project_path is required for acp_agent sessions")
-	ErrACPUnknownAgent       = errors.New("unknown ACP agent")
-	ErrACPAgentNotEnabled    = errors.New("ACP agent is not enabled for this bot")
+	ErrACPAgentIDRequired     = errors.New("acp_agent_id is required for acp_agent sessions")
+	ErrACPProjectPathMissing  = errors.New("project_path is required for acp_agent sessions")
+	ErrACPUnknownAgent        = errors.New("unknown ACP agent")
+	ErrACPAgentNotEnabled     = errors.New("ACP agent is not enabled for this bot")
+	ErrBranchNotFound         = errors.New("session branch not found")
+	ErrForkMessageNotFound    = errors.New("fork source message not found")
+	ErrForkSourceNotAssistant = errors.New("fork source message must be an assistant message")
 )
 
 func IsKnownType(typ string) bool {
@@ -394,6 +444,99 @@ func (s *Service) MessageCount(ctx context.Context, sessionID string) (int64, er
 	return s.queries.CountMessagesBySession(ctx, pgID)
 }
 
+// ListBranches returns the session branch graph and turn previews.
+func (s *Service) ListBranches(ctx context.Context, sessionID string) (BranchGraph, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return BranchGraph{}, fmt.Errorf("invalid session id: %w", err)
+	}
+	if _, err := s.ensureActiveBranchForSession(ctx, pgSessionID); err != nil {
+		return BranchGraph{}, fmt.Errorf("ensure session branch: %w", err)
+	}
+	return s.listBranchesByUUID(ctx, pgSessionID)
+}
+
+// ForkBranchFromMessage creates and activates a new session branch from an assistant message.
+func (s *Service) ForkBranchFromMessage(ctx context.Context, sessionID, messageID string) (BranchGraph, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return BranchGraph{}, fmt.Errorf("invalid session id: %w", err)
+	}
+	pgMessageID, err := dbpkg.ParseUUID(messageID)
+	if err != nil {
+		return BranchGraph{}, fmt.Errorf("invalid message id: %w", err)
+	}
+	if _, err := s.ensureActiveBranchForSession(ctx, pgSessionID); err != nil {
+		return BranchGraph{}, fmt.Errorf("ensure session branch: %w", err)
+	}
+	row, err := s.queries.GetMessageForSessionBranchFork(ctx, sqlc.GetMessageForSessionBranchForkParams{
+		MessageID: pgMessageID,
+		SessionID: pgSessionID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return BranchGraph{}, ErrForkMessageNotFound
+	}
+	if err != nil {
+		return BranchGraph{}, err
+	}
+	if row.Role != "assistant" {
+		return BranchGraph{}, ErrForkSourceNotAssistant
+	}
+	if !row.BranchID.Valid || !row.BranchSeq.Valid {
+		return BranchGraph{}, errors.New("fork source message has no branch position")
+	}
+	branchID, err := s.queries.CreateSessionBranchFromMessage(ctx, sqlc.CreateSessionBranchFromMessageParams{
+		SessionID:         pgSessionID,
+		ParentBranchID:    row.BranchID,
+		ForkFromMessageID: row.ID,
+		ForkFromSeq:       row.BranchSeq,
+		Title:             pgtype.Text{},
+	})
+	if err != nil {
+		return BranchGraph{}, err
+	}
+	if err := s.queries.SetActiveSessionBranch(ctx, sqlc.SetActiveSessionBranchParams{
+		SessionID: pgSessionID,
+		BranchID:  branchID,
+	}); err != nil {
+		return BranchGraph{}, err
+	}
+	return s.listBranchesByUUID(ctx, pgSessionID)
+}
+
+// SetActiveBranch switches the active branch for a session.
+func (s *Service) SetActiveBranch(ctx context.Context, sessionID, branchID string) (BranchGraph, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return BranchGraph{}, fmt.Errorf("invalid session id: %w", err)
+	}
+	pgBranchID, err := dbpkg.ParseUUID(branchID)
+	if err != nil {
+		return BranchGraph{}, fmt.Errorf("invalid branch id: %w", err)
+	}
+	rows, err := s.queries.ListSessionBranches(ctx, pgSessionID)
+	if err != nil {
+		return BranchGraph{}, err
+	}
+	found := false
+	for _, row := range rows {
+		if row.ID == pgBranchID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return BranchGraph{}, ErrBranchNotFound
+	}
+	if err := s.queries.SetActiveSessionBranch(ctx, sqlc.SetActiveSessionBranchParams{
+		SessionID: pgSessionID,
+		BranchID:  pgBranchID,
+	}); err != nil {
+		return BranchGraph{}, err
+	}
+	return s.listBranchesByUUID(ctx, pgSessionID)
+}
+
 // Touch updates a session's updated_at timestamp.
 func (s *Service) Touch(ctx context.Context, sessionID string) error {
 	pgID, err := dbpkg.ParseUUID(sessionID)
@@ -464,6 +607,68 @@ func (s *Service) EnsureActiveSession(ctx context.Context, botID, routeID, chann
 	return sess, nil
 }
 
+func (s *Service) ensureActiveBranchForSession(ctx context.Context, sessionID pgtype.UUID) (pgtype.UUID, error) {
+	branchID, err := s.queries.GetActiveSessionBranch(ctx, sessionID)
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+	if branchID.Valid {
+		return branchID, nil
+	}
+
+	branchID, err = s.queries.GetRootSessionBranch(ctx, sessionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		branchID, err = s.queries.CreateRootSessionBranch(ctx, sessionID)
+		if err != nil {
+			if existing, getErr := s.queries.GetRootSessionBranch(ctx, sessionID); getErr == nil {
+				branchID = existing
+			} else {
+				return pgtype.UUID{}, err
+			}
+		}
+	} else if err != nil {
+		return pgtype.UUID{}, err
+	}
+
+	if err := s.queries.SetActiveSessionBranch(ctx, sqlc.SetActiveSessionBranchParams{
+		SessionID: sessionID,
+		BranchID:  branchID,
+	}); err != nil {
+		return pgtype.UUID{}, err
+	}
+	return branchID, nil
+}
+
+func (s *Service) listBranchesByUUID(ctx context.Context, sessionID pgtype.UUID) (BranchGraph, error) {
+	rows, err := s.queries.ListSessionBranches(ctx, sessionID)
+	if err != nil {
+		return BranchGraph{}, err
+	}
+	previews, err := s.queries.ListSessionBranchPreviewMessages(ctx, sessionID)
+	if err != nil {
+		return BranchGraph{}, err
+	}
+	turnRows, err := s.queries.ListSessionBranchTurnMessages(ctx, sessionID)
+	if err != nil {
+		return BranchGraph{}, err
+	}
+	previewByBranch := buildBranchPreviewMap(previews)
+	graph := BranchGraph{Branches: make([]BranchNode, 0, len(rows))}
+	for _, row := range rows {
+		node := toBranchNode(row)
+		if row.ActiveBranchID.Valid {
+			graph.ActiveBranchID = row.ActiveBranchID.String()
+			node.Active = row.ID == row.ActiveBranchID
+		}
+		if preview, ok := previewByBranch[row.ID.String()]; ok {
+			node.Preview = preview
+		}
+		graph.Branches = append(graph.Branches, node)
+	}
+	graph.Turns = buildBranchTurns(graph.Branches, turnRows)
+	return graph, nil
+}
+
 func toSession(row sqlc.BotSession) Session {
 	parentID := ""
 	if row.ParentSessionID.Valid {
@@ -486,6 +691,234 @@ func toSession(row sqlc.BotSession) Session {
 		CreatedAt:       row.CreatedAt.Time,
 		UpdatedAt:       row.UpdatedAt.Time,
 	}
+}
+
+func toBranchNode(row sqlc.ListSessionBranchesRow) BranchNode {
+	node := BranchNode{
+		ID:        row.ID.String(),
+		SessionID: row.SessionID.String(),
+		Title:     dbpkg.TextToString(row.Title),
+		CreatedAt: dbpkg.TimeFromPg(row.CreatedAt),
+		UpdatedAt: dbpkg.TimeFromPg(row.UpdatedAt),
+	}
+	if row.ParentBranchID.Valid {
+		node.ParentBranchID = row.ParentBranchID.String()
+	}
+	if row.ForkFromMessageID.Valid {
+		node.ForkFromMessageID = row.ForkFromMessageID.String()
+	}
+	if row.ForkFromSeq.Valid {
+		node.ForkFromSeq = row.ForkFromSeq.Int64
+	}
+	return node
+}
+
+func buildBranchPreviewMap(rows []sqlc.ListSessionBranchPreviewMessagesRow) map[string]TurnPreview {
+	out := make(map[string]TurnPreview)
+	for _, row := range rows {
+		if !row.BranchID.Valid {
+			continue
+		}
+		key := row.BranchID.String()
+		preview := out[key]
+		switch row.Role {
+		case "assistant":
+			preview.AssistantText = firstNonEmpty(preview.AssistantText, previewTextFromMessage(row.Content, row.DisplayText))
+			preview.MessageID = row.ID.String()
+			preview.Timestamp = dbpkg.TimeFromPg(row.CreatedAt)
+		case "user":
+			preview.UserText = firstNonEmpty(preview.UserText, previewTextFromMessage(row.Content, row.DisplayText))
+			if preview.Timestamp.IsZero() {
+				preview.Timestamp = dbpkg.TimeFromPg(row.CreatedAt)
+			}
+		}
+		out[key] = preview
+	}
+	return out
+}
+
+func buildBranchTurns(branches []BranchNode, rows []sqlc.ListSessionBranchTurnMessagesRow) []BranchTurn {
+	branchByID := make(map[string]BranchNode, len(branches))
+	depthByBranch := make(map[string]int, len(branches))
+	activeBranchID := ""
+	for _, branch := range branches {
+		branchByID[branch.ID] = branch
+		if branch.Active {
+			activeBranchID = branch.ID
+		}
+	}
+	var branchDepth func(string) int
+	branchDepth = func(branchID string) int {
+		if depth, ok := depthByBranch[branchID]; ok {
+			return depth
+		}
+		branch := branchByID[branchID]
+		depth := 0
+		if strings.TrimSpace(branch.ParentBranchID) != "" {
+			depth = branchDepth(branch.ParentBranchID) + 1
+		}
+		depthByBranch[branchID] = depth
+		return depth
+	}
+
+	turns := make([]BranchTurn, 0, len(rows)+len(branches))
+	lastTurnByBranch := make(map[string]string, len(branches))
+	turnIDByBranchSeq := make(map[string]map[int64]string, len(branches))
+	hasTurn := make(map[string]bool, len(branches))
+	for _, row := range rows {
+		if !row.BranchID.Valid {
+			continue
+		}
+		branchID := row.BranchID.String()
+		seq := row.BranchSeq.Int64
+		branch := branchByID[branchID]
+		parentTurnID := lastTurnByBranch[branchID]
+		if parentTurnID == "" && strings.TrimSpace(branch.ParentBranchID) != "" && branch.ForkFromSeq > 0 {
+			parentTurnID = turnIDForBranchSeq(turnIDByBranchSeq, branch.ParentBranchID, branch.ForkFromSeq)
+		}
+		turn := BranchTurn{
+			ID:           row.AssistantID.String(),
+			BranchID:     branchID,
+			ParentTurnID: parentTurnID,
+			AssistantID:  row.AssistantID.String(),
+			BranchSeq:    seq,
+			Depth:        branchDepth(branchID),
+			Active:       branchID == activeBranchID,
+			Title:        branchTurnTitle(row),
+			Preview: TurnPreview{
+				UserText:      previewTextFromMessage(row.UserContent, row.UserDisplayText),
+				AssistantText: previewTextFromMessage(row.AssistantContent, row.AssistantDisplayText),
+				MessageID:     row.AssistantID.String(),
+				Timestamp:     dbpkg.TimeFromPg(row.AssistantCreatedAt),
+			},
+			ForkFromSeq: branch.ForkFromSeq,
+			CreatedAt:   dbpkg.TimeFromPg(row.AssistantCreatedAt),
+		}
+		if row.UserID.Valid {
+			turn.UserID = row.UserID.String()
+		}
+		turns = append(turns, turn)
+		lastTurnByBranch[branchID] = turn.ID
+		if _, ok := turnIDByBranchSeq[branchID]; !ok {
+			turnIDByBranchSeq[branchID] = make(map[int64]string)
+		}
+		if seq > 0 {
+			turnIDByBranchSeq[branchID][seq] = turn.ID
+		}
+		hasTurn[branchID] = true
+	}
+
+	for _, branch := range branches {
+		if hasTurn[branch.ID] || strings.TrimSpace(branch.ParentBranchID) == "" {
+			continue
+		}
+		parentTurnID := turnIDForBranchSeq(turnIDByBranchSeq, branch.ParentBranchID, branch.ForkFromSeq)
+		turns = append(turns, BranchTurn{
+			ID:           "pending-" + branch.ID,
+			BranchID:     branch.ID,
+			ParentTurnID: parentTurnID,
+			Depth:        branchDepth(branch.ID),
+			Active:       branch.Active,
+			Pending:      true,
+			Title:        firstNonEmpty(branch.Title, branch.Preview.UserText),
+			Preview:      branch.Preview,
+			ForkFromSeq:  branch.ForkFromSeq,
+			CreatedAt:    branch.CreatedAt,
+		})
+	}
+	return turns
+}
+
+func turnIDForBranchSeq(index map[string]map[int64]string, branchID string, seq int64) string {
+	if seq <= 0 {
+		return ""
+	}
+	return index[branchID][seq]
+}
+
+func firstNonEmpty(existing, next string) string {
+	if strings.TrimSpace(existing) != "" {
+		return existing
+	}
+	return strings.TrimSpace(next)
+}
+
+func branchTurnTitle(row sqlc.ListSessionBranchTurnMessagesRow) string {
+	userText := previewTextFromMessage(row.UserContent, row.UserDisplayText)
+	if userText != "" {
+		return summarizeTitleText(userText)
+	}
+	return summarizeTitleText(previewTextFromMessage(row.AssistantContent, row.AssistantDisplayText))
+}
+
+func previewTextFromMessage(content []byte, displayText pgtype.Text) string {
+	if text := strings.TrimSpace(dbpkg.TextToString(displayText)); text != "" {
+		return summarizePreviewText(text)
+	}
+	texts := extractTextFragments(content)
+	return summarizePreviewText(strings.Join(texts, "\n\n"))
+}
+
+func summarizeTitleText(text string) string {
+	text = strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+	const maxRunes = 48
+	runes := []rune(text)
+	if len(runes) <= maxRunes {
+		return text
+	}
+	return string(runes[:maxRunes]) + "..."
+}
+
+func summarizePreviewText(text string) string {
+	text = strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+	const maxRunes = 180
+	runes := []rune(text)
+	if len(runes) <= maxRunes {
+		return text
+	}
+	return string(runes[:maxRunes]) + "..."
+}
+
+func extractTextFragments(content []byte) []string {
+	if len(content) == 0 {
+		return nil
+	}
+	var value any
+	if err := json.Unmarshal(content, &value); err != nil {
+		return nil
+	}
+	return collectTextFragments(value)
+}
+
+func collectTextFragments(value any) []string {
+	switch v := value.(type) {
+	case string:
+		if text := strings.TrimSpace(v); text != "" {
+			return []string{text}
+		}
+	case []any:
+		var out []string
+		for _, item := range v {
+			out = append(out, collectTextFragments(item)...)
+		}
+		return out
+	case map[string]any:
+		if text, ok := v["text"].(string); ok {
+			typ, _ := v["type"].(string)
+			if typ == "" || typ == "text" || typ == "input_text" || typ == "output_text" {
+				if text = strings.TrimSpace(text); text != "" {
+					return []string{text}
+				}
+			}
+		}
+		if content, ok := v["content"]; ok {
+			return collectTextFragments(content)
+		}
+		if text, ok := v["display_text"].(string); ok && strings.TrimSpace(text) != "" {
+			return []string{strings.TrimSpace(text)}
+		}
+	}
+	return nil
 }
 
 func validateACPMetadata(meta map[string]any) error {

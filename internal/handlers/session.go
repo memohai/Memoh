@@ -47,6 +47,9 @@ func (h *SessionHandler) Register(e *echo.Echo) {
 	g.GET("/:session_id", h.GetSession)
 	g.PATCH("/:session_id", h.UpdateSession)
 	g.DELETE("/:session_id", h.DeleteSession)
+	g.GET("/:session_id/branches", h.ListBranches)
+	g.POST("/:session_id/branches/fork", h.ForkBranch)
+	g.PATCH("/:session_id/branches/active", h.SetActiveBranch)
 }
 
 type createSessionRequest struct {
@@ -64,6 +67,14 @@ type updateSessionRequest struct {
 	Title    *string        `json:"title,omitempty"`
 	Type     *string        `json:"type,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+type forkBranchRequest struct {
+	MessageID string `json:"message_id"`
+}
+
+type setActiveBranchRequest struct {
+	BranchID string `json:"branch_id"`
 }
 
 // CreateSession godoc
@@ -337,6 +348,122 @@ func (h *SessionHandler) DeleteSession(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// ListBranches godoc
+// @Summary List session branches
+// @Tags sessions
+// @Param bot_id path string true "Bot ID"
+// @Param session_id path string true "Session ID"
+// @Success 200 {object} session.BranchGraph
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /bots/{bot_id}/sessions/{session_id}/branches [get].
+func (h *SessionHandler) ListBranches(c echo.Context) error {
+	channelIdentityID, err := RequireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	sessionID := strings.TrimSpace(c.Param("session_id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	if sessionID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
+	}
+	if _, _, _, err := h.authorizeSession(c, channelIdentityID, botID, sessionID); err != nil {
+		return err
+	}
+	graph, err := h.sessionService.ListBranches(c.Request().Context(), sessionID)
+	if err != nil {
+		return branchServiceError(err)
+	}
+	return c.JSON(http.StatusOK, graph)
+}
+
+// ForkBranch godoc
+// @Summary Fork a session branch from an assistant message
+// @Tags sessions
+// @Param bot_id path string true "Bot ID"
+// @Param session_id path string true "Session ID"
+// @Param body body forkBranchRequest true "Fork source"
+// @Success 201 {object} session.BranchGraph
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Router /bots/{bot_id}/sessions/{session_id}/branches/fork [post].
+func (h *SessionHandler) ForkBranch(c echo.Context) error {
+	channelIdentityID, err := RequireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	sessionID := strings.TrimSpace(c.Param("session_id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	if sessionID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
+	}
+	if _, _, _, err := h.authorizeSession(c, channelIdentityID, botID, sessionID); err != nil {
+		return err
+	}
+	var req forkBranchRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if strings.TrimSpace(req.MessageID) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "message id is required")
+	}
+	graph, err := h.sessionService.ForkBranchFromMessage(c.Request().Context(), sessionID, req.MessageID)
+	if err != nil {
+		return branchServiceError(err)
+	}
+	return c.JSON(http.StatusCreated, graph)
+}
+
+// SetActiveBranch godoc
+// @Summary Switch the active session branch
+// @Tags sessions
+// @Param bot_id path string true "Bot ID"
+// @Param session_id path string true "Session ID"
+// @Param body body setActiveBranchRequest true "Active branch"
+// @Success 200 {object} session.BranchGraph
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /bots/{bot_id}/sessions/{session_id}/branches/active [patch].
+func (h *SessionHandler) SetActiveBranch(c echo.Context) error {
+	channelIdentityID, err := RequireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	sessionID := strings.TrimSpace(c.Param("session_id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	if sessionID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
+	}
+	if _, _, _, err := h.authorizeSession(c, channelIdentityID, botID, sessionID); err != nil {
+		return err
+	}
+	var req setActiveBranchRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if strings.TrimSpace(req.BranchID) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "branch id is required")
+	}
+	graph, err := h.sessionService.SetActiveBranch(c.Request().Context(), sessionID, req.BranchID)
+	if err != nil {
+		return branchServiceError(err)
+	}
+	return c.JSON(http.StatusOK, graph)
+}
+
 func (h *SessionHandler) authorizeBotSessionAccess(c echo.Context, channelIdentityID, botID string) (bots.Bot, []string, error) {
 	bot, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, bots.PermissionChat)
 	if err != nil {
@@ -441,6 +568,20 @@ func sessionServiceError(err error) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	case errors.Is(err, session.ErrACPAgentNotEnabled):
 		return echo.NewHTTPError(http.StatusForbidden, err.Error())
+	default:
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+}
+
+func branchServiceError(err error) error {
+	switch {
+	case errors.Is(err, session.ErrForkMessageNotFound),
+		errors.Is(err, session.ErrBranchNotFound):
+		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+	case errors.Is(err, session.ErrForkSourceNotAssistant):
+		return echo.NewHTTPError(http.StatusConflict, err.Error())
+	case strings.Contains(err.Error(), "invalid "):
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	default:
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
