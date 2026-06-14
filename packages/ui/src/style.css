@@ -1525,6 +1525,17 @@
   --sidebar-accent: oklch(0.945 0.004 var(--scheme-hue));
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: oklch(0.905 0.0045 var(--scheme-hue));
+  /* sidebar-hover must be a solid value lighter than sidebar-accent so the
+     hover state reads as less prominent than the active state. Using the
+     inherited overlay (--overlay-hover-light = 4.5% black) on a L=0.984
+     background produces ~L=0.940, which is darker than sidebar-accent
+     (L=0.945) — inverting the intended hierarchy in light mode. */
+  --sidebar-hover: oklch(0.964 0.004 var(--scheme-hue));
+  /* sidebar-hover must be a solid value lighter than sidebar-accent (L=0.945)
+     so hover reads as less prominent than active. The inherited overlay token
+     (--overlay-hover-light = 4.5% black) composites to ~L 0.940 on this
+     scheme's L=0.984 background — darker than active, inverting the hierarchy. */
+  --sidebar-hover: oklch(0.964 0.004 var(--scheme-hue));
   --segment-track: oklch(0.945 0.005 var(--scheme-hue));
 }
 
