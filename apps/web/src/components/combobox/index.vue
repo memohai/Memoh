@@ -16,8 +16,8 @@
 
     <PopoverContent
       menu
-      align="start"
-      class="w-[var(--reka-popover-trigger-width)]"
+      :align="popoverAlign"
+      :class="popoverClass"
     >
       <div class="flex flex-col overflow-hidden rounded-[var(--radius-menu-shell)] border border-[color:var(--border-menu)] bg-popover text-popover-foreground shadow-[var(--shadow-dropdown)]">
         <!-- Search (combobox-style: no leading magnifier, query lines up with rows) -->
@@ -109,10 +109,14 @@ const props = withDefaults(defineProps<{
   placeholder?: string
   searchPlaceholder?: string
   emptyText?: string
+  popoverClass?: string
+  popoverAlign?: 'start' | 'center' | 'end'
 }>(), {
   placeholder: '',
   searchPlaceholder: 'Search...',
   emptyText: 'No results.',
+  popoverClass: 'w-[var(--reka-popover-trigger-width)]',
+  popoverAlign: 'start',
 })
 
 const modelValue = defineModel<string>({ default: '' })
