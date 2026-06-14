@@ -31,10 +31,6 @@ func (r *recordingLLM) Compact(_ context.Context, req adapters.CompactRequest) (
 	return adapters.CompactResponse{Facts: facts}, nil
 }
 
-func (*recordingLLM) DetectLanguage(context.Context, string) (string, error) {
-	return "", nil
-}
-
 func TestBuildRequiresBotID(t *testing.T) {
 	t.Parallel()
 

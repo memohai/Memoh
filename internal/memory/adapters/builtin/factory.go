@@ -20,12 +20,12 @@ const (
 	ModeDense  BuiltinMemoryMode = "dense"
 )
 
-// NewBuiltinRuntimeFromConfig returns the appropriate memoryRuntime based on
+// NewBuiltinRuntimeFromConfig returns the appropriate Runtime based on
 // the provider's persisted config (memory_mode field). Returns the file
 // runtime for "off" or unknown modes. Returns an error if a sparse or dense
 // runtime was explicitly requested but failed to initialise, so that callers
 // can surface configuration problems rather than silently degrading.
-func NewBuiltinRuntimeFromConfig(_ *slog.Logger, providerConfig map[string]any, fileRuntime any, store *storefs.Service, queries dbstore.Queries, cfg config.Config) (any, error) {
+func NewBuiltinRuntimeFromConfig(_ *slog.Logger, providerConfig map[string]any, store *storefs.Service, queries dbstore.Queries, cfg config.Config) (Runtime, error) {
 	mode := BuiltinMemoryMode(strings.TrimSpace(adapters.StringFromConfig(providerConfig, "memory_mode")))
 
 	switch mode {
@@ -54,7 +54,7 @@ func NewBuiltinRuntimeFromConfig(_ *slog.Logger, providerConfig map[string]any, 
 		return newDenseRuntime(providerConfig, queries, cfg, store)
 
 	default:
-		return fileRuntime, nil
+		return NewFileRuntime(store), nil
 	}
 }
 

@@ -35,23 +35,12 @@ type sparseIndex interface {
 	DeleteByBotID(ctx context.Context, botID string) error
 }
 
-type sparseMemoryStore interface {
-	PersistMemories(ctx context.Context, botID string, items []storefs.MemoryItem, filters map[string]any) error
-	ReadAllMemoryFiles(ctx context.Context, botID string) ([]storefs.MemoryItem, error)
-	RemoveMemories(ctx context.Context, botID string, ids []string) error
-	RemoveAllMemories(ctx context.Context, botID string) error
-	RebuildFiles(ctx context.Context, botID string, items []storefs.MemoryItem, filters map[string]any) error
-	ArchiveAndRebuildFiles(ctx context.Context, botID string, active []storefs.MemoryItem, archived []storefs.MemoryItem, filters map[string]any) error
-	SyncOverview(ctx context.Context, botID string) error
-	CountMemoryFiles(ctx context.Context, botID string) (int, error)
-}
-
-// sparseRuntime implements memoryRuntime with markdown files as the source of
+// sparseRuntime implements Runtime with markdown files as the source of
 // truth and Qdrant as a derived sparse index used for retrieval.
 type sparseRuntime struct {
 	qdrant  sparseIndex
 	encoder sparseEncoder
-	store   sparseMemoryStore
+	store   memoryStore
 }
 
 const (
