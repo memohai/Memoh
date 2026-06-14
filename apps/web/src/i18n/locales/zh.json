@@ -268,6 +268,14 @@
     "thinking": "思考中…",
     "thinkingInProgress": "思考中…",
     "thinkingDone": "思考完成",
+    "actions": {
+      "copy": "复制",
+      "copied": "已复制",
+      "edit": "编辑",
+      "share": "分享",
+      "retry": "重试",
+      "fork": "分叉"
+    },
     "process": {
       "browse": "浏览 {count} 个文件",
       "edit": "修改 {count} 个文件",
@@ -281,6 +289,9 @@
     "inputPlaceholder": "输入你的问题…",
     "readonlyHint": "该聊天为只读",
     "readonlyPlaceholder": "该聊天为只读，无法发送消息",
+    "composerActions": "添加文件或切换 Agent",
+    "agent": "Agent",
+    "attachFiles": "上传文件",
     "send": "发送",
     "sendFailed": "消息发送失败",
     "minimapLabel": "对话导航",

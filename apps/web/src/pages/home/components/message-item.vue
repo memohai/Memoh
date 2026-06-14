@@ -29,7 +29,7 @@
 
     <!-- Content -->
     <div
-      class="min-w-0"
+      class="min-w-0 group/msg"
       :class="contentClass"
       data-chat-content
     >
@@ -138,14 +138,12 @@
       <!-- Default user message (chat bubble) -->
       <div
         v-else-if="message.role === 'user'"
-        class="space-y-2"
+        class="flex flex-col gap-2"
+        :class="bubbleSelf ? 'items-end' : 'items-start'"
       >
         <div
           v-if="cleanUserText(message.text) || message.forward || message.reply"
-          class="rounded-2xl px-3 py-2 text-xs whitespace-pre-wrap break-all"
-          :class="bubbleSelf
-            ? 'rounded-tr-sm bg-accent text-foreground'
-            : 'rounded-tl-sm bg-muted text-foreground'"
+          class="chat-user-bubble w-fit max-w-full rounded-xl bg-sidebar-accent px-3.5 py-2.5 text-foreground whitespace-pre-wrap break-words"
         >
           <div
             v-if="message.forward"
@@ -201,13 +199,12 @@
           :block="userAttachmentBlock"
           :on-open-media="onOpenMedia"
         />
-        <p
-          class="text-xs text-muted-foreground/80 mt-1"
-          :class="bubbleSelf ? 'text-right' : ''"
-          :title="fullTimestamp"
-        >
-          {{ relativeTimestamp }}
-        </p>
+        <MessageActions
+          :copy-text="userCopyText"
+          :relative-time="relativeTimestamp"
+          :full-time="fullTimestamp"
+          :align="bubbleSelf ? 'end' : 'start'"
+        />
       </div>
 
       <!-- Assistant message blocks -->
@@ -269,12 +266,14 @@
           <LoaderCircle class="size-3.5 animate-spin" />
           {{ $t('chat.thinking') }}
         </div>
-        <p
-          class="text-xs text-muted-foreground/80 mt-1"
-          :title="fullTimestamp"
-        >
-          {{ relativeTimestamp }}
-        </p>
+        <MessageActions
+          :copy-text="assistantPlainText"
+          :relative-time="relativeTimestamp"
+          :full-time="fullTimestamp"
+          align="start"
+          :persistent="isLatestAssistant"
+          :streaming="message.streaming"
+        />
       </div>
     </div>
   </div>
@@ -303,6 +302,7 @@ import ToolCallGroup from './tool-call-group.vue'
 import { isReadOnlyTool } from './tool-call-registry'
 import { finalizeReasoning, markReasoningSeen } from './reasoning-timing'
 import AttachmentBlock from './attachment-block.vue'
+import MessageActions from './message-actions.vue'
 import BackgroundTaskBlock from './background-task-block.vue'
 import HeartbeatTriggerBlock from './heartbeat-trigger-block.vue'
 import ScheduleTriggerBlock from './schedule-trigger-block.vue'
@@ -347,6 +347,7 @@ const props = defineProps<{
   onOpenMedia?: (src: string) => void
   onReplyClick?: (messageId: string) => void
   isScrolling: boolean
+  isLastMessage?: boolean
 }>()
 
 const userStore = useUserStore()
@@ -599,4 +600,24 @@ const relativeTimestamp = computed(() =>
 const fullTimestamp = computed(() =>
   formatDateTime(props.message.timestamp, { locale: locale.value }),
 )
+
+const userCopyText = computed(() =>
+  props.message.role === 'user' ? cleanUserText(props.message.text) : '',
+)
+const assistantPlainText = computed(() => {
+  if (props.message.role !== 'assistant') return ''
+  return props.message.messages
+    .filter((block): block is Extract<ContentBlock, { type: 'text' }> =>
+      block.type === 'text' && Boolean((block as { content?: string }).content),
+    )
+    .map(block => block.content)
+    .join('\n\n')
+})
+
+const isLatestAssistant = computed(() =>
+  props.message.role === 'assistant'
+  && Boolean(props.isLastMessage)
+  && !props.message.streaming,
+)
+
 </script>

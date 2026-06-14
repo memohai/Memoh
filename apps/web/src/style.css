@@ -132,7 +132,7 @@
  * Chinese; CJK that appears inside an English UI rides markstream's own 1.625
  * paragraph leading below, which is already comfortable for mixed runs. */
 :lang(zh) [data-chat-content] .prose {
-  font-weight: 335;
+  font-weight: 345;
   line-height: 1.7;
 }
 :lang(zh) [data-chat-content] .markstream-vue,
@@ -154,16 +154,16 @@
 
 @layer components {
   [data-chat-content] .prose {
-    /* Compact chat body: 13px text with tight 17.5px line-height. Keep the
-     * body weight close to the global normal rung now that CJK is variable.
-     * Tables / code blocks set their own size so they don't grow with this. */
-    font-size: 0.8125rem;
-    line-height: 1.35;
-    font-weight: 380;
+    /* Chat reading body: 16px / 400. This is a READING surface, not UI chrome, so
+     * it sits above the 12-14px control rungs. */
+    font-size: 1rem;
+    line-height: 1.6;
+    font-weight: 400;
   }
 
   [data-chat-content] .chat-user-bubble {
-    font-size: 0.75rem;
+    font-size: 1rem;
+    line-height: 1.6;
   }
 
   [data-chat-content] .chat-message-meta {

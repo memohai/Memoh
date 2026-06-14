@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import type * as Monaco from 'monaco-editor'
 import { useMonaco } from 'stream-monaco'
 import { bundledThemes } from 'shiki/themes'
+import { useSettingsStore } from '@/store/settings'
 // The editor host loads only the minimal `editor.api` entry, which omits every
 // optional editor contribution — including sticky scroll. Without this the
 // `stickyScroll` option is a silent no-op: nothing pins the current heading at
@@ -27,6 +28,11 @@ const emit = defineEmits<{
 }>()
 
 const editorRef = ref<HTMLDivElement>()
+const settings = useSettingsStore()
+const editorFontSize = computed(() => settings.codeFontSizePx)
+// Keep Monaco's built-in platform default font unless the user explicitly
+// customizes the code font; `undefined` resets to the editor default.
+const editorFontFamily = computed(() => settings.codeFontFamily ? settings.codeFontStack : undefined)
 let heightObserver: MutationObserver | null = null
 let themeObserver: MutationObserver | null = null
 
@@ -327,6 +333,14 @@ watch(() => props.modelValue, (newVal) => {
 
 watch(() => props.readonly, (val) => {
   getEditorView()?.updateOptions({ readOnly: val })
+})
+
+watch(editorFontSize, (fontSize) => {
+  getEditorView()?.updateOptions({ fontSize })
+})
+
+watch(editorFontFamily, (fontFamily) => {
+  getEditorView()?.updateOptions({ fontFamily })
 })
 
 watch([() => props.language, () => props.filename], () => {

@@ -22,7 +22,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import {
@@ -38,6 +38,7 @@ import '@/styles/dockview-theme.css'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { useChatStore } from '@/store/chat-list'
 import { openInFileManagerKey } from '../composables/useFileManagerProvider'
+import { DesktopShellKey } from '@/lib/desktop-shell'
 import PanelChat from './dockview/panel-chat.vue'
 import PanelFile from './dockview/panel-file.vue'
 import PanelPreview from './dockview/panel-preview.vue'
@@ -166,6 +167,19 @@ function normalizeFileManagerPath(path: string): string {
   }
   return `${FILE_MANAGER_ROOT}/${trimmedPath}`
 }
+
+// dockview-vue renders panel/tab/header-action components by mounting fresh
+// vNodes whose appContext.provides is rebuilt from THIS component's own
+// instance.provides (it spreads parent.provides). A plain `inject` in a child
+// like prefix-header-actions therefore only sees what this component *provides*
+// itself — the normal Vue provide chain (chat/App.vue → … → here) does NOT cross
+// the manual mount boundary. DesktopShellKey is provided at the desktop chat root
+// to enable the macOS traffic-light reserve; without re-providing it here, the
+// dock's header-actions children read it as `false` and never reserve the gutter,
+// so hiding the sidebar slides the tab strip straight under the traffic lights.
+// Re-inject + re-provide so the value survives the dockview mount boundary.
+const desktopShell = inject(DesktopShellKey, false)
+provide(DesktopShellKey, desktopShell)
 
 provide(openInFileManagerKey, (path: string, isDir = false) => {
   const normalizedPath = normalizeFileManagerPath(path)

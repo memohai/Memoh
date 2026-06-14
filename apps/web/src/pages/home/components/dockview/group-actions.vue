@@ -1,17 +1,23 @@
 <template>
   <div class="flex h-full items-center gap-0.5 px-2">
     <!-- Open Preview to the Side: shown only when this group's active tab is a
-         markdown/html file (VS Code's editor-title preview action). -->
-    <Button
-      v-if="previewPath"
-      variant="ghost"
-      class="size-7 p-0 text-muted-foreground hover:text-foreground"
-      :title="t('chat.openPreviewToSide')"
-      :aria-label="t('chat.openPreviewToSide')"
-      @click="openPreviewToSide"
-    >
-      <Columns2 class="size-3.5" />
-    </Button>
+         markdown/html file (VS Code's editor-title preview action). The slot is
+         RESERVED (kept at a fixed size-7 even when empty): the tab row flex-grows to
+         fill the strip, so a button that appears/disappears as you switch between a
+         previewable and a plain tab would change the actions width and jolt every
+         tab's width. A constant-width slot keeps that from happening. -->
+    <div class="flex size-7 items-center justify-center">
+      <Button
+        v-if="previewPath"
+        variant="ghost"
+        class="size-7 p-0 text-muted-foreground hover:text-foreground"
+        :title="t('chat.openPreviewToSide')"
+        :aria-label="t('chat.openPreviewToSide')"
+        @click="openPreviewToSide"
+      >
+        <Columns2 class="size-3.5" />
+      </Button>
+    </div>
     <DropdownMenu v-if="hasAnyAction">
       <DropdownMenuTrigger as-child>
         <Button

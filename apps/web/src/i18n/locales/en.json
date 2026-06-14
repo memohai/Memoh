@@ -272,6 +272,14 @@
     "thinking": "Thinking…",
     "thinkingInProgress": "Thinking…",
     "thinkingDone": "Thinking complete",
+    "actions": {
+      "copy": "Copy",
+      "copied": "Copied",
+      "edit": "Edit",
+      "share": "Share",
+      "retry": "Try again",
+      "fork": "Fork"
+    },
     "process": {
       "browse": "Read {count} files",
       "edit": "Edited {count} files",
@@ -285,6 +293,9 @@
     "inputPlaceholder": "Type your question…",
     "readonlyHint": "This chat is read-only",
     "readonlyPlaceholder": "This chat is read-only. Sending messages is disabled.",
+    "composerActions": "Add files or switch agent",
+    "agent": "Agent",
+    "attachFiles": "Attach files",
     "send": "Send",
     "sendFailed": "Message failed to send",
     "minimapLabel": "Conversation outline",
