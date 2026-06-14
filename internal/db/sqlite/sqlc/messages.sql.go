@@ -229,14 +229,14 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = ?1
-  AND m.created_at >= ?2
+  AND m.created_at >= strftime('%Y-%m-%d %H:%M:%S', ?2)
   AND (json_extract(m.metadata, '$.trigger_mode') IS NULL OR json_extract(m.metadata, '$.trigger_mode') != 'passive_sync')
 ORDER BY m.created_at ASC
 `
 
 type ListActiveMessagesSinceParams struct {
-	BotID     string `json:"bot_id"`
-	CreatedAt string `json:"created_at"`
+	BotID     string      `json:"bot_id"`
+	CreatedAt interface{} `json:"created_at"`
 }
 
 type ListActiveMessagesSinceRow struct {
@@ -316,14 +316,14 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = ?1
-  AND m.created_at >= ?2
+  AND m.created_at >= strftime('%Y-%m-%d %H:%M:%S', ?2)
   AND (json_extract(m.metadata, '$.trigger_mode') IS NULL OR json_extract(m.metadata, '$.trigger_mode') != 'passive_sync')
 ORDER BY m.created_at ASC
 `
 
 type ListActiveMessagesSinceBySessionParams struct {
 	SessionID sql.NullString `json:"session_id"`
-	CreatedAt string         `json:"created_at"`
+	CreatedAt interface{}    `json:"created_at"`
 }
 
 type ListActiveMessagesSinceBySessionRow struct {
@@ -482,14 +482,14 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = ?1
-  AND m.created_at > ?2
+  AND m.created_at > strftime('%Y-%m-%d %H:%M:%S', ?2)
 ORDER BY m.created_at ASC
 LIMIT ?3
 `
 
 type ListMessagesAfterBySessionParams struct {
 	SessionID sql.NullString `json:"session_id"`
-	CreatedAt string         `json:"created_at"`
+	CreatedAt interface{}    `json:"created_at"`
 	MaxCount  int64          `json:"max_count"`
 }
 
@@ -568,15 +568,15 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = ?1
-  AND m.created_at < ?2
+  AND m.created_at < strftime('%Y-%m-%d %H:%M:%S', ?2)
 ORDER BY m.created_at DESC
 LIMIT ?3
 `
 
 type ListMessagesBeforeParams struct {
-	BotID     string `json:"bot_id"`
-	CreatedAt string `json:"created_at"`
-	MaxCount  int64  `json:"max_count"`
+	BotID     string      `json:"bot_id"`
+	CreatedAt interface{} `json:"created_at"`
+	MaxCount  int64       `json:"max_count"`
 }
 
 type ListMessagesBeforeRow struct {
@@ -654,14 +654,14 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = ?1
-  AND m.created_at < ?2
+  AND m.created_at < strftime('%Y-%m-%d %H:%M:%S', ?2)
 ORDER BY m.created_at DESC
 LIMIT ?3
 `
 
 type ListMessagesBeforeBySessionParams struct {
 	SessionID sql.NullString `json:"session_id"`
-	CreatedAt string         `json:"created_at"`
+	CreatedAt interface{}    `json:"created_at"`
 	MaxCount  int64          `json:"max_count"`
 }
 
@@ -987,13 +987,13 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = ?1
-  AND m.created_at >= ?2
+  AND m.created_at >= strftime('%Y-%m-%d %H:%M:%S', ?2)
 ORDER BY m.created_at ASC
 `
 
 type ListMessagesSinceParams struct {
-	BotID     string `json:"bot_id"`
-	CreatedAt string `json:"created_at"`
+	BotID     string      `json:"bot_id"`
+	CreatedAt interface{} `json:"created_at"`
 }
 
 type ListMessagesSinceRow struct {
@@ -1071,13 +1071,13 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = ?1
-  AND m.created_at >= ?2
+  AND m.created_at >= strftime('%Y-%m-%d %H:%M:%S', ?2)
 ORDER BY m.created_at ASC
 `
 
 type ListMessagesSinceBySessionParams struct {
 	SessionID sql.NullString `json:"session_id"`
-	CreatedAt string         `json:"created_at"`
+	CreatedAt interface{}    `json:"created_at"`
 }
 
 type ListMessagesSinceBySessionRow struct {
@@ -1398,8 +1398,8 @@ LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = ?1
   AND (?2 IS NULL OR m.session_id = ?2)
   AND (?3 IS NULL OR m.sender_channel_identity_id = ?3)
-  AND (?4 IS NULL OR m.created_at >= ?4)
-  AND (?5 IS NULL OR m.created_at <= ?5)
+  AND (?4 IS NULL OR m.created_at >= strftime('%Y-%m-%d %H:%M:%S', ?4))
+  AND (?5 IS NULL OR m.created_at <= strftime('%Y-%m-%d %H:%M:%S', ?5))
   AND (?6 IS NULL OR m.role = ?6)
   AND (?7 IS NULL OR (
     CASE
