@@ -170,7 +170,7 @@ func escapeFeishuLinkURL(url string) string {
 	return url
 }
 
-func selectFeishuBacktickFence(text string, min int) string {
+func selectFeishuBacktickFence(text string, minRun int) string {
 	maxRun, cur := 0, 0
 	for _, r := range text {
 		if r == '`' {
@@ -182,7 +182,7 @@ func selectFeishuBacktickFence(text string, min int) string {
 		}
 		cur = 0
 	}
-	n := min
+	n := minRun
 	if maxRun >= n {
 		n = maxRun + 1
 	}
