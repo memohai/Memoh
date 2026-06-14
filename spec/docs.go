@@ -4496,6 +4496,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
+                    "501": {
+                        "description": "Not Implemented",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
@@ -12145,6 +12151,26 @@ const docTemplate = `{
                 }
             }
         },
+        "adapters.MemoryCompactCapability": {
+            "type": "object",
+            "properties": {
+                "archive": {
+                    "type": "boolean"
+                },
+                "native": {
+                    "type": "boolean"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "rebuild_index": {
+                    "type": "boolean"
+                },
+                "semantic": {
+                    "type": "boolean"
+                }
+            }
+        },
         "adapters.MemoryItem": {
             "type": "object",
             "properties": {
@@ -12198,6 +12224,9 @@ const docTemplate = `{
             "properties": {
                 "can_manual_sync": {
                     "type": "boolean"
+                },
+                "compact": {
+                    "$ref": "#/definitions/adapters.MemoryCompactCapability"
                 },
                 "encoder": {
                     "$ref": "#/definitions/adapters.HealthStatus"

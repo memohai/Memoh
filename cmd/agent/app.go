@@ -263,8 +263,11 @@ func provideMemoryLLM(modelsService *models.Service, settingsService *settings.S
 
 func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatService *conversation.Service, accountService *accounts.Service, provider bridge.Provider, queries dbstore.Queries, cfg config.Config) *memprovider.Registry {
 	registry := memprovider.NewRegistry(log)
-	fileRuntime := handlers.NewBuiltinMemoryRuntime(provider)
 	fileStore := storefs.New(log, provider)
+	var fileRuntime any
+	if provider != nil {
+		fileRuntime = membuiltin.NewFileRuntime(fileStore)
+	}
 	registry.RegisterFactory(string(memprovider.ProviderBuiltin), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
 		runtime, err := membuiltin.NewBuiltinRuntimeFromConfig(log, providerConfig, fileRuntime, fileStore, queries, cfg)
 		if err != nil {
@@ -998,10 +1001,11 @@ func startMemoryProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, mpService *
 				log.Warn("failed to ensure default memory provider", slog.Any("error", err))
 				return nil
 			}
-			if _, regErr := registry.Instantiate(resp.ID, resp.Provider, resp.Config); regErr != nil {
-				log.Warn("failed to instantiate default memory provider", slog.Any("error", regErr))
+			count, regErr := mpService.InstantiateAll(ctx)
+			if regErr != nil {
+				log.Warn("failed to instantiate memory providers", slog.Any("error", regErr))
 			} else {
-				log.Info("default memory provider ready", slog.String("id", resp.ID), slog.String("provider", resp.Provider))
+				log.Info("memory providers ready", slog.Int("count", count), slog.String("default_id", resp.ID), slog.String("default_provider", resp.Provider))
 			}
 			return nil
 		},
@@ -1195,7 +1199,7 @@ func (c *lazyLLMClient) Decide(ctx context.Context, req memprovider.DecideReques
 }
 
 func (c *lazyLLMClient) Compact(ctx context.Context, req memprovider.CompactRequest) (memprovider.CompactResponse, error) {
-	client, err := c.resolve(ctx, "")
+	client, err := c.resolve(ctx, req.BotID)
 	if err != nil {
 		return memprovider.CompactResponse{}, err
 	}

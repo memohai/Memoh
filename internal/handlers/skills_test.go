@@ -573,7 +573,7 @@ func startSkillsTestBridgeServer(t *testing.T, dataRoot, botID string) {
 }
 
 func (s *skillsTestBridgeServer) ListDir(_ context.Context, req *pb.ListDirRequest) (*pb.ListDirResponse, error) {
-	containerPath, localPath := s.resolvePath(req.GetPath())
+	_, localPath := s.resolvePath(req.GetPath())
 	entries, err := os.ReadDir(localPath)
 	if err != nil {
 		return nil, toStatusError(err, req.GetPath())
@@ -586,12 +586,8 @@ func (s *skillsTestBridgeServer) ListDir(_ context.Context, req *pb.ListDirReque
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "stat %s: %v", entry.Name(), err)
 		}
-		entryPath := path.Join(containerPath, entry.Name())
-		if containerPath == "/" {
-			entryPath = "/" + entry.Name()
-		}
 		resp = append(resp, &pb.FileEntry{
-			Path:    entryPath,
+			Path:    entry.Name(),
 			IsDir:   entry.IsDir(),
 			Size:    info.Size(),
 			Mode:    info.Mode().String(),

@@ -342,6 +342,19 @@ definitions:
       ok:
         type: boolean
     type: object
+  adapters.MemoryCompactCapability:
+    properties:
+      archive:
+        type: boolean
+      native:
+        type: boolean
+      reason:
+        type: string
+      rebuild_index:
+        type: boolean
+      semantic:
+        type: boolean
+    type: object
   adapters.MemoryItem:
     properties:
       agent_id:
@@ -378,6 +391,8 @@ definitions:
     properties:
       can_manual_sync:
         type: boolean
+      compact:
+        $ref: '#/definitions/adapters.MemoryCompactCapability'
       encoder:
         $ref: '#/definitions/adapters.HealthStatus'
       indexed_count:
@@ -6911,6 +6926,10 @@ paths:
             $ref: '#/definitions/handlers.ErrorResponse'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "501":
+          description: Not Implemented
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
         "503":

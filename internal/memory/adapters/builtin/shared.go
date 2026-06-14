@@ -87,6 +87,17 @@ func memoryItemFromStore(item storefs.MemoryItem) adapters.MemoryItem {
 	}
 }
 
+func memoryItemsFromStore(items []storefs.MemoryItem) []adapters.MemoryItem {
+	if len(items) == 0 {
+		return []adapters.MemoryItem{}
+	}
+	out := make([]adapters.MemoryItem, 0, len(items))
+	for _, item := range items {
+		out = append(out, memoryItemFromStore(item))
+	}
+	return out
+}
+
 func resultToItem(r qdrantclient.SearchResult) adapters.MemoryItem {
 	item := adapters.MemoryItem{
 		ID:    r.ID,

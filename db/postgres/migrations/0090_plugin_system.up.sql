@@ -43,4 +43,3 @@ CREATE TABLE IF NOT EXISTS bot_plugin_resources (
 
 CREATE INDEX IF NOT EXISTS idx_bot_plugin_resources_installation_id ON bot_plugin_resources(installation_id);
 CREATE INDEX IF NOT EXISTS idx_bot_plugin_resources_resource ON bot_plugin_resources(resource_type, resource_id);
-
