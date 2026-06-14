@@ -115,7 +115,8 @@ export function isDirPathTool(toolName: string): boolean {
 const READONLY_TOOLS = new Set([
   'read', 'list', 'web_search', 'web_fetch', 'search_memory', 'search_messages',
   'get_contacts', 'list_sessions', 'list_email', 'read_email', 'list_email_accounts',
-  'list_schedule', 'get_schedule', 'list_skills', 'bg_status', 'browser_observe', 'computer_observe',
+  'list_schedule', 'get_schedule', 'list_skills', 'bg_status', 'list_background', 'get_background_status',
+  'browser_observe', 'computer_observe',
 ])
 
 export function isReadOnlyTool(toolName: string): boolean {
@@ -343,6 +344,16 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
     case 'bg_status': {
       const action = pickString(input, 'action') || 'list'
       return { icon: ListChecks, actionKey: 'bg_status', target: action }
+    }
+    case 'list_background':
+      return { icon: ListChecks, actionKey: 'list_background' }
+    case 'get_background_status': {
+      const taskId = pickString(input, 'task_id', 'taskId')
+      return { icon: SearchCheck, actionKey: 'get_background_status', target: taskId }
+    }
+    case 'kill_background': {
+      const taskId = pickString(input, 'task_id', 'taskId')
+      return { icon: X, actionKey: 'kill_background', target: taskId }
     }
     case 'web_search': {
       const query = pickString(input, 'query')

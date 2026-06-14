@@ -49,9 +49,9 @@ func TestApplyToolResultStillRecognizesExecBackgroundStart(t *testing.T) {
 }
 
 func TestApplyToolResultIgnoresTerminalTaskStatusPayloads(t *testing.T) {
-	// bg_status "status" results carry task_id with a terminal status; they
-	// must not turn the bg_status tool card into a running background task.
-	msg := &UIMessage{Type: UIMessageTool, Name: "bg_status"}
+	// Background status inspection results carry task_id with a terminal status;
+	// they must not turn the tool card into a running background task.
+	msg := &UIMessage{Type: UIMessageTool, Name: "get_background_status"}
 	applyToolResultToUIMessage(msg, map[string]any{
 		"task_id": "bg_bot1_cccc",
 		"kind":    "exec",
