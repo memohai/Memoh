@@ -268,23 +268,27 @@ func parseApplyPatch(patch string) ([]applyPatchHunk, error) {
 		lineNo := i + 1
 		trimmed := strings.TrimSpace(line)
 
-		if header, ok, err := parseApplyPatchHeader(trimmed, lineNo, mode, currentUpdateLine, hunks); ok || err != nil {
-			if err != nil {
-				return nil, err
+		updateContentLine := mode == "update" && (strings.HasPrefix(line, " ") || strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-"))
+		if !updateContentLine {
+			header, ok, err := parseApplyPatchHeader(trimmed, lineNo, mode, currentUpdateLine, hunks)
+			if ok || err != nil {
+				if err != nil {
+					return nil, err
+				}
+				switch header.kind {
+				case applyPatchHunkAdd:
+					hunks = append(hunks, applyPatchHunk{kind: applyPatchHunkAdd, path: header.path})
+					mode = "add"
+				case applyPatchHunkDelete:
+					hunks = append(hunks, applyPatchHunk{kind: applyPatchHunkDelete, path: header.path})
+					mode = "delete"
+				case applyPatchHunkUpdate:
+					hunks = append(hunks, applyPatchHunk{kind: applyPatchHunkUpdate, path: header.path})
+					mode = "update"
+					currentUpdateLine = lineNo
+				}
+				continue
 			}
-			switch header.kind {
-			case applyPatchHunkAdd:
-				hunks = append(hunks, applyPatchHunk{kind: applyPatchHunkAdd, path: header.path})
-				mode = "add"
-			case applyPatchHunkDelete:
-				hunks = append(hunks, applyPatchHunk{kind: applyPatchHunkDelete, path: header.path})
-				mode = "delete"
-			case applyPatchHunkUpdate:
-				hunks = append(hunks, applyPatchHunk{kind: applyPatchHunkUpdate, path: header.path})
-				mode = "update"
-				currentUpdateLine = lineNo
-			}
-			continue
 		}
 
 		switch mode {
@@ -642,7 +646,7 @@ func computeApplyPatchReplacements(originalLines []string, path string, chunks [
 				insertionIdx = lineIndex
 			}
 			replacements = append(replacements, applyPatchReplacement{start: insertionIdx, newLines: append([]string(nil), chunk.newLines...)})
-			lineIndex = insertionIdx + len(chunk.newLines)
+			lineIndex = insertionIdx
 			continue
 		}
 

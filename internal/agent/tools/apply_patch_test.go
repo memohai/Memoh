@@ -193,6 +193,55 @@ func TestBuildApplyPatchPlanInsertionOnlyUsesContext(t *testing.T) {
 	}
 }
 
+func TestBuildApplyPatchPlanMultipleInsertionOnlyChunksUseOriginalPositions(t *testing.T) {
+	patch := `*** Begin Patch
+*** Update File: notes.txt
+@@ a
++after-a
+@@ b
++after-b
+*** End Patch`
+	hunks, err := parseApplyPatch(patch)
+	if err != nil {
+		t.Fatalf("parseApplyPatch() error = %v", err)
+	}
+
+	plan, err := buildApplyPatchPlan(context.Background(), applyPatchFakeFS{
+		files: map[string]string{"notes.txt": "a\nb\nc\n"},
+	}, "/data", hunks)
+	if err != nil {
+		t.Fatalf("buildApplyPatchPlan() error = %v", err)
+	}
+	if len(plan.operations) != 1 {
+		t.Fatalf("expected 1 operation, got %d", len(plan.operations))
+	}
+	if got, want := plan.operations[0].content, "a\nafter-a\nb\nafter-b\nc\n"; got != want {
+		t.Fatalf("patched content = %q, want %q", got, want)
+	}
+}
+
+func TestParseApplyPatchAllowsLiteralMarkerContextLines(t *testing.T) {
+	patch := `*** Begin Patch
+*** Update File: docs.txt
+@@
+ *** Update File: example
++literal marker follows
+*** End Patch`
+	hunks, err := parseApplyPatch(patch)
+	if err != nil {
+		t.Fatalf("parseApplyPatch() error = %v", err)
+	}
+	if len(hunks) != 1 {
+		t.Fatalf("expected 1 hunk, got %d", len(hunks))
+	}
+	if len(hunks[0].chunks) != 1 {
+		t.Fatalf("expected 1 chunk, got %d", len(hunks[0].chunks))
+	}
+	if got, want := hunks[0].chunks[0].oldLines, []string{"*** Update File: example"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("oldLines = %#v, want %#v", got, want)
+	}
+}
+
 func TestNormalizeApplyPatchPathRejectsRelativeTraversal(t *testing.T) {
 	if _, err := normalizeApplyPatchPath("../outside.txt", "/data"); err == nil {
 		t.Fatal("expected traversal path to be rejected")
