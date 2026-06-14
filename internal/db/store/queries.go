@@ -149,6 +149,7 @@ type Queries interface {
 	GetBotWorkspaceResourceLimits(ctx context.Context, botID pgtype.UUID) (dbsqlc.BotWorkspaceResourceLimit, error)
 	GetActiveSessionBranch(ctx context.Context, sessionID pgtype.UUID) (pgtype.UUID, error)
 	GetMessageForSessionBranchFork(ctx context.Context, arg dbsqlc.GetMessageForSessionBranchForkParams) (dbsqlc.GetMessageForSessionBranchForkRow, error)
+	GetSessionBranchForkPoint(ctx context.Context, arg dbsqlc.GetSessionBranchForkPointParams) (int64, error)
 	GetDefaultMemoryProvider(ctx context.Context) (dbsqlc.MemoryProvider, error)
 	GetEmailOAuthTokenByProvider(ctx context.Context, emailProviderID pgtype.UUID) (dbsqlc.EmailOauthToken, error)
 	GetEmailOAuthTokenByState(ctx context.Context, state string) (dbsqlc.EmailOauthToken, error)

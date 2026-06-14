@@ -67,19 +67,12 @@
               : 'bg-sidebar-accent/70 text-foreground hover:bg-sidebar-accent'"
             :disabled="data.active || branchActionLoading"
             :aria-current="data.active ? 'true' : undefined"
-            :title="data.active ? t('chat.branchHistory.active') : t('chat.branchHistory.switch')"
+            :title="data.label"
             @click.stop="chatStore.switchBranch(data.branchId)"
           >
             <div class="min-w-0">
               <span class="line-clamp-2 text-xs font-semibold leading-snug">{{ data.label }}</span>
             </div>
-            <p
-              v-if="data.fallback"
-              class="mt-1.5 text-[11px] text-muted-foreground"
-              :class="data.pending && 'italic'"
-            >
-              {{ data.fallback }}
-            </p>
           </button>
         </template>
       </VueFlow>
@@ -111,9 +104,7 @@ interface BranchHistoryItem {
   branchId: string
   parentTurnId: string
   label: string
-  fallback: string
   active: boolean
-  pending: boolean
   depth: number
   row: number
 }
@@ -122,9 +113,7 @@ interface BranchNodeData {
   id: string
   branchId: string
   label: string
-  fallback: string
   active: boolean
-  pending: boolean
 }
 
 const { t } = useI18n()
@@ -152,46 +141,18 @@ const asideStyle = computed<Record<string, string>>(() => ({
 const branchItems = computed<BranchHistoryItem[]>(() => {
   const graph = branchGraph.value
   const turns = graph?.turns ?? []
-  if (turns.length > 0) {
-    const titleByBranch = new Map((graph?.branches ?? []).map(branch => [branch.id, branch.title?.trim() ?? '']))
-    return turns.map((turn, index) => {
-      const preview = turn.preview ?? {}
-      const userText = preview.user_text?.trim() ?? ''
-      const assistantText = preview.assistant_text?.trim() ?? ''
-      const title = turn.title?.trim() || titleByBranch.get(turn.branch_id)?.trim() || ''
-      return {
-        id: turn.id,
-        branchId: turn.branch_id,
-        parentTurnId: turn.parent_turn_id?.trim() ?? '',
-        label: title || firstPreviewLine(userText) || firstPreviewLine(assistantText) || t('chat.branchHistory.turnLabel', { index: index + 1 }),
-        fallback: title ? '' : (turn.pending ? t('chat.branchHistory.pendingTurn') : ''),
-        active: turn.active === true,
-        pending: turn.pending === true,
-        depth: turn.depth ?? 0,
-        row: index,
-      }
-    })
-  }
-
-  const rows = graph?.branches ?? []
-  const depthById = new Map<string, number>()
-
-  return rows.map((branch, index) => {
-    const title = branch.title?.trim()
-    const userText = branch.preview?.user_text?.trim() ?? ''
-    const assistantText = branch.preview?.assistant_text?.trim() ?? ''
-    const parentId = branch.parent_branch_id?.trim() ?? ''
-    const depth = parentId ? (depthById.get(parentId) ?? 0) + 1 : 0
-    depthById.set(branch.id, depth)
+  const titleByBranch = new Map((graph?.branches ?? []).map(branch => [branch.id, branch.title?.trim() ?? '']))
+  return turns.map((turn, index) => {
+    const preview = turn.preview ?? {}
+    const userText = preview.user_text?.trim() ?? ''
+    const title = turn.title?.trim() || titleByBranch.get(turn.branch_id)?.trim() || ''
     return {
-      id: branch.id,
-      branchId: branch.id,
-      parentTurnId: parentId,
-      label: title || firstPreviewLine(userText) || firstPreviewLine(assistantText) || t('chat.branchHistory.branchLabel', { index: index + 1 }),
-      fallback: title ? '' : t('chat.branchHistory.noPreview'),
-      active: branch.active === true || branchGraph.value?.active_branch_id === branch.id,
-      pending: false,
-      depth,
+      id: turn.id,
+      branchId: turn.branch_id,
+      parentTurnId: turn.parent_turn_id?.trim() ?? '',
+      label: title || firstPreviewLine(userText) || t('chat.branchHistory.turnLabel', { index: index + 1 }),
+      active: turn.active === true,
+      depth: turn.depth ?? 0,
       row: index,
     }
   })
@@ -211,9 +172,7 @@ const flowNodes = computed<Node<BranchNodeData>[]>(() =>
       id: item.id,
       branchId: item.branchId,
       label: item.label,
-      fallback: item.fallback,
       active: item.active,
-      pending: item.pending,
     },
   })),
 )
@@ -255,7 +214,7 @@ function handleFlowInit(instance: VueFlowStore) {
 }
 
 async function focusActiveBranch() {
-  const active = [...branchItems.value].reverse().find(item => item.active)
+  const active = [...branchItems.value].reverse().find(item => item.active) ?? latestVisibleParentTurn()
   if (!active || !flowInstance.value) return
   await nextTick()
   await flowInstance.value.fitView({
@@ -265,6 +224,23 @@ async function focusActiveBranch() {
     maxZoom: 1,
     duration: 220,
   })
+}
+
+function latestVisibleParentTurn(): BranchHistoryItem | undefined {
+  const graph = branchGraph.value
+  const activeBranchId = graph?.active_branch_id?.trim()
+  if (!activeBranchId) return undefined
+  const activeBranch = graph?.branches?.find(branch => branch.id === activeBranchId)
+  const forkFromMessageId = activeBranch?.fork_from_message_id?.trim()
+  const parentBranchId = activeBranch?.parent_branch_id?.trim()
+  const forkFromSeq = activeBranch?.fork_from_seq ?? 0
+  if (!forkFromMessageId || !parentBranchId || forkFromSeq <= 0) return undefined
+  return [...branchItems.value]
+    .reverse()
+    .find((item) => {
+      const turn = graph?.turns?.find(candidate => candidate.id === item.id)
+      return item.branchId === parentBranchId && turn?.branch_seq === forkFromSeq
+    })
 }
 
 watch([currentBotId, sessionId, branchSidebarOpen], ([botId, sid, open]) => {

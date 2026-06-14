@@ -116,6 +116,30 @@ func (q *Queries) GetMessageForSessionBranchFork(ctx context.Context, arg pgsqlc
 	return result, nil
 }
 
+func (q *Queries) GetSessionBranchForkPoint(ctx context.Context, arg pgsqlc.GetSessionBranchForkPointParams) (int64, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return 0, errSQLiteQueriesNotConfigured
+	}
+	var sqliteSessionID sql.NullString
+	if err := convertValue(arg.SessionID, &sqliteSessionID); err != nil {
+		return 0, err
+	}
+	var sqliteBranchID sql.NullString
+	if err := convertValue(arg.BranchID, &sqliteBranchID); err != nil {
+		return 0, err
+	}
+	sqliteArg := sqlitesqlc.GetSessionBranchForkPointParams{
+		SessionID: sqliteSessionID,
+		BranchID:  sqliteBranchID,
+		BranchSeq: sql.NullInt64{Int64: arg.BranchSeq, Valid: true},
+	}
+	out, err := q.store.queries.GetSessionBranchForkPoint(ctx, sqliteArg)
+	if err != nil {
+		return 0, mapQueryErr(err)
+	}
+	return out, nil
+}
+
 func (q *Queries) ListSessionBranches(ctx context.Context, sessionID pgtype.UUID) ([]pgsqlc.ListSessionBranchesRow, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured

@@ -68,7 +68,6 @@ type BranchTurn struct {
 	BranchSeq    int64       `json:"branch_seq,omitempty"`
 	Depth        int         `json:"depth"`
 	Active       bool        `json:"active"`
-	Pending      bool        `json:"pending,omitempty"`
 	Preview      TurnPreview `json:"preview"`
 	ForkFromSeq  int64       `json:"fork_from_seq,omitempty"`
 	CreatedAt    time.Time   `json:"created_at,omitempty"`
@@ -485,11 +484,19 @@ func (s *Service) ForkBranchFromMessage(ctx context.Context, sessionID, messageI
 	if !row.BranchID.Valid || !row.BranchSeq.Valid {
 		return BranchGraph{}, errors.New("fork source message has no branch position")
 	}
+	forkFromSeq, err := s.queries.GetSessionBranchForkPoint(ctx, sqlc.GetSessionBranchForkPointParams{
+		SessionID: pgSessionID,
+		BranchID:  row.BranchID,
+		BranchSeq: row.BranchSeq.Int64,
+	})
+	if err != nil {
+		return BranchGraph{}, fmt.Errorf("resolve branch fork point: %w", err)
+	}
 	branchID, err := s.queries.CreateSessionBranchFromMessage(ctx, sqlc.CreateSessionBranchFromMessageParams{
 		SessionID:         pgSessionID,
 		ParentBranchID:    row.BranchID,
 		ForkFromMessageID: row.ID,
-		ForkFromSeq:       row.BranchSeq,
+		ForkFromSeq:       pgtype.Int8{Int64: forkFromSeq, Valid: true},
 		Title:             pgtype.Text{},
 	})
 	if err != nil {
@@ -761,10 +768,9 @@ func buildBranchTurns(branches []BranchNode, rows []sqlc.ListSessionBranchTurnMe
 		return depth
 	}
 
-	turns := make([]BranchTurn, 0, len(rows)+len(branches))
+	turns := make([]BranchTurn, 0, len(rows))
 	lastTurnByBranch := make(map[string]string, len(branches))
 	turnIDByBranchSeq := make(map[string]map[int64]string, len(branches))
-	hasTurn := make(map[string]bool, len(branches))
 	for _, row := range rows {
 		if !row.BranchID.Valid {
 			continue
@@ -805,26 +811,6 @@ func buildBranchTurns(branches []BranchNode, rows []sqlc.ListSessionBranchTurnMe
 		if seq > 0 {
 			turnIDByBranchSeq[branchID][seq] = turn.ID
 		}
-		hasTurn[branchID] = true
-	}
-
-	for _, branch := range branches {
-		if hasTurn[branch.ID] || strings.TrimSpace(branch.ParentBranchID) == "" {
-			continue
-		}
-		parentTurnID := turnIDForBranchSeq(turnIDByBranchSeq, branch.ParentBranchID, branch.ForkFromSeq)
-		turns = append(turns, BranchTurn{
-			ID:           "pending-" + branch.ID,
-			BranchID:     branch.ID,
-			ParentTurnID: parentTurnID,
-			Depth:        branchDepth(branch.ID),
-			Active:       branch.Active,
-			Pending:      true,
-			Title:        firstNonEmpty(branch.Title, branch.Preview.UserText),
-			Preview:      branch.Preview,
-			ForkFromSeq:  branch.ForkFromSeq,
-			CreatedAt:    branch.CreatedAt,
-		})
 	}
 	return turns
 }

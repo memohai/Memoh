@@ -2454,7 +2454,6 @@ export type SessionBranchTurn = {
     fork_from_seq?: number;
     id?: string;
     parent_turn_id?: string;
-    pending?: boolean;
     preview?: SessionTurnPreview;
     title?: string;
     user_message_id?: string;

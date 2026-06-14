@@ -135,7 +135,6 @@ export interface BranchTurn {
   branch_seq?: number
   depth?: number
   active?: boolean
-  pending?: boolean
   preview?: BranchTurnPreview
   fork_from_seq?: number
   created_at?: string

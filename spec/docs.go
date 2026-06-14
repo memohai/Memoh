@@ -18239,9 +18239,6 @@ const docTemplate = `{
                 "parent_turn_id": {
                     "type": "string"
                 },
-                "pending": {
-                    "type": "boolean"
-                },
                 "preview": {
                     "$ref": "#/definitions/session.TurnPreview"
                 },

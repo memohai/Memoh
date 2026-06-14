@@ -434,10 +434,7 @@
       "loading": "正在加载分支",
       "active": "当前",
       "switch": "切换分支",
-      "branchLabel": "分支 {index}",
-      "turnLabel": "回合 {index}",
-      "pendingTurn": "等待下一次对话",
-      "noPreview": "暂无缩略内容"
+      "turnLabel": "回合 {index}"
     },
     "startChat": "开始聊天",
     "noBot": "暂无可用 Bot，请先创建 Bot",

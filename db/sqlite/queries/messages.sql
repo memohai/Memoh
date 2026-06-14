@@ -595,6 +595,26 @@ WHERE m.id = sqlc.arg(message_id)
   AND m.session_id = sqlc.arg(session_id)
 LIMIT 1;
 
+-- name: GetSessionBranchForkPoint :one
+WITH turn_start AS (
+  SELECT COALESCE((
+    SELECT MAX(u.branch_seq)
+    FROM bot_history_messages u
+    WHERE u.session_id = sqlc.arg(session_id)
+      AND u.branch_id = sqlc.arg(branch_id)
+      AND u.role = 'user'
+      AND u.branch_seq < sqlc.arg(branch_seq)
+  ), sqlc.arg(branch_seq)) AS branch_seq
+)
+SELECT CAST(COALESCE((
+  SELECT MAX(prev.branch_seq)
+  FROM bot_history_messages prev, turn_start ts
+  WHERE prev.session_id = sqlc.arg(session_id)
+    AND prev.branch_id = sqlc.arg(branch_id)
+    AND prev.role = 'assistant'
+    AND prev.branch_seq < ts.branch_seq
+), 0) AS INTEGER) AS fork_from_seq;
+
 -- name: CreateSessionBranchFromMessage :one
 INSERT INTO bot_session_branches (
   id,
@@ -635,21 +655,51 @@ WHERE b.session_id = sqlc.arg(session_id)
 ORDER BY b.created_at ASC, b.id ASC;
 
 -- name: ListSessionBranchPreviewMessages :many
-WITH targets AS (
+WITH user_turns AS (
   SELECT
     b.id AS branch_id,
-    CASE
-      WHEN b.fork_from_seq IS NOT NULL THEN b.parent_branch_id
-      ELSE b.id
-    END AS preview_branch_id,
-    COALESCE(b.fork_from_seq, (
-      SELECT MIN(m.branch_seq)
-      FROM bot_history_messages m
-      WHERE m.branch_id = b.id
-        AND m.role = 'assistant'
-    )) AS preview_seq
+    u.id AS user_id,
+    u.branch_seq AS user_branch_seq,
+    (
+      SELECT MIN(next_user.branch_seq)
+      FROM bot_history_messages next_user
+      WHERE next_user.branch_id = u.branch_id
+        AND next_user.role = 'user'
+        AND next_user.branch_seq > u.branch_seq
+    ) AS next_user_seq
   FROM bot_session_branches b
+  JOIN bot_history_messages u ON u.branch_id = b.id
+    AND u.role = 'user'
   WHERE b.session_id = sqlc.arg(session_id)
+),
+complete_turns AS (
+  SELECT
+    ut.branch_id,
+    ut.user_id,
+    (
+      SELECT a.id
+      FROM bot_history_messages a
+      WHERE a.branch_id = ut.branch_id
+        AND a.role = 'assistant'
+        AND a.branch_seq > ut.user_branch_seq
+        AND (ut.next_user_seq IS NULL OR a.branch_seq < ut.next_user_seq)
+      ORDER BY a.branch_seq DESC, a.created_at DESC
+      LIMIT 1
+    ) AS assistant_id,
+    ut.user_branch_seq
+  FROM user_turns ut
+),
+targets AS (
+  SELECT ct.branch_id, ct.user_id, ct.assistant_id
+  FROM complete_turns ct
+  WHERE ct.assistant_id IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1
+      FROM complete_turns earlier
+      WHERE earlier.branch_id = ct.branch_id
+        AND earlier.assistant_id IS NOT NULL
+        AND earlier.user_branch_seq < ct.user_branch_seq
+    )
 )
 SELECT
   m.id, m.bot_id, m.session_id, t.branch_id AS branch_id, m.branch_seq, m.sender_channel_identity_id,
@@ -661,14 +711,50 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM targets t
-JOIN bot_history_messages m ON m.branch_id = t.preview_branch_id
-  AND m.branch_seq IN (t.preview_seq - 1, t.preview_seq)
+JOIN bot_history_messages m ON m.id IN (t.user_id, t.assistant_id)
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE t.preview_branch_id IS NOT NULL AND t.preview_seq IS NOT NULL
 ORDER BY m.branch_id, m.branch_seq ASC, m.created_at ASC;
 
 -- name: ListSessionBranchTurnMessages :many
+WITH user_turns AS (
+  SELECT
+    b.created_at AS branch_created_at,
+    u.id AS user_id,
+    u.bot_id AS user_bot_id,
+    u.session_id AS user_session_id,
+    u.branch_id,
+    u.branch_seq AS user_branch_seq,
+    u.content AS user_content,
+    u.display_text AS user_display_text,
+    u.created_at AS user_created_at,
+    (
+      SELECT MIN(next_user.branch_seq)
+      FROM bot_history_messages next_user
+      WHERE next_user.branch_id = u.branch_id
+        AND next_user.role = 'user'
+        AND next_user.branch_seq > u.branch_seq
+    ) AS next_user_seq
+  FROM bot_session_branches b
+  JOIN bot_history_messages u ON u.branch_id = b.id
+    AND u.role = 'user'
+  WHERE b.session_id = sqlc.arg(session_id)
+),
+complete_turns AS (
+  SELECT
+    ut.*,
+    (
+      SELECT a.id
+      FROM bot_history_messages a
+      WHERE a.branch_id = ut.branch_id
+        AND a.role = 'assistant'
+        AND a.branch_seq > ut.user_branch_seq
+        AND (ut.next_user_seq IS NULL OR a.branch_seq < ut.next_user_seq)
+      ORDER BY a.branch_seq DESC, a.created_at DESC
+      LIMIT 1
+    ) AS assistant_id
+  FROM user_turns ut
+)
 SELECT
   a.id AS assistant_id,
   a.bot_id,
@@ -678,15 +764,10 @@ SELECT
   a.content AS assistant_content,
   a.display_text AS assistant_display_text,
   a.created_at AS assistant_created_at,
-  u.id AS user_id,
-  u.content AS user_content,
-  u.display_text AS user_display_text,
-  u.created_at AS user_created_at
-FROM bot_session_branches b
-JOIN bot_history_messages a ON a.branch_id = b.id
-  AND a.role = 'assistant'
-LEFT JOIN bot_history_messages u ON u.branch_id = a.branch_id
-  AND u.branch_seq = a.branch_seq - 1
-  AND u.role = 'user'
-WHERE b.session_id = sqlc.arg(session_id)
-ORDER BY b.created_at ASC, a.branch_seq ASC, a.created_at ASC;
+  ct.user_id,
+  ct.user_content,
+  ct.user_display_text,
+  ct.user_created_at
+FROM complete_turns ct
+JOIN bot_history_messages a ON a.id = ct.assistant_id
+ORDER BY ct.branch_created_at ASC, a.branch_seq ASC, a.created_at ASC;

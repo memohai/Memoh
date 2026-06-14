@@ -434,10 +434,7 @@
       "loading": "Loading branches",
       "active": "Active",
       "switch": "Switch branch",
-      "branchLabel": "Branch {index}",
-      "turnLabel": "Turn {index}",
-      "pendingTurn": "Waiting for the next turn",
-      "noPreview": "No preview yet"
+      "turnLabel": "Turn {index}"
     },
     "startChat": "Start Chat",
     "noBot": "No bots available, please create a bot first",

@@ -286,6 +286,9 @@ func TestBranchForkServiceCreatesSiblingBranchesAndSwitches(t *testing.T) {
 				CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
 			},
 		},
+		forkPoints: map[string]int64{
+			assistantID: 0,
+		},
 		branches: []sqlc.ListSessionBranchesRow{
 			{
 				ID:             rootBranchUUID,
@@ -330,12 +333,14 @@ func TestBranchForkServiceCreatesSiblingBranchesAndSwitches(t *testing.T) {
 		t.Fatalf("branches = %d, want 2", len(graph.Branches))
 	}
 	firstFork := graph.Branches[1]
-	if firstFork.ParentBranchID != rootBranchID || firstFork.ForkFromMessageID != assistantID || firstFork.ForkFromSeq != 2 {
+	if firstFork.ParentBranchID != rootBranchID || firstFork.ForkFromMessageID != assistantID || firstFork.ForkFromSeq != 0 {
 		t.Fatalf("first fork = %#v", firstFork)
 	}
-	pending := findBranchTurn(graph.Turns, "pending-"+firstForkID)
-	if pending == nil || !pending.Pending || pending.ParentTurnID != assistantID || !pending.Active {
-		t.Fatalf("pending first fork turn = %#v", pending)
+	if pending := findBranchTurn(graph.Turns, "pending-"+firstForkID); pending != nil {
+		t.Fatalf("fork should not create a pending turn card: %#v", pending)
+	}
+	if forkTurn := findBranchTurn(graph.Turns, assistantID); forkTurn == nil || forkTurn.Active {
+		t.Fatalf("forked source turn should remain inactive in graph: %#v", forkTurn)
 	}
 
 	graph, err = svc.ForkBranchFromMessage(ctx, sessionID, assistantID)
@@ -350,6 +355,9 @@ func TestBranchForkServiceCreatesSiblingBranchesAndSwitches(t *testing.T) {
 	}
 	if graph.Branches[1].ParentBranchID != rootBranchID || graph.Branches[2].ParentBranchID != rootBranchID {
 		t.Fatalf("fork branches are not siblings: %#v", graph.Branches)
+	}
+	if graph.Branches[1].ForkFromSeq != 0 || graph.Branches[2].ForkFromSeq != 0 {
+		t.Fatalf("fork branches should rewind before the forked turn: %#v", graph.Branches)
 	}
 
 	graph, err = svc.SetActiveBranch(ctx, sessionID, rootBranchID)
@@ -366,6 +374,101 @@ func TestBranchForkServiceCreatesSiblingBranchesAndSwitches(t *testing.T) {
 
 	if _, err := svc.ForkBranchFromMessage(ctx, sessionID, userMessageID); !errors.Is(err, ErrForkSourceNotAssistant) {
 		t.Fatalf("ForkBranchFromMessage(user) error = %v, want %v", err, ErrForkSourceNotAssistant)
+	}
+}
+
+func TestBranchForkServiceForksLaterReplyFromPreviousTurn(t *testing.T) {
+	ctx := context.Background()
+	sessionID := "00000000-0000-0000-0000-000000000400"
+	rootBranchID := "00000000-0000-0000-0000-000000000401"
+	forkID := "00000000-0000-0000-0000-000000000402"
+	firstAssistantID := "00000000-0000-0000-0000-000000000501"
+	secondAssistantID := "00000000-0000-0000-0000-000000000502"
+	forkAssistantID := "00000000-0000-0000-0000-000000000503"
+	sessionUUID := mustPGUUID(sessionID)
+	rootBranchUUID := mustPGUUID(rootBranchID)
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	queries := &branchServiceQueries{
+		sessionID:     sessionUUID,
+		activeID:      rootBranchUUID,
+		nextBranchIDs: []pgtype.UUID{mustPGUUID(forkID)},
+		forkMessages: map[string]sqlc.GetMessageForSessionBranchForkRow{
+			secondAssistantID: {
+				ID:        mustPGUUID(secondAssistantID),
+				SessionID: sessionUUID,
+				BranchID:  rootBranchUUID,
+				BranchSeq: pgtype.Int8{Int64: 4, Valid: true},
+				Role:      "assistant",
+				CreatedAt: pgtype.Timestamptz{Time: now.Add(3 * time.Minute), Valid: true},
+			},
+		},
+		forkPoints: map[string]int64{
+			secondAssistantID: 2,
+		},
+		branches: []sqlc.ListSessionBranchesRow{
+			{
+				ID:             rootBranchUUID,
+				SessionID:      sessionUUID,
+				CreatedAt:      pgtype.Timestamptz{Time: now, Valid: true},
+				UpdatedAt:      pgtype.Timestamptz{Time: now, Valid: true},
+				ActiveBranchID: rootBranchUUID,
+			},
+		},
+		turns: []sqlc.ListSessionBranchTurnMessagesRow{
+			{
+				AssistantID:          mustPGUUID(firstAssistantID),
+				SessionID:            sessionUUID,
+				BranchID:             rootBranchUUID,
+				BranchSeq:            pgtype.Int8{Int64: 2, Valid: true},
+				AssistantDisplayText: pgtype.Text{String: "first answer", Valid: true},
+				AssistantCreatedAt:   pgtype.Timestamptz{Time: now.Add(time.Minute), Valid: true},
+				UserID:               mustPGUUID("00000000-0000-0000-0000-000000000601"),
+				UserDisplayText:      pgtype.Text{String: "first question", Valid: true},
+				UserCreatedAt:        pgtype.Timestamptz{Time: now, Valid: true},
+			},
+			{
+				AssistantID:          mustPGUUID(secondAssistantID),
+				SessionID:            sessionUUID,
+				BranchID:             rootBranchUUID,
+				BranchSeq:            pgtype.Int8{Int64: 4, Valid: true},
+				AssistantDisplayText: pgtype.Text{String: "second answer", Valid: true},
+				AssistantCreatedAt:   pgtype.Timestamptz{Time: now.Add(3 * time.Minute), Valid: true},
+				UserID:               mustPGUUID("00000000-0000-0000-0000-000000000602"),
+				UserDisplayText:      pgtype.Text{String: "second question", Valid: true},
+				UserCreatedAt:        pgtype.Timestamptz{Time: now.Add(2 * time.Minute), Valid: true},
+			},
+			{
+				AssistantID:          mustPGUUID(forkAssistantID),
+				SessionID:            sessionUUID,
+				BranchID:             mustPGUUID(forkID),
+				BranchSeq:            pgtype.Int8{Int64: 2, Valid: true},
+				AssistantDisplayText: pgtype.Text{String: "replacement answer", Valid: true},
+				AssistantCreatedAt:   pgtype.Timestamptz{Time: now.Add(5 * time.Minute), Valid: true},
+				UserID:               mustPGUUID("00000000-0000-0000-0000-000000000603"),
+				UserDisplayText:      pgtype.Text{String: "replacement question", Valid: true},
+				UserCreatedAt:        pgtype.Timestamptz{Time: now.Add(4 * time.Minute), Valid: true},
+			},
+		},
+	}
+	svc := NewService(nil, queries)
+
+	graph, err := svc.ForkBranchFromMessage(ctx, sessionID, secondAssistantID)
+	if err != nil {
+		t.Fatalf("ForkBranchFromMessage(second turn) error = %v", err)
+	}
+	if graph.ActiveBranchID != forkID {
+		t.Fatalf("active branch = %q, want %q", graph.ActiveBranchID, forkID)
+	}
+	if got := graph.Branches[1].ForkFromSeq; got != 2 {
+		t.Fatalf("fork_from_seq = %d, want 2", got)
+	}
+	replacement := findBranchTurn(graph.Turns, forkAssistantID)
+	if replacement == nil {
+		t.Fatalf("replacement turn not found in graph: %#v", graph.Turns)
+	}
+	if replacement.ParentTurnID != firstAssistantID || !replacement.Active {
+		t.Fatalf("replacement turn = %#v", replacement)
 	}
 }
 
@@ -462,6 +565,7 @@ type branchServiceQueries struct {
 	activeID      pgtype.UUID
 	nextBranchIDs []pgtype.UUID
 	forkMessages  map[string]sqlc.GetMessageForSessionBranchForkRow
+	forkPoints    map[string]int64
 	branches      []sqlc.ListSessionBranchesRow
 	previews      []sqlc.ListSessionBranchPreviewMessagesRow
 	turns         []sqlc.ListSessionBranchTurnMessagesRow
@@ -489,6 +593,19 @@ func (q *branchServiceQueries) GetMessageForSessionBranchFork(_ context.Context,
 		return sqlc.GetMessageForSessionBranchForkRow{}, ErrForkMessageNotFound
 	}
 	return row, nil
+}
+
+func (q *branchServiceQueries) GetSessionBranchForkPoint(_ context.Context, params sqlc.GetSessionBranchForkPointParams) (int64, error) {
+	if q.forkPoints != nil {
+		for messageID, row := range q.forkMessages {
+			if row.BranchID == params.BranchID && row.BranchSeq.Valid && row.BranchSeq.Int64 == params.BranchSeq {
+				if seq, ok := q.forkPoints[messageID]; ok {
+					return seq, nil
+				}
+			}
+		}
+	}
+	return 0, nil
 }
 
 func (q *branchServiceQueries) CreateSessionBranchFromMessage(_ context.Context, params sqlc.CreateSessionBranchFromMessageParams) (pgtype.UUID, error) {
