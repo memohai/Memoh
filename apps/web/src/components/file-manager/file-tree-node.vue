@@ -114,18 +114,16 @@ function onCheckbox(checked: boolean | 'indeterminate') {
     <ContextMenuTrigger as-child>
       <div
         ref="rowEl"
-        class="group/row flex h-[22px] cursor-pointer items-center pr-2 pl-2 text-[13px] transition-colors select-none"
+        class="group/row flex h-[27px] cursor-pointer items-center mx-1 mb-px pl-1 pr-1 rounded-sm text-[13.5px] leading-[27px] tracking-normal font-[350] select-none [-webkit-font-smoothing:auto]"
         :class="isActive
           ? 'bg-sidebar-accent text-foreground'
-          : 'text-foreground/90 hover:bg-[color:var(--sidebar-hover)]'"
+          : 'text-foreground/80 hover:bg-[color:var(--sidebar-hover)]'"
         @click="onRowClick"
       >
-        <!-- Indentation: one 8px column per ancestor level. The guide rule is
-             transparent at rest and fades in on row hover (VS Code's tree). -->
         <span
           v-for="g in depth"
           :key="g"
-          class="h-full w-2 shrink-0 self-stretch border-l border-transparent group-hover/row:border-[color:var(--border)]"
+          class="h-full w-2 shrink-0 self-stretch"
         />
 
         <Checkbox
@@ -137,13 +135,11 @@ function onCheckbox(checked: boolean | 'indeterminate') {
           @update:model-value="onCheckbox"
         />
 
-        <!-- Single 16px leading column: folders show the disclosure chevron,
-             files show their Seti type glyph — both at the same x so names align
-             at every depth (the chevron takes the icon's old slot). -->
-        <span class="flex size-4 shrink-0 items-center justify-center">
+        <span class="flex size-6 shrink-0 items-center justify-center">
           <ChevronRight
             v-if="entry.isDir"
-            class="size-3.5 text-muted-foreground transition-transform duration-100"
+            :stroke-width="1.53"
+            class="size-4 text-muted-foreground"
             :class="{ 'rotate-90': expanded }"
           />
           <span
@@ -152,7 +148,7 @@ function onCheckbox(checked: boolean | 'indeterminate') {
             :style="{ color: fileIcon.color }"
           >{{ fileIcon.char }}</span>
         </span>
-        <span class="ml-1.5 min-w-0 flex-1 truncate">{{ entry.name }}</span>
+        <span class="ml-1 min-w-0 flex-1 truncate">{{ entry.name }}</span>
       </div>
     </ContextMenuTrigger>
     <ContextMenuContent>
@@ -197,10 +193,16 @@ function onCheckbox(checked: boolean | 'indeterminate') {
     </ContextMenuContent>
   </ContextMenu>
 
-  <template v-if="entry.isDir && expanded">
+  <!-- Keep children mounted after first load to avoid re-mount cost on
+       close/reopen. display:contents when expanded (no layout impact),
+       display:none when collapsed (hidden but alive). -->
+  <div
+    v-if="entry.isDir && (expanded || loaded)"
+    :class="expanded ? 'contents' : 'hidden'"
+  >
     <div
       v-if="loading && children.length === 0"
-      class="flex h-[22px] items-center pr-2 pl-2 text-[13px] text-muted-foreground"
+      class="flex h-[27px] items-center mx-1 mb-px pl-1 pr-1 text-[13.5px] leading-[27px] tracking-normal font-[350] text-muted-foreground [-webkit-font-smoothing:auto]"
     >
       <span
         v-for="g in depth + 1"
@@ -216,7 +218,7 @@ function onCheckbox(checked: boolean | 'indeterminate') {
       :entry="child"
       :depth="depth + 1"
     />
-  </template>
+  </div>
 </template>
 
 <style scoped>
@@ -225,7 +227,7 @@ function onCheckbox(checked: boolean | 'indeterminate') {
  * ./seti/seti.css (imported by ./file-icon). */
 .seti-icon {
   font-family: 'seti';
-  font-size: 16px;
+  font-size: 20px;
   line-height: 1;
   font-style: normal;
   font-weight: normal;

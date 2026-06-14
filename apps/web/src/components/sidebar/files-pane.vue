@@ -1,5 +1,5 @@
 <template>
-  <div class="flex flex-col h-full min-w-0">
+  <div class="group/tree flex flex-col h-full min-w-0">
     <div class="flex items-center gap-1 border-b border-border px-2 py-1.5 shrink-0">
       <Button
         v-if="canWrite"
