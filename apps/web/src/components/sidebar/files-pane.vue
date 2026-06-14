@@ -1,43 +1,42 @@
 <template>
   <div class="group/tree flex flex-col h-full min-w-0">
-    <!-- VS Code-style section header: bot name + hover actions -->
-    <div class="group/pane-header flex h-[22px] shrink-0 items-center px-2">
-      <span class="min-w-0 flex-1 select-none truncate text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70">
+    <!-- Section header: same height as a tree row. Text sits at the icon-column
+         start position (where a chevron would be) so items below it read as
+         children — text at ~8px, item names at ~36px. -->
+    <div class="group/pane-header flex h-[27px] shrink-0 items-center mx-1 pl-[11px] select-none">
+      <span class="min-w-0 flex-1 truncate text-[13.5px] font-[500] text-muted-foreground/70">
         {{ botName || t('bots.files.panelTitle') }}
       </span>
-      <div class="invisible flex items-center gap-0.5 group-hover/pane-header:visible">
+      <div class="flex items-center gap-0.5 pr-1 opacity-0 transition-opacity duration-150 group-hover/pane-header:opacity-100">
         <Button
           v-if="canWrite"
           variant="ghost"
-          size="sm"
-          class="size-[22px] p-0"
+          class="size-[26px] shrink-0 p-0 text-muted-foreground/70 hover:text-foreground"
           :disabled="operationLoading"
           :title="t('bots.files.newFile')"
           @click="openNewFileDialog(rootPath)"
         >
-          <FilePlus class="size-3.5" />
+          <FilePlus class="size-4" />
         </Button>
         <Button
           v-if="canWrite"
           variant="ghost"
-          size="sm"
-          class="size-[22px] p-0"
+          class="size-[26px] shrink-0 p-0 text-muted-foreground/70 hover:text-foreground"
           :disabled="operationLoading"
           :title="t('bots.files.newFolder')"
           @click="openMkdirDialog(rootPath)"
         >
-          <FolderPlus class="size-3.5" />
+          <FolderPlus class="size-4" />
         </Button>
         <DropdownMenu v-if="canWrite">
           <DropdownMenuTrigger as-child>
             <Button
               variant="ghost"
-              size="sm"
-              class="size-[22px] p-0"
+              class="size-[26px] shrink-0 p-0 text-muted-foreground/70 hover:text-foreground"
               :disabled="operationLoading"
               :title="t('bots.files.upload')"
             >
-              <Upload class="size-3.5" />
+              <Upload class="size-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
@@ -53,12 +52,11 @@
         </DropdownMenu>
         <Button
           variant="ghost"
-          size="sm"
-          class="size-[22px] p-0"
+          class="size-[26px] shrink-0 p-0 text-muted-foreground/70 hover:text-foreground"
           :title="t('common.refresh')"
           @click="reload"
         >
-          <RefreshCw class="size-3.5" />
+          <RefreshCw class="size-4" />
         </Button>
       </div>
     </div>
