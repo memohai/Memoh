@@ -128,3 +128,124 @@ func stringValue(raw any) string {
 	}
 	return fmt.Sprint(raw)
 }
+
+func extractFeishuPostParts(contentMap map[string]any) []channel.MessagePart {
+	linesRaw := getFeishuPostContentLines(contentMap)
+	if linesRaw == nil {
+		return nil
+	}
+	var parts []channel.MessagePart
+	hasRich := false
+	for li, rawLine := range linesRaw {
+		line, ok := rawLine.([]any)
+		if !ok {
+			continue
+		}
+		if li > 0 && len(parts) > 0 {
+			parts = append(parts, channel.MessagePart{Type: channel.MessagePartText, Text: "\n"})
+			hasRich = true
+		}
+		for _, rawPart := range line {
+			part, ok := rawPart.(map[string]any)
+			if !ok {
+				continue
+			}
+			mp, rich, ok := feishuPostPartToMessagePart(part)
+			if !ok {
+				continue
+			}
+			if rich {
+				hasRich = true
+			}
+			parts = append(parts, mp)
+		}
+	}
+	if !hasRich {
+		return nil
+	}
+	return parts
+}
+
+func feishuPostPartToMessagePart(part map[string]any) (channel.MessagePart, bool, bool) {
+	tag := strings.ToLower(strings.TrimSpace(stringValue(part["tag"])))
+	switch tag {
+	case "text":
+		text := stringValue(part["text"])
+		if text == "" {
+			return channel.MessagePart{}, false, false
+		}
+		styles := feishuPostStyles(part["style"])
+		return channel.MessagePart{
+			Type:   channel.MessagePartText,
+			Text:   text,
+			Styles: styles,
+		}, len(styles) > 0, true
+	case "a":
+		text := stringValue(part["text"])
+		href := strings.TrimSpace(stringValue(part["href"]))
+		if text == "" && href == "" {
+			return channel.MessagePart{}, false, false
+		}
+		if text == "" {
+			text = href
+		}
+		return channel.MessagePart{
+			Type: channel.MessagePartLink,
+			Text: text,
+			URL:  href,
+		}, true, true
+	case "at":
+		uid := strings.TrimSpace(stringValue(part["user_id"]))
+		display := strings.TrimSpace(stringValue(part["text"]))
+		if display == "" {
+			display = strings.TrimSpace(stringValue(part["name"]))
+		}
+		if display == "" {
+			display = strings.TrimSpace(stringValue(part["user_name"]))
+		}
+		if display == "" {
+			if uid == "" {
+				return channel.MessagePart{}, false, false
+			}
+			display = "@" + uid
+		} else if !strings.HasPrefix(display, "@") {
+			display = "@" + display
+		}
+		return channel.MessagePart{
+			Type:              channel.MessagePartMention,
+			Text:              display,
+			ChannelIdentityID: uid,
+		}, true, true
+	case "code_block":
+		text := stringValue(part["text"])
+		if text == "" {
+			return channel.MessagePart{}, false, false
+		}
+		return channel.MessagePart{
+			Type:     channel.MessagePartCodeBlock,
+			Text:     text,
+			Language: strings.TrimSpace(stringValue(part["language"])),
+		}, true, true
+	default:
+		return channel.MessagePart{}, false, false
+	}
+}
+
+func feishuPostStyles(raw any) []channel.MessageTextStyle {
+	arr, ok := raw.([]any)
+	if !ok || len(arr) == 0 {
+		return nil
+	}
+	var styles []channel.MessageTextStyle
+	for _, item := range arr {
+		switch strings.ToLower(strings.TrimSpace(stringValue(item))) {
+		case "bold":
+			styles = append(styles, channel.MessageStyleBold)
+		case "italic":
+			styles = append(styles, channel.MessageStyleItalic)
+		case "linethrough", "strike", "strikethrough":
+			styles = append(styles, channel.MessageStyleStrikethrough)
+		}
+	}
+	return styles
+}
