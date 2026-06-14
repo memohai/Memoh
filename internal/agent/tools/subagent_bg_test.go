@@ -2,21 +2,28 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"reflect"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/background"
+	messagepkg "github.com/memohai/memoh/internal/message"
+	sessionpkg "github.com/memohai/memoh/internal/session"
 )
 
-// fakeSpawnAgent satisfies SpawnAgent. When block is non-nil it waits for the
-// channel to close or the context to cancel before returning.
 type fakeSpawnAgent struct {
 	block   chan struct{}
-	failFor map[string]string // query -> non-retryable error message
+	failFor map[string]string
+
+	mu    sync.Mutex
+	calls []SpawnRunConfig
 }
 
 func (f *fakeSpawnAgent) Generate(ctx context.Context, cfg SpawnRunConfig) (*SpawnResult, error) {
@@ -24,6 +31,10 @@ func (f *fakeSpawnAgent) Generate(ctx context.Context, cfg SpawnRunConfig) (*Spa
 }
 
 func (f *fakeSpawnAgent) GenerateWithWatchdog(ctx context.Context, cfg SpawnRunConfig, _ func()) (*SpawnResult, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, cfg)
+	f.mu.Unlock()
+
 	if f.block != nil {
 		select {
 		case <-f.block:
@@ -34,254 +45,409 @@ func (f *fakeSpawnAgent) GenerateWithWatchdog(ctx context.Context, cfg SpawnRunC
 	if msg, ok := f.failFor[cfg.Query]; ok {
 		return nil, errors.New(msg)
 	}
-	return &SpawnResult{Text: "report for " + cfg.Query}, nil
+	return &SpawnResult{
+		Text: "report for " + cfg.Query,
+		Messages: []sdk.Message{{
+			Role:    sdk.MessageRoleAssistant,
+			Content: []sdk.MessagePart{sdk.TextPart{Text: "report for " + cfg.Query}},
+		}},
+	}, nil
 }
 
-func newBgSpawnProvider(t *testing.T, agent SpawnAgent) (*SpawnProvider, *background.Manager) {
+func (f *fakeSpawnAgent) queries() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, 0, len(f.calls))
+	for _, call := range f.calls {
+		out = append(out, call.Query)
+	}
+	return out
+}
+
+func (f *fakeSpawnAgent) callAt(i int) (SpawnRunConfig, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if i < 0 || i >= len(f.calls) {
+		return SpawnRunConfig{}, false
+	}
+	return f.calls[i], true
+}
+
+type fakeAgentSessionService struct {
+	mu       sync.Mutex
+	next     int
+	sessions []sessionpkg.Session
+}
+
+func (s *fakeAgentSessionService) Create(_ context.Context, input sessionpkg.CreateInput) (sessionpkg.Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.next++
+	now := time.Unix(int64(s.next), 0).UTC()
+	sess := sessionpkg.Session{
+		ID:              "child_" + strconv.Itoa(s.next),
+		BotID:           input.BotID,
+		Type:            input.Type,
+		Title:           input.Title,
+		Metadata:        input.Metadata,
+		ParentSessionID: input.ParentSessionID,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	s.sessions = append(s.sessions, sess)
+	return sess, nil
+}
+
+func (s *fakeAgentSessionService) ListSubagentsByParent(_ context.Context, parentSessionID string) ([]sessionpkg.Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []sessionpkg.Session
+	for _, sess := range s.sessions {
+		if sess.ParentSessionID == parentSessionID {
+			out = append(out, sess)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeAgentSessionService) byAgent(parentSessionID, agentID string) (sessionpkg.Session, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, sess := range s.sessions {
+		if sess.ParentSessionID == parentSessionID && sess.Metadata["agent_id"] == agentID {
+			return sess, true
+		}
+	}
+	return sessionpkg.Session{}, false
+}
+
+type fakeAgentMessageService struct {
+	mu       sync.Mutex
+	messages map[string][]messagepkg.Message
+}
+
+func newFakeAgentMessageService() *fakeAgentMessageService {
+	return &fakeAgentMessageService{messages: make(map[string][]messagepkg.Message)}
+}
+
+func (s *fakeAgentMessageService) Persist(_ context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	msg := messagepkg.Message{
+		ID:        "msg_" + strconv.Itoa(len(s.messages[input.SessionID])+1),
+		BotID:     input.BotID,
+		SessionID: input.SessionID,
+		Role:      input.Role,
+		Content:   input.Content,
+		Usage:     input.Usage,
+		CreatedAt: time.Now().UTC(),
+	}
+	s.messages[input.SessionID] = append(s.messages[input.SessionID], msg)
+	return msg, nil
+}
+
+func (s *fakeAgentMessageService) ListBySession(_ context.Context, sessionID string) ([]messagepkg.Message, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]messagepkg.Message(nil), s.messages[sessionID]...), nil
+}
+
+func (*fakeAgentMessageService) List(context.Context, string) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
+func (*fakeAgentMessageService) ListSince(context.Context, string, time.Time) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
+func (*fakeAgentMessageService) ListActiveSince(context.Context, string, time.Time) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
+func (*fakeAgentMessageService) ListLatest(context.Context, string, int32) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
+func (*fakeAgentMessageService) ListBefore(context.Context, string, time.Time, int32) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
+func (*fakeAgentMessageService) ListSinceBySession(context.Context, string, time.Time) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
+func (*fakeAgentMessageService) ListActiveSinceBySession(context.Context, string, time.Time) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
+func (*fakeAgentMessageService) ListLatestBySession(context.Context, string, int32) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
+func (*fakeAgentMessageService) ListBeforeBySession(context.Context, string, time.Time, int32) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
+func (*fakeAgentMessageService) LocateByExternalIDBySession(context.Context, string, string, int32, int32) (messagepkg.LocateResult, error) {
+	return messagepkg.LocateResult{}, nil
+}
+
+func (*fakeAgentMessageService) DeleteByBot(context.Context, string) error {
+	return nil
+}
+
+func (*fakeAgentMessageService) DeleteBySession(context.Context, string) error {
+	return nil
+}
+
+func (*fakeAgentMessageService) LinkAssets(context.Context, string, []messagepkg.AssetRef) error {
+	return nil
+}
+
+func newAgentControlProvider(t *testing.T, agent *fakeSpawnAgent) (*SpawnProvider, *background.Manager, *fakeAgentSessionService, *fakeAgentMessageService) {
 	t.Helper()
 	mgr := background.New(nil)
+	sessionSvc := &fakeAgentSessionService{}
+	messageSvc := newFakeAgentMessageService()
 	p := NewSpawnProvider(nil, nil, nil, nil, nil, mgr)
+	p.sessionService = sessionSvc
 	p.SetAgent(agent)
+	p.SetMessageService(messageSvc)
 	p.modelResolver = func(context.Context, string) (*sdk.Model, string, string, error) {
 		return &sdk.Model{}, "model-1", "", nil
 	}
-	return p, mgr
+	return p, mgr, sessionSvc, messageSvc
 }
 
-func spawnExecuteFn(t *testing.T, p *SpawnProvider, session SessionContext) func(args map[string]any) (any, error) {
+func executeAgentTool(t *testing.T, p *SpawnProvider, session SessionContext, name string, args map[string]any) (any, error) {
 	t.Helper()
-	toolList, err := p.Tools(context.Background(), session)
-	if err != nil || len(toolList) != 1 {
-		t.Fatalf("expected one spawn tool, got %d (err=%v)", len(toolList), err)
-	}
-	return func(args map[string]any) (any, error) {
-		return toolList[0].Execute(&sdk.ToolExecContext{Context: context.Background()}, args)
-	}
-}
-
-func executeWithin(t *testing.T, fn func(args map[string]any) (any, error), args map[string]any, timeout time.Duration) (any, error) {
-	t.Helper()
-	type outcome struct {
-		result any
-		err    error
-	}
-	resCh := make(chan outcome, 1)
-	go func() {
-		r, err := fn(args)
-		resCh <- outcome{r, err}
-	}()
-	select {
-	case out := <-resCh:
-		return out.result, out.err
-	case <-time.After(timeout):
-		t.Fatalf("spawn execute did not return within %s", timeout)
-		return nil, nil
-	}
-}
-
-func drainSpawnNotifications(t *testing.T, mgr *background.Manager, botID, sessionID string, want int) []background.Notification {
-	t.Helper()
-	deadline := time.After(5 * time.Second)
-	var all []background.Notification
-	for {
-		all = append(all, mgr.DrainNotifications(botID, sessionID)...)
-		if len(all) >= want {
-			return all
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("timed out waiting for %d notifications, got %d", want, len(all))
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-}
-
-func TestSpawnRunInBackgroundReturnsImmediatelyAndNotifiesJoinRecord(t *testing.T) {
-	fake := &fakeSpawnAgent{block: make(chan struct{})}
-	p, mgr := newBgSpawnProvider(t, fake)
-	session := SessionContext{BotID: "bot1", SessionID: "sess1"}
-	execute := spawnExecuteFn(t, p, session)
-
-	result, err := executeWithin(t, execute, map[string]any{
-		"tasks":             []any{"alpha", "beta"},
-		"run_in_background": true,
-	}, 2*time.Second)
+	tools, err := p.Tools(context.Background(), session)
 	if err != nil {
-		t.Fatalf("background spawn failed: %v", err)
+		t.Fatalf("Tools failed: %v", err)
 	}
-	m, ok := result.(map[string]any)
+	for _, tool := range tools {
+		if tool.Name == name {
+			return tool.Execute(&sdk.ToolExecContext{Context: context.Background()}, args)
+		}
+	}
+	t.Fatalf("tool %q not found in %v", name, toolNames(tools))
+	return nil, nil
+}
+
+func toolNames(tools []sdk.Tool) []string {
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		names = append(names, tool.Name)
+	}
+	return names
+}
+
+func waitUntil(t *testing.T, timeout time.Duration, ok func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if ok() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("condition not met before timeout")
+}
+
+func asMap(t *testing.T, value any) map[string]any {
+	t.Helper()
+	m, ok := value.(map[string]any)
 	if !ok {
-		t.Fatalf("expected map result, got %T", result)
+		t.Fatalf("expected map result, got %T", value)
 	}
-	if m["status"] != "background_started" {
-		t.Fatalf("expected background_started, got %v", m["status"])
-	}
-	taskID, _ := m["task_id"].(string)
-	if taskID == "" {
-		t.Fatal("expected non-empty task_id")
-	}
-	if desc, _ := m["description"].(string); !strings.Contains(desc, "alpha") {
-		t.Errorf("expected description carrying the task list, got %q", desc)
-	}
-	if task := mgr.GetForSession("bot1", "sess1", taskID); task == nil || task.Status != background.TaskRunning {
-		t.Fatalf("expected running spawn task registered for session, got %+v", task)
-	}
-
-	close(fake.block)
-	n := drainSpawnNotifications(t, mgr, "bot1", "sess1", 1)[0]
-	if n.Kind != background.KindSpawn || n.TaskID != taskID {
-		t.Errorf("unexpected notification identity: %+v", n)
-	}
-	if n.Status != background.TaskCompleted {
-		t.Errorf("expected completed join, got %s", n.Status)
-	}
-	if len(n.Branches) != 2 {
-		t.Fatalf("expected 2 branches, got %d", len(n.Branches))
-	}
-	if n.Branches[0].Task != "alpha" || n.Branches[0].Report != "report for alpha" {
-		t.Errorf("unexpected first branch: %+v", n.Branches[0])
-	}
-	if n.Branches[1].Task != "beta" || n.Branches[1].Status != background.TaskCompleted {
-		t.Errorf("unexpected second branch: %+v", n.Branches[1])
-	}
+	return m
 }
 
-func TestSpawnRunInBackgroundRecordsBranchFailure(t *testing.T) {
-	fake := &fakeSpawnAgent{failFor: map[string]string{"beta": "invalid task configuration"}}
-	p, mgr := newBgSpawnProvider(t, fake)
-	session := SessionContext{BotID: "bot1", SessionID: "sess1"}
-	execute := spawnExecuteFn(t, p, session)
+func TestAgentControlToolsExposeSingleAgentSurface(t *testing.T) {
+	p, _, _, _ := newAgentControlProvider(t, &fakeSpawnAgent{})
+	session := SessionContext{BotID: "bot1", SessionID: "parent1"}
 
-	if _, err := executeWithin(t, execute, map[string]any{
-		"tasks":             []any{"alpha", "beta"},
-		"run_in_background": true,
-	}, 2*time.Second); err != nil {
-		t.Fatalf("background spawn failed: %v", err)
-	}
-
-	n := drainSpawnNotifications(t, mgr, "bot1", "sess1", 1)[0]
-	if n.Status != background.TaskFailed {
-		t.Errorf("expected failed join when a branch fails, got %s", n.Status)
-	}
-	if n.Branches[0].Status != background.TaskCompleted {
-		t.Errorf("expected alpha branch completed, got %+v", n.Branches[0])
-	}
-	if n.Branches[1].Status != background.TaskFailed || !strings.Contains(n.Branches[1].Error, "invalid task configuration") {
-		t.Errorf("expected beta branch failure preserved, got %+v", n.Branches[1])
-	}
-}
-
-func TestSpawnBackgroundKillCancelsBranchesAndSuppressesNotification(t *testing.T) {
-	fake := &fakeSpawnAgent{block: make(chan struct{})}
-	p, mgr := newBgSpawnProvider(t, fake)
-	session := SessionContext{BotID: "bot1", SessionID: "sess1"}
-	execute := spawnExecuteFn(t, p, session)
-
-	result, err := executeWithin(t, execute, map[string]any{
-		"tasks":             []any{"alpha"},
-		"run_in_background": true,
-	}, 2*time.Second)
+	tools, err := p.Tools(context.Background(), session)
 	if err != nil {
-		t.Fatalf("background spawn failed: %v", err)
+		t.Fatalf("Tools failed: %v", err)
 	}
-	taskID, _ := result.(map[string]any)["task_id"].(string)
-	if taskID == "" {
-		t.Fatal("expected non-empty task_id")
-	}
-
-	if err := mgr.KillForSession("bot1", "sess1", taskID); err != nil {
-		t.Fatalf("kill failed: %v", err)
+	got := toolNames(tools)
+	want := []string{"spawn_agent", "send_message", "wait_agent", "list_agents"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected tools: got %v want %v", got, want)
 	}
 
-	// The join still records branch outcomes once cancellation propagates.
-	deadline := time.After(5 * time.Second)
-	for len(mgr.Get(taskID).Snapshot().Branches) != 1 {
-		select {
-		case <-deadline:
-			t.Fatal("timed out waiting for branch outcomes after kill")
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-
-	task := mgr.Get(taskID)
-	if task.Status != background.TaskKilled {
-		t.Errorf("expected killed status, got %s", task.Status)
-	}
-	if snap := task.Snapshot(); snap.Branches[0].Status != background.TaskFailed {
-		t.Errorf("expected killed branch recorded as failed, got %+v", snap.Branches[0])
-	}
-	if n := mgr.DrainNotifications("bot1", "sess1"); len(n) != 0 {
-		t.Errorf("expected no notifications for killed spawn task, got %d", len(n))
-	}
-}
-
-func TestSpawnBackgroundHonorsManagerRunningCapAcrossRuns(t *testing.T) {
-	fake := &fakeSpawnAgent{block: make(chan struct{})}
-	p, mgr := newBgSpawnProvider(t, fake)
-	session := SessionContext{BotID: "bot1", SessionID: "sess1"}
-
-	firstRun := spawnExecuteFn(t, p, session)
-	for range background.MaxRunningSpawnTasks {
-		result, err := executeWithin(t, firstRun, map[string]any{
-			"tasks":             []any{"task"},
-			"run_in_background": true,
-		}, 2*time.Second)
-		if err != nil {
-			t.Fatalf("background spawn under cap failed: %v", err)
-		}
-		if result.(map[string]any)["status"] != "background_started" {
-			t.Fatalf("expected background_started under cap, got %v", result)
-		}
-	}
-
-	// A fresh agent run gets a fresh per-run closure, but the manager cap
-	// still applies across runs.
-	secondRun := spawnExecuteFn(t, p, session)
-	result, err := executeWithin(t, secondRun, map[string]any{
-		"tasks":             []any{"over cap"},
-		"run_in_background": true,
-	}, 2*time.Second)
+	subagentTools, err := p.Tools(context.Background(), SessionContext{BotID: "bot1", SessionID: "child", IsSubagent: true})
 	if err != nil {
-		t.Fatalf("expected structured limit result, got error: %v", err)
+		t.Fatalf("subagent Tools failed: %v", err)
 	}
-	m := result.(map[string]any)
-	if m["isError"] != true {
-		t.Fatalf("expected isError result at cap, got %v", m)
+	if len(subagentTools) != 0 {
+		t.Fatalf("subagent should not see agent control tools, got %v", toolNames(subagentTools))
 	}
-	text := m["content"].([]map[string]any)[0]["text"].(string)
-	if !strings.Contains(text, "spawn limit") {
-		t.Errorf("expected limit message, got %q", text)
-	}
-
-	close(fake.block)
-	drainSpawnNotifications(t, mgr, "bot1", "sess1", background.MaxRunningSpawnTasks)
 }
 
-func TestSpawnForegroundPathUnchangedAndSchemaExposesBackgroundFlag(t *testing.T) {
-	fake := &fakeSpawnAgent{}
-	p, _ := newBgSpawnProvider(t, fake)
-	session := SessionContext{BotID: "bot1", SessionID: "sess1"}
+func TestSpawnAgentIDsAndDuplicateValidation(t *testing.T) {
+	p, _, _, _ := newAgentControlProvider(t, &fakeSpawnAgent{})
+	session := SessionContext{BotID: "bot1", SessionID: "parent1"}
 
-	toolList, err := p.Tools(context.Background(), session)
-	if err != nil || len(toolList) != 1 {
-		t.Fatalf("expected one spawn tool, got %d (err=%v)", len(toolList), err)
-	}
-	props := toolList[0].Parameters.(map[string]any)["properties"].(map[string]any)
-	if _, ok := props["run_in_background"]; !ok {
-		t.Error("expected run_in_background in spawn tool schema")
+	res := asMap(t, mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{"task": "alpha"}))
+	if res["agent_id"] != "agent_1" || res["status"] != "completed" {
+		t.Fatalf("unexpected auto id result: %v", res)
 	}
 
-	result, err := toolList[0].Execute(&sdk.ToolExecContext{Context: context.Background()}, map[string]any{
-		"tasks": []any{"alpha"},
+	res = asMap(t, mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{"id": " Research_One ", "task": "beta"}))
+	if res["agent_id"] != "research_one" {
+		t.Fatalf("expected normalized custom id, got %v", res)
+	}
+
+	if _, err := executeAgentTool(t, p, session, "spawn_agent", map[string]any{"id": "research_one", "task": "again"}); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected duplicate id error, got %v", err)
+	}
+	if _, err := executeAgentTool(t, p, session, "spawn_agent", map[string]any{"id": "1bad", "task": "bad"}); err == nil || !strings.Contains(err.Error(), "invalid agent id") {
+		t.Fatalf("expected invalid id error, got %v", err)
+	}
+}
+
+func mustExecuteAgentTool(t *testing.T, p *SpawnProvider, session SessionContext, name string, args map[string]any) any {
+	t.Helper()
+	res, err := executeAgentTool(t, p, session, name, args)
+	if err != nil {
+		t.Fatalf("%s failed: %v", name, err)
+	}
+	return res
+}
+
+func TestSendMessageReusesSessionAndHistory(t *testing.T) {
+	agent := &fakeSpawnAgent{}
+	p, _, sessions, messages := newAgentControlProvider(t, agent)
+	session := SessionContext{BotID: "bot1", SessionID: "parent1"}
+
+	first := asMap(t, mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{"id": "worker", "task": "first"}))
+	second := asMap(t, mustExecuteAgentTool(t, p, session, "send_message", map[string]any{"id": "worker", "message": "second"}))
+	if first["session_id"] == "" || first["session_id"] != second["session_id"] {
+		t.Fatalf("expected send_message to reuse child session, first=%v second=%v", first, second)
+	}
+
+	call, ok := agent.callAt(1)
+	if !ok {
+		t.Fatal("expected second agent call")
+	}
+	if call.Identity.SessionID != first["session_id"] {
+		t.Fatalf("expected reused identity session, got %q want %q", call.Identity.SessionID, first["session_id"])
+	}
+	if len(call.Messages) < 2 {
+		t.Fatalf("expected persisted history loaded into second call, got %d messages", len(call.Messages))
+	}
+	rec, ok := sessions.byAgent("parent1", "worker")
+	if !ok || rec.Metadata["agent_control_version"] != agentControlVersion {
+		t.Fatalf("expected persisted agent metadata, got %+v", rec)
+	}
+	stored, _ := messages.ListBySession(context.Background(), first["session_id"].(string))
+	if len(stored) != 4 {
+		raw, _ := json.Marshal(stored)
+		t.Fatalf("expected two user+assistant turns persisted, got %d: %s", len(stored), raw)
+	}
+}
+
+func TestBusyAgentQueuesAndRunsFIFO(t *testing.T) {
+	block := make(chan struct{})
+	agent := &fakeSpawnAgent{block: block}
+	p, _, _, _ := newAgentControlProvider(t, agent)
+	session := SessionContext{BotID: "bot1", SessionID: "parent1"}
+
+	first := asMap(t, mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{
+		"id":                "worker",
+		"task":              "first",
+		"run_in_background": true,
+	}))
+	if first["status"] != "background_started" {
+		t.Fatalf("expected background_started, got %v", first)
+	}
+	second := asMap(t, mustExecuteAgentTool(t, p, session, "send_message", map[string]any{"id": "worker", "message": "second"}))
+	third := asMap(t, mustExecuteAgentTool(t, p, session, "send_message", map[string]any{"id": "worker", "message": "third"}))
+	if second["status"] != "queued" || second["queue_position"] != 1 {
+		t.Fatalf("expected second queued at position 1, got %v", second)
+	}
+	if third["status"] != "queued" || third["queue_position"] != 2 {
+		t.Fatalf("expected third queued at position 2, got %v", third)
+	}
+
+	close(block)
+	waitUntil(t, 2*time.Second, func() bool {
+		return reflect.DeepEqual(agent.queries(), []string{"first", "second", "third"})
 	})
-	if err != nil {
-		t.Fatalf("foreground spawn failed: %v", err)
+	waited := p.waitAgent(context.Background(), session, agentRecord{AgentID: "worker", SessionID: first["session_id"].(string)}, third["task_id"].(string), time.Second)
+	if waited["status"] != "completed" {
+		t.Fatalf("expected third task completed, got %v", waited)
 	}
-	results, ok := result.(map[string]any)["results"].([]spawnResult)
-	if !ok || len(results) != 1 {
-		t.Fatalf("expected one foreground result, got %v", result)
+}
+
+func TestWaitAgentTimeoutDoesNotCancelRunningTask(t *testing.T) {
+	block := make(chan struct{})
+	p, mgr, _, _ := newAgentControlProvider(t, &fakeSpawnAgent{block: block})
+	session := SessionContext{BotID: "bot1", SessionID: "parent1"}
+	started := asMap(t, mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{
+		"id":                "worker",
+		"task":              "slow",
+		"run_in_background": true,
+	}))
+
+	waited := p.waitAgent(context.Background(), session, agentRecord{AgentID: "worker", SessionID: started["session_id"].(string)}, "", 20*time.Millisecond)
+	if waited["timed_out"] != true || waited["status"] != "running" {
+		t.Fatalf("expected timed out running wait result, got %v", waited)
 	}
-	if !results[0].Success || results[0].Text != "report for alpha" {
-		t.Errorf("unexpected foreground result: %+v", results[0])
+	if task := mgr.GetForSession("bot1", "parent1", started["task_id"].(string)); task == nil || task.Snapshot().Status != background.TaskRunning {
+		t.Fatalf("wait timeout should not cancel task, got %+v", task)
+	}
+	close(block)
+}
+
+func TestKillBackgroundCancelsRunningAndQueuedAgentTasks(t *testing.T) {
+	block := make(chan struct{})
+	agent := &fakeSpawnAgent{block: block}
+	p, mgr, _, _ := newAgentControlProvider(t, agent)
+	session := SessionContext{BotID: "bot1", SessionID: "parent1"}
+
+	first := asMap(t, mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{
+		"id":                "worker",
+		"task":              "first",
+		"run_in_background": true,
+	}))
+	waitUntil(t, time.Second, func() bool {
+		return reflect.DeepEqual(agent.queries(), []string{"first"})
+	})
+	second := asMap(t, mustExecuteAgentTool(t, p, session, "send_message", map[string]any{"id": "worker", "message": "second"}))
+
+	if err := mgr.KillForSession("bot1", "parent1", second["task_id"].(string)); err != nil {
+		t.Fatalf("kill queued task failed: %v", err)
+	}
+	if task := mgr.Get(second["task_id"].(string)); task == nil || task.Snapshot().Status != background.TaskKilled {
+		t.Fatalf("expected queued task killed, got %+v", task)
+	}
+
+	if err := mgr.KillForSession("bot1", "parent1", first["task_id"].(string)); err != nil {
+		t.Fatalf("kill running task failed: %v", err)
+	}
+	waitUntil(t, time.Second, func() bool {
+		task := mgr.Get(first["task_id"].(string))
+		return task != nil && task.Snapshot().Status == background.TaskKilled
+	})
+	if got := agent.queries(); !reflect.DeepEqual(got, []string{"first"}) {
+		t.Fatalf("killed queued task should not run, got queries %v", got)
+	}
+}
+
+func TestListAgentsScopedByCurrentSession(t *testing.T) {
+	p, _, _, _ := newAgentControlProvider(t, &fakeSpawnAgent{})
+	sessionA := SessionContext{BotID: "bot1", SessionID: "parent-a"}
+	sessionB := SessionContext{BotID: "bot1", SessionID: "parent-b"}
+
+	mustExecuteAgentTool(t, p, sessionA, "spawn_agent", map[string]any{"id": "alpha", "task": "a"})
+	mustExecuteAgentTool(t, p, sessionB, "spawn_agent", map[string]any{"id": "beta", "task": "b"})
+
+	listA := asMap(t, mustExecuteAgentTool(t, p, sessionA, "list_agents", map[string]any{}))
+	agents := listA["agents"].([]map[string]any)
+	if len(agents) != 1 || agents[0]["agent_id"] != "alpha" {
+		t.Fatalf("expected only session A agent, got %v", listA)
 	}
 }

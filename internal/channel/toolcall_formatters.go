@@ -22,8 +22,11 @@ var toolFormatters = map[string]toolFormatter{
 	"write": formatWrite,
 	"edit":  formatEdit,
 
-	"exec":      formatExec,
-	"bg_status": formatBgStatus,
+	"exec":                  formatExec,
+	"bg_status":             formatBgStatus,
+	"list_background":       formatListBackground,
+	"get_background_status": formatGetBackgroundStatus,
+	"kill_background":       formatKillBackground,
 
 	"web_search": formatWebSearch,
 	"web_fetch":  formatWebFetch,
@@ -48,8 +51,11 @@ var toolFormatters = map[string]toolFormatter{
 	"list_email":          formatListEmail,
 	"read_email":          formatReadEmail,
 
-	"spawn":     formatSpawn,
-	"use_skill": formatUseSkill,
+	"spawn_agent":  formatAgentControl,
+	"send_message": formatAgentControl,
+	"wait_agent":   formatAgentControl,
+	"list_agents":  formatAgentControl,
+	"use_skill":    formatUseSkill,
 
 	"generate_image":   formatGenerateImage,
 	"speak":            formatSpeak,
@@ -253,7 +259,7 @@ func formatEdit(tc *StreamToolCall, status ToolCallStatus) ToolCallPresentation 
 	return p
 }
 
-// --- exec / bg_status --------------------------------------------------
+// --- exec / background tasks -------------------------------------------
 
 func formatExec(tc *StreamToolCall, status ToolCallStatus) ToolCallPresentation {
 	in := inputMap(tc)
@@ -363,6 +369,104 @@ func formatBgStatus(tc *StreamToolCall, status ToolCallStatus) ToolCallPresentat
 		if len(tasks) > preview {
 			p.Body = append(p.Body, ToolCallBlock{Type: ToolCallBlockText, Text: fmt.Sprintf("…and %d more", len(tasks)-preview)})
 		}
+		return p
+	}
+	if msg := pickStringField(res, "message"); msg != "" {
+		p.Footer = msg
+	}
+	return p
+}
+
+func formatListBackground(tc *StreamToolCall, status ToolCallStatus) ToolCallPresentation {
+	p := ToolCallPresentation{Header: "list"}
+	if status == ToolCallStatusRunning {
+		return p
+	}
+	if e, done := errorPresentation(p, status, tc); done {
+		return e
+	}
+	res := resultMap(tc)
+	if res == nil {
+		return p
+	}
+	tasks := asSliceOfMaps(res["tasks"])
+	p.Header = fmt.Sprintf("%d tasks", len(tasks))
+	preview := 5
+	for i, t := range tasks {
+		if i >= preview {
+			break
+		}
+		id := pickStringField(t, "task_id", "id")
+		desc := pickStringField(t, "description")
+		st := pickStringField(t, "status")
+		exit := ""
+		if v, ok := numericField(t, "exit_code"); ok {
+			exit = fmt.Sprintf(" exit=%d", int(v))
+		}
+		label := id
+		if desc != "" {
+			label = fmt.Sprintf("%s \"%s\"", id, desc)
+		}
+		text := fmt.Sprintf("- %s · %s%s", label, st, exit)
+		p.Body = append(p.Body, ToolCallBlock{Type: ToolCallBlockText, Text: text})
+	}
+	if len(tasks) > preview {
+		p.Body = append(p.Body, ToolCallBlock{Type: ToolCallBlockText, Text: fmt.Sprintf("…and %d more", len(tasks)-preview)})
+	}
+	return p
+}
+
+func formatGetBackgroundStatus(tc *StreamToolCall, status ToolCallStatus) ToolCallPresentation {
+	in := inputMap(tc)
+	taskID := pickStringField(in, "task_id")
+	p := ToolCallPresentation{Header: taskID}
+	if status == ToolCallStatusRunning {
+		return p
+	}
+	if e, done := errorPresentation(p, status, tc); done {
+		return e
+	}
+	res := resultMap(tc)
+	if res == nil {
+		return p
+	}
+	if id := pickStringField(res, "task_id"); id != "" {
+		taskID = id
+	}
+	kind := pickStringField(res, "kind")
+	st := pickStringField(res, "status")
+	if taskID != "" && st != "" {
+		p.Header = fmt.Sprintf("%s · %s", taskID, st)
+	}
+	if kind != "" {
+		p.Body = append(p.Body, ToolCallBlock{Type: ToolCallBlockText, Text: "kind: " + kind})
+	}
+	if desc := pickStringField(res, "description"); desc != "" {
+		p.Body = append(p.Body, ToolCallBlock{Type: ToolCallBlockText, Text: "description: " + desc})
+	}
+	if out := pickStringField(res, "output_file"); out != "" {
+		p.Body = append(p.Body, ToolCallBlock{Type: ToolCallBlockText, Text: "output: " + out})
+	}
+	if branches := asSliceOfMaps(res["branches"]); len(branches) > 0 {
+		p.Footer = fmt.Sprintf("%d branches", len(branches))
+	} else if v, ok := numericField(res, "exit_code"); ok {
+		p.Footer = fmt.Sprintf("exit=%d", int(v))
+	}
+	return p
+}
+
+func formatKillBackground(tc *StreamToolCall, status ToolCallStatus) ToolCallPresentation {
+	in := inputMap(tc)
+	taskID := pickStringField(in, "task_id")
+	p := ToolCallPresentation{Header: taskID}
+	if status == ToolCallStatusRunning {
+		return p
+	}
+	if e, done := errorPresentation(p, status, tc); done {
+		return e
+	}
+	res := resultMap(tc)
+	if res == nil {
 		return p
 	}
 	if msg := pickStringField(res, "message"); msg != "" {
@@ -947,13 +1051,25 @@ func formatReadEmail(tc *StreamToolCall, status ToolCallStatus) ToolCallPresenta
 
 // --- subagent / skills / media -----------------------------------------
 
-func formatSpawn(tc *StreamToolCall, status ToolCallStatus) ToolCallPresentation {
+func formatAgentControl(tc *StreamToolCall, status ToolCallStatus) ToolCallPresentation {
 	p := ToolCallPresentation{}
 	if status == ToolCallStatusRunning {
 		in := inputMap(tc)
-		tasks := asSliceOfMaps(in["tasks"])
-		if len(tasks) > 0 {
-			p.Header = fmt.Sprintf("%d subagent tasks", len(tasks))
+		agentID := pickStringField(in, "id", "agent_id")
+		task := pickStringField(in, "task", "message")
+		switch strings.ToLower(strings.TrimSpace(tc.Name)) {
+		case "list_agents":
+			p.Header = "list agents"
+		case "wait_agent":
+			if agentID != "" {
+				p.Header = "wait for " + agentID
+			}
+		default:
+			if agentID != "" {
+				p.Header = agentID + " · " + truncLine(task)
+			} else {
+				p.Header = truncLine(task)
+			}
 		}
 		return p
 	}
@@ -961,33 +1077,41 @@ func formatSpawn(tc *StreamToolCall, status ToolCallStatus) ToolCallPresentation
 		return e
 	}
 	res := resultMap(tc)
-	results := asSliceOfMaps(res["results"])
-	succeeded := 0
-	for _, r := range results {
-		if b, ok := r["success"].(bool); ok && b {
-			succeeded++
-			continue
+	if strings.EqualFold(strings.TrimSpace(tc.Name), "list_agents") {
+		agents := asSliceOfMaps(res["agents"])
+		p.Header = fmt.Sprintf("%d agents", len(agents))
+		for _, a := range agents {
+			id := pickStringField(a, "agent_id")
+			st := pickStringField(a, "status")
+			if id != "" {
+				p.Body = append(p.Body, ToolCallBlock{Type: ToolCallBlockText, Text: "- " + id + " · " + st})
+			}
 		}
-		if b, ok := r["ok"].(bool); ok && b {
-			succeeded++
-		}
+		return p
 	}
-	p.Header = fmt.Sprintf("%d / %d subagent tasks succeeded", succeeded, len(results))
-	preview := 5
-	for i, r := range results {
-		if i >= preview {
-			break
-		}
-		task := pickStringField(r, "task", "description")
-		sess := pickStringField(r, "session_id")
-		parts := []string{fmt.Sprintf("- \"%s\"", task)}
-		if sess != "" {
-			parts = append(parts, "· session "+sess)
-		}
-		p.Body = append(p.Body, ToolCallBlock{Type: ToolCallBlockText, Text: strings.Join(parts, " ")})
+	agentID := pickStringField(res, "agent_id")
+	statusText := pickStringField(res, "status")
+	switch {
+	case agentID != "" && statusText != "":
+		p.Header = agentID + " · " + statusText
+	case agentID != "":
+		p.Header = agentID
+	default:
+		p.Header = statusText
 	}
-	if len(results) > preview {
-		p.Footer = fmt.Sprintf("…and %d more", len(results)-preview)
+	taskID := pickStringField(res, "task_id")
+	sessionID := pickStringField(res, "session_id")
+	if taskID != "" {
+		p.Body = append(p.Body, ToolCallBlock{Type: ToolCallBlockText, Text: "task " + taskID})
+	}
+	if sessionID != "" {
+		p.Body = append(p.Body, ToolCallBlock{Type: ToolCallBlockText, Text: "session " + sessionID})
+	}
+	if text := pickStringField(res, "text", "report"); text != "" {
+		p.Body = append(p.Body, ToolCallBlock{Type: ToolCallBlockText, Text: truncLine(text)})
+	}
+	if errText := pickStringField(res, "error"); errText != "" {
+		p.Footer = "error: " + truncateSummary(errText)
 	}
 	return p
 }

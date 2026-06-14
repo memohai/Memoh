@@ -102,16 +102,18 @@ type UITurn struct {
 
 // UIBackgroundTask is the compact background exec state sent to the Web UI.
 type UIBackgroundTask struct {
-	TaskID     string `json:"task_id"`
-	Status     string `json:"status"`
-	Command    string `json:"command,omitempty"`
-	OutputFile string `json:"output_file,omitempty"`
-	ExitCode   int32  `json:"exit_code,omitempty"`
-	Duration   string `json:"duration,omitempty"`
-	OutputTail string `json:"output_tail,omitempty"`
-	Stream     string `json:"stream,omitempty"`
-	Chunk      string `json:"chunk,omitempty"`
-	Stalled    bool   `json:"stalled,omitempty"`
+	TaskID         string `json:"task_id"`
+	Status         string `json:"status"`
+	Command        string `json:"command,omitempty"`
+	AgentID        string `json:"agent_id,omitempty"`
+	AgentSessionID string `json:"agent_session_id,omitempty"`
+	OutputFile     string `json:"output_file,omitempty"`
+	ExitCode       int32  `json:"exit_code,omitempty"`
+	Duration       string `json:"duration,omitempty"`
+	OutputTail     string `json:"output_tail,omitempty"`
+	Stream         string `json:"stream,omitempty"`
+	Chunk          string `json:"chunk,omitempty"`
+	Stalled        bool   `json:"stalled,omitempty"`
 }
 
 // UIMessageStreamEvent is the generic event shape accepted by the UI stream converter.

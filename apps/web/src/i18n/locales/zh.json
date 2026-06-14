@@ -312,6 +312,7 @@
     "historyObserved": "参与过的聊天",
     "backgroundTask": {
       "running": "后台任务运行中",
+      "queued": "后台任务排队中",
       "completed": "后台任务已完成",
       "failed": "后台任务失败",
       "stalled": "后台任务需要处理",
@@ -334,9 +335,13 @@
       "read": "读取",
       "write": "写入",
       "edit": "编辑",
+      "apply_patch": "应用补丁",
       "list": "列出",
       "exec": "执行",
       "bg_status": "后台任务",
+      "list_background": "列出后台任务",
+      "get_background_status": "查看后台状态",
+      "kill_background": "终止后台任务",
       "web_search": "搜索网络",
       "web_fetch": "抓取",
       "search_memory": "搜索记忆",
@@ -359,9 +364,13 @@
       "speak": "朗读",
       "transcribe_audio": "转录音频",
       "generate_image": "生成图像",
-      "spawn": "派遣 {count} 个子代理",
+      "spawn_agent": "派遣智能体",
+      "send_message": "发送给智能体",
+      "wait_agent": "等待智能体",
+      "list_agents": "列出智能体",
       "clustered": "{count} 次工具调用",
       "use_skill": "使用技能",
+      "list_skills": "列出技能",
       "browser_action": "浏览器 {action}",
       "browser_observe": "观察浏览器 {action}",
       "computer_observe": "观察桌面 {action}",
@@ -441,7 +450,8 @@
       "pending": {
         "generic": "处理中…",
         "write": "正在写入文件…",
-        "edit": "正在编辑…"
+        "edit": "正在编辑…",
+        "apply_patch": "正在应用补丁…"
       },
       "detail": {
         "openInFiles": "在文件中打开",

@@ -977,8 +977,8 @@ func finalizeInteractiveRequests(message *UIMessage, output any) {
 
 // backgroundTaskFromToolResult detects a background handoff in a tool result
 // by payload shape — a task_id plus a background-start status marker —
-// regardless of which tool produced it. Terminal statuses (e.g. bg_status
-// inspection results) intentionally do not match.
+// regardless of which tool produced it. Terminal statuses from inspection
+// tools intentionally do not match.
 func backgroundTaskFromToolResult(output any) (UIBackgroundTask, bool) {
 	payload, ok := toolResultMap(output)
 	if !ok {
@@ -990,18 +990,24 @@ func backgroundTaskFromToolResult(output any) (UIBackgroundTask, bool) {
 		return UIBackgroundTask{}, false
 	}
 
-	switch strings.ToLower(strings.TrimSpace(stringFromMap(payload, "status"))) {
-	case "background_started", "auto_backgrounded", "started":
+	status := strings.ToLower(strings.TrimSpace(stringFromMap(payload, "status")))
+	switch status {
+	case "background_started", "auto_backgrounded", "started", "queued":
 	default:
 		return UIBackgroundTask{}, false
 	}
 
 	task := UIBackgroundTask{
-		TaskID:     taskID,
-		Status:     "running",
-		Command:    firstNonEmptyString(stringFromMap(payload, "command"), stringFromMap(payload, "description")),
-		OutputFile: stringFromMap(payload, "output_file"),
-		OutputTail: firstNonEmptyString(stringFromMap(payload, "output_tail"), stringFromMap(payload, "tail")),
+		TaskID:         taskID,
+		Status:         normalizeBackgroundTaskStatus(status),
+		Command:        firstNonEmptyString(stringFromMap(payload, "command"), stringFromMap(payload, "description"), stringFromMap(payload, "message")),
+		AgentID:        stringFromMap(payload, "agent_id"),
+		AgentSessionID: stringFromMap(payload, "agent_session_id", "session_id"),
+		OutputFile:     stringFromMap(payload, "output_file"),
+		OutputTail:     firstNonEmptyString(stringFromMap(payload, "output_tail"), stringFromMap(payload, "tail")),
+	}
+	if task.Status == "" {
+		task.Status = "running"
 	}
 	return task, true
 }
@@ -1025,6 +1031,12 @@ func mergeBackgroundTaskIntoTool(message *UIMessage, task UIBackgroundTask) {
 	}
 	if task.Command != "" {
 		merged.Command = task.Command
+	}
+	if task.AgentID != "" {
+		merged.AgentID = task.AgentID
+	}
+	if task.AgentSessionID != "" {
+		merged.AgentSessionID = task.AgentSessionID
 	}
 	if task.OutputFile != "" {
 		merged.OutputFile = task.OutputFile
@@ -1059,7 +1071,7 @@ func isBackgroundToolStillRunning(message UIMessage) bool {
 		return false
 	}
 	status := normalizeBackgroundTaskStatus(message.Background.Status)
-	return status == "running" || status == "stalled"
+	return status == "running" || status == "queued" || status == "stalled"
 }
 
 func parseBackgroundTaskNotification(text string) (UIBackgroundTask, bool) {
@@ -1083,11 +1095,18 @@ func parseBackgroundTaskNotification(text string) (UIBackgroundTask, bool) {
 		Command: firstNonEmptyString(
 			strings.TrimSpace(extractUITaskNotificationTag(body, "command")),
 			strings.TrimSpace(extractUITaskNotificationTag(body, "description")),
+			strings.TrimSpace(extractUITaskNotificationTag(body, "message")),
 		),
-		OutputFile: strings.TrimSpace(extractUITaskNotificationTag(body, "output-file")),
-		Duration:   strings.TrimSpace(extractUITaskNotificationTag(body, "duration")),
-		OutputTail: strings.TrimSpace(extractUITaskNotificationTag(body, "output-tail")),
-		Stalled:    status == "stalled",
+		AgentID:        strings.TrimSpace(extractUITaskNotificationTag(body, "agent-id")),
+		AgentSessionID: strings.TrimSpace(extractUITaskNotificationTag(body, "session-id")),
+		OutputFile:     strings.TrimSpace(extractUITaskNotificationTag(body, "output-file")),
+		Duration:       strings.TrimSpace(extractUITaskNotificationTag(body, "duration")),
+		OutputTail: firstNonEmptyString(
+			strings.TrimSpace(extractUITaskNotificationTag(body, "output-tail")),
+			strings.TrimSpace(extractUITaskNotificationTag(body, "report")),
+			strings.TrimSpace(extractUITaskNotificationTag(body, "error")),
+		),
+		Stalled: status == "stalled",
 	}
 	if rawExitCode := strings.TrimSpace(extractUITaskNotificationTag(body, "exit-code")); rawExitCode != "" {
 		if exitCode, err := strconv.ParseInt(rawExitCode, 10, 32); err == nil {
@@ -1138,12 +1157,17 @@ func toolResultMap(output any) (map[string]any, bool) {
 	return typed, true
 }
 
-func stringFromMap(value any, key string) string {
+func stringFromMap(value any, keys ...string) string {
 	typed, ok := value.(map[string]any)
 	if !ok {
 		return ""
 	}
-	return stringFromAny(typed[key])
+	for _, key := range keys {
+		if value := stringFromAny(typed[key]); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func firstNonEmptyString(values ...string) string {
@@ -1159,6 +1183,8 @@ func normalizeBackgroundTaskStatus(status string) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "background_started", "auto_backgrounded", "started", "running":
 		return "running"
+	case "queued", "queue":
+		return "queued"
 	case "completed", "complete", "success", "succeeded":
 		return "completed"
 	case "failed", "failure", "error":

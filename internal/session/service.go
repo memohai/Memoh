@@ -272,6 +272,24 @@ func (s *Service) ListByRoute(ctx context.Context, routeID string) ([]Session, e
 	return sessions, nil
 }
 
+// ListSubagentsByParent returns active subagent sessions created under a
+// parent session.
+func (s *Service) ListSubagentsByParent(ctx context.Context, parentSessionID string) ([]Session, error) {
+	pgParentSessionID, err := dbpkg.ParseUUID(parentSessionID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid parent session id: %w", err)
+	}
+	rows, err := s.queries.ListSubagentSessionsByParent(ctx, pgParentSessionID)
+	if err != nil {
+		return nil, err
+	}
+	sessions := make([]Session, 0, len(rows))
+	for _, row := range rows {
+		sessions = append(sessions, toSession(row))
+	}
+	return sessions, nil
+}
+
 // GetActiveForRoute returns the active session for a route.
 func (s *Service) GetActiveForRoute(ctx context.Context, routeID string) (Session, error) {
 	pgRouteID, err := dbpkg.ParseUUID(routeID)

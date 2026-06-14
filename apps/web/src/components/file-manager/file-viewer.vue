@@ -134,7 +134,7 @@ watch(() => props.file.path, () => {
   }
 }, { immediate: true })
 
-// Reload the file when the chat agent runs a fs-mutating tool (write/edit/exec)
+// Reload the file when the chat agent runs a fs-mutating tool (write/edit/apply_patch/exec)
 // against the same bot. Skip if the user has unsaved changes — we don't want to
 // silently overwrite their edits.
 const chatStore = useChatStore()

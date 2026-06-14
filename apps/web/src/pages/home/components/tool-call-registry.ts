@@ -61,6 +61,7 @@ import {
 } from 'lucide-vue-next'
 import type { ToolCallBlock } from '@/store/chat-list'
 import ToolCallDetailBrowser from './tool-call-detail-browser.vue'
+import ToolCallDetailApplyPatch from './tool-call-detail-apply-patch.vue'
 import ToolCallDetailComputer from './tool-call-detail-computer.vue'
 import ToolCallDetailContacts from './tool-call-detail-contacts.vue'
 import ToolCallDetailEdit from './tool-call-detail-edit.vue'
@@ -115,7 +116,8 @@ export function isDirPathTool(toolName: string): boolean {
 const READONLY_TOOLS = new Set([
   'read', 'list', 'web_search', 'web_fetch', 'search_memory', 'search_messages',
   'get_contacts', 'list_sessions', 'list_email', 'read_email', 'list_email_accounts',
-  'list_schedule', 'get_schedule', 'bg_status', 'browser_observe', 'computer_observe',
+  'list_schedule', 'get_schedule', 'list_skills', 'bg_status', 'list_background', 'get_background_status',
+  'browser_observe', 'computer_observe',
 ])
 
 export function isReadOnlyTool(toolName: string): boolean {
@@ -172,6 +174,84 @@ function firstLine(s: string, max = 80): string {
 function lineCount(s: string): number {
   if (!s) return 0
   return s.split('\n').length
+}
+
+function resultObject(block: ToolCallBlock): Record<string, unknown> {
+  const result = asObject(block.result)
+  const sc = asObject(result.structuredContent)
+  return Object.keys(sc).length > 0 ? sc : result
+}
+
+interface PatchFileTarget {
+  operation: 'add' | 'modify' | 'delete'
+  path: string
+}
+
+function normalizePatchOperation(value: unknown): PatchFileTarget['operation'] | '' {
+  if (value === 'add' || value === 'added') return 'add'
+  if (value === 'modify' || value === 'modified' || value === 'update') return 'modify'
+  if (value === 'delete' || value === 'deleted') return 'delete'
+  return ''
+}
+
+function patchFilesFromResult(block: ToolCallBlock): PatchFileTarget[] {
+  const result = resultObject(block)
+  const rawFiles = result.files
+  if (Array.isArray(rawFiles)) {
+    return rawFiles
+      .map((item) => {
+        const obj = asObject(item)
+        const path = pickString(obj, 'path')
+        const operation = normalizePatchOperation(obj.operation)
+        return path && operation ? { operation, path } : null
+      })
+      .filter((item): item is PatchFileTarget => Boolean(item))
+  }
+
+  const out: PatchFileTarget[] = []
+  for (const [key, operation] of [
+    ['added', 'add'],
+    ['modified', 'modify'],
+    ['deleted', 'delete'],
+  ] as const) {
+    const paths = result[key]
+    if (!Array.isArray(paths)) continue
+    for (const path of paths) {
+      if (typeof path === 'string' && path) out.push({ operation, path })
+    }
+  }
+  return out
+}
+
+function patchFilesFromInput(patch: string): PatchFileTarget[] {
+  if (!patch) return []
+  const out: PatchFileTarget[] = []
+  for (const rawLine of patch.split('\n')) {
+    const line = rawLine.trim()
+    if (line.startsWith('*** Add File: ')) {
+      const path = line.slice('*** Add File: '.length).trim()
+      if (path) out.push({ operation: 'add', path })
+    }
+    else if (line.startsWith('*** Delete File: ')) {
+      const path = line.slice('*** Delete File: '.length).trim()
+      if (path) out.push({ operation: 'delete', path })
+    }
+    else if (line.startsWith('*** Update File: ')) {
+      const path = line.slice('*** Update File: '.length).trim()
+      if (path) out.push({ operation: 'modify', path })
+    }
+  }
+  return out
+}
+
+function patchLineCounts(patch: string): { add: number; remove: number } {
+  let add = 0
+  let remove = 0
+  for (const line of patch.split('\n')) {
+    if (line.startsWith('+')) add++
+    else if (line.startsWith('-') && !line.startsWith('***')) remove++
+  }
+  return { add, remove }
 }
 
 function hostnameOrUrl(url: string): string {
@@ -279,7 +359,7 @@ function resolveGuiAction(
 
 export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
   const input = asObject(block.input)
-  
+
   switch (block.toolName) {
     case 'ask_user': {
       // pickString covers pre-v2 history where input was { question: "..." }.
@@ -326,6 +406,30 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         diffRemove: lineCount(oldText),
       }
     }
+    case 'apply_patch': {
+      const patch = pickString(input, 'patch')
+      const files = patchFilesFromResult(block)
+      const fileTargets = files.length > 0 ? files : patchFilesFromInput(patch)
+      const target = fileTargets.length === 1
+        ? basename(fileTargets[0]!.path)
+        : fileTargets.length > 1
+          ? `${fileTargets.length} files`
+          : ''
+      const fullTarget = fileTargets
+        .map(file => `${file.operation} ${file.path}`)
+        .join('\n')
+      const counts = patchLineCounts(patch)
+      return {
+        icon: FilePen,
+        actionKey: 'apply_patch',
+        target,
+        fullTarget,
+        detail: ToolCallDetailApplyPatch,
+        defaultOpen: true,
+        diffAdd: counts.add,
+        diffRemove: counts.remove,
+      }
+    }
     case 'list': {
       const path = pickString(input, 'path')
       return { icon: FolderOpen, actionKey: 'list', target: basename(path), fullTarget: path, detail: ToolCallDetailOutput }
@@ -343,6 +447,16 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
     case 'bg_status': {
       const action = pickString(input, 'action') || 'list'
       return { icon: ListChecks, actionKey: 'bg_status', target: action }
+    }
+    case 'list_background':
+      return { icon: ListChecks, actionKey: 'list_background' }
+    case 'get_background_status': {
+      const taskId = pickString(input, 'task_id', 'taskId')
+      return { icon: SearchCheck, actionKey: 'get_background_status', target: taskId }
+    }
+    case 'kill_background': {
+      const taskId = pickString(input, 'task_id', 'taskId')
+      return { icon: X, actionKey: 'kill_background', target: taskId }
     }
     case 'web_search': {
       const query = pickString(input, 'query')
@@ -505,21 +619,51 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         detail: ToolCallDetailImage,
       }
     }
-    case 'spawn': {
-      const tasks = Array.isArray(input.tasks) ? (input.tasks as unknown[]).length : 0
+    case 'spawn_agent': {
+      const task = pickString(input, 'task')
       return {
         icon: Workflow,
-        actionKey: 'spawn',
-        actionParams: { count: tasks },
-        target: '',
+        actionKey: 'spawn_agent',
+        target: pickString(input, 'id') || truncate(task, 60),
+        fullTarget: task,
         detail: ToolCallDetailSpawn,
       }
     }
+    case 'send_message': {
+      const message = pickString(input, 'message')
+      return {
+        icon: MessagesSquare,
+        actionKey: 'send_message',
+        target: pickString(input, 'id'),
+        fullTarget: message,
+        detail: ToolCallDetailSpawn,
+      }
+    }
+    case 'wait_agent':
+      return {
+        icon: Timer,
+        actionKey: 'wait_agent',
+        target: pickString(input, 'id', 'task_id'),
+        detail: ToolCallDetailSpawn,
+      }
+    case 'list_agents':
+      return {
+        icon: ListChecks,
+        actionKey: 'list_agents',
+        target: '',
+        detail: ToolCallDetailSpawn,
+      }
     case 'use_skill':
       return {
         icon: Sparkles,
         actionKey: 'use_skill',
         target: pickString(input, 'skillName'),
+      }
+    case 'list_skills':
+      return {
+        icon: Sparkles,
+        actionKey: 'list_skills',
+        target: '',
       }
     case 'browser_action': {
       const resolved = resolveGuiAction(BROWSER_ACTION_ICONS, 'browserAction', MousePointerClick, 'browser_action', pickString(input, 'action'))

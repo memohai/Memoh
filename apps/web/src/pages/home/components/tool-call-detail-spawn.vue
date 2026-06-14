@@ -1,63 +1,63 @@
 <template>
   <div class="space-y-1.5">
     <div
-      v-if="tasks.length && !results.length"
+      v-if="agents.length"
       class="space-y-1"
     >
-      <div
-        v-for="(task, idx) in tasks"
-        :key="idx"
-        class="flex items-start gap-1.5 text-xs"
+      <button
+        v-for="agent in agents"
+        :key="agent.agent_id || agent.session_id"
+        class="flex items-center gap-1.5 text-xs w-full text-left rounded-sm px-1 py-0.5 transition-colors"
+        :class="agent.session_id ? 'cursor-pointer hover:bg-accent' : ''"
+        @click="agent.session_id ? navigateToSession(agent.session_id) : undefined"
       >
-        <span class="font-mono text-foreground shrink-0">#{{ idx + 1 }}</span>
-        <span
-          class="truncate text-muted-foreground"
-          :title="task"
-        >{{ task }}</span>
-      </div>
+        <CircleDot
+          class="size-3 shrink-0"
+          :class="statusClass(agent.status)"
+        />
+        <span class="font-mono text-foreground shrink-0">{{ agent.agent_id }}</span>
+        <span class="text-muted-foreground truncate">{{ agent.status }}</span>
+        <ExternalLink
+          v-if="agent.session_id"
+          class="size-3 text-muted-foreground/50 shrink-0 ml-auto"
+        />
+      </button>
     </div>
 
     <div
-      v-if="results.length"
+      v-else-if="result"
       class="space-y-1"
     >
-      <component
-        :is="result.session_id ? 'button' : 'div'"
-        v-for="(result, idx) in results"
-        :key="idx"
+      <button
         class="flex items-center gap-1.5 text-xs w-full text-left rounded-sm px-1 py-0.5 transition-colors"
         :class="result.session_id ? 'cursor-pointer hover:bg-accent' : ''"
         @click="result.session_id ? navigateToSession(result.session_id) : undefined"
       >
-        <CircleCheck
-          v-if="result.success"
-          class="size-3 text-success shrink-0"
+        <CircleDot
+          class="size-3 shrink-0"
+          :class="statusClass(result.status)"
         />
-        <CircleX
-          v-else
-          class="size-3 text-destructive shrink-0"
-        />
-        <span class="font-mono text-foreground shrink-0">#{{ idx + 1 }}</span>
         <span
-          v-if="result.task"
-          class="truncate text-muted-foreground"
-          :title="result.task"
-        >{{ result.task }}</span>
+          v-if="result.agent_id"
+          class="font-mono text-foreground shrink-0"
+        >{{ result.agent_id }}</span>
+        <span
+          v-if="result.status"
+          class="text-muted-foreground truncate"
+        >{{ result.status }}</span>
         <ExternalLink
           v-if="result.session_id"
           class="size-3 text-muted-foreground/50 shrink-0 ml-auto"
         />
-      </component>
-    </div>
+      </button>
 
-    <div
-      v-if="hasDetailedResults"
-      class="space-y-1 pt-1 border-t border-border/50"
-    >
-      <div
-        v-for="(result, idx) in results"
-        :key="idx"
-      >
+      <div class="space-y-1 pt-1 border-t border-border/50">
+        <p
+          v-if="result.task_id"
+          class="text-xs text-muted-foreground"
+        >
+          <span class="font-mono">{{ result.task_id }}</span>
+        </p>
         <pre
           v-if="result.text"
           class="text-xs text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-32 overflow-y-auto rounded-sm bg-muted/30 px-2 py-1"
@@ -72,7 +72,7 @@
     </div>
 
     <p
-      v-if="!tasks.length && !results.length"
+      v-else
       class="text-xs text-muted-foreground italic"
     >
       {{ t('chat.tools.detail.noTasks') }}
@@ -82,29 +82,23 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { CircleCheck, CircleX, ExternalLink } from 'lucide-vue-next'
+import { CircleDot, ExternalLink } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/store/chat-list'
 import type { ToolCallBlock } from '@/store/chat-list'
 
-interface SpawnTaskResult {
-  task?: string
+interface AgentResult {
+  agent_id?: string
   session_id?: string
+  task_id?: string
+  status?: string
   text?: string
-  success?: boolean
   error?: string
 }
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()
-
 const chatStore = useChatStore()
-
-const tasks = computed(() => {
-  const input = props.block.input as Record<string, unknown> | undefined
-  const t = input?.tasks
-  return Array.isArray(t) ? (t as string[]) : []
-})
 
 function resolveResult(): Record<string, unknown> | null {
   if (!props.block.result) return null
@@ -112,16 +106,34 @@ function resolveResult(): Record<string, unknown> | null {
   return (result.structuredContent as Record<string, unknown>) ?? result
 }
 
-const results = computed<SpawnTaskResult[]>(() => {
+const result = computed<AgentResult | null>(() => {
   const r = resolveResult()
-  if (!r) return []
-  const items = r.results
-  return Array.isArray(items) ? (items as SpawnTaskResult[]) : []
+  if (!r) return null
+  if (Array.isArray(r.agents)) return null
+  return r as AgentResult
 })
 
-const hasDetailedResults = computed(() =>
-  results.value.some(r => r.text || r.error),
-)
+const agents = computed<AgentResult[]>(() => {
+  const r = resolveResult()
+  if (!r || !Array.isArray(r.agents)) return []
+  return r.agents as AgentResult[]
+})
+
+function statusClass(status?: string) {
+  switch (status) {
+    case 'completed':
+      return 'text-success'
+    case 'failed':
+    case 'killed':
+      return 'text-destructive'
+    case 'running':
+      return 'text-primary'
+    case 'queued':
+      return 'text-muted-foreground'
+    default:
+      return 'text-muted-foreground/70'
+  }
+}
 
 function navigateToSession(sessionId: string) {
   if (!sessionId || !chatStore.currentBotId) return

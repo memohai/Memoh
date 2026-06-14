@@ -110,6 +110,8 @@ export interface BackgroundTask {
   botId?: string
   sessionId?: string
   command?: string
+  agentId?: string
+  agentSessionId?: string
   outputFile?: string
   outputTail?: string
   stream?: string
@@ -252,11 +254,11 @@ export const useChatStore = defineStore('chat', () => {
   const overrideReasoningEffort = ref<string>('')
   const startupSendFailure = ref<StartupSendFailure | null>(null)
 
-  // Bumps every time a fs-mutating tool call (write/edit/exec) finishes for the
+  // Bumps every time a fs-mutating tool call (write/edit/apply_patch/exec) finishes for the
   // current bot. File-manager components watch this to refresh their listings
   // and any open file viewers without polling.
   const fsChangedAt = ref(0)
-  const FS_MUTATING_TOOLS = new Set(['write', 'edit', 'exec'])
+  const FS_MUTATING_TOOLS = new Set(['write', 'edit', 'apply_patch', 'exec'])
 
   function bumpFsChangedAtIfFsMutation(message: UIMessage) {
     if (message.type !== 'tool') return
@@ -426,6 +428,9 @@ export const useChatStore = defineStore('chat', () => {
       case 'output':
       case 'running':
         return 'running'
+      case 'queued':
+      case 'queue':
+        return 'queued'
       case 'complete':
       case 'completed':
       case 'success':
@@ -448,7 +453,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function isBackgroundTaskActive(task?: BackgroundTask): boolean {
     const status = normalizeBackgroundStatus(task?.status, task?.event)
-    return status === 'running' || status === 'stalled'
+    return status === 'running' || status === 'queued' || status === 'stalled'
   }
 
   function normalizeBackgroundTask(task?: UIBackgroundTask, eventType?: string): BackgroundTask | null {
@@ -466,6 +471,8 @@ export const useChatStore = defineStore('chat', () => {
       botId: pickString(record, 'bot_id', 'botId') || undefined,
       sessionId: pickString(record, 'session_id', 'sessionId') || undefined,
       command: pickString(record, 'command') || undefined,
+      agentId: pickString(record, 'agent_id', 'agentId') || undefined,
+      agentSessionId: pickString(record, 'agent_session_id', 'agentSessionId') || undefined,
       outputFile: pickString(record, 'output_file', 'outputFile') || undefined,
       outputTail: pickString(record, 'output_tail', 'outputTail', 'tail') || undefined,
       stream: pickString(record, 'stream') || undefined,

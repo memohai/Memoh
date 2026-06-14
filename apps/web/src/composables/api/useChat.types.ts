@@ -132,6 +132,8 @@ export interface UIBackgroundTask {
   bot_id?: string
   session_id?: string
   command?: string
+  agent_id?: string
+  agent_session_id?: string
   status?: string
   stream?: string
   chunk?: string

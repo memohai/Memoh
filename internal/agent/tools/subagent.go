@@ -9,9 +9,10 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -25,14 +26,14 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 )
 
-// SpawnAgent is the interface the spawn tool uses to run subagent tasks.
+// SpawnAgent is the interface the subagent control tools use to run tasks.
 // It is satisfied by *agent.Agent and avoids an import cycle.
 type SpawnAgent interface {
 	Generate(ctx context.Context, cfg SpawnRunConfig) (*SpawnResult, error)
 	GenerateWithWatchdog(ctx context.Context, cfg SpawnRunConfig, touchFn func()) (*SpawnResult, error)
 }
 
-// SpawnRunConfig mirrors agent.RunConfig fields needed by spawn.
+// SpawnRunConfig mirrors agent.RunConfig fields needed by subagent controls.
 type SpawnRunConfig struct {
 	Model           *sdk.Model
 	System          string
@@ -45,7 +46,7 @@ type SpawnRunConfig struct {
 	PromptCacheTTL  string
 }
 
-// SpawnIdentity mirrors agent.SessionContext fields needed by spawn.
+// SpawnIdentity mirrors agent.SessionContext fields needed by subagent controls.
 type SpawnIdentity struct {
 	BotID             string
 	ChatID            string
@@ -68,51 +69,32 @@ type SpawnResult struct {
 	Usage    *sdk.Usage
 }
 
-// subagentTimeout caps total execution time as a safety net per attempt.
-// This prevents runaway subagent calls from blocking the parent agent forever,
-// even if the watchdog keeps getting touched (e.g., tiny tokens but no convergence).
-const subagentTimeout = 10 * time.Minute
+const (
+	// subagentTimeout caps total execution time as a safety net per attempt.
+	subagentTimeout = 10 * time.Minute
+	// spawnHeartbeatInterval keeps the parent stream active during foreground waits.
+	spawnHeartbeatInterval  = 30 * time.Second
+	subagentMaxRetries      = 3
+	subagentRetryBaseDelay  = 2 * time.Second
+	subagentWatchdogTimeout = 3 * time.Minute
 
-// spawnHeartbeatInterval controls how often a progress event is emitted during
-// spawn execution to keep the parent stream's idle timeout from firing.
-const spawnHeartbeatInterval = 30 * time.Second
+	agentControlVersion     = "v1"
+	defaultWaitAgentTimeout = 30 * time.Second
+	maxWaitAgentTimeout     = 300 * time.Second
+)
 
-// subagentMaxRetries is the maximum number of retry attempts for a failed
-// subagent task. Only transient errors (rate limits, network failures) are
-// retried; fatal errors (bad config, invalid input) fail immediately.
-const subagentMaxRetries = 3
-
-// subagentRetryBaseDelay is the initial backoff delay between retry attempts.
-const subagentRetryBaseDelay = 2 * time.Second
-
-// ErrWatchdogTimedOut is returned when the subagent watchdog fires
-// (no activity within the timeout period).
+// ErrWatchdogTimedOut is returned when the subagent watchdog fires.
 var ErrWatchdogTimedOut = errors.New("subagent watchdog: no activity within timeout")
 
-// subagentWatchdogTimeout is the default inactivity timeout for the watchdog.
-const subagentWatchdogTimeout = 3 * time.Minute
-
 var (
-	// err429Pattern matches HTTP 429 status codes in error strings.
-	err429Pattern = regexp.MustCompile(`(^|[^0-9])429($|[^0-9])`)
-	// errEOFPattern matches EOF or connection-level resets.
-	errEOFPattern = regexp.MustCompile(`(?i)connection (reset|refused)|EOF$`)
-	// serverErrPattern matches "api error 5XX" where XX is any two digits.
+	err429Pattern    = regexp.MustCompile(`(^|[^0-9])429($|[^0-9])`)
+	errEOFPattern    = regexp.MustCompile(`(?i)connection (reset|refused)|EOF$`)
 	serverErrPattern = regexp.MustCompile(`api error 5\\d{2}`)
+	agentIDPattern   = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
+	errAgentNotFound = errors.New("agent not found")
 )
 
 // SubagentWatchdog implements an activity-based timeout for subagent execution.
-// It is "touched" (fed/reset) on each activity signal from the LLM or tools.
-// If no touch occurs within the configured timeout, it fires by cancelling
-// its associated context.
-//
-// Lifecycle:
-//  1. Call NewSubagentWatchdog to create a watchdog context.
-//  2. Call Touch() on each activity signal.
-//  3. Call Stop() when the watched operation completes normally.
-//
-// The watchdog respects parent context cancellation: if the parent context
-// is cancelled, the watchdog's context is also cancelled immediately.
 type SubagentWatchdog struct {
 	timeout time.Duration
 	touchCh chan struct{}
@@ -121,15 +103,11 @@ type SubagentWatchdog struct {
 	logger  *slog.Logger
 }
 
-// NewSubagentWatchdog creates a watchdog that cancels the returned context
-// after timeout of inactivity. The returned context is derived from parentCtx.
-// If parentCtx is cancelled, the watchdog context is also cancelled.
 func NewSubagentWatchdog(parentCtx context.Context, timeout time.Duration, logger *slog.Logger) (context.Context, *SubagentWatchdog) {
 	if timeout <= 0 {
 		timeout = subagentWatchdogTimeout
 	}
 	ctx, cancel := context.WithCancelCause(parentCtx)
-
 	wd := &SubagentWatchdog{
 		timeout: timeout,
 		touchCh: make(chan struct{}, 1),
@@ -137,44 +115,31 @@ func NewSubagentWatchdog(parentCtx context.Context, timeout time.Duration, logge
 		done:    make(chan struct{}),
 		logger:  logger,
 	}
-
 	go wd.run(ctx)
-
 	return ctx, wd
 }
 
-// Touch resets the watchdog timer. It is non-blocking and safe to call
-// from any goroutine.
 func (w *SubagentWatchdog) Touch() {
 	select {
 	case w.touchCh <- struct{}{}:
 	default:
-		// Already a pending touch, no need to queue another.
 	}
 }
 
-// Stop terminates the watchdog goroutine and releases resources.
-// Call this when the watched operation completes normally.
 func (w *SubagentWatchdog) Stop() {
 	w.cancel(context.Canceled)
 	<-w.done
 }
 
-// run is the watchdog loop. It watches for touches and fires if none arrive
-// within the configured timeout.
 func (w *SubagentWatchdog) run(ctx context.Context) {
 	defer close(w.done)
-
 	timer := time.NewTimer(w.timeout)
 	defer timer.Stop()
-
 	for {
 		select {
 		case <-ctx.Done():
-			// Parent cancelled or Stop() called.
 			return
 		case <-w.touchCh:
-			// Activity detected; reset the timer.
 			if !timer.Stop() {
 				select {
 				case <-timer.C:
@@ -183,41 +148,34 @@ func (w *SubagentWatchdog) run(ctx context.Context) {
 			}
 			timer.Reset(w.timeout)
 		case <-timer.C:
-			// No activity within timeout -- fire!
-			w.logger.Warn("subagent watchdog fired",
-				slog.Duration("timeout", w.timeout),
-			)
+			w.logger.Warn("subagent watchdog fired", slog.Duration("timeout", w.timeout))
 			w.cancel(ErrWatchdogTimedOut)
 			return
 		}
 	}
 }
 
-// maxTasksPerSpawn caps the number of tasks accepted in a single spawn call.
-const maxTasksPerSpawn = 5
+type agentSessionService interface {
+	Create(ctx context.Context, input sessionpkg.CreateInput) (sessionpkg.Session, error)
+	ListSubagentsByParent(ctx context.Context, parentSessionID string) ([]sessionpkg.Session, error)
+}
 
-// maxSpawnCallsPerSession caps the total number of spawn tool calls within
-// a single agent session to prevent subagent storms.
-const maxSpawnCallsPerSession = 3
-
-// SpawnProvider exposes a "spawn" tool that runs one or more subagent tasks
-// concurrently and returns results to the parent agent.
+// SpawnProvider exposes managed subagent control tools.
 type SpawnProvider struct {
 	agent          SpawnAgent
 	settings       *settings.Service
 	models         *models.Service
 	queries        dbstore.Queries
-	sessionService *sessionpkg.Service
-	messageService messagepkg.Writer
+	sessionService agentSessionService
+	messageService messagepkg.Service
 	systemPromptFn func(sessionType string) string
 	modelCreator   ModelCreator
 	bgManager      *background.Manager
 	modelResolver  func(ctx context.Context, botID string) (*sdk.Model, string, string, error)
+	coord          *agentCoordinator
 	logger         *slog.Logger
 }
 
-// NewSpawnProvider creates a SpawnProvider. The agent must be injected later
-// via SetAgent to avoid a dependency cycle.
 func NewSpawnProvider(
 	log *slog.Logger,
 	settingsSvc *settings.Service,
@@ -235,25 +193,21 @@ func NewSpawnProvider(
 		queries:        queries,
 		sessionService: sessionService,
 		bgManager:      bgManager,
-		logger:         log.With(slog.String("tool", "spawn")),
+		coord:          newAgentCoordinator(),
+		logger:         log.With(slog.String("tool", "agent_control")),
 	}
 	p.modelResolver = p.resolveModel
 	return p
 }
 
-// SetAgent injects the agent after construction (breaking the DI cycle).
 func (p *SpawnProvider) SetAgent(a SpawnAgent) {
 	p.agent = a
 }
 
-// SetMessageService injects an optional message writer for persisting
-// subagent conversation history.
-func (p *SpawnProvider) SetMessageService(w messagepkg.Writer) {
+func (p *SpawnProvider) SetMessageService(w messagepkg.Service) {
 	p.messageService = w
 }
 
-// SetSystemPromptFunc injects the function used to generate the system prompt
-// (typically agent.GenerateSystemPrompt).
 func (p *SpawnProvider) SetSystemPromptFunc(fn func(sessionType string) string) {
 	p.systemPromptFn = fn
 }
@@ -263,188 +217,827 @@ func (p *SpawnProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 		return nil, nil
 	}
 	sess := session
-	spawnCount := new(int32)
 	return []sdk.Tool{
 		{
-			Name:        "spawn",
-			Description: fmt.Sprintf("Spawn one or more subagents to work on tasks in parallel. Each task runs in its own context with file, exec, and web tools. All results are returned together. Max %d tasks per call, max %d calls per session.", maxTasksPerSpawn, maxSpawnCallsPerSession),
+			Name:        "spawn_agent",
+			Description: "Create one managed subagent for an independent task. Returns a memorable agent_id. Use send_message to continue an existing agent.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"tasks": map[string]any{
-						"type":        "array",
-						"description": fmt.Sprintf("List of task instructions. Each string is a self-contained prompt for one subagent. Max %d tasks.", maxTasksPerSpawn),
-						"items":       map[string]any{"type": "string"},
+					"id": map[string]any{
+						"type":        "string",
+						"description": "Optional memorable agent id. If omitted, an id like agent_1 is assigned. Must be lowercase letters, digits, underscore, or hyphen.",
+					},
+					"task": map[string]any{
+						"type":        "string",
+						"description": "Task instruction for the new agent.",
 					},
 					"run_in_background": map[string]any{
 						"type":        "boolean",
-						"description": "If true, run the subagent batch in the background. Returns immediately with a task ID; you will be notified with each task's report when all tasks complete. Use for long research or build batches that should not block the conversation.",
+						"description": "If true, return immediately with a task_id. Use bg_status to inspect or kill the task.",
 					},
 				},
-				"required": []string{"tasks"},
+				"required": []string{"task"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execSpawn(ctx.Context, sess, inputAsMap(input), spawnCount)
+				return p.execSpawnAgent(ctx.Context, sess, inputAsMap(input))
+			},
+		},
+		{
+			Name:        "send_message",
+			Description: "Send a follow-up message to an existing managed subagent. Messages to a busy agent are queued and run serially.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type":        "string",
+						"description": "Existing agent id returned by spawn_agent or list_agents.",
+					},
+					"message": map[string]any{
+						"type":        "string",
+						"description": "Follow-up instruction for the agent.",
+					},
+					"run_in_background": map[string]any{
+						"type":        "boolean",
+						"description": "If true, return immediately with a task_id. If the agent is busy, the message is queued regardless of this value.",
+					},
+				},
+				"required": []string{"id", "message"},
+			},
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
+				return p.execSendMessage(ctx.Context, sess, inputAsMap(input))
+			},
+		},
+		{
+			Name:        "wait_agent",
+			Description: "Wait for a managed subagent task to finish. A timeout only stops waiting; it does not cancel the agent.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type":        "string",
+						"description": "Existing agent id.",
+					},
+					"task_id": map[string]any{
+						"type":        "string",
+						"description": "Optional specific task id returned by spawn_agent or send_message.",
+					},
+					"timeout_seconds": map[string]any{
+						"type":        "integer",
+						"description": "Wait timeout in seconds. Default 30, maximum 300.",
+						"minimum":     1,
+						"maximum":     300,
+					},
+				},
+				"required": []string{"id"},
+			},
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
+				return p.execWaitAgent(ctx.Context, sess, inputAsMap(input))
+			},
+		},
+		{
+			Name:        "list_agents",
+			Description: "List managed subagents created in the current session only.",
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
+				return p.execListAgents(ctx.Context, sess, inputAsMap(input))
 			},
 		},
 	}, nil
 }
 
-type spawnResult struct {
-	Task      string `json:"task"`
-	SessionID string `json:"session_id,omitempty"`
-	Text      string `json:"text"`
-	Success   bool   `json:"success"`
-	Error     string `json:"error,omitempty"`
+type agentRecord struct {
+	AgentID   string
+	SessionID string
+	Title     string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
-func (p *SpawnProvider) execSpawn(ctx context.Context, session SessionContext, args map[string]any, spawnCount *int32) (any, error) {
-	botID := strings.TrimSpace(session.BotID)
-	if botID == "" {
-		return nil, errors.New("bot_id is required")
-	}
+type agentRunResult struct {
+	AgentID        string `json:"agent_id"`
+	SessionID      string `json:"session_id,omitempty"`
+	TaskID         string `json:"task_id,omitempty"`
+	Status         string `json:"status"`
+	Message        string `json:"message,omitempty"`
+	Text           string `json:"text,omitempty"`
+	Error          string `json:"error,omitempty"`
+	QueuePosition  int    `json:"queue_position,omitempty"`
+	QueueRemaining int    `json:"queue_remaining,omitempty"`
+	TimedOut       bool   `json:"timed_out,omitempty"`
+}
 
-	// Enforce per-session spawn call limit.
-	current := atomic.AddInt32(spawnCount, 1)
-	if current > maxSpawnCallsPerSession {
-		return map[string]any{
-			"isError": true,
-			"content": []map[string]any{{
-				"type": "text",
-				"text": fmt.Sprintf("Spawn limit reached: max %d spawn calls per session (already made %d). Consolidate your remaining work into the current agent context instead of spawning more subagents.", maxSpawnCallsPerSession, current-1),
-			}},
-		}, nil
-	}
+type agentRequest struct {
+	taskID         string
+	agentID        string
+	agentSessionID string
+	message        string
+	parentSession  SessionContext
+	model          *sdk.Model
+	modelID        string
+	promptCacheTTL string
+	systemPrompt   string
+}
 
-	tasksRaw, ok := args["tasks"]
-	if !ok {
-		return nil, errors.New("tasks is required")
+type agentCoordinator struct {
+	mu     sync.Mutex
+	states map[string]*agentState
+}
+
+type agentState struct {
+	botID           string
+	parentSessionID string
+	agentID         string
+	agentSessionID  string
+	runningTaskID   string
+	queue           []*agentRequest
+	last            agentRunResult
+}
+
+type agentStateSnapshot struct {
+	RunningTaskID string
+	QueuedTaskIDs []string
+	Last          agentRunResult
+}
+
+func newAgentCoordinator() *agentCoordinator {
+	return &agentCoordinator{states: make(map[string]*agentState)}
+}
+
+func agentStateKey(botID, parentSessionID, agentID string) string {
+	return botID + "\x00" + parentSessionID + "\x00" + agentID
+}
+
+func (c *agentCoordinator) ensure(botID, parentSessionID, agentID, agentSessionID string) *agentState {
+	key := agentStateKey(botID, parentSessionID, agentID)
+	st := c.states[key]
+	if st == nil {
+		st = &agentState{
+			botID:           botID,
+			parentSessionID: parentSessionID,
+			agentID:         agentID,
+			agentSessionID:  agentSessionID,
+		}
+		c.states[key] = st
 	}
-	tasks, err := toStringSlice(tasksRaw)
+	if st.agentSessionID == "" {
+		st.agentSessionID = agentSessionID
+	}
+	return st
+}
+
+func (c *agentCoordinator) snapshot(botID, parentSessionID, agentID string) agentStateSnapshot {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	st := c.states[agentStateKey(botID, parentSessionID, agentID)]
+	if st == nil {
+		return agentStateSnapshot{}
+	}
+	queued := make([]string, 0, len(st.queue))
+	for _, req := range st.queue {
+		queued = append(queued, req.taskID)
+	}
+	return agentStateSnapshot{
+		RunningTaskID: st.runningTaskID,
+		QueuedTaskIDs: queued,
+		Last:          st.last,
+	}
+}
+
+func (p *SpawnProvider) execSpawnAgent(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+	if err := validateParentSession(session); err != nil {
+		return nil, err
+	}
+	task := strings.TrimSpace(StringArg(args, "task"))
+	if task == "" {
+		return nil, errors.New("task is required")
+	}
+	agentID, err := p.resolveNewAgentID(ctx, session, StringArg(args, "id"))
 	if err != nil {
-		return nil, fmt.Errorf("invalid tasks: %w", err)
+		return nil, err
 	}
-	if len(tasks) == 0 {
-		return nil, errors.New("at least one task is required")
+	if existing, err := p.findAgent(ctx, session, agentID); err == nil && existing.AgentID != "" {
+		return nil, fmt.Errorf("agent %q already exists; use send_message to continue it", agentID)
+	} else if err != nil && !errors.Is(err, errAgentNotFound) {
+		return nil, err
 	}
-	// Cap tasks per call.
-	if len(tasks) > maxTasksPerSpawn {
-		p.logger.Warn("spawn tasks capped",
-			slog.Int("requested", len(tasks)),
-			slog.Int("max", maxTasksPerSpawn),
-		)
-		tasks = tasks[:maxTasksPerSpawn]
+	rec, err := p.createAgentSession(context.WithoutCancel(ctx), session, agentID, task)
+	if err != nil {
+		return nil, err
 	}
+	runInBackground, _, _ := BoolArg(args, "run_in_background")
+	return p.submitAgentTask(ctx, session, rec, task, runInBackground)
+}
 
-	// Use a decoupled context for model resolution and subagent execution
-	// so that a parent stream cancellation (e.g. idle timeout) does not
-	// prevent the spawn from completing and returning its results.
-	sessionCtx := context.WithoutCancel(ctx)
+func (p *SpawnProvider) execSendMessage(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+	if err := validateParentSession(session); err != nil {
+		return nil, err
+	}
+	agentID, err := normalizeAgentID(StringArg(args, "id"))
+	if err != nil {
+		return nil, err
+	}
+	message := strings.TrimSpace(StringArg(args, "message"))
+	if message == "" {
+		return nil, errors.New("message is required")
+	}
+	rec, err := p.findAgent(ctx, session, agentID)
+	if err != nil {
+		return nil, err
+	}
+	runInBackground, _, _ := BoolArg(args, "run_in_background")
+	return p.submitAgentTask(ctx, session, rec, message, runInBackground)
+}
 
-	sdkModel, modelID, promptCacheTTL, err := p.modelResolver(sessionCtx, botID)
+func (p *SpawnProvider) execWaitAgent(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+	if err := validateParentSession(session); err != nil {
+		return nil, err
+	}
+	agentID, err := normalizeAgentID(StringArg(args, "id"))
+	if err != nil {
+		return nil, err
+	}
+	rec, err := p.findAgent(ctx, session, agentID)
+	if err != nil {
+		return nil, err
+	}
+	timeout := defaultWaitAgentTimeout
+	if seconds, ok, err := IntArg(args, "timeout_seconds"); err != nil {
+		return nil, err
+	} else if ok {
+		if seconds < 1 {
+			seconds = 1
+		}
+		timeout = time.Duration(seconds) * time.Second
+		if timeout > maxWaitAgentTimeout {
+			timeout = maxWaitAgentTimeout
+		}
+	}
+	taskID := strings.TrimSpace(StringArg(args, "task_id"))
+	return p.waitAgent(ctx, session, rec, taskID, timeout), nil
+}
+
+func (p *SpawnProvider) execListAgents(ctx context.Context, session SessionContext, _ map[string]any) (any, error) {
+	if err := validateParentSession(session); err != nil {
+		return nil, err
+	}
+	agents, err := p.listAgentRecords(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]map[string]any, 0, len(agents))
+	for _, rec := range agents {
+		snap := p.coord.snapshot(session.BotID, session.SessionID, rec.AgentID)
+		status := "idle"
+		switch {
+		case snap.RunningTaskID != "":
+			status = string(background.TaskRunning)
+		case len(snap.QueuedTaskIDs) > 0:
+			status = string(background.TaskQueued)
+		case snap.Last.Status != "":
+			status = snap.Last.Status
+		}
+		item := map[string]any{
+			"agent_id":     rec.AgentID,
+			"session_id":   rec.SessionID,
+			"title":        rec.Title,
+			"status":       status,
+			"queued_count": len(snap.QueuedTaskIDs),
+			"created_at":   session.FormatTime(rec.CreatedAt),
+			"updated_at":   session.FormatTime(rec.UpdatedAt),
+		}
+		if snap.RunningTaskID != "" {
+			item["current_task_id"] = snap.RunningTaskID
+		}
+		if snap.Last.TaskID != "" {
+			item["last_task_id"] = snap.Last.TaskID
+		}
+		items = append(items, item)
+	}
+	return map[string]any{"agents": items, "count": len(items)}, nil
+}
+
+func (p *SpawnProvider) submitAgentTask(ctx context.Context, session SessionContext, rec agentRecord, message string, runInBackground bool) (any, error) {
+	if p.bgManager == nil {
+		return nil, errors.New("background task manager not available")
+	}
+	sdkModel, modelID, promptCacheTTL, err := p.modelResolver(context.WithoutCancel(ctx), session.BotID)
 	if err != nil {
 		return nil, fmt.Errorf("resolve model: %w", err)
 	}
-
 	systemPrompt := ""
 	if p.systemPromptFn != nil {
 		systemPrompt = p.systemPromptFn(sessionpkg.TypeSubagent)
 	}
 
-	if runInBg, _, _ := BoolArg(args, "run_in_background"); runInBg {
-		return p.execSpawnBackground(sessionCtx, session, sdkModel, modelID, promptCacheTTL, systemPrompt, tasks)
+	req := &agentRequest{
+		agentID:        rec.AgentID,
+		agentSessionID: rec.SessionID,
+		message:        message,
+		parentSession:  session,
+		model:          sdkModel,
+		modelID:        modelID,
+		promptCacheTTL: promptCacheTTL,
+		systemPrompt:   systemPrompt,
 	}
+	description := truncateTitle(fmt.Sprintf("%s: %s", rec.AgentID, message), 120)
 
-	results := make([]spawnResult, len(tasks))
-	var wg sync.WaitGroup
-	wg.Add(len(tasks))
-
-	// Start a heartbeat goroutine that emits progress events into the
-	// parent stream at regular intervals. This keeps the stream's idle
-	// timeout from firing while subagents are running.
-	heartbeatCtx, heartbeatCancel := context.WithCancel(sessionCtx)
-	defer heartbeatCancel()
-	p.startSpawnHeartbeat(heartbeatCtx, session, len(tasks))
-
-	for i, task := range tasks {
-		go func(idx int, query string) {
-			defer wg.Done()
-			results[idx] = p.runSubagentTask(sessionCtx, session, sdkModel, modelID, promptCacheTTL, systemPrompt, query, true)
-		}(i, task)
-	}
-	wg.Wait()
-
-	return map[string]any{"results": results}, nil
-}
-
-// execSpawnBackground registers the batch as a background spawn task and
-// returns immediately. Branches derive from the task context so bg_status
-// kill can cancel them; the join notification carries each branch's report.
-func (p *SpawnProvider) execSpawnBackground(
-	ctx context.Context,
-	session SessionContext,
-	model *sdk.Model,
-	modelID, promptCacheTTL, systemPrompt string,
-	tasks []string,
-) (any, error) {
-	if p.bgManager == nil {
-		return nil, errors.New("background task manager not available")
-	}
-
-	description := truncateTitle(fmt.Sprintf("spawn %d task(s): %s", len(tasks), strings.Join(tasks, " | ")), 120)
-	taskID, taskCtx, err := p.bgManager.StartSpawnTask(ctx, session.BotID, session.SessionID, description)
-	if err != nil {
+	key := agentStateKey(session.BotID, session.SessionID, rec.AgentID)
+	p.coord.mu.Lock()
+	st := p.coord.ensure(session.BotID, session.SessionID, rec.AgentID, rec.SessionID)
+	if st.runningTaskID != "" {
+		taskID, _, err := p.bgManager.StartAgentTask(ctx, session.BotID, session.SessionID, rec.AgentID, rec.SessionID, message, description, true)
+		if err != nil {
+			p.coord.mu.Unlock()
+			return nil, err
+		}
+		req.taskID = taskID
+		st.queue = append(st.queue, req)
+		queuePosition := len(st.queue)
+		p.coord.mu.Unlock()
 		return map[string]any{
-			"isError": true,
-			"content": []map[string]any{{
-				"type": "text",
-				"text": fmt.Sprintf("%s. Check running tasks with bg_status (and kill stale ones) before starting more.", err),
-			}},
+			"agent_id":       rec.AgentID,
+			"session_id":     rec.SessionID,
+			"task_id":        taskID,
+			"status":         string(background.TaskQueued),
+			"description":    description,
+			"queue_position": queuePosition,
+			"message":        "Agent is currently running. Message queued.",
 		}, nil
 	}
 
-	go func() {
-		results := make([]spawnResult, len(tasks))
-		var wg sync.WaitGroup
-		wg.Add(len(tasks))
-		for i, task := range tasks {
-			go func(idx int, query string) {
-				defer wg.Done()
-				results[idx] = p.runSubagentTask(taskCtx, session, model, modelID, promptCacheTTL, systemPrompt, query, false)
-			}(i, task)
-		}
-		wg.Wait()
+	taskID, taskCtx, err := p.bgManager.StartAgentTask(context.WithoutCancel(ctx), session.BotID, session.SessionID, rec.AgentID, rec.SessionID, message, description, false)
+	if err != nil {
+		p.coord.mu.Unlock()
+		return nil, err
+	}
+	req.taskID = taskID
+	st.runningTaskID = taskID
+	p.coord.mu.Unlock()
 
-		branches := make([]background.SpawnBranch, len(results))
-		for i, r := range results {
-			status := background.TaskCompleted
-			if !r.Success {
-				status = background.TaskFailed
+	if runInBackground {
+		go p.runAgentRequest(taskCtx, key, req)
+		return map[string]any{
+			"agent_id":    rec.AgentID,
+			"session_id":  rec.SessionID,
+			"task_id":     taskID,
+			"status":      "background_started",
+			"description": description,
+			"message":     fmt.Sprintf("Agent %s started in background with task ID: %s. Use bg_status to inspect or kill it.", rec.AgentID, taskID),
+		}, nil
+	}
+
+	heartbeatCtx, heartbeatCancel := context.WithCancel(context.WithoutCancel(ctx))
+	defer heartbeatCancel()
+	p.startSpawnHeartbeat(heartbeatCtx, session, 1)
+	result := p.runAgentRequest(taskCtx, key, req)
+	return agentResultMap(result), nil
+}
+
+func (p *SpawnProvider) runAgentRequest(ctx context.Context, key string, req *agentRequest) agentRunResult {
+	result := p.runSubagentTask(ctx, req)
+	if task := p.bgManager.Get(req.taskID); task != nil {
+		if snap := task.Snapshot(); snap.Status == background.TaskKilled {
+			result.Status = string(background.TaskKilled)
+		}
+	}
+	status := background.TaskCompleted
+	switch {
+	case result.Status == string(background.TaskKilled):
+		status = background.TaskKilled
+	case result.Error != "":
+		status = background.TaskFailed
+		result.Status = string(background.TaskFailed)
+	default:
+		result.Status = string(background.TaskCompleted)
+	}
+	p.bgManager.CompleteAgentTask(req.taskID, background.AgentTaskResult{
+		AgentID:        req.agentID,
+		AgentSessionID: req.agentSessionID,
+		Message:        req.message,
+		Status:         status,
+		Report:         result.Text,
+		Error:          result.Error,
+	})
+	p.finishAgentRequest(ctx, key, result)
+	return result
+}
+
+func (p *SpawnProvider) finishAgentRequest(ctx context.Context, key string, result agentRunResult) {
+	var next *agentRequest
+	p.coord.mu.Lock()
+	st := p.coord.states[key]
+	if st != nil {
+		st.runningTaskID = ""
+		st.last = result
+		for len(st.queue) > 0 {
+			candidate := st.queue[0]
+			st.queue = st.queue[1:]
+			task := p.bgManager.Get(candidate.taskID)
+			if task != nil && task.Snapshot().Status == background.TaskKilled {
+				continue
 			}
-			branches[i] = background.SpawnBranch{
-				Task:           r.Task,
-				ChildSessionID: r.SessionID,
-				Status:         status,
-				Report:         r.Text,
-				Error:          r.Error,
+			next = candidate
+			st.runningTaskID = candidate.taskID
+			break
+		}
+	}
+	p.coord.mu.Unlock()
+	if next == nil {
+		return
+	}
+	runCtx, ok, err := p.bgManager.MarkAgentTaskRunning(ctx, next.taskID)
+	if err != nil {
+		p.logger.Warn("start queued agent task failed", slog.String("task_id", next.taskID), slog.Any("error", err))
+		p.finishAgentRequest(ctx, key, agentRunResult{
+			AgentID:   next.agentID,
+			SessionID: next.agentSessionID,
+			TaskID:    next.taskID,
+			Status:    string(background.TaskFailed),
+			Message:   next.message,
+			Error:     err.Error(),
+		})
+		return
+	}
+	if !ok {
+		p.finishAgentRequest(ctx, key, agentRunResult{
+			AgentID:   next.agentID,
+			SessionID: next.agentSessionID,
+			TaskID:    next.taskID,
+			Status:    string(background.TaskKilled),
+			Message:   next.message,
+		})
+		return
+	}
+	go p.runAgentRequest(runCtx, key, next)
+}
+
+func (p *SpawnProvider) waitAgent(ctx context.Context, session SessionContext, rec agentRecord, taskID string, timeout time.Duration) map[string]any {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		if result := p.currentWaitResult(session, rec, taskID); result != nil {
+			if isTerminalStatus(fmt.Sprintf("%v", result["status"])) || result["status"] == "idle" {
+				return result
 			}
 		}
-		p.bgManager.CompleteSpawnTask(taskID, branches)
-	}()
+		select {
+		case <-ctx.Done():
+			result := p.currentWaitResult(session, rec, taskID)
+			if result == nil {
+				result = map[string]any{"agent_id": rec.AgentID, "session_id": rec.SessionID}
+			}
+			result["timed_out"] = true
+			result["error"] = ctx.Err().Error()
+			return result
+		case <-deadline.C:
+			result := p.currentWaitResult(session, rec, taskID)
+			if result == nil {
+				result = map[string]any{"agent_id": rec.AgentID, "session_id": rec.SessionID, "status": "idle"}
+			}
+			result["timed_out"] = true
+			return result
+		case <-ticker.C:
+		}
+	}
+}
 
+func (p *SpawnProvider) currentWaitResult(session SessionContext, rec agentRecord, taskID string) map[string]any {
+	if taskID != "" {
+		if task := p.bgManager.GetForSession(session.BotID, session.SessionID, taskID); task != nil {
+			return agentSnapshotMap(task.Snapshot())
+		}
+		return map[string]any{
+			"agent_id":   rec.AgentID,
+			"session_id": rec.SessionID,
+			"task_id":    taskID,
+			"status":     "not_found",
+		}
+	}
+	snap := p.coord.snapshot(session.BotID, session.SessionID, rec.AgentID)
+	if snap.RunningTaskID != "" {
+		if task := p.bgManager.GetForSession(session.BotID, session.SessionID, snap.RunningTaskID); task != nil {
+			return agentSnapshotMap(task.Snapshot())
+		}
+	}
+	if len(snap.QueuedTaskIDs) > 0 {
+		if task := p.bgManager.GetForSession(session.BotID, session.SessionID, snap.QueuedTaskIDs[0]); task != nil {
+			return agentSnapshotMap(task.Snapshot())
+		}
+	}
+	if snap.Last.Status != "" {
+		return agentResultMap(snap.Last)
+	}
 	return map[string]any{
-		"status":      "background_started",
-		"task_id":     taskID,
-		"kind":        "spawn",
-		"task_count":  len(tasks),
-		"description": description,
-		"message":     fmt.Sprintf("%d subagent task(s) started in background with task ID: %s. You will be notified with each task's report when all complete. Do NOT poll or sleep — the notification arrives automatically.", len(tasks), taskID),
+		"agent_id":   rec.AgentID,
+		"session_id": rec.SessionID,
+		"status":     "idle",
+	}
+}
+
+func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) agentRunResult {
+	res := agentRunResult{
+		AgentID:   req.agentID,
+		SessionID: req.agentSessionID,
+		TaskID:    req.taskID,
+		Message:   req.message,
+	}
+	history := p.loadAgentMessages(context.WithoutCancel(ctx), req.agentSessionID)
+	cfg := SpawnRunConfig{
+		Model:          req.model,
+		System:         req.systemPrompt,
+		Query:          req.message,
+		SessionType:    sessionpkg.TypeSubagent,
+		PromptCacheTTL: req.promptCacheTTL,
+		Messages:       history,
+		Identity: SpawnIdentity{
+			BotID:             req.parentSession.BotID,
+			ChatID:            req.parentSession.ChatID,
+			SessionID:         req.agentSessionID,
+			ChannelIdentityID: req.parentSession.ChannelIdentityID,
+			CurrentPlatform:   req.parentSession.CurrentPlatform,
+			SessionToken:      req.parentSession.SessionToken,
+			IsSubagent:        true,
+		},
+		LoopDetection: SpawnLoopConfig{Enabled: true},
+	}
+
+	var lastErr error
+	for attempt := 0; attempt <= subagentMaxRetries; attempt++ {
+		if attempt > 0 {
+			delay := subagentRetryBaseDelay * time.Duration(attempt)
+			timer := time.NewTimer(delay)
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				timer.Stop()
+				res.Error = fmt.Sprintf("parent cancelled: %v", ctx.Err())
+				return res
+			}
+		}
+
+		safetyCtx, safetyCancel := context.WithTimeout(ctx, subagentTimeout)
+		wdCtx, wd := NewSubagentWatchdog(safetyCtx, subagentWatchdogTimeout, p.logger)
+		genResult, err := p.agent.GenerateWithWatchdog(wdCtx, cfg, wd.Touch)
+		wd.Stop()
+		safetyCancel()
+
+		if err == nil {
+			res.Text = genResult.Text
+			if p.messageService != nil && req.agentSessionID != "" {
+				p.persistMessages(context.WithoutCancel(ctx), req.parentSession.BotID, req.agentSessionID, req.modelID, req.message, genResult)
+			}
+			return res
+		}
+		lastErr = err
+		if ctx.Err() != nil && !errors.Is(err, ErrWatchdogTimedOut) {
+			res.Error = fmt.Sprintf("parent cancelled: %v", ctx.Err())
+			return res
+		}
+		if errors.Is(err, ErrWatchdogTimedOut) || isRetryableSubagentError(err) {
+			continue
+		}
+		res.Error = err.Error()
+		return res
+	}
+	res.Error = fmt.Sprintf("all %d attempts failed (last: %v)", subagentMaxRetries+1, lastErr)
+	return res
+}
+
+func (p *SpawnProvider) createAgentSession(ctx context.Context, parent SessionContext, agentID, task string) (agentRecord, error) {
+	if p.sessionService == nil {
+		return agentRecord{}, errors.New("session service not available")
+	}
+	sess, err := p.sessionService.Create(ctx, sessionpkg.CreateInput{
+		BotID:           parent.BotID,
+		Type:            sessionpkg.TypeSubagent,
+		Title:           truncateTitle(task, 100),
+		ParentSessionID: parent.SessionID,
+		Metadata: map[string]any{
+			"agent_id":              agentID,
+			"agent_control_version": agentControlVersion,
+		},
+	})
+	if err != nil {
+		return agentRecord{}, err
+	}
+	return agentRecord{
+		AgentID:   agentID,
+		SessionID: sess.ID,
+		Title:     sess.Title,
+		CreatedAt: sess.CreatedAt,
+		UpdatedAt: sess.UpdatedAt,
 	}, nil
 }
 
-// startSpawnHeartbeat emits periodic progress events into the parent agent
-// stream to prevent the idle timeout from firing while spawn tasks run.
-// Each heartbeat carries a progress status so the frontend can display it.
+func (p *SpawnProvider) resolveNewAgentID(ctx context.Context, session SessionContext, raw string) (string, error) {
+	if strings.TrimSpace(raw) != "" {
+		return normalizeAgentID(raw)
+	}
+	agents, err := p.listAgentRecords(ctx, session)
+	if err != nil {
+		return "", err
+	}
+	used := make(map[string]struct{}, len(agents))
+	for _, rec := range agents {
+		used[rec.AgentID] = struct{}{}
+	}
+	for i := 1; ; i++ {
+		id := "agent_" + strconv.Itoa(i)
+		if _, ok := used[id]; !ok {
+			return id, nil
+		}
+	}
+}
+
+func (p *SpawnProvider) findAgent(ctx context.Context, session SessionContext, agentID string) (agentRecord, error) {
+	agents, err := p.listAgentRecords(ctx, session)
+	if err != nil {
+		return agentRecord{}, err
+	}
+	for _, rec := range agents {
+		if rec.AgentID == agentID {
+			return rec, nil
+		}
+	}
+	return agentRecord{}, fmt.Errorf("%w: %q in current session", errAgentNotFound, agentID)
+}
+
+func (p *SpawnProvider) listAgentRecords(ctx context.Context, session SessionContext) ([]agentRecord, error) {
+	if p.sessionService == nil {
+		return nil, errors.New("session service not available")
+	}
+	sessions, err := p.sessionService.ListSubagentsByParent(ctx, session.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	records := make([]agentRecord, 0, len(sessions))
+	for _, sess := range sessions {
+		if sess.Type != sessionpkg.TypeSubagent {
+			continue
+		}
+		agentID, _ := sess.Metadata["agent_id"].(string)
+		agentID = strings.TrimSpace(agentID)
+		if agentID == "" {
+			continue
+		}
+		records = append(records, agentRecord{
+			AgentID:   agentID,
+			SessionID: sess.ID,
+			Title:     sess.Title,
+			CreatedAt: sess.CreatedAt,
+			UpdatedAt: sess.UpdatedAt,
+		})
+	}
+	sort.Slice(records, func(i, j int) bool {
+		return records[i].CreatedAt.Before(records[j].CreatedAt)
+	})
+	return records, nil
+}
+
+func (p *SpawnProvider) loadAgentMessages(ctx context.Context, sessionID string) []sdk.Message {
+	if p.messageService == nil || strings.TrimSpace(sessionID) == "" {
+		return nil
+	}
+	msgs, err := p.messageService.ListBySession(ctx, sessionID)
+	if err != nil {
+		p.logger.Warn("load subagent messages failed", slog.String("session_id", sessionID), slog.Any("error", err))
+		return nil
+	}
+	out := make([]sdk.Message, 0, len(msgs))
+	for _, msg := range msgs {
+		if converted, ok := sdkMessageFromPersisted(msg); ok {
+			out = append(out, converted)
+		}
+	}
+	return out
+}
+
+func sdkMessageFromPersisted(msg messagepkg.Message) (sdk.Message, bool) {
+	var full sdk.Message
+	if err := json.Unmarshal(msg.Content, &full); err == nil && (full.Role != "" || len(full.Content) > 0) {
+		if full.Role == "" {
+			full.Role = sdk.MessageRole(msg.Role)
+		}
+		return full, true
+	}
+
+	var envelope struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(msg.Content, &envelope); err == nil {
+		role := envelope.Role
+		if role == "" {
+			role = msg.Role
+		}
+		var text string
+		if err := json.Unmarshal(envelope.Content, &text); err == nil {
+			return sdk.Message{
+				Role:    sdk.MessageRole(role),
+				Content: []sdk.MessagePart{sdk.TextPart{Text: text}},
+			}, true
+		}
+		wrapped, _ := json.Marshal(struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		}{Role: role, Content: envelope.Content})
+		if err := json.Unmarshal(wrapped, &full); err == nil {
+			return full, true
+		}
+	}
+
+	var text string
+	if err := json.Unmarshal(msg.Content, &text); err == nil {
+		return sdk.Message{
+			Role:    sdk.MessageRole(msg.Role),
+			Content: []sdk.MessagePart{sdk.TextPart{Text: text}},
+		}, true
+	}
+	return sdk.Message{}, false
+}
+
+func validateParentSession(session SessionContext) error {
+	if strings.TrimSpace(session.BotID) == "" {
+		return errors.New("bot_id is required")
+	}
+	if strings.TrimSpace(session.SessionID) == "" {
+		return errors.New("session_id is required")
+	}
+	return nil
+}
+
+func normalizeAgentID(raw string) (string, error) {
+	id := strings.ToLower(strings.TrimSpace(raw))
+	if id == "" {
+		return "", errors.New("id is required")
+	}
+	if !agentIDPattern.MatchString(id) {
+		return "", fmt.Errorf("invalid agent id %q: expected lowercase slug matching %s", raw, agentIDPattern.String())
+	}
+	return id, nil
+}
+
+func isTerminalStatus(status string) bool {
+	switch status {
+	case string(background.TaskCompleted), string(background.TaskFailed), string(background.TaskKilled), "idle", "not_found":
+		return true
+	default:
+		return false
+	}
+}
+
+func agentResultMap(res agentRunResult) map[string]any {
+	out := map[string]any{
+		"agent_id":   res.AgentID,
+		"session_id": res.SessionID,
+		"task_id":    res.TaskID,
+		"status":     res.Status,
+	}
+	if res.Message != "" {
+		out["message"] = res.Message
+	}
+	if res.Text != "" {
+		out["text"] = res.Text
+	}
+	if res.Error != "" {
+		out["error"] = res.Error
+	}
+	if res.QueuePosition > 0 {
+		out["queue_position"] = res.QueuePosition
+	}
+	if res.QueueRemaining > 0 {
+		out["queue_remaining"] = res.QueueRemaining
+	}
+	if res.TimedOut {
+		out["timed_out"] = true
+	}
+	return out
+}
+
+func agentSnapshotMap(s background.TaskSnapshot) map[string]any {
+	out := map[string]any{
+		"agent_id":   s.AgentID,
+		"session_id": s.AgentSessionID,
+		"task_id":    s.TaskID,
+		"status":     string(s.Status),
+		"message":    s.AgentMessage,
+	}
+	if s.AgentReport != "" {
+		out["text"] = s.AgentReport
+	}
+	if s.AgentError != "" {
+		out["error"] = s.AgentError
+	}
+	return out
+}
+
 func (*SpawnProvider) startSpawnHeartbeat(ctx context.Context, session SessionContext, _ int) {
 	emitter := session.Emitter
 	if emitter == nil {
@@ -458,182 +1051,31 @@ func (*SpawnProvider) startSpawnHeartbeat(ctx context.Context, session SessionCo
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				// Emit a progress event through the agent's stream emitter.
-				// The agent framework converts ToolStreamEvent into the
-				// appropriate wire-level progress event, which resets the
-				// idle timeout timer in the resolver.
-				emitter(ToolStreamEvent{
-					Type: StreamEventSpawnHeartbeat,
-				})
+				emitter(ToolStreamEvent{Type: StreamEventSpawnHeartbeat})
 			}
 		}
 	}()
 }
 
-// detachAttempts controls whether each attempt is detached from ctx
-// cancellation: foreground spawns detach so the batch survives parent stream
-// cancellation; background spawns inherit it so Kill stops in-flight work.
-func (p *SpawnProvider) runSubagentTask(
-	ctx context.Context,
-	parentSession SessionContext,
-	model *sdk.Model,
-	modelID string,
-	promptCacheTTL string,
-	systemPrompt string,
-	query string,
-	detachAttempts bool,
-) spawnResult {
-	res := spawnResult{Task: query}
-
-	var sessionID string
-	if p.sessionService != nil {
-		sess, err := p.sessionService.Create(context.WithoutCancel(ctx), sessionpkg.CreateInput{
-			BotID:           parentSession.BotID,
-			Type:            sessionpkg.TypeSubagent,
-			Title:           truncateTitle(query, 100),
-			ParentSessionID: parentSession.SessionID,
-		})
-		if err != nil {
-			p.logger.Warn("failed to create subagent session", slog.Any("error", err))
-		} else {
-			sessionID = sess.ID
-			res.SessionID = sessionID
-		}
-	}
-
-	cfg := SpawnRunConfig{
-		Model:          model,
-		System:         systemPrompt,
-		Query:          query,
-		SessionType:    sessionpkg.TypeSubagent,
-		PromptCacheTTL: promptCacheTTL,
-		Identity: SpawnIdentity{
-			BotID:             parentSession.BotID,
-			ChatID:            parentSession.ChatID,
-			SessionID:         sessionID,
-			ChannelIdentityID: parentSession.ChannelIdentityID,
-			CurrentPlatform:   parentSession.CurrentPlatform,
-			SessionToken:      parentSession.SessionToken,
-			IsSubagent:        true,
-		},
-		LoopDetection: SpawnLoopConfig{Enabled: true},
-	}
-
-	var lastErr error
-	for attempt := 0; attempt <= subagentMaxRetries; attempt++ {
-		if attempt > 0 {
-			delay := subagentRetryBaseDelay * time.Duration(attempt)
-			p.logger.Info("subagent retry",
-				slog.String("session_id", sessionID),
-				slog.Int("attempt", attempt),
-				slog.Duration("delay", delay),
-				slog.String("error", lastErr.Error()),
-			)
-			delayTimer := time.NewTimer(delay)
-			deadlineTimer := time.NewTimer(subagentTimeout)
-			select {
-			case <-delayTimer.C:
-				deadlineTimer.Stop()
-			case <-deadlineTimer.C:
-				delayTimer.Stop()
-				// Hard deadline: don't retry indefinitely.
-				res.Error = fmt.Sprintf("retry deadline exceeded (last error: %v)", lastErr)
-				return res
-			}
-		}
-
-		// Create a two-layer timeout per attempt:
-		// 1. Safety net: wall-clock timeout (subagentTimeout) via context.WithTimeout.
-		// 2. Watchdog: activity-based timeout (subagentWatchdogTimeout) that fires
-		//    when no stream events (tokens, tool output) are received.
-		// When detachAttempts is set, use context.WithoutCancel so retries get
-		// a fresh timeout even if the parent stream was cancelled (e.g. by
-		// idle timeout).
-		attemptBase := ctx
-		if detachAttempts {
-			attemptBase = context.WithoutCancel(ctx)
-		}
-		safetyCtx, safetyCancel := context.WithTimeout(attemptBase, subagentTimeout)
-		wdCtx, wd := NewSubagentWatchdog(safetyCtx, subagentWatchdogTimeout, p.logger)
-
-		genResult, err := p.agent.GenerateWithWatchdog(wdCtx, cfg, wd.Touch)
-		wd.Stop()
-		safetyCancel()
-
-		if err == nil {
-			res.Text = genResult.Text
-			res.Success = true
-			if p.messageService != nil && sessionID != "" {
-				p.persistMessages(context.WithoutCancel(ctx), parentSession.BotID, sessionID, modelID, query, genResult)
-			}
-			return res
-		}
-
-		lastErr = err
-
-		// Check if the true parent context was cancelled (not watchdog, not safety timeout).
-		// If the parent is done, don't retry.
-		if ctx.Err() != nil && !errors.Is(err, ErrWatchdogTimedOut) {
-			res.Error = fmt.Sprintf("parent cancelled: %v", ctx.Err())
-			return res
-		}
-
-		// Watchdog timeouts are always retryable.
-		if errors.Is(err, ErrWatchdogTimedOut) {
-			p.logger.Warn("subagent watchdog fired, will retry",
-				slog.String("session_id", sessionID),
-				slog.Int("attempt", attempt+1),
-				slog.Int("max_attempts", subagentMaxRetries+1),
-			)
-			continue
-		}
-
-		if !isRetryableSubagentError(err) {
-			res.Error = err.Error()
-			return res
-		}
-	}
-
-	p.logger.Warn("subagent failed after all retries",
-		slog.String("session_id", sessionID),
-		slog.Int("attempts", subagentMaxRetries+1),
-		slog.String("error", lastErr.Error()),
-	)
-	res.Error = fmt.Sprintf("all %d attempts failed (last: %v)", subagentMaxRetries+1, lastErr)
-	return res
-}
-
-// isRetryableSubagentError returns true for transient errors that warrant a retry.
-// Fatal errors (invalid config, context cancelled by user) return false.
 func isRetryableSubagentError(err error) bool {
 	if err == nil {
 		return false
 	}
 	errStr := err.Error()
-	// Rate limits
 	if strings.Contains(errStr, "rate limit") || strings.Contains(errStr, "rate_limit") {
 		return true
 	}
-	// HTTP 429 and 5xx
 	if err429Pattern.MatchString(errStr) || serverErrPattern.MatchString(errStr) {
 		return true
 	}
-	// Connection-level errors
 	if errEOFPattern.MatchString(errStr) {
 		return true
 	}
-	// Network timeouts
 	var netErr net.Error
 	if errors.As(err, &netErr) {
 		return true
 	}
-	// Context cancellation from parent (idle timeout, etc.) IS retryable
-	// for subagents — they should complete their work even if the parent
-	// stream was interrupted.
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-	return false
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func (p *SpawnProvider) persistMessages(
@@ -682,8 +1124,6 @@ func (p *SpawnProvider) persistMessages(
 // ModelCreator creates an sdk.Model from provider config. Set via SetModelCreator.
 type ModelCreator func(modelID, clientType, apiKey, codexAccountID, baseURL string, httpClient *http.Client) *sdk.Model
 
-// SetModelCreator injects the function used to create SDK models
-// (typically agent.CreateModel wrapped to match the signature).
 func (p *SpawnProvider) SetModelCreator(fn ModelCreator) {
 	p.modelCreator = fn
 }
@@ -726,25 +1166,6 @@ func (p *SpawnProvider) resolveModel(ctx context.Context, botID string) (*sdk.Mo
 	)
 	cacheTTL := providers.ProviderConfigString(provider, "prompt_cache_ttl")
 	return sdkModel, modelInfo.ID, cacheTTL, nil
-}
-
-func toStringSlice(v any) ([]string, error) {
-	switch val := v.(type) {
-	case []string:
-		return val, nil
-	case []any:
-		result := make([]string, 0, len(val))
-		for _, item := range val {
-			s, ok := item.(string)
-			if !ok {
-				return nil, fmt.Errorf("expected string, got %T", item)
-			}
-			result = append(result, s)
-		}
-		return result, nil
-	default:
-		return nil, fmt.Errorf("expected array, got %T", v)
-	}
 }
 
 func truncateTitle(s string, maxRunes int) string {

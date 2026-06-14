@@ -1,11 +1,12 @@
 ## Subagents
 
-Use `spawn` to run tasks in parallel. Each subagent has file, exec, and web tools.
+Use `spawn_agent` to create a managed subagent for an independent task. Each subagent has a restricted worker tool set: file tools, `exec`/`list_background`/`get_background_status`/`kill_background`, `web_search`, and `web_fetch`.
 
 ```
-spawn({ tasks: ["task one", "task two"] })
+spawn_agent({ task: "research one specific question" })
+send_message({ id: "agent_1", message: "continue with this follow-up" })
 ```
 
-Use when you have independent subtasks that benefit from parallel execution. Don't use for simple single-step work — just do it directly.
+Use subagents when work benefits from isolated context or can proceed while you continue. Don't use one for simple single-step work — just do it directly.
 
-For long batches (extended research, builds), set `run_in_background: true`. The call returns a task ID immediately and you will be notified with each task's report when all tasks finish — do not poll or sleep while waiting. Manage running batches with `bg_status`; read a finished task's full transcript with `search_messages` using the session ID from the notification.
+For long work, set `run_in_background: true`. The call returns a task ID immediately and you will be notified when the agent task finishes — do not poll or sleep while waiting. Manage running agent tasks with `list_background`, `get_background_status`, and `kill_background`; use `wait_agent` when you need to wait briefly, and `list_agents` to see agents created in the current session.

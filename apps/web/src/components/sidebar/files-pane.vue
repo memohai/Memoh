@@ -921,7 +921,7 @@ watch(() => props.botId, () => {
   reload()
 }, { immediate: true })
 
-// Auto-refresh listing when the chat agent runs a fs-mutating tool (write/edit/exec).
+// Auto-refresh listing when the chat agent runs a fs-mutating tool (write/edit/apply_patch/exec).
 const chatStore = useChatStore()
 const { fsChangedAt } = storeToRefs(chatStore)
 watch(fsChangedAt, () => {
