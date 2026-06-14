@@ -14,7 +14,7 @@ export const buttonVariants = cva(
         default:
           'text-background',
         destructive:
-          'text-foreground transition-colors duration-150 hover:bg-[var(--btn-destructive-hover-bg)] hover:text-[var(--btn-destructive-hover-text)]',
+          'bg-destructive text-destructive-foreground hover:bg-destructive/90 active:bg-destructive/80 transition-colors duration-150',
         // OUTLINE is the app-wide bordered/standalone action. Keep it visually
         // identical to `secondary`; the ring/fill/press model lives in style.css.
         outline:

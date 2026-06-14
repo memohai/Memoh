@@ -163,6 +163,13 @@ prose use `variant="link"`; for a control-sized action use a normal `<Button>`.
   `<Button variant="brand">` (rare brand CTAs like chat Send) and a handful of
   reserved tokens (`--sidebar-primary`, capability/event accents). Never make
   purple a default surface or a large fill; the skeleton stays black/white/gray.
+- **Destructive is filled, not ghost.** `variant="destructive"` renders a solid
+  `bg-destructive text-destructive-foreground` button — a filled red CTA. Never
+  use `variant="ghost"` with manual destructive text classes (`text-destructive`,
+  `hover:bg-destructive/10`) as a substitute; that is the OLD pre-refactor ghost
+  pattern. If you need a low-emphasis destructive affordance (e.g. a secondary
+  action in a footer), use `variant="outline"` with the destructive class as a
+  deliberate exception, not the default.
 - **Selection is one blue, applied as fill.** Checkbox, Switch, Radio (checked
   edge) and the Slider range all use `--accent-blue-fill` — the chosen value
   reads as a solid blue fill, not a border. (Hover differs by control: Checkbox

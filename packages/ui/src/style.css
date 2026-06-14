@@ -766,15 +766,15 @@
   --background: oklch(0.981 0.0026 63);
   --background-chrome: oklch(0.975 0.0026 63);
   --foreground: oklch(0.21 0.004 95);
-  --card: oklch(0.998 0.0018 63);
+  --card: oklch(1 0 0);
   --card-foreground: oklch(0.21 0.004 95);
   --popover: var(--card);
   --popover-foreground: var(--card-foreground);
   --primary: oklch(0.37 0.015 285);
   --primary-foreground: oklch(0.985 0.001 286);
-  --secondary: oklch(0.968 0.0026 63);
+  --secondary: oklch(0.968 0 0);
   --secondary-foreground: oklch(0.21 0.004 95);
-  --muted: oklch(0.968 0.0026 63);
+  --muted: oklch(0.968 0 0);
   --muted-foreground: oklch(0.52 0.006 95);
   /* Skeleton shimmer mid-stop — one hair DARKER than --muted (0.967) so the sliding
      seam is a calm shadow, not a bright flash, on the light gray block. */
@@ -782,7 +782,7 @@
   /* Shimmer tile width — narrower than a typical skeleton row so a fresh seam revisits
      each cluster every cycle (short gap). Bigger = longer gap; smaller = denser. */
   --skeleton-tile: 640px;
-  --accent: oklch(0.968 0.0026 63);
+  --accent: oklch(0.968 0 0);
   --accent-foreground: oklch(0.21 0.004 95);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0.001 286);
@@ -798,7 +798,7 @@
   --sidebar-foreground: oklch(0.21 0.004 95);
   --sidebar-primary: oklch(0.55 0.22 290);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.945 0.003 63);
+  --sidebar-accent: var(--overlay-hover);
   --sidebar-accent-foreground: oklch(0.21 0.004 95);
   --sidebar-border: oklch(0.905 0.0045 72);
   --sidebar-ring: oklch(0.55 0.22 290);
@@ -852,7 +852,7 @@
   --sidebar-hover:       var(--overlay-hover-light);
   /* Segmented control surfaces: track is a warm-tinted solid chip (not an
      overlay — needs an opaque fill for the pill shape). */
-  --segment-track: oklch(0.945 0.005 63);
+  --segment-track: oklch(0.945 0 0);
   --segment-thumb: var(--card);
   /* Shadows — tokenized so elevation/edge values never fragment. Same in both
      schemes for now; add .dark overrides when dark elevation is tuned.
@@ -1139,7 +1139,7 @@
   --sidebar-foreground: oklch(0.90 0 0);
   --sidebar-primary: oklch(0.62 0.22 290);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.30 0 0);
+  --sidebar-accent: var(--overlay-hover);
   --sidebar-accent-foreground: oklch(0.86 0 0);
   --sidebar-border: oklch(1 0 0 / 8%);
   --sidebar-ring: oklch(0.62 0.22 290);
@@ -1719,8 +1719,8 @@
   }
 
   *::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
   }
 
   *::-webkit-scrollbar-track,
@@ -1730,7 +1730,7 @@
 
   *::-webkit-scrollbar-thumb {
     background-color: var(--scrollbar-thumb);
-    border: 2px solid transparent;
+    border: 1px solid transparent;
     border-radius: 9999px;
     background-clip: padding-box;
   }
