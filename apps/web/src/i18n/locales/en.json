@@ -370,6 +370,7 @@
       "list_agents": "List agents",
       "clustered": "{count} tool calls",
       "use_skill": "Use skill",
+      "list_skills": "List skills",
       "browser_action": "Browser {action}",
       "browser_observe": "Observe browser {action}",
       "computer_observe": "Observe desktop {action}",

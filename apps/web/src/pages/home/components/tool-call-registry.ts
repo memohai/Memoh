@@ -115,7 +115,7 @@ export function isDirPathTool(toolName: string): boolean {
 const READONLY_TOOLS = new Set([
   'read', 'list', 'web_search', 'web_fetch', 'search_memory', 'search_messages',
   'get_contacts', 'list_sessions', 'list_email', 'read_email', 'list_email_accounts',
-  'list_schedule', 'get_schedule', 'bg_status', 'browser_observe', 'computer_observe',
+  'list_schedule', 'get_schedule', 'list_skills', 'bg_status', 'browser_observe', 'computer_observe',
 ])
 
 export function isReadOnlyTool(toolName: string): boolean {
@@ -544,6 +544,12 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         icon: Sparkles,
         actionKey: 'use_skill',
         target: pickString(input, 'skillName'),
+      }
+    case 'list_skills':
+      return {
+        icon: Sparkles,
+        actionKey: 'list_skills',
+        target: '',
       }
     case 'browser_action': {
       const resolved = resolveGuiAction(BROWSER_ACTION_ICONS, 'browserAction', MousePointerClick, 'browser_action', pickString(input, 'action'))

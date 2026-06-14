@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 )
@@ -26,6 +27,36 @@ func (*SkillProvider) Tools(_ context.Context, session SessionContext) ([]sdk.To
 	}
 	skills := session.Skills
 	return []sdk.Tool{
+		{
+			Name:        "list_skills",
+			Description: "List the skills available in the current session. Use this to inspect skill names and descriptions before activating one with use_skill.",
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
+				names := make([]string, 0, len(skills))
+				for name := range skills {
+					names = append(names, name)
+				}
+				sort.Strings(names)
+
+				items := make([]map[string]any, 0, len(names))
+				for _, name := range names {
+					skill := skills[name]
+					items = append(items, map[string]any{
+						"name":        name,
+						"description": skill.Description,
+						"path":        skill.Path,
+					})
+				}
+				return map[string]any{
+					"success": true,
+					"count":   len(items),
+					"skills":  items,
+				}, nil
+			},
+		},
 		{
 			Name:        "use_skill",
 			Description: "Activate a skill to get its full instructions. Call this when you think a skill is relevant to the current task.",
