@@ -22,38 +22,38 @@ var toolFormatters = map[string]toolFormatter{
 	"write": formatWrite,
 	"edit":  formatEdit,
 
-	"exec":      formatExec,
-	"bg_status": formatBgStatus,
+	"exec":              formatExec,
+	"background.status": formatBgStatus,
 
 	"web_search": formatWebSearch,
 	"web_fetch":  formatWebFetch,
 
-	"search_memory":   formatSearchMemory,
+	"memory.search":   formatSearchMemory,
 	"search_messages": formatSearchMessages,
 	"list_sessions":   formatListSessions,
 
-	"list_schedule":   formatListSchedule,
-	"get_schedule":    formatGetSchedule,
-	"create_schedule": formatCreateSchedule,
-	"update_schedule": formatUpdateSchedule,
-	"delete_schedule": formatDeleteSchedule,
+	"schedule.list":   formatListSchedule,
+	"schedule.get":    formatGetSchedule,
+	"schedule.create": formatCreateSchedule,
+	"schedule.update": formatUpdateSchedule,
+	"schedule.delete": formatDeleteSchedule,
 
-	"send":  formatSend,
-	"react": formatReact,
+	"message.send":  formatSend,
+	"message.react": formatReact,
 
-	"get_contacts": formatGetContacts,
+	"list_contacts": formatGetContacts,
 
-	"list_email_accounts": formatListEmailAccounts,
-	"send_email":          formatSendEmail,
-	"list_email":          formatListEmail,
-	"read_email":          formatReadEmail,
+	"email.accounts_list": formatListEmailAccounts,
+	"email.send":          formatSendEmail,
+	"email.list":          formatListEmail,
+	"email.read":          formatReadEmail,
 
-	"spawn":     formatSpawn,
-	"use_skill": formatUseSkill,
+	"agent.spawn": formatSpawn,
+	"skill.use":   formatUseSkill,
 
-	"generate_image":   formatGenerateImage,
-	"speak":            formatSpeak,
-	"transcribe_audio": formatTranscribeAudio,
+	"image.generate":   formatGenerateImage,
+	"audio.speak":      formatSpeak,
+	"audio.transcribe": formatTranscribeAudio,
 }
 
 func lookupToolFormatter(name string) toolFormatter {
@@ -253,7 +253,7 @@ func formatEdit(tc *StreamToolCall, status ToolCallStatus) ToolCallPresentation 
 	return p
 }
 
-// --- exec / bg_status --------------------------------------------------
+// --- exec / background.status --------------------------------------------------
 
 func formatExec(tc *StreamToolCall, status ToolCallStatus) ToolCallPresentation {
 	in := inputMap(tc)

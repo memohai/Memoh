@@ -35,7 +35,7 @@ func TestConvertMessagesToUITurnsGroupsAssistantToolAndKeepsCurrentConversationD
 				Content: mustUIRawJSON(t, []map[string]any{
 					{"type": "reasoning", "text": "thinking"},
 					{"type": "tool-call", "toolCallId": "call-1", "toolName": "read", "input": map[string]any{"path": "/tmp/a.txt"}},
-					{"type": "tool-call", "toolCallId": "call-2", "toolName": "send", "input": map[string]any{"message": "hi"}},
+					{"type": "tool-call", "toolCallId": "call-2", "toolName": "message.send", "input": map[string]any{"message": "hi"}},
 				}),
 			}),
 			Assets: []messagepkg.MessageAsset{{
@@ -67,7 +67,7 @@ func TestConvertMessagesToUITurnsGroupsAssistantToolAndKeepsCurrentConversationD
 			Content: mustUIMessageJSON(t, ModelMessage{
 				Role: "tool",
 				Content: mustUIRawJSON(t, []map[string]any{
-					{"type": "tool-result", "toolCallId": "call-2", "toolName": "send", "result": map[string]any{"delivered": "current_conversation"}},
+					{"type": "tool-result", "toolCallId": "call-2", "toolName": "message.send", "result": map[string]any{"delivered": "current_conversation"}},
 				}),
 			}),
 			CreatedAt: baseTime.Add(3 * time.Minute),
@@ -112,11 +112,11 @@ func TestConvertMessagesToUITurnsGroupsAssistantToolAndKeepsCurrentConversationD
 	if assistantTurn.Messages[1].Running == nil || *assistantTurn.Messages[1].Running {
 		t.Fatalf("expected tool block to be completed: %#v", assistantTurn.Messages[1])
 	}
-	if assistantTurn.Messages[2].Type != UIMessageTool || assistantTurn.Messages[2].Name != "send" {
+	if assistantTurn.Messages[2].Type != UIMessageTool || assistantTurn.Messages[2].Name != "message.send" {
 		t.Fatalf("expected current conversation delivery tool to be retained: %#v", assistantTurn.Messages[2])
 	}
 	if assistantTurn.Messages[2].Running == nil || *assistantTurn.Messages[2].Running {
-		t.Fatalf("expected send tool block to be completed: %#v", assistantTurn.Messages[2])
+		t.Fatalf("expected message.send tool block to be completed: %#v", assistantTurn.Messages[2])
 	}
 	if assistantTurn.Messages[3].Type != UIMessageAttachments || len(assistantTurn.Messages[3].Attachments) != 1 {
 		t.Fatalf("unexpected attachment block: %#v", assistantTurn.Messages[3])

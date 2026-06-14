@@ -19,7 +19,7 @@ func TestBgStatusListsAndInspectsSpawnTasks(t *testing.T) {
 
 	listRes, err := p.execBgStatus(context.Background(), session, map[string]any{"action": "list"})
 	if err != nil {
-		t.Fatalf("bg_status list failed: %v", err)
+		t.Fatalf("background.status list failed: %v", err)
 	}
 	entries := listRes.(map[string]any)["tasks"].([]map[string]any)
 	if len(entries) != 1 {
@@ -46,7 +46,7 @@ func TestBgStatusListsAndInspectsSpawnTasks(t *testing.T) {
 
 	statusRes, err := p.execBgStatus(context.Background(), session, map[string]any{"action": "status", "task_id": taskID})
 	if err != nil {
-		t.Fatalf("bg_status status failed: %v", err)
+		t.Fatalf("background.status status failed: %v", err)
 	}
 	sm := statusRes.(map[string]any)
 	if sm["kind"] != "spawn" || sm["status"] != "failed" {

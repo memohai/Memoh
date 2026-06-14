@@ -18,7 +18,7 @@ import (
 const (
 	Mem0Type = "mem0"
 
-	mem0ToolSearchMemory = "search_memory"
+	mem0ToolSearchMemory = "memory.search"
 	mem0DefaultLimit     = 8
 	mem0MaxLimit         = 50
 	mem0ContextMaxItems  = 8

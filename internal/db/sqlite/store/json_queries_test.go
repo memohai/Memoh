@@ -73,7 +73,7 @@ CREATE TABLE bot_history_messages (
 		botID,
 		sessionID,
 		"assistant",
-		`{"role":"assistant","content":[{"type":"tool-call","toolName":"use_skill","input":{"skillName":"alpha"}}]}`,
+		`{"role":"assistant","content":[{"type":"tool-call","toolName":"skill.use","input":{"skillName":"alpha"}}]}`,
 		`{"inputTokens":10,"outputTokens":5,"inputTokenDetails":{"cacheReadTokens":3,"cacheWriteTokens":2},"outputTokenDetails":{"reasoningTokens":1}}`,
 		modelID,
 		"2026-05-01 01:00:00",
@@ -94,7 +94,7 @@ CREATE TABLE bot_history_messages (
 		{
 			id:      "00000000-0000-0000-0000-000000000007",
 			role:    "tool",
-			content: `{"role":"tool","content":[{"type":"tool-result","toolName":"use_skill","result":{}}]}`,
+			content: `{"role":"tool","content":[{"type":"tool-result","toolName":"skill.use","result":{}}]}`,
 		},
 	} {
 		_, err = conn.ExecContext(ctx, `INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, usage, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,

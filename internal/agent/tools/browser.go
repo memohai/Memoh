@@ -89,12 +89,12 @@ func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]
 	sess := session
 	return []sdk.Tool{
 		{
-			Name:        "browser_action",
-			Description: "Operate the current workspace browser tab. Prefer a ref returned by browser_observe over CSS selectors; use selectors only as a fallback. Use fill to replace input values, type to append text, and press for shortcuts or submit keys. After navigation or UI-changing actions, observe again only when the next step depends on the changed state.",
+			Name:        "browser.action",
+			Description: "Operate the current workspace browser tab. Prefer a ref returned by browser.observe over CSS selectors; use selectors only as a fallback. Use fill to replace input values, type to append text, and press for shortcuts or submit keys. After navigation or UI-changing actions, observe again only when the next step depends on the changed state.",
 			Parameters: browserObjectSchema(map[string]any{
 				"action":          map[string]any{"type": "string", "enum": []string{"navigate", "click", "double_click", "focus", "type", "fill", "press", "hover", "select", "check", "uncheck", "scroll", "scroll_into_view", "drag", "upload", "wait", "go_back", "go_forward", "reload", "tab_new", "tab_select", "tab_close"}, "description": "Browser action to perform. Compatibility aliases dblclick and scrollintoview are also accepted."},
 				"url":             map[string]any{"type": "string", "description": "URL to open for navigate or tab_new."},
-				"ref":             map[string]any{"type": "string", "description": "Element ref such as e12 from browser_observe snapshot or screenshot_annotate. Preferred over selector."},
+				"ref":             map[string]any{"type": "string", "description": "Element ref such as e12 from browser.observe snapshot or screenshot_annotate. Preferred over selector."},
 				"selector":        map[string]any{"type": "string", "description": "CSS selector for the target element when no ref is available."},
 				"text":            map[string]any{"type": "string", "description": "Text for type or fill."},
 				"key":             map[string]any{"type": "string", "description": "Key or key chord for press, e.g. Enter, Tab, Escape, Control+a."},
@@ -112,7 +112,7 @@ func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]
 			},
 		},
 		{
-			Name:        "browser_observe",
+			Name:        "browser.observe",
 			Description: "Inspect the current workspace browser without changing page state. Prefer snapshot for interactive elements and get_content for readable text. Use screenshot_annotate only when visual layout matters or you need rendered-page refs. Use evaluate only for small DOM queries or page-state checks. Screenshots are saved to a workspace path; read that path with the file read tool when you need the visual.",
 			Parameters: browserObjectSchema(map[string]any{
 				"observe":   map[string]any{"type": "string", "enum": []string{"snapshot", "get_content", "screenshot_annotate", "screenshot", "get_html", "evaluate", "get_url", "get_title", "pdf", "tab_list"}, "description": "What to observe from the page."},
@@ -126,8 +126,8 @@ func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]
 			},
 		},
 		{
-			Name:        "computer_observe",
-			Description: "Inspect the workspace desktop without changing state. Use snapshot for an accessibility-tree listing of interactive UI elements (returns refs like e3 you can pass to computer_action). Use screenshot only when accessibility is unavailable or you need visual layout; the image is saved to a workspace path and must be read explicitly with the file read tool.",
+			Name:        "computer.observe",
+			Description: "Inspect the workspace desktop without changing state. Use snapshot for an accessibility-tree listing of interactive UI elements (returns refs like e3 you can pass to computer.action). Use screenshot only when accessibility is unavailable or you need visual layout; the image is saved to a workspace path and must be read explicitly with the file read tool.",
 			Parameters: browserObjectSchema(map[string]any{
 				"observe": map[string]any{"type": "string", "enum": []string{"snapshot", "screenshot"}, "description": "What to observe from the desktop."},
 			}, []string{"observe"}),
@@ -136,11 +136,11 @@ func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]
 			},
 		},
 		{
-			Name:        "computer_action",
-			Description: "Drive the workspace desktop. Prefer ref from computer_observe snapshot for click/double_click/type/fill/scroll; coordinates (x, y) are only a fallback when no ref applies (native dialogs, raw drags, pointer hovers). Use browser_action for in-page targets whenever possible.",
+			Name:        "computer.action",
+			Description: "Drive the workspace desktop. Prefer ref from computer.observe snapshot for click/double_click/type/fill/scroll; coordinates (x, y) are only a fallback when no ref applies (native dialogs, raw drags, pointer hovers). Use browser.action for in-page targets whenever possible.",
 			Parameters: browserObjectSchema(map[string]any{
 				"action":      map[string]any{"type": "string", "enum": []string{"click", "double_click", "type", "fill", "key", "scroll", "drag", "wait", "mouse_move", "pointer"}, "description": "Desktop action to perform."},
-				"ref":         map[string]any{"type": "string", "description": "Element ref such as e3 from computer_observe snapshot. Preferred over coordinates for click/double_click/type/fill/scroll."},
+				"ref":         map[string]any{"type": "string", "description": "Element ref such as e3 from computer.observe snapshot. Preferred over coordinates for click/double_click/type/fill/scroll."},
 				"x":           map[string]any{"type": "integer", "minimum": 0, "description": "X coordinate in desktop pixels (used when no ref is provided or as fallback)."},
 				"y":           map[string]any{"type": "integer", "minimum": 0, "description": "Y coordinate in desktop pixels (used when no ref is provided or as fallback)."},
 				"to_x":        map[string]any{"type": "integer", "minimum": 0, "description": "Destination X coordinate for drag."},
@@ -157,7 +157,7 @@ func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]
 			},
 		},
 		{
-			Name:        "browser_remote_session",
+			Name:        "browser.remote_session",
 			Description: "Advanced escape hatch for code-driven automation. Use only when writing or running Playwright/CDP code inside the bot workspace is clearly better than normal browser tools. Exposes the workspace Chrome CDP endpoint for chromium.connectOverCDP or other CDP clients.",
 			Parameters: browserObjectSchema(map[string]any{
 				"action":     map[string]any{"type": "string", "enum": []string{"create", "close", "status"}, "description": "Session action to perform."},

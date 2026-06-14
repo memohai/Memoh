@@ -234,7 +234,7 @@ func TestDecodeTurnResponseEntryLegacyToolCallsField(t *testing.T) {
 				ID:   "call-legacy",
 				Type: "function",
 				Function: conversation.ToolCallFunction{
-					Name:      "send",
+					Name:      "message.send",
 					Arguments: `{"text":"hi"}`,
 				},
 			},
@@ -250,7 +250,7 @@ func TestDecodeTurnResponseEntryLegacyToolCallsField(t *testing.T) {
 	if !ok {
 		t.Fatal("expected legacy tool-calls envelope to decode")
 	}
-	part := assertRawPart(t, entry.RawContent, "tool-call", "send", "call-legacy")
+	part := assertRawPart(t, entry.RawContent, "tool-call", "message.send", "call-legacy")
 	input, ok := part["input"].(map[string]any)
 	if !ok || input["text"] != "hi" {
 		t.Fatalf("arguments missing: %#v", part["input"])

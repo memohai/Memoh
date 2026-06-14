@@ -94,7 +94,7 @@ type sendPlan struct {
 // Send executes a send-message action. args are the tool call arguments.
 func (e *Executor) Send(ctx context.Context, session SessionContext, args map[string]any) (*SendResult, error) {
 	return e.sendWithMode(ctx, session, "", args, sendMode{
-		name:               "send",
+		name:               "message.send",
 		allowLocalShortcut: true,
 	})
 }

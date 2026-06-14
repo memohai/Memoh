@@ -336,37 +336,59 @@
       "edit": "编辑",
       "list": "列出",
       "exec": "执行",
-      "bg_status": "后台任务",
+      "background": {
+        "status": "后台任务"
+      },
       "web_search": "搜索网络",
       "web_fetch": "抓取",
-      "search_memory": "搜索记忆",
+      "memory": {
+        "search": "搜索记忆"
+      },
       "ask_user": "询问用户",
-      "send": "发送消息",
-      "react": "添加表情",
-      "react_remove": "移除表情",
-      "get_contacts": "查看联系人",
+      "message": {
+        "send": "发送消息",
+        "react": "添加表情",
+        "react_remove": "移除表情"
+      },
+      "list_contacts": "查看联系人",
       "list_sessions": "列出会话",
       "search_messages": "搜索历史",
-      "list_schedule": "列出计划",
-      "get_schedule": "查看计划",
-      "create_schedule": "创建计划",
-      "update_schedule": "更新计划",
-      "delete_schedule": "删除计划",
-      "list_email_accounts": "列出邮箱账号",
-      "send_email": "发送邮件",
-      "list_email": "列出邮件",
-      "read_email": "阅读邮件",
-      "speak": "朗读",
-      "transcribe_audio": "转录音频",
-      "generate_image": "生成图像",
-      "spawn": "派遣 {count} 个子代理",
+      "schedule": {
+        "list": "列出计划",
+        "get": "查看计划",
+        "create": "创建计划",
+        "update": "更新计划",
+        "delete": "删除计划"
+      },
+      "email": {
+        "accounts_list": "列出邮箱账号",
+        "send": "发送邮件",
+        "list": "列出邮件",
+        "read": "阅读邮件"
+      },
+      "audio": {
+        "speak": "朗读",
+        "transcribe": "转录音频"
+      },
+      "image": {
+        "generate": "生成图像"
+      },
+      "agent": {
+        "spawn": "派遣 {count} 个子代理"
+      },
       "clustered": "{count} 次工具调用",
-      "use_skill": "使用技能",
-      "browser_action": "浏览器 {action}",
-      "browser_observe": "观察浏览器 {action}",
-      "computer_observe": "观察桌面 {action}",
-      "computer_action": "桌面 {action}",
-      "browser_remote_session": "浏览器会话 {action}",
+      "skill": {
+        "use": "使用技能"
+      },
+      "browser": {
+        "action": "浏览器 {action}",
+        "observe": "观察浏览器 {action}",
+        "remote_session": "浏览器会话 {action}"
+      },
+      "computer": {
+        "observe": "观察桌面 {action}",
+        "action": "桌面 {action}"
+      },
       "browserAction": {
         "navigate": "导航",
         "click": "点击",
@@ -1804,7 +1826,7 @@
       "transcriptionModel": "转写模型",
       "transcriptionModelPlaceholder": "选择语音转写模型",
       "imageModel": "图片生成模型",
-      "imageModelDescription": "用于 generate_image 工具的模型，必须支持 image-output 兼容性。",
+      "imageModelDescription": "用于 image.generate 工具的模型，必须支持 image-output 兼容性。",
       "imageModelPlaceholder": "选择图片模型（可选）",
       "language": "语言",
       "reasoningEnabled": "启用推理",

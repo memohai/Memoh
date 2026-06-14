@@ -411,7 +411,7 @@ func (r *Resolver) deliverBackgroundNotifications(ctx context.Context, botID, se
 	)
 
 	// Auto-deliver the agent's text response to the user through the normal
-	// outbound path, not through a special "send" tool call.
+	// outbound path, not through a special message-send tool call.
 	if responseText := strings.TrimSpace(text.String()); responseText != "" && r.outboundFn != nil {
 		if err := r.outboundFn(ctx, botID, delivery.channelType, delivery.replyTarget, responseText); err != nil {
 			r.logger.Warn("background notification: outbound delivery failed",

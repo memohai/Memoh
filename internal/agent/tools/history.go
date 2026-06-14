@@ -105,7 +105,7 @@ func (p *HistoryProvider) Tools(_ context.Context, sess SessionContext) ([]sdk.T
 					},
 					"contact_id": map[string]any{
 						"type":        "string",
-						"description": "Filter by sender channel identity ID. Use get_contacts to find contact IDs.",
+						"description": "Filter by sender channel identity ID. Use list_contacts to find contact IDs.",
 					},
 					"role": map[string]any{
 						"type":        "string",

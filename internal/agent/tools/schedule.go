@@ -42,7 +42,7 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]s
 	sess := session
 	return []sdk.Tool{
 		{
-			Name: "list_schedule", Description: "List schedules for current bot",
+			Name: "schedule.list", Description: "List schedules for current bot",
 			Parameters: emptyObjectSchema(),
 			Execute: func(ctx *sdk.ToolExecContext, _ any) (any, error) {
 				botID := strings.TrimSpace(sess.BotID)
@@ -57,7 +57,7 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]s
 			},
 		},
 		{
-			Name: "get_schedule", Description: "Get a schedule by id",
+			Name: "schedule.get", Description: "Get a schedule by id",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -86,7 +86,7 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]s
 			},
 		},
 		{
-			Name: "create_schedule", Description: "Create a new schedule",
+			Name: "schedule.create", Description: "Create a new schedule",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -129,7 +129,7 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]s
 			},
 		},
 		{
-			Name: "update_schedule", Description: "Update an existing schedule",
+			Name: "schedule.update", Description: "Update an existing schedule",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -185,7 +185,7 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]s
 			},
 		},
 		{
-			Name: "delete_schedule", Description: "Delete a schedule by id",
+			Name: "schedule.delete", Description: "Delete a schedule by id",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

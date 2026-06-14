@@ -145,7 +145,7 @@ src/
 │   │       ├── tool-call-detail-exec.vue    # Exec stdout/stderr/error detail
 │   │       ├── tool-call-detail-edit.vue    # Edit old/new diff detail
 │   │       ├── tool-call-detail-spawn.vue   # Spawn (subagent) task list + links
-│   │       ├── tool-call-detail-image.vue   # generate_image preview
+│   │       ├── tool-call-detail-image.vue   # image.generate preview
 │   │       ├── tool-call-detail-generic.vue # Generic input/result JSON detail
 │   │       ├── schedule-trigger-block.vue  # Schedule trigger display
 │   │       └── heartbeat-trigger-block.vue # Heartbeat trigger display
@@ -473,7 +473,7 @@ Chat supports two transport modes: **Server-Sent Events (SSE)** and **WebSocket*
 - Terminal and file panes are normal workspace features. Display panes are container-workspace features and are hidden for trusted local bots via `utils/bot-workspace.ts` (`metadata.workspace.backend === 'local'` or API `workspace_backend === 'local'`).
 - `pages/home/components/display-pane.vue` connects to the workspace display service, prepares the display runtime, opens a WebRTC session, forwards keyboard/pointer input, and captures snapshots for previews. It represents a headed container desktop with a browser, not a headless automation runner.
 - `pages/bots/components/bot-desktop.vue` is the settings/runtime surface for enabling display, checking Xvnc/browser/toolkit availability, viewing live sessions, and closing display sessions.
-- Agent Browser Use (`browser_action`, `browser_observe`, `browser_remote_session`) operates the headed workspace Chrome/Chromium instance exposed by the backend display stack. Computer Use is split across `computer_observe` (accessibility snapshot via the bundled `a11y-cli` helper, or a saved-to-path screenshot) and `computer_action` (ref-driven click/type/fill with raw RFB coordinates as fallback). Do not describe these as generic headless Playwright; headless Playwright remains a separate command-line workflow inside a workspace.
+- Agent Browser Use (`browser.action`, `browser.observe`, `browser.remote_session`) operates the headed workspace Chrome/Chromium instance exposed by the backend display stack. Computer Use is split across `computer.observe` (accessibility snapshot via the bundled `a11y-cli` helper, or a saved-to-path screenshot) and `computer.action` (ref-driven click/type/fill with raw RFB coordinates as fallback). Do not describe these as generic headless Playwright; headless Playwright remains a separate command-line workflow inside a workspace.
 
 ### Error Handling
 

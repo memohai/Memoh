@@ -109,13 +109,13 @@ export function isDirPathTool(toolName: string): boolean {
 }
 
 // Read-only / no-side-effect tools form an "explore" segment; everything else
-// (write, edit, exec, send, schedule mutations, …) is an "action" segment.
+// (write, edit, exec, message sends, schedule mutations, …) is an "action" segment.
 // Consecutive tools of the same category are grouped together; reasoning rides
 // along with whichever segment it sits next to.
 const READONLY_TOOLS = new Set([
-  'read', 'list', 'web_search', 'web_fetch', 'search_memory', 'search_messages',
-  'get_contacts', 'list_sessions', 'list_email', 'read_email', 'list_email_accounts',
-  'list_schedule', 'get_schedule', 'bg_status', 'browser_observe', 'computer_observe',
+  'read', 'list', 'web_search', 'web_fetch', 'memory.search', 'search_messages',
+  'list_contacts', 'list_sessions', 'email.list', 'email.read', 'email.accounts_list',
+  'schedule.list', 'schedule.get', 'background.status', 'browser.observe', 'computer.observe',
 ])
 
 export function isReadOnlyTool(toolName: string): boolean {
@@ -340,9 +340,9 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         detail: ToolCallDetailExec,
       }
     }
-    case 'bg_status': {
+    case 'background.status': {
       const action = pickString(input, 'action') || 'list'
-      return { icon: ListChecks, actionKey: 'bg_status', target: action }
+      return { icon: ListChecks, actionKey: 'background.status', target: action }
     }
     case 'web_search': {
       const query = pickString(input, 'query')
@@ -364,44 +364,44 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         detail: ToolCallDetailWebFetch,
       }
     }
-    case 'search_memory': {
+    case 'memory.search': {
       const query = pickString(input, 'query')
       return {
         icon: Brain,
-        actionKey: 'search_memory',
+        actionKey: 'memory.search',
         target: query ? `"${query}"` : '',
         fullTarget: query,
         detail: ToolCallDetailMemory,
       }
     }
-    case 'send': {
+    case 'message.send': {
       const target = pickString(input, 'target')
       const text = pickString(input, 'text', 'message')
       const display = target || truncate(text, 60)
       return {
         icon: Send,
-        actionKey: 'send',
+        actionKey: 'message.send',
         target: display,
         fullTarget: text || target,
         detail: ToolCallDetailSend,
       }
     }
-    case 'react': {
+    case 'message.react': {
       const emoji = pickString(input, 'emoji')
       const remove = input.remove === true
       if (remove) {
         return {
           icon: Smile,
-          actionKey: 'react_remove',
+          actionKey: 'message.react_remove',
           target: pickString(input, 'message_id'),
         }
       }
-      return { icon: Smile, actionKey: 'react', target: emoji }
+      return { icon: Smile, actionKey: 'message.react', target: emoji }
     }
-    case 'get_contacts': {
+    case 'list_contacts': {
       return {
         icon: Users,
-        actionKey: 'get_contacts',
+        actionKey: 'list_contacts',
         target: pickString(input, 'platform'),
         detail: ToolCallDetailContacts,
       }
@@ -419,72 +419,72 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         fullTarget: keyword,
       }
     }
-    case 'list_schedule':
-      return { icon: Calendar, actionKey: 'list_schedule', target: '', detail: ToolCallDetailSchedule }
-    case 'get_schedule':
-      return { icon: Calendar, actionKey: 'get_schedule', target: pickString(input, 'id') }
-    case 'create_schedule':
+    case 'schedule.list':
+      return { icon: Calendar, actionKey: 'schedule.list', target: '', detail: ToolCallDetailSchedule }
+    case 'schedule.get':
+      return { icon: Calendar, actionKey: 'schedule.get', target: pickString(input, 'id') }
+    case 'schedule.create':
       return {
         icon: CalendarPlus,
-        actionKey: 'create_schedule',
+        actionKey: 'schedule.create',
         target: pickString(input, 'name'),
       }
-    case 'update_schedule':
+    case 'schedule.update':
       return {
         icon: CalendarCog,
-        actionKey: 'update_schedule',
+        actionKey: 'schedule.update',
         target: pickString(input, 'name', 'id'),
       }
-    case 'delete_schedule':
+    case 'schedule.delete':
       return {
         icon: CalendarMinus,
-        actionKey: 'delete_schedule',
+        actionKey: 'schedule.delete',
         target: pickString(input, 'id'),
       }
-    case 'list_email_accounts':
+    case 'email.accounts_list':
       return {
         icon: Mail,
-        actionKey: 'list_email_accounts',
+        actionKey: 'email.accounts_list',
         target: '',
         detail: ToolCallDetailEmailAccounts,
       }
-    case 'send_email': {
+    case 'email.send': {
       const subject = pickString(input, 'subject')
       const to = pickString(input, 'to')
       return {
         icon: MailPlus,
-        actionKey: 'send_email',
+        actionKey: 'email.send',
         target: subject || to,
         fullTarget: subject ? `${to} — ${subject}` : to,
       }
     }
-    case 'list_email':
+    case 'email.list':
       return {
         icon: Inbox,
-        actionKey: 'list_email',
+        actionKey: 'email.list',
         target: '',
         detail: ToolCallDetailEmailList,
       }
-    case 'read_email': {
+    case 'email.read': {
       const uid = input.uid
       const target = uid != null ? `#${String(uid)}` : ''
       return {
         icon: MailOpen,
-        actionKey: 'read_email',
+        actionKey: 'email.read',
         target,
         detail: ToolCallDetailEmailRead,
       }
     }
-    case 'speak': {
+    case 'audio.speak': {
       const text = pickString(input, 'text')
       return {
         icon: Volume2,
-        actionKey: 'speak',
+        actionKey: 'audio.speak',
         target: truncate(text, 60),
         fullTarget: text,
       }
     }
-    case 'transcribe_audio': {
+    case 'audio.transcribe': {
       const target = pickString(
         input,
         'path',
@@ -493,36 +493,36 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         'url',
         'audio_url',
       )
-      return { icon: AudioLines, actionKey: 'transcribe_audio', target }
+      return { icon: AudioLines, actionKey: 'audio.transcribe', target }
     }
-    case 'generate_image': {
+    case 'image.generate': {
       const prompt = pickString(input, 'prompt')
       return {
         icon: ImagePlus,
-        actionKey: 'generate_image',
+        actionKey: 'image.generate',
         target: truncate(prompt, 60),
         fullTarget: prompt,
         detail: ToolCallDetailImage,
       }
     }
-    case 'spawn': {
+    case 'agent.spawn': {
       const tasks = Array.isArray(input.tasks) ? (input.tasks as unknown[]).length : 0
       return {
         icon: Workflow,
-        actionKey: 'spawn',
+        actionKey: 'agent.spawn',
         actionParams: { count: tasks },
         target: '',
         detail: ToolCallDetailSpawn,
       }
     }
-    case 'use_skill':
+    case 'skill.use':
       return {
         icon: Sparkles,
-        actionKey: 'use_skill',
+        actionKey: 'skill.use',
         target: pickString(input, 'skillName'),
       }
-    case 'browser_action': {
-      const resolved = resolveGuiAction(BROWSER_ACTION_ICONS, 'browserAction', MousePointerClick, 'browser_action', pickString(input, 'action'))
+    case 'browser.action': {
+      const resolved = resolveGuiAction(BROWSER_ACTION_ICONS, 'browserAction', MousePointerClick, 'browser.action', pickString(input, 'action'))
       const target = pickString(input, 'url', 'ref', 'selector')
       return {
         ...resolved,
@@ -531,24 +531,24 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         detail: ToolCallDetailBrowser,
       }
     }
-    case 'browser_observe': {
-      const resolved = resolveGuiAction(BROWSER_OBSERVE_ICONS, 'browserObserve', Eye, 'browser_observe', pickString(input, 'observe'))
+    case 'browser.observe': {
+      const resolved = resolveGuiAction(BROWSER_OBSERVE_ICONS, 'browserObserve', Eye, 'browser.observe', pickString(input, 'observe'))
       return {
         ...resolved,
         target: pickString(input, 'ref', 'selector'),
         detail: ToolCallDetailBrowser,
       }
     }
-    case 'computer_observe': {
-      const resolved = resolveGuiAction(COMPUTER_OBSERVE_ICONS, 'computerObserve', Monitor, 'computer_observe', pickString(input, 'observe'))
+    case 'computer.observe': {
+      const resolved = resolveGuiAction(COMPUTER_OBSERVE_ICONS, 'computerObserve', Monitor, 'computer.observe', pickString(input, 'observe'))
       return {
         ...resolved,
         target: '',
         detail: ToolCallDetailComputer,
       }
     }
-    case 'computer_action': {
-      const resolved = resolveGuiAction(COMPUTER_ACTION_ICONS, 'computerAction', MousePointer2, 'computer_action', pickString(input, 'action'))
+    case 'computer.action': {
+      const resolved = resolveGuiAction(COMPUTER_ACTION_ICONS, 'computerAction', MousePointer2, 'computer.action', pickString(input, 'action'))
       const x = input.x
       const y = input.y
       const coords = typeof x === 'number' && typeof y === 'number' ? `${x}, ${y}` : ''
@@ -558,8 +558,8 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         detail: ToolCallDetailComputer,
       }
     }
-    case 'browser_remote_session': {
-      const resolved = resolveGuiAction(REMOTE_SESSION_ICONS, 'remoteSession', Cable, 'browser_remote_session', pickString(input, 'action'))
+    case 'browser.remote_session': {
+      const resolved = resolveGuiAction(REMOTE_SESSION_ICONS, 'remoteSession', Cable, 'browser.remote_session', pickString(input, 'action'))
       return {
         ...resolved,
         target: pickString(input, 'session_id'),

@@ -180,10 +180,10 @@ func buildDisplayToolsSection(enabled bool) string {
 
 This bot has a headed workspace display (Chrome on a virtual desktop). Use GUI tools only when the task needs on-screen interaction:
 
-- **Browser** (browser_observe, browser_action): Web pages in Chrome. Observe before acting; prefer element refs from snapshot over CSS selectors.
-- **Computer** (computer_observe, computer_action): Whole-desktop fallback for native dialogs, non-browser apps, or when the browser path fails. Start with computer_observe snapshot to get an accessibility tree with element refs, then drive computer_action with those refs; raw coordinates are a last-resort fallback.
-- **browser_remote_session**: Only when running Playwright or other CDP automation inside the workspace is clearly better than the browser tools above.
-- **Screenshots**: Both browser_observe and computer_observe save screenshots to a workspace path; they are not attached to the conversation. Read the returned path with the file read tool when you need the image.
+- **Browser** (browser.observe, browser.action): Web pages in Chrome. Observe before acting; prefer element refs from snapshot over CSS selectors.
+- **Computer** (computer.observe, computer.action): Whole-desktop fallback for native dialogs, non-browser apps, or when the browser path fails. Start with computer.observe snapshot to get an accessibility tree with element refs, then drive computer.action with those refs; raw coordinates are a last-resort fallback.
+- **browser.remote_session**: Only when running Playwright or other CDP automation inside the workspace is clearly better than the browser tools above.
+- **Screenshots**: Both browser.observe and computer.observe save screenshots to a workspace path; they are not attached to the conversation. Read the returned path with the file read tool when you need the image.
 `)
 }
 
@@ -249,7 +249,7 @@ func buildSkillsSection(skills []SkillEntry) string {
 	sb.WriteString("Memoh-managed skills are stored in `" + skillset.ManagedDir() + "/`. ")
 	sb.WriteString("Compatible external skill directories inside the bot container may also be discovered automatically. ")
 	sb.WriteString("Each skill is a `SKILL.md` file inside a named subdirectory.\n\n")
-	sb.WriteString("Call `use_skill` with the skill name to load its full instructions before following them. ")
+	sb.WriteString("Call `skill.use` with the skill name to load its full instructions before following them. ")
 	sb.WriteString("Only activate a skill when it is relevant to the current task.\n\n")
 	sb.WriteString(strconv.Itoa(len(sorted)))
 	sb.WriteString(" skill(s) available:\n")
@@ -282,7 +282,7 @@ func buildMainAgentSections(platformIdentitiesSection, skillsSection, fileSectio
 		includes["_contacts"],
 		identitiesSection,
 		includes["_schedule_task"],
-		"When a scheduled task triggers, it runs in its own session. Use `send` in the schedule command to deliver results to the intended channel.",
+		"When a scheduled task triggers, it runs in its own session. Use `message.send` in the schedule command to deliver results to the intended channel.",
 		includes["_subagent"],
 		skillsSection,
 		fileSections,

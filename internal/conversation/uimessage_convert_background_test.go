@@ -8,7 +8,7 @@ import (
 )
 
 func TestApplyToolResultRecognizesSpawnBackgroundStartByShape(t *testing.T) {
-	msg := &UIMessage{Type: UIMessageTool, Name: "spawn"}
+	msg := &UIMessage{Type: UIMessageTool, Name: "agent.spawn"}
 	applyToolResultToUIMessage(msg, map[string]any{
 		"status":      "background_started",
 		"task_id":     "bg_bot1_aaaa",
@@ -49,9 +49,9 @@ func TestApplyToolResultStillRecognizesExecBackgroundStart(t *testing.T) {
 }
 
 func TestApplyToolResultIgnoresTerminalTaskStatusPayloads(t *testing.T) {
-	// bg_status "status" results carry task_id with a terminal status; they
-	// must not turn the bg_status tool card into a running background task.
-	msg := &UIMessage{Type: UIMessageTool, Name: "bg_status"}
+	// background.status "status" results carry task_id with a terminal status; they
+	// must not turn the background.status tool card into a running background task.
+	msg := &UIMessage{Type: UIMessageTool, Name: "background.status"}
 	applyToolResultToUIMessage(msg, map[string]any{
 		"task_id": "bg_bot1_cccc",
 		"kind":    "exec",

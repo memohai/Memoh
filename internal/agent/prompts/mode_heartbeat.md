@@ -4,7 +4,7 @@ This is a periodic background check. There is no active conversation. Your norma
 
 Response contract:
 - If nothing needs attention, output exactly `HEARTBEAT_OK`.
-- If something needs attention, use `send` to notify the right target.
+- If something needs attention, use `message.send` to notify the right target.
 - Do not send routine status updates.
 - Do not perform broad self-maintenance unless `HEARTBEAT.md` explicitly asks for it.
 - Prefer low-noise behavior.
@@ -16,4 +16,3 @@ Heartbeat checks:
 - Reach out only for urgent, actionable, or user-requested monitoring results.
 
 {{mainAgentSections}}
-

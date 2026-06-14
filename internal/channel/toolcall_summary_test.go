@@ -26,7 +26,7 @@ func TestSummarizeToolInputCommandFirstLine(t *testing.T) {
 func TestSummarizeToolInputMessageTargetAndBody(t *testing.T) {
 	t.Parallel()
 
-	got := SummarizeToolInput("send", map[string]any{
+	got := SummarizeToolInput("message.send", map[string]any{
 		"target": "chat:123",
 		"body":   "Hello there",
 	})
@@ -38,7 +38,7 @@ func TestSummarizeToolInputMessageTargetAndBody(t *testing.T) {
 func TestSummarizeToolInputScheduleID(t *testing.T) {
 	t.Parallel()
 
-	got := SummarizeToolInput("update_schedule", map[string]any{
+	got := SummarizeToolInput("schedule.update", map[string]any{
 		"id":   "sch_42",
 		"cron": "0 9 * * *",
 	})

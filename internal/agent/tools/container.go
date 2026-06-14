@@ -160,7 +160,7 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 			},
 		},
 		{
-			Name:        "bg_status",
+			Name:        "background.status",
 			Description: "Check the status of background tasks or kill a running one.",
 			Parameters: map[string]any{
 				"type": "object",
@@ -801,7 +801,7 @@ func (p *ContainerProvider) execExecBackground(
 	}, nil
 }
 
-// execBgStatus handles the bg_status tool for listing/checking/killing background tasks.
+// execBgStatus handles the background.status tool for listing/checking/killing background tasks.
 func (p *ContainerProvider) execBgStatus(_ context.Context, session SessionContext, args map[string]any) (any, error) {
 	if p.bgManager == nil {
 		return nil, errors.New("background task manager not available")

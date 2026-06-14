@@ -38,14 +38,14 @@ func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sd
 	sess := session
 	if p.exec.CanSend() {
 		tools = append(tools, sdk.Tool{
-			Name:        "send",
+			Name:        "message.send",
 			Description: "Send a message, file, or attachment. When target is omitted, delivers to the current conversation as an inline attachment/message. When target is specified, sends to that channel/person.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"bot_id":   map[string]any{"type": "string", "description": "Bot ID, optional and defaults to current bot"},
 					"platform": map[string]any{"type": "string", "description": "Channel platform name. Defaults to current session platform."},
-					"target":   map[string]any{"type": "string", "description": "Channel target (chat/group/thread ID). Optional — omit to send in the current conversation. Use get_contacts to find targets for other conversations."},
+					"target":   map[string]any{"type": "string", "description": "Channel target (chat/group/thread ID). Optional — omit to send in the current conversation. Use list_contacts to find targets for other conversations."},
 					"text":     map[string]any{"type": "string", "description": "Message text shortcut when message object is omitted"},
 					"reply_to": map[string]any{"type": "string", "description": "Message ID to reply to. The reply will reference this message on the platform."},
 					"attachments": map[string]any{
@@ -69,7 +69,7 @@ func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sd
 	}
 	if p.exec.CanReact() {
 		tools = append(tools, sdk.Tool{
-			Name:        "react",
+			Name:        "message.react",
 			Description: "Add or remove an emoji reaction on a message. When target/platform are omitted, reacts in the current conversation.",
 			Parameters: map[string]any{
 				"type": "object",

@@ -193,8 +193,8 @@ func TestParityUngatedToolNeedsNoApprovalOnEitherRuntime(t *testing.T) {
 
 	nativeApproval := &parityApproval{}
 	executed := false
-	source := parityNativeSource(nativeApproval, nil, "create_schedule", &executed)
-	result, err := source.CallTool(context.Background(), parityNativeSession("stream-1"), "create_schedule", map[string]any{"cron": "0 9 * * *"})
+	source := parityNativeSource(nativeApproval, nil, "schedule.create", &executed)
+	result, err := source.CallTool(context.Background(), parityNativeSession("stream-1"), "schedule.create", map[string]any{"cron": "0 9 * * *"})
 	if err != nil {
 		t.Fatalf("native CallTool error = %v", err)
 	}
@@ -203,7 +203,7 @@ func TestParityUngatedToolNeedsNoApprovalOnEitherRuntime(t *testing.T) {
 	}
 
 	acpApproval := &parityApproval{}
-	callbacks, _ := parityCallbacks(acpApproval, "stream-1", "create_schedule")
+	callbacks, _ := parityCallbacks(acpApproval, "stream-1", "schedule.create")
 	resp, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
 		ToolCall: acp.ToolCallUpdate{
 			ToolCallId: acp.ToolCallId("call-1"),
@@ -213,7 +213,7 @@ func TestParityUngatedToolNeedsNoApprovalOnEitherRuntime(t *testing.T) {
 				"server_name": memohToolsMCPServerName,
 				"method":      "tools/call",
 				"params": map[string]any{
-					"name":      "create_schedule",
+					"name":      "schedule.create",
 					"arguments": map[string]any{"cron": "0 9 * * *"},
 				},
 			},
@@ -233,7 +233,7 @@ func TestParityUngatedToolNeedsNoApprovalOnEitherRuntime(t *testing.T) {
 	resp, err = callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
 		ToolCall: acp.ToolCallUpdate{
 			ToolCallId: acp.ToolCallId("call-claude-title"),
-			Title:      acp.Ptr("mcp__Memoh_Tools__create_schedule"),
+			Title:      acp.Ptr("mcp__Memoh_Tools__schedule.create"),
 			Kind:       acp.Ptr(acp.ToolKind("other")),
 			RawInput:   map[string]any{"cron": "0 9 * * *"},
 		},

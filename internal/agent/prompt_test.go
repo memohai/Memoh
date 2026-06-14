@@ -44,7 +44,7 @@ func TestGenerateSystemPromptIncludesCommonAndModeContracts(t *testing.T) {
 			want: []string{
 				"You are an AI agent running inside a private Memoh workspace.",
 				"## Session mode: discuss",
-				"Use `send` to speak in the conversation.",
+				"Use `message.send` to speak in the conversation.",
 			},
 		},
 		{
@@ -156,7 +156,7 @@ func TestGenerateSystemPromptIncludesDisplayToolsWhenEnabled(t *testing.T) {
 	if !strings.Contains(prompt, "## Workspace browser & desktop") {
 		t.Fatalf("expected display tools section in prompt")
 	}
-	if !strings.Contains(prompt, "browser_observe") {
+	if !strings.Contains(prompt, "browser.observe") {
 		t.Fatalf("expected browser tool mention in prompt")
 	}
 }

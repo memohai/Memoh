@@ -33,7 +33,7 @@ func (p *ContactsProvider) Tools(_ context.Context, session SessionContext) ([]s
 	sess := session
 	return []sdk.Tool{
 		{
-			Name:        "get_contacts",
+			Name:        "list_contacts",
 			Description: "List all known contacts and conversations for the current bot. Returns platform, conversation type, reply target, and metadata for each route.",
 			Parameters: map[string]any{
 				"type": "object",

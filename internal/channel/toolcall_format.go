@@ -21,41 +21,41 @@ const ExternalToolCallEmoji = "⚙️"
 // builtinToolCallEmoji maps built-in tool names to their display emoji.
 // Names are matched case-insensitively after trimming whitespace.
 var builtinToolCallEmoji = map[string]string{
-	"list":       "📂",
-	"read":       "📖",
-	"write":      "📝",
-	"edit":       "📝",
-	"exec":       "💻",
-	"bg_status":  "💻",
-	"web_search": "🌐",
-	"web_fetch":  "🌐",
+	"list":              "📂",
+	"read":              "📖",
+	"write":             "📝",
+	"edit":              "📝",
+	"exec":              "💻",
+	"background.status": "💻",
+	"web_search":        "🌐",
+	"web_fetch":         "🌐",
 
-	"search_memory":   "🧠",
+	"memory.search":   "🧠",
 	"search_messages": "🧠",
 	"list_sessions":   "🧠",
 
-	"list_schedule":   "📅",
-	"get_schedule":    "📅",
-	"create_schedule": "📅",
-	"update_schedule": "📅",
-	"delete_schedule": "📅",
+	"schedule.list":   "📅",
+	"schedule.get":    "📅",
+	"schedule.create": "📅",
+	"schedule.update": "📅",
+	"schedule.delete": "📅",
 
-	"send":  "💬",
-	"react": "💬",
+	"message.send":  "💬",
+	"message.react": "💬",
 
-	"get_contacts": "👥",
+	"list_contacts": "👥",
 
-	"list_email_accounts": "📧",
-	"send_email":          "📧",
-	"list_email":          "📧",
-	"read_email":          "📧",
+	"email.accounts_list": "📧",
+	"email.send":          "📧",
+	"email.list":          "📧",
+	"email.read":          "📧",
 
-	"spawn":     "🤖",
-	"use_skill": "🧩",
+	"agent.spawn": "🤖",
+	"skill.use":   "🧩",
 
-	"generate_image":   "🖼️",
-	"speak":            "🔊",
-	"transcribe_audio": "🎧",
+	"image.generate":   "🖼️",
+	"audio.speak":      "🔊",
+	"audio.transcribe": "🎧",
 }
 
 // ToolCallEmoji returns the emoji mapped for a tool name. Unknown / external

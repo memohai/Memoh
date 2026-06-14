@@ -93,7 +93,7 @@ FROM bot_history_messages m,
 WHERE m.session_id = $1
   AND m.role = 'assistant'
   AND part->>'type' = 'tool-call'
-  AND part->>'toolName' = 'use_skill'
+  AND part->>'toolName' = 'skill.use'
   AND part->'input'->>'skillName' IS NOT NULL
   AND part->'input'->>'skillName' != ''
 ORDER BY skill_name

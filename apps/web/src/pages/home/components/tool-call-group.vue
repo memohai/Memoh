@@ -126,9 +126,9 @@ function labelFor(tool: ToolCallBlockType): string {
 // Collapsed summary: a single tool keeps its subject; multiple tools fall back
 // to category counts ("Read 3 files · Edited 2 files").
 const BROWSE_TOOLS = new Set([
-  'read', 'list', 'web_search', 'web_fetch', 'search_memory', 'search_messages',
-  'get_contacts', 'list_sessions', 'list_email', 'read_email', 'list_email_accounts',
-  'list_schedule', 'get_schedule',
+  'read', 'list', 'web_search', 'web_fetch', 'memory.search', 'search_messages',
+  'list_contacts', 'list_sessions', 'email.list', 'email.read', 'email.accounts_list',
+  'schedule.list', 'schedule.get',
 ])
 const RUN_TOOLS = new Set(['exec'])
 const EDIT_TOOLS = new Set(['write', 'edit'])

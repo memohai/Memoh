@@ -36,7 +36,7 @@ func NewTranscriptionProvider(log *slog.Logger, settingsSvc *settings.Service, a
 		log = slog.Default()
 	}
 	return &TranscriptionProvider{
-		logger:   log.With(slog.String("tool", "transcribe_audio")),
+		logger:   log.With(slog.String("tool", "audio.transcribe")),
 		settings: settingsSvc,
 		audio:    audioSvc,
 		media:    mediaSvc,
@@ -69,7 +69,7 @@ func (p *TranscriptionProvider) Tools(ctx context.Context, session SessionContex
 	}
 	sess := session
 	return []sdk.Tool{{
-		Name:        "transcribe_audio",
+		Name:        "audio.transcribe",
 		Description: "Transcribe an audio or voice message into text. Use this when the user sent a voice message and you need to understand its contents. Accepts a bot media path such as /data/media/... or a direct URL.",
 		Parameters: map[string]any{
 			"type": "object",

@@ -68,7 +68,7 @@ func (p *ImageGenProvider) Tools(ctx context.Context, session SessionContext) ([
 	sess := session
 	return []sdk.Tool{
 		{
-			Name:        "generate_image",
+			Name:        "image.generate",
 			Description: "Generate an image from a text description using the configured image generation model. Returns the file path of the generated image in the workspace.",
 			Parameters: map[string]any{
 				"type": "object",

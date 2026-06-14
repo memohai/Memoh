@@ -340,37 +340,59 @@
       "edit": "Edit",
       "list": "List",
       "exec": "Run",
-      "bg_status": "Background",
+      "background": {
+        "status": "Background"
+      },
       "web_search": "Search the web",
       "web_fetch": "Fetch",
-      "search_memory": "Search memory",
+      "memory": {
+        "search": "Search memory"
+      },
       "ask_user": "Ask user",
-      "send": "Send message",
-      "react": "React",
-      "react_remove": "Remove reaction",
-      "get_contacts": "List contacts",
+      "message": {
+        "send": "Send message",
+        "react": "React",
+        "react_remove": "Remove reaction"
+      },
+      "list_contacts": "List contacts",
       "list_sessions": "List sessions",
       "search_messages": "Search history",
-      "list_schedule": "List schedules",
-      "get_schedule": "Get schedule",
-      "create_schedule": "Create schedule",
-      "update_schedule": "Update schedule",
-      "delete_schedule": "Delete schedule",
-      "list_email_accounts": "List email accounts",
-      "send_email": "Send email",
-      "list_email": "List emails",
-      "read_email": "Read email",
-      "speak": "Speak",
-      "transcribe_audio": "Transcribe",
-      "generate_image": "Generate image",
-      "spawn": "Spawn {count} subagents",
+      "schedule": {
+        "list": "List schedules",
+        "get": "Get schedule",
+        "create": "Create schedule",
+        "update": "Update schedule",
+        "delete": "Delete schedule"
+      },
+      "email": {
+        "accounts_list": "List email accounts",
+        "send": "Send email",
+        "list": "List emails",
+        "read": "Read email"
+      },
+      "audio": {
+        "speak": "Speak",
+        "transcribe": "Transcribe"
+      },
+      "image": {
+        "generate": "Generate image"
+      },
+      "agent": {
+        "spawn": "Spawn {count} subagents"
+      },
       "clustered": "{count} tool calls",
-      "use_skill": "Use skill",
-      "browser_action": "Browser {action}",
-      "browser_observe": "Observe browser {action}",
-      "computer_observe": "Observe desktop {action}",
-      "computer_action": "Desktop {action}",
-      "browser_remote_session": "Browser session {action}",
+      "skill": {
+        "use": "Use skill"
+      },
+      "browser": {
+        "action": "Browser {action}",
+        "observe": "Observe browser {action}",
+        "remote_session": "Browser session {action}"
+      },
+      "computer": {
+        "observe": "Observe desktop {action}",
+        "action": "Desktop {action}"
+      },
       "browserAction": {
         "navigate": "Navigate",
         "click": "Click",
@@ -1808,7 +1830,7 @@
       "transcriptionModel": "Transcription Model",
       "transcriptionModelPlaceholder": "Select transcription model",
       "imageModel": "Image Generation Model",
-      "imageModelDescription": "Model used for the generate_image tool. Must support image-output compatibility.",
+      "imageModelDescription": "Model used for the image.generate tool. Must support image-output compatibility.",
       "imageModelPlaceholder": "Select image model (optional)",
       "language": "Language",
       "reasoningEnabled": "Enable Reasoning",

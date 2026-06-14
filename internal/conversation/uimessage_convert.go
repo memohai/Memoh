@@ -977,7 +977,7 @@ func finalizeInteractiveRequests(message *UIMessage, output any) {
 
 // backgroundTaskFromToolResult detects a background handoff in a tool result
 // by payload shape — a task_id plus a background-start status marker —
-// regardless of which tool produced it. Terminal statuses (e.g. bg_status
+// regardless of which tool produced it. Terminal statuses (e.g. background.status
 // inspection results) intentionally do not match.
 func backgroundTaskFromToolResult(output any) (UIBackgroundTask, bool) {
 	payload, ok := toolResultMap(output)

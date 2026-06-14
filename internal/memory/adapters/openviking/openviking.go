@@ -14,7 +14,7 @@ import (
 const (
 	OpenVikingType = "openviking"
 
-	ovToolSearchMemory = "search_memory"
+	ovToolSearchMemory = "memory.search"
 	ovDefaultLimit     = 10
 	ovMaxLimit         = 50
 	ovContextMaxItems  = 8

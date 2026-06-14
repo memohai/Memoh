@@ -1849,7 +1849,7 @@ func collectMessageToolContext(registry *channel.Registry, messages []conversati
 	suppressReplies := false
 	for _, msg := range messages {
 		for _, tc := range msg.ToolCalls {
-			if tc.Function.Name != "send" && tc.Function.Name != "send_message" {
+			if tc.Function.Name != "message.send" {
 				continue
 			}
 			var args sendMessageToolArgs
@@ -2374,7 +2374,7 @@ func formatVoiceTranscriptionUnavailableNotice(attachments []channel.Attachment)
 	if len(paths) == 0 {
 		return "[User sent a voice message, but transcription is unavailable.]"
 	}
-	return "[User sent a voice message, but transcription is unavailable. Use transcribe_audio with one of these paths if needed: " + strings.Join(paths, ", ") + "]"
+	return "[User sent a voice message, but transcription is unavailable. Use audio.transcribe with one of these paths if needed: " + strings.Join(paths, ", ") + "]"
 }
 
 func openInboundAttachmentURL(ctx context.Context, rawURL string) (inboundAttachmentPayload, error) {

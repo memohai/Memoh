@@ -66,14 +66,14 @@ func (p *TTSProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.
 	sess := session
 	return []sdk.Tool{
 		{
-			Name:        "speak",
+			Name:        "audio.speak",
 			Description: "Send a voice message. When target is omitted, speaks in the current conversation. When target is specified, sends to that channel/person. Synthesizes text to speech and delivers as audio.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"text":     map[string]any{"type": "string", "description": "The text to convert to speech (max 500 characters)"},
 					"platform": map[string]any{"type": "string", "description": "Channel platform name. Defaults to current session platform."},
-					"target":   map[string]any{"type": "string", "description": "Channel target (chat/group/thread ID). Optional — omit to speak in the current conversation. Use get_contacts to find targets for other conversations."},
+					"target":   map[string]any{"type": "string", "description": "Channel target (chat/group/thread ID). Optional — omit to speak in the current conversation. Use list_contacts to find targets for other conversations."},
 					"reply_to": map[string]any{"type": "string", "description": "Message ID to reply to. The voice message will reference this message on the platform."},
 				},
 				"required": []string{"text"},

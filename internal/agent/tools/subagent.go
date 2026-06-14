@@ -200,7 +200,7 @@ const maxTasksPerSpawn = 5
 // a single agent session to prevent subagent storms.
 const maxSpawnCallsPerSession = 3
 
-// SpawnProvider exposes a "spawn" tool that runs one or more subagent tasks
+// SpawnProvider exposes an "agent.spawn" tool that runs one or more subagent tasks
 // concurrently and returns results to the parent agent.
 type SpawnProvider struct {
 	agent          SpawnAgent
@@ -235,7 +235,7 @@ func NewSpawnProvider(
 		queries:        queries,
 		sessionService: sessionService,
 		bgManager:      bgManager,
-		logger:         log.With(slog.String("tool", "spawn")),
+		logger:         log.With(slog.String("tool", "agent.spawn")),
 	}
 	p.modelResolver = p.resolveModel
 	return p
@@ -266,7 +266,7 @@ func (p *SpawnProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 	spawnCount := new(int32)
 	return []sdk.Tool{
 		{
-			Name:        "spawn",
+			Name:        "agent.spawn",
 			Description: fmt.Sprintf("Spawn one or more subagents to work on tasks in parallel. Each task runs in its own context with file, exec, and web tools. All results are returned together. Max %d tasks per call, max %d calls per session.", maxTasksPerSpawn, maxSpawnCallsPerSession),
 			Parameters: map[string]any{
 				"type": "object",
@@ -378,7 +378,7 @@ func (p *SpawnProvider) execSpawn(ctx context.Context, session SessionContext, a
 }
 
 // execSpawnBackground registers the batch as a background spawn task and
-// returns immediately. Branches derive from the task context so bg_status
+// returns immediately. Branches derive from the task context so background.status
 // kill can cancel them; the join notification carries each branch's report.
 func (p *SpawnProvider) execSpawnBackground(
 	ctx context.Context,
@@ -398,7 +398,7 @@ func (p *SpawnProvider) execSpawnBackground(
 			"isError": true,
 			"content": []map[string]any{{
 				"type": "text",
-				"text": fmt.Sprintf("%s. Check running tasks with bg_status (and kill stale ones) before starting more.", err),
+				"text": fmt.Sprintf("%s. Check running tasks with background.status (and kill stale ones) before starting more.", err),
 			}},
 		}, nil
 	}

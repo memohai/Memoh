@@ -27,7 +27,7 @@ func (*SkillProvider) Tools(_ context.Context, session SessionContext) ([]sdk.To
 	skills := session.Skills
 	return []sdk.Tool{
 		{
-			Name:        "use_skill",
+			Name:        "skill.use",
 			Description: "Activate a skill to get its full instructions. Call this when you think a skill is relevant to the current task.",
 			Parameters: map[string]any{
 				"type": "object",

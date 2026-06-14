@@ -147,7 +147,7 @@ func TestFormatSendCarriesTargetAndBody(t *testing.T) {
 	t.Parallel()
 
 	tc := &StreamToolCall{
-		Name: "send",
+		Name: "message.send",
 		Input: map[string]any{
 			"target":   "chat:123",
 			"platform": "telegram",
@@ -171,7 +171,7 @@ func TestFormatSendEmailCarriesSubject(t *testing.T) {
 	t.Parallel()
 
 	tc := &StreamToolCall{
-		Name: "send_email",
+		Name: "email.send",
 		Input: map[string]any{
 			"to":      "alice@example.com",
 			"subject": "Meeting notes",
@@ -194,7 +194,7 @@ func TestFormatSearchMemoryPrintsScoreAndTotal(t *testing.T) {
 	t.Parallel()
 
 	tc := &StreamToolCall{
-		Name:  "search_memory",
+		Name:  "memory.search",
 		Input: map[string]any{"query": "previous trip to Tokyo"},
 		Result: map[string]any{
 			"total": float64(10),
@@ -242,7 +242,7 @@ func TestFormatSpawnSuccessRatio(t *testing.T) {
 	t.Parallel()
 
 	tc := &StreamToolCall{
-		Name: "spawn",
+		Name: "agent.spawn",
 		Result: map[string]any{
 			"results": []any{
 				map[string]any{"success": true, "task": "analyze repo structure", "session_id": "sess_1"},
@@ -289,7 +289,7 @@ func TestFormatCreateScheduleSuccess(t *testing.T) {
 	t.Parallel()
 
 	tc := &StreamToolCall{
-		Name: "create_schedule",
+		Name: "schedule.create",
 		Input: map[string]any{
 			"name":    "Daily report",
 			"pattern": "0 9 * * *",

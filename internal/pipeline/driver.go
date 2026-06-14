@@ -481,11 +481,11 @@ func buildLateBindingPrompt(isMentioned bool) string {
 	sb.WriteString("Current time: ")
 	sb.WriteString(now)
 	sb.WriteString("\n\n")
-	sb.WriteString("IMPORTANT: You MUST use the `send` tool to speak. Your text output is invisible to everyone — it is only internal monologue. ")
-	sb.WriteString("If you want to say something, you MUST call the `send` tool. Writing text without a tool call means absolute silence — no one will see it.")
+	sb.WriteString("IMPORTANT: You MUST use the `message.send` tool to speak. Your text output is invisible to everyone — it is only internal monologue. ")
+	sb.WriteString("If you want to say something, you MUST call the `message.send` tool. Writing text without a tool call means absolute silence — no one will see it.")
 
 	if isMentioned {
-		sb.WriteString("\n\nYou were mentioned or replied to. You should respond by calling the `send` tool now.")
+		sb.WriteString("\n\nYou were mentioned or replied to. You should respond by calling the `message.send` tool now.")
 	}
 
 	return sb.String()

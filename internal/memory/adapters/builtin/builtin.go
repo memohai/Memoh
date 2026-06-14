@@ -19,7 +19,7 @@ const (
 
 	defaultMemoryToolLimit = 8
 	maxMemoryToolLimit     = 50
-	toolSearchMemory       = "search_memory"
+	toolSearchMemory       = "memory.search"
 )
 
 // BuiltinProvider wraps the existing Service as a Provider.

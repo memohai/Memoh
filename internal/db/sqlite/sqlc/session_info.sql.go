@@ -100,7 +100,7 @@ FROM bot_history_messages m,
 WHERE m.session_id = ?1
   AND m.role = 'assistant'
   AND json_extract(j.value, '$.type') = 'tool-call'
-  AND COALESCE(json_extract(j.value, '$.toolName'), json_extract(j.value, '$.tool_name')) = 'use_skill'
+  AND COALESCE(json_extract(j.value, '$.toolName'), json_extract(j.value, '$.tool_name')) = 'skill.use'
   AND COALESCE(
     json_extract(j.value, '$.input.skillName'),
     json_extract(j.value, '$.input.skill_name'),
