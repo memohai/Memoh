@@ -4,19 +4,14 @@
        Layout is a flex row — the code scrolls inside its own column while the
        copy button is a stable trailing sibling (top-aligned). This keeps the
        block fit-to-content without the awkward reserved gap, and the button no
-       longer jitters as the width grows during streaming. -->
+       longer jitters as the width grows during streaming. Highlighting itself
+       is delegated to the shared CodeBlock kernel. -->
   <div class="my-2 flex w-fit max-w-full items-start gap-1.5 overflow-hidden rounded-lg border border-border/60 bg-white py-1 pl-3.5 pr-1.5 dark:bg-card">
-    <!-- eslint-disable vue/no-v-html -->
-    <div
-      v-if="html && !loading"
-      class="min-w-0 overflow-x-auto py-1.5 text-[13px] leading-relaxed [&_pre]:bg-transparent! [&_pre]:m-0! [&_pre]:p-0! [&_code]:bg-transparent!"
-      v-html="html"
+    <CodeBlock
+      :code="code"
+      :lang="language || 'text'"
+      class="overflow-x-auto py-1.5 text-[13px] leading-relaxed"
     />
-    <!-- eslint-enable vue/no-v-html -->
-    <pre
-      v-else
-      class="min-w-0 overflow-x-auto whitespace-pre py-1.5 font-mono text-[13px] leading-relaxed text-foreground"
-    >{{ code }}</pre>
     <Button
       variant="ghost"
       size="icon-sm"
@@ -37,11 +32,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { Check, Copy } from 'lucide-vue-next'
 import { Button } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
-import { useShikiHighlighter } from '@/composables/useShikiHighlighter'
+import CodeBlock from './code-block.vue'
 
 interface CodeFenceNode {
   type: string
@@ -53,18 +48,9 @@ interface CodeFenceNode {
 
 const props = defineProps<{ node: CodeFenceNode }>()
 const { t } = useI18n()
-const { html, loading, highlightLang } = useShikiHighlighter()
 
 const code = computed(() => props.node.code ?? props.node.raw ?? '')
 const language = computed(() => (props.node.language ?? '').trim().toLowerCase())
-
-watch(
-  [code, language],
-  ([c, l]) => {
-    if (c) void highlightLang(c, l || 'text')
-  },
-  { immediate: true },
-)
 
 const copied = ref(false)
 let resetTimer: ReturnType<typeof setTimeout> | null = null

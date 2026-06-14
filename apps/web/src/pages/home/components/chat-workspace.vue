@@ -8,6 +8,7 @@
       :components="panelComponents"
       :watermark-component="watermarkComponent"
       :default-tab-component="defaultTabComponent"
+      :prefix-header-actions-component="prefixHeaderActionsComponent"
       :right-header-actions-component="rightHeaderActionsComponent"
       :theme="memohTheme"
       :disable-floating-groups="true"
@@ -16,11 +17,12 @@
       :get-tab-context-menu-items="getTabContextMenuItems"
       @ready="onReady"
     />
+    <TabCloseConfirm />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import {
@@ -36,6 +38,7 @@ import '@/styles/dockview-theme.css'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { useChatStore } from '@/store/chat-list'
 import { openInFileManagerKey } from '../composables/useFileManagerProvider'
+import { DesktopShellKey } from '@/lib/desktop-shell'
 import PanelChat from './dockview/panel-chat.vue'
 import PanelFile from './dockview/panel-file.vue'
 import PanelPreview from './dockview/panel-preview.vue'
@@ -45,6 +48,8 @@ import PanelDisplay from './dockview/panel-display.vue'
 import WorkspaceWatermark from './dockview/workspace-watermark.vue'
 import WorkspaceTab from './dockview/workspace-tab.vue'
 import GroupActions from './dockview/group-actions.vue'
+import PrefixHeaderActions from './dockview/prefix-header-actions.vue'
+import TabCloseConfirm from './dockview/tab-close-confirm.vue'
 
 const { t } = useI18n()
 const store = useWorkspaceTabsStore()
@@ -88,6 +93,7 @@ const panelComponents: Record<string, VueComponent> = {
 const watermarkComponent = WorkspaceWatermark as unknown as VueComponent
 const defaultTabComponent = WorkspaceTab as unknown as VueComponent
 const rightHeaderActionsComponent = GroupActions as unknown as VueComponent
+const prefixHeaderActionsComponent = PrefixHeaderActions as unknown as VueComponent
 
 const memohTheme: DockviewTheme = {
   name: 'memoh',
@@ -96,28 +102,24 @@ const memohTheme: DockviewTheme = {
   dndTabIndicator: 'fill',
 }
 
+// Closes route through the store guard so dirty files prompt to save instead of
+// discarding edits silently — close-others / close-all walk the dialog per file.
 function getTabContextMenuItems({ panel, group }: GetTabContextMenuItemsParams): ContextMenuItem[] {
   return [
     {
       label: t('chat.tabMenu.close'),
-      action: () => panel.api.close(),
+      action: () => store.requestCloseTab(panel.id),
     },
     {
       label: t('chat.tabMenu.closeOthers'),
       disabled: group.panels.length <= 1,
-      action: () => {
-        for (const other of [...group.panels]) {
-          if (other.id !== panel.id) other.api.close()
-        }
-      },
+      action: () => store.requestCloseTabs(
+        group.panels.filter(other => other.id !== panel.id).map(other => other.id),
+      ),
     },
     {
       label: t('chat.tabMenu.closeAll'),
-      action: () => {
-        for (const other of [...group.panels]) {
-          other.api.close()
-        }
-      },
+      action: () => store.requestCloseTabs(group.panels.map(other => other.id)),
     },
   ]
 }
@@ -165,6 +167,19 @@ function normalizeFileManagerPath(path: string): string {
   }
   return `${FILE_MANAGER_ROOT}/${trimmedPath}`
 }
+
+// dockview-vue renders panel/tab/header-action components by mounting fresh
+// vNodes whose appContext.provides is rebuilt from THIS component's own
+// instance.provides (it spreads parent.provides). A plain `inject` in a child
+// like prefix-header-actions therefore only sees what this component *provides*
+// itself — the normal Vue provide chain (chat/App.vue → … → here) does NOT cross
+// the manual mount boundary. DesktopShellKey is provided at the desktop chat root
+// to enable the macOS traffic-light reserve; without re-providing it here, the
+// dock's header-actions children read it as `false` and never reserve the gutter,
+// so hiding the sidebar slides the tab strip straight under the traffic lights.
+// Re-inject + re-provide so the value survives the dockview mount boundary.
+const desktopShell = inject(DesktopShellKey, false)
+provide(DesktopShellKey, desktopShell)
 
 provide(openInFileManagerKey, (path: string, isDir = false) => {
   const normalizedPath = normalizeFileManagerPath(path)

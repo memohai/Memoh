@@ -1,62 +1,78 @@
 <template>
-  <div class="flex flex-col h-full min-w-0">
-    <div class="flex items-center gap-1 border-b border-border px-2 py-1.5 shrink-0">
-      <Button
-        v-if="canWrite"
-        variant="ghost"
-        size="sm"
-        class="size-7 p-0"
-        :disabled="operationLoading"
-        :title="t('bots.files.upload')"
-        @click="triggerUpload(rootPath)"
-      >
-        <Upload class="size-3.5" />
-      </Button>
-      <Button
-        v-if="canWrite"
-        variant="ghost"
-        size="sm"
-        class="size-7 p-0"
-        :disabled="operationLoading"
-        :title="t('bots.files.uploadFolder')"
-        @click="triggerDirectoryUpload"
-      >
-        <CloudUpload class="size-3.5" />
-      </Button>
-      <Button
-        v-if="canWrite"
-        variant="ghost"
-        size="sm"
-        class="size-7 p-0"
-        :disabled="operationLoading"
-        :title="t('bots.files.newFolder')"
-        @click="openMkdirDialog(rootPath)"
-      >
-        <FolderPlus class="size-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        class="size-7 p-0"
-        :class="selectionMode ? 'bg-sidebar-accent text-foreground!' : ''"
-        :disabled="operationLoading"
-        :aria-pressed="selectionMode"
-        :title="selectionMode ? t('bots.files.doneSelecting') : t('bots.files.selectMode')"
-        @click="toggleSelectionMode"
-      >
-        <ListChecks class="size-3.5" />
-      </Button>
-      <span
-        v-if="selectedCount > 0"
-        class="ml-auto truncate text-[11px] text-muted-foreground"
-      >
+  <div class="group/tree flex flex-col h-full min-w-0">
+    <!-- Section header: same height as a tree row. Text sits at the icon-column
+         start position (where a chevron would be) so items below it read as
+         children — text at ~8px, item names at ~36px. -->
+    <div class="group/pane-header flex h-[27px] shrink-0 items-center mx-1 pl-[11px] select-none">
+      <span class="min-w-0 flex-1 truncate text-[13.5px] font-[500] text-muted-foreground/70">
+        {{ botName || t('bots.files.panelTitle') }}
+      </span>
+      <div class="flex items-center gap-0.5 pr-1 opacity-0 transition-opacity duration-150 group-hover/pane-header:opacity-100">
+        <Button
+          v-if="canWrite"
+          variant="ghost"
+          class="size-[26px] shrink-0 p-0 text-muted-foreground/70 hover:text-foreground"
+          :disabled="operationLoading"
+          :title="t('bots.files.newFile')"
+          @click="openNewFileDialog(rootPath)"
+        >
+          <FilePlus class="size-4" />
+        </Button>
+        <Button
+          v-if="canWrite"
+          variant="ghost"
+          class="size-[26px] shrink-0 p-0 text-muted-foreground/70 hover:text-foreground"
+          :disabled="operationLoading"
+          :title="t('bots.files.newFolder')"
+          @click="openMkdirDialog(rootPath)"
+        >
+          <FolderPlus class="size-4" />
+        </Button>
+        <DropdownMenu v-if="canWrite">
+          <DropdownMenuTrigger as-child>
+            <Button
+              variant="ghost"
+              class="size-[26px] shrink-0 p-0 text-muted-foreground/70 hover:text-foreground"
+              :disabled="operationLoading"
+              :title="t('bots.files.upload')"
+            >
+              <Upload class="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem @select="triggerUpload(rootPath)">
+              <Upload class="mr-2 size-3.5" />
+              {{ t('bots.files.upload') }}
+            </DropdownMenuItem>
+            <DropdownMenuItem @select="triggerDirectoryUpload">
+              <CloudUpload class="mr-2 size-3.5" />
+              {{ t('bots.files.uploadFolder') }}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <Button
+          variant="ghost"
+          class="size-[26px] shrink-0 p-0 text-muted-foreground/70 hover:text-foreground"
+          :title="t('common.refresh')"
+          @click="reload"
+        >
+          <RefreshCw class="size-4" />
+        </Button>
+      </div>
+    </div>
+    <!-- Batch ops bar: shown when items are selected -->
+    <div
+      v-if="selectedCount > 0"
+      class="flex shrink-0 items-center gap-1 border-b border-border px-2 h-7"
+    >
+      <span class="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
         {{ t('bots.files.selectedCount', { count: selectedCount }) }}
       </span>
       <Button
-        v-if="selectedCount > 0 && canWrite"
+        v-if="canWrite"
         variant="ghost"
         size="sm"
-        class="size-7 p-0"
+        class="size-6 p-0"
         :disabled="operationLoading"
         :title="t('bots.files.download')"
         @click="handleBatchDownload"
@@ -64,10 +80,9 @@
         <Download class="size-3.5" />
       </Button>
       <Button
-        v-if="selectedCount > 0"
         variant="ghost"
         size="sm"
-        class="size-7 p-0 text-destructive hover:text-destructive"
+        class="size-6 p-0 text-destructive hover:text-destructive"
         :disabled="operationLoading"
         :title="t('bots.files.delete')"
         @click="openBatchDeleteDialog"
@@ -77,13 +92,11 @@
       <Button
         variant="ghost"
         size="sm"
-        class="size-7 p-0"
-        :class="selectedCount > 0 ? '' : 'ml-auto'"
-        :disabled="operationLoading"
-        :title="t('common.refresh')"
-        @click="reload"
+        class="size-6 p-0"
+        :title="t('bots.files.doneSelecting')"
+        @click="toggleSelectionMode"
       >
-        <RefreshCw class="size-3.5" />
+        <X class="size-3.5" />
       </Button>
     </div>
 
@@ -115,11 +128,79 @@
 
     <div class="flex-1 min-h-0 relative">
       <div class="absolute inset-0">
-        <ScrollArea class="h-full">
-          <FileTree />
-        </ScrollArea>
+        <ContextMenu>
+          <ContextMenuTrigger as-child>
+            <ScrollArea class="h-full">
+              <FileTree />
+            </ScrollArea>
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            <template v-if="canWrite">
+              <ContextMenuItem @select="openNewFileDialog(rootPath)">
+                <FilePlus class="mr-2 size-3.5" />
+                {{ t('bots.files.newFile') }}
+              </ContextMenuItem>
+              <ContextMenuItem @select="openMkdirDialog(rootPath)">
+                <FolderPlus class="mr-2 size-3.5" />
+                {{ t('bots.files.newFolder') }}
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem @select="triggerUpload(rootPath)">
+                <Upload class="mr-2 size-3.5" />
+                {{ t('bots.files.upload') }}
+              </ContextMenuItem>
+              <ContextMenuItem @select="triggerDirectoryUpload">
+                <CloudUpload class="mr-2 size-3.5" />
+                {{ t('bots.files.uploadFolder') }}
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem @select="toggleSelectionMode">
+                <ListChecks class="mr-2 size-3.5" />
+                {{ t('bots.files.selectMode') }}
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+            </template>
+            <ContextMenuItem @select="reload">
+              <RefreshCw class="mr-2 size-3.5" />
+              {{ t('common.refresh') }}
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
       </div>
     </div>
+
+    <Dialog v-model:open="newFileDialogOpen">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{{ t('bots.files.newFile') }}</DialogTitle>
+        </DialogHeader>
+        <Input
+          v-model="newFileName"
+          :placeholder="t('bots.files.fileNamePlaceholder')"
+          :disabled="newFileLoading"
+          @keydown.enter.prevent="handleNewFile"
+        />
+        <DialogFooter>
+          <Button
+            variant="outline"
+            :disabled="newFileLoading"
+            @click="newFileDialogOpen = false"
+          >
+            {{ t('common.cancel') }}
+          </Button>
+          <Button
+            :disabled="!newFileName.trim() || newFileLoading"
+            @click="handleNewFile"
+          >
+            <Spinner
+              v-if="newFileLoading"
+              class="mr-1"
+            />
+            {{ t('common.confirm') }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <Dialog v-model:open="mkdirDialogOpen">
       <DialogContent class="sm:max-w-md">
@@ -255,9 +336,18 @@
 import { computed, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
-import { CloudUpload, Download, Upload, FolderPlus, ListChecks, RefreshCw, Trash2 } from 'lucide-vue-next'
+import { CloudUpload, Download, FilePlus, FolderPlus, ListChecks, RefreshCw, Trash2, Upload, X } from 'lucide-vue-next'
 import {
   Button,
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
   Input,
   Dialog,
   DialogContent,
@@ -273,6 +363,7 @@ import {
   postBotsByBotIdContainerFsMkdir,
   postBotsByBotIdContainerFsDelete,
   postBotsByBotIdContainerFsRename,
+  postBotsByBotIdContainerFsWrite,
 } from '@memohai/sdk'
 import type { HandlersFsFileInfo } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -287,8 +378,10 @@ import { storeToRefs } from 'pinia'
 const props = withDefaults(defineProps<{
   botId: string
   canWrite?: boolean
+  botName?: string
 }>(), {
   canWrite: false,
+  botName: '',
 })
 
 const { t } = useI18n()
@@ -641,6 +734,44 @@ async function handleUpload(event: Event) {
     toast.error(resolveApiErrorMessage(error, t('bots.files.uploadFailed')))
   } finally {
     input.value = ''
+  }
+}
+
+// ---- new file ------------------------------------------------------------
+
+const newFileDialogOpen = ref(false)
+const newFileName = ref('')
+const newFileLoading = ref(false)
+const newFileTarget = ref(rootPath)
+
+function openNewFileDialog(target: string) {
+  if (!props.canWrite) return
+  newFileTarget.value = target || rootPath
+  newFileName.value = ''
+  newFileDialogOpen.value = true
+}
+
+async function handleNewFile() {
+  if (!props.canWrite) return
+  const name = newFileName.value.trim()
+  if (!name || newFileLoading.value) return
+
+  newFileLoading.value = true
+  try {
+    const filePath = joinPath(newFileTarget.value, name)
+    await postBotsByBotIdContainerFsWrite({
+      path: { bot_id: props.botId },
+      body: { path: filePath, content: '' },
+      throwOnError: true,
+    })
+    newFileDialogOpen.value = false
+    toast.success(t('bots.files.newFileSuccess'))
+    reload()
+    workspaceTabs.openFile(filePath)
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('bots.files.newFileFailed')))
+  } finally {
+    newFileLoading.value = false
   }
 }
 

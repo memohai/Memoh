@@ -1,13 +1,15 @@
 <template>
-  <div class="h-full w-full bg-surface-editor">
-    <KeepAlive>
-      <ChatPane
-        v-if="visible"
-        :key="`chat-pane:${currentBotId}:${chatKey}`"
-        :tab-id="chatTabId"
-        :active="visible"
-      />
-    </KeepAlive>
+  <div class="flex flex-col h-full w-full bg-surface-editor">
+    <div class="flex-1 min-h-0">
+      <KeepAlive>
+        <ChatPane
+          v-if="visible"
+          :key="`chat-pane:${currentBotId}:${chatKey}`"
+          :tab-id="chatTabId"
+          :active="visible"
+        />
+      </KeepAlive>
+    </div>
   </div>
 </template>
 
@@ -21,7 +23,8 @@ import { usePanelVisible } from './use-panel-visible'
 
 // The chat panel is a singleton whose content follows the active session
 // (chat-selection store). Multi-session side-by-side rendering needs
-// per-session message state in the chat store first.
+// per-session message state in the chat store first. No breadcrumb: the tab
+// already carries the session title (kept in sync by the workspace store).
 const props = defineProps<{
   params: {
     params: Record<string, unknown>

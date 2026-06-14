@@ -224,7 +224,7 @@
               />
             </div>
           </div>
-          <div class="grid gap-2">
+          <div class="grid gap-2 w-fit">
             <Label for="people-create-role">{{ t('people.role') }}</Label>
             <Select v-model="createForm.role">
               <SelectTrigger id="people-create-role">

@@ -1,13 +1,16 @@
 <template>
-  <div class="h-full w-full bg-surface-editor">
-    <KeepAlive>
-      <FilePane
-        v-if="visible && filePath"
-        :key="`file-pane:${currentBotId}:${filePath}`"
-        :tab-id="props.params.api.id"
-        :file-path="filePath"
-      />
-    </KeepAlive>
+  <div class="flex flex-col h-full w-full bg-surface-editor">
+    <PanelBreadcrumb :path="filePath" />
+    <div class="flex-1 min-h-0">
+      <KeepAlive>
+        <FilePane
+          v-if="visible && filePath"
+          :key="`file-pane:${currentBotId}:${filePath}`"
+          :tab-id="props.params.api.id"
+          :file-path="filePath"
+        />
+      </KeepAlive>
+    </div>
   </div>
 </template>
 
@@ -18,6 +21,7 @@ import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import { useChatStore } from '@/store/chat-list'
 import FilePane from '../file-pane.vue'
 import { usePanelVisible } from './use-panel-visible'
+import PanelBreadcrumb from './panel-breadcrumb.vue'
 
 const props = defineProps<{
   params: {

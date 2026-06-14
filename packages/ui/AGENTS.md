@@ -140,17 +140,19 @@ prose use `variant="link"`; for a control-sized action use a normal `<Button>`.
 - **Selection blue is `--accent-blue-fill`** (`#2383e2`) — the single blue across
   Checkbox / Switch. Its ramp: `--accent-blue-fill-hover` (deeper) /
   `--accent-blue-fill-active` (deeper still).
-- **Interactive surface gray ladder** — one neutral material, two contexts:
-  - **Menu context** (light, single-state): `--ui-selected` (≈243) tints
-    highlighted menu rows (`menuItemClass`) + the SegmentedControl track.
-  - **Control context** (deeper hover→press, no scale: Toggle, ButtonGroup,
-    Select/Native-select trigger, Checkbox/Radio box): `--ui-hover` (≈239) ·
-    `--ui-on` (≈234, the control SELECTED step — Toggle on) · `--ui-pressed`
-    (≈224) · `--ui-selected-pressed` (≈218, on+press).
-  `--ui-on` is split from `--ui-selected` so deepening the control ladder never
-  drags the menu highlight. Ghost is button-tier (own press-scale), so its hover
-  is pinned to its OWN step `--btn-ghost-hover` (≈237), not `--ui-pressed`. Dark
-  mode lightens instead of darkens.
+- **Interaction overlay ladder** — pure neutral overlays, chroma 0, no hue.
+  Composites over the underlying surface, inheriting its warmth automatically.
+  Zero hue = zero color tilt across surfaces or rendering environments.
+  Light mode = black overlays; dark mode = white overlays.
+  - `--overlay-hover-light` (4.5% black / 5.5% white) — wide sidebar rows, menu highlights
+  - `--overlay-hover` (7.2% / 9%) — standard controls (Toggle, Select, Checkbox)
+  - `--overlay-hover-strong` (11% / 13%) — small icon ghost buttons; Toggle on state
+  - `--overlay-active` (13.5% / 15.5%) — pressed state (standard controls)
+  - `--overlay-active-strong` (17% / 19%) — pressed (small icons) / on+press
+  Semantic aliases keep old names so component code is unchanged:
+  `--ui-hover` · `--ui-selected` · `--ui-on` · `--ui-pressed` · `--ui-selected-pressed` ·
+  `--btn-ghost-hover` · `--sidebar-hover` all point into this ladder.
+  Color-scheme variants need **no hover overrides** — overlays are scheme-agnostic.
 - **Accent palette** — 11 hues, each with a 6-role ramp: `--accent-{hue}` (icon/
   text, **state-constant**), `-soft` (rest bg), `-soft-hover`, `-soft-active`,
   `-border`, `-deep`. 3-layer model: a colored item's text/icon **never** changes
@@ -161,6 +163,13 @@ prose use `variant="link"`; for a control-sized action use a normal `<Button>`.
   `<Button variant="brand">` (rare brand CTAs like chat Send) and a handful of
   reserved tokens (`--sidebar-primary`, capability/event accents). Never make
   purple a default surface or a large fill; the skeleton stays black/white/gray.
+- **Destructive is filled, not ghost.** `variant="destructive"` renders a solid
+  `bg-destructive text-destructive-foreground` button — a filled red CTA. Never
+  use `variant="ghost"` with manual destructive text classes (`text-destructive`,
+  `hover:bg-destructive/10`) as a substitute; that is the OLD pre-refactor ghost
+  pattern. If you need a low-emphasis destructive affordance (e.g. a secondary
+  action in a footer), use `variant="outline"` with the destructive class as a
+  deliberate exception, not the default.
 - **Selection is one blue, applied as fill.** Checkbox, Switch, Radio (checked
   edge) and the Slider range all use `--accent-blue-fill` — the chosen value
   reads as a solid blue fill, not a border. (Hover differs by control: Checkbox

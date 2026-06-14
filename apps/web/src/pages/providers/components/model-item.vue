@@ -1,26 +1,33 @@
 <template>
-  <Item
-    variant="outline"
-    class="h-full flex-col items-stretch min-w-0"
+  <!-- A flush list row, not a nested card: name on the left, actions on the
+       right, separated from the next model by an inset hairline (the last row
+       drops it). Same row language as the Configuration card above. -->
+  <div
+    class="mx-4 flex min-h-[3.25rem] items-center justify-between gap-3 border-b border-border py-2.5 last:border-b-0"
   >
-    <ItemContent class="w-full min-w-0">
-      <ItemTitle class="flex items-center gap-2 w-full min-w-0">
-        <span class="truncate min-w-0 flex-1">{{ model.name || model.model_id }}</span>
+    <!-- A hair of left padding so the name doesn't sit dead-flush on the row's
+         inset edge when the search box is above it — just breathing room, not a
+         full align to the placeholder text. -->
+    <div
+      class="min-w-0 flex-1"
+      :class="{ 'pl-1': searchAligned }"
+    >
+      <div class="flex min-w-0 items-center gap-2">
+        <span class="truncate text-[13px] font-medium text-foreground">
+          {{ model.name || model.model_id }}
+        </span>
         <Badge
-          v-if="model.type"
+          v-if="model.type === 'embedding'"
           variant="outline"
           size="sm"
-          class="inline-flex items-center gap-1"
+          class="inline-flex shrink-0 items-center gap-1"
         >
-          <component
-            :is="typeIcon"
-            class="size-3"
-          />
+          <Binary class="size-3" />
           {{ model.type }}
         </Badge>
         <span
           v-if="testResult"
-          class="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
+          class="inline-flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground"
         >
           <span
             class="inline-block size-2 rounded-full"
@@ -30,40 +37,51 @@
         </span>
         <Spinner
           v-if="testLoading"
-          class="size-3.5"
+          class="size-3.5 shrink-0"
         />
-      </ItemTitle>
-      <ItemDescription class="gap-2 flex flex-wrap items-center mt-3 min-h-6">
-        <ModelCapabilities :compatibilities="model.config?.compatibilities || []" />
-        <ContextWindowBadge :context-window="model.config?.context_window" />
+      </div>
+      <!-- Second line only when it carries new info: the real id (when a custom
+           display name is hiding it) or a test error. When the name already is
+           the id, repeating it is pure noise, so the line is dropped. -->
+      <div
+        v-if="showModelId || showError"
+        class="mt-0.5 flex flex-wrap items-center gap-2"
+      >
         <span
-          v-if="testResult && testResult.status !== 'ok' && testResult.message"
-          class="text-destructive text-xs"
+          v-if="showModelId"
+          class="truncate text-xs text-muted-foreground"
         >
-          {{ testResult.message }}
+          {{ model.model_id }}
         </span>
-      </ItemDescription>
-    </ItemContent>
-    <ItemActions class="mt-auto w-full justify-end">
+        <span
+          v-if="showError"
+          class="text-xs text-destructive"
+        >
+          {{ testResult?.message }}
+        </span>
+      </div>
+    </div>
+
+    <div class="flex shrink-0 items-center gap-0.5">
       <Button
         type="button"
-        variant="outline"
-        class="cursor-pointer"
+        variant="ghost"
+        size="icon-sm"
         :disabled="testLoading"
         :aria-label="$t('models.testModel')"
         @click="runTest"
       >
-        <RefreshCw />
+        <Zap class="size-4" />
       </Button>
 
       <Button
         type="button"
-        variant="outline"
-        class="cursor-pointer"
+        variant="ghost"
+        size="icon-sm"
         :aria-label="$t('common.edit')"
         @click="$emit('edit', model)"
       >
-        <Settings />
+        <Settings class="size-4" />
       </Button>
 
       <ConfirmPopover
@@ -74,40 +92,37 @@
         <template #trigger>
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
+            size="icon-sm"
             :aria-label="$t('common.delete')"
           >
-            <Trash2 />
+            <Trash2 class="size-4" />
           </Button>
         </template>
       </ConfirmPopover>
-    </ItemActions>
-  </Item>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
 import {
-  Item,
-  ItemContent,
-  ItemDescription,
-  ItemActions,
-  ItemTitle,
   Badge,
   Button,
   Spinner,
 } from '@memohai/ui'
-import { RefreshCw, Settings, Trash2, MessageSquare, Binary } from 'lucide-vue-next'
+import { Zap, Settings, Trash2, Binary } from 'lucide-vue-next'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
-import ModelCapabilities from '@/components/model-capabilities/index.vue'
-import ContextWindowBadge from '@/components/context-window-badge/index.vue'
 import { postModelsByIdTest } from '@memohai/sdk'
 import type { ModelsGetResponse, ModelsTestResponse } from '@memohai/sdk'
 import { ref, computed } from 'vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   model: ModelsGetResponse
   deleteLoading: boolean
-}>()
+  searchAligned?: boolean
+}>(), {
+  searchAligned: false,
+})
 
 defineEmits<{
   edit: [model: ModelsGetResponse]
@@ -117,9 +132,15 @@ defineEmits<{
 const testLoading = ref(false)
 const testResult = ref<ModelsTestResponse | null>(null)
 
-const typeIcon = computed(() => {
-  return props.model.type === 'embedding' ? Binary : MessageSquare
+// Show the id as a second line only when a real custom name is hiding it.
+const showModelId = computed(() => {
+  const name = props.model.name?.trim()
+  return !!name && !!props.model.model_id && name !== props.model.model_id
 })
+
+const showError = computed(
+  () => !!(testResult.value && testResult.value.status !== 'ok' && testResult.value.message),
+)
 
 const statusDotClass = computed(() => {
   switch (testResult.value?.status) {

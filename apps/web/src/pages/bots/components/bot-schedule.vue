@@ -1,520 +1,507 @@
 <template>
-  <div class="max-w-2xl mx-auto pb-6 space-y-5">
-    <!-- Sovereign Header -->
-    <header class="pb-4 border-b border-border/50 sticky top-0 bg-background/95 backdrop-blur z-30 pt-4 -mt-4 flex items-center justify-between gap-4">
-      <div class="space-y-1">
-        <h2 class="text-sm font-semibold text-foreground flex items-center gap-2">
-          {{ $t('bots.schedule.title') }}
-          <Badge
-            v-if="schedules.length"
-            variant="secondary"
-            class="text-[10px] h-5 px-1.5 font-mono"
-          >
-            {{ schedules.length }}
-          </Badge>
-        </h2>
-        <p class="text-[11px] leading-snug text-muted-foreground max-w-md">
-          {{ $t('bots.schedule.subtitle') }}
-        </p>
-      </div>
-      <div class="flex shrink-0 flex-wrap justify-end gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          :disabled="isLoading || isRefreshing"
-          class="shadow-none"
-          @click="handleRefresh"
-        >
-          <Spinner
-            v-if="isLoading || isRefreshing"
-            class="mr-1.5"
-          />
-          <RefreshCw
-            v-else
-            class="mr-1.5 size-3.5 text-muted-foreground"
-          />
-          {{ $t('common.refresh') }}
-        </Button>
-        <Button
-          v-if="!formVisible"
-          variant="secondary"
-          size="sm"
-          class="shadow-none"
-          @click="handleNew"
-        >
-          <Plus class="mr-1.5 size-3.5" />
+  <div class="mx-auto max-w-3xl pt-6 pb-8">
+    <header class="mb-6 flex items-center justify-between gap-4 px-2">
+      <h1 class="text-lg font-semibold">
+        {{ $t('bots.schedule.title') }}
+      </h1>
+      <div class="flex items-center gap-2">
+        <DropdownMenu v-if="schedules.length > 1">
+          <DropdownMenuTrigger as-child>
+            <Button
+              variant="ghost"
+              class="text-muted-foreground"
+            >
+              <ArrowUpDown class="size-3.5" />
+              {{ currentSortLabel }}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              v-for="opt in SORT_OPTIONS"
+              :key="opt.key"
+              class="justify-between gap-4"
+              @select="sortKey = opt.key"
+            >
+              {{ $t(opt.labelKey) }}
+              <Check
+                class="size-3.5 shrink-0"
+                :class="sortKey === opt.key ? 'opacity-100' : 'opacity-0'"
+              />
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <Button @click="handleNew">
+          <Plus class="size-4" />
           {{ $t('bots.schedule.create') }}
         </Button>
       </div>
     </header>
 
-    <div class="space-y-6">
-      <!-- Loading State -->
-      <div
-        v-if="isLoading && schedules.length === 0"
-        class="flex items-center gap-2 text-xs text-muted-foreground"
-      >
-        <Spinner />
-        <span>{{ $t('common.loading') }}</span>
-      </div>
+    <!-- Loading -->
+    <div
+      v-if="isLoading && schedules.length === 0"
+      class="flex items-center gap-2 px-2 text-xs text-muted-foreground"
+    >
+      <Spinner class="size-3.5" />
+      <span>{{ $t('common.loading') }}</span>
+    </div>
 
-      <!-- Empty State -->
-      <div
-        v-else-if="!isLoading && schedules.length === 0 && !formVisible"
-        class="space-y-6"
+    <!-- Empty -->
+    <div
+      v-else-if="schedules.length === 0"
+      class="flex flex-col items-center justify-center rounded-[var(--radius-menu-shell)] border border-dashed border-border py-16 text-center"
+    >
+      <Calendar class="mb-3 size-8 text-muted-foreground/40" />
+      <p class="text-sm font-medium text-foreground">
+        {{ $t('bots.schedule.empty') }}
+      </p>
+      <Button
+        variant="outline"
+        size="sm"
+        class="mt-4"
+        @click="handleNew"
       >
-        <div class="flex flex-col items-center justify-center py-10 border border-border/40 border-dashed rounded-lg bg-muted/5">
-          <div class="size-10 rounded-full bg-muted/20 flex items-center justify-center mb-4">
-            <Calendar class="size-5 text-muted-foreground" />
-          </div>
-          <p class="text-sm font-medium text-foreground mb-1">
-            {{ $t('bots.schedule.empty') }}
+        <Plus class="size-4" />
+        {{ $t('bots.schedule.create') }}
+      </Button>
+    </div>
+
+    <!-- Card Grid -->
+    <div
+      v-else
+      class="grid grid-cols-1 gap-3 sm:grid-cols-2"
+    >
+      <div
+        v-for="item in sortedSchedules"
+        :key="item.id"
+        class="group/card flex cursor-pointer items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3.5 transition-colors hover:bg-accent/30 dark:hover:bg-accent focus-visible:outline-none"
+        role="button"
+        tabindex="0"
+        @click="handleEdit(item)"
+        @keydown.enter="handleEdit(item)"
+        @keydown.space.prevent="handleEdit(item)"
+      >
+        <!-- Name + description -->
+        <div class="min-w-0 flex-1">
+          <p class="truncate text-sm font-medium text-foreground">
+            {{ item.name }}
           </p>
-          <Button
-            size="sm"
-            variant="outline"
-            class="shadow-none h-8 text-xs mt-3 bg-background border-border/40"
-            @click="handleNew"
-          >
-            <Plus class="mr-1.5 size-3.5" />
-            {{ $t('bots.schedule.create') }}
-          </Button>
+          <p class="truncate text-xs text-muted-foreground">
+            {{ item.description?.trim() || describeItem(item.pattern) || item.pattern }}
+          </p>
+        </div>
+
+        <!-- Hover actions + switch -->
+        <div
+          class="flex shrink-0 items-center gap-2"
+          @click.stop
+        >
+          <!-- Three-dot menu: visible on hover OR when dropdown is open -->
+          <DropdownMenu @update:open="(open: boolean) => { if (open) openMenuIds.add(item.id ?? ''); else openMenuIds.delete(item.id ?? '') }">
+            <DropdownMenuTrigger as-child>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="size-7 transition-opacity"
+                :class="openMenuIds.has(item.id ?? '') ? 'opacity-100' : 'opacity-0 group-hover/card:opacity-100'"
+                :aria-label="$t('common.actions')"
+              >
+                <MoreHorizontal class="size-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                class="gap-2"
+                @select="handleEdit(item)"
+              >
+                <Pencil class="size-3.5" />
+                {{ $t('bots.schedule.edit') }}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                class="gap-2 text-destructive focus:text-destructive"
+                @select="deleteTarget = item"
+              >
+                <Trash2 class="size-3.5" />
+                {{ $t('bots.schedule.delete') }}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <Switch
+            :model-value="!!item.enabled"
+            :disabled="busyIds.has(item.id || '')"
+            @update:model-value="(val: boolean) => handleToggleEnabled(item, !!val)"
+          />
         </div>
       </div>
+    </div>
 
-      <template v-else>
-        <!-- Top Pinned Form -->
-        <div
-          v-if="formVisible"
-          class="bg-background border border-border/60 rounded-md flex flex-col shadow-none"
+    <!-- Create / Edit Dialog -->
+    <Dialog v-model:open="formVisible">
+      <DialogScrollContent class="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>
+            {{ formMode === 'create' ? $t('bots.schedule.create') : $t('bots.schedule.edit') }}
+          </DialogTitle>
+        </DialogHeader>
+
+        <form
+          class="space-y-4"
+          @submit.prevent="handleFormSubmit"
         >
-          <div class="p-4 border-b border-border/40 flex items-center justify-between bg-muted/10">
-            <div class="space-y-0.5">
-              <h4 class="text-sm font-semibold text-foreground">
-                {{ formMode === 'create' ? $t('bots.schedule.create') : $t('bots.schedule.edit') }}
-              </h4>
-              <div
-                v-if="editingSchedule"
-                class="text-[10px] text-muted-foreground/80 font-mono flex items-center gap-1.5"
+          <!-- Name + Enabled -->
+          <div class="flex items-end gap-3">
+            <div class="min-w-0 flex-1 space-y-1.5">
+              <Label
+                for="sched-name"
+                class="text-xs"
               >
-                <span>ID: {{ editingSchedule.id }}</span>
-              </div>
+                {{ $t('bots.schedule.form.name') }}
+              </Label>
+              <Input
+                id="sched-name"
+                v-model="form.name"
+                :placeholder="$t('bots.schedule.form.namePlaceholder')"
+                class="h-8 text-xs"
+              />
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              class="size-7 text-muted-foreground hover:bg-accent/40"
-              @click="handleFormCancel"
-            >
-              <X class="size-4" />
-            </Button>
+            <div class="flex h-8 shrink-0 items-center gap-2">
+              <Label
+                class="cursor-pointer text-xs text-muted-foreground"
+                @click="form.enabled = !form.enabled"
+              >
+                {{ $t('bots.schedule.form.enabled') }}
+              </Label>
+              <Switch
+                :model-value="form.enabled"
+                @update:model-value="(v: boolean) => form.enabled = !!v"
+              />
+            </div>
           </div>
-          
-          <form
-            class="p-4 space-y-6"
-            @submit.prevent="handleFormSubmit"
-          >
-            <div class="space-y-4">
-              <!-- Name & Enabled -->
-              <div class="flex items-end gap-4">
-                <div class="space-y-1.5 flex-1 min-w-0">
-                  <Label
-                    for="schedule-name"
-                    class="text-xs font-medium"
-                  >{{ $t('bots.schedule.form.name') }}</Label>
-                  <Input
-                    id="schedule-name"
-                    v-model="form.name"
-                    :placeholder="$t('bots.schedule.form.namePlaceholder')"
-                    class="h-8 text-xs shadow-none border-border/60 bg-transparent"
-                  />
-                </div>
-                <div class="flex items-center gap-2 h-8 shrink-0 bg-muted/20 px-3 rounded-md border border-border/40">
-                  <Label
-                    class="cursor-pointer text-[11px] text-muted-foreground"
-                    @click="form.enabled = !form.enabled"
-                  >
-                    {{ $t('bots.schedule.form.enabled') }}
-                  </Label>
-                  <Switch
-                    :model-value="form.enabled"
-                    @update:model-value="(v: boolean) => form.enabled = !!v"
-                  />
-                </div>
-              </div>
 
-              <!-- Description -->
-              <div class="space-y-1.5">
-                <Label
-                  for="schedule-description"
-                  class="text-xs font-medium flex items-center gap-1.5"
+          <!-- Description -->
+          <div class="space-y-1.5">
+            <Label
+              for="sched-desc"
+              class="text-xs"
+            >
+              {{ $t('bots.schedule.form.description') }}
+              <span class="ml-1 text-[10px] text-muted-foreground">({{ $t('common.optional') }})</span>
+            </Label>
+            <Input
+              id="sched-desc"
+              v-model="form.description"
+              :placeholder="$t('bots.schedule.form.descriptionPlaceholder')"
+              class="h-8 text-xs"
+            />
+          </div>
+
+          <!-- Command -->
+          <div class="space-y-1.5">
+            <Label
+              for="sched-command"
+              class="text-xs"
+            >
+              {{ $t('bots.schedule.form.command') }}
+            </Label>
+            <Textarea
+              id="sched-command"
+              v-model="form.command"
+              class="min-h-[4.5rem] resize-none font-mono text-xs"
+              :placeholder="$t('bots.schedule.form.commandPlaceholder')"
+              rows="3"
+            />
+            <p class="text-[11px] text-muted-foreground">
+              {{ $t('bots.schedule.form.commandHint') }}
+            </p>
+          </div>
+
+          <!-- Schedule picker -->
+          <div class="space-y-3">
+            <Label class="text-xs">
+              {{ $t('bots.schedule.form.pattern') }}
+            </Label>
+
+            <!-- Primary row: mode select + inline value/time -->
+            <div class="flex items-center gap-2 flex-wrap">
+              <!-- Mode selector -->
+              <Select v-model="schedModeModel">
+                <SelectTrigger
+                  size="sm"
+                  class="w-36 shrink-0"
                 >
-                  {{ $t('bots.schedule.form.description') }}
-                  <span class="text-[10px] text-muted-foreground font-normal">({{ $t('common.optional') }})</span>
-                </Label>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    v-for="mode in SCHEDULE_MODES"
+                    :key="mode.value"
+                    :value="mode.value"
+                    class="text-xs"
+                  >
+                    {{ $t(mode.labelKey) }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+
+              <!-- Every N minutes: inline -->
+              <template v-if="patternState.mode === 'minutes'">
                 <Input
-                  id="schedule-description"
-                  v-model="form.description"
-                  :placeholder="$t('bots.schedule.form.descriptionPlaceholder')"
-                  class="h-8 text-xs shadow-none border-border/60 bg-transparent"
+                  type="number"
+                  :min="1"
+                  :max="59"
+                  :model-value="patternState.intervalMinutes"
+                  class="h-8 w-16 text-xs text-center"
+                  @update:model-value="v => patchState({ intervalMinutes: clampInt(v, 1, 59, 1) })"
                 />
-              </div>
-              
-              <!-- Command -->
-              <div class="space-y-1.5">
-                <Label
-                  for="schedule-command"
-                  class="text-xs font-medium"
-                >{{ $t('bots.schedule.form.command') }}</Label>
-                <div class="relative">
-                  <Textarea
-                    id="schedule-command"
-                    v-model="form.command"
-                    class="text-xs shadow-none border-border/60 min-h-15 bg-transparent font-mono pr-8"
-                    :placeholder="$t('bots.schedule.form.commandPlaceholder')"
-                    rows="2"
-                  />
-                </div>
-                <p class="text-[10px] text-muted-foreground">
-                  {{ $t('bots.schedule.form.commandHint') }}
-                </p>
-              </div>
+                <span class="text-xs text-muted-foreground">{{ $t('bots.schedule.picker.minutes') }}</span>
+              </template>
 
-              <!-- Pattern Section -->
-              <div class="space-y-3 relative">
-                <!-- Sticky Header Container -->
-                <div class="sticky top-[56px] z-20 bg-background/95 backdrop-blur-md pt-2 pb-1 -mt-2">
-                  <Label class="text-xs font-medium block mb-2">{{ $t('bots.schedule.form.pattern') }}</Label>
-                  
-                  <!-- Cron Expression Card -->
-                  <div class="bg-muted/10 border border-border/40 rounded-lg p-4 space-y-3">
-                    <div class="flex items-center justify-between">
-                      <Label class="text-[11px] font-medium text-muted-foreground">{{ $t('bots.schedule.form.cronCode') }}</Label>
-                      <div class="flex items-center gap-3">
-                        <p
-                          v-if="!isValidCron(manualCron)"
-                          class="text-[11px] text-destructive tracking-tight"
-                        >
-                          {{ $t('bots.schedule.form.invalidPattern') }}
-                        </p>
-                        <p class="text-[10px] text-muted-foreground">
-                          {{ $t('bots.schedule.form.manualEditHint') }}
-                        </p>
-                      </div>
-                    </div>
-                    <Input
-                      v-model="manualCron"
-                      class="w-full bg-background border border-border/40 rounded-md px-3 py-2 font-mono text-[11px] text-foreground focus:outline-none shadow-none h-8"
-                    />
-                  </div>
-                </div>
+              <!-- Hourly: inline minute -->
+              <template v-else-if="patternState.mode === 'hourly'">
+                <span class="text-xs text-muted-foreground">{{ $t('bots.schedule.picker.atMinute') }}</span>
+                <Input
+                  type="number"
+                  :min="0"
+                  :max="59"
+                  :model-value="patternState.minute"
+                  class="h-8 w-16 text-xs text-center"
+                  @update:model-value="v => patchState({ minute: clampInt(v, 0, 59, 0) })"
+                />
+              </template>
 
-                <!-- Visual Builder Card -->
-                <div class="bg-muted/10 rounded-lg border border-border/40 p-4 space-y-4">
-                  <Label class="text-[11px] font-medium text-muted-foreground">{{ $t('bots.schedule.form.visualBuilder') }}</Label>
-                  <SchedulePatternBuilder
-                    :state="patternState"
-                    :timezone="botTimezone"
-                    @update:state="(next) => patternState = next"
-                  />
-                </div>
-              </div>
+              <!-- Daily: TimeInput inline -->
+              <TimeInput
+                v-else-if="patternState.mode === 'daily'"
+                :hour="patternState.hours[0] ?? 9"
+                :minute="patternState.minute"
+                size="sm"
+                @update:hour="v => patchState({ hours: [v] })"
+                @update:minute="v => patchState({ minute: v })"
+              />
 
-              <!-- Max Calls -->
-              <div class="bg-muted/10 border border-border/40 rounded-lg p-4 flex items-center justify-between gap-4">
-                <Label class="text-xs font-medium shrink-0">{{ $t('bots.schedule.form.maxCalls') }}</Label>
-                <div class="flex items-center gap-2">
-                  <Input 
-                    v-if="!maxCallsUnlimited" 
-                    :model-value="form.maxCalls ?? 1" 
-                    type="number" 
-                    :min="1" 
-                    placeholder="1" 
-                    class="h-8 text-xs shadow-none border-border/60 bg-transparent w-20 px-2" 
-                    @update:model-value="(v) => form.maxCalls = Math.max(1, Math.floor(Number(v) || 1))" 
-                  />
-                  <div class="flex items-center gap-2 h-8 shrink-0 bg-muted/20 px-3 rounded-md border border-border/40">
-                    <Label
-                      class="cursor-pointer text-[11px] text-muted-foreground"
-                      @click="handleMaxCallsUnlimited(!maxCallsUnlimited)"
-                    >
-                      {{ $t('bots.schedule.form.maxCallsUnlimited') }}
-                    </Label>
-                    <Switch
-                      :model-value="maxCallsUnlimited"
-                      @update:model-value="(v: boolean) => handleMaxCallsUnlimited(!!v)"
-                    />
-                  </div>
-                </div>
-              </div>
+              <!-- Weekly: TimeInput inline (days below) -->
+              <TimeInput
+                v-else-if="patternState.mode === 'weekly'"
+                :hour="patternState.hours[0] ?? 9"
+                :minute="patternState.minute"
+                size="sm"
+                @update:hour="v => patchState({ hours: [v] })"
+                @update:minute="v => patchState({ minute: v })"
+              />
 
+              <!-- Monthly: day input + TimeInput inline -->
+              <template v-else-if="patternState.mode === 'monthly'">
+                <span class="text-xs text-muted-foreground">{{ $t('bots.schedule.picker.day') }}</span>
+                <Input
+                  type="number"
+                  :min="1"
+                  :max="31"
+                  :model-value="patternState.monthDays[0] ?? 1"
+                  class="h-8 w-16 text-xs text-center"
+                  @update:model-value="v => patchState({ monthDays: [clampInt(v, 1, 31, 1)] })"
+                />
+                <TimeInput
+                  :hour="patternState.hours[0] ?? 9"
+                  :minute="patternState.minute"
+                  size="sm"
+                  @update:hour="v => patchState({ hours: [v] })"
+                  @update:minute="v => patchState({ minute: v })"
+                />
+              </template>
+            </div>
+
+            <!-- Weekly: day buttons (below the row) -->
+            <div
+              v-if="patternState.mode === 'weekly'"
+              class="grid grid-cols-7 gap-1"
+            >
+              <button
+                v-for="(key, idx) in WEEKDAY_KEYS"
+                :key="key"
+                type="button"
+                class="h-8 rounded-md border text-xs transition-colors"
+                :class="patternState.weekdays.includes(idx)
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-background hover:bg-accent'"
+                @click="toggleWeekday(idx)"
+              >
+                {{ $t(`bots.schedule.weekday.${key}`) }}
+              </button>
+            </div>
+
+            <!-- Advanced: cron input (below the row) -->
+            <div
+              v-if="patternState.mode === 'advanced'"
+              class="space-y-1.5"
+            >
+              <Input
+                :model-value="patternState.advancedPattern"
+                class="h-8 font-mono text-xs"
+                placeholder="0 9 * * *"
+                @update:model-value="v => patchState({ advancedPattern: String(v) })"
+              />
               <p
-                v-if="submitError"
+                v-if="patternState.advancedPattern && !isValidCron(patternState.advancedPattern)"
                 class="text-[11px] text-destructive"
               >
-                {{ submitError }}
+                {{ $t('bots.schedule.form.invalidPattern') }}
               </p>
             </div>
 
-            <!-- Form Actions -->
-            <div class="flex justify-end gap-2 pt-4 border-t border-border/40">
+            <!-- Preview: only for modes where it adds real information -->
+            <p
+              v-if="schedulePreviewText && ['weekly', 'monthly', 'advanced'].includes(patternState.mode)"
+              class="text-[11px] text-muted-foreground"
+            >
+              {{ schedulePreviewText }}
+            </p>
+          </div>
+
+          <!-- More options: run limit only -->
+          <div>
+            <button
+              type="button"
+              class="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              @click="showMore = !showMore"
+            >
+              <ChevronRight
+                class="size-3.5"
+                :class="showMore ? 'rotate-90' : ''"
+              />
+              {{ $t('bots.schedule.moreOptions') }}
+            </button>
+
+            <!-- CSS grid-rows collapse trick: animates height without JS -->
+            <div
+              class="grid overflow-hidden transition-[grid-template-rows] duration-200 ease-out"
+              :class="showMore ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
+            >
+              <div class="min-h-0">
+                <div class="mt-3">
+                  <!-- Run limit: single input, ∞ placeholder = unlimited -->
+                  <div class="flex items-center justify-between gap-3">
+                    <Label class="text-xs text-muted-foreground">
+                      {{ $t('bots.schedule.form.maxCalls') }}
+                    </Label>
+                    <Input
+                      v-model="runLimitModel"
+                      type="text"
+                      inputmode="numeric"
+                      size="sm"
+                      :placeholder="'∞'"
+                      class="w-24 text-center"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <p
+            v-if="submitError"
+            class="text-[11px] text-destructive"
+          >
+            {{ submitError }}
+          </p>
+
+          <DialogFooter class="gap-2 sm:justify-between">
+            <div
+              v-if="formMode === 'edit' && editingSchedule"
+              class="flex-1"
+            >
               <Button
                 type="button"
-                variant="outline"
-                size="sm"
-                class="shadow-none h-8 text-xs font-medium"
-                @click="handleFormCancel"
+                variant="ghost"
+                class="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                @click="deleteTarget = editingSchedule; formVisible = false"
               >
-                {{ $t('common.cancel') }}
+                <Trash2 class="size-4" />
+                {{ $t('common.delete') }}
               </Button>
+            </div>
+            <div
+              v-else
+              class="flex-1"
+            />
+
+            <div class="flex gap-2">
+              <DialogClose as-child>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  @click="handleFormCancel"
+                >
+                  {{ $t('common.cancel') }}
+                </Button>
+              </DialogClose>
               <Button
                 type="submit"
-                size="sm"
                 :disabled="!canSubmit || isSaving"
-                class="shadow-none h-8 text-xs font-medium"
               >
                 <Spinner
                   v-if="isSaving"
-                  class="mr-1.5 size-3.5"
+                  class="mr-1.5 size-4"
                 />
                 {{ formMode === 'create' ? $t('common.create') : $t('common.confirm') }}
               </Button>
             </div>
-          </form>
+          </DialogFooter>
+        </form>
+      </DialogScrollContent>
+    </Dialog>
 
-          <!-- Danger Zone (Only for Edit) -->
-          <div
-            v-if="formMode === 'edit' && editingSchedule"
-            class="p-4 pt-0"
+    <!-- Delete confirmation dialog -->
+    <Dialog
+      :open="!!deleteTarget"
+      @update:open="(v) => { if (!v) deleteTarget = null }"
+    >
+      <DialogContent class="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>{{ $t('bots.schedule.deleteTitle') }}</DialogTitle>
+        </DialogHeader>
+        <p class="text-sm text-muted-foreground">
+          {{ $t('bots.schedule.deleteConfirm', { name: deleteTarget?.name ?? '' }) }}
+        </p>
+        <DialogFooter class="gap-2">
+          <Button
+            variant="outline"
+            @click="deleteTarget = null"
           >
-            <div class="pt-4">
-              <div class="space-y-4 rounded-md border border-border bg-background p-4 shadow-none">
-                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div class="space-y-0.5">
-                    <h4 class="text-xs font-medium text-destructive">
-                      {{ $t('common.dangerZone') }}
-                    </h4>
-                    <p class="text-[11px] text-muted-foreground">
-                      {{ $t('bots.schedule.dangerZoneDesc') }}
-                    </p>
-                  </div>
-                  <div class="flex justify-end shrink-0">
-                    <ConfirmPopover
-                      :message="$t('bots.schedule.deleteConfirm', { name: editingSchedule.name })"
-                      :confirm-text="$t('bots.schedule.delete')"
-                      :loading="busyIds.has(editingSchedule.id || '')"
-                      @confirm="handleDelete(editingSchedule); formVisible = false"
-                    >
-                      <template #trigger>
-                        <button
-                          data-slot="popover-trigger"
-                          class="[&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 has-[>svg]:px-2.5 inline-flex items-center justify-center whitespace-nowrap transition-all disabled:pointer-events-none disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90 rounded-lg gap-1.5 px-3 min-w-28 h-8 text-xs font-medium shadow-none"
-                          type="button"
-                          aria-haspopup="dialog"
-                          aria-expanded="false"
-                        >
-                          <Spinner
-                            v-if="busyIds.has(editingSchedule.id || '')"
-                            class="mr-1.5 size-3.5"
-                          />
-                          {{ $t('common.delete') }}
-                        </button>
-                      </template>
-                    </ConfirmPopover>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- High Density List (Table Mode) -->
-        <div
-          v-if="schedules.length > 0"
-          class="bg-background border border-border/60 rounded-md shadow-none flex flex-col overflow-hidden"
-        >
-          <div class="overflow-x-auto">
-            <table class="w-full text-xs border-collapse min-w-200">
-              <thead>
-                <tr class="border-b border-border/50 bg-muted/40">
-                  <th class="px-4 py-2.5 text-left font-semibold text-foreground/80 whitespace-nowrap">
-                    {{ $t('common.name') }}
-                  </th>
-                  <th class="px-4 py-2.5 text-left font-semibold text-foreground/80 whitespace-nowrap">
-                    {{ $t('bots.schedule.form.pattern') }}
-                  </th>
-                  <th class="px-4 py-2.5 text-left font-semibold text-foreground/80 whitespace-nowrap">
-                    {{ $t('bots.schedule.form.enabled') }}
-                  </th>
-                  <th class="px-4 py-2.5 text-left font-semibold text-foreground/80 whitespace-nowrap">
-                    {{ $t('bots.schedule.form.maxCalls') }}
-                  </th>
-                  <th class="px-4 py-2.5 text-left font-semibold text-foreground/80 whitespace-nowrap">
-                    {{ $t('common.updatedAt') }}
-                  </th>
-                  <th class="px-4 py-2.5 text-right font-semibold text-foreground/80 w-[1%] whitespace-nowrap">
-                    {{ $t('common.actions') }}
-                  </th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-border/50">
-                <tr 
-                  v-for="item in pagedSchedules" 
-                  :key="item.id" 
-                  class="hover:bg-muted/30 transition-colors group cursor-pointer" 
-                  @click="handleEdit(item)"
-                >
-                  <!-- Identity -->
-                  <td class="px-4 py-3 align-middle min-w-50">
-                    <div class="font-medium text-foreground">
-                      {{ item.name }}
-                    </div>
-                    <div
-                      v-if="item.description"
-                      class="text-[11px] text-muted-foreground mt-0.5 line-clamp-1 leading-relaxed"
-                    >
-                      {{ item.description }}
-                    </div>
-                    <div class="text-[9px] font-mono text-muted-foreground/80 mt-2 uppercase tracking-tight">
-                      ID: {{ item.id }}
-                    </div>
-                  </td>
-
-                  <!-- Pattern -->
-                  <td class="px-4 py-3 align-middle whitespace-nowrap">
-                    <div class="font-mono text-[10px] text-foreground font-medium">
-                      {{ item.pattern }}
-                    </div>
-                    <div class="text-[11px] text-muted-foreground mt-1 line-clamp-1">
-                      {{ describeItem(item.pattern) || '-' }}
-                    </div>
-                  </td>
-
-                  <!-- Enabled -->
-                  <td
-                    class="px-4 py-3 align-middle whitespace-nowrap"
-                    @click.stop
-                  >
-                    <div class="flex items-center gap-2.5">
-                      <Switch 
-                        :model-value="!!item.enabled" 
-                        :disabled="busyIds.has(item.id || '')" 
-                        class="scale-90 origin-left" 
-                        @update:model-value="(val: boolean) => handleToggleEnabled(item, !!val)"
-                      />
-                      <span
-                        class="text-[11px] font-semibold min-w-[42px] transition-colors"
-                        :class="item.enabled ? 'text-success-foreground' : 'text-foreground/70'"
-                      >
-                        {{ item.enabled ? $t('common.enabled') : $t('common.disabled') }}
-                      </span>
-                    </div>
-                  </td>
-
-                  <!-- Telemetry -->
-                  <td class="px-4 py-3 align-middle whitespace-nowrap text-[11px]">
-                    <div class="flex items-center gap-1.5">
-                      <span class="text-foreground font-semibold">{{ item.current_calls ?? 0 }}</span>
-                      <span class="text-muted-foreground/30 text-[10px]">/</span>
-                      <span class="text-muted-foreground font-medium">{{ formatMaxCalls(item) }}</span>
-                    </div>
-                  </td>
-
-                  <!-- Timestamp -->
-                  <td class="px-4 py-3 align-middle text-[11px] text-muted-foreground/90 whitespace-nowrap font-medium">
-                    {{ formatDateTime(item.updated_at) }}
-                  </td>
-
-                  <!-- Actions -->
-                  <td
-                    class="px-4 py-3 align-middle text-right whitespace-nowrap"
-                    @click.stop
-                  >
-                    <div class="flex items-center justify-end gap-1">
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        class="size-7 text-foreground/70 hover:text-foreground hover:bg-accent/40 shadow-none transition-colors"
-                        @click="handleEdit(item)"
-                      >
-                        <Pencil class="size-3.5" />
-                      </Button>
-                      <ConfirmPopover
-                        :message="$t('bots.schedule.deleteConfirm', { name: item.name })"
-                        :confirm-text="$t('bots.schedule.delete')"
-                        :loading="busyIds.has(item.id || '')"
-                        @confirm="handleDelete(item)"
-                      >
-                        <template #trigger>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            class="size-7 text-foreground/70 hover:text-destructive hover:bg-destructive/10 shadow-none transition-colors"
-                          >
-                            <Trash2 class="size-3.5" />
-                          </Button>
-                        </template>
-                      </ConfirmPopover>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <!-- Pagination -->
-          <div
-            v-if="totalPages > 1"
-            class="flex items-center justify-between p-4 border-t border-border/40 bg-muted/5"
+            {{ $t('common.cancel') }}
+          </Button>
+          <Button
+            variant="destructive"
+            :disabled="isDeleting"
+            @click="confirmDelete"
           >
-            <span class="text-[11px] text-muted-foreground whitespace-nowrap">{{ paginationSummary }}</span>
-            <Pagination
-              :total="schedules.length"
-              :items-per-page="PAGE_SIZE"
-              :sibling-count="1"
-              :page="currentPage"
-              show-edges
-              @update:page="currentPage = $event"
-            >
-              <PaginationContent v-slot="{ items }">
-                <PaginationFirst />
-                <PaginationPrevious />
-                <template
-                  v-for="(item, index) in items"
-                  :key="index"
-                >
-                  <PaginationEllipsis
-                    v-if="item.type === 'ellipsis'"
-                    :index="index"
-                  />
-                  <PaginationItem
-                    v-else
-                    :value="item.value"
-                    :is-active="item.value === currentPage"
-                  />
-                </template>
-                <PaginationNext />
-                <PaginationLast />
-              </PaginationContent>
-            </Pagination>
-          </div>
-        </div>
-      </template>
-    </div>
+            <Spinner
+              v-if="isDeleting"
+              class="mr-1.5 size-4"
+            />
+            {{ $t('bots.schedule.delete') }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { Calendar, Pencil, Plus, Trash2, X, RefreshCw } from 'lucide-vue-next'
+import {
+  ArrowUpDown, Calendar, Check, ChevronRight,
+  MoreHorizontal, Pencil, Plus, Trash2,
+} from 'lucide-vue-next'
 import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
 import { useQueryCache } from '@pinia/colada'
 import {
-  Button, Badge, Input, Label, Spinner, Switch, Textarea,
-  Pagination, PaginationContent, PaginationEllipsis,
-  PaginationFirst, PaginationItem, PaginationLast,
-  PaginationNext, PaginationPrevious,
+  Button, Input, Label, Spinner, Switch, Textarea, TimeInput,
+  Dialog, DialogContent, DialogScrollContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
+  DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuItem, DropdownMenuSeparator,
+  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '@memohai/ui'
 import {
   deleteBotsByBotIdScheduleById,
@@ -528,18 +515,18 @@ import type {
   ScheduleCreateRequest,
   ScheduleUpdateRequest,
 } from '@memohai/sdk'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { formatDateTime } from '@/utils/date-time'
 import {
   describeCron,
   defaultScheduleFormState,
   fromCron,
   isValidCron,
+  nextRuns,
   toCron,
+  WEEKDAY_KEYS,
   type ScheduleFormState,
+  type ScheduleMode,
 } from '@/utils/cron-pattern'
-import SchedulePatternBuilder from './schedule-pattern-builder.vue'
 
 const props = defineProps<{
   botId: string
@@ -548,19 +535,91 @@ const props = defineProps<{
 const { t, locale } = useI18n()
 
 const isLoading = ref(false)
-const isRefreshing = ref(false)
 const schedules = ref<ScheduleSchedule[]>([])
-const currentPage = ref(1)
-const PAGE_SIZE = 10
 const botTimezone = ref<string | undefined>(undefined)
 const busyIds = reactive(new Set<string>())
 
-// Inline form state
+// Track which card menus are open (keeps the ⋯ button visible while dropdown is open)
+const openMenuIds = reactive(new Set<string>())
+
+// --- Sort ---
+type SortKey = 'name' | 'status' | 'next-run'
+const sortKey = ref<SortKey>('name')
+
+const SORT_OPTIONS: { key: SortKey; labelKey: string }[] = [
+  { key: 'name', labelKey: 'bots.schedule.sortName' },
+  { key: 'status', labelKey: 'bots.schedule.sortStatus' },
+  { key: 'next-run', labelKey: 'bots.schedule.sortNextRun' },
+]
+
+const SCHEDULE_MODES: { value: ScheduleMode; labelKey: string }[] = [
+  { value: 'minutes', labelKey: 'bots.schedule.mode.minutes' },
+  { value: 'hourly', labelKey: 'bots.schedule.mode.hourly' },
+  { value: 'daily', labelKey: 'bots.schedule.mode.daily' },
+  { value: 'weekly', labelKey: 'bots.schedule.mode.weekly' },
+  { value: 'monthly', labelKey: 'bots.schedule.mode.monthly' },
+  { value: 'advanced', labelKey: 'bots.schedule.mode.advanced' },
+]
+
+const currentSortLabel = computed(
+  () => t(SORT_OPTIONS.find((o) => o.key === sortKey.value)?.labelKey ?? 'bots.schedule.sortName'),
+)
+
+const effectiveTimezone = computed(() => {
+  const tz = botTimezone.value?.trim()
+  if (tz) return tz
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return 'UTC' }
+})
+
+const sortedSchedules = computed(() => {
+  const list = [...schedules.value]
+  if (sortKey.value === 'name') {
+    return list.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
+  }
+  if (sortKey.value === 'status') {
+    return list.sort((a, b) => Number(b.enabled ?? false) - Number(a.enabled ?? false))
+  }
+  if (sortKey.value === 'next-run') {
+    return list.sort((a, b) => {
+      const aTime = a.pattern ? (nextRuns(a.pattern, effectiveTimezone.value, 1)[0]?.getTime() ?? Infinity) : Infinity
+      const bTime = b.pattern ? (nextRuns(b.pattern, effectiveTimezone.value, 1)[0]?.getTime() ?? Infinity) : Infinity
+      return aTime - bTime
+    })
+  }
+  return list
+})
+
+// --- Delete via card menu ---
+const deleteTarget = ref<ScheduleSchedule | null>(null)
+const isDeleting = ref(false)
+
+async function confirmDelete() {
+  const item = deleteTarget.value
+  if (!item?.id) return
+  isDeleting.value = true
+  const id = item.id
+  busyIds.add(id)
+  try {
+    await deleteBotsByBotIdScheduleById({ path: { bot_id: props.botId, id }, throwOnError: true })
+    toast.success(t('bots.schedule.deleteSuccess'))
+    deleteTarget.value = null
+    await fetchSchedules()
+    invalidateSidebarSchedule()
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('bots.schedule.deleteFailed')))
+  } finally {
+    isDeleting.value = false
+    busyIds.delete(id)
+  }
+}
+
+// --- Dialog state ---
 const formVisible = ref(false)
 const formMode = ref<'create' | 'edit'>('create')
 const editingSchedule = ref<ScheduleSchedule | null>(null)
 const isSaving = ref(false)
 const submitError = ref<string | null>(null)
+const showMore = ref(false)
 
 interface SchedulePlainForm {
   name: string
@@ -581,44 +640,95 @@ const form = reactive<SchedulePlainForm>({
 const patternState = ref<ScheduleFormState>(defaultScheduleFormState())
 const manualCron = ref('')
 
-const maxCallsUnlimited = computed(() => form.maxCalls === null)
+// --- Compact schedule picker ---
 
-function handleMaxCallsUnlimited(v: boolean) {
-  form.maxCalls = v ? null : 1
+function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return fallback
+  return Math.max(min, Math.min(max, Math.round(n)))
 }
 
-// Sync Visual Builder -> Cron Code
+function patchState(patch: Partial<ScheduleFormState>) {
+  patternState.value = { ...patternState.value, ...patch }
+}
+
+const schedModeModel = computed({
+  get: (): string => patternState.value.mode,
+  set: (val: unknown) => {
+    const next = String(val) as ScheduleMode
+    const allowed: ScheduleMode[] = ['minutes', 'hourly', 'daily', 'weekly', 'monthly', 'advanced']
+    if (!allowed.includes(next)) return
+    const patch: Partial<ScheduleFormState> = { mode: next }
+    if (next === 'weekly' || next === 'monthly' || next === 'hourly') {
+      patch.hours = [patternState.value.hours[0] ?? 9]
+    }
+    if (next === 'advanced' && !patternState.value.advancedPattern.trim()) {
+      try { patch.advancedPattern = toCron(patternState.value) } catch { patch.advancedPattern = '' }
+    }
+    patternState.value = { ...patternState.value, ...patch }
+  },
+})
+
+function toggleWeekday(d: number) {
+  const set = new Set(patternState.value.weekdays)
+  if (set.has(d)) set.delete(d)
+  else set.add(d)
+  const next = Array.from(set).sort((a, b) => a - b)
+  patchState({ weekdays: next.length ? next : [d] })
+}
+
+const cronLocale = computed<'en' | 'zh'>(() => (locale.value.startsWith('zh') ? 'zh' : 'en'))
+
+const schedulePreviewText = computed(() => {
+  if (!manualCron.value || !isValidCron(manualCron.value)) return ''
+  return describeCron(manualCron.value, cronLocale.value) || ''
+})
+
+// --- Sync patternState ↔ manualCron ---
 watch(
   () => patternState.value,
   (next) => {
-    const canonical = toCron(next)
-    // Only update if the current manual input doesn't already represent this state
-    if (toCron(fromCron(manualCron.value)) !== canonical) {
-      manualCron.value = canonical
-    }
+    try {
+      const canonical = toCron(next)
+      if (toCron(fromCron(manualCron.value)) !== canonical) manualCron.value = canonical
+    } catch { /* invalid intermediate state */ }
   },
   { deep: true },
 )
-
-// Sync Cron Code -> Visual Builder
 watch(manualCron, (next) => {
   const nextState = fromCron(next)
-  // Only update state if it's different to avoid loops
-  if (JSON.stringify(patternState.value) !== JSON.stringify(nextState)) {
-    patternState.value = nextState
-  }
+  if (JSON.stringify(patternState.value) !== JSON.stringify(nextState)) patternState.value = nextState
 })
 
+// --- Max calls: single input, ∞ placeholder = unlimited ---
+const runLimitModel = computed({
+  get(): string {
+    return form.maxCalls === null ? '' : String(form.maxCalls)
+  },
+  set(val: string | number) {
+    const str = String(val).replace(/\D/g, '')
+    if (!str) {
+      form.maxCalls = null
+    } else {
+      const n = parseInt(str, 10)
+      form.maxCalls = Number.isFinite(n) && n > 0 ? n : null
+    }
+  },
+})
+
+const maxCallsUnlimited = computed(() => form.maxCalls === null)
+
+// --- Validation ---
 const canSubmit = computed(() => {
   if (isSaving.value) return false
   if (!form.name.trim()) return false
   if (!form.command.trim()) return false
-  if (!manualCron.value) return false
-  if (!isValidCron(manualCron.value)) return false
+  if (!manualCron.value || !isValidCron(manualCron.value)) return false
   if (!maxCallsUnlimited.value && (form.maxCalls === null || form.maxCalls < 1)) return false
   return true
 })
 
+// --- Form lifecycle ---
 function resetForm() {
   form.name = ''
   form.description = ''
@@ -628,51 +738,30 @@ function resetForm() {
   patternState.value = defaultScheduleFormState()
   manualCron.value = toCron(patternState.value)
   submitError.value = null
+  showMore.value = false
 }
 
 function hydrateForm(s: ScheduleSchedule) {
   form.name = s.name ?? ''
   form.description = s.description ?? ''
   form.command = s.command ?? ''
-  const maxCallsRaw = s.max_calls as unknown
-  form.maxCalls = (typeof maxCallsRaw === 'number' && maxCallsRaw > 0) ? maxCallsRaw : null
+  const raw = s.max_calls as unknown
+  form.maxCalls = (typeof raw === 'number' && raw > 0) ? raw : null
   form.enabled = s.enabled ?? true
   patternState.value = fromCron(s.pattern ?? '')
   manualCron.value = s.pattern ?? ''
   submitError.value = null
+  showMore.value = (typeof raw === 'number' && (raw as number) > 0)
 }
 
-// List computeds
-const totalPages = computed(() => Math.ceil(schedules.value.length / PAGE_SIZE))
-
-const pagedSchedules = computed(() => {
-  const start = (currentPage.value - 1) * PAGE_SIZE
-  return schedules.value.slice(start, start + PAGE_SIZE)
-})
-
-const paginationSummary = computed(() => {
-  const total = schedules.value.length
-  if (total === 0) return ''
-  const start = (currentPage.value - 1) * PAGE_SIZE + 1
-  const end = Math.min(currentPage.value * PAGE_SIZE, total)
-  return `${start}-${end} / ${total}`
-})
-
-const cronLocale = computed<'en' | 'zh'>(() => (locale.value.startsWith('zh') ? 'zh' : 'en'))
-
+// --- Card helpers ---
 function describeItem(pattern: string | undefined): string | undefined {
   if (!pattern) return undefined
   return describeCron(pattern, cronLocale.value)
 }
 
-function formatMaxCalls(item: ScheduleSchedule): string {
-  const raw = item.max_calls as unknown
-  if (typeof raw === 'number' && raw > 0) return String(raw)
-  return '∞'
-}
-
+// --- API ---
 const queryCache = useQueryCache()
-
 function invalidateSidebarSchedule() {
   queryCache.invalidateQueries({ key: ['bot-schedule', props.botId] })
 }
@@ -681,10 +770,7 @@ async function fetchSchedules() {
   if (!props.botId) return
   isLoading.value = true
   try {
-    const { data } = await getBotsByBotIdSchedule({
-      path: { bot_id: props.botId },
-      throwOnError: true,
-    })
+    const { data } = await getBotsByBotIdSchedule({ path: { bot_id: props.botId }, throwOnError: true })
     schedules.value = data?.items || []
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.schedule.loadFailed')))
@@ -696,24 +782,11 @@ async function fetchSchedules() {
 async function fetchBotSettings() {
   if (!props.botId) return
   try {
-    const { data } = await getBotsByBotIdSettings({
-      path: { bot_id: props.botId },
-      throwOnError: true,
-    })
+    const { data } = await getBotsByBotIdSettings({ path: { bot_id: props.botId }, throwOnError: true })
     const tz = (data as { timezone?: string } | undefined)?.timezone
-    botTimezone.value = tz && tz.trim() !== '' ? tz : undefined
+    botTimezone.value = tz?.trim() || undefined
   } catch {
     botTimezone.value = undefined
-  }
-}
-
-async function handleRefresh() {
-  isRefreshing.value = true
-  currentPage.value = 1
-  try {
-    await fetchSchedules()
-  } finally {
-    isRefreshing.value = false
   }
 }
 
@@ -743,40 +816,23 @@ async function handleFormSubmit() {
   isSaving.value = true
   try {
     const pattern = manualCron.value.trim()
-    const maxCallsWire = form.maxCalls ?? null
+    const max_calls = form.maxCalls ?? null
+    const base = {
+      name: form.name.trim(),
+      description: form.description.trim(),
+      command: form.command.trim(),
+      pattern,
+      enabled: form.enabled,
+      max_calls,
+    }
     if (formMode.value === 'create') {
-      const body = {
-        name: form.name.trim(),
-        description: form.description.trim(),
-        command: form.command.trim(),
-        pattern,
-        enabled: form.enabled,
-        max_calls: maxCallsWire,
-      } as unknown as ScheduleCreateRequest
-      await postBotsByBotIdSchedule({
-        path: { bot_id: props.botId },
-        body,
-        throwOnError: true,
-      })
-      toast.success(t('bots.schedule.saveSuccess'))
+      await postBotsByBotIdSchedule({ path: { bot_id: props.botId }, body: base as unknown as ScheduleCreateRequest, throwOnError: true })
     } else {
       const id = editingSchedule.value?.id
       if (!id) throw new Error('schedule id missing')
-      const body = {
-        name: form.name.trim(),
-        description: form.description.trim(),
-        command: form.command.trim(),
-        pattern,
-        enabled: form.enabled,
-        max_calls: maxCallsWire,
-      } as unknown as ScheduleUpdateRequest
-      await putBotsByBotIdScheduleById({
-        path: { bot_id: props.botId, id },
-        body,
-        throwOnError: true,
-      })
-      toast.success(t('bots.schedule.saveSuccess'))
+      await putBotsByBotIdScheduleById({ path: { bot_id: props.botId, id }, body: base as unknown as ScheduleUpdateRequest, throwOnError: true })
     }
+    toast.success(t('bots.schedule.saveSuccess'))
     formVisible.value = false
     editingSchedule.value = null
     await fetchSchedules()
@@ -793,34 +849,11 @@ async function handleToggleEnabled(item: ScheduleSchedule, enabled: boolean) {
   if (!id) return
   busyIds.add(id)
   try {
-    await putBotsByBotIdScheduleById({
-      path: { bot_id: props.botId, id },
-      body: { enabled },
-      throwOnError: true,
-    })
+    await putBotsByBotIdScheduleById({ path: { bot_id: props.botId, id }, body: { enabled }, throwOnError: true })
     await fetchSchedules()
     invalidateSidebarSchedule()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.schedule.saveFailed')))
-  } finally {
-    busyIds.delete(id)
-  }
-}
-
-async function handleDelete(item: ScheduleSchedule) {
-  const id = item.id
-  if (!id) return
-  busyIds.add(id)
-  try {
-    await deleteBotsByBotIdScheduleById({
-      path: { bot_id: props.botId, id },
-      throwOnError: true,
-    })
-    toast.success(t('bots.schedule.deleteSuccess'))
-    await fetchSchedules()
-    invalidateSidebarSchedule()
-  } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('bots.schedule.deleteFailed')))
   } finally {
     busyIds.delete(id)
   }
@@ -837,8 +870,7 @@ watch(
     return entries[0]?.state.value.data
   },
   (next, prev) => {
-    if (!props.botId) return
-    if (next === prev) return
+    if (!props.botId || next === prev) return
     void fetchSchedules()
   },
 )

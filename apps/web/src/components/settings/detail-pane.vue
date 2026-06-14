@@ -8,7 +8,7 @@
     >
       <Button
         variant="ghost"
-        class="-ml-3 text-foreground/85"
+        class="text-foreground/85"
         @click="emit('back')"
       >
         <ChevronLeft class="size-4" />

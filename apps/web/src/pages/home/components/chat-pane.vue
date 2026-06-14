@@ -17,12 +17,16 @@
     <template v-else>
       <section class="flex-1 relative w-full px-3 sm:px-5 lg:px-8">
         <section class="absolute inset-0">
+          <div
+            aria-hidden="true"
+            class="pointer-events-none absolute inset-x-0 top-0 z-10 h-10 bg-gradient-to-b from-surface-editor to-transparent"
+          />
           <ScrollArea
             ref="scrollContainer"
             :class="`${transitionScroll?'opacity-100':'opacity-0'} h-full`"
           >
             <div
-              class="w-full max-w-4xl mx-auto px-10 pt-6 pb-6 space-y-6"
+              class="w-full max-w-[840px] mx-auto px-10 pt-6 pb-28 space-y-6"
             >
               <div
                 ref="loadMoreSentinel"
@@ -61,7 +65,7 @@
               </div>
 
               <div
-                v-for="msg in messages"
+                v-for="(msg, index) in messages"
                 :key="msg.id"
                 :data-message-id="msg.id"
                 :data-external-message-id="(msg.role === 'user' || msg.role === 'assistant') ? msg.externalMessageId : undefined"
@@ -73,22 +77,63 @@
                   :message="msg"
                   :session-type="activeSession?.type"
                   :bot-id="currentBotId"
+                  :channel-thread="isChannelThread"
+                  :channel-platform="channelPlatform"
+                  :bot-name="currentBot?.name"
+                  :bot-avatar-url="currentBot?.avatar_url"
                   :on-open-media="galleryOpenBySrc"
                   :on-reply-click="handleReplyJump"
+                  :is-scrolling="isScrolling"
+                  :is-last-message="index === messages.length - 1"
                   @active="isActiveEl"
                 />
               </div>
             </div>
           </ScrollArea>
 
-          <ChatMinimap
-            v-if="isActive && !loadingChats"
-            :scroll-el="scrollEl"
-            :content-el="descEl"
-            :messages="messages"
-            :has-more-older="hasMoreOlder"
-            @navigate="handleMinimapNavigate"
-          />
+          <div
+            v-if="showScrollRail"
+            class="group/rail hidden md:flex absolute inset-y-0 right-4 z-10 w-96 flex-col items-end justify-center pointer-events-none"
+            @mouseenter="scheduleRailOpen"
+            @mouseleave="scheduleRailClose"
+          >
+            <!-- Collapsed: uniform tick marks -->
+            <div
+              class="flex max-h-[60vh] flex-col items-end justify-center gap-2 py-2 pointer-events-auto transition-opacity duration-150"
+              :class="railOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'"
+            >
+              <span
+                v-for="seg in railSegments"
+                :key="seg.id"
+                class="h-0.5 w-4 shrink-0 rounded-full transition-colors duration-150"
+                :class="seg.id === activeRailId
+                  ? 'bg-foreground/70'
+                  : 'bg-muted-foreground/30 group-hover/rail:bg-muted-foreground/55'"
+              />
+            </div>
+
+            <!-- Expanded: user-prompt select panel -->
+            <div
+              v-if="railOpen"
+              class="absolute right-0 top-1/2 w-80 -translate-y-1/2 overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-lg pointer-events-auto"
+              @mouseenter="scheduleRailOpen"
+              @mouseleave="scheduleRailClose"
+            >
+              <div
+                class="max-h-[min(60vh,480px)] overflow-y-auto overscroll-contain p-1.5 outline-none [mask-image:linear-gradient(to_bottom,transparent,black_10px,black_calc(100%-10px),transparent)] scrollbar-none"
+              >
+                <button
+                  v-for="seg in railSegments"
+                  :key="seg.id"
+                  type="button"
+                  class="flex h-8 w-full items-center rounded-md px-3 text-left text-[13px] text-foreground hover:bg-[var(--overlay-hover)]"
+                  @click="scrollToRailSegment(seg)"
+                >
+                  <span class="truncate">{{ seg.preview }}</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </section>
       </section>
 
@@ -100,9 +145,13 @@
 
       <div
         v-if="!activeChatReadOnly"
-        class="px-3 sm:px-5 lg:px-8 py-2.5"
+        class="pointer-events-none absolute inset-x-0 bottom-0 z-30 px-3 sm:px-5 lg:px-8 pt-2 pb-5"
       >
-        <div class="relative w-full max-w-4xl mx-auto">
+        <div
+          aria-hidden="true"
+          class="absolute inset-x-0 bottom-0 h-5 bg-surface-editor"
+        />
+        <div class="pointer-events-auto relative w-full max-w-[880px] mx-auto px-10">
           <Transition
             enter-active-class="motion-safe:transition-opacity motion-safe:duration-150 ease-out"
             enter-from-class="motion-safe:opacity-0"
@@ -130,9 +179,9 @@
             <Button
               v-if="showJumpToBottom"
               type="button"
-              size="icon"
+              size="icon-sm"
               variant="secondary"
-              class="absolute left-1/2 bottom-full z-20 mb-2 size-8 -translate-x-1/2 rounded-full border bg-background/95 shadow-sm backdrop-blur hover:bg-accent"
+              class="absolute left-1/2 bottom-full z-20 mb-2 size-8 -translate-x-1/2 rounded-full"
               aria-label="Scroll to latest message"
               @click="scrollToBottom"
             >
@@ -293,10 +342,13 @@
               <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
               <span class="min-w-0 break-words">{{ composerError }}</span>
             </div>
-            <InputGroup class="bg-transparent overflow-hidden">
+            <InputGroup
+              class="overflow-hidden rounded-xl bg-surface-editor"
+              :style="{ '--field-edge-solid': 'var(--field-edge-engaged)' }"
+            >
               <InputGroupTextarea
                 v-model="inputText"
-                class="min-h-14 max-h-14 text-xs resize-none break-all!"
+                class="min-h-10 max-h-52 field-sizing-content resize-none break-words text-sm"
                 :placeholder="activeChatReadOnly ? $t('chat.readonlyHint') : $t('chat.inputPlaceholder')"
                 :disabled="!currentBotId || activeChatReadOnly"
                 style="scrollbar-width: none;"
@@ -311,28 +363,29 @@
                   <PopoverTrigger as-child>
                     <Button
                       type="button"
-                      size="sm"
+                      size="icon-sm"
                       variant="ghost"
                       :disabled="!currentBotId || activeChatReadOnly || agentChanging || !canChangeAgent"
-                      class="gap-1.5 text-muted-foreground max-w-40"
+                      class="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                      :aria-label="$t('chat.composerActions')"
                     >
                       <LoaderCircle
                         v-if="agentChanging"
                         class="size-3 animate-spin"
                       />
-                      <component
-                        :is="selectedAgentIcon"
+                      <Plus
                         v-else
-                        class="size-3.5 shrink-0"
+                        class="size-4"
                       />
-                      <span class="truncate text-[11px]">{{ selectedAgentLabel }}</span>
-                      <ChevronDown class="size-3 shrink-0 opacity-50" />
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent
                     class="w-56 p-1"
                     align="start"
                   >
+                    <div class="px-2 py-1.5 text-caption font-medium text-muted-foreground">
+                      {{ $t('chat.agent') }}
+                    </div>
                     <button
                       type="button"
                       class="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-muted"
@@ -362,61 +415,117 @@
                         class="size-3 text-muted-foreground"
                       />
                     </button>
+                    <template v-if="!activeIsACP">
+                      <div class="my-1 h-px bg-border" />
+                      <button
+                        type="button"
+                        class="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                        :disabled="!currentBotId || activeChatReadOnly || streaming"
+                        @click="fileInput?.click(); agentPopoverOpen = false"
+                      >
+                        <Paperclip class="size-3.5 text-muted-foreground" />
+                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.attachFiles') }}</span>
+                      </button>
+                    </template>
                   </PopoverContent>
                 </Popover>
 
-                <Popover v-model:open="modelPopoverOpen">
-                  <PopoverTrigger as-child>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      :disabled="!currentBotId || activeChatReadOnly || acpModelChanging"
-                      class="gap-0.5 text-muted-foreground max-w-40"
-                    >
-                      <LoaderCircle
-                        v-if="acpModelChanging || acpModelsLoading"
-                        class="size-3 animate-spin"
-                      />
-                      <span class="truncate text-[11px]">{{ selectedModelLabel }}</span>
-                      <ChevronDown class="size-3 shrink-0 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    class="w-96 p-0"
-                    align="start"
-                  >
-                    <div
-                      v-if="activeIsPendingACP"
-                      class="max-h-80 overflow-y-auto p-1"
-                    >
-                      <button
+                <div class="order-4 ml-auto">
+                  <Popover v-model:open="modelPopoverOpen">
+                    <PopoverTrigger as-child>
+                      <Button
                         type="button"
-                        class="flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
-                        @click="onPendingACPDefaultModelSelected"
+                        size="sm"
+                        variant="ghost"
+                        :disabled="!currentBotId || activeChatReadOnly || acpModelChanging"
+                        class="gap-0.5 text-muted-foreground max-w-40"
                       >
-                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.modelDefault') }}</span>
-                        <Check
-                          v-if="!pendingACPModelId"
-                          class="mt-0.5 size-3 shrink-0 text-muted-foreground"
+                        <LoaderCircle
+                          v-if="acpModelChanging || acpModelsLoading"
+                          class="size-3 animate-spin"
                         />
-                      </button>
+                        <span class="truncate text-[11px]">{{ selectedModelLabel }}</span>
+                        <ChevronDown class="size-3 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      class="w-96 p-0"
+                      align="start"
+                    >
                       <div
-                        v-if="acpModelsLoading"
-                        class="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground"
+                        v-if="activeIsPendingACP"
+                        class="max-h-80 overflow-y-auto p-1"
                       >
-                        <LoaderCircle class="size-3 animate-spin" />
-                        {{ $t('common.loading') }}
-                      </div>
-                      <div
-                        v-else-if="!pendingACPModelOptions.length"
-                        class="px-2 py-3 text-xs text-muted-foreground"
-                      >
-                        {{ $t('chat.noModels') }}
-                      </div>
-                      <template v-else>
                         <button
-                          v-for="model in pendingACPModelOptions"
+                          type="button"
+                          class="flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
+                          @click="onPendingACPDefaultModelSelected"
+                        >
+                          <span class="min-w-0 flex-1 truncate">{{ $t('chat.modelDefault') }}</span>
+                          <Check
+                            v-if="!pendingACPModelId"
+                            class="mt-0.5 size-3 shrink-0 text-muted-foreground"
+                          />
+                        </button>
+                        <div
+                          v-if="acpModelsLoading"
+                          class="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground"
+                        >
+                          <LoaderCircle class="size-3 animate-spin" />
+                          {{ $t('common.loading') }}
+                        </div>
+                        <div
+                          v-else-if="!pendingACPModelOptions.length"
+                          class="px-2 py-3 text-xs text-muted-foreground"
+                        >
+                          {{ $t('chat.noModels') }}
+                        </div>
+                        <template v-else>
+                          <button
+                            v-for="model in pendingACPModelOptions"
+                            :key="model.id || model.name"
+                            type="button"
+                            class="flex min-h-8 w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
+                            @click="onACPModelSelected(model)"
+                          >
+                            <span class="min-w-0 flex-1">
+                              <span class="block truncate">
+                                {{ model.name || model.id }}
+                              </span>
+                              <span
+                                v-if="model.description"
+                                class="mt-0.5 block line-clamp-2 text-[11px] leading-snug text-muted-foreground"
+                              >
+                                {{ model.description }}
+                              </span>
+                            </span>
+                            <Check
+                              v-if="model.id === pendingACPModelId"
+                              class="mt-0.5 size-3 shrink-0 text-muted-foreground"
+                            />
+                          </button>
+                        </template>
+                      </div>
+                      <div
+                        v-else-if="activeIsACP"
+                        class="max-h-80 overflow-y-auto p-1"
+                      >
+                        <div
+                          v-if="acpModelsLoading"
+                          class="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground"
+                        >
+                          <LoaderCircle class="size-3 animate-spin" />
+                          {{ $t('common.loading') }}
+                        </div>
+                        <div
+                          v-else-if="!acpModels.length"
+                          class="px-2 py-3 text-xs text-muted-foreground"
+                        >
+                          {{ $t('chat.noModels') }}
+                        </div>
+                        <button
+                          v-for="model in acpModels"
+                          v-else
                           :key="model.id || model.name"
                           type="button"
                           class="flex min-h-8 w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
@@ -434,72 +543,30 @@
                             </span>
                           </span>
                           <Check
-                            v-if="model.id === pendingACPModelId"
+                            v-if="model.id === currentACPModelId"
                             class="mt-0.5 size-3 shrink-0 text-muted-foreground"
                           />
                         </button>
-                      </template>
-                    </div>
-                    <div
-                      v-else-if="activeIsACP"
-                      class="max-h-80 overflow-y-auto p-1"
-                    >
-                      <div
-                        v-if="acpModelsLoading"
-                        class="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground"
-                      >
-                        <LoaderCircle class="size-3 animate-spin" />
-                        {{ $t('common.loading') }}
                       </div>
-                      <div
-                        v-else-if="!acpModels.length"
-                        class="px-2 py-3 text-xs text-muted-foreground"
-                      >
-                        {{ $t('chat.noModels') }}
-                      </div>
-                      <button
-                        v-for="model in acpModels"
+                      <ModelOptions
                         v-else
-                        :key="model.id || model.name"
-                        type="button"
-                        class="flex min-h-8 w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
-                        @click="onACPModelSelected(model)"
-                      >
-                        <span class="min-w-0 flex-1">
-                          <span class="block truncate">
-                            {{ model.name || model.id }}
-                          </span>
-                          <span
-                            v-if="model.description"
-                            class="mt-0.5 block line-clamp-2 text-[11px] leading-snug text-muted-foreground"
-                          >
-                            {{ model.description }}
-                          </span>
-                        </span>
-                        <Check
-                          v-if="model.id === currentACPModelId"
-                          class="mt-0.5 size-3 shrink-0 text-muted-foreground"
-                        />
-                      </button>
-                    </div>
-                    <ModelOptions
-                      v-else
-                      v-model="overrideModelId"
-                      :models="models"
-                      :providers="providers"
-                      model-type="chat"
-                      :open="modelPopoverOpen"
-                      @update:model-value="onModelSelected"
-                    />
-                  </PopoverContent>
-                </Popover>
+                        v-model="overrideModelId"
+                        :models="models"
+                        :providers="providers"
+                        model-type="chat"
+                        :open="modelPopoverOpen"
+                        @update:model-value="onModelSelected"
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
 
                 <Button
                   v-if="activeIsACP"
                   type="button"
                   size="sm"
                   variant="ghost"
-                  class="gap-1 text-muted-foreground max-w-40"
+                  class="order-2 gap-1 text-muted-foreground max-w-40"
                   disabled
                 >
                   <FolderOpen class="size-3.5 shrink-0" />
@@ -516,7 +583,7 @@
                       size="sm"
                       variant="ghost"
                       :disabled="!currentBotId || activeChatReadOnly || !activeModelSupportsReasoning"
-                      class="gap-0.5 text-muted-foreground"
+                      class="order-2 gap-0.5 text-muted-foreground"
                     >
                       <Lightbulb
                         class="size-3.5 shrink-0"
@@ -538,45 +605,34 @@
                   </PopoverContent>
                 </Popover>
 
-                <Button
-                  v-if="!activeIsACP"
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  :disabled="!currentBotId || activeChatReadOnly || streaming"
-                  aria-label="Attach files"
-                  @click="fileInput?.click()"
-                >
-                  <Paperclip class="size-3.5" />
-                </Button>
-
                 <SessionInfoRing
                   v-if="!activeIsACP"
-                  class="ml-auto"
+                  class="order-5"
                   :override-model-id="overrideModelId"
                 />
                 <div
                   v-else
-                  class="ml-auto"
+                  class="order-5"
                 />
 
                 <Button
                   v-if="!streaming"
                   type="button"
+                  variant="brand"
                   size="icon"
                   :disabled="(!inputText.trim() && !pendingFiles.length) || !currentBotId || activeChatReadOnly"
                   aria-label="Send message"
-                  class="size-7 rounded-full bg-primary text-primary-foreground"
+                  class="order-6 size-7 rounded-full"
                   @click="handleSend"
                 >
-                  <Send class="size-3" />
+                  <Send class="size-3.5" />
                 </Button>
                 <Button
                   v-else
                   type="button"
                   size="icon"
                   variant="destructive"
-                  class="size-7 rounded-full"
+                  class="order-6 size-7 rounded-full"
                   aria-label="Stop generating response"
                   @click="chatStore.abort()"
                 >
@@ -599,6 +655,7 @@ import {
   File as FileIcon,
   X,
   Paperclip,
+  Plus,
   Send,
   ChevronDown,
   Lightbulb,
@@ -621,7 +678,6 @@ import { getAcpProfiles, getModels, getProviders, getBotsByBotIdSettings } from 
 import type { AcpclientModelInfo, AcpprofilePublicProfile, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import MessageItem from './message-item.vue'
-import ChatMinimap from './chat-minimap.vue'
 import { animateScrollTo } from './chat-minimap'
 import BgTaskPill from './bg-task-pill.vue'
 import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'
@@ -634,7 +690,7 @@ import { useMediaGallery } from '../composables/useMediaGallery'
 import type { ChatAttachment, UIUserInput, UIUserInputQuestion, WSUserInputAnswer } from '@/composables/api/useChat'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
-import { acpAgentDisplayName, acpAgentIcon, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID } from '@/utils/acp'
+import { acpAgentIcon, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID } from '@/utils/acp'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 interface PendingUserInputDraft {
@@ -642,6 +698,13 @@ interface PendingUserInputDraft {
   customSelected: boolean
   customText: string
   text: string
+}
+
+interface ScrollRailSegment {
+  id: string
+  label: string
+  preview: string
+  index: number
 }
 
 const props = withDefaults(defineProps<{
@@ -769,6 +832,14 @@ const { data: acpProfileData } = useQuery({
 })
 
 const currentBot = computed(() => bots.value.find(bot => bot.id === currentBotId.value) ?? null)
+
+// A third-party synced thread (Telegram/Discord/...) is a multi-participant
+// group conversation rather than the local 1:1 chat. The message list switches
+// to a group layout for these: every turn is left-aligned with an avatar +
+// sender name + channel badge, including the bot's own replies.
+const channelPlatform = computed(() => (activeSession.value?.channel_type ?? '').trim().toLowerCase())
+const isChannelThread = computed(() => !!channelPlatform.value && channelPlatform.value !== 'local')
+
 const acpProfiles = computed<AcpprofilePublicProfile[]>(() => acpProfileData.value?.items ?? [])
 const enabledACPProfiles = computed(() =>
   acpProfiles.value.filter(profile => isACPAgentEnabled(currentBot.value?.metadata as Record<string, unknown> | undefined, profile.id)),
@@ -782,12 +853,6 @@ const activeSessionMetadata = computed<Record<string, unknown>>(() =>
 const activeIsPendingACP = computed(() => !activeSession.value && !!pendingACPSessionMetadata.value)
 const activeIsACP = computed(() => activeSession.value?.type === 'acp_agent' || activeIsPendingACP.value)
 const activeACPAgentId = computed(() => normalizeACPAgentID(activeSessionMetadata.value.acp_agent_id))
-const selectedAgentIcon = computed(() => activeIsACP.value ? acpAgentIcon(activeACPAgentId.value, true) : MessageSquare)
-const selectedAgentLabel = computed(() =>
-  activeIsACP.value
-    ? acpAgentDisplayName(activeACPAgentId.value, t('chat.sessionTypeACPAgent'))
-    : t('chat.agentMemoh'),
-)
 const activeACPProjectLabel = computed(() => {
   if (isACPNoProject(activeSessionMetadata.value)) return t('chat.noProject')
   const path = String(activeSessionMetadata.value.project_path ?? '').trim()
@@ -1091,6 +1156,99 @@ const { height } = useElementBounding(descEl)
 let highlightTimer: ReturnType<typeof setTimeout> | null = null
 let cancelScrollTween: (() => void) | null = null
 
+// --- Scroll rail ---
+const railSegments = ref<ScrollRailSegment[]>([])
+const activeRailId = ref('')
+const railOpen = ref(false)
+let railRaf = 0
+let railOpenTimer: ReturnType<typeof setTimeout> | null = null
+let railCloseTimer: ReturnType<typeof setTimeout> | null = null
+
+function getRailSegmentText(msg: (typeof messages.value)[number]): string {
+  if (msg.role === 'user') return msg.text?.trim().replace(/\s+/g, ' ') || ''
+  return ''
+}
+
+function rebuildRailSegments() {
+  const segments: ScrollRailSegment[] = []
+  messages.value.forEach((msg) => {
+    if (msg.role !== 'user') return
+    const preview = getRailSegmentText(msg)
+    if (!preview) return
+    segments.push({
+      id: msg.id,
+      label: `Message ${segments.length + 1}`,
+      preview,
+      index: segments.length,
+    })
+  })
+  railSegments.value = segments
+}
+
+function syncActiveRailFromScroll() {
+  const root = scrollEl.value
+  if (!root || !railSegments.value.length) return
+  const viewAnchor = root.scrollTop + 8
+  let best = railSegments.value[0]!.id
+  let bestDist = Number.POSITIVE_INFINITY
+  for (const seg of railSegments.value) {
+    const el = root.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(seg.id)}"]`)
+    if (!el) continue
+    const top = root.scrollTop + el.getBoundingClientRect().top - root.getBoundingClientRect().top
+    const dist = Math.abs(top - viewAnchor)
+    if (dist < bestDist) { bestDist = dist; best = seg.id }
+  }
+  activeRailId.value = best
+}
+
+watch(() => messages.value.map(m => `${m.id}:${m.role}`).join('|'), () => {
+  rebuildRailSegments()
+}, { flush: 'post', immediate: true })
+
+useScroll(scrollEl, {
+  onScroll() {
+    if (railRaf) return
+    railRaf = requestAnimationFrame(() => {
+      railRaf = 0
+      syncActiveRailFromScroll()
+    })
+  },
+})
+
+function scheduleRailOpen() {
+  if (railCloseTimer) { clearTimeout(railCloseTimer); railCloseTimer = null }
+  if (railOpen.value || railOpenTimer) return
+  railOpenTimer = setTimeout(() => { railOpen.value = true; railOpenTimer = null }, 80)
+}
+
+function scheduleRailClose() {
+  if (railOpenTimer) { clearTimeout(railOpenTimer); railOpenTimer = null }
+  if (!railOpen.value || railCloseTimer) return
+  railCloseTimer = setTimeout(() => { railOpen.value = false; railCloseTimer = null }, 150)
+}
+
+const showScrollRail = computed(() =>
+  isActive.value && !loadingChats.value && railSegments.value.length > 1,
+)
+
+function scrollToRailSegment(seg: ScrollRailSegment) {
+  activeRailId.value = seg.id
+  railOpen.value = false
+  void nextTick(() => {
+    const root = scrollEl.value
+    const target = findMessageElement(seg.id)
+    if (!root || !target) return
+    isAutoScroll.value = false
+    isInstant.value = false
+    const scrollMargin = Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0
+    startScrollTween(root, () => {
+      const el = findMessageElement(seg.id)
+      return el ? getElementAbsoluteTop(el, root) - scrollMargin : root.scrollTop
+    })
+  })
+}
+// --- End scroll rail ---
+
 onBeforeUnmount(() => {
   stopAuthSessionCleanup()
   if (highlightTimer) clearTimeout(highlightTimer)
@@ -1131,10 +1289,6 @@ function scrollViewportTo(getTop: () => number) {
   const root = scrollEl.value
   if (!root) return
   startScrollTween(root, getTop)
-}
-
-function handleMinimapNavigate(messageId: string) {
-  void scrollToMessage(messageId)
 }
 
 function scrollToBottom() {

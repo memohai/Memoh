@@ -1,12 +1,14 @@
 <template>
-  <div class="relative h-full w-full">
-    <BrowserPane
-      v-if="currentBotId"
-      :bot-id="currentBotId"
-      :tab-id="props.params.api.id"
-      :address="address"
-      :active="visible"
-    />
+  <div class="flex flex-col relative h-full w-full">
+    <div class="flex-1 min-h-0">
+      <BrowserPane
+        v-if="currentBotId"
+        :bot-id="currentBotId"
+        :tab-id="props.params.api.id"
+        :address="address"
+        :active="visible"
+      />
+    </div>
   </div>
 </template>
 

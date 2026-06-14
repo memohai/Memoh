@@ -7,7 +7,26 @@
  * Inter Variable still wins for Latin (declared first in --font-sans); MiSans
  * only kicks in for CJK glyphs (per-glyph fallback). Each face is unicode-range
  * subsetted, so the browser lazy-loads only the CJK ranges actually rendered.
- * The wrapper declares MiSans' variable wght axis range (150..700). */
+ *
+ * The wrapper CLAMPS MiSans' variable wght axis to 150..450 (the font masters up
+ * to 700). CJK glyphs are stroke-dense and fill the em box, so they read heavier
+ * than Latin at the same weight; capping the top means a request for 500/600/700
+ * renders MiSans at 450, so Chinese never goes truly bold. Crucially this is a
+ * FONT-level cap — it fires per CJK glyph regardless of the UI's lang attribute,
+ * so it also tames Chinese that appears inside an English-language UI (session
+ * titles, mixed labels) where the :lang(zh) rules below never match. Inter is
+ * unaffected (it owns the Latin glyphs).
+ *
+ * The wrapper also applies size-adjust:96% to every MiSans face. CJK glyphs fill
+ * the whole em box (Latin uses ~70%), so at the same font-size Chinese reads
+ * visibly LARGER than the surrounding English — MiSans in particular draws a
+ * fuller face than the system PingFang other products fall back to. size-adjust
+ * scales ONLY MiSans' glyphs/metrics, so CJK shrinks to ~96% (≈13.4px at our 14px
+ * control size) while Inter's Latin stays at full size, the type scale is
+ * untouched, and — because it rides the bundled face — the shrink is identical
+ * on Web / Windows / macOS (no cross-platform divergence). This is the size
+ * counterpart of the weight clamp above: clamp tames "too heavy", size-adjust
+ * tames "too big", both per-CJK-glyph and language-agnostic. */
 @import "./styles/misans-vf.css";
 
 /* Explicit `@source` paths (relative to this CSS file) — Tailwind v4's
@@ -17,7 +36,7 @@
 @source "./";
 @source "../../../packages/ui/src";
 
-/* ── Workspace surface planes ────────────────────────────────────────────────
+/* ── Workspace surface planes ──────────────────────────────────────────────────────────
  * The editor workspace (dock group view, tabs, file editor, chat, previews)
  * collapses to exactly TWO planes so the SELECTED tab reads as continuous with
  * the content it owns, while the chrome (tab strip + unselected tabs + top
@@ -25,26 +44,49 @@
  * elevation tokens, so any palette/scheme swap (and the dark overrides) carry
  * through automatically (all of :root / .dark / [data-color-scheme] target
  * <html>, so the var() resolves against that element's final value):
- *   · editor plane = --background  (light 0.984 canvas · dark 0.152)
- *     — already what chat/preview sit on, so content is untouched.
- *   · chrome plane = recessed neutral: light --secondary (0.964, one notch
- *     under the canvas) · dark --sidebar (0.185, one notch above it).
- * In light, --background == --sidebar, so the chrome could not separate from
- * the content before (the bug that forced the old brand top-accent). Stepping
- * chrome to --secondary in light, and keeping --sidebar in dark, gives a clear
- * fill step in both schemes — so the active tab separates by its FILL alone,
- * no accent line. */
+ *   · editor plane (the SELECTED tab + the view it owns):
+ *       light = pure white (255) — body/reading content (chat view, file/monaco
+ *       editor) stays a NEUTRAL white, NOT the faintly-warm --card. Cards/dialogs
+ *       carry the warm tint for shell coherence, but the long-read main surface
+ *       must not be tinted · dark = --background (0.152).
+ *   · chrome plane (tab strip + unselected tabs):
+ *       light = --background-chrome (the GRAY chrome ≈249, only Δ≈2 below the
+ *       sidebar — a barely-visible-but-present step so an inactive tab reads
+ *       recessed against the white active tab, while the sidebar stays on the
+ *       brighter --background ≈251 and is NOT dragged down) · dark = --sidebar
+ *       (0.185).
+ * Light is CONTENT-anchored (see packages/ui/style.css): the selected tab is the
+ * brightest layer (white) and the chrome recesses below it, so the active tab
+ * separates by its FILL alone — no accent line. Dark keeps its original two
+ * planes (editor 0.152 < chrome 0.185), so only the light values change here. */
 :root {
-  --surface-editor: var(--background);
-  --surface-chrome: var(--secondary);
+  --surface-editor: rgb(255 255 255);
+  --surface-chrome: var(--background-chrome);
+  /* Hover lift for unselected tabs. Reuses the sidebar's accent grey so the tab
+   * strip and the recents list speak ONE hover language instead of an invented
+   * one-off step (a deeper bespoke value read as too heavy on the chrome plane).
+   * --sidebar-accent is already mode-aware (0.945 light / 0.30 dark), so no
+   * separate .dark override is needed here. */
+  --surface-chrome-hover: var(--sidebar-accent);
 }
 .dark {
+  --surface-editor: var(--background);
   --surface-chrome: var(--sidebar);
 }
 
 @theme inline {
   --color-surface-editor: var(--surface-editor);
   --color-surface-chrome: var(--surface-chrome);
+}
+
+/* Inter-script spacing (W3C CLREQ / CSS Text 4): insert the standard ~1/8em gap
+ * between CJK (Han/kana) and adjacent Latin letters or numerals, so mixed runs
+ * like "Chat查看文件" stop colliding into one dense blob. The property is
+ * inherited, so declaring it on the root cascades to all text. Browsers without
+ * support (older Blink/Gecko) ignore it, and it has no effect on Latin-only or
+ * CJK-only runs — so this is purely additive, zero-risk for existing layout. */
+:root {
+  text-autospace: normal;
 }
 
 /* CJK font-weight de-emphasis. CJK glyphs are stroke-dense, so at the same
@@ -83,9 +125,19 @@
 :lang(zh) body {
   font-weight: 335;
 }
-/* Chat markdown body also relaxes in Chinese (it pins its own 380 weight). */
+/* Chat markdown body in Chinese: relax both weight (it pins its own 380) and
+ * leading. CJK glyphs fill the em box, so lines pack tighter vertically and need
+ * more line-height than Latin (~1.7 vs the compact Latin body) to breathe.
+ * :lang(zh)-scoped, so it only loosens the chat body when the UI language is
+ * Chinese; CJK that appears inside an English UI rides markstream's own 1.625
+ * paragraph leading below, which is already comfortable for mixed runs. */
 :lang(zh) [data-chat-content] .prose {
-  font-weight: 335;
+  font-weight: 345;
+  line-height: 1.7;
+}
+:lang(zh) [data-chat-content] .markstream-vue,
+:lang(zh) [data-chat-content] .markstream-vue .paragraph-node {
+  line-height: 1.75;
 }
 
 @layer base {
@@ -102,16 +154,16 @@
 
 @layer components {
   [data-chat-content] .prose {
-    /* Compact chat body: 13px text with tight 17.5px line-height. Keep the
-     * body weight close to the global normal rung now that CJK is variable.
-     * Tables / code blocks set their own size so they don't grow with this. */
-    font-size: 0.8125rem;
-    line-height: 1.35;
-    font-weight: 380;
+    /* Chat reading body: 16px / 400. This is a READING surface, not UI chrome, so
+     * it sits above the 12-14px control rungs. */
+    font-size: 1rem;
+    line-height: 1.6;
+    font-weight: 400;
   }
 
   [data-chat-content] .chat-user-bubble {
-    font-size: 0.75rem;
+    font-size: 1rem;
+    line-height: 1.6;
   }
 
   [data-chat-content] .chat-message-meta {

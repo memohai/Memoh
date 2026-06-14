@@ -19,7 +19,7 @@
       <Button
         variant="ghost"
         block
-        class="h-9 justify-start gap-[9px] px-[11px] text-control font-medium text-foreground/88 dark:text-[color:oklch(0.86_0_0)]"
+        class="h-9 justify-start gap-[9px] px-[11px] text-control font-medium text-foreground/92 dark:text-[color:oklch(0.86_0_0)]"
         :disabled="!currentBotId"
         @click="handleNewSession"
       >
@@ -32,7 +32,7 @@
       <Button
         variant="ghost"
         block
-        class="h-9 justify-start gap-[9px] px-[11px] text-control font-medium text-foreground/88 dark:text-[color:oklch(0.86_0_0)]"
+        class="h-9 justify-start gap-[9px] px-[11px] text-control font-medium text-foreground/92 dark:text-[color:oklch(0.86_0_0)]"
         :disabled="!currentBotId"
         @click="handleScheduledJobs"
       >

@@ -1,8 +1,10 @@
 <template>
-  <pre
+  <CodeBlock
     v-if="text"
-    class="font-mono text-[12px] leading-relaxed text-foreground whitespace-pre overflow-x-auto max-h-72 overflow-y-auto"
-  >{{ text }}</pre>
+    :code="text"
+    :filename="highlightFilename"
+    class="text-[12px] leading-relaxed whitespace-pre overflow-x-auto max-h-72 overflow-y-auto"
+  />
   <p
     v-else
     class="text-xs text-muted-foreground italic"
@@ -15,9 +17,18 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
+import CodeBlock from './code-block.vue'
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()
+
+// Only file reads carry a meaningful language; directory listings and other
+// plain outputs stay unhighlighted (empty filename -> plaintext kernel path).
+const highlightFilename = computed(() => {
+  if (props.block.toolName !== 'read') return ''
+  const input = props.block.input as Record<string, unknown> | undefined
+  return (input?.path as string) ?? ''
+})
 
 // Render the real tool output (file text / listing), handling every shape the
 // backend uses: a plain `content` string, an MCP `content[].text` array, a

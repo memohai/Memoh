@@ -3,66 +3,44 @@
     v-if="shouldRenderMessage"
     ref="messageItem"
     class="flex gap-3 items-start"
-    :class="message.role === 'user' && isSelf && !isSpecialUserMessage ? 'justify-end' : ''"
+    :class="message.role === 'user' && isSelf && !isSpecialUserMessage && !channelThread ? 'justify-end' : ''"
   >
-    <!-- Assistant avatar
+    <!-- Sender avatar. Local chat shows it only for remote users; a synced
+         channel thread shows it for every participant (self / bot included). -->
     <div
-      v-if="message.role === 'assistant'"
+      v-if="showAvatar"
       class="relative shrink-0"
     >
       <Avatar class="size-8">
         <AvatarImage
-          v-if="botAvatarUrl"
-          :src="botAvatarUrl"
-          :alt="botName"
-        />
-        <AvatarFallback class="text-xs bg-primary/10 text-primary">
-          <FontAwesomeIcon
-            :icon="['fas', 'robot']"
-            class="size-4"
-          />
-        </AvatarFallback>
-      </Avatar>
-      <ChannelBadge
-        v-if="message.platform"
-        :platform="message.platform"
-      />
-    </div> -->
-
-    <!-- User avatar (other sender, left-aligned; hidden for special session types) -->
-    <div
-      v-if="message.role === 'user' && !isSelf && !isSpecialUserMessage"
-      class="relative shrink-0"
-    >
-      <Avatar class="size-8">
-        <AvatarImage
-          v-if="message.senderAvatarUrl"
-          :src="message.senderAvatarUrl"
-          :alt="message.senderDisplayName"
+          v-if="avatarSrc"
+          :src="avatarSrc"
+          :alt="avatarName"
         />
         <AvatarFallback class="text-xs">
-          {{ senderFallback }}
+          {{ avatarFallback }}
         </AvatarFallback>
       </Avatar>
       <ChannelBadge
-        v-if="message.platform"
-        :platform="message.platform"
+        v-if="avatarPlatform"
+        :platform="avatarPlatform"
       />
     </div>
 
     <!-- Content -->
     <div
-      class="min-w-0"
+      class="min-w-0 group/msg"
       :class="contentClass"
       data-chat-content
     >
-      <!-- Sender name for non-self user messages
+      <!-- Sender name (channel threads only): names every participant so the
+           group conversation is legible without relying on bubble side. -->
       <p
-        v-if="message.role === 'user' && !isSelf"
-        class="text-xs text-muted-foreground mb-1"
+        v-if="showSenderName && avatarName"
+        class="text-xs font-medium text-muted-foreground mb-1 px-0.5"
       >
-        {{ message.senderDisplayName || senderFallbackName }}
-      </p> -->
+        {{ avatarName }}
+      </p>
 
       <!-- Background task status -->
       <div
@@ -160,14 +138,12 @@
       <!-- Default user message (chat bubble) -->
       <div
         v-else-if="message.role === 'user'"
-        class="space-y-2"
+        class="flex flex-col gap-2"
+        :class="bubbleSelf ? 'items-end' : 'items-start'"
       >
         <div
           v-if="cleanUserText(message.text) || message.forward || message.reply"
-          class="rounded-2xl px-3 py-2 text-xs whitespace-pre-wrap break-all"
-          :class="isSelf
-            ? 'rounded-tr-sm bg-accent text-foreground'
-            : 'rounded-tl-sm bg-muted text-foreground'"
+          class="chat-user-bubble w-fit max-w-full rounded-xl bg-sidebar-accent px-3.5 py-2.5 text-foreground whitespace-pre-wrap break-words"
         >
           <div
             v-if="message.forward"
@@ -188,13 +164,13 @@
           >
             <span
               class="absolute inset-y-0 left-0 w-[3px]"
-              :class="isSelf ? 'bg-border' : 'bg-primary/70'"
+              :class="bubbleSelf ? 'bg-border' : 'bg-primary/70'"
             />
             <div class="flex min-w-0 items-start gap-2">
               <div class="min-w-0 flex-1">
                 <div
                   class="truncate text-[11px] font-semibold"
-                  :class="isSelf ? 'text-foreground' : 'text-primary'"
+                  :class="bubbleSelf ? 'text-foreground' : 'text-primary'"
                 >
                   {{ replySenderLabel }}
                 </div>
@@ -223,12 +199,12 @@
           :block="userAttachmentBlock"
           :on-open-media="onOpenMedia"
         />
-        <p
-          class="text-xs text-muted-foreground/80 mt-1 text-right"
-          :title="fullTimestamp"
-        >
-          {{ relativeTimestamp }}
-        </p>
+        <MessageActions
+          :copy-text="userCopyText"
+          :relative-time="relativeTimestamp"
+          :full-time="fullTimestamp"
+          :align="bubbleSelf ? 'end' : 'start'"
+        />
       </div>
 
       <!-- Assistant message blocks -->
@@ -236,14 +212,6 @@
         v-else
         class="space-y-1.5"
       >
-        <!-- Bot name label -->
-        <!-- <p
-          v-if="botName"
-          class="text-xs text-muted-foreground"
-        >
-          {{ botName }}
-        </p> -->
-
         <template
           v-for="node in renderNodes"
           :key="node.key"
@@ -298,12 +266,14 @@
           <LoaderCircle class="size-3.5 animate-spin" />
           {{ $t('chat.thinking') }}
         </div>
-        <p
-          class="text-xs text-muted-foreground/80 mt-1"
-          :title="fullTimestamp"
-        >
-          {{ relativeTimestamp }}
-        </p>
+        <MessageActions
+          :copy-text="assistantPlainText"
+          :relative-time="relativeTimestamp"
+          :full-time="fullTimestamp"
+          align="start"
+          :persistent="isLatestAssistant"
+          :streaming="message.streaming"
+        />
       </div>
     </div>
   </div>
@@ -332,13 +302,12 @@ import ToolCallGroup from './tool-call-group.vue'
 import { isReadOnlyTool } from './tool-call-registry'
 import { finalizeReasoning, markReasoningSeen } from './reasoning-timing'
 import AttachmentBlock from './attachment-block.vue'
+import MessageActions from './message-actions.vue'
 import BackgroundTaskBlock from './background-task-block.vue'
 import HeartbeatTriggerBlock from './heartbeat-trigger-block.vue'
 import ScheduleTriggerBlock from './schedule-trigger-block.vue'
 import ChannelBadge from '@/components/chat-list/channel-badge/index.vue'
-// import { useUserStore } from '@/store/user'
-// import { useChatStore } from '@/store/chat-list'
-// import { storeToRefs } from 'pinia'
+import { useUserStore } from '@/store/user'
 import { useI18n } from 'vue-i18n'
 import type {
   AttachmentItem,
@@ -369,10 +338,19 @@ const props = defineProps<{
   message: ChatMessage
   sessionType?: string
   botId?: string
+  // Group layout for third-party synced threads: every turn left-aligned with
+  // an avatar + sender name + channel badge (including the bot's own replies).
+  channelThread?: boolean
+  channelPlatform?: string
+  botName?: string
+  botAvatarUrl?: string
   onOpenMedia?: (src: string) => void
   onReplyClick?: (messageId: string) => void
   isScrolling: boolean
+  isLastMessage?: boolean
 }>()
+
+const userStore = useUserStore()
 
 const isVisible = useElementVisibility(messageEl, {
   threshold: 0.1
@@ -392,11 +370,6 @@ const isSelf = computed(() =>
 
 const { t, locale } = useI18n()
 
-
-const senderFallback = computed(() => {
-  const name = props.message.role === 'user' ? (props.message.senderDisplayName ?? '') : ''
-  return name.slice(0, 2).toUpperCase() || '?'
-})
 
 const replySenderLabel = computed(() => {
   if (props.message.role !== 'user') return ''
@@ -464,6 +437,56 @@ const contentClass = computed(() => {
   if (props.message.role === 'user') return 'max-w-[80%]'
   return 'flex-1 max-w-full'
 })
+
+// In a synced channel thread the bot is just another participant, so its own
+// replies lose the right-aligned "self bubble" treatment and read like everyone
+// else's (left-aligned, plain surface).
+const bubbleSelf = computed(() => isSelf.value && !props.channelThread)
+
+// Resolve the avatar/name for whoever sent this turn: the bot for assistant
+// replies, the signed-in user for own messages, the remote sender otherwise.
+const avatarSrc = computed(() => {
+  if (props.message.role === 'assistant') return props.botAvatarUrl ?? ''
+  if (props.message.role === 'user') {
+    return isSelf.value ? (userStore.userInfo.avatarUrl ?? '') : (props.message.senderAvatarUrl ?? '')
+  }
+  return ''
+})
+
+const avatarName = computed(() => {
+  if (props.message.role === 'assistant') return props.botName ?? ''
+  if (props.message.role === 'user') {
+    return isSelf.value
+      ? (userStore.userInfo.displayName || userStore.userInfo.username || '')
+      : (props.message.senderDisplayName ?? '')
+  }
+  return ''
+})
+
+const avatarFallback = computed(() => (avatarName.value || '?').slice(0, 2).toUpperCase())
+
+// The bot's own turns carry no platform tag; fall back to the thread's channel
+// so its avatar still gets the same channel badge as the human participants.
+const avatarPlatform = computed(() => {
+  const fromMessage = props.message.role === 'user' ? (props.message.platform ?? '') : ''
+  return fromMessage || props.channelPlatform || ''
+})
+
+// Channel threads show an avatar for every participant; the local chat only
+// shows one for remote users (self/bot stay avatar-less to keep it compact).
+const showAvatar = computed(() => {
+  if (isSpecialUserMessage.value) return false
+  if (props.channelThread) {
+    return props.message.role === 'user' || props.message.role === 'assistant'
+  }
+  return props.message.role === 'user' && !isSelf.value
+})
+
+const showSenderName = computed(() =>
+  Boolean(props.channelThread)
+  && !isSpecialUserMessage.value
+  && (props.message.role === 'user' || props.message.role === 'assistant'),
+)
 
 const userAttachmentBlock = computed<AttachmentBlockType | null>(() => {
   if (props.message.role !== 'user' || props.message.attachments.length === 0) return null
@@ -577,4 +600,24 @@ const relativeTimestamp = computed(() =>
 const fullTimestamp = computed(() =>
   formatDateTime(props.message.timestamp, { locale: locale.value }),
 )
+
+const userCopyText = computed(() =>
+  props.message.role === 'user' ? cleanUserText(props.message.text) : '',
+)
+const assistantPlainText = computed(() => {
+  if (props.message.role !== 'assistant') return ''
+  return props.message.messages
+    .filter((block): block is Extract<ContentBlock, { type: 'text' }> =>
+      block.type === 'text' && Boolean((block as { content?: string }).content),
+    )
+    .map(block => block.content)
+    .join('\n\n')
+})
+
+const isLatestAssistant = computed(() =>
+  props.message.role === 'assistant'
+  && Boolean(props.isLastMessage)
+  && !props.message.streaming,
+)
+
 </script>

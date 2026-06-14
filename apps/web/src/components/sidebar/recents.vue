@@ -11,19 +11,36 @@
     </div>
 
     <div class="flex-1 relative min-h-0">
-      <div class="absolute inset-0">
-        <ScrollArea class="h-full">
-          <div class="flex flex-col gap-1 px-2">
-            <SessionItem
-              v-for="session in visibleSessions"
-              :key="session.id"
-              :session="session"
-              :is-active="sessionId === session.id"
-              :streaming="chatStore.isSessionStreaming(session.id)"
-              @select="handleSelect"
-              @rename="openRenameSessionDialog"
-              @delete="confirmDeleteSession"
-            />
+      <!-- Native overflow scroll (not Reka ScrollArea) so the virtualizer can
+           own the real scroll element. A bot's session list is unbounded — IM
+           channels mint one session per chat/group — so rendering every row
+           (each carrying a dropdown menu) froze the main thread for seconds when
+           switching between two busy bots. Windowing keeps the mounted row count
+           tied to the viewport, not the list length. -->
+      <div
+        ref="scrollEl"
+        class="absolute inset-0 overflow-y-auto sidebar-scroll"
+      >
+        <div class="px-2 pr-3">
+          <div
+            v-if="visibleSessions.length > 0"
+            :style="{ position: 'relative', width: '100%', height: `${totalSize}px` }"
+          >
+            <div
+              v-for="vRow in virtualRows"
+              :key="vRow.key"
+              :data-index="vRow.index"
+              :style="{ position: 'absolute', top: '0', left: '0', width: '100%', transform: `translateY(${vRow.start}px)` }"
+            >
+              <SessionItem
+                :session="vRow.session"
+                :is-active="sessionId === vRow.session.id"
+                :streaming="chatStore.isSessionStreaming(vRow.session.id)"
+                @select="handleSelect"
+                @rename="openRenameSessionDialog"
+                @delete="confirmDeleteSession"
+              />
+            </div>
           </div>
 
           <div
@@ -41,7 +58,7 @@
               class="size-4 animate-spin text-muted-foreground"
             />
           </div>
-        </ScrollArea>
+        </div>
       </div>
     </div>
 
@@ -117,10 +134,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import { LoaderCircle } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import { toast } from '@memohai/ui'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
@@ -130,7 +148,6 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
   Button,
   Input,
-  ScrollArea,
   Dialog,
   DialogContent,
   DialogHeader,
@@ -153,6 +170,38 @@ const USER_SESSION_TYPES = new Set(['chat', 'discuss', 'acp_agent'])
 const visibleSessions = computed(() =>
   sortByRecency(sessions.value.filter(s => USER_SESSION_TYPES.has(s.type ?? 'chat'))),
 )
+
+// ---- virtualized session list ----
+// Each row is pinned to an exact stride: SessionItem is h-[35px] and the 37px
+// estimate leaves a 2px gap between rows (matching the old flex gap-0.5), so the
+// offsets stay pixel-exact and we never need a per-row measure pass.
+const scrollEl = ref<HTMLElement | null>(null)
+const virtualizer = useVirtualizer<HTMLElement, HTMLElement>(
+  computed(() => ({
+    count: visibleSessions.value.length,
+    getScrollElement: () => scrollEl.value,
+    estimateSize: () => 37,
+    overscan: 10,
+    getItemKey: (index: number) => visibleSessions.value[index]?.id ?? index,
+  })),
+)
+const totalSize = computed(() => virtualizer.value.getTotalSize())
+const virtualRows = computed(() =>
+  virtualizer.value.getVirtualItems().flatMap((vi) => {
+    const session = visibleSessions.value[vi.index]
+    return session ? [{ key: String(vi.key), index: vi.index, start: vi.start, session }] : []
+  }),
+)
+
+// Switching bots swaps the whole list; start the new bot at the top instead of
+// inheriting the previous bot's scroll offset (which could land past the end of
+// a shorter list).
+watch(currentBotId, () => {
+  nextTick(() => {
+    scrollEl.value?.scrollTo({ top: 0 })
+    virtualizer.value.scrollToOffset(0)
+  })
+})
 
 function handleSelect(session: SessionSummary) {
   void chatStore.selectSession(session.id)
@@ -207,3 +256,26 @@ async function handleDeleteSession() {
   }
 }
 </script>
+
+<style scoped>
+/* Sidebar-specific native scroll bar: narrow so it doesn't dominate the tight
+ * session list. The 2px transparent border + padding-box clip insets the thumb
+ * to a ~4px sliver — visible on hover/scroll but not a constant presence. The
+ * extra pr-3 on the inner container keeps the session hover chip off the bar. */
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--foreground) 18%, transparent) transparent;
+}
+.sidebar-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background-color: color-mix(in oklab, var(--foreground) 18%, transparent);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 9999px;
+}
+</style>

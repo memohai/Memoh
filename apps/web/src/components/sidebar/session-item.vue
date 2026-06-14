@@ -2,7 +2,7 @@
   <div
     role="button"
     tabindex="0"
-    class="group relative flex items-center h-9 w-full rounded-md px-[11px] text-left transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    class="group relative flex items-center h-[35px] w-full rounded-md px-[11px] text-left transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     :class="isActive ? 'bg-sidebar-accent' : 'hover:bg-[color:var(--sidebar-hover)]'"
     :title="hoverTitle"
     @click="$emit('select', session)"
@@ -13,7 +13,7 @@
          actions sit at the trailing edge. No leading type glyph — the list is a
          single human-conversation stream (chat/discuss/agent), so per-row type
          icons added noise without adding information. -->
-    <span class="flex-1 min-w-0 truncate text-control font-medium text-foreground/95">
+    <span class="flex-1 min-w-0 truncate text-control font-normal text-foreground">
       {{ session.title || t('chat.untitledSession') }}
     </span>
 
@@ -63,14 +63,14 @@
             @select="$emit('rename', session)"
           >
             <Pencil class="mr-2 size-3.5" />
-            {{ t('chat.renameSession') }}
+            {{ t('common.rename') }}
           </DropdownMenuItem>
           <DropdownMenuItem
             class="text-destructive focus:text-destructive"
             @select="$emit('delete', session)"
           >
             <Trash2 class="mr-2 size-3.5" />
-            {{ t('chat.deleteSession') }}
+            {{ t('common.delete') }}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

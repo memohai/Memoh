@@ -2,7 +2,7 @@
   <Button
     variant="ghost"
     block
-    class="justify-start gap-2.5 pl-3.5! pr-3! font-[430] tracking-[-0.1px] text-foreground/85 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:px-0!"
+    class="justify-start gap-2.5 pl-3.5! pr-3! font-[430] tracking-[-0.1px] text-foreground/85 [--btn-ghost-hover:var(--sidebar-hover)]"
     :class="active && 'bg-sidebar-accent text-foreground!'"
   >
     <slot />

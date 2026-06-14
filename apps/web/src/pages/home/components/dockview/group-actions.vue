@@ -1,17 +1,23 @@
 <template>
   <div class="flex h-full items-center gap-0.5 px-2">
     <!-- Open Preview to the Side: shown only when this group's active tab is a
-         markdown/html file (VS Code's editor-title preview action). -->
-    <Button
-      v-if="previewPath"
-      variant="ghost"
-      class="size-7 p-0 text-muted-foreground hover:text-foreground"
-      :title="t('chat.openPreviewToSide')"
-      :aria-label="t('chat.openPreviewToSide')"
-      @click="openPreviewToSide"
-    >
-      <Columns2 class="size-3.5" />
-    </Button>
+         markdown/html file (VS Code's editor-title preview action). The slot is
+         RESERVED (kept at a fixed size-7 even when empty): the tab row flex-grows to
+         fill the strip, so a button that appears/disappears as you switch between a
+         previewable and a plain tab would change the actions width and jolt every
+         tab's width. A constant-width slot keeps that from happening. -->
+    <div class="flex size-7 items-center justify-center">
+      <Button
+        v-if="previewPath"
+        variant="ghost"
+        class="size-7 p-0 text-muted-foreground hover:text-foreground"
+        :title="t('chat.openPreviewToSide')"
+        :aria-label="t('chat.openPreviewToSide')"
+        @click="openPreviewToSide"
+      >
+        <Columns2 class="size-3.5" />
+      </Button>
+    </div>
     <DropdownMenu v-if="hasAnyAction">
       <DropdownMenuTrigger as-child>
         <Button
@@ -26,21 +32,21 @@
       <DropdownMenuContent align="end">
         <DropdownMenuItem
           v-if="canWorkspaceExec"
-          @select="store.openTerminal()"
+          @select="store.openTerminal(props.params.group.id)"
         >
           <TerminalSquare class="mr-2 size-3.5" />
           {{ t('chat.tabBarToolkit.newTerminal') }}
         </DropdownMenuItem>
         <DropdownMenuItem
           v-if="canManage && !isLocalWorkspace"
-          @select="store.openBrowser()"
+          @select="store.openBrowser(props.params.group.id)"
         >
           <Globe class="mr-2 size-3.5" />
           {{ t('chat.tabBarToolkit.openBrowser') }}
         </DropdownMenuItem>
         <DropdownMenuItem
           v-if="canManage && !isLocalWorkspace"
-          @select="store.openDisplay()"
+          @select="store.openDisplay(props.params.group.id)"
         >
           <Monitor class="mr-2 size-3.5" />
           {{ t('chat.tabBarToolkit.openDisplay') }}
@@ -117,6 +123,6 @@ function openPreviewToSide() {
   const path = previewPath.value
   if (!path) return
   const name = path.slice(path.lastIndexOf('/') + 1)
-  store.openPreview(path, t('chat.previewTab', { name }))
+  store.openPreview(path, t('chat.previewTab', { name }), props.params.group.id)
 }
 </script>

@@ -84,9 +84,13 @@ async function loadImageBlob() {
   }
 }
 
-async function handleSave() {
-  if (props.readonly) return
-  if (!isDirty.value || saving.value) return
+// Returns whether the file is in a saved state afterwards, so an external caller
+// (the tab close-confirm flow) can decide whether to proceed with closing. A
+// read-only or already-clean file reports success without a network round-trip.
+async function handleSave(): Promise<boolean> {
+  if (props.readonly) return true
+  if (!isDirty.value) return true
+  if (saving.value) return false
   saving.value = true
   try {
     await postBotsByBotIdContainerFsWrite({
@@ -97,12 +101,16 @@ async function handleSave() {
     originalContent.value = content.value
     toast.success(t('bots.files.saveSuccess'))
     emit('saved')
+    return true
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.files.saveFailed')))
+    return false
   } finally {
     saving.value = false
   }
 }
+
+defineExpose({ save: handleSave })
 
 function handleDownload() {
   const url = sdkApiUrl({

@@ -22,8 +22,11 @@ interface Props extends PrimitiveProps {
    *  - overlay: hide label in place and center a spinner (text-only buttons)
    *  - icon: keep content visible and spin the leading icon (no glyph swap)
    *  - leading: animate a spinner slot before the label (full-width CTAs)
+   *  - manual: only the busy chrome (full color, blocked clicks) — the caller
+   *    renders its own loading glyph in the slot (e.g. an icon↔spinner↔result
+   *    swap that must stay in place). The button draws no spinner of its own.
    */
-  loadingMode?: 'overlay' | 'icon' | 'leading'
+  loadingMode?: 'overlay' | 'icon' | 'leading' | 'manual'
   /** Inert + faded. Declared as a prop (not just a fallthrough attr) so we can
    *  OR it with `loading` without one clobbering the other. */
   disabled?: boolean
@@ -65,6 +68,7 @@ const buttonClass = computed(() =>
     :as="as"
     :as-child="asChild"
     :data-variant="resolvedVariant"
+    :data-size="size || undefined"
     :data-block="block ? '' : undefined"
     :data-loading="loading ? '' : undefined"
     :data-loading-mode="loadingMode"

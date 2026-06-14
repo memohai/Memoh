@@ -33,7 +33,7 @@
           </AvatarFallback>
         </Avatar>
         <span
-          class="min-w-0 truncate text-[13px] font-bold tracking-[0.015em] text-foreground dark:text-[color:oklch(0.97_0_0)]"
+          class="min-w-0 truncate text-[13px] font-[550] tracking-[0.015em] text-foreground dark:text-[color:oklch(0.97_0_0)]"
           :class="fullWidth && 'flex-1 text-left'"
         >
           {{ currentLabel }}

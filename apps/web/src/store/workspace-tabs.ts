@@ -26,6 +26,8 @@ export type SidebarView = 'sessions' | 'files'
 
 export const CHAT_PANEL_ID = 'chat'
 
+const DEFAULT_BROWSER_ADDRESS = 'localhost:5173/'
+
 export type WorkspacePanelComponent = 'chat' | 'file' | 'preview' | 'terminal' | 'browser' | 'display'
 
 interface BotLayoutState {
@@ -76,6 +78,16 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   const api = shallowRef<DockviewApi | null>(null)
   const activePanelId = ref<string | null>(null)
+  // Per-panel unsaved-changes state for file panels. Kept here (NOT baked into
+  // the tab title) so the tab dot, the sidebar count badge, and the close-confirm
+  // dialog all read ONE reactive source. Keyed by dockview panel id.
+  const fileDirty = ref<Record<string, boolean>>({})
+  // Save callbacks registered by each mounted file panel, so a dirty tab can be
+  // written from the close-confirm dialog even while it sits in the background.
+  const saveHandlers = new Map<string, () => Promise<boolean>>()
+  // FIFO of dirty panel ids awaiting a close decision (drives the dialog). A
+  // batch close (others / all) enqueues several; the dialog walks them in turn.
+  const closeQueue = ref<string[]>([])
   // The bot whose layout is currently loaded into dockview. Guards persistence
   // so that clearing the view during a bot switch can't wipe the old bot's
   // stored layout.
@@ -142,6 +154,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         persistLayout()
       }),
       dock.onDidRemovePanel((panel) => {
+        cleanupPanelState(panel.id)
         if (panel.id.startsWith('terminal:') && loadedBotId) {
           const bid = loadedBotId
           void nextTick(() => deleteTerminalSnapshot(terminalCacheKey(bid, panel.id)))
@@ -175,6 +188,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     component: WorkspacePanelComponent
     title: string
     params?: Record<string, unknown>
+    // The tab group whose header strip triggered the open (the "+" lives per
+    // group). Without it dockview drops the new panel into the active group,
+    // which is why a "+" in the right split used to open its terminal back in
+    // the left pane.
+    groupId?: string
   }): boolean {
     const dock = api.value
     if (!dock) return false
@@ -191,6 +209,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       // Keep panel DOM mounted while hidden: terminals, WebRTC display and
       // chat scroll state do not survive detach/reattach cycles.
       renderer: 'always',
+      ...(options.groupId
+        ? { position: { referenceGroup: options.groupId, direction: 'within' as const } }
+        : {}),
     })
     return true
   }
@@ -222,7 +243,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // VS Code's "Open Preview to the Side": render a markdown/html file's preview
   // as its own panel in a group beside the source editor, instead of toggling the
   // source view in place. Focuses an existing preview for the same file.
-  function openPreview(filePath: string, title?: string) {
+  function openPreview(filePath: string, title?: string, groupId?: string) {
     if (!hasCurrentPermission('workspace_read')) return
     const path = (filePath ?? '').trim()
     if (!path) return
@@ -234,18 +255,20 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       existing.api.setActive()
       return
     }
-    const activeGroup = dock.activeGroup
+    // Split to the right of the source editor's own group (the preview action
+    // lives in that group's header); fall back to the active group.
+    const referenceGroup = groupId || dock.activeGroup
     dock.addPanel({
       id,
       component: 'preview',
       title: title || fileBaseName(path),
       params: { filePath: path },
       renderer: 'always',
-      ...(activeGroup ? { position: { referenceGroup: activeGroup, direction: 'right' as const } } : {}),
+      ...(referenceGroup ? { position: { referenceGroup, direction: 'right' as const } } : {}),
     })
   }
 
-  function openTerminal() {
+  function openTerminal(groupId?: string) {
     if (!hasCurrentPermission('workspace_exec')) return
     const bid = (currentBotId.value ?? '').trim()
     const state = ensureBotLayout(bid)
@@ -256,10 +279,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       id: `terminal:${next}`,
       component: 'terminal',
       title: `Terminal ${next}`,
+      groupId,
     })
   }
 
-  function openBrowser(address = 'localhost:5173/') {
+  function openBrowser(groupId?: string) {
     if (!hasCurrentPermission('manage')) return
     const bid = (currentBotId.value ?? '').trim()
     const state = ensureBotLayout(bid)
@@ -270,11 +294,12 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       id: `browser:${next}`,
       component: 'browser',
       title: `Browser ${next}`,
-      params: { address },
+      params: { address: DEFAULT_BROWSER_ADDRESS },
+      groupId,
     })
   }
 
-  function openDisplay() {
+  function openDisplay(groupId?: string) {
     if (!hasCurrentPermission('manage')) return
     const dock = api.value
     if (!dock) return
@@ -292,6 +317,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       id: `display:${next}`,
       component: 'display',
       title: `Desktop ${next}`,
+      groupId,
     })
   }
 
@@ -301,13 +327,95 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   function setFileDirty(panelId: string, dirty: boolean) {
-    const panel = api.value?.getPanel(panelId)
-    if (!panel) return
-    const base = fileBaseName(panelId.startsWith('file:') ? panelId.slice('file:'.length) : panelId)
-    const next = dirty ? `● ${base}` : base
-    if (panel.api.title !== next) {
-      panel.api.setTitle(next)
+    if (!!fileDirty.value[panelId] === dirty) return
+    const next = { ...fileDirty.value }
+    if (dirty) next[panelId] = true
+    else delete next[panelId]
+    fileDirty.value = next
+  }
+
+  function registerFileSaveHandler(panelId: string, handler: () => Promise<boolean>) {
+    saveHandlers.set(panelId, handler)
+  }
+
+  function unregisterFileSaveHandler(panelId: string) {
+    saveHandlers.delete(panelId)
+  }
+
+  // Drop every trace of a panel once it's gone, so a stale dirty flag can't keep
+  // a phantom count on the sidebar badge or a phantom entry in the close queue.
+  function cleanupPanelState(id: string) {
+    if (fileDirty.value[id]) {
+      const next = { ...fileDirty.value }
+      delete next[id]
+      fileDirty.value = next
     }
+    saveHandlers.delete(id)
+    if (closeQueue.value.includes(id)) {
+      closeQueue.value = closeQueue.value.filter(q => q !== id)
+    }
+  }
+
+  const dirtyFileCount = computed(
+    () => Object.values(fileDirty.value).filter(Boolean).length,
+  )
+
+  function tabBaseName(id: string): string {
+    if (id.startsWith('file:')) return fileBaseName(id.slice('file:'.length))
+    if (id.startsWith('preview:')) return fileBaseName(id.slice('preview:'.length))
+    return api.value?.getPanel(id)?.api.title ?? id
+  }
+
+  // The tab the close-confirm dialog is currently asking about (head of queue).
+  const pendingClose = computed<{ panelId: string, title: string } | null>(() => {
+    const id = closeQueue.value[0]
+    return id ? { panelId: id, title: tabBaseName(id) } : null
+  })
+
+  // User-initiated close. Clean tabs close at once; a dirty file is queued for
+  // the close-confirm dialog instead of vanishing with its unsaved edits.
+  function requestCloseTab(id: string) {
+    if (!fileDirty.value[id]) {
+      closeTab(id)
+      return
+    }
+    if (!closeQueue.value.includes(id)) {
+      closeQueue.value = [...closeQueue.value, id]
+    }
+  }
+
+  // Batch close (close-others / close-all): clean tabs go immediately, dirty ones
+  // queue up and the dialog walks them one at a time.
+  function requestCloseTabs(ids: string[]) {
+    const queued = [...closeQueue.value]
+    for (const id of ids) {
+      if (fileDirty.value[id]) {
+        if (!queued.includes(id)) queued.push(id)
+      } else {
+        closeTab(id)
+      }
+    }
+    closeQueue.value = queued
+  }
+
+  async function resolvePendingClose(action: 'save' | 'discard' | 'cancel') {
+    const id = closeQueue.value[0]
+    if (!id) return
+    if (action === 'cancel') {
+      // Cancel aborts the whole pending batch — matches VS Code.
+      closeQueue.value = []
+      return
+    }
+    if (action === 'save') {
+      const handler = saveHandlers.get(id)
+      const ok = handler ? await handler() : true
+      // On save failure leave the tab open (the viewer surfaced the error); just
+      // drop it from the queue so the dialog can move to the next one.
+      if (ok) closeTab(id)
+    } else {
+      closeTab(id)
+    }
+    closeQueue.value = closeQueue.value.filter(q => q !== id)
   }
 
   function updateBrowserAddress(panelId: string, address: string) {
@@ -459,6 +567,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   return {
     api,
     activeId,
+    fileDirty,
+    dirtyFileCount,
+    pendingClose,
     sidebarView,
     sidebarOpen,
     workbenchOpen,
@@ -480,7 +591,12 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     openBrowser,
     openDisplay,
     closeTab,
+    requestCloseTab,
+    requestCloseTabs,
+    resolvePendingClose,
     setFileDirty,
+    registerFileSaveHandler,
+    unregisterFileSaveHandler,
     updateBrowserAddress,
     resetBot,
     resetAll,

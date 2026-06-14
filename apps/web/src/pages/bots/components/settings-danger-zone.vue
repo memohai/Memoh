@@ -1,17 +1,15 @@
 <template>
-  <div class="space-y-4 rounded-md border border-border bg-background p-4 shadow-none">
-    <!-- Danger Zone: High-visibility title without background highlight -->
-    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-      <div class="space-y-0.5">
-        <h4 class="text-xs font-medium text-destructive">
+  <SettingsSection>
+    <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 py-3">
+      <div class="min-w-0">
+        <div class="text-sm font-medium text-destructive">
           {{ $t('bots.settings.dangerZone') }}
-        </h4>
-        <p class="text-[11px] text-muted-foreground">
+        </div>
+        <p class="mt-0.5 text-xs text-muted-foreground">
           {{ $t('bots.settings.deleteBotDescription') }}
         </p>
       </div>
-      
-      <div class="flex justify-end shrink-0">
+      <div class="shrink-0">
         <ConfirmPopover
           :message="$t('bots.deleteConfirm')"
           :loading="deleteLoading"
@@ -23,7 +21,6 @@
               variant="destructive"
               size="sm"
               :disabled="deleteLoading"
-              class="min-w-28 h-8 text-xs font-medium shadow-none"
             >
               <Spinner
                 v-if="deleteLoading"
@@ -35,12 +32,13 @@
         </ConfirmPopover>
       </div>
     </div>
-  </div>
+  </SettingsSection>
 </template>
 
 <script setup lang="ts">
 import { Button, Spinner } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import SettingsSection from '@/components/settings/section.vue'
 
 defineProps<{
   deleteLoading: boolean
