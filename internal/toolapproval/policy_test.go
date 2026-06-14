@@ -34,6 +34,26 @@ func TestNeedsApprovalForceReviewOverridesBypass(t *testing.T) {
 	}
 }
 
+func TestNeedsApprovalApplyPatchUsesFileApproval(t *testing.T) {
+	cfg := settings.DefaultToolApprovalConfig()
+	cfg.Enabled = true
+
+	if !needsApproval(cfg, "apply_patch", map[string]any{"patch": "*** Begin Patch\n*** End Patch"}) {
+		t.Fatal("expected apply_patch to require approval when file approvals are enabled")
+	}
+
+	cfg.Write.RequireApproval = false
+	cfg.Edit.RequireApproval = false
+	if needsApproval(cfg, "apply_patch", map[string]any{"patch": "*** Begin Patch\n*** End Patch"}) {
+		t.Fatal("expected apply_patch to skip approval when file approvals are disabled")
+	}
+
+	cfg.Write.ForceReviewGlobs = []string{"/data/secret/**"}
+	if !needsApproval(cfg, "apply_patch", map[string]any{"patch": "*** Begin Patch\n*** End Patch"}) {
+		t.Fatal("expected apply_patch to require approval when force-review file globs exist")
+	}
+}
+
 func TestNeedsApprovalExecDefaultsToAllowed(t *testing.T) {
 	cfg := settings.DefaultToolApprovalConfig()
 	cfg.Enabled = true

@@ -339,9 +339,13 @@
       "read": "Read",
       "write": "Write",
       "edit": "Edit",
+      "apply_patch": "Patch",
       "list": "List",
       "exec": "Run",
       "bg_status": "Background",
+      "list_background": "List background tasks",
+      "get_background_status": "Background status",
+      "kill_background": "Kill background task",
       "web_search": "Search the web",
       "web_fetch": "Fetch",
       "search_memory": "Search memory",
@@ -450,7 +454,8 @@
       "pending": {
         "generic": "Working…",
         "write": "Writing file…",
-        "edit": "Editing…"
+        "edit": "Editing…",
+        "apply_patch": "Applying patch…"
       },
       "detail": {
         "openInFiles": "Open in files",

@@ -7,7 +7,7 @@ import (
 	"github.com/memohai/memoh/internal/agent/background"
 )
 
-func TestBgStatusListsAndInspectsSpawnTasks(t *testing.T) {
+func TestBackgroundToolsListAndInspectSpawnTasks(t *testing.T) {
 	mgr := background.New(nil)
 	p := NewContainerProvider(nil, nil, mgr, "")
 	session := SessionContext{BotID: "bot1", SessionID: "sess1"}
@@ -17,9 +17,9 @@ func TestBgStatusListsAndInspectsSpawnTasks(t *testing.T) {
 		t.Fatalf("StartSpawnTask failed: %v", err)
 	}
 
-	listRes, err := p.execBgStatus(context.Background(), session, map[string]any{"action": "list"})
+	listRes, err := p.execListBackground(context.Background(), session, nil)
 	if err != nil {
-		t.Fatalf("bg_status list failed: %v", err)
+		t.Fatalf("list_background failed: %v", err)
 	}
 	entries := listRes.(map[string]any)["tasks"].([]map[string]any)
 	if len(entries) != 1 {
@@ -44,9 +44,9 @@ func TestBgStatusListsAndInspectsSpawnTasks(t *testing.T) {
 		{Task: "beta", Status: background.TaskFailed, Error: "boom"},
 	})
 
-	statusRes, err := p.execBgStatus(context.Background(), session, map[string]any{"action": "status", "task_id": taskID})
+	statusRes, err := p.execGetBackgroundStatus(context.Background(), session, map[string]any{"task_id": taskID})
 	if err != nil {
-		t.Fatalf("bg_status status failed: %v", err)
+		t.Fatalf("get_background_status failed: %v", err)
 	}
 	sm := statusRes.(map[string]any)
 	if sm["kind"] != "spawn" || sm["status"] != "failed" {

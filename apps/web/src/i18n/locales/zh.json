@@ -335,9 +335,13 @@
       "read": "读取",
       "write": "写入",
       "edit": "编辑",
+      "apply_patch": "应用补丁",
       "list": "列出",
       "exec": "执行",
       "bg_status": "后台任务",
+      "list_background": "列出后台任务",
+      "get_background_status": "查看后台状态",
+      "kill_background": "终止后台任务",
       "web_search": "搜索网络",
       "web_fetch": "抓取",
       "search_memory": "搜索记忆",
@@ -446,7 +450,8 @@
       "pending": {
         "generic": "处理中…",
         "write": "正在写入文件…",
-        "edit": "正在编辑…"
+        "edit": "正在编辑…",
+        "apply_patch": "正在应用补丁…"
       },
       "detail": {
         "openInFiles": "在文件中打开",
