@@ -39,7 +39,7 @@ func adaptMessage(msg channel.InboundMessage, sessionID, channelIdentityID, disp
 		}
 	}
 
-	content := adaptContent(msg.Message.Text)
+	content := adaptBody(msg.Message)
 	attachments := adaptAttachments(msg.Message.Attachments)
 	forwardInfo := adaptForward(msg.Message.Forward)
 
@@ -83,6 +83,125 @@ func adaptContent(text string) []ContentNode {
 		return nil
 	}
 	return []ContentNode{{Type: "text", Text: text}}
+}
+
+func adaptBody(m channel.Message) []ContentNode {
+	if nodes := adaptParts(m.Parts); len(nodes) > 0 {
+		return nodes
+	}
+	return adaptContent(m.Text)
+}
+
+func adaptParts(parts []channel.MessagePart) []ContentNode {
+	if len(parts) == 0 {
+		return nil
+	}
+	nodes := make([]ContentNode, 0, len(parts))
+	for _, p := range parts {
+		node, ok := partToNode(p)
+		if !ok {
+			continue
+		}
+		nodes = append(nodes, node)
+	}
+	if len(nodes) == 0 {
+		return nil
+	}
+	return nodes
+}
+
+func partToNode(p channel.MessagePart) (ContentNode, bool) {
+	switch p.Type {
+	case channel.MessagePartCodeBlock:
+		if strings.TrimSpace(p.Text) == "" {
+			return ContentNode{}, false
+		}
+		return ContentNode{Type: "pre", Language: strings.TrimSpace(p.Language), Text: p.Text}, true
+	case channel.MessagePartLink:
+		display := p.Text
+		if strings.TrimSpace(display) == "" {
+			display = p.URL
+		}
+		if strings.TrimSpace(display) == "" {
+			return ContentNode{}, false
+		}
+		return ContentNode{
+			Type:     "link",
+			URL:      strings.TrimSpace(p.URL),
+			Children: []ContentNode{{Type: "text", Text: display}},
+		}, true
+	case channel.MessagePartMention:
+		display := strings.TrimSpace(p.Text)
+		uid := strings.TrimSpace(p.ChannelIdentityID)
+		if display == "" {
+			if uid == "" {
+				return ContentNode{}, false
+			}
+			display = "@" + uid
+		}
+		return ContentNode{
+			Type:     "mention",
+			UserID:   uid,
+			Children: []ContentNode{{Type: "text", Text: display}},
+		}, true
+	case channel.MessagePartEmoji:
+		text := strings.TrimSpace(p.Emoji)
+		if text == "" {
+			text = strings.TrimSpace(p.Text)
+		}
+		if text == "" {
+			return ContentNode{}, false
+		}
+		return ContentNode{Type: "text", Text: text}, true
+	case channel.MessagePartText:
+		return textPartToNode(p)
+	default:
+		return ContentNode{}, false
+	}
+}
+
+func textPartToNode(p channel.MessagePart) (ContentNode, bool) {
+	if strings.TrimSpace(p.Text) == "" {
+		return ContentNode{}, false
+	}
+
+	hasInlineCode := false
+	wrappers := make([]channel.MessageTextStyle, 0, len(p.Styles))
+	for _, s := range p.Styles {
+		if s == channel.MessageStyleCode {
+			hasInlineCode = true
+			continue
+		}
+		wrappers = append(wrappers, s)
+	}
+
+	var node ContentNode
+	if hasInlineCode {
+		node = ContentNode{Type: "code", Text: p.Text}
+	} else {
+		node = ContentNode{Type: "text", Text: p.Text}
+	}
+	for i := len(wrappers) - 1; i >= 0; i-- {
+		kind := styleToNodeType(wrappers[i])
+		if kind == "" {
+			continue
+		}
+		node = ContentNode{Type: kind, Children: []ContentNode{node}}
+	}
+	return node, true
+}
+
+func styleToNodeType(s channel.MessageTextStyle) string {
+	switch s {
+	case channel.MessageStyleBold:
+		return "bold"
+	case channel.MessageStyleItalic:
+		return "italic"
+	case channel.MessageStyleStrikethrough:
+		return "strikethrough"
+	default:
+		return ""
+	}
 }
 
 func adaptAttachments(atts []channel.Attachment) []Attachment {
@@ -159,7 +278,7 @@ func adaptEdit(msg channel.InboundMessage, sessionID, channelIdentityID, display
 		ReceivedAtMs: now.UnixMilli(),
 		TimestampSec: now.Unix(),
 		UTCOffsetMin: offset / 60,
-		Content:      adaptContent(msg.Message.Text),
+		Content:      adaptBody(msg.Message),
 		Attachments:  adaptAttachments(msg.Message.Attachments),
 	}
 }
