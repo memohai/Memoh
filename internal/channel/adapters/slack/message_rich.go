@@ -82,7 +82,7 @@ func writeSlackRichCodeBlockPart(b *strings.Builder, part channel.MessagePart) {
 		b.WriteString("\n\n")
 	}
 	b.WriteString("```\n")
-	b.WriteString(text)
+	b.WriteString(slackEscapeMrkdwn(text))
 	b.WriteString("\n```")
 }
 
