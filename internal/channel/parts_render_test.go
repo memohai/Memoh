@@ -1,0 +1,280 @@
+package channel
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestRenderPartsAsMarkdown(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		parts    []MessagePart
+		want     string
+		excludes []string
+	}{
+		{
+			name: "plain text",
+			parts: []MessagePart{
+				{Type: MessagePartText, Text: "hello"},
+			},
+			want: "hello",
+		},
+		{
+			name: "bold and italic",
+			parts: []MessagePart{
+				{Type: MessagePartText, Text: "bold", Styles: []MessageTextStyle{MessageStyleBold}},
+				{Type: MessagePartText, Text: "italic", Styles: []MessageTextStyle{MessageStyleItalic}},
+			},
+			want: "**bold**\n\n*italic*",
+		},
+		{
+			name: "strikethrough",
+			parts: []MessagePart{
+				{Type: MessagePartText, Text: "old", Styles: []MessageTextStyle{MessageStyleStrikethrough}},
+			},
+			want: "~~old~~",
+		},
+		{
+			name: "inline code wins over other styles",
+			parts: []MessagePart{
+				{Type: MessagePartText, Text: "x.y", Styles: []MessageTextStyle{MessageStyleCode, MessageStyleBold}},
+			},
+			want:     "`x.y`",
+			excludes: []string{"**"},
+		},
+		{
+			name: "link masked syntax",
+			parts: []MessagePart{
+				{Type: MessagePartLink, Text: "docs", URL: "https://example.test"},
+			},
+			want: "[docs](https://example.test)",
+		},
+		{
+			name: "link without text uses url bare",
+			parts: []MessagePart{
+				{Type: MessagePartLink, URL: "https://example.test"},
+			},
+			want: "https://example.test",
+		},
+		{
+			name: "link with disallowed scheme falls back to text",
+			parts: []MessagePart{
+				{Type: MessagePartLink, Text: "evil", URL: "javascript:alert(1)"},
+			},
+			want:     "evil",
+			excludes: []string{"javascript:", "["},
+		},
+		{
+			name: "code block with language",
+			parts: []MessagePart{
+				{Type: MessagePartCodeBlock, Text: "print(1)", Language: "python"},
+			},
+			want: "```python\nprint(1)\n```",
+		},
+		{
+			name: "code block fence expands for inner backticks",
+			parts: []MessagePart{
+				{Type: MessagePartCodeBlock, Text: "outer ``` end"},
+			},
+			want: "````\nouter ``` end\n````",
+		},
+		{
+			name: "inline text neutralises link injection",
+			parts: []MessagePart{
+				{Type: MessagePartText, Text: "click [evil](https://evil.test)"},
+			},
+			want:     `click \[evil\](https://evil.test)`,
+			excludes: []string{"[evil]("},
+		},
+		{
+			name: "styled inline cannot break wrapper",
+			parts: []MessagePart{
+				{Type: MessagePartText, Text: "x**y", Styles: []MessageTextStyle{MessageStyleBold}},
+			},
+			want: `**x\*\*y**`,
+		},
+		{
+			name: "link url paren and angle bracket are encoded",
+			parts: []MessagePart{
+				{Type: MessagePartLink, Text: "wiki", URL: "https://example.test/<a>(b)"},
+			},
+			want: "[wiki](https://example.test/%3Ca%3E%28b%29)",
+		},
+		{
+			name: "mention emits text only",
+			parts: []MessagePart{
+				{Type: MessagePartMention, Text: "@alice"},
+			},
+			want: "@alice",
+		},
+		{
+			name: "emoji uses Emoji field when Text empty",
+			parts: []MessagePart{
+				{Type: MessagePartEmoji, Emoji: "🎉"},
+			},
+			want: "🎉",
+		},
+		{
+			name:  "empty parts returns empty",
+			parts: nil,
+			want:  "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := RenderPartsAsMarkdown(tc.parts)
+			if got != tc.want {
+				t.Errorf("RenderPartsAsMarkdown()\n  got:  %q\n  want: %q", got, tc.want)
+			}
+			for _, no := range tc.excludes {
+				if strings.Contains(got, no) {
+					t.Errorf("expected %q to NOT contain %q", got, no)
+				}
+			}
+		})
+	}
+}
+
+func TestRenderPartsAsPlain(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		parts []MessagePart
+		want  string
+	}{
+		{
+			name: "plain text",
+			parts: []MessagePart{
+				{Type: MessagePartText, Text: "hello"},
+			},
+			want: "hello",
+		},
+		{
+			name: "drops styles",
+			parts: []MessagePart{
+				{Type: MessagePartText, Text: "title", Styles: []MessageTextStyle{MessageStyleBold}},
+			},
+			want: "title",
+		},
+		{
+			name: "link emits text + url in parens",
+			parts: []MessagePart{
+				{Type: MessagePartLink, Text: "docs", URL: "https://example.test"},
+			},
+			want: "docs (https://example.test)",
+		},
+		{
+			name: "link without text emits bare url",
+			parts: []MessagePart{
+				{Type: MessagePartLink, URL: "https://example.test"},
+			},
+			want: "https://example.test",
+		},
+		{
+			name: "code block drops fence",
+			parts: []MessagePart{
+				{Type: MessagePartCodeBlock, Text: "print(1)", Language: "python"},
+			},
+			want: "print(1)",
+		},
+		{
+			name: "mixed parts join with blank line",
+			parts: []MessagePart{
+				{Type: MessagePartText, Text: "title", Styles: []MessageTextStyle{MessageStyleBold}},
+				{Type: MessagePartCodeBlock, Text: "go test"},
+				{Type: MessagePartLink, Text: "see", URL: "https://example.test"},
+			},
+			want: "title\n\ngo test\n\nsee (https://example.test)",
+		},
+		{
+			name:  "empty parts returns empty",
+			parts: nil,
+			want:  "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := RenderPartsAsPlain(tc.parts)
+			if got != tc.want {
+				t.Errorf("RenderPartsAsPlain()\n  got:  %q\n  want: %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCoerceFormatForCaps_DegradesPartsToMarkdown(t *testing.T) {
+	t.Parallel()
+
+	msg := Message{
+		Format: MessageFormatRich,
+		Parts: []MessagePart{
+			{Type: MessagePartText, Text: "title", Styles: []MessageTextStyle{MessageStyleBold}},
+			{Type: MessagePartLink, Text: "docs", URL: "https://example.test"},
+		},
+	}
+	mdOnlyCaps := ChannelCapabilities{Text: true, Markdown: true}
+
+	got := coerceFormatForCaps(msg, mdOnlyCaps)
+	if got.Format != MessageFormatMarkdown {
+		t.Errorf("expected MessageFormatMarkdown, got %q", got.Format)
+	}
+	if len(got.Parts) != 0 {
+		t.Errorf("expected Parts cleared, got %d", len(got.Parts))
+	}
+	want := "**title**\n\n[docs](https://example.test)"
+	if got.Text != want {
+		t.Errorf("Text mismatch\n  got:  %q\n  want: %q", got.Text, want)
+	}
+}
+
+func TestCoerceFormatForCaps_DegradesPartsToPlain(t *testing.T) {
+	t.Parallel()
+
+	msg := Message{
+		Format: MessageFormatRich,
+		Parts: []MessagePart{
+			{Type: MessagePartText, Text: "title", Styles: []MessageTextStyle{MessageStyleBold}},
+			{Type: MessagePartLink, Text: "docs", URL: "https://example.test"},
+		},
+	}
+	plainCaps := ChannelCapabilities{Text: true}
+
+	got := coerceFormatForCaps(msg, plainCaps)
+	if got.Format != MessageFormatPlain {
+		t.Errorf("expected MessageFormatPlain, got %q", got.Format)
+	}
+	if len(got.Parts) != 0 {
+		t.Errorf("expected Parts cleared, got %d", len(got.Parts))
+	}
+	want := "title\n\ndocs (https://example.test)"
+	if got.Text != want {
+		t.Errorf("Text mismatch\n  got:  %q\n  want: %q", got.Text, want)
+	}
+}
+
+func TestCoerceFormatForCaps_PreservesPartsOnRichChannel(t *testing.T) {
+	t.Parallel()
+
+	msg := Message{
+		Format: MessageFormatRich,
+		Parts: []MessagePart{
+			{Type: MessagePartText, Text: "title", Styles: []MessageTextStyle{MessageStyleBold}},
+		},
+	}
+	richCaps := ChannelCapabilities{Text: true, Markdown: true, RichText: true}
+
+	got := coerceFormatForCaps(msg, richCaps)
+	if got.Format != MessageFormatRich {
+		t.Errorf("expected MessageFormatRich preserved, got %q", got.Format)
+	}
+	if len(got.Parts) != 1 {
+		t.Errorf("expected Parts preserved, got %d", len(got.Parts))
+	}
+}

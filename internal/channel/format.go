@@ -53,18 +53,33 @@ func StripInlineMarkup(s string) string {
 
 // coerceFormatForCaps degrades msg.Format when the target channel cannot
 // render it. Called right before validateMessageCapabilities at the outbound
-// boundary so a Markdown-typed body destined for a plain-text-only channel
-// gets stripped + retyped instead of being rejected.
+// boundary so a Rich- or Markdown-typed body destined for a less capable
+// channel gets retyped instead of being rejected.
 //
-// Today only Markdown→Plain is lossless enough to degrade automatically
-// (strip bold and code markers, retype). Rich-format bodies (with Parts) and
-// button-bearing bodies have no equivalent fallback and remain rejected by
-// validation — extend this function (and its tests) when a handler emits
-// such a body on a non-capable channel.
+// Degradation rules (applied in order):
+//   - Markdown body on a Plain-only channel: strip inline markup, retype Plain.
+//   - Rich body (Parts) on a Markdown-capable channel: render Parts via the
+//     canonical GFM degrader (RenderPartsAsMarkdown), retype Markdown.
+//   - Rich body on a Plain-only channel: render Parts via RenderPartsAsPlain,
+//     retype Plain.
+//
+// Button-bearing bodies (Actions) still have no equivalent fallback and are
+// rejected by validateMessageCapabilities — extend this function when a
+// handler needs to emit them on a non-capable channel.
 func coerceFormatForCaps(msg Message, caps ChannelCapabilities) Message {
 	if msg.Format == MessageFormatMarkdown && !caps.Markdown && !caps.RichText {
 		msg.Text = StripInlineMarkup(msg.Text)
 		msg.Format = MessageFormatPlain
+	}
+	if len(msg.Parts) > 0 && !caps.RichText {
+		if caps.Markdown {
+			msg.Text = RenderPartsAsMarkdown(msg.Parts)
+			msg.Format = MessageFormatMarkdown
+		} else {
+			msg.Text = RenderPartsAsPlain(msg.Parts)
+			msg.Format = MessageFormatPlain
+		}
+		msg.Parts = nil
 	}
 	return msg
 }
