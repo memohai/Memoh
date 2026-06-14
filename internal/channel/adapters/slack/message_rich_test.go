@@ -127,6 +127,34 @@ func TestRenderSlackMessagePartsMrkdwn(t *testing.T) {
 			want: "*title*\n\n```\ngo test ./...\n```\n\n<https://example.test|see docs>",
 		},
 		{
+			name: "inline text neutralizes forged Slack link",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: "see <https://evil.test|Click here>"},
+			}},
+			want: "see &lt;https://evil.test|Click here&gt;",
+		},
+		{
+			name: "inline text neutralizes channel mention injection",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: "alert <!channel>"},
+			}},
+			want: "alert &lt;!channel&gt;",
+		},
+		{
+			name: "inline text neutralizes user mention injection",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: "ping <@U12345>"},
+			}},
+			want: "ping &lt;@U12345&gt;",
+		},
+		{
+			name: "link url percent encodes angle bracket",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartLink, Text: "docs", URL: "https://example.test/<script>"},
+			}},
+			want: "<https://example.test/%3Cscript%3E|docs>",
+		},
+		{
 			name: "empty parts returns empty",
 			msg:  channel.Message{Parts: nil},
 			want: "",
