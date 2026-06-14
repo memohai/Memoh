@@ -200,6 +200,20 @@ func TestRenderFeishuMessagePartsLarkMD(t *testing.T) {
 			want: "[wiki](https://example.test/page%29x)",
 		},
 		{
+			name: "link url opening paren is encoded",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartLink, Text: "wiki", URL: "https://example.test/a(b"},
+			}},
+			want: "[wiki](https://example.test/a%28b)",
+		},
+		{
+			name: "link url angle brackets are encoded",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartLink, Text: "wiki", URL: "https://example.test/<x>"},
+			}},
+			want: "[wiki](https://example.test/%3Cx%3E)",
+		},
+		{
 			name: "mention text escapes markdown chars",
 			msg: channel.Message{Parts: []channel.MessagePart{
 				{Type: channel.MessagePartMention, Text: "@alice [extra]"},
