@@ -343,17 +343,28 @@ func (h *MessageHandler) backgroundTaskSnapshots(botID, sessionID string) []conv
 			label = snapshot.Description
 		}
 		tasks = append(tasks, conversation.UIBackgroundTask{
-			TaskID:     snapshot.TaskID,
-			Status:     status,
-			Command:    label,
-			OutputFile: snapshot.OutputFile,
-			ExitCode:   snapshot.ExitCode,
-			Duration:   snapshot.Duration.Round(time.Millisecond).String(),
-			OutputTail: snapshot.OutputTail,
-			Stalled:    stalled,
+			TaskID:         snapshot.TaskID,
+			Status:         status,
+			Command:        label,
+			AgentID:        snapshot.AgentID,
+			AgentSessionID: snapshot.AgentSessionID,
+			OutputFile:     snapshot.OutputFile,
+			ExitCode:       snapshot.ExitCode,
+			Duration:       snapshot.Duration.Round(time.Millisecond).String(),
+			OutputTail:     firstNonEmptyString(snapshot.OutputTail, snapshot.AgentReport, snapshot.AgentError),
+			Stalled:        stalled,
 		})
 	}
 	return tasks
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func (h *MessageHandler) toolApprovalCanApproveFn(ctx context.Context, sessionID string) func(toolapproval.Request) bool {

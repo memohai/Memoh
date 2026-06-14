@@ -505,16 +505,40 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         detail: ToolCallDetailImage,
       }
     }
-    case 'spawn': {
-      const tasks = Array.isArray(input.tasks) ? (input.tasks as unknown[]).length : 0
+    case 'spawn_agent': {
+      const task = pickString(input, 'task')
       return {
         icon: Workflow,
-        actionKey: 'spawn',
-        actionParams: { count: tasks },
-        target: '',
+        actionKey: 'spawn_agent',
+        target: pickString(input, 'id') || truncate(task, 60),
+        fullTarget: task,
         detail: ToolCallDetailSpawn,
       }
     }
+    case 'send_message': {
+      const message = pickString(input, 'message')
+      return {
+        icon: MessagesSquare,
+        actionKey: 'send_message',
+        target: pickString(input, 'id'),
+        fullTarget: message,
+        detail: ToolCallDetailSpawn,
+      }
+    }
+    case 'wait_agent':
+      return {
+        icon: Timer,
+        actionKey: 'wait_agent',
+        target: pickString(input, 'id', 'task_id'),
+        detail: ToolCallDetailSpawn,
+      }
+    case 'list_agents':
+      return {
+        icon: ListChecks,
+        actionKey: 'list_agents',
+        target: '',
+        detail: ToolCallDetailSpawn,
+      }
     case 'use_skill':
       return {
         icon: Sparkles,

@@ -822,7 +822,11 @@ func (p *ContainerProvider) execBgStatus(_ context.Context, session SessionConte
 				"status":      string(s.Status),
 				"started_at":  session.FormatTime(s.StartedAt),
 			}
-			if s.Kind != background.KindSpawn {
+			if s.Kind == background.KindAgent {
+				entry["agent_id"] = s.AgentID
+				entry["session_id"] = s.AgentSessionID
+			}
+			if s.Kind != background.KindSpawn && s.Kind != background.KindAgent {
 				entry["command"] = truncateStr(s.Command, 120)
 				entry["output_file"] = s.OutputFile
 			}
@@ -846,8 +850,20 @@ func (p *ContainerProvider) execBgStatus(_ context.Context, session SessionConte
 			"status":      string(s.Status),
 			"started_at":  session.FormatTime(s.StartedAt),
 		}
-		if s.Status != background.TaskRunning {
+		if s.Status != background.TaskRunning && s.Status != background.TaskQueued {
 			result["completed_at"] = session.FormatTime(s.CompletedAt)
+		}
+		if s.Kind == background.KindAgent {
+			result["agent_id"] = s.AgentID
+			result["session_id"] = s.AgentSessionID
+			result["message"] = s.AgentMessage
+			if s.AgentReport != "" {
+				result["report"] = s.AgentReport
+			}
+			if s.AgentError != "" {
+				result["error"] = s.AgentError
+			}
+			return result, nil
 		}
 		if s.Kind == background.KindSpawn {
 			if len(s.Branches) > 0 {

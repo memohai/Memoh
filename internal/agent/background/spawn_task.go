@@ -16,6 +16,8 @@ const (
 	KindExec TaskKind = "exec"
 	// KindSpawn is a background subagent batch run by the spawn tool.
 	KindSpawn TaskKind = "spawn"
+	// KindAgent is a single managed subagent task.
+	KindAgent TaskKind = "agent"
 )
 
 // SpawnTaskTimeout is the safety ceiling for a background spawn task,
@@ -48,6 +50,154 @@ type SpawnBranch struct {
 	Status         TaskStatus
 	Report         string
 	Error          string
+}
+
+// AgentTaskResult is the terminal output for one managed subagent run.
+type AgentTaskResult struct {
+	AgentID        string
+	AgentSessionID string
+	Message        string
+	Status         TaskStatus
+	Report         string
+	Error          string
+}
+
+// StartAgentTask registers a managed subagent task. Queued tasks are visible
+// to bg_status immediately but do not get a cancelable run context until
+// MarkAgentTaskRunning is called.
+func (m *Manager) StartAgentTask(parentCtx context.Context, botID, sessionID, agentID, agentSessionID, message, description string, queued bool) (string, context.Context, error) {
+	status := TaskRunning
+	var (
+		ctx    context.Context
+		cancel context.CancelFunc
+	)
+	if queued {
+		status = TaskQueued
+	} else {
+		ctx, cancel = detachedContextWithTimeout(parentCtx, SpawnTaskTimeout)
+	}
+
+	m.mu.Lock()
+	taskID := m.newTaskIDLocked(botID)
+	task := &Task{
+		ID:             taskID,
+		Kind:           KindAgent,
+		BotID:          botID,
+		SessionID:      sessionID,
+		Description:    description,
+		AgentID:        agentID,
+		AgentSessionID: agentSessionID,
+		AgentMessage:   message,
+		Status:         status,
+		StartedAt:      time.Now(),
+		cancel:         cancel,
+	}
+	m.tasks[taskID] = task
+	m.mu.Unlock()
+
+	m.logger.Info("background agent task registered",
+		slog.String("task_id", taskID),
+		slog.String("bot_id", botID),
+		slog.String("agent_id", agentID),
+		slog.String("status", string(status)),
+	)
+	if queued {
+		m.emitTaskEvent(task, TaskEventQueued, "", "")
+	} else {
+		m.emitTaskEvent(task, TaskEventStarted, "", "")
+	}
+	return taskID, ctx, nil
+}
+
+// MarkAgentTaskRunning transitions a queued managed agent task into running
+// and returns the cancelable run context. If the task was killed while queued,
+// ok is false and no run should start.
+func (m *Manager) MarkAgentTaskRunning(parentCtx context.Context, taskID string) (context.Context, bool, error) {
+	ctx, cancel := detachedContextWithTimeout(parentCtx, SpawnTaskTimeout)
+	m.mu.Lock()
+	task := m.tasks[taskID]
+	m.mu.Unlock()
+	if task == nil || task.Kind != KindAgent {
+		cancel()
+		return nil, false, fmt.Errorf("agent task %s not found", taskID)
+	}
+	task.mu.Lock()
+	if task.Status == TaskKilled {
+		task.mu.Unlock()
+		cancel()
+		return nil, false, nil
+	}
+	if task.Status != TaskQueued {
+		task.mu.Unlock()
+		cancel()
+		return nil, false, fmt.Errorf("agent task %s is not queued (status: %s)", taskID, task.Status)
+	}
+	task.Status = TaskRunning
+	task.cancel = cancel
+	task.mu.Unlock()
+
+	m.emitTaskEvent(task, TaskEventStarted, "", "")
+	return ctx, true, nil
+}
+
+// CompleteAgentTask finalises a managed agent task and enqueues a completion
+// notification unless it was killed before completion.
+func (m *Manager) CompleteAgentTask(taskID string, result AgentTaskResult) {
+	m.mu.Lock()
+	task := m.tasks[taskID]
+	m.mu.Unlock()
+	if task == nil || task.Kind != KindAgent {
+		return
+	}
+	defer task.Cancel()
+
+	status := result.Status
+	if status == "" {
+		if result.Error != "" {
+			status = TaskFailed
+		} else {
+			status = TaskCompleted
+		}
+	}
+
+	task.mu.Lock()
+	if task.Status == TaskKilled {
+		task.mu.Unlock()
+		return
+	}
+	task.CompletedAt = time.Now()
+	task.Status = status
+	task.AgentReport = result.Report
+	task.AgentError = result.Error
+	if result.Message != "" {
+		task.AgentMessage = result.Message
+	}
+	duration := task.CompletedAt.Sub(task.StartedAt)
+	task.mu.Unlock()
+
+	eventType := TaskEventCompleted
+	if status != TaskCompleted {
+		eventType = TaskEventFailed
+	}
+	m.emitTaskEvent(task, eventType, "", "")
+
+	if !task.MarkNotified() {
+		return
+	}
+	m.enqueueNotification(Notification{
+		TaskID:         task.ID,
+		Kind:           KindAgent,
+		BotID:          task.BotID,
+		SessionID:      task.SessionID,
+		Status:         status,
+		Description:    task.Description,
+		AgentID:        task.AgentID,
+		AgentSessionID: task.AgentSessionID,
+		AgentMessage:   task.AgentMessage,
+		AgentReport:    task.AgentReport,
+		AgentError:     task.AgentError,
+		Duration:       duration,
+	})
 }
 
 // CompleteSpawnTask finalises a spawn task with its branch outcomes and
@@ -157,6 +307,35 @@ func (n Notification) formatSpawnForAgent() string {
 	}
 	fmt.Fprintf(&b, "  </branches>\n")
 	fmt.Fprintf(&b, "  <suggestion>Read a branch's full transcript with search_messages using its session-id.</suggestion>\n")
+	fmt.Fprintf(&b, "</task-notification>")
+	return b.String()
+}
+
+// formatAgentForAgent renders the terminal record for one managed subagent.
+func (n Notification) formatAgentForAgent() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "<task-notification>\n")
+	fmt.Fprintf(&b, "  <task-id>%s</task-id>\n", n.TaskID)
+	fmt.Fprintf(&b, "  <kind>agent</kind>\n")
+	fmt.Fprintf(&b, "  <agent-id>%s</agent-id>\n", n.AgentID)
+	if n.AgentSessionID != "" {
+		fmt.Fprintf(&b, "  <session-id>%s</session-id>\n", n.AgentSessionID)
+	}
+	fmt.Fprintf(&b, "  <status>%s</status>\n", n.Status)
+	if n.Description != "" {
+		fmt.Fprintf(&b, "  <description>%s</description>\n", n.Description)
+	}
+	if n.AgentMessage != "" {
+		fmt.Fprintf(&b, "  <message>%s</message>\n", n.AgentMessage)
+	}
+	fmt.Fprintf(&b, "  <duration>%s</duration>\n", n.Duration.Round(time.Millisecond))
+	if n.AgentReport != "" {
+		fmt.Fprintf(&b, "  <report>\n%s\n  </report>\n", strings.TrimRight(n.AgentReport, "\n"))
+	}
+	if n.AgentError != "" {
+		fmt.Fprintf(&b, "  <error>%s</error>\n", n.AgentError)
+	}
+	fmt.Fprintf(&b, "  <suggestion>Use send_message with this agent-id to continue the same subagent.</suggestion>\n")
 	fmt.Fprintf(&b, "</task-notification>")
 	return b.String()
 }
