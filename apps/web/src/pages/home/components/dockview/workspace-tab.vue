@@ -8,8 +8,11 @@
          label's metrics or baseline. The chip hugs its title with symmetric
          padding: no slot is reserved for the close button on ANY tab (selected or
          not); it overlays the text on hover instead. -->
+    <!-- leading-[1.4], not leading-none: with truncate (overflow:hidden) a line box
+         equal to the font size clips descenders (g/y) and CJK bottoms; a slightly
+         taller line box gives them room without affecting the centered baseline. -->
     <span
-      class="min-w-0 flex-1 truncate text-[12.5px] leading-none transition-colors"
+      class="min-w-0 flex-1 truncate text-[12.5px] leading-[1.4] transition-colors"
       :class="isActive ? 'text-foreground' : 'text-muted-foreground'"
     >{{ title }}</span>
     <!-- Unsaved-changes dot: sits in the close slot AT REST so the affordance never

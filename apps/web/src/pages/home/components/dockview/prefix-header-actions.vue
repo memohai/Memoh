@@ -1,11 +1,13 @@
 <template>
   <!-- border-r hands the tab strip's vertical divider language to the nav cluster:
        the first tab no longer floats edgeless against the buttons but is fenced off
-       by the same 1px seam that separates adjacent tabs. pr-2 keeps the line off the
-       last button; the tab's own pl-4 keeps the title off the line. -->
+       by the same SOFT inter-tab seam (--tab-divider, inherited from the dockview
+       theme) that separates two unselected tabs — full --border stays reserved for
+       framing the active tab. pr-2 keeps the line off the last button; the tab's
+       own pl-4 keeps the title off the line. -->
   <div
     v-if="isFirstGroup"
-    class="flex h-full items-center gap-0.5 border-r border-border pr-2 [-webkit-app-region:drag] transition-[padding] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+    class="flex h-full items-center gap-0.5 border-r [border-color:var(--tab-divider)] pr-2 [-webkit-app-region:drag] transition-[padding] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
     :class="shouldReserveTrafficLight ? 'pl-[76px]' : 'pl-2'"
   >
     <Button
