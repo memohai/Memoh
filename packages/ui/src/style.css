@@ -800,14 +800,6 @@
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.945 0.003 63);
   --sidebar-accent-foreground: oklch(0.21 0.004 95);
-  /* Sidebar sits on the recessed chrome plane (--background ≈250), so its
-   * hover/active fills are read against that near-white base: hover 0.958 (≈243,
-   * Δbg ~7) and active 0.945 (--sidebar-accent, ≈238, Δbg ~12 — the target, no
-   * longer the old Δ17). hover < active gap is preserved. The bot-switcher TRIGGER
-   * avatar (≈0.932) sits below the active fill, so it gets a hairline border
-   * locally (bot-switcher.vue) to stay crisp — we deliberately do NOT touch the
-   * shared Avatar or the menu avatars. */
-  --sidebar-hover: oklch(0.958 0.0025 63);
   --sidebar-border: oklch(0.905 0.0045 72);
   --sidebar-ring: oklch(0.55 0.22 290);
   --scrollbar-thumb: oklch(0 0 0 / 0.18);
@@ -833,28 +825,34 @@
      retune it in one place. Flips to a light fill in dark mode below. */
   --tooltip: #09090b;
   --tooltip-foreground: oklch(0.985 0.001 286);
-  /* Interactive gray ladder. TWO contexts share one neutral material:
-       · MENU context (settled): --ui-selected (≈243) tints highlighted menu rows
-         (menuItemClass) + the segmented track. Light, single-state. Untouched.
-       · CONTROL context (no-scale hover→press surfaces: Select trigger, Toggle,
-         ButtonGroup, NativeSelect, checkbox/radio box): a DEEPER ladder so the
-         old near-invisible hover (was 249) actually reads.
-     --ui-on is split OUT of --ui-selected so deepening the Toggle's selected step
-     (≈234) never drags the menu highlight (≈243) with it. Ghost is button-tier
-     (own press-scale), so its hover is pinned to its OWN step, not the control
-     press. Steps (rgb): hover 239 · on 234 · pressed 224 · on+pressed 218. */
-  /* Warmed to the canvas hue (72) so menu/control fills sit in the SAME family as
-     the warm popover — a neutral gray highlight on a warm surface read as "pale &
-     off". --ui-selected (menu highlight + segmented track) is also deepened a step
-     (243→≈238) so the dropdown hover actually registers instead of looking faint. */
-  --ui-hover: oklch(0.949 0.004 72); /* ≈239 warm — control hover */
-  --ui-selected: oklch(0.945 0.005 72); /* ≈238 warm — MENU highlight + segmented track */
-  --ui-on: oklch(0.932 0.005 72); /* ≈234 warm — control SELECTED (Toggle on) */
-  --ui-pressed: oklch(0.908 0.005 72); /* ≈224 warm — control press */
-  --ui-selected-pressed: oklch(0.891 0.005 72); /* ≈218 warm — control on+press */
-  --btn-ghost-hover: oklch(0.94 0.0052 72); /* ≈237 warm — ghost (button-tier), matches sidebar-accent on the warm canvas */
-  /* Segmented control surfaces: recessed track + elevated sliding thumb. */
-  --segment-track: var(--ui-selected);
+  /* ── Interaction overlay ladder ──────────────────────────────────────────
+     Pure neutral overlays — chroma 0, hue irrelevant. Composites over the
+     underlying surface so hover/press automatically inherits the surface
+     warmth without a baked hue. Zero hue = zero color tilt across surfaces
+     or rendering environments (eliminates the green cast visible on P3
+     displays when solid hue-72 values were used). Light mode = black
+     overlays; .dark overrides flip them to white. All existing component
+     code is unchanged — semantic aliases below preserve the old token names.
+       hover-light   → wide sidebar rows, menu/list row highlights
+       hover         → standard controls (Toggle, Select, Checkbox)
+       hover-strong  → small icon ghost buttons, toolbar icons; Toggle on
+       active        → pressed state (standard controls)
+       active-strong → pressed state (small icons) / on+press */
+  --overlay-hover-light:   oklch(0 0 0 / 0.045);
+  --overlay-hover:         oklch(0 0 0 / 0.072);
+  --overlay-hover-strong:  oklch(0 0 0 / 0.110);
+  --overlay-active:        oklch(0 0 0 / 0.135);
+  --overlay-active-strong: oklch(0 0 0 / 0.170);
+  --ui-hover:            var(--overlay-hover);
+  --ui-selected:         var(--overlay-hover-light);
+  --ui-on:               var(--overlay-hover-strong);
+  --ui-pressed:          var(--overlay-active);
+  --ui-selected-pressed: var(--overlay-active-strong);
+  --btn-ghost-hover:     var(--overlay-hover-strong);
+  --sidebar-hover:       var(--overlay-hover-light);
+  /* Segmented control surfaces: track is a warm-tinted solid chip (not an
+     overlay — needs an opaque fill for the pill shape). */
+  --segment-track: oklch(0.945 0.005 63);
   --segment-thumb: var(--card);
   /* Shadows — tokenized so elevation/edge values never fragment. Same in both
      schemes for now; add .dark overrides when dark elevation is tuned.
@@ -1141,17 +1139,8 @@
   --sidebar-foreground: oklch(0.90 0 0);
   --sidebar-primary: oklch(0.62 0.22 290);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  /* Sidebar interaction ladder (dark) — a layered gradient on the lifted 19 canvas:
-   * bg 19 → hover 32 → active 44. After --sidebar rose 14→19 the old hover (24,
-   * Δ5) and active (36, Δ17) were squeezed flat against the brighter canvas; this
-   * reopens them to Δ13 / Δ25 so hover registers and active sits clearly above it
-   * (classic build-up model: hover < active). --sidebar-accent is shared with the
-   * settings nav, whose hover is a separate ghost step (--btn-ghost-hover ≈51), so
-   * settings keeps its hover-brighter-than-active look — only its active deepens a
-   * touch. Light mode is untouched. */
   --sidebar-accent: oklch(0.30 0 0);
   --sidebar-accent-foreground: oklch(0.86 0 0);
-  --sidebar-hover: oklch(0.245 0 0);
   --sidebar-border: oklch(1 0 0 / 8%);
   --sidebar-ring: oklch(0.62 0.22 290);
   --scrollbar-thumb: oklch(1 0 0 / 0.14);
@@ -1173,17 +1162,14 @@
   /* Dark: the tooltip inverts to a near-white bubble with dark text. */
   --tooltip: oklch(0.22 0 0);
   --tooltip-foreground: oklch(0.92 0 0);
-  /* Dark: control tints LIGHTEN on engage. Mirrors the deeper light ladder — the
-     control hover lifts more off the surface so it actually reads, while the MENU
-     highlight (--ui-selected) stays put. --ui-on is the control SELECTED step
-     (split from the menu token); ghost keeps its own pinned step. Monotonic:
-     hover < on < pressed < on+pressed. */
-  --ui-hover: oklch(0.30 0 0); /* control hover */
-  --ui-selected: oklch(0.29 0 0); /* MENU highlight (unchanged) */
-  --ui-on: oklch(0.34 0 0); /* control SELECTED (Toggle on) */
-  --ui-pressed: oklch(0.38 0 0); /* control press */
-  --ui-selected-pressed: oklch(0.42 0 0); /* control on+press */
-  --btn-ghost-hover: oklch(0.32 0 0); /* ghost (button-tier), its own step */
+  /* Dark: overlays flip to white so they lighten surfaces instead of darkening.
+     Semantic aliases (--ui-hover, --btn-ghost-hover, --sidebar-hover, etc.)
+     inherit from these via :root — no need to restate them here. */
+  --overlay-hover-light:   oklch(1 0 0 / 0.055);
+  --overlay-hover:         oklch(1 0 0 / 0.090);
+  --overlay-hover-strong:  oklch(1 0 0 / 0.130);
+  --overlay-active:        oklch(1 0 0 / 0.155);
+  --overlay-active-strong: oklch(1 0 0 / 0.190);
   --segment-track: oklch(0.24 0 0);
   --segment-thumb: oklch(0.40 0 0);
   /* Switch (dark): off gray LIGHTENS on hover (like the other dark control
@@ -1538,15 +1524,8 @@
   --sidebar-foreground: var(--foreground);
   --sidebar-accent: oklch(0.945 0.004 var(--scheme-hue));
   --sidebar-accent-foreground: var(--foreground);
-  --sidebar-hover: oklch(0.958 0.0025 var(--scheme-hue));
   --sidebar-border: oklch(0.905 0.0045 var(--scheme-hue));
-  --ui-hover: oklch(0.949 0.004 var(--scheme-hue));
-  --ui-selected: oklch(0.945 0.005 var(--scheme-hue));
-  --ui-on: oklch(0.932 0.005 var(--scheme-hue));
-  --ui-pressed: oklch(0.908 0.005 var(--scheme-hue));
-  --ui-selected-pressed: oklch(0.891 0.005 var(--scheme-hue));
-  --btn-ghost-hover: oklch(0.94 0.0052 var(--scheme-hue));
-  --segment-track: var(--ui-selected);
+  --segment-track: oklch(0.945 0.005 var(--scheme-hue));
 }
 
 .dark[data-color-scheme]:not([data-color-scheme="memoh"]) {
@@ -1568,14 +1547,7 @@
   --sidebar-foreground: var(--card-foreground);
   --sidebar-accent: oklch(0.30 0.006 var(--scheme-hue));
   --sidebar-accent-foreground: var(--foreground);
-  --sidebar-hover: oklch(0.245 0.006 var(--scheme-hue));
   --sidebar-border: oklch(1 0 0 / 8%);
-  --ui-hover: oklch(0.30 0.006 var(--scheme-hue));
-  --ui-selected: oklch(0.30 0.006 var(--scheme-hue));
-  --ui-on: oklch(0.34 0.007 var(--scheme-hue));
-  --ui-pressed: oklch(0.38 0.007 var(--scheme-hue));
-  --ui-selected-pressed: oklch(0.42 0.008 var(--scheme-hue));
-  --btn-ghost-hover: oklch(0.32 0.006 var(--scheme-hue));
   --segment-track: oklch(0.24 0.006 var(--scheme-hue));
   --segment-thumb: oklch(0.40 0.006 var(--scheme-hue));
   --control-label: oklch(0.86 0.004 var(--scheme-hue));
