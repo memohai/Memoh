@@ -68,6 +68,7 @@ func (*DiscordAdapter) Descriptor() channel.Descriptor {
 		Capabilities: channel.ChannelCapabilities{
 			Text:           true,
 			Markdown:       true,
+			RichText:       true,
 			Reply:          true,
 			Attachments:    true,
 			Media:          true,
@@ -284,7 +285,11 @@ func (a *DiscordAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, ms
 }
 
 func sendDiscordMessage(ctx context.Context, session *discordgo.Session, channelID string, msg channel.PreparedOutboundMessage) error {
-	content := truncateDiscordText(msg.Message.Message.Text)
+	body := renderDiscordMessagePartsMarkdown(msg.Message.Message)
+	if body == "" {
+		body = msg.Message.Message.Text
+	}
+	content := truncateDiscordText(body)
 
 	// Build message send parameters
 	messageSend := &discordgo.MessageSend{
