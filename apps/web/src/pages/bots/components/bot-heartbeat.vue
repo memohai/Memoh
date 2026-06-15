@@ -61,12 +61,13 @@
 
         <div class="mx-4 flex min-h-[3.75rem] items-center justify-end py-3">
           <Button
+            size="sm"
             :disabled="!settingsChanged || isSaving"
             @click="handleSaveSettings"
           >
             <Spinner
               v-if="isSaving"
-              class="size-4"
+              class="size-3"
             />
             {{ $t('bots.settings.save') }}
           </Button>
@@ -107,7 +108,7 @@
 
         <Empty
           v-else-if="!isLoading && filteredLogs.length === 0"
-          class="m-4 rounded-[var(--radius-menu-shell)] border border-dashed border-border py-12"
+          class="py-12"
         >
           <EmptyHeader>
             <EmptyTitle>{{ $t('bots.heartbeat.empty') }}</EmptyTitle>

@@ -322,11 +322,15 @@ recurring failures to avoid:
 - **`BadgeCount`:** `destructive` red dot pinned to an icon corner = alert/unread; `default`
   neutral count rides a tab/filter/segment; a flat list row uses a plain muted numeral, no bubble.
 - **`Tooltip`:** always the `@memohai/ui` `Tooltip`. A hand-rolled or legacy tooltip is a bug.
-- **Empty surfaces:** the `Empty` component (icon + title + description + action), framed — but
-  only when there is nothing else to guide the user. For a list that already has an **add**
-  affordance, prefer the same dashed "+ Add" tile the populated grid uses (Provider / Web Search)
-  *as* the empty state, rather than stacking a decorative-icon + heading + sub-line block on top
-  of an Add button that is already on screen.
+- **Empty surfaces — and the frame already belongs to someone.** `Empty` is centered title +
+  description + action; it is **not** a card. *Who draws the frame* decides if it gets a border:
+  when the Empty sits **inside a `SettingsSection` (the white card)**, it carries **no border and
+  no icon-tile** — the white card is the frame, so a dashed-bordered `Empty` or an `EmptyMedia`
+  grey glyph tile dropped inside it is **card-in-card** (a white card holding a grey card — yes,
+  *this* is card-in-card too). Just `py-12` centered content. Only when the `Empty` is the
+  **outermost** frame (a standalone list with no parent card) does the dashed border earn its
+  place. And for a list that already shows an **add** affordance, don't stack a decorative-icon +
+  heading + sub-line block on top of the Add button that's already on screen.
 - **Destructive actions:** a filled `<Button variant="destructive">`, gated behind a
   confirmation (`ConfirmPopover`, or a dialog for heavier deletes) — never a bare one-click
   delete, never a ghost button with manual red text. Group truly dangerous actions in a danger

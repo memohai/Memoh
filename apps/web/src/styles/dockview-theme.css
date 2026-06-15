@@ -67,6 +67,26 @@
   --tab-top-inset: 0.1875rem;
   --tab-gap: var(--radius-sm);
   --tab-flare: var(--tab-gap);
+
+  /* ONE stroke colour for the whole dock outline — the strip's bottom hairline, the
+   * active tab's crown/side border, and the fillet-foot ring. It MUST be opaque.
+   * The design system's --border is a translucent white in dark mode
+   * (oklch(1 0 0 / 8%)); a translucent stroke reads at a different brightness
+   * depending on the surface under it (the chrome strip vs the tab's editor fill)
+   * AND on the technique drawing it (a crisp 1px border vs an anti-aliased inset
+   * box-shadow vs a gradient ring), and worst of all it STACKS — where the foot ring
+   * overlaps the side border the two translucent whites composite to a brighter line,
+   * the "whitened fillet". An opaque colour is backdrop- and technique-independent and
+   * never builds up, so every dock stroke matches. Light mode's --border is already
+   * opaque, so it's reused as-is; dark mode gets an opaque grey (see .dark below). */
+  --dock-stroke: var(--border);
+}
+
+/* Dark: opaque dock stroke (see note above). Tuned a touch brighter than a flat
+ * translucent border would land so the divider stays legible against the deep
+ * surfaces — this single value is the knob for the whole dock outline's weight. */
+.dark .dockview-theme-memoh {
+  --dock-stroke: oklch(0.34 0 0);
 }
 
 /* The custom tab content (workspace-tab.vue) owns its padding/ellipsis; .dv-tab
@@ -179,9 +199,33 @@
  *   .dv-groupview.dv-active-group > .dv-tabs-and-actions-container
  *     .dv-tabs-container > .dv-tab.dv-inactive-tab { background: …hiddenpanel… }
  * which outranks this (0,4,0) hover. dockview exposes NO hover variable for tabs,
- * so the cascade can only be won here by force. */
+ * so the cascade can only be won here by force.
+ *
+ * The fill reaches the bottom — the hover crown is geometrically IDENTICAL to the
+ * active crown (same radius, same full body), only the colour differs. The strip's
+ * bottom hairline is NOT lost under it: it is re-drawn on top as a ::after (below),
+ * so a hovered tab stays separated from the pane by the divider; only the ACTIVE
+ * tab omits that line and reads continuous with the pane. */
 .dockview-theme-memoh .dv-tab:not(.dv-active-tab):hover {
   background-color: var(--surface-chrome-hover) !important;
+}
+
+/* The strip's bottom hairline is a box-shadow on the container, painted BEHIND the
+ * tabs — so an opaque tab fill (the hover tint, or the close/dirty fade child) hides
+ * it at that tab's slot, and because that tint is lighter than the chrome the divider
+ * looked "brightened / washed out" there. Re-assert the exact same 1px --dock-stroke
+ * line as a top-most ::after (generated last, so it sits ABOVE the fill AND the fade
+ * child) on every NON-active tab. Result: the divider is one continuous, same-colour
+ * line across the whole strip; the ONLY break is the active tab, which omits it to
+ * punch through into the pane. (Transparent inactive tabs draw it twice — container
+ * shadow + this line, identical colour/position — which composites to the same line.) */
+.dockview-theme-memoh .dv-tab:not(.dv-active-tab)::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 1px;
+  background: var(--dock-stroke);
+  pointer-events: none;
 }
 
 /* Active tab = editor surface, continuous with the pane below. The crown is
@@ -194,9 +238,9 @@
    * left open and the foot curve (::before, below) carries the stroke the rest of
    * the way down to the bar, so the outline reads as one continuous line: bar →
    * left foot → up the crown → down the right foot → bar (Chrome). */
-  border-top-color: var(--border);
-  border-left-color: var(--border);
-  border-right-color: var(--border);
+  border-top-color: var(--dock-stroke);
+  border-left-color: var(--dock-stroke);
+  border-right-color: var(--dock-stroke);
   /* The active tab never takes the hover lift, so its blot-out colour is the
    * editor surface it already wears. */
   --tab-hover-bg: var(--surface-editor);
@@ -227,8 +271,8 @@
    *     over the bottom strip so the crown's side borders don't leave a stray
    *     vertical nub in the foot zone (the stroke there is the curve, not a line). */
   background:
-    radial-gradient(circle at top left, transparent calc(var(--tab-flare) - 1px), var(--border) calc(var(--tab-flare) - 1px), var(--border) var(--tab-flare), var(--surface-editor) calc(var(--tab-flare) + 0.5px)) left bottom / var(--tab-flare) var(--tab-flare) no-repeat,
-    radial-gradient(circle at top right, transparent calc(var(--tab-flare) - 1px), var(--border) calc(var(--tab-flare) - 1px), var(--border) var(--tab-flare), var(--surface-editor) calc(var(--tab-flare) + 0.5px)) right bottom / var(--tab-flare) var(--tab-flare) no-repeat,
+    radial-gradient(circle at top left, transparent calc(var(--tab-flare) - 1px), var(--dock-stroke) calc(var(--tab-flare) - 1px), var(--dock-stroke) var(--tab-flare), var(--surface-editor) calc(var(--tab-flare) + 0.5px)) left bottom / var(--tab-flare) var(--tab-flare) no-repeat,
+    radial-gradient(circle at top right, transparent calc(var(--tab-flare) - 1px), var(--dock-stroke) calc(var(--tab-flare) - 1px), var(--dock-stroke) var(--tab-flare), var(--surface-editor) calc(var(--tab-flare) + 0.5px)) right bottom / var(--tab-flare) var(--tab-flare) no-repeat,
     linear-gradient(var(--surface-editor), var(--surface-editor)) center bottom / calc(100% - 2 * var(--tab-flare)) 100% no-repeat;
 }
 
@@ -271,7 +315,7 @@
  * 1px at its own slot, so that tab reads as continuous with the pane below
  * (punch-through); transparent inactive tabs and the leftover gap let the line show. */
 .dockview-theme-memoh .dv-tabs-and-actions-container {
-  box-shadow: inset 0 -1px 0 var(--border);
+  box-shadow: inset 0 -1px 0 var(--dock-stroke);
 }
 
 /* No vertical inter-tab divider lines: tabs are separated by --tab-gap (see the

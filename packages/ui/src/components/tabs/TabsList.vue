@@ -23,6 +23,10 @@ const delegatedProps = reactiveOmit(props, 'class', 'variant')
 // reka list nesting / offsetParent quirks.
 const root = ref<HTMLElement>()
 const box = ref({ left: 0, top: 0, width: 0, height: 0, ready: false })
+// The indicator is placed instantly on first paint (no slide-in from the left
+// edge); transitions turn on only after the initial measure, so subsequent tab
+// changes still animate.
+const animate = ref(false)
 // press-shrink fires ONLY when the already-active pill is pressed (inactive
 // items shrink via their own ::before:active, matching SegmentedControl).
 const pressed = ref(false)
@@ -50,7 +54,12 @@ function sync() {
 let ro: ResizeObserver | undefined
 let mo: MutationObserver | undefined
 onMounted(() => {
-  nextTick(sync)
+  nextTick(() => {
+    sync()
+    // Enable transitions one frame after the first placement so the bar lands
+    // in position instead of sliding/growing from the left on mount.
+    requestAnimationFrame(() => { animate.value = true })
+  })
   ro = new ResizeObserver(() => sync())
   if (root.value)
     ro.observe(root.value)
@@ -111,7 +120,7 @@ const indicatorStyle = computed(() => {
   >
     <span
       aria-hidden="true"
-      :class="variant === 'pill' ? 'tabs-thumb' : 'tabs-underline'"
+      :class="[variant === 'pill' ? 'tabs-thumb' : 'tabs-underline', { 'tabs-indicator-static': !animate }]"
       :style="indicatorStyle"
     />
     <TabsList
@@ -125,6 +134,12 @@ const indicatorStyle = computed(() => {
 </template>
 
 <style scoped>
+/* First-paint guard: until the active item is measured, the indicator must land
+ * in place rather than animate from the {left:0,width:0} default. */
+.tabs-indicator-static {
+  transition: none !important;
+}
+
 /* ── underline: a sliding bar pinned to the bottom rail ───────────────────── */
 .tabs-underline {
   position: absolute;

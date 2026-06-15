@@ -29,74 +29,101 @@
         {{ $t('common.loading') }}
       </div>
 
-      <div
+      <Empty
         v-else-if="!plugins.length"
-        class="p-4"
+        class="py-12"
       >
-        <Empty class="rounded-[var(--radius-menu-shell)] border border-dashed border-border py-12">
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <PackageOpen />
-            </EmptyMedia>
-            <EmptyTitle>{{ $t('bots.plugins.emptyTitle') }}</EmptyTitle>
-            <EmptyDescription>{{ $t('bots.plugins.emptyDescription') }}</EmptyDescription>
-          </EmptyHeader>
-          <EmptyContent>
-            <Button
-              variant="outline"
-              size="sm"
-              @click="router.push({ name: 'supermarket' })"
-            >
-              <Store class="size-4" />
-              {{ $t('sidebar.supermarket') }}
-            </Button>
-          </EmptyContent>
-        </Empty>
-      </div>
+        <EmptyHeader>
+          <EmptyTitle>{{ $t('bots.plugins.emptyTitle') }}</EmptyTitle>
+          <EmptyDescription>{{ $t('bots.plugins.emptyDescription') }}</EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button
+            variant="outline"
+            size="sm"
+            @click="router.push({ name: 'supermarket' })"
+          >
+            <Store class="size-4" />
+            {{ $t('sidebar.supermarket') }}
+          </Button>
+        </EmptyContent>
+      </Empty>
 
       <div
         v-for="plugin in plugins"
         :key="plugin.id"
-        class="mx-4 border-b border-border py-4 last:border-b-0"
+        class="mx-4 flex items-start justify-between gap-4 border-b border-border py-4 last:border-b-0"
       >
-        <PluginCard
-          :plugin="pluginManifest(plugin)"
-          :show-install="false"
-        >
-          <template #actions>
-            <div class="flex items-center gap-2">
-              <Badge
-                variant="outline"
-                size="sm"
+        <div class="flex min-w-0 flex-1 items-start gap-3">
+          <div class="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md bg-accent">
+            <ProviderIcon
+              v-if="pluginIcon(plugin)"
+              :icon="pluginIcon(plugin)"
+              size="20"
+              class="size-5 object-contain"
+            >
+              <PackageOpen class="size-4 text-muted-foreground" />
+            </ProviderIcon>
+            <PackageOpen
+              v-else
+              class="size-4 text-muted-foreground"
+            />
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-1.5">
+              <h3
+                class="truncate text-sm font-medium text-foreground"
+                :title="pluginManifest(plugin).name"
               >
-                {{ statusLabel(plugin.status) }}
-              </Badge>
-              <Button
-                v-if="plugin.status === 'needs_auth'"
-                variant="outline"
-                size="sm"
-                :disabled="isPending(plugin, 'oauth')"
-                @click="startOAuth(plugin)"
+                {{ pluginManifest(plugin).name }}
+              </h3>
+              <a
+                v-if="pluginManifest(plugin).homepage"
+                :href="pluginManifest(plugin).homepage"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
               >
-                <ExternalLink class="size-4" />
-                {{ $t('bots.plugins.authorizeAction') }}
-              </Button>
-              <div
-                v-else
-                class="flex items-center gap-2"
-              >
-                <span class="text-xs text-muted-foreground">
-                  {{ plugin.enabled ? $t('common.enabled') : $t('common.disabled') }}
-                </span>
-                <Switch
-                  :model-value="!!plugin.enabled"
-                  :disabled="!canTogglePlugin(plugin)"
-                  @update:model-value="(enabled) => togglePlugin(plugin, !!enabled)"
-                />
-              </div>
+                <ExternalLink class="size-3" />
+              </a>
             </div>
-          </template>
-        </PluginCard>
+            <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">
+              {{ pluginManifest(plugin).description }}
+            </p>
+          </div>
+        </div>
+
+        <div class="flex shrink-0 items-center gap-2">
+          <Badge
+            variant="outline"
+            size="sm"
+          >
+            {{ statusLabel(plugin.status) }}
+          </Badge>
+          <Button
+            v-if="plugin.status === 'needs_auth'"
+            variant="outline"
+            size="sm"
+            :disabled="isPending(plugin, 'oauth')"
+            @click="startOAuth(plugin)"
+          >
+            <ExternalLink class="size-4" />
+            {{ $t('bots.plugins.authorizeAction') }}
+          </Button>
+          <div
+            v-else
+            class="flex items-center gap-2"
+          >
+            <span class="text-xs text-muted-foreground">
+              {{ plugin.enabled ? $t('common.enabled') : $t('common.disabled') }}
+            </span>
+            <Switch
+              :model-value="!!plugin.enabled"
+              :disabled="!canTogglePlugin(plugin)"
+              @update:model-value="(enabled) => togglePlugin(plugin, !!enabled)"
+            />
+          </div>
+        </div>
       </div>
     </SettingsSection>
   </div>
@@ -107,7 +134,7 @@ import { onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { ExternalLink, PackageOpen, Store } from 'lucide-vue-next'
-import { Badge, Button, Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle, Spinner, Switch, toast } from '@memohai/ui'
+import { Badge, Button, Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle, Spinner, Switch, toast } from '@memohai/ui'
 import {
   getBotsByBotIdPlugins,
   getBotsByBotIdPluginsByIdOauthStatus,
@@ -120,7 +147,7 @@ import {
 import { client } from '@memohai/sdk/client'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import SettingsSection from '@/components/settings/section.vue'
-import PluginCard from '@/pages/supermarket/components/plugin-card.vue'
+import ProviderIcon from '@/components/provider-icon/index.vue'
 
 const props = defineProps<{
   botId: string
@@ -163,6 +190,14 @@ function pluginManifest(plugin: PluginsInstallation): PluginsManifest {
     name: plugin.plugin_name || plugin.manifest?.name || plugin.plugin_id || plugin.id,
     description: plugin.manifest?.description || '',
   }
+}
+
+function pluginIcon(plugin: PluginsInstallation): string {
+  const icon = pluginManifest(plugin).icon
+  if (!icon) return ''
+  if (icon.kind === 'external_url') return icon.url || ''
+  if (icon.kind === 'builtin') return icon.name || ''
+  return ''
 }
 
 function statusLabel(status?: string): string {

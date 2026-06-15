@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { Minimize2, RefreshCw, History } from 'lucide-vue-next'
+import { RefreshCw } from 'lucide-vue-next'
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
 import {
-  Button, Badge, Empty, EmptyHeader, EmptyMedia, EmptyTitle, Spinner, NativeSelect, Switch, Input, Slider,
+  Button, Badge, Empty, EmptyHeader, EmptyTitle, Spinner, NativeSelect, Switch, Input, Slider,
   Pagination, PaginationContent, PaginationEllipsis,
   PaginationFirst, PaginationItem, PaginationLast,
   PaginationNext, PaginationPrevious,
@@ -329,12 +329,9 @@ onMounted(() => {
 
       <SettingsSection :title="$t('bots.compaction.title')">
         <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3">
-          <div class="flex min-w-0 items-center gap-2">
-            <History class="size-4 text-muted-foreground" />
-            <span class="text-sm font-medium text-foreground">
-              {{ $t('bots.compaction.title') }}
-            </span>
-          </div>
+          <span class="text-sm font-medium text-foreground">
+            {{ $t('common.status') }}
+          </span>
           <NativeSelect
             v-model="statusFilter"
             class="w-32"
@@ -364,12 +361,9 @@ onMounted(() => {
 
         <Empty
           v-else-if="!isLoading && filteredLogs.length === 0"
-          class="m-4 rounded-[var(--radius-menu-shell)] border border-dashed border-border py-12"
+          class="py-12"
         >
           <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <Minimize2 />
-            </EmptyMedia>
             <EmptyTitle>{{ $t('bots.compaction.empty') }}</EmptyTitle>
           </EmptyHeader>
         </Empty>

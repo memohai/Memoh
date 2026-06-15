@@ -138,14 +138,45 @@ tiles with no per-tile border. (Contrast: the dirty page wraps each tile in its 
 
 ### Empty / loading that holds the frame
 
+**Who draws the frame decides whether the Empty gets a border.** An `Empty` is just centered
+text + an action; it is *not* a card. So:
+
+- **Inside a `SettingsSection` (the usual settings-tab case) → the Empty has NO border and NO
+  icon-tile.** The white section card already *is* the frame; the message sits centered inside it.
+  A dashed-bordered `Empty` (or an `EmptyMedia variant="icon"` gray tile) dropped inside that white
+  card is **card-in-card** — a box inside a box, the exact sin this skill bans. Just `py-12`:
+
+```vue
+<SettingsSection :title="$t('feature.title')">
+  <div v-if="loading" class="mx-4 flex min-h-[3.75rem] items-center gap-3 py-3 text-sm text-muted-foreground">
+    <Spinner class="size-4" /> {{ $t('common.loading') }}
+  </div>
+  <Empty v-else-if="!items.length" class="py-12">
+    <EmptyHeader>
+      <EmptyTitle>{{ $t('feature.emptyTitle') }}</EmptyTitle>
+      <EmptyDescription>{{ $t('feature.emptyDescription') }}</EmptyDescription>
+    </EmptyHeader>
+    <EmptyContent><Button variant="outline" size="sm">…</Button></EmptyContent>
+  </Empty>
+  <!-- rows … -->
+</SettingsSection>
+```
+
+- **As the outermost frame (a standalone list with NO parent card) → the dashed-border `Empty`
+  is the frame.** Only here does the border earn its place, because nothing else draws one:
+
 ```vue
 <Empty class="rounded-[var(--radius-menu-shell)] border border-dashed border-border py-16">
-  <EmptyHeader><EmptyMedia variant="icon"><Globe /></EmptyMedia></EmptyHeader>
-  <EmptyTitle>{{ $t('feature.emptyTitle') }}</EmptyTitle>
-  <EmptyDescription>{{ $t('feature.emptyDescription') }}</EmptyDescription>
+  <EmptyHeader>
+    <EmptyTitle>{{ $t('feature.emptyTitle') }}</EmptyTitle>
+    <EmptyDescription>{{ $t('feature.emptyDescription') }}</EmptyDescription>
+  </EmptyHeader>
   <EmptyContent><Button variant="outline">…</Button></EmptyContent>
 </Empty>
 ```
+
+The `EmptyMedia variant="icon"` decorative glyph tile is itself a small inner box — default to
+**no** icon (§ Component discipline); add one only after sign-off, and never inside a card.
 
 In a table, keep the table drawn and use a full-width empty cell:
 
@@ -256,6 +287,37 @@ the `(optional)` marker rides the **label**, not the placeholder; secondary and 
 `canSubmit` and surfaces errors on **submit**, not on blur (no red-on-touch). Forms still use
 vee-validate + Zod for real schemas (`apps/web/AGENTS.md`); `canSubmit` is the submit gate, not a
 replacement for the schema.
+
+### Advanced / progressive disclosure (two contexts, one chevron)
+
+Hiding secondary or power-user controls behind a toggle has **one shared mechanism** — a
+**leading `ChevronRight` that rotates 90° when open** — in **two skins, picked by context**.
+Don't invent a third (no trailing `ChevronDown`, no ghost-vs-outline coin-flip per page).
+
+- **Inside a Dialog form → low-emphasis text button + CSS grid-rows collapse.** This is the
+  "More options" pattern in the § Form recipe (`bot-schedule.vue`): a `text-xs
+  text-muted-foreground` `<button>` carrying the leading chevron, animating height via
+  `grid-template-rows: 0fr ↔ 1fr`. The toggle is inline form text, so it stays quiet.
+- **Inside a `SettingsSection` card → an outline button in a hairline row.** The disclosed block
+  is a set of card rows, so the control is a section-level affordance, not inline form text:
+
+```vue
+<div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
+  <span class="text-sm font-medium text-foreground">{{ $t('feature.advancedTitle') }}</span>
+  <Button variant="outline" size="sm" class="shrink-0" @click="open = !open">
+    <ChevronRight class="size-4 transition-transform" :class="open ? 'rotate-90' : ''" />
+    {{ open ? $t('feature.collapse') : $t('feature.expand') }}
+  </Button>
+</div>
+<template v-if="open"><!-- the advanced rows --></template>
+```
+
+The toggle row keeps `last:border-b-0`: collapsed, it's the card's last row so its hairline must
+vanish (otherwise an always-on border sits a few px above the card's rounded edge and **fights
+the stroke**); expanded, the rows below render and the border becomes the real separator.
+References: the Access rules card (`bot-access.vue`) and the channel platform card
+(`channel-settings-panel.vue`) — both now use this exact button, so don't reintroduce a
+divergent one.
 
 ### List ↔ detail directional swap
 
@@ -385,6 +447,17 @@ wider/narrower pane, and a larger root/OS font — and hold up under all three a
 - The desktop shell locks `body` overflow. A page that must scroll owns its container
   (`h-dvh overflow-y-auto`, as the dev wall does); settings pages scroll inside the section's
   existing scroll area — don't add a second one.
+- **Reserve the scrollbar gutter so growth doesn't shake the layout sideways.** A centered
+  `mx-auto max-w-*` column re-centers the instant a scrollbar appears — i.e. the moment content
+  grows tall enough to scroll (an advanced section expands, a list fills in) — so the title and
+  card edges jump left and the whole pane visibly "shakes" left/right. The fix is
+  `[scrollbar-gutter:stable]` on the **scroll container** (the element with `overflow-y-auto`),
+  *not* on the content: the track's width is always reserved, so showing/hiding the bar never
+  changes the content width, and every tab/state stays aligned. This already lives on the
+  bot-detail pane (`pages/bots/detail.vue`) and the settings shell
+  (`pages/settings-section/index.vue`); any new owned scroll container holding a centered column
+  inherits the same requirement. Set it once on the scroll owner — never per page, never on the
+  inner content.
 - Sideways-nudge transforms (the ±24px list↔detail swap) clip with `overflow-x-clip`, **not**
   `overflow-x-hidden` (which becomes a vertical scroll container and steals scroll from the
   ancestor). See `swap-transition.vue`.
@@ -428,6 +501,8 @@ see it, replace it with the right column. This is your strip-list when refactori
 | hardcoded user-facing text | breaks i18n; only checked in one language | i18n key in both `en.json` + `zh.json`; design for the wider/longer locale |
 | section pops in a different size than its skeleton/placeholder | layout jump on load | skeleton matches final shape; reserve `min-h`; `—` not faked `0` |
 | stray `overflow-*` / `overflow-x-hidden` on a swapped pane | nested scrollbar or stolen ancestor scroll | own scroll only when intended; `overflow-x-clip` for sideways-nudge |
+| a centered column that jumps sideways when a scrollbar appears (expand a section → the pane "shakes" left/right) | the `mx-auto` column re-centers the instant the bar takes/returns its width | `[scrollbar-gutter:stable]` on the owning `overflow-y-auto` container — reserve the track once, never per page (§ Scroll ownership) |
+| two different "show advanced" toggles (one ghost + trailing `ChevronDown`, one outline + leading `ChevronRight`) | the same affordance drawn two ways drifts further apart every page | one mechanism — leading `ChevronRight` rotate-90; text-button skin in a Dialog form, outline-button skin in a card (§ Advanced disclosure) |
 | one-click delete, or ghost button + `text-destructive` | unconfirmed/under-weighted destruction | filled `variant="destructive"` + confirm step; danger card at the bottom |
 | always-present "Status: OK" / healthy-state row | noise where a healthy state should say nothing | progressive disclosure — show only when actionable, hide the whole block otherwise |
 | hand-written control (clickable `<div>`/`<span>`, bespoke popover list, `<div>`-grid "table") | re-implements a primitive; can't take size/token/focus/a11y, and drifts | reuse the `@memohai/ui` atom as-is; never rebuild a control from raw markup |
@@ -436,6 +511,7 @@ see it, replace it with the right column. This is your strip-list when refactori
 | `size="sm"` on a form footer / primary action | squat half-height buttons read as unfinished | default (`h-9`, full height); `sm` only for genuinely tight, secondary spots |
 | decorative icon stacked in a card / atop an empty block | a cost (surface, shadow, extra color, language-fit) with no signal | ship no icon; add one only after the developer signs off |
 | card-in-card (a bordered box wrapping bordered boxes) | nesting depth with no meaning; reads mostly-empty | flatten to one surface — hairline-divided tiles, not boxes-in-a-box |
+| a dashed/bordered `Empty` — or an `EmptyMedia variant="icon"` gray tile — placed *inside* a `SettingsSection` white card | also card-in-card: the white section already frames it, so the inner border/tile is a box-in-a-box (a white card holding a grey card) | the in-card Empty is borderless centered content (`py-12`, no icon tile); add the dashed border only when the `Empty` is the **outermost** frame (no parent card) |
 | `font-[NNN]` weight / `text-[Npx]` size / `text-foreground\|muted-foreground/NN` alpha in a page | off the role-map weight, off the `--text-*` scale, hand-mixed alpha — the single most common app-page drift (60+ files), and it sits even in the `about` reference | the three weights (`normal`/`medium`/`semibold`), the `--text-*` scale, the overlay ladder — and push the guard to scan `apps/web` |
 | `w-fit` / content-sized container width | one long string (a back label, a name) silently resizes the frame | pin the width; let text `truncate` inside a fixed box |
 | header `px-2` over a full-bleed body (`Input` / `Table` / grid of cards) | the right-aligned action indents 8px off the body's right edge → the "Submit / New member / Save don't line up" bug | compose through `PageShell` (`components/page-shell`) — it owns title + actions + body on one set of edges; never hand-roll a `<header>` |

@@ -44,39 +44,34 @@
         {{ $t('common.loading') }}
       </div>
 
-      <div
+      <Empty
         v-else-if="!skills.length"
-        class="p-4"
+        class="py-12"
       >
-        <Empty class="rounded-[var(--radius-menu-shell)] border border-dashed border-border py-12">
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <Zap />
-            </EmptyMedia>
-            <EmptyTitle>{{ $t('bots.skills.emptyTitle') }}</EmptyTitle>
-            <EmptyDescription>{{ $t('bots.skills.emptyDescription') }}</EmptyDescription>
-          </EmptyHeader>
-          <EmptyContent>
-            <div class="flex items-center gap-2">
-              <Button
-                size="sm"
-                @click="handleCreate"
-              >
-                <Plus class="size-4" />
-                {{ $t('bots.skills.addSkill') }}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                @click="isDiscoveryDialogOpen = true"
-              >
-                <SlidersHorizontal class="size-4" />
-                {{ $t('bots.skills.discoveryTitle') }}
-              </Button>
-            </div>
-          </EmptyContent>
-        </Empty>
-      </div>
+        <EmptyHeader>
+          <EmptyTitle>{{ $t('bots.skills.emptyTitle') }}</EmptyTitle>
+          <EmptyDescription>{{ $t('bots.skills.emptyDescription') }}</EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <div class="flex items-center gap-2">
+            <Button
+              size="sm"
+              @click="handleCreate"
+            >
+              <Plus class="size-4" />
+              {{ $t('bots.skills.addSkill') }}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              @click="isDiscoveryDialogOpen = true"
+            >
+              <SlidersHorizontal class="size-4" />
+              {{ $t('bots.skills.discoveryTitle') }}
+            </Button>
+          </div>
+        </EmptyContent>
+      </Empty>
 
       <template v-else>
         <div
@@ -355,7 +350,7 @@
 </template>
 
 <script setup lang="ts">
-import { ArrowDownToLine, Eye, EyeOff, Plus, SlidersHorizontal, Zap, SquarePen, Trash2 } from 'lucide-vue-next'
+import { ArrowDownToLine, Eye, EyeOff, Plus, SlidersHorizontal, SquarePen, Trash2 } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
@@ -364,7 +359,7 @@ import {
   Badge,
   Button,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose,
-  Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle,
+  Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle,
   Label, Spinner, Textarea,
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'

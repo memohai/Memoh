@@ -121,21 +121,22 @@
         />
 
         <template v-if="optionalFieldsKeys.length > 0">
-          <!-- Label aligns with the credential labels on the left; a single ghost
-               toggle on the right (expand-all style) carries the hover/press feedback. -->
+          <!-- Label on the left; the canonical settings-card disclosure on the
+               right — an outline button with a leading chevron that rotates 90°
+               when open (same mechanism as the Access rules card). -->
           <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-transparent">
             <span class="text-sm font-medium text-foreground">{{ $t('bots.channels.advancedTitle') }}</span>
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
-              class="text-muted-foreground hover:text-foreground"
+              class="shrink-0"
               @click="isAdvancedExpanded = !isAdvancedExpanded"
             >
-              {{ isAdvancedExpanded ? $t('bots.channels.collapse') : $t('bots.channels.expandAll') }}
-              <ChevronDown
-                class="size-4"
-                :class="isAdvancedExpanded ? 'rotate-180' : ''"
+              <ChevronRight
+                class="size-4 transition-transform"
+                :class="isAdvancedExpanded ? 'rotate-90' : ''"
               />
+              {{ isAdvancedExpanded ? $t('bots.channels.collapse') : $t('bots.channels.expandAll') }}
             </Button>
           </div>
           <template v-if="isAdvancedExpanded">
@@ -189,7 +190,7 @@
 
 <script setup lang="ts">
 import { Button, Input, Spinner } from '@memohai/ui'
-import { ChevronDown } from 'lucide-vue-next'
+import { ChevronRight } from 'lucide-vue-next'
 import { reactive, watch, computed, ref } from 'vue'
 import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
