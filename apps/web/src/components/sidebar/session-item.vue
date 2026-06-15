@@ -2,7 +2,7 @@
   <div
     role="button"
     tabindex="0"
-    class="group relative flex items-center h-[35px] w-full rounded-md px-[11px] text-left transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    class="group relative flex items-center min-h-9 w-full rounded-md px-[11px] text-left transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     :class="isActive ? 'bg-sidebar-accent' : 'hover:bg-[color:var(--sidebar-hover)]'"
     :title="hoverTitle"
     @click="$emit('select', session)"

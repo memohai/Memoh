@@ -29,6 +29,7 @@
             <div
               v-for="vRow in virtualRows"
               :key="vRow.key"
+              :ref="measureRow"
               :data-index="vRow.index"
               :style="{ position: 'absolute', top: '0', left: '0', width: '100%', transform: `translateY(${vRow.start}px)` }"
             >
@@ -172,15 +173,16 @@ const visibleSessions = computed(() =>
 )
 
 // ---- virtualized session list ----
-// Each row is pinned to an exact stride: SessionItem is h-[35px] and the 37px
-// estimate leaves a 2px gap between rows (matching the old flex gap-0.5), so the
-// offsets stay pixel-exact and we never need a per-row measure pass.
+// Rows are MEASURED, not pinned to a px stride: SessionItem sizes in rem (min-h-9)
+// so its real height tracks the UI font setting / browser zoom. A fixed px estimate
+// would desync the row offsets the moment the font scales, so we hand the virtualizer
+// a rough estimate and let measureElement read each row's actual height.
 const scrollEl = ref<HTMLElement | null>(null)
 const virtualizer = useVirtualizer<HTMLElement, HTMLElement>(
   computed(() => ({
     count: visibleSessions.value.length,
     getScrollElement: () => scrollEl.value,
-    estimateSize: () => 37,
+    estimateSize: () => 38,
     overscan: 10,
     getItemKey: (index: number) => visibleSessions.value[index]?.id ?? index,
   })),
@@ -192,6 +194,12 @@ const virtualRows = computed(() =>
     return session ? [{ key: String(vi.key), index: vi.index, start: vi.start, session }] : []
   }),
 )
+
+// Read each rendered row's real (rem-based) height so offsets stay correct when the
+// UI font scales — pairs with the estimate above.
+function measureRow(el: unknown) {
+  if (el instanceof HTMLElement) virtualizer.value.measureElement(el)
+}
 
 // Switching bots swaps the whole list; start the new bot at the top instead of
 // inheriting the previous bot's scroll offset (which could land past the end of

@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
+import { registerSharedMarkdownComponents } from '@/components/markdown'
 
 const props = withDefaults(defineProps<{
   content: string
@@ -12,6 +13,10 @@ const props = withDefaults(defineProps<{
 
 enableKatex()
 enableMermaid()
+// File preview reuses the chat's design-system node components (library
+// Checkbox task markers, link-language footnotes). It keeps markstream's own
+// Monaco code block, so no code_block override here.
+registerSharedMarkdownComponents('file-preview-md')
 
 const settings = useSettingsStore()
 const isDark = computed(() => settings.theme === 'dark')
@@ -31,6 +36,8 @@ const codeFontRenderKey = computed(() => settings.codeFontStack)
         :is-dark="isDark"
         :typewriter="false"
         :fade="false"
+        :show-tooltips="false"
+        :mermaid-props="{ showTooltips: false }"
         :code-block-monaco-options="codeBlockMonacoOptions"
         custom-id="file-preview-md"
       />

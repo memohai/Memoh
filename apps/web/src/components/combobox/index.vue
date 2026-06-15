@@ -56,6 +56,7 @@
             <div
               v-for="vRow in virtualRows"
               :key="vRow.key"
+              :ref="measureRow"
               :data-index="vRow.index"
               class="py-0.5"
               :style="{ position: 'absolute', top: '0', left: '0', width: '100%', transform: `translateY(${vRow.start}px)` }"
@@ -146,11 +147,10 @@ const virtualizer = useVirtualizer<HTMLElement, HTMLElement>(
   computed(() => ({
     count: filtered.value.length,
     getScrollElement: () => scrollEl.value,
-    // Rows are pinned to an exact height — the option button is h-8 (32px) and the
-    // row wrapper adds py-0.5 (4px) = 36px — so this estimate IS the real height for
-    // every row. That determinism is why we don't measureElement: there is no
-    // variance to measure, the translateY offsets stay pixel-exact, and we skip a
-    // getBoundingClientRect reflow per visible row on open/scroll.
+    // Rows are single-line (option button h-8 + py-0.5 ≈ 36px at the default font);
+    // this seed keeps the scroll size close to real so the scrollbar tracks. measureRow
+    // reads the true height at runtime, so when the UI font setting / browser zoom
+    // scales the rem row an off estimate only causes minor jitter, never misalignment.
     estimateSize: () => 36,
     overscan: 8,
     getItemKey: (index: number) => filtered.value[index]?.value ?? index,
@@ -165,6 +165,10 @@ const virtualRows = computed(() =>
     return option ? [{ key: String(vi.key), index: vi.index, start: vi.start, option }] : []
   }),
 )
+
+const measureRow = (el: unknown) => {
+  if (el instanceof HTMLElement) virtualizer.value.measureElement(el)
+}
 
 // useListboxKeyboard skips non-'item' rows, so wrap the flat options as item rows.
 // Indexes stay 1:1 with `filtered`, so activeIndex lines up with the virtual rows.

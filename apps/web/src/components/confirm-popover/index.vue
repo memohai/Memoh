@@ -4,54 +4,56 @@
       <PopoverTrigger as-child>
         <slot name="trigger" />
       </PopoverTrigger>
-      <PopoverContent class="w-80 p-0 overflow-hidden border-border shadow-xl">
-        <div class="p-4 space-y-3">
+      <!-- Inherit the shared popover chrome (menu-shell radius, --border-menu
+           hairline, dropdown shadow, p-4) instead of overriding it — this is the
+           same surface as DropdownMenu / Select, so a confirm reads as part of
+           the one menu language. -->
+      <PopoverContent class="w-72">
+        <div class="space-y-3">
           <div
             v-if="title"
-            class="flex items-center gap-2 mb-1"
+            class="flex items-center gap-2"
           >
-            <div
+            <span
               v-if="$slots.icon"
               class="shrink-0"
             >
               <slot name="icon" />
-            </div>
-            <h5 class="text-xs font-bold text-foreground">
+            </span>
+            <h5 class="min-w-0 truncate text-sm font-medium text-foreground">
               {{ title }}
             </h5>
           </div>
-          
-          <div class="text-[11px] text-muted-foreground leading-relaxed">
+
+          <div class="text-xs leading-relaxed text-muted-foreground">
             <slot>
               {{ message }}
             </slot>
           </div>
-        </div>
 
-        <div class="flex items-center justify-end gap-2 px-4 py-3 bg-muted/30 border-t border-border/50">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            class="h-8 text-[11px] font-medium"
-            @click="close"
-          >
-            {{ cancelText || $t('common.cancel') }}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            class="h-8 text-[11px] font-bold shadow-sm"
-            :variant="variant"
-            :disabled="loading"
-            @click="$emit('confirm'); close()"
-          >
-            <Spinner
-              v-if="loading"
-              class="size-3 mr-1"
-            />
-            {{ confirmText || $t('common.confirm') }}
-          </Button>
+          <div class="flex items-center justify-end gap-2 pt-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              @click="close"
+            >
+              {{ cancelText || $t('common.cancel') }}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              :variant="variant"
+              :disabled="loading"
+              @click="$emit('confirm'); close()"
+            >
+              <Spinner
+                v-if="loading"
+                class="size-3.5"
+              />
+              {{ confirmText || $t('common.confirm') }}
+            </Button>
+          </div>
         </div>
       </PopoverContent>
     </template>
@@ -80,7 +82,7 @@ withDefaults(defineProps<{
   confirmText: '',
   cancelText: '',
   loading: false,
-  variant: 'default'
+  variant: 'default',
 })
 
 defineEmits<{
