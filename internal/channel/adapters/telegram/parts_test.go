@@ -221,8 +221,11 @@ func TestExtractTelegramMessageParts_UsesCaptionAndCaptionEntities(t *testing.T)
 	}
 }
 
-func TestExtractTelegramMessageParts_HonorsRuneOffsets(t *testing.T) {
+func TestExtractTelegramMessageParts_HonorsUTF16OffsetsForBMP(t *testing.T) {
 	t.Parallel()
+	// CJK characters live in the BMP, so one UTF-16 code unit equals one rune;
+	// the offsets line up under either indexing strategy. The supplementary-plane
+	// case is covered separately below.
 	msg := &tgbotapi.Message{
 		Text: "你好 world",
 		Entities: []tgbotapi.MessageEntity{
@@ -238,6 +241,35 @@ func TestExtractTelegramMessageParts_HonorsRuneOffsets(t *testing.T) {
 	}
 	if parts[1].Text != "world" || len(parts[1].Styles) != 1 {
 		t.Fatalf("expected bold 'world', got %+v", parts[1])
+	}
+}
+
+func TestExtractTelegramMessageParts_HandlesSupplementaryPlaneEmoji(t *testing.T) {
+	t.Parallel()
+	// 🎉 (U+1F389) is encoded as a UTF-16 surrogate pair (2 code units) but is a
+	// single rune in Go. Telegram entity offsets are documented as UTF-16 code
+	// units; rune-based slicing would drift by 1 after each supplementary-plane
+	// character.
+	msg := &tgbotapi.Message{
+		Text: "see 🎉 bold here",
+		Entities: []tgbotapi.MessageEntity{
+			// "bold" begins at UTF-16 index 7: "see "(0-3) + 🎉(4-5) + " "(6) + "bold"(7-10).
+			{Type: "bold", Offset: 7, Length: 4},
+		},
+	}
+	parts := extractTelegramMessageParts(msg)
+	var bold *channel.MessagePart
+	for i := range parts {
+		if len(parts[i].Styles) == 1 && parts[i].Styles[0] == channel.MessageStyleBold {
+			bold = &parts[i]
+			break
+		}
+	}
+	if bold == nil {
+		t.Fatalf("expected a bold part, got %+v", parts)
+	}
+	if bold.Text != "bold" {
+		t.Fatalf("expected bold text 'bold' under UTF-16 offsets, got %q (offsets interpreted as runes drift past the surrogate pair)", bold.Text)
 	}
 }
 

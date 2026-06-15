@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf16"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
@@ -36,8 +37,12 @@ func extractTelegramMessageParts(msg *tgbotapi.Message) []channel.MessagePart {
 		return sorted[i].Length > sorted[j].Length
 	})
 
-	runes := []rune(text)
-	n := len(runes)
+	// Telegram entity offsets and lengths are documented as UTF-16 code units,
+	// so slice the text through utf16 indices rather than runes — supplementary
+	// plane characters (e.g. most emoji) take 2 code units each and would
+	// otherwise drift rune-based offsets.
+	units := utf16.Encode([]rune(text))
+	n := len(units)
 	var parts []channel.MessagePart
 	appendPlain := func(s string) {
 		if s == "" {
@@ -55,9 +60,9 @@ func extractTelegramMessageParts(msg *tgbotapi.Message) []channel.MessagePart {
 			continue
 		}
 		if ent.Offset > cursor {
-			appendPlain(string(runes[cursor:ent.Offset]))
+			appendPlain(string(utf16.Decode(units[cursor:ent.Offset])))
 		}
-		slice := string(runes[ent.Offset : ent.Offset+ent.Length])
+		slice := string(utf16.Decode(units[ent.Offset : ent.Offset+ent.Length]))
 		if part, ok := telegramEntityToPart(ent, slice); ok {
 			parts = append(parts, part)
 		} else {
@@ -66,7 +71,7 @@ func extractTelegramMessageParts(msg *tgbotapi.Message) []channel.MessagePart {
 		cursor = ent.Offset + ent.Length
 	}
 	if cursor < n {
-		appendPlain(string(runes[cursor:]))
+		appendPlain(string(utf16.Decode(units[cursor:])))
 	}
 
 	if onlyPlainText(parts) {
