@@ -1,40 +1,13 @@
 <template>
-  <div class="mx-auto max-w-2xl space-y-5 pb-6">
-    <div class="flex items-center justify-between border-b border-border/50 pb-4">
-      <div class="space-y-1">
-        <h3 class="text-sm font-semibold text-foreground">
+  <div class="mx-auto max-w-3xl pt-6 pb-8">
+    <div class="mb-6 px-2">
+      <div class="min-w-0">
+        <h1 class="text-lg font-semibold text-foreground">
           {{ $t('bots.tabs.acp') }}
-        </h3>
-        <p class="text-[11px] text-muted-foreground">
+        </h1>
+        <p class="mt-1 text-xs text-muted-foreground">
           {{ $t('bots.settings.blocks.acpDescription') }}
         </p>
-      </div>
-
-      <div class="flex shrink-0 items-center gap-3">
-        <Transition name="fade">
-          <div
-            v-if="hasChanges"
-            class="flex items-center gap-1.5 rounded-full border border-border/50 bg-muted/40 px-2 py-0.5"
-          >
-            <div class="size-1 rounded-full bg-muted-foreground/40" />
-            <span class="whitespace-nowrap text-[10px] font-medium text-muted-foreground">
-              {{ $t('common.unsaved') }}
-            </span>
-          </div>
-        </Transition>
-
-        <Button
-          size="sm"
-          :disabled="!hasChanges || saveLoading"
-          class="h-8 min-w-24 text-xs font-medium shadow-none"
-          @click="handleSave"
-        >
-          <Spinner
-            v-if="saveLoading"
-            class="mr-1.5 size-3"
-          />
-          {{ $t('bots.settings.save') }}
-        </Button>
       </div>
     </div>
 
@@ -43,22 +16,21 @@
       :profiles="profiles"
       :form="form"
       :loading="profilesLoading"
+      @commit="persistACPForm"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
-import { Button, Spinner } from '@memohai/ui'
 import { getAcpProfiles, getBotsById, putBotsById } from '@memohai/sdk'
 import type { AcpprofilePublicProfile, BotsUpdateBotRequest } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import SettingsAcpCard from './settings-acp-card.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { isLocalWorkspaceBot } from '@/utils/bot-workspace'
 import {
   emptyACPAgentForm,
   findMissingRequiredACPField,
@@ -80,6 +52,9 @@ const botIdRef = computed(() => props.botId) as Ref<string>
 const form = reactive<ACPForm>({
   agents: {},
 })
+const lastPersistedSnapshot = ref('')
+const persistRunning = ref(false)
+const persistQueued = ref(false)
 
 const { data: profileData, isLoading: profilesLoading } = useQuery({
   key: () => ['acp-profiles'],
@@ -100,7 +75,7 @@ const { data: bot } = useQuery({
   enabled: () => !!botIdRef.value,
 })
 
-const { mutateAsync: updateBot, isLoading: saveLoading } = useMutation({
+const { mutateAsync: updateBot } = useMutation({
   mutation: async (body: BotsUpdateBotRequest) => {
     const { data } = await putBotsById({
       path: { id: botIdRef.value },
@@ -119,19 +94,22 @@ watch([bot, profiles], ([value, list]) => {
   applyMetadataToForm(value?.metadata as Record<string, unknown> | undefined, list)
 }, { immediate: true })
 
-const hasChanges = computed(() => {
-  if (!bot.value) return false
-  return JSON.stringify(normalizeACPForm(form, profiles.value)) !== JSON.stringify(readACPConfig(bot.value.metadata as Record<string, unknown> | undefined, profiles.value))
-})
-
-async function handleSave() {
+async function persistACPForm() {
+  if (!bot.value) return
+  if (persistRunning.value) {
+    persistQueued.value = true
+    return
+  }
+  const normalized = normalizeACPForm(form, profiles.value)
+  const snapshot = JSON.stringify(normalized)
+  if (snapshot === lastPersistedSnapshot.value) return
+  const validationError = validateForm(normalized, profiles.value)
+  if (validationError) {
+    toast.error(validationError)
+    return
+  }
+  persistRunning.value = true
   try {
-    const normalized = normalizeACPForm(form, profiles.value)
-    const validationError = validateForm(normalized, profiles.value, isLocalWorkspaceBot(bot.value?.metadata))
-    if (validationError) {
-      toast.error(validationError)
-      return
-    }
     await updateBot({
       metadata: withACPMetadata(
         bot.value?.metadata as Record<string, unknown> | undefined,
@@ -139,14 +117,25 @@ async function handleSave() {
         profiles.value,
       ),
     })
-    toast.success(t('bots.settings.saveSuccess'))
+    lastPersistedSnapshot.value = snapshot
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
+  } finally {
+    persistRunning.value = false
+    if (persistQueued.value) {
+      persistQueued.value = false
+      void persistACPForm()
+    }
   }
 }
 
 function applyMetadataToForm(metadata: Record<string, unknown> | undefined, list: AcpprofilePublicProfile[]) {
   const next = readACPConfig(metadata, list)
+  const nextSnapshot = JSON.stringify(next)
+  const currentSnapshot = JSON.stringify(normalizeACPForm(form, list))
+  if ((persistRunning.value || persistQueued.value || currentSnapshot !== lastPersistedSnapshot.value) && nextSnapshot === lastPersistedSnapshot.value) {
+    return
+  }
   for (const key of Object.keys(form.agents)) {
     if (!next.agents[key]) delete form.agents[key]
   }
@@ -155,10 +144,11 @@ function applyMetadataToForm(metadata: Record<string, unknown> | undefined, list
     if (!id) continue
     form.agents[id] = next.agents[id] ?? emptyACPAgentForm(profile)
   }
+  lastPersistedSnapshot.value = nextSnapshot
 }
 
-function validateForm(value: ACPForm, list: AcpprofilePublicProfile[], isLocalWorkspace = false): string {
-  const missing = findMissingRequiredACPField(value, list, isLocalWorkspace)
+function validateForm(value: ACPForm, list: AcpprofilePublicProfile[]): string {
+  const missing = findMissingRequiredACPField(value, list)
   if (!missing) return ''
   return t('bots.settings.acpRequiredField', {
     agent: missing.profile.display_name || missing.profile.id,
