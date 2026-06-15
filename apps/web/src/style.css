@@ -194,14 +194,6 @@
   --chat-latin-h2: 560;     --chat-cjk-h2: 470;
   --chat-latin-h3: 520;     --chat-cjk-h3: 440;
   --chat-latin-h4: 500;     --chat-cjk-h4: 420;
-  /* Sidebar labels (session titles) mix CJK + Latin constantly, so they borrow the
-   * chat's per-script WEIGHT idea — but ONLY the weight. MiSans (CJK) reads heavier
-   * than Inter (Latin) at the same number, so a single 400 makes the English run
-   * look thin beside the Chinese; this pair lifts Latin and trims CJK to balance at
-   * the 14px label size (it averages back to ~400, the old uniform weight). No size
-   * shave / tracking / leading: a one-line truncated label isn't prose, and those
-   * prose compensations would only make list rows inconsistent. Tune here. */
-  --sidebar-latin: 440;     --sidebar-cjk: 370;
 }
 /* Latin's optical compensation (size/weight/tracking) ALL lives on the span, not
  * the block. A block-level :lang(en) size only fires when the whole block is pure
@@ -233,10 +225,16 @@
 [data-chat-content] :is(.heading-4, .heading-5) .chat-latin { font-weight: var(--chat-latin-h4); }
 [data-chat-content] :is(.heading-4, .heading-5) .chat-cjk { font-weight: var(--chat-cjk-h4); }
 
-/* Sidebar session-title runs (session-item.vue): weight-only per-script balance,
- * no size/tracking. See --sidebar-latin / --sidebar-cjk above. */
-.sidebar-latin { font-weight: var(--sidebar-latin); }
-.sidebar-cjk { font-weight: var(--sidebar-cjk); }
+/* Sidebar session-title runs (session-item.vue) reuse the chat body-tier
+ * per-script treatment verbatim — same --chat-*-body weight, same Latin size shave
+ * + tracking — so a mixed CJK/Latin title reads identically to body prose. No
+ * sidebar-specific tokens; this is the chat treatment, applied to the label. */
+.sidebar-latin {
+  font-weight: var(--chat-latin-body);
+  font-size: var(--chat-latin-size);
+  letter-spacing: var(--chat-latin-track);
+}
+.sidebar-cjk { font-weight: var(--chat-cjk-body); }
 
 @layer base {
   :root {
