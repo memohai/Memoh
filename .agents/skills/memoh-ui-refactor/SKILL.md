@@ -263,6 +263,22 @@ with `overflow-x-clip` — not `overflow-x-hidden`, which would turn the element
 scroll container and steal scrolling from the ancestor. Don't introduce a new scroll container
 unless you mean to.
 
+**Every page-level scroll container that holds a centered `max-w-3xl` column must reserve the
+scrollbar gutter — `[scrollbar-gutter:stable]`.** The shell centers content with `mx-auto`, so
+its left/right margins are computed from the pane's *available* width. When a classic
+(space-consuming) scrollbar appears, it eats that width and the whole centered column — title,
+card edges, everything — shifts sideways. The tell is real and confusing: two sibling tabs look
+"only similar," because a long tab scrolls (narrower pane) while a short one doesn't (wider
+pane), so the title and card edges land in different spots as you switch between them. A page
+that doesn't scroll *today* will the day its content grows — so this is not optional on the
+scroller, it's structural. Reserving the gutter keeps the available width constant whether or
+not the scrollbar is visible, so every page that shares (or mirrors) the scroller stays aligned.
+There are only a handful of these page-level scrollers (the settings section's `router-view`
+pane; any master-detail surface that runs its *own* inner scroll pane, e.g. the bot-detail tab
+pane) — put the rule on the scroll container itself, never on each page, so all pages it hosts
+inherit it for free. Bounded inner scrollers (a tool-call detail body, a dropdown list, a log
+pane) are left-aligned and don't need it.
+
 ## Component discipline
 
 **Reuse first; build new only with sign-off.** The default is always to *find and reuse* an
@@ -485,6 +501,9 @@ seeing it rendered is:
   `text-black`, `text-gray-`, `bg-gray-`, `#`, `dark:`, inline `style=`), then **flip the app
   to dark and look** — is anything still glued to a light value?
 - Shrink to the **narrowest pane width** (and check `zh`): does anything overflow or clip?
+- **Switch between sibling pages/tabs that share the scroller** — one long (scrolls), one short
+  (doesn't). Does the title / card edge stay put, or jump sideways by a scrollbar's width? If it
+  jumps, the page-level scroll container is missing `[scrollbar-gutter:stable]`.
 - Are dividers the right kind — **inset** inside cards, **full-bleed** as structural splits?
 - Is the **save model** right (auto-save silent vs deliberate manual save), with no toast
   spam on ambient changes?

@@ -209,7 +209,13 @@
           <template #sidebar-footer />
 
           <template #detail>
-            <div class="absolute inset-0 overflow-y-auto bg-background">
+            <!-- scrollbar-gutter: stable reserves the scrollbar track on every tab,
+                 scrolling or not. Without it a long tab (e.g. General) shows a
+                 scrollbar that narrows the pane, so PageShell's mx-auto column
+                 re-centers and the title + card edges shift vs a short tab (e.g.
+                 Platforms). Reserving the gutter keeps the content width — and thus
+                 every tab's alignment — identical. -->
+            <div class="absolute inset-0 overflow-y-auto bg-background [scrollbar-gutter:stable]">
               <!-- Top drag strip over the detail pane only (mac desktop), so the
                    window stays draggable beside the sidebar. No fill/border — it
                    shares --background with the content, so the sidebar's vertical
