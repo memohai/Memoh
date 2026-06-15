@@ -141,7 +141,7 @@ watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
 
       <Empty
         v-else
-        class="rounded-[var(--radius-menu-shell)] border border-dashed border-border py-16"
+        class="rounded-[var(--radius-menu-shell)] border border-border py-16"
       >
         <EmptyHeader>
           <EmptyTitle>{{ t('email.emptyTitle') }}</EmptyTitle>

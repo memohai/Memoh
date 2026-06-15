@@ -322,15 +322,24 @@ recurring failures to avoid:
 - **`BadgeCount`:** `destructive` red dot pinned to an icon corner = alert/unread; `default`
   neutral count rides a tab/filter/segment; a flat list row uses a plain muted numeral, no bubble.
 - **`Tooltip`:** always the `@memohai/ui` `Tooltip`. A hand-rolled or legacy tooltip is a bug.
-- **Empty surfaces — and the frame already belongs to someone.** `Empty` is centered title +
-  description + action; it is **not** a card. *Who draws the frame* decides if it gets a border:
-  when the Empty sits **inside a `SettingsSection` (the white card)**, it carries **no border and
-  no icon-tile** — the white card is the frame, so a dashed-bordered `Empty` or an `EmptyMedia`
-  grey glyph tile dropped inside it is **card-in-card** (a white card holding a grey card — yes,
-  *this* is card-in-card too). Just `py-12` centered content. Only when the `Empty` is the
-  **outermost** frame (a standalone list with no parent card) does the dashed border earn its
-  place. And for a list that already shows an **add** affordance, don't stack a decorative-icon +
-  heading + sub-line block on top of the Add button that's already on screen.
+- **An empty state keeps the populated skeleton — it is the same page with no rows yet.** The
+  worst empty-state failure is letting "there's no data" rearrange the page into a *different*
+  shape. Keep the exact frame the populated state uses (the same `SettingsSection` card, the same
+  grid container) and drop the message *inside* it, so entering an empty page vs a full one never
+  jolts the layout. The model is the **Plugins tab**: its empty state is the very white card it
+  shows when populated — just `py-12` centered title + description + the one guiding action (an
+  outline "+ Add" / "Supermarket" button). Two hard rules ride on top:
+  - **`border-dashed` is NOT an empty-state look.** Dashed is reserved for the **"+ Add another"
+    tile** that sits *beside real items in an already-populated list/grid*, where adding one more
+    is the secondary affordance. A completely-empty surface takes the **solid** frame its
+    populated form has — the section card, or a solid-`border` framed block for a standalone grid
+    — never a dashed box, and never bare floating muted text. (This refines the older "outermost
+    Empty earns a dashed border" guidance: it does not — outermost empties are solid-framed.)
+  - **No decorative icon.** An `EmptyMedia variant="icon"` glyph tile, or any big lucide glyph
+    stacked above the title, is banned: it is both card-in-card and the icon-abuse below. Just
+    title + description + action. (An action *button* keeps its own small action glyph — that is
+    not a decorative tile.) This page-type attracts icon abuse — a giant glyph crammed in front
+    of a list item or empty block — so default to **none** everywhere except a button's own glyph.
 - **Destructive actions:** a filled `<Button variant="destructive">`, gated behind a
   confirmation (`ConfirmPopover`, or a dialog for heavier deletes) — never a bare one-click
   delete, never a ghost button with manual red text. Group truly dangerous actions in a danger

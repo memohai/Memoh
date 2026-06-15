@@ -1,24 +1,10 @@
 <template>
   <PageShell
     variant="tab"
-    :title="$t('bots.heartbeat.title')"
+    :title="$t('bots.tabs.heartbeat')"
   >
-    <template #actions>
-      <Button
-        variant="outline"
-        :disabled="isLoading"
-        @click="handleRefresh"
-      >
-        <RotateCw
-          class="size-4"
-          :class="{ 'animate-spin': isLoading }"
-        />
-        {{ $t('common.refresh') }}
-      </Button>
-    </template>
-
     <div class="space-y-8">
-      <SettingsSection :title="$t('bots.settings.heartbeatEnabled')">
+      <SettingsSection :title="$t('bots.heartbeat.settingsTitle')">
         <SettingsRow
           :label="$t('bots.settings.heartbeatEnabled')"
           :description="$t('bots.settings.heartbeatDescription')"
@@ -30,72 +16,121 @@
         </SettingsRow>
 
         <template v-if="settingsForm.heartbeat_enabled">
-          <SettingsRow :label="$t('bots.settings.heartbeatInterval')">
-            <Input
-              v-model.number="settingsForm.heartbeat_interval"
-              type="number"
-              :min="1"
-              placeholder="1440"
-              class="h-8 w-28 tabular-nums"
-            />
+          <SettingsRow :label="$t('bots.heartbeat.checkEvery')">
+            <div class="flex items-center gap-2">
+              <Input
+                v-model.number="settingsForm.heartbeat_interval"
+                type="number"
+                :min="1"
+                placeholder="1440"
+                class="h-8 w-20 tabular-nums"
+              />
+              <span class="text-sm text-muted-foreground">{{ $t('bots.heartbeat.intervalUnit') }}</span>
+            </div>
           </SettingsRow>
 
-          <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3">
-            <div class="min-w-0">
-              <div class="text-sm font-medium text-foreground">
-                {{ $t('bots.settings.heartbeatModel') }}
-              </div>
-              <p class="mt-0.5 text-xs text-muted-foreground">
-                {{ $t('bots.settings.heartbeatModelDescription') }}
-              </p>
-            </div>
+          <!-- Model is a power-user override (it defaults to the bot's chat model), so it
+               stays folded behind Advanced rather than occupying space the moment you enable.
+               Canonical settings-card disclosure: label left, outline button with a chevron
+               that rotates 90° on the right (same as the channel Advanced / Access cards). -->
+          <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
+            <span class="text-sm font-medium text-foreground">{{ $t('bots.heartbeat.advanced') }}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              class="shrink-0"
+              @click="advancedOpen = !advancedOpen"
+            >
+              <ChevronRight
+                class="size-4 transition-transform"
+                :class="advancedOpen ? 'rotate-90' : ''"
+              />
+              {{ advancedOpen ? $t('common.collapse') : $t('common.expand') }}
+            </Button>
+          </div>
+
+          <SettingsRow
+            v-if="advancedOpen"
+            :label="$t('bots.settings.heartbeatModel')"
+            :description="$t('bots.settings.heartbeatModelDescription')"
+          >
             <ModelSelect
               v-model="settingsForm.heartbeat_model_id"
               :models="models"
               :providers="providers"
               model-type="chat"
+              :placeholder="$t('bots.settings.heartbeatModelPlaceholder')"
               class="w-72 shrink-0"
             />
-          </div>
+          </SettingsRow>
         </template>
 
-        <div class="mx-4 flex min-h-[3.75rem] items-center justify-end py-3">
+        <!-- Turning the toggle off is a pending change, not an instant stop — say so, so the
+             switch state doesn't read as already-applied before Save. -->
+        <div
+          v-if="pendingDisable"
+          class="mx-4 border-b border-border py-3 last:border-b-0"
+        >
+          <p class="text-xs text-muted-foreground">
+            {{ $t('bots.heartbeat.disableNote') }}
+          </p>
+        </div>
+
+        <!-- Save is the result of pending changes, not a permanent fixture: the footer only
+             exists while there is something to commit. -->
+        <div
+          v-if="settingsChanged"
+          class="flex items-center justify-end gap-2 px-4 py-3"
+        >
+          <Button
+            variant="ghost"
+            size="sm"
+            :disabled="isSaving"
+            @click="resetSettings"
+          >
+            {{ $t('common.cancel') }}
+          </Button>
           <Button
             size="sm"
-            :disabled="!settingsChanged || isSaving"
+            :disabled="isSaving"
             @click="handleSaveSettings"
           >
             <Spinner
               v-if="isSaving"
               class="size-3"
             />
-            {{ $t('bots.settings.save') }}
+            {{ $t('common.saveChanges') }}
           </Button>
         </div>
       </SettingsSection>
 
       <SettingsSection :title="$t('bots.heartbeat.title')">
-        <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3">
+        <div
+          v-if="totalCount > 0"
+          class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3"
+        >
           <span class="text-sm font-medium text-foreground">
             {{ $t('common.status') }}
           </span>
-          <NativeSelect
-            v-model="statusFilter"
-            class="w-32"
-          >
-            <option value="">
-              {{ $t('bots.heartbeat.filterAll') }}
-            </option>
-            <option value="ok">
-              {{ $t('bots.heartbeat.statusOk') }}
-            </option>
-            <option value="alert">
-              {{ $t('bots.heartbeat.statusAlert') }}
-            </option>
-            <option value="error">
-              {{ $t('bots.heartbeat.statusError') }}
-            </option>
-          </NativeSelect>
+          <Select v-model="statusFilter">
+            <SelectTrigger class="w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">
+                {{ $t('bots.heartbeat.filterAll') }}
+              </SelectItem>
+              <SelectItem value="ok">
+                {{ $t('bots.heartbeat.statusOk') }}
+              </SelectItem>
+              <SelectItem value="alert">
+                {{ $t('bots.heartbeat.statusAlert') }}
+              </SelectItem>
+              <SelectItem value="error">
+                {{ $t('bots.heartbeat.statusError') }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         <div
@@ -107,14 +142,32 @@
         </div>
 
         <Empty
-          v-else-if="!isLoading && filteredLogs.length === 0"
+          v-else-if="!isLoading && totalCount === 0 && !savedEnabled"
+          class="py-12"
+        >
+          <EmptyHeader>
+            <EmptyTitle>{{ $t('bots.heartbeat.logsDisabledTitle') }}</EmptyTitle>
+            <EmptyDescription>{{ $t('bots.heartbeat.logsDisabledHint') }}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+
+        <Empty
+          v-else-if="!isLoading && totalCount === 0"
           class="py-12"
         >
           <EmptyHeader>
             <EmptyTitle>{{ $t('bots.heartbeat.empty') }}</EmptyTitle>
-            <EmptyDescription>
-              {{ statusFilter ? $t('bots.heartbeat.filterEmpty') : $t('bots.heartbeat.description') }}
-            </EmptyDescription>
+            <EmptyDescription>{{ $t('bots.heartbeat.firstCheckHint', { minutes: savedInterval }) }}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+
+        <Empty
+          v-else-if="filteredLogs.length === 0"
+          class="py-12"
+        >
+          <EmptyHeader>
+            <EmptyTitle>{{ $t('bots.heartbeat.empty') }}</EmptyTitle>
+            <EmptyDescription>{{ $t('bots.heartbeat.filterEmpty') }}</EmptyDescription>
           </EmptyHeader>
         </Empty>
 
@@ -270,12 +323,12 @@
 </template>
 
 <script setup lang="ts">
-import { Trash2, RotateCw, ChevronDown } from 'lucide-vue-next'
-import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { Trash2, ChevronDown, ChevronRight } from 'lucide-vue-next'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
 import {
-  Badge, Button, Empty, EmptyDescription, EmptyHeader, EmptyTitle, Spinner, NativeSelect, Switch, Input,
+  Badge, Button, Empty, EmptyDescription, EmptyHeader, EmptyTitle, Spinner, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Input,
   Pagination, PaginationContent, PaginationEllipsis,
   PaginationFirst, PaginationItem, PaginationLast,
   PaginationNext, PaginationPrevious,
@@ -348,6 +401,13 @@ watch(settings, (val: SettingsSettings | undefined) => {
   }
 }, { immediate: true })
 
+const advancedOpen = ref(false)
+
+// Logs context follows the SAVED state, not the pending form: a toggle the user
+// hasn't saved yet must not change what the logs panel claims is running.
+const savedEnabled = computed(() => settings.value?.heartbeat_enabled ?? false)
+const savedInterval = computed(() => settings.value?.heartbeat_interval ?? 1440)
+
 const settingsChanged = computed(() => {
   if (!settings.value) return false
   const s: SettingsSettings = settings.value
@@ -355,6 +415,16 @@ const settingsChanged = computed(() => {
     || settingsForm.heartbeat_interval !== (s.heartbeat_interval ?? 1440)
     || settingsForm.heartbeat_model_id !== (s.heartbeat_model_id ?? '')
 })
+
+// Was on, now toggled off but not yet saved — the cue that disabling is pending.
+const pendingDisable = computed(() => !settingsForm.heartbeat_enabled && savedEnabled.value)
+
+function resetSettings() {
+  const s = settings.value
+  settingsForm.heartbeat_enabled = s?.heartbeat_enabled ?? false
+  settingsForm.heartbeat_interval = s?.heartbeat_interval ?? 1440
+  settingsForm.heartbeat_model_id = s?.heartbeat_model_id ?? ''
+}
 
 const { mutateAsync: updateSettings, isLoading: isSaving } = useMutation({
   mutation: async (body: SettingsUpsertRequest) => {
@@ -381,14 +451,14 @@ const isLoading = ref(false)
 const isClearing = ref(false)
 const logs = ref<HeartbeatLog[]>([])
 const totalCount = ref(0)
-const statusFilter = ref('')
+const statusFilter = ref('all')
 const expandedIds = ref(new Set<string>())
 const currentPage = ref(1)
 
 const PAGE_SIZE = 20
 
 const filteredLogs = computed(() => {
-  if (!statusFilter.value) return logs.value
+  if (statusFilter.value === 'all') return logs.value
   return logs.value.filter(l => l.status === statusFilter.value)
 })
 
@@ -440,9 +510,10 @@ function toggleExpand(id: string | undefined) {
   }
 }
 
-async function fetchLogs() {
+// silent = background poll: no loading flicker, no error toast, keep expanded rows.
+async function fetchLogs(silent = false) {
   if (!props.botId) return
-  isLoading.value = true
+  if (!silent) isLoading.value = true
   try {
     const offset = (currentPage.value - 1) * PAGE_SIZE
     const { data } = await getBotsByBotIdHeartbeatLogs({
@@ -453,16 +524,25 @@ async function fetchLogs() {
     logs.value = data?.items ?? []
     totalCount.value = data?.total_count ?? 0
   } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('bots.heartbeat.loadFailed')))
+    if (!silent) toast.error(resolveApiErrorMessage(error, t('bots.heartbeat.loadFailed')))
   } finally {
-    isLoading.value = false
+    if (!silent) isLoading.value = false
   }
 }
 
-async function handleRefresh() {
-  expandedIds.value.clear()
-  currentPage.value = 1
-  await fetchLogs()
+// Logs stream in on their own cadence, so the panel refreshes itself instead of
+// asking the user to hit a button: poll quietly while enabled, pause when the tab
+// is hidden, and catch up the moment it's visible again.
+const POLL_INTERVAL = 15_000
+let pollTimer: ReturnType<typeof setInterval> | undefined
+
+function tickPoll() {
+  if (document.hidden || !savedEnabled.value) return
+  void fetchLogs(true)
+}
+
+function onVisibilityChange() {
+  if (!document.hidden && savedEnabled.value) void fetchLogs(true)
 }
 
 async function handleClear() {
@@ -485,5 +565,12 @@ async function handleClear() {
 
 onMounted(() => {
   fetchLogs()
+  pollTimer = setInterval(tickPoll, POLL_INTERVAL)
+  document.addEventListener('visibilitychange', onVisibilityChange)
+})
+
+onBeforeUnmount(() => {
+  if (pollTimer) clearInterval(pollTimer)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 </script>

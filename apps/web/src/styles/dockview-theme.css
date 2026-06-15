@@ -69,24 +69,32 @@
   --tab-flare: var(--tab-gap);
 
   /* ONE stroke colour for the whole dock outline — the strip's bottom hairline, the
-   * active tab's crown/side border, and the fillet-foot ring. It MUST be opaque.
-   * The design system's --border is a translucent white in dark mode
-   * (oklch(1 0 0 / 8%)); a translucent stroke reads at a different brightness
-   * depending on the surface under it (the chrome strip vs the tab's editor fill)
-   * AND on the technique drawing it (a crisp 1px border vs an anti-aliased inset
-   * box-shadow vs a gradient ring), and worst of all it STACKS — where the foot ring
-   * overlaps the side border the two translucent whites composite to a brighter line,
-   * the "whitened fillet". An opaque colour is backdrop- and technique-independent and
-   * never builds up, so every dock stroke matches. Light mode's --border is already
-   * opaque, so it's reused as-is; dark mode gets an opaque grey (see .dark below). */
+   * active tab's crown/side border, and the fillet-foot ring. It MUST be opaque, yet
+   * it must also read as the SAME line as the rest of the app's dividers (the sidebar's
+   * vertical --border, the panel seams): the dock is not a special-coloured zone, it
+   * just needs a special TECHNIQUE.
+   *
+   * The design system's --border is a translucent white in dark mode (oklch(1 0 0/8%)).
+   * Used directly it (a) reads at a different brightness on the chrome strip vs the
+   * editor fill, (b) differs per technique (a crisp 1px border vs an anti-aliased inset
+   * box-shadow vs a gradient ring), and (c) STACKS — where the foot ring overlaps the
+   * side border the two translucent whites composite brighter, the "whitened fillet".
+   *
+   * So --dock-stroke is the OPAQUE FLATTENING of that same --border over the chrome
+   * plane (8% white pre-composited onto --surface-chrome). It therefore lands at the
+   * exact brightness the sidebar's translucent --border already shows there — the
+   * horizontal hairline and the vertical sidebar divider become one continuous family —
+   * while being backdrop-/technique-independent and never building up. Light mode's
+   * --border is already opaque (no stacking), so it's reused as-is. */
   --dock-stroke: var(--border);
 }
 
-/* Dark: opaque dock stroke (see note above). Tuned a touch brighter than a flat
- * translucent border would land so the divider stays legible against the deep
- * surfaces — this single value is the knob for the whole dock outline's weight. */
+/* Dark: the opaque equivalent of --border (8% white) sitting on the chrome plane, so
+ * it matches the sidebar/panel dividers exactly instead of being an invented brighter
+ * grey. color-mix in oklab pre-composites the translucent border onto --surface-chrome;
+ * this single value is the one knob for the whole dock outline's weight. */
 .dark .dockview-theme-memoh {
-  --dock-stroke: oklch(0.34 0 0);
+  --dock-stroke: color-mix(in oklab, oklch(1 0 0) 8%, var(--surface-chrome));
 }
 
 /* The custom tab content (workspace-tab.vue) owns its padding/ellipsis; .dv-tab
@@ -138,16 +146,6 @@
   --tab-hover-bg: var(--surface-chrome-hover);
 }
 
-/* Smooth the hover fill on INACTIVE tabs only. The active tab is deliberately
- * excluded: its fill is partnered with the ::before flare (feet + a strip that
- * masks the side borders), which can't be transitioned (gradients don't tween), so
- * fading the body alone made the border + feet pop in first and the centre catch
- * up — the "fill arrives from the edges / in blocks" artefact. Activation is
- * therefore instant, so body, border and flare all appear together. */
-.dockview-theme-memoh .dv-tab:not(.dv-active-tab) {
-  transition: background-color 0.12s ease;
-}
-
 /* Space between adjacent tabs — separation is breathing room, not a divider line
  * (the old per-tab border seams are gone). The active tab's bottom flare is sized
  * to exactly bridge this gap, so its feet reach the neighbours.
@@ -187,63 +185,38 @@
   display: none;
 }
 
-/* Hover lifts an UNSELECTED tab into a rounded-crown highlight — the SAME crown
- * the active tab wears, so clicking it changes only the FILL, never the geometry
- * (the two edges stay put — Chrome). No bottom flare: an inactive tab is a label
- * that lights up, it does not connect to the pane. --surface-chrome-hover is the
- * chrome plane's own hover step (deeper than the generic --ui-hover, invisible
- * against this surface).
+/* Active AND hovered tabs share ONE silhouette — full-height crown + the bottom
+ * fillet feet (::before below) — so a hover never looks like a different, smaller
+ * shape sitting next to the selected tab. The ONLY thing that differs is the fill,
+ * carried by --tab-surface:
+ *   · active  → editor surface (continuous with the pane below; selection)
+ *   · hover   → chrome-hover lift (a brighter chip sitting on the strip)
+ * Both wear the same --dock-stroke crown/side stroke, and the same fillet-foot ring
+ * (::before), so the concentric crown↔foot geometry and every margin are identical
+ * by construction. The bottom is left open; the foot curve carries the stroke down
+ * to the bar, so the outline reads as one continuous line: bar → left foot → up the
+ * crown → down the right foot → bar (Chrome).
  *
- * !important is required, not lazy: dockview pins the inactive tab to transparent
- * with a (0,6,0) static rule
- *   .dv-groupview.dv-active-group > .dv-tabs-and-actions-container
- *     .dv-tabs-container > .dv-tab.dv-inactive-tab { background: …hiddenpanel… }
- * which outranks this (0,4,0) hover. dockview exposes NO hover variable for tabs,
- * so the cascade can only be won here by force.
- *
- * The fill reaches the bottom — the hover crown is geometrically IDENTICAL to the
- * active crown (same radius, same full body), only the colour differs. The strip's
- * bottom hairline is NOT lost under it: it is re-drawn on top as a ::after (below),
- * so a hovered tab stays separated from the pane by the divider; only the ACTIVE
- * tab omits that line and reads continuous with the pane. */
-.dockview-theme-memoh .dv-tab:not(.dv-active-tab):hover {
-  background-color: var(--surface-chrome-hover) !important;
-}
-
-/* The strip's bottom hairline is a box-shadow on the container, painted BEHIND the
- * tabs — so an opaque tab fill (the hover tint, or the close/dirty fade child) hides
- * it at that tab's slot, and because that tint is lighter than the chrome the divider
- * looked "brightened / washed out" there. Re-assert the exact same 1px --dock-stroke
- * line as a top-most ::after (generated last, so it sits ABOVE the fill AND the fade
- * child) on every NON-active tab. Result: the divider is one continuous, same-colour
- * line across the whole strip; the ONLY break is the active tab, which omits it to
- * punch through into the pane. (Transparent inactive tabs draw it twice — container
- * shadow + this line, identical colour/position — which composites to the same line.) */
-.dockview-theme-memoh .dv-tab:not(.dv-active-tab)::after {
-  content: '';
-  position: absolute;
-  inset: auto 0 0 0;
-  height: 1px;
-  background: var(--dock-stroke);
-  pointer-events: none;
-}
-
-/* Active tab = editor surface, continuous with the pane below. The crown is
- * rounded (top corners) and the bottom splays into two outward "feet" (the
- * ::before flare) that curve down into the surface, so the tab reads as physically
- * attached to the pane — the fill alone (no border, no top-accent) marks it. */
+ * No transition here: the fillet (a radial-gradient mask) cannot tween, so the fill
+ * is switched instantly to stay in lock-step with its feet (a fading fill would
+ * detach from the popped-in feet — the old "blocky fill" artefact). */
 .dockview-theme-memoh .dv-tab.dv-active-tab {
-  background-color: var(--surface-editor);
-  /* Crown stroke: recolour the (already reserved) top + side border. The bottom is
-   * left open and the foot curve (::before, below) carries the stroke the rest of
-   * the way down to the bar, so the outline reads as one continuous line: bar →
-   * left foot → up the crown → down the right foot → bar (Chrome). */
+  --tab-surface: var(--surface-editor);
+}
+.dockview-theme-memoh .dv-tab:not(.dv-active-tab):hover {
+  --tab-surface: var(--surface-chrome-hover);
+}
+.dockview-theme-memoh .dv-tab.dv-active-tab,
+.dockview-theme-memoh .dv-tab:not(.dv-active-tab):hover {
+  /* !important only matters for the hover case — dockview pins an inactive tab's
+   * background to transparent; the active tab is already this colour via its own
+   * --dv-* vars, so the declaration is harmless there. */
+  background-color: var(--tab-surface) !important;
   border-top-color: var(--dock-stroke);
   border-left-color: var(--dock-stroke);
   border-right-color: var(--dock-stroke);
-  /* The active tab never takes the hover lift, so its blot-out colour is the
-   * editor surface it already wears. */
-  --tab-hover-bg: var(--surface-editor);
+  /* The close-fade blots the title with the surface the tab actually wears. */
+  --tab-hover-bg: var(--tab-surface);
 }
 
 /* Bottom flare = a CONCAVE fillet (倒角), not a bump. A single pseudo spans
@@ -254,8 +227,11 @@
  * the same negative curve Chrome uses to seat a tab on its toolbar. (Filling the
  * disc instead of carving it would bulge two convex "circles" out of the corners,
  * which is the opposite of a fillet.) dockview leaves ::before unused (it only
- * styles ::after on :focus), so this is a clean slot. */
-.dockview-theme-memoh .dv-tab.dv-active-tab::before {
+ * styles ::after on :focus), so this is a clean slot. Shared by the active tab and a
+ * hovered inactive tab — same feet, same ring — with --tab-surface deciding the fill
+ * (editor vs chrome-hover), so both silhouettes are byte-for-byte the same shape. */
+.dockview-theme-memoh .dv-tab.dv-active-tab::before,
+.dockview-theme-memoh .dv-tab:not(.dv-active-tab):hover::before {
   content: '';
   position: absolute;
   bottom: 0;
@@ -264,16 +240,16 @@
   height: var(--tab-flare);
   pointer-events: none;
   /* Three layers, top to bottom:
-   *  1. left foot  — carved concave fill with a 1px --border ring ALONG the curve
+   *  1. left foot  — carved concave fill with a 1px --dock-stroke ring ALONG the curve
    *     (transparent inside the radius → chrome shows; ring at [r-1,r]; fill beyond).
    *  2. right foot — mirror.
    *  3. middle fill — a plain fill spanning exactly the tab body's width, painted
    *     over the bottom strip so the crown's side borders don't leave a stray
    *     vertical nub in the foot zone (the stroke there is the curve, not a line). */
   background:
-    radial-gradient(circle at top left, transparent calc(var(--tab-flare) - 1px), var(--dock-stroke) calc(var(--tab-flare) - 1px), var(--dock-stroke) var(--tab-flare), var(--surface-editor) calc(var(--tab-flare) + 0.5px)) left bottom / var(--tab-flare) var(--tab-flare) no-repeat,
-    radial-gradient(circle at top right, transparent calc(var(--tab-flare) - 1px), var(--dock-stroke) calc(var(--tab-flare) - 1px), var(--dock-stroke) var(--tab-flare), var(--surface-editor) calc(var(--tab-flare) + 0.5px)) right bottom / var(--tab-flare) var(--tab-flare) no-repeat,
-    linear-gradient(var(--surface-editor), var(--surface-editor)) center bottom / calc(100% - 2 * var(--tab-flare)) 100% no-repeat;
+    radial-gradient(circle at top left, transparent calc(var(--tab-flare) - 1px), var(--dock-stroke) calc(var(--tab-flare) - 1px), var(--dock-stroke) var(--tab-flare), var(--tab-surface) calc(var(--tab-flare) + 0.5px)) left bottom / var(--tab-flare) var(--tab-flare) no-repeat,
+    radial-gradient(circle at top right, transparent calc(var(--tab-flare) - 1px), var(--dock-stroke) calc(var(--tab-flare) - 1px), var(--dock-stroke) var(--tab-flare), var(--tab-surface) calc(var(--tab-flare) + 0.5px)) right bottom / var(--tab-flare) var(--tab-flare) no-repeat,
+    linear-gradient(var(--tab-surface), var(--tab-surface)) center bottom / calc(100% - 2 * var(--tab-flare)) 100% no-repeat;
 }
 
 .dockview-theme-memoh .dv-right-actions-container,

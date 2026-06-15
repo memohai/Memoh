@@ -63,20 +63,15 @@
           <span>{{ $t('common.loading') }}</span>
         </div>
 
-        <div
+        <Empty
           v-else-if="!bindings?.length"
-          class="p-4"
+          class="py-12"
         >
-          <Empty class="rounded-[var(--radius-menu-shell)] border border-dashed border-border py-12">
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <Mail class="size-4" />
-              </EmptyMedia>
-              <EmptyTitle>{{ $t('bots.email.noBindings') }}</EmptyTitle>
-              <EmptyDescription>{{ $t('bots.email.noBindingsDescription') }}</EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        </div>
+          <EmptyHeader>
+            <EmptyTitle>{{ $t('bots.email.noBindings') }}</EmptyTitle>
+            <EmptyDescription>{{ $t('bots.email.noBindingsDescription') }}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
 
         <template v-else>
           <div
@@ -196,7 +191,6 @@ import {
   Empty,
   EmptyDescription,
   EmptyHeader,
-  EmptyMedia,
   EmptyTitle,
   Popover,
   PopoverContent,
@@ -212,7 +206,7 @@ import {
   TableRow,
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
-import { Mail, Plus } from 'lucide-vue-next'
+import { Plus } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'

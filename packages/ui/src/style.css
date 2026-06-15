@@ -293,6 +293,17 @@
     scale: 0.974;
     background-color: var(--btn-ghost-hover);
   }
+  /* press — BLOCK / full-width ghost: a uniform press-scale on a wide button
+     lurches sideways (each edge travels ~width × 2.6%), so full-width ghost
+     buttons (the sidebar New Chat / Bot Settings / Settings rows) drop the scale
+     and read the press through a deeper fill instead — the same reasoning as the
+     primary-block rule above. Snappy press (40ms), eased release via the base
+     transition. */
+  [data-button][data-variant="ghost"][data-block]:active::before {
+    scale: 1 1;
+    background-color: var(--ui-pressed);
+    transition-duration: 40ms;
+  }
 
   /* ── Button: LINK — ported from contract bench `link-fade` ────────────────
      Inline-text link: muted text brightens on hover; underline is a ::after bar

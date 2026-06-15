@@ -1,14 +1,9 @@
 <template>
-  <div class="mx-auto max-w-3xl pt-6 pb-8">
-    <div class="mb-6 px-2">
-      <h1 class="text-lg font-semibold text-foreground">
-        {{ $t('bots.access.title') }}
-      </h1>
-      <p class="mt-1 max-w-2xl text-xs text-muted-foreground">
-        {{ $t('bots.access.subtitle') }}
-      </p>
-    </div>
-
+  <PageShell
+    variant="tab"
+    :title="$t('bots.access.title')"
+    :description="$t('bots.access.subtitle')"
+  >
     <Tabs
       v-model="activeTab"
       class="w-full"
@@ -575,7 +570,7 @@
         <BotUserAccess :bot-id="botId" />
       </TabsContent>
     </Tabs>
-  </div>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
@@ -619,6 +614,7 @@ import {
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
+import PageShell from '@/components/page-shell/index.vue'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 import BotUserAccess from './bot-user-access.vue'

@@ -134,10 +134,10 @@ onBeforeUnmount(() => {
   background:
     linear-gradient(to right, transparent, var(--tab-hover-bg, var(--surface-editor)) 1rem),
     linear-gradient(to right, transparent, var(--surface-chrome) 1rem);
-  /* The tab carries no overflow:hidden (its bottom flare must spill outside), so
-   * this right-edge blot has to round its own top-right corner to the tab crown,
-   * otherwise a square nub of the fade colour pokes past the rounded fill. The
-   * bottom stays square — the tab's bottom is square too (the flare is external). */
+  /* The blot is full-height (inset-y-0), matching the tab silhouette: only the TOP-right
+   * corner is rounded to the crown radius; the bottom stays square because the tab's
+   * bottom is square too (its feet are the external ::before flare, not a rounded corner).
+   * Rounding the bottom here would carve a notch out of the fill above the feet. */
   border-top-right-radius: var(--radius-sm);
 }
 </style>

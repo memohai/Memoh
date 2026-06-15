@@ -138,8 +138,9 @@ tiles with no per-tile border. (Contrast: the dirty page wraps each tile in its 
 
 ### Empty / loading that holds the frame
 
-**Who draws the frame decides whether the Empty gets a border.** An `Empty` is just centered
-text + an action; it is *not* a card. So:
+**An empty state keeps the populated skeleton — the same page with no rows yet — and `dashed`
+is NOT an empty-state look.** An `Empty` is just centered text + an action; it is *not* a card,
+and an empty page must never rearrange into a different shape than its populated form. So:
 
 - **Inside a `SettingsSection` (the usual settings-tab case) → the Empty has NO border and NO
   icon-tile.** The white section card already *is* the frame; the message sits centered inside it.
@@ -162,11 +163,13 @@ text + an action; it is *not* a card. So:
 </SettingsSection>
 ```
 
-- **As the outermost frame (a standalone list with NO parent card) → the dashed-border `Empty`
-  is the frame.** Only here does the border earn its place, because nothing else draws one:
+- **As the outermost frame (a standalone list/grid with NO parent card) → a SOLID-bordered
+  framed block.** It still holds the frame, but it is **not** dashed — `dashed` is reserved for
+  the "+ Add another" tile beside real items (below). A solid `border` at the menu-shell radius
+  matches the populated cards' frame:
 
 ```vue
-<Empty class="rounded-[var(--radius-menu-shell)] border border-dashed border-border py-16">
+<Empty class="rounded-[var(--radius-menu-shell)] border border-border py-16">
   <EmptyHeader>
     <EmptyTitle>{{ $t('feature.emptyTitle') }}</EmptyTitle>
     <EmptyDescription>{{ $t('feature.emptyDescription') }}</EmptyDescription>
@@ -175,8 +178,13 @@ text + an action; it is *not* a card. So:
 </Empty>
 ```
 
+- **`dashed` is ONLY the "+ Add another" tile** that sits *beside real items in an already-populated
+  list/grid* (the dashed `+ Add` cell trailing a BackendCard grid). It is never the frame of an
+  empty state — a fully-empty surface uses the solid frame above.
+
 The `EmptyMedia variant="icon"` decorative glyph tile is itself a small inner box — default to
-**no** icon (§ Component discipline); add one only after sign-off, and never inside a card.
+**no** icon (§ Component discipline); add one only after sign-off, and never inside a card or atop
+an empty block.
 
 In a table, keep the table drawn and use a full-width empty cell:
 
@@ -511,7 +519,8 @@ see it, replace it with the right column. This is your strip-list when refactori
 | `size="sm"` on a form footer / primary action | squat half-height buttons read as unfinished | default (`h-9`, full height); `sm` only for genuinely tight, secondary spots |
 | decorative icon stacked in a card / atop an empty block | a cost (surface, shadow, extra color, language-fit) with no signal | ship no icon; add one only after the developer signs off |
 | card-in-card (a bordered box wrapping bordered boxes) | nesting depth with no meaning; reads mostly-empty | flatten to one surface — hairline-divided tiles, not boxes-in-a-box |
-| a dashed/bordered `Empty` — or an `EmptyMedia variant="icon"` gray tile — placed *inside* a `SettingsSection` white card | also card-in-card: the white section already frames it, so the inner border/tile is a box-in-a-box (a white card holding a grey card) | the in-card Empty is borderless centered content (`py-12`, no icon tile); add the dashed border only when the `Empty` is the **outermost** frame (no parent card) |
+| a dashed/bordered `Empty` — or an `EmptyMedia variant="icon"` gray tile — placed *inside* a `SettingsSection` white card | also card-in-card: the white section already frames it, so the inner border/tile is a box-in-a-box (a white card holding a grey card) | the in-card Empty is borderless centered content (`py-12`, no icon tile) |
+| `border-dashed` used as the frame of a fully-empty state (outermost or otherwise) | empty states must keep the populated skeleton; dashed reads as "drop zone / add here", not "nothing yet" | empty keeps the populated frame — the section card, or a **solid** `border` framed block for a standalone grid; reserve `dashed` for the "+ Add another" tile beside real items |
 | `font-[NNN]` weight / `text-[Npx]` size / `text-foreground\|muted-foreground/NN` alpha in a page | off the role-map weight, off the `--text-*` scale, hand-mixed alpha — the single most common app-page drift (60+ files), and it sits even in the `about` reference | the three weights (`normal`/`medium`/`semibold`), the `--text-*` scale, the overlay ladder — and push the guard to scan `apps/web` |
 | `w-fit` / content-sized container width | one long string (a back label, a name) silently resizes the frame | pin the width; let text `truncate` inside a fixed box |
 | header `px-2` over a full-bleed body (`Input` / `Table` / grid of cards) | the right-aligned action indents 8px off the body's right edge → the "Submit / New member / Save don't line up" bug | compose through `PageShell` (`components/page-shell`) — it owns title + actions + body on one set of edges; never hand-roll a `<header>` |
@@ -525,7 +534,8 @@ see it, replace it with the right column. This is your strip-list when refactori
 | Searchable pick (single or many) | `Combobox` (with `multiple`) | re-skinning `Select`; bespoke search dropdown |
 | Switch a mode/filter, returns a value, no panels | `SegmentedControl` | `Tabs` re-skinned as a pill |
 | Switch between content panels | `Tabs` (underline) | `SegmentedControl` |
-| Simple native dropdown (few static options) | `NativeSelect` | a full `Select` for 3 options if native suffices |
+| Dropdown next to styled cards / styled dropdowns (e.g. a log status filter beside `ModelSelect`) | styled `Select` | `NativeSelect` — its OS-rendered popup clashes with the menu-shell language |
+| `NativeSelect` (raw OS popup) | dense forms where native keyboard/mobile UX wins and nothing styled sits beside it | mixing it into a refactored card surface that already uses `Select` / `ModelSelect` |
 | Toolbar icon action | `<Button variant="ghost" size="icon">` | a bare clickable `<svg>` with manual hover bg |
 | Standalone icon action | `<Button variant="outline" size="icon">` | ghost (reads as toolbar) |
 | Clickable low-emphasis text w/ hover chip | `TextButton` (ghost @ `size="text"`) | a `<span @click>` with a hand-rolled hover |

@@ -3,7 +3,7 @@ import type { TabsListProps } from 'reka-ui'
 import type { HTMLAttributes } from 'vue'
 import { reactiveOmit } from '@vueuse/core'
 import { TabsList } from 'reka-ui'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 import { cn } from '#/lib/utils'
 
 const props = defineProps<TabsListProps & {
@@ -23,9 +23,10 @@ const delegatedProps = reactiveOmit(props, 'class', 'variant')
 // reka list nesting / offsetParent quirks.
 const root = ref<HTMLElement>()
 const box = ref({ left: 0, top: 0, width: 0, height: 0, ready: false })
-// The indicator is placed instantly on first paint (no slide-in from the left
-// edge); transitions turn on only after the initial measure, so subsequent tab
-// changes still animate.
+// Motion is a short user-switch transaction, not a durable component mode.
+// KeepAlive can preserve this component while its page is hidden, so a permanent
+// "animate after first click" flag would let entrance/layout re-measurements ride
+// the underline transition. Arm it only around an actual pointer/keyboard switch.
 const animate = ref(false)
 // press-shrink fires ONLY when the already-active pill is pressed (inactive
 // items shrink via their own ::before:active, matching SegmentedControl).
@@ -51,15 +52,36 @@ function sync() {
   }
 }
 
+// Navigation / activation keys that reka turns into a tab switch — arm the slide
+// before the data-state change lands.
+const NAV_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'Enter', ' '])
+let animationTimer: ReturnType<typeof setTimeout> | undefined
+function armAnimation() {
+  animate.value = true
+  if (animationTimer)
+    clearTimeout(animationTimer)
+  animationTimer = setTimeout(() => {
+    animate.value = false
+    animationTimer = undefined
+  }, 320)
+}
+function resetMotion() {
+  if (animationTimer) {
+    clearTimeout(animationTimer)
+    animationTimer = undefined
+  }
+  animate.value = false
+  pressed.value = false
+}
+function onKeydown(e: KeyboardEvent) {
+  if (NAV_KEYS.has(e.key))
+    armAnimation()
+}
+
 let ro: ResizeObserver | undefined
 let mo: MutationObserver | undefined
 onMounted(() => {
-  nextTick(() => {
-    sync()
-    // Enable transitions one frame after the first placement so the bar lands
-    // in position instead of sliding/growing from the left on mount.
-    requestAnimationFrame(() => { animate.value = true })
-  })
+  nextTick(sync)
   ro = new ResizeObserver(() => sync())
   if (root.value)
     ro.observe(root.value)
@@ -71,10 +93,20 @@ onMounted(() => {
 onBeforeUnmount(() => {
   ro?.disconnect()
   mo?.disconnect()
+  resetMotion()
 })
+onActivated(() => {
+  resetMotion()
+  nextTick(sync)
+})
+onDeactivated(resetMotion)
 
 function onDown(e: PointerEvent) {
   const trigger = (e.target as HTMLElement | null)?.closest('[data-slot=tabs-trigger]')
+  // A pointerdown on the list is the user about to switch — arm the slide before
+  // the resulting data-state change moves the bar.
+  if (trigger)
+    armAnimation()
   pressed.value = trigger?.getAttribute('data-state') === 'active'
 }
 function clearPress() {
@@ -117,6 +149,7 @@ const indicatorStyle = computed(() => {
     @pointerup="clearPress"
     @pointerleave="clearPress"
     @pointercancel="clearPress"
+    @keydown="onKeydown"
   >
     <span
       aria-hidden="true"

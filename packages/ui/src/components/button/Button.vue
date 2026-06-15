@@ -11,8 +11,9 @@ import { buttonVariants } from '.'
 interface Props extends PrimitiveProps {
   variant?: ButtonVariants['variant']
   size?: ButtonVariants['size']
-  /** Stretch to the full width of the parent. Block primaries swap the
-   *  press-scale for an instant color-press (a full-width scale would lurch). */
+  /** Stretch to the full width of the parent. Full-width buttons (primary AND
+   *  ghost) swap the press-scale for a color-press — a uniform scale on a wide
+   *  button lurches sideways. */
   block?: boolean
   /** Busy state: shows a centered spinner, blocks clicks, stays FULL color
    *  (busy ≠ disabled). Layout never shifts — the label is hidden in place and

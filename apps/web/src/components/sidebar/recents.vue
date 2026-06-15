@@ -26,11 +26,16 @@
             v-if="visibleSessions.length > 0"
             :style="{ position: 'relative', width: '100%', height: `${totalSize}px` }"
           >
+            <!-- pb-[2px] is the seam: the pill (SessionItem) keeps its own fill,
+                 and the measured wrapper adds a thin transparent gap below it so
+                 adjacent rows read as separate items instead of one block. Two
+                 rows span 2×34px pill + 2px seam = 70px hover-top to hover-bottom. -->
             <div
               v-for="vRow in virtualRows"
               :key="vRow.key"
               :ref="measureRow"
               :data-index="vRow.index"
+              class="pb-[2px]"
               :style="{ position: 'absolute', top: '0', left: '0', width: '100%', transform: `translateY(${vRow.start}px)` }"
             >
               <SessionItem
@@ -182,7 +187,7 @@ const virtualizer = useVirtualizer<HTMLElement, HTMLElement>(
   computed(() => ({
     count: visibleSessions.value.length,
     getScrollElement: () => scrollEl.value,
-    estimateSize: () => 38,
+    estimateSize: () => 36,
     overscan: 10,
     getItemKey: (index: number) => visibleSessions.value[index]?.id ?? index,
   })),

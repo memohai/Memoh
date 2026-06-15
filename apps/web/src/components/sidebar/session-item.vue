@@ -2,39 +2,38 @@
   <div
     role="button"
     tabindex="0"
-    class="group relative flex items-center min-h-9 w-full rounded-md px-[11px] text-left transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    class="group relative flex items-center min-h-[2.125rem] w-full rounded-[9px] px-[11px] text-left transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     :class="isActive ? 'bg-sidebar-accent' : 'hover:bg-[color:var(--sidebar-hover)]'"
     :title="hoverTitle"
     @click="$emit('select', session)"
     @keydown.enter.prevent="$emit('select', session)"
     @keydown.space.prevent="$emit('select', session)"
   >
-    <!-- Session rows are text-only: the title carries the row, the timestamp/
-         actions sit at the trailing edge. No leading type glyph — the list is a
-         single human-conversation stream (chat/discuss/agent), so per-row type
-         icons added noise without adding information. -->
-    <span class="flex-1 min-w-0 truncate text-control font-normal text-foreground">
-      {{ session.title || t('chat.untitledSession') }}
-    </span>
+    <!-- Session rows are text-only: the title carries the whole row. No leading
+         type glyph and no trailing timestamp — the list is a single
+         human-conversation stream (chat/discuss/agent) ordered by recency, so
+         per-row type icons and clock stamps only added noise. The title runs to
+         the trailing edge; the actions button overlays its tail on hover. -->
+    <!-- Title runs are split CJK vs Latin so each script takes a balanced weight
+         (.sidebar-cjk / .sidebar-latin in style.css) — MiSans reads heavier than
+         Inter at the same number, so one weight makes the English look thin. Weight
+         only; the title is a static one-line label, so no streaming and no prose
+         size/tracking compensation. -->
+    <span class="flex-1 min-w-0 truncate text-control text-foreground dark:text-[color:oklch(0.92_0_0)]"><span
+      v-for="(run, i) in titleRuns"
+      :key="i"
+      :class="run.script === 'cjk' ? 'sidebar-cjk' : 'sidebar-latin'"
+    >{{ run.text }}</span></span>
 
-    <!-- Trailing slot: the timestamp and the actions button share one spot and
-         CROSSFADE on row hover (time fades out, dots fade in) instead of a hard
-         display swap. The time stays in flow (it sizes the slot so nothing
-         shifts); the button overlays it absolutely and only takes pointer/focus
-         while it's actually shown. -->
+    <!-- Trailing slot: only a streaming spinner reserves space in flow; the
+         actions button overlays the title's tail and fades in on row hover, so a
+         resting row spends its whole width on the title. -->
     <div class="relative ml-1.5 flex h-6 shrink-0 items-center justify-end">
       <LoaderCircle
         v-if="streaming"
         class="size-3 animate-spin text-muted-foreground"
         :aria-label="t('chat.sessionStreaming')"
       />
-      <span
-        v-else-if="session.updated_at"
-        class="text-caption text-muted-foreground transition-opacity duration-150"
-        :class="menuOpen ? 'opacity-0' : 'opacity-100 group-hover:opacity-0'"
-      >
-        {{ formatTime(session.updated_at) }}
-      </span>
 
       <DropdownMenu v-model:open="menuOpen">
         <DropdownMenuTrigger as-child>
@@ -90,6 +89,7 @@ import {
   DropdownMenuItem,
 } from '@memohai/ui'
 import { acpAgentDisplayName, normalizeACPAgentID } from '@/utils/acp'
+import { splitScriptRuns } from '@/utils/script-runs'
 
 const props = defineProps<{
   session: SessionSummary
@@ -106,6 +106,10 @@ defineEmits<{
 const { t } = useI18n()
 
 const menuOpen = ref(false)
+
+const titleRuns = computed(() =>
+  splitScriptRuns((props.session.title ?? '').trim() || t('chat.untitledSession')),
+)
 
 const WEB_CHANNELS = new Set(['local', ''])
 
@@ -142,19 +146,4 @@ const hoverTitle = computed(() => {
     || displayLabel.value
   return handle ? `${title} — @${handle.replace(/^@/, '')}` : title
 })
-
-function formatTime(dateStr: string): string {
-  try {
-    const d = new Date(dateStr)
-    if (Number.isNaN(d.getTime())) return ''
-    const now = new Date()
-    const diff = now.getTime() - d.getTime()
-    const day = 86400000
-    if (diff < day) return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-    if (diff < 7 * day) return d.toLocaleDateString(undefined, { weekday: 'short' })
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-  } catch {
-    return ''
-  }
-}
 </script>

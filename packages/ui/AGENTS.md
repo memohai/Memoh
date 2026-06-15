@@ -184,6 +184,11 @@ prose use `variant="link"`; for a control-sized action use a normal `<Button>`.
   - primary/default: `scale: 0.96` on press (block/full-width instead flips fill
     to `--btn-primary-active` instantly).
   - secondary/outline & ghost: `scale: 0.974` on press.
+  - **Full-width (`data-block`) ghost** drops the scale too — a uniform scale on a
+    wide button lurches sideways (each edge travels ~width × 2.6%), so it reads the
+    press through a deeper fill (`--ui-pressed`, 40ms) instead, mirroring the
+    primary-block rule. Covers the sidebar's wide New Chat / Bot Settings / Settings
+    rows.
 - **Buttons** reuse `<Button>` — including small in-field icon buttons (clear /
   reveal / steppers) via `variant="ghost"` / `InputGroupButton`. Do **not**
   hand-roll an icon-hover background; that is the canonical bug.
