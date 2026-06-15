@@ -619,6 +619,7 @@
       "openBrowser": "Open browser",
       "openDisplay": "Open desktop window",
       "menu": "Tab actions",
+      "more": "More",
       "closeAll": "Close all"
     },
     "browser": {

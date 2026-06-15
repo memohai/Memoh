@@ -11,8 +11,13 @@
     <!-- leading-[1.4], not leading-none: with truncate (overflow:hidden) a line box
          equal to the font size clips descenders (g/y) and CJK bottoms; a slightly
          taller line box gives them room without affecting the centered baseline. -->
+    <!-- Sized by its own content (no flex-grow): the tab is natural width (see
+         dockview-theme.css), so a flex-basis:0 grow span made the tab's intrinsic
+         width ambiguous and it jumped on title changes. min-w-0 still lets it shrink
+         + truncate once the tab hits its max-width cap. Centred in the chip (not
+         lifted to the bar centre), so it rides a touch below the top headroom. -->
     <span
-      class="min-w-0 flex-1 truncate text-[12.5px] leading-[1.4] transition-colors"
+      class="min-w-0 truncate text-[12.5px] leading-[1.4] transition-colors"
       :class="isActive ? 'text-foreground' : 'text-muted-foreground'"
     >{{ title }}</span>
     <!-- Unsaved-changes dot: sits in the close slot AT REST so the affordance never
@@ -45,7 +50,7 @@
            double-stacks chrome, so the ghost hover background is suppressed. -->
       <Button
         variant="ghost"
-        class="pointer-events-auto size-5 shrink-0 rounded-sm p-0 text-muted-foreground [--btn-ghost-hover:transparent] hover:text-foreground"
+        class="pointer-events-auto size-5 shrink-0 rounded-full p-0 text-muted-foreground [--btn-ghost-hover:transparent] hover:text-foreground"
         :aria-label="t('chat.tabMenu.close')"
         @pointerdown.stop
         @mousedown.stop
@@ -119,7 +124,20 @@ onBeforeUnmount(() => {
  * (the editor surface for the active tab, the hover tint otherwise), so the fade is
  * seamless with whatever the chip is wearing. Absolutely positioned, so painting it
  * never reserves a slot or resizes the chip. */
+/* Two stacked fades so the blot is ALWAYS opaque. --tab-hover-bg is the surface a
+ * tab wears (opaque --surface-editor when active; the TRANSLUCENT hover overlay
+ * otherwise), so painting it alone left the title legible under the close button on
+ * a hovered tab. Layering the opaque --surface-chrome base UNDER that overlay
+ * composites to exactly what the tab shows — chrome+overlay on hover, plain editor
+ * when active (the opaque top layer hides the base) — but never see-through. */
 .close-fade {
-  background: linear-gradient(to right, transparent, var(--tab-hover-bg, var(--surface-editor)) 1rem);
+  background:
+    linear-gradient(to right, transparent, var(--tab-hover-bg, var(--surface-editor)) 1rem),
+    linear-gradient(to right, transparent, var(--surface-chrome) 1rem);
+  /* The tab carries no overflow:hidden (its bottom flare must spill outside), so
+   * this right-edge blot has to round its own top-right corner to the tab crown,
+   * otherwise a square nub of the fade colour pokes past the rounded fill. The
+   * bottom stays square — the tab's bottom is square too (the flare is external). */
+  border-top-right-radius: var(--radius-sm);
 }
 </style>

@@ -1,19 +1,17 @@
 <template>
-  <!-- border-r hands the tab strip's vertical divider language to the nav cluster:
-       the first tab no longer floats edgeless against the buttons but is fenced off
-       by the same SOFT inter-tab seam (--tab-divider, inherited from the dockview
-       theme) that separates two unselected tabs — full --border stays reserved for
-       framing the active tab. pr-2 keeps the line off the last button; the tab's
-       own pl-4 keeps the title off the line. -->
+  <!-- No vertical seam against the first tab: separation is the gap + the strip's
+       own outline (the bottom hairline, plus the active tab's crown/foot stroke),
+       not a divider between the nav cluster and the tabs. pr-2 keeps the buttons
+       off the first tab; the tab's own pl-4 keeps its title off the gap. -->
   <div
     v-if="isFirstGroup"
-    class="flex h-full items-center gap-0.5 border-r [border-color:var(--tab-divider)] pr-2 [-webkit-app-region:drag] transition-[padding] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+    class="flex h-full items-center gap-0.5 pr-2 [-webkit-app-region:drag] transition-[padding] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
     :class="shouldReserveTrafficLight ? 'pl-[76px]' : 'pl-2'"
   >
     <Button
       variant="ghost"
       size="icon-sm"
-      class="size-7 text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
+      class="size-7 rounded-full text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
       :title="workbenchOpen ? t('chat.topBar.hideWorkbench') : t('chat.topBar.showWorkbench')"
       :aria-label="workbenchOpen ? t('chat.topBar.hideWorkbench') : t('chat.topBar.showWorkbench')"
       :aria-pressed="workbenchOpen"
@@ -33,7 +31,7 @@
     <Button
       variant="ghost"
       size="icon-sm"
-      class="size-7 text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
+      class="size-7 rounded-full text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
       :title="t('chat.topBar.goBack')"
       :aria-label="t('chat.topBar.goBack')"
       @click="router.go(-1)"
@@ -46,7 +44,7 @@
     <Button
       variant="ghost"
       size="icon-sm"
-      class="size-7 text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
+      class="size-7 rounded-full text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
       :title="t('chat.topBar.goForward')"
       :aria-label="t('chat.topBar.goForward')"
       @click="router.go(1)"
