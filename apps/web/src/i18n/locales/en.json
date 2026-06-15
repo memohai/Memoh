@@ -536,6 +536,7 @@
     "noSessions": "No sessions yet",
     "recents": "Recents",
     "quickActions": "Quick Actions",
+    "manageBot": "Manage Bot",
     "scheduledJobs": "Scheduled Jobs",
     "sessionTypeHeartbeat": "Heartbeat",
     "sessionTypeSchedule": "Scheduled Task",

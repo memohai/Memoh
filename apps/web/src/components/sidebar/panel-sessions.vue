@@ -1,7 +1,7 @@
 <template>
   <div class="flex flex-col h-full min-w-0">
     <!-- Quick Actions: a named cluster of "things you can start" (New Chat,
-         Scheduled Jobs), mirroring the Recents block below (actions you take vs
+         Manage Bot), mirroring the Recents block below (actions you take vs
          history you return to). The label does double duty: it names the group
          AND its top padding is what separates this cluster from the nav above —
          without it New Chat butts against the nav, and since the active Chat pill
@@ -34,13 +34,13 @@
         block
         class="h-9 justify-start gap-[9px] px-[11px] text-control font-medium text-foreground/92 dark:text-[color:oklch(0.86_0_0)]"
         :disabled="!currentBotId"
-        @click="handleScheduledJobs"
+        @click="handleManageBot"
       >
-        <Clock
+        <Settings
           :stroke-width="1.75"
           class="size-[18px]"
         />
-        {{ t('chat.scheduledJobs') }}
+        {{ t('chat.manageBot') }}
       </Button>
     </div>
     <Recents class="flex-1 min-h-0" />
@@ -52,7 +52,7 @@ import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { Button } from '@memohai/ui'
-import { SquarePen, Clock } from 'lucide-vue-next'
+import { SquarePen, Settings } from 'lucide-vue-next'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import Recents from './recents.vue'
@@ -69,13 +69,9 @@ function handleNewSession() {
   workspaceTabs.openChat(t('chat.newSession'))
 }
 
-// Scheduled jobs live on the bot's settings page as a tab. The bot-detail route
-// accepts an id in its botName slot (same shortcut schedule-trigger-block uses),
-// so we can deep-link straight to the current bot's schedule tab without
-// resolving a name first.
-function handleScheduledJobs() {
+function handleManageBot() {
   const botId = currentBotId.value
   if (!botId) return
-  void router.push({ name: 'bot-detail', params: { botName: botId }, query: { tab: 'schedule' } })
+  void router.push({ name: 'bot-detail', params: { botName: botId } })
 }
 </script>

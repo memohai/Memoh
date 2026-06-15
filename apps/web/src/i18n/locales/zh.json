@@ -532,6 +532,7 @@
     "noSessions": "暂无会话",
     "recents": "最近",
     "quickActions": "快捷操作",
+    "manageBot": "管理智能体",
     "scheduledJobs": "定时任务",
     "sessionTypeHeartbeat": "心跳",
     "sessionTypeSchedule": "定时任务",
