@@ -67,9 +67,9 @@ func TestChatCompactDevFlowCompactsAndArchivesFileMemory(t *testing.T) {
 	ctx := context.Background()
 	botID := "11111111-1111-1111-1111-111111111111"
 	userID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-	dataRoot, err := os.MkdirTemp("", "mc-*")
+	dataRoot, err := newSkillsTestDataRoot()
 	if err != nil {
-		t.Fatalf("create short temp data root: %v", err)
+		t.Fatalf("create temp data root: %v", err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dataRoot) })
 	startSkillsTestBridgeServer(t, dataRoot, botID)

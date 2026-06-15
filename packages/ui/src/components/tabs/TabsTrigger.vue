@@ -20,7 +20,7 @@ const forwardedProps = useForwardProps(delegatedProps)
       // TabsList, so the trigger itself only carries text + layout.
       'inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap transition-colors',
       'disabled:pointer-events-none disabled:opacity-40',
-      '[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=\'size-\'])]:size-4',
+      '[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=size-])]:size-4',
       // underline skin (keyed off the list root) — transparent border keeps the
       // baseline stable; the foreground color is the only state change. the pill
       // skin lives in TabsList scoped CSS (full SegmentedControl parity).

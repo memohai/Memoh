@@ -7,7 +7,7 @@ export { default as Toggle } from './Toggle.vue'
 // gray-ladder keyed off [data-slot="toggle"][data-state] (single source = the
 // promoted --ui-* tokens), so toggles can never drift from the rest of the system.
 export const toggleVariants = cva(
-  'inline-flex items-center justify-center gap-2 rounded-md text-body font-medium whitespace-nowrap select-none cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring/20 disabled:pointer-events-none disabled:opacity-40 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg:not([class*=\'size-\'])]:size-4 [&_svg]:shrink-0',
+  'inline-flex items-center justify-center gap-2 rounded-md text-body font-medium whitespace-nowrap select-none cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring/20 disabled:pointer-events-none disabled:opacity-40 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg:not([class*=size-])]:size-4 [&_svg]:shrink-0',
   {
     variants: {
       variant: {

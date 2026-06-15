@@ -380,7 +380,7 @@ const formSchema = {
               type="button"
               :class="[
                 'flex h-9 w-56 items-center justify-between gap-2 rounded-md px-3 py-2 text-label tracking-[0.01em] whitespace-nowrap outline-none select-none',
-                '[&_svg:not([class*=\'text-\'])]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=\'size-\'])]:size-4',
+                '[&_svg:not([class*=text-])]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=size-])]:size-4',
                 comboVal ? '' : 'text-muted-foreground',
               ]"
             >
@@ -439,7 +439,7 @@ const formSchema = {
               type="button"
               :class="[
                 'flex h-9 w-56 items-center justify-between gap-2 rounded-md px-3 py-2 text-label tracking-[0.01em] whitespace-nowrap outline-none select-none',
-                '[&_svg:not([class*=\'text-\'])]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=\'size-\'])]:size-4',
+                '[&_svg:not([class*=text-])]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=size-])]:size-4',
                 comboMultiVal.length ? '' : 'text-muted-foreground',
               ]"
             >
