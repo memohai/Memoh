@@ -1,48 +1,47 @@
 <template>
-  <div class="grid gap-4 md:grid-cols-2">
-    <div class="space-y-2">
-      <Label for="sogou-secret-id">{{ $t('common.secretId') }}</Label>
-      <Input
-        id="sogou-secret-id"
-        v-model="localConfig.secret_id"
-        type="password"
-        :aria-label="$t('common.secretId')"
-      />
-    </div>
-    <div class="space-y-2">
-      <Label for="sogou-secret-key">{{ $t('common.secretKey') }}</Label>
-      <Input
-        id="sogou-secret-key"
-        v-model="localConfig.secret_key"
-        type="password"
-        :aria-label="$t('common.secretKey')"
-      />
-    </div>
-    <div class="space-y-2 md:col-span-2">
-      <Label for="sogou-base-url">{{ $t('common.baseUrl') }}</Label>
-      <Input
-        id="sogou-base-url"
-        v-model="localConfig.base_url"
-        :aria-label="$t('common.baseUrl')"
-        placeholder="wsa.tencentcloudapi.com"
-      />
-    </div>
-    <div class="space-y-2">
-      <Label for="sogou-timeout-seconds">{{ $t('common.timeoutSeconds') }}</Label>
-      <Input
-        id="sogou-timeout-seconds"
-        v-model.number="localConfig.timeout_seconds"
-        type="number"
-        :min="1"
-        :aria-label="$t('common.timeoutSeconds')"
-      />
-    </div>
-  </div>
+  <SettingsRow :label="$t('common.secretId')">
+    <Input
+      id="sogou-secret-id"
+      v-model="localConfig.secret_id"
+      type="password"
+      class="w-80"
+      :aria-label="$t('common.secretId')"
+    />
+  </SettingsRow>
+  <SettingsRow :label="$t('common.secretKey')">
+    <Input
+      id="sogou-secret-key"
+      v-model="localConfig.secret_key"
+      type="password"
+      class="w-80"
+      :aria-label="$t('common.secretKey')"
+    />
+  </SettingsRow>
+  <SettingsRow :label="$t('common.baseUrl')">
+    <Input
+      id="sogou-base-url"
+      v-model="localConfig.base_url"
+      class="w-80"
+      :aria-label="$t('common.baseUrl')"
+      placeholder="wsa.tencentcloudapi.com"
+    />
+  </SettingsRow>
+  <SettingsRow :label="$t('common.timeoutSeconds')">
+    <Input
+      id="sogou-timeout-seconds"
+      v-model.number="localConfig.timeout_seconds"
+      type="number"
+      :min="1"
+      class="w-80"
+      :aria-label="$t('common.timeoutSeconds')"
+    />
+  </SettingsRow>
 </template>
 
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
-import { Input, Label } from '@memohai/ui'
+import { Input } from '@memohai/ui'
+import SettingsRow from '@/components/settings/row.vue'
 
 const props = defineProps<{
   modelValue: Record<string, unknown>

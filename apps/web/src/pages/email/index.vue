@@ -1,26 +1,30 @@
 <script setup lang="ts">
-import { computed, ref, provide, watch, reactive } from 'vue'
-import { useQuery} from '@pinia/colada'
+import { computed, provide, reactive, ref, watch } from 'vue'
+import { useQuery, useQueryCache } from '@pinia/colada'
 import {
   Button,
-  ScrollArea,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  Toggle,
   Empty,
   EmptyContent,
   EmptyDescription,
   EmptyHeader,
-  EmptyMedia,
   EmptyTitle,
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
 } from '@memohai/ui'
 import { getEmailProviders } from '@memohai/sdk'
 import type { EmailProviderResponse } from '@memohai/sdk'
+import { Mail, Plus, Search } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
 import AddEmailProvider from './components/add-email-provider.vue'
 import ProviderSetting from './components/provider-setting.vue'
-import { Mail, Plus } from 'lucide-vue-next'
-import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
+import BackendCard from '@/components/settings/backend-card.vue'
+import DetailPane from '@/components/settings/detail-pane.vue'
+import { useViewSwap } from '@/composables/useViewSwap'
+import SwapTransition from '@/components/settings/swap-transition.vue'
+
+const { t } = useI18n()
+const queryCache = useQueryCache()
 
 const { data: providerData } = useQuery({
   key: () => ['email-providers'],
@@ -29,96 +33,149 @@ const { data: providerData } = useQuery({
     return data
   },
 })
+
 const curProvider = ref<EmailProviderResponse>()
 provide('curEmailProvider', curProvider)
 
-const selectProvider = (name: string) => computed(() => {
-  return curProvider.value?.name === name
-})
+const { view, direction, openDetail, backToList } = useViewSwap()
+const searchQuery = ref('')
+const openStatus = reactive({ addOpen: false })
+
+const providers = computed<EmailProviderResponse[]>(() =>
+  Array.isArray(providerData.value) ? providerData.value : [],
+)
+
+const showSearch = computed(() => providers.value.length > 0)
 
 const filteredProviders = computed(() => {
-  if (!Array.isArray(providerData.value)) return []
-  return providerData.value
+  const keyword = searchQuery.value.trim().toLowerCase()
+  if (!keyword) return providers.value
+  return providers.value.filter(p =>
+    (p.name ?? '').toLowerCase().includes(keyword)
+    || (p.provider ?? '').toLowerCase().includes(keyword),
+  )
 })
 
-watch(filteredProviders, (list) => {
-  if (!list || list.length === 0) {
-    curProvider.value = { id: '' }
-    return
-  }
-  const currentId = curProvider.value?.id
-  if (currentId) {
-    const stillExists = list.find((p: EmailProviderResponse) => p.id === currentId)
-    if (stillExists) {
-      curProvider.value = stillExists
-      return
-    }
-  }
-  curProvider.value = list[0]
-}, { immediate: true })
+function openProvider(provider: EmailProviderResponse) {
+  curProvider.value = provider
+  openDetail()
+}
 
-const openStatus = reactive({ addOpen: false })
+// Keep the open provider synced with refreshed data; if it was deleted while
+// open, fall back to the list.
+watch(providers, (list) => {
+  const currentId = curProvider.value?.id
+  if (!currentId) return
+  const stillExists = list.find(p => p.id === currentId)
+  if (stillExists) {
+    curProvider.value = stillExists
+  }
+  else if (view.value === 'detail') {
+    backToList()
+  }
+})
+
+// A provider may have been created in the add dialog — refresh on close.
+watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
+  if (wasOpen && !isOpen) {
+    queryCache.invalidateQueries({ key: ['email-providers'] })
+  }
+})
 </script>
 
 <template>
-  <MasterDetailSidebarLayout>
-    <template #sidebar-content>
-      <SidebarMenu
-        v-for="item in filteredProviders"
-        :key="item.id"
-      >
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            as-child
-            :is-active="curProvider?.id === item.id"
-            class="justify-start py-0! px-0 h-11 before:hidden"
+  <SwapTransition :direction="direction">
+    <!-- Provider list -->
+    <section
+      v-if="view === 'list'"
+      class="mx-auto max-w-3xl px-6 pt-10 pb-12"
+    >
+      <header class="mb-6 flex items-center justify-between gap-4">
+        <h1 class="px-2 text-lg font-semibold">
+          {{ t('email.title') }}
+        </h1>
+        <div class="flex items-center gap-2">
+          <div
+            v-if="showSearch"
+            class="w-44 sm:w-56"
           >
-            <Toggle
-              class="w-full justify-start h-11 px-3 border-0 bg-transparent! transition-colors gap-3"
-              :model-value="selectProvider(item.name ?? '').value"
-              @update:model-value="(isSelect) => { if (isSelect) curProvider = item }"
-            >
-              <Mail class="size-4 shrink-0" />
-              <span class="truncate text-xs font-medium">{{ item.name }}</span>
-            </Toggle>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      </SidebarMenu>
-    </template>
+            <InputGroup class="w-full">
+              <InputGroupAddon align="inline-start">
+                <Search class="size-3.5 text-muted-foreground" />
+              </InputGroupAddon>
+              <InputGroupInput
+                v-model="searchQuery"
+                :placeholder="t('email.searchPlaceholder')"
+              />
+            </InputGroup>
+          </div>
+          <Button @click="openStatus.addOpen = true">
+            <Plus class="size-4" />
+            {{ t('email.add') }}
+          </Button>
+        </div>
+      </header>
 
-    <template #sidebar-footer>
-      <AddEmailProvider v-model:open="openStatus.addOpen" />
-    </template>
-
-    <template #detail>
-      <ScrollArea
-        v-if="curProvider?.id"
-        class="max-h-full h-full"
+      <div
+        v-if="providers.length > 0"
+        class="grid grid-cols-1 gap-3 sm:grid-cols-2"
       >
-        <ProviderSetting />
-      </ScrollArea>
+        <BackendCard
+          v-for="provider in filteredProviders"
+          :key="provider.id"
+          :name="provider.name ?? ''"
+          @click="openProvider(provider)"
+        >
+          <template #leading>
+            <span class="flex size-10 items-center justify-center rounded-full bg-muted">
+              <Mail class="size-5 text-muted-foreground" />
+            </span>
+          </template>
+        </BackendCard>
+
+        <button
+          type="button"
+          class="group/add flex min-h-[4.5rem] items-center justify-center gap-2 rounded-[var(--radius-menu-shell)] border border-dashed border-border bg-background text-sm text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          @click="openStatus.addOpen = true"
+        >
+          <Plus class="size-4" />
+          {{ t('email.add') }}
+        </button>
+      </div>
+
       <Empty
         v-else
-        class="h-full flex justify-center items-center"
+        class="rounded-[var(--radius-menu-shell)] border border-dashed border-border py-16"
       >
         <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <Mail />
-          </EmptyMedia>
+          <EmptyTitle>{{ t('email.emptyTitle') }}</EmptyTitle>
+          <EmptyDescription>{{ t('email.emptyDescription') }}</EmptyDescription>
         </EmptyHeader>
-        <EmptyTitle>{{ $t('email.emptyTitle') }}</EmptyTitle>
-        <EmptyDescription>{{ $t('email.emptyDescription') }}</EmptyDescription>
         <EmptyContent>
           <Button
             variant="outline"
             @click="openStatus.addOpen = true"
           >
-            <Plus
-              class="mr-1"
-            /> {{ $t('email.add') }}
+            <Plus class="size-4" />
+            {{ t('email.add') }}
           </Button>
         </EmptyContent>
       </Empty>
-    </template>
-  </MasterDetailSidebarLayout>
+
+      <AddEmailProvider
+        v-model:open="openStatus.addOpen"
+        hide-trigger
+      />
+    </section>
+
+    <!-- Provider detail -->
+    <DetailPane
+      v-else
+      width="narrow"
+      :back-label="t('email.title')"
+      @back="backToList()"
+    >
+      <ProviderSetting v-if="curProvider?.id" />
+    </DetailPane>
+  </SwapTransition>
 </template>

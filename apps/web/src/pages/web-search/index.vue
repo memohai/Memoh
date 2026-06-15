@@ -51,7 +51,9 @@ const providers = computed<SearchprovidersGetResponse[]>(() => {
   })
 })
 
-const showSearch = computed(() => providers.value.length > 8)
+// Always offer search once there's anything to filter — a hidden-then-appearing
+// box read as inconsistent (some providers showed it, some didn't).
+const showSearch = computed(() => providers.value.length > 0)
 
 const filteredProviders = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase()
@@ -86,8 +88,8 @@ watch(providers, (list) => {
       v-if="view === 'list'"
       class="mx-auto max-w-3xl px-6 pt-10 pb-12"
     >
-      <header class="mb-6 flex items-center justify-between gap-4 px-2">
-        <h1 class="text-lg font-semibold">
+      <header class="mb-6 flex items-center justify-between gap-4">
+        <h1 class="px-2 text-lg font-semibold">
           {{ t('webSearch.title') }}
         </h1>
         <div class="flex items-center gap-2">
@@ -120,7 +122,6 @@ watch(providers, (list) => {
           v-for="provider in filteredProviders"
           :key="provider.id"
           :name="provider.name ?? ''"
-          :subtitle="t(`webSearch.providerNames.${provider.provider}`, provider.provider ?? '')"
           :enabled="provider.enable !== false"
           @click="openProvider(provider)"
         >

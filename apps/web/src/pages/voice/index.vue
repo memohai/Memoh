@@ -113,8 +113,8 @@ watch(transcriptionProviders, (list) => {
 
       <!-- Speaking (TTS) -->
       <section class="space-y-2.5">
-        <div class="flex items-center justify-between gap-4 px-2">
-          <div class="min-w-0">
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0 px-2">
             <h2 class="text-[13px] font-medium text-foreground">
               {{ t('voice.speakTitle') }}
             </h2>
@@ -141,7 +141,6 @@ watch(transcriptionProviders, (list) => {
             v-for="provider in speechProviders"
             :key="provider.id"
             :name="provider.name ?? ''"
-            :subtitle="provider.client_type ?? ''"
             :enabled="provider.enable !== false"
             @click="openSpeech(provider)"
           >
@@ -172,8 +171,8 @@ watch(transcriptionProviders, (list) => {
 
       <!-- Listening (STT) -->
       <section class="space-y-2.5">
-        <div class="flex items-center justify-between gap-4 px-2">
-          <div class="min-w-0">
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0 px-2">
             <h2 class="text-[13px] font-medium text-foreground">
               {{ t('voice.listenTitle') }}
             </h2>
@@ -200,7 +199,6 @@ watch(transcriptionProviders, (list) => {
             v-for="provider in transcriptionProviders"
             :key="provider.id"
             :name="provider.name ?? ''"
-            :subtitle="provider.client_type ?? ''"
             :enabled="provider.enable !== false"
             @click="openTranscription(provider)"
           >

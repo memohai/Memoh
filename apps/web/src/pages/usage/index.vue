@@ -6,7 +6,7 @@
 
     <div class="space-y-8">
       <SettingsSection :title="$t('usage.filters')">
-        <div class="grid grid-cols-2 gap-x-4 gap-y-4 p-4">
+        <div class="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2">
           <div class="space-y-1.5">
             <p class="text-xs text-muted-foreground">
               {{ $t('usage.selectBot') }}
@@ -22,34 +22,9 @@
             <p class="text-xs text-muted-foreground">
               {{ $t('usage.timeRange') }}
             </p>
-            <Select v-model="timeRange">
-              <SelectTrigger
-                size="sm"
-                class="w-full"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="7">
-                  {{ $t('usage.last7Days') }}
-                </SelectItem>
-                <SelectItem value="30">
-                  {{ $t('usage.last30Days') }}
-                </SelectItem>
-                <SelectItem value="90">
-                  {{ $t('usage.last90Days') }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div class="col-span-2 space-y-1.5">
-            <p class="text-xs text-muted-foreground">
-              {{ $t('usage.customRange') }}
-            </p>
             <DateRangePicker
               v-model="customDateRange"
-              size="sm"
+              :presets="datePresets"
               :locale="locale"
               :placeholder="$t('usage.customRangePlaceholder')"
             />
@@ -60,10 +35,7 @@
               {{ $t('usage.sessionType') }}
             </p>
             <Select v-model="selectedSessionType">
-              <SelectTrigger
-                size="sm"
-                class="w-full"
-              >
+              <SelectTrigger class="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -83,18 +55,12 @@
             </Select>
           </div>
 
-          <div
-            v-if="modelOptions.length > 0"
-            class="space-y-1.5"
-          >
+          <div class="space-y-1.5">
             <p class="text-xs text-muted-foreground">
               {{ $t('usage.filterByModel') }}
             </p>
             <Select v-model="selectedModelId">
-              <SelectTrigger
-                size="sm"
-                class="w-full"
-              >
+              <SelectTrigger class="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -358,10 +324,11 @@ import {
 } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { useDark } from '@vueuse/core'
-import { parseDate, type DateValue } from '@internationalized/date'
+import { getLocalTimeZone, parseDate, today, type DateValue } from '@internationalized/date'
 import {
-  DateRangePicker,
   type DateRange,
+  DateRangePicker,
+  type DateRangePreset,
   Pagination,
   PaginationContent,
   PaginationEllipsis,
@@ -387,6 +354,7 @@ import { getBotsQuery } from '@memohai/sdk/colada'
 import { getBotsByBotIdTokenUsage, getBotsByBotIdTokenUsageRecords } from '@memohai/sdk'
 import BotSelect from '@/components/bot-select/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
+import { useChatSelectionStore } from '@/store/chat-selection'
 import ChartCard from './components/chart-card.vue'
 import type { HandlersDailyTokenUsage, HandlersModelTokenUsage, HandlersTokenUsageRecord } from '@memohai/sdk'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
@@ -397,7 +365,6 @@ use([CanvasRenderer, LineChart, BarChart, PieChart, GridComponent, TooltipCompon
 const { t, locale } = useI18n()
 
 const selectedBotId = useSyncedQueryParam('bot', '')
-const timeRange = useSyncedQueryParam('range', '7')
 const selectedModelId = useSyncedQueryParam('model', 'all')
 const selectedSessionType = useSyncedQueryParam('type', 'all')
 const recordsPage = useSyncedQueryParam('rpage', '1')
@@ -417,8 +384,7 @@ function tomorrow(): string {
   return formatDate(d)
 }
 
-const initDays = parseInt(timeRange.value, 10) || 30
-const dateFrom = useSyncedQueryParam('from', daysAgo(initDays))
+const dateFrom = useSyncedQueryParam('from', daysAgo(7))
 const dateTo = useSyncedQueryParam('to', tomorrow())
 
 function parseDateValue(value: string): DateValue | undefined {
@@ -431,41 +397,59 @@ function parseDateValue(value: string): DateValue | undefined {
   }
 }
 
-// The picker speaks DateRange (@internationalized/date); the query keeps the plain
-// YYYY-MM-DD strings. Mirror string -> range here, and only write back to the strings
-// once BOTH ends are chosen, so an in-progress pick never fires a half-open query.
+// The picker speaks an inclusive DateRange (@internationalized/date); the query
+// keeps plain YYYY-MM-DD strings where `to` is EXCLUSIVE (the day after the last
+// counted day, as `allDays` consumes it). Map between the two here so a preset
+// and a hand-picked range agree: read end = to - 1 day, write to = end + 1 day.
+// Only write back once BOTH ends are chosen, so an in-progress pick never fires
+// a half-open query.
 const customDateRange = ref<DateRange>()
 
 watch([dateFrom, dateTo], ([from, to]) => {
   const start = parseDateValue(from)
-  const end = parseDateValue(to)
+  const endExclusive = parseDateValue(to)
+  const end = endExclusive ? endExclusive.subtract({ days: 1 }) : undefined
   customDateRange.value = start || end ? { start, end } : undefined
 }, { immediate: true })
 
 watch(customDateRange, (value) => {
   if (value?.start && value?.end) {
     const nextFrom = value.start.toString()
-    const nextTo = value.end.toString()
+    const nextTo = value.end.add({ days: 1 }).toString()
     if (nextFrom !== dateFrom.value) dateFrom.value = nextFrom
     if (nextTo !== dateTo.value) dateTo.value = nextTo
   }
 })
 
-watch(timeRange, (val) => {
-  const days = parseInt(val, 10)
-  if (days > 0) {
-    dateFrom.value = daysAgo(days)
-    dateTo.value = tomorrow()
-  }
-})
+// Quick presets for the range picker: "Last N days" is the inclusive range
+// [today-(N-1), today]; matching one of these makes the trigger read its name.
+function presetRange(days: number): DateRange {
+  const end = today(getLocalTimeZone())
+  return { start: end.subtract({ days: days - 1 }), end }
+}
+
+const datePresets = computed<DateRangePreset[]>(() => [
+  { label: t('usage.last7Days'), range: presetRange(7) },
+  { label: t('usage.last30Days'), range: presetRange(30) },
+  { label: t('usage.last90Days'), range: presetRange(90) },
+])
 
 const { data: botData } = useQuery(getBotsQuery())
 const botList = computed(() => botData.value?.items ?? [])
 
+// Default to the bot already active on the chat page (persisted in chat-selection),
+// so opening Usage continues looking at whatever the user was just chatting with.
+// Fall back to the first bot only when there's no active bot or it's gone. A
+// ?bot= param or a manual pick always wins, since both flow through selectedBotId.
+const chatSelection = useChatSelectionStore()
+
 watch(botList, (list) => {
-  if (!selectedBotId.value && list.length > 0 && list[0]!.id) {
-    selectedBotId.value = list[0]!.id
-  }
+  if (selectedBotId.value || list.length === 0) return
+  const inherited = chatSelection.currentBotId
+  const next = inherited && list.some(bot => bot.id === inherited)
+    ? inherited
+    : (list[0]?.id ?? '')
+  if (next) selectedBotId.value = next
 }, { immediate: true })
 
 const modelIdFilter = computed(() =>
