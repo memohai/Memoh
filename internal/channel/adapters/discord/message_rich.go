@@ -156,10 +156,7 @@ var escapeDiscordInlineMarkdown = strings.NewReplacer(
 func escapeDiscordLinkText(text string) string {
 	text = strings.ReplaceAll(text, "\r", "")
 	text = strings.ReplaceAll(text, "\n", " ")
-	text = strings.ReplaceAll(text, `\`, `\\`)
-	text = strings.ReplaceAll(text, "[", `\[`)
-	text = strings.ReplaceAll(text, "]", `\]`)
-	return text
+	return escapeDiscordInlineMarkdown(text)
 }
 
 // selectBacktickFence returns a run of backticks long enough to safely fence
