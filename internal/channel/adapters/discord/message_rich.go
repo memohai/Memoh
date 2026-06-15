@@ -163,9 +163,9 @@ func escapeDiscordLinkText(text string) string {
 }
 
 // selectBacktickFence returns a run of backticks long enough to safely fence
-// `text`, with at least `min` backticks. Used by code blocks (min=3) and the
-// inline-code wrapper.
-func selectBacktickFence(text string, min int) string {
+// `text`, with at least `minRun` backticks. Used by code blocks (minRun=3) and
+// the inline-code wrapper.
+func selectBacktickFence(text string, minRun int) string {
 	maxRun, cur := 0, 0
 	for _, r := range text {
 		if r == '`' {
@@ -177,7 +177,7 @@ func selectBacktickFence(text string, min int) string {
 		}
 		cur = 0
 	}
-	n := min
+	n := minRun
 	if maxRun >= n {
 		n = maxRun + 1
 	}
