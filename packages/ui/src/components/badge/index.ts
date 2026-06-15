@@ -32,9 +32,9 @@ export const badgeVariants = cva(
       },
       size: {
         default: 'px-2 py-0.5',
-        // px-[7px]: a hair more breathing room than px-1.5 (6px) so the compact chip
-        // doesn't read as cramped, without growing to the full default px-2.
-        sm: 'px-[7px] py-0',
+        // px-[0.4375rem] (≈7px): a hair more breathing room than px-1.5 (6px) so the
+        // compact chip doesn't read as cramped, without growing to the full default px-2.
+        sm: 'px-[0.4375rem] py-0',
       },
     },
     defaultVariants: {

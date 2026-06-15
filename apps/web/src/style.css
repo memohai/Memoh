@@ -132,7 +132,7 @@
  * Chinese; CJK that appears inside an English UI rides markstream's own 1.625
  * paragraph leading below, which is already comfortable for mixed runs. */
 :lang(zh) [data-chat-content] .prose {
-  font-weight: 345;
+  font-weight: 325;
   line-height: 1.7;
 }
 :lang(zh) [data-chat-content] .markstream-vue,
@@ -154,10 +154,15 @@
 
 @layer components {
   [data-chat-content] .prose {
-    /* Chat reading body: 15px / 400. */
-    font-size: 0.9375rem;
+    /* Chat reading body: 16px. Weight is a deliberate 350 — lighter than the
+     * 400 "normal" rung because this is long-form READING content (markstream
+     * already hand-tunes weight here, and apps/web is outside the UI-contract
+     * guard). The :lang(zh) rule below drops it further for stroke-dense CJK;
+     * this base also governs Chinese in an English-language UI (the common
+     * case) where that rule never matches. */
+    font-size: 1rem;
     line-height: 1.6;
-    font-weight: 400;
+    font-weight: 350;
   }
 
   [data-chat-content] .chat-user-bubble {
@@ -167,6 +172,14 @@
 
   [data-chat-content] .chat-message-meta {
     font-size: 0.75rem;
+  }
+
+  /* Code-block glyphs carry a touch more weight than the 400 body so the mono
+   * run reads as code, not prose. A direct font-weight (not a `font-*` utility)
+   * so the CJK weight-clamp lookup table can't pull it back under :lang(zh). */
+  [data-chat-content] .chat-code-block code,
+  [data-chat-content] .chat-code-block pre {
+    font-weight: 480;
   }
 
   .typography-code-preview pre {
@@ -257,25 +270,35 @@
   /* Heading scale is em-relative (tracks the body) and restrained: headings sit
    * just above the body rather than the old fixed 36/24/20px scale that
    * dwarfed the text. Weights are toned down from the previous 800/700. */
-  --ms-text-h1: 1.5em;
-  --ms-text-h2: 1.3em;
-  --ms-text-h3: 1.15em;
+  /* Two clear tiers: h1–h3 are the BIG group (a pronounced step down from each
+   * other), h4–h6 the small group. h4 and h5 render IDENTICALLY (one rung, not
+   * two), and h6 keeps heading size only — its weight drops to the body weight
+   * so it reads as emphasized body, not a sixth heading rung. */
+  --ms-text-h1: 1.6em;
+  --ms-text-h2: 1.38em;
+  --ms-text-h3: 1.2em;
   --ms-text-h4: 1.05em;
-  --ms-text-h5: 1em;
+  --ms-text-h5: 1.05em;
   --ms-text-h6: 1em;
   --ms-weight-h1: 600;
   --ms-weight-h2: 560;
   --ms-weight-h3: 520;
   --ms-weight-h4: 500;
+  /* h5/h6 weights are NOT read from vars by markstream (.heading-5/.heading-6
+   * only consume --ms-text-*), so they're set directly below. */
 
-  /* Flow spacing — calmer rhythm matching the previous defaults */
-  --ms-flow-paragraph-y: 1.25em;
-  --ms-flow-list-y: 1em;
-  --ms-flow-list-item-y: 0.25em;
-  --ms-flow-blockquote-y: 1rem;
-  --ms-flow-hr-y: 1.5rem;
-  --ms-flow-codeblock-y: 1rem;
-  --ms-flow-table-y: 1rem;
+  /* Flow spacing — a slightly more generous, unified rhythm (~+5% on the block
+   * gaps). --ms-flow-hr-y (1.6rem) is the canonical "big gap": the body↔rule
+   * distance, matched 1:1 by the assistant block space-y so a process/"Thought"
+   * row sits the same distance from the body. List ITEMS, by contrast, tighten
+   * (0.12em) — the inter-item gap read too tall once line-height grew. */
+  --ms-flow-paragraph-y: 1.3em;
+  --ms-flow-list-y: 1.05em;
+  --ms-flow-list-item-y: 0.12em;
+  --ms-flow-blockquote-y: 1.05rem;
+  --ms-flow-hr-y: 1.6rem;
+  --ms-flow-codeblock-y: 1.05rem;
+  --ms-flow-table-y: 1.05rem;
   --ms-flow-table-cell: 0.5rem 0.875rem;
   --ms-radius: var(--radius-lg);
 
@@ -286,8 +309,11 @@
   --hr-border: var(--color-border);
   --blockquote-border: var(--color-border);
   --blockquote-fg: var(--color-muted-foreground);
-  --list-counter-marker: var(--color-muted-foreground);
-  --list-marker: var(--color-muted-foreground);
+  /* List bullets/numbers read as foreground, not a muted gray: the marker is
+   * part of the content (it indexes the item), so it should carry the same ink
+   * as the text it points at rather than fading into the page. */
+  --list-counter-marker: var(--color-foreground);
+  --list-marker: var(--color-foreground);
 
   /* Tables — no row hover (markdown tables are content, not interactive lists).
    * markstream's `tr:hover` reads --code-action-hover-bg, so transparent here
@@ -322,6 +348,25 @@
 .markstream-vue strong,
 .markstream-vue b {
   font-weight: 520;
+}
+
+/* h5 matches h4 exactly (markstream's .heading-5/.heading-6 read only the size
+ * var, not a weight var); h6 drops to the reading-body weight so it reads as
+ * emphasized body rather than a sixth heading rung. */
+.markstream-vue .heading-5 {
+  font-weight: 500;
+}
+
+.markstream-vue .heading-6 {
+  font-weight: 350;
+}
+
+/* The small heading tier (h4–h6) sits tight to its text — trim the inherited
+ * reading line-height (1.6 / 1.7 zh) so stacked sub-headings don't read tall. */
+.markstream-vue .heading-4,
+.markstream-vue .heading-5,
+.markstream-vue .heading-6 {
+  line-height: 1.3;
 }
 
 /* Tables — restore the previous clean look: rounded outer frame, tinted header,
@@ -371,9 +416,12 @@
   border-right: 0;
 }
 
-/* Header — tinted, left-aligned, single-weight bottom border */
+/* Header — tinted, single-weight bottom border. Alignment is NOT forced here:
+ * markstream already stamps text-left/center/right on each <th> from the
+ * column's `:---`/`:--:`/`--:` spec, so the header must inherit the column's
+ * alignment instead of being pinned left (pinning it left made a centered or
+ * right-aligned column read with a mismatched left-aligned title). */
 .markstream-vue .table-node thead th {
-  text-align: left;
   font-weight: 500;
   border-bottom-width: 1px;
   /* One step below the body cells (14px vs 15px). */
@@ -395,11 +443,15 @@
   background-color: transparent;
 }
 
-/* Inline code — shape tweaks on top of CSS vars */
+/* Inline code — shape tweaks on top of CSS vars. Weight matches the code block
+ * (480), clearly heavier than the light reading body (350); inheriting the body
+ * weight made the mono run look too thin to read as code. A direct font-weight
+ * (not a `font-*` utility) so the CJK weight-clamp table can't pull it back. */
 .markstream-vue .inline-code {
   border-radius: 0.3125rem;
   padding: 0.125rem 0.375rem;
   font-size: 0.875em;
+  font-weight: 480;
   font-family: var(--memoh-code-font-family, ui-monospace, monospace);
 }
 
@@ -417,25 +469,266 @@
   line-height: 1.5;
 }
 
-/* Blockquote — soft accent tint (background not exposed as a CSS var in 1.x) */
+/* Blockquote — a single rounded vertical bar, no fill. The old accent tint
+ * baked a color block that compounded on every nesting level (a quote inside a
+ * quote inside a quote stacked three solid blocks). A quote is structure, not a
+ * highlight: drop the fill entirely and mark it with one pill bar drawn as a
+ * ::before, so nesting just adds another thin bar at the next indent — never a
+ * darker block. The bar is a token gray (`--color-border`); copy stays muted. */
 .markstream-vue .blockquote {
   font-style: normal;
   font-weight: 400;
-  background-color: color-mix(in oklch, var(--color-accent) 55%, transparent);
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
-  padding: 0.5rem 1rem;
+  background-color: transparent;
+  border-left: 0;
+  border-radius: 0;
+  padding: 0.4rem 0 0.4rem 1rem;
+  position: relative;
+  color: var(--color-muted-foreground);
 }
 
-/* Links — soft underline (1.x defaults to no underline until hover) */
+.markstream-vue .blockquote::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.1rem;
+  bottom: 0.1rem;
+  width: 3.5px;
+  border-radius: 9999px;
+  background-color: var(--color-border);
+}
+
+/* Links — a dotted underline (a run of small dots), foreground at rest. On
+ * hover BOTH the text and the dots turn the selection blue, with NO transition
+ * (an animated link color reads twitchy in running prose). `skip-ink: none`
+ * keeps the dotted run continuous under descenders; the offset + visible
+ * overflow stop a glyph tail (the "p" in https) from being clipped. The floating
+ * URL tooltip is disabled at the renderer (showTooltips=false) — it was an
+ * off-language popover, not the @memohai/ui Tooltip. */
 .markstream-vue .link-node {
-  text-decoration: underline;
+  color: var(--color-foreground);
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
   text-decoration-thickness: 1px;
-  text-underline-offset: 0.2em;
-  text-decoration-color: color-mix(in oklch, var(--color-foreground) 35%, transparent);
+  text-decoration-color: color-mix(in oklch, var(--color-foreground) 45%, transparent);
+  text-underline-offset: 0.22em;
+  text-decoration-skip-ink: none;
+  overflow: visible;
+  transition: none;
 }
 
 .markstream-vue .link-node:hover {
-  text-decoration-color: var(--color-foreground);
+  /* Hover tints to the scarce brand purple (the app's "special" accent) — the
+   * same hue the footnote markers use, so every inline jump speaks one color. */
+  color: var(--brand);
+  /* Re-assert dotted on hover: markstream's own :hover swaps in a SOLID
+   * underline (it defaults to no underline until hover), which would turn our
+   * dots into a line. Pin the style so hover only changes color, not shape. */
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--brand);
+}
+
+/* Footnotes — drop the per-item top divider (markstream stamps a `border-t` on
+ * every footnote, stacking into a ladder of hairlines), match the body text
+ * size (markstream renders the list at text-sm), and number each entry with a
+ * brand-purple "1." counter so the definitions read as an ordered list keyed to
+ * their references. Purple is used deliberately here: the skeleton is mostly
+ * black/white/gray, so a small accent on the footnote markers earns the scarce
+ * brand hue. */
+.markstream-vue {
+  counter-reset: md-footnote;
+}
+
+.markstream-vue .footnote-node {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 0.4rem;
+  /* Top-align, not baseline: an inline back-link icon at the end of the text
+   * was dragging the flex baseline down, which pulled the "1." marker below the
+   * first character. Top-aligning with a shared line-height lines the marker up
+   * with the first text line regardless of what's further down the entry. */
+  align-items: flex-start;
+  line-height: 1.625;
+  /* Match the reading body exactly (markstream renders the list at text-sm).
+   * Pinned in rem to the prose body size so an intermediate text-sm wrapper
+   * can't shrink it. */
+  font-size: 1rem;
+  counter-increment: md-footnote;
+}
+
+.markstream-vue .footnote-node::before {
+  content: counter(md-footnote) ".";
+  flex-shrink: 0;
+  margin-right: 0.45em;
+  line-height: 1.625;
+  /* Solid foreground (black) — the index number is real content, so it reads as
+   * confident ink, not a washed-out gray. The brand purple is the hover accent
+   * on the interactive ref/backref markers, not the resting number. */
+  color: var(--color-foreground);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Images — never overflow the column; wrap to the next line when several sit in
+ * one paragraph instead of pushing the row wider than the message. */
+.markstream-vue .image-node-container {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: top;
+}
+
+.markstream-vue .image-node-container img,
+.markstream-vue img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-md);
+}
+
+/* Lists — a clear, full indent so nested levels read as nested (the default
+ * felt half-indented). Task-list items keep their bullet: the checkbox is an
+ * annotation on the item, not a replacement for the marker, so "• ☑ text"
+ * mirrors a normal nested list rather than a flush, marker-less column. */
+.markstream-vue ul,
+.markstream-vue ol {
+  padding-left: 1.6em;
+}
+
+/* List markers carry weight: the ordered "1." / "2." numbers (and the bullet
+ * dots) inherited the light reading body and read too faint for an index.
+ * Bump the ::marker weight so the numbers sit confidently in front of the item. */
+.markstream-vue .list-item::marker {
+  font-weight: 550;
+}
+
+/* Task-list items keep their bullet/number AND their indent. markstream stamps
+ * `.markstream-vue li:has(.checkbox-node){list-style:none; margin-left:-indent}`
+ * at the same specificity as a plain override, and its stylesheet loads AFTER
+ * ours — so we out-specify it via the `.list-node` parent (.list-disc/.list-
+ * decimal) and restore the indent the negative margin pulled away. Result:
+ * "• ☑ text", properly indented, mirroring a normal nested list. */
+.markstream-vue .list-disc li:has(.checkbox-node),
+.markstream-vue .list-disc li:has(.checkbox-icon) {
+  list-style-type: disc;
+  margin-left: 0;
+}
+
+.markstream-vue .list-decimal li:has(.checkbox-node),
+.markstream-vue .list-decimal li:has(.checkbox-icon) {
+  list-style-type: decimal;
+  margin-left: 0;
+}
+
+/* The inline checkbox marker sits a hair off the text baseline; nudge it back
+ * and give it a little trailing gap from the label. */
+.markstream-vue .checkbox-node {
+  margin-right: 0.4em;
+  vertical-align: -0.1em;
+}
+
+/* Mermaid — the diagram body keeps markstream's own palette, but the OUTER card
+ * (frame + header strip + label) is one of our floating cards, so it wears our
+ * tokens: a single border-border hairline, the card surface, the card radius,
+ * and a muted label — not markstream's bespoke gray chrome that read as a
+ * foreign block dropped into the conversation. */
+.markstream-vue .mermaid-block-container {
+  border-color: var(--color-border);
+  background-color: var(--color-card);
+  border-radius: var(--radius-lg);
+}
+
+.markstream-vue .mermaid-block-header {
+  background-color: var(--color-card);
+  border-color: var(--color-border);
+}
+
+.markstream-vue .mermaid-label-text {
+  color: var(--color-muted-foreground);
+}
+
+/* Admonition / custom container (incl. the collapsible "warning" block) — align
+ * the container chrome to our card language: token border + surface + radius,
+ * no stray elevation. The floating legend label gets the card surface so it
+ * doesn't read as a haloed chip, and the collapse toggle is a clean neutral
+ * ghost. box-shadow is forced off defensively (the odd left-side shadow the
+ * block showed isn't in markstream's own rules, so it's likely riding in on a
+ * nested element). The inner content keeps its kind accent. */
+.markstream-vue .admonition {
+  border-color: var(--color-border);
+  background-color: var(--color-card);
+  border-radius: var(--radius-lg);
+  box-shadow: none;
+}
+
+.markstream-vue .admonition .admonition-legend {
+  background-color: var(--color-card);
+}
+
+.markstream-vue .admonition .admonition-toggle {
+  box-shadow: none;
+}
+
+.markstream-vue .admonition .admonition-toggle:hover {
+  background-color: var(--color-accent);
+}
+
+/* Mermaid diagram body — recolor markstream's default light-purple nodes to the
+ * neutral skeleton so the diagram reads as ours, not a violet foreign block:
+ * node fills go muted, strokes go border-hairline, labels go foreground.
+ * mermaid scopes its own styles to the SVG id (very high specificity), so these
+ * need !important to land. Edges are left at mermaid's dark stroke. */
+/* Filled shapes across diagram types → muted surface + border-hairline:
+ * flowchart nodes, sequence actors + notes, class/state boxes, cluster frames,
+ * loop label boxes. (rect.actor and text.actor share the `actor` class, so the
+ * fills are matched on the SHAPE element only — text is handled below.) */
+.markstream-vue .mermaid-preview-area .node rect,
+.markstream-vue .mermaid-preview-area .node polygon,
+.markstream-vue .mermaid-preview-area .node circle,
+.markstream-vue .mermaid-preview-area .node path,
+.markstream-vue .mermaid-preview-area rect.actor,
+.markstream-vue .mermaid-preview-area .actor > rect,
+.markstream-vue .mermaid-preview-area g.actor rect,
+.markstream-vue .mermaid-preview-area rect.note,
+.markstream-vue .mermaid-preview-area .note,
+.markstream-vue .mermaid-preview-area .cluster rect,
+.markstream-vue .mermaid-preview-area .labelBox,
+.markstream-vue .mermaid-preview-area .classGroup rect,
+.markstream-vue .mermaid-preview-area .stateGroup rect {
+  fill: var(--color-muted) !important;
+  stroke: var(--color-border) !important;
+}
+
+/* All diagram TEXT → foreground (node/actor/note/message/loop labels). */
+.markstream-vue .mermaid-preview-area .nodeLabel,
+.markstream-vue .mermaid-preview-area .node .label,
+.markstream-vue .mermaid-preview-area span.nodeLabel,
+.markstream-vue .mermaid-preview-area text.actor,
+.markstream-vue .mermaid-preview-area text.actor tspan,
+.markstream-vue .mermaid-preview-area .actor-box,
+.markstream-vue .mermaid-preview-area .noteText,
+.markstream-vue .mermaid-preview-area .noteText tspan,
+.markstream-vue .mermaid-preview-area .messageText,
+.markstream-vue .mermaid-preview-area .labelText,
+.markstream-vue .mermaid-preview-area .loopText,
+.markstream-vue .mermaid-preview-area .loopText tspan {
+  color: var(--color-foreground) !important;
+  fill: var(--color-foreground) !important;
+}
+
+/* Connectors (flow edges, message lines, lifelines, loop frames) → muted ink. */
+.markstream-vue .mermaid-preview-area .edgePath path,
+.markstream-vue .mermaid-preview-area .flowchart-link,
+.markstream-vue .mermaid-preview-area .messageLine0,
+.markstream-vue .mermaid-preview-area .messageLine1,
+.markstream-vue .mermaid-preview-area line.actor-line,
+.markstream-vue .mermaid-preview-area .loopLine {
+  stroke: var(--color-muted-foreground) !important;
+}
+
+.markstream-vue .mermaid-preview-area .edgeLabel {
+  color: var(--color-foreground) !important;
+  background-color: var(--color-card) !important;
+  fill: var(--color-card) !important;
 }
 
 /* Hide the typewriter blinking caret (keep the typewriter text reveal) */

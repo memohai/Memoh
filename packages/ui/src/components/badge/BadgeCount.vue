@@ -16,12 +16,14 @@ import { cn } from '#/lib/utils'
 // (No soft variant — if a count should whisper, it usually shouldn't be a bubble at
 //  all but a plain muted numeral in the row.)
 const badgeCountVariants = cva(
-  // 15px circle: a single digit is a tight little dot (min-w == h, NO px, so it stays
-  // a true circle, never an oval). Horizontal padding is added per-content below —
-  // only multi-char values ("42", "9+", "99+") get breathing room, because a fixed px
-  // would inflate the single-digit circle. font-bold keeps the tiny white numeral
-  // legible on the saturated fill; leading-none + tabular-nums keep it crisp.
-  'inline-flex items-center justify-center rounded-full h-[15px] min-w-[15px] text-caption font-bold font-sans tabular-nums leading-none',
+  // Circle sized in rem (≈15px at the default root) so the dot scales with the UI
+  // font instead of staying a fixed pixel size: a single digit is a tight little dot
+  // (min-w == h, no horizontal padding, so it stays a true circle, never an oval).
+  // Horizontal padding is added per-content below — only multi-char values ("42",
+  // "9+", "99+") get breathing room, because a fixed pad would inflate the single-digit
+  // circle. font-bold keeps the tiny white numeral legible on the saturated fill;
+  // leading-none + tabular-nums keep it crisp.
+  'inline-flex items-center justify-center rounded-full h-[0.9375rem] min-w-[0.9375rem] text-caption font-bold font-sans tabular-nums leading-none',
   {
     variants: {
       variant: {

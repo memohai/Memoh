@@ -21,7 +21,7 @@ const { name, formMessageId } = useFormField()
     as="p"
     :name="toValue(name)"
     :class="cn(
-      'text-destructive flex items-center gap-1.5 text-[13px] leading-snug',
+      'text-destructive flex items-center gap-1.5 text-label leading-snug',
       props.class,
     )"
   >

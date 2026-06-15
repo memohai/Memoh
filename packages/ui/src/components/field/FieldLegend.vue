@@ -18,7 +18,7 @@ const props = withDefaults(defineProps<{
     :data-variant="variant"
     :class="cn(
       'p-0 text-foreground',
-      variant === 'title' ? 'text-[14px] font-medium' : 'text-[13px] font-medium',
+      variant === 'title' ? 'text-control font-medium' : 'text-label font-medium',
       props.class,
     )"
   >
