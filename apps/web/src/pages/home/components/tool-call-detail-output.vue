@@ -3,7 +3,7 @@
     v-if="text"
     :code="text"
     :filename="highlightFilename"
-    class="text-[12px] leading-relaxed whitespace-pre overflow-x-auto max-h-72 overflow-y-auto"
+    class="text-[0.75rem] leading-relaxed whitespace-pre overflow-x-auto max-h-72 overflow-y-auto"
   />
   <p
     v-else

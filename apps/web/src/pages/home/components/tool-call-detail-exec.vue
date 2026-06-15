@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-1.5 font-mono text-[12px] leading-relaxed">
+  <div class="space-y-1.5 font-mono text-[0.75rem] leading-relaxed">
     <div
       v-if="command"
       class="text-muted-foreground whitespace-pre-wrap break-all"
@@ -8,7 +8,7 @@
     </div>
     <div
       v-if="backgroundMeta.length"
-      class="flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground"
+      class="flex flex-wrap gap-x-2 gap-y-0.5 text-[0.6875rem] text-muted-foreground"
     >
       <span
         v-for="item in backgroundMeta"

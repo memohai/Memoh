@@ -13,7 +13,7 @@
   <!-- Multiple items collapse into one process block. -->
   <div
     v-else
-    class="text-[13px] leading-[18px] font-[400]"
+    class="text-[0.8125rem] leading-[1.125rem] font-[400]"
   >
     <button
       class="group/h flex items-center gap-1.5 w-full text-left transition-colors duration-75 cursor-pointer py-px text-muted-foreground hover:text-foreground select-none"
