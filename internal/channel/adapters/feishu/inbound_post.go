@@ -227,7 +227,16 @@ func feishuPostPartToMessagePart(part map[string]any) (channel.MessagePart, bool
 			Language: strings.TrimSpace(stringValue(part["language"])),
 		}, true, true
 	default:
-		return channel.MessagePart{}, false, false
+		// Forward-compatible: any future tag carrying a `text` field should
+		// still surface its body so users don't lose content when a styled
+		// element promotes the post to rich (and adaptBody picks Parts over
+		// Text). rich=false keeps this from falsely promoting a plain-only
+		// post on its own.
+		text := stringValue(part["text"])
+		if text == "" {
+			return channel.MessagePart{}, false, false
+		}
+		return channel.MessagePart{Type: channel.MessagePartText, Text: text}, false, true
 	}
 }
 

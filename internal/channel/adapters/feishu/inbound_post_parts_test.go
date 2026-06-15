@@ -121,6 +121,28 @@ func TestExtractFeishuPostParts_MixedLineBreaksWithNewline(t *testing.T) {
 	}
 }
 
+func TestExtractFeishuPostParts_KeepsTextFromUnknownTag(t *testing.T) {
+	t.Parallel()
+	// When a styled element promotes the post to "rich", adaptBody picks Parts
+	// over Text. Any text-bearing unknown tag must still surface its body or
+	// the LLM loses that content entirely.
+	content := map[string]any{
+		"content": []any{
+			[]any{
+				map[string]any{"tag": "text", "text": "intro", "style": []any{"bold"}},
+				map[string]any{"tag": "unknown_future_tag", "text": "important detail"},
+			},
+		},
+	}
+	parts := extractFeishuPostParts(content)
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 parts (bold + unknown's text), got %+v", parts)
+	}
+	if parts[1].Type != channel.MessagePartText || parts[1].Text != "important detail" {
+		t.Fatalf("expected unknown tag's text preserved, got %+v", parts[1])
+	}
+}
+
 func TestExtractFeishuPostParts_ImagesAndFilesSkipped(t *testing.T) {
 	t.Parallel()
 	content := map[string]any{
