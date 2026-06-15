@@ -207,9 +207,9 @@
           :on-open-media="onOpenMedia"
         />
         <MessageActions
+          class="-mt-1"
+          role="user"
           :copy-text="userCopyText"
-          :relative-time="relativeTimestamp"
-          :full-time="fullTimestamp"
           :align="bubbleSelf ? 'end' : 'start'"
         />
       </div>
@@ -219,78 +219,81 @@
            (1.36rem vs the 1.6rem --ms-flow-hr-y): close to the unified rhythm,
            but the channel-process line was sitting a touch too far from the
            answer at full parity. -->
-      <div
-        v-else
-        class="space-y-[0.85rem]"
-      >
-        <template
-          v-for="node in renderNodes"
-          :key="node.key"
-        >
-          <!-- Process segment: consecutive tool + reasoning blocks. A single
+      <div v-else>
+        <div class="space-y-[0.85rem]">
+          <template
+            v-for="node in renderNodes"
+            :key="node.key"
+          >
+            <!-- Process segment: consecutive tool + reasoning blocks. A single
                item renders as a bare row; multiple collapse into one group. -->
-          <ToolCallGroup
-            v-if="node.kind === 'process'"
-            :items="node.items"
-            :active="message.streaming && node.lastIndex === message.messages.length - 1"
-          />
+            <ToolCallGroup
+              v-if="node.kind === 'process'"
+              :items="node.items"
+              :active="message.streaming && node.lastIndex === message.messages.length - 1"
+            />
 
-          <template v-else>
-            <!-- Text block -->
-            <!-- Headings split into two spacing groups, not one flat ramp:
+            <template v-else>
+              <!-- Text block -->
+              <!-- Headings split into two spacing groups, not one flat ramp:
                  h1–h3 (true section breaks) get more air above and a clear gap
                  below (so an h3 immediately followed by an h4 isn't cramped);
                  h4–h6 (sub-labels close to their text) get less. Reads as two
                  tiers rather than six evenly-spaced rungs. -->
-            <div
-              v-if="node.block.type === 'text' && node.block.content"
-              :lang="contentLang(node.block.content)"
-              class="prose prose-sm dark:prose-invert max-w-none [&_p]:my-0! [&_p+p]:mt-2! [&_ul]:my-1.5! [&_ol]:my-1.5! [&_li]:my-0.5! [&_:is(h1,h2,h3)]:mt-5! [&_:is(h1,h2,h3)]:mb-2! [&_:is(h4,h5,h6)]:mt-3! [&_:is(h4,h5,h6)]:mb-1! [&>*:first-child]:mt-0! [&>*:last-child]:mb-0!"
-            >
-              <MarkdownRender
-                :content="node.block.content"
-                :is-dark="isDark"
-                :smooth-streaming="isAssistantBlockStreaming(node.index)"
-                :typewriter="isAssistantBlockStreaming(node.index)"
-                :fade="isAssistantBlockStreaming(node.index)"
-                :show-tooltips="false"
-                :mermaid-props="{ showTooltips: false }"
-                custom-id="chat-msg"
+              <div
+                v-if="node.block.type === 'text' && node.block.content"
+                :lang="contentLang(node.block.content)"
+                class="prose prose-sm dark:prose-invert max-w-none [&_p]:my-0! [&_p+p]:mt-2! [&_ul]:my-1.5! [&_ol]:my-1.5! [&_li]:my-0.5! [&_:is(h1,h2,h3)]:mt-5! [&_:is(h1,h2,h3)]:mb-2! [&_:is(h4,h5,h6)]:mt-3! [&_:is(h4,h5,h6)]:mb-1! [&>*:first-child]:mt-0! [&>*:last-child]:mb-0!"
+              >
+                <MarkdownRender
+                  :content="node.block.content"
+                  :is-dark="isDark"
+                  :smooth-streaming="isAssistantBlockStreaming(node.index)"
+                  :typewriter="isAssistantBlockStreaming(node.index)"
+                  :fade="isAssistantBlockStreaming(node.index)"
+                  :show-tooltips="false"
+                  :mermaid-props="{ showTooltips: false }"
+                  custom-id="chat-msg"
+                />
+              </div>
+
+              <!-- Error block -->
+              <div
+                v-else-if="node.block.type === 'error' && node.block.content"
+                class="flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+              >
+                <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
+                <span class="min-w-0 whitespace-pre-wrap break-words">{{ node.block.content }}</span>
+              </div>
+
+              <!-- Attachment block -->
+              <AttachmentBlock
+                v-else-if="node.block.type === 'attachments'"
+                :block="(node.block as AttachmentBlockType)"
+                :on-open-media="onOpenMedia"
               />
-            </div>
-
-            <!-- Error block -->
-            <div
-              v-else-if="node.block.type === 'error' && node.block.content"
-              class="flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-            >
-              <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
-              <span class="min-w-0 whitespace-pre-wrap break-words">{{ node.block.content }}</span>
-            </div>
-
-            <!-- Attachment block -->
-            <AttachmentBlock
-              v-else-if="node.block.type === 'attachments'"
-              :block="(node.block as AttachmentBlockType)"
-              :on-open-media="onOpenMedia"
-            />
+            </template>
           </template>
-        </template>
 
-        <!-- Streaming indicator -->
-        <div
-          v-if="message.streaming && !hasVisibleAssistantBlocks"
-          class="flex items-center gap-2 text-xs text-muted-foreground h-6"
-        >
-          <LoaderCircle class="size-3.5 animate-spin" />
-          {{ $t('chat.thinking') }}
+          <!-- Streaming indicator -->
+          <div
+            v-if="message.streaming && !hasVisibleAssistantBlocks"
+            class="flex items-center gap-2 text-xs text-muted-foreground h-6"
+          >
+            <LoaderCircle class="size-3.5 animate-spin" />
+            {{ $t('chat.thinking') }}
+          </div>
         </div>
+        <!-- Action bar hugs the answer (~9px), tighter than the inter-block
+             rhythm above, so it reads as belonging to this turn. -->
         <MessageActions
+          class="mt-2"
+          role="assistant"
           :copy-text="assistantPlainText"
-          :relative-time="relativeTimestamp"
+          :menu-time="calendarTimestamp"
           :full-time="fullTimestamp"
           align="start"
-          :persistent="isLatestAssistant"
+          :persistent="true"
           :streaming="message.streaming"
         />
       </div>
@@ -314,7 +317,7 @@ registerSharedMarkdownComponents('chat-msg', { code_block: ChatCodeBlock, shell:
 <script setup lang="ts">
 import { computed, toRef, useTemplateRef, watch } from 'vue'
 import { CircleAlert, LoaderCircle } from 'lucide-vue-next'
-import { formatRelativeTime, formatDateTime } from '@/utils/date-time'
+import { formatRelativeTime, formatDateTime, formatCalendarTime } from '@/utils/date-time'
 import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
@@ -466,8 +469,13 @@ const isSpecialUserMessage = computed(() =>
 const contentClass = computed(() => {
   if (isSpecialUserMessage.value) return 'flex-1 max-w-full'
   // The user bubble caps a little tighter than the assistant column so a long
-  // prompt doesn't sprawl most of the width before wrapping.
-  if (props.message.role === 'user') return 'max-w-[70%]'
+  // prompt doesn't sprawl most of the width before wrapping. `w-full` makes the
+  // wrapper actually OCCUPY that capped column instead of shrinking to the
+  // bubble, so the hover scope (group/msg) that reveals the action row reaches
+  // left into the empty space beside a short bubble — wide, but capped at 70%
+  // so it never extends to the far left edge. The bubble itself stays
+  // right-aligned via the inner `items-end`.
+  if (props.message.role === 'user') return 'w-full max-w-[70%]'
   return 'flex-1 max-w-full'
 })
 
@@ -633,6 +641,11 @@ const relativeTimestamp = computed(() =>
 const fullTimestamp = computed(() =>
   formatDateTime(props.message.timestamp, { locale: locale.value }),
 )
+// Precise, calendar-anchored time shown inside the assistant "more" menu —
+// "Today 10:11 PM" rather than the decaying "3 hours ago".
+const calendarTimestamp = computed(() =>
+  formatCalendarTime(props.message.timestamp, { locale: locale.value }),
+)
 
 const userCopyText = computed(() =>
   props.message.role === 'user' ? cleanUserText(props.message.text) : '',
@@ -646,11 +659,5 @@ const assistantPlainText = computed(() => {
     .map(block => block.content)
     .join('\n\n')
 })
-
-const isLatestAssistant = computed(() =>
-  props.message.role === 'assistant'
-  && Boolean(props.isLastMessage)
-  && !props.message.streaming,
-)
 
 </script>

@@ -83,6 +83,49 @@ export function formatDateTimeShort(
 }
 
 /**
+ * Calendar-anchored stamp for a single item's detail (e.g. a chat turn's "more"
+ * menu): "Today 10:11 PM" / "Yesterday 10:11 PM" for the last two days, then
+ * "Jun 14, 10:11 PM" within the year and "Jun 14, 2025, 10:11 PM" beyond it.
+ * Unlike `formatRelativeTime` it never decays to a vague "3 hours ago" — the
+ * point here is a precise, readable time the reader can trust at a glance.
+ * Today/Yesterday are produced via `Intl.RelativeTimeFormat` so the words are
+ * localized (zh → 今天 / 昨天) without a translation table.
+ */
+export function formatCalendarTime(
+  value: string | null | undefined,
+  options: FormatDateOptions = {},
+): string {
+  if (!value) return options.fallback ?? ''
+  const parsed = parseDate(value)
+  if (!parsed) return resolveInvalid(value, options)
+
+  const time = parsed.toLocaleTimeString(options.locale, {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  })
+
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const dayDiff = Math.round((startOfDay(parsed) - startOfDay(new Date())) / 86_400_000)
+
+  if (dayDiff === 0 || dayDiff === -1) {
+    const rtf = new Intl.RelativeTimeFormat(options.locale, { numeric: 'auto' })
+    const day = rtf.format(dayDiff, 'day')
+    return `${day.charAt(0).toUpperCase()}${day.slice(1)} ${time}`
+  }
+
+  const sameYear = parsed.getFullYear() === new Date().getFullYear()
+  return parsed.toLocaleString(options.locale, {
+    year: sameYear ? undefined : 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  })
+}
+
+/**
  * Returns a locale-aware relative time string such as "3 minutes ago" or
  * "in 2 days".  Falls back to `toLocaleDateString()` for dates older than a
  * week.  Accepts either an ISO string or a `Date` object.
