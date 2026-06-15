@@ -760,15 +760,19 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 	for key, value := range metadata {
 		meta[key] = value
 	}
-	mentionParts := extractTelegramMessageParts(raw)
+	richParts := extractTelegramMessageParts(raw)
+	format := channel.MessageFormatPlain
+	if len(richParts) > 0 {
+		format = channel.MessageFormatRich
+	}
 
 	return channel.InboundMessage{
 		Channel: Type,
 		Message: channel.Message{
 			ID:          strconv.Itoa(raw.MessageID),
-			Format:      channel.MessageFormatPlain,
+			Format:      format,
 			Text:        text,
-			Parts:       mentionParts,
+			Parts:       richParts,
 			Attachments: attachments,
 			Reply:       replyRef,
 			Forward:     forwardRef,
