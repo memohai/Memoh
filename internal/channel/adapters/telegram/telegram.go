@@ -857,6 +857,17 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 		}
 		return nil
 	}
+	rich := renderTelegramMessagePartsRichMessage(msg.Message.Message)
+	if strings.TrimSpace(rich.HTML) != "" {
+		if _, _, err := sendTelegramRichMessageReturnMessage(bot, to, rich, replyTo, msg.Message.Message.Actions); err == nil {
+			return nil
+		} else if a.logger != nil {
+			a.logger.Warn("telegram: rich message send failed, falling back to text",
+				slog.String("config_id", cfg.ID),
+				slog.Any("error", err),
+			)
+		}
+	}
 	if len(msg.Message.Message.Actions) > 0 {
 		return sendTelegramTextWithActions(bot, to, text, replyTo, parseMode, msg.Message.Message.Actions)
 	}
@@ -886,6 +897,17 @@ func (a *TelegramAdapter) Update(_ context.Context, cfg channel.ChannelConfig, t
 	mid, err := strconv.Atoi(strings.TrimSpace(messageID))
 	if err != nil {
 		return fmt.Errorf("telegram: invalid message id %q: %w", messageID, err)
+	}
+	rich := renderTelegramMessagePartsRichMessage(msg.Message)
+	if strings.TrimSpace(rich.HTML) != "" {
+		if err := editTelegramRichMessage(bot, chatID, mid, rich, msg.Message.Actions); err == nil {
+			return nil
+		} else if a.logger != nil {
+			a.logger.Warn("telegram: rich message edit failed, falling back to text",
+				slog.String("config_id", cfg.ID),
+				slog.Any("error", err),
+			)
+		}
 	}
 	text := strings.TrimSpace(msg.Message.PlainText())
 	text, parseMode := formatTelegramOutput(text, msg.Message.Format)
