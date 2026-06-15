@@ -762,7 +762,7 @@ async function handleOAuthFlow() {
     })
     if (!data?.authorization_url) throw new Error(t('mcp.oauth.flowInitFailed'))
 
-    const popup = window.open(data.authorization_url, 'mcp-oauth', 'width=600,height=700')
+    const popup = await openOAuthURL(data.authorization_url)
     let completed = false
     let pollTimer: ReturnType<typeof setInterval> | undefined
     const finishOAuth = async (result: 'success' | 'error', error?: string) => {
@@ -814,6 +814,15 @@ async function handleOAuthFlow() {
     toast.error(resolveApiErrorMessage(error, t('mcp.oauth.flowInitFailed')))
     oauthAuthorizing.value = false
   }
+}
+
+async function openOAuthURL(url: string): Promise<Window | null> {
+  const desktopOpenExternal = window.api?.desktop?.openExternalUrl
+  if (desktopOpenExternal) {
+    await desktopOpenExternal(url)
+    return null
+  }
+  return window.open(url, 'mcp-oauth', 'width=600,height=700')
 }
 
 async function handleOAuthRevoke() {

@@ -61,6 +61,7 @@ const api = {
     // items with the user's bindings instead of the static table defaults.
     setMenuAccelerators: (overrides: Record<string, string>): Promise<void> =>
       ipcRenderer.invoke('desktop:set-menu-accelerators', overrides),
+    openExternalUrl: (url: string): Promise<void> => ipcRenderer.invoke('desktop:open-external-url', url),
     // Tell the main process to fan a query-cache invalidation out to every
     // other BrowserWindow. Used by `setupCrossWindowCacheSync` to mirror
     // mutations performed in one renderer onto siblings.
