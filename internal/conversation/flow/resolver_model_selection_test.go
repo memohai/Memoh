@@ -112,6 +112,26 @@ func TestBuildModelSelectionRequest_PreservesOverrides(t *testing.T) {
 	}
 }
 
+func TestSupportsImageInputForModelFollowsVisionCompatibility(t *testing.T) {
+	t.Parallel()
+
+	visionModel := models.GetResponse{
+		Model: models.Model{
+			Config: models.ModelConfig{
+				Compatibilities: []string{models.CompatVision},
+			},
+		},
+	}
+	if !supportsImageInputForModel(visionModel) {
+		t.Fatal("vision-compatible model should support image input")
+	}
+
+	plainModel := models.GetResponse{}
+	if supportsImageInputForModel(plainModel) {
+		t.Fatal("model without vision compatibility should not support image input")
+	}
+}
+
 func TestResolveReasoningConfig(t *testing.T) {
 	t.Parallel()
 

@@ -84,7 +84,6 @@ type RunConfig struct {
 	SessionType           string
 	SupportsImageInput    bool
 	SupportsToolCall      bool
-	DisplayEnabled        bool
 	InlineImages          []sdk.ImagePart
 	Identity              SessionContext
 	Bot                   BotInfo

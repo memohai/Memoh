@@ -62,6 +62,12 @@ type NativeToolSource struct {
 	toolEvents NativeToolEventSink
 }
 
+type nativeLoadedTool struct {
+	tool          sdk.Tool
+	usageProvider ToolUsage
+	usageID       int
+}
+
 func NewNativeToolSource(log *slog.Logger, providers []ToolProvider, opts NativeToolSourceOptions) *NativeToolSource {
 	if log == nil {
 		log = slog.Default()
@@ -108,19 +114,34 @@ func (s *NativeToolSource) ListTools(ctx context.Context, session mcp.ToolSessio
 		return []mcp.ToolDescriptor{}, nil
 	}
 	seen := map[string]struct{}{}
-	descriptors := make([]mcp.ToolDescriptor, 0, len(tools))
-	for _, tool := range tools {
-		name := strings.TrimSpace(tool.Name)
-		if name == "" || tool.Execute == nil || !s.allowed(name) {
+	visible := make([]nativeLoadedTool, 0, len(tools))
+	for _, item := range tools {
+		name := strings.TrimSpace(item.tool.Name)
+		if name == "" || item.tool.Execute == nil || !s.allowed(name) {
 			continue
 		}
 		if _, ok := seen[name]; ok {
 			continue
 		}
 		seen[name] = struct{}{}
+		item.tool.Name = name
+		visible = append(visible, item)
+	}
+	available := availableFromLoadedTools(visible)
+	usageApplied := map[int]bool{}
+	descriptors := make([]mcp.ToolDescriptor, 0, len(visible))
+	for _, item := range visible {
+		tool := item.tool
+		description := strings.TrimSpace(tool.Description)
+		if item.usageProvider != nil && !usageApplied[item.usageID] {
+			if usage := strings.TrimSpace(item.usageProvider.Usage(ctx, sessionFromMCP(session), available)); usage != "" {
+				description = appendToolUsageDescription(description, usage)
+			}
+			usageApplied[item.usageID] = true
+		}
 		descriptors = append(descriptors, mcp.ToolDescriptor{
-			Name:        name,
-			Description: strings.TrimSpace(tool.Description),
+			Name:        tool.Name,
+			Description: description,
 			InputSchema: toolInputSchema(tool.Parameters),
 		})
 	}
@@ -133,14 +154,15 @@ func (s *NativeToolSource) CallTool(ctx context.Context, session mcp.ToolSession
 		return nil, mcp.ErrToolNotFound
 	}
 	tools := s.loadTools(ctx, session)
-	for _, tool := range tools {
-		if strings.TrimSpace(tool.Name) != toolName || tool.Execute == nil {
+	for _, item := range tools {
+		tool := item.tool
+		if strings.TrimSpace(tool.Name) != toolName || tool.Execute == nil || !s.allowed(toolName) {
 			continue
 		}
 		if arguments == nil {
 			arguments = map[string]any{}
 		}
-		if toolName == userinput.ToolNameAskUser {
+		if toolName == ToolAskUser.String() {
 			return s.callAskUser(ctx, session, arguments)
 		}
 		approval, err := s.requireApproval(ctx, session, toolName, arguments)
@@ -157,9 +179,23 @@ func (s *NativeToolSource) CallTool(ctx context.Context, session mcp.ToolSession
 		if err != nil {
 			return nil, err
 		}
-		return mcp.BuildToolSuccessResult(result), nil
+		return mcp.BuildToolSuccessResult(publicNativeToolResult(result)), nil
 	}
 	return nil, mcp.ErrToolNotFound
+}
+
+func publicNativeToolResult(result any) any {
+	switch value := result.(type) {
+	case ReadMediaToolOutput:
+		return value.Public
+	case *ReadMediaToolOutput:
+		if value == nil {
+			return nil
+		}
+		return value.Public
+	default:
+		return result
+	}
 }
 
 func (s *NativeToolSource) callAskUser(ctx context.Context, session mcp.ToolSessionContext, arguments map[string]any) (map[string]any, error) {
@@ -167,7 +203,7 @@ func (s *NativeToolSource) callAskUser(ctx context.Context, session mcp.ToolSess
 		return mcp.BuildToolSuccessResult(map[string]any{
 			"status":      "invalid_arguments",
 			"error":       err.Error(),
-			"instruction": "Call ask_user again with a valid `questions` array. Every question needs `text` and a `kind` of single_select, multi_select, or text; select kinds need `options` with labels.",
+			"instruction": "Call " + toolRef(ToolAskUser) + " again with a valid `questions` array. Every question needs `text` and a `kind` of single_select, multi_select, or text; select kinds need `options` with labels.",
 		}), nil
 	}
 	if s == nil || s.userInput == nil {
@@ -189,7 +225,7 @@ func (s *NativeToolSource) callAskUser(ctx context.Context, session mcp.ToolSess
 			ChannelIdentityID:            session.ChannelIdentityID,
 			RequestedByChannelIdentityID: session.ChannelIdentityID,
 			ToolCallID:                   toolCallID,
-			ToolName:                     userinput.ToolNameAskUser,
+			ToolName:                     ToolAskUser.String(),
 			Input:                        arguments,
 			ProviderMetadata: map[string]any{
 				"source":     userinput.ProviderSourceACPMCP,
@@ -220,9 +256,9 @@ func (s *NativeToolSource) callAskUser(ctx context.Context, session mcp.ToolSess
 		if len(req.Result) > 0 {
 			return mcp.BuildToolSuccessResult(req.Result), nil
 		}
-		return mcp.BuildToolErrorResult("ask_user request is no longer pending"), nil
+		return mcp.BuildToolErrorResult(ToolAskUser.String() + " request is no longer pending"), nil
 	}
-	return mcp.BuildToolErrorResult("ask_user request is still pending"), nil
+	return mcp.BuildToolErrorResult(ToolAskUser.String() + " request is still pending"), nil
 }
 
 type nativeApprovalResult struct {
@@ -322,35 +358,68 @@ func (s *NativeToolSource) emitUserInputRequest(session mcp.ToolSessionContext, 
 	return delivered
 }
 
-func (s *NativeToolSource) loadTools(ctx context.Context, session mcp.ToolSessionContext) []sdk.Tool {
+func (s *NativeToolSource) loadTools(ctx context.Context, session mcp.ToolSessionContext) []nativeLoadedTool {
 	if s == nil {
 		return nil
 	}
 	s.mu.RLock()
 	providers := append([]ToolProvider(nil), s.providers...)
 	s.mu.RUnlock()
-	toolSession := SessionContext{
-		BotID:             session.BotID,
-		ChatID:            firstNonEmpty(session.ChatID, session.BotID),
-		SessionID:         session.SessionID,
-		SessionType:       session.SessionType,
-		ChannelIdentityID: session.ChannelIdentityID,
-		SessionToken:      session.SessionToken,
-		CurrentPlatform:   session.CurrentPlatform,
-		ReplyTarget:       session.ReplyTarget,
-		ConversationType:  session.ConversationType,
-		IsSubagent:        session.IsSubagent,
-	}
-	var out []sdk.Tool
-	for _, provider := range providers {
+	toolSession := sessionFromMCP(session)
+	var out []nativeLoadedTool
+	for providerIndex, provider := range providers {
 		providerTools, err := provider.Tools(ctx, toolSession)
 		if err != nil {
 			s.logger.Warn("native tool provider failed", slog.Any("error", err))
 			continue
 		}
-		out = append(out, providerTools...)
+		var usageProvider ToolUsage
+		if len(providerTools) > 0 {
+			if providerUsage, ok := provider.(ToolUsage); ok {
+				usageProvider = providerUsage
+			}
+		}
+		for _, tool := range providerTools {
+			out = append(out, nativeLoadedTool{tool: tool, usageProvider: usageProvider, usageID: providerIndex})
+		}
 	}
 	return out
+}
+
+func sessionFromMCP(session mcp.ToolSessionContext) SessionContext {
+	return SessionContext{
+		BotID:              session.BotID,
+		ChatID:             firstNonEmpty(session.ChatID, session.BotID),
+		SessionID:          session.SessionID,
+		SessionType:        session.SessionType,
+		ChannelIdentityID:  session.ChannelIdentityID,
+		SessionToken:       session.SessionToken,
+		CurrentPlatform:    session.CurrentPlatform,
+		ReplyTarget:        session.ReplyTarget,
+		ConversationType:   session.ConversationType,
+		SupportsImageInput: session.SupportsImageInput,
+		IsSubagent:         session.IsSubagent,
+	}
+}
+
+func availableFromLoadedTools(items []nativeLoadedTool) AvailableTools {
+	sdkTools := make([]sdk.Tool, 0, len(items))
+	for _, item := range items {
+		sdkTools = append(sdkTools, item.tool)
+	}
+	return NewAvailableTools(sdkTools)
+}
+
+func appendToolUsageDescription(description, usage string) string {
+	description = strings.TrimSpace(description)
+	usage = strings.TrimSpace(usage)
+	if usage == "" {
+		return description
+	}
+	if description == "" {
+		return usage
+	}
+	return description + "\n\n" + usage
 }
 
 func (s *NativeToolSource) allowed(name string) bool {

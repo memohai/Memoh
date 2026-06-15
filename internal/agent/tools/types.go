@@ -118,6 +118,40 @@ type ToolProvider interface {
 	Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error)
 }
 
+// AvailableTools is the set of tool names registered for the current session.
+type AvailableTools map[string]struct{}
+
+func NewAvailableTools(tools []sdk.Tool) AvailableTools {
+	available := make(AvailableTools, len(tools))
+	for _, tool := range tools {
+		name := strings.TrimSpace(tool.Name)
+		if name != "" {
+			available[name] = struct{}{}
+		}
+	}
+	return available
+}
+
+// Has reports whether a built-in tool name is registered for the current session.
+func (a AvailableTools) Has(name ToolName) bool {
+	_, ok := a[strings.TrimSpace(name.String())]
+	return ok
+}
+
+// ToolUsage is an optional capability a ToolProvider may also implement to
+// contribute group-level usage guidance to the system prompt — how this set of
+// tools is meant to be used together (e.g. "look up a target with get_contacts
+// before messaging another conversation"). The agent injects the returned text
+// only when the same provider actually returns tools for the session, so the
+// guidance shares that provider's gating and stays in lockstep with the tools
+// that provider registers. available contains the complete registered tool set
+// for this session; only name cross-provider tools after checking
+// available.Has(ToolName), otherwise use generic wording. Return "" to
+// contribute nothing.
+type ToolUsage interface {
+	Usage(ctx context.Context, session SessionContext, available AvailableTools) string
+}
+
 // ---- argument parsing helpers ----
 
 func StringArg(arguments map[string]any, key string) string {

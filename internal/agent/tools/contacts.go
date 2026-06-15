@@ -26,6 +26,24 @@ func NewContactsProvider(log *slog.Logger, routeService route.Service) *Contacts
 	}
 }
 
+// Usage describes how the contacts/messaging/history tools combine. It is
+// injected only when get_contacts is registered (main-agent sessions);
+// subagent sessions register none of these tools, so it never shows there.
+func (p *ContactsProvider) Usage(_ context.Context, _ SessionContext, available AvailableTools) string {
+	if !available.Has(ToolGetContacts) {
+		return ""
+	}
+	var parts []string
+	parts = append(parts, "Use "+toolRef(ToolGetContacts)+" to discover conversations and their reply targets.")
+	if available.Has(ToolSend) || available.Has(ToolSpeak) {
+		parts = append(parts, "Pass a target to a messaging tool to reach another channel or person; omit the target to act in the current conversation.")
+	}
+	if available.Has(ToolListSessions) || available.Has(ToolSearchMessages) {
+		parts = append(parts, "Use the message-history tools to find earlier sessions and look up past messages.")
+	}
+	return "### Contacts, messaging & history\n\n" + strings.Join(parts, " ")
+}
+
 func (p *ContactsProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
 	if session.IsSubagent || p.routeService == nil {
 		return nil, nil
@@ -33,7 +51,7 @@ func (p *ContactsProvider) Tools(_ context.Context, session SessionContext) ([]s
 	sess := session
 	return []sdk.Tool{
 		{
-			Name:        "get_contacts",
+			Name:        ToolGetContacts.String(),
 			Description: "List all known contacts and conversations for the current bot. Returns platform, conversation type, reply target, and metadata for each route.",
 			Parameters: map[string]any{
 				"type": "object",

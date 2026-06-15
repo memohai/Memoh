@@ -34,14 +34,14 @@ func (p *EmailProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 	sess := session
 	return []sdk.Tool{
 		{
-			Name: "list_email_accounts", Description: "List the email accounts (provider bindings) configured for this bot, including provider IDs, email addresses, and permissions.",
+			Name: ToolListEmailAccounts.String(), Description: "List the email accounts (provider bindings) configured for this bot, including provider IDs, email addresses, and permissions.",
 			Parameters: emptyObjectSchema(),
 			Execute: func(ctx *sdk.ToolExecContext, _ any) (any, error) {
 				return p.execListAccounts(ctx.Context, sess)
 			},
 		},
 		{
-			Name: "send_email", Description: "Send an email via the bot's configured email provider. Requires write permission.",
+			Name: ToolSendEmail.String(), Description: "Send an email via the bot's configured email provider. Requires write permission.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -58,7 +58,7 @@ func (p *EmailProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 			},
 		},
 		{
-			Name: "list_email", Description: "List emails from the mailbox (newest first). Supports pagination. Requires read permission.",
+			Name: ToolListEmail.String(), Description: "List emails from the mailbox (newest first). Supports pagination. Requires read permission.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -72,7 +72,7 @@ func (p *EmailProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 			},
 		},
 		{
-			Name: "read_email", Description: "Read the full content of an email by its UID. Requires read permission.",
+			Name: ToolReadEmail.String(), Description: "Read the full content of an email by its UID. Requires read permission.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

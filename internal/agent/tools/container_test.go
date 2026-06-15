@@ -1,6 +1,69 @@
 package tools
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
+)
+
+const readImageHint = "Also supports reading image files (PNG, JPEG, GIF, WebP)"
+
+func readToolDescription(t *testing.T, supportsImageInput bool) string {
+	t.Helper()
+	provider := NewContainerProvider(nil, nil, nil, "")
+	toolList, err := provider.Tools(context.Background(), SessionContext{
+		BotID:              "bot-1",
+		SupportsImageInput: supportsImageInput,
+	})
+	if err != nil {
+		t.Fatalf("Tools() error = %v", err)
+	}
+	for _, tool := range toolList {
+		if tool.Name == "read" {
+			return tool.Description
+		}
+	}
+	t.Fatalf("read tool not found in container provider tools")
+	return ""
+}
+
+func TestContainerReadDescriptionIncludesImageHintWhenImageInputSupported(t *testing.T) {
+	t.Parallel()
+	desc := readToolDescription(t, true)
+	if !strings.Contains(desc, readImageHint) {
+		t.Fatalf("expected read tool description to contain %q, got:\n%s", readImageHint, desc)
+	}
+}
+
+func TestContainerReadDescriptionOmitsImageHintWhenImageInputUnsupported(t *testing.T) {
+	t.Parallel()
+	desc := readToolDescription(t, false)
+	if strings.Contains(desc, readImageHint) {
+		t.Fatalf("expected read tool description to NOT contain %q, got:\n%s", readImageHint, desc)
+	}
+}
+
+func TestContainerApplyPatchDescriptionDoesNotReferenceSiblingTools(t *testing.T) {
+	t.Parallel()
+
+	provider := NewContainerProvider(nil, nil, nil, "")
+	toolList, err := provider.Tools(context.Background(), SessionContext{BotID: "bot-1"})
+	if err != nil {
+		t.Fatalf("Tools() error = %v", err)
+	}
+	for _, tool := range toolList {
+		if tool.Name != ToolApplyPatch.String() {
+			continue
+		}
+		for _, absent := range []string{"Use edit", "Use write", "`edit`", "`write`"} {
+			if strings.Contains(tool.Description, absent) {
+				t.Fatalf("apply_patch description references sibling tool %q:\n%s", absent, tool.Description)
+			}
+		}
+		return
+	}
+	t.Fatalf("apply_patch tool not found")
+}
 
 func TestDetectBlockedSleep(t *testing.T) {
 	tests := []struct {

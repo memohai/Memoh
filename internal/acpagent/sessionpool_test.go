@@ -1219,13 +1219,14 @@ func TestRuntimeHandleToolContextOverlaysActivePrompt(t *testing.T) {
 
 	// During a prompt the live per-prompt fields overlay.
 	active := acpclient.ToolSessionContext{
-		ChatID:           "chat-1",
-		SessionID:        "session-1",
-		StreamID:         "stream-7",
-		SessionToken:     "token-7",
-		CurrentPlatform:  "web",
-		ReplyTarget:      "reply-7",
-		ConversationType: "private",
+		ChatID:             "chat-1",
+		SessionID:          "session-1",
+		StreamID:           "stream-7",
+		SessionToken:       "token-7",
+		CurrentPlatform:    "web",
+		ReplyTarget:        "reply-7",
+		ConversationType:   "private",
+		SupportsImageInput: true,
 	}
 	h.state.Lock()
 	h.active = &active
@@ -1237,11 +1238,14 @@ func TestRuntimeHandleToolContextOverlaysActivePrompt(t *testing.T) {
 	if ctx.RuntimeID != "rt_test" || ctx.IsSubagent {
 		t.Fatalf("active tool context lost stable identity: %#v", ctx)
 	}
+	if !ctx.SupportsImageInput {
+		t.Fatalf("active tool context lost image capability: %#v", ctx)
+	}
 
 	// clearActive removes every per-prompt field again.
 	h.clearActive()
 	ctx = h.toolContext()
-	if ctx.StreamID != "" || ctx.SessionToken != "" || ctx.ChatID != "bot-1" || ctx.RuntimeActive {
+	if ctx.StreamID != "" || ctx.SessionToken != "" || ctx.ChatID != "bot-1" || ctx.RuntimeActive || ctx.SupportsImageInput {
 		t.Fatalf("cleared tool context = %#v", ctx)
 	}
 }

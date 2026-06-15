@@ -1,9 +1,13 @@
 package agent
 
 import (
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	agenttools "github.com/memohai/memoh/internal/agent/tools"
 )
 
 func TestGenerateSystemPromptIncludesPlatformIdentitiesInChat(t *testing.T) {
@@ -44,7 +48,7 @@ func TestGenerateSystemPromptIncludesCommonAndModeContracts(t *testing.T) {
 			want: []string{
 				"You are an AI agent running inside a private Memoh workspace.",
 				"## Session mode: discuss",
-				"Use `send` to speak in the conversation.",
+				"Speak in the conversation only through an available messaging capability.",
 			},
 		},
 		{
@@ -143,59 +147,70 @@ func TestGenerateSystemPromptOmitsLegacyCoreFiles(t *testing.T) {
 	}
 }
 
-func TestGenerateSystemPromptIncludesDisplayToolsWhenEnabled(t *testing.T) {
+// TestGenerateSystemPromptDoesNotEnumerateConditionalTools enforces the
+// Description-first contract: the system prompt must not name any tool that is
+// only conditionally registered. Tool usage lives in each sdk.Tool.Description,
+// so the prompt can never claim a tool that the current session lacks. This
+// guardrail prevents reintroducing prompt-vs-registration drift (the original
+// speak / search_memory / schedule bugs).
+func TestGenerateSystemPromptDoesNotEnumerateConditionalTools(t *testing.T) {
 	t.Parallel()
 
-	prompt := GenerateSystemPrompt(SystemPromptParams{
-		SessionType:    "chat",
-		Now:            time.Unix(1, 0).UTC(),
-		Timezone:       "UTC",
-		DisplayEnabled: true,
-	})
-
-	if !strings.Contains(prompt, "## Workspace browser & desktop") {
-		t.Fatalf("expected display tools section in prompt")
+	// All concrete tool names belong in tool descriptions or ToolUsage gated by
+	// the actual registered tool set, never static prompt templates.
+	conditionalTools := make([]string, 0, len(agenttools.BuiltInToolNames()))
+	for _, name := range agenttools.BuiltInToolNames() {
+		conditionalTools = append(conditionalTools, name.String())
 	}
-	if !strings.Contains(prompt, "browser_observe") {
-		t.Fatalf("expected browser tool mention in prompt")
+	sort.Strings(conditionalTools)
+
+	for _, sessionType := range []string{"chat", "discuss", "schedule", "heartbeat", "subagent"} {
+		sessionType := sessionType
+		t.Run(sessionType, func(t *testing.T) {
+			t.Parallel()
+			prompt := GenerateSystemPrompt(SystemPromptParams{
+				SessionType:               sessionType,
+				Now:                       time.Unix(1, 0).UTC(),
+				Timezone:                  "UTC",
+				PlatformIdentitiesSection: "## Platform Identities\n\n<identity channel=\"telegram\" username=\"@memoh\"/>",
+			})
+			for _, name := range conditionalTools {
+				if promptEnumeratesTool(prompt, name) {
+					t.Fatalf("system prompt for %s must not enumerate conditional tool %q; put its usage in the tool's sdk.Tool.Description instead", sessionType, name)
+				}
+			}
+		})
 	}
 }
 
-func TestGenerateSystemPromptIncludesAskUserGuidance(t *testing.T) {
+func promptEnumeratesTool(prompt, name string) bool {
+	token := regexp.QuoteMeta(name)
+	if strings.Contains(prompt, "`"+name+"`") {
+		return true
+	}
+	if regexp.MustCompile(`(^|[^A-Za-z0-9_])` + token + `\s*\(`).MatchString(prompt) {
+		return true
+	}
+	if strings.Contains(name, "_") {
+		return regexp.MustCompile(`(^|[^A-Za-z0-9_])` + token + `([^A-Za-z0-9_]|$)`).MatchString(prompt)
+	}
+	return regexp.MustCompile(`(?i)\b(call|tool|tools|use|using|invoke|invoking|available)\s+` + token + `\b|\b` + token + `\s+(tool|tools|capability|capabilities)\b`).MatchString(prompt)
+}
+
+func TestPromptEnumeratesToolDetectsCallSyntax(t *testing.T) {
 	t.Parallel()
 
-	prompt := GenerateSystemPrompt(SystemPromptParams{
-		SessionType: "chat",
-		Now:         time.Unix(1, 0).UTC(),
-		Timezone:    "UTC",
-	})
-
-	for _, want := range []string{
-		"## User Input",
-		"Use `ask_user` when you need the user to choose an option",
-		"If the user asks you to create a multiple-choice question",
-		"`single_select` for exactly one choice, `multi_select` for select-all-that-apply",
-		"never duplicate A/B/C choices inside the question text",
-		"Use `allow_custom: true` on a select question",
-		"do not treat that request itself as the user's answer",
+	for _, tc := range []struct {
+		prompt string
+		name   string
+	}{
+		{prompt: "spawn({ tasks: [] })", name: "spawn"},
+		{prompt: "send({ text: \"hello\" })", name: "send"},
+		{prompt: "read(\"/tmp/image.png\")", name: "read"},
 	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("expected prompt to contain %q", want)
+		if !promptEnumeratesTool(tc.prompt, tc.name) {
+			t.Fatalf("expected %q to enumerate %q", tc.prompt, tc.name)
 		}
-	}
-}
-
-func TestGenerateSystemPromptOmitsDisplayToolsWhenDisabled(t *testing.T) {
-	t.Parallel()
-
-	prompt := GenerateSystemPrompt(SystemPromptParams{
-		SessionType: "chat",
-		Now:         time.Unix(1, 0).UTC(),
-		Timezone:    "UTC",
-	})
-
-	if strings.Contains(prompt, "## Workspace browser & desktop") {
-		t.Fatalf("expected display tools section to be omitted")
 	}
 }
 

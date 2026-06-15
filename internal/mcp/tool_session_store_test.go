@@ -26,6 +26,14 @@ func TestToolSessionContextStoreMergesLatestPromptContext(t *testing.T) {
 	}
 }
 
+func TestToolSessionContextMergePreservesSupportsImageInput(t *testing.T) {
+	base := ToolSessionContext{BotID: "bot-1"}
+	merged := MergeToolSessionContext(base, ToolSessionContext{SupportsImageInput: true})
+	if !merged.SupportsImageInput {
+		t.Fatalf("SupportsImageInput = false, want true")
+	}
+}
+
 func TestToolSessionContextStorePutPreservesExistingNonEmptyFields(t *testing.T) {
 	store := NewToolSessionContextStore()
 	store.Put(ToolSessionContext{BotID: "bot-1", SessionID: "session-1", StreamID: "stream-1"})

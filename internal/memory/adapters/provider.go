@@ -6,6 +6,8 @@ import (
 	"github.com/memohai/memoh/internal/mcp"
 )
 
+const ToolSearchMemory = "search_memory"
+
 // Provider is the unified interface for memory systems. Each provider type
 // (builtin, mem0, openviking, etc.) implements this independently with its
 // own storage, retrieval, and tool logic.

@@ -155,14 +155,15 @@ type PromptInput struct {
 	ChannelIdentityID string
 	// SessionToken is consumed only by Prompt, where it flows into the
 	// per-prompt tool context overlay. Ensure and SetModel ignore it.
-	SessionToken     string //nolint:gosec // runtime session credential, not a hardcoded secret.
-	CurrentPlatform  string
-	ReplyTarget      string
-	ConversationType string
-	ToolHTTPURL      string
-	ContextURI       string
-	ContextMarkdown  string
-	Sink             acpclient.EventSink
+	SessionToken       string //nolint:gosec // runtime session credential, not a hardcoded secret.
+	CurrentPlatform    string
+	ReplyTarget        string
+	ConversationType   string
+	SupportsImageInput bool
+	ToolHTTPURL        string
+	ContextURI         string
+	ContextMarkdown    string
+	Sink               acpclient.EventSink
 }
 
 // CreateRuntimeInput describes a pre-session runtime creation request.
@@ -1156,6 +1157,9 @@ func (h *runtimeHandle) toolContext() mcp.ToolSessionContext {
 	overlay(&ctx.CurrentPlatform, h.active.CurrentPlatform)
 	overlay(&ctx.ReplyTarget, h.active.ReplyTarget)
 	overlay(&ctx.ConversationType, h.active.ConversationType)
+	if h.active.SupportsImageInput {
+		ctx.SupportsImageInput = true
+	}
 	return ctx
 }
 
@@ -1180,19 +1184,20 @@ func (h *runtimeHandle) setStatus(status string) {
 
 func toolSessionContext(input PromptInput, h *runtimeHandle) acpclient.ToolSessionContext {
 	return acpclient.ToolSessionContext{
-		BotID:             h.botID,
-		ChatID:            firstNonEmpty(input.ChatID, h.botID),
-		RuntimeID:         h.id,
-		SessionID:         strings.TrimSpace(input.SessionID),
-		StreamID:          strings.TrimSpace(input.StreamID),
-		SessionType:       firstNonEmpty(input.SessionType, session.TypeACPAgent),
-		RouteID:           input.RouteID,
-		ChannelIdentityID: input.ChannelIdentityID,
-		SessionToken:      input.SessionToken,
-		CurrentPlatform:   input.CurrentPlatform,
-		ReplyTarget:       input.ReplyTarget,
-		ConversationType:  input.ConversationType,
-		IsSubagent:        false,
+		BotID:              h.botID,
+		ChatID:             firstNonEmpty(input.ChatID, h.botID),
+		RuntimeID:          h.id,
+		SessionID:          strings.TrimSpace(input.SessionID),
+		StreamID:           strings.TrimSpace(input.StreamID),
+		SessionType:        firstNonEmpty(input.SessionType, session.TypeACPAgent),
+		RouteID:            input.RouteID,
+		ChannelIdentityID:  input.ChannelIdentityID,
+		SessionToken:       input.SessionToken,
+		CurrentPlatform:    input.CurrentPlatform,
+		ReplyTarget:        input.ReplyTarget,
+		ConversationType:   input.ConversationType,
+		IsSubagent:         false,
+		SupportsImageInput: input.SupportsImageInput,
 	}
 }
 

@@ -76,7 +76,7 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 
 	return []sdk.Tool{
 		{
-			Name:        "read",
+			Name:        ToolRead.String(),
 			Description: readDesc,
 			Parameters: map[string]any{
 				"type": "object",
@@ -92,7 +92,7 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 			},
 		},
 		{
-			Name:        "write",
+			Name:        ToolWrite.String(),
 			Description: fmt.Sprintf("Write file content %s. Creates parent directories automatically. Handles files of any size.", workspace.locationDescription),
 			Parameters: map[string]any{
 				"type": "object",
@@ -107,7 +107,7 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 			},
 		},
 		{
-			Name:        "list",
+			Name:        ToolList.String(),
 			Description: fmt.Sprintf("List directory entries %s. Supports pagination. Max %d entries per call. In recursive mode, subdirectories with >%d items are collapsed to a summary.", workspace.locationDescription, listMaxEntries, listCollapseThreshold),
 			Parameters: map[string]any{
 				"type": "object",
@@ -124,7 +124,7 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 			},
 		},
 		{
-			Name:        "edit",
+			Name:        ToolEdit.String(),
 			Description: fmt.Sprintf("Replace exact text in a file %s.", workspace.locationDescription),
 			Parameters: map[string]any{
 				"type": "object",
@@ -140,10 +140,10 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 			},
 		},
 		{
-			Name: "apply_patch",
+			Name: ToolApplyPatch.String(),
 			Description: fmt.Sprintf(`Apply a structured patch %s. This is a Memoh/Codex-style patch format, not a standard unified diff or git patch.
 
-Use this tool for multi-file edits, structured code changes, file creation, file deletion, or file moves. Use edit for one exact text replacement and write for full-file overwrite.
+Use this tool for multi-file edits, structured code changes, file creation, file deletion, or file moves.
 
 Patch grammar:
 - The patch must start with "*** Begin Patch" and end with "*** End Patch".
@@ -197,7 +197,7 @@ Delete a file:
 			},
 		},
 		{
-			Name: "exec",
+			Name: ToolExec.String(),
 			Description: fmt.Sprintf(`Execute a shell command %s. Runs in %s by default.
 
 # Instructions
@@ -227,7 +227,7 @@ Delete a file:
 			},
 		},
 		{
-			Name:        "list_background",
+			Name:        ToolListBackground.String(),
 			Description: "List background tasks for the current session.",
 			Parameters: map[string]any{
 				"type":       "object",
@@ -238,7 +238,7 @@ Delete a file:
 			},
 		},
 		{
-			Name:        "get_background_status",
+			Name:        ToolGetBackgroundStatus.String(),
 			Description: "Get the status and details of a background task.",
 			Parameters: map[string]any{
 				"type": "object",
@@ -252,7 +252,7 @@ Delete a file:
 			},
 		},
 		{
-			Name:        "kill_background",
+			Name:        ToolKillBackground.String(),
 			Description: "Kill a running background task.",
 			Parameters: map[string]any{
 				"type": "object",

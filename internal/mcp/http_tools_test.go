@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -38,6 +39,19 @@ func TestToolGatewayMiddlewareScopesRuntimeToolCallsToActivePrompts(t *testing.T
 	}
 	if _, ok := result.(*sdkmcp.CallToolResult); !ok {
 		t.Fatalf("tools/call result = %#v", result)
+	}
+}
+
+func TestToolSessionContextFromHTTPParsesSupportsImageInput(t *testing.T) {
+	req, err := http.NewRequest(http.MethodPost, "http://example.test/tools", nil)
+	if err != nil {
+		t.Fatalf("NewRequest error = %v", err)
+	}
+	req.Header.Set(ToolHeaderSupportsImageInput, "true")
+
+	session := ToolSessionContextFromHTTP(req, "bot-1")
+	if !session.SupportsImageInput {
+		t.Fatalf("SupportsImageInput = false, want true")
 	}
 }
 

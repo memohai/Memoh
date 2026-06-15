@@ -151,10 +151,14 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		CurrentPlatform:   req.CurrentChannel,
 		ReplyTarget:       req.ReplyTarget,
 		ConversationType:  req.ConversationType,
-		ToolHTTPURL:       req.ToolHTTPURL,
-		ContextURI:        acpContextURI,
-		ContextMarkdown:   contextMarkdown,
-		Sink:              acpclient.EventSinkFunc(emit),
+		// ACP/native MCP does not yet have the in-process read-media decoration
+		// path that turns read image bytes into model-native image input. Keep
+		// this false until ACP model capability and image transport are wired.
+		SupportsImageInput: false,
+		ToolHTTPURL:        req.ToolHTTPURL,
+		ContextURI:         acpContextURI,
+		ContextMarkdown:    contextMarkdown,
+		Sink:               acpclient.EventSinkFunc(emit),
 	})
 	if err != nil {
 		r.logger.Error("ACP prompt failed",

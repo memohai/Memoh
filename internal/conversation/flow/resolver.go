@@ -621,9 +621,8 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 		ChatCompletionsCompat: chatCompletionsCompat,
 		PromptCacheTTL:        providers.ProviderConfigString(provider, "prompt_cache_ttl"),
 		SessionType:           p.SessionType,
-		SupportsImageInput:    chatModel.HasCompatibility(models.CompatVision),
+		SupportsImageInput:    supportsImageInputForModel(chatModel),
 		SupportsToolCall:      chatModel.HasCompatibility(models.CompatToolCall),
-		DisplayEnabled:        botSettings.DisplayEnabled,
 		Identity: agentpkg.SessionContext{
 			BotID:             p.BotID,
 			ChatID:            chatID,
@@ -646,6 +645,10 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 	}
 
 	return cfg, chatModel, provider, nil
+}
+
+func supportsImageInputForModel(model models.GetResponse) bool {
+	return model.HasCompatibility(models.CompatVision)
 }
 
 const (
@@ -1025,7 +1028,6 @@ func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, chann
 
 // prepareRunConfig generates the system prompt and appends the user message.
 func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig) agentpkg.RunConfig {
-	supportsImageInput := cfg.SupportsImageInput
 	beforePromptContext := r.runPromptHook(ctx, agentRunConfigView{
 		BotID:        cfg.Identity.BotID,
 		SessionID:    cfg.Identity.SessionID,
@@ -1066,8 +1068,6 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 		Files:                     files,
 		Now:                       now,
 		Timezone:                  cfg.Identity.Timezone,
-		SupportsImageInput:        supportsImageInput,
-		DisplayEnabled:            cfg.DisplayEnabled,
 		PlatformIdentitiesSection: platformIdentitiesSection,
 	})
 	if beforePromptContext != "" {

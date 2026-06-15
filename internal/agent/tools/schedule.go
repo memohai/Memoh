@@ -35,6 +35,36 @@ func NewScheduleProvider(log *slog.Logger, service Scheduler) *ScheduleProvider 
 	}
 }
 
+// Usage describes how the schedule tool group works together. Injected only
+// when the schedule tools are registered (main-agent sessions with a schedule
+// service); subagents register none, so this guidance never shows there.
+func (p *ScheduleProvider) Usage(_ context.Context, _ SessionContext, available AvailableTools) string {
+	var parts []string
+	delivery := "include an instruction to deliver results to a person or channel when messaging is available"
+	if available.Has(ToolSend) {
+		delivery = "use " + toolRef(ToolSend) + " inside the command to deliver results to a person or channel"
+	} else if available.Has(ToolSpeak) {
+		delivery = "use an available messaging tool inside the command to deliver results to a person or channel"
+	}
+	if available.Has(ToolCreateSchedule) {
+		parts = append(parts, "Create recurring work with "+toolRef(ToolCreateSchedule)+": put a natural-language instruction in `command`; when the cron `pattern` fires, the task runs in its own session and you receive a message containing that command — "+delivery+".")
+	}
+	var manage []string
+	for _, name := range []ToolName{ToolListSchedule, ToolGetSchedule, ToolUpdateSchedule, ToolDeleteSchedule} {
+		if available.Has(name) {
+			manage = append(manage, toolRef(name))
+		}
+	}
+	if len(manage) > 0 {
+		parts = append(parts, "Inspect and manage existing tasks with "+strings.Join(manage, ", ")+".")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "### Scheduled tasks\n\n" +
+		strings.Join(parts, " ")
+}
+
 func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
 	if session.IsSubagent || p.service == nil {
 		return nil, nil
@@ -42,7 +72,7 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]s
 	sess := session
 	return []sdk.Tool{
 		{
-			Name: "list_schedule", Description: "List schedules for current bot",
+			Name: ToolListSchedule.String(), Description: "List schedules for current bot",
 			Parameters: emptyObjectSchema(),
 			Execute: func(ctx *sdk.ToolExecContext, _ any) (any, error) {
 				botID := strings.TrimSpace(sess.BotID)
@@ -57,7 +87,7 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]s
 			},
 		},
 		{
-			Name: "get_schedule", Description: "Get a schedule by id",
+			Name: ToolGetSchedule.String(), Description: "Get a schedule by id",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -86,7 +116,7 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]s
 			},
 		},
 		{
-			Name: "create_schedule", Description: "Create a new schedule",
+			Name: ToolCreateSchedule.String(), Description: "Create a new cron-scheduled task. Fill `command` with a natural-language instruction; when the cron `pattern` fires, the task runs in its own session and you receive a message containing that `command`. Include delivery instructions in the command when results should be sent to a person or channel. Set `max_calls` to null for unlimited runs.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -129,7 +159,7 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]s
 			},
 		},
 		{
-			Name: "update_schedule", Description: "Update an existing schedule",
+			Name: ToolUpdateSchedule.String(), Description: "Update an existing schedule",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -185,7 +215,7 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]s
 			},
 		},
 		{
-			Name: "delete_schedule", Description: "Delete a schedule by id",
+			Name: ToolDeleteSchedule.String(), Description: "Delete a schedule by id",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

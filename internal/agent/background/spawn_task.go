@@ -63,7 +63,7 @@ type AgentTaskResult struct {
 }
 
 // StartAgentTask registers a managed subagent task. Queued tasks are visible
-// to bg_status immediately but do not get a cancelable run context until
+// to background task status immediately but do not get a cancelable run context until
 // MarkAgentTaskRunning is called.
 func (m *Manager) StartAgentTask(parentCtx context.Context, botID, sessionID, agentID, agentSessionID, message, description string, queued bool) (string, context.Context, error) {
 	status := TaskRunning
@@ -306,7 +306,7 @@ func (n Notification) formatSpawnForAgent() string {
 		fmt.Fprintf(&b, "    </branch>\n")
 	}
 	fmt.Fprintf(&b, "  </branches>\n")
-	fmt.Fprintf(&b, "  <suggestion>Read a branch's full transcript with search_messages using its session-id.</suggestion>\n")
+	fmt.Fprintf(&b, "  <suggestion>Use a branch session-id to read the full transcript when message-history search is available.</suggestion>\n")
 	fmt.Fprintf(&b, "</task-notification>")
 	return b.String()
 }
@@ -335,7 +335,7 @@ func (n Notification) formatAgentForAgent() string {
 	if n.AgentError != "" {
 		fmt.Fprintf(&b, "  <error>%s</error>\n", n.AgentError)
 	}
-	fmt.Fprintf(&b, "  <suggestion>Use send_message with this agent-id to continue the same subagent.</suggestion>\n")
+	fmt.Fprintf(&b, "  <suggestion>Use the agent-control follow-up tool with this agent-id to continue the same subagent when that tool is available.</suggestion>\n")
 	fmt.Fprintf(&b, "</task-notification>")
 	return b.String()
 }

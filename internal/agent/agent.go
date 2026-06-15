@@ -70,7 +70,7 @@ func (a *Agent) Generate(ctx context.Context, cfg RunConfig) (*GenerateResult, e
 }
 
 func (a *Agent) ExecuteTool(ctx context.Context, cfg RunConfig, call sdk.ToolCall) (sdk.ToolResultPart, error) {
-	sdkTools, err := a.assembleTools(ctx, cfg, tools.StreamEmitter(func(tools.ToolStreamEvent) {}))
+	sdkTools, _, err := a.assembleTools(ctx, cfg, tools.StreamEmitter(func(tools.ToolStreamEvent) {}))
 	if err != nil {
 		return sdk.ToolResultPart{}, fmt.Errorf("assemble tools: %w", err)
 	}
@@ -142,12 +142,18 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 
 	var sdkTools []sdk.Tool
 	if cfg.SupportsToolCall {
+		var toolUsage string
 		var err error
-		sdkTools, err = a.assembleTools(streamCtx, cfg, streamEmitter)
+		sdkTools, toolUsage, err = a.assembleTools(streamCtx, cfg, streamEmitter)
 		if err != nil {
 			turnError = fmt.Sprintf("assemble tools: %v", err)
 			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
 			return
+		}
+		if toolUsage != "" {
+			// Must run before buildGenerateOptions so prompt caching and
+			// background-notification steps see the usage-augmented text.
+			cfg.System = strings.TrimSpace(cfg.System + "\n\n" + toolUsage)
 		}
 	}
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
@@ -227,23 +233,6 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 				}
 				break
 			}
-			return p
-		}
-	}
-
-	// Drain background task notifications at step boundaries.
-	// Each notification is injected as a user message so the model
-	// discovers completed background work naturally.
-	if cfg.BackgroundManager != nil {
-		basePrepare := prepareStep
-		baseSystem := cfg.System // capture original system prompt to avoid accumulation
-		prepareStep = func(p *sdk.GenerateParams) *sdk.GenerateParams {
-			if basePrepare != nil {
-				if override := basePrepare(p); override != nil {
-					p = override
-				}
-			}
-			p = drainBackgroundNotifications(p, cfg.BackgroundManager, baseSystem, cfg.Identity.BotID, cfg.Identity.SessionID, a.logger)
 			return p
 		}
 	}
@@ -626,10 +615,16 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 
 	var sdkTools []sdk.Tool
 	if cfg.SupportsToolCall {
+		var toolUsage string
 		var err error
-		sdkTools, err = a.assembleTools(genCtx, cfg, collectEmitter)
+		sdkTools, toolUsage, err = a.assembleTools(genCtx, cfg, collectEmitter)
 		if err != nil {
 			return nil, fmt.Errorf("assemble tools: %w", err)
+		}
+		if toolUsage != "" {
+			// Must run before buildGenerateOptions so prompt caching and
+			// background-notification steps see the usage-augmented text.
+			cfg.System = strings.TrimSpace(cfg.System + "\n\n" + toolUsage)
 		}
 	}
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
@@ -651,21 +646,6 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	var prepareStep func(*sdk.GenerateParams) *sdk.GenerateParams
 	if readMediaState != nil {
 		prepareStep = readMediaState.prepareStep
-	}
-
-	// Drain background task notifications at step boundaries (non-streaming).
-	if cfg.BackgroundManager != nil {
-		basePrepare := prepareStep
-		baseSystem := cfg.System
-		prepareStep = func(p *sdk.GenerateParams) *sdk.GenerateParams {
-			if basePrepare != nil {
-				if override := basePrepare(p); override != nil {
-					p = override
-				}
-			}
-			p = drainBackgroundNotifications(p, cfg.BackgroundManager, baseSystem, cfg.Identity.BotID, cfg.Identity.SessionID, a.logger)
-			return p
-		}
 	}
 
 	prepareStep = a.wrapPrepareStepWithModelHook(genCtx, cfg, prepareStep)
@@ -749,6 +729,22 @@ func (a *Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, approvalTo
 	system, messages, tools := models.ApplyPromptCache(
 		cfg.Model, cfg.PromptCacheTTL, cfg.System, cfg.Messages, tools,
 	)
+	if cfg.BackgroundManager != nil {
+		basePrepare := prepareStep
+		baseSystem := captureBackgroundSystem(system, messages)
+		logger := slog.Default()
+		if a != nil && a.logger != nil {
+			logger = a.logger
+		}
+		prepareStep = func(p *sdk.GenerateParams) *sdk.GenerateParams {
+			if basePrepare != nil {
+				if override := basePrepare(p); override != nil {
+					p = override
+				}
+			}
+			return drainBackgroundNotifications(p, cfg.BackgroundManager, baseSystem, cfg.Identity.BotID, cfg.Identity.SessionID, logger)
+		}
+	}
 	opts := []sdk.GenerateOption{
 		sdk.WithModel(cfg.Model),
 		sdk.WithMessages(messages),
@@ -802,13 +798,16 @@ func (a *Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, approvalTo
 	return opts
 }
 
-// assembleTools collects tools from all registered ToolProviders.
-// emitter is injected into the session context so that tools targeting the
-// current conversation can push side-effect events (attachments, reactions,
-// speech) directly into the agent stream.
-func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.StreamEmitter) ([]sdk.Tool, error) {
+// assembleTools collects tools from all registered ToolProviders, along with
+// the group-level usage guidance contributed by providers that also implement
+// tools.ToolUsage. Usage guidance is gathered only from providers that actually
+// returned tools for this session, so it stays in lockstep with registration
+// (see tools.ToolUsage). emitter is injected into the session context so that
+// tools targeting the current conversation can push side-effect events
+// (attachments, reactions, speech) directly into the agent stream.
+func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.StreamEmitter) ([]sdk.Tool, string, error) {
 	if len(a.toolProviders) == 0 {
-		return nil, nil
+		return nil, "", nil
 	}
 	skillsMap := make(map[string]tools.SkillDetail, len(cfg.Skills))
 	for _, s := range cfg.Skills {
@@ -836,25 +835,52 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 	}
 
 	var allTools []sdk.Tool
+	type usageRegistration struct {
+		provider tools.ToolUsage
+	}
+	var usageRegistrations []usageRegistration
+	var usageSections []string
 	for _, provider := range a.toolProviders {
 		providerTools, err := provider.Tools(ctx, session)
 		if err != nil {
 			a.logger.Warn("tool provider failed", slog.Any("error", err))
 			continue
 		}
+		if len(providerTools) == 0 {
+			continue
+		}
 		allTools = append(allTools, providerTools...)
+		// Collect group-level usage guidance only from providers that actually
+		// contributed tools this session, so guidance and registration share
+		// one gating decision and cannot drift apart.
+		if usageProvider, ok := provider.(tools.ToolUsage); ok {
+			usageRegistrations = append(usageRegistrations, usageRegistration{provider: usageProvider})
+		}
 	}
 	if cfg.ToolApprovalHandler != nil || a.hookService != nil {
 		allTools = markApprovalTools(allTools)
 	}
-	return allTools, nil
+	availableTools := tools.NewAvailableTools(allTools)
+	for _, registration := range usageRegistrations {
+		if text := strings.TrimSpace(registration.provider.Usage(ctx, session, availableTools)); text != "" {
+			usageSections = append(usageSections, text)
+		}
+	}
+	usage := ""
+	if len(usageSections) > 0 {
+		usage = "## Tool usage\n\n" + strings.Join(usageSections, "\n\n")
+	}
+	return allTools, usage, nil
 }
 
-func markApprovalTools(tools []sdk.Tool) []sdk.Tool {
-	for i := range tools {
-		tools[i].RequireApproval = true
+func markApprovalTools(sdkTools []sdk.Tool) []sdk.Tool {
+	for i := range sdkTools {
+		switch sdkTools[i].Name {
+		case tools.ToolWrite.String(), tools.ToolEdit.String(), tools.ToolApplyPatch.String(), tools.ToolExec.String():
+			sdkTools[i].RequireApproval = true
+		}
 	}
-	return tools
+	return sdkTools
 }
 
 func approvalShortID(metadata map[string]any) int {
@@ -932,7 +958,7 @@ func isUserInputMetadata(metadata map[string]any) bool {
 }
 
 func isAskUserArgumentParseError(message string) bool {
-	return strings.Contains(message, `unmarshal tool call arguments for "ask_user"`)
+	return strings.Contains(message, `unmarshal tool call arguments for "`+tools.ToolAskUser.String()+`"`)
 }
 
 // toolStreamEventToAgentEvent converts a tool-layer ToolStreamEvent into an
@@ -970,18 +996,14 @@ func toolStreamEventToAgentEvent(evt tools.ToolStreamEvent) StreamEvent {
 func drainBackgroundNotifications(
 	p *sdk.GenerateParams,
 	mgr *background.Manager,
-	baseSystem string,
+	baseSystem backgroundSystem,
 	botID, sessionID string,
 	logger *slog.Logger,
 ) *sdk.GenerateParams {
 	// Inject running tasks summary into system prompt so the model
 	// knows about ongoing background work even after compaction.
 	// Always start from baseSystem to avoid accumulating summaries across steps.
-	if summary := mgr.RunningTasksSummary(botID, sessionID); summary != "" {
-		p.System = baseSystem + "\n\n" + summary
-	} else {
-		p.System = baseSystem
-	}
+	injectBackgroundSummary(p, baseSystem, mgr.RunningTasksSummary(botID, sessionID))
 
 	notifications := mgr.DrainNotifications(botID, sessionID)
 	for _, n := range notifications {
@@ -994,6 +1016,102 @@ func drainBackgroundNotifications(
 		)
 	}
 	return p
+}
+
+type backgroundSystem struct {
+	system             string
+	promotedSystemText string
+	hasPromotedSystem  bool
+}
+
+func captureBackgroundSystem(system string, messages []sdk.Message) backgroundSystem {
+	base := backgroundSystem{system: system}
+	if len(messages) == 0 || messages[0].Role != sdk.MessageRoleSystem || len(messages[0].Content) == 0 {
+		return base
+	}
+	first, ok := messages[0].Content[0].(sdk.TextPart)
+	if !ok {
+		return base
+	}
+	base.promotedSystemText = first.Text
+	base.hasPromotedSystem = true
+	return base
+}
+
+func injectBackgroundSummary(p *sdk.GenerateParams, baseSystem backgroundSystem, summary string) {
+	summary = strings.TrimSpace(summary)
+	if strings.TrimSpace(baseSystem.system) != "" {
+		p.System = baseSystem.system
+		if summary != "" {
+			p.System += "\n\n" + summary
+		}
+		return
+	}
+
+	if baseSystem.hasPromotedSystem {
+		text := strings.TrimSpace(baseSystem.promotedSystemText)
+		if len(p.Messages) == 0 || p.Messages[0].Role != sdk.MessageRoleSystem || len(p.Messages[0].Content) == 0 {
+			p.System = text
+			if summary != "" {
+				p.System = strings.TrimSpace(p.System + "\n\n" + summary)
+			}
+			return
+		}
+		first, ok := p.Messages[0].Content[0].(sdk.TextPart)
+		if !ok {
+			p.System = text
+			if summary != "" {
+				p.System = strings.TrimSpace(p.System + "\n\n" + summary)
+			}
+			return
+		}
+		first.Text = text
+		p.Messages[0].Content[0] = first
+		p.Messages = removeGeneratedBackgroundSystemMessages(p.Messages)
+		if summary != "" {
+			next := make([]sdk.Message, 0, len(p.Messages)+1)
+			next = append(next, p.Messages[0])
+			next = append(next, backgroundSummarySystemMessage(summary))
+			next = append(next, p.Messages[1:]...)
+			p.Messages = next
+		}
+		p.System = ""
+		return
+	}
+
+	if summary != "" {
+		p.System = summary
+		return
+	}
+	p.System = ""
+}
+
+func backgroundSummarySystemMessage(summary string) sdk.Message {
+	return sdk.SystemMessage(summary)
+}
+
+func removeGeneratedBackgroundSystemMessages(messages []sdk.Message) []sdk.Message {
+	if len(messages) == 0 {
+		return messages
+	}
+	out := make([]sdk.Message, 0, len(messages))
+	for _, msg := range messages {
+		if !isBackgroundSummarySystemMessage(msg) {
+			out = append(out, msg)
+		}
+	}
+	return out
+}
+
+func isBackgroundSummarySystemMessage(msg sdk.Message) bool {
+	if msg.Role != sdk.MessageRoleSystem || len(msg.Content) != 1 {
+		return false
+	}
+	part, ok := msg.Content[0].(sdk.TextPart)
+	return ok &&
+		part.CacheControl == nil &&
+		part.ProviderMetadata == nil &&
+		strings.HasPrefix(strings.TrimSpace(part.Text), "Currently running background tasks:")
 }
 
 func wrapToolsWithLoopGuard(tools []sdk.Tool, guard *ToolLoopGuard, abortCallIDs *toolAbortRegistry) []sdk.Tool {

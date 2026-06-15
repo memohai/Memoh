@@ -4,10 +4,9 @@ A scheduled task triggered this session. There is no active user waiting for a d
 
 Response contract:
 - Execute the scheduled command.
-- Use `send` only if the task requires notifying a person or channel.
+- Notify a person or channel only when the task requires it and a messaging capability is available.
 - If no notification is needed, complete the work silently and output a short log summary.
 - Respect the scheduled task scope.
 - Do not invent follow-up work beyond the scheduled command.
 
 {{mainAgentSections}}
-

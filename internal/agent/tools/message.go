@@ -30,6 +30,27 @@ func NewMessageProvider(log *slog.Logger, sender messaging.Sender, reactor messa
 	}
 }
 
+func (p *MessageProvider) Usage(_ context.Context, session SessionContext, available AvailableTools) string {
+	var parts []string
+	if available.Has(ToolSend) {
+		switch session.SessionType {
+		case "discuss":
+			parts = append(parts, "Use "+toolRef(ToolSend)+" to speak in the observed conversation; if you do not call it, you stay silent.")
+		case "schedule", "heartbeat":
+			parts = append(parts, "Use "+toolRef(ToolSend)+" only when the background task needs to notify a person or channel.")
+		default:
+			parts = append(parts, "Use "+toolRef(ToolSend)+" for attachments, voice, forwarding, or messaging another target; ordinary text replies in the current conversation should be normal assistant text.")
+		}
+	}
+	if available.Has(ToolReact) {
+		parts = append(parts, "Use "+toolRef(ToolReact)+" only when an emoji reaction is explicitly useful.")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "### Messaging\n\n" + strings.Join(parts, " ")
+}
+
 func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
 	if session.IsSubagent {
 		return nil, nil
@@ -38,14 +59,14 @@ func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sd
 	sess := session
 	if p.exec.CanSend() {
 		tools = append(tools, sdk.Tool{
-			Name:        "send",
+			Name:        ToolSend.String(),
 			Description: "Send a message, file, or attachment. When target is omitted, delivers to the current conversation as an inline attachment/message. When target is specified, sends to that channel/person.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"bot_id":   map[string]any{"type": "string", "description": "Bot ID, optional and defaults to current bot"},
 					"platform": map[string]any{"type": "string", "description": "Channel platform name. Defaults to current session platform."},
-					"target":   map[string]any{"type": "string", "description": "Channel target (chat/group/thread ID). Optional — omit to send in the current conversation. Use get_contacts to find targets for other conversations."},
+					"target":   map[string]any{"type": "string", "description": "Channel target (chat/group/thread ID). Optional — omit to send in the current conversation."},
 					"text":     map[string]any{"type": "string", "description": "Message text shortcut when message object is omitted"},
 					"reply_to": map[string]any{"type": "string", "description": "Message ID to reply to. The reply will reference this message on the platform."},
 					"attachments": map[string]any{
@@ -69,7 +90,7 @@ func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sd
 	}
 	if p.exec.CanReact() {
 		tools = append(tools, sdk.Tool{
-			Name:        "react",
+			Name:        ToolReact.String(),
 			Description: "Add or remove an emoji reaction on a message. When target/platform are omitted, reacts in the current conversation.",
 			Parameters: map[string]any{
 				"type": "object",

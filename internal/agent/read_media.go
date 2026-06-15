@@ -23,7 +23,7 @@ func decorateReadMediaTools(model *sdk.Model, tools []sdk.Tool) ([]sdk.Tool, *re
 	found := false
 
 	for _, tool := range tools {
-		if tool.Name != agenttools.ReadMediaToolName || tool.Execute == nil {
+		if tool.Name != agenttools.ReadMediaToolName.String() || tool.Execute == nil {
 			wrapped = append(wrapped, tool)
 			continue
 		}

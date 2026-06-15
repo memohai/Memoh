@@ -97,6 +97,10 @@ func (*ContainerdHandler) buildToolSessionContext(c echo.Context, botID string) 
 	session.BotID = botID
 	session.ChannelIdentityID = ""
 	session.SessionToken = ""
+	// Public MCP clients cannot prove model-native image transport support.
+	// Keep this capability limited to server-resolved runtime contexts until
+	// the native MCP image path is wired end-to-end.
+	session.SupportsImageInput = false
 	if ctxIdentityID, err := auth.UserIDFromContext(c); err == nil {
 		session.ChannelIdentityID = strings.TrimSpace(ctxIdentityID)
 	}

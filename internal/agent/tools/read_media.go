@@ -15,7 +15,7 @@ import (
 const (
 	// ReadMediaToolName is the tool name that the agent decoration layer
 	// matches on to intercept image payloads. After the merge this is "read".
-	ReadMediaToolName        = "read"
+	ReadMediaToolName        = ToolRead
 	defaultReadMediaMaxBytes = 20 * 1024 * 1024
 )
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -29,7 +30,7 @@ func TestNativeToolSourceAllowlistAndCall(t *testing.T) {
 				},
 			},
 			{
-				Name:        "exec",
+				Name:        ToolExec.String(),
 				Description: "Blocked tool",
 				Parameters:  map[string]any{"type": "object"},
 				Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
@@ -97,11 +98,98 @@ func TestNativeToolSourceDefaultsToDenyAll(t *testing.T) {
 	}
 }
 
+func TestNativeToolSourceAppendsUsageAfterAllowlistFiltering(t *testing.T) {
+	provider := &nativeSourceUsageProvider{}
+	source := NewNativeToolSource(nil, []ToolProvider{provider}, NativeToolSourceOptions{
+		AllowTools: map[string]bool{
+			ToolSpawnAgent.String(): true,
+		},
+	})
+
+	descriptors, err := source.ListTools(context.Background(), mcp.ToolSessionContext{BotID: "bot-1"})
+	if err != nil {
+		t.Fatalf("ListTools() error = %v", err)
+	}
+	if len(descriptors) != 1 || descriptors[0].Name != ToolSpawnAgent.String() {
+		t.Fatalf("descriptors = %#v, want only spawn_agent", descriptors)
+	}
+	description := descriptors[0].Description
+	if !strings.Contains(description, "USAGE_HAS_SPAWN") {
+		t.Fatalf("description missing allowlist-aware usage:\n%s", description)
+	}
+	if strings.Contains(description, "USAGE_HAS_SEND_MESSAGE") || strings.Contains(description, ToolSendMessage.String()) {
+		t.Fatalf("description mentions filtered-out send_message:\n%s", description)
+	}
+}
+
+func TestNativeToolSourcePassesSupportsImageInputToProviders(t *testing.T) {
+	source := NewNativeToolSource(nil, []ToolProvider{
+		NewContainerProvider(nil, nil, nil, ""),
+	}, NativeToolSourceOptions{
+		AllowTools: map[string]bool{ToolRead.String(): true},
+	})
+
+	descriptors, err := source.ListTools(context.Background(), mcp.ToolSessionContext{
+		BotID:              "bot-1",
+		SupportsImageInput: true,
+	})
+	if err != nil {
+		t.Fatalf("ListTools() error = %v", err)
+	}
+	if len(descriptors) != 1 || descriptors[0].Name != ToolRead.String() {
+		t.Fatalf("descriptors = %#v, want read", descriptors)
+	}
+	if !strings.Contains(descriptors[0].Description, "Also supports reading image files") {
+		t.Fatalf("read description missing image support hint:\n%s", descriptors[0].Description)
+	}
+}
+
+func TestNativeToolSourceReadMediaReturnsPublicResultOnly(t *testing.T) {
+	provider := &nativeSourceTestProvider{
+		tools: []sdk.Tool{{
+			Name:       ToolRead.String(),
+			Parameters: map[string]any{"type": "object"},
+			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
+				return ReadMediaToolOutput{
+					Public: ReadMediaToolResult{
+						OK:   true,
+						Path: "/workspace/image.png",
+						Mime: "image/png",
+						Size: 12,
+					},
+					ImageBase64:    "secret-image-bytes",
+					ImageMediaType: "image/png",
+				}, nil
+			},
+		}},
+	}
+	source := NewNativeToolSource(nil, []ToolProvider{provider}, NativeToolSourceOptions{
+		AllowTools: map[string]bool{ToolRead.String(): true},
+	})
+
+	result, err := source.CallTool(context.Background(), mcp.ToolSessionContext{BotID: "bot-1"}, ToolRead.String(), map[string]any{
+		"path": "/workspace/image.png",
+	})
+	if err != nil {
+		t.Fatalf("CallTool(read) error = %v", err)
+	}
+	structured, ok := result["structuredContent"].(ReadMediaToolResult)
+	if !ok {
+		t.Fatalf("structuredContent = %#v, want ReadMediaToolResult", result["structuredContent"])
+	}
+	if !structured.OK || structured.Path != "/workspace/image.png" || structured.Mime != "image/png" || structured.Size != 12 {
+		t.Fatalf("structuredContent = %#v, want public read-media fields", structured)
+	}
+	if strings.Contains(fmt.Sprintf("%#v", result), "secret-image-bytes") || strings.Contains(fmt.Sprintf("%#v", result), "ImageBase64") || strings.Contains(fmt.Sprintf("%#v", result), "ImageMediaType") {
+		t.Fatalf("native MCP result leaked internal image payload: %#v", result)
+	}
+}
+
 func TestNativeToolSourceWaitsForApprovalAndPublishesRequest(t *testing.T) {
 	executed := false
 	provider := &nativeSourceTestProvider{
 		tools: []sdk.Tool{{
-			Name:       "exec",
+			Name:       ToolExec.String(),
 			Parameters: map[string]any{"type": "object"},
 			Execute: func(_ *sdk.ToolExecContext, input any) (any, error) {
 				executed = true
@@ -174,7 +262,7 @@ func TestNativeToolSourceRejectedApprovalDoesNotExecute(t *testing.T) {
 	executed := false
 	provider := &nativeSourceTestProvider{
 		tools: []sdk.Tool{{
-			Name:       "write",
+			Name:       ToolWrite.String(),
 			Parameters: map[string]any{"type": "object"},
 			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
 				executed = true
@@ -225,7 +313,7 @@ func TestNativeToolSourceApprovalNotDeliveredRejectsWithoutWaiting(t *testing.T)
 	executed := false
 	provider := &nativeSourceTestProvider{
 		tools: []sdk.Tool{{
-			Name:       "write",
+			Name:       ToolWrite.String(),
 			Parameters: map[string]any{"type": "object"},
 			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
 				executed = true
@@ -276,7 +364,7 @@ func TestNativeToolSourceAskUserWaitsForInputAndPublishesRequest(t *testing.T) {
 		response: userinput.Request{
 			ID:         "input-1",
 			ToolCallID: "mcp-http-call-1",
-			ToolName:   userinput.ToolNameAskUser,
+			ToolName:   ToolAskUser.String(),
 			Status:     userinput.StatusSubmitted,
 			Result: map[string]any{
 				"status": userinput.StatusSubmitted,
@@ -314,7 +402,7 @@ func TestNativeToolSourceAskUserWaitsForInputAndPublishesRequest(t *testing.T) {
 		ToolCallID:        "mcp-http-call-1",
 		ChannelIdentityID: "user-1",
 		RuntimeID:         "runtime-1",
-	}, userinput.ToolNameAskUser, map[string]any{
+	}, ToolAskUser.String(), map[string]any{
 		"questions": []any{
 			map[string]any{
 				"text": "Pick plans",
@@ -329,7 +417,7 @@ func TestNativeToolSourceAskUserWaitsForInputAndPublishesRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CallTool(ask_user) error = %v", err)
 	}
-	if userInput.created[0].ToolCallID != "mcp-http-call-1" || userInput.created[0].ToolName != userinput.ToolNameAskUser {
+	if userInput.created[0].ToolCallID != "mcp-http-call-1" || userInput.created[0].ToolName != ToolAskUser.String() {
 		t.Fatalf("created input = %#v", userInput.created)
 	}
 	if userInput.created[0].ProviderMetadata["source"] != userinput.ProviderSourceACPMCP || userInput.created[0].ProviderMetadata["runtime_id"] != "runtime-1" {
@@ -342,7 +430,7 @@ func TestNativeToolSourceAskUserWaitsForInputAndPublishesRequest(t *testing.T) {
 		t.Fatalf("tool events = %d, want pending and terminal events", len(toolEvents.events))
 	}
 	event := toolEvents.events[0]
-	if event.Type != "user_input_request" || event.ToolCallID != "mcp-http-call-1" || event.ToolName != userinput.ToolNameAskUser {
+	if event.Type != "user_input_request" || event.ToolCallID != "mcp-http-call-1" || event.ToolName != ToolAskUser.String() {
 		t.Fatalf("tool event = %#v", event)
 	}
 	if event.UserInputID != "input-1" || event.Status != userinput.StatusPending {
@@ -359,7 +447,7 @@ func TestNativeToolSourceAskUserWaitsForInputAndPublishesRequest(t *testing.T) {
 	if terminal.Type != "user_input_request" || terminal.UserInputID != "input-1" || terminal.Status != userinput.StatusSubmitted {
 		t.Fatalf("terminal user input event = %#v, want submitted status", terminal)
 	}
-	if terminal.ToolCallID != "mcp-http-call-1" || terminal.ToolName != userinput.ToolNameAskUser {
+	if terminal.ToolCallID != "mcp-http-call-1" || terminal.ToolName != ToolAskUser.String() {
 		t.Fatalf("terminal user input identity = %#v", terminal)
 	}
 	structured, ok := result["structuredContent"].(map[string]any)
@@ -374,7 +462,7 @@ func TestNativeToolSourceAskUserRejectsExistingResolvedRequest(t *testing.T) {
 		createResponse: userinput.Request{
 			ID:         "input-1",
 			ToolCallID: "mcp-http-call-1",
-			ToolName:   userinput.ToolNameAskUser,
+			ToolName:   ToolAskUser.String(),
 			Status:     userinput.StatusSubmitted,
 			Result: map[string]any{
 				"status": userinput.StatusSubmitted,
@@ -396,7 +484,7 @@ func TestNativeToolSourceAskUserRejectsExistingResolvedRequest(t *testing.T) {
 		SessionID:  "session-1",
 		StreamID:   "stream-1",
 		ToolCallID: "mcp-http-call-1",
-	}, userinput.ToolNameAskUser, map[string]any{
+	}, ToolAskUser.String(), map[string]any{
 		"questions": []any{
 			map[string]any{"text": "Question?", "kind": "text"},
 		},
@@ -429,7 +517,7 @@ func TestNativeToolSourceAskUserAbortCancelsAfterReleasingWaiter(t *testing.T) {
 		SessionID:  "session-1",
 		StreamID:   "stream-1",
 		ToolCallID: "mcp-http-call-1",
-	}, userinput.ToolNameAskUser, map[string]any{
+	}, ToolAskUser.String(), map[string]any{
 		"questions": []any{
 			map[string]any{"text": "Question?", "kind": "text"},
 		},
@@ -456,7 +544,7 @@ func TestNativeToolSourceAskUserAbortReturnsLateAnswerWhenCancelLoses(t *testing
 		response: userinput.Request{
 			ID:         "input-1",
 			ToolCallID: "mcp-http-call-1",
-			ToolName:   userinput.ToolNameAskUser,
+			ToolName:   ToolAskUser.String(),
 			Status:     userinput.StatusSubmitted,
 			Result:     map[string]any{"status": userinput.StatusSubmitted},
 		},
@@ -472,7 +560,7 @@ func TestNativeToolSourceAskUserAbortReturnsLateAnswerWhenCancelLoses(t *testing
 		SessionID:  "session-1",
 		StreamID:   "stream-1",
 		ToolCallID: "mcp-http-call-1",
-	}, userinput.ToolNameAskUser, map[string]any{
+	}, ToolAskUser.String(), map[string]any{
 		"questions": []any{
 			map[string]any{"text": "Question?", "kind": "text"},
 		},
@@ -509,7 +597,7 @@ func TestNativeToolSourceAskUserNotDeliveredCancelsWithoutWaiting(t *testing.T) 
 		SessionID:  "session-1",
 		StreamID:   "stream-1",
 		ToolCallID: "mcp-http-call-1",
-	}, userinput.ToolNameAskUser, map[string]any{
+	}, ToolAskUser.String(), map[string]any{
 		"questions": []any{
 			map[string]any{"text": "Question?", "kind": "text"},
 		},
@@ -561,7 +649,7 @@ func TestNativeToolSourceAskUserKeepsMultipleRequestsIndependent(t *testing.T) {
 
 	for idx, callID := range []string{"mcp-http-call-1", "mcp-http-call-2"} {
 		session.ToolCallID = callID
-		result, err := source.CallTool(context.Background(), session, userinput.ToolNameAskUser, map[string]any{
+		result, err := source.CallTool(context.Background(), session, ToolAskUser.String(), map[string]any{
 			"questions": []any{
 				map[string]any{"text": fmt.Sprintf("Question %d?", idx+1), "kind": "text"},
 			},
@@ -608,6 +696,40 @@ type nativeSourceTestProvider struct {
 func (p *nativeSourceTestProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
 	p.session = session
 	return p.tools, nil
+}
+
+type nativeSourceUsageProvider struct{}
+
+func (*nativeSourceUsageProvider) Tools(context.Context, SessionContext) ([]sdk.Tool, error) {
+	return []sdk.Tool{
+		{
+			Name:        ToolSpawnAgent.String(),
+			Description: "Create one managed subagent.",
+			Parameters:  emptyObjectSchema(),
+			Execute: func(*sdk.ToolExecContext, any) (any, error) {
+				return map[string]any{"ok": true}, nil
+			},
+		},
+		{
+			Name:        ToolSendMessage.String(),
+			Description: "Send a follow-up message.",
+			Parameters:  emptyObjectSchema(),
+			Execute: func(*sdk.ToolExecContext, any) (any, error) {
+				return map[string]any{"ok": true}, nil
+			},
+		},
+	}, nil
+}
+
+func (*nativeSourceUsageProvider) Usage(_ context.Context, _ SessionContext, available AvailableTools) string {
+	var parts []string
+	if available.Has(ToolSpawnAgent) {
+		parts = append(parts, "USAGE_HAS_SPAWN")
+	}
+	if available.Has(ToolSendMessage) {
+		parts = append(parts, "USAGE_HAS_SEND_MESSAGE")
+	}
+	return strings.Join(parts, " ")
 }
 
 type nativeSourceApproval struct {

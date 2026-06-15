@@ -264,5 +264,8 @@ func MergeToolSessionContext(base, latest ToolSessionContext) ToolSessionContext
 	if latest.RuntimeActive {
 		merged.RuntimeActive = true
 	}
+	if latest.SupportsImageInput {
+		merged.SupportsImageInput = true
+	}
 	return merged
 }

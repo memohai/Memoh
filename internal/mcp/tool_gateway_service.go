@@ -164,5 +164,10 @@ func toolRegistryCacheKey(session ToolSessionContext) string {
 	} else {
 		parts = append(parts, "agent")
 	}
+	if session.SupportsImageInput {
+		parts = append(parts, "vision")
+	} else {
+		parts = append(parts, "no-vision")
+	}
 	return strings.Join(parts, "\x00")
 }

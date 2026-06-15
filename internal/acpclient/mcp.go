@@ -9,20 +9,21 @@ import (
 )
 
 const (
-	memohToolsMCPServerName      = "Memoh Tools"
-	memohToolsMCPServerSlug      = "Memoh_Tools"
-	memohHeaderBotID             = mcpgw.ToolHeaderBotID
-	memohHeaderChatID            = mcpgw.ToolHeaderChatID
-	memohHeaderRuntimeID         = mcpgw.ToolHeaderRuntimeID
-	memohHeaderSessionID         = mcpgw.ToolHeaderSessionID
-	memohHeaderStreamID          = mcpgw.ToolHeaderStreamID
-	memohHeaderSessionType       = mcpgw.ToolHeaderSessionType
-	memohHeaderRouteID           = mcpgw.ToolHeaderRouteID
-	memohHeaderChannelIdentityID = mcpgw.ToolHeaderChannelIdentityID
-	memohHeaderCurrentPlatform   = mcpgw.ToolHeaderCurrentPlatform
-	memohHeaderReplyTarget       = mcpgw.ToolHeaderReplyTarget
-	memohHeaderConversationType  = mcpgw.ToolHeaderConversationType
-	memohHeaderIsSubagent        = mcpgw.ToolHeaderIsSubagent
+	memohToolsMCPServerName       = "Memoh Tools"
+	memohToolsMCPServerSlug       = "Memoh_Tools"
+	memohHeaderBotID              = mcpgw.ToolHeaderBotID
+	memohHeaderChatID             = mcpgw.ToolHeaderChatID
+	memohHeaderRuntimeID          = mcpgw.ToolHeaderRuntimeID
+	memohHeaderSessionID          = mcpgw.ToolHeaderSessionID
+	memohHeaderStreamID           = mcpgw.ToolHeaderStreamID
+	memohHeaderSessionType        = mcpgw.ToolHeaderSessionType
+	memohHeaderRouteID            = mcpgw.ToolHeaderRouteID
+	memohHeaderChannelIdentityID  = mcpgw.ToolHeaderChannelIdentityID
+	memohHeaderCurrentPlatform    = mcpgw.ToolHeaderCurrentPlatform
+	memohHeaderReplyTarget        = mcpgw.ToolHeaderReplyTarget
+	memohHeaderConversationType   = mcpgw.ToolHeaderConversationType
+	memohHeaderIsSubagent         = mcpgw.ToolHeaderIsSubagent
+	memohHeaderSupportsImageInput = mcpgw.ToolHeaderSupportsImageInput
 )
 
 func memohToolsHTTPMCPServer(rawURL string, session mcpgw.ToolSessionContext) acp.McpServer {
@@ -62,6 +63,9 @@ func memohToolsHTTPHeaders(session mcpgw.ToolSessionContext) []acp.HttpHeader {
 	add(memohHeaderConversationType, session.ConversationType)
 	if session.IsSubagent {
 		add(memohHeaderIsSubagent, "true")
+	}
+	if session.SupportsImageInput {
+		add(memohHeaderSupportsImageInput, "true")
 	}
 	return headers
 }
