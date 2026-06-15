@@ -7,7 +7,7 @@ description: Refactor an apps/web page into the new white-floating-card design l
 
 ## Non-negotiables — read this even if you skim the rest
 
-The seven rules that break a page if you miss them. The rest of this file is the *why* and
+The eight rules that break a page if you miss them. The rest of this file is the *why* and
 the *how*; these are the *must*.
 
 1. **Copy the new, never the legacy.** Open a refactored reference page (§ Reference map in
@@ -23,12 +23,19 @@ the *how*; these are the *must*.
 4. **Build from the shared shell + primitives.** Centered `max-w-3xl` with gutters;
    `SettingsSection` / `SettingsRow` white cards — one hairline, role-map radius, inset
    dividers, deliberate spacing rhythm, and **no hover-rise** on cards.
-5. **Use the real `@memohai/ui` components** (Select / Combobox / Tooltip / icon `Button` /
-   `Empty`). Never re-skin one or hand-roll an equivalent.
+5. **Reuse a component — never hand-write one.** Compose from the real `@memohai/ui` atoms
+   (Select / Combobox / Tooltip / icon `Button` / `Empty`) and the existing shared parts; never
+   re-skin one, hand-roll an equivalent, or rebuild a control out of raw `<div>`s. If a layout
+   repeats, extract it into one shared component instead of pasting it twice. A genuinely new
+   component is a last resort — clear it with the developer *before* building it.
 6. **Earn every word and every block.** Cut copy that doesn't guide; hide blocks that aren't
    actionable; empty *and* loading states must still draw their frame (no layout jump).
 7. **You are not done until you verify the *rendered* page:** grep for raw colors → flip to
    **dark** → shrink to **narrow + `zh`** → walk **every old interaction** → `mise run lint`.
+8. **Draw it before you build it, then audit the nesting.** Sketch the page as an ASCII
+   wireframe first — and again when it looks done — and read it like space-complexity: no
+   card-in-card, no decorative icon stacked in a card, no nesting layer that isn't earning its
+   keep. Fewer boxes, shallower depth.
 
 ---
 
@@ -204,6 +211,14 @@ button) must not break or clip. Always check the narrowest realistic width, not 
 default — and remember Chinese copy is wider, so the narrow + `zh` combination is the real worst
 case (see § 1).
 
+Pane width is only one of three "bigger" axes; the page must also hold up under **browser zoom**
+and a **larger root/OS font**. The defence is the same discipline: lay out with the spacing
+ladder and flex/grid gaps (never a margin tuned to one string), size inline-with-text icons in
+`em` so they grow with the text while standalone control icons keep the `size-*` rem ladder, cap
+width with `max-w-*` + centre so a wide screen never stretches a line, and let any line that can
+outgrow its box `truncate`. Full rules + the verify pass (zoom 50→200%, narrow + `zh`, ultra-wide)
+live in `reference.md` § Scaling & zoom.
+
 ### Scroll ownership
 
 Know who owns the scroll before you add `overflow-*` anywhere. The desktop shell **locks body
@@ -219,7 +234,25 @@ unless you mean to.
 
 ## Component discipline
 
-Pick the right component instead of bending the wrong one. See `reference.md` §
+**Reuse first; build new only with sign-off.** The default is always to *find and reuse* an
+existing component, then to *compose* existing atoms — never to hand-write a control out of raw
+markup. The most expensive page is the one where the agent quietly re-built from zero what
+already existed. Three rules, in order:
+
+1. **Hand-writing a component is forbidden.** A clickable `<div>` that re-implements a Button, a
+   bespoke popover list that re-implements a Select, a `<div>`-grid that re-implements a Table —
+   all banned. They can't receive the size / token / focus / a11y contract, and they drift. If
+   `@memohai/ui` (or an existing app component) has it, use it as-is.
+2. **A composition that can repeat must be extracted, not pasted.** Even when every piece is a
+   properly reused atom, if the *arrangement* could appear in more than one place (a provider
+   row, a card header, an empty tile, a field cluster), lift it into one shared component and
+   reuse that. Copy-pasted markup is duplication waiting to drift out of sync — and a reused
+   composition dropped into a spot where the same shape recurs is the signal to extract it.
+3. **A genuinely new component needs the developer's OK first.** When nothing fits and no
+   composition will do, stop and say so — name what's missing and why — get agreement, then
+   build it once in the shared layer. Never silently spawn a one-off component mid-page.
+
+Then pick the right component instead of bending the wrong one. See `reference.md` §
 Component picker for the full decision table and the icon/badge/tooltip rules. The
 recurring failures to avoid:
 
@@ -231,10 +264,22 @@ recurring failures to avoid:
   standalone. Icons are **lucide components** (`<Plus/>`), never a typed glyph (`"+"`),
   and never free-sized — let the `size-4` control ladder apply. Never `scale-90` a control
   to "fix" its size.
+- **Default to no icon — an icon is a cost, not a freebie.** An icon must earn its place by
+  carrying meaning — a brand/provider mark, a status, or a clear action glyph on a button. It is
+  never free: a boxed icon drags in a surface (and its shadow), one more color, and a "does this
+  glyph even fit our language?" judgment call. So a generic lucide glyph dropped beside a title,
+  floated atop a "No X" empty block, or **stacked inside a card** is decoration, not signal — it
+  reads as cheap chrome and cheapens the page. Ship none by default; when a spot genuinely seems
+  to want one, **clear it with the developer before adding it** rather than sprinkling icons on
+  your own judgment.
 - **`BadgeCount`:** `destructive` red dot pinned to an icon corner = alert/unread; `default`
   neutral count rides a tab/filter/segment; a flat list row uses a plain muted numeral, no bubble.
 - **`Tooltip`:** always the `@memohai/ui` `Tooltip`. A hand-rolled or legacy tooltip is a bug.
-- **Empty surfaces:** the `Empty` component (icon + title + description + action), framed.
+- **Empty surfaces:** the `Empty` component (icon + title + description + action), framed — but
+  only when there is nothing else to guide the user. For a list that already has an **add**
+  affordance, prefer the same dashed "+ Add" tile the populated grid uses (Provider / Web Search)
+  *as* the empty state, rather than stacking a decorative-icon + heading + sub-line block on top
+  of an Add button that is already on screen.
 - **Destructive actions:** a filled `<Button variant="destructive">`, gated behind a
   confirmation (`ConfirmPopover`, or a dialog for heavier deletes) — never a bare one-click
   delete, never a ghost button with manual red text. Group truly dangerous actions in a danger
@@ -364,6 +409,34 @@ and how it's framed:
   self-contained unit (a tile row, a chart), let it sit directly under its title with no outer
   card. Card the groups; don't card the singletons.
 
+### 10. Forms follow one standard; controls are sized on purpose
+
+There is one house form, and the **New Task dialog** (`bot-schedule.vue`'s create/edit
+`Dialog`) is it. Mirror its anatomy — don't reinvent a form per page (recipe in
+`reference.md` § Form):
+
+- **Title:** a plain `DialogTitle` that names the action ("New Task"), nothing more — no
+  subtitle restating it.
+- **Fields:** one `space-y-4` column; each field is a `Label` + control in a `space-y-1.5`
+  group. Optional fields mark the **label** with a quiet `(optional)`, never the placeholder.
+- **Group what belongs together** on one aligned row (a name field + its enable toggle), with
+  the heights matched (§ 4).
+- **Progressive disclosure:** secondary settings live behind a **More options** chevron,
+  collapsed by default; rarely-needed power input (a raw cron, an "advanced" mode) sits in that
+  zone — not in the user's face.
+- **Footer:** a ghost **Cancel** + a single filled primary (Create / Confirm); a destructive
+  delete, when present, sits far left. Validate on **submit**, not on blur (§ 2) — gate the
+  primary with a `canSubmit` and surface the error only when they try.
+
+**Size controls deliberately — not "all small," not "all large."** The height ladder is
+`sm` h-8 · default h-9 · `lg` h-10. **Default (h-9, full height) is the norm**, and it is the
+*only* right size for a form footer and any primary action — a footer of squat half-height
+`sm` buttons is a tell that the page wasn't thought through. Drop to `sm` only where space is
+genuinely tight *and* the action is secondary (a dense toolbar, an inline-in-field button, a
+per-row action in a long list); reserve `lg` for a rare, deliberate hero CTA. Pick the rung for
+a reason every time; never shrink everything to look "compact" nor inflate everything to look
+"important."
+
 ## The review ritual — run it on every finished page
 
 When a page looks done, do **not** stop. **Open it in the running dev app** (`mise run dev`) —
@@ -385,6 +458,14 @@ seeing it rendered is:
 - Is the **save model** right (auto-save silent vs deliberate manual save), with no toast
   spam on ambient changes?
 - Is there any **hover-rise**, any tinted card, any off-scale text, any hand-rolled control?
+- **Re-draw the finished page as a wireframe and re-count its complexity** (§ workflow step 4):
+  any card-in-card? any icon stacked inside a card? any nesting layer that adds depth but no
+  meaning? If the sketch is busier than the page needs to be, flatten it before you ship.
+- **Reuse audit:** did you reuse every component you could — or hand-write / duplicate something
+  a primitive or a shared composition already covers? Is any brand-new component cleared with
+  the developer? Was a repeated arrangement extracted, not pasted?
+- **Forms & sizing:** do forms match the New Task standard, and is every button sized on purpose
+  (default h-9 for primaries / footers, `sm` only where genuinely tight)? No squat `sm` footers.
 
 Then run **`mise run lint`** — the UI-contract guard (`scripts/check-ui-contract.mjs`)
 mechanically blocks raw colors, invented shadows, off-scale radius, and structural borders
@@ -402,12 +483,20 @@ on controls. A page is not done until it passes.
 3. **Diagnose** the old page against the dirty→clean table in `reference.md`. List its sins
    (tinted fills, hairline-alpha borders, off-scale text, `scale-90`, `shadow-none`, colored
    focus rings, invented dashboards) — these are exactly what "off-language" means.
-4. **Rebuild** from the shell down: page shell → `SettingsSection`/`SettingsRow` groups →
-   the right `@memohai/ui` atoms, tokens only → **re-wire every behavior from the step-2
-   inventory** → copy through the § 1 interrogation → empty states that hold the frame →
-   aligned same-row heights → only the motion that fits.
-5. **Review ritual** above + `mise run lint`.
-6. Keep code comments about **why** (the reference pages do this well); never narrate the
+4. **Wireframe before you build, and audit the complexity.** Before writing any markup, sketch
+   the target as an ASCII wireframe (template in `reference.md` § Wireframe) — the shell, each
+   card group, the rows, the controls — and read it like space-complexity: count the boxes and
+   the nesting depth. Kill **card-in-card** (a bordered box moated around small boxes), kill
+   **icons stacked inside a card**, kill any layer that isn't earning its keep. The cheapest
+   place to delete a needless layer is here, on paper, before it exists in code.
+5. **Rebuild** from the shell down, **reusing components, never hand-writing them**: page shell →
+   `SettingsSection`/`SettingsRow` groups → the right `@memohai/ui` atoms, tokens only →
+   **re-wire every behavior from the step-2 inventory** → copy through the § 1 interrogation →
+   empty states that hold the frame → aligned same-row heights → only the motion that fits. If a
+   composition repeats, extract it; if you think you need a new component or an icon, get the
+   developer's sign-off first.
+6. **Review ritual** above + `mise run lint`.
+7. Keep code comments about **why** (the reference pages do this well); never narrate the
    change itself, and never name an external product in a comment.
 
 ## Comments & code style

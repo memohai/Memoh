@@ -11,6 +11,7 @@ component picker. Read `SKILL.md` first for the principles; this file is the loo
 | A settings page: titled card groups of rows | `pages/bots/components/bot-overview.vue`, `pages/usage/index.vue` | `pages/bots/components/bot-tool-approval.vue` |
 | A list of backends/items → detail | `pages/web-search/index.vue` (`useViewSwap` + `SwapTransition` + `BackendCard` + `DetailPane`) | — |
 | A dashboard with stats + chart | `pages/bots/components/bot-overview.vue` (stat tiles + echarts, black/white/gray only) | `bot-tool-approval.vue` invented "metrics" cards |
+| A form / create-edit dialog | `pages/bots/components/bot-schedule.vue` (the New Task `Dialog`: `DialogTitle`, `space-y-4` fields, `(optional)` on the label, name + toggle on one row, More options collapse, advanced mode, ghost Cancel + full-height primary) | — |
 | The full component catalog | `pages/dev/components/` (the wall — `Cmd/Ctrl+Shift+D`). Each `<Specimen note="…">` states *when* to use a component and its anti-pattern. | — |
 
 `bot-tool-approval.vue` is the canonical un-refactored page: it stacks tinted fills,
@@ -18,6 +19,37 @@ hairline-alpha borders, off-scale text, `scale-90`, `shadow-none`, colored focus
 and an invented metrics dashboard. Treat it as the "what dirty looks like" exhibit.
 
 ## Recipes (verified against the refactored pages)
+
+### Wireframe first (draw it before and after you build)
+
+Before any markup — and again when the page looks done — sketch it as plain text and read the
+structure like space-complexity: every box and every level of nesting has to justify itself.
+
+```
+┌ Page (mx-auto max-w-3xl) ───────────────────────────┐
+│  Title                                   [ New … ]   │
+│                                                      │
+│  Section label                                       │
+│  ┌ card ────────────────────────────────────────┐   │
+│  │ Row label          ………………………          control │   │
+│  │ Row label          ………………………          control │   │
+│  └──────────────────────────────────────────────┘   │
+│                                                      │
+│  Section label                                       │
+│  ┌ stat tiles (hairline-divided, NOT carded) ───┐    │
+│  │   12    │    3    │    0    │    —             │    │
+│  └──────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────┘
+```
+
+Complexity checklist on the sketch:
+
+1. **Card-in-card?** A box drawn inside another box → flatten to one surface.
+2. **Icon stacked in a card?** Drop it (or get sign-off) — it's a cost, not decoration.
+3. **Nesting depth.** If a row sits three+ frames deep, you're over-building.
+4. **Box count.** Fewer surfaces read calmer; merge or remove the ones that carry nothing.
+
+Delete layers on paper — it's free here and expensive once it's code.
 
 ### Page shell (settings/list page)
 
@@ -134,6 +166,84 @@ if it leaves the page looking broken — that is the empty-state anti-pattern.
 Consider hiding the search entirely until the list is long enough to need it
 (`v-if="items.length > 8"`) — a search box over four rows is noise.
 
+### Form (the New Task dialog is the house standard)
+
+`bot-schedule.vue`'s create/edit `Dialog` is the reference for every form — copy its anatomy
+instead of reinventing one per page.
+
+```vue
+<Dialog v-model:open="open">
+  <DialogScrollContent class="sm:max-w-lg">
+    <DialogHeader>
+      <DialogTitle>{{ $t('feature.create') }}</DialogTitle>
+    </DialogHeader>
+
+    <form class="space-y-4" @submit.prevent="onSubmit">
+      <!-- group a field + its toggle on one aligned row -->
+      <div class="flex items-end gap-3">
+        <div class="min-w-0 flex-1 space-y-1.5">
+          <Label for="f-name">{{ $t('feature.name') }}</Label>
+          <Input id="f-name" v-model="form.name" :placeholder="…" />
+        </div>
+        <div class="flex h-9 shrink-0 items-center gap-2">
+          <Label class="cursor-pointer text-muted-foreground" @click="form.enabled = !form.enabled">
+            {{ $t('feature.enabled') }}
+          </Label>
+          <Switch v-model="form.enabled" />
+        </div>
+      </div>
+
+      <!-- optional field: mark the LABEL, never the placeholder -->
+      <div class="space-y-1.5">
+        <Label for="f-desc">
+          {{ $t('feature.description') }}
+          <span class="ml-1 font-normal text-muted-foreground">({{ $t('common.optional') }})</span>
+        </Label>
+        <Input id="f-desc" v-model="form.description" :placeholder="…" />
+      </div>
+
+      <!-- More options: secondary / advanced settings, collapsed by default -->
+      <div>
+        <button
+          type="button"
+          class="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          @click="showMore = !showMore"
+        >
+          <ChevronRight class="size-3.5" :class="showMore ? 'rotate-90' : ''" />
+          {{ $t('feature.moreOptions') }}
+        </button>
+        <!-- CSS grid-rows collapse: animates height, no JS -->
+        <div
+          class="grid overflow-hidden transition-[grid-template-rows] duration-200 ease-out"
+          :class="showMore ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
+        >
+          <div class="min-h-0"><!-- advanced / rarely-needed inputs --></div>
+        </div>
+      </div>
+
+      <DialogFooter class="gap-2 sm:justify-between">
+        <!-- destructive (edit mode) goes far left; otherwise a flex-1 spacer -->
+        <div class="flex gap-2">
+          <DialogClose as-child>
+            <Button type="button" variant="ghost">{{ $t('common.cancel') }}</Button>
+          </DialogClose>
+          <Button type="submit" :disabled="!canSubmit || isSaving">
+            {{ $t('common.create') }}
+          </Button>
+        </div>
+      </DialogFooter>
+    </form>
+  </DialogScrollContent>
+</Dialog>
+```
+
+Rules this encodes: footer/primary buttons are **default size (h-9, full height)** — never `sm`;
+the `(optional)` marker rides the **label**, not the placeholder; secondary and power-user input
+(a raw cron, an "advanced" mode) hides behind **More options**; validation gates the primary via
+`canSubmit` and surfaces errors on **submit**, not on blur (no red-on-touch). Forms still use
+vee-validate + Zod for real schemas (`apps/web/AGENTS.md`); `canSubmit` is the submit gate, not a
+replacement for the schema.
+
 ### List ↔ detail directional swap
 
 ```vue
@@ -212,6 +322,33 @@ stub. Ask "separating items within one surface, or splitting the container?" bef
 - Note (open debt, from `packages/ui/AGENTS.md`): the dark-mode accent palette currently
   inherits light values — don't assume an accent is dark-tuned; check it.
 
+### Scaling & zoom — size in tokens, never pixels tuned to text
+
+A page has to survive three independent kinds of "bigger" — browser zoom (Cmd ±), a
+wider/narrower pane, and a larger root/OS font — and hold up under all three at once.
+
+- **Lay out with the spacing ladder + flex/grid gaps, never a margin tuned to a string.** Use
+  `gap-*` / `space-y-*` / `p-*` and let flex/grid place things; don't hand-pick a margin or an
+  absolute offset to line up with one specific label's width. Token spacing scales with the root
+  font and reflows on zoom; a pixel nudged to fit today's text breaks the moment the text,
+  locale, or font changes.
+- **Icons inline with variable-size text use `em`; standalone control icons use the `size-*`
+  rem ladder.** `size-4` is `1rem`, relative to the *root* — not the neighbouring text — so an
+  icon beside a `text-lg` label stays 16px and reads as undersized. When an icon must track the
+  text it sits with (a logo beside a name, an inline glyph in a heading), size it in `em`
+  (`size-[1.5em]`, as the provider detail logos do) so it grows with the text. Keep the
+  `size-4` / `size-3.5` / `size-3` rem rungs for icons inside a fixed-size control.
+- **Never pin a width that only fits one zoom/locale.** Cap content with `max-w-*` and centre it
+  so an ultra-wide screen doesn't stretch a line to the full window; give same-row clusters
+  `min-w-0` (and `flex-wrap` where stacking is acceptable) so they shrink instead of clipping.
+- **Truncate is the overflow backstop.** Any single-line label / title / value that can outgrow
+  its box gets `min-w-0 truncate` on the flex child (a back-button label, a card name, a
+  breadcrumb) so it ellipsises instead of overflowing on a small pane or a large font. Pair it
+  with `shrink-0` on the adjacent icon/affordance so only the text gives way.
+- **Verify under all three:** browser zoom 50%→200%, the narrowest resizable pane width (and
+  `zh`, the wider locale), and an ultra-wide window — every state should reflow / centre /
+  truncate, never clip or stretch.
+
 ### i18n & bilingual layout
 
 - Every user-facing string is a key in `apps/web/src/i18n/locales/en.json` **and** `zh.json`;
@@ -280,6 +417,12 @@ see it, replace it with the right column. This is your strip-list when refactori
 | stray `overflow-*` / `overflow-x-hidden` on a swapped pane | nested scrollbar or stolen ancestor scroll | own scroll only when intended; `overflow-x-clip` for sideways-nudge |
 | one-click delete, or ghost button + `text-destructive` | unconfirmed/under-weighted destruction | filled `variant="destructive"` + confirm step; danger card at the bottom |
 | always-present "Status: OK" / healthy-state row | noise where a healthy state should say nothing | progressive disclosure — show only when actionable, hide the whole block otherwise |
+| hand-written control (clickable `<div>`/`<span>`, bespoke popover list, `<div>`-grid "table") | re-implements a primitive; can't take size/token/focus/a11y, and drifts | reuse the `@memohai/ui` atom as-is; never rebuild a control from raw markup |
+| a composition pasted into two+ places | duplication that drifts out of sync | extract one shared component and reuse it |
+| brand-new one-off component spawned mid-page without asking | scope creep outside the shared layer | clear a genuinely new component with the developer first, then build it once, shared |
+| `size="sm"` on a form footer / primary action | squat half-height buttons read as unfinished | default (`h-9`, full height); `sm` only for genuinely tight, secondary spots |
+| decorative icon stacked in a card / atop an empty block | a cost (surface, shadow, extra color, language-fit) with no signal | ship no icon; add one only after the developer signs off |
+| card-in-card (a bordered box wrapping bordered boxes) | nesting depth with no meaning; reads mostly-empty | flatten to one surface — hairline-divided tiles, not boxes-in-a-box |
 
 ## Component picker
 
@@ -298,6 +441,23 @@ see it, replace it with the right column. This is your strip-list when refactori
 | Count / unread / overflow badge | `BadgeCount` (`destructive` alert · `default` neutral) | a hand-built rounded-full number pill |
 | Empty surface | `Empty` (+ framed) | bare centered muted `<p>` |
 | Status that aligns to a section title | `Badge` (gives the status a box edge) | a loose dot + text floating with nothing to align to |
+| Create / edit form | the New Task `Dialog` shape (§ Form recipe) | a bespoke per-page form layout; `sm` footer buttons |
+
+### Button & control sizing (pick the rung on purpose)
+
+The height ladder is `sm` h-8 (32) · default h-9 (36) · `lg` h-10 (40); icon-only `icon-sm`
+(32) · `icon` (36) · `icon-lg` (40). Default is the norm; `sm` is the exception, `lg` is rarer.
+
+| Context | Size |
+|---|---|
+| Form footer, dialog actions, any primary CTA | **default** (`h-9`, full height) — never `sm` |
+| Standalone page action (header "New …", section action) | **default** (`h-9`) |
+| Dense toolbar / inline-in-field button / per-row action in a long list | `sm` (`h-8`) — only when space is genuinely tight *and* the action is secondary |
+| Icon-only action | `icon` (36) toolbar/standalone · `icon-sm` (32) in dense rows |
+| Deliberate hero CTA (rare) | `lg` (`h-10`) |
+
+The tell: a footer of squat half-height `sm` buttons, or a page where every button is shrunk to
+look "compact" (or inflated to look "important"). Size each for a reason, not by reflex.
 
 ### Icon & badge specifics (from the wall)
 
