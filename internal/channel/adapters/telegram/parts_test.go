@@ -314,6 +314,55 @@ func TestExtractTelegramMessageParts_HandlesSupplementaryPlaneEmoji(t *testing.T
 	}
 }
 
+func TestExtractTelegramMessageParts_NestedLinkInsideBold(t *testing.T) {
+	t.Parallel()
+	// Telegram sends overlapping entities natively: the bold span covers the
+	// whole rendered text and the text_link entity points at a sub-range.
+	// Splitting the outer around the inner keeps the URL discoverable; the
+	// flat MessagePart schema can't carry both bold and link at the same
+	// position, so the link span itself appears without the bold style.
+	msg := &tgbotapi.Message{
+		Text: "Check this out",
+		Entities: []tgbotapi.MessageEntity{
+			{Type: "bold", Offset: 0, Length: 14},
+			{Type: "text_link", Offset: 6, Length: 4, URL: "https://example.com"},
+		},
+	}
+	parts := extractTelegramMessageParts(msg)
+	if len(parts) != 3 {
+		t.Fatalf("expected 3 parts (lead-bold + link + tail-bold), got %+v", parts)
+	}
+	if parts[0].Type != channel.MessagePartText || parts[0].Text != "Check " || len(parts[0].Styles) != 1 || parts[0].Styles[0] != channel.MessageStyleBold {
+		t.Fatalf("part 0 wrong: %+v", parts[0])
+	}
+	if parts[1].Type != channel.MessagePartLink || parts[1].URL != "https://example.com" || parts[1].Text != "this" {
+		t.Fatalf("part 1 wrong: %+v", parts[1])
+	}
+	if parts[2].Type != channel.MessagePartText || parts[2].Text != " out" || len(parts[2].Styles) != 1 || parts[2].Styles[0] != channel.MessageStyleBold {
+		t.Fatalf("part 2 wrong: %+v", parts[2])
+	}
+}
+
+func TestExtractTelegramMessageParts_NestedMentionInsideStyle(t *testing.T) {
+	t.Parallel()
+	// Same shape but with a text_mention nested in italic; identity must
+	// reach the LLM even though the italic span covers the mention.
+	msg := &tgbotapi.Message{
+		Text: "hi Alice ok",
+		Entities: []tgbotapi.MessageEntity{
+			{Type: "italic", Offset: 0, Length: 11},
+			{Type: "text_mention", Offset: 3, Length: 5, User: &tgbotapi.User{ID: 7, FirstName: "Alice"}},
+		},
+	}
+	parts := extractTelegramMessageParts(msg)
+	if len(parts) != 3 {
+		t.Fatalf("expected 3 parts, got %+v", parts)
+	}
+	if parts[1].Type != channel.MessagePartMention || parts[1].Text != "Alice" || parts[1].ChannelIdentityID != "7" {
+		t.Fatalf("nested mention wrong: %+v", parts[1])
+	}
+}
+
 func TestExtractTelegramMessageParts_NilMessage(t *testing.T) {
 	t.Parallel()
 	if got := extractTelegramMessageParts(nil); got != nil {

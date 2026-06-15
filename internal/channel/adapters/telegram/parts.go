@@ -51,9 +51,56 @@ func extractTelegramMessageParts(msg *tgbotapi.Message) []channel.MessagePart {
 		parts = append(parts, channel.MessagePart{Type: channel.MessagePartText, Text: s})
 	}
 
+	// Pre-pass: identify nested structural entities (link/mention/text_mention)
+	// so the outer span can be split around them. The flat MessagePart schema
+	// can't simultaneously style + link the same range, but splitting lets us
+	// keep both the styled context and the link/identity signal.
+	childrenOf := make([][]int, len(sorted))
+	isNestedChild := make([]bool, len(sorted))
+	for i, ent := range sorted {
+		if !telegramEntityIsStructural(ent.Type) {
+			continue
+		}
+		parent := -1
+		parentSize := 0
+		for j, candidate := range sorted {
+			if i == j {
+				continue
+			}
+			if candidate.Offset > ent.Offset {
+				continue
+			}
+			if candidate.Offset+candidate.Length < ent.Offset+ent.Length {
+				continue
+			}
+			if candidate.Offset == ent.Offset && candidate.Length == ent.Length {
+				continue
+			}
+			if parent == -1 || candidate.Length < parentSize {
+				parent = j
+				parentSize = candidate.Length
+			}
+		}
+		if parent != -1 {
+			childrenOf[parent] = append(childrenOf[parent], i)
+			isNestedChild[i] = true
+		}
+	}
+
+	emitFromEntity := func(ent tgbotapi.MessageEntity, slice string) {
+		if part, ok := telegramEntityToPart(ent, slice); ok {
+			parts = append(parts, part)
+		} else {
+			appendPlain(slice)
+		}
+	}
+
 	cursor := 0
-	for _, ent := range sorted {
+	for i, ent := range sorted {
 		if ent.Offset < 0 || ent.Length <= 0 || ent.Offset+ent.Length > n {
+			continue
+		}
+		if isNestedChild[i] {
 			continue
 		}
 		if ent.Offset < cursor {
@@ -62,11 +109,25 @@ func extractTelegramMessageParts(msg *tgbotapi.Message) []channel.MessagePart {
 		if ent.Offset > cursor {
 			appendPlain(string(utf16.Decode(units[cursor:ent.Offset])))
 		}
-		slice := string(utf16.Decode(units[ent.Offset : ent.Offset+ent.Length]))
-		if part, ok := telegramEntityToPart(ent, slice); ok {
-			parts = append(parts, part)
+		if kids := childrenOf[i]; len(kids) > 0 {
+			ordered := append([]int{}, kids...)
+			sort.SliceStable(ordered, func(a, b int) bool {
+				return sorted[ordered[a]].Offset < sorted[ordered[b]].Offset
+			})
+			innerCursor := ent.Offset
+			for _, ki := range ordered {
+				child := sorted[ki]
+				if child.Offset > innerCursor {
+					emitFromEntity(ent, string(utf16.Decode(units[innerCursor:child.Offset])))
+				}
+				emitFromEntity(child, string(utf16.Decode(units[child.Offset:child.Offset+child.Length])))
+				innerCursor = child.Offset + child.Length
+			}
+			if innerCursor < ent.Offset+ent.Length {
+				emitFromEntity(ent, string(utf16.Decode(units[innerCursor:ent.Offset+ent.Length])))
+			}
 		} else {
-			appendPlain(slice)
+			emitFromEntity(ent, string(utf16.Decode(units[ent.Offset:ent.Offset+ent.Length])))
 		}
 		cursor = ent.Offset + ent.Length
 	}
@@ -136,6 +197,14 @@ func telegramEntityToPart(ent tgbotapi.MessageEntity, slice string) (channel.Mes
 	default:
 		return channel.MessagePart{}, false
 	}
+}
+
+func telegramEntityIsStructural(t string) bool {
+	switch t {
+	case "mention", "text_mention", "text_link", "url":
+		return true
+	}
+	return false
 }
 
 func styledText(text string, style channel.MessageTextStyle) channel.MessagePart {
