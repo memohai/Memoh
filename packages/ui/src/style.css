@@ -1115,7 +1115,7 @@
 
 .dark {
   --background: oklch(0.152 0 0);
-  --foreground: oklch(0.86 0 0);
+  --foreground: oklch(0.90 0 0);
   --card: oklch(0.21 0 0);
   --card-foreground: oklch(0.90 0 0);
   --popover: oklch(0.21 0 0);
@@ -1125,7 +1125,7 @@
   --secondary: oklch(0.26 0 0);
   --secondary-foreground: oklch(0.86 0 0);
   --muted: oklch(0.26 0 0);
-  --muted-foreground: oklch(0.62 0 0);
+  --muted-foreground: oklch(0.70 0 0);
   /* On dark, the mid-stop is one hair LIGHTER than --muted (0.26) — a gentle lift,
      never a glaring white sweep. */
   --skeleton-mid: oklch(0.315 0 0);
@@ -1559,7 +1559,7 @@
 
 .dark[data-color-scheme]:not([data-color-scheme="memoh"]) {
   --background: oklch(0.152 0.006 var(--scheme-hue));
-  --foreground: oklch(0.86 0.004 var(--scheme-hue));
+  --foreground: oklch(0.90 0.004 var(--scheme-hue));
   --card: oklch(0.21 0.006 var(--scheme-hue));
   --card-foreground: oklch(0.90 0.004 var(--scheme-hue));
   --popover: var(--card);
@@ -1567,7 +1567,7 @@
   --secondary: oklch(0.26 0.006 var(--scheme-hue));
   --secondary-foreground: var(--foreground);
   --muted: var(--secondary);
-  --muted-foreground: oklch(0.62 0.006 var(--scheme-hue));
+  --muted-foreground: oklch(0.70 0.006 var(--scheme-hue));
   --accent: var(--secondary);
   --accent-foreground: var(--foreground);
   --border: oklch(1 0 0 / 8%);
