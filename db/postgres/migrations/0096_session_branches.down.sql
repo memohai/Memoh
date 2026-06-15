@@ -7,6 +7,7 @@ DROP INDEX IF EXISTS idx_bot_session_branches_parent;
 DROP INDEX IF EXISTS idx_bot_session_branches_session;
 DROP INDEX IF EXISTS idx_bot_session_branches_root;
 
+
 ALTER TABLE bot_history_messages
   DROP COLUMN IF EXISTS branch_seq,
   DROP COLUMN IF EXISTS branch_id;

@@ -2436,6 +2436,8 @@ export type SessionBranchNode = {
     created_at?: string;
     fork_from_message_id?: string;
     fork_from_seq?: number;
+    fork_from_turn_id?: string;
+    fork_from_turn_seq?: number;
     id?: string;
     parent_branch_id?: string;
     preview?: SessionTurnPreview;
@@ -2456,6 +2458,7 @@ export type SessionBranchTurn = {
     parent_turn_id?: string;
     preview?: SessionTurnPreview;
     title?: string;
+    turn_seq?: number;
     user_message_id?: string;
 };
 

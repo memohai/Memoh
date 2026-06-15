@@ -425,7 +425,7 @@
     "minimapEarlier": "Earlier messages appear as they load",
     "copyReply": "Copy reply",
     "copyFailed": "Copy failed",
-    "forkReply": "Fork from reply",
+    "rewriteRequest": "Edit and resend",
     "branchHistory": {
       "tab": "Branch",
       "title": "Branch history",

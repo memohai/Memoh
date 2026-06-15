@@ -118,6 +118,8 @@ export interface BranchNode {
   parent_branch_id?: string
   fork_from_message_id?: string
   fork_from_seq?: number
+  fork_from_turn_id?: string
+  fork_from_turn_seq?: number
   title?: string
   active?: boolean
   preview?: BranchTurnPreview
@@ -133,6 +135,7 @@ export interface BranchTurn {
   assistant_message_id?: string
   user_message_id?: string
   branch_seq?: number
+  turn_seq?: number
   depth?: number
   active?: boolean
   preview?: BranchTurnPreview

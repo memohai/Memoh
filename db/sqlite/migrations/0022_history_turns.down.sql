@@ -1,0 +1,2 @@
+-- 0022_history_turns
+-- No-op rollback. The prior 0021 down migration owns branch schema rollback.

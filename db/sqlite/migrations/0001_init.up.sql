@@ -463,6 +463,8 @@ CREATE TABLE IF NOT EXISTS bot_session_branches (
   parent_branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
   fork_from_message_id TEXT,
   fork_from_seq INTEGER,
+  fork_from_turn_id TEXT,
+  fork_from_turn_seq INTEGER,
   title TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -473,6 +475,30 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_session_branches_root
   WHERE parent_branch_id IS NULL AND fork_from_message_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_session_branches_session ON bot_session_branches(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_bot_session_branches_parent ON bot_session_branches(parent_branch_id) WHERE parent_branch_id IS NOT NULL;
+
+-- bot_history_turns: lifecycle unit for one user request and the assistant reply it produced.
+CREATE TABLE IF NOT EXISTS bot_history_turns (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
+  branch_id TEXT NOT NULL REFERENCES bot_session_branches(id) ON DELETE CASCADE,
+  turn_seq INTEGER NOT NULL,
+  request_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
+  final_assistant_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'completed', 'failed', 'canceled')),
+  title TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_history_turns_branch_seq
+  ON bot_history_turns(branch_id, turn_seq);
+CREATE INDEX IF NOT EXISTS idx_bot_history_turns_session_branch
+  ON bot_history_turns(session_id, branch_id, turn_seq);
+CREATE INDEX IF NOT EXISTS idx_bot_history_turns_request
+  ON bot_history_turns(request_message_id) WHERE request_message_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_bot_history_turns_assistant
+  ON bot_history_turns(final_assistant_message_id) WHERE final_assistant_message_id IS NOT NULL;
 
 -- bot_session_events: DCP pipeline event store for cold-start replay.
 CREATE TABLE IF NOT EXISTS bot_session_events (
@@ -500,6 +526,8 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   session_id TEXT REFERENCES bot_sessions(id) ON DELETE SET NULL,
   branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
   branch_seq INTEGER,
+  turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
+  turn_message_seq INTEGER,
   sender_channel_identity_id TEXT REFERENCES channel_identities(id),
   sender_account_user_id TEXT REFERENCES users(id),
   source_message_id TEXT,
@@ -524,6 +552,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_history_messages_branch_seq
   WHERE branch_id IS NOT NULL AND branch_seq IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_branch
   ON bot_history_messages(branch_id, branch_seq);
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_turn
+  ON bot_history_messages(turn_id, turn_message_seq)
+  WHERE turn_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_source
   ON bot_history_messages(session_id, source_message_id);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_reply

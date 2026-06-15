@@ -30,9 +30,24 @@ CREATE TABLE bot_session_branches (
   parent_branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
   fork_from_message_id TEXT,
   fork_from_seq INTEGER,
+  fork_from_turn_id TEXT,
+  fork_from_turn_seq INTEGER,
   title TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE bot_history_turns (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
+  branch_id TEXT NOT NULL REFERENCES bot_session_branches(id) ON DELETE CASCADE,
+  turn_seq INTEGER NOT NULL,
+  request_message_id TEXT,
+  final_assistant_message_id TEXT,
+  status TEXT NOT NULL DEFAULT 'running',
+  title TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at TEXT
 );
 CREATE TABLE channel_identities (
   id TEXT PRIMARY KEY,
@@ -45,6 +60,8 @@ CREATE TABLE bot_history_messages (
   session_id TEXT REFERENCES bot_sessions(id) ON DELETE SET NULL,
   branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
   branch_seq INTEGER,
+  turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
+  turn_message_seq INTEGER,
   sender_channel_identity_id TEXT,
   sender_account_user_id TEXT,
   source_message_id TEXT,
@@ -74,6 +91,10 @@ CREATE TABLE bot_history_messages (
 	forkAssistantID := "00000000-0000-0000-0000-000000002202"
 	secondForkUserID := "00000000-0000-0000-0000-000000002203"
 	secondForkAssistantID := "00000000-0000-0000-0000-000000002204"
+	rootTurn1ID := "00000000-0000-0000-0000-000000002301"
+	rootTurn2ID := "00000000-0000-0000-0000-000000002302"
+	forkTurnID := "00000000-0000-0000-0000-000000002303"
+	secondForkTurnID := "00000000-0000-0000-0000-000000002304"
 
 	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id, active_branch_id) VALUES (?, ?)`, sessionID, forkBranchID); err != nil {
 		t.Fatalf("insert session: %v", err)
@@ -81,31 +102,46 @@ CREATE TABLE bot_history_messages (
 	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_session_branches (id, session_id, created_at, updated_at) VALUES (?, ?, ?, ?)`, rootBranchID, sessionID, "2026-01-01 00:00:00", "2026-01-01 00:00:00"); err != nil {
 		t.Fatalf("insert root branch: %v", err)
 	}
-	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_session_branches (id, session_id, parent_branch_id, fork_from_message_id, fork_from_seq, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, forkBranchID, sessionID, rootBranchID, assistant1ID, 0, "2026-01-01 00:10:00", "2026-01-01 00:10:00"); err != nil {
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_session_branches (id, session_id, parent_branch_id, fork_from_message_id, fork_from_seq, fork_from_turn_id, fork_from_turn_seq, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, forkBranchID, sessionID, rootBranchID, assistant1ID, 2, rootTurn1ID, 0, "2026-01-01 00:10:00", "2026-01-01 00:10:00"); err != nil {
 		t.Fatalf("insert fork branch: %v", err)
 	}
-	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_session_branches (id, session_id, parent_branch_id, fork_from_message_id, fork_from_seq, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, secondForkBranchID, sessionID, rootBranchID, assistant2ID, 2, "2026-01-01 00:20:00", "2026-01-01 00:20:00"); err != nil {
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_session_branches (id, session_id, parent_branch_id, fork_from_message_id, fork_from_seq, fork_from_turn_id, fork_from_turn_seq, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, secondForkBranchID, sessionID, rootBranchID, assistant2ID, 4, rootTurn2ID, 1, "2026-01-01 00:20:00", "2026-01-01 00:20:00"); err != nil {
 		t.Fatalf("insert second fork branch: %v", err)
 	}
-	insertMessage := func(id, branchID, role string, seq int, createdAt string) {
+	insertTurn := func(id, branchID string, seq int, userID, assistantID, createdAt, completedAt string) {
+		t.Helper()
+		_, err := conn.ExecContext(ctx, `
+INSERT INTO bot_history_turns (
+  id, session_id, branch_id, turn_seq, request_message_id, final_assistant_message_id, status, created_at, updated_at, completed_at
+) VALUES (?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?)`,
+			id, sessionID, branchID, seq, userID, assistantID, createdAt, completedAt, completedAt)
+		if err != nil {
+			t.Fatalf("insert turn %s: %v", id, err)
+		}
+	}
+	insertMessage := func(id, branchID, turnID, role string, seq, turnMessageSeq int, createdAt string) {
 		t.Helper()
 		_, err := conn.ExecContext(ctx, `
 INSERT INTO bot_history_messages (
-  id, bot_id, session_id, branch_id, branch_seq, role, content, metadata, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, '{}', ?)`,
-			id, botID, sessionID, branchID, seq, role, `{"content":"`+id+`"}`, createdAt)
+  id, bot_id, session_id, branch_id, branch_seq, turn_id, turn_message_seq, role, content, metadata, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?)`,
+			id, botID, sessionID, branchID, seq, turnID, turnMessageSeq, role, `{"content":"`+id+`"}`, createdAt)
 		if err != nil {
 			t.Fatalf("insert message %s: %v", id, err)
 		}
 	}
-	insertMessage(user1ID, rootBranchID, "user", 1, "2026-01-01 00:01:00")
-	insertMessage(assistant1ID, rootBranchID, "assistant", 2, "2026-01-01 00:02:00")
-	insertMessage(user2ID, rootBranchID, "user", 3, "2026-01-01 00:03:00")
-	insertMessage(assistant2ID, rootBranchID, "assistant", 4, "2026-01-01 00:04:00")
-	insertMessage(forkUserID, forkBranchID, "user", 1, "2026-01-01 00:11:00")
-	insertMessage(forkAssistantID, forkBranchID, "assistant", 2, "2026-01-01 00:12:00")
-	insertMessage(secondForkUserID, secondForkBranchID, "user", 1, "2026-01-01 00:21:00")
-	insertMessage(secondForkAssistantID, secondForkBranchID, "assistant", 2, "2026-01-01 00:22:00")
+	insertTurn(rootTurn1ID, rootBranchID, 1, user1ID, assistant1ID, "2026-01-01 00:01:00", "2026-01-01 00:02:00")
+	insertTurn(rootTurn2ID, rootBranchID, 2, user2ID, assistant2ID, "2026-01-01 00:03:00", "2026-01-01 00:04:00")
+	insertTurn(forkTurnID, forkBranchID, 1, forkUserID, forkAssistantID, "2026-01-01 00:11:00", "2026-01-01 00:12:00")
+	insertTurn(secondForkTurnID, secondForkBranchID, 1, secondForkUserID, secondForkAssistantID, "2026-01-01 00:21:00", "2026-01-01 00:22:00")
+	insertMessage(user1ID, rootBranchID, rootTurn1ID, "user", 1, 1, "2026-01-01 00:01:00")
+	insertMessage(assistant1ID, rootBranchID, rootTurn1ID, "assistant", 2, 2, "2026-01-01 00:02:00")
+	insertMessage(user2ID, rootBranchID, rootTurn2ID, "user", 3, 1, "2026-01-01 00:03:00")
+	insertMessage(assistant2ID, rootBranchID, rootTurn2ID, "assistant", 4, 2, "2026-01-01 00:04:00")
+	insertMessage(forkUserID, forkBranchID, forkTurnID, "user", 1, 1, "2026-01-01 00:11:00")
+	insertMessage(forkAssistantID, forkBranchID, forkTurnID, "assistant", 2, 2, "2026-01-01 00:12:00")
+	insertMessage(secondForkUserID, secondForkBranchID, secondForkTurnID, "user", 1, 1, "2026-01-01 00:21:00")
+	insertMessage(secondForkAssistantID, secondForkBranchID, secondForkTurnID, "assistant", 2, 2, "2026-01-01 00:22:00")
 
 	store, err := New(conn)
 	if err != nil {
@@ -165,27 +201,150 @@ INSERT INTO bot_history_messages (
 	}
 	assertTurnAssistantIDs(t, turnRows, []string{assistant1ID, assistant2ID, forkAssistantID, secondForkAssistantID})
 
-	firstForkPoint, err := q.GetSessionBranchForkPoint(ctx, pgsqlc.GetSessionBranchForkPointParams{
-		SessionID: sessionUUID,
-		BranchID:  mustUUID(t, rootBranchID),
-		BranchSeq: 2,
-	})
+	assertTurnSeqs(t, turnRows, []int64{1, 2, 1, 1})
+}
+
+func TestSQLiteListSessionBranchesScansTurnForkColumns(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
 	if err != nil {
-		t.Fatalf("get first fork point: %v", err)
+		t.Fatalf("open sqlite: %v", err)
 	}
-	if firstForkPoint != 0 {
-		t.Fatalf("first fork point = %d, want 0", firstForkPoint)
+	defer func() { _ = conn.Close() }()
+
+	execAll(t, conn, `
+CREATE TABLE bot_sessions (
+  id TEXT PRIMARY KEY,
+  active_branch_id TEXT
+);
+CREATE TABLE bot_session_branches (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
+  parent_branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
+  fork_from_message_id TEXT,
+  fork_from_seq INTEGER,
+  fork_from_turn_id TEXT,
+  fork_from_turn_seq INTEGER,
+  title TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`)
+
+	sessionID := "00000000-0000-0000-0000-000000004001"
+	rootBranchID := "00000000-0000-0000-0000-000000004010"
+	forkBranchID := "00000000-0000-0000-0000-000000004011"
+	messageID := "00000000-0000-0000-0000-000000004101"
+	turnID := "00000000-0000-0000-0000-000000004201"
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id, active_branch_id) VALUES (?, ?)`, sessionID, forkBranchID); err != nil {
+		t.Fatalf("insert session: %v", err)
 	}
-	secondForkPoint, err := q.GetSessionBranchForkPoint(ctx, pgsqlc.GetSessionBranchForkPointParams{
-		SessionID: sessionUUID,
-		BranchID:  mustUUID(t, rootBranchID),
-		BranchSeq: 4,
-	})
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_session_branches (id, session_id, created_at, updated_at) VALUES (?, ?, ?, ?)`, rootBranchID, sessionID, "2026-06-14 11:22:00", "2026-06-14 11:22:00"); err != nil {
+		t.Fatalf("insert root branch: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO bot_session_branches (
+  id, session_id, parent_branch_id, fork_from_message_id, fork_from_seq,
+  fork_from_turn_id, fork_from_turn_seq, title, created_at, updated_at
+) VALUES (?, ?, ?, ?, 2, ?, 1, 'fork title', ?, ?)`,
+		forkBranchID,
+		sessionID,
+		rootBranchID,
+		messageID,
+		turnID,
+		"2026-06-14 11:23:00",
+		"2026-06-14 11:23:00",
+	); err != nil {
+		t.Fatalf("insert fork branch: %v", err)
+	}
+
+	store, err := New(conn)
 	if err != nil {
-		t.Fatalf("get second fork point: %v", err)
+		t.Fatalf("new store: %v", err)
 	}
-	if secondForkPoint != 2 {
-		t.Fatalf("second fork point = %d, want 2", secondForkPoint)
+	q := NewQueries(store)
+	rows, err := q.ListSessionBranches(ctx, mustUUID(t, sessionID))
+	if err != nil {
+		t.Fatalf("list session branches: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("branches = %d, want 2", len(rows))
+	}
+	fork := rows[1]
+	if fork.ForkFromTurnID.String() != turnID {
+		t.Fatalf("fork_from_turn_id = %s, want %s", fork.ForkFromTurnID.String(), turnID)
+	}
+	if !fork.ForkFromTurnSeq.Valid || fork.ForkFromTurnSeq.Int64 != 1 {
+		t.Fatalf("fork_from_turn_seq = %#v, want 1", fork.ForkFromTurnSeq)
+	}
+	if !fork.CreatedAt.Valid || fork.CreatedAt.Time.Format("2006-01-02 15:04:05") != "2026-06-14 11:23:00" {
+		t.Fatalf("created_at = %#v, want 2026-06-14 11:23:00", fork.CreatedAt)
+	}
+}
+
+func TestSQLiteListSessionBranchesToleratesMigratedColumnSkew(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	execAll(t, conn, `
+CREATE TABLE bot_sessions (
+  id TEXT PRIMARY KEY,
+  active_branch_id TEXT
+);
+CREATE TABLE bot_session_branches (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
+  parent_branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
+  fork_from_message_id TEXT,
+  fork_from_seq INTEGER,
+  fork_from_turn_id TEXT,
+  fork_from_turn_seq INTEGER,
+  title TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`)
+
+	sessionID := "00000000-0000-0000-0000-000000005001"
+	branchID := "00000000-0000-0000-0000-000000005010"
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id, active_branch_id) VALUES (?, ?)`, sessionID, branchID); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO bot_session_branches (
+  id, session_id, fork_from_turn_id, fork_from_turn_seq, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?)`,
+		branchID,
+		sessionID,
+		"2026-06-14 11:23:00",
+		"2026-06-14 11:23:00",
+		"",
+		"",
+	); err != nil {
+		t.Fatalf("insert skewed branch: %v", err)
+	}
+
+	store, err := New(conn)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	q := NewQueries(store)
+	rows, err := q.ListSessionBranches(ctx, mustUUID(t, sessionID))
+	if err != nil {
+		t.Fatalf("list session branches with skewed columns: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("branches = %d, want 1", len(rows))
+	}
+	if rows[0].ForkFromTurnID.Valid {
+		t.Fatalf("fork_from_turn_id = %#v, want null for skewed timestamp", rows[0].ForkFromTurnID)
+	}
+	if rows[0].ForkFromTurnSeq.Valid {
+		t.Fatalf("fork_from_turn_seq = %#v, want null for skewed timestamp", rows[0].ForkFromTurnSeq)
 	}
 }
 
@@ -223,6 +382,22 @@ func assertTurnAssistantIDs(t *testing.T, rows []pgsqlc.ListSessionBranchTurnMes
 		got = append(got, row.AssistantID.String())
 	}
 	assertStringSlice(t, got, want)
+}
+
+func assertTurnSeqs(t *testing.T, rows []pgsqlc.ListSessionBranchTurnMessagesRow, want []int64) {
+	t.Helper()
+	got := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		got = append(got, row.TurnSeq)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("turn seqs = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("turn seqs = %#v, want %#v", got, want)
+		}
+	}
 }
 
 func assertStringSlice(t *testing.T, got []string, want []string) {

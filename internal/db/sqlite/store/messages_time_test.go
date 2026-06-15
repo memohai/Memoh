@@ -37,9 +37,24 @@ CREATE TABLE bot_session_branches (
   parent_branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
   fork_from_message_id TEXT,
   fork_from_seq INTEGER,
+  fork_from_turn_id TEXT,
+  fork_from_turn_seq INTEGER,
   title TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE bot_history_turns (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
+  branch_id TEXT NOT NULL REFERENCES bot_session_branches(id) ON DELETE CASCADE,
+  turn_seq INTEGER NOT NULL,
+  request_message_id TEXT,
+  final_assistant_message_id TEXT,
+  status TEXT NOT NULL DEFAULT 'running',
+  title TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at TEXT
 );
 CREATE TABLE bot_history_messages (
   id TEXT PRIMARY KEY,
@@ -47,6 +62,8 @@ CREATE TABLE bot_history_messages (
   session_id TEXT,
   branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
   branch_seq INTEGER,
+  turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
+  turn_message_seq INTEGER,
   sender_channel_identity_id TEXT,
   sender_account_user_id TEXT,
   source_message_id TEXT,
@@ -64,11 +81,15 @@ CREATE TABLE bot_history_messages (
 	botID := "00000000-0000-0000-0000-000000002001"
 	sessionID := "00000000-0000-0000-0000-000000002002"
 	branchID := "00000000-0000-0000-0000-000000002010"
+	turnID := "00000000-0000-0000-0000-000000002011"
 	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id, channel_type, active_branch_id) VALUES (?, ?, ?)`, sessionID, "local", branchID); err != nil {
 		t.Fatalf("insert session: %v", err)
 	}
 	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_session_branches (id, session_id, created_at, updated_at) VALUES (?, ?, ?, ?)`, branchID, sessionID, "2026-06-13 19:53:50", "2026-06-13 19:53:50"); err != nil {
 		t.Fatalf("insert branch: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_history_turns (id, session_id, branch_id, turn_seq, status, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, 'completed', ?, ?, ?)`, turnID, sessionID, branchID, 1, "2026-06-13 19:53:50", "2026-06-13 19:53:50", "2026-06-13 19:53:50"); err != nil {
+		t.Fatalf("insert turn: %v", err)
 	}
 	for _, item := range []struct {
 		id      string
@@ -80,12 +101,14 @@ CREATE TABLE bot_history_messages (
 		{"00000000-0000-0000-0000-000000002004", "assistant", `{"role":"assistant","content":"hi"}`, 2},
 	} {
 		_, err := conn.ExecContext(ctx, `
-INSERT INTO bot_history_messages (id, bot_id, session_id, branch_id, branch_seq, role, content, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+INSERT INTO bot_history_messages (id, bot_id, session_id, branch_id, branch_seq, turn_id, turn_message_seq, role, content, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			item.id,
 			botID,
 			sessionID,
 			branchID,
+			item.seq,
+			turnID,
 			item.seq,
 			item.role,
 			item.content,

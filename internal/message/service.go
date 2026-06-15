@@ -72,6 +72,31 @@ func (s *DBService) ensureActiveBranchForSession(ctx context.Context, sessionID 
 	return branchID, nil
 }
 
+func (s *DBService) ensureTurnForMessage(ctx context.Context, sessionID, branchID pgtype.UUID, role string, explicitTurnID pgtype.UUID) (pgtype.UUID, error) {
+	if explicitTurnID.Valid {
+		return explicitTurnID, nil
+	}
+	if !sessionID.Valid || !branchID.Valid {
+		return pgtype.UUID{}, nil
+	}
+	if role != "user" {
+		turnID, err := s.queries.GetOpenHistoryTurnForBranch(ctx, sqlc.GetOpenHistoryTurnForBranchParams{
+			SessionID: sessionID,
+			BranchID:  branchID,
+		})
+		if err == nil {
+			return turnID, nil
+		}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return pgtype.UUID{}, err
+			}
+	}
+	return s.queries.CreateHistoryTurn(ctx, sqlc.CreateHistoryTurnParams{
+		SessionID: sessionID,
+		BranchID:  branchID,
+	})
+}
+
 // Persist writes a single message to bot_history_messages.
 func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, error) {
 	pgBotID, err := dbpkg.ParseUUID(input.BotID)
@@ -92,6 +117,14 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 		if err != nil {
 			return Message{}, fmt.Errorf("ensure session branch: %w", err)
 		}
+	}
+	pgTurnID, err := parseOptionalUUID(input.TurnID)
+	if err != nil {
+		return Message{}, fmt.Errorf("invalid turn id: %w", err)
+	}
+	pgTurnID, err = s.ensureTurnForMessage(ctx, pgSessionID, pgBranchID, input.Role, pgTurnID)
+	if err != nil {
+		return Message{}, fmt.Errorf("ensure message turn: %w", err)
 	}
 
 	pgSenderChannelIdentityID, err := parseOptionalUUID(input.SenderChannelIdentityID)
@@ -125,6 +158,7 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 		BotID:                   pgBotID,
 		SessionID:               pgSessionID,
 		BranchID:                pgBranchID,
+		TurnID:                  pgTurnID,
 		SenderChannelIdentityID: pgSenderChannelIdentityID,
 		SenderUserID:            pgSenderUserID,
 		ExternalMessageID:       toPgText(input.ExternalMessageID),
@@ -139,6 +173,25 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 	})
 	if err != nil {
 		return Message{}, err
+	}
+
+	if pgTurnID.Valid {
+		switch input.Role {
+		case "user":
+			if err := s.queries.SetHistoryTurnRequestMessage(ctx, sqlc.SetHistoryTurnRequestMessageParams{
+				TurnID:    pgTurnID,
+				MessageID: row.ID,
+			}); err != nil {
+				s.logger.Warn("set turn request message failed", slog.String("message_id", row.ID.String()), slog.Any("error", err))
+			}
+		case "assistant":
+			if err := s.queries.CompleteHistoryTurnWithAssistant(ctx, sqlc.CompleteHistoryTurnWithAssistantParams{
+				TurnID:    pgTurnID,
+				MessageID: row.ID,
+			}); err != nil {
+				s.logger.Warn("complete turn with assistant failed", slog.String("message_id", row.ID.String()), slog.Any("error", err))
+			}
+		}
 	}
 
 	result := toMessageFromCreate(row)

@@ -1713,23 +1713,33 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function forkMessage(messageId: string) {
+  async function createBranchFromMessage(messageId: string, errorMessage: string): Promise<{ ok: boolean }> {
     const bid = (currentBotId.value ?? '').trim()
     const sid = (sessionId.value ?? '').trim()
     const targetMessageId = messageId.trim()
-    if (!bid || !sid || !targetMessageId || branchActionLoading.value) return
-    if (!isPersistentMessageId(targetMessageId)) return
+    if (!bid || !sid || !targetMessageId || branchActionLoading.value) return { ok: false }
+    if (!isPersistentMessageId(targetMessageId)) return { ok: false }
     branchActionLoading.value = true
     try {
       branchGraph.value = await forkSessionBranch(bid, sid, targetMessageId)
       clearCachedMessages(bid, sid)
       await loadMessages(bid, sid)
+      return { ok: true }
     } catch (error) {
       console.error('Failed to fork branch:', error)
-      toast.error(resolveApiErrorMessage(error, currentLocale() === 'zh' ? '分叉消息失败' : 'Failed to fork message'))
+      toast.error(resolveApiErrorMessage(error, errorMessage))
+      return { ok: false }
     } finally {
       branchActionLoading.value = false
     }
+  }
+
+  async function forkMessage(messageId: string): Promise<{ ok: boolean }> {
+    return createBranchFromMessage(messageId, currentLocale() === 'zh' ? '分叉消息失败' : 'Failed to fork message')
+  }
+
+  async function rewriteRequest(messageId: string): Promise<{ ok: boolean }> {
+    return createBranchFromMessage(messageId, currentLocale() === 'zh' ? '编辑并重发失败' : 'Failed to edit and resend')
   }
 
   async function switchBranch(branchId: string) {
@@ -2595,6 +2605,7 @@ export const useChatStore = defineStore('chat', () => {
     selectChat: selectSession,
     loadBranches,
     forkMessage,
+    rewriteRequest,
     switchBranch,
     stageACPSession,
     ensurePendingACPRuntime,

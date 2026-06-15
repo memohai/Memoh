@@ -45,11 +45,11 @@ SELECT
   ci.display_name AS channel_identity_display_name,
   ci.avatar_url AS channel_identity_avatar_url,
   COALESCE(
-    NULLIF(TRIM(COALESCE(json_extract(source_route.metadata, '$.conversation_name'), '')), ''),
-    NULLIF(TRIM(COALESCE(json_extract(source_route.metadata, '$.conversation_handle'), '')), ''),
+    NULLIF(TRIM(COALESCE(CASE WHEN json_valid(source_route.metadata) THEN json_extract(source_route.metadata, '$.conversation_name') END, '')), ''),
+    NULLIF(TRIM(COALESCE(CASE WHEN json_valid(source_route.metadata) THEN json_extract(source_route.metadata, '$.conversation_handle') END, '')), ''),
     ''
   ) AS source_conversation_name,
-  COALESCE(NULLIF(TRIM(COALESCE(json_extract(source_route.metadata, '$.conversation_avatar_url'), '')), ''), '') AS source_conversation_avatar_url
+  COALESCE(NULLIF(TRIM(COALESCE(CASE WHEN json_valid(source_route.metadata) THEN json_extract(source_route.metadata, '$.conversation_avatar_url') END, '')), ''), '') AS source_conversation_avatar_url
 FROM bot_acl_rules r
 LEFT JOIN channel_identities ci ON ci.id = r.channel_identity_id
 LEFT JOIN bot_channel_routes source_route ON source_route.bot_id = r.bot_id

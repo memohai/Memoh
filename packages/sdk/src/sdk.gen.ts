@@ -1213,7 +1213,7 @@ export const patchBotsByBotIdSessionsBySessionIdBranchesActive = <ThrowOnError e
 });
 
 /**
- * Fork a session branch from an assistant message
+ * Fork a session branch from a message
  */
 export const postBotsByBotIdSessionsBySessionIdBranchesFork = <ThrowOnError extends boolean = false>(options: Options<PostBotsByBotIdSessionsBySessionIdBranchesForkData, ThrowOnError>) => (options.client ?? client).post<PostBotsByBotIdSessionsBySessionIdBranchesForkResponses, PostBotsByBotIdSessionsBySessionIdBranchesForkErrors, ThrowOnError>({
     url: '/bots/{bot_id}/sessions/{session_id}/branches/fork',

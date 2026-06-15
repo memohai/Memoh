@@ -37,6 +37,13 @@ export function canForkMessage(message: ChatMessage): boolean {
     && persistentMessageId(message).length > 0
 }
 
+export function canRewriteRequest(message: ChatMessage): boolean {
+  return message.role === 'user'
+    && !message.streaming
+    && cleanUserText(message.text).length > 0
+    && persistentMessageId(message).length > 0
+}
+
 export function persistentMessageId(message: ChatMessage): string {
   const id = message.serverId?.trim() || message.id.trim()
   return isPersistentMessageId(id) ? id : ''

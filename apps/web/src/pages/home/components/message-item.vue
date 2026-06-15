@@ -213,6 +213,10 @@
           role="user"
           :copy-text="userCopyText"
           :align="bubbleSelf ? 'end' : 'start'"
+          :copied="copied"
+          :can-rewrite="canRewrite"
+          @copy="emit('copyMessage', props.message.id)"
+          @rewrite="handleRewriteClick"
         />
       </div>
 
@@ -308,6 +312,8 @@
           align="start"
           :persistent="true"
           :streaming="message.streaming"
+          :copied="copied"
+          @copy="emit('copyMessage', props.message.id)"
         />
       </div>
     </div>
@@ -337,6 +343,7 @@ setCustomComponents({ mermaid: ThemedMermaidBlock })
 import { computed, toRef, useTemplateRef, watch } from 'vue'
 import { CircleAlert } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime, formatCalendarTime } from '@/utils/date-time'
+import { persistentMessageId } from '@/utils/chat-text'
 import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
@@ -379,6 +386,8 @@ const codeBlockTheme = computed(() => ({
 const messageEl = useTemplateRef('messageItem')
 const emit = defineEmits<{
   active: [isActive: boolean, { id: string, top: number,  }]
+  copyMessage: [messageId: string]
+  rewriteRequest: [messageId: string]
 }>()
 
 const props = defineProps<{
@@ -395,6 +404,8 @@ const props = defineProps<{
   onReplyClick?: (messageId: string) => void
   isScrolling: boolean
   isLastMessage?: boolean
+  copied?: boolean
+  canRewrite?: boolean
 }>()
 
 const userStore = useUserStore()
@@ -707,5 +718,11 @@ const assistantPlainText = computed(() => {
     .map(block => block.content)
     .join('\n\n')
 })
+
+function handleRewriteClick() {
+  const messageId = persistentMessageId(props.message)
+  if (!messageId) return
+  emit('rewriteRequest', messageId)
+}
 
 </script>

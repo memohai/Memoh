@@ -425,7 +425,7 @@
     "minimapEarlier": "更早的消息加载后显示",
     "copyReply": "复制回复",
     "copyFailed": "复制失败",
-    "forkReply": "从回复分叉",
+    "rewriteRequest": "编辑并重发",
     "branchHistory": {
       "tab": "分支",
       "title": "分支历史",

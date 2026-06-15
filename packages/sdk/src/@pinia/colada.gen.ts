@@ -2216,7 +2216,7 @@ export const patchBotsByBotIdSessionsBySessionIdBranchesActiveMutation = (option
 });
 
 /**
- * Fork a session branch from an assistant message
+ * Fork a session branch from a message
  */
 export const postBotsByBotIdSessionsBySessionIdBranchesForkMutation = (options?: Partial<Options<PostBotsByBotIdSessionsBySessionIdBranchesForkData>>): UseMutationOptions<PostBotsByBotIdSessionsBySessionIdBranchesForkResponse, Options<PostBotsByBotIdSessionsBySessionIdBranchesForkData>, PostBotsByBotIdSessionsBySessionIdBranchesForkError> => ({
     mutation: async (vars) => {

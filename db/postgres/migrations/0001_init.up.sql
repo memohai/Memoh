@@ -468,6 +468,8 @@ CREATE TABLE IF NOT EXISTS bot_session_branches (
   parent_branch_id UUID REFERENCES bot_session_branches(id) ON DELETE SET NULL,
   fork_from_message_id UUID,
   fork_from_seq BIGINT,
+  fork_from_turn_id UUID,
+  fork_from_turn_seq BIGINT,
   title TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -478,6 +480,30 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_session_branches_root
   WHERE parent_branch_id IS NULL AND fork_from_message_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_session_branches_session ON bot_session_branches(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_bot_session_branches_parent ON bot_session_branches(parent_branch_id) WHERE parent_branch_id IS NOT NULL;
+
+-- bot_history_turns: lifecycle unit for one user request and the assistant reply it produced.
+CREATE TABLE IF NOT EXISTS bot_history_turns (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id UUID NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
+  branch_id UUID NOT NULL REFERENCES bot_session_branches(id) ON DELETE CASCADE,
+  turn_seq BIGINT NOT NULL,
+  request_message_id UUID,
+  final_assistant_message_id UUID,
+  status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'completed', 'failed', 'canceled')),
+  title TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_history_turns_branch_seq
+  ON bot_history_turns(branch_id, turn_seq);
+CREATE INDEX IF NOT EXISTS idx_bot_history_turns_session_branch
+  ON bot_history_turns(session_id, branch_id, turn_seq);
+CREATE INDEX IF NOT EXISTS idx_bot_history_turns_request
+  ON bot_history_turns(request_message_id) WHERE request_message_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_bot_history_turns_assistant
+  ON bot_history_turns(final_assistant_message_id) WHERE final_assistant_message_id IS NOT NULL;
 
 -- Add FK from routes to sessions (deferred to avoid circular dependency during CREATE).
 ALTER TABLE bot_channel_routes
@@ -510,6 +536,8 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
   branch_id UUID REFERENCES bot_session_branches(id) ON DELETE SET NULL,
   branch_seq BIGINT,
+  turn_id UUID REFERENCES bot_history_turns(id) ON DELETE SET NULL,
+  turn_message_seq BIGINT,
   sender_channel_identity_id UUID REFERENCES channel_identities(id),
   sender_account_user_id UUID REFERENCES users(id),
   source_message_id TEXT,
@@ -534,10 +562,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_history_messages_branch_seq
   WHERE branch_id IS NOT NULL AND branch_seq IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_branch
   ON bot_history_messages(branch_id, branch_seq);
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_turn
+  ON bot_history_messages(turn_id, turn_message_seq)
+  WHERE turn_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_source
   ON bot_history_messages(session_id, source_message_id);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_reply
   ON bot_history_messages(session_id, source_reply_to_message_id);
+
+ALTER TABLE bot_history_turns
+  ADD CONSTRAINT fk_bot_history_turns_request_message
+  FOREIGN KEY (request_message_id) REFERENCES bot_history_messages(id) ON DELETE SET NULL;
+ALTER TABLE bot_history_turns
+  ADD CONSTRAINT fk_bot_history_turns_final_assistant_message
+  FOREIGN KEY (final_assistant_message_id) REFERENCES bot_history_messages(id) ON DELETE SET NULL;
+ALTER TABLE bot_session_branches
+  ADD CONSTRAINT fk_bot_session_branches_fork_from_turn
+  FOREIGN KEY (fork_from_turn_id) REFERENCES bot_history_turns(id) ON DELETE SET NULL;
 
 CREATE TABLE IF NOT EXISTS tool_approval_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

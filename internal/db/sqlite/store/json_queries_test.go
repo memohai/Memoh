@@ -381,6 +381,156 @@ CREATE TABLE user_input_requests (
 	}
 }
 
+func TestSQLiteMessageJSONQueriesTolerateMalformedJSON(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	execAll(t, conn, `
+CREATE TABLE channel_identities (
+  id TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL DEFAULT '',
+  avatar_url TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE bot_sessions (
+  id TEXT PRIMARY KEY,
+  channel_type TEXT,
+  active_branch_id TEXT
+);
+CREATE TABLE bot_session_branches (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
+  parent_branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
+  fork_from_message_id TEXT,
+  fork_from_seq INTEGER,
+  fork_from_turn_id TEXT,
+  fork_from_turn_seq INTEGER,
+  title TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE bot_history_turns (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
+  branch_id TEXT NOT NULL REFERENCES bot_session_branches(id) ON DELETE CASCADE,
+  turn_seq INTEGER NOT NULL,
+  request_message_id TEXT,
+  final_assistant_message_id TEXT,
+  status TEXT NOT NULL DEFAULT 'running',
+  title TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at TEXT
+);
+CREATE TABLE bot_history_messages (
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL,
+  session_id TEXT REFERENCES bot_sessions(id) ON DELETE SET NULL,
+  branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
+  branch_seq INTEGER,
+  turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
+  turn_message_seq INTEGER,
+  sender_channel_identity_id TEXT,
+  sender_account_user_id TEXT,
+  source_message_id TEXT,
+  source_reply_to_message_id TEXT,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL DEFAULT '{}',
+  metadata TEXT NOT NULL DEFAULT '{}',
+  usage TEXT,
+  model_id TEXT,
+  compact_id TEXT,
+  event_id TEXT,
+  display_text TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`)
+
+	botID := "00000000-0000-0000-0000-000000003001"
+	sessionID := "00000000-0000-0000-0000-000000003002"
+	branchID := "00000000-0000-0000-0000-000000003010"
+	turnID := "00000000-0000-0000-0000-000000003011"
+	messageID := "00000000-0000-0000-0000-000000003101"
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id, channel_type, active_branch_id) VALUES (?, 'local', ?)`, sessionID, branchID); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_session_branches (id, session_id) VALUES (?, ?)`, branchID, sessionID); err != nil {
+		t.Fatalf("insert branch: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_history_turns (id, session_id, branch_id, turn_seq, status) VALUES (?, ?, ?, 1, 'completed')`, turnID, sessionID, branchID); err != nil {
+		t.Fatalf("insert turn: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO bot_history_messages (
+  id, bot_id, session_id, branch_id, branch_seq, turn_id, turn_message_seq, role, content, metadata, created_at
+) VALUES (?, ?, ?, ?, 1, ?, 1, 'user', ?, ?, ?)`,
+		messageID,
+		botID,
+		sessionID,
+		branchID,
+		turnID,
+		`{"role":"user","content":"hello malformed metadata"}`,
+		`not-json`,
+		"2026-06-13 19:53:50",
+	); err != nil {
+		t.Fatalf("insert malformed metadata message: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO bot_history_messages (
+  id, bot_id, session_id, role, content, metadata, created_at
+) VALUES (?, ?, ?, 'user', ?, '{}', ?)`,
+		"00000000-0000-0000-0000-000000003102",
+		botID,
+		sessionID,
+		`not-json searchable text`,
+		"2026-06-13 19:54:50",
+	); err != nil {
+		t.Fatalf("insert malformed content message: %v", err)
+	}
+
+	store, err := New(conn)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	q := NewQueries(store)
+
+	rows, err := q.ListActiveMessagesSinceBySession(ctx, pgsqlc.ListActiveMessagesSinceBySessionParams{
+		SessionID: mustUUID(t, sessionID),
+		CreatedAt: pgtype.Timestamptz{
+			Time:  time.Date(2026, 6, 13, 19, 0, 0, 0, time.UTC),
+			Valid: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("list active messages with malformed metadata: %v", err)
+	}
+	foundMalformedMetadata := false
+	for _, row := range rows {
+		if row.ID.String() == messageID {
+			foundMalformedMetadata = true
+			break
+		}
+	}
+	if !foundMalformedMetadata {
+		t.Fatalf("active rows = %#v, want malformed metadata message", rows)
+	}
+
+	searchRows, err := q.SearchMessages(ctx, pgsqlc.SearchMessagesParams{
+		BotID:    mustUUID(t, botID),
+		Keyword:  pgtype.Text{String: "searchable", Valid: true},
+		MaxCount: 10,
+	})
+	if err != nil {
+		t.Fatalf("search messages with malformed content: %v", err)
+	}
+	if len(searchRows) != 1 {
+		t.Fatalf("search rows = %d, want 1", len(searchRows))
+	}
+}
+
 func execAll(t *testing.T, db *sql.DB, statement string) {
 	t.Helper()
 	if _, err := db.ExecContext(context.Background(), statement); err != nil {

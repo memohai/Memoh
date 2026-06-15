@@ -71,6 +71,7 @@ type Queries interface {
 	CreateManagedMCPConnection(ctx context.Context, arg dbsqlc.CreateManagedMCPConnectionParams) (dbsqlc.McpConnection, error)
 	CreateMCPConnection(ctx context.Context, arg dbsqlc.CreateMCPConnectionParams) (dbsqlc.McpConnection, error)
 	CreateMemoryProvider(ctx context.Context, arg dbsqlc.CreateMemoryProviderParams) (dbsqlc.MemoryProvider, error)
+	CreateHistoryTurn(ctx context.Context, arg dbsqlc.CreateHistoryTurnParams) (pgtype.UUID, error)
 	CreateMessage(ctx context.Context, arg dbsqlc.CreateMessageParams) (dbsqlc.CreateMessageRow, error)
 	CreateMessageAsset(ctx context.Context, arg dbsqlc.CreateMessageAssetParams) (dbsqlc.BotHistoryMessageAsset, error)
 	CreateRootSessionBranch(ctx context.Context, sessionID pgtype.UUID) (pgtype.UUID, error)
@@ -149,7 +150,7 @@ type Queries interface {
 	GetBotWorkspaceResourceLimits(ctx context.Context, botID pgtype.UUID) (dbsqlc.BotWorkspaceResourceLimit, error)
 	GetActiveSessionBranch(ctx context.Context, sessionID pgtype.UUID) (pgtype.UUID, error)
 	GetMessageForSessionBranchFork(ctx context.Context, arg dbsqlc.GetMessageForSessionBranchForkParams) (dbsqlc.GetMessageForSessionBranchForkRow, error)
-	GetSessionBranchForkPoint(ctx context.Context, arg dbsqlc.GetSessionBranchForkPointParams) (int64, error)
+	GetOpenHistoryTurnForBranch(ctx context.Context, arg dbsqlc.GetOpenHistoryTurnForBranchParams) (pgtype.UUID, error)
 	GetDefaultMemoryProvider(ctx context.Context) (dbsqlc.MemoryProvider, error)
 	GetEmailOAuthTokenByProvider(ctx context.Context, emailProviderID pgtype.UUID) (dbsqlc.EmailOauthToken, error)
 	GetEmailOAuthTokenByState(ctx context.Context, state string) (dbsqlc.EmailOauthToken, error)
@@ -283,6 +284,7 @@ type Queries interface {
 	ListToolApprovalsBySession(ctx context.Context, arg dbsqlc.ListToolApprovalsBySessionParams) ([]dbsqlc.ToolApprovalRequest, error)
 	ListUserInputsBySession(ctx context.Context, arg dbsqlc.ListUserInputsBySessionParams) ([]dbsqlc.UserInputRequest, error)
 	SetActiveSessionBranch(ctx context.Context, arg dbsqlc.SetActiveSessionBranchParams) error
+	SetHistoryTurnRequestMessage(ctx context.Context, arg dbsqlc.SetHistoryTurnRequestMessageParams) error
 	ListTranscriptionModels(ctx context.Context) ([]dbsqlc.ListTranscriptionModelsRow, error)
 	ListTranscriptionModelsByProviderID(ctx context.Context, providerID pgtype.UUID) ([]dbsqlc.Model, error)
 	ListTranscriptionProviders(ctx context.Context) ([]dbsqlc.Provider, error)
@@ -300,6 +302,7 @@ type Queries interface {
 	SearchChannelIdentities(ctx context.Context, arg dbsqlc.SearchChannelIdentitiesParams) ([]dbsqlc.ChannelIdentity, error)
 	SearchMessages(ctx context.Context, arg dbsqlc.SearchMessagesParams) ([]dbsqlc.SearchMessagesRow, error)
 	SetBotACLDefaultEffect(ctx context.Context, arg dbsqlc.SetBotACLDefaultEffectParams) error
+	CompleteHistoryTurnWithAssistant(ctx context.Context, arg dbsqlc.CompleteHistoryTurnWithAssistantParams) error
 	SetRouteActiveSession(ctx context.Context, arg dbsqlc.SetRouteActiveSessionParams) error
 	SoftDeleteSession(ctx context.Context, id pgtype.UUID) error
 	SoftDeleteSessionsByBot(ctx context.Context, botID pgtype.UUID) error

@@ -50,6 +50,8 @@ type BranchNode struct {
 	ParentBranchID    string      `json:"parent_branch_id,omitempty"`
 	ForkFromMessageID string      `json:"fork_from_message_id,omitempty"`
 	ForkFromSeq       int64       `json:"fork_from_seq,omitempty"`
+	ForkFromTurnID    string      `json:"fork_from_turn_id,omitempty"`
+	ForkFromTurnSeq   int64       `json:"fork_from_turn_seq,omitempty"`
 	Title             string      `json:"title,omitempty"`
 	Active            bool        `json:"active"`
 	Preview           TurnPreview `json:"preview"`
@@ -66,6 +68,7 @@ type BranchTurn struct {
 	AssistantID  string      `json:"assistant_message_id,omitempty"`
 	UserID       string      `json:"user_message_id,omitempty"`
 	BranchSeq    int64       `json:"branch_seq,omitempty"`
+	TurnSeq      int64       `json:"turn_seq,omitempty"`
 	Depth        int         `json:"depth"`
 	Active       bool        `json:"active"`
 	Preview      TurnPreview `json:"preview"`
@@ -93,13 +96,13 @@ const (
 )
 
 var (
-	ErrACPAgentIDRequired     = errors.New("acp_agent_id is required for acp_agent sessions")
-	ErrACPProjectPathMissing  = errors.New("project_path is required for acp_agent sessions")
-	ErrACPUnknownAgent        = errors.New("unknown ACP agent")
-	ErrACPAgentNotEnabled     = errors.New("ACP agent is not enabled for this bot")
-	ErrBranchNotFound         = errors.New("session branch not found")
-	ErrForkMessageNotFound    = errors.New("fork source message not found")
-	ErrForkSourceNotAssistant = errors.New("fork source message must be an assistant message")
+	ErrACPAgentIDRequired    = errors.New("acp_agent_id is required for acp_agent sessions")
+	ErrACPProjectPathMissing = errors.New("project_path is required for acp_agent sessions")
+	ErrACPUnknownAgent       = errors.New("unknown ACP agent")
+	ErrACPAgentNotEnabled    = errors.New("ACP agent is not enabled for this bot")
+	ErrBranchNotFound        = errors.New("session branch not found")
+	ErrForkMessageNotFound   = errors.New("fork source message not found")
+	ErrForkSourceUnsupported = errors.New("fork source message must be a user or assistant message")
 )
 
 func IsKnownType(typ string) bool {
@@ -455,7 +458,8 @@ func (s *Service) ListBranches(ctx context.Context, sessionID string) (BranchGra
 	return s.listBranchesByUUID(ctx, pgSessionID)
 }
 
-// ForkBranchFromMessage creates and activates a new session branch from an assistant message.
+// ForkBranchFromMessage creates and activates a new session branch from a reply
+// or from a request that should be edited and resent.
 func (s *Service) ForkBranchFromMessage(ctx context.Context, sessionID, messageID string) (BranchGraph, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
@@ -478,25 +482,39 @@ func (s *Service) ForkBranchFromMessage(ctx context.Context, sessionID, messageI
 	if err != nil {
 		return BranchGraph{}, err
 	}
-	if row.Role != "assistant" {
-		return BranchGraph{}, ErrForkSourceNotAssistant
+	if !row.BranchID.Valid || !row.TurnID.Valid {
+		return BranchGraph{}, errors.New("fork source message has no turn position")
 	}
-	if !row.BranchID.Valid || !row.BranchSeq.Valid {
-		return BranchGraph{}, errors.New("fork source message has no branch position")
+	forkFromTurnID := row.TurnID
+	forkFromTurnSeq := pgtype.Int8{Int64: row.TurnSeq, Valid: true}
+	forkFromSeq := int64(0)
+	if row.BranchSeq.Valid {
+		forkFromSeq = row.BranchSeq.Int64
 	}
-	forkFromSeq, err := s.queries.GetSessionBranchForkPoint(ctx, sqlc.GetSessionBranchForkPointParams{
-		SessionID: pgSessionID,
-		BranchID:  row.BranchID,
-		BranchSeq: row.BranchSeq.Int64,
-	})
-	if err != nil {
-		return BranchGraph{}, fmt.Errorf("resolve branch fork point: %w", err)
+	forkFromSeqValid := row.BranchSeq.Valid
+	switch row.Role {
+	case "assistant":
+	case "user":
+		forkFromTurnID = row.PreviousTurnID
+		forkFromTurnSeq = pgtype.Int8{Int64: 0, Valid: true}
+		if row.PreviousTurnID.Valid {
+			forkFromTurnSeq.Int64 = row.PreviousTurnSeq
+		}
+		forkFromSeq = 0
+		forkFromSeqValid = true
+		if row.PreviousBranchSeq.Valid {
+			forkFromSeq = row.PreviousBranchSeq.Int64
+		}
+	default:
+		return BranchGraph{}, ErrForkSourceUnsupported
 	}
 	branchID, err := s.queries.CreateSessionBranchFromMessage(ctx, sqlc.CreateSessionBranchFromMessageParams{
 		SessionID:         pgSessionID,
 		ParentBranchID:    row.BranchID,
 		ForkFromMessageID: row.ID,
-		ForkFromSeq:       pgtype.Int8{Int64: forkFromSeq, Valid: true},
+		ForkFromSeq:       pgtype.Int8{Int64: forkFromSeq, Valid: forkFromSeqValid},
+		ForkFromTurnID:    forkFromTurnID,
+		ForkFromTurnSeq:   forkFromTurnSeq,
 		Title:             pgtype.Text{},
 	})
 	if err != nil {
@@ -717,6 +735,12 @@ func toBranchNode(row sqlc.ListSessionBranchesRow) BranchNode {
 	if row.ForkFromSeq.Valid {
 		node.ForkFromSeq = row.ForkFromSeq.Int64
 	}
+	if row.ForkFromTurnID.Valid {
+		node.ForkFromTurnID = row.ForkFromTurnID.String()
+	}
+	if row.ForkFromTurnSeq.Valid {
+		node.ForkFromTurnSeq = row.ForkFromTurnSeq.Int64
+	}
 	return node
 }
 
@@ -776,18 +800,26 @@ func buildBranchTurns(branches []BranchNode, rows []sqlc.ListSessionBranchTurnMe
 			continue
 		}
 		branchID := row.BranchID.String()
-		seq := row.BranchSeq.Int64
+		seq := row.TurnSeq
 		branch := branchByID[branchID]
 		parentTurnID := lastTurnByBranch[branchID]
-		if parentTurnID == "" && strings.TrimSpace(branch.ParentBranchID) != "" && branch.ForkFromSeq > 0 {
-			parentTurnID = turnIDForBranchSeq(turnIDByBranchSeq, branch.ParentBranchID, branch.ForkFromSeq)
+		if parentTurnID == "" && strings.TrimSpace(branch.ParentBranchID) != "" {
+			parentTurnID = branch.ForkFromTurnID
+			if parentTurnID == "" && branch.ForkFromTurnSeq > 0 {
+				parentTurnID = turnIDForBranchSeq(turnIDByBranchSeq, branch.ParentBranchID, branch.ForkFromTurnSeq)
+			}
+		}
+		branchSeq := int64(0)
+		if row.BranchSeq.Valid {
+			branchSeq = row.BranchSeq.Int64
 		}
 		turn := BranchTurn{
-			ID:           row.AssistantID.String(),
+			ID:           row.TurnID.String(),
 			BranchID:     branchID,
 			ParentTurnID: parentTurnID,
 			AssistantID:  row.AssistantID.String(),
-			BranchSeq:    seq,
+			BranchSeq:    branchSeq,
+			TurnSeq:      seq,
 			Depth:        branchDepth(branchID),
 			Active:       branchID == activeBranchID,
 			Title:        branchTurnTitle(row),
@@ -797,7 +829,7 @@ func buildBranchTurns(branches []BranchNode, rows []sqlc.ListSessionBranchTurnMe
 				MessageID:     row.AssistantID.String(),
 				Timestamp:     dbpkg.TimeFromPg(row.AssistantCreatedAt),
 			},
-			ForkFromSeq: branch.ForkFromSeq,
+			ForkFromSeq: branch.ForkFromTurnSeq,
 			CreatedAt:   dbpkg.TimeFromPg(row.AssistantCreatedAt),
 		}
 		if row.UserID.Valid {
@@ -830,6 +862,9 @@ func firstNonEmpty(existing, next string) string {
 }
 
 func branchTurnTitle(row sqlc.ListSessionBranchTurnMessagesRow) string {
+	if text := strings.TrimSpace(dbpkg.TextToString(row.Title)); text != "" {
+		return summarizeTitleText(text)
+	}
 	userText := previewTextFromMessage(row.UserContent, row.UserDisplayText)
 	if userText != "" {
 		return summarizeTitleText(userText)

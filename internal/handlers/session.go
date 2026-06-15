@@ -382,7 +382,7 @@ func (h *SessionHandler) ListBranches(c echo.Context) error {
 }
 
 // ForkBranch godoc
-// @Summary Fork a session branch from an assistant message
+// @Summary Fork a session branch from a message
 // @Tags sessions
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
@@ -578,7 +578,7 @@ func branchServiceError(err error) error {
 	case errors.Is(err, session.ErrForkMessageNotFound),
 		errors.Is(err, session.ErrBranchNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
-	case errors.Is(err, session.ErrForkSourceNotAssistant):
+	case errors.Is(err, session.ErrForkSourceUnsupported):
 		return echo.NewHTTPError(http.StatusConflict, err.Error())
 	case strings.Contains(err.Error(), "invalid "):
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())

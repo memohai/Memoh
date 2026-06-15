@@ -142,6 +142,8 @@ type BotHistoryMessage struct {
 	SessionID               sql.NullString `json:"session_id"`
 	BranchID                sql.NullString `json:"branch_id"`
 	BranchSeq               sql.NullInt64  `json:"branch_seq"`
+	TurnID                  sql.NullString `json:"turn_id"`
+	TurnMessageSeq          sql.NullInt64  `json:"turn_message_seq"`
 	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
 	SenderAccountUserID     sql.NullString `json:"sender_account_user_id"`
 	SourceMessageID         sql.NullString `json:"source_message_id"`
@@ -180,6 +182,20 @@ type BotHistoryMessageCompact struct {
 	ModelID      sql.NullString `json:"model_id"`
 	StartedAt    string         `json:"started_at"`
 	CompletedAt  sql.NullString `json:"completed_at"`
+}
+
+type BotHistoryTurn struct {
+	ID                      string         `json:"id"`
+	SessionID               string         `json:"session_id"`
+	BranchID                string         `json:"branch_id"`
+	TurnSeq                 int64          `json:"turn_seq"`
+	RequestMessageID        sql.NullString `json:"request_message_id"`
+	FinalAssistantMessageID sql.NullString `json:"final_assistant_message_id"`
+	Status                  string         `json:"status"`
+	Title                   sql.NullString `json:"title"`
+	CreatedAt               string         `json:"created_at"`
+	UpdatedAt               string         `json:"updated_at"`
+	CompletedAt             sql.NullString `json:"completed_at"`
 }
 
 type BotPluginInstallation struct {
@@ -231,6 +247,8 @@ type BotSessionBranch struct {
 	ParentBranchID    sql.NullString `json:"parent_branch_id"`
 	ForkFromMessageID sql.NullString `json:"fork_from_message_id"`
 	ForkFromSeq       sql.NullInt64  `json:"fork_from_seq"`
+	ForkFromTurnID    sql.NullString `json:"fork_from_turn_id"`
+	ForkFromTurnSeq   sql.NullInt64  `json:"fork_from_turn_seq"`
 	Title             sql.NullString `json:"title"`
 	CreatedAt         string         `json:"created_at"`
 	UpdatedAt         string         `json:"updated_at"`

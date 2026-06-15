@@ -141,6 +141,8 @@ type BotHistoryMessage struct {
 	SessionID               pgtype.UUID        `json:"session_id"`
 	BranchID                pgtype.UUID        `json:"branch_id"`
 	BranchSeq               pgtype.Int8        `json:"branch_seq"`
+	TurnID                  pgtype.UUID        `json:"turn_id"`
+	TurnMessageSeq          pgtype.Int8        `json:"turn_message_seq"`
 	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
 	SenderAccountUserID     pgtype.UUID        `json:"sender_account_user_id"`
 	SourceMessageID         pgtype.Text        `json:"source_message_id"`
@@ -179,6 +181,20 @@ type BotHistoryMessageCompact struct {
 	ModelID      pgtype.UUID        `json:"model_id"`
 	StartedAt    pgtype.Timestamptz `json:"started_at"`
 	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
+}
+
+type BotHistoryTurn struct {
+	ID                      pgtype.UUID        `json:"id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
+	BranchID                pgtype.UUID        `json:"branch_id"`
+	TurnSeq                 int64              `json:"turn_seq"`
+	RequestMessageID        pgtype.UUID        `json:"request_message_id"`
+	FinalAssistantMessageID pgtype.UUID        `json:"final_assistant_message_id"`
+	Status                  string             `json:"status"`
+	Title                   pgtype.Text        `json:"title"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+	CompletedAt             pgtype.Timestamptz `json:"completed_at"`
 }
 
 type BotPluginInstallation struct {
@@ -230,6 +246,8 @@ type BotSessionBranch struct {
 	ParentBranchID    pgtype.UUID        `json:"parent_branch_id"`
 	ForkFromMessageID pgtype.UUID        `json:"fork_from_message_id"`
 	ForkFromSeq       pgtype.Int8        `json:"fork_from_seq"`
+	ForkFromTurnID    pgtype.UUID        `json:"fork_from_turn_id"`
+	ForkFromTurnSeq   pgtype.Int8        `json:"fork_from_turn_seq"`
 	Title             pgtype.Text        `json:"title"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`

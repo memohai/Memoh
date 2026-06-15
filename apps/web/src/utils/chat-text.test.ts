@@ -1,17 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatMessage } from '@/store/chat-list'
-import { canForkMessage, cleanUserText, getMessageCopyText } from './chat-text'
+import { canRewriteRequest, cleanUserText, getMessageCopyText } from './chat-text'
 
 const ASSISTANT_MESSAGE_ID = '11111111-1111-4111-8111-111111111111'
+const USER_MESSAGE_ID = '22222222-2222-4222-8222-222222222222'
 
-function userMessage(text: string): ChatMessage {
+function userMessage(text: string, options: { id?: string; serverId?: string; streaming?: boolean } = {}): ChatMessage {
   return {
-    id: 'user-1',
+    id: options.id ?? 'user-1',
+    serverId: options.serverId,
     role: 'user',
     text,
     attachments: [],
     timestamp: '2026-01-01T00:00:00Z',
-    streaming: false,
+    streaming: options.streaming ?? false,
     isSelf: true,
   }
 }
@@ -59,21 +61,15 @@ describe('chat text actions', () => {
     expect(getMessageCopyText(message)).toBe('First block\n\nSecond block')
   })
 
-  it('allows fork only for non-streaming assistant messages with text', () => {
-    expect(canForkMessage(assistantMessage([{ type: 'text', content: 'reply' }]))).toBe(true)
-    expect(canForkMessage(assistantMessage([{ type: 'text', content: 'reply' }], true))).toBe(false)
-    expect(canForkMessage(assistantMessage([{ type: 'reasoning', content: 'thinking' }]))).toBe(false)
-    expect(canForkMessage(userMessage('hello'))).toBe(false)
+  it('allows rewrite only for non-streaming persisted user requests with text', () => {
+    expect(canRewriteRequest(userMessage('hello', { id: USER_MESSAGE_ID }))).toBe(true)
+    expect(canRewriteRequest(userMessage('hello', { id: 'user-1', serverId: USER_MESSAGE_ID }))).toBe(true)
+    expect(canRewriteRequest(userMessage('hello', { id: USER_MESSAGE_ID, streaming: true }))).toBe(false)
+    expect(canRewriteRequest(userMessage('[attachment:file] notes.txt', { id: USER_MESSAGE_ID }))).toBe(false)
+    expect(canRewriteRequest(assistantMessage([{ type: 'text', content: 'reply' }]))).toBe(false)
   })
 
-  it('requires a persisted message id before showing fork', () => {
-    expect(canForkMessage(assistantMessage([{ type: 'text', content: 'reply' }], false, {
-      id: 'assistant-1',
-    }))).toBe(false)
-
-    expect(canForkMessage(assistantMessage([{ type: 'text', content: 'reply' }], false, {
-      id: 'assistant-1',
-      serverId: ASSISTANT_MESSAGE_ID,
-    }))).toBe(true)
+  it('requires a persisted message id before showing rewrite', () => {
+    expect(canRewriteRequest(userMessage('hello', { id: 'user-1' }))).toBe(false)
   })
 })

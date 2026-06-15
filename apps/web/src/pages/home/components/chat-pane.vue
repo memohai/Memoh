@@ -83,7 +83,11 @@
                   :on-reply-click="handleReplyJump"
                   :is-scrolling="isScrolling"
                   :is-last-message="index === messages.length - 1"
+                  :copied="copiedMessageId === msg.id"
+                  :can-rewrite="canRewriteMessage(msg.id)"
                   @active="isActiveEl"
+                  @copy-message="handleCopyMessage"
+                  @rewrite-request="handleRewriteRequest"
                 />
               </div>
             </div>
@@ -742,6 +746,9 @@ import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { acpAgentIcon, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID } from '@/utils/acp'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { canRewriteRequest, cleanUserText, getMessageCopyText, persistentMessageId } from '@/utils/chat-text'
+import { useClipboard } from '@/composables/useClipboard'
+import { toast } from '@memohai/ui'
 
 interface PendingUserInputDraft {
   optionIds: string[]
@@ -963,6 +970,7 @@ onBeforeUnmount(() => {
 })
 
 const composerError = ref('')
+const copiedMessageId = ref('')
 const pendingUserInputDrafts = ref<Record<string, PendingUserInputDraft>>({})
 const modelPopoverOpen = ref(false)
 const agentPopoverOpen = ref(false)
@@ -990,6 +998,27 @@ const {
 } = storeToRefs(chatStore)
 
 const isActive = computed(() => props.active !== false)
+const { copyText } = useClipboard()
+let copiedMessageTimer: ReturnType<typeof setTimeout> | null = null
+
+const latestRewriteableRequest = computed(() => {
+  if (streaming.value || activeChatReadOnly.value) return null
+  const assistantIndex = lastVisibleMessageIndexByRole('assistant')
+  if (assistantIndex <= 0) return null
+  const assistant = messages.value[assistantIndex]
+  const user = messages.value[assistantIndex - 1]
+  if (!assistant || !user) return null
+  if (assistant.role !== 'assistant' || user.role !== 'user') return null
+  if (assistant.streaming || !canRewriteRequest(user)) return null
+  return user
+})
+
+function lastVisibleMessageIndexByRole(role: 'user' | 'assistant' | 'system') {
+  for (let index = messages.value.length - 1; index >= 0; index--) {
+    if (messages.value[index]?.role === role) return index
+  }
+  return -1
+}
 
 // A fresh, writable chat opens with the composer centred and a greeting above
 // it. Read-only sessions (subagent / system / synced channel threads) hide the
@@ -1610,6 +1639,10 @@ onBeforeUnmount(() => {
   composerSizeObserver = null
   composerHeightAnim?.cancel()
   composerHeightAnim = null
+  if (copiedMessageTimer) {
+    clearTimeout(copiedMessageTimer)
+    copiedMessageTimer = null
+  }
 })
 
 onDeactivated(() => {
@@ -1826,6 +1859,40 @@ function scrollViewportTo(getTop: () => number) {
   const root = scrollEl.value
   if (!root) return
   startScrollTween(root, getTop)
+}
+
+async function handleCopyMessage(messageId: string) {
+  const message = messages.value.find(item => item.id === messageId || persistentMessageId(item) === messageId)
+  if (!message) return
+  const text = getMessageCopyText(message)
+  if (!text) return
+  if (await copyText(text)) {
+    copiedMessageId.value = message.id
+    if (copiedMessageTimer) clearTimeout(copiedMessageTimer)
+    copiedMessageTimer = setTimeout(() => {
+      if (copiedMessageId.value === message.id) copiedMessageId.value = ''
+      copiedMessageTimer = null
+    }, 1600)
+    return
+  }
+  toast.error(t('chat.copyFailed'))
+}
+
+async function handleRewriteRequest(messageId: string) {
+  const message = messages.value.find(item => item.id === messageId || persistentMessageId(item) === messageId)
+  if (!message || message.role !== 'user') return
+  const text = cleanUserText(message.text)
+  if (!text) return
+  const result = await chatStore.rewriteRequest(messageId)
+  if (!result.ok) return
+  inputText.value = text
+  saveInputDraft(inputDraftKey.value, text)
+  pendingFiles.value = []
+}
+
+function canRewriteMessage(messageId: string) {
+  const latest = latestRewriteableRequest.value
+  return !!latest && (latest.id === messageId || persistentMessageId(latest) === messageId)
 }
 
 function scrollToBottom() {

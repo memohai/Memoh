@@ -6474,7 +6474,7 @@ const docTemplate = `{
                 "tags": [
                     "sessions"
                 ],
-                "summary": "Fork a session branch from an assistant message",
+                "summary": "Fork a session branch from a message",
                 "parameters": [
                     {
                         "type": "string",
@@ -18189,6 +18189,12 @@ const docTemplate = `{
                 "fork_from_seq": {
                     "type": "integer"
                 },
+                "fork_from_turn_id": {
+                    "type": "string"
+                },
+                "fork_from_turn_seq": {
+                    "type": "integer"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -18244,6 +18250,9 @@ const docTemplate = `{
                 },
                 "title": {
                     "type": "string"
+                },
+                "turn_seq": {
+                    "type": "integer"
                 },
                 "user_message_id": {
                     "type": "string"

@@ -62,6 +62,7 @@ type PersistInput struct {
 	BotID                   string
 	SessionID               string
 	BranchID                string
+	TurnID                  string
 	SenderChannelIdentityID string
 	SenderUserID            string
 	ExternalMessageID       string

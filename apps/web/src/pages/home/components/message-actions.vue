@@ -44,7 +44,7 @@
             size="icon-sm"
             :class="actionIconClass"
             :aria-label="copyLabel"
-            @click="handleCopy"
+            @click="$emit('copy')"
           >
             <CheckDrawIcon
               v-if="copied"
@@ -60,6 +60,42 @@
         </TooltipTrigger>
         <TooltipContent side="bottom">
           {{ copyLabel }}
+        </TooltipContent>
+      </Tooltip>
+
+      <Tooltip v-if="canRewriteAction">
+        <TooltipTrigger as-child>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            :class="actionIconClass"
+            :aria-label="t('chat.actions.edit')"
+            @click="$emit('rewrite')"
+          >
+            <PencilLine class="size-[18px]" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          {{ t('chat.actions.edit') }}
+        </TooltipContent>
+      </Tooltip>
+
+      <Tooltip v-if="canForkAction">
+        <TooltipTrigger as-child>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            :class="actionIconClass"
+            :aria-label="t('chat.actions.fork')"
+            @click="$emit('fork')"
+          >
+            <GitFork class="size-[18px]" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          {{ t('chat.actions.fork') }}
         </TooltipContent>
       </Tooltip>
 
@@ -99,11 +135,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import CopyConnectedIcon from './copy-connected-icon.vue'
 import CheckDrawIcon from './check-draw-icon.vue'
 import DotsIcon from './dots-icon.vue'
+import { GitFork, PencilLine } from 'lucide-vue-next'
 import {
   Button,
   Tooltip,
@@ -115,7 +152,6 @@ import {
   DropdownMenuContent,
   DropdownMenuLabel,
 } from '@memohai/ui'
-import { useClipboard } from '@/composables/useClipboard'
 
 const props = defineProps<{
   copyText: string
@@ -125,10 +161,18 @@ const props = defineProps<{
   persistent?: boolean
   streaming?: boolean
   align?: 'start' | 'end'
+  copied?: boolean
+  canFork?: boolean
+  canRewrite?: boolean
 }>()
 
 const { t } = useI18n()
-const { copyText: writeClipboard } = useClipboard()
+
+defineEmits<{
+  copy: []
+  fork: []
+  rewrite: []
+}>()
 
 // Rest tint sits just shy of the muted text — nudged ~15% toward the body
 // foreground so the icons read a touch more present than plain muted-foreground,
@@ -136,16 +180,8 @@ const { copyText: writeClipboard } = useClipboard()
 const actionIconClass
   = 'text-[color-mix(in_oklab,var(--muted-foreground),var(--foreground)_15%)] hover:text-foreground'
 
-const copied = ref(false)
-let resetTimer: ReturnType<typeof setTimeout> | null = null
-
+const copied = computed(() => props.copied === true)
+const canForkAction = computed(() => props.canFork === true)
+const canRewriteAction = computed(() => props.canRewrite === true)
 const copyLabel = computed(() => (copied.value ? t('chat.actions.copied') : t('chat.actions.copy')))
-
-async function handleCopy() {
-  const ok = await writeClipboard(props.copyText)
-  if (!ok) return
-  copied.value = true
-  if (resetTimer) clearTimeout(resetTimer)
-  resetTimer = setTimeout(() => { copied.value = false }, 1500)
-}
 </script>
