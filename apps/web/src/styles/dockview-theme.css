@@ -67,7 +67,10 @@
   --tab-top-inset: 0.1875rem;
   --tab-gap: var(--radius-sm);
   --tab-flare: var(--tab-gap);
-
+  /* Shared timing for inactive-tab hover fill + close-fade (workspace-tab.vue). */
+  --tab-hover-duration: 150ms;
+  /* How far the inactive hover colour layer sits below a flush-top fill (subpixel ok). */
+  --tab-hover-fill-offset: 0.5px;
   /* ONE stroke colour for the whole dock outline — the strip's bottom hairline, the
    * active tab's crown/side border, and the fillet-foot ring. It MUST be opaque, yet
    * it must also read as the SAME line as the rest of the app's dividers (the sidebar's
@@ -144,6 +147,37 @@
   border: 1px solid transparent;
   border-bottom: none;
   --tab-hover-bg: var(--surface-chrome-hover);
+  --tab-hover-fill-top: 0;
+}
+
+/* Inactive tabs: the hover COLOUR lives on ::before (see below), not on the tab box.
+ * Text stays put; only the fill layer's top edge sits 1px lower to match the active
+ * tab's crown stroke optically. --tab-hover-fill-top tells close-fade where that layer
+ * starts (workspace-tab.vue). */
+.dockview-theme-memoh .dv-tab:not(.dv-active-tab) {
+  --tab-hover-fill-top: var(--tab-hover-fill-offset);
+}
+
+.dockview-theme-memoh .dv-tab:not(.dv-active-tab)::before {
+  content: '';
+  position: absolute;
+  top: var(--tab-hover-fill-offset);
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 0;
+  border-top-left-radius: var(--radius-sm);
+  border-top-right-radius: var(--radius-sm);
+  background-color: var(--surface-chrome-hover);
+  opacity: 0;
+  /* Instant hide when hover ends (e.g. after switching tabs) — only fade IN. */
+  transition: none;
+  pointer-events: none;
+}
+
+.dockview-theme-memoh .dv-tab:not(.dv-active-tab):hover::before {
+  opacity: 1;
+  transition: opacity var(--tab-hover-duration) ease-out;
 }
 
 /* Space between adjacent tabs — separation is breathing room, not a divider line
@@ -185,38 +219,26 @@
   display: none;
 }
 
-/* Active AND hovered tabs share ONE silhouette — full-height crown + the bottom
- * fillet feet (::before below) — so a hover never looks like a different, smaller
- * shape sitting next to the selected tab. The ONLY thing that differs is the fill,
- * carried by --tab-surface:
- *   · active  → editor surface (continuous with the pane below; selection)
- *   · hover   → chrome-hover lift (a brighter chip sitting on the strip)
- * Both wear the same --dock-stroke crown/side stroke, and the same fillet-foot ring
- * (::before), so the concentric crown↔foot geometry and every margin are identical
- * by construction. The bottom is left open; the foot curve carries the stroke down
- * to the bar, so the outline reads as one continuous line: bar → left foot → up the
- * crown → down the right foot → bar (Chrome).
- *
- * No transition here: the fillet (a radial-gradient mask) cannot tween, so the fill
- * is switched instantly to stay in lock-step with its feet (a fading fill would
- * detach from the popped-in feet — the old "blocky fill" artefact). */
+/* Active tab = the full Chrome silhouette: editor-surface fill (continuous with the
+ * pane below), a --dock-stroke crown/side stroke, and the bottom fillet feet
+ * (::before) that curve down into the bar. It ALONE wears the 倒角 — selection is a
+ * physical "grafted onto the pane" shape. The crown is rounded; the bottom is left
+ * open so the fill bleeds into the pane and the feet carry the stroke down to the bar
+ * (outline reads as one line: bar → left foot → up the crown → down the right foot). */
 .dockview-theme-memoh .dv-tab.dv-active-tab {
-  --tab-surface: var(--surface-editor);
-}
-.dockview-theme-memoh .dv-tab:not(.dv-active-tab):hover {
-  --tab-surface: var(--surface-chrome-hover);
-}
-.dockview-theme-memoh .dv-tab.dv-active-tab,
-.dockview-theme-memoh .dv-tab:not(.dv-active-tab):hover {
-  /* !important only matters for the hover case — dockview pins an inactive tab's
-   * background to transparent; the active tab is already this colour via its own
-   * --dv-* vars, so the declaration is harmless there. */
-  background-color: var(--tab-surface) !important;
+  background-color: var(--surface-editor);
   border-top-color: var(--dock-stroke);
   border-left-color: var(--dock-stroke);
   border-right-color: var(--dock-stroke);
-  /* The close-fade blots the title with the surface the tab actually wears. */
-  --tab-hover-bg: var(--tab-surface);
+  /* The active tab never takes the hover lift, so its blot-out colour is the
+   * editor surface it already wears. */
+  --tab-hover-bg: var(--surface-editor);
+}
+
+/* Hover on an UNSELECTED tab: tab box stays transparent; the chrome-hover fill is
+ * painted by ::before (top: --tab-hover-fill-offset → bottom). Text does not move. */
+.dockview-theme-memoh .dv-tab:not(.dv-active-tab):hover {
+  background-color: transparent !important;
 }
 
 /* Bottom flare = a CONCAVE fillet (倒角), not a bump. A single pseudo spans
@@ -227,11 +249,9 @@
  * the same negative curve Chrome uses to seat a tab on its toolbar. (Filling the
  * disc instead of carving it would bulge two convex "circles" out of the corners,
  * which is the opposite of a fillet.) dockview leaves ::before unused (it only
- * styles ::after on :focus), so this is a clean slot. Shared by the active tab and a
- * hovered inactive tab — same feet, same ring — with --tab-surface deciding the fill
- * (editor vs chrome-hover), so both silhouettes are byte-for-byte the same shape. */
-.dockview-theme-memoh .dv-tab.dv-active-tab::before,
-.dockview-theme-memoh .dv-tab:not(.dv-active-tab):hover::before {
+ * styles ::after on :focus), so this is a clean slot. ACTIVE-ONLY: a hover is a plain
+ * rounded rectangle (above), never these feet. */
+.dockview-theme-memoh .dv-tab.dv-active-tab::before {
   content: '';
   position: absolute;
   bottom: 0;
@@ -247,9 +267,9 @@
    *     over the bottom strip so the crown's side borders don't leave a stray
    *     vertical nub in the foot zone (the stroke there is the curve, not a line). */
   background:
-    radial-gradient(circle at top left, transparent calc(var(--tab-flare) - 1px), var(--dock-stroke) calc(var(--tab-flare) - 1px), var(--dock-stroke) var(--tab-flare), var(--tab-surface) calc(var(--tab-flare) + 0.5px)) left bottom / var(--tab-flare) var(--tab-flare) no-repeat,
-    radial-gradient(circle at top right, transparent calc(var(--tab-flare) - 1px), var(--dock-stroke) calc(var(--tab-flare) - 1px), var(--dock-stroke) var(--tab-flare), var(--tab-surface) calc(var(--tab-flare) + 0.5px)) right bottom / var(--tab-flare) var(--tab-flare) no-repeat,
-    linear-gradient(var(--tab-surface), var(--tab-surface)) center bottom / calc(100% - 2 * var(--tab-flare)) 100% no-repeat;
+    radial-gradient(circle at top left, transparent calc(var(--tab-flare) - 1px), var(--dock-stroke) calc(var(--tab-flare) - 1px), var(--dock-stroke) var(--tab-flare), var(--surface-editor) calc(var(--tab-flare) + 0.5px)) left bottom / var(--tab-flare) var(--tab-flare) no-repeat,
+    radial-gradient(circle at top right, transparent calc(var(--tab-flare) - 1px), var(--dock-stroke) calc(var(--tab-flare) - 1px), var(--dock-stroke) var(--tab-flare), var(--surface-editor) calc(var(--tab-flare) + 0.5px)) right bottom / var(--tab-flare) var(--tab-flare) no-repeat,
+    linear-gradient(var(--surface-editor), var(--surface-editor)) center bottom / calc(100% - 2 * var(--tab-flare)) 100% no-repeat;
 }
 
 .dockview-theme-memoh .dv-right-actions-container,

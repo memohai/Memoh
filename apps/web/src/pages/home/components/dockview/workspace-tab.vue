@@ -1,6 +1,6 @@
 <template>
   <div
-    class="group/tab relative flex h-full min-w-0 items-center pl-4 pr-4"
+    class="group/tab relative z-[1] flex h-full min-w-0 items-center pl-4 pr-4"
     @auxclick.middle.prevent="close"
   >
     <!-- Active state is signalled by text color (and the CSS top-accent on the
@@ -26,7 +26,7 @@
          it instead of colliding with the glyph. -->
     <div
       v-if="isDirty"
-      class="close-fade pointer-events-none absolute inset-y-0 right-0 flex items-center pl-6 pr-2 opacity-100 transition-opacity duration-150 ease-out group-hover/tab:opacity-0"
+      class="close-fade pointer-events-none absolute right-0 flex items-center pl-6 pr-2 opacity-100 group-hover/tab:opacity-0"
     >
       <span class="flex size-5 items-center justify-center">
         <span
@@ -42,7 +42,7 @@
          button. The fade layer is click-through; only the button takes pointer
          events. Keyboard focus reveals it for a11y; middle-click closes without it. -->
     <div
-      class="close-fade pointer-events-none absolute inset-y-0 right-0 flex items-center pl-6 pr-2 opacity-0 transition-opacity duration-150 ease-out group-hover/tab:opacity-100 focus-within:opacity-100"
+      class="close-fade pointer-events-none absolute right-0 flex items-center pl-6 pr-2 opacity-0 group-hover/tab:opacity-100 focus-within:opacity-100"
     >
       <!-- No own hover fill: the close affordance is read through the left→right
            fade (which already paints the chip's hover surface) plus the icon
@@ -131,13 +131,20 @@ onBeforeUnmount(() => {
  * composites to exactly what the tab shows — chrome+overlay on hover, plain editor
  * when active (the opaque top layer hides the base) — but never see-through. */
 .close-fade {
+  top: var(--tab-hover-fill-top, 0);
+  bottom: 0;
+  /* Instant hide when hover ends — avoids white/grey close-fade lingering on a tab
+   * you just switched away from. Fade-in only while the tab group is hovered. */
+  transition: none;
   background:
     linear-gradient(to right, transparent, var(--tab-hover-bg, var(--surface-editor)) 1rem),
     linear-gradient(to right, transparent, var(--surface-chrome) 1rem);
-  /* The blot is full-height (inset-y-0), matching the tab silhouette: only the TOP-right
-   * corner is rounded to the crown radius; the bottom stays square because the tab's
-   * bottom is square too (its feet are the external ::before flare, not a rounded corner).
-   * Rounding the bottom here would carve a notch out of the fill above the feet. */
+  /* Full-height. Only the TOP-right corner is rounded, to the crown radius. */
   border-top-right-radius: var(--radius-sm);
+}
+
+.group\/tab:hover .close-fade,
+.group\/tab:focus-within .close-fade {
+  transition: opacity var(--tab-hover-duration, 150ms) ease-out;
 }
 </style>
