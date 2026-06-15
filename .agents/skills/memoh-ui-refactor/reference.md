@@ -151,6 +151,107 @@ const { view, direction, openDetail, backToList } = useViewSwap()
 `back` (reverse). Keyframes live in `style.css`; no `appear`, so landing on the page is a
 plain cut and only the swap moves.
 
+### Dividers — two widths, two jobs
+
+- **Inset (rows inside a card).** The border lives on the horizontally-margined row, not the
+  card: `mx-4 … border-b border-border py-3 last:border-b-0`. The `mx-4` is what keeps the
+  hairline from touching the card's left/right edges; `last:border-b-0` drops it on the final
+  row. This is the `SettingsRow` behavior — reuse the component; only hand-roll it for a
+  bespoke row, matching the same `mx-4`/`last:` rules.
+- **Full-bleed (structural splits).** A Dialog header/footer band uses `border-b/t border-border
+  px-6 py-…` so the line spans the full dialog width while the content keeps `px-6` inside. A
+  section heading underline (`border-b border-border pb-2`) and a standalone `<Separator>` are
+  likewise edge-to-edge.
+
+Picking inset-vs-full-bleed wrong is the tell: a full-bleed line inside a settings card slices
+the rounded surface into stacked tiles; an inset line in a Dialog header looks like a floating
+stub. Ask "separating items within one surface, or splitting the container?" before placing it.
+
+### Save model & toast (Profile = auto-save; Tool Approval = manual)
+
+- **Auto-save, silent (the default for settings).** `profile/index.vue` is the reference:
+  edits fire a debounced/triggered `autoSaveProfile()`, success shows **no toast**, and on
+  failure it toasts the error *and rolls the optimistic local edit back* to re-match the
+  server. It also guards out-of-order responses with a monotonic save token. Copy this shape
+  for toggle/select/single-field settings.
+- **Manual Save (only when a deliberate commit is warranted).** A real form, a batch of risky
+  changes, or anything the user should review-then-commit keeps an explicit Save button with a
+  `hasChanges` gate; a single success toast on click is acceptable there.
+- **Never** toast on ambient/automatic/background changes, and never one toast per keystroke.
+  Errors always surface; success is acknowledged only for explicit actions.
+
+### Dark mode & narrow-screen checklist
+
+> **No mechanical net for app pages.** `scripts/check-ui-contract.mjs` (run by `mise run lint`)
+> is scoped to `packages/ui` only — `apps/web` pages are explicitly out of scope, and there is
+> no ESLint color rule. A hardcoded color in a page is caught by **nothing**; lint passes and
+> the page ships broken in dark. This checklist is the only defense — run it every time.
+
+- Pre-ship grep (copy-paste): from the page's dir, search for
+  `bg-white|bg-black|text-white|text-black|-gray-|-zinc-|-slate-|-neutral-|#[0-9a-fA-F]{3,6}|dark:|style=` —
+  every hit is guilty until proven a sanctioned exception. The only allowed `bg-white` is a
+  physical knob (Switch/Slider thumb). Replace the rest with `bg-card` / `bg-background` /
+  `text-foreground` / `text-muted-foreground` / `border-border` / `bg-accent`.
+- A `dark:` override means you started from a raw light color — fix the base token, don't patch
+  per-mode. Themed tokens need no `dark:` prefix.
+- **Tints/interaction states use the overlay ladder, not a baked color or alpha hack.** It is
+  chroma-0 and composites over the surface, so it's identical in light/dark/every scheme with no
+  override. Aliases: `--ui-hover` (standard hover), `--ui-selected` (highlight/selected row),
+  `--ui-pressed` (press), `--sidebar-hover` / `--btn-ghost-hover`; raw rungs `--overlay-hover-light`
+  → `--overlay-hover` → `--overlay-hover-strong` → `--overlay-active` → `--overlay-active-strong`.
+  `bg-accent` is the mapped neutral hover. Use these instead of `hover:bg-gray-100`, `bg-black/5`,
+  or a solid tint. (Defined in `packages/ui/AGENTS.md` § Color.)
+- Then **actually flip the running app to dark and look at the page** (Appearance has the theme
+  toggle). Reading the classes is not enough; render it.
+- Charts/canvas can't read oklch tokens — reuse the `readColor()` token→sRGB round-trip from
+  `bot-overview.vue` / `usage/index.vue`, and re-run it on `isDark` change.
+- Reflow, don't overflow: every multi-column grid needs a `grid-cols-1` (or `grid-cols-2`)
+  base with `sm:`/`md:` step-ups; verify same-row clusters (search+button, label+control)
+  don't clip at the narrowest resizable pane width — Chinese copy is wider, so narrow + `zh`
+  is the worst case.
+- Note (open debt, from `packages/ui/AGENTS.md`): the dark-mode accent palette currently
+  inherits light values — don't assume an accent is dark-tuned; check it.
+
+### i18n & bilingual layout
+
+- Every user-facing string is a key in `apps/web/src/i18n/locales/en.json` **and** `zh.json`;
+  no hardcoded text (`apps/web/AGENTS.md` enforces this). Add both locales in the same change.
+- The two languages have different metrics: Chinese is wider/denser per glyph, English is
+  longer. Design for the longer/wider of the two — give labels room to wrap or truncate, don't
+  pin a width that only fits English. Eyeball the page in both locales (the Appearance page has
+  the language switch); a layout that's only checked in one language is half-checked.
+
+### Loading-state stability (no jump on load)
+
+- Skeletons match the *shape* of the final content: `profile/index.vue` renders a skeleton card
+  of rows sized like the real rows, so the swap to data doesn't resize the card.
+- Reserve height up front: the reference pages put `min-h-[3.75rem]` on rows and fixed heights on
+  async blocks "so a cold load doesn't make the block jump." A section must not pop in larger or
+  smaller than its placeholder.
+- Not-yet-sampled values render `—`, never a faked `0` (see `bot-overview.vue` runtime tiles).
+
+### Scroll ownership
+
+- The desktop shell locks `body` overflow. A page that must scroll owns its container
+  (`h-dvh overflow-y-auto`, as the dev wall does); settings pages scroll inside the section's
+  existing scroll area — don't add a second one.
+- Sideways-nudge transforms (the ±24px list↔detail swap) clip with `overflow-x-clip`, **not**
+  `overflow-x-hidden` (which becomes a vertical scroll container and steals scroll from the
+  ancestor). See `swap-transition.vue`.
+
+### Destructive & confirmation
+
+- Filled `<Button variant="destructive">` + a confirm step (`ConfirmPopover` for inline,
+  a Dialog for heavier deletes). Profile's sign-out and the danger zone are the references.
+- Truly dangerous actions group in a danger card at the bottom of the page, not inline among
+  routine settings.
+
+### Virtualization
+
+- Lists/choosers that can grow unbounded (sessions/recents, model picker, searchable selects)
+  virtualize — there are existing virtualized implementations to reuse. A plain `v-for` over an
+  unbounded list is a perf regression waiting for real data.
+
 ## Dirty → clean diagnostic table
 
 Each left-column pattern is a real sin from `bot-tool-approval.vue` (and friends). When you
@@ -170,6 +271,15 @@ see it, replace it with the right column. This is your strip-list when refactori
 | sticky `bg-background/95 backdrop-blur` "sovereign header" | invented page chrome | the plain page-shell `h1` + a save action where it belongs |
 | `"+"` / `"×"` glyphs, hand-rolled icon hover bg, hand-rolled tooltip | not real components; can't receive size/stroke tokens | lucide components in `<Button size="icon">`; `@memohai/ui` `Tooltip` |
 | `Transition name="fade"` + ad-hoc `transition-all duration-300` | lazy catch-all motion | the directional swap / token durations; transition the real property |
+| edge-to-edge `border-b` slicing a card into stacked tiles | wrong divider width inside a surface | inset the row (`mx-4` + `last:border-b-0`); full-bleed only for structural bands |
+| success toast on every settings tweak / auto-save | toast spam, reads as nagging | auto-save silently; toast only explicit actions + errors |
+| raw color in an app page (`bg-white`, `text-black`, `-gray-*`, `#fff`, `dark:`) | breaks dark mode; **no lint catches it in `apps/web`** | semantic token (`bg-card`/`text-foreground`/…); grep + flip-to-dark before shipping |
+| hand-mixed gray / alpha for a hover/selected tint (`hover:bg-gray-100`, `bg-black/5`) | not theme/scheme-agnostic; can tilt or break in dark | the neutral overlay ladder (`--ui-hover`/`--ui-selected`/`--overlay-*`, or `bg-accent`) |
+| hardcoded user-facing text | breaks i18n; only checked in one language | i18n key in both `en.json` + `zh.json`; design for the wider/longer locale |
+| section pops in a different size than its skeleton/placeholder | layout jump on load | skeleton matches final shape; reserve `min-h`; `—` not faked `0` |
+| stray `overflow-*` / `overflow-x-hidden` on a swapped pane | nested scrollbar or stolen ancestor scroll | own scroll only when intended; `overflow-x-clip` for sideways-nudge |
+| one-click delete, or ghost button + `text-destructive` | unconfirmed/under-weighted destruction | filled `variant="destructive"` + confirm step; danger card at the bottom |
+| always-present "Status: OK" / healthy-state row | noise where a healthy state should say nothing | progressive disclosure — show only when actionable, hide the whole block otherwise |
 
 ## Component picker
 
