@@ -22,6 +22,12 @@ interface FakePanel {
   component: string
   params: Record<string, unknown>
   title: string
+  group?: {
+    api: {
+      setActivePanel: (panel: FakePanel) => void
+      setActive: () => void
+    }
+  }
   api: {
     setActive: () => void
     close: () => void
@@ -71,6 +77,14 @@ function createFakeDock() {
           get title() {
             return panel.title
           },
+        },
+      }
+      panel.group = {
+        api: {
+          setActivePanel: (nextPanel: FakePanel) => {
+            activePanel = nextPanel
+          },
+          setActive: () => {},
         },
       }
       panels.push(panel)
@@ -148,6 +162,20 @@ describe('workspace layout store', () => {
 
     store.setChatTitle('Renamed')
     expect(dock.getPanel('chat')?.title).toBe('Renamed')
+  })
+
+  it('opens multiple schedule panels and focuses an existing schedule', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSchedule('schedule-a', 'Morning')
+    store.openSchedule('schedule-b', 'Evening')
+    store.openSchedule('schedule-a', 'Morning renamed')
+
+    expect(dock.panels.filter((p) => p.component === 'schedule')).toHaveLength(2)
+    expect(dock.activePanel?.id).toBe('schedule:schedule-a')
+    expect(dock.getPanel('schedule:schedule-a')?.title).toBe('Morning renamed')
   })
 
   it('tracks file dirty state without mangling the tab title', () => {
