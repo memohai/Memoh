@@ -14,11 +14,10 @@
          human-conversation stream (chat/discuss/agent) ordered by recency, so
          per-row type icons and clock stamps only added noise. The title runs to
          the trailing edge; the actions button overlays its tail on hover. -->
-    <!-- Title runs are split CJK vs Latin so each script takes a balanced weight
-         (.sidebar-cjk / .sidebar-latin in style.css) — MiSans reads heavier than
-         Inter at the same number, so one weight makes the English look thin. Weight
-         only; the title is a static one-line label, so no streaming and no prose
-         size/tracking compensation. -->
+    <!-- Title runs are split CJK vs Latin so the title renders with the SAME
+         per-script treatment as the chat body (.sidebar-cjk / .sidebar-latin reuse
+         the --chat-*-body weight + Latin size/tracking). The only thing dropped vs
+         the body is streaming — a title is a static one-line label. -->
     <span class="flex-1 min-w-0 truncate text-control text-foreground dark:text-[color:oklch(0.92_0_0)]"><span
       v-for="(run, i) in titleRuns"
       :key="i"
@@ -65,7 +64,7 @@
             {{ t('common.rename') }}
           </DropdownMenuItem>
           <DropdownMenuItem
-            class="text-destructive focus:text-destructive"
+            variant="destructive"
             @select="$emit('delete', session)"
           >
             <Trash2 class="mr-2 size-3.5" />

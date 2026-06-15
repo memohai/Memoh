@@ -184,7 +184,7 @@ function onCheckbox(checked: boolean | 'indeterminate') {
       <ContextMenuSeparator v-if="canWrite" />
       <ContextMenuItem
         v-if="canWrite"
-        class="text-destructive focus:text-destructive"
+        variant="destructive"
         @select="tree.requestDelete(entry)"
       >
         <Trash2 class="mr-2 size-3.5" />

@@ -118,7 +118,8 @@
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
-                      class="gap-2 text-destructive focus:text-destructive"
+                      variant="destructive"
+                      class="gap-2"
                       @select="deleteTarget = item"
                     >
                       <Trash2 class="size-3.5" />
