@@ -215,7 +215,7 @@ func escapeDegradeMarkdownLinkURL(url string) string {
 	return url
 }
 
-func selectDegradeMarkdownBacktickFence(text string, min int) string {
+func selectDegradeMarkdownBacktickFence(text string, minRun int) string {
 	maxRun, cur := 0, 0
 	for _, r := range text {
 		if r == '`' {
@@ -227,7 +227,7 @@ func selectDegradeMarkdownBacktickFence(text string, min int) string {
 		}
 		cur = 0
 	}
-	n := min
+	n := minRun
 	if maxRun >= n {
 		n = maxRun + 1
 	}
