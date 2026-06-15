@@ -1,5 +1,8 @@
 <template>
-  <div class="text-sm font-[400]">
+  <div
+    class="font-[400]"
+    :class="inGroup ? '' : 'text-[0.90625rem]'"
+  >
     <div
       v-if="expandable"
       role="button"
@@ -234,10 +237,12 @@ const renderedActionLabel = computed(
 )
 
 // Every row is gray at rest and animates to near-black (foreground) on hover:
-// one neutral material, with color expressing interaction.
+// one neutral material, with color expressing interaction. Rest ink matches the
+// process/thinking headers (--cop-title) so a lone tool row and a collapsed
+// group read at the same weight.
 const rowClass = computed(() => {
   if (display.value.isError) return 'text-destructive transition-colors duration-75'
-  return 'text-muted-foreground hover:text-foreground transition-colors duration-75'
+  return 'text-cop-title hover:text-foreground transition-colors duration-75'
 })
 
 // Brief tools (e.g. send/memory) finish in <100ms. Showing the running

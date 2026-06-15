@@ -111,7 +111,10 @@
           v-if="message.text"
           class="w-full rounded-lg border border-event-subagent-border bg-event-subagent-soft px-4 py-3"
         >
-          <div class="prose prose-sm dark:prose-invert max-w-none *:first:mt-0">
+          <div
+            :lang="contentLang(message.text)"
+            class="prose prose-sm dark:prose-invert max-w-none *:first:mt-0"
+          >
             <MarkdownRender
               :content="message.text"
               :is-dark="isDark"
@@ -145,7 +148,8 @@
       >
         <div
           v-if="cleanUserText(message.text) || message.forward || message.reply"
-          class="chat-user-bubble w-fit max-w-full rounded-lg bg-muted px-3.5 py-2.5 text-foreground whitespace-pre-wrap break-words"
+          :lang="contentLang(cleanUserText(message.text))"
+          class="chat-user-bubble w-fit max-w-full rounded-2xl bg-chat-user-bubble px-4 py-3 text-chat-user-bubble-fg whitespace-pre-wrap break-words"
         >
           <div
             v-if="message.forward"
@@ -217,7 +221,7 @@
            answer at full parity. -->
       <div
         v-else
-        class="space-y-[1.36rem]"
+        class="space-y-[0.85rem]"
       >
         <template
           v-for="node in renderNodes"
@@ -240,6 +244,7 @@
                  tiers rather than six evenly-spaced rungs. -->
             <div
               v-if="node.block.type === 'text' && node.block.content"
+              :lang="contentLang(node.block.content)"
               class="prose prose-sm dark:prose-invert max-w-none [&_p]:my-0! [&_p+p]:mt-2! [&_ul]:my-1.5! [&_ol]:my-1.5! [&_li]:my-0.5! [&_:is(h1,h2,h3)]:mt-5! [&_:is(h1,h2,h3)]:mb-2! [&_:is(h4,h5,h6)]:mt-3! [&_:is(h4,h5,h6)]:mb-1! [&>*:first-child]:mt-0! [&>*:last-child]:mb-0!"
             >
               <MarkdownRender
@@ -443,6 +448,16 @@ function cleanUserText(content?: string): string {
     .trim()
 }
 
+// Element-level script tag for BLOCK typography only — leading (CJK packs
+// tighter, so it loosens) and the ~3% Latin size shave. Per-glyph WEIGHT in mixed
+// runs is NOT done here (one font-weight can't split a run); that lives in the
+// .chat-cjk / .chat-latin spans emitted by md-text and the user bubble. A block
+// is 'zh' if it contains any CJK (its leading should breathe for the CJK lines).
+const CJK_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f]/
+function contentLang(content?: string): 'zh' | 'en' {
+  return content && CJK_RE.test(content) ? 'zh' : 'en'
+}
+
 const isSpecialUserMessage = computed(() =>
   props.message.role === 'user'
   && (props.sessionType === 'heartbeat' || props.sessionType === 'schedule' || props.sessionType === 'subagent'),
@@ -452,7 +467,7 @@ const contentClass = computed(() => {
   if (isSpecialUserMessage.value) return 'flex-1 max-w-full'
   // The user bubble caps a little tighter than the assistant column so a long
   // prompt doesn't sprawl most of the width before wrapping.
-  if (props.message.role === 'user') return 'max-w-[75%]'
+  if (props.message.role === 'user') return 'max-w-[70%]'
   return 'flex-1 max-w-full'
 })
 

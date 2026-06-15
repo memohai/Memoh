@@ -310,7 +310,7 @@
       "run": "Ran {count} commands",
       "steps": "{count} steps",
       "thought": "Thought",
-      "thoughtBriefly": "Thought for a moment",
+      "thoughtBriefly": "Thought for a couple of seconds",
       "thoughtSeconds": "Thought for {seconds}s"
     },
     "currentBot": "Current Bot",

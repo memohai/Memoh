@@ -3,16 +3,20 @@ import { setCustomComponents } from 'markstream-vue'
 import MdCheckbox from './md-checkbox.vue'
 import MdFootnoteReference from './md-footnote-reference.vue'
 import MdFootnoteAnchor from './md-footnote-anchor.vue'
+import MdText from './md-text.vue'
 
 // Custom markstream node components shared by every markdown surface (chat +
 // file preview). They replace markstream's built-in glyphs with design-system
-// equivalents — the library Checkbox for task markers, and link-language
-// footnote markers (dotted underline + up-right arrow) — without touching the
-// renderer's id/scroll wiring.
+// equivalents — the library Checkbox for task markers, link-language footnote
+// markers (dotted underline + up-right arrow), and a text node that splits mixed
+// CJK/Latin runs into per-script spans for independent font-weight (it delegates
+// back to markstream's TextNode mid-stream to keep the typewriter/fade) — without
+// touching the renderer's id/scroll wiring.
 const sharedComponents: Record<string, Component> = {
   checkbox: MdCheckbox,
   footnote_reference: MdFootnoteReference,
   footnote_anchor: MdFootnoteAnchor,
+  text: MdText,
 }
 
 const registered = new Set<string>()

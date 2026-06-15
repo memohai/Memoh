@@ -13,14 +13,14 @@
   <!-- Multiple items collapse into one process block. -->
   <div
     v-else
-    class="text-sm font-[400]"
+    class="text-[0.90625rem] font-[400]"
   >
     <button
-      class="group/h flex items-center gap-1.5 w-full text-left transition-colors duration-75 cursor-pointer py-px text-muted-foreground hover:text-foreground select-none"
+      class="group/h flex items-center gap-1.5 w-full text-left transition-colors duration-75 cursor-pointer py-px text-cop-title hover:text-foreground select-none"
       @click="toggle"
     >
       <span
-        class="min-w-0 truncate"
+        class="min-w-0 truncate tracking-[0.01em]"
         :class="running ? 'tool-shimmer-text' : ''"
       >{{ headerLabel }}</span>
       <ChevronDown
@@ -34,7 +34,10 @@
     </button>
 
     <CollapseSection :open="open">
-      <div class="mt-1 rounded-md bg-muted px-2.5 py-1.5 space-y-0.5">
+      <!-- Card body sets the in-card type scale (one notch below the root-level
+           cop rows) + tighter leading so nested steps read as a distinct, denser
+           layer; nested rows inherit this instead of re-asserting their own size. -->
+      <div class="mt-1 rounded-md bg-muted px-2.5 py-1.5 space-y-0.5 text-[0.84375rem] leading-snug">
         <template
           v-for="(item, i) in items"
           :key="item.id"
@@ -48,6 +51,7 @@
             v-else-if="item.type === 'reasoning'"
             :block="(item as ThinkingBlockType)"
             :streaming="active === true && i === items.length - 1"
+            in-group
           />
         </template>
       </div>

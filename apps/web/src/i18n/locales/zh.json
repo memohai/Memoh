@@ -306,7 +306,7 @@
       "run": "运行 {count} 条命令",
       "steps": "{count} 步",
       "thought": "已思考",
-      "thoughtBriefly": "略作思考",
+      "thoughtBriefly": "思考了几秒",
       "thoughtSeconds": "已思考 {seconds} 秒"
     },
     "currentBot": "当前 Bot",

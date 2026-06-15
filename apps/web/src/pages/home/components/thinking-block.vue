@@ -1,11 +1,14 @@
 <template>
-  <div class="text-sm font-[400]">
+  <div
+    class="font-[400]"
+    :class="inGroup ? '' : 'text-[0.90625rem]'"
+  >
     <button
-      class="group/h flex items-center gap-1.5 w-full text-left transition-colors duration-75 cursor-pointer py-px text-muted-foreground hover:text-foreground select-none"
+      class="group/h flex items-center gap-1.5 w-full text-left transition-colors duration-75 cursor-pointer py-px text-cop-title hover:text-foreground select-none"
       @click="toggleOpen"
     >
       <span
-        class="min-w-0 truncate"
+        class="min-w-0 truncate tracking-[0.01em]"
         :class="streaming ? 'tool-shimmer-text' : ''"
       >{{ label }}</span>
       <ChevronDown
@@ -19,7 +22,8 @@
     </button>
     <CollapseSection :open="open">
       <div
-        class="mt-1 whitespace-pre-wrap text-muted-foreground leading-relaxed"
+        class="mt-1 whitespace-pre-wrap text-muted-foreground"
+        :class="inGroup ? 'leading-snug' : 'leading-relaxed'"
         v-text="bodyText"
       />
     </CollapseSection>
@@ -38,6 +42,9 @@ import { getCollapseOpen, reasoningCollapseKey, setCollapseOpen } from './proces
 const props = defineProps<{
   block: ThinkingBlock
   streaming: boolean
+  // True when nested inside a multi-step process card: inherit the card's smaller
+  // type scale + tighter leading instead of the root-level cop size.
+  inGroup?: boolean
 }>()
 
 const { t } = useI18n()

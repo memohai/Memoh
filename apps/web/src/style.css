@@ -68,15 +68,38 @@
    * --sidebar-accent is already mode-aware (0.945 light / 0.30 dark), so no
    * separate .dark override is needed here. */
   --surface-chrome-hover: var(--sidebar-accent);
+
+  /* User prompt bubble — built RELATIVE to the accent (--brand) via the relative
+   * color syntax, never a hardcoded RGB: the HUE tracks --brand (so violet /
+   * ocean / forest / rose each derive their own bubble), while fixed L/C set the
+   * recipe and a small warm hue tilt makes the violet read as a truer purple,
+   * not blue. Light = a faint lavender surface ≈ rgb(238,229,254) with deep
+   * purple-black ink. Tune the L/C/tilt numbers (not the hue) so the proportion
+   * stays portable to whatever accent is active. */
+  --chat-user-bubble: oklch(from var(--brand) 0.936 0.035 calc(h + 12));
+  --chat-user-bubble-fg: oklch(from var(--brand) 0.285 0.06 calc(h + 12));
+
+  /* Process / "Thought for Ns" header ink — one notch grayer (lower contrast)
+   * than --muted-foreground so the channel-process line sits quieter above the
+   * answer. Light = washed toward the page; dark mirrors it toward its own bg. */
+  --cop-title: color-mix(in oklab, var(--color-muted-foreground) 80%, var(--color-background));
 }
 .dark {
   --surface-editor: var(--background);
   --surface-chrome: var(--sidebar);
+  /* Dark = a solid deep purple ≈ rgb(83,45,141) with pure-white ink (a filled
+   * "sent" bubble); same relative recipe, just a darker L and near-full C. */
+  --chat-user-bubble: oklch(from var(--brand) 0.40 0.15 calc(h + 7));
+  --chat-user-bubble-fg: #fff;
+  --cop-title: color-mix(in oklab, var(--color-muted-foreground) 82%, var(--color-background));
 }
 
 @theme inline {
   --color-surface-editor: var(--surface-editor);
   --color-surface-chrome: var(--surface-chrome);
+  --color-chat-user-bubble: var(--chat-user-bubble);
+  --color-chat-user-bubble-fg: var(--chat-user-bubble-fg);
+  --color-cop-title: var(--cop-title);
 }
 
 /* Inter-script spacing (W3C CLREQ / CSS Text 4): insert the standard ~1/8em gap
@@ -125,20 +148,82 @@
 :lang(zh) body {
   font-weight: 335;
 }
-/* Chat markdown body in Chinese: relax both weight (it pins its own 380) and
- * leading. CJK glyphs fill the em box, so lines pack tighter vertically and need
- * more line-height than Latin (~1.7 vs the compact Latin body) to breathe.
- * :lang(zh)-scoped, so it only loosens the chat body when the UI language is
- * Chinese; CJK that appears inside an English UI rides markstream's own 1.625
- * paragraph leading below, which is already comfortable for mixed runs. */
-:lang(zh) [data-chat-content] .prose {
-  font-weight: 325;
-  line-height: 1.7;
+/* Chat body LEADING, scoped to the message's content script via the per-message
+ * lang tag (message-item.vue). CJK fills the em box and packs tighter vertically,
+ * so it gets looser leading than Latin. WEIGHT is no longer set here: mixed
+ * CJK/Latin weight is handled per run by the .chat-cjk / .chat-latin spans below,
+ * which one element-level font-weight could never split correctly. */
+[data-chat-content] .prose:lang(zh) {
+  line-height: var(--chat-leading);
 }
-:lang(zh) [data-chat-content] .markstream-vue,
-:lang(zh) [data-chat-content] .markstream-vue .paragraph-node {
-  line-height: 1.75;
+/* The user prompt bubble matches the assistant body's leading per script too, so
+ * a prompt and its answer breathe identically. */
+[data-chat-content] .chat-user-bubble:lang(zh) {
+  line-height: var(--chat-leading);
 }
+[data-chat-content] .markstream-vue:lang(zh),
+[data-chat-content] .markstream-vue:lang(zh) .paragraph-node {
+  line-height: var(--chat-leading-cjk);
+}
+
+/* Per-script weight. MiSans (CJK) reads heavier than Inter (Latin) at the same
+ * numeric weight, and a mixed run can't be split by one font-weight — so md-text
+ * and the user bubble emit .chat-cjk / .chat-latin spans that each take a PAIRED
+ * weight token. The pairs hold a roughly constant Latin→CJK gap, so a font swap
+ * or accent change keeps the same relationship. Tiers mirror the markdown wrappers
+ * (body / strong / heading). md-text splits into these spans from the first frame
+ * (it never delegates to markstream's TextNode), so the weights apply the whole
+ * way through a stream with no settle-time jump. Inline code & math are their own
+ * nodes and never become these spans. */
+:root {
+  /* Chat reading LEADING — the single source for every chat line-height below.
+   * After tuning, Latin/base sits tighter; CJK paragraphs are the one place the
+   * two scripts still diverge, keeping a hair more vertical room. To restyle
+   * leading, change these two numbers only — every rule references them. */
+  --chat-leading: 1.48;
+  --chat-leading-cjk: 1.52;
+  /* Latin optical compensation, applied per .chat-latin run (see below): a small
+   * size shave so Inter doesn't read large beside MiSans, plus a hair of tracking
+   * to reopen the smaller glyphs. CJK takes neither. */
+  --chat-latin-size: 0.9375em;
+  --chat-latin-track: 0.005em;
+  /* Per-script WEIGHT pairs (Latin / CJK) per tier. */
+  --chat-latin-body: 420;   --chat-cjk-body: 330;
+  --chat-latin-strong: 520; --chat-cjk-strong: 430;
+  --chat-latin-h1: 600;     --chat-cjk-h1: 500;
+  --chat-latin-h2: 560;     --chat-cjk-h2: 470;
+  --chat-latin-h3: 520;     --chat-cjk-h3: 440;
+  --chat-latin-h4: 500;     --chat-cjk-h4: 420;
+}
+/* Latin's optical compensation (size/weight/tracking) ALL lives on the span, not
+ * the block. A block-level :lang(en) size only fires when the whole block is pure
+ * English — so a mixed CJK+Latin block (tagged :lang(zh)) would keep its English at
+ * full size while a pure-English block shrank it, making the SAME English look
+ * different between a user prompt and an answer. Scoping size here matches the
+ * weight/tracking scope, so every Latin run is identical regardless of its
+ * neighbors. em (not rem) so Latin headings scale proportionally with their level.
+ * Inter reads a touch large beside MiSans at the same px, hence the slight shave;
+ * the smaller size packs glyphs tighter, so a hair of tracking opens it back up.
+ * CJK keeps the 1em base and is never tracked (it sets its own metrics). */
+[data-chat-content] .chat-latin {
+  font-weight: var(--chat-latin-body);
+  font-size: var(--chat-latin-size);
+  letter-spacing: var(--chat-latin-track);
+}
+[data-chat-content] .chat-cjk { font-weight: var(--chat-cjk-body); }
+/* Context tiers: the spans live INSIDE markstream's .strong-node / .heading-N
+ * wrappers, so without these the bold/heading runs would fall back to the body
+ * weight and lose their emphasis. */
+[data-chat-content] :is(.strong-node, strong, b) .chat-latin { font-weight: var(--chat-latin-strong); }
+[data-chat-content] :is(.strong-node, strong, b) .chat-cjk { font-weight: var(--chat-cjk-strong); }
+[data-chat-content] .heading-1 .chat-latin { font-weight: var(--chat-latin-h1); }
+[data-chat-content] .heading-1 .chat-cjk { font-weight: var(--chat-cjk-h1); }
+[data-chat-content] .heading-2 .chat-latin { font-weight: var(--chat-latin-h2); }
+[data-chat-content] .heading-2 .chat-cjk { font-weight: var(--chat-cjk-h2); }
+[data-chat-content] .heading-3 .chat-latin { font-weight: var(--chat-latin-h3); }
+[data-chat-content] .heading-3 .chat-cjk { font-weight: var(--chat-cjk-h3); }
+[data-chat-content] :is(.heading-4, .heading-5) .chat-latin { font-weight: var(--chat-latin-h4); }
+[data-chat-content] :is(.heading-4, .heading-5) .chat-cjk { font-weight: var(--chat-cjk-h4); }
 
 @layer base {
   :root {
@@ -154,20 +239,22 @@
 
 @layer components {
   [data-chat-content] .prose {
-    /* Chat reading body: 16px. Weight is a deliberate 350 — lighter than the
-     * 400 "normal" rung because this is long-form READING content (markstream
-     * already hand-tunes weight here, and apps/web is outside the UI-contract
-     * guard). The :lang(zh) rule below drops it further for stroke-dense CJK;
-     * this base also governs Chinese in an English-language UI (the common
-     * case) where that rule never matches. */
+    /* Chat reading body: 16px. This is the container default; the actual glyph
+     * size/weight come from the per-script .chat-latin / .chat-cjk spans (Latin
+     * shaves ~6% and goes 420, CJK holds 1em / 330). The values here only govern
+     * any stray text not wrapped in a run span. */
     font-size: 1rem;
-    line-height: 1.6;
-    font-weight: 350;
+    line-height: var(--chat-leading);
+    font-weight: 400;
   }
 
   [data-chat-content] .chat-user-bubble {
-    font-size: 0.9375rem;
-    line-height: 1.6;
+    /* Matches the assistant reading body exactly — same size and the same
+     * per-script run weights — so the prompt and its answer read as one voice;
+     * the tinted surface alone marks the turn. */
+    font-size: 1rem;
+    line-height: var(--chat-leading);
+    font-weight: 400;
   }
 
   [data-chat-content] .chat-message-meta {
@@ -258,7 +345,7 @@
   /* Inherit the app font + size instead of markstream's built-in sans/body scale */
   font-family: inherit;
   font-size: inherit;
-  line-height: 1.625;
+  line-height: var(--chat-leading);
   color: var(--color-foreground);
 
   /* Typography scale */
@@ -266,7 +353,7 @@
   --ms-font-mono: var(--memoh-code-font-family, ui-monospace, monospace);
   --markstream-code-font-family: var(--memoh-code-font-family, ui-monospace, monospace);
   --ms-text-body: inherit;
-  --ms-leading-body: 1.625;
+  --ms-leading-body: var(--chat-leading);
   /* Heading scale is em-relative (tracks the body) and restrained: headings sit
    * just above the body rather than the old fixed 36/24/20px scale that
    * dwarfed the text. Weights are toned down from the previous 800/700. */
@@ -341,7 +428,7 @@
  * keep them inheriting so chat text stays compact. */
 .markstream-vue .paragraph-node {
   font-size: inherit;
-  line-height: 1.625;
+  line-height: var(--chat-leading);
 }
 
 .markstream-vue .strong-node,
@@ -362,7 +449,7 @@
 }
 
 /* The small heading tier (h4–h6) sits tight to its text — trim the inherited
- * reading line-height (1.6 / 1.7 zh) so stacked sub-headings don't read tall. */
+ * reading line-height (1.48 / 1.52 zh) so stacked sub-headings don't read tall. */
 .markstream-vue .heading-4,
 .markstream-vue .heading-5,
 .markstream-vue .heading-6 {
@@ -549,7 +636,7 @@
    * first character. Top-aligning with a shared line-height lines the marker up
    * with the first text line regardless of what's further down the entry. */
   align-items: flex-start;
-  line-height: 1.625;
+  line-height: var(--chat-leading);
   /* Match the reading body exactly (markstream renders the list at text-sm).
    * Pinned in rem to the prose body size so an intermediate text-sm wrapper
    * can't shrink it. */
@@ -561,7 +648,7 @@
   content: counter(md-footnote) ".";
   flex-shrink: 0;
   margin-right: 0.45em;
-  line-height: 1.625;
+  line-height: var(--chat-leading);
   /* Solid foreground (black) — the index number is real content, so it reads as
    * confident ink, not a washed-out gray. The brand purple is the hover accent
    * on the interactive ref/backref markers, not the resting number. */
