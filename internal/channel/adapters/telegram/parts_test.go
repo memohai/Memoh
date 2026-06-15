@@ -161,14 +161,55 @@ func TestExtractTelegramMessageParts_TextMentionCarriesUserMetadata(t *testing.T
 	if mention.Type != channel.MessagePartMention {
 		t.Fatalf("expected mention, got %+v", mention)
 	}
-	if mention.Text != "@Alice" {
-		t.Fatalf("expected @Alice display, got %q", mention.Text)
+	// The visible text the sender wrote (the entity slice) is preserved; the
+	// user identity is surfaced through Metadata + ChannelIdentityID rather
+	// than overwriting the displayed label.
+	if mention.Text != "Alice" {
+		t.Fatalf("expected slice 'Alice' preserved, got %q", mention.Text)
+	}
+	if mention.ChannelIdentityID != "7" {
+		t.Fatalf("expected channel_identity_id=7, got %q", mention.ChannelIdentityID)
 	}
 	if got := mention.Metadata["user_id"]; got != "7" {
 		t.Fatalf("expected user_id=7, got %v", got)
 	}
 	if got := mention.Metadata["username"]; got != "ali" {
 		t.Fatalf("expected username=ali, got %v", got)
+	}
+}
+
+func TestExtractTelegramMessageParts_TextMentionPreservesSenderLabel(t *testing.T) {
+	t.Parallel()
+	// A text_mention can anchor a profile link onto an arbitrary label such as
+	// "the reviewer". The displayed slice is what the LLM should see, not the
+	// linked profile's first name.
+	msg := &tgbotapi.Message{
+		Text: "ask the reviewer please",
+		Entities: []tgbotapi.MessageEntity{
+			{
+				Type:   "text_mention",
+				Offset: 4,
+				Length: 12,
+				User:   &tgbotapi.User{ID: 42, FirstName: "Alice", UserName: "ali"},
+			},
+		},
+	}
+	parts := extractTelegramMessageParts(msg)
+	var mention *channel.MessagePart
+	for i := range parts {
+		if parts[i].Type == channel.MessagePartMention {
+			mention = &parts[i]
+			break
+		}
+	}
+	if mention == nil {
+		t.Fatalf("expected mention, got %+v", parts)
+	}
+	if mention.Text != "the reviewer" {
+		t.Fatalf("expected sender-typed label preserved, got %q", mention.Text)
+	}
+	if got := mention.Metadata["user_id"]; got != "42" {
+		t.Fatalf("expected user_id=42, got %v", got)
 	}
 }
 

@@ -114,20 +114,24 @@ func telegramEntityToPart(ent tgbotapi.MessageEntity, slice string) (channel.Mes
 		if ent.User == nil {
 			return channel.MessagePart{}, false
 		}
-		name := strings.TrimSpace(ent.User.FirstName + " " + ent.User.LastName)
-		if name == "" {
-			name = ent.User.UserName
-		}
+		uid := strconv.FormatInt(ent.User.ID, 10)
 		meta := map[string]any{
-			"user_id": strconv.FormatInt(ent.User.ID, 10),
+			"user_id": uid,
 		}
 		if ent.User.UserName != "" {
 			meta["username"] = ent.User.UserName
 		}
+		if name := strings.TrimSpace(ent.User.FirstName + " " + ent.User.LastName); name != "" {
+			meta["display_name"] = name
+		}
+		// Preserve the sender-typed label as the display text; identity flows
+		// through ChannelIdentityID + Metadata so the LLM still sees who was
+		// anchored without overwriting what the user actually wrote.
 		return channel.MessagePart{
-			Type:     channel.MessagePartMention,
-			Text:     "@" + name,
-			Metadata: meta,
+			Type:              channel.MessagePartMention,
+			Text:              slice,
+			ChannelIdentityID: uid,
+			Metadata:          meta,
 		}, true
 	default:
 		return channel.MessagePart{}, false
