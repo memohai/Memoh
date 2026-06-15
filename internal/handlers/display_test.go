@@ -231,6 +231,17 @@ func TestDisplayApplyStyleCommandInjectsStyleScript(t *testing.T) {
 		!strings.Contains(cmd, "acquire_style_lock") {
 		t.Fatal("display style command must serialize style application with a lock")
 	}
+	if !strings.Contains(cmd, "style_lock_stale_seconds=60") ||
+		!strings.Contains(cmd, `printf '%s\n' "$$" >"$style_lock/pid"`) ||
+		!strings.Contains(cmd, `now_seconds >"$style_lock/created_at"`) ||
+		!strings.Contains(cmd, "cleanup_stale_style_lock") ||
+		!strings.Contains(cmd, `kill -0 "$owner_pid"`) ||
+		!strings.Contains(cmd, `ps -p "$owner_pid"`) ||
+		!strings.Contains(cmd, `Removing stale desktop style lock`) ||
+		!strings.Contains(cmd, `rm -rf "$style_lock"`) ||
+		!strings.Contains(cmd, `trap 'release_style_lock' EXIT INT TERM`) {
+		t.Fatal("display style command must recover stale locks left behind by killed apply helpers")
+	}
 	if !strings.Contains(cmd, `tail -n 80 "$style_log"`) ||
 		!strings.Contains(cmd, `printf '%s\n' "$style_version" >"$style_marker"`) {
 		t.Fatal("display style command must persist success and print log tail on failure")
