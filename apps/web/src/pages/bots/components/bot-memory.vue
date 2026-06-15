@@ -48,7 +48,7 @@
                         side="bottom"
                         align="center"
                       >
-                        <p class="text-[11px]">
+                        <p class="text-caption">
                           {{ compactTooltip }}
                         </p>
                       </TooltipContent>
@@ -67,13 +67,13 @@
                   <h4 class="text-xs font-semibold text-foreground leading-none">
                     {{ $t('bots.memory.compact') }}
                   </h4>
-                  <p class="text-[10px] text-muted-foreground leading-snug">
+                  <p class="text-caption text-muted-foreground leading-snug">
                     {{ $t('bots.memory.compactConfirm') }}
                   </p>
                 </div>
 
                 <div class="space-y-1.5">
-                  <Label class="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">{{ $t('bots.memory.compactRatio') }}</Label>
+                  <Label class="text-caption font-semibold text-muted-foreground uppercase tracking-wider">{{ $t('bots.memory.compactRatio') }}</Label>
                   <RadioGroup
                     v-model="compactRatio"
                     class="grid grid-cols-1 gap-1"
@@ -88,7 +88,7 @@
                       />
                       <Zap class="size-3.5 text-muted-foreground shrink-0" />
                       <div class="min-w-0">
-                        <p class="text-[10px] font-medium text-foreground leading-none">{{ $t('bots.memory.compactRatioLight') }}</p>
+                        <p class="text-caption font-medium text-foreground leading-none">{{ $t('bots.memory.compactRatioLight') }}</p>
                       </div>
                     </Label>
                     <Label
@@ -101,7 +101,7 @@
                       />
                       <BrainCircuit class="size-3.5 text-muted-foreground shrink-0" />
                       <div class="min-w-0">
-                        <p class="text-[10px] font-medium text-foreground leading-none">{{ $t('bots.memory.compactRatioMedium') }}</p>
+                        <p class="text-caption font-medium text-foreground leading-none">{{ $t('bots.memory.compactRatioMedium') }}</p>
                       </div>
                     </Label>
                     <Label
@@ -114,25 +114,25 @@
                       />
                       <Brain class="size-3.5 text-muted-foreground shrink-0" />
                       <div class="min-w-0">
-                        <p class="text-[10px] font-medium text-foreground leading-none">{{ $t('bots.memory.compactRatioAggressive') }}</p>
+                        <p class="text-caption font-medium text-foreground leading-none">{{ $t('bots.memory.compactRatioAggressive') }}</p>
                       </div>
                     </Label>
                   </RadioGroup>
                 </div>
 
                 <div class="space-y-1.5">
-                  <Label class="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">
+                  <Label class="text-caption font-semibold text-muted-foreground uppercase tracking-wider">
                     {{ $t('bots.memory.compactDecayDate') }}
                     <span class="text-muted-foreground/60 normal-case tracking-normal">({{ $t('common.optional') }})</span>
                   </Label>
                   <Input
                     v-model="compactDecayDate"
                     type="date"
-                    class="w-full h-7 text-[10px] px-2 shadow-none border-border"
+                    class="w-full h-7 text-caption px-2 shadow-none border-border"
                   />
                   <p
                     v-if="compactDecayDays > 0"
-                    class="text-[9px] text-muted-foreground"
+                    class="text-caption text-muted-foreground"
                   >
                     Calculated: {{ compactDecayDays }} days old
                   </p>
@@ -142,14 +142,14 @@
                   <Button
                     variant="ghost"
                     size="sm"
-                    class="h-6 text-[10px] font-medium px-2 shadow-none"
+                    class="h-6 text-caption font-medium px-2 shadow-none"
                     @click="compactPopoverOpen = false"
                   >
                     {{ $t('common.cancel') }}
                   </Button>
                   <Button
                     size="sm"
-                    class="h-6 text-[10px] font-medium px-3 shadow-none"
+                    class="h-6 text-caption font-medium px-3 shadow-none"
                     :disabled="compactLoading"
                     @click="handleCompact"
                   >
@@ -185,7 +185,7 @@
                   side="bottom"
                   align="center"
                 >
-                  <p class="text-[11px]">
+                  <p class="text-caption">
                     {{ $t('common.refresh') }}
                   </p>
                 </TooltipContent>
@@ -212,7 +212,7 @@
           </template>
           <div
             v-else-if="filteredMemories.length === 0"
-            class="flex-1 flex items-center justify-center p-4 text-center text-[11px] text-muted-foreground"
+            class="flex-1 flex items-center justify-center p-4 text-center text-caption text-muted-foreground"
           >
             {{ $t('bots.memory.empty') }}
           </div>
@@ -234,7 +234,7 @@
               >*</span>
             </div>
             <div
-              class="mt-0.5 text-[10px] truncate opacity-70 group-hover:opacity-100"
+              class="mt-0.5 text-caption truncate opacity-70 group-hover:opacity-100"
               :class="{ 'text-muted-foreground': selectedId !== item.id, 'text-foreground/70': selectedId === item.id }"
             >
               {{ item.memory.length > 60 ? item.memory.slice(0, 60) + '...' : item.memory }}
@@ -271,7 +271,7 @@
                   <TooltipTrigger as-child>
                     <button
                       type="button"
-                      class="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground font-mono transition-colors outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm -ml-1 px-1"
+                      class="flex items-center gap-1.5 text-caption text-muted-foreground hover:text-foreground font-mono transition-colors outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm -ml-1 px-1"
                       @click="copyToClipboard(selectedMemory.id)"
                     >
                       <span class="truncate">ID: {{ selectedMemory.id }}</span>
@@ -282,7 +282,7 @@
                     side="bottom"
                     align="start"
                   >
-                    <p class="text-[11px]">
+                    <p class="text-caption">
                       Click to copy
                     </p>
                   </TooltipContent>
@@ -297,7 +297,7 @@
                 class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/40 border border-border/50"
               >
                 <div class="size-1 rounded-full bg-muted-foreground/40" />
-                <span class="text-[10px] text-muted-foreground font-medium whitespace-nowrap">
+                <span class="text-caption text-muted-foreground font-medium whitespace-nowrap">
                   Unsaved
                 </span>
               </div>
@@ -339,7 +339,7 @@
                     <h4 class="text-xs font-medium text-destructive">
                       Danger Zone
                     </h4>
-                    <p class="text-[11px] text-muted-foreground">
+                    <p class="text-caption text-muted-foreground">
                       Deleting this memory cannot be undone. Proceed with caution.
                     </p>
                   </div>
@@ -371,14 +371,14 @@
           class="h-60 border-t flex flex-col bg-muted/5 shrink-0"
         >
           <div class="px-4 py-2 border-b bg-muted/10 flex items-center justify-between shrink-0">
-            <h5 class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">
+            <h5 class="text-caption font-bold uppercase tracking-wider text-muted-foreground/70">
               Vector Manifold
             </h5>
           </div>
           <div class="flex-1 flex min-h-0 overflow-hidden">
             <!-- Sparse: Top K Buckets -->
             <div class="flex-1 flex flex-col p-4 min-w-0">
-              <p class="text-[9px] font-semibold text-muted-foreground/60 mb-2 uppercase shrink-0">
+              <p class="text-caption font-semibold text-muted-foreground/60 mb-2 uppercase shrink-0">
                 {{ chartLeftTitle }}
               </p>
               <VChart
@@ -395,7 +395,7 @@
 
             <!-- Sparse/Dense secondary chart -->
             <div class="flex-1 flex flex-col p-4 min-w-0">
-              <p class="text-[9px] font-semibold text-muted-foreground/60 mb-2 uppercase shrink-0">
+              <p class="text-caption font-semibold text-muted-foreground/60 mb-2 uppercase shrink-0">
                 {{ chartRightTitle }}
               </p>
               <VChart
@@ -419,7 +419,7 @@
         <EmptyTitle class="text-xs font-medium mt-4">
           {{ $t('bots.memory.title') }}
         </EmptyTitle>
-        <EmptyDescription class="text-[11px] mt-1.5 max-w-xs text-center text-muted-foreground">
+        <EmptyDescription class="text-caption mt-1.5 max-w-xs text-center text-muted-foreground">
           Select a file from the sidebar to view or edit, or create a new one to persist long-term information for your bot.
         </EmptyDescription>
         <Button
@@ -503,12 +503,12 @@
                   <div class="min-w-0 space-y-1.5 flex-1">
                     <Badge
                       variant="outline"
-                      class="text-[9px] font-medium uppercase px-1.5 py-0 h-4 border-foreground/10 shadow-none"
+                      class="text-caption font-medium uppercase px-1.5 py-0 h-4 border-foreground/10 shadow-none"
                       :class="msg.role === 'user' ? 'bg-muted text-muted-foreground' : 'bg-primary/10 text-primary border-primary/20'"
                     >
                       {{ msg.role }}
                     </Badge>
-                    <p class="text-[11px] text-foreground/90 wrap-break-word line-clamp-4 leading-relaxed font-mono">
+                    <p class="text-caption text-foreground/90 wrap-break-word line-clamp-4 leading-relaxed font-mono">
                       {{ extractMessageText(msg.content) }}
                     </p>
                   </div>

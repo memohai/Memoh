@@ -838,7 +838,7 @@ watch([activeTab, botId], ([tab]) => {
           </span>
           {{ $t('bots.container.title') }}
         </h2>
-        <p class="text-[11px] leading-snug text-muted-foreground max-w-md">
+        <p class="text-caption leading-snug text-muted-foreground max-w-md">
           {{ $t('bots.container.subtitle') }}
         </p>
       </div>
@@ -914,7 +914,7 @@ watch([activeTab, botId], ([tab]) => {
         <p class="text-sm font-medium text-foreground mb-1">
           {{ $t('bots.container.empty') }}
         </p>
-        <p class="text-[11px] text-muted-foreground text-center max-w-sm">
+        <p class="text-caption text-muted-foreground text-center max-w-sm">
           {{ $t('bots.container.createHint') }}
         </p>
       </div>
@@ -925,7 +925,7 @@ watch([activeTab, botId], ([tab]) => {
           <div class="flex items-start justify-between gap-4 rounded-md border border-border/60 bg-background p-3 shadow-none">
             <div class="space-y-1">
               <Label class="text-xs font-medium">{{ $t('bots.container.createRestoreDataLabel') }}</Label>
-              <p class="text-[11px] text-muted-foreground">
+              <p class="text-caption text-muted-foreground">
                 {{ $t('bots.container.createRestoreDataDescription') }}
               </p>
             </div>
@@ -940,7 +940,7 @@ watch([activeTab, botId], ([tab]) => {
           <div class="flex items-start justify-between gap-4 rounded-md border border-border/60 bg-background p-3 shadow-none">
             <div class="space-y-1">
               <Label class="text-xs font-medium">{{ $t('bots.container.createGpuLabel') }}</Label>
-              <p class="text-[11px] text-muted-foreground">
+              <p class="text-caption text-muted-foreground">
                 {{ $t('bots.container.createGpuDescription') }}
               </p>
             </div>
@@ -961,7 +961,7 @@ watch([activeTab, botId], ([tab]) => {
             :disabled="containerBusy || botLifecyclePending"
             class="font-mono text-xs h-8 shadow-none bg-background border-border/60"
           />
-          <p class="text-[11px] text-muted-foreground">
+          <p class="text-caption text-muted-foreground">
             {{ $t('bots.container.createImageDescription') }}
           </p>
         </div>
@@ -978,7 +978,7 @@ watch([activeTab, botId], ([tab]) => {
             :disabled="containerBusy || botLifecyclePending"
             class="min-h-20 font-mono text-xs shadow-none bg-background border-border/60"
           />
-          <p class="text-[11px] text-muted-foreground">
+          <p class="text-caption text-muted-foreground">
             {{ $t('bots.container.createGpuDevicesDescription') }}
           </p>
         </div>
@@ -991,12 +991,12 @@ watch([activeTab, botId], ([tab]) => {
                 <Gauge class="size-3.5 text-muted-foreground" />
                 {{ $t('bots.container.resourceLimits.title') }}
               </h4>
-              <p class="text-[11px] text-muted-foreground leading-snug">
+              <p class="text-caption text-muted-foreground leading-snug">
                 {{ $t('bots.container.resourceLimits.subtitle') }}
               </p>
             </div>
             <span
-              class="inline-flex w-fit items-center rounded border px-2 py-0.5 text-[10px] font-medium"
+              class="inline-flex w-fit items-center rounded border px-2 py-0.5 text-caption font-medium"
               :class="resourceLimitStatusClass"
             >
               {{ resourceLimitStatusText }}
@@ -1025,7 +1025,7 @@ watch([activeTab, botId], ([tab]) => {
                   :disabled="containerBusy || botLifecyclePending || resourceLimitsSaving"
                   class="h-8 text-xs shadow-none bg-background border-border/60"
                 />
-                <p class="text-[11px] text-muted-foreground">
+                <p class="text-caption text-muted-foreground">
                   {{ $t('bots.container.resourceLimits.cpuHint') }}
                 </p>
               </div>
@@ -1039,7 +1039,7 @@ watch([activeTab, botId], ([tab]) => {
                   :disabled="containerBusy || botLifecyclePending || resourceLimitsSaving"
                   class="h-8 text-xs shadow-none bg-background border-border/60"
                 />
-                <p class="text-[11px] text-muted-foreground">
+                <p class="text-caption text-muted-foreground">
                   {{ $t('bots.container.resourceLimits.memoryHint') }}
                 </p>
               </div>
@@ -1053,13 +1053,13 @@ watch([activeTab, botId], ([tab]) => {
                   :disabled="containerBusy || botLifecyclePending || resourceLimitsSaving"
                   class="h-8 text-xs shadow-none bg-background border-border/60"
                 />
-                <p class="text-[11px] text-muted-foreground">
+                <p class="text-caption text-muted-foreground">
                   {{ $t('bots.container.resourceLimits.storageHint') }}
                 </p>
               </div>
             </div>
 
-            <div class="space-y-1.5 text-[11px] text-muted-foreground">
+            <div class="space-y-1.5 text-caption text-muted-foreground">
               <p>
                 <span class="font-medium text-foreground">{{ $t('bots.container.resourceLimits.desiredLabel') }}:</span>
                 {{ desiredResourceLimitText }}
@@ -1072,7 +1072,7 @@ watch([activeTab, botId], ([tab]) => {
 
             <div
               v-if="resourceLimits && !storageHardLimitSupported"
-              class="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground"
+              class="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-caption text-muted-foreground"
             >
               {{ $t('bots.container.resourceLimits.storageSoftOnly') }}
             </div>
@@ -1136,13 +1136,13 @@ watch([activeTab, botId], ([tab]) => {
         v-if="isLegacy"
         class="flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-soft p-3 shadow-none"
       >
-        <p class="text-[11px] text-warning-foreground">
+        <p class="text-caption text-warning-foreground">
           {{ $t('bots.container.legacyWarning') }}
         </p>
         <Button
           variant="outline"
           size="sm"
-          class="shrink-0 h-7 text-[10px] shadow-none"
+          class="shrink-0 h-7 text-caption shadow-none"
           :disabled="containerBusy || botLifecyclePending"
           @click="handleRecreateContainer"
         >
@@ -1166,13 +1166,13 @@ watch([activeTab, botId], ([tab]) => {
 
       <!-- Identity Badges (L3 Meta) -->
       <div class="flex flex-wrap items-center gap-2">
-        <span class="inline-flex items-center rounded bg-muted/20 px-2 py-0.5 text-[10px] font-mono font-medium text-muted-foreground border border-border/40">
+        <span class="inline-flex items-center rounded bg-muted/20 px-2 py-0.5 text-caption font-mono font-medium text-muted-foreground border border-border/40">
           ID: {{ containerInfo.container_id }}
         </span>
-        <span class="inline-flex items-center rounded bg-muted/20 px-2 py-0.5 text-[10px] font-mono font-medium text-muted-foreground border border-border/40">
+        <span class="inline-flex items-center rounded bg-muted/20 px-2 py-0.5 text-caption font-mono font-medium text-muted-foreground border border-border/40">
           IMG: {{ displayedContainerImage }}
         </span>
-        <span class="inline-flex items-center rounded bg-muted/20 px-2 py-0.5 text-[10px] font-medium text-muted-foreground border border-border/40">
+        <span class="inline-flex items-center rounded bg-muted/20 px-2 py-0.5 text-caption font-medium text-muted-foreground border border-border/40">
           TASK: {{ containerTaskText }}
         </span>
       </div>
@@ -1180,7 +1180,7 @@ watch([activeTab, botId], ([tab]) => {
       <div class="grid grid-cols-12 gap-4">
         <!-- Static Metadata Bento -->
         <div class="col-span-12 rounded-md border border-border/60 bg-muted/5 p-4 shadow-none">
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-[11px]">
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-caption">
             <div class="space-y-1">
               <span class="text-muted-foreground block">{{ $t('bots.container.fields.status') }}</span>
               <span class="font-medium text-foreground">{{ containerStatusText }}</span>
@@ -1234,12 +1234,12 @@ watch([activeTab, botId], ([tab]) => {
               <Gauge class="size-3.5 text-muted-foreground" />
               {{ $t('bots.container.metricsTitle') }}
             </h4>
-            <p class="text-[11px] text-muted-foreground leading-snug">
+            <p class="text-caption text-muted-foreground leading-snug">
               {{ $t('bots.container.metricsSubtitle') }}
             </p>
           </div>
           <span
-            class="inline-flex w-fit items-center rounded border px-2 py-0.5 text-[10px] font-medium"
+            class="inline-flex w-fit items-center rounded border px-2 py-0.5 text-caption font-medium"
             :class="resourceLimitStatusClass"
           >
             {{ resourceLimitStatusText }}
@@ -1288,7 +1288,7 @@ watch([activeTab, botId], ([tab]) => {
                 <p class="mt-2 text-2xl font-semibold">
                   {{ cpuMetricValueText }}
                 </p>
-                <p class="mt-2 text-[11px] text-muted-foreground">
+                <p class="mt-2 text-caption text-muted-foreground">
                   {{ $t('bots.container.currentSample') }}
                 </p>
               </div>
@@ -1300,7 +1300,7 @@ watch([activeTab, botId], ([tab]) => {
                 <p class="mt-2 text-2xl font-semibold">
                   {{ memoryMetricValueText }}
                 </p>
-                <p class="mt-2 text-[11px] text-muted-foreground">
+                <p class="mt-2 text-caption text-muted-foreground">
                   {{ memoryMetricHintText }}
                 </p>
               </div>
@@ -1312,7 +1312,7 @@ watch([activeTab, botId], ([tab]) => {
                 <p class="mt-2 text-2xl font-semibold">
                   {{ storageMetricValueText }}
                 </p>
-                <p class="mt-2 text-[11px] text-muted-foreground break-all">
+                <p class="mt-2 text-caption text-muted-foreground break-all">
                   {{ $t('bots.container.metricsPath') }}: {{ storageMetricPathText }}
                 </p>
               </div>
@@ -1320,7 +1320,7 @@ watch([activeTab, botId], ([tab]) => {
 
             <p
               v-if="sampledAtText !== '-'"
-              class="text-[11px] text-muted-foreground"
+              class="text-caption text-muted-foreground"
             >
               {{ $t('bots.container.sampledAt') }}: {{ sampledAtText }}
             </p>
@@ -1332,7 +1332,7 @@ watch([activeTab, botId], ([tab]) => {
             <h5 class="text-xs font-medium text-foreground">
               {{ $t('bots.container.resourceLimits.title') }}
             </h5>
-            <p class="text-[11px] text-muted-foreground leading-snug">
+            <p class="text-caption text-muted-foreground leading-snug">
               {{ $t('bots.container.resourceLimits.subtitle') }}
             </p>
           </div>
@@ -1347,7 +1347,7 @@ watch([activeTab, botId], ([tab]) => {
                 :disabled="containerBusy || botLifecyclePending || resourceLimitsSaving"
                 class="h-8 text-xs shadow-none bg-background border-border/60"
               />
-              <p class="text-[11px] text-muted-foreground">
+              <p class="text-caption text-muted-foreground">
                 {{ $t('bots.container.resourceLimits.cpuHint') }}
               </p>
             </div>
@@ -1361,7 +1361,7 @@ watch([activeTab, botId], ([tab]) => {
                 :disabled="containerBusy || botLifecyclePending || resourceLimitsSaving"
                 class="h-8 text-xs shadow-none bg-background border-border/60"
               />
-              <p class="text-[11px] text-muted-foreground">
+              <p class="text-caption text-muted-foreground">
                 {{ $t('bots.container.resourceLimits.memoryHint') }}
               </p>
             </div>
@@ -1375,13 +1375,13 @@ watch([activeTab, botId], ([tab]) => {
                 :disabled="containerBusy || botLifecyclePending || resourceLimitsSaving"
                 class="h-8 text-xs shadow-none bg-background border-border/60"
               />
-              <p class="text-[11px] text-muted-foreground">
+              <p class="text-caption text-muted-foreground">
                 {{ $t('bots.container.resourceLimits.storageHint') }}
               </p>
             </div>
           </div>
 
-          <div class="space-y-1.5 text-[11px] text-muted-foreground">
+          <div class="space-y-1.5 text-caption text-muted-foreground">
             <p>
               <span class="font-medium text-foreground">{{ $t('bots.container.resourceLimits.desiredLabel') }}:</span>
               {{ desiredResourceLimitText }}
@@ -1394,21 +1394,21 @@ watch([activeTab, botId], ([tab]) => {
 
           <div
             v-if="resourceLimits && !storageHardLimitSupported"
-            class="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground"
+            class="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-caption text-muted-foreground"
           >
             {{ $t('bots.container.resourceLimits.storageSoftOnly') }}
           </div>
 
           <div
             v-if="storageSoftLimitExceeded"
-            class="rounded-md border border-warning-border bg-warning-soft px-3 py-2 text-[11px] text-warning-foreground"
+            class="rounded-md border border-warning-border bg-warning-soft px-3 py-2 text-caption text-warning-foreground"
           >
             {{ $t('bots.container.resourceLimits.storageSoftExceeded') }}
           </div>
 
           <div
             v-if="resourceLimitApplyPromptVisible"
-            class="flex flex-col gap-3 rounded-md border border-warning-border bg-warning-soft px-3 py-3 text-[11px] text-warning-foreground sm:flex-row sm:items-center sm:justify-between"
+            class="flex flex-col gap-3 rounded-md border border-warning-border bg-warning-soft px-3 py-3 text-caption text-warning-foreground sm:flex-row sm:items-center sm:justify-between"
           >
             <p class="leading-snug">
               {{ $t('bots.container.resourceLimits.recreatePrompt') }}
@@ -1417,7 +1417,7 @@ watch([activeTab, botId], ([tab]) => {
               <Button
                 variant="ghost"
                 size="sm"
-                class="h-8 text-[11px]"
+                class="h-8 text-caption"
                 :disabled="containerBusy || botLifecyclePending"
                 @click="resourceLimitApplyPromptVisible = false"
               >
@@ -1434,7 +1434,7 @@ watch([activeTab, botId], ([tab]) => {
                   <Button
                     variant="outline"
                     size="sm"
-                    class="h-8 text-[11px] shadow-none"
+                    class="h-8 text-caption shadow-none"
                     :disabled="containerBusy || botLifecyclePending"
                   >
                     <Spinner
@@ -1465,7 +1465,7 @@ watch([activeTab, botId], ([tab]) => {
         </div>
       </div>
 
-      <div class="rounded-md border border-border/50 bg-background px-3 py-2 text-[11px] text-muted-foreground shadow-none">
+      <div class="rounded-md border border-border/50 bg-background px-3 py-2 text-caption text-muted-foreground shadow-none">
         {{ $t('bots.container.gpuRecreateHint') }}
       </div>
 
@@ -1480,12 +1480,12 @@ watch([activeTab, botId], ([tab]) => {
                   <Database class="size-3.5 text-muted-foreground" />
                   {{ $t('bots.container.dataTitle') }}
                 </h4>
-                <p class="text-[11px] text-muted-foreground leading-snug">
+                <p class="text-caption text-muted-foreground leading-snug">
                   {{ $t('bots.container.dataSubtitle') }}
                 </p>
                 <div
                   v-if="hasPreservedData"
-                  class="mt-2 inline-flex items-center rounded bg-primary/10 px-2 py-0.5 text-[10px] text-primary"
+                  class="mt-2 inline-flex items-center rounded bg-primary/10 px-2 py-0.5 text-caption text-primary"
                 >
                   {{ $t('bots.container.preservedDataAvailable') }}
                 </div>
@@ -1523,7 +1523,7 @@ watch([activeTab, botId], ([tab]) => {
                   <Settings class="size-3.5 text-muted-foreground" />
                   {{ $t('bots.container.lifecycleTitle') }}
                 </h4>
-                <p class="text-[11px] text-muted-foreground leading-snug">
+                <p class="text-caption text-muted-foreground leading-snug">
                   {{ $t('bots.container.deleteSubtitle') }}
                 </p>
               </div>
@@ -1562,7 +1562,7 @@ watch([activeTab, botId], ([tab]) => {
               <h4 class="text-xs font-medium text-destructive">
                 {{ $t('common.dangerZone') }}
               </h4>
-              <p class="text-[11px] text-muted-foreground">
+              <p class="text-caption text-muted-foreground">
                 {{ $t('bots.container.deleteZoneDesc') }}
               </p>
             </div>
@@ -1611,7 +1611,7 @@ watch([activeTab, botId], ([tab]) => {
                   <History class="size-3.5 text-muted-foreground" />
                   {{ $t('bots.container.snapshotTitle') }}
                 </h4>
-                <p class="text-[11px] text-muted-foreground leading-snug">
+                <p class="text-caption text-muted-foreground leading-snug">
                   {{ $t('bots.container.snapshotSubtitle') }}
                 </p>
               </div>
@@ -1636,7 +1636,7 @@ watch([activeTab, botId], ([tab]) => {
                 </Button>
               </div>
             </div>
-            <p class="text-[10px] text-muted-foreground/60 leading-none">
+            <p class="text-caption text-muted-foreground/60 leading-none">
               {{ $t('bots.container.snapshotNameHint') }}
             </p>
           </div>
@@ -1652,7 +1652,7 @@ watch([activeTab, botId], ([tab]) => {
           </div>
           <div
             v-else-if="sortedSnapshots.length === 0"
-            class="text-[11px] text-muted-foreground py-8 text-center border-dashed border-t border-border/20"
+            class="text-caption text-muted-foreground py-8 text-center border-dashed border-t border-border/20"
           >
             {{ $t('bots.container.snapshotEmpty') }}
           </div>
@@ -1672,18 +1672,18 @@ watch([activeTab, botId], ([tab]) => {
                   </div>
                   <div
                     v-if="snapshotRuntimeName(item)"
-                    class="truncate text-[10px] font-mono text-muted-foreground"
+                    class="truncate text-caption font-mono text-muted-foreground"
                   >
                     {{ snapshotRuntimeName(item) }}
                   </div>
                 </div>
-                <div class="sm:col-span-2 text-[11px] text-muted-foreground">
+                <div class="sm:col-span-2 text-caption text-muted-foreground">
                   <span class="inline-flex px-1.5 py-0.5 rounded bg-muted/40 border border-border/40">{{ snapshotVersionText(item) }}</span>
                 </div>
-                <div class="sm:col-span-2 text-[11px] text-muted-foreground">
+                <div class="sm:col-span-2 text-caption text-muted-foreground">
                   {{ snapshotSourceText(item) }}
                 </div>
-                <div class="sm:col-span-4 text-[11px] text-muted-foreground truncate">
+                <div class="sm:col-span-4 text-caption text-muted-foreground truncate">
                   {{ formatDate(item.created_at) }}
                 </div>
               </div>
@@ -1700,7 +1700,7 @@ watch([activeTab, botId], ([tab]) => {
                       variant="ghost"
                       size="sm"
                       :disabled="containerBusy || botLifecyclePending"
-                      class="h-6 px-2 text-[11px] text-muted-foreground hover:text-primary hover:bg-primary/10 shadow-none transition-colors"
+                      class="h-6 px-2 text-caption text-muted-foreground hover:text-primary hover:bg-primary/10 shadow-none transition-colors"
                     >
                       <Spinner
                         v-if="containerAction === 'rollback' && rollbackVersion === item.version"

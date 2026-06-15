@@ -1,207 +1,158 @@
 <template>
-  <div class="flex flex-col lg:flex-row gap-4 lg:gap-6 h-full absolute inset-0 px-6 pt-4 pb-6 w-full">
-    <!-- L3: Silent Hub Rail -->
-    <div class="w-full h-48 shrink-0 lg:flex-[0.5] lg:min-w-[230px] lg:max-w-[260px] lg:h-full flex flex-col border rounded-lg overflow-hidden bg-background shadow-sm">
-      <div class="p-3 pb-2 border-b border-border/50 flex items-center justify-between shrink-0">
-        <h4 class="text-xs font-medium">
-          {{ $t('bots.channels.title') }}
-        </h4>
-        <Popover v-model:open="addMobilePopoverOpen">
-          <PopoverTrigger as-child>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              class="size-7 text-muted-foreground hover:text-foreground lg:hidden"
-              :disabled="unconfiguredChannels.length === 0 && !isLoading"
-            >
-              <Plus class="size-3.5" />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent
-            class="w-56 p-1 shadow-md"
-            align="center"
+  <div>
+    <SwapTransition :direction="direction">
+      <!-- Configured platforms -->
+      <section
+        v-if="view === 'list'"
+        class="mx-auto max-w-3xl pt-6 pb-8"
+      >
+        <header class="mb-6 flex items-center justify-between gap-4 px-2">
+          <h1 class="text-lg font-semibold">
+            {{ t('bots.channels.title') }}
+          </h1>
+          <Button
+            :disabled="unconfiguredChannels.length === 0 && !isLoading"
+            @click="addOpen = true"
           >
-            <div
-              v-if="unconfiguredChannels.length === 0"
-              class="px-3 py-2 text-[11px] text-muted-foreground text-center"
-            >
-              {{ $t('bots.channels.noAvailableTypes') }}
-            </div>
-            <button
-              v-for="item in unconfiguredChannels"
-              :key="item.meta.type"
-              type="button"
-              class="flex w-full items-center gap-3 rounded-md px-3 py-1.5 text-xs hover:bg-accent transition-colors"
-              @click="addChannel(item.meta.type ?? '')"
-            >
-              <span class="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                <ChannelIcon
-                  :channel="item.meta.type ?? ''"
-                  size="1em"
-                />
-              </span>
-              <span>{{ channelTitle(item.meta) }}</span>
-            </button>
-          </PopoverContent>
-        </Popover>
-      </div>
-      <ScrollArea class="flex-1 flex flex-col h-full">
-        <!-- Skeleton Loading -->
+            <Plus class="size-4" />
+            {{ t('bots.channels.addChannel') }}
+          </Button>
+        </header>
+
         <div
           v-if="isLoading && configuredChannels.length === 0"
-          class="p-2 space-y-2 h-full flex flex-col"
+          class="grid grid-cols-1 gap-3 sm:grid-cols-2"
         >
-          <Skeleton class="h-10 w-full rounded-md" />
-          <Skeleton class="h-10 w-full rounded-md" />
-          <Skeleton class="h-10 w-full rounded-md" />
+          <Skeleton
+            v-for="n in 4"
+            :key="n"
+            class="h-[4.5rem] w-full rounded-[var(--radius-menu-shell)]"
+          />
         </div>
 
-        <!-- Empty -->
+        <!-- Platforms + a dashed add tile to drop another in -->
         <div
-          v-else-if="configuredChannels.length === 0"
-          class="h-full flex-1 flex flex-col items-center justify-center p-4 text-center min-h-[100px]"
+          v-else-if="configuredChannels.length > 0"
+          class="grid grid-cols-1 gap-3 sm:grid-cols-2"
         >
-          <p class="text-xs text-muted-foreground">
-            {{ $t('bots.channels.emptyTitle') }}
-          </p>
-          <p class="mt-1 text-[11px] text-muted-foreground">
-            {{ $t('bots.channels.emptyDescription') }}
-          </p>
-        </div>
-
-        <!-- Platform List (High Density py-1.5) -->
-        <div
-          v-else
-          class="p-1 space-y-0.5"
-        >
-          <button
+          <BackendCard
             v-for="item in configuredChannels"
             :key="item.meta.type"
-            type="button"
-            :aria-pressed="selectedType === item.meta.type"
-            class="flex w-full items-center gap-3 rounded-md px-3 py-1.5 text-xs transition-colors hover:bg-accent/50 outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            :class="{ 'bg-accent/40 font-medium text-foreground': selectedType === item.meta.type, 'text-muted-foreground': selectedType !== item.meta.type }"
-            @click="selectedType = item.meta.type ?? ''"
+            :name="channelTitle(item.meta)"
+            :subtitle="!item.config?.disabled ? t('bots.channels.statusActive') : t('bots.channels.configured')"
+            :enabled="!item.config?.disabled"
+            @click="openPlatform(item)"
           >
-            <span class="flex size-7 shrink-0 items-center justify-center rounded-md bg-transparent">
-              <ChannelIcon
-                :channel="item.meta.type as string"
-                size="1.25em"
-              />
-            </span>
-            <div class="flex-1 text-left min-w-0">
-              <div class="truncate flex items-center gap-1">
-                {{ channelTitle(item.meta) }}
-                <!-- Dirty state indicator (*) -->
-                <span
-                  v-if="dirtyStates[item.meta.type ?? '']"
-                  class="text-warning font-bold"
-                  title="Unsaved changes"
-                >*</span>
-              </div>
-              <div class="text-[11px] truncate">
-                <span
-                  v-if="!item.config?.disabled"
-                  class="text-success"
-                >{{ $t('bots.channels.statusActive') }}</span>
-                <span
-                  v-else
-                  class="opacity-70"
-                >{{ $t('bots.channels.configured') }}</span>
-              </div>
-            </div>
-          </button>
-        </div>
-      </ScrollArea>
-      
-      <!-- Add Platform Trigger -->
-      <div class="border-t p-2 bg-background hidden lg:block">
-        <Popover v-model:open="addDesktopPopoverOpen">
-          <PopoverTrigger as-child>
-            <Button
-              variant="ghost"
-              class="w-full h-8 text-xs text-muted-foreground hover:text-foreground"
-              size="sm"
-              :disabled="unconfiguredChannels.length === 0 && !isLoading"
-            >
-              <Plus class="mr-2 size-3" />
-              {{ $t('bots.channels.addChannel') }}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent
-            class="w-56 p-1 shadow-md"
-            align="center"
-          >
-            <div
-              v-if="unconfiguredChannels.length === 0"
-              class="px-3 py-2 text-[11px] text-muted-foreground text-center"
-            >
-              {{ $t('bots.channels.noAvailableTypes') }}
-            </div>
-            <button
-              v-for="item in unconfiguredChannels"
-              :key="item.meta.type"
-              type="button"
-              class="flex w-full items-center gap-3 rounded-md px-3 py-1.5 text-xs hover:bg-accent transition-colors"
-              @click="addChannel(item.meta.type ?? '')"
-            >
-              <span class="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+            <template #leading>
+              <span class="flex size-10 items-center justify-center rounded-full bg-muted">
                 <ChannelIcon
-                  :channel="item.meta.type ?? ''"
-                  size="1em"
+                  :channel="item.meta.type as string"
+                  size="1.5em"
                 />
               </span>
-              <span>{{ channelTitle(item.meta) }}</span>
-            </button>
-          </PopoverContent>
-        </Popover>
-      </div>
-    </div>
+            </template>
+          </BackendCard>
 
-    <!-- L4: Right Workspace -->
-    <div class="flex-1 min-w-0 pr-4">
-      <ScrollArea class="h-full">
-        <div
-          v-if="!selectedType || !selectedItem"
-          class="flex h-full items-center justify-center text-xs text-muted-foreground"
-        >
-          {{ configuredChannels.length > 0 ? $t('bots.channels.selectType') : '' }}
+          <button
+            v-if="unconfiguredChannels.length > 0"
+            type="button"
+            class="group/add flex min-h-[4.5rem] items-center justify-center gap-2 rounded-[var(--radius-menu-shell)] border border-dashed border-border bg-background text-sm text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            @click="addOpen = true"
+          >
+            <Plus class="size-4" />
+            {{ t('bots.channels.addChannel') }}
+          </button>
         </div>
-        
-        <!-- Skeleton Placeholder -->
-        <div
-          v-else-if="isLoading"
-          class="space-y-6"
+
+        <!-- Empty: a framed box that guides with one line + the add action, no decorative icon -->
+        <Empty
+          v-else
+          class="rounded-[var(--radius-menu-shell)] border border-dashed border-border py-16"
         >
-          <Skeleton class="h-20 w-full rounded-md" />
-          <Skeleton class="h-64 w-full rounded-md" />
-        </div>
+          <EmptyTitle>{{ t('bots.channels.emptyTitle') }}</EmptyTitle>
+          <EmptyDescription>{{ t('bots.channels.emptyDescription') }}</EmptyDescription>
+          <EmptyContent>
+            <Button
+              variant="outline"
+              @click="addOpen = true"
+            >
+              <Plus class="size-4" />
+              {{ t('bots.channels.addChannel') }}
+            </Button>
+          </EmptyContent>
+        </Empty>
+      </section>
+
+      <!-- Platform detail -->
+      <section
+        v-else
+        class="mx-auto max-w-3xl pt-4 pb-8"
+      >
+        <Button
+          variant="ghost"
+          class="mb-2 text-foreground/85"
+          @click="backToList()"
+        >
+          <ChevronLeft class="size-4" />
+          {{ t('bots.channels.title') }}
+        </Button>
 
         <ChannelSettingsPanel
-          v-else
-          :key="selectedType"
+          v-if="selectedItem"
+          :key="selectedType ?? ''"
           :bot-id="botId"
           :channel-item="selectedItem"
-          :all-dirty-states="dirtyStates"
-          @update:dirty="(isDirty) => updateDirtyState(selectedType!, isDirty)"
-          @switch-tab="(type) => selectedType = type"
           @saved="handleSaved"
+          @deleted="handleDeleted"
         />
-      </ScrollArea>
-    </div>
+      </section>
+    </SwapTransition>
+
+    <!-- One add surface for every trigger (header / tile / empty): pick a platform type -->
+    <Dialog v-model:open="addOpen">
+      <DialogContent class="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>{{ t('bots.channels.addChannel') }}</DialogTitle>
+        </DialogHeader>
+        <div class="space-y-0.5">
+          <button
+            v-for="item in unconfiguredChannels"
+            :key="item.meta.type"
+            type="button"
+            class="flex w-full items-center gap-3 rounded-[var(--radius-menu)] px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--ui-hover)]"
+            @click="addChannel(item.meta.type ?? '')"
+          >
+            <span class="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted">
+              <ChannelIcon
+                :channel="item.meta.type ?? ''"
+                size="1.1em"
+              />
+            </span>
+            <span class="truncate">{{ channelTitle(item.meta) }}</span>
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { Plus } from 'lucide-vue-next'
+import { Plus, ChevronLeft } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Button, Popover, PopoverTrigger, PopoverContent, ScrollArea, Skeleton } from '@memohai/ui'
+import {
+  Button, Skeleton,
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+  Empty, EmptyTitle, EmptyDescription, EmptyContent,
+} from '@memohai/ui'
 import { useQuery } from '@pinia/colada'
 import { getChannels, getBotsByIdChannelByPlatform } from '@memohai/sdk'
 import type { HandlersChannelMeta, ChannelChannelConfig } from '@memohai/sdk'
 import ChannelSettingsPanel from './channel-settings-panel.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
+import BackendCard from '@/components/settings/backend-card.vue'
+import SwapTransition from '@/components/settings/swap-transition.vue'
+import { useViewSwap } from '@/composables/useViewSwap'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 
 export interface BotChannelItem {
@@ -213,8 +164,8 @@ export interface BotChannelItem {
 const props = defineProps<{ botId: string }>()
 const { t } = useI18n()
 
-// Dirty state tracking
-const dirtyStates = ref<Record<string, boolean>>({})
+const { view, direction, openDetail, backToList } = useViewSwap()
+const addOpen = ref(false)
 
 function channelTitle(meta: HandlersChannelMeta) {
   return channelTypeDisplayName(t, meta.type, meta.display_name)
@@ -244,8 +195,6 @@ const { data: channels, isLoading, refetch } = useQuery({
 })
 
 const selectedType = ref<string | null>(null)
-const addDesktopPopoverOpen = ref(false)
-const addMobilePopoverOpen = ref(false)
 
 const allChannels = computed<BotChannelItem[]>(() => channels.value ?? [])
 const configuredChannels = computed(() => allChannels.value.filter((c) => c.configured))
@@ -253,26 +202,32 @@ const unconfiguredChannels = computed(() => allChannels.value.filter((c) => !c.c
 
 const selectedItem = computed(() => allChannels.value.find((c) => c.meta.type === selectedType.value) ?? null)
 
-watch(configuredChannels, (list) => {
-  if (list.length === 0) return
-  if (!selectedType.value || !list.some((item) => item.meta.type === selectedType.value)) {
-    const configured = list.find((item) => item.configured)
-    selectedType.value = configured?.meta.type ?? list[0]?.meta.type ?? null
-  }
-}, { immediate: true })
-
-function addChannel(type: string) {
-  addDesktopPopoverOpen.value = false
-  addMobilePopoverOpen.value = false
-  selectedType.value = type
+function openPlatform(item: BotChannelItem) {
+  selectedType.value = item.meta.type ?? ''
+  openDetail()
 }
 
-function updateDirtyState(type: string, isDirty: boolean) {
-  dirtyStates.value[type] = isDirty
+// Adding picks an as-yet-unconfigured type and drops straight into its blank form.
+function addChannel(type: string) {
+  addOpen.value = false
+  selectedType.value = type
+  openDetail()
 }
 
 function handleSaved() {
-  if (selectedType.value) dirtyStates.value[selectedType.value] = false
   refetch()
 }
+
+function handleDeleted() {
+  refetch()
+  backToList()
+}
+
+// If the open platform disappears after a refetch, fall back to the list rather
+// than stranding the user on a detail with nothing behind it.
+watch(allChannels, () => {
+  if (view.value === 'detail' && selectedType.value && !selectedItem.value) {
+    backToList()
+  }
+})
 </script>

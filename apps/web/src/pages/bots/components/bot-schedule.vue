@@ -46,23 +46,22 @@
       <span>{{ $t('common.loading') }}</span>
     </div>
 
-    <!-- Empty -->
+    <!-- Empty reads as a single taskless schedule row, so the list frame holds instead of a centered onboarding block -->
     <div
       v-else-if="schedules.length === 0"
-      class="flex flex-col items-center justify-center rounded-[var(--radius-menu-shell)] border border-dashed border-border py-16 text-center"
+      class="flex min-h-[3.75rem] items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3.5"
     >
-      <Calendar class="mb-3 size-8 text-muted-foreground/40" />
-      <p class="text-sm font-medium text-foreground">
+      <p class="min-w-0 flex-1 truncate text-sm text-muted-foreground">
         {{ $t('bots.schedule.empty') }}
       </p>
       <Button
-        variant="outline"
-        size="sm"
-        class="mt-4"
+        variant="ghost"
+        size="icon"
+        class="size-7 shrink-0 text-muted-foreground"
+        :aria-label="$t('bots.schedule.create')"
         @click="handleNew"
       >
         <Plus class="size-4" />
-        {{ $t('bots.schedule.create') }}
       </Button>
     </div>
 
@@ -469,7 +468,7 @@
 
 <script setup lang="ts">
 import {
-  ArrowUpDown, Calendar, Check, ChevronRight,
+  ArrowUpDown, Check, ChevronRight,
   MoreHorizontal, Pencil, Plus, Trash2,
 } from 'lucide-vue-next'
 import { ref, computed, onMounted, reactive, watch } from 'vue'

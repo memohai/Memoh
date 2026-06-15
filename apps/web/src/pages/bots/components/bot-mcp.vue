@@ -51,7 +51,7 @@
           </div>
           <div
             v-else-if="filteredItems.length === 0"
-            class="flex-1 flex items-center justify-center p-4 text-center text-[11px] text-muted-foreground"
+            class="flex-1 flex items-center justify-center p-4 text-center text-caption text-muted-foreground"
           >
             {{ $t('mcp.emptyTitle') }}
           </div>
@@ -132,7 +132,7 @@
             </div>
           </div>
           <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
-            <p class="min-w-0 truncate text-[11px] text-muted-foreground font-mono leading-none">
+            <p class="min-w-0 truncate text-caption text-muted-foreground font-mono leading-none">
               {{ $t('mcp.lastProbed') }}: {{ formatDate(selectedItem.last_probed_at) || $t('mcp.statusUnknown') }}
             </p>
             <div class="flex items-center gap-2 shrink-0 flex-wrap justify-end">
@@ -143,7 +143,7 @@
                   class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/40 border border-border/50"
                 >
                   <div class="size-1 rounded-full bg-muted-foreground/40" />
-                  <span class="text-[10px] text-muted-foreground font-medium whitespace-nowrap">
+                  <span class="text-caption text-muted-foreground font-medium whitespace-nowrap">
                     {{ $t('mcp.unsaved') }}
                   </span>
                 </div>
@@ -226,7 +226,7 @@
               <AlertCircle class="size-4 text-destructive shrink-0 mt-0.5" />
               <div class="text-xs text-destructive flex-1">
                 <strong class="font-medium">{{ $t('mcp.saveFailed') }}:</strong> {{ tier1ErrorMessage }}
-                <p class="text-[10px] opacity-80 mt-1 leading-relaxed">
+                <p class="text-caption opacity-80 mt-1 leading-relaxed">
                   {{ $t('mcp.invalidConfig') }}
                 </p>
               </div>
@@ -243,7 +243,7 @@
                 <div class="mt-2">
                   <button
                     type="button"
-                    class="inline-flex items-center justify-center whitespace-nowrap transition-all outline-none cursor-pointer border border-warning/30 bg-transparent hover:bg-warning/10 rounded-lg px-2 h-6 text-[10px] font-medium text-warning shadow-none"
+                    class="inline-flex items-center justify-center whitespace-nowrap transition-all outline-none cursor-pointer border border-warning/30 bg-transparent hover:bg-warning/10 rounded-lg px-2 h-6 text-caption font-medium text-warning shadow-none"
                     @click="showRawLog = true"
                   >
                     {{ $t('mcp.viewRawLog') }}
@@ -267,21 +267,21 @@
                 <Badge
                   v-if="selectedItem.status === 'connected'"
                   variant="outline"
-                  class="text-[10px] text-success"
+                  class="text-caption text-success"
                 >
                   {{ $t('mcp.statusConnected') }}
                 </Badge>
                 <Badge
                   v-else-if="selectedItem.status === 'error'"
                   variant="outline"
-                  class="text-[10px] text-destructive"
+                  class="text-caption text-destructive"
                 >
                   {{ $t('mcp.statusError') }}
                 </Badge>
                 <Badge
                   v-else
                   variant="outline"
-                  class="text-[10px] text-muted-foreground"
+                  class="text-caption text-muted-foreground"
                 >
                   {{ $t('mcp.statusUnknown') }}
                 </Badge>
@@ -438,7 +438,7 @@
                   <h4 class="text-xs font-medium">
                     {{ $t('mcp.advancedSettings') }}
                   </h4>
-                  <p class="text-[11px] text-muted-foreground">
+                  <p class="text-caption text-muted-foreground">
                     {{ $t('mcp.advancedSettingsHint') }}
                   </p>
                 </div>
@@ -468,7 +468,7 @@
               >
                 <!-- Sub Block: Environment / Headers -->
                 <div class="space-y-3">
-                  <h5 class="text-[11px] font-medium text-foreground uppercase tracking-wider">
+                  <h5 class="text-caption font-medium text-foreground uppercase tracking-wider">
                     {{ connectionType === 'stdio' ? $t('mcp.envVars') : $t('mcp.httpHeaders') }}
                   </h5>
                   <div v-if="connectionType === 'stdio'">
@@ -483,7 +483,7 @@
                       v-if="envPairs.length > 0"
                       class="space-y-2"
                     >
-                      <h6 class="text-[11px] font-medium text-muted-foreground">
+                      <h6 class="text-caption font-medium text-muted-foreground">
                         {{ $t('mcp.envVars') }}
                       </h6>
                       <KeyValueEditor
@@ -506,11 +506,11 @@
                   class="space-y-3 pt-2 border-t border-border/50"
                 >
                   <div class="flex items-center justify-between">
-                    <h5 class="text-[11px] font-medium text-foreground uppercase tracking-wider flex items-center gap-2">
+                    <h5 class="text-caption font-medium text-foreground uppercase tracking-wider flex items-center gap-2">
                       <Lock class="size-3 text-muted-foreground" /> {{ $t('mcp.oauth.title') }}
                     </h5>
                     <div
-                      class="inline-flex items-center justify-center rounded-sm border font-medium w-fit whitespace-nowrap shrink-0 px-2 py-0.5 text-[9px] shadow-none uppercase tracking-wide"
+                      class="inline-flex items-center justify-center rounded-sm border font-medium w-fit whitespace-nowrap shrink-0 px-2 py-0.5 text-caption shadow-none uppercase tracking-wide"
                       :class="oauthStatus?.has_token ? 'bg-success/10 text-success border-success/20' : 'text-muted-foreground bg-muted border-border'"
                     >
                       {{ oauthStatus?.has_token ? $t('mcp.oauth.authorized') : $t('mcp.notConfigured') }}
@@ -607,7 +607,7 @@
                 </h4>
                 <button
                   type="button"
-                  class="inline-flex items-center justify-center whitespace-nowrap font-medium transition-all outline-none cursor-pointer hover:underline text-[10px] text-muted-foreground hover:text-foreground"
+                  class="inline-flex items-center justify-center whitespace-nowrap font-medium transition-all outline-none cursor-pointer hover:underline text-caption text-muted-foreground hover:text-foreground"
                   @click="openToolsModal"
                 >
                   {{ $t('common.viewAll') }} ({{ displayTools.length }})
@@ -615,7 +615,7 @@
               </div>
               <div
                 v-if="displayTools.length === 0"
-                class="text-[11px] text-muted-foreground py-1"
+                class="text-caption text-muted-foreground py-1"
               >
                 {{ $t('mcp.noToolsExposed') }}
               </div>
@@ -627,7 +627,7 @@
                   v-for="tool in displayTools.slice(0, 5)"
                   :key="tool.name"
                   variant="secondary"
-                  class="text-[10px] font-mono hover:bg-secondary/80 cursor-default shadow-none border border-border bg-muted max-w-35 truncate"
+                  class="text-caption font-mono hover:bg-secondary/80 cursor-default shadow-none border border-border bg-muted max-w-35 truncate"
                   :title="tool.description"
                 >
                   {{ tool.name }}
@@ -635,7 +635,7 @@
                 <button
                   v-if="displayTools.length > 5"
                   type="button"
-                  class="text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors ml-1"
+                  class="text-caption font-medium text-muted-foreground hover:text-foreground transition-colors ml-1"
                   @click="openToolsModal"
                 >
                   +{{ displayTools.length - 5 }} {{ $t('mcp.more') }}
@@ -654,7 +654,7 @@
                     <h4 class="text-xs font-medium text-destructive">
                       {{ $t('common.dangerZone') }}
                     </h4>
-                    <p class="text-[11px] text-muted-foreground">
+                    <p class="text-caption text-muted-foreground">
                       {{ $t('mcp.dangerZoneHint') }}
                     </p>
                   </div>
@@ -691,7 +691,7 @@
         <h2 class="tracking-tight text-xs font-medium mt-4">
           {{ $t('mcp.emptyTitle') }}
         </h2>
-        <p class="text-[11px] text-muted-foreground text-center max-w-sm mt-2 mb-6 leading-relaxed">
+        <p class="text-caption text-muted-foreground text-center max-w-sm mt-2 mb-6 leading-relaxed">
           {{ $t('mcp.emptyDescription') }}
         </p>
         <button
@@ -719,7 +719,7 @@
             {{ $t('mcp.importSandbox') }}
           </h2>
           <div class="flex items-center gap-2">
-            <p class="text-[10px] text-muted-foreground font-mono bg-background border border-border px-1.5 py-0.5 rounded">
+            <p class="text-caption text-muted-foreground font-mono bg-background border border-border px-1.5 py-0.5 rounded">
               .gemini/config/mcpServers.json
             </p>
             <button
@@ -734,7 +734,7 @@
         <div class="flex items-center gap-2">
           <button
             type="button"
-            class="inline-flex items-center justify-center whitespace-nowrap outline-none cursor-pointer border border-border bg-background hover:bg-accent rounded-lg px-2 h-7 text-[10px] font-medium shadow-none text-muted-foreground hover:text-foreground"
+            class="inline-flex items-center justify-center whitespace-nowrap outline-none cursor-pointer border border-border bg-background hover:bg-accent rounded-lg px-2 h-7 text-caption font-medium shadow-none text-muted-foreground hover:text-foreground"
             @click="formatImportJson"
           >
             { } {{ $t('common.format') }}
@@ -834,7 +834,7 @@
             <h4 class="text-xs font-medium font-mono text-foreground">
               {{ tool.name }}
             </h4>
-            <p class="text-[11px] text-muted-foreground leading-relaxed">
+            <p class="text-caption text-muted-foreground leading-relaxed">
               {{ tool.description || $t('mcp.noDescription') }}
             </p>
           </div>
@@ -869,12 +869,12 @@
         </DialogClose>
       </div>
       <ScrollArea class="h-64 bg-background">
-        <pre class="p-4 text-[10px] font-mono text-muted-foreground whitespace-pre-wrap break-all">{{ selectedItem?.status_message || $t('mcp.noLog') }}</pre>
+        <pre class="p-4 text-caption font-mono text-muted-foreground whitespace-pre-wrap break-all">{{ selectedItem?.status_message || $t('mcp.noLog') }}</pre>
       </ScrollArea>
       <div class="p-3 border-t border-border/50 bg-muted/10 flex justify-end">
         <button
           type="button"
-          class="inline-flex items-center justify-center whitespace-nowrap outline-none cursor-pointer border border-border bg-background hover:bg-accent rounded-lg px-3 h-7 text-[10px] font-medium shadow-none"
+          class="inline-flex items-center justify-center whitespace-nowrap outline-none cursor-pointer border border-border bg-background hover:bg-accent rounded-lg px-3 h-7 text-caption font-medium shadow-none"
           @click="copyText(selectedItem?.status_message || ''); toast.success($t('common.copied'))"
         >
           {{ $t('mcp.copyLog') }}
@@ -904,7 +904,7 @@
       </div>
       <div class="flex-1 flex min-h-0 bg-background">
         <div class="w-1/2 border-r border-border p-5 flex flex-col bg-muted/5">
-          <p class="text-[11px] text-muted-foreground leading-relaxed">
+          <p class="text-caption text-muted-foreground leading-relaxed">
             {{ $t('mcp.editLongTextHint') }}
           </p>
         </div>
