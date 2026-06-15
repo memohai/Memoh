@@ -118,6 +118,10 @@
         v-show="sidebarView === 'files'"
         class="h-full"
       />
+      <PanelSchedule
+        v-show="sidebarView === 'schedule'"
+        class="h-full"
+      />
       <div class="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-sidebar to-transparent" />
     </div>
 
@@ -167,7 +171,7 @@ import { computed, onBeforeUnmount, ref, watch, type Component } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
-import { Files, MessageCircle, Search, Settings } from 'lucide-vue-next'
+import { Files, MessageCircle, Search, Settings, Calendar } from 'lucide-vue-next'
 import { BadgeCount, Button } from '@memohai/ui'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore, type SidebarView } from '@/store/workspace-tabs'
@@ -175,6 +179,7 @@ import { hasBotPermission } from '@/utils/bot-permissions'
 import BotSwitcher from './bot-switcher.vue'
 import PanelSessions from './panel-sessions.vue'
 import PanelFiles from './panel-files.vue'
+import PanelSchedule from './panel-schedule.vue'
 import SessionSearchDialog from './session-search-dialog.vue'
 
 defineProps<{
@@ -227,6 +232,7 @@ const availableViews = computed<ActivityView[]>(() => {
   if (canWorkspaceRead.value) {
     views.push({ id: 'files', label: t('chat.activityBar.files'), icon: Files })
   }
+  views.push({ id: 'schedule', label: t('chat.activityBar.schedule'), icon: Calendar })
   return views
 })
 

@@ -154,15 +154,14 @@
 
 @layer components {
   [data-chat-content] .prose {
-    /* Chat reading body: 16px / 400. This is a READING surface, not UI chrome, so
-     * it sits above the 12-14px control rungs. */
-    font-size: 1rem;
+    /* Chat reading body: 15px / 400. */
+    font-size: 0.9375rem;
     line-height: 1.6;
     font-weight: 400;
   }
 
   [data-chat-content] .chat-user-bubble {
-    font-size: 1rem;
+    font-size: 0.9375rem;
     line-height: 1.6;
   }
 
@@ -298,19 +297,18 @@
    * edge). Header is one notch grayer than --muted so the two title strips
    * (table header + code-block header) read as a quiet label band. */
   --table-border: color-mix(in oklch, var(--color-border) 55%, transparent);
-  --table-header-bg: color-mix(in oklch, var(--color-muted), var(--color-border) 35%);
+  --table-header-bg: oklch(0.948 0 0);
   --code-action-hover-bg: transparent;
 
-  /* Inline code (`internal/` etc.) — a dimmed gray chip, text-button style.
-   * It reads as a quiet token against the pure-white table/code body. */
-  --inline-code-bg: var(--color-accent);
+  /* Inline code */
+  --inline-code-bg: oklch(0.942 0 0);
   --inline-code-fg: var(--color-foreground);
   --inline-code-border: transparent;
 
-  /* Code blocks */
-  --code-bg: var(--color-muted);
+  /* Code blocks — 18-delta from white so the surface is clearly distinct */
+  --code-bg: oklch(0.935 0 0);
   --code-fg: var(--color-foreground);
-  --code-border: var(--color-border);
+  --code-border: oklch(0.915 0 0);
 }
 
 /* Paragraph/heading nodes hard-set font-size from --ms-text-* via scoped rules;
@@ -340,11 +338,7 @@
 
 .markstream-vue .table-node {
   box-shadow: none;
-  /* Body is pure white so it reads brighter than the (slightly gray) chat
-   * surface — never the same as the background. */
-  background-color: #fff;
-  /* Decoupled from the larger body font so tables stay compact: table body
-   * 15px, header 14px (see thead rule). */
+  background-color: var(--color-card);
   font-size: 0.9375rem;
 }
 

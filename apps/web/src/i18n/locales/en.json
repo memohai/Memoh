@@ -537,6 +537,9 @@
     "recents": "Recents",
     "quickActions": "Quick Actions",
     "scheduledJobs": "Scheduled Jobs",
+    "botSettings": "Bot Settings",
+    "manageSchedule": "Manage",
+    "noBotSelected": "No bot selected",
     "sessionTypeHeartbeat": "Heartbeat",
     "sessionTypeSchedule": "Scheduled Task",
     "sessionTypeSubagent": "Subagent",
@@ -587,7 +590,8 @@
     "activityBar": {
       "sessions": "Chat",
       "files": "Files",
-      "search": "Search"
+      "search": "Search",
+      "schedule": "Schedule"
     },
     "workspaceEmpty": "No open tabs",
     "workspaceEmptyHint": "Pick a session from the sidebar, or open a file, terminal or browser",

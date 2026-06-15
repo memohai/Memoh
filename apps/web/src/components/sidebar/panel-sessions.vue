@@ -34,13 +34,13 @@
         block
         class="h-9 justify-start gap-[9px] px-[11px] text-control font-medium text-foreground/92 dark:text-[color:oklch(0.86_0_0)]"
         :disabled="!currentBotId"
-        @click="handleScheduledJobs"
+        @click="handleBotSettings"
       >
-        <Clock
+        <Settings2
           :stroke-width="1.75"
           class="size-[18px]"
         />
-        {{ t('chat.scheduledJobs') }}
+        {{ t('chat.botSettings') }}
       </Button>
     </div>
     <Recents class="flex-1 min-h-0" />
@@ -52,7 +52,7 @@ import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { Button } from '@memohai/ui'
-import { SquarePen, Clock } from 'lucide-vue-next'
+import { SquarePen, Settings2 } from 'lucide-vue-next'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import Recents from './recents.vue'
@@ -69,13 +69,10 @@ function handleNewSession() {
   workspaceTabs.openChat(t('chat.newSession'))
 }
 
-// Scheduled jobs live on the bot's settings page as a tab. The bot-detail route
-// accepts an id in its botName slot (same shortcut schedule-trigger-block uses),
-// so we can deep-link straight to the current bot's schedule tab without
-// resolving a name first.
-function handleScheduledJobs() {
+// Navigate to the current bot's settings overview.
+function handleBotSettings() {
   const botId = currentBotId.value
   if (!botId) return
-  void router.push({ name: 'bot-detail', params: { botName: botId }, query: { tab: 'schedule' } })
+  void router.push({ name: 'bot-detail', params: { botName: botId } })
 }
 </script>

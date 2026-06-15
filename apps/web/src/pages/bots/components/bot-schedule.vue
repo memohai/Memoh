@@ -153,22 +153,18 @@
           <!-- Name + Enabled -->
           <div class="flex items-end gap-3">
             <div class="min-w-0 flex-1 space-y-1.5">
-              <Label
-                for="sched-name"
-                class="text-xs"
-              >
+              <Label for="sched-name">
                 {{ $t('bots.schedule.form.name') }}
               </Label>
               <Input
                 id="sched-name"
                 v-model="form.name"
                 :placeholder="$t('bots.schedule.form.namePlaceholder')"
-                class="h-8 text-xs"
               />
             </div>
-            <div class="flex h-8 shrink-0 items-center gap-2">
+            <div class="flex h-9 shrink-0 items-center gap-2">
               <Label
-                class="cursor-pointer text-xs text-muted-foreground"
+                class="cursor-pointer text-muted-foreground"
                 @click="form.enabled = !form.enabled"
               >
                 {{ $t('bots.schedule.form.enabled') }}
@@ -182,44 +178,34 @@
 
           <!-- Description -->
           <div class="space-y-1.5">
-            <Label
-              for="sched-desc"
-              class="text-xs"
-            >
+            <Label for="sched-desc">
               {{ $t('bots.schedule.form.description') }}
-              <span class="ml-1 text-[10px] text-muted-foreground">({{ $t('common.optional') }})</span>
+              <span class="ml-1 text-[11px] text-muted-foreground font-normal">({{ $t('common.optional') }})</span>
             </Label>
             <Input
               id="sched-desc"
               v-model="form.description"
               :placeholder="$t('bots.schedule.form.descriptionPlaceholder')"
-              class="h-8 text-xs"
             />
           </div>
 
           <!-- Command -->
           <div class="space-y-1.5">
-            <Label
-              for="sched-command"
-              class="text-xs"
-            >
+            <Label for="sched-command">
               {{ $t('bots.schedule.form.command') }}
             </Label>
             <Textarea
               id="sched-command"
               v-model="form.command"
-              class="min-h-[4.5rem] resize-none font-mono text-xs"
+              class="min-h-[4.5rem] resize-none font-mono"
               :placeholder="$t('bots.schedule.form.commandPlaceholder')"
               rows="3"
             />
-            <p class="text-[11px] text-muted-foreground">
-              {{ $t('bots.schedule.form.commandHint') }}
-            </p>
           </div>
 
           <!-- Schedule picker -->
           <div class="space-y-3">
-            <Label class="text-xs">
+            <Label>
               {{ $t('bots.schedule.form.pattern') }}
             </Label>
 
@@ -227,10 +213,7 @@
             <div class="flex items-center gap-2 flex-wrap">
               <!-- Mode selector -->
               <Select v-model="schedModeModel">
-                <SelectTrigger
-                  size="sm"
-                  class="w-36 shrink-0"
-                >
+                <SelectTrigger class="w-36 shrink-0">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -238,7 +221,6 @@
                     v-for="mode in SCHEDULE_MODES"
                     :key="mode.value"
                     :value="mode.value"
-                    class="text-xs"
                   >
                     {{ $t(mode.labelKey) }}
                   </SelectItem>
@@ -252,21 +234,21 @@
                   :min="1"
                   :max="59"
                   :model-value="patternState.intervalMinutes"
-                  class="h-8 w-16 text-xs text-center"
+                  class="w-20 text-center"
                   @update:model-value="v => patchState({ intervalMinutes: clampInt(v, 1, 59, 1) })"
                 />
-                <span class="text-xs text-muted-foreground">{{ $t('bots.schedule.picker.minutes') }}</span>
+                <span class="text-sm text-muted-foreground">{{ $t('bots.schedule.picker.minutes') }}</span>
               </template>
 
               <!-- Hourly: inline minute -->
               <template v-else-if="patternState.mode === 'hourly'">
-                <span class="text-xs text-muted-foreground">{{ $t('bots.schedule.picker.atMinute') }}</span>
+                <span class="text-sm text-muted-foreground">{{ $t('bots.schedule.picker.atMinute') }}</span>
                 <Input
                   type="number"
                   :min="0"
                   :max="59"
                   :model-value="patternState.minute"
-                  class="h-8 w-16 text-xs text-center"
+                  class="w-20 text-center"
                   @update:model-value="v => patchState({ minute: clampInt(v, 0, 59, 0) })"
                 />
               </template>
@@ -276,7 +258,6 @@
                 v-else-if="patternState.mode === 'daily'"
                 :hour="patternState.hours[0] ?? 9"
                 :minute="patternState.minute"
-                size="sm"
                 @update:hour="v => patchState({ hours: [v] })"
                 @update:minute="v => patchState({ minute: v })"
               />
@@ -286,26 +267,24 @@
                 v-else-if="patternState.mode === 'weekly'"
                 :hour="patternState.hours[0] ?? 9"
                 :minute="patternState.minute"
-                size="sm"
                 @update:hour="v => patchState({ hours: [v] })"
                 @update:minute="v => patchState({ minute: v })"
               />
 
               <!-- Monthly: day input + TimeInput inline -->
               <template v-else-if="patternState.mode === 'monthly'">
-                <span class="text-xs text-muted-foreground">{{ $t('bots.schedule.picker.day') }}</span>
+                <span class="text-sm text-muted-foreground">{{ $t('bots.schedule.picker.day') }}</span>
                 <Input
                   type="number"
                   :min="1"
                   :max="31"
                   :model-value="patternState.monthDays[0] ?? 1"
-                  class="h-8 w-16 text-xs text-center"
+                  class="w-16 text-center"
                   @update:model-value="v => patchState({ monthDays: [clampInt(v, 1, 31, 1)] })"
                 />
                 <TimeInput
                   :hour="patternState.hours[0] ?? 9"
                   :minute="patternState.minute"
-                  size="sm"
                   @update:hour="v => patchState({ hours: [v] })"
                   @update:minute="v => patchState({ minute: v })"
                 />
@@ -321,7 +300,7 @@
                 v-for="(key, idx) in WEEKDAY_KEYS"
                 :key="key"
                 type="button"
-                class="h-8 rounded-md border text-xs transition-colors"
+                class="h-9 rounded-md border text-sm transition-colors"
                 :class="patternState.weekdays.includes(idx)
                   ? 'bg-primary text-primary-foreground border-primary'
                   : 'bg-background hover:bg-accent'"
@@ -338,7 +317,7 @@
             >
               <Input
                 :model-value="patternState.advancedPattern"
-                class="h-8 font-mono text-xs"
+                class="font-mono"
                 placeholder="0 9 * * *"
                 @update:model-value="v => patchState({ advancedPattern: String(v) })"
               />
@@ -382,7 +361,7 @@
                 <div class="mt-3">
                   <!-- Run limit: single input, ∞ placeholder = unlimited -->
                   <div class="flex items-center justify-between gap-3">
-                    <Label class="text-xs text-muted-foreground">
+                    <Label class="text-muted-foreground">
                       {{ $t('bots.schedule.form.maxCalls') }}
                     </Label>
                     <Input

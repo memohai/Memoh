@@ -22,7 +22,7 @@ import {
 // panel is a singleton dockview panel whose content follows the active
 // session; files/terminals/browsers/displays are multi-instance panels.
 
-export type SidebarView = 'sessions' | 'files'
+export type SidebarView = 'sessions' | 'files' | 'schedule'
 
 export const CHAT_PANEL_ID = 'chat'
 
@@ -110,10 +110,42 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     storage.value = { ...storage.value, [botId]: { ...state, ...patch } }
   }
 
+  // Dockview serializes `hideHeader: true` when a group's tab bar is hidden
+  // (display:none). Once this enters localStorage it re-applies on every
+  // fromJSON call, creating a permanent cycle where the tab bar never appears.
+  // Strip the flag from all leaf group data so the tab bar is always visible,
+  // both when reading from storage and when writing back to storage.
+  function sanitizeLayout(layout: SerializedDockview): SerializedDockview {
+    type GridNode = { type: string; data: unknown }
+    function walkNode(node: GridNode): GridNode {
+      if (!node || typeof node !== 'object') return node
+      if (node.type === 'leaf' && node.data && typeof node.data === 'object') {
+        const data = { ...(node.data as Record<string, unknown>) }
+        delete data.hideHeader
+        return { ...node, data }
+      }
+      if (node.type === 'branch' && Array.isArray(node.data)) {
+        return { ...node, data: (node.data as GridNode[]).map(walkNode) }
+      }
+      return node
+    }
+    try {
+      return {
+        ...layout,
+        grid: {
+          ...layout.grid,
+          root: walkNode(layout.grid.root as GridNode) as SerializedDockview['grid']['root'],
+        },
+      }
+    } catch {
+      return layout
+    }
+  }
+
   function persistLayout() {
     if (!api.value || suppressPersist || !loadedBotId) return
     try {
-      patchBotLayout(loadedBotId, { layout: api.value.toJSON() })
+      patchBotLayout(loadedBotId, { layout: sanitizeLayout(api.value.toJSON()) })
     } catch {
       // Serialization should never throw, but a failed save must not break UI.
     }
@@ -127,7 +159,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       const stored = storage.value[botId]?.layout ?? null
       if (stored) {
         try {
-          dock.fromJSON(stored)
+          dock.fromJSON(sanitizeLayout(stored))
         } catch {
           dock.clear()
           patchBotLayout(botId, { layout: null })

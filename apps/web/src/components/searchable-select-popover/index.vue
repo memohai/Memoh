@@ -8,138 +8,110 @@
         :selected-option="selectedOption"
         :placeholder="placeholder"
       >
-        <Button
-          variant="outline"
-          role="combobox"
+        <button
+          data-slot="select-trigger"
+          data-size="default"
+          :data-placeholder="displayLabel ? undefined : ''"
+          type="button"
           :aria-expanded="open"
           :aria-label="ariaLabel || placeholder"
-          class="w-full justify-between font-normal"
+          :class="[selectTriggerClass, 'w-full']"
         >
-          <span
-            class="truncate"
-            :title="displayLabel || placeholder"
-          >
-            {{ displayLabel || placeholder }}
-          </span>
-          <Search
-            class="ml-2 size-3.5 shrink-0 text-muted-foreground"
-          />
-        </Button>
+          <span class="line-clamp-1">{{ displayLabel || placeholder }}</span>
+          <ChevronsUpDown class="opacity-50" />
+        </button>
       </slot>
     </PopoverTrigger>
     <PopoverContent
+      menu
+      align="start"
       class="p-0"
       :style="{ width: `calc(var(--reka-popover-trigger-width) * ${widthRatio})` }"
-      align="start"
     >
-      <div class="flex items-center border-b px-3">
-        <Search
-          v-if="searchIcon"
-          class="mr-2 size-3.5 shrink-0 text-muted-foreground"
-        />
-        <input
-          v-model="searchTerm"
-          role="combobox"
-          :aria-controls="listboxId"
-          :aria-expanded="open"
-          :aria-activedescendant="activeIndex >= 0 ? `${listboxId}-${activeIndex}` : undefined"
-          :placeholder="searchPlaceholder"
-          :aria-label="searchAriaLabel"
-          class="flex h-10 w-full bg-transparent py-3 text-xs outline-none placeholder:text-muted-foreground"
-          @keydown="onKeydown"
-        >
-      </div>
-
-      <div
-        :id="listboxId"
-        ref="scrollEl"
-        class="max-h-64 overflow-y-auto px-1"
-        role="listbox"
-      >
-        <div
-          v-if="rows.length === 0"
-          class="py-6 text-center text-xs text-muted-foreground"
-        >
-          <p class="inline-block max-w-60 p-2 text-left leading-5">
-            {{ emptyText }}
-          </p>
+      <div class="flex flex-col overflow-hidden rounded-[var(--radius-menu-shell)] border border-[color:var(--border-menu)] bg-popover text-popover-foreground shadow-[var(--shadow-dropdown)]">
+        <div class="flex h-10 shrink-0 items-center gap-2 border-b border-border/40 px-3.5">
+          <input
+            v-model="searchTerm"
+            role="combobox"
+            :aria-controls="listboxId"
+            :aria-expanded="open"
+            :aria-activedescendant="activeIndex >= 0 ? `${listboxId}-${activeIndex}` : undefined"
+            :placeholder="searchPlaceholder"
+            :aria-label="searchAriaLabel"
+            class="flex h-full w-full bg-transparent text-control outline-hidden placeholder:text-muted-foreground"
+            @keydown="onKeydown"
+          >
         </div>
 
         <div
-          v-else
-          :style="{ height: `${totalSize}px`, width: '100%', position: 'relative' }"
+          :id="listboxId"
+          ref="scrollEl"
+          class="max-h-64 scroll-my-1 overflow-y-auto px-1"
+          role="listbox"
         >
           <div
-            v-for="vRow in virtualRows"
-            :key="vRow.key"
-            :ref="measureRow"
-            :data-index="vRow.virtual.index"
-            class="py-0.5"
-            :style="{ position: 'absolute', top: '0', left: '0', width: '100%', transform: `translateY(${vRow.virtual.start}px)` }"
+            v-if="rows.length === 0"
+            class="py-6 text-center text-control text-muted-foreground"
+          >
+            {{ emptyText }}
+          </div>
+
+          <div
+            v-else
+            :style="{ height: `${totalSize}px`, width: '100%', position: 'relative' }"
           >
             <div
-              v-if="vRow.row.type === 'header'"
-              class="px-2 py-1.5 text-xs font-medium text-muted-foreground"
+              v-for="vRow in virtualRows"
+              :key="vRow.key"
+              :ref="measureRow"
+              :data-index="vRow.virtual.index"
+              class="py-0.5"
+              :style="{ position: 'absolute', top: '0', left: '0', width: '100%', transform: `translateY(${vRow.virtual.start}px)` }"
             >
-              <slot
-                name="group-label"
-                :group="vRow.row.group"
+              <div
+                v-if="vRow.row.type === 'header'"
+                :class="menuLabelClass"
               >
-                {{ vRow.row.group.label }}
-              </slot>
-            </div>
+                <slot
+                  name="group-label"
+                  :group="vRow.row.group"
+                >
+                  {{ vRow.row.group.label }}
+                </slot>
+              </div>
 
-            <button
-              v-else
-              :id="`${listboxId}-${vRow.virtual.index}`"
-              type="button"
-              role="option"
-              :aria-selected="selected === vRow.row.option.value"
-              :aria-setsize="optionCount"
-              :aria-posinset="vRow.row.posinset"
-              class="relative flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-none hover:bg-accent hover:text-accent-foreground"
-              :class="{
-                'bg-accent': selected === vRow.row.option.value,
-                'bg-accent text-accent-foreground': activeIndex === vRow.virtual.index,
-              }"
-              @click="selectOption(vRow.row.option.value)"
-            >
-              <Check
-                v-if="selected === vRow.row.option.value"
-                class="size-3.5 shrink-0"
-              />
-              <span
+              <button
                 v-else
-                class="size-3.5 shrink-0"
-              />
-              <slot
-                name="option-icon"
-                :option="vRow.row.option"
-              />
-              <span class="flex min-w-0 flex-1 items-center gap-2">
+                :id="`${listboxId}-${vRow.virtual.index}`"
+                type="button"
+                role="option"
+                :aria-selected="selected === vRow.row.option.value"
+                :aria-setsize="optionCount"
+                :aria-posinset="vRow.row.posinset"
+                :data-highlighted="activeIndex === vRow.virtual.index ? '' : undefined"
+                :class="[menuItemClass, 'h-8']"
+                @click="selectOption(vRow.row.option.value)"
+                @pointermove="activeIndex = vRow.virtual.index"
+              >
+                <slot
+                  name="option-icon"
+                  :option="vRow.row.option"
+                />
                 <slot
                   name="option-label"
                   :option="vRow.row.option"
                 >
                   <span
-                    class="truncate flex-1 text-left"
+                    class="min-w-0 flex-1 truncate text-left"
                     :title="vRow.row.option.label"
                   >{{ vRow.row.option.label }}</span>
                 </slot>
-                <slot
-                  name="option-suffix"
-                  :option="vRow.row.option"
-                >
-                  <span
-                    v-if="vRow.row.option.description"
-                    class="ml-auto text-xs text-muted-foreground truncate max-w-[80%] text-right"
-                    :title="vRow.row.option.description"
-                  >
-                    {{ vRow.row.option.description }}
-                  </span>
-                </slot>
-              </span>
-            </button>
+                <Check
+                  v-if="selected === vRow.row.option.value"
+                  class="ml-auto size-4 shrink-0"
+                />
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -148,12 +120,14 @@
 </template>
 
 <script setup lang="ts">
-import { Search, Check } from 'lucide-vue-next'
+import { Check, ChevronsUpDown } from 'lucide-vue-next'
 import {
+  menuItemClass,
+  menuLabelClass,
   Popover,
   PopoverTrigger,
   PopoverContent,
-  Button,
+  selectTriggerClass,
 } from '@memohai/ui'
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
@@ -199,12 +173,7 @@ const props = withDefaults(defineProps<{
   searchAriaLabel?: string
   emptyText?: string
   showGroupHeaders?: boolean
-  // Popover width as a fraction of the trigger width. Defaults to full width;
-  // consumers with short labels (e.g. timezone) can narrow it.
   widthRatio?: number
-  // Show the magnifier glyph inside the panel search input. Off for a cleaner,
-  // combobox-style panel (the placeholder already says "Search …").
-  searchIcon?: boolean
 }>(), {
   placeholder: '',
   ariaLabel: '',
@@ -213,7 +182,6 @@ const props = withDefaults(defineProps<{
   emptyText: 'No results.',
   showGroupHeaders: true,
   widthRatio: 1,
-  searchIcon: true,
 })
 
 const selected = defineModel<string>({ default: '' })

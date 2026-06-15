@@ -533,6 +533,9 @@
     "recents": "最近",
     "quickActions": "快捷操作",
     "scheduledJobs": "定时任务",
+    "botSettings": "Bot 设置",
+    "manageSchedule": "管理",
+    "noBotSelected": "未选择 Bot",
     "sessionTypeHeartbeat": "心跳",
     "sessionTypeSchedule": "定时任务",
     "sessionTypeSubagent": "子智能体",
@@ -583,7 +586,8 @@
     "activityBar": {
       "sessions": "对话",
       "files": "文件",
-      "search": "搜索"
+      "search": "搜索",
+      "schedule": "日程"
     },
     "workspaceEmpty": "暂无打开的标签页",
     "workspaceEmptyHint": "从侧栏选择会话，或打开文件、终端、浏览器",

@@ -1349,7 +1349,8 @@ onActivated(() => {
             transitionScroll.value=true
           })
         })
-
+      } else {
+        transitionScroll.value=true
       }
       setTimeout(() => {
         lockScroll.value = false

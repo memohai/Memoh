@@ -54,7 +54,7 @@
           :aria-setsize="optionCount"
           :aria-posinset="vRow.row.posinset"
           :data-highlighted="activeIndex === vRow.virtual.index ? '' : undefined"
-          class="relative flex w-full cursor-pointer items-center gap-2 rounded-[var(--radius-menu)] px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-[color:var(--ui-selected)] h-8"
+          :class="[menuItemClass, 'h-8']"
           @click="$emit('update:modelValue', vRow.row.option.value)"
           @pointermove="activeIndex = vRow.virtual.index"
         >
@@ -76,6 +76,7 @@
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { Check } from 'lucide-vue-next'
+import { menuItemClass } from '@memohai/ui'
 import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import { useListboxKeyboard } from '@/composables/useListboxKeyboard'
 

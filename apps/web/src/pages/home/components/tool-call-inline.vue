@@ -1,5 +1,5 @@
 <template>
-  <div class="text-[13px] leading-[18px] font-[400]">
+  <div class="text-sm font-[400]">
     <div
       v-if="expandable"
       role="button"

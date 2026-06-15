@@ -143,7 +143,7 @@
       >
         <div
           v-if="cleanUserText(message.text) || message.forward || message.reply"
-          class="chat-user-bubble w-fit max-w-full rounded-xl bg-sidebar-accent px-3.5 py-2.5 text-foreground whitespace-pre-wrap break-words"
+          class="chat-user-bubble w-fit max-w-full rounded-lg bg-muted px-3.5 py-2.5 text-foreground whitespace-pre-wrap break-words"
         >
           <div
             v-if="message.forward"

@@ -1,5 +1,5 @@
 <template>
-  <div class="text-[13px] leading-[18px] font-[400]">
+  <div class="text-sm font-[400]">
     <button
       class="group/h flex items-center gap-1.5 w-full text-left transition-colors duration-75 cursor-pointer py-px text-muted-foreground hover:text-foreground select-none"
       @click="toggleOpen"
@@ -19,7 +19,7 @@
     </button>
     <CollapseSection :open="open">
       <div
-        class="mt-1 whitespace-pre-wrap text-xs text-muted-foreground leading-relaxed"
+        class="mt-1 whitespace-pre-wrap text-muted-foreground leading-relaxed"
         v-text="bodyText"
       />
     </CollapseSection>
