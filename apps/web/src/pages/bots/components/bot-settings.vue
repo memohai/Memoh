@@ -1,33 +1,29 @@
 <template>
-  <div class="mx-auto max-w-3xl pt-6 pb-8">
-    <!-- Page header: title + save action -->
-    <div class="mb-6 flex items-center justify-between px-2">
-      <h1 class="text-lg font-semibold">
-        {{ $t('bots.tabs.settings') }}
-      </h1>
-      <div class="flex items-center gap-3 shrink-0">
-        <Transition name="fade">
-          <div
-            v-if="hasChanges"
-            class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/40 border border-border/50"
-          >
-            <div class="size-1 rounded-full bg-muted-foreground/40" />
-            <span class="text-[10px] text-muted-foreground font-medium whitespace-nowrap">{{ $t('common.unsaved') }}</span>
-          </div>
-        </Transition>
-        <Button
-          size="sm"
-          :disabled="!hasChanges || saveLoading || !nameValid"
-          @click="handleSave"
+  <PageShell
+    variant="tab"
+    :title="$t('bots.tabs.settings')"
+  >
+    <template #actions>
+      <Transition name="fade">
+        <div
+          v-if="hasChanges"
+          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/40 border border-border/50"
         >
-          <Spinner
-            v-if="saveLoading"
-            class="mr-1.5 size-3"
-          />
-          {{ $t('bots.settings.save') }}
-        </Button>
-      </div>
-    </div>
+          <div class="size-1 rounded-full bg-muted-foreground/40" />
+          <span class="text-[10px] text-muted-foreground font-medium whitespace-nowrap">{{ $t('common.unsaved') }}</span>
+        </div>
+      </Transition>
+      <Button
+        :disabled="!hasChanges || saveLoading || !nameValid"
+        @click="handleSave"
+      >
+        <Spinner
+          v-if="saveLoading"
+          class="mr-1.5 size-3"
+        />
+        {{ $t('bots.settings.save') }}
+      </Button>
+    </template>
 
     <div class="space-y-8">
       <!-- URL Name -->
@@ -121,7 +117,7 @@
         @delete="handleDeleteBot"
       />
     </div>
-  </div>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
@@ -142,6 +138,7 @@ import SettingsContextCard from './settings-context-card.vue'
 import SettingsMultimediaCard from './settings-multimedia-card.vue'
 import SettingsDangerZone from './settings-danger-zone.vue'
 import BotBackupActions from './bot-backup-actions.vue'
+import PageShell from '@/components/page-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'

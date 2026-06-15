@@ -23,6 +23,7 @@ import BackendCard from '@/components/settings/backend-card.vue'
 import DetailPane from '@/components/settings/detail-pane.vue'
 import { useViewSwap } from '@/composables/useViewSwap'
 import SwapTransition from '@/components/settings/swap-transition.vue'
+import PageShell from '@/components/page-shell/index.vue'
 import ModelSetting from './model-setting.vue'
 
 const { t } = useI18n()
@@ -122,35 +123,30 @@ watch(providers, (list) => {
 <template>
   <SwapTransition :direction="direction">
     <!-- Gallery -->
-    <section
+    <PageShell
       v-if="view === 'list'"
-      class="mx-auto max-w-3xl px-6 pt-10 pb-12"
+      :title="t('sidebar.providers')"
     >
-      <header class="mb-6 flex items-center justify-between gap-4">
-        <h1 class="px-2 text-lg font-semibold">
-          {{ t('sidebar.providers') }}
-        </h1>
-        <div class="flex items-center gap-2">
-          <div
-            v-if="showSearch"
-            class="w-44 sm:w-56"
-          >
-            <InputGroup class="w-full">
-              <InputGroupAddon align="inline-start">
-                <Search class="size-3.5 text-muted-foreground" />
-              </InputGroupAddon>
-              <InputGroupInput
-                v-model="searchQuery"
-                :placeholder="t('provider.searchPlaceholder')"
-              />
-            </InputGroup>
-          </div>
-          <Button @click="openStatus.provideOpen = true">
-            <Plus class="size-4" />
-            {{ t('provider.addBtn') }}
-          </Button>
+      <template #actions>
+        <div
+          v-if="showSearch"
+          class="w-44 sm:w-56"
+        >
+          <InputGroup class="w-full">
+            <InputGroupAddon align="inline-start">
+              <Search class="size-3.5 text-muted-foreground" />
+            </InputGroupAddon>
+            <InputGroupInput
+              v-model="searchQuery"
+              :placeholder="t('provider.searchPlaceholder')"
+            />
+          </InputGroup>
         </div>
-      </header>
+        <Button @click="openStatus.provideOpen = true">
+          <Plus class="size-4" />
+          {{ t('provider.addBtn') }}
+        </Button>
+      </template>
 
       <div
         v-if="providers.length > 0"
@@ -231,7 +227,7 @@ watch(providers, (list) => {
         :providers="providers"
         hide-trigger
       />
-    </section>
+    </PageShell>
 
     <!-- Detail -->
     <DetailPane

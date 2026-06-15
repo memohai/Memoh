@@ -2,14 +2,12 @@
   <div>
     <SwapTransition :direction="direction">
       <!-- Configured platforms -->
-      <section
+      <PageShell
         v-if="view === 'list'"
-        class="mx-auto max-w-3xl pt-6 pb-8"
+        variant="tab"
+        :title="t('bots.channels.title')"
       >
-        <header class="mb-6 flex items-center justify-between gap-4 px-2">
-          <h1 class="text-lg font-semibold">
-            {{ t('bots.channels.title') }}
-          </h1>
+        <template #actions>
           <Button
             :disabled="unconfiguredChannels.length === 0 && !isLoading"
             @click="addOpen = true"
@@ -17,7 +15,7 @@
             <Plus class="size-4" />
             {{ t('bots.channels.addChannel') }}
           </Button>
-        </header>
+        </template>
 
         <div
           v-if="isLoading && configuredChannels.length === 0"
@@ -81,7 +79,7 @@
             </Button>
           </EmptyContent>
         </Empty>
-      </section>
+      </PageShell>
 
       <!-- Platform detail -->
       <section
@@ -152,6 +150,7 @@ import ChannelSettingsPanel from './channel-settings-panel.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import BackendCard from '@/components/settings/backend-card.vue'
 import SwapTransition from '@/components/settings/swap-transition.vue'
+import PageShell from '@/components/page-shell/index.vue'
 import { useViewSwap } from '@/composables/useViewSwap'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 

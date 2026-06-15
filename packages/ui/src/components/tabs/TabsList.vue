@@ -73,7 +73,7 @@ function clearPress() {
 }
 
 const rootClass = computed(() => variant.value === 'pill'
-  ? 'relative inline-flex w-fit items-center rounded-[var(--radius)] bg-[color:var(--segment-track)] p-0.5'
+  ? 'relative inline-flex w-fit items-center rounded-lg bg-[color:var(--segment-track)] p-0.5'
   : 'relative inline-flex w-full items-center border-b border-border')
 
 const listClass = computed(() => variant.value === 'pill'

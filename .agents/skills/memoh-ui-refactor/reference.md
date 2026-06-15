@@ -65,6 +65,19 @@ Delete layers on paper — it's free here and expensive once it's code.
 A bot tab shell differs slightly (`mx-auto max-w-3xl pt-6 pb-8`, the tab container adds
 its own `px-6`); mirror the sibling tabs, don't invent a new width.
 
+**Header alignment is a contract, not a per-page guess.** The `px-2` that aligns the title to
+card-content's left edge only holds when the body is `SettingsSection` cards (whose content is
+itself inset by `mx-4`). The moment the body is full-bleed — an `Input`, a `Table`, a grid of
+cards whose right edge meets the gutter — a `px-2` on the `<header>` shoves the right-aligned
+action 8px inside the body's right edge: this is the exact "Submit / New member / Save Settings
+don't line up" bug. The fix is structural and now exists: **`PageShell`
+(`apps/web/src/components/page-shell/index.vue`) owns the title, the right-side actions, and the
+body on one set of edges.** The title is inset (`pl-2`) to meet the section-label edge; the
+actions group has no right inset, so it meets the body's right edge; `variant="page" | "tab"`
+covers both the standalone surfaces and the bot-detail tabs (which get their gutter from the tab
+container). Compose through it — `<PageShell :title="…"><template #actions>…</template> …body… </PageShell>`
+— and never hand-roll a `<header>`, or the 8px drift comes straight back.
+
 ### Spacing ladder (reuse these rungs — don't free-style margins)
 
 | Gap between… | Value | Notes |
@@ -423,6 +436,10 @@ see it, replace it with the right column. This is your strip-list when refactori
 | `size="sm"` on a form footer / primary action | squat half-height buttons read as unfinished | default (`h-9`, full height); `sm` only for genuinely tight, secondary spots |
 | decorative icon stacked in a card / atop an empty block | a cost (surface, shadow, extra color, language-fit) with no signal | ship no icon; add one only after the developer signs off |
 | card-in-card (a bordered box wrapping bordered boxes) | nesting depth with no meaning; reads mostly-empty | flatten to one surface — hairline-divided tiles, not boxes-in-a-box |
+| `font-[NNN]` weight / `text-[Npx]` size / `text-foreground\|muted-foreground/NN` alpha in a page | off the role-map weight, off the `--text-*` scale, hand-mixed alpha — the single most common app-page drift (60+ files), and it sits even in the `about` reference | the three weights (`normal`/`medium`/`semibold`), the `--text-*` scale, the overlay ladder — and push the guard to scan `apps/web` |
+| `w-fit` / content-sized container width | one long string (a back label, a name) silently resizes the frame | pin the width; let text `truncate` inside a fixed box |
+| header `px-2` over a full-bleed body (`Input` / `Table` / grid of cards) | the right-aligned action indents 8px off the body's right edge → the "Submit / New member / Save don't line up" bug | compose through `PageShell` (`components/page-shell`) — it owns title + actions + body on one set of edges; never hand-roll a `<header>` |
+| a confirm's core question as `text-xs text-muted-foreground` (+ `size="sm"` buttons) | the *main* prompt rendered as the weakest type; the footer reads unfinished | the prompt is the title rung (`text-sm font-medium text-foreground`); footer buttons are default `h-9`, not `sm` |
 
 ## Component picker
 

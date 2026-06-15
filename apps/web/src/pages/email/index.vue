@@ -22,6 +22,7 @@ import BackendCard from '@/components/settings/backend-card.vue'
 import DetailPane from '@/components/settings/detail-pane.vue'
 import { useViewSwap } from '@/composables/useViewSwap'
 import SwapTransition from '@/components/settings/swap-transition.vue'
+import PageShell from '@/components/page-shell/index.vue'
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
@@ -86,35 +87,30 @@ watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
 <template>
   <SwapTransition :direction="direction">
     <!-- Provider list -->
-    <section
+    <PageShell
       v-if="view === 'list'"
-      class="mx-auto max-w-3xl px-6 pt-10 pb-12"
+      :title="t('email.title')"
     >
-      <header class="mb-6 flex items-center justify-between gap-4">
-        <h1 class="px-2 text-lg font-semibold">
-          {{ t('email.title') }}
-        </h1>
-        <div class="flex items-center gap-2">
-          <div
-            v-if="showSearch"
-            class="w-44 sm:w-56"
-          >
-            <InputGroup class="w-full">
-              <InputGroupAddon align="inline-start">
-                <Search class="size-3.5 text-muted-foreground" />
-              </InputGroupAddon>
-              <InputGroupInput
-                v-model="searchQuery"
-                :placeholder="t('email.searchPlaceholder')"
-              />
-            </InputGroup>
-          </div>
-          <Button @click="openStatus.addOpen = true">
-            <Plus class="size-4" />
-            {{ t('email.add') }}
-          </Button>
+      <template #actions>
+        <div
+          v-if="showSearch"
+          class="w-44 sm:w-56"
+        >
+          <InputGroup class="w-full">
+            <InputGroupAddon align="inline-start">
+              <Search class="size-3.5 text-muted-foreground" />
+            </InputGroupAddon>
+            <InputGroupInput
+              v-model="searchQuery"
+              :placeholder="t('email.searchPlaceholder')"
+            />
+          </InputGroup>
         </div>
-      </header>
+        <Button @click="openStatus.addOpen = true">
+          <Plus class="size-4" />
+          {{ t('email.add') }}
+        </Button>
+      </template>
 
       <div
         v-if="providers.length > 0"
@@ -166,7 +162,7 @@ watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
         v-model:open="openStatus.addOpen"
         hide-trigger
       />
-    </section>
+    </PageShell>
 
     <!-- Provider detail -->
     <DetailPane

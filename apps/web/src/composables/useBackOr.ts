@@ -18,8 +18,11 @@ import { useI18n } from 'vue-i18n'
  * tracks a small per-router stack from it, giving a backend-agnostic notion of
  * "the page before this one". router.back() itself works on both backends.
  *
- * This assumes in-page state (tabs/filters) syncs to the URL via router.replace
- * — see useSyncedQueryParam — so those swaps don't bury the real previous page.
+ * In-page state (tabs/filters) writes itself into the URL — see useSyncedQueryParam.
+ * Those transitions keep the same path, and installBackHistory treats a same-path
+ * transition as "not a navigation": it skips updating the predecessor instead of
+ * trusting callers to use replace. The contract is enforced here, not assumed, so a
+ * tab swap can never make "back" point at (or label itself after) the current page.
  */
 
 interface BackHistory {
@@ -39,7 +42,12 @@ export function installBackHistory(router: Router): void {
   if (histories.has(router)) return
   const state = shallowReactive<BackHistory>({ previous: null })
   histories.set(router, state)
-  router.afterEach((_to, from) => {
+  router.afterEach((to, from) => {
+    // Same-path transitions are in-page state syncs (a tab/filter writing itself
+    // into the query — see useSyncedQueryParam), not navigations. Skipping them
+    // here *enforces* that rule structurally: it holds even if a caller reaches for
+    // push instead of replace, so back never points at the page it sits on.
+    if (to.path === from.path) return
     // from is START_LOCATION (empty path, no matched records) on the first
     // navigation of the session — treat that as "no predecessor".
     state.previous = from.matched.length > 0 ? from : null

@@ -7,29 +7,38 @@
       <!-- Inherit the shared popover chrome (menu-shell radius, --border-menu
            hairline, dropdown shadow, p-4) instead of overriding it — this is the
            same surface as DropdownMenu / Select, so a confirm reads as part of
-           the one menu language. -->
-      <PopoverContent class="w-72">
+           the one menu language. This is an anchored popover, NOT a modal dialog:
+           keep it compact (the question is allowed to wrap to ~2 lines) and keep
+           the inherited p-4 edge inset so text never touches the border. -->
+      <PopoverContent class="w-72 max-w-[calc(100vw-2rem)]">
         <div class="space-y-3">
-          <div
-            v-if="title"
-            class="flex items-center gap-2"
-          >
+          <!-- The core question is the strongest line in a confirm: it reads as a
+               title (text-sm / medium / foreground), never as muted caption text.
+               With only a message, the message *is* the question; pass a title too
+               and the message drops to the supporting line beneath it. -->
+          <div class="flex items-start gap-2">
             <span
               v-if="$slots.icon"
-              class="shrink-0"
+              class="mt-0.5 shrink-0"
             >
               <slot name="icon" />
             </span>
-            <h5 class="min-w-0 truncate text-sm font-medium text-foreground">
-              {{ title }}
-            </h5>
+            <p class="min-w-0 text-sm font-medium text-foreground">
+              <template v-if="title">
+                {{ title }}
+              </template>
+              <slot v-else>
+                {{ message }}
+              </slot>
+            </p>
           </div>
 
-          <div class="text-xs leading-relaxed text-muted-foreground">
-            <slot>
-              {{ message }}
-            </slot>
-          </div>
+          <p
+            v-if="title && (message || !!$slots.default)"
+            class="text-xs leading-relaxed text-muted-foreground"
+          >
+            <slot>{{ message }}</slot>
+          </p>
 
           <div class="flex items-center justify-end gap-2 pt-1">
             <Button

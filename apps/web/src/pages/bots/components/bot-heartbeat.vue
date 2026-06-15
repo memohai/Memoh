@@ -1,19 +1,11 @@
 <template>
-  <div class="mx-auto max-w-3xl pt-6 pb-8">
-    <div class="mb-6 flex items-start justify-between gap-4 px-2">
-      <div class="min-w-0">
-        <h1 class="text-lg font-semibold text-foreground">
-          {{ $t('bots.heartbeat.title') }}
-        </h1>
-        <p class="mt-1 text-xs text-muted-foreground">
-          {{ $t('bots.settings.heartbeatDescription') }}
-        </p>
-      </div>
-
+  <PageShell
+    variant="tab"
+    :title="$t('bots.heartbeat.title')"
+  >
+    <template #actions>
       <Button
         variant="outline"
-        size="sm"
-        class="shrink-0"
         :disabled="isLoading"
         @click="handleRefresh"
       >
@@ -23,7 +15,7 @@
         />
         {{ $t('common.refresh') }}
       </Button>
-    </div>
+    </template>
 
     <div class="space-y-8">
       <SettingsSection :title="$t('bots.settings.heartbeatEnabled')">
@@ -69,13 +61,12 @@
 
         <div class="mx-4 flex min-h-[3.75rem] items-center justify-end py-3">
           <Button
-            size="sm"
             :disabled="!settingsChanged || isSaving"
             @click="handleSaveSettings"
           >
             <Spinner
               v-if="isSaving"
-              class="size-3"
+              class="size-4"
             />
             {{ $t('bots.settings.save') }}
           </Button>
@@ -84,12 +75,9 @@
 
       <SettingsSection :title="$t('bots.heartbeat.title')">
         <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3">
-          <div class="flex min-w-0 items-center gap-2">
-            <HeartPulse class="size-4 text-muted-foreground" />
-            <span class="text-sm font-medium text-foreground">
-              {{ $t('bots.heartbeat.title') }}
-            </span>
-          </div>
+          <span class="text-sm font-medium text-foreground">
+            {{ $t('common.status') }}
+          </span>
           <NativeSelect
             v-model="statusFilter"
             class="w-32"
@@ -122,9 +110,6 @@
           class="m-4 rounded-[var(--radius-menu-shell)] border border-dashed border-border py-12"
         >
           <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <HeartPulse />
-            </EmptyMedia>
             <EmptyTitle>{{ $t('bots.heartbeat.empty') }}</EmptyTitle>
             <EmptyDescription>
               {{ statusFilter ? $t('bots.heartbeat.filterEmpty') : $t('bots.heartbeat.description') }}
@@ -280,21 +265,22 @@
         </div>
       </SettingsSection>
     </div>
-  </div>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
-import { HeartPulse, Trash2, RotateCw, ChevronDown } from 'lucide-vue-next'
+import { Trash2, RotateCw, ChevronDown } from 'lucide-vue-next'
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
 import {
-  Badge, Button, Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle, Spinner, NativeSelect, Switch, Input,
+  Badge, Button, Empty, EmptyDescription, EmptyHeader, EmptyTitle, Spinner, NativeSelect, Switch, Input,
   Pagination, PaginationContent, PaginationEllipsis,
   PaginationFirst, PaginationItem, PaginationLast,
   PaginationNext, PaginationPrevious,
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import PageShell from '@/components/page-shell/index.vue'
 import ModelSelect from './model-select.vue'
 import {
   getBotsByBotIdSettings, putBotsByBotIdSettings,

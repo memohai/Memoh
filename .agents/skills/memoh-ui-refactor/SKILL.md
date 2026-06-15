@@ -10,8 +10,13 @@ description: Refactor an apps/web page into the new white-floating-card design l
 The eight rules that break a page if you miss them. The rest of this file is the *why* and
 the *how*; these are the *must*.
 
-1. **Copy the new, never the legacy.** Open a refactored reference page (§ Reference map in
-   `reference.md`) and mirror it. Never pattern-match off a dirty / un-refactored page.
+1. **Copy the new, never the legacy — and copy the *contract*, not a page's raw classes.** Open
+   a refactored reference page (§ Reference map in `reference.md`) and mirror its *structure*.
+   Never pattern-match off a dirty / un-refactored page — and never inherit a reference page's
+   stray `font-[NNN]` / `text-[Npx]` / `text-foreground/NN`: some references still carry
+   pre-contract token debt (`about` is one — it ships off-scale size, arbitrary weight, and
+   hand-mixed alpha in one line), so the token law in `packages/ui/AGENTS.md` outranks any
+   single page's classes when they disagree.
 2. **A refactor must not regress.** *Before* touching anything, inventory every behavior,
    feature, state, and path the old page has — the new page keeps all of them unless you
    deliberately drop one and say so.
@@ -91,6 +96,32 @@ and during a refactor, stop and ask what the refactor could break:
    the path, the required behaviors, and the complete feature set from the requirement itself.
    The risk inverts: not "losing" an old behavior, but **never specifying** one you needed —
    so think the full interaction surface (states, edges, empties, exits) up front.
+
+## Engineering correctness — the dirt the eye can't see
+
+A page can pass every visual rule and still be **wrong**. The most expensive debt isn't an
+ugly card — it's behavior that breaks because two modules quietly disagree about a contract.
+This is invisible in a screenshot and survives review, so it gets its own pass. Treat it as
+part of "clean," not a separate concern.
+
+- **A cross-module assumption must be enforced or eliminated — never just commented.** The
+  back-affordance bug is the cautionary tale: `useSyncedQueryParam` switched tabs with
+  `router.replace` under a comment claiming "replace won't bury the previous page," while
+  `installBackHistory`'s `afterEach` never distinguished replace from push — so replace *did*
+  overwrite `previous`, and the back button started reading the bot's raw `bot-<uuid>` slug.
+  Both comments looked reasonable; together they were wrong. If module A leans on module B
+  behaving a certain way, lock it with a type or a test, or remove the assumption. A comment
+  asserting the contract is not enforcement of it.
+- **Layout size must never be driven by content.** A `w-fit` sidebar
+  (`master-detail-sidebar-layout`) let one too-long back label stretch the whole panel — so a
+  bad string became a visibly wider sidebar. Pin widths and let text `truncate` inside a fixed
+  box; a locale change, longer data, or an upstream bug must never move the frame.
+- **In-page state syncs with `replace`; whatever reads "the previous page" must honor that.**
+  Tab/filter swaps are not navigations — they `router.replace`. A history reader that counts
+  replace transitions will treat a tab switch as a place to step "back" to.
+- **One root cause often wears two faces.** The slug label and the widened sidebar were the
+  same bug. When two oddities appear together on the same action, hunt one upstream cause
+  before patching each symptom in place.
 
 ## The design language in one breath
 

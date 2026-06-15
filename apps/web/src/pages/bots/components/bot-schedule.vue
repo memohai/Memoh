@@ -1,41 +1,39 @@
 <template>
-  <div class="mx-auto max-w-3xl pt-6 pb-8">
-    <header class="mb-6 flex items-center justify-between gap-4 px-2">
-      <h1 class="text-lg font-semibold">
-        {{ $t('bots.schedule.title') }}
-      </h1>
-      <div class="flex items-center gap-2">
-        <DropdownMenu v-if="schedules.length > 1">
-          <DropdownMenuTrigger as-child>
-            <Button
-              variant="ghost"
-              class="text-muted-foreground"
-            >
-              <ArrowUpDown class="size-3.5" />
-              {{ currentSortLabel }}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              v-for="opt in SORT_OPTIONS"
-              :key="opt.key"
-              class="justify-between gap-4"
-              @select="sortKey = opt.key"
-            >
-              {{ $t(opt.labelKey) }}
-              <Check
-                class="size-3.5 shrink-0"
-                :class="sortKey === opt.key ? 'opacity-100' : 'opacity-0'"
-              />
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <Button @click="handleNew">
-          <Plus class="size-4" />
-          {{ $t('bots.schedule.create') }}
-        </Button>
-      </div>
-    </header>
+  <PageShell
+    variant="tab"
+    :title="$t('bots.schedule.title')"
+  >
+    <template #actions>
+      <DropdownMenu v-if="schedules.length > 1">
+        <DropdownMenuTrigger as-child>
+          <Button
+            variant="ghost"
+            class="text-muted-foreground"
+          >
+            <ArrowUpDown class="size-3.5" />
+            {{ currentSortLabel }}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            v-for="opt in SORT_OPTIONS"
+            :key="opt.key"
+            class="justify-between gap-4"
+            @select="sortKey = opt.key"
+          >
+            {{ $t(opt.labelKey) }}
+            <Check
+              class="size-3.5 shrink-0"
+              :class="sortKey === opt.key ? 'opacity-100' : 'opacity-0'"
+            />
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Button @click="handleNew">
+        <Plus class="size-4" />
+        {{ $t('bots.schedule.create') }}
+      </Button>
+    </template>
 
     <!-- Loading -->
     <div
@@ -73,7 +71,7 @@
       <div
         v-for="item in sortedSchedules"
         :key="item.id"
-        class="group/card flex cursor-pointer items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3.5 transition-colors hover:bg-accent/30 dark:hover:bg-accent focus-visible:outline-none"
+        class="group/card flex cursor-pointer items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3.5 transition-colors hover:bg-accent focus-visible:outline-none"
         role="button"
         tabindex="0"
         @click="handleEdit(item)"
@@ -179,7 +177,7 @@
           <div class="space-y-1.5">
             <Label for="sched-desc">
               {{ $t('bots.schedule.form.description') }}
-              <span class="ml-1 text-[11px] text-muted-foreground font-normal">({{ $t('common.optional') }})</span>
+              <span class="ml-1 text-caption text-muted-foreground font-normal">({{ $t('common.optional') }})</span>
             </Label>
             <Input
               id="sched-desc"
@@ -322,7 +320,7 @@
               />
               <p
                 v-if="patternState.advancedPattern && !isValidCron(patternState.advancedPattern)"
-                class="text-[11px] text-destructive"
+                class="text-caption text-destructive"
               >
                 {{ $t('bots.schedule.form.invalidPattern') }}
               </p>
@@ -331,7 +329,7 @@
             <!-- Preview: only for modes where it adds real information -->
             <p
               v-if="schedulePreviewText && ['weekly', 'monthly', 'advanced'].includes(patternState.mode)"
-              class="text-[11px] text-muted-foreground"
+              class="text-caption text-muted-foreground"
             >
               {{ schedulePreviewText }}
             </p>
@@ -379,7 +377,7 @@
 
           <p
             v-if="submitError"
-            class="text-[11px] text-destructive"
+            class="text-caption text-destructive"
           >
             {{ submitError }}
           </p>
@@ -463,7 +461,7 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  </div>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
@@ -481,6 +479,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuItem, DropdownMenuSeparator,
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '@memohai/ui'
+import PageShell from '@/components/page-shell/index.vue'
 import {
   deleteBotsByBotIdScheduleById,
   getBotsByBotIdSchedule,

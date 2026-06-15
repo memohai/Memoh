@@ -76,10 +76,10 @@
     inset: 0;
     z-index: -1;
     border-radius: inherit;
-    /* Use oklch(0 0 0 / 0) instead of `transparent` so the interpolation
-       to the hover overlay (also oklch) stays in the same color space and
-       the browser produces a smooth alpha fade rather than a hard cut. */
-    background-color: oklch(0 0 0 / 0);
+    /* --overlay-clear is oklch transparent (not the `transparent` keyword) so the
+       interpolation to the hover overlay (also oklch) stays in the same color
+       space and the browser produces a smooth alpha fade rather than a hard cut. */
+    background-color: var(--overlay-clear);
     box-shadow: var(--shadow-hairline);
     scale: 1 1;
     transition:
@@ -843,12 +843,19 @@
   --overlay-hover-strong:  oklch(0 0 0 / 0.110);
   --overlay-active:        oklch(0 0 0 / 0.135);
   --overlay-active-strong: oklch(0 0 0 / 0.170);
+  /* Fully-transparent overlay base. Authored in oklch (not the `transparent`
+     keyword) so a fade between this and an oklch overlay stays in one color
+     space and the browser produces a smooth alpha fade, not a hard cut. */
+  --overlay-clear:         oklch(0 0 0 / 0);
   --ui-hover:            var(--overlay-hover);
   --ui-selected:         var(--overlay-hover-light);
   --ui-on:               var(--overlay-hover-strong);
   --ui-pressed:          var(--overlay-active);
   --ui-selected-pressed: var(--overlay-active-strong);
   --btn-ghost-hover:     var(--overlay-hover-strong);
+  /* Ghost-hover chip recalibrated for the elevated popover/toast surface —
+     a touch denser than the default overlay so it still reads on the card. */
+  --btn-ghost-hover-on-popover: color-mix(in oklab, var(--foreground) 13%, transparent);
   --sidebar-hover:       var(--overlay-hover-light);
   /* Segmented control surfaces: track is a warm-tinted solid chip (not an
      overlay — needs an opaque fill for the pill shape). */
@@ -1830,7 +1837,7 @@
 .memoh-toast {
   /* Ghost button hover chip recalibrated to the popover surface —
      see comment in the no-drag block above for full rationale. */
-  --btn-ghost-hover: color-mix(in oklab, var(--foreground) 13%, transparent);
+  --btn-ghost-hover: var(--btn-ghost-hover-on-popover);
   display: flex;
   gap: 0.5rem;
   border-radius: var(--radius-menu-shell);
