@@ -177,20 +177,33 @@ func TestAdaptInbound_EmojiBecomesText(t *testing.T) {
 	}
 }
 
-func TestAdaptInbound_SkipsEmptyTextParts(t *testing.T) {
+func TestAdaptInbound_SkipsLiterallyEmptyTextParts(t *testing.T) {
+	// Only truly empty text parts are dropped; whitespace-only spans (newline
+	// separators emitted by structured-post adapters like Feishu) must survive
+	// so that line breaks between rich spans are preserved end-to-end.
 	msg := channel.InboundMessage{
 		Message: channel.Message{
 			ID: "m1",
 			Parts: []channel.MessagePart{
 				{Type: channel.MessagePartText, Text: ""},
 				{Type: channel.MessagePartText, Text: "kept"},
-				{Type: channel.MessagePartText, Text: "   "},
+				{Type: channel.MessagePartText, Text: "\n"},
+				{Type: channel.MessagePartText, Text: "next"},
 			},
 		},
 	}
 	me := AdaptInbound(msg, "sess", "", "").(MessageEvent)
-	if len(me.Content) != 1 || me.Content[0].Text != "kept" {
-		t.Fatalf("expected only the non-empty text node, got %+v", me.Content)
+	if len(me.Content) != 3 {
+		t.Fatalf("expected 3 nodes (kept, newline separator, next), got %+v", me.Content)
+	}
+	if me.Content[0].Text != "kept" {
+		t.Fatalf("part 0 wrong: %+v", me.Content[0])
+	}
+	if me.Content[1].Type != "text" || me.Content[1].Text != "\n" {
+		t.Fatalf("expected newline separator preserved, got %+v", me.Content[1])
+	}
+	if me.Content[2].Text != "next" {
+		t.Fatalf("part 2 wrong: %+v", me.Content[2])
 	}
 }
 

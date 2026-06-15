@@ -161,7 +161,7 @@ func partToNode(p channel.MessagePart) (ContentNode, bool) {
 }
 
 func textPartToNode(p channel.MessagePart) (ContentNode, bool) {
-	if strings.TrimSpace(p.Text) == "" {
+	if p.Text == "" {
 		return ContentNode{}, false
 	}
 
