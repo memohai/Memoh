@@ -1,5 +1,5 @@
 <template>
-  <SettingsSection :title="$t('bots.access.userAccess.title')">
+  <SettingsSection>
     <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3">
       <div class="min-w-0">
         <div class="text-sm font-medium text-foreground">
@@ -105,20 +105,15 @@
       {{ $t('common.loading') }}
     </div>
 
-    <div
+    <Empty
       v-else-if="grants.length === 0"
-      class="p-4"
+      class="py-12"
     >
-      <Empty class="rounded-[var(--radius-menu-shell)] border border-dashed border-border py-12">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <Globe class="size-4" />
-          </EmptyMedia>
-          <EmptyTitle>{{ $t('bots.access.userAccess.title') }}</EmptyTitle>
-          <EmptyDescription>{{ $t('bots.access.userAccess.empty') }}</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    </div>
+      <EmptyHeader>
+        <EmptyTitle>{{ $t('bots.access.userAccess.title') }}</EmptyTitle>
+        <EmptyDescription>{{ $t('bots.access.userAccess.empty') }}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
 
     <div
       v-else
@@ -223,7 +218,6 @@ import {
   Empty,
   EmptyDescription,
   EmptyHeader,
-  EmptyMedia,
   EmptyTitle,
   SegmentedControl,
 } from '@memohai/ui'

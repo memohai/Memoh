@@ -13,7 +13,12 @@
       v-model="activeTab"
       class="w-full"
     >
-      <TabsList class="mb-6">
+      <!-- This is scope navigation (two sub-pages), not a value switch — so it's
+           underline Tabs, not a SegmentedControl. pl-1 cancels the trigger's own
+           px-1 so the tab TEXT lands on the px-2 content rail (aligned with the
+           H1 / card titles); the trigger's padding stays as an over-reaching hit
+           target without breaking that visual alignment. -->
+      <TabsList class="mb-6 pl-1">
         <TabsTrigger value="channel">
           {{ $t('bots.access.channelTab') }}
         </TabsTrigger>
@@ -27,14 +32,14 @@
         value="channel"
         class="space-y-8"
       >
-        <SettingsSection :title="$t('bots.access.modeTitle')">
+        <SettingsSection>
           <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
             <div class="min-w-0">
               <div class="text-sm font-medium text-foreground">
                 {{ $t('bots.access.modeTitle') }}
               </div>
               <p class="mt-0.5 text-xs text-muted-foreground">
-                {{ $t('bots.access.modeDescription') }}
+                {{ isBlacklistMode ? $t('bots.access.blacklistModeDescription') : $t('bots.access.whitelistModeDescription') }}
               </p>
             </div>
             <SegmentedControl
@@ -47,8 +52,8 @@
           </div>
         </SettingsSection>
 
-        <SettingsSection :title="$t('bots.access.members.title')">
-          <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3">
+        <SettingsSection>
+          <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
             <div class="min-w-0">
               <div class="text-sm font-medium text-foreground">
                 {{ $t('bots.access.members.title') }}
@@ -132,20 +137,15 @@
             {{ $t('common.loading') }}
           </div>
 
-          <div
+          <Empty
             v-else-if="members.length === 0"
-            class="p-4"
+            class="py-12"
           >
-            <Empty class="rounded-[var(--radius-menu-shell)] border border-dashed border-border py-12">
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <Users class="size-4" />
-                </EmptyMedia>
-                <EmptyTitle>{{ $t('bots.access.members.title') }}</EmptyTitle>
-                <EmptyDescription>{{ memberEmptyDescription }}</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          </div>
+            <EmptyHeader>
+              <EmptyTitle>{{ $t('bots.access.members.title') }}</EmptyTitle>
+              <EmptyDescription>{{ memberEmptyDescription }}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
 
           <template v-else>
             <div
@@ -269,8 +269,8 @@
           </template>
         </SettingsSection>
 
-        <SettingsSection :title="$t('bots.access.rulesTitle')">
-          <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3">
+        <SettingsSection>
+          <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
             <div class="min-w-0">
               <div class="text-sm font-medium text-foreground">
                 {{ $t('bots.access.rulesTitle') }}
@@ -402,20 +402,15 @@
               </div>
             </template>
 
-            <div
+            <Empty
               v-else-if="!formVisible"
-              class="p-4"
+              class="py-12"
             >
-              <Empty class="rounded-[var(--radius-menu-shell)] border border-dashed border-border py-12">
-                <EmptyHeader>
-                  <EmptyMedia variant="icon">
-                    <Users class="size-4" />
-                  </EmptyMedia>
-                  <EmptyTitle>{{ $t('bots.access.rulesEmpty') }}</EmptyTitle>
-                  <EmptyDescription>{{ $t('bots.access.rulesEmptyDescription') }}</EmptyDescription>
-                </EmptyHeader>
-              </Empty>
-            </div>
+              <EmptyHeader>
+                <EmptyTitle>{{ $t('bots.access.rulesEmpty') }}</EmptyTitle>
+                <EmptyDescription>{{ $t('bots.access.rulesEmptyDescription') }}</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
 
             <section
               v-if="formVisible"
@@ -610,7 +605,6 @@ import {
   Empty,
   EmptyDescription,
   EmptyHeader,
-  EmptyMedia,
   EmptyTitle,
   Badge,
   Checkbox,
