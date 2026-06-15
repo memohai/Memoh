@@ -301,7 +301,9 @@
       "edit": "编辑",
       "share": "分享",
       "retry": "重试",
-      "fork": "分叉"
+      "fork": "分叉",
+      "more": "更多",
+      "readAloud": "朗读"
     },
     "process": {
       "browse": "浏览 {count} 个文件",
@@ -614,9 +616,13 @@
     "sessionInfoTooltipHint": "悬停查看会话信息",
     "sessionActions": "会话操作",
     "tabBarToolkit": {
-      "newTerminal": "新建终端",
-      "openBrowser": "打开浏览器",
+      "openMenu": "新建面板",
+      "newTerminal": "终端",
+      "openBrowser": "浏览器",
+      "openDesktop": "桌面",
       "openDisplay": "打开桌面窗口",
+      "splitRight": "左右切分",
+      "splitDown": "上下切分",
       "menu": "标签页操作",
       "more": "更多",
       "closeAll": "关闭全部"

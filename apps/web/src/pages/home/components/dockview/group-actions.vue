@@ -1,60 +1,53 @@
 <template>
-  <div class="flex h-full w-full items-center gap-0.5 px-2">
-    <!-- Split "+": its primary click opens a new terminal — the one capability
-         every workspace has (container or local), and the pane we want close at
-         hand. The chevron beside it discloses the container-only extras (browser /
-         desktop window); a local workspace, which has only the terminal, shows
-         just the "+" with no chevron. Rendered as adjacent ghost buttons to match
-         the strip's other ghost actions, not a bordered ButtonGroup (which would
-         be the only chrome box in an otherwise borderless strip). Sits first so it
-         hugs the last tab. -->
-    <div
-      v-if="hasAnyAction"
-      class="flex items-center"
-    >
-      <Button
-        v-if="canWorkspaceExec"
-        variant="ghost"
-        class="size-7 rounded-full p-0 text-muted-foreground hover:text-foreground"
-        :title="t('chat.tabBarToolkit.newTerminal')"
-        :aria-label="t('chat.tabBarToolkit.newTerminal')"
-        @click="store.openTerminal(props.params.group.id)"
-      >
-        <Plus class="size-3.5" />
-      </Button>
-      <DropdownMenu v-if="canSplitExtras">
-        <DropdownMenuTrigger as-child>
-          <!-- With a primary "+" present this is a slim chevron disclosure beside
-               it; without exec permission the "+" itself becomes the trigger. -->
-          <Button
-            variant="ghost"
-            class="rounded-full p-0 text-muted-foreground hover:text-foreground"
-            :class="canWorkspaceExec ? 'h-7 w-4' : 'size-7'"
-            :title="t('chat.tabBarToolkit.more')"
-            :aria-label="t('chat.tabBarToolkit.more')"
-          >
-            <ChevronDown
-              v-if="canWorkspaceExec"
-              class="size-3"
-            />
-            <Plus
-              v-else
-              class="size-3.5"
-            />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem @select="store.openBrowser(props.params.group.id)">
-            <Globe class="mr-2 size-3.5" />
-            {{ t('chat.tabBarToolkit.openBrowser') }}
-          </DropdownMenuItem>
-          <DropdownMenuItem @select="store.openDisplay(props.params.group.id)">
-            <Monitor class="mr-2 size-3.5" />
-            {{ t('chat.tabBarToolkit.openDisplay') }}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+  <div class="flex h-full w-full items-center gap-0.5 pr-2">
+    <!-- Unified "+": always opens a menu (never a direct terminal shortcut). New
+         panels and split actions live in the dropdown; sits first so it hugs the
+         last tab. -->
+    <DropdownMenu v-if="hasAnyAction">
+      <DropdownMenuTrigger as-child>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          class="size-7 shrink-0 rounded-full p-0 text-muted-foreground hover:text-foreground data-[state=open]:text-foreground"
+          :title="t('chat.tabBarToolkit.openMenu')"
+          :aria-label="t('chat.tabBarToolkit.openMenu')"
+        >
+          <Plus class="size-3.5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        <DropdownMenuItem
+          v-if="canWorkspaceExec"
+          @select="store.openTerminal(props.params.group.id)"
+        >
+          <Terminal class="mr-2 size-3.5" />
+          {{ t('chat.tabBarToolkit.newTerminal') }}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          v-if="canSplitExtras"
+          @select="store.openBrowser(props.params.group.id)"
+        >
+          <Globe class="mr-2 size-3.5" />
+          {{ t('chat.tabBarToolkit.openBrowser') }}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          v-if="canSplitExtras"
+          @select="store.openDisplay(props.params.group.id)"
+        >
+          <Monitor class="mr-2 size-3.5" />
+          {{ t('chat.tabBarToolkit.openDesktop') }}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem @select="store.splitGroup(props.params.group.id, 'right')">
+          <Columns2 class="mr-2 size-3.5" />
+          {{ t('chat.tabBarToolkit.splitRight') }}
+        </DropdownMenuItem>
+        <DropdownMenuItem @select="store.splitGroup(props.params.group.id, 'below')">
+          <Rows2 class="mr-2 size-3.5" />
+          {{ t('chat.tabBarToolkit.splitDown') }}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
     <!-- Draggable spacer: the window drag handle AND what pushes Preview to the
          strip's far right. When there's no Preview the spacer simply extends, so
          the "+" cluster never shifts (no reserved empty slot like before). -->
@@ -79,13 +72,14 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { ChevronDown, Columns2, Globe, Monitor, Plus } from 'lucide-vue-next'
+import { Columns2, Globe, Monitor, Plus, Rows2, Terminal } from 'lucide-vue-next'
 import {
   Button,
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
 } from '@memohai/ui'
 import type { DockviewApi, DockviewGroupPanelApi, IDockviewGroupPanel } from 'dockview-vue'
 import { useChatStore } from '@/store/chat-list'
@@ -116,11 +110,13 @@ const canWorkspaceExec = computed(() => hasBotPermission(currentPermissions.valu
 const canManage = computed(() => hasBotPermission(currentPermissions.value, 'manage'))
 const isLocalWorkspace = computed(() => isLocalWorkspaceBot(currentBot.value?.metadata))
 
-// Browser / desktop window are container-only and need manage permission; a local
-// (trusted-host) workspace exposes neither, so it only ever shows the terminal "+".
+// Browser / desktop are container-only and need manage permission; a local
+// (trusted-host) workspace exposes neither, so its menu is terminal + split only.
 const canSplitExtras = computed(() => canManage.value && !isLocalWorkspace.value)
 
-const hasAnyAction = computed(() => canWorkspaceExec.value || canSplitExtras.value)
+const hasAnyAction = computed(() =>
+  canWorkspaceExec.value || canSplitExtras.value || canWorkspaceRead.value,
+)
 
 // Track THIS group's active tab (not the globally active panel) so the preview
 // action only appears in the header of the group currently showing a

@@ -305,7 +305,9 @@
       "edit": "Edit",
       "share": "Share",
       "retry": "Try again",
-      "fork": "Fork"
+      "fork": "Fork",
+      "more": "More",
+      "readAloud": "Read aloud"
     },
     "process": {
       "browse": "Read {count} files",
@@ -618,9 +620,13 @@
     "sessionInfoTooltipHint": "Hover to see session info",
     "sessionActions": "Session actions",
     "tabBarToolkit": {
-      "newTerminal": "Open new terminal",
-      "openBrowser": "Open browser",
+      "openMenu": "New panel",
+      "newTerminal": "Terminal",
+      "openBrowser": "Browser",
+      "openDesktop": "Desktop",
       "openDisplay": "Open desktop window",
+      "splitRight": "Split right",
+      "splitDown": "Split down",
       "menu": "Tab actions",
       "more": "More",
       "closeAll": "Close all"

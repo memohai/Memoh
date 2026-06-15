@@ -353,6 +353,107 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     })
   }
 
+  function uniqueSplitPanelId(baseId: string): string {
+    const dock = api.value
+    if (!dock) return baseId
+    if (!dock.getPanel(baseId)) return baseId
+    let n = 2
+    while (dock.getPanel(`${baseId}~${n}`)) n++
+    return `${baseId}~${n}`
+  }
+
+  /** Split the group's active tab into a new pane beside/below it (VS Code-style).
+   * Duplicates the current panel into the new split rather than moving it. */
+  function splitGroup(groupId: string, direction: 'right' | 'below') {
+    const dock = api.value
+    if (!dock) return
+    const group = dock.getGroup(groupId)
+    const source = group?.activePanel
+    if (!source || !group) return
+
+    const comp = panelComponentOf(source.id)
+    if (!comp) return
+
+    const position = { referenceGroup: groupId, direction }
+    const title = source.title ?? source.api.title ?? ''
+    const params = source.params as Record<string, unknown> | undefined
+
+    switch (comp) {
+      case 'terminal': {
+        if (!hasCurrentPermission('workspace_exec')) return
+        const bid = (currentBotId.value ?? '').trim()
+        const state = ensureBotLayout(bid)
+        if (!state) return
+        const next = state.terminalCounter + 1
+        patchBotLayout(bid, { terminalCounter: next })
+        dock.addPanel({
+          id: `terminal:${next}`,
+          component: 'terminal',
+          title: title || `Terminal ${next}`,
+          renderer: 'always',
+          position,
+        })
+        break
+      }
+      case 'file':
+      case 'preview': {
+        if (!hasCurrentPermission('workspace_read')) return
+        dock.addPanel({
+          id: uniqueSplitPanelId(source.id),
+          component: comp,
+          title,
+          params: params ? { ...params } : undefined,
+          renderer: 'always',
+          position,
+        })
+        break
+      }
+      case 'browser': {
+        if (!hasCurrentPermission('manage')) return
+        const bid = (currentBotId.value ?? '').trim()
+        const state = ensureBotLayout(bid)
+        if (!state) return
+        const next = state.browserCounter + 1
+        patchBotLayout(bid, { browserCounter: next })
+        dock.addPanel({
+          id: `browser:${next}`,
+          component: 'browser',
+          title: title || `Browser ${next}`,
+          params: { address: (params?.address as string | undefined) ?? DEFAULT_BROWSER_ADDRESS },
+          renderer: 'always',
+          position,
+        })
+        break
+      }
+      case 'display': {
+        if (!hasCurrentPermission('manage')) return
+        const bid = (currentBotId.value ?? '').trim()
+        const state = ensureBotLayout(bid)
+        if (!state) return
+        const next = state.displayCounter + 1
+        patchBotLayout(bid, { displayCounter: next })
+        dock.addPanel({
+          id: `display:${next}`,
+          component: 'display',
+          title: title || `Desktop ${next}`,
+          renderer: 'always',
+          position,
+        })
+        break
+      }
+      case 'chat': {
+        dock.addPanel({
+          id: CHAT_PANEL_ID,
+          component: 'chat',
+          title,
+          renderer: 'always',
+          position,
+        })
+        break
+      }
+    }
+  }
+
   function closeTab(id: string) {
     const panel = api.value?.getPanel(id)
     panel?.api.close()
@@ -622,6 +723,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     openTerminal,
     openBrowser,
     openDisplay,
+    splitGroup,
     closeTab,
     requestCloseTab,
     requestCloseTabs,

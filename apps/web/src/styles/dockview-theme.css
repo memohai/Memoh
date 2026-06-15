@@ -67,6 +67,8 @@
   --tab-top-inset: 0.1875rem;
   --tab-gap: var(--radius-sm);
   --tab-flare: var(--tab-gap);
+  /* Horizontal breathing room between the last tab's foot and the "+" cluster. */
+  --tab-actions-gap: 6px;
   /* Shared timing for inactive-tab hover fill + close-fade (workspace-tab.vue). */
   --tab-hover-duration: 150ms;
   /* How far the inactive hover colour layer sits below a flush-top fill (subpixel ok). */
@@ -184,12 +186,11 @@
  * (the old per-tab border seams are gone). The active tab's bottom flare is sized
  * to exactly bridge this gap, so its feet reach the neighbours.
  *
- * The inline padding matches --tab-flare so the FIRST tab's left foot and the LAST
- * tab's right foot have room INSIDE the scroll content: dockview's .dv-scrollable
- * is overflow:hidden, so without this inset an edge tab's foot (which spills
- * --tab-flare past the chip) gets clipped — the corner fillet on the outermost
- * tabs would vanish. It also gives the first tab a small inset from the nav cluster
- * and the last tab the same from the "+", instead of butting flush. */
+ * Left/right padding matches --tab-flare so the FIRST and LAST tab feet have room
+ * INSIDE the scroll content (dockview's .dv-scrollable is overflow:hidden — without
+ * this inset an edge tab's foot, which spills --tab-flare past the chip, gets
+ * clipped). Horizontal gap from foot to "+" is --tab-actions-gap on the
+ * right-actions container, not extra padding here (avoids double-counting). */
 .dockview-theme-memoh .dv-tabs-container {
   gap: var(--tab-gap);
   padding-inline: var(--tab-flare);
@@ -275,6 +276,12 @@
 .dockview-theme-memoh .dv-right-actions-container,
 .dockview-theme-memoh .dv-left-actions-container {
   align-items: center;
+  /* Match the tab chip band: tabs sit margin-top below the strip crown so they can
+   * graft onto the pane; centering "+" in the full strip height put it above the
+   * close button (workspace-tab.vue). */
+  box-sizing: border-box;
+  margin-top: var(--tab-top-inset);
+  height: calc(100% - var(--tab-top-inset));
 }
 
 /* Prefix actions container: renders navigation buttons before the tabs. */
@@ -300,6 +307,7 @@
 .dockview-theme-memoh .dv-right-actions-container {
   flex: 1 1 auto;
   min-width: 0;
+  margin-left: var(--tab-actions-gap);
 }
 
 /* Continuous bottom hairline for the WHOLE strip, drawn as an inset box-shadow so it
