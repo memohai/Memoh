@@ -5,39 +5,55 @@
 //   · packages/ui/src/style.css         (interaction contracts, type/radius tokens)
 //   · packages/ui/src/components/button  (the one icon button: Button variant=ghost)
 //
-// Scoped to the component LIBRARY (packages/ui) — that is the single source the
-// rest of the app consumes; app pages are out of scope here.
+// TWO rule families with different SCOPE:
+//   · CONTRACT rules — packages/ui ONLY (raw color / arbitrary radius / invented
+//     shadow / disabled opacity / field-edge / selection ring). The library is the
+//     single source the app consumes; app pages are intentionally out of scope here.
+//   · px-SCALING rules — packages/ui AND apps/web. The root font-size is driven by
+//     --memoh-ui-font-size, so rem scales with the user's font setting / browser zoom
+//     while a hardcoded px does NOT. A px on a property that gates TEXT therefore
+//     stops growing while the surrounding text grows → clipped / misaligned controls.
 //
-// HARD FAIL (exit 1):
+// px rules — HARD FAIL (exit 1):
+//   · text-[Npx]      font-size never scales        → use a --text-* token
+//   · leading-[Npx]   line-height never scales       → use rem / unitless
+//   · h/min-h-[Npx], p*/gap/space-[Npx]  (N >= 5)     → a text box / its spacing won't
+//     grow with the font → use rem (the spacing scale, min-h, etc).
+// NOT flagged: width / cap props (w / min-w / max-w / max-h-[Npx]) are a reflow &
+//   sizing concern, not text-coupled, so they are left to review; and decorative
+//   1–4px hairlines / indicator bars, plus border-/ring-/outline-/translate-/inset-/
+//   size-/blur-/rounded-* (never a text box). Escape hatch: put `ui-allow-px` in a
+//   comment on the SAME line for a sanctioned exception (e.g. a fixed chart height).
+//
+// px BASELINE RATCHET: scripts/ui-px-baseline.json records the px-HARD count per
+//   file. A file may keep its grandfathered count, but ADDING px (count grows, or a
+//   brand-new file) HARD-fails — so new code can't regress while the existing debt is
+//   burned down per cluster. Regenerate after a cleanup pass with:
+//     node scripts/check-ui-contract.mjs --write-baseline
+//
+// CONTRACT rules (packages/ui), unchanged:
 //   1. disabled-context opacity that is not 40   → disabled is opacity-40 everywhere
 //   2. arbitrary radius rounded-[Npx] / rounded-[calc(...)] → use rounded-sm/md/lg
 //   5. raw color in a .vue arbitrary class       → use a palette token
 //   6. raw color in the style.css COMPONENT layer → define + use a token
 //   7. box-shadow with a raw color               → never invent chrome (use a token)
-// WARN (exit 0):
-//   3. OFF-SCALE raw text-[Npx] (not on the type scale) → use a type token
-//   4. likely hand-rolled icon-button hover      → reuse <Button variant="ghost">
-//   8. raw shadow utility (shadow-xs/sm/md/lg/xl/2xl) → use an elevation token / shadow-none
-//   9. border-input on a control body            → use the field-edge contract
-//  10. ring-offset-* (selection via offset halo) → use an indicator / --ui-selected
-//
-// Red lines 8/9/10 are the string-detectable § Dirty patterns (AGENTS.md). They
-// are WARN for now (legacy ButtonGroup/Sidebar still ship a flat shadow-sm, and
-// PinInput/InputOTP/TagsInput are mid-refactor); promote to HARD once those land.
-//
-// Rules 5/6/7 are HARD now that the pre-contract debt is fully migrated (the
-// library has zero raw values outside token blocks). Token DEFINITION blocks
-// (:root / .dark / @theme) are where raw values belong, so they're skipped.
-// If a legitimate raw value ever needs to ship, promote it to a token instead.
+//   4. likely hand-rolled icon-button hover (WARN)
+//   8. raw shadow utility (WARN)  9. border-input on a control (WARN)
+//  10. ring-offset-* selection halo (WARN)
 //
 // Run: node scripts/check-ui-contract.mjs   (wired into `mise run lint`)
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..')
-const SCAN_DIRS = ['packages/ui/src']
+// FULL_DIRS get every rule; PX_DIRS get only the px-scaling rules (app pages keep
+// their own raw-color debt out of this guard — that is a separate known gap).
+const FULL_DIRS = ['packages/ui/src']
+const PX_DIRS = ['apps/web/src']
 const EXT = /\.(vue|ts)$/
+const BASELINE_PATH = join(ROOT, 'scripts/ui-px-baseline.json')
+const WRITE_BASELINE = process.argv.includes('--write-baseline')
 
 // Exact arbitrary-radius tokens that are legitimately allowed.
 //   rounded-[calc(var(--radius)-5px)] = the tuned 5px in-field small-control radius
@@ -48,19 +64,23 @@ const RADIUS_ALLOW = new Set([
   'rounded-[2px]',
   'rounded-[calc(var(--radius)-5px)]',
 ])
-// The type scale (px). Raw text-[Npx] ON this scale equals a token and is
-// tolerated; anything OFF the scale is a genuine one-off smell → warn.
-const TYPE_SCALE_PX = new Set([11, 12, 13, 14, 16, 18, 24])
+// Box props (height / padding / gap / space) below this px size are hairlines or
+// indicator bars (a 2px tab underline, a 3px link offset), never a text container —
+// so they are decorative and not flagged. 5px+ is where a real text box starts.
+const MIN_BOX_PX = 5
 
 const hard = []
 const warn = []
+// px-HARD candidates, collected separately so the baseline ratchet can grandfather
+// existing debt before they are promoted into `hard`.
+const pxHard = []
 
-function walk(dir) {
+function walk(dir, full) {
   for (const name of readdirSync(dir)) {
-    const full = join(dir, name)
-    const st = statSync(full)
-    if (st.isDirectory()) walk(full)
-    else if (EXT.test(name)) scan(full)
+    const fullPath = join(dir, name)
+    const st = statSync(fullPath)
+    if (st.isDirectory()) walk(fullPath, full)
+    else if (EXT.test(name)) scan(fullPath, full)
   }
 }
 
@@ -91,7 +111,7 @@ function makeCodeStripper() {
   }
 }
 
-function scan(file) {
+function scan(file, full) {
   const rel = relative(ROOT, file)
   const src = readFileSync(file, 'utf8')
   const lines = src.split('\n')
@@ -99,8 +119,31 @@ function scan(file) {
   lines.forEach((rawLine, i) => {
     const line = codeOf(rawLine)
     const ln = i + 1
+    // Same-line escape hatch for a sanctioned px (kept on the RAW line so the
+    // comment survives the code-stripper).
+    const allowPx = rawLine.includes('ui-allow-px')
     for (const tok of line.split(/[\s'"`]+/)) {
       if (!tok) continue
+
+      // ── px-scaling rules (run in BOTH scopes) ────────────────────────────
+      if (!allowPx) {
+        // font-size / line-height in px never scale — any value is wrong.
+        if (/(?:^|:)text-\[\d+(?:\.\d+)?px\]/.test(tok))
+          pxHard.push({ rel, ln, msg: `px font-size never scales (use a --text-* token) → ${tok}` })
+        if (/(?:^|:)leading-\[\d+(?:\.\d+)?px\]/.test(tok))
+          pxHard.push({ rel, ln, msg: `px line-height never scales (use rem/unitless) → ${tok}` })
+        // height / padding / gap / space: a text box (>=5px) that won't grow.
+        let m
+        if ((m = tok.match(/(?:^|:)(?:min-h|h)-\[(\d+(?:\.\d+)?)px\]/)) && Number(m[1]) >= MIN_BOX_PX)
+          pxHard.push({ rel, ln, msg: `px height won't grow with the font (use rem / min-h) → ${tok}` })
+        if ((m = tok.match(/(?:^|:)p[xytblrse]?-\[(\d+(?:\.\d+)?)px\]/)) && Number(m[1]) >= MIN_BOX_PX)
+          pxHard.push({ rel, ln, msg: `px padding won't scale (use the rem spacing scale) → ${tok}` })
+        if ((m = tok.match(/(?:^|:)(?:gap(?:-[xy])?|space-[xy])-\[(\d+(?:\.\d+)?)px\]/)) && Number(m[1]) >= MIN_BOX_PX)
+          pxHard.push({ rel, ln, msg: `px gap/space won't scale (use the rem spacing scale) → ${tok}` })
+      }
+
+      // ── contract rules (packages/ui only) ────────────────────────────────
+      if (!full) continue
       // 1. disabled opacity must be 40
       const op = tok.match(/opacity-(\d+)$/)
       if (op && /disabled/.test(tok) && op[1] !== '40')
@@ -108,10 +151,6 @@ function scan(file) {
       // 2. arbitrary radius
       if (/^(?:[a-z-]+:)*rounded-\[/.test(tok) && !RADIUS_ALLOW.has(tok.replace(/^(?:[a-z-]+:)*/, '')))
         hard.push(`${rel}:${ln}  arbitrary radius (use rounded-sm/md/lg) → ${tok}`)
-      // 3. OFF-SCALE raw px font size (on-scale sizes equal a token → tolerated)
-      const tx = tok.match(/text-\[(\d+)(?:\.\d+)?px\]/)
-      if (tx && !TYPE_SCALE_PX.has(Number(tx[1])))
-        warn.push(`${rel}:${ln}  off-scale font size (use a type token) → ${tok}`)
       // 5. raw color in a Tailwind arbitrary class (bg-[#..], text-[oklch(..)], …)
       if (/-\[(?:#|(?:rgba?|hsla?|oklch|oklab|lab|lch|color-mix)\()/.test(tok))
         hard.push(`${rel}:${ln}  raw color in arbitrary class (use a palette token) → ${tok}`)
@@ -127,7 +166,7 @@ function scan(file) {
         warn.push(`${rel}:${ln}  ring-offset (selection via offset halo — use an indicator) → ${tok}`)
     }
     // 4. likely hand-rolled icon-button hover (icon present + ad-hoc hover fill)
-    if (/\[&[_>]svg/.test(line) && /hover:bg-(accent|\[)/.test(line) && !/data-slot="button"/.test(line))
+    if (full && /\[&[_>]svg/.test(line) && /hover:bg-(accent|\[)/.test(line) && !/data-slot="button"/.test(line))
       warn.push(`${rel}:${ln}  possible hand-rolled icon hover — reuse <Button variant="ghost">`)
   })
 }
@@ -170,16 +209,46 @@ function scanCss(file) {
   })
 }
 
-for (const d of SCAN_DIRS) walk(join(ROOT, d))
+for (const d of FULL_DIRS) walk(join(ROOT, d), true)
+for (const d of PX_DIRS) walk(join(ROOT, d), false)
 scanCss(join(ROOT, 'packages/ui/src/style.css'))
+
+// ── px baseline ratchet ──────────────────────────────────────────────────────
+const pxByFile = {}
+for (const v of pxHard) pxByFile[v.rel] = (pxByFile[v.rel] || 0) + 1
+
+if (WRITE_BASELINE) {
+  const sorted = Object.fromEntries(Object.entries(pxByFile).sort(([a], [b]) => a.localeCompare(b)))
+  writeFileSync(BASELINE_PATH, `${JSON.stringify(sorted, null, 2)}\n`)
+  const total = Object.values(sorted).reduce((a, b) => a + b, 0)
+  console.log(`✓ wrote px baseline: ${total} grandfathered px violation(s) across ${Object.keys(sorted).length} file(s)`)
+  process.exit(0)
+}
+
+const baseline = existsSync(BASELINE_PATH) ? JSON.parse(readFileSync(BASELINE_PATH, 'utf8')) : {}
+let grandfathered = 0
+for (const [rel, count] of Object.entries(pxByFile)) {
+  const allowed = baseline[rel] || 0
+  if (count > allowed) {
+    // The whole file's px lines are surfaced; the count guard is what fails (we
+    // can't pin WHICH instance is new from a per-file count, but "no new px" holds).
+    for (const v of pxHard) if (v.rel === rel) hard.push(`${v.rel}:${v.ln}  ${v.msg}`)
+    hard.push(`${rel}  ✗ px count ${count} exceeds baseline ${allowed} — no NEW px (fix it, or mark the line with ui-allow-px)`)
+  }
+  else {
+    grandfathered += count
+  }
+}
 
 if (warn.length) {
   console.warn(`\n⚠ UI contract — ${warn.length} warning(s):`)
-  for (const w of warn) console.warn('  ' + w)
+  for (const w of warn) console.warn(`  ${w}`)
 }
+if (grandfathered)
+  console.log(`\nℹ px baseline: ${grandfathered} grandfathered px violation(s) remaining — burn down per cluster, then re-run with --write-baseline`)
 if (hard.length) {
   console.error(`\n✗ UI contract — ${hard.length} violation(s):`)
-  for (const h of hard) console.error('  ' + h)
+  for (const h of hard) console.error(`  ${h}`)
   console.error('\nSee packages/ui/src/style.css for the single sources.\n')
   process.exit(1)
 }
