@@ -8,7 +8,7 @@
     </div>
     <div
       v-if="backgroundMeta.length"
-      class="flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground"
+      class="flex flex-wrap gap-x-2 gap-y-0.5 text-caption text-muted-foreground"
     >
       <span
         v-for="item in backgroundMeta"

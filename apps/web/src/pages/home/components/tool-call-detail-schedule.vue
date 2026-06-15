@@ -13,12 +13,12 @@
           <span class="text-foreground truncate flex-1">{{ item.name || item.id || t('chat.tools.detail.unnamedSchedule') }}</span>
           <span
             v-if="item.pattern"
-            class="text-[10px] text-muted-foreground font-mono shrink-0 rounded bg-muted/30 px-1 py-0.5"
+            class="text-caption text-muted-foreground font-mono shrink-0 rounded bg-muted/30 px-1 py-0.5"
           >{{ item.pattern }}</span>
         </div>
         <span
           v-if="item.prompt"
-          class="text-[10px] text-muted-foreground line-clamp-2"
+          class="text-caption text-muted-foreground line-clamp-2"
         >{{ item.prompt }}</span>
       </div>
     </div>

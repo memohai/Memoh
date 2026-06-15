@@ -118,6 +118,8 @@
               :smooth-streaming="message.streaming"
               :typewriter="message.streaming"
               :fade="message.streaming"
+              :show-tooltips="false"
+              :mermaid-props="{ showTooltips: false }"
               custom-id="chat-msg"
             />
           </div>
@@ -190,9 +192,10 @@
               >
             </div>
           </button>
-          <div v-if="cleanUserText(message.text)">
-            {{ cleanUserText(message.text) }}
-          </div>
+          <CollapsibleUserText
+            v-if="cleanUserText(message.text)"
+            :text="cleanUserText(message.text)"
+          />
         </div>
         <AttachmentBlock
           v-if="userAttachmentBlock"
@@ -207,10 +210,14 @@
         />
       </div>
 
-      <!-- Assistant message blocks -->
+      <!-- Assistant message blocks. The vertical gap between a process/"Thought
+           for Ns" row and the body is ~15% tighter than the body↔rule gap
+           (1.36rem vs the 1.6rem --ms-flow-hr-y): close to the unified rhythm,
+           but the channel-process line was sitting a touch too far from the
+           answer at full parity. -->
       <div
         v-else
-        class="space-y-1.5"
+        class="space-y-[1.36rem]"
       >
         <template
           v-for="node in renderNodes"
@@ -226,9 +233,14 @@
 
           <template v-else>
             <!-- Text block -->
+            <!-- Headings split into two spacing groups, not one flat ramp:
+                 h1–h3 (true section breaks) get more air above and a clear gap
+                 below (so an h3 immediately followed by an h4 isn't cramped);
+                 h4–h6 (sub-labels close to their text) get less. Reads as two
+                 tiers rather than six evenly-spaced rungs. -->
             <div
               v-if="node.block.type === 'text' && node.block.content"
-              class="prose prose-sm dark:prose-invert max-w-none [&_p]:my-0! [&_p+p]:mt-2! [&_ul]:my-1.5! [&_ol]:my-1.5! [&_li]:my-0.5! [&_:is(h1,h2,h3,h4,h5,h6)]:mt-2.5! [&_:is(h1,h2,h3,h4,h5,h6)]:mb-1! [&>*:first-child]:mt-0! [&>*:last-child]:mb-0!"
+              class="prose prose-sm dark:prose-invert max-w-none [&_p]:my-0! [&_p+p]:mt-2! [&_ul]:my-1.5! [&_ol]:my-1.5! [&_li]:my-0.5! [&_:is(h1,h2,h3)]:mt-5! [&_:is(h1,h2,h3)]:mb-2! [&_:is(h4,h5,h6)]:mt-3! [&_:is(h4,h5,h6)]:mb-1! [&>*:first-child]:mt-0! [&>*:last-child]:mb-0!"
             >
               <MarkdownRender
                 :content="node.block.content"
@@ -236,6 +248,8 @@
                 :smooth-streaming="isAssistantBlockStreaming(node.index)"
                 :typewriter="isAssistantBlockStreaming(node.index)"
                 :fade="isAssistantBlockStreaming(node.index)"
+                :show-tooltips="false"
+                :mermaid-props="{ showTooltips: false }"
                 custom-id="chat-msg"
               />
             </div>
@@ -280,15 +294,16 @@
 </template>
 
 <script lang="ts">
-import { setCustomComponents } from 'markstream-vue'
 import ChatCodeBlock from './chat-code-block.vue'
+import { registerSharedMarkdownComponents } from '@/components/markdown'
 
-// Replace markstream's heavy Monaco code block (and its font-size/expand/preview
-// toolbar that surfaced raw i18n keys) with a clean integral code block, scoped
-// to the chat renderer id ("chat-msg"). Both `code_block` and `shell` are mapped
-// to the same component so shell/bash blocks render identically (no separate
-// terminal "run" toolbar / language chrome). Runs once at module load.
-setCustomComponents('chat-msg', { code_block: ChatCodeBlock, shell: ChatCodeBlock })
+// Scope the chat renderer ("chat-msg"): replace markstream's heavy Monaco code
+// block (and its font-size/expand/preview toolbar that surfaced raw i18n keys)
+// with a clean integral code block — both `code_block` and `shell` map to it so
+// shell/bash blocks render identically — and register the shared design-system
+// node components (library Checkbox task markers, link-language footnotes).
+// Runs once at module load.
+registerSharedMarkdownComponents('chat-msg', { code_block: ChatCodeBlock, shell: ChatCodeBlock })
 </script>
 
 <script setup lang="ts">
@@ -302,6 +317,7 @@ import ToolCallGroup from './tool-call-group.vue'
 import { isReadOnlyTool } from './tool-call-registry'
 import { finalizeReasoning, markReasoningSeen } from './reasoning-timing'
 import AttachmentBlock from './attachment-block.vue'
+import CollapsibleUserText from './collapsible-user-text.vue'
 import MessageActions from './message-actions.vue'
 import BackgroundTaskBlock from './background-task-block.vue'
 import HeartbeatTriggerBlock from './heartbeat-trigger-block.vue'
@@ -434,7 +450,9 @@ const isSpecialUserMessage = computed(() =>
 
 const contentClass = computed(() => {
   if (isSpecialUserMessage.value) return 'flex-1 max-w-full'
-  if (props.message.role === 'user') return 'max-w-[80%]'
+  // The user bubble caps a little tighter than the assistant column so a long
+  // prompt doesn't sprawl most of the width before wrapping.
+  if (props.message.role === 'user') return 'max-w-[75%]'
   return 'flex-1 max-w-full'
 })
 

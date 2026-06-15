@@ -8,7 +8,7 @@
     </div>
     <div
       v-if="from"
-      class="text-[10px] text-muted-foreground"
+      class="text-caption text-muted-foreground"
     >
       {{ from }}
     </div>

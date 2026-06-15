@@ -99,7 +99,7 @@ async function handleComplete() {
       :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
     >
       <button
-        class="inline-flex h-[42px] w-[240px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        class="inline-flex h-[2.625rem] w-[240px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         :disabled="completing"
         @click="handleComplete"
       >

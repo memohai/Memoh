@@ -290,7 +290,7 @@ onMounted(() => {
   >
     <div
       v-if="mode === 'list'"
-      class="text-left pt-24 h-[560px] max-h-[calc(100vh-7rem)] flex flex-col transition-all duration-[175ms] ease-out"
+      class="text-left pt-24 h-[35rem] max-h-[calc(100dvh-7rem)] flex flex-col transition-all duration-[175ms] ease-out"
       :class="listVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0'"
     >
       <h2
@@ -357,13 +357,13 @@ onMounted(() => {
         :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
       >
         <button
-          class="inline-flex h-[42px] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          class="inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           @click="leave(prevStep)"
         >
           {{ t('onboarding.prev') }}
         </button>
         <button
-          class="inline-flex h-[42px] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          class="inline-flex h-[2.625rem] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           @click="onSkipStep"
         >
           {{ ctaLabel }}
@@ -373,7 +373,7 @@ onMounted(() => {
 
     <div
       v-else-if="mode === 'form'"
-      class="text-left pt-24 h-[560px] max-h-[calc(100vh-7rem)] flex flex-col transition-all duration-[175ms] ease-out"
+      class="text-left pt-24 h-[35rem] max-h-[calc(100dvh-7rem)] flex flex-col transition-all duration-[175ms] ease-out"
       :class="formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0'"
     >
       <div
@@ -597,14 +597,14 @@ onMounted(() => {
         ]"
       >
         <button
-          class="inline-flex h-[42px] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
+          class="inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
           :disabled="submitting"
           @click="backToList"
         >
           {{ t('onboarding.provider.form.cancel') }}
         </button>
         <button
-          class="inline-flex h-[42px] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
+          class="inline-flex h-[2.625rem] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
           :disabled="formCtaDisabled"
           @click="saveAndNext"
         >
@@ -631,7 +631,7 @@ onMounted(() => {
 
     <div
       v-else-if="mode === 'acp' && selectedAcpProfile"
-      class="text-left pt-24 h-[560px] max-h-[calc(100vh-7rem)] flex flex-col transition-all duration-[175ms] ease-out"
+      class="text-left pt-24 h-[35rem] max-h-[calc(100dvh-7rem)] flex flex-col transition-all duration-[175ms] ease-out"
       :class="formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0'"
     >
       <div
@@ -731,14 +731,14 @@ onMounted(() => {
         :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
       >
         <button
-          class="inline-flex h-[42px] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
+          class="inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
           :disabled="acpSubmitting"
           @click="backToList"
         >
           {{ t('onboarding.provider.form.cancel') }}
         </button>
         <button
-          class="inline-flex h-[42px] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
+          class="inline-flex h-[2.625rem] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
           :disabled="acpSubmitting"
           @click="saveAcpAndNext"
         >

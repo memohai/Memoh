@@ -11,7 +11,7 @@
       v-if="attachments.length"
       class="space-y-0.5"
     >
-      <div class="text-[10px] uppercase tracking-wide text-muted-foreground/70 mb-0.5">
+      <div class="text-caption uppercase tracking-wide text-muted-foreground/70 mb-0.5">
         {{ t('chat.tools.detail.attachments') }}
       </div>
       <ul class="space-y-0.5">
@@ -34,7 +34,7 @@
       class="flex items-center gap-1.5 text-xs text-muted-foreground"
     >
       <CornerDownRight class="size-3 shrink-0" />
-      <span class="text-[10px] uppercase tracking-wide text-muted-foreground/70">
+      <span class="text-caption uppercase tracking-wide text-muted-foreground/70">
         {{ t('chat.tools.detail.replyTo') }}
       </span>
       <span

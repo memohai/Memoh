@@ -20,14 +20,14 @@
         </a>
         <span
           v-if="item.url"
-          class="text-[10px] text-muted-foreground truncate"
+          class="text-caption text-muted-foreground truncate"
           :title="item.url"
         >
           {{ item.url }}
         </span>
         <span
           v-if="item.description"
-          class="text-[10px] text-muted-foreground/80 line-clamp-2"
+          class="text-caption text-muted-foreground/80 line-clamp-2"
         >
           {{ item.description }}
         </span>

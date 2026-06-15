@@ -2,13 +2,13 @@
   <div class="space-y-1.5">
     <div
       v-if="provider"
-      class="text-[10px] uppercase tracking-wide text-muted-foreground/70"
+      class="text-caption uppercase tracking-wide text-muted-foreground/70"
     >
       {{ provider }}
     </div>
     <div
       v-if="format"
-      class="text-[10px] uppercase tracking-wide text-muted-foreground/70"
+      class="text-caption uppercase tracking-wide text-muted-foreground/70"
     >
       {{ format }}
     </div>
@@ -20,7 +20,7 @@
     </div>
     <div
       v-if="excerpt"
-      class="text-[11px] text-muted-foreground italic"
+      class="text-caption text-muted-foreground italic"
     >
       {{ excerpt }}
     </div>

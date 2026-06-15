@@ -6,7 +6,7 @@
        block fit-to-content without the awkward reserved gap, and the button no
        longer jitters as the width grows during streaming. Highlighting itself
        is delegated to the shared CodeBlock kernel. -->
-  <div class="my-2 flex w-fit max-w-full items-start gap-1.5 overflow-hidden rounded-lg border border-border/60 bg-white py-1 pl-3.5 pr-1.5 dark:bg-card">
+  <div class="chat-code-block my-2 flex w-fit max-w-full items-start gap-1.5 overflow-hidden rounded-lg border border-border/60 bg-white py-1 pl-3.5 pr-1.5 dark:bg-card">
     <CodeBlock
       :code="code"
       :lang="language || 'text'"

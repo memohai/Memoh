@@ -39,9 +39,13 @@
     <div
       class="close-fade pointer-events-none absolute inset-y-0 right-0 flex items-center pl-6 pr-2 opacity-0 transition-opacity duration-150 ease-out group-hover/tab:opacity-100 focus-within:opacity-100"
     >
+      <!-- No own hover fill: the close affordance is read through the left→right
+           fade (which already paints the chip's hover surface) plus the icon
+           darkening on hover. A second darker square behind the glyph just
+           double-stacks chrome, so the ghost hover background is suppressed. -->
       <Button
         variant="ghost"
-        class="pointer-events-auto size-5 shrink-0 rounded-sm p-0 text-muted-foreground [--btn-ghost-hover:color-mix(in_oklab,var(--foreground)_13%,transparent)] hover:text-foreground"
+        class="pointer-events-auto size-5 shrink-0 rounded-sm p-0 text-muted-foreground [--btn-ghost-hover:transparent] hover:text-foreground"
         :aria-label="t('chat.tabMenu.close')"
         @pointerdown.stop
         @mousedown.stop
