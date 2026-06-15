@@ -1,23 +1,19 @@
 <template>
-  <div class="max-w-2xl mx-auto pb-6 space-y-6">
-    <!-- Header -->
-    <header class="pb-4 border-b border-border/50 sticky top-0 bg-background/95 backdrop-blur z-30 pt-4 -mt-4">
-      <div class="space-y-1">
-        <h2 class="text-sm font-semibold text-foreground">
-          {{ $t('bots.access.title') }}
-        </h2>
-        <p class="text-[11px] leading-snug text-muted-foreground max-w-md">
-          {{ $t('bots.access.subtitle') }}
-        </p>
-      </div>
-    </header>
+  <div class="mx-auto max-w-3xl pt-6 pb-8">
+    <div class="mb-6 px-2">
+      <h1 class="text-lg font-semibold text-foreground">
+        {{ $t('bots.access.title') }}
+      </h1>
+      <p class="mt-1 max-w-2xl text-xs text-muted-foreground">
+        {{ $t('bots.access.subtitle') }}
+      </p>
+    </div>
 
-    <!-- Audience switch: IM channel members vs workspace members -->
     <Tabs
       v-model="activeTab"
       class="w-full"
     >
-      <TabsList class="grid w-full grid-cols-2">
+      <TabsList class="mb-6">
         <TabsTrigger value="channel">
           {{ $t('bots.access.channelTab') }}
         </TabsTrigger>
@@ -29,71 +25,35 @@
       <!-- Channel members (IM) -->
       <TabsContent
         value="channel"
-        class="space-y-6 mt-4"
+        class="space-y-8"
       >
-        <!-- Access Mode -->
-        <section class="space-y-4 rounded-md border p-4 bg-background/50">
-          <div class="space-y-1">
-            <p class="text-xs font-medium text-foreground">
-              {{ $t('bots.access.modeTitle') }}
-            </p>
-            <p class="text-[11px] text-muted-foreground">
-              {{ $t('bots.access.modeDescription') }}
-            </p>
-          </div>
-          <div class="grid gap-3 md:grid-cols-2">
-            <button
-              type="button"
-              class="flex flex-col items-start rounded-lg border p-4 text-left transition-all duration-200 group shadow-none"
-              :class="defaultEffectDraft === 'allow'
-                ? 'border-foreground bg-muted text-foreground'
-                : 'border-border/60 bg-background/70 text-foreground hover:bg-accent/50'"
-              :disabled="isSavingDefaultEffect"
-              @click="handleSetDefaultEffect('allow')"
-            >
-              <div
-                class="size-8 rounded flex items-center justify-center mb-3 transition-colors shadow-none"
-                :class="defaultEffectDraft === 'allow' ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground group-hover:bg-background'"
-              >
-                <ShieldAlert class="size-5" />
+        <SettingsSection :title="$t('bots.access.modeTitle')">
+          <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
+            <div class="min-w-0">
+              <div class="text-sm font-medium text-foreground">
+                {{ $t('bots.access.modeTitle') }}
               </div>
-              <span class="text-sm font-semibold mb-1">{{ $t('bots.access.blacklistMode') }}</span>
-              <span class="text-[11px] leading-relaxed text-muted-foreground">
-                {{ $t('bots.access.blacklistModeDescription') }}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              class="flex flex-col items-start rounded-lg border p-4 text-left transition-all duration-200 group shadow-none"
-              :class="defaultEffectDraft === 'deny'
-                ? 'border-foreground bg-muted text-foreground'
-                : 'border-border/60 bg-background/70 text-foreground hover:bg-accent/50'"
-              :disabled="isSavingDefaultEffect"
-              @click="handleSetDefaultEffect('deny')"
-            >
-              <div
-                class="size-8 rounded flex items-center justify-center mb-3 transition-colors shadow-none"
-                :class="defaultEffectDraft === 'deny' ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground group-hover:bg-background'"
-              >
-                <ShieldCheck class="size-5" />
-              </div>
-              <span class="text-sm font-semibold mb-1">{{ $t('bots.access.whitelistMode') }}</span>
-              <span class="text-[11px] leading-relaxed text-muted-foreground">
-                {{ $t('bots.access.whitelistModeDescription') }}
-              </span>
-            </button>
+              <p class="mt-0.5 text-xs text-muted-foreground">
+                {{ $t('bots.access.modeDescription') }}
+              </p>
+            </div>
+            <SegmentedControl
+              :model-value="defaultEffectDraft"
+              :items="accessModeItems"
+              :aria-label="$t('bots.access.modeTitle')"
+              class="shrink-0"
+              @update:model-value="(value) => handleSetDefaultEffect(String(value))"
+            />
           </div>
-        </section>
+        </SettingsSection>
 
-        <!-- Members: per-identity Chat + Manage -->
-        <section class="space-y-4">
-          <div class="flex items-center justify-between gap-3">
-            <div class="space-y-1">
-              <h3 class="text-xs font-medium text-foreground">
+        <SettingsSection :title="$t('bots.access.members.title')">
+          <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3">
+            <div class="min-w-0">
+              <div class="text-sm font-medium text-foreground">
                 {{ $t('bots.access.members.title') }}
-              </h3>
-              <p class="text-[11px] text-muted-foreground max-w-md">
+              </div>
+              <p class="mt-0.5 text-xs text-muted-foreground">
                 {{ $t('bots.access.members.subtitle') }}
               </p>
             </div>
@@ -101,18 +61,17 @@
               v-if="!memberFormVisible"
               size="sm"
               variant="outline"
-              class="h-8 text-[11px] font-medium px-3 shrink-0 shadow-none"
+              class="shrink-0"
               @click="openMemberForm"
             >
-              <Plus class="mr-1.5 size-3.5" />
+              <Plus class="size-4" />
               {{ memberAddLabel }}
             </Button>
           </div>
 
-          <!-- Add member: identity selector -->
           <div
             v-if="memberFormVisible"
-            class="space-y-3 rounded-lg border border-border/60 bg-background/70 p-4"
+            class="mx-4 space-y-3 border-b border-border py-4"
           >
             <SearchableSelectPopover
               v-model="memberFormIdentityId"
@@ -123,23 +82,23 @@
               :show-group-headers="false"
             >
               <template #option-label="{ option }">
-                <div class="flex min-w-0 items-center gap-2 text-left py-0.5">
-                  <Avatar class="size-6 shrink-0 border border-border/40">
+                <div class="flex min-w-0 items-center gap-2 py-0.5 text-left">
+                  <Avatar class="size-6 shrink-0">
                     <AvatarImage
                       :src="optionMeta(option.meta).avatarUrl || ''"
                       :alt="option.label"
                     />
-                    <AvatarFallback class="text-[8px]">
+                    <AvatarFallback class="text-caption">
                       {{ option.label.slice(0, 2).toUpperCase() }}
                     </AvatarFallback>
                   </Avatar>
                   <div class="min-w-0">
-                    <div class="truncate text-[11px]">
+                    <div class="truncate text-xs">
                       {{ option.label }}
                     </div>
                     <div
                       v-if="optionMeta(option.meta).channelLabel"
-                      class="truncate text-[10px] text-muted-foreground/60"
+                      class="truncate text-xs text-muted-foreground"
                     >
                       {{ optionMeta(option.meta).channelLabel }}
                     </div>
@@ -151,14 +110,12 @@
               <Button
                 variant="ghost"
                 size="sm"
-                class="h-8 text-[11px] shadow-none"
                 @click="closeMemberForm"
               >
                 {{ $t('common.cancel') }}
               </Button>
               <Button
                 size="sm"
-                class="h-8 text-[11px] shadow-none"
                 :disabled="!memberFormIdentityId"
                 @click="confirmAddMember"
               >
@@ -169,45 +126,51 @@
 
           <div
             v-if="isLoadingRules || isLoadingManagers"
-            class="flex justify-center py-10"
+            class="mx-4 flex min-h-[3.75rem] items-center gap-3 border-b border-border py-3 text-sm text-muted-foreground last:border-b-0"
           >
-            <Spinner class="size-6 text-muted-foreground/50" />
+            <Spinner class="size-4" />
+            {{ $t('common.loading') }}
           </div>
 
-          <Empty
-            v-else-if="members.length === 0"
-            :title="$t('bots.access.members.title')"
-            :description="memberEmptyDescription"
-            class="border border-dashed border-border/60 bg-muted/5 rounded-lg py-10"
-          />
-
           <div
-            v-else
-            class="space-y-2"
+            v-else-if="members.length === 0"
+            class="p-4"
           >
+            <Empty class="rounded-[var(--radius-menu-shell)] border border-dashed border-border py-12">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Users class="size-4" />
+                </EmptyMedia>
+                <EmptyTitle>{{ $t('bots.access.members.title') }}</EmptyTitle>
+                <EmptyDescription>{{ memberEmptyDescription }}</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          </div>
+
+          <template v-else>
             <div
               v-for="member in members"
               :key="member.channelIdentityId"
-              class="flex items-center gap-3 rounded-lg border border-border/60 bg-background/70 px-3 py-2.5"
+              class="mx-4 flex min-h-[3.75rem] items-center gap-3 border-b border-border py-3 last:border-b-0"
             >
-              <Avatar class="size-7 shrink-0 border border-border/40">
+              <Avatar class="size-7 shrink-0">
                 <AvatarImage
                   :src="member.avatarUrl || ''"
                   :alt="member.label"
                 />
-                <AvatarFallback class="text-[10px]">
+                <AvatarFallback class="text-caption">
                   {{ member.label.slice(0, 2).toUpperCase() }}
                 </AvatarFallback>
               </Avatar>
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-1.5">
-                  <span class="truncate text-xs font-medium text-foreground">
+                  <span class="truncate text-sm font-medium text-foreground">
                     {{ member.label }}
                   </span>
                 </div>
                 <div
                   v-if="member.channelType"
-                  class="flex items-center gap-1 truncate text-[10px] text-muted-foreground"
+                  class="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground"
                 >
                   <ChannelIcon
                     :channel="member.channelType"
@@ -217,8 +180,8 @@
                 </div>
               </div>
 
-              <div class="flex items-center gap-3 shrink-0">
-                <label class="flex items-center gap-1.5 text-[11px] cursor-pointer text-foreground">
+              <div class="flex shrink-0 items-center gap-3">
+                <label class="flex cursor-pointer items-center gap-1.5 text-xs text-foreground">
                   <Checkbox
                     :model-value="member.chat"
                     :disabled="isRowBusy(member)"
@@ -226,7 +189,7 @@
                   />
                   {{ $t('bots.access.members.chat') }}
                 </label>
-                <label class="flex items-center gap-1.5 text-[11px] cursor-pointer text-foreground">
+                <label class="flex cursor-pointer items-center gap-1.5 text-xs text-foreground">
                   <Checkbox
                     :model-value="member.manage"
                     :disabled="isRowBusy(member)"
@@ -242,13 +205,15 @@
                  the inner button stays reachable. -->
                 <Popover v-if="member.bound || member.manageInherited">
                   <PopoverTrigger as-child>
-                    <button
-                      type="button"
-                      class="flex size-7 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      class="text-muted-foreground"
                       :title="$t('bots.access.members.platformMember')"
+                      :aria-label="$t('bots.access.members.platformMember')"
                     >
                       <Info class="size-3.5" />
-                    </button>
+                    </Button>
                   </PopoverTrigger>
                   <PopoverContent
                     align="end"
@@ -258,7 +223,7 @@
                       <Info class="size-3.5 text-muted-foreground" />
                       {{ $t('bots.access.members.platformMember') }}
                     </div>
-                    <p class="text-[11px] leading-relaxed text-muted-foreground">
+                    <p class="text-xs leading-relaxed text-muted-foreground">
                       {{ member.manageInherited
                         ? (member.manageHasOverride
                           ? $t('bots.access.members.overrideActive')
@@ -291,8 +256,8 @@
                   <template #trigger>
                     <Button
                       variant="ghost"
-                      size="icon"
-                      class="size-7 text-muted-foreground hover:text-destructive shadow-none"
+                      size="icon-sm"
+                      class="text-muted-foreground"
                       :disabled="isRowBusy(member)"
                     >
                       <Trash2 class="size-3.5" />
@@ -301,48 +266,57 @@
                 </ConfirmPopover>
               </div>
             </div>
+          </template>
+        </SettingsSection>
+
+        <SettingsSection :title="$t('bots.access.rulesTitle')">
+          <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3">
+            <div class="min-w-0">
+              <div class="text-sm font-medium text-foreground">
+                {{ $t('bots.access.rulesTitle') }}
+              </div>
+              <p class="mt-0.5 text-xs text-muted-foreground">
+                {{ $t('bots.access.rulesEmptyDescription') }}
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              class="shrink-0"
+              @click="advancedOpen = !advancedOpen"
+            >
+              <ChevronRight
+                class="size-4 transition-transform"
+                :class="advancedOpen ? 'rotate-90' : ''"
+              />
+              {{ advancedOpen ? $t('bots.access.advanced.hide') : $t('bots.access.advanced.show') }}
+            </Button>
           </div>
-        </section>
 
-        <!-- Advanced rules (platform / conversation scoped) -->
-        <Collapsible
-          v-model:open="advancedOpen"
-          class="space-y-3"
-        >
-          <CollapsibleTrigger class="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors">
-            <ChevronRight
-              class="size-3.5 transition-transform"
-              :class="advancedOpen ? 'rotate-90' : ''"
-            />
-            {{ advancedOpen ? $t('bots.access.advanced.hide') : $t('bots.access.advanced.show') }}
-          </CollapsibleTrigger>
-
-          <CollapsibleContent class="space-y-3">
-            <div class="flex justify-end">
+          <template v-if="advancedOpen">
+            <div
+              v-if="!formVisible"
+              class="mx-4 flex min-h-[3.75rem] items-center justify-end border-b border-border py-3"
+            >
               <Button
-                v-if="!formVisible"
                 size="sm"
                 variant="outline"
-                class="h-8 text-[11px] font-medium px-3 shadow-none"
                 @click="openAddDialog"
               >
-                <Plus class="mr-1.5 size-3.5" />
+                <Plus class="size-4" />
                 {{ addListEntryLabel }}
               </Button>
             </div>
 
-            <div
-              v-if="advancedRules.length"
-              class="space-y-2"
-            >
+            <template v-if="advancedRules.length">
               <div
                 v-for="rule in advancedRules"
                 :key="rule.id"
-                class="group flex items-center gap-3 rounded-md border border-border/60 bg-background/50 px-3 py-2.5 hover:bg-muted/30 transition-all duration-200"
+                class="mx-4 flex min-h-[3.75rem] items-center gap-3 border-b border-border py-3 last:border-b-0"
               >
                 <div
                   v-if="rule.subject_channel_type"
-                  class="flex size-8 shrink-0 items-center justify-center rounded bg-background border border-border/50 text-muted-foreground"
+                  class="flex size-8 shrink-0 items-center justify-center text-muted-foreground"
                 >
                   <ChannelIcon
                     :channel="rule.subject_channel_type"
@@ -351,51 +325,49 @@
                 </div>
                 <Avatar
                   v-else-if="rule.channel_identity_id"
-                  class="size-8 shrink-0 border border-border/40"
+                  class="size-8 shrink-0"
                 >
                   <AvatarImage
                     :src="rule.channel_identity_avatar_url || ''"
                     :alt="describeRuleTarget(rule)"
                   />
-                  <AvatarFallback class="text-[10px]">
+                  <AvatarFallback class="text-caption">
                     {{ ruleTargetFallback(rule) }}
                   </AvatarFallback>
                 </Avatar>
                 <div
                   v-else
-                  class="flex size-8 shrink-0 items-center justify-center rounded bg-background border border-border/50 text-muted-foreground"
+                  class="flex size-8 shrink-0 items-center justify-center text-muted-foreground"
                 >
                   <Users class="size-4" />
                 </div>
 
-                <div class="min-w-0 flex-1 space-y-0.5">
+                <div class="min-w-0 flex-1">
                   <div class="flex min-w-0 items-center gap-2">
-                    <p class="truncate text-[11px] font-semibold text-foreground">
+                    <p class="truncate text-sm font-medium text-foreground">
                       {{ describeRuleTarget(rule) }}
                     </p>
                     <Badge
-                      variant="outline"
-                      class="h-4 px-1.5 text-[9px] font-medium rounded-full shadow-none"
-                      :class="rule.enabled ? 'bg-foreground/5 text-foreground border-foreground/20' : 'bg-muted/40 text-muted-foreground border-border/40'"
+                      :variant="rule.enabled ? 'secondary' : 'outline'"
+                      size="sm"
                     >
                       {{ rule.enabled ? $t('bots.access.ruleEnabled') : $t('bots.access.ruleDisabled') }}
                     </Badge>
                   </div>
-                  <div class="flex min-w-0 items-center text-[10px] text-muted-foreground">
+                  <div class="mt-0.5 flex min-w-0 items-center text-xs text-muted-foreground">
                     <span class="shrink-0">{{ ruleScopePrefix(rule) }}</span>
                     <template v-if="ruleScopeDetail(rule)">
-                      <span class="shrink-0 mx-1">: </span>
+                      <span class="mx-1 shrink-0">: </span>
                       <span class="truncate">{{ ruleScopeDetail(rule) }}</span>
                     </template>
                   </div>
                 </div>
 
-                <div class="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div class="flex shrink-0 items-center gap-1">
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    class="size-7 shadow-none"
-                    :class="rule.enabled ? 'text-muted-foreground' : 'text-foreground hover:bg-foreground/5'"
+                    class="text-muted-foreground"
                     :aria-label="rule.enabled ? $t('bots.access.disableRule') : $t('bots.access.enableRule')"
                     @click="handleToggleEnabled(rule, !(rule.enabled ?? false))"
                   >
@@ -404,11 +376,11 @@
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    class="size-7"
+                    class="text-muted-foreground"
                     :aria-label="$t('common.edit')"
                     @click="openEditDialog(rule)"
                   >
-                    <SquarePen class="size-3.5 text-muted-foreground" />
+                    <SquarePen class="size-3.5" />
                   </Button>
                   <ConfirmPopover
                     :message="$t('bots.access.deleteConfirmDescription')"
@@ -419,7 +391,7 @@
                       <Button
                         variant="ghost"
                         size="icon-sm"
-                        class="size-7 text-destructive/70 hover:text-destructive hover:bg-destructive/10"
+                        class="text-muted-foreground"
                         :aria-label="$t('common.delete')"
                       >
                         <Trash2 class="size-3.5" />
@@ -428,46 +400,58 @@
                   </ConfirmPopover>
                 </div>
               </div>
+            </template>
+
+            <div
+              v-else-if="!formVisible"
+              class="p-4"
+            >
+              <Empty class="rounded-[var(--radius-menu-shell)] border border-dashed border-border py-12">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <Users class="size-4" />
+                  </EmptyMedia>
+                  <EmptyTitle>{{ $t('bots.access.rulesEmpty') }}</EmptyTitle>
+                  <EmptyDescription>{{ $t('bots.access.rulesEmptyDescription') }}</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             </div>
 
-            <!-- Inline Add/Edit Rule Form (advanced) -->
-            <Transition name="fade">
-              <section
-                v-if="formVisible"
-                class="space-y-5 rounded-md border border-border/60 bg-muted/10 p-4 relative"
-              >
-                <div class="flex items-center justify-between">
-                  <h3 class="text-xs font-semibold text-foreground">
-                    {{ editingRule ? $t('bots.access.editRule') : addListEntryLabel }}
-                  </h3>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    class="size-7"
-                    @click="formVisible = false"
-                  >
-                    <X class="size-4" />
-                  </Button>
-                </div>
-
-                <form
-                  class="space-y-4"
-                  @submit.prevent="handleSaveRule(false)"
+            <section
+              v-if="formVisible"
+              class="mx-4 space-y-4 border-b border-border py-4 last:border-b-0"
+            >
+              <div class="flex items-center justify-between gap-4">
+                <h3 class="text-sm font-medium text-foreground">
+                  {{ editingRule ? $t('bots.access.editRule') : addListEntryLabel }}
+                </h3>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  :aria-label="$t('common.cancel')"
+                  @click="formVisible = false"
                 >
-                  <div class="rounded-md bg-background/80 border border-border/40 px-3 py-2.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
-                    {{ rulePreviewText }}
-                  </div>
+                  <X class="size-4" />
+                </Button>
+              </div>
 
-                  <!-- Platform Scope -->
+              <form
+                class="space-y-4"
+                @submit.prevent="handleSaveRule(false)"
+              >
+                <p class="font-mono text-xs leading-relaxed text-muted-foreground">
+                  {{ rulePreviewText }}
+                </p>
+
+                <div class="grid gap-4 sm:grid-cols-2">
                   <div class="space-y-1.5">
                     <div class="flex items-center justify-between gap-2">
-                      <Label class="text-[11px] font-medium text-muted-foreground">{{ $t('bots.access.platformQuestion') }}</Label>
+                      <Label class="text-xs font-medium text-muted-foreground">{{ $t('bots.access.platformQuestion') }}</Label>
                       <Button
                         v-if="ruleForm.subjectChannelType"
                         type="button"
                         variant="ghost"
-                        size="sm"
-                        class="h-5 px-1.5 text-[10px] text-muted-foreground/60"
+                        size="text"
                         @click="setPlatformScope('')"
                       >
                         {{ $t('bots.access.allPlatforms') }}
@@ -481,31 +465,17 @@
                       :empty-text="$t('bots.access.noPlatformCandidates')"
                       :show-group-headers="false"
                       @update:model-value="setPlatformScope"
-                    >
-                      <template #trigger="{ open, displayLabel }">
-                        <Button
-                          variant="outline"
-                          role="combobox"
-                          :aria-expanded="open"
-                          class="w-full justify-between font-normal h-8 text-[11px] bg-background/50 border-border/50 shadow-none"
-                        >
-                          <span class="truncate">{{ displayLabel || $t('bots.access.allPlatforms') }}</span>
-                          <Search class="ml-2 size-3.5 shrink-0 text-muted-foreground/60" />
-                        </Button>
-                      </template>
-                    </SearchableSelectPopover>
+                    />
                   </div>
 
-                  <!-- Channel Identity -->
                   <div class="space-y-1.5">
                     <div class="flex items-center justify-between gap-2">
-                      <Label class="text-[11px] font-medium text-muted-foreground">{{ $t('bots.access.userQuestion') }}</Label>
+                      <Label class="text-xs font-medium text-muted-foreground">{{ $t('bots.access.userQuestion') }}</Label>
                       <Button
                         v-if="ruleForm.channelIdentityId"
                         type="button"
                         variant="ghost"
-                        size="sm"
-                        class="h-5 px-1.5 text-[10px] text-muted-foreground/60"
+                        size="text"
                         @click="setChannelIdentity('')"
                       >
                         {{ $t('bots.access.allUsers') }}
@@ -518,117 +488,94 @@
                       :search-placeholder="$t('bots.access.searchIdentity')"
                       :empty-text="$t('bots.access.noIdentityCandidates')"
                       @update:model-value="setChannelIdentity"
-                    >
-                      <template #trigger="{ open, displayLabel }">
-                        <Button
-                          variant="outline"
-                          role="combobox"
-                          :aria-expanded="open"
-                          class="w-full justify-between font-normal h-8 text-[11px] bg-background/50 border-border/50 shadow-none"
-                        >
-                          <span class="truncate">{{ displayLabel || $t('bots.access.selectIdentity') }}</span>
-                          <Search class="ml-2 size-3.5 shrink-0 text-muted-foreground/60" />
-                        </Button>
-                      </template>
-                    </SearchableSelectPopover>
-                  </div>
-
-                  <!-- Chat Scope -->
-                  <div class="space-y-2">
-                    <Label class="text-[11px] font-medium text-muted-foreground">{{ $t('bots.access.scopeQuestion') }}</Label>
-                    <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                      <button
-                        v-for="scope in chatScopeOptions"
-                        :key="scope.value || 'any'"
-                        type="button"
-                        class="rounded border px-2 py-1.5 text-[10px] font-semibold transition-all text-center h-8 flex items-center justify-center"
-                        :class="ruleForm.sourceConversationType === scope.value
-                          ? 'border-foreground/30 bg-foreground/10 text-foreground'
-                          : 'border-border/50 bg-background/50 text-muted-foreground hover:bg-accent hover:text-foreground'"
-                        @click="setChatScope(scope.value)"
-                      >
-                        {{ scope.label }}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div
-                    v-if="showSpecificConversationSection"
-                    class="space-y-3 border-l-2 border-border/40 pl-4 py-1"
-                  >
-                    <div class="grid gap-3 sm:grid-cols-2">
-                      <div class="space-y-1.5">
-                        <Label class="text-[10px] font-medium text-muted-foreground">{{ $t('bots.access.conversationId') }}</Label>
-                        <Input
-                          v-model="ruleForm.sourceConversationId"
-                          class="h-8 text-[11px] bg-background/50 border-border/50 shadow-none"
-                          :placeholder="$t('bots.access.conversationIdPlaceholder')"
-                        />
-                      </div>
-                      <div
-                        v-if="ruleForm.sourceConversationType === 'thread'"
-                        class="space-y-1.5"
-                      >
-                        <Label class="text-[10px] font-medium text-muted-foreground">{{ $t('bots.access.threadId') }}</Label>
-                        <Input
-                          v-model="ruleForm.sourceThreadId"
-                          class="h-8 text-[11px] bg-background/50 border-border/50 shadow-none"
-                          :placeholder="$t('bots.access.threadIdPlaceholder')"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="space-y-1.5">
-                    <Label class="text-[11px] font-medium text-muted-foreground">{{ $t('bots.access.description') }}</Label>
-                    <Input
-                      v-model="ruleForm.description"
-                      class="h-8 text-[11px] bg-background/50 border-border/50 shadow-none"
-                      :placeholder="$t('bots.access.descriptionPlaceholder')"
                     />
                   </div>
+                </div>
 
-                  <p
-                    v-if="formError"
-                    class="text-[10px] text-destructive bg-destructive/5 px-2 py-1 rounded"
-                  >
-                    {{ formError }}
-                  </p>
+                <div class="space-y-2">
+                  <Label class="text-xs font-medium text-muted-foreground">{{ $t('bots.access.scopeQuestion') }}</Label>
+                  <SegmentedControl
+                    :model-value="ruleForm.sourceConversationType"
+                    :items="chatScopeOptions"
+                    :aria-label="$t('bots.access.scopeQuestion')"
+                    class="w-full sm:w-fit"
+                    @update:model-value="(value) => setChatScope(String(value))"
+                  />
+                </div>
 
-                  <div class="flex justify-end gap-2 pt-2 border-t border-border/30">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      class="h-8 px-4 text-[11px]"
-                      @click="formVisible = false"
-                    >
-                      {{ $t('common.cancel') }}
-                    </Button>
-                    <Button
-                      type="submit"
-                      size="sm"
-                      class="h-8 px-4 text-[11px] shadow-none bg-foreground text-background hover:bg-foreground/90"
-                      :disabled="isSavingRule"
-                    >
-                      <Spinner
-                        v-if="isSavingRule"
-                        class="mr-1.5 size-3.5"
+                <div
+                  v-if="showSpecificConversationSection"
+                  class="space-y-3"
+                >
+                  <div class="grid gap-3 sm:grid-cols-2">
+                    <div class="space-y-1.5">
+                      <Label class="text-xs font-medium text-muted-foreground">{{ $t('bots.access.conversationId') }}</Label>
+                      <Input
+                        v-model="ruleForm.sourceConversationId"
+                        class="h-8"
+                        :placeholder="$t('bots.access.conversationIdPlaceholder')"
                       />
-                      {{ $t('bots.access.saveAndEnable') }}
-                    </Button>
+                    </div>
+                    <div
+                      v-if="ruleForm.sourceConversationType === 'thread'"
+                      class="space-y-1.5"
+                    >
+                      <Label class="text-xs font-medium text-muted-foreground">{{ $t('bots.access.threadId') }}</Label>
+                      <Input
+                        v-model="ruleForm.sourceThreadId"
+                        class="h-8"
+                        :placeholder="$t('bots.access.threadIdPlaceholder')"
+                      />
+                    </div>
                   </div>
-                </form>
-              </section>
-            </Transition>
-          </CollapsibleContent>
-        </Collapsible>
+                </div>
+
+                <div class="space-y-1.5">
+                  <Label class="text-xs font-medium text-muted-foreground">{{ $t('bots.access.description') }}</Label>
+                  <Input
+                    v-model="ruleForm.description"
+                    class="h-8"
+                    :placeholder="$t('bots.access.descriptionPlaceholder')"
+                  />
+                </div>
+
+                <p
+                  v-if="formError"
+                  class="text-xs text-destructive"
+                >
+                  {{ formError }}
+                </p>
+
+                <div class="flex justify-end gap-2 border-t border-border pt-4">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    @click="formVisible = false"
+                  >
+                    {{ $t('common.cancel') }}
+                  </Button>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    :disabled="isSavingRule"
+                  >
+                    <Spinner
+                      v-if="isSavingRule"
+                      class="size-3"
+                    />
+                    {{ $t('bots.access.saveAndEnable') }}
+                  </Button>
+                </div>
+              </form>
+            </section>
+          </template>
+        </SettingsSection>
       </TabsContent>
 
-      <!-- Workspace members (web platform) -->
       <TabsContent
         value="workspace"
-        class="mt-4"
+        class="space-y-8"
       >
         <BotUserAccess :bot-id="botId" />
       </TabsContent>
@@ -646,11 +593,8 @@ import {
   SquarePen,
   Trash2,
   X,
-  Search,
   Users,
   Power,
-  ShieldCheck,
-  ShieldAlert,
   Info,
   RotateCcw,
   ChevronRight,
@@ -664,8 +608,13 @@ import {
   AvatarFallback,
   Spinner,
   Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
   Badge,
   Checkbox,
+  SegmentedControl,
   Tabs,
   TabsList,
   TabsTrigger,
@@ -673,9 +622,6 @@ import {
   Popover,
   PopoverTrigger,
   PopoverContent,
-  Collapsible,
-  CollapsibleTrigger,
-  CollapsibleContent,
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
@@ -684,6 +630,7 @@ import type { SearchableSelectOption } from '@/components/searchable-select-popo
 import BotUserAccess from './bot-user-access.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
+import SettingsSection from '@/components/settings/section.vue'
 import type { AclRule, AclSourceScope, ChannelaccessManager, HandlersChannelMeta } from '@memohai/sdk'
 import {
   getChannels,
@@ -707,6 +654,19 @@ const { t } = useI18n()
 const queryCache = useQueryCache()
 
 const activeTab = ref<'channel' | 'workspace'>('channel')
+
+const accessModeItems = computed(() => [
+  {
+    value: 'allow',
+    label: t('bots.access.blacklistMode'),
+    disabled: isSavingDefaultEffect.value,
+  },
+  {
+    value: 'deny',
+    label: t('bots.access.whitelistMode'),
+    disabled: isSavingDefaultEffect.value,
+  },
+])
 
 const chatScopeOptions = computed(() => [
   { value: '', label: t('bots.access.chatScopeAny') },
@@ -1364,14 +1324,3 @@ function ruleScopeDetail(rule: AclRule): string {
   return `${displayName}${thread}`
 }
 </script>
-
-<style scoped>
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-</style>

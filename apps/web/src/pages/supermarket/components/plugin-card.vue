@@ -1,6 +1,6 @@
 <template>
   <Card
-    class="group flex cursor-pointer flex-row items-start gap-3 p-4 transition-colors hover:border-foreground/20 hover:bg-accent/20"
+    class="group flex cursor-pointer flex-row items-start gap-3 p-4 transition-colors"
     role="button"
     tabindex="0"
     @click="openDetail"
@@ -46,14 +46,24 @@
       </p>
     </div>
 
-    <Button
-      size="sm"
+    <div
+      v-if="$slots.actions || props.showInstall"
       class="shrink-0"
-      @click.stop="$emit('install', plugin)"
+      @click.stop
+      @keydown.stop
     >
-      <Download class="mr-1.5 size-3.5" />
-      {{ $t('supermarket.install') }}
-    </Button>
+      <slot name="actions">
+        <Button
+          v-if="props.showInstall"
+          size="sm"
+          class="shrink-0"
+          @click="$emit('install', plugin)"
+        >
+          <Download class="size-3.5" />
+          {{ $t('supermarket.install') }}
+        </Button>
+      </slot>
+    </div>
   </Card>
 </template>
 
@@ -65,9 +75,12 @@ import { Card, Button } from '@memohai/ui'
 import type { PluginsManifest } from '@memohai/sdk'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   plugin: PluginsManifest
-}>()
+  showInstall?: boolean
+}>(), {
+  showInstall: true,
+})
 
 defineEmits<{
   'install': [plugin: PluginsManifest]

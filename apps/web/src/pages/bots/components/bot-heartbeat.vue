@@ -1,309 +1,295 @@
 <template>
-  <div class="max-w-2xl mx-auto pb-6 space-y-5">
-    <!-- Sovereign Header -->
-    <header class="pb-4 border-b border-border/50 sticky top-0 bg-background/95 backdrop-blur z-30 pt-4 -mt-4 flex items-center justify-between">
-      <div class="space-y-1">
-        <h2 class="text-sm font-semibold text-foreground">
+  <div class="mx-auto max-w-3xl pt-6 pb-8">
+    <div class="mb-6 flex items-start justify-between gap-4 px-2">
+      <div class="min-w-0">
+        <h1 class="text-lg font-semibold text-foreground">
           {{ $t('bots.heartbeat.title') }}
-        </h2>
-        <p class="text-[11px] leading-snug text-muted-foreground max-w-md">
+        </h1>
+        <p class="mt-1 text-xs text-muted-foreground">
           {{ $t('bots.settings.heartbeatDescription') }}
         </p>
       </div>
-      <div class="flex items-center gap-2 shrink-0">
-        <NativeSelect
-          v-model="statusFilter"
-          class="h-8 w-24 text-[11px] shadow-none bg-background/50 border-border/50"
-        >
-          <option value="">
-            {{ $t('bots.heartbeat.filterAll') }}
-          </option>
-          <option value="ok">
-            {{ $t('bots.heartbeat.statusOk') }}
-          </option>
-          <option value="alert">
-            {{ $t('bots.heartbeat.statusAlert') }}
-          </option>
-          <option value="error">
-            {{ $t('bots.heartbeat.statusError') }}
-          </option>
-        </NativeSelect>
 
-        <ConfirmPopover
-          v-if="logs.length > 0"
-          :message="$t('bots.heartbeat.clearConfirm')"
-          :loading="isClearing"
-          :confirm-text="$t('bots.heartbeat.clearLogs')"
-          @confirm="handleClear"
-        >
-          <template #trigger>
-            <Button
-              variant="ghost"
-              size="sm"
-              class="h-8 text-xs font-medium px-3 shadow-none text-muted-foreground hover:text-destructive"
-              :disabled="isClearing"
-            >
-              <Trash2 class="mr-2 size-3.5" />
-              {{ $t('bots.heartbeat.clearLogs') }}
-            </Button>
-          </template>
-        </ConfirmPopover>
-
-        <Button
-          variant="outline"
-          size="sm"
-          class="h-8 text-xs font-medium px-3 shadow-none border-border/50 bg-background/60 backdrop-blur-sm"
-          :disabled="isLoading"
-          @click="handleRefresh"
-        >
-          <RotateCw
-            class="mr-2 size-3.5"
-            :class="{ 'animate-spin': isLoading }"
-          />
-          {{ $t('common.refresh') }}
-        </Button>
-      </div>
-    </header>
-
-    <!-- Configuration Panel (Compact) -->
-    <section class="rounded-md border border-border/60 bg-background p-4 shadow-sm space-y-4">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2.5">
-          <div class="p-1.5 rounded bg-muted/30">
-            <HeartPulse class="size-4 text-muted-foreground" />
-          </div>
-          <div>
-            <h3 class="text-xs font-semibold text-foreground">
-              {{ $t('bots.settings.heartbeatEnabled') }}
-            </h3>
-            <p class="text-[10px] text-muted-foreground">
-              {{ $t('bots.settings.heartbeatModelDescription') }}
-            </p>
-          </div>
-        </div>
-        <Switch
-          :model-value="settingsForm.heartbeat_enabled"
-          @update:model-value="(val) => settingsForm.heartbeat_enabled = !!val"
-        />
-      </div>
-
-      <Transition
-        enter-active-class="transition duration-200 ease-out"
-        enter-from-class="transform -translate-y-2 opacity-0"
-        enter-to-class="transform translate-y-0 opacity-100"
-        leave-active-class="transition duration-150 ease-in"
-        leave-from-class="transform translate-y-0 opacity-100"
-        leave-to-class="transform -translate-y-2 opacity-0"
+      <Button
+        variant="outline"
+        size="sm"
+        class="shrink-0"
+        :disabled="isLoading"
+        @click="handleRefresh"
       >
-        <div
-          v-if="settingsForm.heartbeat_enabled"
-          class="grid gap-4 md:grid-cols-3 pt-2 border-t border-border/40"
+        <RotateCw
+          class="size-4"
+          :class="{ 'animate-spin': isLoading }"
+        />
+        {{ $t('common.refresh') }}
+      </Button>
+    </div>
+
+    <div class="space-y-8">
+      <SettingsSection :title="$t('bots.settings.heartbeatEnabled')">
+        <SettingsRow
+          :label="$t('bots.settings.heartbeatEnabled')"
+          :description="$t('bots.settings.heartbeatDescription')"
         >
-          <div class="space-y-1.5">
-            <Label class="text-[11px] font-medium text-foreground">{{ $t('bots.settings.heartbeatInterval') }}</Label>
+          <Switch
+            :model-value="settingsForm.heartbeat_enabled"
+            @update:model-value="(val) => settingsForm.heartbeat_enabled = !!val"
+          />
+        </SettingsRow>
+
+        <template v-if="settingsForm.heartbeat_enabled">
+          <SettingsRow :label="$t('bots.settings.heartbeatInterval')">
             <Input
               v-model.number="settingsForm.heartbeat_interval"
               type="number"
               :min="1"
-              class="h-8 text-[11px] font-mono bg-muted/5 border-border/50 shadow-none"
-              :placeholder="'1440'"
+              placeholder="1440"
+              class="h-8 w-28 tabular-nums"
             />
-          </div>
-          <div class="space-y-1.5 md:col-span-2">
-            <Label class="text-[11px] font-medium text-foreground">{{ $t('bots.settings.heartbeatModel') }}</Label>
+          </SettingsRow>
+
+          <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3">
+            <div class="min-w-0">
+              <div class="text-sm font-medium text-foreground">
+                {{ $t('bots.settings.heartbeatModel') }}
+              </div>
+              <p class="mt-0.5 text-xs text-muted-foreground">
+                {{ $t('bots.settings.heartbeatModelDescription') }}
+              </p>
+            </div>
             <ModelSelect
               v-model="settingsForm.heartbeat_model_id"
               :models="models"
               :providers="providers"
               model-type="chat"
-              class="h-8 text-[11px]"
+              class="w-72 shrink-0"
             />
           </div>
+        </template>
+
+        <div class="mx-4 flex min-h-[3.75rem] items-center justify-end py-3">
+          <Button
+            size="sm"
+            :disabled="!settingsChanged || isSaving"
+            @click="handleSaveSettings"
+          >
+            <Spinner
+              v-if="isSaving"
+              class="size-3"
+            />
+            {{ $t('bots.settings.save') }}
+          </Button>
         </div>
-      </Transition>
+      </SettingsSection>
 
-      <div class="flex justify-end pt-1">
-        <Button
-          size="sm"
-          class="h-8 text-xs font-medium px-4 shadow-none bg-foreground text-background hover:bg-foreground/90"
-          :disabled="!settingsChanged || isSaving"
-          @click="handleSaveSettings"
-        >
-          <Spinner
-            v-if="isSaving"
-            class="mr-2 size-3.5"
-          />
-          {{ $t('bots.settings.save') }}
-        </Button>
-      </div>
-    </section>
-
-    <!-- Logs List -->
-    <div class="space-y-3">
-      <!-- Loading State -->
-      <div
-        v-if="isLoading && logs.length === 0"
-        class="flex items-center justify-center py-12 text-xs text-muted-foreground"
-      >
-        <Spinner class="mr-2 size-4" />
-        {{ $t('common.loading') }}
-      </div>
-
-      <!-- Empty State -->
-      <div
-        v-else-if="!isLoading && filteredLogs.length === 0"
-        class="flex flex-col items-center justify-center py-16 text-center border border-dashed border-border/50 bg-muted/5 rounded-lg relative overflow-hidden"
-      >
-        <!-- Blueprint Grid Background -->
-        <div class="absolute inset-0 opacity-[0.03] pointer-events-none bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]" />
-        
-        <div class="relative z-10 flex flex-col items-center">
-          <div class="rounded-md bg-background border border-border/50 p-2.5 mb-4 shadow-sm">
-            <Zap class="size-5 text-muted-foreground" />
+      <SettingsSection :title="$t('bots.heartbeat.title')">
+        <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3">
+          <div class="flex min-w-0 items-center gap-2">
+            <HeartPulse class="size-4 text-muted-foreground" />
+            <span class="text-sm font-medium text-foreground">
+              {{ $t('bots.heartbeat.title') }}
+            </span>
           </div>
-          <h3 class="text-sm font-medium text-foreground">
-            {{ $t('bots.heartbeat.empty') }}
-          </h3>
-          <p class="text-[11px] text-muted-foreground mt-1.5 max-w-sm">
-            {{ statusFilter ? $t('bots.heartbeat.filterEmpty') : $t('bots.heartbeat.description') }}
-          </p>
+          <NativeSelect
+            v-model="statusFilter"
+            class="w-32"
+          >
+            <option value="">
+              {{ $t('bots.heartbeat.filterAll') }}
+            </option>
+            <option value="ok">
+              {{ $t('bots.heartbeat.statusOk') }}
+            </option>
+            <option value="alert">
+              {{ $t('bots.heartbeat.statusAlert') }}
+            </option>
+            <option value="error">
+              {{ $t('bots.heartbeat.statusError') }}
+            </option>
+          </NativeSelect>
         </div>
-      </div>
 
-      <!-- Log Cards -->
-      <div
-        v-else
-        class="space-y-2"
-      >
         <div
-          v-for="log in filteredLogs"
-          :key="log.id"
-          class="group rounded-md border border-border/60 bg-background hover:bg-accent/30 transition-colors duration-75 p-3 flex flex-col gap-2 relative cursor-pointer"
-          @click="toggleExpand(log.id)"
+          v-if="isLoading && logs.length === 0"
+          class="mx-4 flex min-h-[12rem] items-center justify-center gap-2 py-12 text-sm text-muted-foreground"
         >
-          <!-- Card Header -->
-          <div class="flex items-center justify-between gap-3">
-            <div class="flex items-center gap-2.5 min-w-0">
-              <div 
-                class="size-1.5 rounded-full shrink-0"
-                :class="statusColorClass(log.status)"
-              />
-              <span class="font-mono text-[11px] font-semibold text-foreground uppercase tracking-tight">
-                {{ statusLabel(log.status) }}
-              </span>
-              <span class="font-mono text-[10px] text-muted-foreground/60">
-                {{ formatDateTime(log.started_at) }}
-              </span>
-            </div>
+          <Spinner class="size-4" />
+          {{ $t('common.loading') }}
+        </div>
 
-            <div class="flex items-center gap-3 shrink-0">
-              <span class="font-mono text-[10px] text-muted-foreground/80 px-1.5 py-0.5 rounded bg-muted/40">
-                {{ formatDuration(log.started_at, log.completed_at) }}
-              </span>
-              <ChevronDown 
-                class="size-3 text-muted-foreground/40 transition-transform duration-200"
-                :class="{ 'rotate-180': log.id && expandedIds.has(log.id) }"
-              />
-            </div>
-          </div>
+        <Empty
+          v-else-if="!isLoading && filteredLogs.length === 0"
+          class="m-4 rounded-[var(--radius-menu-shell)] border border-dashed border-border py-12"
+        >
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <HeartPulse />
+            </EmptyMedia>
+            <EmptyTitle>{{ $t('bots.heartbeat.empty') }}</EmptyTitle>
+            <EmptyDescription>
+              {{ statusFilter ? $t('bots.heartbeat.filterEmpty') : $t('bots.heartbeat.description') }}
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
 
-          <!-- Card Body / Result Summary -->
-          <div 
-            v-if="!expandedIds.has(log.id!)"
-            class="pl-4"
-          >
-            <p 
-              class="text-[11px] leading-snug line-clamp-1 break-words"
-              :class="log.status === 'error' ? 'text-destructive/80' : 'text-muted-foreground'"
-            >
-              {{ log.status === 'error' ? (log.error_message || $t('bots.heartbeat.noResult')) : (truncateText(log.result_text) || $t('bots.heartbeat.noResult')) }}
-            </p>
-          </div>
-
-          <!-- Expanded Detail Section -->
+        <div v-else>
           <div
-            v-if="log.id && expandedIds.has(log.id)"
-            class="pl-4 pt-1 space-y-3"
+            v-for="log in filteredLogs"
+            :key="log.id"
+            class="mx-4 border-b border-border py-3 last:border-b-0"
           >
-            <div class="p-3 rounded-md bg-muted/20 border border-border/40 overflow-hidden shadow-inner">
-              <pre class="font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-foreground/90">{{ log.result_text || $t('bots.heartbeat.noResult') }}</pre>
-            </div>
-            
-            <div 
-              v-if="log.error_message"
-              class="p-3 rounded-md bg-destructive/5 border border-destructive/20"
+            <button
+              type="button"
+              class="flex w-full items-center justify-between gap-3 text-left"
+              @click="toggleExpand(log.id)"
             >
-              <p class="font-mono text-[11px] text-destructive leading-normal">
-                {{ log.error_message }}
-              </p>
-            </div>
+              <div class="min-w-0">
+                <div class="flex items-center gap-2">
+                  <Badge
+                    :variant="statusVariant(log.status)"
+                    size="sm"
+                  >
+                    {{ statusLabel(log.status) }}
+                  </Badge>
+                  <span class="text-xs tabular-nums text-muted-foreground">
+                    {{ formatDateTime(log.started_at) }}
+                  </span>
+                </div>
+                <p
+                  v-if="!expandedIds.has(log.id!)"
+                  class="mt-1 truncate text-xs"
+                  :class="log.status === 'error' ? 'text-destructive' : 'text-muted-foreground'"
+                >
+                  {{ log.status === 'error' ? (log.error_message || $t('bots.heartbeat.noResult')) : (truncateText(log.result_text) || $t('bots.heartbeat.noResult')) }}
+                </p>
+              </div>
 
-            <div 
-              v-if="log.usage"
-              class="flex flex-wrap gap-2 pt-1"
+              <div class="flex shrink-0 items-center gap-3">
+                <span class="text-xs tabular-nums text-muted-foreground">
+                  {{ formatDuration(log.started_at, log.completed_at) }}
+                </span>
+                <ChevronDown
+                  class="size-4 text-muted-foreground transition-transform"
+                  :class="{ 'rotate-180': log.id && expandedIds.has(log.id) }"
+                />
+              </div>
+            </button>
+
+            <div
+              v-if="log.id && expandedIds.has(log.id)"
+              class="mt-3 space-y-3"
             >
-              <div 
-                v-for="(val, key) in (log.usage as any)"
-                :key="key"
-                class="px-1.5 py-0.5 rounded border border-border/40 bg-muted/10 font-mono text-[9px] text-muted-foreground"
+              <div class="overflow-hidden rounded-md border border-border bg-card p-3">
+                <pre class="whitespace-pre-wrap break-all font-mono text-xs leading-relaxed text-foreground">{{ log.result_text || $t('bots.heartbeat.noResult') }}</pre>
+              </div>
+
+              <div
+                v-if="log.error_message"
+                class="rounded-md border border-border bg-card p-3"
               >
-                {{ key }}: {{ val }}
+                <p class="font-mono text-xs leading-normal text-destructive">
+                  {{ log.error_message }}
+                </p>
+              </div>
+
+              <div
+                v-if="log.usage"
+                class="flex flex-wrap gap-2"
+              >
+                <span
+                  v-for="(val, key) in (log.usage as any)"
+                  :key="key"
+                  class="rounded-sm border border-border px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground"
+                >
+                  {{ key }}: {{ val }}
+                </span>
               </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- Pagination -->
-      <div
-        v-if="totalPages > 1"
-        class="flex items-center justify-between pt-4 border-t border-border/40"
-      >
-        <span class="font-mono text-[10px] text-muted-foreground whitespace-nowrap">
-          {{ paginationSummary }}
-        </span>
-        <Pagination
-          :total="totalCount"
-          :items-per-page="PAGE_SIZE"
-          :sibling-count="1"
-          :page="currentPage"
-          show-edges
-          @update:page="currentPage = $event"
+        <div
+          v-if="totalPages > 1"
+          class="flex items-center justify-between border-t border-border p-4"
         >
-          <PaginationContent v-slot="{ items }">
-            <PaginationFirst class="h-8 " />
-            <PaginationPrevious class="h-8" />
-            <template
-              v-for="(item, index) in items"
-              :key="index"
-            >
-              <PaginationEllipsis
-                v-if="item.type === 'ellipsis'"
-                :index="index"
-              />
-              <PaginationItem
-                v-else
-                :value="item.value"
-                :is-active="item.value === currentPage"
-                class="h-8 text-[11px]"
-              />
+          <span class="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+            {{ paginationSummary }}
+          </span>
+          <Pagination
+            :total="totalCount"
+            :items-per-page="PAGE_SIZE"
+            :sibling-count="1"
+            :page="currentPage"
+            show-edges
+            @update:page="currentPage = $event"
+          >
+            <PaginationContent v-slot="{ items }">
+              <PaginationFirst />
+              <PaginationPrevious />
+              <template
+                v-for="(item, index) in items"
+                :key="index"
+              >
+                <PaginationEllipsis
+                  v-if="item.type === 'ellipsis'"
+                  :index="index"
+                />
+                <PaginationItem
+                  v-else
+                  :value="item.value"
+                  :is-active="item.value === currentPage"
+                />
+              </template>
+              <PaginationNext />
+              <PaginationLast />
+            </PaginationContent>
+          </Pagination>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        v-if="logs.length > 0"
+        :title="$t('common.dangerZone')"
+      >
+        <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 py-3">
+          <div class="min-w-0">
+            <div class="text-sm font-medium text-foreground">
+              {{ $t('bots.heartbeat.clearLogs') }}
+            </div>
+            <p class="mt-0.5 text-xs text-muted-foreground">
+              {{ $t('bots.heartbeat.clearConfirm') }}
+            </p>
+          </div>
+          <ConfirmPopover
+            :message="$t('bots.heartbeat.clearConfirm')"
+            :loading="isClearing"
+            :confirm-text="$t('bots.heartbeat.clearLogs')"
+            @confirm="handleClear"
+          >
+            <template #trigger>
+              <Button
+                variant="destructive"
+                size="sm"
+                :disabled="isClearing"
+              >
+                <Trash2 class="size-4" />
+                {{ $t('bots.heartbeat.clearLogs') }}
+              </Button>
             </template>
-            <PaginationNext class="h-8" />
-            <PaginationLast class="h-8" />
-          </PaginationContent>
-        </Pagination>
-      </div>
+          </ConfirmPopover>
+        </div>
+      </SettingsSection>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { HeartPulse, Trash2, RotateCw, Zap, ChevronDown } from 'lucide-vue-next'
+import { HeartPulse, Trash2, RotateCw, ChevronDown } from 'lucide-vue-next'
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
 import {
-  Button, Spinner, NativeSelect, Label, Switch, Input,
+  Badge, Button, Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle, Spinner, NativeSelect, Switch, Input,
   Pagination, PaginationContent, PaginationEllipsis,
   PaginationFirst, PaginationItem, PaginationLast,
   PaginationNext, PaginationPrevious,
@@ -319,6 +305,8 @@ import type { SettingsSettings, SettingsUpsertRequest, HeartbeatLog } from '@mem
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
+import SettingsSection from '@/components/settings/section.vue'
+import SettingsRow from '@/components/settings/row.vue'
 import type { Ref } from 'vue'
 
 const props = defineProps<{
@@ -431,10 +419,10 @@ watch(currentPage, () => {
   fetchLogs()
 })
 
-function statusColorClass(status: string | undefined) {
-  if (status === 'ok') return 'bg-green-500'
-  if (status === 'alert') return 'bg-yellow-500'
-  return 'bg-destructive shadow-[0_0_8px_rgba(239,68,68,0.4)]'
+function statusVariant(status: string | undefined) {
+  if (status === 'ok') return 'secondary' as const
+  if (status === 'alert') return 'warning' as const
+  return 'destructive' as const
 }
 
 function statusLabel(status: string | undefined) {
