@@ -48,6 +48,10 @@ declare module '@memohai/web/lib/keyboard-commands' {
   export const appKeyboardCommands: {
     readonly closeCurrentWorkspaceTab: 'close-current-workspace-tab'
     readonly saveActiveFile: 'save-active-file'
+    readonly toggleSidebar: 'toggle-sidebar'
+    readonly closeMediaLightbox: 'close-media-lightbox'
+    readonly mediaLightboxPrev: 'media-lightbox-prev'
+    readonly mediaLightboxNext: 'media-lightbox-next'
   }
   export type AppKeyboardCommand =
     typeof appKeyboardCommands[keyof typeof appKeyboardCommands]
@@ -69,6 +73,7 @@ declare module '@memohai/web/lib/keyboard-bindings' {
   import type { AppKeyboardCommand } from '@memohai/web/lib/keyboard-commands'
   export type DesktopDelivery = 'menu' | 'keydown'
   export type BrowserBehavior = 'intercept' | 'passthrough'
+  export type KeyboardScope = 'global' | 'mediaLightbox'
   export interface KeyboardBinding {
     command: AppKeyboardCommand
     key: string
@@ -77,6 +82,8 @@ declare module '@memohai/web/lib/keyboard-bindings' {
     shift?: boolean
     desktop: DesktopDelivery
     browser: BrowserBehavior
+    scope: KeyboardScope
+    i18nKey: string
   }
   export const keyboardBindings: KeyboardBinding[]
   export const RESERVED_BROWSER_COMBOS: Set<string>
@@ -112,6 +119,30 @@ declare module '@memohai/web/lib/browser-keyboard-shortcuts' {
     bindings: BrowserKeyboardShortcutBinding[],
     target?: unknown,
   ): () => void
+  export function connectBrowserKeyboardShortcutsLive(
+    registry: Pick<KeyboardCommandRegistry, 'dispatch'>,
+    getBindings: () => BrowserKeyboardShortcutBinding[],
+    target?: unknown,
+  ): () => void
+}
+
+declare module '@memohai/web/store/keyboard-shortcuts' {
+  import type { KeyboardBinding } from '@memohai/web/lib/keyboard-bindings'
+  import type { AppKeyboardCommand } from '@memohai/web/lib/keyboard-commands'
+  export type ConflictKind = 'none' | 'same-scope' | 'cross-scope' | 'reserved' | 'invalid'
+  export interface ConflictResult {
+    kind: ConflictKind
+    collidesWith?: AppKeyboardCommand
+  }
+  export function useKeyboardShortcutsStore(pinia?: unknown): {
+    overrides: Record<string, string>
+    effectiveBindings: KeyboardBinding[]
+    isOverridden(command: AppKeyboardCommand): boolean
+    detectConflict(command: AppKeyboardCommand, combo: unknown): ConflictResult
+    setBinding(command: AppKeyboardCommand, combo: string): ConflictResult
+    resetBinding(command: AppKeyboardCommand): void
+    resetAll(): void
+  }
 }
 
 declare module '@memohai/web/composables/useKeyboardCommand' {

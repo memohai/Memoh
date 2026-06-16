@@ -56,6 +56,11 @@ const api = {
     getCliStatus: (): Promise<CliStatusPayload> => ipcRenderer.invoke('desktop:cli-status'),
     installCli: (): Promise<CliStatusPayload> => ipcRenderer.invoke('desktop:cli-install'),
     uninstallCli: (): Promise<CliStatusPayload> => ipcRenderer.invoke('desktop:cli-uninstall'),
+    // Push the renderer's authoritative menu accelerators (derived from the
+    // Keyboard Shortcuts store) so the main process can rebuild native menu
+    // items with the user's bindings instead of the static table defaults.
+    setMenuAccelerators: (overrides: Record<string, string>): Promise<void> =>
+      ipcRenderer.invoke('desktop:set-menu-accelerators', overrides),
     // Tell the main process to fan a query-cache invalidation out to every
     // other BrowserWindow. Used by `setupCrossWindowCacheSync` to mirror
     // mutations performed in one renderer onto siblings.
