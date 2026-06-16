@@ -245,7 +245,7 @@ const formMode = ref<'create' | 'edit'>('create')
 const editingSchedule = ref<ScheduleSchedule | null>(null)
 const consumedInitialScheduleId = ref<string | undefined>(undefined)
 
-const cronLocale = computed<'en' | 'zh'>(() => (locale.value.startsWith('zh') ? 'zh' : 'en'))
+const cronLocale = computed<'en' | 'zh' | 'ja'>(() => (locale.value.startsWith('zh') ? 'zh' : locale.value.startsWith('ja') ? 'ja' : 'en'))
 
 // --- Card helpers ---
 function describeItem(pattern: string | undefined): string | undefined {

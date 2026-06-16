@@ -1,6 +1,7 @@
 <div align="right">
   <span>[<a href="./README.md">English</a>]<span>
   </span>[<a href="./README_CN.md">简体中文</a>]</span>
+  </span>[<a href="./README_JA.md">日本語</a>]</span>
 </div>  
 
 <div align="center">

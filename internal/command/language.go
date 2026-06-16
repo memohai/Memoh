@@ -26,7 +26,7 @@ func (h *Handler) buildLanguageGroup() *CommandGroup {
 	})
 	g.Register(SubCommand{
 		Name:  "set",
-		Usage: "set <auto|en|zh> - Set the command UI language",
+		Usage: "set <auto|en|zh|ja> - Set the command UI language",
 		ResultHandler: func(cc CommandContext) (*Result, error) {
 			if h.settingsService == nil {
 				return &Result{Text: cc.T("cmd.settings.unavailable")}, nil

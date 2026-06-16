@@ -15,7 +15,9 @@ func TestResolve(t *testing.T) {
 	}{
 		{"en", "en"},
 		{"zh", "zh"},
+		{"ja", "ja"},
 		{"ZH", "zh"},    // case-insensitive
+		{"JA", "ja"},    // case-insensitive
 		{" en ", "en"},  // trimmed
 		{"auto", "en"},  // auto → default
 		{"", "en"},      // empty → default
@@ -104,7 +106,7 @@ func TestSupportedCatalogsParity(t *testing.T) {
 
 func TestIsSupported(t *testing.T) {
 	t.Parallel()
-	for _, ok := range []string{"en", "zh", "ZH", " en "} {
+	for _, ok := range []string{"en", "zh", "ja", "ZH", "JA", " en "} {
 		if !IsSupported(ok) {
 			t.Errorf("IsSupported(%q) = false, want true", ok)
 		}

@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,6 +62,46 @@ type Config struct {
 	Registry     RegistryConfig     `toml:"registry"`
 	Supermarket  SupermarketConfig  `toml:"supermarket"`
 	OAuthClients OAuthClientsConfig `toml:"oauth_clients"`
+	InstanceID   string             `toml:"instance_id"`
+	BridgeTLS    BridgeTLSConfig    `toml:"bridge_tls"`
+}
+
+const (
+	BridgeTLSModeDisabled = "disabled"
+	BridgeTLSModeStrict   = "strict"
+)
+
+// BridgeTLSConfig controls mTLS for Memoh server -> workspace bridge TCP gRPC.
+// Strict mode never falls back to plaintext. UDS/local targets are unaffected.
+type BridgeTLSConfig struct {
+	Mode       string `toml:"mode"`
+	ServerDir  string `toml:"server_dir"`
+	BridgeDir  string `toml:"bridge_dir"`
+	ServerName string `toml:"server_name"`
+}
+
+func (c BridgeTLSConfig) EffectiveMode() string {
+	mode := strings.TrimSpace(strings.ToLower(c.Mode))
+	if mode == "" {
+		return BridgeTLSModeDisabled
+	}
+	return mode
+}
+
+func (c BridgeTLSConfig) Strict() bool {
+	return c.EffectiveMode() == BridgeTLSModeStrict
+}
+
+func BridgeServerName(instanceID string) string {
+	return fmt.Sprintf("memoh-bridge.%s.bridge.memoh.internal", instanceID)
+}
+
+func BridgeServerSPIFFE(instanceID string) string {
+	return fmt.Sprintf("spiffe://memoh/instance/%s/bridge", instanceID)
+}
+
+func ServerClientSPIFFE(instanceID string) string {
+	return fmt.Sprintf("spiffe://memoh/instance/%s/server", instanceID)
 }
 
 type LogConfig struct {
@@ -390,6 +431,7 @@ func Load(path string) (Config, error) {
 
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
+			cfg.applyBridgeTLSEnvOverrides()
 			cfg.resolvePaths()
 			return cfg, nil
 		}
@@ -428,9 +470,28 @@ func Load(path string) (Config, error) {
 	} else {
 		cfg.Workspace = cfg.Container.WorkspaceConfig
 	}
+	cfg.applyBridgeTLSEnvOverrides()
 	cfg.resolvePaths()
 
 	return cfg, nil
+}
+
+func (cfg *Config) applyBridgeTLSEnvOverrides() {
+	if value := strings.TrimSpace(os.Getenv("MEMOH_INSTANCE_ID")); value != "" {
+		cfg.InstanceID = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_BRIDGE_TLS_MODE")); value != "" {
+		cfg.BridgeTLS.Mode = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_BRIDGE_TLS_SERVER_DIR")); value != "" {
+		cfg.BridgeTLS.ServerDir = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_BRIDGE_TLS_BRIDGE_DIR")); value != "" {
+		cfg.BridgeTLS.BridgeDir = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_BRIDGE_TLS_SERVER_NAME")); value != "" {
+		cfg.BridgeTLS.ServerName = value
+	}
 }
 
 func (cfg *Config) resolvePaths() {

@@ -240,7 +240,7 @@ func provideBridgeProvider(manage *workspace.Manager) bridge.Provider {
 	return manage
 }
 
-func provideWorkspaceManager(lc fx.Lifecycle, log *slog.Logger, service ctr.Service, networkController netctl.Controller, cfg config.Config, conn *pgxpool.Pool, queries dbstore.Queries) *workspace.Manager {
+func provideWorkspaceManager(lc fx.Lifecycle, log *slog.Logger, service ctr.Service, networkController netctl.Controller, cfg config.Config, conn *pgxpool.Pool, queries dbstore.Queries) (*workspace.Manager, error) {
 	localSvc := workspace.NewLocalService(log, cfg.Local, cfg.Workspace.DataRoot)
 	lc.Append(fx.Hook{
 		OnStop: func(context.Context) error {
@@ -249,7 +249,15 @@ func provideWorkspaceManager(lc fx.Lifecycle, log *slog.Logger, service ctr.Serv
 		},
 	})
 	runtimeSvc := workspace.NewRuntimeRouter(service, localSvc)
-	return workspace.NewManager(log, runtimeSvc, networkController, cfg.Workspace, cfg.Containerd.Namespace, conn, queries)
+	mgr := workspace.NewManager(log, runtimeSvc, networkController, cfg.Workspace, cfg.Containerd.Namespace, conn, queries)
+	tlsOpts, err := workspace.BridgeTLSRuntimeOptionsFromConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if tlsOpts != nil {
+		mgr.SetBridgeTLS(tlsOpts)
+	}
+	return mgr, nil
 }
 
 func provideMemoryLLM(modelsService *models.Service, settingsService *settings.Service, queries dbstore.Queries, log *slog.Logger) memprovider.LLM {

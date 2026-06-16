@@ -44,9 +44,15 @@ func NewClientFromConn(conn *grpc.ClientConn) *Client {
 
 // Dial creates a new Client connected to the given gRPC target.
 // For UDS use "unix:///path/to/sock", for TCP use "host:port".
-func Dial(_ context.Context, target string) (*Client, error) {
-	conn, err := grpc.NewClient(target,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+func Dial(ctx context.Context, target string) (*Client, error) {
+	return DialTLS(ctx, target, nil)
+}
+
+// DialTLS dials with optional mTLS. A nil TLS config or UDS target uses the
+// local trust model; TCP targets use strict mTLS when configured.
+func DialTLS(_ context.Context, target string, tlsOpts *TLSOptions) (*Client, error) {
+	creds := insecure.NewCredentials()
+	opts := []grpc.DialOption{
 		grpc.WithNoProxy(),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:                30 * time.Second, // ping every 30s if idle
@@ -57,7 +63,19 @@ func Dial(_ context.Context, target string) (*Client, error) {
 			grpc.MaxCallRecvMsgSize(16*1024*1024),
 			grpc.MaxCallSendMsgSize(16*1024*1024),
 		),
-	)
+	}
+	if tlsOpts.appliesTo(target) {
+		tlsCreds, err := tlsOpts.transportCredentials()
+		if err != nil {
+			return nil, err
+		}
+		creds = tlsCreds
+		// The dial target can be an IP or port-forward address, so authority
+		// must be pinned to the synthetic DNS name used in the certificate SAN.
+		opts = append(opts, grpc.WithAuthority(tlsOpts.ServerName))
+	}
+	opts = append(opts, grpc.WithTransportCredentials(creds))
+	conn, err := grpc.NewClient(target, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("grpc dial %s: %w", target, err)
 	}
@@ -587,6 +605,7 @@ type Pool struct {
 	mu             sync.RWMutex
 	clients        map[string]*Client
 	dialTargetFunc func(botID string) string
+	tlsOpts        *TLSOptions
 }
 
 // NewPool creates a client pool. dialTargetFunc maps bot ID to a gRPC target
@@ -596,6 +615,20 @@ func NewPool(dialTargetFunc func(string) string) *Pool {
 		clients:        make(map[string]*Client),
 		dialTargetFunc: dialTargetFunc,
 	}
+}
+
+// SetTLSOptions enables strict mTLS for subsequent TCP dials (UDS targets are
+// exempt). Call once during startup, before the pool serves traffic.
+func (p *Pool) SetTLSOptions(opts *TLSOptions) {
+	p.mu.Lock()
+	p.tlsOpts = opts
+	p.mu.Unlock()
+}
+
+func (p *Pool) tlsOptions() *TLSOptions {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.tlsOpts
 }
 
 // MCPClient implements Provider. Alias for Get.
@@ -626,7 +659,7 @@ func (p *Pool) Get(ctx context.Context, botID string) (*Client, error) {
 		return nil, fmt.Errorf("no dial target for bot %s", botID)
 	}
 
-	c, err := Dial(ctx, target)
+	c, err := DialTLS(ctx, target, p.tlsOptions())
 	if err != nil {
 		return nil, err
 	}
