@@ -247,6 +247,10 @@
           "label": "切换侧边栏",
           "description": "显示或隐藏主侧边栏。"
         },
+        "openSettings": {
+          "label": "打开设置",
+          "description": "在任何位置跳转到设置页。"
+        },
         "closeMediaLightbox": {
           "label": "关闭媒体灯箱",
           "description": "关闭媒体预览覆盖层。"

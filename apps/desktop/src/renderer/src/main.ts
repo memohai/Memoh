@@ -83,6 +83,11 @@ async function bootstrap() {
     void window.api.desktop.setMenuAccelerators(overrides)
   })
 
+  keyboardCommands.register(appKeyboardCommands.openSettings, () => {
+    void router.push('/settings').catch(() => {})
+    return true
+  })
+
   const app = createApp(App)
     .use(pinia)
     .use(PiniaColada)

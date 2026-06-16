@@ -251,6 +251,10 @@
           "label": "サイドバーを切り替え",
           "description": "メインサイドバーの表示/非表示を切り替えます。"
         },
+        "openSettings": {
+          "label": "設定を開く",
+          "description": "どこからでも設定画面に移動します。"
+        },
         "closeMediaLightbox": {
           "label": "メディアライトボックスを閉じる",
           "description": "メディアプレビューのオーバーレイを閉じます。"

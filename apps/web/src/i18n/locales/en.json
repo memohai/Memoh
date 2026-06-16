@@ -251,6 +251,10 @@
           "label": "Toggle sidebar",
           "description": "Show or hide the main sidebar."
         },
+        "openSettings": {
+          "label": "Open Settings",
+          "description": "Jump to the Settings area from anywhere."
+        },
         "closeMediaLightbox": {
           "label": "Close media lightbox",
           "description": "Dismiss the media preview overlay."

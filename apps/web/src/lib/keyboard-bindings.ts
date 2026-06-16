@@ -84,6 +84,15 @@ export const keyboardBindings: KeyboardBinding[] = [
     i18nKey: 'toggleSidebar',
   },
   {
+    command: appKeyboardCommands.openSettings,
+    key: 'k',
+    mod: true,
+    desktop: 'keydown',
+    browser: 'intercept',
+    scope: 'global',
+    i18nKey: 'openSettings',
+  },
+  {
     command: appKeyboardCommands.closeMediaLightbox,
     key: 'Escape',
     desktop: 'keydown',

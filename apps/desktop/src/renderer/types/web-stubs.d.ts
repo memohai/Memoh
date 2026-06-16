@@ -49,6 +49,7 @@ declare module '@memohai/web/lib/keyboard-commands' {
     readonly closeCurrentWorkspaceTab: 'close-current-workspace-tab'
     readonly saveActiveFile: 'save-active-file'
     readonly toggleSidebar: 'toggle-sidebar'
+    readonly openSettings: 'open-settings'
     readonly closeMediaLightbox: 'close-media-lightbox'
     readonly mediaLightboxPrev: 'media-lightbox-prev'
     readonly mediaLightboxNext: 'media-lightbox-next'

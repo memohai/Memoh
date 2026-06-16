@@ -7,7 +7,7 @@ import 'markstream-vue/index.css'
 import './style.css'
 import App from './App.vue'
 import router from './router'
-import { createKeyboardCommandRegistry } from './lib/keyboard-commands'
+import { appKeyboardCommands, createKeyboardCommandRegistry } from './lib/keyboard-commands'
 import { connectBrowserKeyboardShortcutsLive } from './lib/browser-keyboard-shortcuts'
 import { selectWebBindings } from './lib/keyboard-bindings'
 import { KEYBOARD_REGISTRY } from './composables/useKeyboardCommand'
@@ -38,6 +38,10 @@ connectBrowserKeyboardShortcutsLive(
   keyboardCommands,
   () => selectWebBindings(shortcutsStore.effectiveBindings),
 )
+keyboardCommands.register(appKeyboardCommands.openSettings, () => {
+  void router.push('/settings').catch(() => {})
+  return true
+})
 
 createApp(App)
   .use(pinia)

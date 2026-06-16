@@ -26,6 +26,11 @@ describe('keyboard bindings table', () => {
     expect(toggle).toMatchObject({ key: 'b', mod: true, desktop: 'keydown', browser: 'intercept', scope: 'global' })
   })
 
+  it('declares Mod+K as the open-settings global shortcut', () => {
+    const open = keyboardBindings.find(b => b.command === appKeyboardCommands.openSettings)
+    expect(open).toMatchObject({ key: 'k', mod: true, desktop: 'keydown', browser: 'intercept', scope: 'global' })
+  })
+
   it('migrates the lightbox keys with a scoped lifetime (not global)', () => {
     const lightboxCommands = [
       appKeyboardCommands.closeMediaLightbox,
