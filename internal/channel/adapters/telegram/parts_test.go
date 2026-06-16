@@ -343,6 +343,35 @@ func TestExtractTelegramMessageParts_NestedLinkInsideBold(t *testing.T) {
 	}
 }
 
+func TestExtractTelegramMessageParts_LinkCoextensiveWithStyle(t *testing.T) {
+	t.Parallel()
+	// A fully bold link sends two entities covering the exact same range.
+	// The equality exclusion in the parent-search pre-pass treated those as
+	// "not nested", so the structural entity (text_link) was dropped by the
+	// main loop's cursor guard and the URL never reached the LLM.
+	msg := &tgbotapi.Message{
+		Text: "click here",
+		Entities: []tgbotapi.MessageEntity{
+			{Type: "bold", Offset: 0, Length: 10},
+			{Type: "text_link", Offset: 0, Length: 10, URL: "https://example.com"},
+		},
+	}
+	parts := extractTelegramMessageParts(msg)
+	var link *channel.MessagePart
+	for i := range parts {
+		if parts[i].Type == channel.MessagePartLink {
+			link = &parts[i]
+			break
+		}
+	}
+	if link == nil {
+		t.Fatalf("expected link part for coextensive bold+link, got %+v", parts)
+	}
+	if link.URL != "https://example.com" || link.Text != "click here" {
+		t.Fatalf("link content wrong: %+v", link)
+	}
+}
+
 func TestExtractTelegramMessageParts_NestedMentionInsideStyle(t *testing.T) {
 	t.Parallel()
 	// Same shape but with a text_mention nested in italic; identity must

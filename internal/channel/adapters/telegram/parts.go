@@ -67,13 +67,17 @@ func extractTelegramMessageParts(msg *tgbotapi.Message) []channel.MessagePart {
 			if i == j {
 				continue
 			}
+			// Only style/format entities can host a structural child; two
+			// coextensive structurals (e.g. two text_links on the same span)
+			// would otherwise pick each other as parent and both get marked
+			// as nested, dropping both.
+			if telegramEntityIsStructural(candidate.Type) {
+				continue
+			}
 			if candidate.Offset > ent.Offset {
 				continue
 			}
 			if candidate.Offset+candidate.Length < ent.Offset+ent.Length {
-				continue
-			}
-			if candidate.Offset == ent.Offset && candidate.Length == ent.Length {
 				continue
 			}
 			if parent == -1 || candidate.Length < parentSize {
