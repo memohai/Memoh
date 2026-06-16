@@ -2,6 +2,7 @@
   <SidebarProvider
     class="min-h-[initial]! absolute inset-0 "
     :default-open="true"
+    disable-default-shortcut
   >
     <Sidebar
       class="relative! **:[[role=navigation]]:relative! sidebar-container h-full! w-fit! min-w-48 lg:min-w-52 xl:min-w-60 max-w-72 border-0! [&_[data-sidebar=sidebar]]:bg-transparent!"
