@@ -1,11 +1,31 @@
--- 0097_history_turns
--- Add first-class history turns for session branch fork semantics.
+-- 0097_session_branches
+-- Add in-session branch paths and history turns for fork/edit-and-rerun chat history.
 
-ALTER TABLE bot_session_branches
-  ADD COLUMN IF NOT EXISTS fork_from_turn_id UUID,
-  ADD COLUMN IF NOT EXISTS fork_from_turn_seq BIGINT;
+ALTER TABLE bot_sessions
+  ADD COLUMN IF NOT EXISTS active_branch_id UUID;
+
+CREATE TABLE IF NOT EXISTS bot_session_branches (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id UUID NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
+  parent_branch_id UUID REFERENCES bot_session_branches(id) ON DELETE SET NULL,
+  fork_from_message_id UUID,
+  fork_from_seq BIGINT,
+  fork_from_turn_id UUID,
+  fork_from_turn_seq BIGINT,
+  title TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_session_branches_root
+  ON bot_session_branches(session_id)
+  WHERE parent_branch_id IS NULL AND fork_from_message_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_bot_session_branches_session ON bot_session_branches(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_bot_session_branches_parent ON bot_session_branches(parent_branch_id) WHERE parent_branch_id IS NOT NULL;
 
 ALTER TABLE bot_history_messages
+  ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES bot_session_branches(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS branch_seq BIGINT,
   ADD COLUMN IF NOT EXISTS turn_id UUID,
   ADD COLUMN IF NOT EXISTS turn_message_seq BIGINT;
 
@@ -40,6 +60,51 @@ BEGIN
       FOREIGN KEY (fork_from_turn_id) REFERENCES bot_history_turns(id) ON DELETE SET NULL;
   END IF;
 END $$;
+
+INSERT INTO bot_session_branches (session_id, created_at, updated_at)
+SELECT s.id, COALESCE(MIN(m.created_at), s.created_at), COALESCE(MAX(m.created_at), s.updated_at)
+FROM bot_sessions s
+LEFT JOIN bot_history_messages m ON m.session_id = s.id
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM bot_session_branches b
+  WHERE b.session_id = s.id
+    AND b.parent_branch_id IS NULL
+    AND b.fork_from_message_id IS NULL
+)
+GROUP BY s.id, s.created_at, s.updated_at;
+
+UPDATE bot_sessions s
+SET active_branch_id = b.id
+FROM bot_session_branches b
+WHERE b.session_id = s.id
+  AND b.parent_branch_id IS NULL
+  AND b.fork_from_message_id IS NULL
+  AND s.active_branch_id IS NULL;
+
+WITH numbered AS (
+  SELECT
+    m.id,
+    b.id AS branch_id,
+    ROW_NUMBER() OVER (PARTITION BY m.session_id ORDER BY m.created_at ASC, m.id ASC)::BIGINT AS branch_seq
+  FROM bot_history_messages m
+  JOIN bot_session_branches b ON b.session_id = m.session_id
+  WHERE b.parent_branch_id IS NULL
+    AND b.fork_from_message_id IS NULL
+    AND m.session_id IS NOT NULL
+    AND (m.branch_id IS NULL OR m.branch_seq IS NULL)
+)
+UPDATE bot_history_messages m
+SET branch_id = numbered.branch_id,
+    branch_seq = numbered.branch_seq
+FROM numbered
+WHERE m.id = numbered.id;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_history_messages_branch_seq
+  ON bot_history_messages(branch_id, branch_seq)
+  WHERE branch_id IS NOT NULL AND branch_seq IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_branch
+  ON bot_history_messages(branch_id, branch_seq);
 
 WITH user_turns AS (
   SELECT
@@ -148,3 +213,57 @@ CREATE INDEX IF NOT EXISTS idx_bot_history_turns_assistant
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_turn
   ON bot_history_messages(turn_id, turn_message_seq)
   WHERE turn_id IS NOT NULL;
+
+CREATE OR REPLACE VIEW bot_branch_visible_messages AS
+WITH RECURSIVE branch_path AS (
+  SELECT
+    b.id AS target_branch_id,
+    b.id AS branch_id,
+    b.parent_branch_id,
+    NULL::BIGINT AS max_turn_seq,
+    NULL::BIGINT AS max_branch_seq,
+    0 AS depth
+  FROM bot_session_branches b
+  UNION ALL
+  SELECT
+    bp.target_branch_id,
+    parent.id AS branch_id,
+    parent.parent_branch_id,
+    COALESCE(child.fork_from_turn_seq, boundary_turn.turn_seq) AS max_turn_seq,
+    child.fork_from_seq AS max_branch_seq,
+    bp.depth + 1 AS depth
+  FROM branch_path bp
+  JOIN bot_session_branches child ON child.id = bp.branch_id
+  JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
+)
+SELECT
+  bp.target_branch_id AS branch_id,
+  m.id AS message_id,
+  bp.depth
+FROM branch_path bp
+JOIN bot_history_messages m ON m.branch_id = bp.branch_id
+LEFT JOIN bot_history_turns t ON t.id = m.turn_id
+WHERE bp.depth = 0
+  OR (
+    bp.max_turn_seq IS NOT NULL
+    AND (
+      t.turn_seq < bp.max_turn_seq
+      OR (
+        t.turn_seq = bp.max_turn_seq
+        AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
+      )
+    )
+  )
+  OR (
+    bp.max_turn_seq IS NULL
+    AND bp.max_branch_seq IS NOT NULL
+    AND m.branch_seq <= bp.max_branch_seq
+  )
+UNION ALL
+SELECT
+  b.id AS branch_id,
+  m.id AS message_id,
+  2147483647 AS depth
+FROM bot_session_branches b
+JOIN bot_history_messages m ON m.session_id = b.session_id AND m.branch_id IS NULL;

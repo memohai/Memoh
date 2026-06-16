@@ -499,7 +499,6 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	if req.RawQuery == "" {
 		req.RawQuery = strings.TrimSpace(req.Query)
 	}
-	var err error
 	req, err = r.applyUserMessageHook(ctx, req)
 	if err != nil {
 		return conversation.ChatResponse{}, err

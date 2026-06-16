@@ -12,6 +12,7 @@ DROP TABLE _memoh_session_branches_down_guard;
 
 BEGIN;
 
+DROP VIEW IF EXISTS bot_branch_visible_messages;
 DROP INDEX IF EXISTS idx_bot_history_messages_branch;
 DROP INDEX IF EXISTS idx_bot_history_messages_branch_seq;
 DROP INDEX IF EXISTS idx_bot_history_messages_turn;

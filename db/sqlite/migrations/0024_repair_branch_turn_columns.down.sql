@@ -1,2 +1,0 @@
--- 0024_repair_branch_turn_columns
--- No-op rollback for data repair.

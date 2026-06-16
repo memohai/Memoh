@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 
 	"github.com/memohai/memoh/internal/config"
@@ -11,72 +12,8 @@ import (
 
 func TestSQLiteSessionBranchVisiblePath(t *testing.T) {
 	ctx := context.Background()
-	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	conn := openBranchVisibleTestDB(t)
 	defer func() { _ = conn.Close() }()
-
-	execAll(t, conn, `
-CREATE TABLE bot_sessions (
-  id TEXT PRIMARY KEY,
-  channel_type TEXT,
-  active_branch_id TEXT,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE bot_session_branches (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
-  parent_branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
-  fork_from_message_id TEXT,
-  fork_from_seq INTEGER,
-  fork_from_turn_id TEXT,
-  fork_from_turn_seq INTEGER,
-  title TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE bot_history_turns (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
-  branch_id TEXT NOT NULL REFERENCES bot_session_branches(id) ON DELETE CASCADE,
-  turn_seq INTEGER NOT NULL,
-  request_message_id TEXT,
-  final_assistant_message_id TEXT,
-  status TEXT NOT NULL DEFAULT 'running',
-  title TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  completed_at TEXT
-);
-CREATE TABLE channel_identities (
-  id TEXT PRIMARY KEY,
-  display_name TEXT NOT NULL DEFAULT '',
-  avatar_url TEXT NOT NULL DEFAULT ''
-);
-CREATE TABLE bot_history_messages (
-  id TEXT PRIMARY KEY,
-  bot_id TEXT NOT NULL,
-  session_id TEXT REFERENCES bot_sessions(id) ON DELETE SET NULL,
-  branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
-  branch_seq INTEGER,
-  turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
-  turn_message_seq INTEGER,
-  sender_channel_identity_id TEXT,
-  sender_account_user_id TEXT,
-  source_message_id TEXT,
-  source_reply_to_message_id TEXT,
-  role TEXT NOT NULL,
-  content TEXT NOT NULL DEFAULT '{}',
-  metadata TEXT NOT NULL DEFAULT '{}',
-  usage TEXT,
-  model_id TEXT,
-  compact_id TEXT,
-  event_id TEXT,
-  display_text TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-`)
 
 	botID := "00000000-0000-0000-0000-000000002001"
 	sessionID := "00000000-0000-0000-0000-000000002002"
@@ -206,72 +143,8 @@ INSERT INTO bot_history_messages (
 
 func TestSQLiteSessionBranchVisiblePathFallsBackToForkMessageSeq(t *testing.T) {
 	ctx := context.Background()
-	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	conn := openBranchVisibleTestDB(t)
 	defer func() { _ = conn.Close() }()
-
-	execAll(t, conn, `
-CREATE TABLE bot_sessions (
-  id TEXT PRIMARY KEY,
-  channel_type TEXT,
-  active_branch_id TEXT,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE bot_session_branches (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
-  parent_branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
-  fork_from_message_id TEXT,
-  fork_from_seq INTEGER,
-  fork_from_turn_id TEXT,
-  fork_from_turn_seq INTEGER,
-  title TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE bot_history_turns (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
-  branch_id TEXT NOT NULL REFERENCES bot_session_branches(id) ON DELETE CASCADE,
-  turn_seq INTEGER NOT NULL,
-  request_message_id TEXT,
-  final_assistant_message_id TEXT,
-  status TEXT NOT NULL DEFAULT 'running',
-  title TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  completed_at TEXT
-);
-CREATE TABLE channel_identities (
-  id TEXT PRIMARY KEY,
-  display_name TEXT NOT NULL DEFAULT '',
-  avatar_url TEXT NOT NULL DEFAULT ''
-);
-CREATE TABLE bot_history_messages (
-  id TEXT PRIMARY KEY,
-  bot_id TEXT NOT NULL,
-  session_id TEXT REFERENCES bot_sessions(id) ON DELETE SET NULL,
-  branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
-  branch_seq INTEGER,
-  turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
-  turn_message_seq INTEGER,
-  sender_channel_identity_id TEXT,
-  sender_account_user_id TEXT,
-  source_message_id TEXT,
-  source_reply_to_message_id TEXT,
-  role TEXT NOT NULL,
-  content TEXT NOT NULL DEFAULT '{}',
-  metadata TEXT NOT NULL DEFAULT '{}',
-  usage TEXT,
-  model_id TEXT,
-  compact_id TEXT,
-  event_id TEXT,
-  display_text TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-`)
 
 	botID := "00000000-0000-0000-0000-000000009001"
 	sessionID := "00000000-0000-0000-0000-000000009002"
@@ -320,72 +193,8 @@ VALUES
 
 func TestSQLiteSessionBranchVisiblePathClampsForkTurnByMessageSeq(t *testing.T) {
 	ctx := context.Background()
-	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	conn := openBranchVisibleTestDB(t)
 	defer func() { _ = conn.Close() }()
-
-	execAll(t, conn, `
-CREATE TABLE bot_sessions (
-  id TEXT PRIMARY KEY,
-  channel_type TEXT,
-  active_branch_id TEXT,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE bot_session_branches (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
-  parent_branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
-  fork_from_message_id TEXT,
-  fork_from_seq INTEGER,
-  fork_from_turn_id TEXT,
-  fork_from_turn_seq INTEGER,
-  title TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE bot_history_turns (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
-  branch_id TEXT NOT NULL REFERENCES bot_session_branches(id) ON DELETE CASCADE,
-  turn_seq INTEGER NOT NULL,
-  request_message_id TEXT,
-  final_assistant_message_id TEXT,
-  status TEXT NOT NULL DEFAULT 'running',
-  title TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  completed_at TEXT
-);
-CREATE TABLE channel_identities (
-  id TEXT PRIMARY KEY,
-  display_name TEXT NOT NULL DEFAULT '',
-  avatar_url TEXT NOT NULL DEFAULT ''
-);
-CREATE TABLE bot_history_messages (
-  id TEXT PRIMARY KEY,
-  bot_id TEXT NOT NULL,
-  session_id TEXT REFERENCES bot_sessions(id) ON DELETE SET NULL,
-  branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
-  branch_seq INTEGER,
-  turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
-  turn_message_seq INTEGER,
-  sender_channel_identity_id TEXT,
-  sender_account_user_id TEXT,
-  source_message_id TEXT,
-  source_reply_to_message_id TEXT,
-  role TEXT NOT NULL,
-  content TEXT NOT NULL DEFAULT '{}',
-  metadata TEXT NOT NULL DEFAULT '{}',
-  usage TEXT,
-  model_id TEXT,
-  compact_id TEXT,
-  event_id TEXT,
-  display_text TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-`)
 
 	botID := "00000000-0000-0000-0000-000000008001"
 	sessionID := "00000000-0000-0000-0000-000000008002"
@@ -455,6 +264,7 @@ CREATE TABLE bot_session_branches (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 `)
+	createBranchVisibleMessagesView(t, conn)
 
 	sessionID := "00000000-0000-0000-0000-000000004001"
 	rootBranchID := "00000000-0000-0000-0000-000000004010"
@@ -507,124 +317,10 @@ INSERT INTO bot_session_branches (
 	}
 }
 
-func TestSQLiteListSessionBranchesToleratesMigratedColumnSkew(t *testing.T) {
-	ctx := context.Background()
-	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	defer func() { _ = conn.Close() }()
-
-	execAll(t, conn, `
-CREATE TABLE bot_sessions (
-  id TEXT PRIMARY KEY,
-  active_branch_id TEXT
-);
-CREATE TABLE bot_session_branches (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
-  parent_branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
-  fork_from_message_id TEXT,
-  fork_from_seq INTEGER,
-  fork_from_turn_id TEXT,
-  fork_from_turn_seq INTEGER,
-  title TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-`)
-
-	sessionID := "00000000-0000-0000-0000-000000005001"
-	branchID := "00000000-0000-0000-0000-000000005010"
-	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id, active_branch_id) VALUES (?, ?)`, sessionID, branchID); err != nil {
-		t.Fatalf("insert session: %v", err)
-	}
-	if _, err := conn.ExecContext(ctx, `
-INSERT INTO bot_session_branches (
-  id, session_id, fork_from_turn_id, fork_from_turn_seq, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?)`,
-		branchID,
-		sessionID,
-		"2026-06-14 11:23:00",
-		"2026-06-14 11:23:00",
-		"",
-		"",
-	); err != nil {
-		t.Fatalf("insert skewed branch: %v", err)
-	}
-
-	store, err := New(conn)
-	if err != nil {
-		t.Fatalf("new store: %v", err)
-	}
-	q := NewQueries(store)
-	rows, err := q.ListSessionBranches(ctx, mustUUID(t, sessionID))
-	if err != nil {
-		t.Fatalf("list session branches with skewed columns: %v", err)
-	}
-	if len(rows) != 1 {
-		t.Fatalf("branches = %d, want 1", len(rows))
-	}
-	if rows[0].ForkFromTurnID.Valid {
-		t.Fatalf("fork_from_turn_id = %#v, want null for skewed timestamp", rows[0].ForkFromTurnID)
-	}
-	if rows[0].ForkFromTurnSeq.Valid {
-		t.Fatalf("fork_from_turn_seq = %#v, want null for skewed timestamp", rows[0].ForkFromTurnSeq)
-	}
-}
-
 func TestSQLiteGetMessageForSessionBranchForkScansNoPreviousTurn(t *testing.T) {
 	ctx := context.Background()
-	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	conn := openBranchVisibleTestDB(t)
 	defer func() { _ = conn.Close() }()
-
-	execAll(t, conn, `
-CREATE TABLE bot_sessions (
-  id TEXT PRIMARY KEY,
-  active_branch_id TEXT
-);
-CREATE TABLE bot_session_branches (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
-  parent_branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
-  fork_from_message_id TEXT,
-  fork_from_seq INTEGER,
-  fork_from_turn_id TEXT,
-  fork_from_turn_seq INTEGER,
-  title TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE bot_history_turns (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
-  branch_id TEXT NOT NULL REFERENCES bot_session_branches(id) ON DELETE CASCADE,
-  turn_seq INTEGER NOT NULL,
-  request_message_id TEXT,
-  final_assistant_message_id TEXT,
-  status TEXT NOT NULL DEFAULT 'running',
-  title TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  completed_at TEXT
-);
-CREATE TABLE bot_history_messages (
-  id TEXT PRIMARY KEY,
-  bot_id TEXT NOT NULL,
-  session_id TEXT REFERENCES bot_sessions(id) ON DELETE SET NULL,
-  branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
-  branch_seq INTEGER,
-  turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
-  turn_message_seq INTEGER,
-  role TEXT NOT NULL,
-  content TEXT NOT NULL DEFAULT '{}',
-  metadata TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-`)
 
 	botID := "00000000-0000-0000-0000-000000006001"
 	sessionID := "00000000-0000-0000-0000-000000006002"
@@ -675,6 +371,76 @@ INSERT INTO bot_history_messages (
 	if row.TurnSeq != 1 || row.Role != "user" {
 		t.Fatalf("fork row = %#v", row)
 	}
+}
+
+func openBranchVisibleTestDB(t *testing.T) *sql.DB {
+	t.Helper()
+	conn, err := db.OpenSQLite(context.Background(), config.SQLiteConfig{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	execAll(t, conn, `
+CREATE TABLE bot_sessions (
+  id TEXT PRIMARY KEY,
+  channel_type TEXT,
+  active_branch_id TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE bot_session_branches (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
+  parent_branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
+  fork_from_message_id TEXT,
+  fork_from_seq INTEGER,
+  fork_from_turn_id TEXT,
+  fork_from_turn_seq INTEGER,
+  title TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE bot_history_turns (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
+  branch_id TEXT NOT NULL REFERENCES bot_session_branches(id) ON DELETE CASCADE,
+  turn_seq INTEGER NOT NULL,
+  request_message_id TEXT,
+  final_assistant_message_id TEXT,
+  status TEXT NOT NULL DEFAULT 'running',
+  title TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at TEXT
+);
+CREATE TABLE channel_identities (
+  id TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL DEFAULT '',
+  avatar_url TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE bot_history_messages (
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL,
+  session_id TEXT REFERENCES bot_sessions(id) ON DELETE SET NULL,
+  branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
+  branch_seq INTEGER,
+  turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
+  turn_message_seq INTEGER,
+  sender_channel_identity_id TEXT,
+  sender_account_user_id TEXT,
+  source_message_id TEXT,
+  source_reply_to_message_id TEXT,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL DEFAULT '{}',
+  metadata TEXT NOT NULL DEFAULT '{}',
+  usage TEXT,
+  model_id TEXT,
+  compact_id TEXT,
+  event_id TEXT,
+  display_text TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`)
+	createBranchVisibleMessagesView(t, conn)
+	return conn
 }
 
 func assertMessageIDs(t *testing.T, rows []pgsqlc.ListMessagesBySessionRow, want []string) {

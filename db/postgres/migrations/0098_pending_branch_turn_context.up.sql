@@ -1,4 +1,4 @@
--- 0099_pending_branch_turn_context
+-- 0098_pending_branch_turn_context
 -- Persist branch/turn context for deferred tool approval and ask_user continuations.
 
 ALTER TABLE tool_approval_requests

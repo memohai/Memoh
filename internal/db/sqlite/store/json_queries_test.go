@@ -51,6 +51,7 @@ CREATE TABLE bot_history_messages (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 `)
+	createBranchVisibleMessagesView(t, conn)
 
 	botID := "00000000-0000-0000-0000-000000000001"
 	sessionID := "00000000-0000-0000-0000-000000000002"
@@ -295,6 +296,7 @@ CREATE TABLE user_input_requests (
 	CREATE UNIQUE INDEX user_input_tool_call_unique
 	  ON user_input_requests(session_id, tool_call_id);
 	`)
+	createBranchVisibleMessagesView(t, conn)
 
 	botID := "00000000-0000-0000-0000-000000001001"
 	sessionID := "00000000-0000-0000-0000-000000001002"
@@ -385,71 +387,8 @@ CREATE TABLE user_input_requests (
 
 func TestSQLiteMessageJSONQueriesTolerateMalformedJSON(t *testing.T) {
 	ctx := context.Background()
-	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	conn := openBranchVisibleTestDB(t)
 	defer func() { _ = conn.Close() }()
-
-	execAll(t, conn, `
-CREATE TABLE channel_identities (
-  id TEXT PRIMARY KEY,
-  display_name TEXT NOT NULL DEFAULT '',
-  avatar_url TEXT NOT NULL DEFAULT ''
-);
-CREATE TABLE bot_sessions (
-  id TEXT PRIMARY KEY,
-  channel_type TEXT,
-  active_branch_id TEXT
-);
-CREATE TABLE bot_session_branches (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
-  parent_branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
-  fork_from_message_id TEXT,
-  fork_from_seq INTEGER,
-  fork_from_turn_id TEXT,
-  fork_from_turn_seq INTEGER,
-  title TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE bot_history_turns (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
-  branch_id TEXT NOT NULL REFERENCES bot_session_branches(id) ON DELETE CASCADE,
-  turn_seq INTEGER NOT NULL,
-  request_message_id TEXT,
-  final_assistant_message_id TEXT,
-  status TEXT NOT NULL DEFAULT 'running',
-  title TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  completed_at TEXT
-);
-CREATE TABLE bot_history_messages (
-  id TEXT PRIMARY KEY,
-  bot_id TEXT NOT NULL,
-  session_id TEXT REFERENCES bot_sessions(id) ON DELETE SET NULL,
-  branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
-  branch_seq INTEGER,
-  turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
-  turn_message_seq INTEGER,
-  sender_channel_identity_id TEXT,
-  sender_account_user_id TEXT,
-  source_message_id TEXT,
-  source_reply_to_message_id TEXT,
-  role TEXT NOT NULL,
-  content TEXT NOT NULL DEFAULT '{}',
-  metadata TEXT NOT NULL DEFAULT '{}',
-  usage TEXT,
-  model_id TEXT,
-  compact_id TEXT,
-  event_id TEXT,
-  display_text TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-`)
 
 	botID := "00000000-0000-0000-0000-000000003001"
 	sessionID := "00000000-0000-0000-0000-000000003002"

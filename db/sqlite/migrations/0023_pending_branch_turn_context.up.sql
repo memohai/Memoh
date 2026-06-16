@@ -1,11 +1,11 @@
--- 0027_pending_branch_turn_context
--- Rebuild pending request tables without deferred continuation branch/turn context columns.
+-- 0023_pending_branch_turn_context
+-- Persist branch/turn context for deferred tool approval and ask_user continuations.
 
 PRAGMA foreign_keys = OFF;
 
 BEGIN;
 
-CREATE TABLE IF NOT EXISTS tool_approval_requests_0026_down (
+CREATE TABLE IF NOT EXISTS tool_approval_requests_0023_new (
   id TEXT PRIMARY KEY,
   bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS tool_approval_requests_0026_down (
   decided_by_channel_identity_id TEXT REFERENCES channel_identities(id) ON DELETE SET NULL,
   requested_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
   prompt_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
+  persist_branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
+  persist_turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
   prompt_external_message_id TEXT NOT NULL DEFAULT '',
   source_platform TEXT NOT NULL DEFAULT '',
   reply_target TEXT NOT NULL DEFAULT '',
@@ -34,23 +36,24 @@ CREATE TABLE IF NOT EXISTS tool_approval_requests_0026_down (
   CONSTRAINT tool_approval_tool_call_unique UNIQUE (session_id, tool_call_id)
 );
 
-INSERT OR IGNORE INTO tool_approval_requests_0026_down (
+INSERT OR IGNORE INTO tool_approval_requests_0023_new (
   id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name,
   operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id,
   decided_by_channel_identity_id, requested_message_id, prompt_message_id,
-  prompt_external_message_id, source_platform, reply_target, conversation_type,
-  created_at, decided_at
+  persist_branch_id, persist_turn_id, prompt_external_message_id, source_platform,
+  reply_target, conversation_type, created_at, decided_at
 )
 SELECT
   id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name,
   operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id,
   decided_by_channel_identity_id, requested_message_id, prompt_message_id,
+  NULL, NULL,
   prompt_external_message_id, source_platform, reply_target, conversation_type,
   created_at, decided_at
 FROM tool_approval_requests;
 
 DROP TABLE tool_approval_requests;
-ALTER TABLE tool_approval_requests_0026_down RENAME TO tool_approval_requests;
+ALTER TABLE tool_approval_requests_0023_new RENAME TO tool_approval_requests;
 
 CREATE INDEX IF NOT EXISTS idx_tool_approval_bot_status_created
   ON tool_approval_requests(bot_id, status, created_at);
@@ -60,7 +63,7 @@ CREATE INDEX IF NOT EXISTS idx_tool_approval_prompt_external
   ON tool_approval_requests(prompt_external_message_id)
   WHERE prompt_external_message_id != '';
 
-CREATE TABLE IF NOT EXISTS user_input_requests_0026_down (
+CREATE TABLE IF NOT EXISTS user_input_requests_0023_new (
   id TEXT PRIMARY KEY,
   bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
@@ -79,6 +82,8 @@ CREATE TABLE IF NOT EXISTS user_input_requests_0026_down (
   assistant_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
   tool_result_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
   prompt_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
+  persist_branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
+  persist_turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
   prompt_external_message_id TEXT NOT NULL DEFAULT '',
   source_platform TEXT NOT NULL DEFAULT '',
   reply_target TEXT NOT NULL DEFAULT '',
@@ -93,25 +98,27 @@ CREATE TABLE IF NOT EXISTS user_input_requests_0026_down (
   CONSTRAINT user_input_short_id_unique UNIQUE (session_id, short_id)
 );
 
-INSERT OR IGNORE INTO user_input_requests_0026_down (
+INSERT OR IGNORE INTO user_input_requests_0023_new (
   id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name,
   short_id, status, input_json, ui_payload_json, result_json, provider_metadata,
   requested_by_channel_identity_id, responded_by_channel_identity_id,
   assistant_message_id, tool_result_message_id, prompt_message_id,
-  prompt_external_message_id, source_platform, reply_target, conversation_type,
-  expires_at, created_at, responded_at, canceled_at, updated_at
+  persist_branch_id, persist_turn_id, prompt_external_message_id,
+  source_platform, reply_target, conversation_type, expires_at,
+  created_at, responded_at, canceled_at, updated_at
 )
 SELECT
   id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name,
   short_id, status, input_json, ui_payload_json, result_json, provider_metadata,
   requested_by_channel_identity_id, responded_by_channel_identity_id,
   assistant_message_id, tool_result_message_id, prompt_message_id,
+  NULL, NULL,
   prompt_external_message_id, source_platform, reply_target, conversation_type,
   expires_at, created_at, responded_at, canceled_at, updated_at
 FROM user_input_requests;
 
 DROP TABLE user_input_requests;
-ALTER TABLE user_input_requests_0026_down RENAME TO user_input_requests;
+ALTER TABLE user_input_requests_0023_new RENAME TO user_input_requests;
 
 CREATE UNIQUE INDEX IF NOT EXISTS user_input_tool_call_unique
   ON user_input_requests(session_id, tool_call_id);
