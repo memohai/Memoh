@@ -52,6 +52,14 @@ func TestPluginBundleArchiveEntryRejectsUnsafeNames(t *testing.T) {
 }
 
 func TestExtractPluginBundleArchiveWritesOnlySafeBundleFiles(t *testing.T) {
+	pluginRoot, err := skillset.PluginDirForID("github")
+	if err != nil {
+		t.Fatalf("plugin root: %v", err)
+	}
+	skillsRoot, err := skillset.PluginSkillsDirForID("github")
+	if err != nil {
+		t.Fatalf("plugin skills root: %v", err)
+	}
 	archive := tarArchive(t, map[string]string{
 		"github/plugin.yaml":                  "id: github",
 		"github/hooks.json":                   `{"version":1,"hooks":[]}`,
@@ -63,7 +71,13 @@ func TestExtractPluginBundleArchiveWritesOnlySafeBundleFiles(t *testing.T) {
 		"github/../outside":                   "outside",
 		"/data/outside":                       "absolute",
 	})
-	writer := &pluginBundleTestWriter{files: map[string]string{}}
+	writer := &pluginBundleTestWriter{files: map[string]string{
+		pluginRoot + "/hooks.json":          `{"version":1,"hooks":[{"name":"stale"}]}`,
+		pluginRoot + "/scripts/stale.py":    "print('stale')",
+		skillsRoot + "/stale/SKILL.md":      "# Stale",
+		"/data/.memoh/plugins/other/keep":   "keep",
+		"/data/.memoh/plugins/github2/keep": "keep",
+	}}
 
 	result, err := extractPluginBundleArchive(context.Background(), writer, "github", "github", bytes.NewReader(archive))
 	if err != nil {
@@ -72,14 +86,11 @@ func TestExtractPluginBundleArchiveWritesOnlySafeBundleFiles(t *testing.T) {
 	if result.Skills.FilesWritten != 2 || result.Hooks.FilesWritten != 1 || result.Scripts.FilesWritten != 1 {
 		t.Fatalf("install result = %+v, want 2 skills, 1 hook, 1 script", result)
 	}
-
-	pluginRoot, err := skillset.PluginDirForID("github")
-	if err != nil {
-		t.Fatalf("plugin root: %v", err)
+	if len(writer.deletes) != 1 {
+		t.Fatalf("deletes = %+v, want one plugin root delete", writer.deletes)
 	}
-	skillsRoot, err := skillset.PluginSkillsDirForID("github")
-	if err != nil {
-		t.Fatalf("plugin skills root: %v", err)
+	if writer.deletes[0].path != pluginRoot || !writer.deletes[0].recursive {
+		t.Fatalf("delete = %+v, want recursive delete of %s", writer.deletes[0], pluginRoot)
 	}
 	wantFiles := map[string]string{
 		pluginRoot + "/hooks.json":            `{"version":1,"hooks":[]}`,
@@ -90,6 +101,22 @@ func TestExtractPluginBundleArchiveWritesOnlySafeBundleFiles(t *testing.T) {
 	for path, want := range wantFiles {
 		if got := writer.files[path]; got != want {
 			t.Fatalf("file %s = %q, want %q", path, got, want)
+		}
+	}
+	for _, stalePath := range []string{
+		pluginRoot + "/scripts/stale.py",
+		skillsRoot + "/stale/SKILL.md",
+	} {
+		if _, ok := writer.files[stalePath]; ok {
+			t.Fatalf("stale file was not cleared before extraction: %s", stalePath)
+		}
+	}
+	for _, preservedPath := range []string{
+		"/data/.memoh/plugins/other/keep",
+		"/data/.memoh/plugins/github2/keep",
+	} {
+		if got := writer.files[preservedPath]; got != "keep" {
+			t.Fatalf("unrelated plugin file %s = %q, want keep", preservedPath, got)
 		}
 	}
 	for path := range writer.files {
@@ -157,8 +184,28 @@ func tarArchive(t *testing.T, files map[string]string) []byte {
 }
 
 type pluginBundleTestWriter struct {
-	dirs  []string
-	files map[string]string
+	dirs    []string
+	deletes []pluginBundleTestDelete
+	files   map[string]string
+}
+
+type pluginBundleTestDelete struct {
+	path      string
+	recursive bool
+}
+
+func (w *pluginBundleTestWriter) DeleteFile(_ context.Context, path string, recursive bool) error {
+	w.deletes = append(w.deletes, pluginBundleTestDelete{path: path, recursive: recursive})
+	if !recursive {
+		delete(w.files, path)
+		return nil
+	}
+	for filePath := range w.files {
+		if filePath == path || strings.HasPrefix(filePath, path+"/") {
+			delete(w.files, filePath)
+		}
+	}
+	return nil
 }
 
 func (w *pluginBundleTestWriter) Mkdir(_ context.Context, path string) error {

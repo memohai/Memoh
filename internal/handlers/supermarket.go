@@ -37,6 +37,7 @@ type SupermarketHandler struct {
 }
 
 type pluginBundleWriter interface {
+	DeleteFile(ctx context.Context, path string, recursive bool) error
 	Mkdir(ctx context.Context, path string) error
 	WriteFile(ctx context.Context, path string, content []byte) error
 }
@@ -479,6 +480,9 @@ func extractPluginBundleArchive(ctx context.Context, client pluginBundleWriter, 
 	pluginRoot, err := skillset.PluginDirForID(targetPluginID)
 	if err != nil {
 		return pluginBundleInstallResult{}, err
+	}
+	if err := client.DeleteFile(ctx, pluginRoot, true); err != nil {
+		return pluginBundleInstallResult{}, fmt.Errorf("clear plugin root: %w", err)
 	}
 	if err := client.Mkdir(ctx, pluginRoot); err != nil {
 		return pluginBundleInstallResult{}, fmt.Errorf("mkdir plugin root: %w", err)
