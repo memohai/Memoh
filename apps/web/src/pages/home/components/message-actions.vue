@@ -63,77 +63,9 @@
         </TooltipContent>
       </Tooltip>
 
-      <!-- USER role: edit the prompt (mock — wiring lands with the edit flow). -->
-      <template v-if="role === 'user'">
-        <Tooltip>
-          <TooltipTrigger as-child>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              :class="actionIconClass"
-              :aria-label="t('chat.actions.edit')"
-              @click="emit('edit')"
-            >
-              <Pencil
-                class="size-[18px]"
-                :stroke-width="1.75"
-              />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            {{ t('chat.actions.edit') }}
-          </TooltipContent>
-        </Tooltip>
-      </template>
-
-      <!-- ASSISTANT role: copy + share + try again + a "more" menu. Share and
-           Try again are mocks for now; the menu currently only holds the
-           timestamp, but is where the rest of the per-answer actions (fork, …)
-           will live. -->
-      <template v-else>
-        <Tooltip>
-          <TooltipTrigger as-child>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              :class="actionIconClass"
-              :aria-label="t('chat.actions.share')"
-              @click="emit('share')"
-            >
-              <ShareIcon
-                class="size-[18px]"
-                :stroke-width="1.75"
-              />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            {{ t('chat.actions.share') }}
-          </TooltipContent>
-        </Tooltip>
-
-        <Tooltip>
-          <TooltipTrigger as-child>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              :class="actionIconClass"
-              :aria-label="t('chat.actions.retry')"
-              @click="emit('retry')"
-            >
-              <RefreshCw
-                class="size-[18px]"
-                :stroke-width="1.75"
-              />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            {{ t('chat.actions.retry') }}
-          </TooltipContent>
-        </Tooltip>
-
+      <!-- ASSISTANT role: "more" menu — timestamp only for now. Share, retry,
+           read-aloud, and user edit are intentionally withheld until wired. -->
+      <template v-if="role === 'assistant'">
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
             <Button
@@ -159,10 +91,6 @@
             >
               {{ menuTime }}
             </DropdownMenuLabel>
-            <DropdownMenuItem @select="emit('readAloud')">
-              <Volume2 class="size-4" />
-              {{ t('chat.actions.readAloud') }}
-            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </template>
@@ -173,11 +101,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Pencil, RefreshCw, Volume2 } from 'lucide-vue-next'
 import CopyConnectedIcon from './copy-connected-icon.vue'
 import CheckDrawIcon from './check-draw-icon.vue'
 import DotsIcon from './dots-icon.vue'
-import ShareIcon from './share-icon.vue'
 import {
   Button,
   Tooltip,
@@ -187,7 +113,6 @@ import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuLabel,
 } from '@memohai/ui'
 import { useClipboard } from '@/composables/useClipboard'
@@ -200,13 +125,6 @@ const props = defineProps<{
   persistent?: boolean
   streaming?: boolean
   align?: 'start' | 'end'
-}>()
-
-const emit = defineEmits<{
-  edit: []
-  share: []
-  retry: []
-  readAloud: []
 }>()
 
 const { t } = useI18n()
