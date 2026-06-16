@@ -133,7 +133,7 @@
               </Select>
             </div>
           </div>
-          <div class="pointer-events-none mt-3 overflow-hidden rounded-md border border-border bg-surface-editor">
+          <div class="pointer-events-none mt-3">
             <MarkdownRender
               :key="mermaidPreviewKey"
               :content="MERMAID_PREVIEW_CONTENT"
