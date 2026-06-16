@@ -82,8 +82,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watchEffect, onUnmounted, nextTick, ref } from 'vue'
+import { computed, watchEffect, nextTick, ref } from 'vue'
 import { X, ChevronLeft, ChevronRight } from 'lucide-vue-next'
+import { useKeyboardCommand } from '@/composables/useKeyboardCommand'
+import { appKeyboardCommands } from '@/lib/keyboard-commands'
 
 export interface MediaGalleryItem {
   src: string
@@ -127,34 +129,30 @@ function next() {
   emit('update:openIndex', idx)
 }
 
-function handleKeydown(e: KeyboardEvent) {
-  if (props.openIndex === null) return
-  if (e.key === 'Escape') close()
-  else if (e.key === 'ArrowLeft') prev()
-  else if (e.key === 'ArrowRight') next()
-}
-
-let removeListener: (() => void) | null = null
-
 watchEffect(() => {
   if (isOpen.value) {
     previousFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    window.addEventListener('keydown', handleKeydown)
-    removeListener = () => window.removeEventListener('keydown', handleKeydown)
     nextTick(() => {
       closeButtonRef.value?.focus()
     })
-  } else if (removeListener) {
-    removeListener()
-    removeListener = null
+  } else {
     previousFocusedElement?.focus()
     previousFocusedElement = null
   }
 })
 
-onUnmounted(() => {
-  removeListener?.()
-})
+// Scoped to "lightbox open": each handler returns false while closed so the
+// dispatcher keeps iterating (e.g. lets Escape fall through to a global). When
+// the lightbox is open we claim the key, fire the action, and preventDefault.
+function claim(action: () => void): boolean {
+  if (!isOpen.value) return false
+  action()
+  return true
+}
+
+useKeyboardCommand(appKeyboardCommands.closeMediaLightbox, () => claim(close))
+useKeyboardCommand(appKeyboardCommands.mediaLightboxPrev, () => claim(prev))
+useKeyboardCommand(appKeyboardCommands.mediaLightboxNext, () => claim(next))
 </script>
 
 <style scoped>
