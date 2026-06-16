@@ -221,7 +221,7 @@
         "amber": "明亮的琥珀色，清晰的状态指示"
       },
       "codeHighlight": "代码高亮",
-      "codeHighlightDescription": "应用于代码块与编辑器的配色。预览始终展示所选主题，不随界面模式变化。",
+      "codeHighlightDescription": "应用于代码块与编辑器的配色方案。",
       "diagrams": "图表",
       "mermaidTheme": "Mermaid 主题",
       "mermaidThemeDescription": "应用于已渲染的 Mermaid 图表。"

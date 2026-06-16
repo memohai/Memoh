@@ -121,6 +121,11 @@ export function useShikiHighlighter() {
 
   async function highlightLanguage(code: string, lang: string, options: {
     theme?: BundledTheme
+    // Explicit dual-theme override. Pass when the call site needs to dodge the
+    // `.dark .shiki span` !important rule that ships in the design system: set
+    // both halves to the same theme and shiki emits `--shiki-dark` equal to the
+    // light value, so the override resolves back to the picked colors.
+    themes?: { light: BundledTheme, dark: BundledTheme }
     transparentPre?: boolean
   } = {}) {
     loading.value = true
@@ -128,19 +133,30 @@ export function useShikiHighlighter() {
       const hl = await getHighlighter()
       await ensureLang(hl, lang)
       const effectiveLang = loadedLangs.has(lang) ? lang : 'plaintext'
+      const transformers = options.transparentPre ? [transparentPreTransformer] : undefined
       if (options.theme) {
         await ensureTheme(hl, options.theme)
         html.value = hl.codeToHtml(code, {
           lang: effectiveLang,
           theme: options.theme,
-          transformers: options.transparentPre ? [transparentPreTransformer] : undefined,
+          transformers,
+        })
+      } else if (options.themes) {
+        await Promise.all([
+          ensureTheme(hl, options.themes.light),
+          ensureTheme(hl, options.themes.dark),
+        ])
+        html.value = hl.codeToHtml(code, {
+          lang: effectiveLang,
+          themes: options.themes,
+          transformers,
         })
       } else {
         const themes = await ensurePairedThemes(hl)
         html.value = hl.codeToHtml(code, {
           lang: effectiveLang,
           themes,
-          transformers: options.transparentPre ? [transparentPreTransformer] : undefined,
+          transformers,
         })
       }
     } catch {

@@ -225,7 +225,7 @@
         "amber": "明確なステータスインジケーターを備えた金色のハイライト"
       },
       "codeHighlight": "コードハイライト",
-      "codeHighlightDescription": "コードブロックとエディタに適用される配色。プレビューは選択したテーマに固定され、インターフェースモードに依存しません。",
+      "codeHighlightDescription": "コードブロックとエディタに適用される配色。",
       "diagrams": "ダイアグラム",
       "mermaidTheme": "Mermaid テーマ",
       "mermaidThemeDescription": "レンダリング済みの Mermaid 図表に適用されます。"

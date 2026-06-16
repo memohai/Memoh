@@ -419,11 +419,18 @@ const codeFontPreviewStyle = computed(() => ({
 }))
 
 function renderCodeFontPreview() {
+  // Both halves of each preview use the SAME picked theme. The design system's
+  // `.dark .shiki span` !important rule forces every span color to var(--shiki-dark)
+  // in dark interface mode; pinning both halves means that variable already equals
+  // the chosen theme's colors, so the cascade override is a visual no-op and each
+  // preview stays true to its picked theme regardless of interface mode.
+  const light = shikiThemeLight.value as BundledTheme
+  const dark = shikiThemeDark.value as BundledTheme
   void codeFontPreviewLight.highlightLanguage(codeFontPreviewCode, 'typescript', {
-    theme: shikiThemeLight.value as BundledTheme,
+    themes: { light, dark: light },
   })
   void codeFontPreviewDark.highlightLanguage(codeFontPreviewCode, 'typescript', {
-    theme: shikiThemeDark.value as BundledTheme,
+    themes: { light: dark, dark },
   })
 }
 
