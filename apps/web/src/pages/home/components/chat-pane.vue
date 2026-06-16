@@ -151,7 +151,7 @@
           aria-hidden="true"
           class="absolute inset-x-0 bottom-0 h-7 bg-surface-editor"
         />
-        <div class="pointer-events-auto relative w-full max-w-[880px] mx-auto px-10">
+        <div class="pointer-events-auto relative w-full max-w-[840px] mx-auto px-10">
           <Transition
             enter-active-class="motion-safe:transition-opacity motion-safe:duration-150 ease-out"
             enter-from-class="motion-safe:opacity-0"
@@ -188,31 +188,6 @@
               <ArrowDown class="size-4" />
             </Button>
           </Transition>
-
-          <div
-            v-if="pendingFiles.length"
-            class="flex flex-wrap gap-2 mb-2"
-          >
-            <div
-              v-for="(file, i) in pendingFiles"
-              :key="i"
-              class="relative group flex items-center gap-1.5 px-2 py-1 rounded-md border bg-muted/40 text-xs"
-            >
-              <component
-                :is="file.type.startsWith('image/') ? ImageIcon : FileIcon"
-                class="size-3 text-muted-foreground"
-              />
-              <span class="truncate max-w-30">{{ file.name }}</span>
-              <button
-                type="button"
-                class="ml-1 text-muted-foreground hover:text-foreground"
-                :aria-label="`${$t('common.delete')}: ${file.name}`"
-                @click="pendingFiles.splice(i, 1)"
-              >
-                <X class="size-3" />
-              </button>
-            </div>
-          </div>
 
           <input
             ref="fileInput"
@@ -342,14 +317,41 @@
               <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
               <span class="min-w-0 break-words">{{ composerError }}</span>
             </div>
+            <!--
+              Compact uses a CONCRETE 28px radius (= half the compact height:
+              button 36px + py-2.5 ×2 = 56px), so a short composer still reads as
+              a perfect pill — but, unlike rounded-full (9999px), the value can be
+              animated. Multiline shrinks the corners to 20px; transitioning
+              between two concrete radii interpolates smoothly, whereas animating
+              out of 9999px snapped mid-way (the value stayed clamped-round until
+              it crossed half-height, then jumped the corner in one step).
+            -->
             <div
+              ref="composerEl"
               data-slot="input-group"
               role="group"
-              class="relative flex w-full flex-wrap items-center gap-1 bg-surface-editor px-3 py-3 transition-[border-radius] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none"
-              :class="isMultiline ? 'rounded-[24px]' : 'rounded-full'"
+              class="relative flex w-full flex-wrap items-center gap-1 bg-surface-composer px-2.5 py-2.5 transition-[border-radius] duration-[220ms] ease-[cubic-bezier(0.33,1,0.68,1)] motion-reduce:transition-none"
+              :class="(isMultiline || pendingPreviews.length) ? 'rounded-[20px]' : 'rounded-[28px]'"
               :style="{ '--field-edge-solid': 'var(--field-edge-engaged)' }"
               @click.self="focusTextarea"
             >
+              <div
+                v-if="pendingPreviews.length"
+                class="order-first flex w-full basis-full flex-wrap gap-2 pb-1.5"
+              >
+                <ChatAttachmentCard
+                  v-for="preview in pendingPreviews"
+                  :key="preview.i"
+                  :kind="preview.isMedia ? 'media' : 'file'"
+                  :src="preview.url"
+                  :video="preview.isVideo"
+                  :name="preview.file.name"
+                  :ext="preview.ext"
+                  removable
+                  @remove="pendingFiles.splice(preview.i, 1)"
+                />
+              </div>
+
               <textarea
                 ref="textareaEl"
                 v-model="inputText"
@@ -358,9 +360,8 @@
                 :disabled="!currentBotId || activeChatReadOnly"
                 class="field-sizing-content resize-none break-words bg-transparent text-sm leading-6 text-foreground outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
                 :class="isMultiline
-                  ? 'order-none w-full basis-full px-2 pt-1 pb-0.5 max-h-52'
-                  : 'order-2 min-w-0 flex-1 self-center px-2 py-1 max-h-32'"
-                style="scrollbar-width: none;"
+                  ? 'order-none w-full basis-full pl-2 pr-1 pt-2 pb-1.5 max-h-52'
+                  : 'order-2 min-w-0 flex-1 self-center pl-1 pr-1 py-1 max-h-32'"
                 @keydown.enter.exact="handleKeydown"
                 @paste="handlePaste"
                 @input="syncMultiline"
@@ -370,20 +371,21 @@
                 <DropdownMenuTrigger as-child>
                   <Button
                     type="button"
-                    size="icon-sm"
                     variant="ghost"
                     :disabled="!currentBotId || activeChatReadOnly || agentChanging"
-                    class="order-1 size-8 rounded-full text-muted-foreground hover:text-foreground"
+                    :title="$t('chat.composerActions')"
+                    class="order-1 size-9 rounded-full text-foreground/85"
                     :class="isMultiline ? 'self-end' : 'self-center'"
                     :aria-label="$t('chat.composerActions')"
                   >
                     <LoaderCircle
                       v-if="agentChanging"
-                      class="size-3 animate-spin"
+                      class="size-4 animate-spin"
                     />
                     <Plus
                       v-else
-                      class="size-4"
+                      class="size-[22px]"
+                      :stroke-width="1.75"
                     />
                   </Button>
                 </DropdownMenuTrigger>
@@ -463,8 +465,10 @@
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent
-                    class="w-96 p-0"
-                    align="start"
+                    class="w-72 max-h-[60vh] overflow-y-auto p-0"
+                    align="end"
+                    side="top"
+                    :side-offset="4"
                   >
                     <div
                       v-if="activeIsPendingACP"
@@ -563,25 +567,15 @@
                       </button>
                     </div>
                     <div v-else>
-                      <ModelOptions
+                      <ChatModelPicker
                         v-model="overrideModelId"
+                        v-model:reasoning-effort="overrideReasoningEffort"
                         :models="models"
                         :providers="providers"
                         model-type="chat"
                         :open="modelPopoverOpen"
                         @update:model-value="onModelSelected"
                       />
-                      <template v-if="activeModelSupportsReasoning">
-                        <div class="h-px bg-border/60" />
-                        <div class="flex items-center gap-1.5 px-3.5 pt-2 pb-1 text-xs font-medium text-muted-foreground">
-                          <Lightbulb class="size-3.5 shrink-0" />
-                          {{ $t('chat.reasoningEffort') }}
-                        </div>
-                        <ReasoningEffortSelect
-                          v-model="overrideReasoningEffort"
-                          :efforts="availableReasoningEfforts"
-                        />
-                      </template>
                     </div>
                   </PopoverContent>
                 </Popover>
@@ -598,21 +592,20 @@
                   <span class="truncate text-[11px]">{{ activeACPProjectLabel }}</span>
                 </Button>
 
-                <div class="relative size-8 shrink-0">
+                <div class="relative size-9 shrink-0">
                   <SessionInfoRing
                     v-if="!activeIsACP"
                     :override-model-id="overrideModelId"
-                    class="absolute inset-0 size-8 transition-[opacity,scale] duration-200 ease-out motion-reduce:transition-none"
+                    class="absolute inset-0 size-9 transition-[opacity,scale] duration-200 ease-out motion-reduce:transition-none"
                     :class="(!showSend && !streaming) ? 'scale-100 opacity-100' : 'pointer-events-none scale-75 opacity-0'"
                   />
                   <Button
                     v-if="!streaming"
                     type="button"
                     variant="brand"
-                    size="icon-sm"
                     :disabled="!showSend || !currentBotId || activeChatReadOnly"
                     aria-label="Send message"
-                    class="absolute inset-0 size-8 rounded-full transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
+                    class="absolute inset-0 size-9 rounded-full transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
                     :class="showSend ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
                     @click="handleSend"
                   >
@@ -623,7 +616,7 @@
                       stroke-width="2.25"
                       stroke-linecap="round"
                       stroke-linejoin="round"
-                      class="size-4"
+                      class="size-[18px]"
                       aria-hidden="true"
                     >
                       <path d="M12 19.5 V5" />
@@ -634,12 +627,11 @@
                     v-else
                     type="button"
                     variant="destructive"
-                    size="icon-sm"
-                    class="absolute inset-0 size-8 rounded-full"
+                    class="absolute inset-0 size-9 rounded-full"
                     aria-label="Stop generating response"
                     @click="chatStore.abort()"
                   >
-                    <LoaderCircle class="size-4 animate-spin" />
+                    <LoaderCircle class="size-[18px] animate-spin" />
                   </Button>
                 </div>
               </div>
@@ -655,9 +647,6 @@
 import { ref, computed, onBeforeUnmount, onMounted, useTemplateRef, watchEffect, watch, nextTick, onActivated, onDeactivated } from 'vue'
 import {
   LoaderCircle,
-  Image as ImageIcon,
-  File as FileIcon,
-  X,
   Paperclip,
   Plus,
   ChevronDown,
@@ -680,13 +669,13 @@ import { getAcpProfiles, getModels, getProviders, getBotsByBotIdSettings } from 
 import type { AcpclientModelInfo, AcpprofilePublicProfile, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import MessageItem from './message-item.vue'
+import ChatAttachmentCard from './chat-attachment-card.vue'
 import { animateScrollTo } from './chat-minimap'
 import BgTaskPill from './bg-task-pill.vue'
 import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'
 import MediaGalleryLightbox from './media-gallery-lightbox.vue'
 import SessionInfoRing from './session-info-ring.vue'
-import ModelOptions from '@/pages/bots/components/model-options.vue'
-import ReasoningEffortSelect from '@/pages/bots/components/reasoning-effort-select.vue'
+import ChatModelPicker from './chat-model-picker.vue'
 import { EFFORT_LABELS, EFFORT_OPACITY, REASONING_EFFORT_DISABLE, availableEffortsForMode, resolveEffortLevels, resolveThinkingMode } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
 import type { ChatAttachment, UIUserInput, UIUserInputQuestion, WSUserInputAnswer } from '@/composables/api/useChat'
@@ -723,6 +712,48 @@ const { pill: bgTaskPill, scrollToOffscreen, cleanup: cleanupBgTaskBeacons } = p
 onBeforeUnmount(cleanupBgTaskBeacons)
 const fileInput = ref<HTMLInputElement | null>(null)
 const pendingFiles = ref<File[]>([])
+
+// Object-URL previews for pending image/video attachments, keyed by File so a
+// URL is created once and revoked the moment its file leaves the tray (or the
+// composer unmounts) — no leaks across sends or session switches.
+const pendingPreviewUrls = ref(new Map<File, string>())
+function syncPendingPreviewUrls(files: File[]) {
+  const map = pendingPreviewUrls.value
+  for (const [file, url] of map) {
+    if (!files.includes(file)) {
+      URL.revokeObjectURL(url)
+      map.delete(file)
+    }
+  }
+  for (const file of files) {
+    if (map.has(file)) continue
+    if (file.type.startsWith('image/') || file.type.startsWith('video/')) {
+      map.set(file, URL.createObjectURL(file))
+    }
+  }
+}
+watch(pendingFiles, files => syncPendingPreviewUrls(files), { deep: true, immediate: true })
+onBeforeUnmount(() => {
+  for (const url of pendingPreviewUrls.value.values()) URL.revokeObjectURL(url)
+  pendingPreviewUrls.value.clear()
+})
+
+const pendingPreviews = computed(() =>
+  pendingFiles.value.map((file, i) => {
+    const isImage = file.type.startsWith('image/')
+    const isVideo = file.type.startsWith('video/')
+    const dot = file.name.lastIndexOf('.')
+    return {
+      i,
+      file,
+      isMedia: isImage || isVideo,
+      isVideo,
+      url: pendingPreviewUrls.value.get(file) ?? '',
+      ext: dot > 0 ? file.name.slice(dot + 1).toUpperCase() : '',
+    }
+  }),
+)
+
 const composerError = ref('')
 const pendingUserInputDrafts = ref<Record<string, PendingUserInputDraft>>({})
 const modelPopoverOpen = ref(false)
@@ -1095,6 +1126,7 @@ const {
 
 const inputText = ref('')
 const textareaEl = ref<HTMLTextAreaElement | null>(null)
+const composerEl = ref<HTMLElement | null>(null)
 const isMultiline = ref(false)
 const compactContentWidth = ref(0)
 const showSend = computed(() => Boolean(inputText.value.trim()) || pendingFiles.value.length > 0)
@@ -1165,6 +1197,141 @@ watch(inputText, () => {
   void nextTick(syncMultiline)
 })
 
+// Smooth height morph for the compact↔multiline change. The composer is
+// bottom-anchored, so animating its height makes the top edge rise and the text
+// appears to slide up. Pure CSS can't transition between two content-driven
+// (auto) heights, so we measure the natural height and let the browser's
+// animation engine fill the gap — no permanent inline height, no fight with the
+// textarea's field-sizing. During the morph the box is clipped and its content is
+// bottom-pinned: the left (＋) and right (model) controls stay welded to the
+// bottom edge — which never moves — so they don't twitch, while the textarea
+// grows above them and the text is revealed from the top.
+let composerHeight = 0
+let composerHeightAnim: Animation | null = null
+let composerHeightReady = false
+// Last-seen layout mode, so we can tell a pill↔multiline form change from a
+// grow/shrink that happens entirely within multiline.
+let composerMultiline = false
+// A session/draft switch replaces the text wholesale — snap to the new size
+// once instead of animating between two unrelated drafts.
+let composerSnapNext = false
+// Tracks layout-driven height changes (e.g. window/pane resize re-wrapping a
+// multiline draft) that don't go through inputText/isMultiline, so the next
+// morph starts from the real current height instead of a stale baseline.
+let composerSizeObserver: ResizeObserver | null = null
+
+function prefersReducedMotion() {
+  return typeof window !== 'undefined'
+    && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
+}
+
+// Bottom-pin the controls directly: the compact row carries `self-center`
+// (align-self) on each control, which would override a container-level
+// align-items and let the ＋ jump to center mid-shrink. Overriding each child's
+// align-self welds the controls to the bottom in both directions. The textarea
+// is skipped on purpose — it stays centered in the compact row, so it slides
+// smoothly instead of snapping from bottom-pinned back to centered when the
+// morph ends (which made the placeholder jump on shrink).
+function pinComposerChildrenBottom(el: HTMLElement, pinned: boolean) {
+  const value = pinned ? 'flex-end' : ''
+  for (const child of Array.from(el.children)) {
+    if (child instanceof HTMLElement && child.tagName !== 'TEXTAREA') {
+      child.style.alignSelf = value
+    }
+  }
+}
+
+function clearComposerMorphStyles(el: HTMLElement) {
+  el.style.overflow = ''
+  el.style.alignContent = ''
+  pinComposerChildrenBottom(el, false)
+}
+
+function animateComposerHeight() {
+  const el = composerEl.value
+  if (!el) return
+  // Start from the live visual height when a morph is already running, so a
+  // fresh trigger continues from where the eye is instead of snapping back.
+  const from = composerHeightAnim ? el.offsetHeight : composerHeight
+  composerHeightAnim?.cancel()
+  composerHeightAnim = null
+  clearComposerMorphStyles(el)
+  const target = el.offsetHeight
+  composerHeight = target
+  // A pill↔multiline form change is a deliberate transition; growing/shrinking
+  // within multiline (adding a line) is a small nudge that must keep up with the
+  // already-placed text, so the latter runs much faster.
+  const formChanged = isMultiline.value !== composerMultiline
+  composerMultiline = isMultiline.value
+  if (!composerHeightReady || composerSnapNext) {
+    composerSnapNext = false
+    return
+  }
+  if (!isActive.value || !from || Math.abs(target - from) < 0.5 || prefersReducedMotion()) return
+  // Pin every line to the bottom and clip the overflow: the control row stays
+  // welded to the fixed bottom edge (no twitch) while the box grows/shrinks and
+  // the textarea is revealed/concealed from the top.
+  el.style.overflow = 'hidden'
+  el.style.alignContent = 'flex-end'
+  pinComposerChildrenBottom(el, true)
+  // Form change: a pure ease-out (no lead-in) starts moving immediately and
+  // completes promptly, but the tail decelerates to a gentle stop so the finish
+  // visibly slows down rather than snapping. In-multiline grow stays short and
+  // snappy so the box keeps up with the already-placed text.
+  const anim = el.animate(
+    [{ height: `${from}px` }, { height: `${target}px` }],
+    {
+      duration: formChanged ? 220 : 110,
+      easing: formChanged ? 'cubic-bezier(0.33, 1, 0.68, 1)' : 'cubic-bezier(0.16, 1, 0.3, 1)',
+    },
+  )
+  composerHeightAnim = anim
+  anim.onfinish = () => {
+    if (composerHeightAnim === anim) {
+      clearComposerMorphStyles(el)
+      composerHeightAnim = null
+    }
+  }
+}
+
+watch([inputText, isMultiline, () => pendingFiles.value.length], () => {
+  void nextTick(animateComposerHeight)
+})
+
+onMounted(() => {
+  void nextTick(() => {
+    composerHeight = composerEl.value?.offsetHeight ?? 0
+    composerMultiline = isMultiline.value
+    composerHeightReady = true
+    composerSnapNext = false
+  })
+  const el = composerEl.value
+  if (el && typeof ResizeObserver !== 'undefined') {
+    composerSizeObserver = new ResizeObserver(() => {
+      // Skip while we drive the height ourselves; only capture layout-driven
+      // resizes so the next morph starts from the real current height. The
+      // keystroke path sets composerHeightAnim before this fires, so normal
+      // morphs are untouched.
+      if (!composerHeightAnim) composerHeight = el.offsetHeight
+    })
+    composerSizeObserver.observe(el)
+  }
+})
+
+onBeforeUnmount(() => {
+  composerSizeObserver?.disconnect()
+  composerSizeObserver = null
+  composerHeightAnim?.cancel()
+  composerHeightAnim = null
+})
+
+onDeactivated(() => {
+  composerHeightAnim?.cancel()
+  composerHeightAnim = null
+  if (composerEl.value) clearComposerMorphStyles(composerEl.value)
+  composerSnapNext = true
+})
+
 const stopAuthSessionCleanup = onAuthSessionCleared(() => {
   inputDrafts.value = {}
   inputText.value = ''
@@ -1194,6 +1361,7 @@ watch(inputDraftKey, (nextKey, previousKey) => {
     saveInputDraft(previousKey, inputText.value)
   }
   inputText.value = nextKey ? inputDrafts.value[nextKey] ?? '' : ''
+  composerSnapNext = true
 }, { immediate: true })
 
 watch(inputText, (text) => {
@@ -1636,12 +1804,19 @@ function handleFileInputChange(e: Event) {
 function handlePaste(e: ClipboardEvent) {
   const items = e.clipboardData?.items
   if (!items) return
+  let handledFile = false
   for (const item of Array.from(items)) {
     if (item.kind === 'file') {
       const file = item.getAsFile()
-      if (file) pendingFiles.value.push(file)
+      if (file) {
+        pendingFiles.value.push(file)
+        handledFile = true
+      }
     }
   }
+  // A file paste from the OS also carries a text item (its name); without this
+  // the textarea would insert that filename alongside the attachment card.
+  if (handledFile) e.preventDefault()
 }
 
 async function fileToAttachment(file: File): Promise<ChatAttachment> {
