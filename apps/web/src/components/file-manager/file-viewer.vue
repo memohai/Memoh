@@ -5,7 +5,7 @@ import { useKeyboardCommand } from '@/composables/useKeyboardCommand'
 import { isFileSaveEligible } from './file-save-command'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
-import { File, Download } from 'lucide-vue-next'
+import { File, Download, RefreshCw } from 'lucide-vue-next'
 import { Button, Spinner } from '@memohai/ui'
 import {
   getBotsByBotIdContainerFsRead,
@@ -38,6 +38,10 @@ const originalContent = ref('')
 const loading = ref(false)
 const saving = ref(false)
 const imageUrl = ref('')
+// Set when the agent rewrites this file while the user has unsaved edits. We
+// don't silently reload (that would lose their work); the template shows an
+// inline notice with a Reload action instead.
+const externalChangePending = ref(false)
 
 const filename = computed(() => props.file.name ?? '')
 const filePath = computed(() => props.file.path ?? '')
@@ -47,55 +51,70 @@ const isDirty = computed(() => content.value !== originalContent.value)
 
 watch(isDirty, (dirty) => {
   emit('update:dirty', dirty)
+  // User resolved the conflict by saving or reverting their changes.
+  if (!dirty) externalChangePending.value = false
 }, { immediate: true })
 
-// Tagged on every load so a slower stale response can't overwrite a newer one
-// when fsChangedAt fires in bursts.
-let loadSeq = 0
+// One in-flight read at a time per viewer; a new load aborts the old one so a
+// slower stale response can't overwrite newer content when fsChangedAt fires
+// in bursts.
+let activeReadController: AbortController | null = null
 
 async function loadTextContent() {
-  const epoch = ++loadSeq
+  activeReadController?.abort()
+  const controller = new AbortController()
+  activeReadController = controller
   loading.value = true
   try {
     const { data } = await getBotsByBotIdContainerFsRead({
       path: { bot_id: props.botId },
       query: { path: filePath.value },
+      signal: controller.signal,
       throwOnError: true,
     })
-    if (epoch !== loadSeq) return
+    if (controller.signal.aborted) return
     content.value = data.content ?? ''
     originalContent.value = content.value
   } catch (error) {
-    if (epoch !== loadSeq) return
+    if (controller.signal.aborted) return
     toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
   } finally {
-    if (epoch === loadSeq) loading.value = false
+    if (activeReadController === controller) {
+      activeReadController = null
+      loading.value = false
+    }
   }
 }
 
 async function loadImageBlob() {
-  const epoch = ++loadSeq
+  activeReadController?.abort()
+  const controller = new AbortController()
+  activeReadController = controller
   loading.value = true
+  let url = ''
   try {
     const response = await getBotsByBotIdContainerFsDownload({
       path: { bot_id: props.botId },
       query: { path: filePath.value },
       parseAs: 'blob',
+      signal: controller.signal,
       throwOnError: true,
     })
+    if (controller.signal.aborted) return
     const blob = response.data as unknown as Blob
-    const url = URL.createObjectURL(blob)
-    if (epoch !== loadSeq) {
-      URL.revokeObjectURL(url)
-      return
-    }
+    url = URL.createObjectURL(blob)
     cleanupImageUrl()
     imageUrl.value = url
+    url = ''
   } catch (error) {
-    if (epoch !== loadSeq) return
+    if (controller.signal.aborted) return
     toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
   } finally {
-    if (epoch === loadSeq) loading.value = false
+    if (url) URL.revokeObjectURL(url)
+    if (activeReadController === controller) {
+      activeReadController = null
+      loading.value = false
+    }
   }
 }
 
@@ -150,6 +169,7 @@ watch(() => props.file.path, () => {
   cleanupImageUrl()
   content.value = ''
   originalContent.value = ''
+  externalChangePending.value = false
   if (isText.value) {
     void loadTextContent()
   } else if (isImage.value) {
@@ -158,20 +178,35 @@ watch(() => props.file.path, () => {
 }, { immediate: true })
 
 // Reload the file when the chat agent runs a fs-mutating tool (write/edit/apply_patch/exec)
-// against the same bot. Skip if the user has unsaved changes or is mid-save —
-// the in-flight save owns content/originalContent and we'd race it.
+// against the same bot AND the change targets this path. Skip if the user is
+// mid-save — the in-flight save owns content/originalContent and we'd race it.
+// If the user has unsaved edits, surface an inline notice rather than silently
+// reloading or silently dropping the agent's change.
 const chatStore = useChatStore()
 const { fsChangedAt, currentBotId } = storeToRefs(chatStore)
 watch(fsChangedAt, () => {
   if (!props.botId || props.botId !== currentBotId.value) return
+  if (!chatStore.affectsPath(filePath.value)) return
   if (saving.value) return
-  if (isDirty.value) return
+  if (isDirty.value) {
+    externalChangePending.value = true
+    return
+  }
   if (isText.value) {
     void loadTextContent()
   } else if (isImage.value) {
     void loadImageBlob()
   }
 })
+
+async function acceptExternalChange() {
+  externalChangePending.value = false
+  if (isText.value) {
+    await loadTextContent()
+  } else if (isImage.value) {
+    await loadImageBlob()
+  }
+}
 
 // Save on Cmd/Ctrl+S via the shared keyboard layer. The handler is scoped to this
 // component's lifetime: it returns true only for an editable, dirty text file, so
@@ -190,12 +225,28 @@ useKeyboardCommand(appKeyboardCommands.saveActiveFile, () => {
 })
 
 onBeforeUnmount(() => {
+  activeReadController?.abort()
   cleanupImageUrl()
 })
 </script>
 
 <template>
   <div class="flex h-full flex-col overflow-hidden bg-surface-editor">
+    <div
+      v-if="externalChangePending"
+      class="flex shrink-0 items-center gap-2 border-b border-border bg-accent/40 px-3 py-1.5 text-caption text-foreground"
+    >
+      <RefreshCw class="size-3.5 shrink-0 text-muted-foreground" />
+      <span class="min-w-0 flex-1 truncate">{{ t('bots.files.externalChangeNotice') }}</span>
+      <Button
+        variant="ghost"
+        size="sm"
+        class="h-6 shrink-0 px-2 text-xs"
+        @click="acceptExternalChange"
+      >
+        {{ t('bots.files.externalChangeReload') }}
+      </Button>
+    </div>
     <div class="flex-1 min-h-0 overflow-hidden">
       <div
         v-if="loading"

@@ -70,6 +70,12 @@ export interface ToolCallBlock extends UIToolMessage {
 
 export type ContentBlock = TextBlock | ThinkingBlock | ToolCallBlock | AttachmentBlock | ErrorBlock
 
+export interface FsChangeBatch {
+  at: number
+  // null = unknown / wildcard (exec completion, manual refresh, user-driven mutation)
+  paths: ReadonlySet<string> | null
+}
+
 export interface ChatUserTurn {
   id: string
   serverId?: string
@@ -259,17 +265,29 @@ export const useChatStore = defineStore('chat', () => {
   // Bumps every time a fs-mutating tool call (write/edit/apply_patch/exec) finishes for the
   // current bot. File-manager components watch this to refresh their listings
   // and any open file viewers without polling. Trailing fixed-delay throttle so
-  // a burst of edits within one window collapses into one refresh.
+  // a burst of edits within one window collapses into one refresh. Each batch
+  // carries the set of paths touched in that window (or null = wildcard, for
+  // exec and other unknown-impact triggers) so consumers can filter by path.
   const fsChangedAt = ref(0)
+  const lastFsChange = ref<FsChangeBatch | null>(null)
   const FS_MUTATING_TOOLS = new Set(['write', 'edit', 'apply_patch', 'exec'])
   const FS_CHANGED_DEBOUNCE_MS = 150
   let fsChangedBumpTimer: ReturnType<typeof setTimeout> | null = null
+  let pendingFsPaths: Set<string> | null = new Set()
 
-  function markFsChanged() {
+  function markFsChanged(path?: string | null) {
+    if (path === undefined || path === null) {
+      pendingFsPaths = null
+    } else if (pendingFsPaths !== null) {
+      pendingFsPaths.add(path)
+    }
     if (fsChangedBumpTimer != null) return
     fsChangedBumpTimer = setTimeout(() => {
       fsChangedBumpTimer = null
-      fsChangedAt.value = Date.now()
+      const at = Date.now()
+      lastFsChange.value = { at, paths: pendingFsPaths }
+      fsChangedAt.value = at
+      pendingFsPaths = new Set()
     }, FS_CHANGED_DEBOUNCE_MS)
   }
 
@@ -278,13 +296,35 @@ export const useChatStore = defineStore('chat', () => {
       clearTimeout(fsChangedBumpTimer)
       fsChangedBumpTimer = null
     }
+    pendingFsPaths = new Set()
+  }
+
+  function affectsPath(path: string): boolean {
+    const change = lastFsChange.value
+    if (!change) return false
+    if (change.paths === null) return true
+    return change.paths.has(path)
+  }
+
+  function extractToolMessagePath(message: UIMessage): string | null {
+    if (message.type !== 'tool') return null
+    const input = message.input
+    if (typeof input !== 'object' || input === null) return null
+    const path = (input as Record<string, unknown>).path
+    return typeof path === 'string' && path ? path : null
   }
 
   function bumpFsChangedAtIfFsMutation(message: UIMessage) {
     if (message.type !== 'tool') return
     if (message.running) return
     if (!FS_MUTATING_TOOLS.has(message.name)) return
-    markFsChanged()
+    // write / edit carry their target `path` in input. apply_patch can target
+    // many files (multi-path parsing belongs to the view layer, not the store)
+    // and exec is opaque — both fall back to wildcard.
+    const path = (message.name === 'write' || message.name === 'edit')
+      ? extractToolMessagePath(message)
+      : null
+    markFsChanged(path)
   }
 
   let messageEventsSince = ''
@@ -1388,6 +1428,7 @@ export const useChatStore = defineStore('chat', () => {
     startupSendFailure.value = null
     cancelPendingFsBump()
     fsChangedAt.value = 0
+    lastFsChange.value = null
     clearPendingACPSession()
 
     pendingAssistantStreams.clear()
@@ -2496,7 +2537,9 @@ export const useChatStore = defineStore('chat', () => {
     overrideReasoningEffort,
     startupSendFailure,
     fsChangedAt,
+    lastFsChange,
     markFsChanged,
+    affectsPath,
     initialize,
     selectBot,
     selectSession,

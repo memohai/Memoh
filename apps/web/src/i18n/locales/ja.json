@@ -1752,7 +1752,9 @@
       "extractFailed": "アーカイブの抽出に失敗しました",
       "deleteSuccess": "正常に削除されました",
       "batchDeletePartialFailed": "{failed}/{total} アイテムを削除できませんでした",
-      "deleteFailed": "削除に失敗しました"
+      "deleteFailed": "削除に失敗しました",
+      "externalChangeNotice": "Agent がワークスペースでこのファイルを更新しました",
+      "externalChangeReload": "再読み込み"
     },
     "email": {
       "title": "Email",

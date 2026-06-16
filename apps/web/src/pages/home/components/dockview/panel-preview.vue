@@ -35,7 +35,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { FileText } from 'lucide-vue-next'
@@ -76,27 +76,34 @@ const canPreview = computed(() => isMd.value || isHtml.value)
 
 const content = ref('')
 const loading = ref(false)
-// Tagged on every load so stale fast-fire responses can't clobber newer content.
-let loadSeq = 0
+// One in-flight load at a time; a new load aborts the old one so stale
+// fast-fire responses can't clobber newer content.
+let activeLoadController: AbortController | null = null
 
 async function load() {
   const botId = currentBotId.value
   if (!botId || !filePath.value || !canPreview.value) return
-  const epoch = ++loadSeq
+  activeLoadController?.abort()
+  const controller = new AbortController()
+  activeLoadController = controller
   loading.value = true
   try {
     const { data } = await getBotsByBotIdContainerFsRead({
       path: { bot_id: botId },
       query: { path: filePath.value },
+      signal: controller.signal,
       throwOnError: true,
     })
-    if (epoch !== loadSeq) return
+    if (controller.signal.aborted) return
     content.value = data.content ?? ''
   } catch (error) {
-    if (epoch !== loadSeq) return
+    if (controller.signal.aborted) return
     toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
   } finally {
-    if (epoch === loadSeq) loading.value = false
+    if (activeLoadController === controller) {
+      activeLoadController = null
+      loading.value = false
+    }
   }
 }
 
@@ -107,6 +114,12 @@ watch([visible, filePath], ([isVisible]) => {
 }, { immediate: true })
 
 watch(fsChangedAt, () => {
-  if (visible.value) void load()
+  if (!visible.value) return
+  if (!chatStore.affectsPath(filePath.value)) return
+  void load()
+})
+
+onBeforeUnmount(() => {
+  activeLoadController?.abort()
 })
 </script>
