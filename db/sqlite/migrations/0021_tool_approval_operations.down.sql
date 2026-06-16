@@ -145,7 +145,20 @@ CREATE INDEX IF NOT EXISTS idx_bots_owner_user_id ON bots(owner_user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_bots_name ON bots(name);
 
 UPDATE bots
-SET tool_approval_config = '{"enabled":false,"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"edit":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}'
-WHERE tool_approval_config = '{"enabled":false,"read":{"require_approval":false,"bypass_globs":[],"force_review_globs":[]},"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}';
+SET tool_approval_config = CASE
+  WHEN json_valid(tool_approval_config) THEN json_remove(
+    json_set(
+      tool_approval_config,
+      '$.edit',
+      json(CASE
+        WHEN json_type(tool_approval_config, '$.write') = 'object'
+          THEN json_extract(tool_approval_config, '$.write')
+        ELSE '{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]}'
+      END)
+    ),
+    '$.read'
+  )
+  ELSE '{"enabled":false,"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"edit":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}'
+END;
 
 PRAGMA foreign_keys = ON;
