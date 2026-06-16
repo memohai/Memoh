@@ -54,7 +54,7 @@
           variant="ghost"
           class="size-[26px] shrink-0 p-0 text-muted-foreground/70 hover:text-foreground"
           :title="t('common.refresh')"
-          @click="reload"
+          @click="reloadAndBroadcast"
         >
           <RefreshCw class="size-4" />
         </Button>
@@ -160,7 +160,7 @@
               </ContextMenuItem>
               <ContextMenuSeparator />
             </template>
-            <ContextMenuItem @select="reload">
+            <ContextMenuItem @select="reloadAndBroadcast">
               <RefreshCw class="mr-2 size-3.5" />
               {{ t('common.refresh') }}
             </ContextMenuItem>
@@ -386,7 +386,9 @@ const props = withDefaults(defineProps<{
 
 const { t } = useI18n()
 const workspaceTabs = useWorkspaceTabsStore()
+const chatStore = useChatStore()
 const { activeId } = storeToRefs(workspaceTabs)
+const { fsChangedAt } = storeToRefs(chatStore)
 const canWrite = computed(() => props.canWrite)
 
 const rootPath = '/data'
@@ -512,6 +514,15 @@ async function safeListDirectory(path: string): Promise<HandlersFsFileInfo[]> {
 
 function reload() {
   refreshKey.value++
+}
+
+// User-driven mutations call this to refresh the local tree AND tell the chat
+// store so any open file viewer / preview reloads its content. Keep this OFF
+// the fsChangedAt watcher path or the watcher would re-bump fsChangedAt and
+// loop forever.
+function reloadAndBroadcast() {
+  reload()
+  chatStore.markFsChanged()
 }
 
 // Reveal a path in the tree (expand its ancestors + scroll into view). Used by
@@ -703,7 +714,7 @@ async function uploadDirectoryPayload(payload: DirectoryUploadPayload) {
     } else {
       toast.success(t('bots.files.uploadFolderSuccess'))
     }
-    reload()
+    reloadAndBroadcast()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.files.uploadFailed')))
   } finally {
@@ -729,7 +740,7 @@ async function handleUpload(event: Event) {
     })
     toast.success(t('bots.files.uploadSuccess'))
     if (uploadTarget.value !== rootPath) navigateTo(uploadTarget.value)
-    reload()
+    reloadAndBroadcast()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.files.uploadFailed')))
   } finally {
@@ -766,7 +777,7 @@ async function handleNewFile() {
     })
     newFileDialogOpen.value = false
     toast.success(t('bots.files.newFileSuccess'))
-    reload()
+    reloadAndBroadcast()
     workspaceTabs.openFile(filePath)
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.files.newFileFailed')))
@@ -804,7 +815,7 @@ async function handleMkdir() {
     mkdirDialogOpen.value = false
     toast.success(t('bots.files.mkdirSuccess'))
     if (mkdirTarget.value !== rootPath) navigateTo(mkdirTarget.value)
-    reload()
+    reloadAndBroadcast()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.files.mkdirFailed')))
   } finally {
@@ -844,7 +855,7 @@ async function handleRename() {
     })
     renameDialogOpen.value = false
     toast.success(t('bots.files.renameSuccess'))
-    reload()
+    reloadAndBroadcast()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.files.renameFailed')))
   } finally {
@@ -883,7 +894,7 @@ async function handleDelete() {
       next.delete(target.path)
       selectedEntries.value = next
     }
-    reload()
+    reloadAndBroadcast()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.files.deleteFailed')))
   } finally {
@@ -971,7 +982,7 @@ async function handleBatchDelete() {
     } else {
       toast.success(t('bots.files.deleteSuccess'))
     }
-    reload()
+    reloadAndBroadcast()
   } finally {
     batchDeleteLoading.value = false
   }
@@ -997,7 +1008,7 @@ async function handleExtract(entry: HandlersFsFileInfo) {
       throw new Error(await readErrorMessage(response, t('bots.files.extractFailed')))
     }
     toast.success(t('bots.files.extractSuccess'))
-    reload()
+    reloadAndBroadcast()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.files.extractFailed')))
   } finally {
@@ -1053,8 +1064,8 @@ watch(() => props.botId, () => {
 }, { immediate: true })
 
 // Auto-refresh listing when the chat agent runs a fs-mutating tool (write/edit/apply_patch/exec).
-const chatStore = useChatStore()
-const { fsChangedAt } = storeToRefs(chatStore)
+// Stay on the local reload() — calling reloadAndBroadcast here would re-bump
+// fsChangedAt and the watcher would loop on itself.
 watch(fsChangedAt, () => {
   if (!props.botId) return
   reload()

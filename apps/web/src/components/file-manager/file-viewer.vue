@@ -49,7 +49,12 @@ watch(isDirty, (dirty) => {
   emit('update:dirty', dirty)
 }, { immediate: true })
 
+// Tagged on every load so a slower stale response can't overwrite a newer one
+// when fsChangedAt fires in bursts.
+let loadSeq = 0
+
 async function loadTextContent() {
+  const epoch = ++loadSeq
   loading.value = true
   try {
     const { data } = await getBotsByBotIdContainerFsRead({
@@ -57,16 +62,19 @@ async function loadTextContent() {
       query: { path: filePath.value },
       throwOnError: true,
     })
+    if (epoch !== loadSeq) return
     content.value = data.content ?? ''
     originalContent.value = content.value
   } catch (error) {
+    if (epoch !== loadSeq) return
     toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
   } finally {
-    loading.value = false
+    if (epoch === loadSeq) loading.value = false
   }
 }
 
 async function loadImageBlob() {
+  const epoch = ++loadSeq
   loading.value = true
   try {
     const response = await getBotsByBotIdContainerFsDownload({
@@ -76,11 +84,18 @@ async function loadImageBlob() {
       throwOnError: true,
     })
     const blob = response.data as unknown as Blob
-    imageUrl.value = URL.createObjectURL(blob)
+    const url = URL.createObjectURL(blob)
+    if (epoch !== loadSeq) {
+      URL.revokeObjectURL(url)
+      return
+    }
+    cleanupImageUrl()
+    imageUrl.value = url
   } catch (error) {
+    if (epoch !== loadSeq) return
     toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
   } finally {
-    loading.value = false
+    if (epoch === loadSeq) loading.value = false
   }
 }
 
@@ -143,17 +158,17 @@ watch(() => props.file.path, () => {
 }, { immediate: true })
 
 // Reload the file when the chat agent runs a fs-mutating tool (write/edit/apply_patch/exec)
-// against the same bot. Skip if the user has unsaved changes — we don't want to
-// silently overwrite their edits.
+// against the same bot. Skip if the user has unsaved changes or is mid-save —
+// the in-flight save owns content/originalContent and we'd race it.
 const chatStore = useChatStore()
 const { fsChangedAt, currentBotId } = storeToRefs(chatStore)
 watch(fsChangedAt, () => {
   if (!props.botId || props.botId !== currentBotId.value) return
+  if (saving.value) return
   if (isDirty.value) return
   if (isText.value) {
     void loadTextContent()
   } else if (isImage.value) {
-    cleanupImageUrl()
     void loadImageBlob()
   }
 })

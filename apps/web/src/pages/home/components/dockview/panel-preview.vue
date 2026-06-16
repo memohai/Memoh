@@ -76,10 +76,13 @@ const canPreview = computed(() => isMd.value || isHtml.value)
 
 const content = ref('')
 const loading = ref(false)
+// Tagged on every load so stale fast-fire responses can't clobber newer content.
+let loadSeq = 0
 
 async function load() {
   const botId = currentBotId.value
   if (!botId || !filePath.value || !canPreview.value) return
+  const epoch = ++loadSeq
   loading.value = true
   try {
     const { data } = await getBotsByBotIdContainerFsRead({
@@ -87,11 +90,13 @@ async function load() {
       query: { path: filePath.value },
       throwOnError: true,
     })
+    if (epoch !== loadSeq) return
     content.value = data.content ?? ''
   } catch (error) {
+    if (epoch !== loadSeq) return
     toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
   } finally {
-    loading.value = false
+    if (epoch === loadSeq) loading.value = false
   }
 }
 

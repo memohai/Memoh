@@ -1631,4 +1631,122 @@ describe('chat-list store', () => {
     await first
     await second
   })
+
+  it('debounces fsChangedAt bumps when a fs-mutating tool completes', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'write',
+          tool_call_id: 'call-write-1',
+          running: false,
+        },
+      } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 2,
+          type: 'tool',
+          name: 'edit',
+          tool_call_id: 'call-edit-1',
+          running: false,
+        },
+      } as UIStreamEvent,
+      { type: 'error', message: 'done' } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    const before = store.fsChangedAt
+    await store.sendMessage('write file')
+
+    expect(store.fsChangedAt).toBe(before)
+    await new Promise(resolve => setTimeout(resolve, 200))
+    expect(store.fsChangedAt).toBeGreaterThan(before)
+  })
+
+  it('does not bump fsChangedAt for non-fs-mutating tools', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'web_search',
+          tool_call_id: 'call-search',
+          running: false,
+        },
+      } as UIStreamEvent,
+      { type: 'error', message: 'done' } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    const before = store.fsChangedAt
+    await store.sendMessage('search')
+    await new Promise(resolve => setTimeout(resolve, 200))
+    expect(store.fsChangedAt).toBe(before)
+  })
+
+  it('does not bump fsChangedAt while a fs-mutating tool is still running', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'write',
+          tool_call_id: 'call-write-pending',
+          running: true,
+        },
+      } as UIStreamEvent,
+      { type: 'error', message: 'done' } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    const before = store.fsChangedAt
+    await store.sendMessage('start write')
+    await new Promise(resolve => setTimeout(resolve, 200))
+    expect(store.fsChangedAt).toBe(before)
+  })
+})
+
+describe('fsChangedAt markFsChanged()', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('bumps fsChangedAt after the debounce window', () => {
+    const store = useChatStore()
+    const before = store.fsChangedAt
+    store.markFsChanged()
+    expect(store.fsChangedAt).toBe(before)
+    vi.advanceTimersByTime(149)
+    expect(store.fsChangedAt).toBe(before)
+    vi.advanceTimersByTime(1)
+    expect(store.fsChangedAt).toBeGreaterThan(before)
+  })
+
+  it('collapses bursts of markFsChanged() within the window into a single bump', () => {
+    const store = useChatStore()
+    const before = store.fsChangedAt
+    for (let i = 0; i < 5; i++) store.markFsChanged()
+    expect(store.fsChangedAt).toBe(before)
+    vi.advanceTimersByTime(150)
+    const afterFirst = store.fsChangedAt
+    expect(afterFirst).toBeGreaterThan(before)
+
+    store.markFsChanged()
+    expect(store.fsChangedAt).toBe(afterFirst)
+    vi.advanceTimersByTime(150)
+    expect(store.fsChangedAt).toBeGreaterThan(afterFirst)
+  })
 })

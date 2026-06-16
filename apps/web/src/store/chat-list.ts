@@ -258,15 +258,33 @@ export const useChatStore = defineStore('chat', () => {
 
   // Bumps every time a fs-mutating tool call (write/edit/apply_patch/exec) finishes for the
   // current bot. File-manager components watch this to refresh their listings
-  // and any open file viewers without polling.
+  // and any open file viewers without polling. Trailing fixed-delay throttle so
+  // a burst of edits within one window collapses into one refresh.
   const fsChangedAt = ref(0)
   const FS_MUTATING_TOOLS = new Set(['write', 'edit', 'apply_patch', 'exec'])
+  const FS_CHANGED_DEBOUNCE_MS = 150
+  let fsChangedBumpTimer: ReturnType<typeof setTimeout> | null = null
+
+  function markFsChanged() {
+    if (fsChangedBumpTimer != null) return
+    fsChangedBumpTimer = setTimeout(() => {
+      fsChangedBumpTimer = null
+      fsChangedAt.value = Date.now()
+    }, FS_CHANGED_DEBOUNCE_MS)
+  }
+
+  function cancelPendingFsBump() {
+    if (fsChangedBumpTimer != null) {
+      clearTimeout(fsChangedBumpTimer)
+      fsChangedBumpTimer = null
+    }
+  }
 
   function bumpFsChangedAtIfFsMutation(message: UIMessage) {
     if (message.type !== 'tool') return
     if (message.running) return
     if (!FS_MUTATING_TOOLS.has(message.name)) return
-    fsChangedAt.value = Date.now()
+    markFsChanged()
   }
 
   let messageEventsSince = ''
@@ -1368,6 +1386,7 @@ export const useChatStore = defineStore('chat', () => {
     overrideModelId.value = ''
     overrideReasoningEffort.value = ''
     startupSendFailure.value = null
+    cancelPendingFsBump()
     fsChangedAt.value = 0
     clearPendingACPSession()
 
@@ -1517,7 +1536,7 @@ export const useChatStore = defineStore('chat', () => {
     if (block) {
       mergeBackgroundTaskIntoToolBlock(block, task)
       if (!isBackgroundTaskActive(block.backgroundTask)) {
-        fsChangedAt.value = Date.now()
+        markFsChanged()
       }
     } else {
       queuePendingBackgroundEvent(task)
@@ -2477,6 +2496,7 @@ export const useChatStore = defineStore('chat', () => {
     overrideReasoningEffort,
     startupSendFailure,
     fsChangedAt,
+    markFsChanged,
     initialize,
     selectBot,
     selectSession,
