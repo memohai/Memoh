@@ -514,6 +514,8 @@ see it, replace it with the right column. This is your strip-list when refactori
 | one-click delete, or ghost button + `text-destructive` | unconfirmed/under-weighted destruction | filled `variant="destructive"` + confirm step; danger card at the bottom |
 | always-present "Status: OK" / healthy-state row | noise where a healthy state should say nothing | progressive disclosure — show only when actionable, hide the whole block otherwise |
 | hand-written control (clickable `<div>`/`<span>`, bespoke popover list, `<div>`-grid "table") | re-implements a primitive; can't take size/token/focus/a11y, and drifts | reuse the `@memohai/ui` atom as-is; never rebuild a control from raw markup |
+| floating "Saved" / "已保存" status, or any orphan save/sync label misaligned with `#actions` | answers a question the user isn't asking; breaks the column grid; duplicates the disabled Save button | follow § 8 / § 10 save models — silent auto-save, or unsaved-only beside Save in `#actions`, success via toast once |
+| hand-built menu (raw `<button>` rows, `<div @click>`, `<hr>` / `border-b` / `h-px` dividers inside a popover) | bypasses `lib/menu.ts`; row height, highlight, separator, and shell radius drift from Select/Dropdown/Context | `DropdownMenu` / `ContextMenu` + `*MenuItem` + `*MenuSeparator` + `*MenuLabel`; trigger via `Button` / `TextButton` |
 | a composition pasted into two+ places | duplication that drifts out of sync | extract one shared component and reuse it |
 | brand-new one-off component spawned mid-page without asking | scope creep outside the shared layer | clear a genuinely new component with the developer first, then build it once, shared |
 | `size="sm"` on a form footer / primary action | squat half-height buttons read as unfinished | default (`h-9`, full height); `sm` only for genuinely tight, secondary spots |
@@ -526,10 +528,18 @@ see it, replace it with the right column. This is your strip-list when refactori
 | header `px-2` over a full-bleed body (`Input` / `Table` / grid of cards) | the right-aligned action indents 8px off the body's right edge → the "Submit / New member / Save don't line up" bug | compose through `PageShell` (`components/page-shell`) — it owns title + actions + body on one set of edges; never hand-roll a `<header>` |
 | a confirm's core question as `text-xs text-muted-foreground` (+ `size="sm"` buttons) | the *main* prompt rendered as the weakest type; the footer reads unfinished | the prompt is the title rung (`text-sm font-medium text-foreground`); footer buttons are default `h-9`, not `sm` |
 
+| Save / sync feedback | Model | Feedback |
+|---|---|---|
+| Auto-save on change | `profile` | Silent success; error toast + rollback |
+| Manual batch save | `PageShell` `#actions` + Save (`bot-tool-approval`, refactored tabs) | Disabled when synced; spinner on button; one success toast on click |
+| Unsaved hint (optional) | `#actions` beside Save, `hasChanges` only (`bot-settings` pattern) | `common.unsaved` while dirty — **never** a standing "saved" label when clean |
+
 ## Component picker
 
 | Need | Use | Not |
 |---|---|---|
+| Dropdown / overflow / kebab / action menu | `DropdownMenu` + `DropdownMenuContent` + `DropdownMenuItem` (+ `DropdownMenuSeparator` / `DropdownMenuLabel` / `DropdownMenuSub` as needed) | a `Popover` filled with raw `<button>`s; `<hr>` or `border-b` dividers |
+| Right-click / context menu | `ContextMenu` + `ContextMenuContent` + `ContextMenuItem` (+ `ContextMenuSeparator` / `ContextMenuLabel` / submenus) | same hand-built popover list |
 | Pick one value from a menu | `Select` | a hand-rolled popover list |
 | Searchable pick (single or many) | `Combobox` (with `multiple`) | re-skinning `Select`; bespoke search dropdown |
 | Switch a mode/filter, returns a value, no panels | `SegmentedControl` | `Tabs` re-skinned as a pill |

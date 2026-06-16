@@ -1,6 +1,6 @@
 ---
 name: memoh-ui-refactor
-description: Refactor an apps/web page into the new white-floating-card design language with disciplined @memohai/ui usage, deliberate copy, honest empty states, aligned controls, and restrained motion. Use when redesigning, refactoring, polishing, or building any settings/list/detail page in apps/web (e.g. a not-yet-refactored bot tab, a provider list, a settings surface), or when a page feels "dirty" / off-language and needs to match the refactored Overview / Appearance / About / Web Search pages.
+description: Refactor an apps/web page into the new white-floating-card design language with disciplined @memohai/ui usage, deliberate copy, honest empty states, aligned controls, and restrained motion. Never hand-write controls or menus; never leave stray fragments (orphan status labels, misaligned save hints). Compose from @memohai/ui primitives and reuse existing save/feedback patterns from reference pages. Use when redesigning, refactoring, polishing, or building any settings/list/detail page in apps/web (e.g. a not-yet-refactored bot tab, a provider list, a settings surface), or when a page feels "dirty" / off-language and needs to match the refactored Overview / Appearance / About / Web Search pages.
 ---
 
 # Memoh Web — Page Refactor & Design Language
@@ -30,11 +30,20 @@ the *how*; these are the *must*.
    dividers, deliberate spacing rhythm, and **no hover-rise** on cards.
 5. **Reuse a component — never hand-write one.** Compose from the real `@memohai/ui` atoms
    (Select / Combobox / Tooltip / icon `Button` / `Empty`) and the existing shared parts; never
-   re-skin one, hand-roll an equivalent, or rebuild a control out of raw `<div>`s. If a layout
-   repeats, extract it into one shared component instead of pasting it twice. A genuinely new
-   component is a last resort — clear it with the developer *before* building it.
+   re-skin one, hand-roll an equivalent, or rebuild a control out of raw `<div>`s. **Menus
+   included:** dropdown / context / action menus use `DropdownMenu` / `ContextMenu` and their
+   `*Item` / `*Separator` / `*Label` slots — never hand-written `<button>` rows, never `<hr>` /
+   `border-b` dividers inside a popover. The same rule applies to every other surface: if
+   `@memohai/ui` (or an existing app component) already covers it, use it — hand-built markup
+   drifts out of the token contract and reads inconsistent page to page. If a layout repeats,
+   extract it into one shared component instead of pasting it twice. A genuinely new component
+   is a last resort — clear it with the developer *before* building it.
 6. **Earn every word and every block.** Cut copy that doesn't guide; hide blocks that aren't
    actionable; empty *and* loading states must still draw their frame (no layout jump).
+   **No stray fragments:** every visible piece must sit in a named region (PageShell
+   `#actions`, a row's control column, a dialog footer, a toast) — never a lone status line
+   floating where it aligns with nothing. If it can be removed, remove it; if it must stay,
+   anchor it and reuse an existing pattern from a reference page.
 7. **You are not done until you verify the *rendered* page:** grep for raw colors → flip to
    **dark** → shrink to **narrow + `zh`** → walk **every old interaction** → `mise run lint`.
 8. **Draw it before you build it, then audit the nesting.** Sketch the page as an ASCII
@@ -303,6 +312,15 @@ Then pick the right component instead of bending the wrong one. See `reference.m
 Component picker for the full decision table and the icon/badge/tooltip rules. The
 recurring failures to avoid:
 
+- **Menus (dropdown / context / overflow / kebab):** `DropdownMenu` or `ContextMenu` as the
+  shell; each action is `DropdownMenuItem` / `ContextMenuItem` (or checkbox/radio variants when
+  needed); group labels use `*MenuLabel`; splits use `*MenuSeparator` — never a raw `<button>`,
+  clickable `<div>`, or `<hr>` / `border-b` / `h-px bg-border` standing in for menu chrome.
+  The trigger is `<Button>` / `TextButton` / `DropdownMenuTrigger as-child`, not a bespoke
+  clickable span. Submenus use `*MenuSub` + `*MenuSubTrigger` + `*MenuSubContent`. All menu
+  surfaces share `lib/menu.ts` (`menuItemClass`, `menuSeparatorClass`) — hand-building rows
+  bypasses that contract and is the fastest path to "this menu looks different from every other
+  menu."
 - **Choosers:** `Select` (pick one value from a menu) · `Combobox` (searchable, single
   *or* `multiple`) · `SegmentedControl` (a mode/filter, no panels) · `Tabs` (switch panels).
   Do not hand-roll a searchable dropdown when `Combobox` exists; do not inject custom
@@ -469,7 +487,43 @@ and how it's framed:
   self-contained unit (a tile row, a chart), let it sit directly under its title with no outer
   card. Card the groups; don't card the singletons.
 
-### 10. Forms follow one standard; controls are sized on purpose
+### 10. No stray fragments — every visible piece earns a home
+
+A **stray fragment** is UI that renders but doesn't belong to any layout region: a lone
+"Saved" / "已保存" label drifting in a corner, a status chip that doesn't share an edge with
+the title row or the card below, a one-off hint parked beside nothing. It reads broken even
+when the logic is correct, because the eye can't tell what it is attached to.
+
+**While building, run this on every new visible element:**
+
+1. **What region owns this?** Title actions (`PageShell` `#actions`), a `SettingsRow` control
+   column, a dialog footer, inline field feedback, or a toast — pick one. If you can't name
+   the owner, it's probably stray.
+2. **Can it go away entirely?** Most save/sync feedback does not need a persistent label.
+   A disabled Save button already says "nothing to commit"; a success toast on explicit Save
+   is enough acknowledgement. **Do not show a standing "Saved" state** — it duplicates what
+   the quiet synced form already communicates and tends to land misaligned.
+3. **Does this capability already have a house pattern?** Before writing any new status UI,
+   search refactored pages for the same job (see § 8 Save model, `profile` auto-save,
+   `PageShell` + Save in `#actions`). Reuse that model; don't invent a third one for the
+   same page type.
+4. **If it must stay, compose it — don't free-float it.** Unsaved hints belong in the
+   `#actions` cluster next to the Save button (same `flex` row, same baseline), not in a
+   separate corner. Loading belongs on the button (`Spinner`) or in the row being fetched
+   (`Skeleton`), not as orphan text.
+
+**Save / sync feedback — the reference models (do not invent a fourth):**
+
+| Model | When | Feedback |
+|---|---|---|
+| **Silent auto-save** | Toggles / selects that commit on change (`profile`) | Nothing on success; `toast.error` + rollback on failure |
+| **Manual Save in `#actions`** | A form the user batches (`PageShell` + Save button) | Button disabled when synced; `Spinner` while saving; **one** success toast on click |
+| **Explicit unsaved only** | Manual-save pages where drift is easy to miss | Show `common.unsaved` **only while `hasChanges`**, inside `#actions` beside Save — never a parallel "saved" label when synced |
+
+Anti-example: a floating "已保存" that doesn't share the `#actions` right edge with the
+cards below — it answers a question the user isn't asking and breaks the column grid.
+
+### 11. Forms follow one standard; controls are sized on purpose
 
 There is one house form, and the **New Task dialog** (`bot-schedule.vue`'s create/edit
 `Dialog`) is it. Mirror its anatomy — don't reinvent a form per page (recipe in
@@ -505,6 +559,8 @@ the real thing as a first-time user who has never seen it. Reading the code is n
 seeing it rendered is:
 
 - Name everything you see, top to bottom. Is any of it filler? Is any guidance missing?
+  Any **stray fragment** (orphan status text, a chip that doesn't share an edge with its
+  region)?
 - How does it sit in the viewport? Is it balanced **left ↔ right**? **top ↔ bottom**?
 - Force the **empty** state and the **loading** state. Does the frame still hold?
 - Walk **every interaction in the step-2 behavior inventory** — does each one still work? Did
@@ -520,7 +576,8 @@ seeing it rendered is:
 - Are dividers the right kind — **inset** inside cards, **full-bleed** as structural splits?
 - Is the **save model** right (auto-save silent vs deliberate manual save), with no toast
   spam on ambient changes?
-- Is there any **hover-rise**, any tinted card, any off-scale text, any hand-rolled control?
+- Is there any **hover-rise**, any tinted card, any off-scale text, any hand-rolled control,
+  or any **hand-built menu** (raw button rows / self-drawn dividers inside a popover)?
 - **Re-draw the finished page as a wireframe and re-count its complexity** (§ workflow step 4):
   any card-in-card? any icon stacked inside a card? any nesting layer that adds depth but no
   meaning? If the sketch is busier than the page needs to be, flatten it before you ship.
