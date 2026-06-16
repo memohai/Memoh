@@ -219,7 +219,10 @@
         "forest": "沉静的绿色调方案",
         "rose": "温暖的玫瑰色，柔和的视觉对比",
         "amber": "明亮的琥珀色，清晰的状态指示"
-      }
+      },
+      "diagrams": "图表",
+      "mermaidTheme": "Mermaid 主题",
+      "mermaidThemeDescription": "应用于已渲染的 Mermaid 图表。"
     },
     "langZh": "简体中文",
     "langEn": "English",

@@ -132,6 +132,39 @@
         </SettingsRow>
       </SettingsSection>
 
+      <SettingsSection :title="t('settings.appearance.diagrams')">
+        <SettingsRow
+          :label="t('settings.appearance.mermaidTheme')"
+          :description="t('settings.appearance.mermaidThemeDescription')"
+        >
+          <Select
+            :model-value="mermaidTheme"
+            @update:model-value="(value) => value && setMermaidTheme(value as MermaidTheme)"
+          >
+            <SelectTrigger
+              size="sm"
+              class="min-w-36"
+            >
+              <SelectValue>
+                {{ mermaidThemeLabels[mermaidTheme] }}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent
+              align="end"
+              :align-offset="0"
+            >
+              <SelectItem
+                v-for="value in MERMAID_THEMES"
+                :key="value"
+                :value="value"
+              >
+                {{ mermaidThemeLabels[value] }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+      </SettingsSection>
+
       <SettingsSection :title="t('settings.appearance.typography')">
         <SettingsRow
           :label="t('settings.appearance.uiFontSize')"
@@ -256,15 +289,23 @@ import SettingsSection from '@/components/settings/section.vue'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 import { colorSchemes, type ColorSchemeId, type ColorSchemeOption } from '@/constants/color-schemes'
-import { useSettingsStore, type ThemePreference } from '@/store/settings'
+import { MERMAID_THEMES, type MermaidTheme, useSettingsStore, type ThemePreference } from '@/store/settings'
 import { listBundledShikiThemes } from '@/store/settings/shiki-theme'
 import { cssFontFamilyDeclaration, DEFAULT_CODE_FONT_FAMILY, DEFAULT_CODE_FONT_SIZE_PX, DEFAULT_UI_FONT_SIZE_PX, normalizeCodeFontSizePx } from '@/store/settings/typography'
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
-const { language, theme, colorScheme, uiFontFamily, codeFontFamily, uiFontSizePx, codeFontSizePx, shikiThemeLight, shikiThemeDark, defaultUiFontFamily, defaultCodeFontFamily } = storeToRefs(settingsStore)
-const { setLanguage, setTheme, setColorScheme, setUiFontFamily, setCodeFontFamily, setUiFontSizePx, setCodeFontSizePx, setShikiTheme } = settingsStore
+const { language, theme, colorScheme, uiFontFamily, codeFontFamily, uiFontSizePx, codeFontSizePx, shikiThemeLight, shikiThemeDark, mermaidTheme, defaultUiFontFamily, defaultCodeFontFamily } = storeToRefs(settingsStore)
+const { setLanguage, setTheme, setColorScheme, setUiFontFamily, setCodeFontFamily, setUiFontSizePx, setCodeFontSizePx, setShikiTheme, setMermaidTheme } = settingsStore
 const isDark = useDark()
+
+const mermaidThemeLabels: Record<MermaidTheme, string> = {
+  auto: 'Auto',
+  default: 'Default',
+  dark: 'Dark',
+  forest: 'Forest',
+  neutral: 'Neutral',
+}
 
 const allShikiThemes = listBundledShikiThemes()
 const lightShikiThemeOptions = computed<SearchableSelectOption[]>(() =>

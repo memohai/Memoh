@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
+import MarkdownRender, { enableKatex, enableMermaid, setCustomComponents } from 'markstream-vue'
+import ThemedMermaidBlock from '@/components/themed-mermaid-block/index.vue'
 import { useSettingsStore } from '@/store/settings'
 
 const props = withDefaults(defineProps<{
@@ -12,6 +13,7 @@ const props = withDefaults(defineProps<{
 
 enableKatex()
 enableMermaid()
+setCustomComponents({ mermaid: ThemedMermaidBlock })
 
 const settings = useSettingsStore()
 const isDark = computed(() => settings.theme === 'dark')

@@ -22,6 +22,7 @@ import {
   normalizeShikiTheme,
   type ShikiThemeVariant,
 } from './shiki-theme'
+import { DEFAULT_MERMAID_THEME, isMermaidTheme, type MermaidTheme } from './mermaid'
 
 export type ThemePreference = 'light' | 'dark' | 'system'
 
@@ -35,6 +36,7 @@ export interface Settings {
   codeFontSizePx: number;
   shikiThemeLight: BundledTheme;
   shikiThemeDark: BundledTheme;
+  mermaidTheme: MermaidTheme;
 }
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -51,6 +53,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const codeFontSizePx = useStorage<number>('code-font-size-px', DEFAULT_CODE_FONT_SIZE_PX)
   const shikiThemeLight = useStorage<BundledTheme>('shiki-theme-light', DEFAULT_SHIKI_THEME_LIGHT)
   const shikiThemeDark = useStorage<BundledTheme>('shiki-theme-dark', DEFAULT_SHIKI_THEME_DARK)
+  const mermaidTheme = useStorage<MermaidTheme>('mermaid-theme', DEFAULT_MERMAID_THEME)
   const uiFontStack = computed(() => cssFontFamilyDeclaration(uiFontFamily.value, DEFAULT_UI_FONT_FAMILY))
   const codeFontStack = computed(() => cssFontFamilyDeclaration(codeFontFamily.value, DEFAULT_CODE_FONT_FAMILY))
   const shikiThemes = computed(() => ({ light: shikiThemeLight.value, dark: shikiThemeDark.value }))
@@ -83,6 +86,9 @@ export const useSettingsStore = defineStore('settings', () => {
   }
   shikiThemeLight.value = normalizeShikiTheme(shikiThemeLight.value, 'light')
   shikiThemeDark.value = normalizeShikiTheme(shikiThemeDark.value, 'dark')
+  if (!isMermaidTheme(mermaidTheme.value)) {
+    mermaidTheme.value = DEFAULT_MERMAID_THEME
+  }
   normalizeTypographySettings()
 
   watch(theme, (value) => {
@@ -163,6 +169,11 @@ export const useSettingsStore = defineStore('settings', () => {
     else shikiThemeDark.value = next
   }
 
+  const setMermaidTheme = (value: MermaidTheme) => {
+    if (!isMermaidTheme(value)) return
+    mermaidTheme.value = value
+  }
+
   return {
     language,
     theme,
@@ -174,6 +185,7 @@ export const useSettingsStore = defineStore('settings', () => {
     shikiThemeLight,
     shikiThemeDark,
     shikiThemes,
+    mermaidTheme,
     defaultUiFontFamily,
     defaultCodeFontFamily,
     uiFontStack,
@@ -186,5 +198,9 @@ export const useSettingsStore = defineStore('settings', () => {
     setUiFontSizePx,
     setCodeFontSizePx,
     setShikiTheme,
+    setMermaidTheme,
   }
 })
+
+export type { MermaidTheme } from './mermaid'
+export { MERMAID_THEMES, DEFAULT_MERMAID_THEME } from './mermaid'

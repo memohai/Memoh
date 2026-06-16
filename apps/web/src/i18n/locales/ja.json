@@ -223,7 +223,10 @@
         "forest": "控えめなグリーントーン",
         "rose": "温かみのあるアクセントと柔らかなコントラスト",
         "amber": "明確なステータスインジケーターを備えた金色のハイライト"
-      }
+      },
+      "diagrams": "ダイアグラム",
+      "mermaidTheme": "Mermaid テーマ",
+      "mermaidThemeDescription": "レンダリング済みの Mermaid 図表に適用されます。"
     },
     "langZh": "中文",
     "langEn": "英語",
