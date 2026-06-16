@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import { appKeyboardCommands, type KeyboardCommandRegistry } from './keyboard-commands'
-import { handleBrowserKeyboardShortcut, type BrowserKeyboardShortcutBinding } from './browser-keyboard-shortcuts'
+import {
+  connectBrowserKeyboardShortcutsLive,
+  handleBrowserKeyboardShortcut,
+  type BrowserKeyboardShortcutBinding,
+} from './browser-keyboard-shortcuts'
 
 function createKeyboardEventLike(options: {
   key: string
@@ -127,5 +131,62 @@ describe('browser keyboard shortcuts matcher', () => {
     expect(handleBrowserKeyboardShortcut(f4, registry, [binding], 'win')).toBe(true)
     // On Windows the base 'w' no longer matches because the override took effect.
     expect(handleBrowserKeyboardShortcut(w, createRegistry(), [binding], 'win')).toBe(false)
+  })
+
+  it('continues past an unhandled binding to a later one that claims the command', () => {
+    // Two bindings share Escape: a scoped lightbox command (no live handler)
+    // and a global with a live handler. The dispatcher should keep iterating
+    // instead of bailing on the first unhandled match.
+    const dispatch = vi.fn()
+      .mockImplementationOnce(() => false)
+      .mockImplementationOnce(() => true)
+    const registry = { dispatch }
+    const event = createKeyboardEventLike({ key: 'Escape' })
+    const bindings: BrowserKeyboardShortcutBinding[] = [
+      { command: appKeyboardCommands.closeMediaLightbox, key: 'Escape' },
+      { command: appKeyboardCommands.toggleSidebar, key: 'Escape' },
+    ]
+
+    expect(handleBrowserKeyboardShortcut(event, registry, bindings, 'mac')).toBe(true)
+    expect(dispatch).toHaveBeenCalledTimes(2)
+    expect(event.preventDefault).toHaveBeenCalledOnce()
+  })
+})
+
+describe('connectBrowserKeyboardShortcutsLive', () => {
+  function fakeTarget() {
+    let registered: ((event: KeyboardEvent) => void) | null = null
+    return {
+      addEventListener: vi.fn((_type: 'keydown', listener: (event: KeyboardEvent) => void) => {
+        registered = listener
+      }),
+      removeEventListener: vi.fn(),
+      fire(event: ReturnType<typeof createKeyboardEventLike>) {
+        registered?.(event as unknown as KeyboardEvent)
+      },
+    }
+  }
+
+  it('reads bindings from the getter on every keydown so store updates take effect live', () => {
+    const registry = createRegistry(true)
+    const target = fakeTarget()
+    let bindings: BrowserKeyboardShortcutBinding[] = [saveBinding]
+    connectBrowserKeyboardShortcutsLive(registry, () => bindings, target)
+
+    // Node test env detects as linux, so mod means ctrlKey here.
+    target.fire(createKeyboardEventLike({ key: 's', ctrlKey: true }))
+    expect(registry.dispatch).toHaveBeenCalledWith(appKeyboardCommands.saveActiveFile)
+
+    bindings = [{ command: appKeyboardCommands.toggleSidebar, key: 'b', mod: true }]
+    target.fire(createKeyboardEventLike({ key: 'b', ctrlKey: true }))
+    expect(registry.dispatch).toHaveBeenLastCalledWith(appKeyboardCommands.toggleSidebar)
+  })
+
+  it('returns a disposer that detaches the listener', () => {
+    const registry = createRegistry()
+    const target = fakeTarget()
+    const dispose = connectBrowserKeyboardShortcutsLive(registry, () => [saveBinding], target)
+    dispose()
+    expect(target.removeEventListener).toHaveBeenCalledOnce()
   })
 })

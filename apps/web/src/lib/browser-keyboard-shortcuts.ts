@@ -57,11 +57,18 @@ function bindingMatchesEvent(
 }
 
 /**
- * Match a keydown against the given bindings and dispatch the first hit. The
-   * matcher acts on exactly the bindings it is handed. Deciding which combos are
- * browser-owned (passthrough) is the caller's job, done via selectWebBindings.
- * preventDefault is only called when a handler actually claimed the command, so
- * unhandled keys fall through to the browser/OS.
+ * Match a keydown against the given bindings and dispatch the first hit that a
+ * handler actually claims. The matcher acts on exactly the bindings it is
+ * handed. Deciding which combos are browser-owned (passthrough) is the caller's
+ * job, done via selectWebBindings. preventDefault is only called when a handler
+ * actually claimed the command, so unhandled keys fall through to the
+ * browser/OS.
+ *
+ * When several bindings share the same combo (e.g. a scoped 'mediaLightbox'
+ * Escape alongside a future global Escape), we keep iterating past bindings
+ * whose commands have no live handler. This lets scoped commands hand the key
+ * back to globals while their owning component is unmounted, without forcing
+ * callers to keep two binding lists in sync.
  */
 export function handleBrowserKeyboardShortcut(
   event: BrowserKeyboardShortcutEvent,
@@ -72,7 +79,7 @@ export function handleBrowserKeyboardShortcut(
   for (const binding of bindings) {
     if (!bindingMatchesEvent(binding, event, platform)) continue
     const handled = registry.dispatch(binding.command)
-    if (!handled) return false
+    if (!handled) continue
     event.preventDefault()
     return true
   }
@@ -88,6 +95,29 @@ export function connectBrowserKeyboardShortcuts(
   const platform = detectPlatform()
   const listener = (event: KeyboardEvent) => {
     handleBrowserKeyboardShortcut(event, registry, bindings, platform)
+  }
+  target.addEventListener('keydown', listener)
+  return () => {
+    target.removeEventListener('keydown', listener)
+  }
+}
+
+/**
+ * Reactive variant: takes a getter that returns the current bindings, so a
+ * Pinia store's `effectiveBindings` (defaults + user overrides) can drive
+ * dispatch without re-subscribing a listener every time the user rebinds a
+ * key. The getter is invoked on each keydown — cheap for our 5-10 row table
+ * and keeps the wiring stateless.
+ */
+export function connectBrowserKeyboardShortcutsLive(
+  registry: Pick<KeyboardCommandRegistry, 'dispatch'>,
+  getBindings: () => BrowserKeyboardShortcutBinding[],
+  target: BrowserKeyboardShortcutTarget | undefined = typeof window === 'undefined' ? undefined : window,
+): () => void {
+  if (!target) return () => {}
+  const platform = detectPlatform()
+  const listener = (event: KeyboardEvent) => {
+    handleBrowserKeyboardShortcut(event, registry, getBindings(), platform)
   }
   target.addEventListener('keydown', listener)
   return () => {
