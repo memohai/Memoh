@@ -222,7 +222,8 @@
     "langEn": "English",
     "version": "Version",
     "versionTag": "v{version}",
-    "commitHash": "Commit"
+    "commitHash": "Commit",
+    "langJa": "日本語"
   },
   "people": {
     "title": "Members",

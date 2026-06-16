@@ -53,6 +53,9 @@ const { visible, exiting, leave } = useStepTransition()
               <SelectItem value="en">
                 {{ t('settings.langEn') }}
               </SelectItem>
+              <SelectItem value="ja">
+                {{ t('settings.langJa') }}
+              </SelectItem>
             </SelectContent>
           </Select>
         </div>

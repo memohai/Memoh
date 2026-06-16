@@ -24,6 +24,9 @@
               <SelectItem value="zh">
                 {{ t('settings.langZh') }}
               </SelectItem>
+              <SelectItem value="ja">
+                {{ t('settings.langJa') }}
+              </SelectItem>
             </SelectContent>
           </Select>
         </SettingsRow>

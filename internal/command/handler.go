@@ -538,7 +538,7 @@ func (h *Handler) friendlyCommandError(t *i18n.Localizer, resource string, err e
 }
 
 // normalizeLanguageShorthand rewrites the "/language <lang>" shorthand into the
-// explicit "/language set <lang>" form so a bare value (zh/en/auto) reaches the
+// explicit "/language set <lang>" form so a bare value (zh/en/ja/auto) reaches the
 // set handler's argument slice. The caller must invoke this BEFORE freezing
 // CommandContext.Args from parsed.Args — otherwise the rewritten arg never makes
 // it into the context the handler reads.

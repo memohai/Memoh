@@ -31,7 +31,7 @@ const DefaultLocale = "en"
 
 // Supported lists the locales that ship with a bundled catalog, in display
 // order (used by the /settings language picker).
-var Supported = []string{"en", "zh"}
+var Supported = []string{"en", "zh", "ja"}
 
 // catalogs maps locale -> flattened (dotted-key) message table. Populated once
 // at init from the embedded JSON; treated as immutable thereafter.

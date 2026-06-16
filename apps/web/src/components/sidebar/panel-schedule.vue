@@ -153,8 +153,8 @@ const deleteTarget = ref<ScheduleSchedule | null>(null)
 const isDeleting = ref(false)
 const busyIds = reactive(new Set<string>())
 
-const cronLocale = computed<'en' | 'zh'>(() => (locale.value.startsWith('zh') ? 'zh' : 'en'))
-const uiLocale = computed(() => locale.value.startsWith('zh') ? 'zh-CN' : 'en-US')
+const cronLocale = computed<'en' | 'zh' | 'ja'>(() => (locale.value.startsWith('zh') ? 'zh' : locale.value.startsWith('ja') ? 'ja' : 'en'))
+const uiLocale = computed(() => locale.value.startsWith('zh') ? 'zh-CN' : locale.value.startsWith('ja') ? 'ja-JP' : 'en-US')
 
 const effectiveTimezone = computed(() => {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return 'UTC' }
@@ -181,10 +181,10 @@ function groupLabel(date: Date, now: Date): string {
   const week = 7 * 86_400_000
 
   if (isSameDay(date, now)) {
-    return locale.value.startsWith('zh') ? '今天' : 'Today'
+    return locale.value.startsWith('zh') ? '今天' : locale.value.startsWith('ja') ? '今日' : 'Today'
   }
   if (isSameDay(date, tomorrow)) {
-    return locale.value.startsWith('zh') ? '明天' : 'Tomorrow'
+    return locale.value.startsWith('zh') ? '明天' : locale.value.startsWith('ja') ? '明日' : 'Tomorrow'
   }
   if (diff < week) {
     return date.toLocaleDateString(uiLocale.value, { weekday: 'short' })

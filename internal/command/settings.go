@@ -85,7 +85,7 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 	})
 	g.Register(SubCommand{
 		Name:  "language",
-		Usage: "language [auto|en|zh] - View or set the command UI language",
+		Usage: "language [auto|en|zh|ja] - View or set the command UI language",
 		// Deliberately NOT IsWrite: the command-UI language is a display
 		// preference, not a privileged bot setting, so any member can change it
 		// without owner rights. (The general /settings update path stays gated.)
@@ -98,7 +98,7 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 				}
 				return commandLanguageResult(cc, s.CommandUILanguage), nil
 			}
-			// Arg → set the language (auto|en|zh).
+			// Arg → set the language (auto|en|zh|ja).
 			v := strings.ToLower(strings.TrimSpace(cc.Args[0]))
 			if v != "auto" && !i18n.IsSupported(v) {
 				return &Result{Text: cc.T("cmd.settings.unknownLanguage", map[string]any{"value": cc.Args[0]})}, nil
@@ -126,7 +126,7 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 // supported locale (current marked ✓). Tapping re-dispatches
 // "/settings language <key>" (an un-gated path), which writes the choice and
 // re-renders the settings card in the newly chosen language. The locale keys
-// (auto/en/zh) are canonical args and stay untranslated; only the labels are
+// (auto/en/zh/ja) are canonical args and stay untranslated; only the labels are
 // localized.
 func commandLanguageResult(cc CommandContext, current string) *Result {
 	return commandLanguageResultFor(cc, current, "settings", "language")
@@ -144,6 +144,7 @@ func commandLanguageResultFor(cc CommandContext, current, resource, action strin
 		{"auto", cc.T("cmd.settings.langAuto")},
 		{"en", cc.T("cmd.settings.langEn")},
 		{"zh", cc.T("cmd.settings.langZh")},
+		{"ja", cc.T("cmd.settings.langJa")},
 	}
 	choices := make([]ListItem, 0, len(options))
 	currentLabel := ""
@@ -162,12 +163,11 @@ func commandLanguageResultFor(cc CommandContext, current, resource, action strin
 	// active choice — on Telegram the ✓ in the choice list carries the same
 	// signal but text-channel users have no ✓ to read.
 	body := title + "\n" + cc.T("cmd.settings.langCurrent", map[string]any{"label": currentLabel})
-	// Three short locale options (auto/en/zh) fit one row — Columns:3 keeps each
-	// button ~⅓ width instead of stretching full-width one-per-row. Close gets its
-	// own row (appended by the renderer).
+	// Four short locale options (auto/en/zh/ja) fit one compact row. Close gets
+	// its own row (appended by the renderer).
 	return &Result{
 		Text:        body,
-		Interactive: &Interactive{Kind: InteractiveChoices, Choices: &ChoicesView{Title: body, Choices: choices, Columns: 3}},
+		Interactive: &Interactive{Kind: InteractiveChoices, Choices: &ChoicesView{Title: body, Choices: choices, Columns: 4}},
 	}
 }
 
@@ -232,7 +232,7 @@ func (h *Handler) settingsResult(cc CommandContext, s settings.Settings) *Result
 }
 
 // commandLanguageDisplay renders the stored command-UI language setting for the
-// settings card: "auto"/en/zh map to their localized labels; anything else is
+// settings card: "auto"/en/zh/ja map to their localized labels; anything else is
 // shown verbatim.
 func commandLanguageDisplay(cc CommandContext, value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
@@ -242,6 +242,8 @@ func commandLanguageDisplay(cc CommandContext, value string) string {
 		return cc.T("cmd.settings.langEn")
 	case "zh":
 		return cc.T("cmd.settings.langZh")
+	case "ja":
+		return cc.T("cmd.settings.langJa")
 	default:
 		return value
 	}
