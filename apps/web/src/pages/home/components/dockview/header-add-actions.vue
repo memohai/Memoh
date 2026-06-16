@@ -47,15 +47,17 @@
           <Monitor class="mr-2 size-3.5" />
           {{ t('chat.tabBarToolkit.openDesktop') }}
         </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem @select="store.splitGroup(props.params.group.id, 'right')">
-          <Columns2 class="mr-2 size-3.5" />
-          {{ t('chat.tabBarToolkit.splitRight') }}
-        </DropdownMenuItem>
-        <DropdownMenuItem @select="store.splitGroup(props.params.group.id, 'below')">
-          <Rows2 class="mr-2 size-3.5" />
-          {{ t('chat.tabBarToolkit.splitDown') }}
-        </DropdownMenuItem>
+        <template v-if="canSplit">
+          <DropdownMenuSeparator v-if="canWorkspaceExec || canSplitExtras" />
+          <DropdownMenuItem @select="store.splitGroup(props.params.group.id, 'right')">
+            <Columns2 class="mr-2 size-3.5" />
+            {{ t('chat.tabBarToolkit.splitRight') }}
+          </DropdownMenuItem>
+          <DropdownMenuItem @select="store.splitGroup(props.params.group.id, 'below')">
+            <Rows2 class="mr-2 size-3.5" />
+            {{ t('chat.tabBarToolkit.splitDown') }}
+          </DropdownMenuItem>
+        </template>
       </DropdownMenuContent>
     </DropdownMenu>
   </div>
@@ -76,7 +78,7 @@ import {
 } from '@memohai/ui'
 import type { DockviewApi, DockviewGroupPanelApi, IDockviewGroupPanel } from 'dockview-vue'
 import { useChatStore } from '@/store/chat-list'
-import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import { CHAT_PANEL_ID, useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { isLocalWorkspaceBot } from '@/utils/bot-workspace'
 import { hasBotPermission } from '@/utils/bot-permissions'
 
@@ -97,7 +99,6 @@ const currentBot = computed(() =>
   bots.value.find(bot => bot.id === currentBotId.value) ?? null,
 )
 const currentPermissions = computed(() => currentBot.value?.current_user_permissions ?? [])
-const canWorkspaceRead = computed(() => hasBotPermission(currentPermissions.value, 'workspace_read'))
 const canWorkspaceExec = computed(() => hasBotPermission(currentPermissions.value, 'workspace_exec'))
 const canManage = computed(() => hasBotPermission(currentPermissions.value, 'manage'))
 const isLocalWorkspace = computed(() => isLocalWorkspaceBot(currentBot.value?.metadata))
@@ -111,7 +112,18 @@ const isTerminalGroup = computed(() => {
 // (trusted-host) workspace exposes neither, so its menu is terminal + split only.
 const canSplitExtras = computed(() => canManage.value && !isLocalWorkspace.value)
 
+// Splitting duplicates the active tab into a second pane. The chat conversation
+// is a singleton panel (one fixed id), so it can't be duplicated — offering
+// "split" while chat is the active tab just no-ops. Hide it then, and show it
+// only for panels that can actually open a second view (file/terminal/…).
+// store.activeId re-fires this whenever the active tab changes.
+const canSplit = computed(() => {
+  void store.activeId
+  const active = props.params.group.activePanel?.id
+  return !!active && active !== CHAT_PANEL_ID
+})
+
 const hasAnyAction = computed(() =>
-  canWorkspaceExec.value || canSplitExtras.value || canWorkspaceRead.value,
+  canWorkspaceExec.value || canSplitExtras.value || canSplit.value,
 )
 </script>
