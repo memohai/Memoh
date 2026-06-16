@@ -35,7 +35,7 @@ import {
   writeCliPrefs,
   type CliStatus,
 } from './cli-integration'
-import { acceleratorForCommand, appKeyboardCommands } from '../shared/keyboard-commands'
+import { acceleratorForCommand, appKeyboardCommands, type AppKeyboardCommand } from '../shared/keyboard-commands'
 import { dispatchFocusedWindowCommand } from './window-commands'
 
 type DesktopRuntimeMode = 'local' | 'remote'
