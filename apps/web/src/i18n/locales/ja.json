@@ -1190,55 +1190,55 @@
     "toolApproval": {
       "posture": {
         "title": "セキュリティ態勢",
-        "hardened": "硬化した",
-        "description": "承認ポリシーは、実行境界を積極的に強制します。"
+        "hardened": "強化済み",
+        "description": "承認ポリシーが実行境界を適用しています。"
       },
       "metrics": {
         "activeRules": "アクティブなルール",
         "totalDefined": "定義済み合計",
         "blockedCount": "ブロック",
-        "sessionTrust": "Sessionの信頼"
+        "sessionTrust": "セッションの信頼"
       },
       "recentActivity": "最近の活動",
       "trust": "信頼",
       "actions": {
-        "trustCall": "トラストコール",
-        "trustDir": "トラストディレクトリ"
+        "trustCall": "この呼び出しを信頼",
+        "trustDir": "このディレクトリを信頼"
       },
       "noActivity": "最近の活動はありません。",
       "warnings": {
-        "disabled": "Toolの承認は現在無効になっています。",
-        "breachRisk": "リセットすると、すべてのカスタム セキュリティ ルールがクリアされます。"
+        "disabled": "ツール承認は現在無効です。",
+        "breachRisk": "リセットすると、カスタムセキュリティルールがすべて削除されます。"
       },
-      "restoreSecurity": "Toolの承認を有効にする",
+      "restoreSecurity": "ツール承認を有効にする",
       "examples": "例",
       "status": {
         "active": "アクティブ",
         "implicitDeny": "暗黙的な拒否",
-        "sealed": "密封された"
+        "sealed": "封鎖済み"
       },
       "dangerZone": "危険な操作",
-      "dangerZoneDesc": "主要なセキュリティ ポリシーを管理します。",
+      "dangerZoneDesc": "主要なセキュリティポリシーを管理します。",
       "resetDefaults": "デフォルトにリセット",
-      "confirmReset": "すべてのTool承認ルールをデフォルトのステータスにリセットしてもよろしいですか?",
-      "resetWarningExtra": "カスタム バイパス ルールとレビュー ルールは失われます。",
-      "title": "Tool呼び出しの承認",
-      "intro": "Botがファイルを変更したりコマンドを実行したりする前に承認を必要とします。以下の各Toolのルールを設定します。バイパスパターンは自動承認されます。必ず確認する必要があるパターンは承認を強制します。",
+      "confirmReset": "すべてのツール承認ルールをデフォルト状態に戻しますか?",
+      "resetWarningExtra": "カスタムのバイパスルールとレビュー必須ルールは失われます。",
+      "title": "ツール呼び出しの承認",
+      "intro": "Bot がファイルを読み取る、ファイルを変更する、またはコマンドを実行する前に承認を要求します。操作ごとにルールを設定できます。バイパスパターンは自動承認され、レビュー必須パターンは承認を強制します。",
       "tools": {
-        "write": "Container内に新しいファイルを作成する",
-        "edit": "Container内の既存のファイルを変更する",
-        "exec": "Container内でシェルコマンドを実行する"
+        "read": "ワークスペース内のファイルを読み取り、ディレクトリを一覧表示する",
+        "write": "ワークスペース内でファイルの書き込み、編集、patch の適用を行う",
+        "exec": "コンテナ内でシェルコマンドを実行する"
       },
-      "toolDisabledHint": "現在、このToolは承認されていません。以下のルールは、スイッチを有効にした後にのみ有効になります。",
+      "toolDisabledHint": "この操作では現在、承認は要求されていません。以下のルールは、スイッチを有効にした後に適用されます。",
       "bypass": "バイパス (許可リスト)",
-      "bypassHint": "これらのパターンのいずれかに一致する通話は、プロンプトを表示せずに自動的に承認されます。",
-      "mustReview": "確認する必要があります (拒否リスト)",
-      "mustReviewHint": "これらのパターンのいずれかに一致する呼び出しは、このToolが自動承認されている場合でも、常に承認をトリガーします。",
+      "bypassHint": "これらのパターンのいずれかに一致する呼び出しは、確認なしで自動承認されます。",
+      "mustReview": "レビュー必須 (拒否リスト)",
+      "mustReviewHint": "これらのパターンのいずれかに一致する呼び出しは、このツールが自動承認されている場合でも常に承認を要求します。",
       "placeholders": {
-        "fileBypass": "/tmp/**\n/データ/**",
+        "fileBypass": "/tmp/**\n/data/**",
         "fileMustReview": "/etc/**\n.env*",
-        "execBypass": "ls\n障害者\ngit ステータス",
-        "execMustReview": "rm -rf *\n須藤 *"
+        "execBypass": "ls\npwd\ngit status",
+        "execMustReview": "rm -rf *\nsudo *"
       },
       "unsavedChanges": "未保存の変更"
     },
