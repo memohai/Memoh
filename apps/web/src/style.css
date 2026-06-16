@@ -151,16 +151,6 @@
   scale: 1;
 }
 
-/* The model list must scroll without adding a layout gutter. A reserved gutter
- * shortens the row and makes the flyout appear to collide with the menu edge. */
-.composer-model-list {
-  scrollbar-width: none;
-}
-.composer-model-list::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-}
-
 /* Inter-script spacing (W3C CLREQ / CSS Text 4): insert the standard ~1/8em gap
  * between CJK (Han/kana) and adjacent Latin letters or numerals, so mixed runs
  * like "Chat查看文件" stop colliding into one dense blob. The property is

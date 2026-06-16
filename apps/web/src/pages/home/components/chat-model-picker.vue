@@ -24,69 +24,87 @@
         </button>
       </div>
 
-      <!-- This list scrolls, but its scrollbar must not reserve a layout gutter:
-           the row highlight and trailing controls need the full menu width. -->
-      <div class="composer-model-list max-h-80 space-y-px overflow-y-auto overscroll-contain p-1">
-        <div
-          v-if="filteredGroups.length === 0"
-          class="py-6 text-center text-body text-muted-foreground"
+      <div
+        ref="scrollHost"
+        class="relative"
+      >
+        <ScrollArea
+          class="composer-model-list"
+          :style="{ height: `${listHeight}px` }"
         >
-          {{ $t('bots.settings.noModel') }}
-        </div>
-
-        <template
-          v-for="group in filteredGroups"
-          :key="group.key"
-        >
-          <div class="px-3 pt-1.5 pb-0.5 text-caption font-medium text-muted-foreground">
-            {{ group.label }}
-          </div>
-          <div
-            v-for="option in group.items"
-            :key="option.value"
-            class="group/row relative flex items-center gap-1 rounded-md px-1 transition-colors duration-75"
-            :class="modelValue === option.value ? 'bg-[var(--overlay-hover)]' : 'hover:bg-[var(--overlay-hover-light)]'"
+          <section
+            v-if="rows.length === 0"
+            class="py-6 text-center text-body text-muted-foreground"
           >
-            <PopoverAnchor
-              v-if="optionsForValue === option.value"
-              as-child
-            >
-              <span
-                class="pointer-events-none absolute right-0 top-0 h-full w-0"
-                aria-hidden="true"
-              />
-            </PopoverAnchor>
-            <button
-              type="button"
-              class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-control"
-              :class="modelValue === option.value ? 'font-medium text-foreground' : 'text-foreground'"
-              @click="commitModel(option.value)"
-            >
-              <span class="min-w-0 flex-1 truncate">{{ option.label }}</span>
-            </button>
+            {{ $t('bots.settings.noModel') }}
+          </section>
 
-            <div class="flex shrink-0 items-center gap-1 pr-1">
-              <!-- Options surfaces on hover for ANY reasoning-capable model so
-                     its reasoning support is discoverable before it's picked;
-                     clicking it adopts that model and opens its effort card. -->
-              <button
-                v-if="supportsReasoning(option)"
-                type="button"
-                class="rounded px-1 py-0.5 text-control transition-[color,opacity]"
-                :class="(modelValue === option.value || optionsForValue === option.value)
-                  ? 'text-foreground opacity-100'
-                  : 'text-muted-foreground opacity-0 group-hover/row:opacity-100 hover:text-foreground'"
-                @click="toggleOptions(option.value)"
+          <section
+            v-else
+            :style="{ height: `${totalSize}px`, width: '100%', position: 'relative' }"
+          >
+            <div
+              v-for="vRow in virtualRows"
+              :key="vRow.key"
+              :ref="measureRow"
+              :data-index="vRow.virtual.index"
+              class="absolute left-1 right-1 top-0 py-px"
+              :style="{ transform: `translateY(${vRow.virtual.start}px)` }"
+            >
+              <div
+                v-if="vRow.row.type === 'header'"
+                class="px-3 pt-1.5 pb-0.5 text-caption font-medium text-muted-foreground"
               >
-                {{ $t('chat.modelOptions') }}
-              </button>
-              <Check
-                v-if="modelValue === option.value"
-                class="size-3.5 shrink-0 text-muted-foreground"
-              />
+                {{ vRow.row.label }}
+              </div>
+
+              <div
+                v-else
+                class="group/row relative flex items-center gap-1 rounded-md px-1 transition-colors duration-75"
+                :class="modelValue === vRow.row.option.value ? 'bg-[var(--overlay-hover)]' : 'hover:bg-[var(--overlay-hover-light)]'"
+              >
+                <PopoverAnchor
+                  v-if="optionsForValue === vRow.row.option.value"
+                  as-child
+                >
+                  <span
+                    class="pointer-events-none absolute right-0 top-0 h-full w-0"
+                    aria-hidden="true"
+                  />
+                </PopoverAnchor>
+                <button
+                  type="button"
+                  class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-control"
+                  :class="modelValue === vRow.row.option.value ? 'font-medium text-foreground' : 'text-foreground'"
+                  @click="commitModel(vRow.row.option.value)"
+                >
+                  <span class="min-w-0 flex-1 truncate">{{ vRow.row.option.label }}</span>
+                </button>
+
+                <div class="flex shrink-0 items-center gap-1 pr-1">
+                  <!-- Options surfaces on hover for ANY reasoning-capable model so
+                         its reasoning support is discoverable before it's picked;
+                         clicking it adopts that model and opens its effort card. -->
+                  <button
+                    v-if="supportsReasoning(vRow.row.option)"
+                    type="button"
+                    class="rounded px-1 py-0.5 text-control transition-[color,opacity]"
+                    :class="(modelValue === vRow.row.option.value || optionsForValue === vRow.row.option.value)
+                      ? 'text-foreground opacity-100'
+                      : 'text-muted-foreground opacity-0 group-hover/row:opacity-100 hover:text-foreground'"
+                    @click="toggleOptions(vRow.row.option.value)"
+                  >
+                    {{ $t('chat.modelOptions') }}
+                  </button>
+                  <Check
+                    v-if="modelValue === vRow.row.option.value"
+                    class="size-3.5 shrink-0 text-muted-foreground"
+                  />
+                </div>
+              </div>
             </div>
-          </div>
-        </template>
+          </section>
+        </ScrollArea>
       </div>
     </div>
 
@@ -146,9 +164,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
+import { useEventListener } from '@vueuse/core'
 import { X, Check } from 'lucide-vue-next'
-import { Switch, Popover, PopoverAnchor, PopoverContent } from '@memohai/ui'
+import { Switch, Popover, PopoverAnchor, PopoverContent, ScrollArea } from '@memohai/ui'
 import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import {
   REASONING_EFFORT_DISABLE,
@@ -173,9 +193,13 @@ const modelValue = defineModel<string>({ default: '' })
 const reasoningEffort = defineModel<string>('reasoningEffort', { default: '' })
 
 const searchTerm = ref('')
+const scrollHost = ref<HTMLElement | null>(null)
 const optionsOpen = ref(false)
 // Which row owns the reasoning fly-out (drives both its anchor and visibility).
 const optionsForValue = ref('')
+// Sort order is captured when the picker opens. Changing models inside the same
+// open menu must not make the list jump under the pointer.
+const pinnedSortValue = ref('')
 
 const providerMap = computed(() => {
   const map = new Map<string, string>()
@@ -197,6 +221,20 @@ interface ModelOption {
   config: ModelsGetResponse['config']
   providerId: string
 }
+
+interface HeaderRow {
+  type: 'header'
+  key: string
+  label: string
+}
+
+interface ItemRow {
+  type: 'item'
+  key: string
+  option: ModelOption
+}
+
+type Row = HeaderRow | ItemRow
 
 const options = computed<ModelOption[]>(() =>
   typeFilteredModels.value.map((model) => {
@@ -228,10 +266,10 @@ const filteredGroups = computed(() => {
     groups.get(opt.groupKey)!.items.push(opt)
   }
 
-  // Float the active model's provider (and the model itself) to the top so the
-  // current selection is the first thing the eye lands on.
+  // Float the model that was active when this menu opened. During one open
+  // interaction, changing Options can update the selection without reordering.
   const list = Array.from(groups.values())
-  const selected = options.value.find((o) => o.value === modelValue.value)
+  const selected = options.value.find((o) => o.value === pinnedSortValue.value)
   if (!selected) return list
   list.sort((a, b) => Number(b.key === selected.groupKey) - Number(a.key === selected.groupKey))
   const activeGroup = list.find((g) => g.key === selected.groupKey)
@@ -242,6 +280,64 @@ const filteredGroups = computed(() => {
   }
   return list
 })
+
+// The provider list can contain hundreds of models. Flatten headers + options
+// into one virtualized list so opening the picker only mounts visible rows.
+const rows = computed<Row[]>(() => {
+  const result: Row[] = []
+  for (const group of filteredGroups.value) {
+    if (group.label) {
+      result.push({ type: 'header', key: `header:${group.key}`, label: group.label })
+    }
+    for (const option of group.items) {
+      result.push({ type: 'item', key: option.value, option })
+    }
+  }
+  return result
+})
+
+const scrollViewport = computed(() =>
+  scrollHost.value?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null,
+)
+
+const virtualizer = useVirtualizer<HTMLElement, HTMLElement>(
+  computed(() => ({
+    count: rows.value.length,
+    getScrollElement: () => scrollViewport.value,
+    estimateSize: (index) => {
+      const row = rows.value[index]
+      if (!row) return 36
+      return row.type === 'header' ? 28 : 38
+    },
+    overscan: 8,
+    getItemKey: (index: number) => rows.value[index]?.key ?? index,
+  })),
+)
+
+const totalSize = computed(() => virtualizer.value.getTotalSize())
+const listHeight = computed(() => {
+  if (rows.value.length === 0) return 96
+  return Math.min(320, Math.max(36, totalSize.value))
+})
+
+const virtualRows = computed(() =>
+  virtualizer.value.getVirtualItems().flatMap((vi) => {
+    const row = rows.value[vi.index]
+    return row ? [{ key: String(vi.key), virtual: vi, row }] : []
+  }),
+)
+
+const measureRow = (el: unknown) => {
+  if (el instanceof HTMLElement) virtualizer.value.measureElement(el)
+}
+
+function handleListScroll() {
+  if (!optionsOpen.value) return
+  optionsOpen.value = false
+  optionsForValue.value = ''
+}
+
+useEventListener(scrollViewport, 'scroll', handleListScroll, { passive: true })
 
 const activeModel = computed(() =>
   options.value.find((o) => o.value === modelValue.value),
@@ -307,11 +403,15 @@ function setEffort(level: string) {
 watch(() => props.open, (v) => {
   if (v) {
     searchTerm.value = ''
+    pinnedSortValue.value = modelValue.value
+    nextTick(() => {
+      virtualizer.value.scrollToOffset(0)
+    })
   } else {
     optionsOpen.value = false
     optionsForValue.value = ''
   }
-})
+}, { immediate: true })
 
 // Filtering can unmount the row the fly-out is anchored to; drop it so the card
 // never floats against a missing anchor.
@@ -320,6 +420,9 @@ watch(searchTerm, () => {
     optionsOpen.value = false
     optionsForValue.value = ''
   }
+  nextTick(() => {
+    virtualizer.value.scrollToOffset(0)
+  })
 })
 
 // When the fly-out dismisses (toggle, outside-click), forget its row so the
