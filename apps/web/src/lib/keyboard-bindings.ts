@@ -18,6 +18,16 @@ export type BrowserBehavior = 'intercept' | 'passthrough'
 
 export type KeyboardPlatform = 'mac' | 'win' | 'linux'
 
+/**
+ * Logical grouping for the settings page and conflict-detection rules:
+ * - `global`        - always live; collisions with other globals block save.
+ * - `mediaLightbox` - only live while the media lightbox is open. The
+ *                     dispatcher iterator continues past unhandled commands,
+ *                     so a scoped handler claims the key only when mounted;
+ *                     collisions with global bindings are warnings, not errors.
+ */
+export type KeyboardScope = 'global' | 'mediaLightbox'
+
 export interface KeyboardBinding {
   command: AppKeyboardCommand
   /**
@@ -35,6 +45,9 @@ export interface KeyboardBinding {
   shift?: boolean
   desktop: DesktopDelivery
   browser: BrowserBehavior
+  scope: KeyboardScope
+  /** camelCase id used as the i18n branch under `settings.keyboard.commands.<i18nKey>`. */
+  i18nKey: string
 }
 
 /**
@@ -49,6 +62,8 @@ export const keyboardBindings: KeyboardBinding[] = [
     mod: true,
     desktop: 'menu',
     browser: 'passthrough',
+    scope: 'global',
+    i18nKey: 'closeCurrentWorkspaceTab',
   },
   {
     command: appKeyboardCommands.saveActiveFile,
@@ -56,6 +71,41 @@ export const keyboardBindings: KeyboardBinding[] = [
     mod: true,
     desktop: 'keydown',
     browser: 'intercept',
+    scope: 'global',
+    i18nKey: 'saveActiveFile',
+  },
+  {
+    command: appKeyboardCommands.toggleSidebar,
+    key: 'b',
+    mod: true,
+    desktop: 'keydown',
+    browser: 'intercept',
+    scope: 'global',
+    i18nKey: 'toggleSidebar',
+  },
+  {
+    command: appKeyboardCommands.closeMediaLightbox,
+    key: 'Escape',
+    desktop: 'keydown',
+    browser: 'intercept',
+    scope: 'mediaLightbox',
+    i18nKey: 'closeMediaLightbox',
+  },
+  {
+    command: appKeyboardCommands.mediaLightboxPrev,
+    key: 'ArrowLeft',
+    desktop: 'keydown',
+    browser: 'intercept',
+    scope: 'mediaLightbox',
+    i18nKey: 'mediaLightboxPrev',
+  },
+  {
+    command: appKeyboardCommands.mediaLightboxNext,
+    key: 'ArrowRight',
+    desktop: 'keydown',
+    browser: 'intercept',
+    scope: 'mediaLightbox',
+    i18nKey: 'mediaLightboxNext',
   },
 ]
 

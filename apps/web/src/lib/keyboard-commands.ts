@@ -1,6 +1,10 @@
 export const appKeyboardCommands = {
   closeCurrentWorkspaceTab: 'close-current-workspace-tab',
   saveActiveFile: 'save-active-file',
+  toggleSidebar: 'toggle-sidebar',
+  closeMediaLightbox: 'close-media-lightbox',
+  mediaLightboxPrev: 'media-lightbox-prev',
+  mediaLightboxNext: 'media-lightbox-next',
 } as const
 
 export type AppKeyboardCommand =
