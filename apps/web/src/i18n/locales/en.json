@@ -1198,62 +1198,40 @@
   },
   "bots": {
     "toolApproval": {
-      "posture": {
-        "title": "Security Posture",
-        "hardened": "Hardened",
-        "description": "Approval policies are actively enforcing execution boundaries."
-      },
-      "metrics": {
-        "activeRules": "Active rules",
-        "totalDefined": "Total defined",
-        "blockedCount": "Blocks",
-        "sessionTrust": "Session trust"
-      },
-      "recentActivity": "Recent Activity",
-      "trust": "Trust",
-      "actions": {
-        "trustCall": "Trust call",
-        "trustDir": "Trust directory"
-      },
-      "noActivity": "No recent activity.",
-      "warnings": {
-        "disabled": "Tool approval is currently disabled.",
-        "breachRisk": "Resetting will clear all custom security rules."
-      },
-      "restoreSecurity": "Enable Tool Approval",
-      "examples": "Examples",
-      "status": {
-        "active": "Active",
-        "implicitDeny": "Implicit Deny",
-        "sealed": "Sealed"
-      },
-      "dangerZone": "Danger Zone",
-      "dangerZoneDesc": "Manage core security policies.",
-      "resetDefaults": "Reset to Defaults",
-      "confirmReset": "Are you sure you want to reset all tool approval rules to their default state?",
-      "resetWarningExtra": "Custom bypass and review rules will be lost.",
       "title": "Tool Call Approval",
-      "intro": "Require approval before the bot modifies files or runs commands. Configure rules for each tool below. Bypass patterns auto-approve; must-review patterns force approval.",
-      "tools": {
-        "write": "Create new files inside the container",
-        "edit": "Modify existing files inside the container",
-        "exec": "Execute shell commands inside the container"
+      "intro": "Review actions before this bot writes files or runs commands.",
+      "status": {
+        "on": "Approval is on",
+        "off": "Approval is off"
       },
-      "toolDisabledHint": "Approval is currently off for this tool. The rules below take effect only after enabling the switch.",
-      "bypass": "Bypass (allow list)",
-      "bypassHint": "Calls matching any of these patterns are auto-approved without prompting.",
-      "mustReview": "Must review (deny list)",
-      "mustReviewHint": "Calls matching any of these patterns always trigger approval, even when this tool is otherwise auto-approved.",
-      "rulesTitle": "Tool rules",
-      "activeToolsDetail": "Tools that require approval by default.",
-      "rulePatternsDetail": "Bypass and must-review patterns across all tools.",
+      "rules": {
+        "title": "Tool rules",
+        "reset": "Reset to recommended"
+      },
+      "behavior": {
+        "label": "Default behavior",
+        "review": "Review by default",
+        "auto": "Auto-approve by default"
+      },
+      "autoApprove": {
+        "pathsTitle": "Auto-approve these paths",
+        "commandsTitle": "Auto-approve these commands"
+      },
+      "review": {
+        "pathsTitle": "Always require review",
+        "commandsTitle": "Always require review"
+      },
+      "toolNames": {
+        "write": "File write",
+        "edit": "File edit",
+        "exec": "Shell command"
+      },
       "placeholders": {
-        "fileBypass": "/tmp/**\n/data/**",
-        "fileMustReview": "/etc/**\n.env*",
-        "execBypass": "ls\npwd\ngit status",
-        "execMustReview": "rm -rf *\nsudo *"
-      },
-      "unsavedChanges": "Unsaved changes"
+        "filePaths": "/data/**\n/tmp/**",
+        "fileReview": "/etc/**\n.env*",
+        "execCommands": "ls\ngit status",
+        "execReview": "rm -rf *\nsudo *"
+      }
     },
     "title": "Bots",
     "searchPlaceholder": "Search bots…",
