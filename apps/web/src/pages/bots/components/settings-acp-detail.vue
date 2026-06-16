@@ -1,29 +1,22 @@
 <!-- eslint-disable vue/no-mutating-props -->
 <template>
-  <div class="space-y-6">
-    <!-- Who you're configuring. The brand mark is signal (which agent), not
-         decoration, so it earns its place; enable lives on the list, never here. -->
-    <div class="flex items-center gap-3">
-      <span class="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted">
+  <div class="space-y-8">
+    <!-- Identity card: which agent this is. The brand mark is signal (which
+         agent), not decoration. Mirrors the provider detail header so every
+         backend reads the same way. -->
+    <section class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3">
+      <span class="flex size-9 shrink-0 items-center justify-center">
         <component
           :is="acpAgentIcon(profile.id, true)"
           class="size-5"
         />
       </span>
-      <div class="min-w-0">
-        <h2 class="truncate text-base font-semibold text-foreground">
-          {{ profile.display_name || profile.id }}
-        </h2>
-        <p
-          v-if="profile.description"
-          class="mt-0.5 text-sm text-muted-foreground"
-        >
-          {{ profile.description }}
-        </p>
-      </div>
-    </div>
+      <h2 class="truncate text-sm font-semibold">
+        {{ profile.display_name || profile.id }}
+      </h2>
+    </section>
 
-    <SettingsSection :title="$t('bots.settings.acpSetupMode')">
+    <SettingsSection>
       <div class="space-y-5 p-4">
         <SegmentedControl
           :model-value="agent.setup_mode"
@@ -142,8 +135,6 @@
               :placeholder="field.placeholder"
               @update:model-value="(val) => setManagedField(field.id, String(val ?? ''))"
               @change="commitForm"
-              @blur="commitForm"
-              @keydown.enter="commitForm"
             />
             <p
               v-if="field.help"

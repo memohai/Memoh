@@ -7,7 +7,6 @@
       v-if="view === 'list'"
       variant="tab"
       :title="$t('bots.tabs.acp')"
-      :description="$t('bots.settings.blocks.acpDescription')"
     >
       <div
         v-if="profilesLoading && profiles.length === 0"
@@ -51,8 +50,9 @@
               :is="acpAgentIcon(profile.id, true)"
               class="size-5"
             />
+            <!-- Green dot: on + ready (healthy state — small, says nothing more). -->
             <span
-              v-if="agentForm(profile).enabled"
+              v-if="agentRowState(profile) === 'on_ready'"
               class="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full bg-success ring-2 ring-card"
             />
           </span>
@@ -70,6 +70,24 @@
           </span>
 
           <div class="relative flex shrink-0 items-center gap-3">
+            <!-- Row status: surfaced as a Badge (aligns to a region, not a loose dot).
+                 Needs-config is actionable so it earns its place; "Disabled" distinguishes
+                 a previously-configured agent from one never touched. -->
+            <Badge
+              v-if="agentRowState(profile) === 'on_needs_config'"
+              variant="outline"
+              size="sm"
+              class="border-warning/30 text-warning"
+            >
+              {{ $t('bots.settings.acpStatusNeedsConfig') }}
+            </Badge>
+            <Badge
+              v-else-if="agentRowState(profile) === 'off_configured'"
+              variant="outline"
+              size="sm"
+            >
+              {{ $t('bots.settings.acpStatusOff') }}
+            </Badge>
             <ChevronRight class="size-4 text-muted-foreground/60" />
             <Switch
               :model-value="agentForm(profile).enabled"
@@ -81,14 +99,17 @@
       </div>
     </PageShell>
 
-    <!-- Setup: configuration for the selected agent only. -->
+    <!-- Setup: configuration for the selected agent only. The top padding and
+         back-button margin mirror the list view's PageShell (pt-6 tab variant +
+         mb-6 title-to-body gap), so the back arrow lands at the same height as
+         the list page's title and the gap to the first card is the same. -->
     <section
       v-else
-      class="mx-auto max-w-3xl pt-4 pb-8"
+      class="mx-auto max-w-3xl pt-6 pb-8"
     >
       <Button
         variant="ghost"
-        class="mb-2 text-foreground/85"
+        class="mb-6 text-foreground/85"
         @click="backToList()"
       >
         <ChevronLeft class="size-4" />
@@ -109,7 +130,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { Button, Empty, EmptyDescription, EmptyTitle, Skeleton, Switch, toast } from '@memohai/ui'
+import { Badge, Button, Empty, EmptyDescription, EmptyTitle, Skeleton, Switch, toast } from '@memohai/ui'
 import { ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
@@ -125,7 +146,7 @@ import {
   acpAgentIcon,
   emptyACPAgentForm,
   ensureACPAgentForm,
-  findMissingRequiredACPField,
+  findMissingRequiredManagedField,
   normalizeACPAgentID,
   normalizeACPForm,
   readACPConfig,
@@ -210,9 +231,36 @@ function openAgent(profile: AcpprofilePublicProfile) {
   openDetail()
 }
 
+// The switch is the user's *intent* ("I want to use this agent"), not a claim
+// that they've finished setup. So it always commits immediately — no gate.
+// Smart guidance: if turning ON and the agent lacks credentials for its current
+// setup_mode, carry them into the detail page to finish configuring rather than
+// leaving a half-ready switch with no hint. Self-managed mode has no credentials
+// to supply here, so it is always "ready" and never triggers the jump.
 function setAgentEnabled(profile: AcpprofilePublicProfile, enabled: boolean) {
   agentForm(profile).enabled = enabled
   void persistACPForm()
+  if (enabled && agentNeedsConfig(profile)) {
+    openAgent(profile)
+  }
+}
+
+function agentNeedsConfig(profile: AcpprofilePublicProfile): boolean {
+  const agent = agentForm(profile)
+  if (agent.setup_mode === 'self') return false
+  return findMissingRequiredManagedField(profile, agent.managed, agent.setup_mode) !== null
+}
+
+// Drives the row's status Badge / dot. Four honest states:
+//   off_empty      — never touched (no credentials, disabled): show nothing.
+//   off_configured — disabled but has saved credentials (distinct from "never used").
+//   on_needs_config — enabled but missing required credentials: actionable hint.
+//   on_ready       — enabled and ready: a small green dot, nothing more.
+function agentRowState(profile: AcpprofilePublicProfile): 'off_empty' | 'off_configured' | 'on_needs_config' | 'on_ready' {
+  const agent = agentForm(profile)
+  const hasCredentials = Object.values(agent.managed).some(v => String(v ?? '').trim() !== '')
+  if (!agent.enabled) return hasCredentials ? 'off_configured' : 'off_empty'
+  return agentNeedsConfig(profile) ? 'on_needs_config' : 'on_ready'
 }
 
 async function persistACPForm() {
@@ -224,11 +272,6 @@ async function persistACPForm() {
   const normalized = normalizeACPForm(form, profiles.value)
   const snapshot = JSON.stringify(normalized)
   if (snapshot === lastPersistedSnapshot.value) return
-  const validationError = validateForm(normalized, profiles.value)
-  if (validationError) {
-    toast.error(validationError)
-    return
-  }
   persistRunning.value = true
   try {
     await updateBot({
@@ -266,14 +309,5 @@ function applyMetadataToForm(metadata: Record<string, unknown> | undefined, list
     form.agents[id] = next.agents[id] ?? emptyACPAgentForm(profile)
   }
   lastPersistedSnapshot.value = nextSnapshot
-}
-
-function validateForm(value: ACPForm, list: AcpprofilePublicProfile[]): string {
-  const missing = findMissingRequiredACPField(value, list)
-  if (!missing) return ''
-  return t('bots.settings.acpRequiredField', {
-    agent: missing.profile.display_name || missing.profile.id,
-    field: missing.field.label || missing.field.id,
-  })
 }
 </script>
