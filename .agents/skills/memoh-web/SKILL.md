@@ -208,7 +208,10 @@ A divider has two different jobs and two different widths; using the wrong one i
   card's left/right edges. This is done by putting the border on a horizontally-margined row
   (the `mx-4` on `SettingsRow`), never on the card itself, and dropping it on the last row
   (`last:border-b-0`). An edge-to-edge line would visually slice the rounded card into stacked
-  tiles and break the "this is one continuous surface" reading.
+  tiles and break the "this is one continuous surface" reading. **Corollary:** borders go on
+  *rows*, never on the invisible wrapper `<div>` you put a `v-if` block in — a wrapper with
+  `border-b` that ends up the **last child of the card** doubles its hairline onto the card's own
+  bottom stroke (the recurring "fights the stroke" bug). See reference.md § Dividers.
 - **Structurally splitting a container → full-bleed.** A Dialog header/footer band, a
   section-heading underline, or a standalone `Separator` between blocks divides the *whole*
   container, so the line spans edge to edge while the content keeps its own inner padding.
@@ -531,8 +534,17 @@ and how it's framed:
   moves a whole concern **off** the root into its own focused surface (a dialog/form named by
   what it does — *Resource limits*, *Snapshots & restore*, *Details*, *Delete*), reached from a
   one-line entry row (§ 12). The in-card expander is reserved for genuinely secondary fields
-  *within a form* (the **More options** chevron in the New Task dialog, § 11) — never as the
-  root page's way to stash whole features.
+  *within a form* (the **More options** chevron in the New Task dialog, § 11; the **Advanced**
+  toggle on a provider config) — never as the root page's way to stash whole features. **The line
+  is *concern*, not field count.** A form's own advanced/optional fields stay inline behind the
+  one canonical toggle (§ Advanced disclosure) **even when there are many of them, split into
+  titled groups** (auth, network, env, …) — they are still the *same* concern the user is already
+  filling in. Field count never promotes them into a dialog. A § 12 named-entry-row → dialog is
+  reserved for a genuinely *separate* concern (limits / snapshots / delete — a task the 1% comes
+  to *do*). Pushing a form's advanced fields into their own dialog is itself the anti-pattern: it
+  splits one task across two surfaces and walls the same form behind a door. (The Network provider
+  config briefly opened a dialog for Tailscale's grouped fields; it now uses the inline toggle —
+  the exact pattern from the Access rules card.)
 
 ### 10. No stray fragments — every visible piece earns a home
 

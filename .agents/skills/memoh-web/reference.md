@@ -355,6 +355,19 @@ References: the Access rules card (`bot-access.vue`) and the channel platform ca
 (`channel-settings-panel.vue`) — both now use this exact button, so don't reintroduce a
 divergent one.
 
+**Both skins expand in place — and the deciding line is *concern*, not field count.** Inline
+disclosure carries the secondary / optional fields **of the form you're already in** — even when
+there are many of them and they're split into titled groups (auth, network, env, …). A long or
+grouped advanced set does **not** earn a dialog: it's still the *same* concern (the provider
+config the user is configuring), so it stays inline behind the one toggle. Reserve a § 12 **named
+entry row → dialog** for a genuinely *separate* concern (resource limits, snapshots, delete — a
+task the 1% comes to *do*), never the current form's own optional tail. Pushing a form's advanced
+fields into a dialog (a `label` + `Edit` row that opens a modal of grouped inputs) is the
+**anti-pattern**: field count doesn't make them a new concern, so it just fragments one form
+across two surfaces and makes the 1% click through a door to finish the *same* task they were
+already on. (`bot-network.vue` briefly did this for the overlay provider's Tailscale / auth /
+network groups; it now uses the inline toggle above — the exact `bot-access.vue` control.)
+
 ### List ↔ detail directional swap
 
 ```vue
@@ -387,6 +400,16 @@ plain cut and only the swap moves.
 Picking inset-vs-full-bleed wrong is the tell: a full-bleed line inside a settings card slices
 the rounded surface into stacked tiles; an inset line in a Dialog header looks like a floating
 stub. Ask "separating items within one surface, or splitting the container?" before placing it.
+
+- **A grouping/wrapper `<div>` must not carry its own `border-b`.** Borders belong on *rows*
+  (with `mx-4 … last:border-b-0`), never on the invisible `<div>` you wrap a `v-if` block in.
+  When that wrapper is the **last child of the card**, its full-width `border-b` lands exactly on
+  the card's bottom stroke → a **doubled hairline that fights the stroke** (and it's edge-to-edge,
+  so it also slices the corner). The card's own `border` is the bottom boundary; the last *row*'s
+  `last:border-b-0` already clears the inner line. If you need separation *between* the wrapped
+  block and a sibling above, put the border on the sibling row, not the wrapper. (`bot-network.vue`
+  wrapped the provider-config rows in `<div class="border-b border-border">`; that trailing border
+  doubled the card stroke under the collapsed *Advanced* row — removed.)
 
 ### Save model & toast (Profile = auto-save; Tool Approval = manual)
 
@@ -538,6 +561,7 @@ see it, replace it with the right column. This is your strip-list when refactori
 | `"+"` / `"×"` glyphs, hand-rolled icon hover bg, hand-rolled tooltip | not real components; can't receive size/stroke tokens | lucide components in `<Button size="icon">`; `@memohai/ui` `Tooltip` |
 | `Transition name="fade"` + ad-hoc `transition-all duration-300` | lazy catch-all motion | the directional swap / token durations; transition the real property |
 | edge-to-edge `border-b` slicing a card into stacked tiles | wrong divider width inside a surface | inset the row (`mx-4` + `last:border-b-0`); full-bleed only for structural bands |
+| a grouping/wrapper `<div>` (the thing you wrap a `v-if` block in) carrying `border-b`, sitting as the **last child of a card** | its full-width hairline lands on the card's bottom stroke → a doubled line that *fights the stroke* and slices the corner | borders go on **rows** (`mx-4 … last:border-b-0`), never on the wrapper; the card's own border is the bottom edge (§ Dividers; `bot-network.vue` overlay-config wrapper) |
 | success toast on every settings tweak / auto-save | toast spam, reads as nagging | auto-save silently; toast only explicit actions + errors |
 | raw color in an app page (`bg-white`, `text-black`, `-gray-*`, `#fff`, `dark:`) | breaks dark mode; **no lint catches it in `apps/web`** | semantic token (`bg-card`/`text-foreground`/…); grep + flip-to-dark before shipping |
 | hand-mixed gray / alpha for a hover/selected tint (`hover:bg-gray-100`, `bg-black/5`) | not theme/scheme-agnostic; can tilt or break in dark | the neutral overlay ladder (`--ui-hover`/`--ui-selected`/`--overlay-*`, or `bg-accent`) |
@@ -550,6 +574,8 @@ see it, replace it with the right column. This is your strip-list when refactori
 | always-present "Status: OK" / healthy-state row | noise where a healthy state should say nothing | progressive disclosure — show only when actionable, hide the whole block otherwise |
 | a resource-limit form / a snapshot-history list / a button pile sitting on the **root** surface | makes the 99% who came to glance at state carry the 1%'s deep-operation weight | move each deep op behind a named entry row (`label` + summary + button) that opens a focused form/dialog with the inputs, the data, and the action (§ 12 / SKILL § 12) |
 | an in-card "Advanced" / "Show details" disclosure that stashes whole features (limits + snapshots + restore/backup) on the root card | not progressive disclosure — it defers weight onto the same surface and mixes diagnostics with destructive ops in one junk drawer | one named door per concern → its own dialog (*Resource limits* / *Snapshots & restore* / *Details* / *Delete*); reserve the in-card **More options** chevron for secondary fields *inside a form* only |
+| a form's **advanced/optional fields** hidden behind a *full-width ghost bar* / trailing `ChevronDown` / bespoke per-page toggle | invents a third disclosure skin and reads as a heavy ghost slab instead of a section affordance | the **one** canonical control — a hairline row with an **outline button + leading `ChevronRight` (rotates 90°)**, `Show`/`Hide`, expanding the rows in place (§ Advanced disclosure; `bot-access.vue`) |
+| a form's **advanced/optional fields** pushed into their own *dialog* (a `label` + `Edit` row opening a modal of grouped inputs) because they're many or grouped | field count doesn't make them a separate concern — it fragments one form across two surfaces and walls the *same* task behind a door | keep them inline under the canonical advanced toggle; a § 12 named-entry-row → dialog is only for a genuinely *separate* concern (limits / snapshots / delete), never the current form's optional tail (§ Advanced disclosure / § 12) |
 | hand-written control (clickable `<div>`/`<span>`, bespoke popover list, `<div>`-grid "table") | re-implements a primitive; can't take size/token/focus/a11y, and drifts | reuse the `@memohai/ui` atom as-is; never rebuild a control from raw markup |
 | floating "Saved" / "已保存" status, or any orphan save/sync label misaligned with `#actions` | answers a question the user isn't asking; breaks the column grid; duplicates the disabled Save button | follow § 8 / § 10 save models — silent auto-save, or unsaved-only beside Save in `#actions`, success via toast once |
 | hand-built menu (raw `<button>` rows, `<div @click>`, `<hr>` / `border-b` / `h-px` dividers inside a popover) | bypasses `lib/menu.ts`; row height, highlight, separator, and shell radius drift from Select/Dropdown/Context | `DropdownMenu` / `ContextMenu` + `*MenuItem` + `*MenuSeparator` + `*MenuLabel`; trigger via `Button` / `TextButton` |
