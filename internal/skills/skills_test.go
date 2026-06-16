@@ -165,6 +165,22 @@ func TestManagedSkillDirForNameRejectsEscapingNames(t *testing.T) {
 	}
 }
 
+func TestPluginSkillsDirForIDRejectsEscapingIDs(t *testing.T) {
+	for _, id := range []string{".", "..", ".plugin", "alpha..beta", "alpha/beta"} {
+		if _, err := PluginSkillsDirForID(id); !errors.Is(err, bridge.ErrBadRequest) {
+			t.Fatalf("PluginSkillsDirForID(%q) err = %v, want ErrBadRequest", id, err)
+		}
+	}
+
+	dirPath, err := PluginSkillsDirForID("github")
+	if err != nil {
+		t.Fatalf("PluginSkillsDirForID(valid) returned error: %v", err)
+	}
+	if dirPath != pathJoin(PluginDirPath, "github", "skills") {
+		t.Fatalf("PluginSkillsDirForID(valid) = %q, want %q", dirPath, pathJoin(PluginDirPath, "github", "skills"))
+	}
+}
+
 func TestDiscoveryRootsMatchDefaultPolicy(t *testing.T) {
 	roots := DiscoveryRoots(nil)
 	want := []Root{
@@ -205,6 +221,24 @@ func TestDiscoveryRootsAllowExplicitEmptyCompatRoots(t *testing.T) {
 	}
 	if !slices.Equal(roots, want) {
 		t.Fatalf("DiscoveryRoots(empty) = %+v, want %+v", roots, want)
+	}
+}
+
+func TestDiscoveryRootsIncludePluginRootsAsServerManagedSource(t *testing.T) {
+	roots := DiscoveryRootsWithPluginRoots([]string{"/custom/skills"}, []string{
+		" /data/.memoh/plugins/github/skills ",
+		"/data/.memoh/plugins/github/skills",
+		"/data/.memoh/plugins/bad",
+		"relative/plugin/skills",
+	})
+	want := []Root{
+		{Path: ManagedDirPath, Kind: SourceKindManaged, Managed: true},
+		{Path: LegacyDirPath, Kind: SourceKindLegacy, Managed: false},
+		{Path: "/data/.memoh/plugins/github/skills", Kind: SourceKindPlugin, Managed: false},
+		{Path: "/custom/skills", Kind: SourceKindCompat, Managed: false},
+	}
+	if !slices.Equal(roots, want) {
+		t.Fatalf("DiscoveryRootsWithPluginRoots() = %+v, want %+v", roots, want)
 	}
 }
 

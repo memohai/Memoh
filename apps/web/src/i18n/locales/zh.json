@@ -2347,6 +2347,7 @@
       "disabledBadge": "已禁用",
       "legacyBadge": "旧版",
       "compatBadge": "外部",
+      "pluginBadge": "Plugin",
       "description": "描述",
       "descriptionPlaceholder": "输入技能描述",
       "content": "内容",

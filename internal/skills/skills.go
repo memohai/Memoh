@@ -23,11 +23,13 @@ const (
 	LegacyDirPath             = config.DefaultDataMount + "/.skills"
 	IndexDirPath              = config.DefaultDataMount + "/.memoh/skills"
 	IndexFilePath             = IndexDirPath + "/index.json"
+	PluginDirPath             = config.DefaultDataMount + "/.memoh/plugins"
 	SkillDiscoveryRootsEnvVar = "MEMOH_SKILL_DISCOVERY_ROOTS"
 
 	SourceKindManaged = "managed"
 	SourceKindLegacy  = "legacy"
 	SourceKindCompat  = "compat"
+	SourceKindPlugin  = "plugin"
 
 	StateEffective = "effective"
 	StateShadowed  = "shadowed"
@@ -116,6 +118,20 @@ func ManagedSkillDirForName(name string) (string, error) {
 	return dirPath, nil
 }
 
+func PluginSkillsDirForID(pluginID string) (string, error) {
+	pluginID = strings.TrimSpace(pluginID)
+	if !IsValidName(pluginID) {
+		return "", bridge.ErrBadRequest
+	}
+
+	dirPath := path.Clean(path.Join(PluginDirPath, pluginID, "skills"))
+	prefix := path.Clean(path.Join(PluginDirPath, pluginID))
+	if dirPath == PluginDirPath || !strings.HasPrefix(dirPath, prefix+"/") {
+		return "", bridge.ErrBadRequest
+	}
+	return dirPath, nil
+}
+
 func ContainerEnv(rawCompatRoots []string) []string {
 	compatRoots := compatDiscoveryRoots(rawCompatRoots)
 	env := []string{
@@ -129,9 +145,16 @@ func ContainerEnv(rawCompatRoots []string) []string {
 }
 
 func DiscoveryRoots(rawCompatRoots []string) []Root {
+	return DiscoveryRootsWithPluginRoots(rawCompatRoots, nil)
+}
+
+func DiscoveryRootsWithPluginRoots(rawCompatRoots []string, rawPluginRoots []string) []Root {
 	roots := []Root{
 		{Path: ManagedDirPath, Kind: SourceKindManaged, Managed: true},
 		{Path: LegacyDirPath, Kind: SourceKindLegacy, Managed: false},
+	}
+	for _, pluginRoot := range normalizePluginDiscoveryRoots(rawPluginRoots) {
+		roots = append(roots, Root{Path: pluginRoot, Kind: SourceKindPlugin, Managed: false})
 	}
 	for _, compatRoot := range compatDiscoveryRoots(rawCompatRoots) {
 		roots = append(roots, Root{Path: compatRoot, Kind: SourceKindCompat, Managed: false})
@@ -140,15 +163,23 @@ func DiscoveryRoots(rawCompatRoots []string) []Root {
 }
 
 func List(ctx context.Context, client fileClient, rawCompatRoots []string) ([]Entry, error) {
+	return ListWithPluginRoots(ctx, client, rawCompatRoots, nil)
+}
+
+func ListWithPluginRoots(ctx context.Context, client fileClient, rawCompatRoots []string, rawPluginRoots []string) ([]Entry, error) {
 	idx := readIndex(ctx, client)
-	items := scan(ctx, client, DiscoveryRoots(rawCompatRoots))
+	items := scan(ctx, client, DiscoveryRootsWithPluginRoots(rawCompatRoots, rawPluginRoots))
 	resolved := resolve(items, idx.Overrides)
 	writeIndex(ctx, client, idx.withItems(resolved))
 	return resolved, nil
 }
 
 func LoadEffective(ctx context.Context, client fileClient, rawCompatRoots []string) ([]Entry, error) {
-	items, err := List(ctx, client, rawCompatRoots)
+	return LoadEffectiveWithPluginRoots(ctx, client, rawCompatRoots, nil)
+}
+
+func LoadEffectiveWithPluginRoots(ctx context.Context, client fileClient, rawCompatRoots []string, rawPluginRoots []string) ([]Entry, error) {
+	items, err := ListWithPluginRoots(ctx, client, rawCompatRoots, rawPluginRoots)
 	if err != nil {
 		return nil, err
 	}
@@ -162,15 +193,20 @@ func LoadEffective(ctx context.Context, client fileClient, rawCompatRoots []stri
 }
 
 func ApplyAction(ctx context.Context, client fileClient, rawCompatRoots []string, req ActionRequest) error {
+	return ApplyActionWithPluginRoots(ctx, client, rawCompatRoots, nil, req)
+}
+
+func ApplyActionWithPluginRoots(ctx context.Context, client fileClient, rawCompatRoots []string, rawPluginRoots []string, req ActionRequest) error {
 	targetPath := strings.TrimSpace(req.TargetPath)
 	if targetPath == "" {
 		return bridge.ErrBadRequest
 	}
 
+	roots := DiscoveryRootsWithPluginRoots(rawCompatRoots, rawPluginRoots)
 	switch strings.TrimSpace(req.Action) {
 	case ActionDisable:
 		idx := readIndex(ctx, client)
-		items := scan(ctx, client, DiscoveryRoots(rawCompatRoots))
+		items := scan(ctx, client, roots)
 		if !containsSourcePath(items, targetPath) {
 			return bridge.ErrNotFound
 		}
@@ -182,7 +218,7 @@ func ApplyAction(ctx context.Context, client fileClient, rawCompatRoots []string
 		return nil
 	case ActionEnable:
 		idx := readIndex(ctx, client)
-		items := scan(ctx, client, DiscoveryRoots(rawCompatRoots))
+		items := scan(ctx, client, roots)
 		if !containsSourcePath(items, targetPath) {
 			return bridge.ErrNotFound
 		}
@@ -190,7 +226,7 @@ func ApplyAction(ctx context.Context, client fileClient, rawCompatRoots []string
 		writeIndex(ctx, client, idx.withItems(resolve(items, idx.Overrides)))
 		return nil
 	case ActionAdopt:
-		items := scan(ctx, client, DiscoveryRoots(rawCompatRoots))
+		items := scan(ctx, client, roots)
 		target, ok := findBySourcePath(items, targetPath)
 		if !ok {
 			return bridge.ErrNotFound
@@ -214,7 +250,7 @@ func ApplyAction(ctx context.Context, client fileClient, rawCompatRoots []string
 			return err
 		}
 		idx := readIndex(ctx, client)
-		writeIndex(ctx, client, idx.withItems(resolve(scan(ctx, client, DiscoveryRoots(rawCompatRoots)), idx.Overrides)))
+		writeIndex(ctx, client, idx.withItems(resolve(scan(ctx, client, roots), idx.Overrides)))
 		return nil
 	default:
 		return bridge.ErrBadRequest
@@ -248,6 +284,27 @@ func normalizeCompatDiscoveryRoots(paths []string) []string {
 			continue
 		}
 		if p == ManagedDirPath || p == LegacyDirPath {
+			continue
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	return out
+}
+
+func normalizePluginDiscoveryRoots(paths []string) []string {
+	out := make([]string, 0, len(paths))
+	seen := make(map[string]struct{}, len(paths))
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		p = path.Clean(p)
+		if !strings.HasPrefix(p, PluginDirPath+"/") || !strings.HasSuffix(p, "/skills") {
 			continue
 		}
 		if _, ok := seen[p]; ok {

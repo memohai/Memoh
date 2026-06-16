@@ -3,12 +3,15 @@ package handlers
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -31,6 +34,17 @@ type SupermarketHandler struct {
 	botService     *bots.Service
 	accountService *accounts.Service
 	logger         *slog.Logger
+}
+
+type pluginSkillsWriter interface {
+	Mkdir(ctx context.Context, path string) error
+	WriteFile(ctx context.Context, path string, content []byte) error
+}
+
+type pluginSkillsInstallResult struct {
+	OK           bool   `json:"ok"`
+	FilesWritten int    `json:"files_written"`
+	Error        string `json:"error,omitempty"`
 }
 
 func NewSupermarketHandler(
@@ -216,6 +230,8 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	result, installSkillsErr := h.installPluginSkills(c.Request().Context(), botID, req.PluginID, installation.PluginID)
+	installation = withPluginSkillsInstallMetadata(installation, result, installSkillsErr)
 	return c.JSON(http.StatusOK, installation)
 }
 
@@ -395,4 +411,143 @@ func (h *SupermarketHandler) fetchPluginEntry(c echo.Context, pluginID string) (
 		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusBadGateway, "invalid JSON from supermarket")
 	}
 	return manifest, nil
+}
+
+func (h *SupermarketHandler) installPluginSkills(ctx context.Context, botID, downloadPluginID, targetPluginID string) (pluginSkillsInstallResult, error) {
+	result := pluginSkillsInstallResult{OK: true}
+	if h.containers == nil {
+		return pluginSkillsInstallResult{}, errors.New("container provider is not configured")
+	}
+	client, err := h.containers.MCPClient(ctx, botID)
+	if err != nil {
+		return pluginSkillsInstallResult{}, fmt.Errorf("container not reachable: %w", err)
+	}
+
+	downloadURL := h.baseURL + "/api/plugins/" + url.PathEscape(strings.TrimSpace(downloadPluginID)) + "/download"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return pluginSkillsInstallResult{}, err
+	}
+
+	resp, err := h.httpClient.Do(httpReq) //nolint:gosec // URL constructed from trusted config
+	if err != nil {
+		h.logger.Warn("supermarket plugin skills download failed", slog.String("url", downloadURL), slog.Any("error", err))
+		return pluginSkillsInstallResult{}, fmt.Errorf("supermarket unreachable: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return result, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return pluginSkillsInstallResult{}, fmt.Errorf("supermarket returned status %d", resp.StatusCode)
+	}
+
+	gz, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return pluginSkillsInstallResult{}, fmt.Errorf("invalid gzip response from supermarket: %w", err)
+	}
+	defer func() { _ = gz.Close() }()
+
+	filesWritten, err := extractPluginSkillsArchive(ctx, client, downloadPluginID, targetPluginID, gz)
+	if err != nil {
+		return pluginSkillsInstallResult{}, err
+	}
+	result.FilesWritten = filesWritten
+	return result, nil
+}
+
+func extractPluginSkillsArchive(ctx context.Context, client pluginSkillsWriter, archivePluginID, targetPluginID string, r io.Reader) (int, error) {
+	skillsRoot, err := skillset.PluginSkillsDirForID(targetPluginID)
+	if err != nil {
+		return 0, err
+	}
+	if err := client.Mkdir(ctx, skillsRoot); err != nil {
+		return 0, fmt.Errorf("mkdir plugin skills root: %w", err)
+	}
+
+	tr := tar.NewReader(r)
+	filesWritten := 0
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return filesWritten, fmt.Errorf("invalid tar: %w", err)
+		}
+		if hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+
+		relativePath, ok := pluginSkillArchiveRelativePath(archivePluginID, hdr.Name)
+		if !ok {
+			continue
+		}
+		content, err := io.ReadAll(tr)
+		if err != nil {
+			return filesWritten, fmt.Errorf("read tar entry failed: %w", err)
+		}
+
+		filePath := path.Clean(path.Join(skillsRoot, relativePath))
+		if filePath == skillsRoot || !strings.HasPrefix(filePath, skillsRoot+"/") {
+			return filesWritten, fmt.Errorf("plugin skill path escapes root: %s", hdr.Name)
+		}
+		if dir := path.Dir(filePath); dir != skillsRoot {
+			if err := client.Mkdir(ctx, dir); err != nil {
+				return filesWritten, fmt.Errorf("mkdir %s failed: %w", dir, err)
+			}
+		}
+		if err := client.WriteFile(ctx, filePath, content); err != nil {
+			return filesWritten, fmt.Errorf("write file %s failed: %w", relativePath, err)
+		}
+		filesWritten++
+	}
+	return filesWritten, nil
+}
+
+func pluginSkillArchiveRelativePath(pluginID, rawName string) (string, bool) {
+	name := strings.TrimSpace(rawName)
+	if name == "" || strings.Contains(name, "\\") || strings.HasPrefix(name, "/") {
+		return "", false
+	}
+	pluginPrefix := strings.Trim(path.Clean(pluginID), "/")
+	if pluginPrefix != "" {
+		name = strings.TrimPrefix(name, pluginPrefix+"/")
+	}
+	if name == "" {
+		return "", false
+	}
+
+	clean := path.Clean(name)
+	if clean == "." || clean == "" || strings.HasPrefix(clean, "/") {
+		return "", false
+	}
+	segments := strings.Split(clean, "/")
+	for _, segment := range segments {
+		if segment == "" || segment == "." || segment == ".." {
+			return "", false
+		}
+	}
+	if len(segments) < 2 || segments[0] != "skills" {
+		return "", false
+	}
+	relativePath := strings.Join(segments[1:], "/")
+	if relativePath == "" {
+		return "", false
+	}
+	return relativePath, true
+}
+
+func withPluginSkillsInstallMetadata(installation pluginspkg.Installation, result pluginSkillsInstallResult, err error) pluginspkg.Installation {
+	metadata := maps.Clone(installation.Metadata)
+	if metadata == nil {
+		metadata = make(map[string]any)
+	}
+	if err != nil {
+		result = pluginSkillsInstallResult{OK: false, Error: err.Error()}
+	}
+	metadata["skills_install"] = result
+	installation.Metadata = metadata
+	return installation
 }

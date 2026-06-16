@@ -2347,6 +2347,7 @@
       "disabledBadge": "無効",
       "legacyBadge": "遺産",
       "compatBadge": "外部の",
+      "pluginBadge": "Plugin",
       "description": "説明",
       "descriptionPlaceholder": "Skillの説明を入力してください",
       "content": "コンテンツ",

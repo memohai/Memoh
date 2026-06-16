@@ -2347,6 +2347,7 @@
       "disabledBadge": "Disabled",
       "legacyBadge": "Legacy",
       "compatBadge": "External",
+      "pluginBadge": "Plugin",
       "description": "Description",
       "descriptionPlaceholder": "Enter skill description",
       "content": "Content",

@@ -3495,15 +3495,6 @@ definitions:
       url:
         type: string
     type: object
-  plugins.InstallRequest:
-    properties:
-      manifest:
-        $ref: '#/definitions/plugins.Manifest'
-      variables:
-        additionalProperties:
-          type: string
-        type: object
-    type: object
   plugins.Installation:
     properties:
       bot_id:
@@ -7617,39 +7608,6 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: List bot plugins
-      tags:
-      - plugins
-    post:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Plugin install request
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/plugins.InstallRequest'
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/plugins.Installation'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Install bot plugin from manifest
       tags:
       - plugins
   /bots/{bot_id}/plugins/{id}:
