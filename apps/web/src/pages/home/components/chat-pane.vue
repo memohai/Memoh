@@ -145,11 +145,11 @@
 
       <div
         v-if="!activeChatReadOnly"
-        class="pointer-events-none absolute inset-x-0 bottom-0 z-30 px-3 sm:px-5 lg:px-8 pt-2 pb-5"
+        class="pointer-events-none absolute inset-x-0 bottom-0 z-30 px-3 sm:px-5 lg:px-8 pt-2 pb-7"
       >
         <div
           aria-hidden="true"
-          class="absolute inset-x-0 bottom-0 h-5 bg-surface-editor"
+          class="absolute inset-x-0 bottom-0 h-7 bg-surface-editor"
         />
         <div class="pointer-events-auto relative w-full max-w-[880px] mx-auto px-10">
           <Transition
@@ -342,190 +342,161 @@
               <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
               <span class="min-w-0 break-words">{{ composerError }}</span>
             </div>
-            <InputGroup
-              class="overflow-hidden rounded-xl bg-surface-editor"
+            <div
+              data-slot="input-group"
+              role="group"
+              class="relative flex w-full flex-wrap items-center gap-1 bg-surface-editor px-3 py-3 transition-[border-radius] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none"
+              :class="isMultiline ? 'rounded-[24px]' : 'rounded-full'"
               :style="{ '--field-edge-solid': 'var(--field-edge-engaged)' }"
+              @click.self="focusTextarea"
             >
-              <InputGroupTextarea
+              <textarea
+                ref="textareaEl"
                 v-model="inputText"
-                class="min-h-10 max-h-52 field-sizing-content resize-none break-words text-sm"
+                rows="1"
                 :placeholder="activeChatReadOnly ? $t('chat.readonlyHint') : $t('chat.inputPlaceholder')"
                 :disabled="!currentBotId || activeChatReadOnly"
+                class="field-sizing-content resize-none break-words bg-transparent text-sm leading-6 text-foreground outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
+                :class="isMultiline
+                  ? 'order-none w-full basis-full px-2 pt-1 pb-0.5 max-h-52'
+                  : 'order-2 min-w-0 flex-1 self-center px-2 py-1 max-h-32'"
                 style="scrollbar-width: none;"
                 @keydown.enter.exact="handleKeydown"
                 @paste="handlePaste"
+                @input="syncMultiline"
               />
-              <InputGroupAddon
-                align="block-end"
-                class="items-center py-1.5"
-              >
-                <Popover v-model:open="agentPopoverOpen">
-                  <PopoverTrigger as-child>
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant="ghost"
-                      :disabled="!currentBotId || activeChatReadOnly || agentChanging || !canChangeAgent"
-                      class="size-7 rounded-full text-muted-foreground hover:text-foreground"
-                      :aria-label="$t('chat.composerActions')"
-                    >
-                      <LoaderCircle
-                        v-if="agentChanging"
-                        class="size-3 animate-spin"
-                      />
-                      <Plus
-                        v-else
-                        class="size-4"
-                      />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    class="w-56 p-1"
-                    align="start"
+
+              <DropdownMenu v-model:open="agentPopoverOpen">
+                <DropdownMenuTrigger as-child>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    :disabled="!currentBotId || activeChatReadOnly || agentChanging"
+                    class="order-1 size-8 rounded-full text-muted-foreground hover:text-foreground"
+                    :class="isMultiline ? 'self-end' : 'self-center'"
+                    :aria-label="$t('chat.composerActions')"
                   >
-                    <div class="px-2 py-1.5 text-caption font-medium text-muted-foreground">
-                      {{ $t('chat.agent') }}
-                    </div>
-                    <button
-                      type="button"
-                      class="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-muted"
-                      @click="selectMemohAgent"
+                    <LoaderCircle
+                      v-if="agentChanging"
+                      class="size-3 animate-spin"
+                    />
+                    <Plus
+                      v-else
+                      class="size-4"
+                    />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  class="w-56"
+                  align="start"
+                  side="top"
+                >
+                  <template v-if="enabledACPProfiles.length">
+                    <DropdownMenuLabel>{{ $t('chat.agent') }}</DropdownMenuLabel>
+                    <DropdownMenuItem
+                      :disabled="!canChangeAgent"
+                      @select="selectMemohAgent"
                     >
-                      <MessageSquare class="size-3.5 text-muted-foreground" />
+                      <img
+                        src="/logo.svg"
+                        alt=""
+                        class="size-4 shrink-0"
+                      >
                       <span class="min-w-0 flex-1 truncate">{{ $t('chat.agentMemoh') }}</span>
                       <Check
                         v-if="!activeIsACP"
-                        class="size-3 text-muted-foreground"
+                        class="ml-auto"
                       />
-                    </button>
-                    <button
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
                       v-for="profile in enabledACPProfiles"
                       :key="profile.id"
-                      type="button"
-                      class="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-muted"
-                      @click="selectACPAgent(profile)"
+                      :disabled="!canChangeAgent"
+                      @select="selectACPAgent(profile)"
                     >
-                      <component
-                        :is="acpAgentIcon(profile.id, true)"
-                        class="size-3.5 shrink-0"
-                      />
+                      <component :is="acpAgentIcon(profile.id, true)" />
                       <span class="min-w-0 flex-1 truncate">{{ profile.display_name || profile.id }}</span>
                       <Check
                         v-if="activeACPAgentId === normalizedProfileID(profile.id)"
-                        class="size-3 text-muted-foreground"
+                        class="ml-auto"
                       />
-                    </button>
-                    <template v-if="!activeIsACP">
-                      <div class="my-1 h-px bg-border" />
+                    </DropdownMenuItem>
+                  </template>
+                  <template v-if="!activeIsACP">
+                    <DropdownMenuSeparator v-if="enabledACPProfiles.length" />
+                    <DropdownMenuItem
+                      :disabled="!currentBotId || activeChatReadOnly || streaming"
+                      @select="fileInput?.click()"
+                    >
+                      <Paperclip />
+                      <span class="min-w-0 flex-1 truncate">{{ $t('chat.attachFiles') }}</span>
+                    </DropdownMenuItem>
+                  </template>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <div
+                class="order-3 ml-auto flex min-w-0 items-center gap-0.5"
+                :class="isMultiline ? 'self-end' : 'self-center'"
+              >
+                <Popover v-model:open="modelPopoverOpen">
+                  <PopoverTrigger as-child>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      :disabled="!currentBotId || activeChatReadOnly || acpModelChanging"
+                      class="gap-0.5 text-muted-foreground max-w-40"
+                    >
+                      <LoaderCircle
+                        v-if="acpModelChanging || acpModelsLoading"
+                        class="size-3 animate-spin"
+                      />
+                      <Lightbulb
+                        v-else-if="reasoningActive"
+                        class="size-3.5 shrink-0"
+                        :style="{ opacity: reasoningTriggerOpacity }"
+                      />
+                      <span class="truncate text-[11px]">{{ modelTriggerLabel }}</span>
+                      <ChevronDown class="size-3 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    class="w-96 p-0"
+                    align="start"
+                  >
+                    <div
+                      v-if="activeIsPendingACP"
+                      class="max-h-80 overflow-y-auto p-1"
+                    >
                       <button
                         type="button"
-                        class="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
-                        :disabled="!currentBotId || activeChatReadOnly || streaming"
-                        @click="fileInput?.click(); agentPopoverOpen = false"
+                        class="flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
+                        @click="onPendingACPDefaultModelSelected"
                       >
-                        <Paperclip class="size-3.5 text-muted-foreground" />
-                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.attachFiles') }}</span>
-                      </button>
-                    </template>
-                  </PopoverContent>
-                </Popover>
-
-                <div class="order-4 ml-auto">
-                  <Popover v-model:open="modelPopoverOpen">
-                    <PopoverTrigger as-child>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        :disabled="!currentBotId || activeChatReadOnly || acpModelChanging"
-                        class="gap-0.5 text-muted-foreground max-w-40"
-                      >
-                        <LoaderCircle
-                          v-if="acpModelChanging || acpModelsLoading"
-                          class="size-3 animate-spin"
+                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.modelDefault') }}</span>
+                        <Check
+                          v-if="!pendingACPModelId"
+                          class="mt-0.5 size-3 shrink-0 text-muted-foreground"
                         />
-                        <span class="truncate text-[11px]">{{ selectedModelLabel }}</span>
-                        <ChevronDown class="size-3 shrink-0 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent
-                      class="w-96 p-0"
-                      align="start"
-                    >
+                      </button>
                       <div
-                        v-if="activeIsPendingACP"
-                        class="max-h-80 overflow-y-auto p-1"
+                        v-if="acpModelsLoading"
+                        class="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground"
                       >
-                        <button
-                          type="button"
-                          class="flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
-                          @click="onPendingACPDefaultModelSelected"
-                        >
-                          <span class="min-w-0 flex-1 truncate">{{ $t('chat.modelDefault') }}</span>
-                          <Check
-                            v-if="!pendingACPModelId"
-                            class="mt-0.5 size-3 shrink-0 text-muted-foreground"
-                          />
-                        </button>
-                        <div
-                          v-if="acpModelsLoading"
-                          class="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground"
-                        >
-                          <LoaderCircle class="size-3 animate-spin" />
-                          {{ $t('common.loading') }}
-                        </div>
-                        <div
-                          v-else-if="!pendingACPModelOptions.length"
-                          class="px-2 py-3 text-xs text-muted-foreground"
-                        >
-                          {{ $t('chat.noModels') }}
-                        </div>
-                        <template v-else>
-                          <button
-                            v-for="model in pendingACPModelOptions"
-                            :key="model.id || model.name"
-                            type="button"
-                            class="flex min-h-8 w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
-                            @click="onACPModelSelected(model)"
-                          >
-                            <span class="min-w-0 flex-1">
-                              <span class="block truncate">
-                                {{ model.name || model.id }}
-                              </span>
-                              <span
-                                v-if="model.description"
-                                class="mt-0.5 block line-clamp-2 text-[11px] leading-snug text-muted-foreground"
-                              >
-                                {{ model.description }}
-                              </span>
-                            </span>
-                            <Check
-                              v-if="model.id === pendingACPModelId"
-                              class="mt-0.5 size-3 shrink-0 text-muted-foreground"
-                            />
-                          </button>
-                        </template>
+                        <LoaderCircle class="size-3 animate-spin" />
+                        {{ $t('common.loading') }}
                       </div>
                       <div
-                        v-else-if="activeIsACP"
-                        class="max-h-80 overflow-y-auto p-1"
+                        v-else-if="!pendingACPModelOptions.length"
+                        class="px-2 py-3 text-xs text-muted-foreground"
                       >
-                        <div
-                          v-if="acpModelsLoading"
-                          class="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground"
-                        >
-                          <LoaderCircle class="size-3 animate-spin" />
-                          {{ $t('common.loading') }}
-                        </div>
-                        <div
-                          v-else-if="!acpModels.length"
-                          class="px-2 py-3 text-xs text-muted-foreground"
-                        >
-                          {{ $t('chat.noModels') }}
-                        </div>
+                        {{ $t('chat.noModels') }}
+                      </div>
+                      <template v-else>
                         <button
-                          v-for="model in acpModels"
-                          v-else
+                          v-for="model in pendingACPModelOptions"
                           :key="model.id || model.name"
                           type="button"
                           class="flex min-h-8 w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
@@ -543,13 +514,56 @@
                             </span>
                           </span>
                           <Check
-                            v-if="model.id === currentACPModelId"
+                            v-if="model.id === pendingACPModelId"
                             class="mt-0.5 size-3 shrink-0 text-muted-foreground"
                           />
                         </button>
+                      </template>
+                    </div>
+                    <div
+                      v-else-if="activeIsACP"
+                      class="max-h-80 overflow-y-auto p-1"
+                    >
+                      <div
+                        v-if="acpModelsLoading"
+                        class="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground"
+                      >
+                        <LoaderCircle class="size-3 animate-spin" />
+                        {{ $t('common.loading') }}
                       </div>
-                      <ModelOptions
+                      <div
+                        v-else-if="!acpModels.length"
+                        class="px-2 py-3 text-xs text-muted-foreground"
+                      >
+                        {{ $t('chat.noModels') }}
+                      </div>
+                      <button
+                        v-for="model in acpModels"
                         v-else
+                        :key="model.id || model.name"
+                        type="button"
+                        class="flex min-h-8 w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
+                        @click="onACPModelSelected(model)"
+                      >
+                        <span class="min-w-0 flex-1">
+                          <span class="block truncate">
+                            {{ model.name || model.id }}
+                          </span>
+                          <span
+                            v-if="model.description"
+                            class="mt-0.5 block line-clamp-2 text-[11px] leading-snug text-muted-foreground"
+                          >
+                            {{ model.description }}
+                          </span>
+                        </span>
+                        <Check
+                          v-if="model.id === currentACPModelId"
+                          class="mt-0.5 size-3 shrink-0 text-muted-foreground"
+                        />
+                      </button>
+                    </div>
+                    <div v-else>
+                      <ModelOptions
                         v-model="overrideModelId"
                         :models="models"
                         :providers="providers"
@@ -557,89 +571,79 @@
                         :open="modelPopoverOpen"
                         @update:model-value="onModelSelected"
                       />
-                    </PopoverContent>
-                  </Popover>
-                </div>
+                      <template v-if="activeModelSupportsReasoning">
+                        <div class="h-px bg-border/60" />
+                        <div class="flex items-center gap-1.5 px-3.5 pt-2 pb-1 text-xs font-medium text-muted-foreground">
+                          <Lightbulb class="size-3.5 shrink-0" />
+                          {{ $t('chat.reasoningEffort') }}
+                        </div>
+                        <ReasoningEffortSelect
+                          v-model="overrideReasoningEffort"
+                          :efforts="availableReasoningEfforts"
+                        />
+                      </template>
+                    </div>
+                  </PopoverContent>
+                </Popover>
 
                 <Button
                   v-if="activeIsACP"
                   type="button"
                   size="sm"
                   variant="ghost"
-                  class="order-2 gap-1 text-muted-foreground max-w-40"
+                  class="gap-1 text-muted-foreground max-w-40"
                   disabled
                 >
                   <FolderOpen class="size-3.5 shrink-0" />
                   <span class="truncate text-[11px]">{{ activeACPProjectLabel }}</span>
                 </Button>
 
-                <Popover
-                  v-if="!activeIsACP"
-                  v-model:open="reasoningPopoverOpen"
-                >
-                  <PopoverTrigger as-child>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      :disabled="!currentBotId || activeChatReadOnly || !activeModelSupportsReasoning"
-                      class="order-2 gap-0.5 text-muted-foreground"
-                    >
-                      <Lightbulb
-                        class="size-3.5 shrink-0"
-                        :style="{ opacity: reasoningTriggerOpacity }"
-                      />
-                      <span class="text-[11px]">{{ selectedReasoningLabel }}</span>
-                      <ChevronDown class="size-3 shrink-0 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    class="w-40 p-0"
-                    align="start"
+                <div class="relative size-8 shrink-0">
+                  <SessionInfoRing
+                    v-if="!activeIsACP"
+                    :override-model-id="overrideModelId"
+                    class="absolute inset-0 size-8 transition-[opacity,scale] duration-200 ease-out motion-reduce:transition-none"
+                    :class="(!showSend && !streaming) ? 'scale-100 opacity-100' : 'pointer-events-none scale-75 opacity-0'"
+                  />
+                  <Button
+                    v-if="!streaming"
+                    type="button"
+                    variant="brand"
+                    size="icon-sm"
+                    :disabled="!showSend || !currentBotId || activeChatReadOnly"
+                    aria-label="Send message"
+                    class="absolute inset-0 size-8 rounded-full transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
+                    :class="showSend ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
+                    @click="handleSend"
                   >
-                    <ReasoningEffortSelect
-                      v-model="overrideReasoningEffort"
-                      :efforts="availableReasoningEfforts"
-                      @update:model-value="onReasoningSelected"
-                    />
-                  </PopoverContent>
-                </Popover>
-
-                <SessionInfoRing
-                  v-if="!activeIsACP"
-                  class="order-5"
-                  :override-model-id="overrideModelId"
-                />
-                <div
-                  v-else
-                  class="order-5"
-                />
-
-                <Button
-                  v-if="!streaming"
-                  type="button"
-                  variant="brand"
-                  size="icon"
-                  :disabled="(!inputText.trim() && !pendingFiles.length) || !currentBotId || activeChatReadOnly"
-                  aria-label="Send message"
-                  class="order-6 size-7 rounded-full"
-                  @click="handleSend"
-                >
-                  <Send class="size-3.5" />
-                </Button>
-                <Button
-                  v-else
-                  type="button"
-                  size="icon"
-                  variant="destructive"
-                  class="order-6 size-7 rounded-full"
-                  aria-label="Stop generating response"
-                  @click="chatStore.abort()"
-                >
-                  <LoaderCircle class="size-3.5 animate-spin" />
-                </Button>
-              </InputGroupAddon>
-            </InputGroup>
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.25"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      class="size-4"
+                      aria-hidden="true"
+                    >
+                      <path d="M12 19.5 V5" />
+                      <path d="M6 10.5 L12 4.5 L18 10.5" />
+                    </svg>
+                  </Button>
+                  <Button
+                    v-else
+                    type="button"
+                    variant="destructive"
+                    size="icon-sm"
+                    class="absolute inset-0 size-8 rounded-full"
+                    aria-label="Stop generating response"
+                    @click="chatStore.abort()"
+                  >
+                    <LoaderCircle class="size-4 animate-spin" />
+                  </Button>
+                </div>
+              </div>
+            </div>
           </section>
         </div>
       </div>
@@ -648,7 +652,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount, useTemplateRef, watchEffect, watch, nextTick, onActivated, onDeactivated } from 'vue'
+import { ref, computed, onBeforeUnmount, onMounted, useTemplateRef, watchEffect, watch, nextTick, onActivated, onDeactivated } from 'vue'
 import {
   LoaderCircle,
   Image as ImageIcon,
@@ -656,12 +660,10 @@ import {
   X,
   Paperclip,
   Plus,
-  Send,
   ChevronDown,
   Lightbulb,
   CircleAlert,
   ArrowDown,
-  MessageSquare,
   Check,
   FolderOpen,
   Square,
@@ -669,7 +671,7 @@ import {
   Circle,
   CircleDot,
 } from 'lucide-vue-next'
-import { ScrollArea, Button, InputGroup, InputGroupAddon, InputGroupTextarea, Popover, PopoverContent, PopoverTrigger } from '@memohai/ui'
+import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator } from '@memohai/ui'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
 import { useScroll, useElementBounding, useIntersectionObserver, useStorage } from '@vueuse/core'
@@ -724,7 +726,6 @@ const pendingFiles = ref<File[]>([])
 const composerError = ref('')
 const pendingUserInputDrafts = ref<Record<string, PendingUserInputDraft>>({})
 const modelPopoverOpen = ref(false)
-const reasoningPopoverOpen = ref(false)
 const agentPopoverOpen = ref(false)
 const agentChanging = ref(false)
 const acpModelChanging = ref(false)
@@ -929,6 +930,20 @@ const selectedReasoningLabel = computed(() => {
   return t(EFFORT_LABELS[v] ?? 'chat.modelDefault')
 })
 
+const reasoningActive = computed(() =>
+  !activeIsACP.value
+  && !activeIsPendingACP.value
+  && activeModelSupportsReasoning.value
+  && Boolean(overrideReasoningEffort.value)
+  && overrideReasoningEffort.value !== REASONING_EFFORT_DISABLE,
+)
+
+const modelTriggerLabel = computed(() =>
+  reasoningActive.value
+    ? `${selectedModelLabel.value} · ${selectedReasoningLabel.value}`
+    : selectedModelLabel.value,
+)
+
 const reasoningTriggerOpacity = computed(() =>
   EFFORT_OPACITY[overrideReasoningEffort.value] ?? 0.5,
 )
@@ -1071,10 +1086,6 @@ async function onPendingACPDefaultModelSelected() {
   }
 }
 
-function onReasoningSelected() {
-  reasoningPopoverOpen.value = false
-}
-
 const {
   items: galleryItems,
   openIndex: galleryOpenIndex,
@@ -1083,6 +1094,77 @@ const {
 } = useMediaGallery(messages)
 
 const inputText = ref('')
+const textareaEl = ref<HTMLTextAreaElement | null>(null)
+const isMultiline = ref(false)
+const compactContentWidth = ref(0)
+const showSend = computed(() => Boolean(inputText.value.trim()) || pendingFiles.value.length > 0)
+
+function focusTextarea() {
+  textareaEl.value?.focus()
+}
+
+function measureWraps(text: string, width: number): boolean {
+  const el = textareaEl.value
+  if (!el || width <= 1) return false
+  const cs = getComputedStyle(el)
+  const mirror = document.createElement('div')
+  const s = mirror.style
+  s.position = 'fixed'
+  s.left = '-9999px'
+  s.top = '0'
+  s.visibility = 'hidden'
+  s.pointerEvents = 'none'
+  s.whiteSpace = 'pre-wrap'
+  s.overflowWrap = 'anywhere'
+  s.wordBreak = 'break-word'
+  s.boxSizing = 'content-box'
+  s.width = `${width}px`
+  s.fontFamily = cs.fontFamily
+  s.fontSize = cs.fontSize
+  s.fontWeight = cs.fontWeight
+  s.fontStyle = cs.fontStyle
+  s.letterSpacing = cs.letterSpacing
+  s.lineHeight = cs.lineHeight
+  mirror.textContent = text.length ? text : 'x'
+  document.body.appendChild(mirror)
+  const h = mirror.getBoundingClientRect().height
+  mirror.remove()
+  const lh = Number.parseFloat(cs.lineHeight) || 20
+  return h > lh * 1.5
+}
+
+function syncMultiline() {
+  const text = inputText.value
+  if (text.includes('\n')) {
+    isMultiline.value = true
+    return
+  }
+  const el = textareaEl.value
+  if (el && !isMultiline.value) {
+    const cs = getComputedStyle(el)
+    const padX = Number.parseFloat(cs.paddingLeft) + Number.parseFloat(cs.paddingRight)
+    const w = el.clientWidth - padX
+    if (w > 1) compactContentWidth.value = w
+  }
+  isMultiline.value = measureWraps(text, compactContentWidth.value)
+}
+
+let composerResizeObserver: ResizeObserver | null = null
+onMounted(() => {
+  void nextTick(syncMultiline)
+  if (typeof ResizeObserver !== 'undefined' && textareaEl.value) {
+    composerResizeObserver = new ResizeObserver(() => syncMultiline())
+    composerResizeObserver.observe(textareaEl.value)
+  }
+})
+onBeforeUnmount(() => {
+  composerResizeObserver?.disconnect()
+  composerResizeObserver = null
+})
+watch(inputText, () => {
+  void nextTick(syncMultiline)
+})
+
 const stopAuthSessionCleanup = onAuthSessionCleared(() => {
   inputDrafts.value = {}
   inputText.value = ''
