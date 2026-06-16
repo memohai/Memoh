@@ -3598,6 +3598,10 @@ definitions:
         $ref: '#/definitions/plugins.Icon'
       id:
         type: string
+      install:
+        items:
+          type: string
+        type: array
       mcps:
         items:
           $ref: '#/definitions/plugins.MCPResource'

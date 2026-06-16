@@ -497,6 +497,10 @@ func normalizeResource(row sqlc.BotPluginResource) (Resource, error) {
 	}, nil
 }
 
+func NormalizeManifest(manifest Manifest) Manifest {
+	return normalizeManifest(manifest)
+}
+
 func normalizeManifest(manifest Manifest) Manifest {
 	manifest.ID = sanitizeID(manifest.ID)
 	manifest.Name = strings.TrimSpace(manifest.Name)
@@ -507,6 +511,7 @@ func normalizeManifest(manifest Manifest) Manifest {
 	if manifest.SchemaVersion == "" {
 		manifest.SchemaVersion = "1"
 	}
+	manifest.Install = normalizeInstallCommands(manifest.Install)
 	for i := range manifest.MCPs {
 		manifest.MCPs[i].Key = sanitizeID(manifest.MCPs[i].Key)
 		if manifest.MCPs[i].Key == "" {
@@ -523,6 +528,18 @@ func normalizeManifest(manifest Manifest) Manifest {
 		}
 	}
 	return manifest
+}
+
+func normalizeInstallCommands(commands []string) InstallCommands {
+	out := make([]string, 0, len(commands))
+	for _, command := range commands {
+		command = strings.TrimSpace(command)
+		if command == "" {
+			continue
+		}
+		out = append(out, command)
+	}
+	return InstallCommands(out)
 }
 
 func manifestAuthForResource(manifest Manifest, resource MCPResource) AuthRequirement {

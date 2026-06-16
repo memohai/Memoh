@@ -2162,6 +2162,7 @@ export type PluginsManifest = {
     homepage?: string;
     icon?: PluginsIcon;
     id?: string;
+    install?: Array<string>;
     mcps?: Array<PluginsMcpResource>;
     name?: string;
     schema_version?: string;

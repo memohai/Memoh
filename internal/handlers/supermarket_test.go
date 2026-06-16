@@ -4,10 +4,12 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	skillset "github.com/memohai/memoh/internal/skills"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 func TestPluginBundleArchiveEntryAllowsTrustedBundleFiles(t *testing.T) {
@@ -161,6 +163,101 @@ func TestExtractPluginBundleArchiveSeparatesArchiveAndTargetPluginIDs(t *testing
 	}
 }
 
+func TestRunPluginInstallCommandsUsesPluginRootAndMemohEnv(t *testing.T) {
+	pluginRoot, err := skillset.PluginDirForID("github")
+	if err != nil {
+		t.Fatalf("plugin root: %v", err)
+	}
+	longOutput := strings.Repeat("x", pluginInstallScriptOutputLimit+8)
+	executor := &pluginInstallScriptTestExecutor{
+		results: []*bridge.ExecResult{
+			{Stdout: longOutput, ExitCode: 0},
+			{Stderr: "setup ok\n", ExitCode: 0},
+		},
+	}
+
+	result, err := runPluginInstallCommands(context.Background(), executor, "bot-1", "github", []string{
+		" sh scripts/install.sh ",
+		"",
+		"python3 scripts/setup.py",
+	})
+	if err != nil {
+		t.Fatalf("runPluginInstallCommands returned error: %v", err)
+	}
+	if !result.OK || result.CommandsRun != 2 || len(result.Results) != 2 {
+		t.Fatalf("result = %+v, want two successful commands", result)
+	}
+	if len(result.Results[0].Stdout) != pluginInstallScriptOutputLimit {
+		t.Fatalf("stdout was not truncated to limit: %d", len(result.Results[0].Stdout))
+	}
+
+	wantCommands := []string{"sh scripts/install.sh", "python3 scripts/setup.py"}
+	if len(executor.calls) != len(wantCommands) {
+		t.Fatalf("calls = %+v, want %d calls", executor.calls, len(wantCommands))
+	}
+	for i, call := range executor.calls {
+		if call.command != wantCommands[i] {
+			t.Fatalf("call %d command = %q, want %q", i, call.command, wantCommands[i])
+		}
+		if call.workDir != pluginRoot {
+			t.Fatalf("call %d work dir = %q, want %q", i, call.workDir, pluginRoot)
+		}
+		if call.timeout != pluginInstallScriptTimeoutSeconds {
+			t.Fatalf("call %d timeout = %d, want %d", i, call.timeout, pluginInstallScriptTimeoutSeconds)
+		}
+		wantEnv := []string{
+			"MEMOH_PLUGIN_ID=github",
+			"MEMOH_PLUGIN_DIR=" + pluginRoot,
+			"MEMOH_BOT_ID=bot-1",
+		}
+		if strings.Join(call.env, "\n") != strings.Join(wantEnv, "\n") {
+			t.Fatalf("call %d env = %#v, want %#v", i, call.env, wantEnv)
+		}
+	}
+}
+
+func TestRunPluginInstallCommandsStopsOnNonZeroExit(t *testing.T) {
+	executor := &pluginInstallScriptTestExecutor{
+		results: []*bridge.ExecResult{
+			{Stdout: "ok\n", ExitCode: 0},
+			{Stderr: "boom\n", ExitCode: 7},
+			{Stdout: "should not run\n", ExitCode: 0},
+		},
+	}
+
+	result, err := runPluginInstallCommands(context.Background(), executor, "bot-1", "github", []string{
+		"sh scripts/one.sh",
+		"sh scripts/two.sh",
+		"sh scripts/three.sh",
+	})
+	if err == nil {
+		t.Fatal("expected non-zero exit to fail")
+	}
+	if result.OK || result.CommandsRun != 2 || len(result.Results) != 2 {
+		t.Fatalf("result = %+v, want failure after second command", result)
+	}
+	if result.Results[1].ExitCode != 7 || result.Results[1].Stderr != "boom\n" || result.Results[1].Error == "" {
+		t.Fatalf("failed command result = %+v, want exit code, stderr, and error", result.Results[1])
+	}
+	if len(executor.calls) != 2 {
+		t.Fatalf("commands run = %d, want 2", len(executor.calls))
+	}
+}
+
+func TestRunPluginInstallCommandsReportsExecError(t *testing.T) {
+	executor := &pluginInstallScriptTestExecutor{
+		errors: []error{errors.New("bridge unavailable")},
+	}
+
+	result, err := runPluginInstallCommands(context.Background(), executor, "bot-1", "github", []string{"sh scripts/install.sh"})
+	if err == nil {
+		t.Fatal("expected exec error")
+	}
+	if result.OK || result.CommandsRun != 1 || len(result.Results) != 1 || result.Results[0].Error != "bridge unavailable" {
+		t.Fatalf("result = %+v, want exec error metadata", result)
+	}
+}
+
 func tarArchive(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -216,4 +313,39 @@ func (w *pluginBundleTestWriter) Mkdir(_ context.Context, path string) error {
 func (w *pluginBundleTestWriter) WriteFile(_ context.Context, path string, content []byte) error {
 	w.files[path] = string(content)
 	return nil
+}
+
+type pluginInstallScriptTestExecutor struct {
+	calls   []pluginInstallScriptTestCall
+	results []*bridge.ExecResult
+	errors  []error
+}
+
+type pluginInstallScriptTestCall struct {
+	command string
+	workDir string
+	timeout int32
+	env     []string
+}
+
+func (e *pluginInstallScriptTestExecutor) ExecWithEnv(_ context.Context, command, workDir string, timeout int32, env []string) (*bridge.ExecResult, error) {
+	callIndex := len(e.calls)
+	e.calls = append(e.calls, pluginInstallScriptTestCall{
+		command: command,
+		workDir: workDir,
+		timeout: timeout,
+		env:     append([]string(nil), env...),
+	})
+	var result *bridge.ExecResult
+	if callIndex < len(e.results) {
+		result = e.results[callIndex]
+	}
+	if result == nil {
+		result = &bridge.ExecResult{ExitCode: 0}
+	}
+	var err error
+	if callIndex < len(e.errors) {
+		err = e.errors[callIndex]
+	}
+	return result, err
 }

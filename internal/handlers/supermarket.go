@@ -29,17 +29,25 @@ import (
 type SupermarketHandler struct {
 	baseURL        string
 	httpClient     *http.Client
-	pluginService  *pluginspkg.Service
+	pluginService  pluginInstaller
 	containers     bridge.Provider
 	botService     *bots.Service
 	accountService *accounts.Service
 	logger         *slog.Logger
 }
 
+type pluginInstaller interface {
+	Install(ctx context.Context, botID string, req pluginspkg.InstallRequest) (pluginspkg.Installation, error)
+}
+
 type pluginBundleWriter interface {
 	DeleteFile(ctx context.Context, path string, recursive bool) error
 	Mkdir(ctx context.Context, path string) error
 	WriteFile(ctx context.Context, path string, content []byte) error
+}
+
+type pluginInstallScriptExecutor interface {
+	ExecWithEnv(ctx context.Context, command, workDir string, timeout int32, env []string) (*bridge.ExecResult, error)
 }
 
 type pluginAssetInstallResult struct {
@@ -53,6 +61,26 @@ type pluginBundleInstallResult struct {
 	Hooks   pluginAssetInstallResult
 	Scripts pluginAssetInstallResult
 }
+
+type pluginInstallScriptsResult struct {
+	OK          bool                         `json:"ok"`
+	CommandsRun int                          `json:"commands_run"`
+	Results     []pluginInstallCommandResult `json:"results,omitempty"`
+	Error       string                       `json:"error,omitempty"`
+}
+
+type pluginInstallCommandResult struct {
+	Command  string `json:"command"`
+	ExitCode int32  `json:"exit_code"`
+	Stdout   string `json:"stdout,omitempty"`
+	Stderr   string `json:"stderr,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+const (
+	pluginInstallScriptTimeoutSeconds int32 = 10 * 60
+	pluginInstallScriptOutputLimit          = 64 * 1024
+)
 
 func NewSupermarketHandler(
 	log *slog.Logger,
@@ -229,16 +257,30 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	manifest = pluginspkg.NormalizeManifest(manifest)
+	if manifest.ID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "plugin id is required")
+	}
 
-	installation, err := h.pluginService.Install(c.Request().Context(), botID, pluginspkg.InstallRequest{
+	ctx := c.Request().Context()
+	bundleResult, err := h.installPluginBundle(ctx, botID, req.PluginID, manifest.ID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
+	}
+	scriptsResult, err := h.runPluginInstallScripts(ctx, botID, manifest.ID, manifest.Install)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
+	}
+
+	installation, err := h.pluginService.Install(ctx, botID, pluginspkg.InstallRequest{
 		Manifest:  manifest,
 		Variables: req.Variables,
 	})
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	result, installBundleErr := h.installPluginBundle(c.Request().Context(), botID, req.PluginID, installation.PluginID)
-	installation = withPluginBundleInstallMetadata(installation, result, installBundleErr)
+	installation = withPluginBundleInstallMetadata(installation, bundleResult, nil)
+	installation = withPluginInstallScriptsMetadata(installation, scriptsResult, nil)
 	return c.JSON(http.StatusOK, installation)
 }
 
@@ -463,6 +505,67 @@ func (h *SupermarketHandler) installPluginBundle(ctx context.Context, botID, dow
 	return result, nil
 }
 
+func (h *SupermarketHandler) runPluginInstallScripts(ctx context.Context, botID, pluginID string, commands pluginspkg.InstallCommands) (pluginInstallScriptsResult, error) {
+	result := newPluginInstallScriptsResult()
+	if len(commands) == 0 {
+		return result, nil
+	}
+	if h.containers == nil {
+		return result, errors.New("container provider is not configured")
+	}
+	client, err := h.containers.MCPClient(ctx, botID)
+	if err != nil {
+		return result, fmt.Errorf("container not reachable: %w", err)
+	}
+	return runPluginInstallCommands(ctx, client, botID, pluginID, []string(commands))
+}
+
+func runPluginInstallCommands(ctx context.Context, executor pluginInstallScriptExecutor, botID, pluginID string, commands []string) (pluginInstallScriptsResult, error) {
+	result := newPluginInstallScriptsResult()
+	if executor == nil {
+		return result, errors.New("plugin install script executor is not configured")
+	}
+	pluginRoot, err := skillset.PluginDirForID(pluginID)
+	if err != nil {
+		return result, err
+	}
+	env := []string{
+		"MEMOH_PLUGIN_ID=" + pluginID,
+		"MEMOH_PLUGIN_DIR=" + pluginRoot,
+		"MEMOH_BOT_ID=" + botID,
+	}
+	for _, command := range commands {
+		command = strings.TrimSpace(command)
+		if command == "" {
+			continue
+		}
+		commandResult := pluginInstallCommandResult{Command: command}
+		execResult, execErr := executor.ExecWithEnv(ctx, command, pluginRoot, pluginInstallScriptTimeoutSeconds, env)
+		result.CommandsRun++
+		if execResult != nil {
+			commandResult.ExitCode = execResult.ExitCode
+			commandResult.Stdout = truncatePluginInstallOutput(execResult.Stdout)
+			commandResult.Stderr = truncatePluginInstallOutput(execResult.Stderr)
+		}
+		if execErr != nil {
+			commandResult.Error = execErr.Error()
+			result.Results = append(result.Results, commandResult)
+			result.OK = false
+			result.Error = execErr.Error()
+			return result, fmt.Errorf("plugin install command %q failed: %w", command, execErr)
+		}
+		if execResult != nil && execResult.ExitCode != 0 {
+			commandResult.Error = fmt.Sprintf("command exited with code %d", execResult.ExitCode)
+			result.Results = append(result.Results, commandResult)
+			result.OK = false
+			result.Error = commandResult.Error
+			return result, fmt.Errorf("plugin install command %q exited with code %d", command, execResult.ExitCode)
+		}
+		result.Results = append(result.Results, commandResult)
+	}
+	return result, nil
+}
+
 const (
 	pluginArchiveKindSkills  = "skills"
 	pluginArchiveKindHooks   = "hooks"
@@ -604,6 +707,10 @@ func newPluginBundleInstallResult() pluginBundleInstallResult {
 	}
 }
 
+func newPluginInstallScriptsResult() pluginInstallScriptsResult {
+	return pluginInstallScriptsResult{OK: true}
+}
+
 func withPluginBundleInstallMetadata(installation pluginspkg.Installation, result pluginBundleInstallResult, err error) pluginspkg.Installation {
 	metadata := maps.Clone(installation.Metadata)
 	if metadata == nil {
@@ -618,4 +725,25 @@ func withPluginBundleInstallMetadata(installation pluginspkg.Installation, resul
 	metadata["scripts_install"] = result.Scripts
 	installation.Metadata = metadata
 	return installation
+}
+
+func withPluginInstallScriptsMetadata(installation pluginspkg.Installation, result pluginInstallScriptsResult, err error) pluginspkg.Installation {
+	metadata := maps.Clone(installation.Metadata)
+	if metadata == nil {
+		metadata = make(map[string]any)
+	}
+	if err != nil {
+		result.OK = false
+		result.Error = err.Error()
+	}
+	metadata["install_scripts"] = result
+	installation.Metadata = metadata
+	return installation
+}
+
+func truncatePluginInstallOutput(output string) string {
+	if len(output) <= pluginInstallScriptOutputLimit {
+		return output
+	}
+	return output[:pluginInstallScriptOutputLimit]
 }

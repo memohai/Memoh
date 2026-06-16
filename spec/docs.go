@@ -17307,6 +17307,12 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "install": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "mcps": {
                     "type": "array",
                     "items": {
