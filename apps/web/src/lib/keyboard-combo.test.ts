@@ -78,6 +78,14 @@ describe('formatKeyCombo', () => {
       expect(formatKeyCombo(parsed as ParsedKeyCombo)).toBe(sample)
     }
   })
+
+  it('encodes literal + as Plus so parse(format(x)) survives the split delimiter', () => {
+    // Naive serialization "Shift++" would split to ['Shift','',''] and drop the
+    // key; use the explicit 'Plus' token both directions.
+    expect(formatKeyCombo({ mod: false, alt: false, shift: true, key: '+' })).toBe('Shift+Plus')
+    expect(parseKeyCombo('Shift+Plus')).toEqual({ mod: false, alt: false, shift: true, key: '+' })
+    expect(parseKeyCombo('Mod+Plus')).toEqual({ mod: true, alt: false, shift: false, key: '+' })
+  })
 })
 
 describe('isModifierKey', () => {

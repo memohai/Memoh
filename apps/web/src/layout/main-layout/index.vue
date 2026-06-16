@@ -21,8 +21,6 @@ import { ref, watch, inject } from 'vue'
 import { SidebarProvider } from '@memohai/ui'
 import { useMediaQuery } from '@vueuse/core'
 import { DesktopShellKey } from '@/lib/desktop-shell'
-import { useKeyboardCommand } from '@/composables/useKeyboardCommand'
-import { appKeyboardCommands } from '@/lib/keyboard-commands'
 
 // In the desktop shell the sidebar collapse affordance is intentionally
 // disabled — we keep the sidebar pinned open and skip the small-screen
@@ -42,9 +40,4 @@ watch(isSmallScreen, (isSmall) => {
     isOpen.value = true
   }
 }, { immediate: true })
-
-useKeyboardCommand(appKeyboardCommands.toggleSidebar, () => {
-  isOpen.value = !isOpen.value
-  return true
-})
 </script>

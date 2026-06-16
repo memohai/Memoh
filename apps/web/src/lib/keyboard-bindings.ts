@@ -150,7 +150,24 @@ export function detectPlatform(
   return 'linux'
 }
 
+// DOM KeyboardEvent.key names → Electron accelerator names. Electron's
+// accelerator parser uses 'Left'/'Right'/'Up'/'Down' (not 'ArrowLeft' etc.)
+// and 'Esc' (not 'Escape'); pushing the raw DOM names produces an invalid
+// accelerator that the native menu silently rejects, so the menu shortcut
+// goes dead the moment a user rebinds to one of these keys.
+// https://www.electronjs.org/docs/latest/api/accelerator
+const DOM_TO_ELECTRON_KEY: Record<string, string> = {
+  ArrowLeft: 'Left',
+  ArrowRight: 'Right',
+  ArrowUp: 'Up',
+  ArrowDown: 'Down',
+  Escape: 'Esc',
+  ' ': 'Space',
+}
+
 function normalizeAcceleratorKey(key: string): string {
+  const mapped = DOM_TO_ELECTRON_KEY[key]
+  if (mapped) return mapped
   return key.length === 1 ? key.toUpperCase() : key
 }
 

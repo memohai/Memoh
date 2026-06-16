@@ -18,11 +18,15 @@
 
 <script setup lang="ts">
 import { computed, inject, ref, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { DesktopShellKey } from '@/lib/desktop-shell'
 import SideBar from '@/components/sidebar/index.vue'
 import MainContainer from '@/components/main-container/index.vue'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
 import { safeSessionGet, safeSessionRemove } from '@/utils/safe-storage'
+import { useKeyboardCommand } from '@/composables/useKeyboardCommand'
+import { appKeyboardCommands } from '@/lib/keyboard-commands'
+import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 
 const desktopShell = inject(DesktopShellKey, false)
 const macTrafficReserve = computed(() =>
@@ -45,5 +49,19 @@ onMounted(() => {
       entering.value = false
     })
   })
+})
+
+// toggleSidebar is registered here (not in main-layout, which is the settings
+// overlay) because MainSection owns the chat shell's visible sidebar +
+// workbench pane. MainSection stays mounted behind the settings overlay too,
+// so the handler is always available; we no-op on settings routes to preserve
+// the desktop settings sidebar's pinned-open intent AND prevent the web
+// browser from falling through to its native Mod+B (bookmarks bar).
+const workspaceTabs = useWorkspaceTabsStore()
+const route = useRoute()
+useKeyboardCommand(appKeyboardCommands.toggleSidebar, () => {
+  if (route.path.startsWith('/settings')) return true
+  workspaceTabs.toggleWorkbench()
+  return true
 })
 </script>

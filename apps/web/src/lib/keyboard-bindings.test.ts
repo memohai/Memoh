@@ -58,8 +58,22 @@ describe('toElectronAccelerator', () => {
   })
 
   it('orders modifiers CmdOrCtrl, Alt, Shift and uppercases single-char keys', () => {
-    const binding: KeyboardBinding = { command: appKeyboardCommands.saveActiveFile, key: 'k', mod: true, alt: true, shift: true, desktop: 'keydown', browser: 'intercept' }
+    const binding: KeyboardBinding = { command: appKeyboardCommands.saveActiveFile, key: 'k', mod: true, alt: true, shift: true, desktop: 'keydown', browser: 'intercept', scope: 'global', i18nKey: 'saveActiveFile' }
     expect(toElectronAccelerator(binding)).toBe('CmdOrCtrl+Alt+Shift+K')
+  })
+
+  it('maps DOM key names (ArrowLeft, Escape, Space) to their Electron accelerator equivalents', () => {
+    // Electron's accelerator parser uses Left/Right/Up/Down and Esc, not the
+    // DOM ArrowLeft/Escape names — pushing the raw DOM names leaves the
+    // native menu accelerator silently broken.
+    const make = (key: string): KeyboardBinding => ({
+      command: appKeyboardCommands.closeCurrentWorkspaceTab, key, mod: true,
+      desktop: 'menu', browser: 'passthrough', scope: 'global', i18nKey: 'closeCurrentWorkspaceTab',
+    })
+    expect(toElectronAccelerator(make('ArrowLeft'))).toBe('CmdOrCtrl+Left')
+    expect(toElectronAccelerator(make('ArrowDown'))).toBe('CmdOrCtrl+Down')
+    expect(toElectronAccelerator(make('Escape'))).toBe('CmdOrCtrl+Esc')
+    expect(toElectronAccelerator(make(' '))).toBe('CmdOrCtrl+Space')
   })
 })
 

@@ -82,7 +82,9 @@ const collidedLabel = computed(() => {
 })
 
 const isBlockingConflict = computed(() =>
-  conflict.value.kind === 'reserved' || conflict.value.kind === 'same-scope',
+  conflict.value.kind === 'reserved'
+  || conflict.value.kind === 'same-scope'
+  || conflict.value.kind === 'no-modifier',
 )
 
 function handleSave() {
@@ -140,6 +142,12 @@ function handleCancel() {
           class="text-destructive"
         >
           {{ t('settings.keyboard.dialog.reservedError') }}
+        </div>
+        <div
+          v-else-if="conflict.kind === 'no-modifier'"
+          class="text-destructive"
+        >
+          {{ t('settings.keyboard.dialog.noModifierError') }}
         </div>
         <div
           v-else-if="conflict.kind === 'same-scope'"

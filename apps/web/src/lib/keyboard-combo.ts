@@ -21,6 +21,10 @@ export function isModifierKey(key: string): boolean {
 
 function canonicalKey(raw: string): string {
   if (raw === ' ' || raw === 'Space' || raw === 'Spacebar') return ' '
+  // '+' is the combo delimiter, so it can't survive a parse/format round-trip
+  // verbatim — "Shift++" splits to ['Shift', '', ''] and filters to ['Shift'],
+  // dropping the key entirely. Use the explicit 'Plus' token both ways.
+  if (raw === 'Plus') return '+'
   return raw.length === 1 ? raw.toLowerCase() : raw
 }
 
@@ -59,7 +63,9 @@ export function formatKeyCombo(combo: ParsedKeyCombo): string {
   if (combo.mod) parts.push('Mod')
   if (combo.alt) parts.push('Alt')
   if (combo.shift) parts.push('Shift')
-  parts.push(combo.key === ' ' ? 'Space' : combo.key)
+  // See canonicalKey: '+' must serialize as 'Plus' so the parser can split on
+  // '+' without losing the key.
+  parts.push(combo.key === ' ' ? 'Space' : combo.key === '+' ? 'Plus' : combo.key)
   return parts.join('+')
 }
 

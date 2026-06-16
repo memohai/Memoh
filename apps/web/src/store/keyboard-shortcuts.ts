@@ -15,7 +15,7 @@ import {
 } from '@/lib/keyboard-combo'
 import type { AppKeyboardCommand } from '@/lib/keyboard-commands'
 
-export type ConflictKind = 'none' | 'same-scope' | 'cross-scope' | 'reserved' | 'invalid'
+export type ConflictKind = 'none' | 'same-scope' | 'cross-scope' | 'reserved' | 'invalid' | 'no-modifier'
 
 export interface ConflictResult {
   kind: ConflictKind
@@ -78,12 +78,26 @@ export const useKeyboardShortcutsStore = defineStore('keyboard-shortcuts', () =>
     if (isReservedCombo(combo)) return { kind: 'reserved' }
     const ownBinding = keyboardBindings.find(b => b.command === command)
     if (!ownBinding) return { kind: 'none' }
+    // Global shortcuts dispatch from a window-level listener that does not skip
+    // focused inputs, so a bare-key global binding would fire on every literal
+    // keystroke (e.g. binding 'b' would make typing 'b' open the sidebar).
+    // Scoped bindings only register their handler while the owning component is
+    // mounted, so a bare arrow key for the lightbox is fine.
+    if (ownBinding.scope === 'global' && !combo.mod && !combo.alt) {
+      return { kind: 'no-modifier' }
+    }
+    // Scan every matching binding before deciding: a same-scope collision must
+    // block the save even when an earlier-iterated cross-scope binding shares
+    // the combo. Otherwise the first cross-scope match would short-circuit and
+    // we'd silently let two global commands share the same key.
+    let crossScopeMatch: AppKeyboardCommand | undefined
     for (const binding of effectiveBindings.value) {
       if (binding.command === command) continue
       if (!keyCombosEqual(comboFromBinding(binding), combo)) continue
       if (binding.scope === ownBinding.scope) return { kind: 'same-scope', collidesWith: binding.command }
-      return { kind: 'cross-scope', collidesWith: binding.command }
+      crossScopeMatch = crossScopeMatch ?? binding.command
     }
+    if (crossScopeMatch) return { kind: 'cross-scope', collidesWith: crossScopeMatch }
     return { kind: 'none' }
   }
 
@@ -97,7 +111,7 @@ export const useKeyboardShortcutsStore = defineStore('keyboard-shortcuts', () =>
     const parsed = parseKeyCombo(combo)
     if (!parsed) return { kind: 'invalid' }
     const conflict = detectConflict(command, parsed)
-    if (conflict.kind === 'same-scope' || conflict.kind === 'reserved') return conflict
+    if (conflict.kind === 'same-scope' || conflict.kind === 'reserved' || conflict.kind === 'no-modifier') return conflict
     overrides.value = { ...overrides.value, [command]: formatKeyCombo(parsed) }
     return conflict
   }

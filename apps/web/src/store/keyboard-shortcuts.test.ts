@@ -73,10 +73,47 @@ describe('useKeyboardShortcutsStore', () => {
     expect(store.isOverridden(appKeyboardCommands.toggleSidebar)).toBe(false)
   })
 
+  it('rejects bare-key global bindings so typing the key in a form does not fire the command', () => {
+    const store = useKeyboardShortcutsStore()
+    expect(store.setBinding(appKeyboardCommands.toggleSidebar, 'b').kind).toBe('no-modifier')
+    expect(store.setBinding(appKeyboardCommands.openSettings, 'Shift+k').kind).toBe('no-modifier')
+    expect(store.isOverridden(appKeyboardCommands.toggleSidebar)).toBe(false)
+  })
+
+  it('accepts modified global bindings (Mod or Alt)', () => {
+    const store = useKeyboardShortcutsStore()
+    expect(store.setBinding(appKeyboardCommands.toggleSidebar, 'Mod+Shift+j').kind).toBe('none')
+    expect(store.setBinding(appKeyboardCommands.openSettings, 'Alt+m').kind).toBe('none')
+  })
+
+  it('allows bare-key bindings for scoped commands (lightbox arrows)', () => {
+    const store = useKeyboardShortcutsStore()
+    // mediaLightboxNext default is ArrowRight; rebinding to a bare letter is
+    // fine because the scoped handler only fires while the lightbox is mounted.
+    expect(store.setBinding(appKeyboardCommands.mediaLightboxNext, 'l').kind).toBe('none')
+  })
+
+  it('finds a same-scope collision even when a cross-scope match was iterated first', () => {
+    const store = useKeyboardShortcutsStore()
+    // First rebind a global to a key the mediaLightbox scope already uses:
+    // this is allowed as cross-scope and overrides.
+    store.setBinding(appKeyboardCommands.saveActiveFile, 'Mod+ArrowLeft')
+    // Now another global wants the same combo. Scanning must keep going past
+    // the mediaLightboxPrev cross-scope match to find saveActiveFile.
+    const result = store.setBinding(appKeyboardCommands.toggleSidebar, 'Mod+ArrowLeft')
+    expect(result.kind).toBe('same-scope')
+    expect(result.collidesWith).toBe(appKeyboardCommands.saveActiveFile)
+    expect(store.isOverridden(appKeyboardCommands.toggleSidebar)).toBe(false)
+  })
+
   it('treats cross-scope collisions as a soft warning that still applies', () => {
     const store = useKeyboardShortcutsStore()
-    // mediaLightboxPrev = ArrowLeft (mediaLightbox scope). Bind global toggleSidebar to ArrowLeft.
-    const result = store.setBinding(appKeyboardCommands.toggleSidebar, 'ArrowLeft')
+    // mediaLightboxPrev default is bare ArrowLeft (mediaLightbox scope is OK
+    // with bare keys); bind global toggleSidebar to Mod+ArrowLeft so the
+    // global-needs-modifier rule doesn't pre-empt the cross-scope check, and
+    // also rebind mediaLightboxPrev to Mod+ArrowLeft to surface the collision.
+    store.setBinding(appKeyboardCommands.mediaLightboxPrev, 'Mod+ArrowLeft')
+    const result = store.setBinding(appKeyboardCommands.toggleSidebar, 'Mod+ArrowLeft')
     expect(result.kind).toBe('cross-scope')
     expect(result.collidesWith).toBe(appKeyboardCommands.mediaLightboxPrev)
     expect(store.isOverridden(appKeyboardCommands.toggleSidebar)).toBe(true)
