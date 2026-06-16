@@ -122,6 +122,7 @@
     "usage": "使用状況",
     "people": "メンバー",
     "appearance": "外観",
+    "keyboard": "ショートカット",
     "supermarket": "マーケットプレイス",
     "about": "Memoh について",
     "switchBot": "Botを切り替え",
@@ -216,6 +217,52 @@
         "forest": "控えめなグリーントーン",
         "rose": "温かみのあるアクセントと柔らかなコントラスト",
         "amber": "明確なステータスインジケーターを備えた金色のハイライト"
+      }
+    },
+    "keyboard": {
+      "title": "キーボードショートカット",
+      "intro": "各行の Edit をクリックしてから、新しい組み合わせを押してください。Cmd/Ctrl + W、Q、T、N はブラウザと OS に予約されているため変更できません。",
+      "resetAll": "すべてリセット",
+      "scopes": {
+        "global": "Global",
+        "mediaLightbox": "メディアライトボックス"
+      },
+      "row": {
+        "reset": "デフォルトに戻す"
+      },
+      "dialog": {
+        "title": "ショートカットを編集",
+        "prompt": "新しい組み合わせを押してください…",
+        "resetDefault": "デフォルトに戻す",
+        "reservedError": "この組み合わせはブラウザまたは OS に予約されています。",
+        "sameScopeError": "すでに {command} で使用されています。",
+        "crossScopeWarn": "{command} でも使用されています（異なるコンテキストでのみ有効）。"
+      },
+      "commands": {
+        "closeCurrentWorkspaceTab": {
+          "label": "現在の Workspace タブを閉じる",
+          "description": "Workspace ペインで開いているタブを閉じます (OS の閉じる動作にフォールバックします)。"
+        },
+        "saveActiveFile": {
+          "label": "現在のファイルを保存",
+          "description": "Workspace のエディタで開いているファイルを保存します。"
+        },
+        "toggleSidebar": {
+          "label": "サイドバーを切り替え",
+          "description": "メインサイドバーの表示/非表示を切り替えます。"
+        },
+        "closeMediaLightbox": {
+          "label": "メディアライトボックスを閉じる",
+          "description": "メディアプレビューのオーバーレイを閉じます。"
+        },
+        "mediaLightboxPrev": {
+          "label": "前のメディア",
+          "description": "ライトボックスを開いている間、前のアイテムへ移動します。"
+        },
+        "mediaLightboxNext": {
+          "label": "次のメディア",
+          "description": "ライトボックスを開いている間、次のアイテムへ移動します。"
+        }
       }
     },
     "langZh": "中文",

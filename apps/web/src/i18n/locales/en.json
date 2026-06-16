@@ -122,6 +122,7 @@
     "usage": "Usage",
     "people": "Members",
     "appearance": "Appearance",
+    "keyboard": "Keyboard",
     "supermarket": "Supermarket",
     "about": "About",
     "switchBot": "Switch bot",
@@ -216,6 +217,52 @@
         "forest": "Subtle green tones",
         "rose": "Warm accents and soft contrast",
         "amber": "Golden highlights with clear status indicators"
+      }
+    },
+    "keyboard": {
+      "title": "Keyboard Shortcuts",
+      "intro": "Click Edit on a row, then press the new key combination. Cmd/Ctrl + W, Q, T, N stay reserved for the browser and OS.",
+      "resetAll": "Reset all",
+      "scopes": {
+        "global": "Global",
+        "mediaLightbox": "Media Lightbox"
+      },
+      "row": {
+        "reset": "Reset to default"
+      },
+      "dialog": {
+        "title": "Edit shortcut",
+        "prompt": "Press a key combination…",
+        "resetDefault": "Reset to default",
+        "reservedError": "This combination is reserved by the browser or OS.",
+        "sameScopeError": "Already used by {command}.",
+        "crossScopeWarn": "Also used by {command} (only active in a different context)."
+      },
+      "commands": {
+        "closeCurrentWorkspaceTab": {
+          "label": "Close current workspace tab",
+          "description": "Close the active tab in the workspace pane (falls back to the OS close behavior)."
+        },
+        "saveActiveFile": {
+          "label": "Save active file",
+          "description": "Save the file open in the workspace's editor."
+        },
+        "toggleSidebar": {
+          "label": "Toggle sidebar",
+          "description": "Show or hide the main sidebar."
+        },
+        "closeMediaLightbox": {
+          "label": "Close media lightbox",
+          "description": "Dismiss the media preview overlay."
+        },
+        "mediaLightboxPrev": {
+          "label": "Previous media",
+          "description": "Show the previous item while the lightbox is open."
+        },
+        "mediaLightboxNext": {
+          "label": "Next media",
+          "description": "Show the next item while the lightbox is open."
+        }
       }
     },
     "langZh": "中文",

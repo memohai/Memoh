@@ -173,6 +173,14 @@ const routes = [
         },
       },
       {
+        name: 'keyboard',
+        path: 'keyboard',
+        component: () => import('@/pages/keyboard-shortcuts/index.vue'),
+        meta: {
+          breadcrumb: i18nRef('sidebar.keyboard'),
+        },
+      },
+      {
         name: 'profile',
         path: 'profile',
         component: () => import('@/pages/profile/index.vue'),
