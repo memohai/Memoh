@@ -26,7 +26,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, onActivated, onDeactivated, nextTick, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -225,16 +225,6 @@ onMounted(() => {
       connectWs()
     }
   })
-})
-
-onActivated(() => {
-  nextTick(() => {
-    fitTerminal()
-  })
-})
-
-onDeactivated(() => {
-  persistSnapshot()
 })
 
 watch(

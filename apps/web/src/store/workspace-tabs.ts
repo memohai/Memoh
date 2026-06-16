@@ -30,6 +30,11 @@ export const TERMINAL_TAB_COMPONENT = 'terminalTab'
 
 const DEFAULT_BROWSER_ADDRESS = 'localhost:5173/'
 
+// Default share of the editor height the bottom terminal panel claims when it
+// first splits off below the chat. ~1/3 mirrors VS Code's editor:panel ratio
+// (≈554:269) — enough room to work in without burying the conversation.
+const TERMINAL_PANEL_HEIGHT_RATIO = 1 / 3
+
 export type WorkspacePanelComponent = 'chat' | 'file' | 'preview' | 'terminal' | 'browser' | 'display'
 
 interface BotLayoutState {
@@ -100,6 +105,15 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   const api = shallowRef<DockviewApi | null>(null)
   const activePanelId = ref<string | null>(null)
+  // True while ANY panel/group is being dragged. On the desktop shell the blank
+  // header strip (the growing void container) doubles as a window-drag region
+  // (`-webkit-app-region: drag`), which swallows native drag-and-drop events so a
+  // tab can't land on the blank part of another group's tab bar. chat-workspace
+  // mirrors this onto the dock root as `.memoh-dock-dragging`, and the theme
+  // flips the void to `no-drag` while it's set so the whole header accepts drops,
+  // then back to a window handle on drag end. Also gates the terminal "no-drop"
+  // cursor below.
+  const panelDragging = ref(false)
   // Per-panel unsaved-changes state for file panels. Kept here (NOT baked into
   // the tab title) so the tab dot, the sidebar count badge, and the close-confirm
   // dialog all read ONE reactive source. Keyed by dockview panel id.
@@ -116,6 +130,16 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   let loadedBotId: string | null = null
   let suppressPersist = false
   let apiDisposables: Array<{ dispose(): void }> = []
+  // Whether the in-flight drag started from a terminal. Non-terminal drags lock
+  // the exclusive terminal groups (see beginDrag) so an editor can never merge
+  // into the bottom panel; terminal drags leave them open so terminals can be
+  // reordered or stacked. Reset on drag end.
+  let dragSourceTerminal = false
+  // The most recent NON-terminal group to hold focus. A terminal group is
+  // exclusive — opening a file/browser/etc. while it is the active group must
+  // land in an editor group, not contaminate the terminals — so we remember the
+  // last editor group to route those opens back to (see nonTerminalTarget).
+  let lastNonTerminalGroupId: string | null = null
 
   function ensureBotLayout(botId: string | null | undefined): BotLayoutState | null {
     const bid = (botId ?? '').trim()
@@ -144,12 +168,35 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       if (node.type === 'leaf' && node.data && typeof node.data === 'object') {
         const data = { ...(node.data as Record<string, unknown>) }
         delete data.hideHeader
+        // Defensively strip `locked`: older builds toggled 'no-drop-target' on
+        // terminal groups mid-drag and a layout-change persist could bake it
+        // into storage, permanently sealing the group on the next restore. Drop
+        // rejection is now an onWillDrop veto (see registerApi), so we never set
+        // it — this just scrubs any value an old snapshot still carries.
+        delete data.locked
         return { ...node, data }
       }
       if (node.type === 'branch' && Array.isArray(node.data)) {
         return { ...node, data: (node.data as GridNode[]).map(walkNode) }
       }
       return node
+    }
+    // Strip any persisted per-panel tabComponent (older layouts pinned terminals
+    // to 'terminalTab'): terminals now resolve their tab through the default host
+    // by group, so a baked component would override that and keep a moved-out
+    // terminal stuck as a chip.
+    function stripTabComponents(panels: SerializedDockview['panels']): SerializedDockview['panels'] {
+      if (!panels || typeof panels !== 'object') return panels
+      const out: Record<string, unknown> = {}
+      for (const [id, panel] of Object.entries(panels)) {
+        if (panel && typeof panel === 'object' && 'tabComponent' in panel) {
+          const { tabComponent: _tabComponent, ...rest } = panel as unknown as Record<string, unknown>
+          out[id] = rest
+        } else {
+          out[id] = panel
+        }
+      }
+      return out as SerializedDockview['panels']
     }
     try {
       return {
@@ -158,6 +205,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
           ...layout.grid,
           root: walkNode(layout.grid.root as GridNode) as SerializedDockview['grid']['root'],
         },
+        panels: stripTabComponents(layout.panels),
       }
     } catch {
       return layout
@@ -198,14 +246,72 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     }
   }
 
+  function domListener<K extends keyof DocumentEventMap>(
+    type: K,
+    handler: (event: DocumentEventMap[K]) => void,
+    options?: AddEventListenerOptions,
+  ): { dispose(): void } {
+    if (typeof document === 'undefined') return { dispose() {} }
+    document.addEventListener(type, handler as EventListener, options)
+    return {
+      dispose() {
+        document.removeEventListener(type, handler as EventListener, options)
+      },
+    }
+  }
+
+  // A terminal group is exclusive: an editor (file/preview/chat/…) can never
+  // become a tab inside it, mirroring how a VS Code terminal panel refuses
+  // editor drops. We enforce this per drag with onWillShowOverlay (veto the
+  // drop overlay) and onWillDrop (veto the drop) — see registerApi. Preventing
+  // the overlay routes through dockview's removeDropTarget, so no stale
+  // "can-drop" highlight lingers over the terminal. The group-level `locked`
+  // flag can't do that: it makes canDisplayOverlay bail out early and the
+  // shared overlay element is left untouched, so the highlight from the group
+  // hovered just before stays painted. beginDrag only records WHAT is being
+  // dragged so those vetoes can tell a foreign editor from a terminal session
+  // being reordered.
+  function beginDrag(sourceTerminal: boolean) {
+    panelDragging.value = true
+    dragSourceTerminal = sourceTerminal
+  }
+
+  function endDrag() {
+    panelDragging.value = false
+    dragSourceTerminal = false
+  }
+
+  // Is the in-flight drag a NON-terminal panel/group? A single-tab drag carries
+  // its panelId; a whole-group drag has a null panelId, so we fall back to the
+  // terminal-vs-editor classification recorded at drag start.
+  function draggingNonTerminal(
+    event: { getData(): { panelId?: string | null } | undefined },
+  ): boolean {
+    const panelId = event.getData()?.panelId
+    if (typeof panelId === 'string') return !panelId.startsWith('terminal:')
+    return !dragSourceTerminal
+  }
+
   function registerApi(dock: DockviewApi) {
     for (const d of apiDisposables) d.dispose()
     api.value = dock
     apiDisposables = [
       dock.onDidActivePanelChange((panel) => {
         activePanelId.value = panel?.id ?? null
+        const group = panel?.group
+        if (group && !isTerminalOnlyGroup(group)) {
+          lastNonTerminalGroupId = group.id
+        }
       }),
       dock.onDidLayoutChange(() => {
+        // Catch-all: keep terminal-group chrome (bottom header + class) in
+        // lockstep with composition for ANY layout mutation, including drags
+        // dockview may not surface through onDidMovePanel. The per-tab host
+        // also keys off layout changes, so syncing here guarantees the group
+        // chrome and the chip-vs-normal tab never disagree. setHeaderPosition
+        // is guarded by a current-value check, so this cannot loop. Sync first
+        // so the persisted snapshot already reflects the resolved chrome.
+        syncAllTerminalGroupChrome(dock)
         persistLayout()
       }),
       dock.onDidRemovePanel((panel) => {
@@ -222,6 +328,46 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       dock.onDidMovePanel(() => {
         syncAllTerminalGroupChrome(dock)
       }),
+      // Record what is being dragged (a terminal session vs a foreign editor)
+      // and flip the desktop window-drag region off so blank header space
+      // accepts drops.
+      dock.onWillDragPanel((event) => {
+        beginDrag(event.panel.id.startsWith('terminal:'))
+      }),
+      dock.onWillDragGroup((event) => {
+        beginDrag(isTerminalOnlyGroup(event.group))
+      }),
+      // Terminal groups are exclusive. Veto the drop overlay so no "can-drop"
+      // highlight ever paints over the terminal, and veto the drop itself,
+      // whenever a foreign editor is dragged onto one (header, tab strip or
+      // content, any edge). Terminal sessions stay droppable among themselves.
+      dock.onWillShowOverlay((event) => {
+        if (isTerminalOnlyGroup(event.group) && draggingNonTerminal(event)) {
+          event.preventDefault()
+        }
+      }),
+      dock.onWillDrop((event) => {
+        if (isTerminalOnlyGroup(event.group) && draggingNonTerminal(event)) {
+          event.preventDefault()
+        }
+      }),
+      // Clear the drag flags however the drag ends (drop, cancel, Esc). Native
+      // 'dragend' always fires for the HTML5 backend; 'pointerup' covers the
+      // pointer/touch backend.
+      domListener('dragend', () => endDrag(), { capture: true }),
+      domListener('pointerup', () => endDrag(), { capture: true }),
+      // The vetoes above already refuse foreign editors, but dockview still
+      // preventDefaults the native dragover, so the OS would otherwise paint a
+      // droppable cursor. Force the "no-drop" cursor over the terminal group
+      // while a non-terminal is in flight. Capture phase so this runs before
+      // dockview's own dragover sets the effect.
+      domListener('dragover', (event) => {
+        if (!panelDragging.value || dragSourceTerminal) return
+        const target = event.target
+        if (!(target instanceof Element)) return
+        if (!target.closest('.memoh-terminal-group')) return
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'none'
+      }, { capture: true }),
     ]
     const bid = (currentBotId.value ?? '').trim()
     if (bid) {
@@ -235,6 +381,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     api.value = null
     activePanelId.value = null
     loadedBotId = null
+    panelDragging.value = false
+    dragSourceTerminal = false
   }
 
   // ---- panel operations ----------------------------------------------------
@@ -243,6 +391,38 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   function hasCurrentPermission(permission: BotPermission): boolean {
     return hasBotPermission(currentBot.value?.current_user_permissions, permission)
+  }
+
+  // Resolve a group an EDITOR-class panel may join. A terminal-only group is
+  // exclusive, so we never let a non-terminal panel land in one: prefer the
+  // caller's group (if not a terminal group), then the active group, then the
+  // last editor group to hold focus, then any non-terminal group. If only
+  // terminal groups exist, open ABOVE one so the panel gets its own group
+  // instead of joining the terminals. Undefined → let dockview create the first
+  // group (empty dock).
+  function nonTerminalTarget(
+    dock: DockviewApi,
+    groupId?: string,
+  ): { referenceGroup: string, direction: 'within' | 'above' } | undefined {
+    const explicit = groupId ? dock.getGroup(groupId) : undefined
+    if (explicit && !isTerminalOnlyGroup(explicit)) {
+      return { referenceGroup: explicit.id, direction: 'within' }
+    }
+    const active = dock.activeGroup
+    if (active && !isTerminalOnlyGroup(active)) {
+      return { referenceGroup: active.id, direction: 'within' }
+    }
+    if (lastNonTerminalGroupId) {
+      const last = dock.getGroup(lastNonTerminalGroupId)
+      if (last && !isTerminalOnlyGroup(last)) {
+        return { referenceGroup: last.id, direction: 'within' }
+      }
+    }
+    const other = dock.groups.find(g => !isTerminalOnlyGroup(g))
+    if (other) return { referenceGroup: other.id, direction: 'within' }
+    const fallback = dock.groups[0]
+    if (fallback) return { referenceGroup: fallback.id, direction: 'above' }
+    return undefined
   }
 
   function focusOrAdd(options: {
@@ -263,6 +443,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       existing.api.setActive()
       return true
     }
+    const target = nonTerminalTarget(dock, options.groupId)
     dock.addPanel({
       id: options.id,
       component: options.component,
@@ -271,25 +452,31 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       // Keep panel DOM mounted while hidden: terminals, WebRTC display and
       // chat scroll state do not survive detach/reattach cycles.
       renderer: 'always',
-      ...(options.groupId
-        ? { position: { referenceGroup: options.groupId, direction: 'within' as const } }
-        : {}),
+      ...(target ? { position: target } : {}),
     })
     return true
   }
 
-  function defaultTerminalPosition(dock: DockviewApi) {
-    const terminalGroupId = dock.groups.find(g =>
-      g.panels.some(p => p.id.startsWith('terminal:')),
-    )?.id
+  function defaultTerminalPosition(dock: DockviewApi, belowGroupId?: string) {
+    // Reuse the bottom terminal panel (a terminal-ONLY group) if one exists, so a
+    // new session stacks as another tab instead of spawning a parallel panel. We
+    // match terminal-ONLY (not "has a terminal"): a terminal dragged up into the
+    // chat group lives in a MIXED group, which is no longer the bottom panel.
+    const terminalGroupId = dock.groups.find(g => isTerminalOnlyGroup(g))?.id
     if (terminalGroupId) {
       return { referenceGroup: terminalGroupId, direction: 'within' as const }
     }
-    const chatGroupId = dock.groups.find(g =>
-      g.panels.some(p => p.id === CHAT_PANEL_ID),
-    )?.id
-    if (chatGroupId) {
-      return { referenceGroup: chatGroupId, direction: 'below' as const }
+    // No bottom panel yet: open one directly BELOW the column the request came
+    // from — the editor group whose "+" was clicked, else the active editor
+    // group, else the chat group. This is why a terminal opened from the RIGHT
+    // split now appears under the right split instead of jumping back under the
+    // chat on the left.
+    const below
+      = (belowGroupId ? dock.getGroup(belowGroupId) : undefined)
+        ?? (dock.activeGroup && !isTerminalOnlyGroup(dock.activeGroup) ? dock.activeGroup : undefined)
+        ?? dock.groups.find(g => g.panels.some(p => p.id === CHAT_PANEL_ID))
+    if (below && !isTerminalOnlyGroup(below)) {
+      return { referenceGroup: below.id, direction: 'below' as const }
     }
     return undefined
   }
@@ -308,22 +495,29 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       syncAllTerminalGroupChrome(dock)
       return true
     }
+    // No per-panel tabComponent: terminals use the default tab host, which
+    // renders the file-chip tab ONLY while the panel sits in a terminal-only
+    // group and falls back to the normal editor tab once a terminal is dragged
+    // into a mixed group — so a moved-out terminal blends into the dock strip.
     const panelBase = {
       id: options.id,
       component: 'terminal' as const,
-      tabComponent: TERMINAL_TAB_COMPONENT,
       title: options.title,
       renderer: 'always' as const,
     }
-    if (options.groupId) {
-      dock.addPanel({
-        ...panelBase,
-        position: { referenceGroup: options.groupId, direction: 'within' },
-      })
-    } else {
-      dock.addPanel({
-        ...panelBase,
-        ...(options.position ? { position: options.position } : {}),
+    const position = options.groupId
+      ? { referenceGroup: options.groupId, direction: 'within' as const }
+      : options.position
+    const panel = dock.addPanel({
+      ...panelBase,
+      ...(position ? { position } : {}),
+    })
+    // Only when the terminal opens its OWN new group BELOW the chat: give that
+    // group a sensible default height instead of dockview's even 50/50 split.
+    // Joining an existing terminal/editor group keeps whatever height it has.
+    if (position?.direction === 'below' && dock.height > 0) {
+      panel.group.api.setSize({
+        height: Math.round(dock.height * TERMINAL_PANEL_HEIGHT_RATIO),
       })
     }
     syncAllTerminalGroupChrome(dock)
@@ -390,11 +584,19 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!state || !dock) return
     const next = state.terminalCounter + 1
     patchBotLayout(bid, { terminalCounter: next })
+    // The "+" lives per group. Fired from a terminal-only group, the new session
+    // JOINS it (another tab in the bottom panel). Fired from an editor group's
+    // "+" menu — or opened programmatically — it lands in the bottom terminal
+    // panel, which opens directly below the INITIATING editor column when none
+    // exists yet (see defaultTerminalPosition). Passing a non-terminal groupId
+    // straight through would wrongly merge the terminal into that editor group.
+    const initiating = groupId ? dock.getGroup(groupId) : undefined
+    const joinTerminalGroup = !!initiating && isTerminalOnlyGroup(initiating)
     addTerminalPanel({
       id: `terminal:${next}`,
       title: 'zsh',
-      groupId,
-      position: groupId ? undefined : defaultTerminalPosition(dock),
+      groupId: joinTerminalGroup ? groupId : undefined,
+      position: joinTerminalGroup ? undefined : defaultTerminalPosition(dock, groupId),
     })
   }
 
@@ -714,8 +916,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // at the bottom of the editor area, so the layout feels like a VS Code-style
   // bottom panel while remaining fully draggable and composable.
 
-  function openTerminalInPanel() {
-    openTerminal()
+  // groupId is the header strip that triggered the "+" (the terminal group's own
+  // bar). Passing it keeps the new session in THAT group; without it (editor "+"
+  // menu) the terminal routes to the default bottom slot.
+  function openTerminalInPanel(groupId?: string) {
+    openTerminal(groupId)
   }
 
   // One-shot navigation request consumed by the sidebar files panel.
@@ -791,6 +996,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   return {
     api,
     activeId,
+    panelDragging,
     fileDirty,
     dirtyFileCount,
     pendingClose,

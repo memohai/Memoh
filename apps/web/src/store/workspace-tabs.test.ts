@@ -66,6 +66,10 @@ function createFakeDock() {
     onDidRemovePanel: noopDisposable,
     onDidAddPanel: noopDisposable,
     onDidMovePanel: noopDisposable,
+    onWillShowOverlay: noopDisposable,
+    onWillDrop: noopDisposable,
+    onWillDragPanel: noopDisposable,
+    onWillDragGroup: noopDisposable,
     getGroup(id: string) {
       return id === 'group-1' ? group : undefined
     },

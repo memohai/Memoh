@@ -291,22 +291,36 @@
   flex-shrink: 0;
 }
 
-/* The right-actions container now spans the whole leftover strip width (it owns the
- * drag region + the far-right Preview action — see group-actions.vue), so the void
- * collapses to nothing. Kept ordered last and zero-width so it never reintroduces a
- * gap. */
+/* The void is dockview's droppable empty-header region — it owns the
+ * `header_space` drop target, so a tab dragged onto the blank part of a header
+ * lands in that group. It MUST grow to have any area (dockview only binds the
+ * HTML5 dragover to the tab strip + this void, not to the actions slots). It
+ * fills from just after the "+" cluster (leftActions) to the far-right Preview
+ * (rightActions).
+ *
+ * On the desktop shell the same blank strip doubles as the window-drag handle,
+ * so we claim it with -webkit-app-region: drag. While a panel/group is being
+ * dragged the dock root gets .memoh-dock-dragging and we release that claim
+ * (no-drag) so the OS lets the native drop events through to the void; without
+ * this the window-move region would swallow them. (-webkit-app-region is a no-op
+ * on web, where the void is simply always droppable + the group-drag handle.) */
 .dockview-theme-memoh .dv-void-container {
-  order: 1;
-  flex: 0 0 0;
+  flex: 1 1 auto;
+  -webkit-app-region: drag;
+}
+.memoh-dock-dragging .dockview-theme-memoh .dv-void-container {
+  -webkit-app-region: no-drag;
 }
 
-/* Right actions grow to fill from just after the last tab to the strip's end. Its
- * contents lay out themselves: the "+" cluster hugs the tabs at the start, a
- * draggable spacer eats the middle, and the Preview action (when present) sits at
- * the far right (group-actions.vue). Left actions stay shrink-to-fit. */
+/* Right actions hug their content at the strip's far right — just the Preview
+ * action when present (group-actions.vue); the void to its left fills the gap. */
 .dockview-theme-memoh .dv-right-actions-container {
-  flex: 1 1 auto;
-  min-width: 0;
+  flex: 0 0 auto;
+}
+
+/* The "+" cluster (leftActions, header-add-actions.vue) renders right after the
+ * tabs; one breathing gap separates it from the last tab's foot. */
+.dockview-theme-memoh .dv-left-actions-container {
   margin-left: var(--tab-actions-gap);
 }
 
@@ -357,6 +371,9 @@
  * sidebar-accent) instead of the editor chrome tab geometry above. */
 
 .dockview-theme-memoh .memoh-terminal-group .dv-tabs-and-actions-container {
+  /* Share the editor surface with the chat/terminal above so the whole bottom
+   * panel is one continuous ground, split from the editor only by the border. */
+  background-color: var(--surface-editor);
   box-shadow: none;
   border-top: 1px solid var(--border);
   height: auto;
@@ -364,10 +381,32 @@
   padding-block: 0.1875rem;
 }
 
+/* Inter-tab spacing now lives on the container gap (not chip margins) so each
+ * chip can fill its tab box (width:100%) and still shrink: 3px end inset +
+ * 0.375rem (6px) gap reproduce the previously-approved 3px/6px rhythm. */
 .dockview-theme-memoh .memoh-terminal-group .dv-tabs-container {
-  gap: 0;
-  padding-inline: 0;
+  gap: 0.375rem;
+  padding-inline: 0.1875rem;
   align-items: center;
+}
+
+/* Unlike the editor strip (scrollbar hidden), the terminal strip KEEPS a visible
+ * horizontal scrollbar: it's a short bottom bar where wheel/trackpad scroll alone
+ * is undiscoverable. The tab strip scrolls via dockview's OWN overlay scrollbar
+ * (.dv-scrollbar inside .dv-scrollable), NOT the native .dv-tabs-container
+ * overflow bar — so styling ::-webkit-scrollbar there did nothing. We hide that
+ * overlay globally (it clashed with the editor hairline); re-enable it here.
+ * dockview sizes the bar from scrollWidth vs clientWidth (width:0 when nothing
+ * overflows), so painting it unconditionally only shows a bar once a stack of
+ * sessions actually out-measures the strip — and it can't auto-hide the way
+ * macOS overlay scrollbars do. */
+.dockview-theme-memoh .memoh-terminal-group .dv-scrollable > .dv-scrollbar {
+  display: block;
+}
+.dockview-theme-memoh .memoh-terminal-group .dv-scrollable > .dv-scrollbar-horizontal {
+  height: 0.375rem;
+  border-radius: var(--radius-sm);
+  background-color: var(--border);
 }
 
 .dockview-theme-memoh .memoh-terminal-group .dv-tab,
@@ -375,36 +414,54 @@
   margin-top: 0;
   height: auto;
   min-height: 1.6875rem;
-  max-width: none;
   padding: 0;
   background: transparent !important;
   border: none;
   box-shadow: none;
   align-self: center;
+  /* Resting at 140px, but unlike the editor tabs (flex:0 0 auto → fixed, then
+   * scroll) these SHRINK: flex-shrink:1 lets the constrained tabs-container
+   * squeeze every chip toward a 5.5rem floor (icon + a few title chars + close;
+   * the chip's flex-1 min-w-0 span truncates) before the strip ever scrolls, so
+   * a stack of sessions stays on screen the way VS Code's do. */
+  flex: 0 1 8.75rem;
+  min-width: 5.5rem;
+  max-width: 8.75rem;
 }
 
-/* Keep selected chip in sync with dockview's active tab class as well. */
-.dockview-theme-memoh .memoh-terminal-group .dv-tab.dv-active-tab .memoh-terminal-tab,
-.dockview-theme-memoh .dv-tab.dv-active-tab:has(.memoh-terminal-tab) .memoh-terminal-tab {
-  background-color: var(--sidebar-accent);
-  color: var(--foreground);
+/* Terminal tabs are flat file-row chips: the chip (.memoh-terminal-tab) paints its
+ * OWN fill — hover (--sidebar-hover) and active (--sidebar-accent) — from the Vue
+ * class, and is the SOLE surface. The editor-tab chrome above paints its hover/
+ * active/flare on the WRAPPER's ::before (NOT on the box background), so killing
+ * only the box background left that pseudo alive: a real mouse-over lit BOTH the
+ * chip's hover AND the wrapper's ::before hover, stacking two translucent layers
+ * (a DevTools forced :hover only flags one element, so it looked single-layer).
+ * Strip every wrapper-level paint — box background AND the ::before/::after pseudos
+ * — so nothing can stack under the chip. */
+.dockview-theme-memoh .dv-tab:has(.memoh-terminal-tab),
+.dockview-theme-memoh .dv-tab:has(.memoh-terminal-tab):hover,
+.dockview-theme-memoh .dv-tab:has(.memoh-terminal-tab).dv-active-tab {
+  background: transparent !important;
 }
 
-.dockview-theme-memoh .memoh-terminal-group .dv-tab:not(.dv-active-tab):hover .memoh-terminal-tab,
-.dockview-theme-memoh .dv-tab:not(.dv-active-tab):has(.memoh-terminal-tab):hover .memoh-terminal-tab {
-  background-color: var(--sidebar-hover);
-  color: var(--foreground);
-}
-
-.dockview-theme-memoh .memoh-terminal-group .dv-tab.dv-active-tab::before,
-.dockview-theme-memoh .dv-tab:has(.memoh-terminal-tab).dv-active-tab::before {
-  content: none;
+.dockview-theme-memoh .dv-tab:has(.memoh-terminal-tab)::before,
+.dockview-theme-memoh .dv-tab:has(.memoh-terminal-tab)::after,
+.dockview-theme-memoh .dv-tab:has(.memoh-terminal-tab):hover::before,
+.dockview-theme-memoh .dv-tab:has(.memoh-terminal-tab):hover::after {
+  content: none !important;
 }
 
 .dockview-theme-memoh .memoh-terminal-group .dv-right-actions-container,
 .dockview-theme-memoh .memoh-terminal-group .dv-left-actions-container {
   margin-top: 0;
   height: auto;
+}
+
+/* The "+" sits one inter-tab gap (6px) from the last chip: the tabs-container's
+ * 3px end inset already gives half, so the "+" cluster (leftActions) adds the
+ * remaining 3px — not the wider editor --tab-actions-gap. */
+.dockview-theme-memoh .memoh-terminal-group .dv-left-actions-container {
+  margin-left: 0.1875rem;
 }
 
 .dockview-theme-memoh .memoh-terminal-group .dv-pre-actions-container {

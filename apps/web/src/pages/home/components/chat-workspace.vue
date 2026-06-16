@@ -2,6 +2,7 @@
   <div
     ref="rootEl"
     class="flex flex-col flex-1 h-full min-w-0 bg-background"
+    :class="{ 'memoh-dock-dragging': store.panelDragging }"
   >
     <DockviewVue
       class="h-full w-full"
@@ -10,6 +11,7 @@
       :watermark-component="watermarkComponent"
       :default-tab-component="defaultTabComponent"
       :prefix-header-actions-component="prefixHeaderActionsComponent"
+      :left-header-actions-component="leftHeaderActionsComponent"
       :right-header-actions-component="rightHeaderActionsComponent"
       :theme="memohTheme"
       :disable-floating-groups="true"
@@ -50,6 +52,7 @@ import WorkspaceWatermark from './dockview/workspace-watermark.vue'
 import WorkspaceTabHost from './dockview/workspace-tab-host.vue'
 import TerminalTab from './dockview/terminal-tab.vue'
 import GroupActions from './dockview/group-actions.vue'
+import HeaderAddActions from './dockview/header-add-actions.vue'
 import PrefixHeaderActions from './dockview/prefix-header-actions.vue'
 import TabCloseConfirm from './dockview/tab-close-confirm.vue'
 
@@ -97,6 +100,10 @@ const tabComponents: Record<string, VueComponent> = {
   terminalTab: TerminalTab as unknown as VueComponent,
 }
 const defaultTabComponent = WorkspaceTabHost as unknown as VueComponent
+// "+" cluster: leftActions renders right after the tabs (so it hugs the last
+// tab, Chrome-style), while Preview pins to rightActions at the strip's far
+// right. The growing void between them is dockview's droppable empty header.
+const leftHeaderActionsComponent = HeaderAddActions as unknown as VueComponent
 const rightHeaderActionsComponent = GroupActions as unknown as VueComponent
 const prefixHeaderActionsComponent = PrefixHeaderActions as unknown as VueComponent
 
