@@ -123,10 +123,15 @@ export default defineConfig(async ({ command }) => {
         },
       },
       optimizeDeps: {
+        // Only pre-bundle from the renderer entry — scanning all web pages
+        // forces esbuild to crawl Monaco/xterm/ECharts/Mermaid/etc. on every
+        // new import, which during AI-assisted editing triggers repeated
+        // full dev-server restarts and page reloads.
         entries: [
           'src/renderer/src/main.ts',
-          '../web/src/main.ts',
-          '../web/src/pages/**/*.vue',
+        ],
+        exclude: [
+          '@memohai/web',
         ],
       },
       build: {
@@ -139,6 +144,9 @@ export default defineConfig(async ({ command }) => {
       server: {
         port,
         host,
+        hmr: {
+          overlay: false,
+        },
         proxy: {
           '/api': {
             target: baseUrl,

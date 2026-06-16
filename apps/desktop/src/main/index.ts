@@ -610,7 +610,11 @@ function createChatWindow(): BrowserWindow {
   })
   attachWindowStatePersistence(window, 'chat', CHAT_DEFAULTS)
 
-  window.on('ready-to-show', () => {
+  // ready-to-show fires on initial load AND every subsequent full reload
+  // (including HMR-triggered full page reloads during AI-assisted editing).
+  // Guarding with `once` ensures the window shows only on the first load —
+  // it will never steal focus again on subsequent reloads.
+  window.once('ready-to-show', () => {
     restoreWindowMaximized(window, 'chat')
     window.show()
   })
