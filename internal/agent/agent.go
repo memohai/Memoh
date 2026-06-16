@@ -510,6 +510,9 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 					ch, cfg, sdkTools, approvalTools, prepareStep, streamResult,
 					stepNumber, errMsg, &allText, textLoopProbeBuffer,
 				)
+				if !aborted {
+					turnError = ""
+				}
 			} else {
 				aborted = true
 			}

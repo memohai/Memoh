@@ -60,13 +60,22 @@ func (r *Resolver) loadMemoryContextMessage(ctx context.Context, req conversatio
 		return nil
 	}
 	if result == nil || strings.TrimSpace(result.ContextText) == "" {
-		_, _ = r.runChatHook(ctx, req, hooks.EventAfterMemorySearch, func(hreq *hooks.Request) {
+		after, err := r.runChatHook(ctx, req, hooks.EventAfterMemorySearch, func(hreq *hooks.Request) {
 			hreq.Memory = map[string]any{
 				"scope":        "before_chat",
 				"query":        strings.TrimSpace(req.Query),
 				"result_count": 0,
 			}
 		})
+		if err != nil {
+			r.logHookWarn(hooks.EventAfterMemorySearch, req.BotID, req.SessionID, err)
+		}
+		if strings.TrimSpace(after.AppendContext) != "" {
+			return &conversation.ModelMessage{
+				Role:    "user",
+				Content: conversation.NewTextContent(formatResolverHookContext(hooks.EventAfterMemorySearch, after.AppendContext)),
+			}
+		}
 		return nil
 	}
 	after, err := r.runChatHook(ctx, req, hooks.EventAfterMemorySearch, func(hreq *hooks.Request) {

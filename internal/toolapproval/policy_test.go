@@ -157,7 +157,7 @@ func TestOperationForTool(t *testing.T) {
 			t.Fatalf("OperationForTool(%q) = %q, %v; want %q, true", tool, got, ok, want)
 		}
 	}
-	if got, ok := OperationForTool("web_search"); !ok || got != OperationTool {
-		t.Fatalf("OperationForTool(web_search) = %q, %v; want %q, true", got, ok, OperationTool)
+	if got, ok := OperationForTool("web_search"); ok || got != "" {
+		t.Fatalf("OperationForTool(web_search) = %q, %v; want unsupported", got, ok)
 	}
 }

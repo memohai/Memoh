@@ -92,7 +92,7 @@ func TestToolApprovalRequestsConstrainOperationNotToolName(t *testing.T) {
 			if !strings.Contains(tableSQL, operationColumn) {
 				t.Fatalf("%s missing tool approval operation column %q", path, operationColumn)
 			}
-			const operationCheck = "CHECK (operation IN ('read', 'write', 'exec', 'tool'))"
+			const operationCheck = "CHECK (operation IN ('read', 'write', 'exec'))"
 			if !strings.Contains(tableSQL, operationCheck) {
 				t.Fatalf("%s missing Memoh-native tool approval operation CHECK %q", path, operationCheck)
 			}

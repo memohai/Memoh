@@ -79,7 +79,7 @@ func OperationForTool(toolName string) (string, bool) {
 	case "exec":
 		return OperationExec, true
 	default:
-		return OperationTool, true
+		return "", false
 	}
 }
 

@@ -535,7 +535,7 @@ CREATE TABLE IF NOT EXISTS tool_approval_requests (
   conversation_type TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   decided_at TIMESTAMPTZ,
-  CONSTRAINT tool_approval_operation_check CHECK (operation IN ('read', 'write', 'exec', 'tool')),
+  CONSTRAINT tool_approval_operation_check CHECK (operation IN ('read', 'write', 'exec')),
   CONSTRAINT tool_approval_status_check CHECK (status IN ('pending', 'approved', 'rejected', 'expired', 'cancelled')),
   CONSTRAINT tool_approval_short_id_unique UNIQUE (session_id, short_id),
   CONSTRAINT tool_approval_tool_call_unique UNIQUE (session_id, tool_call_id)

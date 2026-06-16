@@ -15,7 +15,6 @@ const (
 	OperationRead  = "read"
 	OperationWrite = "write"
 	OperationExec  = "exec"
-	OperationTool  = "tool"
 
 	DecisionBypass        = "bypass"
 	DecisionNeedsApproval = "needs_approval"

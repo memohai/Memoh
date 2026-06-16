@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -172,6 +173,9 @@ func (h *HooksHandler) Test(c echo.Context) error {
 		},
 	}})
 	if err != nil {
+		if errors.Is(err, hooks.ErrDenied) {
+			return c.JSON(http.StatusOK, HookTestResponse{ConfigExists: exists, Result: result})
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, HookTestResponse{ConfigExists: exists, Result: result})
