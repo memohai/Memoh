@@ -461,6 +461,9 @@ func (s *Server) execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.Ex
 	if err := cmd.Start(); err != nil {
 		return status.Errorf(codes.Internal, "start: %v", err)
 	}
+	if data := firstMsg.GetStdinData(); len(data) > 0 {
+		_, _ = stdinPipe.Write(data)
+	}
 
 	go func() {
 		select {

@@ -614,6 +614,8 @@ function sourceKindLabel(kind?: string) {
       return t('bots.skills.legacyBadge')
     case 'compat':
       return t('bots.skills.compatBadge')
+    case 'plugin':
+      return t('bots.skills.pluginBadge')
     default:
       return t('bots.skills.managedBadge')
   }

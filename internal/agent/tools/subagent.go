@@ -19,6 +19,7 @@ import (
 
 	"github.com/memohai/memoh/internal/agent/background"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/hooks"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/providers"
@@ -171,6 +172,7 @@ type SpawnProvider struct {
 	systemPromptFn func(sessionType string) string
 	modelCreator   ModelCreator
 	bgManager      *background.Manager
+	hookService    *hooks.Service
 	modelResolver  func(ctx context.Context, botID string) (*sdk.Model, string, string, error)
 	coord          *agentCoordinator
 	logger         *slog.Logger
@@ -210,6 +212,10 @@ func (p *SpawnProvider) SetMessageService(w messagepkg.Service) {
 
 func (p *SpawnProvider) SetSystemPromptFunc(fn func(sessionType string) string) {
 	p.systemPromptFn = fn
+}
+
+func (p *SpawnProvider) SetHookService(h *hooks.Service) {
+	p.hookService = h
 }
 
 func (p *SpawnProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
@@ -748,6 +754,20 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		TaskID:    req.taskID,
 		Message:   req.message,
 	}
+	if err := p.runSubagentHook(ctx, hooks.EventSubagentStart, req, res); err != nil {
+		res.Error = err.Error()
+		res.Status = string(background.TaskFailed)
+		return res
+	}
+	defer func() {
+		if err := p.runSubagentHook(context.WithoutCancel(ctx), hooks.EventSubagentStop, req, res); err != nil && p.logger != nil {
+			p.logger.Warn("subagent stop hook failed",
+				slog.String("bot_id", req.parentSession.BotID),
+				slog.String("agent_id", req.agentID),
+				slog.Any("error", err),
+			)
+		}
+	}()
 	history := p.loadAgentMessages(context.WithoutCancel(ctx), req.agentSessionID)
 	cfg := SpawnRunConfig{
 		Model:          req.model,
@@ -808,6 +828,44 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 	}
 	res.Error = fmt.Sprintf("all %d attempts failed (last: %v)", subagentMaxRetries+1, lastErr)
 	return res
+}
+
+func (p *SpawnProvider) runSubagentHook(ctx context.Context, eventName string, req *agentRequest, result agentRunResult) error {
+	if p == nil || p.hookService == nil || req == nil {
+		return nil
+	}
+	extra := map[string]any{
+		"agent_id":         req.agentID,
+		"agent_session_id": req.agentSessionID,
+		"task_id":          req.taskID,
+		"message":          req.message,
+	}
+	if strings.TrimSpace(result.Status) != "" {
+		extra["status"] = result.Status
+	}
+	if strings.TrimSpace(result.Error) != "" {
+		extra["error"] = result.Error
+	}
+	if strings.TrimSpace(result.Text) != "" {
+		extra["text_bytes"] = len(result.Text)
+	}
+	hreq := hooks.Request{
+		Version:   1,
+		Event:     eventName,
+		BotID:     req.parentSession.BotID,
+		SessionID: req.parentSession.SessionID,
+		ChatID:    req.parentSession.ChatID,
+		Workspace: hooks.WorkspaceInfo{CWD: hooks.DefaultWorkDir},
+		Extra:     extra,
+	}
+	res, err := p.hookService.Run(ctx, hreq, nil)
+	if err != nil {
+		return err
+	}
+	if res.Decision == hooks.DecisionDeny {
+		return hooks.ErrDenied
+	}
+	return nil
 }
 
 func (p *SpawnProvider) createAgentSession(ctx context.Context, parent SessionContext, agentID, task string) (agentRecord, error) {

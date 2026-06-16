@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/hooks"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 )
 
@@ -37,6 +38,18 @@ func (r *Resolver) loadMemoryContextMessage(ctx context.Context, req conversatio
 	if p == nil {
 		return nil
 	}
+	before, err := r.runChatHook(ctx, req, hooks.EventBeforeMemorySearch, func(hreq *hooks.Request) {
+		hreq.Memory = map[string]any{
+			"scope": "before_chat",
+			"query": strings.TrimSpace(req.Query),
+		}
+	})
+	if err != nil {
+		r.logHookWarn(hooks.EventBeforeMemorySearch, req.BotID, req.SessionID, err)
+		if before.Decision == hooks.DecisionDeny {
+			return nil
+		}
+	}
 	result, err := p.OnBeforeChat(ctx, memprovider.BeforeChatRequest{
 		Query:  req.Query,
 		BotID:  req.BotID,
@@ -47,11 +60,42 @@ func (r *Resolver) loadMemoryContextMessage(ctx context.Context, req conversatio
 		return nil
 	}
 	if result == nil || strings.TrimSpace(result.ContextText) == "" {
+		after, err := r.runChatHook(ctx, req, hooks.EventAfterMemorySearch, func(hreq *hooks.Request) {
+			hreq.Memory = map[string]any{
+				"scope":        "before_chat",
+				"query":        strings.TrimSpace(req.Query),
+				"result_count": 0,
+			}
+		})
+		if err != nil {
+			r.logHookWarn(hooks.EventAfterMemorySearch, req.BotID, req.SessionID, err)
+		}
+		if strings.TrimSpace(after.AppendContext) != "" {
+			return &conversation.ModelMessage{
+				Role:    "user",
+				Content: conversation.NewTextContent(formatResolverHookContext(hooks.EventAfterMemorySearch, after.AppendContext)),
+			}
+		}
 		return nil
+	}
+	after, err := r.runChatHook(ctx, req, hooks.EventAfterMemorySearch, func(hreq *hooks.Request) {
+		hreq.Memory = map[string]any{
+			"scope":         "before_chat",
+			"query":         strings.TrimSpace(req.Query),
+			"result_count":  1,
+			"context_bytes": len(result.ContextText),
+		}
+	})
+	if err != nil {
+		r.logHookWarn(hooks.EventAfterMemorySearch, req.BotID, req.SessionID, err)
+	}
+	contextText := result.ContextText
+	if strings.TrimSpace(after.AppendContext) != "" {
+		contextText += "\n\n" + formatResolverHookContext(hooks.EventAfterMemorySearch, after.AppendContext)
 	}
 	return &conversation.ModelMessage{
 		Role:    "user",
-		Content: conversation.NewTextContent(result.ContextText),
+		Content: conversation.NewTextContent(contextText),
 	}
 }
 
@@ -69,6 +113,18 @@ func (r *Resolver) storeMemory(ctx context.Context, req conversation.ChatRequest
 	if p == nil {
 		return
 	}
+	before, err := r.runChatHook(ctx, req, hooks.EventBeforeMemoryWrite, func(hreq *hooks.Request) {
+		hreq.Memory = map[string]any{
+			"scope":         "after_chat",
+			"message_count": len(memMsgs),
+		}
+	})
+	if err != nil {
+		r.logHookWarn(hooks.EventBeforeMemoryWrite, botID, req.SessionID, err)
+		if before.Decision == hooks.DecisionDeny {
+			return
+		}
+	}
 	_, tzLoc := r.resolveTimezone(ctx, req.BotID, req.UserID)
 	if err := p.OnAfterChat(ctx, memprovider.AfterChatRequest{
 		BotID:             botID,
@@ -79,6 +135,21 @@ func (r *Resolver) storeMemory(ctx context.Context, req conversation.ChatRequest
 		TimezoneLocation:  tzLoc,
 	}); err != nil {
 		r.logger.Warn("memory provider OnAfterChat failed", slog.String("bot_id", botID), slog.Any("error", err))
+		return
+	}
+	_, _ = r.runChatHook(ctx, req, hooks.EventMemoryExtracted, func(hreq *hooks.Request) {
+		hreq.Memory = map[string]any{
+			"scope":         "after_chat",
+			"message_count": len(memMsgs),
+		}
+	})
+	if _, err := r.runChatHook(ctx, req, hooks.EventAfterMemoryWrite, func(hreq *hooks.Request) {
+		hreq.Memory = map[string]any{
+			"scope":         "after_chat",
+			"message_count": len(memMsgs),
+		}
+	}); err != nil {
+		r.logHookWarn(hooks.EventAfterMemoryWrite, botID, req.SessionID, err)
 	}
 }
 

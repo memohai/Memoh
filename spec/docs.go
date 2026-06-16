@@ -3509,6 +3509,101 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/hooks/events": {
+            "get": {
+                "tags": [
+                    "hooks"
+                ],
+                "summary": "List supported bot hook events",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.HooksEventsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/hooks/test": {
+            "post": {
+                "tags": [
+                    "hooks"
+                ],
+                "summary": "Run bot hooks for a synthetic event",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Hook test payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.HookTestRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.HookTestResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/local/messages": {
             "post": {
                 "description": "Post a user message (with optional attachments) through the local channel pipeline.",
@@ -5160,56 +5255,6 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/plugins.ListResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "tags": [
-                    "plugins"
-                ],
-                "summary": "Install bot plugin from manifest",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Plugin install request",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/plugins.InstallRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/plugins.Installation"
                         }
                     },
                     "400": {
@@ -15404,6 +15449,94 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.HookEventInfo": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "runtime_supported": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "handlers.HookTestRequest": {
+            "type": "object",
+            "properties": {
+                "approval": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "channel": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "chat_id": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "event": {
+                    "type": "string"
+                },
+                "extra": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "memory": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "tool": {
+                    "$ref": "#/definitions/hooks.ToolPayload"
+                },
+                "turn": {
+                    "type": "object",
+                    "additionalProperties": {}
+                }
+            }
+        },
+        "handlers.HookTestResponse": {
+            "type": "object",
+            "properties": {
+                "config_exists": {
+                    "type": "boolean"
+                },
+                "result": {
+                    "$ref": "#/definitions/hooks.Result"
+                }
+            }
+        },
+        "handlers.HooksEventsResponse": {
+            "type": "object",
+            "properties": {
+                "actions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "config_path": {
+                    "type": "string"
+                },
+                "decisions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.HookEventInfo"
+                    }
+                }
+            }
+        },
         "handlers.InstallPluginRequest": {
             "type": "object",
             "properties": {
@@ -16418,6 +16551,89 @@ const docTemplate = `{
                 "usage": {}
             }
         },
+        "hooks.ActionResult": {
+            "type": "object",
+            "properties": {
+                "action_type": {
+                    "type": "string"
+                },
+                "decision": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "exit_code": {
+                    "type": "integer"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "result": {},
+                "stderr": {
+                    "type": "string"
+                },
+                "stdout": {
+                    "type": "string"
+                }
+            }
+        },
+        "hooks.Result": {
+            "type": "object",
+            "properties": {
+                "action_results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/hooks.ActionResult"
+                    }
+                },
+                "actions_run": {
+                    "type": "integer"
+                },
+                "append_context": {
+                    "type": "string"
+                },
+                "decision": {
+                    "type": "string"
+                },
+                "hooks_matched": {
+                    "type": "integer"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "runtime_supported": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "hooks.ToolPayload": {
+            "type": "object",
+            "properties": {
+                "call_id": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "input": {},
+                "name": {
+                    "type": "string"
+                },
+                "result": {}
+            }
+        },
         "mcp.AuthorizeResult": {
             "type": "object",
             "properties": {
@@ -16933,20 +17149,6 @@ const docTemplate = `{
                 },
                 "url": {
                     "type": "string"
-                }
-            }
-        },
-        "plugins.InstallRequest": {
-            "type": "object",
-            "properties": {
-                "manifest": {
-                    "$ref": "#/definitions/plugins.Manifest"
-                },
-                "variables": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
                 }
             }
         },
@@ -17883,14 +18085,14 @@ const docTemplate = `{
         "settings.ToolApprovalConfig": {
             "type": "object",
             "properties": {
-                "edit": {
-                    "$ref": "#/definitions/settings.ToolApprovalFilePolicy"
-                },
                 "enabled": {
                     "type": "boolean"
                 },
                 "exec": {
                     "$ref": "#/definitions/settings.ToolApprovalExecPolicy"
+                },
+                "read": {
+                    "$ref": "#/definitions/settings.ToolApprovalFilePolicy"
                 },
                 "write": {
                     "$ref": "#/definitions/settings.ToolApprovalFilePolicy"

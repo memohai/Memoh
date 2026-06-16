@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -16,9 +17,10 @@ import (
 )
 
 type legacyRouteTestService struct {
-	container ctr.ContainerInfo
-	created   bool
-	byLabel   []ctr.ContainerInfo
+	container  ctr.ContainerInfo
+	created    bool
+	byLabel    []ctr.ContainerInfo
+	createdReq ctr.CreateContainerRequest
 
 	createCalls int
 	startCalls  int
@@ -92,6 +94,7 @@ func (*legacyRouteTestService) ResolveRemoteDigest(context.Context, string) (str
 func (s *legacyRouteTestService) CreateContainer(_ context.Context, req ctr.CreateContainerRequest) (ctr.ContainerInfo, error) {
 	s.createCalls++
 	s.created = true
+	s.createdReq = req
 	s.container = ctr.ContainerInfo{
 		ID:         req.ID,
 		Image:      req.ImageRef,
@@ -213,6 +216,68 @@ func newLegacyRouteTestManager(t *testing.T, svc runtimeService, cfg config.Work
 	}
 	m.grpcPool = bridge.NewPool(m.dialTarget)
 	return m
+}
+
+func TestBuildWorkspaceContainerSpecInjectsBridgeTLSMaterial(t *testing.T) {
+	dataRoot := t.TempDir()
+	runtimeDir := t.TempDir()
+	bridgeDir := t.TempDir()
+	expectedClientURI := config.ServerClientSPIFFE("instance-1")
+	m := newLegacyRouteTestManager(t, &legacyRouteTestService{}, config.WorkspaceConfig{
+		DataRoot:   dataRoot,
+		RuntimeDir: runtimeDir,
+	})
+	m.SetBridgeTLS(&BridgeTLSRuntimeOptions{
+		Client:            &bridge.TLSOptions{},
+		BridgeMaterialDir: bridgeDir,
+		ExpectedClientURI: expectedClientURI,
+	})
+
+	spec, err := m.buildWorkspaceContainerSpec(context.Background(), "00000000-0000-0000-0000-000000000001", WorkspaceGPUConfig{})
+	if err != nil {
+		t.Fatalf("build spec: %v", err)
+	}
+
+	var foundMount bool
+	for _, mount := range spec.Mounts {
+		if mount.Destination == bridgeMTLSMountPath {
+			foundMount = true
+			if mount.Source != bridgeDir {
+				t.Fatalf("bridge TLS mount source = %q, want %q", mount.Source, bridgeDir)
+			}
+			if strings.Join(mount.Options, ",") != "rbind,ro" {
+				t.Fatalf("bridge TLS mount options = %v", mount.Options)
+			}
+		}
+	}
+	if !foundMount {
+		t.Fatalf("missing bridge TLS mount at %s", bridgeMTLSMountPath)
+	}
+
+	env := envMap(spec.Env)
+	wantEnv := map[string]string{
+		"BRIDGE_TLS_MODE":                config.BridgeTLSModeStrict,
+		"BRIDGE_TLS_CERT_FILE":           bridgeMTLSMountPath + "/" + bridgeServerCertFile,
+		"BRIDGE_TLS_KEY_FILE":            bridgeMTLSMountPath + "/" + bridgeServerKeyFile,
+		"BRIDGE_TLS_CLIENT_CA_FILE":      bridgeMTLSMountPath + "/" + serverClientCACertFile,
+		"BRIDGE_TLS_EXPECTED_CLIENT_URI": expectedClientURI,
+	}
+	for key, want := range wantEnv {
+		if got := env[key]; got != want {
+			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
+
+func envMap(items []string) map[string]string {
+	out := make(map[string]string, len(items))
+	for _, item := range items {
+		key, value, ok := strings.Cut(item, "=")
+		if ok {
+			out[key] = value
+		}
+	}
+	return out
 }
 
 func TestStartWithImageClearsLegacyRouteForBridgeContainer(t *testing.T) {

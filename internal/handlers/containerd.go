@@ -40,6 +40,7 @@ type ContainerdHandler struct {
 	botService       *bots.Service
 	accountService   *accounts.Service
 	policyService    *policy.Service
+	pluginService    PluginInstallationLister
 	displayService   *displaypkg.Service
 	browserSessions  *browserSessionStore
 }

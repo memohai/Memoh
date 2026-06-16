@@ -1,5 +1,9 @@
 package settings
 
+import (
+	"encoding/json"
+)
+
 const (
 	DefaultLanguage          = "auto"
 	DefaultCommandUILanguage = "auto"
@@ -73,8 +77,8 @@ type UpsertRequest struct {
 
 type ToolApprovalConfig struct {
 	Enabled bool                   `json:"enabled"`
+	Read    ToolApprovalFilePolicy `json:"read"`
 	Write   ToolApprovalFilePolicy `json:"write"`
-	Edit    ToolApprovalFilePolicy `json:"edit"`
 	Exec    ToolApprovalExecPolicy `json:"exec"`
 }
 
@@ -94,12 +98,12 @@ func DefaultToolApprovalConfig() ToolApprovalConfig {
 	fileBypass := []string{"/data/**", "/tmp/**"}
 	return ToolApprovalConfig{
 		Enabled: false,
-		Write: ToolApprovalFilePolicy{
-			RequireApproval:  true,
-			BypassGlobs:      append([]string(nil), fileBypass...),
+		Read: ToolApprovalFilePolicy{
+			RequireApproval:  false,
+			BypassGlobs:      []string{},
 			ForceReviewGlobs: []string{},
 		},
-		Edit: ToolApprovalFilePolicy{
+		Write: ToolApprovalFilePolicy{
 			RequireApproval:  true,
 			BypassGlobs:      append([]string(nil), fileBypass...),
 			ForceReviewGlobs: []string{},
@@ -115,10 +119,152 @@ func DefaultToolApprovalConfig() ToolApprovalConfig {
 func NormalizeToolApprovalConfig(cfg ToolApprovalConfig) ToolApprovalConfig {
 	defaults := DefaultToolApprovalConfig()
 	defaults.Enabled = cfg.Enabled
+	defaults.Read = normalizeFilePolicy(cfg.Read, defaults.Read)
 	defaults.Write = normalizeFilePolicy(cfg.Write, defaults.Write)
-	defaults.Edit = normalizeFilePolicy(cfg.Edit, defaults.Edit)
 	defaults.Exec = normalizeExecPolicy(cfg.Exec, defaults.Exec)
 	return defaults
+}
+
+func (c *ToolApprovalConfig) UnmarshalJSON(data []byte) error {
+	defaults := DefaultToolApprovalConfig()
+	*c = defaults
+	if len(data) == 0 || string(data) == "null" {
+		return nil
+	}
+	var raw struct {
+		Enabled *bool           `json:"enabled"`
+		Read    json.RawMessage `json:"read"`
+		Write   json.RawMessage `json:"write"`
+		Edit    json.RawMessage `json:"edit"`
+		Exec    json.RawMessage `json:"exec"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.Enabled != nil {
+		c.Enabled = *raw.Enabled
+	}
+	if len(raw.Read) > 0 {
+		policy, err := unmarshalFilePolicy(raw.Read, defaults.Read)
+		if err != nil {
+			return err
+		}
+		c.Read = policy
+	}
+	writePolicy := defaults.Write
+	if len(raw.Write) > 0 {
+		policy, err := unmarshalFilePolicy(raw.Write, defaults.Write)
+		if err != nil {
+			return err
+		}
+		writePolicy = policy
+	}
+	if len(raw.Edit) > 0 {
+		policy, err := unmarshalFilePolicy(raw.Edit, defaults.Write)
+		if err != nil {
+			return err
+		}
+		writePolicy = mergeFilePolicies(writePolicy, policy)
+	}
+	c.Write = writePolicy
+	if len(raw.Exec) > 0 {
+		policy, err := unmarshalExecPolicy(raw.Exec, defaults.Exec)
+		if err != nil {
+			return err
+		}
+		c.Exec = policy
+	}
+	return nil
+}
+
+func unmarshalFilePolicy(data []byte, defaults ToolApprovalFilePolicy) (ToolApprovalFilePolicy, error) {
+	policy := cloneFilePolicy(defaults)
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return policy, err
+	}
+	if value, ok := raw["require_approval"]; ok {
+		if err := json.Unmarshal(value, &policy.RequireApproval); err != nil {
+			return policy, err
+		}
+	}
+	if value, ok := raw["bypass_globs"]; ok {
+		if err := json.Unmarshal(value, &policy.BypassGlobs); err != nil {
+			return policy, err
+		}
+	}
+	if value, ok := raw["force_review_globs"]; ok {
+		if err := json.Unmarshal(value, &policy.ForceReviewGlobs); err != nil {
+			return policy, err
+		}
+	}
+	return policy, nil
+}
+
+func unmarshalExecPolicy(data []byte, defaults ToolApprovalExecPolicy) (ToolApprovalExecPolicy, error) {
+	policy := cloneExecPolicy(defaults)
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return policy, err
+	}
+	if value, ok := raw["require_approval"]; ok {
+		if err := json.Unmarshal(value, &policy.RequireApproval); err != nil {
+			return policy, err
+		}
+	}
+	if value, ok := raw["bypass_commands"]; ok {
+		if err := json.Unmarshal(value, &policy.BypassCommands); err != nil {
+			return policy, err
+		}
+	}
+	if value, ok := raw["force_review_commands"]; ok {
+		if err := json.Unmarshal(value, &policy.ForceReviewCommands); err != nil {
+			return policy, err
+		}
+	}
+	return policy, nil
+}
+
+func cloneFilePolicy(policy ToolApprovalFilePolicy) ToolApprovalFilePolicy {
+	return ToolApprovalFilePolicy{
+		RequireApproval:  policy.RequireApproval,
+		BypassGlobs:      append([]string(nil), policy.BypassGlobs...),
+		ForceReviewGlobs: append([]string(nil), policy.ForceReviewGlobs...),
+	}
+}
+
+func cloneExecPolicy(policy ToolApprovalExecPolicy) ToolApprovalExecPolicy {
+	return ToolApprovalExecPolicy{
+		RequireApproval:     policy.RequireApproval,
+		BypassCommands:      append([]string(nil), policy.BypassCommands...),
+		ForceReviewCommands: append([]string(nil), policy.ForceReviewCommands...),
+	}
+}
+
+func mergeFilePolicies(left, right ToolApprovalFilePolicy) ToolApprovalFilePolicy {
+	return ToolApprovalFilePolicy{
+		RequireApproval:  left.RequireApproval || right.RequireApproval,
+		BypassGlobs:      mergeStringLists(left.BypassGlobs, right.BypassGlobs),
+		ForceReviewGlobs: mergeStringLists(left.ForceReviewGlobs, right.ForceReviewGlobs),
+	}
+}
+
+func mergeStringLists(left, right []string) []string {
+	if len(left) == 0 && len(right) == 0 {
+		return []string{}
+	}
+	seen := make(map[string]struct{}, len(left)+len(right))
+	out := make([]string, 0, len(left)+len(right))
+	for _, list := range [][]string{left, right} {
+		for _, item := range list {
+			if _, ok := seen[item]; ok {
+				continue
+			}
+			seen[item] = struct{}{}
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func normalizeFilePolicy(policy, defaults ToolApprovalFilePolicy) ToolApprovalFilePolicy {

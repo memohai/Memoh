@@ -219,6 +219,11 @@ Key local developer guides:
 - `apps/desktop/AGENTS.md` — Electron shell, local server lifecycle, bundled CLI.
 - `packages/ui/AGENTS.md` — design language contract: tokens, radius, shadow, motion, and the UI contract guard.
 
+### README Localization
+
+- Keep `README.md`, `README_CN.md`, and `README_JA.md` in sync when changing public README content, navigation links, install snippets, or waitlist/product announcements.
+- For Japanese copy, use natural Japanese phrasing while preserving product and technical terms that Japanese users commonly read in English, such as Agent, Bot, Workspace, MCP, Browser Use, Computer Use, SaaS, Desktop, and Web UI.
+
 Bot persona templates (not developer guides):
 - `cmd/bridge/template/AGENTS.md`
 - `internal/workspace/templates/AGENTS.md`

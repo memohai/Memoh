@@ -22,6 +22,10 @@ type FlowService interface {
 	WaitForDecision(ctx context.Context, approvalID string) (Request, error)
 }
 
+type ApprovalTimeoutNotifier interface {
+	NotifyApprovalTimeout(ctx context.Context, req Request)
+}
+
 // FlowRequest parameterizes one run of the pending-approval state machine.
 type FlowRequest struct {
 	Input CreatePendingInput
@@ -166,6 +170,9 @@ func RunFlow(ctx context.Context, svc FlowService, flow FlowRequest) (FlowResult
 			timeoutReq := req
 			timeoutReq.Status = StatusRejected
 			timeoutReq.DecisionReason = reason
+			if notifier, ok := svc.(ApprovalTimeoutNotifier); ok {
+				notifier.NotifyApprovalTimeout(rejectCtx, timeoutReq)
+			}
 			_ = emit(timeoutReq)
 			return FlowResult{Status: StatusRejected, DecisionReason: reason}, nil
 		}
@@ -278,6 +285,9 @@ func RequestMetadata(req Request) map[string]any {
 		"short_id":    req.ShortID,
 		"status":      status,
 		"can_approve": CanApprove(status),
+	}
+	if operation := strings.TrimSpace(req.Operation); operation != "" {
+		metadata["operation"] = operation
 	}
 	if reason := strings.TrimSpace(req.DecisionReason); reason != "" {
 		metadata["decision_reason"] = reason

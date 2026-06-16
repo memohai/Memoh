@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { toast } from '@memohai/ui'
 import enMessages from '@/i18n/locales/en.json'
 import zhMessages from '@/i18n/locales/zh.json'
+import jaMessages from '@/i18n/locales/ja.json'
 import { useRetryingStream } from '@/composables/useRetryingStream'
 import { useUserStore } from '@/store/user'
 import { useChatSelectionStore } from '@/store/chat-selection'
@@ -139,11 +140,12 @@ function currentLocale() {
   const locale = typeof storage?.getItem !== 'function'
     ? ''
     : storage.getItem('language')
-  return locale === 'zh' ? 'zh' : 'en'
+  return locale === 'zh' || locale === 'ja' ? locale : 'en'
 }
 
 function userInputConnectionLostMessage() {
-  const messages = currentLocale() === 'zh' ? zhMessages : enMessages
+  const locale = currentLocale()
+  const messages = locale === 'zh' ? zhMessages : locale === 'ja' ? jaMessages : enMessages
   return messages.chat.tools.userInputConnectionLost
 }
 

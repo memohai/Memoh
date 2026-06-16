@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/bots"
+	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace"
 )
@@ -47,6 +48,14 @@ type SkillsActionRequest struct {
 
 type skillsOpResponse struct {
 	OK bool `json:"ok"`
+}
+
+type PluginInstallationLister interface {
+	List(ctx context.Context, botID string) ([]pluginspkg.Installation, error)
+}
+
+func (h *ContainerdHandler) SetPluginService(service PluginInstallationLister) {
+	h.pluginService = service
 }
 
 // ListSkills godoc
@@ -192,12 +201,12 @@ func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("container not reachable: %v", err))
 	}
-	roots, err := h.skillDiscoveryRoots(ctx, botID)
+	roots, pluginRoots, err := h.skillDiscoveryRoots(ctx, botID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	if err := skillset.ApplyAction(ctx, client, roots, skillset.ActionRequest{
+	if err := skillset.ApplyActionWithPluginRoots(ctx, client, roots, pluginRoots, skillset.ActionRequest{
 		Action:     req.Action,
 		TargetPath: req.TargetPath,
 	}); err != nil {
@@ -213,11 +222,11 @@ func (h *ContainerdHandler) LoadSkills(ctx context.Context, botID string) ([]Ski
 	if err != nil {
 		return nil, err
 	}
-	roots, err := h.skillDiscoveryRoots(ctx, botID)
+	roots, pluginRoots, err := h.skillDiscoveryRoots(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
-	items, err := skillset.LoadEffective(ctx, client, roots)
+	items, err := skillset.LoadEffectiveWithPluginRoots(ctx, client, roots, pluginRoots)
 	if err != nil {
 		return nil, err
 	}
@@ -229,28 +238,64 @@ func (h *ContainerdHandler) listSkillsFromContainer(ctx context.Context, botID s
 	if err != nil {
 		return nil, err
 	}
-	roots, err := h.skillDiscoveryRoots(ctx, botID)
+	roots, pluginRoots, err := h.skillDiscoveryRoots(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
-	items, err := skillset.List(ctx, client, roots)
+	items, err := skillset.ListWithPluginRoots(ctx, client, roots, pluginRoots)
 	if err != nil {
 		return nil, err
 	}
 	return skillItemsFromEntries(items), nil
 }
 
-func (h *ContainerdHandler) skillDiscoveryRoots(ctx context.Context, botID string) ([]string, error) {
+func (h *ContainerdHandler) skillDiscoveryRoots(ctx context.Context, botID string) ([]string, []string, error) {
+	var roots []string
 	if h.botService != nil {
 		bot, err := h.botService.Get(ctx, botID)
 		if err == nil {
-			return workspace.SkillDiscoveryRootsFromMetadata(bot.Metadata), nil
+			roots = workspace.SkillDiscoveryRootsFromMetadata(bot.Metadata)
+			pluginRoots, err := h.pluginSkillRoots(ctx, botID)
+			return roots, pluginRoots, err
 		}
 	}
 	if h.manager == nil {
+		return nil, nil, nil
+	}
+	var err error
+	roots, err = h.manager.ResolveWorkspaceSkillDiscoveryRoots(ctx, botID)
+	if err != nil {
+		return nil, nil, err
+	}
+	pluginRoots, err := h.pluginSkillRoots(ctx, botID)
+	return roots, pluginRoots, err
+}
+
+func (h *ContainerdHandler) pluginSkillRoots(ctx context.Context, botID string) ([]string, error) {
+	if h.pluginService == nil {
 		return nil, nil
 	}
-	return h.manager.ResolveWorkspaceSkillDiscoveryRoots(ctx, botID)
+	installations, err := h.pluginService.List(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	roots := make([]string, 0, len(installations))
+	seen := make(map[string]struct{}, len(installations))
+	for _, installation := range installations {
+		if !installation.Enabled || installation.Status == pluginspkg.StatusUninstalled {
+			continue
+		}
+		root, err := skillset.PluginSkillsDirForID(installation.PluginID)
+		if err != nil {
+			continue
+		}
+		if _, ok := seen[root]; ok {
+			continue
+		}
+		seen[root] = struct{}{}
+		roots = append(roots, root)
+	}
+	return roots, nil
 }
 
 func skillItemsFromEntries(entries []skillset.Entry) []SkillItem {

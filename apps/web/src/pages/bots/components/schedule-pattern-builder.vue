@@ -374,7 +374,7 @@ const emit = defineEmits<{
 
 const { locale, t } = useI18n()
 
-const cronLocale = computed<CronLocale>(() => (locale.value.startsWith('zh') ? 'zh' : 'en'))
+const cronLocale = computed<CronLocale>(() => (locale.value.startsWith('zh') ? 'zh' : locale.value.startsWith('ja') ? 'ja' : 'en'))
 
 const effectiveTimezone = computed(() => {
   const tz = props.timezone?.trim()
@@ -497,7 +497,7 @@ const upcomingRuns = computed(() => {
 const modeHint = computed(() => t(`bots.schedule.modeHint.${props.state.mode}`))
 
 const previewFormatter = computed(() => new Intl.DateTimeFormat(
-  locale.value.startsWith('zh') ? 'zh-CN' : 'en-US',
+  locale.value.startsWith('zh') ? 'zh-CN' : locale.value.startsWith('ja') ? 'ja-JP' : 'en-US',
   {
     timeZone: effectiveTimezone.value,
     year: 'numeric',

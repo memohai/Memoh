@@ -40,12 +40,12 @@ func BuildPrompt(req Request) channel.Message {
 }
 
 func summarizeInput(req Request) string {
-	switch req.ToolName {
-	case "write", "edit":
+	switch req.Operation {
+	case OperationRead, OperationWrite:
 		if path, ok := req.ToolInput["path"].(string); ok && strings.TrimSpace(path) != "" {
 			return strings.TrimSpace(path)
 		}
-	case "exec":
+	case OperationExec:
 		if command, ok := req.ToolInput["command"].(string); ok && strings.TrimSpace(command) != "" {
 			return strings.TrimSpace(command)
 		}

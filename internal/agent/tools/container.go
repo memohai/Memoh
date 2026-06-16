@@ -17,6 +17,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/background"
+	"github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
@@ -39,11 +40,12 @@ const largeFileThreshold = 512 * 1024 // 512 KB
 type ContainerProvider struct {
 	clients     bridge.Provider
 	bgManager   *background.Manager
+	hookService *hooks.Service
 	execWorkDir string
 	logger      *slog.Logger
 }
 
-func NewContainerProvider(log *slog.Logger, clients bridge.Provider, bgManager *background.Manager, execWorkDir string) *ContainerProvider {
+func NewContainerProvider(log *slog.Logger, clients bridge.Provider, bgManager *background.Manager, execWorkDir string, hookServices ...*hooks.Service) *ContainerProvider {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -51,7 +53,15 @@ func NewContainerProvider(log *slog.Logger, clients bridge.Provider, bgManager *
 	if wd == "" {
 		wd = defaultContainerExecWorkDir
 	}
-	return &ContainerProvider{clients: clients, bgManager: bgManager, execWorkDir: wd, logger: log.With(slog.String("tool", "container"))}
+	var hookService *hooks.Service
+	if len(hookServices) > 0 {
+		hookService = hookServices[0]
+	}
+	return &ContainerProvider{clients: clients, bgManager: bgManager, hookService: hookService, execWorkDir: wd, logger: log.With(slog.String("tool", "container"))}
+}
+
+func (p *ContainerProvider) SetHookService(h *hooks.Service) {
+	p.hookService = h
 }
 
 func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
@@ -292,6 +302,55 @@ func (p *ContainerProvider) resolveToolWorkspace(ctx context.Context, session Se
 	}
 }
 
+func (p *ContainerProvider) hookWorkspaceInfo(ctx context.Context, session SessionContext) hooks.WorkspaceInfo {
+	info := hooks.WorkspaceInfo{
+		CWD:     p.execWorkDir,
+		Runtime: bridge.WorkspaceBackendContainer,
+	}
+	if resolver, ok := p.clients.(bridge.WorkspaceInfoProvider); ok {
+		if resolved, err := resolver.WorkspaceInfo(ctx, session.BotID); err == nil {
+			if strings.TrimSpace(resolved.DefaultWorkDir) != "" {
+				info.CWD = resolved.DefaultWorkDir
+			}
+			if strings.TrimSpace(resolved.Backend) != "" {
+				info.Runtime = resolved.Backend
+			}
+		}
+	}
+	if strings.TrimSpace(info.CWD) == "" {
+		info.CWD = hooks.DefaultWorkDir
+	}
+	return info
+}
+
+func (p *ContainerProvider) runWorkspaceToolHook(ctx context.Context, session SessionContext, eventName string, extra map[string]any) (hooks.Result, error) {
+	if p == nil || p.hookService == nil {
+		return hooks.Result{Decision: hooks.DecisionAllow, RuntimeSupported: hooks.RuntimeSupported(eventName)}, nil
+	}
+	req := hooks.Request{
+		Version:   1,
+		Event:     eventName,
+		BotID:     session.BotID,
+		SessionID: session.SessionID,
+		ChatID:    session.ChatID,
+		Workspace: p.hookWorkspaceInfo(ctx, session),
+		Extra:     extra,
+	}
+	return p.hookService.Run(ctx, req, nil)
+}
+
+func (p *ContainerProvider) logWorkspaceToolHookError(eventName, botID, sessionID string, err error) {
+	if p == nil || p.logger == nil || err == nil {
+		return
+	}
+	p.logger.Warn("workspace tool hook failed",
+		slog.String("event", eventName),
+		slog.String("bot_id", botID),
+		slog.String("session_id", sessionID),
+		slog.Any("error", err),
+	)
+}
+
 func (*ContainerProvider) normalizePath(path, workDir string) string {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -431,6 +490,15 @@ func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContex
 	}
 
 	data := []byte(content)
+	if res, err := p.runWorkspaceToolHook(ctx, session, hooks.EventBeforeFileWrite, map[string]any{
+		"path":  filePath,
+		"bytes": len(data),
+	}); err != nil {
+		if res.Decision == hooks.DecisionDeny {
+			return nil, err
+		}
+		return nil, fmt.Errorf("before file write hook failed: %w", err)
+	}
 	if len(data) > largeFileThreshold {
 		// Large content: use streaming WriteRaw to avoid loading everything
 		// into a single gRPC message and to allow incremental transfer.
@@ -442,6 +510,12 @@ func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContex
 		if err := client.WriteFile(opCtx, filePath, data); err != nil {
 			return nil, err
 		}
+	}
+	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, hooks.EventAfterFileWrite, map[string]any{
+		"path":  filePath,
+		"bytes": len(data),
+	}); err != nil {
+		p.logWorkspaceToolHookError(hooks.EventAfterFileWrite, session.BotID, session.SessionID, err)
 	}
 	return map[string]any{"ok": true}, nil
 }
@@ -550,6 +624,16 @@ func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext
 	}
 
 	updatedBytes := []byte(updated)
+	if res, err := p.runWorkspaceToolHook(ctx, session, hooks.EventBeforeFileWrite, map[string]any{
+		"path":  filePath,
+		"bytes": len(updatedBytes),
+		"mode":  "edit",
+	}); err != nil {
+		if res.Decision == hooks.DecisionDeny {
+			return nil, err
+		}
+		return nil, fmt.Errorf("before file write hook failed: %w", err)
+	}
 	if len(updatedBytes) > largeFileThreshold {
 		// Large result: stream-write to avoid gRPC message size issues.
 		if _, err := client.WriteRaw(opCtx, filePath, strings.NewReader(updated)); err != nil {
@@ -559,6 +643,13 @@ func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext
 		if err := client.WriteFile(opCtx, filePath, updatedBytes); err != nil {
 			return nil, err
 		}
+	}
+	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, hooks.EventAfterFileWrite, map[string]any{
+		"path":  filePath,
+		"bytes": len(updatedBytes),
+		"mode":  "edit",
+	}); err != nil {
+		p.logWorkspaceToolHookError(hooks.EventAfterFileWrite, session.BotID, session.SessionID, err)
 	}
 	return map[string]any{"ok": true}, nil
 }
@@ -604,23 +695,61 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 
 	// Background execution path.
 	if runInBg && p.bgManager != nil {
-		return p.execExecBackground(ctx, session, client, command, workDir, description)
+		return p.execWithWorkspaceHooks(ctx, session, command, workDir, timeout, true, func() (any, error) {
+			return p.execExecBackground(ctx, session, client, command, workDir, description)
+		})
 	}
 
 	// If we have a background manager, use streaming exec so we can flip
 	// to background on timeout without killing the process.
 	if p.bgManager != nil {
-		return p.execExecWithFlip(ctx, session, client, command, workDir, description, timeout)
+		return p.execWithWorkspaceHooks(ctx, session, command, workDir, timeout, false, func() (any, error) {
+			return p.execExecWithFlip(ctx, session, client, command, workDir, description, timeout)
+		})
 	}
 
 	// Fallback: no background manager, plain synchronous exec.
-	result, err := client.Exec(ctx, command, workDir, timeout)
+	wrapped, err := p.execWithWorkspaceHooks(ctx, session, command, workDir, timeout, false, func() (any, error) {
+		result, err := client.Exec(ctx, command, workDir, timeout)
+		if err != nil {
+			return nil, err
+		}
+		stdout := pruneToolOutputText(result.Stdout, "tool result (exec stdout)")
+		stderr := pruneToolOutputText(result.Stderr, "tool result (exec stderr)")
+		return map[string]any{"stdout": stdout, "stderr": stderr, "exit_code": result.ExitCode}, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	stdout := pruneToolOutputText(result.Stdout, "tool result (exec stdout)")
-	stderr := pruneToolOutputText(result.Stderr, "tool result (exec stderr)")
-	return map[string]any{"stdout": stdout, "stderr": stderr, "exit_code": result.ExitCode}, nil
+	return wrapped, nil
+}
+
+func (p *ContainerProvider) execWithWorkspaceHooks(ctx context.Context, session SessionContext, command, workDir string, timeout int32, background bool, run func() (any, error)) (any, error) {
+	if res, err := p.runWorkspaceToolHook(ctx, session, hooks.EventBeforeWorkspaceCommand, map[string]any{
+		"command":           command,
+		"work_dir":          workDir,
+		"timeout_seconds":   timeout,
+		"run_in_background": background,
+	}); err != nil {
+		if res.Decision == hooks.DecisionDeny {
+			return nil, err
+		}
+		return nil, fmt.Errorf("before workspace command hook failed: %w", err)
+	}
+	result, runErr := run()
+	extra := map[string]any{
+		"command":           command,
+		"work_dir":          workDir,
+		"timeout_seconds":   timeout,
+		"run_in_background": background,
+	}
+	if runErr != nil {
+		extra["error"] = runErr.Error()
+	}
+	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, hooks.EventAfterWorkspaceCommand, extra); err != nil {
+		p.logWorkspaceToolHookError(hooks.EventAfterWorkspaceCommand, session.BotID, session.SessionID, err)
+	}
+	return result, runErr
 }
 
 const backgroundReplayBytes = 4096

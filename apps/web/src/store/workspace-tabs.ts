@@ -36,19 +36,20 @@ const DEFAULT_BROWSER_ADDRESS = 'localhost:5173/'
 // (≈554:269) — enough room to work in without burying the conversation.
 const TERMINAL_PANEL_HEIGHT_RATIO = 1 / 3
 
-export type WorkspacePanelComponent = 'chat' | 'file' | 'preview' | 'asset' | 'terminal' | 'browser' | 'display'
+export type WorkspacePanelComponent = 'chat' | 'file' | 'preview' | 'asset' | 'terminal' | 'browser' | 'display' | 'schedule'
 
 interface BotLayoutState {
   layout: SerializedDockview | null
   terminalCounter: number
   browserCounter: number
   displayCounter: number
+  scheduleCounter: number
 }
 
 type WorkspaceLayoutStorage = Record<string, BotLayoutState>
 
 function emptyBotLayout(): BotLayoutState {
-  return { layout: null, terminalCounter: 0, browserCounter: 0, displayCounter: 0 }
+  return { layout: null, terminalCounter: 0, browserCounter: 0, displayCounter: 0, scheduleCounter: 0 }
 }
 
 function fileBaseName(filePath: string): string {
@@ -64,6 +65,7 @@ function panelComponentOf(id: string): WorkspacePanelComponent | null {
   if (id.startsWith('terminal:')) return 'terminal'
   if (id.startsWith('browser:')) return 'browser'
   if (id.startsWith('display:')) return 'display'
+  if (id.startsWith('schedule:')) return 'schedule'
   return null
 }
 
@@ -149,6 +151,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!storage.value[bid]) {
       storage.value = { ...storage.value, [bid]: emptyBotLayout() }
     }
+    const state = storage.value[bid]
+    if (state && typeof state.scheduleCounter !== 'number') {
+      storage.value = { ...storage.value, [bid]: { ...emptyBotLayout(), ...state, scheduleCounter: 0 } }
+    }
     return storage.value[bid] ?? null
   }
 
@@ -221,6 +227,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     } catch {
       // Serialization should never throw, but a failed save must not break UI.
     }
+  }
+
+  function focusPanel(panel: unknown) {
+    (panel as { api?: { setActive?: () => void } }).api?.setActive?.()
   }
 
   function restoreLayout(botId: string) {
@@ -442,7 +452,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!dock) return false
     const existing = dock.getPanel(options.id)
     if (existing) {
-      existing.api.setActive()
+      focusPanel(existing)
       return true
     }
     const target = nonTerminalTarget(dock, options.groupId)
@@ -562,7 +572,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const id = `preview:${path}`
     const existing = dock.getPanel(id)
     if (existing) {
-      existing.api.setActive()
+      focusPanel(existing)
       return
     }
     // Split to the right of the source editor's own group (the preview action
@@ -656,7 +666,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!dock) return
     const existing = dock.panels.find((panel) => panel.id.startsWith('display:'))
     if (existing) {
-      existing.api.setActive()
+      focusPanel(existing)
       return
     }
     const bid = (currentBotId.value ?? '').trim()
@@ -758,6 +768,29 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         })
         break
       }
+      case 'schedule': {
+        if (!hasCurrentPermission('manage')) return
+        dock.addPanel({
+          id: uniqueSplitPanelId(source.id),
+          component: 'schedule',
+          title,
+          params: params ? { ...params } : undefined,
+          renderer: 'always',
+          position,
+        })
+        break
+      }
+      case 'asset': {
+        dock.addPanel({
+          id: uniqueSplitPanelId(source.id),
+          component: 'asset',
+          title,
+          params: params ? { ...params } : undefined,
+          renderer: 'always',
+          position,
+        })
+        break
+      }
       case 'chat':
         // The chat conversation is a singleton (one fixed panel id), so it can't
         // be duplicated into a split. The "+" menu hides split while chat is the
@@ -765,6 +798,34 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         // collide with the existing panel).
         break
     }
+  }
+
+  function openSchedule(scheduleId?: string, title?: string, groupId?: string) {
+    if (!hasCurrentPermission('manage')) return
+    const bid = (currentBotId.value ?? '').trim()
+    if (!bid) return
+    const panelTitle = title?.trim() || 'Schedule'
+    const state = ensureBotLayout(bid)
+    if (!state) return
+    const panelId = scheduleId
+      ? `schedule:${scheduleId}`
+      : `schedule:new:${state.scheduleCounter + 1}`
+    const panel = api.value?.getPanel(panelId)
+    if (panel) {
+      panel.api.setTitle(panelTitle)
+      focusPanel(panel)
+      return
+    }
+    if (!scheduleId) {
+      patchBotLayout(bid, { scheduleCounter: state.scheduleCounter + 1 })
+    }
+    focusOrAdd({
+      id: panelId,
+      component: 'schedule',
+      title: panelTitle,
+      params: { scheduleId },
+      groupId,
+    })
   }
 
   function closeTab(id: string) {
@@ -888,6 +949,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         return hasCurrentPermission('workspace_exec')
       case 'browser':
       case 'display':
+      case 'schedule':
         return hasCurrentPermission('manage')
       default:
         return false
@@ -1057,6 +1119,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     openBrowser,
     openDisplay,
     splitGroup,
+    openSchedule,
     closeTab,
     requestCloseTab,
     requestCloseTabs,

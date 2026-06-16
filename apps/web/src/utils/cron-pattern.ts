@@ -1,5 +1,6 @@
 import cronstrue from 'cronstrue'
 import 'cronstrue/locales/zh_CN'
+import 'cronstrue/locales/ja'
 import { CronExpressionParser } from 'cron-parser'
 
 export type ScheduleMode =
@@ -249,7 +250,7 @@ export function fromCron(pattern: string): ScheduleFormState {
 
 // --- preview helpers ---------------------------------------------------------
 
-export type CronLocale = 'en' | 'zh'
+export type CronLocale = 'en' | 'zh' | 'ja'
 
 // Returns a localized human-readable description of the cron pattern, or
 // undefined if cronstrue cannot parse it.
@@ -258,7 +259,7 @@ export function describeCron(pattern: string, locale: CronLocale): string | unde
   if (!trimmed) return undefined
   try {
     return cronstrue.toString(trimmed, {
-      locale: locale === 'zh' ? 'zh_CN' : 'en',
+      locale: locale === 'zh' ? 'zh_CN' : locale,
       use24HourTimeFormat: true,
       throwExceptionOnParseError: true,
       verbose: false,

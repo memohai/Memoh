@@ -22,7 +22,9 @@ RUN set -eux; \
       return 1; \
     }; \
     . /tmp/memoh-desktop-install.sh; \
+    export MEMOH_DISPLAY_INSTALL_ASSETS_GLOBAL=1; \
     install_debian; \
+    unset MEMOH_DISPLAY_INSTALL_ASSETS_GLOBAL; \
     rm -rf /var/lib/apt/lists/* /tmp/memoh-desktop-install.sh; \
     mkdir -p /data /tmp/.X11-unix; \
     chmod 0755 /data; \

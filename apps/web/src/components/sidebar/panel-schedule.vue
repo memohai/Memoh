@@ -3,7 +3,7 @@
     <!-- No bot -->
     <p
       v-if="!currentBotId"
-      class="px-[23px] pt-3 text-caption text-muted-foreground/60"
+      class="px-[23px] pt-3 text-[11px] text-muted-foreground/60"
     >
       {{ t('chat.noBotSelected') }}
     </p>
@@ -11,7 +11,7 @@
     <!-- Loading (initial) -->
     <div
       v-else-if="isLoading && schedules.length === 0"
-      class="flex items-center gap-2 px-[23px] pt-3 text-caption text-muted-foreground/60"
+      class="flex items-center gap-2 px-[23px] pt-3 text-[11px] text-muted-foreground/60"
     >
       <Spinner class="size-3" />
     </div>
@@ -26,12 +26,12 @@
         v-if="groupedSchedules.length === 0"
         class="px-2 pt-2 space-y-1.5"
       >
-        <p class="pl-[11px] text-caption text-muted-foreground/60">
+        <p class="pl-[11px] text-[11px] text-muted-foreground/60">
           {{ t('bots.schedule.empty') }}
         </p>
         <button
           type="button"
-          class="pl-[11px] text-left text-caption text-muted-foreground transition-colors hover:text-foreground"
+          class="pl-[11px] text-left text-[11px] text-muted-foreground transition-colors hover:text-foreground"
           @click="handleManage"
         >
           + {{ t('bots.schedule.create') }}
@@ -44,12 +44,6 @@
           v-for="(group, groupIdx) in groupedSchedules"
           :key="group.key"
         >
-          <!-- Separator between groups -->
-          <div
-            v-if="groupIdx > 0"
-            class="mx-3 my-1.5 h-px bg-border/50"
-          />
-
           <!-- Group header: time label + gear (first group only) -->
           <div class="flex h-8 items-center px-2 mt-2">
             <span class="flex-1 pl-[11px] text-xs font-[550] tracking-[-0.02em] text-muted-foreground/80">
@@ -73,62 +67,19 @@
 
           <!-- Cards in group -->
           <div class="px-2 pb-1 space-y-1.5">
-            <div
+            <ScheduleListItem
               v-for="item in group.tasks"
               :key="item.id"
-              class="group/card relative flex items-center rounded-[var(--radius-menu-shell)] border border-border bg-card transition-colors hover:bg-accent/30 dark:hover:bg-accent"
-            >
-              <button
-                type="button"
-                class="min-w-0 flex-1 px-3 py-2.5 text-left"
-                @click="handleOpenTask(item)"
-              >
-                <p class="truncate text-control font-normal text-foreground leading-snug">
-                  {{ item.name }}
-                </p>
-                <p class="truncate text-caption text-muted-foreground mt-0.5 leading-snug">
-                  {{ item.description?.trim() || describeItem(item.pattern) || item.pattern }}
-                </p>
-              </button>
-
-              <!-- Hover actions -->
-              <div
-                class="flex shrink-0 items-center pr-1.5 opacity-0 transition-opacity group-hover/card:opacity-100"
-                :class="openMenuIds.has(item.id ?? '') ? 'opacity-100' : ''"
-                @click.stop
-              >
-                <DropdownMenu @update:open="(open: boolean) => { if (open) openMenuIds.add(item.id ?? ''); else openMenuIds.delete(item.id ?? '') }">
-                  <DropdownMenuTrigger as-child>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      class="size-6"
-                      :aria-label="t('common.actions')"
-                    >
-                      <MoreHorizontal class="size-3.5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      class="gap-2"
-                      @select="handleOpenTask(item)"
-                    >
-                      <Pencil class="size-3.5" />
-                      {{ t('bots.schedule.edit') }}
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      variant="destructive"
-                      class="gap-2"
-                      @select="deleteTarget = item"
-                    >
-                      <Trash2 class="size-3.5" />
-                      {{ t('bots.schedule.delete') }}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </div>
+              :item="item"
+              variant="sidebar"
+              :description="item.description?.trim() || describeItem(item.pattern) || item.pattern || ''"
+              :time-label="nextRunTimeLabel(item)"
+              :busy="busyIds.has(item.id ?? '')"
+              @open="handleOpenTask(item)"
+              @edit="handleOpenTask(item)"
+              @delete="deleteTarget = item"
+              @toggle="(enabled) => handleToggleEnabled(item, enabled)"
+            />
           </div>
         </div>
       </template>
@@ -174,25 +125,22 @@
 import { ref, watch, computed, onMounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
-import { useRouter } from 'vue-router'
-import { MoreHorizontal, Pencil, Settings2, Trash2 } from 'lucide-vue-next'
+import { Settings2 } from 'lucide-vue-next'
 import { toast } from '@memohai/ui'
 import { useQueryCache } from '@pinia/colada'
 import {
   Button, Spinner,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
-  DropdownMenu, DropdownMenuContent, DropdownMenuTrigger,
-  DropdownMenuItem, DropdownMenuSeparator,
 } from '@memohai/ui'
-import { getBotsByBotIdSchedule, deleteBotsByBotIdScheduleById } from '@memohai/sdk'
+import { getBotsByBotIdSchedule, deleteBotsByBotIdScheduleById, putBotsByBotIdScheduleById } from '@memohai/sdk'
 import type { ScheduleSchedule } from '@memohai/sdk'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { describeCron, nextRuns } from '@/utils/cron-pattern'
+import ScheduleListItem from '@/pages/bots/components/schedule-list-item.vue'
 
 const { t, locale } = useI18n()
-const router = useRouter()
 const chatStore = useChatStore()
 const { currentBotId } = storeToRefs(chatStore)
 const workspaceTabs = useWorkspaceTabsStore()
@@ -201,18 +149,18 @@ const queryCache = useQueryCache()
 
 const isLoading = ref(false)
 const schedules = ref<ScheduleSchedule[]>([])
-const openMenuIds = reactive(new Set<string>())
 const deleteTarget = ref<ScheduleSchedule | null>(null)
 const isDeleting = ref(false)
+const busyIds = reactive(new Set<string>())
 
-const cronLocale = computed<'en' | 'zh'>(() => (locale.value.startsWith('zh') ? 'zh' : 'en'))
-const uiLocale = computed(() => locale.value.startsWith('zh') ? 'zh-CN' : 'en-US')
+const cronLocale = computed<'en' | 'zh' | 'ja'>(() => (locale.value.startsWith('zh') ? 'zh' : locale.value.startsWith('ja') ? 'ja' : 'en'))
+const uiLocale = computed(() => locale.value.startsWith('zh') ? 'zh-CN' : locale.value.startsWith('ja') ? 'ja-JP' : 'en-US')
 
 const effectiveTimezone = computed(() => {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return 'UTC' }
 })
 
-// --- Grouping by exact (day + HH:MM) ---
+// --- Grouping by day; each item carries its own next-run time. ---
 
 interface ScheduleGroup {
   key: string
@@ -229,24 +177,19 @@ function isSameDay(a: Date, b: Date) {
 function groupLabel(date: Date, now: Date): string {
   const tomorrow = new Date(now)
   tomorrow.setDate(now.getDate() + 1)
-  const timeStr = date.toLocaleTimeString(uiLocale.value, { hour: '2-digit', minute: '2-digit', hour12: false })
   const diff = date.getTime() - now.getTime()
   const week = 7 * 86_400_000
 
   if (isSameDay(date, now)) {
-    const todayWord = locale.value.startsWith('zh') ? '今天' : 'Today'
-    return `${todayWord} · ${timeStr}`
+    return locale.value.startsWith('zh') ? '今天' : locale.value.startsWith('ja') ? '今日' : 'Today'
   }
   if (isSameDay(date, tomorrow)) {
-    const tomorrowWord = locale.value.startsWith('zh') ? '明天' : 'Tomorrow'
-    return `${tomorrowWord} · ${timeStr}`
+    return locale.value.startsWith('zh') ? '明天' : locale.value.startsWith('ja') ? '明日' : 'Tomorrow'
   }
   if (diff < week) {
-    const dayAbbr = date.toLocaleDateString(uiLocale.value, { weekday: 'short' })
-    return `${dayAbbr} · ${timeStr}`
+    return date.toLocaleDateString(uiLocale.value, { weekday: 'short' })
   }
-  const dateStr = date.toLocaleDateString(uiLocale.value, { month: 'short', day: 'numeric' })
-  return `${dateStr} · ${timeStr}`
+  return date.toLocaleDateString(uiLocale.value, { month: 'short', day: 'numeric' })
 }
 
 const groupedSchedules = computed<ScheduleGroup[]>(() => {
@@ -261,10 +204,10 @@ const groupedSchedules = computed<ScheduleGroup[]>(() => {
     return [{ task, next }]
   })
 
-  // Group by (year, month, day, hour, minute) — exact time
+  // Group by day; cards inside each group still sort by their exact next run.
   const map = new Map<string, { date: Date; tasks: ScheduleSchedule[] }>()
   for (const { task, next } of pairs) {
-    const key = `${next.getFullYear()}-${next.getMonth()}-${next.getDate()}-${next.getHours()}-${next.getMinutes()}`
+    const key = `${next.getFullYear()}-${next.getMonth()}-${next.getDate()}`
     if (!map.has(key)) map.set(key, { date: next, tasks: [] })
     map.get(key)!.tasks.push(task)
   }
@@ -274,7 +217,11 @@ const groupedSchedules = computed<ScheduleGroup[]>(() => {
     .map(([key, { date, tasks }]) => ({
       key,
       label: groupLabel(date, now),
-      tasks,
+      tasks: tasks.sort((a, b) => {
+        const aTime = nextRunForItem(a)?.getTime() ?? Infinity
+        const bTime = nextRunForItem(b)?.getTime() ?? Infinity
+        return aTime - bTime
+      }),
     }))
 })
 
@@ -283,6 +230,17 @@ const groupedSchedules = computed<ScheduleGroup[]>(() => {
 function describeItem(pattern: string | undefined): string | undefined {
   if (!pattern) return undefined
   return describeCron(pattern, cronLocale.value)
+}
+
+function nextRunForItem(item: ScheduleSchedule): Date | null {
+  if (!item.pattern) return null
+  return nextRuns(item.pattern, effectiveTimezone.value, 1)[0] ?? null
+}
+
+function nextRunTimeLabel(item: ScheduleSchedule): string {
+  const next = nextRunForItem(item)
+  if (!next) return item.pattern ?? ''
+  return next.toLocaleTimeString(uiLocale.value, { hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
 async function fetchSchedules() {
@@ -338,16 +296,36 @@ async function confirmDelete() {
   }
 }
 
+async function handleToggleEnabled(item: ScheduleSchedule, enabled: boolean) {
+  const id = item.id
+  const botId = currentBotId.value
+  if (!id || !botId) return
+  busyIds.add(id)
+  try {
+    await putBotsByBotIdScheduleById({
+      path: { bot_id: botId, id },
+      body: { enabled },
+      throwOnError: true,
+    })
+    await fetchSchedules()
+    queryCache.invalidateQueries({ key: ['bot-schedule', botId] })
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('bots.schedule.saveFailed')))
+  } finally {
+    busyIds.delete(id)
+  }
+}
+
 function handleManage() {
   const botId = currentBotId.value
   if (!botId) return
-  void router.push({ name: 'bot-detail', params: { botName: botId }, query: { tab: 'schedule' } })
+  workspaceTabs.openSchedule()
 }
 
-function handleOpenTask(_item: ScheduleSchedule) {
+function handleOpenTask(item: ScheduleSchedule) {
   const botId = currentBotId.value
   if (!botId) return
-  void router.push({ name: 'bot-detail', params: { botName: botId }, query: { tab: 'schedule' } })
+  workspaceTabs.openSchedule(item.id, item.name)
 }
 
 onMounted(() => void fetchSchedules())

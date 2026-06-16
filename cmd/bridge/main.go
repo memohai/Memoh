@@ -142,9 +142,9 @@ func main() {
 		return
 	}
 
-	srv := grpc.NewServer(
-		grpc.MaxRecvMsgSize(16*1024*1024),
-		grpc.MaxSendMsgSize(16*1024*1024),
+	serverOpts := []grpc.ServerOption{
+		grpc.MaxRecvMsgSize(16 * 1024 * 1024),
+		grpc.MaxSendMsgSize(16 * 1024 * 1024),
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			MaxConnectionIdle:     5 * time.Minute,
 			MaxConnectionAge:      30 * time.Minute,
@@ -156,7 +156,21 @@ func main() {
 			MinTime:             10 * time.Second,
 			PermitWithoutStream: true,
 		}),
-	)
+	}
+	// strict mTLS 只约束 TCP 通道；UDS 走文件系统 socket 权限的本地信任模型。
+	// strict 下材料缺失/损坏直接拒绝启动，不回退明文（设计 §10）。
+	if network == "tcp" {
+		creds, err := bridgeServerCredentials()
+		if err != nil {
+			logger.Error("bridge TLS configuration invalid", slog.Any("error", err))
+			return
+		}
+		if creds != nil {
+			serverOpts = append(serverOpts, grpc.Creds(creds))
+			logger.Info("bridge TCP gRPC requires mTLS", slog.String("mode", bridgeTLSModeStrict))
+		}
+	}
+	srv := grpc.NewServer(serverOpts...)
 	pb.RegisterContainerServiceServer(srv, bridgesvc.New(bridgesvc.Options{
 		DefaultWorkDir:    bridgesvc.DefaultWorkDir,
 		DataMount:         bridgesvc.DefaultWorkDir,

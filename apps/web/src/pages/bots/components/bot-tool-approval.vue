@@ -150,52 +150,20 @@ import type { SettingsSettings } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import SettingsSection from '@/components/settings/section.vue'
 import PageShell from '@/components/page-shell/index.vue'
+import {
+  defaultToolApprovalConfig,
+  normalizeToolApprovalConfig,
+  type ApprovalTool,
+  type ToolApprovalConfig,
+  type ToolApprovalExecPolicy,
+  type ToolApprovalFilePolicy,
+} from './tool-approval-config'
 
 const props = defineProps<{
   botId: string
 }>()
 
-type ApprovalTool = 'write' | 'edit' | 'exec'
-
-interface ToolApprovalFilePolicy {
-  require_approval: boolean
-  bypass_globs: string[]
-  force_review_globs: string[]
-}
-
-interface ToolApprovalExecPolicy {
-  require_approval: boolean
-  bypass_commands: string[]
-  force_review_commands: string[]
-}
-
-interface ToolApprovalConfig {
-  enabled: boolean
-  write: ToolApprovalFilePolicy
-  edit: ToolApprovalFilePolicy
-  exec: ToolApprovalExecPolicy
-}
-
-const defaultToolApprovalConfig = (): ToolApprovalConfig => ({
-  enabled: false,
-  write: {
-    require_approval: true,
-    bypass_globs: ['/data/**', '/tmp/**'],
-    force_review_globs: [],
-  },
-  edit: {
-    require_approval: true,
-    bypass_globs: ['/data/**', '/tmp/**'],
-    force_review_globs: [],
-  },
-  exec: {
-    require_approval: false,
-    bypass_commands: [],
-    force_review_commands: [],
-  },
-})
-
-const approvalTools: ApprovalTool[] = ['write', 'edit', 'exec']
+const approvalTools: ApprovalTool[] = ['read', 'write', 'exec']
 
 const { t } = useI18n()
 
@@ -234,30 +202,6 @@ const behaviorItems = computed(() => [
   { value: 'review', label: t('bots.toolApproval.behavior.review') },
   { value: 'auto', label: t('bots.toolApproval.behavior.auto') },
 ])
-
-function normalizeToolApprovalConfig(raw: unknown): ToolApprovalConfig {
-  const defaults = defaultToolApprovalConfig()
-  if (!raw || typeof raw !== 'object') return defaults
-  const value = raw as Partial<ToolApprovalConfig>
-  return {
-    enabled: value.enabled ?? defaults.enabled,
-    write: {
-      require_approval: value.write?.require_approval ?? defaults.write.require_approval,
-      bypass_globs: value.write?.bypass_globs ?? defaults.write.bypass_globs,
-      force_review_globs: value.write?.force_review_globs ?? defaults.write.force_review_globs,
-    },
-    edit: {
-      require_approval: value.edit?.require_approval ?? defaults.edit.require_approval,
-      bypass_globs: value.edit?.bypass_globs ?? defaults.edit.bypass_globs,
-      force_review_globs: value.edit?.force_review_globs ?? defaults.edit.force_review_globs,
-    },
-    exec: {
-      require_approval: value.exec?.require_approval ?? defaults.exec.require_approval,
-      bypass_commands: value.exec?.bypass_commands ?? defaults.exec.bypass_commands,
-      force_review_commands: value.exec?.force_review_commands ?? defaults.exec.force_review_commands,
-    },
-  }
-}
 
 function toolApprovalPolicy(tool: ApprovalTool) {
   return form.tool_approval_config[tool]
@@ -314,8 +258,8 @@ function toggleExpanded(tool: ApprovalTool) {
 function resetToRecommended() {
   const defaults = defaultToolApprovalConfig()
   // Keep the enable state — it's the user's top-level decision, not a rule.
+  form.tool_approval_config.read = defaults.read
   form.tool_approval_config.write = defaults.write
-  form.tool_approval_config.edit = defaults.edit
   form.tool_approval_config.exec = defaults.exec
 }
 

@@ -108,7 +108,7 @@ func TestCommandLanguageResultMarksCurrentTokensCanonical(t *testing.T) {
 		t.Fatal("expected choices")
 	}
 	var markedKey string
-	keys := map[string]string{"自动": "auto", "English": "en", "中文": "zh"}
+	keys := map[string]string{"自动": "auto", "English": "en", "中文": "zh", "日本語": "ja"}
 	for _, c := range res.Interactive.Choices.Choices {
 		wantKey, ok := keys[c.Label]
 		if !ok {

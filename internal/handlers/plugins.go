@@ -36,7 +36,6 @@ func NewPluginsHandler(log *slog.Logger, service *pluginspkg.Service, botService
 func (h *PluginsHandler) Register(e *echo.Echo) {
 	group := e.Group("/bots/:bot_id/plugins")
 	group.GET("", h.List)
-	group.POST("", h.Install)
 	group.GET("/:id", h.Get)
 	group.POST("/:id/enable", h.Enable)
 	group.POST("/:id/disable", h.Disable)
@@ -88,32 +87,6 @@ func (h *PluginsHandler) List(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, pluginspkg.ListResponse{Items: items})
-}
-
-// Install godoc
-// @Summary Install bot plugin from manifest
-// @Tags plugins
-// @Param bot_id path string true "Bot ID"
-// @Param payload body plugins.InstallRequest true "Plugin install request"
-// @Success 201 {object} plugins.Installation
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/plugins [post].
-func (h *PluginsHandler) Install(c echo.Context) error {
-	botID, err := h.requireBotAccess(c)
-	if err != nil {
-		return err
-	}
-	var req pluginspkg.InstallRequest
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	resp, err := h.service.Install(c.Request().Context(), botID, req)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	return c.JSON(http.StatusCreated, resp)
 }
 
 // Get godoc

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
@@ -205,8 +206,25 @@ func (p *ContainerProvider) execApplyPatch(ctx context.Context, session SessionC
 	if err != nil {
 		return nil, err
 	}
+	if res, err := p.runWorkspaceToolHook(ctx, session, hooks.EventBeforeFileWrite, map[string]any{
+		"operation": "apply_patch",
+		"summary":   plan.summary(),
+		"files":     plan.files(),
+	}); err != nil {
+		if res.Decision == hooks.DecisionDeny {
+			return nil, err
+		}
+		return nil, fmt.Errorf("before file write hook failed: %w", err)
+	}
 	if err := commitApplyPatchPlan(opCtx, client, plan); err != nil {
 		return nil, err
+	}
+	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, hooks.EventAfterFileWrite, map[string]any{
+		"operation": "apply_patch",
+		"summary":   plan.summary(),
+		"files":     plan.files(),
+	}); err != nil {
+		p.logWorkspaceToolHookError(hooks.EventAfterFileWrite, session.BotID, session.SessionID, err)
 	}
 
 	return map[string]any{

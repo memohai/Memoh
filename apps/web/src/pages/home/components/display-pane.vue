@@ -390,7 +390,7 @@ const statusLabel = computed(() => {
 
 const preparePercent = computed(() => Math.max(0, Math.min(100, Math.round(prepareProgress.value?.percent ?? 0))))
 
-const prepareStageOrder = ['checking', 'system', 'installing', 'browser', 'starting', 'desktop', 'complete']
+const prepareStageOrder = ['checking', 'system', 'installing', 'browser', 'starting', 'desktop', 'styling', 'complete']
 
 const prepareStages = computed<PrepareStage[]>(() => {
   const current = prepareProgress.value?.step ?? 'checking'
@@ -1082,6 +1082,7 @@ function prepareEventMessage(event: DisplayPrepareStreamEvent): string {
     case 'browser': return t('chat.display.prepare.browser')
     case 'starting': return t('chat.display.prepare.starting')
     case 'desktop': return t('chat.display.prepare.desktop')
+    case 'styling': return t('chat.display.prepare.styling')
     case 'complete': return t('chat.display.prepare.complete')
     default: return event.message || t('chat.display.prepare.default')
   }
@@ -1129,7 +1130,6 @@ async function connect() {
   status.value = 'connecting'
   unavailableReason.value = ''
   prepareProgress.value = null
-  startConnectTimeout(attempt)
 
   try {
     let info = await loadDisplayInfo()
@@ -1168,6 +1168,7 @@ async function connect() {
     return
   }
 
+  startConnectTimeout(attempt)
   const next = new RTCPeerConnection()
   peer = next
   inputChannel = next.createDataChannel('display-input', { ordered: true })

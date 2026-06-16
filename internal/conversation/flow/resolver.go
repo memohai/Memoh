@@ -27,6 +27,7 @@ import (
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/hooks"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	messageevent "github.com/memohai/memoh/internal/message/event"
@@ -95,6 +96,7 @@ type Resolver struct {
 	bgManager         *background.Manager
 	toolApproval      *toolapproval.Service
 	userInput         userInputService
+	hookService       *hooks.Service
 	acpPromptMu       sync.Mutex
 	acpPromptHubs     map[string]*acpActivePromptHub
 	// continueUserInputFn overrides the chat-flow resume after a user input
@@ -198,6 +200,10 @@ func (r *Resolver) SetBackgroundManager(m *background.Manager) {
 
 func (r *Resolver) SetToolApprovalService(s *toolapproval.Service) {
 	r.toolApproval = s
+}
+
+func (r *Resolver) SetHookService(s *hooks.Service) {
+	r.hookService = s
 }
 
 func (r *Resolver) SetUserInputService(s *userinput.Service) {
@@ -475,12 +481,17 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	doneTurn := r.enterSessionTurn(ctx, req.BotID, req.SessionID)
 	defer doneTurn()
 
-	rc, err := r.resolve(ctx, req)
+	if req.RawQuery == "" {
+		req.RawQuery = strings.TrimSpace(req.Query)
+	}
+	var err error
+	req, err = r.applyUserMessageHook(ctx, req)
 	if err != nil {
 		return conversation.ChatResponse{}, err
 	}
-	if req.RawQuery == "" {
-		req.RawQuery = strings.TrimSpace(req.Query)
+	rc, err := r.resolve(ctx, req)
+	if err != nil {
+		return conversation.ChatResponse{}, err
 	}
 	req.Query = rc.query
 
@@ -859,9 +870,6 @@ func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.
 				Metadata:   userinput.DeferredMetadata(req),
 			}, nil
 		}
-		if r.toolApproval == nil {
-			return sdk.ToolApprovalResult{Decision: sdk.ToolApprovalDecisionApproved}, nil
-		}
 		input := toolapproval.CreatePendingInput{
 			BotID:                        p.BotID,
 			SessionID:                    p.SessionID,
@@ -875,12 +883,24 @@ func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.
 			ReplyTarget:                  p.ReplyTarget,
 			ConversationType:             p.ConversationType,
 		}
-		eval, err := r.toolApproval.EvaluatePolicy(ctx, input)
-		if err != nil {
-			return sdk.ToolApprovalResult{}, err
-		}
-		if eval.Decision == toolapproval.DecisionBypass {
+		forcedApprovalReason, forcedApproval := agentpkg.HookForcedApprovalReason(ctx)
+		if r.toolApproval == nil {
+			if forcedApproval {
+				return sdk.ToolApprovalResult{
+					Decision: sdk.ToolApprovalDecisionRejected,
+					Reason:   firstNonEmpty(forcedApprovalReason, "hook requested approval but tool approval is not configured"),
+				}, nil
+			}
 			return sdk.ToolApprovalResult{Decision: sdk.ToolApprovalDecisionApproved}, nil
+		}
+		if !forcedApproval {
+			eval, err := r.toolApproval.EvaluatePolicy(ctx, input)
+			if err != nil {
+				return sdk.ToolApprovalResult{}, err
+			}
+			if eval.Decision == toolapproval.DecisionBypass {
+				return sdk.ToolApprovalResult{Decision: sdk.ToolApprovalDecisionApproved}, nil
+			}
 		}
 		if !isInteractiveApprovalSession(p.SessionType) {
 			req, err := r.toolApproval.CreatePending(ctx, input)
@@ -899,7 +919,18 @@ func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.
 				Metadata:   approvalResultMetadata(rejected),
 			}, nil
 		}
-		eval, err = r.toolApproval.Evaluate(ctx, input)
+		if forcedApproval {
+			req, err := r.toolApproval.CreatePending(ctx, input)
+			if err != nil {
+				return sdk.ToolApprovalResult{}, err
+			}
+			return sdk.ToolApprovalResult{
+				Decision:   sdk.ToolApprovalDecisionDeferred,
+				ApprovalID: req.ID,
+				Metadata:   approvalResultMetadata(req),
+			}, nil
+		}
+		eval, err := r.toolApproval.Evaluate(ctx, input)
 		if err != nil {
 			return sdk.ToolApprovalResult{}, err
 		}
@@ -916,6 +947,7 @@ func approvalResultMetadata(req toolapproval.Request) map[string]any {
 		"short_id":     req.ShortID,
 		"status":       req.Status,
 		"tool_name":    req.ToolName,
+		"operation":    req.Operation,
 		"tool_call_id": req.ToolCallID,
 	}
 }
@@ -994,6 +1026,13 @@ func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, chann
 // prepareRunConfig generates the system prompt and appends the user message.
 func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig) agentpkg.RunConfig {
 	supportsImageInput := cfg.SupportsImageInput
+	beforePromptContext := r.runPromptHook(ctx, agentRunConfigView{
+		BotID:        cfg.Identity.BotID,
+		SessionID:    cfg.Identity.SessionID,
+		ChatID:       cfg.Identity.ChatID,
+		SessionType:  cfg.SessionType,
+		MessageCount: len(cfg.Messages),
+	}, hooks.EventBeforePromptBuild)
 	var files []agentpkg.SystemFile
 	if r.agent != nil {
 		nowFn := time.Now
@@ -1031,6 +1070,20 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 		DisplayEnabled:            cfg.DisplayEnabled,
 		PlatformIdentitiesSection: platformIdentitiesSection,
 	})
+	if beforePromptContext != "" {
+		cfg.System += "\n\n" + formatResolverHookContext(hooks.EventBeforePromptBuild, beforePromptContext)
+	}
+	afterPromptContext := r.runPromptHook(ctx, agentRunConfigView{
+		BotID:        cfg.Identity.BotID,
+		SessionID:    cfg.Identity.SessionID,
+		ChatID:       cfg.Identity.ChatID,
+		SessionType:  cfg.SessionType,
+		MessageCount: len(cfg.Messages),
+		SystemBytes:  len(cfg.System),
+	}, hooks.EventAfterPromptBuild)
+	if afterPromptContext != "" {
+		cfg.System += "\n\n" + formatResolverHookContext(hooks.EventAfterPromptBuild, afterPromptContext)
+	}
 
 	if cfg.Query != "" {
 		var extra []sdk.MessagePart

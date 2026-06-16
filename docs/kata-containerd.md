@@ -28,6 +28,74 @@ guest VM. Memoh routes Kata bridge traffic to the workspace CNI IP and disables
 HTTP proxy use for bridge gRPC dials so proxy settings on the server container
 do not intercept private workspace addresses.
 
+For shared deployments, enable `[bridge_tls].mode = "strict"`. The default
+`disabled` mode keeps local installs simple, but it does not protect a shared
+Kata/CNI network from workspace-to-workspace bridge traffic. In a multi-tenant
+Kata deployment, strict bridge mTLS is the required isolation layer unless your
+networking stack independently blocks workspace-to-workspace TCP access.
+
+## Bridge mTLS Material
+
+Generate strict bridge mTLS material with the repository tool instead of
+hand-writing OpenSSL commands:
+
+```bash
+INSTANCE_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+scripts/gen-bridge-mtls.sh \
+  -instance-id "$INSTANCE_ID" \
+  -out /opt/memoh/bridge-mtls
+```
+
+The `mise` equivalent is:
+
+```bash
+mise run bridge:mtls:gen -- \
+  -instance-id "$INSTANCE_ID" \
+  -out /opt/memoh/bridge-mtls
+```
+
+The generator creates two independent CAs, signs one `ClientAuth` certificate
+for the Memoh server, signs one `ServerAuth` certificate for the workspace
+bridge, writes only the required leaf keys and CA bundles, and discards both CA
+private keys. It prints a config snippet like this:
+
+```toml
+instance_id = "11111111-1111-1111-1111-111111111111"
+
+[bridge_tls]
+mode = "strict"
+server_dir = "/opt/memoh/bridge-mtls/server"
+bridge_dir = "/opt/memoh/bridge-mtls/bridge"
+server_name = ""
+```
+
+`server_dir` is read only by the Memoh server and contains:
+
+```text
+server-client.crt
+server-client.key
+bridge-server-ca.crt
+```
+
+`bridge_dir` is mounted read-only into workspace containers and must contain
+only:
+
+```text
+bridge-server.crt
+bridge-server.key
+server-client-ca.crt
+```
+
+Do not reuse `server_dir` for `bridge_dir`, and do not copy
+`server-client.crt` or `server-client.key` into `bridge_dir`. Strict mode
+rejects a shared directory, symlinked shared directory, missing material, or
+unexpected files in `bridge_dir` before mounting anything into a workspace.
+
+If you enable strict bridge mTLS on an existing deployment, recreate or restart
+all existing workspace containers. Old containers do not have the TLS material
+mount or `BRIDGE_TLS_*` environment variables and will fail closed once the
+server requires mTLS.
+
 ## Host Requirements
 
 - Linux host with KVM available at `/dev/kvm`.

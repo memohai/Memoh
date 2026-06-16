@@ -55,7 +55,7 @@ func TestBuildGenerateOptionsPreservesDeepSeekReasoningDisabled(t *testing.T) {
 		ChatCompletionsCompat: models.ChatCompletionsCompatDeepSeek,
 	}
 
-	opts := (*Agent)(nil).buildGenerateOptions(cfg, nil, nil)
+	opts := (*Agent)(nil).buildGenerateOptions(cfg, nil, nil, nil)
 	if _, err := sdk.GenerateTextResult(context.Background(), opts...); err != nil {
 		t.Fatalf("generate text result: %v", err)
 	}

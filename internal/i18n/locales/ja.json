@@ -1,0 +1,492 @@
+{
+  "chrome": {
+    "close": "✕ 閉じる",
+    "prev": "◀ 前へ",
+    "next": "次へ ▶",
+    "providers": "◀ Provider",
+    "modelConfiguration": "⚙ Model構成",
+    "selectProvider": "Providerを選択してください:",
+    "selectModel": "Modelを選択してください:",
+    "currentModel": "現在のModel: {model}",
+    "reasoningLine": "推論: {effort}",
+    "provider": "Provider: {provider}",
+    "providerRange": "Provider: {provider} ({total}件中 {start}～{end})",
+    "none": "（なし）",
+    "models": "Model",
+    "rangeAll": "全て"
+  },
+  "startWelcome": {
+    "title": "👋 こんにちは！",
+    "intro": "メッセージを送ってください。それでは手続きを進めます。",
+    "tip": "ここは新しいですか？ {help} は私に何ができるかを示しています。 {new} はいつでも白紙の状態から始められます。"
+  },
+  "newSession": {
+    "title": "✨新しい{mode}が始まりました。",
+    "modeChat": "チャット",
+    "modeDiscussion": "議論",
+    "usage": "読めませんでした。チャットには /new を使用し、ディスカッションには /newDiscussion を使用してください。",
+    "confirmTitle": "⚠️確認/新規",
+    "confirmBody": "これにより、新しい {mode} Sessionが開始され、現在の会話履歴が破棄されます。",
+    "action": {
+      "confirm": "✅確認",
+      "cancel": "✕ キャンセル"
+    },
+    "labelModel": "Model",
+    "labelHeartbeat": "ハートビート",
+    "labelReasoning": "推論",
+    "labelContext": "コンテクスト",
+    "contextUnit": "Token",
+    "tip": "ヒント: {model} または {reasoning} でいつでも調整できます。"
+  },
+  "ops": {
+    "template": "⚠️ 現在 {verb} できませんでした。しばらくしてからもう一度試してください。",
+    "verb": {
+      "completeCommand": "そのコマンドを完了する",
+      "stopReply": "現在の返信を停止します",
+      "startSession": "新しいSessionを開始する",
+      "loadStatus": "ステータスをロードする"
+    }
+  },
+  "cmd": {
+    "common": {
+      "on": "オン",
+      "off": "オフ",
+      "yes": "はい",
+      "no": "いいえ",
+      "none": "（なし）",
+      "unavailable": "(利用不可)",
+      "error": "エラー",
+      "allowed": "許可された",
+      "denied": "拒否されました",
+      "active": "アクティブ",
+      "current": "現在",
+      "default": "デフォルト",
+      "fieldName": "名前",
+      "allCommands": "すべてのコマンド ▸",
+      "showingItems": "{total}件中{shown}件を表示しています。",
+      "alreadySet": "{label}はすでに{value}に設定されています。",
+      "changedTo": "✅ {label}を{value}に変更しました。",
+      "fieldCreated": "作成されました",
+      "fieldUpdated": "更新されました",
+      "fieldStatus": "状態"
+    },
+    "session": {
+      "noActive": "この会話のアクティブなSessionが見つかりません。",
+      "unavailable": "Session情報は現在利用できません。",
+      "noneForBot": "このBotのSessionが見つかりませんでした。"
+    },
+    "time": {
+      "justNow": "ちょうど今",
+      "secondsAgo": "{n}秒前",
+      "minutesAgo": "{n}分前",
+      "hoursAgo": "{n}時間前",
+      "daysAgo": "{n}日前"
+    },
+    "cron": {
+      "everyMinute": "毎分",
+      "everyNMinutes": "{n} 分ごと",
+      "hourly": "毎時",
+      "dailyAt": "毎日 {time}",
+      "weekdayAt": "{time} の {weekday}",
+      "weekday": {
+        "sunday": "日曜日",
+        "monday": "月曜日",
+        "tuesday": "火曜日",
+        "wednesday": "水曜日",
+        "thursday": "木曜日",
+        "friday": "金曜日",
+        "saturday": "土曜日"
+      }
+    },
+    "statusValue": {
+      "success": "成功",
+      "failed": "失敗した",
+      "notChecked": "未チェック",
+      "connected": "接続済み",
+      "disconnected": "切断されました",
+      "inactive": "非アクティブ",
+      "pending": "保留中",
+      "running": "実行中",
+      "sent": "送信済み",
+      "queued": "キューに入れられました",
+      "bounced": "バウンス"
+    },
+    "status": {
+      "title": "🧵 Sessionステータス",
+      "scopeCurrent": "現在の会話",
+      "scopeLatest": "最新のBotSession",
+      "fieldModel": "Model",
+      "fieldMessages": "メッセージ",
+      "fieldContext": "コンテクスト",
+      "fieldCacheHitRate": "キャッシュヒット率",
+      "fieldCacheRead": "キャッシュ読み取り",
+      "fieldSkills": "Skill"
+    },
+    "context": {
+      "title": "コンテクスト",
+      "usedWithWindow": "{percent}・{used}・{window}使用",
+      "tokensUsed": "使用される {used} Token",
+      "fieldCacheHit": "キャッシュヒット"
+    },
+    "access": {
+      "title": "アクセス",
+      "fieldBotRole": "Botの役割",
+      "fieldWriteCommands": "書き込みコマンド",
+      "fieldChannel": "チャネル",
+      "fieldConversationType": "会話の種類",
+      "fieldChannelIdentity": "チャネルのアイデンティティ",
+      "fieldLinkedUser": "リンクされたユーザー",
+      "fieldConversationID": "会話ID",
+      "fieldThreadID": "Thread ID",
+      "fieldRouteID": "ルートID",
+      "fieldSessionID": "SessionID",
+      "fieldChatACL": "チャットACL"
+    },
+    "link": {
+      "usage": "使い方: /link<code>— このアカウントを Memoh ユーザーに接続します。",
+      "missingCode": "リンク コードを入力してください: /link<code>",
+      "success": "接続されました。このアカウントは Memoh ユーザーにリンクされ、Botの権限を継承します。",
+      "notFound": "そのリンク コードは無効です。",
+      "expired": "そのリンク コードの有効期限が切れています。 Memoh 設定で新しいものを生成します。",
+      "consumed": "そのリンク コードはすでに使用されています。",
+      "noIdentity": "リンクできません: チャネル ID がありません。",
+      "unavailable": "現在、アカウントのリンクは利用できません。",
+      "failed": "このアカウントをリンクできませんでした。もう一度試してください。"
+    },
+    "help": {
+      "availableCommands": "利用可能なコマンド",
+      "top": {
+        "help": "このヘルプを表示する",
+        "start": "ウェルカムメッセージを表示する",
+        "new": "新しい会話を始める",
+        "stop": "現在の返信を停止します",
+        "approve": "最新のまたは指定された保留中のTool呼び出しを承認します",
+        "reject": "最新または指定された保留中のTool呼び出しを拒否します"
+      },
+      "globalHint": "任意のコマンドを送信して実行します。グループのアクションについては、/help を送信してください<group>— 例: /ヘルプModel。",
+      "runForDetails": "詳細については、{command} を実行してください。",
+      "summaryLabel": "まとめ：",
+      "usageLabel": "使い方：",
+      "siblingActionsLabel": "兄弟アクションを参照",
+      "chooseAction": "アクションを選択してください:",
+      "backToGroup": "◀ {group}",
+      "actions": {
+        "schedule": {
+          "list": "すべてのスケジュールをリストする",
+          "get": "スケジュールの詳細を取得する",
+          "create": "スケジュールを作成する",
+          "update": "スケジュールを更新する",
+          "delete": "スケジュールを削除する",
+          "enable": "スケジュールを有効にする",
+          "disable": "スケジュールを無効にする"
+        },
+        "mcp": {
+          "list": "すべてリストするMCP接続",
+          "get": "得るMCP接続の詳細",
+          "delete": "を削除しますMCP繋がり"
+        },
+        "settings": {
+          "get": "現在の設定を表示する",
+          "update": "設定を更新する",
+          "language": "コマンドを表示または設定するUIlanguage"
+        },
+        "language": {
+          "show": "コマンドを表示または設定するUIlanguage",
+          "set": "コマンドを設定するUIlanguage"
+        },
+        "model": {
+          "list": "利用可能なチャット Modelをリストする",
+          "current": "現在のチャットとハートビートのModelを表示する",
+          "set": "チャットModelを設定する",
+          "set-heartbeat": "ハートビートModelを設定する"
+        },
+        "reasoning": {
+          "show": "推論レベルを表示し、新しい推論レベルを選択します",
+          "set": "推論レベルを設定する"
+        },
+        "memory": {
+          "list": "すべてのMemoryProviderをリストする",
+          "current": "現在のMemoryProviderを表示する",
+          "set": "このBotのMemoryProviderを設定します"
+        },
+        "search": {
+          "list": "すべての検索Providerをリストする",
+          "current": "現在の検索Providerを表示する",
+          "set": "このBotの検索Providerを設定します"
+        },
+        "usage": {
+          "summary": "Token使用量の概要",
+          "by-model": "Modelごとにグループ化されたTokenの使用状況"
+        },
+        "email": {
+          "providers": "電子EmailProviderをリストする",
+          "bindings": "Bot電子Emailバインディングをリストする",
+          "outbox": "最近送信したEmailを一覧表示する"
+        },
+        "heartbeat": {
+          "logs": "最近のハートビート ログを一覧表示する"
+        },
+        "skill": {
+          "list": "すべてのSkillをリストする"
+        },
+        "fs": {
+          "list": "Container内のファイルを一覧表示する",
+          "read": "Containerからファイルを読み取る"
+        },
+        "status": {
+          "show": "現在のSessionのステータスを表示する",
+          "latest": "このBotの最新のSession ステータスを表示します"
+        },
+        "context": {
+          "show": "現在のSessionのコンテキスト ウィンドウの使用状況を表示する"
+        },
+        "access": {
+          "show": "現在の ID の表示、書き込みアクセス、チャットACLコンテクスト"
+        },
+        "compact": {
+          "run": "現在のSessionのコンテキストを直ちに圧縮します"
+        }
+      }
+    },
+    "settings": {
+      "title": "⚙️ Botの設定",
+      "fieldReasoning": "推論",
+      "fieldHeartbeat": "ハートビート",
+      "fieldAclDefault": "ACLデフォルト",
+      "fieldChatModel": "チャットModel",
+      "fieldHeartbeatModel": "ハートビートModel",
+      "fieldSearchProvider": "検索Provider",
+      "fieldMemoryProvider": "MemoryProvider",
+      "fieldCommandLanguage": "コマンドUIの言語",
+      "heartbeatOnEvery": "オン · {minutes} 分ごと",
+      "aclDeny": "拒否 — Toolは実行前に尋ねます",
+      "aclAllow": "許可 — Toolは何も要求せずに実行されます",
+      "section": {
+        "reasoning": "推論 ▸",
+        "models": "Model ▸",
+        "search": "検索 ▸",
+        "memory": "記憶 ▸",
+        "language": "言語 ▸"
+      },
+      "action": {
+        "enableHeartbeat": "ハートビートをオンにする",
+        "disableHeartbeat": "ハートビートをオフにする",
+        "aclAsk": "Toolの前に質問する",
+        "aclAllow": "Toolを許可する"
+      },
+      "langPickerTitle": "コマンドUIの言語",
+      "langCurrent": "現在: {label}",
+      "langAuto": "自動",
+      "langEn": "英語",
+      "langZh": "中文",
+      "missingValue": "{option} の値が欠落しています。\n\n{usage}",
+      "invalidHeartbeatInterval": "無効なハートビート間隔: {value}",
+      "unknownOption": "不明なオプション: {option}\n\n{usage}",
+      "unknownLanguage": "不明な言語 {value}。auto、en、zh、ja から選んでください。",
+      "unavailable": "現在設定は利用できません。",
+      "updateUsage": "使い方: /settings update [options]\n\nOptions:\n- --language <value>\n- --acl_default_effect <allow|deny>\n- --reasoning_enabled <true|false>\n- --reasoning_effort <none|low|medium|high|xhigh>\n- --heartbeat_enabled <true|false>\n- --heartbeat_interval <minutes>\n- --chat_model_id <id>\n- --heartbeat_model_id <id>\n\n(Command UI language: /settings language <auto|en|zh|ja>)",
+      "langJa": "日本語"
+    },
+    "language": {
+      "setUsage": "使い方: /language <auto|en|zh|ja>"
+    },
+    "model": {
+      "title": "チャットModel",
+      "currentTitle": "現行Model",
+      "byProvider": "Provider別:",
+      "fieldProvider": "Provider",
+      "unavailable": "現在Modelは入手できません。",
+      "listChanged": "Model リストが変更されました - /model を再度開いて選択します。",
+      "setUsage": "使い方: /Modelセット<model_id> | <provider_name> <model_name>",
+      "setHeartbeatUsage": "使い方: /model set-heartbeat<model_id> | <provider_name> <model_name>",
+      "noneUnderProvider": "Provider {provider} にはチャット Modelがありません。 {command} を実行してすべてのProviderを表示します。",
+      "empty": "チャットModelはまだありません。\n\nWeb ダッシュボードにModelを追加します。",
+      "notFound": "{name} という名前のModelはありません。 {command} を実行して、利用可能なものを確認します。",
+      "notFoundUnderProvider": "Provider {provider} に {name} という名前のModelはありません。 {command} を実行して、利用可能なものを確認します。",
+      "ambiguous": "Model {name} はあいまいです。Model ID またはProvider修飾名 ({candidates}) を使用してください。",
+      "idRequired": "Model識別子は必須です。",
+      "serviceUnavailable": "現在Modelサービスはご利用いただけません。",
+      "marker": {
+        "chat": "チャット",
+        "heartbeat": "心拍数"
+      }
+    },
+    "memory": {
+      "title": "MemoryProvider",
+      "label": "MemoryProvider",
+      "unavailable": "現在Memoryが利用できません。",
+      "empty": "MemoryProviderはまだありません。\n\nMemory Providerは、Botに会話全体にわたる長期Memoryを提供します。 Web ダッシュボードに 1 つ追加します。",
+      "noneSet": "MemoryProviderが設定されていません。 {list} でオプションを確認し、{set} でいずれかを選択します。",
+      "active": "アクティブ Memory Provider: {name}",
+      "setUsage": "使い方: /memory セット<name>",
+      "notFound": "{name} という名前のMemory Providerがありません。 {command} のオプションを参照してください。"
+    },
+    "search": {
+      "title": "検索Provider",
+      "label": "検索Provider",
+      "unavailable": "現在、検索は利用できません。",
+      "empty": "検索Providerはまだありません。\n\n検索Providerを使用すると、Botは Web 上で情報を検索できます。 Web ダッシュボードに 1 つ追加します。",
+      "noneSet": "検索Providerが設定されていません。 {list} でオプションを確認し、{set} でいずれかを選択します。",
+      "active": "アクティブな検索Provider: {name}",
+      "setUsage": "使い方: /検索セット<name>",
+      "notFound": "{name} という名前の検索Providerはありません。 {command} のオプションを参照してください。"
+    },
+    "skill": {
+      "title": "Skill",
+      "unavailable": "このBotではSkillを使用できません。",
+      "empty": "まだSkillはありません。\n\nSkillは、Botが呼び出すことができる再利用可能なToolです。それらを Web ダッシュボードに追加します。"
+    },
+    "schedule": {
+      "title": "スケジュール",
+      "paused": "一時停止した",
+      "back": "◀ スケジュール",
+      "empty": "まだスケジュールはありません。\n\nスケジュールは定期的なタイマーでコマンドを実行します。たとえば、次のように作成します。\n{command}",
+      "getUsage": "使い方: {command}",
+      "createUsage": "使い方: /schedule create<name> <pattern> <command>例：/schedule create daily-report \"0 9 * * *\" \"日報送信\"",
+      "updateUsage": "使い方: /スケジュール更新<name>[--パターン P] [--コマンド C]",
+      "deleteUsage": "使い方: /スケジュール削除<name>",
+      "enableUsage": "使い方: /schedule を有効にする<name>",
+      "disableUsage": "使い方: /スケジュールを無効にする<name>",
+      "fieldDescription": "説明",
+      "fieldSchedule": "スケジュール",
+      "fieldCommand": "指示",
+      "fieldRuns": "走る",
+      "runsOf": "{current}/{max}",
+      "notFound": "{name} という名前のスケジュールはありません。 {command} のスケジュールを参照してください。",
+      "created": "✅ スケジュール {name} が作成されました。\n\n- 実行: {runs}\n- コマンド: {command}",
+      "updated": "✅ スケジュール {name} が更新されました。",
+      "deleted": "✅ スケジュール {name} が削除されました。",
+      "enabled": "✅ スケジュール {name} が有効になりました。",
+      "pausedDone": "✅ スケジュール {name} が一時停止されました。"
+    },
+    "mcp": {
+      "title": "MCP接続",
+      "empty": "いいえMCP接続はまだです。MCP接続により、外部ServerからBotに追加のToolが提供されます。 Web ダッシュボードに 1 つ追加します。",
+      "getUsage": "使い方: {command}",
+      "deleteUsage": "使い方: /mcp 削除<name>",
+      "fieldReason": "理由",
+      "fieldType": "タイプ",
+      "fieldActive": "アクティブ",
+      "fieldAuth": "認証",
+      "fieldTools": "Tool",
+      "back": "◀ MCP",
+      "notFound": "{name} という名前の MCP 接続がありません。 {command} との接続を参照してください。",
+      "deleted": "✅ MCP 接続 {name} が削除されました。"
+    },
+    "email": {
+      "providersTitle": "電子EmailProvider",
+      "bindingsTitle": "電子Emailのバインド",
+      "outboxTitle": "送信ボックス",
+      "providersEmpty": "電子EmailProviderはまだありません。\n\n電子Email Providerを使用すると、BotはEmailを送受信できます。 Web ダッシュボードに 1 つ追加します。",
+      "bindingsEmpty": "電子Emailのバインドはまだありません。\n\nバインディングにより、このBotに送信元の電子Email アドレスが与えられます。 Web ダッシュボードに 1 つ追加します。",
+      "outboxEmpty": "まだEmailは送信されていません。\n\nBotが送信したEmailがここに表示されます。",
+      "section": {
+        "providers": "Provider",
+        "bindings": "バインディング",
+        "outbox": "送信ボックス"
+      },
+      "fieldAddress": "住所",
+      "fieldPermissions": "権限",
+      "fieldSubject": "主題",
+      "fieldTo": "に",
+      "fieldSent": "送信済み",
+      "permRead": "読む",
+      "permWrite": "書く",
+      "permDelete": "削除"
+    },
+    "heartbeat": {
+      "title": "ハートビートログ",
+      "empty": "心拍ログはまだありません。\n\nハートビートは定期的な自律チェックインです。ハートビートが有効になると、ここに実行が表示されます。",
+      "section": {
+        "settings": "設定 ▸"
+      },
+      "fieldTime": "時間",
+      "fieldDuration": "間隔",
+      "olderHint": "ウェブを利用するUI古いハートビート ログの場合。"
+    },
+    "usage": {
+      "unavailable": "現在、Tokenの使用は利用できません。",
+      "empty": "Tokenの使用量はまだ記録されていません。\n\nBotがメッセージに応答した後、使用状況がここに表示されます。",
+      "range24h": "24時間",
+      "range7d": "7日間",
+      "range30d": "30日",
+      "rangeAll": "ずっと",
+      "summaryTitle": "Tokenの使用状況 ({range})",
+      "byModelTitle": "Model別のToken使用量 ({range})",
+      "bucketChat": "チャット",
+      "bucketHeartbeat": "ハートビート",
+      "bucketSchedule": "スケジュール",
+      "inOut": "{in} 入力 · {out} 出力",
+      "total": "合計",
+      "otherModels": "その他のModel"
+    },
+    "fs": {
+      "unavailable": "ファイル Browserは現在利用できません。",
+      "emptyDir": "ディレクトリ {path} は空です。",
+      "readUsage": "使い方: /fs 読み取り<path>",
+      "emptyFile": "(空のファイル)",
+      "truncated": "最初の 2000 文字を表示します。ウェブを利用するUIファイル全体の場合。"
+    },
+    "compact": {
+      "unavailable": "現在、圧縮は利用できません。",
+      "done": "✅ コンテキストが圧縮されました。",
+      "noModel": "このBotには圧縮Modelやチャット Modelが構成されていません。"
+    },
+    "toolApproval": {
+      "unavailable": "⚠️ 現在、ここでは承認を取得できません。",
+      "parseFailed": "それは読めませんでした。 /approve または /reject を使用してリクエストに返信するか、ボタンをタップします。"
+    },
+    "fallback": {
+      "switch": "{command}で切り替えます。",
+      "pick": "{command} で選択します。",
+      "toggle": "トグル:{commands}",
+      "open": "開く:{commands}",
+      "details": "詳細については、{command} を参照してください。",
+      "range": "タイムウィンドウ: {command} (プリセット: {presets})。",
+      "menu": "または、{command} を直接入力します。"
+    },
+    "reasoning": {
+      "header": "🧠 推論",
+      "current": "現在: {level}",
+      "choosePrompt": "努力が増えると、より慎重に考えることになりますが、応答は遅くなります。レベルを選択してください:",
+      "setUsage": "使い方: /reasoning set<off|none|low|medium|high|xhigh>",
+      "unavailable": "推論は現在利用できません。",
+      "unknownLevel": "不明レベル {level} — off、none、low、medium、high、または xhigh を選択します。"
+    },
+    "error": {
+      "unknownCommand": "不明なコマンド {command}。 {help} を実行して利用可能なものを確認するか、先頭のスラッシュを付けずに再送信して通常のメッセージとして送信します。",
+      "unknownCommandShort": "不明なコマンド {command}。 {help} を実行してすべてのコマンドを表示します。",
+      "unknownAction": "{command} に対する不明なアクション {action}。 {help} を実行してその動作を確認します。",
+      "ownerOnly": "⚠️ {command} を実行できるのはBot所有者のみです。通常通りチャットできます。",
+      "noAccess": "⚠️ あなたにはこのBotへのアクセス権がありません。",
+      "accessDeniedHint": "⚠️ このBotとはまだチャットできません。あなたがその所有者の場合は、ダッシュボードを開いて接続コードをコピーし、ここに {link} <code> を送信してアカウントをリンクします。",
+      "accessDeniedManager": "⚠️ このBotを管理できますが、このチャネル ID ではチャットが無効になっています。管理コマンドは引き続き機能します。この ID が通常のメッセージを送信する必要がある場合は、Bot所有者にチャットを有効にするよう依頼してください。",
+      "generic": "⚠️ 現在 {command} を完了できませんでした。しばらくしてからもう一度試してください。",
+      "genericNoResource": "⚠️何か問題が発生しました。しばらくしてからもう一度試してください。",
+      "runToSeeList": "{command} を実行して、利用可能なものを確認します。"
+    }
+  },
+  "menu": {
+    "start": "ウェルカムメッセージを表示する",
+    "help": "使用可能なコマンドを表示する",
+    "new": "新しい会話を開始する",
+    "stop": "現在の返信を停止します",
+    "status": "Sessionステータスを表示",
+    "context": "コンテキストウィンドウの使い方を表示する",
+    "model": "チャットModelを切り替える",
+    "reasoning": "推論レベルを設定する",
+    "settings": "Bot設定の表示と更新",
+    "language": "コマンドUIの言語を変更",
+    "memory": "MemoryProviderを選択する",
+    "search": "検索Providerを選択する",
+    "schedule": "スケジュールされたタスクを管理する",
+    "mcp": "管理MCP接続",
+    "usage": "Tokenの使用状況を表示する",
+    "email": "電子Email設定を表示する",
+    "heartbeat": "ハートビートログを表示する",
+    "skill": "BotのSkillを表示する",
+    "fs": "Containerファイルを参照する",
+    "access": "ID と権限を検査する",
+    "compact": "コンパクトな会話コンテキスト"
+  }
+}

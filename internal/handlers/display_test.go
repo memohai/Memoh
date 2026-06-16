@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -66,6 +67,12 @@ func TestDisplayPrepareCommandInjectsInstallScript(t *testing.T) {
 	if !strings.Contains(cmd, "memoh-logo-white") || strings.Contains(cmd, "memoh-apple-symbol") {
 		t.Fatal("injected style script must use the white Memoh logo for the topbar menu icon")
 	}
+	if !strings.Contains(cmd, "memoh_logo_png_base64()") ||
+		!strings.Contains(cmd, "memoh-logo-white.png") ||
+		!strings.Contains(cmd, "/usr/share/icons/hicolor/48x48/apps") ||
+		!strings.Contains(cmd, "base64 -d") {
+		t.Fatal("injected style script must install a PNG Memoh logo fallback for panels without SVG icon loading")
+	}
 	if !strings.Contains(cmd, "xfconf_replace_int_array xfce4-panel /panels 1") || !strings.Contains(cmd, "restart_xfce_panel()") {
 		t.Fatal("injected style script must remove the default Xfce bottom panel")
 	}
@@ -84,14 +91,75 @@ func TestDisplayPrepareCommandInjectsInstallScript(t *testing.T) {
 		strings.Contains(cmd, `write_desktop_file "$file" "Browser" "web-browser"`) {
 		t.Fatal("injected style script must pin the dock browser launcher to a Chromium wrapper with an isolated profile")
 	}
+	terminalIndex := strings.Index(cmd, `terminal="$(command -v xfce4-terminal`)
+	terminalLauncherIndex := strings.Index(cmd, `write_desktop_file "$file" "Terminal" "utilities-terminal" "$terminal"`)
+	xtermFallbackIndex := strings.Index(cmd, `/usr/share/applications/debian-xterm.desktop`)
+	if terminalIndex < 0 || terminalLauncherIndex < terminalIndex || xtermFallbackIndex < terminalLauncherIndex ||
+		strings.Contains(cmd, `write_desktop_file "$file" "XTerm" "xterm" "$terminal"`) {
+		t.Fatal("injected style script must prefer a custom terminal launcher with the themed terminal icon over Debian's mini.xterm desktop file")
+	}
+	filesIndex := strings.Index(cmd, `files_desktop_file()`)
+	filesLauncherIndex := strings.Index(cmd, `write_desktop_file "$file" "Files" "$icon"`)
+	thunarFallbackIndex := strings.Index(cmd, `/usr/share/applications/thunar.desktop`)
+	if filesIndex < 0 || filesLauncherIndex < filesIndex || thunarFallbackIndex < filesLauncherIndex ||
+		!strings.Contains(cmd, "Memoh-WhiteSur-dark") ||
+		!strings.Contains(cmd, "global_theme_dir") ||
+		!strings.Contains(cmd, "install_file_manager_icon_aliases") ||
+		!strings.Contains(cmd, "file_manager_icon_path()") ||
+		!strings.Contains(cmd, "folder-blue.svg") ||
+		!strings.Contains(cmd, "org.xfce.filemanager") ||
+		!strings.Contains(cmd, "org.xfce.thunar") ||
+		!strings.Contains(cmd, "inode-directory") ||
+		!strings.Contains(cmd, "text-x-generic.svg") ||
+		!strings.Contains(cmd, `require_xfconf_value xsettings /Net/IconThemeName Memoh-WhiteSur-dark`) ||
+		!strings.Contains(cmd, "restart_file_manager()") ||
+		strings.Contains(cmd, "memoh_files_icon_png_base64") ||
+		strings.Contains(cmd, "write_memoh_files_icon_png") {
+		t.Fatal("injected style script must use a custom Files launcher and a WhiteSur-backed icon theme overlay")
+	}
 	if !strings.Contains(cmd, "install_style_extras_for_current_os") {
 		t.Fatal("display prepare must install styling assets even when core display packages already exist")
+	}
+	if !strings.Contains(cmd, "cat >/tmp/memoh-desktop-apply-style.sh") {
+		t.Fatal("display prepare command must inject the shared desktop style apply helper")
+	}
+	if !strings.Contains(displayPrepareMainCommand, `desktop_style_current()`) ||
+		!strings.Contains(displayPrepareMainCommand, `/bin/sh /tmp/memoh-desktop-apply-style.sh --check`) {
+		t.Fatal("display prepare readiness must include the desktop style marker")
+	}
+	if strings.Contains(displayPrepareMainCommand, `nohup /bin/sh /tmp/memoh-desktop-style.sh`) {
+		t.Fatal("display prepare must not apply desktop style asynchronously")
+	}
+	styleIndex := strings.Index(displayPrepareMainCommand, `progress 90 styling "Applying desktop style"`)
+	browserIndex := strings.Index(displayPrepareMainCommand, `progress 94 browser "Launching browser"`)
+	completeIndex := strings.LastIndex(displayPrepareMainCommand, "\ncomplete\nexit 0")
+	if styleIndex < 0 || browserIndex < 0 || styleIndex > browserIndex || browserIndex > completeIndex {
+		t.Fatal("display prepare must apply desktop style synchronously before browser launch and completion")
+	}
+	if !strings.Contains(displayPrepareMainCommand, `/bin/sh /tmp/memoh-desktop-apply-style.sh --ensure`) {
+		t.Fatal("display prepare must ensure the current style version before reporting ready")
 	}
 	if !strings.Contains(cmd, "SUDO_USER") || !strings.Contains(cmd, "sudo git unzip bash") {
 		t.Fatal("display prepare must support WhiteSur's installer in non-login root containers")
 	}
+	if !strings.Contains(cmd, "MEMOH_DISPLAY_INSTALL_ASSETS_GLOBAL") ||
+		!strings.Contains(cmd, "/usr/local/share/themes") ||
+		!strings.Contains(cmd, "/usr/local/share/icons") ||
+		!strings.Contains(cmd, "/usr/local/share/backgrounds/WhiteSur") ||
+		!strings.Contains(cmd, "/usr/local/share/plank/themes") {
+		t.Fatal("display prepare must support image-baked desktop style assets in global paths")
+	}
+	if !strings.Contains(cmd, "librsvg2-common") {
+		t.Fatal("display prepare must install SVG icon loading support for themed icon assets")
+	}
 	if !strings.Contains(cmd, "xfce4-appmenu-plugin") || !strings.Contains(cmd, "xfce4-windowck-plugin") || !strings.Contains(cmd, "appmenu-gtk3-module") {
 		t.Fatal("display prepare must install macOS-like topbar plugins when available")
+	}
+	if topbarIndex := strings.Index(cmd, "configure_topbar\n  xfconf_set xfce4-panel /panels/panel-1/mode"); topbarIndex < 0 {
+		t.Fatal("injected style script must set panel geometry after rebuilding the topbar panel")
+	}
+	if !strings.Contains(cmd, "if verify_style; then\n  exit 0\nfi\nexit 1") {
+		t.Fatal("injected style script must return non-zero when style verification fails")
 	}
 	if strings.Contains(displayPrepareMainCommand, "apt-get install") || strings.Contains(displayPrepareMainCommand, "apk add") {
 		t.Fatal("package installation details should stay in scripts/desktop-install.sh")
@@ -154,14 +222,54 @@ func TestDisplayApplyStyleCommandInjectsStyleScript(t *testing.T) {
 	if !strings.Contains(cmd, "/bin/sh /tmp/memoh-desktop-style.sh") {
 		t.Fatal("display style command must run the desktop style script")
 	}
+	if !strings.Contains(cmd, "style_marker=\"$style_config_dir/display-style.version\"") ||
+		!strings.Contains(cmd, "style_version='"+displayDesktopStyleVersion+"'") ||
+		!strings.Contains(cmd, "style_is_current") {
+		t.Fatal("display style command must gate retries with a versioned marker")
+	}
+	if !strings.Contains(cmd, "style_lock=/tmp/memoh-desktop-style.lock") ||
+		!strings.Contains(cmd, "acquire_style_lock") {
+		t.Fatal("display style command must serialize style application with a lock")
+	}
+	if !strings.Contains(cmd, "style_lock_stale_seconds=60") ||
+		!strings.Contains(cmd, `printf '%s\n' "$$" >"$style_lock/pid"`) ||
+		!strings.Contains(cmd, `now_seconds >"$style_lock/created_at"`) ||
+		!strings.Contains(cmd, "cleanup_stale_style_lock") ||
+		!strings.Contains(cmd, `kill -0 "$owner_pid"`) ||
+		!strings.Contains(cmd, `ps -p "$owner_pid"`) ||
+		!strings.Contains(cmd, `Removing stale desktop style lock`) ||
+		!strings.Contains(cmd, `rm -rf "$style_lock"`) ||
+		!strings.Contains(cmd, `trap 'release_style_lock' EXIT INT TERM`) {
+		t.Fatal("display style command must recover stale locks left behind by killed apply helpers")
+	}
+	if !strings.Contains(cmd, `tail -n 80 "$style_log"`) ||
+		!strings.Contains(cmd, `printf '%s\n' "$style_version" >"$style_marker"`) {
+		t.Fatal("display style command must persist success and print log tail on failure")
+	}
+	if !strings.Contains(cmd, `/bin/sh /tmp/memoh-desktop-apply-style.sh --if-needed`) {
+		t.Fatal("display style command must only apply style when the marker is missing or stale")
+	}
 	if !strings.Contains(cmd, "configure_plank()") || !strings.Contains(cmd, "WhiteSur-Dark") {
 		t.Fatal("display style command must include macOS-like desktop styling")
 	}
 	if !strings.Contains(cmd, "configure_topbar()") || !strings.Contains(cmd, "windowck-plugin") || !strings.Contains(cmd, "appmenu") {
 		t.Fatal("display style command must include macOS-like topbar styling")
 	}
+	if !strings.Contains(cmd, "MEMOH_DISPLAY_INSTALL_ASSETS_GLOBAL") ||
+		!strings.Contains(cmd, "/usr/local/share/themes") ||
+		!strings.Contains(cmd, "/usr/local/share/icons") ||
+		!strings.Contains(cmd, "/usr/local/share/backgrounds/WhiteSur") ||
+		!strings.Contains(cmd, "/usr/local/share/plank/themes") {
+		t.Fatal("display style command must reuse image-baked desktop style assets in global paths")
+	}
 	if !strings.Contains(cmd, "memoh-logo-white") || strings.Contains(cmd, "memoh-apple-symbol") {
 		t.Fatal("display style command must use the white Memoh logo for the topbar menu icon")
+	}
+	if !strings.Contains(cmd, "memoh_logo_png_base64()") ||
+		!strings.Contains(cmd, "memoh-logo-white.png") ||
+		!strings.Contains(cmd, "/usr/share/icons/hicolor/48x48/apps") ||
+		!strings.Contains(cmd, "base64 -d") {
+		t.Fatal("display style command must install a PNG Memoh logo fallback for panels without SVG icon loading")
 	}
 	if !strings.Contains(cmd, "xfconf_replace_int_array xfce4-panel /panels 1") || !strings.Contains(cmd, "restart_xfce_panel()") {
 		t.Fatal("display style command must remove the default Xfce bottom panel")
@@ -180,5 +288,52 @@ func TestDisplayApplyStyleCommandInjectsStyleScript(t *testing.T) {
 		!strings.Contains(cmd, `rm -f "\$profile"/SingletonLock`) ||
 		strings.Contains(cmd, `write_desktop_file "$file" "Browser" "web-browser"`) {
 		t.Fatal("display style command must pin the dock browser launcher to a Chromium wrapper with an isolated profile")
+	}
+	if !strings.Contains(cmd, `write_desktop_file "$file" "Files" "$icon"`) ||
+		!strings.Contains(cmd, "Memoh-WhiteSur-dark") ||
+		!strings.Contains(cmd, "global_theme_dir") ||
+		!strings.Contains(cmd, "install_file_manager_icon_aliases") ||
+		!strings.Contains(cmd, "file_manager_icon_path()") ||
+		!strings.Contains(cmd, "folder-blue.svg") ||
+		!strings.Contains(cmd, "org.xfce.filemanager") ||
+		!strings.Contains(cmd, "org.xfce.thunar") ||
+		!strings.Contains(cmd, "inode-directory") ||
+		!strings.Contains(cmd, "text-x-generic.svg") ||
+		!strings.Contains(cmd, "verify_file_manager_style()") ||
+		!strings.Contains(cmd, "restart_file_manager()") ||
+		strings.Contains(cmd, "memoh_files_icon_png_base64") ||
+		strings.Contains(cmd, "write_memoh_files_icon_png") {
+		t.Fatal("display style command must configure the Files launcher and file-manager icon theme")
+	}
+}
+
+func TestDisplayStyleStatusCommandChecksVersionMarker(t *testing.T) {
+	t.Parallel()
+
+	cmd := displayStyleStatusCommand()
+	if !strings.Contains(cmd, "display-style.version") {
+		t.Fatal("style status command must check the desktop style marker")
+	}
+	if !strings.Contains(cmd, "style_version='"+displayDesktopStyleVersion+"'") {
+		t.Fatal("style status command must check the current style version")
+	}
+	if !strings.Contains(cmd, "MEMOH_DISPLAY_DESKTOP_STYLE") {
+		t.Fatal("style status command must treat disabled desktop styling as current")
+	}
+}
+
+func TestWorkspaceDockerfileInstallsDisplayAssetsGlobally(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile("../../docker/Dockerfile.workspace")
+	if err != nil {
+		t.Fatalf("read workspace Dockerfile: %v", err)
+	}
+	dockerfile := string(data)
+	if !strings.Contains(dockerfile, "COPY scripts/desktop-install.sh /tmp/memoh-desktop-install.sh") {
+		t.Fatal("workspace Dockerfile must install display assets through the shared install script")
+	}
+	if !strings.Contains(dockerfile, "MEMOH_DISPLAY_INSTALL_ASSETS_GLOBAL=1") {
+		t.Fatal("workspace Dockerfile must bake static display style assets into global image paths")
 	}
 }
