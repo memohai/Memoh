@@ -35,8 +35,21 @@ function createFakeDock() {
   const panels: FakePanel[] = []
   let activePanel: FakePanel | null = null
   const noopDisposable = () => ({ dispose: () => {} })
+  const groupElement = {
+    classList: {
+      toggle: vi.fn(),
+    },
+  } as unknown as HTMLElement
   const group = {
     id: 'group-1',
+    element: groupElement,
+    api: {
+      getHeaderPosition: () => 'top' as const,
+      setHeaderPosition: vi.fn(),
+    },
+    get panels() {
+      return panels
+    },
     get activePanel() {
       return activePanel
     },
@@ -44,12 +57,15 @@ function createFakeDock() {
 
   const dock = {
     panels,
+    groups: [group],
     get activePanel() {
       return activePanel
     },
     onDidActivePanelChange: noopDisposable,
     onDidLayoutChange: noopDisposable,
     onDidRemovePanel: noopDisposable,
+    onDidAddPanel: noopDisposable,
+    onDidMovePanel: noopDisposable,
     getGroup(id: string) {
       return id === 'group-1' ? group : undefined
     },

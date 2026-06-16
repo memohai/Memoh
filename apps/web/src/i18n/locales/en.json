@@ -619,6 +619,15 @@
     "sessionInfoRingAria": "Session info",
     "sessionInfoTooltipHint": "Hover to see session info",
     "sessionActions": "Session actions",
+    "bottomPanel": {
+      "terminal": "Terminal",
+      "newSession": "New Terminal",
+      "closeSession": "Close",
+      "closePanel": "Close panel",
+      "collapse": "Collapse",
+      "expand": "Expand",
+      "noSessions": "No terminals open"
+    },
     "tabBarToolkit": {
       "openMenu": "New panel",
       "newTerminal": "Terminal",

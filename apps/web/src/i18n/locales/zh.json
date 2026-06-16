@@ -615,6 +615,15 @@
     "sessionInfoRingAria": "会话信息",
     "sessionInfoTooltipHint": "悬停查看会话信息",
     "sessionActions": "会话操作",
+    "bottomPanel": {
+      "terminal": "终端",
+      "newSession": "新建终端",
+      "closeSession": "关闭",
+      "closePanel": "关闭面板",
+      "collapse": "收起",
+      "expand": "展开",
+      "noSessions": "暂无终端"
+    },
     "tabBarToolkit": {
       "openMenu": "新建面板",
       "newTerminal": "终端",

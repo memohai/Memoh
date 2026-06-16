@@ -6,6 +6,7 @@
     <DockviewVue
       class="h-full w-full"
       :components="panelComponents"
+      :tab-components="tabComponents"
       :watermark-component="watermarkComponent"
       :default-tab-component="defaultTabComponent"
       :prefix-header-actions-component="prefixHeaderActionsComponent"
@@ -46,7 +47,8 @@ import PanelTerminal from './dockview/panel-terminal.vue'
 import PanelBrowser from './dockview/panel-browser.vue'
 import PanelDisplay from './dockview/panel-display.vue'
 import WorkspaceWatermark from './dockview/workspace-watermark.vue'
-import WorkspaceTab from './dockview/workspace-tab.vue'
+import WorkspaceTabHost from './dockview/workspace-tab-host.vue'
+import TerminalTab from './dockview/terminal-tab.vue'
 import GroupActions from './dockview/group-actions.vue'
 import PrefixHeaderActions from './dockview/prefix-header-actions.vue'
 import TabCloseConfirm from './dockview/tab-close-confirm.vue'
@@ -91,7 +93,10 @@ const panelComponents: Record<string, VueComponent> = {
 }
 
 const watermarkComponent = WorkspaceWatermark as unknown as VueComponent
-const defaultTabComponent = WorkspaceTab as unknown as VueComponent
+const tabComponents: Record<string, VueComponent> = {
+  terminalTab: TerminalTab as unknown as VueComponent,
+}
+const defaultTabComponent = WorkspaceTabHost as unknown as VueComponent
 const rightHeaderActionsComponent = GroupActions as unknown as VueComponent
 const prefixHeaderActionsComponent = PrefixHeaderActions as unknown as VueComponent
 
@@ -131,8 +136,6 @@ const chatPanelTitle = computed(() => {
 
 function onReady(event: DockviewReadyEvent) {
   store.registerApi(event.api)
-  // Size the grid before adding panels (auto-resize is off, so without this the
-  // grid would be 0×0 and the first panel would lay out empty).
   if (rootEl.value) event.api.layout(rootEl.value.clientWidth, rootEl.value.clientHeight)
   ensureChatPanel()
 }

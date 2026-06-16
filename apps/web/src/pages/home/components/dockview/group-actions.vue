@@ -1,9 +1,19 @@
 <template>
   <div class="flex h-full w-full items-center gap-0.5 pr-2">
-    <!-- Unified "+": always opens a menu (never a direct terminal shortcut). New
-         panels and split actions live in the dropdown; sits first so it hugs the
-         last tab. -->
-    <DropdownMenu v-if="hasAnyAction">
+    <!-- Terminal group: direct "+" to spawn another session (no dropdown). -->
+    <Button
+      v-if="isTerminalGroup && canWorkspaceExec"
+      variant="ghost"
+      size="icon-sm"
+      class="size-[26px] shrink-0 rounded-sm p-0 text-muted-foreground/70 hover:bg-[color:var(--sidebar-hover)] hover:text-foreground"
+      :title="t('chat.tabBarToolkit.newTerminal')"
+      :aria-label="t('chat.tabBarToolkit.newTerminal')"
+      @click="store.openTerminalInPanel()"
+    >
+      <Plus class="size-3.5" />
+    </Button>
+    <!-- Editor groups: unified "+" menu for new panels and splits. -->
+    <DropdownMenu v-else-if="hasAnyAction">
       <DropdownMenuTrigger as-child>
         <Button
           variant="ghost"
@@ -18,7 +28,7 @@
       <DropdownMenuContent align="start">
         <DropdownMenuItem
           v-if="canWorkspaceExec"
-          @select="store.openTerminal(props.params.group.id)"
+          @select="store.openTerminalInPanel()"
         >
           <Terminal class="mr-2 size-3.5" />
           {{ t('chat.tabBarToolkit.newTerminal') }}
@@ -109,6 +119,11 @@ const canWorkspaceRead = computed(() => hasBotPermission(currentPermissions.valu
 const canWorkspaceExec = computed(() => hasBotPermission(currentPermissions.value, 'workspace_exec'))
 const canManage = computed(() => hasBotPermission(currentPermissions.value, 'manage'))
 const isLocalWorkspace = computed(() => isLocalWorkspaceBot(currentBot.value?.metadata))
+
+const isTerminalGroup = computed(() => {
+  const panels = props.params.group.panels
+  return panels.length > 0 && panels.every(p => p.id.startsWith('terminal:'))
+})
 
 // Browser / desktop are container-only and need manage permission; a local
 // (trusted-host) workspace exposes neither, so its menu is terminal + split only.

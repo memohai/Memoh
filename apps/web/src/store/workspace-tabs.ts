@@ -1,7 +1,7 @@
 import { defineStore, storeToRefs } from 'pinia'
 import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import { useLocalStorage, useStorage } from '@vueuse/core'
-import type { DockviewApi, SerializedDockview } from 'dockview-vue'
+import type { DockviewApi, DockviewGroupPanel, SerializedDockview } from 'dockview-vue'
 import { useChatStore } from '@/store/chat-list'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
@@ -25,6 +25,8 @@ import {
 export type SidebarView = 'sessions' | 'files' | 'schedule'
 
 export const CHAT_PANEL_ID = 'chat'
+
+export const TERMINAL_TAB_COMPONENT = 'terminalTab'
 
 const DEFAULT_BROWSER_ADDRESS = 'localhost:5173/'
 
@@ -56,6 +58,26 @@ function panelComponentOf(id: string): WorkspacePanelComponent | null {
   if (id.startsWith('browser:')) return 'browser'
   if (id.startsWith('display:')) return 'display'
   return null
+}
+
+function isTerminalOnlyGroup(group: { panels: Array<{ id: string }> }): boolean {
+  const panels = group.panels
+  return panels.length > 0 && panels.every(p => p.id.startsWith('terminal:'))
+}
+
+function syncTerminalGroupChrome(group: DockviewGroupPanel) {
+  const terminalOnly = isTerminalOnlyGroup(group)
+  group.element.classList.toggle('memoh-terminal-group', terminalOnly)
+  const target = terminalOnly ? 'bottom' : 'top'
+  if (group.api.getHeaderPosition() !== target) {
+    group.api.setHeaderPosition(target)
+  }
+}
+
+function syncAllTerminalGroupChrome(dock: DockviewApi) {
+  for (const group of dock.groups) {
+    syncTerminalGroupChrome(group)
+  }
 }
 
 export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
@@ -170,6 +192,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       loadedBotId = botId
       prunePanels()
       activePanelId.value = dock.activePanel?.id ?? null
+      syncAllTerminalGroupChrome(dock)
     } finally {
       suppressPersist = false
     }
@@ -191,6 +214,13 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
           const bid = loadedBotId
           void nextTick(() => deleteTerminalSnapshot(terminalCacheKey(bid, panel.id)))
         }
+        syncAllTerminalGroupChrome(dock)
+      }),
+      dock.onDidAddPanel(() => {
+        syncAllTerminalGroupChrome(dock)
+      }),
+      dock.onDidMovePanel(() => {
+        syncAllTerminalGroupChrome(dock)
       }),
     ]
     const bid = (currentBotId.value ?? '').trim()
@@ -245,6 +275,58 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         ? { position: { referenceGroup: options.groupId, direction: 'within' as const } }
         : {}),
     })
+    return true
+  }
+
+  function defaultTerminalPosition(dock: DockviewApi) {
+    const terminalGroupId = dock.groups.find(g =>
+      g.panels.some(p => p.id.startsWith('terminal:')),
+    )?.id
+    if (terminalGroupId) {
+      return { referenceGroup: terminalGroupId, direction: 'within' as const }
+    }
+    const chatGroupId = dock.groups.find(g =>
+      g.panels.some(p => p.id === CHAT_PANEL_ID),
+    )?.id
+    if (chatGroupId) {
+      return { referenceGroup: chatGroupId, direction: 'below' as const }
+    }
+    return undefined
+  }
+
+  function addTerminalPanel(options: {
+    id: string
+    title: string
+    groupId?: string
+    position?: { referenceGroup: string, direction: 'within' | 'below' | 'right' | 'left' | 'above' }
+  }) {
+    const dock = api.value
+    if (!dock) return false
+    const existing = dock.getPanel(options.id)
+    if (existing) {
+      existing.api.setActive()
+      syncAllTerminalGroupChrome(dock)
+      return true
+    }
+    const panelBase = {
+      id: options.id,
+      component: 'terminal' as const,
+      tabComponent: TERMINAL_TAB_COMPONENT,
+      title: options.title,
+      renderer: 'always' as const,
+    }
+    if (options.groupId) {
+      dock.addPanel({
+        ...panelBase,
+        position: { referenceGroup: options.groupId, direction: 'within' },
+      })
+    } else {
+      dock.addPanel({
+        ...panelBase,
+        ...(options.position ? { position: options.position } : {}),
+      })
+    }
+    syncAllTerminalGroupChrome(dock)
     return true
   }
 
@@ -304,14 +386,15 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!hasCurrentPermission('workspace_exec')) return
     const bid = (currentBotId.value ?? '').trim()
     const state = ensureBotLayout(bid)
-    if (!state || !api.value) return
+    const dock = api.value
+    if (!state || !dock) return
     const next = state.terminalCounter + 1
     patchBotLayout(bid, { terminalCounter: next })
-    focusOrAdd({
+    addTerminalPanel({
       id: `terminal:${next}`,
-      component: 'terminal',
-      title: `Terminal ${next}`,
+      title: 'zsh',
       groupId,
+      position: groupId ? undefined : defaultTerminalPosition(dock),
     })
   }
 
@@ -386,11 +469,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         if (!state) return
         const next = state.terminalCounter + 1
         patchBotLayout(bid, { terminalCounter: next })
-        dock.addPanel({
+        addTerminalPanel({
           id: `terminal:${next}`,
-          component: 'terminal',
-          title: title || `Terminal ${next}`,
-          renderer: 'always',
+          title: title || 'zsh',
           position,
         })
         break
@@ -596,6 +677,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   const sidebarWidth = useLocalStorage('workspace-sidebar-width', 256)
   const workbenchOpen = useLocalStorage('workspace-workbench-open', true)
 
+
   // Push/pull model (see main-section + sidebar): the rail is in flow and slides
   // out to the left (margin-left) while the dock, a flex sibling, grows to fill
   // the space — content shifts. Toggling just flips this boolean; the rail
@@ -625,6 +707,15 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   function hideWorkbench() {
     setWorkbench(false)
+  }
+
+  // ---- bottom panel actions -------------------------------------------------
+  // Terminals use the standard dockview layout but always default to a group
+  // at the bottom of the editor area, so the layout feels like a VS Code-style
+  // bottom panel while remaining fully draggable and composable.
+
+  function openTerminalInPanel() {
+    openTerminal()
   }
 
   // One-shot navigation request consumed by the sidebar files panel.
@@ -721,6 +812,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     openFilesAt,
     consumePendingFilesPath,
     openTerminal,
+    openTerminalInPanel,
     openBrowser,
     openDisplay,
     splitGroup,
