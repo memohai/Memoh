@@ -217,7 +217,7 @@
     },
     "keyboard": {
       "title": "快捷键",
-      "intro": "点击任意一行右侧的 Edit，然后按下新的组合键。Cmd/Ctrl + W、Q、T、N 为浏览器和系统保留，不可绑定。",
+      "intro": "点击任意一行右侧的「编辑」，然后按下新的组合键。Cmd/Ctrl + W、Q、T、N 为浏览器和系统保留，不可绑定。",
       "resetAll": "全部重置",
       "scopes": {
         "global": "全局",

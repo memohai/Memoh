@@ -51,9 +51,19 @@ export const useKeyboardShortcutsStore = defineStore('keyboard-shortcuts', () =>
     mergeDefaults: true,
   })
 
-  const effectiveBindings = computed<KeyboardBinding[]>(() =>
-    keyboardBindings.map(binding => applyOverride(binding, overrides.value[binding.command])),
-  )
+  const effectiveBindings = computed<KeyboardBinding[]>(() => {
+    const merged = keyboardBindings.map(binding => applyOverride(binding, overrides.value[binding.command]))
+    // Non-global (scoped) bindings come first so the dispatcher's first-handled-
+    // wins iterator gives them a chance to claim their keys before any global
+    // binding that happens to share a combo. A scoped command's handler is only
+    // registered while its owning component is mounted, so when the scope is
+    // inactive the matcher falls through to the global. Stable sort preserves
+    // intra-scope order from the source table.
+    return [...merged].sort((a, b) => {
+      if (a.scope === b.scope) return 0
+      return a.scope === 'global' ? 1 : -1
+    })
+  })
 
   function getEffectiveCombo(command: AppKeyboardCommand): ParsedKeyCombo | null {
     const binding = effectiveBindings.value.find(b => b.command === command)

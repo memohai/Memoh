@@ -52,9 +52,14 @@ watch(() => props.open, (isOpen) => {
 // listener registered in main.ts. stopImmediatePropagation cancels both that
 // listener and reka-ui's Dialog Escape-to-close, so any key — including Escape —
 // can be bound. Gated on props.open to stay inert when the dialog is closed.
+// Enter/Space on a focused button are intentionally let through so keyboard
+// users can still activate Save/Cancel/Reset; the trade-off is that binding
+// Enter or Space requires focus to be off those buttons (e.g. the capture
+// surface), which matches OS-level keybinding dialogs.
 useEventListener(window, 'keydown', (event: KeyboardEvent) => {
   if (!props.open) return
   if (isModifierKey(event.key)) return
+  if ((event.key === 'Enter' || event.key === ' ') && event.target instanceof HTMLButtonElement) return
   event.preventDefault()
   event.stopImmediatePropagation()
   const combo = keyComboFromEvent(event, isMac)

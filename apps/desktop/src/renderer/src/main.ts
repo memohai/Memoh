@@ -80,10 +80,18 @@ async function bootstrap() {
       if (binding.desktop !== 'menu') continue
       overrides[binding.command] = toElectronAccelerator(binding)
     }
-    void window.api.desktop.setMenuAccelerators(overrides)
+    // Surface IPC failures: a silent reject would leave the native menu frozen
+    // at the table's default accelerator until the next mutation, which the
+    // user has no way to diagnose.
+    window.api.desktop.setMenuAccelerators(overrides).catch((error) => {
+      console.warn('failed to push menu accelerators to main', error)
+    })
   })
 
   keyboardCommands.register(appKeyboardCommands.openSettings, () => {
+    // Already inside settings → no-op. Pushing /settings would redirect to
+    // /settings/bots and yank the user off whatever settings page they were on.
+    if (router.currentRoute.value.path.startsWith('/settings')) return true
     void router.push('/settings').catch(() => {})
     return true
   })

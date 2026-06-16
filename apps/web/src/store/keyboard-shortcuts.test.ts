@@ -122,6 +122,14 @@ describe('useKeyboardShortcutsStore', () => {
     expect(binding?.browser).toBe('intercept')
   })
 
+  it('scoped bindings precede global ones so dispatcher picks them up first', () => {
+    const store = useKeyboardShortcutsStore()
+    const scopes = store.effectiveBindings.map(b => b.scope)
+    const firstGlobal = scopes.indexOf('global')
+    const lastScoped = scopes.lastIndexOf('mediaLightbox')
+    expect(firstGlobal).toBeGreaterThan(lastScoped)
+  })
+
   it('garbage stored overrides do not poison the effective bindings', () => {
     (globalThis as unknown as { localStorage: Storage }).localStorage.setItem(
       'keyboard-shortcuts-overrides',
