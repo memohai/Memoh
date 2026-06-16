@@ -94,75 +94,56 @@
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection :title="t('settings.appearance.syntaxHighlighting')">
-        <SettingsRow
-          :label="t('settings.appearance.shikiThemeLight')"
-          :description="t('settings.appearance.shikiThemeLightDescription')"
-        >
-          <div class="w-56">
-            <SearchableSelectPopover
-              v-model="shikiThemeLightSelection"
-              :options="lightShikiThemeOptions"
-              :placeholder="t('settings.appearance.shikiThemeLight')"
-              :aria-label="t('settings.appearance.shikiThemeLight')"
-              :search-placeholder="t('settings.appearance.shikiThemeSearch')"
-              :search-aria-label="t('settings.appearance.shikiThemeSearch')"
-              :empty-text="t('settings.appearance.shikiThemeEmpty')"
-              :show-group-headers="false"
-            />
-          </div>
-        </SettingsRow>
-
-        <SettingsRow
-          :label="t('settings.appearance.shikiThemeDark')"
-          :description="t('settings.appearance.shikiThemeDarkDescription')"
-        >
-          <div class="w-56">
-            <SearchableSelectPopover
-              v-model="shikiThemeDarkSelection"
-              :options="darkShikiThemeOptions"
-              :placeholder="t('settings.appearance.shikiThemeDark')"
-              :aria-label="t('settings.appearance.shikiThemeDark')"
-              :search-placeholder="t('settings.appearance.shikiThemeSearch')"
-              :search-aria-label="t('settings.appearance.shikiThemeSearch')"
-              :empty-text="t('settings.appearance.shikiThemeEmpty')"
-              :show-group-headers="false"
-            />
-          </div>
-        </SettingsRow>
-      </SettingsSection>
-
       <SettingsSection :title="t('settings.appearance.diagrams')">
-        <SettingsRow
-          :label="t('settings.appearance.mermaidTheme')"
-          :description="t('settings.appearance.mermaidThemeDescription')"
-        >
-          <Select
-            :model-value="mermaidTheme"
-            @update:model-value="(value) => value && setMermaidTheme(value as MermaidTheme)"
-          >
-            <SelectTrigger
-              size="sm"
-              class="min-w-36"
-            >
-              <SelectValue>
-                {{ mermaidThemeLabels[mermaidTheme] }}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent
-              align="end"
-              :align-offset="0"
-            >
-              <SelectItem
-                v-for="value in MERMAID_THEMES"
-                :key="value"
-                :value="value"
+        <div class="mx-4 border-b border-border py-3 last:border-b-0">
+          <div class="flex min-h-[2.25rem] items-center justify-between gap-4">
+            <div class="min-w-0">
+              <div class="text-sm font-medium text-foreground">
+                {{ t('settings.appearance.mermaidTheme') }}
+              </div>
+              <p class="mt-0.5 text-xs text-muted-foreground">
+                {{ t('settings.appearance.mermaidThemeDescription') }}
+              </p>
+            </div>
+            <div class="shrink-0">
+              <Select
+                :model-value="mermaidTheme"
+                @update:model-value="(value) => value && setMermaidTheme(value as MermaidTheme)"
               >
-                {{ mermaidThemeLabels[value] }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </SettingsRow>
+                <SelectTrigger
+                  size="sm"
+                  class="min-w-36"
+                >
+                  <SelectValue>
+                    {{ mermaidThemeLabels[mermaidTheme] }}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent
+                  align="end"
+                  :align-offset="0"
+                >
+                  <SelectItem
+                    v-for="value in MERMAID_THEMES"
+                    :key="value"
+                    :value="value"
+                  >
+                    {{ mermaidThemeLabels[value] }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div class="pointer-events-none mt-3 overflow-hidden rounded-md border border-border bg-surface-editor">
+            <MarkdownRender
+              :key="mermaidPreviewKey"
+              :content="MERMAID_PREVIEW_CONTENT"
+              :is-dark="isDark"
+              :typewriter="false"
+              :fade="false"
+              custom-id="appearance-mermaid-preview"
+            />
+          </div>
+        </div>
       </SettingsSection>
 
       <SettingsSection :title="t('settings.appearance.typography')">
@@ -222,31 +203,61 @@
           />
         </SettingsRow>
 
-        <div class="mx-4 border-b border-border py-3 last:border-b-0">
-          <div class="flex min-h-[2.25rem] items-center justify-between gap-4">
-            <div class="min-w-0">
-              <div class="text-sm font-medium text-foreground">
-                {{ t('settings.appearance.codeFontFamily') }}
-              </div>
-              <p class="mt-0.5 text-xs text-muted-foreground">
-                {{ t('settings.appearance.codeFontFamilyDescription') }}
-              </p>
-            </div>
-            <div class="shrink-0">
-              <Input
-                id="code-font-family"
-                :model-value="codeFontFamilyDraft"
-                :placeholder="defaultCodeFontFamily"
-                class="h-8 w-48 font-mono text-xs"
-                @update:model-value="(value) => updateCodeFontFamilyDraft(value)"
-                @change="commitCodeFontFamilyDraft"
-                @blur="commitCodeFontFamilyDraft"
-                @keydown.enter="commitCodeFontFamilyDraft"
-              />
-            </div>
+        <SettingsRow
+          :label="t('settings.appearance.codeFontFamily')"
+          :description="t('settings.appearance.codeFontFamilyDescription')"
+        >
+          <Input
+            id="code-font-family"
+            :model-value="codeFontFamilyDraft"
+            :placeholder="defaultCodeFontFamily"
+            class="h-8 w-48 font-mono text-xs"
+            @update:model-value="(value) => updateCodeFontFamilyDraft(value)"
+            @change="commitCodeFontFamilyDraft"
+            @blur="commitCodeFontFamilyDraft"
+            @keydown.enter="commitCodeFontFamilyDraft"
+          />
+        </SettingsRow>
+
+        <SettingsRow
+          :label="t('settings.appearance.shikiThemeLight')"
+          :description="t('settings.appearance.shikiThemeLightDescription')"
+        >
+          <div class="w-56">
+            <SearchableSelectPopover
+              v-model="shikiThemeLightSelection"
+              :options="lightShikiThemeOptions"
+              :placeholder="t('settings.appearance.shikiThemeLight')"
+              :aria-label="t('settings.appearance.shikiThemeLight')"
+              :search-placeholder="t('settings.appearance.shikiThemeSearch')"
+              :search-aria-label="t('settings.appearance.shikiThemeSearch')"
+              :empty-text="t('settings.appearance.shikiThemeEmpty')"
+              :show-group-headers="false"
+            />
           </div>
+        </SettingsRow>
+
+        <SettingsRow
+          :label="t('settings.appearance.shikiThemeDark')"
+          :description="t('settings.appearance.shikiThemeDarkDescription')"
+        >
+          <div class="w-56">
+            <SearchableSelectPopover
+              v-model="shikiThemeDarkSelection"
+              :options="darkShikiThemeOptions"
+              :placeholder="t('settings.appearance.shikiThemeDark')"
+              :aria-label="t('settings.appearance.shikiThemeDark')"
+              :search-placeholder="t('settings.appearance.shikiThemeSearch')"
+              :search-aria-label="t('settings.appearance.shikiThemeSearch')"
+              :empty-text="t('settings.appearance.shikiThemeEmpty')"
+              :show-group-headers="false"
+            />
+          </div>
+        </SettingsRow>
+
+        <div class="mx-4 py-3">
           <div
-            class="typography-code-preview pointer-events-none mt-3 border-l-4 border-l-warning-border pl-3"
+            class="typography-code-preview pointer-events-none border-l-4 border-l-warning-border pl-3"
             :style="codeFontPreviewStyle"
             inert
           >
@@ -281,6 +292,7 @@ import { Monitor, Moon, Sun } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import MarkdownRender, { enableMermaid, setCustomComponents } from 'markstream-vue'
 import { useShikiHighlighter } from '@/composables/useShikiHighlighter'
 import type { Locale } from '@/i18n'
 import type { BundledTheme } from 'shiki'
@@ -288,10 +300,22 @@ import SettingsRow from '@/components/settings/row.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
+import ThemedMermaidBlock from '@/components/themed-mermaid-block/index.vue'
 import { colorSchemes, type ColorSchemeId, type ColorSchemeOption } from '@/constants/color-schemes'
 import { MERMAID_THEMES, type MermaidTheme, useSettingsStore, type ThemePreference } from '@/store/settings'
 import { listBundledShikiThemes } from '@/store/settings/shiki-theme'
 import { cssFontFamilyDeclaration, DEFAULT_CODE_FONT_FAMILY, DEFAULT_CODE_FONT_SIZE_PX, DEFAULT_UI_FONT_SIZE_PX, normalizeCodeFontSizePx } from '@/store/settings/typography'
+
+enableMermaid()
+setCustomComponents({ mermaid: ThemedMermaidBlock })
+
+const MERMAID_PREVIEW_CONTENT = `\`\`\`mermaid
+flowchart LR
+  A([Idea]) --> B{Pick a theme}
+  B -->|Auto| C[Match interface]
+  B -->|Forest| D[Forest]
+  B -->|Neutral| E[Neutral]
+\`\`\``
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
@@ -306,6 +330,10 @@ const mermaidThemeLabels: Record<MermaidTheme, string> = {
   forest: 'Forest',
   neutral: 'Neutral',
 }
+
+// Mermaid renders to SVG once per source+theme; force a remount when either
+// changes so the preview reflects the picked theme immediately.
+const mermaidPreviewKey = computed(() => `${mermaidTheme.value}:${isDark.value ? 'dark' : 'light'}`)
 
 const allShikiThemes = listBundledShikiThemes()
 const lightShikiThemeOptions = computed<SearchableSelectOption[]>(() =>
