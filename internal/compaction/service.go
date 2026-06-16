@@ -12,13 +12,15 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/models"
 )
 
 // Service manages context compaction for bot conversations.
 type Service struct {
-	queries dbstore.Queries
-	logger  *slog.Logger
+	queries     dbstore.Queries
+	hookService *hooks.Service
+	logger      *slog.Logger
 }
 
 // NewService creates a new compaction Service.
@@ -27,6 +29,10 @@ func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 		queries: queries,
 		logger:  log,
 	}
+}
+
+func (s *Service) SetHookService(h *hooks.Service) {
+	s.hookService = h
 }
 
 // ShouldCompact returns true if inputTokens exceeds the threshold.
@@ -50,13 +56,28 @@ func (s *Service) RunCompactionSync(ctx context.Context, cfg TriggerConfig) erro
 }
 
 func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) error {
+	if err := s.runCompactionHook(ctx, hooks.EventPreCompact, cfg, nil); err != nil {
+		return err
+	}
+	var compactErr error
+	defer func() {
+		extra := map[string]any{}
+		if compactErr != nil {
+			extra["error"] = compactErr.Error()
+		}
+		if err := s.runCompactionHook(context.WithoutCancel(ctx), hooks.EventPostCompact, cfg, extra); err != nil && s.logger != nil {
+			s.logger.Warn("post compaction hook failed", slog.String("bot_id", cfg.BotID), slog.Any("error", err))
+		}
+	}()
 	botUUID, err := db.ParseUUID(cfg.BotID)
 	if err != nil {
-		return err
+		compactErr = err
+		return compactErr
 	}
 	sessionUUID, err := db.ParseUUID(cfg.SessionID)
 	if err != nil {
-		return err
+		compactErr = err
+		return compactErr
 	}
 
 	logRow, err := s.queries.CreateCompactionLog(ctx, sqlc.CreateCompactionLogParams{
@@ -64,14 +85,48 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) error {
 		SessionID: sessionUUID,
 	})
 	if err != nil {
-		return err
+		compactErr = err
+		return compactErr
 	}
 
-	compactErr := s.doCompaction(ctx, logRow.ID, sessionUUID, cfg)
+	compactErr = s.doCompaction(ctx, logRow.ID, sessionUUID, cfg)
 	if compactErr != nil {
 		s.completeLog(ctx, logRow.ID, "error", "", compactErr.Error(), 0, nil, pgtype.UUID{})
 	}
 	return compactErr
+}
+
+func (s *Service) runCompactionHook(ctx context.Context, eventName string, cfg TriggerConfig, extra map[string]any) error {
+	if s == nil || s.hookService == nil {
+		return nil
+	}
+	payload := map[string]any{
+		"input_tokens":  cfg.TotalInputTokens,
+		"target_tokens": cfg.TargetTokens,
+		"ratio":         cfg.Ratio,
+		"model_id":      cfg.ModelID,
+	}
+	for key, value := range extra {
+		payload[key] = value
+	}
+	req := hooks.Request{
+		Version:   1,
+		Event:     eventName,
+		BotID:     cfg.BotID,
+		SessionID: cfg.SessionID,
+		Workspace: hooks.WorkspaceInfo{
+			CWD: hooks.DefaultWorkDir,
+		},
+		Turn: payload,
+	}
+	res, err := s.hookService.Run(ctx, req, nil)
+	if err != nil {
+		return err
+	}
+	if res.Decision == hooks.DecisionDeny {
+		return hooks.ErrDenied
+	}
+	return nil
 }
 
 func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUUID pgtype.UUID, cfg TriggerConfig) error {

@@ -249,7 +249,7 @@ import {
 import {
   SquarePen, LoaderCircle, Check, Search, X, LayoutDashboard, Settings, MessageSquare,
   BrainCircuit, ShieldAlert, HeartPulse, Database, Mail, Link, Clock, Server, FileBox, Zap,
-  Monitor, Globe, Bot as BotIcon, PackageOpen, ChevronLeft
+  Monitor, Globe, Bot as BotIcon, PackageOpen, ChevronLeft, Workflow
 } from 'lucide-vue-next'
 import { computed, ref, watch, onMounted, toValue, nextTick, inject } from 'vue'
 import { useRoute, onBeforeRouteLeave } from 'vue-router'
@@ -271,6 +271,7 @@ import { useCapabilitiesStore } from '@/store/capabilities'
 
 import BotSettings from './components/bot-settings.vue'
 import BotToolApproval from './components/bot-tool-approval.vue'
+import BotHooks from './components/bot-hooks.vue'
 import BotDesktop from './components/bot-desktop.vue'
 import BotNetwork from './components/bot-network.vue'
 import BotChannels from './components/bot-channels.vue'
@@ -385,6 +386,7 @@ const tabList = computed(() => {
     { value: 'channels', label: 'bots.tabs.channels', icon: MessageSquare, component: BotChannels, params: { 'bot-id': bot_id } },
     { value: 'access', label: 'bots.tabs.access', icon: ShieldAlert, component: BotAccess, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
     { value: 'tool-approval', label: 'bots.tabs.toolApproval', icon: Zap, component: BotToolApproval, params: { 'bot-id': bot_id } },
+    { value: 'hooks', label: 'bots.tabs.hooks', icon: Workflow, component: BotHooks, params: { 'bot-id': bot_id }, containerWorkspaceOnly: true },
     { value: 'acp', label: 'bots.tabs.acp', icon: BotIcon, component: BotAcp, params: { 'bot-id': bot_id } },
     { value: 'email', label: 'bots.tabs.email', icon: Mail, component: BotEmail, params: { 'bot-id': bot_id } },
     { value: 'plugins', label: 'bots.tabs.plugins', icon: PackageOpen, component: BotPlugins, params: { 'bot-id': bot_id } },
@@ -427,6 +429,7 @@ const searchIndex = computed(() => {
     { tab: 'channels', key: 'bots.channels.configured', keywords: ['telegram', 'discord', 'wechat', 'slack'] },
     { tab: 'access', key: 'bots.access.title', keywords: ['permissions', 'acl', 'rules', 'allow', 'deny'] },
     { tab: 'tool-approval', key: 'bots.toolApproval.title', keywords: ['mcp', 'tools', 'review', 'bypass', 'approval'] },
+    { tab: 'hooks', key: 'bots.hooks.title', keywords: ['hooks', 'events', 'tool calls', 'approval', 'workspace'] },
     { tab: 'acp', key: 'bots.tabs.acp', keywords: ['codex', 'claude code', 'coding agent', 'acp'] },
     { tab: 'email', key: 'bots.email.title', keywords: ['smtp', 'imap', 'mailbox', 'bindings'] },
     { tab: 'plugins', key: 'bots.plugins.title', keywords: ['plugin', 'marketplace', 'mcp', 'oauth', 'skills'] },
@@ -466,7 +469,7 @@ function selectTab(value: string): void {
 
 const groupedTabs = computed(() => {
   const coreKeys = ['overview', 'general', 'channels']
-  const capabilityKeys = ['plugins', 'skills', 'tool-approval', 'acp', 'mcp', 'memory']
+  const capabilityKeys = ['plugins', 'skills', 'hooks', 'tool-approval', 'acp', 'mcp', 'memory']
   const runtimeKeys = ['desktop', 'container', 'network', 'schedule', 'compaction', 'heartbeat']
   const securityKeys = ['access', 'email']
 

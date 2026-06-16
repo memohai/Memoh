@@ -2375,6 +2375,65 @@ definitions:
       workspace_backend:
         type: string
     type: object
+  handlers.HookEventInfo:
+    properties:
+      name:
+        type: string
+      runtime_supported:
+        type: boolean
+    type: object
+  handlers.HookTestRequest:
+    properties:
+      approval:
+        additionalProperties: {}
+        type: object
+      channel:
+        additionalProperties: {}
+        type: object
+      chat_id:
+        type: string
+      error:
+        type: string
+      event:
+        type: string
+      extra:
+        additionalProperties: {}
+        type: object
+      memory:
+        additionalProperties: {}
+        type: object
+      session_id:
+        type: string
+      tool:
+        $ref: '#/definitions/hooks.ToolPayload'
+      turn:
+        additionalProperties: {}
+        type: object
+    type: object
+  handlers.HookTestResponse:
+    properties:
+      config_exists:
+        type: boolean
+      result:
+        $ref: '#/definitions/hooks.Result'
+    type: object
+  handlers.HooksEventsResponse:
+    properties:
+      actions:
+        items:
+          type: string
+        type: array
+      config_path:
+        type: string
+      decisions:
+        items:
+          type: string
+        type: array
+      events:
+        items:
+          $ref: '#/definitions/handlers.HookEventInfo'
+        type: array
+    type: object
   handlers.InstallPluginRequest:
     properties:
       plugin_id:
@@ -3036,6 +3095,62 @@ definitions:
       status:
         type: string
       usage: {}
+    type: object
+  hooks.ActionResult:
+    properties:
+      action_type:
+        type: string
+      decision:
+        type: string
+      error:
+        type: string
+      exit_code:
+        type: integer
+      metadata:
+        additionalProperties: {}
+        type: object
+      name:
+        type: string
+      reason:
+        type: string
+      result: {}
+      stderr:
+        type: string
+      stdout:
+        type: string
+    type: object
+  hooks.Result:
+    properties:
+      action_results:
+        items:
+          $ref: '#/definitions/hooks.ActionResult'
+        type: array
+      actions_run:
+        type: integer
+      append_context:
+        type: string
+      decision:
+        type: string
+      hooks_matched:
+        type: integer
+      metadata:
+        additionalProperties: {}
+        type: object
+      reason:
+        type: string
+      runtime_supported:
+        type: boolean
+    type: object
+  hooks.ToolPayload:
+    properties:
+      call_id:
+        type: string
+      error:
+        type: string
+      input: {}
+      name:
+        type: string
+      result: {}
     type: object
   mcp.AuthorizeResult:
     properties:
@@ -6315,6 +6430,68 @@ paths:
       summary: List heartbeat logs
       tags:
       - heartbeat
+  /bots/{bot_id}/hooks/events:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.HooksEventsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List supported bot hook events
+      tags:
+      - hooks
+  /bots/{bot_id}/hooks/test:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Hook test payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.HookTestRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.HookTestResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Run bot hooks for a synthetic event
+      tags:
+      - hooks
   /bots/{bot_id}/local/messages:
     post:
       consumes:
