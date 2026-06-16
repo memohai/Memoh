@@ -44,8 +44,10 @@ export const buttonVariants = cva(
         primary: 'text-background',
         // BRAND = the scheme brand color. This used to be `primary`; it's now an
         // explicit variant for the rare brand CTA (e.g. chat Send) per the
-        // brand-scarcity rule. Migrate brand call sites to variant="brand".
-        brand: 'bg-brand text-brand-foreground hover:bg-brand-hover',
+        // brand-scarcity rule. Fill + hover/press live on a ::before shell in
+        // style.css (data-variant="brand"), mirroring primary/ghost, so the press
+        // scales the fill while the glyph stays put.
+        brand: 'text-brand-foreground',
       },
       size: {
         default: 'h-9 px-4 py-2 has-[>svg]:px-3',

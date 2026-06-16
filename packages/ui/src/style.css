@@ -305,6 +305,34 @@
     transition-duration: 40ms;
   }
 
+  /* ── Button: BRAND — solid scheme-color CTA (e.g. chat Send) ─────────────────
+     Fill + hover/press live on a ::before shell (same model as primary/ghost),
+     so the press shrinks only the fill and the glyph never moves. Press scale
+     matches the ghost (0.974) so a circular brand icon button presses with the
+     same tactility as the ghost icon button beside it. */
+  [data-button][data-variant="brand"] {
+    position: relative;
+    isolation: isolate;
+  }
+  [data-button][data-variant="brand"]::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background-color: var(--brand);
+    scale: 1 1;
+    transition:
+      scale 0.255s linear(0, 0.3505, 0.7432, 0.9336, 0.9951, 1.0062, 1.0045, 1.0019, 1.0005, 1),
+      background-color 0.15s ease;
+  }
+  [data-button][data-variant="brand"]:hover::before {
+    background-color: var(--brand-hover);
+  }
+  [data-button][data-variant="brand"]:active::before {
+    scale: 0.974;
+  }
+
   /* ── Button: LINK — ported from contract bench `link-fade` ────────────────
      Inline-text link: muted text brightens on hover; underline is a ::after bar
      that fades in without changing text opacity or layout. */
@@ -1102,10 +1130,14 @@
   --diff-add-border: oklch(0.55 0.12 145 / 0.5);
   --diff-remove: oklch(0.55 0.12 25 / 0.12);
   --diff-remove-border: oklch(0.55 0.12 25 / 0.5);
-  --terminal-background: #1a1b26;
-  --terminal-foreground: #a9b1d6;
-  --terminal-cursor: #c0caf5;
-  --terminal-selection: #33467c;
+  /* Terminal surface tracks the app theme instead of a fixed dark palette, so it
+     never clashes with a light/dark shell. Light: the reading body ground (white)
+     with the body ink for text/cursor. xterm parses only hex/rgb(a), so these stay
+     concrete (not var() aliases). */
+  --terminal-background: #ffffff;
+  --terminal-foreground: #2d2c29;
+  --terminal-cursor: #2d2c29;
+  --terminal-selection: rgb(45 44 41 / 0.16);
   --chart-1: var(--brand);
   --chart-2: var(--success);
   --chart-3: var(--info);
@@ -1313,6 +1345,11 @@
   --chart-3: var(--info);
   --chart-4: var(--warning);
   --chart-5: var(--destructive);
+  /* Terminal surface (dark): the app canvas, with the body ink for text/cursor. */
+  --terminal-background: #1f1f1f;
+  --terminal-foreground: #e0e0e0;
+  --terminal-cursor: #e0e0e0;
+  --terminal-selection: rgb(224 224 224 / 0.20);
   /* Dark: field edge uses solid neutral grays (black-alpha is invisible on dark bg).
        rest ≈ RGB(70) · engaged ≈ RGB(90) · solid ≈ near-white for committed focus */
   --field-edge-rest: oklch(0.318 0 0);

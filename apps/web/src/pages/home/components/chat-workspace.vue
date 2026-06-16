@@ -40,11 +40,12 @@ import 'dockview-vue/dist/styles/dockview.css'
 import '@/styles/dockview-theme.css'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { useChatStore } from '@/store/chat-list'
-import { openInFileManagerKey } from '../composables/useFileManagerProvider'
+import { openInFileManagerKey, openAssetPreviewKey } from '../composables/useFileManagerProvider'
 import { DesktopShellKey } from '@/lib/desktop-shell'
 import PanelChat from './dockview/panel-chat.vue'
 import PanelFile from './dockview/panel-file.vue'
 import PanelPreview from './dockview/panel-preview.vue'
+import PanelAsset from './dockview/panel-asset.vue'
 import PanelTerminal from './dockview/panel-terminal.vue'
 import PanelBrowser from './dockview/panel-browser.vue'
 import PanelDisplay from './dockview/panel-display.vue'
@@ -90,6 +91,7 @@ const panelComponents: Record<string, VueComponent> = {
   chat: PanelChat as unknown as VueComponent,
   file: PanelFile as unknown as VueComponent,
   preview: PanelPreview as unknown as VueComponent,
+  asset: PanelAsset as unknown as VueComponent,
   terminal: PanelTerminal as unknown as VueComponent,
   browser: PanelBrowser as unknown as VueComponent,
   display: PanelDisplay as unknown as VueComponent,
@@ -199,6 +201,8 @@ provide(openInFileManagerKey, (path: string, isDir = false) => {
     store.openFile(normalizedPath)
   }
 })
+
+provide(openAssetPreviewKey, args => store.openAsset(args))
 
 onMounted(() => {
   resizeObserver = new ResizeObserver(() => applyLayout())

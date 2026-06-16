@@ -146,10 +146,16 @@
         class="flex flex-col gap-2"
         :class="bubbleSelf ? 'items-end' : 'items-start'"
       >
+        <AttachmentBlock
+          v-if="userAttachmentBlock"
+          :block="userAttachmentBlock"
+          :on-open-media="onOpenMedia"
+        />
         <div
           v-if="cleanUserText(message.text) || message.forward || message.reply"
           :lang="contentLang(cleanUserText(message.text))"
-          class="chat-user-bubble w-fit max-w-full rounded-2xl bg-chat-user-bubble px-4 py-3 text-chat-user-bubble-fg whitespace-pre-wrap break-words"
+          class="chat-user-bubble w-fit max-w-full bg-chat-user-bubble px-4 py-3 text-chat-user-bubble-fg whitespace-pre-wrap break-words"
+          :class="userBubbleRadiusClass"
         >
           <div
             v-if="message.forward"
@@ -201,11 +207,6 @@
             :text="cleanUserText(message.text)"
           />
         </div>
-        <AttachmentBlock
-          v-if="userAttachmentBlock"
-          :block="userAttachmentBlock"
-          :on-open-media="onOpenMedia"
-        />
         <MessageActions
           class="-mt-1"
           role="user"
@@ -275,13 +276,24 @@
             </template>
           </template>
 
-          <!-- Streaming indicator -->
+          <!-- Local "the turn is running" indicator: shown only before the first
+               block streams in. Same scale/weight/resting color as the process
+               headers (cop-title), so it reads as the first link of the chain that
+               the Thinking block continues — not a separate loading widget. The
+               phrase types in character by character (no spinner, no shimmer), so
+               the only motion is the reveal and the line stays a single, inspectable
+               color at rest. -->
           <div
             v-if="message.streaming && !hasVisibleAssistantBlocks"
-            class="flex items-center gap-2 text-xs text-muted-foreground h-6"
+            class="font-[400] text-[0.90625rem] text-cop-title select-none py-px"
           >
-            <LoaderCircle class="size-3.5 animate-spin" />
-            {{ $t('chat.thinking') }}
+            <TextGenerateEffect
+              :key="thinkingHint"
+              :words="`${thinkingHint}…`"
+              :filter="false"
+              :stagger="45"
+              :duration="0.35"
+            />
           </div>
         </div>
         <!-- Action bar hugs the answer (~9px), tighter than the inter-block
@@ -316,9 +328,9 @@ registerSharedMarkdownComponents('chat-msg', { code_block: ChatCodeBlock, shell:
 
 <script setup lang="ts">
 import { computed, toRef, useTemplateRef, watch } from 'vue'
-import { CircleAlert, LoaderCircle } from 'lucide-vue-next'
+import { CircleAlert } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime, formatCalendarTime } from '@/utils/date-time'
-import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
+import { Avatar, AvatarImage, AvatarFallback, TextGenerateEffect } from '@memohai/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
 import ToolCallGroup from './tool-call-group.vue'
@@ -392,7 +404,18 @@ const isSelf = computed(() =>
 )
 
 
-const { t, locale } = useI18n()
+const { t, tm, rt, locale } = useI18n()
+
+// The pre-stream "running" line picks one phrase and holds it for the turn:
+// seeded by the message id so it stays put across re-renders/refetches instead
+// of flickering between phrases on every reactive update.
+const thinkingHint = computed(() => {
+  const hints = tm('chat.process.thinkingHints') as unknown[]
+  if (!Array.isArray(hints) || hints.length === 0) return t('chat.thinking')
+  let seed = 0
+  for (const ch of props.message.id) seed = (seed + ch.charCodeAt(0)) % 100000
+  return rt(hints[seed % hints.length] as Parameters<typeof rt>[0])
+})
 
 
 const replySenderLabel = computed(() => {
@@ -536,6 +559,20 @@ const userAttachmentBlock = computed<AttachmentBlockType | null>(() => {
     type: 'attachments',
     attachments: props.message.attachments,
   }
+})
+
+// With attachments stacked above the bubble, the corner that meets them tightens
+// to a small radius so it tucks into the attachment stack and reads as one
+// connected unit — noticeably sharper than the attachment card's own corner; the
+// other three corners keep the full bubble radius. 7px (radius token − 3px) sits
+// just under the card's corner so the fold is clearly tighter without going razor
+// sharp. The folded corner follows the bubble's alignment side — top-right for own
+// messages, top-left for left-aligned (channel) messages.
+const userBubbleRadiusClass = computed(() => {
+  if (!userAttachmentBlock.value) return 'rounded-2xl'
+  return bubbleSelf.value
+    ? 'rounded-2xl rounded-tr-[calc(var(--radius)-3px)]'
+    : 'rounded-2xl rounded-tl-[calc(var(--radius)-3px)]'
 })
 
 function hasLaterAssistantMessage(index: number): boolean {

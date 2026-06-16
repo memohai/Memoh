@@ -1,32 +1,35 @@
 <template>
-  <div class="flex flex-col">
-    <!-- Search -->
-    <div class="flex h-10 shrink-0 items-center gap-2 border-b border-border/40 px-3.5">
-      <Search class="size-3.5 shrink-0 text-muted-foreground" />
-      <input
-        v-model="searchTerm"
-        role="combobox"
-        :placeholder="$t('bots.settings.searchModel')"
-        aria-label="Search models"
-        class="flex h-full w-full bg-transparent text-control outline-hidden placeholder:text-muted-foreground"
-      >
-      <button
-        v-if="searchTerm"
-        type="button"
-        class="shrink-0 text-muted-foreground hover:text-foreground"
-        :aria-label="$t('common.clear')"
-        @click="searchTerm = ''"
-      >
-        <X class="size-3.5" />
-      </button>
-    </div>
+  <!-- The flyout anchors to the selected row's right edge, then shifts upward so
+       the Reasoning label aligns with the Options label itself. -->
+  <Popover v-model:open="optionsOpen">
+    <div class="flex flex-col">
+      <!-- Search: no leading glyph — the placeholder already says what to do,
+           and a magnifier on a 1-row field is decoration that eats width. -->
+      <div class="flex h-9 shrink-0 items-center gap-2 border-b border-border/40 px-3">
+        <input
+          v-model="searchTerm"
+          role="combobox"
+          :placeholder="$t('bots.settings.searchModel')"
+          aria-label="Search models"
+          class="flex h-full w-full bg-transparent text-control outline-hidden placeholder:text-muted-foreground"
+        >
+        <button
+          v-if="searchTerm"
+          type="button"
+          class="shrink-0 text-muted-foreground hover:text-foreground"
+          :aria-label="$t('common.clear')"
+          @click="searchTerm = ''"
+        >
+          <X class="size-3.5" />
+        </button>
+      </div>
 
-    <!-- Model list -->
-    <ScrollArea class="max-h-72">
-      <div class="p-1">
+      <!-- This list scrolls, but its scrollbar must not reserve a layout gutter:
+           the row highlight and trailing controls need the full menu width. -->
+      <div class="composer-model-list max-h-80 space-y-px overflow-y-auto overscroll-contain p-1">
         <div
           v-if="filteredGroups.length === 0"
-          class="py-6 text-center text-xs text-muted-foreground"
+          class="py-6 text-center text-body text-muted-foreground"
         >
           {{ $t('bots.settings.noModel') }}
         </div>
@@ -35,55 +38,118 @@
           v-for="group in filteredGroups"
           :key="group.key"
         >
-          <div class="px-2 pt-1.5 pb-1 text-xs font-medium text-muted-foreground">
+          <div class="px-3 pt-1.5 pb-0.5 text-caption font-medium text-muted-foreground">
             {{ group.label }}
           </div>
           <div
             v-for="option in group.items"
             :key="option.value"
-            class="group/model flex items-center gap-1 rounded-md px-1 transition-colors"
+            class="group/row relative flex items-center gap-1 rounded-md px-1 transition-colors duration-75"
             :class="modelValue === option.value ? 'bg-[var(--overlay-hover)]' : 'hover:bg-[var(--overlay-hover-light)]'"
           >
+            <PopoverAnchor
+              v-if="optionsForValue === option.value"
+              as-child
+            >
+              <span
+                class="pointer-events-none absolute right-0 top-0 h-full w-0"
+                aria-hidden="true"
+              />
+            </PopoverAnchor>
             <button
               type="button"
-              class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm"
+              class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-control"
               :class="modelValue === option.value ? 'font-medium text-foreground' : 'text-foreground'"
-              @click="selectModel(option.value)"
+              @click="commitModel(option.value)"
             >
               <span class="min-w-0 flex-1 truncate">{{ option.label }}</span>
+            </button>
+
+            <div class="flex shrink-0 items-center gap-1 pr-1">
+              <!-- Options surfaces on hover for ANY reasoning-capable model so
+                     its reasoning support is discoverable before it's picked;
+                     clicking it adopts that model and opens its effort card. -->
+              <button
+                v-if="supportsReasoning(option)"
+                type="button"
+                class="rounded px-1 py-0.5 text-control transition-[color,opacity]"
+                :class="(modelValue === option.value || optionsForValue === option.value)
+                  ? 'text-foreground opacity-100'
+                  : 'text-muted-foreground opacity-0 group-hover/row:opacity-100 hover:text-foreground'"
+                @click="toggleOptions(option.value)"
+              >
+                {{ $t('chat.modelOptions') }}
+              </button>
               <Check
                 v-if="modelValue === option.value"
                 class="size-3.5 shrink-0 text-muted-foreground"
               />
-            </button>
-
-            <!-- Inline reasoning effort (Arkloop pattern: on the RIGHT of model item) -->
-            <button
-              v-if="modelValue === option.value && supportsReasoning(option)"
-              type="button"
-              class="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-              :class="reasoningActive ? 'text-foreground' : ''"
-              @click.stop="cycleReasoning"
-            >
-              <Lightbulb
-                class="size-3 shrink-0"
-                :class="reasoningActive ? '' : 'opacity-40'"
-              />
-              <span class="text-caption">{{ reasoningLabel }}</span>
-            </button>
+            </div>
           </div>
         </template>
       </div>
-    </ScrollArea>
-  </div>
+    </div>
+
+    <PopoverContent
+      side="right"
+      align="start"
+      :side-offset="12"
+      :align-offset="-4"
+      :align-flip="false"
+      :collision-padding="8"
+      class="w-44 p-1"
+      @open-auto-focus.prevent
+    >
+      <div class="flex flex-col gap-0.5">
+        <!-- Whole row toggles reasoning (the switch is just the indicator), so
+             the target is the full strip rather than a 32px puck. -->
+        <div
+          role="button"
+          tabindex="0"
+          class="flex cursor-pointer items-center justify-between gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-[var(--overlay-hover-light)]"
+          @click="toggleReasoning(!reasoningActive)"
+          @keydown.enter.prevent="toggleReasoning(!reasoningActive)"
+          @keydown.space.prevent="toggleReasoning(!reasoningActive)"
+        >
+          <span class="text-control text-foreground">{{ $t('chat.reasoningEffort') }}</span>
+          <Switch
+            size="sm"
+            tabindex="-1"
+            class="pointer-events-none"
+            :model-value="reasoningActive"
+          />
+        </div>
+
+        <template v-if="reasoningActive && effortLevels.length">
+          <div class="mx-1 my-1 h-px bg-border/60" />
+          <div class="px-2 pb-0.5 text-caption font-medium text-muted-foreground">
+            {{ $t('chat.modelEffort') }}
+          </div>
+          <button
+            v-for="level in effortLevels"
+            :key="level"
+            type="button"
+            class="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-control transition-colors hover:bg-[var(--overlay-hover-light)]"
+            :class="reasoningEffort === level ? 'font-medium text-foreground' : 'text-foreground'"
+            @click="setEffort(level)"
+          >
+            <span>{{ $t(EFFORT_LABELS[level] ?? 'chat.reasoningOff') }}</span>
+            <Check
+              v-if="reasoningEffort === level"
+              class="size-3.5 shrink-0 text-muted-foreground"
+            />
+          </button>
+        </template>
+      </div>
+    </PopoverContent>
+  </Popover>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Search, X, Check, Lightbulb } from 'lucide-vue-next'
-import { ScrollArea } from '@memohai/ui'
+import { X, Check } from 'lucide-vue-next'
+import { Switch, Popover, PopoverAnchor, PopoverContent } from '@memohai/ui'
 import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
-import { useI18n } from 'vue-i18n'
 import {
   REASONING_EFFORT_DISABLE,
   EFFORT_LABELS,
@@ -100,15 +166,16 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'update:modelValue': [value: string]
-  'update:reasoningEffort': [value: string]
+  close: []
 }>()
 
 const modelValue = defineModel<string>({ default: '' })
 const reasoningEffort = defineModel<string>('reasoningEffort', { default: '' })
 
-const { t } = useI18n()
 const searchTerm = ref('')
+const optionsOpen = ref(false)
+// Which row owns the reasoning fly-out (drives both its anchor and visibility).
+const optionsForValue = ref('')
 
 const providerMap = computed(() => {
   const map = new Map<string, string>()
@@ -127,7 +194,7 @@ interface ModelOption {
   label: string
   groupKey: string
   groupLabel: string
-  config: Record<string, unknown> | undefined
+  config: ModelsGetResponse['config']
   providerId: string
 }
 
@@ -139,7 +206,7 @@ const options = computed<ModelOption[]>(() =>
       label: model.name || model.model_id || '',
       groupKey: providerId,
       groupLabel: providerMap.value.get(providerId) ?? providerId,
-      config: model.config as Record<string, unknown> | undefined,
+      config: model.config,
       providerId,
     }
   }),
@@ -160,7 +227,20 @@ const filteredGroups = computed(() => {
     }
     groups.get(opt.groupKey)!.items.push(opt)
   }
-  return Array.from(groups.values())
+
+  // Float the active model's provider (and the model itself) to the top so the
+  // current selection is the first thing the eye lands on.
+  const list = Array.from(groups.values())
+  const selected = options.value.find((o) => o.value === modelValue.value)
+  if (!selected) return list
+  list.sort((a, b) => Number(b.key === selected.groupKey) - Number(a.key === selected.groupKey))
+  const activeGroup = list.find((g) => g.key === selected.groupKey)
+  if (activeGroup) {
+    activeGroup.items = [...activeGroup.items].sort(
+      (a, b) => Number(b.value === selected.value) - Number(a.value === selected.value),
+    )
+  }
+  return list
 })
 
 const activeModel = computed(() =>
@@ -168,7 +248,7 @@ const activeModel = computed(() =>
 )
 
 function supportsReasoning(option: ModelOption): boolean {
-  return resolveThinkingMode(option.config as never) !== 'none'
+  return resolveThinkingMode(option.config) !== 'none'
 }
 
 const activeClientType = computed(() =>
@@ -178,10 +258,16 @@ const activeClientType = computed(() =>
 const availableEfforts = computed(() => {
   if (!activeModel.value) return []
   return availableEffortsForMode(
-    resolveThinkingMode(activeModel.value.config as never),
-    resolveEffortLevels(activeModel.value.config as never, activeClientType.value),
+    resolveThinkingMode(activeModel.value.config),
+    resolveEffortLevels(activeModel.value.config, activeClientType.value),
   )
 })
+
+// The selectable effort tiers, dropping the "off" sentinel — that toggle lives
+// in the Reasoning switch above the list.
+const effortLevels = computed(() =>
+  availableEfforts.value.filter((e) => e !== REASONING_EFFORT_DISABLE),
+)
 
 const reasoningActive = computed(() =>
   Boolean(reasoningEffort.value)
@@ -189,32 +275,56 @@ const reasoningActive = computed(() =>
   && availableEfforts.value.length > 0,
 )
 
-const reasoningLabel = computed(() => {
-  if (!reasoningActive.value) return t('chat.reasoningOff')
-  return t(EFFORT_LABELS[reasoningEffort.value] ?? 'chat.reasoningOff')
-})
+// Picking a model by its name commits the choice and dismisses the menu.
+function commitModel(value: string) {
+  optionsOpen.value = false
+  if (value !== modelValue.value) modelValue.value = value
+  emit('close')
+}
 
-function selectModel(value: string) {
-  if (value !== modelValue.value) {
-    emit('update:modelValue', value)
+// Opening Options adopts the model (so the effort context is unambiguous) but
+// keeps the menu open so the fly-out can render against its row.
+function toggleOptions(value: string) {
+  const reopening = optionsForValue.value === value && optionsOpen.value
+  if (value !== modelValue.value) modelValue.value = value
+  optionsForValue.value = value
+  optionsOpen.value = !reopening
+}
+
+function toggleReasoning(next: boolean) {
+  if (next) {
+    const levels = effortLevels.value
+    reasoningEffort.value = levels.includes('medium') ? 'medium' : (levels[0] ?? REASONING_EFFORT_DISABLE)
+  } else {
+    reasoningEffort.value = REASONING_EFFORT_DISABLE
   }
 }
 
-function cycleReasoning() {
-  if (availableEfforts.value.length === 0) return
-  const currentIndex = availableEfforts.value.indexOf(reasoningEffort.value)
-  // Cycle: off → first effort → ... → last effort → off
-  const nextIndex = (currentIndex + 1) % (availableEfforts.value.length + 1)
-  if (nextIndex === 0) {
-    emit('update:reasoningEffort', availableEfforts.value[0]!)
-  } else if (nextIndex >= availableEfforts.value.length) {
-    emit('update:reasoningEffort', REASONING_EFFORT_DISABLE)
-  } else {
-    emit('update:reasoningEffort', availableEfforts.value[nextIndex]!)
-  }
+function setEffort(level: string) {
+  reasoningEffort.value = level
 }
 
 watch(() => props.open, (v) => {
-  if (v) searchTerm.value = ''
+  if (v) {
+    searchTerm.value = ''
+  } else {
+    optionsOpen.value = false
+    optionsForValue.value = ''
+  }
+})
+
+// Filtering can unmount the row the fly-out is anchored to; drop it so the card
+// never floats against a missing anchor.
+watch(searchTerm, () => {
+  if (optionsOpen.value) {
+    optionsOpen.value = false
+    optionsForValue.value = ''
+  }
+})
+
+// When the fly-out dismisses (toggle, outside-click), forget its row so the
+// "Options" affordance falls back to hover/selection visibility.
+watch(optionsOpen, (v) => {
+  if (!v) optionsForValue.value = ''
 })
 </script>

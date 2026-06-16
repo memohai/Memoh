@@ -1,8 +1,17 @@
 <template>
   <div class="group/att relative shrink-0">
     <div
-      class="relative size-24 overflow-hidden rounded-lg border border-border bg-surface-composer"
-      :class="interactive ? 'transition-colors group-hover/att:border-ring' : ''"
+      class="relative size-30 overflow-hidden rounded-lg border border-border bg-surface-composer text-left"
+      :class="[
+        (interactive || clickable) ? 'transition-colors group-hover/att:border-foreground/20' : '',
+        clickable ? 'cursor-pointer' : '',
+      ]"
+      :role="clickable ? 'button' : undefined"
+      :tabindex="clickable ? 0 : undefined"
+      :aria-label="clickable ? previewLabel : undefined"
+      @click="clickable ? emit('preview') : undefined"
+      @keydown.enter.prevent="clickable ? emit('preview') : undefined"
+      @keydown.space.prevent="clickable ? emit('preview') : undefined"
     >
       <!-- Image / video cover -->
       <template v-if="kind === 'media'">
@@ -39,26 +48,67 @@
         </div>
       </template>
 
-      <!-- File card -->
-      <div
-        v-else
-        class="flex size-full flex-col gap-1 p-2.5"
-      >
-        <span class="line-clamp-3 break-all text-caption leading-snug text-foreground">
-          {{ name }}
-        </span>
-        <div class="flex-1" />
-        <span
-          v-if="ext"
-          class="self-start rounded-sm border border-border px-1.5 py-0.5 text-caption font-medium uppercase tracking-wide text-muted-foreground"
+      <!-- Pasted content: a large text paste captured as a card. The body
+           previews the raw text and a badge marks its origin; clicking opens
+           the full-text viewer. -->
+      <template v-else-if="kind === 'pasted'">
+        <div class="flex size-full flex-col gap-1 p-2.5">
+          <p class="line-clamp-4 flex-1 whitespace-pre-wrap break-all text-caption leading-snug text-muted-foreground">
+            {{ text }}
+          </p>
+          <div class="flex items-center justify-between gap-1">
+            <span
+              v-if="size != null"
+              class="text-caption text-muted-foreground"
+            >
+              {{ sizeLabel }}
+            </span>
+            <span class="rounded-sm border border-border px-1.5 py-0.5 text-caption font-medium uppercase tracking-wide text-muted-foreground">
+              {{ t('chat.pastedBadge') }}
+            </span>
+          </div>
+        </div>
+      </template>
+
+      <!-- File card: a shimmer holds the space while the composer reads the file,
+           then the name / line count / badge fade in — so a freshly added file
+           "loads then appears" rather than popping in. -->
+      <template v-else>
+        <div
+          v-if="!fileRevealed"
+          class="absolute inset-0 flex flex-col gap-2 p-2.5"
         >
-          {{ ext }}
-        </span>
-        <FileIcon
-          v-else
-          class="size-4 text-muted-foreground"
-        />
-      </div>
+          <Skeleton class="h-2.5 w-4/5 rounded-sm" />
+          <Skeleton class="h-2.5 w-3/5 rounded-sm" />
+          <div class="flex-1" />
+          <Skeleton class="h-2.5 w-1/3 rounded-sm" />
+        </div>
+        <div
+          class="flex size-full flex-col gap-0.5 p-2.5 transition-opacity duration-200"
+          :class="fileRevealed ? 'opacity-100' : 'opacity-0'"
+        >
+          <span class="line-clamp-3 break-all text-caption leading-snug text-foreground">
+            {{ name }}
+          </span>
+          <span
+            v-if="lines != null"
+            class="text-caption text-muted-foreground"
+          >
+            {{ t('chat.attachmentLines', { count: lines }) }}
+          </span>
+          <div class="flex-1" />
+          <span
+            v-if="ext"
+            class="self-start rounded-sm border border-border px-1.5 py-0.5 text-caption font-medium uppercase tracking-wide text-muted-foreground"
+          >
+            {{ ext }}
+          </span>
+          <FileIcon
+            v-else
+            class="size-4 text-muted-foreground"
+          />
+        </div>
+      </template>
     </div>
 
     <!-- Remove (composer only) -->
@@ -66,7 +116,7 @@
       v-if="removable"
       type="button"
       :aria-label="resolvedRemoveLabel"
-      class="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-0 transition-[opacity,color] hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none group-hover/att:opacity-100"
+      class="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-0 transition-[opacity,color] hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none group-hover/att:opacity-100"
       @click.stop="emit('remove')"
     >
       <X class="size-3" />
@@ -81,17 +131,22 @@ import { useI18n } from 'vue-i18n'
 import { Skeleton } from '@memohai/ui'
 
 const props = defineProps<{
-  kind: 'media' | 'file'
+  kind: 'media' | 'file' | 'pasted'
   src?: string
   video?: boolean
   name?: string
   ext?: string
+  lines?: number | null
+  text?: string
+  size?: number
+  loading?: boolean
   removable?: boolean
   interactive?: boolean
+  clickable?: boolean
   removeLabel?: string
 }>()
 
-const emit = defineEmits<{ remove: [] }>()
+const emit = defineEmits<{ remove: []; preview: [] }>()
 const { t } = useI18n()
 
 const resolvedRemoveLabel = computed(() =>
@@ -99,6 +154,42 @@ const resolvedRemoveLabel = computed(() =>
   || (props.name ? `${t('common.delete')}: ${props.name}` : t('common.delete')),
 )
 
+const previewLabel = computed(() =>
+  props.name ? `${t('common.preview')}: ${props.name}` : t('common.preview'),
+)
+
+const sizeLabel = computed(() => {
+  const bytes = props.size ?? 0
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+})
+
 const mediaLoaded = ref(false)
-watch(() => props.src, () => { mediaLoaded.value = false })
+watch(() => props.src, () => {
+  // Keep an already-painted frame on screen across an in-place src swap — e.g.
+  // an optimistic base64 preview being reconciled to its persisted asset URL
+  // (same <img>, same message). The browser holds the old frame until the new
+  // src decodes, so skipping the skeleton reset avoids a blank flash. Only the
+  // first load (nothing painted yet) falls through to the skeleton.
+  if (mediaLoaded.value) return
+  mediaLoaded.value = false
+})
+
+// File cards hold a shimmer until the composer has finished reading the file
+// (its line count), then fade their content in. Two animation frames guarantee
+// the shimmer paints once before the swap, so the fade actually plays instead
+// of snapping — even when the read resolves in the same tick.
+const fileRevealed = ref(false)
+watch(
+  () => props.loading,
+  (loading) => {
+    if (loading) {
+      fileRevealed.value = false
+      return
+    }
+    requestAnimationFrame(() => requestAnimationFrame(() => { fileRevealed.value = true }))
+  },
+  { immediate: true },
+)
 </script>

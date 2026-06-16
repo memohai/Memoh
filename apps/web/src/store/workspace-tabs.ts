@@ -12,6 +12,7 @@ import {
   deleteTerminalSnapshot,
   terminalCacheKey,
 } from '@/composables/useTerminalCache'
+import type { OpenAssetPreviewArgs } from '@/pages/home/composables/useFileManagerProvider'
 
 // Workspace shell state (activity bar + side panel + dockview layout):
 // - the dockview layout in the center area (chat / file / terminal / browser /
@@ -35,7 +36,7 @@ const DEFAULT_BROWSER_ADDRESS = 'localhost:5173/'
 // (≈554:269) — enough room to work in without burying the conversation.
 const TERMINAL_PANEL_HEIGHT_RATIO = 1 / 3
 
-export type WorkspacePanelComponent = 'chat' | 'file' | 'preview' | 'terminal' | 'browser' | 'display'
+export type WorkspacePanelComponent = 'chat' | 'file' | 'preview' | 'asset' | 'terminal' | 'browser' | 'display'
 
 interface BotLayoutState {
   layout: SerializedDockview | null
@@ -59,6 +60,7 @@ function panelComponentOf(id: string): WorkspacePanelComponent | null {
   if (id === CHAT_PANEL_ID) return 'chat'
   if (id.startsWith('file:')) return 'file'
   if (id.startsWith('preview:')) return 'preview'
+  if (id.startsWith('asset:')) return 'asset'
   if (id.startsWith('terminal:')) return 'terminal'
   if (id.startsWith('browser:')) return 'browser'
   if (id.startsWith('display:')) return 'display'
@@ -576,6 +578,38 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     })
   }
 
+  // Open or focus a tab that renders a message attachment (a stored media asset).
+  // Unlike openFile/openPreview this is NOT a workspace path: the tab re-resolves
+  // its source from the content hash (or falls back to a direct URL), so it works
+  // for the user's own uploads without a workspace_read grant. Lands in the editor
+  // area like a file tab; refocuses an existing tab for the same asset.
+  function openAsset(args: OpenAssetPreviewArgs) {
+    const dock = api.value
+    if (!dock) return
+    const key = (args.key ?? '').trim()
+    if (!key) return
+    const id = `asset:${key}`
+    const existing = dock.getPanel(id)
+    if (existing) {
+      existing.api.setActive()
+      return
+    }
+    const target = nonTerminalTarget(dock)
+    dock.addPanel({
+      id,
+      component: 'asset',
+      title: args.name || 'file',
+      params: {
+        name: args.name,
+        botId: args.botId,
+        contentHash: args.contentHash,
+        src: args.src,
+      },
+      renderer: 'always',
+      ...(target ? { position: target } : {}),
+    })
+  }
+
   function openTerminal(groupId?: string) {
     if (!hasCurrentPermission('workspace_exec')) return
     const bid = (currentBotId.value ?? '').trim()
@@ -724,16 +758,12 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         })
         break
       }
-      case 'chat': {
-        dock.addPanel({
-          id: CHAT_PANEL_ID,
-          component: 'chat',
-          title,
-          renderer: 'always',
-          position,
-        })
+      case 'chat':
+        // The chat conversation is a singleton (one fixed panel id), so it can't
+        // be duplicated into a split. The "+" menu hides split while chat is the
+        // active tab; this stays a defensive no-op (re-adding CHAT_PANEL_ID would
+        // collide with the existing panel).
         break
-      }
     }
   }
 
@@ -850,6 +880,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       case 'file':
       case 'preview':
         return hasCurrentPermission('workspace_read')
+      case 'asset':
+        // A message attachment is the user's own content, not a workspace file —
+        // viewing it never requires the workspace_read grant.
+        return true
       case 'terminal':
         return hasCurrentPermission('workspace_exec')
       case 'browser':
@@ -1015,6 +1049,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     setChatTitle,
     openFile,
     openPreview,
+    openAsset,
     openFilesAt,
     consumePendingFilesPath,
     openTerminal,
