@@ -1,4 +1,4 @@
-# Memoh Web Refactor — Reference
+# Memoh Web — Reference
 
 Concrete recipes, the dirty→clean diagnostic table, the reference-page map, and the
 component picker. Read `SKILL.md` first for the principles; this file is the lookup.
@@ -155,6 +155,14 @@ The hairline-join earns its keep only when the grid is denser/longer (many tiles
 the per-tile border here is NOT card-in-card. Card-in-card is the two forbidden moves:
 wrapping the tiles in an *outer* card, or tinting the active tile. (Live: `bot-container.vue`
 Container readout uses the separated-sibling form; `bot-overview.vue` uses the hairline join.)
+
+**Vertical column rules are not in the system yet — never split *side-by-side* tiles with a
+hairline.** A `gap-px`/`bg-border` grid with `grid-cols-N` draws BOTH horizontal AND vertical
+rules; the vertical ones read as a cramped, unfinished seam (and they leave an empty ruled cell
+when the last row is short — e.g. one session card with a grey divider trailing into a blank
+half). For anything laid out in columns, use **gapped sibling cards** (`gap-3`), not the
+hairline join. The hairline join is acceptable only as a single horizontal stack of rows (no
+column rule). Until vertical dividers are designed properly, treat them as banned.
 
 ### Empty / loading that holds the frame
 
@@ -550,6 +558,15 @@ see it, replace it with the right column. This is your strip-list when refactori
 | `size="sm"` on a form footer / primary action | squat half-height buttons read as unfinished | default (`h-9`, full height); `sm` only for genuinely tight, secondary spots |
 | decorative icon stacked in a card / atop an empty block | a cost (surface, shadow, extra color, language-fit) with no signal | ship no icon; add one only after the developer signs off |
 | card-in-card (a bordered box wrapping bordered boxes) | nesting depth with no meaning; reads mostly-empty | flatten to one surface — hairline-divided tiles, not boxes-in-a-box |
+| a `gap-px`/`bg-border` grid with `grid-cols-N` (a **vertical** column rule between side-by-side tiles) | vertical dividers aren't in the system yet — they read as a cramped seam and leave a blank ruled cell on a short last row | gapped sibling cards (`gap-3`); reserve the hairline join for a single horizontal stack of rows |
+| a readiness **flag grid** (Enabled/Runtime/VNC/Browser/Toolkit dots) sitting next to the live surface it describes | the live view already shows connecting / installing / live / can't-reach — the flags just restate it in jargon the user never asked for | let the live surface speak; distill to one human status only if it adds something, and surface a problem only when it's actionable |
+| the same word at three nesting rungs (page title ⊃ section title ⊃ row label all "Desktop") | each rung must inform once; the echo is filler that only reads wrong stacked | each rung adds information; drop a section title that equals its single row's label (titleless `SettingsSection`) |
+| implementation vocabulary in user copy (VNC / gstreamer / provision / Debian-Ubuntu / namespace / CDI) | names the stack, not the outcome the user came for | copy names what the user gets; stack terms live in a diagnostic *Details* surface at most |
+| a manual **Refresh** button on a status/preview surface | a confession the page doesn't keep itself fresh (and it feeds the cross-app icon/`sm` inconsistency) | self-refresh: a visibility-guarded silent poll or a live stream; reserve manual refresh for an expensive explicit re-fetch |
+| a ticking absolute "Updated 06/16/2026, 20:04:11" | re-renders every sample, reads like a log line | locale-aware relative time ("just now / 5 min ago") |
+| one status/progress rendered in two spots at once (a prepare card + a duplicate bottom bar) | the two drift, conflict, and clutter | one state, one place — keep the one that belongs, delete the other |
+| a translucent cover (`bg-background/95`) over a black media/screen frame | the dark surface bleeds through at the rounded corners | opaque cover (`bg-background`) when it's meant to hide the surface; translucency only for an intentional scrim |
+| a secondary/conditional section drawing an empty frame ("No active sessions") | it isn't part of the page skeleton — an empty frame is noise for the 99% | a conditional section vanishes when empty; only always-present content keeps its frame with an in-card message |
 | a dashed/bordered `Empty` — or an `EmptyMedia variant="icon"` gray tile — placed *inside* a `SettingsSection` white card | also card-in-card: the white section already frames it, so the inner border/tile is a box-in-a-box (a white card holding a grey card) | the in-card Empty is borderless centered content (`py-12`, no icon tile) |
 | `border-dashed` used as the frame of a fully-empty state (outermost or otherwise) | empty states must keep the populated skeleton; dashed reads as "drop zone / add here", not "nothing yet" | empty keeps the populated frame — the section card, or a **solid** `border` framed block for a standalone grid; reserve `dashed` for the "+ Add another" tile beside real items |
 | `font-[NNN]` weight / `text-[Npx]` size / `text-foreground\|muted-foreground/NN` alpha in a page | off the role-map weight, off the `--text-*` scale, hand-mixed alpha — the single most common app-page drift (60+ files), and it sits even in the `about` reference | the three weights (`normal`/`medium`/`semibold`), the `--text-*` scale, the overlay ladder — and push the guard to scan `apps/web` |

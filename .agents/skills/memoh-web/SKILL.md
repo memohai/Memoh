@@ -1,13 +1,13 @@
 ---
-name: memoh-ui-refactor
-description: Refactor an apps/web page into the new white-floating-card design language with disciplined @memohai/ui usage, deliberate copy, honest empty states, aligned controls, and restrained motion. Never hand-write controls or menus; never leave stray fragments (orphan status labels, misaligned save hints). Compose from @memohai/ui primitives and reuse existing save/feedback patterns from reference pages. Use when redesigning, refactoring, polishing, or building any settings/list/detail page in apps/web (e.g. a not-yet-refactored bot tab, a provider list, a settings surface), or when a page feels "dirty" / off-language and needs to match the refactored Overview / Appearance / About / Web Search pages.
+name: memoh-web
+description: Primary Web development skill for apps/web — white-floating-card design language, disciplined @memohai/ui usage, deliberate copy, honest empty states, aligned controls, and restrained motion. Never hand-write controls or menus; never leave stray fragments (orphan status labels, misaligned save hints). Compose from @memohai/ui primitives and reuse existing save/feedback patterns from reference pages. Use for any apps/web UI work — new pages, settings/list/detail surfaces, chat components, polish passes — not only legacy page migrations. Read this skill before writing or changing Web frontend code.
 ---
 
-# Memoh Web — Page Refactor & Design Language
+# Memoh Web — Page Development & Design Language
 
 ## Non-negotiables — read this even if you skim the rest
 
-The eight rules that break a page if you miss them. The rest of this file is the *why* and
+The nine rules that break a page if you miss them. The rest of this file is the *why* and
 the *how*; these are the *must*.
 
 1. **Copy the new, never the legacy — and copy the *contract*, not a page's raw classes.** Open
@@ -50,6 +50,14 @@ the *how*; these are the *must*.
    wireframe first — and again when it looks done — and read it like space-complexity: no
    card-in-card, no decorative icon stacked in a card, no nesting layer that isn't earning its
    keep. Fewer boxes, shallower depth.
+9. **The root surface answers "is it working," not "configure everything" (the 99/1 rule).**
+   The first page a user lands on serves the 99% who came to *glance at state* — it must not
+   make them carry the visual weight of inputs, button piles, or history lists that only the 1%
+   want. But the 1% are not browsing; they **arrive with a purpose** and will hunt for the
+   button — so deep/rare operations (limits, snapshots/history, destructive actions) live behind
+   a **named entry point** (a one-line summary row + a button) that opens a focused form showing
+   the data *and* the action. Never spill them onto the root, and never bury them in an in-card
+   "Advanced" disclosure that mixes diagnostics with real operations (§ 12).
 
 ---
 
@@ -361,7 +369,10 @@ recurring failures to avoid:
 - **Destructive actions:** a filled `<Button variant="destructive">`, gated behind a
   confirmation (`ConfirmPopover`, or a dialog for heavier deletes) — never a bare one-click
   delete, never a ghost button with manual red text. Group truly dangerous actions in a danger
-  card kept at the bottom of the page.
+  card kept at the bottom of the page. **Confirm covers interruption, not just deletion:** any
+  action that ends running work or severs a live connection — Stop a runtime, Terminate a
+  session, Disconnect — earns the same confirm step, because "it stops what it was doing" is a
+  consequence the user must opt into. Skip the confirm only for cheap, reversible actions.
 - **Long lists / big dropdowns virtualize.** A list or chooser that can hold hundreds of rows
   (sessions, models, searchable selects) must virtualize, not render every node — otherwise the
   refactor that "looks fine" with 5 rows jank-scrolls with 500. Reuse the existing virtualized
@@ -386,6 +397,23 @@ Before you write *any* user-facing line, slow down and ask, repeatedly:
 Then audit both directions: **what guidance is missing** (a user who lands here is lost),
 and **what is redundant** (a label that just narrates the obvious). Cut filler; keep
 direction. A page is not better for having more words on it.
+
+Two repeat offenders that survive the cut above because each line *alone* looks fine — they
+only read wrong stacked together:
+
+- **Don't repeat the same word down the nesting ladder.** A page title, a section title, and a
+  row label are three rungs, and each must add information, not echo the rung above. A page
+  titled *Desktop Environment*, a section titled *Desktop*, and a row labelled *Desktop* says
+  the word three times and informs once. When a section holds a single control whose label
+  already equals the section title, drop the section title — `SettingsSection` renders titleless
+  — and let the row carry the name.
+- **Name the user's outcome, not the implementation under it.** Copy is about what the user
+  gets, never the stack that delivers it. "Give this bot a screen it can see and control" — not
+  "Enable the VNC desktop; auto-provisions Debian/Ubuntu/Alpine." Terms like *VNC*, *gstreamer*,
+  *namespace*, *CDI*, *provision*, or a raw base-image name are implementation trivia the user
+  never asked for; they belong in a diagnostic *Details* surface at most, never in a headline,
+  a toggle label, or its description. (This is also the no-foreign-product-name rule: the UI
+  speaks the user's language, not the runtime's.)
 
 **Copy is bilingual, and that is a layout constraint, not just a translation chore.** Every
 user-facing string goes through an i18n key with **both** `en` and `zh` written — no hardcoded
@@ -420,6 +448,15 @@ card of rows the same size as the real rows), and every block that loads async s
 its height up front (the reference pages set a `min-h` on each row "so a cold load doesn't make
 the block jump"). Never let a section pop in at a different size than its placeholder, and use
 `—` for a not-yet-sampled value rather than a faked `0`.
+
+**"Hold the frame" is for a section that is always present** — the page's primary content, a
+list that's core to why the page exists. A *conditional, secondary* section does the opposite:
+one that only exists to manage things *when there are things to manage* (an *Active sessions*
+list, an issue banner) **vanishes entirely** when empty rather than drawing an empty frame
+(this is the §9 / §13 "let the block disappear" move, not a contradiction of the rule above).
+The test: would a first-time user with nothing set up expect this block to be on the page at
+all? If it only makes sense once populated, hide it while empty; if it's part of the page's
+skeleton, keep its frame with the message inside.
 
 ### 4. Same-row controls share a height
 
@@ -486,6 +523,16 @@ and how it's framed:
   a big box moated around small boxes, which reads as mostly-empty. When content is a single
   self-contained unit (a tile row, a chart), let it sit directly under its title with no outer
   card. Card the groups; don't card the singletons.
+- **An in-card "expand details" / "Advanced" disclosure is a junk drawer, not progressive
+  disclosure.** Hiding a pile of inputs, a snapshot list, and restore/backup buttons behind a
+  *Show details* / *Advanced* toggle *inside the root card* does not reduce weight — it just
+  defers it onto the same surface, and a label like "Advanced" becomes a drawer that mixes
+  read-only diagnostics with real, sometimes destructive operations. Progressive disclosure
+  moves a whole concern **off** the root into its own focused surface (a dialog/form named by
+  what it does — *Resource limits*, *Snapshots & restore*, *Details*, *Delete*), reached from a
+  one-line entry row (§ 12). The in-card expander is reserved for genuinely secondary fields
+  *within a form* (the **More options** chevron in the New Task dialog, § 11) — never as the
+  root page's way to stash whole features.
 
 ### 10. No stray fragments — every visible piece earns a home
 
@@ -550,6 +597,66 @@ genuinely tight *and* the action is secondary (a dense toolbar, an inline-in-fie
 per-row action in a long list); reserve `lg` for a rare, deliberate hero CTA. Pick the rung for
 a reason every time; never shrink everything to look "compact" nor inflate everything to look
 "important."
+
+### 12. The root surface vs. entry-point depth (the 99/1 rule)
+
+This is the rule that decides **what belongs on the first page at all** — upstream of how it's
+framed (§ 9). It came from a workspace page that shoved a resource-limit form, a snapshot
+history list, and restore/backup buttons onto the root, so a user who came only to check "is my
+bot's runtime alive?" was met with input boxes and a wall of controls.
+
+The two-sided principle, in the developer's own words: *we cannot make 99% of users carry the
+visual weight of 1% of users' needs — but we also cannot sacrifice the 1%'s path for the 99%.*
+
+- **The 99% came to glance.** The root surface answers one question — *is it working, and how
+  much is it using?* That is the hero content (a status badge + a usage tile row). It must not
+  hand a status-checker a form, a button pile, or a history list they didn't ask for.
+- **The 1% came with a purpose.** Someone who needs to set a limit, take/restore a snapshot, or
+  delete the thing is **not** browsing — they arrive intending that operation and will look for
+  its button. So you do **not** protect the 99% by deleting the 1%'s path; you protect it by
+  giving the path a **named entry point**: a quiet one-line row (`label` + a read-only summary as
+  its description) with a button that opens a **focused form/dialog** containing the inputs, the
+  data (e.g. the snapshot list), and the action (e.g. rollback). The summary line doubles as a
+  calm read-only glance for the 99% and the discoverable door for the 1%.
+- **Name the door by what's behind it.** *Resource limits*, *Snapshots & restore*, *Details*,
+  *Delete* — each its own entry → its own focused surface. Do **not** merge them into one
+  "Advanced" drawer (§ 9): a drawer that mixes diagnostics with destructive operations hides the
+  1%'s path *and* muddies it.
+- **Empty state is the same discipline.** When there is nothing to glance at yet, the root is a
+  calm invitation + one guiding action — and even *creating* is a deliberate step, so it opens a
+  focused create dialog rather than dumping a creation form onto the first page.
+- **The test:** for every block on the root, ask *"did the 99% come to see this?"* If no, it is
+  not deleted — it is moved behind a named entry point. The first page holds only what answers
+  "is it working."
+
+### 13. Live & status surfaces — fresh, quiet, and singular
+
+A surface whose job is to show *live* state — a runtime's resource use, a desktop's screen, a
+session list — has its own discipline, distilled from the Workspace and Desktop tabs:
+
+- **Self-refresh; don't hand the user a Refresh button.** A status/preview surface keeps itself
+  current on its own — a silent poll while it's on screen (guard on `document.visibilityState`,
+  clear the interval on unmount) or a live stream. A standing *Refresh* button is a confession
+  the page doesn't stay fresh, and it drags in the cross-app mess of "some refreshes have an
+  icon, some don't, some are `sm`." Reserve a manual refresh only for a genuinely expensive,
+  explicit re-fetch the user deliberately chooses to pay for.
+- **Relative time for "updated", never a ticking absolute stamp.** "Updated just now / 5 min ago"
+  answers the only question the user has — *is this current?* — and stays calm. A full
+  `Updated 06/16/2026, 20:04:11` re-renders on every sample and reads like a log line. Use the
+  shared locale-aware relative-time formatter.
+- **One state, one place.** Render any given status/progress exactly once. The Desktop prepare
+  flow shipped the same install progress *twice* — a centered card plus a redundant bottom bar
+  that blended into the background and grew a stray scrollbar. Two renders of one state drift,
+  conflict, and clutter; keep the one that belongs and delete the other.
+- **A cover over a media surface is opaque, not translucent.** A black video/screen frame behind
+  a `bg-background/95` "preparing" cover bleeds black through the rounded corners. If the cover
+  is meant to *hide* the surface while it loads, make it fully opaque (`bg-background`);
+  translucency is only for a scrim you intend to see through.
+- **Distill backend flags to one human status — let the live surface carry the rest.** Don't
+  mirror every readiness boolean (enabled / running / desktop / browser / toolkit) into a flag
+  grid sitting next to the very thing it describes; the live view already shows connecting /
+  installing / live / can't-reach. Surface at most one distilled human status, and a *problem*
+  only when it's actionable (§9: a healthy state says nothing).
 
 ## The review ritual — run it on every finished page
 
