@@ -77,6 +77,12 @@ export interface KeyboardEventLike {
 
 export function keyComboFromEvent(event: KeyboardEventLike, isMac: boolean): ParsedKeyCombo | null {
   if (isModifierKey(event.key)) return null
+  // On macOS the platform mod is Cmd (metaKey); ctrlKey is a distinct modifier
+  // we don't model. Returning a combo with mod=false here would silently
+  // downgrade Ctrl+S to plain 's' — once stored, the dispatcher would then
+  // match every literal 's' keypress in any input. Reject the capture so the
+  // user picks a Cmd/Alt/Shift-based combo instead.
+  if (isMac && event.ctrlKey) return null
   return {
     mod: isMac ? event.metaKey : event.ctrlKey,
     alt: event.altKey,

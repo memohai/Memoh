@@ -97,11 +97,19 @@ describe('keyComboFromEvent', () => {
     expect(keyComboFromEvent({ key: 'Meta', ctrlKey: false, metaKey: true, altKey: false, shiftKey: false }, true)).toBeNull()
   })
 
-  it('on mac maps metaKey to mod, ignoring ctrlKey', () => {
+  it('on mac maps metaKey to mod', () => {
     expect(keyComboFromEvent({ key: 's', ctrlKey: false, metaKey: true, altKey: false, shiftKey: false }, true))
       .toEqual({ mod: true, alt: false, shift: false, key: 's' })
+  })
+
+  it('on mac rejects any combo with ctrlKey to avoid silent downgrade to plain key', () => {
+    // Without this guard Ctrl+S on macOS would store as plain "s", which then
+    // matches normal typing once dispatched. We can't represent literal Ctrl in
+    // the current binding shape, so reject the capture rather than corrupt it.
     expect(keyComboFromEvent({ key: 's', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false }, true))
-      .toEqual({ mod: false, alt: false, shift: false, key: 's' })
+      .toBeNull()
+    expect(keyComboFromEvent({ key: 's', ctrlKey: true, metaKey: true, altKey: false, shiftKey: false }, true))
+      .toBeNull()
   })
 
   it('on non-mac maps ctrlKey to mod', () => {

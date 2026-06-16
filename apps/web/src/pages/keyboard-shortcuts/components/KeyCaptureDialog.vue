@@ -149,7 +149,7 @@ function handleCancel() {
         </div>
         <div
           v-else-if="conflict.kind === 'cross-scope'"
-          class="text-amber-600 dark:text-amber-400"
+          class="text-warning"
         >
           {{ t('settings.keyboard.dialog.crossScopeWarn', { command: collidedLabel }) }}
         </div>
