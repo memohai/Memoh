@@ -1,4 +1,4 @@
--- 0021_session_branches
+-- 0022_session_branches
 -- Remove in-session branch paths.
 
 CREATE TEMP TABLE IF NOT EXISTS _memoh_session_branches_down_guard (

@@ -17,6 +17,8 @@ type SessionContext struct {
 	BotID             string
 	ChatID            string
 	SessionID         string
+	PersistBranchID   string
+	PersistTurnID     string
 	ChannelIdentityID string
 	CurrentPlatform   string
 	ReplyTarget       string

@@ -34,6 +34,8 @@ type CreatePendingInput struct {
 	ChannelIdentityID            string
 	RequestedByChannelIdentityID string
 	RequestedMessageID           string
+	PersistBranchID              string
+	PersistTurnID                string
 	ToolCallID                   string
 	ToolName                     string
 	ToolInput                    any
@@ -68,6 +70,8 @@ type Request struct {
 	Status                  string         `json:"status"`
 	DecisionReason          string         `json:"decision_reason,omitempty"`
 	PromptExternalMessageID string         `json:"prompt_external_message_id,omitempty"`
+	PersistBranchID         string         `json:"-"`
+	PersistTurnID           string         `json:"-"`
 	SourcePlatform          string         `json:"source_platform,omitempty"`
 	ReplyTarget             string         `json:"reply_target,omitempty"`
 	ConversationType        string         `json:"conversation_type,omitempty"`

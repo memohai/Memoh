@@ -1142,6 +1142,8 @@ func TestSessionPoolBakesOnlyStableRuntimeIdentity(t *testing.T) {
 		Prompt:            "run",
 		ChannelIdentityID: "user-1",
 		SessionToken:      "token-1",
+		PersistBranchID:   "branch-1",
+		PersistTurnID:     "turn-1",
 		CurrentPlatform:   "web",
 		ReplyTarget:       "reply-1",
 		ConversationType:  "private",
@@ -1161,6 +1163,9 @@ func TestSessionPoolBakesOnlyStableRuntimeIdentity(t *testing.T) {
 	}
 	if baked.SessionID != "" || baked.StreamID != "" || baked.SessionToken != "" || baked.ReplyTarget != "" || baked.RouteID != "" || baked.ChannelIdentityID != "" {
 		t.Fatalf("baked identity leaks per-prompt fields: %#v", baked)
+	}
+	if baked.PersistBranchID != "" || baked.PersistTurnID != "" {
+		t.Fatalf("baked identity leaks persist context: %#v", baked)
 	}
 	// The pool no longer publishes ACP contexts into the shared store.
 	merged := contexts.Merge(mcp.ToolSessionContext{BotID: "bot-1", SessionID: "session-1"})

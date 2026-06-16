@@ -11,6 +11,7 @@ import (
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/userinput"
 )
 
 // WSStreamEvent represents a raw JSON event forwarded from the agent.
@@ -24,6 +25,7 @@ type terminalSnapshot struct {
 	sdkMessages    []sdk.Message
 	usage          json.RawMessage
 	deferredToolID string
+	deferredKind   string
 }
 
 func isVisibleAgentStreamEvent(event agentpkg.StreamEvent) bool {
@@ -54,10 +56,11 @@ func isVisibleAgentStreamEvent(event agentpkg.StreamEvent) bool {
 // has no usable messages.
 func extractTerminalSnapshot(data []byte) (terminalSnapshot, bool) {
 	var envelope struct {
-		Type       string          `json:"type"`
-		Messages   json.RawMessage `json:"messages"`
-		Usage      json.RawMessage `json:"usage,omitempty"`
-		ApprovalID string          `json:"approvalId,omitempty"`
+		Type        string          `json:"type"`
+		Messages    json.RawMessage `json:"messages"`
+		Usage       json.RawMessage `json:"usage,omitempty"`
+		ApprovalID  string          `json:"approvalId,omitempty"`
+		UserInputID string          `json:"userInputId,omitempty"`
 	}
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return terminalSnapshot{}, false
@@ -72,8 +75,19 @@ func extractTerminalSnapshot(data []byte) (terminalSnapshot, bool) {
 	return terminalSnapshot{
 		sdkMessages:    sdkMsgs,
 		usage:          envelope.Usage,
-		deferredToolID: strings.TrimSpace(envelope.ApprovalID),
+		deferredToolID: strings.TrimSpace(firstNonEmpty(envelope.UserInputID, envelope.ApprovalID)),
+		deferredKind:   deferredKindFromTerminal(envelope.UserInputID, envelope.ApprovalID),
 	}, true
+}
+
+func deferredKindFromTerminal(userInputID, approvalID string) string {
+	if strings.TrimSpace(userInputID) != "" {
+		return userinput.DeferredKind
+	}
+	if strings.TrimSpace(approvalID) != "" {
+		return "tool_approval"
+	}
+	return ""
 }
 
 // StreamChat runs a streaming chat via the internal agent.
@@ -86,6 +100,13 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		streamReq := req
 		doneTurn := r.enterSessionTurn(ctx, streamReq.BotID, streamReq.SessionID)
 		defer doneTurn()
+		var err error
+		streamReq, err = r.pinPersistTurn(ctx, streamReq)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		defer r.cleanupEmptyPersistTurn(context.WithoutCancel(ctx), streamReq)
 
 		if streamReq.RawQuery == "" {
 			streamReq.RawQuery = strings.TrimSpace(streamReq.Query)
@@ -163,9 +184,9 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 						// Use WithoutCancel so persistence still succeeds even
 						// when the parent ctx has already been cancelled by a
 						// client disconnect or idle timeout.
-						if storeErr := r.persistTerminalSnapshot(context.WithoutCancel(ctx), streamReq, rc, snap); storeErr != nil {
+						if didStore, storeErr := r.persistTerminalSnapshot(context.WithoutCancel(ctx), streamReq, rc, snap); storeErr != nil {
 							r.logger.Error("stream persist failed", slog.Any("error", storeErr))
-						} else {
+						} else if didStore {
 							stored = true
 						}
 					}
@@ -247,6 +268,12 @@ func (r *Resolver) StreamChatWS(
 
 	doneTurn := r.enterSessionTurn(ctx, req.BotID, req.SessionID)
 	defer doneTurn()
+	var err error
+	req, err = r.pinPersistTurn(ctx, req)
+	if err != nil {
+		return err
+	}
+	defer r.cleanupEmptyPersistTurn(context.WithoutCancel(ctx), req)
 
 	if req.RawQuery == "" {
 		req.RawQuery = strings.TrimSpace(req.Query)
@@ -331,9 +358,9 @@ func (r *Resolver) StreamChatWS(
 				lastSnapshot = snap
 				hasSnapshot = true
 				if !stored {
-					if storeErr := r.persistTerminalSnapshot(context.WithoutCancel(ctx), req, rc, snap); storeErr != nil {
+					if didStore, storeErr := r.persistTerminalSnapshot(context.WithoutCancel(ctx), req, rc, snap); storeErr != nil {
 						r.logger.Error("ws persist failed", slog.Any("error", storeErr))
-					} else {
+					} else if didStore {
 						stored = true
 					}
 				}
@@ -390,7 +417,7 @@ func (r *Resolver) StreamChatWS(
 // persistTerminalSnapshot stores the SDK messages produced by an agent run
 // (or partial run) into bot history. Triggers compaction when usage data
 // indicates the context is large.
-func (r *Resolver) persistTerminalSnapshot(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, snap terminalSnapshot) error {
+func (r *Resolver) persistTerminalSnapshot(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, snap terminalSnapshot) (bool, error) {
 	outputMessages := sdkMessagesToModelMessages(snap.sdkMessages)
 	if !hasPersistableAssistantOutput(outputMessages) {
 		r.logger.Info("skip persisting terminal snapshot without assistant output",
@@ -398,7 +425,7 @@ func (r *Resolver) persistTerminalSnapshot(ctx context.Context, req conversation
 			slog.String("chat_id", req.ChatID),
 			slog.Int("messages", len(outputMessages)),
 		)
-		return nil
+		return false, nil
 	}
 
 	roundMessages := prependUserMessage(req.Query, outputMessages)
@@ -407,17 +434,47 @@ func (r *Resolver) persistTerminalSnapshot(ctx context.Context, req conversation
 		roundMessages = interleaveInjectedMessages(roundMessages, *rc.injectedRecords)
 	}
 
-	if err := r.storeRoundWithOptions(ctx, req, roundMessages, rc.model.ID, storeRoundOptions{
+	stored, err := r.storeRoundWithContext(ctx, req, roundMessages, rc.model.ID, storeRoundOptions{
 		AllowPendingToolCalls: snap.deferredToolID != "",
-	}); err != nil {
-		return err
+	})
+	if err != nil {
+		return false, err
 	}
+	if strings.TrimSpace(stored.TurnID) == "" {
+		return false, nil
+	}
+	r.updateDeferredPersistContext(ctx, snap, stored)
 
 	if inputTokens := extractInputTokensFromUsage(snap.usage); inputTokens > 0 {
 		go r.maybeCompact(context.WithoutCancel(ctx), req, rc, inputTokens)
 	}
 
-	return nil
+	return true, nil
+}
+
+func (r *Resolver) updateDeferredPersistContext(ctx context.Context, snap terminalSnapshot, stored storedRoundContext) {
+	id := strings.TrimSpace(snap.deferredToolID)
+	branchID := strings.TrimSpace(stored.BranchID)
+	turnID := strings.TrimSpace(stored.TurnID)
+	if id == "" || branchID == "" {
+		return
+	}
+	switch snap.deferredKind {
+	case userinput.DeferredKind:
+		if svc, ok := r.userInput.(interface {
+			UpdatePersistContext(context.Context, string, string, string) (userinput.Request, error)
+		}); ok {
+			if _, err := svc.UpdatePersistContext(ctx, id, branchID, turnID); err != nil && r.logger != nil {
+				r.logger.Warn("update user input persist context failed", slog.String("request_id", id), slog.Any("error", err))
+			}
+		}
+	default:
+		if r.toolApproval != nil {
+			if _, err := r.toolApproval.UpdatePersistContext(ctx, id, branchID, turnID); err != nil && r.logger != nil {
+				r.logger.Warn("update tool approval persist context failed", slog.String("approval_id", id), slog.Any("error", err))
+			}
+		}
+	}
 }
 
 func hasPersistableAssistantOutput(messages []conversation.ModelMessage) bool {
@@ -454,10 +511,10 @@ func (r *Resolver) persistPartialResult(
 		// synthetic error tool_results for any tool_calls that never received
 		// a real result, preserving the assistant ↔ tool pairing required by
 		// downstream provider serializers (especially Anthropic).
-		err := r.persistTerminalSnapshot(persistCtx, req, rc, terminalSnapshot{
+		didStore, err := r.persistTerminalSnapshot(persistCtx, req, rc, terminalSnapshot{
 			sdkMessages: partialMessages,
 		})
-		if err == nil {
+		if err == nil && didStore {
 			r.logger.Info("persisted partial agent result",
 				slog.String("bot_id", req.BotID),
 				slog.Int("tool_calls", toolCallCount),
@@ -470,6 +527,9 @@ func (r *Resolver) persistPartialResult(
 			if rc.estimatedTokens > 0 {
 				r.maybeCompact(persistCtx, req, rc, rc.estimatedTokens)
 			}
+			return
+		}
+		if err == nil {
 			return
 		}
 		r.logger.Error("failed to persist partial agent messages",

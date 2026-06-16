@@ -12,6 +12,8 @@ INSERT INTO user_input_requests (
   ui_payload_json,
   provider_metadata,
   requested_by_channel_identity_id,
+  persist_branch_id,
+  persist_turn_id,
   source_platform,
   reply_target,
   conversation_type,
@@ -33,6 +35,8 @@ INSERT INTO user_input_requests (
   sqlc.arg(ui_payload_json),
   sqlc.arg(provider_metadata),
   sqlc.narg(requested_by_channel_identity_id),
+  sqlc.narg(persist_branch_id),
+  sqlc.narg(persist_turn_id),
   sqlc.arg(source_platform),
   sqlc.arg(reply_target),
   sqlc.arg(conversation_type),
@@ -43,6 +47,8 @@ SET input_json = EXCLUDED.input_json,
     ui_payload_json = EXCLUDED.ui_payload_json,
     provider_metadata = EXCLUDED.provider_metadata,
     requested_by_channel_identity_id = EXCLUDED.requested_by_channel_identity_id,
+    persist_branch_id = EXCLUDED.persist_branch_id,
+    persist_turn_id = EXCLUDED.persist_turn_id,
     source_platform = EXCLUDED.source_platform,
     reply_target = EXCLUDED.reply_target,
     conversation_type = EXCLUDED.conversation_type,
@@ -111,6 +117,14 @@ RETURNING *;
 -- name: UpdateUserInputToolResultMessage :one
 UPDATE user_input_requests
 SET tool_result_message_id = sqlc.narg(tool_result_message_id),
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: UpdateUserInputPersistContext :one
+UPDATE user_input_requests
+SET persist_branch_id = sqlc.narg(persist_branch_id),
+    persist_turn_id = sqlc.narg(persist_turn_id),
     updated_at = CURRENT_TIMESTAMP
 WHERE id = sqlc.arg(id)
 RETURNING *;

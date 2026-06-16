@@ -822,6 +822,8 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 		ChatID:              cfg.Identity.ChatID,
 		SessionID:           cfg.Identity.SessionID,
 		SessionType:         cfg.SessionType,
+		PersistBranchID:     cfg.Identity.PersistBranchID,
+		PersistTurnID:       cfg.Identity.PersistTurnID,
 		ChannelIdentityID:   cfg.Identity.ChannelIdentityID,
 		SessionToken:        cfg.Identity.SessionToken,
 		CurrentPlatform:     cfg.Identity.CurrentPlatform,

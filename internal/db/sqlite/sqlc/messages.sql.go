@@ -11,6 +11,36 @@ import (
 	"strings"
 )
 
+const cancelEmptyHistoryTurn = `-- name: CancelEmptyHistoryTurn :execrows
+UPDATE bot_history_turns
+SET status = 'failed',
+    completed_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE bot_history_turns.id = ?1
+  AND bot_history_turns.session_id = ?2
+  AND bot_history_turns.branch_id = ?3
+  AND bot_history_turns.status = 'running'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM bot_history_messages m
+    WHERE m.turn_id = bot_history_turns.id
+  )
+`
+
+type CancelEmptyHistoryTurnParams struct {
+	TurnID    string `json:"turn_id"`
+	SessionID string `json:"session_id"`
+	BranchID  string `json:"branch_id"`
+}
+
+func (q *Queries) CancelEmptyHistoryTurn(ctx context.Context, arg CancelEmptyHistoryTurnParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, cancelEmptyHistoryTurn, arg.TurnID, arg.SessionID, arg.BranchID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const completeHistoryTurnWithAssistant = `-- name: CompleteHistoryTurnWithAssistant :exec
 UPDATE bot_history_turns
 SET final_assistant_message_id = ?1,
@@ -306,6 +336,22 @@ func (q *Queries) DeleteMessagesBySession(ctx context.Context, sessionID sql.Nul
 	return err
 }
 
+const deleteSessionBranch = `-- name: DeleteSessionBranch :exec
+DELETE FROM bot_session_branches
+WHERE id = ?1
+  AND session_id = ?2
+`
+
+type DeleteSessionBranchParams struct {
+	BranchID  string `json:"branch_id"`
+	SessionID string `json:"session_id"`
+}
+
+func (q *Queries) DeleteSessionBranch(ctx context.Context, arg DeleteSessionBranchParams) error {
+	_, err := q.db.ExecContext(ctx, deleteSessionBranch, arg.BranchID, arg.SessionID)
+	return err
+}
+
 const getActiveSessionBranch = `-- name: GetActiveSessionBranch :one
 SELECT active_branch_id
 FROM bot_sessions
@@ -319,9 +365,31 @@ func (q *Queries) GetActiveSessionBranch(ctx context.Context, sessionID string) 
 	return active_branch_id, err
 }
 
+const getHistoryTurnForMessagePersist = `-- name: GetHistoryTurnForMessagePersist :one
+SELECT id
+FROM bot_history_turns
+WHERE id = ?1
+  AND session_id = ?2
+  AND branch_id = ?3
+LIMIT 1
+`
+
+type GetHistoryTurnForMessagePersistParams struct {
+	TurnID    string `json:"turn_id"`
+	SessionID string `json:"session_id"`
+	BranchID  string `json:"branch_id"`
+}
+
+func (q *Queries) GetHistoryTurnForMessagePersist(ctx context.Context, arg GetHistoryTurnForMessagePersistParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, getHistoryTurnForMessagePersist, arg.TurnID, arg.SessionID, arg.BranchID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getMessageByExternalIDBySession = `-- name: GetMessageByExternalIDBySession :one
-WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, depth) AS (
-  SELECT b.id, b.parent_branch_id, NULL, 0
+WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, max_branch_seq, depth) AS (
+  SELECT b.id, b.parent_branch_id, NULL, NULL, 0
   FROM bot_sessions s
   JOIN bot_session_branches b ON b.id = COALESCE(s.active_branch_id, (
     SELECT rb.id FROM bot_session_branches rb
@@ -330,10 +398,21 @@ WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, depth) AS 
   ))
   WHERE s.id = ?1
   UNION ALL
-  SELECT parent.id, parent.parent_branch_id, child.fork_from_turn_seq, bp.depth + 1
+  SELECT parent.id, parent.parent_branch_id, COALESCE(
+    CASE
+      WHEN typeof(child.fork_from_turn_seq) IN ('integer', 'real') THEN CAST(child.fork_from_turn_seq AS INTEGER)
+      WHEN typeof(child.fork_from_turn_seq) = 'text'
+        AND child.fork_from_turn_seq != ''
+        AND child.fork_from_turn_seq NOT GLOB '*[^0-9]*'
+        THEN CAST(child.fork_from_turn_seq AS INTEGER)
+      ELSE NULL
+    END,
+    boundary_turn.turn_seq
+  ), child.fork_from_seq, bp.depth + 1
   FROM branch_path bp
   JOIN bot_session_branches child ON child.id = bp.branch_id
   JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
 )
 SELECT
   m.id, m.bot_id, m.session_id, m.branch_id, m.branch_seq, m.sender_channel_identity_id,
@@ -353,9 +432,29 @@ WHERE m.session_id = ?1
   AND m.source_message_id = ?2
   AND (
     m.branch_id IS NULL
-    OR (bp.branch_id IS NOT NULL AND (bp.max_turn_seq IS NULL OR t.turn_seq <= bp.max_turn_seq))
+    OR (
+    bp.branch_id IS NOT NULL
+    AND (
+      bp.depth = 0
+      OR (
+        bp.max_turn_seq IS NOT NULL
+        AND (
+          t.turn_seq < bp.max_turn_seq
+          OR (
+            t.turn_seq = bp.max_turn_seq
+            AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
+          )
+        )
+      )
+      OR (
+        bp.max_turn_seq IS NULL
+        AND bp.max_branch_seq IS NOT NULL
+        AND m.branch_seq <= bp.max_branch_seq
+      )
+    )
   )
-ORDER BY COALESCE(bp.depth, -1) ASC, COALESCE(m.branch_seq, 0) DESC, m.created_at DESC
+  )
+ORDER BY COALESCE(bp.depth, -1) ASC, COALESCE(m.branch_seq, 0) DESC, m.created_at DESC, m.id DESC
 LIMIT 1
 `
 
@@ -413,89 +512,6 @@ func (q *Queries) GetMessageByExternalIDBySession(ctx context.Context, arg GetMe
 	return i, err
 }
 
-const getMessageForSessionBranchFork = `-- name: GetMessageForSessionBranchFork :one
-SELECT
-  m.id,
-  m.session_id,
-  m.branch_id,
-  m.branch_seq,
-  m.turn_id,
-  t.turn_seq,
-  (
-    SELECT pt.id
-    FROM bot_history_turns pt
-    WHERE pt.branch_id = t.branch_id
-      AND pt.turn_seq < t.turn_seq
-      AND pt.status = 'completed'
-    ORDER BY pt.turn_seq DESC
-    LIMIT 1
-  ) AS previous_turn_id,
-  (
-    SELECT pt.turn_seq
-    FROM bot_history_turns pt
-    WHERE pt.branch_id = t.branch_id
-      AND pt.turn_seq < t.turn_seq
-      AND pt.status = 'completed'
-    ORDER BY pt.turn_seq DESC
-    LIMIT 1
-  ) AS previous_turn_seq,
-  (
-    SELECT pm.branch_seq
-    FROM bot_history_turns pt
-    JOIN bot_history_messages pm ON pm.id = pt.final_assistant_message_id
-    WHERE pt.branch_id = t.branch_id
-      AND pt.turn_seq < t.turn_seq
-      AND pt.status = 'completed'
-    ORDER BY pt.turn_seq DESC
-    LIMIT 1
-  ) AS previous_branch_seq,
-  m.role,
-  m.created_at
-FROM bot_history_messages m
-JOIN bot_history_turns t ON t.id = m.turn_id
-WHERE m.id = ?1
-  AND m.session_id = ?2
-LIMIT 1
-`
-
-type GetMessageForSessionBranchForkParams struct {
-	MessageID string         `json:"message_id"`
-	SessionID sql.NullString `json:"session_id"`
-}
-
-type GetMessageForSessionBranchForkRow struct {
-	ID                string         `json:"id"`
-	SessionID         sql.NullString `json:"session_id"`
-	BranchID          sql.NullString `json:"branch_id"`
-	BranchSeq         sql.NullInt64  `json:"branch_seq"`
-	TurnID            sql.NullString `json:"turn_id"`
-	TurnSeq           int64          `json:"turn_seq"`
-	PreviousTurnID    string         `json:"previous_turn_id"`
-	PreviousTurnSeq   int64          `json:"previous_turn_seq"`
-	PreviousBranchSeq sql.NullInt64  `json:"previous_branch_seq"`
-	Role              string         `json:"role"`
-	CreatedAt         string         `json:"created_at"`
-}
-
-func (q *Queries) GetMessageForSessionBranchFork(ctx context.Context, arg GetMessageForSessionBranchForkParams) (GetMessageForSessionBranchForkRow, error) {
-	row := q.db.QueryRowContext(ctx, getMessageForSessionBranchFork, arg.MessageID, arg.SessionID)
-	var i GetMessageForSessionBranchForkRow
-	err := row.Scan(
-		&i.ID,
-		&i.SessionID,
-		&i.BranchID,
-		&i.BranchSeq,
-		&i.TurnID,
-		&i.TurnSeq,
-		&i.PreviousTurnID,
-		&i.PreviousTurnSeq,
-		&i.PreviousBranchSeq,
-		&i.Role,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const getOpenHistoryTurnForBranch = `-- name: GetOpenHistoryTurnForBranch :one
 SELECT id
 FROM bot_history_turns
@@ -530,6 +546,26 @@ LIMIT 1
 
 func (q *Queries) GetRootSessionBranch(ctx context.Context, sessionID string) (string, error) {
 	row := q.db.QueryRowContext(ctx, getRootSessionBranch, sessionID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
+const getSessionBranchForPersist = `-- name: GetSessionBranchForPersist :one
+SELECT id
+FROM bot_session_branches
+WHERE id = ?1
+  AND session_id = ?2
+LIMIT 1
+`
+
+type GetSessionBranchForPersistParams struct {
+	BranchID  string `json:"branch_id"`
+	SessionID string `json:"session_id"`
+}
+
+func (q *Queries) GetSessionBranchForPersist(ctx context.Context, arg GetSessionBranchForPersistParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, getSessionBranchForPersist, arg.BranchID, arg.SessionID)
 	var id string
 	err := row.Scan(&id)
 	return id, err
@@ -630,8 +666,8 @@ func (q *Queries) ListActiveMessagesSince(ctx context.Context, arg ListActiveMes
 }
 
 const listActiveMessagesSinceBySession = `-- name: ListActiveMessagesSinceBySession :many
-WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, depth) AS (
-  SELECT b.id, b.parent_branch_id, NULL, 0
+WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, max_branch_seq, depth) AS (
+  SELECT b.id, b.parent_branch_id, NULL, NULL, 0
   FROM bot_sessions s
   JOIN bot_session_branches b ON b.id = COALESCE(s.active_branch_id, (
     SELECT rb.id FROM bot_session_branches rb
@@ -640,10 +676,21 @@ WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, depth) AS 
   ))
   WHERE s.id = ?1
   UNION ALL
-  SELECT parent.id, parent.parent_branch_id, child.fork_from_turn_seq, bp.depth + 1
+  SELECT parent.id, parent.parent_branch_id, COALESCE(
+    CASE
+      WHEN typeof(child.fork_from_turn_seq) IN ('integer', 'real') THEN CAST(child.fork_from_turn_seq AS INTEGER)
+      WHEN typeof(child.fork_from_turn_seq) = 'text'
+        AND child.fork_from_turn_seq != ''
+        AND child.fork_from_turn_seq NOT GLOB '*[^0-9]*'
+        THEN CAST(child.fork_from_turn_seq AS INTEGER)
+      ELSE NULL
+    END,
+    boundary_turn.turn_seq
+  ), child.fork_from_seq, bp.depth + 1
   FROM branch_path bp
   JOIN bot_session_branches child ON child.id = bp.branch_id
   JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
 )
 SELECT
   m.id, m.bot_id, m.session_id, m.branch_id, m.branch_seq, m.sender_channel_identity_id,
@@ -663,7 +710,27 @@ WHERE m.session_id = ?1
   AND m.created_at >= strftime('%Y-%m-%d %H:%M:%S', ?2)
   AND (
     m.branch_id IS NULL
-    OR (bp.branch_id IS NOT NULL AND (bp.max_turn_seq IS NULL OR t.turn_seq <= bp.max_turn_seq))
+    OR (
+    bp.branch_id IS NOT NULL
+    AND (
+      bp.depth = 0
+      OR (
+        bp.max_turn_seq IS NOT NULL
+        AND (
+          t.turn_seq < bp.max_turn_seq
+          OR (
+            t.turn_seq = bp.max_turn_seq
+            AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
+          )
+        )
+      )
+      OR (
+        bp.max_turn_seq IS NULL
+        AND bp.max_branch_seq IS NOT NULL
+        AND m.branch_seq <= bp.max_branch_seq
+      )
+    )
+  )
   )
   AND COALESCE(
     CASE WHEN json_valid(m.metadata) THEN json_extract(m.metadata, '$.trigger_mode') END,
@@ -709,6 +776,313 @@ func (q *Queries) ListActiveMessagesSinceBySession(ctx context.Context, arg List
 	var items []ListActiveMessagesSinceBySessionRow
 	for rows.Next() {
 		var i ListActiveMessagesSinceBySessionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.BranchID,
+			&i.BranchSeq,
+			&i.SenderChannelIdentityID,
+			&i.SenderUserID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.Role,
+			&i.Content,
+			&i.Metadata,
+			&i.Usage,
+			&i.EventID,
+			&i.DisplayText,
+			&i.CompactID,
+			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
+			&i.Platform,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveMessagesSinceBySessionBranch = `-- name: ListActiveMessagesSinceBySessionBranch :many
+WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, max_branch_seq, depth) AS (
+  SELECT b.id, b.parent_branch_id, NULL, NULL, 0
+  FROM bot_session_branches b
+  WHERE b.session_id = ?1
+    AND b.id = ?3
+  UNION ALL
+  SELECT parent.id, parent.parent_branch_id, COALESCE(
+    CASE
+      WHEN typeof(child.fork_from_turn_seq) IN ('integer', 'real') THEN CAST(child.fork_from_turn_seq AS INTEGER)
+      WHEN typeof(child.fork_from_turn_seq) = 'text'
+        AND child.fork_from_turn_seq != ''
+        AND child.fork_from_turn_seq NOT GLOB '*[^0-9]*'
+        THEN CAST(child.fork_from_turn_seq AS INTEGER)
+      ELSE NULL
+    END,
+    boundary_turn.turn_seq
+  ), child.fork_from_seq, bp.depth + 1
+  FROM branch_path bp
+  JOIN bot_session_branches child ON child.id = bp.branch_id
+  JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
+)
+SELECT
+  m.id, m.bot_id, m.session_id, m.branch_id, m.branch_seq, m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.event_id, m.display_text, m.compact_id, m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+LEFT JOIN branch_path bp ON bp.branch_id = m.branch_id
+LEFT JOIN bot_history_turns t ON t.id = m.turn_id
+WHERE m.session_id = ?1
+  AND m.created_at >= strftime('%Y-%m-%d %H:%M:%S', ?2)
+  AND (
+    m.branch_id IS NULL
+    OR (
+    bp.branch_id IS NOT NULL
+    AND (
+      bp.depth = 0
+      OR (
+        bp.max_turn_seq IS NOT NULL
+        AND (
+          t.turn_seq < bp.max_turn_seq
+          OR (
+            t.turn_seq = bp.max_turn_seq
+            AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
+          )
+        )
+      )
+      OR (
+        bp.max_turn_seq IS NULL
+        AND bp.max_branch_seq IS NOT NULL
+        AND m.branch_seq <= bp.max_branch_seq
+      )
+    )
+  )
+  )
+  AND COALESCE(
+    CASE WHEN json_valid(m.metadata) THEN json_extract(m.metadata, '$.trigger_mode') END,
+    ''
+  ) != 'passive_sync'
+ORDER BY COALESCE(bp.depth, 2147483647) DESC, COALESCE(m.branch_seq, 9223372036854775807) ASC, m.created_at ASC
+`
+
+type ListActiveMessagesSinceBySessionBranchParams struct {
+	SessionID sql.NullString `json:"session_id"`
+	CreatedAt interface{}    `json:"created_at"`
+	BranchID  string         `json:"branch_id"`
+}
+
+type ListActiveMessagesSinceBySessionBranchRow struct {
+	ID                      string         `json:"id"`
+	BotID                   string         `json:"bot_id"`
+	SessionID               sql.NullString `json:"session_id"`
+	BranchID                sql.NullString `json:"branch_id"`
+	BranchSeq               sql.NullInt64  `json:"branch_seq"`
+	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
+	SenderUserID            sql.NullString `json:"sender_user_id"`
+	ExternalMessageID       sql.NullString `json:"external_message_id"`
+	SourceReplyToMessageID  sql.NullString `json:"source_reply_to_message_id"`
+	Role                    string         `json:"role"`
+	Content                 string         `json:"content"`
+	Metadata                string         `json:"metadata"`
+	Usage                   sql.NullString `json:"usage"`
+	EventID                 sql.NullString `json:"event_id"`
+	DisplayText             sql.NullString `json:"display_text"`
+	CompactID               sql.NullString `json:"compact_id"`
+	CreatedAt               string         `json:"created_at"`
+	SenderDisplayName       sql.NullString `json:"sender_display_name"`
+	SenderAvatarUrl         sql.NullString `json:"sender_avatar_url"`
+	Platform                sql.NullString `json:"platform"`
+}
+
+func (q *Queries) ListActiveMessagesSinceBySessionBranch(ctx context.Context, arg ListActiveMessagesSinceBySessionBranchParams) ([]ListActiveMessagesSinceBySessionBranchRow, error) {
+	rows, err := q.db.QueryContext(ctx, listActiveMessagesSinceBySessionBranch, arg.SessionID, arg.CreatedAt, arg.BranchID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveMessagesSinceBySessionBranchRow
+	for rows.Next() {
+		var i ListActiveMessagesSinceBySessionBranchRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.BranchID,
+			&i.BranchSeq,
+			&i.SenderChannelIdentityID,
+			&i.SenderUserID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.Role,
+			&i.Content,
+			&i.Metadata,
+			&i.Usage,
+			&i.EventID,
+			&i.DisplayText,
+			&i.CompactID,
+			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
+			&i.Platform,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveMessagesSinceBySessionBranchTurn = `-- name: ListActiveMessagesSinceBySessionBranchTurn :many
+WITH RECURSIVE pinned_turn(id, branch_id, turn_seq) AS (
+  SELECT
+    t.id,
+    t.branch_id,
+    t.turn_seq
+  FROM bot_history_turns t
+  WHERE t.session_id = ?1
+    AND t.branch_id = ?3
+    AND t.id = ?4
+  LIMIT 1
+),
+branch_path(branch_id, parent_branch_id, max_turn_seq, max_branch_seq, depth) AS (
+  SELECT b.id, b.parent_branch_id, pt.turn_seq, (
+    SELECT MAX(m.branch_seq)
+    FROM bot_history_messages m
+    WHERE m.turn_id = pt.id
+  ), 0
+  FROM pinned_turn pt
+  JOIN bot_session_branches b ON b.id = pt.branch_id
+  UNION ALL
+  SELECT parent.id, parent.parent_branch_id, COALESCE(
+    CASE
+      WHEN typeof(child.fork_from_turn_seq) IN ('integer', 'real') THEN CAST(child.fork_from_turn_seq AS INTEGER)
+      WHEN typeof(child.fork_from_turn_seq) = 'text'
+        AND child.fork_from_turn_seq != ''
+        AND child.fork_from_turn_seq NOT GLOB '*[^0-9]*'
+        THEN CAST(child.fork_from_turn_seq AS INTEGER)
+      ELSE NULL
+    END,
+    boundary_turn.turn_seq
+  ), child.fork_from_seq, bp.depth + 1
+  FROM branch_path bp
+  JOIN bot_session_branches child ON child.id = bp.branch_id
+  JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
+)
+SELECT
+  m.id, m.bot_id, m.session_id, m.branch_id, m.branch_seq, m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.event_id, m.display_text, m.compact_id, m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+LEFT JOIN branch_path bp ON bp.branch_id = m.branch_id
+LEFT JOIN bot_history_turns t ON t.id = m.turn_id
+WHERE m.session_id = ?1
+  AND m.created_at >= strftime('%Y-%m-%d %H:%M:%S', ?2)
+  AND EXISTS (SELECT 1 FROM pinned_turn)
+  AND (
+    m.branch_id IS NULL
+    OR (
+    bp.branch_id IS NOT NULL
+    AND (
+      (bp.depth = 0 AND bp.max_turn_seq IS NULL)
+      OR (
+        bp.max_turn_seq IS NOT NULL
+        AND (
+          t.turn_seq < bp.max_turn_seq
+          OR (
+            t.turn_seq = bp.max_turn_seq
+            AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
+          )
+        )
+      )
+      OR (
+        bp.max_turn_seq IS NULL
+        AND bp.max_branch_seq IS NOT NULL
+        AND m.branch_seq <= bp.max_branch_seq
+      )
+    )
+  )
+  )
+  AND COALESCE(
+    CASE WHEN json_valid(m.metadata) THEN json_extract(m.metadata, '$.trigger_mode') END,
+    ''
+  ) != 'passive_sync'
+ORDER BY COALESCE(bp.depth, 2147483647) DESC, COALESCE(m.branch_seq, 9223372036854775807) ASC, m.created_at ASC
+`
+
+type ListActiveMessagesSinceBySessionBranchTurnParams struct {
+	SessionID sql.NullString `json:"session_id"`
+	CreatedAt interface{}    `json:"created_at"`
+	BranchID  string         `json:"branch_id"`
+	TurnID    string         `json:"turn_id"`
+}
+
+type ListActiveMessagesSinceBySessionBranchTurnRow struct {
+	ID                      string         `json:"id"`
+	BotID                   string         `json:"bot_id"`
+	SessionID               sql.NullString `json:"session_id"`
+	BranchID                sql.NullString `json:"branch_id"`
+	BranchSeq               sql.NullInt64  `json:"branch_seq"`
+	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
+	SenderUserID            sql.NullString `json:"sender_user_id"`
+	ExternalMessageID       sql.NullString `json:"external_message_id"`
+	SourceReplyToMessageID  sql.NullString `json:"source_reply_to_message_id"`
+	Role                    string         `json:"role"`
+	Content                 string         `json:"content"`
+	Metadata                string         `json:"metadata"`
+	Usage                   sql.NullString `json:"usage"`
+	EventID                 sql.NullString `json:"event_id"`
+	DisplayText             sql.NullString `json:"display_text"`
+	CompactID               sql.NullString `json:"compact_id"`
+	CreatedAt               string         `json:"created_at"`
+	SenderDisplayName       sql.NullString `json:"sender_display_name"`
+	SenderAvatarUrl         sql.NullString `json:"sender_avatar_url"`
+	Platform                sql.NullString `json:"platform"`
+}
+
+func (q *Queries) ListActiveMessagesSinceBySessionBranchTurn(ctx context.Context, arg ListActiveMessagesSinceBySessionBranchTurnParams) ([]ListActiveMessagesSinceBySessionBranchTurnRow, error) {
+	rows, err := q.db.QueryContext(ctx, listActiveMessagesSinceBySessionBranchTurn,
+		arg.SessionID,
+		arg.CreatedAt,
+		arg.BranchID,
+		arg.TurnID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveMessagesSinceBySessionBranchTurnRow
+	for rows.Next() {
+		var i ListActiveMessagesSinceBySessionBranchTurnRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.BotID,
@@ -828,8 +1202,8 @@ func (q *Queries) ListMessages(ctx context.Context, botID string) ([]ListMessage
 }
 
 const listMessagesAfterBySession = `-- name: ListMessagesAfterBySession :many
-WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, depth) AS (
-  SELECT b.id, b.parent_branch_id, NULL, 0
+WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, max_branch_seq, depth) AS (
+  SELECT b.id, b.parent_branch_id, NULL, NULL, 0
   FROM bot_sessions s
   JOIN bot_session_branches b ON b.id = COALESCE(s.active_branch_id, (
     SELECT rb.id FROM bot_session_branches rb
@@ -838,10 +1212,21 @@ WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, depth) AS 
   ))
   WHERE s.id = ?1
   UNION ALL
-  SELECT parent.id, parent.parent_branch_id, child.fork_from_turn_seq, bp.depth + 1
+  SELECT parent.id, parent.parent_branch_id, COALESCE(
+    CASE
+      WHEN typeof(child.fork_from_turn_seq) IN ('integer', 'real') THEN CAST(child.fork_from_turn_seq AS INTEGER)
+      WHEN typeof(child.fork_from_turn_seq) = 'text'
+        AND child.fork_from_turn_seq != ''
+        AND child.fork_from_turn_seq NOT GLOB '*[^0-9]*'
+        THEN CAST(child.fork_from_turn_seq AS INTEGER)
+      ELSE NULL
+    END,
+    boundary_turn.turn_seq
+  ), child.fork_from_seq, bp.depth + 1
   FROM branch_path bp
   JOIN bot_session_branches child ON child.id = bp.branch_id
   JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
 )
 SELECT
   m.id, m.bot_id, m.session_id, m.branch_id, m.branch_seq, m.sender_channel_identity_id,
@@ -858,17 +1243,61 @@ LEFT JOIN bot_sessions s ON s.id = m.session_id
 LEFT JOIN branch_path bp ON bp.branch_id = m.branch_id
 LEFT JOIN bot_history_turns t ON t.id = m.turn_id
 WHERE m.session_id = ?1
-  AND m.created_at > strftime('%Y-%m-%d %H:%M:%S', ?2)
+  AND (
+    (?2 IS NULL AND m.created_at > strftime('%Y-%m-%d %H:%M:%S', ?3))
+    OR (
+      ?2 IS NOT NULL
+      AND (
+        COALESCE(bp.depth, 2147483647) < COALESCE((SELECT cursor_bp.depth FROM bot_history_messages cursor LEFT JOIN branch_path cursor_bp ON cursor_bp.branch_id = cursor.branch_id WHERE cursor.id = ?2), 2147483647)
+        OR (
+          COALESCE(bp.depth, 2147483647) = COALESCE((SELECT cursor_bp.depth FROM bot_history_messages cursor LEFT JOIN branch_path cursor_bp ON cursor_bp.branch_id = cursor.branch_id WHERE cursor.id = ?2), 2147483647)
+          AND COALESCE(m.branch_seq, 9223372036854775807) > COALESCE((SELECT cursor.branch_seq FROM bot_history_messages cursor WHERE cursor.id = ?2), 9223372036854775807)
+        )
+        OR (
+          COALESCE(bp.depth, 2147483647) = COALESCE((SELECT cursor_bp.depth FROM bot_history_messages cursor LEFT JOIN branch_path cursor_bp ON cursor_bp.branch_id = cursor.branch_id WHERE cursor.id = ?2), 2147483647)
+          AND COALESCE(m.branch_seq, 9223372036854775807) = COALESCE((SELECT cursor.branch_seq FROM bot_history_messages cursor WHERE cursor.id = ?2), 9223372036854775807)
+          AND (
+            m.created_at > (SELECT cursor.created_at FROM bot_history_messages cursor WHERE cursor.id = ?2)
+            OR (
+              m.created_at = (SELECT cursor.created_at FROM bot_history_messages cursor WHERE cursor.id = ?2)
+              AND m.id > ?2
+            )
+          )
+        )
+      )
+    )
+  )
   AND (
     m.branch_id IS NULL
-    OR (bp.branch_id IS NOT NULL AND (bp.max_turn_seq IS NULL OR t.turn_seq <= bp.max_turn_seq))
+    OR (
+    bp.branch_id IS NOT NULL
+    AND (
+      bp.depth = 0
+      OR (
+        bp.max_turn_seq IS NOT NULL
+        AND (
+          t.turn_seq < bp.max_turn_seq
+          OR (
+            t.turn_seq = bp.max_turn_seq
+            AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
+          )
+        )
+      )
+      OR (
+        bp.max_turn_seq IS NULL
+        AND bp.max_branch_seq IS NOT NULL
+        AND m.branch_seq <= bp.max_branch_seq
+      )
+    )
   )
-ORDER BY COALESCE(bp.depth, 2147483647) DESC, COALESCE(m.branch_seq, 9223372036854775807) ASC, m.created_at ASC
-LIMIT ?3
+  )
+ORDER BY COALESCE(bp.depth, 2147483647) DESC, COALESCE(m.branch_seq, 9223372036854775807) ASC, m.created_at ASC, m.id ASC
+LIMIT ?4
 `
 
 type ListMessagesAfterBySessionParams struct {
 	SessionID sql.NullString `json:"session_id"`
+	AfterID   interface{}    `json:"after_id"`
 	CreatedAt interface{}    `json:"created_at"`
 	MaxCount  int64          `json:"max_count"`
 }
@@ -896,7 +1325,12 @@ type ListMessagesAfterBySessionRow struct {
 }
 
 func (q *Queries) ListMessagesAfterBySession(ctx context.Context, arg ListMessagesAfterBySessionParams) ([]ListMessagesAfterBySessionRow, error) {
-	rows, err := q.db.QueryContext(ctx, listMessagesAfterBySession, arg.SessionID, arg.CreatedAt, arg.MaxCount)
+	rows, err := q.db.QueryContext(ctx, listMessagesAfterBySession,
+		arg.SessionID,
+		arg.AfterID,
+		arg.CreatedAt,
+		arg.MaxCount,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1029,8 +1463,8 @@ func (q *Queries) ListMessagesBefore(ctx context.Context, arg ListMessagesBefore
 }
 
 const listMessagesBeforeBySession = `-- name: ListMessagesBeforeBySession :many
-WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, depth) AS (
-  SELECT b.id, b.parent_branch_id, NULL, 0
+WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, max_branch_seq, depth) AS (
+  SELECT b.id, b.parent_branch_id, NULL, NULL, 0
   FROM bot_sessions s
   JOIN bot_session_branches b ON b.id = COALESCE(s.active_branch_id, (
     SELECT rb.id FROM bot_session_branches rb
@@ -1039,10 +1473,21 @@ WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, depth) AS 
   ))
   WHERE s.id = ?1
   UNION ALL
-  SELECT parent.id, parent.parent_branch_id, child.fork_from_turn_seq, bp.depth + 1
+  SELECT parent.id, parent.parent_branch_id, COALESCE(
+    CASE
+      WHEN typeof(child.fork_from_turn_seq) IN ('integer', 'real') THEN CAST(child.fork_from_turn_seq AS INTEGER)
+      WHEN typeof(child.fork_from_turn_seq) = 'text'
+        AND child.fork_from_turn_seq != ''
+        AND child.fork_from_turn_seq NOT GLOB '*[^0-9]*'
+        THEN CAST(child.fork_from_turn_seq AS INTEGER)
+      ELSE NULL
+    END,
+    boundary_turn.turn_seq
+  ), child.fork_from_seq, bp.depth + 1
   FROM branch_path bp
   JOIN bot_session_branches child ON child.id = bp.branch_id
   JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
 )
 SELECT
   m.id, m.bot_id, m.session_id, m.branch_id, m.branch_seq, m.sender_channel_identity_id,
@@ -1059,17 +1504,61 @@ LEFT JOIN bot_sessions s ON s.id = m.session_id
 LEFT JOIN branch_path bp ON bp.branch_id = m.branch_id
 LEFT JOIN bot_history_turns t ON t.id = m.turn_id
 WHERE m.session_id = ?1
-  AND m.created_at < strftime('%Y-%m-%d %H:%M:%S', ?2)
+  AND (
+    (?2 IS NULL AND m.created_at < strftime('%Y-%m-%d %H:%M:%S', ?3))
+    OR (
+      ?2 IS NOT NULL
+      AND (
+        COALESCE(bp.depth, 2147483647) > COALESCE((SELECT cursor_bp.depth FROM bot_history_messages cursor LEFT JOIN branch_path cursor_bp ON cursor_bp.branch_id = cursor.branch_id WHERE cursor.id = ?2), 2147483647)
+        OR (
+          COALESCE(bp.depth, 2147483647) = COALESCE((SELECT cursor_bp.depth FROM bot_history_messages cursor LEFT JOIN branch_path cursor_bp ON cursor_bp.branch_id = cursor.branch_id WHERE cursor.id = ?2), 2147483647)
+          AND COALESCE(m.branch_seq, 9223372036854775807) < COALESCE((SELECT cursor.branch_seq FROM bot_history_messages cursor WHERE cursor.id = ?2), 9223372036854775807)
+        )
+        OR (
+          COALESCE(bp.depth, 2147483647) = COALESCE((SELECT cursor_bp.depth FROM bot_history_messages cursor LEFT JOIN branch_path cursor_bp ON cursor_bp.branch_id = cursor.branch_id WHERE cursor.id = ?2), 2147483647)
+          AND COALESCE(m.branch_seq, 9223372036854775807) = COALESCE((SELECT cursor.branch_seq FROM bot_history_messages cursor WHERE cursor.id = ?2), 9223372036854775807)
+          AND (
+            m.created_at < (SELECT cursor.created_at FROM bot_history_messages cursor WHERE cursor.id = ?2)
+            OR (
+              m.created_at = (SELECT cursor.created_at FROM bot_history_messages cursor WHERE cursor.id = ?2)
+              AND m.id < ?2
+            )
+          )
+        )
+      )
+    )
+  )
   AND (
     m.branch_id IS NULL
-    OR (bp.branch_id IS NOT NULL AND (bp.max_turn_seq IS NULL OR t.turn_seq <= bp.max_turn_seq))
+    OR (
+    bp.branch_id IS NOT NULL
+    AND (
+      bp.depth = 0
+      OR (
+        bp.max_turn_seq IS NOT NULL
+        AND (
+          t.turn_seq < bp.max_turn_seq
+          OR (
+            t.turn_seq = bp.max_turn_seq
+            AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
+          )
+        )
+      )
+      OR (
+        bp.max_turn_seq IS NULL
+        AND bp.max_branch_seq IS NOT NULL
+        AND m.branch_seq <= bp.max_branch_seq
+      )
+    )
   )
-ORDER BY COALESCE(bp.depth, -1) ASC, COALESCE(m.branch_seq, 0) DESC, m.created_at DESC
-LIMIT ?3
+  )
+ORDER BY COALESCE(bp.depth, -1) ASC, COALESCE(m.branch_seq, 0) DESC, m.created_at DESC, m.id DESC
+LIMIT ?4
 `
 
 type ListMessagesBeforeBySessionParams struct {
 	SessionID sql.NullString `json:"session_id"`
+	BeforeID  interface{}    `json:"before_id"`
 	CreatedAt interface{}    `json:"created_at"`
 	MaxCount  int64          `json:"max_count"`
 }
@@ -1097,7 +1586,12 @@ type ListMessagesBeforeBySessionRow struct {
 }
 
 func (q *Queries) ListMessagesBeforeBySession(ctx context.Context, arg ListMessagesBeforeBySessionParams) ([]ListMessagesBeforeBySessionRow, error) {
-	rows, err := q.db.QueryContext(ctx, listMessagesBeforeBySession, arg.SessionID, arg.CreatedAt, arg.MaxCount)
+	rows, err := q.db.QueryContext(ctx, listMessagesBeforeBySession,
+		arg.SessionID,
+		arg.BeforeID,
+		arg.CreatedAt,
+		arg.MaxCount,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1140,10 +1634,11 @@ func (q *Queries) ListMessagesBeforeBySession(ctx context.Context, arg ListMessa
 }
 
 const listMessagesBySession = `-- name: ListMessagesBySession :many
-WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, depth) AS (
+WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, max_branch_seq, depth) AS (
   SELECT
     b.id,
     b.parent_branch_id,
+    NULL,
     NULL,
     0
   FROM bot_sessions s
@@ -1161,10 +1656,21 @@ WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, depth) AS 
   )
   WHERE s.id = ?1
   UNION ALL
-  SELECT parent.id, parent.parent_branch_id, child.fork_from_turn_seq, bp.depth + 1
+  SELECT parent.id, parent.parent_branch_id, COALESCE(
+    CASE
+      WHEN typeof(child.fork_from_turn_seq) IN ('integer', 'real') THEN CAST(child.fork_from_turn_seq AS INTEGER)
+      WHEN typeof(child.fork_from_turn_seq) = 'text'
+        AND child.fork_from_turn_seq != ''
+        AND child.fork_from_turn_seq NOT GLOB '*[^0-9]*'
+        THEN CAST(child.fork_from_turn_seq AS INTEGER)
+      ELSE NULL
+    END,
+    boundary_turn.turn_seq
+  ), child.fork_from_seq, bp.depth + 1
   FROM branch_path bp
   JOIN bot_session_branches child ON child.id = bp.branch_id
   JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
 )
 SELECT
   m.id, m.bot_id, m.session_id, m.branch_id, m.branch_seq, m.sender_channel_identity_id,
@@ -1183,7 +1689,27 @@ LEFT JOIN bot_history_turns t ON t.id = m.turn_id
 WHERE m.session_id = ?1
   AND (
     m.branch_id IS NULL
-    OR (bp.branch_id IS NOT NULL AND (bp.max_turn_seq IS NULL OR t.turn_seq <= bp.max_turn_seq))
+    OR (
+    bp.branch_id IS NOT NULL
+    AND (
+      bp.depth = 0
+      OR (
+        bp.max_turn_seq IS NOT NULL
+        AND (
+          t.turn_seq < bp.max_turn_seq
+          OR (
+            t.turn_seq = bp.max_turn_seq
+            AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
+          )
+        )
+      )
+      OR (
+        bp.max_turn_seq IS NULL
+        AND bp.max_branch_seq IS NOT NULL
+        AND m.branch_seq <= bp.max_branch_seq
+      )
+    )
+  )
   )
 ORDER BY COALESCE(bp.depth, 2147483647) DESC, COALESCE(m.branch_seq, 9223372036854775807) ASC, m.created_at ASC
 LIMIT 10000
@@ -1343,8 +1869,8 @@ func (q *Queries) ListMessagesLatest(ctx context.Context, arg ListMessagesLatest
 }
 
 const listMessagesLatestBySession = `-- name: ListMessagesLatestBySession :many
-WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, depth) AS (
-  SELECT b.id, b.parent_branch_id, NULL, 0
+WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, max_branch_seq, depth) AS (
+  SELECT b.id, b.parent_branch_id, NULL, NULL, 0
   FROM bot_sessions s
   JOIN bot_session_branches b ON b.id = COALESCE(s.active_branch_id, (
     SELECT rb.id FROM bot_session_branches rb
@@ -1353,10 +1879,21 @@ WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, depth) AS 
   ))
   WHERE s.id = ?1
   UNION ALL
-  SELECT parent.id, parent.parent_branch_id, child.fork_from_turn_seq, bp.depth + 1
+  SELECT parent.id, parent.parent_branch_id, COALESCE(
+    CASE
+      WHEN typeof(child.fork_from_turn_seq) IN ('integer', 'real') THEN CAST(child.fork_from_turn_seq AS INTEGER)
+      WHEN typeof(child.fork_from_turn_seq) = 'text'
+        AND child.fork_from_turn_seq != ''
+        AND child.fork_from_turn_seq NOT GLOB '*[^0-9]*'
+        THEN CAST(child.fork_from_turn_seq AS INTEGER)
+      ELSE NULL
+    END,
+    boundary_turn.turn_seq
+  ), child.fork_from_seq, bp.depth + 1
   FROM branch_path bp
   JOIN bot_session_branches child ON child.id = bp.branch_id
   JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
 )
 SELECT
   m.id, m.bot_id, m.session_id, m.branch_id, m.branch_seq, m.sender_channel_identity_id,
@@ -1375,9 +1912,29 @@ LEFT JOIN bot_history_turns t ON t.id = m.turn_id
 WHERE m.session_id = ?1
   AND (
     m.branch_id IS NULL
-    OR (bp.branch_id IS NOT NULL AND (bp.max_turn_seq IS NULL OR t.turn_seq <= bp.max_turn_seq))
+    OR (
+    bp.branch_id IS NOT NULL
+    AND (
+      bp.depth = 0
+      OR (
+        bp.max_turn_seq IS NOT NULL
+        AND (
+          t.turn_seq < bp.max_turn_seq
+          OR (
+            t.turn_seq = bp.max_turn_seq
+            AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
+          )
+        )
+      )
+      OR (
+        bp.max_turn_seq IS NULL
+        AND bp.max_branch_seq IS NOT NULL
+        AND m.branch_seq <= bp.max_branch_seq
+      )
+    )
   )
-ORDER BY COALESCE(bp.depth, -1) ASC, COALESCE(m.branch_seq, 0) DESC, m.created_at DESC
+  )
+ORDER BY COALESCE(bp.depth, -1) ASC, COALESCE(m.branch_seq, 0) DESC, m.created_at DESC, m.id DESC
 LIMIT ?2
 `
 
@@ -1540,8 +2097,8 @@ func (q *Queries) ListMessagesSince(ctx context.Context, arg ListMessagesSincePa
 }
 
 const listMessagesSinceBySession = `-- name: ListMessagesSinceBySession :many
-WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, depth) AS (
-  SELECT b.id, b.parent_branch_id, NULL, 0
+WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, max_branch_seq, depth) AS (
+  SELECT b.id, b.parent_branch_id, NULL, NULL, 0
   FROM bot_sessions s
   JOIN bot_session_branches b ON b.id = COALESCE(s.active_branch_id, (
     SELECT rb.id FROM bot_session_branches rb
@@ -1550,10 +2107,21 @@ WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, depth) AS 
   ))
   WHERE s.id = ?1
   UNION ALL
-  SELECT parent.id, parent.parent_branch_id, child.fork_from_turn_seq, bp.depth + 1
+  SELECT parent.id, parent.parent_branch_id, COALESCE(
+    CASE
+      WHEN typeof(child.fork_from_turn_seq) IN ('integer', 'real') THEN CAST(child.fork_from_turn_seq AS INTEGER)
+      WHEN typeof(child.fork_from_turn_seq) = 'text'
+        AND child.fork_from_turn_seq != ''
+        AND child.fork_from_turn_seq NOT GLOB '*[^0-9]*'
+        THEN CAST(child.fork_from_turn_seq AS INTEGER)
+      ELSE NULL
+    END,
+    boundary_turn.turn_seq
+  ), child.fork_from_seq, bp.depth + 1
   FROM branch_path bp
   JOIN bot_session_branches child ON child.id = bp.branch_id
   JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
 )
 SELECT
   m.id, m.bot_id, m.session_id, m.branch_id, m.branch_seq, m.sender_channel_identity_id,
@@ -1573,7 +2141,27 @@ WHERE m.session_id = ?1
   AND m.created_at >= strftime('%Y-%m-%d %H:%M:%S', ?2)
   AND (
     m.branch_id IS NULL
-    OR (bp.branch_id IS NOT NULL AND (bp.max_turn_seq IS NULL OR t.turn_seq <= bp.max_turn_seq))
+    OR (
+    bp.branch_id IS NOT NULL
+    AND (
+      bp.depth = 0
+      OR (
+        bp.max_turn_seq IS NOT NULL
+        AND (
+          t.turn_seq < bp.max_turn_seq
+          OR (
+            t.turn_seq = bp.max_turn_seq
+            AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
+          )
+        )
+      )
+      OR (
+        bp.max_turn_seq IS NULL
+        AND bp.max_branch_seq IS NOT NULL
+        AND m.branch_seq <= bp.max_branch_seq
+      )
+    )
+  )
   )
 ORDER BY COALESCE(bp.depth, 2147483647) DESC, COALESCE(m.branch_seq, 9223372036854775807) ASC, m.created_at ASC
 `
@@ -2090,8 +2678,8 @@ func (q *Queries) ListSessionBranches(ctx context.Context, sessionID string) ([]
 }
 
 const listUncompactedMessagesBySession = `-- name: ListUncompactedMessagesBySession :many
-WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, depth) AS (
-  SELECT b.id, b.parent_branch_id, NULL, 0
+WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, max_branch_seq, depth) AS (
+  SELECT b.id, b.parent_branch_id, NULL, NULL, 0
   FROM bot_sessions s
   JOIN bot_session_branches b ON b.id = COALESCE(s.active_branch_id, (
     SELECT rb.id FROM bot_session_branches rb
@@ -2100,10 +2688,21 @@ WITH RECURSIVE branch_path(branch_id, parent_branch_id, max_turn_seq, depth) AS 
   ))
   WHERE s.id = ?1
   UNION ALL
-  SELECT parent.id, parent.parent_branch_id, child.fork_from_turn_seq, bp.depth + 1
+  SELECT parent.id, parent.parent_branch_id, COALESCE(
+    CASE
+      WHEN typeof(child.fork_from_turn_seq) IN ('integer', 'real') THEN CAST(child.fork_from_turn_seq AS INTEGER)
+      WHEN typeof(child.fork_from_turn_seq) = 'text'
+        AND child.fork_from_turn_seq != ''
+        AND child.fork_from_turn_seq NOT GLOB '*[^0-9]*'
+        THEN CAST(child.fork_from_turn_seq AS INTEGER)
+      ELSE NULL
+    END,
+    boundary_turn.turn_seq
+  ), child.fork_from_seq, bp.depth + 1
   FROM branch_path bp
   JOIN bot_session_branches child ON child.id = bp.branch_id
   JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
 )
 SELECT m.id, m.bot_id, m.session_id, m.role, m.content, m.usage, m.sender_channel_identity_id, m.compact_id, m.created_at
 FROM bot_history_messages m
@@ -2113,7 +2712,27 @@ WHERE m.session_id = ?1
   AND m.compact_id IS NULL
   AND (
     m.branch_id IS NULL
-    OR (bp.branch_id IS NOT NULL AND (bp.max_turn_seq IS NULL OR t.turn_seq <= bp.max_turn_seq))
+    OR (
+    bp.branch_id IS NOT NULL
+    AND (
+      bp.depth = 0
+      OR (
+        bp.max_turn_seq IS NOT NULL
+        AND (
+          t.turn_seq < bp.max_turn_seq
+          OR (
+            t.turn_seq = bp.max_turn_seq
+            AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
+          )
+        )
+      )
+      OR (
+        bp.max_turn_seq IS NULL
+        AND bp.max_branch_seq IS NOT NULL
+        AND m.branch_seq <= bp.max_branch_seq
+      )
+    )
+  )
   )
 ORDER BY COALESCE(bp.depth, 2147483647) DESC, COALESCE(m.branch_seq, 9223372036854775807) ASC, m.created_at ASC
 `
@@ -2193,6 +2812,7 @@ func (q *Queries) MarkMessagesCompacted(ctx context.Context, arg MarkMessagesCom
 const searchMessages = `-- name: SearchMessages :many
 SELECT
   m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
+  m.branch_id, m.branch_seq,
   m.role, m.content, m.created_at,
   ci.display_name AS sender_display_name,
   s.channel_type AS platform
@@ -2209,9 +2829,9 @@ WHERE m.bot_id = ?1
     CASE
       WHEN NOT json_valid(m.content)
         THEN CASE WHEN m.content LIKE '%' || ?7 || '%' THEN m.content ELSE '' END
-      WHEN json_type(m.content, '$.content') = 'text'
+      WHEN json_valid(m.content) AND json_type(m.content, '$.content') = 'text'
         THEN json_extract(m.content, '$.content')
-      WHEN json_type(m.content, '$.content') = 'array'
+      WHEN json_valid(m.content) AND json_type(m.content, '$.content') = 'array'
         THEN (SELECT COALESCE(group_concat(json_extract(j.value, '$.text'), ' '), '')
               FROM json_each(
                 CASE
@@ -2244,6 +2864,8 @@ type SearchMessagesRow struct {
 	BotID                   string         `json:"bot_id"`
 	SessionID               sql.NullString `json:"session_id"`
 	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
+	BranchID                sql.NullString `json:"branch_id"`
+	BranchSeq               sql.NullInt64  `json:"branch_seq"`
 	Role                    string         `json:"role"`
 	Content                 string         `json:"content"`
 	CreatedAt               string         `json:"created_at"`
@@ -2274,6 +2896,8 @@ func (q *Queries) SearchMessages(ctx context.Context, arg SearchMessagesParams) 
 			&i.BotID,
 			&i.SessionID,
 			&i.SenderChannelIdentityID,
+			&i.BranchID,
+			&i.BranchSeq,
 			&i.Role,
 			&i.Content,
 			&i.CreatedAt,
@@ -2293,7 +2917,7 @@ func (q *Queries) SearchMessages(ctx context.Context, arg SearchMessagesParams) 
 	return items, nil
 }
 
-const setActiveSessionBranch = `-- name: SetActiveSessionBranch :exec
+const setActiveSessionBranch = `-- name: SetActiveSessionBranch :execrows
 UPDATE bot_sessions
 SET active_branch_id = ?1,
     updated_at = CURRENT_TIMESTAMP
@@ -2311,9 +2935,12 @@ type SetActiveSessionBranchParams struct {
 	SessionID string         `json:"session_id"`
 }
 
-func (q *Queries) SetActiveSessionBranch(ctx context.Context, arg SetActiveSessionBranchParams) error {
-	_, err := q.db.ExecContext(ctx, setActiveSessionBranch, arg.BranchID, arg.SessionID)
-	return err
+func (q *Queries) SetActiveSessionBranch(ctx context.Context, arg SetActiveSessionBranchParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setActiveSessionBranch, arg.BranchID, arg.SessionID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const setHistoryTurnRequestMessage = `-- name: SetHistoryTurnRequestMessage :exec

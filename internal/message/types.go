@@ -26,6 +26,7 @@ type Message struct {
 	SessionID               string          `json:"session_id,omitempty"`
 	BranchID                string          `json:"branch_id,omitempty"`
 	BranchSeq               int64           `json:"branch_seq,omitempty"`
+	TurnID                  string          `json:"turn_id,omitempty"`
 	SenderChannelIdentityID string          `json:"sender_channel_identity_id,omitempty"`
 	SenderUserID            string          `json:"sender_user_id,omitempty"`
 	SenderDisplayName       string          `json:"sender_display_name,omitempty"`
@@ -98,6 +99,8 @@ type Service interface {
 	ListBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
 	ListActiveSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
+	ListActiveSinceBySessionBranch(ctx context.Context, sessionID string, branchID string, since time.Time) ([]Message, error)
+	ListActiveSinceBySessionBranchTurn(ctx context.Context, sessionID string, branchID string, turnID string, since time.Time) ([]Message, error)
 	ListLatestBySession(ctx context.Context, sessionID string, limit int32) ([]Message, error)
 	ListBeforeBySession(ctx context.Context, sessionID string, before time.Time, limit int32) ([]Message, error)
 	LocateByExternalIDBySession(ctx context.Context, sessionID string, externalMessageID string, beforeLimit int32, afterLimit int32) (LocateResult, error)

@@ -8,82 +8,10 @@
          middle column grows to fill the freed space. -->
     <div class="flex h-full min-h-0 overflow-hidden">
       <SideBar :mac-traffic-reserve="macTrafficReserve" />
-      <div class="flex min-w-0 min-h-0 flex-1 flex-col">
-        <div
-          class="flex h-9 shrink-0 items-center gap-0.5 bg-surface-chrome pr-2 transition-[padding] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] [-webkit-app-region:drag]"
-          :class="macTrafficReserve && !workbenchOpen ? 'pl-[76px]' : 'pl-2'"
-        >
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            class="size-7 text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
-            :title="workbenchOpen ? $t('chat.topBar.hideWorkbench') : $t('chat.topBar.showWorkbench')"
-            :aria-label="workbenchOpen ? $t('chat.topBar.hideWorkbench') : $t('chat.topBar.showWorkbench')"
-            :aria-pressed="workbenchOpen"
-            @click="workspaceTabs.toggleWorkbench()"
-          >
-            <PanelLeftClose
-              v-if="workbenchOpen"
-              :stroke-width="1.75"
-              class="size-4"
-            />
-            <PanelLeftOpen
-              v-else
-              :stroke-width="1.75"
-              class="size-4"
-            />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            class="size-7 text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
-            :title="$t('chat.topBar.goBack')"
-            :aria-label="$t('chat.topBar.goBack')"
-            @click="router.go(-1)"
-          >
-            <ChevronLeft
-              :stroke-width="1.75"
-              class="size-4"
-            />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            class="size-7 text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
-            :title="$t('chat.topBar.goForward')"
-            :aria-label="$t('chat.topBar.goForward')"
-            @click="router.go(1)"
-          >
-            <ChevronRight
-              :stroke-width="1.75"
-              class="size-4"
-            />
-          </Button>
-          <div class="flex-1" />
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            class="size-7 text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
-            :title="branchSidebarOpen ? $t('chat.topBar.hideBranchSidebar') : $t('chat.topBar.showBranchSidebar')"
-            :aria-label="branchSidebarOpen ? $t('chat.topBar.hideBranchSidebar') : $t('chat.topBar.showBranchSidebar')"
-            :aria-pressed="branchSidebarOpen"
-            @click="workspaceTabs.toggleBranchSidebar()"
-          >
-            <PanelRightClose
-              v-if="branchSidebarOpen"
-              :stroke-width="1.75"
-              class="size-4"
-            />
-            <PanelRightOpen
-              v-else
-              :stroke-width="1.75"
-              class="size-4"
-            />
-          </Button>
-        </div>
+      <div class="relative flex min-w-0 min-h-0 flex-1 flex-col">
         <MainContainer />
       </div>
-      <BranchHistorySidebar />
+      <BranchHistorySidebar v-if="branchSidebarOpen" />
     </div>
   </div>
 </template>
@@ -91,9 +19,7 @@
 <script setup lang="ts">
 import { computed, inject, ref, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useRoute, useRouter } from 'vue-router'
-import { ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-vue-next'
-import { Button } from '@memohai/ui'
+import { useRoute } from 'vue-router'
 import { DesktopShellKey } from '@/lib/desktop-shell'
 import SideBar from '@/components/sidebar/index.vue'
 import MainContainer from '@/components/main-container/index.vue'
@@ -104,15 +30,14 @@ import { useKeyboardCommand } from '@/composables/useKeyboardCommand'
 import { appKeyboardCommands } from '@/lib/keyboard-commands'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 
-const router = useRouter()
 const desktopShell = inject(DesktopShellKey, false)
+const workspaceTabs = useWorkspaceTabsStore()
+const { branchSidebarOpen } = storeToRefs(workspaceTabs)
 const macTrafficReserve = computed(() =>
   desktopShell
   && typeof navigator !== 'undefined'
   && navigator.platform.toLowerCase().includes('mac'),
 )
-const workspaceTabs = useWorkspaceTabsStore()
-const { workbenchOpen, branchSidebarOpen } = storeToRefs(workspaceTabs)
 
 const shouldAnimateEntry = safeSessionGet(ONBOARDING_KEYS.entryAnimation) === '1'
 if (shouldAnimateEntry) {

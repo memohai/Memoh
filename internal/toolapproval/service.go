@@ -103,6 +103,11 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 	if !ok {
 		return Request{}, errors.New("unsupported tool approval operation")
 	}
+	persistBranchID := optionalUUID(input.PersistBranchID)
+	persistTurnID := optionalUUID(input.PersistTurnID)
+	if err := s.validatePersistContext(ctx, sessionID, persistBranchID, persistTurnID); err != nil {
+		return Request{}, err
+	}
 	if err := s.runApprovalHook(ctx, hooks.EventBeforeApprovalCreate, input, Request{}, true); err != nil {
 		return Request{}, err
 	}
@@ -117,6 +122,8 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 		ToolInput:                    toolInput,
 		RequestedByChannelIdentityID: requestedByID,
 		RequestedMessageID:           optionalUUID(input.RequestedMessageID),
+		PersistBranchID:              persistBranchID,
+		PersistTurnID:                persistTurnID,
 		SourcePlatform:               strings.TrimSpace(input.SourcePlatform),
 		ReplyTarget:                  strings.TrimSpace(input.ReplyTarget),
 		ConversationType:             strings.TrimSpace(input.ConversationType),
@@ -447,6 +454,63 @@ func (s *Service) UpdatePromptMessage(ctx context.Context, approvalID, promptMes
 	return requestFromRowOrErr(row, err)
 }
 
+func (s *Service) UpdatePersistContext(ctx context.Context, approvalID, branchID, turnID string) (Request, error) {
+	id, err := db.ParseUUID(approvalID)
+	if err != nil {
+		return Request{}, err
+	}
+	current, err := s.queries.GetToolApprovalRequest(ctx, id)
+	if err != nil {
+		return Request{}, mapLookupErr(err)
+	}
+	persistBranchID := optionalUUID(branchID)
+	persistTurnID := optionalUUID(turnID)
+	if err := s.validatePersistContext(ctx, current.SessionID, persistBranchID, persistTurnID); err != nil {
+		return Request{}, err
+	}
+	row, err := s.queries.UpdateToolApprovalPersistContext(ctx, sqlc.UpdateToolApprovalPersistContextParams{
+		ID:              id,
+		PersistBranchID: persistBranchID,
+		PersistTurnID:   persistTurnID,
+	})
+	return requestFromRowOrErr(row, err)
+}
+
+func (s *Service) validatePersistContext(ctx context.Context, sessionID, branchID, turnID pgtype.UUID) error {
+	if !branchID.Valid {
+		if turnID.Valid {
+			return errors.New("persist turn requires session and branch")
+		}
+		return nil
+	}
+	if !sessionID.Valid {
+		return errors.New("persist branch requires session")
+	}
+	if _, err := s.queries.GetSessionBranchForPersist(ctx, sqlc.GetSessionBranchForPersistParams{
+		BranchID:  branchID,
+		SessionID: sessionID,
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errors.New("persist branch does not belong to session")
+		}
+		return err
+	}
+	if !turnID.Valid {
+		return nil
+	}
+	if _, err := s.queries.GetHistoryTurnForMessagePersist(ctx, sqlc.GetHistoryTurnForMessagePersistParams{
+		TurnID:    turnID,
+		SessionID: sessionID,
+		BranchID:  branchID,
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errors.New("persist turn does not belong to session branch")
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *Service) ListPendingBySession(ctx context.Context, botID, sessionID string) ([]Request, error) {
 	return s.listBySession(ctx, botID, sessionID, true)
 }
@@ -564,6 +628,12 @@ func requestFromRow(row sqlc.ToolApprovalRequest) Request {
 	if row.DecidedAt.Valid {
 		decided := row.DecidedAt.Time
 		req.DecidedAt = &decided
+	}
+	if row.PersistBranchID.Valid {
+		req.PersistBranchID = uuid.UUID(row.PersistBranchID.Bytes).String()
+	}
+	if row.PersistTurnID.Valid {
+		req.PersistTurnID = uuid.UUID(row.PersistTurnID.Bytes).String()
 	}
 	return req
 }

@@ -20,6 +20,7 @@ export async function fetchMessages(
     query: {
       limit: options?.limit ?? 30,
       ...(options?.before?.trim() ? { before: options.before.trim() } : {}),
+      ...(options?.beforeId?.trim() ? { before_id: options.beforeId.trim() } : {}),
       ...(sessionId?.trim() ? { session_id: sessionId.trim() } : {}),
     },
     throwOnError: true,
@@ -40,6 +41,7 @@ export async function fetchMessagesUI(
       limit: options?.limit ?? 30,
       format: 'ui',
       ...(options?.before?.trim() ? { before: options.before.trim() } : {}),
+      ...(options?.beforeId?.trim() ? { before_id: options.beforeId.trim() } : {}),
       ...(sessionId?.trim() ? { session_id: sessionId.trim() } : {}),
     },
     throwOnError: true,

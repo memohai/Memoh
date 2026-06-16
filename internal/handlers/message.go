@@ -43,6 +43,10 @@ type MessageHandler struct {
 	logger              *slog.Logger
 }
 
+type sessionBeforeCursorLister interface {
+	ListBeforeBySessionCursor(ctx context.Context, sessionID string, before time.Time, beforeID string, limit int32) ([]messagepkg.Message, error)
+}
+
 // NewMessageHandler creates a MessageHandler.
 func NewMessageHandler(log *slog.Logger, conversationService conversation.Accessor, messageService messagepkg.Service, sessionService *session.Service, botService *bots.Service, accountService *accounts.Service, eventSubscribers ...messageevent.Subscriber) *MessageHandler {
 	var messageEvents messageevent.Subscriber
@@ -169,6 +173,7 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	}
 
 	before, hasBefore := parseBeforeParam(c.QueryParam("before"))
+	beforeID := strings.TrimSpace(c.QueryParam("before_id"))
 	format := strings.ToLower(strings.TrimSpace(c.QueryParam("format")))
 
 	sessionID := strings.TrimSpace(c.QueryParam("session_id"))
@@ -186,10 +191,27 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 		botID = bot.ID
 	}
 
+	if format == "ui" {
+		if sessionID == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "session_id is required for ui format")
+		}
+		items, err := h.listSessionUITurns(c.Request().Context(), botID, sessionID, before, beforeID, hasBefore, limit)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		return c.JSON(http.StatusOK, map[string]any{
+			"items": items,
+		})
+	}
+
 	var messages []messagepkg.Message
 	if sessionID != "" {
 		if hasBefore {
-			messages, err = h.messageService.ListBeforeBySession(c.Request().Context(), sessionID, before, limit)
+			if cursorLister, ok := h.messageService.(sessionBeforeCursorLister); ok {
+				messages, err = cursorLister.ListBeforeBySessionCursor(c.Request().Context(), sessionID, before, beforeID, limit)
+			} else {
+				messages, err = h.messageService.ListBeforeBySession(c.Request().Context(), sessionID, before, limit)
+			}
 		} else {
 			messages, err = h.messageService.ListLatestBySession(c.Request().Context(), sessionID, limit)
 			if err == nil {
@@ -210,26 +232,74 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, messages)
-	if format == "ui" {
-		items := conversation.ConvertMessagesToUITurns(messages)
-		if sessionID != "" && h.bgManager != nil {
-			conversation.ApplyBackgroundTaskSnapshots(items, h.backgroundTaskSnapshots(botID, sessionID))
-		}
-		if sessionID != "" && h.toolApproval != nil {
-			if approvals, err := h.toolApproval.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
-				mergeToolApprovals(items, approvals, h.toolApprovalCanApproveFn(c.Request().Context(), sessionID))
-			}
-		}
-		if sessionID != "" && h.userInput != nil {
-			if requests, err := h.userInput.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
-				mergeUserInputs(items, requests, h.userInput.CanRespond)
-			}
-		}
-		return c.JSON(http.StatusOK, map[string]any{
-			"items": items,
-		})
-	}
 	return c.JSON(http.StatusOK, map[string]any{"items": messages})
+}
+
+func (h *MessageHandler) listSessionUITurns(ctx context.Context, botID, sessionID string, before time.Time, beforeID string, hasBefore bool, limit int32) ([]conversation.UITurn, error) {
+	messages, err := h.messageService.ListBySession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	h.fillAssetMimeFromStorage(ctx, botID, messages)
+	items := conversation.ConvertMessagesToUITurns(messages)
+	items = filterUITurnPage(items, before, beforeID, hasBefore, limit)
+	h.applyUITurnOverlays(ctx, botID, sessionID, items)
+	return items, nil
+}
+
+func (h *MessageHandler) applyUITurnOverlays(ctx context.Context, botID, sessionID string, items []conversation.UITurn) {
+	if h.bgManager != nil {
+		conversation.ApplyBackgroundTaskSnapshots(items, h.backgroundTaskSnapshots(botID, sessionID))
+	}
+	if h.toolApproval != nil {
+		if approvals, err := h.toolApproval.ListBySession(ctx, botID, sessionID); err == nil {
+			mergeToolApprovals(items, approvals, h.toolApprovalCanApproveFn(ctx, sessionID))
+		}
+	}
+	if h.userInput != nil {
+		if requests, err := h.userInput.ListBySession(ctx, botID, sessionID); err == nil {
+			mergeUserInputs(items, requests, h.userInput.CanRespond)
+		}
+	}
+}
+
+func filterUITurnPage(items []conversation.UITurn, before time.Time, beforeID string, hasBefore bool, limit int32) []conversation.UITurn {
+	if limit <= 0 {
+		return nil
+	}
+	cursorID := strings.TrimSpace(beforeID)
+	end := len(items)
+	if hasBefore {
+		end = 0
+		foundCursor := false
+		for idx, item := range items {
+			if cursorID != "" && strings.TrimSpace(item.ID) == cursorID {
+				end = idx
+				foundCursor = true
+				break
+			}
+			if cursorID == "" && item.Timestamp.Before(before) {
+				end = idx + 1
+			}
+		}
+		if cursorID != "" && !foundCursor {
+			for idx, item := range items {
+				if item.Timestamp.Before(before) {
+					end = idx + 1
+				}
+			}
+		}
+	}
+	if end <= 0 {
+		return nil
+	}
+	start := end - int(limit)
+	if start < 0 {
+		start = 0
+	}
+	out := make([]conversation.UITurn, end-start)
+	copy(out, items[start:end])
+	return out
 }
 
 // LocateMessage godoc
@@ -290,19 +360,7 @@ func (h *MessageHandler) LocateMessage(c echo.Context) error {
 
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, located.Messages)
 	items := conversation.ConvertMessagesToUITurns(located.Messages)
-	if h.bgManager != nil {
-		conversation.ApplyBackgroundTaskSnapshots(items, h.backgroundTaskSnapshots(botID, sessionID))
-	}
-	if h.toolApproval != nil {
-		if approvals, err := h.toolApproval.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
-			mergeToolApprovals(items, approvals, h.toolApprovalCanApproveFn(c.Request().Context(), sessionID))
-		}
-	}
-	if h.userInput != nil {
-		if requests, err := h.userInput.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
-			mergeUserInputs(items, requests, h.userInput.CanRespond)
-		}
-	}
+	h.applyUITurnOverlays(c.Request().Context(), botID, sessionID, items)
 	return c.JSON(http.StatusOK, map[string]any{
 		"items":                      items,
 		"target_id":                  located.TargetID,

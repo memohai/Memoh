@@ -65,6 +65,8 @@ CREATE TABLE user_input_requests (
   assistant_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
   tool_result_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
   prompt_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
+  persist_branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
+  persist_turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
   prompt_external_message_id TEXT NOT NULL DEFAULT '',
   source_platform TEXT NOT NULL DEFAULT '',
   reply_target TEXT NOT NULL DEFAULT '',

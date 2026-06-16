@@ -52,6 +52,10 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 
 	doneTurn := r.enterSessionTurn(ctx, req.BotID, req.SessionID)
 	defer doneTurn()
+	req, err = r.pinPersistBranch(ctx, req)
+	if err != nil {
+		return err
+	}
 
 	if req.RawQuery == "" {
 		req.RawQuery = strings.TrimSpace(req.Query)
@@ -143,6 +147,8 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		SessionID:           req.SessionID,
 		StreamID:            req.StreamID,
 		RouteID:             req.RouteID,
+		PersistBranchID:     req.PersistBranchID,
+		PersistTurnID:       req.PersistTurnID,
 		AgentID:             agentID,
 		ProjectPath:         projectPath,
 		Prompt:              req.Query,
@@ -231,9 +237,11 @@ func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req convers
 		return req
 	}
 	senderChannelIdentityID, senderUserID := r.resolvePersistSenderIDs(ctx, req)
-	if _, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
+	persisted, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
 		BotID:                   req.BotID,
 		SessionID:               req.SessionID,
+		BranchID:                req.PersistBranchID,
+		TurnID:                  req.PersistTurnID,
 		SenderChannelIdentityID: senderChannelIdentityID,
 		SenderUserID:            senderUserID,
 		ExternalMessageID:       req.ExternalMessageID,
@@ -244,12 +252,19 @@ func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req convers
 		Assets:                  chatAttachmentsToAssetRefs(req.Attachments),
 		EventID:                 req.EventID,
 		DisplayText:             displayText,
-	}); err != nil {
+	})
+	if err != nil {
 		r.logger.Warn("persist ACP leading user message failed",
 			slog.String("bot_id", req.BotID),
 			slog.String("session_id", req.SessionID),
 			slog.Any("error", err))
 		return req
+	}
+	if req.PersistBranchID == "" {
+		req.PersistBranchID = persisted.BranchID
+	}
+	if req.PersistTurnID == "" {
+		req.PersistTurnID = persisted.TurnID
 	}
 	req.UserMessagePersisted = true
 	return req
@@ -274,6 +289,8 @@ func (r *Resolver) persistACPDecisionProjection(ctx context.Context, req convers
 		if _, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
 			BotID:                   req.BotID,
 			SessionID:               req.SessionID,
+			BranchID:                req.PersistBranchID,
+			TurnID:                  req.PersistTurnID,
 			SenderChannelIdentityID: "",
 			Role:                    "assistant",
 			Content:                 content,

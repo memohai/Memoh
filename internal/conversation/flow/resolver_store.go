@@ -24,7 +24,17 @@ type storeRoundOptions struct {
 	MessageMetadataByIndex  map[int]map[string]any
 }
 
+type storedRoundContext struct {
+	BranchID string
+	TurnID   string
+}
+
 func (r *Resolver) storeRoundWithOptions(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) error {
+	_, err := r.storeRoundWithContext(ctx, req, messages, modelID, opts)
+	return err
+}
+
+func (r *Resolver) storeRoundWithContext(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) (storedRoundContext, error) {
 	fullRound := make([]conversation.ModelMessage, 0, len(messages))
 
 	// When the user message was already persisted by a channel adapter, skip
@@ -58,15 +68,21 @@ func (r *Resolver) storeRoundWithOptions(ctx context.Context, req conversation.C
 	}
 
 	if len(filtered) == 0 {
-		return nil
+		return storedRoundContext{}, nil
 	}
 
-	r.storeMessages(ctx, req, filtered, modelID, opts)
+	var err error
+	req, err = r.pinPersistBranch(ctx, req)
+	if err != nil {
+		return storedRoundContext{}, err
+	}
+
+	stored := r.storeMessages(ctx, req, filtered, modelID, opts)
 	if !opts.SkipMemory {
 		go r.storeMemory(context.WithoutCancel(ctx), req, filtered)
 	}
 
-	return nil
+	return stored, nil
 }
 
 // isEmptyAssistantMessage returns true if an assistant message has no
@@ -105,12 +121,12 @@ func (r *Resolver) StoreRound(ctx context.Context, botID, sessionID, channelIden
 	return r.storeRound(ctx, req, modelMessages, modelID)
 }
 
-func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) {
+func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) storedRoundContext {
 	if r.messageService == nil {
-		return
+		return storedRoundContext{}
 	}
 	if strings.TrimSpace(req.BotID) == "" {
-		return
+		return storedRoundContext{}
 	}
 
 	// Check bot setting for full tool result persistence.
@@ -120,6 +136,8 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 	}
 	meta := buildRouteMetadata(req)
 	senderChannelIdentityID, senderUserID := r.resolvePersistSenderIDs(ctx, req)
+	pinnedBranchID := strings.TrimSpace(req.PersistBranchID)
+	pinnedTurnID := strings.TrimSpace(req.PersistTurnID)
 
 	// Determine the last assistant message index for outbound asset attachment.
 	lastAssistantIdx := -1
@@ -208,9 +226,11 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 		if extraMeta := opts.MessageMetadataByIndex[i]; len(extraMeta) > 0 {
 			persistMeta = mergeMetadata(persistMeta, extraMeta)
 		}
-		if _, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
+		persisted, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
 			BotID:                   req.BotID,
 			SessionID:               req.SessionID,
+			BranchID:                pinnedBranchID,
+			TurnID:                  pinnedTurnID,
 			SenderChannelIdentityID: messageSenderChannelIdentityID,
 			SenderUserID:            messageSenderUserID,
 			ExternalMessageID:       externalMessageID,
@@ -223,10 +243,19 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 			ModelID:                 modelID,
 			EventID:                 messageEventID,
 			DisplayText:             displayText,
-		}); err != nil {
+		})
+		if err != nil {
 			r.logger.Warn("persist message failed", slog.Any("error", err))
+			continue
+		}
+		if pinnedBranchID == "" {
+			pinnedBranchID = persisted.BranchID
+		}
+		if pinnedTurnID == "" {
+			pinnedTurnID = persisted.TurnID
 		}
 	}
+	return storedRoundContext{BranchID: pinnedBranchID, TurnID: pinnedTurnID}
 }
 
 // outboundAssetRefsToMessageRefs converts outbound asset refs from the streaming

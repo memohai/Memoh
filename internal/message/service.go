@@ -66,14 +66,31 @@ func (s *DBService) ensureActiveBranchForSession(ctx context.Context, sessionID 
 		return pgtype.UUID{}, err
 	}
 
-	if err := s.queries.SetActiveSessionBranch(ctx, sqlc.SetActiveSessionBranchParams{SessionID: sessionID, BranchID: branchID}); err != nil {
+	rows, err := s.queries.SetActiveSessionBranch(ctx, sqlc.SetActiveSessionBranchParams{SessionID: sessionID, BranchID: branchID})
+	if err != nil {
 		return pgtype.UUID{}, err
+	}
+	if rows == 0 {
+		return pgtype.UUID{}, errors.New("session branch not found")
 	}
 	return branchID, nil
 }
 
 func (s *DBService) ensureTurnForMessage(ctx context.Context, sessionID, branchID pgtype.UUID, role string, explicitTurnID pgtype.UUID) (pgtype.UUID, error) {
 	if explicitTurnID.Valid {
+		if !sessionID.Valid || !branchID.Valid {
+			return pgtype.UUID{}, errors.New("explicit turn requires session and branch")
+		}
+		if _, err := s.queries.GetHistoryTurnForMessagePersist(ctx, sqlc.GetHistoryTurnForMessagePersistParams{
+			TurnID:    explicitTurnID,
+			SessionID: sessionID,
+			BranchID:  branchID,
+		}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return pgtype.UUID{}, errors.New("explicit turn does not belong to session branch")
+			}
+			return pgtype.UUID{}, err
+		}
 		return explicitTurnID, nil
 	}
 	if !sessionID.Valid || !branchID.Valid {
@@ -87,9 +104,9 @@ func (s *DBService) ensureTurnForMessage(ctx context.Context, sessionID, branchI
 		if err == nil {
 			return turnID, nil
 		}
-			if !errors.Is(err, pgx.ErrNoRows) {
-				return pgtype.UUID{}, err
-			}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return pgtype.UUID{}, err
+		}
 	}
 	return s.queries.CreateHistoryTurn(ctx, sqlc.CreateHistoryTurnParams{
 		SessionID: sessionID,
@@ -388,6 +405,57 @@ func (s *DBService) ListActiveSinceBySession(ctx context.Context, sessionID stri
 	return msgs, nil
 }
 
+// ListActiveSinceBySessionBranch returns active session messages visible from a pinned branch.
+func (s *DBService) ListActiveSinceBySessionBranch(ctx context.Context, sessionID string, branchID string, since time.Time) ([]Message, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	pgBranchID, err := dbpkg.ParseUUID(branchID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListActiveMessagesSinceBySessionBranch(ctx, sqlc.ListActiveMessagesSinceBySessionBranchParams{
+		SessionID: pgSessionID,
+		BranchID:  pgBranchID,
+		CreatedAt: pgtype.Timestamptz{Time: since, Valid: true},
+	})
+	if err != nil {
+		return nil, err
+	}
+	msgs := toMessagesFromActiveSinceBySessionBranch(rows)
+	s.enrichAssets(ctx, msgs)
+	return msgs, nil
+}
+
+// ListActiveSinceBySessionBranchTurn returns active session messages visible from a pinned branch up to a pinned turn.
+func (s *DBService) ListActiveSinceBySessionBranchTurn(ctx context.Context, sessionID string, branchID string, turnID string, since time.Time) ([]Message, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	pgBranchID, err := dbpkg.ParseUUID(branchID)
+	if err != nil {
+		return nil, err
+	}
+	pgTurnID, err := dbpkg.ParseUUID(turnID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListActiveMessagesSinceBySessionBranchTurn(ctx, sqlc.ListActiveMessagesSinceBySessionBranchTurnParams{
+		SessionID: pgSessionID,
+		BranchID:  pgBranchID,
+		TurnID:    pgTurnID,
+		CreatedAt: pgtype.Timestamptz{Time: since, Valid: true},
+	})
+	if err != nil {
+		return nil, err
+	}
+	msgs := toMessagesFromActiveSinceBySessionBranchTurn(rows)
+	s.enrichAssets(ctx, msgs)
+	return msgs, nil
+}
+
 // ListLatestBySession returns the latest N session messages.
 func (s *DBService) ListLatestBySession(ctx context.Context, sessionID string, limit int32) ([]Message, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
@@ -408,12 +476,22 @@ func (s *DBService) ListLatestBySession(ctx context.Context, sessionID string, l
 
 // ListBeforeBySession returns up to limit session messages older than before.
 func (s *DBService) ListBeforeBySession(ctx context.Context, sessionID string, before time.Time, limit int32) ([]Message, error) {
+	return s.ListBeforeBySessionCursor(ctx, sessionID, before, "", limit)
+}
+
+// ListBeforeBySessionCursor returns up to limit session messages before a stable cursor.
+func (s *DBService) ListBeforeBySessionCursor(ctx context.Context, sessionID string, before time.Time, beforeID string, limit int32) ([]Message, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
 		return nil, err
 	}
+	pgBeforeID, err := parseOptionalUUID(beforeID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid before id: %w", err)
+	}
 	rows, err := s.queries.ListMessagesBeforeBySession(ctx, sqlc.ListMessagesBeforeBySessionParams{
 		SessionID: pgSessionID,
+		BeforeID:  pgBeforeID,
 		CreatedAt: pgtype.Timestamptz{Time: before, Valid: true},
 		MaxCount:  limit,
 	})
@@ -449,9 +527,14 @@ func (s *DBService) LocateByExternalIDBySession(ctx context.Context, sessionID s
 		return LocateResult{}, err
 	}
 	target := toMessageFromExternalIDBySessionRow(targetRow)
+	targetID, err := parseOptionalUUID(target.ID)
+	if err != nil {
+		return LocateResult{}, fmt.Errorf("invalid target id: %w", err)
+	}
 
 	beforeRows, err := s.queries.ListMessagesBeforeBySession(ctx, sqlc.ListMessagesBeforeBySessionParams{
 		SessionID: pgSessionID,
+		BeforeID:  targetID,
 		CreatedAt: pgtype.Timestamptz{
 			Time:  target.CreatedAt,
 			Valid: true,
@@ -467,6 +550,7 @@ func (s *DBService) LocateByExternalIDBySession(ctx context.Context, sessionID s
 			Time:  target.CreatedAt,
 			Valid: true,
 		},
+		AfterID:  targetID,
 		MaxCount: afterLimit,
 	})
 	if err != nil {
@@ -534,7 +618,7 @@ func (s *DBService) DeleteBySession(ctx context.Context, sessionID string) error
 // --- Conversion helpers ---
 
 func toMessageFromCreate(row sqlc.CreateMessageRow) Message {
-	return toMessageFields(
+	m := toMessageFields(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -555,6 +639,10 @@ func toMessageFromCreate(row sqlc.CreateMessageRow) Message {
 		row.DisplayText,
 		row.CreatedAt,
 	)
+	if row.TurnID.Valid {
+		m.TurnID = row.TurnID.String()
+	}
+	return m
 }
 
 func extractPlatformFromMetadata(metadata []byte) pgtype.Text {
@@ -690,6 +778,62 @@ func toMessageFromActiveSinceRow(row sqlc.ListActiveMessagesSinceRow) Message {
 }
 
 func toMessageFromActiveSinceBySessionRow(row sqlc.ListActiveMessagesSinceBySessionRow) Message {
+	m := toMessageFields(
+		row.ID,
+		row.BotID,
+		row.SessionID,
+		row.BranchID,
+		row.BranchSeq,
+		row.SenderChannelIdentityID,
+		row.SenderUserID,
+		row.SenderDisplayName,
+		row.SenderAvatarUrl,
+		row.Platform,
+		row.ExternalMessageID,
+		row.SourceReplyToMessageID,
+		row.Role,
+		row.Content,
+		row.Metadata,
+		row.Usage,
+		row.EventID,
+		row.DisplayText,
+		row.CreatedAt,
+	)
+	if row.CompactID.Valid {
+		m.CompactID = row.CompactID.String()
+	}
+	return m
+}
+
+func toMessageFromActiveSinceBySessionBranchRow(row sqlc.ListActiveMessagesSinceBySessionBranchRow) Message {
+	m := toMessageFields(
+		row.ID,
+		row.BotID,
+		row.SessionID,
+		row.BranchID,
+		row.BranchSeq,
+		row.SenderChannelIdentityID,
+		row.SenderUserID,
+		row.SenderDisplayName,
+		row.SenderAvatarUrl,
+		row.Platform,
+		row.ExternalMessageID,
+		row.SourceReplyToMessageID,
+		row.Role,
+		row.Content,
+		row.Metadata,
+		row.Usage,
+		row.EventID,
+		row.DisplayText,
+		row.CreatedAt,
+	)
+	if row.CompactID.Valid {
+		m.CompactID = row.CompactID.String()
+	}
+	return m
+}
+
+func toMessageFromActiveSinceBySessionBranchTurnRow(row sqlc.ListActiveMessagesSinceBySessionBranchTurnRow) Message {
 	m := toMessageFields(
 		row.ID,
 		row.BotID,
@@ -887,6 +1031,7 @@ func toMessageFields(
 		BotID:                   botID.String(),
 		SessionID:               sessionID.String(),
 		BranchID:                branchID.String(),
+		TurnID:                  "",
 		SenderChannelIdentityID: senderChannelIdentityID.String(),
 		SenderUserID:            senderUserID.String(),
 		SenderDisplayName:       dbpkg.TextToString(senderDisplayName),
@@ -954,6 +1099,22 @@ func toMessagesFromActiveSinceBySession(rows []sqlc.ListActiveMessagesSinceBySes
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
 		messages = append(messages, toMessageFromActiveSinceBySessionRow(row))
+	}
+	return messages
+}
+
+func toMessagesFromActiveSinceBySessionBranch(rows []sqlc.ListActiveMessagesSinceBySessionBranchRow) []Message {
+	messages := make([]Message, 0, len(rows))
+	for _, row := range rows {
+		messages = append(messages, toMessageFromActiveSinceBySessionBranchRow(row))
+	}
+	return messages
+}
+
+func toMessagesFromActiveSinceBySessionBranchTurn(rows []sqlc.ListActiveMessagesSinceBySessionBranchTurnRow) []Message {
+	messages := make([]Message, 0, len(rows))
+	for _, row := range rows {
+		messages = append(messages, toMessageFromActiveSinceBySessionBranchTurnRow(row))
 	}
 	return messages
 }

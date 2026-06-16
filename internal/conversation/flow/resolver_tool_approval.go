@@ -150,7 +150,7 @@ func emitApprovalAck(ctx context.Context, eventCh chan<- WSStreamEvent) error {
 
 func (r *Resolver) executeApprovedTool(ctx context.Context, req toolapproval.Request, input ToolApprovalResponseInput) (sdk.ToolResultPart, error) {
 	req = withLocalWebReplyTarget(req)
-	resolved, err := r.ResolveRunConfig(ctx,
+	resolved, err := r.resolveRunConfigWithPersistContext(ctx,
 		input.BotID,
 		req.SessionID,
 		firstNonEmpty(req.ChannelIdentityID, input.ActorChannelIdentityID),
@@ -158,6 +158,8 @@ func (r *Resolver) executeApprovedTool(ctx context.Context, req toolapproval.Req
 		req.ReplyTarget,
 		req.ConversationType,
 		input.ChatToken,
+		req.PersistBranchID,
+		req.PersistTurnID,
 	)
 	if err != nil {
 		return sdk.ToolResultPart{}, err
@@ -181,6 +183,8 @@ func (r *Resolver) storeToolResultAndContinue(ctx context.Context, approval tool
 		ReplyTarget:             approval.ReplyTarget,
 		ConversationType:        approval.ConversationType,
 		UserMessagePersisted:    true,
+		PersistBranchID:         approval.PersistBranchID,
+		PersistTurnID:           approval.PersistTurnID,
 	}
 	if err := r.storeRoundWithOptions(ctx, storeReq, modelMessages, "", storeRoundOptions{AllowPendingToolCalls: true}); err != nil {
 		return err
@@ -190,7 +194,7 @@ func (r *Resolver) storeToolResultAndContinue(ctx context.Context, approval tool
 
 func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval toolapproval.Request, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) error {
 	approval = withLocalWebReplyTarget(approval)
-	resolved, err := r.ResolveRunConfig(ctx,
+	resolved, err := r.resolveRunConfigWithPersistContext(ctx,
 		input.BotID,
 		approval.SessionID,
 		firstNonEmpty(approval.ChannelIdentityID, input.ActorChannelIdentityID),
@@ -198,12 +202,30 @@ func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval too
 		approval.ReplyTarget,
 		approval.ConversationType,
 		input.ChatToken,
+		approval.PersistBranchID,
+		approval.PersistTurnID,
 	)
 	if err != nil {
 		return err
 	}
 
-	loaded, err := r.loadMessages(ctx, input.BotID, approval.SessionID, defaultMaxContextMinutes)
+	loadReq := conversation.ChatRequest{
+		BotID:                   input.BotID,
+		ChatID:                  input.BotID,
+		SessionID:               approval.SessionID,
+		SourceChannelIdentityID: firstNonEmpty(approval.ChannelIdentityID, input.ActorChannelIdentityID),
+		CurrentChannel:          approval.SourcePlatform,
+		ReplyTarget:             approval.ReplyTarget,
+		ConversationType:        approval.ConversationType,
+		UserMessagePersisted:    true,
+		PersistBranchID:         approval.PersistBranchID,
+		PersistTurnID:           approval.PersistTurnID,
+	}
+	loadReq, err = r.pinPersistBranch(ctx, loadReq)
+	if err != nil {
+		return err
+	}
+	loaded, err := r.loadMessages(ctx, loadReq, defaultMaxContextMinutes)
 	if err != nil {
 		return err
 	}
@@ -227,6 +249,8 @@ func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval too
 		ReplyTarget:             approval.ReplyTarget,
 		ConversationType:        approval.ConversationType,
 		UserMessagePersisted:    true,
+		PersistBranchID:         loadReq.PersistBranchID,
+		PersistTurnID:           loadReq.PersistTurnID,
 	}
 
 	stream := r.agent.Stream(ctx, cfg)
@@ -238,15 +262,16 @@ func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval too
 		}
 		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
 			if snap, ok := extractTerminalSnapshot(data); ok {
-				if storeErr := r.persistTerminalSnapshot(
+				didStore, storeErr := r.persistTerminalSnapshot(
 					context.WithoutCancel(ctx),
 					req,
 					resolvedContext{model: models.GetResponse{ID: resolved.ModelID}},
 					snap,
-				); storeErr != nil {
+				)
+				if storeErr != nil {
 					return storeErr
 				}
-				stored = true
+				stored = didStore
 			}
 		}
 		if eventCh != nil {

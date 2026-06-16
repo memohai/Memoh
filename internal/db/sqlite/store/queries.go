@@ -153,6 +153,40 @@ func (q *Queries) CompleteScheduleLog(ctx context.Context, arg pgsqlc.CompleteSc
 	return result, nil
 }
 
+func (q *Queries) CancelEmptyHistoryTurn(ctx context.Context, arg pgsqlc.CancelEmptyHistoryTurnParams) (int64, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return 0, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.CancelEmptyHistoryTurnParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return 0, err
+	}
+	out, err := q.store.queries.CancelEmptyHistoryTurn(ctx, sqliteArg)
+	if err != nil {
+		return 0, mapQueryErr(err)
+	}
+	return out, nil
+}
+
+func (q *Queries) GetHistoryTurnForMessagePersist(ctx context.Context, arg pgsqlc.GetHistoryTurnForMessagePersistParams) (pgtype.UUID, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgtype.UUID{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.GetHistoryTurnForMessagePersistParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgtype.UUID{}, err
+	}
+	out, err := q.store.queries.GetHistoryTurnForMessagePersist(ctx, sqliteArg)
+	if err != nil {
+		return pgtype.UUID{}, mapQueryErr(err)
+	}
+	var result pgtype.UUID
+	if err := convertValue(out, &result); err != nil {
+		return pgtype.UUID{}, err
+	}
+	return result, nil
+}
+
 func (q *Queries) CountAccounts(ctx context.Context) (int64, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return 0, errSQLiteQueriesNotConfigured
@@ -3115,6 +3149,44 @@ func (q *Queries) ListActiveMessagesSinceBySession(ctx context.Context, arg pgsq
 	return result, nil
 }
 
+func (q *Queries) ListActiveMessagesSinceBySessionBranch(ctx context.Context, arg pgsqlc.ListActiveMessagesSinceBySessionBranchParams) ([]pgsqlc.ListActiveMessagesSinceBySessionBranchRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListActiveMessagesSinceBySessionBranchParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListActiveMessagesSinceBySessionBranch(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ListActiveMessagesSinceBySessionBranchRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListActiveMessagesSinceBySessionBranchTurn(ctx context.Context, arg pgsqlc.ListActiveMessagesSinceBySessionBranchTurnParams) ([]pgsqlc.ListActiveMessagesSinceBySessionBranchTurnRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListActiveMessagesSinceBySessionBranchTurnParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListActiveMessagesSinceBySessionBranchTurn(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ListActiveMessagesSinceBySessionBranchTurnRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (q *Queries) ListAutoStartContainers(ctx context.Context) ([]pgsqlc.Container, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured
@@ -5288,6 +5360,25 @@ func (q *Queries) UpdateToolApprovalPromptMessage(ctx context.Context, arg pgsql
 	return result, nil
 }
 
+func (q *Queries) UpdateToolApprovalPersistContext(ctx context.Context, arg pgsqlc.UpdateToolApprovalPersistContextParams) (pgsqlc.ToolApprovalRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.ToolApprovalRequest{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.UpdateToolApprovalPersistContextParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.ToolApprovalRequest{}, err
+	}
+	out, err := q.store.queries.UpdateToolApprovalPersistContext(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.ToolApprovalRequest{}, mapQueryErr(err)
+	}
+	var result pgsqlc.ToolApprovalRequest
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.ToolApprovalRequest{}, err
+	}
+	return result, nil
+}
+
 func (q *Queries) UpdateUserProviderOAuthState(ctx context.Context, arg pgsqlc.UpdateUserProviderOAuthStateParams) error {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return errSQLiteQueriesNotConfigured
@@ -5853,6 +5944,25 @@ func (q *Queries) UpdateUserInputPromptMessage(ctx context.Context, arg pgsqlc.U
 		return pgsqlc.UserInputRequest{}, err
 	}
 	out, err := q.store.queries.UpdateUserInputPromptMessage(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.UserInputRequest{}, mapQueryErr(err)
+	}
+	var result pgsqlc.UserInputRequest
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) UpdateUserInputPersistContext(ctx context.Context, arg pgsqlc.UpdateUserInputPersistContextParams) (pgsqlc.UserInputRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.UserInputRequest{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.UpdateUserInputPersistContextParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	out, err := q.store.queries.UpdateUserInputPersistContext(ctx, sqliteArg)
 	if err != nil {
 		return pgsqlc.UserInputRequest{}, mapQueryErr(err)
 	}

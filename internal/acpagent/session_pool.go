@@ -150,6 +150,8 @@ type PromptInput struct {
 	StreamID          string
 	SessionType       string
 	RouteID           string
+	PersistBranchID   string
+	PersistTurnID     string
 	AgentID           string
 	ProjectPath       string
 	Prompt            string
@@ -1165,6 +1167,8 @@ func (h *runtimeHandle) toolContext() mcp.ToolSessionContext {
 	overlay(&ctx.StreamID, h.active.StreamID)
 	overlay(&ctx.SessionType, h.active.SessionType)
 	overlay(&ctx.RouteID, h.active.RouteID)
+	overlay(&ctx.PersistBranchID, h.active.PersistBranchID)
+	overlay(&ctx.PersistTurnID, h.active.PersistTurnID)
 	overlay(&ctx.ChannelIdentityID, h.active.ChannelIdentityID)
 	overlay(&ctx.SessionToken, h.active.SessionToken)
 	overlay(&ctx.CurrentPlatform, h.active.CurrentPlatform)
@@ -1207,6 +1211,8 @@ func toolSessionContext(input PromptInput, h *runtimeHandle) acpclient.ToolSessi
 		StreamID:            strings.TrimSpace(input.StreamID),
 		SessionType:         firstNonEmpty(input.SessionType, session.TypeACPAgent),
 		RouteID:             input.RouteID,
+		PersistBranchID:     input.PersistBranchID,
+		PersistTurnID:       input.PersistTurnID,
 		ChannelIdentityID:   input.ChannelIdentityID,
 		SessionToken:        input.SessionToken,
 		CurrentPlatform:     input.CurrentPlatform,

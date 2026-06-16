@@ -18,7 +18,7 @@ SET status = 'approved',
     decided_at = CURRENT_TIMESTAMP
 WHERE id = ?3
   AND status = 'pending'
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, persist_branch_id, persist_turn_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
 `
 
 type ApproveToolApprovalRequestParams struct {
@@ -47,6 +47,8 @@ func (q *Queries) ApproveToolApprovalRequest(ctx context.Context, arg ApproveToo
 		&i.DecidedByChannelIdentityID,
 		&i.RequestedMessageID,
 		&i.PromptMessageID,
+		&i.PersistBranchID,
+		&i.PersistTurnID,
 		&i.PromptExternalMessageID,
 		&i.SourcePlatform,
 		&i.ReplyTarget,
@@ -65,7 +67,7 @@ SET status = 'cancelled',
 WHERE bot_id = ?2
   AND session_id = ?3
   AND status = 'pending'
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, persist_branch_id, persist_turn_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
 `
 
 type CancelPendingToolApprovalsBySessionParams struct {
@@ -100,6 +102,8 @@ func (q *Queries) CancelPendingToolApprovalsBySession(ctx context.Context, arg C
 			&i.DecidedByChannelIdentityID,
 			&i.RequestedMessageID,
 			&i.PromptMessageID,
+			&i.PersistBranchID,
+			&i.PersistTurnID,
 			&i.PromptExternalMessageID,
 			&i.SourcePlatform,
 			&i.ReplyTarget,
@@ -125,6 +129,7 @@ INSERT INTO tool_approval_requests (
   id, bot_id, session_id, route_id, channel_identity_id,
   tool_call_id, tool_name, operation, tool_input, short_id,
   requested_by_channel_identity_id, requested_message_id,
+  persist_branch_id, persist_turn_id,
   source_platform, reply_target, conversation_type
 ) VALUES (
   lower(hex(randomblob(4))) || '-' ||
@@ -149,14 +154,44 @@ INSERT INTO tool_approval_requests (
   ?10,
   ?11,
   ?12,
-  ?13
+  ?13,
+  ?14,
+  ?15
 )
 ON CONFLICT (session_id, tool_call_id) DO UPDATE
 SET tool_input = CASE
   WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.tool_input
   ELSE tool_approval_requests.tool_input
+END,
+requested_by_channel_identity_id = CASE
+  WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.requested_by_channel_identity_id
+  ELSE tool_approval_requests.requested_by_channel_identity_id
+END,
+requested_message_id = CASE
+  WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.requested_message_id
+  ELSE tool_approval_requests.requested_message_id
+END,
+persist_branch_id = CASE
+  WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.persist_branch_id
+  ELSE tool_approval_requests.persist_branch_id
+END,
+persist_turn_id = CASE
+  WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.persist_turn_id
+  ELSE tool_approval_requests.persist_turn_id
+END,
+source_platform = CASE
+  WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.source_platform
+  ELSE tool_approval_requests.source_platform
+END,
+reply_target = CASE
+  WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.reply_target
+  ELSE tool_approval_requests.reply_target
+END,
+conversation_type = CASE
+  WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.conversation_type
+  ELSE tool_approval_requests.conversation_type
 END
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, persist_branch_id, persist_turn_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
 `
 
 type CreateToolApprovalRequestParams struct {
@@ -170,6 +205,8 @@ type CreateToolApprovalRequestParams struct {
 	ToolInput                    string         `json:"tool_input"`
 	RequestedByChannelIdentityID sql.NullString `json:"requested_by_channel_identity_id"`
 	RequestedMessageID           sql.NullString `json:"requested_message_id"`
+	PersistBranchID              sql.NullString `json:"persist_branch_id"`
+	PersistTurnID                sql.NullString `json:"persist_turn_id"`
 	SourcePlatform               string         `json:"source_platform"`
 	ReplyTarget                  string         `json:"reply_target"`
 	ConversationType             string         `json:"conversation_type"`
@@ -187,6 +224,8 @@ func (q *Queries) CreateToolApprovalRequest(ctx context.Context, arg CreateToolA
 		arg.ToolInput,
 		arg.RequestedByChannelIdentityID,
 		arg.RequestedMessageID,
+		arg.PersistBranchID,
+		arg.PersistTurnID,
 		arg.SourcePlatform,
 		arg.ReplyTarget,
 		arg.ConversationType,
@@ -209,6 +248,8 @@ func (q *Queries) CreateToolApprovalRequest(ctx context.Context, arg CreateToolA
 		&i.DecidedByChannelIdentityID,
 		&i.RequestedMessageID,
 		&i.PromptMessageID,
+		&i.PersistBranchID,
+		&i.PersistTurnID,
 		&i.PromptExternalMessageID,
 		&i.SourcePlatform,
 		&i.ReplyTarget,
@@ -220,7 +261,7 @@ func (q *Queries) CreateToolApprovalRequest(ctx context.Context, arg CreateToolA
 }
 
 const getLatestPendingToolApprovalBySession = `-- name: GetLatestPendingToolApprovalBySession :one
-SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
+SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, persist_branch_id, persist_turn_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
 FROM tool_approval_requests
 WHERE bot_id = ?1
   AND session_id = ?2
@@ -254,6 +295,8 @@ func (q *Queries) GetLatestPendingToolApprovalBySession(ctx context.Context, arg
 		&i.DecidedByChannelIdentityID,
 		&i.RequestedMessageID,
 		&i.PromptMessageID,
+		&i.PersistBranchID,
+		&i.PersistTurnID,
 		&i.PromptExternalMessageID,
 		&i.SourcePlatform,
 		&i.ReplyTarget,
@@ -265,7 +308,7 @@ func (q *Queries) GetLatestPendingToolApprovalBySession(ctx context.Context, arg
 }
 
 const getPendingToolApprovalByReplyMessage = `-- name: GetPendingToolApprovalByReplyMessage :one
-SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
+SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, persist_branch_id, persist_turn_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
 FROM tool_approval_requests
 WHERE bot_id = ?1
   AND session_id = ?2
@@ -301,6 +344,8 @@ func (q *Queries) GetPendingToolApprovalByReplyMessage(ctx context.Context, arg 
 		&i.DecidedByChannelIdentityID,
 		&i.RequestedMessageID,
 		&i.PromptMessageID,
+		&i.PersistBranchID,
+		&i.PersistTurnID,
 		&i.PromptExternalMessageID,
 		&i.SourcePlatform,
 		&i.ReplyTarget,
@@ -312,7 +357,7 @@ func (q *Queries) GetPendingToolApprovalByReplyMessage(ctx context.Context, arg 
 }
 
 const getPendingToolApprovalBySessionShortID = `-- name: GetPendingToolApprovalBySessionShortID :one
-SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
+SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, persist_branch_id, persist_turn_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
 FROM tool_approval_requests
 WHERE bot_id = ?1
   AND session_id = ?2
@@ -346,6 +391,8 @@ func (q *Queries) GetPendingToolApprovalBySessionShortID(ctx context.Context, ar
 		&i.DecidedByChannelIdentityID,
 		&i.RequestedMessageID,
 		&i.PromptMessageID,
+		&i.PersistBranchID,
+		&i.PersistTurnID,
 		&i.PromptExternalMessageID,
 		&i.SourcePlatform,
 		&i.ReplyTarget,
@@ -357,7 +404,7 @@ func (q *Queries) GetPendingToolApprovalBySessionShortID(ctx context.Context, ar
 }
 
 const getToolApprovalRequest = `-- name: GetToolApprovalRequest :one
-SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
+SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, persist_branch_id, persist_turn_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
 FROM tool_approval_requests
 WHERE id = ?1
 `
@@ -382,6 +429,8 @@ func (q *Queries) GetToolApprovalRequest(ctx context.Context, id string) (ToolAp
 		&i.DecidedByChannelIdentityID,
 		&i.RequestedMessageID,
 		&i.PromptMessageID,
+		&i.PersistBranchID,
+		&i.PersistTurnID,
 		&i.PromptExternalMessageID,
 		&i.SourcePlatform,
 		&i.ReplyTarget,
@@ -393,7 +442,7 @@ func (q *Queries) GetToolApprovalRequest(ctx context.Context, id string) (ToolAp
 }
 
 const listPendingToolApprovalsBySession = `-- name: ListPendingToolApprovalsBySession :many
-SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
+SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, persist_branch_id, persist_turn_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
 FROM tool_approval_requests
 WHERE bot_id = ?1
   AND session_id = ?2
@@ -432,6 +481,8 @@ func (q *Queries) ListPendingToolApprovalsBySession(ctx context.Context, arg Lis
 			&i.DecidedByChannelIdentityID,
 			&i.RequestedMessageID,
 			&i.PromptMessageID,
+			&i.PersistBranchID,
+			&i.PersistTurnID,
 			&i.PromptExternalMessageID,
 			&i.SourcePlatform,
 			&i.ReplyTarget,
@@ -453,7 +504,7 @@ func (q *Queries) ListPendingToolApprovalsBySession(ctx context.Context, arg Lis
 }
 
 const listToolApprovalsBySession = `-- name: ListToolApprovalsBySession :many
-SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
+SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, persist_branch_id, persist_turn_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
 FROM tool_approval_requests
 WHERE bot_id = ?1
   AND session_id = ?2
@@ -491,6 +542,8 @@ func (q *Queries) ListToolApprovalsBySession(ctx context.Context, arg ListToolAp
 			&i.DecidedByChannelIdentityID,
 			&i.RequestedMessageID,
 			&i.PromptMessageID,
+			&i.PersistBranchID,
+			&i.PersistTurnID,
 			&i.PromptExternalMessageID,
 			&i.SourcePlatform,
 			&i.ReplyTarget,
@@ -519,7 +572,7 @@ SET status = 'rejected',
     decided_at = CURRENT_TIMESTAMP
 WHERE id = ?3
   AND status = 'pending'
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, persist_branch_id, persist_turn_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
 `
 
 type RejectToolApprovalRequestParams struct {
@@ -548,6 +601,54 @@ func (q *Queries) RejectToolApprovalRequest(ctx context.Context, arg RejectToolA
 		&i.DecidedByChannelIdentityID,
 		&i.RequestedMessageID,
 		&i.PromptMessageID,
+		&i.PersistBranchID,
+		&i.PersistTurnID,
+		&i.PromptExternalMessageID,
+		&i.SourcePlatform,
+		&i.ReplyTarget,
+		&i.ConversationType,
+		&i.CreatedAt,
+		&i.DecidedAt,
+	)
+	return i, err
+}
+
+const updateToolApprovalPersistContext = `-- name: UpdateToolApprovalPersistContext :one
+UPDATE tool_approval_requests
+SET persist_branch_id = ?1,
+    persist_turn_id = ?2
+WHERE id = ?3
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, persist_branch_id, persist_turn_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
+`
+
+type UpdateToolApprovalPersistContextParams struct {
+	PersistBranchID sql.NullString `json:"persist_branch_id"`
+	PersistTurnID   sql.NullString `json:"persist_turn_id"`
+	ID              string         `json:"id"`
+}
+
+func (q *Queries) UpdateToolApprovalPersistContext(ctx context.Context, arg UpdateToolApprovalPersistContextParams) (ToolApprovalRequest, error) {
+	row := q.db.QueryRowContext(ctx, updateToolApprovalPersistContext, arg.PersistBranchID, arg.PersistTurnID, arg.ID)
+	var i ToolApprovalRequest
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.SessionID,
+		&i.RouteID,
+		&i.ChannelIdentityID,
+		&i.ToolCallID,
+		&i.ToolName,
+		&i.Operation,
+		&i.ToolInput,
+		&i.ShortID,
+		&i.Status,
+		&i.DecisionReason,
+		&i.RequestedByChannelIdentityID,
+		&i.DecidedByChannelIdentityID,
+		&i.RequestedMessageID,
+		&i.PromptMessageID,
+		&i.PersistBranchID,
+		&i.PersistTurnID,
 		&i.PromptExternalMessageID,
 		&i.SourcePlatform,
 		&i.ReplyTarget,
@@ -563,7 +664,7 @@ UPDATE tool_approval_requests
 SET prompt_message_id = ?1,
     prompt_external_message_id = ?2
 WHERE id = ?3
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, persist_branch_id, persist_turn_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
 `
 
 type UpdateToolApprovalPromptMessageParams struct {
@@ -592,6 +693,8 @@ func (q *Queries) UpdateToolApprovalPromptMessage(ctx context.Context, arg Updat
 		&i.DecidedByChannelIdentityID,
 		&i.RequestedMessageID,
 		&i.PromptMessageID,
+		&i.PersistBranchID,
+		&i.PersistTurnID,
 		&i.PromptExternalMessageID,
 		&i.SourcePlatform,
 		&i.ReplyTarget,

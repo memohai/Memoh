@@ -158,6 +158,10 @@ function userInputConnectionLostMessage() {
   return messages.chat.tools.userInputConnectionLost
 }
 
+function toolApprovalConnectionLostMessage() {
+  return currentLocale() === 'zh' ? '连接已断开，无法提交工具审批' : 'Connection lost; cannot submit tool approval'
+}
+
 interface PendingAssistantStream {
   streamId: string
   assistantTurn: ChatAssistantTurn
@@ -262,6 +266,8 @@ export const useChatStore = defineStore('chat', () => {
   const branchGraph = ref<BranchGraph | null>(null)
   const branchLoading = ref(false)
   const branchActionLoading = ref(false)
+  const chatViewBusy = computed(() => loadingChats.value || loadingOlder.value || branchLoading.value || branchActionLoading.value)
+  const chatSendBlocked = computed(() => loadingChats.value || branchActionLoading.value)
   const initializing = ref(false)
   const bots = ref<Bot[]>([])
   const overrideModelId = ref<string>('')
@@ -284,8 +290,11 @@ export const useChatStore = defineStore('chat', () => {
   let messageEventsSince = ''
   let activeWs: ChatWebSocket | null = null
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
-  let refreshPromise: { key: string; promise: Promise<void> } | null = null
+  let refreshPromise: { key: string; generation: number; promise: Promise<void> } | null = null
   let sessionListRefreshPromise: { botId: string; promise: Promise<void> } | null = null
+  let branchViewGeneration = 0
+  let branchLoadSeq = 0
+  let branchActionSeq = 0
   const pendingBackgroundEvents = new Map<string, BackgroundTask[]>()
   const latestBackgroundTasks = new Map<string, BackgroundTask>()
   // Open chat tabs share this store, so keep a small per-session view cache.
@@ -954,6 +963,46 @@ export const useChatStore = defineStore('chat', () => {
     if (key) sessionMessageStates.delete(key)
   }
 
+  function currentBranchViewGeneration(botId: string, sid: string) {
+    return currentBotId.value === botId && sessionId.value === sid
+      ? branchViewGeneration
+      : -1
+  }
+
+  function isCurrentBranchView(botId: string, sid: string, generation: number) {
+    return currentBotId.value === botId
+      && sessionId.value === sid
+      && branchViewGeneration === generation
+  }
+
+  function bumpBranchViewGeneration() {
+    branchViewGeneration += 1
+  }
+
+  function invalidateBranchLoads() {
+    branchLoadSeq += 1
+    branchLoading.value = false
+  }
+
+  function invalidateBranchView() {
+    bumpBranchViewGeneration()
+    invalidateBranchLoads()
+  }
+
+  function setCurrentBotId(nextBotId: string | null) {
+    const value = nextBotId?.trim() || null
+    if (currentBotId.value === value) return
+    invalidateBranchView()
+    currentBotId.value = value
+  }
+
+  function setCurrentSessionId(nextSessionId: string | null) {
+    const value = nextSessionId?.trim() || null
+    if (sessionId.value === value) return
+    invalidateBranchView()
+    sessionId.value = value
+  }
+
   function createStreamId(): string {
     const randomUUID = globalThis.crypto?.randomUUID
     if (typeof randomUUID === 'function') return randomUUID.call(globalThis.crypto)
@@ -1382,9 +1431,9 @@ export const useChatStore = defineStore('chat', () => {
 
     sessions.value = []
     bots.value = []
-    sessionId.value = null
+    setCurrentSessionId(null)
     if (options.clearSelection && currentBotId.value) {
-      currentBotId.value = null
+      setCurrentBotId(null)
     }
     replaceMessages([])
     hasMoreOlder.value = true
@@ -1430,25 +1479,25 @@ export const useChatStore = defineStore('chat', () => {
     const sid = (targetSessionId ?? sessionId.value ?? '').trim()
     if (!bid || !sid) return
     const key = sessionMessageKey(bid, sid)
+    const generation = currentBranchViewGeneration(bid, sid)
 
     if (refreshPromise) {
-      if (refreshPromise.key === key) {
+      if (refreshPromise.key === key && refreshPromise.generation === generation) {
         await refreshPromise.promise
         return
       }
-      await refreshPromise.promise
     }
 
     const promise = (async () => {
       const turns = await fetchMessagesUI(bid, sid, { limit: PAGE_SIZE })
       const normalized = normalizeTurns(turns, sid)
       const moreOlder = turns.length > 0
-      if (currentBotId.value === bid && sessionId.value === sid) {
+      if (isCurrentBranchView(bid, sid, generation)) {
         reconcileMessages(normalized)
         hasMoreOlder.value = moreOlder
         cacheCurrentMessages()
         void loadBranches(bid, sid)
-      } else {
+      } else if (currentBotId.value !== bid || sessionId.value !== sid) {
         cacheFetchedMessages(bid, sid, normalized, moreOlder)
       }
       touchSession(sid, normalized.at(-1)?.timestamp)
@@ -1457,7 +1506,7 @@ export const useChatStore = defineStore('chat', () => {
         refreshPromise = null
       }
     })
-    refreshPromise = { key, promise }
+    refreshPromise = { key, generation, promise }
 
     await promise
   }
@@ -1661,7 +1710,7 @@ export const useChatStore = defineStore('chat', () => {
       const list = await fetchBots()
       bots.value = list
       if (!list.length) {
-        currentBotId.value = null
+        setCurrentBotId(null)
         return null
       }
       if (currentBotId.value) {
@@ -1669,7 +1718,7 @@ export const useChatStore = defineStore('chat', () => {
         if (found && !isPendingBot(found)) return currentBotId.value
       }
       const ready = list.find(bot => !isPendingBot(bot))
-      currentBotId.value = ready ? ready.id : list[0]!.id
+      setCurrentBotId(ready ? ready.id : list[0]!.id)
       return currentBotId.value
     } catch (error) {
       console.error('Failed to fetch bots:', error)
@@ -1680,10 +1729,13 @@ export const useChatStore = defineStore('chat', () => {
   const PAGE_SIZE = 30
 
   async function loadMessages(botId: string, sid: string) {
+    const generation = currentBranchViewGeneration(botId, sid)
     const turns = await fetchMessagesUI(botId, sid, { limit: PAGE_SIZE })
+    if (!isCurrentBranchView(botId, sid, generation)) return false
     replaceMessages(turns)
     hasMoreOlder.value = turns.length > 0
     cacheCurrentMessages()
+    return true
   }
 
   async function loadBranches(botId = currentBotId.value ?? '', sid = sessionId.value ?? '') {
@@ -1693,21 +1745,23 @@ export const useChatStore = defineStore('chat', () => {
       branchGraph.value = null
       return
     }
+    const generation = currentBranchViewGeneration(bid, targetSessionId)
+    const requestSeq = ++branchLoadSeq
     branchLoading.value = true
     try {
       const graph = await fetchSessionBranches(bid, targetSessionId)
-      if (currentBotId.value === bid && sessionId.value === targetSessionId) {
+      if (requestSeq === branchLoadSeq && isCurrentBranchView(bid, targetSessionId, generation)) {
         branchGraph.value = graph
       }
     } catch (error) {
       console.error('Failed to load branches:', error)
-      if (currentBotId.value === bid && sessionId.value === targetSessionId) {
+      if (requestSeq === branchLoadSeq && isCurrentBranchView(bid, targetSessionId, generation)) {
         branchGraph.value = null
       }
     } finally {
-      if (currentBotId.value === bid && sessionId.value === targetSessionId) {
+      if (requestSeq === branchLoadSeq && isCurrentBranchView(bid, targetSessionId, generation)) {
         branchLoading.value = false
-      } else if (!currentBotId.value || !sessionId.value) {
+      } else if (requestSeq === branchLoadSeq && (!currentBotId.value || !sessionId.value)) {
         branchLoading.value = false
       }
     }
@@ -1719,18 +1773,29 @@ export const useChatStore = defineStore('chat', () => {
     const targetMessageId = messageId.trim()
     if (!bid || !sid || !targetMessageId || branchActionLoading.value) return { ok: false }
     if (!isPersistentMessageId(targetMessageId)) return { ok: false }
+    if (isSessionStreaming(sid)) {
+      toast.error(currentLocale() === 'zh' ? '请等待当前回复完成后再切换分支' : 'Wait for the current response to finish before changing branches')
+      return { ok: false }
+    }
+    const actionSeq = ++branchActionSeq
     branchActionLoading.value = true
+    invalidateBranchView()
     try {
-      branchGraph.value = await forkSessionBranch(bid, sid, targetMessageId)
+      const generation = branchViewGeneration
+      const graph = await forkSessionBranch(bid, sid, targetMessageId)
+      if (!isCurrentBranchView(bid, sid, generation)) return { ok: false }
+      branchGraph.value = graph
       clearCachedMessages(bid, sid)
-      await loadMessages(bid, sid)
+      if (!await loadMessages(bid, sid)) return { ok: false }
       return { ok: true }
     } catch (error) {
       console.error('Failed to fork branch:', error)
       toast.error(resolveApiErrorMessage(error, errorMessage))
       return { ok: false }
     } finally {
-      branchActionLoading.value = false
+      if (actionSeq === branchActionSeq) {
+        branchActionLoading.value = false
+      }
     }
   }
 
@@ -1748,18 +1813,32 @@ export const useChatStore = defineStore('chat', () => {
     const targetBranchId = branchId.trim()
     if (!bid || !sid || !targetBranchId || branchActionLoading.value) return
     if (branchGraph.value?.active_branch_id === targetBranchId) return
+    if (isSessionStreaming(sid)) {
+      toast.error(currentLocale() === 'zh' ? '请等待当前回复完成后再切换分支' : 'Wait for the current response to finish before changing branches')
+      return
+    }
+    const actionSeq = ++branchActionSeq
+    const operationGeneration = branchViewGeneration + 1
     branchActionLoading.value = true
     loadingChats.value = true
+    invalidateBranchView()
     try {
-      branchGraph.value = await setActiveSessionBranch(bid, sid, targetBranchId)
+      const generation = branchViewGeneration
+      const graph = await setActiveSessionBranch(bid, sid, targetBranchId)
+      if (!isCurrentBranchView(bid, sid, generation)) return
+      branchGraph.value = graph
       clearCachedMessages(bid, sid)
       await loadMessages(bid, sid)
     } catch (error) {
       console.error('Failed to switch branch:', error)
       toast.error(resolveApiErrorMessage(error, currentLocale() === 'zh' ? '切换分支失败' : 'Failed to switch branch'))
     } finally {
-      loadingChats.value = false
-      branchActionLoading.value = false
+      if (actionSeq === branchActionSeq) {
+        branchActionLoading.value = false
+        if (isCurrentBranchView(bid, sid, operationGeneration)) {
+          loadingChats.value = false
+        }
+      }
     }
   }
 
@@ -1769,6 +1848,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!bid || !sid || loadingOlder.value || !hasMoreOlder.value) return 0
     const first = messages[0]
     if (!first?.timestamp) return 0
+    const generation = currentBranchViewGeneration(bid, sid)
 
     loadingOlder.value = true
     try {
@@ -1779,18 +1859,21 @@ export const useChatStore = defineStore('chat', () => {
       // never moves and we'd terminate prematurely).
       const MAX_DEDUP_HOPS = 4
       let cursor = first.timestamp
+      let cursorId = first.serverId ?? first.id
       for (let hop = 0; hop < MAX_DEDUP_HOPS; hop++) {
         const turns = await fetchMessagesUI(bid, sid, {
           limit: PAGE_SIZE,
           before: cursor,
+          beforeId: cursorId,
         })
+        if (!isCurrentBranchView(bid, sid, generation)) return 0
 
         if (turns.length === 0) {
           hasMoreOlder.value = false
           return 0
         }
 
-        const existingIds = new Set(messages.map(message => message.id))
+        const existingIds = new Set(messages.flatMap(message => [message.id, message.serverId].filter(Boolean) as string[]))
         const normalized = normalizeTurns(turns)
         const older = normalized.filter(turn => !existingIds.has(turn.id))
 
@@ -1813,12 +1896,23 @@ export const useChatStore = defineStore('chat', () => {
           if (!acc || ts < acc) return ts
           return acc
         }, null)
-        if (!earliest || earliest === cursor) {
+        const earliestTurn = normalized.reduce<ChatMessage | null>((acc, turn) => {
+          const ts = turn.timestamp?.trim()
+          if (!ts) return acc
+          if (!acc) return turn
+          const accTs = acc.timestamp?.trim()
+          if (ts < accTs) return turn
+          if (ts === accTs && (turn.serverId ?? turn.id) < (acc.serverId ?? acc.id)) return turn
+          return acc
+        }, null)
+        const nextCursorId = earliestTurn ? (earliestTurn.serverId ?? earliestTurn.id) : ''
+        if (!earliest || (earliest === cursor && nextCursorId === cursorId)) {
           // Pagination cursor cannot advance; bail out to avoid a request loop.
           hasMoreOlder.value = false
           return 0
         }
         cursor = earliest
+        cursorId = nextCursorId
       }
       // Exhausted hop budget without finding net-new turns; treat as end of
       // history rather than spinning indefinitely.
@@ -1850,9 +1944,11 @@ export const useChatStore = defineStore('chat', () => {
     const sid = sessionId.value ?? ''
     const target = externalMessageId.trim()
     if (!bid || !sid || !target) return null
+    const generation = currentBranchViewGeneration(bid, sid)
 
     try {
       const result = await locateMessageUI(bid, sid, target, PAGE_SIZE, PAGE_SIZE)
+      if (!isCurrentBranchView(bid, sid, generation)) return null
       if (!result.items.length) return null
       mergeMessages(result.items, sid)
       hasMoreOlder.value = true
@@ -2123,7 +2219,7 @@ export const useChatStore = defineStore('chat', () => {
       acpRuntimeId: runtimeId || undefined,
     })
     upsertSession(created)
-    sessionId.value = created.id
+    setCurrentSessionId(created.id)
     await loadBranches(bid, created.id)
     replaceMessages([])
     hasMoreOlder.value = false
@@ -2249,7 +2345,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!bid) throw new Error('Bot not ready')
     const created = await createSession(bid)
     sessions.value = [created, ...sessions.value.filter(session => session.id !== created.id)]
-    sessionId.value = created.id
+    setCurrentSessionId(created.id)
     await loadBranches(bid, created.id)
     replaceMessages([])
     hasMoreOlder.value = false
@@ -2266,7 +2362,7 @@ export const useChatStore = defineStore('chat', () => {
       if (!bid) {
         messageEventsSince = ''
         sessions.value = []
-        sessionId.value = null
+        setCurrentSessionId(null)
         branchGraph.value = null
         clearPendingACPSession()
         replaceMessages([])
@@ -2278,7 +2374,7 @@ export const useChatStore = defineStore('chat', () => {
       sessions.value = visible
       if (!visible.length) {
         messageEventsSince = ''
-        sessionId.value = null
+        setCurrentSessionId(null)
         branchGraph.value = null
         replaceMessages([])
         hasMoreOlder.value = false
@@ -2286,7 +2382,7 @@ export const useChatStore = defineStore('chat', () => {
         const activeSessionId = sessionId.value && visible.some(session => session.id === sessionId.value)
           ? sessionId.value
           : (visible.find((s) => s.type === 'chat' || s.type === 'discuss')?.id ?? visible[0]!.id)
-        sessionId.value = activeSessionId
+        setCurrentSessionId(activeSessionId)
         if (!restoreCachedMessages(bid, activeSessionId)) {
           await loadMessages(bid, activeSessionId)
         }
@@ -2306,8 +2402,8 @@ export const useChatStore = defineStore('chat', () => {
     abort()
     abortAllAssistantStreams()
     clearPendingACPSession()
-    currentBotId.value = targetBotId
-    sessionId.value = null
+    setCurrentBotId(targetBotId)
+    setCurrentSessionId(null)
     branchGraph.value = null
     await initialize()
   }
@@ -2317,7 +2413,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!sid || sid === sessionId.value) return
     cacheCurrentMessages()
     clearPendingACPSession()
-    sessionId.value = sid
+    setCurrentSessionId(sid)
     branchGraph.value = null
     loadingChats.value = true
     try {
@@ -2336,7 +2432,7 @@ export const useChatStore = defineStore('chat', () => {
     const bid = await ensureBot()
     if (!bid) return
     clearPendingACPSession()
-    sessionId.value = null
+    setCurrentSessionId(null)
     branchGraph.value = null
     replaceMessages([])
     hasMoreOlder.value = false
@@ -2356,13 +2452,13 @@ export const useChatStore = defineStore('chat', () => {
       sessions.value = remaining
       if (sessionId.value !== delId) return
       if (!remaining.length) {
-        sessionId.value = null
+        setCurrentSessionId(null)
         branchGraph.value = null
         replaceMessages([])
         hasMoreOlder.value = false
         return
       }
-      sessionId.value = remaining[0]!.id
+      setCurrentSessionId(remaining[0]!.id)
       await loadBranches(bid, remaining[0]!.id)
       await loadMessages(bid, remaining[0]!.id)
     } finally {
@@ -2388,6 +2484,7 @@ export const useChatStore = defineStore('chat', () => {
   async function sendMessage(text: string, attachments?: ChatAttachment[]): Promise<SendMessageResult> {
     const trimmed = text.trim()
     if ((!trimmed && !attachments?.length) || streaming.value || !currentBotId.value) return { ok: false, stage: 'startup' }
+    if (chatSendBlocked.value) return { ok: false, stage: 'startup' }
 
     loading.value = true
     let assistantTurn: ChatAssistantTurn | null = null
@@ -2471,9 +2568,13 @@ export const useChatStore = defineStore('chat', () => {
     const sid = sessionId.value ?? ''
     const approvalId = approval.approval_id?.trim()
     if (!bid || !sid || !approvalId) return false
-    if (approval.status !== 'pending' || approval.can_approve === false) return false
-    if (hasPendingApprovalResponse(approvalId)) return false
     const ws = ensureWebSocket(bid)
+    if (!ws?.connected) {
+      toast.error(toolApprovalConnectionLostMessage())
+      return false
+    }
+    if (hasPendingApprovalResponse(approvalId)) return false
+    if (approval.status !== 'pending' || approval.can_approve === false) return false
     const streamId = createStreamId()
     const silent = isSessionStreaming(sid)
     approvalResponseStreams.set(streamId, { approvalId, silent, at: Date.now() })
@@ -2594,6 +2695,8 @@ export const useChatStore = defineStore('chat', () => {
     branchGraph,
     branchLoading,
     branchActionLoading,
+    chatViewBusy,
+    chatSendBlocked,
     initializing,
     overrideModelId,
     overrideReasoningEffort,

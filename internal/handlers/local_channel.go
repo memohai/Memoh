@@ -29,6 +29,7 @@ import (
 	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	"github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/userinput"
 )
 
@@ -51,6 +52,7 @@ type LocalChannelHandler struct {
 	routeHub            *local.RouteHub
 	botService          *bots.Service
 	accountService      *accounts.Service
+	sessionService      *session.Service
 	resolver            *flow.Resolver
 	mediaService        *media.Service
 	speechService       localSpeechSynthesizer
@@ -59,7 +61,7 @@ type LocalChannelHandler struct {
 }
 
 // NewLocalChannelHandler creates a local channel handler.
-func NewLocalChannelHandler(channelType channel.ChannelType, channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, routeHub *local.RouteHub, botService *bots.Service, accountService *accounts.Service) *LocalChannelHandler {
+func NewLocalChannelHandler(channelType channel.ChannelType, channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, routeHub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, sessionService *session.Service) *LocalChannelHandler {
 	return &LocalChannelHandler{
 		channelType:    channelType,
 		channelManager: channelManager,
@@ -68,6 +70,7 @@ func NewLocalChannelHandler(channelType channel.ChannelType, channelManager *cha
 		routeHub:       routeHub,
 		botService:     botService,
 		accountService: accountService,
+		sessionService: sessionService,
 		logger:         slog.Default().With(slog.String("handler", "local_channel")),
 	}
 }
@@ -644,6 +647,10 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				explicitID = strconv.Itoa(msg.ShortID)
 			}
 			suppressActivePromptAttach := activeStreams.hasSession(sessionID)
+			if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
+				sendWSError(writer, streamID, sessionID, wsSessionAccessError(err))
+				continue
+			}
 
 			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws approval stream error",
 				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, _ <-chan struct{}) error {
@@ -677,6 +684,10 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				explicitID = strconv.Itoa(msg.ShortID)
 			}
 			suppressActivePromptAttach := activeStreams.hasSession(sessionID)
+			if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
+				sendWSError(writer, streamID, sessionID, wsSessionAccessError(err))
+				continue
+			}
 
 			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws user input stream error",
 				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, _ <-chan struct{}) error {
@@ -714,6 +725,10 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSError(writer, streamID, sessionID, "message text or attachments required")
 				continue
 			}
+			if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
+				sendWSError(writer, streamID, sessionID, wsSessionAccessError(err))
+				continue
+			}
 
 			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws stream error",
 				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}) error {
@@ -749,6 +764,64 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 		}
 	}
 	return nil
+}
+
+func (h *LocalChannelHandler) authorizeWSSession(c echo.Context, channelIdentityID, botID, sessionID string) error {
+	if h.sessionService == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "session service not configured")
+	}
+	bot, perms, err := h.authorizeBotSessionAccess(c, channelIdentityID, botID)
+	if err != nil {
+		return err
+	}
+	sess, err := h.sessionService.Get(c.Request().Context(), strings.TrimSpace(sessionID))
+	if err != nil || sess.BotID != bot.ID {
+		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+	}
+	if !canAccessSession(sess, channelIdentityID, perms) {
+		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+	}
+	return nil
+}
+
+func (h *LocalChannelHandler) authorizeBotSessionAccess(c echo.Context, channelIdentityID, botID string) (bots.Bot, []string, error) {
+	bot, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID)
+	if err != nil {
+		bot, err = AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, bots.PermissionWorkspaceExec)
+		if err != nil {
+			return bots.Bot{}, nil, err
+		}
+	}
+	perms, err := h.resolveCurrentUserPermissions(c, channelIdentityID, bot.ID)
+	if err != nil {
+		return bots.Bot{}, nil, err
+	}
+	return bot, perms, nil
+}
+
+func (h *LocalChannelHandler) resolveCurrentUserPermissions(c echo.Context, channelIdentityID, botID string) ([]string, error) {
+	if h.botService == nil || h.accountService == nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
+	}
+	isAdmin, err := h.accountService.IsAdmin(c.Request().Context(), channelIdentityID)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	perms, err := h.botService.ResolveUserPermissions(c.Request().Context(), botID, channelIdentityID, isAdmin)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return perms, nil
+}
+
+func wsSessionAccessError(err error) string {
+	var httpErr *echo.HTTPError
+	if errors.As(err, &httpErr) {
+		if msg, ok := httpErr.Message.(string); ok && strings.TrimSpace(msg) != "" {
+			return msg
+		}
+	}
+	return err.Error()
 }
 
 func (h *LocalChannelHandler) ensureBotParticipant(ctx context.Context, botID, channelIdentityID string) error {

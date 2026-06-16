@@ -78,6 +78,8 @@ type SessionContext struct {
 	ChatID              string
 	SessionID           string
 	SessionType         string
+	PersistBranchID     string
+	PersistTurnID       string
 	ChannelIdentityID   string
 	SessionToken        string //nolint:gosec // carries session credential material at runtime
 	CurrentPlatform     string

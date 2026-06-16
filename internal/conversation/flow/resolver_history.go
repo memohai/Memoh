@@ -27,17 +27,26 @@ type messageWithUsage struct {
 	CompactID         string
 }
 
-func (r *Resolver) loadMessages(ctx context.Context, chatID string, sessionID string, maxContextMinutes int) ([]messageWithUsage, error) {
+func (r *Resolver) loadMessages(ctx context.Context, req conversation.ChatRequest, maxContextMinutes int) ([]messageWithUsage, error) {
 	if r.messageService == nil {
 		return nil, nil
 	}
 	since := time.Now().UTC().Add(-time.Duration(maxContextMinutes) * time.Minute)
+	chatID := strings.TrimSpace(req.ChatID)
+	sessionID := strings.TrimSpace(req.SessionID)
+	branchID := strings.TrimSpace(req.PersistBranchID)
+	turnID := strings.TrimSpace(req.PersistTurnID)
 	var msgs []messagepkg.Message
 	var err error
-	if strings.TrimSpace(sessionID) != "" {
-		msgs, err = r.messageService.ListActiveSinceBySession(ctx, sessionID, since)
-	} else {
+	switch {
+	case sessionID == "":
 		msgs, err = r.messageService.ListActiveSince(ctx, chatID, since)
+	case branchID != "" && turnID != "":
+		msgs, err = r.messageService.ListActiveSinceBySessionBranchTurn(ctx, sessionID, branchID, turnID, since)
+	case branchID != "":
+		msgs, err = r.messageService.ListActiveSinceBySessionBranch(ctx, sessionID, branchID, since)
+	default:
+		msgs, err = r.messageService.ListActiveSinceBySession(ctx, sessionID, since)
 	}
 	if err != nil {
 		return nil, err

@@ -8,6 +8,9 @@ func TestToolSessionContextStoreMergesLatestPromptContext(t *testing.T) {
 		BotID:            "bot-1",
 		SessionID:        "session-1",
 		StreamID:         "stream-1",
+		ToolCallID:       "call-1",
+		PersistBranchID:  "branch-1",
+		PersistTurnID:    "turn-1",
 		CurrentPlatform:  "web",
 		ReplyTarget:      "reply-1",
 		ConversationType: "private",
@@ -18,7 +21,7 @@ func TestToolSessionContextStoreMergesLatestPromptContext(t *testing.T) {
 		SessionID:    "session-1",
 		SessionToken: "header-token",
 	})
-	if merged.StreamID != "stream-1" || merged.CurrentPlatform != "web" || merged.ReplyTarget != "reply-1" || merged.ConversationType != "private" {
+	if merged.StreamID != "stream-1" || merged.ToolCallID != "call-1" || merged.PersistBranchID != "branch-1" || merged.PersistTurnID != "turn-1" || merged.CurrentPlatform != "web" || merged.ReplyTarget != "reply-1" || merged.ConversationType != "private" {
 		t.Fatalf("merged context = %#v", merged)
 	}
 	if merged.SessionToken != "header-token" {

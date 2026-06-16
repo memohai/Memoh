@@ -1,4 +1,4 @@
--- 0022_history_turns
+-- 0023_history_turns
 -- Repair databases that already applied the pre-turn 0021 branch migration.
 
 PRAGMA foreign_keys = OFF;
@@ -36,7 +36,7 @@ WHERE type = 'table'
   AND sql NOT LIKE '%turn_id%';
 
 PRAGMA writable_schema = OFF;
-PRAGMA schema_version = 1000022;
+PRAGMA schema_version = 1000023;
 
 CREATE TABLE IF NOT EXISTS bot_history_turns (
   id TEXT PRIMARY KEY,

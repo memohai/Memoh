@@ -1,4 +1,16 @@
 -- name: CreateMessage :one
+WITH branch_lock AS (
+  SELECT id
+  FROM bot_session_branches
+  WHERE id = sqlc.narg(branch_id)::uuid
+  FOR UPDATE
+),
+turn_lock AS (
+  SELECT id
+  FROM bot_history_turns
+  WHERE id = sqlc.narg(turn_id)::uuid
+  FOR UPDATE
+)
 INSERT INTO bot_history_messages (
   bot_id,
   session_id,
@@ -26,8 +38,8 @@ VALUES (
     WHEN sqlc.narg(branch_id)::uuid IS NULL THEN NULL
     ELSE (
       SELECT COALESCE(MAX(existing.branch_seq), 0) + 1
-      FROM bot_history_messages existing
-      WHERE existing.branch_id = sqlc.narg(branch_id)::uuid
+      FROM branch_lock locked
+      LEFT JOIN bot_history_messages existing ON existing.branch_id = locked.id
     )
   END,
   sqlc.narg(turn_id)::uuid,
@@ -35,8 +47,8 @@ VALUES (
     WHEN sqlc.narg(turn_id)::uuid IS NULL THEN NULL
     ELSE (
       SELECT COALESCE(MAX(existing.turn_message_seq), 0) + 1
-      FROM bot_history_messages existing
-      WHERE existing.turn_id = sqlc.narg(turn_id)::uuid
+      FROM turn_lock locked
+      LEFT JOIN bot_history_messages existing ON existing.turn_id = locked.id
     )
   END,
   sqlc.narg(sender_channel_identity_id)::uuid,
@@ -72,23 +84,59 @@ RETURNING
   created_at;
 
 -- name: CreateHistoryTurn :one
+WITH branch_lock AS (
+  SELECT id
+  FROM bot_session_branches
+  WHERE id = sqlc.arg(branch_id)
+  FOR UPDATE
+)
 INSERT INTO bot_history_turns (
   session_id,
   branch_id,
   turn_seq,
   status
 )
-VALUES (
+SELECT
   sqlc.arg(session_id),
   sqlc.arg(branch_id),
   (
     SELECT COALESCE(MAX(existing.turn_seq), 0) + 1
-    FROM bot_history_turns existing
-    WHERE existing.branch_id = sqlc.arg(branch_id)
+    FROM branch_lock locked
+    LEFT JOIN bot_history_turns existing ON existing.branch_id = locked.id
   ),
   'running'
-)
+FROM branch_lock
 RETURNING id;
+
+-- name: GetHistoryTurnForMessagePersist :one
+SELECT id
+FROM bot_history_turns
+WHERE id = sqlc.arg(turn_id)
+  AND session_id = sqlc.arg(session_id)
+  AND branch_id = sqlc.arg(branch_id)
+LIMIT 1;
+
+-- name: GetSessionBranchForPersist :one
+SELECT id
+FROM bot_session_branches
+WHERE id = sqlc.arg(branch_id)
+  AND session_id = sqlc.arg(session_id)
+LIMIT 1;
+
+-- name: CancelEmptyHistoryTurn :execrows
+UPDATE bot_history_turns t
+SET status = 'failed',
+    completed_at = now(),
+    updated_at = now()
+WHERE t.id = sqlc.arg(turn_id)
+  AND t.session_id = sqlc.arg(session_id)
+  AND t.branch_id = sqlc.arg(branch_id)
+  AND t.status = 'running'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM bot_history_messages m
+    WHERE m.turn_id = t.id
+  );
 
 -- name: GetOpenHistoryTurnForBranch :one
 SELECT id
@@ -147,6 +195,7 @@ WITH RECURSIVE branch_path AS (
     b.id AS branch_id,
     b.parent_branch_id,
     NULL::BIGINT AS max_turn_seq,
+    NULL::BIGINT AS max_branch_seq,
     0 AS depth
   FROM bot_sessions s
   JOIN bot_session_branches b ON b.id = COALESCE(
@@ -166,11 +215,13 @@ WITH RECURSIVE branch_path AS (
   SELECT
     parent.id AS branch_id,
     parent.parent_branch_id,
-    child.fork_from_turn_seq AS max_turn_seq,
+    COALESCE(child.fork_from_turn_seq, boundary_turn.turn_seq) AS max_turn_seq,
+    child.fork_from_seq AS max_branch_seq,
     bp.depth + 1 AS depth
   FROM branch_path bp
   JOIN bot_session_branches child ON child.id = bp.branch_id
   JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
 )
 SELECT
   m.id,
@@ -200,7 +251,27 @@ LEFT JOIN bot_history_turns t ON t.id = m.turn_id
 WHERE m.session_id = sqlc.arg(session_id)
   AND (
     m.branch_id IS NULL
-    OR (bp.branch_id IS NOT NULL AND (bp.max_turn_seq IS NULL OR t.turn_seq <= bp.max_turn_seq))
+    OR (
+    bp.branch_id IS NOT NULL
+    AND (
+      bp.depth = 0
+      OR (
+        bp.max_turn_seq IS NOT NULL
+        AND (
+          t.turn_seq < bp.max_turn_seq
+          OR (
+            t.turn_seq = bp.max_turn_seq
+            AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
+          )
+        )
+      )
+      OR (
+        bp.max_turn_seq IS NULL
+        AND bp.max_branch_seq IS NOT NULL
+        AND m.branch_seq <= bp.max_branch_seq
+      )
+    )
+  )
   )
 ORDER BY COALESCE(bp.depth, 2147483647) DESC, COALESCE(m.branch_seq, 9223372036854775807) ASC, m.created_at ASC
 LIMIT 10000;
@@ -235,7 +306,7 @@ ORDER BY m.created_at ASC;
 
 -- name: ListMessagesSinceBySession :many
 WITH RECURSIVE branch_path AS (
-  SELECT b.id AS branch_id, b.parent_branch_id, NULL::BIGINT AS max_turn_seq, 0 AS depth
+  SELECT b.id AS branch_id, b.parent_branch_id, NULL::BIGINT AS max_turn_seq, NULL::BIGINT AS max_branch_seq, 0 AS depth
   FROM bot_sessions s
   JOIN bot_session_branches b ON b.id = COALESCE(s.active_branch_id, (
     SELECT rb.id FROM bot_session_branches rb
@@ -244,10 +315,11 @@ WITH RECURSIVE branch_path AS (
   ))
   WHERE s.id = sqlc.arg(session_id)
   UNION ALL
-  SELECT parent.id, parent.parent_branch_id, child.fork_from_turn_seq, bp.depth + 1
+  SELECT parent.id, parent.parent_branch_id, COALESCE(child.fork_from_turn_seq, boundary_turn.turn_seq), child.fork_from_seq, bp.depth + 1
   FROM branch_path bp
   JOIN bot_session_branches child ON child.id = bp.branch_id
   JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
 )
 SELECT
   m.id,
@@ -278,7 +350,27 @@ WHERE m.session_id = sqlc.arg(session_id)
   AND m.created_at >= sqlc.arg(created_at)
   AND (
     m.branch_id IS NULL
-    OR (bp.branch_id IS NOT NULL AND (bp.max_turn_seq IS NULL OR t.turn_seq <= bp.max_turn_seq))
+    OR (
+    bp.branch_id IS NOT NULL
+    AND (
+      bp.depth = 0
+      OR (
+        bp.max_turn_seq IS NOT NULL
+        AND (
+          t.turn_seq < bp.max_turn_seq
+          OR (
+            t.turn_seq = bp.max_turn_seq
+            AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
+          )
+        )
+      )
+      OR (
+        bp.max_turn_seq IS NULL
+        AND bp.max_branch_seq IS NOT NULL
+        AND m.branch_seq <= bp.max_branch_seq
+      )
+    )
+  )
   )
 ORDER BY COALESCE(bp.depth, 2147483647) DESC, COALESCE(m.branch_seq, 9223372036854775807) ASC, m.created_at ASC;
 
@@ -314,7 +406,7 @@ ORDER BY m.created_at ASC;
 
 -- name: ListActiveMessagesSinceBySession :many
 WITH RECURSIVE branch_path AS (
-  SELECT b.id AS branch_id, b.parent_branch_id, NULL::BIGINT AS max_turn_seq, 0 AS depth
+  SELECT b.id AS branch_id, b.parent_branch_id, NULL::BIGINT AS max_turn_seq, NULL::BIGINT AS max_branch_seq, 0 AS depth
   FROM bot_sessions s
   JOIN bot_session_branches b ON b.id = COALESCE(s.active_branch_id, (
     SELECT rb.id FROM bot_session_branches rb
@@ -323,10 +415,11 @@ WITH RECURSIVE branch_path AS (
   ))
   WHERE s.id = sqlc.arg(session_id)
   UNION ALL
-  SELECT parent.id, parent.parent_branch_id, child.fork_from_turn_seq, bp.depth + 1
+  SELECT parent.id, parent.parent_branch_id, COALESCE(child.fork_from_turn_seq, boundary_turn.turn_seq), child.fork_from_seq, bp.depth + 1
   FROM branch_path bp
   JOIN bot_session_branches child ON child.id = bp.branch_id
   JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
 )
 SELECT
   m.id,
@@ -358,7 +451,179 @@ WHERE m.session_id = sqlc.arg(session_id)
   AND m.created_at >= sqlc.arg(created_at)
   AND (
     m.branch_id IS NULL
-    OR (bp.branch_id IS NOT NULL AND (bp.max_turn_seq IS NULL OR t.turn_seq <= bp.max_turn_seq))
+    OR (
+    bp.branch_id IS NOT NULL
+    AND (
+      bp.depth = 0
+      OR (
+        bp.max_turn_seq IS NOT NULL
+        AND (
+          t.turn_seq < bp.max_turn_seq
+          OR (
+            t.turn_seq = bp.max_turn_seq
+            AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
+          )
+        )
+      )
+      OR (
+        bp.max_turn_seq IS NULL
+        AND bp.max_branch_seq IS NOT NULL
+        AND m.branch_seq <= bp.max_branch_seq
+      )
+    )
+  )
+  )
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+ORDER BY COALESCE(bp.depth, 2147483647) DESC, COALESCE(m.branch_seq, 9223372036854775807) ASC, m.created_at ASC;
+
+-- name: ListActiveMessagesSinceBySessionBranch :many
+WITH RECURSIVE branch_path AS (
+  SELECT b.id AS branch_id, b.parent_branch_id, NULL::BIGINT AS max_turn_seq, NULL::BIGINT AS max_branch_seq, 0 AS depth
+  FROM bot_session_branches b
+  WHERE b.session_id = sqlc.arg(session_id)
+    AND b.id = sqlc.arg(branch_id)
+  UNION ALL
+  SELECT parent.id, parent.parent_branch_id, COALESCE(child.fork_from_turn_seq, boundary_turn.turn_seq), child.fork_from_seq, bp.depth + 1
+  FROM branch_path bp
+  JOIN bot_session_branches child ON child.id = bp.branch_id
+  JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
+)
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.branch_id,
+  m.branch_seq,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.event_id,
+  m.display_text,
+  m.compact_id,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+LEFT JOIN branch_path bp ON bp.branch_id = m.branch_id
+LEFT JOIN bot_history_turns t ON t.id = m.turn_id
+WHERE m.session_id = sqlc.arg(session_id)
+  AND m.created_at >= sqlc.arg(created_at)
+  AND (
+    m.branch_id IS NULL
+    OR (
+    bp.branch_id IS NOT NULL
+    AND (
+      bp.depth = 0
+      OR (
+        bp.max_turn_seq IS NOT NULL
+        AND (
+          t.turn_seq < bp.max_turn_seq
+          OR (
+            t.turn_seq = bp.max_turn_seq
+            AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
+          )
+        )
+      )
+      OR (
+        bp.max_turn_seq IS NULL
+        AND bp.max_branch_seq IS NOT NULL
+        AND m.branch_seq <= bp.max_branch_seq
+      )
+    )
+  )
+  )
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+ORDER BY COALESCE(bp.depth, 2147483647) DESC, COALESCE(m.branch_seq, 9223372036854775807) ASC, m.created_at ASC;
+
+-- name: ListActiveMessagesSinceBySessionBranchTurn :many
+WITH RECURSIVE pinned_turn AS (
+  SELECT
+    t.id,
+    t.branch_id,
+    t.turn_seq,
+    (
+      SELECT MAX(m.branch_seq)
+      FROM bot_history_messages m
+      WHERE m.turn_id = t.id
+    ) AS max_branch_seq
+  FROM bot_history_turns t
+  WHERE t.session_id = sqlc.arg(session_id)
+    AND t.branch_id = sqlc.arg(branch_id)
+    AND t.id = sqlc.arg(turn_id)
+  LIMIT 1
+),
+branch_path AS (
+  SELECT b.id AS branch_id, b.parent_branch_id, pt.turn_seq AS max_turn_seq, pt.max_branch_seq AS max_branch_seq, 0 AS depth
+  FROM pinned_turn pt
+  JOIN bot_session_branches b ON b.id = pt.branch_id
+  UNION ALL
+  SELECT parent.id, parent.parent_branch_id, COALESCE(child.fork_from_turn_seq, boundary_turn.turn_seq), child.fork_from_seq, bp.depth + 1
+  FROM branch_path bp
+  JOIN bot_session_branches child ON child.id = bp.branch_id
+  JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
+)
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.branch_id,
+  m.branch_seq,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.event_id,
+  m.display_text,
+  m.compact_id,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+LEFT JOIN branch_path bp ON bp.branch_id = m.branch_id
+LEFT JOIN bot_history_turns t ON t.id = m.turn_id
+WHERE m.session_id = sqlc.arg(session_id)
+  AND m.created_at >= sqlc.arg(created_at)
+  AND EXISTS (SELECT 1 FROM pinned_turn)
+  AND (
+    m.branch_id IS NULL
+    OR (
+    bp.branch_id IS NOT NULL
+    AND (
+      (bp.depth = 0 AND bp.max_turn_seq IS NULL)
+      OR (
+        bp.max_turn_seq IS NOT NULL
+        AND (
+          t.turn_seq < bp.max_turn_seq
+          OR (
+            t.turn_seq = bp.max_turn_seq
+            AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
+          )
+        )
+      )
+      OR (
+        bp.max_turn_seq IS NULL
+        AND bp.max_branch_seq IS NOT NULL
+        AND m.branch_seq <= bp.max_branch_seq
+      )
+    )
+  )
   )
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY COALESCE(bp.depth, 2147483647) DESC, COALESCE(m.branch_seq, 9223372036854775807) ASC, m.created_at ASC;
@@ -394,7 +659,7 @@ LIMIT sqlc.arg(max_count);
 
 -- name: ListMessagesBeforeBySession :many
 WITH RECURSIVE branch_path AS (
-  SELECT b.id AS branch_id, b.parent_branch_id, NULL::BIGINT AS max_turn_seq, 0 AS depth
+  SELECT b.id AS branch_id, b.parent_branch_id, NULL::BIGINT AS max_turn_seq, NULL::BIGINT AS max_branch_seq, 0 AS depth
   FROM bot_sessions s
   JOIN bot_session_branches b ON b.id = COALESCE(s.active_branch_id, (
     SELECT rb.id FROM bot_session_branches rb
@@ -403,10 +668,11 @@ WITH RECURSIVE branch_path AS (
   ))
   WHERE s.id = sqlc.arg(session_id)
   UNION ALL
-  SELECT parent.id, parent.parent_branch_id, child.fork_from_turn_seq, bp.depth + 1
+  SELECT parent.id, parent.parent_branch_id, COALESCE(child.fork_from_turn_seq, boundary_turn.turn_seq), child.fork_from_seq, bp.depth + 1
   FROM branch_path bp
   JOIN bot_session_branches child ON child.id = bp.branch_id
   JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
 )
 SELECT
   m.id,
@@ -434,12 +700,55 @@ LEFT JOIN bot_sessions s ON s.id = m.session_id
 LEFT JOIN branch_path bp ON bp.branch_id = m.branch_id
 LEFT JOIN bot_history_turns t ON t.id = m.turn_id
 WHERE m.session_id = sqlc.arg(session_id)
-  AND m.created_at < sqlc.arg(created_at)
+  AND (
+    (sqlc.narg(before_id)::uuid IS NULL AND m.created_at < sqlc.arg(created_at))
+    OR (
+      sqlc.narg(before_id)::uuid IS NOT NULL
+      AND (
+        COALESCE(bp.depth, 2147483647) > COALESCE((SELECT cursor_bp.depth FROM bot_history_messages cursor LEFT JOIN branch_path cursor_bp ON cursor_bp.branch_id = cursor.branch_id WHERE cursor.id = sqlc.narg(before_id)::uuid), 2147483647)
+        OR (
+          COALESCE(bp.depth, 2147483647) = COALESCE((SELECT cursor_bp.depth FROM bot_history_messages cursor LEFT JOIN branch_path cursor_bp ON cursor_bp.branch_id = cursor.branch_id WHERE cursor.id = sqlc.narg(before_id)::uuid), 2147483647)
+          AND COALESCE(m.branch_seq, 9223372036854775807) < COALESCE((SELECT cursor.branch_seq FROM bot_history_messages cursor WHERE cursor.id = sqlc.narg(before_id)::uuid), 9223372036854775807)
+        )
+        OR (
+          COALESCE(bp.depth, 2147483647) = COALESCE((SELECT cursor_bp.depth FROM bot_history_messages cursor LEFT JOIN branch_path cursor_bp ON cursor_bp.branch_id = cursor.branch_id WHERE cursor.id = sqlc.narg(before_id)::uuid), 2147483647)
+          AND COALESCE(m.branch_seq, 9223372036854775807) = COALESCE((SELECT cursor.branch_seq FROM bot_history_messages cursor WHERE cursor.id = sqlc.narg(before_id)::uuid), 9223372036854775807)
+          AND (
+            m.created_at < (SELECT cursor.created_at FROM bot_history_messages cursor WHERE cursor.id = sqlc.narg(before_id)::uuid)
+            OR (
+              m.created_at = (SELECT cursor.created_at FROM bot_history_messages cursor WHERE cursor.id = sqlc.narg(before_id)::uuid)
+              AND m.id < sqlc.narg(before_id)::uuid
+            )
+          )
+        )
+      )
+    )
+  )
   AND (
     m.branch_id IS NULL
-    OR (bp.branch_id IS NOT NULL AND (bp.max_turn_seq IS NULL OR t.turn_seq <= bp.max_turn_seq))
+    OR (
+    bp.branch_id IS NOT NULL
+    AND (
+      bp.depth = 0
+      OR (
+        bp.max_turn_seq IS NOT NULL
+        AND (
+          t.turn_seq < bp.max_turn_seq
+          OR (
+            t.turn_seq = bp.max_turn_seq
+            AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
+          )
+        )
+      )
+      OR (
+        bp.max_turn_seq IS NULL
+        AND bp.max_branch_seq IS NOT NULL
+        AND m.branch_seq <= bp.max_branch_seq
+      )
+    )
   )
-ORDER BY COALESCE(bp.depth, -1) ASC, COALESCE(m.branch_seq, 0) DESC, m.created_at DESC
+  )
+ORDER BY COALESCE(bp.depth, -1) ASC, COALESCE(m.branch_seq, 0) DESC, m.created_at DESC, m.id DESC
 LIMIT sqlc.arg(max_count);
 
 -- name: ListMessagesLatest :many
@@ -472,7 +781,7 @@ LIMIT sqlc.arg(max_count);
 
 -- name: ListMessagesLatestBySession :many
 WITH RECURSIVE branch_path AS (
-  SELECT b.id AS branch_id, b.parent_branch_id, NULL::BIGINT AS max_turn_seq, 0 AS depth
+  SELECT b.id AS branch_id, b.parent_branch_id, NULL::BIGINT AS max_turn_seq, NULL::BIGINT AS max_branch_seq, 0 AS depth
   FROM bot_sessions s
   JOIN bot_session_branches b ON b.id = COALESCE(s.active_branch_id, (
     SELECT rb.id FROM bot_session_branches rb
@@ -481,10 +790,11 @@ WITH RECURSIVE branch_path AS (
   ))
   WHERE s.id = sqlc.arg(session_id)
   UNION ALL
-  SELECT parent.id, parent.parent_branch_id, child.fork_from_turn_seq, bp.depth + 1
+  SELECT parent.id, parent.parent_branch_id, COALESCE(child.fork_from_turn_seq, boundary_turn.turn_seq), child.fork_from_seq, bp.depth + 1
   FROM branch_path bp
   JOIN bot_session_branches child ON child.id = bp.branch_id
   JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
 )
 SELECT
   m.id,
@@ -514,14 +824,34 @@ LEFT JOIN bot_history_turns t ON t.id = m.turn_id
 WHERE m.session_id = sqlc.arg(session_id)
   AND (
     m.branch_id IS NULL
-    OR (bp.branch_id IS NOT NULL AND (bp.max_turn_seq IS NULL OR t.turn_seq <= bp.max_turn_seq))
+    OR (
+    bp.branch_id IS NOT NULL
+    AND (
+      bp.depth = 0
+      OR (
+        bp.max_turn_seq IS NOT NULL
+        AND (
+          t.turn_seq < bp.max_turn_seq
+          OR (
+            t.turn_seq = bp.max_turn_seq
+            AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
+          )
+        )
+      )
+      OR (
+        bp.max_turn_seq IS NULL
+        AND bp.max_branch_seq IS NOT NULL
+        AND m.branch_seq <= bp.max_branch_seq
+      )
+    )
   )
-ORDER BY COALESCE(bp.depth, -1) ASC, COALESCE(m.branch_seq, 0) DESC, m.created_at DESC
+  )
+ORDER BY COALESCE(bp.depth, -1) ASC, COALESCE(m.branch_seq, 0) DESC, m.created_at DESC, m.id DESC
 LIMIT sqlc.arg(max_count);
 
 -- name: GetMessageByExternalIDBySession :one
 WITH RECURSIVE branch_path AS (
-  SELECT b.id AS branch_id, b.parent_branch_id, NULL::BIGINT AS max_turn_seq, 0 AS depth
+  SELECT b.id AS branch_id, b.parent_branch_id, NULL::BIGINT AS max_turn_seq, NULL::BIGINT AS max_branch_seq, 0 AS depth
   FROM bot_sessions s
   JOIN bot_session_branches b ON b.id = COALESCE(s.active_branch_id, (
     SELECT rb.id FROM bot_session_branches rb
@@ -530,10 +860,11 @@ WITH RECURSIVE branch_path AS (
   ))
   WHERE s.id = sqlc.arg(session_id)
   UNION ALL
-  SELECT parent.id, parent.parent_branch_id, child.fork_from_turn_seq, bp.depth + 1
+  SELECT parent.id, parent.parent_branch_id, COALESCE(child.fork_from_turn_seq, boundary_turn.turn_seq), child.fork_from_seq, bp.depth + 1
   FROM branch_path bp
   JOIN bot_session_branches child ON child.id = bp.branch_id
   JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
 )
 SELECT
   m.id,
@@ -564,14 +895,34 @@ WHERE m.session_id = sqlc.arg(session_id)
   AND m.source_message_id = sqlc.arg(external_message_id)
   AND (
     m.branch_id IS NULL
-    OR (bp.branch_id IS NOT NULL AND (bp.max_turn_seq IS NULL OR t.turn_seq <= bp.max_turn_seq))
+    OR (
+    bp.branch_id IS NOT NULL
+    AND (
+      bp.depth = 0
+      OR (
+        bp.max_turn_seq IS NOT NULL
+        AND (
+          t.turn_seq < bp.max_turn_seq
+          OR (
+            t.turn_seq = bp.max_turn_seq
+            AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
+          )
+        )
+      )
+      OR (
+        bp.max_turn_seq IS NULL
+        AND bp.max_branch_seq IS NOT NULL
+        AND m.branch_seq <= bp.max_branch_seq
+      )
+    )
   )
-ORDER BY COALESCE(bp.depth, -1) ASC, COALESCE(m.branch_seq, 0) DESC, m.created_at DESC
+  )
+ORDER BY COALESCE(bp.depth, -1) ASC, COALESCE(m.branch_seq, 0) DESC, m.created_at DESC, m.id DESC
 LIMIT 1;
 
 -- name: ListMessagesAfterBySession :many
 WITH RECURSIVE branch_path AS (
-  SELECT b.id AS branch_id, b.parent_branch_id, NULL::BIGINT AS max_turn_seq, 0 AS depth
+  SELECT b.id AS branch_id, b.parent_branch_id, NULL::BIGINT AS max_turn_seq, NULL::BIGINT AS max_branch_seq, 0 AS depth
   FROM bot_sessions s
   JOIN bot_session_branches b ON b.id = COALESCE(s.active_branch_id, (
     SELECT rb.id FROM bot_session_branches rb
@@ -580,10 +931,11 @@ WITH RECURSIVE branch_path AS (
   ))
   WHERE s.id = sqlc.arg(session_id)
   UNION ALL
-  SELECT parent.id, parent.parent_branch_id, child.fork_from_turn_seq, bp.depth + 1
+  SELECT parent.id, parent.parent_branch_id, COALESCE(child.fork_from_turn_seq, boundary_turn.turn_seq), child.fork_from_seq, bp.depth + 1
   FROM branch_path bp
   JOIN bot_session_branches child ON child.id = bp.branch_id
   JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
 )
 SELECT
   m.id,
@@ -611,12 +963,55 @@ LEFT JOIN bot_sessions s ON s.id = m.session_id
 LEFT JOIN branch_path bp ON bp.branch_id = m.branch_id
 LEFT JOIN bot_history_turns t ON t.id = m.turn_id
 WHERE m.session_id = sqlc.arg(session_id)
-  AND m.created_at > sqlc.arg(created_at)
+  AND (
+    (sqlc.narg(after_id)::uuid IS NULL AND m.created_at > sqlc.arg(created_at))
+    OR (
+      sqlc.narg(after_id)::uuid IS NOT NULL
+      AND (
+        COALESCE(bp.depth, 2147483647) < COALESCE((SELECT cursor_bp.depth FROM bot_history_messages cursor LEFT JOIN branch_path cursor_bp ON cursor_bp.branch_id = cursor.branch_id WHERE cursor.id = sqlc.narg(after_id)::uuid), 2147483647)
+        OR (
+          COALESCE(bp.depth, 2147483647) = COALESCE((SELECT cursor_bp.depth FROM bot_history_messages cursor LEFT JOIN branch_path cursor_bp ON cursor_bp.branch_id = cursor.branch_id WHERE cursor.id = sqlc.narg(after_id)::uuid), 2147483647)
+          AND COALESCE(m.branch_seq, 9223372036854775807) > COALESCE((SELECT cursor.branch_seq FROM bot_history_messages cursor WHERE cursor.id = sqlc.narg(after_id)::uuid), 9223372036854775807)
+        )
+        OR (
+          COALESCE(bp.depth, 2147483647) = COALESCE((SELECT cursor_bp.depth FROM bot_history_messages cursor LEFT JOIN branch_path cursor_bp ON cursor_bp.branch_id = cursor.branch_id WHERE cursor.id = sqlc.narg(after_id)::uuid), 2147483647)
+          AND COALESCE(m.branch_seq, 9223372036854775807) = COALESCE((SELECT cursor.branch_seq FROM bot_history_messages cursor WHERE cursor.id = sqlc.narg(after_id)::uuid), 9223372036854775807)
+          AND (
+            m.created_at > (SELECT cursor.created_at FROM bot_history_messages cursor WHERE cursor.id = sqlc.narg(after_id)::uuid)
+            OR (
+              m.created_at = (SELECT cursor.created_at FROM bot_history_messages cursor WHERE cursor.id = sqlc.narg(after_id)::uuid)
+              AND m.id > sqlc.narg(after_id)::uuid
+            )
+          )
+        )
+      )
+    )
+  )
   AND (
     m.branch_id IS NULL
-    OR (bp.branch_id IS NOT NULL AND (bp.max_turn_seq IS NULL OR t.turn_seq <= bp.max_turn_seq))
+    OR (
+    bp.branch_id IS NOT NULL
+    AND (
+      bp.depth = 0
+      OR (
+        bp.max_turn_seq IS NOT NULL
+        AND (
+          t.turn_seq < bp.max_turn_seq
+          OR (
+            t.turn_seq = bp.max_turn_seq
+            AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
+          )
+        )
+      )
+      OR (
+        bp.max_turn_seq IS NULL
+        AND bp.max_branch_seq IS NOT NULL
+        AND m.branch_seq <= bp.max_branch_seq
+      )
+    )
   )
-ORDER BY COALESCE(bp.depth, 2147483647) DESC, COALESCE(m.branch_seq, 9223372036854775807) ASC, m.created_at ASC
+  )
+ORDER BY COALESCE(bp.depth, 2147483647) DESC, COALESCE(m.branch_seq, 9223372036854775807) ASC, m.created_at ASC, m.id ASC
 LIMIT sqlc.arg(max_count);
 
 -- name: CountMessagesByBot :one
@@ -758,7 +1153,7 @@ WHERE id = ANY($2::uuid[]);
 
 -- name: ListUncompactedMessagesBySession :many
 WITH RECURSIVE branch_path AS (
-  SELECT b.id AS branch_id, b.parent_branch_id, NULL::BIGINT AS max_turn_seq, 0 AS depth
+  SELECT b.id AS branch_id, b.parent_branch_id, NULL::BIGINT AS max_turn_seq, NULL::BIGINT AS max_branch_seq, 0 AS depth
   FROM bot_sessions s
   JOIN bot_session_branches b ON b.id = COALESCE(s.active_branch_id, (
     SELECT rb.id FROM bot_session_branches rb
@@ -767,10 +1162,11 @@ WITH RECURSIVE branch_path AS (
   ))
   WHERE s.id = sqlc.arg(session_id)
   UNION ALL
-  SELECT parent.id, parent.parent_branch_id, child.fork_from_turn_seq, bp.depth + 1
+  SELECT parent.id, parent.parent_branch_id, COALESCE(child.fork_from_turn_seq, boundary_turn.turn_seq), child.fork_from_seq, bp.depth + 1
   FROM branch_path bp
   JOIN bot_session_branches child ON child.id = bp.branch_id
   JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
 )
 SELECT m.id, m.bot_id, m.session_id, m.role, m.content, m.usage, m.sender_channel_identity_id, m.compact_id, m.created_at
 FROM bot_history_messages m
@@ -780,7 +1176,27 @@ WHERE m.session_id = sqlc.arg(session_id)
   AND m.compact_id IS NULL
   AND (
     m.branch_id IS NULL
-    OR (bp.branch_id IS NOT NULL AND (bp.max_turn_seq IS NULL OR t.turn_seq <= bp.max_turn_seq))
+    OR (
+    bp.branch_id IS NOT NULL
+    AND (
+      bp.depth = 0
+      OR (
+        bp.max_turn_seq IS NOT NULL
+        AND (
+          t.turn_seq < bp.max_turn_seq
+          OR (
+            t.turn_seq = bp.max_turn_seq
+            AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
+          )
+        )
+      )
+      OR (
+        bp.max_turn_seq IS NULL
+        AND bp.max_branch_seq IS NOT NULL
+        AND m.branch_seq <= bp.max_branch_seq
+      )
+    )
+  )
   )
 ORDER BY COALESCE(bp.depth, 2147483647) DESC, COALESCE(m.branch_seq, 9223372036854775807) ASC, m.created_at ASC;
 
@@ -790,7 +1206,7 @@ SELECT active_branch_id
 FROM bot_sessions
 WHERE id = sqlc.arg(session_id);
 
--- name: SetActiveSessionBranch :exec
+-- name: SetActiveSessionBranch :execrows
 UPDATE bot_sessions
 SET active_branch_id = sqlc.arg(branch_id),
     updated_at = now()
@@ -833,7 +1249,7 @@ SELECT
     ORDER BY pt.turn_seq DESC
     LIMIT 1
   ) AS previous_turn_id,
-  (
+  COALESCE((
     SELECT pt.turn_seq
     FROM bot_history_turns pt
     WHERE pt.branch_id = t.branch_id
@@ -841,7 +1257,7 @@ SELECT
       AND pt.status = 'completed'
     ORDER BY pt.turn_seq DESC
     LIMIT 1
-  ) AS previous_turn_seq,
+  ), 0)::BIGINT AS previous_turn_seq,
   (
     SELECT pm.branch_seq
     FROM bot_history_turns pt
@@ -880,6 +1296,11 @@ VALUES (
   sqlc.narg(title)
 )
 RETURNING id;
+
+-- name: DeleteSessionBranch :exec
+DELETE FROM bot_session_branches
+WHERE id = sqlc.arg(branch_id)
+  AND session_id = sqlc.arg(session_id);
 
 -- name: ListSessionBranches :many
 SELECT

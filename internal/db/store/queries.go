@@ -72,6 +72,7 @@ type Queries interface {
 	CreateMCPConnection(ctx context.Context, arg dbsqlc.CreateMCPConnectionParams) (dbsqlc.McpConnection, error)
 	CreateMemoryProvider(ctx context.Context, arg dbsqlc.CreateMemoryProviderParams) (dbsqlc.MemoryProvider, error)
 	CreateHistoryTurn(ctx context.Context, arg dbsqlc.CreateHistoryTurnParams) (pgtype.UUID, error)
+	CancelEmptyHistoryTurn(ctx context.Context, arg dbsqlc.CancelEmptyHistoryTurnParams) (int64, error)
 	CreateMessage(ctx context.Context, arg dbsqlc.CreateMessageParams) (dbsqlc.CreateMessageRow, error)
 	CreateMessageAsset(ctx context.Context, arg dbsqlc.CreateMessageAssetParams) (dbsqlc.BotHistoryMessageAsset, error)
 	CreateRootSessionBranch(ctx context.Context, sessionID pgtype.UUID) (pgtype.UUID, error)
@@ -109,6 +110,7 @@ type Queries interface {
 	DeleteMessageAssets(ctx context.Context, messageID pgtype.UUID) error
 	DeleteMessagesByBot(ctx context.Context, botID pgtype.UUID) error
 	DeleteMessagesBySession(ctx context.Context, sessionID pgtype.UUID) error
+	DeleteSessionBranch(ctx context.Context, arg dbsqlc.DeleteSessionBranchParams) error
 	DeleteModel(ctx context.Context, id pgtype.UUID) error
 	DeleteModelByModelID(ctx context.Context, modelID string) error
 	DeleteModelByProviderAndType(ctx context.Context, arg dbsqlc.DeleteModelByProviderAndTypeParams) error
@@ -150,6 +152,8 @@ type Queries interface {
 	GetBotWorkspaceResourceLimits(ctx context.Context, botID pgtype.UUID) (dbsqlc.BotWorkspaceResourceLimit, error)
 	GetActiveSessionBranch(ctx context.Context, sessionID pgtype.UUID) (pgtype.UUID, error)
 	GetMessageForSessionBranchFork(ctx context.Context, arg dbsqlc.GetMessageForSessionBranchForkParams) (dbsqlc.GetMessageForSessionBranchForkRow, error)
+	GetHistoryTurnForMessagePersist(ctx context.Context, arg dbsqlc.GetHistoryTurnForMessagePersistParams) (pgtype.UUID, error)
+	GetSessionBranchForPersist(ctx context.Context, arg dbsqlc.GetSessionBranchForPersistParams) (pgtype.UUID, error)
 	GetOpenHistoryTurnForBranch(ctx context.Context, arg dbsqlc.GetOpenHistoryTurnForBranchParams) (pgtype.UUID, error)
 	GetDefaultMemoryProvider(ctx context.Context) (dbsqlc.MemoryProvider, error)
 	GetEmailOAuthTokenByProvider(ctx context.Context, emailProviderID pgtype.UUID) (dbsqlc.EmailOauthToken, error)
@@ -208,6 +212,8 @@ type Queries interface {
 	ListAccounts(ctx context.Context) ([]dbsqlc.User, error)
 	ListActiveMessagesSince(ctx context.Context, arg dbsqlc.ListActiveMessagesSinceParams) ([]dbsqlc.ListActiveMessagesSinceRow, error)
 	ListActiveMessagesSinceBySession(ctx context.Context, arg dbsqlc.ListActiveMessagesSinceBySessionParams) ([]dbsqlc.ListActiveMessagesSinceBySessionRow, error)
+	ListActiveMessagesSinceBySessionBranch(ctx context.Context, arg dbsqlc.ListActiveMessagesSinceBySessionBranchParams) ([]dbsqlc.ListActiveMessagesSinceBySessionBranchRow, error)
+	ListActiveMessagesSinceBySessionBranchTurn(ctx context.Context, arg dbsqlc.ListActiveMessagesSinceBySessionBranchTurnParams) ([]dbsqlc.ListActiveMessagesSinceBySessionBranchTurnRow, error)
 	ListAutoStartContainers(ctx context.Context) ([]dbsqlc.Container, error)
 	ListBotACLRules(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.ListBotACLRulesRow, error)
 	ListBotChannelConfigsByType(ctx context.Context, channelType string) ([]dbsqlc.BotChannelConfig, error)
@@ -283,7 +289,7 @@ type Queries interface {
 	ListTokenUsageRecords(ctx context.Context, arg dbsqlc.ListTokenUsageRecordsParams) ([]dbsqlc.ListTokenUsageRecordsRow, error)
 	ListToolApprovalsBySession(ctx context.Context, arg dbsqlc.ListToolApprovalsBySessionParams) ([]dbsqlc.ToolApprovalRequest, error)
 	ListUserInputsBySession(ctx context.Context, arg dbsqlc.ListUserInputsBySessionParams) ([]dbsqlc.UserInputRequest, error)
-	SetActiveSessionBranch(ctx context.Context, arg dbsqlc.SetActiveSessionBranchParams) error
+	SetActiveSessionBranch(ctx context.Context, arg dbsqlc.SetActiveSessionBranchParams) (int64, error)
 	SetHistoryTurnRequestMessage(ctx context.Context, arg dbsqlc.SetHistoryTurnRequestMessageParams) error
 	ListTranscriptionModels(ctx context.Context) ([]dbsqlc.ListTranscriptionModelsRow, error)
 	ListTranscriptionModelsByProviderID(ctx context.Context, providerID pgtype.UUID) ([]dbsqlc.Model, error)
@@ -348,8 +354,10 @@ type Queries interface {
 	UpdateSessionMetadata(ctx context.Context, arg dbsqlc.UpdateSessionMetadataParams) (dbsqlc.BotSession, error)
 	UpdateSessionTitle(ctx context.Context, arg dbsqlc.UpdateSessionTitleParams) (dbsqlc.BotSession, error)
 	UpdateSessionTypeAndMetadata(ctx context.Context, arg dbsqlc.UpdateSessionTypeAndMetadataParams) (dbsqlc.BotSession, error)
+	UpdateToolApprovalPersistContext(ctx context.Context, arg dbsqlc.UpdateToolApprovalPersistContextParams) (dbsqlc.ToolApprovalRequest, error)
 	UpdateToolApprovalPromptMessage(ctx context.Context, arg dbsqlc.UpdateToolApprovalPromptMessageParams) (dbsqlc.ToolApprovalRequest, error)
 	UpdateUserInputAssistantMessage(ctx context.Context, arg dbsqlc.UpdateUserInputAssistantMessageParams) (dbsqlc.UserInputRequest, error)
+	UpdateUserInputPersistContext(ctx context.Context, arg dbsqlc.UpdateUserInputPersistContextParams) (dbsqlc.UserInputRequest, error)
 	UpdateUserInputPromptMessage(ctx context.Context, arg dbsqlc.UpdateUserInputPromptMessageParams) (dbsqlc.UserInputRequest, error)
 	UpdateUserInputToolResultMessage(ctx context.Context, arg dbsqlc.UpdateUserInputToolResultMessageParams) (dbsqlc.UserInputRequest, error)
 	UpdateUserProviderOAuthState(ctx context.Context, arg dbsqlc.UpdateUserProviderOAuthStateParams) error

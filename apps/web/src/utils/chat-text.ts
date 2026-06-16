@@ -40,6 +40,7 @@ export function canForkMessage(message: ChatMessage): boolean {
 export function canRewriteRequest(message: ChatMessage): boolean {
   return message.role === 'user'
     && !message.streaming
+    && (message.attachments?.length ?? 0) === 0
     && cleanUserText(message.text).length > 0
     && persistentMessageId(message).length > 0
 }

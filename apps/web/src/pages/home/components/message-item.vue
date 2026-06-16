@@ -313,7 +313,9 @@
           :persistent="true"
           :streaming="message.streaming"
           :copied="copied"
+          :can-fork="canFork"
           @copy="emit('copyMessage', props.message.id)"
+          @fork="handleForkClick"
         />
       </div>
     </div>
@@ -387,6 +389,7 @@ const messageEl = useTemplateRef('messageItem')
 const emit = defineEmits<{
   active: [isActive: boolean, { id: string, top: number,  }]
   copyMessage: [messageId: string]
+  forkMessage: [messageId: string]
   rewriteRequest: [messageId: string]
 }>()
 
@@ -405,6 +408,7 @@ const props = defineProps<{
   isScrolling: boolean
   isLastMessage?: boolean
   copied?: boolean
+  canFork?: boolean
   canRewrite?: boolean
 }>()
 
@@ -723,6 +727,12 @@ function handleRewriteClick() {
   const messageId = persistentMessageId(props.message)
   if (!messageId) return
   emit('rewriteRequest', messageId)
+}
+
+function handleForkClick() {
+  const messageId = persistentMessageId(props.message)
+  if (!messageId) return
+  emit('forkMessage', messageId)
 }
 
 </script>

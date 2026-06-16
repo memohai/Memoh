@@ -294,6 +294,8 @@ func TestNativeToolSourceWaitsForApprovalAndPublishesRequest(t *testing.T) {
 		CurrentPlatform:   "web",
 		ReplyTarget:       "reply-1",
 		ConversationType:  "private",
+		PersistBranchID:   "branch-1",
+		PersistTurnID:     "turn-1",
 	}, "exec", map[string]any{"command": "make test"})
 	if err != nil {
 		t.Fatalf("CallTool() error = %v", err)
@@ -306,6 +308,9 @@ func TestNativeToolSourceWaitsForApprovalAndPublishesRequest(t *testing.T) {
 	}
 	if approval.created.ToolCallID != "mcp-http-call-1" {
 		t.Fatalf("approval tool_call_id = %q, want existing MCP tool call id", approval.created.ToolCallID)
+	}
+	if approval.created.PersistBranchID != "branch-1" || approval.created.PersistTurnID != "turn-1" {
+		t.Fatalf("approval persist context = %q/%q", approval.created.PersistBranchID, approval.created.PersistTurnID)
 	}
 	if len(toolEvents.events) != 2 {
 		t.Fatalf("tool events = %d, want pending and approved approval events", len(toolEvents.events))
@@ -517,6 +522,8 @@ func nativeAskUserSession(toolCallID string) mcp.ToolSessionContext {
 		ToolCallID:          toolCallID,
 		ChannelIdentityID:   "user-1",
 		RuntimeID:           "runtime-1",
+		PersistBranchID:     "branch-1",
+		PersistTurnID:       "turn-1",
 		CanRequestUserInput: true,
 	}
 }
@@ -578,6 +585,9 @@ func TestNativeToolSourceAskUserWaitsForInputAndPublishesRequest(t *testing.T) {
 	}
 	if userInput.created[0].ProviderMetadata["source"] != userinput.ProviderSourceACPMCP || userInput.created[0].ProviderMetadata["runtime_id"] != "runtime-1" {
 		t.Fatalf("provider metadata = %#v", userInput.created[0].ProviderMetadata)
+	}
+	if userInput.created[0].PersistBranchID != "branch-1" || userInput.created[0].PersistTurnID != "turn-1" {
+		t.Fatalf("user input persist context = %q/%q", userInput.created[0].PersistBranchID, userInput.created[0].PersistTurnID)
 	}
 	// The pending question must travel over the tool event channel with the
 	// gateway's tool_call_id so the UI attaches it to the existing tool block

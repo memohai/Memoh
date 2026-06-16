@@ -1,4 +1,4 @@
--- 0023_repair_branch_turn_columns
+-- 0024_repair_branch_turn_columns
 -- Rebuild tables affected by the pre-turn SQLite writable_schema column insertion.
 
 PRAGMA foreign_keys = OFF;
@@ -16,6 +16,10 @@ DROP INDEX IF EXISTS idx_bot_history_messages_branch;
 DROP INDEX IF EXISTS idx_bot_history_messages_turn;
 DROP INDEX IF EXISTS idx_bot_history_messages_session_source;
 DROP INDEX IF EXISTS idx_bot_history_messages_session_reply;
+DROP INDEX IF EXISTS idx_bot_history_turns_assistant;
+DROP INDEX IF EXISTS idx_bot_history_turns_request;
+DROP INDEX IF EXISTS idx_bot_history_turns_session_branch;
+DROP INDEX IF EXISTS idx_bot_history_turns_branch_seq;
 
 CREATE TABLE bot_session_branches_0023_new (
   id TEXT PRIMARY KEY,
@@ -159,6 +163,108 @@ FROM bot_history_messages;
 DROP TABLE bot_history_messages;
 ALTER TABLE bot_history_messages_0023_new RENAME TO bot_history_messages;
 
+UPDATE bot_history_messages
+SET metadata = '{}'
+WHERE metadata IS NULL OR metadata = '' OR NOT json_valid(metadata);
+
+UPDATE bot_history_messages
+SET content = json_object('role', role, 'content', COALESCE(content, ''))
+WHERE content IS NULL OR content = '' OR NOT json_valid(content);
+
+DELETE FROM bot_history_turns
+WHERE request_message_id IS NULL
+   OR final_assistant_message_id IS NULL
+   OR NOT EXISTS (
+     SELECT 1
+     FROM bot_history_messages req
+     WHERE req.id = bot_history_turns.request_message_id
+       AND req.role = 'user'
+       AND req.branch_id = bot_history_turns.branch_id
+   )
+   OR NOT EXISTS (
+     SELECT 1
+     FROM bot_history_messages assistant
+     WHERE assistant.id = bot_history_turns.final_assistant_message_id
+       AND assistant.role = 'assistant'
+       AND assistant.branch_id = bot_history_turns.branch_id
+   );
+
+WITH user_turns AS (
+  SELECT
+    m.id AS user_id,
+    m.session_id,
+    m.branch_id,
+    m.branch_seq,
+    m.created_at AS user_created_at,
+    (
+      SELECT MIN(next_user.branch_seq)
+      FROM bot_history_messages next_user
+      WHERE next_user.branch_id = m.branch_id
+        AND next_user.role = 'user'
+        AND next_user.branch_seq > m.branch_seq
+    ) AS next_user_seq
+  FROM bot_history_messages m
+  WHERE m.session_id IS NOT NULL
+    AND m.branch_id IS NOT NULL
+    AND m.role = 'user'
+),
+complete_turns AS (
+  SELECT
+    ut.*,
+    (
+      SELECT a.id
+      FROM bot_history_messages a
+      WHERE a.branch_id = ut.branch_id
+        AND a.role = 'assistant'
+        AND a.branch_seq > ut.branch_seq
+        AND (ut.next_user_seq IS NULL OR a.branch_seq < ut.next_user_seq)
+      ORDER BY a.branch_seq DESC, a.created_at DESC
+      LIMIT 1
+    ) AS assistant_id,
+    (
+      SELECT a.created_at
+      FROM bot_history_messages a
+      WHERE a.branch_id = ut.branch_id
+        AND a.role = 'assistant'
+        AND a.branch_seq > ut.branch_seq
+        AND (ut.next_user_seq IS NULL OR a.branch_seq < ut.next_user_seq)
+      ORDER BY a.branch_seq DESC, a.created_at DESC
+      LIMIT 1
+    ) AS assistant_created_at
+  FROM user_turns ut
+),
+numbered_turns AS (
+  SELECT
+    lower(hex(randomblob(4))) || '-' ||
+    lower(hex(randomblob(2))) || '-' ||
+    '4' || substr(lower(hex(randomblob(2))), 2) || '-' ||
+    substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' ||
+    lower(hex(randomblob(6))) AS turn_id,
+    ct.*,
+    ROW_NUMBER() OVER (PARTITION BY ct.branch_id ORDER BY ct.branch_seq ASC) AS turn_seq
+  FROM complete_turns ct
+  WHERE ct.assistant_id IS NOT NULL
+)
+INSERT OR IGNORE INTO bot_history_turns (
+  id, session_id, branch_id, turn_seq, request_message_id, final_assistant_message_id,
+  status, created_at, updated_at, completed_at
+)
+SELECT
+  nt.turn_id,
+  nt.session_id,
+  nt.branch_id,
+  nt.turn_seq,
+  nt.user_id,
+  nt.assistant_id,
+  'completed',
+  nt.user_created_at,
+  COALESCE(nt.assistant_created_at, nt.user_created_at),
+  nt.assistant_created_at
+FROM numbered_turns nt
+WHERE NOT EXISTS (
+  SELECT 1 FROM bot_history_turns existing WHERE existing.request_message_id = nt.user_id
+);
+
 WITH turn_ranges AS (
   SELECT
     t.id AS turn_id,
@@ -194,17 +300,35 @@ SET fork_from_turn_id = (
       ORDER BY t.turn_seq DESC, t.created_at DESC
       LIMIT 1
     ),
-    fork_from_turn_seq = COALESCE((
+    fork_from_turn_seq = (
       SELECT t.turn_seq
       FROM bot_history_turns t
       WHERE t.branch_id = bot_session_branches.parent_branch_id
         AND t.final_assistant_message_id = bot_session_branches.fork_from_message_id
       ORDER BY t.turn_seq DESC, t.created_at DESC
       LIMIT 1
-    ), fork_from_seq)
+    )
 WHERE fork_from_message_id IS NOT NULL
   AND parent_branch_id IS NOT NULL
   AND (fork_from_turn_id IS NULL OR fork_from_turn_seq IS NULL);
+
+UPDATE bot_session_branches
+SET fork_from_turn_seq = (
+  SELECT t.turn_seq
+  FROM bot_history_turns t
+  WHERE t.id = bot_session_branches.fork_from_turn_id
+  LIMIT 1
+)
+WHERE fork_from_turn_id IS NOT NULL
+  AND EXISTS (
+    SELECT 1
+    FROM bot_history_turns t
+    WHERE t.id = bot_session_branches.fork_from_turn_id
+      AND (
+        bot_session_branches.fork_from_turn_seq IS NULL
+        OR bot_session_branches.fork_from_turn_seq != t.turn_seq
+      )
+  );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_session_branches_root
   ON bot_session_branches(session_id)
@@ -231,6 +355,14 @@ CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_source
   ON bot_history_messages(session_id, source_message_id);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_reply
   ON bot_history_messages(session_id, source_reply_to_message_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_history_turns_branch_seq
+  ON bot_history_turns(branch_id, turn_seq);
+CREATE INDEX IF NOT EXISTS idx_bot_history_turns_session_branch
+  ON bot_history_turns(session_id, branch_id, turn_seq);
+CREATE INDEX IF NOT EXISTS idx_bot_history_turns_request
+  ON bot_history_turns(request_message_id) WHERE request_message_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_bot_history_turns_assistant
+  ON bot_history_turns(final_assistant_message_id) WHERE final_assistant_message_id IS NOT NULL;
 
 COMMIT;
 

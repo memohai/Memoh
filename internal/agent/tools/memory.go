@@ -110,6 +110,8 @@ func toMCPSession(s SessionContext) mcp.ToolSessionContext {
 		ChatID:            s.ChatID,
 		SessionID:         s.SessionID,
 		SessionType:       s.SessionType,
+		PersistBranchID:   s.PersistBranchID,
+		PersistTurnID:     s.PersistTurnID,
 		ChannelIdentityID: s.ChannelIdentityID,
 		SessionToken:      s.SessionToken,
 		CurrentPlatform:   s.CurrentPlatform,

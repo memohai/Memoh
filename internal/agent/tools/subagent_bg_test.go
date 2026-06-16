@@ -180,6 +180,14 @@ func (*fakeAgentMessageService) ListActiveSinceBySession(context.Context, string
 	return nil, nil
 }
 
+func (*fakeAgentMessageService) ListActiveSinceBySessionBranch(context.Context, string, string, time.Time) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
+func (*fakeAgentMessageService) ListActiveSinceBySessionBranchTurn(context.Context, string, string, string, time.Time) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
 func (*fakeAgentMessageService) ListLatestBySession(context.Context, string, int32) ([]messagepkg.Message, error) {
 	return nil, nil
 }

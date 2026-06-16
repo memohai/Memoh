@@ -485,6 +485,7 @@ func (s *Service) ForkBranchFromMessage(ctx context.Context, sessionID, messageI
 	if !row.BranchID.Valid || !row.TurnID.Valid {
 		return BranchGraph{}, errors.New("fork source message has no turn position")
 	}
+	parentBranchID := row.BranchID
 	forkFromTurnID := row.TurnID
 	forkFromTurnSeq := pgtype.Int8{Int64: row.TurnSeq, Valid: true}
 	forkFromSeq := int64(0)
@@ -495,22 +496,28 @@ func (s *Service) ForkBranchFromMessage(ctx context.Context, sessionID, messageI
 	switch row.Role {
 	case "assistant":
 	case "user":
-		forkFromTurnID = row.PreviousTurnID
-		forkFromTurnSeq = pgtype.Int8{Int64: 0, Valid: true}
-		if row.PreviousTurnID.Valid {
-			forkFromTurnSeq.Int64 = row.PreviousTurnSeq
+		previousTurn, hasPreviousTurn, err := s.previousVisibleTurnBefore(ctx, pgSessionID, row.BranchID.String(), row.TurnSeq)
+		if err != nil {
+			return BranchGraph{}, err
 		}
+		forkFromTurnID = pgtype.UUID{}
+		forkFromTurnSeq = pgtype.Int8{Int64: 0, Valid: true}
 		forkFromSeq = 0
 		forkFromSeqValid = true
-		if row.PreviousBranchSeq.Valid {
-			forkFromSeq = row.PreviousBranchSeq.Int64
+		if hasPreviousTurn {
+			parentBranchID = previousTurn.BranchID
+			forkFromTurnID = previousTurn.TurnID
+			forkFromTurnSeq.Int64 = previousTurn.TurnSeq
+			if previousTurn.BranchSeq.Valid {
+				forkFromSeq = previousTurn.BranchSeq.Int64
+			}
 		}
 	default:
 		return BranchGraph{}, ErrForkSourceUnsupported
 	}
 	branchID, err := s.queries.CreateSessionBranchFromMessage(ctx, sqlc.CreateSessionBranchFromMessageParams{
 		SessionID:         pgSessionID,
-		ParentBranchID:    row.BranchID,
+		ParentBranchID:    parentBranchID,
 		ForkFromMessageID: row.ID,
 		ForkFromSeq:       pgtype.Int8{Int64: forkFromSeq, Valid: forkFromSeqValid},
 		ForkFromTurnID:    forkFromTurnID,
@@ -520,13 +527,111 @@ func (s *Service) ForkBranchFromMessage(ctx context.Context, sessionID, messageI
 	if err != nil {
 		return BranchGraph{}, err
 	}
-	if err := s.queries.SetActiveSessionBranch(ctx, sqlc.SetActiveSessionBranchParams{
+	rowsAffected, err := s.queries.SetActiveSessionBranch(ctx, sqlc.SetActiveSessionBranchParams{
 		SessionID: pgSessionID,
 		BranchID:  branchID,
-	}); err != nil {
+	})
+	if err != nil {
+		_ = s.queries.DeleteSessionBranch(ctx, sqlc.DeleteSessionBranchParams{
+			SessionID: pgSessionID,
+			BranchID:  branchID,
+		})
 		return BranchGraph{}, err
 	}
+	if rowsAffected == 0 {
+		_ = s.queries.DeleteSessionBranch(ctx, sqlc.DeleteSessionBranchParams{
+			SessionID: pgSessionID,
+			BranchID:  branchID,
+		})
+		return BranchGraph{}, ErrBranchNotFound
+	}
 	return s.listBranchesByUUID(ctx, pgSessionID)
+}
+
+type branchForkTurnBoundary struct {
+	BranchID  pgtype.UUID
+	TurnID    pgtype.UUID
+	TurnSeq   int64
+	BranchSeq pgtype.Int8
+}
+
+func (s *Service) previousVisibleTurnBefore(ctx context.Context, sessionID pgtype.UUID, sourceBranchID string, sourceTurnSeq int64) (branchForkTurnBoundary, bool, error) {
+	if strings.TrimSpace(sourceBranchID) == "" || sourceTurnSeq <= 0 {
+		return branchForkTurnBoundary{}, false, nil
+	}
+	branchRows, err := s.queries.ListSessionBranches(ctx, sessionID)
+	if err != nil {
+		return branchForkTurnBoundary{}, false, err
+	}
+	turnRows, err := s.queries.ListSessionBranchTurnMessages(ctx, sessionID)
+	if err != nil {
+		return branchForkTurnBoundary{}, false, err
+	}
+	branches := make([]BranchNode, 0, len(branchRows))
+	for _, row := range branchRows {
+		node := toBranchNode(row)
+		branches = append(branches, node)
+	}
+	turn, ok := previousVisibleTurnBeforeFromRows(branches, turnRows, sourceBranchID, sourceTurnSeq)
+	return turn, ok, nil
+}
+
+func previousVisibleTurnBeforeFromRows(branches []BranchNode, turnRows []sqlc.ListSessionBranchTurnMessagesRow, sourceBranchID string, sourceTurnSeq int64) (branchForkTurnBoundary, bool) {
+	branchByID := make(map[string]BranchNode, len(branches))
+	for _, branch := range branches {
+		branchByID[branch.ID] = branch
+	}
+	type pathSegment struct {
+		branchID   string
+		maxTurnSeq int64
+	}
+	path := make([]pathSegment, 0, len(branchByID))
+	branchID := strings.TrimSpace(sourceBranchID)
+	maxTurnSeq := sourceTurnSeq - 1
+	for branchID != "" {
+		path = append(path, pathSegment{branchID: branchID, maxTurnSeq: maxTurnSeq})
+		branch, ok := branchByID[branchID]
+		if !ok {
+			break
+		}
+		branchID = strings.TrimSpace(branch.ParentBranchID)
+		maxTurnSeq = branch.ForkFromTurnSeq
+	}
+	for _, segment := range path {
+		if segment.maxTurnSeq <= 0 {
+			continue
+		}
+		if turn, ok := latestCompletedTurnInBranch(turnRows, segment.branchID, segment.maxTurnSeq); ok {
+			return turn, true
+		}
+	}
+	return branchForkTurnBoundary{}, false
+}
+
+func latestCompletedTurnInBranch(rows []sqlc.ListSessionBranchTurnMessagesRow, branchID string, maxTurnSeq int64) (branchForkTurnBoundary, bool) {
+	var latest sqlc.ListSessionBranchTurnMessagesRow
+	found := false
+	for _, row := range rows {
+		if !row.BranchID.Valid || row.BranchID.String() != branchID {
+			continue
+		}
+		if row.TurnSeq <= 0 || row.TurnSeq > maxTurnSeq {
+			continue
+		}
+		if !found || row.TurnSeq > latest.TurnSeq {
+			latest = row
+			found = true
+		}
+	}
+	if !found {
+		return branchForkTurnBoundary{}, false
+	}
+	return branchForkTurnBoundary{
+		BranchID:  latest.BranchID,
+		TurnID:    latest.TurnID,
+		TurnSeq:   latest.TurnSeq,
+		BranchSeq: latest.BranchSeq,
+	}, true
 }
 
 // SetActiveBranch switches the active branch for a session.
@@ -553,11 +658,15 @@ func (s *Service) SetActiveBranch(ctx context.Context, sessionID, branchID strin
 	if !found {
 		return BranchGraph{}, ErrBranchNotFound
 	}
-	if err := s.queries.SetActiveSessionBranch(ctx, sqlc.SetActiveSessionBranchParams{
+	rowsAffected, err := s.queries.SetActiveSessionBranch(ctx, sqlc.SetActiveSessionBranchParams{
 		SessionID: pgSessionID,
 		BranchID:  pgBranchID,
-	}); err != nil {
+	})
+	if err != nil {
 		return BranchGraph{}, err
+	}
+	if rowsAffected == 0 {
+		return BranchGraph{}, ErrBranchNotFound
 	}
 	return s.listBranchesByUUID(ctx, pgSessionID)
 }
@@ -655,11 +764,15 @@ func (s *Service) ensureActiveBranchForSession(ctx context.Context, sessionID pg
 		return pgtype.UUID{}, err
 	}
 
-	if err := s.queries.SetActiveSessionBranch(ctx, sqlc.SetActiveSessionBranchParams{
+	rowsAffected, err := s.queries.SetActiveSessionBranch(ctx, sqlc.SetActiveSessionBranchParams{
 		SessionID: sessionID,
 		BranchID:  branchID,
-	}); err != nil {
+	})
+	if err != nil {
 		return pgtype.UUID{}, err
+	}
+	if rowsAffected == 0 {
+		return pgtype.UUID{}, ErrBranchNotFound
 	}
 	return branchID, nil
 }
@@ -770,26 +883,12 @@ func buildBranchPreviewMap(rows []sqlc.ListSessionBranchPreviewMessagesRow) map[
 
 func buildBranchTurns(branches []BranchNode, rows []sqlc.ListSessionBranchTurnMessagesRow) []BranchTurn {
 	branchByID := make(map[string]BranchNode, len(branches))
-	depthByBranch := make(map[string]int, len(branches))
 	activeBranchID := ""
 	for _, branch := range branches {
 		branchByID[branch.ID] = branch
 		if branch.Active {
 			activeBranchID = branch.ID
 		}
-	}
-	var branchDepth func(string) int
-	branchDepth = func(branchID string) int {
-		if depth, ok := depthByBranch[branchID]; ok {
-			return depth
-		}
-		branch := branchByID[branchID]
-		depth := 0
-		if strings.TrimSpace(branch.ParentBranchID) != "" {
-			depth = branchDepth(branch.ParentBranchID) + 1
-		}
-		depthByBranch[branchID] = depth
-		return depth
 	}
 
 	turns := make([]BranchTurn, 0, len(rows))
@@ -800,14 +899,24 @@ func buildBranchTurns(branches []BranchNode, rows []sqlc.ListSessionBranchTurnMe
 			continue
 		}
 		branchID := row.BranchID.String()
+		if _, ok := turnIDByBranchSeq[branchID]; !ok {
+			turnIDByBranchSeq[branchID] = make(map[int64]string)
+		}
+		if row.TurnSeq > 0 {
+			turnIDByBranchSeq[branchID][row.TurnSeq] = row.TurnID.String()
+		}
+	}
+	sourceByUserID, sourceByAssistantID := buildTurnSourceIndexes(rows)
+	for _, row := range rows {
+		if !row.BranchID.Valid {
+			continue
+		}
+		branchID := row.BranchID.String()
 		seq := row.TurnSeq
 		branch := branchByID[branchID]
 		parentTurnID := lastTurnByBranch[branchID]
 		if parentTurnID == "" && strings.TrimSpace(branch.ParentBranchID) != "" {
-			parentTurnID = branch.ForkFromTurnID
-			if parentTurnID == "" && branch.ForkFromTurnSeq > 0 {
-				parentTurnID = turnIDForBranchSeq(turnIDByBranchSeq, branch.ParentBranchID, branch.ForkFromTurnSeq)
-			}
+			parentTurnID = branchForkParentTurnID(branch, branches, rows, turnIDByBranchSeq, sourceByUserID, sourceByAssistantID)
 		}
 		branchSeq := int64(0)
 		if row.BranchSeq.Valid {
@@ -820,7 +929,6 @@ func buildBranchTurns(branches []BranchNode, rows []sqlc.ListSessionBranchTurnMe
 			AssistantID:  row.AssistantID.String(),
 			BranchSeq:    branchSeq,
 			TurnSeq:      seq,
-			Depth:        branchDepth(branchID),
 			Active:       branchID == activeBranchID,
 			Title:        branchTurnTitle(row),
 			Preview: TurnPreview{
@@ -837,14 +945,96 @@ func buildBranchTurns(branches []BranchNode, rows []sqlc.ListSessionBranchTurnMe
 		}
 		turns = append(turns, turn)
 		lastTurnByBranch[branchID] = turn.ID
-		if _, ok := turnIDByBranchSeq[branchID]; !ok {
-			turnIDByBranchSeq[branchID] = make(map[int64]string)
+	}
+	applyTurnGraphDepths(turns)
+	return turns
+}
+
+func buildTurnSourceIndexes(rows []sqlc.ListSessionBranchTurnMessagesRow) (map[string]branchForkTurnBoundary, map[string]branchForkTurnBoundary) {
+	sourceByUserID := make(map[string]branchForkTurnBoundary, len(rows))
+	sourceByAssistantID := make(map[string]branchForkTurnBoundary, len(rows))
+	for _, row := range rows {
+		if !row.BranchID.Valid || !row.TurnID.Valid {
+			continue
 		}
-		if seq > 0 {
-			turnIDByBranchSeq[branchID][seq] = turn.ID
+		boundary := branchForkTurnBoundary{
+			BranchID:  row.BranchID,
+			TurnID:    row.TurnID,
+			TurnSeq:   row.TurnSeq,
+			BranchSeq: row.BranchSeq,
+		}
+		if row.UserID.Valid {
+			sourceByUserID[row.UserID.String()] = boundary
+		}
+		if row.AssistantID.Valid {
+			sourceByAssistantID[row.AssistantID.String()] = boundary
 		}
 	}
-	return turns
+	return sourceByUserID, sourceByAssistantID
+}
+
+func branchForkParentTurnID(
+	branch BranchNode,
+	branches []BranchNode,
+	rows []sqlc.ListSessionBranchTurnMessagesRow,
+	turnIDByBranchSeq map[string]map[int64]string,
+	sourceByUserID map[string]branchForkTurnBoundary,
+	sourceByAssistantID map[string]branchForkTurnBoundary,
+) string {
+	sourceMessageID := strings.TrimSpace(branch.ForkFromMessageID)
+	if sourceMessageID != "" {
+		if source, ok := sourceByUserID[sourceMessageID]; ok {
+			if previousTurn, hasPreviousTurn := previousVisibleTurnBeforeFromRows(branches, rows, source.BranchID.String(), source.TurnSeq); hasPreviousTurn {
+				return previousTurn.TurnID.String()
+			}
+			return ""
+		}
+		if source, ok := sourceByAssistantID[sourceMessageID]; ok {
+			return source.TurnID.String()
+		}
+	}
+	if strings.TrimSpace(branch.ForkFromTurnID) != "" {
+		return branch.ForkFromTurnID
+	}
+	if branch.ForkFromTurnSeq > 0 {
+		return turnIDForBranchSeq(turnIDByBranchSeq, branch.ParentBranchID, branch.ForkFromTurnSeq)
+	}
+	return ""
+}
+
+func applyTurnGraphDepths(turns []BranchTurn) {
+	indexByID := make(map[string]int, len(turns))
+	for i := range turns {
+		indexByID[turns[i].ID] = i
+	}
+	depthByID := make(map[string]int, len(turns))
+	var depthFor func(string, map[string]bool) int
+	depthFor = func(turnID string, visiting map[string]bool) int {
+		if depth, ok := depthByID[turnID]; ok {
+			return depth
+		}
+		index, ok := indexByID[turnID]
+		if !ok {
+			return 0
+		}
+		if visiting[turnID] {
+			return 0
+		}
+		visiting[turnID] = true
+		depth := 0
+		parentID := strings.TrimSpace(turns[index].ParentTurnID)
+		if parentID != "" {
+			if _, ok := indexByID[parentID]; ok {
+				depth = depthFor(parentID, visiting) + 1
+			}
+		}
+		delete(visiting, turnID)
+		depthByID[turnID] = depth
+		return depth
+	}
+	for i := range turns {
+		turns[i].Depth = depthFor(turns[i].ID, make(map[string]bool))
+	}
 }
 
 func turnIDForBranchSeq(index map[string]map[int64]string, branchID string, seq int64) string {

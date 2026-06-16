@@ -603,6 +603,8 @@ type ToolApprovalRequest struct {
 	DecidedByChannelIdentityID   pgtype.UUID        `json:"decided_by_channel_identity_id"`
 	RequestedMessageID           pgtype.UUID        `json:"requested_message_id"`
 	PromptMessageID              pgtype.UUID        `json:"prompt_message_id"`
+	PersistBranchID              pgtype.UUID        `json:"persist_branch_id"`
+	PersistTurnID                pgtype.UUID        `json:"persist_turn_id"`
 	PromptExternalMessageID      string             `json:"prompt_external_message_id"`
 	SourcePlatform               string             `json:"source_platform"`
 	ReplyTarget                  string             `json:"reply_target"`
@@ -684,6 +686,8 @@ type UserInputRequest struct {
 	AssistantMessageID           pgtype.UUID        `json:"assistant_message_id"`
 	ToolResultMessageID          pgtype.UUID        `json:"tool_result_message_id"`
 	PromptMessageID              pgtype.UUID        `json:"prompt_message_id"`
+	PersistBranchID              pgtype.UUID        `json:"persist_branch_id"`
+	PersistTurnID                pgtype.UUID        `json:"persist_turn_id"`
 	PromptExternalMessageID      string             `json:"prompt_external_message_id"`
 	SourcePlatform               string             `json:"source_platform"`
 	ReplyTarget                  string             `json:"reply_target"`

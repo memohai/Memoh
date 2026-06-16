@@ -575,6 +575,8 @@ type ToolApprovalRequest struct {
 	DecidedByChannelIdentityID   sql.NullString `json:"decided_by_channel_identity_id"`
 	RequestedMessageID           sql.NullString `json:"requested_message_id"`
 	PromptMessageID              sql.NullString `json:"prompt_message_id"`
+	PersistBranchID              sql.NullString `json:"persist_branch_id"`
+	PersistTurnID                sql.NullString `json:"persist_turn_id"`
 	PromptExternalMessageID      string         `json:"prompt_external_message_id"`
 	SourcePlatform               string         `json:"source_platform"`
 	ReplyTarget                  string         `json:"reply_target"`
@@ -636,6 +638,8 @@ type UserInputRequest struct {
 	AssistantMessageID           sql.NullString `json:"assistant_message_id"`
 	ToolResultMessageID          sql.NullString `json:"tool_result_message_id"`
 	PromptMessageID              sql.NullString `json:"prompt_message_id"`
+	PersistBranchID              sql.NullString `json:"persist_branch_id"`
+	PersistTurnID                sql.NullString `json:"persist_turn_id"`
 	PromptExternalMessageID      string         `json:"prompt_external_message_id"`
 	SourcePlatform               string         `json:"source_platform"`
 	ReplyTarget                  string         `json:"reply_target"`

@@ -101,6 +101,46 @@ func TestMergeToolApprovalsUsesCanApproveFunction(t *testing.T) {
 	}
 }
 
+func TestFilterUITurnPageKeepsCompleteTurns(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	turns := []conversation.UITurn{
+		{ID: "turn-1", Role: "user", Timestamp: base.Add(time.Minute)},
+		{ID: "turn-2", Role: "assistant", Timestamp: base.Add(2 * time.Minute)},
+		{ID: "turn-3", Role: "user", Timestamp: base.Add(3 * time.Minute)},
+		{ID: "turn-4", Role: "assistant", Timestamp: base.Add(4 * time.Minute)},
+	}
+
+	latest := filterUITurnPage(turns, time.Time{}, "", false, 2)
+	if got := turnIDs(latest); strings.Join(got, ",") != "turn-3,turn-4" {
+		t.Fatalf("latest IDs = %v", got)
+	}
+
+	before := filterUITurnPage(turns, turns[2].Timestamp, "turn-3", true, 2)
+	if got := turnIDs(before); strings.Join(got, ",") != "turn-1,turn-2" {
+		t.Fatalf("before IDs = %v", got)
+	}
+
+	beforeByTime := filterUITurnPage(turns, turns[2].Timestamp, "", true, 2)
+	if got := turnIDs(beforeByTime); strings.Join(got, ",") != "turn-1,turn-2" {
+		t.Fatalf("before by time IDs = %v", got)
+	}
+
+	beforeMissingID := filterUITurnPage(turns, turns[2].Timestamp, "missing-turn", true, 2)
+	if got := turnIDs(beforeMissingID); strings.Join(got, ",") != "turn-1,turn-2" {
+		t.Fatalf("before missing ID fallback IDs = %v", got)
+	}
+}
+
+func turnIDs(turns []conversation.UITurn) []string {
+	out := make([]string, 0, len(turns))
+	for _, turn := range turns {
+		out = append(out, turn.ID)
+	}
+	return out
+}
+
 func TestWriteSSEJSON(t *testing.T) {
 	t.Parallel()
 

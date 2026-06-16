@@ -84,9 +84,11 @@
                   :is-scrolling="isScrolling"
                   :is-last-message="index === messages.length - 1"
                   :copied="copiedMessageId === msg.id"
+                  :can-fork="canForkChatMessage(msg.id)"
                   :can-rewrite="canRewriteMessage(msg.id)"
                   @active="isActiveEl"
                   @copy-message="handleCopyMessage"
+                  @fork-message="handleForkMessage"
                   @rewrite-request="handleRewriteRequest"
                 />
               </div>
@@ -422,7 +424,7 @@
                   v-model="inputText"
                   rows="1"
                   :placeholder="activeChatReadOnly ? $t('chat.readonlyHint') : $t('chat.inputPlaceholder')"
-                  :disabled="!currentBotId || activeChatReadOnly"
+                  :disabled="!currentBotId || activeChatReadOnly || chatSendBlocked"
                   class="field-sizing-content resize-none break-words bg-transparent text-base leading-[var(--chat-leading)] text-foreground outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
                   :class="isMultiline
                     ? 'order-none w-full basis-full pl-2 pr-1 pt-2 pb-1.5 max-h-52'
@@ -666,7 +668,7 @@
                       v-if="!streaming"
                       type="button"
                       variant="brand"
-                      :disabled="!showSend || !currentBotId || activeChatReadOnly"
+                      :disabled="!showSend || !currentBotId || activeChatReadOnly || chatSendBlocked"
                       aria-label="Send message"
                       class="absolute inset-0 size-9 rounded-full transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
                       :class="showSend ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
@@ -746,7 +748,7 @@ import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { acpAgentIcon, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID } from '@/utils/acp'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { canRewriteRequest, cleanUserText, getMessageCopyText, persistentMessageId } from '@/utils/chat-text'
+import { canForkMessage, canRewriteRequest, cleanUserText, getMessageCopyText, persistentMessageId } from '@/utils/chat-text'
 import { useClipboard } from '@/composables/useClipboard'
 import { toast } from '@memohai/ui'
 
@@ -987,6 +989,7 @@ const {
   activeChatReadOnly,
   loadingOlder,
   loadingChats,
+  chatSendBlocked,
   hasMoreOlder,
   overrideModelId,
   overrideReasoningEffort,
@@ -1890,6 +1893,17 @@ async function handleRewriteRequest(messageId: string) {
   pendingFiles.value = []
 }
 
+async function handleForkMessage(messageId: string) {
+  const message = messages.value.find(item => item.id === messageId || persistentMessageId(item) === messageId)
+  if (!message || !canForkMessage(message)) return
+  await chatStore.forkMessage(persistentMessageId(message))
+}
+
+function canForkChatMessage(messageId: string) {
+  const message = messages.value.find(item => item.id === messageId || persistentMessageId(item) === messageId)
+  return !!message && canForkMessage(message)
+}
+
 function canRewriteMessage(messageId: string) {
   const latest = latestRewriteableRequest.value
   return !!latest && (latest.id === messageId || persistentMessageId(latest) === messageId)
@@ -2302,7 +2316,7 @@ async function handleSend() {
   // isAutoScroll.value = true
   const text = inputText.value.trim()
   const files = [...pendingFiles.value]
-  if ((!text && !files.length) || streaming.value || activeChatReadOnly.value) return
+  if ((!text && !files.length) || streaming.value || activeChatReadOnly.value || chatSendBlocked.value) return
   if (activeIsACP.value && files.length) {
     composerError.value = t('chat.acpAttachmentsUnsupported')
     return

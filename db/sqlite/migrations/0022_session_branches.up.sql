@@ -1,4 +1,4 @@
--- 0021_session_branches
+-- 0022_session_branches
 -- Add in-session branch paths for fork/edit-and-rerun chat history.
 
 PRAGMA foreign_keys = OFF;
@@ -16,7 +16,7 @@ SET sql = replace(sql, 'bot_sessions_old', 'bot_sessions')
 WHERE sql LIKE '%bot_sessions_old%';
 
 PRAGMA writable_schema = OFF;
-PRAGMA schema_version = 1000021;
+PRAGMA schema_version = 1000022;
 
 CREATE TABLE IF NOT EXISTS bot_sessions_new (
   id TEXT PRIMARY KEY,

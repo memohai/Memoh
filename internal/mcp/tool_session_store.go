@@ -240,6 +240,15 @@ func MergeToolSessionContext(base, latest ToolSessionContext) ToolSessionContext
 	if value := strings.TrimSpace(latest.StreamID); value != "" {
 		merged.StreamID = value
 	}
+	if value := strings.TrimSpace(latest.ToolCallID); value != "" {
+		merged.ToolCallID = value
+	}
+	if value := strings.TrimSpace(latest.PersistBranchID); value != "" {
+		merged.PersistBranchID = value
+	}
+	if value := strings.TrimSpace(latest.PersistTurnID); value != "" {
+		merged.PersistTurnID = value
+	}
 	if value := strings.TrimSpace(latest.SessionType); value != "" {
 		merged.SessionType = value
 	}

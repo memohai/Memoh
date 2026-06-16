@@ -148,7 +148,7 @@ func TestSQLiteSessionBranchesMigratesExistingSessionHistory(t *testing.T) {
 	closeMigrationSQLite(t, db)
 
 	if err := RunMigrateTarget(nil, MigrationTarget{Driver: DriverSQLite, DSN: dsn}, sqliteMigrationsFS(t), "up", nil); err != nil {
-		t.Fatalf("migrate through 0021_session_branches: %v", err)
+		t.Fatalf("migrate through 0022_session_branches: %v", err)
 	}
 
 	db = openMigrationSQLite(t, dsn)

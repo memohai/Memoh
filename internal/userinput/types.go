@@ -47,6 +47,8 @@ type CreatePendingInput struct {
 	ToolName                     string
 	Input                        any
 	ProviderMetadata             map[string]any
+	PersistBranchID              string
+	PersistTurnID                string
 	SourcePlatform               string
 	ReplyTarget                  string
 	ConversationType             string
@@ -96,6 +98,8 @@ type Request struct {
 	Result                  map[string]any `json:"result,omitempty"`
 	ProviderMetadata        map[string]any `json:"-"`
 	PromptExternalMessageID string         `json:"prompt_external_message_id,omitempty"`
+	PersistBranchID         string         `json:"-"`
+	PersistTurnID           string         `json:"-"`
 	SourcePlatform          string         `json:"source_platform,omitempty"`
 	ReplyTarget             string         `json:"reply_target,omitempty"`
 	ConversationType        string         `json:"conversation_type,omitempty"`
