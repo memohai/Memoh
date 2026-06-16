@@ -717,6 +717,11 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 
 			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws stream error",
 				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}) error {
+					// Persist inbound attachments into the media store first so each
+					// carries a content_hash. Without one the file is still inlined
+					// for the model to see, but it is never linked to the stored user
+					// message and would vanish from history once the session refreshes.
+					ingestedAttachments := h.ingestWSInboundAttachments(ctx, botID, chatAttachments)
 					req := conversation.ChatRequest{
 						BotID:                   botID,
 						ChatID:                  botID,
@@ -729,7 +734,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						Query:                   text,
 						CurrentChannel:          h.channelType.String(),
 						Channels:                []string{h.channelType.String()},
-						Attachments:             chatAttachments,
+						Attachments:             ingestedAttachments,
 						Model:                   strings.TrimSpace(msg.ModelID),
 						ReasoningEffort:         strings.TrimSpace(msg.ReasoningEffort),
 						ToolHTTPURL:             buildACPMCPToolsURL(c, botID),
@@ -995,6 +1000,40 @@ func extractAssetRefsFromProcessedEvent(event json.RawMessage) []messagepkg.Asse
 
 func applyBundleToItemMap(item map[string]any, bundle attachmentpkg.Bundle) map[string]any {
 	return bundle.MergeIntoMap(item)
+}
+
+// ingestWSInboundAttachments persists inbound user attachments (data URLs or
+// container paths) into the media store so each carries a content_hash. The
+// gateway can inline a raw base64 payload for the model to see, but only
+// attachments with a content_hash are linked to the persisted user message —
+// so without this step the file shows up in the live turn yet disappears from
+// history after the session refreshes. Mirrors the channel inbound path's
+// ingestInboundAttachments behaviour for the WebSocket transport.
+func (h *LocalChannelHandler) ingestWSInboundAttachments(ctx context.Context, botID string, attachments []conversation.ChatAttachment) []conversation.ChatAttachment {
+	if len(attachments) == 0 || h.mediaService == nil || strings.TrimSpace(botID) == "" {
+		return attachments
+	}
+	result := make([]conversation.ChatAttachment, 0, len(attachments))
+	for _, att := range attachments {
+		if strings.TrimSpace(att.ContentHash) != "" {
+			result = append(result, att)
+			continue
+		}
+		bundle := conversation.BundleFromChatAttachment(att)
+		if strings.TrimSpace(bundle.Base64) == "" && strings.TrimSpace(bundle.Path) == "" {
+			result = append(result, att)
+			continue
+		}
+		ingested, ok := h.ingestSingleAttachment(ctx, botID, bundle)
+		if !ok {
+			// Keep the original so the model can still see the inlined payload
+			// even if persistence failed.
+			result = append(result, att)
+			continue
+		}
+		result = append(result, conversation.ChatAttachmentFromBundle(ingested))
+	}
+	return result
 }
 
 func parseWSClientAttachments(rawAttachments []json.RawMessage) []conversation.ChatAttachment {
