@@ -136,6 +136,26 @@ The `gap-px` + `bg-border` parent + `bg-card` children draws hairline dividers b
 tiles with no per-tile border. (Contrast: the dirty page wraps each tile in its own
 `rounded-md border` and tints the active one — card-in-card.)
 
+**Short readout (≈3 values) → prefer separated sibling cards, not the hairline join.**
+For a handful of values a center hairline reads as a cramped seam; gapped sibling cards
+breathe and parse as three calm numbers:
+
+```vue
+<div class="grid grid-cols-3 gap-3">
+  <div class="min-w-0 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3.5">
+    <p class="text-xs text-muted-foreground">{{ label }}</p>
+    <p class="mt-1 text-xl font-semibold tabular-nums text-foreground">{{ value }}</p>
+  </div>
+  <!-- … -->
+</div>
+```
+
+The hairline-join earns its keep only when the grid is denser/longer (many tiles, a
+2×4). Either form is fine **because the tiles are siblings at the section's top level** —
+the per-tile border here is NOT card-in-card. Card-in-card is the two forbidden moves:
+wrapping the tiles in an *outer* card, or tinting the active tile. (Live: `bot-container.vue`
+Container readout uses the separated-sibling form; `bot-overview.vue` uses the hairline join.)
+
 ### Empty / loading that holds the frame
 
 **An empty state keeps the populated skeleton — the same page with no rows yet — and `dashed`
@@ -500,6 +520,13 @@ see it, replace it with the right column. This is your strip-list when refactori
 | `opacity-50 grayscale` for disabled | muddy disabled treatment | `opacity-40` (the contract's single disabled rule) |
 | invented "metrics" cards w/ `text-2xl` numbers, status tints | dashboard chrome that isn't the language | stat-tile grid recipe above, black/white/gray |
 | sticky `bg-background/95 backdrop-blur` "sovereign header" | invented page chrome | the plain page-shell `h1` + a save action where it belongs |
+| a consequential / lifecycle op (`Stop`, `Recreate`, `Delete`) parked in the page **title-row action slot** | that slot is read as *the* page CTA — a non-glance / weighty op there over-weights it and folds "manage" into "glance at status" | title slot holds only a safe page-level action (a save), or **nothing**; group lifecycle + destructive ops (Start/Stop, Delete) in a dedicated **operations section at the bottom** — when it holds benign ops too, name it "Actions" rather than "Danger zone" (the destructive control still carries its own `destructive`+confirm weight) — see `bot-container.vue` |
+| a manual **Refresh** button users must keep pressing for live data | refresh-as-a-feature offloads the freshness job onto the user; the data is stale until they remember to click | poll it yourself while the surface is visible (tab active + `visibilitychange`), silently (no loading-flag flicker, no toast, keep last-good on a transient error), and refresh on return-to-tab; reserve a button only for genuinely expensive/explicit reloads |
+| a status/usage header row carrying title + badge + timestamp **and** an action button | the one glanceable readout gets overloaded; the eye can't separate "what is" from "what to do" | keep the readout to label + status + "Updated {time}"; the doing lives in the operations section |
+| a named **entry row** padded with a preview "summary" that doesn't help the 1% who came with intent (`No snapshots yet`, the first detail field like the image name, `CPU 2 cores`) | the summary masquerades as info but earns nothing — the label already says the concern, and the visitor opening it doesn't need a teaser; it's noise the 99% scan past | entry rows are **label + button only**; let the dialog carry the real data. Only keep a row summary when it answers a question the user would otherwise open the dialog to ask — see `bot-container.vue` manage rows |
+| a gauge tile showing usage with **no ceiling** (one metric has `/ limit` or `No limit`, a sibling has nothing), or a gauge sub showing a **diagnostic path** (a bare `/`) instead of a bound | a dashboard reads as "value against a bound"; an unbounded gauge looks broken next to bounded siblings, and a lone `/` says nothing about capacity | every gauge states its ceiling — `used / cap` when limited, the shared `No limit` string when not; pull the cap from the live metric or, if absent there, the configured limit; the mount path is diagnostic → it lives in Details, never in the gauge |
+| a lifecycle/destructive **action row** carrying a description that restates the verb (`Pause or resume the runtime`) or generic danger boilerplate (`cannot be undone, proceed with caution`) | it reads as caution theater — the verb is in the label, and the weight is already carried by the `destructive` (red) button + the confirm dialog; the line is filler the eye skips | action rows are **label + button**; let the red button + confirm dialog (with its real keep-data/irreversible choice) carry the weight. Keep a line only for a *non-obvious, non-restating* fact — and even then prefer putting it in the dialog where the decision happens — see `bot-container.vue` Actions |
+| a DB-first status read that returns the cached record even when the **runtime resource is definitively gone** (live lookup 404s but the error is swallowed) | the surface renders a ghost (looks healthy) while every secondary live call — metrics, snapshots, start/stop — 404s, greeting the user with a contradictory "not found" toast on a page that shows the thing right there | reconcile: on a *definitive* not-found from the runtime, surface missing so the UI falls to its create/recreate path; still tolerate *transient* runtime errors (keep the record). Secondary fetches behind a dialog load silently and never raise a page-level error — see `bot-container.vue` / `GetContainerInfo` |
 | `"+"` / `"×"` glyphs, hand-rolled icon hover bg, hand-rolled tooltip | not real components; can't receive size/stroke tokens | lucide components in `<Button size="icon">`; `@memohai/ui` `Tooltip` |
 | `Transition name="fade"` + ad-hoc `transition-all duration-300` | lazy catch-all motion | the directional swap / token durations; transition the real property |
 | edge-to-edge `border-b` slicing a card into stacked tiles | wrong divider width inside a surface | inset the row (`mx-4` + `last:border-b-0`); full-bleed only for structural bands |
@@ -513,6 +540,8 @@ see it, replace it with the right column. This is your strip-list when refactori
 | two different "show advanced" toggles (one ghost + trailing `ChevronDown`, one outline + leading `ChevronRight`) | the same affordance drawn two ways drifts further apart every page | one mechanism — leading `ChevronRight` rotate-90; text-button skin in a Dialog form, outline-button skin in a card (§ Advanced disclosure) |
 | one-click delete, or ghost button + `text-destructive` | unconfirmed/under-weighted destruction | filled `variant="destructive"` + confirm step; danger card at the bottom |
 | always-present "Status: OK" / healthy-state row | noise where a healthy state should say nothing | progressive disclosure — show only when actionable, hide the whole block otherwise |
+| a resource-limit form / a snapshot-history list / a button pile sitting on the **root** surface | makes the 99% who came to glance at state carry the 1%'s deep-operation weight | move each deep op behind a named entry row (`label` + summary + button) that opens a focused form/dialog with the inputs, the data, and the action (§ 12 / SKILL § 12) |
+| an in-card "Advanced" / "Show details" disclosure that stashes whole features (limits + snapshots + restore/backup) on the root card | not progressive disclosure — it defers weight onto the same surface and mixes diagnostics with destructive ops in one junk drawer | one named door per concern → its own dialog (*Resource limits* / *Snapshots & restore* / *Details* / *Delete*); reserve the in-card **More options** chevron for secondary fields *inside a form* only |
 | hand-written control (clickable `<div>`/`<span>`, bespoke popover list, `<div>`-grid "table") | re-implements a primitive; can't take size/token/focus/a11y, and drifts | reuse the `@memohai/ui` atom as-is; never rebuild a control from raw markup |
 | floating "Saved" / "已保存" status, or any orphan save/sync label misaligned with `#actions` | answers a question the user isn't asking; breaks the column grid; duplicates the disabled Save button | follow § 8 / § 10 save models — silent auto-save, or unsaved-only beside Save in `#actions`, success via toast once |
 | hand-built menu (raw `<button>` rows, `<div @click>`, `<hr>` / `border-b` / `h-px` dividers inside a popover) | bypasses `lib/menu.ts`; row height, highlight, separator, and shell radius drift from Select/Dropdown/Context | `DropdownMenu` / `ContextMenu` + `*MenuItem` + `*MenuSeparator` + `*MenuLabel`; trigger via `Button` / `TextButton` |

@@ -262,6 +262,15 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 				if liveInfo, liveErr := m.service.GetContainer(ctx, row.ContainerID); liveErr == nil {
 					cdiDevices = workspaceCDIDevicesFromLabels(liveInfo.Labels)
 					runtimeBackend = liveInfo.Runtime.Name
+				} else if ctr.IsNotFound(liveErr) {
+					// The DB still has a record but the runtime container is gone
+					// (removed out-of-band, pruned, or a half-failed create left the
+					// row behind). Report it as missing so callers fall back to the
+					// recreate path instead of trusting a stale record whose live
+					// operations (metrics, snapshots, start/stop) all fail. Transient
+					// runtime errors are intentionally tolerated: only a definitive
+					// not-found invalidates the record.
+					return nil, ErrContainerNotFound
 				}
 				createdAt := time.Time{}
 				if row.CreatedAt.Valid {
