@@ -657,6 +657,17 @@ session list — has its own discipline, distilled from the Workspace and Deskto
   grid sitting next to the very thing it describes; the live view already shows connecting /
   installing / live / can't-reach. Surface at most one distilled human status, and a *problem*
   only when it's actionable (§9: a healthy state says nothing).
+- **Enumerate the in-between states; a blank surface is not one of them.** This is the step that's
+  easy to skip and the one that bites: a live surface has more states than "loading" and "live" —
+  *idle, connecting, connected-but-no-frame-yet, reconnecting, can't-reach.* The Desktop tab
+  shipped the happy path and the explicit *prepare* path and left the gaps, so the user sat on a
+  blank black box that reads as broken. **List every state first, then give each one a visible,
+  centered affordance** (spinner + one line, *over* the surface — not in an edge footer that a
+  tall 4:3 frame pushes off-screen, which is how the status hid in the first place). And **gate
+  the "live" view on real content, not the transport flag**: a WebRTC connection reports
+  `connected` *before* the first frame paints, so switching on the flag still shows blank — hold
+  the loading state until a frame actually arrives (`@playing` → a `videoReady` ref, reset on
+  teardown). The flag says the pipe is open; only a frame proves something is on screen.
 
 ## The review ritual — run it on every finished page
 
