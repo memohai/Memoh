@@ -182,6 +182,12 @@ func (c *Client) ExecWithStdin(ctx context.Context, command, workDir string, tim
 	return c.exec(ctx, command, workDir, timeout, stdinData, nil)
 }
 
+// ExecWithStdinEnv runs a command with optional stdin data and additional
+// environment variables.
+func (c *Client) ExecWithStdinEnv(ctx context.Context, command, workDir string, timeout int32, stdinData []byte, env []string) (*ExecResult, error) {
+	return c.exec(ctx, command, workDir, timeout, stdinData, env)
+}
+
 func (c *Client) exec(ctx context.Context, command, workDir string, timeout int32, stdinData []byte, env []string) (*ExecResult, error) {
 	stream, err := c.svc.Exec(ctx)
 	if err != nil {
@@ -194,9 +200,16 @@ func (c *Client) exec(ctx context.Context, command, workDir string, timeout int3
 		WorkDir:        workDir,
 		Env:            env,
 		TimeoutSeconds: timeout,
-		StdinData:      stdinData,
 	})
 	if err != nil {
+		return nil, err
+	}
+	if len(stdinData) > 0 {
+		if err := stream.Send(&pb.ExecInput{StdinData: stdinData}); err != nil {
+			return nil, err
+		}
+	}
+	if err := stream.CloseSend(); err != nil {
 		return nil, err
 	}
 

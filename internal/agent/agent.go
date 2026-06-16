@@ -14,6 +14,7 @@ import (
 
 	"github.com/memohai/memoh/internal/agent/background"
 	"github.com/memohai/memoh/internal/agent/tools"
+	"github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/userinput"
 	"github.com/memohai/memoh/internal/workspace/bridge"
@@ -24,6 +25,7 @@ type Agent struct {
 	client         *sdk.Client
 	toolProviders  []tools.ToolProvider
 	bridgeProvider bridge.Provider
+	hookService    *hooks.Service
 	logger         *slog.Logger
 }
 
@@ -36,6 +38,7 @@ func New(deps Deps) *Agent {
 	return &Agent{
 		client:         sdk.NewClient(),
 		bridgeProvider: deps.BridgeProvider,
+		hookService:    deps.HookService,
 		logger:         logger.With(slog.String("service", "agent")),
 	}
 }
@@ -117,6 +120,18 @@ func sendEvent(ctx context.Context, ch chan<- StreamEvent, evt StreamEvent) bool
 func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEvent) {
 	streamCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
+	aborted := false
+	turnError := ""
+	defer func() {
+		event := hooks.EventTurnEnd
+		if aborted || strings.TrimSpace(turnError) != "" {
+			event = hooks.EventTurnError
+			if strings.TrimSpace(turnError) == "" {
+				turnError = "agent run aborted"
+			}
+		}
+		a.runTurnHook(context.WithoutCancel(ctx), cfg, event, turnError)
+	}()
 
 	// Stream emitter: tools targeting the current conversation push
 	// side-effect events (attachments, reactions, speech) directly here.
@@ -130,13 +145,14 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		var err error
 		sdkTools, err = a.assembleTools(streamCtx, cfg, streamEmitter)
 		if err != nil {
-			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: fmt.Sprintf("assemble tools: %v", err)})
+			turnError = fmt.Sprintf("assemble tools: %v", err)
+			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
 			return
 		}
 	}
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
-
-	aborted := false
+	approvalTools := append([]sdk.Tool(nil), sdkTools...)
+	sdkTools = a.wrapToolsWithHooks(ctx, cfg, sdkTools)
 
 	// Loop detection setup
 	var textLoopGuard *TextLoopGuard
@@ -232,7 +248,21 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		}
 	}
 
-	opts := a.buildGenerateOptions(cfg, sdkTools, prepareStep)
+	prepareStep = a.wrapPrepareStepWithModelHook(streamCtx, cfg, prepareStep)
+	var err error
+	cfg, err = a.applyBeforeModelCallHook(streamCtx, cfg, 0)
+	if err != nil {
+		turnError = err.Error()
+		sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
+		return
+	}
+	opts := a.buildGenerateOptions(cfg, sdkTools, approvalTools, prepareStep)
+	modelStepIndex := 0
+	opts = append(opts, sdk.WithOnStep(func(step *sdk.StepResult) *sdk.GenerateParams {
+		a.runAfterModelCallHook(streamCtx, cfg, step, modelStepIndex)
+		modelStepIndex++
+		return nil
+	}))
 
 	retryCfg := cfg.Retry
 	if retryCfg.MaxAttempts <= 0 {
@@ -247,7 +277,8 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			break
 		}
 		if !isRetryableStreamError(err) {
-			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: fmt.Sprintf("stream start: %v", err)})
+			turnError = fmt.Sprintf("stream start: %v", err)
+			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
 			return
 		}
 		a.logger.Warn("stream start failed, retrying",
@@ -264,13 +295,15 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			return
 		}
 		if attempt+1 >= retryCfg.MaxAttempts {
-			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: fmt.Sprintf("stream start: all %d attempts failed (last: %v)", retryCfg.MaxAttempts, err)})
+			turnError = fmt.Sprintf("stream start: all %d attempts failed (last: %v)", retryCfg.MaxAttempts, err)
+			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
 			return
 		}
 		delay := retryDelay(attempt, retryCfg)
 		if delay > 0 {
 			if err := sleepWithContext(streamCtx, delay); err != nil {
-				sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: fmt.Sprintf("stream start: context cancelled during retry: %v", err)})
+				turnError = fmt.Sprintf("stream start: context cancelled during retry: %v", err)
+				sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
 				return
 			}
 		}
@@ -464,6 +497,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			if isAskUserArgumentParseError(errMsg) {
 				continue
 			}
+			turnError = errMsg
 			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: errMsg})
 
 			// Mid-stream retry: if the error is retryable, attempt to continue
@@ -473,9 +507,12 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			if isRetryableStreamError(p.Error) {
 				streamResult, aborted = a.runMidStreamRetry(
 					ctx, streamCtx, cancel, toolLoopAbortCallIDs,
-					ch, cfg, sdkTools, prepareStep, streamResult,
+					ch, cfg, sdkTools, approvalTools, prepareStep, streamResult,
 					stepNumber, errMsg, &allText, textLoopProbeBuffer,
 				)
+				if !aborted {
+					turnError = ""
+				}
 			} else {
 				aborted = true
 			}
@@ -566,9 +603,18 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	sendEvent(deliveryCtx, ch, termEvent)
 }
 
-func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult, error) {
+func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *GenerateResult, retErr error) {
 	genCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
+	defer func() {
+		event := hooks.EventTurnEnd
+		errMsg := ""
+		if retErr != nil {
+			event = hooks.EventTurnError
+			errMsg = retErr.Error()
+		}
+		a.runTurnHook(context.WithoutCancel(ctx), cfg, event, errMsg)
+	}()
 	loopAbort := newLoopAbortState()
 
 	// Collecting emitter: tools push side-effect events here during generation.
@@ -587,6 +633,8 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 		}
 	}
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
+	approvalTools := append([]sdk.Tool(nil), sdkTools...)
+	sdkTools = a.wrapToolsWithHooks(ctx, cfg, sdkTools)
 
 	var toolLoopGuard *ToolLoopGuard
 	var textLoopGuard *TextLoopGuard
@@ -620,9 +668,17 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 		}
 	}
 
-	opts := a.buildGenerateOptions(cfg, sdkTools, prepareStep)
+	prepareStep = a.wrapPrepareStepWithModelHook(genCtx, cfg, prepareStep)
+	cfg, err := a.applyBeforeModelCallHook(genCtx, cfg, 0)
+	if err != nil {
+		return nil, err
+	}
+	opts := a.buildGenerateOptions(cfg, sdkTools, approvalTools, prepareStep)
+	modelStepIndex := 0
 	opts = append(opts,
 		sdk.WithOnStep(func(step *sdk.StepResult) *sdk.GenerateParams {
+			a.runAfterModelCallHook(genCtx, cfg, step, modelStepIndex)
+			modelStepIndex++
 			if cfg.LoopDetection.Enabled {
 				if toolLoopAbortCallIDs.Any() {
 					loopAbort.Set(ErrToolLoopDetected)
@@ -689,7 +745,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 	}, nil
 }
 
-func (*Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, prepareStep func(*sdk.GenerateParams) *sdk.GenerateParams) []sdk.GenerateOption {
+func (a *Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, approvalTools []sdk.Tool, prepareStep func(*sdk.GenerateParams) *sdk.GenerateParams) []sdk.GenerateOption {
 	system, messages, tools := models.ApplyPromptCache(
 		cfg.Model, cfg.PromptCacheTTL, cfg.System, cfg.Messages, tools,
 	)
@@ -702,8 +758,12 @@ func (*Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, prepareStep 
 	if len(tools) > 0 && cfg.SupportsToolCall {
 		opts = append(opts, sdk.WithTools(tools))
 	}
-	if cfg.ToolApprovalHandler != nil {
-		opts = append(opts, sdk.WithApprovalHandler(cfg.ToolApprovalHandler))
+	approvalHandler := cfg.ToolApprovalHandler
+	if a != nil && a.hookService != nil {
+		approvalHandler = a.wrapApprovalHandlerWithHooks(cfg, approvalTools, approvalHandler)
+	}
+	if approvalHandler != nil {
+		opts = append(opts, sdk.WithApprovalHandler(approvalHandler))
 	}
 
 	// Wrap the existing prepareStep (if any) with mid-task context pruning.
@@ -784,7 +844,7 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 		}
 		allTools = append(allTools, providerTools...)
 	}
-	if cfg.ToolApprovalHandler != nil {
+	if cfg.ToolApprovalHandler != nil || a.hookService != nil {
 		allTools = markApprovalTools(allTools)
 	}
 	return allTools, nil
@@ -792,10 +852,7 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 
 func markApprovalTools(tools []sdk.Tool) []sdk.Tool {
 	for i := range tools {
-		switch tools[i].Name {
-		case "read", "list", "write", "edit", "apply_patch", "exec":
-			tools[i].RequireApproval = true
-		}
+		tools[i].RequireApproval = true
 	}
 	return tools
 }
@@ -1083,6 +1140,7 @@ func (a *Agent) runMidStreamRetry(
 	ch chan<- StreamEvent,
 	cfg RunConfig,
 	sdkTools []sdk.Tool,
+	approvalTools []sdk.Tool,
 	prepareStep func(*sdk.GenerateParams) *sdk.GenerateParams,
 	prevResult *sdk.StreamResult,
 	stepNumber int,
@@ -1126,7 +1184,7 @@ func (a *Agent) runMidStreamRetry(
 		// media resolution, and other prepare-step logic — same as initial stream.
 		retryCfgCopy := cfg
 		retryCfgCopy.Messages = prevResult.Messages
-		retryOpts := a.buildGenerateOptions(retryCfgCopy, sdkTools, prepareStep)
+		retryOpts := a.buildGenerateOptions(retryCfgCopy, sdkTools, approvalTools, prepareStep)
 
 		retryResult, retryErr := a.client.StreamText(streamCtx, retryOpts...)
 		if retryErr != nil {

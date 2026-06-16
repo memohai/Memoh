@@ -1428,6 +1428,46 @@ export type HandlersGetContainerResponse = {
     workspace_backend?: string;
 };
 
+export type HandlersHookEventInfo = {
+    name?: string;
+    runtime_supported?: boolean;
+};
+
+export type HandlersHookTestRequest = {
+    approval?: {
+        [key: string]: unknown;
+    };
+    channel?: {
+        [key: string]: unknown;
+    };
+    chat_id?: string;
+    error?: string;
+    event?: string;
+    extra?: {
+        [key: string]: unknown;
+    };
+    memory?: {
+        [key: string]: unknown;
+    };
+    session_id?: string;
+    tool?: HooksToolPayload;
+    turn?: {
+        [key: string]: unknown;
+    };
+};
+
+export type HandlersHookTestResponse = {
+    config_exists?: boolean;
+    result?: HooksResult;
+};
+
+export type HandlersHooksEventsResponse = {
+    actions?: Array<string>;
+    config_path?: string;
+    decisions?: Array<string>;
+    events?: Array<HandlersHookEventInfo>;
+};
+
 export type HandlersInstallPluginRequest = {
     plugin_id?: string;
     variables?: {
@@ -1838,6 +1878,42 @@ export type HeartbeatLog = {
     started_at?: string;
     status?: string;
     usage?: unknown;
+};
+
+export type HooksActionResult = {
+    action_type?: string;
+    decision?: string;
+    error?: string;
+    exit_code?: number;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+    reason?: string;
+    result?: unknown;
+    stderr?: string;
+    stdout?: string;
+};
+
+export type HooksResult = {
+    action_results?: Array<HooksActionResult>;
+    actions_run?: number;
+    append_context?: string;
+    decision?: string;
+    hooks_matched?: number;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    reason?: string;
+    runtime_supported?: boolean;
+};
+
+export type HooksToolPayload = {
+    call_id?: string;
+    error?: string;
+    input?: unknown;
+    name?: string;
+    result?: unknown;
 };
 
 export type McpAuthorizeResult = {
@@ -5339,6 +5415,85 @@ export type GetBotsByBotIdHeartbeatLogsResponses = {
 };
 
 export type GetBotsByBotIdHeartbeatLogsResponse = GetBotsByBotIdHeartbeatLogsResponses[keyof GetBotsByBotIdHeartbeatLogsResponses];
+
+export type GetBotsByBotIdHooksEventsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/hooks/events';
+};
+
+export type GetBotsByBotIdHooksEventsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdHooksEventsError = GetBotsByBotIdHooksEventsErrors[keyof GetBotsByBotIdHooksEventsErrors];
+
+export type GetBotsByBotIdHooksEventsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersHooksEventsResponse;
+};
+
+export type GetBotsByBotIdHooksEventsResponse = GetBotsByBotIdHooksEventsResponses[keyof GetBotsByBotIdHooksEventsResponses];
+
+export type PostBotsByBotIdHooksTestData = {
+    /**
+     * Hook test payload
+     */
+    body: HandlersHookTestRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/hooks/test';
+};
+
+export type PostBotsByBotIdHooksTestErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdHooksTestError = PostBotsByBotIdHooksTestErrors[keyof PostBotsByBotIdHooksTestErrors];
+
+export type PostBotsByBotIdHooksTestResponses = {
+    /**
+     * OK
+     */
+    200: HandlersHookTestResponse;
+};
+
+export type PostBotsByBotIdHooksTestResponse = PostBotsByBotIdHooksTestResponses[keyof PostBotsByBotIdHooksTestResponses];
 
 export type PostBotsByBotIdLocalMessagesData = {
     /**

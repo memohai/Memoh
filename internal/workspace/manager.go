@@ -20,6 +20,7 @@ import (
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/identity"
 	netctl "github.com/memohai/memoh/internal/network"
 	skillset "github.com/memohai/memoh/internal/skills"
@@ -89,6 +90,7 @@ type Manager struct {
 	namespace         string
 	db                *pgxpool.Pool
 	queries           dbstore.Queries
+	hookService       *hooks.Service
 	logger            *slog.Logger
 	containerLockMu   sync.Mutex
 	containerLocks    map[string]*sync.Mutex
@@ -126,6 +128,10 @@ func NewManager(log *slog.Logger, service runtimeService, networkController netc
 	}
 	m.grpcPool = bridge.NewPool(m.dialTarget)
 	return m
+}
+
+func (m *Manager) SetHookService(h *hooks.Service) {
+	m.hookService = h
 }
 
 // SetBridgeTLS enables strict mTLS on TCP bridge dials and injects bridge-side
@@ -620,6 +626,13 @@ func (m *Manager) startWithLocalConfig(ctx context.Context, botID, image, worksp
 		return err
 	}
 	m.upsertContainerRecord(ctx, botID, containerID, "running", image)
+	if err := m.runWorkspaceHook(context.WithoutCancel(ctx), botID, hooks.EventWorkspaceStart, map[string]any{
+		"backend": bridge.WorkspaceBackendLocal,
+		"image":   image,
+		"path":    path,
+	}); err != nil {
+		m.logWorkspaceHookError(hooks.EventWorkspaceStart, botID, err)
+	}
 	return nil
 }
 
@@ -670,12 +683,23 @@ func (m *Manager) startWithResolvedConfig(ctx context.Context, botID, image stri
 	if !m.usesTCPBridge(ctx, containerID) {
 		m.clearLegacyRoute(botID)
 	}
+	if err := m.runWorkspaceHook(context.WithoutCancel(ctx), botID, hooks.EventWorkspaceStart, map[string]any{
+		"backend": bridge.WorkspaceBackendContainer,
+		"image":   image,
+	}); err != nil {
+		m.logWorkspaceHookError(hooks.EventWorkspaceStart, botID, err)
+	}
 	return nil
 }
 
 func (m *Manager) Stop(ctx context.Context, botID string, timeout time.Duration) error {
 	if err := validateBotID(botID); err != nil {
 		return err
+	}
+	if err := m.runWorkspaceHook(ctx, botID, hooks.EventWorkspaceStop, map[string]any{
+		"timeout_seconds": int(timeout.Seconds()),
+	}); err != nil {
+		m.logWorkspaceHookError(hooks.EventWorkspaceStop, botID, err)
 	}
 	return m.service.StopContainer(ctx, m.resolveContainerID(ctx, botID), &ctr.StopTaskOptions{
 		Timeout: timeout,

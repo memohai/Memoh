@@ -15,6 +15,7 @@ import (
 	dbpkg "github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/hooks"
 )
 
 // Session represents a chat session within a bot.
@@ -75,8 +76,9 @@ type CreateInput struct {
 
 // Service manages bot chat sessions.
 type Service struct {
-	queries dbstore.Queries
-	logger  *slog.Logger
+	queries     dbstore.Queries
+	hookService *hooks.Service
+	logger      *slog.Logger
 }
 
 // NewService creates a session service.
@@ -88,6 +90,10 @@ func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 		queries: queries,
 		logger:  log.With(slog.String("service", "session")),
 	}
+}
+
+func (s *Service) SetHookService(h *hooks.Service) {
+	s.hookService = h
 }
 
 // Create creates a new session.
@@ -153,7 +159,36 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 	if err != nil {
 		return Session{}, err
 	}
-	return toSession(row), nil
+	sess := toSession(row)
+	s.runSessionStartHook(context.WithoutCancel(ctx), sess)
+	return sess, nil
+}
+
+func (s *Service) runSessionStartHook(ctx context.Context, sess Session) {
+	if s == nil || s.hookService == nil {
+		return
+	}
+	req := hooks.Request{
+		Version:   1,
+		Event:     hooks.EventSessionStart,
+		BotID:     sess.BotID,
+		SessionID: sess.ID,
+		Workspace: hooks.WorkspaceInfo{
+			CWD: hooks.DefaultWorkDir,
+		},
+		Turn: map[string]any{
+			"session_type": sess.Type,
+			"route_id":     sess.RouteID,
+			"channel_type": sess.ChannelType,
+		},
+	}
+	if _, err := s.hookService.Run(ctx, req, nil); err != nil && s.logger != nil {
+		s.logger.Warn("session start hook failed",
+			slog.String("bot_id", sess.BotID),
+			slog.String("session_id", sess.ID),
+			slog.Any("error", err),
+		)
+	}
 }
 
 // UpdateTypeAndMetadata updates a session's runtime type and metadata in one
