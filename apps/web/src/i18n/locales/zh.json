@@ -1137,6 +1137,9 @@
     "statusError": "错误",
     "statusUnknown": "未测试",
     "lastProbed": "上次测试",
+    "testedAt": "{time}测试",
+    "commandRequired": "请先填写启动命令。",
+    "urlRequired": "请先填写端点 URL。",
     "authRequired": "需要授权",
     "oauth": {
       "title": "认证",
@@ -1203,7 +1206,8 @@
       "sse": "SSE"
     },
     "advancedSettings": "高级设置",
-    "advancedSettingsHint": "配置环境变量、请求头及 OAuth。",
+    "advancedHintStdio": "传给进程的环境变量。",
+    "advancedHintRemote": "请求头与授权。",
     "expand": "展开",
     "collapse": "收起",
     "envVars": "环境变量",
@@ -1212,7 +1216,6 @@
     "discoveredTools": "已发现的工具",
     "noToolsExposed": "该服务器未暴露任何工具。",
     "more": "更多",
-    "dangerZoneHint": "永久删除此服务器配置。",
     "importSandbox": "导入配置",
     "pathCopied": "路径已复制",
     "blindImport": "导入",

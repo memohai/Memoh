@@ -1141,6 +1141,9 @@
     "statusError": "Error",
     "statusUnknown": "Not tested",
     "lastProbed": "Last tested",
+    "testedAt": "Tested {time}",
+    "commandRequired": "Enter a command before saving.",
+    "urlRequired": "Enter an endpoint URL before saving.",
     "authRequired": "Authorization required",
     "oauth": {
       "title": "Authentication",
@@ -1207,7 +1210,8 @@
       "sse": "SSE"
     },
     "advancedSettings": "Advanced Settings",
-    "advancedSettingsHint": "Environment variables, headers, and OAuth.",
+    "advancedHintStdio": "Environment variables for the process.",
+    "advancedHintRemote": "Request headers and authorization.",
     "expand": "Expand",
     "collapse": "Collapse",
     "envVars": "Environment Variables",
@@ -1216,7 +1220,6 @@
     "discoveredTools": "Discovered Tools",
     "noToolsExposed": "No tools exposed by this server.",
     "more": "more",
-    "dangerZoneHint": "Permanently remove this server.",
     "importSandbox": "Import Configuration",
     "pathCopied": "Path copied to clipboard",
     "blindImport": "Import",
