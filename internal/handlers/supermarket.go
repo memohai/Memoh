@@ -36,15 +36,21 @@ type SupermarketHandler struct {
 	logger         *slog.Logger
 }
 
-type pluginSkillsWriter interface {
+type pluginBundleWriter interface {
 	Mkdir(ctx context.Context, path string) error
 	WriteFile(ctx context.Context, path string, content []byte) error
 }
 
-type pluginSkillsInstallResult struct {
+type pluginAssetInstallResult struct {
 	OK           bool   `json:"ok"`
 	FilesWritten int    `json:"files_written"`
 	Error        string `json:"error,omitempty"`
+}
+
+type pluginBundleInstallResult struct {
+	Skills  pluginAssetInstallResult
+	Hooks   pluginAssetInstallResult
+	Scripts pluginAssetInstallResult
 }
 
 func NewSupermarketHandler(
@@ -230,8 +236,8 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	result, installSkillsErr := h.installPluginSkills(c.Request().Context(), botID, req.PluginID, installation.PluginID)
-	installation = withPluginSkillsInstallMetadata(installation, result, installSkillsErr)
+	result, installBundleErr := h.installPluginBundle(c.Request().Context(), botID, req.PluginID, installation.PluginID)
+	installation = withPluginBundleInstallMetadata(installation, result, installBundleErr)
 	return c.JSON(http.StatusOK, installation)
 }
 
@@ -413,26 +419,26 @@ func (h *SupermarketHandler) fetchPluginEntry(c echo.Context, pluginID string) (
 	return manifest, nil
 }
 
-func (h *SupermarketHandler) installPluginSkills(ctx context.Context, botID, downloadPluginID, targetPluginID string) (pluginSkillsInstallResult, error) {
-	result := pluginSkillsInstallResult{OK: true}
+func (h *SupermarketHandler) installPluginBundle(ctx context.Context, botID, downloadPluginID, targetPluginID string) (pluginBundleInstallResult, error) {
+	result := newPluginBundleInstallResult()
 	if h.containers == nil {
-		return pluginSkillsInstallResult{}, errors.New("container provider is not configured")
+		return pluginBundleInstallResult{}, errors.New("container provider is not configured")
 	}
 	client, err := h.containers.MCPClient(ctx, botID)
 	if err != nil {
-		return pluginSkillsInstallResult{}, fmt.Errorf("container not reachable: %w", err)
+		return pluginBundleInstallResult{}, fmt.Errorf("container not reachable: %w", err)
 	}
 
 	downloadURL := h.baseURL + "/api/plugins/" + url.PathEscape(strings.TrimSpace(downloadPluginID)) + "/download"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
-		return pluginSkillsInstallResult{}, err
+		return pluginBundleInstallResult{}, err
 	}
 
 	resp, err := h.httpClient.Do(httpReq) //nolint:gosec // URL constructed from trusted config
 	if err != nil {
-		h.logger.Warn("supermarket plugin skills download failed", slog.String("url", downloadURL), slog.Any("error", err))
-		return pluginSkillsInstallResult{}, fmt.Errorf("supermarket unreachable: %w", err)
+		h.logger.Warn("supermarket plugin bundle download failed", slog.String("url", downloadURL), slog.Any("error", err))
+		return pluginBundleInstallResult{}, fmt.Errorf("supermarket unreachable: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -440,114 +446,172 @@ func (h *SupermarketHandler) installPluginSkills(ctx context.Context, botID, dow
 		return result, nil
 	}
 	if resp.StatusCode != http.StatusOK {
-		return pluginSkillsInstallResult{}, fmt.Errorf("supermarket returned status %d", resp.StatusCode)
+		return pluginBundleInstallResult{}, fmt.Errorf("supermarket returned status %d", resp.StatusCode)
 	}
 
 	gz, err := gzip.NewReader(resp.Body)
 	if err != nil {
-		return pluginSkillsInstallResult{}, fmt.Errorf("invalid gzip response from supermarket: %w", err)
+		return pluginBundleInstallResult{}, fmt.Errorf("invalid gzip response from supermarket: %w", err)
 	}
 	defer func() { _ = gz.Close() }()
 
-	filesWritten, err := extractPluginSkillsArchive(ctx, client, downloadPluginID, targetPluginID, gz)
+	result, err = extractPluginBundleArchive(ctx, client, downloadPluginID, targetPluginID, gz)
 	if err != nil {
-		return pluginSkillsInstallResult{}, err
+		return pluginBundleInstallResult{}, err
 	}
-	result.FilesWritten = filesWritten
 	return result, nil
 }
 
-func extractPluginSkillsArchive(ctx context.Context, client pluginSkillsWriter, archivePluginID, targetPluginID string, r io.Reader) (int, error) {
-	skillsRoot, err := skillset.PluginSkillsDirForID(targetPluginID)
+const (
+	pluginArchiveKindSkills  = "skills"
+	pluginArchiveKindHooks   = "hooks"
+	pluginArchiveKindScripts = "scripts"
+)
+
+type pluginArchiveEntry struct {
+	kind         string
+	root         string
+	relativePath string
+}
+
+func extractPluginBundleArchive(ctx context.Context, client pluginBundleWriter, archivePluginID, targetPluginID string, r io.Reader) (pluginBundleInstallResult, error) {
+	result := newPluginBundleInstallResult()
+	pluginRoot, err := skillset.PluginDirForID(targetPluginID)
 	if err != nil {
-		return 0, err
+		return pluginBundleInstallResult{}, err
 	}
-	if err := client.Mkdir(ctx, skillsRoot); err != nil {
-		return 0, fmt.Errorf("mkdir plugin skills root: %w", err)
+	if err := client.Mkdir(ctx, pluginRoot); err != nil {
+		return pluginBundleInstallResult{}, fmt.Errorf("mkdir plugin root: %w", err)
 	}
 
 	tr := tar.NewReader(r)
-	filesWritten := 0
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
-			return filesWritten, fmt.Errorf("invalid tar: %w", err)
+			return result, fmt.Errorf("invalid tar: %w", err)
 		}
 		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
 
-		relativePath, ok := pluginSkillArchiveRelativePath(archivePluginID, hdr.Name)
+		entry, ok, err := pluginBundleArchiveEntry(archivePluginID, targetPluginID, hdr.Name)
+		if err != nil {
+			return result, err
+		}
 		if !ok {
 			continue
 		}
 		content, err := io.ReadAll(tr)
 		if err != nil {
-			return filesWritten, fmt.Errorf("read tar entry failed: %w", err)
+			return result, fmt.Errorf("read tar entry failed: %w", err)
 		}
 
-		filePath := path.Clean(path.Join(skillsRoot, relativePath))
-		if filePath == skillsRoot || !strings.HasPrefix(filePath, skillsRoot+"/") {
-			return filesWritten, fmt.Errorf("plugin skill path escapes root: %s", hdr.Name)
+		if err := client.Mkdir(ctx, entry.root); err != nil {
+			return result, fmt.Errorf("mkdir %s failed: %w", entry.root, err)
 		}
-		if dir := path.Dir(filePath); dir != skillsRoot {
+		filePath := path.Clean(path.Join(entry.root, entry.relativePath))
+		if filePath == entry.root || !strings.HasPrefix(filePath, entry.root+"/") {
+			return result, fmt.Errorf("plugin bundle path escapes root: %s", hdr.Name)
+		}
+		if dir := path.Dir(filePath); dir != entry.root {
 			if err := client.Mkdir(ctx, dir); err != nil {
-				return filesWritten, fmt.Errorf("mkdir %s failed: %w", dir, err)
+				return result, fmt.Errorf("mkdir %s failed: %w", dir, err)
 			}
 		}
 		if err := client.WriteFile(ctx, filePath, content); err != nil {
-			return filesWritten, fmt.Errorf("write file %s failed: %w", relativePath, err)
+			return result, fmt.Errorf("write file %s failed: %w", entry.relativePath, err)
 		}
-		filesWritten++
+		switch entry.kind {
+		case pluginArchiveKindSkills:
+			result.Skills.FilesWritten++
+		case pluginArchiveKindHooks:
+			result.Hooks.FilesWritten++
+		case pluginArchiveKindScripts:
+			result.Scripts.FilesWritten++
+		}
 	}
-	return filesWritten, nil
+	return result, nil
 }
 
-func pluginSkillArchiveRelativePath(pluginID, rawName string) (string, bool) {
+func pluginBundleArchiveEntry(archivePluginID, targetPluginID, rawName string) (pluginArchiveEntry, bool, error) {
 	name := strings.TrimSpace(rawName)
 	if name == "" || strings.Contains(name, "\\") || strings.HasPrefix(name, "/") {
-		return "", false
+		return pluginArchiveEntry{}, false, nil
 	}
-	pluginPrefix := strings.Trim(path.Clean(pluginID), "/")
+	pluginPrefix := strings.Trim(path.Clean(archivePluginID), "/")
 	if pluginPrefix != "" {
 		name = strings.TrimPrefix(name, pluginPrefix+"/")
 	}
 	if name == "" {
-		return "", false
+		return pluginArchiveEntry{}, false, nil
 	}
 
-	clean := path.Clean(name)
-	if clean == "." || clean == "" || strings.HasPrefix(clean, "/") {
-		return "", false
-	}
-	segments := strings.Split(clean, "/")
+	segments := strings.Split(name, "/")
 	for _, segment := range segments {
 		if segment == "" || segment == "." || segment == ".." {
-			return "", false
+			return pluginArchiveEntry{}, false, nil
 		}
 	}
-	if len(segments) < 2 || segments[0] != "skills" {
-		return "", false
+
+	switch segments[0] {
+	case "plugin.yaml":
+		if len(segments) == 1 {
+			return pluginArchiveEntry{}, false, nil
+		}
+	case "hooks.json":
+		if len(segments) != 1 {
+			return pluginArchiveEntry{}, false, nil
+		}
+		root, err := skillset.PluginDirForID(targetPluginID)
+		if err != nil {
+			return pluginArchiveEntry{}, false, err
+		}
+		return pluginArchiveEntry{kind: pluginArchiveKindHooks, root: root, relativePath: "hooks.json"}, true, nil
+	case "skills":
+		if len(segments) < 2 {
+			return pluginArchiveEntry{}, false, nil
+		}
+		root, err := skillset.PluginSkillsDirForID(targetPluginID)
+		if err != nil {
+			return pluginArchiveEntry{}, false, err
+		}
+		return pluginArchiveEntry{kind: pluginArchiveKindSkills, root: root, relativePath: strings.Join(segments[1:], "/")}, true, nil
+	case "scripts":
+		if len(segments) < 2 {
+			return pluginArchiveEntry{}, false, nil
+		}
+		root, err := skillset.PluginScriptsDirForID(targetPluginID)
+		if err != nil {
+			return pluginArchiveEntry{}, false, err
+		}
+		return pluginArchiveEntry{kind: pluginArchiveKindScripts, root: root, relativePath: strings.Join(segments[1:], "/")}, true, nil
 	}
-	relativePath := strings.Join(segments[1:], "/")
-	if relativePath == "" {
-		return "", false
-	}
-	return relativePath, true
+	return pluginArchiveEntry{}, false, nil
 }
 
-func withPluginSkillsInstallMetadata(installation pluginspkg.Installation, result pluginSkillsInstallResult, err error) pluginspkg.Installation {
+func newPluginBundleInstallResult() pluginBundleInstallResult {
+	return pluginBundleInstallResult{
+		Skills:  pluginAssetInstallResult{OK: true},
+		Hooks:   pluginAssetInstallResult{OK: true},
+		Scripts: pluginAssetInstallResult{OK: true},
+	}
+}
+
+func withPluginBundleInstallMetadata(installation pluginspkg.Installation, result pluginBundleInstallResult, err error) pluginspkg.Installation {
 	metadata := maps.Clone(installation.Metadata)
 	if metadata == nil {
 		metadata = make(map[string]any)
 	}
 	if err != nil {
-		result = pluginSkillsInstallResult{OK: false, Error: err.Error()}
+		failed := pluginAssetInstallResult{OK: false, Error: err.Error()}
+		result = pluginBundleInstallResult{Skills: failed, Hooks: failed, Scripts: failed}
 	}
-	metadata["skills_install"] = result
+	metadata["skills_install"] = result.Skills
+	metadata["hooks_install"] = result.Hooks
+	metadata["scripts_install"] = result.Scripts
 	installation.Metadata = metadata
 	return installation
 }

@@ -121,6 +121,15 @@ type Hook struct {
 	Actions    []HookAction `json:"actions,omitempty"`
 
 	matcher *regexp.Regexp
+	source  hookSource
+}
+
+type hookSource struct {
+	Kind           string
+	PluginID       string
+	PluginDir      string
+	Env            map[string]string
+	MaxOutputBytes int
 }
 
 type Condition struct {

@@ -22,7 +22,6 @@ import (
 	"github.com/memohai/memoh/internal/fetchproviders"
 	"github.com/memohai/memoh/internal/handlers"
 	"github.com/memohai/memoh/internal/heartbeat"
-	"github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/mcp"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/message/event"
@@ -73,7 +72,7 @@ func options() fx.Option {
 			settings.NewService,
 			toolapproval.NewService,
 			userinput.NewService,
-			hooks.NewService,
+			provideHooksService,
 			provideProvidersService,
 			fetchproviders.NewService,
 			searchproviders.NewService,

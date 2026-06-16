@@ -144,7 +144,7 @@ func (h *HooksHandler) Test(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "hooks service is not configured")
 	}
 	ctx := c.Request().Context()
-	cfg, exists, err := h.service.Load(ctx, botID)
+	cfg, exists, err := h.service.LoadEffective(ctx, botID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}

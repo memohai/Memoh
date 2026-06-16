@@ -119,14 +119,45 @@ func ManagedSkillDirForName(name string) (string, error) {
 }
 
 func PluginSkillsDirForID(pluginID string) (string, error) {
+	pluginRoot, err := PluginDirForID(pluginID)
+	if err != nil {
+		return "", err
+	}
+	return safePluginChildDir(pluginRoot, "skills")
+}
+
+func PluginDirForID(pluginID string) (string, error) {
 	pluginID = strings.TrimSpace(pluginID)
 	if !IsValidName(pluginID) {
 		return "", bridge.ErrBadRequest
 	}
 
-	dirPath := path.Clean(path.Join(PluginDirPath, pluginID, "skills"))
-	prefix := path.Clean(path.Join(PluginDirPath, pluginID))
-	if dirPath == PluginDirPath || !strings.HasPrefix(dirPath, prefix+"/") {
+	dirPath := path.Clean(path.Join(PluginDirPath, pluginID))
+	if dirPath == PluginDirPath || !strings.HasPrefix(dirPath, PluginDirPath+"/") {
+		return "", bridge.ErrBadRequest
+	}
+	return dirPath, nil
+}
+
+func PluginHooksPathForID(pluginID string) (string, error) {
+	pluginRoot, err := PluginDirForID(pluginID)
+	if err != nil {
+		return "", err
+	}
+	return path.Join(pluginRoot, "hooks.json"), nil
+}
+
+func PluginScriptsDirForID(pluginID string) (string, error) {
+	pluginRoot, err := PluginDirForID(pluginID)
+	if err != nil {
+		return "", err
+	}
+	return safePluginChildDir(pluginRoot, "scripts")
+}
+
+func safePluginChildDir(pluginRoot, child string) (string, error) {
+	dirPath := path.Clean(path.Join(pluginRoot, child))
+	if dirPath == PluginDirPath || !strings.HasPrefix(dirPath, pluginRoot+"/") {
 		return "", bridge.ErrBadRequest
 	}
 	return dirPath, nil
