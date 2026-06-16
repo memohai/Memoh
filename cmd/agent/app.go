@@ -37,6 +37,7 @@ import (
 	"github.com/memohai/memoh/internal/channel/adapters/local"
 	"github.com/memohai/memoh/internal/channel/adapters/matrix"
 	"github.com/memohai/memoh/internal/channel/adapters/misskey"
+	"github.com/memohai/memoh/internal/channel/adapters/personalwechat"
 	"github.com/memohai/memoh/internal/channel/adapters/qq"
 	slackadapter "github.com/memohai/memoh/internal/channel/adapters/slack"
 	"github.com/memohai/memoh/internal/channel/adapters/telegram"
@@ -505,6 +506,7 @@ func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService 
 	weixinAdapter := weixin.NewWeixinAdapter(log)
 	weixinAdapter.SetAssetOpener(mediaService)
 	registry.MustRegister(weixinAdapter)
+	registry.MustRegister(personalwechat.NewAdapter(log))
 	registry.MustRegister(local.NewWebAdapter(hub))
 	registry.MustRegister(misskey.NewMisskeyAdapter(log))
 
