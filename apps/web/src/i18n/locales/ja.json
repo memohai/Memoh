@@ -203,6 +203,13 @@
       "codeFontFamilyDescription": "標準のコードフォントを上書きします",
       "codeFontSize": "コードフォントサイズ",
       "codeFontSizeDescription": "コードエディタ、コードブロック、ターミナルに適用されます",
+      "syntaxHighlighting": "Syntax Highlight",
+      "shikiThemeLight": "Light テーマ",
+      "shikiThemeLightDescription": "Light モード時のコードブロックとエディタに適用されます",
+      "shikiThemeDark": "Dark テーマ",
+      "shikiThemeDarkDescription": "Dark モード時のコードブロックとエディタに適用されます",
+      "shikiThemeSearch": "テーマを検索…",
+      "shikiThemeEmpty": "該当するテーマがありません。",
       "colorSchemes": {
         "memoh": "Memoh",
         "ocean": "海",

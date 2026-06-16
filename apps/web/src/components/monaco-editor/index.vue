@@ -114,8 +114,10 @@ function buildMarkdownHeadingSymbols(model: Monaco.editor.ITextModel, monaco: ty
 // The applied light/dark mode is driven by the `.dark` class on <html> (set by the
 // color-mode store, which also honors "system"). Read it straight from the DOM so we
 // pick the right base theme even when the preference is "system".
-function resolveThemeName(): 'vitesse-dark' | 'vitesse-light' {
-  return document.documentElement.classList.contains('dark') ? 'vitesse-dark' : 'vitesse-light'
+function resolveThemeName(): string {
+  return document.documentElement.classList.contains('dark')
+    ? settings.shikiThemeDark
+    : settings.shikiThemeLight
 }
 
 const {
@@ -128,7 +130,7 @@ const {
   getEditorView,
 } = useMonaco({
   theme: resolveThemeName(),
-  themes: ['vitesse-dark', 'vitesse-light'],
+  themes: [settings.shikiThemeDark, settings.shikiThemeLight],
   readOnly: props.readonly,
   automaticLayout: true,
   autoScrollInitial: false,
@@ -346,6 +348,11 @@ watch(editorFontFamily, (fontFamily) => {
 watch([() => props.language, () => props.filename], () => {
   setLanguage(resolveLanguage())
 })
+
+watch(
+  () => [settings.shikiThemeLight, settings.shikiThemeDark] as const,
+  () => { void syncEditorTheme() },
+)
 </script>
 
 <template>

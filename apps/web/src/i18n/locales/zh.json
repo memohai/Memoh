@@ -199,6 +199,13 @@
       "codeFontFamilyDescription": "替换默认代码字体",
       "codeFontSize": "代码字号",
       "codeFontSizeDescription": "应用于代码编辑器、代码块与终端",
+      "syntaxHighlighting": "语法高亮",
+      "shikiThemeLight": "浅色主题",
+      "shikiThemeLightDescription": "浅色模式下用于代码块与编辑器",
+      "shikiThemeDark": "深色主题",
+      "shikiThemeDarkDescription": "深色模式下用于代码块与编辑器",
+      "shikiThemeSearch": "搜索主题…",
+      "shikiThemeEmpty": "未找到主题。",
       "colorSchemes": {
         "memoh": "Memoh",
         "ocean": "海洋",

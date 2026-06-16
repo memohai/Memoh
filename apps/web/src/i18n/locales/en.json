@@ -203,6 +203,13 @@
       "codeFontFamilyDescription": "Overrides the default code font",
       "codeFontSize": "Code Font Size",
       "codeFontSizeDescription": "Applies to code editors, code blocks, and the terminal",
+      "syntaxHighlighting": "Syntax Highlighting",
+      "shikiThemeLight": "Light theme",
+      "shikiThemeLightDescription": "Applied to code blocks and editors in light mode",
+      "shikiThemeDark": "Dark theme",
+      "shikiThemeDarkDescription": "Applied to code blocks and editors in dark mode",
+      "shikiThemeSearch": "Search themes…",
+      "shikiThemeEmpty": "No themes found.",
       "colorSchemes": {
         "memoh": "Memoh",
         "ocean": "Ocean",

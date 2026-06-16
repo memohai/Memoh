@@ -94,6 +94,44 @@
         </SettingsRow>
       </SettingsSection>
 
+      <SettingsSection :title="t('settings.appearance.syntaxHighlighting')">
+        <SettingsRow
+          :label="t('settings.appearance.shikiThemeLight')"
+          :description="t('settings.appearance.shikiThemeLightDescription')"
+        >
+          <div class="w-56">
+            <SearchableSelectPopover
+              v-model="shikiThemeLightSelection"
+              :options="lightShikiThemeOptions"
+              :placeholder="t('settings.appearance.shikiThemeLight')"
+              :aria-label="t('settings.appearance.shikiThemeLight')"
+              :search-placeholder="t('settings.appearance.shikiThemeSearch')"
+              :search-aria-label="t('settings.appearance.shikiThemeSearch')"
+              :empty-text="t('settings.appearance.shikiThemeEmpty')"
+              :show-group-headers="false"
+            />
+          </div>
+        </SettingsRow>
+
+        <SettingsRow
+          :label="t('settings.appearance.shikiThemeDark')"
+          :description="t('settings.appearance.shikiThemeDarkDescription')"
+        >
+          <div class="w-56">
+            <SearchableSelectPopover
+              v-model="shikiThemeDarkSelection"
+              :options="darkShikiThemeOptions"
+              :placeholder="t('settings.appearance.shikiThemeDark')"
+              :aria-label="t('settings.appearance.shikiThemeDark')"
+              :search-placeholder="t('settings.appearance.shikiThemeSearch')"
+              :search-aria-label="t('settings.appearance.shikiThemeSearch')"
+              :empty-text="t('settings.appearance.shikiThemeEmpty')"
+              :show-group-headers="false"
+            />
+          </div>
+        </SettingsRow>
+      </SettingsSection>
+
       <SettingsSection :title="t('settings.appearance.typography')">
         <SettingsRow
           :label="t('settings.appearance.uiFontSize')"
@@ -212,17 +250,41 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useShikiHighlighter } from '@/composables/useShikiHighlighter'
 import type { Locale } from '@/i18n'
+import type { BundledTheme } from 'shiki'
 import SettingsRow from '@/components/settings/row.vue'
 import SettingsSection from '@/components/settings/section.vue'
+import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
+import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 import { colorSchemes, type ColorSchemeId, type ColorSchemeOption } from '@/constants/color-schemes'
 import { useSettingsStore, type ThemePreference } from '@/store/settings'
+import { listBundledShikiThemes } from '@/store/settings/shiki-theme'
 import { cssFontFamilyDeclaration, DEFAULT_CODE_FONT_FAMILY, DEFAULT_CODE_FONT_SIZE_PX, DEFAULT_UI_FONT_SIZE_PX, normalizeCodeFontSizePx } from '@/store/settings/typography'
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
-const { language, theme, colorScheme, uiFontFamily, codeFontFamily, uiFontSizePx, codeFontSizePx, defaultUiFontFamily, defaultCodeFontFamily } = storeToRefs(settingsStore)
-const { setLanguage, setTheme, setColorScheme, setUiFontFamily, setCodeFontFamily, setUiFontSizePx, setCodeFontSizePx } = settingsStore
+const { language, theme, colorScheme, uiFontFamily, codeFontFamily, uiFontSizePx, codeFontSizePx, shikiThemeLight, shikiThemeDark, defaultUiFontFamily, defaultCodeFontFamily } = storeToRefs(settingsStore)
+const { setLanguage, setTheme, setColorScheme, setUiFontFamily, setCodeFontFamily, setUiFontSizePx, setCodeFontSizePx, setShikiTheme } = settingsStore
 const isDark = useDark()
+
+const allShikiThemes = listBundledShikiThemes()
+const lightShikiThemeOptions = computed<SearchableSelectOption[]>(() =>
+  allShikiThemes
+    .filter(theme => theme.type === 'light')
+    .map(theme => ({ value: theme.id, label: theme.displayName, keywords: [theme.id] })),
+)
+const darkShikiThemeOptions = computed<SearchableSelectOption[]>(() =>
+  allShikiThemes
+    .filter(theme => theme.type === 'dark')
+    .map(theme => ({ value: theme.id, label: theme.displayName, keywords: [theme.id] })),
+)
+const shikiThemeLightSelection = computed<string>({
+  get: () => shikiThemeLight.value,
+  set: (value) => setShikiTheme('light', value as BundledTheme),
+})
+const shikiThemeDarkSelection = computed<string>({
+  get: () => shikiThemeDark.value,
+  set: (value) => setShikiTheme('dark', value as BundledTheme),
+})
 
 const currentColorScheme = computed(() =>
   colorSchemes.find(scheme => scheme.id === colorScheme.value) ?? colorSchemes[0],
@@ -259,7 +321,6 @@ const codeFontPreviewStyle = computed(() => ({
 
 function renderCodeFontPreview() {
   void codeFontPreview.highlightLanguage(codeFontPreviewCode, 'typescript', {
-    theme: isDark.value ? 'github-dark' : 'github-light',
     transparentPre: true,
   })
 }
@@ -273,6 +334,7 @@ watch(codeFontSizePx, (value) => { codeFontSizeDraft.value = String(value) })
 watch(uiFontFamily, (value) => { uiFontFamilyDraft.value = value })
 watch(codeFontFamily, (value) => { codeFontFamilyDraft.value = value })
 watch(isDark, () => { renderCodeFontPreview() })
+watch([shikiThemeLight, shikiThemeDark], () => { renderCodeFontPreview() })
 
 function updateUiFontSizeDraft(value: string | number) { uiFontSizeDraft.value = String(value) }
 function updateCodeFontSizeDraft(value: string | number) { codeFontSizeDraft.value = String(value) }

@@ -19,6 +19,10 @@ const codeBlockMonacoOptions = computed(() => ({
   fontFamily: settings.codeFontStack,
   fontSize: settings.codeFontSizePx,
 }))
+const codeBlockTheme = computed(() => ({
+  light: settings.shikiThemeLight,
+  dark: settings.shikiThemeDark,
+}))
 const codeFontRenderKey = computed(() => settings.codeFontStack)
 </script>
 
@@ -32,6 +36,7 @@ const codeFontRenderKey = computed(() => settings.codeFontStack)
         :typewriter="false"
         :fade="false"
         :code-block-monaco-options="codeBlockMonacoOptions"
+        :theme="codeBlockTheme"
         custom-id="file-preview-md"
       />
     </div>

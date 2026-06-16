@@ -150,6 +150,7 @@
             :typewriter="false"
             :fade="false"
             :show-tooltips="false"
+            :theme="codeBlockTheme"
             custom-id="release-notes"
           />
         </div>
@@ -192,6 +193,7 @@ import { useI18n } from 'vue-i18n'
 import SettingsRow from '@/components/settings/row.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import { useCapabilitiesStore } from '@/store/capabilities'
+import { useSettingsStore } from '@/store/settings'
 import { useUpdateStore } from '@/store/update'
 
 const GITHUB_REPO = 'memohai/memoh'
@@ -209,7 +211,12 @@ const { serverVersion, commitHash } = storeToRefs(capabilitiesStore)
 const normalizedServerVersion = computed(() => (serverVersion.value ?? '').replace(/^v/i, ''))
 
 const update = useUpdateStore()
+const settingsStore = useSettingsStore()
 const isDark = useDark()
+const codeBlockTheme = computed(() => ({
+  light: settingsStore.shikiThemeLight,
+  dark: settingsStore.shikiThemeDark,
+}))
 
 const links: ResourceLink[] = [
   { icon: Github, labelKey: 'about.github', href: `https://github.com/${GITHUB_REPO}` },

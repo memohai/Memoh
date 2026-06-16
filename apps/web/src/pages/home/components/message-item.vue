@@ -118,6 +118,7 @@
               :smooth-streaming="message.streaming"
               :typewriter="message.streaming"
               :fade="message.streaming"
+              :theme="codeBlockTheme"
               custom-id="chat-msg"
             />
           </div>
@@ -236,6 +237,7 @@
                 :smooth-streaming="isAssistantBlockStreaming(node.index)"
                 :typewriter="isAssistantBlockStreaming(node.index)"
                 :fade="isAssistantBlockStreaming(node.index)"
+                :theme="codeBlockTheme"
                 custom-id="chat-msg"
               />
             </div>
@@ -282,6 +284,7 @@
 <script lang="ts">
 import { setCustomComponents } from 'markstream-vue'
 import ChatCodeBlock from './chat-code-block.vue'
+import ThemedMermaidBlock from '@/components/themed-mermaid-block/index.vue'
 
 // Replace markstream's heavy Monaco code block (and its font-size/expand/preview
 // toolbar that surfaced raw i18n keys) with a clean integral code block, scoped
@@ -289,6 +292,10 @@ import ChatCodeBlock from './chat-code-block.vue'
 // to the same component so shell/bash blocks render identically (no separate
 // terminal "run" toolbar / language chrome). Runs once at module load.
 setCustomComponents('chat-msg', { code_block: ChatCodeBlock, shell: ChatCodeBlock })
+// Mermaid is registered globally so the appearance preference wins over the
+// markstream default (which only follows the host renderer's isDark flag). One
+// registration covers chat + file preview + any future MarkdownRender call site.
+setCustomComponents({ mermaid: ThemedMermaidBlock })
 </script>
 
 <script setup lang="ts">
@@ -328,6 +335,10 @@ enableMermaid()
 
 const settingsStore = useSettingsStore()
 const isDark = computed(() => settingsStore.theme === 'dark')
+const codeBlockTheme = computed(() => ({
+  light: settingsStore.shikiThemeLight,
+  dark: settingsStore.shikiThemeDark,
+}))
 
 const messageEl = useTemplateRef('messageItem')
 const emit = defineEmits<{
