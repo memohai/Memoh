@@ -133,13 +133,14 @@
               </Select>
             </div>
           </div>
-          <div class="pointer-events-none mt-3">
+          <div class="appearance-mermaid-preview pointer-events-none mt-3">
             <MarkdownRender
               :key="mermaidPreviewKey"
               :content="MERMAID_PREVIEW_CONTENT"
               :is-dark="isDark"
               :typewriter="false"
               :fade="false"
+              :mermaid-props="MERMAID_PREVIEW_PROPS"
               custom-id="appearance-mermaid-preview"
             />
           </div>
@@ -317,6 +318,19 @@ flowchart LR
   B -->|Neutral| E[Neutral]
 \`\`\``
 
+// Hide every chrome control on the preview's mermaid block; we want just the
+// bare diagram, no header, no toolbar.
+const MERMAID_PREVIEW_PROPS = {
+  showHeader: false,
+  showModeToggle: false,
+  showCopyButton: false,
+  showExportButton: false,
+  showFullscreenButton: false,
+  showCollapseButton: false,
+  showZoomControls: false,
+  enableMermaidInteractions: false,
+} as const
+
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
 const { language, theme, colorScheme, uiFontFamily, codeFontFamily, uiFontSizePx, codeFontSizePx, shikiThemeLight, shikiThemeDark, mermaidTheme, defaultUiFontFamily, defaultCodeFontFamily } = storeToRefs(settingsStore)
@@ -440,3 +454,16 @@ function commitCodeFontFamilyDraft() {
   codeFontFamilyDraft.value = codeFontFamily.value
 }
 </script>
+
+<style scoped>
+/* Strip markstream-vue's card chrome off the appearance preview so only the
+   bare diagram shows — no border, no surface background, no rounding. */
+.appearance-mermaid-preview :deep(.mermaid-block-container) {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.appearance-mermaid-preview :deep(.mermaid-preview-area) {
+  background: transparent;
+}
+</style>
