@@ -1,14 +1,9 @@
 <template>
-  <div class="mx-auto max-w-3xl pt-6 pb-8">
-    <div class="mb-6 px-2">
-      <h1 class="text-lg font-semibold text-foreground">
-        {{ $t('bots.email.title') }}
-      </h1>
-      <p class="mt-1 text-xs text-muted-foreground">
-        {{ $t('bots.email.subtitle') }}
-      </p>
-    </div>
-
+  <PageShell
+    variant="tab"
+    :title="$t('bots.email.title')"
+    :description="$t('bots.email.subtitle')"
+  >
     <div class="space-y-8">
       <SettingsSection :title="$t('bots.email.bindings')">
         <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3">
@@ -181,7 +176,7 @@
         </Table>
       </section>
     </div>
-  </div>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
@@ -222,6 +217,7 @@ import {
 import type { EmailProviderResponse, EmailBindingResponse, EmailOutboxItemResponse } from '@memohai/sdk'
 import { formatDateTime } from '@/utils/date-time'
 import SettingsSection from '@/components/settings/section.vue'
+import PageShell from '@/components/page-shell/index.vue'
 
 const props = defineProps<{ botId: string }>()
 const { t } = useI18n()

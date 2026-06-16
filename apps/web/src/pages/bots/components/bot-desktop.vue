@@ -1,14 +1,10 @@
 <template>
-  <div class="mx-auto max-w-3xl pt-6 pb-8">
-    <div class="mb-6 flex items-start justify-between gap-4 px-2">
-      <div class="min-w-0">
-        <h1 class="text-lg font-semibold text-foreground">
-          {{ $t('bots.desktop.title', 'Desktop Environment') }}
-        </h1>
-        <p class="mt-1 text-xs text-muted-foreground">
-          {{ $t('bots.desktop.subtitle', 'Manage virtual display and interaction sessions.') }}
-        </p>
-      </div>
+  <PageShell
+    variant="tab"
+    :title="$t('bots.desktop.title', 'Desktop Environment')"
+    :description="$t('bots.desktop.subtitle', 'Manage virtual display and interaction sessions.')"
+  >
+    <template #actions>
       <Button
         variant="outline"
         size="sm"
@@ -26,7 +22,7 @@
         />
         {{ $t('common.refresh') }}
       </Button>
-    </div>
+    </template>
 
     <div class="space-y-8">
       <SettingsSection :title="$t('bots.settings.desktopEnabled')">
@@ -220,7 +216,7 @@
         </Empty>
       </SettingsSection>
     </div>
-  </div>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
@@ -256,6 +252,7 @@ import DisplayPane from '@/pages/home/components/display-pane.vue'
 import { useDisplaySnapshotsStore } from '@/store/display-snapshots'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import PageShell from '@/components/page-shell/index.vue'
 
 const props = defineProps<{
   botId: string

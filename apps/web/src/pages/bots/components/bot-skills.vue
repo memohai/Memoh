@@ -1,39 +1,33 @@
 <template>
-  <div class="mx-auto max-w-3xl pt-6 pb-8">
-    <div class="mb-6 flex items-start justify-between gap-4 px-2">
-      <div class="min-w-0">
-        <h1 class="text-lg font-semibold text-foreground">
-          {{ $t('bots.skills.title') }}
-        </h1>
-        <p class="mt-1 max-w-2xl text-xs text-muted-foreground">
-          {{ $t('bots.skills.intro') }}
-        </p>
-      </div>
-      <div class="flex shrink-0 items-center gap-2">
-        <Button
-          variant="outline"
+  <PageShell
+    variant="tab"
+    :title="$t('bots.skills.title')"
+    :description="$t('bots.skills.intro')"
+  >
+    <template #actions>
+      <Button
+        variant="outline"
+        size="sm"
+        @click="isDiscoveryDialogOpen = true"
+      >
+        <SlidersHorizontal class="size-4" />
+        {{ $t('bots.skills.discoveryTitle') }}
+        <Badge
+          v-if="showDiscoveryIndicator"
+          variant="default"
           size="sm"
-          @click="isDiscoveryDialogOpen = true"
         >
-          <SlidersHorizontal class="size-4" />
-          {{ $t('bots.skills.discoveryTitle') }}
-          <Badge
-            v-if="showDiscoveryIndicator"
-            variant="default"
-            size="sm"
-          >
-            {{ $t('bots.skills.discoverySummaryUnsaved') }}
-          </Badge>
-        </Button>
-        <Button
-          size="sm"
-          @click="handleCreate"
-        >
-          <Plus class="size-4" />
-          {{ $t('bots.skills.addSkill') }}
-        </Button>
-      </div>
-    </div>
+          {{ $t('bots.skills.discoverySummaryUnsaved') }}
+        </Badge>
+      </Button>
+      <Button
+        size="sm"
+        @click="handleCreate"
+      >
+        <Plus class="size-4" />
+        {{ $t('bots.skills.addSkill') }}
+      </Button>
+    </template>
 
     <SettingsSection :title="$t('bots.skills.libraryTitle')">
       <div
@@ -346,7 +340,7 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  </div>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
@@ -365,6 +359,7 @@ import {
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
+import PageShell from '@/components/page-shell/index.vue'
 import {
   getBotsById,
   getBotsByBotIdContainerSkills,

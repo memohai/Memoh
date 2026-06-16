@@ -1,14 +1,10 @@
 <template>
-  <div class="mx-auto max-w-3xl pt-6 pb-8">
-    <div class="mb-6 flex items-start justify-between gap-4 px-2">
-      <div class="min-w-0">
-        <h1 class="text-lg font-semibold text-foreground">
-          {{ $t('bots.plugins.title') }}
-        </h1>
-        <p class="mt-1 max-w-2xl text-xs text-muted-foreground">
-          {{ $t('bots.plugins.intro') }}
-        </p>
-      </div>
+  <PageShell
+    variant="tab"
+    :title="$t('bots.plugins.title')"
+    :description="$t('bots.plugins.intro')"
+  >
+    <template #actions>
       <Button
         variant="outline"
         size="sm"
@@ -18,7 +14,7 @@
         <Store class="size-4" />
         {{ $t('sidebar.supermarket') }}
       </Button>
-    </div>
+    </template>
 
     <SettingsSection :title="$t('bots.plugins.installedTitle')">
       <div
@@ -126,7 +122,7 @@
         </div>
       </div>
     </SettingsSection>
-  </div>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
@@ -145,6 +141,7 @@ import {
   type PluginsManifest,
 } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
+import PageShell from '@/components/page-shell/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import SettingsSection from '@/components/settings/section.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'

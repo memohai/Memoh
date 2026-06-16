@@ -1,36 +1,29 @@
 <template>
-  <div class="mx-auto max-w-3xl pt-6 pb-8">
-    <div class="mb-6 flex items-start justify-between gap-4 px-2">
-      <div class="min-w-0">
-        <h1 class="text-lg font-semibold text-foreground">
-          {{ $t('bots.settings.networkPageTitle') }}
-        </h1>
-        <p class="mt-1 text-xs text-muted-foreground">
-          {{ $t('bots.settings.networkPageSubtitle') }}
-        </p>
-      </div>
-
-      <div class="flex shrink-0 items-center gap-2">
-        <span
-          v-if="hasChanges"
-          class="text-xs text-muted-foreground"
-        >
-          {{ $t('common.unsaved') }}
-        </span>
-        <Button
-          variant="outline"
-          size="sm"
-          :disabled="!props.botId || isNetworkStatusFetching"
-          @click="handleRefreshNetworkStatus"
-        >
-          <Spinner
-            v-if="isNetworkStatusFetching"
-            class="size-3"
-          />
-          {{ $t('common.refresh') }}
-        </Button>
-      </div>
-    </div>
+  <PageShell
+    variant="tab"
+    :title="$t('bots.settings.networkPageTitle')"
+    :description="$t('bots.settings.networkPageSubtitle')"
+  >
+    <template #actions>
+      <span
+        v-if="hasChanges"
+        class="text-xs text-muted-foreground"
+      >
+        {{ $t('common.unsaved') }}
+      </span>
+      <Button
+        variant="outline"
+        size="sm"
+        :disabled="!props.botId || isNetworkStatusFetching"
+        @click="handleRefreshNetworkStatus"
+      >
+        <Spinner
+          v-if="isNetworkStatusFetching"
+          class="size-3"
+        />
+        {{ $t('common.refresh') }}
+      </Button>
+    </template>
 
     <div class="space-y-8">
       <SettingsSection
@@ -599,7 +592,7 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  </div>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
@@ -629,6 +622,7 @@ import type { ConfigSchema, ConfigSchemaField } from '@/components/config-schema
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import SettingsRow from '@/components/settings/row.vue'
 import SettingsSection from '@/components/settings/section.vue'
+import PageShell from '@/components/page-shell/index.vue'
 import OverlayProviderSelect from './network-provider-select.vue'
 import NetworkNodeSelect from './network-node-select.vue'
 import MonacoEditor from '@/components/monaco-editor/index.vue'

@@ -1,16 +1,9 @@
 <template>
-  <div class="mx-auto max-w-3xl pt-6 pb-8">
-    <div class="mb-6 px-2">
-      <div class="min-w-0">
-        <h1 class="text-lg font-semibold text-foreground">
-          {{ $t('bots.tabs.acp') }}
-        </h1>
-        <p class="mt-1 text-xs text-muted-foreground">
-          {{ $t('bots.settings.blocks.acpDescription') }}
-        </p>
-      </div>
-    </div>
-
+  <PageShell
+    variant="tab"
+    :title="$t('bots.tabs.acp')"
+    :description="$t('bots.settings.blocks.acpDescription')"
+  >
     <SettingsAcpCard
       :bot-id="botId"
       :profiles="profiles"
@@ -18,7 +11,7 @@
       :loading="profilesLoading"
       @commit="persistACPForm"
     />
-  </div>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
@@ -30,6 +23,7 @@ import { getAcpProfiles, getBotsById, putBotsById } from '@memohai/sdk'
 import type { AcpprofilePublicProfile, BotsUpdateBotRequest } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import SettingsAcpCard from './settings-acp-card.vue'
+import PageShell from '@/components/page-shell/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
   emptyACPAgentForm,
