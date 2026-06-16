@@ -1,7 +1,7 @@
 <template>
   <div
     ref="rootRef"
-    class=" inset-0 flex flex-col bg-foreground z-10 "
+    class=" inset-0 flex flex-col bg-card z-10 "
     :class="isFullScroll?'fixed':'absolute'"
     @click="closeStatsMenu"
   >
@@ -12,11 +12,12 @@
     />
     <video
       ref="videoRef"
-      class="size-full min-h-0 flex-1 bg-foreground object-contain"
+      class="size-full min-h-0 flex-1 bg-card object-contain"
       autoplay
       playsinline
       muted
       tabindex="0"
+      @playing="videoReady = true"
       @contextmenu.prevent="openStatsMenu"
       @mousedown.prevent="onPointerDown"
       @mousemove="onPointerMove"
@@ -28,9 +29,9 @@
     />
     <div
       v-if="prepareProgress"
-      class="absolute inset-0 flex items-center justify-center bg-background/95 px-6"
+      class="absolute inset-0 flex items-center justify-center bg-card px-6"
     >
-      <div class="w-full max-w-[520px] rounded-lg border border-border bg-background p-5">
+      <div class="w-full max-w-[520px] rounded-lg border border-border bg-card p-5">
         <div class="flex items-start justify-between gap-4">
           <div class="min-w-0">
             <p class="text-sm font-medium text-foreground">
@@ -177,28 +178,16 @@
       </div>
     </div>
     <div
-      v-if="prepareProgress"
-      class="shrink-0 border-t border-border bg-background px-3 py-2 text-xs text-muted-foreground"
+      v-if="!prepareProgress && (status !== 'connected' || !videoReady)"
+      class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-card px-6 text-center"
     >
-      <div class="mb-1.5 flex items-center justify-between gap-3">
-        <span class="inline-flex min-w-0 items-center gap-2">
-          <Spinner class="size-3.5 shrink-0" />
-          <span class="truncate">{{ prepareProgress.message }}</span>
-        </span>
-        <span class="shrink-0 tabular-nums">{{ preparePercent }}%</span>
-      </div>
-      <div class="h-2 w-full overflow-hidden rounded-full bg-muted">
-        <div
-          class="h-full rounded-full bg-foreground transition-all duration-300 ease-out"
-          :style="{ width: `${preparePercent}%` }"
-        />
-      </div>
-    </div>
-    <div
-      v-else-if="status !== 'connected'"
-      class="shrink-0 flex items-center justify-end gap-2 px-3 py-1.5 text-xs text-muted-foreground border-t border-border bg-background"
-    >
-      <span>{{ statusLabel }}</span>
+      <Spinner
+        v-if="status !== 'disconnected' && status !== 'unavailable'"
+        class="size-5 text-muted-foreground"
+      />
+      <p class="text-sm text-muted-foreground">
+        {{ (status === 'disconnected' || status === 'unavailable') ? statusLabel : t('chat.display.status.connecting') }}
+      </p>
       <Button
         v-if="status === 'disconnected' || status === 'unavailable'"
         size="sm"
@@ -362,6 +351,7 @@ const { t } = useI18n()
 const rootRef = ref<HTMLElement | null>(null)
 const videoRef = ref<HTMLVideoElement | null>(null)
 const status = ref<DisplayStatus>('idle')
+const videoReady = ref(false)
 const unavailableReason = ref('')
 const prepareProgress = ref<PrepareProgress | null>(null)
 const displaySessionId = ref('')
@@ -506,6 +496,7 @@ function cleanupLocal() {
   stopSnapshotCapture()
   stopStatsPolling()
   closeStatsMenu()
+  videoReady.value = false
   pointerMask = 0
   lastPointerPoint = null
   if (inputChannel) {
