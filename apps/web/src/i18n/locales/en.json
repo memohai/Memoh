@@ -224,6 +224,8 @@
         "rose": "Warm accents and soft contrast",
         "amber": "Golden highlights with clear status indicators"
       },
+      "codeHighlight": "Code highlight",
+      "codeHighlightDescription": "Themes applied to code blocks and editors. Each preview stays pinned to its picked theme regardless of interface mode.",
       "diagrams": "Diagrams",
       "mermaidTheme": "Mermaid Theme",
       "mermaidThemeDescription": "Applies to rendered Mermaid diagrams."

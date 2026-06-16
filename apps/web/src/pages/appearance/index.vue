@@ -167,8 +167,16 @@
           />
         </SettingsRow>
 
-        <div class="mx-4 py-3">
-          <div class="grid gap-3 sm:grid-cols-2">
+        <div class="mx-4 border-b border-border py-3 last:border-b-0">
+          <div class="min-w-0">
+            <div class="text-sm font-medium text-foreground">
+              {{ t('settings.appearance.codeHighlight') }}
+            </div>
+            <p class="mt-0.5 text-xs text-muted-foreground">
+              {{ t('settings.appearance.codeHighlightDescription') }}
+            </p>
+          </div>
+          <div class="mt-3 grid gap-3 sm:grid-cols-2">
             <div class="space-y-2">
               <SearchableSelectPopover
                 v-model="shikiThemeLightSelection"
@@ -181,7 +189,7 @@
                 :show-group-headers="false"
               />
               <div
-                class="typography-code-preview shiki-preview pointer-events-none overflow-hidden rounded-md border border-border"
+                class="typography-code-preview shiki-preview pointer-events-none overflow-hidden"
                 :style="codeFontPreviewStyle"
                 inert
               >
@@ -205,7 +213,7 @@
                 :show-group-headers="false"
               />
               <div
-                class="typography-code-preview shiki-preview pointer-events-none overflow-hidden rounded-md border border-border"
+                class="typography-code-preview shiki-preview pointer-events-none overflow-hidden"
                 :style="codeFontPreviewStyle"
                 inert
               >
@@ -479,12 +487,16 @@ function commitCodeFontFamilyDraft() {
 
 /* The shiki preview keeps the theme's inline background-color on <pre>, so
    the parent typography-code-preview rule's `padding: 0` would crowd the code
-   against the corners. Re-add comfortable padding inside the themed box.
-   Line numbers default to the UI muted color which is unreadable on a theme
-   background that disagrees with the current interface mode — derive them
-   from the inherited text color instead so they stay legible on any theme. */
+   against the corners. Re-add comfortable padding inside the themed box, and
+   derive the rounded outline from the theme's own text color (via currentColor)
+   so it stays stable across UI mode flips — UI tokens like --color-border
+   adapt with light/dark, which we want for page chrome but not for these
+   theme previews. Line numbers follow the same idea so they stay legible on
+   any chosen theme. */
 .shiki-preview :deep(pre) {
   padding: 0.5rem 0.75rem;
+  border-radius: 0.375rem;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent);
 }
 .shiki-preview :deep(.line::before) {
   color: currentColor;
