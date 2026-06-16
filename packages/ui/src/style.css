@@ -1358,6 +1358,10 @@
 
 .dark[data-color-scheme="ocean"] {
   --scheme-hue: 230;
+  /* :root[data-color-scheme="ocean"] sets --destructive with specificity (0,2,0),
+     which outranks .dark (0,1,0) and bleeds the light-mode value into dark. Restore
+     the dark-appropriate bright red here at equal specificity, later in source. */
+  --destructive: oklch(0.704 0.191 22.216);
   --brand: oklch(0.72 0.13 230);
   --brand-soft: oklch(0.30 0.07 230 / 0.35);
   --brand-border: oklch(0.72 0.13 230 / 0.32);
@@ -1549,11 +1553,6 @@
      background produces ~L=0.940, which is darker than sidebar-accent
      (L=0.945) — inverting the intended hierarchy in light mode. */
   --sidebar-hover: oklch(0.964 0.004 var(--scheme-hue));
-  /* sidebar-hover must be a solid value lighter than sidebar-accent (L=0.945)
-     so hover reads as less prominent than active. The inherited overlay token
-     (--overlay-hover-light = 4.5% black) composites to ~L 0.940 on this
-     scheme's L=0.984 background — darker than active, inverting the hierarchy. */
-  --sidebar-hover: oklch(0.964 0.004 var(--scheme-hue));
   --segment-track: oklch(0.945 0.005 var(--scheme-hue));
 }
 
@@ -1577,6 +1576,11 @@
   --sidebar-accent: oklch(0.30 0.006 var(--scheme-hue));
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: oklch(1 0 0 / 8%);
+  /* The light-scheme block above sets --sidebar-hover to a solid L=0.964 value.
+     In dark mode that solid near-white bleeds through onto the dark sidebar
+     (L≈0.185) and renders as ~rgb(240,244,245). Reset to the overlay token so
+     hover correctly lightens the dark surface instead. */
+  --sidebar-hover: var(--overlay-hover-light);
   --segment-track: oklch(0.24 0.006 var(--scheme-hue));
   --segment-thumb: oklch(0.40 0.006 var(--scheme-hue));
   --control-label: oklch(0.86 0.004 var(--scheme-hue));
