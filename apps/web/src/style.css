@@ -384,6 +384,32 @@
   animation: tool-shimmer 1.6s linear infinite;
 }
 
+/* Typewriter reveal for a status line: a stepped left-to-right wipe that uncovers
+ * the text while it keeps shimmering. clip-path is used (not per-character opacity)
+ * so it composes with the background-clip:text shimmer instead of fighting it —
+ * the shimmer paints continuously underneath while the wipe exposes it. Pair with
+ * .tool-shimmer-text on the same inline-block element. */
+@keyframes cop-typewriter {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.cop-typewriter {
+  clip-path: inset(0 100% 0 0);
+  animation: cop-typewriter 0.55s steps(18, end) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cop-typewriter {
+    clip-path: none;
+    animation: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tool-shimmer-text {
     background-image: none;

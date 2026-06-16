@@ -277,23 +277,22 @@
           </template>
 
           <!-- Local "the turn is running" indicator: shown only before the first
-               block streams in. Same scale/weight/resting color as the process
-               headers (cop-title), so it reads as the first link of the chain that
-               the Thinking block continues — not a separate loading widget. The
-               phrase types in character by character (no spinner, no shimmer), so
-               the only motion is the reveal and the line stays a single, inspectable
-               color at rest. -->
+               block streams in. Same scale/weight as the process headers, and the
+               same shimmer the Thinking/running states use (running = shimmer,
+               done = solid), so it reads as the first link of the chain the
+               Thinking block continues — not a separate loading widget. The phrase
+               also types in (a stepped clip-path wipe) on entry; keyed by the hint
+               so it replays once per turn. -->
           <div
             v-if="message.streaming && !hasVisibleAssistantBlocks"
-            class="font-[400] text-[0.90625rem] text-cop-title select-none py-px"
+            class="font-[400] text-[0.90625rem]"
           >
-            <TextGenerateEffect
-              :key="thinkingHint"
-              :words="`${thinkingHint}…`"
-              :filter="false"
-              :stagger="45"
-              :duration="0.35"
-            />
+            <div class="flex items-center gap-1.5 py-px text-cop-title select-none">
+              <span
+                :key="thinkingHint"
+                class="inline-block whitespace-nowrap tracking-[0.01em] tool-shimmer-text cop-typewriter"
+              >{{ thinkingHint }}…</span>
+            </div>
           </div>
         </div>
         <!-- Action bar hugs the answer (~9px), tighter than the inter-block
@@ -330,7 +329,7 @@ registerSharedMarkdownComponents('chat-msg', { code_block: ChatCodeBlock, shell:
 import { computed, toRef, useTemplateRef, watch } from 'vue'
 import { CircleAlert } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime, formatCalendarTime } from '@/utils/date-time'
-import { Avatar, AvatarImage, AvatarFallback, TextGenerateEffect } from '@memohai/ui'
+import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
 import ToolCallGroup from './tool-call-group.vue'
