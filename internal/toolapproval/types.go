@@ -12,6 +12,10 @@ const (
 	StatusExpired   = "expired"
 	StatusCancelled = "cancelled"
 
+	OperationRead  = "read"
+	OperationWrite = "write"
+	OperationExec  = "exec"
+
 	DecisionBypass        = "bypass"
 	DecisionNeedsApproval = "needs_approval"
 )
@@ -58,6 +62,7 @@ type Request struct {
 	ChannelIdentityID       string         `json:"channel_identity_id,omitempty"`
 	ToolCallID              string         `json:"tool_call_id"`
 	ToolName                string         `json:"tool_name"`
+	Operation               string         `json:"operation"`
 	ToolInput               map[string]any `json:"tool_input,omitempty"`
 	ShortID                 int            `json:"short_id"`
 	Status                  string         `json:"status"`

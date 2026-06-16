@@ -16,54 +16,70 @@ func needsApproval(cfg settings.ToolApprovalConfig, toolName string, input any) 
 	}
 
 	args := inputMap(input)
-	switch strings.ToLower(strings.TrimSpace(toolName)) {
-	case "write":
-		target := normalizeContainerPath(readString(args, "path"))
-		if matchesAnyGlob(target, cfg.Write.ForceReviewGlobs) {
+	operation, ok := OperationForTool(toolName)
+	switch {
+	case ok && operation == OperationRead:
+		targets := approvalPaths(args)
+		if matchesAnyPathGlob(targets, cfg.Read.ForceReviewGlobs) {
 			return true
 		}
-		if matchesAnyGlob(target, cfg.Write.BypassGlobs) {
+		if pathsBypass(targets, cfg.Read.BypassGlobs) {
+			return false
+		}
+		if !cfg.Read.RequireApproval {
+			return false
+		}
+		return true
+	case ok && operation == OperationWrite:
+		if strings.EqualFold(strings.TrimSpace(toolName), "apply_patch") {
+			targets := applyPatchPaths(readString(args, "patch"))
+			if matchesAnyPathGlob(targets, cfg.Write.ForceReviewGlobs) {
+				return true
+			}
+			if pathsBypass(targets, cfg.Write.BypassGlobs) {
+				return false
+			}
+			return cfg.Write.RequireApproval || len(cfg.Write.ForceReviewGlobs) > 0
+		}
+		targets := approvalPaths(args)
+		if matchesAnyPathGlob(targets, cfg.Write.ForceReviewGlobs) {
+			return true
+		}
+		if pathsBypass(targets, cfg.Write.BypassGlobs) {
 			return false
 		}
 		if !cfg.Write.RequireApproval {
 			return false
 		}
 		return true
-	case "edit":
-		target := normalizeContainerPath(readString(args, "path"))
-		if matchesAnyGlob(target, cfg.Edit.ForceReviewGlobs) {
+	case ok && operation == OperationExec:
+		command := readString(args, "command")
+		if matchesCommand(command, cfg.Exec.ForceReviewCommands) {
 			return true
 		}
-		if matchesAnyGlob(target, cfg.Edit.BypassGlobs) {
-			return false
-		}
-		if !cfg.Edit.RequireApproval {
-			return false
-		}
-		return true
-	case "apply_patch":
-		// apply_patch can add, edit, delete, and move multiple files from a
-		// freeform patch body. Without a single path to compare against bypass
-		// globs, require approval whenever file mutations are configured for
-		// review or force-review rules exist.
-		return cfg.Write.RequireApproval ||
-			cfg.Edit.RequireApproval ||
-			len(cfg.Write.ForceReviewGlobs) > 0 ||
-			len(cfg.Edit.ForceReviewGlobs) > 0
-	case "exec":
-		exe, ok := simpleExecutable(readString(args, "command"))
+		exe, ok := simpleExecutable(command)
 		if !ok {
 			return cfg.Exec.RequireApproval
 		}
-		if matchesCommand(exe, cfg.Exec.ForceReviewCommands) {
-			return true
-		}
-		if matchesCommand(exe, cfg.Exec.BypassCommands) {
+		if matchesCommandWithExecutable(command, exe, cfg.Exec.BypassCommands) {
 			return false
 		}
 		return cfg.Exec.RequireApproval
 	default:
 		return false
+	}
+}
+
+func OperationForTool(toolName string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(toolName)) {
+	case "read", "list":
+		return OperationRead, true
+	case "write", "edit", "apply_patch":
+		return OperationWrite, true
+	case "exec":
+		return OperationExec, true
+	default:
+		return "", false
 	}
 }
 
@@ -92,6 +108,60 @@ func readString(m map[string]any, key string) string {
 	return ""
 }
 
+func approvalPaths(args map[string]any) []string {
+	keys := []string{"path", "file_path", "filePath", "file", "filename", "old_path", "new_path"}
+	seen := map[string]struct{}{}
+	var out []string
+	for _, key := range keys {
+		addApprovalPath(&out, seen, args[key])
+	}
+	addApprovalPath(&out, seen, args["paths"])
+	addApprovalPath(&out, seen, args["files"])
+	return out
+}
+
+func addApprovalPath(out *[]string, seen map[string]struct{}, value any) {
+	switch v := value.(type) {
+	case string:
+		p := strings.TrimSpace(v)
+		if p == "" {
+			return
+		}
+		if _, ok := seen[p]; ok {
+			return
+		}
+		seen[p] = struct{}{}
+		*out = append(*out, p)
+	case []string:
+		for _, item := range v {
+			addApprovalPath(out, seen, item)
+		}
+	case []any:
+		for _, item := range v {
+			addApprovalPath(out, seen, item)
+		}
+	}
+}
+
+func applyPatchPaths(patch string) []string {
+	var out []string
+	seen := map[string]struct{}{}
+	for _, line := range strings.Split(patch, "\n") {
+		for _, prefix := range []string{
+			"*** Add File: ",
+			"*** Delete File: ",
+			"*** Update File: ",
+			"*** Move to: ",
+		} {
+			if path, ok := strings.CutPrefix(line, prefix); ok {
+				addApprovalPath(&out, seen, path)
+				break
+			}
+		}
+	}
+	return out
+}
+
 func normalizeContainerPath(raw string) string {
 	p := strings.TrimSpace(raw)
 	if p == "/data" || p == "/tmp" {
@@ -102,6 +172,27 @@ func normalizeContainerPath(raw string) string {
 		return "."
 	}
 	return path.Clean(p)
+}
+
+func matchesAnyPathGlob(targets []string, patterns []string) bool {
+	for _, target := range targets {
+		if matchesAnyGlob(target, patterns) {
+			return true
+		}
+	}
+	return false
+}
+
+func pathsBypass(targets []string, patterns []string) bool {
+	if len(targets) == 0 {
+		return false
+	}
+	for _, target := range targets {
+		if !matchesAnyGlob(target, patterns) {
+			return false
+		}
+	}
+	return true
 }
 
 func matchesAnyGlob(target string, patterns []string) bool {
@@ -158,12 +249,75 @@ func simpleExecutable(command string) (string, bool) {
 	return path.Base(exe), true
 }
 
-func matchesCommand(exe string, allowed []string) bool {
+func matchesCommand(command string, patterns []string) bool {
+	exe, _ := simpleExecutable(command)
+	return matchesCommandWithExecutable(command, exe, patterns)
+}
+
+func matchesCommandWithExecutable(command, exe string, patterns []string) bool {
+	command = normalizeCommand(command)
 	exe = strings.ToLower(strings.TrimSpace(exe))
-	for _, cmd := range allowed {
-		if exe == strings.ToLower(strings.TrimSpace(cmd)) {
+	for _, raw := range patterns {
+		pattern := normalizeCommand(raw)
+		if pattern == "" {
+			continue
+		}
+		if isExecutablePattern(pattern) {
+			if exe != "" && exe == strings.ToLower(pattern) {
+				return true
+			}
+			continue
+		}
+		if commandMatchesPattern(command, pattern) {
 			return true
 		}
 	}
 	return false
+}
+
+func normalizeCommand(raw string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(raw)), " ")
+}
+
+func isExecutablePattern(pattern string) bool {
+	return !strings.ContainsAny(pattern, " \t\r\n*?")
+}
+
+func commandMatchesPattern(command, pattern string) bool {
+	command = strings.ToLower(command)
+	pattern = strings.ToLower(pattern)
+	if !strings.ContainsAny(pattern, "*?") {
+		return command == pattern
+	}
+	return wildcardMatch(pattern, command)
+}
+
+func wildcardMatch(pattern, value string) bool {
+	p, v := 0, 0
+	star := -1
+	match := 0
+	for v < len(value) {
+		if p < len(pattern) && (pattern[p] == '?' || pattern[p] == value[v]) {
+			p++
+			v++
+			continue
+		}
+		if p < len(pattern) && pattern[p] == '*' {
+			star = p
+			match = v
+			p++
+			continue
+		}
+		if star != -1 {
+			p = star + 1
+			match++
+			v = match
+			continue
+		}
+		return false
+	}
+	for p < len(pattern) && pattern[p] == '*' {
+		p++
+	}
+	return p == len(pattern)
 }

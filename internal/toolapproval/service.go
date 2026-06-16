@@ -91,6 +91,10 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 	if err != nil {
 		return Request{}, err
 	}
+	operation, ok := OperationForTool(input.ToolName)
+	if !ok {
+		return Request{}, errors.New("unsupported tool approval operation")
+	}
 	row, err := s.queries.CreateToolApprovalRequest(ctx, sqlc.CreateToolApprovalRequestParams{
 		BotID:                        botID,
 		SessionID:                    sessionID,
@@ -98,6 +102,7 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 		ChannelIdentityID:            channelIdentityID,
 		ToolCallID:                   strings.TrimSpace(input.ToolCallID),
 		ToolName:                     strings.TrimSpace(input.ToolName),
+		Operation:                    operation,
 		ToolInput:                    toolInput,
 		RequestedByChannelIdentityID: requestedByID,
 		RequestedMessageID:           optionalUUID(input.RequestedMessageID),
@@ -446,6 +451,7 @@ func requestFromRow(row sqlc.ToolApprovalRequest) Request {
 		SessionID:               uuid.UUID(row.SessionID.Bytes).String(),
 		ToolCallID:              strings.TrimSpace(row.ToolCallID),
 		ToolName:                strings.TrimSpace(row.ToolName),
+		Operation:               strings.TrimSpace(row.Operation),
 		ToolInput:               input,
 		ShortID:                 int(row.ShortID),
 		Status:                  strings.TrimSpace(row.Status),
@@ -455,6 +461,9 @@ func requestFromRow(row sqlc.ToolApprovalRequest) Request {
 		ReplyTarget:             strings.TrimSpace(row.ReplyTarget),
 		ConversationType:        strings.TrimSpace(row.ConversationType),
 		CreatedAt:               row.CreatedAt.Time,
+	}
+	if req.Operation == "" {
+		req.Operation, _ = OperationForTool(req.ToolName)
 	}
 	if row.RouteID.Valid {
 		req.RouteID = uuid.UUID(row.RouteID.Bytes).String()

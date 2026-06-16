@@ -793,7 +793,7 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 func markApprovalTools(tools []sdk.Tool) []sdk.Tool {
 	for i := range tools {
 		switch tools[i].Name {
-		case "write", "edit", "apply_patch", "exec":
+		case "read", "list", "write", "edit", "apply_patch", "exec":
 			tools[i].RequireApproval = true
 		}
 	}
@@ -856,6 +856,7 @@ func annotateDeferredApproval(messages []sdk.Message, approval sdk.ToolApprovalR
 					"short_id":    approvalShortID(approval.Metadata),
 					"status":      "pending",
 					"can_approve": true,
+					"operation":   approval.Metadata["operation"],
 				}
 			}
 			annotated[msgIdx].Content[partIdx] = call

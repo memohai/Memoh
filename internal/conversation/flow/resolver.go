@@ -916,6 +916,7 @@ func approvalResultMetadata(req toolapproval.Request) map[string]any {
 		"short_id":     req.ShortID,
 		"status":       req.Status,
 		"tool_name":    req.ToolName,
+		"operation":    req.Operation,
 		"tool_call_id": req.ToolCallID,
 	}
 }

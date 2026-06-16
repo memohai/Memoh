@@ -80,18 +80,25 @@ func TestPostgresACPAgentSessionTypeMigrationFiles(t *testing.T) {
 	}
 }
 
-func TestACPDoesNotWidenToolApprovalRequestToolNameCheck(t *testing.T) {
+func TestToolApprovalRequestsConstrainOperationNotToolName(t *testing.T) {
 	for _, path := range []string{
 		"postgres/migrations/0001_init.up.sql",
 		"sqlite/migrations/0001_init.up.sql",
 	} {
 		t.Run(path, func(t *testing.T) {
 			sql := readEmbeddedMigration(t, path)
-			const check = "CHECK (tool_name IN ('write', 'edit', 'exec'))"
-			if !strings.Contains(sql, check) {
-				t.Fatalf("%s missing exact Memoh-native tool approval CHECK %q", path, check)
-			}
 			tableSQL := toolApprovalTableSQL(sql)
+			const operationColumn = "operation TEXT NOT NULL"
+			if !strings.Contains(tableSQL, operationColumn) {
+				t.Fatalf("%s missing tool approval operation column %q", path, operationColumn)
+			}
+			const operationCheck = "CHECK (operation IN ('read', 'write', 'exec'))"
+			if !strings.Contains(tableSQL, operationCheck) {
+				t.Fatalf("%s missing Memoh-native tool approval operation CHECK %q", path, operationCheck)
+			}
+			if strings.Contains(tableSQL, "CHECK (tool_name IN") {
+				t.Fatalf("%s tool_approval_requests must not constrain real tool_name values", path)
+			}
 			if strings.Contains(tableSQL, "acp_agent") {
 				t.Fatalf("%s tool_approval_requests CHECK must not include ACP tools", path)
 			}

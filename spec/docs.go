@@ -17883,14 +17883,14 @@ const docTemplate = `{
         "settings.ToolApprovalConfig": {
             "type": "object",
             "properties": {
-                "edit": {
-                    "$ref": "#/definitions/settings.ToolApprovalFilePolicy"
-                },
                 "enabled": {
                     "type": "boolean"
                 },
                 "exec": {
                     "$ref": "#/definitions/settings.ToolApprovalExecPolicy"
+                },
+                "read": {
+                    "$ref": "#/definitions/settings.ToolApprovalFilePolicy"
                 },
                 "write": {
                     "$ref": "#/definitions/settings.ToolApprovalFilePolicy"

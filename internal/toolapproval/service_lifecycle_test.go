@@ -19,19 +19,55 @@ type lifecycleQueries struct {
 	dbstore.Queries
 	mu         sync.Mutex
 	createRow  sqlc.ToolApprovalRequest
+	createArg  sqlc.CreateToolApprovalRequestParams
 	createErr  error
 	getRow     sqlc.ToolApprovalRequest
 	cancelArg  sqlc.CancelPendingToolApprovalsBySessionParams
 	cancelCall int
 }
 
-func (q *lifecycleQueries) CreateToolApprovalRequest(_ context.Context, _ sqlc.CreateToolApprovalRequestParams) (sqlc.ToolApprovalRequest, error) {
+func (q *lifecycleQueries) CreateToolApprovalRequest(_ context.Context, arg sqlc.CreateToolApprovalRequestParams) (sqlc.ToolApprovalRequest, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	q.createArg = arg
 	if q.createErr != nil {
 		return sqlc.ToolApprovalRequest{}, q.createErr
 	}
 	return q.createRow, nil
+}
+
+func TestCreatePendingStoresOperationAndOriginalToolName(t *testing.T) {
+	t.Parallel()
+
+	queries := &lifecycleQueries{createRow: sqlc.ToolApprovalRequest{
+		ID:         mustTestUUID("33333333-3333-3333-3333-333333333333"),
+		BotID:      mustTestUUID("11111111-1111-1111-1111-111111111111"),
+		SessionID:  mustTestUUID("22222222-2222-2222-2222-222222222222"),
+		ToolCallID: "call-1",
+		ToolName:   "apply_patch",
+		Operation:  OperationWrite,
+		ToolInput:  []byte(`{"patch":"*** Begin Patch\n*** End Patch"}`),
+		ShortID:    1,
+		Status:     StatusPending,
+	}}
+	svc := NewService(slog.New(slog.DiscardHandler), queries, nil)
+
+	req, err := svc.CreatePending(context.Background(), CreatePendingInput{
+		BotID:      "11111111-1111-1111-1111-111111111111",
+		SessionID:  "22222222-2222-2222-2222-222222222222",
+		ToolCallID: "call-1",
+		ToolName:   "apply_patch",
+		ToolInput:  map[string]any{"patch": "*** Begin Patch\n*** End Patch"},
+	})
+	if err != nil {
+		t.Fatalf("CreatePending() error = %v", err)
+	}
+	if queries.createArg.ToolName != "apply_patch" || queries.createArg.Operation != OperationWrite {
+		t.Fatalf("create args tool=%q operation=%q, want apply_patch/write", queries.createArg.ToolName, queries.createArg.Operation)
+	}
+	if req.ToolName != "apply_patch" || req.Operation != OperationWrite {
+		t.Fatalf("request tool=%q operation=%q, want apply_patch/write", req.ToolName, req.Operation)
+	}
 }
 
 func (q *lifecycleQueries) GetToolApprovalRequest(_ context.Context, _ pgtype.UUID) (sqlc.ToolApprovalRequest, error) {

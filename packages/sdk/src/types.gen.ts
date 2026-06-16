@@ -2397,9 +2397,9 @@ export type SettingsSettings = {
 };
 
 export type SettingsToolApprovalConfig = {
-    edit?: SettingsToolApprovalFilePolicy;
     enabled?: boolean;
     exec?: SettingsToolApprovalExecPolicy;
+    read?: SettingsToolApprovalFilePolicy;
     write?: SettingsToolApprovalFilePolicy;
 };
 

@@ -279,6 +279,9 @@ func RequestMetadata(req Request) map[string]any {
 		"status":      status,
 		"can_approve": CanApprove(status),
 	}
+	if operation := strings.TrimSpace(req.Operation); operation != "" {
+		metadata["operation"] = operation
+	}
 	if reason := strings.TrimSpace(req.DecisionReason); reason != "" {
 		metadata["decision_reason"] = reason
 	}
