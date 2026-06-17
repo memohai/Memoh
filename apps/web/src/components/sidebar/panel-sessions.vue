@@ -82,6 +82,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -95,7 +96,11 @@ const { t } = useI18n()
 const router = useRouter()
 const chatStore = useChatStore()
 const workspaceTabs = useWorkspaceTabsStore()
-const { currentBotId } = storeToRefs(chatStore)
+const { currentBotId, bots } = storeToRefs(chatStore)
+
+const currentBot = computed(() =>
+  bots.value.find(bot => bot.id === currentBotId.value) ?? null,
+)
 
 function handleNewSession() {
   if (!currentBotId.value) return
@@ -107,6 +112,6 @@ function handleNewSession() {
 function handleBotSettings() {
   const botId = currentBotId.value
   if (!botId) return
-  void router.push({ name: 'bot-detail', params: { botName: botId } })
+  void router.push({ name: 'bot-detail', params: { botName: currentBot.value?.name ?? botId } })
 }
 </script>

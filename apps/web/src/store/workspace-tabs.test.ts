@@ -212,6 +212,23 @@ describe('workspace layout store', () => {
     expect(dock.getPanel('chat')?.title).toBe('Renamed')
   })
 
+  it('splits the chat panel into a duplicate chat pane', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openChat('Session')
+    store.splitGroup('group-1', 'right')
+
+    expect(dock.getPanel('chat')).toBeTruthy()
+    expect(dock.getPanel('chat~2')).toBeTruthy()
+    expect(dock.getPanel('chat~2')?.component).toBe('chat')
+
+    store.setChatTitle('Renamed')
+    expect(dock.getPanel('chat')?.title).toBe('Renamed')
+    expect(dock.getPanel('chat~2')?.title).toBe('Renamed')
+  })
+
   it('opens multiple schedule panels and focuses an existing schedule', () => {
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()

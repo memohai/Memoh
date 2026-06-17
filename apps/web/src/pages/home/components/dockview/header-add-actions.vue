@@ -64,7 +64,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { Columns2, Globe, Monitor, Plus, Rows2, Terminal } from 'lucide-vue-next'
@@ -78,7 +78,7 @@ import {
 } from '@memohai/ui'
 import type { DockviewApi, DockviewGroupPanelApi, IDockviewGroupPanel } from 'dockview-vue'
 import { useChatStore } from '@/store/chat-list'
-import { CHAT_PANEL_ID, useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { isLocalWorkspaceBot } from '@/utils/bot-workspace'
 import { hasBotPermission } from '@/utils/bot-permissions'
 
@@ -108,19 +108,21 @@ const isTerminalGroup = computed(() => {
   return panels.length > 0 && panels.every(p => p.id.startsWith('terminal:'))
 })
 
+const activePanelId = ref<string | null>(props.params.group.activePanel?.id ?? null)
+const activePanelSub = props.params.api.onDidActivePanelChange(() => {
+  activePanelId.value = props.params.group.activePanel?.id ?? null
+})
+
+onBeforeUnmount(() => activePanelSub.dispose())
+
 // Browser / desktop are container-only and need manage permission; a local
 // (trusted-host) workspace exposes neither, so its menu is terminal + split only.
 const canSplitExtras = computed(() => canManage.value && !isLocalWorkspace.value)
 
-// Splitting duplicates the active tab into a second pane. The chat conversation
-// is a singleton panel (one fixed id), so it can't be duplicated — offering
-// "split" while chat is the active tab just no-ops. Hide it then, and show it
-// only for panels that can actually open a second view (file/terminal/…).
-// store.activeId re-fires this whenever the active tab changes.
+// Splitting duplicates the active tab into a second pane. Chat keeps its stable
+// primary id for routing/title sync, but split copies use generated ids.
 const canSplit = computed(() => {
-  void store.activeId
-  const active = props.params.group.activePanel?.id
-  return !!active && active !== CHAT_PANEL_ID
+  return !!activePanelId.value
 })
 
 const hasAnyAction = computed(() =>

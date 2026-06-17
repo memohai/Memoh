@@ -59,6 +59,7 @@ function fileBaseName(filePath: string): string {
 
 function panelComponentOf(id: string): WorkspacePanelComponent | null {
   if (id === CHAT_PANEL_ID) return 'chat'
+  if (id.startsWith(`${CHAT_PANEL_ID}~`)) return 'chat'
   if (id.startsWith('file:')) return 'file'
   if (id.startsWith('preview:')) return 'preview'
   if (id.startsWith('asset:')) return 'asset'
@@ -542,9 +543,13 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   function setChatTitle(title: string) {
-    const panel = api.value?.getPanel(CHAT_PANEL_ID)
-    if (panel && panel.api.title !== title) {
-      panel.api.setTitle(title)
+    const dock = api.value
+    if (!dock) return
+    for (const panel of dock.panels) {
+      if (panel.id !== CHAT_PANEL_ID && !panel.id.startsWith(`${CHAT_PANEL_ID}~`)) continue
+      if (panel.api.title !== title) {
+        panel.api.setTitle(title)
+      }
     }
   }
 
@@ -792,10 +797,13 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         break
       }
       case 'chat':
-        // The chat conversation is a singleton (one fixed panel id), so it can't
-        // be duplicated into a split. The "+" menu hides split while chat is the
-        // active tab; this stays a defensive no-op (re-adding CHAT_PANEL_ID would
-        // collide with the existing panel).
+        dock.addPanel({
+          id: uniqueSplitPanelId(source.id),
+          component: 'chat',
+          title,
+          renderer: 'always',
+          position,
+        })
         break
     }
   }
