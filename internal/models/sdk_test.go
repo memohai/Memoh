@@ -182,6 +182,7 @@ func TestNewSDKChatModelDeepSeekChatCompletionsCompatDisablesThinking(t *testing
 	})
 	if model == nil {
 		t.Fatal("expected a model, got nil")
+		return
 	}
 	if model.Provider == nil || model.Provider.Name() != string(ClientTypeOpenAICompletions) {
 		t.Fatalf("expected openai completions provider, got %+v", model.Provider)

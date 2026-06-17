@@ -2,6 +2,7 @@ package bots
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -272,4 +273,224 @@ func TestRunCreateLifecycleSetsUpContainerBeforeReady(t *testing.T) {
 	if len(events) != 2 || events[0] != "setup" || events[1] != "status" {
 		t.Fatalf("expected setup before ready status update, got events %v", events)
 	}
+}
+
+func TestRunCreateLifecycleRecordsSetupFailureAndLeavesBotReady(t *testing.T) {
+	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
+	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
+	botID := botUUID.String()
+	events := make([]string, 0, 3)
+	var persisted []byte
+
+	db := &fakeDBTX{
+		queryRowFunc: func(_ context.Context, query string, args ...any) pgx.Row {
+			switch {
+			case strings.Contains(query, "SELECT id, owner_user_id") && strings.Contains(query, "FROM bots"):
+				return makeGetBotRowWithMetadata(botUUID, ownerUUID, []byte(`{"workspace":{"image":"ghcr.io/memohai/workspace:latest"},"keep":true}`))
+			case strings.Contains(query, "UPDATE bots") && strings.Contains(query, "metadata = $7"):
+				events = append(events, "metadata")
+				if got := args[1].(string); got != "test-bot" {
+					t.Fatalf("expected update to preserve bot name, got %q", got)
+				}
+				payload, ok := args[6].([]byte)
+				if !ok {
+					t.Fatalf("metadata arg type = %T, want []byte", args[6])
+				}
+				persisted = append([]byte(nil), payload...)
+				return makeUpdateBotProfileRowWithMetadata(botUUID, ownerUUID, payload)
+			default:
+				t.Fatalf("unexpected query: %s", query)
+				return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
+			}
+		},
+		execFunc: func(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
+			if strings.Contains(query, "UPDATE bots") && strings.Contains(query, "SET status = $2") {
+				events = append(events, "status")
+				if got := args[1].(string); got != BotStatusReady {
+					t.Fatalf("expected bot to remain %q, got %q", BotStatusReady, got)
+				}
+			}
+			return pgconn.CommandTag{}, nil
+		},
+	}
+	lifecycle := &fakeContainerLifecycle{
+		onSetup: func() {
+			events = append(events, "setup")
+		},
+		setupErr: errors.New("pull https://user:pass@registry.example.test/image?token=abc123 failed: proxyconnect tcp: dial tcp 127.0.0.1:7897: connect: connection refused"),
+	}
+	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
+	svc.SetContainerLifecycle(lifecycle)
+
+	if err := svc.runCreateLifecycle(context.Background(), botID); err != nil {
+		t.Fatalf("run create lifecycle: %v", err)
+	}
+	if len(events) != 3 || events[0] != "setup" || events[1] != "metadata" || events[2] != "status" {
+		t.Fatalf("expected setup, metadata, status events, got %v", events)
+	}
+
+	setupError := requireLastSetupError(t, persisted)
+	if setupError["phase"] != "setup" {
+		t.Fatalf("phase = %#v, want setup", setupError["phase"])
+	}
+	message, _ := setupError["message"].(string)
+	if !strings.Contains(message, "127.0.0.1:7897") {
+		t.Fatalf("message = %q, want proxy failure details", message)
+	}
+	if strings.Contains(message, "user:pass") || strings.Contains(message, "abc123") {
+		t.Fatalf("message should redact credentials and tokens, got %q", message)
+	}
+}
+
+func TestRunCreateLifecycleClearsSetupFailureAfterSuccess(t *testing.T) {
+	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
+	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
+	botID := botUUID.String()
+	var persisted []byte
+
+	db := &fakeDBTX{
+		queryRowFunc: func(_ context.Context, query string, args ...any) pgx.Row {
+			switch {
+			case strings.Contains(query, "SELECT id, owner_user_id") && strings.Contains(query, "FROM bots"):
+				return makeGetBotRowWithMetadata(botUUID, ownerUUID, []byte(`{"workspace":{"image":"ghcr.io/memohai/workspace:latest","last_setup_error":{"phase":"setup","message":"old failure","at":"2026-06-08T10:00:00Z"}}}`))
+			case strings.Contains(query, "UPDATE bots") && strings.Contains(query, "metadata = $7"):
+				payload, ok := args[6].([]byte)
+				if !ok {
+					t.Fatalf("metadata arg type = %T, want []byte", args[6])
+				}
+				persisted = append([]byte(nil), payload...)
+				return makeUpdateBotProfileRowWithMetadata(botUUID, ownerUUID, payload)
+			default:
+				t.Fatalf("unexpected query: %s", query)
+				return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
+			}
+		},
+	}
+	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
+	svc.SetContainerLifecycle(&fakeContainerLifecycle{})
+
+	if err := svc.runCreateLifecycle(context.Background(), botID); err != nil {
+		t.Fatalf("run create lifecycle: %v", err)
+	}
+
+	metadata := decodePersistedMetadata(t, persisted)
+	workspace := metadata["workspace"].(map[string]any)
+	if _, ok := workspace["last_setup_error"]; ok {
+		t.Fatalf("last_setup_error should be cleared, metadata=%#v", metadata)
+	}
+	if workspace["image"] != "ghcr.io/memohai/workspace:latest" {
+		t.Fatalf("workspace image was not preserved: %#v", workspace)
+	}
+}
+
+func TestListChecksReportsSetupFailureAsSingleIssue(t *testing.T) {
+	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
+	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
+	metadata := []byte(`{"workspace":{"last_setup_error":{"phase":"setup","message":"image pull failed: proxyconnect tcp: dial tcp 127.0.0.1:7897: connect: connection refused","at":"2026-06-08T10:00:00Z"}}}`)
+
+	db := &fakeDBTX{
+		queryRowFunc: func(_ context.Context, query string, _ ...any) pgx.Row {
+			switch {
+			case strings.Contains(query, "SELECT id, owner_user_id") && strings.Contains(query, "FROM bots"):
+				return makeGetBotRowWithMetadata(botUUID, ownerUUID, metadata)
+			case strings.Contains(query, "FROM containers"):
+				return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
+			default:
+				t.Fatalf("unexpected query: %s", query)
+				return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
+			}
+		},
+	}
+	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
+
+	checks, err := svc.ListChecks(context.Background(), botUUID.String())
+	if err != nil {
+		t.Fatalf("ListChecks() error = %v", err)
+	}
+	initCheck := findBotCheck(t, checks, BotCheckTypeContainerInit)
+	if initCheck.Status != BotCheckStatusError {
+		t.Fatalf("container.init status = %q, want error", initCheck.Status)
+	}
+	if !strings.Contains(initCheck.Detail, "127.0.0.1:7897") {
+		t.Fatalf("container.init detail = %q, want setup failure detail", initCheck.Detail)
+	}
+	recordCheck := findBotCheck(t, checks, BotCheckTypeContainerRecord)
+	if recordCheck.Status != BotCheckStatusUnknown {
+		t.Fatalf("container.record status = %q, want unknown", recordCheck.Status)
+	}
+	state, issueCount := summarizeChecks(checks)
+	if state != BotCheckStateIssue || issueCount != 1 {
+		t.Fatalf("summary = (%q, %d), want (%q, 1); checks=%#v", state, issueCount, BotCheckStateIssue, checks)
+	}
+}
+
+func TestRecordContainerSetupFailureTruncatesLongMessages(t *testing.T) {
+	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
+	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
+	var persisted []byte
+
+	db := &fakeDBTX{
+		queryRowFunc: func(_ context.Context, query string, args ...any) pgx.Row {
+			switch {
+			case strings.Contains(query, "SELECT id, owner_user_id") && strings.Contains(query, "FROM bots"):
+				return makeGetBotRowWithMetadata(botUUID, ownerUUID, []byte(`{}`))
+			case strings.Contains(query, "UPDATE bots") && strings.Contains(query, "metadata = $7"):
+				payload, ok := args[6].([]byte)
+				if !ok {
+					t.Fatalf("metadata arg type = %T, want []byte", args[6])
+				}
+				persisted = append([]byte(nil), payload...)
+				return makeUpdateBotProfileRowWithMetadata(botUUID, ownerUUID, payload)
+			default:
+				t.Fatalf("unexpected query: %s", query)
+				return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
+			}
+		},
+	}
+	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
+
+	longMessage := strings.Repeat("x", 5000)
+	if err := svc.RecordContainerSetupFailure(context.Background(), botUUID.String(), "start", errors.New(longMessage)); err != nil {
+		t.Fatalf("RecordContainerSetupFailure() error = %v", err)
+	}
+
+	setupError := requireLastSetupError(t, persisted)
+	message, _ := setupError["message"].(string)
+	if len([]rune(message)) > 4096 {
+		t.Fatalf("message length = %d, want <= 4096", len([]rune(message)))
+	}
+}
+
+func findBotCheck(t *testing.T, checks []BotCheck, id string) BotCheck {
+	t.Helper()
+	for _, check := range checks {
+		if check.ID == id {
+			return check
+		}
+	}
+	t.Fatalf("missing check %q in %#v", id, checks)
+	return BotCheck{}
+}
+
+func requireLastSetupError(t *testing.T, payload []byte) map[string]any {
+	t.Helper()
+	metadata := decodePersistedMetadata(t, payload)
+	workspace, ok := metadata["workspace"].(map[string]any)
+	if !ok {
+		t.Fatalf("workspace metadata missing: %#v", metadata)
+	}
+	setupError, ok := workspace["last_setup_error"].(map[string]any)
+	if !ok {
+		t.Fatalf("last_setup_error missing: %#v", workspace)
+	}
+	return setupError
+}
+
+func decodePersistedMetadata(t *testing.T, payload []byte) map[string]any {
+	t.Helper()
+	var metadata map[string]any
+	if err := json.Unmarshal(payload, &metadata); err != nil {
+		t.Fatalf("decode metadata: %v", err)
+	}
+	return metadata
 }

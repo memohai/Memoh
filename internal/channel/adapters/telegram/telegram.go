@@ -752,15 +752,19 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 	for key, value := range metadata {
 		meta[key] = value
 	}
-	mentionParts := extractTelegramMentionParts(raw)
+	richParts := extractTelegramMessageParts(raw)
+	format := channel.MessageFormatPlain
+	if len(richParts) > 0 {
+		format = channel.MessageFormatRich
+	}
 
 	return channel.InboundMessage{
 		Channel: Type,
 		Message: channel.Message{
 			ID:          strconv.Itoa(raw.ID),
-			Format:      channel.MessageFormatPlain,
+			Format:      format,
 			Text:        text,
-			Parts:       mentionParts,
+			Parts:       richParts,
 			Attachments: attachments,
 			Reply:       replyRef,
 			Forward:     forwardRef,
@@ -1492,55 +1496,6 @@ func parseTelegramTarget(target string) (chatID int64, channelUsername string, e
 		return 0, "", errors.New("telegram target must be @username or chat_id")
 	}
 	return chatID, "", nil
-}
-
-// extractTelegramMentionParts extracts structured mention parts from Telegram message entities.
-func extractTelegramMentionParts(msg *tele.Message) []channel.MessagePart {
-	if msg == nil {
-		return nil
-	}
-	text := msg.Text
-	if text == "" {
-		text = msg.Caption
-	}
-	entities := make(tele.Entities, 0, len(msg.Entities)+len(msg.CaptionEntities))
-	entities = append(entities, msg.Entities...)
-	entities = append(entities, msg.CaptionEntities...)
-
-	var parts []channel.MessagePart
-	for _, entity := range entities {
-		switch entity.Type {
-		case tele.EntityMention:
-			if text != "" && entity.Offset >= 0 && entity.Offset+entity.Length <= len([]rune(text)) {
-				runes := []rune(text)
-				mentionText := string(runes[entity.Offset : entity.Offset+entity.Length])
-				parts = append(parts, channel.MessagePart{
-					Type: channel.MessagePartMention,
-					Text: mentionText,
-				})
-			}
-		case tele.EntityTMention:
-			if entity.User != nil {
-				name := strings.TrimSpace(entity.User.FirstName + " " + entity.User.LastName)
-				if name == "" {
-					name = entity.User.Username
-				}
-				displayText := "@" + name
-				meta := map[string]any{
-					"user_id": strconv.FormatInt(entity.User.ID, 10),
-				}
-				if entity.User.Username != "" {
-					meta["username"] = entity.User.Username
-				}
-				parts = append(parts, channel.MessagePart{
-					Type:     channel.MessagePartMention,
-					Text:     displayText,
-					Metadata: meta,
-				})
-			}
-		}
-	}
-	return parts
 }
 
 func isTelegramBotMentioned(msg *tele.Message, botUsername string) bool {

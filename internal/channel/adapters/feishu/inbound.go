@@ -51,6 +51,10 @@ func extractFeishuInbound(event *larkim.P2MessageReceiveV1, botOpenID string, lo
 			if postText != "" {
 				msg.Text = postText
 			}
+			if postParts := extractFeishuPostParts(contentMap); len(postParts) > 0 {
+				msg.Parts = postParts
+				msg.Format = channel.MessageFormatRich
+			}
 			postAtts := extractFeishuPostAttachments(contentMap, msg.ID)
 			msg.Attachments = append(msg.Attachments, postAtts...)
 			if len(postAtts) > 0 || postText != "" {

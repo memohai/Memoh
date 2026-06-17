@@ -317,6 +317,61 @@ func TestBuildTelegramInboundMessageIncludesUpdateIDMetadata(t *testing.T) {
 	}
 }
 
+func TestBuildTelegramInboundMessage_PlainFormatWhenNoEntities(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewTelegramAdapter(nil)
+	bot := &tgbotapi.BotAPI{Token: "test", Self: tgbotapi.User{ID: 1, UserName: "memohbot"}}
+	update := tgbotapi.Update{
+		UpdateID: 1,
+		Message: &tgbotapi.Message{
+			MessageID: 1,
+			Text:      "plain text only",
+			Chat:      &tgbotapi.Chat{ID: 1, Type: "private"},
+			From:      &tgbotapi.User{ID: 1, UserName: "alice"},
+		},
+	}
+	inbound, ok := adapter.buildTelegramInboundMessage(bot, channel.ChannelConfig{}, update)
+	if !ok {
+		t.Fatal("expected inbound message")
+	}
+	if inbound.Message.Format != channel.MessageFormatPlain {
+		t.Fatalf("expected plain format when no entities, got %q", inbound.Message.Format)
+	}
+	if len(inbound.Message.Parts) != 0 {
+		t.Fatalf("expected no Parts, got %+v", inbound.Message.Parts)
+	}
+}
+
+func TestBuildTelegramInboundMessage_RichFormatWhenEntitiesPopulateParts(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewTelegramAdapter(nil)
+	bot := &tgbotapi.BotAPI{Token: "test", Self: tgbotapi.User{ID: 1, UserName: "memohbot"}}
+	update := tgbotapi.Update{
+		UpdateID: 1,
+		Message: &tgbotapi.Message{
+			MessageID: 1,
+			Text:      "hi shout bye",
+			Chat:      &tgbotapi.Chat{ID: 1, Type: "private"},
+			From:      &tgbotapi.User{ID: 1, UserName: "alice"},
+			Entities: []tgbotapi.MessageEntity{
+				{Type: "bold", Offset: 3, Length: 5},
+			},
+		},
+	}
+	inbound, ok := adapter.buildTelegramInboundMessage(bot, channel.ChannelConfig{}, update)
+	if !ok {
+		t.Fatal("expected inbound message")
+	}
+	if len(inbound.Message.Parts) == 0 {
+		t.Fatalf("expected Parts populated from bold entity, got empty")
+	}
+	if inbound.Message.Format != channel.MessageFormatRich {
+		t.Fatalf("expected rich format when Parts populate, got %q", inbound.Message.Format)
+	}
+}
+
 func TestSeenTelegramUpdate(t *testing.T) {
 	t.Parallel()
 
