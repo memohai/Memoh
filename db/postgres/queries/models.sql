@@ -269,6 +269,7 @@ SELECT m.*,
 FROM models m
 JOIN providers p ON p.id = m.provider_id
 WHERE m.type = 'speech'
+  AND m.enable = true
 ORDER BY m.created_at DESC;
 
 -- name: ListSpeechModelsByProviderID :many
@@ -298,6 +299,7 @@ SELECT m.*,
 FROM models m
 JOIN providers p ON p.id = m.provider_id
 WHERE m.type = 'transcription'
+  AND m.enable = true
 ORDER BY m.created_at DESC;
 
 -- name: ListTranscriptionModelsByProviderID :many

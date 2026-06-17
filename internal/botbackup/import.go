@@ -1194,6 +1194,7 @@ func (s *Service) ensureModel(ctx context.Context, item modelpkg.GetResponse, de
 		Name:       item.Name,
 		ProviderID: providerID,
 		Type:       item.Type,
+		Enable:     &item.Enable,
 		Config:     item.Config,
 	})
 	if err != nil {

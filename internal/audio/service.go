@@ -211,6 +211,7 @@ func (s *Service) UpdateSpeechModel(ctx context.Context, id string, req UpdateSp
 		Name:       name,
 		ProviderID: row.ProviderID,
 		Type:       string(models.ModelTypeSpeech),
+		Enable:     row.Enable,
 		Config:     configJSON,
 	})
 	if err != nil {
@@ -242,6 +243,7 @@ func (s *Service) UpdateTranscriptionModel(ctx context.Context, id string, req U
 		Name:       name,
 		ProviderID: row.ProviderID,
 		Type:       string(models.ModelTypeTranscription),
+		Enable:     row.Enable,
 		Config:     configJSON,
 	})
 	if err != nil {

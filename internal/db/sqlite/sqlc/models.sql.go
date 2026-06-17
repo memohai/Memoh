@@ -954,6 +954,7 @@ SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.config, m.created_at, 
 FROM models m
 JOIN providers p ON p.id = m.provider_id
 WHERE m.type = 'speech'
+  AND m.enable = true
 ORDER BY m.created_at DESC
 `
 
@@ -1099,6 +1100,7 @@ SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.config, m.created_at, 
 FROM models m
 JOIN providers p ON p.id = m.provider_id
 WHERE m.type = 'transcription'
+  AND m.enable = true
 ORDER BY m.created_at DESC
 `
 
