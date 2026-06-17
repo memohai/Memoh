@@ -215,7 +215,7 @@
                 {{ item.summary }}
               </p>
               
-              <!-- Code Block with Syntax Highlighting -->
+              <!-- Diagnostic detail -->
               <div
                 v-if="item.detail"
                 class="group/code relative rounded border bg-muted/30"
@@ -230,8 +230,7 @@
                     <Copy class="w-3 h-3" />
                   </Button>
                 </div>
-                <!-- eslint-disable-next-line vue/no-v-html -->
-                <pre class="p-3 font-mono text-[11px] leading-relaxed overflow-x-auto max-h-[240px] overflow-y-auto select-text whitespace-pre-wrap"><code v-html="highlightCode(item.detail)" /></pre>
+                <pre class="p-3 font-mono text-[11px] leading-relaxed overflow-x-auto max-h-[240px] overflow-y-auto select-text whitespace-pre-wrap"><code>{{ item.detail }}</code></pre>
               </div>
             </div>
           </CollapsibleContent>
@@ -357,14 +356,6 @@ async function handleRefreshChecks() {
 function copyToClipboard(text: string) {
   navigator.clipboard.writeText(text)
   toast.success(t('common.copied'))
-}
-
-// Helper: Syntax Highlighting
-function highlightCode(text: string): string {
-  return text
-    .replace(/(error|fail|failed|denied)/gi, '<span class="text-destructive font-bold">$1</span>')
-    .replace(/(warn|warning)/gi, '<span class="text-warning font-bold">$1</span>')
-    .replace(/(\/([^\s\/\:]+\/)*[^\s\/\:]+)/g, '<span class="text-foreground underline decoration-muted-foreground/30">$1</span>')
 }
 
 // Helper: Icons & Colors
