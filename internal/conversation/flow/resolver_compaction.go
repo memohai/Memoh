@@ -110,6 +110,13 @@ func (r *Resolver) buildCompactionConfig(ctx context.Context, req conversation.C
 	if err != nil {
 		return compaction.TriggerConfig{}, err
 	}
+	if !compactModel.Enable {
+		// Silently skip auto-compaction when the configured model is
+		// disabled — matches the existing "no model configured" path so the
+		// bot keeps running without spending tokens on a model the user
+		// explicitly turned off.
+		return compaction.TriggerConfig{}, nil
+	}
 
 	compactProvider, err := models.FetchProviderByID(ctx, r.queries, compactModel.ProviderID)
 	if err != nil {

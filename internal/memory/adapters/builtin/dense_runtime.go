@@ -588,6 +588,9 @@ func resolveDenseEmbeddingModel(ctx context.Context, queries dbstore.Queries, mo
 	if row.Type != "embedding" {
 		return denseModelSpec{}, fmt.Errorf("dense runtime: model %s is not an embedding model", modelRef)
 	}
+	if !row.Enable {
+		return denseModelSpec{}, fmt.Errorf("dense runtime: embedding model %s is disabled", modelRef)
+	}
 	if !row.ProviderID.Valid {
 		return denseModelSpec{}, fmt.Errorf("dense runtime: model %s has no provider", modelRef)
 	}

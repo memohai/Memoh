@@ -458,6 +458,9 @@ func (s *Service) resolveSpeechParams(ctx context.Context, modelID string, text 
 	if err != nil {
 		return nil, fmt.Errorf("get speech model: %w", err)
 	}
+	if !modelRow.Enable {
+		return nil, fmt.Errorf("speech model %s is disabled", modelRow.ModelID)
+	}
 	providerRow, err := s.queries.GetProviderByID(ctx, modelRow.ProviderID)
 	if err != nil {
 		return nil, fmt.Errorf("get speech provider: %w", err)
@@ -491,6 +494,9 @@ func (s *Service) resolveTranscriptionParams(ctx context.Context, modelID string
 	modelRow, err := s.queries.GetTranscriptionModelWithProvider(ctx, pgID)
 	if err != nil {
 		return nil, fmt.Errorf("get transcription model: %w", err)
+	}
+	if !modelRow.Enable {
+		return nil, fmt.Errorf("transcription model %s is disabled", modelRow.ModelID)
 	}
 	providerRow, err := s.queries.GetProviderByID(ctx, modelRow.ProviderID)
 	if err != nil {
