@@ -262,6 +262,13 @@ button) must not break or clip. Always check the narrowest realistic width, not 
 default — and remember Chinese copy is wider, so the narrow + `zh` combination is the real worst
 case (see § 1).
 
+**When a component must adapt to a resizable pane, viewport breakpoints are the wrong tool.**
+`sm:` / `md:` watch the *window* — but a dockview / master-detail pane changes width while the
+window doesn't, so a `sm:` grid won't react when the same component sits in a narrow vs wide
+pane. Reach for a **container query** (`@container`) so the component responds to *its own
+container's* width, not the viewport. (Page-level `max-w-3xl` columns still use viewport
+prefixes; this is only for components that live inside variable-width panes.)
+
 Pane width is only one of three "bigger" axes; the page must also hold up under **browser zoom**
 and a **larger root/OS font**. The defence is the same discipline: lay out with the spacing
 ladder and flex/grid gaps (never a margin tuned to one string), size inline-with-text icons in
@@ -381,6 +388,140 @@ recurring failures to avoid:
   refactor that "looks fine" with 5 rows jank-scrolls with 500. Reuse the existing virtualized
   patterns instead of a plain `v-for` over an unbounded list.
 
+## Compose, don't style — the extension boundary
+
+This is the page-layer half of `packages/ui/AGENTS.md` § *Compose, don't style* (read it for
+the ownership table + the four override planes). Component discipline above says *which*
+component to use; this says how you are allowed to **add to** one — because the moment you
+can't, the only exit left is injecting CSS, and injected CSS is the single largest source of
+page debt: it fights the component's `::before` fill / field-edge, breaks dark mode, and
+nothing lints it on an app page.
+
+**"I want to add something" has exactly five exits — four need no CSS, the fifth is an upgrade:**
+
+| I want to… | The sanctioned exit |
+|---|---|
+| add content (icon / badge / suffix) | a **slot** |
+| change size / density | the **`size` prop** |
+| change meaning (emphasis / danger / selected) | the **`variant` prop** |
+| change *outer* layout (width / alignment / outer margin) | a **layout-only className** (see the red line) |
+| want a look the component doesn't offer | **upgrade the component** (add a `variant`/slot, or extract a pure-style component) — never inject in place |
+
+**The className red line — the outer box is yours, the body is the component's:**
+
+- **Allowed on a component** (it only positions the outer box): `w-full`, `flex-1`, `grid`,
+  `gap-*`, outer margin (`mt-*` / `mx-auto`), `max-w-*`.
+- **Forbidden on a component** (it reaches into the body and fights `style.css`): `bg-*`,
+  `hover:*`, `active:*`, `border-*`, `shadow-*` / `shadow-none!`, `ring-*`, `h-[Npx]`. If you
+  just typed one of these onto a `<Button>` / `<Select>` / `<TextButton>`, stop — pick the
+  right `variant`/`size`, or upgrade the component. (Canonical offender: the 6×-pasted "add
+  provider" button carrying `bg-background border-border hover:bg-accent shadow-none!` on a
+  real `<Button>`.)
+
+**The agent workflow — find, reuse, compose, upgrade; never style:**
+
+1. **Find before you write — and do not trust grep.** Ten near-identical controls can wear a
+   hundred names, and they all share similar CSS, so "I didn't match it" does **not** mean it
+   doesn't exist — the odds it already exists under another name are high. Check the component
+   map / `reference.md` § Component picker before assuming nothing fits. Re-deriving an existing
+   component is the #1 debt source.
+2. **Priority is an order, not a suggestion:** reuse > compose > upgrade > (never) hand-write style.
+3. **Copy only a gold-standard reference, never a dirty page.** few-shot copies what it sees;
+   some good-looking pages are already off-contract, so their markup is poison — confirm a page
+   is clean before mirroring it.
+4. **Red lights — STOP and ask, do not improvise:** you need a *new component*, a *new token*,
+   to *edit `style.css`*, or an *a11y / RTL* trade-off. Improvising past any of these means
+   hand-writing past the boundary — exactly the move this whole contract exists to prevent.
+
+## The debt taxonomy — name it before you decide to fix it
+
+"Is this debt?" stops being a vibe once the failure has a name. Three axes turn the adjectives
+*maintainable / reliable / clean* into a checklist; when unsure whether something is worth
+flagging, match it here. This is a diagnostic lens, not new rules — most rows already have a
+rule elsewhere; the value is being able to **name** the failure (and so decide whether to fix
+it now or mark it known).
+
+- **Maintainability** (can we still change it fast & safely tomorrow):
+  - *override-plane debt* — one result must hold on all four planes at once (`packages/ui/AGENTS.md`).
+  - *duplication debt* — one arrangement pasted N times; change one = change N, and they drift.
+  - *source-of-truth debt* — one value hand-copied to two homes, kept in sync "by remembering"
+    (a list mirrored in `cva` and an array with a "keep in sync" comment).
+  - *discoverability debt* — can't find it → rebuild it. grep is blind here (same job, a hundred
+    names, identical-looking CSS), so a missing component map *guarantees* re-derivation.
+- **Reliability** (will it break when no one is looking):
+  - *coupling / boundary debt* — a cross-module assumption asserted only in a comment, never
+    enforced; survives review, fires at runtime.
+  - *consistency debt* — one job done N ways, so one of them is always the odd/wrong one
+    (the trigger-open philosophy split: Select vs ghost).
+- **Cleanliness** (will it rot the more it is used):
+  - *extension-contract debt* — no sanctioned exit → injection (the red line above).
+  - *rule debt* — a rule written but not mechanized, or whose guard is scoped to the wrong place
+    (the contract scans `packages/ui`; the debt lives in `apps/web`).
+  - *exemplar debt* — a dirty page becomes the thing the next author (or agent) copies.
+
+The deepest debt is **un-greppable**: it lives at runtime / in injected dependency behavior —
+reka's focus management + `pointer-events`, portal/teleport leaving the style context, z-index
+stacking, JS↔CSS measured layout, the Tailwind-v4 `translate`/`transform` remap. String search
+can't find it and review can't see it, because it is synthesized only when the page runs. The
+defense is always the same: push that complexity **down** into components / tokens / lint, so
+neither a human nor an agent ever has to reason about it from inside a page.
+
+## Seam-first debugging — find the seam, don't grind the layer
+
+The debt above is mostly un-greppable, so when a visual / interaction bug appears you cannot
+search your way out — and the wrong instinct is to **grind the layer**: stack another
+`!important`, nudge a z-index, pile on a hover override, tweak a margin until it "looks right."
+Every grind adds a chrome layer (= more debt) and usually treats a symptom whose cause lives in
+a seam you are not even editing. Front-end conflicts almost never live *inside* the layer you
+are touching; they live in the **seam between two layers**. So when stuck, debug the seam, not
+the layer. (This is the diagnostic the override-plane map can't pre-list for you: the map names
+*known* seams; this is how you handle a seam nobody wrote down yet.)
+
+1. **Stop signal.** If your next move is "add one more CSS rule" to fix a look / interaction —
+   stop. That urge is itself the tell that you're grinding a layer.
+2. **Name the seam.** Ask what *composes* this final result: your classes + the framework's
+   injected `data-*` / behavior (reka) + the browser's cascade + the current runtime state. The
+   fight is at the seam between two of these — not in the one file you opened.
+3. **Check ownership.** The misbehaving property — where is its home (the ownership table in
+   `packages/ui/AGENTS.md`)? If you're changing it somewhere it shouldn't be touched, that's the
+   cause; go fix it in its home.
+4. **Find a solved twin.** Has this exact seam already been solved elsewhere? (`select-trigger`
+   solved the open/hover seam with `pointer-events:auto`.) Copy the solved one — don't invent a
+   second, conflicting fix (that is how the trigger-open split was born).
+5. **Fix the contract, not the symptom.** Resolve it at the seam's contract (add / unify a
+   `variant` / slot / one philosophy), never by caking CSS onto the symptom.
+6. **Circuit breaker.** Same bug, second or third "add CSS" attempt still not clean? That is
+   conclusive: the cause is a seam, not a missing rule. Stop adding CSS, return to step 2 — and
+   if the honest fix is a new component / token / a `style.css` edit, that's a red light
+   (§ Compose, don't style — the extension boundary): stop and ask, don't grind on.
+
+## Re-review — two failures a single read of this skill can't prevent
+
+Reading the rules once, up front, is not enough — two failure modes slip past it, and both are
+fixed by the agent **re-reviewing itself**, not by adding more rules:
+
+- **Context decay — you forgot the rules you read.** After a long task (many tool calls, a big
+  diff) the skill you read at the start has been diluted out of context, and the code you just
+  wrote can quietly violate it. So before calling a thing done, **reload the contract — don't
+  review from memory**: re-open the ownership table + the className red line + the five exits
+  (and run § The review ritual below), then walk your own diff against them — did I inject an
+  appearance/interaction class onto a component, hand-write a hover, hand-roll a control? Memory
+  is not the source of truth; the rules file is.
+- **The loop is the signal — you're patching a wrong direction.** When the same problem runs
+  *human flags it → you patch → still wrong*, two or three rounds deep, **stop patching.** The
+  loop is conclusive on its own: the cause is not "one more fix," it's a wrong root or a wrong
+  direction, and every patch only stacks complexity (= debt) on a bad base. Even if you
+  eventually make it "work," a thing patched onto a wrong direction is debt, not a solution.
+  Step back and re-review the *whole* thing, not the last edit: did I understand the requirement
+  right? Am I fixing the root or a symptom (§ Seam-first debugging)? Is the honest move to
+  **throw it out and redo it** rather than patch again? Is this a red light (§ Compose, don't
+  style)? The bar is "is the direction right," never "can I eventually make it run."
+
+Same spirit as § Seam-first debugging, scaled up: seam-first stops you grinding one **layer** on
+a single bug (a spatial move — look at the seam); this stops you grinding one **direction**
+across many rounds (a time/round move — look at the whole). Both say: at a threshold, quit local
+patching and re-review the larger frame.
+
 ## UX principles — the part that is hard to see
 
 These are judgment rules. They are the difference between "it renders" and "it's good."
@@ -424,6 +565,18 @@ text. But the two languages have different shapes: Chinese is denser and wider p
 English runs longer. A row that fits perfectly in English can wrap or overflow in Chinese (and
 vice versa), which silently breaks same-row height (§ 4) and narrow-screen reflow. So write and
 **eyeball both locales**, and design the layout to survive the longer/wider of the two.
+
+**An error message follows a formula: what happened · why · how to fix.** "Email needs an @
+symbol" beats "Invalid input"; "We couldn't reach the server — check your connection and retry"
+beats "Something went wrong." Never blame the user ("This field is required", not "You entered
+nothing"), and never use humor in an error — they're already frustrated.
+
+**One concept, one word — terminology consistency is the copy-layer of consistency debt (§ The
+debt taxonomy).** Pick a term and hold it product-wide: *Delete* (never also Remove / Trash),
+*Settings* (never also Preferences / Options), *Create* (never also Add / New). Synonyms-for-
+variety read as different features and quietly erode trust. And a button label names the
+*outcome*, not "OK / Submit / Yes" — *Save changes*, *Create account*, *Delete 5 items* (show
+the count).
 
 ### 2. Don't over-prompt (validation and beyond)
 
