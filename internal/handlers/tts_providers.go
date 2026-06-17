@@ -184,6 +184,9 @@ func (h *AudioHandler) ImportModels(c echo.Context) error {
 		Models: make([]string, 0, len(remoteModels)),
 	}
 
+	// Bulk import lands disabled — see providers.ImportModels for the rationale.
+	disabled := false
+
 	for _, model := range remoteModels {
 		name := strings.TrimSpace(model.Name)
 		if name == "" {
@@ -195,6 +198,7 @@ func (h *AudioHandler) ImportModels(c echo.Context) error {
 			Name:       name,
 			ProviderID: id,
 			Type:       models.ModelTypeSpeech,
+			Enable:     &disabled,
 			Config:     models.ModelConfig{},
 		})
 		if err != nil {
@@ -261,6 +265,9 @@ func (h *AudioHandler) ImportTranscriptionModels(c echo.Context) error {
 		Models: make([]string, 0, len(remoteModels)),
 	}
 
+	// Bulk import lands disabled — see providers.ImportModels for the rationale.
+	disabled := false
+
 	for _, model := range remoteModels {
 		name := strings.TrimSpace(model.Name)
 		if name == "" {
@@ -272,6 +279,7 @@ func (h *AudioHandler) ImportTranscriptionModels(c echo.Context) error {
 			Name:       name,
 			ProviderID: id,
 			Type:       models.ModelTypeTranscription,
+			Enable:     &disabled,
 			Config:     models.ModelConfig{},
 		})
 		if err != nil {

@@ -332,6 +332,11 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 		Models: make([]string, 0),
 	}
 
+	// Bulk import lands disabled — the user picks which ones to expose in
+	// model pickers afterward, to avoid flooding bot config with dozens of
+	// freshly discovered models.
+	disabled := false
+
 	for _, m := range remoteModels {
 		modelType := models.ModelTypeChat
 		if strings.TrimSpace(m.Type) == string(models.ModelTypeEmbedding) {
@@ -363,6 +368,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 			Name:       name,
 			ProviderID: id,
 			Type:       modelType,
+			Enable:     &disabled,
 			Config:     cfg,
 		})
 		if err != nil {
