@@ -25,8 +25,11 @@
             ref="scrollContainer"
             :class="`${transitionScroll?'opacity-100':'opacity-0'} h-full`"
           >
+            <!-- Same horizontal rhythm as the composer below (px-4 sm:px-6
+                 lg:px-10) so the input box and the message column share one
+                 width at every pane size — they must never diverge. -->
             <div
-              class="w-full max-w-[840px] mx-auto px-10 pt-6 pb-28 space-y-6"
+              class="w-full max-w-[840px] mx-auto px-4 pt-6 pb-28 space-y-6 sm:px-6 lg:px-10"
             >
               <div
                 ref="loadMoreSentinel"
@@ -180,13 +183,16 @@
         <div :class="isWelcome ? 'flex flex-col items-center gap-10 w-full' : 'contents'">
           <div
             v-if="isWelcome"
-            class="w-full max-w-[840px] mx-auto px-10 text-center"
+            class="w-full max-w-[840px] mx-auto px-4 text-center sm:px-6 lg:px-10"
           >
             <h1 class="text-balance text-2xl font-semibold tracking-tight text-foreground">
               {{ welcomeGreeting }}
             </h1>
           </div>
-          <div class="pointer-events-auto relative w-full max-w-[840px] mx-auto px-10">
+          <!-- Mirror the message column's padding (px-4 sm:px-6 lg:px-10) exactly
+               so the composer and the chat body always share one width — the inner
+               gutter still relaxes on a cramped pane, but both edges move together. -->
+          <div class="pointer-events-auto relative w-full max-w-[840px] mx-auto px-4 sm:px-6 lg:px-10">
             <Transition
               enter-active-class="motion-safe:transition-opacity motion-safe:duration-150 ease-out"
               enter-from-class="motion-safe:opacity-0"
@@ -422,7 +428,7 @@
                   class="field-sizing-content resize-none break-words bg-transparent text-base leading-[var(--chat-leading)] text-foreground outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
                   :class="isMultiline
                     ? 'order-none w-full basis-full pl-2 pr-1 pt-2 pb-1.5 max-h-52'
-                    : 'order-2 min-w-0 flex-1 self-center pl-1 pr-1 py-1 max-h-32'"
+                    : 'order-2 min-w-0 flex-1 self-center overflow-hidden whitespace-nowrap pl-1 pr-1 py-1 max-h-32'"
                   @keydown.enter.exact="handleKeydown"
                   @paste="handlePaste"
                   @input="syncMultiline"
@@ -502,9 +508,13 @@
                   </DropdownMenuContent>
                 </DropdownMenu>
 
+                <!-- Compact: content-sized and pushed right (ml-auto) so the
+                     textarea (flex-1) owns the slack. Multiline: grows to fill the
+                     controls row (flex-1) and right-aligns, so a long model name
+                     truncates within the row instead of overflowing it. -->
                 <div
-                  class="order-3 ml-auto flex min-w-0 items-center gap-2"
-                  :class="isMultiline ? 'self-end' : 'self-center'"
+                  class="order-3 flex min-w-0 items-center gap-2"
+                  :class="isMultiline ? 'flex-1 justify-end self-end' : 'ml-auto self-center'"
                 >
                   <Popover v-model:open="modelPopoverOpen">
                     <PopoverTrigger as-child>
@@ -512,13 +522,16 @@
                         type="button"
                         variant="ghost"
                         :disabled="!currentBotId || activeChatReadOnly || acpModelChanging"
-                        class="composer-pill-press h-9 max-w-60 gap-1 rounded-full px-3 text-muted-foreground"
+                        class="composer-pill-press h-9 min-w-0 max-w-60 gap-1 rounded-full px-3 text-muted-foreground"
                       >
                         <LoaderCircle
                           v-if="acpModelChanging || acpModelsLoading"
-                          class="size-3.5 animate-spin"
+                          class="size-3.5 shrink-0 animate-spin"
                         />
-                        <span class="truncate text-label">{{ modelTriggerLabel }}</span>
+                        <span
+                          ref="modelLabelEl"
+                          class="min-w-0 truncate text-label"
+                        >{{ modelTriggerLabel }}</span>
                         <ChevronDown class="size-3.5 shrink-0 opacity-50" />
                       </Button>
                     </PopoverTrigger>
@@ -643,11 +656,14 @@
                     v-if="activeIsACP"
                     type="button"
                     variant="ghost"
-                    class="h-9 gap-1 rounded-full px-3 text-muted-foreground max-w-40"
+                    class="h-9 min-w-0 max-w-40 gap-1 rounded-full px-3 text-muted-foreground"
                     disabled
                   >
                     <FolderOpen class="size-3.5 shrink-0" />
-                    <span class="truncate text-[11px]">{{ activeACPProjectLabel }}</span>
+                    <span
+                      ref="acpProjectLabelEl"
+                      class="min-w-0 truncate text-[11px]"
+                    >{{ activeACPProjectLabel }}</span>
                   </Button>
 
                   <div class="relative size-9 shrink-0">
@@ -1403,7 +1419,16 @@ const {
 const inputText = ref('')
 const textareaEl = ref<HTMLTextAreaElement | null>(null)
 const composerEl = ref<HTMLElement | null>(null)
-const isMultiline = ref(false)
+const modelLabelEl = ref<HTMLElement | null>(null)
+const acpProjectLabelEl = ref<HTMLElement | null>(null)
+// The composer lifts to its multiline layout (textarea on its own row, controls
+// below) for two independent reasons: the typed text wraps or holds a newline
+// (textMultiline), or the pane is too narrow to seat the input + model capsule +
+// send on one pill row (narrowMultiline). Either trigger flips isMultiline, so a
+// cramped pane reflows into multiline instead of letting the pill explode.
+const textMultiline = ref(false)
+const narrowMultiline = ref(false)
+const isMultiline = computed(() => textMultiline.value || narrowMultiline.value)
 const compactContentWidth = ref(0)
 const showSend = computed(() => Boolean(inputText.value.trim()) || pendingFiles.value.length > 0)
 
@@ -1466,7 +1491,7 @@ function measureWraps(text: string, width: number): boolean {
 function syncMultiline() {
   const text = inputText.value
   if (text.includes('\n')) {
-    isMultiline.value = true
+    textMultiline.value = true
     return
   }
   const el = textareaEl.value
@@ -1476,16 +1501,61 @@ function syncMultiline() {
     const w = el.clientWidth - padX
     if (w > 1) compactContentWidth.value = w
   }
-  isMultiline.value = measureWraps(text, compactContentWidth.value)
+  textMultiline.value = measureWraps(text, compactContentWidth.value)
+}
+
+// Pixel budget for the compact (pill) row. The right cluster's *natural* width is
+// derived from intrinsic measurements (the model label's scrollWidth, which a
+// `truncate` span still reports in full) so the verdict never depends on the
+// current layout — switching to multiline can't change the inputs and oscillate.
+// When the inline textarea would be squeezed under MIN_INLINE_TEXTAREA, the pill
+// can't host input + capsule + send on one line, so we reflow to multiline.
+const MIN_INLINE_TEXTAREA = 120
+const MODEL_TRIGGER_MAX = 240 // max-w-60
+const PLUS_SLOT = 40 // size-9 (36) + gap-1 (4)
+const SEND_SLOT = 36 // send / ring size-9
+const MODEL_CHROME = 46 // px-3 ×2 + gap-1 + chevron + a little slack
+const CLUSTER_GAP = 8 // gap-2 between cluster children
+const ROW_GAPS = 8 // gap-1 on each flank of the textarea
+
+function rightClusterNaturalWidth(): number {
+  const modelLabel = modelLabelEl.value?.scrollWidth ?? 0
+  const modelWidth = modelLabel > 0
+    ? Math.min(MODEL_TRIGGER_MAX, modelLabel + MODEL_CHROME)
+    : MODEL_TRIGGER_MAX
+  let width = modelWidth + CLUSTER_GAP + SEND_SLOT
+  const acpLabel = acpProjectLabelEl.value?.scrollWidth ?? 0
+  if (acpLabel > 0) width += Math.min(160, acpLabel + 28) + CLUSTER_GAP
+  return width
+}
+
+function recomputeComposerFit() {
+  const el = composerEl.value
+  if (!el) return
+  const cs = getComputedStyle(el)
+  const padX = Number.parseFloat(cs.paddingLeft) + Number.parseFloat(cs.paddingRight)
+  const inner = el.clientWidth - padX
+  if (inner <= 1) return
+  const room = inner - PLUS_SLOT - ROW_GAPS - rightClusterNaturalWidth()
+  narrowMultiline.value = room < MIN_INLINE_TEXTAREA
 }
 
 let composerResizeObserver: ResizeObserver | null = null
 onMounted(() => {
-  void nextTick(syncMultiline)
+  void nextTick(() => {
+    syncMultiline()
+    recomputeComposerFit()
+  })
   if (typeof ResizeObserver !== 'undefined' && textareaEl.value) {
     composerResizeObserver = new ResizeObserver(() => syncMultiline())
     composerResizeObserver.observe(textareaEl.value)
   }
+})
+
+// A different model name (or switching to/from an ACP project pill) changes the
+// right cluster's natural width, so re-run the fit check when the labels change.
+watch([modelTriggerLabel, activeIsACP, activeACPProjectLabel], () => {
+  void nextTick(recomputeComposerFit)
 })
 onBeforeUnmount(() => {
   composerResizeObserver?.disconnect()
@@ -1602,6 +1672,9 @@ onMounted(() => {
   const el = composerEl.value
   if (el && typeof ResizeObserver !== 'undefined') {
     composerSizeObserver = new ResizeObserver(() => {
+      // The fit check keys off width only, so the height swing of a pill↔multiline
+      // morph (same width) can't feed back and re-toggle it.
+      recomputeComposerFit()
       // Skip while we drive the height ourselves; only capture layout-driven
       // resizes so the next morph starts from the real current height. The
       // keystroke path sets composerHeightAnim before this fires, so normal
