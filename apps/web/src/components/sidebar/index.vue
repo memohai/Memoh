@@ -205,7 +205,7 @@ const asideStyle = computed<Record<string, string>>(() => ({
   width: `${sidebarWidth.value}px`,
   marginLeft: workbenchOpen.value ? '0px' : `-${sidebarWidth.value}px`,
   transition: 'margin-left 300ms cubic-bezier(0.32, 0.72, 0, 1)',
-  // Sidebar-scoped: lighten EVERY ghost button's hover (New Chat, Settings,
+  // Sidebar-scoped: lighten EVERY ghost button's hover (New Session, Settings,
   // Search) to the subtle sidebar tint so nothing on the rail uses the heavy
   // control-tier gray. The teleported bot dropdown lives outside this subtree
   // and keeps its own menu tokens.
