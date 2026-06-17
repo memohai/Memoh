@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode/utf16"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tele "gopkg.in/telebot.v4"
 
 	"github.com/memohai/memoh/internal/channel"
 )
@@ -15,7 +15,7 @@ import (
 // slices, interleaving styled spans with the surrounding plain text. Returns nil
 // when the resulting slice would carry no rich information (so callers can fall
 // back to the plain Text field).
-func extractTelegramMessageParts(msg *tgbotapi.Message) []channel.MessagePart {
+func extractTelegramMessageParts(msg *tele.Message) []channel.MessagePart {
 	if msg == nil {
 		return nil
 	}
@@ -29,7 +29,7 @@ func extractTelegramMessageParts(msg *tgbotapi.Message) []channel.MessagePart {
 		return nil
 	}
 
-	sorted := append([]tgbotapi.MessageEntity{}, entities...)
+	sorted := append(tele.Entities{}, entities...)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		if sorted[i].Offset != sorted[j].Offset {
 			return sorted[i].Offset < sorted[j].Offset
@@ -91,7 +91,7 @@ func extractTelegramMessageParts(msg *tgbotapi.Message) []channel.MessagePart {
 		}
 	}
 
-	emitFromEntity := func(ent tgbotapi.MessageEntity, slice string) {
+	emitFromEntity := func(ent tele.MessageEntity, slice string) {
 		if part, ok := telegramEntityToPart(ent, slice); ok {
 			parts = append(parts, part)
 		} else {
@@ -145,37 +145,37 @@ func extractTelegramMessageParts(msg *tgbotapi.Message) []channel.MessagePart {
 	return parts
 }
 
-func telegramEntityToPart(ent tgbotapi.MessageEntity, slice string) (channel.MessagePart, bool) {
+func telegramEntityToPart(ent tele.MessageEntity, slice string) (channel.MessagePart, bool) {
 	switch ent.Type {
-	case "bold":
+	case tele.EntityBold:
 		return styledText(slice, channel.MessageStyleBold), true
-	case "italic":
+	case tele.EntityItalic:
 		return styledText(slice, channel.MessageStyleItalic), true
-	case "strikethrough":
+	case tele.EntityStrikethrough:
 		return styledText(slice, channel.MessageStyleStrikethrough), true
-	case "code":
+	case tele.EntityCode:
 		return styledText(slice, channel.MessageStyleCode), true
-	case "pre":
+	case tele.EntityCodeBlock:
 		return channel.MessagePart{
 			Type:     channel.MessagePartCodeBlock,
 			Text:     slice,
 			Language: strings.TrimSpace(ent.Language),
 		}, true
-	case "text_link":
+	case tele.EntityTextLink:
 		return channel.MessagePart{
 			Type: channel.MessagePartLink,
 			Text: slice,
 			URL:  strings.TrimSpace(ent.URL),
 		}, true
-	case "url":
+	case tele.EntityURL:
 		return channel.MessagePart{
 			Type: channel.MessagePartLink,
 			Text: slice,
 			URL:  slice,
 		}, true
-	case "mention":
+	case tele.EntityMention:
 		return channel.MessagePart{Type: channel.MessagePartMention, Text: slice}, true
-	case "text_mention":
+	case tele.EntityTMention:
 		if ent.User == nil {
 			return channel.MessagePart{}, false
 		}
@@ -183,8 +183,8 @@ func telegramEntityToPart(ent tgbotapi.MessageEntity, slice string) (channel.Mes
 		meta := map[string]any{
 			"user_id": uid,
 		}
-		if ent.User.UserName != "" {
-			meta["username"] = ent.User.UserName
+		if ent.User.Username != "" {
+			meta["username"] = ent.User.Username
 		}
 		if name := strings.TrimSpace(ent.User.FirstName + " " + ent.User.LastName); name != "" {
 			meta["display_name"] = name
@@ -203,9 +203,9 @@ func telegramEntityToPart(ent tgbotapi.MessageEntity, slice string) (channel.Mes
 	}
 }
 
-func telegramEntityIsStructural(t string) bool {
+func telegramEntityIsStructural(t tele.EntityType) bool {
 	switch t {
-	case "mention", "text_mention", "text_link", "url":
+	case tele.EntityMention, tele.EntityTMention, tele.EntityTextLink, tele.EntityURL:
 		return true
 	}
 	return false

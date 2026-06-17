@@ -321,14 +321,15 @@ func TestBuildTelegramInboundMessage_PlainFormatWhenNoEntities(t *testing.T) {
 	t.Parallel()
 
 	adapter := NewTelegramAdapter(nil)
-	bot := &tgbotapi.BotAPI{Token: "test", Self: tgbotapi.User{ID: 1, UserName: "memohbot"}}
-	update := tgbotapi.Update{
-		UpdateID: 1,
-		Message: &tgbotapi.Message{
-			MessageID: 1,
-			Text:      "plain text only",
-			Chat:      &tgbotapi.Chat{ID: 1, Type: "private"},
-			From:      &tgbotapi.User{ID: 1, UserName: "alice"},
+	bot := newStubTelegramBot(t)
+	bot.Me = &tele.User{ID: 1, Username: "memohbot"}
+	update := &tele.Update{
+		ID: 1,
+		Message: &tele.Message{
+			ID:     1,
+			Text:   "plain text only",
+			Chat:   &tele.Chat{ID: 1, Type: tele.ChatPrivate},
+			Sender: &tele.User{ID: 1, Username: "alice"},
 		},
 	}
 	inbound, ok := adapter.buildTelegramInboundMessage(bot, channel.ChannelConfig{}, update)
@@ -347,16 +348,17 @@ func TestBuildTelegramInboundMessage_RichFormatWhenEntitiesPopulateParts(t *test
 	t.Parallel()
 
 	adapter := NewTelegramAdapter(nil)
-	bot := &tgbotapi.BotAPI{Token: "test", Self: tgbotapi.User{ID: 1, UserName: "memohbot"}}
-	update := tgbotapi.Update{
-		UpdateID: 1,
-		Message: &tgbotapi.Message{
-			MessageID: 1,
-			Text:      "hi shout bye",
-			Chat:      &tgbotapi.Chat{ID: 1, Type: "private"},
-			From:      &tgbotapi.User{ID: 1, UserName: "alice"},
-			Entities: []tgbotapi.MessageEntity{
-				{Type: "bold", Offset: 3, Length: 5},
+	bot := newStubTelegramBot(t)
+	bot.Me = &tele.User{ID: 1, Username: "memohbot"}
+	update := &tele.Update{
+		ID: 1,
+		Message: &tele.Message{
+			ID:     1,
+			Text:   "hi shout bye",
+			Chat:   &tele.Chat{ID: 1, Type: tele.ChatPrivate},
+			Sender: &tele.User{ID: 1, Username: "alice"},
+			Entities: tele.Entities{
+				{Type: tele.EntityBold, Offset: 3, Length: 5},
 			},
 		},
 	}
