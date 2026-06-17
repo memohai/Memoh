@@ -3,21 +3,33 @@
     :open="open"
     @update:open="$emit('update:open', $event)"
   >
-    <DialogContent class="gap-0 overflow-hidden p-0 sm:max-w-lg">
+    <DialogContent
+      class="gap-0 overflow-hidden p-0 sm:max-w-lg"
+      :show-close-button="false"
+    >
       <DialogHeader class="sr-only">
         <DialogTitle>{{ t('chat.searchSessions') }}</DialogTitle>
         <DialogDescription>{{ t('chat.searchSessionPlaceholder') }}</DialogDescription>
       </DialogHeader>
 
-      <div class="flex items-center gap-2 border-b border-border px-3">
+      <div class="flex items-center gap-1 border-b border-border pl-3 pr-1.5">
         <Search class="size-4 shrink-0 text-muted-foreground" />
         <input
           ref="inputRef"
           v-model="query"
-          class="h-11 min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+          class="h-11 min-w-0 flex-1 bg-transparent px-2 text-sm text-foreground outline-none placeholder:text-muted-foreground"
           :placeholder="t('chat.searchSessions')"
           @keydown.enter.prevent="selectFirst"
         >
+        <DialogClose as-child>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Close"
+          >
+            <X />
+          </Button>
+        </DialogClose>
       </div>
 
       <ScrollArea class="max-h-[60vh]">
@@ -54,9 +66,11 @@
 import { computed, nextTick, ref, watch, type Component } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { Clock, GitBranch, HeartPulse, MessageCircle, MessageSquare, Search } from 'lucide-vue-next'
+import { Clock, GitBranch, HeartPulse, MessageCircle, MessageSquare, Search, X } from 'lucide-vue-next'
 import {
+  Button,
   Dialog,
+  DialogClose,
   DialogContent,
   DialogHeader,
   DialogTitle,

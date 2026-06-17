@@ -22,10 +22,23 @@ const listId = `chat-minimap-list-${uid}`
 
 const MIN_ANCHORS = 4
 const MAX_RAIL_MARKS = 28
-const ROW_HEIGHT = 32
-const BAR_HEIGHT = 16
-const LIST_PADDING = 6
-const HINT_HEIGHT = 24
+// Row / bar / padding geometry is derived from the ROOT font size (px) rather than
+// pinned to fixed px, so the active-position bar and the panel scroll math stay
+// aligned with the real rendered rows (rem: row h-8, bar h-4, list p-1.5, hint h-6)
+// when the UI font setting / browser zoom scales them. Re-read on each rebuild — a
+// font/zoom change reflows the chat, which retriggers rebuild via the content
+// ResizeObserver.
+const rootFontPx = shallowRef(16)
+function readRootFontPx() {
+  if (typeof document === 'undefined') return
+  const px = Number.parseFloat(getComputedStyle(document.documentElement).fontSize)
+  if (Number.isFinite(px) && px > 0) rootFontPx.value = px
+}
+readRootFontPx()
+const ROW_HEIGHT = computed(() => 2 * rootFontPx.value)
+const BAR_HEIGHT = computed(() => rootFontPx.value)
+const LIST_PADDING = computed(() => 0.375 * rootFontPx.value)
+const HINT_HEIGHT = computed(() => 1.5 * rootFontPx.value)
 
 const anchors = computed(() => buildMinimapAnchors(props.messages))
 const visible = computed(() => anchors.value.length >= MIN_ANCHORS)
@@ -52,10 +65,10 @@ const anchorTops = computed(() => {
   return anchors.value.map(anchor => tops?.get(anchor.id) ?? Number.MAX_SAFE_INTEGER)
 })
 
-const hintOffset = computed(() => props.hasMoreOlder ? HINT_HEIGHT : 0)
+const hintOffset = computed(() => props.hasMoreOlder ? HINT_HEIGHT.value : 0)
 
 const barStyle = computed(() => ({
-  transform: `translateY(${LIST_PADDING + hintOffset.value + activeIndex.value * ROW_HEIGHT + (ROW_HEIGHT - BAR_HEIGHT) / 2}px)`,
+  transform: `translateY(${LIST_PADDING.value + hintOffset.value + activeIndex.value * ROW_HEIGHT.value + (ROW_HEIGHT.value - BAR_HEIGHT.value) / 2}px)`,
 }))
 
 function rowId(index: number) {
@@ -65,6 +78,7 @@ function rowId(index: number) {
 function rebuild() {
   const root = props.scrollEl
   if (!root || !visible.value) return
+  readRootFontPx()
   const wanted = new Set(anchors.value.map(anchor => anchor.id))
   const rootRect = root.getBoundingClientRect()
   const tops = new Map<string, number>()
@@ -207,8 +221,8 @@ function positionList(instant = false) {
   if (!list) return
   const index = highlightedIndex.value >= 0 ? highlightedIndex.value : activeIndex.value
   const target = panelScrollTop({
-    itemTop: LIST_PADDING + hintOffset.value + index * ROW_HEIGHT,
-    itemHeight: ROW_HEIGHT,
+    itemTop: LIST_PADDING.value + hintOffset.value + index * ROW_HEIGHT.value,
+    itemHeight: ROW_HEIGHT.value,
     viewTop: list.scrollTop,
     viewHeight: list.clientHeight,
   })
@@ -343,7 +357,7 @@ onBeforeUnmount(() => {
         >
           <div
             v-if="hasMoreOlder"
-            class="flex h-6 items-center justify-center text-[11px] text-muted-foreground/70 select-none"
+            class="flex h-6 items-center justify-center text-caption text-muted-foreground/70 select-none"
           >
             {{ t('chat.minimapEarlier') }}
           </div>

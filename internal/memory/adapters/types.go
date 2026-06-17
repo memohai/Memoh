@@ -32,7 +32,6 @@ type LLM interface {
 	Extract(ctx context.Context, req ExtractRequest) (ExtractResponse, error)
 	Decide(ctx context.Context, req DecideRequest) (DecideResponse, error)
 	Compact(ctx context.Context, req CompactRequest) (CompactResponse, error)
-	DetectLanguage(ctx context.Context, text string) (string, error)
 }
 
 type Message struct {

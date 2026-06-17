@@ -1,38 +1,37 @@
 <template>
-  <div class="grid gap-4 md:grid-cols-2">
-    <div class="space-y-2 md:col-span-2">
-      <Label for="jina-reader-api-key">API Key</Label>
-      <Input
-        id="jina-reader-api-key"
-        v-model="localConfig.api_key"
-        type="password"
-        aria-label="API Key"
-      />
-    </div>
-    <div class="space-y-2 md:col-span-2">
-      <Label for="jina-reader-base-url">Base URL</Label>
-      <Input
-        id="jina-reader-base-url"
-        v-model="localConfig.base_url"
-        aria-label="Base URL"
-      />
-    </div>
-    <div class="space-y-2">
-      <Label for="jina-reader-timeout-seconds">Timeout (seconds)</Label>
-      <Input
-        id="jina-reader-timeout-seconds"
-        v-model.number="localConfig.timeout_seconds"
-        type="number"
-        :min="1"
-        aria-label="Timeout (seconds)"
-      />
-    </div>
-  </div>
+  <SettingsRow :label="$t('provider.apiKey')">
+    <Input
+      id="jina-reader-api-key"
+      v-model="localConfig.api_key"
+      type="password"
+      class="w-80"
+      :aria-label="$t('provider.apiKey')"
+    />
+  </SettingsRow>
+  <SettingsRow :label="$t('common.baseUrl')">
+    <Input
+      id="jina-reader-base-url"
+      v-model="localConfig.base_url"
+      class="w-80"
+      :aria-label="$t('common.baseUrl')"
+    />
+  </SettingsRow>
+  <SettingsRow :label="$t('common.timeoutSeconds')">
+    <Input
+      id="jina-reader-timeout-seconds"
+      v-model.number="localConfig.timeout_seconds"
+      type="number"
+      class="w-40"
+      :min="1"
+      :aria-label="$t('common.timeoutSeconds')"
+    />
+  </SettingsRow>
 </template>
 
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
-import { Input, Label } from '@memohai/ui'
+import { Input } from '@memohai/ui'
+import SettingsRow from '@/components/settings/row.vue'
 
 const props = defineProps<{
   modelValue: Record<string, unknown>

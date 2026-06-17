@@ -2,9 +2,9 @@
   <section>
     <FormDialogShell
       v-model:open="open"
-      :title="$t('webSearch.add')"
+      :title="$t('webSearch.addSearch')"
       :cancel-text="$t('common.cancel')"
-      :submit-text="$t('webSearch.add')"
+      :submit-text="$t('webSearch.addSearch')"
       :submit-disabled="(form.meta.value.valid === false) || isLoading"
       :loading="isLoading"
       @submit="handleCreate"
@@ -19,7 +19,7 @@
           class="w-full shadow-none! text-muted-foreground h-9 px-3 rounded-md border-border bg-background hover:bg-accent"
           variant="outline"
         >
-          <Plus class="mr-1 size-4" /> {{ $t('webSearch.add') }}
+          <Plus class="mr-1 size-4" /> {{ $t('webSearch.addSearch') }}
         </Button>
       </template>
       <template #body>

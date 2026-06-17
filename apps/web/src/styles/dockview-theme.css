@@ -31,15 +31,11 @@
   --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
   --dv-inactivegroup-hiddenpanel-tab-color: var(--muted-foreground);
 
-  /* dockview also paints a per-tab ::before divider from this var; we draw every
-   * tab divider via borders below (so the strength can differ by state), so kill
-   * the built-in one — otherwise it stacks a SECOND full-strength line on top of
-   * the border and the seam reads as ~2px/too heavy. */
+  /* dockview also paints a per-tab ::before divider from this var; tabs are now
+   * separated by gap (no divider lines at all), so kill the built-in one. We also
+   * reuse ::before on the active tab for its bottom flare — this keeps dockview
+   * from drawing anything there. */
   --dv-tab-divider-color: transparent;
-  /* The soft inter-tab divider: a faint line between two UNSELECTED tabs.
-   * Distinctly weaker than --border, which stays reserved for framing the
-   * ACTIVE tab — so selection reads as "stronger", not just "different". */
-  --tab-divider: color-mix(in oklab, var(--border) 45%, transparent);
   --dv-tab-font-size: 12px;
 
   --dv-separator-border: var(--border);
@@ -57,24 +53,64 @@
 
   --dv-border-radius: 0px;
   --dv-tab-border-radius: 0px;
-  /* No top margin: a 4px top margin made tabs sit low and a tab visibly "jump
-   * up" the moment it became active (the active tab dropped the margin). Zero
-   * keeps active and inactive tabs vertically identical. */
   --dv-tab-margin: 0;
 
   --dv-floating-border: 1px solid var(--border);
+
+  /* Chrome-tab geometry knobs (tunable). --tab-top-inset lifts every tab off the
+   * top of the strip so the rounded crown floats below the window edge. --tab-gap
+   * is the breathing room between adjacent tabs (no border dividers any more —
+   * separation is space). --tab-flare is the radius of the active tab's bottom
+   * "feet" that splay outward and curve down into the pane; tying it to --tab-gap
+   * makes the flare exactly bridge the gap to the neighbour, so the active tab
+   * reads as connected to the surface below (Chrome). */
+  --tab-top-inset: 0.1875rem;
+  --tab-gap: var(--radius-sm);
+  --tab-flare: var(--tab-gap);
+  /* Horizontal breathing room between the last tab's foot and the "+" cluster. */
+  --tab-actions-gap: 6px;
+  /* Shared timing for inactive-tab hover fill + close-fade (workspace-tab.vue). */
+  --tab-hover-duration: 150ms;
+  /* How far the inactive hover colour layer sits below a flush-top fill (subpixel ok). */
+  --tab-hover-fill-offset: 0.5px;
+  /* ONE stroke colour for the whole dock outline — the strip's bottom hairline, the
+   * active tab's crown/side border, and the fillet-foot ring. It MUST be opaque, yet
+   * it must also read as the SAME line as the rest of the app's dividers (the sidebar's
+   * vertical --border, the panel seams): the dock is not a special-coloured zone, it
+   * just needs a special TECHNIQUE.
+   *
+   * The design system's --border is a translucent white in dark mode (oklch(1 0 0/8%)).
+   * Used directly it (a) reads at a different brightness on the chrome strip vs the
+   * editor fill, (b) differs per technique (a crisp 1px border vs an anti-aliased inset
+   * box-shadow vs a gradient ring), and (c) STACKS — where the foot ring overlaps the
+   * side border the two translucent whites composite brighter, the "whitened fillet".
+   *
+   * So --dock-stroke is the OPAQUE FLATTENING of that same --border over the chrome
+   * plane (8% white pre-composited onto --surface-chrome). It therefore lands at the
+   * exact brightness the sidebar's translucent --border already shows there — the
+   * horizontal hairline and the vertical sidebar divider become one continuous family —
+   * while being backdrop-/technique-independent and never building up. Light mode's
+   * --border is already opaque (no stacking), so it's reused as-is. */
+  --dock-stroke: var(--border);
+}
+
+/* Dark: the opaque equivalent of --border (8% white) sitting on the chrome plane, so
+ * it matches the sidebar/panel dividers exactly instead of being an invented brighter
+ * grey. color-mix in oklab pre-composites the translucent border onto --surface-chrome;
+ * this single value is the one knob for the whole dock outline's weight. */
+.dark .dockview-theme-memoh {
+  --dock-stroke: color-mix(in oklab, oklch(1 0 0) 8%, var(--surface-chrome));
 }
 
 /* The custom tab content (workspace-tab.vue) owns its padding/ellipsis; .dv-tab
- * carries the chip background (from the --dv-* vars above) and grows to a generous
- * capped width that only shrinks once the strip fills up (see flex below), so tabs
- * feel substantial and don't reshuffle while there's room. A short title —
- * especially CJK like "新对话" — is padded out rather than collapsing to a cramped
- * chip, and a long one truncates (ellipsis in workspace-tab.vue). The close button
- * overlays the title on hover (no reserved slot — see workspace-tab.vue), so the
- * width buys breathing room, not a dead gap. --tab-hover-bg is the opaque colour a
- * tab wears while hovered; the close affordance paints it to blot out the text
- * beneath the button. */
+ * carries the chip background (from the --dv-* vars above). Tabs are NATURAL width
+ * — a tab is as wide as its title, capped at max-width (then the title truncates,
+ * see workspace-tab.vue) — never stretched to fill the row. The row hugs its
+ * content so the right-side actions ("+") sit directly after the LAST tab
+ * (Chrome/Notion), not pinned to the viewport edge. The close button overlays the
+ * title on hover (no reserved slot — see workspace-tab.vue). --tab-hover-bg is the
+ * opaque colour a tab wears while hovered; the close affordance paints it to blot
+ * out the text beneath the button. */
 .dockview-theme-memoh .dv-tab {
   box-sizing: border-box;
   padding: 0;
@@ -82,30 +118,91 @@
    * arrow (VS Code), not a pointer. dockview defaults .dv-tab to cursor:pointer;
    * the close button re-enables the pointer on itself only. */
   cursor: default;
-  transition: background-color 0.12s ease;
-  /* Each tab flex-GROWS to share the row's width (the row is forced to the strip width
-   * by flex-grow below), so the width tracks available-width ÷ N. max-width caps it:
-   * while few tabs are open every tab sits at the cap and opening/closing one leaves
-   * the others put (only the right-side gap changes); once there are enough tabs that
-   * available ÷ N drops below the cap, they shrink TOGETHER down to the min-width floor
-   * and then overflow-scroll. (Grow is required: a shrink-to-fit row collapses to the
-   * scroll container's min-content and pins every tab at the floor — basis never wins.)
-   * A short title is padded out; a long one truncates (ellipsis in workspace-tab.vue). */
-  flex: 1 1 0;
-  min-width: 6rem;
+  /* Natural width, no grow/shrink. Unlike the old VS-Code layout (flex:1 1 0 +
+   * grow-to-fill, where a lone tab rested at max-width), Chrome tabs hug their title
+   * so the "+" can sit right after the LAST tab — which means min-width is now the
+   * RESTING width of a short tab, not just a crowded-floor. So it's a comfortable
+   * 8rem (a one-word tab still reads as a real tab, with room for the close button),
+   * growing to max-width then truncating. The title span is sized by content (NOT
+   * flex-grow): a flex-basis:0 grow child made the flex container's intrinsic width
+   * ambiguous, so a live title change produced a wrong/jumping width (worse with
+   * many tabs). Overflow scrolls (flex-shrink:0 keeps each tab's width). */
+  flex: 0 0 auto;
+  min-width: 8rem;
   max-width: 11rem;
+  /* Rounded crown on EVERY tab, always — radius is state-independent so it can
+   * never flash square for a frame while dockview swaps active/hover classes (it
+   * only used to live on the active/hover rules). Invisible on a transparent
+   * inactive tab; revealed once a fill paints. */
+  border-top-left-radius: var(--radius-sm);
+  border-top-right-radius: var(--radius-sm);
+  /* Float the chip below the strip's top edge — the rounded crown needs headroom
+   * (Chrome). Applied to EVERY tab uniformly, so selecting one never shifts it
+   * vertically. The fill still reaches the bottom, so the active tab meets the
+   * pane. position:relative anchors the ::before bottom-flare (see active rule). */
+  position: relative;
+  margin-top: var(--tab-top-inset);
+  /* A transparent 1px border on EVERY tab reserves the active tab's outline width
+   * up front, so selecting a tab only RECOLOURS its crown stroke — it never resizes
+   * or nudges the chip. Bottom edge stays borderless (the active fill bleeds into
+   * the pane there). */
+  border: 1px solid transparent;
+  border-bottom: none;
   --tab-hover-bg: var(--surface-chrome-hover);
+  --tab-hover-fill-top: 0;
 }
 
-/* The tab row MUST grow to fill the strip. dockview's tab container is a scroll
- * container (overflow:auto) whose intrinsic width collapses to min-content (≈ the
- * tabs' min-widths), so a shrink-to-fit row would pin every tab at its floor and the
- * resting width (max-width) would never show. flex-grow forces the row to the
- * available width so the tabs have real space to share; min-width:0 then lets the
- * full row compress so the tabs can shrink together before overflow-scrolling. */
+/* Inactive tabs: the hover COLOUR lives on ::before (see below), not on the tab box.
+ * Text stays put; only the fill layer's top edge sits 1px lower to match the active
+ * tab's crown stroke optically. --tab-hover-fill-top tells close-fade where that layer
+ * starts (workspace-tab.vue). */
+.dockview-theme-memoh .dv-tab:not(.dv-active-tab) {
+  --tab-hover-fill-top: var(--tab-hover-fill-offset);
+}
+
+.dockview-theme-memoh .dv-tab:not(.dv-active-tab)::before {
+  content: '';
+  position: absolute;
+  top: var(--tab-hover-fill-offset);
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 0;
+  border-top-left-radius: var(--radius-sm);
+  border-top-right-radius: var(--radius-sm);
+  background-color: var(--surface-chrome-hover);
+  opacity: 0;
+  /* Instant hide when hover ends (e.g. after switching tabs) — only fade IN. */
+  transition: none;
+  pointer-events: none;
+}
+
+.dockview-theme-memoh .dv-tab:not(.dv-active-tab):hover::before {
+  opacity: 1;
+  transition: opacity var(--tab-hover-duration) ease-out;
+}
+
+/* Space between adjacent tabs — separation is breathing room, not a divider line
+ * (the old per-tab border seams are gone). The active tab's bottom flare is sized
+ * to exactly bridge this gap, so its feet reach the neighbours.
+ *
+ * Left/right padding matches --tab-flare so the FIRST and LAST tab feet have room
+ * INSIDE the scroll content (dockview's .dv-scrollable is overflow:hidden — without
+ * this inset an edge tab's foot, which spills --tab-flare past the chip, gets
+ * clipped). Horizontal gap from foot to "+" is --tab-actions-gap on the
+ * right-actions container, not extra padding here (avoids double-counting). */
+.dockview-theme-memoh .dv-tabs-container {
+  gap: var(--tab-gap);
+  padding-inline: var(--tab-flare);
+}
+
+/* The tab row hugs its content (does not grow), so the "+" actions land right
+ * after the last tab. It may still SHRINK (flex-shrink:1 + min-width:0) so that
+ * when the tabs out-measure the strip the scroll container clips them and they
+ * scroll — rather than pushing the "+" off-screen. */
 .dockview-theme-memoh .dv-tabs-and-actions-container > .dv-scrollable,
 .dockview-theme-memoh .dv-scrollable > .dv-tabs-container {
-  flex-grow: 1;
+  flex: 0 1 auto;
   min-width: 0;
 }
 
@@ -123,35 +220,68 @@
   display: none;
 }
 
-/* Hover lifts UNSELECTED tabs only — the active tab never hovers (VS Code).
- * --surface-chrome-hover is the chrome plane's own hover step (deeper than the
- * generic --ui-hover, which is invisible against this surface).
- *
- * !important is required, not lazy: dockview pins the inactive tab to transparent
- * with a (0,6,0) static rule
- *   .dv-groupview.dv-active-group > .dv-tabs-and-actions-container
- *     .dv-tabs-container > .dv-tab.dv-inactive-tab { background: …hiddenpanel… }
- * which outranks this (0,4,0) hover. Static tab fills are themed via the --dv-*
- * variables, but dockview exposes NO hover variable for tabs, so the cascade can
- * only be won here by force. Without it the fill never paints and only the
- * close-fade gradient (right edge) shows — the "only the right changes" bug. */
-.dockview-theme-memoh .dv-tab:not(.dv-active-tab):hover {
-  background-color: var(--surface-chrome-hover) !important;
-}
-
-/* Active tab = editor surface, continuous with the pane below. The two planes
- * differ in both light and dark, so the fill step alone marks the active tab —
- * no top-accent line, no divider. */
+/* Active tab = the full Chrome silhouette: editor-surface fill (continuous with the
+ * pane below), a --dock-stroke crown/side stroke, and the bottom fillet feet
+ * (::before) that curve down into the bar. It ALONE wears the 倒角 — selection is a
+ * physical "grafted onto the pane" shape. The crown is rounded; the bottom is left
+ * open so the fill bleeds into the pane and the feet carry the stroke down to the bar
+ * (outline reads as one line: bar → left foot → up the crown → down the right foot). */
 .dockview-theme-memoh .dv-tab.dv-active-tab {
   background-color: var(--surface-editor);
+  border-top-color: var(--dock-stroke);
+  border-left-color: var(--dock-stroke);
+  border-right-color: var(--dock-stroke);
   /* The active tab never takes the hover lift, so its blot-out colour is the
    * editor surface it already wears. */
   --tab-hover-bg: var(--surface-editor);
 }
 
+/* Hover on an UNSELECTED tab: tab box stays transparent; the chrome-hover fill is
+ * painted by ::before (top: --tab-hover-fill-offset → bottom). Text does not move. */
+.dockview-theme-memoh .dv-tab:not(.dv-active-tab):hover {
+  background-color: transparent !important;
+}
+
+/* Bottom flare = a CONCAVE fillet (倒角), not a bump. A single pseudo spans
+ * --tab-flare BEYOND each side at the bottom; each side is a solid tile of the pane
+ * colour with a quarter-circle CARVED OUT of its OUTER-TOP corner (transparent
+ * inside the radius, fill outside). What remains is an inward-curving foot: the
+ * tab's vertical edge sweeps down and splays out to meet the bar tangentially —
+ * the same negative curve Chrome uses to seat a tab on its toolbar. (Filling the
+ * disc instead of carving it would bulge two convex "circles" out of the corners,
+ * which is the opposite of a fillet.) dockview leaves ::before unused (it only
+ * styles ::after on :focus), so this is a clean slot. ACTIVE-ONLY: a hover is a plain
+ * rounded rectangle (above), never these feet. */
+.dockview-theme-memoh .dv-tab.dv-active-tab::before {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: calc(-1 * var(--tab-flare));
+  right: calc(-1 * var(--tab-flare));
+  height: var(--tab-flare);
+  pointer-events: none;
+  /* Three layers, top to bottom:
+   *  1. left foot  — carved concave fill with a 1px --dock-stroke ring ALONG the curve
+   *     (transparent inside the radius → chrome shows; ring at [r-1,r]; fill beyond).
+   *  2. right foot — mirror.
+   *  3. middle fill — a plain fill spanning exactly the tab body's width, painted
+   *     over the bottom strip so the crown's side borders don't leave a stray
+   *     vertical nub in the foot zone (the stroke there is the curve, not a line). */
+  background:
+    radial-gradient(circle at top left, transparent calc(var(--tab-flare) - 1px), var(--dock-stroke) calc(var(--tab-flare) - 1px), var(--dock-stroke) var(--tab-flare), var(--surface-editor) calc(var(--tab-flare) + 0.5px)) left bottom / var(--tab-flare) var(--tab-flare) no-repeat,
+    radial-gradient(circle at top right, transparent calc(var(--tab-flare) - 1px), var(--dock-stroke) calc(var(--tab-flare) - 1px), var(--dock-stroke) var(--tab-flare), var(--surface-editor) calc(var(--tab-flare) + 0.5px)) right bottom / var(--tab-flare) var(--tab-flare) no-repeat,
+    linear-gradient(var(--surface-editor), var(--surface-editor)) center bottom / calc(100% - 2 * var(--tab-flare)) 100% no-repeat;
+}
+
 .dockview-theme-memoh .dv-right-actions-container,
 .dockview-theme-memoh .dv-left-actions-container {
   align-items: center;
+  /* Match the tab chip band: tabs sit margin-top below the strip crown so they can
+   * graft onto the pane; centering "+" in the full strip height put it above the
+   * close button (workspace-tab.vue). */
+  box-sizing: border-box;
+  margin-top: var(--tab-top-inset);
+  height: calc(100% - var(--tab-top-inset));
 }
 
 /* Prefix actions container: renders navigation buttons before the tabs. */
@@ -161,15 +291,37 @@
   flex-shrink: 0;
 }
 
-/* Desktop drag region: the void container (empty tab-strip area) acts as the
- * window drag handle, replacing the removed chrome strip. Individual buttons
- * inside actions containers opt out via [-webkit-app-region:no-drag]. */
+/* The void is dockview's droppable empty-header region — it owns the
+ * `header_space` drop target, so a tab dragged onto the blank part of a header
+ * lands in that group. It MUST grow to have any area (dockview only binds the
+ * HTML5 dragover to the tab strip + this void, not to the actions slots). It
+ * fills from just after the "+" cluster (leftActions) to the far-right Preview
+ * (rightActions).
+ *
+ * On the desktop shell the same blank strip doubles as the window-drag handle,
+ * so we claim it with -webkit-app-region: drag. While a panel/group is being
+ * dragged the dock root gets .memoh-dock-dragging and we release that claim
+ * (no-drag) so the OS lets the native drop events through to the void; without
+ * this the window-move region would swallow them. (-webkit-app-region is a no-op
+ * on web, where the void is simply always droppable + the group-drag handle.) */
 .dockview-theme-memoh .dv-void-container {
+  flex: 1 1 auto;
   -webkit-app-region: drag;
-  /* Collapsed to zero: the tab row owns the full strip width up to the + action, so
-   * tabs use all the space and, when overflowing, run right up to the + (no dead gap
-   * before it). Window dragging stays on the nav cluster / sidebar header. */
-  flex: 0 0 0;
+}
+.memoh-dock-dragging .dockview-theme-memoh .dv-void-container {
+  -webkit-app-region: no-drag;
+}
+
+/* Right actions hug their content at the strip's far right — just the Preview
+ * action when present (group-actions.vue); the void to its left fills the gap. */
+.dockview-theme-memoh .dv-right-actions-container {
+  flex: 0 0 auto;
+}
+
+/* The "+" cluster (leftActions, header-add-actions.vue) renders right after the
+ * tabs; one breathing gap separates it from the last tab's foot. */
+.dockview-theme-memoh .dv-left-actions-container {
+  margin-left: var(--tab-actions-gap);
 }
 
 /* Continuous bottom hairline for the WHOLE strip, drawn as an inset box-shadow so it
@@ -181,47 +333,13 @@
  * 1px at its own slot, so that tab reads as continuous with the pane below
  * (punch-through); transparent inactive tabs and the leftover gap let the line show. */
 .dockview-theme-memoh .dv-tabs-and-actions-container {
-  box-shadow: inset 0 -1px 0 var(--border);
+  box-shadow: inset 0 -1px 0 var(--dock-stroke);
 }
 
-/* Vertical inter-tab divider: every tab paints the line on its RIGHT edge, so
- * adjacent tabs — including two inactive ones — are always separated. Between two
- * UNSELECTED tabs this is the SOFT --tab-divider; the left edge is
- * reserved-transparent and only lights up (to full --border) to frame the active
- * tab. Recolouring borders on select never resizes the chip. */
-.dockview-theme-memoh .dv-tab {
-  border-left: 1px solid transparent;
-  border-right: 1px solid var(--tab-divider);
-}
-
-/* Active tab: FRAMED at full --border on both sides (its right edge upgrades from the
- * soft inter-tab divider to the strong frame; its left lights up). Its bottom needs no
- * border — its opaque --surface-editor background covers the strip's box-shadow
- * hairline at this slot, so it reads as continuous with the pane below. */
-.dockview-theme-memoh .dv-tab.dv-active-tab {
-  border-left-color: var(--border);
-  border-right-color: var(--border);
-}
-
-/* The tab immediately before the active one drops its own right divider, so the
- * active tab's left frame reads as a single 1px line, not a doubled 2px seam. */
-.dockview-theme-memoh .dv-tab:has(+ .dv-active-tab) {
-  border-right-color: transparent;
-}
-
-/* Same doubling at the strip's HEAD: the nav cluster paints a right seam against
- * the first tab (prefix-header-actions.vue, first group only), but when that first
- * tab is active it ALSO paints its own border-left frame — the two stack into a 2px
- * line. When the first tab is active, retract the nav seam; the active tab's frame
- * is then the single 1px line. Non-active first tab keeps the nav seam (its own
- * left edge is transparent). Non-first groups have no nav seam, so they're untouched. */
-.dockview-theme-memoh
-  .dv-tabs-and-actions-container:has(.dv-tabs-container > .dv-tab:first-child.dv-active-tab)
-  .dv-pre-actions-container
-  .dv-vue-part
-  > div {
-  border-right-color: transparent;
-}
+/* No vertical inter-tab divider lines: tabs are separated by --tab-gap (see the
+ * .dv-tabs-container gap rule above) the way Chrome separates them — space, not a
+ * seam. The old per-tab border-left/right dividers and the active-tab frame were
+ * removed so selecting a tab changes only its fill + flare, never an edge. */
 
 /* Dockview paints its tab "selection" box as a PSEUDO-ELEMENT outline, not as an
  * outline on the tab element itself: it ships `.dv-tab:focus::after` /
@@ -245,4 +363,107 @@
 .dockview-theme-memoh .dv-groupview:focus,
 .dockview-theme-memoh .dv-groupview:focus-visible {
   outline: none !important;
+}
+
+/* ---- Terminal groups: bottom tab strip, file-list chips -------------------
+ * Terminal-only groups use headerPosition: bottom and memoh-terminal-group.
+ * Tabs reuse the sidebar file row language (rounded-sm + sidebar-hover /
+ * sidebar-accent) instead of the editor chrome tab geometry above. */
+
+.dockview-theme-memoh .memoh-terminal-group .dv-tabs-and-actions-container {
+  /* Share the editor surface with the chat/terminal above so the whole bottom
+   * panel is one continuous ground, split from the editor only by the border. */
+  background-color: var(--surface-editor);
+  box-shadow: none;
+  border-top: 1px solid var(--border);
+  height: auto;
+  min-height: calc(1.6875rem + 0.375rem);
+  padding-block: 0.1875rem;
+}
+
+/* Inter-tab spacing now lives on the container gap (not chip margins) so each
+ * chip can fill its tab box (width:100%) and still shrink: 3px end inset +
+ * 0.375rem (6px) gap reproduce the previously-approved 3px/6px rhythm. */
+.dockview-theme-memoh .memoh-terminal-group .dv-tabs-container {
+  gap: 0.375rem;
+  padding-inline: 0.1875rem;
+  align-items: center;
+}
+
+/* Unlike the editor strip (scrollbar hidden), the terminal strip KEEPS a visible
+ * horizontal scrollbar: it's a short bottom bar where wheel/trackpad scroll alone
+ * is undiscoverable. The tab strip scrolls via dockview's OWN overlay scrollbar
+ * (.dv-scrollbar inside .dv-scrollable), NOT the native .dv-tabs-container
+ * overflow bar — so styling ::-webkit-scrollbar there did nothing. We hide that
+ * overlay globally (it clashed with the editor hairline); re-enable it here.
+ * dockview sizes the bar from scrollWidth vs clientWidth (width:0 when nothing
+ * overflows), so painting it unconditionally only shows a bar once a stack of
+ * sessions actually out-measures the strip — and it can't auto-hide the way
+ * macOS overlay scrollbars do. */
+.dockview-theme-memoh .memoh-terminal-group .dv-scrollable > .dv-scrollbar {
+  display: block;
+}
+.dockview-theme-memoh .memoh-terminal-group .dv-scrollable > .dv-scrollbar-horizontal {
+  height: 0.375rem;
+  border-radius: var(--radius-sm);
+  background-color: var(--border);
+}
+
+.dockview-theme-memoh .memoh-terminal-group .dv-tab,
+.dockview-theme-memoh .dv-tab:has(.memoh-terminal-tab) {
+  margin-top: 0;
+  height: auto;
+  min-height: 1.6875rem;
+  padding: 0;
+  background: transparent !important;
+  border: none;
+  box-shadow: none;
+  align-self: center;
+  /* Resting at 140px, but unlike the editor tabs (flex:0 0 auto → fixed, then
+   * scroll) these SHRINK: flex-shrink:1 lets the constrained tabs-container
+   * squeeze every chip toward a 5.5rem floor (icon + a few title chars + close;
+   * the chip's flex-1 min-w-0 span truncates) before the strip ever scrolls, so
+   * a stack of sessions stays on screen the way VS Code's do. */
+  flex: 0 1 8.75rem;
+  min-width: 5.5rem;
+  max-width: 8.75rem;
+}
+
+/* Terminal tabs are flat file-row chips: the chip (.memoh-terminal-tab) paints its
+ * OWN fill — hover (--sidebar-hover) and active (--sidebar-accent) — from the Vue
+ * class, and is the SOLE surface. The editor-tab chrome above paints its hover/
+ * active/flare on the WRAPPER's ::before (NOT on the box background), so killing
+ * only the box background left that pseudo alive: a real mouse-over lit BOTH the
+ * chip's hover AND the wrapper's ::before hover, stacking two translucent layers
+ * (a DevTools forced :hover only flags one element, so it looked single-layer).
+ * Strip every wrapper-level paint — box background AND the ::before/::after pseudos
+ * — so nothing can stack under the chip. */
+.dockview-theme-memoh .dv-tab:has(.memoh-terminal-tab),
+.dockview-theme-memoh .dv-tab:has(.memoh-terminal-tab):hover,
+.dockview-theme-memoh .dv-tab:has(.memoh-terminal-tab).dv-active-tab {
+  background: transparent !important;
+}
+
+.dockview-theme-memoh .dv-tab:has(.memoh-terminal-tab)::before,
+.dockview-theme-memoh .dv-tab:has(.memoh-terminal-tab)::after,
+.dockview-theme-memoh .dv-tab:has(.memoh-terminal-tab):hover::before,
+.dockview-theme-memoh .dv-tab:has(.memoh-terminal-tab):hover::after {
+  content: none !important;
+}
+
+.dockview-theme-memoh .memoh-terminal-group .dv-right-actions-container,
+.dockview-theme-memoh .memoh-terminal-group .dv-left-actions-container {
+  margin-top: 0;
+  height: auto;
+}
+
+/* The "+" sits one inter-tab gap (6px) from the last chip: the tabs-container's
+ * 3px end inset already gives half, so the "+" cluster (leftActions) adds the
+ * remaining 3px — not the wider editor --tab-actions-gap. */
+.dockview-theme-memoh .memoh-terminal-group .dv-left-actions-container {
+  margin-left: 0.1875rem;
+}
+
+.dockview-theme-memoh .memoh-terminal-group .dv-pre-actions-container {
+  display: none;
 }

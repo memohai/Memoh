@@ -21,7 +21,7 @@ const props = withDefaults(defineProps<Props>(), {
     :data-orientation="props.orientation"
     :as="as"
     :as-child="asChild"
-    :class="cn('flex select-none items-center justify-center gap-1.5 whitespace-nowrap px-3 text-control font-medium text-muted-foreground [&_svg]:pointer-events-none [&_svg:not([class*=\'size-\'])]:size-4', props.class)"
+    :class="cn('flex select-none items-center justify-center gap-1.5 whitespace-nowrap px-3 text-control font-medium text-muted-foreground [&_svg]:pointer-events-none [&_svg:not([class*=size-])]:size-4', props.class)"
   >
     <slot />
   </Primitive>

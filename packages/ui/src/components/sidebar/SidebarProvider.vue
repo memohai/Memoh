@@ -10,9 +10,17 @@ const props = withDefaults(defineProps<{
   defaultOpen?: boolean
   open?: boolean
   class?: HTMLAttributes['class']
+  /**
+   * Skip the built-in Cmd/Ctrl+B listener. Set when the host app drives the
+   * shortcut from a central keyboard binding table (see apps/web's
+   * useKeyboardCommand on `toggleSidebar`) so the combo is configurable from
+   * settings and doesn't double-fire across multiple SidebarProviders.
+   */
+  disableDefaultShortcut?: boolean
 }>(), {
   defaultOpen: !defaultDocument?.cookie.includes(`${SIDEBAR_COOKIE_NAME}=false`),
   open: undefined,
+  disableDefaultShortcut: false,
 })
 
 const emits = defineEmits<{
@@ -43,12 +51,14 @@ function toggleSidebar() {
   return setOpen(!open.value)
 }
 
-useEventListener('keydown', (event: KeyboardEvent) => {
-  if (event.key === SIDEBAR_KEYBOARD_SHORTCUT && (event.metaKey || event.ctrlKey)) {
-    event.preventDefault()
-    toggleSidebar()
-  }
-})
+if (!props.disableDefaultShortcut) {
+  useEventListener('keydown', (event: KeyboardEvent) => {
+    if (event.key === SIDEBAR_KEYBOARD_SHORTCUT && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault()
+      toggleSidebar()
+    }
+  })
+}
 
 // We add a state so that we can do data-state="expanded" or "collapsed".
 // This makes it easier to style the sidebar with Tailwind classes.

@@ -122,6 +122,7 @@
     "usage": "使用状況",
     "people": "メンバー",
     "appearance": "外観",
+    "keyboard": "ショートカット",
     "supermarket": "マーケットプレイス",
     "about": "Memoh について",
     "switchBot": "Botを切り替え",
@@ -229,6 +230,57 @@
       "diagrams": "ダイアグラム",
       "mermaidTheme": "Mermaid テーマ",
       "mermaidThemeDescription": "レンダリング済みの Mermaid 図表に適用されます。"
+    },
+    "keyboard": {
+      "title": "キーボードショートカット",
+      "intro": "各行の「編集」をクリックしてから、新しい組み合わせを押してください。Cmd/Ctrl + W、Q、T、N はブラウザと OS に予約されているため変更できません。",
+      "resetAll": "すべてリセット",
+      "scopes": {
+        "global": "Global",
+        "mediaLightbox": "メディアライトボックス"
+      },
+      "row": {
+        "reset": "デフォルトに戻す"
+      },
+      "dialog": {
+        "title": "ショートカットを編集",
+        "prompt": "新しい組み合わせを押してください…",
+        "resetDefault": "デフォルトに戻す",
+        "reservedError": "この組み合わせはブラウザまたは OS に予約されています。",
+        "noModifierError": "グローバルショートカットには Cmd/Ctrl または Alt 修飾キーが必要です（通常入力で誤発火しないように）。",
+        "sameScopeError": "すでに {command} で使用されています。",
+        "crossScopeWarn": "{command} でも使用されています（異なるコンテキストでのみ有効）。"
+      },
+      "commands": {
+        "closeCurrentWorkspaceTab": {
+          "label": "現在の Workspace タブを閉じる",
+          "description": "Workspace ペインで開いているタブを閉じます (OS の閉じる動作にフォールバックします)。"
+        },
+        "saveActiveFile": {
+          "label": "現在のファイルを保存",
+          "description": "Workspace のエディタで開いているファイルを保存します。"
+        },
+        "toggleSidebar": {
+          "label": "サイドバーを切り替え",
+          "description": "メインサイドバーの表示/非表示を切り替えます。"
+        },
+        "openSettings": {
+          "label": "設定を開く",
+          "description": "どこからでも設定画面に移動します。"
+        },
+        "closeMediaLightbox": {
+          "label": "メディアライトボックスを閉じる",
+          "description": "メディアプレビューのオーバーレイを閉じます。"
+        },
+        "mediaLightboxPrev": {
+          "label": "前のメディア",
+          "description": "ライトボックスを開いている間、前のアイテムへ移動します。"
+        },
+        "mediaLightboxNext": {
+          "label": "次のメディア",
+          "description": "ライトボックスを開いている間、次のアイテムへ移動します。"
+        }
+      }
     },
     "langZh": "中文",
     "langEn": "英語",
@@ -823,13 +875,18 @@
   "webSearch": {
     "title": "ウェブ検索",
     "add": "追加",
+    "addSearch": "Web検索の追加",
     "addFetch": "Webフェッチの追加",
     "empty": "検索プロバイダーがありません",
     "emptyFetch": "フェッチプロバイダーがありません",
     "provider": "タイプ",
     "fetchProvider": "取得プロバイダーの種類",
+    "accountId": "アカウント ID",
+    "apiToken": "API トークン",
     "searchProviders": "検索",
     "fetchProviders": "フェッチ",
+    "searchHint": "web_search ツールが使用する検索サービスです。",
+    "fetchHint": "web_fetch ツールがページを読み取るためのサービスです。",
     "selectHint": "Web 検索プロバイダーを選択または作成します",
     "unsupportedProvider": "このプロバイダーには設定パネルがまだありません",
     "nativeManaged": "ネイティブは Memoh によって管理され、常に有効になります。",
@@ -1236,6 +1293,32 @@
       "resetWarningExtra": "カスタムのバイパスルールとレビュー必須ルールは失われます。",
       "title": "ツール呼び出しの承認",
       "intro": "Bot がファイルを読み取る、ファイルを変更する、またはコマンドを実行する前に承認を要求します。操作ごとにルールを設定できます。バイパスパターンは自動承認され、レビュー必須パターンは承認を強制します。",
+      "status": {
+        "on": "承認が有効です",
+        "off": "承認が無効です"
+      },
+      "rules": {
+        "title": "ツールルール",
+        "reset": "推奨設定にリセット"
+      },
+      "behavior": {
+        "label": "デフォルトの動作",
+        "review": "デフォルトでレビュー",
+        "auto": "デフォルトで自動承認"
+      },
+      "autoApprove": {
+        "pathsTitle": "これらのパスを自動承認",
+        "commandsTitle": "これらのコマンドを自動承認"
+      },
+      "review": {
+        "pathsTitle": "常にレビューを要求",
+        "commandsTitle": "常にレビューを要求"
+      },
+      "toolNames": {
+        "read": "ファイル読み取り",
+        "write": "ファイル書き込み",
+        "exec": "シェルコマンド"
+      },
       "tools": {
         "read": "ワークスペース内のファイルを読み取り、ディレクトリを一覧表示する",
         "write": "ワークスペース内でファイルの書き込み、編集、patch の適用を行う",
@@ -1247,6 +1330,10 @@
       "mustReview": "レビュー必須 (拒否リスト)",
       "mustReviewHint": "これらのパターンのいずれかに一致する呼び出しは、このツールが自動承認されている場合でも常に承認を要求します。",
       "placeholders": {
+        "filePaths": "/data/**\n/tmp/**",
+        "fileReview": "/etc/**\n.env*",
+        "execCommands": "ls\ngit status",
+        "execReview": "rm -rf *\nsudo *",
         "fileBypass": "/tmp/**\n/data/**",
         "fileMustReview": "/etc/**\n.env*",
         "execBypass": "ls\npwd\ngit status",
@@ -2359,6 +2446,7 @@
       "disabledBadge": "無効",
       "legacyBadge": "遺産",
       "compatBadge": "外部の",
+      "pluginBadge": "Plugin",
       "description": "説明",
       "descriptionPlaceholder": "Skillの説明を入力してください",
       "content": "コンテンツ",

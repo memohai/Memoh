@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	pluginspkg "github.com/memohai/memoh/internal/plugins"
+	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
@@ -18,12 +20,22 @@ type ToolRunner interface {
 	RunHookTool(ctx context.Context, toolName string, input map[string]any) (any, error)
 }
 
+type PluginInstallationLister interface {
+	List(ctx context.Context, botID string) ([]pluginspkg.Installation, error)
+}
+
 type Service struct {
-	logger   *slog.Logger
-	provider bridge.Provider
+	logger        *slog.Logger
+	provider      bridge.Provider
+	pluginService PluginInstallationLister
 }
 
 var emptyConfigFile = []byte("{\n  \"version\": 1,\n  \"enabled\": true,\n  \"hooks\": []\n}\n")
+
+const (
+	sourceKindUser   = "user"
+	sourceKindPlugin = "plugin"
+)
 
 func NewService(log *slog.Logger, provider bridge.Provider) *Service {
 	if log == nil {
@@ -33,6 +45,13 @@ func NewService(log *slog.Logger, provider bridge.Provider) *Service {
 		logger:   log.With(slog.String("service", "hooks")),
 		provider: provider,
 	}
+}
+
+func (s *Service) SetPluginService(service PluginInstallationLister) {
+	if s == nil {
+		return
+	}
+	s.pluginService = service
 }
 
 func (s *Service) Load(ctx context.Context, botID string) (Config, bool, error) {
@@ -69,12 +88,125 @@ func (s *Service) Load(ctx context.Context, botID string) (Config, bool, error) 
 	return cfg, true, nil
 }
 
+func (s *Service) LoadEffective(ctx context.Context, botID string) (Config, bool, error) {
+	userCfg, exists, err := s.Load(ctx, botID)
+	if err != nil {
+		return Config{}, exists, err
+	}
+	userCfg.applyDefaults()
+
+	effective := Config{
+		Version:  1,
+		Enabled:  boolPtr(true),
+		Defaults: userCfg.Defaults,
+		Env:      cloneStringMap(userCfg.Env),
+	}
+	if userCfg.enabled() {
+		for _, hook := range userCfg.Hooks {
+			hook.source = hookSource{Kind: sourceKindUser}
+			effective.Hooks = append(effective.Hooks, hook)
+		}
+	}
+	pluginHooks, err := s.loadPluginHooks(ctx, botID)
+	if err != nil {
+		return Config{}, exists, err
+	}
+	effective.Hooks = append(effective.Hooks, pluginHooks...)
+	return effective, exists, nil
+}
+
+func (s *Service) loadPluginHooks(ctx context.Context, botID string) ([]Hook, error) {
+	if s == nil || s.provider == nil || s.pluginService == nil {
+		return nil, nil
+	}
+	botID = strings.TrimSpace(botID)
+	if botID == "" {
+		return nil, nil
+	}
+	installations, err := s.pluginService.List(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	client, err := s.provider.MCPClient(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+
+	hooks := make([]Hook, 0, len(installations))
+	seen := make(map[string]struct{}, len(installations))
+	for _, installation := range installations {
+		if !installation.Enabled || installation.Status != pluginspkg.StatusReady {
+			continue
+		}
+		pluginID := strings.TrimSpace(installation.PluginID)
+		if pluginID == "" {
+			continue
+		}
+		if _, ok := seen[pluginID]; ok {
+			continue
+		}
+		seen[pluginID] = struct{}{}
+
+		pluginDir, err := skillset.PluginDirForID(pluginID)
+		if err != nil {
+			continue
+		}
+		hooksPath, err := skillset.PluginHooksPathForID(pluginID)
+		if err != nil {
+			continue
+		}
+		rc, err := client.ReadRaw(ctx, hooksPath)
+		if err != nil {
+			if errors.Is(err, bridge.ErrNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		raw, readErr := io.ReadAll(rc)
+		closeErr := rc.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		if closeErr != nil {
+			return nil, closeErr
+		}
+
+		cfg, err := ParseConfig(raw)
+		if err != nil {
+			if s.logger != nil {
+				s.logger.Warn("skipping invalid plugin hooks config",
+					slog.String("plugin_id", pluginID),
+					slog.String("path", hooksPath),
+					slog.String("error", err.Error()),
+				)
+			}
+			continue
+		}
+		if !cfg.enabled() {
+			continue
+		}
+		env := cloneStringMap(cfg.Env)
+		for idx, hook := range cfg.Hooks {
+			hook.Name = pluginHookName(pluginID, hook.Name, idx)
+			hook.source = hookSource{
+				Kind:           sourceKindPlugin,
+				PluginID:       pluginID,
+				PluginDir:      pluginDir,
+				Env:            env,
+				MaxOutputBytes: cfg.Defaults.MaxOutputBytes,
+			}
+			hooks = append(hooks, hook)
+		}
+	}
+	return hooks, nil
+}
+
 func (s *Service) Run(ctx context.Context, req Request, runner ToolRunner) (Result, error) {
 	req.Version = 1
 	if strings.TrimSpace(req.Event) == "" {
 		return Result{}, errors.New("hook event is required")
 	}
-	cfg, _, err := s.Load(ctx, req.BotID)
+	cfg, _, err := s.LoadEffective(ctx, req.BotID)
 	if err != nil {
 		return Result{}, err
 	}
@@ -95,12 +227,14 @@ func (s *Service) RunConfig(ctx context.Context, cfg Config, req Request, runner
 	if len(matches) == 0 {
 		return result, nil
 	}
+	result.Metadata = map[string]any{"hook_sources": hookSourceSummaries(matches)}
 	for _, hook := range matches {
 		hookReq := req
 		hookReq.Version = 1
 		hookReq.HookName = hook.Name
 		for _, action := range hook.Actions {
-			actionResult, err := s.runAction(ctx, cfg, hookReq, action, runner)
+			actionResult, err := s.runAction(ctx, cfg, hookReq, action, hook.source, runner)
+			annotateActionResult(&actionResult, hook)
 			result.ActionResults = append(result.ActionResults, actionResult)
 			result.ActionsRun++
 			if err != nil {
@@ -132,10 +266,10 @@ func (s *Service) RunConfig(ctx context.Context, cfg Config, req Request, runner
 	return result, nil
 }
 
-func (s *Service) runAction(ctx context.Context, cfg Config, req Request, action HookAction, runner ToolRunner) (ActionResult, error) {
+func (s *Service) runAction(ctx context.Context, cfg Config, req Request, action HookAction, source hookSource, runner ToolRunner) (ActionResult, error) {
 	switch strings.TrimSpace(action.Type) {
 	case ActionCommand:
-		return s.runCommand(ctx, cfg, req, action)
+		return s.runCommand(ctx, cfg, req, action, source)
 	case ActionTool:
 		return s.runTool(ctx, req, action, runner)
 	case ActionMCPTool:
@@ -146,7 +280,7 @@ func (s *Service) runAction(ctx context.Context, cfg Config, req Request, action
 	}
 }
 
-func (s *Service) runCommand(ctx context.Context, cfg Config, req Request, action HookAction) (ActionResult, error) {
+func (s *Service) runCommand(ctx context.Context, cfg Config, req Request, action HookAction, source hookSource) (ActionResult, error) {
 	res := ActionResult{ActionType: ActionCommand, Name: action.Command}
 	if s == nil || s.provider == nil {
 		err := errors.New("hooks workspace provider is not configured")
@@ -169,18 +303,31 @@ func (s *Service) runCommand(ctx context.Context, cfg Config, req Request, actio
 		return res, err
 	}
 	workDir := strings.TrimSpace(action.WorkDir)
+	if workDir == "" && source.Kind == sourceKindPlugin {
+		workDir = strings.TrimSpace(source.PluginDir)
+	}
 	if workDir == "" {
 		workDir = strings.TrimSpace(req.Workspace.CWD)
 	}
 	if workDir == "" {
 		workDir = DefaultWorkDir
 	}
-	env := make([]string, 0, len(cfg.Env)+4)
-	for key, value := range cfg.Env {
+	envMap := cfg.Env
+	if source.Kind == sourceKindPlugin {
+		envMap = source.Env
+	}
+	env := make([]string, 0, len(envMap)+6)
+	for key, value := range envMap {
 		if strings.TrimSpace(key) == "" {
 			continue
 		}
 		env = append(env, key+"="+value)
+	}
+	if source.Kind == sourceKindPlugin {
+		env = append(env,
+			"MEMOH_PLUGIN_ID="+source.PluginID,
+			"MEMOH_PLUGIN_DIR="+source.PluginDir,
+		)
 	}
 	env = append(env,
 		"MEMOH_HOOK_EVENT="+req.Event,
@@ -198,9 +345,13 @@ func (s *Service) runCommand(ctx context.Context, cfg Config, req Request, actio
 	execCtx, cancel := context.WithTimeout(ctx, timeout+time.Second)
 	defer cancel()
 	execResult, err := client.ExecWithStdinEnv(execCtx, action.Command, workDir, int32(timeoutUnits), append(payload, '\n'), env)
+	maxOutputBytes := cfg.Defaults.MaxOutputBytes
+	if source.Kind == sourceKindPlugin && source.MaxOutputBytes > 0 {
+		maxOutputBytes = source.MaxOutputBytes
+	}
 	if execResult != nil {
-		res.Stdout = trimOutput(execResult.Stdout, cfg.Defaults.MaxOutputBytes)
-		res.Stderr = trimOutput(execResult.Stderr, cfg.Defaults.MaxOutputBytes)
+		res.Stdout = trimOutput(execResult.Stdout, maxOutputBytes)
+		res.Stderr = trimOutput(execResult.Stderr, maxOutputBytes)
 		res.ExitCode = execResult.ExitCode
 	}
 	if err != nil {
@@ -360,6 +511,65 @@ func trimOutput(raw string, limit int) string {
 		return raw
 	}
 	return raw[:limit]
+}
+
+func pluginHookName(pluginID, hookName string, idx int) string {
+	name := strings.TrimSpace(hookName)
+	if name == "" {
+		name = fmt.Sprintf("hook-%d", idx+1)
+	}
+	return "plugin:" + strings.TrimSpace(pluginID) + ":" + name
+}
+
+func hookSourceSummaries(hooks []Hook) []map[string]any {
+	out := make([]map[string]any, 0, len(hooks))
+	for _, hook := range hooks {
+		source := normalizeHookSource(hook.source)
+		item := map[string]any{
+			"hook_name":   hook.Name,
+			"source_kind": source.Kind,
+		}
+		if source.Kind == sourceKindPlugin {
+			item["plugin_id"] = source.PluginID
+			item["plugin_dir"] = source.PluginDir
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func annotateActionResult(result *ActionResult, hook Hook) {
+	if result == nil {
+		return
+	}
+	if result.Metadata == nil {
+		result.Metadata = map[string]any{}
+	}
+	source := normalizeHookSource(hook.source)
+	result.Metadata["hook_name"] = hook.Name
+	result.Metadata["hook_source_kind"] = source.Kind
+	if source.Kind == sourceKindPlugin {
+		result.Metadata["plugin_id"] = source.PluginID
+		result.Metadata["plugin_dir"] = source.PluginDir
+	}
+}
+
+func normalizeHookSource(source hookSource) hookSource {
+	if strings.TrimSpace(source.Kind) == "" {
+		source.Kind = sourceKindUser
+	}
+	return source
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 func firstNonEmpty(values ...string) string {

@@ -1,6 +1,11 @@
 package plugins
 
-import "time"
+import (
+	"encoding/json"
+	"errors"
+	"strings"
+	"time"
+)
 
 const (
 	StatusReady         = "ready"
@@ -70,6 +75,37 @@ type SkillEntry struct {
 	Files       []string       `json:"files,omitempty"`
 }
 
+type InstallCommands []string
+
+func (c *InstallCommands) UnmarshalJSON(data []byte) error {
+	raw := strings.TrimSpace(string(data))
+	if raw == "" || raw == "null" {
+		*c = nil
+		return nil
+	}
+	if strings.HasPrefix(raw, "[") {
+		var items []string
+		if err := json.Unmarshal(data, &items); err != nil {
+			return err
+		}
+		*c = normalizeInstallCommands(items)
+		return nil
+	}
+	if strings.HasPrefix(raw, "\"") {
+		var item string
+		if err := json.Unmarshal(data, &item); err != nil {
+			return err
+		}
+		*c = normalizeInstallCommands([]string{item})
+		return nil
+	}
+	return errors.New("install must be a string or string array")
+}
+
+func (c InstallCommands) MarshalJSON() ([]byte, error) {
+	return json.Marshal([]string(c))
+}
+
 type Manifest struct {
 	SchemaVersion    string            `json:"schema_version,omitempty"`
 	ID               string            `json:"id"`
@@ -81,6 +117,7 @@ type Manifest struct {
 	Homepage         string            `json:"homepage,omitempty"`
 	Tags             []string          `json:"tags,omitempty"`
 	Capabilities     []string          `json:"capabilities,omitempty"`
+	Install          InstallCommands   `json:"install,omitempty"`
 	Variables        []ConfigVar       `json:"variables,omitempty"`
 	AuthRequirements []AuthRequirement `json:"auth_requirements,omitempty"`
 	MCPs             []MCPResource     `json:"mcps,omitempty"`

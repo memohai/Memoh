@@ -27,7 +27,7 @@ const forAttr = computed(() => props.for ?? field?.id)
     :for="forAttr"
     data-slot="field-label"
     v-bind="delegated"
-    :class="cn('gap-1 text-[13px]', props.class)"
+    :class="cn('gap-1 text-label', props.class)"
   >
     <slot />
     <span

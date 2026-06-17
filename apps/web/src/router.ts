@@ -9,6 +9,7 @@ import { i18nRef } from './i18n'
 import { useUserStore } from '@/store/user'
 import { ensureOnboarding } from '@/router-guards/onboarding'
 import { installBackHistory } from '@/composables/useBackOr'
+import { getBotBreadcrumbName } from '@/lib/bot-breadcrumb'
 
 const routes = [
   {
@@ -92,7 +93,11 @@ const routes = [
             path: ':botName',
             component: () => import('@/pages/bots/detail.vue'),
             meta: {
-              breadcrumb: (route: RouteLocationNormalized) => route.params.botName,
+              // Resolve the bot's display name from the registry the detail page
+              // populates; never echo the raw `bot-<uuid>` route param. Unknown
+              // names yield '' so the back affordance shows its generic label.
+              breadcrumb: (route: RouteLocationNormalized) =>
+                getBotBreadcrumbName(String(route.params.botName ?? '')),
             },
           },
         ],
@@ -170,6 +175,14 @@ const routes = [
         component: () => import('@/pages/appearance/index.vue'),
         meta: {
           breadcrumb: i18nRef('sidebar.appearance'),
+        },
+      },
+      {
+        name: 'keyboard',
+        path: 'keyboard',
+        component: () => import('@/pages/keyboard-shortcuts/index.vue'),
+        meta: {
+          breadcrumb: i18nRef('sidebar.keyboard'),
         },
       },
       {

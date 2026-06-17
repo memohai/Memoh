@@ -23,9 +23,9 @@ const modelValue = useVModel(props, 'modelValue', emits, {
 })
 
 const sizeClass = computed(() => ({
-  sm: 'min-h-14 px-2.5 py-1.5 text-[12px]',
-  default: 'min-h-16 px-3 py-2 text-[13px]',
-  lg: 'min-h-20 px-3.5 py-2.5 text-[14px]',
+  sm: 'min-h-14 px-2.5 py-1.5 text-body',
+  default: 'min-h-16 px-3 py-2 text-label',
+  lg: 'min-h-20 px-3.5 py-2.5 text-control',
 }[props.size]))
 </script>
 

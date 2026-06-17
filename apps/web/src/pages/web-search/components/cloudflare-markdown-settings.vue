@@ -1,46 +1,45 @@
 <template>
-  <div class="grid gap-4 md:grid-cols-2">
-    <div class="space-y-2 md:col-span-2">
-      <Label for="cloudflare-account-id">Account ID</Label>
-      <Input
-        id="cloudflare-account-id"
-        v-model="localConfig.account_id"
-        aria-label="Account ID"
-      />
-    </div>
-    <div class="space-y-2 md:col-span-2">
-      <Label for="cloudflare-api-token">API Token</Label>
-      <Input
-        id="cloudflare-api-token"
-        v-model="localConfig.api_token"
-        type="password"
-        aria-label="API Token"
-      />
-    </div>
-    <div class="space-y-2 md:col-span-2">
-      <Label for="cloudflare-base-url">Base URL</Label>
-      <Input
-        id="cloudflare-base-url"
-        v-model="localConfig.base_url"
-        aria-label="Base URL"
-      />
-    </div>
-    <div class="space-y-2">
-      <Label for="cloudflare-timeout-seconds">Timeout (seconds)</Label>
-      <Input
-        id="cloudflare-timeout-seconds"
-        v-model.number="localConfig.timeout_seconds"
-        type="number"
-        :min="1"
-        aria-label="Timeout (seconds)"
-      />
-    </div>
-  </div>
+  <SettingsRow :label="$t('webSearch.accountId')">
+    <Input
+      id="cloudflare-account-id"
+      v-model="localConfig.account_id"
+      class="w-80"
+      :aria-label="$t('webSearch.accountId')"
+    />
+  </SettingsRow>
+  <SettingsRow :label="$t('webSearch.apiToken')">
+    <Input
+      id="cloudflare-api-token"
+      v-model="localConfig.api_token"
+      type="password"
+      class="w-80"
+      :aria-label="$t('webSearch.apiToken')"
+    />
+  </SettingsRow>
+  <SettingsRow :label="$t('common.baseUrl')">
+    <Input
+      id="cloudflare-base-url"
+      v-model="localConfig.base_url"
+      class="w-80"
+      :aria-label="$t('common.baseUrl')"
+    />
+  </SettingsRow>
+  <SettingsRow :label="$t('common.timeoutSeconds')">
+    <Input
+      id="cloudflare-timeout-seconds"
+      v-model.number="localConfig.timeout_seconds"
+      type="number"
+      class="w-40"
+      :min="1"
+      :aria-label="$t('common.timeoutSeconds')"
+    />
+  </SettingsRow>
 </template>
 
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
-import { Input, Label } from '@memohai/ui'
+import { Input } from '@memohai/ui'
+import SettingsRow from '@/components/settings/row.vue'
 
 const props = defineProps<{
   modelValue: Record<string, unknown>

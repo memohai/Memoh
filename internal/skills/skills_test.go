@@ -165,6 +165,50 @@ func TestManagedSkillDirForNameRejectsEscapingNames(t *testing.T) {
 	}
 }
 
+func TestPluginPathsForIDRejectEscapingIDs(t *testing.T) {
+	for _, id := range []string{".", "..", ".plugin", "alpha..beta", "alpha/beta"} {
+		for name, fn := range map[string]func(string) (string, error){
+			"PluginDirForID":        PluginDirForID,
+			"PluginSkillsDirForID":  PluginSkillsDirForID,
+			"PluginHooksPathForID":  PluginHooksPathForID,
+			"PluginScriptsDirForID": PluginScriptsDirForID,
+		} {
+			if _, err := fn(id); !errors.Is(err, bridge.ErrBadRequest) {
+				t.Fatalf("%s(%q) err = %v, want ErrBadRequest", name, id, err)
+			}
+		}
+	}
+
+	gotRoot, err := PluginDirForID("github")
+	if err != nil {
+		t.Fatalf("PluginDirForID(valid) returned error: %v", err)
+	}
+	if gotRoot != pathJoin(PluginDirPath, "github") {
+		t.Fatalf("PluginDirForID(valid) = %q, want %q", gotRoot, pathJoin(PluginDirPath, "github"))
+	}
+	gotSkills, err := PluginSkillsDirForID("github")
+	if err != nil {
+		t.Fatalf("PluginSkillsDirForID(valid) returned error: %v", err)
+	}
+	if gotSkills != pathJoin(PluginDirPath, "github", "skills") {
+		t.Fatalf("PluginSkillsDirForID(valid) = %q, want %q", gotSkills, pathJoin(PluginDirPath, "github", "skills"))
+	}
+	gotHooks, err := PluginHooksPathForID("github")
+	if err != nil {
+		t.Fatalf("PluginHooksPathForID(valid) returned error: %v", err)
+	}
+	if gotHooks != pathJoin(PluginDirPath, "github", "hooks.json") {
+		t.Fatalf("PluginHooksPathForID(valid) = %q, want %q", gotHooks, pathJoin(PluginDirPath, "github", "hooks.json"))
+	}
+	gotScripts, err := PluginScriptsDirForID("github")
+	if err != nil {
+		t.Fatalf("PluginScriptsDirForID(valid) returned error: %v", err)
+	}
+	if gotScripts != pathJoin(PluginDirPath, "github", "scripts") {
+		t.Fatalf("PluginScriptsDirForID(valid) = %q, want %q", gotScripts, pathJoin(PluginDirPath, "github", "scripts"))
+	}
+}
+
 func TestDiscoveryRootsMatchDefaultPolicy(t *testing.T) {
 	roots := DiscoveryRoots(nil)
 	want := []Root{
@@ -205,6 +249,24 @@ func TestDiscoveryRootsAllowExplicitEmptyCompatRoots(t *testing.T) {
 	}
 	if !slices.Equal(roots, want) {
 		t.Fatalf("DiscoveryRoots(empty) = %+v, want %+v", roots, want)
+	}
+}
+
+func TestDiscoveryRootsIncludePluginRootsAsServerManagedSource(t *testing.T) {
+	roots := DiscoveryRootsWithPluginRoots([]string{"/custom/skills"}, []string{
+		" /data/.memoh/plugins/github/skills ",
+		"/data/.memoh/plugins/github/skills",
+		"/data/.memoh/plugins/bad",
+		"relative/plugin/skills",
+	})
+	want := []Root{
+		{Path: ManagedDirPath, Kind: SourceKindManaged, Managed: true},
+		{Path: LegacyDirPath, Kind: SourceKindLegacy, Managed: false},
+		{Path: "/data/.memoh/plugins/github/skills", Kind: SourceKindPlugin, Managed: false},
+		{Path: "/custom/skills", Kind: SourceKindCompat, Managed: false},
+	}
+	if !slices.Equal(roots, want) {
+		t.Fatalf("DiscoveryRootsWithPluginRoots() = %+v, want %+v", roots, want)
 	}
 }
 

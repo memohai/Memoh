@@ -111,13 +111,18 @@
           v-if="message.text"
           class="w-full rounded-lg border border-event-subagent-border bg-event-subagent-soft px-4 py-3"
         >
-          <div class="prose prose-sm dark:prose-invert max-w-none *:first:mt-0">
+          <div
+            :lang="contentLang(message.text)"
+            class="prose prose-sm dark:prose-invert max-w-none *:first:mt-0"
+          >
             <MarkdownRender
               :content="message.text"
               :is-dark="isDark"
               :smooth-streaming="message.streaming"
               :typewriter="message.streaming"
               :fade="message.streaming"
+              :show-tooltips="false"
+              :mermaid-props="{ showTooltips: false }"
               :theme="codeBlockTheme"
               custom-id="chat-msg"
             />
@@ -142,9 +147,16 @@
         class="flex flex-col gap-2"
         :class="bubbleSelf ? 'items-end' : 'items-start'"
       >
+        <AttachmentBlock
+          v-if="userAttachmentBlock"
+          :block="userAttachmentBlock"
+          :on-open-media="onOpenMedia"
+        />
         <div
           v-if="cleanUserText(message.text) || message.forward || message.reply"
-          class="chat-user-bubble w-fit max-w-full rounded-lg bg-muted px-3.5 py-2.5 text-foreground whitespace-pre-wrap break-words"
+          :lang="contentLang(cleanUserText(message.text))"
+          class="chat-user-bubble w-fit max-w-full bg-chat-user-bubble px-4 py-3 text-chat-user-bubble-fg whitespace-pre-wrap break-words"
+          :class="userBubbleRadiusClass"
         >
           <div
             v-if="message.forward"
@@ -191,89 +203,110 @@
               >
             </div>
           </button>
-          <div v-if="cleanUserText(message.text)">
-            {{ cleanUserText(message.text) }}
-          </div>
+          <CollapsibleUserText
+            v-if="cleanUserText(message.text)"
+            :text="cleanUserText(message.text)"
+          />
         </div>
-        <AttachmentBlock
-          v-if="userAttachmentBlock"
-          :block="userAttachmentBlock"
-          :on-open-media="onOpenMedia"
-        />
         <MessageActions
+          class="-mt-1"
+          role="user"
           :copy-text="userCopyText"
-          :relative-time="relativeTimestamp"
-          :full-time="fullTimestamp"
           :align="bubbleSelf ? 'end' : 'start'"
         />
       </div>
 
-      <!-- Assistant message blocks -->
-      <div
-        v-else
-        class="space-y-1.5"
-      >
-        <template
-          v-for="node in renderNodes"
-          :key="node.key"
-        >
-          <!-- Process segment: consecutive tool + reasoning blocks. A single
+      <!-- Assistant message blocks. The vertical gap between a process/"Thought
+           for Ns" row and the body is ~15% tighter than the body↔rule gap
+           (1.36rem vs the 1.6rem --ms-flow-hr-y): close to the unified rhythm,
+           but the channel-process line was sitting a touch too far from the
+           answer at full parity. -->
+      <div v-else>
+        <div class="space-y-[0.85rem]">
+          <template
+            v-for="node in renderNodes"
+            :key="node.key"
+          >
+            <!-- Process segment: consecutive tool + reasoning blocks. A single
                item renders as a bare row; multiple collapse into one group. -->
-          <ToolCallGroup
-            v-if="node.kind === 'process'"
-            :items="node.items"
-            :active="message.streaming && node.lastIndex === message.messages.length - 1"
-          />
-
-          <template v-else>
-            <!-- Text block -->
-            <div
-              v-if="node.block.type === 'text' && node.block.content"
-              class="prose prose-sm dark:prose-invert max-w-none [&_p]:my-0! [&_p+p]:mt-2! [&_ul]:my-1.5! [&_ol]:my-1.5! [&_li]:my-0.5! [&_:is(h1,h2,h3,h4,h5,h6)]:mt-2.5! [&_:is(h1,h2,h3,h4,h5,h6)]:mb-1! [&>*:first-child]:mt-0! [&>*:last-child]:mb-0!"
-            >
-              <MarkdownRender
-                :content="node.block.content"
-                :is-dark="isDark"
-                :smooth-streaming="isAssistantBlockStreaming(node.index)"
-                :typewriter="isAssistantBlockStreaming(node.index)"
-                :fade="isAssistantBlockStreaming(node.index)"
-                :theme="codeBlockTheme"
-                custom-id="chat-msg"
-              />
-            </div>
-
-            <!-- Error block -->
-            <div
-              v-else-if="node.block.type === 'error' && node.block.content"
-              class="flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-            >
-              <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
-              <span class="min-w-0 whitespace-pre-wrap break-words">{{ node.block.content }}</span>
-            </div>
-
-            <!-- Attachment block -->
-            <AttachmentBlock
-              v-else-if="node.block.type === 'attachments'"
-              :block="(node.block as AttachmentBlockType)"
-              :on-open-media="onOpenMedia"
+            <ToolCallGroup
+              v-if="node.kind === 'process'"
+              :items="node.items"
+              :active="message.streaming && node.lastIndex === message.messages.length - 1"
             />
-          </template>
-        </template>
 
-        <!-- Streaming indicator -->
-        <div
-          v-if="message.streaming && !hasVisibleAssistantBlocks"
-          class="flex items-center gap-2 text-xs text-muted-foreground h-6"
-        >
-          <LoaderCircle class="size-3.5 animate-spin" />
-          {{ $t('chat.thinking') }}
+            <template v-else>
+              <!-- Text block -->
+              <!-- Headings split into two spacing groups, not one flat ramp:
+                 h1–h3 (true section breaks) get more air above and a clear gap
+                 below (so an h3 immediately followed by an h4 isn't cramped);
+                 h4–h6 (sub-labels close to their text) get less. Reads as two
+                 tiers rather than six evenly-spaced rungs. -->
+              <div
+                v-if="node.block.type === 'text' && node.block.content"
+                :lang="contentLang(node.block.content)"
+                class="prose prose-sm dark:prose-invert max-w-none [&_p]:my-0! [&_p+p]:mt-2! [&_ul]:my-1.5! [&_ol]:my-1.5! [&_li]:my-0.5! [&_:is(h1,h2,h3)]:mt-5! [&_:is(h1,h2,h3)]:mb-2! [&_:is(h4,h5,h6)]:mt-3! [&_:is(h4,h5,h6)]:mb-1! [&>*:first-child]:mt-0! [&>*:last-child]:mb-0!"
+              >
+                <MarkdownRender
+                  :content="node.block.content"
+                  :is-dark="isDark"
+                  :smooth-streaming="isAssistantBlockStreaming(node.index)"
+                  :typewriter="isAssistantBlockStreaming(node.index)"
+                  :fade="isAssistantBlockStreaming(node.index)"
+                  :show-tooltips="false"
+                  :mermaid-props="{ showTooltips: false }"
+                  :theme="codeBlockTheme"
+                  custom-id="chat-msg"
+                />
+              </div>
+
+              <!-- Error block -->
+              <div
+                v-else-if="node.block.type === 'error' && node.block.content"
+                class="flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+              >
+                <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
+                <span class="min-w-0 whitespace-pre-wrap break-words">{{ node.block.content }}</span>
+              </div>
+
+              <!-- Attachment block -->
+              <AttachmentBlock
+                v-else-if="node.block.type === 'attachments'"
+                :block="(node.block as AttachmentBlockType)"
+                :on-open-media="onOpenMedia"
+              />
+            </template>
+          </template>
+
+          <!-- Local "the turn is running" indicator: shown only before the first
+               block streams in. Same scale/weight as the process headers, and the
+               same shimmer the Thinking/running states use (running = shimmer,
+               done = solid), so it reads as the first link of the chain the
+               Thinking block continues — not a separate loading widget. The phrase
+               also types in (a stepped clip-path wipe) on entry; keyed by the hint
+               so it replays once per turn. -->
+          <div
+            v-if="message.streaming && !hasVisibleAssistantBlocks"
+            class="font-[400] text-[0.90625rem]"
+          >
+            <div class="flex items-center gap-1.5 py-px text-cop-title select-none">
+              <span
+                :key="thinkingHint"
+                class="inline-block whitespace-nowrap tracking-[0.01em] tool-shimmer-text cop-typewriter"
+              >{{ thinkingHint }}…</span>
+            </div>
+          </div>
         </div>
+        <!-- Action bar hugs the answer (~9px), tighter than the inter-block
+             rhythm above, so it reads as belonging to this turn. -->
         <MessageActions
+          class="mt-2"
+          role="assistant"
           :copy-text="assistantPlainText"
-          :relative-time="relativeTimestamp"
+          :menu-time="calendarTimestamp"
           :full-time="fullTimestamp"
           align="start"
-          :persistent="isLatestAssistant"
+          :persistent="true"
           :streaming="message.streaming"
         />
       </div>
@@ -284,14 +317,16 @@
 <script lang="ts">
 import { setCustomComponents } from 'markstream-vue'
 import ChatCodeBlock from './chat-code-block.vue'
+import { registerSharedMarkdownComponents } from '@/components/markdown'
 import ThemedMermaidBlock from '@/components/themed-mermaid-block/index.vue'
 
-// Replace markstream's heavy Monaco code block (and its font-size/expand/preview
-// toolbar that surfaced raw i18n keys) with a clean integral code block, scoped
-// to the chat renderer id ("chat-msg"). Both `code_block` and `shell` are mapped
-// to the same component so shell/bash blocks render identically (no separate
-// terminal "run" toolbar / language chrome). Runs once at module load.
-setCustomComponents('chat-msg', { code_block: ChatCodeBlock, shell: ChatCodeBlock })
+// Scope the chat renderer ("chat-msg"): replace markstream's heavy Monaco code
+// block (and its font-size/expand/preview toolbar that surfaced raw i18n keys)
+// with a clean integral code block — both `code_block` and `shell` map to it so
+// shell/bash blocks render identically — and register the shared design-system
+// node components (library Checkbox task markers, link-language footnotes).
+// Runs once at module load.
+registerSharedMarkdownComponents('chat-msg', { code_block: ChatCodeBlock, shell: ChatCodeBlock })
 // Mermaid is registered globally so the appearance preference wins over the
 // markstream default (which only follows the host renderer's isDark flag). One
 // registration covers chat + file preview + any future MarkdownRender call site.
@@ -300,8 +335,8 @@ setCustomComponents({ mermaid: ThemedMermaidBlock })
 
 <script setup lang="ts">
 import { computed, toRef, useTemplateRef, watch } from 'vue'
-import { CircleAlert, LoaderCircle } from 'lucide-vue-next'
-import { formatRelativeTime, formatDateTime } from '@/utils/date-time'
+import { CircleAlert } from 'lucide-vue-next'
+import { formatRelativeTime, formatDateTime, formatCalendarTime } from '@/utils/date-time'
 import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
@@ -309,6 +344,7 @@ import ToolCallGroup from './tool-call-group.vue'
 import { isReadOnlyTool } from './tool-call-registry'
 import { finalizeReasoning, markReasoningSeen } from './reasoning-timing'
 import AttachmentBlock from './attachment-block.vue'
+import CollapsibleUserText from './collapsible-user-text.vue'
 import MessageActions from './message-actions.vue'
 import BackgroundTaskBlock from './background-task-block.vue'
 import HeartbeatTriggerBlock from './heartbeat-trigger-block.vue'
@@ -379,7 +415,18 @@ const isSelf = computed(() =>
 )
 
 
-const { t, locale } = useI18n()
+const { t, tm, rt, locale } = useI18n()
+
+// The pre-stream "running" line picks one phrase and holds it for the turn:
+// seeded by the message id so it stays put across re-renders/refetches instead
+// of flickering between phrases on every reactive update.
+const thinkingHint = computed(() => {
+  const hints = tm('chat.process.thinkingHints') as unknown[]
+  if (!Array.isArray(hints) || hints.length === 0) return t('chat.thinking')
+  let seed = 0
+  for (const ch of props.message.id) seed = (seed + ch.charCodeAt(0)) % 100000
+  return rt(hints[seed % hints.length] as Parameters<typeof rt>[0])
+})
 
 
 const replySenderLabel = computed(() => {
@@ -438,6 +485,16 @@ function cleanUserText(content?: string): string {
     .trim()
 }
 
+// Element-level script tag for BLOCK typography only — leading (CJK packs
+// tighter, so it loosens) and the ~3% Latin size shave. Per-glyph WEIGHT in mixed
+// runs is NOT done here (one font-weight can't split a run); that lives in the
+// .chat-cjk / .chat-latin spans emitted by md-text and the user bubble. A block
+// is 'zh' if it contains any CJK (its leading should breathe for the CJK lines).
+const CJK_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f]/
+function contentLang(content?: string): 'zh' | 'en' {
+  return content && CJK_RE.test(content) ? 'zh' : 'en'
+}
+
 const isSpecialUserMessage = computed(() =>
   props.message.role === 'user'
   && (props.sessionType === 'heartbeat' || props.sessionType === 'schedule' || props.sessionType === 'subagent'),
@@ -445,7 +502,14 @@ const isSpecialUserMessage = computed(() =>
 
 const contentClass = computed(() => {
   if (isSpecialUserMessage.value) return 'flex-1 max-w-full'
-  if (props.message.role === 'user') return 'max-w-[80%]'
+  // The user bubble caps a little tighter than the assistant column so a long
+  // prompt doesn't sprawl most of the width before wrapping. `w-full` makes the
+  // wrapper actually OCCUPY that capped column instead of shrinking to the
+  // bubble, so the hover scope (group/msg) that reveals the action row reaches
+  // left into the empty space beside a short bubble — wide, but capped at 70%
+  // so it never extends to the far left edge. The bubble itself stays
+  // right-aligned via the inner `items-end`.
+  if (props.message.role === 'user') return 'w-full max-w-[70%]'
   return 'flex-1 max-w-full'
 })
 
@@ -506,6 +570,20 @@ const userAttachmentBlock = computed<AttachmentBlockType | null>(() => {
     type: 'attachments',
     attachments: props.message.attachments,
   }
+})
+
+// With attachments stacked above the bubble, the corner that meets them tightens
+// to a small radius so it tucks into the attachment stack and reads as one
+// connected unit — noticeably sharper than the attachment card's own corner; the
+// other three corners keep the full bubble radius. 7px (radius token − 3px) sits
+// just under the card's corner so the fold is clearly tighter without going razor
+// sharp. The folded corner follows the bubble's alignment side — top-right for own
+// messages, top-left for left-aligned (channel) messages.
+const userBubbleRadiusClass = computed(() => {
+  if (!userAttachmentBlock.value) return 'rounded-2xl'
+  return bubbleSelf.value
+    ? 'rounded-2xl rounded-tr-[calc(var(--radius)-3px)]'
+    : 'rounded-2xl rounded-tl-[calc(var(--radius)-3px)]'
 })
 
 function hasLaterAssistantMessage(index: number): boolean {
@@ -611,6 +689,11 @@ const relativeTimestamp = computed(() =>
 const fullTimestamp = computed(() =>
   formatDateTime(props.message.timestamp, { locale: locale.value }),
 )
+// Precise, calendar-anchored time shown inside the assistant "more" menu —
+// "Today 10:11 PM" rather than the decaying "3 hours ago".
+const calendarTimestamp = computed(() =>
+  formatCalendarTime(props.message.timestamp, { locale: locale.value }),
+)
 
 const userCopyText = computed(() =>
   props.message.role === 'user' ? cleanUserText(props.message.text) : '',
@@ -624,11 +707,5 @@ const assistantPlainText = computed(() => {
     .map(block => block.content)
     .join('\n\n')
 })
-
-const isLatestAssistant = computed(() =>
-  props.message.role === 'assistant'
-  && Boolean(props.isLastMessage)
-  && !props.message.streaming,
-)
 
 </script>

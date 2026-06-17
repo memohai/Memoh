@@ -8,11 +8,11 @@
     >
       <Button
         variant="ghost"
-        class="text-foreground/85"
+        class="max-w-full text-foreground/85"
         @click="emit('back')"
       >
-        <ChevronLeft class="size-4" />
-        {{ backLabel }}
+        <ChevronLeft class="size-4 shrink-0" />
+        <span class="min-w-0 truncate">{{ backLabel }}</span>
       </Button>
     </div>
 

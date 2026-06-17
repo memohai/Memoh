@@ -3,8 +3,8 @@
     <!-- Section header: same height as a tree row. Text sits at the icon-column
          start position (where a chevron would be) so items below it read as
          children — text at ~8px, item names at ~36px. -->
-    <div class="group/pane-header flex h-[27px] shrink-0 items-center mx-1 pl-[11px] select-none">
-      <span class="min-w-0 flex-1 truncate text-[13.5px] font-[500] text-muted-foreground/70">
+    <div class="group/pane-header flex min-h-[1.6875rem] shrink-0 items-center mx-1 pl-[11px] select-none">
+      <span class="min-w-0 flex-1 truncate text-[0.84375rem] font-[500] text-muted-foreground/70">
         {{ botName || t('bots.files.panelTitle') }}
       </span>
       <div class="flex items-center gap-0.5 pr-1 opacity-0 transition-opacity duration-150 group-hover/pane-header:opacity-100">
@@ -65,7 +65,7 @@
       v-if="selectedCount > 0"
       class="flex shrink-0 items-center gap-1 border-b border-border px-2 h-7"
     >
-      <span class="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+      <span class="min-w-0 flex-1 truncate text-caption text-muted-foreground">
         {{ t('bots.files.selectedCount', { count: selectedCount }) }}
       </span>
       <Button

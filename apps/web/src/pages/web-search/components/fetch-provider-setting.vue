@@ -1,102 +1,107 @@
 <template>
-  <SettingsShell width="standard">
-    <section class="flex items-center gap-3">
-      <SearchProviderLogo
-        :provider="curProvider?.provider || ''"
-        size="lg"
-      />
-      <h2 class="scroll-m-20 text-sm font-semibold tracking-tight min-w-0 truncate">
-        {{ curProvider?.name }}
-      </h2>
-      <div class="ml-auto flex items-center gap-2">
-        <span class="text-xs text-muted-foreground">
-          {{ $t('common.enable') }}
+  <SettingsShell width="narrow">
+    <div class="space-y-6">
+      <!-- Identity card mirrors the search provider detail, while Native keeps
+           its managed/non-destructive behavior. -->
+      <section class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3">
+        <span class="flex size-9 shrink-0 items-center justify-center">
+          <SearchProviderLogo
+            :provider="curProvider?.provider || ''"
+            size="md"
+          />
         </span>
-        <Switch
-          :model-value="curProvider?.enable ?? false"
-          :disabled="isNative || !curProvider?.id || enableLoading"
-          @update:model-value="handleToggleEnable"
-        />
-      </div>
-    </section>
-    <Separator class="mt-4 mb-6" />
-
-    <section
-      v-if="isNative"
-      class="text-xs text-muted-foreground"
-    >
-      {{ $t('webSearch.nativeManaged') }}
-    </section>
-
-    <form
-      v-else
-      @submit="editProvider"
-    >
-      <div class="space-y-4">
-        <FormField
-          v-slot="{ componentField }"
-          name="name"
-        >
-          <FormItem>
-            <Label
-              :for="componentField.id || 'fetch-provider-name'"
-              class="scroll-m-20 font-semibold tracking-tight"
-            >
-              {{ $t('common.name') }}
-            </Label>
-            <FormControl>
-              <Input
-                :id="componentField.id || 'fetch-provider-name'"
-                type="text"
-                :placeholder="$t('common.namePlaceholder')"
-                :aria-label="$t('common.name')"
-                v-bind="componentField"
-              />
-            </FormControl>
-          </FormItem>
-        </FormField>
-
-        <Separator class="my-4" />
-
-        <template v-if="form.values.provider === 'jina'">
-          <JinaReaderSettings v-model="configProxy" />
-        </template>
-        <template v-else-if="form.values.provider === 'cloudflare_markdown'">
-          <CloudflareMarkdownSettings v-model="configProxy" />
-        </template>
-        <div
-          v-else-if="form.values.provider"
-          class="text-xs text-muted-foreground"
-        >
-          {{ $t('webSearch.unsupportedProvider') }}
+        <div class="min-w-0 flex-1">
+          <h2 class="truncate text-sm font-semibold">
+            {{ curProvider?.name }}
+          </h2>
         </div>
-      </div>
-
-      <section class="flex justify-end mt-4 gap-4">
-        <ConfirmPopover
-          :message="$t('webSearch.deleteFetchConfirm')"
-          :loading="deleteLoading"
-          @confirm="deleteProvider"
-        >
-          <template #trigger>
-            <Button
-              type="button"
-              variant="outline"
-              :aria-label="$t('common.delete')"
-            >
-              <Trash2 />
-            </Button>
-          </template>
-        </ConfirmPopover>
-
-        <LoadingButton
-          type="submit"
-          :loading="editLoading"
-        >
-          {{ $t('provider.saveChanges') }}
-        </LoadingButton>
+        <div class="ml-auto flex items-center gap-2">
+          <ConfirmPopover
+            v-if="!isNative"
+            :message="$t('webSearch.deleteFetchConfirm')"
+            :loading="deleteLoading"
+            variant="destructive"
+            @confirm="deleteProvider"
+          >
+            <template #trigger>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                class="text-muted-foreground hover:text-destructive"
+                :aria-label="$t('common.delete')"
+              >
+                <Trash2 class="size-4" />
+              </Button>
+            </template>
+          </ConfirmPopover>
+          <Switch
+            :model-value="curProvider?.enable ?? false"
+            :disabled="isNative || !curProvider?.id || enableLoading"
+            :aria-label="$t('common.enable')"
+            @update:model-value="handleToggleEnable"
+          />
+        </div>
       </section>
-    </form>
+
+      <SettingsSection :title="$t('provider.configurationTitle')">
+        <div
+          v-if="isNative"
+          class="px-4 py-3 text-xs text-muted-foreground"
+        >
+          {{ $t('webSearch.nativeManaged') }}
+        </div>
+
+        <form
+          v-else
+          @submit="editProvider"
+        >
+          <div>
+            <FormField
+              v-slot="{ componentField }"
+              name="name"
+            >
+              <SettingsRow :label="$t('common.name')">
+                <FormItem class="w-80">
+                  <FormControl>
+                    <Input
+                      type="text"
+                      :placeholder="$t('common.namePlaceholder')"
+                      :aria-label="$t('common.name')"
+                      v-bind="componentField"
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              </SettingsRow>
+            </FormField>
+
+            <template v-if="form.values.provider === 'jina'">
+              <JinaReaderSettings v-model="configProxy" />
+            </template>
+            <template v-else-if="form.values.provider === 'cloudflare_markdown'">
+              <CloudflareMarkdownSettings v-model="configProxy" />
+            </template>
+            <div
+              v-else-if="form.values.provider"
+              class="px-4 py-3 text-xs text-muted-foreground"
+            >
+              {{ $t('webSearch.unsupportedProvider') }}
+            </div>
+          </div>
+
+          <div class="mx-4 flex items-center justify-end border-t border-border py-3">
+            <LoadingButton
+              type="submit"
+              size="sm"
+              :loading="editLoading"
+            >
+              {{ $t('provider.saveChanges') }}
+            </LoadingButton>
+          </div>
+        </form>
+      </SettingsSection>
+    </div>
   </SettingsShell>
 </template>
 
@@ -107,13 +112,14 @@ import {
   FormControl,
   FormField,
   FormItem,
-  Separator,
-  Label,
+  FormMessage,
   Switch,
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
 import SettingsShell from '@/components/settings-shell/index.vue'
+import SettingsSection from '@/components/settings/section.vue'
+import SettingsRow from '@/components/settings/row.vue'
 import JinaReaderSettings from './jina-reader-settings.vue'
 import CloudflareMarkdownSettings from './cloudflare-markdown-settings.vue'
 import { Trash2 } from 'lucide-vue-next'

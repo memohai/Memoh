@@ -1,46 +1,45 @@
 <template>
-  <div class="grid gap-4 md:grid-cols-2">
-    <div class="space-y-2 md:col-span-2">
-      <Label for="google-api-key">API Key</Label>
-      <Input
-        id="google-api-key"
-        v-model="localConfig.api_key"
-        type="password"
-        aria-label="API Key"
-      />
-    </div>
-    <div class="space-y-2">
-      <Label for="google-cx">Search Engine ID (cx)</Label>
-      <Input
-        id="google-cx"
-        v-model="localConfig.cx"
-        aria-label="Search Engine ID"
-      />
-    </div>
-    <div class="space-y-2">
-      <Label for="google-timeout-seconds">Timeout (seconds)</Label>
-      <Input
-        id="google-timeout-seconds"
-        v-model.number="localConfig.timeout_seconds"
-        type="number"
-        :min="1"
-        aria-label="Timeout (seconds)"
-      />
-    </div>
-    <div class="space-y-2 md:col-span-2">
-      <Label for="google-base-url">Base URL</Label>
-      <Input
-        id="google-base-url"
-        v-model="localConfig.base_url"
-        aria-label="Base URL"
-      />
-    </div>
-  </div>
+  <SettingsRow label="API Key">
+    <Input
+      id="google-api-key"
+      v-model="localConfig.api_key"
+      type="password"
+      class="w-80"
+      aria-label="API Key"
+    />
+  </SettingsRow>
+  <SettingsRow label="Search Engine ID (cx)">
+    <Input
+      id="google-cx"
+      v-model="localConfig.cx"
+      class="w-80"
+      aria-label="Search Engine ID"
+    />
+  </SettingsRow>
+  <SettingsRow label="Base URL">
+    <Input
+      id="google-base-url"
+      v-model="localConfig.base_url"
+      class="w-80"
+      aria-label="Base URL"
+    />
+  </SettingsRow>
+  <SettingsRow label="Timeout (seconds)">
+    <Input
+      id="google-timeout-seconds"
+      v-model.number="localConfig.timeout_seconds"
+      type="number"
+      :min="1"
+      class="w-80"
+      aria-label="Timeout (seconds)"
+    />
+  </SettingsRow>
 </template>
 
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
-import { Input, Label } from '@memohai/ui'
+import { Input } from '@memohai/ui'
+import SettingsRow from '@/components/settings/row.vue'
 
 const props = defineProps<{
   modelValue: Record<string, unknown>

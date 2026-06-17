@@ -41,7 +41,7 @@
           <p class="text-xs font-medium text-foreground">
             {{ indexedMemoryStatusTitle }}
           </p>
-          <p class="text-[11px] text-muted-foreground">
+          <p class="text-caption text-muted-foreground">
             {{ isSelectedMemoryProviderPersisted ? $t('bots.settings.memoryHealthOk') : $t('bots.settings.indexedMemoryStatusPendingSave') }}
           </p>
         </div>
@@ -88,8 +88,8 @@
         </div>
 
         <template v-else-if="statusCardData">
-          <div class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[70px]">
-            <p class="text-[10px] text-muted-foreground tracking-tight">
+          <div class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[4.375rem]">
+            <p class="text-caption text-muted-foreground tracking-tight">
               {{ $t('bots.settings.memorySourceDir') }}
             </p>
             <p class="mt-1 text-xs font-mono font-medium text-foreground break-all leading-snug">
@@ -97,8 +97,8 @@
             </p>
           </div>
 
-          <div class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[70px]">
-            <p class="text-[10px] text-muted-foreground tracking-tight">
+          <div class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[4.375rem]">
+            <p class="text-caption text-muted-foreground tracking-tight">
               {{ $t('bots.settings.memoryOverviewPath') }}
             </p>
             <p class="mt-1 text-xs font-mono font-medium text-foreground break-all leading-snug">
@@ -106,8 +106,8 @@
             </p>
           </div>
 
-          <div class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[70px]">
-            <p class="text-[10px] text-muted-foreground tracking-tight">
+          <div class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[4.375rem]">
+            <p class="text-caption text-muted-foreground tracking-tight">
               {{ $t('bots.settings.memoryMarkdownFiles') }}
             </p>
             <p class="mt-1 text-base font-mono font-semibold text-foreground leading-none">
@@ -115,8 +115,8 @@
             </p>
           </div>
 
-          <div class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[70px]">
-            <p class="text-[10px] text-muted-foreground tracking-tight">
+          <div class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[4.375rem]">
+            <p class="text-caption text-muted-foreground tracking-tight">
               {{ $t('bots.settings.memorySourceEntries') }}
             </p>
             <p class="mt-1 text-base font-mono font-semibold text-foreground leading-none">
@@ -124,8 +124,8 @@
             </p>
           </div>
 
-          <div class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[70px]">
-            <p class="text-[10px] text-muted-foreground tracking-tight">
+          <div class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[4.375rem]">
+            <p class="text-caption text-muted-foreground tracking-tight">
               {{ $t('bots.settings.memoryIndexedEntries') }}
             </p>
             <p class="mt-1 text-base font-mono font-semibold text-foreground leading-none">
@@ -135,9 +135,9 @@
 
           <div
             v-if="showQdrantDetails"
-            class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[70px] sm:col-span-1"
+            class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[4.375rem] sm:col-span-1"
           >
-            <p class="text-[10px] text-muted-foreground tracking-tight">
+            <p class="text-caption text-muted-foreground tracking-tight">
               {{ $t('bots.settings.memoryQdrantCollection') }}
             </p>
             <p class="mt-1 text-xs font-mono font-medium text-foreground break-all leading-snug">
@@ -147,9 +147,9 @@
 
           <div
             v-if="showEncoderHealth"
-            class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[70px]"
+            class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[4.375rem]"
           >
-            <p class="text-[10px] text-muted-foreground tracking-tight">
+            <p class="text-caption text-muted-foreground tracking-tight">
               {{ encoderHealthLabel }}
             </p>
             <div class="flex items-center gap-1.5 mt-1">
@@ -168,9 +168,9 @@
 
           <div
             v-if="showQdrantHealth"
-            class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[70px]"
+            class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[4.375rem]"
           >
-            <p class="text-[10px] text-muted-foreground tracking-tight">
+            <p class="text-caption text-muted-foreground tracking-tight">
               {{ $t('bots.settings.memoryQdrantHealth') }}
             </p>
             <div class="flex items-center gap-1.5 mt-1">

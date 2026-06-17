@@ -8,7 +8,7 @@
         v-if="url"
         class="flex items-center gap-1.5 text-muted-foreground"
       >
-        <span class="text-[10px] uppercase tracking-wide text-muted-foreground/70 shrink-0">
+        <span class="text-caption uppercase tracking-wide text-muted-foreground/70 shrink-0">
           {{ t('chat.tools.detail.url') }}
         </span>
         <span
@@ -20,7 +20,7 @@
         v-if="targetRef"
         class="flex items-center gap-1.5 text-muted-foreground"
       >
-        <span class="text-[10px] uppercase tracking-wide text-muted-foreground/70 shrink-0">
+        <span class="text-caption uppercase tracking-wide text-muted-foreground/70 shrink-0">
           {{ t('chat.tools.detail.ref') }}
         </span>
         <span class="font-mono">{{ targetRef }}</span>
@@ -29,7 +29,7 @@
         v-if="selector"
         class="flex items-center gap-1.5 text-muted-foreground"
       >
-        <span class="text-[10px] uppercase tracking-wide text-muted-foreground/70 shrink-0">
+        <span class="text-caption uppercase tracking-wide text-muted-foreground/70 shrink-0">
           {{ t('chat.tools.detail.selector') }}
         </span>
         <span
@@ -55,7 +55,7 @@
       v-if="screenshotPath"
       class="flex items-center gap-1.5 text-xs text-muted-foreground"
     >
-      <span class="text-[10px] uppercase tracking-wide text-muted-foreground/70 shrink-0">
+      <span class="text-caption uppercase tracking-wide text-muted-foreground/70 shrink-0">
         {{ t('chat.tools.detail.screenshotPath') }}
       </span>
       <span

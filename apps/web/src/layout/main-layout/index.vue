@@ -4,13 +4,14 @@
       v-model:open="isOpen"
       class="min-h-0 h-full"
       :default-open="sidebarDefaultOpen"
+      disable-default-shortcut
     >
       <section class="relative">
         <slot name="sidebar" />
       </section>
-    
+
       <section class="main-left-section" />
-      <slot name="main" />  
+      <slot name="main" />
       <section class="main-right-section" />
     </sidebar-provider>
   </section>

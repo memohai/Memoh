@@ -1,38 +1,37 @@
 <template>
-  <div class="grid gap-4 md:grid-cols-2">
-    <div class="space-y-2 md:col-span-2">
-      <Label for="bing-api-key">API Key</Label>
-      <Input
-        id="bing-api-key"
-        v-model="localConfig.api_key"
-        type="password"
-        aria-label="API Key"
-      />
-    </div>
-    <div class="space-y-2 md:col-span-2">
-      <Label for="bing-base-url">Base URL</Label>
-      <Input
-        id="bing-base-url"
-        v-model="localConfig.base_url"
-        aria-label="Base URL"
-      />
-    </div>
-    <div class="space-y-2">
-      <Label for="bing-timeout-seconds">Timeout (seconds)</Label>
-      <Input
-        id="bing-timeout-seconds"
-        v-model.number="localConfig.timeout_seconds"
-        type="number"
-        :min="1"
-        aria-label="Timeout (seconds)"
-      />
-    </div>
-  </div>
+  <SettingsRow label="API Key">
+    <Input
+      id="bing-api-key"
+      v-model="localConfig.api_key"
+      type="password"
+      class="w-80"
+      aria-label="API Key"
+    />
+  </SettingsRow>
+  <SettingsRow label="Base URL">
+    <Input
+      id="bing-base-url"
+      v-model="localConfig.base_url"
+      class="w-80"
+      aria-label="Base URL"
+    />
+  </SettingsRow>
+  <SettingsRow label="Timeout (seconds)">
+    <Input
+      id="bing-timeout-seconds"
+      v-model.number="localConfig.timeout_seconds"
+      type="number"
+      :min="1"
+      class="w-80"
+      aria-label="Timeout (seconds)"
+    />
+  </SettingsRow>
 </template>
 
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
-import { Input, Label } from '@memohai/ui'
+import { Input } from '@memohai/ui'
+import SettingsRow from '@/components/settings/row.vue'
 
 const props = defineProps<{
   modelValue: Record<string, unknown>

@@ -17,8 +17,38 @@ describe('keyboard bindings table', () => {
     const close = keyboardBindings.find(b => b.command === appKeyboardCommands.closeCurrentWorkspaceTab)
     const save = keyboardBindings.find(b => b.command === appKeyboardCommands.saveActiveFile)
 
-    expect(close).toMatchObject({ key: 'w', mod: true, desktop: 'menu', browser: 'passthrough' })
-    expect(save).toMatchObject({ key: 's', mod: true, desktop: 'keydown', browser: 'intercept' })
+    expect(close).toMatchObject({ key: 'w', mod: true, desktop: 'menu', browser: 'passthrough', scope: 'global' })
+    expect(save).toMatchObject({ key: 's', mod: true, desktop: 'keydown', browser: 'intercept', scope: 'global' })
+  })
+
+  it('migrates the previously hardcoded sidebar toggle into the table', () => {
+    const toggle = keyboardBindings.find(b => b.command === appKeyboardCommands.toggleSidebar)
+    expect(toggle).toMatchObject({ key: 'b', mod: true, desktop: 'keydown', browser: 'intercept', scope: 'global' })
+  })
+
+  it('declares Mod+K as the open-settings global shortcut', () => {
+    const open = keyboardBindings.find(b => b.command === appKeyboardCommands.openSettings)
+    expect(open).toMatchObject({ key: 'k', mod: true, desktop: 'keydown', browser: 'intercept', scope: 'global' })
+  })
+
+  it('migrates the lightbox keys with a scoped lifetime (not global)', () => {
+    const lightboxCommands = [
+      appKeyboardCommands.closeMediaLightbox,
+      appKeyboardCommands.mediaLightboxPrev,
+      appKeyboardCommands.mediaLightboxNext,
+    ]
+    for (const command of lightboxCommands) {
+      const binding = keyboardBindings.find(b => b.command === command)
+      expect(binding, command).toBeDefined()
+      expect(binding?.scope).toBe('mediaLightbox')
+      expect(binding?.mod).toBeUndefined()
+    }
+  })
+
+  it('every binding declares an i18nKey unique within the table', () => {
+    const keys = keyboardBindings.map(b => b.i18nKey)
+    expect(keys.every(Boolean)).toBe(true)
+    expect(new Set(keys).size).toBe(keys.length)
   })
 })
 
@@ -28,8 +58,22 @@ describe('toElectronAccelerator', () => {
   })
 
   it('orders modifiers CmdOrCtrl, Alt, Shift and uppercases single-char keys', () => {
-    const binding: KeyboardBinding = { command: appKeyboardCommands.saveActiveFile, key: 'k', mod: true, alt: true, shift: true, desktop: 'keydown', browser: 'intercept' }
+    const binding: KeyboardBinding = { command: appKeyboardCommands.saveActiveFile, key: 'k', mod: true, alt: true, shift: true, desktop: 'keydown', browser: 'intercept', scope: 'global', i18nKey: 'saveActiveFile' }
     expect(toElectronAccelerator(binding)).toBe('CmdOrCtrl+Alt+Shift+K')
+  })
+
+  it('maps DOM key names (ArrowLeft, Escape, Space) to their Electron accelerator equivalents', () => {
+    // Electron's accelerator parser uses Left/Right/Up/Down and Esc, not the
+    // DOM ArrowLeft/Escape names — pushing the raw DOM names leaves the
+    // native menu accelerator silently broken.
+    const make = (key: string): KeyboardBinding => ({
+      command: appKeyboardCommands.closeCurrentWorkspaceTab, key, mod: true,
+      desktop: 'menu', browser: 'passthrough', scope: 'global', i18nKey: 'closeCurrentWorkspaceTab',
+    })
+    expect(toElectronAccelerator(make('ArrowLeft'))).toBe('CmdOrCtrl+Left')
+    expect(toElectronAccelerator(make('ArrowDown'))).toBe('CmdOrCtrl+Down')
+    expect(toElectronAccelerator(make('Escape'))).toBe('CmdOrCtrl+Esc')
+    expect(toElectronAccelerator(make(' '))).toBe('CmdOrCtrl+Space')
   })
 })
 

@@ -8,6 +8,10 @@ import { useChatStore } from '@/store/chat-list'
 interface UseSessionInfoOptions {
   visible?: Ref<boolean>
   overrideModelId?: Ref<string>
+  // The session status only reports a context window once the backend can
+  // resolve one for the model; until then we fall back to the selected model's
+  // configured window so the ring shows real headroom instead of an empty band.
+  fallbackContextWindow?: Ref<number | null | undefined>
 }
 
 export function useSessionInfo(options: UseSessionInfoOptions = {}) {
@@ -40,7 +44,12 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
   })
 
   const usedTokens = computed(() => info.value?.context_usage?.used_tokens ?? 0)
-  const contextWindow = computed(() => info.value?.context_usage?.context_window ?? null)
+  const contextWindow = computed(() => {
+    const fromStatus = info.value?.context_usage?.context_window
+    if (fromStatus != null && fromStatus > 0) return fromStatus
+    const fallback = options.fallbackContextWindow?.value
+    return fallback != null && fallback > 0 ? fallback : null
+  })
   const contextPercent = computed(() => {
     if (contextWindow.value == null || contextWindow.value <= 0) return 0
     return (usedTokens.value / contextWindow.value) * 100

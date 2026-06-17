@@ -1,11 +1,11 @@
 <template>
-  <section class="space-y-4 rounded-md border p-4 bg-background/50">
-    <div class="flex items-center justify-between gap-3">
-      <div class="space-y-1">
-        <h3 class="text-xs font-medium text-foreground">
+  <SettingsSection>
+    <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3">
+      <div class="min-w-0">
+        <div class="text-sm font-medium text-foreground">
           {{ $t('bots.access.userAccess.title') }}
-        </h3>
-        <p class="text-[11px] leading-snug text-muted-foreground max-w-md">
+        </div>
+        <p class="mt-0.5 text-xs text-muted-foreground">
           {{ $t('bots.access.userAccess.subtitle') }}
         </p>
       </div>
@@ -13,54 +13,36 @@
         v-if="!formVisible"
         size="sm"
         variant="outline"
-        class="h-8 text-[11px] font-medium px-3 shrink-0 shadow-none"
+        class="shrink-0"
         @click="openAddForm"
       >
-        <Plus class="mr-1.5 size-3.5" />
+        <Plus class="size-4" />
         {{ $t('bots.access.userAccess.addMember') }}
       </Button>
     </div>
 
-    <!-- Add form -->
     <div
       v-if="formVisible"
-      class="space-y-4 rounded-lg border border-border/60 bg-background/70 p-4"
+      class="mx-4 space-y-4 border-b border-border py-4"
     >
       <div class="space-y-2">
-        <Label class="text-[11px] text-muted-foreground">
+        <Label class="text-xs font-medium text-muted-foreground">
           {{ $t('bots.access.userAccess.subjectQuestion') }}
         </Label>
-        <div class="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            class="flex items-center gap-2 rounded-md border px-3 py-2 text-left text-xs transition-colors shadow-none"
-            :class="formSubjectType === 'everyone'
-              ? 'border-foreground bg-muted text-foreground'
-              : 'border-border/60 bg-background/70 hover:bg-accent/50'"
-            @click="formSubjectType = 'everyone'"
-          >
-            <Globe class="size-4 shrink-0" />
-            <span class="truncate">{{ $t('bots.access.userAccess.everyone') }}</span>
-          </button>
-          <button
-            type="button"
-            class="flex items-center gap-2 rounded-md border px-3 py-2 text-left text-xs transition-colors shadow-none"
-            :class="formSubjectType === 'user'
-              ? 'border-foreground bg-muted text-foreground'
-              : 'border-border/60 bg-background/70 hover:bg-accent/50'"
-            @click="formSubjectType = 'user'"
-          >
-            <User class="size-4 shrink-0" />
-            <span class="truncate">{{ $t('bots.access.userAccess.specificMember') }}</span>
-          </button>
-        </div>
+        <SegmentedControl
+          :model-value="formSubjectType"
+          :items="subjectTypeItems"
+          :aria-label="$t('bots.access.userAccess.subjectQuestion')"
+          class="w-full sm:w-fit"
+          @update:model-value="(value) => formSubjectType = value as 'user' | 'everyone'"
+        />
       </div>
 
       <div
         v-if="formSubjectType === 'user'"
         class="space-y-2"
       >
-        <Label class="text-[11px] text-muted-foreground">
+        <Label class="text-xs font-medium text-muted-foreground">
           {{ $t('bots.access.userAccess.memberQuestion') }}
         </Label>
         <SearchableSelectPopover
@@ -74,7 +56,7 @@
       </div>
 
       <div class="space-y-2">
-        <Label class="text-[11px] text-muted-foreground">
+        <Label class="text-xs font-medium text-muted-foreground">
           {{ $t('bots.access.userAccess.permissionsQuestion') }}
         </Label>
         <div class="flex flex-wrap gap-4">
@@ -96,14 +78,12 @@
         <Button
           variant="ghost"
           size="sm"
-          class="h-8 text-[11px] shadow-none"
           @click="closeForm"
         >
           {{ $t('common.cancel') }}
         </Button>
         <Button
           size="sm"
-          class="h-8 text-[11px] shadow-none"
           :disabled="!canSubmit || isSaving"
           @click="handleCreate"
         >
@@ -119,20 +99,30 @@
     <!-- Loading -->
     <div
       v-if="isLoading"
-      class="flex justify-center py-8"
+      class="mx-4 flex min-h-[3.75rem] items-center gap-3 border-b border-border py-3 text-sm text-muted-foreground last:border-b-0"
     >
-      <Spinner class="size-5 text-muted-foreground/50" />
+      <Spinner class="size-4" />
+      {{ $t('common.loading') }}
     </div>
 
-    <!-- List -->
+    <Empty
+      v-else-if="grants.length === 0"
+      class="py-12"
+    >
+      <EmptyHeader>
+        <EmptyTitle>{{ $t('bots.access.userAccess.title') }}</EmptyTitle>
+        <EmptyDescription>{{ $t('bots.access.userAccess.empty') }}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+
     <div
       v-else
-      class="space-y-2"
+      class="divide-y divide-border"
     >
       <div
         v-for="grant in grants"
         :key="grant.id || grant.subject_type + (grant.user_id || 'everyone')"
-        class="flex items-center gap-3 rounded-lg border border-border/60 bg-background/70 px-3 py-2.5"
+        class="mx-4 flex min-h-[3.75rem] items-center gap-3 py-3"
       >
         <div class="flex min-w-0 flex-1 items-center gap-2.5">
           <Avatar class="size-7 shrink-0">
@@ -147,7 +137,7 @@
               />
               <span
                 v-else
-                class="text-[10px]"
+                class="text-caption"
               >{{ initials(grant) }}</span>
             </AvatarFallback>
           </Avatar>
@@ -159,14 +149,14 @@
               <Badge
                 v-if="grant.is_owner"
                 variant="secondary"
-                class="h-4 px-1.5 text-[9px] font-medium"
+                size="sm"
               >
                 {{ $t('bots.access.userAccess.ownerBadge') }}
               </Badge>
             </div>
             <p
               v-if="grant.subject_type === 'user' && grant.user_username"
-              class="truncate text-[10px] text-muted-foreground"
+              class="truncate text-xs text-muted-foreground"
             >
               @{{ grant.user_username }}
             </p>
@@ -177,7 +167,7 @@
           <label
             v-for="permission in permissionOptions"
             :key="permission"
-            class="flex items-center gap-1.5 text-[11px]"
+            class="flex items-center gap-1.5 text-xs"
             :class="grant.is_owner ? 'text-muted-foreground' : 'cursor-pointer text-foreground'"
           >
             <Checkbox
@@ -193,26 +183,28 @@
             :title="$t('bots.access.userAccess.removeConfirm')"
             @confirm="() => handleDelete(grant)"
           >
-            <Button
-              variant="ghost"
-              size="icon"
-              class="size-7 text-muted-foreground hover:text-destructive shadow-none"
-              :disabled="isRowBusy(grant)"
-            >
-              <Trash2 class="size-3.5" />
-            </Button>
+            <template #trigger>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                class="text-muted-foreground"
+                :disabled="isRowBusy(grant)"
+              >
+                <Trash2 class="size-3.5" />
+              </Button>
+            </template>
           </ConfirmPopover>
         </div>
       </div>
     </div>
-  </section>
+  </SettingsSection>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { Plus, Trash2, Globe, User } from 'lucide-vue-next'
+import { Plus, Trash2, Globe } from 'lucide-vue-next'
 import {
   Button,
   Label,
@@ -223,12 +215,18 @@ import {
   AvatarFallback,
   Spinner,
   Badge,
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+  SegmentedControl,
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { BOT_PERMISSION_ORDER, expandBotPermissions, type BotPermission } from '@/utils/bot-permissions'
+import SettingsSection from '@/components/settings/section.vue'
 import {
   getBotsByBotIdUserAccess,
   getBotsByBotIdUserAccessCandidates,
@@ -305,6 +303,17 @@ const candidateOptions = computed<SearchableSelectOption[]>(() => {
 })
 
 const everyoneExists = computed(() => grants.value.some((g) => g.subject_type === 'everyone'))
+const subjectTypeItems = computed(() => [
+  {
+    value: 'user',
+    label: t('bots.access.userAccess.specificMember'),
+  },
+  {
+    value: 'everyone',
+    label: t('bots.access.userAccess.everyone'),
+    disabled: everyoneExists.value,
+  },
+])
 
 const canSubmit = computed(() => {
   if (buildPermissions().length === 0) return false

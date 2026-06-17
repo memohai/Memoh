@@ -17,6 +17,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
+	pluginspkg "github.com/memohai/memoh/internal/plugins"
+	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
@@ -318,6 +320,142 @@ func TestRunLoadsConfigAndExecutesCommandHook(t *testing.T) {
 	}
 }
 
+func TestRunLoadsReadyPluginHooksWithPluginRuntimeDefaults(t *testing.T) {
+	t.Parallel()
+
+	pluginRoot, err := skillset.PluginDirForID("github")
+	if err != nil {
+		t.Fatalf("plugin root: %v", err)
+	}
+	pluginHooksPath, err := skillset.PluginHooksPathForID("github")
+	if err != nil {
+		t.Fatalf("plugin hooks path: %v", err)
+	}
+	disabledHooksPath, err := skillset.PluginHooksPathForID("disabled")
+	if err != nil {
+		t.Fatalf("disabled hooks path: %v", err)
+	}
+	needsAuthHooksPath, err := skillset.PluginHooksPathForID("needsauth")
+	if err != nil {
+		t.Fatalf("needs auth hooks path: %v", err)
+	}
+	forgedHooksPath, err := skillset.PluginHooksPathForID("forged")
+	if err != nil {
+		t.Fatalf("forged hooks path: %v", err)
+	}
+
+	userCfg := `{
+		"version": 1,
+		"env": {"USER_ENV": "enabled"},
+		"hooks": [{
+			"name": "user logger",
+			"event": "PostToolUse",
+			"matcher": "^exec$",
+			"priority": 10,
+			"actions": [{"type": "tool", "tool": "user_hook"}]
+		}]
+	}`
+	pluginCfg := `{
+		"version": 1,
+		"env": {"PLUGIN_ENV": "enabled"},
+		"hooks": [{
+			"name": "plugin logger",
+			"event": "PostToolUse",
+			"matcher": "^exec$",
+			"priority": 10,
+			"actions": [{"type": "command", "command": "python scripts/hook.py"}]
+		}]
+	}`
+	ignoredPluginCfg := `{
+		"version": 1,
+		"hooks": [{
+			"name": "ignored",
+			"event": "PostToolUse",
+			"priority": 100,
+			"actions": [{"type": "command", "command": "python ignored.py"}]
+		}]
+	}`
+	server := &hookBridgeTestServer{
+		files: map[string][]byte{
+			DefaultConfigPath:  []byte(userCfg),
+			pluginHooksPath:    []byte(pluginCfg),
+			disabledHooksPath:  []byte(ignoredPluginCfg),
+			needsAuthHooksPath: []byte(ignoredPluginCfg),
+			forgedHooksPath:    []byte(ignoredPluginCfg),
+		},
+	}
+	client := newHookBridgeTestClient(t, server)
+	service := NewService(nil, hookBridgeProvider{client: client})
+	service.SetPluginService(fakePluginInstallationLister{items: []pluginspkg.Installation{
+		{PluginID: "github", Enabled: true, Status: pluginspkg.StatusReady},
+		{PluginID: "disabled", Enabled: false, Status: pluginspkg.StatusReady},
+		{PluginID: "needsauth", Enabled: true, Status: pluginspkg.StatusNeedsAuth},
+	}})
+	runner := &fakeToolRunner{}
+
+	result, err := service.Run(context.Background(), Request{
+		Event: EventPostToolUse,
+		BotID: "bot-1",
+		Tool:  &ToolPayload{Name: "exec", Result: "ok"},
+		Workspace: WorkspaceInfo{
+			CWD:     "/data/workspace",
+			Runtime: "container",
+		},
+	}, runner)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if result.HooksMatched != 2 || result.ActionsRun != 2 {
+		t.Fatalf("hooks matched/actions run = %d/%d, want 2/2", result.HooksMatched, result.ActionsRun)
+	}
+	if got := []string{result.ActionResults[0].Name, result.ActionResults[1].Name}; !slices.Equal(got, []string{"user_hook", "python scripts/hook.py"}) {
+		t.Fatalf("action order = %v, want user hook before plugin hook", got)
+	}
+	if len(runner.calls) != 1 || runner.calls[0].name != "user_hook" {
+		t.Fatalf("tool runner calls = %+v, want user_hook only", runner.calls)
+	}
+	server.mu.Lock()
+	execs := append([]capturedExec(nil), server.execs...)
+	server.mu.Unlock()
+	if len(execs) != 1 {
+		t.Fatalf("exec count = %d, want 1", len(execs))
+	}
+	exec := execs[0]
+	if exec.command != "python scripts/hook.py" {
+		t.Fatalf("command = %q, want plugin script command", exec.command)
+	}
+	if exec.workDir != pluginRoot {
+		t.Fatalf("work_dir = %q, want plugin root %q", exec.workDir, pluginRoot)
+	}
+	for _, want := range []string{
+		"PLUGIN_ENV=enabled",
+		"MEMOH_PLUGIN_ID=github",
+		"MEMOH_PLUGIN_DIR=" + pluginRoot,
+		"MEMOH_HOOK_NAME=plugin:github:plugin logger",
+	} {
+		if !slices.Contains(exec.env, want) {
+			t.Fatalf("env = %v, missing %q", exec.env, want)
+		}
+	}
+	if slices.Contains(exec.env, "USER_ENV=enabled") {
+		t.Fatalf("plugin command env leaked user env: %v", exec.env)
+	}
+	var req Request
+	if err := json.Unmarshal(exec.stdin, &req); err != nil {
+		t.Fatalf("stdin is not hook request JSON: %v", err)
+	}
+	if req.HookName != "plugin:github:plugin logger" {
+		t.Fatalf("stdin hook name = %q, want plugin-prefixed hook name", req.HookName)
+	}
+	sources, ok := result.Metadata["hook_sources"].([]map[string]any)
+	if !ok {
+		t.Fatalf("hook_sources metadata = %#v, want []map[string]any", result.Metadata["hook_sources"])
+	}
+	if len(sources) != 2 || sources[0]["source_kind"] != sourceKindUser || sources[1]["source_kind"] != sourceKindPlugin || sources[1]["plugin_id"] != "github" {
+		t.Fatalf("hook_sources = %#v, want user then github plugin", sources)
+	}
+}
+
 func TestLoadCreatesEmptyConfigWhenMissing(t *testing.T) {
 	t.Parallel()
 
@@ -373,6 +511,15 @@ type hookBridgeProvider struct {
 
 func (p hookBridgeProvider) MCPClient(context.Context, string) (*bridge.Client, error) {
 	return p.client, nil
+}
+
+type fakePluginInstallationLister struct {
+	items []pluginspkg.Installation
+	err   error
+}
+
+func (l fakePluginInstallationLister) List(context.Context, string) ([]pluginspkg.Installation, error) {
+	return l.items, l.err
 }
 
 type capturedExec struct {

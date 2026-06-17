@@ -87,6 +87,7 @@ import (
 	netctl "github.com/memohai/memoh/internal/network"
 	netoverlay "github.com/memohai/memoh/internal/network/overlay"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
+	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/registry"
@@ -241,6 +242,12 @@ func provideBridgeProvider(manage *workspace.Manager) bridge.Provider {
 	return manage
 }
 
+func provideHooksService(log *slog.Logger, provider bridge.Provider, pluginService *pluginspkg.Service) *hookspkg.Service {
+	service := hookspkg.NewService(log, provider)
+	service.SetPluginService(pluginService)
+	return service
+}
+
 func provideWorkspaceManager(lc fx.Lifecycle, log *slog.Logger, service ctr.Service, networkController netctl.Controller, cfg config.Config, conn *pgxpool.Pool, queries dbstore.Queries) (*workspace.Manager, error) {
 	localSvc := workspace.NewLocalService(log, cfg.Local, cfg.Workspace.DataRoot)
 	lc.Append(fx.Hook{
@@ -274,12 +281,8 @@ func provideMemoryLLM(modelsService *models.Service, settingsService *settings.S
 func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatService *conversation.Service, accountService *accounts.Service, provider bridge.Provider, queries dbstore.Queries, cfg config.Config) *memprovider.Registry {
 	registry := memprovider.NewRegistry(log)
 	fileStore := storefs.New(log, provider)
-	var fileRuntime any
-	if provider != nil {
-		fileRuntime = membuiltin.NewFileRuntime(fileStore)
-	}
 	registry.RegisterFactory(string(memprovider.ProviderBuiltin), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
-		runtime, err := membuiltin.NewBuiltinRuntimeFromConfig(log, providerConfig, fileRuntime, fileStore, queries, cfg)
+		runtime, err := membuiltin.NewBuiltinRuntimeFromConfig(log, providerConfig, fileStore, queries, cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -294,7 +297,7 @@ func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatSe
 	registry.RegisterFactory(string(memprovider.ProviderOpenViking), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
 		return memopenviking.NewOpenVikingProvider(log, providerConfig)
 	})
-	defaultProvider := membuiltin.NewBuiltinProvider(log, fileRuntime, chatService, accountService)
+	defaultProvider := membuiltin.NewBuiltinProvider(log, membuiltin.NewFileRuntime(fileStore), chatService, accountService)
 	defaultProvider.SetLLM(llm)
 	registry.Register("__builtin_default__", defaultProvider)
 	return registry
@@ -604,8 +607,10 @@ func provideChannelLifecycleService(channelStore *channel.Store, channelManager 
 	return channel.NewLifecycle(channelStore, channelManager)
 }
 
-func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service) *handlers.ContainerdHandler {
-	return handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, botService, accountService, policyService)
+func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, pluginService *pluginspkg.Service) *handlers.ContainerdHandler {
+	h := handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, botService, accountService, policyService)
+	h.SetPluginService(pluginService)
+	return h
 }
 
 func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, emailService *emailpkg.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, memoryProviderService *memprovider.Service, manager *workspace.Manager) *botbackup.Service {
@@ -715,11 +720,10 @@ func provideToolProviders(log *slog.Logger, channelManager *channel.Manager, reg
 	}
 }
 
-func provideMemoryHandler(log *slog.Logger, botService *bots.Service, accountService *accounts.Service, _ config.Config, provider bridge.Provider, memoryRegistry *memprovider.Registry, settingsService *settings.Service, _ *handlers.ContainerdHandler) *handlers.MemoryHandler {
+func provideMemoryHandler(log *slog.Logger, botService *bots.Service, accountService *accounts.Service, _ config.Config, memoryRegistry *memprovider.Registry, settingsService *settings.Service, _ *handlers.ContainerdHandler) *handlers.MemoryHandler {
 	h := handlers.NewMemoryHandler(log, botService, accountService)
 	h.SetMemoryRegistry(memoryRegistry)
 	h.SetSettingsService(settingsService)
-	h.SetMCPClientProvider(provider)
 	return h
 }
 
@@ -1234,14 +1238,6 @@ func (c *lazyLLMClient) Compact(ctx context.Context, req memprovider.CompactRequ
 		return memprovider.CompactResponse{}, err
 	}
 	return client.Compact(ctx, req)
-}
-
-func (c *lazyLLMClient) DetectLanguage(ctx context.Context, text string) (string, error) {
-	client, err := c.resolve(ctx, "")
-	if err != nil {
-		return "", err
-	}
-	return client.DetectLanguage(ctx, text)
 }
 
 func (c *lazyLLMClient) resolve(ctx context.Context, botID string) (memprovider.LLM, error) {

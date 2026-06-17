@@ -3,7 +3,7 @@ import type { TabsListProps } from 'reka-ui'
 import type { HTMLAttributes } from 'vue'
 import { reactiveOmit } from '@vueuse/core'
 import { TabsList } from 'reka-ui'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 import { cn } from '#/lib/utils'
 
 const props = defineProps<TabsListProps & {
@@ -23,6 +23,11 @@ const delegatedProps = reactiveOmit(props, 'class', 'variant')
 // reka list nesting / offsetParent quirks.
 const root = ref<HTMLElement>()
 const box = ref({ left: 0, top: 0, width: 0, height: 0, ready: false })
+// Motion is a short user-switch transaction, not a durable component mode.
+// KeepAlive can preserve this component while its page is hidden, so a permanent
+// "animate after first click" flag would let entrance/layout re-measurements ride
+// the underline transition. Arm it only around an actual pointer/keyboard switch.
+const animate = ref(false)
 // press-shrink fires ONLY when the already-active pill is pressed (inactive
 // items shrink via their own ::before:active, matching SegmentedControl).
 const pressed = ref(false)
@@ -47,6 +52,32 @@ function sync() {
   }
 }
 
+// Navigation / activation keys that reka turns into a tab switch — arm the slide
+// before the data-state change lands.
+const NAV_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'Enter', ' '])
+let animationTimer: ReturnType<typeof setTimeout> | undefined
+function armAnimation() {
+  animate.value = true
+  if (animationTimer)
+    clearTimeout(animationTimer)
+  animationTimer = setTimeout(() => {
+    animate.value = false
+    animationTimer = undefined
+  }, 320)
+}
+function resetMotion() {
+  if (animationTimer) {
+    clearTimeout(animationTimer)
+    animationTimer = undefined
+  }
+  animate.value = false
+  pressed.value = false
+}
+function onKeydown(e: KeyboardEvent) {
+  if (NAV_KEYS.has(e.key))
+    armAnimation()
+}
+
 let ro: ResizeObserver | undefined
 let mo: MutationObserver | undefined
 onMounted(() => {
@@ -62,10 +93,20 @@ onMounted(() => {
 onBeforeUnmount(() => {
   ro?.disconnect()
   mo?.disconnect()
+  resetMotion()
 })
+onActivated(() => {
+  resetMotion()
+  nextTick(sync)
+})
+onDeactivated(resetMotion)
 
 function onDown(e: PointerEvent) {
   const trigger = (e.target as HTMLElement | null)?.closest('[data-slot=tabs-trigger]')
+  // A pointerdown on the list is the user about to switch — arm the slide before
+  // the resulting data-state change moves the bar.
+  if (trigger)
+    armAnimation()
   pressed.value = trigger?.getAttribute('data-state') === 'active'
 }
 function clearPress() {
@@ -73,7 +114,7 @@ function clearPress() {
 }
 
 const rootClass = computed(() => variant.value === 'pill'
-  ? 'relative inline-flex w-fit items-center rounded-[var(--radius)] bg-[color:var(--segment-track)] p-0.5'
+  ? 'relative inline-flex w-fit items-center rounded-lg bg-[color:var(--segment-track)] p-0.5'
   : 'relative inline-flex w-full items-center border-b border-border')
 
 const listClass = computed(() => variant.value === 'pill'
@@ -108,10 +149,11 @@ const indicatorStyle = computed(() => {
     @pointerup="clearPress"
     @pointerleave="clearPress"
     @pointercancel="clearPress"
+    @keydown="onKeydown"
   >
     <span
       aria-hidden="true"
-      :class="variant === 'pill' ? 'tabs-thumb' : 'tabs-underline'"
+      :class="[variant === 'pill' ? 'tabs-thumb' : 'tabs-underline', { 'tabs-indicator-static': !animate }]"
       :style="indicatorStyle"
     />
     <TabsList
@@ -125,6 +167,12 @@ const indicatorStyle = computed(() => {
 </template>
 
 <style scoped>
+/* First-paint guard: until the active item is measured, the indicator must land
+ * in place rather than animate from the {left:0,width:0} default. */
+.tabs-indicator-static {
+  transition: none !important;
+}
+
 /* ── underline: a sliding bar pinned to the bottom rail ───────────────────── */
 .tabs-underline {
   position: absolute;

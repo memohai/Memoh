@@ -1,12 +1,5 @@
 <template>
   <div class="flex flex-col h-full min-w-0">
-    <!-- Quick Actions: a named cluster of "things you can start" (New Chat,
-         Scheduled Jobs), mirroring the Recents block below (actions you take vs
-         history you return to). The label does double duty: it names the group
-         AND its top padding is what separates this cluster from the nav above —
-         without it New Chat butts against the nav, and since the active Chat pill
-         bleeds left on hover the whole top reads as one smudged block. Same
-         label style/size as Recents so the two section headings match. -->
     <div class="shrink-0 px-2 pb-0.5 pt-2">
       <span class="pl-[11px] text-xs font-[550] tracking-[-0.02em] text-muted-foreground/80">
         {{ t('chat.quickActions') }}
@@ -43,11 +36,53 @@
         {{ t('chat.botSettings') }}
       </Button>
     </div>
+
+    <!--
+    EXPERIMENT (archived): no Quick Actions heading — New Chat / Bot Settings ride
+    straight up under the Chat nav tab, icons aligned in the same x=19 column.
+    The core problem: the Chat tab uses font-[550] and looks like a "header" for
+    whatever is below it, but New Chat / Bot Settings are ACTIONS not sub-items,
+    so they need visual separation. Reducing font weight to font-normal made the
+    actions look too faint; keeping font-medium made them read as peers of "Chat".
+    There's no in-between that works without the Quick Actions heading providing
+    the structural break. Keeping this block here for future reference.
+
+    <div class="flex flex-col px-2 pb-0.5 pt-0.5 shrink-0">
+      <Button variant="ghost" block
+        class="h-9 justify-start gap-[11px] px-[11px] text-control font-normal text-foreground/92 dark:text-[color:oklch(0.86_0_0)]"
+        :disabled="!currentBotId" @click="handleNewSession">
+        <span class="relative size-[18px] shrink-0">
+          <span class="absolute -inset-[3px] flex items-center justify-center rounded-full
+                       bg-[color:oklch(0.93_0_0)] text-[color:oklch(0.2_0_0)]
+                       dark:bg-[color:oklch(0.27_0_0)] dark:text-[color:oklch(0.82_0_0)]">
+            <Plus :stroke-width="2.2" class="size-[14px]" />
+          </span>
+        </span>
+        {{ t('chat.newSession') }}
+      </Button>
+      <Button variant="ghost" block
+        class="h-9 justify-start gap-3 px-[11px] text-control font-normal text-foreground/92 dark:text-[color:oklch(0.86_0_0)]"
+        :disabled="!currentBotId" @click="handleBotSettings">
+        <Settings2 :stroke-width="1.75" class="size-[17px]" />
+        {{ t('chat.botSettings') }}
+      </Button>
+    </div>
+
+    Color calibration for the disc (dark mode):
+      sidebar bg oklch(0.185) ≈ rgb 37
+      disc target: rgb 37 + Δ18 ≈ rgb 55 → oklch(0.27)   (ref app had Δ18 between bg and disc)
+      plus: oklch(0.82) off-white (ref app ≈ rgb 194 → oklch 0.80)
+    Light mode: disc oklch(0.93) one step off white, plus oklch(0.2) near-black.
+    Icon alignment: 18px outer layout box (= same slot as all other icons) with
+    the 24px visual disc via absolute -inset-[3px]; icon center x=28, text x=48.
+    -->
+
     <Recents class="flex-1 min-h-0" />
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -61,7 +96,11 @@ const { t } = useI18n()
 const router = useRouter()
 const chatStore = useChatStore()
 const workspaceTabs = useWorkspaceTabsStore()
-const { currentBotId } = storeToRefs(chatStore)
+const { currentBotId, bots } = storeToRefs(chatStore)
+
+const currentBot = computed(() =>
+  bots.value.find(bot => bot.id === currentBotId.value) ?? null,
+)
 
 function handleNewSession() {
   if (!currentBotId.value) return
@@ -73,6 +112,6 @@ function handleNewSession() {
 function handleBotSettings() {
   const botId = currentBotId.value
   if (!botId) return
-  void router.push({ name: 'bot-detail', params: { botName: botId } })
+  void router.push({ name: 'bot-detail', params: { botName: currentBot.value?.name ?? botId } })
 }
 </script>

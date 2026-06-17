@@ -42,7 +42,7 @@ export const menuViewportClass = 'flex flex-col gap-0.5 p-1.5'
 // shown by an indicator (check / dot), never by the row background. Components only
 // override the right gutter for an indicator (pr-8) or the left for an inset (pl-8).
 export const menuItemClass
-  = 'relative flex w-full cursor-default items-center gap-2 rounded-menu px-2.5 py-1.5 text-control outline-hidden select-none transition-colors duration-[60ms] data-[highlighted]:bg-[color:var(--ui-selected)] data-[disabled]:pointer-events-none data-[disabled]:opacity-40 [&_svg:not([class*=\'text-\'])]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=\'size-\'])]:size-4'
+  = 'relative flex w-full cursor-default items-center gap-2 rounded-menu px-2.5 py-1.5 text-control outline-hidden select-none transition-colors duration-[60ms] data-[highlighted]:bg-[color:var(--ui-selected)] data-[disabled]:pointer-events-none data-[disabled]:opacity-40 [&_svg:not([class*=text-])]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=size-])]:size-4'
 
 // Full-width hairline divider between menu rows — item-width (no negative margin),
 // dimmed so it separates without competing with the rows.

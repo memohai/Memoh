@@ -1,6 +1,6 @@
 <template>
   <div
-    class="group/tab relative flex h-full min-w-0 items-center pl-4 pr-4"
+    class="group/tab relative z-[1] flex h-full min-w-0 items-center pl-4 pr-4"
     @auxclick.middle.prevent="close"
   >
     <!-- Active state is signalled by text color (and the CSS top-accent on the
@@ -11,8 +11,13 @@
     <!-- leading-[1.4], not leading-none: with truncate (overflow:hidden) a line box
          equal to the font size clips descenders (g/y) and CJK bottoms; a slightly
          taller line box gives them room without affecting the centered baseline. -->
+    <!-- Sized by its own content (no flex-grow): the tab is natural width (see
+         dockview-theme.css), so a flex-basis:0 grow span made the tab's intrinsic
+         width ambiguous and it jumped on title changes. min-w-0 still lets it shrink
+         + truncate once the tab hits its max-width cap. Centred in the chip (not
+         lifted to the bar centre), so it rides a touch below the top headroom. -->
     <span
-      class="min-w-0 flex-1 truncate text-[12.5px] leading-[1.4] transition-colors"
+      class="min-w-0 truncate text-[12.5px] leading-[1.4] transition-colors"
       :class="isActive ? 'text-foreground' : 'text-muted-foreground'"
     >{{ title }}</span>
     <!-- Unsaved-changes dot: sits in the close slot AT REST so the affordance never
@@ -21,7 +26,7 @@
          it instead of colliding with the glyph. -->
     <div
       v-if="isDirty"
-      class="close-fade pointer-events-none absolute inset-y-0 right-0 flex items-center pl-6 pr-2 opacity-100 transition-opacity duration-150 ease-out group-hover/tab:opacity-0"
+      class="close-fade pointer-events-none absolute right-0 flex items-center pl-6 pr-2 opacity-100 group-hover/tab:opacity-0"
     >
       <span class="flex size-5 items-center justify-center">
         <span
@@ -37,11 +42,15 @@
          button. The fade layer is click-through; only the button takes pointer
          events. Keyboard focus reveals it for a11y; middle-click closes without it. -->
     <div
-      class="close-fade pointer-events-none absolute inset-y-0 right-0 flex items-center pl-6 pr-2 opacity-0 transition-opacity duration-150 ease-out group-hover/tab:opacity-100 focus-within:opacity-100"
+      class="close-fade pointer-events-none absolute right-0 flex items-center pl-6 pr-2 opacity-0 group-hover/tab:opacity-100 focus-within:opacity-100"
     >
+      <!-- No own hover fill: the close affordance is read through the left→right
+           fade (which already paints the chip's hover surface) plus the icon
+           darkening on hover. A second darker square behind the glyph just
+           double-stacks chrome, so the ghost hover background is suppressed. -->
       <Button
         variant="ghost"
-        class="pointer-events-auto size-5 shrink-0 rounded-sm p-0 text-muted-foreground [--btn-ghost-hover:color-mix(in_oklab,var(--foreground)_13%,transparent)] hover:text-foreground"
+        class="pointer-events-auto size-5 shrink-0 rounded-full p-0 text-muted-foreground [--btn-ghost-hover:transparent] hover:text-foreground"
         :aria-label="t('chat.tabMenu.close')"
         @pointerdown.stop
         @mousedown.stop
@@ -115,7 +124,27 @@ onBeforeUnmount(() => {
  * (the editor surface for the active tab, the hover tint otherwise), so the fade is
  * seamless with whatever the chip is wearing. Absolutely positioned, so painting it
  * never reserves a slot or resizes the chip. */
+/* Two stacked fades so the blot is ALWAYS opaque. --tab-hover-bg is the surface a
+ * tab wears (opaque --surface-editor when active; the TRANSLUCENT hover overlay
+ * otherwise), so painting it alone left the title legible under the close button on
+ * a hovered tab. Layering the opaque --surface-chrome base UNDER that overlay
+ * composites to exactly what the tab shows — chrome+overlay on hover, plain editor
+ * when active (the opaque top layer hides the base) — but never see-through. */
 .close-fade {
-  background: linear-gradient(to right, transparent, var(--tab-hover-bg, var(--surface-editor)) 1rem);
+  top: var(--tab-hover-fill-top, 0);
+  bottom: 0;
+  /* Instant hide when hover ends — avoids white/grey close-fade lingering on a tab
+   * you just switched away from. Fade-in only while the tab group is hovered. */
+  transition: none;
+  background:
+    linear-gradient(to right, transparent, var(--tab-hover-bg, var(--surface-editor)) 1rem),
+    linear-gradient(to right, transparent, var(--surface-chrome) 1rem);
+  /* Full-height. Only the TOP-right corner is rounded, to the crown radius. */
+  border-top-right-radius: var(--radius-sm);
+}
+
+.group\/tab:hover .close-fade,
+.group\/tab:focus-within .close-fade {
+  transition: opacity var(--tab-hover-duration, 150ms) ease-out;
 }
 </style>

@@ -85,8 +85,7 @@ Memoh/
 │   │   ├── prompts/            #     Prompt templates (Markdown, with partials prefixed by _)
 │   │   │   ├── system_chat.md, system_discuss.md, system_heartbeat.md, system_schedule.md, system_subagent.md
 │   │   │   ├── _tools.md, _memory.md, _contacts.md, _schedule_task.md, _subagent.md
-│   │   │   ├── heartbeat.md, schedule.md
-│   │   │   └── memory_extract.md, memory_update.md
+│   │   │   └── heartbeat.md, schedule.md
 │   │   └── tools/              #     Tool providers (ToolProvider interface)
 │   │       ├── message.go      #       Send message tool
 │   │       ├── contacts.go     #       Contact list tool

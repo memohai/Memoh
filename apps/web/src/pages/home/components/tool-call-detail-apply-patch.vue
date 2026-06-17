@@ -17,7 +17,7 @@
         class="flex items-center gap-2 font-mono"
       >
         <span
-          class="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-sm border px-1 text-[10px] font-semibold leading-none"
+          class="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-sm border px-1 text-caption font-semibold leading-none"
           :class="operationClass(file.operation)"
         >
           {{ operationLabel(file.operation) }}

@@ -35,7 +35,7 @@ import {
   writeCliPrefs,
   type CliStatus,
 } from './cli-integration'
-import { acceleratorForCommand, appKeyboardCommands } from '../shared/keyboard-commands'
+import { acceleratorForCommand, appKeyboardCommands, type AppKeyboardCommand } from '../shared/keyboard-commands'
 import { dispatchFocusedWindowCommand } from './window-commands'
 
 type DesktopRuntimeMode = 'local' | 'remote'
@@ -610,7 +610,11 @@ function createChatWindow(): BrowserWindow {
   })
   attachWindowStatePersistence(window, 'chat', CHAT_DEFAULTS)
 
-  window.on('ready-to-show', () => {
+  // ready-to-show fires on initial load AND every subsequent full reload
+  // (including HMR-triggered full page reloads during AI-assisted editing).
+  // Guarding with `once` ensures the window shows only on the first load —
+  // it will never steal focus again on subsequent reloads.
+  window.once('ready-to-show', () => {
     restoreWindowMaximized(window, 'chat')
     window.show()
   })
@@ -650,12 +654,23 @@ function dispatchSettingsNavigate(window: BrowserWindow, target: string): void {
   window.webContents.send('settings:navigate', target)
 }
 
-// Derive the native Close accelerator from the shared binding table. The
-// focused window decides whether the command closes an app tab or the window.
+// Renderer-supplied menu accelerators take precedence over the static table.
+// Keyed by command id (kebab-case AppKeyboardCommand). The renderer pushes the
+// current set whenever the Keyboard Shortcuts store mutates, and we rebuild
+// the menu so the native item's label and matching combo stay in sync.
+const menuAcceleratorOverrides = new Map<string, string>()
+
+function effectiveMenuAccelerator(command: AppKeyboardCommand): string | undefined {
+  return menuAcceleratorOverrides.get(command) ?? acceleratorForCommand(command)
+}
+
+// Derive the native Close accelerator from the renderer-pushed overrides,
+// falling back to the shared binding table's default. The focused window
+// decides whether the command closes an app tab or the window.
 function closeWindowMenuItem(): MenuItemConstructorOptions {
   return {
     label: 'Close',
-    accelerator: acceleratorForCommand(appKeyboardCommands.closeCurrentWorkspaceTab),
+    accelerator: effectiveMenuAccelerator(appKeyboardCommands.closeCurrentWorkspaceTab),
     click: () => {
       dispatchFocusedWindowCommand(
         chatWindow,
@@ -952,6 +967,29 @@ app.whenReady().then(async () => {
   ipcMain.handle('desktop:cli-uninstall', async () => {
     await uninstallCli()
     return detectCliState()
+  })
+  ipcMain.handle('desktop:set-menu-accelerators', async (_event, rawPayload: unknown) => {
+    if (!rawPayload || typeof rawPayload !== 'object') return
+    const incoming = new Map<string, string>()
+    for (const [command, accelerator] of Object.entries(rawPayload as Record<string, unknown>)) {
+      if (typeof accelerator !== 'string' || !accelerator) continue
+      incoming.set(command, accelerator)
+    }
+    let changed = incoming.size !== menuAcceleratorOverrides.size
+    if (!changed) {
+      for (const [command, accelerator] of incoming) {
+        if (menuAcceleratorOverrides.get(command) !== accelerator) {
+          changed = true
+          break
+        }
+      }
+    }
+    if (!changed) return
+    menuAcceleratorOverrides.clear()
+    for (const [command, accelerator] of incoming) {
+      menuAcceleratorOverrides.set(command, accelerator)
+    }
+    await rebuildAppMenu()
   })
 
   // Cross-window Pinia Colada query-cache invalidation. Each renderer owns

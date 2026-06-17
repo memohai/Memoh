@@ -156,6 +156,7 @@ import {
   Database,
   Globe,
   Info,
+  Keyboard,
   Mail,
   MousePointer2,
   Store,
@@ -298,6 +299,7 @@ const integrationsNavItems = computed<NavItem[]>(() => filterItems([
 
 const accountNavItems = computed<NavItem[]>(() => filterItems([
   { title: t('sidebar.appearance'), name: 'appearance', icon: AppearanceIcon },
+  { title: t('sidebar.keyboard'), name: 'keyboard', icon: Keyboard },
   { title: t('sidebar.profile'), name: 'profile', icon: CircleUserRound },
   { title: t('sidebar.about'), name: 'about', icon: Info },
 ]))

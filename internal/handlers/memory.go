@@ -12,9 +12,7 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	storefs "github.com/memohai/memoh/internal/memory/storefs"
 	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 // MemoryHandler handles memory CRUD operations scoped by bot.
@@ -23,7 +21,6 @@ type MemoryHandler struct {
 	accountService  *accounts.Service
 	settingsService *settings.Service
 	memoryRegistry  *memprovider.Registry
-	memoryStore     *storefs.Service
 	logger          *slog.Logger
 }
 
@@ -113,15 +110,6 @@ func (h *MemoryHandler) resolveProvider(ctx context.Context, botID string) (memp
 		return nil, nil
 	}
 	return p, nil
-}
-
-// SetMCPClientProvider sets the gRPC client provider for filesystem persistence.
-func (h *MemoryHandler) SetMCPClientProvider(p bridge.Provider) {
-	if p == nil {
-		h.memoryStore = nil
-		return
-	}
-	h.memoryStore = storefs.New(h.logger, p)
 }
 
 // Register registers chat-level memory routes.

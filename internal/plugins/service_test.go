@@ -1,10 +1,68 @@
 package plugins
 
 import (
+	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/memohai/memoh/internal/mcp"
 )
+
+func TestManifestInstallCommandsAcceptStringOrList(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{
+			name: "string",
+			raw:  `{"id":"plugin","name":"Plugin","author":{"name":"Memoh"},"install":" sh scripts/install.sh "}`,
+			want: []string{"sh scripts/install.sh"},
+		},
+		{
+			name: "list",
+			raw:  `{"id":"plugin","name":"Plugin","author":{"name":"Memoh"},"install":[" sh scripts/a.sh ","","python3 scripts/b.py"]}`,
+			want: []string{"sh scripts/a.sh", "python3 scripts/b.py"},
+		},
+		{
+			name: "null",
+			raw:  `{"id":"plugin","name":"Plugin","author":{"name":"Memoh"},"install":null}`,
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var manifest Manifest
+			if err := json.Unmarshal([]byte(tt.raw), &manifest); err != nil {
+				t.Fatalf("json.Unmarshal: %v", err)
+			}
+			if !reflect.DeepEqual([]string(manifest.Install), tt.want) {
+				t.Fatalf("install = %#v, want %#v", []string(manifest.Install), tt.want)
+			}
+		})
+	}
+}
+
+func TestManifestInstallCommandsRejectInvalidShape(t *testing.T) {
+	var manifest Manifest
+	if err := json.Unmarshal([]byte(`{"id":"plugin","install":7}`), &manifest); err == nil {
+		t.Fatal("expected invalid install shape to fail")
+	}
+}
+
+func TestNormalizeManifestTrimsInstallCommands(t *testing.T) {
+	manifest := NormalizeManifest(Manifest{
+		ID:      "Plugin.ID",
+		Name:    " Plugin ",
+		Install: InstallCommands{" sh scripts/install.sh ", "", "python3 scripts/setup.py"},
+	})
+
+	want := []string{"sh scripts/install.sh", "python3 scripts/setup.py"}
+	if !reflect.DeepEqual([]string(manifest.Install), want) {
+		t.Fatalf("install = %#v, want %#v", []string(manifest.Install), want)
+	}
+}
 
 func TestMissingRequiredVariablesTreatsSelfTemplateDefaultAsMissing(t *testing.T) {
 	manifest := Manifest{

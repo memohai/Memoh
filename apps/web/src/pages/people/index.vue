@@ -1,18 +1,14 @@
 <template>
-  <section class="mx-auto max-w-3xl px-6 pt-10 pb-12">
-    <header class="mb-6 flex items-center justify-between gap-4 px-2">
-      <h1 class="text-lg font-semibold">
-        {{ t('people.title') }}
-      </h1>
+  <PageShell :title="t('people.title')">
+    <template #actions>
       <Button
         type="button"
-        size="sm"
         @click="openCreateDialog"
       >
         <UserPlus class="size-4" />
         {{ t('people.newMember') }}
       </Button>
-    </header>
+    </template>
 
     <div class="space-y-8">
       <Alert
@@ -331,7 +327,7 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  </section>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
@@ -372,6 +368,7 @@ import {
   TableRow,
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import PageShell from '@/components/page-shell/index.vue'
 import { useUserStore } from '@/store/user'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'

@@ -32,8 +32,8 @@ const props = withDefaults(defineProps<{
       // :not(:has(>textarea)) so it never fights the auto-height of a textarea
       // group (otherwise [data-size] out-specifies :has() and re-pins the height).
       '[&:not(:has(>textarea))]:data-[size=sm]:h-8 [&:not(:has(>textarea))]:data-[size=default]:h-9 [&:not(:has(>textarea))]:data-[size=lg]:h-10',
-      'data-[size=sm]:[&_[data-slot=input-group-control]]:text-[12px]',
-      'data-[size=lg]:[&_[data-slot=input-group-control]]:text-[14px]',
+      'data-[size=sm]:[&_[data-slot=input-group-control]]:text-body',
+      'data-[size=lg]:[&_[data-slot=input-group-control]]:text-control',
 
       // Variants based on alignment.
       'has-[>[data-align=inline-start]]:[&>input]:pl-2',

@@ -125,20 +125,16 @@
       <div class="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-sidebar to-transparent" />
     </div>
 
-    <!-- Settings, pinned to the bottom. Shares the icon column with New Chat /
-         session rows: container px-2 + button px-[11px] → the hover pill sits 8px
-         off the left AND right walls, matching every list row above. Bottom pad is
-         pb-2 (8px) too, so the pill clears all three outer walls by the same 8px
-         (it was pb-1.5/6px, which read as the button crowding the bottom edge).
-         Top stays pt-1.5 — the list above fades into it, so it isn't a hard wall.
-         Hover uses the stronger ACTIVE fill (sidebar-accent) so it registers
-         against the non-white sidebar background. No top border — the list above
-         fades into it instead. -->
-    <div class="shrink-0 px-2 pt-1.5 pb-2">
+    <!-- Settings, pinned to the bottom. Shares the same action-row geometry as
+         New Session / Bot Settings above: container px-2 + button px-[11px]
+         aligns the icon column, while h-9 + gap-[9px] keeps the footer action
+         from reading like a separate control family. No top border — the list
+         above fades into it instead. -->
+    <div class="shrink-0 px-2 pt-1 pb-2">
       <Button
         variant="ghost"
         block
-        class="h-9 justify-start gap-2 rounded-[9px] px-[11px] text-control text-muted-foreground [--btn-ghost-hover:var(--sidebar-accent)] hover:text-foreground"
+        class="h-9 justify-start gap-[9px] px-[11px] text-control font-medium text-foreground/92 dark:text-[color:oklch(0.86_0_0)]"
         :class="isSettingsActive && 'bg-sidebar-accent text-foreground!'"
         :aria-label="t('sidebar.settings')"
         @click="router.push('/settings')"

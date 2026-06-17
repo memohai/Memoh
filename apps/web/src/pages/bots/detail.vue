@@ -34,7 +34,7 @@
                 @click="goBack()"
               >
                 <ChevronLeft class="size-3.5 shrink-0" />
-                <span>{{ backLabel }}</span>
+                <span class="min-w-0 truncate">{{ backLabel }}</span>
               </NavItem>
 
               <!-- Identity floats as a card — same recipe as the bots-list persona
@@ -209,7 +209,13 @@
           <template #sidebar-footer />
 
           <template #detail>
-            <div class="absolute inset-0 overflow-y-auto bg-background">
+            <!-- scrollbar-gutter: stable reserves the scrollbar track on every tab,
+                 scrolling or not. Without it a long tab (e.g. General) shows a
+                 scrollbar that narrows the pane, so PageShell's mx-auto column
+                 re-centers and the title + card edges shift vs a short tab (e.g.
+                 Platforms). Reserving the gutter keeps the content width — and thus
+                 every tab's alignment — identical. -->
+            <div class="absolute inset-0 overflow-y-auto bg-background [scrollbar-gutter:stable]">
               <!-- Top drag strip over the detail pane only (mac desktop), so the
                    window stays draggable beside the sidebar. No fill/border — it
                    shares --background with the content, so the sidebar's vertical
@@ -292,6 +298,7 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { useBackAffordance } from '@/composables/useBackOr'
+import { registerBotBreadcrumbName } from '@/lib/bot-breadcrumb'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
@@ -518,12 +525,15 @@ const isEditingBotName = ref(false)
 const botNameDraft = ref('')
 const editNameInputRef = ref<InstanceType<typeof Input> | null>(null)
 
-// Replace breadcrumb bot id with display name when available.
+// Register the display name so the breadcrumb / back label reads a real name
+// instead of the raw `bot-<uuid>` route param (keyed by both the URL identifier
+// and the canonical id so either navigation form resolves).
 watch(bot, (val) => {
   if (!val) return
   const currentName = (val.display_name || '').trim()
   if (currentName) {
-    route.meta.breadcrumb = () => currentName
+    registerBotBreadcrumbName(routeIdentifier.value, currentName)
+    registerBotBreadcrumbName(val.id, currentName)
   }
   if (!isEditingBotName.value) {
     botNameDraft.value = val.display_name || ''
@@ -647,7 +657,8 @@ async function handleConfirmBotName() {
       id: bot.value.id as string,
       display_name: nextName,
     })
-    route.meta.breadcrumb = () => nextName
+    registerBotBreadcrumbName(routeIdentifier.value, nextName)
+    registerBotBreadcrumbName(bot.value.id, nextName)
     isEditingBotName.value = false
     toast.success(t('bots.renameSuccess'))
   } catch (error) {

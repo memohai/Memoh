@@ -184,6 +184,11 @@ prose use `variant="link"`; for a control-sized action use a normal `<Button>`.
   - primary/default: `scale: 0.96` on press (block/full-width instead flips fill
     to `--btn-primary-active` instantly).
   - secondary/outline & ghost: `scale: 0.974` on press.
+  - **Full-width (`data-block`) ghost** drops the scale too — a uniform scale on a
+    wide button lurches sideways (each edge travels ~width × 2.6%), so it reads the
+    press through a deeper fill (`--ui-pressed`, 40ms) instead, mirroring the
+    primary-block rule. Covers the sidebar's wide New Chat / Bot Settings / Settings
+    rows.
 - **Buttons** reuse `<Button>` — including small in-field icon buttons (clear /
   reveal / steppers) via `variant="ghost"` / `InputGroupButton`. Do **not**
   hand-roll an icon-hover background; that is the canonical bug.
@@ -327,6 +332,30 @@ dark. Tooltip carries no border at all — its solid fill is its own edge.
 - Icon-only buttons (no visible label) MUST carry an `aria-label` for the action.
 - Decorative / status icons use `--accent-{hue}` and are **state-constant** (color
   does not change on hover/select).
+
+## Scale with the font — rem on anything that touches text
+
+The root sets `font-size: var(--memoh-ui-font-size, 1rem)`, so the UI font-size control
+and browser zoom resize the whole UI **through rem**. A hardcoded `px` does NOT scale —
+so a px value on a property that gates text stops growing while the text around it
+grows (clipped controls, cramped rows, same-row controls that stop matching height).
+
+- **Anything that touches text is rem / a token, never px.** Font size = the `--text-*`
+  scale (`text-body` / `text-label` / `text-control` / …), never `text-[Npx]`.
+  Line-height = rem or unitless, never `leading-[Npx]`. Control height, padding, and the
+  gaps between text use the rem spacing scale (`h-9` / `p-4` / `gap-2`) or a rem
+  arbitrary value — never `h-[Npx]` / `p-[Npx]` / `gap-[Npx]` (≥5px).
+- **px is only for non-text decoration:** 1–4px hairlines / indicator bars, plus
+  `border-*` / `ring-*` / `outline-*` / `translate-*` / `inset` offsets, icon `size-*`,
+  and blur. Widths / caps (`w-*` / `max-h-*`) are a reflow concern, left to review.
+- **JS layout must track rem too.** A virtualizer `estimateSize`, a minimap row stride,
+  or a scroll-anchor offset hardcoded in px desyncs when the font scales — derive it
+  from the root font size or measure the element (`measureElement`).
+- **Enforced by the guard.** `scripts/check-ui-contract.mjs` (run by `mise run lint`)
+  HARD-fails text-coupled px across `packages/ui` **and** `apps/web`. Existing app-page
+  debt is grandfathered by `scripts/ui-px-baseline.json` — a ratchet: new px is blocked,
+  the baseline only shrinks. A genuine exception (e.g. a fixed chart-canvas height) opts
+  out with a `ui-allow-px` comment on the same line.
 
 ## Disabled
 

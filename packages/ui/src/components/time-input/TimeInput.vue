@@ -114,13 +114,13 @@ function onMinuteKeydown(e: KeyboardEvent) {
 }
 
 const containerClass = computed(() => props.size === 'sm'
-  ? 'h-8 px-2.5 text-[12px]'
-  : 'h-9 px-3 text-[13px]',
+  ? 'h-8 px-2.5 text-body'
+  : 'h-9 px-3 text-label',
 )
 
 const segmentClass = computed(() => props.size === 'sm'
-  ? 'w-[1.5rem] text-[12px]'
-  : 'w-[1.6rem] text-[13px]',
+  ? 'w-[1.5rem] text-body'
+  : 'w-[1.6rem] text-label',
 )
 </script>
 
@@ -154,7 +154,7 @@ const segmentClass = computed(() => props.size === 'sm'
     >
     <span
       class="select-none text-muted-foreground"
-      :class="props.size === 'sm' ? 'text-[12px]' : 'text-[13px]'"
+      :class="props.size === 'sm' ? 'text-body' : 'text-label'"
     >:</span>
     <input
       ref="minuteRef"

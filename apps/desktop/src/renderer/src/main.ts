@@ -7,14 +7,16 @@ import { createPinia } from 'pinia'
 import { PiniaColada, useQueryCache } from '@pinia/colada'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 
+import { watchEffect } from 'vue'
 import i18n from '@memohai/web/i18n'
 import { setupApiClient } from '@memohai/web/api-client'
 import { appKeyboardCommands, createKeyboardCommandRegistry, type AppKeyboardCommand } from '@memohai/web/lib/keyboard-commands'
-import { connectBrowserKeyboardShortcuts } from '@memohai/web/lib/browser-keyboard-shortcuts'
-import { keyboardBindings, selectDesktopKeydownBindings } from '@memohai/web/lib/keyboard-bindings'
+import { connectBrowserKeyboardShortcutsLive } from '@memohai/web/lib/browser-keyboard-shortcuts'
+import { selectDesktopKeydownBindings, toElectronAccelerator } from '@memohai/web/lib/keyboard-bindings'
 import { KEYBOARD_REGISTRY } from '@memohai/web/composables/useKeyboardCommand'
 import { registerWorkspaceTabCommands } from '@memohai/web/pages/home/commands/workspace-tab-commands'
 import { useWorkspaceTabsStore } from '@memohai/web/store/workspace-tabs'
+import { useKeyboardShortcutsStore } from '@memohai/web/store/keyboard-shortcuts'
 
 import '@fontsource-variable/inter'
 import 'markstream-vue/index.css'
@@ -61,7 +63,38 @@ async function bootstrap() {
   keyboardCommands.connect(window.api.window, closeWindowWhenNoTab)
   // keydown-delivered commands (e.g. save) share the exact web matcher; menu
   // commands are excluded here so they never double-fire with the accelerator.
-  connectBrowserKeyboardShortcuts(keyboardCommands, selectDesktopKeydownBindings(keyboardBindings))
+  // Reading bindings from the store on every keydown lets user overrides from
+  // the Keyboard Shortcuts settings page take effect immediately.
+  const shortcutsStore = useKeyboardShortcutsStore(pinia)
+  connectBrowserKeyboardShortcutsLive(
+    keyboardCommands,
+    () => selectDesktopKeydownBindings(shortcutsStore.effectiveBindings),
+  )
+  // Push the latest accelerators for menu-delivered commands to main so the
+  // native menu items stay in sync with whatever the user has bound — without
+  // this, the menu's accelerator label and matching combo would freeze at the
+  // table's default.
+  watchEffect(() => {
+    const overrides: Record<string, string> = {}
+    for (const binding of shortcutsStore.effectiveBindings) {
+      if (binding.desktop !== 'menu') continue
+      overrides[binding.command] = toElectronAccelerator(binding)
+    }
+    // Surface IPC failures: a silent reject would leave the native menu frozen
+    // at the table's default accelerator until the next mutation, which the
+    // user has no way to diagnose.
+    window.api.desktop.setMenuAccelerators(overrides).catch((error) => {
+      console.warn('failed to push menu accelerators to main', error)
+    })
+  })
+
+  keyboardCommands.register(appKeyboardCommands.openSettings, () => {
+    // Already inside settings → no-op. Pushing /settings would redirect to
+    // /settings/bots and yank the user off whatever settings page they were on.
+    if (router.currentRoute.value.path.startsWith('/settings')) return true
+    void router.push('/settings').catch(() => {})
+    return true
+  })
 
   const app = createApp(App)
     .use(pinia)

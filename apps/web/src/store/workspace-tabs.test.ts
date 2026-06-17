@@ -41,19 +41,54 @@ function createFakeDock() {
   const panels: FakePanel[] = []
   let activePanel: FakePanel | null = null
   const noopDisposable = () => ({ dispose: () => {} })
+  const groupElement = {
+    classList: {
+      toggle: vi.fn(),
+    },
+  } as unknown as HTMLElement
+  const group = {
+    id: 'group-1',
+    element: groupElement,
+    api: {
+      getHeaderPosition: () => 'top' as const,
+      setHeaderPosition: vi.fn(),
+    },
+    get panels() {
+      return panels
+    },
+    get activePanel() {
+      return activePanel
+    },
+  }
 
   const dock = {
     panels,
+    groups: [group],
     get activePanel() {
       return activePanel
     },
     onDidActivePanelChange: noopDisposable,
     onDidLayoutChange: noopDisposable,
     onDidRemovePanel: noopDisposable,
+    onDidAddPanel: noopDisposable,
+    onDidMovePanel: noopDisposable,
+    onWillShowOverlay: noopDisposable,
+    onWillDrop: noopDisposable,
+    onWillDragPanel: noopDisposable,
+    onWillDragGroup: noopDisposable,
+    getGroup(id: string) {
+      return id === 'group-1' ? group : undefined
+    },
     getPanel(id: string) {
       return panels.find((p) => p.id === id)
     },
-    addPanel(options: { id: string; component: string; title?: string; params?: Record<string, unknown> }) {
+    addPanel(options: {
+      id: string
+      component: string
+      title?: string
+      params?: Record<string, unknown>
+      position?: { referenceGroup: string; direction: string }
+    }) {
       const panel: FakePanel = {
         id: options.id,
         component: options.component,
@@ -148,6 +183,19 @@ describe('workspace layout store', () => {
     expect(dock.getPanel('terminal:3')).toBeTruthy()
   })
 
+  it('duplicates the active file into a split pane with a unique panel id', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openFile('/data/notes/todo.md')
+    store.splitGroup('group-1', 'right')
+
+    expect(dock.getPanel('file:/data/notes/todo.md')).toBeTruthy()
+    expect(dock.getPanel('file:/data/notes/todo.md~2')).toBeTruthy()
+    expect(dock.panels).toHaveLength(2)
+  })
+
   it('focuses the singleton chat panel instead of duplicating it', () => {
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()
@@ -162,6 +210,23 @@ describe('workspace layout store', () => {
 
     store.setChatTitle('Renamed')
     expect(dock.getPanel('chat')?.title).toBe('Renamed')
+  })
+
+  it('splits the chat panel into a duplicate chat pane', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openChat('Session')
+    store.splitGroup('group-1', 'right')
+
+    expect(dock.getPanel('chat')).toBeTruthy()
+    expect(dock.getPanel('chat~2')).toBeTruthy()
+    expect(dock.getPanel('chat~2')?.component).toBe('chat')
+
+    store.setChatTitle('Renamed')
+    expect(dock.getPanel('chat')?.title).toBe('Renamed')
+    expect(dock.getPanel('chat~2')?.title).toBe('Renamed')
   })
 
   it('opens multiple schedule panels and focuses an existing schedule', () => {

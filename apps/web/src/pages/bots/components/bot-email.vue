@@ -1,33 +1,29 @@
 <template>
-  <div class="max-w-2xl mx-auto pb-6 space-y-5">
-    <!-- Top Action Bar -->
-    <div class="flex items-center justify-between pb-4 border-b border-border/50">
-      <div class="space-y-1">
-        <h3 class="text-sm font-semibold text-foreground">
-          {{ $t('bots.email.title') }}
-        </h3>
-        <p class="text-[11px] text-muted-foreground">
-          {{ $t('bots.email.subtitle') }}
-        </p>
-      </div>
-    </div>
-
-    <!-- Standardized Card Container -->
-    <div class="space-y-4">
-      <!-- Bindings section -->
-      <div class="space-y-4 rounded-md border border-border bg-background p-4 shadow-none">
-        <div class="flex items-center justify-between space-y-0.5">
-          <h4 class="text-xs font-medium text-foreground">
-            {{ $t('bots.email.bindings') }}
-          </h4>
+  <PageShell
+    variant="tab"
+    :title="$t('bots.email.title')"
+    :description="$t('bots.email.subtitle')"
+  >
+    <div class="space-y-8">
+      <SettingsSection :title="$t('bots.email.bindings')">
+        <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3">
+          <div class="min-w-0">
+            <div class="text-sm font-medium text-foreground">
+              {{ $t('bots.email.bindings') }}
+            </div>
+            <p class="mt-0.5 text-xs text-muted-foreground">
+              {{ $t('bots.email.bindingsDescription') }}
+            </p>
+          </div>
           <Popover>
             <PopoverTrigger as-child>
               <Button
                 size="sm"
+                variant="outline"
                 :disabled="!unboundProviders.length"
-                class="h-8 text-xs shadow-none"
+                class="shrink-0"
               >
-                <Plus class="mr-1.5 size-3.5" />
+                <Plus class="size-4" />
                 {{ $t('bots.email.addBinding') }}
               </Button>
             </PopoverTrigger>
@@ -39,7 +35,7 @@
                 v-for="p in unboundProviders"
                 :key="p.id"
                 type="button"
-                class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs transition-colors hover:bg-accent"
+                class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-foreground transition-colors hover:bg-accent"
                 :disabled="addingBinding"
                 @click="handleAddBinding(p)"
               >
@@ -48,175 +44,161 @@
                   class="size-3"
                 />
                 {{ p.name }}
-                <span class="text-xs text-muted-foreground ml-auto">{{ p.provider }}</span>
+                <span class="ml-auto text-xs text-muted-foreground">{{ p.provider }}</span>
               </button>
             </PopoverContent>
           </Popover>
         </div>
 
-        <div class="pt-1">
-          <div
-            v-if="bindingsLoading"
-            class="flex items-center justify-center text-xs text-muted-foreground py-4 border rounded-md border-dashed"
-          >
-            <Spinner class="inline-block mr-2 align-text-bottom size-3" />
-            <span>{{ $t('common.loading') }}</span>
-          </div>
+        <div
+          v-if="bindingsLoading"
+          class="mx-4 flex min-h-[3.75rem] items-center gap-3 border-b border-border py-3 text-sm text-muted-foreground last:border-b-0"
+        >
+          <Spinner class="size-4" />
+          <span>{{ $t('common.loading') }}</span>
+        </div>
 
-          <div
-            v-else-if="!bindings?.length"
-            class="text-xs text-muted-foreground py-4 text-center border rounded-md border-dashed"
-          >
-            {{ $t('bots.email.noBindings') }}
-          </div>
+        <Empty
+          v-else-if="!bindings?.length"
+          class="py-12"
+        >
+          <EmptyHeader>
+            <EmptyTitle>{{ $t('bots.email.noBindings') }}</EmptyTitle>
+            <EmptyDescription>{{ $t('bots.email.noBindingsDescription') }}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
 
+        <template v-else>
           <div
-            v-else
-            class="space-y-2"
+            v-for="binding in bindings"
+            :key="binding.id"
+            class="mx-4 border-b border-border py-4 last:border-b-0"
           >
-            <div
-              v-for="binding in bindings"
-              :key="binding.id"
-              class="rounded-md border p-3 bg-muted/20 shadow-none"
-            >
-              <div class="flex items-center justify-between">
-                <div class="min-w-0">
-                  <p class="font-medium text-xs text-foreground">
-                    {{ providerNameMap[binding.email_provider_id!] || binding.email_provider_id }}
-                  </p>
-                  <p
-                    v-if="binding.email_address"
-                    class="text-[11px] text-muted-foreground mt-0.5"
-                  >
-                    {{ binding.email_address }}
-                  </p>
-                </div>
-                <ConfirmPopover
-                  :message="$t('bots.email.unbindConfirm')"
-                  :loading="deletingId === binding.id"
-                  @confirm="handleDeleteBinding(binding.id!)"
+            <div class="flex items-center justify-between gap-4">
+              <div class="min-w-0">
+                <p class="text-sm font-medium text-foreground">
+                  {{ providerNameMap[binding.email_provider_id!] || binding.email_provider_id }}
+                </p>
+                <p
+                  v-if="binding.email_address"
+                  class="mt-0.5 text-xs text-muted-foreground"
                 >
-                  <template #trigger>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      class="h-7 px-3 text-xs shadow-none"
-                    >
-                      {{ $t('bots.email.unbind') }}
-                    </Button>
-                  </template>
-                </ConfirmPopover>
+                  {{ binding.email_address }}
+                </p>
               </div>
-              <Separator class="my-3" />
-              <div class="flex gap-6 text-xs">
-                <label class="flex items-center gap-2 cursor-pointer text-foreground">
-                  <Switch
-                    :model-value="binding.can_read"
-                    @update:model-value="(v) => handleTogglePerm(binding, 'can_read', !!v)"
-                  />
-                  <span>{{ $t('bots.email.canRead') }}</span>
-                </label>
-                <label class="flex items-center gap-2 cursor-pointer text-foreground">
-                  <Switch
-                    :model-value="binding.can_write"
-                    @update:model-value="(v) => handleTogglePerm(binding, 'can_write', !!v)"
-                  />
-                  <span>{{ $t('bots.email.canWrite') }}</span>
-                </label>
-              </div>
+              <ConfirmPopover
+                :message="$t('bots.email.unbindConfirm')"
+                :loading="deletingId === binding.id"
+                @confirm="handleDeleteBinding(binding.id!)"
+              >
+                <template #trigger>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    class="shrink-0"
+                  >
+                    {{ $t('bots.email.unbind') }}
+                  </Button>
+                </template>
+              </ConfirmPopover>
+            </div>
+            <div class="mt-4 flex flex-wrap gap-6 text-xs">
+              <label class="flex cursor-pointer items-center gap-2 text-foreground">
+                <Switch
+                  :model-value="binding.can_read"
+                  @update:model-value="(v) => handleTogglePerm(binding, 'can_read', !!v)"
+                />
+                <span>{{ $t('bots.email.canRead') }}</span>
+              </label>
+              <label class="flex cursor-pointer items-center gap-2 text-foreground">
+                <Switch
+                  :model-value="binding.can_write"
+                  @update:model-value="(v) => handleTogglePerm(binding, 'can_write', !!v)"
+                />
+                <span>{{ $t('bots.email.canWrite') }}</span>
+              </label>
             </div>
           </div>
-        </div>
-      </div>
+        </template>
+      </SettingsSection>
 
-      <!-- Outbox (audit) -->
-      <div class="space-y-4 rounded-md border border-border bg-background p-4 shadow-none">
-        <div class="space-y-0.5">
-          <h4 class="text-xs font-medium text-foreground">
-            {{ $t('bots.email.outbox') }}
-          </h4>
-        </div>
-
-        <div class="pt-1">
-          <div
-            v-if="outboxLoading"
-            class="flex items-center justify-center text-xs text-muted-foreground py-4 border rounded-md border-dashed"
-          >
-            <Spinner class="inline-block mr-2 align-text-bottom size-3" />
-            <span>{{ $t('common.loading') }}</span>
-          </div>
-          
-          <div
-            v-else-if="!outboxItems?.length"
-            class="text-xs text-muted-foreground py-4 text-center border rounded-md border-dashed"
-          >
-            {{ $t('bots.email.noEmails') }}
-          </div>
-
-          <div
-            v-else
-            class="overflow-x-auto rounded-md border shadow-none"
-          >
-            <table class="w-full text-xs">
-              <thead class="bg-muted/30 text-left">
-                <tr>
-                  <th class="px-3 py-2 font-medium text-foreground">
-                    {{ $t('bots.email.to') }}
-                  </th>
-                  <th class="px-3 py-2 font-medium text-foreground">
-                    {{ $t('bots.email.subject') }}
-                  </th>
-                  <th class="px-3 py-2 font-medium text-foreground">
-                    {{ $t('bots.email.status') }}
-                  </th>
-                  <th class="px-3 py-2 font-medium text-foreground">
-                    {{ $t('bots.email.sentAt') }}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="item in outboxItems"
-                  :key="item.id"
-                  class="border-t"
-                >
-                  <td class="px-3 py-2 text-[11px] text-foreground">
-                    {{ Array.isArray(item.to) ? item.to.join(', ') : item.to }}
-                  </td>
-                  <td class="px-3 py-2 text-[11px] text-foreground">
-                    {{ item.subject }}
-                  </td>
-                  <td class="px-3 py-2">
-                    <Badge
-                      :variant="item.status === 'failed' ? 'destructive' : 'secondary'"
-                      class="text-[10px]"
-                    >
-                      {{ item.status }}
-                    </Badge>
-                  </td>
-                  <td class="px-3 py-2 text-[11px] text-muted-foreground whitespace-nowrap">
-                    {{ formatDate(item.sent_at) }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+      <section class="space-y-2.5">
+        <h2 class="px-2 text-[13px] font-medium text-muted-foreground">
+          {{ $t('bots.email.outbox') }}
+        </h2>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{{ $t('bots.email.to') }}</TableHead>
+              <TableHead>{{ $t('bots.email.subject') }}</TableHead>
+              <TableHead>{{ $t('bots.email.status') }}</TableHead>
+              <TableHead>{{ $t('bots.email.sentAt') }}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableEmpty
+              v-if="outboxLoading"
+              :colspan="4"
+            >
+              <div class="flex items-center gap-2">
+                <Spinner class="size-4" />
+                {{ $t('common.loading') }}
+              </div>
+            </TableEmpty>
+            <TableEmpty
+              v-else-if="!outboxItems?.length"
+              :colspan="4"
+            >
+              {{ $t('bots.email.noEmails') }}
+            </TableEmpty>
+            <template v-else>
+              <TableRow
+                v-for="item in outboxItems"
+                :key="item.id"
+              >
+                <TableCell class="text-foreground">
+                  {{ Array.isArray(item.to) ? item.to.join(', ') : item.to }}
+                </TableCell>
+                <TableCell class="text-foreground">
+                  {{ item.subject }}
+                </TableCell>
+                <TableCell>
+                  <Badge :variant="item.status === 'failed' ? 'destructive' : 'secondary'">
+                    {{ item.status }}
+                  </Badge>
+                </TableCell>
+                <TableCell class="whitespace-nowrap text-muted-foreground">
+                  {{ formatDate(item.sent_at) }}
+                </TableCell>
+              </TableRow>
+            </template>
+          </TableBody>
+        </Table>
+      </section>
     </div>
-  </div>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
 import {
   Badge,
   Button,
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
   Popover,
   PopoverContent,
   PopoverTrigger,
-  Separator,
   Spinner,
   Switch,
+  Table,
+  TableBody,
+  TableCell,
+  TableEmpty,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import { Plus } from 'lucide-vue-next'
@@ -234,6 +216,8 @@ import {
 } from '@memohai/sdk'
 import type { EmailProviderResponse, EmailBindingResponse, EmailOutboxItemResponse } from '@memohai/sdk'
 import { formatDateTime } from '@/utils/date-time'
+import SettingsSection from '@/components/settings/section.vue'
+import PageShell from '@/components/page-shell/index.vue'
 
 const props = defineProps<{ botId: string }>()
 const { t } = useI18n()

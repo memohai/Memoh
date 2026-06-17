@@ -158,9 +158,10 @@ defineEmits<{
 const searchQuery = ref('')
 const currentPage = ref(1)
 
-// The search box only earns its place once the list is long enough to need it.
-// When it's shown, model rows align their text to the search placeholder.
-const searchVisible = computed(() => !!props.models && props.models.length > 5)
+// Always offer search once there are models, so the box never disappears for a
+// short list (which read as inconsistent between providers). When it's shown,
+// model rows align their text to the search placeholder.
+const searchVisible = computed(() => !!props.models && props.models.length > 0)
 
 const filteredModels = computed(() => {
   if (!props.models) return []

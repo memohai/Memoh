@@ -2,7 +2,7 @@
   <main
     class="w-screen h-screen flex flex-col items-center justify-center bg-background relative overflow-hidden p-6 pb-24"
   >
-    <div class="login-grid absolute inset-0 pointer-events-none" />
+    <DotMatrixBg class="login-dots absolute inset-0 pointer-events-none" />
 
     <div class="absolute top-6 left-6 flex items-center gap-2.5 z-10">
       <img
@@ -15,7 +15,7 @@
     </div>
 
     <section
-      class="relative z-10 w-full max-w-xs flex flex-col items-center gap-8 transition-all duration-[175ms] ease-out"
+      class="relative z-10 w-full max-w-[20.5rem] flex flex-col items-center gap-8 transition-all duration-[175ms] ease-out"
       :class="exiting ? 'scale-[0.88] opacity-0' : 'scale-100 opacity-100'"
     >
       <div class="flex flex-col items-center gap-3">
@@ -75,6 +75,7 @@ import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { postAuthLogin } from '@memohai/sdk'
 import LoadingButton from '@/components/loading-button/index.vue'
+import DotMatrixBg from './components/dot-matrix-bg.vue'
 import { submitLogin } from './login-submit'
 import { safeSessionSet } from '@/utils/safe-storage'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
@@ -118,17 +119,27 @@ const login = async () => {
 </script>
 
 <style scoped>
-.login-grid {
-  background-image:
-    linear-gradient(var(--border) 1px, transparent 1px),
-    linear-gradient(90deg, var(--border) 1px, transparent 1px);
-  background-size: 28px 28px;
-  opacity: 0.3;
+/* 极轻的四角渐隐:圆心略偏右下,使左上角(有 logo)衰减略多,其余角几乎不遮;
+ * 最深也仅到 ~82%,只是收一点点边角,不牺牲可见度 */
+.login-dots {
+  -webkit-mask-image: radial-gradient(ellipse 118% 118% at 58% 60%, #000 72%, rgba(0, 0, 0, 0.82) 100%);
+  mask-image: radial-gradient(ellipse 118% 118% at 58% 60%, #000 72%, rgba(0, 0, 0, 0.82) 100%);
 }
-
 
 form :deep([data-button]:active::before) {
   scale: 1 !important;
   transition: none !important;
+}
+
+/* 动画背景上:禁用态 opacity 会让点阵从按钮底下透出来 */
+form :deep([data-button]:is([data-variant="default"], [data-variant="primary"])) {
+  background-color: var(--btn-primary);
+}
+form :deep([data-button]:is([data-variant="default"], [data-variant="primary"]):disabled) {
+  opacity: 1;
+  cursor: not-allowed;
+}
+form :deep([data-button]:is([data-variant="default"], [data-variant="primary"]):disabled)::before {
+  background-color: var(--btn-primary-active);
 }
 </style>

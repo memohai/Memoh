@@ -4,54 +4,65 @@
       <PopoverTrigger as-child>
         <slot name="trigger" />
       </PopoverTrigger>
-      <PopoverContent class="w-80 p-0 overflow-hidden border-border shadow-xl">
-        <div class="p-4 space-y-3">
-          <div
-            v-if="title"
-            class="flex items-center gap-2 mb-1"
-          >
-            <div
+      <!-- Inherit the shared popover chrome (menu-shell radius, --border-menu
+           hairline, dropdown shadow, p-4) instead of overriding it — this is the
+           same surface as DropdownMenu / Select, so a confirm reads as part of
+           the one menu language. This is an anchored popover, NOT a modal dialog:
+           keep it compact (the question is allowed to wrap to ~2 lines) and keep
+           the inherited p-4 edge inset so text never touches the border. -->
+      <PopoverContent class="w-72 max-w-[calc(100vw-2rem)]">
+        <div class="space-y-3">
+          <!-- The core question is the strongest line in a confirm: it reads as a
+               title (text-sm / medium / foreground), never as muted caption text.
+               With only a message, the message *is* the question; pass a title too
+               and the message drops to the supporting line beneath it. -->
+          <div class="flex items-start gap-2">
+            <span
               v-if="$slots.icon"
-              class="shrink-0"
+              class="mt-0.5 shrink-0"
             >
               <slot name="icon" />
-            </div>
-            <h5 class="text-xs font-bold text-foreground">
-              {{ title }}
-            </h5>
+            </span>
+            <p class="min-w-0 text-sm font-medium text-foreground">
+              <template v-if="title">
+                {{ title }}
+              </template>
+              <slot v-else>
+                {{ message }}
+              </slot>
+            </p>
           </div>
-          
-          <div class="text-[11px] text-muted-foreground leading-relaxed">
-            <slot>
-              {{ message }}
-            </slot>
-          </div>
-        </div>
 
-        <div class="flex items-center justify-end gap-2 px-4 py-3 bg-muted/30 border-t border-border/50">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            class="h-8 text-[11px] font-medium"
-            @click="close"
+          <p
+            v-if="title && (message || !!$slots.default)"
+            class="text-xs leading-relaxed text-muted-foreground"
           >
-            {{ cancelText || $t('common.cancel') }}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            class="h-8 text-[11px] font-bold shadow-sm"
-            :variant="variant"
-            :disabled="loading"
-            @click="$emit('confirm'); close()"
-          >
-            <Spinner
-              v-if="loading"
-              class="size-3 mr-1"
-            />
-            {{ confirmText || $t('common.confirm') }}
-          </Button>
+            <slot>{{ message }}</slot>
+          </p>
+
+          <div class="flex items-center justify-end gap-2 pt-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              @click="close"
+            >
+              {{ cancelText || $t('common.cancel') }}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              :variant="variant"
+              :disabled="loading"
+              @click="$emit('confirm'); close()"
+            >
+              <Spinner
+                v-if="loading"
+                class="size-3.5"
+              />
+              {{ confirmText || $t('common.confirm') }}
+            </Button>
+          </div>
         </div>
       </PopoverContent>
     </template>
@@ -80,7 +91,7 @@ withDefaults(defineProps<{
   confirmText: '',
   cancelText: '',
   loading: false,
-  variant: 'default'
+  variant: 'default',
 })
 
 defineEmits<{

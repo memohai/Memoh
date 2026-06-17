@@ -13,12 +13,12 @@
           <span class="text-xs font-medium text-foreground truncate flex-1">{{ item.subject || t('chat.tools.detail.noSubject') }}</span>
           <span
             v-if="item.received_at"
-            class="text-[10px] text-muted-foreground shrink-0"
+            class="text-caption text-muted-foreground shrink-0"
           >{{ item.received_at }}</span>
         </div>
         <span
           v-if="item.from"
-          class="text-[10px] text-muted-foreground truncate"
+          class="text-caption text-muted-foreground truncate"
         >{{ item.from }}</span>
       </div>
     </div>

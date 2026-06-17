@@ -123,10 +123,14 @@ export default defineConfig(async ({ command }) => {
         },
       },
       optimizeDeps: {
+        // Only pre-bundle from the renderer entry — scanning all web pages
+        // forces esbuild to crawl Monaco/xterm/ECharts/Mermaid/etc. on every
+        // new import, which during AI-assisted editing triggers repeated
+        // full dev-server restarts and page reloads. Vite's scanner follows
+        // dynamic imports in the router, so page-level deps are still
+        // discovered without listing every page here.
         entries: [
           'src/renderer/src/main.ts',
-          '../web/src/main.ts',
-          '../web/src/pages/**/*.vue',
         ],
       },
       build: {
@@ -139,6 +143,9 @@ export default defineConfig(async ({ command }) => {
       server: {
         port,
         host,
+        hmr: {
+          overlay: false,
+        },
         proxy: {
           '/api': {
             target: baseUrl,

@@ -99,6 +99,12 @@ export const SETTINGS_ROUTE_SPECS: SettingsRouteSpec[] = [
     meta: { breadcrumb: i18nRef('sidebar.appearance') }
   },
   {
+    name: 'keyboard',
+    path: '/settings/keyboard',
+    loader: () => import('@memohai/web/pages/keyboard-shortcuts/index.vue'),
+    meta: { breadcrumb: i18nRef('sidebar.keyboard') }
+  },
+  {
     name: 'profile',
     path: '/settings/profile',
     loader: () => import('@memohai/web/pages/profile/index.vue'),

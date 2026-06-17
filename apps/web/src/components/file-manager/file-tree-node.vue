@@ -114,7 +114,7 @@ function onCheckbox(checked: boolean | 'indeterminate') {
     <ContextMenuTrigger as-child>
       <div
         ref="rowEl"
-        class="group/row flex h-[27px] cursor-pointer items-center mx-1 mb-px pl-1 pr-1 rounded-sm text-[13.5px] leading-[27px] tracking-normal font-[350] select-none [-webkit-font-smoothing:auto]"
+        class="group/row flex min-h-[1.6875rem] cursor-pointer items-center mx-1 mb-px pl-1 pr-1 rounded-sm text-[0.84375rem] tracking-normal font-[350] select-none [-webkit-font-smoothing:auto]"
         :class="isActive
           ? 'bg-sidebar-accent text-foreground'
           : 'text-foreground/80 hover:bg-[color:var(--sidebar-hover)]'"
@@ -184,7 +184,7 @@ function onCheckbox(checked: boolean | 'indeterminate') {
       <ContextMenuSeparator v-if="canWrite" />
       <ContextMenuItem
         v-if="canWrite"
-        class="text-destructive focus:text-destructive"
+        variant="destructive"
         @select="tree.requestDelete(entry)"
       >
         <Trash2 class="mr-2 size-3.5" />
@@ -197,7 +197,7 @@ function onCheckbox(checked: boolean | 'indeterminate') {
        browser can composite the animation layer correctly. -->
   <div
     v-if="entry.isDir && expanded && loading && children.length === 0"
-    class="flex h-[27px] items-center mx-1 mb-px pl-1 pr-1 text-[13.5px] leading-[27px] tracking-normal font-[350] text-muted-foreground [-webkit-font-smoothing:auto]"
+    class="flex min-h-[1.6875rem] items-center mx-1 mb-px pl-1 pr-1 text-[0.84375rem] tracking-normal font-[350] text-muted-foreground [-webkit-font-smoothing:auto]"
   >
     <span
       v-for="g in depth + 1"

@@ -2,9 +2,13 @@
   <SidebarProvider
     class="min-h-[initial]! absolute inset-0 "
     :default-open="true"
+    disable-default-shortcut
   >
+    <!-- Fixed width, never w-fit: the panel must not be sized by its content, or a
+         long back label / name would stretch the whole sidebar. Width is pinned per
+         breakpoint and inner text truncates inside it. -->
     <Sidebar
-      class="relative! **:[[role=navigation]]:relative! sidebar-container h-full! w-fit! min-w-48 lg:min-w-52 xl:min-w-60 max-w-72 border-0! [&_[data-sidebar=sidebar]]:bg-transparent!"
+      class="relative! **:[[role=navigation]]:relative! sidebar-container h-full! w-48! lg:w-52! xl:w-60! border-0! [&_[data-sidebar=sidebar]]:bg-transparent!"
     >
       <SidebarContent
         class="overflow-hidden h-full flex flex-col"

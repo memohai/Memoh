@@ -2112,13 +2112,6 @@ export type PluginsIcon = {
     url?: string;
 };
 
-export type PluginsInstallRequest = {
-    manifest?: PluginsManifest;
-    variables?: {
-        [key: string]: string;
-    };
-};
-
 export type PluginsInstallation = {
     bot_id?: string;
     config?: {
@@ -2169,6 +2162,7 @@ export type PluginsManifest = {
     homepage?: string;
     icon?: PluginsIcon;
     id?: string;
+    install?: Array<string>;
     mcps?: Array<PluginsMcpResource>;
     name?: string;
     schema_version?: string;
@@ -6813,47 +6807,6 @@ export type GetBotsByBotIdPluginsResponses = {
 };
 
 export type GetBotsByBotIdPluginsResponse = GetBotsByBotIdPluginsResponses[keyof GetBotsByBotIdPluginsResponses];
-
-export type PostBotsByBotIdPluginsData = {
-    /**
-     * Plugin install request
-     */
-    body: PluginsInstallRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/plugins';
-};
-
-export type PostBotsByBotIdPluginsErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PostBotsByBotIdPluginsError = PostBotsByBotIdPluginsErrors[keyof PostBotsByBotIdPluginsErrors];
-
-export type PostBotsByBotIdPluginsResponses = {
-    /**
-     * Created
-     */
-    201: PluginsInstallation;
-};
-
-export type PostBotsByBotIdPluginsResponse = PostBotsByBotIdPluginsResponses[keyof PostBotsByBotIdPluginsResponses];
 
 export type DeleteBotsByBotIdPluginsByIdData = {
     body?: never;

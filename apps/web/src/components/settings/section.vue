@@ -1,11 +1,17 @@
 <template>
   <section class="space-y-2.5">
-    <h2
-      v-if="title"
-      class="px-2 text-[13px] font-medium text-muted-foreground"
+    <div
+      v-if="title || $slots.actions"
+      class="flex min-h-7 items-center justify-between gap-4 px-2"
     >
-      {{ title }}
-    </h2>
+      <h2
+        v-if="title"
+        class="text-[13px] font-medium text-muted-foreground"
+      >
+        {{ title }}
+      </h2>
+      <slot name="actions" />
+    </div>
     <div class="overflow-hidden rounded-[var(--radius-menu-shell)] border border-border bg-card">
       <slot />
     </div>

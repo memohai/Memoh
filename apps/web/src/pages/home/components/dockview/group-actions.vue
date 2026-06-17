@@ -1,78 +1,32 @@
 <template>
-  <div class="flex h-full items-center gap-0.5 px-2">
-    <!-- Open Preview to the Side: shown only when this group's active tab is a
-         markdown/html file (VS Code's editor-title preview action). The slot is
-         RESERVED (kept at a fixed size-7 even when empty): the tab row flex-grows to
-         fill the strip, so a button that appears/disappears as you switch between a
-         previewable and a plain tab would change the actions width and jolt every
-         tab's width. A constant-width slot keeps that from happening. -->
-    <div class="flex size-7 items-center justify-center">
-      <Button
-        v-if="previewPath"
-        variant="ghost"
-        class="size-7 p-0 text-muted-foreground hover:text-foreground"
-        :title="t('chat.openPreviewToSide')"
-        :aria-label="t('chat.openPreviewToSide')"
-        @click="openPreviewToSide"
-      >
-        <Columns2 class="size-3.5" />
-      </Button>
-    </div>
-    <DropdownMenu v-if="hasAnyAction">
-      <DropdownMenuTrigger as-child>
-        <Button
-          variant="ghost"
-          class="size-7 p-0 text-muted-foreground hover:text-foreground"
-          :title="t('chat.tabBarToolkit.menu')"
-          :aria-label="t('chat.tabBarToolkit.menu')"
-        >
-          <Plus class="size-3.5" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem
-          v-if="canWorkspaceExec"
-          @select="store.openTerminal(props.params.group.id)"
-        >
-          <TerminalSquare class="mr-2 size-3.5" />
-          {{ t('chat.tabBarToolkit.newTerminal') }}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          v-if="canManage && !isLocalWorkspace"
-          @select="store.openBrowser(props.params.group.id)"
-        >
-          <Globe class="mr-2 size-3.5" />
-          {{ t('chat.tabBarToolkit.openBrowser') }}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          v-if="canManage && !isLocalWorkspace"
-          @select="store.openDisplay(props.params.group.id)"
-        >
-          <Monitor class="mr-2 size-3.5" />
-          {{ t('chat.tabBarToolkit.openDisplay') }}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+  <!-- Right actions hug their content at the strip's far right (the void grows to
+       fill — and accept drops — between the "+" cluster and here). Only the
+       "Open Preview to the Side" action lives here, and only when this group's
+       active tab is a markdown/html file (VS Code's editor-title preview action). -->
+  <div class="flex h-full items-center pr-2">
+    <Button
+      v-if="previewPath"
+      variant="ghost"
+      class="size-7 shrink-0 rounded-full p-0 text-muted-foreground hover:text-foreground"
+      :title="t('chat.openPreviewToSide')"
+      :aria-label="t('chat.openPreviewToSide')"
+      @click="openPreviewToSide"
+    >
+      <Columns2 class="size-3.5" />
+    </Button>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { Columns2, Globe, Monitor, Plus, TerminalSquare } from 'lucide-vue-next'
-import {
-  Button,
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from '@memohai/ui'
+import { Columns2 } from 'lucide-vue-next'
+import { Button } from '@memohai/ui'
 import type { DockviewApi, DockviewGroupPanelApi, IDockviewGroupPanel } from 'dockview-vue'
-import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import { useChatStore } from '@/store/chat-list'
+import { storeToRefs } from 'pinia'
 import { isHtmlFile, isMarkdownFile } from '@/components/file-manager/utils'
-import { isLocalWorkspaceBot } from '@/utils/bot-workspace'
 import { hasBotPermission } from '@/utils/bot-permissions'
 
 const props = defineProps<{
@@ -91,14 +45,8 @@ const { currentBotId, bots } = storeToRefs(chatStore)
 const currentBot = computed(() =>
   bots.value.find(bot => bot.id === currentBotId.value) ?? null,
 )
-const currentPermissions = computed(() => currentBot.value?.current_user_permissions ?? [])
-const canWorkspaceRead = computed(() => hasBotPermission(currentPermissions.value, 'workspace_read'))
-const canWorkspaceExec = computed(() => hasBotPermission(currentPermissions.value, 'workspace_exec'))
-const canManage = computed(() => hasBotPermission(currentPermissions.value, 'manage'))
-const isLocalWorkspace = computed(() => isLocalWorkspaceBot(currentBot.value?.metadata))
-
-const hasAnyAction = computed(() =>
-  canWorkspaceExec.value || (canManage.value && !isLocalWorkspace.value),
+const canWorkspaceRead = computed(() =>
+  hasBotPermission(currentBot.value?.current_user_permissions ?? [], 'workspace_read'),
 )
 
 // Track THIS group's active tab (not the globally active panel) so the preview

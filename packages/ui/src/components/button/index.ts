@@ -4,7 +4,7 @@ import { cva } from 'class-variance-authority'
 export { default as Button } from './Button.vue'
 
 export const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-control font-[450] transition-all disabled:pointer-events-none disabled:opacity-40 data-[loading]:opacity-100 [&_svg]:pointer-events-none [&_svg:not([class*=\'size-\'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer',
+  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-control font-[450] transition-all disabled:pointer-events-none disabled:opacity-40 data-[loading]:opacity-100 [&_svg]:pointer-events-none [&_svg:not([class*=size-])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer',
   {
     variants: {
       variant: {
@@ -44,8 +44,10 @@ export const buttonVariants = cva(
         primary: 'text-background',
         // BRAND = the scheme brand color. This used to be `primary`; it's now an
         // explicit variant for the rare brand CTA (e.g. chat Send) per the
-        // brand-scarcity rule. Migrate brand call sites to variant="brand".
-        brand: 'bg-brand text-brand-foreground hover:bg-brand-hover',
+        // brand-scarcity rule. Fill + hover/press live on a ::before shell in
+        // style.css (data-variant="brand"), mirroring primary/ghost, so the press
+        // scales the fill while the glyph stays put.
+        brand: 'text-brand-foreground',
       },
       size: {
         default: 'h-9 px-4 py-2 has-[>svg]:px-3',
@@ -60,7 +62,7 @@ export const buttonVariants = cva(
         // in-field / 12 text & badge), so the glyph sits one notch under the cap height
         // and reads quietly instead of as a chunky control icon. rounded-sm (6px) is
         // the compact-chip radius (NOT a control's rounded-md, NOT an invented
-        // rounded-xs). Horizontal padding stays tight (px-1.5); vertical is py-[5px] —
+        // rounded-xs). Horizontal padding stays tight (px-1.5); vertical is py-[0.3125rem] (≈5px) —
         // a hair more than py-1 so the ghost hover/press chip breathes ever so slightly
         // above/below the text without ballooning into a tall pill. leading-none is
         // REQUIRED: text-control otherwise drags in a 20px line-height that inflates
@@ -70,7 +72,7 @@ export const buttonVariants = cva(
         // makes the box stable everywhere. Pairs with variant="ghost" to get "clickable
         // text with a hover chip" (see <TextButton>); the ghost ::before hover/press
         // chrome from style.css applies unchanged.
-        text: 'h-auto gap-1.5 rounded-sm px-1.5 py-[5px] leading-none [&_svg:not([class*=size-])]:size-3',
+        text: 'h-auto gap-1.5 rounded-sm px-1.5 py-[0.3125rem] leading-none [&_svg:not([class*=size-])]:size-3',
       },
     },
     defaultVariants: {
