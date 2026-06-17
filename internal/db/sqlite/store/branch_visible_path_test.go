@@ -40,7 +40,7 @@ func TestSQLiteSessionBranchVisiblePath(t *testing.T) {
 	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_session_branches (id, session_id, created_at, updated_at) VALUES (?, ?, ?, ?)`, rootBranchID, sessionID, "2026-01-01 00:00:00", "2026-01-01 00:00:00"); err != nil {
 		t.Fatalf("insert root branch: %v", err)
 	}
-	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_session_branches (id, session_id, parent_branch_id, fork_from_message_id, fork_from_seq, fork_from_turn_id, fork_from_turn_seq, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, forkBranchID, sessionID, rootBranchID, assistant1ID, 2, rootTurn1ID, 1, "2026-01-01 00:10:00", "2026-01-01 00:10:00"); err != nil {
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_session_branches (id, session_id, parent_branch_id, fork_from_message_id, fork_from_seq, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, forkBranchID, sessionID, rootBranchID, assistant1ID, 2, "2026-01-01 00:10:00", "2026-01-01 00:10:00"); err != nil {
 		t.Fatalf("insert fork branch: %v", err)
 	}
 	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_session_branches (id, session_id, parent_branch_id, fork_from_message_id, fork_from_seq, fork_from_turn_id, fork_from_turn_seq, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, secondForkBranchID, sessionID, rootBranchID, assistant2ID, 4, rootTurn2ID, 2, "2026-01-01 00:20:00", "2026-01-01 00:20:00"); err != nil {
@@ -149,56 +149,6 @@ INSERT INTO bot_history_messages (
 	assertTurnSeqs(t, turnRows, []int64{1, 2, 1, 1})
 }
 
-func TestSQLiteSessionBranchVisiblePathFallsBackToForkMessageSeq(t *testing.T) {
-	ctx := context.Background()
-	conn := openBranchVisibleTestDB(t)
-	defer func() { _ = conn.Close() }()
-
-	botID := "00000000-0000-0000-0000-000000009001"
-	sessionID := "00000000-0000-0000-0000-000000009002"
-	rootBranchID := "00000000-0000-0000-0000-000000009010"
-	forkBranchID := "00000000-0000-0000-0000-000000009011"
-	rootTurn1ID := "00000000-0000-0000-0000-000000009101"
-	rootTurn2ID := "00000000-0000-0000-0000-000000009102"
-	forkTurnID := "00000000-0000-0000-0000-000000009103"
-	user1ID := "00000000-0000-0000-0000-000000009201"
-	assistant1ID := "00000000-0000-0000-0000-000000009202"
-	user2ID := "00000000-0000-0000-0000-000000009203"
-	assistant2ID := "00000000-0000-0000-0000-000000009204"
-	forkUserID := "00000000-0000-0000-0000-000000009301"
-	forkAssistantID := "00000000-0000-0000-0000-000000009302"
-
-	execAll(t, conn, `
-INSERT INTO bot_sessions (id, active_branch_id) VALUES ('`+sessionID+`', '`+forkBranchID+`');
-INSERT INTO bot_session_branches (id, session_id, created_at, updated_at) VALUES ('`+rootBranchID+`', '`+sessionID+`', '2026-01-01 00:00:00', '2026-01-01 00:00:00');
-INSERT INTO bot_session_branches (id, session_id, parent_branch_id, fork_from_message_id, fork_from_seq, created_at, updated_at)
-VALUES ('`+forkBranchID+`', '`+sessionID+`', '`+rootBranchID+`', '`+assistant1ID+`', 2, '2026-01-01 00:10:00', '2026-01-01 00:10:00');
-INSERT INTO bot_history_turns (id, session_id, branch_id, turn_seq, request_message_id, final_assistant_message_id, status, created_at, updated_at, completed_at)
-VALUES
-  ('`+rootTurn1ID+`', '`+sessionID+`', '`+rootBranchID+`', 1, '`+user1ID+`', '`+assistant1ID+`', 'completed', '2026-01-01 00:01:00', '2026-01-01 00:02:00', '2026-01-01 00:02:00'),
-  ('`+rootTurn2ID+`', '`+sessionID+`', '`+rootBranchID+`', 2, '`+user2ID+`', '`+assistant2ID+`', 'completed', '2026-01-01 00:03:00', '2026-01-01 00:04:00', '2026-01-01 00:04:00'),
-  ('`+forkTurnID+`', '`+sessionID+`', '`+forkBranchID+`', 1, '`+forkUserID+`', '`+forkAssistantID+`', 'completed', '2026-01-01 00:11:00', '2026-01-01 00:12:00', '2026-01-01 00:12:00');
-INSERT INTO bot_history_messages (id, bot_id, session_id, branch_id, branch_seq, turn_id, turn_message_seq, role, content, metadata, created_at)
-VALUES
-  ('`+user1ID+`', '`+botID+`', '`+sessionID+`', '`+rootBranchID+`', 1, '`+rootTurn1ID+`', 1, 'user', '{"content":"u1"}', '{}', '2026-01-01 00:01:00'),
-  ('`+assistant1ID+`', '`+botID+`', '`+sessionID+`', '`+rootBranchID+`', 2, '`+rootTurn1ID+`', 2, 'assistant', '{"content":"a1"}', '{}', '2026-01-01 00:02:00'),
-  ('`+user2ID+`', '`+botID+`', '`+sessionID+`', '`+rootBranchID+`', 3, '`+rootTurn2ID+`', 1, 'user', '{"content":"u2"}', '{}', '2026-01-01 00:03:00'),
-  ('`+assistant2ID+`', '`+botID+`', '`+sessionID+`', '`+rootBranchID+`', 4, '`+rootTurn2ID+`', 2, 'assistant', '{"content":"a2"}', '{}', '2026-01-01 00:04:00'),
-  ('`+forkUserID+`', '`+botID+`', '`+sessionID+`', '`+forkBranchID+`', 1, '`+forkTurnID+`', 1, 'user', '{"content":"fu"}', '{}', '2026-01-01 00:11:00'),
-  ('`+forkAssistantID+`', '`+botID+`', '`+sessionID+`', '`+forkBranchID+`', 2, '`+forkTurnID+`', 2, 'assistant', '{"content":"fa"}', '{}', '2026-01-01 00:12:00');
-`)
-
-	store, err := New(conn)
-	if err != nil {
-		t.Fatalf("new store: %v", err)
-	}
-	rows, err := NewQueries(store).ListMessagesBySession(ctx, mustUUID(t, sessionID))
-	if err != nil {
-		t.Fatalf("list active path: %v", err)
-	}
-	assertMessageIDs(t, rows, []string{user1ID, assistant1ID, forkUserID, forkAssistantID})
-}
-
 func TestSQLiteSessionBranchVisiblePathIncludesWholeForkBoundaryTurn(t *testing.T) {
 	ctx := context.Background()
 	conn := openBranchVisibleTestDB(t)
@@ -248,31 +198,8 @@ VALUES
 
 func TestSQLiteListSessionBranchesScansTurnForkColumns(t *testing.T) {
 	ctx := context.Background()
-	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	conn := openBranchVisibleTestDB(t)
 	defer func() { _ = conn.Close() }()
-
-	execAll(t, conn, `
-CREATE TABLE bot_sessions (
-  id TEXT PRIMARY KEY,
-  active_branch_id TEXT
-);
-CREATE TABLE bot_session_branches (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
-  parent_branch_id TEXT REFERENCES bot_session_branches(id) ON DELETE SET NULL,
-  fork_from_message_id TEXT,
-  fork_from_seq INTEGER,
-  fork_from_turn_id TEXT,
-  fork_from_turn_seq INTEGER,
-  title TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-`)
-	createBranchVisibleMessagesView(t, conn)
 
 	sessionID := "00000000-0000-0000-0000-000000004001"
 	rootBranchID := "00000000-0000-0000-0000-000000004010"
