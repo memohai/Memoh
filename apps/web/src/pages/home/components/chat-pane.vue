@@ -175,7 +175,7 @@
         class="pointer-events-none absolute z-30"
         :class="isWelcome
           ? 'inset-0 flex flex-col items-center justify-start pt-[38dvh]'
-          : 'inset-x-0 bottom-0 pt-2 pb-7'"
+          : 'inset-x-0 bottom-0 pt-2 pb-8'"
       >
         <!-- Opaque backdrop, bottom-anchored, rising only to the box's widest point
              (its vertical centre). The box is solid and sits above the messages, so
@@ -379,8 +379,8 @@
                 <span class="min-w-0 break-words">{{ composerError }}</span>
               </div>
               <!--
-              Compact uses a CONCRETE 24px radius (= half the compact height:
-              button 32px + py-2 ×2 = 48px), so a short composer still reads as a
+              Compact uses a CONCRETE 26px radius (= half the compact height:
+              button 36px + py-2 ×2 = 52px), so a short composer still reads as a
               perfect pill — but, unlike rounded-full (9999px), the value can be
               animated. Multiline shrinks the corners to 20px; transitioning
               between two concrete radii interpolates smoothly, whereas animating
@@ -392,7 +392,7 @@
                 data-slot="input-group"
                 role="group"
                 class="chat-composer-edge relative flex w-full flex-wrap items-center gap-1 bg-surface-composer px-2.5 py-2 transition-[border-radius] motion-reduce:transition-none"
-                :class="(isMultiline || showAttachmentGrid) ? 'rounded-[20px]' : 'rounded-[24px]'"
+                :class="(isMultiline || showAttachmentGrid) ? 'rounded-[20px]' : 'rounded-[26px]'"
                 :style="{ transitionDuration: `${composerRadiusMs}ms`, transitionTimingFunction: composerRadiusEase }"
                 @click.self="focusTextarea"
               >
@@ -464,7 +464,7 @@
                       variant="ghost"
                       :disabled="!currentBotId || activeChatReadOnly || agentChanging"
                       :title="$t('chat.composerActions')"
-                      class="order-1 size-8 rounded-full text-foreground/85"
+                      class="order-1 size-9 rounded-full text-foreground"
                       :class="isMultiline ? 'self-end' : 'self-center'"
                       :aria-label="$t('chat.composerActions')"
                     >
@@ -472,10 +472,9 @@
                         v-if="agentChanging"
                         class="size-4 animate-spin"
                       />
-                      <!-- Plus glyph scaled with the button: 22 × 32/36 ≈ 20. -->
                       <Plus
                         v-else
-                        class="size-[20px]"
+                        class="size-[23px]"
                         :stroke-width="1.75"
                       />
                     </Button>
@@ -543,7 +542,7 @@
                         type="button"
                         variant="ghost"
                         :disabled="!currentBotId || activeChatReadOnly || acpModelChanging"
-                        class="composer-pill-press h-8 min-w-0 gap-1 rounded-full px-3 text-muted-foreground"
+                        class="composer-pill-press h-9 min-w-0 gap-1 rounded-full px-3 text-muted-foreground"
                         :style="{ maxWidth: `${modelTriggerMaxWidth}px` }"
                       >
                         <LoaderCircle
@@ -678,7 +677,7 @@
                     v-if="activeIsACP"
                     type="button"
                     variant="ghost"
-                    class="h-8 min-w-0 max-w-40 gap-1 rounded-full px-3 text-muted-foreground"
+                    class="h-9 min-w-0 max-w-40 gap-1 rounded-full px-3 text-muted-foreground"
                     disabled
                   >
                     <FolderOpen class="size-3.5 shrink-0" />
@@ -688,12 +687,12 @@
                     >{{ activeACPProjectLabel }}</span>
                   </Button>
 
-                  <div class="relative size-8 shrink-0">
+                  <div class="relative size-9 shrink-0">
                     <SessionInfoRing
                       v-if="!activeIsACP"
                       :override-model-id="overrideModelId"
                       :fallback-context-window="activeModel?.config?.context_window ?? null"
-                      class="absolute inset-0 size-8 transition-[opacity,scale] duration-200 ease-out motion-reduce:transition-none"
+                      class="absolute inset-0 size-9 transition-[opacity,scale] duration-200 ease-out motion-reduce:transition-none"
                       :class="(!showSend && !streaming) ? 'scale-100 opacity-100' : 'pointer-events-none scale-75 opacity-0'"
                     />
                     <Button
@@ -702,11 +701,10 @@
                       variant="brand"
                       :disabled="!showSend || !currentBotId || activeChatReadOnly"
                       aria-label="Send message"
-                      class="absolute inset-0 size-8 rounded-full transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
+                      class="absolute inset-0 size-9 rounded-full transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
                       :class="showSend ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
                       @click="handleSend"
                     >
-                      <!-- Arrow scaled with the button: 18 × 32/36 = 16. -->
                       <svg
                         viewBox="0 0 24 24"
                         fill="none"
@@ -714,7 +712,7 @@
                         stroke-width="2.25"
                         stroke-linecap="round"
                         stroke-linejoin="round"
-                        class="size-4"
+                        class="size-[18px]"
                         aria-hidden="true"
                       >
                         <path d="M12 19.5 V5" />
@@ -725,11 +723,11 @@
                       v-else
                       type="button"
                       variant="destructive"
-                      class="absolute inset-0 size-8 rounded-full"
+                      class="absolute inset-0 size-9 rounded-full"
                       aria-label="Stop generating response"
                       @click="chatStore.abort(mySessionId ?? undefined)"
                     >
-                      <LoaderCircle class="size-4 animate-spin" />
+                      <LoaderCircle class="size-[18px] animate-spin" />
                     </Button>
                   </div>
                 </div>
@@ -1565,8 +1563,8 @@ function syncMultiline() {
 // can't host input + capsule + send on one line, so we reflow to multiline.
 const MIN_INLINE_TEXTAREA = 120
 const MODEL_TRIGGER_MAX = 240 // max-w-60
-const PLUS_SLOT = 36 // size-8 (32) + gap-1 (4)
-const SEND_SLOT = 32 // send / ring size-8
+const PLUS_SLOT = 40 // size-9 (36) + gap-1 (4)
+const SEND_SLOT = 36 // send / ring size-9
 const MODEL_CHROME = 46 // px-3 ×2 + gap-1 + chevron + a little slack
 const CLUSTER_GAP = 8 // gap-2 between cluster children
 const ROW_GAPS = 8 // gap-1 on each flank of the textarea
@@ -1615,7 +1613,7 @@ const modelTriggerMaxWidth = computed(() => {
 // edge is hidden by the box itself (no visible seam, no fade). Above that line
 // the box's rounded top is left to float over whatever is there; below it the
 // fill hides the bottom-corner gaps and the strip beneath, so nothing bleeds out.
-const COMPOSER_MASK_BELOW = 28 // pb-7
+const COMPOSER_MASK_BELOW = 32 // pb-8
 const composerMaskHeight = computed(() => `${COMPOSER_MASK_BELOW + composerBoxHeight.value / 2}px`)
 
 let composerResizeObserver: ResizeObserver | null = null
