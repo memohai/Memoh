@@ -1,9 +1,5 @@
 <template>
-  <section class="mx-auto max-w-3xl px-6 pt-10 pb-12">
-    <h1 class="mb-8 px-2 text-lg font-semibold">
-      {{ $t('sidebar.profile') }}
-    </h1>
-
+  <PageShell :title="$t('sidebar.profile')">
     <div class="space-y-8">
       <!-- Skeleton loading state -->
       <template v-if="loadingInitial">
@@ -59,8 +55,9 @@
         <ConnectedAccountsSection />
 
         <!-- Card 3 · Session: user id + sign out (low-frequency, kept at the bottom).
-             The sign-out row is hidden in the desktop shell: it auto-logs in and
-             has no login screen to return to. -->
+             Sign-out is hidden only in the local desktop shell, which auto-logs
+             in via [admin] and has no login screen to return to. The remote
+             desktop shell and the browser keep it available. -->
         <SettingsSection :title="$t('settings.sessionSection')">
           <SettingsRow :label="$t('settings.userID')">
             <div class="flex items-center gap-1 text-sm text-muted-foreground">
@@ -84,7 +81,7 @@
           </SettingsRow>
 
           <SettingsRow
-            v-if="!desktopShell"
+            v-if="canSignOut"
             :label="$t('auth.logout')"
           >
             <ConfirmPopover
@@ -104,7 +101,7 @@
         </SettingsSection>
       </template>
     </div>
-  </section>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
@@ -115,6 +112,7 @@ import { useI18n } from 'vue-i18n'
 import { Button, Skeleton } from '@memohai/ui'
 import { Check, Copy } from 'lucide-vue-next'
 
+import PageShell from '@/components/page-shell/index.vue'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import TimezoneSelect from '@/components/timezone-select/index.vue'
 import SettingsRow from '@/components/settings/row.vue'
@@ -128,7 +126,7 @@ import type { AccountsAccount, AccountsUpdateProfileRequest, AccountsUpdatePassw
 import { useUserStore } from '@/store/user'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
-import { DesktopShellKey } from '@/lib/desktop-shell'
+import { DesktopShellKey, DesktopRuntimeModeKey } from '@/lib/desktop-shell'
 
 type UserAccount = AccountsAccount
 
@@ -137,9 +135,13 @@ const router = useRouter()
 const userStore = useUserStore()
 const { userInfo, exitLogin, patchUserInfo } = userStore
 
-// In the desktop shell the app auto-logs in and has no login screen, so the
-// sign-out action is hidden there. Connected Accounts stays available.
+// In the local desktop shell the app auto-logs in via [admin] and has no
+// login screen to return to, so sign-out is hidden there. The remote desktop
+// shell (and the browser) talks to a real server with user accounts, so
+// sign-out stays available. Connected Accounts stays available either way.
 const desktopShell = inject(DesktopShellKey, false)
+const desktopRuntimeMode = inject(DesktopRuntimeModeKey, 'local')
+const canSignOut = !desktopShell || desktopRuntimeMode === 'remote'
 
 // ---- User data ----
 const account = ref<UserAccount | null>(null)
