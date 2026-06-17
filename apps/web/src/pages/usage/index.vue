@@ -1,9 +1,5 @@
 <template>
-  <section class="mx-auto max-w-3xl px-6 pt-10 pb-12">
-    <h1 class="mb-6 px-2 text-lg font-semibold">
-      {{ $t('usage.title') }}
-    </h1>
-
+  <PageShell :title="$t('usage.title')">
     <div class="space-y-8">
       <SettingsSection :title="$t('usage.filters')">
         <div class="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2">
@@ -307,7 +303,7 @@
         </section>
       </template>
     </div>
-  </section>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
@@ -359,6 +355,7 @@ import ChartCard from './components/chart-card.vue'
 import type { HandlersDailyTokenUsage, HandlersModelTokenUsage, HandlersTokenUsageRecord } from '@memohai/sdk'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { formatDateTimeShort } from '@/utils/date-time'
+import PageShell from '@/components/page-shell/index.vue'
 
 use([CanvasRenderer, LineChart, BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent])
 
