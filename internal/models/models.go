@@ -523,12 +523,14 @@ func SelectMemoryModel(ctx context.Context, modelsService *Service, queries dbst
 
 // SelectMemoryModelForBot selects a chat model for memory operations.
 // If botID is provided, it attempts to use the bot's configured chat model first,
-// falling back to the first enabled chat model globally.
+// falling back to the first enabled chat model globally. Models or providers
+// that the user has disabled are skipped so memory extraction/decision/compact
+// never quietly run on a row hidden from the UI.
 func SelectMemoryModelForBot(ctx context.Context, modelsService *Service, queries dbstore.Queries, chatModelID string) (GetResponse, sqlc.Provider, error) {
 	// If a specific model is configured (e.g. bot's chat_model_id), try to use it.
 	if chatModelID = strings.TrimSpace(chatModelID); chatModelID != "" {
 		model, err := modelsService.GetByModelID(ctx, chatModelID)
-		if err == nil && model.Type == ModelTypeChat {
+		if err == nil && model.Type == ModelTypeChat && model.Enable {
 			provider, pErr := FetchProviderByID(ctx, queries, model.ProviderID)
 			if pErr == nil && provider.Enable {
 				return model, provider, nil
@@ -536,7 +538,7 @@ func SelectMemoryModelForBot(ctx context.Context, modelsService *Service, querie
 		}
 		// UUID-based lookup fallback
 		model, err = modelsService.GetByID(ctx, chatModelID)
-		if err == nil && model.Type == ModelTypeChat {
+		if err == nil && model.Type == ModelTypeChat && model.Enable {
 			provider, pErr := FetchProviderByID(ctx, queries, model.ProviderID)
 			if pErr == nil && provider.Enable {
 				return model, provider, nil

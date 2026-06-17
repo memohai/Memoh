@@ -1239,6 +1239,9 @@ func (p *SpawnProvider) resolveModel(ctx context.Context, botID string) (*sdk.Mo
 	if err != nil {
 		return nil, "", "", err
 	}
+	if !modelInfo.Enable {
+		return nil, "", "", fmt.Errorf("subagent chat model %s is disabled", modelInfo.ModelID)
+	}
 	provider, err := models.FetchProviderByID(ctx, p.queries, modelInfo.ProviderID)
 	if err != nil {
 		return nil, "", "", err

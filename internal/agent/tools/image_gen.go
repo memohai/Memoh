@@ -112,6 +112,9 @@ func (p *ImageGenProvider) execGenerateImage(ctx context.Context, session Sessio
 	if err != nil {
 		return nil, fmt.Errorf("failed to load image model: %w", err)
 	}
+	if !modelResp.Enable {
+		return nil, fmt.Errorf("image model %s is disabled", modelResp.ModelID)
+	}
 	if !modelResp.HasCompatibility(models.CompatImageOutput) {
 		return nil, errors.New("configured model does not support image generation")
 	}
