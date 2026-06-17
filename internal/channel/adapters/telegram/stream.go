@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tele "gopkg.in/telebot.v4"
 
 	"github.com/memohai/memoh/internal/channel"
 )
@@ -22,7 +22,7 @@ const (
 	telegramStreamPendingSuffix = "\n……"
 )
 
-var testEditFunc func(bot *tgbotapi.BotAPI, chatID int64, msgID int, text string, parseMode string) error
+var testEditFunc func(bot *tele.Bot, chatID int64, msgID int, text string, parseMode string) error
 
 type telegramOutboundStream struct {
 	adapter       *TelegramAdapter
@@ -51,7 +51,7 @@ type telegramToolCallMessage struct {
 	hasActions bool
 }
 
-func (s *telegramOutboundStream) getBot(_ context.Context) (bot *tgbotapi.BotAPI, err error) {
+func (s *telegramOutboundStream) getBot(_ context.Context) (bot *tele.Bot, err error) {
 	telegramCfg, err := parseConfig(s.cfg.Credentials)
 	if err != nil {
 		return nil, err
@@ -63,7 +63,7 @@ func (s *telegramOutboundStream) getBot(_ context.Context) (bot *tgbotapi.BotAPI
 	return bot, nil
 }
 
-func (s *telegramOutboundStream) getBotAndReply(ctx context.Context) (bot *tgbotapi.BotAPI, replyTo int, err error) {
+func (s *telegramOutboundStream) getBotAndReply(ctx context.Context) (bot *tele.Bot, replyTo int, err error) {
 	bot, err = s.getBot(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -80,9 +80,7 @@ func (s *telegramOutboundStream) refreshTypingAction(ctx context.Context) error 
 	if err != nil {
 		return err
 	}
-	action := tgbotapi.NewChatAction(s.streamChatID, tgbotapi.ChatTyping)
-	_, err = bot.Request(action)
-	return err
+	return bot.Notify(tele.ChatID(s.streamChatID), tele.Typing)
 }
 
 func (s *telegramOutboundStream) ensureStreamMessage(ctx context.Context, text string) error {

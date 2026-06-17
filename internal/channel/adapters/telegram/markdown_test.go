@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tele "gopkg.in/telebot.v4"
 
 	"github.com/memohai/memoh/internal/channel"
 )
@@ -155,7 +155,7 @@ func TestFormatTelegramOutput(t *testing.T) {
 			name:         "markdown format returns html mode",
 			text:         "**bold**",
 			format:       channel.MessageFormatMarkdown,
-			wantMode:     tgbotapi.ModeHTML,
+			wantMode:     tele.ModeHTML,
 			wantContains: "<b>bold</b>",
 		},
 		{

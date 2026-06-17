@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tele "gopkg.in/telebot.v4"
 
 	"github.com/memohai/memoh/internal/channel"
 )
@@ -139,10 +139,10 @@ func TestTelegramOutboundStream_PushErrorEventRedactsRegisteredTokenFragments(t 
 
 	origGetBot := getOrCreateBotForTest
 	origSendText := sendTextForTest
-	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
-		return &tgbotapi.BotAPI{Token: botToken}, nil
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return &tele.Bot{Token: botToken}, nil
 	}
-	sendTextForTest = func(_ *tgbotapi.BotAPI, _ string, text string, _ int, _ string) (int64, int, error) {
+	sendTextForTest = func(_ *tele.Bot, _ string, text string, _ int, _ string) (int64, int, error) {
 		sentText = text
 		return 1, 1, nil
 	}
@@ -261,15 +261,11 @@ func TestEditStreamMessage_429SetsBackoffAndReturnsNil(t *testing.T) {
 
 	origGetBot := getOrCreateBotForTest
 	origEdit := testEditFunc
-	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
-		return &tgbotapi.BotAPI{Token: "fake"}, nil
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return &tele.Bot{Token: "fake"}, nil
 	}
-	testEditFunc = func(*tgbotapi.BotAPI, int64, int, string, string) error {
-		return tgbotapi.Error{
-			Code:               429,
-			Message:            "Too Many Requests",
-			ResponseParameters: tgbotapi.ResponseParameters{RetryAfter: 2},
-		}
+	testEditFunc = func(*tele.Bot, int64, int, string, string) error {
+		return tele.FloodError{RetryAfter: 2}
 	}
 	defer func() {
 		getOrCreateBotForTest = origGetBot
@@ -306,10 +302,10 @@ func TestEditStreamMessageFinal_Success(t *testing.T) {
 
 	origGetBot := getOrCreateBotForTest
 	origEdit := testEditFunc
-	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
-		return &tgbotapi.BotAPI{Token: "fake"}, nil
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return &tele.Bot{Token: "fake"}, nil
 	}
-	testEditFunc = func(*tgbotapi.BotAPI, int64, int, string, string) error {
+	testEditFunc = func(*tele.Bot, int64, int, string, string) error {
 		return nil
 	}
 	defer func() {
@@ -349,15 +345,15 @@ func TestEditStreamMessageFinal_UnrecoverableFallsBackToNewMessage(t *testing.T)
 	origGetBot := getOrCreateBotForTest
 	origEdit := testEditFunc
 	origSendText := sendTextForTest
-	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
-		return &tgbotapi.BotAPI{Token: "fake"}, nil
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return &tele.Bot{Token: "fake"}, nil
 	}
-	testEditFunc = func(*tgbotapi.BotAPI, int64, int, string, string) error {
-		return tgbotapi.Error{Code: 400, Message: "Bad Request: message to edit not found"}
+	testEditFunc = func(*tele.Bot, int64, int, string, string) error {
+		return &tele.Error{Code: 400, Description: "Bad Request: message to edit not found"}
 	}
 	var sentText string
 	var sentCount int
-	sendTextForTest = func(_ *tgbotapi.BotAPI, _ string, text string, _ int, _ string) (int64, int, error) {
+	sendTextForTest = func(_ *tele.Bot, _ string, text string, _ int, _ string) (int64, int, error) {
 		sentText = text
 		sentCount++
 		return 1, 99, nil
@@ -463,13 +459,13 @@ func TestSendDraft_Success(t *testing.T) {
 
 	origGetBot := getOrCreateBotForTest
 	origDraft := sendDraftForTest
-	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
-		return &tgbotapi.BotAPI{Token: "fake"}, nil
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return &tele.Bot{Token: "fake"}, nil
 	}
 	var capturedChatID int64
 	var capturedDraftID int
 	var capturedText string
-	sendDraftForTest = func(_ *tgbotapi.BotAPI, chatID int64, draftID int, text string, _ string) error {
+	sendDraftForTest = func(_ *tele.Bot, chatID int64, draftID int, text string, _ string) error {
 		capturedChatID = chatID
 		capturedDraftID = draftID
 		capturedText = text
@@ -510,15 +506,11 @@ func TestSendDraft_429Backoff(t *testing.T) {
 
 	origGetBot := getOrCreateBotForTest
 	origDraft := sendDraftForTest
-	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
-		return &tgbotapi.BotAPI{Token: "fake"}, nil
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return &tele.Bot{Token: "fake"}, nil
 	}
-	sendDraftForTest = func(*tgbotapi.BotAPI, int64, int, string, string) error {
-		return tgbotapi.Error{
-			Code:               429,
-			Message:            "Too Many Requests",
-			ResponseParameters: tgbotapi.ResponseParameters{RetryAfter: 2},
-		}
+	sendDraftForTest = func(*tele.Bot, int64, int, string, string) error {
+		return tele.FloodError{RetryAfter: 2}
 	}
 	defer func() {
 		getOrCreateBotForTest = origGetBot
@@ -550,11 +542,11 @@ func TestDraftMode_DeltaUsesSendDraft(t *testing.T) {
 
 	origGetBot := getOrCreateBotForTest
 	origDraft := sendDraftForTest
-	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
-		return &tgbotapi.BotAPI{Token: "fake"}, nil
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return &tele.Bot{Token: "fake"}, nil
 	}
 	draftCalls := 0
-	sendDraftForTest = func(*tgbotapi.BotAPI, int64, int, string, string) error {
+	sendDraftForTest = func(*tele.Bot, int64, int, string, string) error {
 		draftCalls++
 		return nil
 	}
@@ -621,18 +613,18 @@ func TestToolCallFlow_FlushPreTextAndEditRunning(t *testing.T) {
 	origGetBot := getOrCreateBotForTest
 	origSendText := sendTextForTest
 	origEdit := testEditFunc
-	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
-		return &tgbotapi.BotAPI{Token: "fake"}, nil
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return &tele.Bot{Token: "fake"}, nil
 	}
 	var sentTexts []string
 	var msgIDCounter int
-	sendTextForTest = func(_ *tgbotapi.BotAPI, _ string, text string, _ int, _ string) (int64, int, error) {
+	sendTextForTest = func(_ *tele.Bot, _ string, text string, _ int, _ string) (int64, int, error) {
 		sentTexts = append(sentTexts, text)
 		msgIDCounter++
 		return 42, msgIDCounter, nil
 	}
 	var editTexts []string
-	testEditFunc = func(_ *tgbotapi.BotAPI, _ int64, _ int, text string, _ string) error {
+	testEditFunc = func(_ *tele.Bot, _ int64, _ int, text string, _ string) error {
 		editTexts = append(editTexts, text)
 		return nil
 	}
@@ -698,18 +690,18 @@ func TestToolCallFlow_NoPreTextEditsRunningInPlace(t *testing.T) {
 	origGetBot := getOrCreateBotForTest
 	origSendText := sendTextForTest
 	origEdit := testEditFunc
-	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
-		return &tgbotapi.BotAPI{Token: "fake"}, nil
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return &tele.Bot{Token: "fake"}, nil
 	}
 	var sentTexts []string
 	var msgIDCounter int
-	sendTextForTest = func(_ *tgbotapi.BotAPI, _ string, text string, _ int, _ string) (int64, int, error) {
+	sendTextForTest = func(_ *tele.Bot, _ string, text string, _ int, _ string) (int64, int, error) {
 		sentTexts = append(sentTexts, text)
 		msgIDCounter++
 		return 42, msgIDCounter, nil
 	}
 	var editTexts []string
-	testEditFunc = func(_ *tgbotapi.BotAPI, _ int64, _ int, text string, _ string) error {
+	testEditFunc = func(_ *tele.Bot, _ int64, _ int, text string, _ string) error {
 		editTexts = append(editTexts, text)
 		return nil
 	}
@@ -759,15 +751,15 @@ func TestDraftMode_ToolCallStartSendsPermanentMessage(t *testing.T) {
 	origGetBot := getOrCreateBotForTest
 	origSendEdit := sendEditForTest
 	origSendText := sendTextForTest
-	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
-		return &tgbotapi.BotAPI{Token: "fake"}, nil
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return &tele.Bot{Token: "fake"}, nil
 	}
 	var sentText string
-	sendTextForTest = func(_ *tgbotapi.BotAPI, _ string, text string, _ int, _ string) (int64, int, error) {
+	sendTextForTest = func(_ *tele.Bot, _ string, text string, _ int, _ string) (int64, int, error) {
 		sentText = text
 		return 123, 1, nil
 	}
-	sendEditForTest = func(_ *tgbotapi.BotAPI, _ tgbotapi.EditMessageTextConfig) error {
+	sendEditForTest = func(_ *tele.Bot, _ int64, _ int, _ string, _ string) error {
 		t.Error("editMessage should not be called in draft mode")
 		return nil
 	}
@@ -814,10 +806,10 @@ func TestDraftMode_FinalEmptyBufferSkipsDuplicate(t *testing.T) {
 	// StreamEventFinal should NOT re-send the message via PlainText() fallback.
 	origGetBot := getOrCreateBotForTest
 	origSendText := sendTextForTest
-	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
-		return &tgbotapi.BotAPI{Token: "fake"}, nil
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return &tele.Bot{Token: "fake"}, nil
 	}
-	sendTextForTest = func(_ *tgbotapi.BotAPI, _ string, _ string, _ int, _ string) (int64, int, error) {
+	sendTextForTest = func(_ *tele.Bot, _ string, _ string, _ int, _ string) (int64, int, error) {
 		t.Error("sendTelegramText should not be called when buffer is empty in draft mode")
 		return 0, 0, nil
 	}
@@ -858,11 +850,11 @@ func TestDraftMode_MultipleFinalEventsOnlyOneSend(t *testing.T) {
 
 	origGetBot := getOrCreateBotForTest
 	origSendText := sendTextForTest
-	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
-		return &tgbotapi.BotAPI{Token: "fake"}, nil
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return &tele.Bot{Token: "fake"}, nil
 	}
 	sendCount := 0
-	sendTextForTest = func(_ *tgbotapi.BotAPI, _ string, _ string, _ int, _ string) (int64, int, error) {
+	sendTextForTest = func(_ *tele.Bot, _ string, _ string, _ int, _ string) (int64, int, error) {
 		sendCount++
 		return 123, 1, nil
 	}
