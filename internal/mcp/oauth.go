@@ -449,12 +449,48 @@ type tokenResponse struct {
 	ErrorDescription string `json:"error_description,omitempty"`
 }
 
+type mcpOAuthProbeRequest struct {
+	JSONRPC string                  `json:"jsonrpc"`
+	ID      string                  `json:"id"`
+	Method  string                  `json:"method"`
+	Params  mcpOAuthProbeParameters `json:"params"`
+}
+
+type mcpOAuthProbeParameters struct {
+	ProtocolVersion string                  `json:"protocolVersion"`
+	Capabilities    map[string]any          `json:"capabilities"`
+	ClientInfo      mcpOAuthProbeClientInfo `json:"clientInfo"`
+}
+
+type mcpOAuthProbeClientInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
 func (s *OAuthService) probeForAuth(ctx context.Context, serverURL string) (resourceMetaURL, scope string, err error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, serverURL, nil)
+	payload, err := json.Marshal(mcpOAuthProbeRequest{
+		JSONRPC: "2.0",
+		ID:      "oauth-probe",
+		Method:  "initialize",
+		Params: mcpOAuthProbeParameters{
+			ProtocolVersion: "2025-06-18",
+			Capabilities:    map[string]any{},
+			ClientInfo: mcpOAuthProbeClientInfo{
+				Name:    "Memoh",
+				Version: "dev",
+			},
+		},
+	})
+	if err != nil {
+		return "", "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, serverURL, strings.NewReader(string(payload)))
 	if err != nil {
 		return "", "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
 
 	resp, err := s.httpClient.Do(req) //nolint:gosec // G704: URL is from OAuth server discovery metadata or operator config, not user input
 	if err != nil {

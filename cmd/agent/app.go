@@ -242,6 +242,10 @@ func provideBridgeProvider(manage *workspace.Manager) bridge.Provider {
 	return manage
 }
 
+func providePluginBridgeProvider(provider bridge.Provider) pluginspkg.BridgeProvider {
+	return pluginspkg.BridgeProvider{Provider: provider}
+}
+
 func provideHooksService(log *slog.Logger, provider bridge.Provider, pluginService *pluginspkg.Service) *hookspkg.Service {
 	service := hookspkg.NewService(log, provider)
 	service.SetPluginService(pluginService)

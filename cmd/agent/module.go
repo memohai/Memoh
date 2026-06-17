@@ -57,6 +57,7 @@ func options() fx.Option {
 			provideAccountStore,
 			provideWorkspaceManager,
 			provideBridgeProvider,
+			providePluginBridgeProvider,
 			provideMemoryLLM,
 			memprovider.NewService,
 			provideMemoryProviderRegistry,
