@@ -607,6 +607,31 @@ see it, replace it with the right column. This is your strip-list when refactori
 | Manual batch save | `PageShell` `#actions` + Save (`bot-tool-approval`, refactored tabs) | Disabled when synced; spinner on button; one success toast on click |
 | Unsaved hint (optional) | `#actions` beside Save, `hasChanges` only (`bot-settings` pattern) | `common.unsaved` while dirty — **never** a standing "saved" label when clean |
 
+## AI default-aesthetic traps — what it reaches for that breaks our language
+
+These are the decorations an LLM reaches for **by default** when nothing constrains it — the
+"AI slop" fingerprints. In a *make-it-distinctive* brief they're rejected for being generic; in
+*our* brief they're rejected for breaking the calm, unified white-card language. Same verdict,
+opposite reason. Ship **none** by default — none passes the test "does this look like a page
+already in our system, or like an AI improvising its own house style?"
+
+| The AI reaches for… | Why it breaks our language | What we want instead |
+|---|---|---|
+| a boxed / rounded icon stacked above every heading or title | card-in-card + icon-abuse (an icon must earn its place) | no icon — the title is the title |
+| purple→blue gradients, neon, cyan-on-dark, glowing accents | the skeleton is black/white/gray; blue = selected, purple is scarce, nothing glows | token solids; charcoal CTA |
+| gradient text (esp. on metrics / headings) | we have no gradients; text is a solid token | `text-foreground` / `text-muted-foreground` |
+| identical equal-sized card grids (icon + heading + text, repeated) | the identical-card-grid tell, and usually card-in-card | stat tiles (hairline-divided, not boxes-in-a-box) or plain content under a title |
+| the hero-metric template (big number, small label, gradient accent) | template-y; our metrics are a flat stat-tile row, no gradient | stat tiles |
+| glassmorphism — blur, glass cards, glow borders | we're flat: no invented shadow/glow, the edge is one hairline | `bg-card` + one `border-border` hairline |
+| rounded rectangles with a generic drop shadow | flat by default; shadow is a scarce elevation token, not decoration | flat card, no shadow |
+| centering everything | landing-page habit; we left-align inside the `max-w-3xl` shell | left-aligned, shell rhythm |
+| making every button primary | breaks hierarchy; charcoal is the one high-emphasis fill | one primary, the rest ghost / outline |
+| defaulting to dark mode with glowing accents | dark is the automatic result of tokens, not an aesthetic flex | build in tokens; dark just works |
+| a thick colored border on one side of a block | a lazy accent that fights the unified single-hairline stroke | one hairline; express state via fill / color |
+| bounce / elastic easing, or a staggered page-load reveal | our motion is restrained, fixed-palette, no overshoot | the duration palette + ease-out, change read in place |
+| monospace as shorthand for "technical" | a lazy vibe, not our type system | the normal font stack + the `--text-*` scale |
+| a modal as the default container | modals are lazy; we prefer inline / a named-entry surface (§ 9, § 12) | inline first; `Dialog` only when truly warranted |
+
 ## Component picker
 
 | Need | Use | Not |

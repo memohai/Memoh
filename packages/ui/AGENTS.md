@@ -17,6 +17,85 @@ make a **new** cross-cutting decision, write it back here — this is a living d
 | **This contract** | `packages/ui/AGENTS.md` | the rules + rationale |
 | **Guard** | `scripts/check-ui-contract.mjs` (wired into `mise run lint`) | mechanical block on drift |
 
+## Compose, don't style — the one principle (locality)
+
+LLMs are weak at CSS / visual / spatial reasoning and strong at composing by API. The whole
+point of this library is to keep that weakness out of the loop: **style has exactly one home
+(locality), and the layer above only composes.** An agent (or a person) expresses intent
+through a component's API — `variant="destructive"` — never through raw CSS
+(`bg-red-500 hover:bg-red-600`). The component is the translation layer between "what I want"
+and "what CSS makes it so."
+
+Corollary: **hand-writing CSS / injecting a class is NOT a normal move here — it is an escape
+hatch.** Reaching for it means a contract is missing; the right reaction is to *add the
+contract* (a `variant`, a slot, a token, a shared component), not to press the hatch and paint
+over the component.
+
+**Ownership — every concern has exactly ONE home:**
+
+| Concern | Its only home | Who must never touch it |
+|---|---|---|
+| Raw values (color / shadow / radius / size) | tokens (`style.css` `:root` / `.dark` / `@theme`) | any `.vue`, any app page |
+| Interaction chrome (hover / press / focus / open) | `style.css @layer components`, keyed off `data-*` | any `.vue`, any app page |
+| Layout + resting state (height / padding / radius / rest color) | the component `.vue` + `cva` | app pages don't re-write it |
+| Composition (arranging components into a screen) | app pages + shared composition components | — |
+| Business / orchestration | page logic | components embed no business assumption |
+
+The test: for any value, *"where does it live?"* must have exactly **one** answer. The same
+value in two homes is debt. *How* these homes fight the moment you ignore the boundary is the
+next section.
+
+## The cascade has four override planes (read before you "just add a class")
+
+The recurring frustration — *"my CSS does nothing / something else wins / the conflict is
+invisible"* — is not because the CSS is messy. It is because a final style here has to hold
+on **four independent override planes at once**. Touch one without knowing the others and the
+result silently changes. This is the mental model that the rest of this file assumes; an agent
+that lacks it keeps re-introducing the same class of bug.
+
+**The stack, bottom → top:**
+
+```
+5  app pages (apps/web)         compose components; pass ONLY tokens + variant/size
+4  .vue + cva (index.ts)        ONLY layout + resting color (height/padding/radius/rest text)
+3  style.css @layer components   ALL interaction chrome (hover/press/focus/open), keyed off data-*
+2  reka-ui primitives           inject data-state / aria-expanded; set page pointer-events:none on open
+1  Tailwind v4 + tokens          @theme / :root / .dark values; @layer utilities classes
+```
+
+**The four planes that decide who wins:**
+
+1. **Layer order — `@layer utilities` ALWAYS beats `@layer components`.** A Tailwind utility
+   you put on a component's `class` (`hover:bg-*`, `bg-*`, `transition-colors`) overrides the
+   hand-written rule in `style.css`. (This is the Switch stray-`transition-colors` bug and why
+   the link variants need `!important`.)
+2. **`cn()` = clsx + tailwind-merge silently DROPS classes.** When tailwind-merge thinks two
+   utilities conflict it keeps only the last and discards the rest — so a base class can vanish
+   (the `text-control` vs `text-background` collision patched in `lib/utils.ts`; the
+   `[&_svg:not([class*=size-])]` icon-size gotcha).
+3. **reka injects `data-state` / `aria-expanded` and sets page `pointer-events:none` while a
+   menu is open.** This is the "the library overrides me" plane: an open trigger goes inert, so
+   `:hover` cannot fire unless the component opts back in with `pointer-events:auto` (what
+   `select-trigger` does; the ghost button instead stays lit via `[data-state=open]`).
+4. **Specificity + source order inside `@layer components`.** Later rules win at equal
+   specificity (ButtonGroup overriding the standalone button is this plane).
+
+**The boundary that keeps all four from biting (enforce it on every page):**
+
+- **Interaction chrome is owned by `style.css`, keyed off `[data-button]` / `[data-slot]` /
+  `[data-variant]` / `[data-state]`.** A `.vue` file and an app page NEVER hand-write a
+  hover/press/open fill.
+- **A page passes a component only `variant` / `size` / layout (`w-full`) + semantic tokens.**
+  It does **not** inject `bg-*` / `hover:bg-*` / `border-border` / `shadow-none!` into a
+  `<Button>` / `<Select>` / `<TextButton>` — those collide with the `::before` fill and the
+  field-edge contract (the canonical "weird Select" / "fights the ::before" bug). The tell of
+  this debt is a fill/hover/border baked onto a real component's `class`; if you need a
+  different look, pick the right `variant`, don't paint over it.
+- **One trigger-open philosophy, applied everywhere.** "How a trigger looks while its menu is
+  open" is ONE decision (pure-pointer via `pointer-events:auto`, OR stay-lit via
+  `[data-state=open]`) — Select, Dropdown, Popover and ghost triggers must not each pick their
+  own, or they read as "fighting" (the recurring TextButton-vs-Select hover mismatch).
+
 ## Three laws
 
 1. **Everything is a token.** No raw `#hex` / `rgb()` / `oklch()` / `color-mix()`
