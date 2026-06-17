@@ -170,17 +170,6 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 		slog.Int("messages", len(toCompact)),
 	)
 
-	priorLogs, err := s.queries.ListCompactionLogsBySession(ctx, sessionUUID)
-	if err != nil {
-		return err
-	}
-	var priorSummaries []string
-	for _, l := range priorLogs {
-		if l.Summary != "" {
-			priorSummaries = append(priorSummaries, l.Summary)
-		}
-	}
-
 	entries := make([]messageEntry, 0, len(toCompact))
 	messageIDs := make([]pgtype.UUID, 0, len(toCompact))
 	for _, m := range toCompact {
@@ -189,6 +178,18 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 			Content: string(m.Content),
 		})
 		messageIDs = append(messageIDs, m.ID)
+	}
+
+	priorLogs, err := s.queries.ListCompactionLogsBySession(ctx, sessionUUID)
+	if err != nil {
+		return err
+	}
+	priorSummaries := make([]string, 0, len(priorLogs))
+	for _, log := range priorLogs {
+		if log.ID == logID || log.Summary == "" {
+			continue
+		}
+		priorSummaries = append(priorSummaries, log.Summary)
 	}
 
 	userPrompt := buildUserPrompt(priorSummaries, entries)

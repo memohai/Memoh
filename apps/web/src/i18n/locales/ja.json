@@ -51,6 +51,9 @@
     "type": "タイプ",
     "typePlaceholder": "タイプを選択してください",
     "refresh": "更新",
+    "reset": "リセット",
+    "zoomIn": "拡大",
+    "zoomOut": "縮小",
     "status": "ステータス",
     "active": "アクティブ",
     "inactive": "非アクティブ",
@@ -387,6 +390,19 @@
     "sendFailed": "メッセージの送信に失敗しました",
     "minimapLabel": "会話の概要",
     "minimapEarlier": "以前のメッセージがロード中に表示される",
+    "copyReply": "返信をコピー",
+    "copyFailed": "コピーに失敗しました",
+    "rewriteRequest": "編集して再送信",
+    "branchHistory": {
+      "tab": "分岐",
+      "title": "分岐履歴",
+      "empty": "表示できる分岐ターンはありません",
+      "count": "{count} 件の分岐",
+      "loading": "分岐を読み込み中",
+      "active": "現在",
+      "switch": "分岐を切り替え",
+      "turnLabel": "ターン {index}"
+    },
     "startChat": "チャットを開始する",
     "noBot": "利用可能なBotがありません。最初にBotを作成してください",
     "newChat": "新しいセッション",
@@ -650,7 +666,9 @@
       "hideWorkbench": "サイドバーを隠す",
       "showWorkbench": "サイドバーを表示",
       "goBack": "戻る",
-      "goForward": "進む"
+      "goForward": "進む",
+      "hideBranchSidebar": "分岐サイドバーを隠す",
+      "showBranchSidebar": "分岐サイドバーを表示"
     },
     "activityBar": {
       "sessions": "チャット",

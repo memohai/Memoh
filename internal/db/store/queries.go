@@ -168,6 +168,7 @@ type Queries interface {
 	GetLatestPendingUserInputBySession(ctx context.Context, arg dbsqlc.GetLatestPendingUserInputBySessionParams) (dbsqlc.UserInputRequest, error)
 	GetLatestSessionIDByBot(ctx context.Context, botID pgtype.UUID) (pgtype.UUID, error)
 	GetRootSessionBranch(ctx context.Context, sessionID pgtype.UUID) (pgtype.UUID, error)
+	IsSessionPersistContextVisible(ctx context.Context, arg dbsqlc.IsSessionPersistContextVisibleParams) (bool, error)
 	GetMCPConnectionByID(ctx context.Context, arg dbsqlc.GetMCPConnectionByIDParams) (dbsqlc.McpConnection, error)
 	GetMCPOAuthToken(ctx context.Context, connectionID pgtype.UUID) (dbsqlc.McpOauthToken, error)
 	GetMCPOAuthTokenByState(ctx context.Context, stateParam string) (dbsqlc.McpOauthToken, error)

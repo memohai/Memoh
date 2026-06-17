@@ -5,18 +5,7 @@
       v-else
       class="flex-1 flex min-w-0 flex-col bg-card"
     >
-      <div class="flex h-9 shrink-0 items-center px-2 [-webkit-app-region:drag]">
-        <button
-          v-if="!workbenchOpen"
-          type="button"
-          class="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring [-webkit-app-region:no-drag]"
-          :title="t('chat.topBar.showWorkbench')"
-          :aria-label="t('chat.topBar.showWorkbench')"
-          @click="workspaceTabs.showWorkbench()"
-        >
-          <PanelLeftOpen class="size-3.5" />
-        </button>
-      </div>
+      <div class="h-9 shrink-0 [-webkit-app-region:drag]" />
       <div class="flex min-h-0 flex-1 items-center justify-center">
         <div class="text-center px-6">
           <p class="text-xs font-medium text-foreground">
@@ -37,9 +26,7 @@ import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getBotsById } from '@memohai/sdk'
-import { PanelLeftOpen } from 'lucide-vue-next'
 import { useChatStore } from '@/store/chat-list'
-import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { ACP_NO_PROJECT_MODE, createACPNoProjectPath, normalizeACPAgentID } from '@/utils/acp'
 import ChatWorkspace from './components/chat-workspace.vue'
 
@@ -48,8 +35,6 @@ const router = useRouter()
 const { t } = useI18n()
 const chatStore = useChatStore()
 const { currentBotId, bots } = storeToRefs(chatStore)
-const workspaceTabs = useWorkspaceTabsStore()
-const { workbenchOpen } = storeToRefs(workspaceTabs)
 
 // Resolve a bot UUID from a URL name slug. Prefers the already-loaded bot list,
 // falling back to the API (which accepts both name and UUID identifiers).

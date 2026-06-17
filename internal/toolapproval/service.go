@@ -155,6 +155,9 @@ func (s *Service) ResolveTarget(ctx context.Context, input ResolveInput) (Reques
 			if req.BotID != uuid.UUID(botID.Bytes).String() || req.Status != StatusPending {
 				return Request{}, ErrNotFound
 			}
+			if !s.requestVisibleInActivePath(ctx, row.SessionID, req.PersistBranchID, req.PersistTurnID) {
+				return Request{}, ErrNotFound
+			}
 			return req, nil
 		}
 		return Request{}, ErrNotFound
@@ -170,7 +173,7 @@ func (s *Service) ResolveTarget(ctx context.Context, input ResolveInput) (Reques
 				SessionID: sessionID,
 				ShortID:   int32(shortID), //nolint:gosec // user-facing approval numbers are small positive integers.
 			})
-			return requestFromRowOrErr(row, err)
+			return s.visiblePendingRequestFromRow(ctx, sessionID, row, err)
 		}
 		if parsed, err := db.ParseUUID(explicit); err == nil {
 			row, err := s.queries.GetToolApprovalRequest(ctx, parsed)
@@ -179,6 +182,9 @@ func (s *Service) ResolveTarget(ctx context.Context, input ResolveInput) (Reques
 			}
 			req := requestFromRow(row)
 			if req.BotID != uuid.UUID(botID.Bytes).String() || req.SessionID != uuid.UUID(sessionID.Bytes).String() || req.Status != StatusPending {
+				return Request{}, ErrNotFound
+			}
+			if !s.requestVisibleInActivePath(ctx, sessionID, req.PersistBranchID, req.PersistTurnID) {
 				return Request{}, ErrNotFound
 			}
 			return req, nil
@@ -191,18 +197,51 @@ func (s *Service) ResolveTarget(ctx context.Context, input ResolveInput) (Reques
 			SessionID:               sessionID,
 			PromptExternalMessageID: replyID,
 		})
-		if err == nil {
-			return requestFromRow(row), nil
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return Request{}, err
-		}
+		return s.visiblePendingRequestFromRow(ctx, sessionID, row, err)
 	}
-	row, err := s.queries.GetLatestPendingToolApprovalBySession(ctx, sqlc.GetLatestPendingToolApprovalBySessionParams{
+	return s.latestVisiblePendingBySession(ctx, botID, sessionID)
+}
+
+func (s *Service) requestVisibleInActivePath(ctx context.Context, sessionID pgtype.UUID, branchID, turnID string) bool {
+	persistBranchID := optionalUUID(branchID)
+	persistTurnID := optionalUUID(turnID)
+	visible, err := s.queries.IsSessionPersistContextVisible(ctx, sqlc.IsSessionPersistContextVisibleParams{
+		SessionID:       sessionID,
+		PersistBranchID: persistBranchID,
+		PersistTurnID:   persistTurnID,
+	})
+	return err == nil && visible
+}
+
+func (s *Service) visiblePendingRequestFromRow(ctx context.Context, sessionID pgtype.UUID, row sqlc.ToolApprovalRequest, err error) (Request, error) {
+	req, err := requestFromRowOrErr(row, err)
+	if err != nil {
+		return Request{}, err
+	}
+	if req.Status != StatusPending {
+		return Request{}, ErrNotFound
+	}
+	if !s.requestVisibleInActivePath(ctx, sessionID, req.PersistBranchID, req.PersistTurnID) {
+		return Request{}, ErrNotFound
+	}
+	return req, nil
+}
+
+func (s *Service) latestVisiblePendingBySession(ctx context.Context, botID, sessionID pgtype.UUID) (Request, error) {
+	rows, err := s.queries.ListPendingToolApprovalsBySession(ctx, sqlc.ListPendingToolApprovalsBySessionParams{
 		BotID:     botID,
 		SessionID: sessionID,
 	})
-	return requestFromRowOrErr(row, err)
+	if err != nil {
+		return Request{}, err
+	}
+	for i := len(rows) - 1; i >= 0; i-- {
+		req := requestFromRow(rows[i])
+		if s.requestVisibleInActivePath(ctx, rows[i].SessionID, req.PersistBranchID, req.PersistTurnID) {
+			return req, nil
+		}
+	}
+	return Request{}, ErrNotFound
 }
 
 func (s *Service) Approve(ctx context.Context, approvalID, actorID, reason string) (Request, error) {
@@ -212,6 +251,9 @@ func (s *Service) Approve(ctx context.Context, approvalID, actorID, reason strin
 	}
 	decidedBy, err := s.optionalChannelIdentityUUID(ctx, actorID)
 	if err != nil {
+		return Request{}, err
+	}
+	if err := s.ensurePendingRequestVisible(ctx, approvalID); err != nil {
 		return Request{}, err
 	}
 	row, err := s.queries.ApproveToolApprovalRequest(ctx, sqlc.ApproveToolApprovalRequestParams{
@@ -238,6 +280,9 @@ func (s *Service) Reject(ctx context.Context, approvalID, actorID, reason string
 	if err != nil {
 		return Request{}, err
 	}
+	if err := s.ensurePendingRequestVisible(ctx, approvalID); err != nil {
+		return Request{}, err
+	}
 	row, err := s.queries.RejectToolApprovalRequest(ctx, sqlc.RejectToolApprovalRequestParams{
 		ID:                         id,
 		Reason:                     strings.TrimSpace(reason),
@@ -251,6 +296,24 @@ func (s *Service) Reject(ctx context.Context, approvalID, actorID, reason string
 		_ = s.runApprovalHook(ctx, hooks.EventApprovalResolved, CreatePendingInput{}, req, false)
 	}
 	return req, err
+}
+
+func (s *Service) ensurePendingRequestVisible(ctx context.Context, approvalID string) error {
+	req, err := s.Get(ctx, approvalID)
+	if err != nil {
+		return err
+	}
+	if req.Status != StatusPending {
+		return ErrAlreadyDecided
+	}
+	sessionID, err := db.ParseUUID(req.SessionID)
+	if err != nil {
+		return err
+	}
+	if !s.requestVisibleInActivePath(ctx, sessionID, req.PersistBranchID, req.PersistTurnID) {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // CancelPendingForSession closes pending approvals that belonged to an ended
@@ -545,7 +608,11 @@ func (s *Service) listBySession(ctx context.Context, botID, sessionID string, pe
 	}
 	result := make([]Request, 0, len(rows))
 	for _, row := range rows {
-		result = append(result, requestFromRow(row))
+		req := requestFromRow(row)
+		if pendingOnly && !s.requestVisibleInActivePath(ctx, row.SessionID, req.PersistBranchID, req.PersistTurnID) {
+			continue
+		}
+		result = append(result, req)
 	}
 	return result, nil
 }

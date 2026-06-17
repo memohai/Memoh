@@ -77,6 +77,7 @@ WITH branch_lock AS (
   SELECT id
   FROM bot_session_branches
   WHERE id = $2
+    AND session_id = $1
   FOR UPDATE
 )
 INSERT INTO bot_history_turns (
@@ -644,6 +645,84 @@ func (q *Queries) GetSessionBranchForPersist(ctx context.Context, arg GetSession
 	return id, err
 }
 
+const isSessionPersistContextVisible = `-- name: IsSessionPersistContextVisible :one
+WITH RECURSIVE active_branch AS (
+  SELECT COALESCE(
+    (SELECT active_branch_id FROM bot_sessions WHERE id = $3),
+    (
+      SELECT rb.id
+      FROM bot_session_branches rb
+      WHERE rb.session_id = $3
+        AND rb.parent_branch_id IS NULL
+        AND rb.fork_from_message_id IS NULL
+      ORDER BY rb.created_at ASC
+      LIMIT 1
+    )
+  ) AS id
+),
+branch_path AS (
+  SELECT
+    b.id AS branch_id,
+    b.parent_branch_id,
+    NULL::BIGINT AS max_turn_seq,
+    NULL::BIGINT AS max_branch_seq,
+    0 AS depth
+  FROM bot_session_branches b
+  JOIN active_branch ab ON ab.id = b.id
+  UNION ALL
+  SELECT
+    parent.id AS branch_id,
+    parent.parent_branch_id,
+    COALESCE(child.fork_from_turn_seq, boundary_turn.turn_seq) AS max_turn_seq,
+    child.fork_from_seq AS max_branch_seq,
+    bp.depth + 1 AS depth
+  FROM branch_path bp
+  JOIN bot_session_branches child ON child.id = bp.branch_id
+  JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
+  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
+)
+SELECT CASE
+  WHEN $1::uuid IS NULL THEN TRUE
+  WHEN $2::uuid IS NOT NULL THEN EXISTS (
+    SELECT 1
+    FROM bot_history_turns t
+    JOIN branch_path bp ON bp.branch_id = t.branch_id
+    LEFT JOIN bot_history_messages fm ON fm.id = t.final_assistant_message_id
+    WHERE t.id = $2::uuid
+      AND t.session_id = $3
+      AND t.branch_id = $1::uuid
+      AND (
+        bp.depth = 0
+        OR (bp.max_turn_seq IS NOT NULL AND t.turn_seq <= bp.max_turn_seq)
+        OR (
+          bp.max_turn_seq IS NULL
+          AND bp.max_branch_seq IS NOT NULL
+          AND fm.branch_seq <= bp.max_branch_seq
+        )
+      )
+  )
+  ELSE EXISTS (
+    SELECT 1
+    FROM branch_path bp
+    WHERE bp.branch_id = $1::uuid
+      AND bp.depth = 0
+  )
+END::boolean AS visible
+`
+
+type IsSessionPersistContextVisibleParams struct {
+	PersistBranchID pgtype.UUID `json:"persist_branch_id"`
+	PersistTurnID   pgtype.UUID `json:"persist_turn_id"`
+	SessionID       pgtype.UUID `json:"session_id"`
+}
+
+func (q *Queries) IsSessionPersistContextVisible(ctx context.Context, arg IsSessionPersistContextVisibleParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isSessionPersistContextVisible, arg.PersistBranchID, arg.PersistTurnID, arg.SessionID)
+	var visible bool
+	err := row.Scan(&visible)
+	return visible, err
+}
+
 const listActiveMessagesSince = `-- name: ListActiveMessagesSince :many
 SELECT
   m.id,
@@ -1022,13 +1101,7 @@ WHERE m.session_id = $1
       (bp.depth = 0 AND bp.max_turn_seq IS NULL)
       OR (
         bp.max_turn_seq IS NOT NULL
-        AND (
-          t.turn_seq < bp.max_turn_seq
-          OR (
-            t.turn_seq = bp.max_turn_seq
-            AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
-          )
-        )
+        AND t.turn_seq <= bp.max_turn_seq
       )
       OR (
         bp.max_turn_seq IS NULL
@@ -2589,6 +2662,10 @@ JOIN bot_branch_visible_messages bvm ON bvm.message_id = m.id
   ))
 WHERE m.session_id = $1
   AND m.compact_id IS NULL
+  AND (
+    m.role != 'system'
+    OR (m.metadata->>'kind') IS DISTINCT FROM 'compaction_summary'
+  )
 ORDER BY bvm.depth DESC, COALESCE(m.branch_seq, 9223372036854775807) ASC, m.created_at ASC
 `
 

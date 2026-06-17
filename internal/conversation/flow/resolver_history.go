@@ -261,12 +261,15 @@ func (r *Resolver) buildMessagesFromPipeline(ctx context.Context, req conversati
 	if r.pipeline == nil || sessionID == "" {
 		return nil
 	}
+	if r.sessionHasMultipleBranches(ctx, sessionID) {
+		return nil
+	}
 	rc := r.pipeline.GetRC(sessionID)
 	if len(rc) == 0 {
 		return nil
 	}
 
-	trs := r.loadTurnResponses(ctx, sessionID)
+	trs := r.loadTurnResponses(ctx, req)
 
 	composed := pipelinepkg.ComposeContext(rc, trs, "")
 	if composed == nil {
@@ -327,14 +330,46 @@ func trimPipelineMessagesByTokens(log *slog.Logger, messages []conversation.Mode
 	return messages[cutoff:]
 }
 
+func (r *Resolver) sessionHasMultipleBranches(ctx context.Context, sessionID string) bool {
+	if r == nil || r.queries == nil || strings.TrimSpace(sessionID) == "" {
+		return false
+	}
+	parsed, err := db.ParseUUID(sessionID)
+	if err != nil {
+		return false
+	}
+	branches, err := r.queries.ListSessionBranches(ctx, parsed)
+	if err != nil {
+		return false
+	}
+	return len(branches) > 1
+}
+
 // loadTurnResponses loads recent assistant/tool messages from bot_history_messages
 // for use as the TR stream in pipeline-based context assembly.
-func (r *Resolver) loadTurnResponses(ctx context.Context, sessionID string) []pipelinepkg.TurnResponseEntry {
+func (r *Resolver) loadTurnResponses(ctx context.Context, req conversation.ChatRequest) []pipelinepkg.TurnResponseEntry {
 	if r.messageService == nil {
 		return nil
 	}
+	sessionID := strings.TrimSpace(req.SessionID)
+	if sessionID == "" {
+		return nil
+	}
 	since := time.Now().UTC().Add(-24 * time.Hour)
-	msgs, err := r.messageService.ListActiveSinceBySession(ctx, sessionID, since)
+	branchID := strings.TrimSpace(req.PersistBranchID)
+	turnID := strings.TrimSpace(req.PersistTurnID)
+	var (
+		msgs []messagepkg.Message
+		err  error
+	)
+	switch {
+	case branchID != "" && turnID != "":
+		msgs, err = r.messageService.ListActiveSinceBySessionBranchTurn(ctx, sessionID, branchID, turnID, since)
+	case branchID != "":
+		msgs, err = r.messageService.ListActiveSinceBySessionBranch(ctx, sessionID, branchID, since)
+	default:
+		msgs, err = r.messageService.ListActiveSinceBySession(ctx, sessionID, since)
+	}
 	if err != nil {
 		r.logger.Warn("load TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
 		return nil

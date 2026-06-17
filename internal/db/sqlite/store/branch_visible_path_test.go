@@ -32,6 +32,7 @@ func TestSQLiteSessionBranchVisiblePath(t *testing.T) {
 	rootTurn2ID := "00000000-0000-0000-0000-000000002302"
 	forkTurnID := "00000000-0000-0000-0000-000000002303"
 	secondForkTurnID := "00000000-0000-0000-0000-000000002304"
+	compactionSummaryID := "00000000-0000-0000-0000-000000002401"
 
 	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id, active_branch_id) VALUES (?, ?)`, sessionID, forkBranchID); err != nil {
 		t.Fatalf("insert session: %v", err)
@@ -102,9 +103,16 @@ INSERT INTO bot_history_messages (
 	}
 	assertLatestMessageIDs(t, latest, []string{forkAssistantID, forkUserID, assistant1ID, user1ID})
 
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO bot_history_messages (
+  id, bot_id, session_id, branch_id, branch_seq, role, content, metadata, created_at
+) VALUES (?, ?, ?, ?, ?, 'system', '{"content":"summary"}', '{"kind":"compaction_summary"}', ?)`,
+		compactionSummaryID, botID, sessionID, forkBranchID, 3, "2026-01-01 00:13:00"); err != nil {
+		t.Fatalf("insert compaction summary message: %v", err)
+	}
 	uncompacted, err := q.ListUncompactedMessagesBySession(ctx, sessionUUID)
 	if err != nil {
-		t.Fatalf("list uncompacted active fork path: %v", err)
+		t.Fatalf("list uncompacted messages: %v", err)
 	}
 	assertUncompactedMessageIDs(t, uncompacted, []string{user1ID, assistant1ID, forkUserID, forkAssistantID})
 
@@ -191,7 +199,7 @@ VALUES
 	assertMessageIDs(t, rows, []string{user1ID, assistant1ID, forkUserID, forkAssistantID})
 }
 
-func TestSQLiteSessionBranchVisiblePathClampsForkTurnByMessageSeq(t *testing.T) {
+func TestSQLiteSessionBranchVisiblePathIncludesWholeForkBoundaryTurn(t *testing.T) {
 	ctx := context.Background()
 	conn := openBranchVisibleTestDB(t)
 	defer func() { _ = conn.Close() }()
@@ -235,7 +243,7 @@ VALUES
 	if err != nil {
 		t.Fatalf("list active path: %v", err)
 	}
-	assertMessageIDs(t, rows, []string{userID, assistantID, forkUserID, forkAssistantID})
+	assertMessageIDs(t, rows, []string{userID, assistantID, lateToolID, forkUserID, forkAssistantID})
 }
 
 func TestSQLiteListSessionBranchesScansTurnForkColumns(t *testing.T) {

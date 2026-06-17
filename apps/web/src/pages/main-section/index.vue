@@ -9,21 +9,22 @@
     <div class="flex h-full min-h-0 overflow-hidden">
       <SideBar :mac-traffic-reserve="macTrafficReserve" />
       <div class="relative flex min-w-0 min-h-0 flex-1 flex-col">
-        <MainContainer />
+        <WorkspacePaneChrome :mac-traffic-reserve="macTrafficReserve" />
+        <MainContainer class="relative z-0" />
       </div>
-      <BranchHistorySidebar v-if="branchSidebarOpen" />
+      <BranchHistorySidebar />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, inject, ref, onMounted } from 'vue'
-import { storeToRefs } from 'pinia'
 import { useRoute } from 'vue-router'
 import { DesktopShellKey } from '@/lib/desktop-shell'
 import SideBar from '@/components/sidebar/index.vue'
 import MainContainer from '@/components/main-container/index.vue'
 import BranchHistorySidebar from '@/pages/home/components/branch-history-sidebar.vue'
+import WorkspacePaneChrome from '@/pages/home/components/workspace-pane-chrome.vue'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
 import { safeSessionGet, safeSessionRemove } from '@/utils/safe-storage'
 import { useKeyboardCommand } from '@/composables/useKeyboardCommand'
@@ -32,7 +33,6 @@ import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 
 const desktopShell = inject(DesktopShellKey, false)
 const workspaceTabs = useWorkspaceTabsStore()
-const { branchSidebarOpen } = storeToRefs(workspaceTabs)
 const macTrafficReserve = computed(() =>
   desktopShell
   && typeof navigator !== 'undefined'

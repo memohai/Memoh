@@ -210,6 +210,9 @@ func (s *Service) ResolveTarget(ctx context.Context, input ResolveInput) (Reques
 			if req.BotID != uuid.UUID(botID.Bytes).String() || req.Status != StatusPending {
 				return Request{}, ErrNotFound
 			}
+			if !s.requestVisibleInActivePath(ctx, row.SessionID, req.PersistBranchID, req.PersistTurnID) {
+				return Request{}, ErrNotFound
+			}
 			return req, nil
 		}
 		return Request{}, ErrNotFound
@@ -225,7 +228,7 @@ func (s *Service) ResolveTarget(ctx context.Context, input ResolveInput) (Reques
 				SessionID: sessionID,
 				ShortID:   int32(shortID), //nolint:gosec // user-facing request numbers are small positive integers.
 			})
-			return requestFromRowOrErr(row, err)
+			return s.visiblePendingRequestFromRow(ctx, sessionID, row, err)
 		}
 		if parsed, err := db.ParseUUID(explicit); err == nil {
 			row, err := s.queries.GetUserInputRequest(ctx, parsed)
@@ -234,6 +237,9 @@ func (s *Service) ResolveTarget(ctx context.Context, input ResolveInput) (Reques
 			}
 			req := requestFromRow(row)
 			if req.BotID != uuid.UUID(botID.Bytes).String() || req.SessionID != uuid.UUID(sessionID.Bytes).String() || req.Status != StatusPending {
+				return Request{}, ErrNotFound
+			}
+			if !s.requestVisibleInActivePath(ctx, sessionID, req.PersistBranchID, req.PersistTurnID) {
 				return Request{}, ErrNotFound
 			}
 			return req, nil
@@ -246,18 +252,51 @@ func (s *Service) ResolveTarget(ctx context.Context, input ResolveInput) (Reques
 			SessionID:               sessionID,
 			PromptExternalMessageID: replyID,
 		})
-		if err == nil {
-			return requestFromRow(row), nil
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return Request{}, err
-		}
+		return s.visiblePendingRequestFromRow(ctx, sessionID, row, err)
 	}
-	row, err := s.queries.GetLatestPendingUserInputBySession(ctx, sqlc.GetLatestPendingUserInputBySessionParams{
+	return s.latestVisiblePendingBySession(ctx, botID, sessionID)
+}
+
+func (s *Service) requestVisibleInActivePath(ctx context.Context, sessionID pgtype.UUID, branchID, turnID string) bool {
+	persistBranchID := optionalUUID(branchID)
+	persistTurnID := optionalUUID(turnID)
+	visible, err := s.queries.IsSessionPersistContextVisible(ctx, sqlc.IsSessionPersistContextVisibleParams{
+		SessionID:       sessionID,
+		PersistBranchID: persistBranchID,
+		PersistTurnID:   persistTurnID,
+	})
+	return err == nil && visible
+}
+
+func (s *Service) visiblePendingRequestFromRow(ctx context.Context, sessionID pgtype.UUID, row sqlc.UserInputRequest, err error) (Request, error) {
+	req, err := requestFromRowOrErr(row, err)
+	if err != nil {
+		return Request{}, err
+	}
+	if req.Status != StatusPending {
+		return Request{}, ErrNotFound
+	}
+	if !s.requestVisibleInActivePath(ctx, sessionID, req.PersistBranchID, req.PersistTurnID) {
+		return Request{}, ErrNotFound
+	}
+	return req, nil
+}
+
+func (s *Service) latestVisiblePendingBySession(ctx context.Context, botID, sessionID pgtype.UUID) (Request, error) {
+	rows, err := s.queries.ListPendingUserInputsBySession(ctx, sqlc.ListPendingUserInputsBySessionParams{
 		BotID:     botID,
 		SessionID: sessionID,
 	})
-	return requestFromRowOrErr(row, err)
+	if err != nil {
+		return Request{}, err
+	}
+	for i := len(rows) - 1; i >= 0; i-- {
+		req := requestFromRow(rows[i])
+		if s.requestVisibleInActivePath(ctx, rows[i].SessionID, req.PersistBranchID, req.PersistTurnID) {
+			return req, nil
+		}
+	}
+	return Request{}, ErrNotFound
 }
 
 func (s *Service) Get(ctx context.Context, requestID string) (Request, error) {
@@ -336,6 +375,13 @@ func (s *Service) Submit(ctx context.Context, input SubmitInput) (Request, error
 	if req.Status != StatusPending {
 		return Request{}, ErrAlreadyDecided
 	}
+	sessionID, err := db.ParseUUID(req.SessionID)
+	if err != nil {
+		return Request{}, err
+	}
+	if !s.requestVisibleInActivePath(ctx, sessionID, req.PersistBranchID, req.PersistTurnID) {
+		return Request{}, ErrNotFound
+	}
 	result, err := submittedResult(req.UIPayload, input.Answers)
 	if err != nil {
 		return Request{}, err
@@ -363,6 +409,20 @@ func (s *Service) Cancel(ctx context.Context, input CancelInput) (Request, error
 	actorID, err := s.optionalChannelIdentityUUID(ctx, input.ActorChannelIdentityID)
 	if err != nil {
 		return Request{}, err
+	}
+	req, err := s.Get(ctx, input.RequestID)
+	if err != nil {
+		return Request{}, err
+	}
+	if req.Status != StatusPending {
+		return Request{}, ErrAlreadyDecided
+	}
+	sessionID, err := db.ParseUUID(req.SessionID)
+	if err != nil {
+		return Request{}, err
+	}
+	if !s.requestVisibleInActivePath(ctx, sessionID, req.PersistBranchID, req.PersistTurnID) {
+		return Request{}, ErrNotFound
 	}
 	result := canceledResult(input.Reason)
 	resultJSON, err := json.Marshal(result)
@@ -560,7 +620,11 @@ func (s *Service) listBySession(ctx context.Context, botID, sessionID string, pe
 	}
 	result := make([]Request, 0, len(rows))
 	for _, row := range rows {
-		result = append(result, requestFromRow(row))
+		req := requestFromRow(row)
+		if pendingOnly && !s.requestVisibleInActivePath(ctx, row.SessionID, req.PersistBranchID, req.PersistTurnID) {
+			continue
+		}
+		result = append(result, req)
 	}
 	return result, nil
 }

@@ -1,10 +1,10 @@
 <template>
   <aside
-    v-if="branchSidebarOpen"
     class="relative flex shrink-0 flex-col border-l border-sidebar-border bg-sidebar"
     role="complementary"
     :aria-label="t('chat.branchHistory.title')"
     :style="asideStyle"
+    :inert="!branchSidebarOpen || undefined"
   >
     <nav
       class="flex h-11 shrink-0 items-center gap-1.5 pl-3 pr-2 py-1.5"
@@ -219,6 +219,8 @@ const cardMetrics = computed(() => {
 
 const asideStyle = computed<Record<string, string>>(() => ({
   width: `${branchSidebarWidth.value}px`,
+  marginRight: branchSidebarOpen.value ? '0px' : `-${branchSidebarWidth.value}px`,
+  transition: 'margin-right 300ms cubic-bezier(0.32, 0.72, 0, 1)',
   '--btn-ghost-hover': 'var(--sidebar-hover)',
 }))
 
@@ -409,7 +411,7 @@ function refreshBranches() {
 function branchCardClass(data: BranchNodeData): string {
   if (data.active) return 'bg-[color:var(--accent-blue-soft-active)] text-foreground'
   if (data.activePath) return 'bg-sidebar-accent text-foreground'
-  return 'text-sidebar-foreground hover:bg-[color:var(--sidebar-hover)]'
+  return 'bg-[color:var(--overlay-hover-light)] text-sidebar-foreground hover:bg-[color:var(--sidebar-hover)]'
 }
 
 function switchToBranch(branchId: string) {

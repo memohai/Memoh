@@ -77,6 +77,17 @@ func (s *DBService) ensureActiveBranchForSession(ctx context.Context, sessionID 
 }
 
 func (s *DBService) ensureTurnForMessage(ctx context.Context, sessionID, branchID pgtype.UUID, role string, explicitTurnID pgtype.UUID) (pgtype.UUID, error) {
+	if sessionID.Valid && branchID.Valid {
+		if _, err := s.queries.GetSessionBranchForPersist(ctx, sqlc.GetSessionBranchForPersistParams{
+			SessionID: sessionID,
+			BranchID:  branchID,
+		}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return pgtype.UUID{}, errors.New("branch does not belong to session")
+			}
+			return pgtype.UUID{}, err
+		}
+	}
 	if explicitTurnID.Valid {
 		if !sessionID.Valid || !branchID.Valid {
 			return pgtype.UUID{}, errors.New("explicit turn requires session and branch")

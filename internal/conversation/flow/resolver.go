@@ -335,7 +335,9 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	// message is already in the RC, so it must not be appended again.
 	usePipeline := r.pipeline != nil && strings.TrimSpace(req.SessionID) != ""
 	if usePipeline {
-		if _, loaded := r.pipeline.GetIC(strings.TrimSpace(req.SessionID)); !loaded {
+		if r.sessionHasMultipleBranches(ctx, strings.TrimSpace(req.SessionID)) {
+			usePipeline = false
+		} else if _, loaded := r.pipeline.GetIC(strings.TrimSpace(req.SessionID)); !loaded {
 			usePipeline = false
 		}
 	}

@@ -13,6 +13,7 @@ import {
   terminalCacheKey,
 } from '@/composables/useTerminalCache'
 import type { OpenAssetPreviewArgs } from '@/pages/home/composables/useFileManagerProvider'
+import { isWorkspaceTopLeftGroup, isWorkspaceTopRightGroup } from '@/pages/home/components/dockview/chrome-reserve'
 
 // Workspace shell state (activity bar + side panel + dockview layout):
 // - the dockview layout in the center area (chat / file / terminal / browser /
@@ -89,6 +90,14 @@ function syncTerminalGroupChrome(group: DockviewGroupPanel) {
 function syncAllTerminalGroupChrome(dock: DockviewApi) {
   for (const group of dock.groups) {
     syncTerminalGroupChrome(group)
+    group.element.classList.toggle(
+      'memoh-shell-top-left-group',
+      isWorkspaceTopLeftGroup(dock, group.id),
+    )
+    group.element.classList.toggle(
+      'memoh-shell-top-right-group',
+      isWorkspaceTopRightGroup(dock, group.id),
+    )
   }
 }
 

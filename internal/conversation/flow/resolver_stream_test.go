@@ -6,10 +6,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/conversation"
+	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	"github.com/memohai/memoh/internal/userinput"
 )
 
@@ -136,6 +140,79 @@ func TestLoadMessagesUsesPinnedTurnHistory(t *testing.T) {
 			messages.activeBranchTurnTurnID,
 		)
 	}
+}
+
+func TestLoadTurnResponsesUsesPinnedTurnHistory(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	_ = resolver.loadTurnResponses(context.Background(), conversation.ChatRequest{
+		SessionID:       "session-1",
+		PersistBranchID: "branch-1",
+		PersistTurnID:   "turn-1",
+	})
+	if messages.activeBranchTurnCallCount != 1 {
+		t.Fatalf("pinned turn TR calls = %d, want 1", messages.activeBranchTurnCallCount)
+	}
+	if messages.activeBranchOnlyCallCount != 0 {
+		t.Fatalf("branch-only TR calls = %d, want 0", messages.activeBranchOnlyCallCount)
+	}
+	if messages.activeBranchTurnSessionID != "session-1" || messages.activeBranchTurnBranchID != "branch-1" || messages.activeBranchTurnTurnID != "turn-1" {
+		t.Fatalf(
+			"pinned turn TR args = (%q, %q, %q), want (session-1, branch-1, turn-1)",
+			messages.activeBranchTurnSessionID,
+			messages.activeBranchTurnBranchID,
+			messages.activeBranchTurnTurnID,
+		)
+	}
+}
+
+func TestBuildMessagesFromPipelineSkipsBranchedSessions(t *testing.T) {
+	t.Parallel()
+
+	p := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
+	now := time.Now()
+	sessionID := "00000000-0000-0000-0000-000000000001"
+	p.PushEvent(sessionID, pipelinepkg.MessageEvent{
+		SessionID:    sessionID,
+		MessageID:    "external-1",
+		ReceivedAtMs: now.UnixMilli(),
+		TimestampSec: now.Unix(),
+		Content:      []pipelinepkg.ContentNode{{Type: "text", Text: "hidden rc message"}},
+		Conversation: pipelinepkg.ConversationMeta{Channel: "local"},
+	})
+	resolver := &Resolver{
+		pipeline: p,
+		queries:  branchAwareQueries{hasBranches: true},
+		logger:   slog.New(slog.DiscardHandler),
+	}
+
+	messages := resolver.buildMessagesFromPipeline(context.Background(), conversation.ChatRequest{
+		SessionID: sessionID,
+	}, 0)
+	if len(messages) != 0 {
+		t.Fatalf("branched session used pipeline RC: %#v", messages)
+	}
+}
+
+type branchAwareQueries struct {
+	dbstore.Queries
+	hasBranches bool
+}
+
+func (q branchAwareQueries) ListSessionBranches(context.Context, pgtype.UUID) ([]dbsqlc.ListSessionBranchesRow, error) {
+	if !q.hasBranches {
+		return nil, nil
+	}
+	return []dbsqlc.ListSessionBranchesRow{
+		{ID: pgtype.UUID{Valid: true}},
+		{ID: pgtype.UUID{Valid: true}},
+	}, nil
 }
 
 type recordingUserInputService struct {

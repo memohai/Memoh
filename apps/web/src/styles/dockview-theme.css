@@ -381,6 +381,11 @@
   padding-block: 0.1875rem;
 }
 
+.dockview-theme-memoh .memoh-terminal-group.memoh-shell-top-left-group > .dv-content-container,
+.dockview-theme-memoh .memoh-terminal-group.memoh-shell-top-right-group > .dv-content-container {
+  padding-top: 2.25rem;
+}
+
 /* Inter-tab spacing now lives on the container gap (not chip margins) so each
  * chip can fill its tab box (width:100%) and still shrink: 3px end inset +
  * 0.375rem (6px) gap reproduce the previously-approved 3px/6px rhythm. */

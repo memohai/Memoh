@@ -496,20 +496,28 @@ func (s *Service) ForkBranchFromMessage(ctx context.Context, sessionID, messageI
 	switch row.Role {
 	case "assistant":
 	case "user":
-		previousTurn, hasPreviousTurn, err := s.previousVisibleTurnBefore(ctx, pgSessionID, row.BranchID.String(), row.TurnSeq)
-		if err != nil {
-			return BranchGraph{}, err
-		}
 		forkFromTurnID = pgtype.UUID{}
 		forkFromTurnSeq = pgtype.Int8{Int64: 0, Valid: true}
 		forkFromSeq = 0
 		forkFromSeqValid = true
-		if hasPreviousTurn {
-			parentBranchID = previousTurn.BranchID
-			forkFromTurnID = previousTurn.TurnID
-			forkFromTurnSeq.Int64 = previousTurn.TurnSeq
-			if previousTurn.BranchSeq.Valid {
-				forkFromSeq = previousTurn.BranchSeq.Int64
+		if row.PreviousTurnID.Valid && row.PreviousTurnSeq > 0 {
+			forkFromTurnID = row.PreviousTurnID
+			forkFromTurnSeq.Int64 = row.PreviousTurnSeq
+			if row.PreviousBranchSeq.Valid {
+				forkFromSeq = row.PreviousBranchSeq.Int64
+			}
+		} else {
+			previousTurn, hasPreviousTurn, err := s.previousVisibleTurnBefore(ctx, pgSessionID, row.BranchID.String(), row.TurnSeq)
+			if err != nil {
+				return BranchGraph{}, err
+			}
+			if hasPreviousTurn {
+				parentBranchID = previousTurn.BranchID
+				forkFromTurnID = previousTurn.TurnID
+				forkFromTurnSeq.Int64 = previousTurn.TurnSeq
+				if previousTurn.BranchSeq.Valid {
+					forkFromSeq = previousTurn.BranchSeq.Int64
+				}
 			}
 		}
 	default:
@@ -982,6 +990,12 @@ func branchForkParentTurnID(
 	sourceByAssistantID map[string]branchForkTurnBoundary,
 ) string {
 	sourceMessageID := strings.TrimSpace(branch.ForkFromMessageID)
+	if strings.TrimSpace(branch.ForkFromTurnID) != "" {
+		return branch.ForkFromTurnID
+	}
+	if branch.ForkFromTurnSeq > 0 {
+		return turnIDForBranchSeq(turnIDByBranchSeq, branch.ParentBranchID, branch.ForkFromTurnSeq)
+	}
 	if sourceMessageID != "" {
 		if source, ok := sourceByUserID[sourceMessageID]; ok {
 			if previousTurn, hasPreviousTurn := previousVisibleTurnBeforeFromRows(branches, rows, source.BranchID.String(), source.TurnSeq); hasPreviousTurn {
@@ -992,12 +1006,6 @@ func branchForkParentTurnID(
 		if source, ok := sourceByAssistantID[sourceMessageID]; ok {
 			return source.TurnID.String()
 		}
-	}
-	if strings.TrimSpace(branch.ForkFromTurnID) != "" {
-		return branch.ForkFromTurnID
-	}
-	if branch.ForkFromTurnSeq > 0 {
-		return turnIDForBranchSeq(turnIDByBranchSeq, branch.ParentBranchID, branch.ForkFromTurnSeq)
 	}
 	return ""
 }

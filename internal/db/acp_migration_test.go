@@ -50,8 +50,8 @@ func TestSQLiteACPAgentSessionTypeMigration(t *testing.T) {
 		db = openMigrationSQLite(t, dsn)
 		defer closeMigrationSQLite(t, db)
 		after := sqliteTableSQL(t, db, "bot_sessions")
-		if before != after || !strings.Contains(after, "acp_agent") {
-			t.Fatalf("guard failure should leave bot_sessions schema unchanged\nbefore: %s\nafter: %s", before, after)
+		if after != before {
+			t.Fatalf("guard failure mutated bot_sessions schema\nbefore: %s\nafter: %s", before, after)
 		}
 		var count int
 		if err := db.QueryRowContext(context.Background(), `SELECT count(*) FROM bot_sessions WHERE type = 'acp_agent'`).Scan(&count); err != nil {

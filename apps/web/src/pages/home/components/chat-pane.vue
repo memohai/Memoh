@@ -1004,25 +1004,6 @@ const isActive = computed(() => props.active !== false)
 const { copyText } = useClipboard()
 let copiedMessageTimer: ReturnType<typeof setTimeout> | null = null
 
-const latestRewriteableRequest = computed(() => {
-  if (streaming.value || activeChatReadOnly.value) return null
-  const assistantIndex = lastVisibleMessageIndexByRole('assistant')
-  if (assistantIndex <= 0) return null
-  const assistant = messages.value[assistantIndex]
-  const user = messages.value[assistantIndex - 1]
-  if (!assistant || !user) return null
-  if (assistant.role !== 'assistant' || user.role !== 'user') return null
-  if (assistant.streaming || !canRewriteRequest(user)) return null
-  return user
-})
-
-function lastVisibleMessageIndexByRole(role: 'user' | 'assistant' | 'system') {
-  for (let index = messages.value.length - 1; index >= 0; index--) {
-    if (messages.value[index]?.role === role) return index
-  }
-  return -1
-}
-
 // A fresh, writable chat opens with the composer centred and a greeting above
 // it. Read-only sessions (subagent / system / synced channel threads) hide the
 // composer entirely, so they never reach this state.
@@ -1905,8 +1886,9 @@ function canForkChatMessage(messageId: string) {
 }
 
 function canRewriteMessage(messageId: string) {
-  const latest = latestRewriteableRequest.value
-  return !!latest && (latest.id === messageId || persistentMessageId(latest) === messageId)
+  if (streaming.value || activeChatReadOnly.value || chatSendBlocked.value) return false
+  const message = messages.value.find(item => item.id === messageId || persistentMessageId(item) === messageId)
+  return !!message && canRewriteRequest(message)
 }
 
 function scrollToBottom() {

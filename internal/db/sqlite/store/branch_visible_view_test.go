@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"database/sql"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -12,49 +14,22 @@ type testSQLExecutor interface {
 
 func createBranchVisibleMessagesView(t *testing.T, conn testSQLExecutor) {
 	t.Helper()
-	_, err := conn.ExecContext(context.Background(), `
-CREATE VIEW IF NOT EXISTS bot_branch_visible_messages AS
-WITH RECURSIVE branch_path AS (
-  SELECT b.id AS branch_id, b.id AS message_branch_id, b.parent_branch_id AS parent_branch_id, NULL AS max_turn_seq, NULL AS max_branch_seq, 0 AS depth
-  FROM bot_session_branches b
-  UNION ALL
-  SELECT bp.branch_id AS branch_id, parent.id AS message_branch_id, parent.parent_branch_id AS parent_branch_id, COALESCE(child.fork_from_turn_seq, boundary_turn.turn_seq) AS max_turn_seq, child.fork_from_seq AS max_branch_seq, bp.depth + 1 AS depth
-  FROM branch_path bp
-  JOIN bot_session_branches child ON child.id = bp.message_branch_id
-  JOIN bot_session_branches parent ON parent.id = child.parent_branch_id
-  LEFT JOIN bot_history_turns boundary_turn ON boundary_turn.id = child.fork_from_turn_id AND boundary_turn.branch_id = parent.id
-)
-SELECT
-  bp.branch_id AS branch_id,
-  m.id AS message_id,
-  bp.depth
-FROM branch_path bp
-JOIN bot_history_messages m ON m.branch_id = bp.message_branch_id
-LEFT JOIN bot_history_turns t ON t.id = m.turn_id
-WHERE bp.depth = 0
-  OR (
-    bp.max_turn_seq IS NOT NULL
-    AND (
-      t.turn_seq < bp.max_turn_seq
-      OR (
-        t.turn_seq = bp.max_turn_seq
-        AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
-      )
-    )
-  )
-  OR (
-    bp.max_turn_seq IS NULL
-    AND bp.max_branch_seq IS NOT NULL
-    AND m.branch_seq <= bp.max_branch_seq
-  )
-UNION ALL
-SELECT
-  b.id AS branch_id,
-  m.id AS message_id,
-  2147483647 AS depth
-FROM bot_session_branches b
-JOIN bot_history_messages m ON m.session_id = b.session_id AND m.branch_id IS NULL;
-`)
+	migration, err := os.ReadFile("../../../../db/sqlite/migrations/0001_init.up.sql")
+	if err != nil {
+		t.Fatalf("read sqlite baseline migration: %v", err)
+	}
+	const viewStart = "CREATE VIEW IF NOT EXISTS bot_branch_visible_messages AS"
+	sqlText := string(migration)
+	start := strings.Index(sqlText, viewStart)
+	if start < 0 {
+		t.Fatalf("sqlite baseline migration does not define %s", viewStart)
+	}
+	rest := sqlText[start:]
+	end := strings.Index(rest, "\n\nCREATE INDEX")
+	if end < 0 {
+		t.Fatal("sqlite baseline migration view definition terminator not found")
+	}
+	_, err = conn.ExecContext(context.Background(), rest[:end])
 	if err != nil {
 		t.Fatalf("create branch visible messages view: %v", err)
 	}

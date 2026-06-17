@@ -603,13 +603,7 @@ LEFT JOIN bot_history_turns t ON t.id = m.turn_id
 WHERE bp.depth = 0
   OR (
     bp.max_turn_seq IS NOT NULL
-    AND (
-      t.turn_seq < bp.max_turn_seq
-      OR (
-        t.turn_seq = bp.max_turn_seq
-        AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
-      )
-    )
+    AND t.turn_seq <= bp.max_turn_seq
   )
   OR (
     bp.max_turn_seq IS NULL

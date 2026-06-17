@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"reflect"
+	"strconv"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -152,6 +154,56 @@ func (q *Queries) GetActiveSessionBranch(ctx context.Context, sessionID pgtype.U
 		return pgtype.UUID{}, err
 	}
 	return result, nil
+}
+
+func (q *Queries) IsSessionPersistContextVisible(ctx context.Context, arg pgsqlc.IsSessionPersistContextVisibleParams) (bool, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return false, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.IsSessionPersistContextVisibleParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return false, err
+	}
+	visible, err := q.store.queries.IsSessionPersistContextVisible(ctx, sqliteArg)
+	if err != nil {
+		return false, mapQueryErr(err)
+	}
+	return sqliteBool(visible)
+}
+
+func sqliteBool(value any) (bool, error) {
+	switch v := value.(type) {
+	case nil:
+		return false, nil
+	case bool:
+		return v, nil
+	case int64:
+		return v != 0, nil
+	case int:
+		return v != 0, nil
+	case []byte:
+		parsed, err := strconv.ParseBool(string(v))
+		if err == nil {
+			return parsed, nil
+		}
+		asInt, intErr := strconv.ParseInt(string(v), 10, 64)
+		if intErr == nil {
+			return asInt != 0, nil
+		}
+		return false, err
+	case string:
+		parsed, err := strconv.ParseBool(v)
+		if err == nil {
+			return parsed, nil
+		}
+		asInt, intErr := strconv.ParseInt(v, 10, 64)
+		if intErr == nil {
+			return asInt != 0, nil
+		}
+		return false, err
+	default:
+		return false, fmt.Errorf("unsupported sqlite bool value %T", value)
+	}
 }
 
 func (q *Queries) SetActiveSessionBranch(ctx context.Context, arg pgsqlc.SetActiveSessionBranchParams) (int64, error) {

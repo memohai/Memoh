@@ -616,6 +616,139 @@ func TestBranchForkServiceRewritesLatestRequestFromPreviousTurn(t *testing.T) {
 	}
 }
 
+func TestBranchForkServiceRewritesMiddleRequestFromPreviousTurn(t *testing.T) {
+	ctx := context.Background()
+	sessionID := "00000000-0000-0000-0000-000000001700"
+	rootBranchID := "00000000-0000-0000-0000-000000001701"
+	forkID := "00000000-0000-0000-0000-000000001702"
+	firstTurnID := "00000000-0000-0000-0000-000000001703"
+	secondTurnID := "00000000-0000-0000-0000-000000001704"
+	thirdTurnID := "00000000-0000-0000-0000-000000001705"
+	requestID := "00000000-0000-0000-0000-000000001706"
+	forkTurnID := "00000000-0000-0000-0000-000000001707"
+	sessionUUID := mustPGUUID(sessionID)
+	rootBranchUUID := mustPGUUID(rootBranchID)
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	queries := &branchServiceQueries{
+		sessionID:     sessionUUID,
+		activeID:      rootBranchUUID,
+		nextBranchIDs: []pgtype.UUID{mustPGUUID(forkID)},
+		forkMessages: map[string]sqlc.GetMessageForSessionBranchForkRow{
+			requestID: {
+				ID:                mustPGUUID(requestID),
+				SessionID:         sessionUUID,
+				BranchID:          rootBranchUUID,
+				BranchSeq:         pgtype.Int8{Int64: 3, Valid: true},
+				TurnID:            mustPGUUID(secondTurnID),
+				TurnSeq:           2,
+				PreviousTurnID:    mustPGUUID(firstTurnID),
+				PreviousTurnSeq:   1,
+				PreviousBranchSeq: pgtype.Int8{Int64: 2, Valid: true},
+				Role:              "user",
+				CreatedAt:         pgtype.Timestamptz{Time: now.Add(2 * time.Minute), Valid: true},
+			},
+		},
+		branches: []sqlc.ListSessionBranchesRow{
+			{
+				ID:             rootBranchUUID,
+				SessionID:      sessionUUID,
+				CreatedAt:      pgtype.Timestamptz{Time: now, Valid: true},
+				UpdatedAt:      pgtype.Timestamptz{Time: now, Valid: true},
+				ActiveBranchID: rootBranchUUID,
+			},
+		},
+		turns: []sqlc.ListSessionBranchTurnMessagesRow{
+			{
+				TurnID:               mustPGUUID(firstTurnID),
+				TurnSeq:              1,
+				AssistantID:          mustPGUUID("00000000-0000-0000-0000-000000001711"),
+				SessionID:            sessionUUID,
+				BranchID:             rootBranchUUID,
+				BranchSeq:            pgtype.Int8{Int64: 2, Valid: true},
+				AssistantDisplayText: pgtype.Text{String: "first answer", Valid: true},
+				AssistantCreatedAt:   pgtype.Timestamptz{Time: now.Add(time.Minute), Valid: true},
+				UserID:               mustPGUUID("00000000-0000-0000-0000-000000001712"),
+				UserDisplayText:      pgtype.Text{String: "first question", Valid: true},
+				UserCreatedAt:        pgtype.Timestamptz{Time: now, Valid: true},
+			},
+			{
+				TurnID:               mustPGUUID(secondTurnID),
+				TurnSeq:              2,
+				AssistantID:          mustPGUUID("00000000-0000-0000-0000-000000001713"),
+				SessionID:            sessionUUID,
+				BranchID:             rootBranchUUID,
+				BranchSeq:            pgtype.Int8{Int64: 4, Valid: true},
+				AssistantDisplayText: pgtype.Text{String: "second answer", Valid: true},
+				AssistantCreatedAt:   pgtype.Timestamptz{Time: now.Add(3 * time.Minute), Valid: true},
+				UserID:               mustPGUUID(requestID),
+				UserDisplayText:      pgtype.Text{String: "second question", Valid: true},
+				UserCreatedAt:        pgtype.Timestamptz{Time: now.Add(2 * time.Minute), Valid: true},
+			},
+			{
+				TurnID:               mustPGUUID(thirdTurnID),
+				TurnSeq:              3,
+				AssistantID:          mustPGUUID("00000000-0000-0000-0000-000000001714"),
+				SessionID:            sessionUUID,
+				BranchID:             rootBranchUUID,
+				BranchSeq:            pgtype.Int8{Int64: 6, Valid: true},
+				AssistantDisplayText: pgtype.Text{String: "third answer", Valid: true},
+				AssistantCreatedAt:   pgtype.Timestamptz{Time: now.Add(5 * time.Minute), Valid: true},
+				UserID:               mustPGUUID("00000000-0000-0000-0000-000000001715"),
+				UserDisplayText:      pgtype.Text{String: "third question", Valid: true},
+				UserCreatedAt:        pgtype.Timestamptz{Time: now.Add(4 * time.Minute), Valid: true},
+			},
+			{
+				TurnID:               mustPGUUID(forkTurnID),
+				TurnSeq:              1,
+				AssistantID:          mustPGUUID("00000000-0000-0000-0000-000000001716"),
+				SessionID:            sessionUUID,
+				BranchID:             mustPGUUID(forkID),
+				BranchSeq:            pgtype.Int8{Int64: 2, Valid: true},
+				AssistantDisplayText: pgtype.Text{String: "rewrite answer", Valid: true},
+				AssistantCreatedAt:   pgtype.Timestamptz{Time: now.Add(7 * time.Minute), Valid: true},
+				UserID:               mustPGUUID("00000000-0000-0000-0000-000000001717"),
+				UserDisplayText:      pgtype.Text{String: "rewritten question", Valid: true},
+				UserCreatedAt:        pgtype.Timestamptz{Time: now.Add(6 * time.Minute), Valid: true},
+			},
+		},
+	}
+	svc := NewService(nil, queries)
+
+	graph, err := svc.ForkBranchFromMessage(ctx, sessionID, requestID)
+	if err != nil {
+		t.Fatalf("ForkBranchFromMessage(middle user request) error = %v", err)
+	}
+	if graph.ActiveBranchID != forkID {
+		t.Fatalf("active branch = %q, want %q", graph.ActiveBranchID, forkID)
+	}
+	rewriteBranch := graph.Branches[len(graph.Branches)-1]
+	if rewriteBranch.ParentBranchID != rootBranchID {
+		t.Fatalf("rewrite parent branch = %q, want %q", rewriteBranch.ParentBranchID, rootBranchID)
+	}
+	if rewriteBranch.ForkFromTurnID != firstTurnID || rewriteBranch.ForkFromTurnSeq != 1 || rewriteBranch.ForkFromSeq != 2 {
+		t.Fatalf("rewrite fork boundary = %#v", rewriteBranch)
+	}
+	rewrite := findBranchTurn(graph.Turns, forkTurnID)
+	if rewrite == nil {
+		t.Fatalf("rewrite turn not found in graph: %#v", graph.Turns)
+	}
+	if rewrite.ParentTurnID != firstTurnID || !rewrite.Active {
+		t.Fatalf("rewrite turn = %#v", rewrite)
+	}
+	original := findBranchTurn(graph.Turns, secondTurnID)
+	if original == nil {
+		t.Fatalf("original edited turn not found in graph: %#v", graph.Turns)
+	}
+	if rewrite.Depth != original.Depth {
+		t.Fatalf("rewrite depth = %d, want sibling depth %d", rewrite.Depth, original.Depth)
+	}
+	third := findBranchTurn(graph.Turns, thirdTurnID)
+	if third == nil || third.ParentTurnID != secondTurnID {
+		t.Fatalf("third turn should remain on original path after edited turn: %#v", third)
+	}
+}
+
 func TestBranchForkServiceRewritesFirstForkRequestFromParentTurn(t *testing.T) {
 	ctx := context.Background()
 	sessionID := "00000000-0000-0000-0000-000000001300"

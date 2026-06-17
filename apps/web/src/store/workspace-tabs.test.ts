@@ -48,9 +48,18 @@ interface FakePanel {
   }
 }
 
+interface FakeAddPanelOptions {
+  id: string
+  component: string
+  title?: string
+  params?: Record<string, unknown>
+  position?: { referenceGroup: string; direction: string }
+}
+
 function createFakeDock() {
   const panels: FakePanel[] = []
   const removeListeners: Array<(panel: FakePanel) => void> = []
+  const addPanelCalls: FakeAddPanelOptions[] = []
   let activePanel: FakePanel | null = null
   const noopDisposable = () => ({ dispose: () => {} })
   const removeDisposable = (listener: (panel: FakePanel) => void) => {
@@ -66,6 +75,14 @@ function createFakeDock() {
     classList: {
       toggle: vi.fn(),
     },
+    getBoundingClientRect: vi.fn(() => ({
+      top: 0,
+      left: 0,
+      right: 100,
+      bottom: 100,
+      width: 100,
+      height: 100,
+    })),
   } as unknown as HTMLElement
   const group = {
     id: 'group-1',
@@ -84,7 +101,11 @@ function createFakeDock() {
 
   const dock = {
     panels,
+    addPanelCalls,
     groups: [group],
+    get activeGroup() {
+      return group
+    },
     get activePanel() {
       return activePanel
     },
@@ -103,13 +124,8 @@ function createFakeDock() {
     getPanel(id: string) {
       return panels.find((p) => p.id === id)
     },
-    addPanel(options: {
-      id: string
-      component: string
-      title?: string
-      params?: Record<string, unknown>
-      position?: { referenceGroup: string; direction: string }
-    }) {
+    addPanel(options: FakeAddPanelOptions) {
+      addPanelCalls.push(options)
       const panel: FakePanel = {
         id: options.id,
         component: options.component,
@@ -303,6 +319,18 @@ describe('workspace layout store', () => {
     expect(dock.getPanel('chat')?.title).toBe('New Session')
   })
 
+  it('opens chat above a terminal-only group instead of joining it', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openTerminal()
+    store.openChat('Chat')
+
+    const chatOpen = dock.addPanelCalls.find(call => call.id === 'chat')
+    expect(chatOpen?.position).toEqual({ referenceGroup: 'group-1', direction: 'above' })
+  })
+
   it('sets a fallback title when focusing an existing blank chat tab', () => {
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()
@@ -312,6 +340,26 @@ describe('workspace layout store', () => {
     store.openChat()
 
     expect(dock.getPanel('chat')?.title).toBe('New Session')
+  })
+
+  it('keeps sidebar toggles usable after closing the last tab', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openChat('Chat')
+    store.hideWorkbench()
+    store.closeTab('chat')
+
+    expect(dock.panels).toHaveLength(1)
+    expect(dock.getPanel('chat')?.component).toBe('chat')
+    expect(store.workbenchOpen).toBe(false)
+
+    store.toggleWorkbench()
+    expect(store.workbenchOpen).toBe(true)
+
+    store.toggleBranchSidebar()
+    expect(store.branchSidebarOpen).toBe(false)
   })
 
   it('splits the chat panel into a duplicate chat pane', () => {
@@ -456,6 +504,22 @@ describe('workspace layout store', () => {
 
     store.showWorkbench()
     expect(store.workbenchOpen).toBe(true)
+  })
+
+  it('keeps the branch history sidebar visible by default', () => {
+    const store = useWorkspaceTabsStore()
+
+    expect(store.branchSidebarOpen).toBe(true)
+  })
+
+  it('toggles the branch history sidebar', () => {
+    const store = useWorkspaceTabsStore()
+
+    store.toggleBranchSidebar()
+    expect(store.branchSidebarOpen).toBe(false)
+
+    store.toggleBranchSidebar()
+    expect(store.branchSidebarOpen).toBe(true)
   })
 
   it('drops legacy persisted tab models', () => {
