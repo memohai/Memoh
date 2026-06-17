@@ -50,6 +50,12 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 		r.logger.Warn("compaction: failed to build config", slog.Any("error", err))
 		return
 	}
+	if cfg.ModelID == "" {
+		// buildCompactionConfig returns an empty cfg when no compaction model
+		// is configured or the configured one is disabled. Skip the trigger
+		// so the compaction service doesn't run hooks + fail on empty UUIDs.
+		return
+	}
 	r.compactionService.TriggerCompaction(ctx, cfg)
 }
 
@@ -73,6 +79,11 @@ func (r *Resolver) runCompactionSync(ctx context.Context, req conversation.ChatR
 	cfg, err := r.buildCompactionConfig(ctx, req, botSettings, inputTokens)
 	if err != nil {
 		r.logger.Warn("compaction sync: failed to build config", slog.Any("error", err))
+		return
+	}
+	if cfg.ModelID == "" {
+		// Same skip path as the async trigger above — no model or model
+		// disabled means there is nothing to compact.
 		return
 	}
 
