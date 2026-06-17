@@ -164,17 +164,32 @@
            the bottom once a conversation exists, or lifted to the vertical
            centre (with a greeting above it) while the chat is still empty, so a
            fresh chat opens on an inviting page instead of a near-blank pane. -->
+      <!-- No outer horizontal gutter here on purpose: the message list lives in a
+           `section.absolute.inset-0` layer that fills its parent's padding box, so
+           it bypasses the section's px-3/sm:px-5/lg:px-8 gutter and only carries the
+           inner px-4/sm:px-6/lg:px-10. The composer must drop the same outer gutter
+           so its inner padding is the ONLY horizontal inset — matching the message
+           column edge-for-edge at every width. -->
       <div
         v-if="!activeChatReadOnly"
-        class="pointer-events-none absolute z-30 px-3 sm:px-5 lg:px-8"
+        class="pointer-events-none absolute z-30"
         :class="isWelcome
           ? 'inset-0 flex flex-col items-center justify-start pt-[38dvh]'
           : 'inset-x-0 bottom-0 pt-2 pb-7'"
       >
+        <!-- Opaque backdrop, bottom-anchored, rising only to the box's widest point
+             (its vertical centre). The box is solid and sits above the messages, so
+             above that line its rounded top simply floats over whatever is there —
+             that area is left unmasked on purpose. From the widest point down (where
+             the box curves back in and would leave gaps by its bottom corners, plus
+             the strip beneath it) this fill hides everything, so nothing bleeds out
+             below the box. No fade: the top edge meets the box where it is already
+             full width, so the seam is hidden behind the box itself. -->
         <div
           v-if="!isWelcome"
           aria-hidden="true"
-          class="absolute inset-x-0 bottom-0 h-7 bg-surface-editor"
+          class="absolute inset-x-0 bottom-0 bg-surface-editor"
+          :style="{ height: composerMaskHeight }"
         />
         <!-- welcome: top-anchored column — the greeting and the composer's top
              edge stay pinned at pt-[38dvh], so a growing composer (multiline
@@ -522,7 +537,8 @@
                         type="button"
                         variant="ghost"
                         :disabled="!currentBotId || activeChatReadOnly || acpModelChanging"
-                        class="composer-pill-press h-9 min-w-0 max-w-60 gap-1 rounded-full px-3 text-muted-foreground"
+                        class="composer-pill-press h-9 min-w-0 gap-1 rounded-full px-3 text-muted-foreground"
+                        :style="{ maxWidth: `${modelTriggerMaxWidth}px` }"
                       >
                         <LoaderCircle
                           v-if="acpModelChanging || acpModelsLoading"
@@ -704,7 +720,7 @@
                       variant="destructive"
                       class="absolute inset-0 size-9 rounded-full"
                       aria-label="Stop generating response"
-                      @click="chatStore.abort()"
+                      @click="chatStore.abort(mySessionId ?? undefined)"
                     >
                       <LoaderCircle class="size-[18px] animate-spin" />
                     </Button>
@@ -720,7 +736,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount, onMounted, useTemplateRef, watchEffect, watch, nextTick, onActivated, onDeactivated } from 'vue'
+import { ref, computed, onBeforeUnmount, onMounted, provide, useTemplateRef, watchEffect, watch, nextTick, onActivated, onDeactivated } from 'vue'
 import {
   LoaderCircle,
   Paperclip,
@@ -758,6 +774,7 @@ import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { acpAgentIcon, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID } from '@/utils/acp'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { CHAT_PANE_SESSION_ID } from './chat-pane-context'
 
 interface PendingUserInputDraft {
   optionIds: string[]
@@ -774,9 +791,14 @@ interface ScrollRailSegment {
 }
 
 const props = withDefaults(defineProps<{
+  // The session this pane renders. A pinned tab passes its fixed session id; the
+  // primary tab passes the active session (null while drafting). undefined falls
+  // back to the active session for any caller that doesn't bind one.
+  sessionId?: string | null
   tabId?: string
   active?: boolean
 }>(), {
+  sessionId: undefined,
   tabId: 'chat',
   active: true,
 })
@@ -987,23 +1009,52 @@ const acpModelChanging = ref(false)
 const inputDrafts = useStorage<Record<string, string>>('chat-input-drafts', {})
 
 const {
-  messages,
-  streaming,
   currentBotId,
   bots,
-  activeSession,
-  activeChatReadOnly,
-  loadingOlder,
-  loadingChats,
-  hasMoreOlder,
-  overrideModelId,
-  overrideReasoningEffort,
-  startupSendFailure,
   pendingACPSessionMetadata,
   pendingACPModelId,
   pendingACPRuntimeStatus,
   pendingACPRuntimeEnsuring,
 } = storeToRefs(chatStore)
+
+// The session this pane is bound to. The primary tab tracks the active session
+// reactively (props.sessionId follows it); a pinned tab keeps its fixed id.
+const mySessionId = computed<string | null>(() =>
+  props.sessionId !== undefined ? props.sessionId : (chatStore.sessionId ?? null),
+)
+
+// Every session-scoped store value is read through the per-session API keyed by
+// mySessionId, so a pinned tab renders/streams its own session even while a
+// different session is globally active. Names match the previous storeToRefs
+// destructure so the rest of the component is unchanged.
+const messages = computed(() => chatStore.getMessages(mySessionId.value))
+const streaming = computed(() => chatStore.isSessionStreaming(mySessionId.value))
+const activeSession = computed(() =>
+  chatStore.sessions.find(session => session.id === mySessionId.value) ?? null,
+)
+const activeChatReadOnly = computed(() => chatStore.getSessionReadOnly(mySessionId.value))
+const loadingOlder = computed(() => chatStore.getLoadingOlder(mySessionId.value))
+const loadingChats = computed(() => chatStore.getSessionLoading(mySessionId.value))
+const hasMoreOlder = computed(() => chatStore.getHasMoreOlder(mySessionId.value))
+const startupSendFailure = computed(() => chatStore.getStartupSendFailure(mySessionId.value))
+const overrideModelId = computed<string>({
+  get: () => chatStore.getOverrideModelId(mySessionId.value),
+  set: value => chatStore.setOverrideModelId(mySessionId.value, value),
+})
+const overrideReasoningEffort = computed<string>({
+  get: () => chatStore.getOverrideReasoningEffort(mySessionId.value),
+  set: value => chatStore.setOverrideReasoningEffort(mySessionId.value, value),
+})
+
+// A pinned tab that is not the active session (and isn't cached yet) must pull
+// its history in the background so it isn't blank.
+watch(mySessionId, (sid) => {
+  if (sid && sid !== chatStore.sessionId) void chatStore.ensureSessionLoaded(sid)
+}, { immediate: true })
+
+// Tool approvals are answered deep in the message tree (tool-call-inline); give
+// that subtree this pane's session so the response targets the right chat.
+provide(CHAT_PANE_SESSION_ID, mySessionId)
 
 const isActive = computed(() => props.active !== false)
 
@@ -1423,6 +1474,8 @@ const textMultiline = ref(false)
 const narrowMultiline = ref(false)
 const isMultiline = computed(() => textMultiline.value || narrowMultiline.value)
 const compactContentWidth = ref(0)
+const composerInnerWidth = ref(0)
+const composerBoxHeight = ref(0)
 const showSend = computed(() => Boolean(inputText.value.trim()) || pendingFiles.value.length > 0)
 
 // Border-radius morph, kept on the SAME clock as whatever box change drives it.
@@ -1529,9 +1582,34 @@ function recomputeComposerFit() {
   const padX = Number.parseFloat(cs.paddingLeft) + Number.parseFloat(cs.paddingRight)
   const inner = el.clientWidth - padX
   if (inner <= 1) return
+  composerInnerWidth.value = inner
   const room = inner - PLUS_SLOT - ROW_GAPS - rightClusterNaturalWidth()
   narrowMultiline.value = room < MIN_INLINE_TEXTAREA
 }
+
+// The model trigger inherits the Button's `shrink-0`, so it won't yield in a
+// flex row — a long name would push past the box instead of truncating. A hard
+// max-width clamps it regardless of flex-shrink (the min-w-0 label then ellipses
+// within), sized to whatever the controls row can spare after the ＋, send, and
+// any project pill. It only bites when space is tight; otherwise it rests at the
+// 240px cap and the button still hugs a short name.
+const modelTriggerMaxWidth = computed(() => {
+  const inner = composerInnerWidth.value
+  if (inner <= 1) return MODEL_TRIGGER_MAX
+  let reserved = PLUS_SLOT + ROW_GAPS + CLUSTER_GAP + SEND_SLOT
+  const acpLabel = acpProjectLabelEl.value?.scrollWidth ?? 0
+  if (acpLabel > 0) reserved += Math.min(160, acpLabel + 28) + CLUSTER_GAP
+  return Math.max(72, Math.min(MODEL_TRIGGER_MAX, inner - reserved))
+})
+
+// The bottom mask rises only to the box's vertical centre — its widest point.
+// pb-7 (28px) is the strip beneath the box; + half the box height reaches the
+// centre line, which falls behind the box's full-width middle so the mask's top
+// edge is hidden by the box itself (no visible seam, no fade). Above that line
+// the box's rounded top is left to float over whatever is there; below it the
+// fill hides the bottom-corner gaps and the strip beneath, so nothing bleeds out.
+const COMPOSER_MASK_BELOW = 28 // pb-7
+const composerMaskHeight = computed(() => `${COMPOSER_MASK_BELOW + composerBoxHeight.value / 2}px`)
 
 let composerResizeObserver: ResizeObserver | null = null
 onMounted(() => {
@@ -1658,6 +1736,7 @@ watch([inputText, isMultiline], () => {
 onMounted(() => {
   void nextTick(() => {
     composerHeight = composerEl.value?.offsetHeight ?? 0
+    composerBoxHeight.value = composerHeight
     composerMultiline = isMultiline.value
     composerHeightReady = true
     composerSnapNext = false
@@ -1668,6 +1747,9 @@ onMounted(() => {
       // The fit check keys off width only, so the height swing of a pill↔multiline
       // morph (same width) can't feed back and re-toggle it.
       recomputeComposerFit()
+      // The bottom mask tracks the live box height (including mid-morph frames) so
+      // its top edge stays welded to the box's centre as it grows/shrinks.
+      composerBoxHeight.value = el.offsetHeight
       // Skip while we drive the height ourselves; only capture layout-driven
       // resizes so the next morph starts from the real current height. The
       // keystroke path sets composerHeightAnim before this fires, so normal
@@ -1728,17 +1810,16 @@ watch(inputText, (text) => {
   saveInputDraft(inputDraftKey.value, text)
 })
 
+// startupSendFailure is already scoped to this pane's session, so a failed send
+// only restores its input in the tab it came from. Only the focused tab restores
+// (two tabs can share a session), and the bot guard avoids a stale cross-bot hit.
 watch([
   startupSendFailure,
   currentBotId,
-  () => chatStore.sessionId,
-  () => props.tabId,
   isActive,
 ], ([failure]) => {
   if (!failure || !isActive.value) return
   if (failure.botId && failure.botId !== currentBotId.value) return
-  if (failure.sessionId && failure.sessionId !== chatStore.sessionId) return
-  if (failure.sessionId && props.tabId !== `chat:${failure.sessionId}`) return
 
   inputText.value = failure.restoreInput
   saveInputDraft(inputDraftKey.value, failure.restoreInput)
@@ -2064,7 +2145,7 @@ async function ensureOlderLoaded() {
 
       let count = 0
       try {
-        count = await chatStore.loadOlderMessages()
+        count = await chatStore.loadOlderMessages(mySessionId.value)
       } catch (error) {
         console.error('Failed to load older messages:', error)
         return
@@ -2291,7 +2372,7 @@ function handlePendingUserInputSubmit() {
   const userInput = pendingUserInput.value
   const answers = pendingUserInputAnswers.value
   if (!userInput || !answers) return
-  void chatStore.respondUserInput(userInput, { answers })
+  void chatStore.respondUserInput(userInput, { answers }, mySessionId.value ?? undefined)
 }
 
 function handlePendingUserInputCancel() {
@@ -2300,7 +2381,7 @@ function handlePendingUserInputCancel() {
   void chatStore.respondUserInput(userInput, {
     canceled: true,
     reason: 'user_canceled',
-  })
+  }, mySessionId.value ?? undefined)
 }
 
 async function handleSend() {
@@ -2332,7 +2413,7 @@ async function handleSend() {
     return
   }
 
-  const result = await chatStore.sendMessage(text, attachments)
+  const result = await chatStore.sendMessage(text, attachments, mySessionId.value ?? undefined)
   if (!result.ok && result.stage === 'startup') {
     const restoreInput = result.restoreInput ?? text
     inputText.value = restoreInput

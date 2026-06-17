@@ -145,8 +145,33 @@ const chatPanelTitle = computed(() => {
   return (activeSession.value?.title ?? '').trim() || t('chat.untitledSession')
 })
 
+// dockview's built-in floor for a pane is only 100px, so a split pane — or any
+// pane in a cramped window — can collapse to an unusable sliver (vertical-wrapped
+// text, a clipped composer). Raise the floor to a width that still seats the chat
+// composer's pill/multiline row and keeps the message column legible.
+const MIN_PANE_WIDTH = 280
+
+function setGroupMinWidth(group: { api: { setConstraints: (value: { minimumWidth?: number }) => void } }) {
+  try {
+    group.api.setConstraints({ minimumWidth: MIN_PANE_WIDTH })
+  } catch {
+    // Constraints are a progressive enhancement: if a future dockview build
+    // changes this surface, the dock must still mount with its default floor.
+  }
+}
+
+function enforceMinPaneWidth(api: DockviewReadyEvent['api']) {
+  for (const group of api.groups) setGroupMinWidth(group)
+  // Cover groups created later by splits/drags too. onDidAddGroup is sound at
+  // runtime; only the bundled type definitions mangle its name, hence the cast.
+  ;(api as unknown as {
+    onDidAddGroup: (cb: (group: { api: { setConstraints: (value: { minimumWidth?: number }) => void } }) => void) => void
+  }).onDidAddGroup(setGroupMinWidth)
+}
+
 function onReady(event: DockviewReadyEvent) {
   store.registerApi(event.api)
+  enforceMinPaneWidth(event.api)
   if (rootEl.value) event.api.layout(rootEl.value.clientWidth, rootEl.value.clientHeight)
   ensureChatPanel()
 }
