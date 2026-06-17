@@ -2,9 +2,9 @@
   <section>
     <FormDialogShell
       v-model:open="open"
-      :title="$t('webSearch.addSearch')"
+      :title="$t('webSearch.addFetch')"
       :cancel-text="$t('common.cancel')"
-      :submit-text="$t('webSearch.addSearch')"
+      :submit-text="$t('webSearch.addFetch')"
       :submit-disabled="(form.meta.value.valid === false) || isLoading"
       :loading="isLoading"
       @submit="handleCreate"
@@ -19,7 +19,7 @@
           class="w-full shadow-none! text-muted-foreground h-9 px-3 rounded-md border-border bg-background hover:bg-accent"
           variant="outline"
         >
-          <Plus class="mr-1 size-4" /> {{ $t('webSearch.addSearch') }}
+          <Plus class="mr-1 size-4" /> {{ $t('webSearch.addFetch') }}
         </Button>
       </template>
       <template #body>
@@ -31,13 +31,13 @@
             <FormItem>
               <Label
                 class="mb-2"
-                :for="'search-provider-create-name'"
+                :for="'fetch-provider-create-name'"
               >
                 {{ $t('common.name') }}
               </Label>
               <FormControl>
                 <Input
-                  :id="'search-provider-create-name'"
+                  :id="'fetch-provider-create-name'"
                   type="text"
                   :placeholder="$t('common.namePlaceholder')"
                   v-bind="componentField"
@@ -53,16 +53,16 @@
             <FormItem>
               <Label
                 class="mb-2"
-                :for="'search-provider-create-type'"
+                :for="'fetch-provider-create-type'"
               >
-                {{ $t('webSearch.provider') }}
+                {{ $t('webSearch.fetchProvider') }}
               </Label>
               <FormControl>
                 <Select v-bind="componentField">
                   <SelectTrigger
-                    :id="'search-provider-create-type'"
+                    :id="'fetch-provider-create-type'"
                     class="w-full"
-                    :aria-label="$t('webSearch.provider')"
+                    :aria-label="$t('webSearch.fetchProvider')"
                   >
                     <SelectValue :placeholder="$t('common.typePlaceholder')" />
                   </SelectTrigger>
@@ -73,7 +73,7 @@
                         :key="type"
                         :value="type"
                       >
-                        {{ $t(`webSearch.providerNames.${type}`, type) }}
+                        {{ $t(`webSearch.fetchProviderNames.${type}`, type) }}
                       </SelectItem>
                     </SelectGroup>
                   </SelectContent>
@@ -106,14 +106,14 @@ import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
 import { useMutation, useQueryCache } from '@pinia/colada'
-import { postSearchProviders } from '@memohai/sdk'
-import type { SearchprovidersCreateRequest } from '@memohai/sdk'
+import { postFetchProviders } from '@memohai/sdk'
+import type { FetchprovidersCreateRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { Plus } from 'lucide-vue-next'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 
-const PROVIDER_TYPES = ['brave', 'bing', 'google', 'tavily', 'sogou', 'serper', 'searxng', 'jina', 'exa', 'bocha', 'duckduckgo', 'yandex'] as const
+const PROVIDER_TYPES = ['jina', 'cloudflare_markdown'] as const
 
 const open = defineModel<boolean>('open')
 withDefaults(defineProps<{
@@ -127,10 +127,10 @@ const { run } = useDialogMutation()
 const queryCache = useQueryCache()
 const { mutateAsync: createProviderMutation, isLoading } = useMutation({
   mutation: async (data: Record<string, unknown>) => {
-    const { data: result } = await postSearchProviders({ body: data as SearchprovidersCreateRequest, throwOnError: true })
+    const { data: result } = await postFetchProviders({ body: data as FetchprovidersCreateRequest, throwOnError: true })
     return result
   },
-  onSettled: () => queryCache.invalidateQueries({ key: ['search-providers'] }),
+  onSettled: () => queryCache.invalidateQueries({ key: ['fetch-providers'] }),
 })
 
 const providerSchema = toTypedSchema(z.object({
