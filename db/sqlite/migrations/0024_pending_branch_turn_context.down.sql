@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS tool_approval_requests_0023_down (
   CONSTRAINT tool_approval_tool_call_unique UNIQUE (session_id, tool_call_id)
 );
 
-INSERT OR IGNORE INTO tool_approval_requests_0023_down (
+INSERT INTO tool_approval_requests_0023_down (
   id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name,
   operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id,
   decided_by_channel_identity_id, requested_message_id, prompt_message_id,
@@ -47,7 +47,19 @@ SELECT
   decided_by_channel_identity_id, requested_message_id, prompt_message_id,
   prompt_external_message_id, source_platform, reply_target, conversation_type,
   created_at, decided_at
-FROM tool_approval_requests;
+FROM (
+  SELECT
+    *,
+    ROW_NUMBER() OVER (
+      PARTITION BY session_id, tool_call_id
+      ORDER BY
+        CASE WHEN persist_turn_id IS NULL THEN 0 ELSE 1 END,
+        created_at DESC,
+        id DESC
+    ) AS row_num
+  FROM tool_approval_requests
+) ranked
+WHERE row_num = 1;
 
 DROP TABLE tool_approval_requests;
 ALTER TABLE tool_approval_requests_0023_down RENAME TO tool_approval_requests;
@@ -93,7 +105,7 @@ CREATE TABLE IF NOT EXISTS user_input_requests_0023_down (
   CONSTRAINT user_input_short_id_unique UNIQUE (session_id, short_id)
 );
 
-INSERT OR IGNORE INTO user_input_requests_0023_down (
+INSERT INTO user_input_requests_0023_down (
   id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name,
   short_id, status, input_json, ui_payload_json, result_json, provider_metadata,
   requested_by_channel_identity_id, responded_by_channel_identity_id,
@@ -108,7 +120,19 @@ SELECT
   assistant_message_id, tool_result_message_id, prompt_message_id,
   prompt_external_message_id, source_platform, reply_target, conversation_type,
   expires_at, created_at, responded_at, canceled_at, updated_at
-FROM user_input_requests;
+FROM (
+  SELECT
+    *,
+    ROW_NUMBER() OVER (
+      PARTITION BY session_id, tool_call_id
+      ORDER BY
+        CASE WHEN persist_turn_id IS NULL THEN 0 ELSE 1 END,
+        created_at DESC,
+        id DESC
+    ) AS row_num
+  FROM user_input_requests
+) ranked
+WHERE row_num = 1;
 
 DROP TABLE user_input_requests;
 ALTER TABLE user_input_requests_0023_down RENAME TO user_input_requests;

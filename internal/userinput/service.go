@@ -165,19 +165,50 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 		ProviderMetadata:             providerMetadata,
 		RequestedByChannelIdentityID: requestedByID,
 		PersistBranchID:              persistBranchID,
-		PersistTurnID:                persistTurnID,
 		SourcePlatform:               strings.TrimSpace(input.SourcePlatform),
 		ReplyTarget:                  strings.TrimSpace(input.ReplyTarget),
 		ConversationType:             strings.TrimSpace(input.ConversationType),
 		ExpiresAt:                    optionalTime(input.ExpiresAt),
 	}
-	row, err := s.queries.CreateUserInputRequest(ctx, params)
+	var row sqlc.UserInputRequest
+	if persistTurnID.Valid {
+		row, err = s.queries.CreateUserInputRequestForTurn(ctx, sqlc.CreateUserInputRequestForTurnParams{
+			BotID:                        params.BotID,
+			SessionID:                    params.SessionID,
+			RouteID:                      params.RouteID,
+			ChannelIdentityID:            params.ChannelIdentityID,
+			ToolCallID:                   params.ToolCallID,
+			ToolName:                     params.ToolName,
+			InputJson:                    params.InputJson,
+			UiPayloadJson:                params.UiPayloadJson,
+			ProviderMetadata:             params.ProviderMetadata,
+			RequestedByChannelIdentityID: params.RequestedByChannelIdentityID,
+			PersistBranchID:              persistBranchID,
+			PersistTurnID:                persistTurnID,
+			SourcePlatform:               params.SourcePlatform,
+			ReplyTarget:                  params.ReplyTarget,
+			ConversationType:             params.ConversationType,
+			ExpiresAt:                    params.ExpiresAt,
+		})
+	} else {
+		row, err = s.queries.CreateUserInputRequest(ctx, params)
+	}
 	if err != nil {
 		if errors.Is(mapLookupErr(err), ErrNotFound) {
-			existing, getErr := s.queries.GetUserInputRequestBySessionToolCall(ctx, sqlc.GetUserInputRequestBySessionToolCallParams{
-				SessionID:  sessionID,
-				ToolCallID: toolCallID,
-			})
+			var existing sqlc.UserInputRequest
+			var getErr error
+			if persistTurnID.Valid {
+				existing, getErr = s.queries.GetUserInputRequestBySessionToolCallTurn(ctx, sqlc.GetUserInputRequestBySessionToolCallTurnParams{
+					SessionID:     sessionID,
+					ToolCallID:    toolCallID,
+					PersistTurnID: persistTurnID,
+				})
+			} else {
+				existing, getErr = s.queries.GetUserInputRequestBySessionToolCall(ctx, sqlc.GetUserInputRequestBySessionToolCallParams{
+					SessionID:  sessionID,
+					ToolCallID: toolCallID,
+				})
+			}
 			if getErr == nil {
 				existingReq := requestFromRow(existing)
 				if existingReq.Status != StatusPending {
@@ -621,7 +652,7 @@ func (s *Service) listBySession(ctx context.Context, botID, sessionID string, pe
 	result := make([]Request, 0, len(rows))
 	for _, row := range rows {
 		req := requestFromRow(row)
-		if pendingOnly && !s.requestVisibleInActivePath(ctx, row.SessionID, req.PersistBranchID, req.PersistTurnID) {
+		if !s.requestVisibleInActivePath(ctx, row.SessionID, req.PersistBranchID, req.PersistTurnID) {
 			continue
 		}
 		result = append(result, req)

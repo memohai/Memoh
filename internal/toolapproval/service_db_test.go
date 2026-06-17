@@ -106,9 +106,14 @@ CREATE TABLE tool_approval_requests (
   decided_at TEXT,
   CONSTRAINT tool_approval_operation_check CHECK (operation IN ('read', 'write', 'exec')),
   CONSTRAINT tool_approval_status_check CHECK (status IN ('pending', 'approved', 'rejected', 'expired', 'cancelled')),
-  CONSTRAINT tool_approval_short_id_unique UNIQUE (session_id, short_id),
-  CONSTRAINT tool_approval_tool_call_unique UNIQUE (session_id, tool_call_id)
+  CONSTRAINT tool_approval_short_id_unique UNIQUE (session_id, short_id)
 );
+CREATE UNIQUE INDEX tool_approval_tool_call_legacy_unique
+  ON tool_approval_requests(session_id, tool_call_id)
+  WHERE persist_turn_id IS NULL;
+CREATE UNIQUE INDEX tool_approval_tool_call_turn_unique
+  ON tool_approval_requests(session_id, tool_call_id, persist_turn_id)
+  WHERE persist_turn_id IS NOT NULL;
 `)
 	if _, err := conn.ExecContext(ctx, `INSERT INTO bots (id) VALUES (?)`, testApprovalBotID); err != nil {
 		t.Fatalf("insert bot: %v", err)
@@ -317,6 +322,48 @@ func TestServicePendingApprovalUsesActiveVisibleTurnPath(t *testing.T) {
 	}
 	if got, err := svc.ResolveTarget(ctx, ResolveInput{BotID: testApprovalBotID, SessionID: testApprovalSessionID}); err != nil || got.ID != rootAfterFork.ID {
 		t.Fatalf("latest visible on root = (%#v, %v), want %s", got, err, rootAfterFork.ID)
+	}
+}
+
+func TestServiceCreatePendingApprovalIsIdempotentPerTurn(t *testing.T) {
+	svc, conn := newSQLiteToolApprovalServiceWithDB(t)
+	ctx := context.Background()
+
+	first, err := svc.CreatePending(ctx, testApprovalInputForTurn("replayed-call", testApprovalRootBranch, testApprovalRootTurn1))
+	if err != nil {
+		t.Fatalf("create first turn approval: %v", err)
+	}
+	duplicate, err := svc.CreatePending(ctx, testApprovalInputForTurn("replayed-call", testApprovalRootBranch, testApprovalRootTurn1))
+	if err != nil {
+		t.Fatalf("create duplicate turn approval: %v", err)
+	}
+	if duplicate.ID != first.ID {
+		t.Fatalf("duplicate turn approval ID = %s, want %s", duplicate.ID, first.ID)
+	}
+
+	if _, err := svc.Reject(ctx, first.ID, "", "done"); err != nil {
+		t.Fatalf("reject first approval: %v", err)
+	}
+	secondTurn, err := svc.CreatePending(ctx, testApprovalInputForTurn("replayed-call", testApprovalRootBranch, testApprovalRootTurn2))
+	if err != nil {
+		t.Fatalf("create same call on second turn: %v", err)
+	}
+	if secondTurn.ID == first.ID {
+		t.Fatalf("second turn reused first approval %s", first.ID)
+	}
+	if secondTurn.ShortID == first.ShortID {
+		t.Fatalf("second turn short_id = %d, want a new session-scoped short id", secondTurn.ShortID)
+	}
+
+	var firstPersist, secondPersist string
+	if err := conn.QueryRowContext(ctx, `SELECT persist_turn_id FROM tool_approval_requests WHERE id = ?`, first.ID).Scan(&firstPersist); err != nil {
+		t.Fatalf("select first persist turn: %v", err)
+	}
+	if err := conn.QueryRowContext(ctx, `SELECT persist_turn_id FROM tool_approval_requests WHERE id = ?`, secondTurn.ID).Scan(&secondPersist); err != nil {
+		t.Fatalf("select second persist turn: %v", err)
+	}
+	if firstPersist != testApprovalRootTurn1 || secondPersist != testApprovalRootTurn2 {
+		t.Fatalf("persist turns = %q/%q, want %q/%q", firstPersist, secondPersist, testApprovalRootTurn1, testApprovalRootTurn2)
 	}
 }
 

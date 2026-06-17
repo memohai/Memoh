@@ -87,7 +87,9 @@ type Queries interface {
 	CreateSessionEvent(ctx context.Context, arg dbsqlc.CreateSessionEventParams) (pgtype.UUID, error)
 	CreateStorageProvider(ctx context.Context, arg dbsqlc.CreateStorageProviderParams) (dbsqlc.StorageProvider, error)
 	CreateToolApprovalRequest(ctx context.Context, arg dbsqlc.CreateToolApprovalRequestParams) (dbsqlc.ToolApprovalRequest, error)
+	CreateToolApprovalRequestForTurn(ctx context.Context, arg dbsqlc.CreateToolApprovalRequestForTurnParams) (dbsqlc.ToolApprovalRequest, error)
 	CreateUserInputRequest(ctx context.Context, arg dbsqlc.CreateUserInputRequestParams) (dbsqlc.UserInputRequest, error)
+	CreateUserInputRequestForTurn(ctx context.Context, arg dbsqlc.CreateUserInputRequestForTurnParams) (dbsqlc.UserInputRequest, error)
 	CreateUser(ctx context.Context, arg dbsqlc.CreateUserParams) (dbsqlc.User, error)
 	DeleteBotACLRuleByID(ctx context.Context, id pgtype.UUID) error
 	DeleteBotByID(ctx context.Context, id pgtype.UUID) error
@@ -201,6 +203,7 @@ type Queries interface {
 	GetToolApprovalRequest(ctx context.Context, id pgtype.UUID) (dbsqlc.ToolApprovalRequest, error)
 	GetUserInputRequest(ctx context.Context, id pgtype.UUID) (dbsqlc.UserInputRequest, error)
 	GetUserInputRequestBySessionToolCall(ctx context.Context, arg dbsqlc.GetUserInputRequestBySessionToolCallParams) (dbsqlc.UserInputRequest, error)
+	GetUserInputRequestBySessionToolCallTurn(ctx context.Context, arg dbsqlc.GetUserInputRequestBySessionToolCallTurnParams) (dbsqlc.UserInputRequest, error)
 	GetTranscriptionModelWithProvider(ctx context.Context, id pgtype.UUID) (dbsqlc.GetTranscriptionModelWithProviderRow, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (dbsqlc.User, error)
 	GetUserChannelBinding(ctx context.Context, arg dbsqlc.GetUserChannelBindingParams) (dbsqlc.UserChannelBinding, error)

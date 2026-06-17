@@ -99,6 +99,7 @@ type UITurn struct {
 	SenderUserID      string            `json:"sender_user_id,omitempty"`
 	ExternalMessageID string            `json:"external_message_id,omitempty"`
 	ID                string            `json:"id,omitempty"`
+	TurnID            string            `json:"-"`
 }
 
 // UIBranchInfo identifies the in-session branch path a turn belongs to.

@@ -36,7 +36,7 @@
       <!-- Copy — shared by both roles. The clipboard glyph is mirrored on X so
            the two stacked squares read top-left over bottom-right, matching the
            composer's copy affordance. -->
-      <Tooltip>
+      <Tooltip v-if="hasCopyText">
         <TooltipTrigger as-child>
           <Button
             type="button"
@@ -181,6 +181,7 @@ const actionIconClass
   = 'text-[color-mix(in_oklab,var(--muted-foreground),var(--foreground)_15%)] hover:text-foreground'
 
 const copied = computed(() => props.copied === true)
+const hasCopyText = computed(() => props.copyText.trim().length > 0)
 const canForkAction = computed(() => props.canFork === true)
 const canRewriteAction = computed(() => props.canRewrite === true)
 const copyLabel = computed(() => (copied.value ? t('chat.actions.copied') : t('chat.actions.copy')))

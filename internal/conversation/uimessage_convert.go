@@ -231,6 +231,7 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 				Platform:          resolveUIPersistencePlatform(raw),
 				ExternalMessageID: strings.TrimSpace(raw.ExternalMessageID),
 				ID:                strings.TrimSpace(raw.ID),
+				TurnID:            strings.TrimSpace(raw.TurnID),
 			}
 			if turn.Platform != "" {
 				turn.SenderDisplayName = strings.TrimSpace(raw.SenderDisplayName)
@@ -321,6 +322,7 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 				Platform:          resolveUIPersistencePlatform(raw),
 				ExternalMessageID: strings.TrimSpace(raw.ExternalMessageID),
 				ID:                strings.TrimSpace(raw.ID),
+				TurnID:            strings.TrimSpace(raw.TurnID),
 			})
 			registerBackgroundTools(len(result) - 1)
 
@@ -353,6 +355,7 @@ func newPendingAssistantTurn(raw messagepkg.Message) *uiPendingAssistantTurn {
 			Platform:          resolveUIPersistencePlatform(raw),
 			ExternalMessageID: strings.TrimSpace(raw.ExternalMessageID),
 			ID:                strings.TrimSpace(raw.ID),
+			TurnID:            strings.TrimSpace(raw.TurnID),
 		},
 		ToolIndexes: map[string]int{},
 	}

@@ -111,7 +111,7 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 	if err := s.runApprovalHook(ctx, hooks.EventBeforeApprovalCreate, input, Request{}, true); err != nil {
 		return Request{}, err
 	}
-	row, err := s.queries.CreateToolApprovalRequest(ctx, sqlc.CreateToolApprovalRequestParams{
+	params := sqlc.CreateToolApprovalRequestParams{
 		BotID:                        botID,
 		SessionID:                    sessionID,
 		RouteID:                      optionalUUID(input.RouteID),
@@ -123,11 +123,32 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 		RequestedByChannelIdentityID: requestedByID,
 		RequestedMessageID:           optionalUUID(input.RequestedMessageID),
 		PersistBranchID:              persistBranchID,
-		PersistTurnID:                persistTurnID,
 		SourcePlatform:               strings.TrimSpace(input.SourcePlatform),
 		ReplyTarget:                  strings.TrimSpace(input.ReplyTarget),
 		ConversationType:             strings.TrimSpace(input.ConversationType),
-	})
+	}
+	var row sqlc.ToolApprovalRequest
+	if persistTurnID.Valid {
+		row, err = s.queries.CreateToolApprovalRequestForTurn(ctx, sqlc.CreateToolApprovalRequestForTurnParams{
+			BotID:                        params.BotID,
+			SessionID:                    params.SessionID,
+			RouteID:                      params.RouteID,
+			ChannelIdentityID:            params.ChannelIdentityID,
+			ToolCallID:                   params.ToolCallID,
+			ToolName:                     params.ToolName,
+			Operation:                    params.Operation,
+			ToolInput:                    params.ToolInput,
+			RequestedByChannelIdentityID: params.RequestedByChannelIdentityID,
+			RequestedMessageID:           params.RequestedMessageID,
+			PersistBranchID:              persistBranchID,
+			PersistTurnID:                persistTurnID,
+			SourcePlatform:               params.SourcePlatform,
+			ReplyTarget:                  params.ReplyTarget,
+			ConversationType:             params.ConversationType,
+		})
+	} else {
+		row, err = s.queries.CreateToolApprovalRequest(ctx, params)
+	}
 	if err != nil {
 		return Request{}, err
 	}
@@ -609,7 +630,7 @@ func (s *Service) listBySession(ctx context.Context, botID, sessionID string, pe
 	result := make([]Request, 0, len(rows))
 	for _, row := range rows {
 		req := requestFromRow(row)
-		if pendingOnly && !s.requestVisibleInActivePath(ctx, row.SessionID, req.PersistBranchID, req.PersistTurnID) {
+		if !s.requestVisibleInActivePath(ctx, row.SessionID, req.PersistBranchID, req.PersistTurnID) {
 			continue
 		}
 		result = append(result, req)

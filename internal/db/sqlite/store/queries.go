@@ -1345,6 +1345,25 @@ func (q *Queries) CreateToolApprovalRequest(ctx context.Context, arg pgsqlc.Crea
 	return result, nil
 }
 
+func (q *Queries) CreateToolApprovalRequestForTurn(ctx context.Context, arg pgsqlc.CreateToolApprovalRequestForTurnParams) (pgsqlc.ToolApprovalRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.ToolApprovalRequest{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.CreateToolApprovalRequestForTurnParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.ToolApprovalRequest{}, err
+	}
+	out, err := q.store.queries.CreateToolApprovalRequestForTurn(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.ToolApprovalRequest{}, mapQueryErr(err)
+	}
+	var result pgsqlc.ToolApprovalRequest
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.ToolApprovalRequest{}, err
+	}
+	return result, nil
+}
+
 func (q *Queries) CreateUser(ctx context.Context, arg pgsqlc.CreateUserParams) (pgsqlc.User, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return pgsqlc.User{}, errSQLiteQueriesNotConfigured
@@ -5745,6 +5764,25 @@ func (q *Queries) CreateUserInputRequest(ctx context.Context, arg pgsqlc.CreateU
 	return result, nil
 }
 
+func (q *Queries) CreateUserInputRequestForTurn(ctx context.Context, arg pgsqlc.CreateUserInputRequestForTurnParams) (pgsqlc.UserInputRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.UserInputRequest{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.CreateUserInputRequestForTurnParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	out, err := q.store.queries.CreateUserInputRequestForTurn(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.UserInputRequest{}, mapQueryErr(err)
+	}
+	var result pgsqlc.UserInputRequest
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	return result, nil
+}
+
 func (q *Queries) FailUserInputRequest(ctx context.Context, arg pgsqlc.FailUserInputRequestParams) (pgsqlc.UserInputRequest, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return pgsqlc.UserInputRequest{}, errSQLiteQueriesNotConfigured
@@ -5849,6 +5887,25 @@ func (q *Queries) GetUserInputRequestBySessionToolCall(ctx context.Context, arg 
 		return pgsqlc.UserInputRequest{}, err
 	}
 	out, err := q.store.queries.GetUserInputRequestBySessionToolCall(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.UserInputRequest{}, mapQueryErr(err)
+	}
+	var result pgsqlc.UserInputRequest
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) GetUserInputRequestBySessionToolCallTurn(ctx context.Context, arg pgsqlc.GetUserInputRequestBySessionToolCallTurnParams) (pgsqlc.UserInputRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.UserInputRequest{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.GetUserInputRequestBySessionToolCallTurnParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	out, err := q.store.queries.GetUserInputRequestBySessionToolCallTurn(ctx, sqliteArg)
 	if err != nil {
 		return pgsqlc.UserInputRequest{}, mapQueryErr(err)
 	}

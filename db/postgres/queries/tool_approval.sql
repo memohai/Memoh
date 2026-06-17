@@ -39,12 +39,12 @@ INSERT INTO tool_approval_requests (
   sqlc.narg(requested_by_channel_identity_id),
   sqlc.narg(requested_message_id),
   sqlc.narg(persist_branch_id),
-  sqlc.narg(persist_turn_id),
+  NULL,
   sqlc.arg(source_platform),
   sqlc.arg(reply_target),
   sqlc.arg(conversation_type)
 )
-ON CONFLICT (session_id, tool_call_id) DO UPDATE
+ON CONFLICT (session_id, tool_call_id) WHERE persist_turn_id IS NULL DO UPDATE
 SET tool_input = CASE
   WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.tool_input
   ELSE tool_approval_requests.tool_input
@@ -61,9 +61,82 @@ persist_branch_id = CASE
   WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.persist_branch_id
   ELSE tool_approval_requests.persist_branch_id
 END,
-persist_turn_id = CASE
-  WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.persist_turn_id
-  ELSE tool_approval_requests.persist_turn_id
+source_platform = CASE
+  WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.source_platform
+  ELSE tool_approval_requests.source_platform
+END,
+reply_target = CASE
+  WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.reply_target
+  ELSE tool_approval_requests.reply_target
+END,
+conversation_type = CASE
+  WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.conversation_type
+  ELSE tool_approval_requests.conversation_type
+END
+RETURNING *;
+
+-- name: CreateToolApprovalRequestForTurn :one
+WITH session_lock AS (
+  SELECT id
+  FROM bot_sessions
+  WHERE id = sqlc.arg(session_id)
+  FOR UPDATE
+)
+INSERT INTO tool_approval_requests (
+  bot_id,
+  session_id,
+  route_id,
+  channel_identity_id,
+  tool_call_id,
+  tool_name,
+  operation,
+  tool_input,
+  short_id,
+  requested_by_channel_identity_id,
+  requested_message_id,
+  persist_branch_id,
+  persist_turn_id,
+  source_platform,
+  reply_target,
+  conversation_type
+) VALUES (
+  sqlc.arg(bot_id),
+  sqlc.arg(session_id),
+  sqlc.narg(route_id),
+  sqlc.narg(channel_identity_id),
+  sqlc.arg(tool_call_id),
+  sqlc.arg(tool_name),
+  sqlc.arg(operation),
+  sqlc.arg(tool_input),
+  (
+    SELECT COALESCE(MAX(short_id), 0) + 1
+    FROM tool_approval_requests
+    WHERE session_id = (SELECT id FROM session_lock)
+  ),
+  sqlc.narg(requested_by_channel_identity_id),
+  sqlc.narg(requested_message_id),
+  sqlc.narg(persist_branch_id),
+  sqlc.arg(persist_turn_id),
+  sqlc.arg(source_platform),
+  sqlc.arg(reply_target),
+  sqlc.arg(conversation_type)
+)
+ON CONFLICT (session_id, tool_call_id, persist_turn_id) WHERE persist_turn_id IS NOT NULL DO UPDATE
+SET tool_input = CASE
+  WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.tool_input
+  ELSE tool_approval_requests.tool_input
+END,
+requested_by_channel_identity_id = CASE
+  WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.requested_by_channel_identity_id
+  ELSE tool_approval_requests.requested_by_channel_identity_id
+END,
+requested_message_id = CASE
+  WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.requested_message_id
+  ELSE tool_approval_requests.requested_message_id
+END,
+persist_branch_id = CASE
+  WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.persist_branch_id
+  ELSE tool_approval_requests.persist_branch_id
 END,
 source_platform = CASE
   WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.source_platform

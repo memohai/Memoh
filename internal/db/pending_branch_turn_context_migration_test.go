@@ -12,7 +12,7 @@ func TestSQLitePendingBranchTurnContextMigrationPreservesOldRows(t *testing.T) {
 	target := MigrationTarget{Driver: DriverSQLite, DSN: dsn}
 
 	if err := RunMigrateTarget(nil, target, sqliteMigrationsFSUpTo(t, 23), "up", nil); err != nil {
-		t.Fatalf("migrate through 0022: %v", err)
+		t.Fatalf("migrate through 0023: %v", err)
 	}
 
 	db := openMigrationSQLite(t, dsn)
@@ -53,8 +53,8 @@ INSERT INTO user_input_requests (
 	}
 	closeMigrationSQLite(t, db)
 
-	if err := RunMigrateTarget(nil, target, sqliteMigrationsFS(t), "up", nil); err != nil {
-		t.Fatalf("migrate through latest: %v", err)
+	if err := RunMigrateTarget(nil, target, sqliteMigrationsFSUpTo(t, 24), "up", nil); err != nil {
+		t.Fatalf("migrate through 0024: %v", err)
 	}
 
 	db = openMigrationSQLite(t, dsn)
@@ -119,6 +119,61 @@ WHERE id = '00000000-0000-0000-0000-000000002005'
 		RespondedAt:             sql.NullString{String: "2026-06-14 11:26:00", Valid: true},
 		CanceledAt:              sql.NullString{String: "2026-06-14 11:27:00", Valid: true},
 		UpdatedAt:               "2026-06-14 11:28:00",
+	})
+}
+
+func TestSQLitePendingBranchTurnContextDownDedupesTurnScopedRows(t *testing.T) {
+	ctx := context.Background()
+	dsn := tempSQLiteMigrationDSN(t)
+	target := MigrationTarget{Driver: DriverSQLite, DSN: dsn}
+
+	if err := RunMigrateTarget(nil, target, sqliteMigrationsFS(t), "up", nil); err != nil {
+		t.Fatalf("migrate through latest: %v", err)
+	}
+
+	db := openMigrationSQLite(t, dsn)
+	seedSQLitePendingContextBase(t, db)
+	seedSQLitePendingTurnContext(t, db)
+	if _, err := db.ExecContext(ctx, `
+INSERT INTO tool_approval_requests (
+  id, bot_id, session_id, tool_call_id, tool_name, operation, tool_input, short_id, status,
+  decision_reason, persist_branch_id, persist_turn_id, created_at
+) VALUES
+  ('00000000-0000-0000-0000-000000002210', '00000000-0000-0000-0000-000000002002', '00000000-0000-0000-0000-000000002003', 'call-approval-legacy', 'exec', 'exec', '{}', 10, 'pending', '', NULL, NULL, '2026-06-14 11:20:00'),
+  ('00000000-0000-0000-0000-000000002211', '00000000-0000-0000-0000-000000002002', '00000000-0000-0000-0000-000000002003', 'call-approval-legacy', 'exec', 'exec', '{}', 11, 'pending', '', '00000000-0000-0000-0000-000000002101', '00000000-0000-0000-0000-000000002201', '2026-06-14 11:21:00'),
+  ('00000000-0000-0000-0000-000000002212', '00000000-0000-0000-0000-000000002002', '00000000-0000-0000-0000-000000002003', 'call-approval-turn', 'exec', 'exec', '{}', 12, 'pending', '', '00000000-0000-0000-0000-000000002101', '00000000-0000-0000-0000-000000002201', '2026-06-14 11:22:00'),
+  ('00000000-0000-0000-0000-000000002213', '00000000-0000-0000-0000-000000002002', '00000000-0000-0000-0000-000000002003', 'call-approval-turn', 'exec', 'exec', '{}', 13, 'pending', '', '00000000-0000-0000-0000-000000002101', '00000000-0000-0000-0000-000000002202', '2026-06-14 11:23:00')
+`); err != nil {
+		t.Fatalf("insert turn-scoped approvals: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+INSERT INTO user_input_requests (
+  id, bot_id, session_id, tool_call_id, tool_name, short_id, status,
+  input_json, ui_payload_json, result_json, provider_metadata,
+  persist_branch_id, persist_turn_id, created_at, updated_at
+) VALUES
+  ('00000000-0000-0000-0000-000000002220', '00000000-0000-0000-0000-000000002002', '00000000-0000-0000-0000-000000002003', 'call-input-legacy', 'ask_user', 20, 'pending', '{}', '{}', '{}', '{}', NULL, NULL, '2026-06-14 11:20:00', '2026-06-14 11:20:00'),
+  ('00000000-0000-0000-0000-000000002221', '00000000-0000-0000-0000-000000002002', '00000000-0000-0000-0000-000000002003', 'call-input-legacy', 'ask_user', 21, 'pending', '{}', '{}', '{}', '{}', '00000000-0000-0000-0000-000000002101', '00000000-0000-0000-0000-000000002201', '2026-06-14 11:21:00', '2026-06-14 11:21:00'),
+  ('00000000-0000-0000-0000-000000002222', '00000000-0000-0000-0000-000000002002', '00000000-0000-0000-0000-000000002003', 'call-input-turn', 'ask_user', 22, 'pending', '{}', '{}', '{}', '{}', '00000000-0000-0000-0000-000000002101', '00000000-0000-0000-0000-000000002201', '2026-06-14 11:22:00', '2026-06-14 11:22:00'),
+  ('00000000-0000-0000-0000-000000002223', '00000000-0000-0000-0000-000000002002', '00000000-0000-0000-0000-000000002003', 'call-input-turn', 'ask_user', 23, 'pending', '{}', '{}', '{}', '{}', '00000000-0000-0000-0000-000000002101', '00000000-0000-0000-0000-000000002202', '2026-06-14 11:23:00', '2026-06-14 11:23:00')
+`); err != nil {
+		t.Fatalf("insert turn-scoped user inputs: %v", err)
+	}
+	closeMigrationSQLite(t, db)
+
+	db = openMigrationSQLite(t, dsn)
+	defer closeMigrationSQLite(t, db)
+	if _, err := db.ExecContext(ctx, readEmbeddedMigration(t, "sqlite/migrations/0024_pending_branch_turn_context.down.sql")); err != nil {
+		t.Fatalf("execute 0024 down migration: %v", err)
+	}
+
+	assertOnlyPendingIDs(t, db, "tool_approval_requests", map[string]string{
+		"call-approval-legacy": "00000000-0000-0000-0000-000000002210",
+		"call-approval-turn":   "00000000-0000-0000-0000-000000002213",
+	})
+	assertOnlyPendingIDs(t, db, "user_input_requests", map[string]string{
+		"call-input-legacy": "00000000-0000-0000-0000-000000002220",
+		"call-input-turn":   "00000000-0000-0000-0000-000000002223",
 	})
 }
 
@@ -230,6 +285,58 @@ func seedSQLitePendingContextBase(t *testing.T, db *sql.DB) {
 	for _, stmt := range stmts {
 		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
 			t.Fatalf("exec seed %q: %v", stmt, err)
+		}
+	}
+}
+
+func seedSQLitePendingTurnContext(t *testing.T, db *sql.DB) {
+	t.Helper()
+	stmts := []string{
+		`INSERT INTO bot_session_branches(id, session_id, title) VALUES('00000000-0000-0000-0000-000000002101', '00000000-0000-0000-0000-000000002003', 'Root')`,
+		`INSERT INTO bot_history_turns(id, session_id, branch_id, turn_seq, status, created_at, updated_at) VALUES('00000000-0000-0000-0000-000000002201', '00000000-0000-0000-0000-000000002003', '00000000-0000-0000-0000-000000002101', 1, 'completed', '2026-06-14 11:21:00', '2026-06-14 11:21:00')`,
+		`INSERT INTO bot_history_turns(id, session_id, branch_id, turn_seq, status, created_at, updated_at) VALUES('00000000-0000-0000-0000-000000002202', '00000000-0000-0000-0000-000000002003', '00000000-0000-0000-0000-000000002101', 2, 'completed', '2026-06-14 11:23:00', '2026-06-14 11:23:00')`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			t.Fatalf("exec seed turn context %q: %v", stmt, err)
+		}
+	}
+}
+
+func assertOnlyPendingIDs(t *testing.T, db *sql.DB, table string, want map[string]string) {
+	t.Helper()
+	var query string
+	switch table {
+	case "tool_approval_requests":
+		query = "SELECT tool_call_id, id FROM tool_approval_requests ORDER BY tool_call_id"
+	case "user_input_requests":
+		query = "SELECT tool_call_id, id FROM user_input_requests ORDER BY tool_call_id"
+	default:
+		t.Fatalf("unexpected pending table %q", table)
+	}
+	rows, err := db.QueryContext(context.Background(), query)
+	if err != nil {
+		t.Fatalf("select %s: %v", table, err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			t.Fatalf("close %s rows: %v", table, err)
+		}
+	}()
+	got := map[string]string{}
+	for rows.Next() {
+		var callID, id string
+		if err := rows.Scan(&callID, &id); err != nil {
+			t.Fatalf("scan %s: %v", table, err)
+		}
+		got[callID] = id
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate %s: %v", table, err)
+	}
+	for callID, wantID := range want {
+		if got[callID] != wantID {
+			t.Fatalf("%s[%s] = %q, want %q (all rows: %#v)", table, callID, got[callID], wantID, got)
 		}
 	}
 }

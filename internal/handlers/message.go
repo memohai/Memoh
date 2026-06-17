@@ -449,9 +449,14 @@ func mergeToolApprovals(turns []conversation.UITurn, approvals []toolapproval.Re
 		}
 	}
 	byCallID := make(map[string]toolapproval.Request, len(approvals))
+	byTurnCallID := make(map[string]toolapproval.Request, len(approvals))
 	for _, approval := range approvals {
 		if callID := strings.TrimSpace(approval.ToolCallID); callID != "" {
-			byCallID[callID] = approval
+			if turnID := strings.TrimSpace(approval.PersistTurnID); turnID != "" {
+				byTurnCallID[turnToolCallKey(turnID, callID)] = approval
+			} else {
+				byCallID[callID] = approval
+			}
 		}
 	}
 	for turnIdx := range turns {
@@ -463,7 +468,11 @@ func mergeToolApprovals(turns []conversation.UITurn, approvals []toolapproval.Re
 			if msg.Type != conversation.UIMessageTool {
 				continue
 			}
-			approval, ok := byCallID[strings.TrimSpace(msg.ToolCallID)]
+			callID := strings.TrimSpace(msg.ToolCallID)
+			approval, ok := byTurnCallID[turnToolCallKey(turns[turnIdx].TurnID, callID)]
+			if !ok {
+				approval, ok = byCallID[callID]
+			}
 			if !ok {
 				continue
 			}
@@ -485,9 +494,14 @@ func mergeUserInputs(turns []conversation.UITurn, requests []userinput.Request, 
 		return
 	}
 	byCallID := make(map[string]userinput.Request, len(requests))
+	byTurnCallID := make(map[string]userinput.Request, len(requests))
 	for _, req := range requests {
 		if callID := strings.TrimSpace(req.ToolCallID); callID != "" {
-			byCallID[callID] = req
+			if turnID := strings.TrimSpace(req.PersistTurnID); turnID != "" {
+				byTurnCallID[turnToolCallKey(turnID, callID)] = req
+			} else {
+				byCallID[callID] = req
+			}
 		}
 	}
 	for turnIdx := range turns {
@@ -499,7 +513,11 @@ func mergeUserInputs(turns []conversation.UITurn, requests []userinput.Request, 
 			if msg.Type != conversation.UIMessageTool {
 				continue
 			}
-			req, ok := byCallID[strings.TrimSpace(msg.ToolCallID)]
+			callID := strings.TrimSpace(msg.ToolCallID)
+			req, ok := byTurnCallID[turnToolCallKey(turns[turnIdx].TurnID, callID)]
+			if !ok {
+				req, ok = byCallID[callID]
+			}
 			if !ok {
 				continue
 			}
@@ -518,6 +536,10 @@ func mergeUserInputs(turns []conversation.UITurn, requests []userinput.Request, 
 			}
 		}
 	}
+}
+
+func turnToolCallKey(turnID, callID string) string {
+	return strings.TrimSpace(turnID) + "\x00" + strings.TrimSpace(callID)
 }
 
 // fillAssetMimeFromStorage fills mime, storage_key, size_bytes from storage (soft link: DB only has content_hash).

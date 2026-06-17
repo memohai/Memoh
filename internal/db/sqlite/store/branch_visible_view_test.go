@@ -25,11 +25,11 @@ func createBranchVisibleMessagesView(t *testing.T, conn testSQLExecutor) {
 		t.Fatalf("sqlite baseline migration does not define %s", viewStart)
 	}
 	rest := sqlText[start:]
-	end := strings.Index(rest, "\n\nCREATE INDEX")
+	end := strings.Index(rest, ";\n")
 	if end < 0 {
 		t.Fatal("sqlite baseline migration view definition terminator not found")
 	}
-	_, err = conn.ExecContext(context.Background(), rest[:end])
+	_, err = conn.ExecContext(context.Background(), rest[:end+1])
 	if err != nil {
 		t.Fatalf("create branch visible messages view: %v", err)
 	}

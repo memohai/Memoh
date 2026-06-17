@@ -689,7 +689,7 @@ func toMessageFromListRow(row sqlc.ListMessagesRow) Message {
 }
 
 func toMessageFromSessionListRow(row sqlc.ListMessagesBySessionRow) Message {
-	return toMessageFields(
+	return withTurnID(toMessageFields(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -709,7 +709,7 @@ func toMessageFromSessionListRow(row sqlc.ListMessagesBySessionRow) Message {
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,
-	)
+	), row.TurnID)
 }
 
 func toMessageFromSinceRow(row sqlc.ListMessagesSinceRow) Message {
@@ -737,7 +737,7 @@ func toMessageFromSinceRow(row sqlc.ListMessagesSinceRow) Message {
 }
 
 func toMessageFromSinceBySessionRow(row sqlc.ListMessagesSinceBySessionRow) Message {
-	return toMessageFields(
+	return withTurnID(toMessageFields(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -757,7 +757,7 @@ func toMessageFromSinceBySessionRow(row sqlc.ListMessagesSinceBySessionRow) Mess
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,
-	)
+	), row.TurnID)
 }
 
 func toMessageFromActiveSinceRow(row sqlc.ListActiveMessagesSinceRow) Message {
@@ -789,7 +789,7 @@ func toMessageFromActiveSinceRow(row sqlc.ListActiveMessagesSinceRow) Message {
 }
 
 func toMessageFromActiveSinceBySessionRow(row sqlc.ListActiveMessagesSinceBySessionRow) Message {
-	m := toMessageFields(
+	m := withTurnID(toMessageFields(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -809,7 +809,7 @@ func toMessageFromActiveSinceBySessionRow(row sqlc.ListActiveMessagesSinceBySess
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,
-	)
+	), row.TurnID)
 	if row.CompactID.Valid {
 		m.CompactID = row.CompactID.String()
 	}
@@ -817,7 +817,7 @@ func toMessageFromActiveSinceBySessionRow(row sqlc.ListActiveMessagesSinceBySess
 }
 
 func toMessageFromActiveSinceBySessionBranchRow(row sqlc.ListActiveMessagesSinceBySessionBranchRow) Message {
-	m := toMessageFields(
+	m := withTurnID(toMessageFields(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -837,7 +837,7 @@ func toMessageFromActiveSinceBySessionBranchRow(row sqlc.ListActiveMessagesSince
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,
-	)
+	), row.TurnID)
 	if row.CompactID.Valid {
 		m.CompactID = row.CompactID.String()
 	}
@@ -845,7 +845,7 @@ func toMessageFromActiveSinceBySessionBranchRow(row sqlc.ListActiveMessagesSince
 }
 
 func toMessageFromActiveSinceBySessionBranchTurnRow(row sqlc.ListActiveMessagesSinceBySessionBranchTurnRow) Message {
-	m := toMessageFields(
+	m := withTurnID(toMessageFields(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -865,7 +865,7 @@ func toMessageFromActiveSinceBySessionBranchTurnRow(row sqlc.ListActiveMessagesS
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,
-	)
+	), row.TurnID)
 	if row.CompactID.Valid {
 		m.CompactID = row.CompactID.String()
 	}
@@ -897,7 +897,7 @@ func toMessageFromLatestRow(row sqlc.ListMessagesLatestRow) Message {
 }
 
 func toMessageFromLatestBySessionRow(row sqlc.ListMessagesLatestBySessionRow) Message {
-	return toMessageFields(
+	return withTurnID(toMessageFields(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -917,7 +917,7 @@ func toMessageFromLatestBySessionRow(row sqlc.ListMessagesLatestBySessionRow) Me
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,
-	)
+	), row.TurnID)
 }
 
 func toMessageFromBeforeRow(row sqlc.ListMessagesBeforeRow) Message {
@@ -945,7 +945,7 @@ func toMessageFromBeforeRow(row sqlc.ListMessagesBeforeRow) Message {
 }
 
 func toMessageFromBeforeBySessionRow(row sqlc.ListMessagesBeforeBySessionRow) Message {
-	return toMessageFields(
+	return withTurnID(toMessageFields(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -965,11 +965,11 @@ func toMessageFromBeforeBySessionRow(row sqlc.ListMessagesBeforeBySessionRow) Me
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,
-	)
+	), row.TurnID)
 }
 
 func toMessageFromExternalIDBySessionRow(row sqlc.GetMessageByExternalIDBySessionRow) Message {
-	return toMessageFields(
+	return withTurnID(toMessageFields(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -989,11 +989,11 @@ func toMessageFromExternalIDBySessionRow(row sqlc.GetMessageByExternalIDBySessio
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,
-	)
+	), row.TurnID)
 }
 
 func toMessageFromAfterBySessionRow(row sqlc.ListMessagesAfterBySessionRow) Message {
-	return toMessageFields(
+	return withTurnID(toMessageFields(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -1013,7 +1013,14 @@ func toMessageFromAfterBySessionRow(row sqlc.ListMessagesAfterBySessionRow) Mess
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,
-	)
+	), row.TurnID)
+}
+
+func withTurnID(message Message, turnID pgtype.UUID) Message {
+	if turnID.Valid {
+		message.TurnID = turnID.String()
+	}
+	return message
 }
 
 func toMessageFields(

@@ -36,19 +36,77 @@ INSERT INTO user_input_requests (
   sqlc.arg(provider_metadata),
   sqlc.narg(requested_by_channel_identity_id),
   sqlc.narg(persist_branch_id),
-  sqlc.narg(persist_turn_id),
+  NULL,
   sqlc.arg(source_platform),
   sqlc.arg(reply_target),
   sqlc.arg(conversation_type),
   sqlc.narg(expires_at)
 )
-ON CONFLICT (session_id, tool_call_id) DO UPDATE
+ON CONFLICT (session_id, tool_call_id) WHERE persist_turn_id IS NULL DO UPDATE
 SET input_json = EXCLUDED.input_json,
     ui_payload_json = EXCLUDED.ui_payload_json,
     provider_metadata = EXCLUDED.provider_metadata,
     requested_by_channel_identity_id = EXCLUDED.requested_by_channel_identity_id,
     persist_branch_id = EXCLUDED.persist_branch_id,
-    persist_turn_id = EXCLUDED.persist_turn_id,
+    source_platform = EXCLUDED.source_platform,
+    reply_target = EXCLUDED.reply_target,
+    conversation_type = EXCLUDED.conversation_type,
+    expires_at = EXCLUDED.expires_at,
+    updated_at = CURRENT_TIMESTAMP
+WHERE user_input_requests.status = 'pending'
+  AND (user_input_requests.expires_at IS NULL OR user_input_requests.expires_at = '' OR julianday(user_input_requests.expires_at) > julianday('now'))
+RETURNING *;
+
+-- name: CreateUserInputRequestForTurn :one
+INSERT INTO user_input_requests (
+  id,
+  bot_id,
+  session_id,
+  route_id,
+  channel_identity_id,
+  tool_call_id,
+  tool_name,
+  short_id,
+  input_json,
+  ui_payload_json,
+  provider_metadata,
+  requested_by_channel_identity_id,
+  persist_branch_id,
+  persist_turn_id,
+  source_platform,
+  reply_target,
+  conversation_type,
+  expires_at
+) VALUES (
+  lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-' || '4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6))),
+  sqlc.arg(bot_id),
+  sqlc.arg(session_id),
+  sqlc.narg(route_id),
+  sqlc.narg(channel_identity_id),
+  sqlc.arg(tool_call_id),
+  sqlc.arg(tool_name),
+  (
+    SELECT COALESCE(MAX(short_id), 0) + 1
+    FROM user_input_requests
+    WHERE session_id = sqlc.arg(session_id)
+  ),
+  sqlc.arg(input_json),
+  sqlc.arg(ui_payload_json),
+  sqlc.arg(provider_metadata),
+  sqlc.narg(requested_by_channel_identity_id),
+  sqlc.narg(persist_branch_id),
+  sqlc.arg(persist_turn_id),
+  sqlc.arg(source_platform),
+  sqlc.arg(reply_target),
+  sqlc.arg(conversation_type),
+  sqlc.narg(expires_at)
+)
+ON CONFLICT (session_id, tool_call_id, persist_turn_id) WHERE persist_turn_id IS NOT NULL DO UPDATE
+SET input_json = EXCLUDED.input_json,
+    ui_payload_json = EXCLUDED.ui_payload_json,
+    provider_metadata = EXCLUDED.provider_metadata,
+    requested_by_channel_identity_id = EXCLUDED.requested_by_channel_identity_id,
+    persist_branch_id = EXCLUDED.persist_branch_id,
     source_platform = EXCLUDED.source_platform,
     reply_target = EXCLUDED.reply_target,
     conversation_type = EXCLUDED.conversation_type,
@@ -67,7 +125,15 @@ WHERE id = ?;
 SELECT *
 FROM user_input_requests
 WHERE session_id = ?
-  AND tool_call_id = ?;
+  AND tool_call_id = ?
+  AND persist_turn_id IS NULL;
+
+-- name: GetUserInputRequestBySessionToolCallTurn :one
+SELECT *
+FROM user_input_requests
+WHERE session_id = ?
+  AND tool_call_id = ?
+  AND persist_turn_id = ?;
 
 -- name: GetPendingUserInputBySessionShortID :one
 SELECT *

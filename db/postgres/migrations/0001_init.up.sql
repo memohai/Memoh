@@ -655,10 +655,15 @@ CREATE TABLE IF NOT EXISTS tool_approval_requests (
   decided_at TIMESTAMPTZ,
   CONSTRAINT tool_approval_operation_check CHECK (operation IN ('read', 'write', 'exec')),
   CONSTRAINT tool_approval_status_check CHECK (status IN ('pending', 'approved', 'rejected', 'expired', 'cancelled')),
-  CONSTRAINT tool_approval_short_id_unique UNIQUE (session_id, short_id),
-  CONSTRAINT tool_approval_tool_call_unique UNIQUE (session_id, tool_call_id)
+  CONSTRAINT tool_approval_short_id_unique UNIQUE (session_id, short_id)
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS tool_approval_tool_call_legacy_unique
+  ON tool_approval_requests(session_id, tool_call_id)
+  WHERE persist_turn_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS tool_approval_tool_call_turn_unique
+  ON tool_approval_requests(session_id, tool_call_id, persist_turn_id)
+  WHERE persist_turn_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_tool_approval_bot_status_created
   ON tool_approval_requests(bot_id, status, created_at);
 CREATE INDEX IF NOT EXISTS idx_tool_approval_session_status_created
@@ -699,10 +704,15 @@ CREATE TABLE IF NOT EXISTS user_input_requests (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT user_input_tool_name_check CHECK (tool_name = 'ask_user'),
   CONSTRAINT user_input_status_check CHECK (status IN ('pending', 'submitted', 'canceled', 'expired', 'failed')),
-  CONSTRAINT user_input_short_id_unique UNIQUE (session_id, short_id),
-  CONSTRAINT user_input_tool_call_unique UNIQUE (session_id, tool_call_id)
+  CONSTRAINT user_input_short_id_unique UNIQUE (session_id, short_id)
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS user_input_tool_call_legacy_unique
+  ON user_input_requests(session_id, tool_call_id)
+  WHERE persist_turn_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS user_input_tool_call_turn_unique
+  ON user_input_requests(session_id, tool_call_id, persist_turn_id)
+  WHERE persist_turn_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_user_input_bot_status_created
   ON user_input_requests(bot_id, status, created_at);
 CREATE INDEX IF NOT EXISTS idx_user_input_session_status_created

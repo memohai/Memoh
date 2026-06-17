@@ -123,8 +123,12 @@ CREATE TABLE user_input_requests (
   CONSTRAINT user_input_status_check CHECK (status IN ('pending', 'submitted', 'canceled', 'expired', 'failed')),
   CONSTRAINT user_input_short_id_unique UNIQUE (session_id, short_id)
 );
-CREATE UNIQUE INDEX user_input_tool_call_unique
-  ON user_input_requests(session_id, tool_call_id);
+CREATE UNIQUE INDEX user_input_tool_call_legacy_unique
+  ON user_input_requests(session_id, tool_call_id)
+  WHERE persist_turn_id IS NULL;
+CREATE UNIQUE INDEX user_input_tool_call_turn_unique
+  ON user_input_requests(session_id, tool_call_id, persist_turn_id)
+  WHERE persist_turn_id IS NOT NULL;
 `)
 	if _, err := conn.ExecContext(ctx, `INSERT INTO bots (id) VALUES (?)`, testBotID); err != nil {
 		t.Fatalf("insert bot: %v", err)
@@ -605,6 +609,51 @@ func TestServicePendingUserInputUsesActiveVisibleTurnPath(t *testing.T) {
 	}
 	if got, err := svc.ResolveTarget(ctx, ResolveInput{BotID: testBotID, SessionID: testSessionID}); err != nil || got.ID != rootAfterFork.ID {
 		t.Fatalf("latest visible on root = (%#v, %v), want %s", got, err, rootAfterFork.ID)
+	}
+}
+
+func TestServiceCreatePendingUserInputIsIdempotentPerTurn(t *testing.T) {
+	svc, conn := newSQLiteUserInputServiceWithDB(t)
+	ctx := context.Background()
+
+	first, err := svc.CreatePending(ctx, testPendingInputForTurn("replayed-call", testRootBranchID, testRootTurn1ID, nil))
+	if err != nil {
+		t.Fatalf("create first turn request: %v", err)
+	}
+	duplicate, err := svc.CreatePending(ctx, testPendingInputForTurn("replayed-call", testRootBranchID, testRootTurn1ID, nil))
+	if err != nil {
+		t.Fatalf("create duplicate turn request: %v", err)
+	}
+	if duplicate.ID != first.ID {
+		t.Fatalf("duplicate turn request ID = %s, want %s", duplicate.ID, first.ID)
+	}
+
+	if _, err := svc.Submit(ctx, SubmitInput{
+		RequestID: first.ID,
+		Answers:   []QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
+	}); err != nil {
+		t.Fatalf("submit first request: %v", err)
+	}
+	secondTurn, err := svc.CreatePending(ctx, testPendingInputForTurn("replayed-call", testRootBranchID, testRootTurn2ID, nil))
+	if err != nil {
+		t.Fatalf("create same call on second turn: %v", err)
+	}
+	if secondTurn.ID == first.ID {
+		t.Fatalf("second turn reused first request %s", first.ID)
+	}
+	if secondTurn.ShortID == first.ShortID {
+		t.Fatalf("second turn short_id = %d, want a new session-scoped short id", secondTurn.ShortID)
+	}
+
+	var firstPersist, secondPersist string
+	if err := conn.QueryRowContext(ctx, `SELECT persist_turn_id FROM user_input_requests WHERE id = ?`, first.ID).Scan(&firstPersist); err != nil {
+		t.Fatalf("select first persist turn: %v", err)
+	}
+	if err := conn.QueryRowContext(ctx, `SELECT persist_turn_id FROM user_input_requests WHERE id = ?`, secondTurn.ID).Scan(&secondPersist); err != nil {
+		t.Fatalf("select second persist turn: %v", err)
+	}
+	if firstPersist != testRootTurn1ID || secondPersist != testRootTurn2ID {
+		t.Fatalf("persist turns = %q/%q, want %q/%q", firstPersist, secondPersist, testRootTurn1ID, testRootTurn2ID)
 	}
 }
 
