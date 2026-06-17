@@ -426,10 +426,10 @@ type Model struct {
 	Name       sql.NullString `json:"name"`
 	ProviderID string         `json:"provider_id"`
 	Type       string         `json:"type"`
+	Enable     int64          `json:"enable"`
 	Config     string         `json:"config"`
 	CreatedAt  string         `json:"created_at"`
 	UpdatedAt  string         `json:"updated_at"`
-	Enable     int64          `json:"enable"`
 }
 
 type ModelVariant struct {

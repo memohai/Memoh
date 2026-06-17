@@ -83,9 +83,15 @@ resolved:
 	if model.Type != models.ModelTypeChat {
 		return models.GetResponse{}, sqlc.Provider{}, errors.New("model is not a chat model")
 	}
+	if !model.Enable {
+		return models.GetResponse{}, sqlc.Provider{}, fmt.Errorf("chat model %s is disabled", model.ModelID)
+	}
 	prov, err := models.FetchProviderByID(ctx, r.queries, model.ProviderID)
 	if err != nil {
 		return models.GetResponse{}, sqlc.Provider{}, err
+	}
+	if !prov.Enable {
+		return models.GetResponse{}, sqlc.Provider{}, fmt.Errorf("chat model provider %s is disabled", prov.Name)
 	}
 	return model, prov, nil
 }
