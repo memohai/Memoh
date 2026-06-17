@@ -126,7 +126,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { ExternalLink, PackageOpen, Store } from 'lucide-vue-next'
@@ -143,6 +143,7 @@ import {
 import { client } from '@memohai/sdk/client'
 import PageShell from '@/components/page-shell/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { BOT_PLUGINS_UPDATED_EVENT, isBotPluginsUpdatedEvent } from '@/utils/bot-plugin-events'
 import SettingsSection from '@/components/settings/section.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 
@@ -158,11 +159,22 @@ const pendingKey = ref('')
 
 onMounted(() => {
   void loadPlugins()
+  window.addEventListener(BOT_PLUGINS_UPDATED_EVENT, handleBotPluginsUpdated)
+})
+
+onUnmounted(() => {
+  window.removeEventListener(BOT_PLUGINS_UPDATED_EVENT, handleBotPluginsUpdated)
 })
 
 watch(() => props.botId, () => {
   void loadPlugins()
 })
+
+function handleBotPluginsUpdated(event: Event) {
+  if (!isBotPluginsUpdatedEvent(event)) return
+  if (event.detail.botId !== props.botId) return
+  void loadPlugins()
+}
 
 async function loadPlugins() {
   if (!props.botId) return
