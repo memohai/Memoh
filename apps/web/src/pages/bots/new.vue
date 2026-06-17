@@ -1,5 +1,5 @@
 <template>
-  <section class="relative px-4 pt-2 pb-10 lg:px-6 md:pt-4 md:pb-12 max-w-2xl">
+  <section class="relative mx-auto w-full max-w-2xl px-4 pt-2 pb-10 md:pt-4 md:pb-12 lg:px-6">
     <Tabs
       v-model="mode"
       class="mb-6"
