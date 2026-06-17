@@ -184,21 +184,20 @@ func (h *AudioHandler) ImportModels(c echo.Context) error {
 		Models: make([]string, 0, len(remoteModels)),
 	}
 
-	// Bulk import lands disabled — see providers.ImportModels for the rationale.
-	disabled := false
-
 	for _, model := range remoteModels {
 		name := strings.TrimSpace(model.Name)
 		if name == "" {
 			name = model.ID
 		}
 
+		// Speech imports stay enabled by default: the audio response DTO and
+		// provider-detail page don't yet surface a per-model toggle, so an
+		// "imported but disabled" model would have no UI path back to on.
 		_, err := h.modelsService.Create(c.Request().Context(), models.AddRequest{
 			ModelID:    model.ID,
 			Name:       name,
 			ProviderID: id,
 			Type:       models.ModelTypeSpeech,
-			Enable:     &disabled,
 			Config:     models.ModelConfig{},
 		})
 		if err != nil {
@@ -265,21 +264,19 @@ func (h *AudioHandler) ImportTranscriptionModels(c echo.Context) error {
 		Models: make([]string, 0, len(remoteModels)),
 	}
 
-	// Bulk import lands disabled — see providers.ImportModels for the rationale.
-	disabled := false
-
 	for _, model := range remoteModels {
 		name := strings.TrimSpace(model.Name)
 		if name == "" {
 			name = model.ID
 		}
 
+		// Transcription imports stay enabled by default: see ImportSpeechModels
+		// for the rationale.
 		_, err := h.modelsService.Create(c.Request().Context(), models.AddRequest{
 			ModelID:    model.ID,
 			Name:       name,
 			ProviderID: id,
 			Type:       models.ModelTypeTranscription,
-			Enable:     &disabled,
 			Config:     models.ModelConfig{},
 		})
 		if err != nil {
