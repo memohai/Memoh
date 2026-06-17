@@ -1,9 +1,5 @@
 <template>
-  <section class="mx-auto max-w-3xl px-6 pt-10 pb-12">
-    <h1 class="mb-6 px-2 text-lg font-semibold">
-      {{ t('settings.appearance.title') }}
-    </h1>
-
+  <PageShell :title="t('settings.appearance.title')">
     <div class="space-y-8">
       <SettingsSection :title="t('settings.appearance.interface')">
         <SettingsRow :label="t('settings.language')">
@@ -282,7 +278,7 @@
         </div>
       </SettingsSection>
     </div>
-  </section>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
@@ -309,6 +305,7 @@ import type { Locale } from '@/i18n'
 import type { BundledTheme } from 'shiki'
 import SettingsRow from '@/components/settings/row.vue'
 import SettingsSection from '@/components/settings/section.vue'
+import PageShell from '@/components/page-shell/index.vue'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 import ThemedMermaidBlock from '@/components/themed-mermaid-block/index.vue'

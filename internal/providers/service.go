@@ -121,9 +121,6 @@ func (s *Service) List(ctx context.Context) ([]GetResponse, error) {
 
 	results := make([]GetResponse, 0, len(providers))
 	for _, p := range providers {
-		if isHiddenRegistryTemplate(p) {
-			continue
-		}
 		results = append(results, s.toGetResponse(p))
 	}
 	return results, nil

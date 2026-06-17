@@ -11,9 +11,10 @@ import {
 import MainLayout from '@memohai/web/layout/main-layout/index.vue'
 import SettingsSidebar from '@memohai/web/components/settings-sidebar/index.vue'
 import { useSettingsStore } from '@memohai/web/store/settings'
-import { DesktopShellKey } from '@memohai/web/lib/desktop-shell'
+import { DesktopShellKey, DesktopRuntimeModeKey } from '@memohai/web/lib/desktop-shell'
 
 provide(DesktopShellKey, true)
+provide(DesktopRuntimeModeKey, __MEMOH_DESKTOP_RUNTIME_MODE__)
 useSettingsStore()
 
 const route = useRoute()
