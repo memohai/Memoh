@@ -774,6 +774,8 @@
     "contextWindow": "コンテキストウィンドウ",
     "contextWindowPlaceholder": "例: 128000",
     "testModel": "モデルをテスト",
+    "enable": "モデルを有効化",
+    "toggleFailed": "モデルの更新に失敗しました",
     "testOk": "OK",
     "testAuthError": "認証エラー",
     "testError": "エラー",

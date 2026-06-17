@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS models (
   name TEXT,
   provider_id UUID NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
   type TEXT NOT NULL DEFAULT 'chat',
+  enable BOOLEAN NOT NULL DEFAULT true,
   config JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

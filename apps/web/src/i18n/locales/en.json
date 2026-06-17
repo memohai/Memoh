@@ -827,6 +827,8 @@
     "contextWindow": "Context Window",
     "contextWindowPlaceholder": "e.g. 128000",
     "testModel": "Test Model",
+    "enable": "Enable model",
+    "toggleFailed": "Failed to update model",
     "testOk": "OK",
     "testAuthError": "Auth Error",
     "testError": "Error",

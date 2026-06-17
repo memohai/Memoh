@@ -118,7 +118,18 @@ type Model struct {
 	Name       string      `json:"name"`
 	ProviderID string      `json:"provider_id"`
 	Type       ModelType   `json:"type"`
+	Enable     bool        `json:"enable"`
 	Config     ModelConfig `json:"config"`
+}
+
+// ResolveEnable returns the effective enable flag: when the override is nil,
+// the current value is preserved; otherwise the override wins. Used by
+// Service.Create (current=true default) and Service.UpdateByID (current=stored).
+func ResolveEnable(override *bool, current bool) bool {
+	if override == nil {
+		return current
+	}
+	return *override
 }
 
 func (m *Model) Validate() error {
@@ -198,7 +209,16 @@ func (m *Model) ResolveThinkingMode() string {
 	}
 }
 
-type AddRequest Model
+// AddRequest is the payload for creating a new model. Enable is a pointer so
+// the server can default to true when the field is absent from the request.
+type AddRequest struct {
+	ModelID    string      `json:"model_id"`
+	Name       string      `json:"name,omitempty"`
+	ProviderID string      `json:"provider_id"`
+	Type       ModelType   `json:"type"`
+	Enable     *bool       `json:"enable,omitempty"`
+	Config     ModelConfig `json:"config"`
+}
 
 type AddResponse struct {
 	ID      string `json:"id"`
@@ -215,7 +235,41 @@ type GetResponse struct {
 	Model
 }
 
-type UpdateRequest Model
+// UpdateRequest is the payload for updating an existing model. Enable is a
+// pointer so callers can omit it to preserve the current enable state while
+// still rewriting the other fields.
+type UpdateRequest struct {
+	ModelID    string      `json:"model_id"`
+	Name       string      `json:"name,omitempty"`
+	ProviderID string      `json:"provider_id"`
+	Type       ModelType   `json:"type"`
+	Enable     *bool       `json:"enable,omitempty"`
+	Config     ModelConfig `json:"config"`
+}
+
+// toModel builds a Model from an AddRequest using the given enable value.
+func (r AddRequest) toModel(enable bool) Model {
+	return Model{
+		ModelID:    r.ModelID,
+		Name:       r.Name,
+		ProviderID: r.ProviderID,
+		Type:       r.Type,
+		Enable:     enable,
+		Config:     r.Config,
+	}
+}
+
+// toModel builds a Model from an UpdateRequest using the given enable value.
+func (r UpdateRequest) toModel(enable bool) Model {
+	return Model{
+		ModelID:    r.ModelID,
+		Name:       r.Name,
+		ProviderID: r.ProviderID,
+		Type:       r.Type,
+		Enable:     enable,
+		Config:     r.Config,
+	}
+}
 
 type ListRequest struct {
 	Type ModelType `json:"type,omitempty"`

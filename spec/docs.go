@@ -16932,6 +16932,9 @@ const docTemplate = `{
                 "config": {
                     "$ref": "#/definitions/models.ModelConfig"
                 },
+                "enable": {
+                    "type": "boolean"
+                },
                 "model_id": {
                     "type": "string"
                 },
@@ -16970,6 +16973,9 @@ const docTemplate = `{
             "properties": {
                 "config": {
                     "$ref": "#/definitions/models.ModelConfig"
+                },
+                "enable": {
+                    "type": "boolean"
                 },
                 "id": {
                     "type": "string"
@@ -17066,6 +17072,9 @@ const docTemplate = `{
             "properties": {
                 "config": {
                     "$ref": "#/definitions/models.ModelConfig"
+                },
+                "enable": {
+                    "type": "boolean"
                 },
                 "model_id": {
                     "type": "string"

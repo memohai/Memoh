@@ -4,6 +4,7 @@
        drops it). Same row language as the Configuration card above. -->
   <div
     class="mx-4 flex min-h-[3.25rem] items-center justify-between gap-3 border-b border-border py-2.5 last:border-b-0"
+    :class="{ 'opacity-60': !enabled }"
   >
     <!-- A hair of left padding so the name doesn't sit dead-flush on the row's
          inset edge when the search box is above it — just breathing room, not a
@@ -63,6 +64,14 @@
     </div>
 
     <div class="flex shrink-0 items-center gap-0.5">
+      <Switch
+        class="mr-1"
+        :model-value="enabled"
+        :disabled="!model.id || enableLoading"
+        :aria-label="$t('models.enable')"
+        @update:model-value="handleToggleEnable"
+      />
+
       <Button
         type="button"
         variant="ghost"
@@ -109,12 +118,16 @@ import {
   Badge,
   Button,
   Spinner,
+  Switch,
+  toast,
 } from '@memohai/ui'
 import { Zap, Settings, Trash2, Binary } from 'lucide-vue-next'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
-import { postModelsByIdTest } from '@memohai/sdk'
-import type { ModelsGetResponse, ModelsTestResponse } from '@memohai/sdk'
+import { postModelsByIdTest, putModelsById } from '@memohai/sdk'
+import type { ModelsGetResponse, ModelsTestResponse, ModelsUpdateRequest } from '@memohai/sdk'
+import { useQueryCache } from '@pinia/colada'
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const props = withDefaults(defineProps<{
   model: ModelsGetResponse
@@ -129,8 +142,14 @@ defineEmits<{
   delete: [id: string]
 }>()
 
+const { t } = useI18n()
+const queryCache = useQueryCache()
 const testLoading = ref(false)
 const testResult = ref<ModelsTestResponse | null>(null)
+const enableLoading = ref(false)
+const enableOverride = ref<boolean | null>(null)
+
+const enabled = computed(() => enableOverride.value ?? props.model.enable ?? true)
 
 // Show the id as a second line only when a real custom name is hiding it.
 const showModelId = computed(() => {
@@ -165,6 +184,31 @@ async function runTest() {
     testResult.value = { status: 'error' }
   } finally {
     testLoading.value = false
+  }
+}
+
+async function handleToggleEnable(value: boolean) {
+  if (!props.model.id) return
+  const prev = enabled.value
+  enableOverride.value = value
+  enableLoading.value = true
+  try {
+    const body: ModelsUpdateRequest = {
+      model_id: props.model.model_id,
+      name: props.model.name,
+      provider_id: props.model.provider_id,
+      type: props.model.type,
+      config: props.model.config,
+      enable: value,
+    }
+    await putModelsById({ path: { id: props.model.id }, body, throwOnError: true })
+    queryCache.invalidateQueries({ key: ['provider-models'] })
+    queryCache.invalidateQueries({ key: ['models'] })
+  } catch {
+    enableOverride.value = prev
+    toast.error(t('models.toggleFailed'))
+  } finally {
+    enableLoading.value = false
   }
 }
 </script>

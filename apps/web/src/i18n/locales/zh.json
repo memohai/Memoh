@@ -827,6 +827,8 @@
     "contextWindow": "上下文窗口",
     "contextWindowPlaceholder": "例如 128000",
     "testModel": "测试模型",
+    "enable": "启用模型",
+    "toggleFailed": "更新模型失败",
     "testOk": "正常",
     "testAuthError": "认证失败",
     "testError": "异常",
