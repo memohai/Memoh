@@ -28,6 +28,10 @@ const toast = vi.hoisted(() => ({
 
 vi.mock('@/composables/api/useChat', () => api)
 vi.mock('vue-sonner', () => ({ toast }))
+vi.mock('@memohai/ui', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@memohai/ui')>()
+  return { ...original, toast }
+})
 
 function flushPromises() {
   return new Promise(resolve => setTimeout(resolve, 0))
@@ -183,6 +187,20 @@ describe('chat-list store', () => {
         onClose: null,
       }
     })
+  })
+
+  it('selects the first ready bot during initialization when none is selected', async () => {
+    api.fetchBots.mockResolvedValueOnce([
+      { id: 'bot-creating', status: 'creating', name: 'Creating' },
+      { id: 'bot-ready', status: 'active', name: 'Ready' },
+    ])
+
+    const store = useChatStore()
+
+    await store.initialize()
+
+    expect(store.currentBotId).toBe('bot-ready')
+    expect(api.fetchSessions).toHaveBeenCalledWith('bot-ready')
   })
 
   it('returns startup stream errors to the composer when no assistant output exists', async () => {

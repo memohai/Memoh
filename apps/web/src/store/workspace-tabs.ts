@@ -92,7 +92,7 @@ function syncAllTerminalGroupChrome(dock: DockviewApi) {
 
 export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   const selection = useChatSelectionStore()
-  const { currentBotId } = storeToRefs(selection)
+  const { currentBotId, sessionId } = storeToRefs(selection)
   const chatStore = useChatStore()
   const currentBot = computed(() =>
     chatStore.bots.find(bot => bot.id === currentBotId.value) ?? null,
@@ -140,6 +140,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // into the bottom panel; terminal drags leave them open so terminals can be
   // reordered or stacked. Reset on drag end.
   let dragSourceTerminal = false
+  let draftChatQueued = false
   // The most recent NON-terminal group to hold focus. A terminal group is
   // exclusive — opening a file/browser/etc. while it is the active group must
   // land in an editor group, not contaminate the terminals — so we remember the
@@ -237,6 +238,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   function restoreLayout(botId: string) {
     const dock = api.value
     if (!dock) return
+    let restoredEmptyLayout = false
     suppressPersist = true
     try {
       const stored = storage.value[botId]?.layout ?? null
@@ -254,9 +256,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       prunePanels()
       activePanelId.value = dock.activePanel?.id ?? null
       syncAllTerminalGroupChrome(dock)
+      restoredEmptyLayout = !!stored && dock.panels.length === 0
     } finally {
       suppressPersist = false
     }
+    if (restoredEmptyLayout) ensureDraftChatPanel()
   }
 
   function domListener<K extends keyof DocumentEventMap>(
@@ -334,6 +338,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
           void nextTick(() => deleteTerminalSnapshot(terminalCacheKey(bid, panel.id)))
         }
         syncAllTerminalGroupChrome(dock)
+        ensureDraftChatPanel()
       }),
       dock.onDidAddPanel(() => {
         syncAllTerminalGroupChrome(dock)
@@ -396,6 +401,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     loadedBotId = null
     panelDragging.value = false
     dragSourceTerminal = false
+    draftChatQueued = false
   }
 
   // ---- panel operations ----------------------------------------------------
@@ -551,6 +557,32 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         panel.api.setTitle(title)
       }
     }
+  }
+
+  function ensureDraftChatPanel() {
+    const dock = api.value
+    if (!dock || suppressPersist || draftChatQueued) return
+    if (dock.panels.length > 0) return
+    if (!(currentBotId.value ?? '').trim()) return
+
+    draftChatQueued = true
+    void nextTick(async () => {
+      draftChatQueued = false
+      const latestDock = api.value
+      if (!latestDock || suppressPersist || latestDock.panels.length > 0) return
+      if (!(currentBotId.value ?? '').trim()) return
+
+      try {
+        await chatStore.createNewSession()
+      } catch {
+        // A draft reset should not leave the dock blank if the active bot is still usable.
+      }
+
+      const settledDock = api.value
+      if (!settledDock || suppressPersist || settledDock.panels.length > 0) return
+      if (!(currentBotId.value ?? '').trim()) return
+      openChat('')
+    })
   }
 
   function openFile(filePath: string) {
@@ -836,7 +868,15 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     })
   }
 
+  function shouldKeepLastDraftChat(id: string) {
+    const dock = api.value
+    if (!dock || dock.panels.length !== 1) return false
+    if ((sessionId.value ?? '').trim()) return false
+    return !!dock.getPanel(id) && panelComponentOf(id) === 'chat'
+  }
+
   function closeTab(id: string) {
+    if (shouldKeepLastDraftChat(id)) return
     const panel = api.value?.getPanel(id)
     panel?.api.close()
   }
