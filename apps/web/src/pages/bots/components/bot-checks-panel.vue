@@ -117,6 +117,7 @@
                       variant="ghost"
                       size="icon"
                       class="size-6"
+                      :aria-label="$t('common.copy')"
                       @click.stop="copyToClipboard(item.detail)"
                     >
                       <Copy class="size-3" />
