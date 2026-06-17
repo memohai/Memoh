@@ -16,6 +16,9 @@ import {
   Spinner,
 } from '@memohai/ui'
 import {
+  TriangleAlert,
+} from 'lucide-vue-next'
+import {
   postBotsByBotIdBackupExport,
   getBotsByBotIdBackupSummary,
   type BotbackupSummaryResult,
@@ -48,6 +51,12 @@ const EXPORT_SECTIONS = [
 ] as const
 
 const exportSections = reactive<Record<string, 'skip' | 'merge' | 'replace'>>({})
+const summaryWarnings = computed(() => summary.value?.warnings ?? [])
+const summaryWhatsAppWarnings = computed(() => summaryWarnings.value.filter(isWhatsAppChannelWarning))
+
+function isWhatsAppChannelWarning(warning: string) {
+  return warning.toLowerCase().includes('whatsapp channel config skipped')
+}
 
 // Build cards from the live-bot summary: counts/items per section, with empty
 // sections marked unavailable so they render disabled.
@@ -56,12 +65,13 @@ const exportSectionList = computed(() => {
   return EXPORT_SECTIONS.map((key) => {
     const s = byKey.get(key)
     const count = s?.count ?? 0
+    const warningOnly = key === 'channels' && count === 0 && summaryWhatsAppWarnings.value.length > 0
     return {
       key,
-      count,
+      count: warningOnly ? -1 : count,
       items: s?.items ?? [],
       sensitive: s?.sensitive ?? false,
-      available: count !== 0,
+      available: count !== 0 || warningOnly,
     }
   })
 })
@@ -89,6 +99,9 @@ async function loadSummary() {
     for (const key of Object.keys(exportSections)) delete exportSections[key]
     for (const section of data.sections ?? []) {
       if (section.key && (section.count ?? 0) !== 0) exportSections[section.key] = 'merge'
+    }
+    if (summaryWhatsAppWarnings.value.length > 0) {
+      exportSections.channels = 'merge'
     }
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.backup.exportFailed')))
@@ -180,6 +193,23 @@ function handleImported(botId: string) {
             v-else
             class="flex-1 overflow-y-auto px-0.5"
           >
+            <div
+              v-if="summaryWarnings.length"
+              class="mb-3 space-y-1.5 rounded-md border border-warning-border bg-warning-soft p-3 text-xs text-warning-foreground"
+            >
+              <div class="flex items-center gap-2 font-medium">
+                <TriangleAlert class="size-3.5 shrink-0" />
+                {{ t('bots.backup.warningsTitle') }}
+              </div>
+              <ul class="list-disc space-y-1 pl-5">
+                <li
+                  v-for="warning in summaryWarnings"
+                  :key="warning"
+                >
+                  {{ warning }}
+                </li>
+              </ul>
+            </div>
             <BackupSectionCards
               mode="include"
               :sections="exportSectionList"

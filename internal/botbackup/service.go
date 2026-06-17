@@ -23,6 +23,7 @@ import (
 	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/channel/adapters/whatsapp"
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -272,9 +273,9 @@ func (s *Service) collect(ctx context.Context, botID string, opts ExportOptions)
 			warnings = append(warnings, "acl export failed: "+err.Error())
 		}
 	}
-	if s.channels != nil {
+	if opts.wants(SectionChannels) && s.channels != nil {
 		if rows, err := s.channels.ListConfigs(ctx, botID); err == nil {
-			data.Channels = rows
+			data.Channels = filterExportableChannels(rows, &warnings)
 		} else {
 			warnings = append(warnings, "channel config export failed: "+err.Error())
 		}
@@ -319,6 +320,29 @@ func (s *Service) collect(ctx context.Context, botID string, opts ExportOptions)
 		Checksums:     map[string]string{},
 	}
 	return data, manifest, nil
+}
+
+func filterExportableChannels(rows []channel.ChannelConfig, warnings *[]string) []channel.ChannelConfig {
+	out := make([]channel.ChannelConfig, 0, len(rows))
+	for _, row := range rows {
+		if !isImportableChannelType(row.ChannelType) {
+			if warnings != nil {
+				*warnings = append(*warnings, whatsappExportSkipWarning)
+			}
+			continue
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+const (
+	whatsappExportSkipWarning = "whatsapp channel config skipped: WhatsApp Web session store is not included in backups"
+	whatsappImportSkipWarning = "whatsapp channel config skipped: WhatsApp Web session store is not included in backups; scan QR again"
+)
+
+func isImportableChannelType(channelType channel.ChannelType) bool {
+	return channelType != whatsapp.Type
 }
 
 func (s *Service) collectWorkspaceResourceLimits(ctx context.Context, botID string) (backupWorkspaceResourceLimits, error) {

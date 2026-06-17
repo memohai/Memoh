@@ -186,6 +186,7 @@ type SectionSummary struct {
 type SummaryResult struct {
 	Profile  *ProfilePreview  `json:"profile,omitempty"`
 	Sections []SectionSummary `json:"sections"`
+	Warnings []string         `json:"warnings,omitempty"`
 }
 
 type RestorePlan struct {

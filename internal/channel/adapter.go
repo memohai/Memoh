@@ -87,12 +87,18 @@ type Descriptor struct {
 	Type             ChannelType
 	DisplayName      string
 	Configless       bool
+	SetupMode        string
 	Capabilities     ChannelCapabilities
 	OutboundPolicy   OutboundPolicy
 	ConfigSchema     ConfigSchema
 	UserConfigSchema ConfigSchema
 	TargetSpec       TargetSpec
 }
+
+const (
+	SetupModeCredentials = "credentials"
+	SetupModeQR          = "qr"
+)
 
 // ConfigNormalizer validates and normalizes channel and user-binding configurations.
 type ConfigNormalizer interface {

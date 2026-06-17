@@ -22,11 +22,11 @@ var summaryLightSections = []Section{
 // pause the bot or stream the workspace, and it counts history/assets/workspace
 // without loading them in full.
 func (s *Service) Summary(ctx context.Context, botID string) (SummaryResult, error) {
-	data, _, err := s.collect(ctx, botID, ExportOptions{Sections: summaryLightSections})
+	data, manifest, err := s.collect(ctx, botID, ExportOptions{Sections: summaryLightSections})
 	if err != nil {
 		return SummaryResult{}, err
 	}
-	res := SummaryResult{Sections: []SectionSummary{}}
+	res := SummaryResult{Sections: []SectionSummary{}, Warnings: append([]string(nil), manifest.Warnings...)}
 	if prof, err := roundTripJSON[bots.Bot](data.Profile); err == nil {
 		res.Profile = &ProfilePreview{
 			DisplayName: prof.DisplayName,

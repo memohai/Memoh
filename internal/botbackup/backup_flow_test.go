@@ -116,6 +116,46 @@ func TestPreviewPlainBundleRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPreviewSkipsWhatsAppChannelConfig(t *testing.T) {
+	var buf bytes.Buffer
+	manifest := Manifest{SchemaVersion: BackupSchemaVersion, SourceBotID: "src-bot", SourceBotName: "Src Bot"}
+	w := &zipBackupWriter{zw: zip.NewWriter(&buf), manifest: &manifest, checksum: map[string]string{}}
+	if err := w.writeJSON("bot/channel_configs.json", "channels", []map[string]any{
+		{"channel_type": "whatsapp"},
+		{"channel_type": "telegram"},
+	}, ExportOptions{}); err != nil {
+		t.Fatalf("write channels: %v", err)
+	}
+	if err := w.writeManifest(); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := w.zw.Close(); err != nil {
+		t.Fatalf("zip Close() error = %v", err)
+	}
+
+	svc := &Service{}
+	preview, err := svc.Preview(context.Background(), buf.Bytes(), ImportOptions{}, "")
+	if err != nil {
+		t.Fatalf("Preview() error = %v", err)
+	}
+	if got := sectionCount(preview.Sections, SectionChannels); got != 1 {
+		t.Fatalf("channels count = %d, want 1", got)
+	}
+	if len(preview.Warnings) != 1 || !strings.Contains(preview.Warnings[0], "scan QR again") {
+		t.Fatalf("warnings = %#v", preview.Warnings)
+	}
+
+	skipped, err := svc.Preview(context.Background(), buf.Bytes(), ImportOptions{
+		Sections: map[Section]ImportStrategy{SectionChannels: StrategySkip},
+	}, "")
+	if err != nil {
+		t.Fatalf("Preview(skip channels) error = %v", err)
+	}
+	if len(skipped.Warnings) != 0 {
+		t.Fatalf("skip channel warnings = %#v, want none", skipped.Warnings)
+	}
+}
+
 func TestPreviewEncryptedBundle(t *testing.T) {
 	var enc bytes.Buffer
 	if err := secure.Encrypt(&enc, bytes.NewReader(buildSampleBundle(t)), "pw"); err != nil {

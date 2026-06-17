@@ -470,4 +470,5 @@ const (
 	ChannelTypeWeChatOA ChannelType = "wechatoa"
 	ChannelTypeLocal    ChannelType = "local"
 	ChannelTypeSlack    ChannelType = "slack"
+	ChannelTypeWhatsApp ChannelType = "whatsapp"
 )

@@ -95,11 +95,13 @@ func (s *Service) Preview(ctx context.Context, raw []byte, opts ImportOptions, p
 	if err != nil {
 		return PreviewResult{}, err
 	}
+	warnings := append([]string(nil), manifest.Warnings...)
+	sections := summarizeSections(entries, opts, &warnings)
 	result := PreviewResult{
 		Manifest:  manifest,
 		Profile:   profilePreview(entries),
-		Warnings:  append([]string(nil), manifest.Warnings...),
-		Sections:  summarizeSections(entries),
+		Warnings:  warnings,
+		Sections:  sections,
 		Encrypted: encrypted,
 		RestorePlan: RestorePlan{
 			Mode:                 normalizeImportMode(opts.Mode),
@@ -157,7 +159,7 @@ func (s *Service) targetSectionCounts(ctx context.Context, botID string) map[Sec
 	}
 	if s.channels != nil {
 		if rows, err := s.channels.ListConfigs(ctx, botID); err == nil {
-			out[SectionChannels] = len(rows)
+			out[SectionChannels] = len(filterImportableChannels(rows, nil))
 		}
 	}
 	if s.mcp != nil {
@@ -206,7 +208,7 @@ func (s *Service) clearChannels(ctx context.Context, botID string) {
 	if err != nil {
 		return
 	}
-	for _, c := range rows {
+	for _, c := range replaceClearableChannels(rows) {
 		_ = s.channels.DeleteConfig(ctx, botID, c.ChannelType)
 	}
 }
@@ -254,7 +256,7 @@ func (s *Service) clearEmailBindings(ctx context.Context, botID string) {
 // written at export time), with item counts and a sample of item labels. A
 // section is shown even when its count is 0, so import mirrors the section set
 // chosen at export.
-func summarizeSections(entries map[string]backupZipEntry) []SectionSummary {
+func summarizeSections(entries map[string]backupZipEntry, opts ImportOptions, warnings *[]string) []SectionSummary {
 	out := []SectionSummary{}
 	add := func(key Section, path string, count int, items []string) {
 		if _, ok := entries[path]; ok {
@@ -277,8 +279,20 @@ func summarizeSections(entries map[string]backupZipEntry) []SectionSummary {
 	}
 	add(SectionACL, "bot/acl_rules.json", countArrayEntry(entries, "bot/acl_rules.json"),
 		jsonArrayLabels(entries["bot/acl_rules.json"].data, sectionItemLimit, "description", "subject_channel_type"))
-	add(SectionChannels, "bot/channel_configs.json", countArrayEntry(entries, "bot/channel_configs.json"),
-		jsonArrayLabels(entries["bot/channel_configs.json"].data, sectionItemLimit, "channel_type"))
+	if entry, ok := entries["bot/channel_configs.json"]; ok {
+		var channelWarnings *[]string
+		if opts.wants(SectionChannels) {
+			channelWarnings = warnings
+		}
+		channels := importableChannelsFromRaw(entry.data, channelWarnings)
+		raw, _ := marshalJSON(channels)
+		out = append(out, SectionSummary{
+			Key:       SectionChannels,
+			Count:     len(channels),
+			Items:     jsonArrayLabels(raw, sectionItemLimit, "channel_type"),
+			Sensitive: isSensitiveSection(SectionChannels),
+		})
+	}
 	add(SectionMCP, "bot/mcp_connections.json", countArrayEntry(entries, "bot/mcp_connections.json"),
 		jsonArrayLabels(entries["bot/mcp_connections.json"].data, sectionItemLimit, "name"))
 	add(SectionSchedules, "bot/schedules.json", countArrayEntry(entries, "bot/schedules.json"),
@@ -944,7 +958,7 @@ func (s *Service) restoreChannels(ctx context.Context, botID string, state *impo
 	if err != nil {
 		return err
 	}
-	for _, cfg := range configs {
+	for _, cfg := range filterImportableChannels(configs, &state.warnings) {
 		disabled := cfg.Disabled
 		verifiedAt := cfg.VerifiedAt
 		_, err := s.channels.UpsertConfig(ctx, botID, cfg.ChannelType, channel.UpsertConfigRequest{
@@ -964,6 +978,32 @@ func (s *Service) restoreChannels(ctx context.Context, botID string, state *impo
 		state.counts[SectionChannels]++
 	}
 	return nil
+}
+
+func filterImportableChannels(rows []channel.ChannelConfig, warnings *[]string) []channel.ChannelConfig {
+	out := make([]channel.ChannelConfig, 0, len(rows))
+	for _, row := range rows {
+		if !isImportableChannelType(row.ChannelType) {
+			if warnings != nil {
+				*warnings = append(*warnings, whatsappImportSkipWarning)
+			}
+			continue
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+func replaceClearableChannels(rows []channel.ChannelConfig) []channel.ChannelConfig {
+	return filterImportableChannels(rows, nil)
+}
+
+func importableChannelsFromRaw(raw []byte, warnings *[]string) []channel.ChannelConfig {
+	var configs []channel.ChannelConfig
+	if err := unmarshalJSON(raw, &configs); err != nil {
+		return nil
+	}
+	return filterImportableChannels(configs, warnings)
 }
 
 func (s *Service) restoreMCP(ctx context.Context, botID string, state *importState) error {

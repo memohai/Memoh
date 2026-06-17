@@ -24,7 +24,7 @@
       </div>
       <div class="flex shrink-0 items-center gap-2">
         <span
-          v-if="isFormDirty"
+          v-if="!isQRSetup && isFormDirty"
           class="hidden text-xs text-muted-foreground sm:inline"
         >
           {{ $t('common.unsaved') }}
@@ -43,6 +43,7 @@
           {{ form.disabled ? $t('bots.channels.actionEnable') : $t('bots.channels.actionDisable') }}
         </Button>
         <Button
+          v-if="!isQRSetup"
           size="sm"
           :disabled="(!isFormDirty && isEditMode) || isBusy"
           @click="handleSave"
@@ -57,14 +58,22 @@
     </div>
 
     <!-- WeChat pairs by scanning a QR rather than entering credentials. -->
-    <div v-if="channelItem.meta.type === 'weixin'">
+    <div v-if="platformType === 'weixin'">
       <WeixinQrLogin
         :bot-id="botId"
         @login-success="handleWeixinLoginSuccess"
       />
     </div>
+    <div v-else-if="isQRSetup && isWhatsApp">
+      <WhatsAppQrLogin
+        :bot-id="botId"
+        :configured="isEditMode"
+        @login-success="handleWeixinLoginSuccess"
+        @update:busy="handleQRSetupBusy"
+      />
+    </div>
 
-    <template v-else>
+    <template v-else-if="!isQRSetup">
       <!-- Callback URL the platform console needs (Feishu webhook mode / WeChat OA) -->
       <SettingsSection
         v-if="showWebhookCallback"
@@ -158,13 +167,13 @@
       :title="$t('bots.channels.dangerZone')"
     >
       <SettingsRow
-        :label="$t('common.delete')"
-        :description="$t('bots.channels.deleteWarning')"
+        :label="dangerActionLabel"
+        :description="dangerActionDescription"
       >
         <ConfirmPopover
-          :title="$t('bots.channels.deleteTitle')"
-          :message="$t('bots.channels.deleteConfirm')"
-          :confirm-text="$t('common.delete')"
+          :title="dangerActionTitle"
+          :message="dangerActionConfirm"
+          :confirm-text="dangerActionLabel"
           variant="destructive"
           :loading="action === 'delete'"
           @confirm="handleDelete"
@@ -179,7 +188,7 @@
                 v-if="action === 'delete'"
                 class="size-4"
               />
-              {{ $t('common.delete') }}
+              {{ dangerActionLabel }}
             </Button>
           </template>
         </ConfirmPopover>
@@ -195,7 +204,12 @@ import { reactive, watch, computed, ref } from 'vue'
 import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { useMutation } from '@pinia/colada'
-import { putBotsByIdChannelByPlatform, deleteBotsByIdChannelByPlatform, patchBotsByIdChannelByPlatformStatus } from '@memohai/sdk'
+import {
+  deleteBotsByIdChannelByPlatform,
+  patchBotsByIdChannelByPlatformStatus,
+  postBotsByIdChannelWhatsappLogout,
+  putBotsByIdChannelByPlatform,
+} from '@memohai/sdk'
 import type { HandlersChannelMeta, ChannelChannelConfig, ChannelFieldSchema, ChannelUpsertConfigRequest } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
@@ -204,6 +218,7 @@ import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
 import ChannelField from './channel-field.vue'
 import WeixinQrLogin from './weixin-qr-login.vue'
+import WhatsAppQrLogin from './whatsapp-qr-login.vue'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
@@ -227,10 +242,18 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const botIdRef = computed(() => props.botId)
 const platformType = computed(() => String(props.channelItem.meta.type || '').trim())
+const setupMode = computed(() => String((props.channelItem.meta as { setup_mode?: string }).setup_mode || '').trim())
+const isQRSetup = computed(() => setupMode.value === 'qr')
+const isWhatsApp = computed(() => platformType.value === 'whatsapp')
 const channelTitle = computed(() => channelTypeDisplayName(t, props.channelItem.meta.type, props.channelItem.meta.display_name))
+const dangerActionLabel = computed(() => isQRSetup.value ? t('bots.channels.logout') : t('common.delete'))
+const dangerActionTitle = computed(() => isQRSetup.value ? t('bots.channels.logoutTitle') : t('bots.channels.deleteTitle'))
+const dangerActionDescription = computed(() => isQRSetup.value ? t('bots.channels.logoutWarning') : t('bots.channels.deleteWarning'))
+const dangerActionConfirm = computed(() => isQRSetup.value ? t('bots.channels.logoutConfirm') : t('bots.channels.deleteConfirm'))
 
 const action = ref<'save' | 'toggle' | 'delete' | ''>('')
-const isBusy = computed(() => action.value !== '')
+const qrSetupBusy = ref(false)
+const isBusy = computed(() => action.value !== '' || qrSetupBusy.value)
 const isEditMode = computed(() => props.channelItem.configured)
 const lastSavedConfigId = ref('')
 
@@ -301,6 +324,9 @@ function initForm() {
 }
 
 watch(() => props.channelItem, initForm, { immediate: true })
+watch(platformType, () => {
+  qrSetupBusy.value = false
+})
 
 // Stringify the reactive proxy (not toRaw) so the computed actually tracks nested
 // credential edits — otherwise Save never re-enables after a field changes.
@@ -343,6 +369,7 @@ async function handleSave() {
 }
 
 async function handleToggleDisabled() {
+  if (isBusy.value) return
   action.value = 'toggle'
   try {
     const result = await updateChannelStatus({ platform: platformType.value, disabled: !form.disabled })
@@ -357,14 +384,19 @@ async function handleToggleDisabled() {
 }
 
 async function handleDelete() {
+  if (isBusy.value) return
   action.value = 'delete'
   try {
-    await deleteBotsByIdChannelByPlatform({ path: { id: botIdRef.value, platform: platformType.value }, throwOnError: true })
+    if (isWhatsApp.value) {
+      await postBotsByIdChannelWhatsappLogout({ path: { id: botIdRef.value }, throwOnError: true })
+    } else {
+      await deleteBotsByIdChannelByPlatform({ path: { id: botIdRef.value, platform: platformType.value }, throwOnError: true })
+    }
     lastSavedConfigId.value = ''
-    toast.success(t('bots.channels.deleteSuccess'))
+    toast.success(isWhatsApp.value ? t('bots.channels.logoutSuccess') : t('bots.channels.deleteSuccess'))
     emit('deleted')
   } catch (err) {
-    toast.error(resolveApiErrorMessage(err, t('bots.channels.deleteFailed'), { prefixFallback: true }))
+    toast.error(resolveApiErrorMessage(err, isWhatsApp.value ? t('bots.channels.logoutFailed') : t('bots.channels.deleteFailed'), { prefixFallback: true }))
   } finally {
     action.value = ''
   }
@@ -385,4 +417,8 @@ async function copyWebhookCallback() {
 }
 
 function handleWeixinLoginSuccess() { emit('saved') }
+
+function handleQRSetupBusy(busy: boolean) {
+  qrSetupBusy.value = busy
+}
 </script>

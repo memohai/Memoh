@@ -28,6 +28,11 @@
           />
         </div>
 
+        <Alert v-else-if="loadError">
+          <AlertTitle>{{ t('common.loadFailed') }}</AlertTitle>
+          <AlertDescription>{{ loadError }}</AlertDescription>
+        </Alert>
+
         <!-- Platforms + a dashed add tile to drop another in -->
         <div
           v-else-if="configuredChannels.length > 0"
@@ -97,7 +102,7 @@
 
         <ChannelSettingsPanel
           v-if="selectedItem"
-          :key="selectedType ?? ''"
+          :key="`${botId}:${selectedType ?? ''}`"
           :bot-id="botId"
           :channel-item="selectedItem"
           @saved="handleSaved"
@@ -142,6 +147,7 @@ import {
   Button, Skeleton,
   Dialog, DialogContent, DialogHeader, DialogTitle,
   Empty, EmptyTitle, EmptyDescription, EmptyContent,
+  Alert, AlertDescription, AlertTitle,
 } from '@memohai/ui'
 import { useQuery } from '@pinia/colada'
 import { getChannels, getBotsByIdChannelByPlatform } from '@memohai/sdk'
@@ -153,6 +159,7 @@ import SwapTransition from '@/components/settings/swap-transition.vue'
 import PageShell from '@/components/page-shell/index.vue'
 import { useViewSwap } from '@/composables/useViewSwap'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 
 export interface BotChannelItem {
   meta: HandlersChannelMeta
@@ -172,7 +179,7 @@ function channelTitle(meta: HandlersChannelMeta) {
 
 const botIdRef = computed(() => props.botId)
 
-const { data: channels, isLoading, refetch } = useQuery({
+const { data: channels, isLoading, refetch, error } = useQuery({
   key: () => ['bot-channels', botIdRef.value],
   query: async (): Promise<BotChannelItem[]> => {
     const { data: metas } = await getChannels({ throwOnError: true })
@@ -180,18 +187,24 @@ const { data: channels, isLoading, refetch } = useQuery({
     const configurableTypes = metas.filter((m) => !m.configless)
     const results = await Promise.all(
       configurableTypes.map(async (meta) => {
-        try {
-          const { data: config } = await getBotsByIdChannelByPlatform({ path: { id: botIdRef.value, platform: meta.type ?? '' }, throwOnError: true })
-          return { meta, config: config ?? null, configured: true } as BotChannelItem
-        } catch {
-          return { meta, config: null, configured: false } as BotChannelItem
+        const result = await getBotsByIdChannelByPlatform({ path: { id: botIdRef.value, platform: meta.type ?? '' } })
+        if (result.error !== undefined) {
+          if (result.response?.status === 404) {
+            return { meta, config: null, configured: false } as BotChannelItem
+          }
+          throw result.error
         }
+        return { meta, config: result.data ?? null, configured: true } as BotChannelItem
       })
     )
     return results
   },
   enabled: () => !!botIdRef.value,
 })
+
+const loadError = computed(() => error.value
+  ? resolveApiErrorMessage(error.value, t('bots.channels.loadFailed'))
+  : '')
 
 const selectedType = ref<string | null>(null)
 

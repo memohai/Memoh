@@ -22,6 +22,7 @@
 
 <script setup lang="ts">
 import { computed, type Component } from 'vue'
+import { MessageCircle } from 'lucide-vue-next'
 import {
   Dingtalk,
   Qq,
@@ -50,6 +51,7 @@ const channelIcons: Record<string, Component> = {
   matrix: Matrix,
   misskey: Misskey,
   dingtalk: Dingtalk,
+  whatsapp: MessageCircle,
 }
 
 const props = withDefaults(defineProps<{
