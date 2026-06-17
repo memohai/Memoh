@@ -926,6 +926,17 @@ export const useChatStore = defineStore('chat', () => {
       merge: mergeTurnInPlace,
     })
     updateSinceFromMessages(items)
+    // Refresh path: fs-mutating tools that landed via /messages/events (e.g.
+    // a Telegram-triggered session writing to the workspace) never go through
+    // upsertAssistantUIMessage, so this is the only chance to fire fsChangedAt
+    // for those bots. bumpFsChangedAtIfFsMutation gates on running:false and
+    // tool name, and the debounce collapses re-bumps for already-seen blocks.
+    for (const turn of items) {
+      if (turn.role !== 'assistant') continue
+      for (const block of turn.messages) {
+        bumpFsChangedAtIfFsMutation(block)
+      }
+    }
   }
 
   function replaceMessages(items: UITurn[], targetSessionId?: string) {

@@ -1690,6 +1690,47 @@ describe('chat-list store', () => {
     expect(store.fsChangedAt).toBe(before)
   })
 
+  it('bumps fsChangedAt when a refresh delivers a fs-mutating tool from another channel', async () => {
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ])
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    api.fetchMessagesUI.mockResolvedValueOnce([{
+      id: 'assistant-1',
+      role: 'assistant',
+      messages: [{
+        id: 1,
+        type: 'tool',
+        name: 'write',
+        tool_call_id: 'call-cross-channel-write',
+        input: { path: '/data/cross-channel.md', content: 'hi' },
+        running: false,
+      }],
+      timestamp: new Date().toISOString(),
+    }])
+
+    messageEventsHandler?.({
+      type: 'message_created',
+      bot_id: 'bot-1',
+      message: {
+        id: 'msg-write',
+        bot_id: 'bot-1',
+        session_id: 'session-1',
+        role: 'assistant',
+        content: 'tool',
+        created_at: new Date().toISOString(),
+      },
+    })
+
+    // 100ms refresh schedule + 150ms fs debounce + slack.
+    await new Promise(resolve => setTimeout(resolve, 350))
+
+    expect(store.affectsPath('/data/cross-channel.md')).toBe(true)
+  })
+
   it('does not bump fsChangedAt while a fs-mutating tool is still running', async () => {
     sendEvents = [
       { type: 'start' } as UIStreamEvent,
