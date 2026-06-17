@@ -38,6 +38,11 @@ const originalContent = ref('')
 const loading = ref(false)
 const saving = ref(false)
 const imageUrl = ref('')
+// True once the file has been read at least once for the current path. Used
+// to suppress the full-area spinner on subsequent reloads — the editor / image
+// stays mounted and the content swaps in place, the way VS Code handles
+// external file changes.
+const loaded = ref(false)
 // Set when the agent rewrites this file while the user has unsaved edits. We
 // don't silently reload (that would lose their work); the template shows an
 // inline notice with a Reload action instead.
@@ -74,6 +79,7 @@ async function loadTextContent() {
     content.value = data.content ?? ''
     originalContent.value = content.value
     externalChangePending.value = false
+    loaded.value = true
   } catch (error) {
     if (controller.signal.aborted) return
     toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
@@ -106,6 +112,7 @@ async function loadImageBlob() {
     imageUrl.value = url
     url = ''
     externalChangePending.value = false
+    loaded.value = true
   } catch (error) {
     if (controller.signal.aborted) return
     toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
@@ -171,6 +178,7 @@ watch(() => props.file.path, () => {
   content.value = ''
   originalContent.value = ''
   externalChangePending.value = false
+  loaded.value = false
   if (isText.value) {
     void loadTextContent()
   } else if (isImage.value) {
@@ -253,8 +261,11 @@ onBeforeUnmount(() => {
       </Button>
     </div>
     <div class="flex-1 min-h-0 overflow-hidden">
+      <!-- Full-area spinner only on the FIRST load for this path (nothing else
+           to show). Subsequent reloads keep the editor/image mounted and let
+           the content swap in place, matching VS Code's external-change UX. -->
       <div
-        v-if="loading"
+        v-if="loading && !loaded"
         class="flex h-full items-center justify-center text-muted-foreground"
       >
         <Spinner class="mr-2" />

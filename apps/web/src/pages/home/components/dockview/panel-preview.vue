@@ -2,8 +2,10 @@
   <div class="flex flex-col h-full w-full bg-surface-editor">
     <PanelBreadcrumb :path="filePath" />
     <div class="flex-1 min-h-0">
+      <!-- Full-area spinner only on the first load. Reloads keep the rendered
+           markdown/html mounted and swap content in place. -->
       <div
-        v-if="loading"
+        v-if="loading && !loaded"
         class="flex h-full items-center justify-center text-muted-foreground"
       >
         <Spinner class="mr-2" />
@@ -76,6 +78,9 @@ const canPreview = computed(() => isMd.value || isHtml.value)
 
 const content = ref('')
 const loading = ref(false)
+// True once the preview has been rendered at least once for the current path,
+// so subsequent reloads can update content in place without flashing a spinner.
+const loaded = ref(false)
 // One in-flight load at a time; a new load aborts the old one so stale
 // fast-fire responses can't clobber newer content.
 let activeLoadController: AbortController | null = null
@@ -96,6 +101,7 @@ async function load() {
     })
     if (controller.signal.aborted) return
     content.value = data.content ?? ''
+    loaded.value = true
   } catch (error) {
     if (controller.signal.aborted) return
     toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
@@ -108,7 +114,13 @@ async function load() {
 }
 
 // Load when the panel first becomes visible / its target changes, and refresh
-// when the agent mutates the workspace.
+// when the agent mutates the workspace. Path change starts the "loaded" clock
+// from scratch so the user sees the spinner only for the new target's first
+// fetch.
+watch(filePath, () => {
+  loaded.value = false
+  content.value = ''
+})
 watch([visible, filePath], ([isVisible]) => {
   if (isVisible) void load()
 }, { immediate: true })
