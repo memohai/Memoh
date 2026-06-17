@@ -89,6 +89,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
   Button, Spinner, Badge, Input, toast,
@@ -103,6 +104,7 @@ import {
 } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { emitBotPluginsUpdated } from '@/utils/bot-plugin-events'
 import BotSelect from '@/components/bot-select/index.vue'
 
 const props = defineProps<{
@@ -116,6 +118,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const router = useRouter()
 
 const selectedBotId = ref('')
 const installing = ref(false)
@@ -159,8 +162,14 @@ async function handleInstall() {
       throwOnError: true,
     })
     toast.success(t('supermarket.installSuccess'))
+    emitBotPluginsUpdated(botId)
     emit('update:open', false)
     emit('installed')
+    void router.push({
+      name: 'bot-detail',
+      params: { botName: botId },
+      query: { tab: 'plugins' },
+    }).catch(() => {})
     if (data.status === 'needs_auth' && data.id) {
       await startOAuthAfterInstall(botId, data, oauthPopup)
     } else {
@@ -202,10 +211,12 @@ async function startOAuthAfterInstall(botId: string, installation: PluginsInstal
     await waitForMCPOAuth(botId, installation.id!, popup)
     const synced = await syncOAuthStatus(botId, installation.id!)
     if (synced.status !== 'ready' && !synced.enabled) throw new Error(t('mcp.oauth.authFailed'))
+    emitBotPluginsUpdated(botId)
     toast.success(t('mcp.oauth.authSuccess'))
     emit('installed')
   } catch (error) {
     const synced = await syncOAuthStatus(botId, installation.id!).catch(() => null)
+    if (synced) emitBotPluginsUpdated(botId)
     if (synced?.status === 'ready' || synced?.enabled) {
       toast.success(t('mcp.oauth.authSuccess'))
       emit('installed')
