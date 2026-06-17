@@ -1,40 +1,45 @@
 <script setup lang="ts">
-import { computed, ref, provide, watch, reactive } from 'vue'
-import modelSetting from './model-setting.vue'
+import { computed, provide, reactive, ref, watch } from 'vue'
 import { useQuery } from '@pinia/colada'
 import {
-  ScrollArea,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  Toggle,
+  Button,
   Empty,
   EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-  Button,
-  Badge,
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
 } from '@memohai/ui'
-import { getProviders } from '@memohai/sdk'
-import type { ProvidersGetResponse } from '@memohai/sdk'
+import { getModels, getProviders } from '@memohai/sdk'
+import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
+import { Boxes, Box, ChevronRight, Plus, Search } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
 import AddProvider from '@/components/add-provider/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
-import { List } from 'lucide-vue-next'
-import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
+import BackendCard from '@/components/settings/backend-card.vue'
+import DetailPane from '@/components/settings/detail-pane.vue'
+import { useViewSwap } from '@/composables/useViewSwap'
+import SwapTransition from '@/components/settings/swap-transition.vue'
+import PageShell from '@/components/page-shell/index.vue'
+import ModelSetting from './model-setting.vue'
 
-function getInitials(name: string | undefined) {
-  const label = name?.trim() ?? ''
-  return label ? label.slice(0, 2).toUpperCase() : '?'
-}
+const { t } = useI18n()
 
 const { data: providerData } = useQuery({
   key: () => ['providers'],
   query: async () => {
-    const { data } = await getProviders({
-      throwOnError: true,
-    })
+    const { data } = await getProviders({ throwOnError: true })
+    return data
+  },
+})
+
+const { data: modelData } = useQuery({
+  key: () => ['models'],
+  query: async () => {
+    const { data } = await getModels({ throwOnError: true })
     return data
   },
 })
@@ -42,131 +47,196 @@ const { data: providerData } = useQuery({
 const curProvider = ref<ProvidersGetResponse>()
 provide('curProvider', curProvider)
 
-const selectProvider = (value: string) => computed(() => {
-  return curProvider.value?.id === value
-})
+const { view, direction, openDetail, backToList } = useViewSwap()
+const searchQuery = ref('')
+const openStatus = reactive({ provideOpen: false })
 
-const curFilterProvider = computed(() => {
-  if (!Array.isArray(providerData.value)) {
-    return []
-  }
-  let list = providerData.value as ProvidersGetResponse[]
-  return [...list].sort((a, b) => {
+const providers = computed<ProvidersGetResponse[]>(() => {
+  if (!Array.isArray(providerData.value)) return []
+  return [...providerData.value].sort((a, b) => {
     const ae = a.enable !== false ? 1 : 0
     const be = b.enable !== false ? 1 : 0
     return be - ae
   })
 })
 
-watch(curFilterProvider, (providers) => {
-  if (providers.length === 0) {
-    curProvider.value = { id: '' }
-    return
+const modelCountByProvider = computed(() => {
+  const counts: Record<string, number> = {}
+  for (const model of (modelData.value as ModelsGetResponse[] | undefined) ?? []) {
+    const id = model.provider_id
+    if (!id) continue
+    counts[id] = (counts[id] ?? 0) + 1
   }
+  return counts
+})
+
+// Always offer search once there's anything to filter — a hidden-then-appearing
+// box read as inconsistent (some providers showed it, some didn't).
+const showSearch = computed(() => providers.value.length > 0)
+
+const filteredProviders = computed(() => {
+  const keyword = searchQuery.value.trim().toLowerCase()
+  if (!keyword) return providers.value
+  return providers.value.filter((p) => {
+    const name = (p.name ?? '').toLowerCase()
+    const url = providerSubtitle(p).toLowerCase()
+    return name.includes(keyword) || url.includes(keyword)
+  })
+})
+
+function getInitials(name: string | undefined) {
+  const label = name?.trim() ?? ''
+  return label ? label.slice(0, 2).toUpperCase() : '?'
+}
+
+function providerSubtitle(provider: ProvidersGetResponse) {
+  const baseUrl = (provider.config as Record<string, unknown> | undefined)?.base_url
+  if (typeof baseUrl === 'string' && baseUrl) {
+    return baseUrl.replace(/^https?:\/\//, '')
+  }
+  return provider.client_type ?? ''
+}
+
+function modelCount(id: string | undefined) {
+  return id ? (modelCountByProvider.value[id] ?? 0) : 0
+}
+
+function openProvider(provider: ProvidersGetResponse) {
+  curProvider.value = provider
+  openDetail()
+}
+
+// Sync the open provider with refreshed data; if it was deleted while open,
+// fall back to the gallery.
+watch(providers, (list) => {
   const currentId = curProvider.value?.id
-  if (currentId) {
-    const stillExists = providers.find((p) => p.id === currentId)
-    if (stillExists) {
-      curProvider.value = stillExists
-      return
-    }
+  if (!currentId) return
+  const stillExists = list.find((p) => p.id === currentId)
+  if (stillExists) {
+    curProvider.value = stillExists
+  } else if (view.value === 'detail') {
+    backToList()
   }
-  curProvider.value = providers[0]
-}, {
-  immediate: true
 })
-
-const openStatus = reactive({
-  provideOpen: false
-})
-
 </script>
 
 <template>
-  <MasterDetailSidebarLayout class="[&_td:last-child]:w-45">
-    <template
-      #sidebar-content
+  <SwapTransition :direction="direction">
+    <!-- Gallery -->
+    <PageShell
+      v-if="view === 'list'"
+      :title="t('sidebar.providers')"
     >
-      <SidebarMenu
-        v-for="providerItem in curFilterProvider"
-        :key="providerItem.id"
+      <template #actions>
+        <div
+          v-if="showSearch"
+          class="w-44 sm:w-56"
+        >
+          <InputGroup class="w-full">
+            <InputGroupAddon align="inline-start">
+              <Search class="size-3.5 text-muted-foreground" />
+            </InputGroupAddon>
+            <InputGroupInput
+              v-model="searchQuery"
+              :placeholder="t('provider.searchPlaceholder')"
+            />
+          </InputGroup>
+        </div>
+        <Button @click="openStatus.provideOpen = true">
+          <Plus class="size-4" />
+          {{ t('provider.addBtn') }}
+        </Button>
+      </template>
+
+      <div
+        v-if="providers.length > 0"
+        class="grid grid-cols-1 gap-3 sm:grid-cols-2"
       >
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            as-child
-            :is-active="selectProvider(providerItem.id ?? '').value"
-            class="justify-start py-0! px-0 h-11 before:hidden"
-          >
-            <Toggle
-              class="w-full justify-start h-11 px-3 border-0 bg-transparent! transition-colors gap-3"
-              :model-value="selectProvider(providerItem.id ?? '').value"
-              @update:model-value="(isSelect) => {
-                if (isSelect) {
-                  curProvider = providerItem
-                }
-              }"
-            >
-              <span class="relative shrink-0">
-                <span class="flex size-6 items-center justify-center rounded-full bg-muted">
-                  <ProviderIcon
-                    v-if="providerItem.icon"
-                    :icon="providerItem.icon"
-                    size="1em"
-                  />
-                  <span
-                    v-else
-                    class="text-[10px] font-medium text-muted-foreground"
-                  >
-                    {{ getInitials(providerItem.name) }}
-                  </span>
-                </span>
-                <Badge
-                  v-if="providerItem.enable !== false"
-                  class="absolute -bottom-0.5 -right-0.5 size-2.5 p-0 rounded-full ring-2 ring-background"
-                  variant="success"
-                />
+        <BackendCard
+          v-for="provider in filteredProviders"
+          :key="provider.id"
+          :name="provider.name ?? ''"
+          :subtitle="providerSubtitle(provider)"
+          :enabled="provider.enable !== false"
+          @click="openProvider(provider)"
+        >
+          <template #leading>
+            <span class="flex size-10 items-center justify-center rounded-full bg-muted">
+              <ProviderIcon
+                v-if="provider.icon"
+                :icon="provider.icon"
+                size="1.5em"
+              />
+              <span
+                v-else
+                class="text-xs font-medium text-muted-foreground"
+              >
+                {{ getInitials(provider.name) }}
               </span>
-              <span class="truncate text-xs font-medium">{{ providerItem.name }}</span>
-            </Toggle>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      </SidebarMenu>
-    </template>
+            </span>
+          </template>
+          <template #trailing>
+            <span
+              v-if="modelCount(provider.id) > 0"
+              class="flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
+            >
+              <Boxes class="size-3.5" />
+              {{ modelCount(provider.id) }}
+            </span>
+            <ChevronRight
+              v-else
+              class="size-4 shrink-0 text-muted-foreground/60"
+            />
+          </template>
+        </BackendCard>
 
-    <template #sidebar-footer>
-      <AddProvider
-        v-model:open="openStatus.provideOpen"
-        :providers="curFilterProvider"
-      />
-    </template>
+        <button
+          type="button"
+          class="group/add flex min-h-[4.5rem] items-center justify-center gap-2 rounded-[var(--radius-menu-shell)] border border-dashed border-border bg-background text-sm text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          @click="openStatus.provideOpen = true"
+        >
+          <Plus class="size-4" />
+          {{ t('provider.addBtn') }}
+        </button>
+      </div>
 
-    <template #detail>
-      <ScrollArea
-        v-if="curProvider?.id"
-        class="max-h-full h-full"
-      >
-        <model-setting />
-      </ScrollArea>
       <Empty
         v-else
-        class="h-full flex justify-center items-center"
+        class="rounded-[var(--radius-menu-shell)] border border-dashed border-border py-16"
       >
         <EmptyHeader>
           <EmptyMedia variant="icon">
-            <List />
+            <Box />
           </EmptyMedia>
         </EmptyHeader>
-        <EmptyTitle>{{ $t('provider.emptyTitle') }}</EmptyTitle>
-        <EmptyDescription>{{ $t('provider.emptyDescription') }}</EmptyDescription>
+        <EmptyTitle>{{ t('provider.emptyTitle') }}</EmptyTitle>
+        <EmptyDescription>{{ t('provider.emptyDescription') }}</EmptyDescription>
         <EmptyContent>
           <Button
             variant="outline"
-            @click="openStatus.provideOpen=true"
+            @click="openStatus.provideOpen = true"
           >
-            {{ $t('provider.addBtn') }}
-          </Button>          
+            <Plus class="size-4" />
+            {{ t('provider.addBtn') }}
+          </Button>
         </EmptyContent>
       </Empty>
-    </template>
-  </MasterDetailSidebarLayout>
-</template>    
+
+      <AddProvider
+        v-model:open="openStatus.provideOpen"
+        :providers="providers"
+        hide-trigger
+      />
+    </PageShell>
+
+    <!-- Detail -->
+    <DetailPane
+      v-else
+      width="narrow"
+      :back-label="t('sidebar.providers')"
+      @back="backToList()"
+    >
+      <ModelSetting v-if="curProvider?.id" />
+    </DetailPane>
+  </SwapTransition>
+</template>

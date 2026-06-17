@@ -17,6 +17,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/background"
+	"github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
@@ -39,11 +40,12 @@ const largeFileThreshold = 512 * 1024 // 512 KB
 type ContainerProvider struct {
 	clients     bridge.Provider
 	bgManager   *background.Manager
+	hookService *hooks.Service
 	execWorkDir string
 	logger      *slog.Logger
 }
 
-func NewContainerProvider(log *slog.Logger, clients bridge.Provider, bgManager *background.Manager, execWorkDir string) *ContainerProvider {
+func NewContainerProvider(log *slog.Logger, clients bridge.Provider, bgManager *background.Manager, execWorkDir string, hookServices ...*hooks.Service) *ContainerProvider {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -51,7 +53,15 @@ func NewContainerProvider(log *slog.Logger, clients bridge.Provider, bgManager *
 	if wd == "" {
 		wd = defaultContainerExecWorkDir
 	}
-	return &ContainerProvider{clients: clients, bgManager: bgManager, execWorkDir: wd, logger: log.With(slog.String("tool", "container"))}
+	var hookService *hooks.Service
+	if len(hookServices) > 0 {
+		hookService = hookServices[0]
+	}
+	return &ContainerProvider{clients: clients, bgManager: bgManager, hookService: hookService, execWorkDir: wd, logger: log.With(slog.String("tool", "container"))}
+}
+
+func (p *ContainerProvider) SetHookService(h *hooks.Service) {
+	p.hookService = h
 }
 
 func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
@@ -130,6 +140,63 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 			},
 		},
 		{
+			Name: "apply_patch",
+			Description: fmt.Sprintf(`Apply a structured patch %s. This is a Memoh/Codex-style patch format, not a standard unified diff or git patch.
+
+Use this tool for multi-file edits, structured code changes, file creation, file deletion, or file moves. Use edit for one exact text replacement and write for full-file overwrite.
+
+Patch grammar:
+- The patch must start with "*** Begin Patch" and end with "*** End Patch".
+- Add a file with "*** Add File: path". Every following content line for that file must start with "+".
+- Delete a file with "*** Delete File: path".
+- Update a file with "*** Update File: path".
+- Move or rename a file by putting "*** Move to: new/path" immediately after an update header, before any changed lines.
+- Inside update hunks, use "@@" or "@@ context line" before changed lines. The optional context line helps locate the block in the file.
+- Changed lines use a one-character prefix: " " for unchanged context, "-" for removed lines, and "+" for added lines.
+- Use "*** End of File" inside an update hunk when the hunk should match the end of the file.
+- Paths are relative to the workspace by default. Absolute paths are accepted only when the workspace backend allows them.
+
+Examples:
+
+Add a file:
+*** Begin Patch
+*** Add File: docs/notes.md
++new line
+*** End Patch
+
+Update a file:
+*** Begin Patch
+*** Update File: path
+@@
+-old line
++new line
+*** End Patch
+
+Move a file:
+*** Begin Patch
+*** Update File: old/path.txt
+*** Move to: new/path.txt
+@@
+ old content
+*** End Patch
+
+Delete a file:
+*** Begin Patch
+*** Delete File: obsolete.txt
+*** End Patch
+`, workspace.locationDescription),
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"patch": map[string]any{"type": "string", "description": "Patch body using the apply_patch format. Paths are relative to the workspace by default, or absolute paths supported by the workspace backend."},
+				},
+				"required": []string{"patch"},
+			},
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
+				return p.execApplyPatch(ctx.Context, sess, input)
+			},
+		},
+		{
 			Name: "exec",
 			Description: fmt.Sprintf(`Execute a shell command %s. Runs in %s by default.
 
@@ -160,18 +227,42 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 			},
 		},
 		{
-			Name:        "bg_status",
-			Description: "Check the status of background tasks or kill a running one.",
+			Name:        "list_background",
+			Description: "List background tasks for the current session.",
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
+				return p.execListBackground(ctx.Context, sess, inputAsMap(input))
+			},
+		},
+		{
+			Name:        "get_background_status",
+			Description: "Get the status and details of a background task.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"action":  map[string]any{"type": "string", "enum": []string{"list", "status", "kill"}, "description": "Action to perform: list all tasks, get status of one task, or kill a running task"},
-					"task_id": map[string]any{"type": "string", "description": "Task ID (required for status and kill actions)"},
+					"task_id": map[string]any{"type": "string", "description": "Task ID"},
 				},
-				"required": []string{"action"},
+				"required": []string{"task_id"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execBgStatus(ctx.Context, sess, inputAsMap(input))
+				return p.execGetBackgroundStatus(ctx.Context, sess, inputAsMap(input))
+			},
+		},
+		{
+			Name:        "kill_background",
+			Description: "Kill a running background task.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"task_id": map[string]any{"type": "string", "description": "Task ID"},
+				},
+				"required": []string{"task_id"},
+			},
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
+				return p.execKillBackground(ctx.Context, sess, inputAsMap(input))
 			},
 		},
 	}, nil
@@ -209,6 +300,55 @@ func (p *ContainerProvider) resolveToolWorkspace(ctx context.Context, session Se
 		locationDescription:     "inside the bot container",
 		absolutePathDescription: "inside container",
 	}
+}
+
+func (p *ContainerProvider) hookWorkspaceInfo(ctx context.Context, session SessionContext) hooks.WorkspaceInfo {
+	info := hooks.WorkspaceInfo{
+		CWD:     p.execWorkDir,
+		Runtime: bridge.WorkspaceBackendContainer,
+	}
+	if resolver, ok := p.clients.(bridge.WorkspaceInfoProvider); ok {
+		if resolved, err := resolver.WorkspaceInfo(ctx, session.BotID); err == nil {
+			if strings.TrimSpace(resolved.DefaultWorkDir) != "" {
+				info.CWD = resolved.DefaultWorkDir
+			}
+			if strings.TrimSpace(resolved.Backend) != "" {
+				info.Runtime = resolved.Backend
+			}
+		}
+	}
+	if strings.TrimSpace(info.CWD) == "" {
+		info.CWD = hooks.DefaultWorkDir
+	}
+	return info
+}
+
+func (p *ContainerProvider) runWorkspaceToolHook(ctx context.Context, session SessionContext, eventName string, extra map[string]any) (hooks.Result, error) {
+	if p == nil || p.hookService == nil {
+		return hooks.Result{Decision: hooks.DecisionAllow, RuntimeSupported: hooks.RuntimeSupported(eventName)}, nil
+	}
+	req := hooks.Request{
+		Version:   1,
+		Event:     eventName,
+		BotID:     session.BotID,
+		SessionID: session.SessionID,
+		ChatID:    session.ChatID,
+		Workspace: p.hookWorkspaceInfo(ctx, session),
+		Extra:     extra,
+	}
+	return p.hookService.Run(ctx, req, nil)
+}
+
+func (p *ContainerProvider) logWorkspaceToolHookError(eventName, botID, sessionID string, err error) {
+	if p == nil || p.logger == nil || err == nil {
+		return
+	}
+	p.logger.Warn("workspace tool hook failed",
+		slog.String("event", eventName),
+		slog.String("bot_id", botID),
+		slog.String("session_id", sessionID),
+		slog.Any("error", err),
+	)
 }
 
 func (*ContainerProvider) normalizePath(path, workDir string) string {
@@ -350,6 +490,15 @@ func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContex
 	}
 
 	data := []byte(content)
+	if res, err := p.runWorkspaceToolHook(ctx, session, hooks.EventBeforeFileWrite, map[string]any{
+		"path":  filePath,
+		"bytes": len(data),
+	}); err != nil {
+		if res.Decision == hooks.DecisionDeny {
+			return nil, err
+		}
+		return nil, fmt.Errorf("before file write hook failed: %w", err)
+	}
 	if len(data) > largeFileThreshold {
 		// Large content: use streaming WriteRaw to avoid loading everything
 		// into a single gRPC message and to allow incremental transfer.
@@ -361,6 +510,12 @@ func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContex
 		if err := client.WriteFile(opCtx, filePath, data); err != nil {
 			return nil, err
 		}
+	}
+	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, hooks.EventAfterFileWrite, map[string]any{
+		"path":  filePath,
+		"bytes": len(data),
+	}); err != nil {
+		p.logWorkspaceToolHookError(hooks.EventAfterFileWrite, session.BotID, session.SessionID, err)
 	}
 	return map[string]any{"ok": true}, nil
 }
@@ -469,6 +624,16 @@ func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext
 	}
 
 	updatedBytes := []byte(updated)
+	if res, err := p.runWorkspaceToolHook(ctx, session, hooks.EventBeforeFileWrite, map[string]any{
+		"path":  filePath,
+		"bytes": len(updatedBytes),
+		"mode":  "edit",
+	}); err != nil {
+		if res.Decision == hooks.DecisionDeny {
+			return nil, err
+		}
+		return nil, fmt.Errorf("before file write hook failed: %w", err)
+	}
 	if len(updatedBytes) > largeFileThreshold {
 		// Large result: stream-write to avoid gRPC message size issues.
 		if _, err := client.WriteRaw(opCtx, filePath, strings.NewReader(updated)); err != nil {
@@ -478,6 +643,13 @@ func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext
 		if err := client.WriteFile(opCtx, filePath, updatedBytes); err != nil {
 			return nil, err
 		}
+	}
+	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, hooks.EventAfterFileWrite, map[string]any{
+		"path":  filePath,
+		"bytes": len(updatedBytes),
+		"mode":  "edit",
+	}); err != nil {
+		p.logWorkspaceToolHookError(hooks.EventAfterFileWrite, session.BotID, session.SessionID, err)
 	}
 	return map[string]any{"ok": true}, nil
 }
@@ -523,23 +695,61 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 
 	// Background execution path.
 	if runInBg && p.bgManager != nil {
-		return p.execExecBackground(ctx, session, client, command, workDir, description)
+		return p.execWithWorkspaceHooks(ctx, session, command, workDir, timeout, true, func() (any, error) {
+			return p.execExecBackground(ctx, session, client, command, workDir, description)
+		})
 	}
 
 	// If we have a background manager, use streaming exec so we can flip
 	// to background on timeout without killing the process.
 	if p.bgManager != nil {
-		return p.execExecWithFlip(ctx, session, client, command, workDir, description, timeout)
+		return p.execWithWorkspaceHooks(ctx, session, command, workDir, timeout, false, func() (any, error) {
+			return p.execExecWithFlip(ctx, session, client, command, workDir, description, timeout)
+		})
 	}
 
 	// Fallback: no background manager, plain synchronous exec.
-	result, err := client.Exec(ctx, command, workDir, timeout)
+	wrapped, err := p.execWithWorkspaceHooks(ctx, session, command, workDir, timeout, false, func() (any, error) {
+		result, err := client.Exec(ctx, command, workDir, timeout)
+		if err != nil {
+			return nil, err
+		}
+		stdout := pruneToolOutputText(result.Stdout, "tool result (exec stdout)")
+		stderr := pruneToolOutputText(result.Stderr, "tool result (exec stderr)")
+		return map[string]any{"stdout": stdout, "stderr": stderr, "exit_code": result.ExitCode}, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	stdout := pruneToolOutputText(result.Stdout, "tool result (exec stdout)")
-	stderr := pruneToolOutputText(result.Stderr, "tool result (exec stderr)")
-	return map[string]any{"stdout": stdout, "stderr": stderr, "exit_code": result.ExitCode}, nil
+	return wrapped, nil
+}
+
+func (p *ContainerProvider) execWithWorkspaceHooks(ctx context.Context, session SessionContext, command, workDir string, timeout int32, background bool, run func() (any, error)) (any, error) {
+	if res, err := p.runWorkspaceToolHook(ctx, session, hooks.EventBeforeWorkspaceCommand, map[string]any{
+		"command":           command,
+		"work_dir":          workDir,
+		"timeout_seconds":   timeout,
+		"run_in_background": background,
+	}); err != nil {
+		if res.Decision == hooks.DecisionDeny {
+			return nil, err
+		}
+		return nil, fmt.Errorf("before workspace command hook failed: %w", err)
+	}
+	result, runErr := run()
+	extra := map[string]any{
+		"command":           command,
+		"work_dir":          workDir,
+		"timeout_seconds":   timeout,
+		"run_in_background": background,
+	}
+	if runErr != nil {
+		extra["error"] = runErr.Error()
+	}
+	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, hooks.EventAfterWorkspaceCommand, extra); err != nil {
+		p.logWorkspaceToolHookError(hooks.EventAfterWorkspaceCommand, session.BotID, session.SessionID, err)
+	}
+	return result, runErr
 }
 
 const backgroundReplayBytes = 4096
@@ -801,66 +1011,112 @@ func (p *ContainerProvider) execExecBackground(
 	}, nil
 }
 
-// execBgStatus handles the bg_status tool for listing/checking/killing background tasks.
-func (p *ContainerProvider) execBgStatus(_ context.Context, session SessionContext, args map[string]any) (any, error) {
+func (p *ContainerProvider) execListBackground(_ context.Context, session SessionContext, _ map[string]any) (any, error) {
 	if p.bgManager == nil {
 		return nil, errors.New("background task manager not available")
 	}
 
-	action := strings.TrimSpace(StringArg(args, "action"))
+	snapshots := p.bgManager.ListSnapshotsForSession(session.BotID, session.SessionID)
+	entries := make([]map[string]any, 0, len(snapshots))
+	for _, s := range snapshots {
+		entry := map[string]any{
+			"task_id":     s.TaskID,
+			"kind":        string(s.Kind),
+			"description": s.Description,
+			"status":      string(s.Status),
+			"started_at":  session.FormatTime(s.StartedAt),
+		}
+		if s.Kind == background.KindAgent {
+			entry["agent_id"] = s.AgentID
+			entry["session_id"] = s.AgentSessionID
+		}
+		if s.Kind != background.KindSpawn && s.Kind != background.KindAgent {
+			entry["command"] = truncateStr(s.Command, 120)
+			entry["output_file"] = s.OutputFile
+		}
+		entries = append(entries, entry)
+	}
+	return map[string]any{"tasks": entries, "count": len(entries)}, nil
+}
+
+func (p *ContainerProvider) execGetBackgroundStatus(_ context.Context, session SessionContext, args map[string]any) (any, error) {
+	if p.bgManager == nil {
+		return nil, errors.New("background task manager not available")
+	}
+
 	taskID := strings.TrimSpace(StringArg(args, "task_id"))
-
-	switch action {
-	case "list":
-		tasks := p.bgManager.ListForSession(session.BotID, session.SessionID)
-		entries := make([]map[string]any, 0, len(tasks))
-		for _, t := range tasks {
-			entries = append(entries, map[string]any{
-				"task_id":     t.ID,
-				"command":     truncateStr(t.Command, 120),
-				"description": t.Description,
-				"status":      string(t.Status),
-				"output_file": t.OutputFile,
-				"started_at":  session.FormatTime(t.StartedAt),
-			})
+	if taskID == "" {
+		return nil, errors.New("task_id is required")
+	}
+	task := p.bgManager.GetForSession(session.BotID, session.SessionID, taskID)
+	if task == nil {
+		return nil, fmt.Errorf("task %s not found", taskID)
+	}
+	s := task.Snapshot()
+	result := map[string]any{
+		"task_id":     s.TaskID,
+		"kind":        string(s.Kind),
+		"description": s.Description,
+		"status":      string(s.Status),
+		"started_at":  session.FormatTime(s.StartedAt),
+	}
+	if s.Status != background.TaskRunning && s.Status != background.TaskQueued {
+		result["completed_at"] = session.FormatTime(s.CompletedAt)
+	}
+	if s.Kind == background.KindAgent {
+		result["agent_id"] = s.AgentID
+		result["session_id"] = s.AgentSessionID
+		result["message"] = s.AgentMessage
+		if s.AgentReport != "" {
+			result["report"] = s.AgentReport
 		}
-		return map[string]any{"tasks": entries, "count": len(entries)}, nil
-
-	case "status":
-		if taskID == "" {
-			return nil, errors.New("task_id is required for status action")
-		}
-		task := p.bgManager.GetForSession(session.BotID, session.SessionID, taskID)
-		if task == nil {
-			return nil, fmt.Errorf("task %s not found", taskID)
-		}
-		result := map[string]any{
-			"task_id":     task.ID,
-			"command":     task.Command,
-			"description": task.Description,
-			"status":      string(task.Status),
-			"output_file": task.OutputFile,
-			"started_at":  session.FormatTime(task.StartedAt),
-		}
-		if task.Status != background.TaskRunning {
-			result["exit_code"] = task.ExitCode
-			result["completed_at"] = session.FormatTime(task.CompletedAt)
-			result["output_tail"] = task.OutputTail()
+		if s.AgentError != "" {
+			result["error"] = s.AgentError
 		}
 		return result, nil
-
-	case "kill":
-		if taskID == "" {
-			return nil, errors.New("task_id is required for kill action")
-		}
-		if err := p.bgManager.KillForSession(session.BotID, session.SessionID, taskID); err != nil {
-			return nil, err
-		}
-		return map[string]any{"ok": true, "message": fmt.Sprintf("Task %s has been killed.", taskID)}, nil
-
-	default:
-		return nil, fmt.Errorf("unknown action: %s (expected: list, status, kill)", action)
 	}
+	if s.Kind == background.KindSpawn {
+		if len(s.Branches) > 0 {
+			branches := make([]map[string]any, 0, len(s.Branches))
+			for _, br := range s.Branches {
+				b := map[string]any{"task": br.Task, "status": string(br.Status)}
+				if br.ChildSessionID != "" {
+					b["session_id"] = br.ChildSessionID
+				}
+				if br.Report != "" {
+					b["report"] = br.Report
+				}
+				if br.Error != "" {
+					b["error"] = br.Error
+				}
+				branches = append(branches, b)
+			}
+			result["branches"] = branches
+		}
+		return result, nil
+	}
+	result["command"] = s.Command
+	result["output_file"] = s.OutputFile
+	if s.Status != background.TaskRunning && s.Status != background.TaskQueued {
+		result["exit_code"] = s.ExitCode
+		result["output_tail"] = s.OutputTail
+	}
+	return result, nil
+}
+
+func (p *ContainerProvider) execKillBackground(_ context.Context, session SessionContext, args map[string]any) (any, error) {
+	if p.bgManager == nil {
+		return nil, errors.New("background task manager not available")
+	}
+
+	taskID := strings.TrimSpace(StringArg(args, "task_id"))
+	if taskID == "" {
+		return nil, errors.New("task_id is required")
+	}
+	if err := p.bgManager.KillForSession(session.BotID, session.SessionID, taskID); err != nil {
+		return nil, err
+	}
+	return map[string]any{"ok": true, "message": fmt.Sprintf("Task %s has been killed.", taskID)}, nil
 }
 
 func truncateStr(s string, n int) string {

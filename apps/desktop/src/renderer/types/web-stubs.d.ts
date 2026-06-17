@@ -1,11 +1,11 @@
 // Type stubs for @memohai/web subpath imports consumed by the renderer.
 // We route typechecking through these stubs (via tsconfig `paths`) so vue-tsc
-// does not recursively typecheck @memohai/web's source tree — @memohai/web
+// does not recursively typecheck @memohai/web's source tree. @memohai/web
 // owns its own types/CI. Vite ignores `paths` and resolves the real `exports`
 // entries at bundle time, so runtime behavior is unchanged.
 
 // Marker to make this file a module (not an ambient script). Required so
-// that paths-mapped dynamic `import('@memohai/web/...')` calls succeed —
+// that paths-mapped dynamic `import('@memohai/web/...')` calls succeed.
 // TS otherwise complains that the resolved file "is not a module".
 export {}
 
@@ -30,6 +30,7 @@ declare module '@memohai/web/i18n' {
 declare module '@memohai/web/api-client' {
   export interface SetupApiClientOptions {
     baseUrl?: string
+    fetch?: typeof fetch
     onUnauthorized?: () => void
   }
   export interface SdkUrlOptions {
@@ -43,10 +44,146 @@ declare module '@memohai/web/api-client' {
   export function setupApiClient(options?: SetupApiClientOptions): void
 }
 
+declare module '@memohai/web/lib/keyboard-commands' {
+  export const appKeyboardCommands: {
+    readonly closeCurrentWorkspaceTab: 'close-current-workspace-tab'
+    readonly saveActiveFile: 'save-active-file'
+    readonly toggleSidebar: 'toggle-sidebar'
+    readonly openSettings: 'open-settings'
+    readonly closeMediaLightbox: 'close-media-lightbox'
+    readonly mediaLightboxPrev: 'media-lightbox-prev'
+    readonly mediaLightboxNext: 'media-lightbox-next'
+  }
+  export type AppKeyboardCommand =
+    typeof appKeyboardCommands[keyof typeof appKeyboardCommands]
+  export type KeyboardCommandHandler = () => boolean | void
+  export type UnhandledKeyboardCommandCallback = (command: AppKeyboardCommand) => void
+  export interface KeyboardCommandApi {
+    onKeyboardCommand(cb: (command: AppKeyboardCommand) => void): (() => void) | void
+  }
+  export interface KeyboardCommandRegistry {
+    register(command: AppKeyboardCommand, handler: KeyboardCommandHandler): () => void
+    dispatch(command: AppKeyboardCommand): boolean
+    connect(api: KeyboardCommandApi, onUnhandled?: UnhandledKeyboardCommandCallback): () => void
+  }
+  export function isAppKeyboardCommand(value: unknown): value is AppKeyboardCommand
+  export function createKeyboardCommandRegistry(): KeyboardCommandRegistry
+}
+
+declare module '@memohai/web/lib/keyboard-bindings' {
+  import type { AppKeyboardCommand } from '@memohai/web/lib/keyboard-commands'
+  export type DesktopDelivery = 'menu' | 'keydown'
+  export type BrowserBehavior = 'intercept' | 'passthrough'
+  export type KeyboardScope = 'global' | 'mediaLightbox'
+  export interface KeyboardBinding {
+    command: AppKeyboardCommand
+    key: string
+    mod?: boolean
+    alt?: boolean
+    shift?: boolean
+    desktop: DesktopDelivery
+    browser: BrowserBehavior
+    scope: KeyboardScope
+    i18nKey: string
+  }
+  export const keyboardBindings: KeyboardBinding[]
+  export const RESERVED_BROWSER_COMBOS: Set<string>
+  export function toElectronAccelerator(binding: KeyboardBinding): string
+  export function acceleratorForCommand(command: AppKeyboardCommand): string | undefined
+  export function selectWebBindings(bindings: KeyboardBinding[]): KeyboardBinding[]
+  export function selectDesktopKeydownBindings(bindings: KeyboardBinding[]): KeyboardBinding[]
+}
+
+declare module '@memohai/web/lib/browser-keyboard-shortcuts' {
+  import type { AppKeyboardCommand, KeyboardCommandRegistry } from '@memohai/web/lib/keyboard-commands'
+  export interface BrowserKeyboardShortcutBinding {
+    command: AppKeyboardCommand
+    key: string
+    mod?: boolean
+    alt?: boolean
+    shift?: boolean
+  }
+  export function handleBrowserKeyboardShortcut(
+    event: {
+      key: string
+      metaKey: boolean
+      ctrlKey: boolean
+      altKey: boolean
+      shiftKey: boolean
+      preventDefault(): void
+    },
+    registry: Pick<KeyboardCommandRegistry, 'dispatch'>,
+    bindings: BrowserKeyboardShortcutBinding[],
+  ): boolean
+  export function connectBrowserKeyboardShortcuts(
+    registry: Pick<KeyboardCommandRegistry, 'dispatch'>,
+    bindings: BrowserKeyboardShortcutBinding[],
+    target?: unknown,
+  ): () => void
+  export function connectBrowserKeyboardShortcutsLive(
+    registry: Pick<KeyboardCommandRegistry, 'dispatch'>,
+    getBindings: () => BrowserKeyboardShortcutBinding[],
+    target?: unknown,
+  ): () => void
+}
+
+declare module '@memohai/web/store/keyboard-shortcuts' {
+  import type { KeyboardBinding } from '@memohai/web/lib/keyboard-bindings'
+  import type { AppKeyboardCommand } from '@memohai/web/lib/keyboard-commands'
+  export type ConflictKind = 'none' | 'same-scope' | 'cross-scope' | 'reserved' | 'invalid'
+  export interface ConflictResult {
+    kind: ConflictKind
+    collidesWith?: AppKeyboardCommand
+  }
+  export function useKeyboardShortcutsStore(pinia?: unknown): {
+    overrides: Record<string, string>
+    effectiveBindings: KeyboardBinding[]
+    isOverridden(command: AppKeyboardCommand): boolean
+    detectConflict(command: AppKeyboardCommand, combo: unknown): ConflictResult
+    setBinding(command: AppKeyboardCommand, combo: string): ConflictResult
+    resetBinding(command: AppKeyboardCommand): void
+    resetAll(): void
+  }
+}
+
+declare module '@memohai/web/composables/useKeyboardCommand' {
+  import type { InjectionKey } from 'vue'
+  import type {
+    AppKeyboardCommand,
+    KeyboardCommandHandler,
+    KeyboardCommandRegistry,
+  } from '@memohai/web/lib/keyboard-commands'
+  export const KEYBOARD_REGISTRY: InjectionKey<KeyboardCommandRegistry>
+  export function useKeyboardCommand(command: AppKeyboardCommand, handler: KeyboardCommandHandler): void
+}
+
+declare module '@memohai/web/pages/home/commands/workspace-tab-commands' {
+  import type { AppKeyboardCommand, KeyboardCommandRegistry } from '@memohai/web/lib/keyboard-commands'
+  export interface WorkspaceTabCommandStore {
+    activeId: string | null
+    closeTab(id: string): void
+  }
+  export function handleWorkspaceKeyboardCommand(
+    command: AppKeyboardCommand,
+    store: WorkspaceTabCommandStore,
+  ): boolean
+  export function registerWorkspaceTabCommands(
+    registry: Pick<KeyboardCommandRegistry, 'register'>,
+    store: WorkspaceTabCommandStore,
+  ): () => void
+}
+
 declare module '@memohai/web/store/settings' {
-  // We don't need the concrete Pinia store type here — desktop just calls the
+  // We don't need the concrete Pinia store type here. Desktop just calls the
   // composable for its registration side-effect.
   export function useSettingsStore(): unknown
+}
+
+declare module '@memohai/web/store/workspace-tabs' {
+  export function useWorkspaceTabsStore(pinia?: unknown): {
+    activeId: string | null
+    closeTab: (id: string) => void
+  }
 }
 
 declare module '@memohai/web/store/user' {
@@ -61,6 +198,19 @@ declare module '@memohai/web/store/capabilities' {
   export function useCapabilitiesStore(): {
     localWorkspaceEnabled: boolean
     load: () => Promise<void>
+  }
+}
+
+declare module '@memohai/web/store/update' {
+  export function useUpdateStore(): {
+    checking: boolean
+    checked: boolean
+    hasUpdate: boolean
+    latestVersion: string
+    releaseBody: string
+    releaseUrl: string
+    check: () => Promise<boolean>
+    checkAtStartup: () => Promise<void>
   }
 }
 
@@ -82,6 +232,17 @@ declare module '@memohai/web/utils/timezones' {
 declare module '@memohai/web/lib/desktop-shell' {
   import type { InjectionKey } from 'vue'
   export const DesktopShellKey: InjectionKey<boolean>
+}
+
+declare module '@memohai/web/composables/useBackOr' {
+  import type { ComputedRef } from 'vue'
+  import type { RouteLocationRaw, Router } from 'vue-router'
+  export function installBackHistory(router: Router): void
+  export function useBackOr(fallback: RouteLocationRaw): () => void
+  export function useBackAffordance(fallback: RouteLocationRaw): {
+    onBack: () => void
+    label: ComputedRef<string>
+  }
 }
 
 declare module '@memohai/web/style.css'

@@ -235,6 +235,19 @@ func (s *Service) RebuildFiles(ctx context.Context, botID string, items []Memory
 	return s.SyncOverview(ctx, botID)
 }
 
+func (s *Service) ArchiveAndRebuildFiles(ctx context.Context, botID string, active []MemoryItem, archived []MemoryItem, filters map[string]any) error {
+	if s.provider == nil {
+		return ErrNotConfigured
+	}
+	if len(archived) > 0 {
+		now := time.Now().UTC()
+		if err := s.writeMemoryDay(ctx, botID, memoryArchivePath(now), archived); err != nil {
+			return err
+		}
+	}
+	return s.RebuildFiles(ctx, botID, active, filters)
+}
+
 func (s *Service) RemoveMemories(ctx context.Context, botID string, ids []string) error {
 	if s.provider == nil {
 		return ErrNotConfigured
@@ -432,6 +445,10 @@ func (s *Service) removeIDsFromFiles(ctx context.Context, botID string, removals
 
 func memoryOverviewPath() string { return path.Join(config.DefaultDataMount, "MEMORY.md") }
 func memoryDirPath() string      { return path.Join(config.DefaultDataMount, "memory") }
+func memoryArchivePath(t time.Time) string {
+	return path.Join(config.DefaultDataMount, "memory_archive", t.UTC().Format("20060102T150405.000000000Z")+".md")
+}
+
 func memoryDayPath(date string) string {
 	return path.Join(memoryDirPath(), strings.TrimSpace(date)+".md")
 }

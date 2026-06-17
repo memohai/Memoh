@@ -10,6 +10,12 @@ func TestNeedsApprovalFileBypass(t *testing.T) {
 	cfg := settings.DefaultToolApprovalConfig()
 	cfg.Enabled = true
 
+	if needsApproval(cfg, "read", map[string]any{"path": "/etc/passwd"}) {
+		t.Fatal("expected read approval to be disabled by default")
+	}
+	if needsApproval(cfg, "list", map[string]any{"path": "/etc"}) {
+		t.Fatal("expected list approval to be disabled by default")
+	}
 	if needsApproval(cfg, "write", map[string]any{"path": "/data/tmp/output.txt"}) {
 		t.Fatal("expected /data path to bypass write approval")
 	}
@@ -34,6 +40,31 @@ func TestNeedsApprovalForceReviewOverridesBypass(t *testing.T) {
 	}
 }
 
+func TestNeedsApprovalApplyPatchUsesFileApproval(t *testing.T) {
+	cfg := settings.DefaultToolApprovalConfig()
+	cfg.Enabled = true
+
+	if !needsApproval(cfg, "apply_patch", map[string]any{"patch": "*** Begin Patch\n*** End Patch"}) {
+		t.Fatal("expected pathless apply_patch to require approval when file approvals are enabled")
+	}
+	if needsApproval(cfg, "apply_patch", map[string]any{"patch": "*** Begin Patch\n*** Add File: notes.txt\n+hello\n*** End Patch"}) {
+		t.Fatal("expected relative apply_patch path to bypass under default /data policy")
+	}
+	if needsApproval(cfg, "apply_patch", map[string]any{"patch": "*** Begin Patch\n*** Update File: /tmp/output.txt\n@@\n-old\n+new\n*** End Patch"}) {
+		t.Fatal("expected /tmp apply_patch path to bypass")
+	}
+
+	cfg.Write.RequireApproval = false
+	if needsApproval(cfg, "apply_patch", map[string]any{"patch": "*** Begin Patch\n*** End Patch"}) {
+		t.Fatal("expected apply_patch to skip approval when file approvals are disabled")
+	}
+
+	cfg.Write.ForceReviewGlobs = []string{"/data/secret/**"}
+	if !needsApproval(cfg, "apply_patch", map[string]any{"patch": "*** Begin Patch\n*** Update File: /data/secret/token.txt\n@@\n-old\n+new\n*** End Patch"}) {
+		t.Fatal("expected apply_patch force-review path to require approval")
+	}
+}
+
 func TestNeedsApprovalExecDefaultsToAllowed(t *testing.T) {
 	cfg := settings.DefaultToolApprovalConfig()
 	cfg.Enabled = true
@@ -53,5 +84,80 @@ func TestNeedsApprovalExecForceReview(t *testing.T) {
 
 	if !needsApproval(cfg, "exec", map[string]any{"command": "rm file.txt"}) {
 		t.Fatal("expected force-review command to require approval")
+	}
+}
+
+func TestNeedsApprovalReadPolicy(t *testing.T) {
+	cfg := settings.DefaultToolApprovalConfig()
+	cfg.Enabled = true
+	cfg.Read.RequireApproval = true
+	cfg.Read.BypassGlobs = []string{"/data/public/**"}
+
+	if needsApproval(cfg, "read", map[string]any{"path": "/data/public/note.txt"}) {
+		t.Fatal("expected read bypass glob to skip approval")
+	}
+	if !needsApproval(cfg, "list", map[string]any{"path": "/etc"}) {
+		t.Fatal("expected list to use read approval policy")
+	}
+}
+
+func TestNeedsApprovalFilePathAliases(t *testing.T) {
+	cfg := settings.DefaultToolApprovalConfig()
+	cfg.Enabled = true
+	cfg.Write.BypassGlobs = []string{"/data/public/**", "/tmp/**"}
+
+	if needsApproval(cfg, "write", map[string]any{"file_path": "/data/public/note.txt"}) {
+		t.Fatal("expected file_path alias to use write bypass globs")
+	}
+	if needsApproval(cfg, "write", map[string]any{"files": []any{"/data/public/a.txt", "/tmp/b.txt"}}) {
+		t.Fatal("expected all files entries under bypass globs to skip approval")
+	}
+	if !needsApproval(cfg, "write", map[string]any{"files": []any{"/data/public/a.txt", "/etc/passwd"}}) {
+		t.Fatal("expected non-bypassed file in multi-path input to require approval")
+	}
+}
+
+func TestNeedsApprovalExecCommandPatterns(t *testing.T) {
+	cfg := settings.DefaultToolApprovalConfig()
+	cfg.Enabled = true
+	cfg.Exec.RequireApproval = true
+	cfg.Exec.BypassCommands = []string{"git status", "ls", "npm *"}
+	cfg.Exec.ForceReviewCommands = []string{"sudo *", "rm -rf *"}
+
+	if needsApproval(cfg, "exec", map[string]any{"command": "git status"}) {
+		t.Fatal("expected exact command bypass to skip approval")
+	}
+	if needsApproval(cfg, "exec", map[string]any{"command": "npm test"}) {
+		t.Fatal("expected wildcard command bypass to skip approval")
+	}
+	if !needsApproval(cfg, "exec", map[string]any{"command": "git status --short"}) {
+		t.Fatal("expected non-matching command to require approval")
+	}
+	if !needsApproval(cfg, "exec", map[string]any{"command": "sudo apt update"}) {
+		t.Fatal("expected wildcard force-review command to require approval")
+	}
+	if !needsApproval(cfg, "exec", map[string]any{"command": "rm -rf /data/tmp"}) {
+		t.Fatal("expected force-review command with slash to require approval")
+	}
+}
+
+func TestOperationForTool(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"read":        OperationRead,
+		"list":        OperationRead,
+		"write":       OperationWrite,
+		"edit":        OperationWrite,
+		"apply_patch": OperationWrite,
+		"exec":        OperationExec,
+	}
+	for tool, want := range cases {
+		if got, ok := OperationForTool(tool); !ok || got != want {
+			t.Fatalf("OperationForTool(%q) = %q, %v; want %q, true", tool, got, ok, want)
+		}
+	}
+	if got, ok := OperationForTool("web_search"); ok || got != "" {
+		t.Fatalf("OperationForTool(web_search) = %q, %v; want unsupported", got, ok)
 	}
 }

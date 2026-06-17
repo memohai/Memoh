@@ -42,6 +42,7 @@ const normalizedStatus = computed(() => (props.task.status || '').trim().toLower
 const statusIcon = computed(() => {
   switch (normalizedStatus.value) {
     case 'running':
+    case 'queued':
       return LoaderCircle
     case 'completed':
       return CircleCheck
@@ -58,6 +59,7 @@ const statusIcon = computed(() => {
 const iconClass = computed(() => {
   switch (normalizedStatus.value) {
     case 'running':
+    case 'queued':
       return 'animate-spin text-muted-foreground'
     case 'completed':
       return 'text-success-foreground'

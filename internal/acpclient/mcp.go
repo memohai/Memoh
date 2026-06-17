@@ -9,6 +9,8 @@ import (
 )
 
 const (
+	memohToolsMCPServerName      = "Memoh Tools"
+	memohToolsMCPServerSlug      = "Memoh_Tools"
 	memohHeaderBotID             = mcpgw.ToolHeaderBotID
 	memohHeaderChatID            = mcpgw.ToolHeaderChatID
 	memohHeaderRuntimeID         = mcpgw.ToolHeaderRuntimeID
@@ -30,7 +32,7 @@ func memohToolsHTTPMCPServer(rawURL string, session mcpgw.ToolSessionContext) ac
 	}
 	return acp.McpServer{
 		Http: &acp.McpServerHttpInline{
-			Name:    "Memoh Tools",
+			Name:    memohToolsMCPServerName,
 			Url:     rawURL,
 			Headers: memohToolsHTTPHeaders(session),
 		},
@@ -62,4 +64,10 @@ func memohToolsHTTPHeaders(session mcpgw.ToolSessionContext) []acp.HttpHeader {
 		add(memohHeaderIsSubagent, "true")
 	}
 	return headers
+}
+
+func isMemohToolsMCPServerName(name string) bool {
+	name = strings.TrimSpace(name)
+	return strings.EqualFold(name, memohToolsMCPServerName) ||
+		strings.EqualFold(name, memohToolsMCPServerSlug)
 }

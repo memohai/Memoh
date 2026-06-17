@@ -128,20 +128,30 @@ func (m *Manager) emitTaskEvent(task *Task, event TaskEventType, stream, chunk s
 		return
 	}
 	task.mu.Lock()
+	command := task.Command
+	if command == "" {
+		command = task.Description
+	}
+	if command == "" {
+		command = task.AgentMessage
+	}
 	payload := TaskEvent{
-		Event:      event,
-		TaskID:     task.ID,
-		BotID:      task.BotID,
-		SessionID:  task.SessionID,
-		Command:    task.Command,
-		Status:     task.Status,
-		Stream:     stream,
-		Chunk:      chunk,
-		Tail:       task.outputTailLocked(),
-		OutputFile: task.OutputFile,
-		ExitCode:   task.ExitCode,
-		Duration:   time.Since(task.StartedAt).Round(time.Millisecond).String(),
-		Stalled:    event == TaskEventStalled,
+		Event:          event,
+		TaskID:         task.ID,
+		Kind:           task.Kind,
+		BotID:          task.BotID,
+		SessionID:      task.SessionID,
+		Command:        command,
+		AgentID:        task.AgentID,
+		AgentSessionID: task.AgentSessionID,
+		Status:         task.Status,
+		Stream:         stream,
+		Chunk:          chunk,
+		Tail:           task.outputTailLocked(),
+		OutputFile:     task.OutputFile,
+		ExitCode:       task.ExitCode,
+		Duration:       time.Since(task.StartedAt).Round(time.Millisecond).String(),
+		Stalled:        event == TaskEventStalled,
 	}
 	task.mu.Unlock()
 	if event == TaskEventCompleted || event == TaskEventFailed || event == TaskEventStalled {
@@ -169,6 +179,7 @@ func (m *Manager) Spawn(
 
 	task := &Task{
 		ID:          taskID,
+		Kind:        KindExec,
 		BotID:       botID,
 		SessionID:   sessionID,
 		Command:     command,
@@ -210,6 +221,7 @@ func (m *Manager) SpawnAdopt(
 
 	task := &Task{
 		ID:          taskID,
+		Kind:        KindExec,
 		BotID:       botID,
 		SessionID:   sessionID,
 		Command:     command,
@@ -545,7 +557,7 @@ func (m *Manager) Kill(taskID string) error {
 		return fmt.Errorf("task %s not found", taskID)
 	}
 	task.mu.Lock()
-	if task.Status != TaskRunning {
+	if task.Status != TaskRunning && task.Status != TaskQueued {
 		task.mu.Unlock()
 		return fmt.Errorf("task %s is not running (status: %s)", taskID, task.Status)
 	}
@@ -677,11 +689,11 @@ func (m *Manager) RunningTasksSummary(botID, sessionID string) string {
 		if desc == "" {
 			desc = truncate(command, 80)
 		}
-		lines = append(lines, fmt.Sprintf("- [%s] %s (started %s ago, output: %s)",
-			id, desc,
-			time.Since(startedAt).Round(time.Second),
-			outputFile,
-		))
+		line := fmt.Sprintf("- [%s] %s (started %s ago", id, desc, time.Since(startedAt).Round(time.Second))
+		if outputFile != "" {
+			line += fmt.Sprintf(", output: %s", outputFile)
+		}
+		lines = append(lines, line+")")
 	}
 	if len(lines) == 0 {
 		return ""

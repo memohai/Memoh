@@ -23,7 +23,7 @@ const { visible, exiting, leave } = useStepTransition()
     class="transition-all duration-[175ms] ease-out"
     :class="exiting ? 'scale-[0.88] opacity-0' : 'scale-100 opacity-100'"
   >
-    <div class="text-left h-[560px] max-h-[calc(100vh-7rem)] flex flex-col">
+    <div class="text-left h-[35rem] max-h-[calc(100dvh-7rem)] flex flex-col">
       <h2
         class="text-3xl font-semibold mb-8 transition-all duration-[350ms] ease-out"
         :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
@@ -52,6 +52,9 @@ const { visible, exiting, leave } = useStepTransition()
               </SelectItem>
               <SelectItem value="en">
                 {{ t('settings.langEn') }}
+              </SelectItem>
+              <SelectItem value="ja">
+                {{ t('settings.langJa') }}
               </SelectItem>
             </SelectContent>
           </Select>
@@ -112,13 +115,13 @@ const { visible, exiting, leave } = useStepTransition()
         :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
       >
         <button
-          class="inline-flex h-[42px] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          class="inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           @click="leave(prevStep)"
         >
           {{ t('onboarding.prev') }}
         </button>
         <button
-          class="inline-flex h-[42px] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          class="inline-flex h-[2.625rem] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           @click="leave(nextStep)"
         >
           {{ t('onboarding.next') }}

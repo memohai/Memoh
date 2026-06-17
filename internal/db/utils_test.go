@@ -160,6 +160,14 @@ func TestTextToString(t *testing.T) {
 	}
 }
 
+type sqliteConstraintTestError struct {
+	code int
+	msg  string
+}
+
+func (e sqliteConstraintTestError) Error() string { return e.msg }
+func (e sqliteConstraintTestError) Code() int     { return e.code }
+
 func TestIsUniqueViolation(t *testing.T) {
 	tests := []struct {
 		name string
@@ -171,6 +179,11 @@ func TestIsUniqueViolation(t *testing.T) {
 		{"unique violation", &pgconn.PgError{Code: "23505"}, true},
 		{"other pg error", &pgconn.PgError{Code: "23503"}, false},
 		{"wrapped unique violation", fmt.Errorf("wrapped: %w", &pgconn.PgError{Code: "23505"}), true},
+		{"sqlite generic constraint (not unique)", sqliteConstraintTestError{code: 19, msg: "constraint failed: FK"}, false},
+		{"sqlite unique constraint", sqliteConstraintTestError{code: 2067, msg: "UNIQUE constraint failed: models.model_id"}, true},
+		{"wrapped sqlite unique constraint", fmt.Errorf("wrapped: %w", sqliteConstraintTestError{code: 2067, msg: "UNIQUE constraint failed: models.model_id"}), true},
+		{"sqlite message fallback unique", errors.New("UNIQUE constraint failed: models.model_id"), true},
+		{"sqlite message fallback generic constraint (not unique)", errors.New("constraint failed: CHECK"), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

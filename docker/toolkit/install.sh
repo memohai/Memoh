@@ -32,7 +32,7 @@ NODE_VERSION=24.14.0
 NPM_VERSION=10.9.2
 CODEX_VERSION="${CODEX_VERSION:-0.133.0}"
 CODEX_ACP_VERSION="${CODEX_ACP_VERSION:-0.15.0}"
-CLAUDE_AGENT_ACP_VERSION="${CLAUDE_AGENT_ACP_VERSION:-0.39.0}"
+CLAUDE_AGENT_ACP_VERSION="${CLAUDE_AGENT_ACP_VERSION:-0.44.0}"
 
 OUTDIR="${1:-.toolkit}"
 ARCH="${2:-}"
@@ -543,12 +543,25 @@ install_acp_packages_with_host_npm() {
     "@agentclientprotocol/claude-agent-acp@$CLAUDE_AGENT_ACP_VERSION"
 }
 
+# acp_package_at_version checks that an installed ACP npm package matches the
+# pinned version, so bumping a pin in this script triggers a reinstall instead
+# of being silently skipped by the file-existence check.
+acp_package_at_version() {
+  pkg_json="$OUTDIR/acp/lib/node_modules/$1/package.json"
+  [ -f "$pkg_json" ] || return 1
+  installed="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$pkg_json" | head -n 1)"
+  [ "$installed" = "$2" ]
+}
+
 install_acp_packages() {
   codex_bin="$OUTDIR/acp/lib/node_modules/@openai/codex/bin/codex.js"
   codex_acp_bin="$OUTDIR/acp/lib/node_modules/@zed-industries/codex-acp/bin/codex-acp.js"
   claude_agent_acp_bin="$OUTDIR/acp/lib/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js"
-  if [ -f "$codex_bin" ] && [ -f "$codex_acp_bin" ] && [ -f "$claude_agent_acp_bin" ]; then
-    echo "ACP agent packages already installed; skipping npm install."
+  if [ -f "$codex_bin" ] && [ -f "$codex_acp_bin" ] && [ -f "$claude_agent_acp_bin" ] &&
+    acp_package_at_version "@openai/codex" "$CODEX_VERSION" &&
+    acp_package_at_version "@zed-industries/codex-acp" "$CODEX_ACP_VERSION" &&
+    acp_package_at_version "@agentclientprotocol/claude-agent-acp" "$CLAUDE_AGENT_ACP_VERSION"; then
+    echo "ACP agent packages already installed at pinned versions; skipping npm install."
     return
   fi
 

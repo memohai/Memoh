@@ -18,7 +18,12 @@ export function useSyncedQueryParam(key: string, defaultValue: string) {
 
   watch(model, (value) => {
     if (value !== route.query[key]) {
-      void router.push({ query: { ...route.query, [key]: value } })
+      // replace, not push: this syncs in-page state (tabs, filters) into the URL,
+      // which is not a navigation, so it shouldn't pile entries onto the history
+      // stack. The back affordance is guarded independently — installBackHistory
+      // ignores same-path transitions — so back stays correct regardless; replace
+      // also keeps the browser's own back button honest.
+      void router.replace({ query: { ...route.query, [key]: value } })
     }
   })
 

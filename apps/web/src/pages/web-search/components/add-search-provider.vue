@@ -2,19 +2,24 @@
   <section>
     <FormDialogShell
       v-model:open="open"
-      :title="$t('webSearch.add')"
+      :title="$t('webSearch.addSearch')"
       :cancel-text="$t('common.cancel')"
-      :submit-text="$t('webSearch.add')"
+      :submit-text="$t('webSearch.addSearch')"
       :submit-disabled="(form.meta.value.valid === false) || isLoading"
       :loading="isLoading"
       @submit="handleCreate"
     >
       <template #trigger>
+        <span
+          v-if="hideTrigger"
+          class="hidden"
+        />
         <Button
+          v-else
           class="w-full shadow-none! text-muted-foreground h-9 px-3 rounded-md border-border bg-background hover:bg-accent"
           variant="outline"
         >
-          <Plus class="mr-1 size-4" /> {{ $t('webSearch.add') }}
+          <Plus class="mr-1 size-4" /> {{ $t('webSearch.addSearch') }}
         </Button>
       </template>
       <template #body>
@@ -111,6 +116,11 @@ import { useDialogMutation } from '@/composables/useDialogMutation'
 const PROVIDER_TYPES = ['brave', 'bing', 'google', 'tavily', 'sogou', 'serper', 'searxng', 'jina', 'exa', 'bocha', 'duckduckgo', 'yandex'] as const
 
 const open = defineModel<boolean>('open')
+withDefaults(defineProps<{
+  hideTrigger?: boolean
+}>(), {
+  hideTrigger: false,
+})
 const { t } = useI18n()
 const { run } = useDialogMutation()
 

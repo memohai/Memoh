@@ -1,38 +1,47 @@
 <template>
-  <div class="space-y-1.5">
+  <div class="space-y-1.5 font-mono text-[12px] leading-relaxed">
+    <div
+      v-if="command"
+      class="text-muted-foreground whitespace-pre-wrap break-all"
+    >
+      $ {{ command }}
+    </div>
     <div
       v-if="backgroundMeta.length"
-      class="flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-foreground"
+      class="flex flex-wrap gap-x-2 gap-y-0.5 text-caption text-muted-foreground"
     >
       <span
         v-for="item in backgroundMeta"
         :key="item"
-        class="font-mono"
       >{{ item }}</span>
     </div>
     <pre
       v-if="progressText"
-      class="text-xs text-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto rounded-sm bg-muted/30 px-2 py-1"
+      class="text-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-72 overflow-y-auto"
     >{{ progressText }}</pre>
     <pre
       v-if="backgroundOutput"
-      class="text-xs text-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto rounded-sm bg-muted/30 px-2 py-1"
+      class="text-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-72 overflow-y-auto"
     >{{ backgroundOutput }}</pre>
     <pre
       v-if="stdout"
-      class="text-xs text-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto rounded-sm bg-muted/30 px-2 py-1"
+      class="text-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-72 overflow-y-auto"
     >{{ stdout }}</pre>
     <pre
       v-if="stderr"
-      class="text-xs text-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto rounded-sm bg-muted/30 px-2 py-1"
+      class="text-destructive overflow-x-auto whitespace-pre-wrap break-all max-h-72 overflow-y-auto"
     >{{ stderr }}</pre>
     <pre
       v-if="errorText"
-      class="text-xs text-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto rounded-sm bg-muted/30 px-2 py-1"
+      class="text-destructive overflow-x-auto whitespace-pre-wrap break-all max-h-72 overflow-y-auto"
     >{{ errorText }}</pre>
+    <pre
+      v-if="fallbackText"
+      class="text-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-72 overflow-y-auto"
+    >{{ fallbackText }}</pre>
     <p
-      v-if="!progressText && !backgroundOutput && !stdout && !stderr && !errorText"
-      class="text-xs text-muted-foreground italic"
+      v-if="!progressText && !backgroundOutput && !stdout && !stderr && !errorText && !fallbackText"
+      class="text-muted-foreground italic"
     >
       {{ isBackgroundActive ? t('chat.tools.detail.waitingOutput') : t('chat.tools.detail.noOutput') }}
     </p>
@@ -46,6 +55,11 @@ import type { ToolCallBlock } from '@/store/chat-list'
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()
+
+const command = computed(() => {
+  const input = props.block.input as Record<string, unknown> | undefined
+  return typeof input?.command === 'string' ? input.command : ''
+})
 
 const backgroundTask = computed(() => props.block.backgroundTask)
 
@@ -96,6 +110,20 @@ const errorText = computed(() => {
   return content
     .filter(c => c.type === 'text')
     .map(c => c.text as string)
+    .join('\n')
+})
+
+// Fallback for tools whose output lands in the MCP-style content[].text array
+// (rather than structuredContent.stdout). Only used when nothing else matched
+// so we never silently show "no output" when output is actually present.
+const fallbackText = computed(() => {
+  if (stdout.value || stderr.value || errorText.value) return ''
+  const result = props.block.result as Record<string, unknown> | null
+  if (!result || !Array.isArray(result.content)) return ''
+  return (result.content as Array<Record<string, unknown>>)
+    .filter(c => c.type === 'text')
+    .map(c => c.text as string)
+    .filter(Boolean)
     .join('\n')
 })
 

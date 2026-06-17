@@ -1,20 +1,13 @@
 <!-- eslint-disable vue/no-mutating-props -->
 <template>
-  <div class="space-y-4 rounded-md border border-border bg-background p-4 shadow-none">
-    <!-- Header Section -->
-    <div class="space-y-0.5">
-      <h4 class="text-xs font-medium text-foreground">
-        {{ $t('bots.settings.blocks.interaction') }}
-      </h4>
-      <p class="text-[11px] text-muted-foreground">
-        {{ $t('bots.settings.blocks.interactionDescription') }}
-      </p>
-    </div>
-    
-    <!-- Model selection inputs with compact spacing -->
-    <div class="space-y-3 pt-1">
-      <div class="space-y-1.5">
-        <Label class="text-xs font-medium text-foreground">{{ $t('bots.settings.chatModel') }}</Label>
+  <!-- id is a scroll anchor: the Overview "choose a model" reminder navigates
+       here with ?section=interaction, and bot-settings.vue scrolls to it. -->
+  <SettingsSection
+    id="settings-section-interaction"
+    :title="$t('bots.settings.blocks.interaction')"
+  >
+    <SettingsRow :label="$t('bots.settings.chatModel')">
+      <div class="w-56">
         <ModelSelect
           v-model="form.chat_model_id"
           :models="models"
@@ -23,14 +16,13 @@
           :placeholder="$t('bots.settings.chatModel')"
         />
       </div>
+    </SettingsRow>
 
-      <div class="space-y-1.5">
-        <div class="space-y-0.5">
-          <Label class="text-xs font-medium text-foreground">{{ $t('bots.settings.titleModel') }}</Label>
-          <p class="text-[10px] text-muted-foreground">
-            {{ $t('bots.settings.titleModelDescription') }}
-          </p>
-        </div>
+    <SettingsRow
+      :label="$t('bots.settings.titleModel')"
+      :description="$t('bots.settings.titleModelDescription')"
+    >
+      <div class="w-56">
         <ModelSelect
           v-model="form.title_model_id"
           :models="models"
@@ -39,69 +31,66 @@
           :placeholder="$t('bots.settings.titleModelPlaceholder')"
         />
       </div>
-    </div>
+    </SettingsRow>
 
-    <Separator class="bg-border my-4" />
-
-    <div class="space-y-3">
-      <div class="space-y-1.5">
-        <Label class="text-xs font-medium text-foreground">{{ $t('bots.settings.reasoningEffort') }}</Label>
-        <Popover v-model:open="reasoningPopoverOpen">
-          <PopoverTrigger as-child>
-            <Button
-              variant="outline"
-              role="combobox"
-              :disabled="!chatModelSupportsReasoning"
-              class="w-full justify-between font-normal shadow-none h-8 bg-transparent text-xs"
-            >
-              <span class="flex items-center gap-2">
-                <Lightbulb
-                  class="size-3"
-                  :style="{ opacity: EFFORT_OPACITY[reasoningFormValue] ?? 0.5 }"
-                />
-                {{ $t(EFFORT_LABELS[reasoningFormValue] ?? reasoningFormValue) }}
-              </span>
-              <ChevronDown class="size-3.5 shrink-0 text-muted-foreground" />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent
-            class="w-[--reka-popover-trigger-width] p-0 shadow-md rounded-md"
-            align="start"
+    <SettingsRow :label="$t('bots.settings.reasoningEffort')">
+      <Popover v-model:open="reasoningPopoverOpen">
+        <PopoverTrigger as-child>
+          <button
+            data-slot="select-trigger"
+            data-size="default"
+            type="button"
+            :disabled="!chatModelSupportsReasoning"
+            :class="[selectTriggerClass, 'w-44']"
           >
+            <span class="flex items-center gap-2 truncate flex-1">
+              <Lightbulb
+                class="size-3.5 shrink-0"
+                :style="{ opacity: EFFORT_OPACITY[reasoningFormValue] ?? 0.5 }"
+              />
+              <span class="truncate">{{ $t(EFFORT_LABELS[reasoningFormValue] ?? reasoningFormValue) }}</span>
+            </span>
+            <ChevronDown class="size-3.5 shrink-0 opacity-50" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent
+          menu
+          align="end"
+          class="w-[var(--reka-popover-trigger-width)] p-0"
+        >
+          <div class="flex flex-col overflow-hidden rounded-[var(--radius-menu-shell)] border border-[color:var(--border-menu)] bg-popover text-popover-foreground shadow-[var(--shadow-dropdown)]">
             <ReasoningEffortSelect
               v-model="reasoningFormValue"
               :efforts="availableReasoningEfforts"
               @update:model-value="reasoningPopoverOpen = false"
             />
-          </PopoverContent>
-        </Popover>
-      </div>
+          </div>
+        </PopoverContent>
+      </Popover>
+    </SettingsRow>
 
-      <div class="flex items-center justify-between gap-4 rounded-md border border-border p-3 shadow-none bg-background">
-        <div class="space-y-0.5">
-          <Label class="text-xs font-medium text-foreground">{{ $t('bots.settings.showToolCallsInIM') }}</Label>
-          <p class="text-[10px] text-muted-foreground">
-            {{ $t('bots.settings.showToolCallsInIMDescription') }}
-          </p>
-        </div>
-        <Switch
-          :model-value="form.show_tool_calls_in_im"
-          class="shadow-none scale-[0.8] origin-right"
-          @update:model-value="(val) => form.show_tool_calls_in_im = !!val"
-        />
-      </div>
-    </div>
-  </div>
+    <SettingsRow
+      :label="$t('bots.settings.showToolCallsInIM')"
+      :description="$t('bots.settings.showToolCallsInIMDescription')"
+    >
+      <Switch
+        :model-value="form.show_tool_calls_in_im"
+        @update:model-value="(val) => form.show_tool_calls_in_im = !!val"
+      />
+    </SettingsRow>
+  </SettingsSection>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Label, Separator, Popover, PopoverTrigger, PopoverContent, Button, Switch } from '@memohai/ui'
+import { Popover, PopoverTrigger, PopoverContent, Switch, selectTriggerClass } from '@memohai/ui'
 import { Lightbulb, ChevronDown } from 'lucide-vue-next'
 import ModelSelect from './model-select.vue'
 import ReasoningEffortSelect from './reasoning-effort-select.vue'
-import { EFFORT_LABELS, EFFORT_OPACITY, REASONING_EFFORT_DISABLE } from './reasoning-effort'
+import { EFFORT_LABELS, EFFORT_OPACITY, REASONING_EFFORT_DISABLE, availableEffortsForMode, resolveEffortLevels, resolveThinkingMode } from './reasoning-effort'
 import type { SettingsSettings, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
+import SettingsSection from '@/components/settings/section.vue'
+import SettingsRow from '@/components/settings/row.vue'
 
 const props = defineProps<{
   form: SettingsSettings
@@ -109,31 +98,39 @@ const props = defineProps<{
   providers: ProvidersGetResponse[]
 }>()
 
-const chatModelSupportsReasoning = computed(() => {
-  if (!props.form.chat_model_id) return false
-  const m = props.models.find((m) => m.id === props.form.chat_model_id)
-  return !!m?.config?.compatibilities?.includes('reasoning')
+const chatModelConfig = computed(() => {
+  if (!props.form.chat_model_id) return undefined
+  return props.models.find((m) => m.id === props.form.chat_model_id)?.config
 })
 
-const availableReasoningEfforts = computed(() => {
-  if (!props.form.chat_model_id) return ['low', 'medium', 'high']
+const chatModelClientType = computed(() => {
+  if (!props.form.chat_model_id) return undefined
   const model = props.models.find((m) => m.id === props.form.chat_model_id)
-  const efforts = ((model?.config as { reasoning_efforts?: string[] } | undefined)?.reasoning_efforts ?? [])
-    .filter((effort) => ['none', 'low', 'medium', 'high', 'xhigh'].includes(effort))
-  return efforts.length > 0 ? efforts : ['low', 'medium', 'high']
+  return props.providers.find((p) => p.id === model?.provider_id)?.client_type
 })
 
-watch(availableReasoningEfforts, (efforts) => {
-  if (props.form.reasoning_enabled && !efforts.includes(props.form.reasoning_effort)) {
+const thinkingMode = computed(() => resolveThinkingMode(chatModelConfig.value))
+
+const chatModelSupportsReasoning = computed(() => thinkingMode.value !== 'none')
+
+const effortLevels = computed(() => resolveEffortLevels(chatModelConfig.value, chatModelClientType.value))
+
+const availableReasoningEfforts = computed(() =>
+  availableEffortsForMode(thinkingMode.value, effortLevels.value),
+)
+
+watch([effortLevels, thinkingMode], ([levels]) => {
+  const current = props.form.reasoning_effort
+  if (props.form.reasoning_enabled && (!current || !levels.includes(current))) {
     // eslint-disable-next-line vue/no-mutating-props
-    props.form.reasoning_effort = efforts.includes('medium') ? 'medium' : efforts[0] ?? 'medium'
+    props.form.reasoning_effort = levels.includes('medium') ? 'medium' : levels[0] ?? 'medium'
   }
 }, { immediate: true })
 
 const reasoningPopoverOpen = ref(false)
 
 const reasoningFormValue = computed({
-  get: () => props.form.reasoning_enabled ? props.form.reasoning_effort : REASONING_EFFORT_DISABLE,
+  get: () => (props.form.reasoning_enabled ? (props.form.reasoning_effort ?? 'medium') : REASONING_EFFORT_DISABLE),
   set: (v: string) => {
     if (v === REASONING_EFFORT_DISABLE) {
       // eslint-disable-next-line vue/no-mutating-props

@@ -12,49 +12,65 @@ import (
 type TaskStatus string
 
 const (
+	TaskQueued    TaskStatus = "queued"
 	TaskRunning   TaskStatus = "running"
 	TaskCompleted TaskStatus = "completed"
 	TaskFailed    TaskStatus = "failed"
 	TaskKilled    TaskStatus = "killed"
 )
 
-// Task represents a single background command execution.
+// Task represents a single background task (a container command execution
+// or a spawn subagent batch, per Kind).
 type Task struct {
-	ID          string
-	BotID       string
-	SessionID   string
-	Command     string
-	Description string
-	WorkDir     string
-	Status      TaskStatus
-	ExitCode    int32
-	OutputFile  string // path inside container where output is being written
-	StartedAt   time.Time
-	CompletedAt time.Time
+	ID             string
+	Kind           TaskKind
+	BotID          string
+	SessionID      string
+	Command        string
+	Description    string
+	AgentID        string
+	AgentSessionID string
+	AgentMessage   string
+	AgentReport    string
+	AgentError     string
+	WorkDir        string
+	Status         TaskStatus
+	ExitCode       int32
+	OutputFile     string // path inside container where output is being written
+	StartedAt      time.Time
+	CompletedAt    time.Time
 
 	mu              sync.Mutex
 	cancel          context.CancelFunc
 	notified        bool            // true once a terminal notification has been enqueued; prevents duplicates
 	stalledNotified bool            // true once a stalled notification has been enqueued
 	output          strings.Builder // buffered output tail
+	branches        []SpawnBranch   // spawn-kind branch outcomes, set at completion
 }
 
 // TaskSnapshot is a lock-safe, immutable view of a task for handler/UI code.
 type TaskSnapshot struct {
-	TaskID      string
-	BotID       string
-	SessionID   string
-	Command     string
-	Description string
-	WorkDir     string
-	Status      TaskStatus
-	ExitCode    int32
-	OutputFile  string
-	OutputTail  string
-	StartedAt   time.Time
-	CompletedAt time.Time
-	Duration    time.Duration
-	Stalled     bool
+	TaskID         string
+	Kind           TaskKind
+	BotID          string
+	SessionID      string
+	Command        string
+	Description    string
+	AgentID        string
+	AgentSessionID string
+	AgentMessage   string
+	AgentReport    string
+	AgentError     string
+	WorkDir        string
+	Status         TaskStatus
+	ExitCode       int32
+	OutputFile     string
+	OutputTail     string
+	Branches       []SpawnBranch
+	StartedAt      time.Time
+	CompletedAt    time.Time
+	Duration       time.Duration
+	Stalled        bool
 }
 
 // Snapshot returns a consistent view of the task without exposing its mutex.
@@ -70,20 +86,27 @@ func (t *Task) Snapshot() TaskSnapshot {
 		duration = t.CompletedAt.Sub(t.StartedAt)
 	}
 	return TaskSnapshot{
-		TaskID:      t.ID,
-		BotID:       t.BotID,
-		SessionID:   t.SessionID,
-		Command:     t.Command,
-		Description: t.Description,
-		WorkDir:     t.WorkDir,
-		Status:      t.Status,
-		ExitCode:    t.ExitCode,
-		OutputFile:  t.OutputFile,
-		OutputTail:  t.outputTailLocked(),
-		StartedAt:   t.StartedAt,
-		CompletedAt: t.CompletedAt,
-		Duration:    duration,
-		Stalled:     t.stalledNotified && t.Status == TaskRunning,
+		TaskID:         t.ID,
+		Kind:           t.Kind,
+		BotID:          t.BotID,
+		SessionID:      t.SessionID,
+		Command:        t.Command,
+		Description:    t.Description,
+		AgentID:        t.AgentID,
+		AgentSessionID: t.AgentSessionID,
+		AgentMessage:   t.AgentMessage,
+		AgentReport:    t.AgentReport,
+		AgentError:     t.AgentError,
+		WorkDir:        t.WorkDir,
+		Status:         t.Status,
+		ExitCode:       t.ExitCode,
+		OutputFile:     t.OutputFile,
+		OutputTail:     t.outputTailLocked(),
+		Branches:       append([]SpawnBranch(nil), t.branches...),
+		StartedAt:      t.StartedAt,
+		CompletedAt:    t.CompletedAt,
+		Duration:       duration,
+		Stalled:        t.stalledNotified && t.Status == TaskRunning,
 	}
 }
 
@@ -175,23 +198,31 @@ type AdoptResult struct {
 // Notification is the structured event sent to the agent when a background
 // task reaches a terminal state or requires attention (e.g. stalled).
 type Notification struct {
-	TaskID      string
-	BotID       string
-	SessionID   string
-	Status      TaskStatus
-	Command     string
-	Description string
-	ExitCode    int32
-	OutputFile  string
-	OutputTail  string // last N bytes of output for quick summary
-	Duration    time.Duration
-	Stalled     bool // true when task appears stuck on interactive input
+	TaskID         string
+	Kind           TaskKind
+	BotID          string
+	SessionID      string
+	Status         TaskStatus
+	Command        string
+	Description    string
+	AgentID        string
+	AgentSessionID string
+	AgentMessage   string
+	AgentReport    string
+	AgentError     string
+	ExitCode       int32
+	OutputFile     string
+	OutputTail     string // last N bytes of output for quick summary
+	Branches       []SpawnBranch
+	Duration       time.Duration
+	Stalled        bool // true when task appears stuck on interactive input
 }
 
 // TaskEventType identifies a UI-facing background task event.
 type TaskEventType string
 
 const (
+	TaskEventQueued    TaskEventType = "queued"
 	TaskEventStarted   TaskEventType = "started"
 	TaskEventOutput    TaskEventType = "output"
 	TaskEventCompleted TaskEventType = "completed"
@@ -203,19 +234,22 @@ const (
 // lightweight and non-persistent; completion notifications remain the source of
 // truth for agent wakeups and history.
 type TaskEvent struct {
-	Event      TaskEventType `json:"event"`
-	TaskID     string        `json:"task_id"`
-	BotID      string        `json:"bot_id,omitempty"`
-	SessionID  string        `json:"session_id,omitempty"`
-	Command    string        `json:"command,omitempty"`
-	Status     TaskStatus    `json:"status,omitempty"`
-	Stream     string        `json:"stream,omitempty"`
-	Chunk      string        `json:"chunk,omitempty"`
-	Tail       string        `json:"tail,omitempty"`
-	OutputFile string        `json:"output_file,omitempty"`
-	ExitCode   int32         `json:"exit_code,omitempty"`
-	Duration   string        `json:"duration,omitempty"`
-	Stalled    bool          `json:"stalled,omitempty"`
+	Event          TaskEventType `json:"event"`
+	TaskID         string        `json:"task_id"`
+	Kind           TaskKind      `json:"kind,omitempty"`
+	BotID          string        `json:"bot_id,omitempty"`
+	SessionID      string        `json:"session_id,omitempty"`
+	Command        string        `json:"command,omitempty"`
+	AgentID        string        `json:"agent_id,omitempty"`
+	AgentSessionID string        `json:"agent_session_id,omitempty"`
+	Status         TaskStatus    `json:"status,omitempty"`
+	Stream         string        `json:"stream,omitempty"`
+	Chunk          string        `json:"chunk,omitempty"`
+	Tail           string        `json:"tail,omitempty"`
+	OutputFile     string        `json:"output_file,omitempty"`
+	ExitCode       int32         `json:"exit_code,omitempty"`
+	Duration       string        `json:"duration,omitempty"`
+	Stalled        bool          `json:"stalled,omitempty"`
 }
 
 // MessageText returns the full user-message text that should be injected into
@@ -232,6 +266,12 @@ func (n Notification) MessageText() string {
 // FormatForAgent returns a human-readable task-notification block that can be
 // injected into the agent's message stream.
 func (n Notification) FormatForAgent() string {
+	if n.Kind == KindAgent {
+		return n.formatAgentForAgent()
+	}
+	if n.Kind == KindSpawn {
+		return n.formatSpawnForAgent()
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "<task-notification>\n")
 	fmt.Fprintf(&b, "  <task-id>%s</task-id>\n", n.TaskID)
@@ -255,7 +295,7 @@ func (n Notification) FormatForAgent() string {
 		fmt.Fprintf(&b, "  <output-tail>\n%s\n  </output-tail>\n", strings.TrimRight(n.OutputTail, "\n"))
 	}
 	if n.Stalled {
-		fmt.Fprintf(&b, "  <suggestion>This command appears to be waiting for interactive input. Kill it with bg_status and retry with a non-interactive flag (e.g. -y, --yes, --non-interactive).</suggestion>\n")
+		fmt.Fprintf(&b, "  <suggestion>This command appears to be waiting for interactive input. Kill it with kill_background and retry with a non-interactive flag (e.g. -y, --yes, --non-interactive).</suggestion>\n")
 	}
 	fmt.Fprintf(&b, "</task-notification>")
 	return b.String()

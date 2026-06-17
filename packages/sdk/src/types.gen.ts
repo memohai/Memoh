@@ -214,6 +214,14 @@ export type AdaptersHealthStatus = {
     ok?: boolean;
 };
 
+export type AdaptersMemoryCompactCapability = {
+    archive?: boolean;
+    native?: boolean;
+    reason?: string;
+    rebuild_index?: boolean;
+    semantic?: boolean;
+};
+
 export type AdaptersMemoryItem = {
     agent_id?: string;
     bot_id?: string;
@@ -233,6 +241,7 @@ export type AdaptersMemoryItem = {
 
 export type AdaptersMemoryStatusResponse = {
     can_manual_sync?: boolean;
+    compact?: AdaptersMemoryCompactCapability;
     encoder?: AdaptersHealthStatus;
     indexed_count?: number;
     markdown_file_count?: number;
@@ -892,6 +901,72 @@ export type ChannelUpsertConfigRequest = {
     verified_at?: string;
 };
 
+export type ChannelaccessBinding = {
+    channel_identity_avatar_url?: string;
+    channel_identity_display_name?: string;
+    channel_identity_id?: string;
+    channel_subject_id?: string;
+    channel_type?: string;
+    created_at?: string;
+    id?: string;
+    user_id?: string;
+};
+
+export type ChannelaccessIssueLinkCodeRequest = {
+    channel_type?: string;
+};
+
+export type ChannelaccessLinkCode = {
+    channel_type?: string;
+    created_at?: string;
+    expires_at?: string;
+    token?: string;
+    user_id?: string;
+};
+
+export type ChannelaccessListBindingsResponse = {
+    items?: Array<ChannelaccessBinding>;
+};
+
+export type ChannelaccessListManagersResponse = {
+    items?: Array<ChannelaccessManager>;
+};
+
+export type ChannelaccessManager = {
+    /**
+     * Bound reports whether this identity is linked to a workspace member of this
+     * bot (any permission). It marks the identity as a "platform member" in the UI
+     * regardless of whether it carries Manage.
+     */
+    bound?: boolean;
+    channel_identity_avatar_url?: string;
+    channel_identity_display_name?: string;
+    channel_identity_id?: string;
+    channel_subject_id?: string;
+    channel_type?: string;
+    /**
+     * HasOverride reports whether a local Channel Access override exists for it.
+     */
+    has_override?: boolean;
+    /**
+     * Inherited reports whether this identity is bound to a web member that carries
+     * the Manage capability (owner or workspace manage grant).
+     */
+    inherited?: boolean;
+    /**
+     * Manage is the effective Manage capability (local override ?? inherited).
+     */
+    manage?: boolean;
+};
+
+export type ChannelaccessSetManagerRequest = {
+    channel_identity_id?: string;
+    /**
+     * Granted forces Manage ON (true) or OFF (false) locally.
+     */
+    granted?: boolean;
+};
+
 export type CompactionListLogsResponse = {
     items?: Array<CompactionLog>;
     total_count?: number;
@@ -1017,6 +1092,58 @@ export type EmailUpdateProviderRequest = {
     };
     name?: string;
     provider?: string;
+};
+
+export type FetchprovidersCreateRequest = {
+    config?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+    provider?: FetchprovidersProviderName;
+};
+
+export type FetchprovidersGetResponse = {
+    config?: {
+        [key: string]: unknown;
+    };
+    created_at?: string;
+    enable?: boolean;
+    id?: string;
+    name?: string;
+    provider?: string;
+    updated_at?: string;
+};
+
+export type FetchprovidersProviderConfigSchema = {
+    fields?: {
+        [key: string]: FetchprovidersProviderFieldSchema;
+    };
+};
+
+export type FetchprovidersProviderFieldSchema = {
+    description?: string;
+    enum?: Array<string>;
+    example?: unknown;
+    required?: boolean;
+    title?: string;
+    type?: string;
+};
+
+export type FetchprovidersProviderMeta = {
+    config_schema?: FetchprovidersProviderConfigSchema;
+    display_name?: string;
+    provider?: string;
+};
+
+export type FetchprovidersProviderName = 'native' | 'jina' | 'cloudflare_markdown';
+
+export type FetchprovidersUpdateRequest = {
+    config?: {
+        [key: string]: unknown;
+    };
+    enable?: boolean;
+    name?: string;
+    provider?: FetchprovidersProviderName;
 };
 
 export type GithubComMemohaiMemohInternalMcpConnection = {
@@ -1173,6 +1300,7 @@ export type HandlersCreateContainerResponse = {
     data_restored?: boolean;
     has_preserved_data?: boolean;
     image?: string;
+    runtime_backend?: string;
     snapshotter?: string;
     started?: boolean;
     workspace_backend?: string;
@@ -1293,10 +1421,51 @@ export type HandlersGetContainerResponse = {
     image?: string;
     legacy?: boolean;
     namespace?: string;
+    runtime_backend?: string;
     status?: string;
     task_running?: boolean;
     updated_at?: string;
     workspace_backend?: string;
+};
+
+export type HandlersHookEventInfo = {
+    name?: string;
+    runtime_supported?: boolean;
+};
+
+export type HandlersHookTestRequest = {
+    approval?: {
+        [key: string]: unknown;
+    };
+    channel?: {
+        [key: string]: unknown;
+    };
+    chat_id?: string;
+    error?: string;
+    event?: string;
+    extra?: {
+        [key: string]: unknown;
+    };
+    memory?: {
+        [key: string]: unknown;
+    };
+    session_id?: string;
+    tool?: HooksToolPayload;
+    turn?: {
+        [key: string]: unknown;
+    };
+};
+
+export type HandlersHookTestResponse = {
+    config_exists?: boolean;
+    result?: HooksResult;
+};
+
+export type HandlersHooksEventsResponse = {
+    actions?: Array<string>;
+    config_path?: string;
+    decisions?: Array<string>;
+    events?: Array<HandlersHookEventInfo>;
 };
 
 export type HandlersInstallPluginRequest = {
@@ -1711,6 +1880,42 @@ export type HeartbeatLog = {
     usage?: unknown;
 };
 
+export type HooksActionResult = {
+    action_type?: string;
+    decision?: string;
+    error?: string;
+    exit_code?: number;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+    reason?: string;
+    result?: unknown;
+    stderr?: string;
+    stdout?: string;
+};
+
+export type HooksResult = {
+    action_results?: Array<HooksActionResult>;
+    actions_run?: number;
+    append_context?: string;
+    decision?: string;
+    hooks_matched?: number;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    reason?: string;
+    runtime_supported?: boolean;
+};
+
+export type HooksToolPayload = {
+    call_id?: string;
+    error?: string;
+    input?: unknown;
+    name?: string;
+    result?: unknown;
+};
+
 export type McpAuthorizeResult = {
     authorization_url?: string;
 };
@@ -1858,6 +2063,7 @@ export type ModelsModelConfig = {
     context_window?: number;
     dimensions?: number;
     reasoning_efforts?: Array<string>;
+    thinking_mode?: string;
 };
 
 export type ModelsModelType = 'chat' | 'embedding' | 'speech' | 'transcription';
@@ -1904,13 +2110,6 @@ export type PluginsIcon = {
     kind?: string;
     name?: string;
     url?: string;
-};
-
-export type PluginsInstallRequest = {
-    manifest?: PluginsManifest;
-    variables?: {
-        [key: string]: string;
-    };
 };
 
 export type PluginsInstallation = {
@@ -1963,6 +2162,7 @@ export type PluginsManifest = {
     homepage?: string;
     icon?: PluginsIcon;
     id?: string;
+    install?: Array<string>;
     mcps?: Array<PluginsMcpResource>;
     name?: string;
     schema_version?: string;
@@ -2042,6 +2242,7 @@ export type ProvidersImportModelsResponse = {
     created?: number;
     models?: Array<string>;
     skipped?: number;
+    updated?: number;
 };
 
 export type ProvidersOAuthAccount = {
@@ -2241,6 +2442,7 @@ export type SettingsSettings = {
     compaction_threshold?: number;
     discuss_probe_model_id?: string;
     display_enabled?: boolean;
+    fetch_provider_id?: string;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
     heartbeat_model_id?: string;
@@ -2265,9 +2467,9 @@ export type SettingsSettings = {
 };
 
 export type SettingsToolApprovalConfig = {
-    edit?: SettingsToolApprovalFilePolicy;
     enabled?: boolean;
     exec?: SettingsToolApprovalExecPolicy;
+    read?: SettingsToolApprovalFilePolicy;
     write?: SettingsToolApprovalFilePolicy;
 };
 
@@ -2293,6 +2495,7 @@ export type SettingsUpsertRequest = {
     compaction_threshold?: number;
     discuss_probe_model_id?: string;
     display_enabled?: boolean;
+    fetch_provider_id?: string;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
     heartbeat_model_id?: string;
@@ -3330,6 +3533,123 @@ export type GetBotsByBotIdBackupSummaryResponses = {
 };
 
 export type GetBotsByBotIdBackupSummaryResponse = GetBotsByBotIdBackupSummaryResponses[keyof GetBotsByBotIdBackupSummaryResponses];
+
+export type GetBotsByBotIdChannelManagersData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/channel-managers';
+};
+
+export type GetBotsByBotIdChannelManagersErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdChannelManagersError = GetBotsByBotIdChannelManagersErrors[keyof GetBotsByBotIdChannelManagersErrors];
+
+export type GetBotsByBotIdChannelManagersResponses = {
+    /**
+     * OK
+     */
+    200: ChannelaccessListManagersResponse;
+};
+
+export type GetBotsByBotIdChannelManagersResponse = GetBotsByBotIdChannelManagersResponses[keyof GetBotsByBotIdChannelManagersResponses];
+
+export type PostBotsByBotIdChannelManagersData = {
+    /**
+     * Override payload
+     */
+    body: ChannelaccessSetManagerRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/channel-managers';
+};
+
+export type PostBotsByBotIdChannelManagersErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdChannelManagersError = PostBotsByBotIdChannelManagersErrors[keyof PostBotsByBotIdChannelManagersErrors];
+
+export type PostBotsByBotIdChannelManagersResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type DeleteBotsByBotIdChannelManagersByChannelIdentityIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Channel Identity ID
+         */
+        channel_identity_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/channel-managers/{channel_identity_id}';
+};
+
+export type DeleteBotsByBotIdChannelManagersByChannelIdentityIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdChannelManagersByChannelIdentityIdError = DeleteBotsByBotIdChannelManagersByChannelIdentityIdErrors[keyof DeleteBotsByBotIdChannelManagersByChannelIdentityIdErrors];
+
+export type DeleteBotsByBotIdChannelManagersByChannelIdentityIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
 
 export type DeleteBotsByBotIdCompactionLogsData = {
     body?: never;
@@ -5090,6 +5410,85 @@ export type GetBotsByBotIdHeartbeatLogsResponses = {
 
 export type GetBotsByBotIdHeartbeatLogsResponse = GetBotsByBotIdHeartbeatLogsResponses[keyof GetBotsByBotIdHeartbeatLogsResponses];
 
+export type GetBotsByBotIdHooksEventsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/hooks/events';
+};
+
+export type GetBotsByBotIdHooksEventsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdHooksEventsError = GetBotsByBotIdHooksEventsErrors[keyof GetBotsByBotIdHooksEventsErrors];
+
+export type GetBotsByBotIdHooksEventsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersHooksEventsResponse;
+};
+
+export type GetBotsByBotIdHooksEventsResponse = GetBotsByBotIdHooksEventsResponses[keyof GetBotsByBotIdHooksEventsResponses];
+
+export type PostBotsByBotIdHooksTestData = {
+    /**
+     * Hook test payload
+     */
+    body: HandlersHookTestRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/hooks/test';
+};
+
+export type PostBotsByBotIdHooksTestErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdHooksTestError = PostBotsByBotIdHooksTestErrors[keyof PostBotsByBotIdHooksTestErrors];
+
+export type PostBotsByBotIdHooksTestResponses = {
+    /**
+     * OK
+     */
+    200: HandlersHookTestResponse;
+};
+
+export type PostBotsByBotIdHooksTestResponse = PostBotsByBotIdHooksTestResponses[keyof PostBotsByBotIdHooksTestResponses];
+
 export type PostBotsByBotIdLocalMessagesData = {
     /**
      * Message payload
@@ -5976,6 +6375,10 @@ export type PostBotsByBotIdMemoryCompactErrors = {
      */
     500: HandlersErrorResponse;
     /**
+     * Not Implemented
+     */
+    501: HandlersErrorResponse;
+    /**
      * Service Unavailable
      */
     503: HandlersErrorResponse;
@@ -6404,47 +6807,6 @@ export type GetBotsByBotIdPluginsResponses = {
 };
 
 export type GetBotsByBotIdPluginsResponse = GetBotsByBotIdPluginsResponses[keyof GetBotsByBotIdPluginsResponses];
-
-export type PostBotsByBotIdPluginsData = {
-    /**
-     * Plugin install request
-     */
-    body: PluginsInstallRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/plugins';
-};
-
-export type PostBotsByBotIdPluginsErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PostBotsByBotIdPluginsError = PostBotsByBotIdPluginsErrors[keyof PostBotsByBotIdPluginsErrors];
-
-export type PostBotsByBotIdPluginsResponses = {
-    /**
-     * Created
-     */
-    201: PluginsInstallation;
-};
-
-export type PostBotsByBotIdPluginsResponse = PostBotsByBotIdPluginsResponses[keyof PostBotsByBotIdPluginsResponses];
 
 export type DeleteBotsByBotIdPluginsByIdData = {
     body?: never;
@@ -9080,6 +9442,187 @@ export type GetEmailOauthCallbackResponses = {
 
 export type GetEmailOauthCallbackResponse = GetEmailOauthCallbackResponses[keyof GetEmailOauthCallbackResponses];
 
+export type GetFetchProvidersData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Provider filter (native)
+         */
+        provider?: string;
+    };
+    url: '/fetch-providers';
+};
+
+export type GetFetchProvidersErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetFetchProvidersError = GetFetchProvidersErrors[keyof GetFetchProvidersErrors];
+
+export type GetFetchProvidersResponses = {
+    /**
+     * OK
+     */
+    200: Array<FetchprovidersGetResponse>;
+};
+
+export type GetFetchProvidersResponse = GetFetchProvidersResponses[keyof GetFetchProvidersResponses];
+
+export type PostFetchProvidersData = {
+    /**
+     * Fetch provider configuration
+     */
+    body: FetchprovidersCreateRequest;
+    path?: never;
+    query?: never;
+    url: '/fetch-providers';
+};
+
+export type PostFetchProvidersErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostFetchProvidersError = PostFetchProvidersErrors[keyof PostFetchProvidersErrors];
+
+export type PostFetchProvidersResponses = {
+    /**
+     * Created
+     */
+    201: FetchprovidersGetResponse;
+};
+
+export type PostFetchProvidersResponse = PostFetchProvidersResponses[keyof PostFetchProvidersResponses];
+
+export type GetFetchProvidersMetaData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/fetch-providers/meta';
+};
+
+export type GetFetchProvidersMetaResponses = {
+    /**
+     * OK
+     */
+    200: Array<FetchprovidersProviderMeta>;
+};
+
+export type GetFetchProvidersMetaResponse = GetFetchProvidersMetaResponses[keyof GetFetchProvidersMetaResponses];
+
+export type DeleteFetchProvidersByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/fetch-providers/{id}';
+};
+
+export type DeleteFetchProvidersByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteFetchProvidersByIdError = DeleteFetchProvidersByIdErrors[keyof DeleteFetchProvidersByIdErrors];
+
+export type DeleteFetchProvidersByIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetFetchProvidersByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/fetch-providers/{id}';
+};
+
+export type GetFetchProvidersByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetFetchProvidersByIdError = GetFetchProvidersByIdErrors[keyof GetFetchProvidersByIdErrors];
+
+export type GetFetchProvidersByIdResponses = {
+    /**
+     * OK
+     */
+    200: FetchprovidersGetResponse;
+};
+
+export type GetFetchProvidersByIdResponse = GetFetchProvidersByIdResponses[keyof GetFetchProvidersByIdResponses];
+
+export type PutFetchProvidersByIdData = {
+    /**
+     * Updated configuration
+     */
+    body: FetchprovidersUpdateRequest;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/fetch-providers/{id}';
+};
+
+export type PutFetchProvidersByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutFetchProvidersByIdError = PutFetchProvidersByIdErrors[keyof PutFetchProvidersByIdErrors];
+
+export type PutFetchProvidersByIdResponses = {
+    /**
+     * OK
+     */
+    200: FetchprovidersGetResponse;
+};
+
+export type PutFetchProvidersByIdResponse = PutFetchProvidersByIdResponses[keyof PutFetchProvidersByIdResponses];
+
 export type GetMemoryProvidersData = {
     body?: never;
     path?: never;
@@ -11302,6 +11845,10 @@ export type GetUsersMeErrors = {
      */
     400: HandlersErrorResponse;
     /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
      * Internal Server Error
      */
     500: HandlersErrorResponse;
@@ -11349,6 +11896,95 @@ export type PutUsersMeResponses = {
 };
 
 export type PutUsersMeResponse = PutUsersMeResponses[keyof PutUsersMeResponses];
+
+export type GetUsersMeChannelIdentitiesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/users/me/channel-identities';
+};
+
+export type GetUsersMeChannelIdentitiesErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetUsersMeChannelIdentitiesError = GetUsersMeChannelIdentitiesErrors[keyof GetUsersMeChannelIdentitiesErrors];
+
+export type GetUsersMeChannelIdentitiesResponses = {
+    /**
+     * OK
+     */
+    200: ChannelaccessListBindingsResponse;
+};
+
+export type GetUsersMeChannelIdentitiesResponse = GetUsersMeChannelIdentitiesResponses[keyof GetUsersMeChannelIdentitiesResponses];
+
+export type DeleteUsersMeChannelIdentitiesByChannelIdentityIdData = {
+    body?: never;
+    path: {
+        /**
+         * Channel Identity ID
+         */
+        channel_identity_id: string;
+    };
+    query?: never;
+    url: '/users/me/channel-identities/{channel_identity_id}';
+};
+
+export type DeleteUsersMeChannelIdentitiesByChannelIdentityIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteUsersMeChannelIdentitiesByChannelIdentityIdError = DeleteUsersMeChannelIdentitiesByChannelIdentityIdErrors[keyof DeleteUsersMeChannelIdentitiesByChannelIdentityIdErrors];
+
+export type DeleteUsersMeChannelIdentitiesByChannelIdentityIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type PostUsersMeChannelLinksData = {
+    /**
+     * Link code options
+     */
+    body?: ChannelaccessIssueLinkCodeRequest;
+    path?: never;
+    query?: never;
+    url: '/users/me/channel-links';
+};
+
+export type PostUsersMeChannelLinksErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostUsersMeChannelLinksError = PostUsersMeChannelLinksErrors[keyof PostUsersMeChannelLinksErrors];
+
+export type PostUsersMeChannelLinksResponses = {
+    /**
+     * Created
+     */
+    201: ChannelaccessLinkCode;
+};
+
+export type PostUsersMeChannelLinksResponse = PostUsersMeChannelLinksResponses[keyof PostUsersMeChannelLinksResponses];
 
 export type GetUsersMeChannelsByPlatformData = {
     body?: never;

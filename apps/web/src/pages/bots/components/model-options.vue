@@ -1,8 +1,5 @@
 <template>
-  <div class="flex items-center border-b px-3">
-    <Search
-      class="mr-2 size-3.5 shrink-0 text-muted-foreground"
-    />
+  <div class="flex h-10 shrink-0 items-center gap-2 border-b border-border/40 px-3.5">
     <input
       v-model="searchTerm"
       role="combobox"
@@ -11,7 +8,7 @@
       :aria-activedescendant="activeIndex >= 0 ? `${listboxId}-${activeIndex}` : undefined"
       :placeholder="$t('bots.settings.searchModel')"
       aria-label="Search models"
-      class="flex h-10 w-full bg-transparent py-3 text-xs outline-none placeholder:text-muted-foreground"
+      class="flex h-full w-full bg-transparent text-control outline-hidden placeholder:text-muted-foreground"
       @keydown="onKeydown"
     >
   </div>
@@ -56,43 +53,19 @@
           :aria-selected="modelValue === vRow.row.option.value"
           :aria-setsize="optionCount"
           :aria-posinset="vRow.row.posinset"
-          class="relative flex w-full cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-xs outline-none hover:bg-accent hover:text-accent-foreground"
-          :class="{
-            'bg-accent': modelValue === vRow.row.option.value,
-            'bg-accent text-accent-foreground': activeIndex === vRow.virtual.index,
-          }"
+          :data-highlighted="activeIndex === vRow.virtual.index ? '' : undefined"
+          :class="[menuItemClass, 'h-8']"
           @click="$emit('update:modelValue', vRow.row.option.value)"
+          @pointermove="activeIndex = vRow.virtual.index"
         >
+          <span
+            class="min-w-0 flex-1 truncate text-left"
+            :title="vRow.row.option.label"
+          >{{ vRow.row.option.label }}</span>
           <Check
             v-if="modelValue === vRow.row.option.value"
-            class="size-3.5 shrink-0 mt-0.5"
+            class="ml-2 size-4 shrink-0"
           />
-          <span
-            v-else
-            class="size-3.5 shrink-0"
-          />
-          <span class="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span class="flex min-w-0 items-center gap-2">
-              <span
-                class="truncate flex-1 text-left"
-                :title="vRow.row.option.label"
-              >{{ vRow.row.option.label }}</span>
-              <span class="flex items-center gap-1.5 shrink-0">
-                <ModelCapabilities
-                  v-if="vRow.row.option.compatibilities?.length"
-                  :compatibilities="vRow.row.option.compatibilities"
-                />
-                <ContextWindowBadge :context-window="vRow.row.option.contextWindow" />
-              </span>
-            </span>
-            <span
-              v-if="vRow.row.hasDescription"
-              class="text-xs text-muted-foreground truncate text-left"
-              :title="vRow.row.option.description"
-            >
-              {{ vRow.row.option.description }}
-            </span>
-          </span>
         </button>
       </div>
     </div>
@@ -102,10 +75,9 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
-import { Search, Check } from 'lucide-vue-next'
+import { Check } from 'lucide-vue-next'
+import { menuItemClass } from '@memohai/ui'
 import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
-import ModelCapabilities from '@/components/model-capabilities/index.vue'
-import ContextWindowBadge from '@/components/context-window-badge/index.vue'
 import { useListboxKeyboard } from '@/composables/useListboxKeyboard'
 
 export interface ModelOption {
@@ -129,7 +101,6 @@ interface ItemRow {
   type: 'item'
   key: string
   option: ModelOption
-  hasDescription: boolean
   // 1-based position among option rows (excludes headers), for aria-posinset
   posinset: number
 }
@@ -221,12 +192,11 @@ const rows = computed<Row[]>(() => {
     for (const option of group.items) {
       posinset += 1
       result.push({
-        type: 'item',
-        key: option.value,
-        option,
-        hasDescription: Boolean(option.description && option.description !== option.label),
-        posinset,
-      })
+          type: 'item',
+          key: option.value,
+          option,
+          posinset,
+        })
     }
   }
   return result
@@ -248,9 +218,8 @@ const virtualizer = useVirtualizer<HTMLElement, HTMLElement>(
     // causes minor jitter at worst, never clipping/misalignment.
     estimateSize: (index) => {
       const row = rows.value[index]
-      if (!row) return 44
-      if (row.type === 'header') return 32
-      return row.hasDescription ? 54 : 36
+      if (!row) return 36
+      return row.type === 'header' ? 32 : 36
     },
     overscan: 8,
     getItemKey: (index: number) => rows.value[index]?.key ?? index,

@@ -14,7 +14,7 @@
         </span>
         <span
           v-if="typeof item.score === 'number'"
-          class="text-[10px] text-muted-foreground font-mono shrink-0 rounded bg-muted/30 px-1 py-0.5"
+          class="text-caption text-muted-foreground font-mono shrink-0 rounded bg-muted/30 px-1 py-0.5"
         >
           {{ item.score.toFixed(2) }}
         </span>

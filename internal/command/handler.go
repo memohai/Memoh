@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/compaction"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -27,9 +28,17 @@ type MemberRoleResolver interface {
 	GetMemberRole(ctx context.Context, botID, channelIdentityID string) (string, error)
 }
 
+// ChannelManageResolver reports whether a channel identity has been granted the
+// manage capability on a bot (Channel Access "Manage"). It lets an IM identity
+// run owner-only slash commands without being the web owner.
+type ChannelManageResolver interface {
+	HasManageGrant(ctx context.Context, botID, channelIdentityID string) (bool, error)
+}
+
 // BotMemberRoleAdapter adapts bots.Service to MemberRoleResolver.
 type BotMemberRoleAdapter struct {
-	BotService *bots.Service
+	BotService     *bots.Service
+	ManageResolver ChannelManageResolver
 }
 
 func (a *BotMemberRoleAdapter) GetMemberRole(ctx context.Context, botID, channelIdentityID string) (string, error) {
@@ -39,6 +48,17 @@ func (a *BotMemberRoleAdapter) GetMemberRole(ctx context.Context, botID, channel
 	}
 	if bot.OwnerUserID == channelIdentityID {
 		return "owner", nil
+	}
+	// A channel identity explicitly granted manage in Channel Access counts as a
+	// manager, which carries the same write-command access as the owner.
+	if a.ManageResolver != nil && strings.TrimSpace(channelIdentityID) != "" {
+		granted, err := a.ManageResolver.HasManageGrant(ctx, botID, channelIdentityID)
+		if err != nil {
+			return "", err
+		}
+		if granted {
+			return "manager", nil
+		}
 	}
 	return "", nil
 }
@@ -64,6 +84,7 @@ type Handler struct {
 	aclEvaluator       AccessEvaluator
 	skillLoader        SkillLoader
 	containerFS        ContainerFS
+	linkConsumer       LinkConsumer
 
 	logger *slog.Logger
 }
@@ -157,14 +178,15 @@ func (h *Handler) CurrentContext(ctx context.Context, botID string) (CurrentCont
 // topLevelCommands are standalone commands (no sub-actions) that IsCommand
 // recognises and that are handled outside the regular resource-group dispatch
 // (the channel inbound processor has the routing context they need). Only
-// /help, /new, /stop are advertised in /help output — /approve and /reject are
-// internal tool-approval protocol verbs that users discover via the inline
-// approval prompt, not via the help listing.
+// /help, /start, /new, /stop are advertised in /help output — /approve and
+// /reject are internal tool-approval protocol verbs that users discover via the
+// inline approval prompt, not via the help listing.
 //
 // The map carries no per-key data — membership is the only fact callers need.
 // Localized descriptions for the advertised entries live under `cmd.help.top.*`
 // in the i18n catalog.
 var topLevelCommands = map[string]struct{}{
+	"start":   {},
 	"new":     {},
 	"stop":    {},
 	"approve": {},
@@ -263,6 +285,28 @@ func UnknownCommandMessage(t *i18n.Localizer, text string) string {
 	})
 }
 
+// AccessDeniedMessage is the reply sent when the chat ACL denies a sender. It
+// doubles as the binding hint so a forgetful owner learns how to link in
+// (/link) while a genuine outsider learns they aren't permitted. A manager gets
+// a narrower message because Manage access does not imply Chat access.
+func AccessDeniedMessage(t *i18n.Localizer, role string) string {
+	if strings.TrimSpace(role) == "manager" {
+		return t.T("cmd.error.accessDeniedManager")
+	}
+	return t.T("cmd.error.accessDeniedHint", map[string]any{
+		"link": CmdRef("link"),
+	})
+}
+
+// MemberRole resolves the sender's bot role for presentation decisions outside
+// command execution. Callers must not use it as an authorization shortcut.
+func (h *Handler) MemberRole(ctx context.Context, botID, channelIdentityID string) (string, error) {
+	if h == nil || h.roleResolver == nil || strings.TrimSpace(channelIdentityID) == "" {
+		return "", nil
+	}
+	return h.roleResolver.GetMemberRole(ctx, strings.TrimSpace(botID), strings.TrimSpace(channelIdentityID))
+}
+
 // ResolveLocale resolves the command-UI locale for a bot from its
 // command_ui_language setting (auto/unknown → server default). Any settings I/O
 // error falls back to the default locale, so command rendering never blocks on
@@ -336,10 +380,7 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 
 	// Resolve the user's role in this bot.
 	role := ""
-	roleIdentityID := input.ChannelIdentityID
-	if strings.TrimSpace(input.UserID) != "" {
-		roleIdentityID = strings.TrimSpace(input.UserID)
-	}
+	roleIdentityID := strings.TrimSpace(input.ChannelIdentityID)
 	if h.roleResolver != nil && roleIdentityID != "" {
 		r, err := h.roleResolver.GetMemberRole(ctx, input.BotID, roleIdentityID)
 		if err != nil {
@@ -352,7 +393,7 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 			role = r
 		}
 	}
-	writeAccess := role == "owner" || allowsUnboundWriteCommands(input)
+	writeAccess := role == "owner" || role == "manager"
 
 	resource := canonicalResource(parsed.Resource)
 	// /language <lang> shorthand → /language set <lang>. Must run BEFORE cc is
@@ -360,6 +401,7 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 	// after construction would leave the `language set` handler reading an empty
 	// arg slice and emitting usage text instead of switching the language.
 	normalizeLanguageShorthand(resource, &parsed)
+	normalizeLinkShorthand(resource, &parsed)
 
 	cc := CommandContext{
 		Ctx:               ctx,
@@ -381,6 +423,27 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 		Range:             parsed.Range,
 		Locale:            localeStr,
 		L:                 loc,
+	}
+
+	// ACL gate for commands: an outsider who cannot chat with the bot must not be
+	// able to operate it via slash commands either. The binding entry point
+	// (/link) is always allowed so a holder of a valid code can bind; owners and
+	// managers are always allowed and can recover even in whitelist mode; everyone
+	// else must pass the chat ACL.
+	// (Write commands are additionally gated by writeAccess below.)
+	if resource != "link" && !writeAccess {
+		allowed, aclErr := h.chatACLAllows(cc)
+		if aclErr != nil {
+			h.logger.Warn("command acl evaluation failed",
+				slog.String("bot_id", input.BotID),
+				slog.String("resource", resource),
+				slog.Any("error", aclErr),
+			)
+			return &Result{Text: cc.T("cmd.error.noAccess")}, nil
+		}
+		if !allowed {
+			return &Result{Text: cc.T("cmd.error.noAccess")}, nil
+		}
 	}
 
 	// /help (and its alias /commands)
@@ -475,7 +538,7 @@ func (h *Handler) friendlyCommandError(t *i18n.Localizer, resource string, err e
 }
 
 // normalizeLanguageShorthand rewrites the "/language <lang>" shorthand into the
-// explicit "/language set <lang>" form so a bare value (zh/en/auto) reaches the
+// explicit "/language set <lang>" form so a bare value (zh/en/ja/auto) reaches the
 // set handler's argument slice. The caller must invoke this BEFORE freezing
 // CommandContext.Args from parsed.Args — otherwise the rewritten arg never makes
 // it into the context the handler reads.
@@ -539,21 +602,68 @@ func endsWithTerminalPunct(s string) bool {
 	return false
 }
 
-func allowsUnboundWriteCommands(input ExecuteInput) bool {
-	if strings.TrimSpace(input.UserID) != "" {
-		return false
+// chatACLAllows reports whether the bot's chat ACL permits this caller. With no
+// ACL evaluator wired it allows, mirroring the inbound chat gate (a no-op when
+// ACL is unconfigured).
+func (h *Handler) chatACLAllows(cc CommandContext) (bool, error) {
+	if h.aclEvaluator == nil {
+		return true, nil
 	}
-	if strings.TrimSpace(input.ChannelIdentityID) == "" {
-		return false
+	return h.aclEvaluator.Evaluate(cc.Ctx, acl.EvaluateRequest{
+		BotID:             cc.BotID,
+		ChannelIdentityID: cc.ChannelIdentityID,
+		ChannelType:       cc.ChannelType,
+		SourceScope: acl.SourceScope{
+			ConversationType: cc.ConversationType,
+			ConversationID:   cc.ConversationID,
+			ThreadID:         cc.ThreadID,
+		},
+	})
+}
+
+// CommandAccess reports whether the caller may operate a command on the bot,
+// applying the same policy as Execute's gate: /link is always allowed; owners and
+// managers are always allowed; everyone else must pass the chat ACL. The channel
+// processor uses it to gate the route-aware mode commands (/new, /stop, /status)
+// that do not flow through Execute.
+func (h *Handler) CommandAccess(ctx context.Context, input ExecuteInput) (bool, error) {
+	if parsed, err := Parse(ExtractCommandText(input.Text)); err == nil {
+		if canonicalResource(parsed.Resource) == "link" {
+			return true, nil
+		}
 	}
-	// QQ and personal WeChat no longer have a channel-identity bind flow, so
-	// channel-scoped slash commands must not depend on a linked Web user.
-	switch strings.ToLower(strings.TrimSpace(input.ChannelType)) {
-	case "qq", "weixin":
-		return true
-	default:
-		return false
+	role := ""
+	roleIdentityID := strings.TrimSpace(input.ChannelIdentityID)
+	if h.roleResolver != nil && roleIdentityID != "" {
+		r, err := h.roleResolver.GetMemberRole(ctx, input.BotID, roleIdentityID)
+		if err != nil {
+			if h.logger != nil {
+				h.logger.Warn("failed to resolve member role in CommandAccess",
+					slog.String("bot_id", input.BotID),
+					slog.String("channel_identity_id", roleIdentityID),
+					slog.Any("error", err),
+				)
+			}
+		} else {
+			role = r
+		}
 	}
+	if role == "owner" || role == "manager" {
+		return true, nil
+	}
+	if h.aclEvaluator == nil {
+		return true, nil
+	}
+	return h.aclEvaluator.Evaluate(ctx, acl.EvaluateRequest{
+		BotID:             input.BotID,
+		ChannelIdentityID: strings.TrimSpace(input.ChannelIdentityID),
+		ChannelType:       strings.TrimSpace(input.ChannelType),
+		SourceScope: acl.SourceScope{
+			ConversationType: strings.TrimSpace(input.ConversationType),
+			ConversationID:   strings.TrimSpace(input.ConversationID),
+			ThreadID:         strings.TrimSpace(input.ThreadID),
+		},
+	})
 }
 
 // safeExecute runs a sub-command handler and recovers from panics.

@@ -3,6 +3,8 @@ package mcp
 import (
 	"strings"
 	"sync"
+
+	"github.com/memohai/memoh/internal/agent/event"
 )
 
 // ToolSessionContextStore keeps the latest per-prompt context for long-lived
@@ -10,13 +12,17 @@ import (
 type ToolSessionContextStore struct {
 	mu       sync.RWMutex
 	sessions map[string]ToolSessionContext
-	sinks    map[string]func(ToolStreamEvent)
+	sinks    map[string]*toolEventSinkEntry
+}
+
+type toolEventSinkEntry struct {
+	sink func(ToolStreamEvent)
 }
 
 func NewToolSessionContextStore() *ToolSessionContextStore {
 	return &ToolSessionContextStore{
 		sessions: map[string]ToolSessionContext{},
-		sinks:    map[string]func(ToolStreamEvent){},
+		sinks:    map[string]*toolEventSinkEntry{},
 	}
 }
 
@@ -29,6 +35,8 @@ type ToolStreamEvent struct {
 	Input      any    `json:"input,omitempty"`
 	Result     any    `json:"result,omitempty"`
 	Error      string `json:"error,omitempty"`
+	// Approval request fields (Type "tool_approval_request").
+	ApprovalID string `json:"approval_id,omitempty"`
 	// Interactive request fields (Type "user_input_request"). Carrying the
 	// pending interaction over the same channel as tool_call_start lets the UI
 	// attach it to the existing tool call block instead of rendering a
@@ -37,6 +45,45 @@ type ToolStreamEvent struct {
 	ShortID     int            `json:"short_id,omitempty"`
 	Status      string         `json:"status,omitempty"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
+}
+
+func (e ToolStreamEvent) ToAgentStreamEvent() (event.StreamEvent, bool) {
+	typ := event.StreamEventType(strings.TrimSpace(e.Type))
+	switch typ {
+	case event.ToolCallStart, event.ToolCallEnd:
+		return event.StreamEvent{
+			Type:       typ,
+			ToolCallID: e.ToolCallID,
+			ToolName:   e.ToolName,
+			Input:      e.Input,
+			Result:     e.Result,
+			Error:      e.Error,
+		}, true
+	case event.ToolApprovalRequest:
+		return event.StreamEvent{
+			Type:       typ,
+			ToolCallID: e.ToolCallID,
+			ToolName:   e.ToolName,
+			Input:      e.Input,
+			ApprovalID: e.ApprovalID,
+			ShortID:    e.ShortID,
+			Status:     e.Status,
+			Metadata:   e.Metadata,
+		}, true
+	case event.UserInputRequest:
+		return event.StreamEvent{
+			Type:        typ,
+			ToolCallID:  e.ToolCallID,
+			ToolName:    e.ToolName,
+			Input:       e.Input,
+			UserInputID: e.UserInputID,
+			ShortID:     e.ShortID,
+			Status:      e.Status,
+			Metadata:    e.Metadata,
+		}, true
+	default:
+		return event.StreamEvent{}, false
+	}
 }
 
 func (s *ToolSessionContextStore) Put(session ToolSessionContext) {
@@ -51,7 +98,7 @@ func (s *ToolSessionContextStore) Put(session ToolSessionContext) {
 	}
 	s.mu.Lock()
 	if existing, ok := s.sessions[key]; ok {
-		session = mergeToolSessionContext(existing, session)
+		session = MergeToolSessionContext(existing, session)
 	}
 	s.sessions[key] = session
 	s.mu.Unlock()
@@ -71,7 +118,7 @@ func (s *ToolSessionContextStore) Merge(session ToolSessionContext) ToolSessionC
 	if !ok {
 		return session
 	}
-	return mergeToolSessionContext(session, latest)
+	return MergeToolSessionContext(session, latest)
 }
 
 func (s *ToolSessionContextStore) CloseSession(sessionID string) {
@@ -111,10 +158,10 @@ func (s *ToolSessionContextStore) AppendToolEvent(session ToolSessionContext, ev
 		return false
 	}
 	s.mu.RLock()
-	sink := s.sinks[key]
+	entry := s.sinks[key]
 	s.mu.RUnlock()
-	if sink != nil {
-		sink(event)
+	if entry != nil && entry.sink != nil {
+		entry.sink(event)
 		return true
 	}
 	return false
@@ -128,12 +175,13 @@ func (s *ToolSessionContextStore) RegisterToolEventSink(session ToolSessionConte
 	if key == "" {
 		return func() {}
 	}
+	entry := &toolEventSinkEntry{sink: sink}
 	s.mu.Lock()
-	s.sinks[key] = sink
+	s.sinks[key] = entry
 	s.mu.Unlock()
 	return func() {
 		s.mu.Lock()
-		if current := s.sinks[key]; current != nil {
+		if current := s.sinks[key]; current == entry {
 			delete(s.sinks, key)
 		}
 		s.mu.Unlock()
@@ -168,13 +216,20 @@ func toolStreamEventKeyHasSessionID(key, sessionID string) bool {
 	return len(parts) == 3 && parts[1] == sessionID
 }
 
-func mergeToolSessionContext(base, latest ToolSessionContext) ToolSessionContext {
+// MergeToolSessionContext overlays every non-empty field of latest onto base
+// (bools are sticky-true). It is the single merge for ToolSessionContext -
+// used by the tool-context store and the ACP client callbacks - so a new
+// field only needs to be wired up here.
+func MergeToolSessionContext(base, latest ToolSessionContext) ToolSessionContext {
 	merged := base
 	if value := strings.TrimSpace(latest.BotID); value != "" {
 		merged.BotID = value
 	}
 	if value := strings.TrimSpace(latest.ChatID); value != "" {
 		merged.ChatID = value
+	}
+	if value := strings.TrimSpace(latest.RuntimeID); value != "" {
+		merged.RuntimeID = value
 	}
 	if value := strings.TrimSpace(latest.SessionID); value != "" {
 		merged.SessionID = value
@@ -205,6 +260,9 @@ func mergeToolSessionContext(base, latest ToolSessionContext) ToolSessionContext
 	}
 	if latest.IsSubagent {
 		merged.IsSubagent = true
+	}
+	if latest.RuntimeActive {
+		merged.RuntimeActive = true
 	}
 	return merged
 }

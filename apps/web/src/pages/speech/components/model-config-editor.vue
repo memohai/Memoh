@@ -7,7 +7,7 @@
       <section
         v-for="field in basicFields"
         :key="field.key"
-        class="space-y-2"
+        class="space-y-1.5"
         :class="isWideField(field) ? 'md:col-span-2' : ''"
       >
         <Label :for="field.type === 'bool' || field.type === 'enum' ? undefined : `tts-field-${field.key}`">
@@ -61,7 +61,7 @@
           :model-value="String(configData[field.key] ?? '')"
           @update:model-value="(val) => configData[field.key] = val"
         >
-          <SelectTrigger>
+          <SelectTrigger class="w-full">
             <SelectValue :placeholder="field.title || field.key" />
           </SelectTrigger>
           <SelectContent>
@@ -92,118 +92,121 @@
       {{ mode === 'transcription' ? $t('transcription.noCapabilities') : $t('speech.noCapabilities') }}
     </div>
 
-    <div
-      v-if="advancedFields.length > 0"
-      class="rounded-lg border border-border"
-    >
+    <!-- Advanced is a quiet disclosure, not a bordered sub-card: the same
+         chevron toggle + height reveal the schedule "More options" uses, so the
+         rarely-touched vendor knobs stay folded away until the user asks. -->
+    <div v-if="advancedFields.length > 0">
       <button
         type="button"
-        class="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium"
+        class="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
         @click="showAdvanced = !showAdvanced"
       >
-        <span>{{ mode === 'transcription' ? $t('transcription.advanced.title') : $t('speech.advanced.title') }}</span>
-        <component
-          :is="showAdvanced ? ChevronUp : ChevronDown"
-          class="size-3 text-muted-foreground"
+        <ChevronRight
+          class="size-3.5"
+          :class="showAdvanced ? 'rotate-90' : ''"
         />
+        {{ mode === 'transcription' ? $t('transcription.advanced.title') : $t('speech.advanced.title') }}
       </button>
+
       <div
-        v-if="showAdvanced"
-        class="border-t border-border px-3 py-3 space-y-4"
+        class="grid overflow-hidden transition-[grid-template-rows] duration-200 ease-out"
+        :class="showAdvanced ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
       >
-        <p class="text-xs text-muted-foreground">
-          {{ mode === 'transcription' ? $t('transcription.advanced.description') : $t('speech.advanced.description') }}
-        </p>
-        <div class="grid gap-4 md:grid-cols-2">
-          <section
-            v-for="field in advancedFields"
-            :key="field.key"
-            class="space-y-2"
-            :class="isWideField(field) ? 'md:col-span-2' : ''"
-          >
-            <Label :for="field.type === 'bool' || field.type === 'enum' ? undefined : `tts-field-${field.key}`">
-              {{ field.title || field.key }}
-            </Label>
-            <p
-              v-if="field.description"
-              class="text-xs text-muted-foreground"
-            >
-              {{ field.description }}
+        <div class="min-h-0">
+          <div class="mt-3 space-y-4">
+            <p class="text-xs text-muted-foreground">
+              {{ mode === 'transcription' ? $t('transcription.advanced.description') : $t('speech.advanced.description') }}
             </p>
-
-            <div
-              v-if="field.type === 'secret'"
-              class="relative"
-            >
-              <Input
-                :id="`tts-field-${field.key}`"
-                v-model="configData[field.key] as string"
-                :type="visibleSecrets[field.key] ? 'text' : 'password'"
-                :placeholder="field.example ? String(field.example) : ''"
-              />
-              <button
-                type="button"
-                class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                @click="visibleSecrets[field.key] = !visibleSecrets[field.key]"
+            <div class="grid gap-4 md:grid-cols-2">
+              <section
+                v-for="field in advancedFields"
+                :key="field.key"
+                class="space-y-1.5"
+                :class="isWideField(field) ? 'md:col-span-2' : ''"
               >
-                <component
-                  :is="visibleSecrets[field.key] ? EyeOff : Eye"
-                  class="size-3.5"
-                />
-              </button>
-            </div>
-
-            <Switch
-              v-else-if="field.type === 'bool'"
-              :model-value="!!configData[field.key]"
-              @update:model-value="(val) => configData[field.key] = !!val"
-            />
-
-            <Input
-              v-else-if="field.type === 'number'"
-              :id="`tts-field-${field.key}`"
-              v-model.number="configData[field.key] as number"
-              type="number"
-              :placeholder="field.example ? String(field.example) : ''"
-            />
-
-            <Select
-              v-else-if="field.type === 'enum' && field.enum"
-              :model-value="String(configData[field.key] ?? '')"
-              @update:model-value="(val) => configData[field.key] = val"
-            >
-              <SelectTrigger>
-                <SelectValue :placeholder="field.title || field.key" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem
-                  v-for="opt in field.enum"
-                  :key="opt"
-                  :value="opt"
+                <Label :for="field.type === 'bool' || field.type === 'enum' ? undefined : `tts-field-${field.key}`">
+                  {{ field.title || field.key }}
+                </Label>
+                <p
+                  v-if="field.description"
+                  class="text-xs text-muted-foreground"
                 >
-                  {{ opt }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+                  {{ field.description }}
+                </p>
 
-            <Input
-              v-else
-              :id="`tts-field-${field.key}`"
-              v-model="configData[field.key] as string"
-              type="text"
-              :placeholder="field.example ? String(field.example) : ''"
-            />
-          </section>
+                <div
+                  v-if="field.type === 'secret'"
+                  class="relative"
+                >
+                  <Input
+                    :id="`tts-field-${field.key}`"
+                    v-model="configData[field.key] as string"
+                    :type="visibleSecrets[field.key] ? 'text' : 'password'"
+                    :placeholder="field.example ? String(field.example) : ''"
+                  />
+                  <button
+                    type="button"
+                    class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    @click="visibleSecrets[field.key] = !visibleSecrets[field.key]"
+                  >
+                    <component
+                      :is="visibleSecrets[field.key] ? EyeOff : Eye"
+                      class="size-3.5"
+                    />
+                  </button>
+                </div>
+
+                <Switch
+                  v-else-if="field.type === 'bool'"
+                  :model-value="!!configData[field.key]"
+                  @update:model-value="(val) => configData[field.key] = !!val"
+                />
+
+                <Input
+                  v-else-if="field.type === 'number'"
+                  :id="`tts-field-${field.key}`"
+                  v-model.number="configData[field.key] as number"
+                  type="number"
+                  :placeholder="field.example ? String(field.example) : ''"
+                />
+
+                <Select
+                  v-else-if="field.type === 'enum' && field.enum"
+                  :model-value="String(configData[field.key] ?? '')"
+                  @update:model-value="(val) => configData[field.key] = val"
+                >
+                  <SelectTrigger class="w-full">
+                    <SelectValue :placeholder="field.title || field.key" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem
+                      v-for="opt in field.enum"
+                      :key="opt"
+                      :value="opt"
+                    >
+                      {{ opt }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Input
+                  v-else
+                  :id="`tts-field-${field.key}`"
+                  v-model="configData[field.key] as string"
+                  type="text"
+                  :placeholder="field.example ? String(field.example) : ''"
+                />
+              </section>
+            </div>
+          </div>
         </div>
       </div>
     </div>
 
-    <Separator class="my-3" />
-
     <div class="space-y-3">
-      <h4 class="text-xs font-medium">
+      <Label>
         {{ mode === 'transcription' ? $t('transcription.test.title') : $t('speech.test.title') }}
-      </h4>
+      </Label>
       <div
         v-if="mode === 'synthesis'"
         class="relative"
@@ -285,23 +288,21 @@
       </div>
     </div>
 
-    <Separator class="my-3" />
-
-    <div class="flex justify-end">
+    <DialogFooter>
       <LoadingButton
         type="button"
-        size="sm"
         :loading="saving"
         @click="handleSaveConfig"
       >
         {{ $t('provider.saveChanges') }}
       </LoadingButton>
-    </div>
+    </DialogFooter>
   </div>
 </template>
 
 <script setup lang="ts">
 import {
+  DialogFooter,
   Input,
   Label,
   Select,
@@ -309,13 +310,12 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Separator,
   Switch,
   Textarea,
 } from '@memohai/ui'
-import { ChevronDown, ChevronUp, Eye, EyeOff, Play } from 'lucide-vue-next'
+import { ChevronRight, Eye, EyeOff, Play } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import LoadingButton from '@/components/loading-button/index.vue'
 

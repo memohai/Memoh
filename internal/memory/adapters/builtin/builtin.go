@@ -24,7 +24,7 @@ const (
 
 // BuiltinProvider wraps the existing Service as a Provider.
 type BuiltinProvider struct {
-	service      memoryRuntime
+	service      Runtime
 	llm          adapters.LLM
 	chatAccessor conversation.Accessor
 	adminChecker AdminChecker
@@ -32,10 +32,10 @@ type BuiltinProvider struct {
 	packer       contextPackerConfig
 }
 
-// memoryRuntime is the runtime memory backend required by the builtin provider.
+// Runtime is the runtime memory backend required by the builtin provider.
 // It is intentionally defined as an interface to decouple provider wiring from
 // concrete service structs in the memory package.
-type memoryRuntime interface {
+type Runtime interface {
 	Add(ctx context.Context, req adapters.AddRequest) (adapters.SearchResponse, error)
 	Search(ctx context.Context, req adapters.SearchRequest) (adapters.SearchResponse, error)
 	GetAll(ctx context.Context, req adapters.GetAllRequest) (adapters.SearchResponse, error)
@@ -50,22 +50,22 @@ type memoryRuntime interface {
 	Rebuild(ctx context.Context, botID string) (adapters.RebuildResult, error)
 }
 
+type llmCompactRuntime interface {
+	CompactWithLLM(ctx context.Context, filters map[string]any, ratio float64, decayDays int, llm adapters.LLM) (adapters.CompactResult, error)
+}
+
 // AdminChecker checks whether a channel identity has admin privileges.
 type AdminChecker interface {
 	IsAdmin(ctx context.Context, channelIdentityID string) (bool, error)
 }
 
-func NewBuiltinProvider(log *slog.Logger, service any, chatAccessor conversation.Accessor, adminChecker AdminChecker) *BuiltinProvider {
+func NewBuiltinProvider(log *slog.Logger, service Runtime, chatAccessor conversation.Accessor, adminChecker AdminChecker) *BuiltinProvider {
 	if log == nil {
 		log = slog.Default()
 	}
 	logger := log.With(slog.String("provider", BuiltinType))
-	runtimeService, ok := service.(memoryRuntime)
-	if service != nil && !ok {
-		logger.Warn("service does not implement memoryRuntime; provider will operate without a backend")
-	}
 	return &BuiltinProvider{
-		service:      runtimeService,
+		service:      service,
 		chatAccessor: chatAccessor,
 		adminChecker: adminChecker,
 		logger:       logger,
@@ -127,6 +127,24 @@ func intFromConfig(m map[string]any, key string) int {
 }
 
 func (*BuiltinProvider) Type() string { return BuiltinType }
+
+func (p *BuiltinProvider) SemanticCompactCapability() adapters.MemoryCompactCapability {
+	if p.service == nil {
+		return adapters.MemoryCompactCapability{Reason: "memory runtime not configured"}
+	}
+	if p.llm == nil {
+		return adapters.MemoryCompactCapability{Reason: "semantic compact requires a configured LLM"}
+	}
+	if _, ok := p.service.(llmCompactRuntime); !ok {
+		return adapters.MemoryCompactCapability{Reason: "selected memory runtime does not support semantic compact"}
+	}
+	mode := strings.TrimSpace(p.service.Mode())
+	return adapters.MemoryCompactCapability{
+		Semantic:     true,
+		Archive:      true,
+		RebuildIndex: mode == "dense" || mode == "sparse",
+	}
+}
 
 func memorySourceLabel(item adapters.MemoryItem) string {
 	var parts []string
@@ -445,7 +463,15 @@ func (p *BuiltinProvider) Compact(ctx context.Context, filters map[string]any, r
 	if p.service == nil {
 		return adapters.CompactResult{}, errors.New("memory runtime not configured")
 	}
-	return p.service.Compact(ctx, filters, ratio, decayDays)
+	capability := p.SemanticCompactCapability()
+	if !capability.Semantic {
+		reason := strings.TrimSpace(capability.Reason)
+		if reason == "" {
+			reason = "semantic compact is not available"
+		}
+		return adapters.CompactResult{}, errors.New(reason)
+	}
+	return p.service.(llmCompactRuntime).CompactWithLLM(ctx, filters, ratio, decayDays, p.llm)
 }
 
 func (p *BuiltinProvider) Usage(ctx context.Context, filters map[string]any) (adapters.UsageResponse, error) {

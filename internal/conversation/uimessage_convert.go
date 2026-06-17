@@ -266,20 +266,7 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 				}
 
 				for _, call := range toolCalls {
-					block := UIMessage{
-						ID:         pending.NextID,
-						Type:       UIMessageTool,
-						Name:       call.Name,
-						Input:      call.Input,
-						ToolCallID: call.ID,
-						Running:    uiBoolPtr(true),
-						Approval:   call.Approval,
-						UserInput:  call.UserInput,
-					}
-					appendPendingAssistantMessage(pending, block)
-					if call.ID != "" {
-						pending.ToolIndexes[call.ID] = len(pending.Turn.Messages) - 1
-					}
+					upsertPendingToolCall(pending, call)
 				}
 
 				if len(attachments) > 0 {
@@ -375,6 +362,44 @@ func appendPendingAssistantMessage(pending *uiPendingAssistantTurn, message UIMe
 	message.ID = pending.NextID
 	pending.NextID++
 	pending.Turn.Messages = append(pending.Turn.Messages, message)
+}
+
+func upsertPendingToolCall(pending *uiPendingAssistantTurn, call uiExtractedToolCall) {
+	if pending == nil {
+		return
+	}
+	if call.ID != "" {
+		if idx, ok := pending.ToolIndexes[call.ID]; ok && idx >= 0 && idx < len(pending.Turn.Messages) {
+			msg := &pending.Turn.Messages[idx]
+			if call.Name != "" {
+				msg.Name = call.Name
+			}
+			if call.Input != nil {
+				msg.Input = call.Input
+			}
+			if call.Approval != nil {
+				msg.Approval = call.Approval
+			}
+			if call.UserInput != nil {
+				msg.UserInput = call.UserInput
+			}
+			msg.Running = uiBoolPtr(true)
+			return
+		}
+	}
+	block := UIMessage{
+		Type:       UIMessageTool,
+		Name:       call.Name,
+		Input:      call.Input,
+		ToolCallID: call.ID,
+		Running:    uiBoolPtr(true),
+		Approval:   call.Approval,
+		UserInput:  call.UserInput,
+	}
+	appendPendingAssistantMessage(pending, block)
+	if call.ID != "" {
+		pending.ToolIndexes[call.ID] = len(pending.Turn.Messages) - 1
+	}
 }
 
 func buildStandaloneAssistantMessages(text string, reasonings []string, attachments []UIAttachment) []UIMessage {
@@ -922,18 +947,16 @@ func applyToolResultToUIMessage(message *UIMessage, output any) {
 		return
 	}
 	message.Output = output
-	// Finalize before any early return below: a background exec result is
+	// Finalize before any early return below: a background handoff result is
 	// still a tool result, and replaying a pending user input would re-offer
 	// an already answered form.
 	finalizeInteractiveRequests(message, output)
-	if strings.EqualFold(strings.TrimSpace(message.Name), "exec") {
-		if task, ok := backgroundTaskFromExecToolResult(output); ok {
-			if task.Command == "" {
-				task.Command = stringFromMap(message.Input, "command")
-			}
-			mergeBackgroundTaskIntoTool(message, task)
-			return
+	if task, ok := backgroundTaskFromToolResult(output); ok {
+		if task.Command == "" {
+			task.Command = stringFromMap(message.Input, "command")
 		}
+		mergeBackgroundTaskIntoTool(message, task)
+		return
 	}
 	message.Running = uiBoolPtr(false)
 }
@@ -952,7 +975,11 @@ func finalizeInteractiveRequests(message *UIMessage, output any) {
 	}
 }
 
-func backgroundTaskFromExecToolResult(output any) (UIBackgroundTask, bool) {
+// backgroundTaskFromToolResult detects a background handoff in a tool result
+// by payload shape — a task_id plus a background-start status marker —
+// regardless of which tool produced it. Terminal statuses from inspection
+// tools intentionally do not match.
+func backgroundTaskFromToolResult(output any) (UIBackgroundTask, bool) {
 	payload, ok := toolResultMap(output)
 	if !ok {
 		return UIBackgroundTask{}, false
@@ -963,25 +990,24 @@ func backgroundTaskFromExecToolResult(output any) (UIBackgroundTask, bool) {
 		return UIBackgroundTask{}, false
 	}
 
-	statusToken := strings.ToLower(strings.TrimSpace(stringFromMap(payload, "status")))
-	status := normalizeBackgroundTaskStatus(statusToken)
-	switch statusToken {
-	case "background_started", "auto_backgrounded", "started":
-		status = "running"
-	}
-	if status == "" {
+	status := strings.ToLower(strings.TrimSpace(stringFromMap(payload, "status")))
+	switch status {
+	case "background_started", "auto_backgrounded", "started", "queued":
+	default:
 		return UIBackgroundTask{}, false
 	}
 
 	task := UIBackgroundTask{
-		TaskID:     taskID,
-		Status:     status,
-		Command:    stringFromMap(payload, "command"),
-		OutputFile: stringFromMap(payload, "output_file"),
-		ExitCode:   int32FromAny(payload["exit_code"]),
-		Duration:   stringFromMap(payload, "duration"),
-		OutputTail: firstNonEmptyString(stringFromMap(payload, "output_tail"), stringFromMap(payload, "tail")),
-		Stalled:    status == "stalled" || boolFromAny(payload["stalled"], false),
+		TaskID:         taskID,
+		Status:         normalizeBackgroundTaskStatus(status),
+		Command:        firstNonEmptyString(stringFromMap(payload, "command"), stringFromMap(payload, "description"), stringFromMap(payload, "message")),
+		AgentID:        stringFromMap(payload, "agent_id"),
+		AgentSessionID: stringFromMap(payload, "agent_session_id", "session_id"),
+		OutputFile:     stringFromMap(payload, "output_file"),
+		OutputTail:     firstNonEmptyString(stringFromMap(payload, "output_tail"), stringFromMap(payload, "tail")),
+	}
+	if task.Status == "" {
+		task.Status = "running"
 	}
 	return task, true
 }
@@ -1005,6 +1031,12 @@ func mergeBackgroundTaskIntoTool(message *UIMessage, task UIBackgroundTask) {
 	}
 	if task.Command != "" {
 		merged.Command = task.Command
+	}
+	if task.AgentID != "" {
+		merged.AgentID = task.AgentID
+	}
+	if task.AgentSessionID != "" {
+		merged.AgentSessionID = task.AgentSessionID
 	}
 	if task.OutputFile != "" {
 		merged.OutputFile = task.OutputFile
@@ -1039,7 +1071,7 @@ func isBackgroundToolStillRunning(message UIMessage) bool {
 		return false
 	}
 	status := normalizeBackgroundTaskStatus(message.Background.Status)
-	return status == "running" || status == "stalled"
+	return status == "running" || status == "queued" || status == "stalled"
 }
 
 func parseBackgroundTaskNotification(text string) (UIBackgroundTask, bool) {
@@ -1058,13 +1090,23 @@ func parseBackgroundTaskNotification(text string) (UIBackgroundTask, bool) {
 		status = "completed"
 	}
 	task := UIBackgroundTask{
-		TaskID:     taskID,
-		Status:     status,
-		Command:    strings.TrimSpace(extractUITaskNotificationTag(body, "command")),
-		OutputFile: strings.TrimSpace(extractUITaskNotificationTag(body, "output-file")),
-		Duration:   strings.TrimSpace(extractUITaskNotificationTag(body, "duration")),
-		OutputTail: strings.TrimSpace(extractUITaskNotificationTag(body, "output-tail")),
-		Stalled:    status == "stalled",
+		TaskID: taskID,
+		Status: status,
+		Command: firstNonEmptyString(
+			strings.TrimSpace(extractUITaskNotificationTag(body, "command")),
+			strings.TrimSpace(extractUITaskNotificationTag(body, "description")),
+			strings.TrimSpace(extractUITaskNotificationTag(body, "message")),
+		),
+		AgentID:        strings.TrimSpace(extractUITaskNotificationTag(body, "agent-id")),
+		AgentSessionID: strings.TrimSpace(extractUITaskNotificationTag(body, "session-id")),
+		OutputFile:     strings.TrimSpace(extractUITaskNotificationTag(body, "output-file")),
+		Duration:       strings.TrimSpace(extractUITaskNotificationTag(body, "duration")),
+		OutputTail: firstNonEmptyString(
+			strings.TrimSpace(extractUITaskNotificationTag(body, "output-tail")),
+			strings.TrimSpace(extractUITaskNotificationTag(body, "report")),
+			strings.TrimSpace(extractUITaskNotificationTag(body, "error")),
+		),
+		Stalled: status == "stalled",
 	}
 	if rawExitCode := strings.TrimSpace(extractUITaskNotificationTag(body, "exit-code")); rawExitCode != "" {
 		if exitCode, err := strconv.ParseInt(rawExitCode, 10, 32); err == nil {
@@ -1115,16 +1157,17 @@ func toolResultMap(output any) (map[string]any, bool) {
 	return typed, true
 }
 
-func stringFromMap(value any, key string) string {
+func stringFromMap(value any, keys ...string) string {
 	typed, ok := value.(map[string]any)
 	if !ok {
 		return ""
 	}
-	return stringFromAny(typed[key])
-}
-
-func int32FromAny(value any) int32 {
-	return int32(intFromAny(value)) //nolint:gosec // exit codes are small process statuses.
+	for _, key := range keys {
+		if value := stringFromAny(typed[key]); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func firstNonEmptyString(values ...string) string {
@@ -1140,6 +1183,8 @@ func normalizeBackgroundTaskStatus(status string) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "background_started", "auto_backgrounded", "started", "running":
 		return "running"
+	case "queued", "queue":
+		return "queued"
 	case "completed", "complete", "success", "succeeded":
 		return "completed"
 	case "failed", "failure", "error":

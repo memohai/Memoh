@@ -39,6 +39,21 @@ type ListRulesResponse struct {
 	Items []Rule `json:"items"`
 }
 
+// ManageOverride is a local Channel Access override of the Manage capability for a
+// channel identity on a bot. Granted=true forces ON, Granted=false forces OFF
+// (suppressing an inherited grant). Absence of a row means "inherit".
+type ManageOverride struct {
+	ID                         string    `json:"id"`
+	BotID                      string    `json:"bot_id"`
+	ChannelIdentityID          string    `json:"channel_identity_id"`
+	Granted                    bool      `json:"granted"`
+	ChannelType                string    `json:"channel_type,omitempty"`
+	ChannelSubjectID           string    `json:"channel_subject_id,omitempty"`
+	ChannelIdentityDisplayName string    `json:"channel_identity_display_name,omitempty"`
+	ChannelIdentityAvatarURL   string    `json:"channel_identity_avatar_url,omitempty"`
+	CreatedAt                  time.Time `json:"created_at"`
+}
+
 type DefaultEffectResponse struct {
 	DefaultEffect string `json:"default_effect"`
 }

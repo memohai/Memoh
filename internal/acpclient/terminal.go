@@ -12,6 +12,7 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 
+	"github.com/memohai/memoh/internal/agent/event"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
@@ -38,6 +39,15 @@ type terminalManager struct {
 	terminals map[string]*terminal
 }
 
+type terminalApprovalFunc func(toolCallID string, input map[string]any) (terminalApprovalResult, error)
+
+type terminalApprovalResult struct {
+	Approved   bool
+	ToolCallID string
+	// RejectionMessage is the agent-visible text for an unapproved result.
+	RejectionMessage string
+}
+
 type terminal struct {
 	stream *bridge.ExecStream
 	limit  int
@@ -50,9 +60,14 @@ type terminal struct {
 	exitCode  *int
 	signal    *string
 	reported  bool
-	done      chan struct{}
-	doneOnce  sync.Once
-	onDone    func(*terminal)
+	// endReported is closed after the winning emitTerminalEnd call has
+	// actually emitted the tool_call_end event, so concurrent callers (the
+	// readLoop drain goroutine vs WaitForTerminalExit) can rely on the event
+	// being visible once emitTerminalEnd returns.
+	endReported chan struct{}
+	done        chan struct{}
+	doneOnce    sync.Once
+	onDone      func(*terminal)
 }
 
 func newTerminalManager(ctx context.Context, client *bridge.Client, root, defaultCwd string, timeoutSeconds int32, baseEnv []string, virtualRoot bool, events *toolEventEmitter) *terminalManager { //nolint:contextcheck // terminal streams must live for the ACP turn, not a single RPC callback.
@@ -75,7 +90,7 @@ func newTerminalManager(ctx context.Context, client *bridge.Client, root, defaul
 	}
 }
 
-func (m *terminalManager) CreateTerminal(_ context.Context, p acp.CreateTerminalRequest) (acp.CreateTerminalResponse, error) {
+func (m *terminalManager) CreateTerminal(_ context.Context, p acp.CreateTerminalRequest, approve terminalApprovalFunc) (acp.CreateTerminalResponse, error) {
 	cwd := m.defaultCwd
 	if p.Cwd != nil && strings.TrimSpace(*p.Cwd) != "" {
 		resolved, err := m.resolvePath(*p.Cwd)
@@ -95,7 +110,29 @@ func (m *terminalManager) CreateTerminal(_ context.Context, p acp.CreateTerminal
 	if p.Cwd != nil && strings.TrimSpace(*p.Cwd) != "" {
 		input["cwd"] = strings.TrimSpace(*p.Cwd)
 	}
-	m.emitToolCallStart("terminal-"+id, "exec", input)
+	toolCallID := "terminal-" + id
+	if approve != nil {
+		approval, err := approve(toolCallID, input)
+		if err != nil {
+			m.emitToolCallStart(toolCallID, "exec", input)
+			m.emitToolCallEnd(toolCallID, "exec", input, toolErrorResult(err), err)
+			return acp.CreateTerminalResponse{}, err
+		}
+		if strings.TrimSpace(approval.ToolCallID) != "" {
+			toolCallID = strings.TrimSpace(approval.ToolCallID)
+		}
+		if !approval.Approved {
+			message := strings.TrimSpace(approval.RejectionMessage)
+			if message == "" {
+				message = "tool execution was not approved"
+			}
+			err := errors.New(message)
+			m.emitToolCallStart(toolCallID, "exec", input)
+			m.emitToolCallEnd(toolCallID, "exec", input, toolErrorResult(err), err)
+			return acp.CreateTerminalResponse{}, err
+		}
+	}
+	m.emitToolCallStart(toolCallID, "exec", input)
 
 	limit := defaultTerminalOutputLimit
 	if p.OutputByteLimit != nil && *p.OutputByteLimit > 0 {
@@ -115,11 +152,11 @@ func (m *terminalManager) CreateTerminal(_ context.Context, p acp.CreateTerminal
 	}
 	stream, err := m.client.ExecStreamWithEnv(m.ctx, command, cwd, m.timeout, env) //nolint:contextcheck // use the ACP turn context so terminal output survives the create RPC.
 	if err != nil {
-		m.emitToolCallEnd("terminal-"+id, "exec", input, toolErrorResult(err), err)
+		m.emitToolCallEnd(toolCallID, "exec", input, toolErrorResult(err), err)
 		return acp.CreateTerminalResponse{}, err
 	}
 
-	term := &terminal{stream: stream, limit: limit, id: "terminal-" + id, input: input, done: make(chan struct{}), onDone: m.emitTerminalEnd}
+	term := &terminal{stream: stream, limit: limit, id: toolCallID, input: input, done: make(chan struct{}), endReported: make(chan struct{}), onDone: m.emitTerminalEnd}
 	m.mu.Lock()
 	m.terminals[id] = term
 	m.mu.Unlock()
@@ -202,8 +239,8 @@ func (m *terminalManager) emitToolCallStart(id, name string, input map[string]an
 	if m == nil || m.events == nil {
 		return
 	}
-	m.events.emit(StreamEvent{
-		Type:       StreamEventToolCallStart,
+	m.events.emit(event.StreamEvent{
+		Type:       event.ToolCallStart,
 		ToolCallID: id,
 		ToolName:   name,
 		Input:      input,
@@ -214,22 +251,33 @@ func (m *terminalManager) emitToolCallEnd(id, name string, input map[string]any,
 	if m == nil || m.events == nil {
 		return
 	}
-	event := StreamEvent{
-		Type:       StreamEventToolCallEnd,
+	ev := event.StreamEvent{
+		Type:       event.ToolCallEnd,
 		ToolCallID: id,
 		ToolName:   name,
 		Input:      input,
 		Result:     result,
 	}
 	if err != nil {
-		event.Error = err.Error()
+		ev.Error = err.Error()
 	}
-	m.events.emit(event)
+	m.events.emit(ev)
 }
 
 func (m *terminalManager) emitTerminalEnd(term *terminal) {
-	if m == nil || term == nil || !term.markReported() {
+	if m == nil || term == nil {
 		return
+	}
+	if !term.markReported() {
+		// Another caller won the report race; wait until its end event is
+		// emitted so this call's caller observes the event too.
+		if term.endReported != nil {
+			<-term.endReported
+		}
+		return
+	}
+	if term.endReported != nil {
+		defer close(term.endReported)
 	}
 	output, truncated, status := term.snapshot()
 	result := map[string]any{

@@ -43,6 +43,18 @@ func (*countingGatewayTestProvider) CallTool(context.Context, ToolSessionContext
 	return nil, ErrToolNotFound
 }
 
+type mutableGatewayTestProvider struct {
+	tools []ToolDescriptor
+}
+
+func (p *mutableGatewayTestProvider) ListTools(_ context.Context, _ ToolSessionContext) ([]ToolDescriptor, error) {
+	return append([]ToolDescriptor(nil), p.tools...), nil
+}
+
+func (*mutableGatewayTestProvider) CallTool(context.Context, ToolSessionContext, string, map[string]any) (map[string]any, error) {
+	return nil, ErrToolNotFound
+}
+
 func (p *gatewayTestProvider) CallTool(_ context.Context, _ ToolSessionContext, toolName string, _ map[string]any) (map[string]any, error) {
 	if err, ok := p.callErr[toolName]; ok {
 		return nil, err
@@ -96,6 +108,45 @@ func TestToolGatewayServiceListTools(t *testing.T) {
 	}
 	if len(tools) != 3 {
 		t.Fatalf("expected 3 tools after dedupe, got %d", len(tools))
+	}
+}
+
+func TestToolGatewayServiceLookupTool(t *testing.T) {
+	provider := &gatewayTestProvider{
+		tools: []ToolDescriptor{
+			{Name: "lookup_tool", Description: "Lookup", InputSchema: map[string]any{"type": "object"}},
+		},
+	}
+	service := NewToolGatewayService(slog.Default(), []ToolSource{provider})
+
+	desc, ok, err := service.LookupTool(context.Background(), ToolSessionContext{BotID: "bot-1"}, "lookup_tool")
+	if err != nil {
+		t.Fatalf("LookupTool error = %v", err)
+	}
+	if !ok || desc.Name != "lookup_tool" {
+		t.Fatalf("LookupTool = (%#v, %v), want lookup_tool", desc, ok)
+	}
+	if _, ok, err := service.LookupTool(context.Background(), ToolSessionContext{BotID: "bot-1"}, "missing_tool"); err != nil || ok {
+		t.Fatalf("LookupTool missing = ok %v err %v, want not found without error", ok, err)
+	}
+}
+
+func TestToolGatewayServiceLookupToolRefreshesAfterCachedMiss(t *testing.T) {
+	provider := &mutableGatewayTestProvider{}
+	service := NewToolGatewayService(slog.Default(), []ToolSource{provider})
+	session := ToolSessionContext{BotID: "bot-1"}
+
+	if _, ok, err := service.LookupTool(context.Background(), session, "late_tool"); err != nil || ok {
+		t.Fatalf("LookupTool before provider update = ok %v err %v, want cached miss", ok, err)
+	}
+
+	provider.tools = []ToolDescriptor{{Name: "late_tool", Description: "Late", InputSchema: map[string]any{"type": "object"}}}
+	desc, ok, err := service.LookupTool(context.Background(), session, "late_tool")
+	if err != nil {
+		t.Fatalf("LookupTool after provider update error = %v", err)
+	}
+	if !ok || desc.Name != "late_tool" {
+		t.Fatalf("LookupTool after provider update = (%#v, %v), want late_tool", desc, ok)
 	}
 }
 

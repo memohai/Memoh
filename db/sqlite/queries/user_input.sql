@@ -140,6 +140,19 @@ WHERE id = sqlc.arg(id)
   AND (expires_at IS NULL OR expires_at = '' OR julianday(expires_at) > julianday('now'))
 RETURNING *;
 
+-- name: CancelPendingUserInputsBySession :many
+UPDATE user_input_requests
+SET status = 'canceled',
+    result_json = sqlc.arg(result_json),
+    responded_at = CURRENT_TIMESTAMP,
+    canceled_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE bot_id = sqlc.arg(bot_id)
+  AND session_id = sqlc.arg(session_id)
+  AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at = '' OR julianday(expires_at) > julianday('now'))
+RETURNING *;
+
 -- name: FailUserInputRequest :one
 UPDATE user_input_requests
 SET status = 'failed',

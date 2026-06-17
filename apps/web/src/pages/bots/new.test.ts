@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   routerBack: vi.fn(),
   routerPush: vi.fn(),
   startBotCreate: vi.fn(),
+  localWorkspaceEnabled: false,
+  getDesktopServerStatus: vi.fn(),
+  defaultWorkspacePath: vi.fn(),
 }))
 
 function translate(key: string) {
@@ -69,7 +72,9 @@ vi.mock('@memohai/sdk/colada', () => ({
 vi.mock('@/store/capabilities', () => ({
   useCapabilitiesStore: () => ({
     load: mocks.loadCapabilities,
-    localWorkspaceEnabled: false,
+    get localWorkspaceEnabled() {
+      return mocks.localWorkspaceEnabled
+    },
   }),
 }))
 
@@ -146,11 +151,16 @@ vi.mock('./components/model-select.vue', () => ({ default: () => h('select') }))
 
 describe('bot create page', () => {
   beforeEach(() => {
-    mocks.getBotsNameAvailability.mockResolvedValue({ data: { available: true } })
+    mocks.getBotsNameAvailability.mockReset()
     mocks.loadCapabilities.mockReset()
     mocks.routerBack.mockReset()
     mocks.routerPush.mockReset()
     mocks.startBotCreate.mockReset()
+    mocks.getDesktopServerStatus.mockReset()
+    mocks.defaultWorkspacePath.mockReset()
+    mocks.getBotsNameAvailability.mockResolvedValue({ data: { available: true } })
+    mocks.localWorkspaceEnabled = false
+    delete (window as unknown as { api?: unknown }).api
     document.body.innerHTML = ''
   })
 
@@ -179,6 +189,114 @@ describe('bot create page', () => {
     expect(mocks.startBotCreate).toHaveBeenCalledTimes(1)
     expect(mocks.routerPush).toHaveBeenCalledWith({ name: 'bot-create-progress' })
     expect(form.getAttribute('aria-busy')).toBe('false')
+
+    app.unmount()
+    root.remove()
+  })
+
+  it('hides local workspace creation in remote desktop even when the server supports it', async () => {
+    mocks.localWorkspaceEnabled = true
+    mocks.getDesktopServerStatus.mockResolvedValue({
+      mode: 'remote',
+      baseUrl: 'https://memoh.example.com',
+      ready: true,
+      managed: false,
+    })
+    ;(window as unknown as { api: unknown }).api = {
+      desktop: {
+        getServerStatus: mocks.getDesktopServerStatus,
+        defaultWorkspacePath: mocks.defaultWorkspacePath,
+      },
+    }
+
+    const Page = (await import('./new.vue')).default
+    const root = document.createElement('div')
+    document.body.append(root)
+    const app = createApp(Page)
+    app.config.globalProperties.$t = translate
+    app.mount(root)
+    await flushPromises()
+
+    expect(root.textContent).not.toContain('bots.workspaceBackend')
+
+    const [displayInput, nameInput] = Array.from(root.querySelectorAll('input'))
+    displayInput!.value = 'Remote Bot'
+    displayInput!.dispatchEvent(new Event('input', { bubbles: true }))
+    nameInput!.value = 'remote-bot'
+    nameInput!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    await flushPromises()
+
+    const submitButton = root.querySelector('button[type="submit"]') as HTMLButtonElement
+    expect(submitButton.disabled).toBe(false)
+
+    root.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await vi.waitFor(() => {
+      expect(mocks.startBotCreate).toHaveBeenCalledTimes(1)
+    })
+
+    expect(mocks.startBotCreate.mock.calls[0]?.[0]).toMatchObject({
+      display_name: 'Remote Bot',
+      metadata: undefined,
+    })
+    expect(mocks.routerPush).toHaveBeenCalledWith({ name: 'bot-create-progress' })
+
+    app.unmount()
+    root.remove()
+  })
+
+  it('shows local workspace creation in local desktop and resolves the default path', async () => {
+    mocks.localWorkspaceEnabled = true
+    mocks.getDesktopServerStatus.mockResolvedValue({
+      mode: 'local',
+      baseUrl: 'http://127.0.0.1:18731',
+      ready: true,
+      managed: true,
+    })
+    mocks.defaultWorkspacePath.mockResolvedValue('/Users/test/.memoh/workspaces/local-bot')
+    ;(window as unknown as { api: unknown }).api = {
+      desktop: {
+        getServerStatus: mocks.getDesktopServerStatus,
+        defaultWorkspacePath: mocks.defaultWorkspacePath,
+      },
+    }
+
+    const Page = (await import('./new.vue')).default
+    const root = document.createElement('div')
+    document.body.append(root)
+    const app = createApp(Page)
+    app.config.globalProperties.$t = translate
+    app.mount(root)
+    await flushPromises()
+
+    expect(root.textContent).toContain('bots.workspaceBackend')
+
+    const [displayInput] = Array.from(root.querySelectorAll('input'))
+    displayInput!.value = 'Local Bot'
+    displayInput!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+
+    expect(mocks.defaultWorkspacePath).toHaveBeenCalledWith('Local Bot')
+    expect(Array.from(root.querySelectorAll('input')).some(input =>
+      input.value === '/Users/test/.memoh/workspaces/local-bot',
+    )).toBe(true)
+
+    app.unmount()
+    root.remove()
+  })
+
+  it('keeps browser web local workspace behavior based on server capabilities', async () => {
+    mocks.localWorkspaceEnabled = true
+
+    const Page = (await import('./new.vue')).default
+    const root = document.createElement('div')
+    document.body.append(root)
+    const app = createApp(Page)
+    app.config.globalProperties.$t = translate
+    app.mount(root)
+    await flushPromises()
+
+    expect(root.textContent).toContain('bots.workspaceBackend')
 
     app.unmount()
     root.remove()

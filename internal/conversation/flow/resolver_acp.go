@@ -6,15 +6,17 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/acpagent"
 	"github.com/memohai/memoh/internal/acpclient"
 	agentpkg "github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/agent/event"
 	"github.com/memohai/memoh/internal/conversation"
+	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/session"
-	"github.com/memohai/memoh/internal/userinput"
 )
 
 type acpPrompter interface {
@@ -55,10 +57,13 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		req.RawQuery = strings.TrimSpace(req.Query)
 	}
 	req.Query = strings.TrimSpace(req.Query)
+	req = r.persistACPLeadingUserMessage(context.WithoutCancel(ctx), req)
 	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.Query)
 
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	activePrompt := r.registerACPActivePrompt(req.BotID, req.SessionID)
+	defer r.unregisterACPActivePrompt(req.BotID, req.SessionID, activePrompt)
 	go func() {
 		select {
 		case <-abortCh:
@@ -67,8 +72,56 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		}
 	}()
 
-	emit := func(event agentpkg.StreamEvent) {
-		data, err := json.Marshal(event)
+	var (
+		projectedMu       sync.Mutex
+		projectedStatuses = map[string]string{}
+	)
+	recordProjectionStatus := func(ev agentpkg.StreamEvent) bool {
+		toolCallID := strings.TrimSpace(ev.ToolCallID)
+		if toolCallID == "" {
+			return false
+		}
+		status := acpDecisionProjectionStatus(ev)
+		projectedMu.Lock()
+		defer projectedMu.Unlock()
+		if projectedStatuses[toolCallID] == status {
+			return false
+		}
+		projectedStatuses[toolCallID] = status
+		return true
+	}
+	releaseProjection := func(toolCallID string) {
+		toolCallID = strings.TrimSpace(toolCallID)
+		if toolCallID == "" {
+			return
+		}
+		projectedMu.Lock()
+		delete(projectedStatuses, toolCallID)
+		projectedMu.Unlock()
+	}
+	projectedSnapshot := func() map[string]struct{} {
+		projectedMu.Lock()
+		defer projectedMu.Unlock()
+		if len(projectedStatuses) == 0 {
+			return nil
+		}
+		out := make(map[string]struct{}, len(projectedStatuses))
+		for id := range projectedStatuses {
+			out[id] = struct{}{}
+		}
+		return out
+	}
+
+	emit := func(ev agentpkg.StreamEvent) {
+		if isACPDecisionProjectionEvent(ev) && recordProjectionStatus(ev) {
+			if !r.persistACPDecisionProjection(context.WithoutCancel(ctx), req, ev) {
+				releaseProjection(ev.ToolCallID)
+			}
+		}
+		if activePrompt != nil {
+			activePrompt.emit(ev)
+		}
+		data, err := json.Marshal(ev)
 		if err != nil {
 			return
 		}
@@ -78,7 +131,7 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		}
 	}
 
-	emit(agentpkg.StreamEvent{Type: agentpkg.EventAgentStart})
+	emit(agentpkg.StreamEvent{Type: agentpkg.EventStart})
 	// No eager text_start here: the UI message converter allocates block IDs
 	// in arrival order and the frontend sorts by ID, so pre-creating the text
 	// block would pin the answer text above any reasoning that streams first.
@@ -101,11 +154,7 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		ToolHTTPURL:       req.ToolHTTPURL,
 		ContextURI:        acpContextURI,
 		ContextMarkdown:   contextMarkdown,
-		Sink: acpclient.EventSinkFunc(func(event acpclient.StreamEvent) {
-			for _, mapped := range mapACPStreamEvent(event) {
-				emit(mapped)
-			}
-		}),
+		Sink:              acpclient.EventSinkFunc(emit),
 	})
 	if err != nil {
 		r.logger.Error("ACP prompt failed",
@@ -113,67 +162,186 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 			slog.String("session_id", req.SessionID),
 			slog.Any("error", err),
 		)
+		r.cancelPendingACPApprovals(context.WithoutCancel(ctx), req, "tool approval cancelled: the turn ended before a decision arrived")
 		failedResult, failureDelta := acpFailureResult(result, err)
+		projected := projectedSnapshot()
+		failedResult.Output = filterACPProjectedOutput(failedResult.Output, projected)
 		if failureDelta != "" {
 			emit(agentpkg.StreamEvent{Type: agentpkg.EventTextDelta, Delta: failureDelta})
 		}
 		_ = r.persistACPRound(context.WithoutCancel(ctx), req, agentID, projectPath, failedResult, err)
 		emit(agentpkg.StreamEvent{Type: agentpkg.EventTextEnd})
-		emit(agentpkg.StreamEvent{Type: agentpkg.EventAgentAbort})
+		emit(agentpkg.StreamEvent{Type: agentpkg.EventAbort})
 		return nil
 	}
 
 	emit(agentpkg.StreamEvent{Type: agentpkg.EventTextEnd})
+	projected := projectedSnapshot()
+	result.Output = filterACPProjectedOutput(result.Output, projected)
 	if err := r.persistACPRound(context.WithoutCancel(ctx), req, agentID, projectPath, result, nil); err != nil {
 		r.logger.Error("ACP persist failed", slog.Any("error", err), slog.String("session_id", req.SessionID))
 	}
-	emit(agentpkg.StreamEvent{Type: agentpkg.EventAgentEnd})
+	emit(agentpkg.StreamEvent{Type: agentpkg.EventEnd})
 	return nil
 }
 
-func mapACPStreamEvent(event acpclient.StreamEvent) []agentpkg.StreamEvent {
-	switch event.Type {
-	case acpclient.StreamEventTextDelta:
-		if event.Delta == "" {
-			return nil
-		}
-		return []agentpkg.StreamEvent{{Type: agentpkg.EventTextDelta, Delta: event.Delta}}
-	case acpclient.StreamEventReasoningDelta:
-		if event.Delta == "" {
-			return nil
-		}
-		return []agentpkg.StreamEvent{{Type: agentpkg.EventReasoningDelta, Delta: event.Delta}}
-	case acpclient.StreamEventToolCallStart:
-		return []agentpkg.StreamEvent{{
-			Type:       agentpkg.EventToolCallStart,
-			ToolName:   event.ToolName,
-			ToolCallID: event.ToolCallID,
-			Input:      event.Input,
-		}}
-	case acpclient.StreamEventToolCallEnd:
-		return []agentpkg.StreamEvent{{
-			Type:       agentpkg.EventToolCallEnd,
-			ToolName:   event.ToolName,
-			ToolCallID: event.ToolCallID,
-			Input:      event.Input,
-			Result:     event.Result,
-			Error:      event.Error,
-		}}
-	case acpclient.StreamEventUserInputRequest:
-		// Same shape the in-process agent loop emits, so the stream converter
-		// attaches the pending question to the existing tool call block.
-		return []agentpkg.StreamEvent{{
-			Type:        agentpkg.EventUserInputRequest,
-			ToolName:    event.ToolName,
-			ToolCallID:  event.ToolCallID,
-			Input:       event.Input,
-			UserInputID: event.UserInputID,
-			ShortID:     event.ShortID,
-			Status:      event.Status,
-			Metadata:    event.Metadata,
-		}}
+func isACPDecisionProjectionEvent(ev agentpkg.StreamEvent) bool {
+	switch ev.Type {
+	case agentpkg.EventUserInputRequest, agentpkg.EventToolApprovalRequest:
+		return strings.TrimSpace(ev.ToolCallID) != ""
 	default:
-		return nil
+		return false
+	}
+}
+
+func acpDecisionProjectionStatus(ev agentpkg.StreamEvent) string {
+	status := strings.ToLower(strings.TrimSpace(ev.Status))
+	if status == "" {
+		return "pending"
+	}
+	return status
+}
+
+func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req conversation.ChatRequest) conversation.ChatRequest {
+	if req.UserMessagePersisted || r == nil || r.messageService == nil || strings.TrimSpace(req.BotID) == "" {
+		return req
+	}
+	displayText := strings.TrimSpace(req.RawQuery)
+	if displayText == "" {
+		displayText = strings.TrimSpace(req.Query)
+	}
+	if displayText == "" && len(req.Attachments) == 0 {
+		return req
+	}
+	contentText := strings.TrimSpace(req.Query)
+	if contentText == "" {
+		contentText = displayText
+	}
+	content, err := json.Marshal(conversation.ModelMessage{
+		Role:    "user",
+		Content: conversation.NewTextContent(contentText),
+	})
+	if err != nil {
+		r.logger.Warn("persist ACP leading user message: marshal failed", slog.Any("error", err))
+		return req
+	}
+	senderChannelIdentityID, senderUserID := r.resolvePersistSenderIDs(ctx, req)
+	if _, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
+		BotID:                   req.BotID,
+		SessionID:               req.SessionID,
+		SenderChannelIdentityID: senderChannelIdentityID,
+		SenderUserID:            senderUserID,
+		ExternalMessageID:       req.ExternalMessageID,
+		SourceReplyToMessageID:  req.SourceReplyToMessageID,
+		Role:                    "user",
+		Content:                 content,
+		Metadata:                mergeMetadata(buildRouteMetadata(req), buildInteractionMetadata(req)),
+		Assets:                  chatAttachmentsToAssetRefs(req.Attachments),
+		EventID:                 req.EventID,
+		DisplayText:             displayText,
+	}); err != nil {
+		r.logger.Warn("persist ACP leading user message failed",
+			slog.String("bot_id", req.BotID),
+			slog.String("session_id", req.SessionID),
+			slog.Any("error", err))
+		return req
+	}
+	req.UserMessagePersisted = true
+	return req
+}
+
+func (r *Resolver) persistACPDecisionProjection(ctx context.Context, req conversation.ChatRequest, ev agentpkg.StreamEvent) bool {
+	if r == nil || r.messageService == nil || strings.TrimSpace(req.BotID) == "" || strings.TrimSpace(req.SessionID) == "" {
+		return false
+	}
+	output := sdkMessagesToModelMessages(acpclient.TranscriptFromEvents([]event.StreamEvent{ev}, ""))
+	for _, msg := range output {
+		if msg.Role != "assistant" {
+			continue
+		}
+		content, err := json.Marshal(msg)
+		if err != nil {
+			r.logger.Warn("persist ACP decision projection: marshal failed",
+				slog.String("tool_call_id", ev.ToolCallID),
+				slog.Any("error", err))
+			return false
+		}
+		if _, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
+			BotID:                   req.BotID,
+			SessionID:               req.SessionID,
+			SenderChannelIdentityID: "",
+			Role:                    "assistant",
+			Content:                 content,
+			Metadata:                buildRouteMetadata(req),
+		}); err != nil {
+			r.logger.Warn("persist ACP decision projection failed",
+				slog.String("bot_id", req.BotID),
+				slog.String("session_id", req.SessionID),
+				slog.String("tool_call_id", ev.ToolCallID),
+				slog.Any("error", err))
+			return false
+		}
+		return true
+	}
+	return false
+}
+
+func filterACPProjectedOutput(messages []sdk.Message, projected map[string]struct{}) []sdk.Message {
+	if len(messages) == 0 || len(projected) == 0 {
+		return messages
+	}
+	out := make([]sdk.Message, 0, len(messages))
+	for _, msg := range messages {
+		if msg.Role != sdk.MessageRoleAssistant {
+			out = append(out, msg)
+			continue
+		}
+		content := make([]sdk.MessagePart, 0, len(msg.Content))
+		changed := false
+		for _, part := range msg.Content {
+			call, ok := part.(sdk.ToolCallPart)
+			if !ok {
+				content = append(content, part)
+				continue
+			}
+			if _, skip := projected[strings.TrimSpace(call.ToolCallID)]; skip {
+				changed = true
+				continue
+			}
+			content = append(content, part)
+		}
+		if changed {
+			if len(content) == 0 {
+				continue
+			}
+			msg.Content = content
+		}
+		out = append(out, msg)
+	}
+	return out
+}
+
+// cancelPendingACPApprovals closes the residual approval window when a turn
+// dies abnormally: any pending row for the session belonged to that turn (the
+// pool's turn slot guarantees one turn per session), and its waiter is gone -
+// left pending, the persisted card would stay actionable forever and a late
+// approve would flip a row nobody executes.
+func (r *Resolver) cancelPendingACPApprovals(ctx context.Context, req conversation.ChatRequest, reason string) {
+	if r == nil || r.toolApproval == nil {
+		return
+	}
+	cancelled, err := r.toolApproval.CancelPendingForSession(ctx, req.BotID, req.SessionID, reason)
+	if err != nil {
+		r.logger.Warn("cancel pending ACP approvals failed",
+			slog.String("bot_id", req.BotID),
+			slog.String("session_id", req.SessionID),
+			slog.Any("error", err))
+		return
+	}
+	if len(cancelled) > 0 {
+		r.logger.Info("cancelled pending ACP approvals with their turn",
+			slog.String("session_id", req.SessionID),
+			slog.Int("count", len(cancelled)))
 	}
 }
 
@@ -186,185 +354,36 @@ func (r *Resolver) persistACPRound(ctx context.Context, req conversation.ChatReq
 	if promptErr != nil {
 		meta["error"] = promptErr.Error()
 	}
-	output := acpResultOutputMessages(result)
+	// result.Output is already assembled by the ACP client; the resolver only
+	// converts and stores it.
+	output := sdkMessagesToModelMessages(result.Output)
+	if len(output) == 0 {
+		output = []conversation.ModelMessage{{Role: "assistant", Content: conversation.NewTextContent("")}}
+	}
 	round := make([]conversation.ModelMessage, 0, 1+len(output))
 	round = append(round, conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent(req.Query)})
 	round = append(round, output...)
 
 	metadataByIndex := make(map[int]map[string]any, len(output))
+	metadataOffset := 1
+	if req.UserMessagePersisted {
+		metadataOffset = 0
+	}
 	for idx, msg := range output {
 		if msg.Role == "assistant" {
-			metadataByIndex[idx+1] = meta
+			metadataByIndex[idx+metadataOffset] = meta
 		}
 	}
-	return r.storeRoundWithOptions(ctx, req, round, "", storeRoundOptions{
-		SkipMemory:              promptErr != nil,
+	skipMemory := promptErr != nil || req.UserMessagePersisted
+	err := r.storeRoundWithOptions(ctx, req, round, "", storeRoundOptions{
+		SkipMemory:              skipMemory,
 		AllowEmptyAssistantText: true,
 		MessageMetadataByIndex:  metadataByIndex,
 	})
-}
-
-func acpResultOutputMessages(result acpclient.PromptResult) []conversation.ModelMessage {
-	output := make([]conversation.ModelMessage, 0)
-	assistantParts := make([]sdk.MessagePart, 0)
-	var reasoning strings.Builder
-	var text strings.Builder
-	sawTextDelta := false
-
-	flushReasoning := func() {
-		if reasoning.Len() == 0 {
-			return
-		}
-		assistantParts = append(assistantParts, sdk.ReasoningPart{Text: reasoning.String()})
-		reasoning.Reset()
+	if err == nil && promptErr == nil && req.UserMessagePersisted {
+		go r.storeMemory(context.WithoutCancel(ctx), req, round)
 	}
-	flushText := func() {
-		if text.Len() == 0 {
-			return
-		}
-		assistantParts = append(assistantParts, sdk.TextPart{Text: text.String()})
-		text.Reset()
-	}
-	assistantHasToolCall := func() bool {
-		for _, part := range assistantParts {
-			if _, ok := part.(sdk.ToolCallPart); ok {
-				return true
-			}
-		}
-		return false
-	}
-	flushAssistant := func() {
-		flushReasoning()
-		flushText()
-		if len(assistantParts) == 0 {
-			return
-		}
-		converted := sdkMessagesToModelMessages([]sdk.Message{{
-			Role:    sdk.MessageRoleAssistant,
-			Content: assistantParts,
-		}})
-		output = append(output, converted...)
-		assistantParts = assistantParts[:0]
-	}
-	appendText := func(delta string) {
-		if delta == "" {
-			return
-		}
-		if assistantHasToolCall() {
-			flushAssistant()
-		}
-		sawTextDelta = true
-		text.WriteString(delta)
-	}
-	appendReasoning := func(delta string) {
-		if delta == "" {
-			return
-		}
-		if text.Len() > 0 || assistantHasToolCall() {
-			flushAssistant()
-		}
-		reasoning.WriteString(delta)
-	}
-	appendToolResult := func(event acpclient.StreamEvent) {
-		result := event.Result
-		isError := strings.TrimSpace(event.Error) != ""
-		if result == nil && isError {
-			result = strings.TrimSpace(event.Error)
-		}
-		converted := sdkMessagesToModelMessages([]sdk.Message{
-			sdk.ToolMessage(sdk.ToolResultPart{
-				ToolCallID: strings.TrimSpace(event.ToolCallID),
-				ToolName:   strings.TrimSpace(event.ToolName),
-				Result:     result,
-				IsError:    isError,
-			}),
-		})
-		output = append(output, converted...)
-	}
-	attachToolMetadata := func(event acpclient.StreamEvent, key string, value map[string]any) {
-		toolCallID := strings.TrimSpace(event.ToolCallID)
-		toolName := strings.TrimSpace(event.ToolName)
-		for idx, part := range assistantParts {
-			toolCall, ok := part.(sdk.ToolCallPart)
-			if !ok {
-				continue
-			}
-			if toolCallID != "" && strings.TrimSpace(toolCall.ToolCallID) != toolCallID {
-				continue
-			}
-			if toolCallID == "" && toolName != "" && strings.TrimSpace(toolCall.ToolName) != toolName {
-				continue
-			}
-			if toolCall.ProviderMetadata == nil {
-				toolCall.ProviderMetadata = map[string]any{}
-			}
-			toolCall.ProviderMetadata[key] = value
-			if event.Input != nil {
-				toolCall.Input = event.Input
-			}
-			assistantParts[idx] = toolCall
-			return
-		}
-		if text.Len() > 0 || reasoning.Len() > 0 {
-			flushAssistant()
-		}
-		assistantParts = append(assistantParts, sdk.ToolCallPart{
-			ToolCallID: toolCallID,
-			ToolName:   toolName,
-			Input:      event.Input,
-			ProviderMetadata: map[string]any{
-				key: value,
-			},
-		})
-	}
-	userInputMetadata := func(event acpclient.StreamEvent) map[string]any {
-		status := strings.TrimSpace(event.Status)
-		if status == "" {
-			status = userinput.StatusPending
-		}
-		userInputID := strings.TrimSpace(event.UserInputID)
-		if userInputID == "" {
-			if value, _ := event.Metadata["user_input_id"].(string); value != "" {
-				userInputID = strings.TrimSpace(value)
-			}
-		}
-		return map[string]any{
-			"user_input_id": userInputID,
-			"short_id":      event.ShortID,
-			"status":        status,
-			"ui_payload":    event.Metadata["ui_payload"],
-		}
-	}
-	for _, event := range result.Events {
-		switch event.Type {
-		case acpclient.StreamEventReasoningDelta:
-			appendReasoning(event.Delta)
-		case acpclient.StreamEventTextDelta:
-			appendText(event.Delta)
-		case acpclient.StreamEventToolCallStart:
-			flushReasoning()
-			flushText()
-			assistantParts = append(assistantParts, sdk.ToolCallPart{
-				ToolCallID: strings.TrimSpace(event.ToolCallID),
-				ToolName:   strings.TrimSpace(event.ToolName),
-				Input:      event.Input,
-			})
-		case acpclient.StreamEventToolCallEnd:
-			flushAssistant()
-			appendToolResult(event)
-		case acpclient.StreamEventUserInputRequest:
-			attachToolMetadata(event, "user_input", userInputMetadata(event))
-		}
-	}
-	if !sawTextDelta {
-		appendText(strings.TrimSpace(result.Text))
-	}
-	flushAssistant()
-
-	if len(output) == 0 {
-		return []conversation.ModelMessage{{Role: "assistant", Content: conversation.NewTextContent("")}}
-	}
-	return output
+	return err
 }
 
 // acpFailureResult appends the raw upstream error (truncated, single-line) to
@@ -379,11 +398,13 @@ func acpFailureResult(result acpclient.PromptResult, err error) (acpclient.Promp
 	if strings.TrimSpace(result.Text) != "" {
 		delta := "\n\n" + message
 		result.Text = strings.TrimSpace(result.Text + delta)
-		result.Events = append(result.Events, acpclient.StreamEvent{Type: acpclient.StreamEventTextDelta, Delta: delta})
+		result.Events = append(result.Events, event.StreamEvent{Type: event.TextDelta, Delta: delta})
+		result.Output = acpclient.AppendTranscriptText(result.Output, message)
 		return result, delta
 	}
 	result.Text = message
-	result.Events = append(result.Events, acpclient.StreamEvent{Type: acpclient.StreamEventTextDelta, Delta: message})
+	result.Events = append(result.Events, event.StreamEvent{Type: event.TextDelta, Delta: message})
+	result.Output = acpclient.AppendTranscriptText(result.Output, message)
 	return result, message
 }
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import {
   Button,
   Dialog,
@@ -142,19 +142,17 @@ function handleImported(botId: string) {
 <template>
   <div class="flex shrink-0 flex-wrap justify-end gap-2">
     <Button
-      variant="secondary"
+      variant="outline"
       size="sm"
       :disabled="disabled"
-      class="h-8 text-xs shadow-none font-medium border border-border"
       @click="exportOpen = true"
     >
       {{ t('bots.backup.exportBot') }}
     </Button>
     <Button
-      variant="secondary"
+      variant="outline"
       size="sm"
       :disabled="disabled"
-      class="h-8 text-xs shadow-none font-medium border border-border"
       @click="importOpen = true"
     >
       {{ t('bots.backup.importBot') }}

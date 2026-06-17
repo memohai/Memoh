@@ -1,13 +1,8 @@
 <template>
-  <div class="px-4 pt-2 pb-10 md:px-6 md:pt-4 md:pb-12 max-w-6xl mx-auto space-y-6">
-    <!-- Header: Title + Submit Button -->
-    <div class="flex items-center justify-between">
-      <h1 class="text-lg font-semibold">
-        {{ $t('supermarket.title') }}
-      </h1>
+  <PageShell :title="$t('supermarket.title')">
+    <template #actions>
       <Button
         variant="outline"
-        size="sm"
         as="a"
         href="https://github.com/memohai/supermarket"
         target="_blank"
@@ -16,146 +11,124 @@
         <Github class="size-4" />
         {{ $t('supermarket.submit') }}
       </Button>
-    </div>
+    </template>
 
-    <!-- Search -->
-    <div class="space-y-4">
-      <div class="flex items-center gap-2">
-        <div class="relative flex-1">
-          <Search class="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-          <Input
-            v-model="searchInput"
-            :placeholder="$t('supermarket.searchPlaceholder')"
-            class="pl-9"
-            @keydown.enter="applySearch"
-          />
-        </div>
+    <div class="space-y-6">
+      <!-- Search -->
+      <div class="relative">
+        <Search class="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+        <Input
+          v-model="searchInput"
+          :placeholder="$t('supermarket.searchPlaceholder')"
+          class="pl-9"
+          @keydown.enter="applySearch"
+        />
       </div>
 
-      <!-- Active tag filter -->
-      <div
-        v-if="activeTag"
-        class="flex items-center gap-2"
+      <!-- Tabs: Plugins / Skills -->
+      <Tabs
+        default-value="plugins"
+        class="w-full"
       >
-        <Badge
-          variant="secondary"
-          class="gap-1"
-        >
-          {{ $t('supermarket.filterByTag', { tag: activeTag }) }}
-          <button
-            class="ml-1 hover:text-destructive"
-            @click="clearTag"
+        <TabsList>
+          <TabsTrigger value="plugins">
+            {{ $t('supermarket.pluginSection') }}
+          </TabsTrigger>
+          <TabsTrigger value="skills">
+            {{ $t('supermarket.skillsSection') }}
+          </TabsTrigger>
+        </TabsList>
+
+        <!-- Plugins Tab -->
+        <TabsContent value="plugins">
+          <div
+            v-if="pluginsLoading"
+            class="flex items-center justify-center py-8 text-xs text-muted-foreground"
           >
-            <X class="size-3" />
-          </button>
-        </Badge>
-      </div>
+            <Spinner class="mr-2" />
+            {{ $t('common.loading') }}
+          </div>
+
+          <div
+            v-else-if="!plugins.length"
+            class="py-8 text-center text-xs text-muted-foreground"
+          >
+            {{ $t('supermarket.noPluginResults') }}
+          </div>
+
+          <div
+            v-else
+            class="grid grid-cols-1 sm:grid-cols-2 gap-4"
+          >
+            <PluginCard
+              v-for="plugin in plugins"
+              :key="plugin.id"
+              :plugin="plugin"
+              @install="openPluginInstall"
+            />
+          </div>
+        </TabsContent>
+
+        <!-- Skills Tab -->
+        <TabsContent value="skills">
+          <div
+            v-if="skillsLoading"
+            class="flex items-center justify-center py-8 text-xs text-muted-foreground"
+          >
+            <Spinner class="mr-2" />
+            {{ $t('common.loading') }}
+          </div>
+
+          <div
+            v-else-if="!skills.length"
+            class="py-8 text-center text-xs text-muted-foreground"
+          >
+            {{ $t('supermarket.noSkillResults') }}
+          </div>
+
+          <div
+            v-else
+            class="grid grid-cols-1 sm:grid-cols-2 gap-4"
+          >
+            <SkillCard
+              v-for="skill in skills"
+              :key="skill.id"
+              :skill="skill"
+              @install="openSkillInstall"
+            />
+          </div>
+        </TabsContent>
+      </Tabs>
+
+      <!-- Install Dialogs -->
+      <InstallPluginDialog
+        v-model:open="pluginDialogOpen"
+        :plugin="selectedPlugin"
+        @installed="refreshAll"
+      />
+      <InstallSkillDialog
+        v-model:open="skillDialogOpen"
+        :skill="selectedSkill"
+        @installed="refreshAll"
+      />
     </div>
-
-    <!-- Tabs: Plugins / Skills -->
-    <Tabs
-      default-value="plugins"
-      class="w-full"
-    >
-      <TabsList>
-        <TabsTrigger value="plugins">
-          {{ $t('supermarket.pluginSection') }}
-        </TabsTrigger>
-        <TabsTrigger value="skills">
-          {{ $t('supermarket.skillsSection') }}
-        </TabsTrigger>
-      </TabsList>
-
-      <!-- Plugins Tab -->
-      <TabsContent value="plugins">
-        <div
-          v-if="pluginsLoading"
-          class="flex items-center justify-center py-8 text-xs text-muted-foreground"
-        >
-          <Spinner class="mr-2" />
-          {{ $t('common.loading') }}
-        </div>
-
-        <div
-          v-else-if="!plugins.length"
-          class="py-8 text-center text-xs text-muted-foreground"
-        >
-          {{ $t('supermarket.noPluginResults') }}
-        </div>
-
-        <div
-          v-else
-          class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
-        >
-          <PluginCard
-            v-for="plugin in plugins"
-            :key="plugin.id"
-            :plugin="plugin"
-            @tag-click="setTag"
-            @install="openPluginInstall"
-          />
-        </div>
-      </TabsContent>
-
-      <!-- Skills Tab -->
-      <TabsContent value="skills">
-        <div
-          v-if="skillsLoading"
-          class="flex items-center justify-center py-8 text-xs text-muted-foreground"
-        >
-          <Spinner class="mr-2" />
-          {{ $t('common.loading') }}
-        </div>
-
-        <div
-          v-else-if="!skills.length"
-          class="py-8 text-center text-xs text-muted-foreground"
-        >
-          {{ $t('supermarket.noSkillResults') }}
-        </div>
-
-        <div
-          v-else
-          class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
-        >
-          <SkillCard
-            v-for="skill in skills"
-            :key="skill.id"
-            :skill="skill"
-            @tag-click="setTag"
-            @install="openSkillInstall"
-          />
-        </div>
-      </TabsContent>
-    </Tabs>
-
-    <!-- Install Dialogs -->
-    <InstallPluginDialog
-      v-model:open="pluginDialogOpen"
-      :plugin="selectedPlugin"
-      @installed="refreshAll"
-    />
-    <InstallSkillDialog
-      v-model:open="skillDialogOpen"
-      :skill="selectedSkill"
-      @installed="refreshAll"
-    />
-  </div>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Search, X, Github } from 'lucide-vue-next'
-import { Input, Badge, Spinner, Button, Tabs, TabsList, TabsTrigger, TabsContent } from '@memohai/ui'
+import { Search, Github } from 'lucide-vue-next'
+import { Input, Spinner, Button, Tabs, TabsList, TabsTrigger, TabsContent } from '@memohai/ui'
 import {
   getSupermarketPlugins,
   getSupermarketSkills,
   type HandlersSupermarketSkillEntry,
   type PluginsManifest,
 } from '@memohai/sdk'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import PageShell from '@/components/page-shell/index.vue'
 import PluginCard from './components/plugin-card.vue'
 import SkillCard from './components/skill-card.vue'
 import InstallPluginDialog from './components/install-plugin-dialog.vue'
@@ -165,7 +138,6 @@ const { t } = useI18n()
 
 const searchInput = ref('')
 const searchQuery = ref('')
-const activeTag = ref('')
 
 const plugins = ref<PluginsManifest[]>([])
 const skills = ref<HandlersSupermarketSkillEntry[]>([])
@@ -189,14 +161,6 @@ watch(searchInput, () => {
   }, 300)
 })
 
-function setTag(tag: string) {
-  activeTag.value = tag
-}
-
-function clearTag() {
-  activeTag.value = ''
-}
-
 function openPluginInstall(plugin: PluginsManifest) {
   selectedPlugin.value = plugin
   pluginDialogOpen.value = true
@@ -213,7 +177,6 @@ async function loadPlugins() {
     const { data } = await getSupermarketPlugins({
       query: {
         q: searchQuery.value || undefined,
-        tag: activeTag.value || undefined,
         limit: 50,
       },
       throwOnError: true,
@@ -232,7 +195,6 @@ async function loadSkills() {
     const { data } = await getSupermarketSkills({
       query: {
         q: searchQuery.value || undefined,
-        tag: activeTag.value || undefined,
         limit: 50,
       },
       throwOnError: true,
@@ -250,7 +212,7 @@ function refreshAll() {
   loadSkills()
 }
 
-watch([searchQuery, activeTag], () => {
+watch(searchQuery, () => {
   loadPlugins()
   loadSkills()
 }, { immediate: true })

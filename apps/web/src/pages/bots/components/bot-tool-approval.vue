@@ -1,233 +1,133 @@
 <template>
-  <div class="max-w-2xl mx-auto pb-6 space-y-5">
-    <!-- Sovereign Header -->
-    <header class="pb-4 border-b border-border/50 sticky top-0 bg-background/95 backdrop-blur z-30 pt-4 -mt-4 flex items-center justify-between">
-      <div class="space-y-1">
-        <h2 class="text-sm font-semibold text-foreground">
-          {{ $t('bots.toolApproval.title') }}
-        </h2>
-        <p class="text-[11px] leading-snug text-muted-foreground max-w-md">
-          {{ $t('bots.toolApproval.intro') }}
-        </p>
-      </div>
-
-      <div class="flex items-center gap-3 shrink-0">
-        <Transition name="fade">
-          <div
-            v-if="hasChanges"
-            class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/40 border border-border/50"
-          >
-            <div class="size-1 rounded-full bg-muted-foreground/40" />
-            <span class="text-[10px] text-muted-foreground font-medium whitespace-nowrap">Unsaved</span>
-          </div>
-        </Transition>
-
-        <Button
-          size="sm"
-          class="h-8 text-xs font-medium px-4 shadow-none min-w-24"
-          :variant="hasChanges ? 'default' : 'secondary'"
-          :disabled="!hasChanges || saveLoading"
-          @click="handleSave"
-        >
-          <Spinner
-            v-if="saveLoading"
-            class="mr-2 size-4"
-          />
-          {{ $t('bots.settings.save') }}
-        </Button>
-      </div>
-    </header>
-
-    <!-- Metrics Section (Overview Style) -->
-    <div class="space-y-4 rounded-md border p-4">
-      <!-- Section Header -->
-      <div class="space-y-1">
-        <h4 class="text-xs font-medium">
-          {{ $t('bots.toolApproval.posture.title') }}
-        </h4>
-        <p class="text-xs text-muted-foreground">
-          {{ $t('bots.toolApproval.posture.description') }}
-        </p>
-      </div>
-
-      <!-- Metrics Grid -->
-      <div class="grid grid-cols-1 gap-3 xl:grid-cols-3">
-        <!-- Status Card -->
-        <div
-          class="rounded-md border bg-background/70 p-3 flex flex-col justify-between transition-all duration-200"
-          :class="{ 'border-success/20 bg-success/5': form.tool_approval_config.enabled }"
-        >
-          <div class="flex xl:flex-col items-center xl:items-stretch justify-between gap-3">
-            <div class="space-y-1">
-              <p class="text-xs text-muted-foreground">
-                {{ $t('common.status') }}
-              </p>
-              <div class="flex items-center gap-2">
-                <ShieldCheck
-                  v-if="form.tool_approval_config.enabled"
-                  class="w-4 h-4 shrink-0 text-success"
-                />
-                <ShieldOff
-                  v-else
-                  class="w-4 h-4 shrink-0 text-muted-foreground"
-                />
-                <p class="text-lg xl:text-2xl font-semibold leading-none">
-                  {{ form.tool_approval_config.enabled ? $t('bots.toolApproval.posture.hardened') : $t('common.inactive') }}
-                </p>
-              </div>
-            </div>
-
-            <div class="flex items-center gap-3">
-              <p class="xl:hidden text-[11px] text-muted-foreground text-right max-w-[150px] leading-tight">
-                {{ form.tool_approval_config.enabled ? $t('bots.toolApproval.posture.description') : $t('bots.toolApproval.warnings.disabled') }}
-              </p>
-              <Switch
-                :model-value="form.tool_approval_config.enabled"
-                class="scale-90"
-                @update:model-value="(val) => form.tool_approval_config.enabled = !!val"
-              />
-            </div>
-          </div>
-          <div class="hidden xl:flex mt-3 min-h-[32px] items-center">
-            <p class="text-[11px] leading-4 text-muted-foreground">
-              {{ form.tool_approval_config.enabled ? $t('bots.toolApproval.posture.description') : $t('bots.toolApproval.warnings.disabled') }}
-            </p>
-          </div>
-        </div>
-
-        <!-- Active Tools Card -->
-        <div class="rounded-md border bg-background/70 p-3 flex flex-col justify-between">
-          <div class="flex xl:flex-col items-center xl:items-stretch justify-between gap-3">
-            <p class="text-xs text-muted-foreground">
-              {{ $t('bots.toolApproval.metrics.activeRules') }}
-            </p>
-            <div class="flex items-baseline gap-1">
-              <span class="text-lg xl:text-2xl font-semibold">{{ activeToolsCount }}</span>
-              <span class="text-xs font-medium text-muted-foreground">/ {{ approvalTools.length }}</span>
-            </div>
-          </div>
-          <div class="mt-1 xl:mt-3 xl:min-h-[32px] flex items-center">
-            <p class="text-[11px] leading-4 text-muted-foreground">
-              {{ $t('bots.toolApproval.metrics.totalDefined') }}
-            </p>
-          </div>
-        </div>
-
-        <!-- Rules Count Card -->
-        <div class="rounded-md border bg-background/70 p-3 flex flex-col justify-between">
-          <div class="flex xl:flex-col items-center xl:items-stretch justify-between gap-3">
-            <p class="text-xs text-muted-foreground">
-              {{ $t('bots.toolApproval.metrics.totalDefined') }}
-            </p>
-            <div class="mt-0 xl:mt-2">
-              <span class="text-lg xl:text-2xl font-semibold">{{ totalRulesCount }}</span>
-            </div>
-          </div>
-          <div class="mt-1 xl:mt-3 xl:min-h-[32px] flex items-center">
-            <p class="text-[11px] leading-4 text-muted-foreground">
-              {{ $t('bots.toolApproval.metrics.blockedCount') }} & Bypasses
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tool Configurations -->
-    <div
-      class="space-y-4 transition-all duration-300"
-      :class="{ 'opacity-50 grayscale pointer-events-none': !form.tool_approval_config.enabled }"
-    >
-      <div
-        v-for="tool in approvalTools"
-        :key="tool"
-        class="rounded-md border border-border/60 bg-background overflow-hidden"
+  <PageShell
+    variant="tab"
+    :title="$t('bots.toolApproval.title')"
+    :description="$t('bots.toolApproval.intro')"
+  >
+    <template #actions>
+      <Button
+        :disabled="!hasChanges || saveLoading"
+        @click="handleSave"
       >
-        <div class="bg-muted/10 p-3 border-b border-border/40 flex items-center justify-between">
-          <div class="flex items-center gap-3">
-            <div
-              class="size-8 rounded flex items-center justify-center bg-background border border-border/50"
-              :class="{ 'text-success border-success/20 bg-success/5': toolApprovalPolicy(tool).require_approval }"
-            >
-              <component
-                :is="TOOL_META[tool].icon"
-                class="size-4"
-              />
-            </div>
-            <div class="space-y-0.5">
-              <div class="flex items-center gap-2">
-                <span class="font-mono text-[11px] font-semibold text-foreground">
-                  {{ tool }}
-                </span>
-                <Badge
-                  v-if="toolApprovalPolicy(tool).require_approval"
-                  variant="outline"
-                  class="h-4 px-1.5 text-[9px] font-medium bg-success/10 text-success border-success/20 rounded-full"
-                >
-                  {{ $t('common.active') }}
-                </Badge>
-              </div>
-              <p class="text-[11px] text-muted-foreground">
-                {{ $t(TOOL_META[tool].descKey) }}
-              </p>
-            </div>
+        <Spinner
+          v-if="saveLoading"
+          class="size-3"
+        />
+        {{ $t('common.saveChanges') }}
+      </Button>
+    </template>
+
+    <div class="space-y-8">
+      <!-- Status card: the page's center of gravity. The toggle controls whether any
+           prompt ever fires; the body and the summary line below it tell the user what
+           that means right now, so the rules table doesn't have to re-explain it. -->
+      <SettingsSection>
+        <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
+          <div class="min-w-0 text-sm font-medium text-foreground">
+            {{ form.tool_approval_config.enabled ? $t('bots.toolApproval.status.on') : $t('bots.toolApproval.status.off') }}
           </div>
           <Switch
-            :model-value="toolApprovalPolicy(tool).require_approval"
-            class="scale-90"
-            @update:model-value="(val) => toolApprovalPolicy(tool).require_approval = !!val"
+            class="shrink-0"
+            :model-value="form.tool_approval_config.enabled"
+            @update:model-value="(val) => form.tool_approval_config.enabled = !!val"
           />
         </div>
+      </SettingsSection>
 
-        <div class="p-3 space-y-4">
-          <div
-            v-if="!toolApprovalPolicy(tool).require_approval"
-            class="flex items-center gap-2 rounded border border-warning/10 bg-warning/5 px-3 py-1.5 text-[11px] text-warning"
+      <!-- Tool rules: a summary row per tool, with at most one inline editor open at a
+           time. The summary shows default behavior + exception counts so the user reads
+           the whole posture without expanding anything. -->
+      <SettingsSection :title="$t('bots.toolApproval.rules.title')">
+        <template #actions>
+          <Button
+            variant="outline"
+            size="sm"
+            @click="resetToRecommended"
           >
-            <ShieldAlert class="size-3.5" />
-            {{ $t('bots.toolApproval.toolDisabledHint') }}
+            <RotateCcw class="size-4" />
+            {{ $t('bots.toolApproval.rules.reset') }}
+          </Button>
+        </template>
+
+        <template
+          v-for="tool in approvalTools"
+          :key="tool"
+        >
+          <div class="mx-4 flex min-h-[3.75rem] items-center gap-4 border-b border-border py-3 last:border-b-0">
+            <div class="min-w-0 flex-1">
+              <div class="text-sm font-medium text-foreground">
+                {{ $t(`bots.toolApproval.toolNames.${tool}`) }}
+              </div>
+            </div>
+
+            <span class="hidden shrink-0 text-xs text-muted-foreground sm:inline">
+              {{ toolApprovalPolicy(tool).require_approval ? $t('bots.toolApproval.behavior.review') : $t('bots.toolApproval.behavior.auto') }}
+            </span>
+
+            <Button
+              variant="outline"
+              size="sm"
+              class="shrink-0"
+              @click="toggleExpanded(tool)"
+            >
+              <ChevronRight
+                class="size-4 transition-transform"
+                :class="expandedTool === tool ? 'rotate-90' : ''"
+              />
+              {{ expandedTool === tool ? $t('common.collapse') : $t('common.edit') }}
+            </Button>
           </div>
 
-          <div class="grid gap-4 md:grid-cols-2 items-stretch">
-            <div class="flex flex-col gap-2">
-              <div class="flex items-center justify-between">
-                <Label class="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-                  <ShieldCheck class="size-3.5 text-success" />
-                  {{ $t('bots.toolApproval.bypass') }}
-                </Label>
-                <span class="text-[10px] font-mono text-muted-foreground tabular-nums">
-                  {{ bypassList(tool).length }}
-                </span>
-              </div>
-              <Textarea
-                :model-value="approvalBypassText(tool)"
-                :placeholder="bypassPlaceholder(tool)"
-                class="min-h-24 flex-1 resize-none font-mono text-[11px] bg-muted/20 border-border/50 rounded-md focus-visible:ring-success/30 shadow-none"
-                @update:model-value="(val) => updateApprovalBypass(tool, String(val))"
+          <div
+            v-if="expandedTool === tool"
+            class="mx-4 space-y-4 border-b border-border py-4 last:border-b-0"
+          >
+            <div class="space-y-1.5">
+              <Label class="text-xs font-medium text-muted-foreground">
+                {{ $t('bots.toolApproval.behavior.label') }}
+              </Label>
+              <SegmentedControl
+                :model-value="toolApprovalPolicy(tool).require_approval ? 'review' : 'auto'"
+                :items="behaviorItems"
+                :aria-label="$t('bots.toolApproval.behavior.label')"
+                class="w-full sm:w-fit"
+                @update:model-value="(val) => toolApprovalPolicy(tool).require_approval = val === 'review'"
               />
             </div>
 
-            <div class="flex flex-col gap-2">
-              <div class="flex items-center justify-between">
-                <Label class="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-                  <ShieldAlert class="size-3.5 text-warning" />
-                  {{ $t('bots.toolApproval.mustReview') }}
-                </Label>
-                <span class="text-[10px] font-mono text-muted-foreground tabular-nums">
-                  {{ forceReviewList(tool).length }}
-                </span>
-              </div>
+            <!-- Auto-approve exceptions only make sense when the default is to review.
+                 An auto-by-default tool would treat them as redundant, so they're hidden. -->
+            <div
+              v-if="toolApprovalPolicy(tool).require_approval"
+              class="space-y-1.5"
+            >
+              <Label class="text-xs font-medium text-muted-foreground">
+                {{ tool === 'exec' ? $t('bots.toolApproval.autoApprove.commandsTitle') : $t('bots.toolApproval.autoApprove.pathsTitle') }}
+              </Label>
               <Textarea
-                :model-value="approvalForceReviewText(tool)"
-                :placeholder="forceReviewPlaceholder(tool)"
-                class="min-h-24 flex-1 resize-none font-mono text-[11px] bg-muted/20 border-border/50 rounded-md focus-visible:ring-warning/30 shadow-none"
-                @update:model-value="(val) => updateApprovalForceReview(tool, String(val))"
+                :model-value="bypassText(tool)"
+                :placeholder="tool === 'exec' ? $t('bots.toolApproval.placeholders.execCommands') : $t('bots.toolApproval.placeholders.filePaths')"
+                class="min-h-24 resize-none font-mono text-xs"
+                @update:model-value="(val) => updateBypass(tool, String(val))"
+              />
+            </div>
+
+            <div class="space-y-1.5">
+              <Label class="text-xs font-medium text-muted-foreground">
+                {{ tool === 'exec' ? $t('bots.toolApproval.review.commandsTitle') : $t('bots.toolApproval.review.pathsTitle') }}
+              </Label>
+              <Textarea
+                :model-value="forceReviewText(tool)"
+                :placeholder="tool === 'exec' ? $t('bots.toolApproval.placeholders.execReview') : $t('bots.toolApproval.placeholders.fileReview')"
+                class="min-h-24 resize-none font-mono text-xs"
+                @update:model-value="(val) => updateForceReview(tool, String(val))"
               />
             </div>
           </div>
-        </div>
-      </div>
+        </template>
+      </SettingsSection>
     </div>
-  </div>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
@@ -237,76 +137,33 @@ import {
   Button,
   Spinner,
   Switch,
-  Badge,
+  SegmentedControl,
 } from '@memohai/ui'
-import {
-  FilePlus2,
-  FilePen,
-  SquareTerminal,
-  ShieldCheck,
-  ShieldAlert,
-  ShieldOff,
-} from 'lucide-vue-next'
-import { reactive, computed, watch } from 'vue'
-import type { Component, Ref } from 'vue'
-import { toast } from 'vue-sonner'
+import { ChevronRight, RotateCcw } from 'lucide-vue-next'
+import { reactive, computed, watch, ref } from 'vue'
+import type { Ref } from 'vue'
+import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import { getBotsByBotIdSettings, putBotsByBotIdSettings } from '@memohai/sdk'
 import type { SettingsSettings } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import SettingsSection from '@/components/settings/section.vue'
+import PageShell from '@/components/page-shell/index.vue'
+import {
+  defaultToolApprovalConfig,
+  normalizeToolApprovalConfig,
+  type ApprovalTool,
+  type ToolApprovalConfig,
+  type ToolApprovalExecPolicy,
+  type ToolApprovalFilePolicy,
+} from './tool-approval-config'
 
 const props = defineProps<{
   botId: string
 }>()
 
-type ApprovalTool = 'write' | 'edit' | 'exec'
-
-interface ToolApprovalFilePolicy {
-  require_approval: boolean
-  bypass_globs: string[]
-  force_review_globs: string[]
-}
-
-interface ToolApprovalExecPolicy {
-  require_approval: boolean
-  bypass_commands: string[]
-  force_review_commands: string[]
-}
-
-interface ToolApprovalConfig {
-  enabled: boolean
-  write: ToolApprovalFilePolicy
-  edit: ToolApprovalFilePolicy
-  exec: ToolApprovalExecPolicy
-}
-
-const defaultToolApprovalConfig = (): ToolApprovalConfig => ({
-  enabled: false,
-  write: {
-    require_approval: true,
-    bypass_globs: ['/data/**', '/tmp/**'],
-    force_review_globs: [],
-  },
-  edit: {
-    require_approval: true,
-    bypass_globs: ['/data/**', '/tmp/**'],
-    force_review_globs: [],
-  },
-  exec: {
-    require_approval: false,
-    bypass_commands: [],
-    force_review_commands: [],
-  },
-})
-
-const approvalTools: ApprovalTool[] = ['write', 'edit', 'exec']
-
-const TOOL_META: Record<ApprovalTool, { icon: Component; descKey: string }> = {
-  write: { icon: FilePlus2, descKey: 'bots.toolApproval.tools.write' },
-  edit: { icon: FilePen, descKey: 'bots.toolApproval.tools.edit' },
-  exec: { icon: SquareTerminal, descKey: 'bots.toolApproval.tools.exec' },
-}
+const approvalTools: ApprovalTool[] = ['read', 'write', 'exec']
 
 const { t } = useI18n()
 
@@ -339,29 +196,12 @@ const form = reactive<{ tool_approval_config: ToolApprovalConfig }>({
   tool_approval_config: defaultToolApprovalConfig(),
 })
 
-function normalizeToolApprovalConfig(raw: unknown): ToolApprovalConfig {
-  const defaults = defaultToolApprovalConfig()
-  if (!raw || typeof raw !== 'object') return defaults
-  const value = raw as Partial<ToolApprovalConfig>
-  return {
-    enabled: value.enabled ?? defaults.enabled,
-    write: {
-      require_approval: value.write?.require_approval ?? defaults.write.require_approval,
-      bypass_globs: value.write?.bypass_globs ?? defaults.write.bypass_globs,
-      force_review_globs: value.write?.force_review_globs ?? defaults.write.force_review_globs,
-    },
-    edit: {
-      require_approval: value.edit?.require_approval ?? defaults.edit.require_approval,
-      bypass_globs: value.edit?.bypass_globs ?? defaults.edit.bypass_globs,
-      force_review_globs: value.edit?.force_review_globs ?? defaults.edit.force_review_globs,
-    },
-    exec: {
-      require_approval: value.exec?.require_approval ?? defaults.exec.require_approval,
-      bypass_commands: value.exec?.bypass_commands ?? defaults.exec.bypass_commands,
-      force_review_commands: value.exec?.force_review_commands ?? defaults.exec.force_review_commands,
-    },
-  }
-}
+const expandedTool = ref<ApprovalTool | null>(null)
+
+const behaviorItems = computed(() => [
+  { value: 'review', label: t('bots.toolApproval.behavior.review') },
+  { value: 'auto', label: t('bots.toolApproval.behavior.auto') },
+])
 
 function toolApprovalPolicy(tool: ApprovalTool) {
   return form.tool_approval_config[tool]
@@ -381,16 +221,20 @@ function forceReviewList(tool: ApprovalTool): string[] {
     : (policy as ToolApprovalFilePolicy).force_review_globs
 }
 
-function approvalBypassText(tool: ApprovalTool): string {
+function bypassText(tool: ApprovalTool): string {
   return bypassList(tool).join('\n')
 }
 
-function approvalForceReviewText(tool: ApprovalTool): string {
+function forceReviewText(tool: ApprovalTool): string {
   return forceReviewList(tool).join('\n')
 }
 
-function updateApprovalBypass(tool: ApprovalTool, raw: string) {
-  const values = raw.split(/\r?\n|,/).map(item => item.trim()).filter(Boolean)
+function parseList(raw: string): string[] {
+  return raw.split(/\r?\n|,/).map(item => item.trim()).filter(Boolean)
+}
+
+function updateBypass(tool: ApprovalTool, raw: string) {
+  const values = parseList(raw)
   if (tool === 'exec') {
     form.tool_approval_config.exec.bypass_commands = values
   } else {
@@ -398,8 +242,8 @@ function updateApprovalBypass(tool: ApprovalTool, raw: string) {
   }
 }
 
-function updateApprovalForceReview(tool: ApprovalTool, raw: string) {
-  const values = raw.split(/\r?\n|,/).map(item => item.trim()).filter(Boolean)
+function updateForceReview(tool: ApprovalTool, raw: string) {
+  const values = parseList(raw)
   if (tool === 'exec') {
     form.tool_approval_config.exec.force_review_commands = values
   } else {
@@ -407,16 +251,16 @@ function updateApprovalForceReview(tool: ApprovalTool, raw: string) {
   }
 }
 
-function bypassPlaceholder(tool: ApprovalTool): string {
-  return tool === 'exec'
-    ? t('bots.toolApproval.placeholders.execBypass')
-    : t('bots.toolApproval.placeholders.fileBypass')
+function toggleExpanded(tool: ApprovalTool) {
+  expandedTool.value = expandedTool.value === tool ? null : tool
 }
 
-function forceReviewPlaceholder(tool: ApprovalTool): string {
-  return tool === 'exec'
-    ? t('bots.toolApproval.placeholders.execMustReview')
-    : t('bots.toolApproval.placeholders.fileMustReview')
+function resetToRecommended() {
+  const defaults = defaultToolApprovalConfig()
+  // Keep the enable state — it's the user's top-level decision, not a rule.
+  form.tool_approval_config.read = defaults.read
+  form.tool_approval_config.write = defaults.write
+  form.tool_approval_config.exec = defaults.exec
 }
 
 watch(settings, (val) => {
@@ -427,22 +271,15 @@ watch(settings, (val) => {
   }
 }, { immediate: true })
 
-const activeToolsCount = computed(() => {
-  return approvalTools.filter(t => form.tool_approval_config[t].require_approval).length
-})
-
-const totalRulesCount = computed(() => {
-  return approvalTools.reduce((acc, t) => {
-    return acc + bypassList(t).length + forceReviewList(t).length
-  }, 0)
-})
+function serverConfig(): ToolApprovalConfig {
+  return normalizeToolApprovalConfig(
+    (settings.value as SettingsSettings & { tool_approval_config?: unknown } | undefined)?.tool_approval_config,
+  )
+}
 
 const hasChanges = computed(() => {
   if (!settings.value) return false
-  const current = normalizeToolApprovalConfig(
-    (settings.value as SettingsSettings & { tool_approval_config?: unknown }).tool_approval_config,
-  )
-  return JSON.stringify(form.tool_approval_config) !== JSON.stringify(current)
+  return JSON.stringify(form.tool_approval_config) !== JSON.stringify(serverConfig())
 })
 
 async function handleSave() {
@@ -454,5 +291,3 @@ async function handleSave() {
   }
 }
 </script>
-
-

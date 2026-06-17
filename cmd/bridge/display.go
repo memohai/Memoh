@@ -13,9 +13,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/memohai/memoh/internal/logger"
+	scriptassets "github.com/memohai/memoh/scripts"
 )
 
 const (
@@ -36,9 +38,12 @@ const (
 	defaultXvncGeometry   = "1280x960"
 	xvncSocketPath        = x11SocketDir + "/X99"
 	xvncLockPath          = "/tmp/.X99-lock"
+	desktopStylePath      = "/tmp/memoh-desktop-style.sh"
 	defaultRFBTCPAddr     = "127.0.0.1:5999"
 	displayReadyTimeout   = 30 * time.Second
 )
+
+var desktopSessionMonitorOnce sync.Once
 
 func startDisplaySupervisor(ctx context.Context) {
 	if !isTruthy(os.Getenv(displayEnabledEnv)) {
@@ -326,9 +331,14 @@ func startDisplaySession(ctx context.Context) {
 		return
 	}
 	if xsetroot := resolveDisplayCommand(toolkitXsetrootPath, "/usr/bin/xsetroot", "/usr/local/bin/xsetroot", "xsetroot"); xsetroot != "" {
-		runDisplayCommand(ctx, xsetroot, "-solid", "#315f7d")
+		runDisplayCommand(ctx, xsetroot, "-solid", desktopBackgroundColor())
+		runDisplayCommand(ctx, xsetroot, "-cursor_name", "left_ptr")
 	}
 	startDesktopSession(ctx)
+	desktopSessionMonitorOnce.Do(func() {
+		go superviseDesktopSession(ctx)
+	})
+	startDesktopStyle(ctx)
 	startDisplayTerminal(ctx)
 	startDisplayBrowser(ctx)
 }
@@ -380,19 +390,29 @@ func runDisplayCommand(ctx context.Context, path string, args ...string) {
 }
 
 func startDesktopSession(ctx context.Context) {
-	if displayProcessRunning(ctx, "xfce4-session", "xfwm4", "twm") {
+	if xfceSessionAvailable() {
+		if xfceSessionRunning(ctx) {
+			ensureXfceWindowManager(ctx)
+			return
+		}
+		if desktop := resolveDisplayCommand("startxfce4"); desktop != "" {
+			stopFallbackWindowManagers(ctx)
+			startDisplayCommand(ctx, "desktop", desktop)
+			return
+		}
+		if desktop := resolveDisplayCommand("xfce4-session"); desktop != "" {
+			stopFallbackWindowManagers(ctx)
+			startDisplayCommand(ctx, "desktop", desktop)
+			return
+		}
+	}
+	if xfceWindowManagerRunning(ctx) {
 		return
 	}
-	if desktop := resolveDisplayCommand("startxfce4"); desktop != "" {
-		startDisplayCommand(ctx, "desktop", desktop)
+	if ensureXfceWindowManager(ctx) {
 		return
 	}
-	if desktop := resolveDisplayCommand("xfce4-session"); desktop != "" {
-		startDisplayCommand(ctx, "desktop", desktop)
-		return
-	}
-	if windowManager := resolveDisplayCommand("xfwm4"); windowManager != "" {
-		startDisplayCommand(ctx, "window manager", windowManager)
+	if displayProcessRunning(ctx, "twm") {
 		return
 	}
 	if windowManager := resolveDisplayCommand(toolkitTwmPath); windowManager != "" {
@@ -400,6 +420,76 @@ func startDesktopSession(ctx context.Context) {
 		return
 	}
 	logger.FromContext(ctx).Warn("display desktop session unavailable")
+}
+
+func superviseDesktopSession(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	lastRestart := time.Time{}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !displayTCPReady(ctx, displayRFBTCPAddr()) {
+				continue
+			}
+			if desktopSessionHealthy(ctx) {
+				continue
+			}
+			if !lastRestart.IsZero() && time.Since(lastRestart) < 10*time.Second {
+				continue
+			}
+			lastRestart = time.Now()
+			logger.FromContext(ctx).Warn("display desktop session is not running; restarting")
+			startDesktopSession(ctx)
+			startDesktopStyle(ctx)
+		}
+	}
+}
+
+func desktopSessionHealthy(ctx context.Context) bool {
+	if xfceSessionAvailable() {
+		return xfceSessionRunning(ctx) && (!xfceWindowManagerAvailable() || xfceWindowManagerRunning(ctx))
+	}
+	if xfceWindowManagerAvailable() {
+		return xfceWindowManagerRunning(ctx)
+	}
+	return displayProcessRunning(ctx, "twm")
+}
+
+func xfceSessionAvailable() bool {
+	return resolveDisplayCommand("startxfce4") != "" ||
+		resolveDisplayCommand("xfce4-session") != ""
+}
+
+func xfceSessionRunning(ctx context.Context) bool {
+	return displayProcessRunning(ctx, "startxfce4", "xfce4-session", "xfdesktop")
+}
+
+func xfceWindowManagerAvailable() bool {
+	return resolveDisplayCommand("xfwm4") != ""
+}
+
+func xfceWindowManagerRunning(ctx context.Context) bool {
+	return displayProcessRunning(ctx, "xfwm4")
+}
+
+func ensureXfceWindowManager(ctx context.Context) bool {
+	windowManager := resolveDisplayCommand("xfwm4")
+	if windowManager == "" {
+		return false
+	}
+	if xfceWindowManagerRunning(ctx) {
+		return true
+	}
+	stopFallbackWindowManagers(ctx)
+	startDisplayCommand(ctx, "window manager", windowManager, "--replace")
+	return true
+}
+
+func stopFallbackWindowManagers(ctx context.Context) {
+	stopDisplayProcesses(ctx, "twm")
 }
 
 func startDisplayTerminal(ctx context.Context) {
@@ -447,18 +537,89 @@ func startDisplayBrowser(ctx context.Context) {
 	)
 }
 
-func displayProcessRunning(ctx context.Context, patterns ...string) bool {
-	pgrep := resolveDisplayCommand("pgrep")
-	if pgrep == "" {
-		return false
+func startDesktopStyle(ctx context.Context) {
+	script := strings.TrimSpace(desktopStyleScript())
+	if script == "" {
+		return
 	}
-	for _, pattern := range patterns {
-		cmd := exec.CommandContext(ctx, pgrep, "-f", pattern) //nolint:gosec // patterns are controlled by this package.
-		if cmd.Run() == nil {
-			return true
+	if err := os.WriteFile(desktopStylePath, []byte(script+"\n"), 0o755); err != nil { //nolint:gosec // G306: executable script is intentionally written for this container session.
+		logger.FromContext(ctx).Warn("failed to write display desktop style script", slog.String("path", desktopStylePath), slog.Any("error", err))
+		return
+	}
+	startDisplayCommand(ctx, "desktop style", "/bin/sh", desktopStylePath)
+}
+
+func desktopBackgroundColor() string {
+	color := strings.TrimSpace(os.Getenv("MEMOH_DISPLAY_DESKTOP_COLOR"))
+	if color == "" {
+		return "#1f2329"
+	}
+	return color
+}
+
+func desktopStyleScript() string {
+	if data, err := os.ReadFile("scripts/desktop-style.sh"); err == nil {
+		return string(data)
+	}
+	return scriptassets.DesktopStyle
+}
+
+func displayProcessRunning(_ context.Context, patterns ...string) bool {
+	return len(displayProcessIDsByName(patterns...)) > 0
+}
+
+func displayProcessIDsByName(names ...string) []int {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+	wanted := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			wanted[name] = struct{}{}
 		}
 	}
-	return false
+	if len(wanted) == 0 {
+		return nil
+	}
+	var pids []int
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == "" || name[0] < '0' || name[0] > '9' {
+			continue
+		}
+		cmdline, err := os.ReadFile(filepath.Join("/proc", name, "cmdline")) //nolint:gosec // /proc entries are kernel-provided.
+		if err != nil || len(cmdline) == 0 {
+			continue
+		}
+		pid, err := strconv.Atoi(name)
+		if err != nil {
+			continue
+		}
+		parts := strings.Split(strings.TrimRight(string(cmdline), "\x00"), "\x00")
+		for _, arg := range parts {
+			if _, ok := wanted[filepath.Base(strings.TrimSpace(arg))]; ok {
+				pids = append(pids, pid)
+				break
+			}
+		}
+	}
+	return pids
+}
+
+func stopDisplayProcesses(ctx context.Context, names ...string) {
+	pids := displayProcessIDsByName(names...)
+	for _, pid := range pids {
+		process, err := os.FindProcess(pid)
+		if err == nil {
+			_ = process.Kill()
+		}
+	}
+	if len(pids) == 0 {
+		return
+	}
+	_ = sleepWithContext(ctx, 300*time.Millisecond)
 }
 
 func xvncProcessRunning() bool {

@@ -124,6 +124,9 @@ func TestLoadReadsBackendSpecificConfigs(t *testing.T) {
 
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	data := []byte(`
+[containerd]
+runtime_type = "io.containerd.kata.v2"
+
 [docker]
 host = "unix:///var/run/docker.sock"
 
@@ -139,6 +142,9 @@ binary_path = "/opt/homebrew/bin/socktainer"
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
+	if cfg.Containerd.RuntimeType != "io.containerd.kata.v2" {
+		t.Fatalf("containerd runtime type = %q", cfg.Containerd.RuntimeType)
+	}
 	if cfg.Docker.Host != "unix:///var/run/docker.sock" {
 		t.Fatalf("docker host = %q", cfg.Docker.Host)
 	}
@@ -147,6 +153,43 @@ binary_path = "/opt/homebrew/bin/socktainer"
 	}
 	if cfg.Apple.BinaryPath != "/opt/homebrew/bin/socktainer" {
 		t.Fatalf("apple binary path = %q", cfg.Apple.BinaryPath)
+	}
+}
+
+func TestLoadAppliesBridgeTLSEnvOverrides(t *testing.T) {
+	t.Setenv("MEMOH_INSTANCE_ID", "instance-1")
+	t.Setenv("MEMOH_BRIDGE_TLS_MODE", BridgeTLSModeStrict)
+	t.Setenv("MEMOH_BRIDGE_TLS_SERVER_DIR", "/server")
+	t.Setenv("MEMOH_BRIDGE_TLS_BRIDGE_DIR", "/bridge")
+	t.Setenv("MEMOH_BRIDGE_TLS_SERVER_NAME", "bridge.internal")
+
+	cfg, err := Load(filepath.Join(t.TempDir(), "missing.toml"))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.InstanceID != "instance-1" {
+		t.Fatalf("instance id = %q", cfg.InstanceID)
+	}
+	if cfg.BridgeTLS.Mode != BridgeTLSModeStrict ||
+		cfg.BridgeTLS.ServerDir != "/server" ||
+		cfg.BridgeTLS.BridgeDir != "/bridge" ||
+		cfg.BridgeTLS.ServerName != "bridge.internal" {
+		t.Fatalf("bridge tls config = %#v", cfg.BridgeTLS)
+	}
+}
+
+func TestLoadDefaultsContainerdRuntimeType(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := Load(filepath.Join(t.TempDir(), "missing.toml"))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.Containerd.RuntimeType != DefaultContainerdRuntimeType {
+		t.Fatalf("containerd runtime type = %q, want %q", cfg.Containerd.RuntimeType, DefaultContainerdRuntimeType)
+	}
+	if got := cfg.Containerd.RuntimeTypeOrDefault(); got != DefaultContainerdRuntimeType {
+		t.Fatalf("runtime type default = %q, want %q", got, DefaultContainerdRuntimeType)
 	}
 }
 
@@ -184,6 +227,68 @@ func TestLoadAppLocalTemplate(t *testing.T) {
 	}
 	if !filepath.IsAbs(cfg.Registry.ProvidersPath()) {
 		t.Fatalf("providers path = %q, want absolute path", cfg.Registry.ProvidersPath())
+	}
+}
+
+func TestLoadAppKataDevTemplate(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "devenv", "app.kata.dev.toml"))
+	if err != nil {
+		t.Fatalf("read app.kata.dev.toml: %v", err)
+	}
+	configPath := filepath.Join(t.TempDir(), "app.kata.dev.toml")
+	//nolint:gosec // configPath is rooted at t.TempDir() with a literal filename; the rendered template content is not used as a path.
+	if err := os.WriteFile(configPath, raw, 0o600); err != nil {
+		t.Fatalf("write rendered app.kata.dev.toml: %v", err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("load app.kata.dev.toml: %v", err)
+	}
+	if cfg.Container.Backend != "containerd" {
+		t.Fatalf("container backend = %q, want containerd", cfg.Container.Backend)
+	}
+	if cfg.Containerd.RuntimeTypeOrDefault() != "io.containerd.kata.v2" {
+		t.Fatalf("containerd runtime type = %q, want io.containerd.kata.v2", cfg.Containerd.RuntimeTypeOrDefault())
+	}
+	if cfg.Database.DriverOrDefault() != "postgres" {
+		t.Fatalf("database driver = %q, want postgres", cfg.Database.DriverOrDefault())
+	}
+	if !filepath.IsAbs(cfg.Workspace.DataRoot) {
+		t.Fatalf("workspace data_root = %q, want absolute path", cfg.Workspace.DataRoot)
+	}
+	if !filepath.IsAbs(cfg.Workspace.RuntimeDir) {
+		t.Fatalf("workspace runtime_dir = %q, want absolute path", cfg.Workspace.RuntimeDir)
+	}
+}
+
+func TestLoadAppKataDockerTemplate(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "conf", "app.kata.docker.toml"))
+	if err != nil {
+		t.Fatalf("read app.kata.docker.toml: %v", err)
+	}
+	configPath := filepath.Join(t.TempDir(), "app.kata.docker.toml")
+	//nolint:gosec // configPath is rooted at t.TempDir() with a literal filename; the rendered template content is not used as a path.
+	if err := os.WriteFile(configPath, raw, 0o600); err != nil {
+		t.Fatalf("write rendered app.kata.docker.toml: %v", err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("load app.kata.docker.toml: %v", err)
+	}
+	if cfg.Container.Backend != "containerd" {
+		t.Fatalf("container backend = %q, want containerd", cfg.Container.Backend)
+	}
+	if cfg.Containerd.RuntimeTypeOrDefault() != "io.containerd.kata.v2" {
+		t.Fatalf("containerd runtime type = %q, want io.containerd.kata.v2", cfg.Containerd.RuntimeTypeOrDefault())
+	}
+	if cfg.Database.DriverOrDefault() != "postgres" {
+		t.Fatalf("database driver = %q, want postgres", cfg.Database.DriverOrDefault())
+	}
+	if !filepath.IsAbs(cfg.Workspace.DataRoot) {
+		t.Fatalf("workspace data_root = %q, want absolute path", cfg.Workspace.DataRoot)
+	}
+	if !filepath.IsAbs(cfg.Workspace.RuntimeDir) {
+		t.Fatalf("workspace runtime_dir = %q, want absolute path", cfg.Workspace.RuntimeDir)
 	}
 }
 
@@ -241,9 +346,17 @@ func TestWorkspaceImagePullPolicyDefaultsAndNormalizes(t *testing.T) {
 	}
 }
 
-func TestWorkspaceImagePullCandidatesAddsVNCMirror(t *testing.T) {
-	got := WorkspaceImagePullCandidates("memohai/vnc:debian")
-	want := []string{"docker.io/memohai/vnc:debian", "memoh.cn/memohai/vnc:debian"}
+func TestWorkspaceImageRefDefaultsToPackagedWorkspace(t *testing.T) {
+	got := (WorkspaceConfig{}).ImageRef()
+	want := "docker.io/memohai/workspace:debian"
+	if got != want {
+		t.Fatalf("default image ref = %q, want %q", got, want)
+	}
+}
+
+func TestWorkspaceImagePullCandidatesAddsWorkspaceMirror(t *testing.T) {
+	got := WorkspaceImagePullCandidates("memohai/workspace:debian")
+	want := []string{"docker.io/memohai/workspace:debian", "memoh.cn/memohai/workspace:debian"}
 	if len(got) != len(want) {
 		t.Fatalf("candidate count = %d, want %d (%v)", len(got), len(want), got)
 	}

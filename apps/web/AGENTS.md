@@ -6,6 +6,15 @@
 
 In deploy/server mode this package is served as the standalone Web frontend. The native desktop client reuses many of the same pages, stores, routes, i18n files, API client helpers, and design tokens through `@memohai/web` exports, but desktop owns Electron windows, local server startup, embedded Qdrant, tray behavior, and bundled resources. Keep Web usable as a pure browser app.
 
+## Agent Skill (required)
+
+Before writing or changing anything under `apps/web` — pages, components, layout, copy, or styling — **read** the Web development skill:
+
+- **Skill**: `.agents/skills/memoh-web/SKILL.md`
+- **Lookup**: `.agents/skills/memoh-web/reference.md` (recipes, reference-page map, component picker)
+
+This skill is the page-level companion to `packages/ui/AGENTS.md` (atom-level tokens and components). It covers the white-floating-card design language, `@memohai/ui` composition rules, copy discipline, empty/loading states, layout patterns, and the verification checklist. Do not skip it for "small" UI edits — the non-negotiables there apply to every surface in this package.
+
 ## Tech Stack
 
 | Category | Technology |
@@ -19,7 +28,7 @@ In deploy/server mode this package is served as the standalone Web frontend. The
 | Forms | vee-validate + `@vee-validate/zod` + Zod |
 | i18n | vue-i18n (en / zh) |
 | Icons | lucide-vue-next (primary) + `@memohai/icon` (brand/provider icons) |
-| Toast | vue-sonner |
+| Toast | `@memohai/ui` `toast` / `Toaster` (in-house) |
 | Tables | @tanstack/vue-table |
 | Markdown | markstream-vue + Shiki + Mermaid + KaTeX |
 | Charts | ECharts + vue-echarts |
@@ -40,9 +49,15 @@ src/
 ├── i18n.ts                    # vue-i18n configuration
 ├── assets/                    # Static assets (logo.svg)
 ├── components/                # Shared components
-│   ├── sidebar/               #   Bot list sidebar (collapsible, bot items, settings link)
-│   │   ├── index.vue          #     Sidebar with bot list + settings gear footer
-│   │   └── bot-item.vue       #     Individual bot entry in sidebar
+│   ├── sidebar/               #   Left shell: activity bar + collapsible side panel
+│   │   ├── index.vue          #     Activity rail (bot avatar, Sessions/Files/Search icons, Settings) + resizable panel host
+│   │   ├── bot-switcher.vue   #     Bot switcher dropdown (rail avatar variant + row variant)
+│   │   ├── panel-sessions.vue #     Sessions panel: New Session button + Recents
+│   │   ├── panel-files.vue    #     Files panel wrapper (permissions + openFilesAt navigation)
+│   │   ├── panel-search.vue   #     Search panel (sessions search, autofocused input)
+│   │   ├── files-pane.vue     #     Workspace file browser (upload, mkdir, batch ops)
+│   │   ├── recents.vue        #     Session list (type filter, rename/delete dialogs, streaming indicator)
+│   │   └── session-item.vue   #     Session list row (avatar, title, timestamp, streaming spinner)
 │   ├── settings-sidebar/      #   Settings section sidebar (back-to-chat + nav items)
 │   ├── main-container/        #   Main content area (KeepAlive RouterView)
 │   ├── master-detail-sidebar-layout/  # Master-detail layout pattern
@@ -108,22 +123,28 @@ src/
 │   ├── main-section/          #   Chat section layout (bot sidebar + main container)
 │   ├── settings-section/      #   Settings section layout (settings sidebar + KeepAlive)
 │   ├── home/                  #   Chat interface (used by both `/` and `/chat/:botId?`)
-│   │   ├── index.vue          #     Route ↔ store sync, chat sidebar + workspace area
+│   │   ├── index.vue          #     Route ↔ store sync + workspace host (left shell lives in components/sidebar)
 │   │   ├── composables/       #     Page-specific composables
 │   │   │   ├── useFileManagerProvider.ts  # File manager context
 │   │   │   └── useMediaGallery.ts         # Media gallery state
 │   │   └── components/        #     Chat UI components
-│   │       ├── chat-area.vue          # Main chat area (messages, input, attachments)
-│   │       ├── chat-sidebar.vue       # Left workspace sidebar (sessions, files, tools)
-│   │       ├── chat-workspace.vue     # Main workspace host (chat, files, terminal, display)
-│   │       ├── workspace-tab-bar.vue  # Workspace tabs and terminal/display actions
+│   │       ├── chat-workspace.vue     # Dockview host: panel registry, theme, tab context menu, chat panel sync
+│   │       ├── dockview/              # Dockview panel wrappers
+│   │       │   ├── panel-chat.vue     #   Singleton chat panel (content follows active session)
+│   │       │   ├── panel-file.vue     #   Opened-file panel (Monaco file viewer)
+│   │       │   ├── panel-terminal.vue #   Terminal panel
+│   │       │   ├── panel-browser.vue  #   Workspace browser panel (iframe, renderer 'always')
+│   │       │   ├── panel-display.vue  #   Workspace desktop panel (WebRTC, renderer 'always')
+│   │       │   ├── workspace-watermark.vue # Empty-dock watermark
+│   │       │   ├── group-actions.vue  #   Group header "+" menu (new terminal/browser/desktop)
+│   │       │   └── use-panel-visible.ts #  Panel visibility tracking composable
+│   │       ├── chat-pane.vue          # Main chat area (messages, input, attachments)
+│   │       ├── file-pane.vue          # Opened-file viewer pane
 │   │       ├── terminal-pane.vue      # Interactive workspace terminal
 │   │       ├── display-pane.vue       # Workspace desktop/browser display over WebRTC
-│   │       ├── session-sidebar.vue    # Session list sidebar (search, filter, CRUD)
+│   │       ├── browser-pane.vue       # Embedded workspace browser pane
 │   │       ├── session-info-panel.vue # Session info panel
-│   │       ├── chat-header.vue        # Chat top bar (status, step indicator)
 │   │       ├── message-item.vue       # Single message (user/assistant, markdown, blocks)
-│   │       ├── session-item.vue       # Session list row (avatar, title, timestamp)
 │   │       ├── thinking-block.vue     # Collapsible thinking/reasoning block
 │   │       ├── attachment-block.vue   # Attachment grid (images, audio, files)
 │   │       ├── media-gallery-lightbox.vue  # Fullscreen media lightbox
@@ -171,8 +192,12 @@ src/
 │   ├── providers/             #   LLM provider & model management
 │   ├── web-search/            #   Web search provider management
 │   ├── memory/                #   Memory provider management
-│   ├── speech/                #   TTS / speech provider & model management
-│   ├── transcription/         #   Transcription provider & model management
+│   ├── speech/                #   Legacy TTS page (redirects to voice)
+│   ├── transcription/         #   Legacy transcription page (redirects to voice)
+│   ├── voice/                 #   TTS + transcription provider management
+│   ├── people/                #   User management (admin only)
+│   ├── onboarding/            #   First-run setup wizard
+│   ├── dev/components/        #   Dev-only component wall (see § Dev Component Wall)
 │   ├── email/                 #   Email provider management
 │   ├── supermarket/           #   Supermarket (template/skill marketplace)
 │   ├── usage/                 #   Token usage statistics
@@ -184,12 +209,14 @@ src/
 │       └── mcp-callback.vue   #     MCP OAuth callback handler
 ├── store/                     # Pinia stores
 │   ├── user.ts                #   User state, JWT token, login/logout
-│   ├── settings.ts            #   UI settings (theme, language)
+│   ├── settings/              #   UI settings store (index.ts: theme, language; typography.ts)
 │   ├── capabilities.ts        #   Server capabilities (container backend)
 │   ├── chat-selection.ts      #   Current bot/session selection (localStorage persisted)
 │   ├── chat-list.ts           #   Chat messages, streaming state, SSE/WS event processing
 │   ├── workspace-tabs.ts      #   Chat/file/terminal/display tab state
 │   ├── display-snapshots.ts   #   Latest display screenshots keyed by bot/session/tab
+│   ├── bot-create-progress.ts #   Bot creation SSE progress state
+│   ├── update.ts              #   Desktop/app update prompt state
 │   └── chat-list.utils.ts     #   Chat list utility functions (+ chat-list.utils.test.ts)
 ├── stores/                    # Additional stores (non-core)
 │   └── supermarket-mcp-draft.ts #  Supermarket MCP draft state
@@ -216,10 +243,11 @@ The app uses a two-section layout architecture:
 
 | Path | Name | Component | Description |
 |------|------|-----------|-------------|
-| `/` | home | `home/index.vue` | Home — empty state when no bot selected |
-| `/chat/:botId?` | chat | `home/index.vue` | Chat interface with optional bot param; active session is stored in Pinia/localStorage |
+| `/` | home | *(null stub)* | Home — empty state when no bot selected |
+| `/bot/:botName?` | bot | *(null stub)* | Chat with optional bot name param; active session in Pinia/localStorage |
+| `/chat/:botName?` | — | redirect | Legacy alias → `/bot/:botName?` |
 
-Both routes render the same `home/index.vue` component. The `home` route shows an empty state; the `chat` route auto-selects a bot based on the URL param. Session selection lives in the chat stores and workspace tabs rather than in the route path.
+Chat routes register **null stub components** in the router. The real UI (`MainSection`: sidebar + dockview) mounts **persistently in `App.vue`**, not via `<RouterView>`, so chat survives settings navigation without unmount/relayout (see § Layout System).
 
 ### Settings Section (`/settings`)
 
@@ -227,15 +255,20 @@ Both routes render the same `home/index.vue` component. The `home` route shows a
 |------|------|-----------|-------------|
 | `/settings/bots` | bots | `bots/index.vue` | Bot list grid |
 | `/settings/bots/new` | bot-new | `bots/new.vue` | Create bot flow |
-| `/settings/bots/:botId` | bot-detail | `bots/detail.vue` | Bot detail with tabs |
+| `/settings/bots/new/progress` | bot-create-progress | `bots/new-progress.vue` | Bot creation progress (SSE) |
+| `/settings/bots/:botName` | bot-detail | `bots/detail.vue` | Bot detail with tabs |
 | `/settings/providers` | providers | `providers/index.vue` | LLM provider & model management |
 | `/settings/web-search` | web-search | `web-search/index.vue` | Web search provider management |
 | `/settings/memory` | memory | `memory/index.vue` | Memory provider management |
-| `/settings/speech` | speech | `speech/index.vue` | TTS / speech provider & model management |
-| `/settings/transcription` | transcription | `transcription/index.vue` | Transcription provider & model management |
+| `/settings/voice` | voice | `voice/index.vue` | TTS + transcription providers |
+| `/settings/speech` | — | redirect | Legacy alias → `voice` |
+| `/settings/transcription` | — | redirect | Legacy alias → `voice` |
 | `/settings/email` | email | `email/index.vue` | Email provider management |
 | `/settings/supermarket` | supermarket | `supermarket/index.vue` | Template/skill marketplace |
+| `/settings/supermarket/plugins/:pluginId` | supermarket-plugin-detail | `supermarket/plugin-detail.vue` | Plugin detail |
+| `/settings/supermarket/skills/:skillId` | supermarket-skill-detail | `supermarket/skill-detail.vue` | Skill detail |
 | `/settings/usage` | usage | `usage/index.vue` | Token usage statistics |
+| `/settings/people` | people | `people/index.vue` | User management (admin only) |
 | `/settings/appearance` | appearance | `appearance/index.vue` | Theme, locale, and appearance settings |
 | `/settings/profile` | profile | `profile/index.vue` | User profile settings |
 | `/settings/platform` | platform | `platform/index.vue` | Platform management |
@@ -248,39 +281,50 @@ Both routes render the same `home/index.vue` component. The `home` route shows a
 | Path | Name | Component | Description |
 |------|------|-----------|-------------|
 | `/login` | Login | `login/index.vue` | Login form (no auth required) |
+| `/onboarding` | onboarding | `onboarding/index.vue` | First-run setup wizard (redirects to `/` when complete) |
 | `/oauth/mcp/callback` | oauth-mcp-callback | `oauth/mcp-callback.vue` | MCP OAuth callback (no auth required) |
+| `/dev/components` | dev-components | `dev/components/index.vue` | Dev-only component wall (see below) |
 
 ### Auth Guard
 
 - All routes except `/login` and `/oauth/*` require `localStorage.getItem('token')`.
 - Logged-in users accessing `/login` are redirected to `/`.
+- Incomplete onboarding redirects authenticated users to `/onboarding` (`router-guards/onboarding.ts`).
+- Routes with `meta.adminOnly` (e.g. `/settings/people`) require `user.role === 'admin'`.
 - Chunk load errors (dynamic import failures) trigger an automatic page reload.
+- `/dev/*` is registered only in dev builds and requires `localStorage.setItem('memoh:dev-tools', '1')`.
 
 ## Layout System
 
-Two-section layout architecture, both sharing the same `MainLayout` wrapper:
+The shell splits into three layers (`App.vue` is the orchestrator):
 
-1. **MainLayout** (`layout/main-layout/`) — Top-level wrapper using `SidebarProvider` from `@memohai/ui`. Provides `#sidebar` and `#main` slots.
+1. **Persistent chat shell** — `MainSection` (`pages/main-section/`) mounts in `App.vue` whenever the route is chat (`home` / `bot`) **or** settings (`/settings/*`). It stays full-size behind the settings overlay so dockview layout and message scroll survive settings navigation (KeepAlive cannot do this — detaching the subtree caused relayout/flash regressions).
 
-2. **Chat Section** (`pages/main-section/`) — Uses `MainLayout` with:
-   - **Sidebar** (`components/sidebar/`) — Bot list sidebar (collapsible). Header shows "Bots" label + create button. Body lists all bots as `BotItem` entries. Footer has a settings gear link to `/settings`.
-   - **MainContainer** (`components/main-container/`) — `<KeepAlive>` wrapped `<RouterView>` for chat pages.
+2. **Chat section internals** (`MainSection` — hand-rolled flex, no `MainLayout`):
+   - On macOS desktop a 36px full-width drag strip clears the traffic lights; web has no strip.
+   - **Sidebar** (`components/sidebar/`) — Activity rail (44px icon column: bot switcher avatar on top, Sessions/Files/Search views, Settings gear at bottom) + a resizable, collapsible side panel. Clicking the active rail icon toggles the panel open/closed. Files view is hidden without `workspace_read`.
+   - **ChatWorkspace** (`pages/home/components/chat-workspace.vue`) — [dockview-vue](https://dockview.dev) host for the center area.
 
-3. **Settings Section** (`pages/settings-section/`) — Uses `MainLayout` with:
-   - **SettingsSidebar** (`components/settings-sidebar/`) — Collapsible settings navigation. Top has a "back to chat" button that restores the last selected bot/session. Menu items include Bots, Providers, Web Search, Memory, Speech, Transcription, Email, Supermarket, Usage, Appearance, Profile, Platform, and About.
+3. **Settings overlay** — `pages/settings-section/` renders as a **fixed full-screen overlay** on top of the persistent chat shell (visibility toggle, not v-if). Uses `MainLayout` with:
+   - **SettingsSidebar** (`components/settings-sidebar/`) — Collapsible settings navigation. Top has a "back to chat" button that restores the last selected bot/session. Menu items include Bots, Providers, Web Search, Memory, Voice, Email, Supermarket, Usage, People (admin), Appearance, Profile, Platform, and About.
    - **SidebarInset** — `<KeepAlive>` wrapped `<RouterView>` for settings pages.
 
-4. **Home/Chat Page** (`pages/home/`) — Internal layout:
-   - **ChatSidebar** — Left panel: session search/filter/CRUD plus file/tool affordances.
-   - **ChatWorkspace** — Main panel: tabbed chat, file viewer/editor, terminal panes, and display panes.
-   - **ChatArea** — Message list with scroll and input area with attachments.
-   - **SessionInfoPanel** — Right panel: session info display.
+4. **Auth-boundary pages** (`/login`, `/onboarding`, `/oauth/*`, `/dev/*`) — Neither `MainSection` nor the settings overlay mounts; `<RouterView>` renders them full-screen alone.
 
-Several settings pages use **MasterDetailSidebarLayout** (`components/master-detail-sidebar-layout/`) for left-sidebar + detail-panel patterns (providers, web search, email, memory, speech, transcription).
+5. **Home/Chat content** (inside `MainSection` → `ChatWorkspace`):
+   - Panel types: `chat` (singleton, content follows the active session), `file`, `terminal`, `browser`, `display`. Floating groups are disabled; panels use `renderer: 'always'` so terminals / iframes / WebRTC survive tab switches.
+   - **ChatPane** — Message list with scroll and input area with attachments (KeepAlive-cached per session inside the chat panel).
+   - **SessionInfoRing** — Session info display in the composer.
+
+Several settings pages use **MasterDetailSidebarLayout** (`components/master-detail-sidebar-layout/`) for left-sidebar + detail-panel patterns (providers, web search, email, memory, voice).
+
+### Dev Component Wall
+
+`pages/dev/components/` is the living reference for `@memohai/ui` atoms and tokens. Reach it at `/dev/components` in dev builds after `localStorage.setItem('memoh:dev-tools', '1')`. Also openable via `Cmd/Ctrl+Shift+D` when dev tools are enabled. Use it to verify visual changes; `mise run lint` runs `scripts/check-ui-contract.mjs` as a mechanical guard.
 
 ## CSS & Theming
 
-Design tokens, color palette, typography, elevation strategy, and component visual specs are defined in `packages/ui/DESIGN.md`. **Read that file before making any UI changes.**
+Design tokens, typography, elevation, and the atom-level visual contract live in `packages/ui/AGENTS.md` and `packages/ui/src/style.css`. **`packages/ui/AGENTS.md` is the enforcement contract** (backed by `scripts/check-ui-contract.mjs` in `mise run lint`). `packages/ui/DESIGN.md` retains supplementary visual specs. Read both skill + UI contract before making UI changes.
 
 ### Tailwind CSS 4
 
@@ -292,7 +336,7 @@ CSS-based configuration (no `tailwind.config.*` file). All design tokens (CSS va
 
 ### Dark Mode
 
-- Runtime: `useColorMode` from `@vueuse/core` in `store/settings.ts`
+- Runtime: `useColorMode` from `@vueuse/core` in `store/settings/index.ts`
 - Storage: theme preference persisted via `useStorage`
 - Toggle: Available in Settings page and login page
 - Usage: semantic tokens auto-switch; no `dark:` prefix needed
@@ -301,11 +345,11 @@ CSS-based configuration (no `tailwind.config.*` file). All design tokens (CSS va
 
 - Use Tailwind utility classes; avoid `<style>` blocks.
 - Always use semantic color tokens (`text-foreground`, `bg-card`, `border-border`, etc.) — never hardcode raw colors (`gray-*`, `bg-white`, `text-black`).
-- Follow the design system rules in `packages/ui/DESIGN.md`.
+- Follow the design system rules in `packages/ui/AGENTS.md`.
 
 ## UI Components (@memohai/ui)
 
-All UI primitives are provided by `@memohai/ui` (43 component groups built on Reka UI). Do not import Reka UI directly. For the component design specification (variants, colors, elevation, spacing), see `packages/ui/DESIGN.md`.
+All UI primitives are provided by `@memohai/ui` (built on Reka UI). Do not import Reka UI directly. For the component design contract (variants, tokens, elevation, spacing), see `packages/ui/AGENTS.md`.
 
 - **Exception**: Physical UI knobs (Switch thumb, Slider thumb) may keep `bg-white` as they need to contrast against colored tracks regardless of theme.
 - **No scoped CSS modules**: Styling is done inline via utility classes.
@@ -317,8 +361,9 @@ style.css                    — Tailwind + theme tokens
 animate.css                  — Animation utilities
 markstream-vue/index.css     — Markdown rendering
 katex/dist/katex.min.css     — Math rendering
-vue-sonner/style.css         — Toast notifications (in App.vue)
 ```
+
+Toast styling ships inside `@memohai/ui` `style.css` (the in-house `Toaster`); no separate toast stylesheet import is needed.
 
 `@memohai/ui` provides 43 component groups built on Reka UI primitives + Tailwind + class-variance-authority:
 
@@ -329,7 +374,7 @@ vue-sonner/style.css         — Toast notifications (in App.vue)
 - **Overlays**: `Dialog` (incl. `DialogScrollContent`), `Popover`, `Tooltip`, `DropdownMenu`, `ContextMenu`, `Command` (Dialog, Group, Input, Item, List)
 - **Data**: `Table` (9 sub-components), `Badge`, `BadgeCount`, `Avatar`, `Skeleton`, `Empty` (5 sub-components)
 - **Navigation**: `Breadcrumb`, `Tabs`, `Pagination`, `PinInput` (Group, Slot, Separator)
-- **Feedback**: `Button`, `ButtonGroup` (Separator, Text), `Spinner`, `Alert`, `Toaster` (Sonner), `Kbd`
+- **Feedback**: `Button`, `ButtonGroup` (Separator, Text), `Spinner`, `Alert`, `Toaster` (in-house), `Kbd`
 - **Effects**: `TextGenerateEffect`
 
 ### Form Pattern (vee-validate + Zod)
@@ -365,7 +410,7 @@ const form = useForm({
 ### Notification Pattern
 
 ```typescript
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 toast.success(t('common.saved'))
 toast.error(resolveApiErrorMessage(error, 'Failed'))
 ```
@@ -428,8 +473,10 @@ SDK also generates colada helpers: `getBotsQuery()`, `postBotsMutation()`, query
 | `capabilities` | `capabilities` | Server feature flags (container backend, snapshot support), loaded once from `getPing()` |
 | `chat-selection` | `chat-selection` | Current bot ID and session ID, persisted via `useStorage` to localStorage |
 | `chat-list` | `chat` | Chat messages, sessions, bots, streaming state, SSE/WS event processing. Depends on `chat-selection` store for current bot/session. Utility functions in `chat-list.utils.ts` |
-| `workspace-tabs` | `workspace-tabs` | Chat/file/terminal/display tabs for the active workspace area |
+| `workspace-tabs` | `workspace-tabs` | Dockview layout manager: holds the `DockviewApi` handle, opens/closes panels (chat/file/terminal/browser/display), serializes layout per bot under `workspace-layout`, and owns activity-bar/side-panel state (`sidebarView`, `sidebarOpen`, `sidebarWidth`). The active chat session lives in `chat-selection` |
 | `display-snapshots` | `display-snapshots` | Last display screenshots for previews in chat and bot desktop settings |
+| `bot-create-progress` | `bot-create-progress` | Bot creation SSE progress (used by `bots/new-progress.vue`) |
+| `update` | `update` | Desktop/app update prompt state |
 
 Additional stores in `stores/`:
 | Store | Purpose |
@@ -456,7 +503,7 @@ Chat supports two transport modes: **Server-Sent Events (SSE)** and **WebSocket*
 
 ## Workspace, Display, Browser Use, and Computer Use
 
-- Workspace tabs are managed by `store/workspace-tabs.ts`: chat, draft, file, terminal, and display tabs share the same main workspace region.
+- The center workspace is a dockview layout managed by `store/workspace-tabs.ts`: chat / file / terminal / browser / display are dockview panels that can be tabbed together or split. The chat panel is a singleton that follows the active session; the workspace file browser lives in the left side panel (`components/sidebar/files-pane.vue`), not in the dock.
 - Terminal and file panes are normal workspace features. Display panes are container-workspace features and are hidden for trusted local bots via `utils/bot-workspace.ts` (`metadata.workspace.backend === 'local'` or API `workspace_backend === 'local'`).
 - `pages/home/components/display-pane.vue` connects to the workspace display service, prepares the display runtime, opens a WebRTC session, forwards keyboard/pointer input, and captures snapshots for previews. It represents a headed container desktop with a browser, not a headless automation runner.
 - `pages/bots/components/bot-desktop.vue` is the settings/runtime surface for enabling display, checking Xvnc/browser/toolkit availability, viewing live sessions, and closing display sessions.
@@ -486,8 +533,9 @@ Chat supports two transport modes: **Server-Sent Events (SSE)** and **WebSocket*
 
 ## Development Rules
 
+- **Read `.agents/skills/memoh-web/SKILL.md` first** for any UI or page work (see § Agent Skill above).
 - Use Vue 3 Composition API with `<script setup>` exclusively.
-- Style with Tailwind utility classes; avoid `<style>` blocks. Follow the design system in `packages/ui/DESIGN.md`.
+- Style with Tailwind utility classes; avoid `<style>` blocks. Follow `packages/ui/AGENTS.md` and `.agents/skills/memoh-web/SKILL.md`.
 - **Always use semantic color tokens** (`text-foreground`, `bg-card`, `border-border`, `text-muted-foreground`, `bg-accent`, etc.) instead of raw colors (`gray-*`, `bg-white`, `text-black`). Never introduce hardcoded Tailwind color classes for themed elements — this breaks dark mode consistency.
 - Use `@memohai/ui` components for all UI primitives; do not import Reka UI directly.
 - Use `lucide-vue-next` for all UI icons. Use `@memohai/icon` for brand/provider logos. **Never use FontAwesome** — do not add `<FontAwesomeIcon>`, do not import from `@fortawesome/*`, do not use inline SVG or base64-encoded SVG in templates.

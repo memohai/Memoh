@@ -8,10 +8,12 @@
     }
   }
 
+  /* Dark-mode syntax highlight: keep only the foreground token colors.
+     Background is intentionally left untouched so every code surface uses its
+     own container background instead of the highlighter's baked-in dark fill. */
   .dark .shiki,
   .dark .shiki span {
     color: var(--shiki-dark) !important;
-    background-color: var(--shiki-dark-bg) !important;
   }
 }
 
@@ -21,39 +23,823 @@
   }
 }
 
+@layer components {
+  /* ── Button: PRIMARY high-emphasis interaction ──────────────────────────────
+     The fill + every state lives on a ::before shell (not the button box) so the
+     press-scale shrinks only the background — the label never moves or blurs.
+     Keyed off <Button variant="primary"> / default → data-variant. Pairs with
+     the --btn-primary ramp (light/dark) so it themes correctly. */
+  [data-button]:is([data-variant="default"], [data-variant="primary"]) {
+    position: relative;
+    isolation: isolate;
+  }
+  [data-button]:is([data-variant="default"], [data-variant="primary"])::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background-color: var(--btn-primary);
+    scale: 1 1;
+    transition:
+      scale 0.255s linear(0, 0.3505, 0.7432, 0.9336, 0.9951, 1.0062, 1.0045, 1.0019, 1.0005, 1),
+      background-color 0.15s ease-out;
+  }
+  /* hover: fill lightens (generic lighten-on-engage, not a sheen). */
+  [data-button]:is([data-variant="default"], [data-variant="primary"]):hover::before {
+    background-color: var(--btn-primary-hover);
+  }
+  /* press — SMALL (default): scale DOWN 0.96. The scale IS the signal; fill holds
+     its hover color. */
+  [data-button]:is([data-variant="default"], [data-variant="primary"]):active::before {
+    scale: 0.96;
+  }
+  /* press — BLOCK / full-width: scale would lurch, so the fill lightens to the
+     press color INSTANT (transition 0s), easing back on release. */
+  [data-button]:is([data-variant="default"], [data-variant="primary"])[data-block]:active::before {
+    scale: 1 1;
+    background-color: var(--btn-primary-active);
+    transition: background-color 0s;
+  }
+
+  /* ── Button: SECONDARY — ported verbatim from the contract bench ─────────────
+     Transparent at rest with a 1px inset ring; hover fills + the ring drops;
+     press scales down. All on ::before so the label never moves. This REPLACES
+     the old bg-accent/border library look. */
+  [data-button]:is([data-variant="outline"], [data-variant="secondary"]) {
+    position: relative;
+    isolation: isolate;
+  }
+  [data-button]:is([data-variant="outline"], [data-variant="secondary"])::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    /* --overlay-clear is oklch transparent (not the `transparent` keyword) so the
+       interpolation to the hover overlay (also oklch) stays in the same color
+       space and the browser produces a smooth alpha fade rather than a hard cut. */
+    background-color: var(--overlay-clear);
+    box-shadow: var(--shadow-hairline);
+    scale: 1 1;
+    transition:
+      scale 0.255s linear(0, 0.3505, 0.7432, 0.9336, 0.9951, 1.0062, 1.0045, 1.0019, 1.0005, 1),
+      background-color 0.06s ease-out,
+      box-shadow 0.06s ease-out;
+  }
+  [data-button]:is([data-variant="outline"], [data-variant="secondary"]):hover::before {
+    background-color: var(--btn-secondary-overlay);
+    box-shadow: none;
+  }
+  [data-button]:is([data-variant="outline"], [data-variant="secondary"]):active::before {
+    scale: 0.974;
+    box-shadow: none;
+  }
+
+  /* ── Buttons inside a ButtonGroup — a "joined" relative of Toggle ────────────
+     The group (button-group/index.ts) draws the single outer border + internal
+     dividers, so grouped buttons drop their standalone ::before chrome and adopt
+     the Toggle gray-ladder press model instead. Two reasons the standalone model
+     can't survive in a group: (1) the hairline ring would double the group
+     border, and (2) a standalone outline button's press signal is PURELY the
+     scale-down — hover and :active share one fill — but a shrinking fill pulls
+     away from the fixed divider and fights it. So we kill the scale and make the
+     press read through COLOR like Toggle does: hover 249 → press 237, distinct
+     and snappy. Specificity ties the standalone selectors and wins by source
+     order (these rules come later). */
+  [data-slot="button-group"] > [data-button]:active::before {
+    scale: 1;
+  }
+  [data-slot="button-group"] > [data-button]:is([data-variant="outline"], [data-variant="secondary"])::before {
+    box-shadow: none;
+  }
+  [data-slot="button-group"] > [data-button]:is([data-variant="outline"], [data-variant="secondary"]):hover::before {
+    background-color: var(--ui-hover);
+  }
+  [data-slot="button-group"] > [data-button]:is([data-variant="outline"], [data-variant="secondary"]):active::before {
+    background-color: var(--ui-pressed);
+    transition-duration: 40ms;
+  }
+
+  /* ── Form fields: text input / textarea / select trigger / native select ─────
+     No fill — the field is defined purely by its edge so dense forms stay clean.
+     Rest: a light hairline edge (lighter than the secondary button, so the
+     resting box doesn't read as heavy). Hover & focus keep that edge and stack a
+     second 1px ring just OUTSIDE in near-black, for a crisp committed edge.
+     Inputs are replaced elements so the rings live on the element box directly. */
+  /* The edge is a single inset 1px hairline driven by one var (--field-edge).
+     Every state — focus, subtle, invalid — only swaps that one color in place.
+     No outer rings: the edge never stacks, it just changes color. */
+  [data-slot="input"],
+  [data-slot="textarea"],
+  [data-slot="input-group"],
+  [data-slot="tags-input"],
+  [data-slot="number-field"],
+  [data-slot="pin-input-slot"],
+  [data-slot="input-otp-slot"] {
+    background-color: transparent;
+    --field-edge: var(--field-edge-rest);
+    box-shadow: inset 0 0 0 1px var(--field-edge);
+    transition: box-shadow 0.07s ease-out;
+  }
+  /* Placeholder: same type metrics as real input (size/weight/tracking) so the
+     hint sits on the exact same rhythm as typed text — only the color is lighter
+     so it reads as a soft hint rather than competing with real input. */
+  [data-slot="input"]::placeholder,
+  [data-slot="textarea"]::placeholder {
+    color: var(--field-placeholder);
+  }
+  /* Fields engage on FOCUS only — never on hover. A text field is a container
+     you click into; the meaningful signal is focus, and hover-darkening just
+     reads as twitchy noise as the pointer passes over. */
+  /* DEFAULT (solid): the hairline itself turns near-black on focus. */
+  [data-slot="input"]:focus,
+  [data-slot="textarea"]:focus,
+  [data-slot="input-group"]:focus-within,
+  [data-slot="number-field"]:focus-within,
+  [data-slot="pin-input-slot"]:focus,
+  [data-slot="input-otp-slot"][data-active="true"] {
+    --field-edge: var(--field-edge-solid);
+  }
+  /* SUBTLE: the faintest deepen of the hairline — search / low-chrome, and the
+     tags field. The near-black solid edge is a strong, decided signal we reserve
+     for single-line fields; on a big tag container it reads as a heavy box, so
+     tags-input only nudges the edge to engaged on focus.
+     Extra attribute (or distinct slot) = higher specificity than the solid group. */
+  [data-slot="input"][data-emphasis="subtle"]:focus,
+  [data-slot="textarea"][data-emphasis="subtle"]:focus,
+  [data-slot="tags-input"]:focus-within {
+    --field-edge: var(--field-edge-engaged);
+  }
+  /* INVALID: the edge itself turns destructive — replaces the hairline, never
+     stacks outside it. */
+  [data-slot="input"][aria-invalid="true"],
+  [data-slot="textarea"][aria-invalid="true"],
+  [data-slot="input-group"]:has([aria-invalid="true"]),
+  [data-slot="tags-input"][aria-invalid="true"],
+  [data-slot="tags-input"]:has([aria-invalid="true"]),
+  [data-slot="number-field"][aria-invalid="true"],
+  [data-slot="number-field"]:has([aria-invalid="true"]),
+  [data-slot="pin-input-slot"][aria-invalid="true"],
+  [data-slot="input-otp-slot"][aria-invalid="true"] {
+    --field-edge: var(--destructive);
+  }
+
+  /* ── Select — a BUTTON, not a field. The trigger wears light secondary-button
+     chrome: a faint resting hairline plus a gray fill on hover, instead of the
+     input field-edge that flashed a near-black committed border. */
+  [data-slot="select-trigger"] {
+    background-color: transparent;
+    box-shadow: inset 0 0 0 1px var(--field-edge-rest);
+    transition:
+      background-color 110ms ease,
+      box-shadow 110ms ease;
+    /* Hover is PURELY pointer-driven (pointer on = fill, off = none). Reka sets
+       pointer-events:none on the page while the menu is open, which would make
+       the trigger inert (unhoverable) — and, on close, the page stays inert for
+       the ~75ms close animation AFTER the trigger's [data-state] already flipped,
+       so a state-keyed re-enable left a gap where :hover dropped → a white flash.
+       Keeping the trigger ALWAYS pointer-events:auto (a child opts back in under
+       an inert ancestor) removes that gap entirely: the rest of the page stays
+       inert so outside-click still dismisses, but the trigger's fill tracks the
+       pointer continuously through open and close. */
+    pointer-events: auto;
+  }
+  [data-slot="select-trigger"]:hover {
+    background-color: var(--ui-hover);
+  }
+  /* No focus ring: reka returns DOM focus to the trigger after a mouse pick,
+     and the browser then paints :focus-visible — which left a near-black ring
+     stuck on the closed trigger ("triggered" look). The resting hairline plus
+     the menu itself are the affordance. */
+  [data-slot="select-trigger"][aria-invalid="true"] {
+    box-shadow: inset 0 0 0 1px var(--destructive);
+  }
+
+  /* ── NativeSelect — the same chooser language as the Select trigger (a BUTTON, not
+     a field): transparent fill, faint resting hairline, gray fill on hover, and NO
+     focus edge. A native <select> matches :focus-visible even on a mouse click
+     (selects are the browser exception), so any focus box-shadow would paint a
+     near-black "stuck" ring on click — exactly what the reka Select avoids. Keyboard
+     users open the native dropdown, which is the affordance; outline-none on the
+     element kills the default ring so the resting hairline is the only chrome. */
+  [data-slot="native-select"] {
+    background-color: transparent;
+    box-shadow: inset 0 0 0 1px var(--field-edge-rest);
+    transition:
+      background-color 110ms ease,
+      box-shadow 110ms ease;
+  }
+  [data-slot="native-select"]:hover:not(:disabled) {
+    background-color: var(--ui-hover);
+  }
+  [data-slot="native-select"][aria-invalid="true"] {
+    box-shadow: inset 0 0 0 1px var(--destructive);
+  }
+
+  /* Select opens "pointing at" its current value: the CHECKED row carries the menu
+     highlight the instant the panel opens — but ONLY once. [data-open-hint] is set
+     on the viewport at open and dropped on the first pointer-move / key-press
+     (SelectContent.vue), so after any interaction the highlight follows the pointer/
+     keyboard and never snaps back to the selected row when the cursor leaves. The
+     selection itself still reads via the check icon, never a persistent fill. */
+  [data-slot="select-viewport"][data-open-hint] [data-slot="select-item"][data-state="checked"] {
+    background-color: var(--ui-selected);
+  }
+
+  /* Menu panel border lives on the Tailwind utility in lib/menu.ts → menuContentClass
+     (border-[color:var(--border-menu)]). It MUST be a utility, not a rule here:
+     @layer utilities always wins over @layer components, so any border-color set
+     in this block would be silently overridden by the component's border utility.
+     --border-menu is deeper than the hairline so the floating panel reads as a
+     crisp, higher-contrast cutout — not the same faint line as a flat field. */
+
+  /* Menu rows live in the shared menu recipe (lib/menu.ts → menuItemClass):
+     a single utility, highlight = reka's roving focus
+     (data-[highlighted]:bg-[var(--ui-selected)], the reka/Radix equivalent of
+     shadcn's focus:bg-accent). The highlight simply FOLLOWS the pointer; the
+     selected value is shown by the check icon, not a background. Select,
+     DropdownMenu, ContextMenu, … all reuse that one class — no per-slot rule
+     here, no checked floor / :has() suppressor / sticky home-grown hacks. */
+
+  /* ── Button: GHOST — ported verbatim from the contract bench ─────────────────
+     No chrome at rest; hover fills a soft gray (237, a touch deeper than
+     --accent — the tuned ghost hover); press scales down. A ghost that is a menu
+     /popover/select trigger holds that same hover chip while it is open
+     (data-state=open / aria-expanded) — an open trigger reads as active, so the
+     fill must not vanish the moment the pointer leaves. */
+  [data-button][data-variant="ghost"] {
+    position: relative;
+    isolation: isolate;
+  }
+  [data-button][data-variant="ghost"]::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background-color: transparent;
+    scale: 1 1;
+    transition:
+      scale 0.255s linear(0, 0.3505, 0.7432, 0.9336, 0.9951, 1.0062, 1.0045, 1.0019, 1.0005, 1),
+      background-color 0.15s ease;
+  }
+  [data-button][data-variant="ghost"]:hover::before,
+  [data-button][data-variant="ghost"][data-state="open"]::before,
+  [data-button][data-variant="ghost"][aria-expanded="true"]::before {
+    background-color: var(--btn-ghost-hover);
+  }
+  [data-button][data-variant="ghost"]:active::before {
+    scale: 0.974;
+    background-color: var(--btn-ghost-hover);
+  }
+  /* press — BLOCK / full-width ghost: a uniform press-scale on a wide button
+     lurches sideways (each edge travels ~width × 2.6%), so full-width ghost
+     buttons (the sidebar New Chat / Bot Settings / Settings rows) drop the scale
+     and read the press through a deeper fill instead — the same reasoning as the
+     primary-block rule above. Snappy press (40ms), eased release via the base
+     transition. */
+  [data-button][data-variant="ghost"][data-block]:active::before {
+    scale: 1 1;
+    background-color: var(--ui-pressed);
+    transition-duration: 40ms;
+  }
+
+  /* ── Button: BRAND — solid scheme-color CTA (e.g. chat Send) ─────────────────
+     Fill + hover/press live on a ::before shell (same model as primary/ghost),
+     so the press shrinks only the fill and the glyph never moves. Press scale
+     matches the ghost (0.974) so a circular brand icon button presses with the
+     same tactility as the ghost icon button beside it. */
+  [data-button][data-variant="brand"] {
+    position: relative;
+    isolation: isolate;
+  }
+  [data-button][data-variant="brand"]::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background-color: var(--brand);
+    scale: 1 1;
+    transition:
+      scale 0.255s linear(0, 0.3505, 0.7432, 0.9336, 0.9951, 1.0062, 1.0045, 1.0019, 1.0005, 1),
+      background-color 0.15s ease;
+  }
+  [data-button][data-variant="brand"]:hover::before {
+    background-color: var(--brand-hover);
+  }
+  [data-button][data-variant="brand"]:active::before {
+    scale: 0.974;
+  }
+
+  /* ── Button: LINK — ported from contract bench `link-fade` ────────────────
+     Inline-text link: muted text brightens on hover; underline is a ::after bar
+     that fades in without changing text opacity or layout. */
+  /* Geometry is the SINGLE source here (with !important) because the size axis
+     (h-9 / px-4 / py-2 / rounded-md) lives in Tailwind's utilities layer, which
+     wins over @layer components. Links are inline text, not button boxes: no
+     fixed height, no horizontal padding, no radius (square so the draw line is
+     not clipped at the ends). fade + draw add 3px bottom room for the underline;
+     static uses text-decoration + offset, so it needs no bottom padding. */
+  [data-button]:is([data-variant="link"], [data-variant="link-static"], [data-variant="link-draw"]) {
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
+  }
+  [data-button]:is([data-variant="link"], [data-variant="link-draw"]) {
+    padding-bottom: 3px !important;
+  }
+  [data-button][data-variant="link"]::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 1.5px;
+    background-color: currentcolor;
+    opacity: 0;
+    transition: opacity 0.18s ease;
+  }
+  [data-button][data-variant="link"]:hover::after {
+    opacity: 1;
+  }
+  [data-button][data-variant="link-draw"] {
+    background-image: linear-gradient(currentcolor, currentcolor);
+    background-repeat: no-repeat;
+    background-position: 0 100%;
+    background-size: 0% 1.5px;
+    /* !important: the base `transition-all` utility (utilities layer) would
+       otherwise win over this component-layer rule and kill the draw animation. */
+    transition:
+      background-size 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+      color 150ms ease !important;
+  }
+  [data-button][data-variant="link-draw"]:hover {
+    background-size: 100% 1.5px;
+  }
+
+  /* ── Button: BUSY (loading) — universal, variant-agnostic ────────────────────
+     The native [disabled] is set to swallow double-clicks, but a busy button must
+     NOT look faded — keep full color, the spinner is the only signal. The label is
+     hidden IN PLACE (visibility) and the spinner overlays it → zero layout shift,
+     any width, no glyph swap. */
+  [data-button][data-loading] {
+    position: relative;
+  }
+  [data-button][data-loading]:disabled {
+    opacity: 1;
+  }
+  [data-button][data-loading][data-loading-mode="overlay"] > [data-button-content] {
+    visibility: hidden;
+  }
+  /* LEADING: a spinner slot grows in before the label. The slot is the first
+     flex child, so its flex gap to the content would otherwise leave a phantom
+     space at rest (the slot is width:0 but the gap is not). A blanket `gap: 0`
+     here loses to the gap-2/gap-1.5 utility (utilities layer beats components)
+     AND would also flatten the label's own icon↔text gap. Instead the slot
+     carries its own spacing via its expanded width and cancels exactly the one
+     gap to the content with a negative end-margin (held constant in both states
+     so the rest position is flush and the grow lands at the intended tight gap).
+     --btn-leading-gap mirrors the size's flex gap (see data-size below). */
+  [data-button] > [data-button-leading-spinner] {
+    display: inline-grid;
+    place-items: center;
+    width: 0;
+    opacity: 0;
+    overflow: hidden;
+    margin-inline-end: calc(-1 * var(--btn-leading-gap, 0.5rem));
+    transition:
+      width 0.24s cubic-bezier(0.32, 0.72, 0, 1),
+      opacity 0.18s ease;
+  }
+  [data-button]:is([data-size="sm"], [data-size="text"]) {
+    --btn-leading-gap: 0.375rem;
+  }
+  [data-button][data-loading][data-loading-mode="leading"] > [data-button-leading-spinner] {
+    width: 1.5rem;
+    opacity: 1;
+  }
+  [data-button][data-loading][data-loading-mode="icon"] > [data-button-content] > svg:first-child {
+    animation: button-spin 1s linear infinite;
+  }
+  /* Busy holds the most-engaged color (no pop on the click→spin handoff). */
+  [data-button]:is([data-variant="default"], [data-variant="primary"])[data-block][data-loading]::before {
+    background-color: var(--btn-primary-active);
+  }
+  [data-button]:is([data-variant="default"], [data-variant="primary"]):not([data-block])[data-loading]::before {
+    background-color: var(--btn-primary-hover);
+  }
+  [data-button]:is([data-variant="outline"], [data-variant="secondary"])[data-loading]::before {
+    background-color: var(--btn-secondary-overlay);
+    box-shadow: none;
+  }
+  [data-button][data-variant="ghost"][data-loading]::before {
+    background-color: var(--btn-ghost-hover);
+  }
+}
+
+@keyframes button-spin {
+  to {
+    rotate: 360deg;
+  }
+}
+
+/* Accordion height tween — reka exposes the measured content height as
+   --reka-accordion-content-height; we animate height between 0 and that. */
+@keyframes accordion-down {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--reka-accordion-content-height);
+  }
+}
+@keyframes accordion-up {
+  from {
+    height: var(--reka-accordion-content-height);
+  }
+  to {
+    height: 0;
+  }
+}
+
+/* Skeleton loading shimmer — a soft two-gray seam drifts left→right. The gradient is
+   one repeating tile (--skeleton-tile wide) marching across a VIEWPORT-anchored sheet
+   (background-attachment:fixed), so every skeleton block — wherever it sits — samples
+   the SAME light by its own position: a cluster (avatar + lines) reads as one surface
+   crossed by a single seam, never independent per-block pulses (the "one paper, many
+   windows" model). The tile is narrower than a typical row, so a fresh seam revisits
+   the group every cycle — a short gap, not a viewport-wide wait. Animating by exactly
+   one tile width loops seamlessly. Two CLOSE grays keep it a gentle seam, not a band. */
+@keyframes skeleton-shimmer {
+  to {
+    background-position-x: var(--skeleton-tile);
+  }
+}
+
+@layer components {
+  [data-slot="skeleton"] {
+    background-image: linear-gradient(
+      100deg,
+      var(--muted) 40%,
+      var(--skeleton-mid) 50%,
+      var(--muted) 60%
+    );
+    background-attachment: fixed;
+    background-repeat: repeat;
+    background-size: var(--skeleton-tile) 100%;
+    animation: skeleton-shimmer 2s linear infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    [data-slot="skeleton"] {
+      background-image: none;
+      animation: none;
+    }
+  }
+
+  /* ── Toggle — gray-ladder press model (ported verbatim from the contract bench)
+     rest → hover 249 → press 237 (snappy) → on 243 → on+press 231. Press-down is
+     quick (40ms) and release eases (160ms) — the modern press feel. Fill is on the
+     element itself (toggles don't press-scale, so no ::before shell needed). */
+  [data-slot="toggle"] {
+    background-color: transparent;
+    transition:
+      background-color 160ms ease,
+      color 150ms ease;
+  }
+  [data-slot="toggle"]:hover {
+    background-color: var(--ui-hover);
+  }
+  [data-slot="toggle"]:active {
+    background-color: var(--ui-pressed);
+    transition-duration: 40ms;
+  }
+  [data-slot="toggle"][data-state="on"] {
+    background-color: var(--ui-on);
+  }
+  [data-slot="toggle"][data-state="on"]:active {
+    background-color: var(--ui-selected-pressed);
+    transition-duration: 40ms;
+  }
+
+  /* TINT variant — selection reads via COLOR (icon brightens), not a persistent
+     fill, so there's no reserved selected gray: hover/press just borrow the
+     control hover→press ladder like the default toggle. Order matters: :hover is
+     declared AFTER [data-state=on] so an active+hovered item still shows the
+     track. NOTE: the active tint uses --brand for now; swap to a promoted accent
+     token once the accent palette lands. */
+  [data-slot="toggle"][data-variant="tint"] {
+    color: var(--muted-foreground);
+  }
+  [data-slot="toggle"][data-variant="tint"][data-state="on"] {
+    color: var(--brand);
+    background-color: transparent;
+  }
+  [data-slot="toggle"][data-variant="tint"]:hover {
+    background-color: var(--ui-hover);
+  }
+  [data-slot="toggle"][data-variant="tint"]:active {
+    background-color: var(--ui-pressed);
+    transition-duration: 40ms;
+  }
+
+  /* ── Segmented control — sliding thumb (ported verbatim from the contract bench)
+     The elevated thumb slides via translate + width; non-selected items darken the
+     track on hover and shrink slightly on press. Near-flat (faint shadow only).
+     Geometry of the thumb is measured + set inline by SegmentedControl.vue. */
+  [data-slot="segmented"] {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.125rem;
+    padding: 0.125rem;
+    border-radius: var(--radius);
+    background-color: var(--segment-track);
+  }
+  [data-slot="segmented"] [data-segment-thumb] {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 0;
+    pointer-events: none;
+    border-radius: calc(var(--radius) - 0.125rem);
+    background-color: var(--segment-thumb);
+    box-shadow: var(--shadow-thumb);
+    transition:
+      translate 0.25s cubic-bezier(0.32, 0.72, 0, 1),
+      width 0.25s cubic-bezier(0.32, 0.72, 0, 1),
+      scale 0.16s ease,
+      opacity 0.12s ease;
+  }
+  [data-slot="segmented"] [data-segment-thumb][data-motion="false"] {
+    transition: none;
+  }
+  [data-slot="segmented"] [data-segment-item] {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    height: 1.75rem;
+    padding-inline: 0.75rem;
+    border-radius: calc(var(--radius) - 0.125rem);
+    font-size: 0.875rem;
+    font-weight: 450;
+    letter-spacing: -0.16px;
+    white-space: nowrap;
+    /* idle label sits lighter than global muted for a cleaner, airier read;
+       active jumps to near-foreground for strong contrast. Hover nudges darker. */
+    color: var(--control-label);
+    cursor: pointer;
+    transition: color 150ms ease;
+  }
+  [data-slot="segmented"] [data-segment-item]:hover {
+    color: var(--control-label-hover);
+  }
+  [data-slot="segmented"] [data-segment-item][data-active="true"],
+  [data-slot="segmented"] [data-segment-item][data-active="true"]:hover {
+    color: var(--foreground);
+  }
+  [data-slot="segmented"] [data-segment-item]::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background-color: transparent;
+    transition:
+      background-color 150ms ease,
+      scale 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  [data-slot="segmented"] [data-segment-item]:not([data-active="true"]):hover::before {
+    background-color: var(--segment-overlay-hover);
+  }
+  [data-slot="segmented"] [data-segment-item]:not([data-active="true"]):active::before {
+    scale: 0.965;
+    background-color: var(--segment-overlay-active);
+  }
+  [data-slot="segmented"] [data-segment-item]:disabled {
+    pointer-events: none;
+    opacity: 0.5;
+  }
+  [data-slot="segmented"] [data-segment-item]:focus-visible {
+    outline: none;
+    box-shadow:
+      0 0 0 2px var(--segment-track),
+      0 0 0 4px var(--ring);
+  }
+
+  /* ── Checkbox ────────────────────────────────────────────────────────────
+     Rest reads as page background, separated only by the hairline border
+     (clean). Hover (unchecked) lifts to the gray-ladder hover. Checked flips
+     to the solid blue fill with a white check. Background transitions; the
+     check itself is instant (no indicator animation). */
+  [data-slot="checkbox"] {
+    background-color: transparent;
+    border-color: var(--border-hairline);
+    transition:
+      background-color 100ms ease,
+      border-color 100ms ease;
+  }
+  [data-slot="checkbox"]:not(:disabled):not([data-state="checked"]):hover {
+    background-color: var(--ui-hover);
+  }
+  [data-slot="checkbox"][data-state="checked"] {
+    background-color: var(--accent-blue-fill);
+    border-color: var(--accent-blue-fill);
+    color: var(--accent-blue-foreground);
+  }
+  [data-slot="checkbox"][data-state="checked"]:not(:disabled):hover {
+    background-color: var(--accent-blue-fill-hover);
+    border-color: var(--accent-blue-fill-hover);
+  }
+  [data-slot="checkbox"][data-state="checked"]:not(:disabled):active {
+    background-color: var(--accent-blue-fill-active);
+    border-color: var(--accent-blue-fill-active);
+  }
+
+  /* ── Switch ──────────────────────────────────────────────────────────────
+     Pure COLOR switch — no track outline at all. Off = a clear gray pill, on =
+     the solid palette blue (same --accent-blue-fill as the checkbox, one blue
+     across selection controls). Hover deepens the gray and brightens the blue.
+     The puck is a plain white disc (drop shadow only, no ring). Geometry
+     (size/thumb/travel) is in Switch.vue; this is the single source for color. */
+  [data-slot="switch"] {
+    background-color: var(--switch-off);
+    /* synced with the thumb glide so track color + puck move as one motion;
+       80ms alone read as an instant snap, 150 dragged. */
+    transition: background-color 110ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  [data-slot="switch"]:not(:disabled):not([data-state="checked"]):hover {
+    background-color: var(--switch-off-hover);
+  }
+  [data-slot="switch"][data-state="checked"] {
+    background-color: var(--accent-blue-fill);
+  }
+  [data-slot="switch"][data-state="checked"]:not(:disabled):hover {
+    background-color: var(--switch-on-hover);
+  }
+  [data-slot="switch-thumb"] {
+    background-color: var(--switch-thumb);
+    /* synced with the track color (110ms) so the toggle reads as one motion.
+       NB: Tailwind v4 translate-x-* sets the `translate` property (not
+       `transform`), so the transition must target `translate`. */
+    transition: translate 110ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* ── Radio ───────────────────────────────────────────────────────────────
+     Same blue selection token as the checkbox, but the SELECT is expressed by
+     GROWING the edge: a thin gray hairline ring thickens into a thick blue ring
+     (box-border, so it grows inward — the bg-colored center hole becomes the
+     dot). border-width + color are animated so select/deselect glide instead of
+     snapping. The edge is owned here (no Tailwind `border` utility) so the width
+     can transition. Geometry (size) lives in RadioGroupItem.vue. */
+  [data-slot="radio-group-item"] {
+    border-style: solid;
+    border-width: 1px;
+    border-color: var(--border-hairline);
+    background-color: transparent;
+    transition:
+      border-width 150ms cubic-bezier(0.4, 0, 0.2, 1),
+      border-color 150ms ease,
+      background-color 120ms ease;
+  }
+  [data-slot="radio-group-item"]:not(:disabled):not([data-state="checked"]):hover {
+    background-color: var(--ui-hover);
+  }
+  [data-slot="radio-group-item"][data-state="checked"] {
+    border-width: 4px;
+    border-color: var(--accent-blue-fill);
+  }
+  [data-slot="radio-group-item"][data-state="checked"]:not(:disabled):hover {
+    border-color: var(--accent-blue-fill-hover);
+  }
+  [data-slot="radio-group-item"][data-state="checked"]:not(:disabled):active {
+    border-color: var(--accent-blue-fill-active);
+  }
+
+  /* ── Slider ──────────────────────────────────────────────────────────────
+     Neutral rail + blue filled range (same selection blue as the toggles). The
+     white knob carries a hairline border at rest; on hover the edge grows from a
+     thin gray hairline into a thin blue edge (1px → 2px border-width animation,
+     borrowing the RadioGroup idea but kept light — no size change on the knob).
+     Colors live here; geometry (rail height, knob size) lives in Slider.vue. */
+  [data-slot="slider-track"] {
+    background-color: var(--slider-track);
+  }
+  [data-slot="slider-range"] {
+    background-color: var(--slider-range);
+  }
+  [data-slot="slider-thumb"] {
+    background-color: var(--slider-thumb);
+    border-style: solid;
+    border-width: 1px;
+    border-color: var(--border-hairline);
+    transition:
+      border-width 150ms cubic-bezier(0.4, 0, 0.2, 1),
+      border-color 150ms ease;
+  }
+  /* Hover only: the hairline grows into a thin blue edge (idea borrowed from
+     RadioGroup, kept light — no outer ring, no shadow). Focus is intentionally
+     not styled: reka keeps the thumb focused after a drag, so a focus style
+     would linger as a "stuck" blue edge until the user clicks elsewhere. */
+  [data-slot="slider-thumb"]:not(:disabled):hover {
+    border-width: 2px;
+    border-color: var(--accent-blue-fill);
+  }
+}
+
+/* Tooltip (dark mode only): subtle ring using --border-menu (14% white) so it
+   lifts off any dark surface without a heavy outline. Drop shadow adds depth. */
+.dark [data-slot="tooltip-content"] {
+  box-shadow: 0 0 0 1px var(--border-menu), 0 4px 12px oklch(0 0 0 / 0.35);
+}
+
+/* Dark mode: secondary / outline button hover keeps the full-strength border
+   (overrides the component-layer box-shadow: none). The fill sinks dark while
+   the border stays at its resting brightness, creating a clear outline. */
+.dark [data-button]:is([data-variant="outline"], [data-variant="secondary"]):not(:disabled):hover::before {
+  box-shadow: inset 0 0 0 1px var(--border-hairline);
+}
+
+/* Dark mode: tune background-color transition speed for the higher-contrast
+   dark fills. Primary is slightly faster than light (snappier hover feel on
+   white→gray); secondary is fast so transparent→black reads as instant fill. */
+.dark [data-button]:is([data-variant="default"], [data-variant="primary"])::before {
+  transition-duration: 0.255s, 0.11s;
+}
+.dark [data-button]:is([data-variant="outline"], [data-variant="secondary"])::before {
+  transition-duration: 0.255s, 0.095s, 0.095s;
+}
+
 :root {
+  --font-sans: "Inter Variable", "Inter", "MiSans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Noto Sans SC", sans-serif;
   --radius: 0.625rem;
-  --background: oklch(0.985 0.001 286);
-  --foreground: oklch(0.22 0.006 286);
-  --card: oklch(0.995 0.001 286);
-  --card-foreground: oklch(0.22 0.006 286);
-  --popover: oklch(0.995 0.001 286);
-  --popover-foreground: oklch(0.22 0.006 286);
+  --scheme-hue: 72;
+  /* Near-neutral WARM surfaces (hue 63, faint chroma — a gentle warm lean so the
+     off-white reads cozy and slightly white-leaning, NOT yellow/red and NOT the
+     cold/green a near-zero chroma drifts to), CONTENT-anchored: the reading
+     surface is the brightest layer and chrome recesses below.
+       · CONTENT splits by role, both the brightest layer:
+           - --card ≈255 WARM near-white: cards, dialogs, popovers, the active dock
+             tab. A hair of the chrome's warm hue so these surfaces stay temperature-
+             coherent with the warm shell (a cold neutral-white card in a warm frame
+             reads clinical).
+           - --surface-editor = PURE white (set in apps/web): the long-read body
+             (chat view, file / monaco editor). Reading content is kept a NEUTRAL
+             white — no tint — so text sits on a clean ground, not a warm wash.
+       · BRIGHT chrome = --background / --sidebar (≈250): page canvas + sidebars,
+         near-white but pulled a hair off pure white so the faint warm tint has
+         headroom to read (at 251 it washed out gray — warmth needs room below white).
+       · GRAY chrome = --background-chrome (≈248), used by --surface-chrome for the
+         dock tab strip + unselected tabs. Only Δ≈2 below the sidebar — a barely-
+         visible-but-present step so an inactive tab differentiates from the white
+         active tab WITHOUT the sidebar reading as the gray one. It is its OWN token
+         (not --secondary) so the tab tone can be tuned apart from the muted chips.
+     --muted/--secondary/--accent sit lower (≈246) as recessed CHIPS — a separate
+     role from the tab strip. chroma stays tiny (≈.0026); sidebar hover/active carry
+     a hair more so they don't go dead gray. */
+  --background: oklch(0.981 0.0026 63);
+  --background-chrome: oklch(0.975 0.0026 63);
+  --foreground: oklch(0.21 0.004 95);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.004 95);
+  --popover: var(--card);
+  --popover-foreground: var(--card-foreground);
   --primary: oklch(0.37 0.015 285);
   --primary-foreground: oklch(0.985 0.001 286);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.22 0.006 286);
-  --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: #737373;
-  --accent: oklch(97.1% 0 0deg);
-  --accent-foreground: oklch(0.22 0.006 286);
+  --secondary: oklch(0.968 0 0);
+  --secondary-foreground: oklch(0.21 0.004 95);
+  --muted: oklch(0.968 0 0);
+  --muted-foreground: oklch(0.52 0.006 95);
+  /* Skeleton shimmer mid-stop — one hair DARKER than --muted (0.967) so the sliding
+     seam is a calm shadow, not a bright flash, on the light gray block. */
+  --skeleton-mid: oklch(0.93 0.002 286);
+  /* Shimmer tile width — narrower than a typical skeleton row so a fresh seam revisits
+     each cluster every cycle (short gap). Bigger = longer gap; smaller = denser. */
+  --skeleton-tile: 640px;
+  --accent: oklch(0.968 0 0);
+  --accent-foreground: oklch(0.21 0.004 95);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0.001 286);
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
+  --border: oklch(0.915 0.0045 72);
+  --input: oklch(0.915 0.0045 72);
   --ring: oklch(57.5% 0 0deg / 1);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.975 0.001 286);
-  --sidebar-foreground: oklch(0.22 0.006 286);
+  --sidebar: var(--background);
+  --sidebar-foreground: oklch(0.21 0.004 95);
   --sidebar-primary: oklch(0.55 0.22 290);
-  --sidebar-primary-foreground: oklch(0.985 0.001 286);
-  --sidebar-accent: oklch(0.967 0.001 286.375);
-  --sidebar-accent-foreground: oklch(0.22 0.006 286);
-  --sidebar-border: oklch(0.92 0.004 286.32);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: var(--overlay-hover);
+  --sidebar-accent-foreground: oklch(0.21 0.004 95);
+  --sidebar-border: oklch(0.905 0.0045 72);
   --sidebar-ring: oklch(0.55 0.22 290);
   --scrollbar-thumb: oklch(0 0 0 / 0.18);
   --scrollbar-thumb-hover: oklch(0 0 0 / 0.32);
@@ -66,6 +852,228 @@
   --brand-hover: oklch(0.49 0.23 290);
   --sidebar-primary: var(--brand);
   --sidebar-ring: var(--brand);
+  /* PRIMARY button ramp (charcoal high-emphasis CTA). rest → hover → press, each
+     step lighter (19 → 51 → 92 lighten). This is the default high-emphasis fill;
+     the scheme brand is reserved for variant="brand". */
+  --btn-primary: #131313;
+  --btn-primary-hover: #333333;
+  --btn-primary-active: #5c5c5c;
+  /* Tooltip ink — a terse inverted hint reads as TRUE black, deeper than the
+     charcoal CTA (--btn-primary) so it never looks like a washed-out gray bubble.
+     Standalone token (not foreground/primary) so the upcoming black-system pass can
+     retune it in one place. Flips to a light fill in dark mode below. */
+  --tooltip: #09090b;
+  --tooltip-foreground: oklch(0.985 0.001 286);
+  /* ── Interaction overlay ladder ──────────────────────────────────────────
+     Pure neutral overlays — chroma 0, hue irrelevant. Composites over the
+     underlying surface so hover/press automatically inherits the surface
+     warmth without a baked hue. Zero hue = zero color tilt across surfaces
+     or rendering environments (eliminates the green cast visible on P3
+     displays when solid hue-72 values were used). Light mode = black
+     overlays; .dark overrides flip them to white. All existing component
+     code is unchanged — semantic aliases below preserve the old token names.
+       hover-light   → wide sidebar rows, menu/list row highlights
+       hover         → standard controls (Toggle, Select, Checkbox)
+       hover-strong  → small icon ghost buttons, toolbar icons; Toggle on
+       active        → pressed state (standard controls)
+       active-strong → pressed state (small icons) / on+press */
+  --overlay-hover-light:   oklch(0 0 0 / 0.045);
+  --overlay-hover:         oklch(0 0 0 / 0.072);
+  --overlay-hover-strong:  oklch(0 0 0 / 0.110);
+  --overlay-active:        oklch(0 0 0 / 0.135);
+  --overlay-active-strong: oklch(0 0 0 / 0.170);
+  /* Fully-transparent overlay base. Authored in oklch (not the `transparent`
+     keyword) so a fade between this and an oklch overlay stays in one color
+     space and the browser produces a smooth alpha fade, not a hard cut. */
+  --overlay-clear:         oklch(0 0 0 / 0);
+  --ui-hover:            var(--overlay-hover);
+  --ui-selected:         var(--overlay-hover-light);
+  --ui-on:               var(--overlay-hover-strong);
+  --ui-pressed:          var(--overlay-active);
+  --ui-selected-pressed: var(--overlay-active-strong);
+  --btn-ghost-hover:     var(--overlay-hover-strong);
+  /* Ghost-hover chip recalibrated for the elevated popover/toast surface —
+     a touch denser than the default overlay so it still reads on the card. */
+  --btn-ghost-hover-on-popover: color-mix(in oklab, var(--foreground) 13%, transparent);
+  --sidebar-hover:       var(--overlay-hover-light);
+  /* Segmented control surfaces: track is a warm-tinted solid chip (not an
+     overlay — needs an opaque fill for the pill shape). */
+  --segment-track: oklch(0.945 0 0);
+  --segment-thumb: var(--card);
+  /* Shadows — tokenized so elevation/edge values never fragment. Same in both
+     schemes for now; add .dark overrides when dark elevation is tuned.
+       --shadow-hairline  1px inset edge (outline / secondary button chrome)
+       --shadow-thumb     subtle lift for the segmented sliding thumb
+       --shadow-dropdown  dropdown elevation for menu surfaces */
+  /* Hairline edge color — shared by secondary/outline button chrome and small
+     control borders (checkbox). A future Design Token revision target. */
+  --border-hairline: oklch(0 0 0 / 0.16);
+  /* Edge for ELEVATED surfaces (dropdown / popover menus). A neutral hairline a
+     touch stronger than the field/button edge (--field-edge-rest 0.11) so the
+     floating panel reads with slightly more contrast than the flat trigger below
+     it; the cutout depth still comes mostly from --shadow-dropdown. */
+  --border-menu: oklch(0 0 0 / 0.13);
+  /* Shared edge for every MODAL surface floating over a dimmed scrim — the card
+     Dialog / DialogScrollContent AND the CommandDialog palette all use it so the modal
+     edge never fragments.
+     LIGHT mode: NO border. These surfaces are WHITE and the scrim is dark, so they
+     already separate at maximum contrast; a dark semi-transparent hairline here is the
+     SAME darkness as the scrim, so instead of drawing a crisp edge it dissolves INTO
+     the dimmed background and reads as a muddy smudge. We let the white surface +
+     --shadow-modal carry the separation. Dark mode keeps a white hairline (see
+     .dark) because a dark surface on a dark scrim needs one to separate. */
+  --border-menu-elevated: transparent;
+  --shadow-hairline: inset 0 0 0 1px var(--border-hairline);
+  --shadow-thumb: 0 1px 2px oklch(0 0 0 / 0.08);
+  --shadow-dropdown: 0 1px 2px 0 oklch(0 0 0 / 0.04), 0 6px 18px -6px oklch(0 0 0 / 0.08);
+  /* Elevation for any surface floating in the MODAL layer over a scrim — the card
+     Dialog / Sheet panels AND the CommandDialog menu palette all share it so modal
+     depth never fragments (was: per-component shadow-2xl / shadow-lg / a bespoke
+     dropdown-elevated). Both layers carry a STRONG negative spread (-10 / -16) so the
+     drop concentrates BELOW the panel and barely bleeds out the sides — that sideways
+     bleed is what made the soft gray haze sit right next to the 1px hairline and read
+     as a dirty doubled edge in light mode. Now the hairline border is the only crisp
+     edge and the shadow is a clean float that still separates from the scrim. */
+  --shadow-modal: 0 8px 16px -10px oklch(0 0 0 / 0.18), 0 24px 48px -16px oklch(0 0 0 / 0.26);
+  /* ONE backdrop dim behind EVERY modal surface — Dialog, DialogScrollContent, Sheet
+     AND the CommandDialog palette (was fragmented: bg-black/80 on Dialog, /30 on Sheet,
+     /40 on CommandDialog). A single scrim keeps the modal layer reading as one layer.
+     Black-alpha reads in both schemes, so no .dark override. */
+  --scrim: oklch(0 0 0 / 0.5);
+  /* Form-field edge — text input / textarea / select. The edge is one inset
+     hairline whose color swaps per state (never an outer ring):
+       solid  (default) → the hairline turns near-black on focus
+       subtle            → the hairline barely deepens on focus
+       invalid           → the hairline turns destructive
+       --field-edge-rest     light resting hairline (lighter than the button edge)
+       --field-edge-engaged  SUBTLE focus — barely deeper than rest
+       --field-edge-solid    SOLID focus — the edge turns near-black in place
+       --field-placeholder   soft hint color — lighter/greyer than muted text */
+  --field-edge-rest: oklch(0 0 0 / 0.11);
+  --field-edge-engaged: oklch(0 0 0 / 0.17);
+  --field-edge-solid: oklch(0 0 0 / 0.78);
+  --field-placeholder: oklch(0.66 0.004 95);
+  /* ── Accent palette ────────────────────────────────────────────────────
+     Unified hue ramps for colored surfaces (menu items, tags, status,
+     decorative icons, capability badges). Each hue ships our own role model:
+       --accent-{hue}             saturated icon / text color (state-constant)
+       --accent-{hue}-soft        rest background tint   (lightest)
+       --accent-{hue}-soft-hover  hover background       (one step deeper)
+       --accent-{hue}-soft-active selected / pressed bg  (deeper still)
+       --accent-{hue}-border      hairline
+       --accent-{hue}-deep        darkest text tone
+     3-layer model: a colored item's text/icon never changes on hover/select —
+     only the background deepens across soft → soft-hover → soft-active.
+     Light values are canonical here; dark-mode values are TODO (tune on a dark
+     accent board, then mirror into .dark). Promoted verbatim from the bench. */
+  --accent-gray: #5f5e59;
+  --accent-gray-soft: #f9f8f7;
+  --accent-gray-soft-hover: #f0efed;
+  /* Neutral avatar gray (≈#e9e9e5): a touch lighter and more neutral than the
+   * old #e6e5e3 so the avatar disc reads as a clean chip rather than a muddy
+   * warm gray. Also the secondary-badge fill (negligible shift). */
+  --accent-gray-soft-active: #e7e7e4;
+  --accent-gray-border: #d4d3cf;
+  --accent-gray-deep: #494846;
+  --accent-brown: #9f765a;
+  --accent-brown-soft: #faf8f6;
+  --accent-brown-soft-hover: #f5ede9;
+  --accent-brown-soft-active: #ebdfd7;
+  --accent-brown-border: #e0cdc0;
+  --accent-brown-deep: #584437;
+  --accent-orange: #d9730d;
+  --accent-orange-soft: #fcf7f4;
+  --accent-orange-soft-hover: #fbebde;
+  --accent-orange-soft-active: #f3ddcb;
+  --accent-orange-border: #eaccb2;
+  --accent-orange-deep: #6a4222;
+  --accent-yellow: #cb912f;
+  --accent-yellow-soft: #fcfaef;
+  --accent-yellow-soft-hover: #f9f3dc;
+  --accent-yellow-soft-active: #f2e3b7;
+  --accent-yellow-border: #e8d497;
+  --accent-yellow-deep: #655121;
+  --accent-green: #448361;
+  --accent-green-soft: #f6f9f7;
+  --accent-green-soft-hover: #e8f1ec;
+  --accent-green-soft-active: #d7e6dd;
+  --accent-green-border: #bed9c9;
+  --accent-green-deep: #2a533c;
+  --accent-teal: #2c8b9e;
+  --accent-teal-soft: #f3fafb;
+  --accent-teal-soft-hover: #e0f3f7;
+  --accent-teal-soft-active: #cae9f0;
+  --accent-teal-border: #b0dbe4;
+  --accent-teal-deep: #18505b;
+  --accent-blue: #2383e2;
+  --accent-blue-soft: #f3f9fd;
+  --accent-blue-soft-hover: #e5f2fc;
+  --accent-blue-soft-active: #cee3f7;
+  --accent-blue-border: #b6d4f3;
+  --accent-blue-deep: #264a72;
+  --accent-purple: #9065b0;
+  --accent-purple-soft: #faf7fc;
+  --accent-purple-soft-hover: #f3ebf9;
+  --accent-purple-soft-active: #e8dbf2;
+  --accent-purple-border: #dbc8e8;
+  --accent-purple-deep: #553b69;
+  --accent-pink: #c14c8a;
+  --accent-pink-soft: #fcf7f9;
+  --accent-pink-soft-hover: #fae9f1;
+  --accent-pink-soft-active: #f4d8e4;
+  --accent-pink-border: #eac4d5;
+  --accent-pink-deep: #68354e;
+  --accent-red: #cd3c3a;
+  --accent-red-soft: #fdf6f6;
+  --accent-red-soft-hover: #fce9e7;
+  --accent-red-soft-active: #f7d9d5;
+  --accent-red-border: #f0c5be;
+  --accent-red-deep: #6d3531;
+  /* blue is the one hue we also ship as a saturated solid fill (white text) */
+  --accent-blue-fill: #2383e2;
+  --accent-blue-fill-hover: #0077d4;
+  --accent-blue-fill-active: #006bc7;
+  /* Red ALSO ships as a saturated solid fill (white text) — but for one job only:
+     count / notification bubbles, where the soft status ramp is too quiet to read
+     as an alert. Derived from --accent-red (#cd3c3a) but tuned to feel ALIVE rather
+     than muddy: lightness and chroma both lifted toward a brighter, more vivid red
+     (still a touch softer than the raw screaming red). White numeral lands ~3.8:1 —
+     under strict AA, but it rides as a small BOLD tabular digit (not body text), and
+     the priority here is an unmistakable alert dot. Pinned theme-constant (like
+     --accent-blue-fill) because the .dark block lightens --accent-red for icon use,
+     which would kill white-on-red. */
+  --accent-red-fill: oklch(0.62 0.18 27);
+  --accent-red-foreground: #fff;
+  /* Switch — pure color toggle, no outline. Off = a clear gray that deepens on
+     hover; ON reuses --accent-blue-fill (one blue across selection controls) and
+     BRIGHTENS on hover (unlike checkbox, which deepens); puck = a white disc. */
+  --switch-off: oklch(0.82 0.005 286);
+  --switch-off-hover: oklch(0.73 0.006 286);
+  --switch-on-hover: color-mix(in oklab, var(--accent-blue-fill), white 14%);
+  --switch-thumb: #fff;
+  /* Foreground (check / glyph) sitting on the solid --accent-blue-fill. */
+  --accent-blue-foreground: #fff;
+  /* Translucent ink overlays for engage states layered OVER a surface (the
+     secondary button shell; segmented items). Black in light mode; the .dark
+     block flips the segmented ones to white so they lighten instead. */
+  --btn-secondary-overlay: oklch(0 0 0 / 0.12);
+  --segment-overlay-hover: oklch(0 0 0 / 0.05);
+  --segment-overlay-active: oklch(0 0 0 / 0.08);
+  /* Segmented idle / hover label — lighter than global muted for an airier read;
+     active jumps to --foreground (handled inline). */
+  --control-label: oklch(0.64 0.004 95);
+  --control-label-hover: oklch(0.46 0.004 95);
+  /* Destructive ghost button hover — a bespoke soft-red chip (not the accent-red
+     ramp): light red fill + deep red text. */
+  --btn-destructive-hover-bg: #fae2e1;
+  --btn-destructive-hover-text: #c0271e;
+  /* Slider — a light neutral rail; the FILLED range reuses the selection blue so
+     it ties to the switch/checkbox/radio family ("this portion is the active
+     value"); the knob is a white disc with a hairline edge that turns blue on
+     hover. */
+  --slider-track: oklch(0.91 0.004 286);
+  --slider-range: var(--accent-blue-fill);
+  --slider-thumb: #fff;
   --success: oklch(0.62 0.16 150);
   --success-foreground: oklch(0.33 0.12 150);
   --success-solid-foreground: oklch(0.985 0.001 286);
@@ -99,15 +1107,19 @@
   --capability-tool: var(--info);
   --capability-tool-foreground: var(--info-foreground);
   --capability-tool-soft: var(--info-soft);
+  --capability-tool-border: var(--info-border);
   --capability-vision: var(--brand);
   --capability-vision-foreground: var(--event-subagent-foreground);
   --capability-vision-soft: var(--brand-soft);
+  --capability-vision-border: var(--brand-border);
   --capability-image: oklch(0.60 0.18 340);
   --capability-image-foreground: oklch(0.40 0.15 340);
   --capability-image-soft: oklch(0.96 0.035 340);
+  --capability-image-border: oklch(0.87 0.07 340);
   --capability-reasoning: var(--warning);
   --capability-reasoning-foreground: var(--warning-foreground);
   --capability-reasoning-soft: var(--warning-soft);
+  --capability-reasoning-border: var(--warning-border);
   --context-window-xs: oklch(0.93 0 0);
   --context-window-sm: var(--warning-soft);
   --context-window-md: var(--info-soft);
@@ -118,10 +1130,14 @@
   --diff-add-border: oklch(0.55 0.12 145 / 0.5);
   --diff-remove: oklch(0.55 0.12 25 / 0.12);
   --diff-remove-border: oklch(0.55 0.12 25 / 0.5);
-  --terminal-background: #1a1b26;
-  --terminal-foreground: #a9b1d6;
-  --terminal-cursor: #c0caf5;
-  --terminal-selection: #33467c;
+  /* Terminal surface tracks the app theme instead of a fixed dark palette, so it
+     never clashes with a light/dark shell. Light: the reading body ground (white)
+     with the body ink for text/cursor. xterm parses only hex/rgb(a), so these stay
+     concrete (not var() aliases). */
+  --terminal-background: #ffffff;
+  --terminal-foreground: #2d2c29;
+  --terminal-cursor: #2d2c29;
+  --terminal-selection: rgb(45 44 41 / 0.16);
   --chart-1: var(--brand);
   --chart-2: var(--success);
   --chart-3: var(--info);
@@ -130,23 +1146,38 @@
 }
 
 .dark {
-  --background: oklch(0.165 0.006 286);
-  --foreground: oklch(0.86 0.005 285);
-  --card: oklch(0.21 0.006 285.885);
-  --card-foreground: oklch(0.90 0.003 285);
-  --popover: oklch(0.21 0.006 285.885);
-  --popover-foreground: oklch(0.90 0.003 285);
-  --primary: oklch(0.84 0.006 285);
-  --primary-foreground: oklch(0.985 0.001 286);
-  --secondary: oklch(0.274 0.006 286.033);
-  --secondary-foreground: oklch(0.86 0.005 285);
-  --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.552 0.016 285.938);
-  --accent: oklch(0.274 0.006 286.033);
-  --accent-foreground: oklch(0.86 0.005 285);
+  --background: oklch(0.152 0 0);
+  --foreground: oklch(0.90 0 0);
+  --card: oklch(0.21 0 0);
+  --card-foreground: oklch(0.90 0 0);
+  --popover: oklch(0.21 0 0);
+  --popover-foreground: oklch(0.90 0 0);
+  --primary: oklch(0.84 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.26 0 0);
+  --secondary-foreground: oklch(0.86 0 0);
+  --muted: oklch(0.26 0 0);
+  --muted-foreground: oklch(0.70 0 0);
+  /* On dark, the mid-stop is one hair LIGHTER than --muted (0.26) — a gentle lift,
+     never a glaring white sweep. */
+  --skeleton-mid: oklch(0.315 0 0);
+  --accent: oklch(0.26 0 0);
+  --accent-foreground: oklch(0.86 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0.001 286);
-  --border: oklch(1 0 0 / 10%);
+  /* Dark dividers/borders sit at 8% white. Now that the chrome surface was lifted
+   * 14→19 (--sidebar), 6% had dropped the seams to Δ14 against it; 8% restores a
+   * clear Δ19 on BOTH the content (12→31) and chrome (19→38) planes. Width is
+   * unchanged (1px) — only the contrast tracks the brighter surface. Still well
+   * below the old hard 10%. Light mode is unaffected. */
+  --border: oklch(1 0 0 / 8%);
+  --border-hairline: oklch(0.422 0 0);
+  --border-menu: oklch(1 0 0 / 0.14);
+  /* Dark: a dark palette on a dark scrim DOES need an edge, so here the elevated
+     menu border is a WHITE hairline (light-on-dark), a touch stronger than
+     --border-menu. (Light mode drops this border entirely — a white palette already
+     separates from the scrim; see :root.) */
+  --border-menu-elevated: oklch(1 0 0 / 0.12);
   --input: oklch(1 0 0 / 14%);
   --ring: oklch(0.86 0.005 285);
   --chart-1: oklch(0.488 0.243 264.376);
@@ -154,13 +1185,13 @@
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.18 0.005 286);
-  --sidebar-foreground: oklch(0.90 0.003 285);
+  --sidebar: oklch(0.185 0 0);
+  --sidebar-foreground: oklch(0.90 0 0);
   --sidebar-primary: oklch(0.62 0.22 290);
-  --sidebar-primary-foreground: oklch(0.985 0.001 286);
-  --sidebar-accent: oklch(0.274 0.006 286.033);
-  --sidebar-accent-foreground: oklch(0.86 0.005 285);
-  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: var(--overlay-hover);
+  --sidebar-accent-foreground: oklch(0.86 0 0);
+  --sidebar-border: oklch(1 0 0 / 8%);
   --sidebar-ring: oklch(0.62 0.22 290);
   --scrollbar-thumb: oklch(1 0 0 / 0.14);
   --scrollbar-thumb-hover: oklch(1 0 0 / 0.26);
@@ -173,6 +1204,35 @@
   --brand-hover: oklch(0.78 0.15 290);
   --sidebar-primary: var(--brand);
   --sidebar-ring: var(--brand);
+  /* Dark mode: the primary CTA inverts to a light fill (text-background gives it
+     dark text automatically), still lightening rest → hover → press. */
+  --btn-primary: oklch(0.976 0 0);
+  --btn-primary-hover: oklch(0.81 0 0);
+  --btn-primary-active: oklch(0.65 0 0);
+  /* Dark: the tooltip inverts to a near-white bubble with dark text. */
+  --tooltip: oklch(0.22 0 0);
+  --tooltip-foreground: oklch(0.92 0 0);
+  /* Dark: overlays flip to white so they lighten surfaces instead of darkening.
+     Semantic aliases (--ui-hover, --btn-ghost-hover, --sidebar-hover, etc.)
+     inherit from these via :root — no need to restate them here. */
+  --overlay-hover-light:   oklch(1 0 0 / 0.055);
+  --overlay-hover:         oklch(1 0 0 / 0.090);
+  --overlay-hover-strong:  oklch(1 0 0 / 0.130);
+  --overlay-active:        oklch(1 0 0 / 0.155);
+  --overlay-active-strong: oklch(1 0 0 / 0.190);
+  --segment-track: oklch(0.24 0 0);
+  --segment-thumb: oklch(0.40 0 0);
+  /* Switch (dark): off gray LIGHTENS on hover (like the other dark control
+     tints); on/thumb inherit the light tokens but off needs its own dark grays. */
+  --switch-off: oklch(0.34 0.005 286);
+  --switch-off-hover: oklch(0.42 0.006 286);
+  --switch-thumb: oklch(0.92 0 0);
+  /* Segmented engage overlays flip to white so they LIGHTEN on dark surfaces. */
+  --segment-overlay-hover: oklch(1 0 0 / 0.06);
+  --segment-overlay-active: oklch(1 0 0 / 0.10);
+  /* Slider (dark): a darker rail; range/thumb inherit (blue is theme-stable). */
+  --slider-track: oklch(0.32 0.004 286);
+  --slider-thumb: oklch(0.95 0 0);
   --success: oklch(0.70 0.15 150);
   --success-foreground: oklch(0.82 0.13 150);
   --success-solid-foreground: var(--background);
@@ -195,15 +1255,19 @@
   --capability-tool: var(--info);
   --capability-tool-foreground: var(--info-foreground);
   --capability-tool-soft: var(--info-soft);
+  --capability-tool-border: var(--info-border);
   --capability-vision: var(--brand);
   --capability-vision-foreground: var(--brand);
   --capability-vision-soft: var(--brand-soft);
+  --capability-vision-border: var(--brand-border);
   --capability-image: oklch(0.76 0.13 340);
   --capability-image-foreground: oklch(0.84 0.12 340);
   --capability-image-soft: oklch(0.30 0.07 340 / 0.35);
+  --capability-image-border: oklch(0.76 0.13 340 / 0.32);
   --capability-reasoning: var(--warning);
   --capability-reasoning-foreground: var(--warning-foreground);
   --capability-reasoning-soft: var(--warning-soft);
+  --capability-reasoning-border: var(--warning-border);
   --context-window-xs: oklch(0.28 0.006 286);
   --context-window-sm: var(--warning-soft);
   --context-window-md: var(--info-soft);
@@ -214,14 +1278,98 @@
   --diff-add-border: oklch(0.70 0.12 145 / 0.48);
   --diff-remove: oklch(0.70 0.12 25 / 0.16);
   --diff-remove-border: oklch(0.70 0.12 25 / 0.48);
+  /* Dark: accent palette — icon colors brightened, soft fills become dark translucent
+     tints. Pattern mirrors success/warning/info dark values: low-L + mid-C + alpha. */
+  --accent-gray: oklch(0.65 0.005 0);
+  --accent-gray-soft: oklch(0.28 0.003 0 / 0.38);
+  --accent-gray-soft-hover: oklch(0.32 0.003 0 / 0.48);
+  --accent-gray-soft-active: oklch(0.36 0.003 0 / 0.55);
+  --accent-gray-border: oklch(0.55 0.004 0 / 0.32);
+  --accent-gray-deep: oklch(0.80 0.004 0);
+  --accent-brown: oklch(0.72 0.08 57);
+  --accent-brown-soft: oklch(0.28 0.05 57 / 0.38);
+  --accent-brown-soft-hover: oklch(0.32 0.05 57 / 0.46);
+  --accent-brown-soft-active: oklch(0.36 0.06 57 / 0.54);
+  --accent-brown-border: oklch(0.72 0.08 57 / 0.32);
+  --accent-brown-deep: oklch(0.84 0.06 57);
+  --accent-orange: oklch(0.76 0.16 53);
+  --accent-orange-soft: oklch(0.28 0.07 53 / 0.38);
+  --accent-orange-soft-hover: oklch(0.32 0.08 53 / 0.46);
+  --accent-orange-soft-active: oklch(0.36 0.09 53 / 0.54);
+  --accent-orange-border: oklch(0.76 0.16 53 / 0.32);
+  --accent-orange-deep: oklch(0.86 0.10 53);
+  --accent-yellow: oklch(0.80 0.14 78);
+  --accent-yellow-soft: oklch(0.30 0.07 78 / 0.38);
+  --accent-yellow-soft-hover: oklch(0.34 0.08 78 / 0.46);
+  --accent-yellow-soft-active: oklch(0.38 0.09 78 / 0.54);
+  --accent-yellow-border: oklch(0.80 0.14 78 / 0.32);
+  --accent-yellow-deep: oklch(0.88 0.10 78);
+  --accent-green: oklch(0.72 0.10 153);
+  --accent-green-soft: oklch(0.28 0.06 153 / 0.38);
+  --accent-green-soft-hover: oklch(0.32 0.07 153 / 0.46);
+  --accent-green-soft-active: oklch(0.36 0.08 153 / 0.54);
+  --accent-green-border: oklch(0.72 0.10 153 / 0.32);
+  --accent-green-deep: oklch(0.84 0.08 153);
+  --accent-teal: oklch(0.74 0.10 212);
+  --accent-teal-soft: oklch(0.28 0.06 212 / 0.38);
+  --accent-teal-soft-hover: oklch(0.32 0.07 212 / 0.46);
+  --accent-teal-soft-active: oklch(0.36 0.08 212 / 0.54);
+  --accent-teal-border: oklch(0.74 0.10 212 / 0.32);
+  --accent-teal-deep: oklch(0.84 0.08 212);
+  --accent-blue: oklch(0.72 0.16 260);
+  --accent-blue-soft: oklch(0.28 0.08 260 / 0.38);
+  --accent-blue-soft-hover: oklch(0.32 0.09 260 / 0.46);
+  --accent-blue-soft-active: oklch(0.36 0.10 260 / 0.54);
+  --accent-blue-border: oklch(0.72 0.16 260 / 0.32);
+  --accent-blue-deep: oklch(0.84 0.10 260);
+  --accent-purple: oklch(0.72 0.12 302);
+  --accent-purple-soft: oklch(0.28 0.07 302 / 0.38);
+  --accent-purple-soft-hover: oklch(0.32 0.08 302 / 0.46);
+  --accent-purple-soft-active: oklch(0.36 0.09 302 / 0.54);
+  --accent-purple-border: oklch(0.72 0.12 302 / 0.32);
+  --accent-purple-deep: oklch(0.84 0.09 302);
+  --accent-pink: oklch(0.72 0.16 356);
+  --accent-pink-soft: oklch(0.28 0.08 356 / 0.38);
+  --accent-pink-soft-hover: oklch(0.32 0.09 356 / 0.46);
+  --accent-pink-soft-active: oklch(0.36 0.10 356 / 0.54);
+  --accent-pink-border: oklch(0.72 0.16 356 / 0.32);
+  --accent-pink-deep: oklch(0.84 0.10 356);
+  --accent-red: oklch(0.72 0.17 28);
+  --accent-red-soft: oklch(0.28 0.08 28 / 0.38);
+  --accent-red-soft-hover: oklch(0.32 0.09 28 / 0.46);
+  --accent-red-soft-active: oklch(0.36 0.10 28 / 0.54);
+  --accent-red-border: oklch(0.72 0.17 28 / 0.32);
+  --accent-red-deep: oklch(0.84 0.10 28);
   --chart-1: var(--brand);
   --chart-2: var(--success);
   --chart-3: var(--info);
   --chart-4: var(--warning);
   --chart-5: var(--destructive);
+  /* Terminal surface (dark): the app canvas, with the body ink for text/cursor. */
+  --terminal-background: #1f1f1f;
+  --terminal-foreground: #e0e0e0;
+  --terminal-cursor: #e0e0e0;
+  --terminal-selection: rgb(224 224 224 / 0.20);
+  /* Dark: field edge uses solid neutral grays (black-alpha is invisible on dark bg).
+       rest ≈ RGB(70) · engaged ≈ RGB(90) · solid ≈ near-white for committed focus */
+  --field-edge-rest: oklch(0.318 0 0);
+  --field-edge-engaged: oklch(0.42 0 0);
+  --field-edge-solid: oklch(0.60 0 0);
+  /* Dark: segmented control labels. The thumb chip is the primary "selected"
+     signal, so idle text can be fully bright. idle ≈ foreground; hover pushes
+     toward white; active also uses --foreground (same as idle, chip distinguishes). */
+  --control-label: oklch(0.86 0 0);
+  --control-label-hover: oklch(0.94 0 0);
+  /* Dark: secondary button hover — pure black fill. Border (--border-hairline)
+     is restored by the .dark override above, so the button shape stays clear. */
+  --btn-secondary-overlay: oklch(0 0 0);
+  /* Dark: destructive ghost hover — warmer translucent red, brighter than before. */
+  --btn-destructive-hover-bg: oklch(0.36 0.12 25 / 0.55);
+  --btn-destructive-hover-text: oklch(0.80 0.18 25);
 }
 
 :root[data-color-scheme="ocean"] {
+  --scheme-hue: 230;
   --brand: oklch(0.56 0.15 230);
   --brand-soft: oklch(0.96 0.035 230);
   --brand-border: oklch(0.84 0.08 230);
@@ -246,6 +1394,11 @@
 }
 
 .dark[data-color-scheme="ocean"] {
+  --scheme-hue: 230;
+  /* :root[data-color-scheme="ocean"] sets --destructive with specificity (0,2,0),
+     which outranks .dark (0,1,0) and bleeds the light-mode value into dark. Restore
+     the dark-appropriate bright red here at equal specificity, later in source. */
+  --destructive: oklch(0.704 0.191 22.216);
   --brand: oklch(0.72 0.13 230);
   --brand-soft: oklch(0.30 0.07 230 / 0.35);
   --brand-border: oklch(0.72 0.13 230 / 0.32);
@@ -269,6 +1422,7 @@
 }
 
 :root[data-color-scheme="forest"] {
+  --scheme-hue: 150;
   --brand: oklch(0.50 0.14 150);
   --brand-soft: oklch(0.96 0.035 150);
   --brand-border: oklch(0.84 0.08 150);
@@ -292,6 +1446,7 @@
 }
 
 .dark[data-color-scheme="forest"] {
+  --scheme-hue: 150;
   --brand: oklch(0.66 0.12 150);
   --brand-soft: oklch(0.30 0.07 150 / 0.35);
   --brand-border: oklch(0.66 0.12 150 / 0.32);
@@ -315,6 +1470,7 @@
 }
 
 :root[data-color-scheme="rose"] {
+  --scheme-hue: 355;
   --brand: oklch(0.58 0.18 355);
   --brand-soft: oklch(0.96 0.035 355);
   --brand-border: oklch(0.84 0.09 355);
@@ -338,6 +1494,7 @@
 }
 
 .dark[data-color-scheme="rose"] {
+  --scheme-hue: 355;
   --brand: oklch(0.74 0.16 355);
   --brand-soft: oklch(0.30 0.07 355 / 0.35);
   --brand-border: oklch(0.74 0.16 355 / 0.32);
@@ -361,6 +1518,7 @@
 }
 
 :root[data-color-scheme="amber"] {
+  --scheme-hue: 70;
   --brand: oklch(0.62 0.15 70);
   --brand-soft: oklch(0.97 0.045 75);
   --brand-border: oklch(0.86 0.10 75);
@@ -384,6 +1542,7 @@
 }
 
 .dark[data-color-scheme="amber"] {
+  --scheme-hue: 70;
   --brand: oklch(0.78 0.13 70);
   --brand-soft: oklch(0.30 0.07 70 / 0.35);
   --brand-border: oklch(0.78 0.13 70 / 0.32);
@@ -404,6 +1563,65 @@
   --event-heartbeat-foreground: oklch(0.82 0.13 350);
   --event-heartbeat-soft: oklch(0.30 0.07 350 / 0.35);
   --event-heartbeat-border: oklch(0.76 0.15 350 / 0.32);
+}
+
+:root[data-color-scheme]:not([data-color-scheme="memoh"]) {
+  --background: oklch(0.984 0.004 var(--scheme-hue));
+  --background-chrome: oklch(0.978 0.004 var(--scheme-hue));
+  --foreground: oklch(0.21 0.004 var(--scheme-hue));
+  --secondary: oklch(0.968 0.004 var(--scheme-hue));
+  --secondary-foreground: var(--foreground);
+  --muted: var(--secondary);
+  --muted-foreground: oklch(0.52 0.006 var(--scheme-hue));
+  --accent: var(--secondary);
+  --accent-foreground: var(--foreground);
+  --border: oklch(0.915 0.0045 var(--scheme-hue));
+  --input: var(--border);
+  --popover: var(--card);
+  --popover-foreground: var(--card-foreground);
+  --sidebar: var(--background);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-accent: oklch(0.945 0.004 var(--scheme-hue));
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: oklch(0.905 0.0045 var(--scheme-hue));
+  /* sidebar-hover must be a solid value lighter than sidebar-accent so the
+     hover state reads as less prominent than the active state. Using the
+     inherited overlay (--overlay-hover-light = 4.5% black) on a L=0.984
+     background produces ~L=0.940, which is darker than sidebar-accent
+     (L=0.945) — inverting the intended hierarchy in light mode. */
+  --sidebar-hover: oklch(0.964 0.004 var(--scheme-hue));
+  --segment-track: oklch(0.945 0.005 var(--scheme-hue));
+}
+
+.dark[data-color-scheme]:not([data-color-scheme="memoh"]) {
+  --background: oklch(0.152 0.006 var(--scheme-hue));
+  --foreground: oklch(0.90 0.004 var(--scheme-hue));
+  --card: oklch(0.21 0.006 var(--scheme-hue));
+  --card-foreground: oklch(0.90 0.004 var(--scheme-hue));
+  --popover: var(--card);
+  --popover-foreground: var(--card-foreground);
+  --secondary: oklch(0.26 0.006 var(--scheme-hue));
+  --secondary-foreground: var(--foreground);
+  --muted: var(--secondary);
+  --muted-foreground: oklch(0.70 0.006 var(--scheme-hue));
+  --accent: var(--secondary);
+  --accent-foreground: var(--foreground);
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 14%);
+  --sidebar: oklch(0.185 0.006 var(--scheme-hue));
+  --sidebar-foreground: var(--card-foreground);
+  --sidebar-accent: oklch(0.30 0.006 var(--scheme-hue));
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  /* The light-scheme block above sets --sidebar-hover to a solid L=0.964 value.
+     In dark mode that solid near-white bleeds through onto the dark sidebar
+     (L≈0.185) and renders as ~rgb(240,244,245). Reset to the overlay token so
+     hover correctly lightens the dark surface instead. */
+  --sidebar-hover: var(--overlay-hover-light);
+  --segment-track: oklch(0.24 0.006 var(--scheme-hue));
+  --segment-thumb: oklch(0.40 0.006 var(--scheme-hue));
+  --control-label: oklch(0.86 0.004 var(--scheme-hue));
+  --control-label-hover: oklch(0.94 0.004 var(--scheme-hue));
 }
 
 @theme inline {
@@ -431,10 +1649,56 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --radius-2xs: calc(var(--radius) - 7px);
+  --radius-xs: calc(var(--radius) - 6px);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  /* Menu geometry: row = 8px, shell = row + 4px. */
+  --radius-menu: calc(var(--radius) - 2px);
+  --radius-menu-shell: calc(var(--radius) + 2px);
+
+  /* Accordion open/close — height tween driven by reka's measured content height.
+     Kept short (matches the menu/fast-motion budget) so sections feel snappy. */
+  --animate-accordion-down: accordion-down 0.18s ease-out;
+  --animate-accordion-up: accordion-up 0.18s ease-out;
+
+  /* Type scale: semantic sizes with line-height + tracking baked in.
+     Tuned for variable Latin + CJK fonts.
+     Weight is ROLE-MAPPED via the --font-weight-* overrides below — do not free-style:
+       · font-semibold (520) → surface / section titles (Card / Dialog / Sheet)
+       · font-medium   (450) → labels, button text, badges, small/inline titles, emphasis
+       · font-normal   (360) → body, descriptions, field values, placeholder, input text */
+  --text-caption: 0.6875rem; /* 11px — badges, tiny meta */
+  --text-caption--line-height: 1rem;
+  --text-caption--letter-spacing: -0.04px;
+  --text-body: 0.75rem; /* 12px — default UI body (workhorse) */
+  --text-body--line-height: 1rem;
+  --text-body--letter-spacing: -0.08px;
+  --text-label: 0.8125rem; /* 13px — form labels, emphasized small */
+  --text-label--line-height: 1.125rem;
+  --text-label--letter-spacing: -0.1px;
+  --text-control: 0.875rem; /* 14px — buttons, compact titles */
+  --text-control--line-height: 1.25rem;
+  --text-control--letter-spacing: -0.14px;
+  --text-title: 1rem; /* 16px — card / section / sheet titles */
+  --text-title--line-height: 1.4rem;
+  --text-title--letter-spacing: -0.18px;
+  --text-heading: 1.125rem; /* 18px — dialog / page headings */
+  --text-heading--line-height: 1.55rem;
+  --text-heading--letter-spacing: -0.26px;
+  --text-display: 1.5rem; /* 24px — hero / empty-state */
+  --text-display--line-height: 1.85rem;
+  --text-display--letter-spacing: -0.4px;
+
+  /* Font-weight overrides: Inter runs ~half-step heavier than SF Pro at the same
+     numeric weight, so the Tailwind role-map values are shifted down accordingly. */
+  --font-weight-normal: 360;
+  --font-weight-medium: 450;
+  --font-weight-semibold: 520;
+  --font-weight-bold: 620;
+
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -481,15 +1745,19 @@
   --color-capability-tool: var(--capability-tool);
   --color-capability-tool-foreground: var(--capability-tool-foreground);
   --color-capability-tool-soft: var(--capability-tool-soft);
+  --color-capability-tool-border: var(--capability-tool-border);
   --color-capability-vision: var(--capability-vision);
   --color-capability-vision-foreground: var(--capability-vision-foreground);
   --color-capability-vision-soft: var(--capability-vision-soft);
+  --color-capability-vision-border: var(--capability-vision-border);
   --color-capability-image: var(--capability-image);
   --color-capability-image-foreground: var(--capability-image-foreground);
   --color-capability-image-soft: var(--capability-image-soft);
+  --color-capability-image-border: var(--capability-image-border);
   --color-capability-reasoning: var(--capability-reasoning);
   --color-capability-reasoning-foreground: var(--capability-reasoning-foreground);
   --color-capability-reasoning-soft: var(--capability-reasoning-soft);
+  --color-capability-reasoning-border: var(--capability-reasoning-border);
   --color-context-window-xs: var(--context-window-xs);
   --color-context-window-sm: var(--context-window-sm);
   --color-context-window-md: var(--context-window-md);
@@ -507,7 +1775,12 @@
     @apply border-border outline-ring/50;
   }
   body {
+    font-family: var(--font-sans);
+    font-weight: 360;
     @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 
   * {
@@ -516,8 +1789,8 @@
   }
 
   *::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
   }
 
   *::-webkit-scrollbar-track,
@@ -527,12 +1800,257 @@
 
   *::-webkit-scrollbar-thumb {
     background-color: var(--scrollbar-thumb);
-    border: 2px solid transparent;
+    border: 1px solid transparent;
     border-radius: 9999px;
     background-clip: padding-box;
   }
 
   *::-webkit-scrollbar-thumb:hover {
     background-color: var(--scrollbar-thumb-hover);
+  }
+}
+
+/* Theme-switch crossfade via View Transitions API.
+   The browser captures before/after screenshots and animates between them.
+   Respect prefers-reduced-motion: skip the animation for users who opt out. */
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 220ms;
+    animation-timing-function: ease;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 0ms;
+  }
+}
+
+/* ── Toast (Memoh) ───────────────────────────────────────────────────────────
+   Our own toast surface (components/sonner/Toaster.vue + toast.ts) — replaces
+   vue-sonner. Plain fixed flex column: NO JS height measurement, NO transform-
+   offset depth stack. The close × is a real flex child (ghost icon Button),
+   not an absolute corner chip, so its hit area is stable.
+   Card: pure --background fill, --border-menu hairline, --radius-menu-shell,
+   no shadow. Colour stays neutral; semantic intent is carried ONLY by the
+   leading semantic icon.
+   Two layout variants: single (no description) and rich (has description). */
+.memoh-toaster {
+  position: fixed;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 22rem;
+  max-width: calc(100vw - 2rem);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  /* the column is click-through; only the cards capture the pointer, so the empty
+     gaps never block the workspace underneath. */
+  pointer-events: none;
+  /* Teleported to <body>, the toaster sits OUTSIDE the app's no-drag wrappers and
+     overlaps the desktop titlebar drag strip (titleBarStyle:'hidden'). Without this,
+     the OS treats the top of each card as window-drag surface and swallows the
+     pointer, so hover/clicks only land where the card clears the drag region. Opt
+     the whole stack back out (no-op on web). See apps/desktop/AGENTS.md. */
+  -webkit-app-region: no-drag;
+}
+.memoh-toaster > * {
+  pointer-events: auto;
+}
+.memoh-toaster--top-right,
+.memoh-toaster--top-left,
+.memoh-toaster--top-center {
+  top: 1rem;
+}
+.memoh-toaster--bottom-right,
+.memoh-toaster--bottom-left,
+.memoh-toaster--bottom-center {
+  bottom: 1rem;
+}
+.memoh-toaster--top-right,
+.memoh-toaster--bottom-right {
+  right: 1rem;
+}
+.memoh-toaster--top-left,
+.memoh-toaster--bottom-left {
+  left: 1rem;
+}
+.memoh-toaster--top-center,
+.memoh-toaster--bottom-center {
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* ── Toast card shell ─────────────────────────────────────────────────────── */
+.memoh-toast {
+  /* Ghost button hover chip recalibrated to the popover surface —
+     see comment in the no-drag block above for full rationale. */
+  --btn-ghost-hover: var(--btn-ghost-hover-on-popover);
+  display: flex;
+  gap: 0.5rem;
+  border-radius: var(--radius-menu-shell);
+  border: 1px solid var(--border-menu);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: none;
+}
+
+/* ── SINGLE LINE: no description ─────────────────────────────────────────── *
+ *  icon · title · (action) · ×   — one flat row, all center-aligned.         *
+ * ─────────────────────────────────────────────────────────────────────────── */
+.memoh-toast--single {
+  align-items: center;
+  padding: 0.375rem 0.375rem 0.375rem 0.75rem;
+}
+
+/* ── RICH: has description ───────────────────────────────────────────────── *
+ *  icon · [title-row · (action)]  · ×   — top-aligned outer shell            *
+ *            desc                                                             *
+ * ─────────────────────────────────────────────────────────────────────────── */
+.memoh-toast--rich {
+  align-items: flex-start;
+  padding: 0.625rem 0.375rem 0.625rem 0.75rem;
+}
+
+/* ── Icons ────────────────────────────────────────────────────────────────── */
+.memoh-toast__icon {
+  flex-shrink: 0;
+}
+/* In rich mode (align-items: flex-start) each icon's optical center sits at a
+   slightly different height within the 24×24 Lucide viewBox, so they each need
+   an individual nudge to land on the 13px title cap-line. */
+.memoh-toast__icon--rich {
+  margin-top: 1px; /* info — already close, minimal nudge */
+}
+.memoh-toast--rich[data-variant="warning"] .memoh-toast__icon--rich,
+.memoh-toast--rich[data-variant="success"] .memoh-toast__icon--rich,
+.memoh-toast--rich[data-variant="error"]   .memoh-toast__icon--rich {
+  margin-top: 2px;
+}
+.memoh-toast[data-variant="success"] .memoh-toast__icon { color: var(--success); }
+.memoh-toast[data-variant="warning"] .memoh-toast__icon { color: var(--warning); }
+.memoh-toast[data-variant="error"]   .memoh-toast__icon { color: var(--destructive); }
+.memoh-toast[data-variant="info"]    .memoh-toast__icon { color: var(--info); }
+
+/* Single-line title stretches to fill the row */
+.memoh-toast__title--grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ── Rich body: column layout, title → desc → (action) ───────────────────── */
+.memoh-toast__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Typography ───────────────────────────────────────────────────────────── */
+/* Long unbreakable tokens (file paths, URLs, IDs — e.g. a raw backend error like
+   "open /Users/…/workspaces/1/documents/项目: no such file or directory") must
+   wrap INSIDE the card, never spill past the close button. `anywhere` also lets
+   the flex item collapse to its true min-content width, so a wall-of-text title
+   can't push the row wider than the 22rem column. Applies to single + rich. */
+.memoh-toast__title,
+.memoh-toast__desc {
+  overflow-wrap: anywhere;
+}
+/* Single-line: one grade larger — the card is compact so the title carries more weight */
+.memoh-toast--single .memoh-toast__title {
+  font-size: var(--text-control);
+  line-height: var(--text-control--line-height);
+  letter-spacing: var(--text-control--letter-spacing);
+  font-weight: 500;
+}
+/* Rich: title at text-label (13px) — desc sits below so title doesn't need to dominate */
+.memoh-toast--rich .memoh-toast__title {
+  font-size: var(--text-label);
+  line-height: var(--text-label--line-height);
+  letter-spacing: var(--text-label--letter-spacing);
+  font-weight: 500;
+}
+.memoh-toast__desc {
+  margin-top: 0.25rem;
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+  letter-spacing: var(--text-body--letter-spacing);
+  color: var(--muted-foreground);
+}
+
+/* ── Action + Close ───────────────────────────────────────────────────────── */
+/* Toast action button (Retry / Undo / Copy / Open settings…). The `sm` button is
+   32px tall with the standard 14px control type — too chunky for this compact
+   card, where it visually competes with the title. Tighten BOTH layouts to a
+   secondary affordance: 28px tall, no vertical padding, and the title's 13px
+   `text-label` type (a notch under the button default) so it reads as an action,
+   not a control hogging the toast. Single-line stays center-aligned by the row;
+   rich pins below the description (see the rich rule). */
+.memoh-toast__action {
+  flex-shrink: 0;
+  height: 1.75rem;
+  padding-top: 0;
+  padding-bottom: 0;
+  font-size: var(--text-label);
+  line-height: var(--text-label--line-height);
+  letter-spacing: var(--text-label--letter-spacing);
+}
+/* TODO: if other compact contexts (inline list actions, tab bars, etc.) also
+   need this height, extract it as a proper `xs` size in button/index.ts instead
+   of duplicating this override. */
+
+/* Rich action: lives inside .memoh-toast__body (flex column). Push it down so
+   the visual gap from desc-text-bottom to button-top ≈ card's padding-bottom
+   (0.625rem / 10px).  desc half-leading ≈ 2px, so margin-top 0.5rem (8px)
+   gives ~10px visual distance — matching the bottom padding symmetrically. */
+.memoh-toast--rich .memoh-toast__action {
+  align-self: flex-start;
+  margin-top: 0.5rem;
+}
+
+/* Single-line close: no adjustment needed (outer row is already center-aligned) */
+.memoh-toast__close {
+  flex-shrink: 0;
+}
+
+/* Rich close: icon-sm is 32px, title line-box is 18px. With flex-start the
+   button top aligns to the card top edge; pull it up so its visual center
+   tracks the title's cap-line instead of sitting a full button-radius below. */
+.memoh-toast__close--rich {
+  margin-top: -0.25rem;
+}
+
+/* enter: a SHORT slide in from the right + fade. exit: quick fade back to the
+   right. The leaving card drops out of flow so the rest slide up cleanly. No
+   vertical travel, no scale — the "from the right, local fade" spec. */
+.memoh-toast-enter-from,
+.memoh-toast-leave-to {
+  opacity: 0;
+  transform: translateX(1rem);
+}
+.memoh-toast-enter-active {
+  transition:
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 140ms ease;
+}
+.memoh-toast-leave-active {
+  position: absolute;
+  width: 100%;
+  transition:
+    transform 140ms ease,
+    opacity 120ms ease;
+}
+.memoh-toast-move {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .memoh-toast-enter-active,
+  .memoh-toast-leave-active,
+  .memoh-toast-move {
+    transition-duration: 1ms;
   }
 }

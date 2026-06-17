@@ -367,8 +367,42 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// (via @mention or reply) to avoid all bots responding to the same command.
 	cmdText := rawTextForCommand(msg, text)
 
-	// /new and /stop require route context, so they are handled separately
-	// from the general command handler (which runs before route resolution).
+	// /start, /new, /stop, and /status require channel-layer handling outside
+	// the generic command handler (which runs before route resolution).
+	//
+	// /new, /stop, and /status run before the chat ACL gate below, so gate them
+	// with the same command-access policy (chat ACL + manage) — otherwise an
+	// outsider who cannot chat could still reset/stop/inspect the bot's session.
+	// /start is intentionally left ungated: it only returns a static welcome
+	// message and acts as the onboarding entry point for users who cannot chat yet.
+	if isDirectedAtBot(msg) &&
+		(isNewSessionCommand(cmdText) || isStopCommand(cmdText) || isStatusCommand(cmdText)) &&
+		p.commandHandler != nil {
+		ok, accErr := p.commandHandler.CommandAccess(ctx, command.ExecuteInput{
+			BotID:             strings.TrimSpace(identity.BotID),
+			ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
+			UserID:            strings.TrimSpace(identity.UserID),
+			Text:              cmdText,
+			ChannelType:       msg.Channel.String(),
+			ConversationType:  strings.TrimSpace(msg.Conversation.Type),
+			ConversationID:    strings.TrimSpace(msg.Conversation.ID),
+			ThreadID:          extractThreadID(msg),
+		})
+		if accErr != nil || !ok {
+			if p.logger != nil {
+				p.logger.Info("mode command denied by acl — ignored",
+					slog.String("channel", msg.Channel.String()),
+					slog.String("bot_id", strings.TrimSpace(identity.BotID)),
+					slog.String("channel_identity_id", strings.TrimSpace(identity.ChannelIdentityID)),
+					slog.Any("error", accErr),
+				)
+			}
+			return nil
+		}
+	}
+	if isStartCommand(cmdText) && isDirectedAtBot(msg) {
+		return p.handleStartCommand(ctx, msg, sender, identity)
+	}
 	if isNewSessionCommand(cmdText) && isDirectedAtBot(msg) {
 		return p.handleNewSessionCommand(ctx, cfg, msg, sender, identity)
 	}
@@ -533,6 +567,25 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				slog.String("channel_identity_id", strings.TrimSpace(identity.ChannelIdentityID)),
 				slog.String("conversation_type", strings.TrimSpace(msg.Conversation.Type)),
 			)
+		}
+		// Don't leave the sender in silence. For a directed message (a DM, or an
+		// @mention/reply in a group) reply with an access/bind hint: a forgetful
+		// owner learns how to link in via /link, and an outsider learns they
+		// aren't permitted. Stay silent for undirected group chatter so we don't
+		// spam the room with denials.
+		if isDirectedAtBot(msg) {
+			loc := p.localizer(ctx, identity.BotID)
+			role := p.accessDeniedRole(ctx, identity)
+			out := applyMessageFormat(channel.Message{Text: command.AccessDeniedMessage(loc, role)}, p.channelCaps(msg.Channel))
+			if mid := strings.TrimSpace(msg.Message.ID); mid != "" {
+				out.Reply = &channel.ReplyRef{MessageID: mid}
+			}
+			if sendErr := sender.Send(ctx, channel.OutboundMessage{
+				Target:  strings.TrimSpace(msg.ReplyTarget),
+				Message: out,
+			}); sendErr != nil && p.logger != nil {
+				p.logger.Warn("send acl-denied hint failed", slog.Any("error", sendErr))
+			}
 		}
 		return nil
 	}
@@ -1104,6 +1157,24 @@ func (p *ChannelInboundProcessor) sendModeConfirmation(
 			Emoji:     emoji,
 		})
 	}
+}
+
+func (p *ChannelInboundProcessor) accessDeniedRole(ctx context.Context, identity InboundIdentity) string {
+	if p == nil || p.commandHandler == nil {
+		return ""
+	}
+	role, err := p.commandHandler.MemberRole(ctx, identity.BotID, identity.ChannelIdentityID)
+	if err != nil {
+		if p.logger != nil {
+			p.logger.Warn("resolve acl-denied role failed",
+				slog.String("bot_id", strings.TrimSpace(identity.BotID)),
+				slog.String("channel_identity_id", strings.TrimSpace(identity.ChannelIdentityID)),
+				slog.Any("error", err),
+			)
+		}
+		return ""
+	}
+	return role
 }
 
 // drainQueue marks the route as done and processes any queued tasks.
@@ -2864,6 +2935,44 @@ func (p *ChannelInboundProcessor) handleStopCommand(
 		)
 	}
 	return nil
+}
+
+// isStartCommand returns true when the command text is "/start" (with optional
+// Telegram-style @botname suffix and a deep-link payload). Telegram deep links
+// deliver "/start <payload>" (and "/start@bot <payload>" in groups), which Parse
+// reads as an Action/Args; the payload is ignored — any /start opens the welcome.
+func isStartCommand(cmdText string) bool {
+	extracted := command.ExtractCommandText(cmdText)
+	if extracted == "" {
+		return false
+	}
+	parsed, err := command.Parse(extracted)
+	if err != nil {
+		return false
+	}
+	return parsed.Resource == "start"
+}
+
+// handleStartCommand replies with a lightweight welcome. Unlike /new it does not
+// reset the active session or show configuration — it only opens the door.
+func (p *ChannelInboundProcessor) handleStartCommand(
+	ctx context.Context,
+	msg channel.InboundMessage,
+	sender channel.StreamReplySender,
+	identity InboundIdentity,
+) error {
+	target := strings.TrimSpace(msg.ReplyTarget)
+	if target == "" {
+		return errors.New("reply target missing for /start command")
+	}
+	loc := p.localizer(ctx, identity.BotID)
+	caps := p.channelCaps(msg.Channel)
+
+	out := applyMessageFormat(channel.Message{Text: formatStartWelcomeMessage(loc)}, caps)
+	if mid := strings.TrimSpace(msg.Message.ID); mid != "" {
+		out.Reply = &channel.ReplyRef{MessageID: mid}
+	}
+	return sender.Send(ctx, channel.OutboundMessage{Target: target, Message: out})
 }
 
 // isNewSessionCommand returns true when the command text is "/new" (with

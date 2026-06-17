@@ -1,214 +1,206 @@
 <template>
-  <SettingsShell width="standard">
-    <section class="flex justify-between items-center">
-      <div class="flex items-center gap-2">
-        <Mail
-          class="size-5"
-        />
-        <div>
-          <h2 class="text-sm font-semibold">
+  <SettingsShell width="narrow">
+    <div class="space-y-6">
+      <!-- Identity card: name on the left, delete on the right — same header
+           shape as the provider / web search / voice details. -->
+      <section class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3">
+        <span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
+          <Mail class="size-5 text-muted-foreground" />
+        </span>
+        <div class="min-w-0 flex-1">
+          <h2 class="truncate text-sm font-semibold">
             {{ curProvider?.name }}
           </h2>
-          <p class="text-xs text-muted-foreground">
-            {{ curProvider?.provider }}
-          </p>
         </div>
-      </div>
-    </section>
-    <Separator class="mt-4 mb-6" />
-
-    <form @submit="handleSave">
-      <div class="grid gap-4 md:grid-cols-2">
-        <FormField
-          v-slot="{ componentField }"
-          name="name"
-        >
-          <FormItem class="md:col-span-2">
-            <Label :for="'email-provider-name'">
-              {{ $t('common.name') }}
-            </Label>
-            <FormControl>
-              <Input
-                :id="'email-provider-name'"
-                type="text"
-                :placeholder="$t('common.namePlaceholder')"
-                v-bind="componentField"
-              />
-            </FormControl>
-          </FormItem>
-        </FormField>
-
-        <Separator class="md:col-span-2" />
-
-        <!-- Dynamic config fields from meta schema -->
-        <div
-          v-for="field in orderedFields"
-          :key="field.key"
-          class="space-y-2"
-          :class="isWideField(field) ? 'md:col-span-2' : ''"
-        >
-          <Label :for="field.type === 'bool' || field.type === 'enum' ? undefined : `email-field-${field.key}`">
-            {{ $te(`email.fields.${field.key}`) ? $t(`email.fields.${field.key}`) : (field.title || field.key) }}
-            <span
-              v-if="!field.required"
-              class="text-xs text-muted-foreground ml-1"
-            >({{ $t('common.optional') }})</span>
-          </Label>
-          <p
-            v-if="field.description"
-            class="text-xs text-muted-foreground"
+        <div class="ml-auto shrink-0">
+          <ConfirmPopover
+            :message="$t('email.deleteConfirm')"
+            :loading="deleteLoading"
+            variant="destructive"
+            @confirm="handleDelete"
           >
-            {{ field.description }}
-          </p>
-
-          <div
-            v-if="field.type === 'secret'"
-            class="relative"
-          >
-            <Input
-              :id="`email-field-${field.key}`"
-              v-model="configData[field.key!] as string"
-              :type="visibleSecrets[field.key!] ? 'text' : 'password'"
-              :placeholder="field.example ? String(field.example) : ''"
-            />
-            <button
-              type="button"
-              class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              @click="visibleSecrets[field.key!] = !visibleSecrets[field.key!]"
-            >
-              <component
-                :is="visibleSecrets[field.key!] ? EyeOff : Eye"
-                class="size-3.5"
-              />
-            </button>
-          </div>
-
-          <Switch
-            v-else-if="field.type === 'bool'"
-            :model-value="!!configData[field.key!]"
-            @update:model-value="(val) => configData[field.key!] = !!val"
-          />
-
-          <Input
-            v-else-if="field.type === 'number'"
-            :id="`email-field-${field.key}`"
-            v-model.number="configData[field.key!] as string"
-            type="number"
-            :placeholder="field.example ? String(field.example) : ''"
-          />
-
-          <Select
-            v-else-if="field.type === 'enum' && field.enum"
-            :model-value="String(configData[field.key!] || '')"
-            @update:model-value="(val) => configData[field.key!] = val"
-          >
-            <SelectTrigger>
-              <SelectValue :placeholder="field.title || field.key" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem
-                v-for="opt in field.enum"
-                :key="opt"
-                :value="opt"
+            <template #trigger>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                class="text-muted-foreground hover:text-destructive"
+                :aria-label="$t('common.delete')"
               >
-                {{ opt }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-
-          <Input
-            v-else
-            :id="`email-field-${field.key}`"
-            v-model="configData[field.key !] as string"
-            type="text"
-            :placeholder="field.example ? String(field.example) : ''"
-          />
+                <Trash2 class="size-4" />
+              </Button>
+            </template>
+          </ConfirmPopover>
         </div>
-      </div>
+      </section>
 
-      <!-- OAuth authorization button for Gmail -->
-      <section
-        v-if="isOAuthProvider"
-        class="mt-6 p-4 border rounded-lg bg-muted/30"
-      >
-        <div class="flex flex-wrap items-start justify-between gap-4">
-          <div class="flex-1 min-w-55">
-            <p class="text-xs font-medium">
-              {{ $t('email.oauth.title') }}
-            </p>
-            <p class="text-xs text-muted-foreground mt-0.5">
-              {{ $t('email.oauth.description') }}
-            </p>
-            <p
-              class="text-xs mt-2"
-              :class="oauthTokenExpired ? 'text-destructive' : 'text-muted-foreground'"
+      <form @submit="handleSave">
+        <!-- Configuration card -->
+        <SettingsSection :title="$t('provider.configurationTitle')">
+          <div>
+            <FormField
+              v-slot="{ componentField }"
+              name="name"
             >
-              <template v-if="oauthStatusLoading">
-                {{ $t('email.oauth.status.checking') }}
-              </template>
-              <template v-else-if="oauthStatus && !oauthStatus.configured">
-                {{ $t('email.oauth.status.notConfigured') }}
-              </template>
-              <template v-else-if="oauthTokenExpired">
-                {{ $t('email.oauth.status.expired') }}
-              </template>
-              <template v-else-if="oauthStatus && oauthStatus.has_token">
-                {{ oauthStatus.email_address ? $t('email.oauth.status.authorized', { email: oauthStatus.email_address }) : $t('email.oauth.status.authorizedUnknown') }}
-              </template>
-              <template v-else>
-                {{ $t('email.oauth.status.missing') }}
-              </template>
-            </p>
-          </div>
-          <div class="flex items-center gap-2">
-            <LoadingButton
-              type="button"
-              variant="outline"
-              :disabled="!canAuthorize"
-              :loading="authorizeLoading"
-              @click="handleAuthorize"
+              <SettingsRow :label="$t('common.name')">
+                <FormItem class="w-80">
+                  <FormControl>
+                    <Input
+                      id="email-provider-name"
+                      type="text"
+                      :placeholder="$t('common.namePlaceholder')"
+                      v-bind="componentField"
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              </SettingsRow>
+            </FormField>
+
+            <SettingsRow
+              v-for="field in orderedFields"
+              :key="field.key"
+              :label="fieldLabel(field)"
+              :description="field.description"
             >
-              <KeyRound
-                class="mr-1.5"
+              <div
+                v-if="field.type === 'secret'"
+                class="relative w-80"
+              >
+                <Input
+                  :id="`email-field-${field.key}`"
+                  v-model="configData[field.key!] as string"
+                  :type="visibleSecrets[field.key!] ? 'text' : 'password'"
+                  class="pr-9"
+                  :placeholder="field.example ? String(field.example) : ''"
+                />
+                <button
+                  type="button"
+                  class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  @click="visibleSecrets[field.key!] = !visibleSecrets[field.key!]"
+                >
+                  <component
+                    :is="visibleSecrets[field.key!] ? EyeOff : Eye"
+                    class="size-3.5"
+                  />
+                </button>
+              </div>
+
+              <Switch
+                v-else-if="field.type === 'bool'"
+                :model-value="!!configData[field.key!]"
+                @update:model-value="(val) => configData[field.key!] = !!val"
               />
-              {{ $t('email.oauth.authorize') }}
-            </LoadingButton>
+
+              <Input
+                v-else-if="field.type === 'number'"
+                :id="`email-field-${field.key}`"
+                v-model.number="configData[field.key!] as string"
+                type="number"
+                class="w-40"
+                :placeholder="field.example ? String(field.example) : ''"
+              />
+
+              <Select
+                v-else-if="field.type === 'enum' && field.enum"
+                :model-value="String(configData[field.key!] || '')"
+                @update:model-value="(val) => configData[field.key!] = val"
+              >
+                <SelectTrigger class="w-80">
+                  <SelectValue :placeholder="field.title || field.key" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    v-for="opt in field.enum"
+                    :key="opt"
+                    :value="opt"
+                  >
+                    {{ opt }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Input
+                v-else
+                :id="`email-field-${field.key}`"
+                v-model="configData[field.key !] as string"
+                type="text"
+                class="w-80"
+                :placeholder="field.example ? String(field.example) : ''"
+              />
+            </SettingsRow>
+          </div>
+
+          <div class="mx-4 flex items-center justify-end border-t border-border py-3">
             <LoadingButton
-              v-if="hasOAuthToken"
-              type="button"
-              variant="ghost"
-              :loading="revokeLoading"
-              @click="handleRevoke"
+              type="submit"
+              size="sm"
+              :loading="editLoading"
             >
-              {{ $t('email.oauth.logout') }}
+              {{ $t('provider.saveChanges') }}
             </LoadingButton>
           </div>
-        </div>
-      </section>
+        </SettingsSection>
 
-      <section class="flex justify-end mt-6 gap-4">
-        <ConfirmPopover
-          :message="$t('email.deleteConfirm')"
-          :loading="deleteLoading"
-          @confirm="handleDelete"
+        <!-- Gmail OAuth authorization -->
+        <SettingsSection
+          v-if="isOAuthProvider"
+          :title="$t('email.oauth.title')"
+          class="mt-6"
         >
-          <template #trigger>
-            <Button
-              type="button"
-              variant="outline"
-            >
-              <Trash2 />
-            </Button>
-          </template>
-        </ConfirmPopover>
-        <LoadingButton
-          type="submit"
-          :loading="editLoading"
-        >
-          {{ $t('provider.saveChanges') }}
-        </LoadingButton>
-      </section>
-    </form>
+          <div class="flex flex-wrap items-start justify-between gap-4 p-4">
+            <div class="min-w-55 flex-1 space-y-1">
+              <p class="text-xs text-muted-foreground">
+                {{ $t('email.oauth.description') }}
+              </p>
+              <p
+                class="text-xs"
+                :class="oauthTokenExpired ? 'text-destructive' : 'text-muted-foreground'"
+              >
+                <template v-if="oauthStatusLoading">
+                  {{ $t('email.oauth.status.checking') }}
+                </template>
+                <template v-else-if="oauthStatus && !oauthStatus.configured">
+                  {{ $t('email.oauth.status.notConfigured') }}
+                </template>
+                <template v-else-if="oauthTokenExpired">
+                  {{ $t('email.oauth.status.expired') }}
+                </template>
+                <template v-else-if="oauthStatus && oauthStatus.has_token">
+                  {{ oauthStatus.email_address ? $t('email.oauth.status.authorized', { email: oauthStatus.email_address }) : $t('email.oauth.status.authorizedUnknown') }}
+                </template>
+                <template v-else>
+                  {{ $t('email.oauth.status.missing') }}
+                </template>
+              </p>
+            </div>
+            <div class="flex items-center gap-2">
+              <LoadingButton
+                type="button"
+                variant="outline"
+                size="sm"
+                :disabled="!canAuthorize"
+                :loading="authorizeLoading"
+                @click="handleAuthorize"
+              >
+                <KeyRound class="size-4" />
+                {{ $t('email.oauth.authorize') }}
+              </LoadingButton>
+              <LoadingButton
+                v-if="hasOAuthToken"
+                type="button"
+                variant="ghost"
+                size="sm"
+                :loading="revokeLoading"
+                @click="handleRevoke"
+              >
+                {{ $t('email.oauth.logout') }}
+              </LoadingButton>
+            </div>
+          </div>
+        </SettingsSection>
+      </form>
+    </div>
   </SettingsShell>
 </template>
 
@@ -219,21 +211,22 @@ import {
   FormControl,
   FormField,
   FormItem,
-  Separator,
+  FormMessage,
   Select,
   SelectTrigger,
   SelectValue,
   SelectContent,
   SelectItem,
   Switch,
-  Label,
 } from '@memohai/ui'
 import { Mail, Eye, EyeOff, KeyRound, Trash2 } from 'lucide-vue-next'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
 import SettingsShell from '@/components/settings-shell/index.vue'
+import SettingsSection from '@/components/settings/section.vue'
+import SettingsRow from '@/components/settings/row.vue'
 import { computed, inject, reactive, ref, watch } from 'vue'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
@@ -251,7 +244,7 @@ import type { EmailProviderResponse, EmailProviderMeta, EmailFieldSchema, Handle
 
 const OAUTH_PROVIDERS = ['gmail']
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const curProvider = inject('curEmailProvider', ref<EmailProviderResponse>())
 const curProviderId = computed(() => curProvider.value?.id)
 
@@ -274,12 +267,12 @@ const orderedFields = computed<EmailFieldSchema[]>(() => {
   return [...fields].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 })
 
-function isWideField(field: EmailFieldSchema) {
-  if (field.type === 'secret') return true
-  const key = String(field.key ?? '').toLowerCase()
-  if (key.includes('url') || key.includes('endpoint') || key.includes('key') || key.includes('token') || key.includes('path') || key.includes('uri') || key.includes('address') || key.includes('domain') || key.includes('sender') || key.includes('from') || key.includes('to')) return true
-  if ((field.description ?? '').length > 80) return true
-  return false
+// Field label: an i18n override when present, else the schema title/key, with a
+// muted "(optional)" suffix for non-required fields.
+function fieldLabel(field: EmailFieldSchema): string {
+  const key = `email.fields.${field.key}`
+  const base = te(key) ? t(key) : (field.title || field.key || '')
+  return field.required ? base : `${base} (${t('common.optional')})`
 }
 
 const isOAuthProvider = computed(() =>

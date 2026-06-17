@@ -8,7 +8,7 @@
         v-if="status"
         class="flex items-center gap-1.5 text-muted-foreground"
       >
-        <span class="text-[10px] uppercase tracking-wide text-muted-foreground/70 shrink-0">
+        <span class="text-caption uppercase tracking-wide text-muted-foreground/70 shrink-0">
           {{ t('chat.tools.detail.status') }}
         </span>
         <span class="font-mono">{{ status }}</span>
@@ -17,7 +17,7 @@
         v-if="sessionId"
         class="flex items-center gap-1.5 text-muted-foreground"
       >
-        <span class="text-[10px] uppercase tracking-wide text-muted-foreground/70 shrink-0">
+        <span class="text-caption uppercase tracking-wide text-muted-foreground/70 shrink-0">
           {{ t('chat.tools.detail.session') }}
         </span>
         <span
@@ -29,7 +29,7 @@
         v-if="cdpUrl"
         class="flex items-center gap-1.5 text-muted-foreground"
       >
-        <span class="text-[10px] uppercase tracking-wide text-muted-foreground/70 shrink-0">
+        <span class="text-caption uppercase tracking-wide text-muted-foreground/70 shrink-0">
           {{ t('chat.tools.detail.cdpUrl') }}
         </span>
         <span
@@ -43,7 +43,7 @@
       v-if="targets.length"
       class="space-y-1"
     >
-      <div class="text-[10px] uppercase tracking-wide text-muted-foreground/70">
+      <div class="text-caption uppercase tracking-wide text-muted-foreground/70">
         {{ t('chat.tools.detail.targets') }}
       </div>
       <div
@@ -58,7 +58,7 @@
         >{{ target.title }}</span>
         <span
           v-if="target.url"
-          class="text-[10px] text-muted-foreground font-mono truncate"
+          class="text-caption text-muted-foreground font-mono truncate"
           :title="target.url"
         >{{ target.url }}</span>
       </div>

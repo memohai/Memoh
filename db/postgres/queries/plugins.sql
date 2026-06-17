@@ -59,4 +59,3 @@ ORDER BY resource_type ASC, resource_key ASC;
 -- name: DeleteBotPluginResources :exec
 DELETE FROM bot_plugin_resources
 WHERE installation_id = $1;
-

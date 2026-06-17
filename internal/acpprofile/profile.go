@@ -20,13 +20,25 @@ const (
 )
 
 type Profile struct {
-	ID                string
-	DisplayName       string
-	Description       string
-	Command           string
-	Args              []string
-	LocalCommand      string
-	LocalArgs         []string
+	ID           string
+	DisplayName  string
+	Description  string
+	Command      string
+	Args         []string
+	LocalCommand string
+	LocalArgs    []string
+	// SessionModeID, when set, is the ACP session mode Memoh pins right after
+	// session/new so tool permissions flow through ACP regardless of ambient
+	// agent-side configuration (e.g. a host ~/.claude/settings.json).
+	SessionModeID string
+	// SessionConfigValues are ACP session config options pinned after
+	// session/new when the agent advertises them (e.g. Claude Code's "effort"
+	// select, which gates extended thinking on newer models). Options the
+	// agent does not expose are skipped.
+	SessionConfigValues map[string]string
+	// ToolQuirks override the default title heuristics for this agent; nil
+	// means DefaultToolQuirks. See ToolQuirks for why this lives here.
+	ToolQuirks        *ToolQuirks
 	ManagedFields     []ManagedField
 	SupportedBackends []string
 	SetupModes        []string
@@ -124,14 +136,26 @@ func codexProfile() Profile {
 
 func claudeCodeProfile() Profile {
 	return Profile{
-		ID:           AgentClaudeCodeID,
-		DisplayName:  AgentClaudeCodeName,
-		Description:  "Claude Code ACP adapter",
-		Command:      "claude-agent-acp",
-		LocalCommand: "npx",
+		ID:          AgentClaudeCodeID,
+		DisplayName: AgentClaudeCodeName,
+		Description: "Claude Code ACP adapter",
+		Command:     "claude-agent-acp",
+		// "default" routes every gated tool through session/request_permission;
+		// without the pin a host-level Claude settings file (defaultMode auto /
+		// acceptEdits) silently bypasses Memoh's approval flow.
+		SessionModeID: "default",
+		// Newer Claude models gate extended thinking on the effort level, not
+		// MAX_THINKING_TOKENS; "high" is the counterpart of Codex's xhigh
+		// reasoning config. Models without effort support skip this pin.
+		SessionConfigValues: map[string]string{"effort": "high"},
+		LocalCommand:        "npx",
 		LocalArgs: []string{
 			"-y",
-			"@agentclientprotocol/claude-agent-acp@0.39.0",
+			// 0.40+ fixes two thinking bugs: MAX_THINKING_TOKENS now maps to a
+			// real thinking config (the old maxThinkingTokens option is
+			// deprecated and near-no-op on current models), and un-streamed
+			// thinking blocks are forwarded instead of silently dropped.
+			"@agentclientprotocol/claude-agent-acp@0.44.0",
 		},
 		ManagedFields: []ManagedField{
 			{

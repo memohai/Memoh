@@ -151,6 +151,13 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
     } catch (error) {
       const message = toMessage(error)
       setupError.value = message
+      // If a bot was already created, a later failure (settings, terminal or
+      // cache bookkeeping) is non-fatal: the bot exists, so never downgrade it
+      // to a hard error — otherwise a successful create is reported as failed.
+      if (bot.value) {
+        status.value = 'ready'
+        return
+      }
       progress.value = { phase: 'error', error: message }
       ensureErrorLine(message)
       status.value = 'error'

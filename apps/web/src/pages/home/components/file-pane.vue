@@ -2,6 +2,7 @@
   <div class="flex flex-col h-full min-w-0 overflow-hidden">
     <FileViewer
       v-if="botId"
+      ref="viewerRef"
       :bot-id="botId"
       :file="fileInfo"
       :readonly="!canWrite"
@@ -11,7 +12,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import type { HandlersFsFileInfo } from '@memohai/sdk'
 import FileViewer from '@/components/file-manager/file-viewer.vue'
@@ -23,6 +24,8 @@ const props = defineProps<{
   filePath: string
   tabId: string
 }>()
+
+const viewerRef = ref<InstanceType<typeof FileViewer> | null>(null)
 
 const chatStore = useChatStore()
 const { currentBotId } = storeToRefs(chatStore)
@@ -51,7 +54,18 @@ function handleDirty(dirty: boolean) {
   workspaceTabs.setFileDirty(props.tabId, dirty)
 }
 
+// Let the tab close-confirm dialog write this file even while it's backgrounded.
+// FileViewer stays mounted (renderer:'always' + KeepAlive), so its save() is live
+// for the whole panel lifetime.
+onMounted(() => {
+  workspaceTabs.registerFileSaveHandler(
+    props.tabId,
+    async () => (await viewerRef.value?.save()) ?? true,
+  )
+})
+
 onBeforeUnmount(() => {
   workspaceTabs.setFileDirty(props.tabId, false)
+  workspaceTabs.unregisterFileSaveHandler(props.tabId)
 })
 </script>

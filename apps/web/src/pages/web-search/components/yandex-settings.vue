@@ -1,47 +1,46 @@
 <template>
-  <div class="grid gap-4 md:grid-cols-2">
-    <div class="space-y-2 md:col-span-2">
-      <Label for="yandex-api-key">{{ $t('provider.apiKey') }}</Label>
-      <Input
-        id="yandex-api-key"
-        v-model="localConfig.api_key"
-        type="password"
-        :aria-label="$t('provider.apiKey')"
-      />
-    </div>
-    <div class="space-y-2">
-      <Label for="yandex-search-type">{{ $t('common.searchType') }}</Label>
-      <Input
-        id="yandex-search-type"
-        v-model="localConfig.search_type"
-        :aria-label="$t('common.searchType')"
-        placeholder="SEARCH_TYPE_RU"
-      />
-    </div>
-    <div class="space-y-2">
-      <Label for="yandex-timeout-seconds">{{ $t('common.timeoutSeconds') }}</Label>
-      <Input
-        id="yandex-timeout-seconds"
-        v-model.number="localConfig.timeout_seconds"
-        type="number"
-        :min="1"
-        :aria-label="$t('common.timeoutSeconds')"
-      />
-    </div>
-    <div class="space-y-2 md:col-span-2">
-      <Label for="yandex-base-url">{{ $t('common.baseUrl') }}</Label>
-      <Input
-        id="yandex-base-url"
-        v-model="localConfig.base_url"
-        :aria-label="$t('common.baseUrl')"
-      />
-    </div>
-  </div>
+  <SettingsRow :label="$t('provider.apiKey')">
+    <Input
+      id="yandex-api-key"
+      v-model="localConfig.api_key"
+      type="password"
+      class="w-80"
+      :aria-label="$t('provider.apiKey')"
+    />
+  </SettingsRow>
+  <SettingsRow :label="$t('common.searchType')">
+    <Input
+      id="yandex-search-type"
+      v-model="localConfig.search_type"
+      class="w-80"
+      :aria-label="$t('common.searchType')"
+      placeholder="SEARCH_TYPE_RU"
+    />
+  </SettingsRow>
+  <SettingsRow :label="$t('common.baseUrl')">
+    <Input
+      id="yandex-base-url"
+      v-model="localConfig.base_url"
+      class="w-80"
+      :aria-label="$t('common.baseUrl')"
+    />
+  </SettingsRow>
+  <SettingsRow :label="$t('common.timeoutSeconds')">
+    <Input
+      id="yandex-timeout-seconds"
+      v-model.number="localConfig.timeout_seconds"
+      type="number"
+      :min="1"
+      class="w-80"
+      :aria-label="$t('common.timeoutSeconds')"
+    />
+  </SettingsRow>
 </template>
 
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
-import { Input, Label } from '@memohai/ui'
+import { Input } from '@memohai/ui'
+import SettingsRow from '@/components/settings/row.vue'
 
 const props = defineProps<{
   modelValue: Record<string, unknown>

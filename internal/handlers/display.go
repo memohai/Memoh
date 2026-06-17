@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -164,6 +165,8 @@ func (h *ContainerdHandler) HandleDisplayWebRTCOffer(c echo.Context) error {
 		return echo.NewHTTPError(status, err.Error())
 	}
 
+	h.applyDisplayStyleAsync(c.Request().Context(), botID)
+
 	return c.JSON(http.StatusOK, displayWebRTCOfferResponse{
 		Type:      answer.Type,
 		SDP:       answer.SDP,
@@ -214,7 +217,10 @@ func (h *ContainerdHandler) CloseDisplaySession(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-const displayPrepareProgressPrefix = "__MEMOH_DISPLAY_PROGRESS__"
+const (
+	displayPrepareProgressPrefix = "__MEMOH_DISPLAY_PROGRESS__"
+	displayDesktopStyleVersion   = "2026-06-14.10"
+)
 
 type displayPrepareStreamEvent struct {
 	Type    string `json:"type"`
@@ -408,11 +414,21 @@ func appendLimitedLine(builder *strings.Builder, line string) {
 }
 
 func displayPrepareCommand() string {
+	return displayDesktopScriptPreamble() + `
+` + displayApplyStyleScript() + `
+` + displayPrepareMainCommand
+}
+
+func displayDesktopScriptPreamble() string {
 	return `cat >/tmp/memoh-desktop-install.sh <<'MEMOH_DESKTOP_INSTALL'
 ` + strings.TrimRight(displayPrepareInstallScript(), "\n") + `
 MEMOH_DESKTOP_INSTALL
 chmod 0755 /tmp/memoh-desktop-install.sh
-` + displayPrepareMainCommand
+cat >/tmp/memoh-desktop-style.sh <<'MEMOH_DESKTOP_STYLE'
+` + strings.TrimRight(displayPrepareStyleScript(), "\n") + `
+MEMOH_DESKTOP_STYLE
+chmod 0755 /tmp/memoh-desktop-style.sh
+`
 }
 
 func displayPrepareInstallScript() string {
@@ -420,6 +436,300 @@ func displayPrepareInstallScript() string {
 		return string(data)
 	}
 	return scriptassets.DesktopInstall
+}
+
+func displayPrepareStyleScript() string {
+	if data, err := os.ReadFile("scripts/desktop-style.sh"); err == nil {
+		return string(data)
+	}
+	return scriptassets.DesktopStyle
+}
+
+func displayApplyStyleCommand() string {
+	return displayDesktopScriptPreamble() + `
+` + displayApplyStyleScript() + `
+/bin/sh /tmp/memoh-desktop-apply-style.sh --if-needed`
+}
+
+func displayApplyStyleScript() string {
+	return `cat >/tmp/memoh-desktop-apply-style.sh <<'MEMOH_DESKTOP_APPLY_STYLE'
+#!/bin/sh
+
+style_version='` + displayDesktopStyleVersion + `'
+style_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/memoh"
+style_marker="$style_config_dir/display-style.version"
+style_lock=/tmp/memoh-desktop-style.lock
+style_lock_stale_seconds=60
+style_log=/tmp/memoh-desktop-style.log
+
+style_enabled() {
+  style="${MEMOH_DISPLAY_DESKTOP_STYLE:-macos}"
+  case "$style" in
+    ""|0|false|False|FALSE|off|Off|OFF|none|None|NONE) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+style_is_current() {
+  [ -r "$style_marker" ] && [ "$(cat "$style_marker" 2>/dev/null || true)" = "$style_version" ]
+}
+
+if [ "${1:-}" = "--check" ]; then
+  style_enabled || exit 0
+  style_is_current
+  exit $?
+fi
+
+mode="${1:---if-needed}"
+style_enabled || exit 0
+if { [ "$mode" = "--if-needed" ] || [ "$mode" = "--ensure" ]; } && style_is_current; then
+  exit 0
+fi
+
+now_seconds() {
+  date +%s 2>/dev/null || printf '0\n'
+}
+
+lock_file_mtime_seconds() {
+  stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || printf '0\n'
+}
+
+write_style_lock_owner() {
+  printf '%s\n' "$$" >"$style_lock/pid" 2>/dev/null || true
+  now_seconds >"$style_lock/created_at" 2>/dev/null || true
+}
+
+try_acquire_style_lock() {
+  if mkdir "$style_lock" 2>/dev/null; then
+    write_style_lock_owner
+    return 0
+  fi
+  return 1
+}
+
+read_style_lock_owner_pid() {
+  cat "$style_lock/pid" 2>/dev/null || true
+}
+
+style_lock_age_seconds() {
+  now="$(now_seconds)"
+  created="$(cat "$style_lock/created_at" 2>/dev/null || true)"
+  case "$created" in
+    ""|*[!0-9]*) created="$(lock_file_mtime_seconds "$style_lock")" ;;
+  esac
+  case "$now:$created" in
+    *[!0-9:]*|0:*|*:0) printf '0\n' ;;
+    *) printf '%s\n' "$((now - created))" ;;
+  esac
+}
+
+cleanup_stale_style_lock() {
+  [ -d "$style_lock" ] || return 1
+  owner_pid="$(read_style_lock_owner_pid)"
+  stale_reason=
+  case "$owner_pid" in
+    ""|*[!0-9]*)
+      age="$(style_lock_age_seconds)"
+      if [ "$age" -ge "$style_lock_stale_seconds" ]; then
+        stale_reason="missing owner metadata for ${age}s"
+      fi
+      ;;
+    *)
+      if ! kill -0 "$owner_pid" 2>/dev/null && ! ps -p "$owner_pid" >/dev/null 2>&1; then
+        stale_reason="owner pid $owner_pid is not running"
+      fi
+      ;;
+  esac
+  [ -n "$stale_reason" ] || return 1
+  echo "Removing stale desktop style lock: $stale_reason." >&2
+  rm -rf "$style_lock" 2>/dev/null || true
+}
+
+acquire_style_lock() {
+  wait_seconds="$1"
+  if try_acquire_style_lock; then
+    return 0
+  fi
+  i=0
+  while [ "$i" -lt "$wait_seconds" ]; do
+    if [ "$mode" = "--if-needed" ] && style_is_current; then
+      exit 0
+    fi
+    cleanup_stale_style_lock || true
+    if try_acquire_style_lock; then
+      return 0
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  cleanup_stale_style_lock || true
+  try_acquire_style_lock
+}
+
+release_style_lock() {
+  owner_pid="$(read_style_lock_owner_pid)"
+  if [ "$owner_pid" = "$$" ]; then
+    rm -rf "$style_lock" 2>/dev/null || true
+  else
+    rmdir "$style_lock" 2>/dev/null || true
+  fi
+}
+
+wait_seconds=30
+case "$mode" in
+  --ensure|--force) wait_seconds=120 ;;
+esac
+if ! acquire_style_lock "$wait_seconds"; then
+  if [ "$mode" = "--if-needed" ]; then
+    echo "Another desktop style apply is running; skipping retry." >&2
+    exit 0
+  fi
+  echo "Another desktop style apply is still running." >&2
+  exit 1
+fi
+trap 'release_style_lock' EXIT INT TERM
+
+if { [ "$mode" = "--if-needed" ] || [ "$mode" = "--ensure" ]; } && style_is_current; then
+  exit 0
+fi
+
+progress() { :; }
+has_cmd() { command -v "$1" >/dev/null 2>&1; }
+os_like() {
+  if [ -r /etc/os-release ]; then
+    . /etc/os-release
+    printf '%s %s\n' "${ID:-}" "${ID_LIKE:-}"
+    return
+  fi
+  printf unknown
+}
+is_debian_like() {
+  case " $(os_like) " in
+    *" debian "*|*" ubuntu "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+is_alpine() {
+  case " $(os_like) " in
+    *" alpine "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+. /tmp/memoh-desktop-install.sh
+
+install_style_extras_for_current_os
+rm -f "$style_log"
+if /bin/sh /tmp/memoh-desktop-style.sh >"$style_log" 2>&1; then
+  mkdir -p "$style_config_dir"
+  printf '%s\n' "$style_version" >"$style_marker"
+  exit 0
+fi
+
+status=$?
+echo "Desktop style apply failed with exit code $status. Log tail:" >&2
+tail -n 80 "$style_log" >&2 2>/dev/null || true
+exit "$status"
+MEMOH_DESKTOP_APPLY_STYLE
+chmod 0755 /tmp/memoh-desktop-apply-style.sh`
+}
+
+func displayStyleStatusCommand() string {
+	return `style_version='` + displayDesktopStyleVersion + `'
+style="${MEMOH_DISPLAY_DESKTOP_STYLE:-macos}"
+case "$style" in
+  ""|0|false|False|FALSE|off|Off|OFF|none|None|NONE) exit 0 ;;
+esac
+style_marker="${XDG_CONFIG_HOME:-$HOME/.config}/memoh/display-style.version"
+[ -r "$style_marker" ] && [ "$(cat "$style_marker" 2>/dev/null || true)" = "$style_version" ]`
+}
+
+func displayStyleLogTailCommand() string {
+	return `tail -n 80 /tmp/memoh-desktop-style.log 2>/dev/null || true`
+}
+
+func trimDisplayLog(text string) string {
+	text = strings.TrimSpace(text)
+	if len(text) <= 6000 {
+		return text
+	}
+	return text[len(text)-6000:]
+}
+
+func displayStyleApplyNeedsRun(ctx context.Context, client *bridge.Client) bool {
+	if client == nil {
+		return false
+	}
+	result, err := client.Exec(ctx, displayStyleStatusCommand(), "/", 15)
+	return err != nil || result == nil || result.ExitCode != 0
+}
+
+func displayStyleLogTail(ctx context.Context, client *bridge.Client) string {
+	if client == nil {
+		return ""
+	}
+	result, err := client.Exec(ctx, displayStyleLogTailCommand(), "/", 15)
+	if err != nil || result == nil {
+		return ""
+	}
+	return result.Stdout + result.Stderr
+}
+
+func displayStyleLogArgs(ctx context.Context, client *bridge.Client, botID string, result *bridge.ExecResult) []any {
+	exitCode := -1
+	stdout := ""
+	stderr := ""
+	if result != nil {
+		exitCode = int(result.ExitCode)
+		stdout = trimDisplayLog(result.Stdout)
+		stderr = trimDisplayLog(result.Stderr)
+	}
+	args := []any{
+		slog.String("bot_id", botID),
+		slog.Int("exit_code", exitCode),
+	}
+	if stderr != "" {
+		args = append(args, slog.String("stderr", stderr))
+	}
+	if stdout != "" {
+		args = append(args, slog.String("stdout", stdout))
+	}
+	if stdout == "" && stderr == "" {
+		if tail := trimDisplayLog(displayStyleLogTail(ctx, client)); tail != "" {
+			args = append(args, slog.String("style_log_tail", tail))
+		}
+	}
+	return args
+}
+
+func (h *ContainerdHandler) applyDisplayStyleAsync(ctx context.Context, botID string) {
+	if h == nil || h.manager == nil {
+		return
+	}
+	go func() {
+		runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Minute)
+		defer cancel()
+		client, err := h.manager.MCPClient(runCtx, botID)
+		if err != nil || client == nil {
+			if err != nil && h.logger != nil {
+				h.logger.Warn("display desktop style skipped", slog.String("bot_id", botID), slog.Any("error", err))
+			}
+			return
+		}
+		if !displayStyleApplyNeedsRun(runCtx, client) {
+			return
+		}
+		result, err := client.Exec(runCtx, displayApplyStyleCommand(), "/", 540)
+		if err != nil {
+			if h.logger != nil {
+				h.logger.Warn("display desktop style failed", slog.String("bot_id", botID), slog.Any("error", err))
+			}
+			return
+		}
+		if (result == nil || result.ExitCode != 0) && h.logger != nil {
+			h.logger.Warn("display desktop style exited non-zero", displayStyleLogArgs(runCtx, client, botID, result)...)
+		}
+	}()
 }
 
 const displayPrepareMainCommand = `cat >/tmp/memoh-display-prepare.sh <<'MEMOH_DISPLAY_PREPARE'
@@ -565,11 +875,85 @@ stop_browsers() {
     kill -9 "$pid" 2>/dev/null || true
   done
 }
+process_pids_by_name() {
+  for proc_dir in /proc/[0-9]*; do
+    [ -d "$proc_dir" ] || continue
+    pid="${proc_dir#/proc/}"
+    cmdline="$(tr '\000' '\n' <"$proc_dir/cmdline" 2>/dev/null || true)"
+    found=0
+    old_ifs="$IFS"
+    IFS='
+'
+    for arg in $cmdline; do
+      base="${arg##*/}"
+      for target in "$@"; do
+        [ "$base" = "$target" ] && found=1
+      done
+    done
+    IFS="$old_ifs"
+    [ "$found" = 1 ] && printf '%s\n' "$pid"
+  done
+  return 0
+}
+xfce_session_pids() {
+  process_pids_by_name startxfce4 xfce4-session xfdesktop
+}
+xfwm4_pids() {
+  process_pids_by_name xfwm4
+}
+fallback_wm_pids() {
+  process_pids_by_name twm
+}
+stop_fallback_wm() {
+  pids="$(fallback_wm_pids)"
+  [ -n "$pids" ] || return 0
+  for pid in $pids; do
+    kill "$pid" 2>/dev/null || true
+  done
+  sleep 1
+  pids="$(fallback_wm_pids)"
+  for pid in $pids; do
+    kill -9 "$pid" 2>/dev/null || true
+  done
+}
+start_xfwm4() {
+  has_cmd xfwm4 || return 1
+  [ -n "$(xfwm4_pids)" ] && return 0
+  stop_fallback_wm
+  nohup xfwm4 --replace >/tmp/memoh-xfwm4.log 2>&1 &
+  return 0
+}
+start_desktop_session() {
+  if has_cmd startxfce4; then
+    if [ -n "$(xfce_session_pids)" ]; then
+      start_xfwm4
+      return 0
+    fi
+    stop_fallback_wm
+    nohup startxfce4 >/tmp/memoh-xfce.log 2>&1 &
+  elif has_cmd xfce4-session; then
+    if [ -n "$(xfce_session_pids)" ]; then
+      start_xfwm4
+      return 0
+    fi
+    stop_fallback_wm
+    nohup xfce4-session >/tmp/memoh-xfce.log 2>&1 &
+  elif has_cmd xfwm4; then
+    start_xfwm4
+  elif [ -n "$(fallback_wm_pids)" ]; then
+    return 0
+  elif [ -x /opt/memoh/toolkit/display/bin/twm ]; then
+    nohup /opt/memoh/toolkit/display/bin/twm >/tmp/memoh-twm.log 2>&1 &
+  fi
+}
 display_socket_ready() {
   xvnc_running && [ -S "$X_SOCKET" ] && awk -v port="$(printf '%04X' "$RFB_PORT")" 'toupper($2) ~ ":" port "$" && $4 == "0A" { found = 1 } END { exit found ? 0 : 1 }' /proc/net/tcp /proc/net/tcp6 2>/dev/null
 }
+desktop_style_current() {
+  /bin/sh /tmp/memoh-desktop-apply-style.sh --check >/dev/null 2>&1
+}
 display_ready() {
-  display_socket_ready && find_browser >/dev/null 2>&1 && has_desktop
+  display_socket_ready && find_browser >/dev/null 2>&1 && has_desktop && desktop_style_current
 }
 
 . /tmp/memoh-desktop-install.sh
@@ -672,22 +1056,17 @@ if command -v fc-cache >/dev/null 2>&1; then
 fi
 if [ -S "$X_SOCKET" ]; then
   if command -v xsetroot >/dev/null 2>&1; then
-    run_quick xsetroot -solid '#315f7d'
+    run_quick xsetroot -solid "${MEMOH_DISPLAY_DESKTOP_COLOR:-#1f2329}"
+    run_quick xsetroot -cursor_name left_ptr
   elif [ -x /opt/memoh/toolkit/display/bin/xsetroot ]; then
-    run_quick /opt/memoh/toolkit/display/bin/xsetroot -solid '#315f7d'
+    run_quick /opt/memoh/toolkit/display/bin/xsetroot -solid "${MEMOH_DISPLAY_DESKTOP_COLOR:-#1f2329}"
+    run_quick /opt/memoh/toolkit/display/bin/xsetroot -cursor_name left_ptr
   fi
 fi
-if ! ps -ef 2>/dev/null | grep -E 'xfce4-session|xfwm4|twm' | grep -v grep >/dev/null 2>&1; then
-  if has_cmd startxfce4; then
-    nohup startxfce4 >/tmp/memoh-xfce.log 2>&1 &
-  elif has_cmd xfce4-session; then
-    nohup xfce4-session >/tmp/memoh-xfce.log 2>&1 &
-  elif has_cmd xfwm4; then
-    nohup xfwm4 >/tmp/memoh-xfwm4.log 2>&1 &
-  elif [ -x /opt/memoh/toolkit/display/bin/twm ]; then
-    nohup /opt/memoh/toolkit/display/bin/twm >/tmp/memoh-twm.log 2>&1 &
-  fi
-fi
+start_desktop_session
+
+progress 90 styling "Applying desktop style"
+/bin/sh /tmp/memoh-desktop-apply-style.sh --ensure
 
 progress 94 browser "Launching browser"
 if ! browser_cdp_running; then

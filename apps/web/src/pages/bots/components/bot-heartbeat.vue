@@ -1,314 +1,340 @@
 <template>
-  <div class="max-w-2xl mx-auto pb-6 space-y-5">
-    <!-- Sovereign Header -->
-    <header class="pb-4 border-b border-border/50 sticky top-0 bg-background/95 backdrop-blur z-30 pt-4 -mt-4 flex items-center justify-between">
-      <div class="space-y-1">
-        <h2 class="text-sm font-semibold text-foreground">
-          {{ $t('bots.heartbeat.title') }}
-        </h2>
-        <p class="text-[11px] leading-snug text-muted-foreground max-w-md">
-          {{ $t('bots.settings.heartbeatDescription') }}
-        </p>
-      </div>
-      <div class="flex items-center gap-2 shrink-0">
-        <NativeSelect
-          v-model="statusFilter"
-          class="h-8 w-24 text-[11px] shadow-none bg-background/50 border-border/50"
+  <PageShell
+    variant="tab"
+    :title="$t('bots.tabs.heartbeat')"
+  >
+    <div class="space-y-8">
+      <SettingsSection :title="$t('bots.heartbeat.settingsTitle')">
+        <SettingsRow
+          :label="$t('bots.settings.heartbeatEnabled')"
+          :description="$t('bots.settings.heartbeatDescription')"
         >
-          <option value="">
-            {{ $t('bots.heartbeat.filterAll') }}
-          </option>
-          <option value="ok">
-            {{ $t('bots.heartbeat.statusOk') }}
-          </option>
-          <option value="alert">
-            {{ $t('bots.heartbeat.statusAlert') }}
-          </option>
-          <option value="error">
-            {{ $t('bots.heartbeat.statusError') }}
-          </option>
-        </NativeSelect>
-
-        <ConfirmPopover
-          v-if="logs.length > 0"
-          :message="$t('bots.heartbeat.clearConfirm')"
-          :loading="isClearing"
-          :confirm-text="$t('bots.heartbeat.clearLogs')"
-          @confirm="handleClear"
-        >
-          <template #trigger>
-            <Button
-              variant="ghost"
-              size="sm"
-              class="h-8 text-xs font-medium px-3 shadow-none text-muted-foreground hover:text-destructive"
-              :disabled="isClearing"
-            >
-              <Trash2 class="mr-2 size-3.5" />
-              {{ $t('bots.heartbeat.clearLogs') }}
-            </Button>
-          </template>
-        </ConfirmPopover>
-
-        <Button
-          variant="outline"
-          size="sm"
-          class="h-8 text-xs font-medium px-3 shadow-none border-border/50 bg-background/60 backdrop-blur-sm"
-          :disabled="isLoading"
-          @click="handleRefresh"
-        >
-          <RotateCw
-            class="mr-2 size-3.5"
-            :class="{ 'animate-spin': isLoading }"
+          <Switch
+            :model-value="settingsForm.heartbeat_enabled"
+            @update:model-value="(val) => settingsForm.heartbeat_enabled = !!val"
           />
-          {{ $t('common.refresh') }}
-        </Button>
-      </div>
-    </header>
+        </SettingsRow>
 
-    <!-- Configuration Panel (Compact) -->
-    <section class="rounded-md border border-border/60 bg-background p-4 shadow-sm space-y-4">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2.5">
-          <div class="p-1.5 rounded bg-muted/30">
-            <HeartPulse class="size-4 text-muted-foreground" />
-          </div>
-          <div>
-            <h3 class="text-xs font-semibold text-foreground">
-              {{ $t('bots.settings.heartbeatEnabled') }}
-            </h3>
-            <p class="text-[10px] text-muted-foreground">
-              {{ $t('bots.settings.heartbeatModelDescription') }}
-            </p>
-          </div>
-        </div>
-        <Switch
-          :model-value="settingsForm.heartbeat_enabled"
-          @update:model-value="(val) => settingsForm.heartbeat_enabled = !!val"
-        />
-      </div>
+        <template v-if="settingsForm.heartbeat_enabled">
+          <SettingsRow :label="$t('bots.heartbeat.checkEvery')">
+            <div class="flex items-center gap-2">
+              <Input
+                v-model.number="settingsForm.heartbeat_interval"
+                type="number"
+                :min="1"
+                placeholder="1440"
+                class="h-8 w-20 tabular-nums"
+              />
+              <span class="text-sm text-muted-foreground">{{ $t('bots.heartbeat.intervalUnit') }}</span>
+            </div>
+          </SettingsRow>
 
-      <Transition
-        enter-active-class="transition duration-200 ease-out"
-        enter-from-class="transform -translate-y-2 opacity-0"
-        enter-to-class="transform translate-y-0 opacity-100"
-        leave-active-class="transition duration-150 ease-in"
-        leave-from-class="transform translate-y-0 opacity-100"
-        leave-to-class="transform -translate-y-2 opacity-0"
-      >
-        <div
-          v-if="settingsForm.heartbeat_enabled"
-          class="grid gap-4 md:grid-cols-3 pt-2 border-t border-border/40"
-        >
-          <div class="space-y-1.5">
-            <Label class="text-[11px] font-medium text-foreground">{{ $t('bots.settings.heartbeatInterval') }}</Label>
-            <Input
-              v-model.number="settingsForm.heartbeat_interval"
-              type="number"
-              :min="1"
-              class="h-8 text-[11px] font-mono bg-muted/5 border-border/50 shadow-none"
-              :placeholder="'1440'"
-            />
+          <!-- Model is a power-user override (it defaults to the bot's chat model), so it
+               stays folded behind Advanced rather than occupying space the moment you enable.
+               Canonical settings-card disclosure: label left, outline button with a chevron
+               that rotates 90° on the right (same as the channel Advanced / Access cards). -->
+          <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
+            <span class="text-sm font-medium text-foreground">{{ $t('bots.heartbeat.advanced') }}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              class="shrink-0"
+              @click="advancedOpen = !advancedOpen"
+            >
+              <ChevronRight
+                class="size-4 transition-transform"
+                :class="advancedOpen ? 'rotate-90' : ''"
+              />
+              {{ advancedOpen ? $t('common.collapse') : $t('common.expand') }}
+            </Button>
           </div>
-          <div class="space-y-1.5 md:col-span-2">
-            <Label class="text-[11px] font-medium text-foreground">{{ $t('bots.settings.heartbeatModel') }}</Label>
+
+          <SettingsRow
+            v-if="advancedOpen"
+            :label="$t('bots.settings.heartbeatModel')"
+            :description="$t('bots.settings.heartbeatModelDescription')"
+          >
             <ModelSelect
               v-model="settingsForm.heartbeat_model_id"
               :models="models"
               :providers="providers"
               model-type="chat"
-              class="h-8 text-[11px]"
+              :placeholder="$t('bots.settings.heartbeatModelPlaceholder')"
+              class="w-72 shrink-0"
             />
-          </div>
-        </div>
-      </Transition>
+          </SettingsRow>
+        </template>
 
-      <div class="flex justify-end pt-1">
-        <Button
-          size="sm"
-          class="h-8 text-xs font-medium px-4 shadow-none bg-foreground text-background hover:bg-foreground/90"
-          :disabled="!settingsChanged || isSaving"
-          @click="handleSaveSettings"
+        <!-- Turning the toggle off is a pending change, not an instant stop — say so, so the
+             switch state doesn't read as already-applied before Save. -->
+        <div
+          v-if="pendingDisable"
+          class="mx-4 border-b border-border py-3 last:border-b-0"
         >
-          <Spinner
-            v-if="isSaving"
-            class="mr-2 size-3.5"
-          />
-          {{ $t('bots.settings.save') }}
-        </Button>
-      </div>
-    </section>
-
-    <!-- Logs List -->
-    <div class="space-y-3">
-      <!-- Loading State -->
-      <div
-        v-if="isLoading && logs.length === 0"
-        class="flex items-center justify-center py-12 text-xs text-muted-foreground"
-      >
-        <Spinner class="mr-2 size-4" />
-        {{ $t('common.loading') }}
-      </div>
-
-      <!-- Empty State -->
-      <div
-        v-else-if="!isLoading && filteredLogs.length === 0"
-        class="flex flex-col items-center justify-center py-16 text-center border border-dashed border-border/50 bg-muted/5 rounded-lg relative overflow-hidden"
-      >
-        <!-- Blueprint Grid Background -->
-        <div class="absolute inset-0 opacity-[0.03] pointer-events-none bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]" />
-        
-        <div class="relative z-10 flex flex-col items-center">
-          <div class="rounded-md bg-background border border-border/50 p-2.5 mb-4 shadow-sm">
-            <Zap class="size-5 text-muted-foreground" />
-          </div>
-          <h3 class="text-sm font-medium text-foreground">
-            {{ $t('bots.heartbeat.empty') }}
-          </h3>
-          <p class="text-[11px] text-muted-foreground mt-1.5 max-w-sm">
-            {{ statusFilter ? $t('bots.heartbeat.filterEmpty') : $t('bots.heartbeat.description') }}
+          <p class="text-xs text-muted-foreground">
+            {{ $t('bots.heartbeat.disableNote') }}
           </p>
         </div>
-      </div>
 
-      <!-- Log Cards -->
-      <div
-        v-else
-        class="space-y-2"
-      >
+        <!-- Save is the result of pending changes, not a permanent fixture: the footer only
+             exists while there is something to commit. -->
         <div
-          v-for="log in filteredLogs"
-          :key="log.id"
-          class="group rounded-md border border-border/60 bg-background hover:bg-accent/30 transition-colors duration-75 p-3 flex flex-col gap-2 relative cursor-pointer"
-          @click="toggleExpand(log.id)"
+          v-if="settingsChanged"
+          class="flex items-center justify-end gap-2 px-4 py-3"
         >
-          <!-- Card Header -->
-          <div class="flex items-center justify-between gap-3">
-            <div class="flex items-center gap-2.5 min-w-0">
-              <div 
-                class="size-1.5 rounded-full shrink-0"
-                :class="statusColorClass(log.status)"
-              />
-              <span class="font-mono text-[11px] font-semibold text-foreground uppercase tracking-tight">
-                {{ statusLabel(log.status) }}
-              </span>
-              <span class="font-mono text-[10px] text-muted-foreground/60">
-                {{ formatDateTime(log.started_at) }}
-              </span>
-            </div>
-
-            <div class="flex items-center gap-3 shrink-0">
-              <span class="font-mono text-[10px] text-muted-foreground/80 px-1.5 py-0.5 rounded bg-muted/40">
-                {{ formatDuration(log.started_at, log.completed_at) }}
-              </span>
-              <ChevronDown 
-                class="size-3 text-muted-foreground/40 transition-transform duration-200"
-                :class="{ 'rotate-180': log.id && expandedIds.has(log.id) }"
-              />
-            </div>
-          </div>
-
-          <!-- Card Body / Result Summary -->
-          <div 
-            v-if="!expandedIds.has(log.id!)"
-            class="pl-4"
+          <Button
+            variant="ghost"
+            size="sm"
+            :disabled="isSaving"
+            @click="resetSettings"
           >
-            <p 
-              class="text-[11px] leading-snug line-clamp-1 break-words"
-              :class="log.status === 'error' ? 'text-destructive/80' : 'text-muted-foreground'"
-            >
-              {{ log.status === 'error' ? (log.error_message || $t('bots.heartbeat.noResult')) : (truncateText(log.result_text) || $t('bots.heartbeat.noResult')) }}
-            </p>
-          </div>
+            {{ $t('common.cancel') }}
+          </Button>
+          <Button
+            size="sm"
+            :disabled="isSaving"
+            @click="handleSaveSettings"
+          >
+            <Spinner
+              v-if="isSaving"
+              class="size-3"
+            />
+            {{ $t('common.saveChanges') }}
+          </Button>
+        </div>
+      </SettingsSection>
 
-          <!-- Expanded Detail Section -->
+      <SettingsSection :title="$t('bots.heartbeat.title')">
+        <div
+          v-if="totalCount > 0"
+          class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3"
+        >
+          <span class="text-sm font-medium text-foreground">
+            {{ $t('common.status') }}
+          </span>
+          <Select v-model="statusFilter">
+            <SelectTrigger class="w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">
+                {{ $t('bots.heartbeat.filterAll') }}
+              </SelectItem>
+              <SelectItem value="ok">
+                {{ $t('bots.heartbeat.statusOk') }}
+              </SelectItem>
+              <SelectItem value="alert">
+                {{ $t('bots.heartbeat.statusAlert') }}
+              </SelectItem>
+              <SelectItem value="error">
+                {{ $t('bots.heartbeat.statusError') }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div
+          v-if="isLoading && logs.length === 0"
+          class="mx-4 flex min-h-[12rem] items-center justify-center gap-2 py-12 text-sm text-muted-foreground"
+        >
+          <Spinner class="size-4" />
+          {{ $t('common.loading') }}
+        </div>
+
+        <Empty
+          v-else-if="!isLoading && totalCount === 0 && !savedEnabled"
+          class="py-12"
+        >
+          <EmptyHeader>
+            <EmptyTitle>{{ $t('bots.heartbeat.logsDisabledTitle') }}</EmptyTitle>
+            <EmptyDescription>{{ $t('bots.heartbeat.logsDisabledHint') }}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+
+        <Empty
+          v-else-if="!isLoading && totalCount === 0"
+          class="py-12"
+        >
+          <EmptyHeader>
+            <EmptyTitle>{{ $t('bots.heartbeat.empty') }}</EmptyTitle>
+            <EmptyDescription>{{ $t('bots.heartbeat.firstCheckHint', { minutes: savedInterval }) }}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+
+        <Empty
+          v-else-if="filteredLogs.length === 0"
+          class="py-12"
+        >
+          <EmptyHeader>
+            <EmptyTitle>{{ $t('bots.heartbeat.empty') }}</EmptyTitle>
+            <EmptyDescription>{{ $t('bots.heartbeat.filterEmpty') }}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+
+        <div v-else>
           <div
-            v-if="log.id && expandedIds.has(log.id)"
-            class="pl-4 pt-1 space-y-3"
+            v-for="log in filteredLogs"
+            :key="log.id"
+            class="mx-4 border-b border-border py-3 last:border-b-0"
           >
-            <div class="p-3 rounded-md bg-muted/20 border border-border/40 overflow-hidden shadow-inner">
-              <pre class="font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-foreground/90">{{ log.result_text || $t('bots.heartbeat.noResult') }}</pre>
-            </div>
-            
-            <div 
-              v-if="log.error_message"
-              class="p-3 rounded-md bg-destructive/5 border border-destructive/20"
+            <button
+              type="button"
+              class="flex w-full items-center justify-between gap-3 text-left"
+              @click="toggleExpand(log.id)"
             >
-              <p class="font-mono text-[11px] text-destructive leading-normal">
-                {{ log.error_message }}
-              </p>
-            </div>
+              <div class="min-w-0">
+                <div class="flex items-center gap-2">
+                  <Badge
+                    :variant="statusVariant(log.status)"
+                    size="sm"
+                  >
+                    {{ statusLabel(log.status) }}
+                  </Badge>
+                  <span class="text-xs tabular-nums text-muted-foreground">
+                    {{ formatDateTime(log.started_at) }}
+                  </span>
+                </div>
+                <p
+                  v-if="!expandedIds.has(log.id!)"
+                  class="mt-1 truncate text-xs"
+                  :class="log.status === 'error' ? 'text-destructive' : 'text-muted-foreground'"
+                >
+                  {{ log.status === 'error' ? (log.error_message || $t('bots.heartbeat.noResult')) : (truncateText(log.result_text) || $t('bots.heartbeat.noResult')) }}
+                </p>
+              </div>
 
-            <div 
-              v-if="log.usage"
-              class="flex flex-wrap gap-2 pt-1"
+              <div class="flex shrink-0 items-center gap-3">
+                <span class="text-xs tabular-nums text-muted-foreground">
+                  {{ formatDuration(log.started_at, log.completed_at) }}
+                </span>
+                <ChevronDown
+                  class="size-4 text-muted-foreground transition-transform"
+                  :class="{ 'rotate-180': log.id && expandedIds.has(log.id) }"
+                />
+              </div>
+            </button>
+
+            <div
+              v-if="log.id && expandedIds.has(log.id)"
+              class="mt-3 space-y-3"
             >
-              <div 
-                v-for="(val, key) in (log.usage as any)"
-                :key="key"
-                class="px-1.5 py-0.5 rounded border border-border/40 bg-muted/10 font-mono text-[9px] text-muted-foreground"
+              <div class="overflow-hidden rounded-md border border-border bg-card p-3">
+                <pre class="whitespace-pre-wrap break-all font-mono text-xs leading-relaxed text-foreground">{{ log.result_text || $t('bots.heartbeat.noResult') }}</pre>
+              </div>
+
+              <div
+                v-if="log.error_message"
+                class="rounded-md border border-border bg-card p-3"
               >
-                {{ key }}: {{ val }}
+                <p class="font-mono text-xs leading-normal text-destructive">
+                  {{ log.error_message }}
+                </p>
+              </div>
+
+              <div
+                v-if="log.usage"
+                class="flex flex-wrap gap-2"
+              >
+                <span
+                  v-for="(val, key) in (log.usage as any)"
+                  :key="key"
+                  class="rounded-sm border border-border px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground"
+                >
+                  {{ key }}: {{ val }}
+                </span>
               </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- Pagination -->
-      <div
-        v-if="totalPages > 1"
-        class="flex items-center justify-between pt-4 border-t border-border/40"
-      >
-        <span class="font-mono text-[10px] text-muted-foreground whitespace-nowrap">
-          {{ paginationSummary }}
-        </span>
-        <Pagination
-          :total="totalCount"
-          :items-per-page="PAGE_SIZE"
-          :sibling-count="1"
-          :page="currentPage"
-          show-edges
-          @update:page="currentPage = $event"
+        <div
+          v-if="totalPages > 1"
+          class="flex items-center justify-between border-t border-border p-4"
         >
-          <PaginationContent v-slot="{ items }">
-            <PaginationFirst class="h-8 " />
-            <PaginationPrevious class="h-8" />
-            <template
-              v-for="(item, index) in items"
-              :key="index"
-            >
-              <PaginationEllipsis
-                v-if="item.type === 'ellipsis'"
-                :index="index"
-              />
-              <PaginationItem
-                v-else
-                :value="item.value"
-                :is-active="item.value === currentPage"
-                class="h-8 text-[11px]"
-              />
+          <span class="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+            {{ paginationSummary }}
+          </span>
+          <Pagination
+            :total="totalCount"
+            :items-per-page="PAGE_SIZE"
+            :sibling-count="1"
+            :page="currentPage"
+            show-edges
+            @update:page="currentPage = $event"
+          >
+            <PaginationContent v-slot="{ items }">
+              <PaginationFirst />
+              <PaginationPrevious />
+              <template
+                v-for="(item, index) in items"
+                :key="index"
+              >
+                <PaginationEllipsis
+                  v-if="item.type === 'ellipsis'"
+                  :index="index"
+                />
+                <PaginationItem
+                  v-else
+                  :value="item.value"
+                  :is-active="item.value === currentPage"
+                />
+              </template>
+              <PaginationNext />
+              <PaginationLast />
+            </PaginationContent>
+          </Pagination>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        v-if="logs.length > 0"
+        :title="$t('common.dangerZone')"
+      >
+        <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 py-3">
+          <div class="min-w-0">
+            <div class="text-sm font-medium text-foreground">
+              {{ $t('bots.heartbeat.clearLogs') }}
+            </div>
+            <p class="mt-0.5 text-xs text-muted-foreground">
+              {{ $t('bots.heartbeat.clearConfirm') }}
+            </p>
+          </div>
+          <ConfirmPopover
+            :message="$t('bots.heartbeat.clearConfirm')"
+            :loading="isClearing"
+            :confirm-text="$t('bots.heartbeat.clearLogs')"
+            @confirm="handleClear"
+          >
+            <template #trigger>
+              <Button
+                variant="destructive"
+                size="sm"
+                :disabled="isClearing"
+              >
+                <Trash2 class="size-4" />
+                {{ $t('bots.heartbeat.clearLogs') }}
+              </Button>
             </template>
-            <PaginationNext class="h-8" />
-            <PaginationLast class="h-8" />
-          </PaginationContent>
-        </Pagination>
-      </div>
+          </ConfirmPopover>
+        </div>
+      </SettingsSection>
     </div>
-  </div>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
-import { HeartPulse, Trash2, RotateCw, Zap, ChevronDown } from 'lucide-vue-next'
-import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { Trash2, ChevronDown, ChevronRight } from 'lucide-vue-next'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import {
-  Button, Spinner, NativeSelect, Label, Switch, Input,
+  Badge, Button, Empty, EmptyDescription, EmptyHeader, EmptyTitle, Spinner, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Input,
   Pagination, PaginationContent, PaginationEllipsis,
   PaginationFirst, PaginationItem, PaginationLast,
   PaginationNext, PaginationPrevious,
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import PageShell from '@/components/page-shell/index.vue'
 import ModelSelect from './model-select.vue'
 import {
   getBotsByBotIdSettings, putBotsByBotIdSettings,
@@ -319,6 +345,8 @@ import type { SettingsSettings, SettingsUpsertRequest, HeartbeatLog } from '@mem
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
+import SettingsSection from '@/components/settings/section.vue'
+import SettingsRow from '@/components/settings/row.vue'
 import type { Ref } from 'vue'
 
 const props = defineProps<{
@@ -373,6 +401,13 @@ watch(settings, (val: SettingsSettings | undefined) => {
   }
 }, { immediate: true })
 
+const advancedOpen = ref(false)
+
+// Logs context follows the SAVED state, not the pending form: a toggle the user
+// hasn't saved yet must not change what the logs panel claims is running.
+const savedEnabled = computed(() => settings.value?.heartbeat_enabled ?? false)
+const savedInterval = computed(() => settings.value?.heartbeat_interval ?? 1440)
+
 const settingsChanged = computed(() => {
   if (!settings.value) return false
   const s: SettingsSettings = settings.value
@@ -380,6 +415,16 @@ const settingsChanged = computed(() => {
     || settingsForm.heartbeat_interval !== (s.heartbeat_interval ?? 1440)
     || settingsForm.heartbeat_model_id !== (s.heartbeat_model_id ?? '')
 })
+
+// Was on, now toggled off but not yet saved — the cue that disabling is pending.
+const pendingDisable = computed(() => !settingsForm.heartbeat_enabled && savedEnabled.value)
+
+function resetSettings() {
+  const s = settings.value
+  settingsForm.heartbeat_enabled = s?.heartbeat_enabled ?? false
+  settingsForm.heartbeat_interval = s?.heartbeat_interval ?? 1440
+  settingsForm.heartbeat_model_id = s?.heartbeat_model_id ?? ''
+}
 
 const { mutateAsync: updateSettings, isLoading: isSaving } = useMutation({
   mutation: async (body: SettingsUpsertRequest) => {
@@ -406,14 +451,14 @@ const isLoading = ref(false)
 const isClearing = ref(false)
 const logs = ref<HeartbeatLog[]>([])
 const totalCount = ref(0)
-const statusFilter = ref('')
+const statusFilter = ref('all')
 const expandedIds = ref(new Set<string>())
 const currentPage = ref(1)
 
 const PAGE_SIZE = 20
 
 const filteredLogs = computed(() => {
-  if (!statusFilter.value) return logs.value
+  if (statusFilter.value === 'all') return logs.value
   return logs.value.filter(l => l.status === statusFilter.value)
 })
 
@@ -431,10 +476,10 @@ watch(currentPage, () => {
   fetchLogs()
 })
 
-function statusColorClass(status: string | undefined) {
-  if (status === 'ok') return 'bg-green-500'
-  if (status === 'alert') return 'bg-yellow-500'
-  return 'bg-destructive shadow-[0_0_8px_rgba(239,68,68,0.4)]'
+function statusVariant(status: string | undefined) {
+  if (status === 'ok') return 'secondary' as const
+  if (status === 'alert') return 'warning' as const
+  return 'destructive' as const
 }
 
 function statusLabel(status: string | undefined) {
@@ -465,9 +510,10 @@ function toggleExpand(id: string | undefined) {
   }
 }
 
-async function fetchLogs() {
+// silent = background poll: no loading flicker, no error toast, keep expanded rows.
+async function fetchLogs(silent = false) {
   if (!props.botId) return
-  isLoading.value = true
+  if (!silent) isLoading.value = true
   try {
     const offset = (currentPage.value - 1) * PAGE_SIZE
     const { data } = await getBotsByBotIdHeartbeatLogs({
@@ -478,16 +524,25 @@ async function fetchLogs() {
     logs.value = data?.items ?? []
     totalCount.value = data?.total_count ?? 0
   } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('bots.heartbeat.loadFailed')))
+    if (!silent) toast.error(resolveApiErrorMessage(error, t('bots.heartbeat.loadFailed')))
   } finally {
-    isLoading.value = false
+    if (!silent) isLoading.value = false
   }
 }
 
-async function handleRefresh() {
-  expandedIds.value.clear()
-  currentPage.value = 1
-  await fetchLogs()
+// Logs stream in on their own cadence, so the panel refreshes itself instead of
+// asking the user to hit a button: poll quietly while enabled, pause when the tab
+// is hidden, and catch up the moment it's visible again.
+const POLL_INTERVAL = 15_000
+let pollTimer: ReturnType<typeof setInterval> | undefined
+
+function tickPoll() {
+  if (document.hidden || !savedEnabled.value) return
+  void fetchLogs(true)
+}
+
+function onVisibilityChange() {
+  if (!document.hidden && savedEnabled.value) void fetchLogs(true)
 }
 
 async function handleClear() {
@@ -510,5 +565,12 @@ async function handleClear() {
 
 onMounted(() => {
   fetchLogs()
+  pollTimer = setInterval(tickPoll, POLL_INTERVAL)
+  document.addEventListener('visibilitychange', onVisibilityChange)
+})
+
+onBeforeUnmount(() => {
+  if (pollTimer) clearInterval(pollTimer)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 </script>

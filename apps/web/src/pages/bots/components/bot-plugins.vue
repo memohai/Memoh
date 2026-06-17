@@ -1,62 +1,60 @@
 <template>
-  <div class="max-w-3xl mx-auto pb-6 space-y-5">
-    <header class="pb-4 border-b border-border/50 sticky top-0 bg-background/95 backdrop-blur z-30 pt-4 -mt-4 flex items-center justify-between">
-      <div class="space-y-1">
-        <h2 class="text-sm font-semibold text-foreground">
-          {{ $t('bots.plugins.title') }}
-        </h2>
-        <p class="text-[11px] leading-snug text-muted-foreground max-w-md">
-          {{ $t('bots.plugins.intro') }}
-        </p>
-      </div>
+  <PageShell
+    variant="tab"
+    :title="$t('bots.plugins.title')"
+    :description="$t('bots.plugins.intro')"
+  >
+    <template #actions>
       <Button
         variant="outline"
         size="sm"
-        class="h-8 text-xs"
+        class="shrink-0"
         @click="router.push({ name: 'supermarket' })"
       >
-        <Store class="size-3.5" />
+        <Store class="size-4" />
         {{ $t('sidebar.supermarket') }}
       </Button>
-    </header>
+    </template>
 
-    <div
-      v-if="loading && !plugins.length"
-      class="flex items-center justify-center py-12 text-xs text-muted-foreground"
-    >
-      <Spinner class="mr-2 size-4" />
-      {{ $t('common.loading') }}
-    </div>
-
-    <div
-      v-else-if="!plugins.length"
-      class="flex flex-col items-center justify-center py-16 text-center border border-dashed border-border/50 bg-muted/5 rounded-lg"
-    >
-      <div class="rounded-md bg-background border border-border/50 p-2.5 mb-4 shadow-sm">
-        <PackageOpen class="size-5 text-muted-foreground" />
+    <SettingsSection :title="$t('bots.plugins.installedTitle')">
+      <div
+        v-if="loading && !plugins.length"
+        class="mx-4 flex min-h-[3.75rem] items-center gap-3 py-3 text-sm text-muted-foreground"
+      >
+        <Spinner class="size-4" />
+        {{ $t('common.loading') }}
       </div>
-      <h3 class="text-sm font-medium text-foreground">
-        {{ $t('bots.plugins.emptyTitle') }}
-      </h3>
-      <p class="text-[11px] text-muted-foreground mt-1.5 max-w-sm">
-        {{ $t('bots.plugins.emptyDescription') }}
-      </p>
-    </div>
 
-    <div
-      v-else
-      class="space-y-3"
-    >
-      <section
+      <Empty
+        v-else-if="!plugins.length"
+        class="py-12"
+      >
+        <EmptyHeader>
+          <EmptyTitle>{{ $t('bots.plugins.emptyTitle') }}</EmptyTitle>
+          <EmptyDescription>{{ $t('bots.plugins.emptyDescription') }}</EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button
+            variant="outline"
+            size="sm"
+            @click="router.push({ name: 'supermarket' })"
+          >
+            <Store class="size-4" />
+            {{ $t('sidebar.supermarket') }}
+          </Button>
+        </EmptyContent>
+      </Empty>
+
+      <div
         v-for="plugin in plugins"
         :key="plugin.id"
-        class="rounded-md border border-border/60 bg-background p-4 shadow-sm"
+        class="mx-4 flex items-start justify-between gap-4 border-b border-border py-4 last:border-b-0"
       >
-        <div class="flex items-start gap-3">
-          <div class="size-10 shrink-0 rounded-md border border-border bg-muted/20 flex items-center justify-center overflow-hidden">
+        <div class="flex min-w-0 flex-1 items-start gap-3">
+          <div class="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md bg-accent">
             <ProviderIcon
               v-if="pluginIcon(plugin)"
-              :icon="pluginIcon(plugin)!"
+              :icon="pluginIcon(plugin)"
               size="20"
               class="size-5 object-contain"
             >
@@ -67,180 +65,87 @@
               class="size-4 text-muted-foreground"
             />
           </div>
-          <div class="min-w-0 flex-1 space-y-2">
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <div class="flex items-center gap-2 min-w-0">
-                  <h3
-                    class="text-sm font-semibold text-foreground truncate"
-                    :title="plugin.plugin_name || plugin.manifest?.name"
-                  >
-                    {{ plugin.plugin_name || plugin.manifest?.name || plugin.plugin_id }}
-                  </h3>
-                  <Badge
-                    variant="outline"
-                    size="sm"
-                    :class="statusClass(plugin.status)"
-                  >
-                    {{ statusLabel(plugin.status) }}
-                  </Badge>
-                </div>
-                <p class="text-[11px] text-muted-foreground line-clamp-2 mt-1">
-                  {{ plugin.manifest?.description || '-' }}
-                </p>
-              </div>
-              <div class="flex items-center gap-1 shrink-0">
-                <Button
-                  v-if="plugin.status === 'needs_auth'"
-                  variant="outline"
-                  size="sm"
-                  class="h-7 text-xs"
-                  :disabled="isPending(plugin, 'oauth')"
-                  @click="startOAuth(plugin)"
-                >
-                  <ExternalLink class="size-3.5" />
-                  {{ $t('bots.plugins.authorizeAction') }}
-                </Button>
-                <Button
-                  v-if="plugin.status === 'needs_auth'"
-                  variant="ghost"
-                  size="icon-sm"
-                  class="size-7 text-muted-foreground"
-                  :title="$t('bots.plugins.refreshAuthAction')"
-                  :disabled="isPending(plugin, 'status')"
-                  @click="refreshOAuth(plugin)"
-                >
-                  <RefreshCw
-                    class="size-3.5"
-                    :class="{ 'animate-spin': isPending(plugin, 'status') }"
-                  />
-                </Button>
-                <Button
-                  v-if="plugin.enabled"
-                  variant="ghost"
-                  size="icon-sm"
-                  class="size-7 text-muted-foreground"
-                  :title="$t('bots.plugins.disableAction')"
-                  :disabled="isPending(plugin, 'disable')"
-                  @click="disablePlugin(plugin)"
-                >
-                  <PowerOff class="size-3.5" />
-                </Button>
-                <Button
-                  v-else-if="plugin.status === 'ready' || plugin.status === 'disabled'"
-                  variant="ghost"
-                  size="icon-sm"
-                  class="size-7 text-muted-foreground"
-                  :title="$t('bots.plugins.enableAction')"
-                  :disabled="isPending(plugin, 'enable')"
-                  @click="enablePlugin(plugin)"
-                >
-                  <Power class="size-3.5" />
-                </Button>
-                <ConfirmPopover
-                  :message="$t('bots.plugins.uninstallConfirm')"
-                  @confirm="uninstallPlugin(plugin)"
-                >
-                  <template #trigger>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      class="size-7 text-muted-foreground hover:text-destructive"
-                      :title="$t('bots.plugins.uninstallAction')"
-                      :disabled="isPending(plugin, 'uninstall')"
-                    >
-                      <Archive class="size-3.5" />
-                    </Button>
-                  </template>
-                </ConfirmPopover>
-                <ConfirmPopover
-                  v-if="plugin.status === 'uninstalled'"
-                  :message="$t('bots.plugins.purgeConfirm')"
-                  @confirm="purgePlugin(plugin)"
-                >
-                  <template #trigger>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      class="size-7 text-muted-foreground hover:text-destructive"
-                      :title="$t('bots.plugins.purgeAction')"
-                      :disabled="isPending(plugin, 'purge')"
-                    >
-                      <Trash2 class="size-3.5" />
-                    </Button>
-                  </template>
-                </ConfirmPopover>
-              </div>
-            </div>
-
-            <div class="flex flex-wrap items-center gap-1.5">
-              <Badge
-                v-for="tag in plugin.manifest?.tags?.slice(0, 4)"
-                :key="tag"
-                variant="secondary"
-                size="sm"
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-1.5">
+              <h3
+                class="truncate text-sm font-medium text-foreground"
+                :title="pluginManifest(plugin).name"
               >
-                {{ tag }}
-              </Badge>
+                {{ pluginManifest(plugin).name }}
+              </h3>
+              <a
+                v-if="pluginManifest(plugin).homepage"
+                :href="pluginManifest(plugin).homepage"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <ExternalLink class="size-3" />
+              </a>
             </div>
-
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
-              <div class="rounded-md bg-muted/30 border border-border/50 px-2.5 py-2">
-                <p class="text-[10px] uppercase text-muted-foreground">
-                  {{ $t('bots.plugins.resourcesLabel') }}
-                </p>
-                <p class="text-xs font-medium text-foreground mt-1">
-                  {{ mcpResourceCount(plugin) }} MCP / {{ skillResourceCount(plugin) }} Skill
-                </p>
-              </div>
-              <div class="rounded-md bg-muted/30 border border-border/50 px-2.5 py-2">
-                <p class="text-[10px] uppercase text-muted-foreground">
-                  {{ $t('bots.plugins.authLabel') }}
-                </p>
-                <p class="text-xs font-medium text-foreground mt-1 truncate">
-                  {{ authSummary(plugin) }}
-                </p>
-              </div>
-              <div class="rounded-md bg-muted/30 border border-border/50 px-2.5 py-2">
-                <p class="text-[10px] uppercase text-muted-foreground">
-                  {{ $t('bots.plugins.toolPrefixLabel') }}
-                </p>
-                <p
-                  class="text-xs font-mono text-foreground mt-1 truncate"
-                  :title="toolPrefix(plugin)"
-                >
-                  {{ toolPrefix(plugin) || '-' }}
-                </p>
-              </div>
-            </div>
+            <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">
+              {{ pluginManifest(plugin).description }}
+            </p>
           </div>
         </div>
-      </section>
-    </div>
-  </div>
+
+        <div class="flex shrink-0 items-center gap-2">
+          <Badge
+            variant="outline"
+            size="sm"
+          >
+            {{ statusLabel(plugin.status) }}
+          </Badge>
+          <Button
+            v-if="plugin.status === 'needs_auth'"
+            variant="outline"
+            size="sm"
+            :disabled="isPending(plugin, 'oauth')"
+            @click="startOAuth(plugin)"
+          >
+            <ExternalLink class="size-4" />
+            {{ $t('bots.plugins.authorizeAction') }}
+          </Button>
+          <div
+            v-else
+            class="flex items-center gap-2"
+          >
+            <span class="text-xs text-muted-foreground">
+              {{ plugin.enabled ? $t('common.enabled') : $t('common.disabled') }}
+            </span>
+            <Switch
+              :model-value="!!plugin.enabled"
+              :disabled="!canTogglePlugin(plugin)"
+              @update:model-value="(enabled) => togglePlugin(plugin, !!enabled)"
+            />
+          </div>
+        </div>
+      </div>
+    </SettingsSection>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { toast } from 'vue-sonner'
-import { Archive, ExternalLink, PackageOpen, Power, PowerOff, RefreshCw, Store, Trash2 } from 'lucide-vue-next'
-import { Badge, Button, Spinner } from '@memohai/ui'
+import { ExternalLink, PackageOpen, Store } from 'lucide-vue-next'
+import { Badge, Button, Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle, Spinner, Switch, toast } from '@memohai/ui'
 import {
-  deleteBotsByBotIdPluginsById,
   getBotsByBotIdPlugins,
   getBotsByBotIdPluginsByIdOauthStatus,
   postBotsByBotIdPluginsByIdDisable,
   postBotsByBotIdPluginsByIdEnable,
   postBotsByBotIdPluginsByIdOauthAuthorize,
-  postBotsByBotIdPluginsByIdUninstall,
   type PluginsInstallation,
+  type PluginsManifest,
 } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
-import ProviderIcon from '@/components/provider-icon/index.vue'
+import PageShell from '@/components/page-shell/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { BOT_PLUGINS_UPDATED_EVENT, isBotPluginsUpdatedEvent } from '@/utils/bot-plugin-events'
+import SettingsSection from '@/components/settings/section.vue'
+import ProviderIcon from '@/components/provider-icon/index.vue'
 
 const props = defineProps<{
   botId: string
@@ -254,11 +159,22 @@ const pendingKey = ref('')
 
 onMounted(() => {
   void loadPlugins()
+  window.addEventListener(BOT_PLUGINS_UPDATED_EVENT, handleBotPluginsUpdated)
+})
+
+onUnmounted(() => {
+  window.removeEventListener(BOT_PLUGINS_UPDATED_EVENT, handleBotPluginsUpdated)
 })
 
 watch(() => props.botId, () => {
   void loadPlugins()
 })
+
+function handleBotPluginsUpdated(event: Event) {
+  if (!isBotPluginsUpdatedEvent(event)) return
+  if (event.detail.botId !== props.botId) return
+  void loadPlugins()
+}
 
 async function loadPlugins() {
   if (!props.botId) return
@@ -276,8 +192,17 @@ async function loadPlugins() {
   }
 }
 
+function pluginManifest(plugin: PluginsInstallation): PluginsManifest {
+  return {
+    ...(plugin.manifest ?? {}),
+    id: plugin.plugin_id || plugin.manifest?.id || plugin.id,
+    name: plugin.plugin_name || plugin.manifest?.name || plugin.plugin_id || plugin.id,
+    description: plugin.manifest?.description || '',
+  }
+}
+
 function pluginIcon(plugin: PluginsInstallation): string {
-  const icon = plugin.manifest?.icon
+  const icon = pluginManifest(plugin).icon
   if (!icon) return ''
   if (icon.kind === 'external_url') return icon.url || ''
   if (icon.kind === 'builtin') return icon.name || ''
@@ -296,49 +221,22 @@ function statusLabel(status?: string): string {
   }
 }
 
-function statusClass(status?: string): string {
-  switch (status) {
-    case 'ready': return 'text-success border-success/30'
-    case 'needs_auth':
-    case 'needs_config': return 'text-warning border-warning/30'
-    case 'admin_required':
-    case 'uninstalled': return 'text-destructive border-destructive/30'
-    case 'disabled': return 'text-muted-foreground'
-    default: return 'text-muted-foreground'
-  }
-}
-
-function mcpResourceCount(plugin: PluginsInstallation): number {
-  return plugin.resources?.filter(item => item.resource_type === 'mcp').length ?? 0
-}
-
-function skillResourceCount(plugin: PluginsInstallation): number {
-  return plugin.resources?.filter(item => item.resource_type === 'skill').length ?? 0
-}
-
-function authSummary(plugin: PluginsInstallation): string {
-  const types = new Set((plugin.manifest?.auth_requirements ?? []).map(item => item.type || 'none'))
-  if (types.size === 0) return t('bots.plugins.auth.none')
-  return Array.from(types).map(authTypeLabel).join(', ')
-}
-
-function authTypeLabel(type: string): string {
-  switch (type) {
-    case 'managed_oauth': return t('bots.plugins.auth.managed_oauth')
-    case 'user_secret': return t('bots.plugins.auth.user_secret')
-    case 'none': return t('bots.plugins.auth.none')
-    default: return type
-  }
-}
-
-function toolPrefix(plugin: PluginsInstallation): string {
-  const resource = plugin.resources?.find(item => item.resource_type === 'mcp')
-  const rawPrefix = resource?.metadata?.tool_prefix
-  return typeof rawPrefix === 'string' ? rawPrefix : ''
-}
-
 function isPending(plugin: PluginsInstallation, action: string): boolean {
   return pendingKey.value === `${plugin.id}:${action}`
+}
+
+function canTogglePlugin(plugin: PluginsInstallation): boolean {
+  if (isPending(plugin, 'enable') || isPending(plugin, 'disable')) return false
+  return plugin.status === 'ready' || plugin.status === 'disabled'
+}
+
+function togglePlugin(plugin: PluginsInstallation, enabled: boolean) {
+  if (enabled === !!plugin.enabled) return
+  if (enabled) {
+    void enablePlugin(plugin)
+  } else {
+    void disablePlugin(plugin)
+  }
 }
 
 function mcpOAuthCallbackUrl() {
@@ -457,12 +355,6 @@ function waitForMCPOAuth(plugin: PluginsInstallation, popup: Window | null): Pro
   })
 }
 
-async function refreshOAuth(plugin: PluginsInstallation) {
-  await withPending(plugin, 'status', async () => {
-    await syncOAuthStatus(plugin)
-  })
-}
-
 async function syncOAuthStatus(plugin: PluginsInstallation): Promise<PluginsInstallation> {
   const { data } = await getBotsByBotIdPluginsByIdOauthStatus({
     path: { bot_id: props.botId, id: plugin.id! },
@@ -470,27 +362,5 @@ async function syncOAuthStatus(plugin: PluginsInstallation): Promise<PluginsInst
   })
   plugins.value = plugins.value.map(item => item.id === data.id ? data : item)
   return data
-}
-
-async function uninstallPlugin(plugin: PluginsInstallation) {
-  await withPending(plugin, 'uninstall', async () => {
-    await postBotsByBotIdPluginsByIdUninstall({
-      path: { bot_id: props.botId, id: plugin.id! },
-      throwOnError: true,
-    })
-    toast.success(t('bots.plugins.uninstallSuccess'))
-    await loadPlugins()
-  })
-}
-
-async function purgePlugin(plugin: PluginsInstallation) {
-  await withPending(plugin, 'purge', async () => {
-    await deleteBotsByBotIdPluginsById({
-      path: { bot_id: props.botId, id: plugin.id! },
-      throwOnError: true,
-    })
-    toast.success(t('bots.plugins.purgeSuccess'))
-    await loadPlugins()
-  })
 }
 </script>

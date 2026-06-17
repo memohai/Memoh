@@ -18,6 +18,9 @@ export const [useCommand, provideCommandContext] = createContext<{
     search: string
     filtered: { count: number, items: Map<string, number>, groups: Set<string> }
   }
+  // Select-parity: a row reports pointerleave so the surface can clear its highlight
+  // when the pointer sits on dead space (separators / padding) instead of a row.
+  onItemPointerLeave: (el: HTMLElement | null) => void
 }>('Command')
 
 export const [useCommandGroup, provideCommandGroupContext] = createContext<{

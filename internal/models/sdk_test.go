@@ -24,13 +24,13 @@ func TestBuildReasoningOptionsDeepSeekChatCompletionsCompat(t *testing.T) {
 			wantOpts: 1,
 		},
 		{
-			name:     "enabled with effort forwards effort",
-			config:   &ReasoningConfig{Enabled: true, Effort: "high"},
+			name:     "active with effort forwards effort",
+			config:   &ReasoningConfig{Active: true, Effort: "high"},
 			wantOpts: 1,
 		},
 		{
-			name:     "adaptive leaves effort unset for model default",
-			config:   &ReasoningConfig{Enabled: true},
+			name:     "active without effort leaves effort unset for model default",
+			config:   &ReasoningConfig{Active: true},
 			wantOpts: 0,
 		},
 		{
@@ -55,6 +55,52 @@ func TestBuildReasoningOptionsDeepSeekChatCompletionsCompat(t *testing.T) {
 	}
 }
 
+func TestBuildReasoningOptionsOpenAIDisable(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		config   *ReasoningConfig
+		wantOpts int
+	}{
+		{
+			// Toggle model advertising only low/medium/high: OffEffort is empty,
+			// so reasoning_effort must be omitted. Sending a real tier (e.g. low)
+			// would enable thinking (OpenRouter maps it to Anthropic thinking).
+			name:     "disabled with empty off effort omits reasoning_effort",
+			config:   &ReasoningConfig{Disabled: true, OffEffort: ""},
+			wantOpts: 0,
+		},
+		{
+			name:     "disabled with none off effort sends none",
+			config:   &ReasoningConfig{Disabled: true, OffEffort: ReasoningEffortNone},
+			wantOpts: 1,
+		},
+		{
+			name:     "disabled with minimal off effort sends minimal",
+			config:   &ReasoningConfig{Disabled: true, OffEffort: ReasoningEffortMinimal},
+			wantOpts: 1,
+		},
+		{
+			name:     "active sends effort",
+			config:   &ReasoningConfig{Active: true, Effort: ReasoningEffortHigh},
+			wantOpts: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			opts := BuildReasoningOptions(SDKModelConfig{
+				ClientType:      string(ClientTypeOpenAICompletions),
+				ReasoningConfig: tt.config,
+			})
+			if len(opts) != tt.wantOpts {
+				t.Fatalf("expected %d options, got %d", tt.wantOpts, len(opts))
+			}
+		})
+	}
+}
+
 func TestBuildReasoningOptionsMiniMaxChatCompletionsCompat(t *testing.T) {
 	t.Parallel()
 
@@ -69,13 +115,13 @@ func TestBuildReasoningOptionsMiniMaxChatCompletionsCompat(t *testing.T) {
 			wantOpts: 1,
 		},
 		{
-			name:     "enabled without effort forwards nothing (provider default applies)",
-			config:   &ReasoningConfig{Enabled: true},
+			name:     "active without effort forwards nothing (provider default applies)",
+			config:   &ReasoningConfig{Active: true},
 			wantOpts: 0,
 		},
 		{
-			name:     "enabled with effort forwards effort",
-			config:   &ReasoningConfig{Enabled: true, Effort: "high"},
+			name:     "active with effort forwards effort",
+			config:   &ReasoningConfig{Active: true, Effort: "high"},
 			wantOpts: 1,
 		},
 		{
@@ -272,7 +318,7 @@ func TestNewSDKChatModelMiniMaxChatCompletionsCompatEnablesThinking(t *testing.T
 	opts = append(opts, BuildReasoningOptions(SDKModelConfig{
 		ClientType:            string(ClientTypeOpenAICompletions),
 		ChatCompletionsCompat: compat,
-		ReasoningConfig:       &ReasoningConfig{Enabled: true, Effort: "high"},
+		ReasoningConfig:       &ReasoningConfig{Active: true, Effort: "high"},
 	})...)
 	_, err := sdk.GenerateTextResult(context.Background(), opts...)
 	if err != nil {
@@ -287,6 +333,175 @@ func TestNewSDKChatModelMiniMaxChatCompletionsCompatEnablesThinking(t *testing.T
 	}
 	if body.Thinking == nil || body.Thinking.Type != "adaptive" {
 		t.Fatalf("thinking: got %#v, want adaptive", body.Thinking)
+	}
+}
+
+func TestNewSDKChatModelOpenAIWireMapsMaxEffortToXHigh(t *testing.T) {
+	t.Parallel()
+
+	var body struct {
+		ReasoningEffort *string `json:"reasoning_effort"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":    "chatcmpl-openai",
+			"model": "openrouter/anthropic/claude-opus-4.8",
+			"choices": []map[string]any{{
+				"index":         0,
+				"finish_reason": "stop",
+				"message":       map[string]any{"role": "assistant", "content": "ok"},
+			}},
+			"usage": map[string]any{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+		})
+	}))
+	defer srv.Close()
+
+	model := NewSDKChatModel(SDKModelConfig{
+		ModelID:    "openrouter/anthropic/claude-opus-4.8",
+		ClientType: string(ClientTypeOpenAICompletions),
+		BaseURL:    srv.URL,
+		APIKey:     "test-key",
+	})
+
+	opts := BuildReasoningOptions(SDKModelConfig{
+		ClientType:      string(ClientTypeOpenAICompletions),
+		ReasoningConfig: &ReasoningConfig{Active: true, Effort: ReasoningEffortMax},
+	})
+	_, err := sdk.GenerateTextResult(
+		context.Background(),
+		append([]sdk.GenerateOption{
+			sdk.WithModel(model),
+			sdk.WithMessages([]sdk.Message{sdk.UserMessage("hi")}),
+		}, opts...)...,
+	)
+	if err != nil {
+		t.Fatalf("generate text: %v", err)
+	}
+
+	if body.ReasoningEffort == nil || *body.ReasoningEffort != ReasoningEffortXHigh {
+		t.Fatalf("reasoning_effort: got %v, want xhigh", body.ReasoningEffort)
+	}
+}
+
+func TestNewSDKChatModelAnthropicThinkingWire(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		config     *ReasoningConfig
+		wantType   string
+		wantBudget int
+	}{
+		{
+			// Legacy (<=4.5): non-adaptive active call must enable thinking via
+			// budget_tokens (output_config.effort alone does not turn it on).
+			name:       "legacy non-adaptive sends enabled with budget",
+			config:     &ReasoningConfig{Active: true, Effort: ReasoningEffortHigh},
+			wantType:   "enabled",
+			wantBudget: 50000,
+		},
+		{
+			name:       "legacy non-adaptive defaults empty effort to medium budget",
+			config:     &ReasoningConfig{Active: true},
+			wantType:   "enabled",
+			wantBudget: 16000,
+		},
+		{
+			// 4.6+ (adaptive): thinking{type:"adaptive"} and never a budget.
+			name:       "adaptive sends adaptive without budget",
+			config:     &ReasoningConfig{Active: true, Adaptive: true, Effort: ReasoningEffortHigh},
+			wantType:   "adaptive",
+			wantBudget: 0,
+		},
+		{
+			// Disabled: no thinking field at all.
+			name:     "disabled sends no thinking",
+			config:   &ReasoningConfig{Disabled: true},
+			wantType: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var body struct {
+				Thinking *struct {
+					Type         string `json:"type"`
+					BudgetTokens int    `json:"budget_tokens"`
+				} `json:"thinking"`
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatalf("decode request body: %v", err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"id": "msg_anthropic", "type": "message", "model": "claude-test", "role": "assistant",
+					"content":     []map[string]any{{"type": "text", "text": "ok"}},
+					"stop_reason": "end_turn",
+					"usage":       map[string]any{"input_tokens": 1, "output_tokens": 1},
+				})
+			}))
+			defer srv.Close()
+
+			cfg := SDKModelConfig{
+				ModelID:         "claude-test",
+				ClientType:      string(ClientTypeAnthropicMessages),
+				BaseURL:         srv.URL,
+				APIKey:          "test-key",
+				ReasoningConfig: tt.config,
+			}
+			model := NewSDKChatModel(cfg)
+			if model == nil {
+				t.Fatal("expected a model, got nil")
+			}
+
+			opts := append([]sdk.GenerateOption{
+				sdk.WithModel(model),
+				sdk.WithMessages([]sdk.Message{sdk.UserMessage("hi")}),
+			}, BuildReasoningOptions(cfg)...)
+			if _, err := sdk.GenerateTextResult(context.Background(), opts...); err != nil {
+				t.Fatalf("generate text: %v", err)
+			}
+
+			if tt.wantType == "" {
+				if body.Thinking != nil {
+					t.Fatalf("thinking should be omitted, got %#v", body.Thinking)
+				}
+				return
+			}
+			if body.Thinking == nil {
+				t.Fatalf("thinking missing, want type %q", tt.wantType)
+			}
+			if body.Thinking.Type != tt.wantType {
+				t.Fatalf("thinking type: got %q, want %q", body.Thinking.Type, tt.wantType)
+			}
+			if body.Thinking.BudgetTokens != tt.wantBudget {
+				t.Fatalf("budget_tokens: got %d, want %d", body.Thinking.BudgetTokens, tt.wantBudget)
+			}
+		})
+	}
+}
+
+func TestLegacyAnthropicBudgetFor(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]int{
+		ReasoningEffortLow:    5000,
+		ReasoningEffortMedium: 16000,
+		ReasoningEffortHigh:   50000,
+		"":                    16000,
+		"unexpected":          16000,
+	}
+	for effort, want := range cases {
+		if got := legacyAnthropicBudgetFor(effort); got != want {
+			t.Fatalf("legacyAnthropicBudgetFor(%q): got %d, want %d", effort, got, want)
+		}
 	}
 }
 

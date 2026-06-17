@@ -1,335 +1,314 @@
 <template>
-  <div class="pb-6 space-y-4">
-    <!-- Sovereign Header -->
-    <div class="flex items-center justify-between pb-4 border-b border-border/50">
-      <div class="space-y-1">
-        <h3 class="text-sm font-semibold text-foreground">
-          {{ $t('bots.settings.networkPageTitle') }}
-        </h3>
-        <p class="text-[11px] text-muted-foreground">
-          {{ $t('bots.settings.networkPageSubtitle') }}
-        </p>
-      </div>
+  <PageShell
+    variant="tab"
+    :title="$t('bots.settings.networkPageTitle')"
+  >
+    <template
+      v-if="props.botId && settings && hasChanges"
+      #actions
+    >
+      <span class="text-xs text-muted-foreground">
+        {{ $t('common.unsaved') }}
+      </span>
+    </template>
 
-      <div class="flex items-center gap-3 shrink-0">
-        <Transition name="fade">
-          <div
-            v-if="hasChanges"
-            class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/40 border border-border/50"
-          >
-            <div class="size-1 rounded-full bg-muted-foreground/40" />
-            <span class="text-[10px] text-muted-foreground font-medium whitespace-nowrap">Unsaved</span>
-          </div>
-        </Transition>
-
-        <Button
-          variant="outline"
-          size="sm"
-          class="h-8 text-xs font-medium min-w-24 shadow-none"
-          :disabled="!props.botId || isNetworkStatusFetching"
-          @click="handleRefreshNetworkStatus"
+    <div class="space-y-8">
+      <SettingsSection v-if="props.botId">
+        <SettingsRow
+          :label="$t('bots.settings.networkSDWANSectionTitle')"
+          :description="$t('bots.settings.networkSDWANSectionHint')"
         >
-          <Spinner
-            v-if="isNetworkStatusFetching"
-            class="mr-1.5 size-3"
+          <Switch
+            :model-value="form.overlay_enabled"
+            @update:model-value="(val) => form.overlay_enabled = val"
           />
-          {{ $t('common.refresh') }}
-        </Button>
-
-        <Button
-          size="sm"
-          :disabled="!hasChanges || isSaving"
-          class="h-8 text-xs font-medium min-w-24 shadow-none"
-          @click="handleSave"
-        >
-          <Spinner
-            v-if="isSaving"
-            class="mr-1.5 size-3"
-          />
-          {{ $t('bots.settings.save') }}
-        </Button>
-      </div>
-    </div>
-
-    <!-- Workspace Status Card -->
-    <div
-      v-if="props.botId && workspaceStatusFields.length"
-      class="space-y-6 rounded-md border border-border bg-background p-5 shadow-none"
-    >
-      <div class="space-y-1">
-        <h4 class="text-xs font-semibold text-foreground">
-          {{ $t('bots.settings.botStatusTitle') }}
-        </h4>
-        <p class="text-[10px] text-muted-foreground">
-          {{ $t('bots.settings.botStatusSubtitle') }}
-        </p>
-      </div>
-
-      <div class="space-y-6">
-        <div
-          v-for="(item, idx) in workspaceStatusFields"
-          :key="`ws-${idx}-${item.label}`"
-          class="space-y-1.5"
-        >
-          <div class="text-[11px] font-medium text-muted-foreground/90">
-            {{ item.label }}
-          </div>
-          <div class="font-mono text-[11px] text-foreground/90 break-all leading-relaxed">
-            {{ item.value }}
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- SD-WAN Status Card -->
-    <div
-      v-if="props.botId && (showOverlayStatusInNetworkCard || isNetworkStatusPendingSave || isNetworkStatusLoading)"
-      class="space-y-6 rounded-md border border-border bg-background p-5 shadow-none"
-    >
-      <div class="space-y-1">
-        <h4 class="text-xs font-semibold text-foreground">
-          {{ $t('bots.settings.networkSDWANSectionTitle') }}
-        </h4>
-        <p class="text-[10px] text-muted-foreground">
-          {{ $t('bots.settings.networkSDWANSectionHint') }}
-        </p>
-      </div>
-
-      <div class="space-y-6">
-        <!-- Loading State -->
-        <div
-          v-if="isNetworkStatusLoading && !networkStatusCard"
-          class="flex items-center gap-2 text-[11px] text-muted-foreground py-2"
-        >
-          <Spinner class="size-3" />
-          <span>{{ $t('common.loading') }}</span>
-        </div>
-
-        <!-- Status Fields -->
-        <template v-else-if="networkStatusCard">
-          <!-- Pending Save Banner -->
-          <div
-            v-if="isNetworkStatusPendingSave"
-            class="border-l-2 border-warning/50 bg-warning/5 px-3 py-2 rounded-r-md flex items-center gap-2"
-          >
-            <div class="size-1 rounded-full bg-warning animate-pulse" />
-            <p class="text-[10px] text-warning font-medium">
-              {{ $t('bots.settings.networkStatusPendingSave') }}
-            </p>
-          </div>
-
-          <!-- Overlay Fields -->
-          <div
-            v-if="showOverlayStatusInNetworkCard && overlayNetworkStatusFields.length"
-            class="space-y-6"
-          >
-            <!-- Auth Required -->
-            <div
-              v-if="overlayState === 'needs_login'"
-              class="border-l-2 border-primary/50 bg-muted/20 px-3 py-2.5 rounded-r-md flex flex-col items-start gap-2"
-            >
-              <div class="space-y-0.5">
-                <p class="text-[11px] font-medium text-foreground">
-                  Action Required
-                </p>
-                <p class="text-[10px] text-muted-foreground">
-                  {{ $t('bots.settings.networkNeedsLoginDescription') }}
-                </p>
-              </div>
-              <Button
-                v-if="overlayAuthURL"
-                size="sm"
-                variant="outline"
-                class="h-7 text-[10px] shadow-none bg-background"
-                @click="openAuthURL"
-              >
-                {{ $t('bots.settings.networkOpenLoginPage') }}
-              </Button>
-            </div>
-
-            <div
-              v-for="(item, idx) in overlayNetworkStatusFields"
-              :key="`ov-${idx}-${item.label}`"
-              class="space-y-1.5"
-            >
-              <div class="text-[11px] font-medium text-muted-foreground/90">
-                {{ item.label }}
-              </div>
-              <div class="font-mono text-[11px] text-foreground/90 break-all leading-relaxed">
-                {{ item.value }}
-              </div>
-            </div>
-
-            <!-- Logout -->
-            <div
-              v-if="showLogoutButton"
-              class="pt-2"
-            >
-              <Button
-                variant="ghost"
-                size="sm"
-                class="h-7 text-[10px] text-muted-foreground hover:text-destructive px-2 -ml-2"
-                :disabled="isLoggingOut"
-                @click="handleLogout"
-              >
-                <Spinner
-                  v-if="isLoggingOut"
-                  class="mr-1.5 size-3"
-                />
-                {{ $t('bots.settings.networkLogout') }}
-              </Button>
-            </div>
-          </div>
-        </template>
-        <div
-          v-else
-          class="text-[11px] text-muted-foreground py-2 italic"
-        >
-          {{ $t('bots.settings.networkStatusEmpty') }}
-        </div>
-      </div>
-    </div>
-
-    <!-- SD-WAN Configuration Card -->
-    <div
-      v-if="props.botId"
-      class="space-y-6 rounded-md border border-border bg-background p-5 shadow-none"
-    >
-      <div class="space-y-1">
-        <h4 class="text-xs font-semibold text-foreground">
-          {{ $t('bots.settings.networkSDWANSectionTitle') }}
-        </h4>
-        <p class="text-[10px] text-muted-foreground">
-          {{ $t('bots.settings.networkSDWANSectionHint') }}
-        </p>
-      </div>
-
-      <div class="space-y-6">
-        <!-- Enable SD-WAN Toggle -->
-        <div class="flex items-center justify-between gap-6">
-          <div class="space-y-0.5 flex-1 pr-4">
-            <Label class="text-[11px] font-medium text-foreground/70">{{ $t('common.enable') }}</Label>
-          </div>
-          <div class="shrink-0 flex justify-end">
-            <Switch
-              :model-value="form.overlay_enabled"
-              @update:model-value="(val) => form.overlay_enabled = val"
-            />
-          </div>
-        </div>
+        </SettingsRow>
 
         <template v-if="form.overlay_enabled">
-          <!-- Connection Type (Provider) -->
-          <div class="flex items-center justify-between gap-6 pt-4 border-t border-border/40">
-            <div class="space-y-0.5 flex-1 pr-4">
-              <Label class="text-[11px] font-medium text-foreground/70">{{ $t('bots.settings.overlayProviderFieldLabel') }}</Label>
-            </div>
-            <div class="shrink-0 flex justify-end min-w-40 max-w-[320px] w-full">
+          <SettingsRow :label="$t('bots.settings.overlayProviderFieldLabel')">
+            <div class="w-72 shrink-0">
               <OverlayProviderSelect
                 v-model="form.overlay_provider"
                 :providers="overlayProviderMeta"
                 :placeholder="$t('bots.settings.overlayProviderPlaceholder')"
               />
             </div>
+          </SettingsRow>
+
+          <!-- One distilled status line; raw diagnostics live behind Details. -->
+          <div
+            v-if="needsSaveForStatus"
+            class="mx-4 flex min-h-[3.75rem] items-center gap-2.5 border-b border-border py-3"
+          >
+            <span class="size-1.5 shrink-0 rounded-sm bg-warning" />
+            <p class="text-sm text-muted-foreground">
+              {{ $t('bots.settings.networkStatusPendingSave') }}
+            </p>
+          </div>
+          <div
+            v-else-if="isNetworkStatusLoading && !networkStatusData"
+            class="mx-4 flex min-h-[3.75rem] items-center gap-2 border-b border-border py-3 text-sm text-muted-foreground"
+          >
+            <Spinner class="size-4" />
+            <span>{{ $t('common.loading') }}</span>
+          </div>
+          <div
+            v-else-if="networkStatusLine"
+            class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3"
+          >
+            <div class="flex min-w-0 items-center gap-2.5">
+              <span
+                class="size-1.5 shrink-0 rounded-sm"
+                :class="statusDotClass"
+              />
+              <div class="min-w-0">
+                <div class="truncate text-sm font-medium text-foreground">
+                  {{ networkStatusLine.label }}
+                </div>
+                <div
+                  v-if="networkStatusLine.detail"
+                  class="truncate font-mono text-xs text-muted-foreground"
+                >
+                  {{ networkStatusLine.detail }}
+                </div>
+              </div>
+            </div>
+            <div class="flex shrink-0 items-center gap-2">
+              <Button
+                v-if="overlayState === 'needs_login' && overlayAuthURL"
+                size="sm"
+                variant="outline"
+                @click="openAuthURL"
+              >
+                {{ $t('bots.settings.networkOpenLoginPage') }}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                @click="isDetailsDialogOpen = true"
+              >
+                {{ $t('common.details') }}
+              </Button>
+            </div>
           </div>
 
-          <!-- Configuration Sub-Boxes -->
-          <div
-            v-if="showOverlayConfig"
-            class="pt-4 border-t border-border/50 space-y-4"
-          >
-            <!-- Primary Configuration -->
-            <div
-              v-if="primarySchema?.fields?.length"
-              class="space-y-4 rounded-md border border-border/50 bg-background/50 p-4 shadow-none"
-            >
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-1.5 text-xs font-medium text-foreground">
+          <div v-if="showOverlayConfig">
+            <template v-if="primarySchema?.fields?.length">
+              <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3">
+                <div class="text-sm font-medium text-foreground">
                   {{ $t('bots.settings.overlayPrimaryConfigTitle') }}
                 </div>
                 <Button
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
-                  class="h-6 px-2 text-[10px] text-muted-foreground"
                   @click="isEditorDialogOpen = true"
                 >
-                  <SquarePen class="mr-1.5 size-3" />
-                  Edit JSON
+                  <SquarePen class="size-4" />
+                  {{ $t('common.editJson') }}
                 </Button>
               </div>
 
-              <div class="pt-4 border-t border-border/50 space-y-1">
-                <template
-                  v-for="field in primarySchema.fields"
-                  :key="field.key"
+              <template
+                v-for="field in primarySchema.fields"
+                :key="field.key"
+              >
+                <div
+                  class="mx-4 border-b border-border py-3 last:border-b-0"
+                  :class="isMultilineField(field) ? 'space-y-3' : 'flex min-h-[3.75rem] items-center justify-between gap-4'"
                 >
-                  <!-- Multiline Fields (Boxed) -->
-                  <div 
-                    v-if="isMultilineField(field)"
-                    class="space-y-2.5 p-4 bg-muted/20 rounded-md border border-border/40 my-3"
-                  >
-                    <div class="space-y-1">
-                      <Label
-                        :for="`bot-network-config-primary-${field.key}`"
-                        class="text-[11px] font-semibold text-foreground/70"
-                      >
-                        {{ field.title || field.key }}
-                      </Label>
-                      <p
-                        v-if="field.description"
-                        class="text-[10px] text-muted-foreground/80 leading-relaxed"
-                      >
-                        {{ field.description }}
-                      </p>
-                    </div>
+                  <div class="min-w-0">
+                    <Label
+                      :for="`bot-network-config-primary-${field.key}`"
+                      class="text-sm font-medium text-foreground"
+                    >
+                      {{ field.title || field.key }}
+                    </Label>
+                    <p
+                      v-if="field.description"
+                      class="mt-0.5 text-xs text-muted-foreground"
+                    >
+                      {{ field.description }}
+                    </p>
+                  </div>
+
+                  <div :class="isMultilineField(field) ? 'w-full' : 'w-full shrink-0 sm:w-80'">
                     <Textarea
+                      v-if="isMultilineField(field)"
                       :id="`bot-network-config-primary-${field.key}`"
                       :model-value="stringValue(field)"
                       :placeholder="placeholderOf(field)"
                       :readonly="field.readonly"
                       rows="4"
-                      class="text-xs shadow-none resize-none bg-background/50 focus:bg-background transition-colors border-border/60"
+                      class="min-h-24 resize-none"
+                      @update:model-value="(val: string) => updateValue(field.key, val)"
+                    />
+
+                    <Switch
+                      v-else-if="field.type === 'bool'"
+                      :model-value="!!getFieldValue(field)"
+                      :disabled="field.readonly"
+                      @update:model-value="(val: boolean) => updateValue(field.key, !!val)"
+                    />
+
+                    <Select
+                      v-else-if="field.type === 'enum' && field.enum"
+                      :model-value="stringValue(field)"
+                      :disabled="field.readonly"
+                      @update:model-value="(val: string) => updateValue(field.key, val)"
+                    >
+                      <SelectTrigger
+                        size="sm"
+                        class="w-full"
+                      >
+                        <SelectValue :placeholder="placeholderOf(field)" />
+                      </SelectTrigger>
+                      <SelectContent class="w-[--reka-select-trigger-width]">
+                        <SelectItem
+                          v-for="option in field.enum"
+                          :key="option"
+                          :value="option"
+                        >
+                          {{ option }}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    <InputGroup v-else-if="field.type === 'secret'">
+                      <InputGroupInput
+                        :id="`bot-network-config-primary-${field.key}`"
+                        :model-value="stringValue(field)"
+                        :type="visibleSecrets[field.key] ? 'text' : 'password'"
+                        :placeholder="placeholderOf(field)"
+                        :readonly="field.readonly"
+                        @update:model-value="(val: string) => updateValue(field.key, val)"
+                      />
+                      <InputGroupAddon align="inline-end">
+                        <InputGroupButton
+                          size="icon-sm"
+                          :aria-label="$t('common.preview')"
+                          @click="visibleSecrets[field.key] = !visibleSecrets[field.key]"
+                        >
+                          <component :is="visibleSecrets[field.key] ? EyeOff : Eye" />
+                        </InputGroupButton>
+                      </InputGroupAddon>
+                    </InputGroup>
+
+                    <Input
+                      v-else-if="field.type === 'number'"
+                      :id="`bot-network-config-primary-${field.key}`"
+                      :model-value="numberValue(field)"
+                      type="number"
+                      :placeholder="placeholderOf(field)"
+                      :readonly="field.readonly"
+                      :min="field.constraint?.min"
+                      :max="field.constraint?.max"
+                      :step="field.constraint?.step ?? 1"
+                      class="h-8 w-full tabular-nums"
+                      @update:model-value="(val: string) => updateNumber(field.key, val)"
+                    />
+
+                    <Input
+                      v-else
+                      :id="`bot-network-config-primary-${field.key}`"
+                      :model-value="stringValue(field)"
+                      type="text"
+                      :placeholder="placeholderOf(field)"
+                      :readonly="field.readonly"
+                      class="h-8 w-full"
                       @update:model-value="(val: string) => updateValue(field.key, val)"
                     />
                   </div>
+                </div>
+              </template>
+            </template>
 
-                  <!-- Standard Fields (Horizontal) -->
-                  <div 
-                    v-else
-                    class="flex items-center justify-between gap-6 py-4 border-b border-border/40 last:border-0 min-h-16"
+            <div
+              v-if="advancedSchema?.fields?.length"
+              class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-b-0"
+            >
+              <div class="min-w-0">
+                <div class="text-sm font-medium text-foreground">
+                  {{ $t('common.advanced') }}
+                </div>
+                <p class="mt-0.5 text-xs text-muted-foreground">
+                  {{ $t('common.allOptional') }}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                class="shrink-0"
+                @click="showAdvancedConfig = !showAdvancedConfig"
+              >
+                <ChevronRight
+                  class="size-4 transition-transform"
+                  :class="showAdvancedConfig ? 'rotate-90' : ''"
+                />
+                {{ showAdvancedConfig ? $t('common.hide') : $t('common.show') }}
+              </Button>
+            </div>
+
+            <template v-if="showAdvancedConfig">
+              <div
+                v-for="group in advancedSchemaGroups"
+                :key="group.title"
+              >
+                <div class="mx-4 pb-1 pt-3 text-xs font-medium text-muted-foreground">
+                  {{ group.title }}
+                </div>
+
+                <template
+                  v-for="field in group.fields"
+                  :key="field.key"
+                >
+                  <div
+                    class="mx-4 border-b border-border py-3 last:border-b-0"
+                    :class="isMultilineField(field) ? 'space-y-3' : 'flex min-h-[3.75rem] items-center justify-between gap-4'"
                   >
-                    <div class="space-y-0.5 flex-1 pr-4">
+                    <div class="min-w-0">
                       <Label
-                        :for="`bot-network-config-primary-${field.key}`"
-                        class="text-[11px] font-semibold text-foreground/70"
+                        :for="`bot-network-config-advanced-${field.key}`"
+                        class="text-sm font-medium text-foreground"
                       >
                         {{ field.title || field.key }}
                       </Label>
                       <p
                         v-if="field.description"
-                        class="text-[10px] text-muted-foreground/80 leading-relaxed"
+                        class="mt-0.5 text-xs text-muted-foreground"
                       >
                         {{ field.description }}
                       </p>
                     </div>
 
-                    <div class="shrink-0 flex justify-end min-w-[160px] max-w-[320px] w-full">
-                      <!-- Switch for Bool -->
+                    <div :class="isMultilineField(field) ? 'w-full' : 'w-full shrink-0 sm:w-80'">
+                      <Textarea
+                        v-if="isMultilineField(field)"
+                        :id="`bot-network-config-advanced-${field.key}`"
+                        :model-value="stringValue(field)"
+                        :placeholder="placeholderOf(field)"
+                        :readonly="field.readonly"
+                        rows="4"
+                        class="min-h-24 resize-none"
+                        @update:model-value="(val: string) => updateValue(field.key, val)"
+                      />
+
                       <Switch
-                        v-if="field.type === 'bool'"
+                        v-else-if="field.type === 'bool'"
                         :model-value="!!getFieldValue(field)"
                         :disabled="field.readonly"
                         @update:model-value="(val: boolean) => updateValue(field.key, !!val)"
                       />
 
-                      <!-- Select for Enum -->
                       <Select
                         v-else-if="field.type === 'enum' && field.enum"
                         :model-value="stringValue(field)"
                         :disabled="field.readonly"
                         @update:model-value="(val: string) => updateValue(field.key, val)"
                       >
-                        <SelectTrigger class="h-8 text-xs w-full shadow-none bg-background/50 border-border/60">
+                        <SelectTrigger
+                          size="sm"
+                          class="w-full"
+                        >
                           <SelectValue :placeholder="placeholderOf(field)" />
                         </SelectTrigger>
                         <SelectContent class="w-[--reka-select-trigger-width]">
@@ -343,36 +322,29 @@
                         </SelectContent>
                       </Select>
 
-                      <!-- Secret Input -->
-                      <div
-                        v-else-if="field.type === 'secret'"
-                        class="relative w-full"
-                      >
-                        <Input
-                          :id="`bot-network-config-primary-${field.key}`"
+                      <InputGroup v-else-if="field.type === 'secret'">
+                        <InputGroupInput
+                          :id="`bot-network-config-advanced-${field.key}`"
                           :model-value="stringValue(field)"
                           :type="visibleSecrets[field.key] ? 'text' : 'password'"
                           :placeholder="placeholderOf(field)"
                           :readonly="field.readonly"
-                          class="h-8 text-xs shadow-none pr-8 bg-background/50 border-border/60 focus:bg-background transition-colors w-full"
                           @update:model-value="(val: string) => updateValue(field.key, val)"
                         />
-                        <button
-                          type="button"
-                          class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                          @click="visibleSecrets[field.key] = !visibleSecrets[field.key]"
-                        >
-                          <component
-                            :is="visibleSecrets[field.key] ? EyeOff : Eye"
-                            class="size-3.5"
-                          />
-                        </button>
-                      </div>
+                        <InputGroupAddon align="inline-end">
+                          <InputGroupButton
+                            size="icon-sm"
+                            :aria-label="$t('common.preview')"
+                            @click="visibleSecrets[field.key] = !visibleSecrets[field.key]"
+                          >
+                            <component :is="visibleSecrets[field.key] ? EyeOff : Eye" />
+                          </InputGroupButton>
+                        </InputGroupAddon>
+                      </InputGroup>
 
-                      <!-- Number Input -->
                       <Input
                         v-else-if="field.type === 'number'"
-                        :id="`bot-network-config-primary-${field.key}`"
+                        :id="`bot-network-config-advanced-${field.key}`"
                         :model-value="numberValue(field)"
                         type="number"
                         :placeholder="placeholderOf(field)"
@@ -380,352 +352,124 @@
                         :min="field.constraint?.min"
                         :max="field.constraint?.max"
                         :step="field.constraint?.step ?? 1"
-                        :class="[
-                          'h-8 text-xs shadow-none w-full bg-background/50 border-border/60 focus:bg-background transition-colors',
-                          field.key.toLowerCase().includes('port') ? '[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none' : ''
-                        ]"
+                        class="h-8 w-full tabular-nums"
                         @update:model-value="(val: string) => updateNumber(field.key, val)"
                       />
 
-                      <!-- Default Text Input -->
                       <Input
                         v-else
-                        :id="`bot-network-config-primary-${field.key}`"
+                        :id="`bot-network-config-advanced-${field.key}`"
                         :model-value="stringValue(field)"
                         type="text"
                         :placeholder="placeholderOf(field)"
                         :readonly="field.readonly"
-                        class="h-8 text-xs shadow-none w-full bg-background/50 border-border/60 focus:bg-background transition-colors"
+                        class="h-8 w-full"
                         @update:model-value="(val: string) => updateValue(field.key, val)"
                       />
                     </div>
                   </div>
                 </template>
               </div>
-            </div>
-
-            <!-- Advanced Configuration -->
-            <div
-              v-if="advancedSchema?.fields?.length"
-              class="rounded-md border border-border/50 bg-background/50 p-4 shadow-none transition-all duration-200"
-              :class="showAdvancedConfig ? 'space-y-4' : 'space-y-0'"
-            >
-              <button
-                type="button"
-                class="flex items-center gap-1.5 text-xs font-medium text-foreground hover:text-foreground transition-colors w-full outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
-                @click="showAdvancedConfig = !showAdvancedConfig"
-              >
-                {{ $t('common.advanced') }}
-                <span class="text-[10px] text-muted-foreground font-normal ml-1">({{ $t('common.allOptional') }})</span>
-                <component
-                  :is="showAdvancedConfig ? ChevronDown : ChevronRight"
-                  class="size-3.5 shrink-0 ml-auto"
-                />
-              </button>
-                  
-              <div
-                v-show="showAdvancedConfig"
-                class="pt-4 border-t border-border/50 space-y-8"
-              >
-                <div
-                  v-for="group in advancedSchemaGroups"
-                  :key="group.title"
-                  class="space-y-2"
-                >
-                  <div class="flex items-center pt-2 pb-1 border-b border-border/20 mb-1">
-                    <span class="text-[10px] font-bold text-foreground/50 shrink-0">
-                      {{ group.title }}
-                    </span>
-                  </div>
-
-                  <div class="space-y-1">
-                    <template
-                      v-for="field in group.fields"
-                      :key="field.key"
-                    >
-                      <!-- Multiline Fields (Boxed) -->
-                      <div 
-                        v-if="isMultilineField(field)"
-                        class="space-y-2.5 p-4 bg-muted/20 rounded-md border border-border/40 my-3"
-                      >
-                        <div class="space-y-1">
-                          <Label
-                            :for="`bot-network-config-advanced-${field.key}`"
-                            class="text-[11px] font-semibold text-foreground/70"
-                          >
-                            {{ field.title || field.key }}
-                          </Label>
-                          <p
-                            v-if="field.description"
-                            class="text-[10px] text-muted-foreground/80 leading-relaxed"
-                          >
-                            {{ field.description }}
-                          </p>
-                        </div>
-                        <Textarea
-                          :id="`bot-network-config-advanced-${field.key}`"
-                          :model-value="stringValue(field)"
-                          :placeholder="placeholderOf(field)"
-                          :readonly="field.readonly"
-                          rows="4"
-                          class="text-xs shadow-none resize-none bg-background/50 focus:bg-background transition-colors border-border/60"
-                          @update:model-value="(val: string) => updateValue(field.key, val)"
-                        />
-                      </div>
-
-                      <!-- Standard Fields (Horizontal) -->
-                      <div 
-                        v-else
-                        class="flex items-center justify-between gap-6 py-4 border-b border-border/40 last:border-0 min-h-[64px]"
-                      >
-                        <div class="space-y-0.5 flex-1 pr-4">
-                          <Label
-                            :for="`bot-network-config-advanced-${field.key}`"
-                            class="text-[11px] font-semibold text-foreground/70"
-                          >
-                            {{ field.title || field.key }}
-                          </Label>
-                          <p
-                            v-if="field.description"
-                            class="text-[10px] text-muted-foreground/80 leading-relaxed"
-                          >
-                            {{ field.description }}
-                          </p>
-                        </div>
-
-                        <div class="shrink-0 flex justify-end min-w-40 max-w-[320px] w-full">
-                          <!-- Switch for Bool -->
-                          <Switch
-                            v-if="field.type === 'bool'"
-                            :model-value="!!getFieldValue(field)"
-                            :disabled="field.readonly"
-                            @update:model-value="(val: boolean) => updateValue(field.key, !!val)"
-                          />
-
-                          <!-- Select for Enum -->
-                          <Select
-                            v-else-if="field.type === 'enum' && field.enum"
-                            :model-value="stringValue(field)"
-                            :disabled="field.readonly"
-                            @update:model-value="(val: string) => updateValue(field.key, val)"
-                          >
-                            <SelectTrigger class="h-8 text-xs w-full shadow-none bg-background/50 border-border/60">
-                              <SelectValue :placeholder="placeholderOf(field)" />
-                            </SelectTrigger>
-                            <SelectContent class="w-[--reka-select-trigger-width]">
-                              <SelectItem
-                                v-for="option in field.enum"
-                                :key="option"
-                                :value="option"
-                              >
-                                {{ option }}
-                              </SelectItem>
-                            </SelectContent>
-                          </Select>
-
-                          <!-- Secret Input -->
-                          <div
-                            v-else-if="field.type === 'secret'"
-                            class="relative w-full"
-                          >
-                            <Input
-                              :id="`bot-network-config-advanced-${field.key}`"
-                              :model-value="stringValue(field)"
-                              :type="visibleSecrets[field.key] ? 'text' : 'password'"
-                              :placeholder="placeholderOf(field)"
-                              :readonly="field.readonly"
-                              class="h-8 text-xs shadow-none pr-8 bg-background/50 border-border/60 focus:bg-background transition-colors w-full"
-                              @update:model-value="(val: string) => updateValue(field.key, val)"
-                            />
-                            <button
-                              type="button"
-                              class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                              @click="visibleSecrets[field.key] = !visibleSecrets[field.key]"
-                            >
-                              <component
-                                :is="visibleSecrets[field.key] ? EyeOff : Eye"
-                                class="size-3.5"
-                              />
-                            </button>
-                          </div>
-
-                          <!-- Number Input -->
-                          <Input
-                            v-else-if="field.type === 'number'"
-                            :id="`bot-network-config-advanced-${field.key}`"
-                            :model-value="numberValue(field)"
-                            type="number"
-                            :placeholder="placeholderOf(field)"
-                            :readonly="field.readonly"
-                            :min="field.constraint?.min"
-                            :max="field.constraint?.max"
-                            :step="field.constraint?.step ?? 1"
-                            :class="[
-                              'h-8 text-xs shadow-none w-full bg-background/50 border-border/60 focus:bg-background transition-colors',
-                              field.key.toLowerCase().includes('port') ? '[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none' : ''
-                            ]"
-                            @update:model-value="(val: string) => updateNumber(field.key, val)"
-                          />
-
-                          <!-- Default Text Input -->
-                          <Input
-                            v-else
-                            :id="`bot-network-config-advanced-${field.key}`"
-                            :model-value="stringValue(field)"
-                            type="text"
-                            :placeholder="placeholderOf(field)"
-                            :readonly="field.readonly"
-                            class="h-8 text-xs shadow-none w-full bg-background/50 border-border/60 focus:bg-background transition-colors"
-                            @update:model-value="(val: string) => updateValue(field.key, val)"
-                          />
-                        </div>
-                      </div>
-                    </template>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- SD-WAN Actions -->
-          <div class="flex justify-end gap-2 pt-2 border-t border-border/30">
-            <Button
-              variant="ghost"
-              size="sm"
-              class="h-8 text-[11px] font-medium px-4 shadow-none"
-              @click="handleCancel"
-            >
-              {{ $t('common.cancel') }}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              class="h-8 text-[11px] font-medium px-4 shadow-none"
-              :disabled="!hasChanges || isSaving"
-              @click="handleSaveWithEnable(false)"
-            >
-              <Spinner
-                v-if="isSaving && !form.overlay_enabled"
-                class="mr-1.5 size-3"
-              />
-              {{ $t('bots.settings.saveOnly') }}
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              class="h-8 text-[11px] font-medium px-4 shadow-none"
-              :disabled="!hasChanges || isSaving"
-              @click="handleSaveWithEnable(true)"
-            >
-              <Spinner
-                v-if="isSaving && form.overlay_enabled"
-                class="mr-1.5 size-3"
-              />
-              {{ $t('bots.settings.saveAndEnable') }}
-            </Button>
+            </template>
           </div>
         </template>
-      </div>
-    </div>
+      </SettingsSection>
 
-    <!-- Exit Node independent block -->
-    <div
-      v-if="showExitNodeSelector"
-      class="space-y-4 rounded-md border border-border bg-background p-4 shadow-none"
-    >
-      <div class="flex items-start justify-between gap-3">
-        <div class="space-y-1">
-          <h4 class="text-xs font-medium text-foreground">
-            {{ $t('bots.settings.networkExitNode') }}
-          </h4>
-          <p class="text-[11px] text-muted-foreground">
-            {{ $t('bots.settings.networkExitNodeSectionHint') }}
-          </p>
+      <SettingsSection
+        v-if="showExitNodeSelector"
+        :title="$t('bots.settings.networkExitNode')"
+      >
+        <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 py-3">
+          <div class="min-w-0">
+            <div class="text-sm font-medium text-foreground">
+              {{ $t('bots.settings.networkExitNode') }}
+            </div>
+            <p class="mt-0.5 text-xs text-muted-foreground">
+              {{ nodeListHint }}
+            </p>
+          </div>
+          <div class="flex w-80 shrink-0 items-center gap-2">
+            <NetworkNodeSelect
+              v-model="exitNodeValue"
+              :nodes="exitNodeOptions"
+              :placeholder="$t('bots.settings.networkExitNodePlaceholder')"
+            />
+            <Button
+              variant="outline"
+              size="icon-sm"
+              :aria-label="$t('common.refresh')"
+              :disabled="!shouldLoadNodeOptions || isNodeListLoading"
+              @click="handleRefreshNodes"
+            >
+              <Spinner
+                v-if="isNodeListLoading"
+                class="size-3"
+              />
+              <RefreshCw
+                v-else
+                class="size-3.5"
+              />
+            </Button>
+          </div>
         </div>
+      </SettingsSection>
+
+      <div
+        v-if="props.botId && settings && hasChanges"
+        class="flex items-center justify-end gap-2"
+      >
         <Button
-          variant="ghost"
+          variant="outline"
           size="sm"
-          class="shrink-0 h-7 text-[10px] text-muted-foreground px-2"
-          :disabled="!shouldLoadNodeOptions || isNodeListLoading"
-          @click="handleRefreshNodes"
+          @click="handleCancel"
+        >
+          {{ $t('common.cancel') }}
+        </Button>
+        <Button
+          size="sm"
+          :disabled="isSaving"
+          @click="handleSave"
         >
           <Spinner
-            v-if="isNodeListLoading"
-            class="mr-1.5 size-3"
+            v-if="isSaving"
+            class="size-3"
           />
-          {{ $t('common.refresh') }}
+          {{ $t('common.save') }}
         </Button>
-      </div>
-
-      <div class="space-y-1.5">
-        <NetworkNodeSelect
-          v-model="exitNodeValue"
-          :nodes="exitNodeOptions"
-          :placeholder="$t('bots.settings.networkExitNodePlaceholder')"
-        />
-        <p class="text-[10px] text-muted-foreground">
-          {{ nodeListHint }}
-        </p>
-      </div>
-
-      <!-- Node Meta details (Single Column) -->
-      <div
-        v-if="selectedExitNodeMeta"
-        class="space-y-3 pt-3 border-t border-border/50"
-      >
-        <div class="space-y-1">
-          <div class="text-[11px] font-medium text-muted-foreground">
-            {{ $t('bots.settings.networkExitNodeStatus') }}
-          </div>
-          <div class="font-mono text-[10px] leading-relaxed tracking-tight break-all rounded px-2 py-1 bg-secondary/30 opacity-60 grayscale border border-transparent">
-            {{ selectedExitNodeMeta.online ? $t('bots.settings.networkExitNodeOnline') : $t('bots.settings.networkExitNodeOffline') }}
-          </div>
-        </div>
-        <div class="space-y-1">
-          <div class="text-[11px] font-medium text-muted-foreground">
-            {{ $t('bots.settings.networkExitNodeAddresses') }}
-          </div>
-          <div class="font-mono text-[10px] leading-relaxed tracking-tight break-all rounded px-2 py-1 bg-secondary/30 opacity-60 grayscale border border-transparent">
-            {{ (selectedExitNodeMeta.addresses ?? []).join(', ') || '-' }}
-          </div>
-        </div>
       </div>
     </div>
 
-    <!-- Edit Dialog (Modal IDE for Raw JSON) -->
     <Dialog v-model:open="isEditorDialogOpen">
-      <DialogContent class="sm:max-w-3xl max-h-[calc(100vh - 2rem)] sm:h-[70vh] flex flex-col overflow-hidden p-0 gap-0">
-        <DialogHeader class="shrink-0 p-4 border-b border-border/50 bg-background">
+      <DialogContent class="flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden p-0 sm:h-[70vh] sm:max-w-3xl">
+        <DialogHeader class="shrink-0 border-b border-border p-4">
           <DialogTitle class="text-sm font-semibold">
             {{ $t('mcp.editValue') }}
           </DialogTitle>
-          <DialogDescription class="text-[11px] leading-snug">
+          <DialogDescription class="text-xs leading-snug">
             {{ $t('mcp.editLongTextHint') }}
           </DialogDescription>
         </DialogHeader>
         
-        <div class="flex-1 min-h-0 relative p-4 bg-muted/5">
-          <div class="absolute inset-4 rounded-md border border-border/50 bg-background/50 overflow-hidden flex flex-col shadow-sm">
-            <MonacoEditor
-              v-model="editorDraftRaw"
-              language="json"
-              class="flex-1 min-h-0"
-              :options="{
-                automaticLayout: true,
-                fixedOverflowWidgets: true,
-                minimap: { enabled: false },
-                scrollBeyondLastLine: false,
-                formatOnPaste: true,
-                formatOnType: true
-              }"
-            />
-          </div>
+        <div class="flex min-h-0 flex-1 p-4">
+          <MonacoEditor
+            v-model="editorDraftRaw"
+            language="json"
+            class="min-h-0 flex-1 rounded-md border border-border"
+            :options="{
+              automaticLayout: true,
+              fixedOverflowWidgets: true,
+              minimap: { enabled: false },
+              scrollBeyondLastLine: false,
+              formatOnPaste: true,
+              formatOnType: true
+            }"
+          />
         </div>
 
-        <DialogFooter class="shrink-0 p-4 border-t border-border/50 bg-background flex items-center justify-between gap-2">
+        <DialogFooter class="flex shrink-0 items-center justify-between gap-2 border-t border-border p-4">
           <p
             v-if="editorError"
-            class="text-[10px] text-warning/80"
+            class="text-xs text-warning"
           >
             {{ editorError }}
           </p>
@@ -735,30 +479,101 @@
               <Button
                 variant="ghost"
                 size="sm"
-                class="h-8 text-xs font-medium px-4 shadow-none"
               >
                 {{ $t('common.cancel') }}
               </Button>
             </DialogClose>
             <Button
               size="sm"
-              class="h-8 text-xs font-medium px-4 min-w-24 shadow-none bg-foreground text-background hover:bg-foreground/90"
+              class="min-w-24"
               :disabled="!!editorError"
               @click="handleEditorSave"
             >
-              {{ $t('common.save') }}
+              {{ $t('common.confirm') }}
             </Button>
           </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  </div>
+
+    <Dialog v-model:open="isDetailsDialogOpen">
+      <DialogContent class="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle class="text-sm font-semibold">
+            {{ $t('bots.settings.networkDetailsTitle') }}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div v-if="overlayNetworkStatusFields.length">
+          <div
+            v-for="item in overlayNetworkStatusFields"
+            :key="`d-ov-${item.label}`"
+            class="flex items-start justify-between gap-4 border-b border-border py-2.5 last:border-b-0"
+          >
+            <span class="shrink-0 text-sm text-muted-foreground">{{ item.label }}</span>
+            <span
+              class="max-w-[60%] break-all text-right text-sm text-foreground"
+              :class="{ 'font-mono': item.mono }"
+            >{{ item.value }}</span>
+          </div>
+        </div>
+
+        <div v-if="workspaceStatusFields.length">
+          <div class="mb-1 text-xs font-medium text-muted-foreground">
+            {{ $t('bots.settings.networkDetailsWorkspaceGroup') }}
+          </div>
+          <div
+            v-for="item in workspaceStatusFields"
+            :key="`d-ws-${item.label}`"
+            class="flex items-start justify-between gap-4 border-b border-border py-2.5 last:border-b-0"
+          >
+            <span class="shrink-0 text-sm text-muted-foreground">{{ item.label }}</span>
+            <span
+              class="max-w-[60%] break-all text-right text-sm text-foreground"
+              :class="{ 'font-mono': item.mono }"
+            >{{ item.value }}</span>
+          </div>
+        </div>
+
+        <DialogFooter
+          v-if="showLogoutButton"
+          class="border-t border-border pt-4"
+        >
+          <ConfirmPopover
+            variant="destructive"
+            :message="$t('bots.settings.networkLogoutConfirm')"
+            :confirm-text="$t('bots.settings.networkLogout')"
+            :loading="isLoggingOut"
+            @confirm="handleLogout"
+          >
+            <template #trigger>
+              <Button
+                variant="destructive"
+                size="sm"
+                :disabled="isLoggingOut"
+              >
+                <Spinner
+                  v-if="isLoggingOut"
+                  class="size-3"
+                />
+                {{ $t('bots.settings.networkLogout') }}
+              </Button>
+            </template>
+          </ConfirmPopover>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
 import {
-  Label,
   Button,
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+  Label,
   Spinner,
   Switch,
   Input,
@@ -766,9 +581,9 @@ import {
   Textarea,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose,
 } from '@memohai/ui'
-import { SquarePen, ChevronDown, ChevronRight, Eye, EyeOff } from 'lucide-vue-next'
+import { SquarePen, Eye, EyeOff, RefreshCw, ChevronRight } from 'lucide-vue-next'
 import { reactive, computed, watch, nextTick, onBeforeUnmount, ref } from 'vue'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import { getBotsByBotIdSettings, putBotsByBotIdSettings } from '@memohai/sdk'
@@ -776,6 +591,10 @@ import type { SettingsSettings } from '@memohai/sdk'
 import { cloneConfig, getPathValue, setPathValue } from '@/components/config-schema-form/utils'
 import type { ConfigSchema, ConfigSchemaField } from '@/components/config-schema-form/types'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import SettingsRow from '@/components/settings/row.vue'
+import SettingsSection from '@/components/settings/section.vue'
+import PageShell from '@/components/page-shell/index.vue'
+import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import OverlayProviderSelect from './network-provider-select.vue'
 import NetworkNodeSelect from './network-node-select.vue'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
@@ -1038,6 +857,7 @@ const { mutateAsync: runNetworkAction, isLoading: isLoggingOut } = useMutation({
 // Editor state
 // ---------------------------------------------------------------------------
 const isEditorDialogOpen = ref(false)
+const isDetailsDialogOpen = ref(false)
 const editorDraftRaw = ref('')
 const editorError = ref('')
 
@@ -1053,7 +873,7 @@ watch(editorDraftRaw, (val) => {
     JSON.parse(val)
     editorError.value = ''
   } catch {
-    editorError.value = 'Invalid JSON format'
+    editorError.value = t('mcp.importErrorJson')
   }
 })
 
@@ -1064,7 +884,7 @@ function handleEditorSave() {
     isEditorDialogOpen.value = false
   } catch {
     // Should be caught by watcher, but just in case
-    editorError.value = 'Invalid JSON format'
+    editorError.value = t('mcp.importErrorJson')
   }
 }
 
@@ -1090,7 +910,7 @@ const isConnected = computed(() =>
 // Show logout when the sidecar is alive (connected or waiting for login).
 const showLogoutButton = computed(() =>
   shouldLoadNetworkStatus.value
-  && !isNetworkStatusPendingSave.value
+  && !needsSaveForStatus.value
   && ['ready', 'running', 'degraded', 'needs_login', 'starting', 'stopped'].includes(overlayState.value),
 )
 
@@ -1114,25 +934,11 @@ const exitNodeValue = computed({
     }
   },
 })
-const selectedExitNodeMeta = computed(() =>
-  exitNodeOptions.value.find(node => node.value === exitNodeValue.value),
-)
 
-const networkStatusCard = computed(() => {
-  if (form.overlay_enabled && form.overlay_provider && !isSelectedNetworkPersisted.value) {
-    return {
-      state: 'pending_save',
-      title: t('bots.settings.networkStatusPendingSaveTitle'),
-      description: t('bots.settings.networkStatusPendingSave'),
-    }
-  }
-  if (networkStatusData.value) {
-    return networkStatusData.value
-  }
-  return null
-})
-const isNetworkStatusPendingSave = computed(() =>
-  networkStatusCard.value?.state === 'pending_save',
+const needsSaveForStatus = computed(() =>
+  form.overlay_enabled
+  && !!form.overlay_provider
+  && !isSelectedNetworkPersisted.value,
 )
 
 const showOverlayStatusInNetworkCard = computed(() =>
@@ -1140,9 +946,41 @@ const showOverlayStatusInNetworkCard = computed(() =>
   && !!networkStatusData.value,
 )
 
-async function handleRefreshNetworkStatus() {
-  await refetchNetworkStatus()
-}
+type NetworkStatusTone = 'success' | 'warning' | 'muted' | 'destructive'
+
+// Distill the backend's many states into one human line + a colored dot; the raw
+// fields live behind Details (§13: let one status carry the surface, hide diagnostics).
+const networkStatusLine = computed<{ tone: NetworkStatusTone; label: string; detail?: string } | null>(() => {
+  if (!showOverlayStatusInNetworkCard.value) return null
+  const status = networkStatusData.value as NetworkBotStatus | null
+  const details = status?.details ?? {}
+  const address = status?.network_ip || (details.dns_name as string | undefined) || ''
+  switch (overlayState.value) {
+    case 'ready':
+    case 'running':
+      return { tone: 'success', label: t('bots.settings.networkState.connected'), detail: address || undefined }
+    case 'degraded':
+      return { tone: 'warning', label: t('bots.settings.networkState.degraded'), detail: address || undefined }
+    case 'needs_login':
+    case 'needslogin':
+      return { tone: 'warning', label: t('bots.settings.networkState.needsLogin') }
+    case 'starting':
+      return { tone: 'muted', label: t('bots.settings.networkState.connecting') }
+    case 'stopped':
+      return { tone: 'muted', label: t('bots.settings.networkState.stopped') }
+    default:
+      return { tone: 'muted', label: overlayState.value || t('bots.settings.networkState.unknown') }
+  }
+})
+
+const statusDotClass = computed(() => {
+  switch (networkStatusLine.value?.tone) {
+    case 'success': return 'bg-success'
+    case 'warning': return 'bg-warning'
+    case 'destructive': return 'bg-destructive'
+    default: return 'bg-muted-foreground'
+  }
+})
 
 function workspaceStateDisplay(state: string) {
   const key = `bots.settings.networkWorkspaceState.${state}`
@@ -1154,16 +992,16 @@ const workspaceStatusFields = computed(() => {
   const status = networkStatusData.value
   if (!status || !status.workspace) return []
   const ws = status.workspace
-  const items: { label: string; value: string }[] = [
-    { label: t('bots.settings.networkWorkspaceStateLabel'), value: workspaceStateDisplay(ws.state) },
+  const items: { label: string; value: string; mono: boolean }[] = [
+    { label: t('bots.settings.networkWorkspaceStateLabel'), value: workspaceStateDisplay(ws.state), mono: false },
   ]
-  if (ws.container_id) items.push({ label: t('bots.settings.networkWorkspaceContainerID'), value: ws.container_id })
-  if (ws.task_status) items.push({ label: t('bots.settings.networkWorkspaceTaskStatus'), value: ws.task_status })
+  if (ws.container_id) items.push({ label: t('bots.settings.networkWorkspaceContainerID'), value: ws.container_id, mono: true })
+  if (ws.task_status) items.push({ label: t('bots.settings.networkWorkspaceTaskStatus'), value: ws.task_status, mono: false })
   if (ws.pid != null && ws.pid > 0) {
-    items.push({ label: t('bots.settings.networkWorkspaceTaskPID'), value: String(ws.pid) })
+    items.push({ label: t('bots.settings.networkWorkspaceTaskPID'), value: String(ws.pid), mono: true })
   }
-  if (ws.network_target) items.push({ label: t('bots.settings.networkWorkspaceTarget'), value: ws.network_target })
-  if (ws.message) items.push({ label: t('bots.settings.networkWorkspaceMessage'), value: ws.message })
+  if (ws.network_target) items.push({ label: t('bots.settings.networkWorkspaceTarget'), value: ws.network_target, mono: true })
+  if (ws.message) items.push({ label: t('bots.settings.networkWorkspaceMessage'), value: ws.message, mono: false })
   return items.filter(item => item.value)
 })
 
@@ -1171,16 +1009,16 @@ const overlayNetworkStatusFields = computed(() => {
   const status = networkStatusData.value
   if (!status) return []
   const details = status.details ?? {}
-  const items = [
-    { label: t('bots.settings.networkStatusState'), value: status.state },
-    { label: t('bots.settings.networkStatusIP'), value: status.network_ip },
-    { label: t('bots.settings.networkStatusProxy'), value: status.proxy_address },
-    { label: t('bots.settings.networkStatusPID'), value: details.pid == null ? undefined : String(details.pid) },
-    { label: t('bots.settings.networkStatusDNSName'), value: details.dns_name as string | undefined },
-    { label: t('bots.settings.networkStatusBackendState'), value: details.backend_state as string | undefined },
-    { label: t('bots.settings.networkStatusHealth'), value: Array.isArray(details.health) ? details.health.join('; ') : undefined },
-    { label: t('bots.settings.networkStatusSocket'), value: details.localapi_socket_host_path as string | undefined },
-    { label: t('bots.settings.networkStatusExitNode'), value: details.configured_exit_node as string | undefined },
+  const items: { label: string; value: string | undefined; mono: boolean }[] = [
+    { label: t('bots.settings.networkStatusState'), value: status.state, mono: false },
+    { label: t('bots.settings.networkStatusIP'), value: status.network_ip, mono: true },
+    { label: t('bots.settings.networkStatusProxy'), value: status.proxy_address, mono: true },
+    { label: t('bots.settings.networkStatusPID'), value: details.pid == null ? undefined : String(details.pid), mono: true },
+    { label: t('bots.settings.networkStatusDNSName'), value: details.dns_name as string | undefined, mono: true },
+    { label: t('bots.settings.networkStatusBackendState'), value: details.backend_state as string | undefined, mono: false },
+    { label: t('bots.settings.networkStatusHealth'), value: Array.isArray(details.health) ? details.health.join('; ') : undefined, mono: false },
+    { label: t('bots.settings.networkStatusSocket'), value: details.localapi_socket_host_path as string | undefined, mono: true },
+    { label: t('bots.settings.networkStatusExitNode'), value: details.configured_exit_node as string | undefined, mono: true },
   ]
   return items.filter(item => item.value)
 })
@@ -1264,11 +1102,6 @@ function handleCancel() {
       skipProviderChangeReset = false
     })
   }
-}
-
-async function handleSaveWithEnable(enable: boolean) {
-  form.overlay_enabled = enable
-  await handleSave()
 }
 
 async function handleRefreshNodes() {

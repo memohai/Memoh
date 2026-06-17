@@ -1,221 +1,228 @@
 <template>
-  <SettingsShell width="wide">
-    <section class="flex items-center gap-3">
-      <span class="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted">
-        <ProviderIcon
-          v-if="curProvider?.icon"
-          :icon="curProvider.icon"
-          size="1.5em"
-        />
-        <span
-          v-else
-          class="text-xs font-medium text-muted-foreground"
-        >
-          {{ getInitials(curProvider?.name) }}
-        </span>
-      </span>
-      <div class="min-w-0">
-        <h2 class="text-sm font-semibold truncate">
-          {{ curProvider?.name }}
-        </h2>
-        <p class="text-xs text-muted-foreground">
-          {{ currentMeta?.display_name ?? curProvider?.client_type }}
-        </p>
-      </div>
-      <div class="ml-auto flex items-center gap-2">
-        <span class="text-xs text-muted-foreground">
-          {{ $t('common.enable') }}
-        </span>
-        <Switch
-          :model-value="curProvider?.enable ?? false"
-          :disabled="!curProvider?.id || enableLoading"
-          @update:model-value="handleToggleEnable"
-        />
-      </div>
-    </section>
-    <Separator class="mt-4 mb-6" />
-
-    <form
-      @submit.prevent="handleSaveProvider"
-    >
-      <div class="grid gap-4 md:grid-cols-2">
-        <section class="space-y-2 md:col-span-2">
-          <Label for="transcription-provider-name">{{ $t('common.name') }}</Label>
-          <Input
-            id="transcription-provider-name"
-            v-model="providerName"
-            type="text"
-            :placeholder="$t('common.namePlaceholder')"
+  <SettingsShell width="narrow">
+    <div class="space-y-6">
+      <!-- Identity card: same header shape as the provider detail. -->
+      <section class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3">
+        <span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
+          <ProviderIcon
+            v-if="curProvider?.icon"
+            :icon="curProvider.icon"
+            size="1.5em"
           />
-        </section>
-
-        <section
-          v-for="field in orderedProviderFields"
-          :key="field.key"
-          class="space-y-2"
-          :class="isWideField(field) ? 'md:col-span-2' : ''"
-        >
-          <Label :for="field.type === 'bool' || field.type === 'enum' ? undefined : `transcription-provider-${field.key}`">
-            {{ field.title || field.key }}
-          </Label>
-          <p
-            v-if="field.description"
-            class="text-xs text-muted-foreground"
-          >
-            {{ field.description }}
-          </p>
-          <div
-            v-if="field.type === 'secret'"
-            class="relative"
-          >
-            <Input
-              :id="`transcription-provider-${field.key}`"
-              v-model="providerConfig[field.key] as string"
-              :type="visibleSecrets[field.key] ? 'text' : 'password'"
-            />
-            <button
-              type="button"
-              class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              @click="visibleSecrets[field.key] = !visibleSecrets[field.key]"
-            >
-              <component
-                :is="visibleSecrets[field.key] ? EyeOff : Eye"
-                class="size-3.5"
-              />
-            </button>
-          </div>
-          <Switch
-            v-else-if="field.type === 'bool'"
-            :model-value="!!providerConfig[field.key]"
-            @update:model-value="(val) => providerConfig[field.key] = !!val"
-          />
-          <Input
-            v-else-if="field.type === 'number'"
-            :id="`transcription-provider-${field.key}`"
-            v-model.number="providerConfig[field.key] as number"
-            type="number"
-          />
-          <Select
-            v-else-if="field.type === 'enum' && field.enum"
-            :model-value="String(providerConfig[field.key] ?? '')"
-            @update:model-value="(val) => providerConfig[field.key] = val"
-          >
-            <SelectTrigger>
-              <SelectValue :placeholder="field.title || field.key" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem
-                v-for="opt in field.enum"
-                :key="opt"
-                :value="opt"
-              >
-                {{ opt }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <Input
+          <span
             v-else
-            :id="`transcription-provider-${field.key}`"
-            v-model="providerConfig[field.key] as string"
-            type="text"
-          />
-        </section>
-      </div>
-
-      <div class="flex justify-end mt-4">
-        <LoadingButton
-          type="submit"
-          :loading="saveLoading"
-        >
-          {{ $t('provider.saveChanges') }}
-        </LoadingButton>
-      </div>
-    </form>
-
-    <Separator class="mt-6 mb-6" />
-
-    <section>
-      <div class="flex justify-between items-center mb-4">
-        <h3 class="text-xs font-medium">
-          {{ $t('transcription.models') }}
-        </h3>
-        <div
-          v-if="curProviderId"
-          class="flex items-center gap-2"
-        >
-          <LoadingButton
-            type="button"
-            variant="outline"
-            size="sm"
-            :loading="importLoading"
-            @click="handleImportModels"
+            class="text-xs font-medium text-muted-foreground"
           >
-            {{ $t('transcription.importModels') }}
-          </LoadingButton>
-          <CreateModel
-            :id="curProviderId"
-            default-type="transcription"
-            hide-type
-            :type-options="transcriptionTypeOptions"
-            :invalidate-keys="['transcription-provider-models', 'transcription-models']"
+            {{ getInitials(curProvider?.name) }}
+          </span>
+        </span>
+        <div class="min-w-0 flex-1">
+          <h2 class="truncate text-sm font-semibold">
+            {{ curProvider?.name }}
+          </h2>
+        </div>
+        <div class="ml-auto flex shrink-0 items-center gap-2">
+          <span class="text-xs text-muted-foreground">
+            {{ $t('common.enable') }}
+          </span>
+          <Switch
+            :model-value="curProvider?.enable ?? false"
+            :disabled="!curProvider?.id || enableLoading"
+            :aria-label="$t('common.enable')"
+            @update:model-value="handleToggleEnable"
           />
         </div>
-      </div>
+      </section>
 
-      <div
-        v-if="providerModels.length === 0"
-        class="text-xs text-muted-foreground py-4 text-center"
-      >
-        {{ $t('transcription.noModels') }}
-      </div>
-
-      <div
-        v-for="model in providerModels"
-        :key="model.id"
-        class="border border-border rounded-lg mb-4"
-      >
-        <button
-          type="button"
-          class="w-full flex items-center justify-between p-3 text-left hover:bg-accent/50 rounded-t-lg transition-colors"
-          @click="toggleModel(model.id ?? '')"
-        >
+      <!-- Provider configuration card -->
+      <form @submit.prevent="handleSaveProvider">
+        <SettingsSection :title="$t('provider.configurationTitle')">
           <div>
-            <span class="text-xs font-medium">{{ model.name || model.model_id }}</span>
-            <span
-              v-if="model.name"
-              class="text-xs text-muted-foreground ml-2"
+            <SettingsRow :label="$t('common.name')">
+              <Input
+                id="transcription-provider-name"
+                v-model="providerName"
+                type="text"
+                class="w-80"
+                :placeholder="$t('common.namePlaceholder')"
+              />
+            </SettingsRow>
+
+            <SettingsRow
+              v-for="field in orderedProviderFields"
+              :key="field.key"
+              :label="field.title || field.key"
+              :description="field.description"
             >
-              {{ model.model_id }}
-            </span>
+              <div
+                v-if="field.type === 'secret'"
+                class="relative w-80"
+              >
+                <Input
+                  :id="`transcription-provider-${field.key}`"
+                  v-model="providerConfig[field.key] as string"
+                  :type="visibleSecrets[field.key] ? 'text' : 'password'"
+                  class="pr-9"
+                />
+                <button
+                  type="button"
+                  class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  @click="visibleSecrets[field.key] = !visibleSecrets[field.key]"
+                >
+                  <component
+                    :is="visibleSecrets[field.key] ? EyeOff : Eye"
+                    class="size-3.5"
+                  />
+                </button>
+              </div>
+              <Switch
+                v-else-if="field.type === 'bool'"
+                :model-value="!!providerConfig[field.key]"
+                @update:model-value="(val) => providerConfig[field.key] = !!val"
+              />
+              <Input
+                v-else-if="field.type === 'number'"
+                :id="`transcription-provider-${field.key}`"
+                v-model.number="providerConfig[field.key] as number"
+                type="number"
+                class="w-80"
+              />
+              <Select
+                v-else-if="field.type === 'enum' && field.enum"
+                :model-value="String(providerConfig[field.key] ?? '')"
+                @update:model-value="(val) => providerConfig[field.key] = val"
+              >
+                <SelectTrigger class="w-80">
+                  <SelectValue :placeholder="field.title || field.key" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    v-for="opt in field.enum"
+                    :key="opt"
+                    :value="opt"
+                  >
+                    {{ opt }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <Input
+                v-else
+                :id="`transcription-provider-${field.key}`"
+                v-model="providerConfig[field.key] as string"
+                type="text"
+                class="w-80"
+              />
+            </SettingsRow>
           </div>
-          <component
-            :is="expandedModelId === model.id ? ChevronUp : ChevronDown"
-            class="size-3 text-muted-foreground"
-          />
-        </button>
-        <div
-          v-if="expandedModelId === model.id"
-          class="px-3 pb-3 space-y-4 border-t border-border pt-3"
-        >
-          <ModelConfigEditor
-            :model-id="model.id ?? ''"
-            :model-name="model.model_id ?? ''"
-            :config="model.config || {}"
-            :schema="getModelSchema(model.model_id ?? '')"
-            mode="transcription"
-            :on-test="(file, cfg) => handleTestModel(model.id ?? '', file as File, cfg)"
-            @save="(cfg) => handleSaveModel(model.id ?? '', cfg)"
-          />
+
+          <div class="mx-4 flex items-center justify-end border-t border-border py-3">
+            <LoadingButton
+              type="submit"
+              size="sm"
+              :loading="saveLoading"
+            >
+              {{ $t('provider.saveChanges') }}
+            </LoadingButton>
+          </div>
+        </SettingsSection>
+      </form>
+
+      <!-- Models: a list; editing a model opens a dialog (the same shape as the
+           provider's model management), not an inline accordion. -->
+      <section class="space-y-2.5">
+        <div class="flex min-h-7 items-center justify-between gap-2 px-2">
+          <h2 class="text-[13px] font-medium text-muted-foreground">
+            {{ $t('transcription.models') }}
+          </h2>
+          <div
+            v-if="curProviderId"
+            class="flex items-center gap-2"
+          >
+            <LoadingButton
+              type="button"
+              variant="outline"
+              size="sm"
+              :loading="importLoading"
+              @click="handleImportModels"
+            >
+              {{ $t('transcription.importModels') }}
+            </LoadingButton>
+            <CreateModel
+              :id="curProviderId"
+              default-type="transcription"
+              hide-type
+              :type-options="transcriptionTypeOptions"
+              :invalidate-keys="['transcription-provider-models', 'transcription-models']"
+            />
+          </div>
         </div>
-      </div>
-    </section>
+
+        <div class="overflow-hidden rounded-[var(--radius-menu-shell)] border border-border bg-card">
+          <div
+            v-if="providerModels.length === 0"
+            class="px-4 py-10 text-center text-xs text-muted-foreground"
+          >
+            {{ $t('transcription.noModels') }}
+          </div>
+
+          <template v-else>
+            <div
+              v-for="(model, index) in providerModels"
+              :key="model.id"
+            >
+              <button
+                type="button"
+                class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-accent"
+                @click="openModelEditor(model)"
+              >
+                <span class="min-w-0 truncate">
+                  <span class="text-sm font-medium">{{ model.name || model.model_id }}</span>
+                  <span
+                    v-if="model.name && model.name !== model.model_id"
+                    class="ml-2 text-xs text-muted-foreground"
+                  >{{ model.model_id }}</span>
+                </span>
+                <Settings class="size-4 shrink-0 text-muted-foreground/60" />
+              </button>
+              <div
+                v-if="index < providerModels.length - 1"
+                class="mx-4 border-b border-border"
+              />
+            </div>
+          </template>
+        </div>
+      </section>
+
+      <!-- Editing opens the config editor in a dialog rather than expanding the
+           row in place. -->
+      <Dialog v-model:open="modelDialogOpen">
+        <DialogContent class="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {{ editingModel?.name || editingModel?.model_id }}
+            </DialogTitle>
+          </DialogHeader>
+          <ModelConfigEditor
+            v-if="editingModel"
+            :key="editingModel.id"
+            :model-id="editingModel.id ?? ''"
+            :model-name="editingModel.model_id ?? ''"
+            :config="editingModel.config || {}"
+            :schema="getModelSchema(editingModel.model_id ?? '')"
+            mode="transcription"
+            :on-test="(file, cfg) => handleTestModel(editingModel?.id ?? '', file as File, cfg)"
+            @save="(cfg) => handleSaveModel(editingModel?.id ?? '', cfg)"
+          />
+        </DialogContent>
+      </Dialog>
+    </div>
   </SettingsShell>
 </template>
 
 <script setup lang="ts">
 import { computed, inject, reactive, ref, watch } from 'vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import {
   getTranscriptionProvidersById,
@@ -232,13 +239,15 @@ import type {
   AudioTestTranscriptionResponse,
   AudioTranscriptionModelResponse,
 } from '@memohai/sdk'
-import { ChevronDown, ChevronUp, Eye, EyeOff } from 'lucide-vue-next'
-import { Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Separator, Switch } from '@memohai/ui'
+import { Eye, EyeOff, Settings } from 'lucide-vue-next'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from '@memohai/ui'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
 import ModelConfigEditor from '@/pages/speech/components/model-config-editor.vue'
 import CreateModel from '@/components/create-model/index.vue'
 import SettingsShell from '@/components/settings-shell/index.vue'
+import SettingsSection from '@/components/settings/section.vue'
+import SettingsRow from '@/components/settings/row.vue'
 
 interface FieldSchema { key: string, type: string, title?: string, description?: string, enum?: string[], order?: number }
 interface ConfigSchema { fields?: FieldSchema[] }
@@ -307,7 +316,8 @@ const curProviderId = computed(() => curProvider.value?.id)
 const providerName = ref('')
 const providerConfig = reactive<Record<string, unknown>>({})
 const visibleSecrets = reactive<Record<string, boolean>>({})
-const expandedModelId = ref('')
+const modelDialogOpen = ref(false)
+const editingModel = ref<AudioTranscriptionModelResponse | null>(null)
 const enableLoading = ref(false)
 const saveLoading = ref(false)
 const importLoading = ref(false)
@@ -339,14 +349,6 @@ const { data: metaList } = useQuery({
 const currentMeta = computed(() => (metaList.value ?? []).find(m => m.provider === curProvider.value?.client_type) ?? null)
 const orderedProviderFields = computed(() => [...(currentMeta.value?.config_schema?.fields ?? [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)))
 
-function isWideField(field: FieldSchema) {
-  if (field.type === 'secret') return true
-  const key = field.key.toLowerCase()
-  if (key.includes('url') || key.includes('endpoint') || key.includes('key') || key.includes('token') || key.includes('path') || key.includes('uri')) return true
-  if ((field.description ?? '').length > 80) return true
-  return false
-}
-
 const { data: providerModelData } = useQuery({
   key: () => ['transcription-provider-models', curProviderId.value ?? ''],
   query: async () => {
@@ -374,8 +376,9 @@ function getModelSchema(modelID: string): ConfigSchema | null {
   return fallback?.config_schema ?? fallback?.capabilities?.config_schema ?? null
 }
 
-function toggleModel(id: string) {
-  expandedModelId.value = expandedModelId.value === id ? '' : id
+function openModelEditor(model: AudioTranscriptionModelResponse) {
+  editingModel.value = model
+  modelDialogOpen.value = true
 }
 
 async function handleToggleEnable(value: boolean) {

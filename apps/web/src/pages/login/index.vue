@@ -1,188 +1,145 @@
 <template>
   <main
-    class="w-screen h-screen flex *:m-auto bg-background relative p-4"
-    :aria-busy="isSubmitting"
+    class="w-screen h-screen flex flex-col items-center justify-center bg-background relative overflow-hidden p-6 pb-24"
   >
-    <header class="absolute top-6 right-6 flex items-center gap-2">
-      <Select
-        :model-value="language"
-        @update:model-value="(v) => v && setLanguage(v as Locale)"
+    <DotMatrixBg class="login-dots absolute inset-0 pointer-events-none" />
+
+    <div class="absolute top-6 left-6 flex items-center gap-2.5 z-10">
+      <img
+        src="/logo.svg"
+        class="size-7"
+        alt=""
+        aria-hidden="true"
       >
-        <SelectTrigger
-          class="w-28 h-9"
-          :aria-label="$t('settings.language')"
+      <span class="text-control font-semibold text-foreground">Memoh</span>
+    </div>
+
+    <section
+      class="relative z-10 w-full max-w-[20.5rem] flex flex-col items-center gap-8 transition-all duration-[175ms] ease-out"
+      :class="exiting ? 'scale-[0.88] opacity-0' : 'scale-100 opacity-100'"
+    >
+      <div class="flex flex-col items-center gap-3">
+        <img
+          src="/logo.svg"
+          class="size-12"
+          alt=""
+          aria-hidden="true"
         >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectGroup>
-            <SelectItem value="en">
-              English
-            </SelectItem>
-            <SelectItem value="zh">
-              中文
-            </SelectItem>
-          </SelectGroup>
-        </SelectContent>
-      </Select>
-      <Button
-        variant="ghost"
-        size="icon"
-        type="button"
-        aria-label="Toggle theme"
-        @click="toggleTheme"
-      >
-        <Sun
-          v-if="theme === 'dark'"
-          class="size-5"
-        />
-        <Moon
-          v-else
-          class="size-5"
-        />
-      </Button>
-    </header>
-    <section class="w-full max-w-sm flex flex-col gap-10 ">
-      <section>
-        <h1
-          class="scroll-m-20 text-3xl tracking-wide font-semibold text-foreground text-center"
-        >
-          {{ $t('auth.welcome') }}
+        <h1 class="text-display font-semibold text-foreground">
+          {{ $t('auth.pageTitle') }}
         </h1>
-      </section>
+      </div>
+
       <form
+        class="w-full flex flex-col gap-2.5"
         @submit.prevent="login"
       >
-        <Card class="py-14">
-          <CardContent class="flex flex-col [&_input]:py-5 gap-4">
-            <FormField
-              v-slot="{ componentField }"
-              name="username"
-            >
-              <FormItem>
-                <Label
-                  class="mb-2"
-                  for="username"
-                >
-                  {{ $t('auth.username') }}
-                </Label>
-                <FormControl>
-                  <Input
-                    v-bind="componentField"
-                    id="username"
-                    type="text"
-                    :placeholder="$t('auth.username')"
-                    :disabled="isSubmitting"
-                    autocomplete="new-password"
-                  />
-                </FormControl>
-              </FormItem>
-            </FormField>
-            <FormField
-              v-slot="{ componentField }"
-              name="password"
-            >
-              <FormItem>
-                <Label
-                  class="mb-2"
-                  for="password"
-                >
-                  {{ $t('auth.password') }}
-                </Label>
-                <FormControl>
-                  <Input
-                    id="password"
-                    type="password"
-                    :placeholder="$t('auth.password')"
-                    autocomplete="new-password"
-                    :disabled="isSubmitting"
-                    v-bind="componentField"
-                  />
-                </FormControl>
-              </FormItem>
-            </FormField>
-          </CardContent>
-
-          <CardFooter>
-            <LoadingButton
-              class="w-full"
-              type="submit"
-              :loading="isSubmitting"
-            >
-              {{ $t('auth.login') }}
-            </LoadingButton>
-          </CardFooter>
-        </Card>
+        <Input
+          id="username"
+          v-model="username"
+          type="text"
+          :placeholder="$t('auth.username')"
+          :disabled="isSubmitting"
+          autocomplete="username"
+          class="bg-background"
+        />
+        <Input
+          id="password"
+          v-model="password"
+          type="password"
+          :placeholder="$t('auth.password')"
+          autocomplete="current-password"
+          :disabled="isSubmitting"
+          class="bg-background"
+        />
+        <LoadingButton
+          class="w-full mt-1"
+          type="submit"
+          :loading="isSubmitting"
+          :loading-delay="0"
+          :disabled="!canSubmit"
+        >
+          {{ $t('auth.continue') }}
+        </LoadingButton>
       </form>
     </section>
   </main>
 </template>
 
 <script setup lang="ts">
-import {
-  Card,
-  CardContent,
-  CardFooter,
-  Input,
-  Button,
-  FormControl,
-  FormField,
-  FormItem,
-  Label,
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@memohai/ui'
-import { Sun, Moon } from 'lucide-vue-next'
+import { computed, ref } from 'vue'
+import { Input } from '@memohai/ui'
 import { useRouter } from 'vue-router'
-import { toTypedSchema } from '@vee-validate/zod'
-import { useForm } from 'vee-validate'
-import * as z from 'zod'
 import { useUserStore } from '@/store/user'
-import { useSettingsStore } from '@/store/settings'
-import { ref } from 'vue'
-import { storeToRefs } from 'pinia'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { postAuthLogin } from '@memohai/sdk'
-import type { Locale } from '@/i18n'
 import LoadingButton from '@/components/loading-button/index.vue'
+import DotMatrixBg from './components/dot-matrix-bg.vue'
 import { submitLogin } from './login-submit'
+import { safeSessionSet } from '@/utils/safe-storage'
+import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
 
 const router = useRouter()
 const { t } = useI18n()
-const settingsStore = useSettingsStore()
-const { theme, language } = storeToRefs(settingsStore)
-const { setLanguage, setTheme } = settingsStore
 
-const toggleTheme = () => {
-  setTheme(theme.value === 'light' ? 'dark' : 'light')
-}
+const username = ref('')
+const password = ref('')
+const exiting = ref(false)
 
-const formSchema = toTypedSchema(z.object({
-  username: z.string().min(1),
-  password: z.string().min(1),
-}))
-const form = useForm({
-  validationSchema: formSchema,
-})
+const canSubmit = computed(() =>
+  !!username.value.trim() && !!password.value.trim(),
+)
 
 const { login: loginHandle } = useUserStore()
 const isSubmitting = ref(false)
 
-const login = form.handleSubmit(async (values) => {
-  await submitLogin(values, isSubmitting, {
-    authenticate: (body) => postAuthLogin({ body }),
-    applyLogin: loginHandle,
-    navigateHome: () => router.replace({ path: '/' }),
-    notifyInvalidCredentials: () => {
-      toast.error(t('auth.invalidCredentials'), {
-        description: t('auth.retryHint'),
-      })
+const login = async () => {
+  if (!canSubmit.value || isSubmitting.value) return
+  await submitLogin(
+    { username: username.value.trim(), password: password.value },
+    isSubmitting,
+    {
+      authenticate: (body) => postAuthLogin({ body }),
+      applyLogin: loginHandle,
+      navigateHome: async () => {
+        exiting.value = true
+        safeSessionSet(ONBOARDING_KEYS.entryAnimation, '1')
+        await new Promise<void>(resolve => setTimeout(resolve, 175))
+        await router.replace({ path: '/' })
+      },
+      notifyInvalidCredentials: () => {
+        toast.error(t('auth.invalidCredentials'), {
+          description: t('auth.retryHint'),
+        })
+      },
     },
-  })
-})
+  )
+}
 </script>
+
+<style scoped>
+/* 极轻的四角渐隐:圆心略偏右下,使左上角(有 logo)衰减略多,其余角几乎不遮;
+ * 最深也仅到 ~82%,只是收一点点边角,不牺牲可见度 */
+.login-dots {
+  -webkit-mask-image: radial-gradient(ellipse 118% 118% at 58% 60%, #000 72%, rgba(0, 0, 0, 0.82) 100%);
+  mask-image: radial-gradient(ellipse 118% 118% at 58% 60%, #000 72%, rgba(0, 0, 0, 0.82) 100%);
+}
+
+form :deep([data-button]:active::before) {
+  scale: 1 !important;
+  transition: none !important;
+}
+
+/* 动画背景上:禁用态 opacity 会让点阵从按钮底下透出来 */
+form :deep([data-button]:is([data-variant="default"], [data-variant="primary"])) {
+  background-color: var(--btn-primary);
+}
+form :deep([data-button]:is([data-variant="default"], [data-variant="primary"]):disabled) {
+  opacity: 1;
+  cursor: not-allowed;
+}
+form :deep([data-button]:is([data-variant="default"], [data-variant="primary"]):disabled)::before {
+  background-color: var(--btn-primary-active);
+}
+</style>

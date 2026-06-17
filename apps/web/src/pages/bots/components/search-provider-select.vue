@@ -10,28 +10,25 @@
     :show-group-headers="false"
   >
     <template #trigger="{ open, displayLabel }">
-      <Button
-        variant="outline"
-        role="combobox"
+      <button
+        data-slot="select-trigger"
+        data-size="default"
+        :data-placeholder="!selected ? '' : undefined"
+        type="button"
         :aria-expanded="open"
         :aria-label="placeholder || 'Select search provider'"
-        class="w-full justify-between font-normal text-xs shadow-none h-9"
+        :class="[selectTriggerClass, 'w-full']"
       >
-        <span class="flex min-w-0 items-center gap-2 truncate">
+        <span class="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
           <SearchProviderLogo
             v-if="selectedProvider"
             :provider="selectedProvider.provider || ''"
             size="xs"
           />
-          <span
-            class="truncate"
-            :title="displayLabel || placeholder"
-          >{{ displayLabel || placeholder }}</span>
+          <span class="line-clamp-1">{{ displayLabel || placeholder }}</span>
         </span>
-        <Search
-          class="ml-2 size-3.5 shrink-0 text-muted-foreground"
-        />
-      </Button>
+        <ChevronsUpDown class="opacity-50" />
+      </button>
     </template>
 
     <template #option-icon="{ option }">
@@ -55,8 +52,8 @@
 </template>
 
 <script setup lang="ts">
-import { Search } from 'lucide-vue-next'
-import { Button } from '@memohai/ui'
+import { ChevronsUpDown } from 'lucide-vue-next'
+import { selectTriggerClass } from '@memohai/ui'
 import { computed } from 'vue'
 import type { SearchprovidersGetResponse } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'

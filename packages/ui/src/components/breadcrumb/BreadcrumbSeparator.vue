@@ -1,6 +1,5 @@
 <script lang="ts" setup>
 import type { HTMLAttributes } from 'vue'
-import { ChevronRight } from 'lucide-vue-next'
 import { cn } from '#/lib/utils'
 
 const props = defineProps<{
@@ -13,10 +12,10 @@ const props = defineProps<{
     data-slot="breadcrumb-separator"
     role="presentation"
     aria-hidden="true"
-    :class="cn('inline-flex items-center [&>svg]:size-3.5 text-muted-foreground leading-none [&>*]:leading-none', props.class)"
+    :class="cn('inline-flex items-center select-none [&>svg]:size-3 text-muted-foreground/70 leading-none [&>*]:leading-none', props.class)"
   >
     <slot>
-      <ChevronRight />
+      /
     </slot>
   </li>
 </template>

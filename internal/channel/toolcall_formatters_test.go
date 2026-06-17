@@ -238,24 +238,28 @@ func TestFormatSearchMessagesTruncatesPreview(t *testing.T) {
 	}
 }
 
-func TestFormatSpawnSuccessRatio(t *testing.T) {
+func TestFormatAgentControlResult(t *testing.T) {
 	t.Parallel()
 
 	tc := &StreamToolCall{
-		Name: "spawn",
+		Name: "spawn_agent",
 		Result: map[string]any{
-			"results": []any{
-				map[string]any{"success": true, "task": "analyze repo structure", "session_id": "sess_1"},
-				map[string]any{"success": true, "task": "summarize README", "session_id": "sess_2"},
-			},
+			"agent_id":   "agent_1",
+			"session_id": "sess_1",
+			"task_id":    "bg_bot1_1234",
+			"status":     "completed",
+			"text":       "analyzed repo structure",
 		},
 	}
 	p := BuildToolCallEnd(tc)
-	if !strings.Contains(p.Header, "2 / 2") {
+	if !strings.Contains(p.Header, "agent_1") || !strings.Contains(p.Header, "completed") {
 		t.Fatalf("unexpected header: %q", p.Header)
 	}
-	if !hasTextBlock(p.Body, "analyze repo structure") {
-		t.Fatalf("expected first task in body, got %+v", p.Body)
+	if !hasTextBlock(p.Body, "task bg_bot1_1234") {
+		t.Fatalf("expected task id in body, got %+v", p.Body)
+	}
+	if !hasTextBlock(p.Body, "analyzed repo structure") {
+		t.Fatalf("expected report in body, got %+v", p.Body)
 	}
 }
 

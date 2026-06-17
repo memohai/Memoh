@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -10,7 +9,6 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/mcp"
-	messageevent "github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
 )
@@ -119,17 +117,18 @@ func TestNativeToolSourceWaitsForApprovalAndPublishesRequest(t *testing.T) {
 			Status:  toolapproval.StatusApproved,
 		},
 	}
-	publisher := &nativeSourcePublisher{}
+	toolEvents := &nativeSourceToolEvents{delivered: true}
 	source := NewNativeToolSource(nil, []ToolProvider{provider}, NativeToolSourceOptions{
-		AllowAll:          true,
-		Approval:          approval,
-		ApprovalPublisher: publisher,
+		AllowAll:   true,
+		Approval:   approval,
+		ToolEvents: toolEvents,
 	})
 
 	result, err := source.CallTool(context.Background(), mcp.ToolSessionContext{
 		BotID:             "bot-1",
 		SessionID:         "session-1",
 		StreamID:          "stream-1",
+		ToolCallID:        "mcp-http-call-1",
 		ChannelIdentityID: "user-1",
 		CurrentPlatform:   "web",
 		ReplyTarget:       "reply-1",
@@ -144,21 +143,26 @@ func TestNativeToolSourceWaitsForApprovalAndPublishesRequest(t *testing.T) {
 	if approval.created.ToolName != "exec" || approval.created.ToolInput.(map[string]any)["command"] != "make test" || approval.created.ConversationType != "private" {
 		t.Fatalf("approval input = %#v", approval.created)
 	}
-	if len(publisher.events) != 3 {
-		t.Fatalf("published events = %d, want start/message/end", len(publisher.events))
+	if approval.created.ToolCallID != "mcp-http-call-1" {
+		t.Fatalf("approval tool_call_id = %q, want existing MCP tool call id", approval.created.ToolCallID)
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(publisher.events[1].Data, &payload); err != nil {
-		t.Fatalf("decode approval event: %v", err)
+	if len(toolEvents.events) != 2 {
+		t.Fatalf("tool events = %d, want pending and approved approval events", len(toolEvents.events))
 	}
-	stream, _ := payload["stream"].(map[string]any)
-	if stream["type"] != "message" || stream["stream_id"] != "stream-1" {
-		t.Fatalf("stream payload = %#v", stream)
+	pending := toolEvents.events[0]
+	if pending.Type != "tool_approval_request" || pending.ToolCallID != "mcp-http-call-1" || pending.ToolName != "exec" {
+		t.Fatalf("pending approval event = %#v", pending)
 	}
-	data, _ := stream["data"].(map[string]any)
-	approvalPayload, _ := data["approval"].(map[string]any)
+	approvalPayload, _ := pending.Metadata["approval"].(map[string]any)
 	if approvalPayload["approval_id"] != "approval-1" || approvalPayload["status"] != toolapproval.StatusPending {
 		t.Fatalf("approval payload = %#v", approvalPayload)
+	}
+	approved := toolEvents.events[1]
+	approvedApproval, _ := approved.Metadata["approval"].(map[string]any)
+	if approvedApproval["approval_id"] != "approval-1" ||
+		approvedApproval["status"] != toolapproval.StatusApproved ||
+		approvedApproval["can_approve"] != false {
+		t.Fatalf("approved approval payload = %#v", approvedApproval)
 	}
 	structured, ok := result["structuredContent"].(map[string]any)
 	if !ok || structured["command"] != "make test" {
@@ -178,6 +182,7 @@ func TestNativeToolSourceRejectedApprovalDoesNotExecute(t *testing.T) {
 			},
 		}},
 	}
+	toolEvents := &nativeSourceToolEvents{delivered: true}
 	source := NewNativeToolSource(nil, []ToolProvider{provider}, NativeToolSourceOptions{
 		AllowAll: true,
 		Approval: &nativeSourceApproval{
@@ -188,7 +193,7 @@ func TestNativeToolSourceRejectedApprovalDoesNotExecute(t *testing.T) {
 				DecisionReason: "not now",
 			},
 		},
-		ApprovalPublisher: &nativeSourcePublisher{},
+		ToolEvents: toolEvents,
 	})
 
 	result, err := source.CallTool(context.Background(), mcp.ToolSessionContext{
@@ -201,6 +206,64 @@ func TestNativeToolSourceRejectedApprovalDoesNotExecute(t *testing.T) {
 	}
 	if executed {
 		t.Fatalf("rejected tool should not execute")
+	}
+	if isError, _ := result["isError"].(bool); !isError {
+		t.Fatalf("result = %#v, want MCP error result", result)
+	}
+	if len(toolEvents.events) != 2 {
+		t.Fatalf("tool events = %d, want pending and rejected approval events", len(toolEvents.events))
+	}
+	approvalPayload, _ := toolEvents.events[1].Metadata["approval"].(map[string]any)
+	if approvalPayload["approval_id"] != "approval-2" ||
+		approvalPayload["status"] != toolapproval.StatusRejected ||
+		approvalPayload["can_approve"] != false {
+		t.Fatalf("rejected approval payload = %#v", approvalPayload)
+	}
+}
+
+func TestNativeToolSourceApprovalNotDeliveredRejectsWithoutWaiting(t *testing.T) {
+	executed := false
+	provider := &nativeSourceTestProvider{
+		tools: []sdk.Tool{{
+			Name:       "write",
+			Parameters: map[string]any{"type": "object"},
+			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
+				executed = true
+				return "wrote", nil
+			},
+		}},
+	}
+	approval := &nativeSourceApproval{
+		decision: toolapproval.Request{
+			ID:      "approval-undelivered",
+			ShortID: 9,
+			Status:  toolapproval.StatusApproved,
+		},
+	}
+	source := NewNativeToolSource(nil, []ToolProvider{provider}, NativeToolSourceOptions{
+		AllowAll:   true,
+		Approval:   approval,
+		ToolEvents: &nativeSourceToolEvents{delivered: false},
+	})
+
+	result, err := source.CallTool(context.Background(), mcp.ToolSessionContext{
+		BotID:             "bot-1",
+		SessionID:         "session-1",
+		StreamID:          "stream-1",
+		ToolCallID:        "mcp-http-call-1",
+		ChannelIdentityID: "user-1",
+	}, "write", map[string]any{"path": "file.txt", "content": "x"})
+	if err != nil {
+		t.Fatalf("CallTool() error = %v", err)
+	}
+	if executed {
+		t.Fatalf("undelivered approval should not execute the tool")
+	}
+	if approval.waitCalls != 0 {
+		t.Fatalf("wait calls = %d, want 0 after delivery failure", approval.waitCalls)
+	}
+	if len(approval.rejected) != 1 || approval.rejected[0] != "tool approval request was not delivered to the interactive stream" {
+		t.Fatalf("rejected reasons = %#v, want delivery failure", approval.rejected)
 	}
 	if isError, _ := result["isError"].(bool); !isError {
 		t.Fatalf("result = %#v, want MCP error result", result)
@@ -234,7 +297,7 @@ func TestNativeToolSourceAskUserWaitsForInputAndPublishesRequest(t *testing.T) {
 	// An instant answer must already see a registered waiter, or the
 	// responder misjudges the request as orphaned.
 	toolEvents.onAppend = func() {
-		if userInput.activeWaiters == 0 {
+		if len(toolEvents.events) == 0 && userInput.activeWaiters == 0 {
 			t.Error("waiter must be registered before the request is announced")
 		}
 	}
@@ -275,8 +338,8 @@ func TestNativeToolSourceAskUserWaitsForInputAndPublishesRequest(t *testing.T) {
 	// The pending question must travel over the tool event channel with the
 	// gateway's tool_call_id so the UI attaches it to the existing tool block
 	// instead of rendering a second synthetic message.
-	if len(toolEvents.events) != 1 {
-		t.Fatalf("tool events = %d, want 1", len(toolEvents.events))
+	if len(toolEvents.events) != 2 {
+		t.Fatalf("tool events = %d, want pending and terminal events", len(toolEvents.events))
 	}
 	event := toolEvents.events[0]
 	if event.Type != "user_input_request" || event.ToolCallID != "mcp-http-call-1" || event.ToolName != userinput.ToolNameAskUser {
@@ -292,13 +355,20 @@ func TestNativeToolSourceAskUserWaitsForInputAndPublishesRequest(t *testing.T) {
 	if toolEvents.sessions[0].StreamID != "stream-1" || toolEvents.sessions[0].SessionID != "session-1" {
 		t.Fatalf("tool event session = %#v", toolEvents.sessions[0])
 	}
+	terminal := toolEvents.events[1]
+	if terminal.Type != "user_input_request" || terminal.UserInputID != "input-1" || terminal.Status != userinput.StatusSubmitted {
+		t.Fatalf("terminal user input event = %#v, want submitted status", terminal)
+	}
+	if terminal.ToolCallID != "mcp-http-call-1" || terminal.ToolName != userinput.ToolNameAskUser {
+		t.Fatalf("terminal user input identity = %#v", terminal)
+	}
 	structured, ok := result["structuredContent"].(map[string]any)
 	if !ok || structured["status"] != userinput.StatusSubmitted {
 		t.Fatalf("result = %#v", result)
 	}
 }
 
-func TestNativeToolSourceAskUserReturnsExistingResolvedRequestWithoutPublishing(t *testing.T) {
+func TestNativeToolSourceAskUserRejectsExistingResolvedRequest(t *testing.T) {
 	provider := NewAskUserProvider(nil)
 	userInput := &nativeSourceUserInput{
 		createResponse: userinput.Request{
@@ -321,7 +391,7 @@ func TestNativeToolSourceAskUserReturnsExistingResolvedRequestWithoutPublishing(
 		ToolEvents: toolEvents,
 	})
 
-	result, err := source.CallTool(context.Background(), mcp.ToolSessionContext{
+	_, err := source.CallTool(context.Background(), mcp.ToolSessionContext{
 		BotID:      "bot-1",
 		SessionID:  "session-1",
 		StreamID:   "stream-1",
@@ -331,8 +401,8 @@ func TestNativeToolSourceAskUserReturnsExistingResolvedRequestWithoutPublishing(
 			map[string]any{"text": "Question?", "kind": "text"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("CallTool(ask_user) error = %v", err)
+	if !errors.Is(err, userinput.ErrAlreadyDecided) {
+		t.Fatalf("CallTool(ask_user) error = %v, want ErrAlreadyDecided", err)
 	}
 	if len(toolEvents.events) != 0 {
 		t.Fatalf("tool events = %d, want no pending event", len(toolEvents.events))
@@ -340,19 +410,16 @@ func TestNativeToolSourceAskUserReturnsExistingResolvedRequestWithoutPublishing(
 	if userInput.waitCalls != 0 {
 		t.Fatalf("wait calls = %d, want 0", userInput.waitCalls)
 	}
-	structured, ok := result["structuredContent"].(map[string]any)
-	if !ok || structured["status"] != userinput.StatusSubmitted {
-		t.Fatalf("result = %#v", result)
-	}
 }
 
 func TestNativeToolSourceAskUserAbortCancelsAfterReleasingWaiter(t *testing.T) {
 	provider := NewAskUserProvider(nil)
 	userInput := &nativeSourceUserInput{waitErr: context.Canceled}
+	toolEvents := &nativeSourceToolEvents{delivered: true}
 	source := NewNativeToolSource(nil, []ToolProvider{provider}, NativeToolSourceOptions{
 		AllowAll:   true,
 		UserInput:  userInput,
-		ToolEvents: &nativeSourceToolEvents{delivered: true},
+		ToolEvents: toolEvents,
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -375,6 +442,9 @@ func TestNativeToolSourceAskUserAbortCancelsAfterReleasingWaiter(t *testing.T) {
 	}
 	if len(userInput.waitersAtCancel) != 1 || userInput.waitersAtCancel[0] != 0 {
 		t.Fatalf("waiters at abort cleanup = %#v, want released before cancel", userInput.waitersAtCancel)
+	}
+	if len(toolEvents.events) != 2 || toolEvents.events[1].Status != userinput.StatusCanceled {
+		t.Fatalf("tool events = %#v, want pending then canceled", toolEvents.events)
 	}
 }
 
@@ -540,21 +610,14 @@ func (p *nativeSourceTestProvider) Tools(_ context.Context, session SessionConte
 	return p.tools, nil
 }
 
-type nativeSourcePublisher struct {
-	events []messageevent.Event
-}
-
-func (p *nativeSourcePublisher) Publish(event messageevent.Event) {
-	p.events = append(p.events, event)
-}
-
 type nativeSourceApproval struct {
 	created   toolapproval.CreatePendingInput
 	decision  toolapproval.Request
-	waitErrs  []error // popped per WaitForDecision call; nil entry → return decision
+	waitErrs  []error // popped per WaitForDecision call; nil entry -> return decision
 	rejectErr error
 	rejected  []string
 	waitCalls int
+	waiters   int
 }
 
 type nativeSourceUserInput struct {
@@ -697,6 +760,14 @@ func (a *nativeSourceApproval) Reject(_ context.Context, approvalID, _, reason s
 	}, nil
 }
 
+func (a *nativeSourceApproval) Get(_ context.Context, approvalID string) (toolapproval.Request, error) {
+	decision := a.decision
+	if decision.ID == "" {
+		decision.ID = approvalID
+	}
+	return decision, nil
+}
+
 func (a *nativeSourceApproval) WaitForDecision(context.Context, string) (toolapproval.Request, error) {
 	a.waitCalls++
 	if len(a.waitErrs) > 0 {
@@ -707,4 +778,9 @@ func (a *nativeSourceApproval) WaitForDecision(context.Context, string) (toolapp
 		}
 	}
 	return a.decision, nil
+}
+
+func (a *nativeSourceApproval) RegisterWaiter(string) func() {
+	a.waiters++
+	return func() { a.waiters-- }
 }

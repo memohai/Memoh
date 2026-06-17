@@ -5,12 +5,15 @@ import (
 	"testing"
 
 	acp "github.com/coder/acp-go-sdk"
+
+	"github.com/memohai/memoh/internal/acpprofile"
+	"github.com/memohai/memoh/internal/agent/event"
 )
 
 func TestACPGenericExecuteToolMapsToNativeExecEvents(t *testing.T) {
 	t.Parallel()
 
-	mapper := newACPToolEventMapper()
+	mapper := newACPToolEventMapper(acpprofile.DefaultToolQuirks())
 	start := mapper.eventsFromNotification(acp.SessionNotification{
 		Update: acp.StartToolCall(
 			acp.ToolCallId("call-1"),
@@ -23,7 +26,7 @@ func TestACPGenericExecuteToolMapsToNativeExecEvents(t *testing.T) {
 	if len(start) != 1 {
 		t.Fatalf("start events = %#v, want 1", start)
 	}
-	if start[0].Type != StreamEventToolCallStart || start[0].ToolName != "exec" || start[0].ToolCallID != "call-1" {
+	if start[0].Type != event.ToolCallStart || start[0].ToolName != "exec" || start[0].ToolCallID != "call-1" {
 		t.Fatalf("start event = %#v, want native exec start", start[0])
 	}
 	input, ok := start[0].Input.(map[string]any)
@@ -44,7 +47,7 @@ func TestACPGenericExecuteToolMapsToNativeExecEvents(t *testing.T) {
 	if len(end) != 1 {
 		t.Fatalf("end events = %#v, want 1", end)
 	}
-	if end[0].Type != StreamEventToolCallEnd || end[0].ToolName != "exec" || end[0].Error != "" {
+	if end[0].Type != event.ToolCallEnd || end[0].ToolName != "exec" || end[0].Error != "" {
 		t.Fatalf("end event = %#v, want native exec end", end[0])
 	}
 	result, ok := end[0].Result.(map[string]any)
@@ -59,7 +62,7 @@ func TestACPGenericExecuteToolMapsToNativeExecEvents(t *testing.T) {
 func TestACPGenericExecuteCompletionWithoutStartEmitsStartThenEnd(t *testing.T) {
 	t.Parallel()
 
-	mapper := newACPToolEventMapper()
+	mapper := newACPToolEventMapper(acpprofile.DefaultToolQuirks())
 	events := mapper.eventsFromNotification(acp.SessionNotification{
 		Update: acp.UpdateToolCall(
 			acp.ToolCallId("call-1"),
@@ -72,10 +75,10 @@ func TestACPGenericExecuteCompletionWithoutStartEmitsStartThenEnd(t *testing.T) 
 	if len(events) != 2 {
 		t.Fatalf("events = %#v, want start + end", events)
 	}
-	if events[0].Type != StreamEventToolCallStart || events[0].ToolName != "exec" {
+	if events[0].Type != event.ToolCallStart || events[0].ToolName != "exec" {
 		t.Fatalf("first event = %#v, want exec start", events[0])
 	}
-	if events[1].Type != StreamEventToolCallEnd || events[1].ToolName != "exec" {
+	if events[1].Type != event.ToolCallEnd || events[1].ToolName != "exec" {
 		t.Fatalf("second event = %#v, want exec end", events[1])
 	}
 	result, ok := events[1].Result.(map[string]any)
@@ -84,10 +87,52 @@ func TestACPGenericExecuteCompletionWithoutStartEmitsStartThenEnd(t *testing.T) 
 	}
 }
 
+func TestACPGenericExecuteTerminalTitleWithoutCommandIsIgnored(t *testing.T) {
+	t.Parallel()
+
+	mapper := newACPToolEventMapper(acpprofile.DefaultToolQuirks())
+	events := mapper.eventsFromNotification(acp.SessionNotification{
+		Update: acp.StartToolCall(
+			acp.ToolCallId("call-1"),
+			"Terminal",
+			acp.WithStartKind(acp.ToolKindExecute),
+			acp.WithStartStatus(acp.ToolCallStatusInProgress),
+		),
+	})
+	if len(events) != 0 {
+		t.Fatalf("events = %#v, want none", events)
+	}
+}
+
+func TestACPGenericExecuteTerminalTitleUsesRawCommand(t *testing.T) {
+	t.Parallel()
+
+	mapper := newACPToolEventMapper(acpprofile.DefaultToolQuirks())
+	events := mapper.eventsFromNotification(acp.SessionNotification{
+		Update: acp.StartToolCall(
+			acp.ToolCallId("call-1"),
+			"Terminal",
+			acp.WithStartKind(acp.ToolKindExecute),
+			acp.WithStartStatus(acp.ToolCallStatusInProgress),
+			acp.WithStartRawInput(map[string]any{"command": "pwd"}),
+		),
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want 1", events)
+	}
+	if events[0].Type != event.ToolCallStart || events[0].ToolName != "exec" {
+		t.Fatalf("event = %#v, want native exec start", events[0])
+	}
+	input, ok := events[0].Input.(map[string]any)
+	if !ok || input["command"] != "pwd" {
+		t.Fatalf("input = %#v, want command pwd", events[0].Input)
+	}
+}
+
 func TestACPGenericEditWithContentMapsToNativeWriteEvents(t *testing.T) {
 	t.Parallel()
 
-	mapper := newACPToolEventMapper()
+	mapper := newACPToolEventMapper(acpprofile.DefaultToolQuirks())
 	start := mapper.eventsFromNotification(acp.SessionNotification{
 		Update: acp.StartToolCall(
 			acp.ToolCallId("write-1"),
@@ -103,7 +148,7 @@ func TestACPGenericEditWithContentMapsToNativeWriteEvents(t *testing.T) {
 	if len(start) != 1 {
 		t.Fatalf("start events = %#v, want 1", start)
 	}
-	if start[0].Type != StreamEventToolCallStart || start[0].ToolName != "write" || start[0].ToolCallID != "write-1" {
+	if start[0].Type != event.ToolCallStart || start[0].ToolName != "write" || start[0].ToolCallID != "write-1" {
 		t.Fatalf("start event = %#v, want native write start", start[0])
 	}
 	input, ok := start[0].Input.(map[string]any)
@@ -126,7 +171,7 @@ func TestACPGenericEditWithContentMapsToNativeWriteEvents(t *testing.T) {
 	if len(end) != 1 {
 		t.Fatalf("end events = %#v, want 1", end)
 	}
-	if end[0].Type != StreamEventToolCallEnd || end[0].ToolName != "write" || end[0].Error != "" {
+	if end[0].Type != event.ToolCallEnd || end[0].ToolName != "write" || end[0].Error != "" {
 		t.Fatalf("end event = %#v, want native write end", end[0])
 	}
 }
@@ -134,7 +179,7 @@ func TestACPGenericEditWithContentMapsToNativeWriteEvents(t *testing.T) {
 func TestACPGenericEditDiffMapsToNativeEditEvents(t *testing.T) {
 	t.Parallel()
 
-	mapper := newACPToolEventMapper()
+	mapper := newACPToolEventMapper(acpprofile.DefaultToolQuirks())
 	events := mapper.eventsFromNotification(acp.SessionNotification{
 		Update: acp.UpdateToolCall(
 			acp.ToolCallId("edit-1"),
@@ -148,7 +193,7 @@ func TestACPGenericEditDiffMapsToNativeEditEvents(t *testing.T) {
 	if len(events) != 2 {
 		t.Fatalf("events = %#v, want start + end", events)
 	}
-	if events[0].Type != StreamEventToolCallStart || events[0].ToolName != "edit" {
+	if events[0].Type != event.ToolCallStart || events[0].ToolName != "edit" {
 		t.Fatalf("first event = %#v, want edit start", events[0])
 	}
 	input, ok := events[0].Input.(map[string]any)
@@ -158,7 +203,7 @@ func TestACPGenericEditDiffMapsToNativeEditEvents(t *testing.T) {
 	if input["path"] != "/data/test.txt" || input["old_text"] != "old text\n" || input["new_text"] != "new text\n" {
 		t.Fatalf("start input = %#v", input)
 	}
-	if events[1].Type != StreamEventToolCallEnd || events[1].ToolName != "edit" {
+	if events[1].Type != event.ToolCallEnd || events[1].ToolName != "edit" {
 		t.Fatalf("second event = %#v, want edit end", events[1])
 	}
 }
@@ -166,7 +211,7 @@ func TestACPGenericEditDiffMapsToNativeEditEvents(t *testing.T) {
 func TestACPGenericEditDiffWithoutOldTextMapsToNativeWriteEvents(t *testing.T) {
 	t.Parallel()
 
-	mapper := newACPToolEventMapper()
+	mapper := newACPToolEventMapper(acpprofile.DefaultToolQuirks())
 	events := mapper.eventsFromNotification(acp.SessionNotification{
 		Update: acp.UpdateToolCall(
 			acp.ToolCallId("write-1"),
@@ -180,7 +225,7 @@ func TestACPGenericEditDiffWithoutOldTextMapsToNativeWriteEvents(t *testing.T) {
 	if len(events) != 2 {
 		t.Fatalf("events = %#v, want start + end", events)
 	}
-	if events[0].Type != StreamEventToolCallStart || events[0].ToolName != "write" {
+	if events[0].Type != event.ToolCallStart || events[0].ToolName != "write" {
 		t.Fatalf("first event = %#v, want write start", events[0])
 	}
 	input, ok := events[0].Input.(map[string]any)
@@ -190,7 +235,7 @@ func TestACPGenericEditDiffWithoutOldTextMapsToNativeWriteEvents(t *testing.T) {
 	if input["path"] != "/data/new.txt" || input["content"] != "new file\n" {
 		t.Fatalf("start input = %#v", input)
 	}
-	if events[1].Type != StreamEventToolCallEnd || events[1].ToolName != "write" {
+	if events[1].Type != event.ToolCallEnd || events[1].ToolName != "write" {
 		t.Fatalf("second event = %#v, want write end", events[1])
 	}
 }
@@ -198,14 +243,14 @@ func TestACPGenericEditDiffWithoutOldTextMapsToNativeWriteEvents(t *testing.T) {
 func TestACPAgentThoughtMapsToReasoningDelta(t *testing.T) {
 	t.Parallel()
 
-	mapper := newACPToolEventMapper()
+	mapper := newACPToolEventMapper(acpprofile.DefaultToolQuirks())
 	events := mapper.eventsFromNotification(acp.SessionNotification{
 		Update: acp.UpdateAgentThoughtText("I should inspect the workspace first."),
 	})
 	if len(events) != 1 {
 		t.Fatalf("events = %#v, want 1", events)
 	}
-	if events[0].Type != StreamEventReasoningDelta || events[0].Delta != "I should inspect the workspace first." {
+	if events[0].Type != event.ReasoningDelta || events[0].Delta != "I should inspect the workspace first." {
 		t.Fatalf("event = %#v, want reasoning delta", events[0])
 	}
 }
@@ -213,7 +258,7 @@ func TestACPAgentThoughtMapsToReasoningDelta(t *testing.T) {
 func TestACPPlanMapsToReasoningDelta(t *testing.T) {
 	t.Parallel()
 
-	mapper := newACPToolEventMapper()
+	mapper := newACPToolEventMapper(acpprofile.DefaultToolQuirks())
 	events := mapper.eventsFromNotification(acp.SessionNotification{
 		Update: acp.UpdatePlan(
 			acp.PlanEntry{Content: "Inspect the workspace", Status: acp.PlanEntryStatusInProgress},
@@ -223,7 +268,7 @@ func TestACPPlanMapsToReasoningDelta(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("events = %#v, want 1", events)
 	}
-	if events[0].Type != StreamEventReasoningDelta {
+	if events[0].Type != event.ReasoningDelta {
 		t.Fatalf("event = %#v, want reasoning delta", events[0])
 	}
 	want := "Plan:\n- [in_progress] Inspect the workspace\n- [pending] Apply the change"
@@ -247,8 +292,8 @@ func TestEventCollectorBoundsStoredEvents(t *testing.T) {
 
 	collector := newEventCollector()
 	for i := 0; i < maxCollectedStreamEvents+10; i++ {
-		collector.record(StreamEvent{
-			Type:       StreamEventToolCallStart,
+		collector.record(event.StreamEvent{
+			Type:       event.ToolCallStart,
 			ToolCallID: string(rune('a' + (i % 26))),
 			ToolName:   "exec",
 		})
@@ -263,7 +308,7 @@ func TestEventCollectorBoundsStoredEvents(t *testing.T) {
 func TestACPToolEventMapperBoundsTrackedTools(t *testing.T) {
 	t.Parallel()
 
-	mapper := newACPToolEventMapper()
+	mapper := newACPToolEventMapper(acpprofile.DefaultToolQuirks())
 	for i := 0; i < maxTrackedACPToolStates+10; i++ {
 		_ = mapper.eventsFromNotification(acp.SessionNotification{
 			Update: acp.StartToolCall(

@@ -6,6 +6,7 @@ INSERT INTO tool_approval_requests (
   channel_identity_id,
   tool_call_id,
   tool_name,
+  operation,
   tool_input,
   short_id,
   requested_by_channel_identity_id,
@@ -20,6 +21,7 @@ INSERT INTO tool_approval_requests (
   sqlc.narg(channel_identity_id),
   sqlc.arg(tool_call_id),
   sqlc.arg(tool_name),
+  sqlc.arg(operation),
   sqlc.arg(tool_input),
   (
     SELECT COALESCE(MAX(short_id), 0) + 1
@@ -33,7 +35,10 @@ INSERT INTO tool_approval_requests (
   sqlc.arg(conversation_type)
 )
 ON CONFLICT (session_id, tool_call_id) DO UPDATE
-SET tool_input = EXCLUDED.tool_input
+SET tool_input = CASE
+  WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.tool_input
+  ELSE tool_approval_requests.tool_input
+END
 RETURNING *;
 
 -- name: GetToolApprovalRequest :one
@@ -92,6 +97,16 @@ SET status = 'rejected',
     decided_by_channel_identity_id = sqlc.narg(decided_by_channel_identity_id),
     decided_at = now()
 WHERE id = sqlc.arg(id)
+  AND status = 'pending'
+RETURNING *;
+
+-- name: CancelPendingToolApprovalsBySession :many
+UPDATE tool_approval_requests
+SET status = 'cancelled',
+    decision_reason = sqlc.arg(reason),
+    decided_at = now()
+WHERE bot_id = sqlc.arg(bot_id)
+  AND session_id = sqlc.arg(session_id)
   AND status = 'pending'
 RETURNING *;
 

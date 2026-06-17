@@ -573,6 +573,21 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 			send(createContainerCreatingEvent{Type: "creating"})
 		case "restoring":
 			send(createContainerRestoringEvent{Type: "restoring"})
+		case "complete":
+			send(createContainerCompleteEvent{
+				Type: "complete",
+				Container: CreateContainerResponse{
+					ContainerID:      event.ContainerID,
+					WorkspaceBackend: event.WorkspaceBackend,
+					RuntimeBackend:   event.RuntimeBackend,
+					ContainerPath:    event.ContainerPath,
+					Image:            event.Image,
+					CDIDevices:       event.CDIDevices,
+					Started:          event.Started,
+					DataRestored:     event.DataRestored,
+					HasPreservedData: event.HasPreservedData,
+				},
+			})
 		}
 	}); err != nil {
 		h.logger.Error("bot container setup failed",
@@ -809,9 +824,14 @@ func (h *UsersHandler) UpdateBot(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+	// The bot row is already updated, so a workspace-config write failure
+	// (e.g. the user is mid-typing an API key and it is still empty) must NOT
+	// fail the request. Log and continue — the managed config can be
+	// (re)written from the bot settings page once the credentials are complete.
 	if req.Metadata != nil {
 		if err := h.prepareACPWorkspaceConfig(c.Request().Context(), resp); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+			h.logger.Warn("write ACP workspace config after bot update failed",
+				slog.String("bot_id", resp.ID), slog.Any("error", err))
 		}
 	}
 	return c.JSON(http.StatusOK, scrubBotForResponse(resp))

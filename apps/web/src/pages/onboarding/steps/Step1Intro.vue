@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { nextFrame } from '../useStepTransition'
+import { safeLocalGet, safeLocalSet } from '@/utils/safe-storage'
 import { ONBOARDING_KEYS } from '../constants'
 
 const { t } = useI18n()
@@ -44,7 +45,7 @@ onMounted(() => {
     skipAnimation()
     return
   }
-  if (localStorage.getItem(ONBOARDING_KEYS.introSeen) === '1') {
+  if (safeLocalGet(ONBOARDING_KEYS.introSeen) === '1') {
     isSkipped.value = true
     nextFrame(() => {
       showContent.value = true
@@ -122,7 +123,7 @@ const animate = () => {
   })
 
   if (allFinished && elapsed > 4000) {
-    localStorage.setItem(ONBOARDING_KEYS.introSeen, '1')
+    safeLocalSet(ONBOARDING_KEYS.introSeen, '1')
     if (!showContent.value) showContent.value = true
     setTimeout(() => { isSkipped.value = true }, 600)
   } else {
@@ -134,7 +135,7 @@ const animate = () => {
 }
 
 const skipAnimation = () => {
-  localStorage.setItem(ONBOARDING_KEYS.introSeen, '1')
+  safeLocalSet(ONBOARDING_KEYS.introSeen, '1')
   isSkipped.value = true
   showContent.value = true
   cancelAnimationFrame(animationFrameId)
@@ -211,7 +212,7 @@ const skipAnimation = () => {
           :class="showContent ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'"
         >
           <button
-            class="inline-flex h-[42px] w-[240px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none ring-[0.8px] ring-primary ring-offset-2 ring-offset-background transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            class="inline-flex h-[2.625rem] w-[240px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none ring-[0.8px] ring-primary ring-offset-2 ring-offset-background transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             @click="handleStart"
           >
             {{ t('onboarding.start') }}

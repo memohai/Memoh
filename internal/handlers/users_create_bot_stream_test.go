@@ -132,6 +132,15 @@ func TestCreateBotStreamsContainerProgressEvents(t *testing.T) {
 			{Type: "pulling", Image: "debian:bookworm-slim"},
 			{Type: "pull_progress", Layers: []ctr.LayerStatus{{Ref: "layer-1", Offset: 10, Total: 100}}},
 			{Type: "creating"},
+			{
+				Type:             "complete",
+				Image:            "debian:bookworm-slim",
+				ContainerID:      "workspace-" + botID,
+				WorkspaceBackend: bridge.WorkspaceBackendContainer,
+				RuntimeBackend:   "io.containerd.kata.v2",
+				ContainerPath:    "/data",
+				Started:          true,
+			},
 		}},
 	}
 
@@ -151,10 +160,30 @@ func TestCreateBotStreamsContainerProgressEvents(t *testing.T) {
 	}
 
 	events := decodeSSEEvents(t, rec.Body.String())
-	for _, eventType := range []string{"bot_created", "pulling", "pull_progress", "creating", "ready"} {
+	for _, eventType := range []string{"bot_created", "pulling", "pull_progress", "creating", "complete", "ready"} {
 		if !hasEventType(events, eventType) {
 			t.Fatalf("missing %q event: %#v", eventType, events)
 		}
+	}
+	complete, ok := findEventType(events, "complete")
+	if !ok {
+		t.Fatalf("complete event missing: %#v", events)
+	}
+	container, ok := complete["container"].(map[string]any)
+	if !ok {
+		t.Fatalf("complete container payload = %#v", complete["container"])
+	}
+	if got := container["container_id"]; got != "workspace-"+botID {
+		t.Fatalf("complete container_id = %#v, want %q", got, "workspace-"+botID)
+	}
+	if got := container["workspace_backend"]; got != bridge.WorkspaceBackendContainer {
+		t.Fatalf("complete workspace_backend = %#v, want %q", got, bridge.WorkspaceBackendContainer)
+	}
+	if got := container["runtime_backend"]; got != "io.containerd.kata.v2" {
+		t.Fatalf("complete runtime_backend = %#v, want io.containerd.kata.v2", got)
+	}
+	if got := container["started"]; got != true {
+		t.Fatalf("complete started = %#v, want true", got)
 	}
 }
 
@@ -307,12 +336,17 @@ func eventBotID(event map[string]any) string {
 }
 
 func hasEventType(events []map[string]any, eventType string) bool {
+	_, ok := findEventType(events, eventType)
+	return ok
+}
+
+func findEventType(events []map[string]any, eventType string) (map[string]any, bool) {
 	for _, event := range events {
 		if event["type"] == eventType {
-			return true
+			return event, true
 		}
 	}
-	return false
+	return nil, false
 }
 
 func newTestCreateBotAccountService(userID string) *accounts.Service {

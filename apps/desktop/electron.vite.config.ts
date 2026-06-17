@@ -1,4 +1,5 @@
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
+import type { PluginOption } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 import { createRequire } from 'node:module'
@@ -9,8 +10,27 @@ const require = createRequire(import.meta.url)
 
 const defaultPort = 8082
 const defaultHost = '127.0.0.1'
-const defaultApiBaseUrl = process.env.VITE_API_URL ?? 'http://localhost:8080'
-const desktopFlavor = process.env.MEMOH_DESKTOP_FLAVOR === 'online' ? 'online' : 'offline'
+const desktopRuntimeMode = resolveDesktopRuntimeMode(
+  process.env.MEMOH_DESKTOP_RUNTIME_MODE ?? process.env.MEMOH_DESKTOP_FLAVOR,
+)
+const defaultApiBaseUrl = process.env.VITE_API_URL ?? (
+  desktopRuntimeMode === 'remote' ? 'http://localhost:18080' : 'http://localhost:8080'
+)
+
+function resolveDesktopRuntimeMode(value: string | undefined): 'local' | 'remote' {
+  switch (value?.trim()) {
+    case 'remote':
+    case 'online':
+      return 'remote'
+    case 'local':
+    case 'offline':
+    case undefined:
+    case '':
+      return 'local'
+    default:
+      throw new Error(`Unsupported desktop runtime mode: ${value}`)
+  }
+}
 
 function resolveProxyTarget(command: 'build' | 'serve'): { port: number; host: string; baseUrl: string } {
   const configuredProxyTarget = process.env.MEMOH_WEB_PROXY_TARGET?.trim()
@@ -21,7 +41,13 @@ function resolveProxyTarget(command: 'build' | 'serve'): { port: number; host: s
   let host = defaultHost
   let baseUrl = configuredProxyTarget || defaultApiBaseUrl
 
-  if (command !== 'build') {
+  const shouldReadConfig = command !== 'build' && (
+    desktopRuntimeMode !== 'remote'
+    || Boolean(configuredProxyTarget)
+    || Boolean(configuredPath)
+  )
+
+  if (shouldReadConfig) {
     try {
       const { loadConfig, getBaseUrl } = require('@memohai/config') as {
         loadConfig: (path: string) => { web?: { port?: number; host?: string } }
@@ -52,32 +78,42 @@ function resolveProxyTarget(command: 'build' | 'serve'): { port: number; host: s
   return { port, host, baseUrl }
 }
 
-export default defineConfig(({ command }) => {
+export default defineConfig(async ({ command }) => {
   const { port, host, baseUrl } = resolveProxyTarget(command)
   const bundledElectronToolkit = ['@electron-toolkit/preload', '@electron-toolkit/utils']
+
+  const devtoolsPlugins: PluginOption[] = []
+  if (command !== 'build') {
+    try {
+      const { default: vueDevTools } = await import('vite-plugin-vue-devtools')
+      devtoolsPlugins.push(vueDevTools())
+    } catch {
+      // DevTools is optional — never block startup.
+    }
+  }
 
   return {
     main: {
       plugins: [externalizeDepsPlugin({ exclude: bundledElectronToolkit })],
       define: {
-        __MEMOH_DESKTOP_FLAVOR__: JSON.stringify(desktopFlavor),
+        __MEMOH_DESKTOP_RUNTIME_MODE__: JSON.stringify(desktopRuntimeMode),
       },
     },
     preload: {
       plugins: [externalizeDepsPlugin({ exclude: bundledElectronToolkit })],
       define: {
-        __MEMOH_DESKTOP_FLAVOR__: JSON.stringify(desktopFlavor),
+        __MEMOH_DESKTOP_RUNTIME_MODE__: JSON.stringify(desktopRuntimeMode),
       },
     },
     renderer: {
       root: resolve(__dirname, 'src/renderer'),
       define: {
-        __MEMOH_DESKTOP_FLAVOR__: JSON.stringify(desktopFlavor),
+        __MEMOH_DESKTOP_RUNTIME_MODE__: JSON.stringify(desktopRuntimeMode),
       },
       // Reuse apps/web/public so absolute-path assets (e.g. /logo.svg) resolve
       // when web modules are imported directly from the desktop renderer.
       publicDir: resolve(__dirname, '../web/public'),
-      plugins: [vue(), tailwindcss()],
+      plugins: [...devtoolsPlugins, vue(), tailwindcss()],
       resolve: {
         alias: {
           '@renderer': fileURLToPath(new URL('./src/renderer/src', import.meta.url)),
@@ -87,24 +123,29 @@ export default defineConfig(({ command }) => {
         },
       },
       optimizeDeps: {
+        // Only pre-bundle from the renderer entry — scanning all web pages
+        // forces esbuild to crawl Monaco/xterm/ECharts/Mermaid/etc. on every
+        // new import, which during AI-assisted editing triggers repeated
+        // full dev-server restarts and page reloads. Vite's scanner follows
+        // dynamic imports in the router, so page-level deps are still
+        // discovered without listing every page here.
         entries: [
           'src/renderer/src/main.ts',
-          '../web/src/main.ts',
-          '../web/src/pages/**/*.vue',
         ],
       },
       build: {
         rollupOptions: {
           input: {
             index: resolve(__dirname, 'src/renderer/index.html'),
-            settings: resolve(__dirname, 'src/renderer/settings.html'),
-            connection: resolve(__dirname, 'src/renderer/connection.html'),
           },
         },
       },
       server: {
         port,
         host,
+        hmr: {
+          overlay: false,
+        },
         proxy: {
           '/api': {
             target: baseUrl,

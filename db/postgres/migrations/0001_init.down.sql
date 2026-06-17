@@ -1,3 +1,6 @@
+DROP TABLE IF EXISTS channel_link_codes;
+DROP TABLE IF EXISTS user_channel_identity_bindings;
+DROP TABLE IF EXISTS bot_channel_admins;
 DROP TABLE IF EXISTS bot_user_grants;
 DROP TABLE IF EXISTS bot_history_message_assets;
 DROP TABLE IF EXISTS media_assets;

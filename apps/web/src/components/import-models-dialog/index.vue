@@ -11,6 +11,7 @@
     <template #trigger>
       <Button
         variant="outline"
+        :size="size"
         class="flex items-center gap-2"
       >
         <FileInput />
@@ -32,15 +33,19 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQueryCache } from '@pinia/colada'
 import { postProvidersByIdImportModels } from '@memohai/sdk'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { FileInput } from 'lucide-vue-next'
 import { Button } from '@memohai/ui'
+import type { ButtonVariants } from '@memohai/ui'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   providerId: string
-}>()
+  size?: ButtonVariants['size']
+}>(), {
+  size: 'default',
+})
 
 const open = ref(false)
 const { t } = useI18n()

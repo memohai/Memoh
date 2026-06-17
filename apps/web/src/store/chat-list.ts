@@ -1,13 +1,14 @@
 import { defineStore, storeToRefs } from 'pinia'
 import { computed, reactive, ref, watch } from 'vue'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import enMessages from '@/i18n/locales/en.json'
 import zhMessages from '@/i18n/locales/zh.json'
+import jaMessages from '@/i18n/locales/ja.json'
 import { useRetryingStream } from '@/composables/useRetryingStream'
 import { useUserStore } from '@/store/user'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
-import { shouldRefreshFromMessageCreated, upsertById } from './chat-list.utils'
+import { reconcileById, shouldRefreshFromMessageCreated, upsertById } from './chat-list.utils'
 import {
   createSession,
   deleteSession as requestDeleteSession,
@@ -71,6 +72,7 @@ export type ContentBlock = TextBlock | ThinkingBlock | ToolCallBlock | Attachmen
 
 export interface ChatUserTurn {
   id: string
+  serverId?: string
   role: 'user'
   text: string
   attachments: AttachmentItem[]
@@ -88,6 +90,7 @@ export interface ChatUserTurn {
 
 export interface ChatAssistantTurn {
   id: string
+  serverId?: string
   role: 'assistant'
   messages: ContentBlock[]
   timestamp: string
@@ -108,6 +111,8 @@ export interface BackgroundTask {
   botId?: string
   sessionId?: string
   command?: string
+  agentId?: string
+  agentSessionId?: string
   outputFile?: string
   outputTail?: string
   stream?: string
@@ -119,6 +124,7 @@ export interface BackgroundTask {
 
 export interface ChatSystemTurn {
   id: string
+  serverId?: string
   role: 'system'
   kind: 'background_task'
   backgroundTask: BackgroundTask
@@ -134,11 +140,12 @@ function currentLocale() {
   const locale = typeof storage?.getItem !== 'function'
     ? ''
     : storage.getItem('language')
-  return locale === 'zh' ? 'zh' : 'en'
+  return locale === 'zh' || locale === 'ja' ? locale : 'en'
 }
 
 function userInputConnectionLostMessage() {
-  const messages = currentLocale() === 'zh' ? zhMessages : enMessages
+  const locale = currentLocale()
+  const messages = locale === 'zh' ? zhMessages : locale === 'ja' ? jaMessages : enMessages
   return messages.chat.tools.userInputConnectionLost
 }
 
@@ -222,6 +229,14 @@ export const useChatStore = defineStore('chat', () => {
 
   const messages = reactive<ChatMessage[]>([])
   const pendingAssistantStreams = reactive(new Map<string, PendingAssistantStream>())
+  // In-flight tool-approval responses, keyed by response stream id. Silent
+  // entries belong to a session that is already streaming: their events are
+  // swallowed instead of rendered as a new assistant turn. Entries normally
+  // clear on the response stream's end/error; the expiry covers streams whose
+  // terminal event never arrives (e.g. a WebSocket drop mid-approval), so the
+  // approval doesn't stay locked against retries until a reload.
+  const APPROVAL_RESPONSE_TTL_MS = 2 * 60 * 1000
+  const approvalResponseStreams = new Map<string, { approvalId: string, silent: boolean, at: number }>()
   const pendingStreams = () => [...pendingAssistantStreams.values()].filter(stream => !stream.done)
   const streamingSessionId = computed(() => {
     const activeSid = (sessionId.value ?? '').trim()
@@ -241,11 +256,11 @@ export const useChatStore = defineStore('chat', () => {
   const overrideReasoningEffort = ref<string>('')
   const startupSendFailure = ref<StartupSendFailure | null>(null)
 
-  // Bumps every time a fs-mutating tool call (write/edit/exec) finishes for the
+  // Bumps every time a fs-mutating tool call (write/edit/apply_patch/exec) finishes for the
   // current bot. File-manager components watch this to refresh their listings
   // and any open file viewers without polling.
   const fsChangedAt = ref(0)
-  const FS_MUTATING_TOOLS = new Set(['write', 'edit', 'exec'])
+  const FS_MUTATING_TOOLS = new Set(['write', 'edit', 'apply_patch', 'exec'])
 
   function bumpFsChangedAtIfFsMutation(message: UIMessage) {
     if (message.type !== 'tool') return
@@ -415,6 +430,9 @@ export const useChatStore = defineStore('chat', () => {
       case 'output':
       case 'running':
         return 'running'
+      case 'queued':
+      case 'queue':
+        return 'queued'
       case 'complete':
       case 'completed':
       case 'success':
@@ -437,7 +455,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function isBackgroundTaskActive(task?: BackgroundTask): boolean {
     const status = normalizeBackgroundStatus(task?.status, task?.event)
-    return status === 'running' || status === 'stalled'
+    return status === 'running' || status === 'queued' || status === 'stalled'
   }
 
   function normalizeBackgroundTask(task?: UIBackgroundTask, eventType?: string): BackgroundTask | null {
@@ -455,6 +473,8 @@ export const useChatStore = defineStore('chat', () => {
       botId: pickString(record, 'bot_id', 'botId') || undefined,
       sessionId: pickString(record, 'session_id', 'sessionId') || undefined,
       command: pickString(record, 'command') || undefined,
+      agentId: pickString(record, 'agent_id', 'agentId') || undefined,
+      agentSessionId: pickString(record, 'agent_session_id', 'agentSessionId') || undefined,
       outputFile: pickString(record, 'output_file', 'outputFile') || undefined,
       outputTail: pickString(record, 'output_tail', 'outputTail', 'tail') || undefined,
       stream: pickString(record, 'stream') || undefined,
@@ -792,6 +812,54 @@ export const useChatStore = defineStore('chat', () => {
     updateSinceFromMessages(items)
   }
 
+  const PRESERVED_TURN_KEYS = ['id', 'serverId']
+
+  function mergeTurnInPlace(current: ChatMessage, incoming: ChatMessage) {
+    const mergeBlocks = current.role === 'assistant' && incoming.role === 'assistant'
+    if (mergeBlocks) {
+      reconcileById(current.messages, incoming.messages)
+    }
+    const target = current as unknown as Record<string, unknown>
+    const source = incoming as unknown as Record<string, unknown>
+    for (const key of Object.keys(target)) {
+      if (PRESERVED_TURN_KEYS.includes(key)) continue
+      if (mergeBlocks && key === 'messages') continue
+      if (!(key in source)) delete target[key]
+    }
+    for (const key of Object.keys(source)) {
+      if (PRESERVED_TURN_KEYS.includes(key)) continue
+      if (mergeBlocks && key === 'messages') continue
+      target[key] = source[key]
+    }
+  }
+
+  function adoptTailOptimisticTurns(incoming: ChatMessage[]) {
+    const incomingIds = new Set(incoming.map(turn => turn.id))
+    const existingKeys = new Set(messages.map(turn => turn.serverId ?? turn.id))
+    let ei = messages.length - 1
+    let ii = incoming.length - 1
+    while (ei >= 0 && ii >= 0) {
+      const existing = messages[ei]
+      const candidate = incoming[ii]
+      if (!existing || !candidate) break
+      if (incomingIds.has(existing.serverId ?? existing.id)) break
+      if (existingKeys.has(candidate.id)) break
+      if (existing.role !== candidate.role) break
+      existing.serverId = candidate.id
+      ei -= 1
+      ii -= 1
+    }
+  }
+
+  function reconcileMessages(items: ChatMessage[]) {
+    adoptTailOptimisticTurns(items)
+    reconcileById(messages, items, {
+      keyOfExisting: turn => turn.serverId ?? turn.id,
+      merge: mergeTurnInPlace,
+    })
+    updateSinceFromMessages(items)
+  }
+
   function replaceMessages(items: UITurn[], targetSessionId?: string) {
     setMessages(normalizeTurns(items, targetSessionId))
   }
@@ -1020,8 +1088,54 @@ export const useChatStore = defineStore('chat', () => {
     return getAssistantStream(id)!
   }
 
+  function isPendingApproval(approval?: UIToolApproval) {
+    return approval?.status?.trim().toLowerCase() === 'pending'
+  }
+
+  function isSameApproval(left?: UIToolApproval, right?: UIToolApproval) {
+    const leftId = left?.approval_id?.trim()
+    const rightId = right?.approval_id?.trim()
+    return Boolean(leftId && rightId && leftId === rightId)
+  }
+
+  function mergeApprovalState(existing?: UIToolApproval, incoming?: UIToolApproval) {
+    if (!incoming) return existing
+    if (isSameApproval(existing, incoming) && !isPendingApproval(existing) && isPendingApproval(incoming)) {
+      return existing
+    }
+    return incoming
+  }
+
+  // Approval and user-input snapshots are partial messages: the ?? / || guards
+  // keep them from wiping fields the stream already filled in. The block keeps
+  // its id (and reactive identity) — only content fields move.
+  function mergeToolCallBlock(existing: ToolCallBlock, incoming: ToolCallBlock) {
+    Object.assign(existing, incoming, {
+      id: existing.id,
+      name: incoming.name || existing.name,
+      toolName: incoming.toolName || existing.toolName,
+      input: incoming.input ?? existing.input,
+      result: incoming.result ?? existing.result,
+      output: incoming.output ?? existing.output,
+      approval: mergeApprovalState(existing.approval, incoming.approval),
+      userInput: incoming.userInput ?? existing.userInput,
+      user_input: incoming.user_input ?? existing.user_input,
+      backgroundTask: incoming.backgroundTask ?? existing.backgroundTask,
+      background_task: incoming.background_task ?? existing.background_task,
+      progress: incoming.progress ?? existing.progress,
+    })
+  }
+
   function upsertAssistantUIMessage(turn: ChatAssistantTurn, message: UIMessage) {
     const normalized = normalizeUIMessage(message)
+    if (normalized.type === 'tool' && normalized.toolCallId) {
+      const existing = turn.messages.find((block): block is ToolCallBlock => block.type === 'tool' && block.toolCallId === normalized.toolCallId)
+      if (existing) {
+        mergeToolCallBlock(existing, normalized)
+        bumpFsChangedAtIfFsMutation(message)
+        return
+      }
+    }
     turn.messages = upsertById(turn.messages, normalized)
     bumpFsChangedAtIfFsMutation(message)
   }
@@ -1127,9 +1241,61 @@ export const useChatStore = defineStore('chat', () => {
     removeTurnFromSession(session.botId, session.sessionId, turn)
   }
 
+  function purgeStaleApprovalResponses() {
+    const now = Date.now()
+    for (const [streamId, entry] of approvalResponseStreams) {
+      if (now - entry.at < APPROVAL_RESPONSE_TTL_MS) continue
+      markToolApprovalDecision(entry.approvalId, 'pending')
+      approvalResponseStreams.delete(streamId)
+    }
+  }
+
+  function hasPendingApprovalResponse(approvalId: string) {
+    purgeStaleApprovalResponses()
+    for (const entry of approvalResponseStreams.values()) {
+      if (entry.approvalId === approvalId) return true
+    }
+    return false
+  }
+
+  function markToolApprovalDecision(approvalId: string, status: 'approved' | 'rejected' | 'pending') {
+    const id = approvalId.trim()
+    if (!id) return
+    for (const message of messages) {
+      if (message.role !== 'assistant') continue
+      for (const block of message.messages) {
+        if (block.type !== 'tool' || block.approval?.approval_id !== id) continue
+        block.approval = {
+          ...block.approval,
+          status,
+          can_approve: status === 'pending',
+        }
+      }
+    }
+  }
+
+  // Undo the optimistic decision when the response stream fails, so the user
+  // can retry instead of being stuck with buttons that vanished for nothing.
+  function rollbackApprovalResponse(streamId: string) {
+    const approvalId = approvalResponseStreams.get(streamId)?.approvalId
+    if (approvalId) markToolApprovalDecision(approvalId, 'pending')
+  }
+
   function handleWSStreamEvent(event: UIStreamEvent, targetSessionId?: string) {
     const sid = (event.session_id ?? targetSessionId ?? sessionId.value ?? '').trim()
     const streamId = streamIdForEvent(event, sid)
+
+    if (approvalResponseStreams.get(streamId)?.silent) {
+      if (event.type === 'end' || event.type === 'error') {
+        if (event.type === 'error') {
+          rollbackApprovalResponse(streamId)
+          toast.error(event.message || 'tool approval failed')
+        }
+        approvalResponseStreams.delete(streamId)
+        loading.value = isSessionStreaming(sessionId.value)
+      }
+      return
+    }
 
     switch (event.type) {
       case 'start':
@@ -1142,6 +1308,7 @@ export const useChatStore = defineStore('chat', () => {
         const endedSession = getAssistantStream(streamId)
         const endedBotId = endedSession?.botId ?? currentBotId.value ?? ''
         const endedSessionId = (endedSession?.sessionId || sid || '').trim()
+        approvalResponseStreams.delete(streamId)
         pruneEmptyAssistantTurnIfPending(streamId)
         resolveAssistantStream(streamId)
         loading.value = isSessionStreaming(sessionId.value)
@@ -1153,6 +1320,8 @@ export const useChatStore = defineStore('chat', () => {
         const session = getAssistantStream(streamId) ?? ensureDiscussStream(streamId, sid)
         const message = event.message || 'stream error'
         const stage: SendMessageStage = hasVisibleAssistantBlocks(session.assistantTurn) ? 'stream' : 'startup'
+        rollbackApprovalResponse(streamId)
+        approvalResponseStreams.delete(streamId)
         rejectAssistantStream(streamId, new StreamFailureError(message, stage))
         loading.value = isSessionStreaming(sessionId.value)
         break
@@ -1203,6 +1372,7 @@ export const useChatStore = defineStore('chat', () => {
     clearPendingACPSession()
 
     pendingAssistantStreams.clear()
+    approvalResponseStreams.clear()
     pendingBackgroundEvents.clear()
     latestBackgroundTasks.clear()
     sessionMessageStates.clear()
@@ -1244,13 +1414,13 @@ export const useChatStore = defineStore('chat', () => {
       const normalized = normalizeTurns(turns, sid)
       const moreOlder = turns.length > 0
       if (currentBotId.value === bid && sessionId.value === sid) {
-        setMessages(normalized)
+        reconcileMessages(normalized)
         hasMoreOlder.value = moreOlder
         cacheCurrentMessages()
       } else {
         cacheFetchedMessages(bid, sid, normalized, moreOlder)
       }
-      touchSession(sid)
+      touchSession(sid, normalized.at(-1)?.timestamp)
     })().finally(() => {
       if (refreshPromise?.promise === promise) {
         refreshPromise = null
@@ -1374,10 +1544,6 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     handleWSStreamEvent(stream, sid || undefined)
-
-    if (stream.type === 'end' || stream.type === 'error') {
-      if (sid) touchSession(sid)
-    }
   }
 
   function handleStreamEvent(targetBotId: string, event: MessageStreamEvent) {
@@ -1402,7 +1568,7 @@ export const useChatStore = defineStore('chat', () => {
       const messageSessionId = String(raw.session_id ?? event.session_id ?? '').trim()
       if (messageSessionId) {
         if (sessions.value.some((session) => session.id === messageSessionId)) {
-          touchSession(messageSessionId)
+          touchSession(messageSessionId, raw.created_at)
         } else {
           void refreshSessionsList(targetBotId)
         }
@@ -1451,6 +1617,7 @@ export const useChatStore = defineStore('chat', () => {
   function abortAllAssistantStreams() {
     const abortError = new Error('aborted')
     abortError.name = 'AbortError'
+    approvalResponseStreams.clear()
     for (const stream of pendingStreams()) {
       if (activeWs?.connected) activeWs.abort(stream.streamId)
       rejectAssistantStream(stream.streamId, abortError)
@@ -1539,7 +1706,7 @@ export const useChatStore = defineStore('chat', () => {
           return acc
         }, null)
         if (!earliest || earliest === cursor) {
-          // Cursor cannot advance — bail out to avoid a request loop.
+          // Pagination cursor cannot advance; bail out to avoid a request loop.
           hasMoreOlder.value = false
           return 0
         }
@@ -1589,13 +1756,12 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function touchSession(targetSessionId: string) {
-    const index = sessions.value.findIndex(session => session.id === targetSessionId)
-    if (index < 0) return
-    const [target] = sessions.value.splice(index, 1)
+  function touchSession(targetSessionId: string, timestamp?: string) {
+    const target = sessions.value.find(session => session.id === targetSessionId)
     if (!target) return
-    target.updated_at = new Date().toISOString()
-    sessions.value.unshift(target)
+    if (timestamp && (!target.updated_at || timestamp > target.updated_at)) {
+      target.updated_at = timestamp
+    }
   }
 
   function acpSessionMetadata(input: ACPAgentSessionInput): Record<string, unknown> {
@@ -2153,7 +2319,6 @@ export const useChatStore = defineStore('chat', () => {
 
       assistantTurn.streaming = false
       loading.value = false
-      touchSession(sid)
       return { ok: true }
     } catch (error) {
       const err = error instanceof Error ? error : new Error('Unknown error')
@@ -2185,37 +2350,34 @@ export const useChatStore = defineStore('chat', () => {
   async function respondToolApproval(approval: UIToolApproval, decision: 'approve' | 'reject') {
     const bid = currentBotId.value ?? ''
     const sid = sessionId.value ?? ''
-    if (!bid || !sid || !approval.approval_id || streaming.value) return
+    const approvalId = approval.approval_id?.trim()
+    if (!bid || !sid || !approvalId) return false
+    if (approval.status !== 'pending' || approval.can_approve === false) return false
+    if (hasPendingApprovalResponse(approvalId)) return false
     const ws = ensureWebSocket(bid)
     const streamId = createStreamId()
-    const assistantTurn = createOptimisticAssistantTurn()
-    messages.push(assistantTurn)
-    void trackAssistantStream(streamId, assistantTurn, bid, sid).catch((error: Error) => {
-      finalizeStreamFailure(assistantTurn, bid, sid, error)
-    })
-    loading.value = true
+    const silent = isSessionStreaming(sid)
+    approvalResponseStreams.set(streamId, { approvalId, silent, at: Date.now() })
+    if (!silent) {
+      const assistantTurn = createOptimisticAssistantTurn()
+      messages.push(assistantTurn)
+      void trackAssistantStream(streamId, assistantTurn, bid, sid).catch((error: Error) => {
+        finalizeStreamFailure(assistantTurn, bid, sid, error)
+      })
+      loading.value = true
+    }
     // Optimistically update the approved/rejected tool block before the
     // server snapshot arrives so the buttons disappear immediately.
-    for (const message of messages) {
-      if (message.role !== 'assistant') continue
-      for (const block of message.messages) {
-        if (block.type === 'tool' && block.approval?.approval_id === approval.approval_id) {
-          block.approval = {
-            ...block.approval,
-            status: decision === 'approve' ? 'approved' : 'rejected',
-            can_approve: false,
-          }
-        }
-      }
-    }
+    markToolApprovalDecision(approvalId, decision === 'approve' ? 'approved' : 'rejected')
     ws?.send({
       type: 'tool_approval_response',
       stream_id: streamId,
       session_id: sid,
-      approval_id: approval.approval_id,
+      approval_id: approvalId,
       short_id: approval.short_id,
       decision,
     })
+    return true
   }
 
   async function respondUserInput(

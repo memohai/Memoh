@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import type { HTMLAttributes } from 'vue'
+import { CircleAlert } from 'lucide-vue-next'
 import { ErrorMessage } from 'vee-validate'
 import { toValue } from 'vue'
 import { cn } from '#/lib/utils'
@@ -15,9 +16,16 @@ const { name, formMessageId } = useFormField()
 <template>
   <ErrorMessage
     :id="formMessageId"
+    v-slot="{ message }"
     data-slot="form-message"
     as="p"
     :name="toValue(name)"
-    :class="cn('text-destructive text-xs', props.class)"
-  />
+    :class="cn(
+      'text-destructive flex items-center gap-1.5 text-label leading-snug',
+      props.class,
+    )"
+  >
+    <CircleAlert class="size-3.5 shrink-0" />
+    <span>{{ message }}</span>
+  </ErrorMessage>
 </template>

@@ -68,13 +68,12 @@ export default defineConfig(({ command }) => {
       vue(),
       tailwindcss(),
     ],
-    optimizeDeps: {
-      // Pre-bundle deps for route pages to avoid slow first load / navigation
-      entries: ['src/main.ts', 'src/pages/**/*.vue'],
-    },
     server: {
       port,
       host,
+      hmr: {
+        overlay: false,
+      },
       proxy: {
         '/api': apiProxy,
         '/': browserHostProxy,

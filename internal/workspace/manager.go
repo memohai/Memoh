@@ -20,6 +20,7 @@ import (
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/identity"
 	netctl "github.com/memohai/memoh/internal/network"
 	skillset "github.com/memohai/memoh/internal/skills"
@@ -36,7 +37,10 @@ const (
 	DisplayRFBSocketName        = "display.rfb.sock"
 	ACPToolsProxyHTTPURL        = bridge.ACPToolsProxyHTTPURL
 
-	legacyGRPCPort = 9090
+	legacyGRPCPort           = 9090
+	bridgeReadyTimeout       = 45 * time.Second
+	bridgeReadyRPCTimeout    = 3 * time.Second
+	bridgeReadyRetryInterval = 500 * time.Millisecond
 )
 
 // ErrContainerNotFound is returned when no container exists for a bot.
@@ -46,6 +50,7 @@ var ErrContainerNotFound = errors.New("container not found for bot")
 type ContainerStatus struct {
 	ContainerID      string    `json:"container_id"`
 	WorkspaceBackend string    `json:"workspace_backend"`
+	RuntimeBackend   string    `json:"runtime_backend,omitempty"`
 	Image            string    `json:"image"`
 	Status           string    `json:"status"`
 	Namespace        string    `json:"namespace"`
@@ -85,10 +90,12 @@ type Manager struct {
 	namespace         string
 	db                *pgxpool.Pool
 	queries           dbstore.Queries
+	hookService       *hooks.Service
 	logger            *slog.Logger
 	containerLockMu   sync.Mutex
 	containerLocks    map[string]*sync.Mutex
 	grpcPool          *bridge.Pool
+	bridgeTLS         *BridgeTLSRuntimeOptions
 	legacyMu          sync.RWMutex
 	legacyIPs         map[string]string // botID → IP for pre-bridge containers
 }
@@ -123,7 +130,24 @@ func NewManager(log *slog.Logger, service runtimeService, networkController netc
 	return m
 }
 
-// resolveContainerID resolves the actual containerd container ID for a bot.
+func (m *Manager) SetHookService(h *hooks.Service) {
+	m.hookService = h
+}
+
+// SetBridgeTLS enables strict mTLS on TCP bridge dials and injects bridge-side
+// TLS material into new workspace containers. UDS bridge targets keep using the
+// local filesystem trust model.
+func (m *Manager) SetBridgeTLS(opts *BridgeTLSRuntimeOptions) {
+	if opts == nil {
+		m.bridgeTLS = nil
+		m.grpcPool.SetTLSOptions(nil)
+		return
+	}
+	m.bridgeTLS = opts
+	m.grpcPool.SetTLSOptions(opts.Client)
+}
+
+// resolveContainerID resolves the actual workspace container ID for a bot.
 // This is the SINGLE point of container ID resolution for all lookup operations.
 // It delegates to ContainerID (DB → label → scan) and falls back to the
 // new-style prefix if no container exists yet.
@@ -177,7 +201,7 @@ func (m *Manager) dialTarget(botID string) string {
 	ip, legacy := m.legacyIPs[botID]
 	m.legacyMu.RUnlock()
 	if legacy {
-		return fmt.Sprintf("%s:%d", ip, legacyGRPCPort)
+		return fmt.Sprintf("passthrough:///%s:%d", ip, legacyGRPCPort)
 	}
 	return "unix://" + m.socketPath(botID)
 }
@@ -195,6 +219,18 @@ func (m *Manager) ClearLegacyIP(botID string) {
 	m.legacyMu.Lock()
 	delete(m.legacyIPs, botID)
 	m.legacyMu.Unlock()
+}
+
+func (m *Manager) usesKataRuntime() bool {
+	provider, ok := m.service.(interface{ RuntimeType() string })
+	if !ok {
+		return false
+	}
+	return strings.Contains(strings.ToLower(strings.TrimSpace(provider.RuntimeType())), "kata")
+}
+
+func (m *Manager) usesTCPBridge(ctx context.Context, containerID string) bool {
+	return m.IsLegacyContainer(ctx, containerID) || m.usesKataRuntime()
 }
 
 // clearLegacyRoute evicts any stale TCP fallback state for a bot so future
@@ -217,6 +253,32 @@ func (m *Manager) MCPClient(ctx context.Context, botID string) (*bridge.Client, 
 		}
 	}
 	return m.grpcPool.Get(ctx, botID)
+}
+
+func (m *Manager) WaitForWorkspaceReady(ctx context.Context, botID string) error {
+	deadline := time.Now().Add(bridgeReadyTimeout)
+	var lastErr error
+	for {
+		attemptCtx, cancel := context.WithTimeout(ctx, bridgeReadyRPCTimeout)
+		client, err := m.MCPClient(attemptCtx, botID)
+		if err == nil {
+			_, err = client.Stat(attemptCtx, "/")
+		}
+		cancel()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		m.grpcPool.Remove(botID)
+		if time.Now().After(deadline) {
+			return fmt.Errorf("workspace bridge not ready for bot %s after %s: %w", botID, bridgeReadyTimeout, lastErr)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for workspace bridge: %w", ctx.Err())
+		case <-time.After(bridgeReadyRetryInterval):
+		}
+	}
 }
 
 func (m *Manager) WorkspaceInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error) {
@@ -329,6 +391,18 @@ func (m *Manager) buildWorkspaceContainerSpec(ctx context.Context, botID string,
 	}
 	tzMounts, tzEnv := ctr.TimezoneSpec()
 	mounts = append(mounts, tzMounts...)
+	if m.bridgeTLS != nil {
+		bridgeDir := strings.TrimSpace(m.bridgeTLS.BridgeMaterialDir)
+		if bridgeDir == "" || strings.TrimSpace(m.bridgeTLS.ExpectedClientURI) == "" {
+			return ctr.ContainerSpec{}, fmt.Errorf("%w: bridge TLS strict mode requires bridge material dir and expected client URI", ctr.ErrInvalidArgument)
+		}
+		mounts = append(mounts, ctr.MountSpec{
+			Destination: bridgeMTLSMountPath,
+			Type:        "bind",
+			Source:      bridgeDir,
+			Options:     []string{"rbind", "ro"},
+		})
+	}
 
 	skillRoots, err := m.ResolveWorkspaceSkillDiscoveryRoots(ctx, botID)
 	if err != nil {
@@ -337,7 +411,12 @@ func (m *Manager) buildWorkspaceContainerSpec(ctx context.Context, botID string,
 	skillEnv := skillset.ContainerEnv(skillRoots)
 	env := make([]string, 0, len(tzEnv)+1+len(skillEnv))
 	env = append(env, tzEnv...)
-	env = append(env, "BRIDGE_SOCKET_PATH=/run/memoh/bridge.sock")
+	if m.usesKataRuntime() {
+		env = append(env, fmt.Sprintf("BRIDGE_TCP_ADDR=:%d", legacyGRPCPort))
+	} else {
+		env = append(env, "BRIDGE_SOCKET_PATH=/run/memoh/bridge.sock")
+	}
+	env = m.appendBridgeTLSEnv(env)
 	if m.botDisplayEnabled(ctx, botID) {
 		env = append(env,
 			"MEMOH_DISPLAY_ENABLED=true",
@@ -353,6 +432,19 @@ func (m *Manager) buildWorkspaceContainerSpec(ctx context.Context, botID string,
 		Env:        env,
 		CDIDevices: normalizeWorkspaceGPUDevices(gpu.Devices),
 	}, nil
+}
+
+func (m *Manager) appendBridgeTLSEnv(env []string) []string {
+	if m.bridgeTLS == nil {
+		return env
+	}
+	return append(env,
+		"BRIDGE_TLS_MODE="+config.BridgeTLSModeStrict,
+		"BRIDGE_TLS_CERT_FILE="+bridgeMTLSMountPath+"/"+bridgeServerCertFile,
+		"BRIDGE_TLS_KEY_FILE="+bridgeMTLSMountPath+"/"+bridgeServerKeyFile,
+		"BRIDGE_TLS_CLIENT_CA_FILE="+bridgeMTLSMountPath+"/"+serverClientCACertFile,
+		"BRIDGE_TLS_EXPECTED_CLIENT_URI="+m.bridgeTLS.ExpectedClientURI,
+	)
 }
 
 func (m *Manager) botDisplayEnabled(ctx context.Context, botID string) bool {
@@ -534,6 +626,13 @@ func (m *Manager) startWithLocalConfig(ctx context.Context, botID, image, worksp
 		return err
 	}
 	m.upsertContainerRecord(ctx, botID, containerID, "running", image)
+	if err := m.runWorkspaceHook(context.WithoutCancel(ctx), botID, hooks.EventWorkspaceStart, map[string]any{
+		"backend": bridge.WorkspaceBackendLocal,
+		"image":   image,
+		"path":    path,
+	}); err != nil {
+		m.logWorkspaceHookError(hooks.EventWorkspaceStart, botID, err)
+	}
 	return nil
 }
 
@@ -581,8 +680,14 @@ func (m *Manager) startWithResolvedConfig(ctx context.Context, botID, image stri
 			return fmt.Errorf("restore preserved data through bridge: %w", err)
 		}
 	}
-	if !m.IsLegacyContainer(ctx, containerID) {
+	if !m.usesTCPBridge(ctx, containerID) {
 		m.clearLegacyRoute(botID)
+	}
+	if err := m.runWorkspaceHook(context.WithoutCancel(ctx), botID, hooks.EventWorkspaceStart, map[string]any{
+		"backend": bridge.WorkspaceBackendContainer,
+		"image":   image,
+	}); err != nil {
+		m.logWorkspaceHookError(hooks.EventWorkspaceStart, botID, err)
 	}
 	return nil
 }
@@ -590,6 +695,11 @@ func (m *Manager) startWithResolvedConfig(ctx context.Context, botID, image stri
 func (m *Manager) Stop(ctx context.Context, botID string, timeout time.Duration) error {
 	if err := validateBotID(botID); err != nil {
 		return err
+	}
+	if err := m.runWorkspaceHook(ctx, botID, hooks.EventWorkspaceStop, map[string]any{
+		"timeout_seconds": int(timeout.Seconds()),
+	}); err != nil {
+		m.logWorkspaceHookError(hooks.EventWorkspaceStop, botID, err)
 	}
 	return m.service.StopContainer(ctx, m.resolveContainerID(ctx, botID), &ctr.StopTaskOptions{
 		Timeout: timeout,

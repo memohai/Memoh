@@ -1,6 +1,7 @@
 package memllm
 
 import (
+	"strings"
 	"testing"
 
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
@@ -56,6 +57,23 @@ func TestParseJSONStringArray_FiltersBlanks(t *testing.T) {
 	result := parseJSONStringArray(`["fact one", "", "  ", "fact two"]`)
 	if len(result) != 2 {
 		t.Fatalf("expected 2 non-empty facts, got %d", len(result))
+	}
+}
+
+func TestCompactSystemPromptDefinesLongTermMemoryCompactionContract(t *testing.T) {
+	t.Parallel()
+
+	for _, want := range []string{
+		"target_count",
+		"Cluster related memories",
+		"Preserve safety-critical",
+		"Resolve conflicts",
+		"Drop duplicates",
+		"JSON array only",
+	} {
+		if !strings.Contains(compactSystemPrompt, want) {
+			t.Fatalf("compact prompt missing %q:\n%s", want, compactSystemPrompt)
+		}
 	}
 }
 

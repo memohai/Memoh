@@ -1,6 +1,6 @@
 {
   "name": "@memohai/web",
-  "version": "0.11.0",
+  "version": "0.13.0",
   "type": "module",
   "exports": {
     ".": "./src/main.ts",
@@ -10,6 +10,7 @@
     "./i18n": "./src/i18n.ts",
     "./api-client": "./src/lib/api-client.ts",
     "./lib/desktop-shell": "./src/lib/desktop-shell.ts",
+    "./store/settings": "./src/store/settings/index.ts",
     "./style.css": "./src/style.css",
     "./*": "./src/*"
   },
@@ -19,6 +20,9 @@
     "start": "vite preview"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "^5.2.8",
+    "@internationalized/date": "^3.12.2",
+    "@lisse/vue": "^0.4.0",
     "@memohai/icon": "workspace:*",
     "@memohai/sdk": "workspace:*",
     "@memohai/ui": "workspace:*",
@@ -36,12 +40,14 @@
     "animate.css": "^4.1.1",
     "cron-parser": "^5.5.0",
     "cronstrue": "^3.14.0",
+    "dockview-vue": "^6.6.1",
     "dotenv": "^17.2.3",
     "echarts": "^6.0.0",
     "katex": "^0.16.28",
     "lucide-vue-next": "^0.562.0",
-    "markstream-vue": "1.0.1-beta.1",
+    "markstream-vue": "1.0.1-beta.5",
     "mermaid": "^11.12.2",
+    "misans-vf": "1.0.0",
     "modern-css-reset": "^1.4.0",
     "moment": "^2.30.1",
     "monaco-editor": "^0.52.2",
@@ -59,7 +65,6 @@
     "vue-echarts": "^8.0.1",
     "vue-i18n": "^11.2.8",
     "vue-router": "^4.6.4",
-    "vue-sonner": "^2.0.9",
     "zod": "^4.3.5"
   },
   "devDependencies": {

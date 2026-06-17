@@ -31,7 +31,7 @@ type formationResult struct {
 }
 
 // runFormation executes the Extract -> candidate retrieval -> Decide -> apply pipeline.
-func runFormation(ctx context.Context, logger *slog.Logger, llm adapters.LLM, runtime memoryRuntime, req adapters.AfterChatRequest) formationResult {
+func runFormation(ctx context.Context, logger *slog.Logger, llm adapters.LLM, runtime Runtime, req adapters.AfterChatRequest) formationResult {
 	ctx, cancel := context.WithTimeout(ctx, formationTimeout)
 	defer cancel()
 
@@ -77,7 +77,7 @@ func runFormation(ctx context.Context, logger *slog.Logger, llm adapters.LLM, ru
 }
 
 // gatherCandidates collects existing memories relevant to the extracted facts.
-func gatherCandidates(ctx context.Context, logger *slog.Logger, runtime memoryRuntime, botID string, facts []string) []adapters.CandidateMemory {
+func gatherCandidates(ctx context.Context, logger *slog.Logger, runtime Runtime, botID string, facts []string) []adapters.CandidateMemory {
 	seen := make(map[string]struct{})
 	candidates := make([]adapters.CandidateMemory, 0, candidateSearchLimit)
 
@@ -157,7 +157,7 @@ func gatherCandidates(ctx context.Context, logger *slog.Logger, runtime memoryRu
 }
 
 // applyActions executes the decided CRUD actions against the runtime.
-func applyActions(ctx context.Context, logger *slog.Logger, runtime memoryRuntime, botID string, actions []adapters.DecisionAction, filters map[string]any, metadata map[string]any, result *formationResult) {
+func applyActions(ctx context.Context, logger *slog.Logger, runtime Runtime, botID string, actions []adapters.DecisionAction, filters map[string]any, metadata map[string]any, result *formationResult) {
 	deleted := make(map[string]struct{})
 	updated := make(map[string]struct{})
 

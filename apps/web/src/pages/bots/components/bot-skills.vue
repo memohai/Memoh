@@ -1,286 +1,224 @@
 <template>
-  <div class="max-w-2xl mx-auto pb-6 space-y-5">
-    <!-- Sovereign Header -->
-    <header class="pb-4 border-b border-border/50 sticky top-0 bg-background/95 backdrop-blur z-30 pt-4 -mt-4 flex items-center justify-between">
-      <div class="space-y-1">
-        <h2 class="text-sm font-semibold text-foreground">
-          {{ $t('bots.skills.title') }}
-        </h2>
-        <p class="text-[11px] leading-snug text-muted-foreground max-w-md">
-          {{ $t('bots.skills.intro') }}
-        </p>
-      </div>
-      <div
-        v-if="skills.length > 0"
-        class="flex items-center gap-2 shrink-0"
+  <PageShell
+    variant="tab"
+    :title="$t('bots.skills.title')"
+    :description="$t('bots.skills.intro')"
+  >
+    <template #actions>
+      <Button
+        variant="outline"
+        size="sm"
+        @click="isDiscoveryDialogOpen = true"
       >
-        <Button
-          variant="ghost"
+        <SlidersHorizontal class="size-4" />
+        {{ $t('bots.skills.discoveryTitle') }}
+        <Badge
+          v-if="showDiscoveryIndicator"
+          variant="default"
           size="sm"
-          class="h-8 text-xs font-medium px-3 shadow-none text-muted-foreground"
-          :title="$t('bots.skills.discoveryTitle')"
-          @click="isDiscoveryDialogOpen = true"
         >
-          <SlidersHorizontal class="mr-2 size-3.5" />
-          {{ $t('bots.skills.discoveryTitle') }}
-          <span
-            v-if="showDiscoveryIndicator"
-            class="ml-1.5 inline-block size-1.5 rounded-full bg-primary"
-          />
-        </Button>
-        <Button
-          size="sm"
-          class="h-8 text-xs font-medium px-4 shadow-none bg-foreground text-background hover:bg-foreground/90"
-          @click="handleCreate"
-        >
-          <Plus class="mr-2 size-3.5" />
-          {{ $t('bots.skills.addSkill') }}
-        </Button>
-      </div>
-    </header>
-
-    <!-- Loading State -->
-    <div
-      v-if="isLoading"
-      class="flex items-center justify-center py-12 text-xs text-muted-foreground"
-    >
-      <Spinner class="mr-2 size-4" />
-      {{ $t('common.loading') }}
-    </div>
-
-    <!-- Empty State -->
-    <div
-      v-else-if="!skills.length"
-      class="flex flex-col items-center justify-center py-16 text-center border border-dashed border-border/50 bg-muted/5 rounded-lg relative overflow-hidden"
-    >
-      <!-- Blueprint Grid Background -->
-      <div class="absolute inset-0 opacity-[0.03] pointer-events-none bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]" />
-      
-      <div class="relative z-10 flex flex-col items-center">
-        <div class="rounded-md bg-background border border-border/50 p-2.5 mb-4 shadow-sm">
-          <Zap class="size-5 text-muted-foreground" />
-        </div>
-        <h3 class="text-sm font-medium text-foreground">
-          {{ $t('bots.skills.emptyTitle') }}
-        </h3>
-        <p class="text-[11px] text-muted-foreground mt-1.5 max-w-sm">
-          {{ $t('bots.skills.emptyDescription') }}
-        </p>
-        <div class="flex items-center gap-3 mt-6">
-          <Button
-            size="sm"
-            class="h-8 text-xs px-4 shadow-none bg-foreground text-background hover:bg-foreground/90"
-            @click="handleCreate"
-          >
-            <Plus class="mr-2 size-3.5" />
-            {{ $t('bots.skills.addSkill') }}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            class="h-8 text-xs px-4 shadow-none border-border/50 bg-background/60 backdrop-blur-sm"
-            @click="isDiscoveryDialogOpen = true"
-          >
-            <SlidersHorizontal class="mr-2 size-3.5" />
-            {{ $t('bots.skills.discoveryTitle') }}
-          </Button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Skills Grid -->
-    <div
-      v-else
-      class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
-    >
-      <div
-        v-for="skill in skills"
-        :key="skillKey(skill)"
-        class="rounded-md border p-3 flex flex-col justify-between min-h-[110px] group transition-colors duration-75 relative"
-        :class="[
-          skill.state === 'shadowed' 
-            ? 'border-solid border-border/40 bg-background/40' 
-            : 'border-border/60 bg-background hover:bg-accent/30 hover:border-border'
-        ]"
+          {{ $t('bots.skills.discoverySummaryUnsaved') }}
+        </Badge>
+      </Button>
+      <Button
+        size="sm"
+        @click="handleCreate"
       >
-        <!-- Top Row / Header -->
-        <div class="flex items-center justify-between gap-2 mb-2">
-          <div class="flex items-center gap-2 min-w-0">
-            <div 
-              class="shrink-0"
-              :class="[
-                skill.state === 'disabled' || skill.state === 'shadowed' 
-                  ? 'size-1.5 rounded-full border border-muted-foreground bg-transparent' 
-                  : 'size-1.5 rounded-full bg-foreground'
-              ]" 
-            />
-            <h4 
-              class="font-mono text-[11px] font-semibold truncate"
-              :class="[
-                skill.state === 'shadowed' ? 'line-through text-muted-foreground/70' : 'text-foreground'
-              ]"
-              :title="skill.name"
-            >
-              {{ skill.name }}
-            </h4>
-          </div>
-          
-          <div class="flex items-center gap-1.5 shrink-0">
-            <span
-              v-if="skill.state === 'shadowed'"
-              class="text-[9px] font-mono text-muted-foreground/70"
-            >
-              ↳ Shadowed
-            </span>
-            <div
-              v-if="skill.managed"
-              class="h-5 px-1.5 flex items-center text-[9px] uppercase tracking-wider rounded-full bg-muted/40 text-muted-foreground font-medium"
-            >
-              {{ $t('bots.skills.managedBadge') }}
-            </div>
-            <div
-              v-else
-              class="h-5 px-1.5 flex items-center text-[9px] uppercase tracking-wider rounded-full bg-primary/10 text-primary border border-primary/20 font-medium"
-            >
-              {{ $t('bots.skills.discoveredBadge') }}
-            </div>
-          </div>
-        </div>
+        <Plus class="size-4" />
+        {{ $t('bots.skills.addSkill') }}
+      </Button>
+    </template>
 
-        <!-- Middle Row / Body -->
-        <div class="mb-3 flex-1">
-          <p 
-            class="text-[11px] leading-snug line-clamp-2 break-words [overflow-wrap:anywhere]"
-            :class="[
-              skill.state === 'shadowed' ? 'text-muted-foreground/50' : 'text-muted-foreground'
-            ]"
-            :title="skill.description"
+    <SettingsSection :title="$t('bots.skills.libraryTitle')">
+      <div
+        v-if="isLoading"
+        class="mx-4 flex min-h-[3.75rem] items-center gap-3 py-3 text-sm text-muted-foreground"
+      >
+        <Spinner class="size-4" />
+        {{ $t('common.loading') }}
+      </div>
+
+      <Empty
+        v-else-if="!skills.length"
+        class="py-12"
+      >
+        <EmptyHeader>
+          <EmptyTitle>{{ $t('bots.skills.emptyTitle') }}</EmptyTitle>
+          <EmptyDescription>{{ $t('bots.skills.emptyDescription') }}</EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <div class="flex items-center gap-2">
+            <Button
+              size="sm"
+              @click="handleCreate"
+            >
+              <Plus class="size-4" />
+              {{ $t('bots.skills.addSkill') }}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              @click="isDiscoveryDialogOpen = true"
+            >
+              <SlidersHorizontal class="size-4" />
+              {{ $t('bots.skills.discoveryTitle') }}
+            </Button>
+          </div>
+        </EmptyContent>
+      </Empty>
+
+      <template v-else>
+        <div
+          v-for="skill in skills"
+          :key="skillKey(skill)"
+          class="mx-4 border-b border-border py-4 last:border-b-0"
+        >
+          <div class="flex items-start justify-between gap-4">
+            <div class="min-w-0 flex-1">
+              <div class="flex min-w-0 items-center gap-2">
+                <h3
+                  class="truncate font-mono text-sm font-medium text-foreground"
+                  :class="{ 'line-through text-muted-foreground': skill.state === 'shadowed' }"
+                  :title="skill.name"
+                >
+                  {{ skill.name }}
+                </h3>
+                <Badge
+                  variant="outline"
+                  size="sm"
+                >
+                  {{ skillStateLabel(skill) }}
+                </Badge>
+                <Badge
+                  variant="default"
+                  size="sm"
+                >
+                  {{ skill.managed ? $t('bots.skills.managedBadge') : $t('bots.skills.discoveredBadge') }}
+                </Badge>
+              </div>
+              <p
+                class="mt-1 line-clamp-2 break-words text-xs text-muted-foreground [overflow-wrap:anywhere]"
+                :title="skill.description"
+              >
+                {{ skill.description || '-' }}
+              </p>
+              <p
+                class="mt-2 truncate font-mono text-xs text-muted-foreground"
+                :title="sourceSummary(skill)"
+              >
+                {{ sourceSummary(skill) }}
+              </p>
+            </div>
+
+            <div class="flex shrink-0 items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                :aria-label="!skill.managed ? $t('bots.skills.overrideTitle') : $t('common.edit')"
+                @click="handleEdit(skill)"
+              >
+                <SquarePen class="size-3.5" />
+              </Button>
+
+              <Button
+                v-if="skill.state === 'disabled'"
+                variant="ghost"
+                size="icon-sm"
+                :disabled="isActioning"
+                :aria-label="$t('bots.skills.enableAction')"
+                @click="handleSkillAction('enable', skill)"
+              >
+                <Spinner
+                  v-if="isSkillActionPending(skill, 'enable')"
+                  class="size-3"
+                />
+                <EyeOff
+                  v-else
+                  class="size-3.5"
+                />
+              </Button>
+              <Button
+                v-else
+                variant="ghost"
+                size="icon-sm"
+                :disabled="isActioning"
+                :aria-label="$t('bots.skills.disableAction')"
+                @click="handleSkillAction('disable', skill)"
+              >
+                <Spinner
+                  v-if="isSkillActionPending(skill, 'disable')"
+                  class="size-3"
+                />
+                <Eye
+                  v-else
+                  class="size-3.5"
+                />
+              </Button>
+
+              <Button
+                v-if="!skill.managed"
+                variant="ghost"
+                size="icon-sm"
+                :disabled="isActioning || skill.state === 'shadowed'"
+                :aria-label="skill.state === 'shadowed' ? $t('bots.skills.adoptBlocked') : $t('bots.skills.adoptAction')"
+                @click="handleSkillAction('adopt', skill)"
+              >
+                <Spinner
+                  v-if="isSkillActionPending(skill, 'adopt')"
+                  class="size-3"
+                />
+                <ArrowDownToLine
+                  v-else
+                  class="size-3.5"
+                />
+              </Button>
+
+              <ConfirmPopover
+                v-if="skill.managed"
+                :message="$t('bots.skills.deleteConfirm')"
+                :loading="isDeleting && deletingName === skill.name"
+                @confirm="handleDelete(skill.name)"
+              >
+                <template #trigger>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    :disabled="isDeleting"
+                    :aria-label="$t('common.delete')"
+                  >
+                    <Trash2 class="size-3.5" />
+                  </Button>
+                </template>
+              </ConfirmPopover>
+            </div>
+          </div>
+
+          <p
+            v-if="skill.state === 'shadowed'"
+            class="mt-3 text-xs text-muted-foreground"
           >
-            {{ skill.description || '-' }}
+            {{ $t('bots.skills.shadowedHint') }}
           </p>
         </div>
-
-        <!-- Bottom Row / Footer & Action Panel -->
-        <div class="flex items-center justify-between gap-2 mt-auto">
-          <div 
-            class="font-mono text-[9px] truncate px-1.5 py-0.5 rounded bg-muted/30"
-            :class="skill.state === 'shadowed' ? 'text-muted-foreground/50' : 'text-muted-foreground'"
-            :title="sourceSummary(skill)"
-          >
-            {{ sourceSummary(skill) }}
-          </div>
-          
-          <!-- Actions (Revealed on Hover) -->
-          <div class="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-            <!-- Edit / View -->
-            <Button
-              variant="ghost"
-              size="sm"
-              class="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-              :title="!skill.managed ? $t('bots.skills.overrideTitle') : $t('common.edit')"
-              @click="handleEdit(skill)"
-            >
-              <SquarePen class="size-3" />
-            </Button>
-            
-            <!-- Enable / Disable -->
-            <Button
-              v-if="skill.state === 'disabled'"
-              variant="ghost"
-              size="sm"
-              class="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-              :disabled="isActioning"
-              :title="$t('bots.skills.enableAction')"
-              @click="handleSkillAction('enable', skill)"
-            >
-              <Spinner
-                v-if="isSkillActionPending(skill, 'enable')"
-                class="size-3"
-              />
-              <EyeOff
-                v-else
-                class="size-3"
-              />
-            </Button>
-            <Button
-              v-else
-              variant="ghost"
-              size="sm"
-              class="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-              :disabled="isActioning"
-              :title="$t('bots.skills.disableAction')"
-              @click="handleSkillAction('disable', skill)"
-            >
-              <Spinner
-                v-if="isSkillActionPending(skill, 'disable')"
-                class="size-3"
-              />
-              <Eye
-                v-else
-                class="size-3"
-              />
-            </Button>
-
-            <!-- Adopt -->
-            <Button
-              v-if="!skill.managed"
-              variant="ghost"
-              size="sm"
-              class="h-6 w-6 p-0 text-muted-foreground hover:text-primary transition-colors"
-              :disabled="isActioning || skill.state === 'shadowed'"
-              :title="skill.state === 'shadowed' ? $t('bots.skills.adoptBlocked') : $t('bots.skills.adoptAction')"
-              @click="handleSkillAction('adopt', skill)"
-            >
-              <Spinner
-                v-if="isSkillActionPending(skill, 'adopt')"
-                class="size-3"
-              />
-              <ArrowDownToLine
-                v-else
-                class="size-3"
-              />
-            </Button>
-
-            <!-- Delete -->
-            <ConfirmPopover
-              v-if="skill.managed"
-              :message="$t('bots.skills.deleteConfirm')"
-              :loading="isDeleting && deletingName === skill.name"
-              @confirm="handleDelete(skill.name)"
-            >
-              <template #trigger>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  class="h-6 w-6 p-0 text-muted-foreground hover:text-destructive transition-colors"
-                  :disabled="isDeleting"
-                  :title="$t('common.delete')"
-                >
-                  <Trash2 class="size-3" />
-                </Button>
-              </template>
-            </ConfirmPopover>
-          </div>
-        </div>
-      </div>
-    </div>
+      </template>
+    </SettingsSection>
 
     <!-- Edit Dialog (Modal IDE) -->
     <Dialog v-model:open="isDialogOpen">
-      <DialogContent class="sm:max-w-4xl max-h-[calc(100vh-2rem)] sm:h-[85vh] flex flex-col overflow-hidden p-0 gap-0">
-        <DialogHeader class="shrink-0 p-4 border-b border-border/50 bg-background">
+      <DialogContent class="flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden p-0 sm:h-[85vh] sm:max-w-4xl">
+        <DialogHeader class="shrink-0 border-b border-border p-4">
           <DialogTitle class="text-sm font-semibold">
             {{ isEditing ? $t('common.edit') : $t('bots.skills.addSkill') }}
           </DialogTitle>
         </DialogHeader>
         
-        <div class="flex-1 min-h-0 relative p-4 bg-muted/5">
-          <div class="absolute inset-4 rounded-md border border-border/50 bg-background/50 overflow-hidden flex flex-col shadow-sm">
+        <div class="min-h-0 flex-1 p-4">
+          <div class="flex h-full min-h-0 flex-col overflow-hidden rounded-[var(--radius-menu-shell)] border border-border">
             <MonacoEditor
               v-model="draftRaw"
               language="markdown"
               :readonly="isSaving"
-              class="flex-1 min-h-0"
+              class="min-h-0 flex-1"
               :options="{
                 automaticLayout: true,
                 fixedOverflowWidgets: true,
@@ -291,12 +229,11 @@
           </div>
         </div>
 
-        <DialogFooter class="shrink-0 p-4 border-t border-border/50 bg-background flex items-center justify-end gap-2">
+        <DialogFooter class="shrink-0 items-center gap-2 border-t border-border p-4">
           <DialogClose as-child>
             <Button
               variant="ghost"
               size="sm"
-              class="h-8 text-xs font-medium px-4 shadow-none"
               :disabled="isSaving"
             >
               {{ $t('common.cancel') }}
@@ -304,15 +241,15 @@
           </DialogClose>
           <Button
             size="sm"
-            class="h-8 text-xs font-medium px-4 min-w-24 shadow-none bg-foreground text-background hover:bg-foreground/90"
+            class="min-w-24"
             :disabled="!canSave || isSaving"
             @click="handleSave"
           >
             <Spinner
               v-if="isSaving"
-              class="mr-2 size-3.5"
+              class="size-3"
             />
-            {{ $t('common.save') }}
+            {{ $t('common.confirm') }}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -325,44 +262,44 @@
           <DialogTitle class="text-sm font-semibold">
             {{ $t('bots.skills.discoveryTitle') }}
           </DialogTitle>
-          <DialogDescription class="text-[11px] leading-snug">
+          <DialogDescription class="text-xs">
             {{ $t('bots.skills.discoveryDescription') }}
           </DialogDescription>
         </DialogHeader>
 
         <div class="space-y-5 py-3">
           <div class="space-y-1.5">
-            <Label class="text-[11px] font-medium text-foreground">
+            <Label class="text-xs font-medium text-foreground">
               {{ $t('bots.skills.managedPathLabel') }}
             </Label>
-            <div class="rounded border border-border/50 bg-muted/20 px-2.5 py-1.5 font-mono text-[10px] text-muted-foreground break-all">
+            <div class="break-all rounded-md border border-border px-2.5 py-1.5 font-mono text-xs text-muted-foreground">
               {{ MANAGED_SKILL_PATH }}
             </div>
-            <p class="text-[10px] text-muted-foreground">
+            <p class="text-xs text-muted-foreground">
               {{ $t('bots.skills.managedPathHint') }}
             </p>
           </div>
 
           <div class="space-y-1.5">
-            <Label class="text-[11px] font-medium text-foreground">
+            <Label class="text-xs font-medium text-foreground">
               {{ $t('bots.skills.discoveryPathsLabel') }}
             </Label>
             <Textarea
               v-model="discoveryRootsDraft"
               :disabled="discoveryControlsDisabled"
               :placeholder="$t('bots.skills.discoveryPathPlaceholder')"
-              class="min-h-24 font-mono text-[11px] bg-muted/10 border-border/50 shadow-none"
-              :class="{ 'border-warning/40 focus-visible:ring-warning/30': hasDiscoveryRootErrors }"
+              class="min-h-24 font-mono text-xs"
+              :aria-invalid="hasDiscoveryRootErrors"
             />
             <p
               v-if="discoveryRootError"
-              class="text-[10px] text-warning/80"
+              class="text-xs text-destructive"
             >
               {{ discoveryRootError }}
             </p>
             <p
               v-else
-              class="text-[10px] text-muted-foreground"
+              class="text-xs text-muted-foreground"
             >
               {{ $t('bots.skills.discoveryDefaultHint', { paths: DEFAULT_DISCOVERY_ROOTS.join(', ') }) }}
             </p>
@@ -373,7 +310,6 @@
           <Button
             variant="ghost"
             size="sm"
-            class="h-8 text-[11px] px-3 shadow-none text-muted-foreground"
             :disabled="discoveryControlsDisabled || !isDiscoveryRootsDirty"
             @click="resetDiscoveryRoots"
           >
@@ -383,7 +319,6 @@
             <Button
               variant="ghost"
               size="sm"
-              class="h-8 text-xs font-medium px-4 shadow-none"
               :disabled="isSavingDiscoveryRoots"
               @click="closeDiscoveryDialog"
             >
@@ -391,36 +326,40 @@
             </Button>
             <Button
               size="sm"
-              class="h-8 text-xs font-medium px-4 min-w-24 shadow-none bg-foreground text-background hover:bg-foreground/90"
+              class="min-w-24"
               :disabled="!canSaveDiscoveryRoots"
               @click="handleSaveDiscoveryRoots"
             >
               <Spinner
                 v-if="isSavingDiscoveryRoots"
-                class="mr-2 size-3.5"
+                class="size-3"
               />
-              {{ $t('common.save') }}
+              {{ $t('common.confirm') }}
             </Button>
           </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  </div>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
-import { ArrowDownToLine, Eye, EyeOff, Plus, SlidersHorizontal, Zap, SquarePen, Trash2 } from 'lucide-vue-next'
+import { ArrowDownToLine, Eye, EyeOff, Plus, SlidersHorizontal, SquarePen, Trash2 } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
+  Badge,
   Button,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose,
+  Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle,
   Label, Spinner, Textarea,
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
+import SettingsSection from '@/components/settings/section.vue'
+import PageShell from '@/components/page-shell/index.vue'
 import {
   getBotsById,
   getBotsByBotIdContainerSkills,
@@ -675,8 +614,21 @@ function sourceKindLabel(kind?: string) {
       return t('bots.skills.legacyBadge')
     case 'compat':
       return t('bots.skills.compatBadge')
+    case 'plugin':
+      return t('bots.skills.pluginBadge')
     default:
       return t('bots.skills.managedBadge')
+  }
+}
+
+function skillStateLabel(skill: SkillItem) {
+  switch (skill.state) {
+    case 'shadowed':
+      return t('bots.skills.shadowedBadge')
+    case 'disabled':
+      return t('bots.skills.disabledBadge')
+    default:
+      return t('bots.skills.effectiveBadge')
   }
 }
 

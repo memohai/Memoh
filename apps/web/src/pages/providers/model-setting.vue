@@ -1,57 +1,73 @@
 <template>
-  <SettingsShell width="wide">
-    <section class="flex items-center gap-3">
-      <span class="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted">
-        <ProviderIcon
-          v-if="curProvider?.icon"
-          :icon="curProvider.icon"
-          size="1.5em"
-        />
-        <span
-          v-else
-          class="text-xs font-medium text-muted-foreground"
-        >
-          {{ getInitials(curProvider?.name) }}
+  <SettingsShell width="narrow">
+    <div class="space-y-6">
+      <section class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3">
+        <span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
+          <ProviderIcon
+            v-if="curProvider?.icon"
+            :icon="curProvider.icon"
+            size="1.5em"
+          />
+          <span
+            v-else
+            class="text-xs font-medium text-muted-foreground"
+          >
+            {{ getInitials(curProvider?.name) }}
+          </span>
         </span>
-      </span>
-      <h4 class="scroll-m-20 tracking-tight min-w-0 truncate">
-        {{ curProvider?.name }}
-      </h4>
-      <div class="ml-auto flex items-center gap-2">
-        <span class="text-xs text-muted-foreground">
-          {{ $t('provider.enable') }}
-        </span>
-        <Switch
-          :model-value="curProvider?.enable ?? true"
-          :disabled="!curProvider?.id || enableLoading"
-          @update:model-value="handleToggleEnable"
-        />
-      </div>
-    </section>
-    <Separator class="mt-4 mb-6" />
+        <div class="min-w-0 flex-1">
+          <h4 class="scroll-m-20 tracking-tight truncate">
+            {{ curProvider?.name }}
+          </h4>
+        </div>
+        <div class="ml-auto flex items-center gap-2">
+          <ConfirmPopover
+            :message="$t('provider.deleteConfirm')"
+            :loading="deleteLoading"
+            @confirm="deleteProvider"
+          >
+            <template #trigger>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                class="text-muted-foreground hover:text-destructive"
+                :aria-label="$t('common.delete')"
+              >
+                <Trash2 class="size-4" />
+              </Button>
+            </template>
+          </ConfirmPopover>
+          <Switch
+            :model-value="curProvider?.enable ?? true"
+            :disabled="!curProvider?.id || enableLoading"
+            :aria-label="$t('provider.enable')"
+            @update:model-value="handleToggleEnable"
+          />
+        </div>
+      </section>
 
-    <ProviderForm
-      :provider="curProvider"
-      :edit-loading="editLoading"
-      :delete-loading="deleteLoading"
-      @submit="changeProvider"
-      @delete="deleteProvider"
-    />
+      <ProviderForm
+        :provider="curProvider"
+        :edit-loading="editLoading"
+        @submit="changeProvider"
+      />
 
-    <Separator class="mt-4 mb-6" />
-
-    <ModelList
-      :provider-id="curProvider?.id"
-      :models="modelDataList"
-      :delete-model-loading="deleteModelLoading"
-      @edit="handleEditModel"
-      @delete="deleteModel"
-    />
+      <ModelList
+        :provider-id="curProvider?.id"
+        :models="modelDataList"
+        :delete-model-loading="deleteModelLoading"
+        @edit="handleEditModel"
+        @delete="deleteModel"
+      />
+    </div>
   </SettingsShell>
 </template>
 
 <script setup lang="ts">
-import { Separator, Switch } from '@memohai/ui'
+import { Button, Switch } from '@memohai/ui'
+import { Trash2 } from 'lucide-vue-next'
+import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import SettingsShell from '@/components/settings-shell/index.vue'
 
@@ -66,7 +82,7 @@ import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import { putProvidersById, deleteProvidersById, getProvidersByIdModels, deleteModelsById } from '@memohai/sdk'
 import type { ModelsGetResponse, ProvidersGetResponse, ProvidersUpdateRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 
 // ---- Model 编辑状态（provide 给 CreateModel） ----
 const openModel = reactive<{

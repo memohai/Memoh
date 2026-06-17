@@ -1251,6 +1251,146 @@
                 }
             }
         },
+        "/bots/{bot_id}/channel-managers": {
+            "get": {
+                "description": "List effective Manage state per channel identity on a bot (inherited + local overrides)",
+                "tags": [
+                    "bots"
+                ],
+                "summary": "List channel managers",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/channelaccess.ListManagersResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Force the Manage capability ON or OFF for a channel identity on a bot",
+                "tags": [
+                    "bots"
+                ],
+                "summary": "Set a channel manage override",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Override payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/channelaccess.SetManagerRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/channel-managers/{channel_identity_id}": {
+            "delete": {
+                "description": "Remove the local Manage override so the channel identity falls back to inheritance",
+                "tags": [
+                    "bots"
+                ],
+                "summary": "Clear a channel manage override",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Channel Identity ID",
+                        "name": "channel_identity_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/compaction/logs": {
             "get": {
                 "description": "List compaction logs for a bot",
@@ -3360,6 +3500,101 @@
                 }
             }
         },
+        "/bots/{bot_id}/hooks/events": {
+            "get": {
+                "tags": [
+                    "hooks"
+                ],
+                "summary": "List supported bot hook events",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.HooksEventsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/hooks/test": {
+            "post": {
+                "tags": [
+                    "hooks"
+                ],
+                "summary": "Run bot hooks for a synthetic event",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Hook test payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.HookTestRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.HookTestResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/local/messages": {
             "post": {
                 "description": "Post a user message (with optional attachments) through the local channel pipeline.",
@@ -4487,6 +4722,12 @@
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
+                    "501": {
+                        "description": "Not Implemented",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
@@ -5005,56 +5246,6 @@
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/plugins.ListResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "tags": [
-                    "plugins"
-                ],
-                "summary": "Install bot plugin from manifest",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Plugin install request",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/plugins.InstallRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/plugins.Installation"
                         }
                     },
                     "400": {
@@ -8269,6 +8460,244 @@
                 }
             }
         },
+        "/fetch-providers": {
+            "get": {
+                "description": "List configured fetch providers",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "fetch-providers"
+                ],
+                "summary": "List fetch providers",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider filter (native)",
+                        "name": "provider",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/fetchproviders.GetResponse"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Create a fetch provider configuration",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "fetch-providers"
+                ],
+                "summary": "Create a fetch provider",
+                "parameters": [
+                    {
+                        "description": "Fetch provider configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/fetchproviders.CreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/fetchproviders.GetResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/fetch-providers/meta": {
+            "get": {
+                "description": "List available fetch provider types and config schemas",
+                "tags": [
+                    "fetch-providers"
+                ],
+                "summary": "List fetch provider metadata",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/fetchproviders.ProviderMeta"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/fetch-providers/{id}": {
+            "get": {
+                "description": "Get fetch provider by ID",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "fetch-providers"
+                ],
+                "summary": "Get a fetch provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/fetchproviders.GetResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Update fetch provider by ID",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "fetch-providers"
+                ],
+                "summary": "Update a fetch provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Updated configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/fetchproviders.UpdateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/fetchproviders.GetResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete fetch provider by ID",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "fetch-providers"
+                ],
+                "summary": "Delete a fetch provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/memory-providers": {
             "get": {
                 "description": "List configured memory providers",
@@ -10982,6 +11411,12 @@
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -11012,6 +11447,103 @@
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/accounts.Account"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/me/channel-identities": {
+            "get": {
+                "description": "List the IM channel identities bound to the current user's account",
+                "tags": [
+                    "users"
+                ],
+                "summary": "List connected channel identities",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/channelaccess.ListBindingsResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/me/channel-identities/{channel_identity_id}": {
+            "delete": {
+                "description": "Remove a channel identity binding from the current user's account",
+                "tags": [
+                    "users"
+                ],
+                "summary": "Disconnect a channel identity",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Channel Identity ID",
+                        "name": "channel_identity_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/me/channel-links": {
+            "post": {
+                "description": "Generate a one-time code to send as /link \u003ccode\u003e in IM to bind that channel identity to your account",
+                "tags": [
+                    "users"
+                ],
+                "summary": "Issue an account link code",
+                "parameters": [
+                    {
+                        "description": "Link code options",
+                        "name": "payload",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/channelaccess.IssueLinkCodeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/channelaccess.LinkCode"
                         }
                     },
                     "400": {
@@ -11892,6 +12424,26 @@
                 }
             }
         },
+        "adapters.MemoryCompactCapability": {
+            "type": "object",
+            "properties": {
+                "archive": {
+                    "type": "boolean"
+                },
+                "native": {
+                    "type": "boolean"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "rebuild_index": {
+                    "type": "boolean"
+                },
+                "semantic": {
+                    "type": "boolean"
+                }
+            }
+        },
         "adapters.MemoryItem": {
             "type": "object",
             "properties": {
@@ -11945,6 +12497,9 @@
             "properties": {
                 "can_manual_sync": {
                     "type": "boolean"
+                },
+                "compact": {
+                    "$ref": "#/definitions/adapters.MemoryCompactCapability"
                 },
                 "encoder": {
                     "$ref": "#/definitions/adapters.HealthStatus"
@@ -13629,6 +14184,133 @@
                 }
             }
         },
+        "channelaccess.Binding": {
+            "type": "object",
+            "properties": {
+                "channel_identity_avatar_url": {
+                    "type": "string"
+                },
+                "channel_identity_display_name": {
+                    "type": "string"
+                },
+                "channel_identity_id": {
+                    "type": "string"
+                },
+                "channel_subject_id": {
+                    "type": "string"
+                },
+                "channel_type": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "channelaccess.IssueLinkCodeRequest": {
+            "type": "object",
+            "properties": {
+                "channel_type": {
+                    "type": "string"
+                }
+            }
+        },
+        "channelaccess.LinkCode": {
+            "type": "object",
+            "properties": {
+                "channel_type": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "token": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "channelaccess.ListBindingsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/channelaccess.Binding"
+                    }
+                }
+            }
+        },
+        "channelaccess.ListManagersResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/channelaccess.Manager"
+                    }
+                }
+            }
+        },
+        "channelaccess.Manager": {
+            "type": "object",
+            "properties": {
+                "bound": {
+                    "description": "Bound reports whether this identity is linked to a workspace member of this\nbot (any permission). It marks the identity as a \"platform member\" in the UI\nregardless of whether it carries Manage.",
+                    "type": "boolean"
+                },
+                "channel_identity_avatar_url": {
+                    "type": "string"
+                },
+                "channel_identity_display_name": {
+                    "type": "string"
+                },
+                "channel_identity_id": {
+                    "type": "string"
+                },
+                "channel_subject_id": {
+                    "type": "string"
+                },
+                "channel_type": {
+                    "type": "string"
+                },
+                "has_override": {
+                    "description": "HasOverride reports whether a local Channel Access override exists for it.",
+                    "type": "boolean"
+                },
+                "inherited": {
+                    "description": "Inherited reports whether this identity is bound to a web member that carries\nthe Manage capability (owner or workspace manage grant).",
+                    "type": "boolean"
+                },
+                "manage": {
+                    "description": "Manage is the effective Manage capability (local override ?? inherited).",
+                    "type": "boolean"
+                }
+            }
+        },
+        "channelaccess.SetManagerRequest": {
+            "type": "object",
+            "properties": {
+                "channel_identity_id": {
+                    "type": "string"
+                },
+                "granted": {
+                    "description": "Granted forces Manage ON (true) or OFF (false) locally.",
+                    "type": "boolean"
+                }
+            }
+        },
         "compaction.ListLogsResponse": {
             "type": "object",
             "properties": {
@@ -13934,6 +14616,128 @@
                 },
                 "provider": {
                     "type": "string"
+                }
+            }
+        },
+        "fetchproviders.CreateRequest": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
+                },
+                "provider": {
+                    "$ref": "#/definitions/fetchproviders.ProviderName"
+                }
+            }
+        },
+        "fetchproviders.GetResponse": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "enable": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "fetchproviders.ProviderConfigSchema": {
+            "type": "object",
+            "properties": {
+                "fields": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/fetchproviders.ProviderFieldSchema"
+                    }
+                }
+            }
+        },
+        "fetchproviders.ProviderFieldSchema": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "enum": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "example": {},
+                "required": {
+                    "type": "boolean"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "fetchproviders.ProviderMeta": {
+            "type": "object",
+            "properties": {
+                "config_schema": {
+                    "$ref": "#/definitions/fetchproviders.ProviderConfigSchema"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                }
+            }
+        },
+        "fetchproviders.ProviderName": {
+            "type": "string",
+            "enum": [
+                "native",
+                "jina",
+                "cloudflare_markdown"
+            ],
+            "x-enum-varnames": [
+                "ProviderNative",
+                "ProviderJina",
+                "ProviderCloudflareMarkdown"
+            ]
+        },
+        "fetchproviders.UpdateRequest": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "enable": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "provider": {
+                    "$ref": "#/definitions/fetchproviders.ProviderName"
                 }
             }
         },
@@ -14319,6 +15123,9 @@
                 "image": {
                     "type": "string"
                 },
+                "runtime_backend": {
+                    "type": "string"
+                },
                 "snapshotter": {
                     "type": "string"
                 },
@@ -14616,6 +15423,9 @@
                 "namespace": {
                     "type": "string"
                 },
+                "runtime_backend": {
+                    "type": "string"
+                },
                 "status": {
                     "type": "string"
                 },
@@ -14627,6 +15437,94 @@
                 },
                 "workspace_backend": {
                     "type": "string"
+                }
+            }
+        },
+        "handlers.HookEventInfo": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "runtime_supported": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "handlers.HookTestRequest": {
+            "type": "object",
+            "properties": {
+                "approval": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "channel": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "chat_id": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "event": {
+                    "type": "string"
+                },
+                "extra": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "memory": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "tool": {
+                    "$ref": "#/definitions/hooks.ToolPayload"
+                },
+                "turn": {
+                    "type": "object",
+                    "additionalProperties": {}
+                }
+            }
+        },
+        "handlers.HookTestResponse": {
+            "type": "object",
+            "properties": {
+                "config_exists": {
+                    "type": "boolean"
+                },
+                "result": {
+                    "$ref": "#/definitions/hooks.Result"
+                }
+            }
+        },
+        "handlers.HooksEventsResponse": {
+            "type": "object",
+            "properties": {
+                "actions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "config_path": {
+                    "type": "string"
+                },
+                "decisions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.HookEventInfo"
+                    }
                 }
             }
         },
@@ -15644,6 +16542,89 @@
                 "usage": {}
             }
         },
+        "hooks.ActionResult": {
+            "type": "object",
+            "properties": {
+                "action_type": {
+                    "type": "string"
+                },
+                "decision": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "exit_code": {
+                    "type": "integer"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "result": {},
+                "stderr": {
+                    "type": "string"
+                },
+                "stdout": {
+                    "type": "string"
+                }
+            }
+        },
+        "hooks.Result": {
+            "type": "object",
+            "properties": {
+                "action_results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/hooks.ActionResult"
+                    }
+                },
+                "actions_run": {
+                    "type": "integer"
+                },
+                "append_context": {
+                    "type": "string"
+                },
+                "decision": {
+                    "type": "string"
+                },
+                "hooks_matched": {
+                    "type": "integer"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "runtime_supported": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "hooks.ToolPayload": {
+            "type": "object",
+            "properties": {
+                "call_id": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "input": {},
+                "name": {
+                    "type": "string"
+                },
+                "result": {}
+            }
+        },
         "mcp.AuthorizeResult": {
             "type": "object",
             "properties": {
@@ -16018,6 +16999,9 @@
                     "items": {
                         "type": "string"
                     }
+                },
+                "thinking_mode": {
+                    "type": "string"
                 }
             }
         },
@@ -16156,20 +17140,6 @@
                 },
                 "url": {
                     "type": "string"
-                }
-            }
-        },
-        "plugins.InstallRequest": {
-            "type": "object",
-            "properties": {
-                "manifest": {
-                    "$ref": "#/definitions/plugins.Manifest"
-                },
-                "variables": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
                 }
             }
         },
@@ -16327,6 +17297,12 @@
                 },
                 "id": {
                     "type": "string"
+                },
+                "install": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "mcps": {
                     "type": "array",
@@ -16523,6 +17499,9 @@
                     }
                 },
                 "skipped": {
+                    "type": "integer"
+                },
+                "updated": {
                     "type": "integer"
                 }
             }
@@ -17037,6 +18016,9 @@
                 "display_enabled": {
                     "type": "boolean"
                 },
+                "fetch_provider_id": {
+                    "type": "string"
+                },
                 "heartbeat_enabled": {
                     "type": "boolean"
                 },
@@ -17100,14 +18082,14 @@
         "settings.ToolApprovalConfig": {
             "type": "object",
             "properties": {
-                "edit": {
-                    "$ref": "#/definitions/settings.ToolApprovalFilePolicy"
-                },
                 "enabled": {
                     "type": "boolean"
                 },
                 "exec": {
                     "$ref": "#/definitions/settings.ToolApprovalExecPolicy"
+                },
+                "read": {
+                    "$ref": "#/definitions/settings.ToolApprovalFilePolicy"
                 },
                 "write": {
                     "$ref": "#/definitions/settings.ToolApprovalFilePolicy"
@@ -17183,6 +18165,9 @@
                 },
                 "display_enabled": {
                     "type": "boolean"
+                },
+                "fetch_provider_id": {
+                    "type": "string"
                 },
                 "heartbeat_enabled": {
                     "type": "boolean"

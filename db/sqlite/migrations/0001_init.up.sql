@@ -99,6 +99,17 @@ CREATE TABLE IF NOT EXISTS search_providers (
   CONSTRAINT search_providers_name_unique UNIQUE (name)
 );
 
+CREATE TABLE IF NOT EXISTS fetch_providers (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  config TEXT NOT NULL DEFAULT '{}',
+  enable INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fetch_providers_name_unique UNIQUE (name)
+);
+
 CREATE TABLE IF NOT EXISTS models (
   id TEXT PRIMARY KEY,
   model_id TEXT NOT NULL,
@@ -153,6 +164,7 @@ CREATE TABLE IF NOT EXISTS bots (
   reasoning_effort TEXT NOT NULL DEFAULT 'medium',
   chat_model_id TEXT REFERENCES models(id) ON DELETE SET NULL,
   search_provider_id TEXT REFERENCES search_providers(id) ON DELETE SET NULL,
+  fetch_provider_id TEXT REFERENCES fetch_providers(id) ON DELETE SET NULL,
   memory_provider_id TEXT REFERENCES memory_providers(id) ON DELETE SET NULL,
   heartbeat_enabled INTEGER NOT NULL DEFAULT 0,
   heartbeat_interval INTEGER NOT NULL DEFAULT 1440,
@@ -169,7 +181,7 @@ CREATE TABLE IF NOT EXISTS bots (
   transcription_model_id TEXT REFERENCES models(id) ON DELETE SET NULL,
   persist_full_tool_results INTEGER NOT NULL DEFAULT 0,
   show_tool_calls_in_im INTEGER NOT NULL DEFAULT 0,
-  tool_approval_config TEXT NOT NULL DEFAULT '{"enabled":false,"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"edit":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}',
+  tool_approval_config TEXT NOT NULL DEFAULT '{"enabled":false,"read":{"require_approval":false,"bypass_globs":[],"force_review_globs":[]},"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}',
   display_enabled INTEGER NOT NULL DEFAULT 0,
   overlay_provider TEXT NOT NULL DEFAULT '',
   overlay_enabled INTEGER NOT NULL DEFAULT 0,
@@ -180,7 +192,7 @@ CREATE TABLE IF NOT EXISTS bots (
   CONSTRAINT bots_type_check CHECK (type IN ('personal', 'public')),
   CONSTRAINT bots_status_check CHECK (status IN ('creating', 'ready', 'deleting')),
   CONSTRAINT bots_acl_default_effect_check CHECK (acl_default_effect IN ('allow', 'deny')),
-  CONSTRAINT bots_reasoning_effort_check CHECK (reasoning_effort IN ('none', 'low', 'medium', 'high', 'xhigh')),
+  -- reasoning_effort is a free-form capability-driven tier string; no CHECK constraint (see 0018).
   CONSTRAINT bots_name_format_check CHECK (
     name GLOB '[a-z0-9]*'
     AND name NOT GLOB '*[^a-z0-9-]*'
@@ -232,6 +244,49 @@ CREATE TABLE IF NOT EXISTS bot_acl_rules (
 CREATE INDEX IF NOT EXISTS idx_bot_acl_rules_bot_id ON bot_acl_rules(bot_id);
 CREATE INDEX IF NOT EXISTS idx_bot_acl_rules_channel_identity_id ON bot_acl_rules(channel_identity_id);
 CREATE INDEX IF NOT EXISTS idx_bot_acl_rules_subject_channel_type ON bot_acl_rules(subject_channel_type);
+
+-- bot_channel_admins: channel-identity level manage grant (run owner-only slash commands)
+CREATE TABLE IF NOT EXISTS bot_channel_admins (
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  channel_identity_id TEXT NOT NULL REFERENCES channel_identities(id) ON DELETE CASCADE,
+  granted INTEGER NOT NULL DEFAULT 1,
+  created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT bot_channel_admins_unique UNIQUE (bot_id, channel_identity_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_channel_admins_bot_id ON bot_channel_admins(bot_id);
+CREATE INDEX IF NOT EXISTS idx_bot_channel_admins_channel_identity_id ON bot_channel_admins(channel_identity_id);
+
+-- user_channel_identity_bindings: global account-level link between a web user and
+-- an IM channel identity. Lets a member's bot permissions flow to their IM identity.
+CREATE TABLE IF NOT EXISTS user_channel_identity_bindings (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  channel_identity_id TEXT NOT NULL REFERENCES channel_identities(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT user_channel_identity_bindings_unique UNIQUE (user_id, channel_identity_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_channel_identity_bindings_user_id ON user_channel_identity_bindings(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_channel_identity_bindings_channel_identity_id ON user_channel_identity_bindings(channel_identity_id);
+
+-- channel_link_codes: one-time codes a user generates in the web app, then sends as
+-- /link <code> to a bot in IM to bind the sending channel identity to their account.
+CREATE TABLE IF NOT EXISTS channel_link_codes (
+  token TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  channel_type TEXT NOT NULL DEFAULT '',
+  expires_at TEXT NOT NULL,
+  consumed_at TEXT,
+  consumed_channel_identity_id TEXT REFERENCES channel_identities(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_channel_link_codes_user_id ON channel_link_codes(user_id);
 
 CREATE TABLE IF NOT EXISTS bot_plugin_installations (
   id TEXT PRIMARY KEY,
@@ -456,6 +511,7 @@ CREATE TABLE IF NOT EXISTS tool_approval_requests (
   channel_identity_id TEXT REFERENCES channel_identities(id) ON DELETE SET NULL,
   tool_call_id TEXT NOT NULL,
   tool_name TEXT NOT NULL,
+  operation TEXT NOT NULL,
   tool_input TEXT NOT NULL,
   short_id INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
@@ -470,7 +526,7 @@ CREATE TABLE IF NOT EXISTS tool_approval_requests (
   conversation_type TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   decided_at TEXT,
-  CONSTRAINT tool_approval_tool_name_check CHECK (tool_name IN ('write', 'edit', 'exec')),
+  CONSTRAINT tool_approval_operation_check CHECK (operation IN ('read', 'write', 'exec')),
   CONSTRAINT tool_approval_status_check CHECK (status IN ('pending', 'approved', 'rejected', 'expired', 'cancelled')),
   CONSTRAINT tool_approval_short_id_unique UNIQUE (session_id, short_id),
   CONSTRAINT tool_approval_tool_call_unique UNIQUE (session_id, tool_call_id)

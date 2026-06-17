@@ -4,7 +4,7 @@
       as="button"
       type="button"
       :class="[
-        'inline-flex items-center justify-center size-7 rounded-full text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        'inline-flex items-center justify-center size-9 rounded-full text-foreground transition-[opacity,scale] duration-200 ease-out disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none',
         ($attrs.class as string | undefined) ?? '',
       ]"
       :disabled="!sessionId"
@@ -16,7 +16,7 @@
     >
       <svg
         viewBox="0 0 24 24"
-        class="size-5 -rotate-90"
+        class="size-6 -rotate-90"
         aria-hidden="true"
       >
         <circle
@@ -26,7 +26,7 @@
           fill="none"
           stroke="currentColor"
           :stroke-width="strokeWidth"
-          class="opacity-25"
+          class="opacity-20"
         />
         <circle
           cx="12"
@@ -55,6 +55,7 @@
       <SessionInfoPanel
         :visible="open"
         :override-model-id="overrideModelId"
+        :fallback-context-window="fallbackContextWindow"
       />
     </PopoverContent>
   </Popover>
@@ -71,17 +72,20 @@ defineOptions({ inheritAttrs: false })
 
 const props = defineProps<{
   overrideModelId?: string
+  fallbackContextWindow?: number | null
 }>()
 
 const { t } = useI18n()
 const open = ref(false)
 
 const overrideModelIdRef = computed(() => props.overrideModelId ?? '')
+const fallbackContextWindowRef = computed(() => props.fallbackContextWindow ?? null)
 const { contextPercent, sessionId } = useSessionInfo({
   overrideModelId: overrideModelIdRef,
+  fallbackContextWindow: fallbackContextWindowRef,
 })
 
-const radius = 9
+const radius = 10
 const strokeWidth = 2.5
 const circumference = computed(() => 2 * Math.PI * radius)
 const dashOffset = computed(() => {

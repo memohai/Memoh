@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"io/fs"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	embeddeddb "github.com/memohai/memoh/db"
 	"github.com/memohai/memoh/internal/config"
@@ -78,18 +80,25 @@ func TestPostgresACPAgentSessionTypeMigrationFiles(t *testing.T) {
 	}
 }
 
-func TestACPDoesNotWidenToolApprovalRequestToolNameCheck(t *testing.T) {
+func TestToolApprovalRequestsConstrainOperationNotToolName(t *testing.T) {
 	for _, path := range []string{
 		"postgres/migrations/0001_init.up.sql",
 		"sqlite/migrations/0001_init.up.sql",
 	} {
 		t.Run(path, func(t *testing.T) {
 			sql := readEmbeddedMigration(t, path)
-			const check = "CHECK (tool_name IN ('write', 'edit', 'exec'))"
-			if !strings.Contains(sql, check) {
-				t.Fatalf("%s missing exact Memoh-native tool approval CHECK %q", path, check)
-			}
 			tableSQL := toolApprovalTableSQL(sql)
+			const operationColumn = "operation TEXT NOT NULL"
+			if !strings.Contains(tableSQL, operationColumn) {
+				t.Fatalf("%s missing tool approval operation column %q", path, operationColumn)
+			}
+			const operationCheck = "CHECK (operation IN ('read', 'write', 'exec'))"
+			if !strings.Contains(tableSQL, operationCheck) {
+				t.Fatalf("%s missing Memoh-native tool approval operation CHECK %q", path, operationCheck)
+			}
+			if strings.Contains(tableSQL, "CHECK (tool_name IN") {
+				t.Fatalf("%s tool_approval_requests must not constrain real tool_name values", path)
+			}
 			if strings.Contains(tableSQL, "acp_agent") {
 				t.Fatalf("%s tool_approval_requests CHECK must not include ACP tools", path)
 			}
@@ -104,6 +113,37 @@ func sqliteMigrationsFS(t *testing.T) fs.FS {
 		t.Fatalf("sqlite migrations fs: %v", err)
 	}
 	return migrations
+}
+
+func sqliteMigrationsFSUpTo(t *testing.T, maxVersion int) fs.FS {
+	t.Helper()
+	migrations := sqliteMigrationsFS(t)
+	entries, err := fs.ReadDir(migrations, ".")
+	if err != nil {
+		t.Fatalf("read sqlite migrations: %v", err)
+	}
+
+	out := fstest.MapFS{}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		sep := strings.IndexByte(name, '_')
+		if sep <= 0 {
+			continue
+		}
+		version, err := strconv.Atoi(name[:sep])
+		if err != nil || version > maxVersion {
+			continue
+		}
+		data, err := fs.ReadFile(migrations, name)
+		if err != nil {
+			t.Fatalf("read sqlite migration %s: %v", name, err)
+		}
+		out[name] = &fstest.MapFile{Data: data}
+	}
+	return out
 }
 
 func tempSQLiteMigrationDSN(t *testing.T) string {

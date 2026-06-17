@@ -8,23 +8,15 @@
       <button
         v-if="(isImage(att) || isVideo(att)) && getUrl(att)"
         type="button"
-        class="inline-flex max-w-64 max-h-72 rounded-lg overflow-hidden hover:ring-2 ring-primary/40 transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/40"
+        class="cursor-pointer rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         @click="handleMediaClick(att)"
       >
-        <img
-          v-if="isImage(att)"
+        <ChatAttachmentCard
+          kind="media"
           :src="getUrl(att)"
-          :alt="String(att.name ?? 'image')"
-          class="block max-w-64 max-h-72 w-auto h-auto object-contain pointer-events-none"
-          loading="eager"
-        >
-        <video
-          v-else
-          :src="getUrl(att)"
-          class="block max-w-64 max-h-72 w-auto h-auto object-contain pointer-events-none"
-          preload="metadata"
-          muted
-          playsinline
+          :video="isVideo(att)"
+          :name="String(att.name ?? '')"
+          interactive
         />
       </button>
 
@@ -45,68 +37,123 @@
       <button
         v-else-if="getContainerPath(att)"
         type="button"
-        class="flex items-center gap-2 px-3 py-2 rounded-lg border bg-muted/30 hover:bg-muted/60 transition-colors text-xs cursor-pointer"
+        class="cursor-pointer rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         :title="getContainerPath(att)"
         @click="handleOpenContainerFile(att)"
       >
-        <component
-          :is="fileIconComponent(att)"
-          class="size-4 text-muted-foreground"
+        <ChatAttachmentCard
+          kind="file"
+          :name="getDisplayName(att)"
+          :ext="getExt(att)"
+          interactive
         />
-        <span class="truncate max-w-[200px] font-mono text-xs">
-          {{ getDisplayName(att) }}
-        </span>
-        <ExternalLink class="size-3 text-muted-foreground/60 shrink-0" />
       </button>
 
-      <!-- Downloadable file -->
-      <a
+      <!-- Uploaded file — open in an in-app preview tab -->
+      <button
         v-else-if="getUrl(att)"
-        :href="getUrl(att)"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="flex items-center gap-2 px-3 py-2 rounded-lg border bg-muted/30 hover:bg-muted/60 transition-colors text-xs"
+        type="button"
+        class="cursor-pointer rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+        :title="getDisplayName(att)"
+        @click="handleOpenFile(att)"
       >
-        <component
-          :is="fileIconComponent(att)"
-          class="size-4 text-muted-foreground"
+        <ChatAttachmentCard
+          kind="file"
+          :name="getDisplayName(att)"
+          :ext="getExt(att)"
+          :lines="linesFor(att)"
+          :loading="isCounting(att)"
+          interactive
         />
-        <span class="truncate max-w-[200px]">
-          {{ String(att.name ?? 'file') }}
-        </span>
-      </a>
+      </button>
 
       <!-- Non-accessible attachment -->
-      <div
+      <ChatAttachmentCard
         v-else
-        class="flex items-center gap-2 px-3 py-2 rounded-lg border bg-muted/30 text-xs text-muted-foreground"
-      >
-        <component
-          :is="fileIconComponent(att)"
-          class="size-4"
-        />
-        <span class="truncate max-w-[200px]">
-          {{ String(att.name ?? att.storage_key ?? 'attachment') }}
-        </span>
-      </div>
+        kind="file"
+        :name="getDisplayName(att)"
+        :ext="getExt(att)"
+      />
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { inject } from 'vue'
-import { Music, Video, File as FileIcon, ExternalLink } from 'lucide-vue-next'
-import type { Component } from 'vue'
+import { inject, reactive, watch } from 'vue'
 import type { AttachmentBlock, AttachmentItem } from '@/store/chat-list'
+import { useChatStore } from '@/store/chat-list'
+import { isTextFile } from '@/components/file-manager/utils'
 import { resolveUrl } from '../composables/useMediaGallery'
-import { openInFileManagerKey } from '../composables/useFileManagerProvider'
+import { openInFileManagerKey, openAssetPreviewKey } from '../composables/useFileManagerProvider'
+import ChatAttachmentCard from './chat-attachment-card.vue'
+
+// Line counts for sent text attachments, shared across renders so a reconcile
+// (optimistic → persisted) or a re-mount doesn't refetch. Keyed by content hash
+// when known (stable), else the source URL.
+const lineCountCache = new Map<string, number>()
 
 const props = defineProps<{
   block: AttachmentBlock
   onOpenMedia?: (src: string) => void
 }>()
 
+const chatStore = useChatStore()
 const openInFileManager = inject(openInFileManagerKey, undefined)
+const openAssetPreview = inject(openAssetPreviewKey, undefined)
+
+// A sent text file should read exactly like its composer preview did — same line
+// count, same "load then appear" shimmer. The composer had the File object to
+// read; here the file lives in the media store, so we fetch the asset once and
+// count its lines the same way (split on '\n'). 'counting' shimmers the card
+// until the fetch resolves; a number reveals it with the count.
+const lineCounts = reactive<Record<string, number | 'counting'>>({})
+
+function attachmentKey(att: AttachmentItem): string {
+  const hash = String(att.content_hash ?? '').trim()
+  return hash || getUrl(att)
+}
+
+function isTextAttachment(att: AttachmentItem): boolean {
+  if (isImage(att) || isVideo(att) || isAudio(att)) return false
+  return isTextFile(getDisplayName(att))
+}
+
+async function ensureLineCount(att: AttachmentItem) {
+  if (!isTextAttachment(att)) return
+  const url = getUrl(att)
+  if (!url) return
+  const key = attachmentKey(att)
+  if (!key || key in lineCounts) return
+  const cached = lineCountCache.get(key)
+  if (cached != null) {
+    lineCounts[key] = cached
+    return
+  }
+  lineCounts[key] = 'counting'
+  try {
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const count = (await res.text()).split('\n').length
+    lineCountCache.set(key, count)
+    lineCounts[key] = count
+  } catch {
+    // Counting failed — drop the shimmer and show the file without a count.
+    delete lineCounts[key]
+  }
+}
+
+watch(() => props.block.attachments, (atts) => {
+  for (const att of atts) void ensureLineCount(att)
+}, { immediate: true })
+
+function linesFor(att: AttachmentItem): number | null {
+  const v = lineCounts[attachmentKey(att)]
+  return typeof v === 'number' ? v : null
+}
+
+function isCounting(att: AttachmentItem): boolean {
+  return lineCounts[attachmentKey(att)] === 'counting'
+}
 
 function getUrl(att: AttachmentItem): string {
   return resolveUrl(att)
@@ -126,7 +173,7 @@ function isVideo(att: AttachmentItem): boolean {
   return mime.startsWith('video/')
 }
 
-function isAudio(att: Record<string, unknown>): boolean {
+function isAudio(att: AttachmentItem): boolean {
   const type = String(att.type ?? '').toLowerCase()
   if (type === 'audio' || type === 'voice') return true
   const mime = String(att.mime ?? '').toLowerCase()
@@ -144,7 +191,14 @@ function getDisplayName(att: AttachmentItem): string {
   if (att.name) return String(att.name)
   const p = getContainerPath(att)
   if (p) return p.split('/').pop() || p
+  if (att.storage_key) return String(att.storage_key)
   return 'file'
+}
+
+function getExt(att: AttachmentItem): string {
+  const name = getDisplayName(att)
+  const dot = name.lastIndexOf('.')
+  return dot > 0 ? name.slice(dot + 1).toUpperCase() : ''
 }
 
 function handleMediaClick(att: AttachmentItem) {
@@ -161,10 +215,46 @@ function handleOpenContainerFile(att: AttachmentItem) {
   }
 }
 
-function fileIconComponent(att: AttachmentItem): Component {
-  const type = String(att.type ?? '').toLowerCase()
-  if (type === 'audio' || type === 'voice') return Music
-  if (type === 'video') return Video
-  return FileIcon
+function resolveAttBotId(att: AttachmentItem): string {
+  const direct = String(att.bot_id ?? '').trim()
+  if (direct) return direct
+  const meta = att.metadata as Record<string, unknown> | undefined
+  const fromMeta = String(meta?.bot_id ?? '').trim()
+  if (fromMeta) return fromMeta
+  return (chatStore.currentBotId ?? '').trim()
+}
+
+// Stable fallback key for an attachment that has no content hash yet (an
+// optimistic, just-sent file): derive one from the name + source so reopening
+// the same file refocuses its tab instead of stacking duplicates.
+function stableKey(input: string): string {
+  let hash = 5381
+  for (let i = 0; i < input.length; i++) {
+    hash = ((hash << 5) + hash + input.charCodeAt(i)) >>> 0
+  }
+  return hash.toString(36)
+}
+
+function handleOpenFile(att: AttachmentItem) {
+  const url = getUrl(att)
+  if (!url) return
+  const name = getDisplayName(att)
+  const contentHash = String(att.content_hash ?? '').trim()
+  if (openAssetPreview) {
+    openAssetPreview({
+      key: contentHash || stableKey(`${name}:${url}`),
+      name,
+      botId: contentHash ? resolveAttBotId(att) : undefined,
+      contentHash: contentHash || undefined,
+      src: contentHash ? undefined : url,
+    })
+    return
+  }
+  // Rendered outside a dock (no preview host): download rather than hand a
+  // data:/blob URL to the OS, which would prompt to pick an external app.
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name || 'file'
+  a.click()
 }
 </script>

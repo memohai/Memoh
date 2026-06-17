@@ -15,6 +15,11 @@
     "models": "模型",
     "rangeAll": "全部"
   },
+  "startWelcome": {
+    "title": "👋 你好呀！",
+    "intro": "直接发消息给我，我们就能开始聊。",
+    "tip": "第一次来？用 {help} 看看我能做什么；想从头开始，随时用 {new}。"
+  },
   "newSession": {
     "title": "✨ 已开启新{mode}。",
     "modeChat": "对话",
@@ -137,10 +142,22 @@
       "fieldSessionID": "会话 ID",
       "fieldChatACL": "聊天 ACL"
     },
+    "link": {
+      "usage": "用法：/link <code> — 把此账号关联到你的 Memoh 用户。",
+      "missingCode": "请提供关联码：/link <code>",
+      "success": "已关联。此账号现在已绑定到你的 Memoh 用户，并继承你的 Bot 权限。",
+      "notFound": "关联码无效。",
+      "expired": "关联码已过期。请在 Memoh 设置中重新生成。",
+      "consumed": "该关联码已被使用。",
+      "noIdentity": "无法关联：缺少渠道身份。",
+      "unavailable": "账号关联功能当前不可用。",
+      "failed": "关联失败，请重试。"
+    },
     "help": {
       "availableCommands": "可用命令",
       "top": {
         "help": "显示帮助",
+        "start": "显示欢迎信息",
         "new": "开始新对话",
         "stop": "停止当前回复",
         "approve": "批准待执行的工具调用",
@@ -265,12 +282,13 @@
       "missingValue": "{option} 缺少取值。\n\n{usage}",
       "invalidHeartbeatInterval": "无效的 heartbeat_interval：{value}",
       "unknownOption": "未知选项：{option}\n\n{usage}",
-      "unknownLanguage": "未知语言 {value}。请选择 auto、en 或 zh。",
+      "unknownLanguage": "未知语言 {value}。请选择 auto、en、zh 或 ja。",
       "unavailable": "设置暂不可用。",
-      "updateUsage": "用法：/settings update [选项]\n\n选项：\n- --language <值>\n- --acl_default_effect <allow|deny>\n- --reasoning_enabled <true|false>\n- --reasoning_effort <none|low|medium|high|xhigh>\n- --heartbeat_enabled <true|false>\n- --heartbeat_interval <分钟>\n- --chat_model_id <id>\n- --heartbeat_model_id <id>\n\n（命令界面语言：/settings language <auto|en|zh>）"
+      "updateUsage": "用法：/settings update [选项]\n\n选项：\n- --language <值>\n- --acl_default_effect <allow|deny>\n- --reasoning_enabled <true|false>\n- --reasoning_effort <none|low|medium|high|xhigh>\n- --heartbeat_enabled <true|false>\n- --heartbeat_interval <分钟>\n- --chat_model_id <id>\n- --heartbeat_model_id <id>\n\n（命令界面语言：/settings language <auto|en|zh|ja>）",
+      "langJa": "日本語"
     },
     "language": {
-      "setUsage": "用法：/language <auto|en|zh>"
+      "setUsage": "用法：/language <auto|en|zh|ja>"
     },
     "model": {
       "title": "对话模型",
@@ -440,12 +458,16 @@
       "unknownCommandShort": "未知命令 {command}，用 {help} 查看全部命令。",
       "unknownAction": "{command} 不支持 {action} 操作，用 {help} 查看可用操作。",
       "ownerOnly": "⚠️ 仅机器人所有者可执行 {command}，聊天不受影响。",
+      "noAccess": "⚠️ 你没有该 Bot 的访问权限。",
+      "accessDeniedHint": "⚠️ 你暂时无法与该 Bot 对话。如果你是它的拥有者，请到后台复制连接码，并在这里发送 {link} <code> 绑定你的账号。",
+      "accessDeniedManager": "⚠️ 你可以管理这个 Bot，但这个频道身份没有开启 Chat。Manage 命令仍然可用；如果这个身份也需要发送普通消息，请让 Bot 所有者在 Channel Access 里开启 Chat。",
       "generic": "⚠️ 暂时无法完成 {command}，请稍后再试。",
       "genericNoResource": "⚠️ 出了点问题，请稍后再试。",
       "runToSeeList": " 用 {command} 查看可用项。"
     }
   },
   "menu": {
+    "start": "显示欢迎信息",
     "help": "查看可用命令",
     "new": "开始新对话",
     "stop": "停止当前回复",

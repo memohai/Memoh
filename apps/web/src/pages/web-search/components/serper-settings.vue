@@ -1,38 +1,37 @@
 <template>
-  <div class="grid gap-4 md:grid-cols-2">
-    <div class="space-y-2 md:col-span-2">
-      <Label for="serper-api-key">API Key</Label>
-      <Input
-        id="serper-api-key"
-        v-model="localConfig.api_key"
-        type="password"
-        aria-label="API Key"
-      />
-    </div>
-    <div class="space-y-2 md:col-span-2">
-      <Label for="serper-base-url">Base URL</Label>
-      <Input
-        id="serper-base-url"
-        v-model="localConfig.base_url"
-        aria-label="Base URL"
-      />
-    </div>
-    <div class="space-y-2">
-      <Label for="serper-timeout-seconds">Timeout (seconds)</Label>
-      <Input
-        id="serper-timeout-seconds"
-        v-model.number="localConfig.timeout_seconds"
-        type="number"
-        :min="1"
-        aria-label="Timeout (seconds)"
-      />
-    </div>
-  </div>
+  <SettingsRow label="API Key">
+    <Input
+      id="serper-api-key"
+      v-model="localConfig.api_key"
+      type="password"
+      class="w-80"
+      aria-label="API Key"
+    />
+  </SettingsRow>
+  <SettingsRow label="Base URL">
+    <Input
+      id="serper-base-url"
+      v-model="localConfig.base_url"
+      class="w-80"
+      aria-label="Base URL"
+    />
+  </SettingsRow>
+  <SettingsRow label="Timeout (seconds)">
+    <Input
+      id="serper-timeout-seconds"
+      v-model.number="localConfig.timeout_seconds"
+      type="number"
+      :min="1"
+      class="w-80"
+      aria-label="Timeout (seconds)"
+    />
+  </SettingsRow>
 </template>
 
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
-import { Input, Label } from '@memohai/ui'
+import { Input } from '@memohai/ui'
+import SettingsRow from '@/components/settings/row.vue'
 
 const props = defineProps<{
   modelValue: Record<string, unknown>

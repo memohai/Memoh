@@ -4,16 +4,16 @@
       <!-- No session -->
       <div
         v-if="!sessionId"
-        class="flex items-center justify-center h-40"
+        class="flex h-40 items-center justify-center"
       >
-        <p class="text-xs text-muted-foreground">
+        <p class="text-body text-muted-foreground">
           {{ $t('chat.infoNoData') }}
         </p>
       </div>
 
       <template v-else>
         <!-- Key-value rows -->
-        <div class="divide-y divide-border text-xs">
+        <div class="divide-y divide-border text-body">
           <!-- Messages -->
           <div class="flex items-center justify-between py-2">
             <span class="text-muted-foreground">{{ $t('chat.infoMessages') }}</span>
@@ -36,7 +36,7 @@
             </div>
             <div
               v-if="contextWindow != null && contextWindow > 0"
-              class="w-full h-1 rounded-full bg-accent overflow-hidden"
+              class="h-1.5 w-full overflow-hidden rounded-full bg-accent"
             >
               <div
                 class="h-full rounded-full transition-all"
@@ -60,51 +60,51 @@
         </div>
 
         <!-- Compact Now -->
-        <div class="mt-3">
-          <button
-            type="button"
-            class="flex items-center justify-center gap-1.5 w-full px-2 py-1.5 rounded-md text-xs font-medium text-foreground bg-accent hover:bg-accent/80 transition-colors disabled:opacity-50 disabled:pointer-events-none"
-            :disabled="!sessionId || usedTokens <= 0 || isCompacting"
-            @click="triggerCompact"
-          >
-            <Loader2
-              v-if="isCompacting"
-              class="size-3 animate-spin"
-            />
-            <Minimize2
-              v-else
-              class="size-3"
-            />
-            {{ $t('chat.compactNow') }}
-          </button>
-        </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          class="mt-3 w-full"
+          :disabled="!sessionId || usedTokens <= 0 || isCompacting"
+          @click="triggerCompact"
+        >
+          <Loader2
+            v-if="isCompacting"
+            class="size-3.5 animate-spin"
+          />
+          <Minimize2
+            v-else
+            class="size-3.5"
+          />
+          {{ $t('chat.compactNow') }}
+        </Button>
 
         <!-- Skills -->
-        <div class="mt-3">
-          <p class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
+        <div class="mt-4">
+          <p class="mb-1.5 text-caption font-medium uppercase tracking-wider text-muted-foreground">
             {{ $t('chat.infoSkills') }}
           </p>
-          <div
+          <p
             v-if="!skills.length"
-            class="text-xs text-muted-foreground"
+            class="text-body text-muted-foreground"
           >
             {{ $t('chat.infoNoSkills') }}
-          </div>
+          </p>
           <div
             v-else
             class="space-y-0.5"
           >
-            <button
+            <Button
               v-for="skill in skills"
               :key="skill"
-              type="button"
-              class="flex items-center gap-1.5 w-full px-2 py-1 rounded-md text-xs text-foreground hover:bg-accent transition-colors text-left"
+              variant="ghost"
+              size="sm"
+              class="w-full justify-start gap-1.5 px-2 text-body font-normal"
               @click="openSkillFile(skill)"
             >
-              <Sparkles class="size-3 text-muted-foreground shrink-0" />
-              <span class="truncate">{{ skill }}</span>
-              <ExternalLink class="size-3 text-muted-foreground shrink-0 ml-auto" />
-            </button>
+              <Sparkles class="size-3.5 shrink-0 text-muted-foreground" />
+              <span class="min-w-0 flex-1 truncate text-left">{{ skill }}</span>
+              <ExternalLink class="size-3.5 shrink-0 text-muted-foreground" />
+            </Button>
           </div>
         </div>
       </template>
@@ -116,9 +116,8 @@
 import { computed, inject, ref, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { toast } from 'vue-sonner'
+import { toast, ScrollArea, Button } from '@memohai/ui'
 import { Sparkles, ExternalLink, Loader2, Minimize2 } from 'lucide-vue-next'
-import { ScrollArea } from '@memohai/ui'
 import { getBotsByBotIdContainerSkills, postBotsByBotIdSessionsBySessionIdCompact } from '@memohai/sdk'
 import type { HandlersSkillItem } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -128,6 +127,7 @@ import { useSessionInfo } from '../composables/useSessionInfo'
 const props = defineProps<{
   visible: boolean
   overrideModelId?: string
+  fallbackContextWindow?: number | null
 }>()
 
 const { t } = useI18n()
@@ -141,10 +141,12 @@ type SkillItem = HandlersSkillItem & {
 
 const visibleRef = toRef(props, 'visible')
 const overrideModelIdRef = computed(() => props.overrideModelId ?? '')
+const fallbackContextWindowRef = computed(() => props.fallbackContextWindow ?? null)
 
 const { info, usedTokens, contextWindow, contextPercent, currentBotId, sessionId } = useSessionInfo({
   visible: visibleRef,
   overrideModelId: overrideModelIdRef,
+  fallbackContextWindow: fallbackContextWindowRef,
 })
 
 const { data: skillCatalog } = useQuery({

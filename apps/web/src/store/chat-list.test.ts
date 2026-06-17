@@ -28,6 +28,10 @@ const toast = vi.hoisted(() => ({
 
 vi.mock('@/composables/api/useChat', () => api)
 vi.mock('vue-sonner', () => ({ toast }))
+vi.mock('@memohai/ui', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@memohai/ui')>()
+  return { ...original, toast }
+})
 
 function flushPromises() {
   return new Promise(resolve => setTimeout(resolve, 0))
@@ -185,6 +189,20 @@ describe('chat-list store', () => {
     })
   })
 
+  it('selects the first ready bot during initialization when none is selected', async () => {
+    api.fetchBots.mockResolvedValueOnce([
+      { id: 'bot-creating', status: 'creating', name: 'Creating' },
+      { id: 'bot-ready', status: 'active', name: 'Ready' },
+    ])
+
+    const store = useChatStore()
+
+    await store.initialize()
+
+    expect(store.currentBotId).toBe('bot-ready')
+    expect(api.fetchSessions).toHaveBeenCalledWith('bot-ready')
+  })
+
   it('returns startup stream errors to the composer when no assistant output exists', async () => {
     const store = useChatStore()
 
@@ -204,6 +222,292 @@ describe('chat-list store', () => {
       error: 'model failed',
       restoreInput: 'hello',
     })
+  })
+
+  it('merges ACP approval tool messages into the existing tool block by call id', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'exec',
+          input: { command: 'make test' },
+          tool_call_id: 'mcp-http-call-1',
+          running: true,
+        },
+      } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1000007,
+          type: 'tool',
+          name: 'exec',
+          input: { command: 'make test' },
+          tool_call_id: 'mcp-http-call-1',
+          running: false,
+          approval: {
+            approval_id: 'approval-1',
+            short_id: 7,
+            status: 'pending',
+            can_approve: true,
+          },
+        },
+      } as UIStreamEvent,
+      { type: 'error', message: 'stop after visible output' } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const result = await store.sendMessage('run command')
+
+    expect(result).toMatchObject({ ok: false, stage: 'stream' })
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    expect(assistant?.role).toBe('assistant')
+    if (!assistant || assistant.role !== 'assistant') {
+      throw new Error('assistant turn was not created')
+    }
+    expect(assistant.messages.filter(block => block.type === 'tool')).toHaveLength(1)
+    const tool = assistant.messages.find(block => block.type === 'tool')
+    expect(tool).toMatchObject({
+      id: 1,
+      type: 'tool',
+      toolCallId: 'mcp-http-call-1',
+      running: false,
+      approval: {
+        approval_id: 'approval-1',
+        status: 'pending',
+      },
+    })
+  })
+
+  it('allows responding to ACP approval while the original stream is still active', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'exec',
+          input: { command: 'pwd' },
+          tool_call_id: 'call-pwd',
+          running: false,
+          approval: {
+            approval_id: 'approval-pwd',
+            short_id: 9,
+            status: 'pending',
+            can_approve: true,
+          },
+        },
+      } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sendPromise = store.sendMessage('run pwd')
+    await flushPromises()
+    await flushPromises()
+
+    expect(store.streaming).toBe(true)
+    const initialMessageCount = store.messages.length
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    if (!assistant || assistant.role !== 'assistant') {
+      throw new Error('assistant turn was not created')
+    }
+    const tool = assistant.messages.find(block => block.type === 'tool')
+    expect(tool).toMatchObject({
+      toolCallId: 'call-pwd',
+      approval: {
+        approval_id: 'approval-pwd',
+        status: 'pending',
+      },
+    })
+
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      { type: 'end' } as UIStreamEvent,
+    ]
+    await store.respondToolApproval(tool!.approval!, 'approve')
+    await flushPromises()
+
+    expect(sentWSMessages.at(-1)).toMatchObject({
+      type: 'tool_approval_response',
+      session_id: 'session-1',
+      approval_id: 'approval-pwd',
+      decision: 'approve',
+    })
+    expect(store.messages).toHaveLength(initialMessageCount)
+    const updatedAssistant = store.messages.find(turn => turn.role === 'assistant')
+    if (!updatedAssistant || updatedAssistant.role !== 'assistant') {
+      throw new Error('assistant turn was not found after approval')
+    }
+    const updatedTool = updatedAssistant.messages.find(block => block.type === 'tool')
+    expect(updatedTool?.approval).toMatchObject({
+      approval_id: 'approval-pwd',
+      status: 'approved',
+      can_approve: false,
+    })
+
+    const originalStreamId = sentWSMessages[0]?.stream_id as string
+    streamHandler?.({
+      type: 'message',
+      stream_id: originalStreamId,
+      session_id: 'session-1',
+      data: {
+        id: 1,
+        type: 'tool',
+        name: 'exec',
+        input: { command: 'pwd' },
+        tool_call_id: 'call-pwd',
+        running: false,
+        approval: {
+          approval_id: 'approval-pwd',
+          short_id: 9,
+          status: 'pending',
+          can_approve: true,
+        },
+      },
+    } as UIStreamEvent)
+    const staleAssistant = store.messages.find(turn => turn.role === 'assistant')
+    if (!staleAssistant || staleAssistant.role !== 'assistant') {
+      throw new Error('assistant turn was not found after stale pending')
+    }
+    const staleTool = staleAssistant.messages.find(block => block.type === 'tool')
+    expect(staleTool?.approval).toMatchObject({
+      approval_id: 'approval-pwd',
+      status: 'approved',
+      can_approve: false,
+    })
+
+    streamHandler?.({ type: 'end', stream_id: originalStreamId, session_id: 'session-1' } as UIStreamEvent)
+    await expect(sendPromise).resolves.toMatchObject({ ok: true })
+  })
+
+  it('rolls the optimistic approval back to pending when the response stream errors', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'exec',
+          input: { command: 'pwd' },
+          tool_call_id: 'call-pwd',
+          running: false,
+          approval: {
+            approval_id: 'approval-pwd',
+            short_id: 9,
+            status: 'pending',
+            can_approve: true,
+          },
+        },
+      } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sendPromise = store.sendMessage('run pwd')
+    await flushPromises()
+    await flushPromises()
+
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    if (!assistant || assistant.role !== 'assistant') {
+      throw new Error('assistant turn was not created')
+    }
+    const tool = assistant.messages.find(block => block.type === 'tool')
+
+    // The approval response stream fails before the server applies the decision.
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      { type: 'error', message: 'approval failed' } as UIStreamEvent,
+    ]
+    await store.respondToolApproval(tool!.approval!, 'approve')
+    await flushPromises()
+
+    expect(toast.error).toHaveBeenCalledWith('approval failed')
+    const rolledBackTool = assistant.messages.find(block => block.type === 'tool')
+    expect(rolledBackTool?.approval).toMatchObject({
+      approval_id: 'approval-pwd',
+      status: 'pending',
+      can_approve: true,
+    })
+
+    // The user can retry, and the retry goes through.
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      { type: 'end' } as UIStreamEvent,
+    ]
+    const retried = await store.respondToolApproval(rolledBackTool!.approval!, 'approve')
+    await flushPromises()
+
+    expect(retried).toBe(true)
+    const approvalResponses = sentWSMessages.filter(message => message.type === 'tool_approval_response')
+    expect(approvalResponses).toHaveLength(2)
+    const retriedTool = assistant.messages.find(block => block.type === 'tool')
+    expect(retriedTool?.approval).toMatchObject({
+      status: 'approved',
+      can_approve: false,
+    })
+
+    const originalStreamId = sentWSMessages[0]?.stream_id as string
+    streamHandler?.({ type: 'end', stream_id: originalStreamId, session_id: 'session-1' } as UIStreamEvent)
+    await expect(sendPromise).resolves.toMatchObject({ ok: true })
+  })
+
+  it('sends each ACP approval response only once while the response is in flight', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'exec',
+          input: { command: 'pwd' },
+          tool_call_id: 'call-pwd',
+          running: false,
+          approval: {
+            approval_id: 'approval-pwd',
+            short_id: 9,
+            status: 'pending',
+            can_approve: true,
+          },
+        },
+      } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sendPromise = store.sendMessage('run pwd')
+    await flushPromises()
+    await flushPromises()
+
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    if (!assistant || assistant.role !== 'assistant') {
+      throw new Error('assistant turn was not created')
+    }
+    const tool = assistant.messages.find(block => block.type === 'tool')
+    if (!tool?.approval) {
+      throw new Error('tool approval was not created')
+    }
+    const approval = tool.approval
+
+    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    await store.respondToolApproval(approval, 'approve')
+    await store.respondToolApproval(approval, 'approve')
+    await flushPromises()
+
+    const approvalResponses = sentWSMessages.filter(message => message.type === 'tool_approval_response')
+    expect(approvalResponses).toHaveLength(1)
+
+    const approvalStreamId = approvalResponses[0]?.stream_id as string
+    streamHandler?.({ type: 'end', stream_id: approvalStreamId, session_id: 'session-1' } as UIStreamEvent)
+    const originalStreamId = sentWSMessages[0]?.stream_id as string
+    streamHandler?.({ type: 'end', stream_id: originalStreamId, session_id: 'session-1' } as UIStreamEvent)
+    await expect(sendPromise).resolves.toMatchObject({ ok: true })
   })
 
   it('creates ACP sessions without a placeholder title', async () => {
@@ -955,6 +1259,111 @@ describe('chat-list store', () => {
     await flushPromises()
 
     expect(api.fetchMessagesUI).toHaveBeenCalledTimes(1)
+  })
+
+  it('reconciles refreshed turns in place, preserving identity of unchanged turns', async () => {
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ])
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    api.fetchMessagesUI.mockResolvedValueOnce([{
+      id: 'assistant-1',
+      role: 'assistant',
+      messages: [{ id: 0, type: 'text', content: 'hello' }],
+      timestamp: '2026-01-01T00:00:01Z',
+    }])
+    streamHandler?.({ type: 'start', stream_id: 'stream-a', session_id: 'session-1' } as UIStreamEvent)
+    streamHandler?.({ type: 'end', stream_id: 'stream-a', session_id: 'session-1' } as UIStreamEvent)
+    await flushPromises()
+
+    const turn = store.messages.find(message => message.id === 'assistant-1')
+    const block = turn?.role === 'assistant' ? turn.messages[0] : null
+    expect(turn?.role).toBe('assistant')
+    expect(block?.type).toBe('text')
+
+    api.fetchMessagesUI.mockResolvedValueOnce([{
+      id: 'assistant-1',
+      role: 'assistant',
+      messages: [{ id: 0, type: 'text', content: 'hello world' }],
+      timestamp: '2026-01-01T00:00:01Z',
+    }])
+    streamHandler?.({ type: 'start', stream_id: 'stream-b', session_id: 'session-1' } as UIStreamEvent)
+    streamHandler?.({ type: 'end', stream_id: 'stream-b', session_id: 'session-1' } as UIStreamEvent)
+    await flushPromises()
+
+    const turnAfter = store.messages.find(message => message.id === 'assistant-1')
+    const blockAfter = turnAfter?.role === 'assistant' ? turnAfter.messages[0] : null
+    expect(turnAfter).toBe(turn)
+    expect(blockAfter).toBe(block)
+    expect(blockAfter?.type === 'text' ? blockAfter.content : '').toBe('hello world')
+  })
+
+  it('adopts the server id onto the just-sent optimistic turn in place, keeping its key', async () => {
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ])
+    sendEvents = [
+      { type: 'message', data: { id: 0, type: 'text', content: 'hello' } } as UIStreamEvent,
+      { type: 'end' } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      { id: 'srv-user-1', role: 'user', text: 'hi', timestamp: '2026-01-01T00:00:00Z' },
+      { id: 'srv-asst-1', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'hello' }], timestamp: '2026-01-01T00:00:01Z' },
+    ])
+    await store.sendMessage('hi')
+    await flushPromises()
+
+    const asstTurn = store.messages.find(message => message.role === 'assistant')
+    expect(asstTurn).toBeTruthy()
+    expect(asstTurn!.id).not.toBe('srv-asst-1')
+    expect((asstTurn as { serverId?: string }).serverId).toBe('srv-asst-1')
+
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      { id: 'srv-user-1', role: 'user', text: 'hi', timestamp: '2026-01-01T00:00:00Z' },
+      { id: 'srv-asst-1', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'hello' }], timestamp: '2026-01-01T00:00:01Z' },
+      { id: 'srv-user-2', role: 'user', text: 'again', timestamp: '2026-01-01T00:00:02Z' },
+      { id: 'srv-asst-2', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'reply 2' }], timestamp: '2026-01-01T00:00:03Z' },
+    ])
+    await store.sendMessage('again')
+    await flushPromises()
+
+    const asstTurnAfter = store.messages.find(message => (message as { serverId?: string }).serverId === 'srv-asst-1')
+    expect(asstTurnAfter).toBe(asstTurn)
+  })
+
+  it('stamps session updated_at from the server message time, not the client clock or a reorder', async () => {
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat', updated_at: '2026-01-01T00:00:00Z' },
+      { id: 'session-2', bot_id: 'bot-1', title: 'B', type: 'chat', updated_at: '2026-01-02T00:00:00Z' },
+    ])
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    messageEventsHandler?.({
+      type: 'message_created',
+      bot_id: 'bot-1',
+      message: {
+        id: 'm1',
+        bot_id: 'bot-1',
+        session_id: 'session-2',
+        role: 'assistant',
+        content: 'hi',
+        created_at: '2026-01-03T00:00:00Z',
+      },
+    })
+    await flushPromises()
+
+    const updated = store.sessions.find(session => session.id === 'session-2')
+    expect(updated?.updated_at).toBe('2026-01-03T00:00:00Z')
+    expect(store.sessions.map(session => session.id)).toEqual(['session-1', 'session-2'])
   })
 
   it('refreshes pending user input after response stream failure', async () => {

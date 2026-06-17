@@ -2,6 +2,33 @@
 @import "tw-animate-css";
 @import "@memohai/ui/style.css";
 
+/* Bundled MiSans Variable (Apache-2.0) as the CJK fallback so Chinese renders
+ * identically on Web / Windows / macOS instead of each OS's system font.
+ * Inter Variable still wins for Latin (declared first in --font-sans); MiSans
+ * only kicks in for CJK glyphs (per-glyph fallback). Each face is unicode-range
+ * subsetted, so the browser lazy-loads only the CJK ranges actually rendered.
+ *
+ * The wrapper CLAMPS MiSans' variable wght axis to 150..450 (the font masters up
+ * to 700). CJK glyphs are stroke-dense and fill the em box, so they read heavier
+ * than Latin at the same weight; capping the top means a request for 500/600/700
+ * renders MiSans at 450, so Chinese never goes truly bold. Crucially this is a
+ * FONT-level cap — it fires per CJK glyph regardless of the UI's lang attribute,
+ * so it also tames Chinese that appears inside an English-language UI (session
+ * titles, mixed labels) where the :lang(zh) rules below never match. Inter is
+ * unaffected (it owns the Latin glyphs).
+ *
+ * The wrapper also applies size-adjust:96% to every MiSans face. CJK glyphs fill
+ * the whole em box (Latin uses ~70%), so at the same font-size Chinese reads
+ * visibly LARGER than the surrounding English — MiSans in particular draws a
+ * fuller face than the system PingFang other products fall back to. size-adjust
+ * scales ONLY MiSans' glyphs/metrics, so CJK shrinks to ~96% (≈13.4px at our 14px
+ * control size) while Inter's Latin stays at full size, the type scale is
+ * untouched, and — because it rides the bundled face — the shrink is identical
+ * on Web / Windows / macOS (no cross-platform divergence). This is the size
+ * counterpart of the weight clamp above: clamp tames "too heavy", size-adjust
+ * tames "too big", both per-CJK-glyph and language-agnostic. */
+@import "./styles/misans-vf.css";
+
 /* Explicit `@source` paths (relative to this CSS file) — Tailwind v4's
  * auto-detection anchors on the Vite project root, so when a consumer
  * (e.g. @memohai/desktop) imports this stylesheet from a different root,
@@ -9,10 +36,327 @@
 @source "./";
 @source "../../../packages/ui/src";
 
+/* ── Workspace surface planes ──────────────────────────────────────────────────────────
+ * The editor workspace (dock group view, tabs, file editor, chat, previews)
+ * collapses to exactly TWO planes so the SELECTED tab reads as continuous with
+ * the content it owns, while the chrome (tab strip + unselected tabs + top
+ * strip) sits clearly apart — in BOTH light and dark. We reuse the existing
+ * elevation tokens, so any palette/scheme swap (and the dark overrides) carry
+ * through automatically (all of :root / .dark / [data-color-scheme] target
+ * <html>, so the var() resolves against that element's final value):
+ *   · editor plane (the SELECTED tab + the view it owns):
+ *       light = pure white (255) — body/reading content (chat view, file/monaco
+ *       editor) stays a NEUTRAL white, NOT the faintly-warm --card. Cards/dialogs
+ *       carry the warm tint for shell coherence, but the long-read main surface
+ *       must not be tinted · dark = --background (0.152).
+ *   · chrome plane (tab strip + unselected tabs):
+ *       light = --background-chrome (the GRAY chrome ≈249, only Δ≈2 below the
+ *       sidebar — a barely-visible-but-present step so an inactive tab reads
+ *       recessed against the white active tab, while the sidebar stays on the
+ *       brighter --background ≈251 and is NOT dragged down) · dark = --sidebar
+ *       (0.185).
+ * Light is CONTENT-anchored (see packages/ui/style.css): the selected tab is the
+ * brightest layer (white) and the chrome recesses below it, so the active tab
+ * separates by its FILL alone — no accent line. Dark keeps its original two
+ * planes (editor 0.152 < chrome 0.185), so only the light values change here. */
+:root {
+  --surface-editor: rgb(255 255 255);
+  --surface-chrome: var(--background-chrome);
+  /* Hover lift for unselected tabs. Reuses the sidebar's accent grey so the tab
+   * strip and the recents list speak ONE hover language instead of an invented
+   * one-off step (a deeper bespoke value read as too heavy on the chrome plane).
+   * --sidebar-accent is already mode-aware (0.945 light / 0.30 dark), so no
+   * separate .dark override is needed here. */
+  --surface-chrome-hover: var(--sidebar-accent);
+
+  /* Composer input surface — the chat input capsule. Differentiated from the
+   * reading surface by COLOR in dark mode (gray body above the dark canvas),
+   * but in light mode it stays the SAME pure white as the editor surface — a
+   * gray capsule on a white canvas would read as a muddy block, so the capsule
+   * separates by its edge/shape alone in light.
+   *   · light = var(--surface-editor) (pure white 255) — identical to the body,
+   *     so it never turns gray.
+   *   · dark  = --card (≈0.21): an elevated gray one step above the dark
+   *     --background editor surface (0.152). */
+  --surface-composer: var(--surface-editor);
+
+  /* The chat capsule's resting hairline is fainter than a normal field edge so
+   * an idle composer doesn't read as a bright box (most noticeable in dark
+   * mode). It brightens to the standard field edge on hover and one notch past
+   * it on focus (see the .chat-composer-edge rules below). */
+  --composer-edge-rest: oklch(0 0 0 / 0.07);
+
+  /* User prompt bubble — built RELATIVE to the accent (--brand) via the relative
+   * color syntax, never a hardcoded RGB: the HUE tracks --brand (so violet /
+   * ocean / forest / rose each derive their own bubble), while fixed L/C set the
+   * recipe and a small warm hue tilt makes the violet read as a truer purple,
+   * not blue. Light = a faint lavender surface ≈ rgb(238,229,254) with deep
+   * purple-black ink. Tune the L/C/tilt numbers (not the hue) so the proportion
+   * stays portable to whatever accent is active. */
+  --chat-user-bubble: oklch(from var(--brand) 0.936 0.035 calc(h + 12));
+  --chat-user-bubble-fg: oklch(from var(--brand) 0.285 0.06 calc(h + 12));
+
+  /* Process / "Thought for Ns" header ink — one notch grayer (lower contrast)
+   * than --muted-foreground so the channel-process line sits quieter above the
+   * answer. Light = washed toward the page; dark mirrors it toward its own bg. */
+  --cop-title: color-mix(in oklab, var(--color-muted-foreground) 80%, var(--color-background));
+}
+.dark {
+  --surface-editor: var(--background);
+  --surface-chrome: var(--sidebar);
+  --surface-composer: var(--card);
+  --composer-edge-rest: oklch(0.255 0 0);
+  /* Dark = a solid deep purple ≈ rgb(83,45,141) with pure-white ink (a filled
+   * "sent" bubble); same relative recipe, just a darker L and near-full C. */
+  --chat-user-bubble: oklch(from var(--brand) 0.40 0.15 calc(h + 7));
+  --chat-user-bubble-fg: #fff;
+  --cop-title: color-mix(in oklab, var(--color-muted-foreground) 82%, var(--color-background));
+}
+
+@theme inline {
+  --color-surface-editor: var(--surface-editor);
+  --color-surface-chrome: var(--surface-chrome);
+  --color-surface-composer: var(--surface-composer);
+  --color-chat-user-bubble: var(--chat-user-bubble);
+  --color-chat-user-bubble-fg: var(--chat-user-bubble-fg);
+  --color-cop-title: var(--cop-title);
+}
+
+/* Chat composer edge — fainter at rest than a standard field, brightening to
+ * the normal field hairline on hover and one notch past it on focus. Reuses the
+ * shared --field-edge-* tokens so it themes with everything else. Unlayered so
+ * it overrides the @memohai/ui input-group rules without a specificity war. */
+[data-slot="input-group"].chat-composer-edge:not(:has([aria-invalid="true"])) {
+  --field-edge: var(--composer-edge-rest);
+}
+[data-slot="input-group"].chat-composer-edge:not(:has([aria-invalid="true"])):hover,
+[data-slot="input-group"].chat-composer-edge:not(:has([aria-invalid="true"])):focus-within {
+  --field-edge: var(--field-edge-rest);
+}
+
+/* The model preview pill is a WIDE ghost button. The shared ghost press uses a
+ * uniform scale (0.974); on a wide element that travels sideways by ~width ×
+ * 2.6% — far deeper than the square "+" button beside it. Press it by a FIXED
+ * inset instead (~0.5px/edge, the same absolute depth the square button's 0.974
+ * scale produces on its 36px height), so the pill shrinks on BOTH axes by an
+ * equal, height-derived amount — consistent with the "+" and with no
+ * width-driven lurch. */
+[data-button][data-variant="ghost"].composer-pill-press::before {
+  transition:
+    inset 0.255s linear(0, 0.3505, 0.7432, 0.9336, 0.9951, 1.0062, 1.0045, 1.0019, 1.0005, 1),
+    background-color 0.15s ease;
+}
+[data-button][data-variant="ghost"].composer-pill-press:active::before {
+  inset: 0.5px;
+  scale: 1;
+}
+
+/* Inter-script spacing (W3C CLREQ / CSS Text 4): insert the standard ~1/8em gap
+ * between CJK (Han/kana) and adjacent Latin letters or numerals, so mixed runs
+ * like "Chat查看文件" stop colliding into one dense blob. The property is
+ * inherited, so declaring it on the root cascades to all text. Browsers without
+ * support (older Blink/Gecko) ignore it, and it has no effect on Latin-only or
+ * CJK-only runs — so this is purely additive, zero-risk for existing layout. */
+:root {
+  text-autospace: normal;
+}
+
+/* CJK font-weight de-emphasis. CJK glyphs are stroke-dense, so at the same
+ * size+weight MiSans reads heavier/darker than Inter — a screen of zh titles at
+ * medium/semibold/bold looks overbearingly bold beside the same English UI.
+ * Scoped to <html lang="zh"> (set by the settings store on locale change), so
+ * this only ever fires when the UI language is Chinese; English is untouched.
+ *
+ * Tailwind v4 emits weight utilities as LITERALS (.font-medium → 500, not
+ * var(--font-weight-*)), AND this codebase uses many arbitrary-value weights
+ * (font-[450] is the Button base; font-[550]/[475]/[430] are tuned heading and
+ * label rungs). Neither resolves through a single token, so each class is
+ * remapped here. It is admittedly a lookup table, not an elegant abstraction —
+ * the elegant fix is a real weight-token layer the whole app references, which
+ * is a design-system change deferred for now. The mapping is a single MONOTONIC
+ * compress-the-top curve: heavier source weights drop more, and the order is
+ * preserved (no rung overtakes a heavier one). Keep it sorted by source weight
+ * when editing so monotonicity stays obvious. */
+@layer utilities {
+  /* semantic utilities (literal source weights in parens) */
+  :lang(zh) .font-light { font-weight: 280; }     /* 300 */
+  :lang(zh) .font-normal { font-weight: 315; }    /* 400 */
+  :lang(zh) .font-medium { font-weight: 370; }    /* 500 */
+  :lang(zh) .font-semibold { font-weight: 410; }  /* 600 */
+  :lang(zh) .font-bold { font-weight: 450; }      /* 700 */
+  /* arbitrary-value weights, sorted ascending so the curve stays monotonic */
+  :lang(zh) .font-\[360\] { font-weight: 315; }
+  :lang(zh) .font-\[380\] { font-weight: 330; }
+  :lang(zh) .font-\[400\] { font-weight: 345; }
+  :lang(zh) .font-\[420\] { font-weight: 360; }
+  :lang(zh) .font-\[430\] { font-weight: 368; }
+  :lang(zh) .font-\[450\] { font-weight: 380; }
+  :lang(zh) .font-\[475\] { font-weight: 398; }
+  :lang(zh) .font-\[550\] { font-weight: 432; }
+}
+:lang(zh) body {
+  font-weight: 335;
+}
+/* Chat body LEADING, scoped to the message's content script via the per-message
+ * lang tag (message-item.vue). CJK fills the em box and packs tighter vertically,
+ * so it gets looser leading than Latin. WEIGHT is no longer set here: mixed
+ * CJK/Latin weight is handled per run by the .chat-cjk / .chat-latin spans below,
+ * which one element-level font-weight could never split correctly. */
+[data-chat-content] .prose:lang(zh) {
+  line-height: var(--chat-leading);
+}
+/* The user prompt bubble matches the assistant body's leading per script too, so
+ * a prompt and its answer breathe identically. */
+[data-chat-content] .chat-user-bubble:lang(zh) {
+  line-height: var(--chat-leading);
+}
+[data-chat-content] .markstream-vue:lang(zh),
+[data-chat-content] .markstream-vue:lang(zh) .paragraph-node {
+  line-height: var(--chat-leading-cjk);
+}
+
+/* Per-script weight. MiSans (CJK) reads heavier than Inter (Latin) at the same
+ * numeric weight, and a mixed run can't be split by one font-weight — so md-text
+ * and the user bubble emit .chat-cjk / .chat-latin spans that each take a PAIRED
+ * weight token. The pairs hold a roughly constant Latin→CJK gap, so a font swap
+ * or accent change keeps the same relationship. Tiers mirror the markdown wrappers
+ * (body / strong / heading). md-text splits into these spans from the first frame
+ * (it never delegates to markstream's TextNode), so the weights apply the whole
+ * way through a stream with no settle-time jump. Inline code & math are their own
+ * nodes and never become these spans. */
+:root {
+  /* Chat reading LEADING — the single source for every chat line-height below.
+   * After tuning, Latin/base sits tighter; CJK paragraphs are the one place the
+   * two scripts still diverge, keeping a hair more vertical room. To restyle
+   * leading, change these two numbers only — every rule references them. */
+  --chat-leading: 1.48;
+  --chat-leading-cjk: 1.52;
+  /* Latin optical compensation, applied per .chat-latin run (see below): a small
+   * size shave so Inter doesn't read large beside MiSans, plus a hair of tracking
+   * to reopen the smaller glyphs. CJK takes neither. */
+  --chat-latin-size: 0.9375em;
+  --chat-latin-track: 0.005em;
+  /* Per-script WEIGHT pairs (Latin / CJK) per tier. */
+  --chat-latin-body: 420;   --chat-cjk-body: 330;
+  --chat-latin-strong: 520; --chat-cjk-strong: 430;
+  --chat-latin-h1: 600;     --chat-cjk-h1: 500;
+  --chat-latin-h2: 560;     --chat-cjk-h2: 470;
+  --chat-latin-h3: 520;     --chat-cjk-h3: 440;
+  --chat-latin-h4: 500;     --chat-cjk-h4: 420;
+}
+/* Latin's optical compensation (size/weight/tracking) ALL lives on the span, not
+ * the block. A block-level :lang(en) size only fires when the whole block is pure
+ * English — so a mixed CJK+Latin block (tagged :lang(zh)) would keep its English at
+ * full size while a pure-English block shrank it, making the SAME English look
+ * different between a user prompt and an answer. Scoping size here matches the
+ * weight/tracking scope, so every Latin run is identical regardless of its
+ * neighbors. em (not rem) so Latin headings scale proportionally with their level.
+ * Inter reads a touch large beside MiSans at the same px, hence the slight shave;
+ * the smaller size packs glyphs tighter, so a hair of tracking opens it back up.
+ * CJK keeps the 1em base and is never tracked (it sets its own metrics). */
+[data-chat-content] .chat-latin {
+  font-weight: var(--chat-latin-body);
+  font-size: var(--chat-latin-size);
+  letter-spacing: var(--chat-latin-track);
+}
+[data-chat-content] .chat-cjk { font-weight: var(--chat-cjk-body); }
+/* Context tiers: the spans live INSIDE markstream's .strong-node / .heading-N
+ * wrappers, so without these the bold/heading runs would fall back to the body
+ * weight and lose their emphasis. */
+[data-chat-content] :is(.strong-node, strong, b) .chat-latin { font-weight: var(--chat-latin-strong); }
+[data-chat-content] :is(.strong-node, strong, b) .chat-cjk { font-weight: var(--chat-cjk-strong); }
+[data-chat-content] .heading-1 .chat-latin { font-weight: var(--chat-latin-h1); }
+[data-chat-content] .heading-1 .chat-cjk { font-weight: var(--chat-cjk-h1); }
+[data-chat-content] .heading-2 .chat-latin { font-weight: var(--chat-latin-h2); }
+[data-chat-content] .heading-2 .chat-cjk { font-weight: var(--chat-cjk-h2); }
+[data-chat-content] .heading-3 .chat-latin { font-weight: var(--chat-latin-h3); }
+[data-chat-content] .heading-3 .chat-cjk { font-weight: var(--chat-cjk-h3); }
+[data-chat-content] :is(.heading-4, .heading-5) .chat-latin { font-weight: var(--chat-latin-h4); }
+[data-chat-content] :is(.heading-4, .heading-5) .chat-cjk { font-weight: var(--chat-cjk-h4); }
+
+/* Sidebar session-title runs (session-item.vue) reuse the chat body-tier
+ * per-script treatment verbatim — same --chat-*-body weight, same Latin size shave
+ * + tracking — so a mixed CJK/Latin title reads identically to body prose. No
+ * sidebar-specific tokens; this is the chat treatment, applied to the label. */
+.sidebar-latin {
+  font-weight: var(--chat-latin-body);
+  font-size: var(--chat-latin-size);
+  letter-spacing: var(--chat-latin-track);
+}
+.sidebar-cjk { font-weight: var(--chat-cjk-body); }
+
+@layer base {
+  :root {
+    /* 1rem on :root resolves to the browser's default font size, so when the
+     * user hasn't customized the UI font size (variable unset) we keep
+     * honoring browser/OS accessibility settings. Custom font families are
+     * applied at runtime by overriding --font-sans / --font-mono inline
+     * (see store/settings/typography.ts), so Tailwind's stock stacks stay
+     * untouched by default. */
+    font-size: var(--memoh-ui-font-size, 1rem);
+  }
+}
+
 @layer components {
   [data-chat-content] .prose {
-    font-size: 0.875rem;
-    line-height: 1.625;
+    /* Chat reading body: 16px. This is the container default; the actual glyph
+     * size/weight come from the per-script .chat-latin / .chat-cjk spans (Latin
+     * shaves ~6% and goes 420, CJK holds 1em / 330). The values here only govern
+     * any stray text not wrapped in a run span. */
+    font-size: 1rem;
+    line-height: var(--chat-leading);
+    font-weight: 400;
+  }
+
+  [data-chat-content] .chat-user-bubble {
+    /* Matches the assistant reading body exactly — same size and the same
+     * per-script run weights — so the prompt and its answer read as one voice;
+     * the tinted surface alone marks the turn. */
+    font-size: 1rem;
+    line-height: var(--chat-leading);
+    font-weight: 400;
+  }
+
+  [data-chat-content] .chat-message-meta {
+    font-size: 0.75rem;
+  }
+
+  /* Code-block glyphs carry a touch more weight than the 400 body so the mono
+   * run reads as code, not prose. A direct font-weight (not a `font-*` utility)
+   * so the CJK weight-clamp lookup table can't pull it back under :lang(zh). */
+  [data-chat-content] .chat-code-block code,
+  [data-chat-content] .chat-code-block pre {
+    font-weight: 480;
+  }
+
+  .typography-code-preview pre {
+    counter-reset: typography-code-preview-line;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+  }
+
+  .typography-code-preview pre,
+  .typography-code-preview code {
+    font-family: var(--typography-code-preview-font-family);
+    font-size: var(--typography-code-preview-font-size);
+    line-height: 1.45;
+  }
+
+  .typography-code-preview .line {
+    counter-increment: typography-code-preview-line;
+    display: inline-block;
+    min-width: 100%;
+  }
+
+  .typography-code-preview .line::before {
+    content: counter(typography-code-preview-line);
+    display: inline-block;
+    width: 2ch;
+    margin-right: 1.25ch;
+    color: var(--color-muted-foreground);
+    text-align: right;
+    user-select: none;
   }
 }
 
@@ -29,8 +373,8 @@
   background-image: linear-gradient(
     90deg,
     var(--color-muted-foreground) 0%,
-    var(--color-foreground) 45%,
-    var(--color-foreground) 55%,
+    color-mix(in oklch, var(--color-foreground) 82%, transparent) 45%,
+    color-mix(in oklch, var(--color-foreground) 82%, transparent) 55%,
     var(--color-muted-foreground) 100%
   );
   background-size: 200% 100%;
@@ -40,13 +384,39 @@
   animation: tool-shimmer 1.6s linear infinite;
 }
 
+/* Typewriter reveal for a status line: a stepped left-to-right wipe that uncovers
+ * the text while it keeps shimmering. clip-path is used (not per-character opacity)
+ * so it composes with the background-clip:text shimmer instead of fighting it —
+ * the shimmer paints continuously underneath while the wipe exposes it. Pair with
+ * .tool-shimmer-text on the same inline-block element. */
+@keyframes cop-typewriter {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.cop-typewriter {
+  clip-path: inset(0 100% 0 0);
+  animation: cop-typewriter 0.55s steps(18, end) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cop-typewriter {
+    clip-path: none;
+    animation: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tool-shimmer-text {
     background-image: none;
     -webkit-background-clip: border-box;
     background-clip: border-box;
     color: var(--color-muted-foreground);
-    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    animation: none;
   }
 }
 
@@ -61,32 +431,47 @@
   /* Inherit the app font + size instead of markstream's built-in sans/body scale */
   font-family: inherit;
   font-size: inherit;
-  line-height: 1.625;
+  line-height: var(--chat-leading);
   color: var(--color-foreground);
 
-  /* Typography scale — re-tighten to the compact look the chat/preview used before */
-  --ms-font-sans: inherit;
+  /* Typography scale */
+  --ms-font-sans: var(--memoh-ui-font-family, inherit);
+  --ms-font-mono: var(--memoh-code-font-family, ui-monospace, monospace);
+  --markstream-code-font-family: var(--memoh-code-font-family, ui-monospace, monospace);
   --ms-text-body: inherit;
-  --ms-leading-body: 1.625;
-  --ms-text-h1: 2.25rem;
-  --ms-text-h2: 1.5rem;
-  --ms-text-h3: 1.25rem;
-  --ms-text-h4: 1.125rem;
-  --ms-text-h5: 1rem;
-  --ms-text-h6: 1rem;
-  --ms-weight-h1: 800;
-  --ms-weight-h2: 700;
-  --ms-weight-h3: 600;
-  --ms-weight-h4: 600;
+  --ms-leading-body: var(--chat-leading);
+  /* Heading scale is em-relative (tracks the body) and restrained: headings sit
+   * just above the body rather than the old fixed 36/24/20px scale that
+   * dwarfed the text. Weights are toned down from the previous 800/700. */
+  /* Two clear tiers: h1–h3 are the BIG group (a pronounced step down from each
+   * other), h4–h6 the small group. h4 and h5 render IDENTICALLY (one rung, not
+   * two), and h6 keeps heading size only — its weight drops to the body weight
+   * so it reads as emphasized body, not a sixth heading rung. */
+  --ms-text-h1: 1.6em;
+  --ms-text-h2: 1.38em;
+  --ms-text-h3: 1.2em;
+  --ms-text-h4: 1.05em;
+  --ms-text-h5: 1.05em;
+  --ms-text-h6: 1em;
+  --ms-weight-h1: 600;
+  --ms-weight-h2: 560;
+  --ms-weight-h3: 520;
+  --ms-weight-h4: 500;
+  /* h5/h6 weights are NOT read from vars by markstream (.heading-5/.heading-6
+   * only consume --ms-text-*), so they're set directly below. */
 
-  /* Flow spacing — calmer rhythm matching the previous defaults */
-  --ms-flow-paragraph-y: 1.25em;
-  --ms-flow-list-y: 1em;
-  --ms-flow-list-item-y: 0.25em;
-  --ms-flow-blockquote-y: 1rem;
-  --ms-flow-hr-y: 1.5rem;
-  --ms-flow-codeblock-y: 1rem;
-  --ms-flow-table-y: 1rem;
+  /* Flow spacing — a slightly more generous, unified rhythm (~+5% on the block
+   * gaps). --ms-flow-hr-y (1.6rem) is the canonical "big gap": the body↔rule
+   * distance, matched 1:1 by the assistant block space-y so a process/"Thought"
+   * row sits the same distance from the body. List ITEMS, by contrast, tighten
+   * (0.12em) — the inter-item gap read too tall once line-height grew. */
+  --ms-flow-paragraph-y: 1.3em;
+  --ms-flow-list-y: 1.05em;
+  --ms-flow-list-item-y: 0.12em;
+  --ms-flow-blockquote-y: 1.05rem;
+  --ms-flow-hr-y: 1.6rem;
+  --ms-flow-codeblock-y: 1.05rem;
+  --ms-flow-table-y: 1.05rem;
   --ms-flow-table-cell: 0.5rem 0.875rem;
   --ms-radius: var(--radius-lg);
 
@@ -97,30 +482,64 @@
   --hr-border: var(--color-border);
   --blockquote-border: var(--color-border);
   --blockquote-fg: var(--color-muted-foreground);
-  --list-counter-marker: var(--color-muted-foreground);
-  --list-marker: var(--color-muted-foreground);
+  /* List bullets/numbers read as foreground, not a muted gray: the marker is
+   * part of the content (it indexes the item), so it should carry the same ink
+   * as the text it points at rather than fading into the page. */
+  --list-counter-marker: var(--color-foreground);
+  --list-marker: var(--color-foreground);
 
-  /* Tables */
-  --table-border: var(--color-border);
-  --table-header-bg: var(--color-muted);
-  --code-action-hover-bg: color-mix(in oklch, var(--color-accent) 60%, transparent);
+  /* Tables — no row hover (markdown tables are content, not interactive lists).
+   * markstream's `tr:hover` reads --code-action-hover-bg, so transparent here
+   * disables it uniformly for every row (avoids the odd/even specificity tie
+   * with the zebra-stripe override below). */
+  /* Outer frame is the same hairline as the inner grid (a divider, not a hard
+   * edge). Header is one notch grayer than --muted so the two title strips
+   * (table header + code-block header) read as a quiet label band. */
+  --table-border: color-mix(in oklch, var(--color-border) 55%, transparent);
+  --table-header-bg: oklch(0.948 0 0);
+  --code-action-hover-bg: transparent;
 
-  /* Inline code — accent pill (1.x uses .inline-code, not bare <code>) */
-  --inline-code-bg: var(--color-accent);
+  /* Inline code */
+  --inline-code-bg: oklch(0.942 0 0);
   --inline-code-fg: var(--color-foreground);
   --inline-code-border: transparent;
 
-  /* Code blocks */
-  --code-bg: var(--color-muted);
+  /* Code blocks — 18-delta from white so the surface is clearly distinct */
+  --code-bg: oklch(0.935 0 0);
   --code-fg: var(--color-foreground);
-  --code-border: var(--color-border);
+  --code-border: oklch(0.915 0 0);
 }
 
 /* Paragraph/heading nodes hard-set font-size from --ms-text-* via scoped rules;
  * keep them inheriting so chat text stays compact. */
 .markstream-vue .paragraph-node {
   font-size: inherit;
-  line-height: 1.625;
+  line-height: var(--chat-leading);
+}
+
+.markstream-vue .strong-node,
+.markstream-vue strong,
+.markstream-vue b {
+  font-weight: 520;
+}
+
+/* h5 matches h4 exactly (markstream's .heading-5/.heading-6 read only the size
+ * var, not a weight var); h6 drops to the reading-body weight so it reads as
+ * emphasized body rather than a sixth heading rung. */
+.markstream-vue .heading-5 {
+  font-weight: 500;
+}
+
+.markstream-vue .heading-6 {
+  font-weight: 350;
+}
+
+/* The small heading tier (h4–h6) sits tight to its text — trim the inherited
+ * reading line-height (1.48 / 1.52 zh) so stacked sub-headings don't read tall. */
+.markstream-vue .heading-4,
+.markstream-vue .heading-5,
+.markstream-vue .heading-6 {
+  line-height: 1.3;
 }
 
 /* Tables — restore the previous clean look: rounded outer frame, tinted header,
@@ -137,21 +556,49 @@
 
 .markstream-vue .table-node {
   box-shadow: none;
+  background-color: var(--color-card);
+  font-size: 0.9375rem;
 }
 
-/* Drop the per-cell vertical grid lines; keep a single horizontal separator */
+.dark .markstream-vue .table-node {
+  background-color: var(--color-card);
+}
+
+/* Dark mode: flip hardcoded light-surface values to dark equivalents */
+.dark .markstream-vue {
+  --code-bg: oklch(0.24 0 0);
+  --code-border: oklch(0.30 0 0);
+  --table-header-bg: oklch(0.22 0 0);
+  --inline-code-bg: oklch(0.24 0 0);
+}
+
+/* Full grid (Excel feel): both vertical + horizontal cell lines, but a finer/
+ * lighter hairline than the outer frame so the grid is calm, not heavy. */
 .markstream-vue .table-node th,
 .markstream-vue .table-node td {
-  border-right: 0;
-  border-bottom: 1px solid var(--color-border);
-  padding: 0.5rem 0.875rem;
+  border-right: 1px solid color-mix(in oklch, var(--color-border) 55%, transparent);
+  border-bottom: 1px solid color-mix(in oklch, var(--color-border) 55%, transparent);
+  /* Compact cell metrics: 8px/12px padding + tight 1.5 line-height keeps rows
+   * from reading tall. */
+  padding: 0.5rem 0.75rem;
+  line-height: 1.5;
 }
 
-/* Header — tinted, left-aligned, single-weight bottom border */
+.markstream-vue .table-node th:last-child,
+.markstream-vue .table-node td:last-child {
+  border-right: 0;
+}
+
+/* Header — tinted, single-weight bottom border. Alignment is NOT forced here:
+ * markstream already stamps text-left/center/right on each <th> from the
+ * column's `:---`/`:--:`/`--:` spec, so the header must inherit the column's
+ * alignment instead of being pinned left (pinning it left made a centered or
+ * right-aligned column read with a mismatched left-aligned title). */
 .markstream-vue .table-node thead th {
-  text-align: left;
-  font-weight: 600;
+  font-weight: 500;
   border-bottom-width: 1px;
+  /* One step below the body cells (14px vs 15px). */
+  font-size: 0.875rem;
 }
 
 /* Remove 1.x zebra striping */
@@ -164,43 +611,297 @@
   border-bottom: 0;
 }
 
-/* Row hover tint */
+/* No row hover on markdown tables — they're content, not an interactive list */
 .markstream-vue .table-node tbody tr:hover td {
-  background-color: color-mix(in oklch, var(--color-accent) 60%, transparent);
+  background-color: transparent;
 }
 
-/* Inline code — shape tweaks on top of CSS vars */
+/* Inline code — shape tweaks on top of CSS vars. Weight matches the code block
+ * (480), clearly heavier than the light reading body (350); inheriting the body
+ * weight made the mono run look too thin to read as code. A direct font-weight
+ * (not a `font-*` utility) so the CJK weight-clamp table can't pull it back. */
 .markstream-vue .inline-code {
   border-radius: 0.3125rem;
   padding: 0.125rem 0.375rem;
   font-size: 0.875em;
+  font-weight: 480;
+  font-family: var(--memoh-code-font-family, ui-monospace, monospace);
 }
 
 /* Code block container — soft rounded frame */
 .markstream-vue .code-block-container {
   margin: 1rem 0;
   overflow: hidden;
+  font-size: var(--memoh-code-font-size, 13px);
+  font-family: var(--memoh-code-font-family, ui-monospace, monospace);
 }
 
-/* Blockquote — soft accent tint (background not exposed as a CSS var in 1.x) */
+.markstream-vue .code-block-container .code-block-content {
+  font-size: var(--memoh-code-font-size, 13px);
+  font-family: var(--memoh-code-font-family, ui-monospace, monospace);
+  line-height: 1.5;
+}
+
+/* Blockquote — a single rounded vertical bar, no fill. The old accent tint
+ * baked a color block that compounded on every nesting level (a quote inside a
+ * quote inside a quote stacked three solid blocks). A quote is structure, not a
+ * highlight: drop the fill entirely and mark it with one pill bar drawn as a
+ * ::before, so nesting just adds another thin bar at the next indent — never a
+ * darker block. The bar is a token gray (`--color-border`); copy stays muted. */
 .markstream-vue .blockquote {
   font-style: normal;
   font-weight: 400;
-  background-color: color-mix(in oklch, var(--color-accent) 55%, transparent);
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
-  padding: 0.5rem 1rem;
+  background-color: transparent;
+  border-left: 0;
+  border-radius: 0;
+  padding: 0.4rem 0 0.4rem 1rem;
+  position: relative;
+  color: var(--color-muted-foreground);
 }
 
-/* Links — soft underline (1.x defaults to no underline until hover) */
+.markstream-vue .blockquote::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.1rem;
+  bottom: 0.1rem;
+  width: 3.5px;
+  border-radius: 9999px;
+  background-color: var(--color-border);
+}
+
+/* Links — a dotted underline (a run of small dots), foreground at rest. On
+ * hover BOTH the text and the dots turn the selection blue, with NO transition
+ * (an animated link color reads twitchy in running prose). `skip-ink: none`
+ * keeps the dotted run continuous under descenders; the offset + visible
+ * overflow stop a glyph tail (the "p" in https) from being clipped. The floating
+ * URL tooltip is disabled at the renderer (showTooltips=false) — it was an
+ * off-language popover, not the @memohai/ui Tooltip. */
 .markstream-vue .link-node {
-  text-decoration: underline;
+  color: var(--color-foreground);
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
   text-decoration-thickness: 1px;
-  text-underline-offset: 0.2em;
-  text-decoration-color: color-mix(in oklch, var(--color-foreground) 35%, transparent);
+  text-decoration-color: color-mix(in oklch, var(--color-foreground) 45%, transparent);
+  text-underline-offset: 0.22em;
+  text-decoration-skip-ink: none;
+  overflow: visible;
+  transition: none;
 }
 
 .markstream-vue .link-node:hover {
-  text-decoration-color: var(--color-foreground);
+  /* Hover tints to the scarce brand purple (the app's "special" accent) — the
+   * same hue the footnote markers use, so every inline jump speaks one color. */
+  color: var(--brand);
+  /* Re-assert dotted on hover: markstream's own :hover swaps in a SOLID
+   * underline (it defaults to no underline until hover), which would turn our
+   * dots into a line. Pin the style so hover only changes color, not shape. */
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--brand);
+}
+
+/* Footnotes — drop the per-item top divider (markstream stamps a `border-t` on
+ * every footnote, stacking into a ladder of hairlines), match the body text
+ * size (markstream renders the list at text-sm), and number each entry with a
+ * brand-purple "1." counter so the definitions read as an ordered list keyed to
+ * their references. Purple is used deliberately here: the skeleton is mostly
+ * black/white/gray, so a small accent on the footnote markers earns the scarce
+ * brand hue. */
+.markstream-vue {
+  counter-reset: md-footnote;
+}
+
+.markstream-vue .footnote-node {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 0.4rem;
+  /* Top-align, not baseline: an inline back-link icon at the end of the text
+   * was dragging the flex baseline down, which pulled the "1." marker below the
+   * first character. Top-aligning with a shared line-height lines the marker up
+   * with the first text line regardless of what's further down the entry. */
+  align-items: flex-start;
+  line-height: var(--chat-leading);
+  /* Match the reading body exactly (markstream renders the list at text-sm).
+   * Pinned in rem to the prose body size so an intermediate text-sm wrapper
+   * can't shrink it. */
+  font-size: 1rem;
+  counter-increment: md-footnote;
+}
+
+.markstream-vue .footnote-node::before {
+  content: counter(md-footnote) ".";
+  flex-shrink: 0;
+  margin-right: 0.45em;
+  line-height: var(--chat-leading);
+  /* Solid foreground (black) — the index number is real content, so it reads as
+   * confident ink, not a washed-out gray. The brand purple is the hover accent
+   * on the interactive ref/backref markers, not the resting number. */
+  color: var(--color-foreground);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Images — never overflow the column; wrap to the next line when several sit in
+ * one paragraph instead of pushing the row wider than the message. */
+.markstream-vue .image-node-container {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: top;
+}
+
+.markstream-vue .image-node-container img,
+.markstream-vue img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-md);
+}
+
+/* Lists — a clear, full indent so nested levels read as nested (the default
+ * felt half-indented). Task-list items keep their bullet: the checkbox is an
+ * annotation on the item, not a replacement for the marker, so "• ☑ text"
+ * mirrors a normal nested list rather than a flush, marker-less column. */
+.markstream-vue ul,
+.markstream-vue ol {
+  padding-left: 1.6em;
+}
+
+/* List markers carry weight: the ordered "1." / "2." numbers (and the bullet
+ * dots) inherited the light reading body and read too faint for an index.
+ * Bump the ::marker weight so the numbers sit confidently in front of the item. */
+.markstream-vue .list-item::marker {
+  font-weight: 550;
+}
+
+/* Task-list items keep their bullet/number AND their indent. markstream stamps
+ * `.markstream-vue li:has(.checkbox-node){list-style:none; margin-left:-indent}`
+ * at the same specificity as a plain override, and its stylesheet loads AFTER
+ * ours — so we out-specify it via the `.list-node` parent (.list-disc/.list-
+ * decimal) and restore the indent the negative margin pulled away. Result:
+ * "• ☑ text", properly indented, mirroring a normal nested list. */
+.markstream-vue .list-disc li:has(.checkbox-node),
+.markstream-vue .list-disc li:has(.checkbox-icon) {
+  list-style-type: disc;
+  margin-left: 0;
+}
+
+.markstream-vue .list-decimal li:has(.checkbox-node),
+.markstream-vue .list-decimal li:has(.checkbox-icon) {
+  list-style-type: decimal;
+  margin-left: 0;
+}
+
+/* The inline checkbox marker sits a hair off the text baseline; nudge it back
+ * and give it a little trailing gap from the label. */
+.markstream-vue .checkbox-node {
+  margin-right: 0.4em;
+  vertical-align: -0.1em;
+}
+
+/* Mermaid — the diagram body keeps markstream's own palette, but the OUTER card
+ * (frame + header strip + label) is one of our floating cards, so it wears our
+ * tokens: a single border-border hairline, the card surface, the card radius,
+ * and a muted label — not markstream's bespoke gray chrome that read as a
+ * foreign block dropped into the conversation. */
+.markstream-vue .mermaid-block-container {
+  border-color: var(--color-border);
+  background-color: var(--color-card);
+  border-radius: var(--radius-lg);
+}
+
+.markstream-vue .mermaid-block-header {
+  background-color: var(--color-card);
+  border-color: var(--color-border);
+}
+
+.markstream-vue .mermaid-label-text {
+  color: var(--color-muted-foreground);
+}
+
+/* Admonition / custom container (incl. the collapsible "warning" block) — align
+ * the container chrome to our card language: token border + surface + radius,
+ * no stray elevation. The floating legend label gets the card surface so it
+ * doesn't read as a haloed chip, and the collapse toggle is a clean neutral
+ * ghost. box-shadow is forced off defensively (the odd left-side shadow the
+ * block showed isn't in markstream's own rules, so it's likely riding in on a
+ * nested element). The inner content keeps its kind accent. */
+.markstream-vue .admonition {
+  border-color: var(--color-border);
+  background-color: var(--color-card);
+  border-radius: var(--radius-lg);
+  box-shadow: none;
+}
+
+.markstream-vue .admonition .admonition-legend {
+  background-color: var(--color-card);
+}
+
+.markstream-vue .admonition .admonition-toggle {
+  box-shadow: none;
+}
+
+.markstream-vue .admonition .admonition-toggle:hover {
+  background-color: var(--color-accent);
+}
+
+/* Mermaid diagram body — recolor markstream's default light-purple nodes to the
+ * neutral skeleton so the diagram reads as ours, not a violet foreign block:
+ * node fills go muted, strokes go border-hairline, labels go foreground.
+ * mermaid scopes its own styles to the SVG id (very high specificity), so these
+ * need !important to land. Edges are left at mermaid's dark stroke. */
+/* Filled shapes across diagram types → muted surface + border-hairline:
+ * flowchart nodes, sequence actors + notes, class/state boxes, cluster frames,
+ * loop label boxes. (rect.actor and text.actor share the `actor` class, so the
+ * fills are matched on the SHAPE element only — text is handled below.) */
+.markstream-vue .mermaid-preview-area .node rect,
+.markstream-vue .mermaid-preview-area .node polygon,
+.markstream-vue .mermaid-preview-area .node circle,
+.markstream-vue .mermaid-preview-area .node path,
+.markstream-vue .mermaid-preview-area rect.actor,
+.markstream-vue .mermaid-preview-area .actor > rect,
+.markstream-vue .mermaid-preview-area g.actor rect,
+.markstream-vue .mermaid-preview-area rect.note,
+.markstream-vue .mermaid-preview-area .note,
+.markstream-vue .mermaid-preview-area .cluster rect,
+.markstream-vue .mermaid-preview-area .labelBox,
+.markstream-vue .mermaid-preview-area .classGroup rect,
+.markstream-vue .mermaid-preview-area .stateGroup rect {
+  fill: var(--color-muted) !important;
+  stroke: var(--color-border) !important;
+}
+
+/* All diagram TEXT → foreground (node/actor/note/message/loop labels). */
+.markstream-vue .mermaid-preview-area .nodeLabel,
+.markstream-vue .mermaid-preview-area .node .label,
+.markstream-vue .mermaid-preview-area span.nodeLabel,
+.markstream-vue .mermaid-preview-area text.actor,
+.markstream-vue .mermaid-preview-area text.actor tspan,
+.markstream-vue .mermaid-preview-area .actor-box,
+.markstream-vue .mermaid-preview-area .noteText,
+.markstream-vue .mermaid-preview-area .noteText tspan,
+.markstream-vue .mermaid-preview-area .messageText,
+.markstream-vue .mermaid-preview-area .labelText,
+.markstream-vue .mermaid-preview-area .loopText,
+.markstream-vue .mermaid-preview-area .loopText tspan {
+  color: var(--color-foreground) !important;
+  fill: var(--color-foreground) !important;
+}
+
+/* Connectors (flow edges, message lines, lifelines, loop frames) → muted ink. */
+.markstream-vue .mermaid-preview-area .edgePath path,
+.markstream-vue .mermaid-preview-area .flowchart-link,
+.markstream-vue .mermaid-preview-area .messageLine0,
+.markstream-vue .mermaid-preview-area .messageLine1,
+.markstream-vue .mermaid-preview-area line.actor-line,
+.markstream-vue .mermaid-preview-area .loopLine {
+  stroke: var(--color-muted-foreground) !important;
+}
+
+.markstream-vue .mermaid-preview-area .edgeLabel {
+  color: var(--color-foreground) !important;
+  background-color: var(--color-card) !important;
+  fill: var(--color-card) !important;
 }
 
 /* Hide the typewriter blinking caret (keep the typewriter text reveal) */
@@ -244,3 +945,72 @@
     background: color-mix(in oklch, var(--color-muted-foreground) 52%, transparent);
   }
 }
+
+/* ── Settings list ↔ detail swap (directional push-pop) ──────────────────────
+ * A page-turn between the list and the detail, driven by <Transition> in
+ * components/settings/swap-transition.vue (no `mode`, so enter+leave run at
+ * once and cross-slide). The leaving pane is taken out of flow so it overlaps
+ * the entering one instead of stacking above it.
+ *
+ * Speed + easing are aligned 1:1 with the settings / bot-detail open motion:
+ * enter 90ms ease-out, leave 40ms ease-in, 10px travel. Only the DIRECTION is
+ * split per forward/back to read as a push-pop:
+ *   forward (open detail): list exits LEFT,  detail enters from RIGHT
+ *   back    (return list):  detail exits RIGHT, list enters from LEFT
+ */
+.swap-forward-enter-active,
+.swap-back-enter-active {
+  transition: transform 90ms ease-out, opacity 90ms ease-out;
+}
+
+.swap-forward-leave-active,
+.swap-back-leave-active {
+  transition: transform 40ms ease-in, opacity 40ms ease-in;
+}
+
+/* The pane that is leaving drops out of normal flow and pins to the wrapper, so
+ * the entering pane occupies the layout box uncontested while they cross. */
+.swap-forward-leave-active,
+.swap-back-leave-active {
+  position: absolute;
+  inset: 0;
+}
+
+/* forward: enter from the right, leave to the left */
+.swap-forward-enter-from {
+  opacity: 0;
+  transform: translateX(10px);
+}
+
+.swap-forward-leave-to {
+  opacity: 0;
+  transform: translateX(-10px);
+}
+
+/* back: enter from the left, leave to the right */
+.swap-back-enter-from {
+  opacity: 0;
+  transform: translateX(-10px);
+}
+
+.swap-back-leave-to {
+  opacity: 0;
+  transform: translateX(10px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .swap-forward-enter-active,
+  .swap-forward-leave-active,
+  .swap-back-enter-active,
+  .swap-back-leave-active {
+    transition: opacity 90ms ease;
+  }
+
+  .swap-forward-enter-from,
+  .swap-forward-leave-to,
+  .swap-back-enter-from,
+  .swap-back-leave-to {
+    transform: none;
+  }
+}
+

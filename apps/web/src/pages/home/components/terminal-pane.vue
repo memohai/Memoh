@@ -26,7 +26,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, onActivated, onDeactivated, nextTick, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -68,9 +68,20 @@ function resolveTerminalTheme() {
 
 const TERMINAL_OPTIONS = {
   cursorBlink: true,
-  fontSize: 14,
-  fontFamily: 'Menlo, Monaco, "Courier New", monospace',
 } as const
+
+// All code surfaces follow the shared code font size (default 13). Only the
+// family falls back to xterm's built-in monospace until the user customizes it.
+const DEFAULT_TERMINAL_FONT_FAMILY = 'Menlo, Monaco, "Courier New", monospace'
+
+function resolveTerminalFont() {
+  return {
+    fontSize: settingsStore.codeFontSizePx,
+    fontFamily: settingsStore.codeFontFamily
+      ? settingsStore.codeFontStack
+      : DEFAULT_TERMINAL_FONT_FAMILY,
+  }
+}
 
 const wrapperRef = ref<HTMLDivElement | null>(null)
 const containerRef = ref<HTMLDivElement | null>(null)
@@ -191,7 +202,7 @@ function setupResizeObserver() {
 
 onMounted(() => {
   if (!containerRef.value) return
-  const term = new Terminal({ ...TERMINAL_OPTIONS, theme: resolveTerminalTheme() })
+  const term = new Terminal({ ...TERMINAL_OPTIONS, ...resolveTerminalFont(), theme: resolveTerminalTheme() })
   const fa = new FitAddon()
   const sa = new SerializeAddon()
   term.loadAddon(fa)
@@ -216,16 +227,6 @@ onMounted(() => {
   })
 })
 
-onActivated(() => {
-  nextTick(() => {
-    fitTerminal()
-  })
-})
-
-onDeactivated(() => {
-  persistSnapshot()
-})
-
 watch(
   () => props.active,
   async (active) => {
@@ -248,6 +249,17 @@ watch(
     if (terminal) {
       terminal.options.theme = resolveTerminalTheme()
     }
+  },
+)
+
+watch(
+  [() => settingsStore.codeFontSizePx, () => settingsStore.codeFontStack],
+  () => {
+    if (!terminal) return
+    const { fontSize, fontFamily } = resolveTerminalFont()
+    terminal.options.fontSize = fontSize
+    terminal.options.fontFamily = fontFamily
+    fitTerminal()
   },
 )
 

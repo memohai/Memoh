@@ -30,10 +30,10 @@ nano config.toml   # Change passwords and JWT secret
 
 > **Important**: You must create `config.toml` before starting. `docker-compose.yml` mounts `./config.toml` into the containers — running without it will fail.
 
-### Standard startup (with Qdrant + Browser)
+### Standard startup (with Qdrant + Sparse)
 
 ```bash
-docker compose --profile qdrant --profile browser up -d
+docker compose --profile qdrant --profile sparse up -d
 ```
 
 ### Minimal startup (core only)
@@ -45,33 +45,54 @@ docker compose up -d
 Access:
 - Web UI: http://localhost:8082
 - API: http://localhost:8080
-- Agent: http://localhost:8081
 
 Default credentials: `admin` / `admin123` (change in `config.toml`)
 
+### Kata workspace runtime (Linux/KVM)
+
+Memoh can run containerd-backed bot workspaces through Kata Containers on a
+Linux/KVM host:
+
+```bash
+cp conf/app.kata.docker.toml config.kata.toml
+nano config.kata.toml   # Change passwords and JWT secret
+MEMOH_CONFIG=./config.kata.toml \
+  docker compose -f docker-compose.yml -f docker-compose.kata.yml up --build -d
+```
+
+Before using this path for production, check the Linux/KVM host and Kata
+installation on a dedicated clean host:
+
+```bash
+mise run kata:runner
+```
+
+Then start the production stack manually with the command above. The root
+Compose file uses fixed container names such as `memoh-server` and
+`memoh-postgres`, so run it on a host where those names are not already in use.
+
+See [docs/kata-containerd.md](docs/kata-containerd.md) for host requirements,
+custom Kata paths, dev startup, production startup, and GitHub runner setup.
+
 ## Docker Compose Profiles
 
-The base `docker-compose.yml` contains all services. Core services (postgres, server, agent, web) always start. Optional services are gated by profiles and only start when explicitly enabled:
+The base `docker-compose.yml` contains all services. Core services (`postgres`, `migrate`, `server`, and `web`) always start. The AI agent runs in-process inside `server`. Optional services are gated by profiles and only start when explicitly enabled:
 
 | Profile | Service | Description |
 |---------|---------|-------------|
 | `qdrant` | Qdrant | Vector database for memory semantic search |
-| `browser` | Browser | Browser automation gateway (Playwright) |
-| `openviking` | OpenViking | Self-hosted OpenViking memory provider |
+| `sparse` | Sparse | Neural sparse memory retrieval service |
 
 ### Supported combinations
 
 ```bash
-# Core + Qdrant + Browser (recommended default)
-docker compose --profile qdrant --profile browser up -d
-
-# Core + Qdrant + OpenViking (self-hosted)
-docker compose --profile qdrant --profile openviking up -d
+# Core + Qdrant + Sparse (recommended default)
+docker compose --profile qdrant --profile sparse up -d
 ```
 
 ### SaaS / external providers
 
-For Mem0 or OpenViking SaaS, no profile is needed. Configure the provider directly in the Memoh admin UI with the external `base_url` and API key.
+For Mem0, OpenViking SaaS, or a separately hosted OpenViking service, no Compose profile is needed. Configure the provider directly in the Memoh admin UI with the external `base_url` and API key.
 
 ### China Mainland Mirror
 
@@ -79,7 +100,7 @@ Uncomment `registry = "memoh.cn"` in `config.toml` under `[container]`, then add
 
 ```bash
 docker compose -f docker-compose.yml -f docker/docker-compose.cn.yml \
-  --profile qdrant --profile browser up -d
+  --profile qdrant --profile sparse up -d
 ```
 
 ## Prerequisites

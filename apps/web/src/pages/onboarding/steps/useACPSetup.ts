@@ -30,6 +30,10 @@ export function readACPSelection(): OnboardingACPSelection | null {
   }
 }
 
+// ACP selection is functional state that decides which kind of bot gets
+// created, so it deliberately uses storage directly (not the best-effort
+// safe-storage helpers): a failed write must surface rather than silently fall
+// through to creating a plain bot.
 export function writeACPSelection(selection: OnboardingACPSelection): void {
   sessionStorage.setItem(ONBOARDING_KEYS.acpSelection, JSON.stringify(selection))
 }

@@ -10,27 +10,24 @@
     :show-group-headers="false"
   >
     <template #trigger="{ open, displayLabel }">
-      <Button
-        variant="outline"
-        role="combobox"
+      <button
+        data-slot="select-trigger"
+        data-size="default"
+        :data-placeholder="!selected ? '' : undefined"
+        type="button"
         :aria-expanded="open"
         :aria-label="placeholder || 'Select memory provider'"
-        class="w-full justify-between font-normal text-xs shadow-none h-9"
+        :class="[selectTriggerClass, 'w-full']"
       >
-        <span class="flex min-w-0 items-center gap-2 truncate">
+        <span class="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
           <Brain
             v-if="selected"
             class="size-3.5 shrink-0 text-primary"
           />
-          <span
-            class="truncate"
-            :title="displayLabel || placeholder"
-          >{{ displayLabel || placeholder }}</span>
+          <span class="line-clamp-1">{{ displayLabel || placeholder }}</span>
         </span>
-        <Search
-          class="ml-2 size-3.5 shrink-0 text-muted-foreground"
-        />
-      </Button>
+        <ChevronsUpDown class="opacity-50" />
+      </button>
     </template>
 
     <template #option-icon="{ option }">
@@ -53,8 +50,8 @@
 </template>
 
 <script setup lang="ts">
-import { Brain, Search } from 'lucide-vue-next'
-import { Button } from '@memohai/ui'
+import { Brain, ChevronsUpDown } from 'lucide-vue-next'
+import { selectTriggerClass } from '@memohai/ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'

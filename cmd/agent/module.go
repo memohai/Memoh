@@ -15,9 +15,11 @@ import (
 	"github.com/memohai/memoh/internal/channel/adapters/local"
 	"github.com/memohai/memoh/internal/channel/adapters/weixin"
 	"github.com/memohai/memoh/internal/channel/identities"
+	"github.com/memohai/memoh/internal/channelaccess"
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/conversation"
 	emailpkg "github.com/memohai/memoh/internal/email"
+	"github.com/memohai/memoh/internal/fetchproviders"
 	"github.com/memohai/memoh/internal/handlers"
 	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/mcp"
@@ -66,10 +68,13 @@ func options() fx.Option {
 			provideACPClaudeCodeOAuthHandler,
 			accounts.NewService,
 			acl.NewService,
+			channelaccess.NewService,
 			settings.NewService,
 			toolapproval.NewService,
 			userinput.NewService,
+			provideHooksService,
 			provideProvidersService,
+			fetchproviders.NewService,
 			searchproviders.NewService,
 			policy.NewService,
 			mcp.NewConnectionService,
@@ -130,12 +135,15 @@ func options() fx.Option {
 			provideServerHandler(provideProviderOAuthHandler),
 			provideServerHandler(provideACPCodexOAuthServerHandler),
 			provideServerHandler(provideACPClaudeCodeOAuthServerHandler),
+			provideServerHandler(handlers.NewFetchProvidersHandler),
 			provideServerHandler(handlers.NewSearchProvidersHandler),
 			provideServerHandler(handlers.NewModelsHandler),
 			provideServerHandler(handlers.NewSettingsHandler),
 			provideServerHandler(handlers.NewToolApprovalHandler),
+			provideServerHandler(handlers.NewHooksHandler),
 			provideServerHandler(handlers.NewACLHandler),
 			provideServerHandler(handlers.NewBotUserAccessHandler),
+			provideServerHandler(handlers.NewChannelAccessHandler),
 			provideServerHandler(handlers.NewScheduleHandler),
 			provideServerHandler(handlers.NewHeartbeatHandler),
 			provideServerHandler(handlers.NewCompactionHandler),
@@ -169,6 +177,7 @@ func options() fx.Option {
 			startRegistrySync,
 			startAudioProviderBootstrap,
 			startMemoryProviderBootstrap,
+			startFetchProviderBootstrap,
 			startSearchProviderBootstrap,
 			startScheduleService,
 			startHeartbeatService,

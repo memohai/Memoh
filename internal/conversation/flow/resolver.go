@@ -27,6 +27,7 @@ import (
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/hooks"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	messageevent "github.com/memohai/memoh/internal/message/event"
@@ -95,6 +96,9 @@ type Resolver struct {
 	bgManager         *background.Manager
 	toolApproval      *toolapproval.Service
 	userInput         userInputService
+	hookService       *hooks.Service
+	acpPromptMu       sync.Mutex
+	acpPromptHubs     map[string]*acpActivePromptHub
 	// continueUserInputFn overrides the chat-flow resume after a user input
 	// response; nil means storeUserInputResultAndContinue. Test seam.
 	continueUserInputFn func(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error
@@ -196,6 +200,10 @@ func (r *Resolver) SetBackgroundManager(m *background.Manager) {
 
 func (r *Resolver) SetToolApprovalService(s *toolapproval.Service) {
 	r.toolApproval = s
+}
+
+func (r *Resolver) SetHookService(s *hooks.Service) {
+	r.hookService = s
 }
 
 func (r *Resolver) SetUserInputService(s *userinput.Service) {
@@ -473,12 +481,17 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	doneTurn := r.enterSessionTurn(ctx, req.BotID, req.SessionID)
 	defer doneTurn()
 
-	rc, err := r.resolve(ctx, req)
+	if req.RawQuery == "" {
+		req.RawQuery = strings.TrimSpace(req.Query)
+	}
+	var err error
+	req, err = r.applyUserMessageHook(ctx, req)
 	if err != nil {
 		return conversation.ChatResponse{}, err
 	}
-	if req.RawQuery == "" {
-		req.RawQuery = strings.TrimSpace(req.Query)
+	rc, err := r.resolve(ctx, req)
+	if err != nil {
+		return conversation.ChatResponse{}, err
 	}
 	req.Query = rc.query
 
@@ -551,12 +564,6 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 		return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, err
 	}
 
-	reasoningConfig := resolveReasoningConfig(chatModel, botSettings, p.ReasoningEffort)
-	reasoningEffort := ""
-	if reasoningConfig != nil && reasoningConfig.Enabled {
-		reasoningEffort = reasoningConfig.Effort
-	}
-
 	authResolver := providers.NewService(nil, r.queries, "")
 	authCtx := oauthctx.WithUserID(ctx, p.UserID)
 	creds, err := authResolver.ResolveModelCredentials(authCtx, provider)
@@ -569,6 +576,12 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 		baseURL,
 		providers.ProviderConfigString(provider, "chat_completions_compat"),
 	)
+
+	reasoningConfig := resolveReasoningConfig(chatModel, botSettings, p.ReasoningEffort, provider.ClientType)
+	reasoningEffort := ""
+	if reasoningConfig != nil && reasoningConfig.Active {
+		reasoningEffort = reasoningConfig.Effort
+	}
 
 	sdkModel := models.NewSDKChatModel(models.SDKModelConfig{
 		ModelID:               chatModel.ModelID,
@@ -601,7 +614,10 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 	cfg := agentpkg.RunConfig{
 		Model:                 sdkModel,
 		ReasoningEffort:       reasoningEffort,
+		ReasoningActive:       reasoningConfig != nil && reasoningConfig.Active,
 		ReasoningDisabled:     reasoningConfig != nil && reasoningConfig.Disabled,
+		ReasoningAdaptive:     reasoningConfig != nil && reasoningConfig.Adaptive,
+		ReasoningOffEffort:    offEffortOrEmpty(reasoningConfig),
 		ChatCompletionsCompat: chatCompletionsCompat,
 		PromptCacheTTL:        providers.ProviderConfigString(provider, "prompt_cache_ttl"),
 		SessionType:           p.SessionType,
@@ -637,31 +653,158 @@ const (
 	reasoningEffortDisable  = "disable"
 )
 
-func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.Settings, requestedEffort string) *models.ReasoningConfig {
-	if !chatModel.HasCompatibility(models.CompatReasoning) {
+// resolveReasoningConfig makes the single reasoning decision for a call, driven
+// by the model's discovered thinking mode plus the user's settings/override.
+//
+//   - none:     no thinking; returns nil.
+//   - adaptive: on/off; when active, Anthropic-style providers use adaptive
+//     thinking plus the selected effort.
+//   - toggle:   on/off, with per-message override taking precedence over the
+//     bot's default.
+func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.Settings, requestedEffort, clientType string) *models.ReasoningConfig {
+	mode := chatModel.ResolveThinkingMode()
+	if mode == models.ThinkingModeNone {
 		return nil
 	}
-	requestedEffort = strings.TrimSpace(requestedEffort)
-	switch {
-	case reasoningEffortDisabled(requestedEffort):
-		return &models.ReasoningConfig{Disabled: true}
-	case requestedEffort == reasoningEffortAdaptive:
-		return &models.ReasoningConfig{Enabled: true}
-	case requestedEffort != "":
-		return &models.ReasoningConfig{Enabled: true, Effort: requestedEffort}
-	case botSettings.ReasoningEnabled:
-		effort := strings.TrimSpace(botSettings.ReasoningEffort)
-		if effort == "" {
-			effort = models.ReasoningEffortMedium
-		}
-		return &models.ReasoningConfig{Enabled: true, Effort: effort}
-	default:
-		return &models.ReasoningConfig{Disabled: true}
+
+	effortLevels := effectiveReasoningEfforts(chatModel.Config.ReasoningEfforts, clientType)
+	offEffort := offEffortFor(effortLevels)
+	requested := strings.TrimSpace(requestedEffort)
+	adaptive := mode == models.ThinkingModeAdaptive
+	// Anthropic 4.6+ uses the effort/adaptive wire (no budget_tokens). Cloud
+	// variants (bedrock/vertex/azure/openrouter) are missing
+	// supports_adaptive_thinking in the LiteLLM registry but still advertise the
+	// 4.6+ effort tiers, so promote them to adaptive here. This keeps them off the
+	// legacy budget path, where budget_tokens is rejected with 400 on 4.7+.
+	if !adaptive && clientType == string(models.ClientTypeAnthropicMessages) && anthropicEffortEra(effortLevels) {
+		adaptive = true
 	}
+
+	switch {
+	case reasoningEffortDisabled(requested):
+		return &models.ReasoningConfig{Disabled: true, OffEffort: offEffort}
+	case requested == reasoningEffortAdaptive:
+		// Legacy "adaptive" override on a toggle model: treat as on (toggle has no
+		// adaptive concept; send a normal effort).
+		return &models.ReasoningConfig{Active: true, Adaptive: adaptive, Effort: pickEffort("", botSettings, effortLevels), OffEffort: offEffort}
+	case requested != "":
+		return &models.ReasoningConfig{Active: true, Adaptive: adaptive, Effort: pickEffort(requested, botSettings, effortLevels), OffEffort: offEffort}
+	case botSettings.ReasoningEnabled:
+		return &models.ReasoningConfig{Active: true, Adaptive: adaptive, Effort: pickEffort("", botSettings, effortLevels), OffEffort: offEffort}
+	default:
+		return &models.ReasoningConfig{Disabled: true, OffEffort: offEffort}
+	}
+}
+
+// anthropicEffortEra reports whether an Anthropic model uses the 4.6+
+// effort/adaptive thinking mechanism rather than the legacy
+// thinking{type:"enabled", budget_tokens:N} path. Pre-4.6 Claude advertises only
+// the implicit low/medium/high base; 4.6+ adds at least one of none/minimal/
+// xhigh/max. Detecting any of those tiers catches the cloud-provider variants
+// that the registry leaves without supports_adaptive_thinking.
+func anthropicEffortEra(effortLevels []string) bool {
+	for _, e := range effortLevels {
+		switch e {
+		case models.ReasoningEffortNone, models.ReasoningEffortMinimal,
+			models.ReasoningEffortXHigh, models.ReasoningEffortMax:
+			return true
+		}
+	}
+	return false
+}
+
+// pickEffort resolves the effort to send when thinking is active: the
+// per-message override (if a concrete tier) wins, then the bot default, then
+// medium. Values outside the effective model+wire effort list are ignored so
+// stale settings or command/API overrides cannot send a known-invalid wire value.
+func pickEffort(requested string, botSettings settings.Settings, effortLevels []string) string {
+	if e := strings.TrimSpace(requested); e != "" && e != reasoningEffortAdaptive && e != reasoningEffortDisable {
+		if hasEffort(effortLevels, e) {
+			return e
+		}
+	}
+	if e := strings.TrimSpace(botSettings.ReasoningEffort); e != "" && hasEffort(effortLevels, e) {
+		return e
+	}
+	if hasEffort(effortLevels, models.ReasoningEffortMedium) {
+		return models.ReasoningEffortMedium
+	}
+	if len(effortLevels) > 0 {
+		return effortLevels[0]
+	}
+	return models.ReasoningEffortMedium
+}
+
+// effectiveReasoningEfforts intersects the model's advertised effort levels
+// with the wire format's accepted set. OpenAI-format clients reject "max", so
+// it is excluded here. This is the primary filter; openAIWireEffort in
+// models/sdk.go and the Twilight SDK provider layer act as defence-in-depth.
+// Keep isOpenAIReasoningWire in sync with the frontend OPENAI_FORMAT_CLIENT_TYPES.
+func effectiveReasoningEfforts(effortLevels []string, clientType string) []string {
+	levels := effortLevels
+	if len(levels) == 0 {
+		levels = []string{models.ReasoningEffortLow, models.ReasoningEffortMedium, models.ReasoningEffortHigh}
+	}
+	out := make([]string, 0, len(levels))
+	for _, e := range levels {
+		if isOpenAIReasoningWire(clientType) && e == models.ReasoningEffortMax {
+			continue
+		}
+		if !hasEffort(out, e) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// isOpenAIReasoningWire returns true for client types whose wire format rejects
+// "max" effort. Keep in sync with OPENAI_FORMAT_CLIENT_TYPES in reasoning-effort.ts.
+func isOpenAIReasoningWire(clientType string) bool {
+	switch models.ClientType(clientType) {
+	case models.ClientTypeOpenAICompletions, models.ClientTypeOpenAIResponses, models.ClientTypeOpenAICodex:
+		return true
+	default:
+		return false
+	}
+}
+
+func hasEffort(effortLevels []string, effort string) bool {
+	for _, e := range effortLevels {
+		if e == effort {
+			return true
+		}
+	}
+	return false
+}
+
+// offEffortFor picks the effort an OpenAI-style provider should send to
+// approximate "off": "none" when advertised, else "minimal" when advertised,
+// else "" meaning the caller must omit reasoning_effort entirely. Returning a
+// real tier (low/medium/high) here would *enable* thinking instead of disabling
+// it — e.g. OpenRouter translates reasoning_effort:"low" into Anthropic extended
+// thinking, so a toggle model that advertises only low/medium/high would keep
+// reasoning on when the user selected Off. Omitting the field instead lets the
+// provider default (thinking off for toggle/Anthropic-compat models) take over
+// and also avoids sending an unsupported tier. effortLevels is ordered low→high.
+func offEffortFor(effortLevels []string) string {
+	if hasEffort(effortLevels, models.ReasoningEffortNone) {
+		return models.ReasoningEffortNone
+	}
+	if hasEffort(effortLevels, models.ReasoningEffortMinimal) {
+		return models.ReasoningEffortMinimal
+	}
+	return ""
 }
 
 func reasoningEffortDisabled(effort string) bool {
 	return strings.TrimSpace(effort) == reasoningEffortDisable
+}
+
+func offEffortOrEmpty(rc *models.ReasoningConfig) string {
+	if rc == nil {
+		return ""
+	}
+	return rc.OffEffort
 }
 
 func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.Context, sdk.ToolCall) (sdk.ToolApprovalResult, error) {
@@ -727,9 +870,6 @@ func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.
 				Metadata:   userinput.DeferredMetadata(req),
 			}, nil
 		}
-		if r.toolApproval == nil {
-			return sdk.ToolApprovalResult{Decision: sdk.ToolApprovalDecisionApproved}, nil
-		}
 		input := toolapproval.CreatePendingInput{
 			BotID:                        p.BotID,
 			SessionID:                    p.SessionID,
@@ -743,12 +883,24 @@ func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.
 			ReplyTarget:                  p.ReplyTarget,
 			ConversationType:             p.ConversationType,
 		}
-		eval, err := r.toolApproval.EvaluatePolicy(ctx, input)
-		if err != nil {
-			return sdk.ToolApprovalResult{}, err
-		}
-		if eval.Decision == toolapproval.DecisionBypass {
+		forcedApprovalReason, forcedApproval := agentpkg.HookForcedApprovalReason(ctx)
+		if r.toolApproval == nil {
+			if forcedApproval {
+				return sdk.ToolApprovalResult{
+					Decision: sdk.ToolApprovalDecisionRejected,
+					Reason:   firstNonEmpty(forcedApprovalReason, "hook requested approval but tool approval is not configured"),
+				}, nil
+			}
 			return sdk.ToolApprovalResult{Decision: sdk.ToolApprovalDecisionApproved}, nil
+		}
+		if !forcedApproval {
+			eval, err := r.toolApproval.EvaluatePolicy(ctx, input)
+			if err != nil {
+				return sdk.ToolApprovalResult{}, err
+			}
+			if eval.Decision == toolapproval.DecisionBypass {
+				return sdk.ToolApprovalResult{Decision: sdk.ToolApprovalDecisionApproved}, nil
+			}
 		}
 		if !isInteractiveApprovalSession(p.SessionType) {
 			req, err := r.toolApproval.CreatePending(ctx, input)
@@ -767,7 +919,18 @@ func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.
 				Metadata:   approvalResultMetadata(rejected),
 			}, nil
 		}
-		eval, err = r.toolApproval.Evaluate(ctx, input)
+		if forcedApproval {
+			req, err := r.toolApproval.CreatePending(ctx, input)
+			if err != nil {
+				return sdk.ToolApprovalResult{}, err
+			}
+			return sdk.ToolApprovalResult{
+				Decision:   sdk.ToolApprovalDecisionDeferred,
+				ApprovalID: req.ID,
+				Metadata:   approvalResultMetadata(req),
+			}, nil
+		}
+		eval, err := r.toolApproval.Evaluate(ctx, input)
 		if err != nil {
 			return sdk.ToolApprovalResult{}, err
 		}
@@ -784,6 +947,7 @@ func approvalResultMetadata(req toolapproval.Request) map[string]any {
 		"short_id":     req.ShortID,
 		"status":       req.Status,
 		"tool_name":    req.ToolName,
+		"operation":    req.Operation,
 		"tool_call_id": req.ToolCallID,
 	}
 }
@@ -862,6 +1026,13 @@ func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, chann
 // prepareRunConfig generates the system prompt and appends the user message.
 func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig) agentpkg.RunConfig {
 	supportsImageInput := cfg.SupportsImageInput
+	beforePromptContext := r.runPromptHook(ctx, agentRunConfigView{
+		BotID:        cfg.Identity.BotID,
+		SessionID:    cfg.Identity.SessionID,
+		ChatID:       cfg.Identity.ChatID,
+		SessionType:  cfg.SessionType,
+		MessageCount: len(cfg.Messages),
+	}, hooks.EventBeforePromptBuild)
 	var files []agentpkg.SystemFile
 	if r.agent != nil {
 		nowFn := time.Now
@@ -899,6 +1070,20 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 		DisplayEnabled:            cfg.DisplayEnabled,
 		PlatformIdentitiesSection: platformIdentitiesSection,
 	})
+	if beforePromptContext != "" {
+		cfg.System += "\n\n" + formatResolverHookContext(hooks.EventBeforePromptBuild, beforePromptContext)
+	}
+	afterPromptContext := r.runPromptHook(ctx, agentRunConfigView{
+		BotID:        cfg.Identity.BotID,
+		SessionID:    cfg.Identity.SessionID,
+		ChatID:       cfg.Identity.ChatID,
+		SessionType:  cfg.SessionType,
+		MessageCount: len(cfg.Messages),
+		SystemBytes:  len(cfg.System),
+	}, hooks.EventAfterPromptBuild)
+	if afterPromptContext != "" {
+		cfg.System += "\n\n" + formatResolverHookContext(hooks.EventAfterPromptBuild, afterPromptContext)
+	}
 
 	if cfg.Query != "" {
 		var extra []sdk.MessagePart

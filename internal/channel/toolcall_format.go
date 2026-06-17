@@ -21,14 +21,17 @@ const ExternalToolCallEmoji = "⚙️"
 // builtinToolCallEmoji maps built-in tool names to their display emoji.
 // Names are matched case-insensitively after trimming whitespace.
 var builtinToolCallEmoji = map[string]string{
-	"list":       "📂",
-	"read":       "📖",
-	"write":      "📝",
-	"edit":       "📝",
-	"exec":       "💻",
-	"bg_status":  "💻",
-	"web_search": "🌐",
-	"web_fetch":  "🌐",
+	"list":                  "📂",
+	"read":                  "📖",
+	"write":                 "📝",
+	"edit":                  "📝",
+	"exec":                  "💻",
+	"bg_status":             "💻",
+	"list_background":       "💻",
+	"get_background_status": "💻",
+	"kill_background":       "💻",
+	"web_search":            "🌐",
+	"web_fetch":             "🌐",
 
 	"search_memory":   "🧠",
 	"search_messages": "🧠",
@@ -50,8 +53,11 @@ var builtinToolCallEmoji = map[string]string{
 	"list_email":          "📧",
 	"read_email":          "📧",
 
-	"spawn":     "🤖",
-	"use_skill": "🧩",
+	"spawn_agent":  "🤖",
+	"send_message": "🤖",
+	"wait_agent":   "🤖",
+	"list_agents":  "🤖",
+	"use_skill":    "🧩",
 
 	"generate_image":   "🖼️",
 	"speak":            "🔊",

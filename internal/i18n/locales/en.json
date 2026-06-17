@@ -15,6 +15,11 @@
     "models": "models",
     "rangeAll": "All"
   },
+  "startWelcome": {
+    "title": "👋 Hi there!",
+    "intro": "Just send me a message and we'll get going.",
+    "tip": "New here? {help} shows what I can do. {new} starts a clean slate anytime."
+  },
   "newSession": {
     "title": "✨ New {mode} started.",
     "modeChat": "chat",
@@ -137,10 +142,22 @@
       "fieldSessionID": "Session ID",
       "fieldChatACL": "Chat ACL"
     },
+    "link": {
+      "usage": "Usage: /link <code> — connect this account to your Memoh user.",
+      "missingCode": "Please provide a link code: /link <code>",
+      "success": "Connected. This account is now linked to your Memoh user and inherits your bot permissions.",
+      "notFound": "That link code is invalid.",
+      "expired": "That link code has expired. Generate a new one in Memoh settings.",
+      "consumed": "That link code was already used.",
+      "noIdentity": "Cannot link: missing channel identity.",
+      "unavailable": "Account linking is unavailable right now.",
+      "failed": "Failed to link this account. Please try again."
+    },
     "help": {
       "availableCommands": "Available commands",
       "top": {
         "help": "show this help",
+        "start": "show the welcome message",
         "new": "start a new conversation",
         "stop": "stop the current reply",
         "approve": "approve the latest or specified pending tool call",
@@ -265,12 +282,13 @@
       "missingValue": "Missing value for {option}.\n\n{usage}",
       "invalidHeartbeatInterval": "Invalid heartbeat_interval: {value}",
       "unknownOption": "Unknown option: {option}\n\n{usage}",
-      "unknownLanguage": "Unknown language {value}. Choose auto, en, or zh.",
+      "unknownLanguage": "Unknown language {value}. Choose auto, en, zh, or ja.",
       "unavailable": "Settings aren't available right now.",
-      "updateUsage": "Usage: /settings update [options]\n\nOptions:\n- --language <value>\n- --acl_default_effect <allow|deny>\n- --reasoning_enabled <true|false>\n- --reasoning_effort <none|low|medium|high|xhigh>\n- --heartbeat_enabled <true|false>\n- --heartbeat_interval <minutes>\n- --chat_model_id <id>\n- --heartbeat_model_id <id>\n\n(Command UI language: /settings language <auto|en|zh>)"
+      "updateUsage": "Usage: /settings update [options]\n\nOptions:\n- --language <value>\n- --acl_default_effect <allow|deny>\n- --reasoning_enabled <true|false>\n- --reasoning_effort <none|low|medium|high|xhigh>\n- --heartbeat_enabled <true|false>\n- --heartbeat_interval <minutes>\n- --chat_model_id <id>\n- --heartbeat_model_id <id>\n\n(Command UI language: /settings language <auto|en|zh|ja>)",
+      "langJa": "日本語"
     },
     "language": {
-      "setUsage": "Usage: /language <auto|en|zh>"
+      "setUsage": "Usage: /language <auto|en|zh|ja>"
     },
     "model": {
       "title": "Chat Models",
@@ -440,12 +458,16 @@
       "unknownCommandShort": "Unknown command {command}. Run {help} to see all commands.",
       "unknownAction": "Unknown action {action} for {command}. Run {help} to see its actions.",
       "ownerOnly": "⚠️ Only the bot owner can run {command}. You can still chat normally.",
+      "noAccess": "⚠️ You don't have access to this bot.",
+      "accessDeniedHint": "⚠️ You can't chat with this bot yet. If you're its owner, open the dashboard, copy a connection code, and send {link} <code> here to link your account.",
+      "accessDeniedManager": "⚠️ You can manage this bot, but Chat is disabled for this channel identity. Manage commands still work; ask the bot owner to enable Chat if this identity should send regular messages.",
       "generic": "⚠️ Couldn't complete {command} right now. Try again in a moment.",
       "genericNoResource": "⚠️ Something went wrong. Try again in a moment.",
       "runToSeeList": " Run {command} to see what's available."
     }
   },
   "menu": {
+    "start": "Show the welcome message",
     "help": "Show available commands",
     "new": "Start a new conversation",
     "stop": "Stop the current reply",

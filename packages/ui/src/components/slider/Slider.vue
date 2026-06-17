@@ -18,26 +18,31 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
     v-slot="{ modelValue }"
     data-slot="slider"
     :class="cn(
-      'relative flex w-full touch-none items-center select-none data-[disabled]:opacity-50 data-[orientation=vertical]:h-full data-[orientation=vertical]:min-h-44 data-[orientation=vertical]:w-auto data-[orientation=vertical]:flex-col',
+      'relative flex w-full touch-none items-center select-none data-[disabled]:opacity-40 data-[orientation=vertical]:h-full data-[orientation=vertical]:min-h-44 data-[orientation=vertical]:w-auto data-[orientation=vertical]:flex-col',
       props.class,
     )"
     v-bind="forwarded"
   >
     <SliderTrack
       data-slot="slider-track"
-      class="relative grow overflow-hidden rounded-full bg-accent data-[orientation=horizontal]:h-1.5 data-[orientation=horizontal]:w-full data-[orientation=vertical]:h-full data-[orientation=vertical]:w-1.5"
+      class="relative grow overflow-hidden rounded-full data-[orientation=horizontal]:h-1.5 data-[orientation=horizontal]:w-full data-[orientation=vertical]:h-full data-[orientation=vertical]:w-1.5"
     >
       <SliderRange
         data-slot="slider-range"
-        class="absolute bg-foreground data-[orientation=horizontal]:h-full data-[orientation=vertical]:w-full"
+        class="absolute data-[orientation=horizontal]:h-full data-[orientation=vertical]:w-full"
       />
     </SliderTrack>
 
+    <!-- Color/edge/motion owned by style.css: white knob with a hairline edge
+         that grows into a thin blue edge on hover (idea from RadioGroup, kept
+         light). No outer ring or shadow; the knob never changes size. Focus is
+         not styled — reka keeps the thumb focused after a drag, so a focus style
+         would linger as a stuck blue edge. -->
     <SliderThumb
       v-for="(_, key) in modelValue"
       :key="key"
       data-slot="slider-thumb"
-      class="block shadow-sm size-4 shrink-0 rounded-full border border-foreground bg-white hover:ring-4 hover:ring-ring/20  hover:border-2 focus-visible:ring-4 focus-visible:ring-ring/20 focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50"
+      class="block size-4 shrink-0 rounded-full cursor-pointer outline-none focus-visible:outline-hidden disabled:pointer-events-none"
     />
   </SliderRoot>
 </template>

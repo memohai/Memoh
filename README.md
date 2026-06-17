@@ -1,6 +1,7 @@
 <div align="right">
   <span>[<a href="./README.md">English</a>]<span>
   </span>[<a href="./README_CN.md">简体中文</a>]</span>
+  </span>[<a href="./README_JA.md">日本語</a>]</span>
 </div>  
 
 <div align="center">
@@ -24,6 +25,9 @@
   </h3>
   <img src="./assets/hero.png" alt="Memoh" width="1000">
 </div>
+
+> [!TIP]
+> Memoh's SaaS service is coming soon. Join the waitlist at [memoh.ai/waitlist](https://memoh.ai/waitlist).
 
 ## What is Memoh?
 

@@ -9,6 +9,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/background"
+	"github.com/memohai/memoh/internal/agent/event"
 )
 
 // SessionContext carries request-scoped identity and routing information.
@@ -72,7 +73,10 @@ type InjectMessage struct {
 type RunConfig struct {
 	Model                 *sdk.Model
 	ReasoningEffort       string
+	ReasoningActive       bool
 	ReasoningDisabled     bool
+	ReasoningAdaptive     bool
+	ReasoningOffEffort    string
 	ChatCompletionsCompat string
 	Messages              []sdk.Message
 	Query                 string
@@ -136,29 +140,13 @@ type GenerateResult struct {
 	Usage       *sdk.Usage
 }
 
-// FileAttachment represents a file reference extracted from agent output.
-type FileAttachment struct {
-	Type        string         `json:"type"`
-	Base64      string         `json:"base64,omitempty"`
-	Path        string         `json:"path,omitempty"`
-	URL         string         `json:"url,omitempty"`
-	PlatformKey string         `json:"platform_key,omitempty"`
-	Mime        string         `json:"mime,omitempty"`
-	Name        string         `json:"name,omitempty"`
-	ContentHash string         `json:"content_hash,omitempty"`
-	Size        int64          `json:"size,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-}
-
-// ReactionItem represents an emoji reaction extracted from agent output.
-type ReactionItem struct {
-	Emoji string `json:"emoji"`
-}
-
-// SpeechItem represents a TTS request extracted from agent output.
-type SpeechItem struct {
-	Text string `json:"text"`
-}
+// FileAttachment, ReactionItem and SpeechItem live in the event leaf package
+// (they ride on StreamEvent); aliased here for source compatibility.
+type (
+	FileAttachment = event.FileAttachment
+	ReactionItem   = event.ReactionItem
+	SpeechItem     = event.SpeechItem
+)
 
 // SystemFile is a file loaded from the bot container for prompt generation.
 type SystemFile struct {

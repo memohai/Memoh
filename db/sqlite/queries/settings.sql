@@ -16,6 +16,7 @@ SELECT
   compaction_models.id AS compaction_model_id,
   title_models.id AS title_model_id,
   search_providers.id AS search_provider_id,
+  fetch_providers.id AS fetch_provider_id,
   memory_providers.id AS memory_provider_id,
   image_models.id AS image_model_id,
   tts_models.id AS tts_model_id,
@@ -35,6 +36,7 @@ LEFT JOIN models AS compaction_models ON compaction_models.id = bots.compaction_
 LEFT JOIN models AS title_models ON title_models.id = bots.title_model_id
 LEFT JOIN models AS image_models ON image_models.id = bots.image_model_id
 LEFT JOIN search_providers ON search_providers.id = bots.search_provider_id
+LEFT JOIN fetch_providers ON fetch_providers.id = bots.fetch_provider_id
 LEFT JOIN memory_providers ON memory_providers.id = bots.memory_provider_id
 LEFT JOIN models AS tts_models ON tts_models.id = bots.tts_model_id
 LEFT JOIN models AS transcription_models ON transcription_models.id = bots.transcription_model_id
@@ -57,6 +59,10 @@ SET language = sqlc.arg(language),
     compaction_model_id = COALESCE(sqlc.narg(compaction_model_id), bots.compaction_model_id),
     title_model_id = COALESCE(sqlc.narg(title_model_id), bots.title_model_id),
     search_provider_id = COALESCE(sqlc.narg(search_provider_id), bots.search_provider_id),
+    fetch_provider_id = CASE
+      WHEN sqlc.arg(fetch_provider_id_set) = 1 THEN sqlc.narg(fetch_provider_id)
+      ELSE bots.fetch_provider_id
+    END,
     memory_provider_id = COALESCE(sqlc.narg(memory_provider_id), bots.memory_provider_id),
     image_model_id = COALESCE(sqlc.narg(image_model_id), bots.image_model_id),
     tts_model_id = COALESCE(sqlc.narg(tts_model_id), bots.tts_model_id),
@@ -88,6 +94,7 @@ RETURNING
   compaction_model_id,
   title_model_id,
   search_provider_id,
+  fetch_provider_id,
   memory_provider_id,
   image_model_id,
   tts_model_id,
@@ -119,12 +126,13 @@ SET language = 'auto',
     title_model_id = NULL,
     image_model_id = NULL,
     search_provider_id = NULL,
+    fetch_provider_id = NULL,
     memory_provider_id = NULL,
     tts_model_id = NULL,
     transcription_model_id = NULL,
     persist_full_tool_results = false,
     show_tool_calls_in_im = false,
-    tool_approval_config = '{"enabled":false,"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"edit":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}',
+    tool_approval_config = '{"enabled":false,"read":{"require_approval":false,"bypass_globs":[],"force_review_globs":[]},"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}',
     display_enabled = false,
     overlay_provider = '',
     overlay_enabled = false,

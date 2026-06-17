@@ -32,6 +32,7 @@ import (
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
+	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
@@ -254,11 +255,11 @@ func TestLoadSkillsUsesEffectiveSetAndPromptReflectsOverrideFallback(t *testing.
 	if err != nil {
 		t.Fatalf("get bridge client: %v", err)
 	}
-	roots, err := env.handler.skillDiscoveryRoots(context.Background(), env.botID)
+	roots, pluginRoots, err := env.handler.skillDiscoveryRoots(context.Background(), env.botID)
 	if err != nil {
 		t.Fatalf("resolve skill discovery roots: %v", err)
 	}
-	if err := skillset.ApplyAction(context.Background(), client, roots, skillset.ActionRequest{
+	if err := skillset.ApplyActionWithPluginRoots(context.Background(), client, roots, pluginRoots, skillset.ActionRequest{
 		Action:     skillset.ActionDisable,
 		TargetPath: managedPath,
 	}); err != nil {
@@ -306,11 +307,58 @@ func TestListSkillsAPIUsesConfiguredDiscoveryRoots(t *testing.T) {
 	}
 }
 
+func TestListSkillsAPIIncludesEnabledPluginSkillRoots(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	pluginRoot, err := skillset.PluginSkillsDirForID("github")
+	if err != nil {
+		t.Fatalf("plugin skills root: %v", err)
+	}
+	disabledRoot, err := skillset.PluginSkillsDirForID("disabled")
+	if err != nil {
+		t.Fatalf("disabled plugin skills root: %v", err)
+	}
+	pluginPath := path.Join(pluginRoot, "review", "SKILL.md")
+	env.writeSkillFile(t, pluginPath, managedSkillRaw("review", "Plugin Review"))
+	env.writeSkillFile(t, path.Join(disabledRoot, "hidden", "SKILL.md"), managedSkillRaw("hidden", "Hidden Plugin"))
+	env.handler.SetPluginService(fakePluginInstallationLister{items: []pluginspkg.Installation{
+		{PluginID: "github", Status: pluginspkg.StatusReady, Enabled: true},
+		{PluginID: "disabled", Status: pluginspkg.StatusReady, Enabled: false},
+		{PluginID: "removed", Status: pluginspkg.StatusUninstalled, Enabled: true},
+	}})
+
+	skills := env.listSkills(t)
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 plugin skill, got %d: %+v", len(skills), skills)
+	}
+	got := mustFindSkillByPath(t, skills, pluginPath)
+	if got.SourceRoot != pluginRoot {
+		t.Fatalf("source_root = %q, want %q", got.SourceRoot, pluginRoot)
+	}
+	if got.SourceKind != skillset.SourceKindPlugin {
+		t.Fatalf("source_kind = %q, want %q", got.SourceKind, skillset.SourceKindPlugin)
+	}
+	if got.State != skillset.StateEffective {
+		t.Fatalf("state = %q, want effective", got.State)
+	}
+}
+
 type skillsTestEnv struct {
 	handler  *ContainerdHandler
 	dataRoot string
 	botID    string
 	userID   string
+}
+
+type fakePluginInstallationLister struct {
+	items []pluginspkg.Installation
+	err   error
+}
+
+func (f fakePluginInstallationLister) List(context.Context, string) ([]pluginspkg.Installation, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.items, nil
 }
 
 func newSkillsTestEnv(t *testing.T) *skillsTestEnv {
@@ -573,7 +621,7 @@ func startSkillsTestBridgeServer(t *testing.T, dataRoot, botID string) {
 }
 
 func (s *skillsTestBridgeServer) ListDir(_ context.Context, req *pb.ListDirRequest) (*pb.ListDirResponse, error) {
-	containerPath, localPath := s.resolvePath(req.GetPath())
+	_, localPath := s.resolvePath(req.GetPath())
 	entries, err := os.ReadDir(localPath)
 	if err != nil {
 		return nil, toStatusError(err, req.GetPath())
@@ -586,12 +634,8 @@ func (s *skillsTestBridgeServer) ListDir(_ context.Context, req *pb.ListDirReque
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "stat %s: %v", entry.Name(), err)
 		}
-		entryPath := path.Join(containerPath, entry.Name())
-		if containerPath == "/" {
-			entryPath = "/" + entry.Name()
-		}
 		resp = append(resp, &pb.FileEntry{
-			Path:    entryPath,
+			Path:    entry.Name(),
 			IsDir:   entry.IsDir(),
 			Size:    info.Size(),
 			Mode:    info.Mode().String(),

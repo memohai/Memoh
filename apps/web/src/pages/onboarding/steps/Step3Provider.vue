@@ -15,12 +15,15 @@ import { ArrowLeft, Plus, AlertCircle } from 'lucide-vue-next'
 import { getAcpProfiles, type AcpprofileManagedField, type AcpprofilePublicProfile } from '@memohai/sdk'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { useCapabilitiesStore } from '@/store/capabilities'
+import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import CreateModel from '@/components/create-model/index.vue'
 import ModelItem from '@/pages/providers/components/model-item.vue'
 import { onboardingProviderPresets as providerPresets, type ProviderPreset } from '@/constants/provider-presets'
 import { acpAgentIcon, defaultSetupMode, findMissingRequiredManagedField, normalizeACPAgentID } from '@/utils/acp'
+import { canCreateLocalWorkspace } from '@/utils/desktop-runtime'
 import { useStepTransition, nextFrame } from '../useStepTransition'
+import { safeSessionGet, safeSessionSet } from '@/utils/safe-storage'
 import { ONBOARDING_KEYS } from '../constants'
 import { useProviderSetup } from './useProviderSetup'
 import { writeACPSelection, clearACPSelection } from './useACPSetup'
@@ -29,11 +32,17 @@ const { t } = useI18n()
 const { nextStep, prevStep } = useOnboarding()
 const { visible, exiting, leave } = useStepTransition()
 const capabilities = useCapabilitiesStore()
+const desktopRuntime = useDesktopRuntime()
 
-// Desktop/local deployments default to "self" (run against the host's
-// already-installed, already-logged-in CLI), but BYOK (api_key / oauth) is also
-// available. We use this only to pick the recommended default setup mode.
-const isLocalEnv = computed(() => capabilities.localWorkspaceEnabled)
+// Local workspace creation means "self" can run against host credentials.
+// Remote desktop connects to a server elsewhere, so it should use BYOK defaults.
+const allowLocalWorkspaceCreate = computed(() =>
+  canCreateLocalWorkspace({
+    serverLocalWorkspaceEnabled: capabilities.localWorkspaceEnabled,
+    host: desktopRuntime.host.value,
+    desktopRuntimeMode: desktopRuntime.desktopRuntimeMode.value,
+  }),
+)
 
 const listVisible = ref(false)
 const mode = ref<'list' | 'form' | 'acp'>('list')
@@ -51,7 +60,7 @@ const acpSubmitting = ref(false)
 
 function advanceWithCount() {
   addedCount.value++
-  sessionStorage.setItem(ONBOARDING_KEYS.providerAddedCount, String(addedCount.value))
+  safeSessionSet(ONBOARDING_KEYS.providerAddedCount, String(addedCount.value))
   leave(nextStep)
 }
 
@@ -119,10 +128,9 @@ function onSkipStep() {
 }
 
 async function openAcpForm(profile: AcpprofilePublicProfile) {
-  // Resolve deployment capabilities before branching: the store defaults to
-  // container (localWorkspaceEnabled=false), so the desktop default (self) is
-  // picked correctly even when the agent card is clicked early.
-  await capabilities.load()
+  // Resolve deployment and desktop runtime policy before branching so remote
+  // desktop does not pick the local "self" default when clicked early.
+  await Promise.all([capabilities.load(), desktopRuntime.load()])
 
   selectedAcpProfile.value = profile
   acpError.value = ''
@@ -136,7 +144,7 @@ async function openAcpForm(profile: AcpprofilePublicProfile) {
   // Desktop/local already has a logged-in CLI, so "use local config" (self) is
   // the recommended default and BYOK (oauth / api_key) is the secondary path.
   // Clean container workspaces have no credentials, so they default to api_key.
-  const preferred = isLocalEnv.value ? 'self' : 'api_key'
+  const preferred = allowLocalWorkspaceCreate.value ? 'self' : 'api_key'
   acpSetupMode.value = modes.includes(preferred) ? preferred : (modes[0] ?? defaultSetupMode(profile))
   listVisible.value = false
   setTimeout(() => {
@@ -218,13 +226,14 @@ onMounted(() => {
   // only when the user actually picks an agent on this step.
   clearACPSelection()
 
-  const stored = sessionStorage.getItem(ONBOARDING_KEYS.providerAddedCount)
+  const stored = safeSessionGet(ONBOARDING_KEYS.providerAddedCount)
   if (stored !== null) {
     const parsed = Number.parseInt(stored, 10)
     if (Number.isFinite(parsed) && parsed >= 0) addedCount.value = parsed
   }
 
   void capabilities.load()
+  void desktopRuntime.load()
 
   void (async () => {
     try {
@@ -281,7 +290,7 @@ onMounted(() => {
   >
     <div
       v-if="mode === 'list'"
-      class="text-left pt-24 h-[560px] max-h-[calc(100vh-7rem)] flex flex-col transition-all duration-[175ms] ease-out"
+      class="text-left pt-24 h-[35rem] max-h-[calc(100dvh-7rem)] flex flex-col transition-all duration-[175ms] ease-out"
       :class="listVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0'"
     >
       <h2
@@ -348,13 +357,13 @@ onMounted(() => {
         :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
       >
         <button
-          class="inline-flex h-[42px] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          class="inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           @click="leave(prevStep)"
         >
           {{ t('onboarding.prev') }}
         </button>
         <button
-          class="inline-flex h-[42px] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          class="inline-flex h-[2.625rem] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           @click="onSkipStep"
         >
           {{ ctaLabel }}
@@ -364,7 +373,7 @@ onMounted(() => {
 
     <div
       v-else-if="mode === 'form'"
-      class="text-left pt-24 h-[560px] max-h-[calc(100vh-7rem)] flex flex-col transition-all duration-[175ms] ease-out"
+      class="text-left pt-24 h-[35rem] max-h-[calc(100dvh-7rem)] flex flex-col transition-all duration-[175ms] ease-out"
       :class="formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0'"
     >
       <div
@@ -588,14 +597,14 @@ onMounted(() => {
         ]"
       >
         <button
-          class="inline-flex h-[42px] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
+          class="inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
           :disabled="submitting"
           @click="backToList"
         >
           {{ t('onboarding.provider.form.cancel') }}
         </button>
         <button
-          class="inline-flex h-[42px] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
+          class="inline-flex h-[2.625rem] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
           :disabled="formCtaDisabled"
           @click="saveAndNext"
         >
@@ -622,7 +631,7 @@ onMounted(() => {
 
     <div
       v-else-if="mode === 'acp' && selectedAcpProfile"
-      class="text-left pt-24 h-[560px] max-h-[calc(100vh-7rem)] flex flex-col transition-all duration-[175ms] ease-out"
+      class="text-left pt-24 h-[35rem] max-h-[calc(100dvh-7rem)] flex flex-col transition-all duration-[175ms] ease-out"
       :class="formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0'"
     >
       <div
@@ -722,14 +731,14 @@ onMounted(() => {
         :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
       >
         <button
-          class="inline-flex h-[42px] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
+          class="inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
           :disabled="acpSubmitting"
           @click="backToList"
         >
           {{ t('onboarding.provider.form.cancel') }}
         </button>
         <button
-          class="inline-flex h-[42px] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
+          class="inline-flex h-[2.625rem] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
           :disabled="acpSubmitting"
           @click="saveAcpAndNext"
         >

@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -253,6 +254,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 
 	start := time.Now()
 	result := sdkProvider.Test(ctx)
+	message := providerTestMessage(result)
 
 	switch result.Status {
 	case sdk.ProviderStatusUnreachable:
@@ -260,7 +262,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 			Status:    TestStatusError,
 			Reachable: false,
 			LatencyMs: time.Since(start).Milliseconds(),
-			Message:   result.Message,
+			Message:   message,
 		}, nil
 	case sdk.ProviderStatusUnhealthy:
 		status := TestStatusError
@@ -271,7 +273,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 			Status:    status,
 			Reachable: true,
 			LatencyMs: time.Since(start).Milliseconds(),
-			Message:   result.Message,
+			Message:   message,
 		}, nil
 	default:
 		if _, probeErr := sdkProvider.TestModel(ctx, "__ping__"); probeErr != nil {
@@ -293,6 +295,30 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	}
 }
 
+// errorDetailer is implemented by transport errors that can expand into a
+// fuller diagnostic, including the raw upstream response body. The probe path
+// only fills a short summary (e.g. "service error (404):"), so we reach for
+// this richer detail when the upstream replies with an opaque, non-JSON body.
+type errorDetailer interface {
+	Detail() string
+}
+
+// providerTestMessage returns the most informative message for a probe result,
+// preferring the upstream response detail over the short summary so that
+// opaque statuses still surface the provider's actual response body.
+func providerTestMessage(result *sdk.ProviderTestResult) string {
+	if result == nil {
+		return ""
+	}
+	var detailer errorDetailer
+	if errors.As(result.Error, &detailer) {
+		if detail := strings.TrimSpace(detailer.Detail()); detail != "" {
+			return detail
+		}
+	}
+	return result.Message
+}
+
 // FetchRemoteModels fetches available models from the provider using the Twilight AI SDK.
 func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteModel, error) {
 	providerID, err := db.ParseUUID(id)
@@ -304,59 +330,74 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 	if err != nil {
 		return nil, fmt.Errorf("get provider: %w", err)
 	}
-	if models.ClientType(provider.ClientType) == models.ClientTypeGitHubCopilot {
-		creds, err := s.ResolveModelCredentials(ctx, provider)
-		if err != nil {
-			return nil, err
-		}
-		sdkProvider := memohcopilot.NewProvider(creds.APIKey, nil)
-		if result := sdkProvider.Test(ctx); result.Status != sdk.ProviderStatusOK {
-			return nil, fmt.Errorf("github copilot provider test failed: %s", result.Message)
-		}
 
-		catalog := githubcopilot.Catalog()
-		remoteModels := make([]RemoteModel, 0, len(catalog))
-		for _, model := range catalog {
-			remoteModels = append(remoteModels, RemoteModel{
-				ID:      model.ID,
-				Name:    model.DisplayName,
-				Object:  "model",
-				OwnedBy: "github-copilot",
-				Type:    "chat",
-				Compatibilities: []string{
-					models.CompatVision,
-					models.CompatToolCall,
-					models.CompatReasoning,
-				},
-			})
-		}
-		return remoteModels, nil
+	var remoteModels []RemoteModel
+	switch {
+	case models.ClientType(provider.ClientType) == models.ClientTypeGitHubCopilot:
+		remoteModels, err = s.fetchGitHubCopilotModels(ctx, provider)
+	case supportsOAuth(provider):
+		remoteModels = fetchCodexCatalogModels()
+	default:
+		remoteModels, err = s.fetchRemoteModelsViaSDK(ctx, provider)
 	}
-	if supportsOAuth(provider) {
-		catalog := openaicodex.Catalog()
-		remoteModels := make([]RemoteModel, 0, len(catalog))
-		for _, model := range catalog {
-			compatibilities := make([]string, 0, 2)
-			if model.SupportsToolCall {
-				compatibilities = append(compatibilities, models.CompatToolCall)
-			}
-			if model.SupportsReasoning {
-				compatibilities = append(compatibilities, models.CompatReasoning)
-			}
-			remoteModels = append(remoteModels, RemoteModel{
-				ID:               model.ID,
-				Name:             model.DisplayName,
-				Object:           "model",
-				OwnedBy:          "openai-codex",
-				Type:             "chat",
-				Compatibilities:  compatibilities,
-				ReasoningEfforts: append([]string(nil), model.ReasoningEfforts...),
-			})
-		}
-		return remoteModels, nil
+	if err != nil {
+		return nil, err
 	}
 
-	return s.fetchRemoteModelsViaSDK(ctx, provider)
+	return remoteModels, nil
+}
+
+func (s *Service) fetchGitHubCopilotModels(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, error) {
+	creds, err := s.ResolveModelCredentials(ctx, provider)
+	if err != nil {
+		return nil, err
+	}
+	sdkProvider := memohcopilot.NewProvider(creds.APIKey, nil)
+	if result := sdkProvider.Test(ctx); result.Status != sdk.ProviderStatusOK {
+		return nil, fmt.Errorf("github copilot provider test failed: %s", result.Message)
+	}
+
+	catalog := githubcopilot.Catalog()
+	remoteModels := make([]RemoteModel, 0, len(catalog))
+	for _, model := range catalog {
+		remoteModels = append(remoteModels, RemoteModel{
+			ID:      model.ID,
+			Name:    model.DisplayName,
+			Object:  "model",
+			OwnedBy: "github-copilot",
+			Type:    "chat",
+			Compatibilities: []string{
+				models.CompatVision,
+				models.CompatToolCall,
+				models.CompatReasoning,
+			},
+		})
+	}
+	return remoteModels, nil
+}
+
+func fetchCodexCatalogModels() []RemoteModel {
+	catalog := openaicodex.Catalog()
+	remoteModels := make([]RemoteModel, 0, len(catalog))
+	for _, model := range catalog {
+		compatibilities := make([]string, 0, 2)
+		if model.SupportsToolCall {
+			compatibilities = append(compatibilities, models.CompatToolCall)
+		}
+		if model.SupportsReasoning {
+			compatibilities = append(compatibilities, models.CompatReasoning)
+		}
+		remoteModels = append(remoteModels, RemoteModel{
+			ID:               model.ID,
+			Name:             model.DisplayName,
+			Object:           "model",
+			OwnedBy:          "openai-codex",
+			Type:             "chat",
+			Compatibilities:  compatibilities,
+			ReasoningEfforts: append([]string(nil), model.ReasoningEfforts...),
+		})
+	}
+	return remoteModels
 }
 
 func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, error) {

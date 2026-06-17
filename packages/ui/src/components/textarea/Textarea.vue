@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from 'vue'
 import { useVModel } from '@vueuse/core'
+import { computed } from 'vue'
 import { cn } from '#/lib/utils'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   class?: HTMLAttributes['class']
   defaultValue?: string | number
   modelValue?: string | number
-}>()
+  size?: 'sm' | 'default' | 'lg'
+}>(), {
+  size: 'default',
+})
 
 const emits = defineEmits<{
   (e: 'update:modelValue', payload: string | number): void
@@ -17,18 +21,24 @@ const modelValue = useVModel(props, 'modelValue', emits, {
   passive: true,
   defaultValue: props.defaultValue,
 })
+
+const sizeClass = computed(() => ({
+  sm: 'min-h-14 px-2.5 py-1.5 text-body',
+  default: 'min-h-16 px-3 py-2 text-label',
+  lg: 'min-h-20 px-3.5 py-2.5 text-control',
+}[props.size]))
 </script>
 
 <template>
   <textarea
     v-model="modelValue"
     data-slot="textarea"
+    :data-size="props.size"
     :class="cn(
-      'flex field-sizing-content min-h-16 w-full rounded-lg border border-border bg-background px-3 py-2 text-[16px] text-foreground',
-      'placeholder:text-muted-foreground',
-      'transition-all outline-none resize-none',
-      'focus:border-ring focus:ring-2 focus:ring-ring/20',
-      'disabled:cursor-not-allowed disabled:opacity-50',
+      'flex field-sizing-content w-full rounded-md tracking-[0.01em] text-foreground',
+      sizeClass,
+      'outline-none resize-none',
+      'disabled:cursor-not-allowed disabled:opacity-40',
       props.class
     )"
   />

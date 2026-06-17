@@ -190,6 +190,18 @@ type fakeChatACL struct {
 	lastReq acl.EvaluateRequest
 }
 
+type fakeCommandRoleResolver struct {
+	role string
+	err  error
+}
+
+func (f *fakeCommandRoleResolver) GetMemberRole(_ context.Context, _, _ string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.role, nil
+}
+
 type fakeSessionEnsurer struct {
 	activeSession SessionResult
 	activeErr     error
@@ -511,6 +523,64 @@ func TestChannelInboundProcessorDeniedByACL(t *testing.T) {
 	}
 }
 
+func TestChannelInboundProcessorACLDeniedManagerMessageDoesNotSuggestLink(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-manager"}}
+	policySvc := &fakePolicyService{}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-denied", RouteID: "route-denied"}}
+	gateway := &fakeChatGateway{}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, "", 0)
+	processor.SetACLService(&fakeChatACL{allowed: false})
+	processor.SetCommandHandler(command.NewHandler(
+		nil,
+		&fakeCommandRoleResolver{role: "manager"},
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	))
+	sender := &fakeReplySender{}
+
+	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("telegram")}
+	msg := channel.InboundMessage{
+		BotID:       "bot-1",
+		Channel:     channel.ChannelType("telegram"),
+		Message:     channel.Message{Text: "hello"},
+		ReplyTarget: "target-id",
+		Sender:      channel.Identity{SubjectID: "manager-1"},
+		Conversation: channel.Conversation{
+			ID:   "chat-1",
+			Type: channel.ConversationTypePrivate,
+		},
+	}
+
+	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gateway.gotReq.Query != "" {
+		t.Error("denied manager should not trigger chat call")
+	}
+	if len(sender.sent) != 1 {
+		t.Fatalf("expected one denial reply, got: %+v", sender.sent)
+	}
+	reply := sender.sent[0].Message.PlainText()
+	if !strings.Contains(reply, "manage this bot") {
+		t.Fatalf("expected manager-specific denial reply, got: %s", reply)
+	}
+	if strings.Contains(reply, "/link") || strings.Contains(reply, "connection code") {
+		t.Fatalf("manager denial must not suggest account linking, got: %s", reply)
+	}
+}
+
 func TestChannelInboundProcessorACLGuestDeniedDowngradesToNotify(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-acl-deny"}}
 	policySvc := &fakePolicyService{}
@@ -548,8 +618,13 @@ func TestChannelInboundProcessorACLGuestDeniedDowngradesToNotify(t *testing.T) {
 	if gateway.gotReq.Query != "" {
 		t.Fatal("ACL denied guest should not trigger chat call")
 	}
-	if len(sender.sent) != 0 {
-		t.Fatalf("ACL denied guest should not send reply, got %+v", sender.sent)
+	// A directed (DM) denied message is no longer silently dropped: the sender
+	// gets one access/bind hint so a forgetful owner can /link in.
+	if len(sender.sent) != 1 {
+		t.Fatalf("ACL denied guest (DM) should receive one access hint reply, got %+v", sender.sent)
+	}
+	if !strings.Contains(sender.sent[0].Message.Text, "/link") {
+		t.Fatalf("expected access/bind hint mentioning /link, got %q", sender.sent[0].Message.Text)
 	}
 	if len(chatSvc.persistedIn) != 1 {
 		t.Fatalf("ACL denied guest should persist 1 passive message (replacing inbox), got %d", len(chatSvc.persistedIn))
@@ -598,7 +673,7 @@ func TestChannelInboundProcessorACLReceivesThreadScope(t *testing.T) {
 	}
 }
 
-func TestChannelInboundProcessorQQAndWeixinWriteCommandsBypassChatACL(t *testing.T) {
+func TestChannelInboundProcessorQQAndWeixinWriteCommandsNeedLinkedManager(t *testing.T) {
 	for _, channelType := range []channel.ChannelType{channel.ChannelType("qq"), channel.ChannelType("weixin")} {
 		t.Run(channelType.String(), func(t *testing.T) {
 			channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-im-command"}}
@@ -626,17 +701,14 @@ func TestChannelInboundProcessorQQAndWeixinWriteCommandsBypassChatACL(t *testing
 			if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channelType}, msg, sender); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if aclSvc.calls != 0 {
-				t.Fatalf("slash command should be handled before chat ACL, got %d ACL calls", aclSvc.calls)
-			}
 			if gateway.gotReq.Query != "" {
 				t.Fatalf("slash command should not trigger chat call, got query %q", gateway.gotReq.Query)
 			}
 			if len(sender.sent) != 1 {
 				t.Fatalf("expected one command reply, got %d", len(sender.sent))
 			}
-			if !strings.Contains(sender.sent[0].Message.Text, "Usage: /model set") {
-				t.Fatalf("expected command usage reply, got %q", sender.sent[0].Message.Text)
+			if !strings.Contains(sender.sent[0].Message.Text, "Only the bot owner") {
+				t.Fatalf("expected write command denial, got %q", sender.sent[0].Message.Text)
 			}
 		})
 	}

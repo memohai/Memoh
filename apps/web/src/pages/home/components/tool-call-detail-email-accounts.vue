@@ -12,7 +12,7 @@
         <span class="text-foreground truncate flex-1">{{ item.email || item.id }}</span>
         <span
           v-if="item.provider"
-          class="text-[10px] text-muted-foreground font-mono shrink-0 rounded bg-muted/30 px-1 py-0.5"
+          class="text-caption text-muted-foreground font-mono shrink-0 rounded bg-muted/30 px-1 py-0.5"
         >{{ item.provider }}</span>
       </div>
     </div>

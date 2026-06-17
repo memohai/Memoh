@@ -3,13 +3,16 @@ import type { AcceptableValue } from 'reka-ui'
 import type { HTMLAttributes } from 'vue'
 import { reactiveOmit, useVModel } from '@vueuse/core'
 import { ChevronDownIcon } from 'lucide-vue-next'
+import { computed } from 'vue'
 import { cn } from '#/lib/utils'
 
 defineOptions({
   inheritAttrs: false,
 })
 
-const props = defineProps<{ modelValue?: AcceptableValue | AcceptableValue[], class?: HTMLAttributes['class'] }>()
+const props = withDefaults(defineProps<{ modelValue?: AcceptableValue | AcceptableValue[], class?: HTMLAttributes['class'], size?: 'sm' | 'default' | 'lg' }>(), {
+  size: 'default',
+})
 
 const emit = defineEmits<{
   'update:modelValue': AcceptableValue
@@ -20,22 +23,30 @@ const modelValue = useVModel(props, 'modelValue', emit, {
   defaultValue: '',
 })
 
-const delegatedProps = reactiveOmit(props, 'class')
+const delegatedProps = reactiveOmit(props, 'class', 'size')
+
+// Size ladder mirrors the Select trigger (sm h-8 / default h-9 / lg h-10), tokenised
+// to the same control type scale so a NativeSelect and a Select read identically.
+const sizeClass = computed(() => ({
+  sm: 'h-8 pl-3 text-body',
+  default: 'h-9 pl-3 text-label',
+  lg: 'h-10 pl-3.5 text-control',
+}[props.size]))
 </script>
 
 <template>
   <div
-    class="group/native-select relative w-fit has-[select:disabled]:opacity-50"
+    class="group/native-select relative w-fit has-[select:disabled]:opacity-40"
     data-slot="native-select-wrapper"
   >
     <select
       v-bind="{ ...$attrs, ...delegatedProps }"
       v-model="modelValue"
       data-slot="native-select"
+      :data-size="props.size"
       :class="cn(
-        'shadow-xs! border-border placeholder:text-muted-foreground selection:bg-foreground selection:text-background h-9 w-full min-w-0 appearance-none rounded-lg border bg-background px-3 py-2 pr-9 text-xs transition-[color,box-shadow] outline-none disabled:pointer-events-none disabled:cursor-not-allowed',
-        'focus-visible:border-ring focus-visible:ring-ring/20 focus-visible:ring-2',
-        'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
+        'selection:bg-foreground selection:text-background w-full min-w-0 appearance-none rounded-md py-2 pr-9 tracking-[0.01em] outline-none disabled:pointer-events-none disabled:cursor-not-allowed',
+        sizeClass,
         props.class,
       )"
     >

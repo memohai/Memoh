@@ -17,12 +17,16 @@
     <template v-else>
       <section class="flex-1 relative w-full px-3 sm:px-5 lg:px-8">
         <section class="absolute inset-0">
+          <div
+            aria-hidden="true"
+            class="pointer-events-none absolute inset-x-0 top-0 z-10 h-10 bg-gradient-to-b from-surface-editor to-transparent"
+          />
           <ScrollArea
             ref="scrollContainer"
             :class="`${transitionScroll?'opacity-100':'opacity-0'} h-full`"
           >
             <div
-              class="w-full max-w-4xl mx-auto px-10 pt-6 pb-6 space-y-6"
+              class="w-full max-w-[840px] mx-auto px-10 pt-6 pb-28 space-y-6"
             >
               <div
                 ref="loadMoreSentinel"
@@ -36,8 +40,12 @@
                 <LoaderCircle class="size-3.5 animate-spin text-muted-foreground" />
               </div>
 
+              <!-- Read-only sessions (subagent / system / synced channel
+                   threads) can't take new input, so an empty one states why it
+                   has nothing. A fresh, writable chat instead gets the centered
+                   welcome composer below, never a stray line in a blank pane. -->
               <div
-                v-if="messages.length === 0 && !loadingChats"
+                v-if="messages.length === 0 && !loadingChats && activeChatReadOnly"
                 class="flex items-center justify-center min-h-75"
               >
                 <p
@@ -47,37 +55,34 @@
                   {{ $t('chat.emptySubagent') }}
                 </p>
                 <p
-                  v-else-if="activeSession?.type === 'heartbeat' || activeSession?.type === 'schedule'"
+                  v-else
                   class="text-muted-foreground text-xs"
                 >
                   {{ $t('chat.emptySystemSession') }}
                 </p>
-                <p
-                  v-else
-                  class="text-muted-foreground text-xs"
-                >
-                  {{ $t('chat.greeting') }}
-                </p>
               </div>
 
               <div
-                v-for="(msg, msgIndex) in messages"
+                v-for="(msg, index) in messages"
                 :key="msg.id"
                 :data-message-id="msg.id"
-                :data-scroll-segment-id="messageSegmentDomId(msg, msgIndex)"
                 :data-external-message-id="(msg.role === 'user' || msg.role === 'assistant') ? msg.externalMessageId : undefined"
-                class="rounded-2xl transition-[background-color,box-shadow] duration-500"
-                :class="highlightedMessageId === msg.id ? 'bg-muted/45 ring-1 ring-border shadow-sm' : ''"
+                class="transition-[background-color] duration-500 scroll-mt-2 px-2 -mx-2 [content-visibility:auto] [contain-intrinsic-size:auto_600px]"
+                :class="highlightedMessageId === msg.id ? 'bg-muted/45' : ''"
                 :data-anchor="msg.id"
               >
                 <MessageItem
                   :message="msg"
                   :session-type="activeSession?.type"
                   :bot-id="currentBotId"
+                  :channel-thread="isChannelThread"
+                  :channel-platform="channelPlatform"
+                  :bot-name="currentBot?.name"
+                  :bot-avatar-url="currentBot?.avatar_url"
                   :on-open-media="galleryOpenBySrc"
                   :on-reply-click="handleReplyJump"
-                  :root-el="scrollEl"
                   :is-scrolling="isScrolling"
+                  :is-last-message="index === messages.length - 1"
                   @active="isActiveEl"
                 />
               </div>
@@ -86,66 +91,46 @@
 
           <div
             v-if="showScrollRail"
-            class="group hidden md:flex absolute right-2 top-1/2 z-10 w-64 -translate-y-1/2 flex-col items-end pointer-events-none"
-            aria-label="Conversation navigation"
+            class="group/rail hidden md:flex absolute inset-y-0 right-4 z-10 w-96 flex-col items-end justify-center pointer-events-none"
+            @mouseenter="scheduleRailOpen"
+            @mouseleave="scheduleRailClose"
           >
+            <!-- Collapsed: uniform tick marks -->
             <div
-              v-if="hoveredScrollSegment"
-              class="absolute right-12 top-1/2 w-fit max-w-72 -translate-y-1/2 rounded-lg border bg-background/95 px-2.5 py-1.5 text-left font-mono shadow-md backdrop-blur transition-opacity duration-150"
+              class="flex max-h-[60vh] flex-col items-end justify-center gap-2 py-2 pointer-events-auto transition-opacity duration-150"
+              :class="railOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'"
+            >
+              <span
+                v-for="seg in railSegments"
+                :key="seg.id"
+                class="h-0.5 w-4 shrink-0 rounded-full transition-colors duration-150"
+                :class="seg.id === activeRailId
+                  ? 'bg-foreground/70'
+                  : 'bg-muted-foreground/30 group-hover/rail:bg-muted-foreground/55'"
+              />
+            </div>
+
+            <!-- Expanded: user-prompt select panel -->
+            <div
+              v-if="railOpen"
+              class="absolute right-0 top-1/2 w-80 -translate-y-1/2 overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-lg pointer-events-auto"
+              @mouseenter="scheduleRailOpen"
+              @mouseleave="scheduleRailClose"
             >
               <div
-                v-if="hoveredScrollSegment.role === 'assistant'"
-                class="mb-1 text-[10px] font-medium leading-none text-muted-foreground"
+                class="max-h-[min(60vh,480px)] overflow-y-auto overscroll-contain p-1.5 outline-none [mask-image:linear-gradient(to_bottom,transparent,black_10px,black_calc(100%-10px),transparent)] scrollbar-none"
               >
-                memoh
-              </div>
-              <div class="line-clamp-4 overflow-hidden text-ellipsis break-words text-[11px] leading-snug text-foreground">
-                {{ hoveredScrollSegment.preview }}
+                <button
+                  v-for="seg in railSegments"
+                  :key="seg.id"
+                  type="button"
+                  class="flex h-8 w-full items-center rounded-md px-3 text-left text-[13px] text-foreground hover:bg-[var(--overlay-hover)]"
+                  @click="scrollToRailSegment(seg)"
+                >
+                  <span class="truncate">{{ seg.preview }}</span>
+                </button>
               </div>
             </div>
-
-            <button
-              type="button"
-              class="absolute bottom-full mb-1 flex size-8 translate-y-1 items-center justify-center rounded-full border border-transparent text-muted-foreground opacity-0 transition-all duration-200 hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-0 disabled:hover:bg-transparent disabled:hover:text-muted-foreground group-hover:translate-y-0 group-hover:opacity-100 disabled:group-hover:opacity-40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring pointer-events-auto"
-              aria-label="Navigate to previous message"
-              :disabled="!previousScrollSegment"
-              @click="scrollToAdjacentSegment(-1)"
-            >
-              <ChevronUp class="size-4" />
-            </button>
-
-            <div class="flex flex-col items-end gap-0 pointer-events-auto">
-              <button
-                v-for="segment in scrollSegments"
-                :key="segment.id"
-                type="button"
-                class="group/timeline-tick relative flex h-3 w-8 cursor-pointer items-center justify-center rounded-full border border-transparent text-xs font-medium text-muted-foreground transition-colors duration-100 hover:bg-transparent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                :aria-label="segment.label"
-                @mouseenter="hoveredSegmentId = segment.id"
-                @mouseleave="hoveredSegmentId = ''"
-                @focus="hoveredSegmentId = segment.id"
-                @blur="hoveredSegmentId = ''"
-                @click="scrollToSegment(segment)"
-              >
-                <span
-                  class="h-px rounded-full bg-muted-foreground/70 opacity-50 transition-all duration-150 group-hover:opacity-100 group-hover/timeline-tick:w-4 group-hover/timeline-tick:bg-foreground/70"
-                  :class="[
-                    activeSegmentId === segment.id ? 'w-4 bg-foreground/80 opacity-100' : segment.index % 2 === 0 ? 'w-1.5' : 'w-3',
-                    hoveredSegmentId === segment.id ? '!w-4 !bg-foreground/80 opacity-100' : '',
-                  ]"
-                />
-              </button>
-            </div>
-
-            <button
-              type="button"
-              class="absolute top-full mt-1 flex size-8 -translate-y-1 items-center justify-center rounded-full border border-transparent text-muted-foreground opacity-0 transition-all duration-200 hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-0 disabled:hover:bg-transparent disabled:hover:text-muted-foreground group-hover:translate-y-0 group-hover:opacity-100 disabled:group-hover:opacity-40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring pointer-events-auto"
-              aria-label="Navigate to next message"
-              :disabled="!nextScrollSegment"
-              @click="scrollToAdjacentSegment(1)"
-            >
-              <ChevronDown class="size-4" />
-            </button>
           </div>
         </section>
       </section>
@@ -156,309 +141,467 @@
         @update:open-index="gallerySetOpenIndex"
       />
 
+      <MediaGalleryLightbox
+        :items="composerPreviewItems"
+        :open-index="composerPreviewIndex"
+        appearance="frost"
+        @update:open-index="composerPreviewIndex = $event"
+      />
+
+      <Dialog v-model:open="pastedViewerOpen">
+        <DialogContent class="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{{ $t('chat.pastedViewerTitle') }}</DialogTitle>
+          </DialogHeader>
+          <pre class="max-h-[60vh] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-surface-composer p-3 text-caption leading-relaxed text-foreground">{{ pastedViewerText }}</pre>
+        </DialogContent>
+      </Dialog>
+
+      <!-- The composer is a single instance reused in both layouts: pinned to
+           the bottom once a conversation exists, or lifted to the vertical
+           centre (with a greeting above it) while the chat is still empty, so a
+           fresh chat opens on an inviting page instead of a near-blank pane. -->
       <div
         v-if="!activeChatReadOnly"
-        class="px-3 sm:px-5 lg:px-8 py-2.5"
+        class="pointer-events-none absolute z-30 px-3 sm:px-5 lg:px-8"
+        :class="isWelcome
+          ? 'inset-0 flex flex-col items-center justify-start pt-[38dvh]'
+          : 'inset-x-0 bottom-0 pt-2 pb-7'"
       >
-        <div class="relative w-full max-w-4xl mx-auto">
-          <Transition
-            enter-active-class="transition-opacity duration-150 ease-out"
-            enter-from-class="opacity-0"
-            enter-to-class="opacity-100"
-            leave-active-class="transition-opacity duration-150 ease-in"
-            leave-from-class="opacity-100"
-            leave-to-class="opacity-0"
-          >
-            <Button
-              v-if="showJumpToBottom"
-              type="button"
-              size="icon"
-              variant="secondary"
-              class="absolute left-1/2 bottom-full z-20 mb-2 size-8 -translate-x-1/2 rounded-full border bg-background/95 shadow-sm backdrop-blur hover:bg-accent"
-              aria-label="Scroll to latest message"
-              @click="scrollToBottom"
-            >
-              <ArrowDown class="size-4" />
-            </Button>
-          </Transition>
-
+        <div
+          v-if="!isWelcome"
+          aria-hidden="true"
+          class="absolute inset-x-0 bottom-0 h-7 bg-surface-editor"
+        />
+        <!-- welcome: top-anchored column — the greeting and the composer's top
+             edge stay pinned at pt-[38dvh], so a growing composer (multiline
+             text or attachments) only extends downward and never pushes the
+             greeting up; normal: display:contents removes this from layout. -->
+        <div :class="isWelcome ? 'flex flex-col items-center gap-10 w-full' : 'contents'">
           <div
-            v-if="pendingFiles.length"
-            class="flex flex-wrap gap-2 mb-2"
+            v-if="isWelcome"
+            class="w-full max-w-[840px] mx-auto px-10 text-center"
           >
-            <div
-              v-for="(file, i) in pendingFiles"
-              :key="i"
-              class="relative group flex items-center gap-1.5 px-2 py-1 rounded-md border bg-muted/40 text-xs"
-            >
-              <component
-                :is="file.type.startsWith('image/') ? ImageIcon : FileIcon"
-                class="size-3 text-muted-foreground"
-              />
-              <span class="truncate max-w-30">{{ file.name }}</span>
-              <button
-                type="button"
-                class="ml-1 text-muted-foreground hover:text-foreground"
-                :aria-label="`${$t('common.delete')}: ${file.name}`"
-                @click="pendingFiles.splice(i, 1)"
-              >
-                <X class="size-3" />
-              </button>
-            </div>
+            <h1 class="text-balance text-2xl font-semibold tracking-tight text-foreground">
+              {{ welcomeGreeting }}
+            </h1>
           </div>
-
-          <input
-            ref="fileInput"
-            type="file"
-            multiple
-            class="hidden"
-            @change="handleFileInputChange"
-          >
-          <section>
+          <div class="pointer-events-auto relative w-full max-w-[840px] mx-auto px-10">
             <Transition
-              enter-active-class="transition-all duration-150 ease-out"
-              enter-from-class="opacity-0 translate-y-1"
-              enter-to-class="opacity-100 translate-y-0"
-              leave-active-class="transition-all duration-100 ease-in"
-              leave-from-class="opacity-100 translate-y-0"
-              leave-to-class="opacity-0 translate-y-1"
+              enter-active-class="motion-safe:transition-opacity motion-safe:duration-150 ease-out"
+              enter-from-class="motion-safe:opacity-0"
+              enter-to-class="opacity-100"
+              leave-active-class="motion-safe:transition-opacity motion-safe:duration-150 ease-in"
+              leave-from-class="opacity-100"
+              leave-to-class="motion-safe:opacity-0"
             >
-              <div
-                v-if="pendingUserInput"
-                class="mb-2 overflow-hidden rounded-lg border border-border bg-card shadow-sm"
+              <BgTaskPill
+                v-if="bgTaskPill"
+                :pill="bgTaskPill"
+                class="absolute left-0 bottom-full z-20 mb-2 max-w-[calc(50%-2rem)]"
+                @jump="scrollToOffscreen"
+              />
+            </Transition>
+
+            <Transition
+              enter-active-class="transition-opacity duration-150 ease-out"
+              enter-from-class="opacity-0"
+              enter-to-class="opacity-100"
+              leave-active-class="transition-opacity duration-150 ease-in"
+              leave-from-class="opacity-100"
+              leave-to-class="opacity-0"
+            >
+              <Button
+                v-if="showJumpToBottom"
+                type="button"
+                size="icon-sm"
+                variant="secondary"
+                class="absolute left-1/2 bottom-full z-20 mb-2 size-8 -translate-x-1/2 rounded-full"
+                aria-label="Scroll to latest message"
+                @click="scrollToBottom"
+              >
+                <ArrowDown class="size-4" />
+              </Button>
+            </Transition>
+
+            <input
+              ref="fileInput"
+              type="file"
+              multiple
+              class="hidden"
+              @change="handleFileInputChange"
+            >
+            <section>
+              <Transition
+                enter-active-class="transition-all duration-150 ease-out"
+                enter-from-class="opacity-0 translate-y-1"
+                enter-to-class="opacity-100 translate-y-0"
+                leave-active-class="transition-all duration-100 ease-in"
+                leave-from-class="opacity-100 translate-y-0"
+                leave-to-class="opacity-0 translate-y-1"
               >
                 <div
-                  class="max-h-[45vh] overflow-y-auto overscroll-contain px-3 py-2 pr-2"
-                  style="scrollbar-gutter: stable;"
+                  v-if="pendingUserInput"
+                  class="mb-2 overflow-hidden rounded-lg border border-border bg-card shadow-sm"
                 >
                   <div
-                    v-for="(question, questionIndex) in pendingUserInputQuestions"
-                    :key="question.id"
-                    :class="questionIndex > 0 ? 'mt-3 border-t border-border/60 pt-3' : ''"
+                    class="max-h-[45vh] overflow-y-auto overscroll-contain px-3 py-2 pr-2"
+                    style="scrollbar-gutter: stable;"
                   >
-                    <p class="whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-foreground">
-                      {{ question.text }}
-                    </p>
-                    <div>
-                      <div
-                        v-if="question.kind !== 'text' && question.options?.length"
-                        class="mt-2 flex flex-col gap-1"
-                      >
-                        <Button
-                          v-for="option in question.options"
-                          :key="option.id"
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          class="h-auto min-h-8 w-full justify-start whitespace-normal rounded-md px-2.5 py-1.5 text-left text-xs"
-                          :class="isPendingUserInputOptionSelected(question.id, option.id) ? 'bg-muted text-foreground' : 'text-foreground hover:bg-accent'"
-                          :title="option.description || option.label"
-                          :role="question.kind === 'multi_select' ? 'checkbox' : 'radio'"
-                          :aria-checked="isPendingUserInputOptionSelected(question.id, option.id)"
-                          @click="togglePendingUserInputOption(question, option.id)"
+                    <div
+                      v-for="(question, questionIndex) in pendingUserInputQuestions"
+                      :key="question.id"
+                      :class="questionIndex > 0 ? 'mt-3 border-t border-border/60 pt-3' : ''"
+                    >
+                      <p class="whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-foreground">
+                        {{ question.text }}
+                      </p>
+                      <div>
+                        <div
+                          v-if="question.kind !== 'text' && question.options?.length"
+                          class="mt-2 flex flex-col gap-1"
                         >
-                          <span
-                            class="mr-2 flex size-4 shrink-0 items-center justify-center"
-                            :class="isPendingUserInputOptionSelected(question.id, option.id) ? 'text-foreground' : 'text-muted-foreground'"
+                          <Button
+                            v-for="option in question.options"
+                            :key="option.id"
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            class="h-auto min-h-8 w-full justify-start whitespace-normal rounded-md px-2.5 py-1.5 text-left text-xs"
+                            :class="isPendingUserInputOptionSelected(question.id, option.id) ? 'bg-muted text-foreground' : 'text-foreground hover:bg-accent'"
+                            :title="option.description || option.label"
+                            :role="question.kind === 'multi_select' ? 'checkbox' : 'radio'"
+                            :aria-checked="isPendingUserInputOptionSelected(question.id, option.id)"
+                            @click="togglePendingUserInputOption(question, option.id)"
                           >
-                            <component
-                              :is="pendingUserInputOptionIcon(question, isPendingUserInputOptionSelected(question.id, option.id))"
-                              class="size-4"
-                            />
-                          </span>
-                          <span class="min-w-0 flex-1 break-words">{{ option.label }}</span>
-                        </Button>
-                        <Button
-                          v-if="question.allow_custom"
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          class="h-auto min-h-8 w-full justify-start whitespace-normal rounded-md px-2.5 py-1.5 text-left text-xs"
-                          :class="isPendingUserInputCustomSelected(question.id) ? 'bg-muted text-foreground' : 'text-foreground hover:bg-accent'"
-                          :role="question.kind === 'multi_select' ? 'checkbox' : 'radio'"
-                          :aria-checked="isPendingUserInputCustomSelected(question.id)"
-                          @click="togglePendingUserInputCustom(question)"
-                        >
-                          <span
-                            class="mr-2 flex size-4 shrink-0 items-center justify-center"
-                            :class="isPendingUserInputCustomSelected(question.id) ? 'text-foreground' : 'text-muted-foreground'"
+                            <span
+                              class="mr-2 flex size-4 shrink-0 items-center justify-center"
+                              :class="isPendingUserInputOptionSelected(question.id, option.id) ? 'text-foreground' : 'text-muted-foreground'"
+                            >
+                              <component
+                                :is="pendingUserInputOptionIcon(question, isPendingUserInputOptionSelected(question.id, option.id))"
+                                class="size-4"
+                              />
+                            </span>
+                            <span class="min-w-0 flex-1 break-words">{{ option.label }}</span>
+                          </Button>
+                          <Button
+                            v-if="question.allow_custom"
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            class="h-auto min-h-8 w-full justify-start whitespace-normal rounded-md px-2.5 py-1.5 text-left text-xs"
+                            :class="isPendingUserInputCustomSelected(question.id) ? 'bg-muted text-foreground' : 'text-foreground hover:bg-accent'"
+                            :role="question.kind === 'multi_select' ? 'checkbox' : 'radio'"
+                            :aria-checked="isPendingUserInputCustomSelected(question.id)"
+                            @click="togglePendingUserInputCustom(question)"
                           >
-                            <component
-                              :is="pendingUserInputOptionIcon(question, isPendingUserInputCustomSelected(question.id))"
-                              class="size-4"
-                            />
-                          </span>
-                          <span class="min-w-0 flex-1 break-words">{{ $t('chat.tools.userInputCustomOption') }}</span>
-                        </Button>
-                      </div>
-                      <div
-                        v-if="question.kind === 'text' || isPendingUserInputCustomSelected(question.id)"
-                        class="mt-1 flex items-center gap-2"
-                      >
-                        <input
-                          :value="pendingUserInputDraftText(question)"
-                          class="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          :placeholder="question.placeholder || $t('chat.tools.userInputPlaceholder')"
-                          @input="setPendingUserInputDraftText(question, ($event.target as HTMLInputElement).value)"
-                          @keydown.enter.prevent="handlePendingUserInputSubmit"
+                            <span
+                              class="mr-2 flex size-4 shrink-0 items-center justify-center"
+                              :class="isPendingUserInputCustomSelected(question.id) ? 'text-foreground' : 'text-muted-foreground'"
+                            >
+                              <component
+                                :is="pendingUserInputOptionIcon(question, isPendingUserInputCustomSelected(question.id))"
+                                class="size-4"
+                              />
+                            </span>
+                            <span class="min-w-0 flex-1 break-words">{{ $t('chat.tools.userInputCustomOption') }}</span>
+                          </Button>
+                        </div>
+                        <div
+                          v-if="question.kind === 'text' || isPendingUserInputCustomSelected(question.id)"
+                          class="mt-1 flex items-center gap-2"
                         >
+                          <input
+                            :value="pendingUserInputDraftText(question)"
+                            class="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            :placeholder="question.placeholder || $t('chat.tools.userInputPlaceholder')"
+                            @input="setPendingUserInputDraftText(question, ($event.target as HTMLInputElement).value)"
+                            @keydown.enter.prevent="handlePendingUserInputSubmit"
+                          >
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-                <div class="flex items-center justify-end gap-2 border-t border-border/60 bg-card px-3 py-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    class="text-xs text-muted-foreground hover:text-foreground"
-                    @click="handlePendingUserInputCancel"
-                  >
-                    {{ $t('chat.tools.cancelUserInput') }}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    class="text-xs"
-                    :disabled="!canSubmitPendingUserInput"
-                    @click="handlePendingUserInputSubmit"
-                  >
-                    {{ $t('chat.tools.submitUserInput') }}
-                  </Button>
-                </div>
-              </div>
-            </Transition>
-            <div
-              v-if="composerError"
-              class="mb-2 flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-            >
-              <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
-              <span class="min-w-0 break-words">{{ composerError }}</span>
-            </div>
-            <InputGroup class="bg-transparent overflow-hidden shadow-none! ring-0! border-border!">
-              <InputGroupTextarea
-                v-model="inputText"
-                class="min-h-14 max-h-14 text-xs resize-none break-all!"
-                :placeholder="activeChatReadOnly ? $t('chat.readonlyHint') : $t('chat.inputPlaceholder')"
-                :disabled="!currentBotId || activeChatReadOnly"
-                style="scrollbar-width: none;"
-                @keydown.enter.exact="handleKeydown"
-                @paste="handlePaste"
-              />
-              <InputGroupAddon
-                align="block-end"
-                class="items-center py-1.5"
-              >
-                <Popover v-model:open="agentPopoverOpen">
-                  <PopoverTrigger as-child>
+                  <div class="flex items-center justify-end gap-2 border-t border-border/60 bg-card px-3 py-2">
                     <Button
                       type="button"
                       size="sm"
                       variant="ghost"
-                      :disabled="!currentBotId || activeChatReadOnly || agentChanging || !canChangeAgent"
-                      class="gap-1.5 text-muted-foreground max-w-40"
+                      class="text-xs text-muted-foreground hover:text-foreground"
+                      @click="handlePendingUserInputCancel"
+                    >
+                      {{ $t('chat.tools.cancelUserInput') }}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      class="text-xs"
+                      :disabled="!canSubmitPendingUserInput"
+                      @click="handlePendingUserInputSubmit"
+                    >
+                      {{ $t('chat.tools.submitUserInput') }}
+                    </Button>
+                  </div>
+                </div>
+              </Transition>
+              <div
+                v-if="composerError"
+                class="mb-2 flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+              >
+                <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
+                <span class="min-w-0 break-words">{{ composerError }}</span>
+              </div>
+              <!--
+              Compact uses a CONCRETE 28px radius (= half the compact height:
+              button 36px + py-2.5 ×2 = 56px), so a short composer still reads as
+              a perfect pill — but, unlike rounded-full (9999px), the value can be
+              animated. Multiline shrinks the corners to 20px; transitioning
+              between two concrete radii interpolates smoothly, whereas animating
+              out of 9999px snapped mid-way (the value stayed clamped-round until
+              it crossed half-height, then jumped the corner in one step).
+            -->
+              <div
+                ref="composerEl"
+                data-slot="input-group"
+                role="group"
+                class="chat-composer-edge relative flex w-full flex-wrap items-center gap-1 bg-surface-composer px-2.5 py-2.5 transition-[border-radius] motion-reduce:transition-none"
+                :class="(isMultiline || showAttachmentGrid) ? 'rounded-[20px]' : 'rounded-[28px]'"
+                :style="{ transitionDuration: `${composerRadiusMs}ms`, transitionTimingFunction: composerRadiusEase }"
+                @click.self="focusTextarea"
+              >
+                <!-- The attachment row reveals via a grid 0fr↔1fr track so a card
+                   is unveiled in place — it never translates and is always
+                   clipped, so it can't overflow the box — while the composer
+                   grows around it. The inner min-h-0 + overflow-hidden is what
+                   lets the grid track actually collapse below content height. -->
+                <Transition
+                  enter-active-class="transition-[grid-template-rows] motion-reduce:transition-none"
+                  enter-from-class="grid-rows-[0fr]"
+                  enter-to-class="grid-rows-[1fr]"
+                  leave-active-class="transition-[grid-template-rows] motion-reduce:transition-none"
+                  leave-from-class="grid-rows-[1fr]"
+                  leave-to-class="grid-rows-[0fr]"
+                  :duration="ATTACHMENT_ANIM_MS"
+                >
+                  <div
+                    v-if="showAttachmentGrid"
+                    class="order-first grid w-full basis-full"
+                    :style="{ transitionDuration: `${ATTACHMENT_ANIM_MS}ms`, transitionTimingFunction: 'cubic-bezier(0.25, 0.1, 0.25, 1)' }"
+                  >
+                    <div class="min-h-0 overflow-hidden">
+                      <div class="flex flex-wrap gap-2 pb-1.5">
+                        <ChatAttachmentCard
+                          v-for="preview in pendingPreviews"
+                          :key="preview.key"
+                          :kind="preview.isPasted ? 'pasted' : (preview.isMedia ? 'media' : 'file')"
+                          :src="preview.url"
+                          :video="preview.isVideo"
+                          :name="preview.file.name"
+                          :ext="preview.ext"
+                          :lines="preview.lines"
+                          :text="preview.pastedText"
+                          :size="preview.size"
+                          :loading="preview.loading"
+                          removable
+                          :clickable="preview.isPasted || (preview.isMedia && !!preview.url)"
+                          @remove="removeAttachment(preview.i)"
+                          @preview="preview.isPasted ? (pastedViewerText = preview.pastedText) : openComposerPreview(preview.url)"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </Transition>
+
+                <textarea
+                  ref="textareaEl"
+                  v-model="inputText"
+                  rows="1"
+                  :placeholder="activeChatReadOnly ? $t('chat.readonlyHint') : $t('chat.inputPlaceholder')"
+                  :disabled="!currentBotId || activeChatReadOnly"
+                  class="field-sizing-content resize-none break-words bg-transparent text-base leading-[var(--chat-leading)] text-foreground outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
+                  :class="isMultiline
+                    ? 'order-none w-full basis-full pl-2 pr-1 pt-2 pb-1.5 max-h-52'
+                    : 'order-2 min-w-0 flex-1 self-center pl-1 pr-1 py-1 max-h-32'"
+                  @keydown.enter.exact="handleKeydown"
+                  @paste="handlePaste"
+                  @input="syncMultiline"
+                />
+
+                <DropdownMenu
+                  v-if="composerMenuHasItems"
+                  v-model:open="agentPopoverOpen"
+                >
+                  <DropdownMenuTrigger as-child>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      :disabled="!currentBotId || activeChatReadOnly || agentChanging"
+                      :title="$t('chat.composerActions')"
+                      class="order-1 size-9 rounded-full text-foreground/85"
+                      :class="isMultiline ? 'self-end' : 'self-center'"
+                      :aria-label="$t('chat.composerActions')"
                     >
                       <LoaderCircle
                         v-if="agentChanging"
-                        class="size-3 animate-spin"
+                        class="size-4 animate-spin"
                       />
-                      <component
-                        :is="selectedAgentIcon"
+                      <Plus
                         v-else
-                        class="size-3.5 shrink-0"
+                        class="size-[22px]"
+                        :stroke-width="1.75"
                       />
-                      <span class="truncate text-[11px]">{{ selectedAgentLabel }}</span>
-                      <ChevronDown class="size-3 shrink-0 opacity-50" />
                     </Button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    class="w-56 p-1"
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    class="w-56"
                     align="start"
+                    side="top"
                   >
-                    <button
-                      type="button"
-                      class="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-muted"
-                      @click="selectMemohAgent"
-                    >
-                      <MessageSquare class="size-3.5 text-muted-foreground" />
-                      <span class="min-w-0 flex-1 truncate">{{ $t('chat.agentMemoh') }}</span>
-                      <Check
-                        v-if="!activeIsACP"
-                        class="size-3 text-muted-foreground"
-                      />
-                    </button>
-                    <button
-                      v-for="profile in enabledACPProfiles"
-                      :key="profile.id"
-                      type="button"
-                      class="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-muted"
-                      @click="selectACPAgent(profile)"
-                    >
-                      <component
-                        :is="acpAgentIcon(profile.id, true)"
-                        class="size-3.5 shrink-0"
-                      />
-                      <span class="min-w-0 flex-1 truncate">{{ profile.display_name || profile.id }}</span>
-                      <Check
-                        v-if="activeACPAgentId === normalizedProfileID(profile.id)"
-                        class="size-3 text-muted-foreground"
-                      />
-                    </button>
-                  </PopoverContent>
-                </Popover>
-
-                <Popover v-model:open="modelPopoverOpen">
-                  <PopoverTrigger as-child>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      :disabled="!currentBotId || activeChatReadOnly || acpModelChanging"
-                      class="gap-0.5 text-muted-foreground max-w-40"
-                    >
-                      <LoaderCircle
-                        v-if="acpModelChanging || acpModelsLoading"
-                        class="size-3 animate-spin"
-                      />
-                      <span class="truncate text-[11px]">{{ selectedModelLabel }}</span>
-                      <ChevronDown class="size-3 shrink-0 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    class="w-96 p-0"
-                    align="start"
-                  >
-                    <div
-                      v-if="activeIsPendingACP"
-                      class="max-h-80 overflow-y-auto p-1"
-                    >
-                      <button
-                        type="button"
-                        class="flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
-                        @click="onPendingACPDefaultModelSelected"
-                      >
-                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.modelDefault') }}</span>
+                    <!-- The agent runtime is fixed once a session has any turns,
+                       so the switcher only appears while the session is still
+                       empty. Showing it disabled in an active chat just dangles
+                       a choice that can't be made. -->
+                    <template v-if="canChangeAgent && enabledACPProfiles.length">
+                      <DropdownMenuLabel>{{ $t('chat.agent') }}</DropdownMenuLabel>
+                      <DropdownMenuItem @select="selectMemohAgent">
+                        <img
+                          src="/logo.svg"
+                          alt=""
+                          class="size-4 shrink-0"
+                        >
+                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.agentMemoh') }}</span>
                         <Check
-                          v-if="!pendingACPModelId"
-                          class="mt-0.5 size-3 shrink-0 text-muted-foreground"
+                          v-if="!activeIsACP"
+                          class="ml-auto"
                         />
-                      </button>
-                      <div
-                        v-if="acpModelsLoading"
-                        class="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground"
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        v-for="profile in enabledACPProfiles"
+                        :key="profile.id"
+                        @select="selectACPAgent(profile)"
                       >
-                        <LoaderCircle class="size-3 animate-spin" />
-                        {{ $t('common.loading') }}
-                      </div>
-                      <div
-                        v-else-if="!pendingACPModelOptions.length"
-                        class="px-2 py-3 text-xs text-muted-foreground"
+                        <component :is="acpAgentIcon(profile.id, true)" />
+                        <span class="min-w-0 flex-1 truncate">{{ profile.display_name || profile.id }}</span>
+                        <Check
+                          v-if="activeACPAgentId === normalizedProfileID(profile.id)"
+                          class="ml-auto"
+                        />
+                      </DropdownMenuItem>
+                    </template>
+                    <template v-if="!activeIsACP">
+                      <DropdownMenuSeparator v-if="canChangeAgent && enabledACPProfiles.length" />
+                      <DropdownMenuItem
+                        :disabled="!currentBotId || activeChatReadOnly || streaming"
+                        @select="fileInput?.click()"
                       >
-                        {{ $t('chat.noModels') }}
-                      </div>
-                      <template v-else>
+                        <Paperclip />
+                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.attachFiles') }}</span>
+                      </DropdownMenuItem>
+                    </template>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <div
+                  class="order-3 ml-auto flex min-w-0 items-center gap-2"
+                  :class="isMultiline ? 'self-end' : 'self-center'"
+                >
+                  <Popover v-model:open="modelPopoverOpen">
+                    <PopoverTrigger as-child>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        :disabled="!currentBotId || activeChatReadOnly || acpModelChanging"
+                        class="composer-pill-press h-9 max-w-60 gap-1 rounded-full px-3 text-muted-foreground"
+                      >
+                        <LoaderCircle
+                          v-if="acpModelChanging || acpModelsLoading"
+                          class="size-3.5 animate-spin"
+                        />
+                        <span class="truncate text-label">{{ modelTriggerLabel }}</span>
+                        <ChevronDown class="size-3.5 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      class="w-80 overflow-hidden p-0"
+                      align="end"
+                      side="top"
+                      :side-offset="4"
+                    >
+                      <div
+                        v-if="activeIsPendingACP"
+                        class="max-h-80 overflow-y-auto p-1"
+                      >
                         <button
-                          v-for="model in pendingACPModelOptions"
+                          type="button"
+                          class="flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
+                          @click="onPendingACPDefaultModelSelected"
+                        >
+                          <span class="min-w-0 flex-1 truncate">{{ $t('chat.modelDefault') }}</span>
+                          <Check
+                            v-if="!pendingACPModelId"
+                            class="mt-0.5 size-3 shrink-0 text-muted-foreground"
+                          />
+                        </button>
+                        <div
+                          v-if="acpModelsLoading"
+                          class="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground"
+                        >
+                          <LoaderCircle class="size-3 animate-spin" />
+                          {{ $t('common.loading') }}
+                        </div>
+                        <div
+                          v-else-if="!pendingACPModelOptions.length"
+                          class="px-2 py-3 text-xs text-muted-foreground"
+                        >
+                          {{ $t('chat.noModels') }}
+                        </div>
+                        <template v-else>
+                          <button
+                            v-for="model in pendingACPModelOptions"
+                            :key="model.id || model.name"
+                            type="button"
+                            class="flex min-h-8 w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
+                            @click="onACPModelSelected(model)"
+                          >
+                            <span class="min-w-0 flex-1">
+                              <span class="block truncate">
+                                {{ model.name || model.id }}
+                              </span>
+                              <span
+                                v-if="model.description"
+                                class="mt-0.5 block line-clamp-2 text-[11px] leading-snug text-muted-foreground"
+                              >
+                                {{ model.description }}
+                              </span>
+                            </span>
+                            <Check
+                              v-if="model.id === pendingACPModelId"
+                              class="mt-0.5 size-3 shrink-0 text-muted-foreground"
+                            />
+                          </button>
+                        </template>
+                      </div>
+                      <div
+                        v-else-if="activeIsACP"
+                        class="max-h-80 overflow-y-auto p-1"
+                      >
+                        <div
+                          v-if="acpModelsLoading"
+                          class="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground"
+                        >
+                          <LoaderCircle class="size-3 animate-spin" />
+                          {{ $t('common.loading') }}
+                        </div>
+                        <div
+                          v-else-if="!acpModels.length"
+                          class="px-2 py-3 text-xs text-muted-foreground"
+                        >
+                          {{ $t('chat.noModels') }}
+                        </div>
+                        <button
+                          v-for="model in acpModels"
+                          v-else
                           :key="model.id || model.name"
                           type="button"
                           class="flex min-h-8 w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
@@ -476,157 +619,84 @@
                             </span>
                           </span>
                           <Check
-                            v-if="model.id === pendingACPModelId"
+                            v-if="model.id === currentACPModelId"
                             class="mt-0.5 size-3 shrink-0 text-muted-foreground"
                           />
                         </button>
-                      </template>
-                    </div>
-                    <div
-                      v-else-if="activeIsACP"
-                      class="max-h-80 overflow-y-auto p-1"
-                    >
-                      <div
-                        v-if="acpModelsLoading"
-                        class="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground"
-                      >
-                        <LoaderCircle class="size-3 animate-spin" />
-                        {{ $t('common.loading') }}
                       </div>
-                      <div
-                        v-else-if="!acpModels.length"
-                        class="px-2 py-3 text-xs text-muted-foreground"
-                      >
-                        {{ $t('chat.noModels') }}
-                      </div>
-                      <button
-                        v-for="model in acpModels"
-                        v-else
-                        :key="model.id || model.name"
-                        type="button"
-                        class="flex min-h-8 w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
-                        @click="onACPModelSelected(model)"
-                      >
-                        <span class="min-w-0 flex-1">
-                          <span class="block truncate">
-                            {{ model.name || model.id }}
-                          </span>
-                          <span
-                            v-if="model.description"
-                            class="mt-0.5 block line-clamp-2 text-[11px] leading-snug text-muted-foreground"
-                          >
-                            {{ model.description }}
-                          </span>
-                        </span>
-                        <Check
-                          v-if="model.id === currentACPModelId"
-                          class="mt-0.5 size-3 shrink-0 text-muted-foreground"
+                      <div v-else>
+                        <ChatModelPicker
+                          v-model="overrideModelId"
+                          v-model:reasoning-effort="overrideReasoningEffort"
+                          :models="models"
+                          :providers="providers"
+                          model-type="chat"
+                          :open="modelPopoverOpen"
+                          @update:model-value="onModelSelected"
+                          @close="modelPopoverOpen = false"
                         />
-                      </button>
-                    </div>
-                    <ModelOptions
-                      v-else
-                      v-model="overrideModelId"
-                      :models="models"
-                      :providers="providers"
-                      model-type="chat"
-                      :open="modelPopoverOpen"
-                      @update:model-value="onModelSelected"
-                    />
-                  </PopoverContent>
-                </Popover>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
 
-                <Button
-                  v-if="activeIsACP"
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  class="gap-1 text-muted-foreground max-w-40"
-                  disabled
-                >
-                  <FolderOpen class="size-3.5 shrink-0" />
-                  <span class="truncate text-[11px]">{{ activeACPProjectLabel }}</span>
-                </Button>
-
-                <Popover
-                  v-if="!activeIsACP"
-                  v-model:open="reasoningPopoverOpen"
-                >
-                  <PopoverTrigger as-child>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      :disabled="!currentBotId || activeChatReadOnly || !activeModelSupportsReasoning"
-                      class="gap-0.5 text-muted-foreground"
-                    >
-                      <Lightbulb
-                        class="size-3.5 shrink-0"
-                        :style="{ opacity: reasoningTriggerOpacity }"
-                      />
-                      <span class="text-[11px]">{{ selectedReasoningLabel }}</span>
-                      <ChevronDown class="size-3 shrink-0 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    class="w-40 p-0"
-                    align="start"
+                  <Button
+                    v-if="activeIsACP"
+                    type="button"
+                    variant="ghost"
+                    class="h-9 gap-1 rounded-full px-3 text-muted-foreground max-w-40"
+                    disabled
                   >
-                    <ReasoningEffortSelect
-                      v-model="overrideReasoningEffort"
-                      :efforts="availableReasoningEfforts"
-                      @update:model-value="onReasoningSelected"
+                    <FolderOpen class="size-3.5 shrink-0" />
+                    <span class="truncate text-[11px]">{{ activeACPProjectLabel }}</span>
+                  </Button>
+
+                  <div class="relative size-9 shrink-0">
+                    <SessionInfoRing
+                      v-if="!activeIsACP"
+                      :override-model-id="overrideModelId"
+                      :fallback-context-window="activeModel?.config?.context_window ?? null"
+                      class="absolute inset-0 size-9 transition-[opacity,scale] duration-200 ease-out motion-reduce:transition-none"
+                      :class="(!showSend && !streaming) ? 'scale-100 opacity-100' : 'pointer-events-none scale-75 opacity-0'"
                     />
-                  </PopoverContent>
-                </Popover>
-
-                <Button
-                  v-if="!activeIsACP"
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  :disabled="!currentBotId || activeChatReadOnly || streaming"
-                  aria-label="Attach files"
-                  @click="fileInput?.click()"
-                >
-                  <Paperclip class="size-3.5" />
-                </Button>
-
-                <SessionInfoRing
-                  v-if="!activeIsACP"
-                  class="ml-auto"
-                  :override-model-id="overrideModelId"
-                />
-                <div
-                  v-else
-                  class="ml-auto"
-                />
-
-                <Button
-                  v-if="!streaming"
-                  type="button"
-                  size="icon"
-                  :disabled="(!inputText.trim() && !pendingFiles.length) || !currentBotId || activeChatReadOnly"
-                  aria-label="Send message"
-                  class="size-7 rounded-full bg-primary text-primary-foreground"
-                  @click="handleSend"
-                >
-                  <Send class="size-3" />
-                </Button>
-                <Button
-                  v-else
-                  type="button"
-                  size="icon"
-                  variant="destructive"
-                  class="size-7 rounded-full"
-                  aria-label="Stop generating response"
-                  @click="chatStore.abort()"
-                >
-                  <LoaderCircle class="size-3.5 animate-spin" />
-                </Button>
-              </InputGroupAddon>
-            </InputGroup>
-          </section>
+                    <Button
+                      v-if="!streaming"
+                      type="button"
+                      variant="brand"
+                      :disabled="!showSend || !currentBotId || activeChatReadOnly"
+                      aria-label="Send message"
+                      class="absolute inset-0 size-9 rounded-full transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
+                      :class="showSend ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
+                      @click="handleSend"
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.25"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        class="size-[18px]"
+                        aria-hidden="true"
+                      >
+                        <path d="M12 19.5 V5" />
+                        <path d="M6 10.5 L12 4.5 L18 10.5" />
+                      </svg>
+                    </Button>
+                    <Button
+                      v-else
+                      type="button"
+                      variant="destructive"
+                      class="absolute inset-0 size-9 rounded-full"
+                      aria-label="Stop generating response"
+                      @click="chatStore.abort()"
+                    >
+                      <LoaderCircle class="size-[18px] animate-spin" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
         </div>
       </div>
     </template>
@@ -634,20 +704,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount, useTemplateRef, watchEffect, watch, nextTick, onActivated, onDeactivated } from 'vue'
+import { ref, computed, onBeforeUnmount, onMounted, useTemplateRef, watchEffect, watch, nextTick, onActivated, onDeactivated } from 'vue'
 import {
   LoaderCircle,
-  Image as ImageIcon,
-  File as FileIcon,
-  X,
   Paperclip,
-  Send,
+  Plus,
   ChevronDown,
-  ChevronUp,
-  Lightbulb,
   CircleAlert,
   ArrowDown,
-  MessageSquare,
   Check,
   FolderOpen,
   Square,
@@ -655,7 +719,7 @@ import {
   Circle,
   CircleDot,
 } from 'lucide-vue-next'
-import { ScrollArea, Button, InputGroup, InputGroupAddon, InputGroupTextarea, Popover, PopoverContent, PopoverTrigger } from '@memohai/ui'
+import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogHeader, DialogTitle } from '@memohai/ui'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
 import { useScroll, useElementBounding, useIntersectionObserver, useStorage } from '@vueuse/core'
@@ -664,41 +728,33 @@ import { getAcpProfiles, getModels, getProviders, getBotsByBotIdSettings } from 
 import type { AcpclientModelInfo, AcpprofilePublicProfile, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import MessageItem from './message-item.vue'
-import MediaGalleryLightbox from './media-gallery-lightbox.vue'
+import ChatAttachmentCard from './chat-attachment-card.vue'
+import { animateScrollTo } from './chat-minimap'
+import BgTaskPill from './bg-task-pill.vue'
+import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'
+import MediaGalleryLightbox, { type MediaGalleryItem } from './media-gallery-lightbox.vue'
 import SessionInfoRing from './session-info-ring.vue'
-import ModelOptions from '@/pages/bots/components/model-options.vue'
-import ReasoningEffortSelect from '@/pages/bots/components/reasoning-effort-select.vue'
-import { EFFORT_LABELS, EFFORT_OPACITY, REASONING_EFFORT_ADAPTIVE, REASONING_EFFORT_DISABLE } from '@/pages/bots/components/reasoning-effort'
+import ChatModelPicker from './chat-model-picker.vue'
+import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, availableEffortsForMode, resolveEffortLevels, resolveThinkingMode } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
 import type { ChatAttachment, UIUserInput, UIUserInputQuestion, WSUserInputAnswer } from '@/composables/api/useChat'
 import { onAuthSessionCleared } from '@/lib/auth-session'
-import type { ChatMessage } from '@/store/chat-list'
 import { useACPRuntime } from '@/composables/useACPRuntime'
-import { acpAgentDisplayName, acpAgentIcon, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID } from '@/utils/acp'
+import { acpAgentIcon, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID } from '@/utils/acp'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-
-interface ScrollSegment {
-  id: string
-  targetSegmentId: string
-  targetMessageId: string
-  role: 'user' | 'assistant'
-  label: string
-  preview: string
-  index: number
-  top: number
-  topPercent: number
-}
-
-interface ScrollSegmentSource {
-  message: ChatMessage
-  messageIndex: number
-}
 
 interface PendingUserInputDraft {
   optionIds: string[]
   customSelected: boolean
   customText: string
   text: string
+}
+
+interface ScrollRailSegment {
+  id: string
+  label: string
+  preview: string
+  index: number
 }
 
 const props = withDefaults(defineProps<{
@@ -711,12 +767,204 @@ const props = withDefaults(defineProps<{
 
 const { t } = useI18n()
 const chatStore = useChatStore()
+const { pill: bgTaskPill, scrollToOffscreen, cleanup: cleanupBgTaskBeacons } = provideBgTaskBeacons()
+onBeforeUnmount(cleanupBgTaskBeacons)
 const fileInput = ref<HTMLInputElement | null>(null)
 const pendingFiles = ref<File[]>([])
+
+// Pasting a large block of text floods the composer and buries the controls, so
+// past a threshold we capture it as a "pasted content" attachment card instead
+// (the raw text still rides along as a .txt file on send). The trigger is set
+// deliberately high so ordinary multi-line snippets keep landing in the input.
+const PASTE_LINE_THRESHOLD = 50
+const PASTE_CHAR_THRESHOLD = 2000
+const PASTED_FILE_NAME = 'pasted-text.txt'
+// Original text for each pasted-content file, so its card can preview the body
+// and the viewer can show it in full without re-reading the synthetic File.
+const pastedTexts = new WeakMap<File, string>()
+function makePastedFile(text: string): File {
+  const file = new File([text], PASTED_FILE_NAME, { type: 'text/plain' })
+  pastedTexts.set(file, text)
+  return file
+}
+
+function isMediaFile(file: File): boolean {
+  return file.type.startsWith('image/') || file.type.startsWith('video/')
+}
+
+// A stable, collision-free key per File object (two byte-identical files are
+// still distinct instances) so a card keeps its identity across reorders and
+// never replays its entry animation when a sibling is removed.
+const fileKeys = new WeakMap<File, string>()
+let fileKeySeq = 0
+function keyForFile(file: File): string {
+  let key = fileKeys.get(file)
+  if (!key) {
+    key = `f${++fileKeySeq}`
+    fileKeys.set(file, key)
+  }
+  return key
+}
+
+// Text-like files get a line count on their card (e.g. a pasted snippet or a
+// .yml config), mirroring how a code block reads. Binary blobs are skipped so
+// we never surface a meaningless newline tally for a PDF or archive.
+const TEXT_EXTENSIONS = new Set([
+  'txt', 'md', 'markdown', 'json', 'jsonc', 'yaml', 'yml', 'xml', 'csv', 'tsv',
+  'log', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'vue', 'py', 'go', 'rs', 'java',
+  'c', 'cc', 'cpp', 'h', 'hpp', 'css', 'scss', 'less', 'html', 'svg', 'sh', 'bash',
+  'zsh', 'toml', 'ini', 'conf', 'env', 'sql', 'rb', 'php', 'swift', 'kt', 'gradle',
+])
+const LINE_COUNT_MAX_BYTES = 2 * 1024 * 1024
+function isTextLikeFile(file: File): boolean {
+  if (isMediaFile(file)) return false
+  if (file.size > LINE_COUNT_MAX_BYTES) return false
+  const mime = file.type.toLowerCase()
+  if (mime.startsWith('text/')) return true
+  if (mime === 'application/json' || mime === 'application/xml' || mime.includes('yaml')) return true
+  const dot = file.name.lastIndexOf('.')
+  const ext = dot > 0 ? file.name.slice(dot + 1).toLowerCase() : ''
+  if (ext && TEXT_EXTENSIONS.has(ext)) return true
+  // Pasted content arrives without a mime/extension — treat it as text.
+  return mime === '' && ext === ''
+}
+
+// Object-URL previews for pending image/video attachments, keyed by File so a
+// URL is created once and revoked the moment its file leaves the tray (or the
+// composer unmounts) — no leaks across sends or session switches.
+const pendingPreviewUrls = ref(new Map<File, string>())
+// Line counts for text-like pending files, resolved asynchronously via FileReader.
+// A `-1` sentinel marks "reading in progress" so a file is read at most once.
+const pendingLineCounts = ref(new Map<File, number>())
+function syncPendingAttachmentMeta(files: File[]) {
+  const urls = pendingPreviewUrls.value
+  for (const [file, url] of urls) {
+    if (!files.includes(file)) {
+      URL.revokeObjectURL(url)
+      urls.delete(file)
+    }
+  }
+  for (const file of files) {
+    if (!urls.has(file) && isMediaFile(file)) urls.set(file, URL.createObjectURL(file))
+  }
+
+  const counts = pendingLineCounts.value
+  for (const file of [...counts.keys()]) {
+    if (!files.includes(file)) counts.delete(file)
+  }
+  for (const file of files) {
+    if (counts.has(file) || !isTextLikeFile(file)) continue
+    counts.set(file, -1)
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      if (!pendingFiles.value.includes(file)) return
+      counts.set(file, String(e.target?.result ?? '').split('\n').length)
+    }
+    // -2 marks "read failed": no count to show, but the card must still reveal.
+    reader.onerror = () => { if (pendingFiles.value.includes(file)) counts.set(file, -2) }
+    reader.readAsText(file)
+  }
+}
+watch(pendingFiles, files => syncPendingAttachmentMeta(files), { deep: true, immediate: true })
+onBeforeUnmount(() => {
+  for (const url of pendingPreviewUrls.value.values()) URL.revokeObjectURL(url)
+  pendingPreviewUrls.value.clear()
+})
+
+const pendingPreviews = computed(() =>
+  pendingFiles.value.map((file, i) => {
+    const isImage = file.type.startsWith('image/')
+    const isVideo = file.type.startsWith('video/')
+    const isMedia = isImage || isVideo
+    const dot = file.name.lastIndexOf('.')
+    const url = pendingPreviewUrls.value.get(file) ?? ''
+    const lc = pendingLineCounts.value.get(file)
+    const pastedText = pastedTexts.get(file)
+    const isPasted = pastedText !== undefined
+    return {
+      i,
+      file,
+      key: keyForFile(file),
+      isMedia,
+      isVideo,
+      isPasted,
+      pastedText: pastedText ?? '',
+      size: file.size,
+      url,
+      ext: dot > 0 ? file.name.slice(dot + 1).toUpperCase() : '',
+      lines: lc != null && lc >= 0 ? lc : null,
+      // A text-like file is still loading until its line count resolves (sentinel
+      // `undefined`/`-1`); the card shimmers until then, like the media skeleton.
+      // Pasted content is held in memory already, so it reveals immediately.
+      loading: !isPasted && !isMedia && isTextLikeFile(file) && (lc === undefined || lc === -1),
+    }
+  }),
+)
+
+// Lightbox for pending composer media so attachments can be verified at full
+// size before sending. Driven separately from the message gallery since these
+// object URLs are not part of the sent history yet.
+const composerPreviewItems = computed<MediaGalleryItem[]>(() =>
+  pendingPreviews.value
+    .filter(p => p.isMedia && p.url)
+    .map(p => ({ src: p.url, type: p.isVideo ? 'video' : 'image', name: p.file.name })),
+)
+const composerPreviewIndex = ref<number | null>(null)
+function openComposerPreview(url: string) {
+  const idx = composerPreviewItems.value.findIndex(item => item.src === url)
+  if (idx >= 0) composerPreviewIndex.value = idx
+}
+
+// Full-text viewer for a pending pasted-content card, opened from its preview.
+const pastedViewerText = ref<string | null>(null)
+const pastedViewerOpen = computed({
+  get: () => pastedViewerText.value !== null,
+  set: (open: boolean) => { if (!open) pastedViewerText.value = null },
+})
+
+// Attachment row reveal/collapse timing (the grid 0fr↔1fr transition).
+const ATTACHMENT_ANIM_MS = 230
+// While the last card is collapsing the row stays mounted (the card holds its
+// place) until the animation ends; the grid is open whenever there are cards and
+// we're not in that closing window.
+const collapsingAttachments = ref(false)
+const showAttachmentGrid = computed(() => pendingPreviews.value.length > 0 && !collapsingAttachments.value)
+let attachmentCollapseTimer: ReturnType<typeof setTimeout> | null = null
+function removeAttachment(index: number) {
+  const file = pendingFiles.value[index]
+  if (!file) return
+  // Removing one of several cards just reflows the open row; removing the last
+  // one collapses the row first, then drops the card so it doesn't pop out.
+  if (pendingFiles.value.length > 1) {
+    pendingFiles.value.splice(index, 1)
+    return
+  }
+  collapsingAttachments.value = true
+  if (attachmentCollapseTimer) clearTimeout(attachmentCollapseTimer)
+  attachmentCollapseTimer = setTimeout(() => {
+    const i = pendingFiles.value.indexOf(file)
+    if (i >= 0) pendingFiles.value.splice(i, 1)
+    collapsingAttachments.value = false
+    attachmentCollapseTimer = null
+  }, ATTACHMENT_ANIM_MS)
+}
+// A new file arriving mid-collapse cancels the close so it can reveal instead.
+watch(() => pendingFiles.value.length, (n, o) => {
+  if (n > o && collapsingAttachments.value) {
+    if (attachmentCollapseTimer) {
+      clearTimeout(attachmentCollapseTimer)
+      attachmentCollapseTimer = null
+    }
+    collapsingAttachments.value = false
+  }
+})
+onBeforeUnmount(() => {
+  if (attachmentCollapseTimer) clearTimeout(attachmentCollapseTimer)
+})
+
 const composerError = ref('')
 const pendingUserInputDrafts = ref<Record<string, PendingUserInputDraft>>({})
 const modelPopoverOpen = ref(false)
-const reasoningPopoverOpen = ref(false)
 const agentPopoverOpen = ref(false)
 const agentChanging = ref(false)
 const acpModelChanging = ref(false)
@@ -742,6 +990,35 @@ const {
 } = storeToRefs(chatStore)
 
 const isActive = computed(() => props.active !== false)
+
+// A fresh, writable chat opens with the composer centred and a greeting above
+// it. Read-only sessions (subagent / system / synced channel threads) hide the
+// composer entirely, so they never reach this state.
+const isWelcome = computed(() =>
+  !!currentBotId.value
+  && !activeChatReadOnly.value
+  && !loadingChats.value
+  && messages.value.length === 0,
+)
+
+// Rotate the greeting per fresh chat so the entry point feels alive rather than
+// a fixed banner; the pick stays stable while a single welcome screen is shown
+// and re-rolls when a new empty chat (bot/session) is opened.
+const WELCOME_GREETING_KEYS = [
+  'chat.welcome.g1', 'chat.welcome.g2', 'chat.welcome.g3', 'chat.welcome.g4',
+  'chat.welcome.g5', 'chat.welcome.g6', 'chat.welcome.g7', 'chat.welcome.g8',
+  'chat.welcome.g9', 'chat.welcome.g10', 'chat.welcome.g11', 'chat.welcome.g12',
+] as const
+function pickWelcomeGreetingIndex() {
+  return Math.floor(Math.random() * WELCOME_GREETING_KEYS.length)
+}
+const welcomeGreetingIndex = ref(pickWelcomeGreetingIndex())
+const welcomeGreeting = computed(() =>
+  t(WELCOME_GREETING_KEYS[welcomeGreetingIndex.value] ?? WELCOME_GREETING_KEYS[0]),
+)
+watch([isWelcome, currentBotId, () => activeSession.value?.id], ([welcome]) => {
+  if (welcome) welcomeGreetingIndex.value = pickWelcomeGreetingIndex()
+})
 
 const pendingUserInput = computed<UIUserInput | null>(() => {
   for (let msgIndex = messages.value.length - 1; msgIndex >= 0; msgIndex--) {
@@ -824,6 +1101,14 @@ const { data: acpProfileData } = useQuery({
 })
 
 const currentBot = computed(() => bots.value.find(bot => bot.id === currentBotId.value) ?? null)
+
+// A third-party synced thread (Telegram/Discord/...) is a multi-participant
+// group conversation rather than the local 1:1 chat. The message list switches
+// to a group layout for these: every turn is left-aligned with an avatar +
+// sender name + channel badge, including the bot's own replies.
+const channelPlatform = computed(() => (activeSession.value?.channel_type ?? '').trim().toLowerCase())
+const isChannelThread = computed(() => !!channelPlatform.value && channelPlatform.value !== 'local')
+
 const acpProfiles = computed<AcpprofilePublicProfile[]>(() => acpProfileData.value?.items ?? [])
 const enabledACPProfiles = computed(() =>
   acpProfiles.value.filter(profile => isACPAgentEnabled(currentBot.value?.metadata as Record<string, unknown> | undefined, profile.id)),
@@ -837,12 +1122,6 @@ const activeSessionMetadata = computed<Record<string, unknown>>(() =>
 const activeIsPendingACP = computed(() => !activeSession.value && !!pendingACPSessionMetadata.value)
 const activeIsACP = computed(() => activeSession.value?.type === 'acp_agent' || activeIsPendingACP.value)
 const activeACPAgentId = computed(() => normalizeACPAgentID(activeSessionMetadata.value.acp_agent_id))
-const selectedAgentIcon = computed(() => activeIsACP.value ? acpAgentIcon(activeACPAgentId.value, true) : MessageSquare)
-const selectedAgentLabel = computed(() =>
-  activeIsACP.value
-    ? acpAgentDisplayName(activeACPAgentId.value, t('chat.sessionTypeACPAgent'))
-    : t('chat.agentMemoh'),
-)
 const activeACPProjectLabel = computed(() => {
   if (isACPNoProject(activeSessionMetadata.value)) return t('chat.noProject')
   const path = String(activeSessionMetadata.value.project_path ?? '').trim()
@@ -850,6 +1129,13 @@ const activeACPProjectLabel = computed(() => {
   return path ? parts[parts.length - 1] ?? path : t('chat.noProject')
 })
 const canChangeAgent = computed(() => !streaming.value && messages.value.length === 0)
+// The composer's "+" menu is worth showing only when it can do something:
+// switch the agent (empty session with ACP profiles) or attach files (Memoh
+// mode). An in-progress ACP chat has neither, so the trigger is hidden rather
+// than opening an empty sheet.
+const composerMenuHasItems = computed(() =>
+  (canChangeAgent.value && enabledACPProfiles.value.length > 0) || !activeIsACP.value,
+)
 const activeSessionId = computed(() => activeSession.value?.id ?? '')
 const {
   runtime: acpRuntime,
@@ -885,15 +1171,17 @@ const activeModel = computed(() => {
   return models.value.find((m) => m.id === id)
 })
 
-const activeModelSupportsReasoning = computed(() =>
-  !!activeModel.value?.config?.compatibilities?.includes('reasoning'),
+const activeThinkingMode = computed(() => resolveThinkingMode(activeModel.value?.config))
+
+const activeModelSupportsReasoning = computed(() => activeThinkingMode.value !== 'none')
+
+const activeModelClientType = computed(() =>
+  providers.value.find((p) => p.id === activeModel.value?.provider_id)?.client_type,
 )
 
-const availableReasoningEfforts = computed(() => {
-  const efforts = ((activeModel.value?.config as { reasoning_efforts?: string[] } | undefined)?.reasoning_efforts ?? [])
-    .filter((e) => [REASONING_EFFORT_ADAPTIVE, 'none', 'low', 'medium', 'high', 'xhigh'].includes(e))
-  return [...new Set([REASONING_EFFORT_ADAPTIVE, ...(efforts.length > 0 ? efforts : ['low', 'medium', 'high'])])]
-})
+const availableReasoningEfforts = computed(() =>
+  availableEffortsForMode(activeThinkingMode.value, resolveEffortLevels(activeModel.value?.config, activeModelClientType.value)),
+)
 
 const selectedModelLabel = computed(() => {
   if (activeIsPendingACP.value) {
@@ -917,8 +1205,18 @@ const selectedReasoningLabel = computed(() => {
   return t(EFFORT_LABELS[v] ?? 'chat.modelDefault')
 })
 
-const reasoningTriggerOpacity = computed(() =>
-  EFFORT_OPACITY[overrideReasoningEffort.value] ?? 0.5,
+const reasoningActive = computed(() =>
+  !activeIsACP.value
+  && !activeIsPendingACP.value
+  && activeModelSupportsReasoning.value
+  && Boolean(overrideReasoningEffort.value)
+  && overrideReasoningEffort.value !== REASONING_EFFORT_DISABLE,
+)
+
+const modelTriggerLabel = computed(() =>
+  reasoningActive.value
+    ? `${selectedModelLabel.value} · ${selectedReasoningLabel.value}`
+    : selectedModelLabel.value,
 )
 
 function initFromBotSettings() {
@@ -936,6 +1234,12 @@ function initFromBotSettings() {
 }
 
 watch(botSettings, () => initFromBotSettings(), { immediate: true })
+
+watch(availableReasoningEfforts, (efforts) => {
+  const current = overrideReasoningEffort.value
+  if (!current || current === REASONING_EFFORT_DISABLE || efforts.includes(current)) return
+  overrideReasoningEffort.value = efforts.includes('medium') ? 'medium' : efforts[0] ?? REASONING_EFFORT_DISABLE
+}, { immediate: true })
 
 watch(currentBotId, () => {
   overrideModelId.value = ''
@@ -959,6 +1263,33 @@ function normalizedProfileID(value: unknown): string {
   return normalizeACPAgentID(value)
 }
 
+// Starting an ACP runtime (spawning the agent process + protocol handshake) has
+// no server-side deadline, so a wedged agent would leave the composer spinning
+// indefinitely — the user's only escape was a full page reload. Bound the switch
+// on the client so the controls re-enable and a retry hint surfaces instead.
+const AGENT_SWITCH_TIMEOUT_MS = 30_000
+
+class AgentSwitchTimeout extends Error {}
+
+function withAgentSwitchTimeout<T>(work: Promise<T>): Promise<T> {
+  // Keep a detached handler so a late settle (after the race is decided) never
+  // bubbles up as an unhandled rejection.
+  void work.catch(() => {})
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new AgentSwitchTimeout()), AGENT_SWITCH_TIMEOUT_MS)
+    work.then(
+      (value) => { clearTimeout(timer); resolve(value) },
+      (error) => { clearTimeout(timer); reject(error) },
+    )
+  })
+}
+
+function agentSwitchErrorMessage(error: unknown): string {
+  return error instanceof AgentSwitchTimeout
+    ? t('chat.agentSwitchTimeout')
+    : resolveApiErrorMessage(error, t('chat.agentSwitchFailed'))
+}
+
 async function selectACPAgent(profile: AcpprofilePublicProfile) {
   const agentId = normalizeACPAgentID(profile.id)
   if (!agentId || agentChanging.value || !canChangeAgent.value) return
@@ -967,18 +1298,18 @@ async function selectACPAgent(profile: AcpprofilePublicProfile) {
   composerError.value = ''
   try {
     if (chatStore.sessionId) {
-      await chatStore.updateCurrentSessionAgent({
+      await withAgentSwitchTimeout(chatStore.updateCurrentSessionAgent({
         agentId,
-      })
+      }))
     } else {
       chatStore.stageACPSession({
         agentId,
       })
-      await chatStore.ensurePendingACPRuntime()
+      await withAgentSwitchTimeout(chatStore.ensurePendingACPRuntime())
     }
     pendingFiles.value = []
   } catch (error) {
-    composerError.value = resolveApiErrorMessage(error, t('chat.agentSwitchFailed'))
+    composerError.value = agentSwitchErrorMessage(error)
   } finally {
     agentChanging.value = false
   }
@@ -996,16 +1327,18 @@ async function selectMemohAgent() {
   agentChanging.value = true
   composerError.value = ''
   try {
-    await chatStore.updateCurrentSessionToMemoh()
+    await withAgentSwitchTimeout(chatStore.updateCurrentSessionToMemoh())
   } catch (error) {
-    composerError.value = resolveApiErrorMessage(error, t('chat.agentSwitchFailed'))
+    composerError.value = agentSwitchErrorMessage(error)
   } finally {
     agentChanging.value = false
   }
 }
 
 function onModelSelected() {
-  modelPopoverOpen.value = false
+  // The picker drives dismissal via @close (so opening a model's reasoning
+  // options can adopt it without collapsing the menu); here we only sanitise
+  // the effort when the new model can't reason.
   if (!activeModelSupportsReasoning.value) {
     overrideReasoningEffort.value = REASONING_EFFORT_DISABLE
   }
@@ -1053,10 +1386,6 @@ async function onPendingACPDefaultModelSelected() {
   }
 }
 
-function onReasoningSelected() {
-  reasoningPopoverOpen.value = false
-}
-
 const {
   items: galleryItems,
   openIndex: galleryOpenIndex,
@@ -1065,6 +1394,231 @@ const {
 } = useMediaGallery(messages)
 
 const inputText = ref('')
+const textareaEl = ref<HTMLTextAreaElement | null>(null)
+const composerEl = ref<HTMLElement | null>(null)
+const isMultiline = ref(false)
+const compactContentWidth = ref(0)
+const showSend = computed(() => Boolean(inputText.value.trim()) || pendingFiles.value.length > 0)
+
+// Border-radius morph, kept on the SAME clock as whatever box change drives it.
+// An attachment open/close keys off showAttachmentGrid — which flips at the START
+// of the collapse, before the card is spliced out — and borrows the grid reveal's
+// duration + curve, so the corner rounds in lockstep with the height instead of
+// lagging a beat behind it (the height was finishing first, then the corner moved
+// only once the card was finally removed). A pill↔multiline text change keeps the
+// form ease, matched to the JS height morph. Pre-flush watchers set the timing
+// before the radius class flips, so the corner uses it.
+const RADIUS_EASE_FORM = 'cubic-bezier(0.33, 1, 0.68, 1)'
+const composerRadiusMs = ref(220)
+const composerRadiusEase = ref(RADIUS_EASE_FORM)
+watch(showAttachmentGrid, () => {
+  composerRadiusMs.value = ATTACHMENT_ANIM_MS
+  composerRadiusEase.value = 'cubic-bezier(0.25, 0.1, 0.25, 1)'
+})
+watch(isMultiline, () => {
+  if (!showAttachmentGrid.value) {
+    composerRadiusMs.value = 220
+    composerRadiusEase.value = RADIUS_EASE_FORM
+  }
+})
+
+function focusTextarea() {
+  textareaEl.value?.focus()
+}
+
+function measureWraps(text: string, width: number): boolean {
+  const el = textareaEl.value
+  if (!el || width <= 1) return false
+  const cs = getComputedStyle(el)
+  const mirror = document.createElement('div')
+  const s = mirror.style
+  s.position = 'fixed'
+  s.left = '-9999px'
+  s.top = '0'
+  s.visibility = 'hidden'
+  s.pointerEvents = 'none'
+  s.whiteSpace = 'pre-wrap'
+  s.overflowWrap = 'anywhere'
+  s.wordBreak = 'break-word'
+  s.boxSizing = 'content-box'
+  s.width = `${width}px`
+  s.fontFamily = cs.fontFamily
+  s.fontSize = cs.fontSize
+  s.fontWeight = cs.fontWeight
+  s.fontStyle = cs.fontStyle
+  s.letterSpacing = cs.letterSpacing
+  s.lineHeight = cs.lineHeight
+  mirror.textContent = text.length ? text : 'x'
+  document.body.appendChild(mirror)
+  const h = mirror.getBoundingClientRect().height
+  mirror.remove()
+  const lh = Number.parseFloat(cs.lineHeight) || 20
+  return h > lh * 1.5
+}
+
+function syncMultiline() {
+  const text = inputText.value
+  if (text.includes('\n')) {
+    isMultiline.value = true
+    return
+  }
+  const el = textareaEl.value
+  if (el && !isMultiline.value) {
+    const cs = getComputedStyle(el)
+    const padX = Number.parseFloat(cs.paddingLeft) + Number.parseFloat(cs.paddingRight)
+    const w = el.clientWidth - padX
+    if (w > 1) compactContentWidth.value = w
+  }
+  isMultiline.value = measureWraps(text, compactContentWidth.value)
+}
+
+let composerResizeObserver: ResizeObserver | null = null
+onMounted(() => {
+  void nextTick(syncMultiline)
+  if (typeof ResizeObserver !== 'undefined' && textareaEl.value) {
+    composerResizeObserver = new ResizeObserver(() => syncMultiline())
+    composerResizeObserver.observe(textareaEl.value)
+  }
+})
+onBeforeUnmount(() => {
+  composerResizeObserver?.disconnect()
+  composerResizeObserver = null
+})
+watch(inputText, () => {
+  void nextTick(syncMultiline)
+})
+
+// Smooth height morph for the compact↔multiline change. The composer is
+// bottom-anchored, so animating its height makes the top edge rise and the text
+// appears to slide up. Pure CSS can't transition between two content-driven
+// (auto) heights, so we measure the natural height and let the browser's
+// animation engine fill the gap — no permanent inline height, no fight with the
+// textarea's field-sizing. During the morph the box is clipped and its content is
+// bottom-pinned: the left (＋) and right (model) controls stay welded to the
+// bottom edge — which never moves — so they don't twitch, while the textarea
+// grows above them and the text is revealed from the top.
+let composerHeight = 0
+let composerHeightAnim: Animation | null = null
+let composerHeightReady = false
+// Last-seen layout mode, so we can tell a pill↔multiline form change from a
+// grow/shrink that happens entirely within multiline.
+let composerMultiline = false
+// A session/draft switch replaces the text wholesale — snap to the new size
+// once instead of animating between two unrelated drafts.
+let composerSnapNext = false
+// Tracks layout-driven height changes (e.g. window/pane resize re-wrapping a
+// multiline draft) that don't go through inputText/isMultiline, so the next
+// morph starts from the real current height instead of a stale baseline.
+let composerSizeObserver: ResizeObserver | null = null
+
+function prefersReducedMotion() {
+  return typeof window !== 'undefined'
+    && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
+}
+
+// Bottom-pin the controls directly: the compact row carries `self-center`
+// (align-self) on each control, which would override a container-level
+// align-items and let the ＋ jump to center mid-shrink. Overriding each child's
+// align-self welds the controls to the bottom in both directions. The textarea
+// is skipped on purpose — it stays centered in the compact row, so it slides
+// smoothly instead of snapping from bottom-pinned back to centered when the
+// morph ends (which made the placeholder jump on shrink).
+function pinComposerChildrenBottom(el: HTMLElement, pinned: boolean) {
+  const value = pinned ? 'flex-end' : ''
+  for (const child of Array.from(el.children)) {
+    if (child instanceof HTMLElement && child.tagName !== 'TEXTAREA') {
+      child.style.alignSelf = value
+    }
+  }
+}
+
+function clearComposerMorphStyles(el: HTMLElement) {
+  el.style.overflow = ''
+  el.style.alignContent = ''
+  pinComposerChildrenBottom(el, false)
+}
+
+function animateComposerHeight() {
+  const el = composerEl.value
+  if (!el) return
+  // Start from the live visual height when a morph is already running, so a
+  // fresh trigger continues from where the eye is instead of snapping back.
+  const from = composerHeightAnim ? el.offsetHeight : composerHeight
+  composerHeightAnim?.cancel()
+  composerHeightAnim = null
+  clearComposerMorphStyles(el)
+  const target = el.offsetHeight
+  composerHeight = target
+  // Only a pill↔multiline form change earns the height morph. Attachment rows
+  // now reveal via their own grid 0fr↔1fr track (card stays put, box grows), and
+  // plain line-wraps within multiline snap, so they're deliberately excluded.
+  const formChanged = isMultiline.value !== composerMultiline
+  composerMultiline = isMultiline.value
+  if (!composerHeightReady || composerSnapNext) {
+    composerSnapNext = false
+    return
+  }
+  if (!formChanged) return
+  if (!isActive.value || !from || Math.abs(target - from) < 0.5 || prefersReducedMotion()) return
+  // Pin every line to the bottom and clip the overflow: the control row stays
+  // welded to the fixed bottom edge (no twitch) while the box grows/shrinks and
+  // the textarea is revealed/concealed from the top.
+  el.style.overflow = 'hidden'
+  el.style.alignContent = 'flex-end'
+  pinComposerChildrenBottom(el, true)
+  // A gentle ease-out whose tail decelerates to a soft stop — monotonic, so the
+  // height moves to its target and stops without overshooting and bouncing back.
+  const anim = el.animate(
+    [{ height: `${from}px` }, { height: `${target}px` }],
+    { duration: 220, easing: 'cubic-bezier(0.33, 1, 0.68, 1)' },
+  )
+  composerHeightAnim = anim
+  anim.onfinish = () => {
+    if (composerHeightAnim === anim) {
+      clearComposerMorphStyles(el)
+      composerHeightAnim = null
+    }
+  }
+}
+
+watch([inputText, isMultiline], () => {
+  void nextTick(animateComposerHeight)
+})
+
+onMounted(() => {
+  void nextTick(() => {
+    composerHeight = composerEl.value?.offsetHeight ?? 0
+    composerMultiline = isMultiline.value
+    composerHeightReady = true
+    composerSnapNext = false
+  })
+  const el = composerEl.value
+  if (el && typeof ResizeObserver !== 'undefined') {
+    composerSizeObserver = new ResizeObserver(() => {
+      // Skip while we drive the height ourselves; only capture layout-driven
+      // resizes so the next morph starts from the real current height. The
+      // keystroke path sets composerHeightAnim before this fires, so normal
+      // morphs are untouched.
+      if (!composerHeightAnim) composerHeight = el.offsetHeight
+    })
+    composerSizeObserver.observe(el)
+  }
+})
+
+onBeforeUnmount(() => {
+  composerSizeObserver?.disconnect()
+  composerSizeObserver = null
+  composerHeightAnim?.cancel()
+  composerHeightAnim = null
+})
+
+onDeactivated(() => {
+  composerHeightAnim?.cancel()
+  composerHeightAnim = null
+  if (composerEl.value) clearComposerMorphStyles(composerEl.value)
+  composerSnapNext = true
+})
+
 const stopAuthSessionCleanup = onAuthSessionCleared(() => {
   inputDrafts.value = {}
   inputText.value = ''
@@ -1094,6 +1648,7 @@ watch(inputDraftKey, (nextKey, previousKey) => {
     saveInputDraft(previousKey, inputText.value)
   }
   inputText.value = nextKey ? inputDrafts.value[nextKey] ?? '' : ''
+  composerSnapNext = true
 }, { immediate: true })
 
 watch(inputText, (text) => {
@@ -1135,25 +1690,126 @@ const isInstant = ref(false)
 const highlightedMessageId = ref('')
 const { y, directions, arrivedState, isScrolling } = useScroll(scrollEl, { behavior: computed(() => isAutoScroll.value && isInstant.value ? 'smooth' : 'instant') })
 const { height } = useElementBounding(descEl)
-const scrollSegments = ref<ScrollSegment[]>([])
-const activeSegmentId = ref('')
-const hoveredSegmentId = ref('')
-const scrollAnchorOffset = 8
-const scrollAnimationMaxDuration = 760
-const scrollAnimationMinDuration = 260
-const scrollNavigationLockMs = scrollAnimationMaxDuration + 80
 let highlightTimer: ReturnType<typeof setTimeout> | null = null
-let scrollNavigationLockTimer: ReturnType<typeof setTimeout> | null = null
-let scrollNavigationRaf = 0
-let scrollAnimationRaf = 0
+let cancelScrollTween: (() => void) | null = null
+
+// --- Scroll rail ---
+const railSegments = ref<ScrollRailSegment[]>([])
+const activeRailId = ref('')
+const railOpen = ref(false)
+let railRaf = 0
+let railOpenTimer: ReturnType<typeof setTimeout> | null = null
+let railCloseTimer: ReturnType<typeof setTimeout> | null = null
+
+function getRailSegmentText(msg: (typeof messages.value)[number]): string {
+  if (msg.role === 'user') return msg.text?.trim().replace(/\s+/g, ' ') || ''
+  return ''
+}
+
+function rebuildRailSegments() {
+  const segments: ScrollRailSegment[] = []
+  messages.value.forEach((msg) => {
+    if (msg.role !== 'user') return
+    const preview = getRailSegmentText(msg)
+    if (!preview) return
+    segments.push({
+      id: msg.id,
+      label: `Message ${segments.length + 1}`,
+      preview,
+      index: segments.length,
+    })
+  })
+  railSegments.value = segments
+}
+
+function syncActiveRailFromScroll() {
+  const root = scrollEl.value
+  if (!root || !railSegments.value.length) return
+  const viewAnchor = root.scrollTop + 8
+  let best = railSegments.value[0]!.id
+  let bestDist = Number.POSITIVE_INFINITY
+  for (const seg of railSegments.value) {
+    const el = root.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(seg.id)}"]`)
+    if (!el) continue
+    const top = root.scrollTop + el.getBoundingClientRect().top - root.getBoundingClientRect().top
+    const dist = Math.abs(top - viewAnchor)
+    if (dist < bestDist) { bestDist = dist; best = seg.id }
+  }
+  activeRailId.value = best
+}
+
+watch(() => messages.value.map(m => `${m.id}:${m.role}`).join('|'), () => {
+  rebuildRailSegments()
+}, { flush: 'post', immediate: true })
+
+useScroll(scrollEl, {
+  onScroll() {
+    if (railRaf) return
+    railRaf = requestAnimationFrame(() => {
+      railRaf = 0
+      syncActiveRailFromScroll()
+    })
+  },
+})
+
+function scheduleRailOpen() {
+  if (railCloseTimer) { clearTimeout(railCloseTimer); railCloseTimer = null }
+  if (railOpen.value || railOpenTimer) return
+  railOpenTimer = setTimeout(() => { railOpen.value = true; railOpenTimer = null }, 80)
+}
+
+function scheduleRailClose() {
+  if (railOpenTimer) { clearTimeout(railOpenTimer); railOpenTimer = null }
+  if (!railOpen.value || railCloseTimer) return
+  railCloseTimer = setTimeout(() => { railOpen.value = false; railCloseTimer = null }, 150)
+}
+
+const showScrollRail = computed(() =>
+  isActive.value && !loadingChats.value && railSegments.value.length > 1,
+)
+
+function scrollToRailSegment(seg: ScrollRailSegment) {
+  activeRailId.value = seg.id
+  railOpen.value = false
+  void nextTick(() => {
+    const root = scrollEl.value
+    const target = findMessageElement(seg.id)
+    if (!root || !target) return
+    isAutoScroll.value = false
+    isInstant.value = false
+    const scrollMargin = Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0
+    startScrollTween(root, () => {
+      const el = findMessageElement(seg.id)
+      return el ? getElementAbsoluteTop(el, root) - scrollMargin : root.scrollTop
+    })
+  })
+}
+// --- End scroll rail ---
 
 onBeforeUnmount(() => {
   stopAuthSessionCleanup()
   if (highlightTimer) clearTimeout(highlightTimer)
-  if (scrollNavigationLockTimer) clearTimeout(scrollNavigationLockTimer)
-  if (scrollNavigationRaf) cancelAnimationFrame(scrollNavigationRaf)
-  if (scrollAnimationRaf) cancelAnimationFrame(scrollAnimationRaf)
+  cancelScrollTween?.()
 })
+
+// The tween re-reads its target every frame, so positions shifted by
+// content-visibility materializing rows mid-flight still land exactly.
+function startScrollTween(root: HTMLElement, getTarget: () => number) {
+  cancelScrollTween?.()
+  const stop = animateScrollTo(root, () => {
+    const max = Math.max(root.scrollHeight - root.clientHeight, 0)
+    return Math.min(Math.max(getTarget(), 0), max)
+  })
+  const cancel = () => {
+    stop()
+    root.removeEventListener('wheel', cancel)
+    root.removeEventListener('touchstart', cancel)
+    cancelScrollTween = null
+  }
+  root.addEventListener('wheel', cancel, { passive: true })
+  root.addEventListener('touchstart', cancel, { passive: true })
+  cancelScrollTween = cancel
+}
 
 const showJumpToBottom = computed(() =>
   isActive.value
@@ -1162,216 +1818,14 @@ const showJumpToBottom = computed(() =>
   && !arrivedState.bottom,
 )
 
-const showScrollRail = computed(() =>
-  isActive.value
-  && !loadingChats.value
-  && scrollSegments.value.length > 1,
-)
-
-const hoveredScrollSegment = computed(() => {
-  const id = hoveredSegmentId.value
-  return scrollSegments.value.find(segment => segment.id === id)
-})
-
-const activeSegmentIndex = computed(() => {
-  if (!scrollSegments.value.length) return -1
-  const index = scrollSegments.value.findIndex(segment => segment.id === activeSegmentId.value)
-  return index >= 0 ? index : 0
-})
-
-const previousScrollSegment = computed(() => {
-  const index = activeSegmentIndex.value
-  return index > 0 ? scrollSegments.value[index - 1] : null
-})
-
-const nextScrollSegment = computed(() => {
-  const index = activeSegmentIndex.value
-  return index >= 0 && index < scrollSegments.value.length - 1 ? scrollSegments.value[index + 1] : null
-})
-
-function messageSegmentDomId(message: ChatMessage, index: number) {
-  return `${index}:${message.role}:${message.id}`
+function getElementAbsoluteTop(target: HTMLElement, root: HTMLElement) {
+  return root.scrollTop + target.getBoundingClientRect().top - root.getBoundingClientRect().top
 }
 
-function findSegmentElement(segmentId: string): HTMLElement | null {
-  const root = scrollEl.value
-  if (!root) return null
-  for (const item of Array.from(root.querySelectorAll<HTMLElement>('[data-scroll-segment-id]'))) {
-    if (item.dataset.scrollSegmentId === segmentId) return item
-  }
-  return null
-}
-
-function getElementAbsoluteTop(target: HTMLElement, root: HTMLElement, rootRect = root.getBoundingClientRect()) {
-  const rect = target.getBoundingClientRect()
-  return root.scrollTop + rect.top - rootRect.top
-}
-
-function getSegmentAbsoluteTop(segment: ScrollSegment) {
-  const target = findSegmentElement(segment.targetSegmentId)
-  if (!target) return segment.top
-  const root = scrollEl.value
-  if (!root) return segment.top
-  return getElementAbsoluteTop(target, root)
-}
-
-function getSegmentText(message: ChatMessage) {
-  if (message.role === 'user') {
-    return message.text?.trim().replace(/\s+/g, ' ') || ''
-  }
-  if (message.role === 'assistant') {
-    const textBlock = message.messages.find(block => block.type === 'text')
-    return textBlock?.content?.trim().replace(/\s+/g, ' ') || ''
-  }
-  return ''
-}
-
-function getSegmentLabel(index: number, message: ChatMessage) {
-  const preview = getSegmentText(message)
-  const roleLabel = message.role === 'assistant'
-    ? t('chat.timelineAnswer')
-    : t('chat.timelineMessage')
-  return preview ? `${roleLabel} ${index + 1}. ${preview.slice(0, 48)}` : `${roleLabel} ${index + 1}`
-}
-
-function buildSegmentSources(): ScrollSegmentSource[] {
-  const sources: ScrollSegmentSource[] = []
-  messages.value.forEach((message, messageIndex) => {
-    if ((message.role === 'user' || message.role === 'assistant') && getSegmentText(message).length > 0) {
-      sources.push({ message, messageIndex })
-    }
-  })
-  return sources
-}
-
-const scrollSegmentStructureKey = computed(() =>
-  messages.value
-    .filter(message => message.role === 'user' || message.role === 'assistant')
-    .map(message => `${message.id}:${message.role}:${message.streaming ? '1' : '0'}:${getSegmentText(message).length > 0 ? 'text' : 'empty'}`)
-    .join('|'),
-)
-
-function measureScrollNavigation() {
-  scrollNavigationRaf = 0
+function scrollViewportTo(getTop: () => number) {
   const root = scrollEl.value
   if (!root) return
-
-  const scrollHeight = Math.max(root.scrollHeight, 1)
-  const rootRect = root.getBoundingClientRect()
-  const segmentSources = buildSegmentSources()
-  const nextSegments: ScrollSegment[] = []
-
-  segmentSources.forEach(({ message, messageIndex }, index) => {
-    const targetSegmentId = messageSegmentDomId(message, messageIndex)
-    const target = findSegmentElement(targetSegmentId)
-    if (!target) return
-
-    const absoluteTop = getElementAbsoluteTop(target, root, rootRect)
-
-    nextSegments.push({
-      id: targetSegmentId,
-      targetSegmentId,
-      targetMessageId: message.id,
-      role: message.role,
-      label: getSegmentLabel(index, message),
-      preview: getSegmentText(message) || getSegmentLabel(index, message),
-      index,
-      top: absoluteTop,
-      topPercent: Math.min(100, Math.max(0, (absoluteTop / scrollHeight) * 100)),
-    })
-  })
-
-  scrollSegments.value = nextSegments
-
-  if (scrollNavigationLockTimer) return
-
-  const viewportAnchor = root.scrollTop + scrollAnchorOffset
-  let active = nextSegments[0]?.id ?? ''
-  let activeDistance = Number.POSITIVE_INFINITY
-  for (const segment of nextSegments) {
-    const distance = Math.abs(segment.top - viewportAnchor)
-    if (distance < activeDistance) {
-      active = segment.id
-      activeDistance = distance
-    }
-  }
-  activeSegmentId.value = active
-}
-
-function scheduleScrollNavigationMeasure() {
-  if (scrollNavigationRaf) return
-  scrollNavigationRaf = requestAnimationFrame(measureScrollNavigation)
-}
-
-function easeInOutCubic(progress: number) {
-  return progress < 0.5
-    ? 4 * progress * progress * progress
-    : 1 - ((-2 * progress + 2) ** 3) / 2
-}
-
-function scrollViewportTo(top: number, animated = true) {
-  const root = scrollEl.value
-  if (!root) return
-  const nextTop = Math.min(Math.max(top, 0), Math.max(root.scrollHeight - root.clientHeight, 0))
-  if (scrollAnimationRaf) cancelAnimationFrame(scrollAnimationRaf)
-
-  if (!animated) {
-    root.scrollTop = nextTop
-    y.value = nextTop
-    scheduleScrollNavigationMeasure()
-    return
-  }
-
-  const startTop = root.scrollTop
-  const distance = nextTop - startTop
-  if (Math.abs(distance) < 1) {
-    root.scrollTop = nextTop
-    y.value = nextTop
-    scheduleScrollNavigationMeasure()
-    return
-  }
-
-  const duration = Math.min(scrollAnimationMaxDuration, Math.max(scrollAnimationMinDuration, Math.abs(distance) * 0.45))
-  const startedAt = performance.now()
-
-  const step = (now: number) => {
-    const progress = Math.min(1, (now - startedAt) / duration)
-    root.scrollTop = startTop + distance * easeInOutCubic(progress)
-    if (progress < 1) {
-      scrollAnimationRaf = requestAnimationFrame(step)
-      return
-    }
-    root.scrollTop = nextTop
-    y.value = nextTop
-    scrollAnimationRaf = 0
-    scheduleScrollNavigationMeasure()
-  }
-
-  scrollAnimationRaf = requestAnimationFrame(step)
-}
-
-async function scrollToSegment(segment: ScrollSegment) {
-  activeSegmentId.value = segment.id
-  if (scrollNavigationLockTimer) clearTimeout(scrollNavigationLockTimer)
-  scrollNavigationLockTimer = setTimeout(() => {
-    scrollNavigationLockTimer = null
-    scheduleScrollNavigationMeasure()
-  }, scrollNavigationLockMs)
-  await scrollToMessage(segment)
-}
-
-async function scrollToAdjacentSegment(direction: -1 | 1) {
-  const target = resolveAdjacentSegment(direction)
-  if (!target) return
-  await scrollToSegment(target)
-}
-
-function resolveAdjacentSegment(direction: -1 | 1) {
-  const segments = scrollSegments.value
-  if (!segments.length) return null
-
-  const targetIndex = activeSegmentIndex.value + direction
-  return targetIndex >= 0 && targetIndex < segments.length ? segments[targetIndex] : null
+  startScrollTween(root, getTop)
 }
 
 function scrollToBottom() {
@@ -1379,7 +1833,7 @@ function scrollToBottom() {
   if (!root) return
   isAutoScroll.value = true
   isInstant.value = true
-  scrollViewportTo(root.scrollHeight)
+  scrollViewportTo(() => root.scrollHeight)
 }
 
 
@@ -1402,6 +1856,15 @@ function isActiveEl(isActive: boolean, item: { id: string, top: number }) {
 
 
 const lockScroll = ref(true)
+
+watch(isScrolling, (scrolling) => {
+  if (scrolling || lockScroll.value || !isActive.value) return
+  for (const item of elId) {
+    const el = findMessageElement(item.id)
+    if (el) item.top = el.getBoundingClientRect().top - 48
+  }
+})
+
 let isInit = false
 const transitionScroll=ref(false)
 onActivated(() => {
@@ -1423,7 +1886,8 @@ onActivated(() => {
             transitionScroll.value=true
           })
         })
-
+      } else {
+        transitionScroll.value=true
       }
       setTimeout(() => {
         lockScroll.value = false
@@ -1481,14 +1945,6 @@ watch([isAutoScroll, height, isActive], async () => {
 }, {
   flush: 'post',
   deep: true
-})
-
-watch([scrollSegmentStructureKey, y, height, isActive], async () => {
-  if (!isActive.value) return
-  await nextTick()
-  scheduleScrollNavigationMeasure()
-}, {
-  flush: 'post',
 })
 
 // Sentinel-based infinite scroll for older history. The IntersectionObserver
@@ -1579,30 +2035,21 @@ useIntersectionObserver(
 function findMessageElement(messageId: string): HTMLElement | null {
   const root = scrollEl.value
   if (!root) return null
-  for (const item of Array.from(root.querySelectorAll<HTMLElement>('[data-message-id]'))) {
-    if (item.dataset.messageId === messageId) return item
-  }
-  return null
+  return root.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(messageId)}"]`)
 }
 
-async function scrollToMessage(messageOrSegment: string | ScrollSegment): Promise<boolean> {
+async function scrollToMessage(messageId: string): Promise<boolean> {
   await nextTick()
   const root = scrollEl.value
-  const target = typeof messageOrSegment === 'string'
-    ? findMessageElement(messageOrSegment)
-    : findSegmentElement(messageOrSegment.targetSegmentId)
+  const target = findMessageElement(messageId)
   if (!root || !target) return false
   isAutoScroll.value = false
   isInstant.value = false
-  const messageId = typeof messageOrSegment === 'string'
-    ? messageOrSegment
-    : messageOrSegment.targetMessageId
-  const absoluteTop = typeof messageOrSegment === 'string'
-    ? getElementAbsoluteTop(target, root)
-    : getSegmentAbsoluteTop(messageOrSegment)
-  const nextTop = absoluteTop - scrollAnchorOffset
-
-  scrollViewportTo(nextTop)
+  const scrollMargin = Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0
+  startScrollTween(root, () => {
+    const el = findMessageElement(messageId)
+    return el ? getElementAbsoluteTop(el, root) - scrollMargin : root.scrollTop
+  })
   highlightedMessageId.value = messageId
   if (highlightTimer) clearTimeout(highlightTimer)
   highlightTimer = setTimeout(() => {
@@ -1642,13 +2089,32 @@ function handleFileInputChange(e: Event) {
 }
 
 function handlePaste(e: ClipboardEvent) {
-  const items = e.clipboardData?.items
-  if (!items) return
-  for (const item of Array.from(items)) {
+  const data = e.clipboardData
+  if (!data) return
+  let handledFile = false
+  for (const item of Array.from(data.items ?? [])) {
     if (item.kind === 'file') {
       const file = item.getAsFile()
-      if (file) pendingFiles.value.push(file)
+      if (file) {
+        pendingFiles.value.push(file)
+        handledFile = true
+      }
     }
+  }
+  // A file paste from the OS also carries a text item (its name); without this
+  // the textarea would insert that filename alongside the attachment card.
+  if (handledFile) {
+    e.preventDefault()
+    return
+  }
+  // A large text paste becomes a pasted-content card so it doesn't bury the
+  // composer; anything below the threshold drops into the textarea as usual.
+  const text = data.getData('text/plain')
+  if (!text) return
+  const lineCount = text.split('\n').length
+  if (lineCount >= PASTE_LINE_THRESHOLD || text.length >= PASTE_CHAR_THRESHOLD) {
+    e.preventDefault()
+    pendingFiles.value.push(makePastedFile(text))
   }
 }
 

@@ -4,13 +4,16 @@
       v-model:open="open"
       :title="title === 'edit' ? $t('models.editModel') : $t('models.addModel')"
       :cancel-text="$t('common.cancel')"
-      :submit-text="title === 'edit' ? $t('common.save') : $t('models.addModel')"
+      :submit-text="title === 'edit' ? $t('common.confirm') : $t('models.addModel')"
       :submit-disabled="!canSubmit"
       :loading="isLoading"
       @submit="addModel"
     >
       <template #trigger>
-        <Button variant="default">
+        <Button
+          variant="default"
+          :size="size"
+        >
           {{ $t('models.addModel') }}
         </Button>
       </template>
@@ -69,8 +72,11 @@
             </FormItem>
           </FormField>
 
-          <!-- Display Name -->
+          <!-- Display Name: optional, empty by default. We deliberately do NOT
+               mirror model_id into it — a name that just repeats the id is noise
+               on the list. Only a name the user actually types is kept. -->
           <FormField
+            v-slot="{ componentField }"
             name="name"
           >
             <FormItem>
@@ -82,8 +88,7 @@
                 <Input
                   type="text"
                   :placeholder="$t('models.displayNamePlaceholder')"
-                  :model-value="form.values.name ?? ''"
-                  @input="onNameInput"
+                  v-bind="componentField"
                 />
               </FormControl>
             </FormItem>
@@ -171,6 +176,7 @@ import {
   Checkbox,
   Label,
 } from '@memohai/ui'
+import type { ButtonVariants } from '@memohai/ui'
 import { useForm } from 'vee-validate'
 import { inject, computed, watch, nextTick, type Ref, ref } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
@@ -206,6 +212,7 @@ const props = withDefaults(defineProps<{
   defaultType?: string
   hideType?: boolean
   invalidateKeys?: string[]
+  size?: ButtonVariants['size']
 }>(), {
   typeOptions: () => [
     { value: 'chat', label: 'Chat' },
@@ -214,6 +221,7 @@ const props = withDefaults(defineProps<{
   defaultType: 'chat',
   hideType: false,
   invalidateKeys: () => ['provider-models', 'models'],
+  size: 'default',
 })
 
 const form = useForm({
@@ -242,22 +250,6 @@ function toggleCompat(cap: string, checked: boolean) {
   } else {
     selectedCompat.value = selectedCompat.value.filter(c => c !== cap)
   }
-}
-
-const userEditedName = ref(false)
-
-watch(
-  () => form.values.model_id,
-  (newModelId) => {
-    if (!userEditedName.value && newModelId !== undefined) {
-      form.setFieldValue('name', newModelId)
-    }
-  },
-)
-
-function onNameInput(e: Event) {
-  userEditedName.value = true
-  form.setFieldValue('name', (e.target as HTMLInputElement).value)
 }
 
 const queryCache = useQueryCache()
@@ -328,8 +320,10 @@ async function addModel() {
     config,
   }
 
-  if (name) {
-    payload.name = name
+  // Keep a name only when it carries information beyond the id. Persisting a
+  // name equal to model_id is what made the list show the same string twice.
+  if (name && name.trim() && name.trim() !== model_id) {
+    payload.name = name.trim()
   }
 
   await run(
@@ -367,13 +361,14 @@ watch(open, async () => {
       values: {
         type: type || 'chat',
         model_id,
-        name,
+        // Older models stored name === model_id. Don't surface that as a
+        // "custom" name in the field — treat it as empty so editing starts clean.
+        name: name && name !== model_id ? name : '',
         dimensions: config?.dimensions,
         context_window: config?.context_window,
       },
     })
     selectedCompat.value = config?.compatibilities ?? []
-    userEditedName.value = !!(name && name !== model_id)
   } else {
     form.resetForm({
       values: {
@@ -385,7 +380,6 @@ watch(open, async () => {
       },
     })
     selectedCompat.value = []
-    userEditedName.value = false
   }
 }, {
   immediate: true,

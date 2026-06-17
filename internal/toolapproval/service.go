@@ -16,13 +16,19 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/decision"
+	"github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/settings"
 )
 
 type Service struct {
-	queries  dbstore.Queries
+	queries dbstore.Queries
+
 	settings *settings.Service
+	hooks    *hooks.Service
 	logger   *slog.Logger
+
+	waiter *decision.Waiter[Request]
 }
 
 func NewService(log *slog.Logger, queries dbstore.Queries, settings *settings.Service) *Service {
@@ -33,6 +39,13 @@ func NewService(log *slog.Logger, queries dbstore.Queries, settings *settings.Se
 		queries:  queries,
 		settings: settings,
 		logger:   log.With(slog.String("service", "toolapproval")),
+		waiter:   decision.NewWaiter[Request](),
+	}
+}
+
+func (s *Service) SetHookService(h *hooks.Service) {
+	if s != nil {
+		s.hooks = h
 	}
 }
 
@@ -86,6 +99,13 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 	if err != nil {
 		return Request{}, err
 	}
+	operation, ok := OperationForTool(input.ToolName)
+	if !ok {
+		return Request{}, errors.New("unsupported tool approval operation")
+	}
+	if err := s.runApprovalHook(ctx, hooks.EventBeforeApprovalCreate, input, Request{}, true); err != nil {
+		return Request{}, err
+	}
 	row, err := s.queries.CreateToolApprovalRequest(ctx, sqlc.CreateToolApprovalRequestParams{
 		BotID:                        botID,
 		SessionID:                    sessionID,
@@ -93,6 +113,7 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 		ChannelIdentityID:            channelIdentityID,
 		ToolCallID:                   strings.TrimSpace(input.ToolCallID),
 		ToolName:                     strings.TrimSpace(input.ToolName),
+		Operation:                    operation,
 		ToolInput:                    toolInput,
 		RequestedByChannelIdentityID: requestedByID,
 		RequestedMessageID:           optionalUUID(input.RequestedMessageID),
@@ -103,7 +124,12 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 	if err != nil {
 		return Request{}, err
 	}
-	return requestFromRow(row), nil
+	req := requestFromRow(row)
+	if req.Status != StatusPending {
+		return Request{}, ErrAlreadyDecided
+	}
+	_ = s.runApprovalHook(ctx, hooks.EventApprovalRequested, input, req, false)
+	return req, nil
 }
 
 func (s *Service) ResolveTarget(ctx context.Context, input ResolveInput) (Request, error) {
@@ -186,7 +212,14 @@ func (s *Service) Approve(ctx context.Context, approvalID, actorID, reason strin
 		Reason:                     strings.TrimSpace(reason),
 		DecidedByChannelIdentityID: decidedBy,
 	})
-	return requestFromRowOrErr(row, err)
+	req, err := s.resolveAndNotify(ctx, approvalID, row, err)
+	if err == nil && strings.TrimSpace(actorID) != "" {
+		req.DecidedByUser = true
+	}
+	if err == nil {
+		_ = s.runApprovalHook(ctx, hooks.EventApprovalResolved, CreatePendingInput{}, req, false)
+	}
+	return req, err
 }
 
 func (s *Service) Reject(ctx context.Context, approvalID, actorID, reason string) (Request, error) {
@@ -203,7 +236,49 @@ func (s *Service) Reject(ctx context.Context, approvalID, actorID, reason string
 		Reason:                     strings.TrimSpace(reason),
 		DecidedByChannelIdentityID: decidedBy,
 	})
-	return requestFromRowOrErr(row, err)
+	req, err := s.resolveAndNotify(ctx, approvalID, row, err)
+	if err == nil && strings.TrimSpace(actorID) != "" {
+		req.DecidedByUser = true
+	}
+	if err == nil {
+		_ = s.runApprovalHook(ctx, hooks.EventApprovalResolved, CreatePendingInput{}, req, false)
+	}
+	return req, err
+}
+
+// CancelPendingForSession closes pending approvals that belonged to an ended
+// turn and wakes any in-process waiters.
+func (s *Service) CancelPendingForSession(ctx context.Context, botID, sessionID, reason string) ([]Request, error) {
+	if s == nil || s.queries == nil {
+		return nil, errors.New("tool approval queries not configured")
+	}
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return nil, err
+	}
+	pgSessionID, err := db.ParseUUID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "tool approval cancelled: the turn that requested it ended"
+	}
+	rows, err := s.queries.CancelPendingToolApprovalsBySession(ctx, sqlc.CancelPendingToolApprovalsBySessionParams{
+		BotID:     pgBotID,
+		SessionID: pgSessionID,
+		Reason:    reason,
+	})
+	if err != nil {
+		return nil, err
+	}
+	requests := make([]Request, 0, len(rows))
+	for _, row := range rows {
+		req := requestFromRow(row)
+		requests = append(requests, req)
+		s.notifyResolved(req)
+	}
+	return requests, nil
 }
 
 func (s *Service) Get(ctx context.Context, approvalID string) (Request, error) {
@@ -219,23 +294,144 @@ func (s *Service) Get(ctx context.Context, approvalID string) (Request, error) {
 }
 
 func (s *Service) WaitForDecision(ctx context.Context, approvalID string) (Request, error) {
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
+	if s == nil {
+		return Request{}, errors.New("tool approval service not configured")
+	}
+	poll := func(ctx context.Context) (Request, bool, error) {
 		req, err := s.Get(ctx, approvalID)
 		if err != nil {
-			return Request{}, err
+			return Request{}, false, err
 		}
 		if req.Status != StatusPending {
-			return req, nil
+			return req, true, nil
 		}
-		select {
-		case <-ctx.Done():
-			return Request{}, ctx.Err()
-		case <-ticker.C:
+		return Request{}, false, nil
+	}
+	req, err := s.waiter.Await(ctx, approvalID, decision.DefaultFallbackInterval, poll)
+	if err != nil && ctx.Err() != nil {
+		return s.resolvedAfterContextDone(ctx, approvalID)
+	}
+	return req, err
+}
+
+func (s *Service) RegisterWaiter(approvalID string) func() {
+	if s == nil || s.waiter == nil {
+		return func() {}
+	}
+	return s.waiter.Register(approvalID)
+}
+
+func (s *Service) NotifyApprovalTimeout(ctx context.Context, req Request) {
+	_ = s.runApprovalHook(ctx, hooks.EventApprovalTimeout, CreatePendingInput{}, req, false)
+}
+
+func (s *Service) runApprovalHook(ctx context.Context, event string, input CreatePendingInput, req Request, failOnError bool) error {
+	if s == nil || s.hooks == nil {
+		return nil
+	}
+	botID := firstApprovalValue(req.BotID, input.BotID)
+	sessionID := firstApprovalValue(req.SessionID, input.SessionID)
+	payload := map[string]any{
+		"tool_call_id": firstApprovalValue(req.ToolCallID, input.ToolCallID),
+		"tool_name":    firstApprovalValue(req.ToolName, input.ToolName),
+		"operation":    req.Operation,
+		"status":       req.Status,
+		"approval_id":  req.ID,
+		"short_id":     req.ShortID,
+		"reason":       req.DecisionReason,
+	}
+	if req.Operation == "" {
+		if operation, ok := OperationForTool(input.ToolName); ok {
+			payload["operation"] = operation
 		}
 	}
+	if req.ToolInput != nil {
+		payload["tool_input"] = req.ToolInput
+	} else if input.ToolInput != nil {
+		payload["tool_input"] = input.ToolInput
+	}
+	result, err := s.hooks.Run(ctx, hooks.Request{
+		Version:   1,
+		Event:     event,
+		BotID:     botID,
+		SessionID: sessionID,
+		Tool: &hooks.ToolPayload{
+			Name:   firstApprovalValue(req.ToolName, input.ToolName),
+			CallID: firstApprovalValue(req.ToolCallID, input.ToolCallID),
+			Input:  payload["tool_input"],
+		},
+		Approval: payload,
+	}, nil)
+	if err == nil && result.Decision == hooks.DecisionDeny {
+		err = hooks.ErrDenied
+	}
+	if err != nil {
+		if failOnError {
+			return err
+		}
+		if s.logger != nil {
+			s.logger.Warn("approval hook failed",
+				slog.String("event", event),
+				slog.String("bot_id", botID),
+				slog.String("session_id", sessionID),
+				slog.Any("error", err),
+			)
+		}
+	}
+	return nil
+}
+
+func firstApprovalValue(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func (s *Service) HasWaiter(approvalID string) bool {
+	return s != nil && s.waiter != nil && s.waiter.Has(approvalID)
+}
+
+// CanRespond reports whether a waiter-backed approval can accept a user
+// decision in this process. Native chat approvals are DB-deferred and must not
+// use this helper; it is for ACP/MCP flows whose caller is blocked in process.
+func (s *Service) CanRespond(req Request) bool {
+	return strings.EqualFold(NormalizedStatus(req.Status), StatusPending) && s.HasWaiter(req.ID)
+}
+
+// resolveAndNotify converts a guarded approval update into the shared service
+// result. If the update matched no pending row, a terminal row with the same
+// ID means another responder or waiter won the race.
+func (s *Service) resolveAndNotify(ctx context.Context, approvalID string, row sqlc.ToolApprovalRequest, err error) (Request, error) {
+	req, err := requestFromRowOrErr(row, err)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			if existing, getErr := s.Get(ctx, approvalID); getErr == nil && existing.Status != StatusPending {
+				return Request{}, ErrAlreadyDecided
+			}
+		}
+		return Request{}, err
+	}
+	s.notifyResolved(req)
+	return req, nil
+}
+
+func (s *Service) notifyResolved(req Request) {
+	if s == nil || s.waiter == nil {
+		return
+	}
+	s.waiter.Notify(req.ID, req)
+}
+
+func (s *Service) resolvedAfterContextDone(ctx context.Context, approvalID string) (Request, error) {
+	finalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	if req, err := s.Get(finalCtx, approvalID); err == nil && req.Status != StatusPending {
+		return req, nil
+	}
+	return Request{}, ctx.Err()
 }
 
 func (s *Service) UpdatePromptMessage(ctx context.Context, approvalID, promptMessageID, externalID string) (Request, error) {
@@ -342,6 +538,7 @@ func requestFromRow(row sqlc.ToolApprovalRequest) Request {
 		SessionID:               uuid.UUID(row.SessionID.Bytes).String(),
 		ToolCallID:              strings.TrimSpace(row.ToolCallID),
 		ToolName:                strings.TrimSpace(row.ToolName),
+		Operation:               strings.TrimSpace(row.Operation),
 		ToolInput:               input,
 		ShortID:                 int(row.ShortID),
 		Status:                  strings.TrimSpace(row.Status),
@@ -352,11 +549,17 @@ func requestFromRow(row sqlc.ToolApprovalRequest) Request {
 		ConversationType:        strings.TrimSpace(row.ConversationType),
 		CreatedAt:               row.CreatedAt.Time,
 	}
+	if req.Operation == "" {
+		req.Operation, _ = OperationForTool(req.ToolName)
+	}
 	if row.RouteID.Valid {
 		req.RouteID = uuid.UUID(row.RouteID.Bytes).String()
 	}
 	if row.ChannelIdentityID.Valid {
 		req.ChannelIdentityID = uuid.UUID(row.ChannelIdentityID.Bytes).String()
+	}
+	if row.DecidedByChannelIdentityID.Valid {
+		req.DecidedByUser = true
 	}
 	if row.DecidedAt.Valid {
 		decided := row.DecidedAt.Time

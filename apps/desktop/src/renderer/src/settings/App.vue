@@ -8,7 +8,6 @@ import {
   Breadcrumb, BreadcrumbList, BreadcrumbItem,
   BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator,
 } from '@memohai/ui'
-import 'vue-sonner/style.css'
 import MainLayout from '@memohai/web/layout/main-layout/index.vue'
 import SettingsSidebar from '@memohai/web/components/settings-sidebar/index.vue'
 import { useSettingsStore } from '@memohai/web/store/settings'
@@ -68,7 +67,7 @@ const breadcrumbs = computed(() => {
 </script>
 
 <template>
-  <section class="[&_input]:shadow-none!">
+  <section>
     <!-- Invisible 16px drag strip pinned to the very top edge of the
          window. Sized to match the routed sections' `p-4` top
          padding so it sits entirely within the page's existing dead
@@ -92,10 +91,7 @@ const breadcrumbs = computed(() => {
       <template #sidebar>
         <!-- Desktop hosts settings in a dedicated window, so the sidebar's
              "← Settings" header (back-to-chat affordance) is suppressed. -->
-        <SettingsSidebar
-          :hide-header="true"
-          :exclude-items="['profile']"
-        />
+        <SettingsSidebar :hide-header="true" />
       </template>
       <template #main>
         <SidebarInset class="flex flex-col overflow-hidden">
