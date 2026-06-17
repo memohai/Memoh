@@ -57,6 +57,7 @@ require (
 	golang.org/x/time v0.14.0
 	google.golang.org/grpc v1.78.0
 	google.golang.org/protobuf v1.36.11
+	gopkg.in/telebot.v4 v4.0.0-beta.10
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.18.1
 	tags.cncf.io/container-device-interface v1.1.0
@@ -220,7 +221,6 @@ require (
 	golang.org/x/text v0.34.0 // indirect
 	golang.org/x/tools v0.42.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260209200024-4cfbd4190f57 // indirect
-	gopkg.in/telebot.v4 v4.0.0-beta.10 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 	lukechampine.com/uint128 v1.2.0 // indirect
 	modernc.org/cc/v3 v3.36.3 // indirect

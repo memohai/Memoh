@@ -614,6 +614,11 @@ func TestIsTelegramMessageNotModified(t *testing.T) {
 		{"production exact", &tele.Error{Code: 400, Description: productionMessageNotModified}, true},
 		{"same text but code 500", &tele.Error{Code: 500, Description: "message is not modified"}, false},
 		{"wrapped same", fmt.Errorf("wrapped: %w", &tele.Error{Code: 400, Description: "Bad Request: message is not modified"}), true},
+		// telebot only types errors whose description matches a sentinel; longer or
+		// novel variants of "message is not modified" arrive as fmt.Errorf strings
+		// shaped "telegram: <description> (<code>)" with no *tele.Error in the chain.
+		{"telebot fmt-wrapped variant", errors.New("telegram: Bad Request: message is not modified: caption is unchanged (400)"), true},
+		{"telebot fmt-wrapped wrong code", errors.New("telegram: Bad Request: message is not modified (500)"), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -643,6 +648,13 @@ func TestIsTelegramEditUnrecoverable(t *testing.T) {
 		{"rate limit not terminal", &tele.Error{Code: 429, Description: "Too Many Requests"}, false},
 		{"same text but code 500", &tele.Error{Code: 500, Description: "message to edit not found"}, false},
 		{"wrapped terminal", fmt.Errorf("wrapped: %w", &tele.Error{Code: 400, Description: "Bad Request: message to edit not found"}), true},
+		// telebot has no sentinel for these; extractOk emits the raw fmt.Errorf
+		// shape, which used to slip past the *tele.Error check and broke the
+		// streaming final-edit recovery path.
+		{"telebot fmt-wrapped not found", errors.New("telegram: Bad Request: message to edit not found (400)"), true},
+		{"telebot fmt-wrapped message_id_invalid", errors.New("telegram: Bad Request: MESSAGE_ID_INVALID (400)"), true},
+		{"telebot fmt-wrapped wrong code", errors.New("telegram: Bad Request: message to edit not found (500)"), false},
+		{"telebot fmt-wrapped unrelated", errors.New("telegram: Bad Request: chat not found (400)"), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

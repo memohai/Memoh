@@ -1206,7 +1206,11 @@ func isTelegramMessageNotModified(err error) bool {
 	if errors.As(err, &apiErr) {
 		return apiErr.Code == 400 && strings.Contains(strings.ToLower(apiErr.Description), "message is not modified")
 	}
-	return false
+	// telebot only types errors whose description matches a registered sentinel
+	// (ErrMessageNotModified, ErrSameMessageContent, …). Other 4xx variants are
+	// returned as fmt.Errorf("telegram: <description> (<code>)") and would slip
+	// through *tele.Error type checks. Match by the wire string instead.
+	return telegramTextErrorMatches(err, 400, "message is not modified")
 }
 
 // isTelegramEditUnrecoverable reports whether an edit failed because the target
@@ -1229,6 +1233,37 @@ func isTelegramEditUnrecoverable(err error) bool {
 		return strings.Contains(m, "message to edit not found") ||
 			strings.Contains(m, "message can't be edited") ||
 			strings.Contains(m, "message_id_invalid")
+	}
+	// "message to edit not found" and "MESSAGE_ID_INVALID" are not registered
+	// as telebot sentinels, so they arrive as plain fmt.Errorf strings. Without
+	// this fallback the streaming recovery path (editStreamMessageFinal →
+	// sendPermanentMessage) silently drops the final answer when the placeholder
+	// message has been deleted or aged past Telegram's edit window.
+	return telegramTextErrorMatches(err, 400,
+		"message to edit not found",
+		"message_id_invalid")
+}
+
+// telegramTextErrorMatches reports whether err's message looks like telebot's
+// fmt.Errorf("telegram: <description> (<code>)") wrapping with the given code
+// and at least one of the (case-insensitive) substrings present.
+func telegramTextErrorMatches(err error, code int, substrings ...string) bool {
+	// FloodError is the only typed telebot error a 429 can take. Skip it here
+	// to avoid recursing into its Error() method, which dereferences an
+	// unexported inner *Error; test stubs that construct FloodError{RetryAfter:N}
+	// directly would panic otherwise.
+	var floodErr tele.FloodError
+	if errors.As(err, &floodErr) {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, fmt.Sprintf("(%d)", code)) {
+		return false
+	}
+	for _, s := range substrings {
+		if strings.Contains(msg, s) {
+			return true
+		}
 	}
 	return false
 }
