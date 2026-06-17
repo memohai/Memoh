@@ -5,7 +5,9 @@
     class="group relative flex items-center min-h-[2.125rem] w-full rounded-[9px] px-[11px] text-left transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     :class="isActive ? 'bg-sidebar-accent' : 'hover:bg-[color:var(--sidebar-hover)]'"
     :title="hoverTitle"
-    @click="$emit('select', session)"
+    @click="onRowClick"
+    @mousedown.middle.prevent
+    @auxclick="onRowAuxClick"
     @keydown.enter.prevent="$emit('select', session)"
     @keydown.space.prevent="$emit('select', session)"
   >
@@ -58,6 +60,12 @@
           @click.stop
         >
           <DropdownMenuItem
+            @select="$emit('open-new', session)"
+          >
+            <SquarePlus class="mr-2 size-3.5" />
+            {{ t('chat.openInNewTab') }}
+          </DropdownMenuItem>
+          <DropdownMenuItem
             @select="$emit('rename', session)"
           >
             <Pencil class="mr-2 size-3.5" />
@@ -78,7 +86,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { LoaderCircle, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
+import { LoaderCircle, MoreHorizontal, Pencil, SquarePlus, Trash2 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import type { SessionSummary } from '@/composables/api/useChat'
 import {
@@ -96,8 +104,9 @@ const props = defineProps<{
   streaming?: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   select: [session: SessionSummary]
+  'open-new': [session: SessionSummary]
   rename: [session: SessionSummary]
   delete: [session: SessionSummary]
 }>()
@@ -105,6 +114,22 @@ defineEmits<{
 const { t } = useI18n()
 
 const menuOpen = ref(false)
+
+// A plain click switches the primary tab in place (the fast, common path, no
+// delay). ⌘/Ctrl+click and middle-click open the session as its own tab —
+// the browser/IDE convention — so "open in a new tab" never has to fight the
+// single-click for a double-click window.
+function onRowClick(e: MouseEvent) {
+  if (e.metaKey || e.ctrlKey) {
+    emit('open-new', props.session)
+    return
+  }
+  emit('select', props.session)
+}
+
+function onRowAuxClick(e: MouseEvent) {
+  if (e.button === 1) emit('open-new', props.session)
+}
 
 const titleRuns = computed(() =>
   splitScriptRuns((props.session.title ?? '').trim() || t('chat.untitledSession')),

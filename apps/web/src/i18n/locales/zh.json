@@ -716,6 +716,7 @@
     "sessionInfoRingAria": "会话信息",
     "sessionInfoTooltipHint": "悬停查看会话信息",
     "sessionActions": "会话操作",
+    "openInNewTab": "在新标签页打开",
     "bottomPanel": {
       "terminal": "终端",
       "newSession": "新建终端",

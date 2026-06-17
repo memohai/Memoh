@@ -166,10 +166,14 @@ import {
 import ToolCallDetailGeneric from './tool-call-detail-generic.vue'
 import CollapseSection from './collapse-section.vue'
 import { getCollapseOpen, setCollapseOpen, toolCollapseKey } from './process-collapse'
+import { CHAT_PANE_SESSION_ID } from './chat-pane-context'
 
 const props = defineProps<{ block: ToolCallBlock, inGroup?: boolean }>()
 const { t } = useI18n()
 const chatStore = useChatStore()
+// The session this tool block is rendered in (a pinned chat tab may not be the
+// active session); falls back to the active session when not provided.
+const paneSessionId = inject(CHAT_PANE_SESSION_ID, undefined)
 
 // Two detail styles:
 //  - 'inline' = half-embedded key:value list (params), just indented, no card.
@@ -347,6 +351,6 @@ function handleOpenInFiles() {
 function handleApproval(decision: 'approve' | 'reject') {
   const approval = props.block.approval
   if (!approval) return
-  void chatStore.respondToolApproval(approval, decision)
+  void chatStore.respondToolApproval(approval, decision, paneSessionId?.value ?? undefined)
 }
 </script>

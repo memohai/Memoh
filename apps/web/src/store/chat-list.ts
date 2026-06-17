@@ -252,9 +252,50 @@ export const useChatStore = defineStore('chat', () => {
   const hasMoreOlder = ref(true)
   const initializing = ref(false)
   const bots = ref<Bot[]>([])
-  const overrideModelId = ref<string>('')
-  const overrideReasoningEffort = ref<string>('')
-  const startupSendFailure = ref<StartupSendFailure | null>(null)
+  // Composer overrides and startup-send failures are scoped per session
+  // (keyed by session id; '' is the draft slot) so side-by-side chat tabs each
+  // keep their own pending state instead of sharing one global value.
+  const overrideModelIds = reactive(new Map<string, string>())
+  const overrideReasoningEfforts = reactive(new Map<string, string>())
+  const startupSendFailures = reactive(new Map<string, StartupSendFailure>())
+
+  function sessionScopeKey(sid?: string | null): string {
+    return (sid ?? '').trim()
+  }
+  function getOverrideModelId(sid?: string | null): string {
+    return overrideModelIds.get(sessionScopeKey(sid)) ?? ''
+  }
+  function setOverrideModelId(sid: string | null | undefined, value: string) {
+    const key = sessionScopeKey(sid)
+    if (value) overrideModelIds.set(key, value)
+    else overrideModelIds.delete(key)
+  }
+  function getOverrideReasoningEffort(sid?: string | null): string {
+    return overrideReasoningEfforts.get(sessionScopeKey(sid)) ?? ''
+  }
+  function setOverrideReasoningEffort(sid: string | null | undefined, value: string) {
+    const key = sessionScopeKey(sid)
+    if (value) overrideReasoningEfforts.set(key, value)
+    else overrideReasoningEfforts.delete(key)
+  }
+  function getStartupSendFailure(sid?: string | null): StartupSendFailure | null {
+    return startupSendFailures.get(sessionScopeKey(sid)) ?? null
+  }
+  // Active-session views kept for the primary tab and existing consumers/tests.
+  const overrideModelId = computed<string>({
+    get: () => getOverrideModelId(sessionId.value),
+    set: value => setOverrideModelId(sessionId.value, value),
+  })
+  const overrideReasoningEffort = computed<string>({
+    get: () => getOverrideReasoningEffort(sessionId.value),
+    set: value => setOverrideReasoningEffort(sessionId.value, value),
+  })
+  const startupSendFailure = computed<StartupSendFailure | null>(() => getStartupSendFailure(sessionId.value))
+
+  // Background pagination/load tracking for non-active (pinned) sessions, keyed
+  // by `botId:sessionId`. The active session keeps using loadingOlder/loadingChats.
+  const sessionLoadingOlder = reactive(new Set<string>())
+  const sessionLoading = reactive(new Set<string>())
 
   // Bumps every time a fs-mutating tool call (write/edit/apply_patch/exec) finishes for the
   // current bot. File-manager components watch this to refresh their listings
@@ -276,10 +317,12 @@ export const useChatStore = defineStore('chat', () => {
   let sessionListRefreshPromise: { botId: string; promise: Promise<void> } | null = null
   const pendingBackgroundEvents = new Map<string, BackgroundTask[]>()
   const latestBackgroundTasks = new Map<string, BackgroundTask>()
-  // Open chat tabs share this store, so keep a small per-session view cache.
-  // Switching tabs saves/restores from here; the active session remains the
-  // only live `messages` array rendered by ChatPane.
-  const sessionMessageStates = new Map<string, SessionMessageState>()
+  // Open chat tabs share this store, so keep a per-session message cache.
+  // The active session is rendered from the live `messages` array; every other
+  // (pinned) session reads its own reactive `items` slice straight from here,
+  // which is what lets side-by-side tabs stream independently. Reactive so that
+  // background stream appends to a non-active session re-render its tab.
+  const sessionMessageStates = reactive(new Map<string, SessionMessageState>())
   const ephemeralAssistantErrors = new Map<string, EphemeralAssistantError[]>()
   const messageEventsStream = useRetryingStream()
   const acpRuntimeStatuses = ref<Record<string, AcpagentRuntimeStatus | undefined>>({})
@@ -298,15 +341,22 @@ export const useChatStore = defineStore('chat', () => {
     sessions.value.find((s) => s.id === sessionId.value) ?? null,
   )
 
-  const activeChatReadOnly = computed(() => {
-    const session = activeSession.value
+  function sessionReadOnly(session: SessionSummary | null | undefined): boolean {
     if (!session) return false
     const type = session.type ?? 'chat'
     if (type === 'heartbeat' || type === 'schedule' || type === 'subagent') return true
     const ct = (session.channel_type ?? '').trim().toLowerCase()
     if (ct && ct !== 'local') return true
     return false
-  })
+  }
+
+  const activeChatReadOnly = computed(() => sessionReadOnly(activeSession.value))
+
+  function getSessionReadOnly(sid?: string | null): boolean {
+    const target = (sid ?? '').trim()
+    if (!target) return false
+    return sessionReadOnly(sessions.value.find(session => session.id === target) ?? null)
+  }
 
   function acpRuntimeKey(botId: string, targetSessionId: string) {
     const bid = botId.trim()
@@ -894,7 +944,7 @@ export const useChatStore = defineStore('chat', () => {
     const key = sessionMessageKey(currentBotId.value, sessionId.value)
     if (!key) return
     sessionMessageStates.set(key, {
-      items: [...messages],
+      items: reactive<ChatMessage[]>([...messages]),
       hasMoreOlder: hasMoreOlder.value,
     })
   }
@@ -913,7 +963,7 @@ export const useChatStore = defineStore('chat', () => {
     const key = sessionMessageKey(botId, sid)
     if (!key) return
     sessionMessageStates.set(key, {
-      items: [...items],
+      items: reactive<ChatMessage[]>([...items]),
       hasMoreOlder: moreOlder,
     })
     for (const item of items) {
@@ -925,6 +975,69 @@ export const useChatStore = defineStore('chat', () => {
   function clearCachedMessages(botId?: string | null, sid?: string | null) {
     const key = sessionMessageKey(botId, sid)
     if (key) sessionMessageStates.delete(key)
+  }
+
+  // Empty sentinel for sessions whose cache hasn't loaded yet. Shared and never
+  // mutated, so reads stay cheap and reactivity comes from the map entry itself.
+  const EMPTY_MESSAGES: ChatMessage[] = []
+
+  // The live message collection for a session: the active session uses the
+  // rendered `messages` array; any other session uses (and lazily creates) its
+  // reactive cache slice. All session-scoped writes route through this so a
+  // pinned tab mutates its own session, never the active one.
+  function itemsFor(botId: string, sid: string): ChatMessage[] {
+    const bid = botId.trim()
+    const session = sid.trim()
+    if (currentBotId.value === bid && sessionId.value === session) return messages
+    const key = sessionMessageKey(bid, session)
+    if (!key) return messages
+    let entry = sessionMessageStates.get(key)
+    if (!entry) {
+      entry = { items: reactive<ChatMessage[]>([]), hasMoreOlder: true }
+      sessionMessageStates.set(key, entry)
+    }
+    return entry.items
+  }
+
+  // Read-only message view for a session, used by ChatPane to render any tab.
+  function getMessages(sid?: string | null): ChatMessage[] {
+    const session = (sid ?? sessionId.value ?? '').trim()
+    if (!session || sessionId.value === session) return messages
+    const key = sessionMessageKey(currentBotId.value, session)
+    return (key ? sessionMessageStates.get(key)?.items : undefined) ?? EMPTY_MESSAGES
+  }
+
+  function getHasMoreOlder(sid?: string | null): boolean {
+    const session = (sid ?? sessionId.value ?? '').trim()
+    if (!session || sessionId.value === session) return hasMoreOlder.value
+    const key = sessionMessageKey(currentBotId.value, session)
+    return (key ? sessionMessageStates.get(key)?.hasMoreOlder : undefined) ?? true
+  }
+
+  function getLoadingOlder(sid?: string | null): boolean {
+    const session = (sid ?? sessionId.value ?? '').trim()
+    if (!session || sessionId.value === session) return loadingOlder.value
+    const key = sessionMessageKey(currentBotId.value, session)
+    return key ? sessionLoadingOlder.has(key) : false
+  }
+
+  function getSessionLoading(sid?: string | null): boolean {
+    const session = (sid ?? sessionId.value ?? '').trim()
+    if (!session || sessionId.value === session) return loadingChats.value
+    const key = sessionMessageKey(currentBotId.value, session)
+    return key ? sessionLoading.has(key) : false
+  }
+
+  // Apply a callback to every distinct message collection (active + non-active
+  // caches), so id-keyed updates (approvals, user-input) reach whichever tab
+  // holds the block without the caller having to know the session.
+  function forEachMessageCollection(fn: (items: ChatMessage[]) => void) {
+    fn(messages)
+    const activeKey = sessionMessageKey(currentBotId.value, sessionId.value)
+    for (const [key, entry] of sessionMessageStates) {
+      if (key === activeKey) continue
+      fn(entry.items)
+    }
   }
 
   function createStreamId(): string {
@@ -1021,7 +1134,7 @@ export const useChatStore = defineStore('chat', () => {
       cached.items.push(turn)
     } else {
       sessionMessageStates.set(key, {
-        items: [turn],
+        items: reactive<ChatMessage[]>([turn]),
         hasMoreOlder: true,
       })
     }
@@ -1162,17 +1275,19 @@ export const useChatStore = defineStore('chat', () => {
     const id = userInputId.trim()
     if (!id) return []
     const snapshots: UserInputStateSnapshot[] = []
-    for (const message of messages) {
-      if (message.role !== 'assistant') continue
-      for (const block of message.messages) {
-        if (block.type === 'tool' && block.userInput?.user_input_id === id) {
-          snapshots.push({
-            block,
-            userInput: cloneUserInputState(block.userInput),
-          })
+    forEachMessageCollection((items) => {
+      for (const message of items) {
+        if (message.role !== 'assistant') continue
+        for (const block of message.messages) {
+          if (block.type === 'tool' && block.userInput?.user_input_id === id) {
+            snapshots.push({
+              block,
+              userInput: cloneUserInputState(block.userInput),
+            })
+          }
         }
       }
-    }
+    })
     return snapshots
   }
 
@@ -1220,16 +1335,20 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function rememberStartupSendFailure(failure: Omit<StartupSendFailure, 'id'>) {
-    startupSendFailure.value = {
+    startupSendFailures.set(sessionScopeKey(failure.sessionId), {
       ...failure,
       id: nextId(),
       restoreAttachments: failure.restoreAttachments ? [...failure.restoreAttachments] : undefined,
-    }
+    })
   }
 
   function clearStartupSendFailure(id?: string) {
-    if (!id || startupSendFailure.value?.id === id) {
-      startupSendFailure.value = null
+    if (!id) {
+      startupSendFailures.clear()
+      return
+    }
+    for (const [key, failure] of startupSendFailures) {
+      if (failure.id === id) startupSendFailures.delete(key)
     }
   }
 
@@ -1261,17 +1380,19 @@ export const useChatStore = defineStore('chat', () => {
   function markToolApprovalDecision(approvalId: string, status: 'approved' | 'rejected' | 'pending') {
     const id = approvalId.trim()
     if (!id) return
-    for (const message of messages) {
-      if (message.role !== 'assistant') continue
-      for (const block of message.messages) {
-        if (block.type !== 'tool' || block.approval?.approval_id !== id) continue
-        block.approval = {
-          ...block.approval,
-          status,
-          can_approve: status === 'pending',
+    forEachMessageCollection((items) => {
+      for (const message of items) {
+        if (message.role !== 'assistant') continue
+        for (const block of message.messages) {
+          if (block.type !== 'tool' || block.approval?.approval_id !== id) continue
+          block.approval = {
+            ...block.approval,
+            status,
+            can_approve: status === 'pending',
+          }
         }
       }
-    }
+    })
   }
 
   // Undo the optimistic decision when the response stream fails, so the user
@@ -1365,9 +1486,9 @@ export const useChatStore = defineStore('chat', () => {
     loadingChats.value = false
     loadingOlder.value = false
     initializing.value = false
-    overrideModelId.value = ''
-    overrideReasoningEffort.value = ''
-    startupSendFailure.value = null
+    overrideModelIds.clear()
+    overrideReasoningEfforts.clear()
+    startupSendFailures.clear()
     fsChangedAt.value = 0
     clearPendingACPSession()
 
@@ -1375,6 +1496,8 @@ export const useChatStore = defineStore('chat', () => {
     approvalResponseStreams.clear()
     pendingBackgroundEvents.clear()
     latestBackgroundTasks.clear()
+    sessionLoadingOlder.clear()
+    sessionLoading.clear()
     sessionMessageStates.clear()
     ephemeralAssistantErrors.clear()
   }
@@ -1603,8 +1726,9 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
-  function abort() {
-    const activeIds = activeStreamIdsForSession(sessionId.value)
+  function abort(targetSessionId?: string | null) {
+    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
+    const activeIds = activeStreamIdsForSession(sid)
     const abortError = new Error('aborted')
     abortError.name = 'AbortError'
     for (const streamId of activeIds) {
@@ -1655,14 +1779,41 @@ export const useChatStore = defineStore('chat', () => {
     cacheCurrentMessages()
   }
 
-  async function loadOlderMessages(): Promise<number> {
+  async function loadOlderMessages(targetSessionId?: string | null): Promise<number> {
     const bid = currentBotId.value ?? ''
-    const sid = sessionId.value ?? ''
-    if (!bid || !sid || loadingOlder.value || !hasMoreOlder.value) return 0
-    const first = messages[0]
+    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
+    if (!bid || !sid) return 0
+    const isActiveSession = sessionId.value === sid
+    const key = sessionMessageKey(bid, sid)
+
+    const isLoadingOlder = () => isActiveSession ? loadingOlder.value : (key ? sessionLoadingOlder.has(key) : false)
+    const setLoadingOlder = (value: boolean) => {
+      if (isActiveSession) {
+        loadingOlder.value = value
+        return
+      }
+      if (!key) return
+      if (value) sessionLoadingOlder.add(key)
+      else sessionLoadingOlder.delete(key)
+    }
+    const getMoreOlder = () => isActiveSession
+      ? hasMoreOlder.value
+      : ((key ? sessionMessageStates.get(key)?.hasMoreOlder : undefined) ?? true)
+    const setMoreOlder = (value: boolean) => {
+      if (isActiveSession) {
+        hasMoreOlder.value = value
+        return
+      }
+      const entry = key ? sessionMessageStates.get(key) : undefined
+      if (entry) entry.hasMoreOlder = value
+    }
+
+    if (isLoadingOlder() || !getMoreOlder()) return 0
+    const collection = itemsFor(bid, sid)
+    const first = collection[0]
     if (!first?.timestamp) return 0
 
-    loadingOlder.value = true
+    setLoadingOlder(true)
     try {
       // Page through history with cursor advancement. When merged-turn de-dup
       // collapses an entire page to zero net-new entries, we must keep
@@ -1678,16 +1829,16 @@ export const useChatStore = defineStore('chat', () => {
         })
 
         if (turns.length === 0) {
-          hasMoreOlder.value = false
+          setMoreOlder(false)
           return 0
         }
 
-        const existingIds = new Set(messages.map(message => message.id))
-        const normalized = normalizeTurns(turns)
+        const existingIds = new Set(collection.map(message => message.id))
+        const normalized = normalizeTurns(turns, sid)
         const older = normalized.filter(turn => !existingIds.has(turn.id))
 
         if (older.length > 0) {
-          messages.unshift(...older)
+          collection.unshift(...older)
           // Don't infer end-of-history from `turns.length < PAGE_SIZE`: the
           // server pages by raw DB rows (bot_history_messages.created_at) but
           // we receive merged UI turns (multi-row user/assistant groups
@@ -1707,20 +1858,41 @@ export const useChatStore = defineStore('chat', () => {
         }, null)
         if (!earliest || earliest === cursor) {
           // Pagination cursor cannot advance; bail out to avoid a request loop.
-          hasMoreOlder.value = false
+          setMoreOlder(false)
           return 0
         }
         cursor = earliest
       }
       // Exhausted hop budget without finding net-new turns; treat as end of
       // history rather than spinning indefinitely.
-      hasMoreOlder.value = false
+      setMoreOlder(false)
       return 0
     } catch (error) {
       console.error('Failed to load older messages:', error)
       return 0
     } finally {
-      loadingOlder.value = false
+      setLoadingOlder(false)
+    }
+  }
+
+  // Lazily fetch a non-active session's history into its cache slice so a pinned
+  // tab restored from a saved layout (or opened without ever being active) has
+  // content. No-op for the active session, sessions already cached, or in-flight
+  // loads.
+  async function ensureSessionLoaded(targetSessionId?: string | null) {
+    const bid = (currentBotId.value ?? '').trim()
+    const sid = (targetSessionId ?? '').trim()
+    if (!bid || !sid || sessionId.value === sid) return
+    const key = sessionMessageKey(bid, sid)
+    if (!key || sessionMessageStates.has(key) || sessionLoading.has(key)) return
+    sessionLoading.add(key)
+    try {
+      const turns = await fetchMessagesUI(bid, sid, { limit: PAGE_SIZE })
+      cacheFetchedMessages(bid, sid, normalizeTurns(turns, sid), turns.length > 0)
+    } catch (error) {
+      console.error('Failed to load session messages:', error)
+    } finally {
+      sessionLoading.delete(key)
     }
   }
 
@@ -2266,9 +2438,14 @@ export const useChatStore = defineStore('chat', () => {
     return updated
   }
 
-  async function sendMessage(text: string, attachments?: ChatAttachment[]): Promise<SendMessageResult> {
+  async function sendMessage(text: string, attachments?: ChatAttachment[], targetSessionId?: string): Promise<SendMessageResult> {
     const trimmed = text.trim()
-    if ((!trimmed && !attachments?.length) || streaming.value || !currentBotId.value) return { ok: false, stage: 'startup' }
+    const requestedSid = (targetSessionId ?? '').trim()
+    // The composer slot the overrides belong to: a pinned tab uses its own
+    // session; the primary tab uses the active session (or '' while drafting).
+    const composerSid = requestedSid || sessionId.value || ''
+    const guardSid = requestedSid || sessionId.value || ''
+    if ((!trimmed && !attachments?.length) || isSessionStreaming(guardSid) || !currentBotId.value) return { ok: false, stage: 'startup' }
 
     loading.value = true
     let assistantTurn: ChatAssistantTurn | null = null
@@ -2277,23 +2454,29 @@ export const useChatStore = defineStore('chat', () => {
     let sendSessionId = ''
     let sendStreamId = ''
 
+    // Capture overrides before ensureActiveSession() can mint a new session id
+    // (a draft send would otherwise lose the model picked on the draft slot).
+    const modelId = getOverrideModelId(composerSid) || undefined
+    const effort = getOverrideReasoningEffort(composerSid)
+    const reasoningEffort = effort || undefined
+
     try {
-      await ensureActiveSession()
+      // Only the primary tab drafts; a pinned tab always targets a real session.
+      if (!requestedSid) {
+        await ensureActiveSession()
+      }
 
       const bid = currentBotId.value!
-      const sid = sessionId.value!
+      const sid = requestedSid || sessionId.value!
       sendBotId = bid
       sendSessionId = sid
       sendStreamId = createStreamId()
 
+      const collection = itemsFor(bid, sid)
       userTurn = createOptimisticUserTurn(trimmed, attachments)
-      messages.push(userTurn)
-      messages.push(createOptimisticAssistantTurn())
-      assistantTurn = messages[messages.length - 1] as ChatAssistantTurn
-
-      const modelId = overrideModelId.value || undefined
-      const effort = overrideReasoningEffort.value
-      const reasoningEffort = effort || undefined
+      collection.push(userTurn)
+      collection.push(createOptimisticAssistantTurn())
+      assistantTurn = collection[collection.length - 1] as ChatAssistantTurn
 
       const ws = ensureWebSocket(bid)
       if (ws) {
@@ -2347,9 +2530,9 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function respondToolApproval(approval: UIToolApproval, decision: 'approve' | 'reject') {
+  async function respondToolApproval(approval: UIToolApproval, decision: 'approve' | 'reject', targetSessionId?: string) {
     const bid = currentBotId.value ?? ''
-    const sid = sessionId.value ?? ''
+    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
     const approvalId = approval.approval_id?.trim()
     if (!bid || !sid || !approvalId) return false
     if (approval.status !== 'pending' || approval.can_approve === false) return false
@@ -2360,7 +2543,7 @@ export const useChatStore = defineStore('chat', () => {
     approvalResponseStreams.set(streamId, { approvalId, silent, at: Date.now() })
     if (!silent) {
       const assistantTurn = createOptimisticAssistantTurn()
-      messages.push(assistantTurn)
+      itemsFor(bid, sid).push(assistantTurn)
       void trackAssistantStream(streamId, assistantTurn, bid, sid).catch((error: Error) => {
         finalizeStreamFailure(assistantTurn, bid, sid, error)
       })
@@ -2383,9 +2566,10 @@ export const useChatStore = defineStore('chat', () => {
   async function respondUserInput(
     userInput: UIUserInput,
     payload: { answers?: WSUserInputAnswer[]; canceled?: boolean; reason?: string },
+    targetSessionId?: string,
   ) {
     const bid = currentBotId.value ?? ''
-    const sid = sessionId.value ?? ''
+    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
     if (!bid || !sid || !userInput.user_input_id) return
     const ws = ensureWebSocket(bid)
     if (!ws?.connected) {
@@ -2395,7 +2579,7 @@ export const useChatStore = defineStore('chat', () => {
     const streamId = createStreamId()
     const previousUserInputStates = snapshotUserInputStates(userInput.user_input_id)
     const assistantTurn = createOptimisticAssistantTurn()
-    messages.push(assistantTurn)
+    itemsFor(bid, sid).push(assistantTurn)
     void trackAssistantStream(streamId, assistantTurn, bid, sid).catch((error: Error) => {
       finalizeStreamFailure(assistantTurn, bid, sid, error)
       // While the main session stream is still active a refresh would
@@ -2412,7 +2596,7 @@ export const useChatStore = defineStore('chat', () => {
     loading.value = true
 
     const status = payload.canceled ? 'canceled' : 'submitted'
-    for (const message of messages) {
+    for (const message of itemsFor(bid, sid)) {
       if (message.role !== 'assistant') continue
       for (const block of message.messages) {
         if (block.type === 'tool' && block.userInput?.user_input_id === userInput.user_input_id) {
@@ -2467,7 +2651,18 @@ export const useChatStore = defineStore('chat', () => {
     bots,
     activeSession,
     activeChatReadOnly,
+    getSessionReadOnly,
     isSessionStreaming,
+    getMessages,
+    getHasMoreOlder,
+    getLoadingOlder,
+    getSessionLoading,
+    getStartupSendFailure,
+    getOverrideModelId,
+    setOverrideModelId,
+    getOverrideReasoningEffort,
+    setOverrideReasoningEffort,
+    ensureSessionLoaded,
     loading,
     loadingChats,
     loadingOlder,

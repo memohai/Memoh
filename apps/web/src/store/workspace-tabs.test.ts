@@ -259,7 +259,7 @@ describe('workspace layout store', () => {
     expect(dock.getPanel('chat')?.component).toBe('chat')
   })
 
-  it('splits the chat panel into a duplicate chat pane', () => {
+  it('does not duplicate the chat panel on split (side-by-side is drag-only)', () => {
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()
     store.registerApi(dock as never)
@@ -267,13 +267,56 @@ describe('workspace layout store', () => {
     store.openChat('Session')
     store.splitGroup('group-1', 'right')
 
-    expect(dock.getPanel('chat')).toBeTruthy()
-    expect(dock.getPanel('chat~2')).toBeTruthy()
-    expect(dock.getPanel('chat~2')?.component).toBe('chat')
+    // The split button must not mirror the active session into a second pane.
+    expect(dock.panels.filter((p) => p.component === 'chat')).toHaveLength(1)
+    expect(dock.getPanel('chat~2')).toBeUndefined()
+  })
 
-    store.setChatTitle('Renamed')
-    expect(dock.getPanel('chat')?.title).toBe('Renamed')
-    expect(dock.getPanel('chat~2')?.title).toBe('Renamed')
+  it('opens a pinned chat tab per session and focuses an existing one', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openChatSession('s1', 'Alpha')
+    store.openChatSession('s2', 'Beta')
+    // Re-opening the same session focuses its existing tab instead of adding a
+    // duplicate (titles track the session list, not the open call).
+    store.openChatSession('s1', 'Alpha again')
+
+    expect(dock.panels.filter((p) => p.component === 'chat')).toHaveLength(2)
+    expect(dock.getPanel('chat:s1')?.title).toBe('Alpha')
+    expect(dock.activePanel?.id).toBe('chat:s1')
+  })
+
+  it('reports and focuses pinned chat tabs only when open', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    expect(store.hasChatSessionTab('s1')).toBe(false)
+    expect(store.focusChatSessionTab('s1')).toBe(false)
+
+    store.openChatSession('s1', 'Alpha')
+    store.openTerminal()
+    expect(dock.activePanel?.id).toBe('terminal:1')
+
+    expect(store.hasChatSessionTab('s1')).toBe(true)
+    expect(store.focusChatSessionTab('s1')).toBe(true)
+    expect(dock.activePanel?.id).toBe('chat:s1')
+  })
+
+  it('renames only the primary chat tab, never pinned session tabs', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openChat('Primary')
+    store.openChatSession('s1', 'Alpha')
+
+    store.setChatTitle('Renamed primary')
+    expect(dock.getPanel('chat')?.title).toBe('Renamed primary')
+    // The pinned tab keeps its own session title.
+    expect(dock.getPanel('chat:s1')?.title).toBe('Alpha')
   })
 
   it('opens multiple schedule panels and focuses an existing schedule', () => {

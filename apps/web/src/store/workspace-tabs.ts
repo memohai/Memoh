@@ -60,6 +60,8 @@ function fileBaseName(filePath: string): string {
 function panelComponentOf(id: string): WorkspacePanelComponent | null {
   if (id === CHAT_PANEL_ID) return 'chat'
   if (id.startsWith(`${CHAT_PANEL_ID}~`)) return 'chat'
+  // Pinned chat tabs (`chat:<sessionId>`) bound to one fixed session.
+  if (id.startsWith(`${CHAT_PANEL_ID}:`)) return 'chat'
   if (id.startsWith('file:')) return 'file'
   if (id.startsWith('preview:')) return 'preview'
   if (id.startsWith('asset:')) return 'asset'
@@ -254,6 +256,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       }
       loadedBotId = botId
       prunePanels()
+      syncChatSessionTabs()
       activePanelId.value = dock.activePanel?.id ?? null
       syncAllTerminalGroupChrome(dock)
       restoredEmptyLayout = !!stored && dock.panels.length === 0
@@ -408,6 +411,20 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   const activeId = computed<string | null>(() => activePanelId.value)
 
+  // The session the focused tab is actually showing — what the sidebar should
+  // highlight. A pinned tab (`chat:<sid>`) owns a fixed session; the primary tab
+  // (and its `chat~` split clones) follows the global active session. When a
+  // non-chat tab (file/terminal/…) holds focus there is no chat in view, so we
+  // fall back to the active session rather than dropping the highlight entirely.
+  const focusedChatSessionId = computed<string | null>(() => {
+    const id = activePanelId.value
+    const activeSid = chatStore.sessionId ?? null
+    if (!id) return activeSid
+    if (id.startsWith(`${CHAT_PANEL_ID}:`)) return id.slice(CHAT_PANEL_ID.length + 1) || null
+    if (id === CHAT_PANEL_ID || id.startsWith(`${CHAT_PANEL_ID}~`)) return activeSid
+    return activeSid
+  })
+
   function hasCurrentPermission(permission: BotPermission): boolean {
     return hasBotPermission(currentBot.value?.current_user_permissions, permission)
   }
@@ -543,17 +560,74 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     return true
   }
 
-  /** Open or focus the singleton chat panel. Content follows the active session. */
+  /** Open or focus the singleton (primary) chat panel. Content follows the
+   * active session — single-click in the sidebar swaps it in place. */
   function openChat(title?: string) {
     focusOrAdd({ id: CHAT_PANEL_ID, component: 'chat', title: title ?? '' })
   }
 
+  function chatSessionPanelId(sid: string): string {
+    return `${CHAT_PANEL_ID}:${sid}`
+  }
+
+  /** Open or focus a pinned chat tab bound to one fixed session. Double-click in
+   * the sidebar opens these; they render their own session independently of the
+   * active one, so the user can drag them into a split for true side-by-side. */
+  function openChatSession(targetSessionId: string, title?: string) {
+    const sid = (targetSessionId ?? '').trim()
+    if (!sid) return
+    focusOrAdd({ id: chatSessionPanelId(sid), component: 'chat', title: title ?? '' })
+  }
+
+  // True when a pinned tab for the session is already open. The sidebar uses
+  // this so a single-click on an already-pinned session focuses its tab instead
+  // of hijacking the primary tab.
+  function hasChatSessionTab(targetSessionId: string): boolean {
+    const sid = (targetSessionId ?? '').trim()
+    return !!sid && !!api.value?.getPanel(chatSessionPanelId(sid))
+  }
+
+  function focusChatSessionTab(targetSessionId: string): boolean {
+    const sid = (targetSessionId ?? '').trim()
+    const panel = sid ? api.value?.getPanel(chatSessionPanelId(sid)) : undefined
+    if (!panel) return false
+    focusPanel(panel)
+    return true
+  }
+
+  // Primary chat tabs (the singleton + its `chat~` split duplicates) share the
+  // active session, so they all take the active title. Pinned `chat:` tabs carry
+  // their own session title and are skipped here.
   function setChatTitle(title: string) {
     const dock = api.value
     if (!dock) return
     for (const panel of dock.panels) {
       if (panel.id !== CHAT_PANEL_ID && !panel.id.startsWith(`${CHAT_PANEL_ID}~`)) continue
       if (panel.api.title !== title) {
+        panel.api.setTitle(title)
+      }
+    }
+  }
+
+  // Keep every open pinned chat tab's title in lockstep with its session, and
+  // close tabs whose session no longer exists (deleted, or absent from a
+  // restored layout). Skipped while the chat store is (re)initializing so the
+  // brief empty-session window during a bot switch can't close valid tabs.
+  function syncChatSessionTabs() {
+    const dock = api.value
+    if (!dock || chatStore.initializing) return
+    const byId = new Map(chatStore.sessions.map(session => [session.id, session]))
+    const prefix = `${CHAT_PANEL_ID}:`
+    for (const panel of [...dock.panels]) {
+      if (!panel.id.startsWith(prefix)) continue
+      const sid = panel.id.slice(prefix.length)
+      const session = byId.get(sid)
+      if (!session) {
+        panel.api.close()
+        continue
+      }
+      const title = (session.title ?? '').trim()
+      if (title && panel.api.title !== title) {
         panel.api.setTitle(title)
       }
     }
@@ -829,13 +903,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         break
       }
       case 'chat':
-        dock.addPanel({
-          id: uniqueSplitPanelId(source.id),
-          component: 'chat',
-          title,
-          renderer: 'always',
-          position,
-        })
+        // No split-button duplication for chat: a primary duplicate would just
+        // mirror the active session (two identical panes), and a pinned tab is
+        // already its own session. Side-by-side is achieved by dragging a tab
+        // into a split, which moves the real panel and keeps its session.
         break
     }
   }
@@ -1137,9 +1208,17 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     () => prunePanels(),
   )
 
+  // Retitle/close pinned chat tabs as the session list changes (rename, delete,
+  // or a layout restored with sessions that no longer exist).
+  watch(
+    () => `${chatStore.initializing}|${chatStore.sessions.map(s => `${s.id}:${s.title ?? ''}`).join('|')}`,
+    () => syncChatSessionTabs(),
+  )
+
   return {
     api,
     activeId,
+    focusedChatSessionId,
     panelDragging,
     fileDirty,
     dirtyFileCount,
@@ -1156,7 +1235,14 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     showWorkbench,
     hideWorkbench,
     openChat,
+    openChatSession,
+    hasChatSessionTab,
+    focusChatSessionTab,
     setChatTitle,
+    setChatSessionTitle: (sid: string, title: string) => {
+      const panel = api.value?.getPanel(chatSessionPanelId((sid ?? '').trim()))
+      if (panel && title && panel.api.title !== title) panel.api.setTitle(title)
+    },
     openFile,
     openPreview,
     openAsset,

@@ -5,6 +5,7 @@
         <ChatPane
           v-if="visible"
           :key="`chat-pane:${currentBotId}:${chatKey}`"
+          :session-id="mySessionId"
           :tab-id="chatTabId"
           :active="visible"
         />
@@ -21,10 +22,11 @@ import { useChatStore } from '@/store/chat-list'
 import ChatPane from '../chat-pane.vue'
 import { usePanelVisible } from './use-panel-visible'
 
-// The chat panel is a singleton whose content follows the active session
-// (chat-selection store). Multi-session side-by-side rendering needs
-// per-session message state in the chat store first. No breadcrumb: the tab
-// already carries the session title (kept in sync by the workspace store).
+// Two flavours of chat panel share this host, distinguished by dockview panel id:
+// - the primary tab (`chat`, plus `chat~` split duplicates) follows the global
+//   active session, so single-click in the sidebar swaps it in place.
+// - a pinned tab (`chat:<sessionId>`) is bound to one fixed session and renders
+//   it independently, which is what lets two chats stream side by side.
 const props = defineProps<{
   params: {
     params: Record<string, unknown>
@@ -36,9 +38,20 @@ const props = defineProps<{
 const chatStore = useChatStore()
 const { currentBotId, sessionId } = storeToRefs(chatStore)
 
+const panelId = props.params.api.id
+const pinnedPrefix = 'chat:'
+const pinnedSessionId = panelId.startsWith(pinnedPrefix) ? panelId.slice(pinnedPrefix.length) : null
+
 const visible = usePanelVisible(props.params.api)
-const chatKey = computed(() => sessionId.value ?? 'draft')
-const chatTabId = computed(() =>
-  sessionId.value ? `chat:${sessionId.value}` : 'draft',
-)
+
+// Primary tab follows the active session (incl. the null draft); a pinned tab is
+// fixed to its bound session.
+const mySessionId = computed(() => pinnedSessionId ?? sessionId.value ?? null)
+// A pinned tab is a stable instance (key never changes), so it stays mounted and
+// keeps streaming. The primary tab re-keys per active session, as before.
+const chatKey = computed(() => pinnedSessionId ?? sessionId.value ?? 'draft')
+const chatTabId = computed(() => {
+  const sid = mySessionId.value
+  return sid ? `chat:${sid}` : 'draft'
+})
 </script>

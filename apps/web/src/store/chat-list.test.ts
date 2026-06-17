@@ -1631,4 +1631,61 @@ describe('chat-list store', () => {
     await first
     await second
   })
+
+  it('routes an explicitly targeted send into the non-active session slice', async () => {
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+      { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+    ])
+    // Keep the stream open so we can assert the optimistic turn before the
+    // post-stream refresh swaps in the server snapshot.
+    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    expect(store.sessionId).toBe('session-a')
+
+    // A pinned tab for session-b sends while session-a is the active tab.
+    const sendPromise = store.sendMessage('to B', undefined, 'session-b')
+    await flushPromises()
+
+    // The active session's transcript stays empty; the turn lands in session-b.
+    expect(store.messages.some(turn => turn.role === 'user')).toBe(false)
+    const bMessages = store.getMessages('session-b')
+    expect(bMessages.some(turn => turn.role === 'user' && turn.text === 'to B')).toBe(true)
+    expect(store.isSessionStreaming('session-b')).toBe(true)
+    expect(store.isSessionStreaming('session-a')).toBe(false)
+
+    streamHandler?.({ type: 'end', stream_id: lastStreamId, session_id: 'session-b' } as UIStreamEvent)
+    await sendPromise
+  })
+
+  it('exposes per-session messages without disturbing the active transcript', async () => {
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+      { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+    ])
+    api.fetchMessagesUI.mockImplementation((_botId: string, sid: string) => {
+      if (sid === 'session-b') {
+        return Promise.resolve([
+          { id: 'srv-b-1', role: 'user', text: 'hi from B', timestamp: '2026-01-01T00:00:00Z' },
+        ])
+      }
+      return Promise.resolve([])
+    })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    // The active session (a) has no turns; loading b's cache must not bleed in.
+    expect(store.getMessages('session-a')).toBe(store.messages)
+    expect(store.messages).toHaveLength(0)
+
+    await store.ensureSessionLoaded('session-b')
+    await flushPromises()
+
+    const bMessages = store.getMessages('session-b')
+    expect(bMessages.some(turn => turn.role === 'user' && turn.text === 'hi from B')).toBe(true)
+    // The active transcript is still untouched after loading another session.
+    expect(store.messages).toHaveLength(0)
+  })
 })

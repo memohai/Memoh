@@ -716,6 +716,7 @@
     "sessionInfoRingAria": "Session info",
     "sessionInfoTooltipHint": "Hover to see session info",
     "sessionActions": "Session actions",
+    "openInNewTab": "Open in New Tab",
     "bottomPanel": {
       "terminal": "Terminal",
       "newSession": "New Terminal",
