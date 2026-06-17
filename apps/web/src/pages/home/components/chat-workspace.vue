@@ -164,6 +164,7 @@ watch(currentBotId, (bid) => {
 
 // Keep the singleton chat tab title in sync with the active session.
 watch(chatPanelTitle, (title) => {
+  store.setChatPanelFallbackTitle(title)
   store.setChatTitle(title)
 }, { immediate: true })
 

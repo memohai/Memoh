@@ -113,7 +113,13 @@ async function maybeStartACPSession() {
 
 async function syncStoreFromUrl(rawName: string) {
   const urlName = rawName.trim()
-  if (!urlName) return
+  if (!urlName) {
+    if (!currentBotId.value) {
+      await chatStore.initialize()
+    }
+    await maybeStartACPSession()
+    return
+  }
   const resolvedId = await resolveBotIdFromName(urlName)
   if (!resolvedId) return
   if (resolvedId !== (currentBotId.value ?? '').trim()) {
@@ -134,7 +140,14 @@ async function syncStoreFromUrl(rawName: string) {
   }
 }
 
-void syncStoreFromUrl((route.params.botName as string) ?? '')
+watch(
+  () => [route.name, route.params.botName] as const,
+  ([routeName, paramBotName]) => {
+    if (!CHAT_ROUTE_NAMES.has(routeName as string)) return
+    void syncStoreFromUrl((paramBotName as string) ?? '')
+  },
+  { immediate: true },
+)
 
 watch(currentBotId, async (newBotId) => {
   if (suppressUrlSync) return
@@ -157,13 +170,4 @@ watch(currentBotId, async (newBotId) => {
   })
 })
 
-watch(
-  () => route.params.botName,
-  (paramBotName) => {
-    // Only sync on a chat route. The settings route shares the :botName param;
-    // reacting to its changes would bounce the user back to chat (see above).
-    if (!isChatRoute()) return
-    void syncStoreFromUrl((paramBotName as string) ?? '')
-  },
-)
 </script>

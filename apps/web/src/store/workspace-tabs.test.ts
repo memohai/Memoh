@@ -1,7 +1,12 @@
+import { nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatSelectionStore } from './chat-selection'
 import { useWorkspaceTabsStore } from './workspace-tabs'
+
+const chatStoreMock = vi.hoisted(() => ({
+  createNewSession: vi.fn(async () => {}),
+}))
 
 vi.mock('@/store/chat-list', () => ({
   useChatStore: () => ({
@@ -14,6 +19,7 @@ vi.mock('@/store/chat-list', () => ({
       },
     ],
     isSessionStreaming: vi.fn(() => false),
+    createNewSession: chatStoreMock.createNewSession,
   }),
 }))
 
@@ -39,8 +45,18 @@ interface FakePanel {
 
 function createFakeDock() {
   const panels: FakePanel[] = []
+  const removeListeners: Array<(panel: FakePanel) => void> = []
   let activePanel: FakePanel | null = null
   const noopDisposable = () => ({ dispose: () => {} })
+  const removeDisposable = (listener: (panel: FakePanel) => void) => {
+    removeListeners.push(listener)
+    return {
+      dispose: () => {
+        const idx = removeListeners.indexOf(listener)
+        if (idx >= 0) removeListeners.splice(idx, 1)
+      },
+    }
+  }
   const groupElement = {
     classList: {
       toggle: vi.fn(),
@@ -69,7 +85,7 @@ function createFakeDock() {
     },
     onDidActivePanelChange: noopDisposable,
     onDidLayoutChange: noopDisposable,
-    onDidRemovePanel: noopDisposable,
+    onDidRemovePanel: removeDisposable,
     onDidAddPanel: noopDisposable,
     onDidMovePanel: noopDisposable,
     onWillShowOverlay: noopDisposable,
@@ -102,6 +118,7 @@ function createFakeDock() {
             const idx = panels.indexOf(panel)
             if (idx >= 0) panels.splice(idx, 1)
             if (activePanel === panel) activePanel = panels[0] ?? null
+            removeListeners.forEach(listener => listener(panel))
           },
           setTitle: (title: string) => {
             panel.title = title
@@ -147,6 +164,7 @@ describe('workspace layout store', () => {
       removeItem: (key: string) => storage.delete(key),
       clear: () => storage.clear(),
     })
+    chatStoreMock.createNewSession.mockClear()
     setActivePinia(createPinia())
     useChatSelectionStore().setBot('bot-1')
   })
@@ -166,6 +184,20 @@ describe('workspace layout store', () => {
     store.updateBrowserAddress('browser:1', 'localhost:3000/app')
     expect(panel?.params.address).toBe('localhost:3000/app')
     expect(panel?.title).toBe('localhost:3000/app')
+  })
+
+  it('opens a draft chat when the selected bot has no restored tabs', async () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    await nextTick()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(chatStoreMock.createNewSession).toHaveBeenCalledOnce()
+    expect(dock.panels).toHaveLength(1)
+    expect(dock.getPanel('chat')?.component).toBe('chat')
+    expect(dock.getPanel('chat')?.title).toBe('New Chat')
   })
 
   it('keeps terminal ids monotonic per bot', () => {
@@ -210,6 +242,49 @@ describe('workspace layout store', () => {
 
     store.setChatTitle('Renamed')
     expect(dock.getPanel('chat')?.title).toBe('Renamed')
+  })
+
+  it('keeps the final draft chat tab open when it is closed', async () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openChat('Existing')
+    store.closeTab('chat')
+
+    expect(dock.panels).toHaveLength(1)
+    expect(dock.getPanel('chat')?.component).toBe('chat')
+    expect(chatStoreMock.createNewSession).not.toHaveBeenCalled()
+  })
+
+  it('opens a draft chat when a non-chat tab leaves the dock empty', async () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openTerminal()
+    store.closeTab('terminal:1')
+
+    await nextTick()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(chatStoreMock.createNewSession).toHaveBeenCalledOnce()
+    expect(dock.panels).toHaveLength(1)
+    expect(dock.getPanel('chat')?.component).toBe('chat')
+    expect(dock.getPanel('chat')?.title).toBe('New Chat')
+  })
+
+  it('uses the localized draft chat title when the dock restores empty', async () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.setChatPanelFallbackTitle('新对话')
+    store.registerApi(dock as never)
+
+    await nextTick()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(dock.panels).toHaveLength(1)
+    expect(dock.getPanel('chat')?.title).toBe('新对话')
   })
 
   it('splits the chat panel into a duplicate chat pane', () => {
