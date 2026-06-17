@@ -346,6 +346,14 @@ func TestWorkspaceImagePullPolicyDefaultsAndNormalizes(t *testing.T) {
 	}
 }
 
+func TestWorkspaceImageRefDefaultsToPackagedWorkspace(t *testing.T) {
+	got := (WorkspaceConfig{}).ImageRef()
+	want := "docker.io/memohai/workspace:debian"
+	if got != want {
+		t.Fatalf("default image ref = %q, want %q", got, want)
+	}
+}
+
 func TestWorkspaceImagePullCandidatesAddsWorkspaceMirror(t *testing.T) {
 	got := WorkspaceImagePullCandidates("memohai/workspace:debian")
 	want := []string{"docker.io/memohai/workspace:debian", "memoh.cn/memohai/workspace:debian"}

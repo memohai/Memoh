@@ -31,8 +31,8 @@ const (
 	DefaultQdrantURL             = "http://127.0.0.1:6334"
 	DefaultQdrantCollection      = "memory"
 	DefaultRuntimeDir            = "/opt/memoh/runtime"
-	DefaultBaseImage             = "debian:bookworm-slim"
 	DefaultWorkspaceImage        = "memohai/workspace:debian"
+	DefaultBaseImage             = DefaultWorkspaceImage
 	DefaultWorkspaceMirrorImage  = "memoh.cn/memohai/workspace:debian"
 	DefaultTimezone              = "UTC"
 	DefaultContainerdRuntimeType = "io.containerd.runc.v2"
