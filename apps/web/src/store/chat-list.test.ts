@@ -1926,3 +1926,76 @@ describe('fs-mutating tool path extraction', () => {
     expect(store.affectsPath('/data/anything.ts')).toBe(true)
   })
 })
+
+describe('fs bump bot-switch isolation', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    api.fetchBots.mockResolvedValue([
+      { id: 'bot-1', status: 'active', name: 'Bot 1' },
+      { id: 'bot-2', status: 'active', name: 'Bot 2' },
+    ])
+    api.fetchSessions.mockResolvedValue([])
+    api.fetchMessagesUI.mockResolvedValue([])
+    api.streamMessageEvents.mockImplementation((_botId: string, signal: AbortSignal) => new Promise<void>((resolve) => {
+      signal.addEventListener('abort', () => resolve(), { once: true })
+    }))
+    api.connectWebSocket.mockImplementation(() => ({
+      get connected() { return true },
+      send: vi.fn(),
+      abort: vi.fn(),
+      close: vi.fn(),
+      onOpen: null,
+      onClose: null,
+    }))
+  })
+
+  it('discards a pending fs batch when currentBotId changes before the timer fires', () => {
+    vi.useFakeTimers()
+    try {
+      const store = useChatStore()
+      store.currentBotId = 'bot-A'
+      store.markFsChanged('/data/foo.ts')
+      store.currentBotId = 'bot-B'
+      vi.advanceTimersByTime(150)
+      expect(store.lastFsChange).toBe(null)
+      expect(store.affectsPath('/data/foo.ts')).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not leak a batch from one bot into the next after a switch', () => {
+    vi.useFakeTimers()
+    try {
+      const store = useChatStore()
+      store.currentBotId = 'bot-A'
+      store.markFsChanged('/data/foo.ts')
+      store.currentBotId = 'bot-B'
+      vi.advanceTimersByTime(150)
+      expect(store.affectsPath('/data/foo.ts')).toBe(false)
+
+      store.markFsChanged('/data/bar.ts')
+      vi.advanceTimersByTime(150)
+      expect(store.affectsPath('/data/bar.ts')).toBe(true)
+      expect(store.affectsPath('/data/foo.ts')).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('selectBot cancels any pending fs bump and clears lastFsChange', async () => {
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    store.markFsChanged('/data/foo.ts')
+    await new Promise(resolve => setTimeout(resolve, 200))
+    expect(store.lastFsChange).not.toBe(null)
+
+    await store.selectBot('bot-2')
+    expect(store.lastFsChange).toBe(null)
+
+    store.markFsChanged('/data/foo.ts')
+    await new Promise(resolve => setTimeout(resolve, 200))
+    expect(store.lastFsChange).not.toBe(null)
+  })
+})

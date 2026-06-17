@@ -274,6 +274,10 @@ export const useChatStore = defineStore('chat', () => {
   const FS_CHANGED_DEBOUNCE_MS = 150
   let fsChangedBumpTimer: ReturnType<typeof setTimeout> | null = null
   let pendingFsPaths: Set<string> | null = new Set()
+  // Bot at the moment the in-flight batch started. If currentBotId changes
+  // before the timer fires, the batch belongs to the old bot and we drop it
+  // rather than leak it into the new bot's UI.
+  let pendingFsBotId: string | null = null
 
   function markFsChanged(path?: string | null) {
     if (path === undefined || path === null) {
@@ -282,12 +286,17 @@ export const useChatStore = defineStore('chat', () => {
       pendingFsPaths.add(path)
     }
     if (fsChangedBumpTimer != null) return
+    pendingFsBotId = currentBotId.value
     fsChangedBumpTimer = setTimeout(() => {
       fsChangedBumpTimer = null
-      const at = Date.now()
-      lastFsChange.value = { at, paths: pendingFsPaths }
-      fsChangedAt.value = at
+      const recordedBotId = pendingFsBotId
+      const paths = pendingFsPaths
+      pendingFsBotId = null
       pendingFsPaths = new Set()
+      if (recordedBotId !== currentBotId.value) return
+      const at = Date.now()
+      lastFsChange.value = { at, paths }
+      fsChangedAt.value = at
     }, FS_CHANGED_DEBOUNCE_MS)
   }
 
@@ -297,6 +306,7 @@ export const useChatStore = defineStore('chat', () => {
       fsChangedBumpTimer = null
     }
     pendingFsPaths = new Set()
+    pendingFsBotId = null
   }
 
   function affectsPath(path: string): boolean {
@@ -2253,6 +2263,8 @@ export const useChatStore = defineStore('chat', () => {
     abort()
     abortAllAssistantStreams()
     clearPendingACPSession()
+    cancelPendingFsBump()
+    lastFsChange.value = null
     currentBotId.value = targetBotId
     sessionId.value = null
     await initialize()
