@@ -297,6 +297,33 @@ export const useChatStore = defineStore('chat', () => {
   const sessionLoadingOlder = reactive(new Set<string>())
   const sessionLoading = reactive(new Set<string>())
 
+  // Sessions currently shown in an open chat tab (primary + pinned), ref-counted
+  // by session id. A pinned tab for a non-active session still wants live streams
+  // and inbound refreshes even while another tab is focused, so the panel host
+  // registers/unregisters its bound session here. Ref-counted because the same
+  // session can back more than one tab (e.g. the primary tab and a pinned tab of
+  // the active session). NOT keyed by bot: tabs only exist for the current bot.
+  const observedSessionCounts = reactive(new Map<string, number>())
+  function observeSession(targetSessionId?: string | null) {
+    const sid = (targetSessionId ?? '').trim()
+    if (!sid) return
+    observedSessionCounts.set(sid, (observedSessionCounts.get(sid) ?? 0) + 1)
+  }
+  function unobserveSession(targetSessionId?: string | null) {
+    const sid = (targetSessionId ?? '').trim()
+    if (!sid) return
+    const next = (observedSessionCounts.get(sid) ?? 0) - 1
+    if (next > 0) observedSessionCounts.set(sid, next)
+    else observedSessionCounts.delete(sid)
+  }
+  function isObservedSession(targetSessionId?: string | null): boolean {
+    const sid = (targetSessionId ?? '').trim()
+    return !!sid && (observedSessionCounts.get(sid) ?? 0) > 0
+  }
+  // Per-session debounce so a burst of inbound events for a pinned tab coalesces
+  // into one refresh. The active session uses refreshTimer instead.
+  const observedRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
   // Bumps every time a fs-mutating tool call (write/edit/apply_patch/exec) finishes for the
   // current bot. File-manager components watch this to refresh their listings
   // and any open file viewers without polling.
@@ -1498,6 +1525,9 @@ export const useChatStore = defineStore('chat', () => {
     latestBackgroundTasks.clear()
     sessionLoadingOlder.clear()
     sessionLoading.clear()
+    for (const timer of observedRefreshTimers.values()) clearTimeout(timer)
+    observedRefreshTimers.clear()
+    observedSessionCounts.clear()
     sessionMessageStates.clear()
     ephemeralAssistantErrors.clear()
   }
@@ -1592,6 +1622,26 @@ export const useChatStore = defineStore('chat', () => {
     }, delay)
   }
 
+  // Catch up a non-active session that is open in a pinned tab when something
+  // happens to it that we aren't already streaming (an inbound channel reply,
+  // a server-side completion). The active session is handled by
+  // scheduleRefreshCurrentSession; this only fires for observed pinned tabs.
+  function scheduleObservedSessionRefresh(targetBotId: string, targetSessionId: string, delay = 150) {
+    const bid = targetBotId.trim()
+    const sid = targetSessionId.trim()
+    if (!bid || !sid) return
+    if (sid === (sessionId.value ?? '').trim()) return
+    if (!isObservedSession(sid)) return
+    if (observedRefreshTimers.has(sid)) return
+    const timer = setTimeout(() => {
+      observedRefreshTimers.delete(sid)
+      // A live stream will refresh on its own `end`, so don't race it.
+      if (isSessionStreaming(sid)) return
+      void refreshCurrentSession(bid, sid)
+    }, delay)
+    observedRefreshTimers.set(sid, timer)
+  }
+
   function findBackgroundToolBlockIn(items: ChatMessage[], taskId: string): ToolCallBlock | null {
     const id = taskId.trim()
     if (!id) return null
@@ -1658,8 +1708,12 @@ export const useChatStore = defineStore('chat', () => {
     const sid = (event.session_id ?? '').trim()
     const activeSid = (sessionId.value ?? '').trim()
     if (sid && activeSid && sid !== activeSid) {
+      // Apply a non-active session's stream when either we started it locally
+      // (its id is tracked) or the session is open in a pinned tab — otherwise a
+      // stray background stream would create a phantom turn in a chat nobody is
+      // looking at. Observed pinned tabs need it to stream live like the active one.
       const isKnownBackgroundStream = !!stream.stream_id && pendingAssistantStreams.has(stream.stream_id)
-      if (!isKnownBackgroundStream) return
+      if (!isKnownBackgroundStream && !isObservedSession(sid)) return
     }
 
     if (stream.type === 'start' || stream.type === 'message') {
@@ -1695,6 +1749,9 @@ export const useChatStore = defineStore('chat', () => {
         } else {
           void refreshSessionsList(targetBotId)
         }
+        // A pinned tab for a non-active session won't get this snapshot any other
+        // way, so refresh it in the background to keep it current.
+        scheduleObservedSessionRefresh(targetBotId, messageSessionId)
       }
       if (shouldRefreshFromMessageCreated(targetBotId, sessionId.value, streamingSessionId.value, event)) {
         scheduleRefreshCurrentSession((raw.session_id ?? '').trim())
@@ -2663,6 +2720,9 @@ export const useChatStore = defineStore('chat', () => {
     getOverrideReasoningEffort,
     setOverrideReasoningEffort,
     ensureSessionLoaded,
+    observeSession,
+    unobserveSession,
+    isObservedSession,
     loading,
     loadingChats,
     loadingOlder,

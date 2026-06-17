@@ -1660,6 +1660,60 @@ describe('chat-list store', () => {
     await sendPromise
   })
 
+  it('ref-counts observed sessions so overlapping tabs both keep it live', () => {
+    const store = useChatStore()
+    expect(store.isObservedSession('s1')).toBe(false)
+    store.observeSession('s1')
+    store.observeSession('s1')
+    expect(store.isObservedSession('s1')).toBe(true)
+    store.unobserveSession('s1')
+    // One tab still open, so the session stays observed.
+    expect(store.isObservedSession('s1')).toBe(true)
+    store.unobserveSession('s1')
+    expect(store.isObservedSession('s1')).toBe(false)
+    // An extra unobserve must not push the count negative.
+    store.unobserveSession('s1')
+    expect(store.isObservedSession('s1')).toBe(false)
+  })
+
+  it('applies a background stream to a non-active session only when its tab is observed', async () => {
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+      { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+    ])
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    expect(store.sessionId).toBe('session-a')
+
+    const bgEvent = {
+      type: 'agent_stream',
+      bot_id: 'bot-1',
+      session_id: 'session-b',
+      stream: {
+        type: 'message',
+        stream_id: 'bg-1',
+        session_id: 'session-b',
+        data: { id: 1, type: 'text', content: 'live from B' },
+      },
+    } as unknown as MessageStreamEvent
+
+    // No pinned tab for session-b: a stray background stream must not create a
+    // phantom turn in a chat nobody is looking at.
+    messageEventsHandler?.(bgEvent)
+    await flushPromises()
+    expect(store.getMessages('session-b')).toHaveLength(0)
+
+    // With a pinned tab open (observed), the same stream renders live in its slice
+    // while the active transcript stays untouched.
+    store.observeSession('session-b')
+    messageEventsHandler?.(bgEvent)
+    await flushPromises()
+    expect(store.getMessages('session-b').some(turn => turn.role === 'assistant')).toBe(true)
+    expect(store.messages).toHaveLength(0)
+
+    store.unobserveSession('session-b')
+  })
+
   it('exposes per-session messages without disturbing the active transcript', async () => {
     api.fetchSessions.mockResolvedValueOnce([
       { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },

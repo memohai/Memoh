@@ -15,7 +15,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onUnmounted, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import { useChatStore } from '@/store/chat-list'
@@ -53,5 +53,18 @@ const chatKey = computed(() => pinnedSessionId ?? sessionId.value ?? 'draft')
 const chatTabId = computed(() => {
   const sid = mySessionId.value
   return sid ? `chat:${sid}` : 'draft'
+})
+
+// While this panel is open, keep its bound session "observed" in the store so it
+// receives live streams and inbound refreshes even when another tab is focused.
+// The primary panel re-points as the active session changes; a pinned panel
+// holds one session for its lifetime. This panel host stays mounted regardless
+// of tab visibility, so observation tracks "tab open", not "tab focused".
+watch(mySessionId, (sid, prev) => {
+  if (prev) chatStore.unobserveSession(prev)
+  if (sid) chatStore.observeSession(sid)
+}, { immediate: true })
+onUnmounted(() => {
+  if (mySessionId.value) chatStore.unobserveSession(mySessionId.value)
 })
 </script>
