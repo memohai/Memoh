@@ -325,7 +325,13 @@ export const useChatStore = defineStore('chat', () => {
     const input = message.input
     if (typeof input !== 'object' || input === null) return null
     const path = (input as Record<string, unknown>).path
-    return typeof path === 'string' && path ? path : null
+    if (typeof path !== 'string' || !path) return null
+    // Only emit absolute paths as path-targeted hints. Viewer filePaths are
+    // always absolute (the FS list API normalizes them); a relative path here
+    // can't be safely compared without knowing the agent's cwd, so fall through
+    // to wildcard and let every viewer decide whether to refresh.
+    if (!path.startsWith('/')) return null
+    return path
   }
 
   function bumpFsChangedAtIfFsMutation(message: UIMessage) {

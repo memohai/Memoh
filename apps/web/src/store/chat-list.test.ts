@@ -1999,6 +1999,33 @@ describe('fs-mutating tool path extraction', () => {
     expect(store.affectsPath('/data/untouched.ts')).toBe(false)
   })
 
+  it('treats a relative tool path as wildcard (viewer filePaths are absolute)', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'write',
+          tool_call_id: 'call-relative',
+          input: { path: 'cat.md', content: 'meow' },
+          running: false,
+        },
+      } as UIStreamEvent,
+      { type: 'error', message: 'done' } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await store.sendMessage('write rel')
+
+    await new Promise(resolve => setTimeout(resolve, 200))
+    // Relative paths can't be compared against the viewer's absolute filePath,
+    // so the batch falls back to wildcard — affectsPath returns true for any path.
+    expect(store.affectsPath('/data/cat.md')).toBe(true)
+    expect(store.affectsPath('/data/unrelated.ts')).toBe(true)
+  })
+
   it('falls back to wildcard when exec completes (path unknown)', async () => {
     sendEvents = [
       { type: 'start' } as UIStreamEvent,

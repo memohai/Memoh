@@ -51,8 +51,6 @@ const isDirty = computed(() => content.value !== originalContent.value)
 
 watch(isDirty, (dirty) => {
   emit('update:dirty', dirty)
-  // User resolved the conflict by saving or reverting their changes.
-  if (!dirty) externalChangePending.value = false
 }, { immediate: true })
 
 // One in-flight read at a time per viewer; a new load aborts the old one so a
@@ -75,6 +73,7 @@ async function loadTextContent() {
     if (controller.signal.aborted) return
     content.value = data.content ?? ''
     originalContent.value = content.value
+    externalChangePending.value = false
   } catch (error) {
     if (controller.signal.aborted) return
     toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
@@ -106,6 +105,7 @@ async function loadImageBlob() {
     cleanupImageUrl()
     imageUrl.value = url
     url = ''
+    externalChangePending.value = false
   } catch (error) {
     if (controller.signal.aborted) return
     toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
@@ -133,6 +133,7 @@ async function handleSave(): Promise<boolean> {
       throwOnError: true,
     })
     originalContent.value = content.value
+    externalChangePending.value = false
     toast.success(t('bots.files.saveSuccess'))
     emit('saved')
     return true
