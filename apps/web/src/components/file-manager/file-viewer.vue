@@ -199,8 +199,12 @@ watch(fsChangedAt, () => {
   }
 })
 
+// Keep the chip visible while the reload is in flight so the user sees a
+// continuous "agent updated · loading · resolved" transition. The isDirty
+// watcher clears externalChangePending the moment the load commits fresh
+// content (content === originalContent → !isDirty), and a failed load leaves
+// the chip up so the user can retry.
 async function acceptExternalChange() {
-  externalChangePending.value = false
   if (isText.value) {
     await loadTextContent()
   } else if (isImage.value) {

@@ -278,6 +278,10 @@ export const useChatStore = defineStore('chat', () => {
   // before the timer fires, the batch belongs to the old bot and we drop it
   // rather than leak it into the new bot's UI.
   let pendingFsBotId: string | null = null
+  // Tool calls we've already bumped (or seen at load time) for the current
+  // bot. Prevents double-bumping when a tool first arrives via the WS stream
+  // and then re-appears via the stream-end / message_created refresh path.
+  const seenFsToolCallIds = new Set<string>()
 
   function markFsChanged(path?: string | null) {
     if (path === undefined || path === null) {
@@ -328,6 +332,9 @@ export const useChatStore = defineStore('chat', () => {
     if (message.type !== 'tool') return
     if (message.running) return
     if (!FS_MUTATING_TOOLS.has(message.name)) return
+    const callId = message.tool_call_id?.trim() ?? ''
+    if (callId && seenFsToolCallIds.has(callId)) return
+    if (callId) seenFsToolCallIds.add(callId)
     // write / edit carry their target `path` in input. apply_patch can target
     // many files (multi-path parsing belongs to the view layer, not the store)
     // and exec is opaque — both fall back to wildcard.
@@ -335,6 +342,22 @@ export const useChatStore = defineStore('chat', () => {
       ? extractToolMessagePath(message)
       : null
     markFsChanged(path)
+  }
+
+  // Populates seenFsToolCallIds without bumping. Used when messages are loaded
+  // wholesale (initial session load, cache restore) so a later refresh of the
+  // same page can't re-trigger fsChangedAt for tool calls we've already shown.
+  function markFsToolsAsSeen(items: ChatMessage[]) {
+    for (const turn of items) {
+      if (turn.role !== 'assistant') continue
+      for (const block of turn.messages) {
+        if (block.type !== 'tool') continue
+        if (block.running) continue
+        if (!FS_MUTATING_TOOLS.has(block.name)) continue
+        const callId = block.tool_call_id?.trim() ?? ''
+        if (callId) seenFsToolCallIds.add(callId)
+      }
+    }
   }
 
   let messageEventsSince = ''
@@ -878,6 +901,7 @@ export const useChatStore = defineStore('chat', () => {
   function setMessages(items: ChatMessage[]) {
     messages.splice(0, messages.length, ...items)
     updateSinceFromMessages(items)
+    markFsToolsAsSeen(items)
   }
 
   const PRESERVED_TURN_KEYS = ['id', 'serverId']
@@ -985,6 +1009,7 @@ export const useChatStore = defineStore('chat', () => {
     messages.splice(0, messages.length, ...cached.items)
     hasMoreOlder.value = cached.hasMoreOlder
     updateSinceFromMessages(cached.items)
+    markFsToolsAsSeen(cached.items)
     return true
   }
 
@@ -1450,6 +1475,7 @@ export const useChatStore = defineStore('chat', () => {
     cancelPendingFsBump()
     fsChangedAt.value = 0
     lastFsChange.value = null
+    seenFsToolCallIds.clear()
     clearPendingACPSession()
 
     pendingAssistantStreams.clear()
@@ -2276,6 +2302,7 @@ export const useChatStore = defineStore('chat', () => {
     clearPendingACPSession()
     cancelPendingFsBump()
     lastFsChange.value = null
+    seenFsToolCallIds.clear()
     currentBotId.value = targetBotId
     sessionId.value = null
     await initialize()

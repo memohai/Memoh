@@ -1690,6 +1690,62 @@ describe('chat-list store', () => {
     expect(store.fsChangedAt).toBe(before)
   })
 
+  it('does not double-bump fsChangedAt when a refresh re-delivers a streamed tool', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'write',
+          tool_call_id: 'call-stream-then-refresh',
+          input: { path: '/data/dedup.md', content: 'x' },
+          running: false,
+        },
+      } as UIStreamEvent,
+      { type: 'error', message: 'done' } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await store.sendMessage('write file')
+
+    await new Promise(resolve => setTimeout(resolve, 200))
+    const afterStream = store.fsChangedAt
+    expect(afterStream).toBeGreaterThan(0)
+
+    // Now a refresh delivers the SAME tool call again — should not re-bump.
+    api.fetchMessagesUI.mockResolvedValueOnce([{
+      id: 'assistant-1',
+      role: 'assistant',
+      messages: [{
+        id: 1,
+        type: 'tool',
+        name: 'write',
+        tool_call_id: 'call-stream-then-refresh',
+        input: { path: '/data/dedup.md', content: 'x' },
+        running: false,
+      }],
+      timestamp: new Date().toISOString(),
+    }])
+
+    messageEventsHandler?.({
+      type: 'message_created',
+      bot_id: 'bot-1',
+      message: {
+        id: 'msg-dedup',
+        bot_id: 'bot-1',
+        session_id: 'session-1',
+        role: 'assistant',
+        content: 'tool',
+        created_at: new Date().toISOString(),
+      },
+    })
+
+    await new Promise(resolve => setTimeout(resolve, 350))
+    expect(store.fsChangedAt).toBe(afterStream)
+  })
+
   it('bumps fsChangedAt when a refresh delivers a fs-mutating tool from another channel', async () => {
     api.fetchSessions.mockResolvedValueOnce([
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
