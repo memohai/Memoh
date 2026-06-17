@@ -1,4 +1,4 @@
--- 0098_pending_branch_turn_context
+-- 0099_pending_branch_turn_context
 -- Remove deferred continuation branch/turn context columns.
 
 ALTER TABLE user_input_requests

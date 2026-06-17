@@ -11,7 +11,7 @@ func TestSQLitePendingBranchTurnContextMigrationPreservesOldRows(t *testing.T) {
 	dsn := tempSQLiteMigrationDSN(t)
 	target := MigrationTarget{Driver: DriverSQLite, DSN: dsn}
 
-	if err := RunMigrateTarget(nil, target, sqliteMigrationsFSUpTo(t, 22), "up", nil); err != nil {
+	if err := RunMigrateTarget(nil, target, sqliteMigrationsFSUpTo(t, 23), "up", nil); err != nil {
 		t.Fatalf("migrate through 0022: %v", err)
 	}
 

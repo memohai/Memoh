@@ -1,5 +1,5 @@
--- 0024_branch_visible_turn_boundary
--- Include the full fork boundary turn in visible branch paths.
+-- 0025_branch_visible_turn_boundary
+-- Restore message-sequence cutoff inside the fork boundary turn.
 
 BEGIN;
 
@@ -26,7 +26,13 @@ LEFT JOIN bot_history_turns t ON t.id = m.turn_id
 WHERE bp.depth = 0
   OR (
     bp.max_turn_seq IS NOT NULL
-    AND t.turn_seq <= bp.max_turn_seq
+    AND (
+      t.turn_seq < bp.max_turn_seq
+      OR (
+        t.turn_seq = bp.max_turn_seq
+        AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
+      )
+    )
   )
   OR (
     bp.max_turn_seq IS NULL

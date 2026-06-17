@@ -1,4 +1,4 @@
--- 0097_session_branches
+-- 0098_session_branches
 -- Remove in-session branch paths and history turns.
 
 DROP VIEW IF EXISTS bot_branch_visible_messages;

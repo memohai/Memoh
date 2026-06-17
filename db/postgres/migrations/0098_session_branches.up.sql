@@ -1,4 +1,4 @@
--- 0097_session_branches
+-- 0098_session_branches
 -- Add in-session branch paths and history turns for fork/edit-and-rerun chat history.
 
 ALTER TABLE bot_sessions

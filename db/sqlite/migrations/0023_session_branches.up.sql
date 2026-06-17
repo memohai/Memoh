@@ -1,4 +1,4 @@
--- 0022_session_branches
+-- 0023_session_branches
 -- Add in-session branch paths for fork/edit-and-rerun chat history.
 
 PRAGMA foreign_keys = OFF;
