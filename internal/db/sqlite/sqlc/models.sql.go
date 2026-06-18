@@ -77,7 +77,7 @@ VALUES (
   ?5,
   ?6
 )
-RETURNING id, model_id, name, provider_id, type, config, created_at, updated_at, enable
+RETURNING id, model_id, name, provider_id, type, enable, config, created_at, updated_at
 `
 
 type CreateModelParams struct {
@@ -105,10 +105,10 @@ func (q *Queries) CreateModel(ctx context.Context, arg CreateModelParams) (Model
 		&i.Name,
 		&i.ProviderID,
 		&i.Type,
+		&i.Enable,
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Enable,
 	)
 	return i, err
 }
@@ -269,7 +269,7 @@ func (q *Queries) DeleteProvider(ctx context.Context, id string) error {
 }
 
 const getModelByID = `-- name: GetModelByID :one
-SELECT id, model_id, name, provider_id, type, config, created_at, updated_at, enable FROM models WHERE id = ?1
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models WHERE id = ?1
 `
 
 func (q *Queries) GetModelByID(ctx context.Context, id string) (Model, error) {
@@ -281,16 +281,16 @@ func (q *Queries) GetModelByID(ctx context.Context, id string) (Model, error) {
 		&i.Name,
 		&i.ProviderID,
 		&i.Type,
+		&i.Enable,
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Enable,
 	)
 	return i, err
 }
 
 const getModelByModelID = `-- name: GetModelByModelID :one
-SELECT id, model_id, name, provider_id, type, config, created_at, updated_at, enable FROM models WHERE model_id = ?1
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models WHERE model_id = ?1
 `
 
 func (q *Queries) GetModelByModelID(ctx context.Context, modelID string) (Model, error) {
@@ -302,16 +302,16 @@ func (q *Queries) GetModelByModelID(ctx context.Context, modelID string) (Model,
 		&i.Name,
 		&i.ProviderID,
 		&i.Type,
+		&i.Enable,
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Enable,
 	)
 	return i, err
 }
 
 const getModelByProviderAndModelID = `-- name: GetModelByProviderAndModelID :one
-SELECT id, model_id, name, provider_id, type, config, created_at, updated_at, enable FROM models
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
 WHERE provider_id = ?1
   AND model_id = ?2
 LIMIT 1
@@ -331,10 +331,10 @@ func (q *Queries) GetModelByProviderAndModelID(ctx context.Context, arg GetModel
 		&i.Name,
 		&i.ProviderID,
 		&i.Type,
+		&i.Enable,
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Enable,
 	)
 	return i, err
 }
@@ -404,7 +404,7 @@ func (q *Queries) GetProviderByName(ctx context.Context, name string) (Provider,
 
 const getSpeechModelWithProvider = `-- name: GetSpeechModelWithProvider :one
 SELECT
-  m.id, m.model_id, m.name, m.provider_id, m.type, m.config, m.created_at, m.updated_at, m.enable,
+  m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at,
   p.client_type AS provider_type
 FROM models m
 JOIN providers p ON p.id = m.provider_id
@@ -418,10 +418,10 @@ type GetSpeechModelWithProviderRow struct {
 	Name         sql.NullString `json:"name"`
 	ProviderID   string         `json:"provider_id"`
 	Type         string         `json:"type"`
+	Enable       int64          `json:"enable"`
 	Config       string         `json:"config"`
 	CreatedAt    string         `json:"created_at"`
 	UpdatedAt    string         `json:"updated_at"`
-	Enable       int64          `json:"enable"`
 	ProviderType string         `json:"provider_type"`
 }
 
@@ -434,10 +434,10 @@ func (q *Queries) GetSpeechModelWithProvider(ctx context.Context, id string) (Ge
 		&i.Name,
 		&i.ProviderID,
 		&i.Type,
+		&i.Enable,
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Enable,
 		&i.ProviderType,
 	)
 	return i, err
@@ -445,7 +445,7 @@ func (q *Queries) GetSpeechModelWithProvider(ctx context.Context, id string) (Ge
 
 const getTranscriptionModelWithProvider = `-- name: GetTranscriptionModelWithProvider :one
 SELECT
-  m.id, m.model_id, m.name, m.provider_id, m.type, m.config, m.created_at, m.updated_at, m.enable,
+  m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at,
   p.client_type AS provider_type
 FROM models m
 JOIN providers p ON p.id = m.provider_id
@@ -459,10 +459,10 @@ type GetTranscriptionModelWithProviderRow struct {
 	Name         sql.NullString `json:"name"`
 	ProviderID   string         `json:"provider_id"`
 	Type         string         `json:"type"`
+	Enable       int64          `json:"enable"`
 	Config       string         `json:"config"`
 	CreatedAt    string         `json:"created_at"`
 	UpdatedAt    string         `json:"updated_at"`
-	Enable       int64          `json:"enable"`
 	ProviderType string         `json:"provider_type"`
 }
 
@@ -475,17 +475,17 @@ func (q *Queries) GetTranscriptionModelWithProvider(ctx context.Context, id stri
 		&i.Name,
 		&i.ProviderID,
 		&i.Type,
+		&i.Enable,
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Enable,
 		&i.ProviderType,
 	)
 	return i, err
 }
 
 const listEnabledModels = `-- name: ListEnabledModels :many
-SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.config, m.created_at, m.updated_at, m.enable
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at
 FROM models m
 JOIN providers p ON m.provider_id = p.id
 WHERE p.enable = true
@@ -509,10 +509,10 @@ func (q *Queries) ListEnabledModels(ctx context.Context) ([]Model, error) {
 			&i.Name,
 			&i.ProviderID,
 			&i.Type,
+			&i.Enable,
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Enable,
 		); err != nil {
 			return nil, err
 		}
@@ -528,7 +528,7 @@ func (q *Queries) ListEnabledModels(ctx context.Context) ([]Model, error) {
 }
 
 const listEnabledModelsByProviderClientType = `-- name: ListEnabledModelsByProviderClientType :many
-SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.config, m.created_at, m.updated_at, m.enable
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at
 FROM models m
 JOIN providers p ON m.provider_id = p.id
 WHERE p.enable = true
@@ -552,10 +552,10 @@ func (q *Queries) ListEnabledModelsByProviderClientType(ctx context.Context, cli
 			&i.Name,
 			&i.ProviderID,
 			&i.Type,
+			&i.Enable,
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Enable,
 		); err != nil {
 			return nil, err
 		}
@@ -571,7 +571,7 @@ func (q *Queries) ListEnabledModelsByProviderClientType(ctx context.Context, cli
 }
 
 const listEnabledModelsByType = `-- name: ListEnabledModelsByType :many
-SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.config, m.created_at, m.updated_at, m.enable
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at
 FROM models m
 JOIN providers p ON m.provider_id = p.id
 WHERE p.enable = true
@@ -595,10 +595,10 @@ func (q *Queries) ListEnabledModelsByType(ctx context.Context, type_ string) ([]
 			&i.Name,
 			&i.ProviderID,
 			&i.Type,
+			&i.Enable,
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Enable,
 		); err != nil {
 			return nil, err
 		}
@@ -651,7 +651,7 @@ func (q *Queries) ListModelVariantsByModelUUID(ctx context.Context, modelUuid st
 }
 
 const listModels = `-- name: ListModels :many
-SELECT id, model_id, name, provider_id, type, config, created_at, updated_at, enable FROM models
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
 WHERE type NOT IN ('speech', 'transcription')
 ORDER BY created_at DESC
 `
@@ -671,10 +671,10 @@ func (q *Queries) ListModels(ctx context.Context) ([]Model, error) {
 			&i.Name,
 			&i.ProviderID,
 			&i.Type,
+			&i.Enable,
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Enable,
 		); err != nil {
 			return nil, err
 		}
@@ -690,7 +690,7 @@ func (q *Queries) ListModels(ctx context.Context) ([]Model, error) {
 }
 
 const listModelsByModelID = `-- name: ListModelsByModelID :many
-SELECT id, model_id, name, provider_id, type, config, created_at, updated_at, enable FROM models
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
 WHERE model_id = ?1
 ORDER BY created_at DESC
 `
@@ -710,10 +710,10 @@ func (q *Queries) ListModelsByModelID(ctx context.Context, modelID string) ([]Mo
 			&i.Name,
 			&i.ProviderID,
 			&i.Type,
+			&i.Enable,
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Enable,
 		); err != nil {
 			return nil, err
 		}
@@ -729,7 +729,7 @@ func (q *Queries) ListModelsByModelID(ctx context.Context, modelID string) ([]Mo
 }
 
 const listModelsByProviderClientType = `-- name: ListModelsByProviderClientType :many
-SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.config, m.created_at, m.updated_at, m.enable
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at
 FROM models m
 JOIN providers p ON m.provider_id = p.id
 WHERE p.client_type = ?1
@@ -751,10 +751,10 @@ func (q *Queries) ListModelsByProviderClientType(ctx context.Context, clientType
 			&i.Name,
 			&i.ProviderID,
 			&i.Type,
+			&i.Enable,
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Enable,
 		); err != nil {
 			return nil, err
 		}
@@ -770,7 +770,7 @@ func (q *Queries) ListModelsByProviderClientType(ctx context.Context, clientType
 }
 
 const listModelsByProviderID = `-- name: ListModelsByProviderID :many
-SELECT id, model_id, name, provider_id, type, config, created_at, updated_at, enable FROM models
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
 WHERE provider_id = ?1
   AND type NOT IN ('speech', 'transcription')
 ORDER BY created_at DESC
@@ -791,10 +791,10 @@ func (q *Queries) ListModelsByProviderID(ctx context.Context, providerID string)
 			&i.Name,
 			&i.ProviderID,
 			&i.Type,
+			&i.Enable,
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Enable,
 		); err != nil {
 			return nil, err
 		}
@@ -810,7 +810,7 @@ func (q *Queries) ListModelsByProviderID(ctx context.Context, providerID string)
 }
 
 const listModelsByProviderIDAndType = `-- name: ListModelsByProviderIDAndType :many
-SELECT id, model_id, name, provider_id, type, config, created_at, updated_at, enable FROM models
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
 WHERE provider_id = ?1
   AND type = ?2
 ORDER BY created_at DESC
@@ -836,10 +836,10 @@ func (q *Queries) ListModelsByProviderIDAndType(ctx context.Context, arg ListMod
 			&i.Name,
 			&i.ProviderID,
 			&i.Type,
+			&i.Enable,
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Enable,
 		); err != nil {
 			return nil, err
 		}
@@ -855,7 +855,7 @@ func (q *Queries) ListModelsByProviderIDAndType(ctx context.Context, arg ListMod
 }
 
 const listModelsByType = `-- name: ListModelsByType :many
-SELECT id, model_id, name, provider_id, type, config, created_at, updated_at, enable FROM models
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
 WHERE type = ?1
 ORDER BY created_at DESC
 `
@@ -875,10 +875,10 @@ func (q *Queries) ListModelsByType(ctx context.Context, type_ string) ([]Model, 
 			&i.Name,
 			&i.ProviderID,
 			&i.Type,
+			&i.Enable,
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Enable,
 		); err != nil {
 			return nil, err
 		}
@@ -949,7 +949,7 @@ func (q *Queries) ListProviders(ctx context.Context) ([]Provider, error) {
 }
 
 const listSpeechModels = `-- name: ListSpeechModels :many
-SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.config, m.created_at, m.updated_at, m.enable,
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at,
   p.client_type AS provider_type
 FROM models m
 JOIN providers p ON p.id = m.provider_id
@@ -964,10 +964,10 @@ type ListSpeechModelsRow struct {
 	Name         sql.NullString `json:"name"`
 	ProviderID   string         `json:"provider_id"`
 	Type         string         `json:"type"`
+	Enable       int64          `json:"enable"`
 	Config       string         `json:"config"`
 	CreatedAt    string         `json:"created_at"`
 	UpdatedAt    string         `json:"updated_at"`
-	Enable       int64          `json:"enable"`
 	ProviderType string         `json:"provider_type"`
 }
 
@@ -986,10 +986,10 @@ func (q *Queries) ListSpeechModels(ctx context.Context) ([]ListSpeechModelsRow, 
 			&i.Name,
 			&i.ProviderID,
 			&i.Type,
+			&i.Enable,
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Enable,
 			&i.ProviderType,
 		); err != nil {
 			return nil, err
@@ -1006,9 +1006,10 @@ func (q *Queries) ListSpeechModels(ctx context.Context) ([]ListSpeechModelsRow, 
 }
 
 const listSpeechModelsByProviderID = `-- name: ListSpeechModelsByProviderID :many
-SELECT id, model_id, name, provider_id, type, config, created_at, updated_at, enable FROM models
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
 WHERE provider_id = ?1
   AND type = 'speech'
+  AND enable = true
 ORDER BY created_at DESC
 `
 
@@ -1027,10 +1028,10 @@ func (q *Queries) ListSpeechModelsByProviderID(ctx context.Context, providerID s
 			&i.Name,
 			&i.ProviderID,
 			&i.Type,
+			&i.Enable,
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Enable,
 		); err != nil {
 			return nil, err
 		}
@@ -1095,7 +1096,7 @@ func (q *Queries) ListSpeechProviders(ctx context.Context) ([]Provider, error) {
 }
 
 const listTranscriptionModels = `-- name: ListTranscriptionModels :many
-SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.config, m.created_at, m.updated_at, m.enable,
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at,
   p.client_type AS provider_type
 FROM models m
 JOIN providers p ON p.id = m.provider_id
@@ -1110,10 +1111,10 @@ type ListTranscriptionModelsRow struct {
 	Name         sql.NullString `json:"name"`
 	ProviderID   string         `json:"provider_id"`
 	Type         string         `json:"type"`
+	Enable       int64          `json:"enable"`
 	Config       string         `json:"config"`
 	CreatedAt    string         `json:"created_at"`
 	UpdatedAt    string         `json:"updated_at"`
-	Enable       int64          `json:"enable"`
 	ProviderType string         `json:"provider_type"`
 }
 
@@ -1132,10 +1133,10 @@ func (q *Queries) ListTranscriptionModels(ctx context.Context) ([]ListTranscript
 			&i.Name,
 			&i.ProviderID,
 			&i.Type,
+			&i.Enable,
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Enable,
 			&i.ProviderType,
 		); err != nil {
 			return nil, err
@@ -1152,9 +1153,10 @@ func (q *Queries) ListTranscriptionModels(ctx context.Context) ([]ListTranscript
 }
 
 const listTranscriptionModelsByProviderID = `-- name: ListTranscriptionModelsByProviderID :many
-SELECT id, model_id, name, provider_id, type, config, created_at, updated_at, enable FROM models
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
 WHERE provider_id = ?1
   AND type = 'transcription'
+  AND enable = true
 ORDER BY created_at DESC
 `
 
@@ -1173,10 +1175,10 @@ func (q *Queries) ListTranscriptionModelsByProviderID(ctx context.Context, provi
 			&i.Name,
 			&i.ProviderID,
 			&i.Type,
+			&i.Enable,
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Enable,
 		); err != nil {
 			return nil, err
 		}
@@ -1247,7 +1249,7 @@ SET
   config = ?6,
   updated_at = CURRENT_TIMESTAMP
 WHERE id = ?7
-RETURNING id, model_id, name, provider_id, type, config, created_at, updated_at, enable
+RETURNING id, model_id, name, provider_id, type, enable, config, created_at, updated_at
 `
 
 type UpdateModelParams struct {
@@ -1277,10 +1279,10 @@ func (q *Queries) UpdateModel(ctx context.Context, arg UpdateModelParams) (Model
 		&i.Name,
 		&i.ProviderID,
 		&i.Type,
+		&i.Enable,
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Enable,
 	)
 	return i, err
 }
@@ -1353,7 +1355,7 @@ ON CONFLICT (provider_id, model_id) DO UPDATE SET
   type = EXCLUDED.type,
   config = EXCLUDED.config,
   updated_at = CURRENT_TIMESTAMP
-RETURNING id, model_id, name, provider_id, type, config, created_at, updated_at, enable
+RETURNING id, model_id, name, provider_id, type, enable, config, created_at, updated_at
 `
 
 type UpsertRegistryModelParams struct {
@@ -1379,10 +1381,10 @@ func (q *Queries) UpsertRegistryModel(ctx context.Context, arg UpsertRegistryMod
 		&i.Name,
 		&i.ProviderID,
 		&i.Type,
+		&i.Enable,
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Enable,
 	)
 	return i, err
 }

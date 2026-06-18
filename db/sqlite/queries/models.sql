@@ -313,6 +313,7 @@ ORDER BY m.created_at DESC;
 SELECT * FROM models
 WHERE provider_id = sqlc.arg(provider_id)
   AND type = 'speech'
+  AND enable = true
 ORDER BY created_at DESC;
 
 -- name: GetModelByProviderAndModelID :one
@@ -343,4 +344,5 @@ ORDER BY m.created_at DESC;
 SELECT * FROM models
 WHERE provider_id = sqlc.arg(provider_id)
   AND type = 'transcription'
+  AND enable = true
 ORDER BY created_at DESC;
