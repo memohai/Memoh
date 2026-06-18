@@ -493,14 +493,39 @@ func stopFallbackWindowManagers(ctx context.Context) {
 }
 
 func startDisplayTerminal(ctx context.Context) {
+	const title = "Memoh Workspace"
+	workdir := "/data"
+	if info, err := os.Stat(workdir); err != nil || !info.IsDir() {
+		workdir = "/"
+	}
+
+	// Prefer a GTK terminal so the window inherits the desktop theme, fonts and
+	// window decorations. Only the bundled xterm is guaranteed on bare images.
+	if term := resolveDisplayCommand("xfce4-terminal"); term != "" {
+		startDisplayCommand(ctx, "terminal", term,
+			"--title="+title,
+			"--working-directory="+workdir,
+			"--hide-menubar",
+			"--geometry=100x30+28+28",
+		)
+		return
+	}
+
 	xterm := resolveDisplayCommand(toolkitXtermPath, "/usr/bin/xterm", "/usr/local/bin/xterm", "xterm")
 	if xterm == "" {
 		return
 	}
+	background := desktopBackgroundColor()
 	startDisplayCommand(ctx, "terminal", xterm,
 		"-geometry", "100x30+28+28",
-		"-title", "Memoh Workspace",
-		"-e", "/bin/sh", "-c", "cd /data 2>/dev/null || cd /; exec /bin/sh",
+		"-title", title,
+		"-fa", "DejaVu Sans Mono",
+		"-fs", "11",
+		"-bg", background,
+		"-fg", "#f5f5f7",
+		"-bd", background,
+		"-b", "14",
+		"-e", "/bin/sh", "-c", "cd "+workdir+" 2>/dev/null || cd /; exec /bin/sh",
 	)
 }
 
