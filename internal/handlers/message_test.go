@@ -6,46 +6,15 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/toolapproval"
 )
 
 type testFlusher struct{}
 
 func (*testFlusher) Flush() {}
-
-func TestParseSinceParam(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now().UTC().Truncate(time.Second)
-	parsed, ok, err := parseSinceParam(now.Format(time.RFC3339))
-	if err != nil {
-		t.Fatalf("parse RFC3339 failed: %v", err)
-	}
-	if !ok {
-		t.Fatalf("expected parseSinceParam ok=true")
-	}
-	if !parsed.Equal(now) {
-		t.Fatalf("expected parsed time %s, got %s", now, parsed)
-	}
-
-	parsedEpoch, ok, err := parseSinceParam("1735689600000")
-	if err != nil {
-		t.Fatalf("parse epoch millis failed: %v", err)
-	}
-	if !ok {
-		t.Fatalf("expected epoch parse ok=true")
-	}
-	if parsedEpoch.UnixMilli() != 1735689600000 {
-		t.Fatalf("expected parsed epoch millis 1735689600000, got %d", parsedEpoch.UnixMilli())
-	}
-
-	if _, _, err := parseSinceParam("invalid-time"); err == nil {
-		t.Fatalf("expected invalid since parameter error")
-	}
-}
 
 func TestParseBeforeParam(t *testing.T) {
 	t.Parallel()
@@ -61,6 +30,23 @@ func TestParseBeforeParam(t *testing.T) {
 		t.Fatalf("expected parsed epoch millis 1735689600000, got %d", parsed.UnixMilli())
 	}
 }
+
+func TestIsUserFacingSessionType(t *testing.T) {
+	t.Parallel()
+
+	for _, typ := range []string{session.TypeChat, session.TypeDiscuss, session.TypeACPAgent} {
+		if !isUserFacingSessionType(typ) {
+			t.Fatalf("expected %q to be user-facing", typ)
+		}
+	}
+	for _, typ := range []string{session.TypeHeartbeat, session.TypeSchedule, session.TypeSubagent, ""} {
+		if isUserFacingSessionType(typ) {
+			t.Fatalf("expected %q to be filtered out of user-facing surfaces", typ)
+		}
+	}
+}
+
+// (no trailing helpers)
 
 func TestMergeToolApprovalsUsesCanApproveFunction(t *testing.T) {
 	t.Parallel()

@@ -19,6 +19,10 @@ type EventType string
 const (
 	// EventTypeMessageCreated is emitted after a message is persisted successfully.
 	EventTypeMessageCreated EventType = "message_created"
+	// EventTypeSessionCreated is emitted after a new user-facing session is
+	// created. Consumers use it to surface a fresh session in sidebars before
+	// the first message arrives.
+	EventTypeSessionCreated EventType = "session_created"
 	// EventTypeSessionTitleUpdated is emitted after a session title is auto-generated.
 	EventTypeSessionTitleUpdated EventType = "session_title_updated"
 	// EventTypeBackgroundTask is emitted for live background exec task updates.
