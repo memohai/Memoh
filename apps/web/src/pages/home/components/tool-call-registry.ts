@@ -125,6 +125,40 @@ export function isReadOnlyTool(toolName: string): boolean {
   return READONLY_TOOLS.has(toolName)
 }
 
+// GUI tools (browser + computer) interleave read-only "observe" and
+// side-effecting "action" calls as one continuous browsing activity. Splitting
+// them on every observe↔action flip would strand each step in its own segment,
+// so they share a single category and stay grouped together.
+const GUI_TOOLS = new Set([
+  'browser_action', 'browser_observe', 'browser_remote_session',
+  'computer_action', 'computer_observe',
+])
+
+export type ToolSegmentCategory = 'explore' | 'action' | 'gui'
+
+export function isGuiTool(toolName: string): boolean {
+  return GUI_TOOLS.has(toolName)
+}
+
+// Segment category used to group consecutive tool calls in a process run.
+export function toolSegmentCategory(toolName: string): ToolSegmentCategory {
+  if (GUI_TOOLS.has(toolName)) return 'gui'
+  return isReadOnlyTool(toolName) ? 'explore' : 'action'
+}
+
+// An image read (e.g. the path a browser/computer screenshot was saved to) is
+// the model looking at a picture — an observation that belongs with the
+// surrounding GUI activity, not a standalone file-exploration read. Folding it
+// in keeps the "navigate → screenshot → look" loop as one browsing segment.
+const IMAGE_READ_EXT = /\.(png|jpe?g|gif|webp|bmp|avif)$/i
+
+export function toolSegmentCategoryForBlock(block: ToolCallBlock): ToolSegmentCategory {
+  if (block.toolName === 'read' && IMAGE_READ_EXT.test(pickString(asObject(block.input), 'path'))) {
+    return 'gui'
+  }
+  return toolSegmentCategory(block.toolName)
+}
+
 function asObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
 }
