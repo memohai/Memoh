@@ -105,6 +105,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_history_messages_branch_seq
   WHERE branch_id IS NOT NULL AND branch_seq IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_branch
   ON bot_history_messages(branch_id, branch_seq);
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_branch_role_seq
+  ON bot_history_messages(branch_id, role, branch_seq)
+  WHERE branch_id IS NOT NULL AND branch_seq IS NOT NULL;
 
 WITH user_turns AS (
   SELECT
@@ -113,42 +116,28 @@ WITH user_turns AS (
     m.branch_id,
     m.branch_seq,
     m.created_at AS user_created_at,
-    (
-      SELECT MIN(next_user.branch_seq)
-      FROM bot_history_messages next_user
-      WHERE next_user.branch_id = m.branch_id
-        AND next_user.role = 'user'
-        AND next_user.branch_seq > m.branch_seq
-    ) AS next_user_seq
+    LEAD(m.branch_seq) OVER (PARTITION BY m.branch_id ORDER BY m.branch_seq) AS next_user_seq
   FROM bot_history_messages m
   WHERE m.session_id IS NOT NULL
     AND m.branch_id IS NOT NULL
     AND m.role = 'user'
 ),
-complete_turns AS (
+assistant_matches AS (
   SELECT
     ut.*,
-    (
-      SELECT a.id
-      FROM bot_history_messages a
-      WHERE a.branch_id = ut.branch_id
-        AND a.role = 'assistant'
-        AND a.branch_seq > ut.branch_seq
-        AND (ut.next_user_seq IS NULL OR a.branch_seq < ut.next_user_seq)
-      ORDER BY a.branch_seq DESC, a.created_at DESC
-      LIMIT 1
-    ) AS assistant_id,
-    (
-      SELECT a.created_at
-      FROM bot_history_messages a
-      WHERE a.branch_id = ut.branch_id
-        AND a.role = 'assistant'
-        AND a.branch_seq > ut.branch_seq
-        AND (ut.next_user_seq IS NULL OR a.branch_seq < ut.next_user_seq)
-      ORDER BY a.branch_seq DESC, a.created_at DESC
-      LIMIT 1
-    ) AS assistant_created_at
+    a.id AS assistant_id,
+    a.created_at AS assistant_created_at,
+    ROW_NUMBER() OVER (PARTITION BY ut.user_id ORDER BY a.branch_seq DESC, a.created_at DESC) AS assistant_rank
   FROM user_turns ut
+  JOIN bot_history_messages a ON a.branch_id = ut.branch_id
+    AND a.role = 'assistant'
+    AND a.branch_seq > ut.branch_seq
+    AND (ut.next_user_seq IS NULL OR a.branch_seq < ut.next_user_seq)
+),
+complete_turns AS (
+  SELECT *
+  FROM assistant_matches
+  WHERE assistant_rank = 1
 ),
 numbered_turns AS (
   SELECT
@@ -183,13 +172,10 @@ WITH turn_ranges AS (
     t.id AS turn_id,
     t.branch_id,
     req.branch_seq AS start_seq,
-    COALESCE((
-      SELECT MIN(next_req.branch_seq)
-      FROM bot_history_messages next_req
-      WHERE next_req.branch_id = t.branch_id
-        AND next_req.role = 'user'
-        AND next_req.branch_seq > req.branch_seq
-    ), 9223372036854775807) AS end_seq
+    COALESCE(
+      LEAD(req.branch_seq) OVER (PARTITION BY t.branch_id ORDER BY req.branch_seq),
+      9223372036854775807
+    ) AS end_seq
   FROM bot_history_turns t
   JOIN bot_history_messages req ON req.id = t.request_message_id
 )
@@ -213,6 +199,34 @@ CREATE INDEX IF NOT EXISTS idx_bot_history_turns_assistant
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_turn
   ON bot_history_messages(turn_id, turn_message_seq)
   WHERE turn_id IS NOT NULL;
+
+ALTER TABLE tool_approval_requests
+  ADD COLUMN IF NOT EXISTS persist_branch_id UUID REFERENCES bot_session_branches(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS persist_turn_id UUID REFERENCES bot_history_turns(id) ON DELETE SET NULL;
+
+ALTER TABLE user_input_requests
+  ADD COLUMN IF NOT EXISTS persist_branch_id UUID REFERENCES bot_session_branches(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS persist_turn_id UUID REFERENCES bot_history_turns(id) ON DELETE SET NULL;
+
+ALTER TABLE tool_approval_requests
+  DROP CONSTRAINT IF EXISTS tool_approval_tool_call_unique;
+
+ALTER TABLE user_input_requests
+  DROP CONSTRAINT IF EXISTS user_input_tool_call_unique;
+
+CREATE UNIQUE INDEX IF NOT EXISTS tool_approval_tool_call_legacy_unique
+  ON tool_approval_requests(session_id, tool_call_id)
+  WHERE persist_turn_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS tool_approval_tool_call_turn_unique
+  ON tool_approval_requests(session_id, tool_call_id, persist_turn_id)
+  WHERE persist_turn_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS user_input_tool_call_legacy_unique
+  ON user_input_requests(session_id, tool_call_id)
+  WHERE persist_turn_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS user_input_tool_call_turn_unique
+  ON user_input_requests(session_id, tool_call_id, persist_turn_id)
+  WHERE persist_turn_id IS NOT NULL;
 
 CREATE OR REPLACE VIEW bot_branch_visible_messages AS
 WITH RECURSIVE branch_path AS (
@@ -247,13 +261,7 @@ LEFT JOIN bot_history_turns t ON t.id = m.turn_id
 WHERE bp.depth = 0
   OR (
     bp.max_turn_seq IS NOT NULL
-    AND (
-      t.turn_seq < bp.max_turn_seq
-      OR (
-        t.turn_seq = bp.max_turn_seq
-        AND (bp.max_branch_seq IS NULL OR m.branch_seq <= bp.max_branch_seq)
-      )
-    )
+    AND t.turn_seq <= bp.max_turn_seq
   )
   OR (
     bp.max_turn_seq IS NULL

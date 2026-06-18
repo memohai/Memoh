@@ -552,6 +552,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_history_messages_branch_seq
   WHERE branch_id IS NOT NULL AND branch_seq IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_branch
   ON bot_history_messages(branch_id, branch_seq);
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_branch_role_seq
+  ON bot_history_messages(branch_id, role, branch_seq)
+  WHERE branch_id IS NOT NULL AND branch_seq IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_turn
   ON bot_history_messages(turn_id, turn_message_seq)
   WHERE turn_id IS NOT NULL;

@@ -11,8 +11,8 @@ func TestSQLitePendingBranchTurnContextMigrationPreservesOldRows(t *testing.T) {
 	dsn := tempSQLiteMigrationDSN(t)
 	target := MigrationTarget{Driver: DriverSQLite, DSN: dsn}
 
-	if err := RunMigrateTarget(nil, target, sqliteMigrationsFSUpTo(t, 23), "up", nil); err != nil {
-		t.Fatalf("migrate through 0023: %v", err)
+	if err := RunMigrateTarget(nil, target, sqliteMigrationsFSUpTo(t, 22), "up", nil); err != nil {
+		t.Fatalf("migrate through 0022: %v", err)
 	}
 
 	db := openMigrationSQLite(t, dsn)
@@ -53,8 +53,8 @@ INSERT INTO user_input_requests (
 	}
 	closeMigrationSQLite(t, db)
 
-	if err := RunMigrateTarget(nil, target, sqliteMigrationsFSUpTo(t, 24), "up", nil); err != nil {
-		t.Fatalf("migrate through 0024: %v", err)
+	if err := RunMigrateTarget(nil, target, sqliteMigrationsFSUpTo(t, 23), "up", nil); err != nil {
+		t.Fatalf("migrate through 0023: %v", err)
 	}
 
 	db = openMigrationSQLite(t, dsn)
@@ -163,8 +163,8 @@ INSERT INTO user_input_requests (
 
 	db = openMigrationSQLite(t, dsn)
 	defer closeMigrationSQLite(t, db)
-	if _, err := db.ExecContext(ctx, readEmbeddedMigration(t, "sqlite/migrations/0024_pending_branch_turn_context.down.sql")); err != nil {
-		t.Fatalf("execute 0024 down migration: %v", err)
+	if _, err := db.ExecContext(ctx, readEmbeddedMigration(t, "sqlite/migrations/0023_session_branches.down.sql")); err != nil {
+		t.Fatalf("execute 0023 down migration: %v", err)
 	}
 
 	assertOnlyPendingIDs(t, db, "tool_approval_requests", map[string]string{
