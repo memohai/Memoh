@@ -12,6 +12,7 @@ export interface DesktopApiBridge {
   desktop?: {
     getServerStatus?: () => Promise<DesktopServerStatus>
     defaultWorkspacePath?: (displayName: string) => Promise<string>
+    openProjectFolder?: () => Promise<string | null>
   }
 }
 
@@ -40,4 +41,18 @@ export function canCreateLocalWorkspace(input: LocalWorkspaceCreatePolicyInput):
   if (!input.serverLocalWorkspaceEnabled) return false
   if (input.host === 'web') return true
   return input.desktopRuntimeMode === 'local'
+}
+
+export function canPickProjectFolder(): boolean {
+  return typeof desktopApiBridge()?.desktop?.openProjectFolder === 'function'
+}
+
+export async function pickProjectFolder(): Promise<string | null> {
+  const open = desktopApiBridge()?.desktop?.openProjectFolder
+  if (typeof open !== 'function') return null
+  try {
+    return await open()
+  } catch {
+    return null
+  }
 }
