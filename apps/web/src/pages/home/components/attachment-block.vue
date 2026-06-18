@@ -4,9 +4,37 @@
       v-for="(att, i) in block.attachments"
       :key="i"
     >
-      <!-- Image / video thumbnail -->
+      <!-- Content image/video (assistant body): an image the bot posts into the
+           reply is content, not an attachment chip, so it keeps its natural
+           aspect ratio (a screenshot stays a rectangle) — bounded by the column
+           width and a max height, never cropped square. -->
       <button
-        v-if="(isImage(att) || isVideo(att)) && getUrl(att)"
+        v-if="variant === 'content' && (isImage(att) || isVideo(att)) && getUrl(att)"
+        type="button"
+        class="block w-fit max-w-[min(28rem,100%)] cursor-pointer overflow-hidden rounded-lg border border-border focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+        @click="handleMediaClick(att)"
+      >
+        <video
+          v-if="isVideo(att)"
+          :src="getUrl(att)"
+          class="block h-auto max-h-80 w-auto max-w-full object-contain"
+          preload="metadata"
+          muted
+          playsinline
+        />
+        <img
+          v-else
+          :src="getUrl(att)"
+          :alt="String(att.name ?? '')"
+          class="block h-auto max-h-80 w-auto max-w-full object-contain"
+          loading="eager"
+          decoding="async"
+        >
+      </button>
+
+      <!-- Image / video thumbnail (uploaded attachment chip) -->
+      <button
+        v-else-if="(isImage(att) || isVideo(att)) && getUrl(att)"
         type="button"
         class="cursor-pointer rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         @click="handleMediaClick(att)"
@@ -92,10 +120,16 @@ import ChatAttachmentCard from './chat-attachment-card.vue'
 // when known (stable), else the source URL.
 const lineCountCache = new Map<string, number>()
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   block: AttachmentBlock
   onOpenMedia?: (src: string) => void
-}>()
+  // 'attachment' (default) = uploaded-file chips (square media cards); 'content'
+  // = images the assistant posts in its reply body, rendered inline at their
+  // natural aspect ratio.
+  variant?: 'attachment' | 'content'
+}>(), {
+  variant: 'attachment',
+})
 
 const chatStore = useChatStore()
 const openInFileManager = inject(openInFileManagerKey, undefined)
