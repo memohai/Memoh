@@ -83,7 +83,7 @@ export default defineConfig(async ({ command }) => {
   const bundledElectronToolkit = ['@electron-toolkit/preload', '@electron-toolkit/utils']
 
   const devtoolsPlugins: PluginOption[] = []
-  if (command !== 'build') {
+  if (command !== 'build' && process.env.MEMOH_VUE_DEVTOOLS !== '0') {
     try {
       const { default: vueDevTools } = await import('vite-plugin-vue-devtools')
       devtoolsPlugins.push(vueDevTools())
