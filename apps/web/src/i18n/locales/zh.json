@@ -758,6 +758,7 @@
       "status": {
         "idle": "桌面待连接",
         "connecting": "正在连接桌面...",
+        "buffering": "正在启动画面...",
         "connected": "桌面已连接",
         "disconnected": "桌面连接已断开",
         "unavailable": "桌面不可用",
