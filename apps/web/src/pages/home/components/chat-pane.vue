@@ -702,7 +702,7 @@
                       :disabled="!showSend || !currentBotId || activeChatReadOnly"
                       aria-label="Send message"
                       class="absolute inset-0 size-9 rounded-full transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
-                      :class="showSend ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
+                      :class="sendButtonVisible ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
                       @click="handleSend"
                     >
                       <svg
@@ -1482,6 +1482,13 @@ const compactContentWidth = ref(0)
 const composerInnerWidth = ref(0)
 const composerBoxHeight = ref(0)
 const showSend = computed(() => Boolean(inputText.value.trim()) || pendingFiles.value.length > 0)
+
+// Whether the trailing slot shows the send button at all. In standard chat the
+// SessionInfoRing fills that slot while idle and the send button only reveals
+// once there's content (showSend). ACP sessions have no ring, so without this
+// the slot would sit empty on empty input — the button must stay put and just
+// fall to its disabled (dimmed brand) state instead of vanishing.
+const sendButtonVisible = computed(() => showSend.value || activeIsACP.value)
 
 // Border-radius morph, kept on the SAME clock as whatever box change drives it.
 // An attachment open/close keys off showAttachmentGrid — which flips at the START
