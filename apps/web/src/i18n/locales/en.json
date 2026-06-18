@@ -762,6 +762,7 @@
       "status": {
         "idle": "Desktop is idle",
         "connecting": "Connecting desktop...",
+        "buffering": "Starting video stream...",
         "connected": "Desktop connected",
         "disconnected": "Desktop disconnected",
         "unavailable": "Desktop unavailable",
