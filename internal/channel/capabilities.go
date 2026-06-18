@@ -13,10 +13,8 @@ type ChannelCapabilities struct {
 	Reply          bool     `json:"reply"`
 	Threads        bool     `json:"threads"`
 	Streaming      bool     `json:"streaming"`
-	Polls          bool     `json:"polls"`
 	Edit           bool     `json:"edit"`
 	Unsend         bool     `json:"unsend"`
-	NativeCommands bool     `json:"native_commands"`
 	BlockStreaming bool     `json:"block_streaming"`
 	ChatTypes      []string `json:"chat_types,omitempty"`
 }

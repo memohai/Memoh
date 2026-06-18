@@ -743,8 +743,6 @@ export type ChannelChannelCapabilities = {
     edit?: boolean;
     markdown?: boolean;
     media?: boolean;
-    native_commands?: boolean;
-    polls?: boolean;
     reactions?: boolean;
     reply?: boolean;
     rich_text?: boolean;

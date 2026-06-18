@@ -13756,12 +13756,6 @@ const docTemplate = `{
                 "media": {
                     "type": "boolean"
                 },
-                "native_commands": {
-                    "type": "boolean"
-                },
-                "polls": {
-                    "type": "boolean"
-                },
                 "reactions": {
                     "type": "boolean"
                 },
