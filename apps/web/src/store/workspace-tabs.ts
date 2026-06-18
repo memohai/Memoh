@@ -14,6 +14,7 @@ import {
   terminalCacheKey,
 } from '@/composables/useTerminalCache'
 import type { OpenAssetPreviewArgs } from '@/pages/home/composables/useFileManagerProvider'
+import i18n from '@/i18n'
 
 // Workspace shell state (activity bar + side panel + dockview layout):
 // - the dockview layout in the center area (chat / file / terminal / browser /
@@ -22,11 +23,15 @@ import type { OpenAssetPreviewArgs } from '@/pages/home/composables/useFileManag
 //
 // The active chat session itself lives in the chat-selection store. The chat
 // panel is a singleton dockview panel whose content follows the active
-// session; files/terminals/browsers/displays are multi-instance panels.
+// session; files/terminals/browsers are multi-instance panels. Desktop is a
+// singleton WebRTC viewer per bot (DISPLAY_PANEL_ID).
 
 export type SidebarView = 'sessions' | 'files' | 'schedule'
 
 export const CHAT_PANEL_ID = 'chat'
+
+/** One desktop WebRTC viewer per bot; reconnect reuses this panel instead of display:2, display:3, … */
+export const DISPLAY_PANEL_ID = 'display:1'
 
 export const TERMINAL_TAB_COMPONENT = 'terminalTab'
 
@@ -1026,25 +1031,25 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     return addBrowserPanel(target, target, groupId)
   }
 
+  function focusExistingDisplayPanel(dock: DockviewApi): boolean {
+    const panels = dock.panels.filter(panel => panel.id.startsWith('display:'))
+    if (!panels.length) return false
+    focusPanel(panels[0]!)
+    for (const extra of panels.slice(1)) {
+      extra.api.close()
+    }
+    return true
+  }
 
   function openDisplay(groupId?: string) {
     if (!hasCurrentPermission('manage')) return
     const dock = api.value
     if (!dock) return
-    const existing = dock.panels.find((panel) => panel.id.startsWith('display:'))
-    if (existing) {
-      focusPanel(existing)
-      return
-    }
-    const bid = (currentBotId.value ?? '').trim()
-    const state = ensureBotLayout(bid)
-    if (!state) return
-    const next = state.displayCounter + 1
-    patchBotLayout(bid, { displayCounter: next })
+    if (focusExistingDisplayPanel(dock)) return
     focusOrAdd({
-      id: `display:${next}`,
+      id: DISPLAY_PANEL_ID,
       component: 'display',
-      title: `Desktop ${next}`,
+      title: i18n.global.t('chat.display.title'),
       groupId,
     })
   }
@@ -1121,18 +1126,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       }
       case 'display': {
         if (!hasCurrentPermission('manage')) return
-        const bid = (currentBotId.value ?? '').trim()
-        const state = ensureBotLayout(bid)
-        if (!state) return
-        const next = state.displayCounter + 1
-        patchBotLayout(bid, { displayCounter: next })
-        dock.addPanel({
-          id: `display:${next}`,
-          component: 'display',
-          title: title || `Desktop ${next}`,
-          renderer: 'always',
-          position,
-        })
+        if (focusExistingDisplayPanel(dock)) return
+        openDisplay(group.id)
         break
       }
       case 'schedule': {
