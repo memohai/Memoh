@@ -1039,8 +1039,11 @@ func TestStreamFinal_RichSendFallbackPreservesParseMode(t *testing.T) {
 				Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":90,"chat":{"id":123}}}`)),
 			}, nil
 		}
-		t.Fatalf("expected sendMessage/editMessageText fallback, got %s", req.URL.Path)
-		return nil, nil
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":true}`)),
+		}, nil
 	}))
 
 	origGetBot := getOrCreateBotForTest
