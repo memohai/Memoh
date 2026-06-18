@@ -1240,6 +1240,10 @@ definitions:
         type: boolean
       media:
         type: boolean
+      native_commands:
+        type: boolean
+      polls:
+        type: boolean
       reactions:
         type: boolean
       reply:
@@ -1406,6 +1410,8 @@ definitions:
         $ref: '#/definitions/channel.ReplyRef'
       text:
         type: string
+      thread:
+        $ref: '#/definitions/channel.ThreadRef'
     type: object
   channel.MessageFormat:
     enum:
@@ -1504,6 +1510,11 @@ definitions:
         items:
           $ref: '#/definitions/channel.TargetHint'
         type: array
+    type: object
+  channel.ThreadRef:
+    properties:
+      id:
+        type: string
     type: object
   channel.UpdateChannelStatusRequest:
     properties:

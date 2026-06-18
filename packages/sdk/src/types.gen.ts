@@ -743,6 +743,8 @@ export type ChannelChannelCapabilities = {
     edit?: boolean;
     markdown?: boolean;
     media?: boolean;
+    native_commands?: boolean;
+    polls?: boolean;
     reactions?: boolean;
     reply?: boolean;
     rich_text?: boolean;
@@ -824,6 +826,7 @@ export type ChannelMessage = {
     parts?: Array<ChannelMessagePart>;
     reply?: ChannelReplyRef;
     text?: string;
+    thread?: ChannelThreadRef;
 };
 
 export type ChannelMessageFormat = 'plain' | 'markdown' | 'rich';
@@ -867,6 +870,10 @@ export type ChannelTargetHint = {
 export type ChannelTargetSpec = {
     format?: string;
     hints?: Array<ChannelTargetHint>;
+};
+
+export type ChannelThreadRef = {
+    id?: string;
 };
 
 export type ChannelUpdateChannelStatusRequest = {

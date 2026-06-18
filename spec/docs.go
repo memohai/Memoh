@@ -13756,6 +13756,12 @@ const docTemplate = `{
                 "media": {
                     "type": "boolean"
                 },
+                "native_commands": {
+                    "type": "boolean"
+                },
+                "polls": {
+                    "type": "boolean"
+                },
                 "reactions": {
                     "type": "boolean"
                 },
@@ -13990,6 +13996,9 @@ const docTemplate = `{
                 },
                 "text": {
                     "type": "string"
+                },
+                "thread": {
+                    "$ref": "#/definitions/channel.ThreadRef"
                 }
             }
         },
@@ -14130,6 +14139,14 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/channel.TargetHint"
                     }
+                }
+            }
+        },
+        "channel.ThreadRef": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
                 }
             }
         },
