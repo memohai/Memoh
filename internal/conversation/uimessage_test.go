@@ -129,6 +129,158 @@ func TestConvertMessagesToUITurnsGroupsAssistantToolAndKeepsCurrentConversationD
 	}
 }
 
+// A "talk while acting" reply persists as several separate assistant messages
+// that interleave plain text with tool calls. They are one logical reply to a
+// single user message, so they must collapse into a single assistant turn (one
+// ActionBar). The opening and interstitial remarks must not split the turn.
+func TestConvertMessagesToUITurnsMergesTalkWhileActingIntoOneTurn(t *testing.T) {
+	baseTime := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
+	messages := []messagepkg.Message{
+		{
+			ID:             "user-1",
+			BotID:          "bot-1",
+			SessionID:      "session-1",
+			Role:           "user",
+			DisplayContent: "open the page and summarize it",
+			Content: mustUIMessageJSON(t, ModelMessage{
+				Role:    "user",
+				Content: mustUIRawJSON(t, "open the page and summarize it"),
+			}),
+			CreatedAt: baseTime,
+		},
+		{
+			ID:        "assistant-opening",
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			Role:      "assistant",
+			Content: mustUIMessageJSON(t, ModelMessage{
+				Role:    "assistant",
+				Content: mustUIRawJSON(t, []map[string]any{{"type": "text", "text": "Sure, let me open it."}}),
+			}),
+			CreatedAt: baseTime.Add(1 * time.Second),
+		},
+		{
+			ID:        "assistant-tool-1",
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			Role:      "assistant",
+			Content: mustUIMessageJSON(t, ModelMessage{
+				Role: "assistant",
+				Content: mustUIRawJSON(t, []map[string]any{
+					{"type": "tool-call", "toolCallId": "call-1", "toolName": "browser_action", "input": map[string]any{"action": "navigate"}},
+				}),
+			}),
+			CreatedAt: baseTime.Add(2 * time.Second),
+		},
+		{
+			ID:        "tool-1",
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			Role:      "tool",
+			Content: mustUIMessageJSON(t, ModelMessage{
+				Role: "tool",
+				Content: mustUIRawJSON(t, []map[string]any{
+					{"type": "tool-result", "toolCallId": "call-1", "toolName": "browser_action", "result": map[string]any{"structuredContent": map[string]any{"ok": true}}},
+				}),
+			}),
+			CreatedAt: baseTime.Add(3 * time.Second),
+		},
+		{
+			ID:        "assistant-interstitial",
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			Role:      "assistant",
+			Content: mustUIMessageJSON(t, ModelMessage{
+				Role:    "assistant",
+				Content: mustUIRawJSON(t, []map[string]any{{"type": "text", "text": "Page loaded, reading content."}}),
+			}),
+			CreatedAt: baseTime.Add(4 * time.Second),
+		},
+		{
+			ID:        "assistant-tool-2",
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			Role:      "assistant",
+			Content: mustUIMessageJSON(t, ModelMessage{
+				Role: "assistant",
+				Content: mustUIRawJSON(t, []map[string]any{
+					{"type": "tool-call", "toolCallId": "call-2", "toolName": "browser_observe", "input": map[string]any{}},
+				}),
+			}),
+			CreatedAt: baseTime.Add(5 * time.Second),
+		},
+		{
+			ID:        "tool-2",
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			Role:      "tool",
+			Content: mustUIMessageJSON(t, ModelMessage{
+				Role: "tool",
+				Content: mustUIRawJSON(t, []map[string]any{
+					{"type": "tool-result", "toolCallId": "call-2", "toolName": "browser_observe", "result": map[string]any{"structuredContent": map[string]any{"text": "content"}}},
+				}),
+			}),
+			CreatedAt: baseTime.Add(6 * time.Second),
+		},
+		{
+			ID:        "assistant-closing",
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			Role:      "assistant",
+			Content: mustUIMessageJSON(t, ModelMessage{
+				Role:    "assistant",
+				Content: mustUIRawJSON(t, []map[string]any{{"type": "text", "text": "Here is the summary."}}),
+			}),
+			CreatedAt: baseTime.Add(7 * time.Second),
+		},
+	}
+
+	turns := ConvertMessagesToUITurns(messages)
+	if len(turns) != 2 {
+		t.Fatalf("talk-while-acting reply must collapse into one user + one assistant turn, got %d", len(turns))
+	}
+	if turns[0].Role != "user" || turns[0].Text != "open the page and summarize it" {
+		t.Fatalf("unexpected user turn: %#v", turns[0])
+	}
+
+	assistantTurn := turns[1]
+	if assistantTurn.Role != "assistant" {
+		t.Fatalf("expected merged assistant turn, got %#v", assistantTurn)
+	}
+	if len(assistantTurn.Messages) != 5 {
+		t.Fatalf("expected 5 ordered blocks (text, tool, text, tool, text), got %d: %#v", len(assistantTurn.Messages), assistantTurn.Messages)
+	}
+	if assistantTurn.Messages[0].Type != UIMessageText || assistantTurn.Messages[0].Content != "Sure, let me open it." {
+		t.Fatalf("block 0 should be the opening remark: %#v", assistantTurn.Messages[0])
+	}
+	if assistantTurn.Messages[1].Type != UIMessageTool || assistantTurn.Messages[1].Name != "browser_action" {
+		t.Fatalf("block 1 should be the first tool call: %#v", assistantTurn.Messages[1])
+	}
+	if assistantTurn.Messages[2].Type != UIMessageText || assistantTurn.Messages[2].Content != "Page loaded, reading content." {
+		t.Fatalf("block 2 should be the interstitial remark: %#v", assistantTurn.Messages[2])
+	}
+	if assistantTurn.Messages[3].Type != UIMessageTool || assistantTurn.Messages[3].Name != "browser_observe" {
+		t.Fatalf("block 3 should be the second tool call: %#v", assistantTurn.Messages[3])
+	}
+	if assistantTurn.Messages[4].Type != UIMessageText || assistantTurn.Messages[4].Content != "Here is the summary." {
+		t.Fatalf("block 4 should be the closing remark: %#v", assistantTurn.Messages[4])
+	}
+	for i, block := range assistantTurn.Messages {
+		if block.Type != UIMessageTool {
+			continue
+		}
+		if block.Running == nil || *block.Running {
+			t.Fatalf("tool block %d should be completed once its result is applied: %#v", i, block)
+		}
+	}
+	if !assistantTurn.Timestamp.Equal(baseTime.Add(1 * time.Second)) {
+		t.Fatalf("merged turn timestamp must anchor to the first assistant message, got %v", assistantTurn.Timestamp)
+	}
+	if assistantTurn.ID != "assistant-opening" {
+		t.Fatalf("merged turn id must anchor to the first assistant message, got %q", assistantTurn.ID)
+	}
+}
+
 func TestConvertMessagesToUITurnsKeepsUserInputMetadata(t *testing.T) {
 	t.Parallel()
 
