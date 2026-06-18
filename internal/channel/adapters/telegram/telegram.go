@@ -185,6 +185,7 @@ func (*TelegramAdapter) Descriptor() channel.Descriptor {
 		Capabilities: channel.ChannelCapabilities{
 			Text:           true,
 			Markdown:       true,
+			RichText:       true,
 			Reply:          true,
 			Buttons:        true,
 			Attachments:    true,

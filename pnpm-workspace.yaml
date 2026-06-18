@@ -2,6 +2,12 @@ packages:
   - 'packages/*'
   - 'apps/*'
 
+allowBuilds:
+  electron: set this to true or false
+  electron-winstaller: set this to true or false
+  esbuild: set this to true or false
+  vue-demi: set this to true or false
+
 onlyBuiltDependencies:
   - sqlite3
   - electron

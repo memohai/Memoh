@@ -1163,6 +1163,30 @@ func TestCoerceFormatForCaps_PreservesMarkdownOnCapableChannel(t *testing.T) {
 	}
 }
 
+// TestCoerceFormatForCaps_PreservesPartsOnRichTextChannel locks in the
+// invariant that the rich-text path (Telegram sendRichMessage, Feishu
+// interactive card) keeps Parts intact through the outbound boundary. If
+// this regresses, those adapters' rich rendering becomes silently
+// unreachable in production because coerce would have stripped Parts to
+// markdown text before the adapter ever sees it.
+func TestCoerceFormatForCaps_PreservesPartsOnRichTextChannel(t *testing.T) {
+	t.Parallel()
+	msg := Message{
+		Format: MessageFormatRich,
+		Parts: []MessagePart{
+			{Type: MessagePartText, Text: "hello", Styles: []MessageTextStyle{MessageStyleBold}},
+		},
+	}
+	caps := ChannelCapabilities{Text: true, Markdown: true, RichText: true}
+	coerced := coerceFormatForCaps(msg, caps)
+	if coerced.Format != MessageFormatRich {
+		t.Fatalf("format should stay rich, got %q", coerced.Format)
+	}
+	if len(coerced.Parts) != 1 || coerced.Parts[0].Text != "hello" {
+		t.Fatalf("Parts must survive on a rich-capable channel, got %+v", coerced.Parts)
+	}
+}
+
 // TestCoerceFormatForCaps_PreservesPlainEverywhere — explicit Plain is never
 // upgraded by coercion.
 func TestCoerceFormatForCaps_PreservesPlainEverywhere(t *testing.T) {
