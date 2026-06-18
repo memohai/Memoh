@@ -4158,6 +4158,44 @@ func (q *Queries) ListSessionsByBotAndCreatedByUser(ctx context.Context, arg pgs
 	return result, nil
 }
 
+func (q *Queries) ListSessionsByBotPaged(ctx context.Context, arg pgsqlc.ListSessionsByBotPagedParams) ([]pgsqlc.ListSessionsByBotPagedRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListSessionsByBotPagedParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListSessionsByBotPaged(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ListSessionsByBotPagedRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListSessionsByBotAndCreatedByUserPaged(ctx context.Context, arg pgsqlc.ListSessionsByBotAndCreatedByUserPagedParams) ([]pgsqlc.ListSessionsByBotAndCreatedByUserPagedRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListSessionsByBotAndCreatedByUserPagedParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListSessionsByBotAndCreatedByUserPaged(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ListSessionsByBotAndCreatedByUserPagedRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (q *Queries) ListSessionsByRoute(ctx context.Context, routeID pgtype.UUID) ([]pgsqlc.BotSession, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured

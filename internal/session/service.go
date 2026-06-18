@@ -46,6 +46,11 @@ const (
 	DefaultACPProjectPath = "/data"
 )
 
+// UserFacingSessionTypes lists the session types intended to appear in
+// user-facing session lists. Heartbeat, schedule, and subagent sessions are
+// system-internal — they back agent-driven loops and never surface in the UI.
+var UserFacingSessionTypes = []string{TypeChat, TypeDiscuss, TypeACPAgent}
+
 var (
 	ErrACPAgentIDRequired    = errors.New("acp_agent_id is required for acp_agent sessions")
 	ErrACPProjectPathMissing = errors.New("project_path is required for acp_agent sessions")
@@ -56,6 +61,17 @@ var (
 func IsKnownType(typ string) bool {
 	switch strings.TrimSpace(typ) {
 	case TypeChat, TypeHeartbeat, TypeSchedule, TypeSubagent, TypeDiscuss, TypeACPAgent:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsUserFacingType reports whether a session type is one that user-facing
+// session list endpoints should return by default.
+func IsUserFacingType(typ string) bool {
+	switch strings.TrimSpace(typ) {
+	case TypeChat, TypeDiscuss, TypeACPAgent:
 		return true
 	default:
 		return false
@@ -264,6 +280,91 @@ func (s *Service) ListByBot(ctx context.Context, botID string) ([]Session, error
 		sessions = append(sessions, toSessionFromListRow(row))
 	}
 	return sessions, nil
+}
+
+// SessionCursor identifies the position in a session listing for keyset
+// pagination. The zero value means "start from the head".
+type SessionCursor struct {
+	UpdatedAt time.Time
+	ID        string
+}
+
+// IsZero reports whether the cursor is the zero value (i.e. no cursor).
+func (c SessionCursor) IsZero() bool {
+	return c.ID == "" && c.UpdatedAt.IsZero()
+}
+
+// ListByBotPaged returns one page of sessions for a bot, filtered to the given
+// types and starting after the given cursor.
+func (s *Service) ListByBotPaged(ctx context.Context, botID string, types []string, cursor SessionCursor, limit int32) ([]Session, error) {
+	pgBotID, err := dbpkg.ParseUUID(botID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid bot id: %w", err)
+	}
+	cursorUpdatedAt, cursorID, useCursor, err := pagedCursorParams(cursor)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListSessionsByBotPaged(ctx, sqlc.ListSessionsByBotPagedParams{
+		BotID:           pgBotID,
+		Types:           types,
+		UseCursor:       useCursor,
+		CursorUpdatedAt: cursorUpdatedAt,
+		CursorID:        cursorID,
+		LimitCount:      limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	sessions := make([]Session, 0, len(rows))
+	for _, row := range rows {
+		sessions = append(sessions, toSessionFromPagedRow(row))
+	}
+	return sessions, nil
+}
+
+// ListByBotAndCreatedByUserPaged is the paged variant scoped to a single user.
+func (s *Service) ListByBotAndCreatedByUserPaged(ctx context.Context, botID, userID string, types []string, cursor SessionCursor, limit int32) ([]Session, error) {
+	pgBotID, err := dbpkg.ParseUUID(botID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid bot id: %w", err)
+	}
+	pgUserID, err := dbpkg.ParseUUID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user id: %w", err)
+	}
+	cursorUpdatedAt, cursorID, useCursor, err := pagedCursorParams(cursor)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListSessionsByBotAndCreatedByUserPaged(ctx, sqlc.ListSessionsByBotAndCreatedByUserPagedParams{
+		BotID:           pgBotID,
+		CreatedByUserID: pgUserID,
+		Types:           types,
+		UseCursor:       useCursor,
+		CursorUpdatedAt: cursorUpdatedAt,
+		CursorID:        cursorID,
+		LimitCount:      limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	sessions := make([]Session, 0, len(rows))
+	for _, row := range rows {
+		sessions = append(sessions, toSessionFromUserPagedRow(row))
+	}
+	return sessions, nil
+}
+
+func pagedCursorParams(cursor SessionCursor) (pgtype.Timestamptz, pgtype.UUID, bool, error) {
+	if cursor.IsZero() {
+		return pgtype.Timestamptz{}, pgtype.UUID{}, false, nil
+	}
+	pgID, err := dbpkg.ParseUUID(cursor.ID)
+	if err != nil {
+		return pgtype.Timestamptz{}, pgtype.UUID{}, false, fmt.Errorf("invalid cursor id: %w", err)
+	}
+	return pgtype.Timestamptz{Time: cursor.UpdatedAt, Valid: true}, pgID, true, nil
 }
 
 // ListByBotAndCreatedByUser returns all active sessions for a bot created by a user.
@@ -580,6 +681,58 @@ func toSessionFromListRow(row sqlc.ListSessionsByBotRow) Session {
 }
 
 func toSessionFromUserListRow(row sqlc.ListSessionsByBotAndCreatedByUserRow) Session {
+	parentID := ""
+	if row.ParentSessionID.Valid {
+		parentID = row.ParentSessionID.String()
+	}
+	createdByUserID := ""
+	if row.CreatedByUserID.Valid {
+		createdByUserID = row.CreatedByUserID.String()
+	}
+	return Session{
+		ID:                    row.ID.String(),
+		BotID:                 row.BotID.String(),
+		RouteID:               row.RouteID.String(),
+		ChannelType:           dbpkg.TextToString(row.ChannelType),
+		Type:                  row.Type,
+		Title:                 row.Title,
+		Metadata:              parseJSONMap(row.Metadata),
+		ParentSessionID:       parentID,
+		CreatedByUserID:       createdByUserID,
+		CreatedAt:             row.CreatedAt.Time,
+		UpdatedAt:             row.UpdatedAt.Time,
+		RouteMetadata:         parseJSONMap(row.RouteMetadata),
+		RouteConversationType: dbpkg.TextToString(row.RouteConversationType),
+	}
+}
+
+func toSessionFromPagedRow(row sqlc.ListSessionsByBotPagedRow) Session {
+	parentID := ""
+	if row.ParentSessionID.Valid {
+		parentID = row.ParentSessionID.String()
+	}
+	createdByUserID := ""
+	if row.CreatedByUserID.Valid {
+		createdByUserID = row.CreatedByUserID.String()
+	}
+	return Session{
+		ID:                    row.ID.String(),
+		BotID:                 row.BotID.String(),
+		RouteID:               row.RouteID.String(),
+		ChannelType:           dbpkg.TextToString(row.ChannelType),
+		Type:                  row.Type,
+		Title:                 row.Title,
+		Metadata:              parseJSONMap(row.Metadata),
+		ParentSessionID:       parentID,
+		CreatedByUserID:       createdByUserID,
+		CreatedAt:             row.CreatedAt.Time,
+		UpdatedAt:             row.UpdatedAt.Time,
+		RouteMetadata:         parseJSONMap(row.RouteMetadata),
+		RouteConversationType: dbpkg.TextToString(row.RouteConversationType),
+	}
+}
+
+func toSessionFromUserPagedRow(row sqlc.ListSessionsByBotAndCreatedByUserPagedRow) Session {
 	parentID := ""
 	if row.ParentSessionID.Valid {
 		parentID = row.ParentSessionID.String()

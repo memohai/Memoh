@@ -50,6 +50,45 @@ WHERE s.bot_id = sqlc.arg(bot_id)
   AND s.deleted_at IS NULL
 ORDER BY s.updated_at DESC;
 
+-- name: ListSessionsByBotPaged :many
+SELECT
+  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
+  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
+  r.metadata AS route_metadata,
+  r.conversation_type AS route_conversation_type
+FROM bot_sessions s
+LEFT JOIN bot_channel_routes r ON r.id = s.route_id
+WHERE s.bot_id = sqlc.arg(bot_id)
+  AND s.deleted_at IS NULL
+  AND s.type IN (sqlc.slice(types))
+  AND (
+    sqlc.arg(use_cursor) = 0
+    OR (s.updated_at < sqlc.arg(cursor_updated_at)
+        OR (s.updated_at = sqlc.arg(cursor_updated_at) AND s.id < sqlc.arg(cursor_id)))
+  )
+ORDER BY s.updated_at DESC, s.id DESC
+LIMIT sqlc.arg(limit_count);
+
+-- name: ListSessionsByBotAndCreatedByUserPaged :many
+SELECT
+  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
+  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
+  r.metadata AS route_metadata,
+  r.conversation_type AS route_conversation_type
+FROM bot_sessions s
+LEFT JOIN bot_channel_routes r ON r.id = s.route_id
+WHERE s.bot_id = sqlc.arg(bot_id)
+  AND s.created_by_user_id = sqlc.arg(created_by_user_id)
+  AND s.deleted_at IS NULL
+  AND s.type IN (sqlc.slice(types))
+  AND (
+    sqlc.arg(use_cursor) = 0
+    OR (s.updated_at < sqlc.arg(cursor_updated_at)
+        OR (s.updated_at = sqlc.arg(cursor_updated_at) AND s.id < sqlc.arg(cursor_id)))
+  )
+ORDER BY s.updated_at DESC, s.id DESC
+LIMIT sqlc.arg(limit_count);
+
 -- name: ListSessionsByRoute :many
 SELECT *
 FROM bot_sessions

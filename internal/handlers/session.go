@@ -1,10 +1,14 @@
 package handlers
 
 import (
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -142,7 +146,10 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 // @Summary List bot sessions
 // @Tags sessions
 // @Param bot_id path string true "Bot ID"
-// @Success 200 {object} map[string][]session.Session
+// @Param types query string false "Comma-separated session types to include. Defaults to user-facing types (chat,discuss,acp_agent)."
+// @Param limit query int false "Page size (1..200). Defaults to 50."
+// @Param cursor query string false "Opaque cursor returned as next_cursor on a previous page."
+// @Success 200 {object} listSessionsResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Router /bots/{bot_id}/sessions [get].
@@ -159,17 +166,118 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	types, err := parseSessionTypesParam(c.QueryParam("types"))
+	if err != nil {
+		return err
+	}
+	limit, err := parseSessionLimitParam(c.QueryParam("limit"))
+	if err != nil {
+		return err
+	}
+	cursor, err := decodeSessionCursor(c.QueryParam("cursor"))
+	if err != nil {
+		return err
+	}
+
 	var sessions []session.Session
 	if bots.HasPermission(perms, bots.PermissionManage) {
-		sessions, err = h.sessionService.ListByBot(c.Request().Context(), bot.ID)
+		sessions, err = h.sessionService.ListByBotPaged(c.Request().Context(), bot.ID, types, cursor, limit)
 	} else {
-		sessions, err = h.sessionService.ListByBotAndCreatedByUser(c.Request().Context(), bot.ID, channelIdentityID)
+		sessions, err = h.sessionService.ListByBotAndCreatedByUserPaged(c.Request().Context(), bot.ID, channelIdentityID, types, cursor, limit)
 		sessions = filterSessionsForPermissions(sessions, channelIdentityID, perms)
 	}
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	return c.JSON(http.StatusOK, map[string]any{"items": sessions})
+
+	nextCursor := ""
+	if len(sessions) == int(limit) && len(sessions) > 0 {
+		last := sessions[len(sessions)-1]
+		nextCursor = encodeSessionCursor(session.SessionCursor{UpdatedAt: last.UpdatedAt, ID: last.ID})
+	}
+	return c.JSON(http.StatusOK, listSessionsResponse{Items: sessions, NextCursor: nextCursor})
+}
+
+// listSessionsResponse is the shape returned by ListSessions.
+type listSessionsResponse struct {
+	Items      []session.Session `json:"items"`
+	NextCursor string            `json:"next_cursor"`
+}
+
+const (
+	sessionListDefaultLimit = 50
+	sessionListMaxLimit     = 200
+)
+
+func parseSessionTypesParam(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		out := make([]string, len(session.UserFacingSessionTypes))
+		copy(out, session.UserFacingSessionTypes)
+		return out, nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		token := strings.TrimSpace(part)
+		if token == "" {
+			continue
+		}
+		if !session.IsKnownType(token) {
+			return nil, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("unknown session type %q", token))
+		}
+		if _, ok := seen[token]; ok {
+			continue
+		}
+		seen[token] = struct{}{}
+		out = append(out, token)
+	}
+	if len(out) == 0 {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "types must contain at least one session type")
+	}
+	return out, nil
+}
+
+func parseSessionLimitParam(raw string) (int32, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return sessionListDefaultLimit, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, echo.NewHTTPError(http.StatusBadRequest, "limit must be an integer")
+	}
+	if value < 1 || value > sessionListMaxLimit {
+		return 0, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("limit must be between 1 and %d", sessionListMaxLimit))
+	}
+	//nolint:gosec // bounded above by sessionListMaxLimit (200), safe for int32.
+	return int32(value), nil
+}
+
+func encodeSessionCursor(c session.SessionCursor) string {
+	raw := c.UpdatedAt.UTC().Format(time.RFC3339Nano) + "|" + c.ID
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+func decodeSessionCursor(raw string) (session.SessionCursor, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return session.SessionCursor{}, nil
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return session.SessionCursor{}, echo.NewHTTPError(http.StatusBadRequest, "invalid cursor")
+	}
+	parts := strings.SplitN(string(decoded), "|", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return session.SessionCursor{}, echo.NewHTTPError(http.StatusBadRequest, "invalid cursor")
+	}
+	updatedAt, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil {
+		return session.SessionCursor{}, echo.NewHTTPError(http.StatusBadRequest, "invalid cursor")
+	}
+	return session.SessionCursor{UpdatedAt: updatedAt, ID: parts[1]}, nil
 }
 
 // GetSession godoc

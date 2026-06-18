@@ -2953,6 +2953,15 @@ definitions:
       ok:
         type: boolean
     type: object
+  handlers.listSessionsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/session.Session'
+        type: array
+      next_cursor:
+        type: string
+    type: object
   handlers.memoryAddPayload:
     properties:
       embedding_enabled:
@@ -8087,15 +8096,24 @@ paths:
         name: bot_id
         required: true
         type: string
+      - description: Comma-separated session types to include. Defaults to user-facing
+          types (chat,discuss,acp_agent).
+        in: query
+        name: types
+        type: string
+      - description: Page size (1..200). Defaults to 50.
+        in: query
+        name: limit
+        type: integer
+      - description: Opaque cursor returned as next_cursor on a previous page.
+        in: query
+        name: cursor
+        type: string
       responses:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              items:
-                $ref: '#/definitions/session.Session'
-              type: array
-            type: object
+            $ref: '#/definitions/handlers.listSessionsResponse'
         "400":
           description: Bad Request
           schema:

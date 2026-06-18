@@ -5983,19 +5983,31 @@ const docTemplate = `{
                         "name": "bot_id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated session types to include. Defaults to user-facing types (chat,discuss,acp_agent).",
+                        "name": "types",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (1..200). Defaults to 50.",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Opaque cursor returned as next_cursor on a previous page.",
+                        "name": "cursor",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "array",
-                                "items": {
-                                    "$ref": "#/definitions/session.Session"
-                                }
-                            }
+                            "$ref": "#/definitions/handlers.listSessionsResponse"
                         }
                     },
                     "400": {
@@ -16329,6 +16341,20 @@ const docTemplate = `{
             "properties": {
                 "ok": {
                     "type": "boolean"
+                }
+            }
+        },
+        "handlers.listSessionsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/session.Session"
+                    }
+                },
+                "next_cursor": {
+                    "type": "string"
                 }
             }
         },
