@@ -12,6 +12,7 @@ import { connectBrowserKeyboardShortcutsLive } from './lib/browser-keyboard-shor
 import { selectWebBindings } from './lib/keyboard-bindings'
 import { KEYBOARD_REGISTRY } from './composables/useKeyboardCommand'
 import { setupApiClient } from './lib/api-client'
+import { DesktopShellKey } from './lib/desktop-shell'
 import { registerWorkspaceTabCommands } from './pages/home/commands/workspace-tab-commands'
 import { useWorkspaceTabsStore } from './store/workspace-tabs'
 import { useKeyboardShortcutsStore } from './store/keyboard-shortcuts'
@@ -46,10 +47,24 @@ keyboardCommands.register(appKeyboardCommands.openSettings, () => {
   return true
 })
 
-createApp(App)
+// Capture-only escape hatch: `?desktopShell=1` forces the macOS desktop layout
+// (traffic-light reserve + integrated tabs + pinned sidebar) in the browser, so
+// the marketing hero can be screen-recorded against the real running build.
+// Without the query param the browser keeps the default `false` — this must
+// never be on for normal web visitors.
+const forceDesktopShell =
+  typeof location !== 'undefined'
+  && new URLSearchParams(location.search).has('desktopShell')
+
+const app = createApp(App)
   .use(pinia)
   .use(PiniaColada)
   .use(router)
   .use(i18n)
   .provide(KEYBOARD_REGISTRY, keyboardCommands)
-  .mount('#app')
+
+if (forceDesktopShell) {
+  app.provide(DesktopShellKey, true)
+}
+
+app.mount('#app')
