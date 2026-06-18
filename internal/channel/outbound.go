@@ -245,7 +245,6 @@ func buildOutboundMessages(msg OutboundMessage, policy OutboundPolicy) ([]Outbou
 					Parts:       base.Parts,
 					Attachments: nil,
 					Actions:     actions,
-					Thread:      base.Thread,
 					Reply:       base.Reply,
 					Metadata:    base.Metadata,
 				},
@@ -339,9 +338,6 @@ func validateMessageCapabilities(registry *Registry, channelType ChannelType, ms
 	}
 	if len(msg.Actions) > 0 && !caps.Buttons {
 		return errors.New("channel does not support actions")
-	}
-	if msg.Thread != nil && !caps.Threads {
-		return errors.New("channel does not support threads")
 	}
 	if msg.Reply != nil && !caps.Reply {
 		return errors.New("channel does not support reply")
@@ -787,7 +783,6 @@ func (s *managerOutboundStream) pushFinalAfterSplit(ctx context.Context, event S
 		if err := s.send(ctx, OutboundMessage{
 			Message: Message{
 				Attachments: msg.Attachments,
-				Thread:      msg.Thread,
 				Actions:     msg.Actions,
 			},
 		}); err != nil {
@@ -910,7 +905,6 @@ func (s *managerOutboundStream) sendChunkedFinal(ctx context.Context, msg Messag
 			Message: Message{
 				Format:   msg.Format,
 				Text:     chunk,
-				Thread:   msg.Thread,
 				Reply:    msg.Reply,
 				Metadata: msg.Metadata,
 				Actions:  actions,
@@ -932,7 +926,6 @@ func (s *managerOutboundStream) sendChunkedFinal(ctx context.Context, msg Messag
 		if err := s.send(ctx, OutboundMessage{
 			Message: Message{
 				Attachments: msg.Attachments,
-				Thread:      msg.Thread,
 				Reply:       msg.Reply,
 				Metadata:    msg.Metadata,
 				Actions:     msg.Actions,

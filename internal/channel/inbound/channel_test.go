@@ -647,12 +647,13 @@ func TestChannelInboundProcessorACLReceivesThreadScope(t *testing.T) {
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
 		Channel:     channel.ChannelType("discord"),
-		Message:     channel.Message{Text: "hello", Thread: &channel.ThreadRef{ID: "thread-1"}},
+		Message:     channel.Message{Text: "hello"},
 		ReplyTarget: "discord:thread-1",
 		Sender:      channel.Identity{SubjectID: "guest-thread"},
 		Conversation: channel.Conversation{
-			ID:   "guild-chat-1",
-			Type: channel.ConversationTypeThread,
+			ID:       "guild-chat-1",
+			Type:     channel.ConversationTypeThread,
+			ThreadID: "thread-1",
 		},
 		Metadata: map[string]any{
 			"is_mentioned": true,

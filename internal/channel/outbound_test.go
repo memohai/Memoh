@@ -517,42 +517,6 @@ func TestPushFinalWithChunking_ActionsOnAttachmentMsg(t *testing.T) {
 	}
 }
 
-func TestPushFinalWithChunking_ThreadPropagated(t *testing.T) {
-	t.Parallel()
-	stream, rec, sent := newChunkingTestStream(t, 50)
-
-	longText := strings.Repeat("a", 30) + "\n" + strings.Repeat("b", 30)
-	thread := &ThreadRef{ID: "thread-123"}
-
-	event := StreamEvent{
-		Type: StreamEventFinal,
-		Final: &StreamFinalizePayload{
-			Message: Message{
-				Text:   longText,
-				Format: MessageFormatPlain,
-				Thread: thread,
-			},
-		},
-	}
-	if err := stream.Push(context.Background(), event); err != nil {
-		t.Fatalf("Push failed: %v", err)
-	}
-
-	events := rec.Events()
-	if len(events) != 1 {
-		t.Fatalf("expected 1 stream event, got %d", len(events))
-	}
-
-	if len(*sent) == 0 {
-		t.Fatal("expected overflow sends")
-	}
-	for i, msg := range *sent {
-		if msg.Message.Thread == nil || msg.Message.Thread.ID != "thread-123" {
-			t.Fatalf("overflow chunk %d should have thread propagated", i)
-		}
-	}
-}
-
 func TestPushFinalWithChunking_FirstChunkPushFailureFallback(t *testing.T) {
 	t.Parallel()
 

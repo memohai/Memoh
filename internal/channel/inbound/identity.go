@@ -302,11 +302,5 @@ func (r *IdentityResolver) resolveProfileFromDirectory(ctx context.Context, cfg 
 }
 
 func extractThreadID(msg channel.InboundMessage) string {
-	if msg.Message.Thread != nil && strings.TrimSpace(msg.Message.Thread.ID) != "" {
-		return strings.TrimSpace(msg.Message.Thread.ID)
-	}
-	if strings.TrimSpace(msg.Conversation.ThreadID) != "" {
-		return strings.TrimSpace(msg.Conversation.ThreadID)
-	}
-	return ""
+	return strings.TrimSpace(msg.Conversation.ThreadID)
 }

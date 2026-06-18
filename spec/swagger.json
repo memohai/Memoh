@@ -13981,9 +13981,6 @@
                 },
                 "text": {
                     "type": "string"
-                },
-                "thread": {
-                    "$ref": "#/definitions/channel.ThreadRef"
                 }
             }
         },
@@ -14124,14 +14121,6 @@
                     "items": {
                         "$ref": "#/definitions/channel.TargetHint"
                     }
-                }
-            }
-        },
-        "channel.ThreadRef": {
-            "type": "object",
-            "properties": {
-                "id": {
-                    "type": "string"
                 }
             }
         },

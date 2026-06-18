@@ -297,11 +297,6 @@ type Action struct {
 	Row int `json:"row,omitempty"`
 }
 
-// ThreadRef references a conversation thread by ID.
-type ThreadRef struct {
-	ID string `json:"id"`
-}
-
 // ReplyRef points to a message being replied to.
 type ReplyRef struct {
 	Target      string       `json:"target,omitempty"`
@@ -321,6 +316,12 @@ type ForwardRef struct {
 }
 
 // Message is the unified message structure used across all channels.
+//
+// Thread routing flows through Conversation.ThreadID at the envelope
+// level, not through a per-message field. Forward is populated inbound
+// (Telegram, Misskey) and persisted to history but no adapter Send
+// currently honors it on outbound — explicitly forwarding an existing
+// message requires a dedicated future feature.
 type Message struct {
 	ID          string         `json:"id,omitempty"`
 	Format      MessageFormat  `json:"format,omitempty"`
@@ -328,7 +329,6 @@ type Message struct {
 	Parts       []MessagePart  `json:"parts,omitempty"`
 	Attachments []Attachment   `json:"attachments,omitempty"`
 	Actions     []Action       `json:"actions,omitempty"`
-	Thread      *ThreadRef     `json:"thread,omitempty"`
 	Reply       *ReplyRef      `json:"reply,omitempty"`
 	Forward     *ForwardRef    `json:"forward,omitempty"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
