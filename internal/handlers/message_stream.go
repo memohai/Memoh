@@ -24,20 +24,6 @@ import (
 // cursor allowed: a stale `since=` could replay the entire bot history.
 const sessionMessageBacklogSize = 50
 
-// isUserFacingSessionType reports whether a session type should appear in
-// user-facing surfaces (sidebars, sessions activity stream).
-//
-// TODO(merge): replace with session.IsUserFacingType once the parallel
-// session-types refactor lands.
-func isUserFacingSessionType(typ string) bool {
-	switch strings.TrimSpace(typ) {
-	case session.TypeChat, session.TypeDiscuss, session.TypeACPAgent:
-		return true
-	default:
-		return false
-	}
-}
-
 // StreamSessionMessageEvents godoc
 // @Summary Stream message events for one session
 // @Description SSE stream that pushes a server-fixed backlog of the last 50
@@ -259,7 +245,7 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 					continue
 				}
 				typ, _ := payload["type"].(string)
-				if !isUserFacingSessionType(typ) {
+				if !session.IsUserFacingType(typ) {
 					continue
 				}
 				cache.set(sessionID, typ, true)
@@ -349,7 +335,7 @@ func (c *sessionTypeCache) userFacing(ctx context.Context, sessionID string) (bo
 	if err != nil {
 		return false, false
 	}
-	userFacing := isUserFacingSessionType(sess.Type)
+	userFacing := session.IsUserFacingType(sess.Type)
 	c.mu.Lock()
 	c.known[sessionID] = userFacing
 	c.mu.Unlock()
@@ -358,6 +344,6 @@ func (c *sessionTypeCache) userFacing(ctx context.Context, sessionID string) (bo
 
 func (c *sessionTypeCache) set(sessionID, typ string, _ bool) {
 	c.mu.Lock()
-	c.known[sessionID] = isUserFacingSessionType(typ)
+	c.known[sessionID] = session.IsUserFacingType(typ)
 	c.mu.Unlock()
 }

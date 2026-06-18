@@ -35,12 +35,12 @@ func TestIsUserFacingSessionType(t *testing.T) {
 	t.Parallel()
 
 	for _, typ := range []string{session.TypeChat, session.TypeDiscuss, session.TypeACPAgent} {
-		if !isUserFacingSessionType(typ) {
+		if !session.IsUserFacingType(typ) {
 			t.Fatalf("expected %q to be user-facing", typ)
 		}
 	}
 	for _, typ := range []string{session.TypeHeartbeat, session.TypeSchedule, session.TypeSubagent, ""} {
-		if isUserFacingSessionType(typ) {
+		if session.IsUserFacingType(typ) {
 			t.Fatalf("expected %q to be filtered out of user-facing surfaces", typ)
 		}
 	}
