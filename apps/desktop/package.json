@@ -13,6 +13,7 @@
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "pnpm run prepare:qdrant && pnpm run prepare:gstreamer && electron-vite dev",
+    "preview": "pnpm run prepare:qdrant && pnpm run prepare:gstreamer && electron-vite build && electron-vite preview",
     "start": "electron-vite preview",
     "prepare:qdrant": "node scripts/prepare-qdrant.mjs --targets=current",
     "prepare:qdrant:release-platform": "node scripts/prepare-qdrant.mjs --targets=release-platform",

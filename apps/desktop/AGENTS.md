@@ -546,6 +546,7 @@ electron-builder so the runtime icon is dereferenceable from disk.
 | Command | Output | Notes |
 |---------|--------|-------|
 | `pnpm --filter @memohai/desktop dev` | dev server + main process watch | Prepares current Qdrant/GStreamer resources first; renderer hot-reload; main needs window restart on changes |
+| `pnpm --filter @memohai/desktop preview` (or `mise run desktop:preview`) | production renderer bundle + main process | Builds `out/` then runs `electron-vite preview` — no Vite dev server, no HMR, no `optimizeDeps`. Closest "what a user sees" frontend while still backed by the local dev Go server (built from source because `!app.isPackaged`). Use to reproduce/triage prod-only rendering issues without a full package build |
 | `pnpm --filter @memohai/desktop build` | `dist/` installers (current platform) | Runs `scripts/build.mjs`: prepare Qdrant/GStreamer/local-server resources, electron-vite build, then electron-builder |
 | `pnpm --filter @memohai/desktop build:dir` | `dist/<platform>-unpacked/` | Skip installer; smoke-test packaged app |
 | `pnpm --filter @memohai/desktop build:mac` | DMG (arm64 + x64) | Requires darwin |
