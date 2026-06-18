@@ -17,6 +17,7 @@ import { KEYBOARD_REGISTRY } from '@memohai/web/composables/useKeyboardCommand'
 import { registerWorkspaceTabCommands } from '@memohai/web/pages/home/commands/workspace-tab-commands'
 import { useWorkspaceTabsStore } from '@memohai/web/store/workspace-tabs'
 import { useKeyboardShortcutsStore } from '@memohai/web/store/keyboard-shortcuts'
+import { useChatStore } from '@memohai/web/store/chat-list'
 
 import '@fontsource-variable/inter'
 import 'markstream-vue/index.css'
@@ -106,6 +107,22 @@ async function bootstrap() {
   // Bridge query-cache invalidations between chat and settings windows.
   // Must run after `PiniaColada` is installed so the store is registered.
   setupCrossWindowCacheSync(useQueryCache())
+
+  // The composer reads its agent list from the chat store's one-shot bot
+  // snapshot, not the Colada cache, so the sync above can't refresh it. When the
+  // settings window mutates bot config — enabling an ACP agent, renaming,
+  // switching model — it invalidates ['bots'] / ['bot', <id>]; mirror that into a
+  // store re-pull so the chat window's agent menu updates without a manual
+  // reload. (Web does this via its route watcher when leaving the settings
+  // overlay; desktop's chat window route never enters settings.)
+  const chatStore = useChatStore(pinia)
+  window.api.desktop.onInvalidate((payload) => {
+    const key = payload?.filters?.key
+    const head = Array.isArray(key) ? key[0] : undefined
+    if (head === 'bots' || head === 'bot') {
+      void chatStore.refreshBots()
+    }
+  })
 
   app.mount('#app')
 }

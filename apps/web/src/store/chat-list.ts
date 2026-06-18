@@ -1827,6 +1827,20 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  // Re-pull the bot list without touching the current bot/session selection.
+  // The store loads bots once at init and isn't wired to the settings pages'
+  // query cache, so per-bot config edited in settings (enabled agents, model,
+  // name…) would otherwise stay stale in the composer until a full reload.
+  // currentBot is a computed over bots, so swapping the list reactively
+  // refreshes the composer's agent list and metadata in place.
+  async function refreshBots(): Promise<void> {
+    try {
+      bots.value = await fetchBots()
+    } catch (error) {
+      console.error('Failed to refresh bots:', error)
+    }
+  }
+
   const PAGE_SIZE = 30
 
   async function loadMessages(botId: string, sid: string) {
@@ -2733,6 +2747,7 @@ export const useChatStore = defineStore('chat', () => {
     startupSendFailure,
     fsChangedAt,
     initialize,
+    refreshBots,
     selectBot,
     selectSession,
     selectChat: selectSession,
