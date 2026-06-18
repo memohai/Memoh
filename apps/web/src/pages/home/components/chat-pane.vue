@@ -673,17 +673,73 @@
                     </PopoverContent>
                   </Popover>
 
+                  <DropdownMenu
+                    v-if="canChooseProjectFolder"
+                    v-model:open="projectFolderMenuOpen"
+                  >
+                    <DropdownMenuTrigger as-child>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        :disabled="agentChanging"
+                        class="composer-pill-press h-9 min-w-0 max-w-40 gap-1 rounded-full px-3 text-muted-foreground"
+                      >
+                        <component
+                          :is="activeProjectIsNone ? Folder : FolderOpen"
+                          class="size-3.5 shrink-0"
+                        />
+                        <span
+                          ref="acpProjectLabelEl"
+                          class="min-w-0 truncate text-label"
+                        >{{ activeACPProjectLabel }}</span>
+                        <ChevronDown class="size-3.5 shrink-0 opacity-50" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      class="w-64"
+                      align="end"
+                      side="top"
+                    >
+                      <DropdownMenuLabel>{{ $t('chat.projectFolder') }}</DropdownMenuLabel>
+                      <DropdownMenuItem @select="selectACPNoProject">
+                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.noProject') }}</span>
+                        <Check
+                          v-if="activeProjectIsNone"
+                          class="ml-auto"
+                        />
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        v-for="folder in projectFolderOptions"
+                        :key="folder"
+                        :title="folder"
+                        @select="selectACPProjectFolder(folder)"
+                      >
+                        <span class="min-w-0 flex-1 truncate">{{ folderBasename(folder) }}</span>
+                        <Check
+                          v-if="!activeProjectIsNone && folder === currentACPProjectPath"
+                          class="ml-auto"
+                        />
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem @select="onChooseProjectFolder">
+                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.chooseFolder') }}</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                   <Button
-                    v-if="activeIsACP"
+                    v-else-if="activeIsACP"
                     type="button"
                     variant="ghost"
                     class="h-9 min-w-0 max-w-40 gap-1 rounded-full px-3 text-muted-foreground"
                     disabled
                   >
-                    <FolderOpen class="size-3.5 shrink-0" />
+                    <component
+                      :is="activeProjectIsNone ? Folder : FolderOpen"
+                      class="size-3.5 shrink-0"
+                    />
                     <span
                       ref="acpProjectLabelEl"
-                      class="min-w-0 truncate text-[11px]"
+                      class="min-w-0 truncate text-label"
                     >{{ activeACPProjectLabel }}</span>
                   </Button>
 
@@ -695,39 +751,51 @@
                       class="absolute inset-0 size-9 transition-[opacity,scale] duration-200 ease-out motion-reduce:transition-none"
                       :class="(!showSend && !streaming) ? 'scale-100 opacity-100' : 'pointer-events-none scale-75 opacity-0'"
                     />
+                    <!-- Send and stop are one brand circle: the surface never
+                         changes between the two states, only the glyph cross-fades
+                         (arrow ⇄ stop square), so the button can't blink color or
+                         shape mid-turn. While streaming it stays clickable to abort. -->
                     <Button
-                      v-if="!streaming"
                       type="button"
                       variant="brand"
-                      :disabled="!showSend || !currentBotId || activeChatReadOnly"
-                      aria-label="Send message"
+                      :disabled="streaming ? false : (!showSend || !currentBotId || activeChatReadOnly)"
+                      :aria-label="streaming ? 'Stop generating response' : 'Send message'"
                       class="absolute inset-0 size-9 rounded-full transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
-                      :class="sendButtonVisible ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
-                      @click="handleSend"
+                      :class="(sendButtonVisible || streaming) ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
+                      @click="streaming ? chatStore.abort(mySessionId ?? undefined) : handleSend()"
                     >
-                      <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2.25"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        class="size-[18px]"
+                      <span
+                        class="grid size-[20px] shrink-0 place-items-center"
                         aria-hidden="true"
                       >
-                        <path d="M12 19.5 V5" />
-                        <path d="M6 10.5 L12 4.5 L18 10.5" />
-                      </svg>
-                    </Button>
-                    <Button
-                      v-else
-                      type="button"
-                      variant="destructive"
-                      class="absolute inset-0 size-9 rounded-full"
-                      aria-label="Stop generating response"
-                      @click="chatStore.abort(mySessionId ?? undefined)"
-                    >
-                      <LoaderCircle class="size-[18px] animate-spin" />
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.75"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          class="col-start-1 row-start-1 size-[20px] transition-opacity duration-200 ease-out motion-reduce:transition-none"
+                          :class="streaming ? 'opacity-0' : 'opacity-100'"
+                        >
+                          <path d="M12 19.5 V5" />
+                          <path d="M6 10.5 L12 4.5 L18 10.5" />
+                        </svg>
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                          class="col-start-1 row-start-1 size-[18px] transition-opacity duration-200 ease-out motion-reduce:transition-none"
+                          :class="streaming ? 'opacity-100' : 'opacity-0'"
+                        >
+                          <rect
+                            x="4"
+                            y="4"
+                            width="16"
+                            height="16"
+                            rx="3"
+                          />
+                        </svg>
+                      </span>
                     </Button>
                   </div>
                 </div>
@@ -750,6 +818,7 @@ import {
   CircleAlert,
   ArrowDown,
   Check,
+  Folder,
   FolderOpen,
   Square,
   SquareCheck,
@@ -777,7 +846,19 @@ import { useMediaGallery } from '../composables/useMediaGallery'
 import type { ChatAttachment, UIUserInput, UIUserInputQuestion, WSUserInputAnswer } from '@/composables/api/useChat'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
-import { acpAgentIcon, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID } from '@/utils/acp'
+import {
+  acpAgentIcon,
+  isACPAgentEnabled,
+  isACPNoProject,
+  normalizeACPAgentID,
+  createACPNoProjectPath,
+  readRecentACPFolders,
+  rememberACPFolder,
+  ACP_NO_PROJECT_MODE,
+  ACP_DEFAULT_PROJECT_MODE,
+} from '@/utils/acp'
+import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
+import { canPickProjectFolder, pickProjectFolder } from '@/utils/desktop-runtime'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { CHAT_PANE_SESSION_ID } from './chat-pane-context'
 
@@ -1051,10 +1132,15 @@ const overrideReasoningEffort = computed<string>({
   set: value => chatStore.setOverrideReasoningEffort(mySessionId.value, value),
 })
 
-// A pinned tab that is not the active session (and isn't cached yet) must pull
-// its history in the background so it isn't blank.
+// A pinned tab that isn't the active session pulls its history in the
+// background so it isn't blank. The active tab normally loads through the
+// store's entry points, but on web a cross-tab storage sync can switch the
+// active session id without any of them running; ensureActiveSessionLoaded
+// backstops that so a real session never falls through to the welcome screen.
 watch(mySessionId, (sid) => {
-  if (sid && sid !== chatStore.sessionId) void chatStore.ensureSessionLoaded(sid)
+  if (!sid) return
+  if (sid !== chatStore.sessionId) void chatStore.ensureSessionLoaded(sid)
+  else void chatStore.ensureActiveSessionLoaded()
 }, { immediate: true })
 
 // Tool approvals are answered deep in the message tree (tool-call-inline); give
@@ -1063,9 +1149,13 @@ provide(CHAT_PANE_SESSION_ID, mySessionId)
 
 const isActive = computed(() => props.active !== false)
 
-// A fresh, writable chat opens with the composer centred and a greeting above
-// it. Read-only sessions (subagent / system / synced channel threads) hide the
-// composer entirely, so they never reach this state.
+// The empty-and-idle state shows the composer centred with a greeting above it,
+// ready to type. This covers both a brand-new draft and a real session that has
+// no messages yet (e.g. created but never sent). The "title shows but content is
+// blank" case is handled upstream by ensureActiveSessionLoaded holding
+// loadingChats true while a real session's history is fetched, so this no longer
+// needs to inspect the session id. Read-only sessions (subagent / system /
+// synced channel threads) hide the composer entirely, so they never reach here.
 const isWelcome = computed(() =>
   !!currentBotId.value
   && !activeChatReadOnly.value
@@ -1194,11 +1284,12 @@ const activeSessionMetadata = computed<Record<string, unknown>>(() =>
 const activeIsPendingACP = computed(() => !activeSession.value && !!pendingACPSessionMetadata.value)
 const activeIsACP = computed(() => activeSession.value?.type === 'acp_agent' || activeIsPendingACP.value)
 const activeACPAgentId = computed(() => normalizeACPAgentID(activeSessionMetadata.value.acp_agent_id))
+const currentACPProjectPath = computed(() => String(activeSessionMetadata.value.project_path ?? '').trim())
+const activeProjectIsNone = computed(() => isACPNoProject(activeSessionMetadata.value))
 const activeACPProjectLabel = computed(() => {
-  if (isACPNoProject(activeSessionMetadata.value)) return t('chat.noProject')
-  const path = String(activeSessionMetadata.value.project_path ?? '').trim()
-  const parts = path.split('/').filter(Boolean)
-  return path ? parts[parts.length - 1] ?? path : t('chat.noProject')
+  if (activeProjectIsNone.value) return t('chat.noProject')
+  const path = currentACPProjectPath.value
+  return path ? folderBasename(path) : t('chat.noProject')
 })
 const canChangeAgent = computed(() => !streaming.value && messages.value.length === 0)
 // The composer's "+" menu is worth showing only when it can do something:
@@ -1405,6 +1496,72 @@ async function selectMemohAgent() {
   } finally {
     agentChanging.value = false
   }
+}
+
+function folderBasename(path: string): string {
+  const parts = path.split('/').filter(Boolean)
+  return parts[parts.length - 1] ?? path
+}
+
+const { isLocalDesktop, load: loadDesktopRuntime } = useDesktopRuntime()
+void loadDesktopRuntime()
+const projectFolderMenuOpen = ref(false)
+const recentACPFolders = ref<string[]>(readRecentACPFolders())
+
+// A host folder only maps to the session's working directory when the agent
+// runs on a local desktop workspace; in remote/web mode the path is fixed
+// server-side, so the pill stays a read-only marker. Mirrors the agent
+// switcher's gate — the runtime binds its folder on the first turn, so the
+// choice is offered only while the session is still empty.
+const canChooseProjectFolder = computed(() =>
+  activeIsACP.value && canChangeAgent.value && isLocalDesktop.value && canPickProjectFolder(),
+)
+const projectFolderOptions = computed(() => {
+  const list = [...recentACPFolders.value]
+  const current = currentACPProjectPath.value
+  if (current && !activeProjectIsNone.value && !list.includes(current)) list.unshift(current)
+  return list
+})
+
+watch(projectFolderMenuOpen, (open) => {
+  if (open) recentACPFolders.value = readRecentACPFolders()
+})
+
+async function applyACPProject(projectMode: string, projectPath: string) {
+  const agentId = activeACPAgentId.value
+  if (!agentId || agentChanging.value || !canChangeAgent.value) return
+  projectFolderMenuOpen.value = false
+  agentChanging.value = true
+  composerError.value = ''
+  try {
+    if (chatStore.sessionId) {
+      await withAgentSwitchTimeout(chatStore.updateCurrentSessionAgent({ agentId, projectMode, projectPath }))
+    } else {
+      chatStore.stageACPSession({ agentId, projectMode, projectPath })
+      await withAgentSwitchTimeout(chatStore.ensurePendingACPRuntime())
+    }
+    pendingFiles.value = []
+  } catch (error) {
+    composerError.value = agentSwitchErrorMessage(error)
+  } finally {
+    agentChanging.value = false
+  }
+}
+
+function selectACPProjectFolder(path: string) {
+  const next = path.trim()
+  if (next) void applyACPProject(ACP_DEFAULT_PROJECT_MODE, next)
+}
+
+function selectACPNoProject() {
+  void applyACPProject(ACP_NO_PROJECT_MODE, createACPNoProjectPath())
+}
+
+async function onChooseProjectFolder() {
+  const path = await pickProjectFolder()
+  if (!path) return
+  recentACPFolders.value = rememberACPFolder(path)
+  void applyACPProject(ACP_DEFAULT_PROJECT_MODE, path)
 }
 
 function onModelSelected() {

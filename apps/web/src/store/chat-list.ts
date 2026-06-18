@@ -979,7 +979,10 @@ export const useChatStore = defineStore('chat', () => {
   function restoreCachedMessages(botId: string, sid: string): boolean {
     const key = sessionMessageKey(botId, sid)
     const cached = key ? sessionMessageStates.get(key) : undefined
-    if (!cached) return false
+    // An empty slice counts as a miss: a real session snapshotted before its
+    // history loaded would otherwise restore to nothing and strand the chat on
+    // an empty view. Falling through forces a server fetch instead.
+    if (!cached || cached.items.length === 0) return false
     messages.splice(0, messages.length, ...cached.items)
     hasMoreOlder.value = cached.hasMoreOlder
     updateSinceFromMessages(cached.items)
@@ -1967,6 +1970,44 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  // Backstop for the primary tab. The active session's history is loaded by
+  // selectSession / initialize / selectBot, which own loadingChats. On web the
+  // persisted session id can also change without any of them running: a storage
+  // sync from another browser tab assigns sessionId directly, leaving a real
+  // session with no messages on the welcome screen until the next send. Pull the
+  // history here, straight from the server (the cache may hold the empty snapshot
+  // that caused this), owning loadingChats so the view reads as loading rather
+  // than a false new chat. No-op while a real load/stream is already in flight.
+  async function ensureActiveSessionLoaded() {
+    const bid = (currentBotId.value ?? '').trim()
+    const sid = (sessionId.value ?? '').trim()
+    if (!bid || !sid) return
+    // Never race a path that owns the message list. `loading` spans the whole
+    // send, including the window where ensureActiveSession() has just minted a
+    // session id but its optimistic turns aren't pushed yet — fetching there
+    // would pull an empty/404 history and wipe the stream that's starting.
+    if (loadingChats.value || initializing.value || loading.value) return
+    if (messages.length > 0 || isSessionStreaming(sid)) return
+    loadingChats.value = true
+    try {
+      const turns = await fetchMessagesUI(bid, sid, { limit: PAGE_SIZE })
+      // A send/stream may have begun, or the active view moved on, while the
+      // request was in flight; only commit onto a still-idle active session.
+      if (
+        sessionId.value !== sid || currentBotId.value !== bid
+        || loading.value || isSessionStreaming(sid) || messages.length > 0
+      ) return
+      replaceMessages(turns)
+      hasMoreOlder.value = turns.length > 0
+      cacheCurrentMessages()
+    } catch {
+      // A just-minted session can 404 before its first message persists; stay
+      // silent and let the live send/stream own the view.
+    } finally {
+      loadingChats.value = false
+    }
+  }
+
   function findMessageIdByExternalId(externalMessageId: string): string | null {
     const target = externalMessageId.trim()
     if (!target) return null
@@ -2734,6 +2775,7 @@ export const useChatStore = defineStore('chat', () => {
     getOverrideReasoningEffort,
     setOverrideReasoningEffort,
     ensureSessionLoaded,
+    ensureActiveSessionLoaded,
     observeSession,
     unobserveSession,
     isObservedSession,
