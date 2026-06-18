@@ -176,6 +176,13 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+	// format=ui converts each page independently, so a page that begins mid
+	// assistant turn (its earlier rows on the previous page) would render one
+	// reply as several turns/action bars. Extend the head back to a real turn
+	// boundary so a turn is never split across pages.
+	if format == "ui" && sessionID != "" && len(messages) > 0 {
+		messages = h.extendToUITurnHead(c.Request().Context(), sessionID, messages)
+	}
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, messages)
 	if format == "ui" {
 		items := conversation.ConvertMessagesToUITurns(messages)
@@ -478,6 +485,28 @@ func reverseMessages(m []messagepkg.Message) {
 // per-session messages SSE (see message_stream.go) and a bot-wide lightweight
 // sessions activity SSE. Resolves a catch-up explosion where a stale client
 // `since=` cursor could force a multi-megabyte replay of bot history.
+// extendToUITurnHead prepends older session messages (oldest-first) until the
+// slice starts on a real UI turn boundary — a visible user message or a
+// background-task system turn. A turn is the unit of an action bar and is
+// indivisible, so when a fixed-size page lands in the middle of an assistant
+// turn we pull the turn's earlier rows back in. This makes the page larger than
+// `limit`, which is fine: the frontend already pages by turns, not rows. The
+// row cap guards against a single pathologically long turn.
+func (h *MessageHandler) extendToUITurnHead(ctx context.Context, sessionID string, messages []messagepkg.Message) []messagepkg.Message {
+	const batch = int32(50)
+	const maxRows = 2000
+	for len(messages) > 0 && len(messages) < maxRows && !conversation.IsUITurnBoundary(messages[0]) {
+		older, err := h.messageService.ListBeforeBySession(ctx, sessionID, messages[0].CreatedAt, batch)
+		if err != nil || len(older) == 0 {
+			break
+		}
+		messages = append(older, messages...)
+		if len(older) < int(batch) {
+			break // reached the start of the session
+		}
+	}
+	return messages
+}
 
 // DeleteMessages godoc
 // @Summary Delete all bot history messages
