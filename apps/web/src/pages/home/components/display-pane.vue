@@ -1,7 +1,7 @@
 <template>
   <div
     ref="rootRef"
-    class=" inset-0 flex flex-col bg-card z-10 "
+    class=" inset-0 flex flex-col bg-background z-10 "
     :class="isFullScroll?'fixed':'absolute'"
     @click="closeStatsMenu"
   >
@@ -12,7 +12,7 @@
     />
     <video
       ref="videoRef"
-      class="size-full min-h-0 flex-1 bg-card object-contain"
+      class="size-full min-h-0 flex-1 bg-background object-contain"
       autoplay
       playsinline
       muted
@@ -29,7 +29,7 @@
     />
     <div
       v-if="prepareProgress"
-      class="absolute inset-0 flex items-center justify-center bg-card px-6"
+      class="absolute inset-0 flex items-center justify-center bg-background px-6"
     >
       <div class="w-full max-w-[520px] rounded-lg border border-border bg-card p-5">
         <div class="flex items-start justify-between gap-4">
@@ -179,7 +179,7 @@
     </div>
     <div
       v-if="!prepareProgress && (status !== 'connected' || !videoReady)"
-      class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-card px-6 text-center"
+      class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background px-6 text-center"
     >
       <Spinner
         v-if="status !== 'disconnected' && status !== 'unavailable'"
