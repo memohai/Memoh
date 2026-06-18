@@ -574,6 +574,22 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.Pr
 	}
 
 	msg := event.Final.Message
+
+	// Rich path: when the final carries canonical Parts (the channel is
+	// RichText-capable after item 1, so coerce kept them intact), render via
+	// sendRichMessage so styled spans/links/mentions reach the user instead of
+	// being silently degraded to markdown text via PlainText()+HTML conversion.
+	// Mirrors the rich branch in TelegramAdapter.Send.
+	if len(msg.Message.Parts) > 0 {
+		if err := s.pushFinalRich(ctx, msg); err != nil {
+			return err
+		}
+		if len(msg.Attachments) > 0 {
+			return s.pushFinalAttachments(ctx, msg)
+		}
+		return nil
+	}
+
 	finalText := bufText
 	if authoritative := strings.TrimSpace(msg.Message.PlainText()); authoritative != "" {
 		if !s.isPrivateChat || bufText != "" || (finalText == "" && len(msg.Message.Actions) > 0) {
@@ -616,6 +632,66 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.Pr
 			if err := sendTelegramAttachmentWithAssets(ctx, bot, s.target, att, "", to, parseMode); err != nil && s.adapter.logger != nil {
 				s.adapter.logger.Error("stream final attachment failed", slog.String("config_id", s.cfg.ID), slog.Any("error", err))
 			}
+		}
+	}
+	return nil
+}
+
+// pushFinalRich delivers a streaming final whose canonical Parts should be
+// rendered via Telegram's sendRichMessage / editRichMessage APIs instead of
+// being collapsed to markdown text. Edits an existing stream message in place
+// when one was opened during delta streaming; otherwise sends a fresh rich
+// message.
+func (s *telegramOutboundStream) pushFinalRich(ctx context.Context, msg channel.PreparedMessage) error {
+	rich := renderTelegramMessagePartsRichMessage(msg.Message)
+	if strings.TrimSpace(rich.HTML) == "" {
+		return nil
+	}
+	bot, replyTo, err := s.getBotAndReply(ctx)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	streamMsgID := s.streamMsgID
+	streamChatID := s.streamChatID
+	s.mu.Unlock()
+
+	if streamMsgID > 0 && streamChatID != 0 {
+		if err := editTelegramRichMessage(bot, streamChatID, streamMsgID, rich, msg.Message.Actions); err == nil {
+			s.resetStreamState()
+			return nil
+		}
+		// Editing the in-flight stream message to rich failed (e.g. message
+		// was originally a draft/sendMessageDraft that the rich endpoint
+		// can't replace). Fall through to a fresh rich send so the user
+		// still sees the final.
+	}
+
+	if _, _, err := sendTelegramRichMessageReturnMessage(bot, s.target, rich, replyTo, msg.Message.Actions); err != nil {
+		return err
+	}
+	s.resetStreamState()
+	return nil
+}
+
+// pushFinalAttachments delivers the attachment tail after a rich-final send.
+// Extracted so the rich path can reuse the same logic as the existing text
+// final path.
+func (s *telegramOutboundStream) pushFinalAttachments(ctx context.Context, msg channel.PreparedMessage) error {
+	bot, err := s.getBot(ctx)
+	if err != nil {
+		return err
+	}
+	replyTo := parseReplyToMessageID(s.reply)
+	parseMode := s.parseMode
+	for i, att := range msg.Attachments {
+		to := replyTo
+		if i > 0 {
+			to = 0
+		}
+		if err := sendTelegramAttachmentWithAssets(ctx, bot, s.target, att, "", to, parseMode); err != nil && s.adapter != nil && s.adapter.logger != nil {
+			s.adapter.logger.Error("stream final attachment failed", slog.String("config_id", s.cfg.ID), slog.Any("error", err))
 		}
 	}
 	return nil

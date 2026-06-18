@@ -3,6 +3,8 @@ package telegram
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -887,5 +889,57 @@ func TestDraftMode_MultipleFinalEventsOnlyOneSend(t *testing.T) {
 
 	if sendCount != 1 {
 		t.Fatalf("expected exactly 1 sendTelegramText call, got %d", sendCount)
+	}
+}
+
+// TestStreamFinal_RichPartsUseSendRichMessage verifies that when a
+// StreamEventFinal carries canonical Parts and the channel is RichText-capable
+// (per item 1), pushFinal routes through sendRichMessage instead of falling
+// back to PlainText()+formatTelegramOutput. Without this, rich Parts arriving
+// in the streaming-final boundary get silently degraded to markdown text.
+func TestStreamFinal_RichPartsUseSendRichMessage(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	s := &telegramOutboundStream{
+		adapter: adapter,
+		cfg:     channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		target:  "123",
+	}
+	ctx := context.Background()
+
+	var sawRich bool
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			sawRich = true
+		}
+		resp := `{"ok":true,"result":{"message_id":77,"chat":{"id":123}}}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(resp)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{
+		Type: channel.StreamEventFinal,
+		Final: &channel.StreamFinalizePayload{
+			Message: channel.Message{
+				Format: channel.MessageFormatRich,
+				Parts: []channel.MessagePart{
+					{Type: channel.MessagePartText, Text: "hello", Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+				},
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if !sawRich {
+		t.Fatal("expected sendRichMessage to be invoked for streaming final with Parts")
 	}
 }
