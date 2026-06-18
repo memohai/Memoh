@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/memohai/memoh/internal/agent/sessionmode"
 	skillset "github.com/memohai/memoh/internal/skills"
 )
 
@@ -17,14 +18,15 @@ import (
 var promptsFS embed.FS
 
 var (
-	systemCommonTmpl  string
-	modeChatTmpl      string
-	modeDiscussTmpl   string
-	modeHeartbeatTmpl string
-	modeScheduleTmpl  string
-	modeSubagentTmpl  string
-	scheduleTmpl      string
-	heartbeatTmpl     string
+	systemCommonTmpl           string
+	modeChatTmpl               string
+	modeDiscussTmpl            string
+	modeHeartbeatTmpl          string
+	modeBackgroundDeliveryTmpl string
+	modeScheduleTmpl           string
+	modeSubagentTmpl           string
+	scheduleTmpl               string
+	heartbeatTmpl              string
 
 	includes map[string]string
 )
@@ -36,24 +38,22 @@ func init() {
 	modeChatTmpl = mustReadPrompt("prompts/mode_chat.md")
 	modeDiscussTmpl = mustReadPrompt("prompts/mode_discuss.md")
 	modeHeartbeatTmpl = mustReadPrompt("prompts/mode_heartbeat.md")
+	modeBackgroundDeliveryTmpl = mustReadPrompt("prompts/mode_background_delivery.md")
 	modeScheduleTmpl = mustReadPrompt("prompts/mode_schedule.md")
 	modeSubagentTmpl = mustReadPrompt("prompts/mode_subagent.md")
 	scheduleTmpl = mustReadPrompt("prompts/schedule.md")
 	heartbeatTmpl = mustReadPrompt("prompts/heartbeat.md")
 
 	includes = map[string]string{
-		"_memory":        mustReadPrompt("prompts/_memory.md"),
-		"_tools":         mustReadPrompt("prompts/_tools.md"),
-		"_contacts":      mustReadPrompt("prompts/_contacts.md"),
-		"_identities":    mustReadPrompt("prompts/_identities.md"),
-		"_schedule_task": mustReadPrompt("prompts/_schedule_task.md"),
-		"_subagent":      mustReadPrompt("prompts/_subagent.md"),
+		"_memory":     mustReadPrompt("prompts/_memory.md"),
+		"_identities": mustReadPrompt("prompts/_identities.md"),
 	}
 
 	systemCommonTmpl = resolveIncludes(systemCommonTmpl)
 	modeChatTmpl = resolveIncludes(modeChatTmpl)
 	modeDiscussTmpl = resolveIncludes(modeDiscussTmpl)
 	modeHeartbeatTmpl = resolveIncludes(modeHeartbeatTmpl)
+	modeBackgroundDeliveryTmpl = resolveIncludes(modeBackgroundDeliveryTmpl)
 	modeScheduleTmpl = resolveIncludes(modeScheduleTmpl)
 	modeSubagentTmpl = resolveIncludes(modeSubagentTmpl)
 }
@@ -92,13 +92,15 @@ func render(tmpl string, vars map[string]string) string {
 
 func selectModeTemplate(sessionType string) string {
 	switch sessionType {
-	case "discuss":
+	case sessionmode.Discuss:
 		return modeDiscussTmpl
-	case "heartbeat":
+	case sessionmode.Heartbeat:
 		return modeHeartbeatTmpl
-	case "schedule":
+	case sessionmode.BackgroundDelivery:
+		return modeBackgroundDeliveryTmpl
+	case sessionmode.Schedule:
 		return modeScheduleTmpl
-	case "subagent":
+	case sessionmode.Subagent:
 		return modeSubagentTmpl
 	default:
 		return modeChatTmpl
@@ -117,19 +119,6 @@ func GenerateSystemPrompt(params SystemPromptParams) string {
 		timezoneName = "UTC"
 	}
 
-	readToolDesc := "- `read`: read file content"
-	if params.SupportsImageInput {
-		readToolDesc += " (also supports images: PNG, JPEG, GIF, WebP)"
-	}
-	basicTools := []string{readToolDesc}
-	basicTools = append(basicTools,
-		"- `write`: write file content",
-		"- `list`: list directory entries",
-		"- `edit`: replace exact text in a file",
-		"- `exec`: execute command",
-	)
-
-	displayTools := buildDisplayToolsSection(params.DisplayEnabled)
 	botInfoSection := buildBotInfoSection(params.Bot)
 
 	skillsSection := buildSkillsSection(params.Skills)
@@ -142,8 +131,6 @@ func GenerateSystemPrompt(params SystemPromptParams) string {
 		"home":                      home,
 		"currentTime":               now.Format(time.RFC3339),
 		"timezone":                  timezoneName,
-		"basicTools":                strings.Join(basicTools, "\n"),
-		"displayTools":              displayTools,
 		"botInfoSection":            botInfoSection,
 		"skillsSection":             skillsSection,
 		"platformIdentitiesSection": strings.TrimSpace(params.PlatformIdentitiesSection),
@@ -161,25 +148,7 @@ type SystemPromptParams struct {
 	Files                     []SystemFile
 	Now                       time.Time
 	Timezone                  string
-	SupportsImageInput        bool
-	DisplayEnabled            bool
 	PlatformIdentitiesSection string
-}
-
-func buildDisplayToolsSection(enabled bool) string {
-	if !enabled {
-		return ""
-	}
-	return strings.TrimSpace(`
-## Workspace browser & desktop
-
-This bot has a headed workspace display (Chrome on a virtual desktop). Use GUI tools only when the task needs on-screen interaction:
-
-- **Browser** (browser_observe, browser_action): Web pages in Chrome. Observe before acting; prefer element refs from snapshot over CSS selectors.
-- **Computer** (computer_observe, computer_action): Whole-desktop fallback for native dialogs, non-browser apps, or when the browser path fails. Start with computer_observe snapshot to get an accessibility tree with element refs, then drive computer_action with those refs; raw coordinates are a last-resort fallback.
-- **browser_remote_session**: Only when running Playwright or other CDP automation inside the workspace is clearly better than the browser tools above.
-- **Screenshots**: Both browser_observe and computer_observe save screenshots to a workspace path; they are not attached to the conversation. Read the returned path with the file read tool when you need the image.
-`)
 }
 
 func buildBotInfoSection(bot BotInfo) string {
@@ -243,9 +212,8 @@ func buildSkillsSection(skills []SkillEntry) string {
 	sb.WriteString("## Skills\n\n")
 	sb.WriteString("Memoh-managed skills are stored in `" + skillset.ManagedDir() + "/`. ")
 	sb.WriteString("Compatible external skill directories inside the bot container may also be discovered automatically. ")
-	sb.WriteString("Each skill is a `SKILL.md` file inside a named subdirectory.\n\n")
-	sb.WriteString("Call `use_skill` with the skill name to load its full instructions before following them. ")
-	sb.WriteString("Only activate a skill when it is relevant to the current task.\n\n")
+	sb.WriteString("Each skill is a `SKILL.md` file inside a named subdirectory. ")
+	sb.WriteString("Only activate a skill when it is relevant to the current task and a skill-loading capability is available.\n\n")
 	sb.WriteString(strconv.Itoa(len(sorted)))
 	sb.WriteString(" skill(s) available:\n")
 	for _, s := range sorted {
@@ -268,17 +236,13 @@ func buildFileSections(files []SystemFile) string {
 	return sb.String()
 }
 
-func buildMainAgentSections(platformIdentitiesSection, skillsSection, fileSections string) string {
+func buildMainAgentSections(platformIdentitiesSection string, skillsSection, fileSections string) string {
 	identitiesSection := render(includes["_identities"], map[string]string{
 		"platformIdentitiesSection": platformIdentitiesSection,
 	})
 	sections := []string{
 		includes["_memory"],
-		includes["_contacts"],
 		identitiesSection,
-		includes["_schedule_task"],
-		"When a scheduled task triggers, it runs in its own session. Use `send` in the schedule command to deliver results to the intended channel.",
-		includes["_subagent"],
 		skillsSection,
 		fileSections,
 	}

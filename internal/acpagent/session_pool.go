@@ -119,6 +119,7 @@ type sessionGetter interface {
 type runtimeHandle struct {
 	// Stable identity, fixed at creation.
 	id          string
+	toolToken   string
 	botID       string
 	agentID     string
 	projectPath string
@@ -155,14 +156,16 @@ type PromptInput struct {
 	ChannelIdentityID string
 	// SessionToken is consumed only by Prompt, where it flows into the
 	// per-prompt tool context overlay. Ensure and SetModel ignore it.
-	SessionToken     string //nolint:gosec // runtime session credential, not a hardcoded secret.
-	CurrentPlatform  string
-	ReplyTarget      string
-	ConversationType string
-	ToolHTTPURL      string
-	ContextURI       string
-	ContextMarkdown  string
-	Sink             acpclient.EventSink
+	SessionToken        string //nolint:gosec // runtime session credential, not a hardcoded secret.
+	CurrentPlatform     string
+	ReplyTarget         string
+	ConversationType    string
+	CanRequestUserInput bool
+	SupportsImageInput  bool
+	ToolHTTPURL         string
+	ContextURI          string
+	ContextMarkdown     string
+	Sink                acpclient.EventSink
 }
 
 // CreateRuntimeInput describes a pre-session runtime creation request.
@@ -242,6 +245,10 @@ func newRuntimeID() string {
 	return runtimeIDPrefix + uuid.NewString()
 }
 
+func newRuntimeToolToken() string {
+	return uuid.NewString()
+}
+
 // owned is the single tenancy gate: every runtime-scoped operation resolves
 // through here, and a cross-bot reference behaves exactly like a missing
 // runtime - zero side effects.
@@ -280,6 +287,7 @@ func (p *SessionPool) CreateRuntime(ctx context.Context, input CreateRuntimeInpu
 
 	h := &runtimeHandle{
 		id:          newRuntimeID(),
+		toolToken:   newRuntimeToolToken(),
 		botID:       botID,
 		agentID:     agentID,
 		projectPath: projectPath,
@@ -463,9 +471,12 @@ func (p *SessionPool) CloseRuntime(botID, runtimeID string) error {
 // ResolveRuntimeToolContext resolves the trusted MCP tool context for a
 // runtime referenced by its stable ID (for example from baked process
 // headers). Fails closed: dead or foreign runtimes resolve to nothing.
-func (p *SessionPool) ResolveRuntimeToolContext(botID, runtimeID string) (mcp.ToolSessionContext, bool) {
+func (p *SessionPool) ResolveRuntimeToolContext(botID, runtimeID, toolToken string) (mcp.ToolSessionContext, bool) {
 	h, err := p.owned(botID, runtimeID)
 	if err != nil {
+		return mcp.ToolSessionContext{}, false
+	}
+	if strings.TrimSpace(h.toolToken) == "" || strings.TrimSpace(toolToken) != h.toolToken {
 		return mcp.ToolSessionContext{}, false
 	}
 	h.state.Lock()
@@ -627,6 +638,7 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 			// second one.
 			h = &runtimeHandle{
 				id:           newRuntimeID(),
+				toolToken:    newRuntimeToolToken(),
 				botID:        input.BotID,
 				agentID:      agentID,
 				projectPath:  projectPath,
@@ -1117,10 +1129,11 @@ func (p *SessionPool) resolveSessionMetadata(ctx context.Context, input PromptIn
 // re-configuration.
 func (h *runtimeHandle) stableToolIdentity() acpclient.ToolSessionContext {
 	return acpclient.ToolSessionContext{
-		BotID:       h.botID,
-		ChatID:      h.botID,
-		RuntimeID:   h.id,
-		SessionType: session.TypeACPAgent,
+		BotID:        h.botID,
+		ChatID:       h.botID,
+		RuntimeID:    h.id,
+		RuntimeToken: h.toolToken,
+		SessionType:  session.TypeACPAgent,
 	}
 }
 
@@ -1141,6 +1154,7 @@ func (h *runtimeHandle) toolContext() mcp.ToolSessionContext {
 		return ctx
 	}
 	ctx.RuntimeActive = true
+	ctx.CanListUserInput = true
 	overlay := func(dst *string, value string) {
 		if value = strings.TrimSpace(value); value != "" {
 			*dst = value
@@ -1156,6 +1170,12 @@ func (h *runtimeHandle) toolContext() mcp.ToolSessionContext {
 	overlay(&ctx.CurrentPlatform, h.active.CurrentPlatform)
 	overlay(&ctx.ReplyTarget, h.active.ReplyTarget)
 	overlay(&ctx.ConversationType, h.active.ConversationType)
+	if h.active.CanRequestUserInput {
+		ctx.CanRequestUserInput = true
+	}
+	if h.active.SupportsImageInput {
+		ctx.SupportsImageInput = true
+	}
 	return ctx
 }
 
@@ -1180,19 +1200,21 @@ func (h *runtimeHandle) setStatus(status string) {
 
 func toolSessionContext(input PromptInput, h *runtimeHandle) acpclient.ToolSessionContext {
 	return acpclient.ToolSessionContext{
-		BotID:             h.botID,
-		ChatID:            firstNonEmpty(input.ChatID, h.botID),
-		RuntimeID:         h.id,
-		SessionID:         strings.TrimSpace(input.SessionID),
-		StreamID:          strings.TrimSpace(input.StreamID),
-		SessionType:       firstNonEmpty(input.SessionType, session.TypeACPAgent),
-		RouteID:           input.RouteID,
-		ChannelIdentityID: input.ChannelIdentityID,
-		SessionToken:      input.SessionToken,
-		CurrentPlatform:   input.CurrentPlatform,
-		ReplyTarget:       input.ReplyTarget,
-		ConversationType:  input.ConversationType,
-		IsSubagent:        false,
+		BotID:               h.botID,
+		ChatID:              firstNonEmpty(input.ChatID, h.botID),
+		RuntimeID:           h.id,
+		SessionID:           strings.TrimSpace(input.SessionID),
+		StreamID:            strings.TrimSpace(input.StreamID),
+		SessionType:         firstNonEmpty(input.SessionType, session.TypeACPAgent),
+		RouteID:             input.RouteID,
+		ChannelIdentityID:   input.ChannelIdentityID,
+		SessionToken:        input.SessionToken,
+		CurrentPlatform:     input.CurrentPlatform,
+		ReplyTarget:         input.ReplyTarget,
+		ConversationType:    input.ConversationType,
+		CanRequestUserInput: input.CanRequestUserInput,
+		IsSubagent:          false,
+		SupportsImageInput:  input.SupportsImageInput,
 	}
 }
 

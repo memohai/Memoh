@@ -16923,6 +16923,9 @@
                 "config": {
                     "$ref": "#/definitions/models.ModelConfig"
                 },
+                "enable": {
+                    "type": "boolean"
+                },
                 "model_id": {
                     "type": "string"
                 },
@@ -16961,6 +16964,9 @@
             "properties": {
                 "config": {
                     "$ref": "#/definitions/models.ModelConfig"
+                },
+                "enable": {
+                    "type": "boolean"
                 },
                 "id": {
                     "type": "string"
@@ -17057,6 +17063,9 @@
             "properties": {
                 "config": {
                     "$ref": "#/definitions/models.ModelConfig"
+                },
+                "enable": {
+                    "type": "boolean"
                 },
                 "model_id": {
                     "type": "string"

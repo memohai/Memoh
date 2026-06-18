@@ -3348,6 +3348,8 @@ definitions:
     properties:
       config:
         $ref: '#/definitions/models.ModelConfig'
+      enable:
+        type: boolean
       model_id:
         type: string
       name:
@@ -3373,6 +3375,8 @@ definitions:
     properties:
       config:
         $ref: '#/definitions/models.ModelConfig'
+      enable:
+        type: boolean
       id:
         type: string
       model_id:
@@ -3440,6 +3444,8 @@ definitions:
     properties:
       config:
         $ref: '#/definitions/models.ModelConfig'
+      enable:
+        type: boolean
       model_id:
         type: string
       name:

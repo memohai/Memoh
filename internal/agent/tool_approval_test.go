@@ -6,10 +6,11 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 )
 
-func TestMarkApprovalToolsCoversAllTools(t *testing.T) {
+func TestMarkApprovalToolsCoversMutatingTools(t *testing.T) {
 	t.Parallel()
 
-	tools := markApprovalTools([]sdk.Tool{
+	tools := map[string]sdk.Tool{}
+	for _, tool := range markApprovalTools([]sdk.Tool{
 		{Name: "read"},
 		{Name: "list"},
 		{Name: "write"},
@@ -17,11 +18,18 @@ func TestMarkApprovalToolsCoversAllTools(t *testing.T) {
 		{Name: "apply_patch"},
 		{Name: "exec"},
 		{Name: "web_search"},
-	})
+	}) {
+		tools[tool.Name] = tool
+	}
 
-	for _, tool := range tools {
-		if !tool.RequireApproval {
-			t.Fatalf("%s RequireApproval = false, want true", tool.Name)
+	for _, name := range []string{"write", "edit", "apply_patch", "exec"} {
+		if !tools[name].RequireApproval {
+			t.Fatalf("%s RequireApproval = false, want true", name)
+		}
+	}
+	for _, name := range []string{"read", "list", "web_search"} {
+		if tools[name].RequireApproval {
+			t.Fatalf("%s RequireApproval = true, want false", name)
 		}
 	}
 }

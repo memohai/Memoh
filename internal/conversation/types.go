@@ -249,6 +249,7 @@ type ChatRequest struct {
 	EventID                   string           `json:"-"`
 	RawQuery                  string           `json:"-"`
 	ToolHTTPURL               string           `json:"-"`
+	SessionType               string           `json:"-"`
 
 	// OutboundAssetCollector returns asset refs accumulated during outbound streaming.
 	// Set by the inbound channel processor; called by the resolver at persist time.

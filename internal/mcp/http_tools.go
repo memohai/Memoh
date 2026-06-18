@@ -13,20 +13,22 @@ import (
 )
 
 const (
-	ToolHeaderAuthorization     = "Authorization" //nolint:gosec // G101: HTTP header name, not a credential.
-	ToolHeaderBotID             = "X-Memoh-Bot-Id"
-	ToolHeaderChatID            = "X-Memoh-Chat-Id"
-	ToolHeaderRuntimeID         = "X-Memoh-Runtime-Id"
-	ToolHeaderSessionID         = "X-Memoh-Session-Id"
-	ToolHeaderStreamID          = "X-Memoh-Stream-Id"
-	ToolHeaderSessionType       = "X-Memoh-Session-Type"
-	ToolHeaderRouteID           = "X-Memoh-Route-Id"
-	ToolHeaderChannelIdentityID = "X-Memoh-Channel-Identity-Id"
-	ToolHeaderSessionToken      = "X-Memoh-Session-Token" //nolint:gosec // G101: HTTP header name, not a credential.
-	ToolHeaderCurrentPlatform   = "X-Memoh-Current-Platform"
-	ToolHeaderReplyTarget       = "X-Memoh-Reply-Target"
-	ToolHeaderConversationType  = "X-Memoh-Conversation-Type"
-	ToolHeaderIsSubagent        = "X-Memoh-Is-Subagent"
+	ToolHeaderAuthorization      = "Authorization" //nolint:gosec // G101: HTTP header name, not a credential.
+	ToolHeaderBotID              = "X-Memoh-Bot-Id"
+	ToolHeaderChatID             = "X-Memoh-Chat-Id"
+	ToolHeaderRuntimeID          = "X-Memoh-Runtime-Id"
+	ToolHeaderRuntimeToken       = "X-Memoh-Runtime-Token" //nolint:gosec // G101: HTTP header name, not a credential.
+	ToolHeaderSessionID          = "X-Memoh-Session-Id"
+	ToolHeaderStreamID           = "X-Memoh-Stream-Id"
+	ToolHeaderSessionType        = "X-Memoh-Session-Type"
+	ToolHeaderRouteID            = "X-Memoh-Route-Id"
+	ToolHeaderChannelIdentityID  = "X-Memoh-Channel-Identity-Id"
+	ToolHeaderSessionToken       = "X-Memoh-Session-Token" //nolint:gosec // G101: HTTP header name, not a credential.
+	ToolHeaderCurrentPlatform    = "X-Memoh-Current-Platform"
+	ToolHeaderReplyTarget        = "X-Memoh-Reply-Target"
+	ToolHeaderConversationType   = "X-Memoh-Conversation-Type"
+	ToolHeaderIsSubagent         = "X-Memoh-Is-Subagent"
+	ToolHeaderSupportsImageInput = "X-Memoh-Supports-Image-Input"
 )
 
 func ToolSessionContextFromHTTP(req *http.Request, fallbackBotID string) ToolSessionContext {
@@ -39,19 +41,21 @@ func ToolSessionContextFromHTTP(req *http.Request, fallbackBotID string) ToolSes
 		chatID = sessionBotID
 	}
 	return ToolSessionContext{
-		BotID:             sessionBotID,
-		ChatID:            chatID,
-		RuntimeID:         firstNonEmptyHTTPHeader(req, ToolHeaderRuntimeID),
-		SessionID:         firstNonEmptyHTTPHeader(req, ToolHeaderSessionID),
-		StreamID:          firstNonEmptyHTTPHeader(req, ToolHeaderStreamID),
-		SessionType:       firstNonEmptyHTTPHeader(req, ToolHeaderSessionType),
-		RouteID:           firstNonEmptyHTTPHeader(req, ToolHeaderRouteID),
-		ChannelIdentityID: firstNonEmptyHTTPHeader(req, ToolHeaderChannelIdentityID),
-		SessionToken:      strings.TrimSpace(req.Header.Get(ToolHeaderSessionToken)),
-		CurrentPlatform:   strings.TrimSpace(req.Header.Get(ToolHeaderCurrentPlatform)),
-		ReplyTarget:       strings.TrimSpace(req.Header.Get(ToolHeaderReplyTarget)),
-		ConversationType:  strings.TrimSpace(req.Header.Get(ToolHeaderConversationType)),
-		IsSubagent:        strings.EqualFold(strings.TrimSpace(req.Header.Get(ToolHeaderIsSubagent)), "true"),
+		BotID:              sessionBotID,
+		ChatID:             chatID,
+		RuntimeID:          firstNonEmptyHTTPHeader(req, ToolHeaderRuntimeID),
+		RuntimeToken:       strings.TrimSpace(req.Header.Get(ToolHeaderRuntimeToken)),
+		SessionID:          firstNonEmptyHTTPHeader(req, ToolHeaderSessionID),
+		StreamID:           firstNonEmptyHTTPHeader(req, ToolHeaderStreamID),
+		SessionType:        firstNonEmptyHTTPHeader(req, ToolHeaderSessionType),
+		RouteID:            firstNonEmptyHTTPHeader(req, ToolHeaderRouteID),
+		ChannelIdentityID:  firstNonEmptyHTTPHeader(req, ToolHeaderChannelIdentityID),
+		SessionToken:       strings.TrimSpace(req.Header.Get(ToolHeaderSessionToken)),
+		CurrentPlatform:    strings.TrimSpace(req.Header.Get(ToolHeaderCurrentPlatform)),
+		ReplyTarget:        strings.TrimSpace(req.Header.Get(ToolHeaderReplyTarget)),
+		ConversationType:   strings.TrimSpace(req.Header.Get(ToolHeaderConversationType)),
+		IsSubagent:         strings.EqualFold(strings.TrimSpace(req.Header.Get(ToolHeaderIsSubagent)), "true"),
+		SupportsImageInput: strings.EqualFold(strings.TrimSpace(req.Header.Get(ToolHeaderSupportsImageInput)), "true"),
 	}
 }
 

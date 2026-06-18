@@ -9,6 +9,9 @@ import (
 	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
+
+	"github.com/memohai/memoh/internal/agent/sessionmode"
+	"github.com/memohai/memoh/internal/agent/tools/internal/toolset"
 )
 
 // SkillDetail holds the description and content of a loadable skill.
@@ -71,20 +74,29 @@ type StreamEmitter func(ToolStreamEvent)
 
 // SessionContext carries request-scoped identity for tool execution.
 type SessionContext struct {
-	BotID              string
-	ChatID             string
-	SessionID          string
-	SessionType        string
-	ChannelIdentityID  string
-	SessionToken       string //nolint:gosec // carries session credential material at runtime
-	CurrentPlatform    string
-	ReplyTarget        string
-	ConversationType   string
-	SupportsImageInput bool
-	IsSubagent         bool
-	Skills             map[string]SkillDetail
-	TimezoneLocation   *time.Location
-	Emitter            StreamEmitter
+	BotID               string
+	ChatID              string
+	SessionID           string
+	SessionType         string
+	ChannelIdentityID   string
+	SessionToken        string //nolint:gosec // carries session credential material at runtime
+	CurrentPlatform     string
+	ReplyTarget         string
+	ConversationType    string
+	CanRequestUserInput bool
+	CanListUserInput    bool
+	SupportsImageInput  bool
+	IsSubagent          bool
+	Skills              map[string]SkillDetail
+	TimezoneLocation    *time.Location
+	Emitter             StreamEmitter
+	LiveStream          bool
+}
+
+// CanAskUser reports whether ask_user can be both shown to the model and
+// delivered to the user in this run.
+func (s SessionContext) CanAskUser() bool {
+	return s.CanRequestUserInput && sessionmode.IsInteractive(s.SessionType)
 }
 
 // IsSameConversation reports whether the given platform+target pair refers to
@@ -103,6 +115,35 @@ func (s SessionContext) IsSameConversation(platform, target string) bool {
 		target == strings.TrimSpace(s.ReplyTarget)
 }
 
+// CanOmitMessagingTarget reports whether messaging tools can safely default to
+// the current conversation. Background sessions may have no live reply target,
+// so their usage guidance should ask for explicit platform/target instead.
+func (s SessionContext) CanOmitMessagingTarget() bool {
+	switch s.SessionType {
+	case sessionmode.Heartbeat, sessionmode.Schedule, sessionmode.BackgroundDelivery:
+		return false
+	default:
+		return strings.TrimSpace(s.CurrentPlatform) != "" &&
+			strings.TrimSpace(s.ReplyTarget) != ""
+	}
+}
+
+// CanUseLocalMessagingShortcut reports whether current-conversation side
+// effects can be represented by the live agent stream instead of the channel
+// sender. Non-interactive runs must use the real sender even when their target
+// equals the current conversation.
+func (s SessionContext) CanUseLocalMessagingShortcut() bool {
+	if !s.LiveStream || s.Emitter == nil || !s.CanOmitMessagingTarget() {
+		return false
+	}
+	switch s.SessionType {
+	case "", sessionmode.Chat:
+		return true
+	default:
+		return false
+	}
+}
+
 // FormatTime formats a time.Time using the session timezone (falls back to UTC).
 func (s SessionContext) FormatTime(t time.Time) string {
 	if s.TimezoneLocation != nil {
@@ -116,6 +157,60 @@ func (s SessionContext) FormatTime(t time.Time) string {
 // tool sets based on session context (e.g. subagent restrictions, bot settings).
 type ToolProvider interface {
 	Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error)
+}
+
+// AvailableTools is the set of tool names registered for the current session.
+type AvailableTools = toolset.Available
+
+func NewAvailableTools(tools []sdk.Tool) AvailableTools {
+	names := make([]ToolName, 0, len(tools))
+	for _, tool := range tools {
+		name := strings.TrimSpace(tool.Name)
+		if builtIn, ok := lookupBuiltInToolName(name); ok {
+			names = append(names, builtIn)
+		}
+	}
+	return toolset.New(names)
+}
+
+func usageSection(title string, items []string) string {
+	lines := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			lines = append(lines, "- "+item)
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "### " + title + "\n\n" + strings.Join(lines, "\n")
+}
+
+func joinRefs(refs []string, conjunction string) string {
+	switch len(refs) {
+	case 0:
+		return ""
+	case 1:
+		return refs[0]
+	case 2:
+		return refs[0] + " " + strings.TrimSpace(conjunction) + " " + refs[1]
+	default:
+		return strings.Join(refs[:len(refs)-1], ", ") + ", " + strings.TrimSpace(conjunction) + " " + refs[len(refs)-1]
+	}
+}
+
+// ToolUsage is an optional capability a ToolProvider may also implement to
+// contribute group-level usage guidance to the system prompt — how this set of
+// tools is meant to be used together (e.g. "look up a target with get_contacts
+// before messaging another conversation"). The agent injects the returned text
+// only when the same provider actually returns tools for the session, so the
+// guidance shares that provider's gating and stays in lockstep with the tools
+// that provider registers. available contains the complete registered tool set
+// for this session; use available.Ref/Refs before naming cross-provider tools.
+// Return "" to contribute nothing.
+type ToolUsage interface {
+	Usage(ctx context.Context, session SessionContext, available AvailableTools) string
 }
 
 // ---- argument parsing helpers ----

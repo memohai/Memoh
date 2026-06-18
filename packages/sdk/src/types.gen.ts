@@ -2034,6 +2034,7 @@ export type MessageMessageAsset = {
 
 export type ModelsAddRequest = {
     config?: ModelsModelConfig;
+    enable?: boolean;
     model_id?: string;
     name?: string;
     provider_id?: string;
@@ -2051,6 +2052,7 @@ export type ModelsCountResponse = {
 
 export type ModelsGetResponse = {
     config?: ModelsModelConfig;
+    enable?: boolean;
     id?: string;
     model_id?: string;
     name?: string;
@@ -2079,6 +2081,7 @@ export type ModelsTestStatus = 'ok' | 'auth_error' | 'model_not_supported' | 'er
 
 export type ModelsUpdateRequest = {
     config?: ModelsModelConfig;
+    enable?: boolean;
     model_id?: string;
     name?: string;
     provider_id?: string;

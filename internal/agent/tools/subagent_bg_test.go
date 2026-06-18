@@ -286,6 +286,35 @@ func TestAgentControlToolsExposeSingleAgentSurface(t *testing.T) {
 	}
 }
 
+func TestAgentControlToolSchemasDoNotReferenceSiblingTools(t *testing.T) {
+	p, _, _, _ := newAgentControlProvider(t, &fakeSpawnAgent{})
+	tools, err := p.Tools(context.Background(), SessionContext{BotID: "bot1", SessionID: "parent1"})
+	if err != nil {
+		t.Fatalf("Tools failed: %v", err)
+	}
+	for _, tool := range tools {
+		raw, err := json.Marshal(tool.Parameters)
+		if err != nil {
+			t.Fatalf("marshal %s schema: %v", tool.Name, err)
+		}
+		schema := string(raw)
+		switch tool.Name {
+		case ToolSendMessage().String():
+			for _, absent := range []string{ToolSpawnAgent().String(), ToolListAgents().String()} {
+				if strings.Contains(schema, absent) {
+					t.Fatalf("%s schema references sibling tool %s:\n%s", tool.Name, absent, schema)
+				}
+			}
+		case ToolWaitAgent().String():
+			for _, absent := range []string{ToolSpawnAgent().String(), ToolSendMessage().String()} {
+				if strings.Contains(schema, absent) {
+					t.Fatalf("%s schema references sibling tool %s:\n%s", tool.Name, absent, schema)
+				}
+			}
+		}
+	}
+}
+
 func TestSpawnAgentIDsAndDuplicateValidation(t *testing.T) {
 	p, _, _, _ := newAgentControlProvider(t, &fakeSpawnAgent{})
 	session := SessionContext{BotID: "bot1", SessionID: "parent1"}
@@ -302,6 +331,8 @@ func TestSpawnAgentIDsAndDuplicateValidation(t *testing.T) {
 
 	if _, err := executeAgentTool(t, p, session, "spawn_agent", map[string]any{"id": "research_one", "task": "again"}); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("expected duplicate id error, got %v", err)
+	} else if strings.Contains(err.Error(), ToolSendMessage().String()) {
+		t.Fatalf("duplicate id error should not name sibling tools that may be unavailable, got %v", err)
 	}
 	if _, err := executeAgentTool(t, p, session, "spawn_agent", map[string]any{"id": "1bad", "task": "bad"}); err == nil || !strings.Contains(err.Error(), "invalid agent id") {
 		t.Fatalf("expected invalid id error, got %v", err)
@@ -362,6 +393,9 @@ func TestBusyAgentQueuesAndRunsFIFO(t *testing.T) {
 	}))
 	if first["status"] != "background_started" {
 		t.Fatalf("expected background_started, got %v", first)
+	}
+	if msg, _ := first["message"].(string); strings.Contains(msg, "get_background_status") || strings.Contains(msg, "kill_background") {
+		t.Fatalf("background start message should not name tools that may be filtered out, got %q", msg)
 	}
 	second := asMap(t, mustExecuteAgentTool(t, p, session, "send_message", map[string]any{"id": "worker", "message": "second"}))
 	third := asMap(t, mustExecuteAgentTool(t, p, session, "send_message", map[string]any{"id": "worker", "message": "third"}))

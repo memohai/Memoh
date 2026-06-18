@@ -426,6 +426,16 @@ fi
 pnpm dev
 """
 
+[tasks."desktop:dev:remote"]
+description = "Start Electron desktop app in remote dev mode"
+dir = "{{config_root}}/apps/desktop"
+run = """
+#!/bin/bash
+set -euo pipefail
+
+pnpm dev:remote
+"""
+
 [tasks."desktop:qdrant:prepare"]
 description = "Download the Qdrant binary used by the Electron desktop app"
 dir = "{{config_root}}/apps/desktop"

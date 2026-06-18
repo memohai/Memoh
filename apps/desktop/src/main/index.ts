@@ -47,6 +47,7 @@ const LEGACY_REMOTE_PRODUCT_NAME = 'Memoh Online'
 const LEGACY_LOCAL_PRODUCT_NAME = 'Memoh'
 const DESKTOP_PRODUCT_NAME = DESKTOP_RUNTIME_MODE === 'remote' ? ONLINE_PRODUCT_NAME : LOCAL_PRODUCT_NAME
 const DEFAULT_REMOTE_BASE_URL = is.dev ? 'http://localhost:18080' : 'http://localhost:8080'
+const guardedExternalLinkWebContents = new WeakSet<Electron.WebContents>()
 
 interface RemoteProfile {
   baseUrl?: string
@@ -380,10 +381,57 @@ app.on('will-quit', () => {
 })
 
 function applyExternalLinkHandler(window: BrowserWindow): void {
-  window.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+  attachExternalLinkGuards(window.webContents)
+}
+
+function normalizeExternalUrl(rawURL: unknown): { url: string, protocol: string, supported: boolean } {
+  const url = typeof rawURL === 'string' ? rawURL.trim() : ''
+  let protocol = ''
+  try {
+    protocol = new URL(url).protocol
+  } catch {
+    protocol = ''
+  }
+  return {
+    url,
+    protocol,
+    supported: ['http:', 'https:', 'mailto:'].includes(protocol),
+  }
+}
+
+function attachExternalLinkGuards(webContents: Electron.WebContents): void {
+  if (guardedExternalLinkWebContents.has(webContents)) return
+  guardedExternalLinkWebContents.add(webContents)
+
+  webContents.setWindowOpenHandler(({ url }) => {
+    const external = normalizeExternalUrl(url)
+    if (!external.supported) {
+      console.warn('blocked unsupported window.open URL', external.url || url)
+      return { action: 'deny' }
+    }
+    void shell.openExternal(external.url).catch((error) => {
+      console.error('failed to open external URL', external.url, error)
+    })
     return { action: 'deny' }
   })
+
+  webContents.on('will-navigate', (event, url) => {
+    const external = normalizeExternalUrl(url)
+    if (external.protocol === 'about:' || (!external.supported && external.protocol !== 'file:')) {
+      console.warn('blocked unsupported navigation URL', external.url || url)
+      event.preventDefault()
+    }
+  })
+}
+
+async function openExternalUrl(rawURL: unknown): Promise<void> {
+  const external = normalizeExternalUrl(rawURL)
+  if (!external.supported) {
+    const blockedURL = external.url || String(rawURL ?? '')
+    console.warn('blocked unsupported external URL', blockedURL)
+    throw new Error(`Unsupported external URL: ${blockedURL || 'empty URL'}`)
+  }
+  await shell.openExternal(external.url)
 }
 
 function loadRendererEntry(window: BrowserWindow, entry: 'index'): void {
@@ -936,6 +984,7 @@ app.whenReady().then(async () => {
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
+    attachExternalLinkGuards(window.webContents)
   })
 
   createAppTray()
@@ -991,6 +1040,7 @@ app.whenReady().then(async () => {
     }
     await rebuildAppMenu()
   })
+  ipcMain.handle('desktop:open-external-url', (_event, rawURL: unknown) => openExternalUrl(rawURL))
 
   // Cross-window Pinia Colada query-cache invalidation. Each renderer owns
   // an independent in-memory cache (separate Vue/Pinia instances per

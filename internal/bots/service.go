@@ -510,6 +510,17 @@ func (s *Service) runCreateLifecycle(ctx context.Context, botID string) error {
 				slog.String("bot_id", botID),
 				slog.Any("error", err),
 			)
+			if recordErr := s.RecordContainerSetupFailure(lifecycleCtx, botID, "setup", err); recordErr != nil {
+				s.logger.Warn("record bot container setup failure failed",
+					slog.String("bot_id", botID),
+					slog.Any("error", recordErr),
+				)
+			}
+		} else if clearErr := s.ClearContainerSetupFailure(lifecycleCtx, botID); clearErr != nil {
+			s.logger.Warn("clear bot container setup failure failed",
+				slog.String("bot_id", botID),
+				slog.Any("error", clearErr),
+			)
 		}
 	}
 
@@ -777,25 +788,43 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 		return checks, nil
 	}
 
-	checks = append(checks, BotCheck{
+	setupFailure, hasSetupFailure, err := lastContainerSetupFailure(row.Metadata)
+	if err != nil {
+		return nil, err
+	}
+	initCheck := BotCheck{
 		ID:       BotCheckTypeContainerInit,
 		Type:     BotCheckTypeContainerInit,
 		TitleKey: "bots.checks.titles.containerInit",
 		Status:   BotCheckStatusOK,
 		Summary:  "Initialization finished.",
-	})
+	}
+	if hasSetupFailure {
+		initCheck.Status = BotCheckStatusError
+		initCheck.Summary = "Container initialization failed."
+		initCheck.Detail = setupFailure.Message
+		initCheck.Metadata = setupFailure.metadata()
+	}
+	checks = append(checks, initCheck)
 
 	containerRow, err := s.queries.GetContainerByBotID(ctx, row.ID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			checks = append(checks, BotCheck{
+			recordCheck := BotCheck{
 				ID:       BotCheckTypeContainerRecord,
 				Type:     BotCheckTypeContainerRecord,
 				TitleKey: "bots.checks.titles.containerRecord",
 				Status:   BotCheckStatusError,
 				Summary:  "Container record is missing.",
 				Detail:   "No container is attached to this bot.",
-			})
+			}
+			if hasSetupFailure {
+				recordCheck.Status = BotCheckStatusUnknown
+				recordCheck.Summary = "Container record was not created."
+				recordCheck.Detail = "Container record cannot be checked until initialization succeeds."
+				recordCheck.Metadata = setupFailure.metadata()
+			}
+			checks = append(checks, recordCheck)
 			checks = append(checks, BotCheck{
 				ID:       BotCheckTypeContainerTask,
 				Type:     BotCheckTypeContainerTask,

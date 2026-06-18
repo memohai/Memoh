@@ -8,6 +8,7 @@ import {
   deleteModelsById,
   getProvidersByIdModels,
   getProvidersNameByName,
+  putModelsById,
   putProvidersById,
   type ProvidersCreateRequest,
   type ModelsGetResponse,
@@ -255,6 +256,11 @@ export function useProviderSetup(options: {
         path: { id: providerId },
       })
       if (models && models.length > 0) {
+        // Imports land disabled per LobeHub-style policy; onboarding needs at
+        // least one enabled chat model so the next bot step has something to
+        // select. Activate the first chat model we see so the auto-advance
+        // path stays usable; the user can fine-tune the rest later.
+        await ensureFirstChatModelEnabled(models)
         options.onProviderReady()
         return
       }
@@ -264,6 +270,32 @@ export function useProviderSetup(options: {
     }
 
     errorState.value = importFailed ? 'http' : 'noModels'
+  }
+
+  async function ensureFirstChatModelEnabled(models: ModelsGetResponse[]) {
+    if (models.some((m) => m.type === 'chat' && m.enable)) return
+    const target = models.find((m) => m.type === 'chat')
+    if (!target?.id) return
+    try {
+      await putModelsById({
+        path: { id: target.id },
+        body: {
+          model_id: target.model_id,
+          name: target.name,
+          provider_id: target.provider_id,
+          type: target.type,
+          config: target.config,
+          enable: true,
+        },
+        throwOnError: true,
+      })
+      queryCache.invalidateQueries({ key: ['provider-models'] })
+      queryCache.invalidateQueries({ key: ['models'] })
+      queryCache.invalidateQueries({ key: ['all-models'] })
+    } catch {
+      // Non-fatal: the user will still see the model list and can enable
+      // models manually if the auto-activate failed.
+    }
   }
 
   async function saveAndNext() {

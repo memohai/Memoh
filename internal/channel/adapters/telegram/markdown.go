@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tele "gopkg.in/telebot.v4"
 
 	"github.com/memohai/memoh/internal/channel"
 )
@@ -30,7 +30,7 @@ var (
 // Telegram parse mode to use.
 func formatTelegramOutput(text string, format channel.MessageFormat) (string, string) {
 	if format == channel.MessageFormatMarkdown && strings.TrimSpace(text) != "" {
-		return markdownToTelegramHTML(text), tgbotapi.ModeHTML
+		return markdownToTelegramHTML(text), tele.ModeHTML
 	}
 	return text, ""
 }

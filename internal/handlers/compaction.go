@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -187,6 +188,9 @@ func (h *CompactionHandler) buildTriggerConfig(ctx context.Context, botID, sessi
 	compactModel, err := h.modelsService.GetByID(ctx, modelID)
 	if err != nil {
 		return compaction.TriggerConfig{}, err
+	}
+	if !compactModel.Enable {
+		return compaction.TriggerConfig{}, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("compaction model %s is disabled", compactModel.ModelID))
 	}
 	compactProvider, err := models.FetchProviderByID(ctx, h.queries, compactModel.ProviderID)
 	if err != nil {

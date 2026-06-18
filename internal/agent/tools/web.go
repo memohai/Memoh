@@ -54,7 +54,7 @@ func (p *WebProvider) Tools(_ context.Context, session SessionContext) ([]sdk.To
 	sess := session
 	return []sdk.Tool{
 		{
-			Name:        "web_search",
+			Name:        ToolWebSearch().String(),
 			Description: "Search web results via configured search provider.",
 			Parameters: map[string]any{
 				"type": "object",

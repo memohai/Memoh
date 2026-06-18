@@ -52,7 +52,7 @@ func (p *WebFetchProvider) Tools(_ context.Context, session SessionContext) ([]s
 	sess := session
 	return []sdk.Tool{
 		{
-			Name:        "web_fetch",
+			Name:        ToolWebFetch().String(),
 			Description: "Fetch a URL and convert the response to readable content. Supports HTML (converts to Markdown), JSON, XML, and plain text formats.",
 			Parameters: map[string]any{
 				"type": "object",

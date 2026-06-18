@@ -83,7 +83,7 @@ WHERE client_type NOT IN (
 );
 
 -- name: CreateModel :one
-INSERT INTO models (id, model_id, name, provider_id, type, config)
+INSERT INTO models (id, model_id, name, provider_id, type, enable, config)
 VALUES (
   lower(hex(randomblob(4))) || '-' ||
   lower(hex(randomblob(2))) || '-' ||
@@ -94,6 +94,7 @@ VALUES (
   sqlc.arg(name),
   sqlc.arg(provider_id),
   sqlc.arg(type),
+  sqlc.arg(enable),
   sqlc.arg(config)
 )
 RETURNING *;
@@ -145,6 +146,7 @@ SET
   name = sqlc.arg(name),
   provider_id = sqlc.arg(provider_id),
   type = sqlc.arg(type),
+  enable = sqlc.arg(enable),
   config = sqlc.arg(config),
   updated_at = CURRENT_TIMESTAMP
 WHERE id = sqlc.arg(id)
@@ -221,6 +223,7 @@ SELECT m.*
 FROM models m
 JOIN providers p ON m.provider_id = p.id
 WHERE p.enable = true
+  AND m.enable = true
   AND m.type NOT IN ('speech', 'transcription')
 ORDER BY m.created_at DESC;
 
@@ -229,6 +232,7 @@ SELECT m.*
 FROM models m
 JOIN providers p ON m.provider_id = p.id
 WHERE p.enable = true
+  AND m.enable = true
   AND m.type = sqlc.arg(type)
 ORDER BY m.created_at DESC;
 
@@ -237,6 +241,7 @@ SELECT m.*
 FROM models m
 JOIN providers p ON m.provider_id = p.id
 WHERE p.enable = true
+  AND m.enable = true
   AND p.client_type = sqlc.arg(client_type)
 ORDER BY m.created_at DESC;
 
@@ -301,12 +306,14 @@ SELECT m.*,
 FROM models m
 JOIN providers p ON p.id = m.provider_id
 WHERE m.type = 'speech'
+  AND m.enable = true
 ORDER BY m.created_at DESC;
 
 -- name: ListSpeechModelsByProviderID :many
 SELECT * FROM models
 WHERE provider_id = sqlc.arg(provider_id)
   AND type = 'speech'
+  AND enable = true
 ORDER BY created_at DESC;
 
 -- name: GetModelByProviderAndModelID :one
@@ -330,10 +337,12 @@ SELECT m.*,
 FROM models m
 JOIN providers p ON p.id = m.provider_id
 WHERE m.type = 'transcription'
+  AND m.enable = true
 ORDER BY m.created_at DESC;
 
 -- name: ListTranscriptionModelsByProviderID :many
 SELECT * FROM models
 WHERE provider_id = sqlc.arg(provider_id)
   AND type = 'transcription'
+  AND enable = true
 ORDER BY created_at DESC;

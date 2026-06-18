@@ -138,23 +138,28 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 	// The first text_delta lazily creates the text block instead.
 
 	result, err := r.acpPool.Prompt(streamCtx, acpagent.PromptInput{
-		BotID:             req.BotID,
-		ChatID:            req.ChatID,
-		SessionID:         req.SessionID,
-		StreamID:          req.StreamID,
-		RouteID:           req.RouteID,
-		AgentID:           agentID,
-		ProjectPath:       projectPath,
-		Prompt:            req.Query,
-		ChannelIdentityID: req.SourceChannelIdentityID,
-		SessionToken:      req.Token,
-		CurrentPlatform:   req.CurrentChannel,
-		ReplyTarget:       req.ReplyTarget,
-		ConversationType:  req.ConversationType,
-		ToolHTTPURL:       req.ToolHTTPURL,
-		ContextURI:        acpContextURI,
-		ContextMarkdown:   contextMarkdown,
-		Sink:              acpclient.EventSinkFunc(emit),
+		BotID:               req.BotID,
+		ChatID:              req.ChatID,
+		SessionID:           req.SessionID,
+		StreamID:            req.StreamID,
+		RouteID:             req.RouteID,
+		AgentID:             agentID,
+		ProjectPath:         projectPath,
+		Prompt:              req.Query,
+		ChannelIdentityID:   req.SourceChannelIdentityID,
+		SessionToken:        req.Token,
+		CurrentPlatform:     req.CurrentChannel,
+		ReplyTarget:         req.ReplyTarget,
+		ConversationType:    req.ConversationType,
+		CanRequestUserInput: r.canDeliverUserInputWS(eventCh),
+		// ACP/native MCP does not yet have the in-process read-media decoration
+		// path that turns read image bytes into model-native image input. Keep
+		// this false until ACP model capability and image transport are wired.
+		SupportsImageInput: false,
+		ToolHTTPURL:        req.ToolHTTPURL,
+		ContextURI:         acpContextURI,
+		ContextMarkdown:    contextMarkdown,
+		Sink:               acpclient.EventSinkFunc(emit),
 	})
 	if err != nil {
 		r.logger.Error("ACP prompt failed",

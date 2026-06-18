@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"testing"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tele "gopkg.in/telebot.v4"
 
 	"github.com/memohai/memoh/internal/channel"
 )
@@ -74,7 +74,7 @@ func Test_parseTelegramUserInput(t *testing.T) {
 }
 
 func Test_telegramUserToEntry(t *testing.T) {
-	u := &tgbotapi.User{ID: 123, UserName: "alice", FirstName: "Alice", LastName: "Smith"}
+	u := &tele.User{ID: 123, Username: "alice", FirstName: "Alice", LastName: "Smith"}
 	e := telegramUserToEntry(u)
 	if e.Kind != channel.DirectoryEntryUser {
 		t.Errorf("Kind = %q", e.Kind)

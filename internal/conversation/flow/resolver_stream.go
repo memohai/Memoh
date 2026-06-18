@@ -115,6 +115,8 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), streamReq, streamReq.Query)
 
 		cfg := rc.runConfig
+		cfg.LiveToolStream = true
+		cfg.CanRequestUserInput = r.canDeliverUserInputStream()
 		cfg = r.prepareRunConfig(ctx, cfg)
 
 		// Wrap with idle timeout: if no events arrive within the adaptive timeout, cancel the stream.
@@ -282,6 +284,8 @@ func (r *Resolver) StreamChatWS(
 	}()
 
 	cfg := rc.runConfig
+	cfg.LiveToolStream = true
+	cfg.CanRequestUserInput = r.canDeliverUserInputWS(eventCh)
 	cfg = r.prepareRunConfig(streamCtx, cfg)
 
 	// Wrap with idle timeout: if no events arrive within the adaptive timeout, cancel the stream.

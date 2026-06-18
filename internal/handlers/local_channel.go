@@ -733,6 +733,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						ConversationType:        channel.ConversationTypePrivate,
 						Query:                   text,
 						CurrentChannel:          h.channelType.String(),
+						ReplyTarget:             botID,
 						Channels:                []string{h.channelType.String()},
 						Attachments:             ingestedAttachments,
 						Model:                   strings.TrimSpace(msg.ModelID),

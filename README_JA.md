@@ -7,8 +7,8 @@
 <div align="center">
   <img src="./assets/logo.png" alt="Memoh" height="80">
   <h1>Memoh</h1>
-  <p>オープンソースのマルチ Agent プラットフォーム<br>
-  すべての Agent に専用のコンピューター、Desktop、ネットワーク、長期記憶を</p>
+  <p>すべての AI Agent に専用のクラウドコンピューターを。オープンソース。<br>
+  Desktop、Browser、ネットワーク、長期記憶 — ノートパソコンを閉じても Agent は止まりません。</p>
   <div align="center">
     <img src="https://img.shields.io/github/package-json/v/memohai/Memoh" alt="Version" />
     <img src="https://img.shields.io/github/stars/memohai/Memoh?style=social" alt="Stars" />
@@ -21,29 +21,27 @@
     </a>
   </div>
   <h3>
-    <a href="https://memoh.ai/desktop">Memoh Desktop をダウンロード</a> · <a href="#server-にデプロイ">Server にデプロイ</a> · <a href="https://memoh.ai">Website</a> · <a href="https://x.com/memoh_ai">X</a> · <a href="https://docs.memoh.ai">Docs</a>
+    <a href="https://memoh.ai/waitlist">Memoh Cloud</a> · <a href="#server-にデプロイ">Server にデプロイ</a> · <a href="https://docs.memoh.ai">Docs</a> · <a href="https://memoh.ai">Website</a> · <a href="https://x.com/memoh_ai">X</a>
   </h3>
   <img src="./assets/hero.png" alt="Memoh" width="1000">
 </div>
 
-> [!TIP]
-> Memoh の SaaS サービスは近日公開予定です。[memoh.ai/waitlist](https://memoh.ai/waitlist) から waitlist に参加できます。
-
 ## Memoh とは？
 
-Memoh は、1 台のマシン上で複数の AI Agent を動かすためのプラットフォームです。各 Agent には専用の Container、ファイルシステム、Desktop、Browser、ネットワーク、長期記憶が割り当てられます。まるで Agent 専用のコンピューターを持たせるような感覚です。
+Memoh はオープンソースのマルチ Agent プラットフォームです。各 Agent には専用のクラウドコンピューターが割り当てられます — ファイルシステム、Desktop、Browser、ネットワーク、長期記憶を備えた独立 Container です。ノートパソコンを閉じても Agent は 24 時間稼働し続けます。
 
-Telegram、Discord、Lark、WeChat、Web UI などから Agent と会話できます。Agent は文脈を記憶し、Browser を操作し、MCP ツールを呼び出し、スケジュールされたタスクも実行できます。
+Telegram、Discord、Lark、WeChat、Web UI などから Agent と会話できます。セッションやプラットフォームをまたいで文脈を記憶し、Browser を操作し、MCP ツールを呼び出し、スケジュールタスクを実行します。自分用に 1 つ、チームメンバーごとに 1 つ、あるいは複数の Agent をまとめて起動できます。
 
-自分用に 1 つ動かすことも、チームメンバーごとに 1 つずつ割り当てることも、1 台のマシン上で専用 Agent の fleet をまとめて動かすこともできます。
+## はじめに
 
-## Quick Start
+### Memoh Cloud
 
-### Desktop
-
-[Memoh Desktop をダウンロード](https://memoh.ai/desktop)
+> [!TIP]
+> Memoh Cloud は近日公開予定です — セットアップ不要、Agent が cloud 上で 24 時間稼働します。[memoh.ai/waitlist](https://memoh.ai/waitlist) から waitlist に参加できます。
 
 ### Server にデプロイ
+
+自分のインフラにフルスタックをセルフホストできます。
 
 ```bash
 curl -fsSL https://memoh.sh | sh
@@ -72,6 +70,10 @@ docker compose up -d
 カスタム設定や本番環境での構成については [DEPLOYMENT.md](DEPLOYMENT.md) を参照してください。
 
 </details>
+
+### Desktop
+
+macOS、Windows、Linux 向けのネイティブクライアント。[Memoh Desktop をダウンロード](https://memoh.ai/desktop)
 
 ## Memoh を選ぶ理由
 

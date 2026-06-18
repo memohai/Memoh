@@ -3,14 +3,14 @@ package telegram
 import (
 	"testing"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tele "gopkg.in/telebot.v4"
 
 	"github.com/memohai/memoh/internal/channel"
 )
 
 func TestExtractTelegramMessageParts_PlainTextNoEntities(t *testing.T) {
 	t.Parallel()
-	msg := &tgbotapi.Message{Text: "hello world"}
+	msg := &tele.Message{Text: "hello world"}
 	parts := extractTelegramMessageParts(msg)
 	if len(parts) != 0 {
 		t.Fatalf("expected no parts for plain text, got %+v", parts)
@@ -19,10 +19,10 @@ func TestExtractTelegramMessageParts_PlainTextNoEntities(t *testing.T) {
 
 func TestExtractTelegramMessageParts_BoldSpanInMiddle(t *testing.T) {
 	t.Parallel()
-	msg := &tgbotapi.Message{
+	msg := &tele.Message{
 		Text: "hi shout bye",
-		Entities: []tgbotapi.MessageEntity{
-			{Type: "bold", Offset: 3, Length: 5},
+		Entities: tele.Entities{
+			{Type: tele.EntityBold, Offset: 3, Length: 5},
 		},
 	}
 	parts := extractTelegramMessageParts(msg)
@@ -44,20 +44,20 @@ func TestExtractTelegramMessageParts_ItalicStrikeCode(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name   string
-		entity string
+		entity tele.EntityType
 		style  channel.MessageTextStyle
 	}{
-		{"italic", "italic", channel.MessageStyleItalic},
-		{"strikethrough", "strikethrough", channel.MessageStyleStrikethrough},
-		{"inline_code", "code", channel.MessageStyleCode},
+		{"italic", tele.EntityItalic, channel.MessageStyleItalic},
+		{"strikethrough", tele.EntityStrikethrough, channel.MessageStyleStrikethrough},
+		{"inline_code", tele.EntityCode, channel.MessageStyleCode},
 	}
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			msg := &tgbotapi.Message{
+			msg := &tele.Message{
 				Text: "xx",
-				Entities: []tgbotapi.MessageEntity{
+				Entities: tele.Entities{
 					{Type: tc.entity, Offset: 0, Length: 2},
 				},
 			}
@@ -74,10 +74,10 @@ func TestExtractTelegramMessageParts_ItalicStrikeCode(t *testing.T) {
 
 func TestExtractTelegramMessageParts_CodeBlockWithLanguage(t *testing.T) {
 	t.Parallel()
-	msg := &tgbotapi.Message{
+	msg := &tele.Message{
 		Text: "fn main(){}",
-		Entities: []tgbotapi.MessageEntity{
-			{Type: "pre", Offset: 0, Length: 11, Language: "rust"},
+		Entities: tele.Entities{
+			{Type: tele.EntityCodeBlock, Offset: 0, Length: 11, Language: "rust"},
 		},
 	}
 	parts := extractTelegramMessageParts(msg)
@@ -91,10 +91,10 @@ func TestExtractTelegramMessageParts_CodeBlockWithLanguage(t *testing.T) {
 
 func TestExtractTelegramMessageParts_TextLinkWithURL(t *testing.T) {
 	t.Parallel()
-	msg := &tgbotapi.Message{
+	msg := &tele.Message{
 		Text: "see Memoh now",
-		Entities: []tgbotapi.MessageEntity{
-			{Type: "text_link", Offset: 4, Length: 5, URL: "https://example.com"},
+		Entities: tele.Entities{
+			{Type: tele.EntityTextLink, Offset: 4, Length: 5, URL: "https://example.com"},
 		},
 	}
 	parts := extractTelegramMessageParts(msg)
@@ -108,10 +108,10 @@ func TestExtractTelegramMessageParts_TextLinkWithURL(t *testing.T) {
 
 func TestExtractTelegramMessageParts_BareURLEntity(t *testing.T) {
 	t.Parallel()
-	msg := &tgbotapi.Message{
+	msg := &tele.Message{
 		Text: "go https://example.com",
-		Entities: []tgbotapi.MessageEntity{
-			{Type: "url", Offset: 3, Length: 19},
+		Entities: tele.Entities{
+			{Type: tele.EntityURL, Offset: 3, Length: 19},
 		},
 	}
 	parts := extractTelegramMessageParts(msg)
@@ -125,10 +125,10 @@ func TestExtractTelegramMessageParts_BareURLEntity(t *testing.T) {
 
 func TestExtractTelegramMessageParts_MentionPreserved(t *testing.T) {
 	t.Parallel()
-	msg := &tgbotapi.Message{
+	msg := &tele.Message{
 		Text: "hi @bot ok",
-		Entities: []tgbotapi.MessageEntity{
-			{Type: "mention", Offset: 3, Length: 4},
+		Entities: tele.Entities{
+			{Type: tele.EntityMention, Offset: 3, Length: 4},
 		},
 	}
 	parts := extractTelegramMessageParts(msg)
@@ -142,14 +142,14 @@ func TestExtractTelegramMessageParts_MentionPreserved(t *testing.T) {
 
 func TestExtractTelegramMessageParts_TextMentionCarriesUserMetadata(t *testing.T) {
 	t.Parallel()
-	msg := &tgbotapi.Message{
+	msg := &tele.Message{
 		Text: "hi Alice",
-		Entities: []tgbotapi.MessageEntity{
+		Entities: tele.Entities{
 			{
-				Type:   "text_mention",
+				Type:   tele.EntityTMention,
 				Offset: 3,
 				Length: 5,
-				User:   &tgbotapi.User{ID: 7, FirstName: "Alice", UserName: "ali"},
+				User:   &tele.User{ID: 7, FirstName: "Alice", Username: "ali"},
 			},
 		},
 	}
@@ -183,14 +183,14 @@ func TestExtractTelegramMessageParts_TextMentionPreservesSenderLabel(t *testing.
 	// A text_mention can anchor a profile link onto an arbitrary label such as
 	// "the reviewer". The displayed slice is what the LLM should see, not the
 	// linked profile's first name.
-	msg := &tgbotapi.Message{
+	msg := &tele.Message{
 		Text: "ask the reviewer please",
-		Entities: []tgbotapi.MessageEntity{
+		Entities: tele.Entities{
 			{
-				Type:   "text_mention",
+				Type:   tele.EntityTMention,
 				Offset: 4,
 				Length: 12,
-				User:   &tgbotapi.User{ID: 42, FirstName: "Alice", UserName: "ali"},
+				User:   &tele.User{ID: 42, FirstName: "Alice", Username: "ali"},
 			},
 		},
 	}
@@ -215,10 +215,10 @@ func TestExtractTelegramMessageParts_TextMentionPreservesSenderLabel(t *testing.
 
 func TestExtractTelegramMessageParts_UnsupportedEntityKeepsTextAsPlain(t *testing.T) {
 	t.Parallel()
-	msg := &tgbotapi.Message{
+	msg := &tele.Message{
 		Text: "see #news today",
-		Entities: []tgbotapi.MessageEntity{
-			{Type: "hashtag", Offset: 4, Length: 5},
+		Entities: tele.Entities{
+			{Type: tele.EntityHashtag, Offset: 4, Length: 5},
 		},
 	}
 	parts := extractTelegramMessageParts(msg)
@@ -229,11 +229,11 @@ func TestExtractTelegramMessageParts_UnsupportedEntityKeepsTextAsPlain(t *testin
 
 func TestExtractTelegramMessageParts_OverlappingEntityDropped(t *testing.T) {
 	t.Parallel()
-	msg := &tgbotapi.Message{
+	msg := &tele.Message{
 		Text: "bold italic",
-		Entities: []tgbotapi.MessageEntity{
-			{Type: "bold", Offset: 0, Length: 11},
-			{Type: "italic", Offset: 5, Length: 6},
+		Entities: tele.Entities{
+			{Type: tele.EntityBold, Offset: 0, Length: 11},
+			{Type: tele.EntityItalic, Offset: 5, Length: 6},
 		},
 	}
 	parts := extractTelegramMessageParts(msg)
@@ -247,10 +247,10 @@ func TestExtractTelegramMessageParts_OverlappingEntityDropped(t *testing.T) {
 
 func TestExtractTelegramMessageParts_UsesCaptionAndCaptionEntities(t *testing.T) {
 	t.Parallel()
-	msg := &tgbotapi.Message{
+	msg := &tele.Message{
 		Caption: "x y",
-		CaptionEntities: []tgbotapi.MessageEntity{
-			{Type: "bold", Offset: 0, Length: 1},
+		CaptionEntities: tele.Entities{
+			{Type: tele.EntityBold, Offset: 0, Length: 1},
 		},
 	}
 	parts := extractTelegramMessageParts(msg)
@@ -267,10 +267,10 @@ func TestExtractTelegramMessageParts_HonorsUTF16OffsetsForBMP(t *testing.T) {
 	// CJK characters live in the BMP, so one UTF-16 code unit equals one rune;
 	// the offsets line up under either indexing strategy. The supplementary-plane
 	// case is covered separately below.
-	msg := &tgbotapi.Message{
+	msg := &tele.Message{
 		Text: "你好 world",
-		Entities: []tgbotapi.MessageEntity{
-			{Type: "bold", Offset: 3, Length: 5},
+		Entities: tele.Entities{
+			{Type: tele.EntityBold, Offset: 3, Length: 5},
 		},
 	}
 	parts := extractTelegramMessageParts(msg)
@@ -291,11 +291,11 @@ func TestExtractTelegramMessageParts_HandlesSupplementaryPlaneEmoji(t *testing.T
 	// single rune in Go. Telegram entity offsets are documented as UTF-16 code
 	// units; rune-based slicing would drift by 1 after each supplementary-plane
 	// character.
-	msg := &tgbotapi.Message{
+	msg := &tele.Message{
 		Text: "see 🎉 bold here",
-		Entities: []tgbotapi.MessageEntity{
+		Entities: tele.Entities{
 			// "bold" begins at UTF-16 index 7: "see "(0-3) + 🎉(4-5) + " "(6) + "bold"(7-10).
-			{Type: "bold", Offset: 7, Length: 4},
+			{Type: tele.EntityBold, Offset: 7, Length: 4},
 		},
 	}
 	parts := extractTelegramMessageParts(msg)
@@ -321,11 +321,11 @@ func TestExtractTelegramMessageParts_NestedLinkInsideBold(t *testing.T) {
 	// Splitting the outer around the inner keeps the URL discoverable; the
 	// flat MessagePart schema can't carry both bold and link at the same
 	// position, so the link span itself appears without the bold style.
-	msg := &tgbotapi.Message{
+	msg := &tele.Message{
 		Text: "Check this out",
-		Entities: []tgbotapi.MessageEntity{
-			{Type: "bold", Offset: 0, Length: 14},
-			{Type: "text_link", Offset: 6, Length: 4, URL: "https://example.com"},
+		Entities: tele.Entities{
+			{Type: tele.EntityBold, Offset: 0, Length: 14},
+			{Type: tele.EntityTextLink, Offset: 6, Length: 4, URL: "https://example.com"},
 		},
 	}
 	parts := extractTelegramMessageParts(msg)
@@ -349,11 +349,11 @@ func TestExtractTelegramMessageParts_LinkCoextensiveWithStyle(t *testing.T) {
 	// The equality exclusion in the parent-search pre-pass treated those as
 	// "not nested", so the structural entity (text_link) was dropped by the
 	// main loop's cursor guard and the URL never reached the LLM.
-	msg := &tgbotapi.Message{
+	msg := &tele.Message{
 		Text: "click here",
-		Entities: []tgbotapi.MessageEntity{
-			{Type: "bold", Offset: 0, Length: 10},
-			{Type: "text_link", Offset: 0, Length: 10, URL: "https://example.com"},
+		Entities: tele.Entities{
+			{Type: tele.EntityBold, Offset: 0, Length: 10},
+			{Type: tele.EntityTextLink, Offset: 0, Length: 10, URL: "https://example.com"},
 		},
 	}
 	parts := extractTelegramMessageParts(msg)
@@ -376,11 +376,11 @@ func TestExtractTelegramMessageParts_NestedMentionInsideStyle(t *testing.T) {
 	t.Parallel()
 	// Same shape but with a text_mention nested in italic; identity must
 	// reach the LLM even though the italic span covers the mention.
-	msg := &tgbotapi.Message{
+	msg := &tele.Message{
 		Text: "hi Alice ok",
-		Entities: []tgbotapi.MessageEntity{
-			{Type: "italic", Offset: 0, Length: 11},
-			{Type: "text_mention", Offset: 3, Length: 5, User: &tgbotapi.User{ID: 7, FirstName: "Alice"}},
+		Entities: tele.Entities{
+			{Type: tele.EntityItalic, Offset: 0, Length: 11},
+			{Type: tele.EntityTMention, Offset: 3, Length: 5, User: &tele.User{ID: 7, FirstName: "Alice"}},
 		},
 	}
 	parts := extractTelegramMessageParts(msg)

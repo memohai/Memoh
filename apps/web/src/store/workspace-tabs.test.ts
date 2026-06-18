@@ -12,9 +12,14 @@ vi.mock('@/store/chat-list', () => ({
   useChatStore: () => ({
     sessionId: null,
     sessions: [],
+    activeSession: null,
     bots: [
       {
         id: 'bot-1',
+        current_user_permissions: ['manage', 'workspace_exec', 'workspace_read'],
+      },
+      {
+        id: 'bot-without-layout',
         current_user_permissions: ['manage', 'workspace_exec', 'workspace_read'],
       },
     ],
@@ -150,9 +155,31 @@ function createFakeDock() {
     toJSON() {
       return { fake: true }
     },
-    fromJSON() {},
+    fromJSON(data?: {
+      panels?: Record<string, {
+        id?: string
+        contentComponent?: string
+        title?: string
+        params?: Record<string, unknown>
+      }>
+    }) {
+      dock.clear()
+      for (const [id, panel] of Object.entries(data?.panels ?? {})) {
+        dock.addPanel({
+          id: panel.id ?? id,
+          component: panel.contentComponent ?? 'unknown',
+          title: panel.title,
+          params: panel.params,
+        })
+      }
+    },
   }
   return dock
+}
+
+async function flushDraftChatFallback() {
+  await nextTick()
+  await new Promise(resolve => setTimeout(resolve, 0))
 }
 
 describe('workspace layout store', () => {
@@ -251,12 +278,40 @@ describe('workspace layout store', () => {
     store.openTerminal()
     store.closeTab('terminal:1')
 
-    await nextTick()
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await flushDraftChatFallback()
 
     expect(chatStoreMock.createNewSession).toHaveBeenCalledOnce()
     expect(dock.panels).toHaveLength(1)
     expect(dock.getPanel('chat')?.component).toBe('chat')
+  })
+
+  it('opens a draft chat when switching to a bot without a saved layout', async () => {
+    const selection = useChatSelectionStore()
+    selection.setBot(null)
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    expect(dock.panels).toHaveLength(0)
+
+    selection.setBot('bot-without-layout')
+    await flushDraftChatFallback()
+
+    expect(chatStoreMock.createNewSession).toHaveBeenCalledOnce()
+    expect(dock.panels).toHaveLength(1)
+    expect(dock.getPanel('chat')?.component).toBe('chat')
+    expect(dock.getPanel('chat')?.title).toBe('New Session')
+  })
+
+  it('sets a fallback title when focusing an existing blank chat tab', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    dock.addPanel({ id: 'chat', component: 'chat', title: '' })
+    store.openChat()
+
+    expect(dock.getPanel('chat')?.title).toBe('New Session')
   })
 
   it('splits the chat panel into a duplicate chat pane', () => {

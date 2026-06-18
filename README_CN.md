@@ -7,8 +7,8 @@
 <div align="center">
   <img src="./assets/logo.png" alt="Memoh" height="80">
   <h1>Memoh</h1>
-  <p>开源的多智能体平台<br>
-  每个 Agent 都拥有独立的电脑、桌面、网络与长期记忆</p>
+  <p>给每个 AI Agent 一台云端电脑，开源<br>
+  桌面、浏览器、网络与长期记忆 — 即使关上笔记本，Agent 也不会停</p>
   <div align="center">
     <img src="https://img.shields.io/github/package-json/v/memohai/Memoh" alt="Version" />
     <img src="https://img.shields.io/github/stars/memohai/Memoh?style=social" alt="Stars" />
@@ -21,29 +21,27 @@
     </a>
   </div>
   <h3>
-    <a href="https://memoh.ai/desktop">下载 Memoh Desktop</a> · <a href="#部署到服务器">部署到服务器</a> · <a href="https://memoh.ai">官网</a> · <a href="https://x.com/memoh_ai">X</a> · <a href="https://docs.memoh.ai">文档</a>
+    <a href="https://memoh.ai/waitlist">Memoh Cloud</a> · <a href="#部署到服务器">部署到服务器</a> · <a href="https://docs.memoh.ai">文档</a> · <a href="https://memoh.ai">官网</a> · <a href="https://x.com/memoh_ai">X</a>
   </h3>
   <img src="./assets/hero.png" alt="Memoh" width="1000">
 </div>
 
-> [!TIP]
-> Memoh 的 SaaS 服务即将上线，欢迎在 [memoh.ai/waitlist](https://memoh.ai/waitlist) 加入 waitlist。
-
 ## Memoh 是什么？
 
-Memoh 让你在一台机器上运行多个 AI Agent。每个 Agent 都拥有独立的容器环境、文件系统、桌面、浏览器、网络和长期记忆，像一台真正属于它的电脑。
+Memoh 是一个开源的多智能体平台。每个 Agent 都有一台自己的云端电脑 — 独立的容器环境，配有文件系统、桌面、浏览器、网络和长期记忆。你的 Agent 全天候在线，即使关上笔记本也不会停。
 
-你可以通过 Telegram、Discord、飞书、微信、Web UI 等渠道和它们对话；它们可以记住上下文、操作浏览器、调用 MCP 工具、执行定时任务。
+通过 Telegram、Discord、飞书、微信、Web UI 等渠道与它们对话。它们能跨会话、跨平台记住上下文，操作浏览器，调用 MCP 工具，执行定时任务。给自己跑一个，给团队成员各分配一个，或一次拉起一组。
 
-给自己跑一个，给团队成员各分配一个，或在一台机器上同时运行一组专用 Agent。
+## 开始使用
 
-## 快速开始
+### Memoh Cloud
 
-### Desktop
-
-[下载 Memoh Desktop](https://memoh.ai/desktop)
+> [!TIP]
+> Memoh Cloud 即将上线 — 零配置、Agent 全天候运行在云端。在 [memoh.ai/waitlist](https://memoh.ai/waitlist) 加入等待列表。
 
 ### 部署到服务器
+
+在自己的基础设施上自托管完整服务。
 
 ```bash
 curl -fsSL https://memoh.sh | sh
@@ -70,6 +68,10 @@ docker compose up -d
 自定义与生产环境见 [DEPLOYMENT.md](DEPLOYMENT.md)。
 
 </details>
+
+### Desktop
+
+macOS、Windows、Linux 原生客户端。[下载 Memoh Desktop](https://memoh.ai/desktop)
 
 ## 为什么选 Memoh？
 

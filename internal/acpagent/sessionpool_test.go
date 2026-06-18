@@ -440,7 +440,7 @@ func TestSessionPoolOwnedGateHasZeroSideEffectsAcrossBots(t *testing.T) {
 	if err := pool.BindRuntime("bot-1", foreign.id, "my-session", acpprofile.AgentCodexID, "/data"); !errors.Is(err, ErrRuntimeNotFound) {
 		t.Fatalf("BindRuntime(cross bot) error = %v, want ErrRuntimeNotFound", err)
 	}
-	if _, ok := pool.ResolveRuntimeToolContext("bot-1", foreign.id); ok {
+	if _, ok := pool.ResolveRuntimeToolContext("bot-1", foreign.id, "runtime-token-1"); ok {
 		t.Fatalf("ResolveRuntimeToolContext(cross bot) resolved")
 	}
 
@@ -1156,7 +1156,7 @@ func TestSessionPoolBakesOnlyStableRuntimeIdentity(t *testing.T) {
 	// per-prompt fields (stream, token, reply target...) change every turn
 	// and are resolved live from the handle instead.
 	baked := runner.req.ToolSession
-	if baked.BotID != "bot-1" || !strings.HasPrefix(baked.RuntimeID, runtimeIDPrefix) || baked.SessionType != sessionpkg.TypeACPAgent {
+	if baked.BotID != "bot-1" || !strings.HasPrefix(baked.RuntimeID, runtimeIDPrefix) || baked.RuntimeToken == "" || baked.SessionType != sessionpkg.TypeACPAgent {
 		t.Fatalf("baked identity = %#v, want stable runtime identity", baked)
 	}
 	if baked.SessionID != "" || baked.StreamID != "" || baked.SessionToken != "" || baked.ReplyTarget != "" || baked.RouteID != "" || baked.ChannelIdentityID != "" {
@@ -1216,16 +1216,20 @@ func TestRuntimeHandleToolContextOverlaysActivePrompt(t *testing.T) {
 	if ctx.RuntimeActive {
 		t.Fatalf("idle tool context must not allow tools/call: %#v", ctx)
 	}
+	if ctx.CanListUserInput || ctx.CanRequestUserInput {
+		t.Fatalf("idle tool context must not expose user input tools: %#v", ctx)
+	}
 
 	// During a prompt the live per-prompt fields overlay.
 	active := acpclient.ToolSessionContext{
-		ChatID:           "chat-1",
-		SessionID:        "session-1",
-		StreamID:         "stream-7",
-		SessionToken:     "token-7",
-		CurrentPlatform:  "web",
-		ReplyTarget:      "reply-7",
-		ConversationType: "private",
+		ChatID:             "chat-1",
+		SessionID:          "session-1",
+		StreamID:           "stream-7",
+		SessionToken:       "token-7",
+		CurrentPlatform:    "web",
+		ReplyTarget:        "reply-7",
+		ConversationType:   "private",
+		SupportsImageInput: true,
 	}
 	h.state.Lock()
 	h.active = &active
@@ -1234,14 +1238,20 @@ func TestRuntimeHandleToolContextOverlaysActivePrompt(t *testing.T) {
 	if ctx.StreamID != "stream-7" || ctx.SessionToken != "token-7" || ctx.ChatID != "chat-1" || ctx.ReplyTarget != "reply-7" || !ctx.RuntimeActive {
 		t.Fatalf("active tool context = %#v", ctx)
 	}
+	if !ctx.CanListUserInput {
+		t.Fatalf("active tool context must expose listable user input tools: %#v", ctx)
+	}
 	if ctx.RuntimeID != "rt_test" || ctx.IsSubagent {
 		t.Fatalf("active tool context lost stable identity: %#v", ctx)
+	}
+	if !ctx.SupportsImageInput {
+		t.Fatalf("active tool context lost image capability: %#v", ctx)
 	}
 
 	// clearActive removes every per-prompt field again.
 	h.clearActive()
 	ctx = h.toolContext()
-	if ctx.StreamID != "" || ctx.SessionToken != "" || ctx.ChatID != "bot-1" || ctx.RuntimeActive {
+	if ctx.StreamID != "" || ctx.SessionToken != "" || ctx.ChatID != "bot-1" || ctx.RuntimeActive || ctx.SupportsImageInput || ctx.CanListUserInput {
 		t.Fatalf("cleared tool context = %#v", ctx)
 	}
 }
@@ -1250,6 +1260,7 @@ func TestSessionPoolResolveRuntimeToolContext(t *testing.T) {
 	pool := newSessionPool(nil, nil, nil)
 	h := &runtimeHandle{
 		id:           "rt_live",
+		toolToken:    "runtime-token-1",
 		botID:        "bot-1",
 		boundSession: "session-1",
 		status:       stateIdle,
@@ -1257,21 +1268,24 @@ func TestSessionPoolResolveRuntimeToolContext(t *testing.T) {
 	}
 	injectRuntime(pool, h)
 
-	ctx, ok := pool.ResolveRuntimeToolContext("bot-1", "rt_live")
+	ctx, ok := pool.ResolveRuntimeToolContext("bot-1", "rt_live", "runtime-token-1")
 	if !ok || ctx.RuntimeID != "rt_live" || ctx.SessionID != "session-1" {
 		t.Fatalf("ResolveRuntimeToolContext() = %#v, %v", ctx, ok)
 	}
-	if _, ok := pool.ResolveRuntimeToolContext("bot-2", "rt_live"); ok {
+	if _, ok := pool.ResolveRuntimeToolContext("bot-1", "rt_live", "wrong-token"); ok {
+		t.Fatalf("runtime context resolved with wrong token")
+	}
+	if _, ok := pool.ResolveRuntimeToolContext("bot-2", "rt_live", "runtime-token-1"); ok {
 		t.Fatalf("cross-bot runtime context resolved")
 	}
-	if _, ok := pool.ResolveRuntimeToolContext("bot-1", "rt_missing"); ok {
+	if _, ok := pool.ResolveRuntimeToolContext("bot-1", "rt_missing", "runtime-token-1"); ok {
 		t.Fatalf("missing runtime context resolved")
 	}
 
 	h.state.Lock()
 	h.closed = true
 	h.state.Unlock()
-	if _, ok := pool.ResolveRuntimeToolContext("bot-1", "rt_live"); ok {
+	if _, ok := pool.ResolveRuntimeToolContext("bot-1", "rt_live", "runtime-token-1"); ok {
 		t.Fatalf("dead runtime context resolved; must fail closed")
 	}
 }

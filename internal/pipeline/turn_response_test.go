@@ -89,6 +89,51 @@ func TestDecodeTurnResponseEntryPreservesToolCallOnlyPayload(t *testing.T) {
 	}
 }
 
+func TestDecodeTurnResponseEntryPreservesToolCallProviderMetadata(t *testing.T) {
+	t.Parallel()
+
+	content, err := json.Marshal([]map[string]any{
+		{
+			"type":       "tool-call",
+			"toolName":   "read",
+			"toolCallId": "call-1",
+			"input":      map[string]any{"path": "/tmp/a.txt"},
+			"providerMetadata": map[string]any{
+				"google": map[string]any{"thoughtSignature": "sig-1"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal content: %v", err)
+	}
+
+	modelMessage, err := json.Marshal(conversation.ModelMessage{
+		Role:    "assistant",
+		Content: content,
+	})
+	if err != nil {
+		t.Fatalf("marshal model message: %v", err)
+	}
+
+	entry, ok := DecodeTurnResponseEntry(messagepkg.Message{
+		Role:      "assistant",
+		Content:   modelMessage,
+		CreatedAt: time.Unix(1710000000, 0).UTC(),
+	})
+	if !ok {
+		t.Fatal("expected turn response entry")
+	}
+	part := assertRawPart(t, entry.RawContent, "tool-call", "read", "call-1")
+	meta, ok := part["providerMetadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("providerMetadata = %#v, want map", part["providerMetadata"])
+	}
+	google, ok := meta["google"].(map[string]any)
+	if !ok || google["thoughtSignature"] != "sig-1" {
+		t.Fatalf("google metadata = %#v, want thought signature", meta["google"])
+	}
+}
+
 func TestDecodeTurnResponseEntryRendersTextAndToolCall(t *testing.T) {
 	t.Parallel()
 

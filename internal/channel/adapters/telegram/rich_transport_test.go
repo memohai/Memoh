@@ -3,10 +3,9 @@ package telegram
 import (
 	"encoding/json"
 	"net/http"
-	"net/url"
 	"testing"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tele "gopkg.in/telebot.v4"
 )
 
 type telegramRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -15,25 +14,40 @@ func (f telegramRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, err
 	return f(req)
 }
 
-func newTestTelegramBot(transport http.RoundTripper) *tgbotapi.BotAPI {
-	bot := &tgbotapi.BotAPI{
-		Token:  "fake",
-		Client: &http.Client{Transport: transport},
+func newTestTelegramBot(transport http.RoundTripper) *tele.Bot {
+	bot, err := tele.NewBot(tele.Settings{
+		Token:   "fake",
+		URL:     "https://api.telegram.test",
+		Client:  &http.Client{Transport: transport},
+		Offline: true,
+	})
+	if err != nil {
+		panic(err)
 	}
-	bot.SetAPIEndpoint("https://api.telegram.test/bot%s/%s")
 	return bot
 }
 
-func telegramRichHTMLFromForm(t *testing.T, form url.Values) string {
+// decodeTelegramBody parses a JSON request body sent by telebot's Raw() API
+// into a map for field-level assertions.
+func decodeTelegramBody(t *testing.T, body []byte) map[string]any {
 	t.Helper()
-
-	raw := form.Get("rich_message")
-	if raw == "" {
-		t.Fatalf("expected rich_message in form: %v", form)
+	payload := map[string]any{}
+	if len(body) == 0 {
+		return payload
 	}
-	var rich map[string]any
-	if err := json.Unmarshal([]byte(raw), &rich); err != nil {
-		t.Fatalf("decode rich_message: %v (raw=%q)", err, raw)
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("parse body: %v (raw=%q)", err, string(body))
+	}
+	return payload
+}
+
+// telegramRichHTMLFromBody decodes a JSON request body sent by telebot's Raw()
+// API and returns the rich_message.html field for assertions.
+func telegramRichHTMLFromBody(t *testing.T, body map[string]any) string {
+	t.Helper()
+	rich, ok := body["rich_message"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected rich_message object in body: %#v", body)
 	}
 	html, _ := rich["html"].(string)
 	if html == "" {

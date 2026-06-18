@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
@@ -23,7 +24,7 @@ func decorateReadMediaTools(model *sdk.Model, tools []sdk.Tool) ([]sdk.Tool, *re
 	found := false
 
 	for _, tool := range tools {
-		if tool.Name != agenttools.ReadMediaToolName || tool.Execute == nil {
+		if tool.Name != agenttools.ReadMediaToolName().String() || tool.Execute == nil {
 			wrapped = append(wrapped, tool)
 			continue
 		}
@@ -42,10 +43,12 @@ func decorateReadMediaTools(model *sdk.Model, tools []sdk.Tool) ([]sdk.Tool, *re
 				return output, nil
 			}
 			if ctx != nil && strings.TrimSpace(ctx.ToolCallID) != "" && strings.TrimSpace(image.Image) != "" {
+				state.mu.Lock()
 				if _, exists := state.pendingImages[ctx.ToolCallID]; !exists {
 					state.pendingOrder = append(state.pendingOrder, ctx.ToolCallID)
 				}
 				state.pendingImages[ctx.ToolCallID] = image
+				state.mu.Unlock()
 			}
 			return publicResult, nil
 		}
@@ -60,6 +63,7 @@ func decorateReadMediaTools(model *sdk.Model, tools []sdk.Tool) ([]sdk.Tool, *re
 }
 
 type readMediaDecorationState struct {
+	mu            sync.Mutex
 	pendingOrder  []string
 	pendingImages map[string]sdk.ImagePart
 	prepareCalls  int
@@ -79,6 +83,8 @@ func (s *readMediaDecorationState) prepareStep(params *sdk.GenerateParams) *sdk.
 	afterStep := s.prepareCalls
 	s.prepareCalls++
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if len(s.pendingOrder) == 0 {
 		return nil
 	}
@@ -152,6 +158,14 @@ func normalizeReadMediaOutput(output any, clientType string) (any, sdk.ImagePart
 	default:
 		return nil, sdk.ImagePart{}, false
 	}
+}
+
+func publicReadMediaToolResult(output any) any {
+	publicResult, _, ok := normalizeReadMediaOutput(output, "")
+	if !ok {
+		return output
+	}
+	return publicResult
 }
 
 func buildReadMediaImagePart(clientType, imageBase64, mediaType string) sdk.ImagePart {

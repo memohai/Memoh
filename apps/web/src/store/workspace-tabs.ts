@@ -30,6 +30,8 @@ export const CHAT_PANEL_ID = 'chat'
 export const TERMINAL_TAB_COMPONENT = 'terminalTab'
 
 const DEFAULT_BROWSER_ADDRESS = 'localhost:5173/'
+const DEFAULT_CHAT_TITLE = 'New Session'
+const DEFAULT_UNTITLED_SESSION_TITLE = 'Untitled Session'
 
 // Default share of the editor height the bottom terminal panel claims when it
 // first splits off below the chat. ~1/3 mirrors VS Code's editor:panel ratio
@@ -235,10 +237,63 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     (panel as { api?: { setActive?: () => void } }).api?.setActive?.()
   }
 
+  function numberedFallbackTitle(prefix: string, id: string): string {
+    const suffix = id.split(':')[1]?.trim()
+    return suffix ? `${prefix} ${suffix}` : prefix
+  }
+
+  function chatTitleFallback(): string {
+    if (!(sessionId.value ?? '').trim()) return DEFAULT_CHAT_TITLE
+    return (chatStore.activeSession?.title ?? '').trim() || DEFAULT_UNTITLED_SESSION_TITLE
+  }
+
+  function panelTitleFallback(panel: { id: string, params?: Record<string, unknown> }): string {
+    const params = panel.params ?? {}
+    switch (panelComponentOf(panel.id)) {
+      case 'chat':
+        return chatTitleFallback()
+      case 'file':
+        return fileBaseName(panel.id.slice('file:'.length))
+      case 'preview':
+        return fileBaseName(panel.id.slice('preview:'.length))
+      case 'asset': {
+        const name = params.name
+        return typeof name === 'string' && name.trim() ? name.trim() : 'file'
+      }
+      case 'terminal':
+        return 'zsh'
+      case 'browser': {
+        const address = params.address
+        return typeof address === 'string' && address.trim()
+          ? address.trim()
+          : numberedFallbackTitle('Browser', panel.id)
+      }
+      case 'display':
+        return numberedFallbackTitle('Desktop', panel.id)
+      case 'schedule':
+        return 'Schedule'
+      default:
+        return panel.id
+    }
+  }
+
+  function repairEmptyPanelTitles(): boolean {
+    const dock = api.value
+    if (!dock) return false
+    let repaired = false
+    for (const panel of dock.panels) {
+      if ((panel.api.title ?? '').trim()) continue
+      panel.api.setTitle(panelTitleFallback(panel))
+      repaired = true
+    }
+    return repaired
+  }
+
   function restoreLayout(botId: string) {
     const dock = api.value
     if (!dock) return
-    let restoredEmptyLayout = false
+    let dockEmptyAfterRestore = false
+    let repairedEmptyTitles = false
     suppressPersist = true
     try {
       const stored = storage.value[botId]?.layout ?? null
@@ -256,11 +311,13 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       prunePanels()
       activePanelId.value = dock.activePanel?.id ?? null
       syncAllTerminalGroupChrome(dock)
-      restoredEmptyLayout = !!stored && dock.panels.length === 0
+      repairedEmptyTitles = repairEmptyPanelTitles()
+      dockEmptyAfterRestore = dock.panels.length === 0
     } finally {
       suppressPersist = false
     }
-    if (restoredEmptyLayout) ensureDraftChatPanel()
+    if (repairedEmptyTitles && !dockEmptyAfterRestore) persistLayout()
+    if (dockEmptyAfterRestore) ensureDraftChatPanel()
   }
 
   function domListener<K extends keyof DocumentEventMap>(
@@ -545,7 +602,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   /** Open or focus the singleton chat panel. Content follows the active session. */
   function openChat(title?: string) {
-    focusOrAdd({ id: CHAT_PANEL_ID, component: 'chat', title: title ?? '' })
+    const panelTitle = title?.trim() || chatTitleFallback()
+    focusOrAdd({ id: CHAT_PANEL_ID, component: 'chat', title: panelTitle })
+    setChatTitle(panelTitle)
   }
 
   function setChatTitle(title: string) {
@@ -581,7 +640,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       const settledDock = api.value
       if (!settledDock || suppressPersist || settledDock.panels.length > 0) return
       if (!(currentBotId.value ?? '').trim()) return
-      openChat('')
+      openChat()
     })
   }
 

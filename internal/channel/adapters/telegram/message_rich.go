@@ -3,7 +3,7 @@ package telegram
 import (
 	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tele "gopkg.in/telebot.v4"
 
 	"github.com/memohai/memoh/internal/channel"
 )
@@ -43,7 +43,7 @@ func renderTelegramPartsFallbackText(msg channel.Message) (string, string) {
 		text := strings.TrimSpace(msg.PlainText())
 		return formatTelegramOutput(text, msg.Format)
 	}
-	return renderTelegramMessagePartsHTMLFallback(msg), tgbotapi.ModeHTML
+	return renderTelegramMessagePartsHTMLFallback(msg), tele.ModeHTML
 }
 
 func renderTelegramMessagePartsHTMLFallback(msg channel.Message) string {

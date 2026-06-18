@@ -295,7 +295,7 @@ func (n Notification) FormatForAgent() string {
 		fmt.Fprintf(&b, "  <output-tail>\n%s\n  </output-tail>\n", strings.TrimRight(n.OutputTail, "\n"))
 	}
 	if n.Stalled {
-		fmt.Fprintf(&b, "  <suggestion>This command appears to be waiting for interactive input. Kill it with kill_background and retry with a non-interactive flag (e.g. -y, --yes, --non-interactive).</suggestion>\n")
+		fmt.Fprintf(&b, "  <suggestion>This command appears to be waiting for interactive input. Kill it with an available background task tool and retry with a non-interactive flag (e.g. -y, --yes, --non-interactive).</suggestion>\n")
 	}
 	fmt.Fprintf(&b, "</task-notification>")
 	return b.String()

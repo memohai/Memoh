@@ -7,8 +7,8 @@
 <div align="center">
   <img src="./assets/logo.png" alt="Memoh" height="80">
   <h1>Memoh</h1>
-  <p>The open-source multi-agent platform.<br>
-  Every agent gets its own computer, desktop, network, and long-term memory.</p>
+  <p>Give every AI agent its own cloud computer. Open source.<br>
+  Desktop, browser, network, and long-term memory — always on, even when your laptop is closed.</p>
   <div align="center">
     <img src="https://img.shields.io/github/package-json/v/memohai/Memoh" alt="Version" />
     <img src="https://img.shields.io/github/stars/memohai/Memoh?style=social" alt="Stars" />
@@ -21,29 +21,27 @@
     </a>
   </div>
   <h3>
-    <a href="https://memoh.ai/desktop">Download Memoh Desktop</a> · <a href="#deploy-to-server">Deploy to Server</a> · <a href="https://memoh.ai">Website</a> · <a href="https://x.com/memoh_ai">X</a> · <a href="https://docs.memoh.ai">Docs</a>
+    <a href="https://memoh.ai/waitlist">Memoh Cloud</a> · <a href="#deploy-to-server">Deploy to Server</a> · <a href="https://docs.memoh.ai">Docs</a> · <a href="https://memoh.ai">Website</a> · <a href="https://x.com/memoh_ai">X</a>
   </h3>
   <img src="./assets/hero.png" alt="Memoh" width="1000">
 </div>
 
-> [!TIP]
-> Memoh's SaaS service is coming soon. Join the waitlist at [memoh.ai/waitlist](https://memoh.ai/waitlist).
-
 ## What is Memoh?
 
-Memoh lets you run multiple AI agents on a single machine. Each agent gets its own container, filesystem, desktop, browser, network, and long-term memory — like a real computer that belongs to it.
+Memoh is an open-source multi-agent platform. Each agent gets its own cloud computer — a dedicated container with a filesystem, desktop, browser, network, and long-term memory. Your agents stay online 24/7, even when your laptop is closed.
 
-Talk to them through Telegram, Discord, Lark, WeChat, Web UI, and more. They remember context, drive a browser, call MCP tools, and run scheduled tasks.
+Talk to them through Telegram, Discord, Lark, WeChat, Web UI, and more. They remember context across sessions and platforms, drive a browser, call MCP tools, and run scheduled tasks. Run one for yourself, assign one to each team member, or spin up a fleet.
 
-Run one for yourself, assign one to each team member, or spin up a fleet of dedicated agents on a single machine.
+## Get Started
 
-## Quick Start
+### Memoh Cloud
 
-### Desktop
-
-[Download Memoh Desktop](https://memoh.ai/desktop)
+> [!TIP]
+> Memoh Cloud is coming soon — zero setup, always-on agents in the cloud. Join the waitlist at [memoh.ai/waitlist](https://memoh.ai/waitlist).
 
 ### Deploy to Server
+
+Self-host the full stack on your own infrastructure.
 
 ```bash
 curl -fsSL https://memoh.sh | sh
@@ -73,6 +71,10 @@ docker compose up -d
 See [DEPLOYMENT.md](DEPLOYMENT.md) for custom configuration and production setup.
 
 </details>
+
+### Desktop
+
+A native client for macOS, Windows, and Linux. [Download Memoh Desktop](https://memoh.ai/desktop)
 
 ## Why Memoh?
 

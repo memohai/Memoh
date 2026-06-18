@@ -23,12 +23,16 @@ belongs in this `main.ts`, not in `@memohai/web`.
 ```bash
 # from repo root
 pnpm --filter @memohai/desktop dev
+pnpm --filter @memohai/desktop dev:remote
 # or via mise
 mise run desktop:dev
+mise run desktop:dev:remote
 ```
 
 `MEMOH_WEB_PROXY_TARGET` overrides the backend that the renderer's `/api` proxy points
 at (defaults to whatever `config.toml` / `conf/app.docker.toml` declares).
+Remote desktop dev defaults to `http://localhost:18080`; override it with
+`MEMOH_DESKTOP_REMOTE_BASE_URL`.
 
 ## Build
 

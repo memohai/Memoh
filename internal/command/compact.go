@@ -85,6 +85,9 @@ func (h *Handler) buildCompactConfig(cc CommandContext, sessionID string) (compa
 	if err != nil {
 		return compaction.TriggerConfig{}, fmt.Errorf("failed to load compaction model: %w", err)
 	}
+	if !compactModel.Enable {
+		return compaction.TriggerConfig{}, fmt.Errorf("compaction model %s is disabled", compactModel.ModelID)
+	}
 	compactProvider, err := models.FetchProviderByID(cc.Ctx, h.sqlcQueries, compactModel.ProviderID)
 	if err != nil {
 		return compaction.TriggerConfig{}, fmt.Errorf("failed to load provider: %w", err)

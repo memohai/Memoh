@@ -122,8 +122,7 @@
                       <Copy class="size-3" />
                     </Button>
                   </div>
-                  <!-- eslint-disable-next-line vue/no-v-html -->
-                  <pre class="max-h-[240px] select-text overflow-x-auto overflow-y-auto whitespace-pre-wrap p-3 font-mono text-[11px] leading-relaxed"><code v-html="highlightCode(item.detail)" /></pre>
+                  <pre class="max-h-[240px] select-text overflow-x-auto overflow-y-auto whitespace-pre-wrap p-3 font-mono text-[11px] leading-relaxed"><code>{{ item.detail }}</code></pre>
                 </div>
               </div>
             </CollapsibleContent>
@@ -220,15 +219,6 @@ function toggleAll(expand: boolean) {
 function copyToClipboard(text: string) {
   navigator.clipboard.writeText(text)
   toast.success(t('common.copied'))
-}
-
-// Lightweight highlighting: flag error/warn words and underline path-like
-// tokens so the raw diagnostic detail is easier to scan.
-function highlightCode(text: string): string {
-  return text
-    .replace(/(error|fail|failed|denied)/gi, '<span class="text-destructive font-bold">$1</span>')
-    .replace(/(warn|warning)/gi, '<span class="text-warning font-bold">$1</span>')
-    .replace(/(\/([^\s/:]+\/)*[^\s/:]+)/g, '<span class="text-foreground underline decoration-muted-foreground/30">$1</span>')
 }
 
 function getStatusIcon(status: BotCheck['status']) {

@@ -79,3 +79,70 @@ func TestScrubBotsForResponseScrubsEachItem(t *testing.T) {
 		}
 	}
 }
+
+func TestScrubBotForResponseRemovesWorkspaceSetupError(t *testing.T) {
+	original := bots.Bot{
+		ID: "bot-1",
+		Metadata: map[string]any{
+			"workspace": map[string]any{
+				"backend":               "container",
+				"image":                 "ghcr.io/memohai/workspace:latest",
+				"last_setup_error":      map[string]any{"message": "pull failed"},
+				"skill_discovery_roots": []any{"/data/skills"},
+			},
+		},
+	}
+
+	resp := scrubBotForResponse(original)
+	workspace, ok := resp.Metadata["workspace"].(map[string]any)
+	if !ok {
+		t.Fatalf("workspace metadata missing: %#v", resp.Metadata)
+	}
+	if _, ok := workspace["last_setup_error"]; ok {
+		t.Fatalf("last_setup_error should be removed from response: %#v", workspace)
+	}
+	if got := workspace["backend"]; got != "container" {
+		t.Fatalf("workspace backend = %#v, want container", got)
+	}
+	if got := workspace["image"]; got != "ghcr.io/memohai/workspace:latest" {
+		t.Fatalf("workspace image = %#v, want preserved image", got)
+	}
+
+	originalWorkspace := original.Metadata["workspace"].(map[string]any)
+	if _, ok := originalWorkspace["last_setup_error"]; !ok {
+		t.Fatalf("original metadata should be left untouched: %#v", originalWorkspace)
+	}
+}
+
+func TestScrubBotChecksForResponseDropsDetailsForNonManage(t *testing.T) {
+	items := []bots.BotCheck{
+		{
+			ID:      bots.BotCheckTypeContainerInit,
+			Status:  bots.BotCheckStatusError,
+			Summary: "Container initialization failed.",
+			Detail:  "registry token leaked",
+			Metadata: map[string]any{
+				"setup_error_phase": "setup",
+			},
+		},
+	}
+
+	resp := scrubBotChecksForResponse(items, false)
+	if len(resp) != 1 {
+		t.Fatalf("response len = %d, want 1", len(resp))
+	}
+	if resp[0].Detail != "" {
+		t.Fatalf("detail = %q, want empty", resp[0].Detail)
+	}
+	if resp[0].Metadata != nil {
+		t.Fatalf("metadata = %#v, want nil", resp[0].Metadata)
+	}
+	if resp[0].Summary != items[0].Summary || resp[0].Status != items[0].Status {
+		t.Fatalf("status/summary should be preserved: %#v", resp[0])
+	}
+
+	manageResp := scrubBotChecksForResponse(items, true)
+	if manageResp[0].Detail != items[0].Detail || manageResp[0].Metadata == nil {
+		t.Fatalf("manage response should preserve detail/metadata: %#v", manageResp[0])
+	}
+}

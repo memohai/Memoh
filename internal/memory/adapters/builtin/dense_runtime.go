@@ -32,6 +32,11 @@ type denseRuntime struct {
 	embedModel *sdk.EmbeddingModel
 	dimensions int
 	collection string
+	// queries + modelRef let each Embed call re-check the model's enable
+	// state. Cached runtimes outlive the model row in the registry, so the
+	// construction-time check alone leaks disabled models until eviction.
+	queries  dbstore.Queries
+	modelRef string
 }
 
 type denseModelSpec struct {
@@ -84,12 +89,44 @@ func newDenseRuntime(providerConfig map[string]any, queries dbstore.Queries, cfg
 		embedModel: embedModel,
 		dimensions: spec.dimensions,
 		collection: collection,
+		queries:    queries,
+		modelRef:   modelRef,
 	}, nil
+}
+
+// ensureEmbeddingEnabled re-resolves the embedding model row and rejects calls
+// when its Enable flag was flipped off after the runtime was cached. One
+// indexed lookup per Embed is cheap relative to the embedding HTTP roundtrip
+// itself.
+func (r *denseRuntime) ensureEmbeddingEnabled(ctx context.Context) error {
+	if r.queries == nil || r.modelRef == "" {
+		return nil
+	}
+	var row dbsqlc.Model
+	if parsed, err := db.ParseUUID(r.modelRef); err == nil {
+		if dbModel, err := r.queries.GetModelByID(ctx, parsed); err == nil {
+			row = dbModel
+		}
+	}
+	if !row.ID.Valid {
+		rows, err := r.queries.ListModelsByModelID(ctx, r.modelRef)
+		if err != nil || len(rows) == 0 {
+			return fmt.Errorf("dense runtime: embedding model not found: %s", r.modelRef)
+		}
+		row = rows[0]
+	}
+	if !row.Enable {
+		return fmt.Errorf("dense runtime: embedding model %s is disabled", r.modelRef)
+	}
+	return nil
 }
 
 // --- embedder helpers using Twilight SDK ---
 
 func (r *denseRuntime) embedQuery(ctx context.Context, text string) ([]float32, error) {
+	if err := r.ensureEmbeddingEnabled(ctx); err != nil {
+		return nil, err
+	}
 	client := sdk.NewClient()
 	vec, err := client.Embed(ctx, text, sdk.WithEmbeddingModel(r.embedModel))
 	if err != nil {
@@ -99,6 +136,9 @@ func (r *denseRuntime) embedQuery(ctx context.Context, text string) ([]float32, 
 }
 
 func (r *denseRuntime) embedDocuments(ctx context.Context, texts []string) ([][]float32, error) {
+	if err := r.ensureEmbeddingEnabled(ctx); err != nil {
+		return nil, err
+	}
 	client := sdk.NewClient()
 	result, err := client.EmbedMany(ctx, texts, sdk.WithEmbeddingModel(r.embedModel))
 	if err != nil {
@@ -114,6 +154,9 @@ func (r *denseRuntime) embedDocuments(ctx context.Context, texts []string) ([][]
 // embedHealth performs a minimal smoke-test embedding to verify that the
 // configured embedding model is reachable and functional.
 func (r *denseRuntime) embedHealth(ctx context.Context) error {
+	if err := r.ensureEmbeddingEnabled(ctx); err != nil {
+		return err
+	}
 	client := sdk.NewClient()
 	_, err := client.Embed(ctx, "health", sdk.WithEmbeddingModel(r.embedModel))
 	if err != nil {
@@ -587,6 +630,9 @@ func resolveDenseEmbeddingModel(ctx context.Context, queries dbstore.Queries, mo
 	}
 	if row.Type != "embedding" {
 		return denseModelSpec{}, fmt.Errorf("dense runtime: model %s is not an embedding model", modelRef)
+	}
+	if !row.Enable {
+		return denseModelSpec{}, fmt.Errorf("dense runtime: embedding model %s is disabled", modelRef)
 	}
 	if !row.ProviderID.Valid {
 		return denseModelSpec{}, fmt.Errorf("dense runtime: model %s has no provider", modelRef)

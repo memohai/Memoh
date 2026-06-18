@@ -38,10 +38,10 @@
     </div>
 
     <!--
-    EXPERIMENT (archived): no Quick Actions heading — New Chat / Bot Settings ride
+    EXPERIMENT (archived): no Quick Actions heading — New Session / Bot Settings ride
     straight up under the Chat nav tab, icons aligned in the same x=19 column.
     The core problem: the Chat tab uses font-[550] and looks like a "header" for
-    whatever is below it, but New Chat / Bot Settings are ACTIONS not sub-items,
+    whatever is below it, but New Session / Bot Settings are ACTIONS not sub-items,
     so they need visual separation. Reducing font weight to font-normal made the
     actions look too faint; keeping font-medium made them read as peers of "Chat".
     There's no in-between that works without the Quick Actions heading providing

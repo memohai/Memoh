@@ -14,10 +14,12 @@ import (
 
 // SessionContext carries request-scoped identity for tool execution.
 type SessionContext struct {
-	BotID           string
-	ChatID          string
-	CurrentPlatform string
-	ReplyTarget     string
+	BotID              string
+	ChatID             string
+	CanOmitTarget      bool
+	AllowLocalShortcut bool
+	CurrentPlatform    string
+	ReplyTarget        string
 }
 
 // Sender sends outbound messages through a channel manager.
@@ -74,6 +76,8 @@ type ReactResult struct {
 	MessageID string
 	Emoji     string
 	Action    string // "added" or "removed"
+	Local     bool
+	Remove    bool
 }
 
 type sendMode struct {
@@ -125,7 +129,10 @@ func (e *Executor) sendWithMode(
 		return nil, err
 	}
 
-	if mode.allowLocalShortcut && plan.sameConv {
+	if mode.allowLocalShortcut && session.AllowLocalShortcut && plan.sameConv {
+		if !localShortcutCanRepresent(plan.message) {
+			return nil, errors.New("send to the current conversation is only for standalone files or attachments; use assistant text for ordinary replies")
+		}
 		return &SendResult{
 			BotID:            plan.botID,
 			Platform:         plan.channelType.String(),
@@ -181,18 +188,22 @@ func (e *Executor) prepareSendPlan(
 		target = firstStringArg(args, "target")
 	}
 	if target == "" {
-		target = strings.TrimSpace(session.ReplyTarget)
+		target = defaultReplyTargetForPlatform(args, session, channelType)
 	}
 
-	sameConv := target == "" || IsSameConversation(session, channelType.String(), target)
 	if mode.requireTarget && target == "" {
 		return nil, errors.New("target is required")
 	}
 	if !mode.allowLocalShortcut && target == "" {
 		return nil, errors.New("target is required for cross-conversation send")
 	}
+	if target == "" {
+		return nil, errors.New("target is required")
+	}
 
-	msg, err := e.buildOutboundMessage(ctx, botID, session, channelType, target, args, sameConv)
+	sameConv := IsSameConversation(session, channelType.String(), target)
+	allowSameConversationShortcut := mode.allowLocalShortcut && session.AllowLocalShortcut && sameConv
+	msg, err := e.buildOutboundMessage(ctx, botID, session, channelType, target, args, allowSameConversationShortcut)
 	if err != nil {
 		return nil, err
 	}
@@ -206,6 +217,15 @@ func (e *Executor) prepareSendPlan(
 	}, nil
 }
 
+func localShortcutCanRepresent(msg channel.Message) bool {
+	return strings.TrimSpace(msg.Text) == "" &&
+		len(msg.Parts) == 0 &&
+		len(msg.Attachments) > 0 &&
+		len(msg.Actions) == 0 &&
+		msg.Reply == nil &&
+		msg.Forward == nil
+}
+
 func (e *Executor) buildOutboundMessage(
 	ctx context.Context,
 	botID string,
@@ -216,14 +236,28 @@ func (e *Executor) buildOutboundMessage(
 	isSameConv bool,
 ) (channel.Message, error) {
 	messageText := firstStringArg(args, "text")
-	outboundMessage, parseErr := ParseOutboundMessage(args, messageText)
+	messageAttachments := messageAttachmentsArg(args)
+	messageArgs := args
+	if messageAttachments != nil {
+		messageArgs = withoutMessageAttachments(args)
+	}
+	outboundMessage, parseErr := ParseOutboundMessage(messageArgs, messageText)
 	if parseErr != nil {
-		if rawAtt, ok := args["attachments"]; !ok || rawAtt == nil {
+		rawAtt, hasTopLevelAttachments := args["attachments"]
+		if (!hasTopLevelAttachments || rawAtt == nil) && messageAttachments == nil {
 			return channel.Message{}, parseErr
 		}
 		outboundMessage = channel.Message{Text: strings.TrimSpace(messageText)}
 	}
 
+	if messageAttachments != nil {
+		outboundMessage.Attachments = nil
+		attachments, err := e.resolveOutboundAttachments(ctx, botID, session, channelType, target, messageAttachments, isSameConv)
+		if err != nil {
+			return channel.Message{}, err
+		}
+		outboundMessage.Attachments = append(outboundMessage.Attachments, attachments...)
+	}
 	if rawAttachments, ok := args["attachments"]; ok && rawAttachments != nil {
 		attachments, err := e.resolveOutboundAttachments(ctx, botID, session, channelType, target, rawAttachments, isSameConv)
 		if err != nil {
@@ -243,14 +277,56 @@ func (e *Executor) buildOutboundMessage(
 	return outboundMessage, nil
 }
 
+func messageAttachmentsArg(args map[string]any) any {
+	if args == nil {
+		return nil
+	}
+	raw, ok := args["message"]
+	if !ok || raw == nil {
+		return nil
+	}
+	switch msg := raw.(type) {
+	case map[string]any:
+		return msg["attachments"]
+	default:
+		return nil
+	}
+}
+
+func withoutMessageAttachments(args map[string]any) map[string]any {
+	if args == nil {
+		return nil
+	}
+	raw, ok := args["message"]
+	if !ok || raw == nil {
+		return args
+	}
+	msg, ok := raw.(map[string]any)
+	if !ok {
+		return args
+	}
+	msgCopy := make(map[string]any, len(msg))
+	for k, v := range msg {
+		if k != "attachments" {
+			msgCopy[k] = v
+		}
+	}
+	argsCopy := make(map[string]any, len(args))
+	for k, v := range args {
+		argsCopy[k] = v
+	}
+	argsCopy["message"] = msgCopy
+	return argsCopy
+}
+
 func (e *Executor) resolveOutboundAttachments(
 	ctx context.Context,
 	botID string,
-	session SessionContext,
-	channelType channel.ChannelType,
-	target string,
+	_ SessionContext,
+	_ channel.ChannelType,
+	_ string,
 	rawAttachments any,
-	isSameConv bool,
+	allowSameConversationShortcut bool,
 ) ([]channel.Attachment, error) {
 	bundles, ok := attachmentpkg.ParseToolInputBundles(rawAttachments)
 	if !ok {
@@ -259,14 +335,33 @@ func (e *Executor) resolveOutboundAttachments(
 	if len(bundles) == 0 {
 		return nil, nil
 	}
-	if isSameConv || IsSameConversation(session, channelType.String(), target) {
+	if allowSameConversationShortcut {
 		return resolveSameConversationAttachments(bundles), nil
 	}
 	resolved := e.ResolveAttachments(ctx, botID, bundles)
+	resolved = dropUnresolvedDataPathAttachments(resolved)
 	if len(resolved) == 0 {
 		return nil, errors.New("attachments could not be resolved")
 	}
 	return resolved, nil
+}
+
+func dropUnresolvedDataPathAttachments(attachments []channel.Attachment) []channel.Attachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	filtered := attachments[:0]
+	for _, att := range attachments {
+		if strings.TrimSpace(att.ContentHash) == "" &&
+			strings.TrimSpace(att.URL) == "" &&
+			strings.TrimSpace(att.Base64) == "" &&
+			strings.TrimSpace(att.PlatformKey) == "" &&
+			attachmentpkg.IsDataPath(att.Path) {
+			continue
+		}
+		filtered = append(filtered, att)
+	}
+	return filtered
 }
 
 func resolveSameConversationAttachments(bundles []attachmentpkg.Bundle) []channel.Attachment {
@@ -314,7 +409,7 @@ func (e *Executor) React(ctx context.Context, session SessionContext, args map[s
 	}
 	target := firstStringArg(args, "target")
 	if target == "" {
-		target = strings.TrimSpace(session.ReplyTarget)
+		target = defaultReplyTargetForPlatform(args, session, channelType)
 	}
 	if target == "" {
 		return nil, errors.New("target is required")
@@ -325,6 +420,17 @@ func (e *Executor) React(ctx context.Context, session SessionContext, args map[s
 	}
 	emoji := firstStringArg(args, "emoji")
 	remove, _, _ := boolArg(args, "remove")
+	sameConv := IsSameConversation(session, channelType.String(), target)
+	if session.AllowLocalShortcut && sameConv {
+		action := "added"
+		if remove {
+			action = "removed"
+		}
+		return &ReactResult{
+			BotID: botID, Platform: channelType.String(), Target: target,
+			MessageID: messageID, Emoji: emoji, Action: action, Local: true, Remove: remove,
+		}, nil
+	}
 	if err := e.Reactor.React(ctx, botID, channelType, channel.ReactRequest{
 		Target: target, MessageID: messageID, Emoji: emoji, Remove: remove,
 	}); err != nil {
@@ -341,6 +447,16 @@ func (e *Executor) React(ctx context.Context, session SessionContext, args map[s
 		BotID: botID, Platform: channelType.String(), Target: target,
 		MessageID: messageID, Emoji: emoji, Action: action,
 	}, nil
+}
+
+func defaultReplyTargetForPlatform(args map[string]any, session SessionContext, channelType channel.ChannelType) string {
+	if !session.CanOmitTarget {
+		return ""
+	}
+	if firstStringArg(args, "platform") != "" && !strings.EqualFold(channelType.String(), strings.TrimSpace(session.CurrentPlatform)) {
+		return ""
+	}
+	return strings.TrimSpace(session.ReplyTarget)
 }
 
 // CanSend returns true if the executor has a sender and resolver configured.

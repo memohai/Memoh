@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
@@ -121,6 +122,7 @@ func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponse
 }
 
 func (r *Resolver) storeUserInputResultAndContinue(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error {
+	req = withLocalWebUserInputReplyTarget(req)
 	modelMessages := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(result)})
 	storeReq := conversation.ChatRequest{
 		BotID:                   input.BotID,
@@ -139,6 +141,7 @@ func (r *Resolver) storeUserInputResultAndContinue(ctx context.Context, req user
 }
 
 func (r *Resolver) continueUserInputSession(ctx context.Context, req userinput.Request, input UserInputResponseInput, eventCh chan<- WSStreamEvent) error {
+	req = withLocalWebUserInputReplyTarget(req)
 	resolved, err := r.ResolveRunConfig(ctx,
 		input.BotID,
 		req.SessionID,
@@ -163,6 +166,8 @@ func (r *Resolver) continueUserInputSession(ctx context.Context, req userinput.R
 	cfg := resolved.RunConfig
 	cfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(sanitizeMessages(messages)))
 	cfg.Query = ""
+	cfg.LiveToolStream = eventCh != nil
+	cfg.CanRequestUserInput = r.canDeliverUserInputWS(eventCh)
 	cfg = r.prepareRunConfig(ctx, cfg)
 
 	chatReq := conversation.ChatRequest{
@@ -205,4 +210,11 @@ func (r *Resolver) continueUserInputSession(ctx context.Context, req userinput.R
 		}
 	}
 	return nil
+}
+
+func withLocalWebUserInputReplyTarget(req userinput.Request) userinput.Request {
+	if strings.EqualFold(strings.TrimSpace(req.SourcePlatform), "web") && strings.TrimSpace(req.ReplyTarget) == "" {
+		req.ReplyTarget = strings.TrimSpace(req.BotID)
+	}
+	return req
 }

@@ -79,6 +79,7 @@ func (q *lazyLLMTestQueries) GetModelByID(_ context.Context, id pgtype.UUID) (sq
 		ModelID:    "compact-model",
 		ProviderID: q.providerID,
 		Type:       string(modelspkg.ModelTypeChat),
+		Enable:     true,
 	}, nil
 }
 

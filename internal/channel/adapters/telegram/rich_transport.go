@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tele "gopkg.in/telebot.v4"
 
 	"github.com/memohai/memoh/internal/channel"
 )
@@ -40,7 +40,7 @@ func isAllowedTelegramRichHref(href string) bool {
 }
 
 func sendTelegramRichMessageReturnMessage(
-	bot *tgbotapi.BotAPI,
+	bot *tele.Bot,
 	target string,
 	rich telegramInputRichMessage,
 	replyTo int,
@@ -53,43 +53,41 @@ func sendTelegramRichMessageReturnMessage(
 	if parseErr != nil {
 		return 0, 0, parseErr
 	}
-	params := tgbotapi.Params{}
+	payload := map[string]any{"rich_message": rich}
 	if channelUsername != "" {
-		params.AddNonEmpty("chat_id", channelUsername)
+		payload["chat_id"] = channelUsername
 	} else {
-		params.AddNonEmpty("chat_id", strconv.FormatInt(parsedChatID, 10))
-	}
-	if err := params.AddInterface("rich_message", rich); err != nil {
-		return 0, 0, err
+		payload["chat_id"] = strconv.FormatInt(parsedChatID, 10)
 	}
 	if replyTo > 0 {
-		if err := params.AddInterface("reply_parameters", map[string]any{"message_id": replyTo}); err != nil {
-			return 0, 0, err
-		}
+		payload["reply_parameters"] = map[string]any{"message_id": replyTo}
 	}
 	markup := telegramInlineKeyboard(actions)
-	if len(markup.InlineKeyboard) > 0 {
-		if err := params.AddInterface("reply_markup", markup); err != nil {
-			return 0, 0, err
-		}
+	if markup != nil && len(markup.InlineKeyboard) > 0 {
+		payload["reply_markup"] = markup
 	}
-	resp, err := bot.MakeRequest("sendRichMessage", params)
+	data, err := bot.Raw("sendRichMessage", payload)
 	if err != nil {
 		return 0, 0, err
 	}
-	var sent tgbotapi.Message
-	if err := json.Unmarshal(resp.Result, &sent); err != nil {
+	var resp struct {
+		Result *tele.Message `json:"result"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
 		return 0, 0, err
 	}
 	chatID = parsedChatID
-	if sent.Chat != nil {
-		chatID = sent.Chat.ID
+	if resp.Result != nil && resp.Result.Chat != nil {
+		chatID = resp.Result.Chat.ID
 	}
-	return chatID, sent.MessageID, nil
+	if resp.Result == nil {
+		return chatID, 0, nil
+	}
+	return chatID, resp.Result.ID, nil
 }
 
 func rawEditTelegramRichMessage(
-	bot *tgbotapi.BotAPI,
+	bot *tele.Bot,
 	chatID int64,
 	messageID int,
 	rich telegramInputRichMessage,
@@ -98,24 +96,21 @@ func rawEditTelegramRichMessage(
 	if strings.TrimSpace(rich.HTML) == "" {
 		return nil
 	}
-	params := tgbotapi.Params{}
-	params.AddNonEmpty("chat_id", strconv.FormatInt(chatID, 10))
-	params.AddNonZero("message_id", messageID)
-	if err := params.AddInterface("rich_message", rich); err != nil {
-		return err
+	payload := map[string]any{
+		"chat_id":      strconv.FormatInt(chatID, 10),
+		"message_id":   messageID,
+		"rich_message": rich,
 	}
 	markup := telegramInlineKeyboard(actions)
-	if len(markup.InlineKeyboard) > 0 {
-		if err := params.AddInterface("reply_markup", markup); err != nil {
-			return err
-		}
+	if markup != nil && len(markup.InlineKeyboard) > 0 {
+		payload["reply_markup"] = markup
 	}
-	_, err := bot.MakeRequest("editMessageText", params)
+	_, err := bot.Raw("editMessageText", payload)
 	return err
 }
 
 func editTelegramRichMessage(
-	bot *tgbotapi.BotAPI,
+	bot *tele.Bot,
 	chatID int64,
 	messageID int,
 	rich telegramInputRichMessage,

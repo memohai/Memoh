@@ -2,6 +2,8 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"log/slog"
 	"strings"
@@ -156,13 +158,47 @@ func (s *ToolGatewayService) getRegistry(ctx context.Context, session ToolSessio
 func toolRegistryCacheKey(session ToolSessionContext) string {
 	parts := []string{
 		strings.TrimSpace(session.BotID),
+		strings.TrimSpace(session.ChatID),
+		strings.TrimSpace(session.RuntimeID),
+		hashCacheKeySecret(session.RuntimeToken),
+		strings.TrimSpace(session.SessionID),
+		strings.TrimSpace(session.StreamID),
 		strings.TrimSpace(session.SessionType),
+		strings.TrimSpace(session.RouteID),
 		strings.TrimSpace(session.ChannelIdentityID),
+		strings.TrimSpace(session.CurrentPlatform),
+		strings.TrimSpace(session.ReplyTarget),
+		strings.TrimSpace(session.ConversationType),
+		hashCacheKeySecret(session.SessionToken),
 	}
 	if session.IsSubagent {
 		parts = append(parts, "subagent")
 	} else {
 		parts = append(parts, "agent")
 	}
+	if session.SupportsImageInput {
+		parts = append(parts, "vision")
+	} else {
+		parts = append(parts, "no-vision")
+	}
+	if session.CanRequestUserInput {
+		parts = append(parts, "user-input")
+	} else {
+		parts = append(parts, "no-user-input")
+	}
+	if session.CanListUserInput {
+		parts = append(parts, "list-user-input")
+	} else {
+		parts = append(parts, "no-list-user-input")
+	}
 	return strings.Join(parts, "\x00")
+}
+
+func hashCacheKeySecret(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
 }
