@@ -244,83 +244,47 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			reasonings := extractPersistedReasoning(modelMessage)
 			attachments := uiAttachmentsFromMessageAssets(raw)
 
-			if len(toolCalls) > 0 {
-				if pending == nil {
-					pending = newPendingAssistantTurn(raw)
-				}
-
-				for _, reasoning := range reasonings {
-					appendPendingAssistantMessage(pending, UIMessage{
-						ID:      pending.NextID,
-						Type:    UIMessageReasoning,
-						Content: reasoning,
-					})
-				}
-
-				if text != "" {
-					appendPendingAssistantMessage(pending, UIMessage{
-						ID:      pending.NextID,
-						Type:    UIMessageText,
-						Content: text,
-					})
-				}
-
-				for _, call := range toolCalls {
-					upsertPendingToolCall(pending, call)
-				}
-
-				if len(attachments) > 0 {
-					appendPendingAssistantMessage(pending, UIMessage{
-						ID:          pending.NextID,
-						Type:        UIMessageAttachments,
-						Attachments: attachments,
-					})
-				}
+			// An assistant turn spans the whole reply to a user message: every
+			// assistant + tool message that follows, in order. A plain-text
+			// assistant message must NOT split the turn — the "talk while acting"
+			// pattern (a remark before or between tool calls) is common, so it
+			// extends the current turn instead of opening a new one. The turn is
+			// closed only by the next user message (flushed in the "user" case,
+			// which also derives background-notification system turns) or by the
+			// trailing flush at the end of the list. Empty messages carry nothing,
+			// so they neither open nor split a turn.
+			if len(toolCalls) == 0 && text == "" && len(reasonings) == 0 && len(attachments) == 0 {
 				continue
 			}
 
-			if pending != nil && (text != "" || len(reasonings) > 0 || len(attachments) > 0) {
-				for _, reasoning := range reasonings {
-					appendPendingAssistantMessage(pending, UIMessage{
-						ID:      pending.NextID,
-						Type:    UIMessageReasoning,
-						Content: reasoning,
-					})
-				}
-				if text != "" {
-					appendPendingAssistantMessage(pending, UIMessage{
-						ID:      pending.NextID,
-						Type:    UIMessageText,
-						Content: text,
-					})
-				}
-				if len(attachments) > 0 {
-					appendPendingAssistantMessage(pending, UIMessage{
-						ID:          pending.NextID,
-						Type:        UIMessageAttachments,
-						Attachments: attachments,
-					})
-				}
-				flushPending()
-				continue
+			if pending == nil {
+				pending = newPendingAssistantTurn(raw)
 			}
 
-			flushPending()
-
-			assistantMessages := buildStandaloneAssistantMessages(text, reasonings, attachments)
-			if len(assistantMessages) == 0 {
-				continue
+			for _, reasoning := range reasonings {
+				appendPendingAssistantMessage(pending, UIMessage{
+					ID:      pending.NextID,
+					Type:    UIMessageReasoning,
+					Content: reasoning,
+				})
 			}
-
-			result = append(result, UITurn{
-				Role:              "assistant",
-				Messages:          assistantMessages,
-				Timestamp:         raw.CreatedAt,
-				Platform:          resolveUIPersistencePlatform(raw),
-				ExternalMessageID: strings.TrimSpace(raw.ExternalMessageID),
-				ID:                strings.TrimSpace(raw.ID),
-			})
-			registerBackgroundTools(len(result) - 1)
+			if text != "" {
+				appendPendingAssistantMessage(pending, UIMessage{
+					ID:      pending.NextID,
+					Type:    UIMessageText,
+					Content: text,
+				})
+			}
+			for _, call := range toolCalls {
+				upsertPendingToolCall(pending, call)
+			}
+			if len(attachments) > 0 {
+				appendPendingAssistantMessage(pending, UIMessage{
+					ID:          pending.NextID,
+					Type:        UIMessageAttachments,
+					Attachments: attachments,
+				})
+			}
 
 		case "tool":
 			if pending == nil {
@@ -400,35 +364,6 @@ func upsertPendingToolCall(pending *uiPendingAssistantTurn, call uiExtractedTool
 	if call.ID != "" {
 		pending.ToolIndexes[call.ID] = len(pending.Turn.Messages) - 1
 	}
-}
-
-func buildStandaloneAssistantMessages(text string, reasonings []string, attachments []UIAttachment) []UIMessage {
-	messages := make([]UIMessage, 0, len(reasonings)+2)
-	nextID := 0
-	for _, reasoning := range reasonings {
-		messages = append(messages, UIMessage{
-			ID:      nextID,
-			Type:    UIMessageReasoning,
-			Content: reasoning,
-		})
-		nextID++
-	}
-	if text != "" {
-		messages = append(messages, UIMessage{
-			ID:      nextID,
-			Type:    UIMessageText,
-			Content: text,
-		})
-		nextID++
-	}
-	if len(attachments) > 0 {
-		messages = append(messages, UIMessage{
-			ID:          nextID,
-			Type:        UIMessageAttachments,
-			Attachments: attachments,
-		})
-	}
-	return messages
 }
 
 func decodePersistedModelMessage(raw messagepkg.Message) ModelMessage {
