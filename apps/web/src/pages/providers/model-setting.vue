@@ -12,7 +12,7 @@
             v-else
             class="text-xs font-medium text-muted-foreground"
           >
-            {{ getInitials(curProvider?.name) }}
+            {{ avatarInitials(curProvider?.name, '?') }}
           </span>
         </span>
         <div class="min-w-0 flex-1">
@@ -70,14 +70,11 @@ import { Trash2 } from 'lucide-vue-next'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import SettingsShell from '@/components/settings-shell/index.vue'
+import { avatarInitials } from '@/composables/useAvatarInitials'
 
-function getInitials(name: string | undefined) {
-  const label = name?.trim() ?? ''
-  return label ? label.slice(0, 2).toUpperCase() : '?'
-}
 import ProviderForm from './components/provider-form.vue'
 import ModelList from './components/model-list.vue'
-import { computed, inject, provide, reactive, ref, toRef, watch } from 'vue'
+import { computed, provide, reactive, ref, toRef, watch } from 'vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import { putProvidersById, deleteProvidersById, getProvidersByIdModels, deleteModelsById } from '@memohai/sdk'
 import type { ModelsGetResponse, ProvidersGetResponse, ProvidersUpdateRequest } from '@memohai/sdk'
@@ -105,8 +102,8 @@ function handleEditModel(model: ModelsGetResponse) {
   openModel.curState = { ...model }
 }
 
-// ---- 当前 Provider ----
-const curProvider = inject('curProvider', ref<ProvidersGetResponse>())
+// ---- 当前 Provider（父级 v-model:provider 下发，子写回自动回传） ----
+const curProvider = defineModel<ProvidersGetResponse>('provider')
 const curProviderId = computed(() => curProvider.value?.id)
 const enableLoading = ref(false)
 const { t } = useI18n()
