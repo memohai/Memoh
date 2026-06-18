@@ -20,7 +20,7 @@ func renderTelegramMessagePartsRichMessage(msg channel.Message) telegramInputRic
 		case channel.MessagePartCodeBlock:
 			writeTelegramRichCodeBlockPart(&b, part)
 		case channel.MessagePartMention:
-			writeTelegramRichInlinePart(&b, part.Text, part.Styles)
+			writeTelegramRichMentionPart(&b, part)
 		case channel.MessagePartEmoji:
 			text := strings.TrimSpace(part.Text)
 			if text == "" {
@@ -59,6 +59,35 @@ func writeTelegramRichLinkPart(b *strings.Builder, part channel.MessagePart) {
 	}
 	link := `<a href="` + telegramEscapeAttr(url) + `">` + telegramEscapeHTML(text) + `</a>`
 	writeTelegramRichParagraph(b, link)
+}
+
+// writeTelegramRichMentionPart emits Telegram's tg://user?id=… profile
+// link when the canonical Part carries a numeric Telegram user id.
+// Telegram user IDs are positive integers, so the safe character class is
+// digits only; IDs outside that class fall back to the inline-text path so
+// the visible mention still reaches the channel (and Telegram's
+// auto-detection can still light up @-prefixed public usernames in plain
+// text).
+func writeTelegramRichMentionPart(b *strings.Builder, part channel.MessagePart) {
+	id := strings.TrimSpace(part.ChannelIdentityID)
+	text := strings.TrimSpace(part.Text)
+	if id == "" || !isTelegramNumericMentionID(id) || text == "" {
+		writeTelegramRichInlinePart(b, part.Text, part.Styles)
+		return
+	}
+	writeTelegramRichParagraph(b, `<a href="tg://user?id=`+id+`">`+telegramEscapeHTML(text)+`</a>`)
+}
+
+func isTelegramNumericMentionID(id string) bool {
+	if id == "" {
+		return false
+	}
+	for _, r := range id {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func writeTelegramRichCodeBlockPart(b *strings.Builder, part channel.MessagePart) {

@@ -20,7 +20,7 @@ func renderFeishuMessagePartsLarkMD(msg channel.Message) string {
 		case channel.MessagePartCodeBlock:
 			writeFeishuRichCodeBlockPart(&b, part)
 		case channel.MessagePartMention:
-			writeFeishuRichInlinePart(&b, part.Text, part.Styles)
+			writeFeishuRichMentionPart(&b, part)
 		case channel.MessagePartEmoji:
 			text := strings.TrimSpace(part.Text)
 			if text == "" {
@@ -64,6 +64,38 @@ func writeFeishuRichLinkPart(b *strings.Builder, part channel.MessagePart) {
 	b.WriteString("](")
 	b.WriteString(escapeFeishuLinkURL(url))
 	b.WriteString(")")
+}
+
+// writeFeishuRichMentionPart emits Feishu's lark_md <at user_id="…"></at>
+// tag when the canonical Part carries a safe open_id. Feishu open IDs are
+// lowercase alphanumeric with a single underscore-separated prefix
+// (e.g. "ou_abc123"); IDs outside that class fall back to the inline-text
+// path so the visible mention still reaches the channel.
+func writeFeishuRichMentionPart(b *strings.Builder, part channel.MessagePart) {
+	id := strings.TrimSpace(part.ChannelIdentityID)
+	if id == "" || !isSafeFeishuMentionID(id) {
+		writeFeishuRichInlinePart(b, part.Text, part.Styles)
+		return
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n\n")
+	}
+	b.WriteString(`<at user_id="`)
+	b.WriteString(id)
+	b.WriteString(`"></at>`)
+}
+
+func isSafeFeishuMentionID(id string) bool {
+	if id == "" {
+		return false
+	}
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func writeFeishuRichCodeBlockPart(b *strings.Builder, part channel.MessagePart) {

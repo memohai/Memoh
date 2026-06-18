@@ -227,6 +227,21 @@ func TestRenderDiscordMessagePartsMarkdown(t *testing.T) {
 			want: `@alice \[extra\]`,
 		},
 		{
+			name: "mention with ChannelIdentityID emits Discord-native ping",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: "ping "},
+				{Type: channel.MessagePartMention, Text: "@alice", ChannelIdentityID: "1234567890"},
+			}},
+			want: "ping\n\n<@1234567890>",
+		},
+		{
+			name: "mention with unsafe ChannelIdentityID falls back to text",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartMention, Text: "@alice", ChannelIdentityID: "1234)>"},
+			}},
+			want: `@alice`,
+		},
+		{
 			name: "empty parts returns empty",
 			msg:  channel.Message{Parts: nil},
 			want: "",

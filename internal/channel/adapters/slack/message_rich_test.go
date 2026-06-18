@@ -97,12 +97,27 @@ func TestRenderSlackMessagePartsMrkdwn(t *testing.T) {
 			excludes: []string{"<!channel>", "<https://evil.test|click>"},
 		},
 		{
-			name: "mention emits text only",
+			name: "mention without identity emits text only",
 			msg: channel.Message{Parts: []channel.MessagePart{
 				{Type: channel.MessagePartMention, Text: "@alice"},
 			}},
 			want:     "@alice",
 			excludes: []string{"<@"},
+		},
+		{
+			name: "mention with ChannelIdentityID emits Slack native ping",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: "ping "},
+				{Type: channel.MessagePartMention, Text: "@alice", ChannelIdentityID: "U12345ABC"},
+			}},
+			want: "ping\n\n<@U12345ABC>",
+		},
+		{
+			name: "mention with unsafe ChannelIdentityID falls back to text",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartMention, Text: "@alice", ChannelIdentityID: "U123|<evil>"},
+			}},
+			want: "@alice",
 		},
 		{
 			name: "emoji prefers Emoji field",

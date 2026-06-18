@@ -28,7 +28,7 @@ func renderSlackMessagePartsMrkdwn(msg channel.Message) string {
 		case channel.MessagePartCodeBlock:
 			writeSlackRichCodeBlockPart(&b, part)
 		case channel.MessagePartMention:
-			writeSlackRichInlinePart(&b, part.Text, part.Styles)
+			writeSlackRichMentionPart(&b, part)
 		case channel.MessagePartEmoji:
 			text := strings.TrimSpace(part.Text)
 			if text == "" {
@@ -71,6 +71,38 @@ func writeSlackRichLinkPart(b *strings.Builder, part channel.MessagePart) {
 		b.WriteString(slackEscapeMrkdwn(text))
 	}
 	b.WriteString(">")
+}
+
+// writeSlackRichMentionPart emits Slack's <@USERID> ping when the canonical
+// Part carries a safe identity. Slack IDs are uppercase-alphanumeric
+// (U/W for users, C/G/D for channels, S for subteams); anything outside
+// that class falls back to the inline-text path so the visible mention
+// still reaches the channel even if it doesn't ping.
+func writeSlackRichMentionPart(b *strings.Builder, part channel.MessagePart) {
+	id := strings.TrimSpace(part.ChannelIdentityID)
+	if id == "" || !isSafeSlackMentionID(id) {
+		writeSlackRichInlinePart(b, part.Text, part.Styles)
+		return
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n\n")
+	}
+	b.WriteString("<@")
+	b.WriteString(id)
+	b.WriteString(">")
+}
+
+func isSafeSlackMentionID(id string) bool {
+	if id == "" {
+		return false
+	}
+	for _, r := range id {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func writeSlackRichCodeBlockPart(b *strings.Builder, part channel.MessagePart) {

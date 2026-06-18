@@ -1,0 +1,71 @@
+package telegram
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/memohai/memoh/internal/channel"
+)
+
+// TestRenderTelegramMessagePartsRichMessage_Mentions covers the
+// ChannelIdentityID → tg://user?id=… path. The canonical fixture in
+// parts_canonical_test.go locks down the no-id mention output (plain text),
+// so cases here focus on the id-resolved render.
+func TestRenderTelegramMessagePartsRichMessage_Mentions(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		msg  channel.Message
+		want string
+		not  []string
+	}{
+		{
+			name: "mention with numeric ChannelIdentityID emits tg user link",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: "ping "},
+				{Type: channel.MessagePartMention, Text: "@alice", ChannelIdentityID: "42"},
+			}},
+			want: `<p>ping</p><p><a href="tg://user?id=42">@alice</a></p>`,
+		},
+		{
+			name: "mention with empty ChannelIdentityID falls back to text paragraph",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartMention, Text: "@alice"},
+			}},
+			want: `<p>@alice</p>`,
+			not:  []string{`tg://user`},
+		},
+		{
+			name: "mention with non-numeric ChannelIdentityID falls back to text",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartMention, Text: "@alice", ChannelIdentityID: "ali ce"},
+			}},
+			want: `<p>@alice</p>`,
+			not:  []string{`tg://user`},
+		},
+		{
+			name: "mention text injection in href is escaped",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartMention, Text: `<script>`, ChannelIdentityID: "7"},
+			}},
+			want: `<p><a href="tg://user?id=7">&lt;script&gt;</a></p>`,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rich := renderTelegramMessagePartsRichMessage(tc.msg)
+			if rich.HTML != tc.want {
+				t.Errorf("got %q\nwant %q", rich.HTML, tc.want)
+			}
+			for _, n := range tc.not {
+				if strings.Contains(rich.HTML, n) {
+					t.Errorf("expected %q to NOT contain %q", rich.HTML, n)
+				}
+			}
+		})
+	}
+}

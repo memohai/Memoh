@@ -90,12 +90,27 @@ func TestRenderFeishuMessagePartsLarkMD(t *testing.T) {
 			want: "```\nraw\n```",
 		},
 		{
-			name: "mention emits text only",
+			name: "mention without identity emits text only",
 			msg: channel.Message{Parts: []channel.MessagePart{
 				{Type: channel.MessagePartMention, Text: "@alice"},
 			}},
 			want:     "@alice",
 			excludes: []string{"<at"},
+		},
+		{
+			name: "mention with ChannelIdentityID emits lark_md at-tag",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: "ping "},
+				{Type: channel.MessagePartMention, Text: "@alice", ChannelIdentityID: "ou_alice_open_id"},
+			}},
+			want: "ping" + "\n\n" + `<at user_id="ou_alice_open_id"></at>`,
+		},
+		{
+			name: "mention with unsafe ChannelIdentityID falls back to text",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartMention, Text: "@alice", ChannelIdentityID: `ou_alice"><script>`},
+			}},
+			want: `@alice`,
 		},
 		{
 			name: "emoji prefers Emoji field when Text empty",

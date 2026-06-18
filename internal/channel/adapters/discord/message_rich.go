@@ -20,7 +20,7 @@ func renderDiscordMessagePartsMarkdown(msg channel.Message) string {
 		case channel.MessagePartCodeBlock:
 			writeDiscordRichCodeBlockPart(&b, part)
 		case channel.MessagePartMention:
-			writeDiscordRichInlinePart(&b, part.Text, part.Styles)
+			writeDiscordRichMentionPart(&b, part)
 		case channel.MessagePartEmoji:
 			text := strings.TrimSpace(part.Text)
 			if text == "" {
@@ -65,6 +65,39 @@ func writeDiscordRichLinkPart(b *strings.Builder, part channel.MessagePart) {
 	b.WriteString("](")
 	b.WriteString(discordEscapeLinkURL(url))
 	b.WriteString(")")
+}
+
+// writeDiscordRichMentionPart emits a Discord-native ping <@ID> when the
+// canonical Part carries a safe identity. Without an ID (or with an unsafe
+// ID such as one containing markdown control chars) it falls back to the
+// inline-text path so the visible mention still reaches the channel.
+func writeDiscordRichMentionPart(b *strings.Builder, part channel.MessagePart) {
+	id := strings.TrimSpace(part.ChannelIdentityID)
+	if id == "" || !isSafeDiscordMentionID(id) {
+		writeDiscordRichInlinePart(b, part.Text, part.Styles)
+		return
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n\n")
+	}
+	b.WriteString("<@")
+	b.WriteString(id)
+	b.WriteString(">")
+}
+
+// isSafeDiscordMentionID limits the ID to the snowflake/role-id character
+// class so attacker-supplied data cannot break out of the <@…> wrapper.
+func isSafeDiscordMentionID(id string) bool {
+	if id == "" {
+		return false
+	}
+	for _, r := range id {
+		if (r >= '0' && r <= '9') || r == '&' || r == '!' || r == '#' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func writeDiscordRichCodeBlockPart(b *strings.Builder, part channel.MessagePart) {
