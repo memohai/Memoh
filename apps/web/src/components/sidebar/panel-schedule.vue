@@ -54,11 +54,11 @@
               variant="ghost"
               size="icon-sm"
               class="shrink-0 rounded-full text-muted-foreground hover:text-foreground"
-              :title="t('chat.manageSchedule')"
-              :aria-label="t('chat.manageSchedule')"
+              :title="t('bots.schedule.create')"
+              :aria-label="t('bots.schedule.create')"
               @click="handleManage"
             >
-              <Settings2
+              <Plus
                 :stroke-width="1.75"
                 class="size-[15px]"
               />
@@ -125,7 +125,7 @@
 import { ref, watch, computed, onMounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
-import { Settings2 } from 'lucide-vue-next'
+import { Plus } from 'lucide-vue-next'
 import { toast } from '@memohai/ui'
 import { useQueryCache } from '@pinia/colada'
 import {
