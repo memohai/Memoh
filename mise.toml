@@ -436,6 +436,12 @@ set -euo pipefail
 pnpm dev:remote
 """
 
+[tasks."desktop:preview"]
+description = "Run the Electron desktop app against the production renderer bundle (no dev server / HMR), backed by the local dev server"
+dir = "{{config_root}}/apps/desktop"
+env = { CONFIG_PATH = "../../conf/app.local.toml" }
+run = "pnpm preview"
+
 [tasks."desktop:qdrant:prepare"]
 description = "Download the Qdrant binary used by the Electron desktop app"
 dir = "{{config_root}}/apps/desktop"
