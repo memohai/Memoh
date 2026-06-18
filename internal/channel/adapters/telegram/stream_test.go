@@ -943,3 +943,63 @@ func TestStreamFinal_RichPartsUseSendRichMessage(t *testing.T) {
 		t.Fatal("expected sendRichMessage to be invoked for streaming final with Parts")
 	}
 }
+
+func TestStreamFinal_RichEditUnrecoverableFallsBackToNewRichMessage(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	s := &telegramOutboundStream{
+		adapter:      adapter,
+		cfg:          channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		target:       "123",
+		streamChatID: 123,
+		streamMsgID:  77,
+	}
+	ctx := context.Background()
+
+	var paths []string
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		paths = append(paths, req.URL.Path)
+		if strings.HasSuffix(req.URL.Path, "/editMessageText") {
+			resp := `{"ok":false,"error_code":400,"description":"Bad Request: message to edit not found"}`
+			return &http.Response{
+				StatusCode: http.StatusBadRequest,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(resp)),
+			}, nil
+		}
+		if !strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			t.Fatalf("expected sendRichMessage after failed edit, got %s", req.URL.Path)
+		}
+		resp := `{"ok":true,"result":{"message_id":88,"chat":{"id":123}}}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(resp)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{
+		Type: channel.StreamEventFinal,
+		Final: &channel.StreamFinalizePayload{
+			Message: channel.Message{
+				Format: channel.MessageFormatRich,
+				Parts: []channel.MessagePart{
+					{Type: channel.MessagePartText, Text: "hello", Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+				},
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if len(paths) != 2 ||
+		!strings.HasSuffix(paths[0], "/editMessageText") ||
+		!strings.HasSuffix(paths[1], "/sendRichMessage") {
+		t.Fatalf("expected failed edit followed by new rich send, got paths %v", paths)
+	}
+}

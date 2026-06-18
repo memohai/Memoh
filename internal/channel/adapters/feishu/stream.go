@@ -111,10 +111,7 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.PreparedS
 		}
 		msg := event.Final.Message
 		bufText := strings.TrimSpace(s.textBuffer.String())
-		finalText := bufText
-		if finalText == "" {
-			finalText = strings.TrimSpace(msg.Message.PlainText())
-		}
+		finalText := renderFeishuStreamFinalText(msg.Message, bufText)
 		if finalText != "" {
 			if err := s.ensureCard(ctx, feishuStreamThinkingText); err != nil {
 				return err
@@ -149,6 +146,18 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.PreparedS
 	default:
 		return nil
 	}
+}
+
+func renderFeishuStreamFinalText(msg channel.Message, buffered string) string {
+	if len(msg.Parts) > 0 {
+		if body := renderFeishuMessagePartsLarkMD(msg); body != "" {
+			return body
+		}
+	}
+	if text := strings.TrimSpace(buffered); text != "" {
+		return text
+	}
+	return strings.TrimSpace(msg.PlainText())
 }
 
 func feishuLogicalAttachments(attachments []channel.PreparedAttachment) []channel.Attachment {

@@ -88,7 +88,7 @@ func sendTelegramRichMessageReturnMessage(
 	return chatID, sent.MessageID, nil
 }
 
-func editTelegramRichMessage(
+func rawEditTelegramRichMessage(
 	bot *tgbotapi.BotAPI,
 	chatID int64,
 	messageID int,
@@ -111,6 +111,17 @@ func editTelegramRichMessage(
 		}
 	}
 	_, err := bot.MakeRequest("editMessageText", params)
+	return err
+}
+
+func editTelegramRichMessage(
+	bot *tgbotapi.BotAPI,
+	chatID int64,
+	messageID int,
+	rich telegramInputRichMessage,
+	actions []channel.Action,
+) error {
+	err := rawEditTelegramRichMessage(bot, chatID, messageID, rich, actions)
 	if err != nil && (isTelegramMessageNotModified(err) || isTelegramEditUnrecoverable(err)) {
 		return nil
 	}

@@ -51,6 +51,14 @@ func TestSlackDescriptorDoesNotAdvertiseEdit(t *testing.T) {
 	}
 }
 
+func TestSlackDescriptorAdvertisesRichText(t *testing.T) {
+	t.Parallel()
+
+	if !NewSlackAdapter(nil).Descriptor().Capabilities.RichText {
+		t.Fatal("Slack descriptor must advertise rich text so Message.Parts reaches the Slack renderer")
+	}
+}
+
 func TestSlackResolveOutboundTargetUsesDMForUserID(t *testing.T) {
 	t.Parallel()
 
@@ -1140,6 +1148,53 @@ func TestSlackSendResolvesUserTargetToDMChannel(t *testing.T) {
 	}
 	if gotChannel != "D456" {
 		t.Fatalf("expected postMessage channel D456, got %q", gotChannel)
+	}
+}
+
+func TestSlackSendUsesPartsRenderer(t *testing.T) {
+	t.Parallel()
+
+	var gotText string
+	adapter := NewSlackAdapter(nil)
+	api := slack.New(
+		testBotToken,
+		slack.OptionAPIURL("https://slack.test/api/"),
+		slack.OptionHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.URL.String() != "https://slack.test/api/chat.postMessage" {
+				return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("not found")), Header: make(http.Header)}, nil
+			}
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("ParseForm: %v", err)
+			}
+			gotText = r.FormValue("text")
+			body, _ := json.Marshal(map[string]any{"ok": true, "channel": "C123", "ts": "1710000000.000200"})
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(string(body))),
+			}, nil
+		})}),
+		slack.OptionRetry(3),
+	)
+
+	err := adapter.sendSlackMessage(context.Background(), api, "C123", channel.PreparedOutboundMessage{
+		Message: channel.PreparedMessage{
+			Message: channel.Message{
+				Format: channel.MessageFormatRich,
+				Parts: []channel.MessagePart{
+					{Type: channel.MessagePartText, Text: "Hello", Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+					{Type: channel.MessagePartLink, Text: "docs", URL: "https://example.test/a"},
+					{Type: channel.MessagePartMention, Text: "@alice", ChannelIdentityID: "U12345ABC"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("sendSlackMessage: %v", err)
+	}
+	want := "*Hello*\n\n<https://example.test/a|docs>\n\n<@U12345ABC>"
+	if gotText != want {
+		t.Fatalf("Slack rich text mismatch\n  got:  %q\n  want: %q", gotText, want)
 	}
 }
 

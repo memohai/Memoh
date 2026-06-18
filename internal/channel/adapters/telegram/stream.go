@@ -658,7 +658,8 @@ func (s *telegramOutboundStream) pushFinalRich(ctx context.Context, msg channel.
 	s.mu.Unlock()
 
 	if streamMsgID > 0 && streamChatID != 0 {
-		if err := editTelegramRichMessage(bot, streamChatID, streamMsgID, rich, msg.Message.Actions); err == nil {
+		err := rawEditTelegramRichMessage(bot, streamChatID, streamMsgID, rich, msg.Message.Actions)
+		if err == nil || isTelegramMessageNotModified(err) {
 			s.resetStreamState()
 			return nil
 		}
@@ -669,7 +670,8 @@ func (s *telegramOutboundStream) pushFinalRich(ctx context.Context, msg channel.
 	}
 
 	if _, _, err := sendTelegramRichMessageReturnMessage(bot, s.target, rich, replyTo, msg.Message.Actions); err != nil {
-		return err
+		text, parseMode := renderTelegramPartsFallbackText(msg.Message)
+		return s.deliverFinalText(ctx, text, parseMode)
 	}
 	s.resetStreamState()
 	return nil

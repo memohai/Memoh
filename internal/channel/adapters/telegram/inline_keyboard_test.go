@@ -32,25 +32,22 @@ func TestTelegramInlineKeyboard_URLButton(t *testing.T) {
 	}
 }
 
-func TestTelegramInlineKeyboard_URLPrecedesValue(t *testing.T) {
+func TestTelegramInlineKeyboard_ValuePrecedesURL(t *testing.T) {
 	t.Parallel()
-	// When both URL and Value are set, URL wins — Telegram cannot route an
-	// inline-keyboard tap through both, and a URL button is the most useful
-	// fallback for "open this and also remember the choice" because the URL
-	// can carry the choice as a query string.
+
 	mk := telegramInlineKeyboard([]channel.Action{{Label: "Open", URL: "https://example.com/x", Value: "fallback"}})
 	btn := firstButton(t, mk)
-	if btn.URL == nil || *btn.URL != "https://example.com/x" {
-		t.Fatalf("expected URL to win, got %+v", btn)
+	if btn.CallbackData == nil || *btn.CallbackData != "fallback" {
+		t.Fatalf("expected callback value to win, got %+v", btn)
 	}
-	if btn.CallbackData != nil {
-		t.Fatalf("expected callback to be dropped, got %q", *btn.CallbackData)
+	if btn.URL != nil {
+		t.Fatalf("expected URL to be dropped when callback value is present, got %q", *btn.URL)
 	}
 }
 
 func TestTelegramInlineKeyboard_RejectsUnsafeURL(t *testing.T) {
 	t.Parallel()
-	for _, raw := range []string{"javascript:alert(1)", "data:text/html,xx", "tg://resolve?domain=x"} {
+	for _, raw := range []string{"javascript:alert(1)", "data:text/html,xx", "mailto:a@example.com", "tel:+123", "#anchor", "tg://resolve?domain=x"} {
 		raw := raw
 		t.Run(raw, func(t *testing.T) {
 			t.Parallel()

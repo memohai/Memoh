@@ -831,8 +831,7 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 	if msg.Message.Message.IsEmpty() {
 		return errors.New("message is required")
 	}
-	text := strings.TrimSpace(msg.Message.Message.PlainText())
-	text, parseMode := formatTelegramOutput(text, msg.Message.Message.Format)
+	text, parseMode := renderTelegramPartsFallbackText(msg.Message.Message)
 	replyTo := parseReplyToMessageID(msg.Message.Message.Reply)
 	if len(msg.Message.Attachments) > 0 {
 		usedCaption := false
@@ -910,8 +909,7 @@ func (a *TelegramAdapter) Update(_ context.Context, cfg channel.ChannelConfig, t
 			)
 		}
 	}
-	text := strings.TrimSpace(msg.Message.PlainText())
-	text, parseMode := formatTelegramOutput(text, msg.Message.Format)
+	text, parseMode := renderTelegramPartsFallbackText(msg.Message)
 	return editTelegramMessageTextWithActions(bot, chatID, mid, text, parseMode, msg.Message.Actions)
 }
 
@@ -1221,22 +1219,26 @@ func telegramInlineKeyboard(actions []channel.Action) tgbotapi.InlineKeyboardMar
 }
 
 // telegramActionButton renders a single Action as a Telegram inline-keyboard
-// button. A URL — when present and pointing at a safe http(s) scheme — wins
-// over Value: a single tap cannot route through both callback data AND a URL,
-// and the URL is the action that gives the user immediate visible feedback.
-// Unsafe URL schemes (javascript:, data:, tg://) are rejected outright so an
-// attacker-supplied URL can't open a privileged app handler.
+// button. Callback Value keeps precedence for compatibility with Memoh's
+// existing interactive actions; URL is used only for link-only actions.
 func telegramActionButton(label string, action channel.Action) (tgbotapi.InlineKeyboardButton, bool) {
+	if value := strings.TrimSpace(action.Value); value != "" {
+		return tgbotapi.NewInlineKeyboardButtonData(label, value), true
+	}
 	if url := strings.TrimSpace(action.URL); url != "" {
-		if !isAllowedTelegramRichHref(url) {
+		if !isAllowedTelegramInlineKeyboardURL(url) {
 			return tgbotapi.InlineKeyboardButton{}, false
 		}
 		return tgbotapi.NewInlineKeyboardButtonURL(label, url), true
 	}
-	if value := strings.TrimSpace(action.Value); value != "" {
-		return tgbotapi.NewInlineKeyboardButtonData(label, value), true
-	}
 	return tgbotapi.InlineKeyboardButton{}, false
+}
+
+func isAllowedTelegramInlineKeyboardURL(url string) bool {
+	url = strings.TrimSpace(url)
+	return strings.HasPrefix(url, "https://") ||
+		strings.HasPrefix(url, "http://") ||
+		strings.HasPrefix(url, "tg://user?id=")
 }
 
 var sendDraftForTest func(bot *tgbotapi.BotAPI, chatID int64, draftID int, text string, parseMode string) error

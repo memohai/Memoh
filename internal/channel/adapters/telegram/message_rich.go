@@ -36,6 +36,14 @@ func renderTelegramMessagePartsRichMessage(msg channel.Message) telegramInputRic
 	return telegramInputRichMessage{HTML: html, SkipEntityDetection: true}
 }
 
+func renderTelegramPartsFallbackText(msg channel.Message) (string, string) {
+	if len(msg.Parts) == 0 {
+		text := strings.TrimSpace(msg.PlainText())
+		return formatTelegramOutput(text, msg.Format)
+	}
+	return formatTelegramOutput(channel.RenderPartsAsMarkdown(msg.Parts), channel.MessageFormatMarkdown)
+}
+
 func writeTelegramRichInlinePart(b *strings.Builder, text string, styles []channel.MessageTextStyle) {
 	text = strings.TrimSpace(text)
 	if text == "" {

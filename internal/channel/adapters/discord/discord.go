@@ -68,6 +68,7 @@ func (*DiscordAdapter) Descriptor() channel.Descriptor {
 		Capabilities: channel.ChannelCapabilities{
 			Text:           true,
 			Markdown:       true,
+			RichText:       true,
 			Reply:          true,
 			Attachments:    true,
 			Media:          true,

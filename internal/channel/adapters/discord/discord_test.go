@@ -2,12 +2,24 @@ package discord
 
 import (
 	"context"
+	"encoding/json"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/bwmarrin/discordgo"
+
 	"github.com/memohai/memoh/internal/channel"
 )
+
+func TestDiscordDescriptorAdvertisesRichText(t *testing.T) {
+	t.Parallel()
+
+	if !(&DiscordAdapter{}).Descriptor().Capabilities.RichText {
+		t.Fatal("Discord descriptor must advertise rich text so Message.Parts reaches the Discord renderer")
+	}
+}
 
 func TestMimeExtension(t *testing.T) {
 	tests := []struct {
@@ -30,6 +42,51 @@ func TestMimeExtension(t *testing.T) {
 				t.Errorf("mimeExtension(%q) = %q, want %q", tt.mime, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDiscordSendUsesPartsRenderer(t *testing.T) {
+	t.Parallel()
+
+	var sentBody string
+	session, err := discordgo.New("Bot test")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	session.Client = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			body, _ := io.ReadAll(req.Body)
+			sentBody = string(body)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"id":"msg-1","channel_id":"ch-1"}`)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}, nil
+		}),
+	}
+
+	err = sendDiscordMessage(context.Background(), session, "ch-1", channel.PreparedOutboundMessage{
+		Message: channel.PreparedMessage{
+			Message: channel.Message{
+				Format: channel.MessageFormatRich,
+				Parts: []channel.MessagePart{
+					{Type: channel.MessagePartText, Text: "Hello", Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+					{Type: channel.MessagePartLink, Text: "docs", URL: "https://example.test/a"},
+					{Type: channel.MessagePartMention, Text: "@alice", ChannelIdentityID: "1234567890"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("sendDiscordMessage: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(sentBody), &payload); err != nil {
+		t.Fatalf("decode sent body: %v (body=%q)", err, sentBody)
+	}
+	want := "**Hello**\n\n[docs](https://example.test/a)\n\n<@1234567890>"
+	if payload["content"] != want {
+		t.Fatalf("Discord rich content mismatch\n  got:  %q\n  want: %q", payload["content"], want)
 	}
 }
 

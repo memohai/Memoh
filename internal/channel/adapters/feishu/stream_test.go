@@ -2,6 +2,8 @@ package feishu
 
 import (
 	"testing"
+
+	"github.com/memohai/memoh/internal/channel"
 )
 
 func TestExtractReadableFromJSON(t *testing.T) {
@@ -27,5 +29,31 @@ func TestExtractReadableFromJSON(t *testing.T) {
 				t.Errorf("extractReadableFromJSON(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRenderFeishuStreamFinalTextUsesParts(t *testing.T) {
+	t.Parallel()
+
+	msg := channel.Message{
+		Text: "plain fallback",
+		Parts: []channel.MessagePart{
+			{Type: channel.MessagePartText, Text: "Hello", Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+			{Type: channel.MessagePartLink, Text: "docs", URL: "https://example.test"},
+		},
+	}
+	got := renderFeishuStreamFinalText(msg, "buffered plain text")
+	want := "**Hello**\n\n[docs](https://example.test)"
+	if got != want {
+		t.Fatalf("expected rich parts to drive Feishu stream final\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
+func TestRenderFeishuStreamFinalTextFallsBackToBuffer(t *testing.T) {
+	t.Parallel()
+
+	got := renderFeishuStreamFinalText(channel.Message{Text: "plain fallback"}, "buffered plain text")
+	if got != "buffered plain text" {
+		t.Fatalf("expected buffered stream text, got %q", got)
 	}
 }

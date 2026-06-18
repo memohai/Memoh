@@ -704,8 +704,11 @@ func TestTelegramAdapter_SendRichPartsFallsBackToText(t *testing.T) {
 	if len(paths) != 2 {
 		t.Fatalf("expected rich send plus text fallback, got paths %v", paths)
 	}
-	if fallbackForm.Get("text") != "hello\ndocs" {
+	if fallbackForm.Get("text") != "hello\n\n<a href=\"https://example.test\">docs</a>" {
 		t.Fatalf("expected plain text fallback, got form %v", fallbackForm)
+	}
+	if fallbackForm.Get("parse_mode") != tgbotapi.ModeHTML {
+		t.Fatalf("expected HTML parse mode for rich fallback, got form %v", fallbackForm)
 	}
 }
 
