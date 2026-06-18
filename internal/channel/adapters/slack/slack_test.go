@@ -1079,6 +1079,61 @@ func TestSlackStreamFinalFallbackDeletesOldPlaceholder(t *testing.T) {
 	}
 }
 
+func TestSlackStreamFinalUsesPartsRenderer(t *testing.T) {
+	t.Parallel()
+
+	var gotText string
+	client := slack.New(
+		testBotToken,
+		slack.OptionAPIURL("https://slack.test/api/"),
+		slack.OptionHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.URL.String() != "https://slack.test/api/chat.postMessage" {
+				return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("not found")), Header: make(http.Header)}, nil
+			}
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("ParseForm: %v", err)
+			}
+			gotText = r.FormValue("text")
+			body, _ := json.Marshal(map[string]any{"ok": true, "channel": "C123", "ts": "1710000000.000500"})
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(string(body))),
+			}, nil
+		})}),
+		slack.OptionRetry(3),
+	)
+	stream := &slackOutboundStream{
+		adapter: NewSlackAdapter(nil),
+		cfg:     channel.ChannelConfig{ID: "cfg-stream-rich"},
+		target:  "C123",
+		api:     client,
+	}
+
+	if err := stream.Push(context.Background(), channel.PreparedStreamEvent{
+		Type: channel.StreamEventFinal,
+		Final: &channel.PreparedStreamFinalizePayload{
+			Message: channel.PreparedMessage{
+				Message: channel.Message{
+					Text:   "plain fallback",
+					Format: channel.MessageFormatRich,
+					Parts: []channel.MessagePart{
+						{Type: channel.MessagePartText, Text: "Hello", Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+						{Type: channel.MessagePartLink, Text: "docs", URL: "https://example.test/a"},
+					},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("rich final push: %v", err)
+	}
+
+	want := "*Hello*\n\n<https://example.test/a|docs>"
+	if gotText != want {
+		t.Fatalf("Slack stream rich text mismatch\n  got:  %q\n  want: %q", gotText, want)
+	}
+}
+
 func preparedSlackUploadAttachment(name string, mime string, content string) channel.PreparedAttachment {
 	return channel.PreparedAttachment{
 		Logical: channel.Attachment{

@@ -77,10 +77,7 @@ func (s *slackOutboundStream) Push(ctx context.Context, event channel.PreparedSt
 		s.mu.Lock()
 		bufText := strings.TrimSpace(s.buffer.String())
 		s.mu.Unlock()
-		finalText := bufText
-		if authoritative := strings.TrimSpace(event.Final.Message.Message.PlainText()); authoritative != "" {
-			finalText = authoritative
-		}
+		finalText := renderSlackStreamFinalText(event.Final.Message.Message, bufText)
 		if finalText != "" {
 			if err := s.finalizeMessage(ctx, finalText); err != nil {
 				return err
@@ -235,6 +232,16 @@ func (s *slackOutboundStream) updateMessage(ctx context.Context) error {
 		)
 	}
 	return nil
+}
+
+func renderSlackStreamFinalText(msg channel.Message, buffered string) string {
+	if rich := renderSlackMessagePartsMrkdwn(msg); rich != "" {
+		return rich
+	}
+	if authoritative := strings.TrimSpace(msg.PlainText()); authoritative != "" {
+		return authoritative
+	}
+	return strings.TrimSpace(buffered)
 }
 
 func (s *slackOutboundStream) finalizeMessage(ctx context.Context, text string) error {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -1001,5 +1002,80 @@ func TestStreamFinal_RichEditUnrecoverableFallsBackToNewRichMessage(t *testing.T
 		!strings.HasSuffix(paths[0], "/editMessageText") ||
 		!strings.HasSuffix(paths[1], "/sendRichMessage") {
 		t.Fatalf("expected failed edit followed by new rich send, got paths %v", paths)
+	}
+}
+
+func TestStreamFinal_RichSendFallbackPreservesParseMode(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	s := &telegramOutboundStream{
+		adapter: adapter,
+		cfg:     channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		target:  "123",
+	}
+	ctx := context.Background()
+
+	var sendForm url.Values
+	var editForm url.Values
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(req.Body)
+		form, err := url.ParseQuery(string(body))
+		if err != nil {
+			t.Fatalf("parse body: %v", err)
+		}
+		if strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"ok":false,"error_code":404,"description":"Not Found: method not found"}`)),
+			}, nil
+		}
+		if strings.HasSuffix(req.URL.Path, "/sendMessage") {
+			sendForm = form
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":90,"chat":{"id":123}}}`)),
+			}, nil
+		}
+		if strings.HasSuffix(req.URL.Path, "/editMessageText") {
+			editForm = form
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":90,"chat":{"id":123}}}`)),
+			}, nil
+		}
+		t.Fatalf("expected sendMessage/editMessageText fallback, got %s", req.URL.Path)
+		return nil, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{
+		Type: channel.StreamEventFinal,
+		Final: &channel.StreamFinalizePayload{
+			Message: channel.Message{
+				Format: channel.MessageFormatRich,
+				Parts: []channel.MessagePart{
+					{Type: channel.MessagePartText, Text: "hello", Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+				},
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if sendForm.Get("parse_mode") != tgbotapi.ModeHTML {
+		t.Fatalf("expected fallback send parse_mode=HTML, got form %v", sendForm)
+	}
+	if editForm.Get("parse_mode") != tgbotapi.ModeHTML {
+		t.Fatalf("expected fallback edit parse_mode=HTML, got form %v", editForm)
+	}
+	if editForm.Get("text") != "<b>hello</b>" {
+		t.Fatalf("expected HTML fallback final body, got %q", editForm.Get("text"))
 	}
 }

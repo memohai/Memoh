@@ -712,6 +712,71 @@ func TestTelegramAdapter_SendRichPartsFallsBackToText(t *testing.T) {
 	}
 }
 
+func TestTelegramAdapter_SendRichPartsFallbackEscapesLiteralMarkdown(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+
+	var fallbackForm url.Values
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(req.Body)
+		form, err := url.ParseQuery(string(body))
+		if err != nil {
+			t.Fatalf("parse body: %v", err)
+		}
+		if strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"ok":false,"error_code":404,"description":"Not Found: method not found"}`)),
+			}, nil
+		}
+		if !strings.HasSuffix(req.URL.Path, "/sendMessage") {
+			t.Fatalf("expected fallback sendMessage, got %s", req.URL.Path)
+		}
+		fallbackForm = form
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":79,"chat":{"id":123}}}`)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	msg := channel.PreparedOutboundMessage{
+		Target: "123",
+		Message: channel.PreparedMessage{Message: channel.Message{
+			Format: channel.MessageFormatRich,
+			Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: `literal [evil](https://evil.test) <tag>`},
+				{Type: channel.MessagePartLink, Text: `docs "quoted"`, URL: `https://example.test/?q="x"&ok=1`},
+			},
+		}},
+	}
+
+	if err := adapter.Send(context.Background(), channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}}, msg); err != nil {
+		t.Fatalf("send rich parts with fallback: %v", err)
+	}
+	text := fallbackForm.Get("text")
+	if strings.Contains(text, `<a href="https://evil.test">`) {
+		t.Fatalf("literal markdown text became a link in fallback: %q", text)
+	}
+	for _, want := range []string{
+		`literal [evil](https://evil.test) &lt;tag&gt;`,
+		`<a href="https://example.test/?q=&quot;x&quot;&amp;ok=1">docs "quoted"</a>`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected fallback text to contain %q, got %q", want, text)
+		}
+	}
+	if fallbackForm.Get("parse_mode") != tgbotapi.ModeHTML {
+		t.Fatalf("expected HTML parse mode for rich fallback, got form %v", fallbackForm)
+	}
+}
+
 func TestTelegramAdapter_UpdateRichPartsUsesRichMessage(t *testing.T) {
 	adapter := NewTelegramAdapter(nil)
 

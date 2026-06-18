@@ -68,8 +68,8 @@ func (s *discordOutboundStream) Push(ctx context.Context, event channel.Prepared
 		bufText := strings.TrimSpace(s.buffer.String())
 		s.mu.Unlock()
 		finalText := bufText
-		if finalText == "" && event.Final != nil && !event.Final.Message.Message.IsEmpty() {
-			finalText = strings.TrimSpace(event.Final.Message.Message.PlainText())
+		if event.Final != nil && !event.Final.Message.Message.IsEmpty() {
+			finalText = renderDiscordStreamFinalText(event.Final.Message.Message, bufText)
 		}
 		if finalText != "" {
 			return s.finalizeMessage(finalText)
@@ -138,6 +138,16 @@ func (s *discordOutboundStream) Close(ctx context.Context) error {
 	}
 	s.closed.Store(true)
 	return nil
+}
+
+func renderDiscordStreamFinalText(msg channel.Message, buffered string) string {
+	if rich := renderDiscordMessagePartsMarkdown(msg); rich != "" {
+		return rich
+	}
+	if text := strings.TrimSpace(buffered); text != "" {
+		return text
+	}
+	return strings.TrimSpace(msg.PlainText())
 }
 
 func (s *discordOutboundStream) ensureMessage(text string) error {

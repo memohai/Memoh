@@ -3,6 +3,8 @@ package telegram
 import (
 	"strings"
 
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+
 	"github.com/memohai/memoh/internal/channel"
 )
 
@@ -41,7 +43,79 @@ func renderTelegramPartsFallbackText(msg channel.Message) (string, string) {
 		text := strings.TrimSpace(msg.PlainText())
 		return formatTelegramOutput(text, msg.Format)
 	}
-	return formatTelegramOutput(channel.RenderPartsAsMarkdown(msg.Parts), channel.MessageFormatMarkdown)
+	return renderTelegramMessagePartsHTMLFallback(msg), tgbotapi.ModeHTML
+}
+
+func renderTelegramMessagePartsHTMLFallback(msg channel.Message) string {
+	if len(msg.Parts) == 0 {
+		return ""
+	}
+	blocks := make([]string, 0, len(msg.Parts))
+	for _, part := range msg.Parts {
+		switch part.Type {
+		case channel.MessagePartText:
+			if text := strings.TrimSpace(part.Text); text != "" {
+				blocks = append(blocks, renderTelegramStyledInline(text, part.Styles))
+			}
+		case channel.MessagePartLink:
+			if block := renderTelegramLinkFallback(part); block != "" {
+				blocks = append(blocks, block)
+			}
+		case channel.MessagePartCodeBlock:
+			if block := renderTelegramCodeBlockFallback(part); block != "" {
+				blocks = append(blocks, block)
+			}
+		case channel.MessagePartMention:
+			if block := renderTelegramMentionFallback(part); block != "" {
+				blocks = append(blocks, block)
+			}
+		case channel.MessagePartEmoji:
+			text := strings.TrimSpace(part.Text)
+			if text == "" {
+				text = strings.TrimSpace(part.Emoji)
+			}
+			if text != "" {
+				blocks = append(blocks, renderTelegramStyledInline(text, part.Styles))
+			}
+		}
+	}
+	return strings.TrimSpace(strings.Join(blocks, "\n\n"))
+}
+
+func renderTelegramLinkFallback(part channel.MessagePart) string {
+	url := strings.TrimSpace(part.URL)
+	text := strings.TrimSpace(part.Text)
+	if text == "" {
+		text = url
+	}
+	if text == "" {
+		return ""
+	}
+	if url == "" || !isAllowedTelegramRichHref(url) {
+		return renderTelegramStyledInline(text, part.Styles)
+	}
+	return `<a href="` + telegramEscapeAttr(url) + `">` + telegramEscapeHTML(text) + `</a>`
+}
+
+func renderTelegramMentionFallback(part channel.MessagePart) string {
+	id := strings.TrimSpace(part.ChannelIdentityID)
+	text := strings.TrimSpace(part.Text)
+	if id == "" || !isTelegramNumericMentionID(id) || text == "" {
+		return renderTelegramStyledInline(part.Text, part.Styles)
+	}
+	return `<a href="tg://user?id=` + id + `">` + telegramEscapeHTML(text) + `</a>`
+}
+
+func renderTelegramCodeBlockFallback(part channel.MessagePart) string {
+	text := strings.Trim(part.Text, "\n\r")
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	lang := telegramRichLanguage(part.Language)
+	if lang != "" {
+		return `<pre><code class="language-` + telegramEscapeAttr(lang) + `">` + telegramEscapeHTML(text) + `</code></pre>`
+	}
+	return "<pre>" + telegramEscapeHTML(text) + "</pre>"
 }
 
 func writeTelegramRichInlinePart(b *strings.Builder, text string, styles []channel.MessageTextStyle) {
@@ -99,8 +173,8 @@ func isTelegramNumericMentionID(id string) bool {
 }
 
 func writeTelegramRichCodeBlockPart(b *strings.Builder, part channel.MessagePart) {
-	text := strings.TrimSpace(part.Text)
-	if text == "" {
+	text := strings.Trim(part.Text, "\n\r")
+	if strings.TrimSpace(text) == "" {
 		return
 	}
 	lang := telegramRichLanguage(part.Language)

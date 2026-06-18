@@ -321,6 +321,11 @@ func (s *telegramOutboundStream) deliverFinalText(ctx context.Context, text, par
 	if s.isPrivateChat {
 		return s.sendPermanentMessage(ctx, text, parseMode)
 	}
+	if parseMode != "" {
+		s.mu.Lock()
+		s.parseMode = parseMode
+		s.mu.Unlock()
+	}
 	if err := s.ensureStreamMessage(ctx, text); err != nil {
 		return err
 	}

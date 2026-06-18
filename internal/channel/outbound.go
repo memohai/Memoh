@@ -370,8 +370,8 @@ func (m *Manager) sendWithConfig(ctx context.Context, sender Sender, cfg Channel
 	}
 	normalized.Message.Attachments = attachments
 	// Coerce Format down to what the channel can render BEFORE validation.
-	// Only Markdown→Plain degrades losslessly; other format/cap mismatches
-	// still fail validation below.
+	// Rich Parts degrade to Markdown/Plain when needed; Markdown degrades to
+	// Plain on plain-only channels.
 	if caps, ok := m.registry.GetCapabilities(cfg.ChannelType); ok {
 		normalized.Message = coerceFormatForCaps(normalized.Message, caps)
 	}
@@ -823,6 +823,16 @@ func (s *managerOutboundStream) pushFinalWithChunking(ctx context.Context, event
 	if text == "" || runeLen(text) <= policy.TextChunkLimit {
 		if s.manager.logger != nil {
 			s.manager.logger.Debug("stream final chunking skipped: text within limit",
+				slog.String("channel", s.channelType.String()),
+				slog.Int("text_runes", textRunes),
+				slog.Int("chunk_limit", policy.TextChunkLimit),
+			)
+		}
+		return s.pushPrepared(ctx, event)
+	}
+	if len(msg.Parts) > 0 {
+		if s.manager.logger != nil {
+			s.manager.logger.Debug("stream final chunking skipped: rich parts preserve adapter renderer",
 				slog.String("channel", s.channelType.String()),
 				slog.Int("text_runes", textRunes),
 				slog.Int("chunk_limit", policy.TextChunkLimit),

@@ -14,6 +14,7 @@ type streamValidationAdapter struct {
 	channelType    ChannelType
 	outboundPolicy OutboundPolicy
 	noMarkdown     bool // when true, advertise a plain-text-only channel
+	richText       bool
 }
 
 func (a *streamValidationAdapter) Type() ChannelType {
@@ -27,6 +28,7 @@ func (a *streamValidationAdapter) Descriptor() Descriptor {
 		Capabilities: ChannelCapabilities{
 			Text:           true,
 			Markdown:       !a.noMarkdown,
+			RichText:       a.richText,
 			Attachments:    true,
 			Streaming:      true,
 			BlockStreaming: true,
@@ -385,6 +387,61 @@ func TestPushFinalWithChunking_MarkdownFormat(t *testing.T) {
 	}
 	if (*sent)[0].Message.Format != MessageFormatMarkdown {
 		t.Fatal("overflow chunk should preserve markdown format")
+	}
+}
+
+func TestPushFinalWithChunking_RichPartsStayOnPreparedStream(t *testing.T) {
+	t.Parallel()
+
+	channelType := ChannelType("richstream")
+	registry := NewRegistry()
+	adapter := &streamValidationAdapter{
+		channelType:    channelType,
+		outboundPolicy: OutboundPolicy{TextChunkLimit: 20},
+		richText:       true,
+	}
+	if err := registry.Register(adapter); err != nil {
+		t.Fatalf("register adapter failed: %v", err)
+	}
+	manager := &Manager{registry: registry, attachmentStore: channeltest.NewMemoryAttachmentStore()}
+	rec := &recordingStream{}
+	var sent []OutboundMessage
+	stream := &managerOutboundStream{
+		manager:     manager,
+		config:      ChannelConfig{BotID: "bot-1", ChannelType: channelType},
+		stream:      rec,
+		channelType: channelType,
+		policy:      manager.resolveOutboundPolicy(channelType),
+		send: func(_ context.Context, msg OutboundMessage) error {
+			sent = append(sent, msg)
+			return nil
+		},
+	}
+
+	event := StreamEvent{
+		Type: StreamEventFinal,
+		Final: &StreamFinalizePayload{
+			Message: Message{
+				Format: MessageFormatRich,
+				Parts: []MessagePart{
+					{Type: MessagePartText, Text: strings.Repeat("rich ", 20), Styles: []MessageTextStyle{MessageStyleBold}},
+				},
+			},
+		},
+	}
+	if err := stream.Push(context.Background(), event); err != nil {
+		t.Fatalf("Push failed: %v", err)
+	}
+
+	events := rec.Events()
+	if len(events) != 1 {
+		t.Fatalf("expected rich final to stay on prepared stream, got %d events", len(events))
+	}
+	if got := events[0].Final.Message; got.Format != MessageFormatRich || len(got.Parts) != 1 {
+		t.Fatalf("expected rich parts preserved on prepared stream, got %+v", got)
+	}
+	if len(sent) != 0 {
+		t.Fatalf("expected no overflow plain sends for rich parts, got %d", len(sent))
 	}
 }
 
