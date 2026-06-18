@@ -76,6 +76,23 @@ export interface FsChangeBatch {
   paths: ReadonlySet<string> | null
 }
 
+export type FsToolKind = 'write' | 'edit' | 'apply_patch' | 'exec'
+
+// Rich metadata for fs-mutating tool calls that landed on a known absolute
+// path. Stored per-path so the file viewer can show context (which agent, when,
+// what was written) and so the Compare flow can diff against the agent's
+// content without an extra round-trip.
+export interface FsChangeEvent {
+  at: number
+  path: string
+  kind: FsToolKind
+  toolCallId: string
+  sessionId: string
+  writeContent?: string
+  editOldText?: string
+  editNewText?: string
+}
+
 export interface ChatUserTurn {
   id: string
   serverId?: string
@@ -270,10 +287,16 @@ export const useChatStore = defineStore('chat', () => {
   // exec and other unknown-impact triggers) so consumers can filter by path.
   const fsChangedAt = ref(0)
   const lastFsChange = ref<FsChangeBatch | null>(null)
+  // Most recent rich event per absolute path. Powers the file-viewer chip's
+  // "who did what" context and the Compare view's diff baseline. Wildcard
+  // events (exec / apply_patch / relative paths) are intentionally absent —
+  // those still fire fsChangedAt but contribute no per-path metadata.
+  const lastFsEvents = ref<Map<string, FsChangeEvent>>(new Map())
   const FS_MUTATING_TOOLS = new Set(['write', 'edit', 'apply_patch', 'exec'])
   const FS_CHANGED_DEBOUNCE_MS = 150
   let fsChangedBumpTimer: ReturnType<typeof setTimeout> | null = null
   let pendingFsPaths: Set<string> | null = new Set()
+  let pendingFsEvents = new Map<string, FsChangeEvent>()
   // Bot at the moment the in-flight batch started. If currentBotId changes
   // before the timer fires, the batch belongs to the old bot and we drop it
   // rather than leak it into the new bot's UI.
@@ -295,12 +318,19 @@ export const useChatStore = defineStore('chat', () => {
       fsChangedBumpTimer = null
       const recordedBotId = pendingFsBotId
       const paths = pendingFsPaths
+      const events = pendingFsEvents
       pendingFsBotId = null
       pendingFsPaths = new Set()
+      pendingFsEvents = new Map()
       if (recordedBotId !== currentBotId.value) return
       const at = Date.now()
       lastFsChange.value = { at, paths }
       fsChangedAt.value = at
+      if (events.size > 0) {
+        const next = new Map(lastFsEvents.value)
+        for (const [p, ev] of events) next.set(p, ev)
+        lastFsEvents.value = next
+      }
     }, FS_CHANGED_DEBOUNCE_MS)
   }
 
@@ -310,6 +340,7 @@ export const useChatStore = defineStore('chat', () => {
       fsChangedBumpTimer = null
     }
     pendingFsPaths = new Set()
+    pendingFsEvents = new Map()
     pendingFsBotId = null
   }
 
@@ -318,6 +349,10 @@ export const useChatStore = defineStore('chat', () => {
     if (!change) return false
     if (change.paths === null) return true
     return change.paths.has(path)
+  }
+
+  function fsEventForPath(path: string): FsChangeEvent | null {
+    return lastFsEvents.value.get(path) ?? null
   }
 
   function extractToolMessagePath(message: UIMessage): string | null {
@@ -334,6 +369,28 @@ export const useChatStore = defineStore('chat', () => {
     return path
   }
 
+  function buildFsChangeEvent(message: UIMessage, path: string, callId: string): FsChangeEvent | null {
+    if (message.type !== 'tool') return null
+    const input = message.input
+    const event: FsChangeEvent = {
+      at: Date.now(),
+      path,
+      kind: message.name as FsToolKind,
+      toolCallId: callId,
+      sessionId: (sessionId.value ?? '').trim(),
+    }
+    if (typeof input === 'object' && input !== null) {
+      const rec = input as Record<string, unknown>
+      if (message.name === 'write' && typeof rec.content === 'string') {
+        event.writeContent = rec.content
+      } else if (message.name === 'edit') {
+        if (typeof rec.old_text === 'string') event.editOldText = rec.old_text
+        if (typeof rec.new_text === 'string') event.editNewText = rec.new_text
+      }
+    }
+    return event
+  }
+
   function bumpFsChangedAtIfFsMutation(message: UIMessage) {
     if (message.type !== 'tool') return
     if (message.running) return
@@ -347,6 +404,10 @@ export const useChatStore = defineStore('chat', () => {
     const path = (message.name === 'write' || message.name === 'edit')
       ? extractToolMessagePath(message)
       : null
+    if (path) {
+      const event = buildFsChangeEvent(message, path, callId)
+      if (event) pendingFsEvents.set(path, event)
+    }
     markFsChanged(path)
   }
 
@@ -1481,6 +1542,7 @@ export const useChatStore = defineStore('chat', () => {
     cancelPendingFsBump()
     fsChangedAt.value = 0
     lastFsChange.value = null
+    lastFsEvents.value = new Map()
     seenFsToolCallIds.clear()
     clearPendingACPSession()
 
@@ -2308,6 +2370,7 @@ export const useChatStore = defineStore('chat', () => {
     clearPendingACPSession()
     cancelPendingFsBump()
     lastFsChange.value = null
+    lastFsEvents.value = new Map()
     seenFsToolCallIds.clear()
     currentBotId.value = targetBotId
     sessionId.value = null
@@ -2594,8 +2657,10 @@ export const useChatStore = defineStore('chat', () => {
     startupSendFailure,
     fsChangedAt,
     lastFsChange,
+    lastFsEvents,
     markFsChanged,
     affectsPath,
+    fsEventForPath,
     initialize,
     selectBot,
     selectSession,

@@ -1739,8 +1739,23 @@
       "deleteSuccess": "删除成功",
       "batchDeletePartialFailed": "{failed}/{total} 项删除失败",
       "deleteFailed": "删除失败",
-      "externalChangeNotice": "Agent 已在工作区中更新此文件",
-      "externalChangeReload": "重新加载"
+      "externalChange": {
+        "fallbackAgent": "Agent",
+        "wrote": "{agent} 写入了 {lines} 行 · {time}",
+        "edited": "{agent} 修改了（+{added} / -{removed}）· {time}",
+        "ran": "{agent} 执行了命令 · {time}",
+        "patched": "{agent} 应用了补丁 · {time}",
+        "generic": "{agent} 更新了此文件 · {time}",
+        "reload": "重新加载",
+        "compare": "对比",
+        "saveAnyway": "强制保存"
+      },
+      "compare": {
+        "yours": "你的编辑",
+        "disk": "工作区中",
+        "close": "关闭"
+      },
+      "compareLoadFailed": "无法加载工作区版本用于对比"
     },
     "email": {
       "title": "邮件",

@@ -1739,8 +1739,23 @@
       "deleteSuccess": "Deleted successfully",
       "batchDeletePartialFailed": "{failed}/{total} items failed to delete",
       "deleteFailed": "Failed to delete",
-      "externalChangeNotice": "Agent updated this file in the workspace",
-      "externalChangeReload": "Reload"
+      "externalChange": {
+        "fallbackAgent": "The agent",
+        "wrote": "{agent} wrote {lines} lines · {time}",
+        "edited": "{agent} edited (+{added} / -{removed}) · {time}",
+        "ran": "{agent} ran a command · {time}",
+        "patched": "{agent} applied a patch · {time}",
+        "generic": "{agent} updated this file · {time}",
+        "reload": "Reload",
+        "compare": "Compare",
+        "saveAnyway": "Save anyway"
+      },
+      "compare": {
+        "yours": "Your edits",
+        "disk": "On disk",
+        "close": "Close"
+      },
+      "compareLoadFailed": "Could not load the workspace version for comparison"
     },
     "email": {
       "title": "Email",

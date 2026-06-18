@@ -2051,6 +2051,298 @@ describe('fs-mutating tool path extraction', () => {
   })
 })
 
+describe('fs change events per-path metadata', () => {
+  let lastStreamId = ''
+  let lastSessionId = ''
+  let sendEvents: UIStreamEvent[]
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    lastStreamId = ''
+    lastSessionId = ''
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      { type: 'error', message: 'done' } as UIStreamEvent,
+    ]
+    vi.clearAllMocks()
+    api.fetchBots.mockResolvedValue([{ id: 'bot-1', status: 'active', name: 'Bot 1' }])
+    api.fetchSessions.mockResolvedValue([
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ])
+    api.createSession.mockResolvedValue({
+      id: 'session-1',
+      bot_id: 'bot-1',
+      title: 'Chat',
+      type: 'chat',
+    })
+    api.fetchMessagesUI.mockResolvedValue([])
+    api.streamMessageEvents.mockImplementation((_botId: string, signal: AbortSignal) => new Promise<void>((resolve) => {
+      signal.addEventListener('abort', () => resolve(), { once: true })
+    }))
+    api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
+      return {
+        get connected() { return true },
+        send: vi.fn((message: { stream_id?: string; session_id?: string }) => {
+          lastStreamId = message.stream_id ?? ''
+          lastSessionId = message.session_id ?? ''
+          for (const event of sendEvents) {
+            onStreamEvent({
+              ...event,
+              stream_id: lastStreamId,
+              session_id: lastSessionId,
+            } as UIStreamEvent)
+          }
+        }),
+        abort: vi.fn(),
+        close: vi.fn(),
+        onOpen: null,
+        onClose: null,
+      }
+    })
+  })
+
+  it('records writeContent on the per-path event for a write tool', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'write',
+          tool_call_id: 'call-w',
+          input: { path: '/data/foo.ts', content: 'hello\nworld\n' },
+          running: false,
+        },
+      } as UIStreamEvent,
+      { type: 'error', message: 'done' } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await store.sendMessage('write foo')
+    await new Promise(resolve => setTimeout(resolve, 200))
+
+    const event = store.fsEventForPath('/data/foo.ts')
+    expect(event).not.toBe(null)
+    expect(event?.kind).toBe('write')
+    expect(event?.toolCallId).toBe('call-w')
+    expect(event?.writeContent).toBe('hello\nworld\n')
+    expect(event?.sessionId).toBe('session-1')
+  })
+
+  it('records old_text/new_text on the event for an edit tool', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'edit',
+          tool_call_id: 'call-e',
+          input: {
+            path: '/data/bar.ts',
+            old_text: 'old line',
+            new_text: 'new line one\nnew line two',
+          },
+          running: false,
+        },
+      } as UIStreamEvent,
+      { type: 'error', message: 'done' } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await store.sendMessage('edit bar')
+    await new Promise(resolve => setTimeout(resolve, 200))
+
+    const event = store.fsEventForPath('/data/bar.ts')
+    expect(event).not.toBe(null)
+    expect(event?.kind).toBe('edit')
+    expect(event?.editOldText).toBe('old line')
+    expect(event?.editNewText).toBe('new line one\nnew line two')
+  })
+
+  it('does not record per-path events for relative paths', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'write',
+          tool_call_id: 'call-rel',
+          input: { path: 'foo.ts', content: 'x' },
+          running: false,
+        },
+      } as UIStreamEvent,
+      { type: 'error', message: 'done' } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await store.sendMessage('write rel')
+    await new Promise(resolve => setTimeout(resolve, 200))
+
+    expect(store.fsEventForPath('/data/foo.ts')).toBe(null)
+    expect(store.fsEventForPath('foo.ts')).toBe(null)
+  })
+
+  it('does not record per-path events for exec (no path known)', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'exec',
+          tool_call_id: 'call-x',
+          input: { command: 'rm /data/x' },
+          running: false,
+        },
+      } as UIStreamEvent,
+      { type: 'error', message: 'done' } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await store.sendMessage('exec')
+    await new Promise(resolve => setTimeout(resolve, 200))
+
+    expect(store.fsEventForPath('/data/x')).toBe(null)
+    expect(store.lastFsEvents.size).toBe(0)
+  })
+
+  it('later write to the same path overwrites the earlier event', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'write',
+          tool_call_id: 'call-w-1',
+          input: { path: '/data/foo.ts', content: 'first' },
+          running: false,
+        },
+      } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 2,
+          type: 'tool',
+          name: 'write',
+          tool_call_id: 'call-w-2',
+          input: { path: '/data/foo.ts', content: 'second' },
+          running: false,
+        },
+      } as UIStreamEvent,
+      { type: 'error', message: 'done' } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await store.sendMessage('write twice')
+    await new Promise(resolve => setTimeout(resolve, 200))
+
+    expect(store.fsEventForPath('/data/foo.ts')?.writeContent).toBe('second')
+  })
+
+  it('keeps independent events for distinct absolute paths in the same batch', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'write',
+          tool_call_id: 'call-a',
+          input: { path: '/data/a.md', content: 'aa' },
+          running: false,
+        },
+      } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 2,
+          type: 'tool',
+          name: 'edit',
+          tool_call_id: 'call-b',
+          input: { path: '/data/b.md', old_text: 'old', new_text: 'new' },
+          running: false,
+        },
+      } as UIStreamEvent,
+      { type: 'error', message: 'done' } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await store.sendMessage('two paths')
+    await new Promise(resolve => setTimeout(resolve, 200))
+
+    expect(store.fsEventForPath('/data/a.md')?.writeContent).toBe('aa')
+    expect(store.fsEventForPath('/data/b.md')?.editNewText).toBe('new')
+    expect(store.lastFsEvents.size).toBe(2)
+  })
+
+  it('clears lastFsEvents when the user switches to another bot', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'write',
+          tool_call_id: 'call-c',
+          input: { path: '/data/c.md', content: 'c' },
+          running: false,
+        },
+      } as UIStreamEvent,
+      { type: 'error', message: 'done' } as UIStreamEvent,
+    ]
+    api.fetchBots.mockResolvedValue([
+      { id: 'bot-1', status: 'active', name: 'Bot 1' },
+      { id: 'bot-2', status: 'active', name: 'Bot 2' },
+    ])
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await store.sendMessage('write')
+    await new Promise(resolve => setTimeout(resolve, 200))
+    expect(store.fsEventForPath('/data/c.md')).not.toBe(null)
+
+    await store.selectBot('bot-2')
+    expect(store.lastFsEvents.size).toBe(0)
+    expect(store.fsEventForPath('/data/c.md')).toBe(null)
+  })
+
+  it('records a write event even when input.content is missing (no diff content)', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'write',
+          tool_call_id: 'call-d',
+          input: { path: '/data/d.md' }, // no content field
+          running: false,
+        },
+      } as UIStreamEvent,
+      { type: 'error', message: 'done' } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await store.sendMessage('write no content')
+    await new Promise(resolve => setTimeout(resolve, 200))
+
+    const event = store.fsEventForPath('/data/d.md')
+    expect(event).not.toBe(null)
+    expect(event?.kind).toBe('write')
+    expect(event?.writeContent).toBeUndefined()
+  })
+})
+
 describe('fs bump bot-switch isolation', () => {
   beforeEach(() => {
     setActivePinia(createPinia())

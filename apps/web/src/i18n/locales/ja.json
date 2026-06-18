@@ -1753,8 +1753,23 @@
       "deleteSuccess": "正常に削除されました",
       "batchDeletePartialFailed": "{failed}/{total} アイテムを削除できませんでした",
       "deleteFailed": "削除に失敗しました",
-      "externalChangeNotice": "Agent がワークスペースでこのファイルを更新しました",
-      "externalChangeReload": "再読み込み"
+      "externalChange": {
+        "fallbackAgent": "Agent",
+        "wrote": "{agent} が {lines} 行を書き込みました · {time}",
+        "edited": "{agent} が編集しました（+{added} / -{removed}）· {time}",
+        "ran": "{agent} がコマンドを実行しました · {time}",
+        "patched": "{agent} がパッチを適用しました · {time}",
+        "generic": "{agent} がこのファイルを更新しました · {time}",
+        "reload": "再読み込み",
+        "compare": "比較",
+        "saveAnyway": "強制保存"
+      },
+      "compare": {
+        "yours": "あなたの編集",
+        "disk": "ワークスペース",
+        "close": "閉じる"
+      },
+      "compareLoadFailed": "比較用のワークスペースのバージョンを読み込めませんでした"
     },
     "email": {
       "title": "Email",
