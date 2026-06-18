@@ -1200,20 +1200,42 @@ func telegramInlineKeyboard(actions []channel.Action) tgbotapi.InlineKeyboardMar
 	rowButtons := make(map[int][]tgbotapi.InlineKeyboardButton, len(actions))
 	for _, action := range actions {
 		label := strings.TrimSpace(action.Label)
-		value := strings.TrimSpace(action.Value)
-		if label == "" || value == "" {
+		if label == "" {
+			continue
+		}
+		btn, ok := telegramActionButton(label, action)
+		if !ok {
 			continue
 		}
 		if _, ok := rowButtons[action.Row]; !ok {
 			rowOrder = append(rowOrder, action.Row)
 		}
-		rowButtons[action.Row] = append(rowButtons[action.Row], tgbotapi.NewInlineKeyboardButtonData(label, value))
+		rowButtons[action.Row] = append(rowButtons[action.Row], btn)
 	}
 	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(rowOrder))
 	for _, r := range rowOrder {
 		rows = append(rows, rowButtons[r])
 	}
 	return tgbotapi.NewInlineKeyboardMarkup(rows...)
+}
+
+// telegramActionButton renders a single Action as a Telegram inline-keyboard
+// button. A URL — when present and pointing at a safe http(s) scheme — wins
+// over Value: a single tap cannot route through both callback data AND a URL,
+// and the URL is the action that gives the user immediate visible feedback.
+// Unsafe URL schemes (javascript:, data:, tg://) are rejected outright so an
+// attacker-supplied URL can't open a privileged app handler.
+func telegramActionButton(label string, action channel.Action) (tgbotapi.InlineKeyboardButton, bool) {
+	if url := strings.TrimSpace(action.URL); url != "" {
+		if !isAllowedTelegramRichHref(url) {
+			return tgbotapi.InlineKeyboardButton{}, false
+		}
+		return tgbotapi.NewInlineKeyboardButtonURL(label, url), true
+	}
+	if value := strings.TrimSpace(action.Value); value != "" {
+		return tgbotapi.NewInlineKeyboardButtonData(label, value), true
+	}
+	return tgbotapi.InlineKeyboardButton{}, false
 }
 
 var sendDraftForTest func(bot *tgbotapi.BotAPI, chatID int64, draftID int, text string, parseMode string) error
