@@ -146,8 +146,20 @@ async function syncStoreFromUrl(rawName: string) {
 
 watch(
   () => [route.name, route.params.botName] as const,
-  ([routeName, paramBotName]) => {
+  ([routeName, paramBotName], prev) => {
     if (!CHAT_ROUTE_NAMES.has(routeName as string)) return
+    // Returning to chat from a non-chat route (settings overlay): per-bot config
+    // edited there — enabled agents, model, name — won't have reached the store,
+    // which loads bots once and isn't wired to the settings query cache. Re-pull
+    // so the composer's agent menu reflects the change. Fire-and-forget; the bot
+    // list swaps in place and currentBot recomputes. Skips the initial run (no
+    // prev) since initialize() already loads a fresh list. Desktop is a separate
+    // window whose route never enters settings — it refreshes via the
+    // cross-window invalidate listener in the renderer bootstrap instead.
+    const prevName = prev?.[0] as string | undefined
+    if (prevName !== undefined && !CHAT_ROUTE_NAMES.has(prevName)) {
+      void chatStore.refreshBots()
+    }
     void syncStoreFromUrl((paramBotName as string) ?? '')
   },
   { immediate: true },
