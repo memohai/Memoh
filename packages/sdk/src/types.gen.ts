@@ -1788,6 +1788,11 @@ export type HandlersFsOpResponse = {
     revision?: string;
 };
 
+export type HandlersListSessionsResponse = {
+    items?: Array<SessionSession>;
+    next_cursor?: string;
+};
+
 export type HandlersMemoryAddPayload = {
     embedding_enabled?: boolean;
     filters?: {
@@ -6674,7 +6679,11 @@ export type GetBotsByBotIdMessagesData = {
          */
         bot_id: string;
     };
-    query?: {
+    query: {
+        /**
+         * Session ID
+         */
+        session_id: string;
         /**
          * Limit
          */
@@ -6696,6 +6705,10 @@ export type GetBotsByBotIdMessagesErrors = {
      * Forbidden
      */
     403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
     /**
      * Internal Server Error
      */
@@ -7411,7 +7424,20 @@ export type GetBotsByBotIdSessionsData = {
          */
         bot_id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Comma-separated session types to include. Defaults to user-facing types (chat,discuss,acp_agent).
+         */
+        types?: string;
+        /**
+         * Page size (1..200). Defaults to 50.
+         */
+        limit?: number;
+        /**
+         * Opaque cursor returned as next_cursor on a previous page.
+         */
+        cursor?: string;
+    };
     url: '/bots/{bot_id}/sessions';
 };
 
@@ -7432,9 +7458,7 @@ export type GetBotsByBotIdSessionsResponses = {
     /**
      * OK
      */
-    200: {
-        [key: string]: Array<SessionSession>;
-    };
+    200: HandlersListSessionsResponse;
 };
 
 export type GetBotsByBotIdSessionsResponse = GetBotsByBotIdSessionsResponses[keyof GetBotsByBotIdSessionsResponses];
@@ -7475,6 +7499,44 @@ export type PostBotsByBotIdSessionsResponses = {
 };
 
 export type PostBotsByBotIdSessionsResponse = PostBotsByBotIdSessionsResponses[keyof PostBotsByBotIdSessionsResponses];
+
+export type GetBotsByBotIdSessionsEventsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/events';
+};
+
+export type GetBotsByBotIdSessionsEventsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdSessionsEventsError = GetBotsByBotIdSessionsEventsErrors[keyof GetBotsByBotIdSessionsEventsErrors];
+
+export type GetBotsByBotIdSessionsEventsResponses = {
+    /**
+     * SSE stream
+     */
+    200: string;
+};
+
+export type GetBotsByBotIdSessionsEventsResponse = GetBotsByBotIdSessionsEventsResponses[keyof GetBotsByBotIdSessionsEventsResponses];
 
 export type DeleteBotsByBotIdSessionsBySessionIdData = {
     body?: never;
@@ -7765,6 +7827,52 @@ export type PostBotsByBotIdSessionsBySessionIdCompactResponses = {
 };
 
 export type PostBotsByBotIdSessionsBySessionIdCompactResponse = PostBotsByBotIdSessionsBySessionIdCompactResponses[keyof PostBotsByBotIdSessionsBySessionIdCompactResponses];
+
+export type GetBotsByBotIdSessionsBySessionIdMessagesEventsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/messages/events';
+};
+
+export type GetBotsByBotIdSessionsBySessionIdMessagesEventsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdMessagesEventsError = GetBotsByBotIdSessionsBySessionIdMessagesEventsErrors[keyof GetBotsByBotIdSessionsBySessionIdMessagesEventsErrors];
+
+export type GetBotsByBotIdSessionsBySessionIdMessagesEventsResponses = {
+    /**
+     * SSE stream
+     */
+    200: string;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdMessagesEventsResponse = GetBotsByBotIdSessionsBySessionIdMessagesEventsResponses[keyof GetBotsByBotIdSessionsBySessionIdMessagesEventsResponses];
 
 export type GetBotsByBotIdSessionsBySessionIdStatusData = {
     body?: never;
