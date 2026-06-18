@@ -353,6 +353,20 @@ func TestIsUsableExecutableAllowsWindowsFilesWithoutExecuteBits(t *testing.T) {
 	}
 }
 
+func TestSessionRemoveTrackDefersEncoderStopUntilIdleHold(t *testing.T) {
+	sess := newSession(NewService(nil, nil), "bot-1", "gst-launch-1.0", CodecVP8)
+	trackID := "track-1"
+	sess.addTrack(trackID, nil)
+
+	sess.removeTrack(trackID)
+
+	select {
+	case <-sess.ctx.Done():
+		t.Fatal("encoder must stay warm briefly after the last viewer disconnects")
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
 func containsString(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
