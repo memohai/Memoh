@@ -194,6 +194,14 @@ declare module '@memohai/web/store/user' {
   }
 }
 
+declare module '@memohai/web/store/chat-list' {
+  // Desktop only needs to re-pull the bot snapshot when a sibling window
+  // invalidates bot config, so the composer's agent menu stays current.
+  export function useChatStore(pinia?: unknown): {
+    refreshBots: () => Promise<void>
+  }
+}
+
 declare module '@memohai/web/store/capabilities' {
   export function useCapabilitiesStore(): {
     localWorkspaceEnabled: boolean
