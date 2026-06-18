@@ -45,6 +45,7 @@ const (
 	displayProbePeriod   = 5 * time.Second
 	socketProbeTimeout   = 300 * time.Millisecond
 	stalePeerTTL         = 2 * time.Minute
+	encoderIdleHold      = 90 * time.Second
 	screenshotTimeout    = 15 * time.Second
 	screenshotWidth      = 1280
 	screenshotQuality    = 82
@@ -494,6 +495,9 @@ type session struct {
 	peersMu sync.RWMutex
 	peers   map[string]*peerSession
 
+	idleStopMu    sync.Mutex
+	idleStopTimer *time.Timer
+
 	stopOnce sync.Once
 }
 
@@ -802,6 +806,7 @@ func (s *session) addTrack(id string, track *webrtc.TrackLocalStaticRTP) {
 	s.tracksMu.Lock()
 	s.tracks[id] = track
 	s.tracksMu.Unlock()
+	s.cancelIdleStop()
 }
 
 func (s *session) removeTrack(id string) {
@@ -810,7 +815,32 @@ func (s *session) removeTrack(id string) {
 	empty := len(s.tracks) == 0
 	s.tracksMu.Unlock()
 	if empty {
-		go s.stop()
+		s.scheduleIdleStop()
+	}
+}
+
+func (s *session) scheduleIdleStop() {
+	s.idleStopMu.Lock()
+	defer s.idleStopMu.Unlock()
+	if s.idleStopTimer != nil {
+		s.idleStopTimer.Stop()
+	}
+	s.idleStopTimer = time.AfterFunc(encoderIdleHold, func() {
+		s.tracksMu.RLock()
+		empty := len(s.tracks) == 0
+		s.tracksMu.RUnlock()
+		if empty && !s.closed() {
+			s.stop()
+		}
+	})
+}
+
+func (s *session) cancelIdleStop() {
+	s.idleStopMu.Lock()
+	defer s.idleStopMu.Unlock()
+	if s.idleStopTimer != nil {
+		s.idleStopTimer.Stop()
+		s.idleStopTimer = nil
 	}
 }
 
@@ -921,6 +951,7 @@ func (p *peerSession) stale(now time.Time) bool {
 
 func (s *session) stop() {
 	s.stopOnce.Do(func() {
+		s.cancelIdleStop()
 		s.cancel()
 		if s.runCtxCancel != nil {
 			s.runCtxCancel()
