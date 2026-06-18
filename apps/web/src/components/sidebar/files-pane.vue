@@ -1,10 +1,12 @@
 <template>
   <div class="group/tree flex flex-col h-full min-w-0">
-    <!-- Section header: same height as a tree row. Text sits at the icon-column
-         start position (where a chevron would be) so items below it read as
-         children — text at ~8px, item names at ~36px. -->
-    <div class="group/pane-header flex min-h-[1.6875rem] shrink-0 items-center mx-1 pl-[11px] select-none">
-      <span class="min-w-0 flex-1 truncate text-[0.84375rem] font-[500] text-muted-foreground/70">
+    <!-- Section header: aligns with the Chat ("Quick Actions") and Schedule
+         group headers — same mt-2 top inset, text-xs/550 type — so the first
+         label in each capsule shares one baseline. Horizontal indent
+         (mx-1 pl-[11px]) is preserved to stay over the tree's chevron column;
+         do not switch to px-2 or the header text drifts off the icon column. -->
+    <div class="group/pane-header flex min-h-[1.6875rem] shrink-0 items-center mx-1 pl-[11px] mt-2 select-none">
+      <span class="min-w-0 flex-1 truncate text-xs font-[550] tracking-[-0.02em] text-muted-foreground/80">
         {{ botName || t('bots.files.panelTitle') }}
       </span>
       <div class="flex items-center gap-0.5 pr-1 opacity-0 transition-opacity duration-150 group-hover/pane-header:opacity-100">
