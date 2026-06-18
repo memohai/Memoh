@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -27,6 +28,8 @@ const (
 
 	agentsFileName         = "AGENTS.md"
 	legacyIdentityFileName = "IDENTITY.md"
+	managedSkillsDir       = ".memoh/skills"
+	templateKeepFileName   = ".gitkeep"
 )
 
 // initDataDir ensures /data exists and seeds template files on first boot.
@@ -44,29 +47,75 @@ func initDataDirAt(dataDir, templatesDir string) {
 		return
 	}
 
-	entries, err := os.ReadDir(templatesDir)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			logger.Warn("failed to read template dir", slog.String("dir", templatesDir), slog.Any("error", err))
-		}
-		return
+	if err := seedTemplateDir(templatesDir, dataDir, fs.FileMode(0o644)); err != nil {
+		logger.Warn("failed to seed templates", slog.String("dir", templatesDir), slog.Any("error", err))
 	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
+}
+
+func seedTemplateDir(srcDir, dstDir string, fileMode fs.FileMode) error {
+	if _, err := os.Stat(srcDir); err != nil {
+		if os.IsNotExist(err) {
+			return nil
 		}
-		dst := filepath.Join(dataDir, e.Name())
-		if _, err := os.Stat(dst); err == nil {
-			continue
+		return err
+	}
+	return filepath.WalkDir(srcDir, func(srcPath string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
-		data, err := os.ReadFile(filepath.Join(templatesDir, e.Name())) //nolint:gosec // G304: file name comes from os.ReadDir(templatesDir).
+		rel, err := filepath.Rel(srcDir, srcPath)
 		if err != nil {
-			continue
+			return err
 		}
-		if err := os.WriteFile(dst, data, fs.FileMode(0o644)); err != nil { //nolint:gosec // G703: dst is built from filepath.Join(defaultWorkDir, e.Name()) where e comes from os.ReadDir
-			logger.Warn("failed to seed template", slog.String("file", e.Name()), slog.Any("error", err))
+		if rel == "." {
+			return nil
+		}
+		relSlash := filepath.ToSlash(rel)
+		if shouldSkipTemplateFile(relSlash, entry) {
+			return nil
+		}
+		dstPath := templateDestinationPath(dstDir, relSlash)
+		if entry.IsDir() {
+			if isManagedSkillsPath(relSlash) {
+				return os.MkdirAll(dstPath, 0o750)
+			}
+			return nil
+		}
+		if entry.Type()&fs.ModeType != 0 {
+			return nil
+		}
+		return copyTemplateFile(srcPath, dstPath, fileMode, isManagedSkillsPath(relSlash))
+	})
+}
+
+func copyTemplateFile(srcPath, dstPath string, fileMode fs.FileMode, overwrite bool) error {
+	if !overwrite {
+		if _, err := os.Stat(dstPath); err == nil {
+			return nil
+		} else if !os.IsNotExist(err) {
+			return err
 		}
 	}
+	data, err := os.ReadFile(srcPath) //nolint:gosec // G304: template paths are discovered under the configured templates directory.
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0o750); err != nil {
+		return err
+	}
+	return os.WriteFile(dstPath, data, fileMode) //nolint:gosec // G306: template files are intentionally readable in workspace containers.
+}
+
+func isManagedSkillsPath(rel string) bool {
+	return rel == managedSkillsDir || strings.HasPrefix(rel, managedSkillsDir+"/")
+}
+
+func templateDestinationPath(dstDir, rel string) string {
+	return filepath.Join(dstDir, filepath.FromSlash(rel))
+}
+
+func shouldSkipTemplateFile(rel string, entry fs.DirEntry) bool {
+	return !entry.IsDir() && path.Base(rel) == templateKeepFileName
 }
 
 func migrateLegacyIdentityFile(dataDir string) error {

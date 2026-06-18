@@ -540,6 +540,7 @@ func normalizeWorkspaceSkillDiscoveryRoots(roots []string) []string {
 	}
 
 	managedDir := path.Join(config.DefaultDataMount, "skills")
+	indexDir := path.Join(config.DefaultDataMount, ".memoh", "skills")
 	legacyDir := path.Join(config.DefaultDataMount, ".skills")
 	seen := make(map[string]struct{}, len(roots))
 	normalized := make([]string, 0, len(roots))
@@ -548,7 +549,7 @@ func normalizeWorkspaceSkillDiscoveryRoots(roots []string) []string {
 		if root == "" || !strings.HasPrefix(root, "/") {
 			continue
 		}
-		if root == managedDir || root == legacyDir {
+		if root == managedDir || root == indexDir || root == legacyDir {
 			continue
 		}
 		if _, ok := seen[root]; ok {

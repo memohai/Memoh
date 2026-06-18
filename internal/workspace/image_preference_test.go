@@ -163,6 +163,7 @@ func TestWorkspaceSkillDiscoveryRootsMetadataRoundTrip(t *testing.T) {
 		"/custom/skills",
 		"/custom/./skills",
 		"/data/skills",
+		"/data/.memoh/skills",
 		"relative/path",
 	})
 

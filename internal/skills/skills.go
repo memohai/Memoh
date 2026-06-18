@@ -182,6 +182,7 @@ func DiscoveryRoots(rawCompatRoots []string) []Root {
 func DiscoveryRootsWithPluginRoots(rawCompatRoots []string, rawPluginRoots []string) []Root {
 	roots := []Root{
 		{Path: ManagedDirPath, Kind: SourceKindManaged, Managed: true},
+		{Path: IndexDirPath, Kind: SourceKindManaged, Managed: true},
 		{Path: LegacyDirPath, Kind: SourceKindLegacy, Managed: false},
 	}
 	for _, pluginRoot := range normalizePluginDiscoveryRoots(rawPluginRoots) {
@@ -314,7 +315,7 @@ func normalizeCompatDiscoveryRoots(paths []string) []string {
 		if !strings.HasPrefix(p, "/") {
 			continue
 		}
-		if p == ManagedDirPath || p == LegacyDirPath {
+		if p == ManagedDirPath || p == IndexDirPath || p == LegacyDirPath {
 			continue
 		}
 		if _, ok := seen[p]; ok {
