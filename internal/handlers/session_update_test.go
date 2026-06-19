@@ -76,7 +76,7 @@ func TestUpdateSessionSwitchesEmptyChatToACPAgent(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -125,7 +125,7 @@ func TestUpdateSessionDefaultsACPProjectPath(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -173,7 +173,7 @@ func TestUpdateSessionDefaultsACPProjectPathBeforeAgentChangeCheck(t *testing.T)
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -217,7 +217,7 @@ func TestUpdateSessionRejectsAgentChangeAfterFirstMessage(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -259,7 +259,7 @@ func TestUpdateSessionAllowsEmptyACPAgentChangeAndClosesRuntime(t *testing.T) {
 	closer := &recordingACPSessionCloser{active: map[string]bool{sessionID: true}}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		closer,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -302,7 +302,7 @@ func TestUpdateSessionSwitchesACPAgentToChatClearsMetadataAndClosesRuntime(t *te
 	closer := &recordingACPSessionCloser{}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		closer,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),

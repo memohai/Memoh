@@ -58,7 +58,7 @@ func TestCreateSessionRejectsUnknownTypeAsBadRequest(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -87,7 +87,7 @@ func TestCreateSessionAcceptsACPAgentType(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -121,7 +121,7 @@ func TestCreateSessionDefaultsACPProjectPath(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -166,7 +166,7 @@ func TestCreateSessionBindsWarmACPRuntime(t *testing.T) {
 	binder := &recordingRuntimeBinder{}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		binder,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -201,7 +201,7 @@ func TestCreateSessionToleratesFailedRuntimeBind(t *testing.T) {
 	binder := &recordingRuntimeBinder{bindErr: errors.New("runtime gone")}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		binder,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),

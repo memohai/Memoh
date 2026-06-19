@@ -90,7 +90,7 @@ func TestSessionServicePublishesSessionCreated(t *testing.T) {
 func TestSessionServiceCreateSucceedsWithoutPublisher(t *testing.T) {
 	t.Parallel()
 
-	svc := session.NewService(nil, sessionCreateRecorder{})
+	svc := session.NewService(nil, sessionCreateRecorder{}, nil)
 	if _, err := svc.Create(context.Background(), session.CreateInput{
 		BotID: "11111111-1111-1111-1111-111111111111",
 		Type:  session.TypeChat,

@@ -105,14 +105,12 @@ type Service struct {
 	logger      *slog.Logger
 }
 
-// NewService creates a session service.
-func NewService(log *slog.Logger, queries dbstore.Queries, publishers ...event.Publisher) *Service {
+// NewService creates a session service. publisher may be nil — session
+// creation still succeeds when there is no event hub wired in (tests, or any
+// caller that doesn't surface activity events).
+func NewService(log *slog.Logger, queries dbstore.Queries, publisher event.Publisher) *Service {
 	if log == nil {
 		log = slog.Default()
-	}
-	var publisher event.Publisher
-	if len(publishers) > 0 {
-		publisher = publishers[0]
 	}
 	return &Service{
 		queries:   queries,
