@@ -392,6 +392,48 @@ func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 			}}},
 			want: "unsupported message part style",
 		},
+		{
+			name: "empty text part",
+			raw: map[string]any{"message": map[string]any{"parts": []any{
+				map[string]any{"type": "text", "text": "   "},
+			}}},
+			want: "message part content is required",
+		},
+		{
+			name: "link without url",
+			raw: map[string]any{"message": map[string]any{"parts": []any{
+				map[string]any{"type": "link", "text": "docs"},
+			}}},
+			want: "message link part url is required",
+		},
+		{
+			name: "link without visible text",
+			raw: map[string]any{"message": map[string]any{"parts": []any{
+				map[string]any{"type": "link", "url": "https://example.com"},
+			}}},
+			want: "message link part text is required",
+		},
+		{
+			name: "code block without text",
+			raw: map[string]any{"message": map[string]any{"parts": []any{
+				map[string]any{"type": "code_block", "language": "go"},
+			}}},
+			want: "message part content is required",
+		},
+		{
+			name: "mention without text or identity",
+			raw: map[string]any{"message": map[string]any{"parts": []any{
+				map[string]any{"type": "mention"},
+			}}},
+			want: "message mention part text or channel_identity_id is required",
+		},
+		{
+			name: "emoji without text or emoji",
+			raw: map[string]any{"message": map[string]any{"parts": []any{
+				map[string]any{"type": "emoji"},
+			}}},
+			want: "message emoji part text or emoji is required",
+		},
 	}
 
 	for _, tt := range tests {

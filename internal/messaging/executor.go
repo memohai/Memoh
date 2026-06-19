@@ -687,10 +687,14 @@ func validateOutboundMessagePart(index int, raw map[string]any) error {
 		}
 	}
 	partType, _ := raw["type"].(string)
-	switch channel.MessagePartType(strings.TrimSpace(partType)) {
+	normalizedType := channel.MessagePartType(strings.TrimSpace(partType))
+	switch normalizedType {
 	case channel.MessagePartText, channel.MessagePartLink, channel.MessagePartCodeBlock, channel.MessagePartMention, channel.MessagePartEmoji, channel.MessagePartHeading, channel.MessagePartBlockquote, channel.MessagePartListItem:
 	default:
 		return fmt.Errorf("unsupported message part type %q at index %d", partType, index)
+	}
+	if err := validateOutboundMessagePartContent(index, normalizedType, raw); err != nil {
+		return err
 	}
 	styles, ok := raw["styles"]
 	if !ok || styles == nil {
@@ -706,6 +710,40 @@ func validateOutboundMessagePart(index int, raw map[string]any) error {
 		case channel.MessageStyleBold, channel.MessageStyleItalic, channel.MessageStyleStrikethrough, channel.MessageStyleCode, channel.MessageStyleUnderline, channel.MessageStyleSpoiler:
 		default:
 			return fmt.Errorf("unsupported message part style %q at index %d", style, index)
+		}
+	}
+	return nil
+}
+
+func validateOutboundMessagePartContent(index int, partType channel.MessagePartType, raw map[string]any) error {
+	text, _ := raw["text"].(string)
+	text = strings.TrimSpace(text)
+	switch partType {
+	case channel.MessagePartLink:
+		rawURL, _ := raw["url"].(string)
+		rawURL = strings.TrimSpace(rawURL)
+		if rawURL == "" {
+			return fmt.Errorf("message link part url is required at index %d", index)
+		}
+		if !channel.IsHTTPURL(rawURL) {
+			return fmt.Errorf("message link part url must be http(s) at index %d", index)
+		}
+		if text == "" {
+			return fmt.Errorf("message link part text is required at index %d", index)
+		}
+	case channel.MessagePartMention:
+		channelIdentityID, _ := raw["channel_identity_id"].(string)
+		if text == "" && strings.TrimSpace(channelIdentityID) == "" {
+			return fmt.Errorf("message mention part text or channel_identity_id is required at index %d", index)
+		}
+	case channel.MessagePartEmoji:
+		emoji, _ := raw["emoji"].(string)
+		if text == "" && strings.TrimSpace(emoji) == "" {
+			return fmt.Errorf("message emoji part text or emoji is required at index %d", index)
+		}
+	default:
+		if text == "" {
+			return fmt.Errorf("message part content is required at index %d", index)
 		}
 	}
 	return nil
