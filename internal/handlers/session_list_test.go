@@ -246,6 +246,24 @@ func TestListSessionsOmitsNextCursorOnShortPage(t *testing.T) {
 	}
 }
 
+// TestListSessionsEmptyResultSerializesAsEmptyArray pins down that an empty
+// page renders as `"items": []` rather than `"items": null`. Clients iterate
+// the field directly and a null value would crash strict decoders.
+func TestListSessionsEmptyResultSerializesAsEmptyArray(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	queries := &sessionListQueries{bot: testBotRow(botID, nil)}
+	handler := newListSessionHandler(t, queries)
+
+	rec, err := callListSessions(handler, botID, "")
+	if err != nil {
+		t.Fatalf("ListSessions() error = %v", err)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"items":[]`) {
+		t.Fatalf("empty page body = %s, want items rendered as []", body)
+	}
+}
+
 func TestListSessionsRejectsMalformedCursor(t *testing.T) {
 	botID := "11111111-1111-1111-1111-111111111111"
 	queries := &sessionListQueries{bot: testBotRow(botID, nil)}

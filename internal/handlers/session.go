@@ -180,8 +180,10 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 		return err
 	}
 
+	// Initialize to an empty slice so an empty page serializes as `"items": []`
+	// rather than `"items": null`, sparing clients a null check.
+	sessions := []session.Session{}
 	var (
-		sessions     []session.Session
 		nextCursor   session.SessionCursor
 		hasMorePages bool
 	)
@@ -203,10 +205,6 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 		var preFilter []session.Session
 		preFilter, err = h.sessionService.ListByBotAndCreatedByUserPaged(c.Request().Context(), bot.ID, channelIdentityID, types, cursor, probeLimit)
 		if err == nil {
-			// next_cursor must reflect the DB position to resume from, not the
-			// filter survivorship — otherwise a page whose rows were all
-			// dropped by the permission filter would terminate pagination
-			// while older accessible rows still exist on disk.
 			var page []session.Session
 			page, hasMorePages = trimPagedSessions(preFilter, limit)
 			if hasMorePages {
@@ -230,6 +228,12 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 // trimPagedSessions implements the limit+1 has-more probe: if the SQL layer
 // returned the extra row, slice it off and signal hasMore; otherwise the
 // caller has reached the end of the listing and next_cursor must stay empty.
+//
+// The returned page is the slice the caller should derive next_cursor from
+// before any in-memory permission filtering. next_cursor must reflect the DB
+// position to resume from, not filter survivorship — otherwise a page whose
+// rows were all dropped by the permission filter would terminate pagination
+// while older accessible rows still exist on disk.
 func trimPagedSessions(rows []session.Session, limit int64) ([]session.Session, bool) {
 	if int64(len(rows)) > limit {
 		return rows[:limit], true
