@@ -206,11 +206,14 @@ const (
 type MessagePartType string
 
 const (
-	MessagePartText      MessagePartType = "text"
-	MessagePartLink      MessagePartType = "link"
-	MessagePartCodeBlock MessagePartType = "code_block"
-	MessagePartMention   MessagePartType = "mention"
-	MessagePartEmoji     MessagePartType = "emoji"
+	MessagePartText       MessagePartType = "text"
+	MessagePartLink       MessagePartType = "link"
+	MessagePartCodeBlock  MessagePartType = "code_block"
+	MessagePartMention    MessagePartType = "mention"
+	MessagePartEmoji      MessagePartType = "emoji"
+	MessagePartHeading    MessagePartType = "heading"
+	MessagePartBlockquote MessagePartType = "blockquote"
+	MessagePartListItem   MessagePartType = "list_item"
 )
 
 // MessageTextStyle describes inline formatting for a text part.
@@ -221,6 +224,8 @@ const (
 	MessageStyleItalic        MessageTextStyle = "italic"
 	MessageStyleStrikethrough MessageTextStyle = "strikethrough"
 	MessageStyleCode          MessageTextStyle = "code"
+	MessageStyleUnderline     MessageTextStyle = "underline"
+	MessageStyleSpoiler       MessageTextStyle = "spoiler"
 )
 
 // MessagePart is a single element within a rich-text message.

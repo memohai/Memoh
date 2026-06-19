@@ -37,6 +37,22 @@ func TestRenderPartsAsMarkdown(t *testing.T) {
 			want: "~~old~~",
 		},
 		{
+			name: "underline degrades to visible text",
+			parts: []MessagePart{
+				{Type: MessagePartText, Text: "under", Styles: []MessageTextStyle{MessageStyleUnderline}},
+			},
+			want:     "under",
+			excludes: []string{"__", "<u>"},
+		},
+		{
+			name: "spoiler degrades to visible text",
+			parts: []MessagePart{
+				{Type: MessagePartText, Text: "secret", Styles: []MessageTextStyle{MessageStyleSpoiler}},
+			},
+			want:     "secret",
+			excludes: []string{"||", "spoiler"},
+		},
+		{
 			name: "inline code wins over other styles",
 			parts: []MessagePart{
 				{Type: MessagePartText, Text: "x.y", Styles: []MessageTextStyle{MessageStyleCode, MessageStyleBold}},
@@ -117,6 +133,27 @@ func TestRenderPartsAsMarkdown(t *testing.T) {
 			want: "🎉",
 		},
 		{
+			name: "heading emits markdown heading",
+			parts: []MessagePart{
+				{Type: MessagePartHeading, Text: "Title [x]"},
+			},
+			want: `## Title \[x\]`,
+		},
+		{
+			name: "blockquote quotes each line",
+			parts: []MessagePart{
+				{Type: MessagePartBlockquote, Text: "alpha [x]\nbeta"},
+			},
+			want: "> alpha \\[x\\]\n> beta",
+		},
+		{
+			name: "list item emits bullet line",
+			parts: []MessagePart{
+				{Type: MessagePartListItem, Text: "item [x]"},
+			},
+			want: `- item \[x\]`,
+		},
+		{
 			name:  "empty parts returns empty",
 			parts: nil,
 			want:  "",
@@ -162,6 +199,14 @@ func TestRenderPartsAsPlain(t *testing.T) {
 			want: "title",
 		},
 		{
+			name: "drops underline and spoiler styles",
+			parts: []MessagePart{
+				{Type: MessagePartText, Text: "under", Styles: []MessageTextStyle{MessageStyleUnderline}},
+				{Type: MessagePartText, Text: "secret", Styles: []MessageTextStyle{MessageStyleSpoiler}},
+			},
+			want: "under\n\nsecret",
+		},
+		{
 			name: "link emits text + url in parens",
 			parts: []MessagePart{
 				{Type: MessagePartLink, Text: "docs", URL: "https://example.test"},
@@ -190,6 +235,15 @@ func TestRenderPartsAsPlain(t *testing.T) {
 				{Type: MessagePartLink, Text: "see", URL: "https://example.test"},
 			},
 			want: "title\n\ngo test\n\nsee (https://example.test)",
+		},
+		{
+			name: "block parts preserve readable structure",
+			parts: []MessagePart{
+				{Type: MessagePartHeading, Text: "Title"},
+				{Type: MessagePartBlockquote, Text: "quoted\nsecond"},
+				{Type: MessagePartListItem, Text: "item"},
+			},
+			want: "Title\n\n> quoted\n> second\n\n- item",
 		},
 		{
 			name:  "empty parts returns empty",

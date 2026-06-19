@@ -78,6 +78,12 @@ func renderMatrixMessagePartsHTML(parts []channel.MessagePart) string {
 				text = part.Emoji
 			}
 			writeMatrixRichInlinePart(&b, text, nil)
+		case channel.MessagePartHeading:
+			writeMatrixRichHeadingPart(&b, part)
+		case channel.MessagePartBlockquote:
+			writeMatrixRichBlockquotePart(&b, part)
+		case channel.MessagePartListItem:
+			writeMatrixRichListItemPart(&b, part)
 		default:
 			continue
 		}
@@ -146,13 +152,62 @@ func writeMatrixRichCodeBlockPart(b *strings.Builder, part channel.MessagePart) 
 	b.WriteString("</code></pre>")
 }
 
+func writeMatrixRichHeadingPart(b *strings.Builder, part channel.MessagePart) {
+	text := channel.CollapseMessagePartTextLine(part.Text)
+	if text == "" {
+		return
+	}
+	b.WriteString("<h2>")
+	b.WriteString(renderMatrixRichStyledInline(text, part.Styles))
+	b.WriteString("</h2>")
+}
+
+func writeMatrixRichBlockquotePart(b *strings.Builder, part channel.MessagePart) {
+	lines := channel.SplitMessagePartTextLines(part.Text)
+	if len(lines) == 0 {
+		return
+	}
+	b.WriteString("<blockquote>")
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteString("<br>")
+		}
+		if line != "" {
+			b.WriteString(renderMatrixRichStyledInline(line, part.Styles))
+		}
+	}
+	b.WriteString("</blockquote>")
+}
+
+func writeMatrixRichListItemPart(b *strings.Builder, part channel.MessagePart) {
+	lines := channel.SplitMessagePartTextLines(part.Text)
+	if len(lines) == 0 {
+		return
+	}
+	b.WriteString("<ul><li>")
+	b.WriteString(renderMatrixRichStyledInline(lines[0], part.Styles))
+	for _, line := range lines[1:] {
+		b.WriteString("<br>")
+		if line != "" {
+			b.WriteString(renderMatrixRichStyledInline(line, part.Styles))
+		}
+	}
+	b.WriteString("</li></ul>")
+}
+
 func renderMatrixRichStyledInline(text string, styles []channel.MessageTextStyle) string {
 	escaped := stdhtml.EscapeString(text)
 	if hasMatrixRichTextStyle(styles, channel.MessageStyleCode) {
 		return "<code>" + escaped + "</code>"
 	}
+	if hasMatrixRichTextStyle(styles, channel.MessageStyleSpoiler) {
+		escaped = "<span data-mx-spoiler>" + escaped + "</span>"
+	}
 	if hasMatrixRichTextStyle(styles, channel.MessageStyleStrikethrough) {
 		escaped = "<del>" + escaped + "</del>"
+	}
+	if hasMatrixRichTextStyle(styles, channel.MessageStyleUnderline) {
+		escaped = "<u>" + escaped + "</u>"
 	}
 	if hasMatrixRichTextStyle(styles, channel.MessageStyleItalic) {
 		escaped = "<em>" + escaped + "</em>"

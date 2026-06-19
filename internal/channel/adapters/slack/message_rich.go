@@ -35,6 +35,12 @@ func renderSlackMessagePartsMrkdwn(msg channel.Message) string {
 				text = strings.TrimSpace(part.Emoji)
 			}
 			writeSlackRichInlinePart(&b, text, part.Styles)
+		case channel.MessagePartHeading:
+			writeSlackRichHeadingPart(&b, part)
+		case channel.MessagePartBlockquote:
+			writeSlackRichBlockquotePart(&b, part)
+		case channel.MessagePartListItem:
+			writeSlackRichListItemPart(&b, part)
 		}
 	}
 	return strings.TrimSpace(b.String())
@@ -116,6 +122,56 @@ func writeSlackRichCodeBlockPart(b *strings.Builder, part channel.MessagePart) {
 	b.WriteString("```\n")
 	b.WriteString(slackEscapeMrkdwn(text))
 	b.WriteString("\n```")
+}
+
+func writeSlackRichHeadingPart(b *strings.Builder, part channel.MessagePart) {
+	text := channel.CollapseMessagePartTextLine(part.Text)
+	if text == "" {
+		return
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n\n")
+	}
+	styles := append([]channel.MessageTextStyle{channel.MessageStyleBold}, part.Styles...)
+	b.WriteString(renderSlackRichStyledInline(slackEscapeMrkdwn(text), styles))
+}
+
+func writeSlackRichBlockquotePart(b *strings.Builder, part channel.MessagePart) {
+	lines := channel.SplitMessagePartTextLines(part.Text)
+	if len(lines) == 0 {
+		return
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n\n")
+	}
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(">")
+		if line != "" {
+			b.WriteString(" ")
+			b.WriteString(renderSlackRichStyledInline(slackEscapeMrkdwn(line), part.Styles))
+		}
+	}
+}
+
+func writeSlackRichListItemPart(b *strings.Builder, part channel.MessagePart) {
+	lines := channel.SplitMessagePartTextLines(part.Text)
+	if len(lines) == 0 {
+		return
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n\n")
+	}
+	b.WriteString("- ")
+	b.WriteString(renderSlackRichStyledInline(slackEscapeMrkdwn(lines[0]), part.Styles))
+	for _, line := range lines[1:] {
+		b.WriteString("\n  ")
+		if line != "" {
+			b.WriteString(renderSlackRichStyledInline(slackEscapeMrkdwn(line), part.Styles))
+		}
+	}
 }
 
 func renderSlackRichStyledInline(escaped string, styles []channel.MessageTextStyle) string {

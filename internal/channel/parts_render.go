@@ -35,6 +35,12 @@ func RenderPartsAsMarkdown(parts []MessagePart) string {
 				text = strings.TrimSpace(part.Emoji)
 			}
 			writeDegradeMarkdownInline(&b, text, part.Styles)
+		case MessagePartHeading:
+			writeDegradeMarkdownHeading(&b, part)
+		case MessagePartBlockquote:
+			writeDegradeMarkdownBlockquote(&b, part)
+		case MessagePartListItem:
+			writeDegradeMarkdownListItem(&b, part)
 		}
 	}
 	return strings.TrimSpace(b.String())
@@ -78,6 +84,18 @@ func RenderPartsAsPlain(parts []MessagePart) string {
 				t = strings.TrimSpace(part.Emoji)
 			}
 			if t != "" {
+				lines = append(lines, t)
+			}
+		case MessagePartHeading:
+			if t := CollapseMessagePartTextLine(part.Text); t != "" {
+				lines = append(lines, t)
+			}
+		case MessagePartBlockquote:
+			if t := renderPlainBlockquote(part.Text); t != "" {
+				lines = append(lines, t)
+			}
+		case MessagePartListItem:
+			if t := renderPlainListItem(part.Text); t != "" {
 				lines = append(lines, t)
 			}
 		}
@@ -136,6 +154,56 @@ func writeDegradeMarkdownCodeBlock(b *strings.Builder, part MessagePart) {
 	b.WriteString(text)
 	b.WriteString("\n")
 	b.WriteString(fence)
+}
+
+func writeDegradeMarkdownHeading(b *strings.Builder, part MessagePart) {
+	text := CollapseMessagePartTextLine(part.Text)
+	if text == "" {
+		return
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n\n")
+	}
+	b.WriteString("## ")
+	b.WriteString(renderDegradeMarkdownStyled(text, part.Styles))
+}
+
+func writeDegradeMarkdownBlockquote(b *strings.Builder, part MessagePart) {
+	lines := SplitMessagePartTextLines(part.Text)
+	if len(lines) == 0 {
+		return
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n\n")
+	}
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(">")
+		if line != "" {
+			b.WriteString(" ")
+			b.WriteString(renderDegradeMarkdownStyled(line, part.Styles))
+		}
+	}
+}
+
+func writeDegradeMarkdownListItem(b *strings.Builder, part MessagePart) {
+	lines := SplitMessagePartTextLines(part.Text)
+	if len(lines) == 0 {
+		return
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n\n")
+	}
+	b.WriteString("- ")
+	b.WriteString(renderDegradeMarkdownStyled(lines[0], part.Styles))
+	for _, line := range lines[1:] {
+		b.WriteString("\n  ")
+		if line != "" {
+			b.WriteString(renderDegradeMarkdownStyled(line, part.Styles))
+		}
+	}
 }
 
 func renderDegradeMarkdownStyled(text string, styles []MessageTextStyle) string {
@@ -241,4 +309,59 @@ func wrapDegradeMarkdownInlineCode(text string) string {
 		pad = " "
 	}
 	return fence + pad + text + pad + fence
+}
+
+// CollapseMessagePartTextLine normalizes block part text into one visible line.
+func CollapseMessagePartTextLine(text string) string {
+	return strings.Join(strings.Fields(text), " ")
+}
+
+// SplitMessagePartTextLines normalizes block part text into trimmed display lines.
+func SplitMessagePartTextLines(text string) []string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	text = strings.Trim(text, "\n\t ")
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	raw := strings.Split(text, "\n")
+	lines := make([]string, 0, len(raw))
+	for _, line := range raw {
+		lines = append(lines, strings.TrimSpace(line))
+	}
+	return lines
+}
+
+func renderPlainBlockquote(text string) string {
+	lines := SplitMessagePartTextLines(text)
+	if len(lines) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(">")
+		if line != "" {
+			b.WriteString(" ")
+			b.WriteString(line)
+		}
+	}
+	return b.String()
+}
+
+func renderPlainListItem(text string) string {
+	lines := SplitMessagePartTextLines(text)
+	if len(lines) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("- ")
+	b.WriteString(lines[0])
+	for _, line := range lines[1:] {
+		b.WriteString("\n  ")
+		b.WriteString(line)
+	}
+	return b.String()
 }

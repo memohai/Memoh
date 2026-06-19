@@ -637,7 +637,7 @@ func validateOutboundMessagePart(index int, raw map[string]any) error {
 	}
 	partType, _ := raw["type"].(string)
 	switch channel.MessagePartType(strings.TrimSpace(partType)) {
-	case channel.MessagePartText, channel.MessagePartLink, channel.MessagePartCodeBlock, channel.MessagePartMention, channel.MessagePartEmoji:
+	case channel.MessagePartText, channel.MessagePartLink, channel.MessagePartCodeBlock, channel.MessagePartMention, channel.MessagePartEmoji, channel.MessagePartHeading, channel.MessagePartBlockquote, channel.MessagePartListItem:
 	default:
 		return fmt.Errorf("unsupported message part type %q at index %d", partType, index)
 	}
@@ -652,7 +652,7 @@ func validateOutboundMessagePart(index int, raw map[string]any) error {
 	for _, rawStyle := range styleItems {
 		style, _ := rawStyle.(string)
 		switch channel.MessageTextStyle(strings.TrimSpace(style)) {
-		case channel.MessageStyleBold, channel.MessageStyleItalic, channel.MessageStyleStrikethrough, channel.MessageStyleCode:
+		case channel.MessageStyleBold, channel.MessageStyleItalic, channel.MessageStyleStrikethrough, channel.MessageStyleCode, channel.MessageStyleUnderline, channel.MessageStyleSpoiler:
 		default:
 			return fmt.Errorf("unsupported message part style %q at index %d", style, index)
 		}

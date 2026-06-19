@@ -27,6 +27,12 @@ func renderFeishuMessagePartsLarkMD(msg channel.Message) string {
 				text = strings.TrimSpace(part.Emoji)
 			}
 			writeFeishuRichInlinePart(&b, text, part.Styles)
+		case channel.MessagePartHeading:
+			writeFeishuRichHeadingPart(&b, part)
+		case channel.MessagePartBlockquote:
+			writeFeishuRichBlockquotePart(&b, part)
+		case channel.MessagePartListItem:
+			writeFeishuRichListItemPart(&b, part)
 		}
 	}
 	return strings.TrimSpace(b.String())
@@ -114,6 +120,56 @@ func writeFeishuRichCodeBlockPart(b *strings.Builder, part channel.MessagePart) 
 	b.WriteString(text)
 	b.WriteString("\n")
 	b.WriteString(fence)
+}
+
+func writeFeishuRichHeadingPart(b *strings.Builder, part channel.MessagePart) {
+	text := channel.CollapseMessagePartTextLine(part.Text)
+	if text == "" {
+		return
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n\n")
+	}
+	styles := append([]channel.MessageTextStyle{channel.MessageStyleBold}, part.Styles...)
+	b.WriteString(renderFeishuRichStyledInline(text, styles))
+}
+
+func writeFeishuRichBlockquotePart(b *strings.Builder, part channel.MessagePart) {
+	lines := channel.SplitMessagePartTextLines(part.Text)
+	if len(lines) == 0 {
+		return
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n\n")
+	}
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(">")
+		if line != "" {
+			b.WriteString(" ")
+			b.WriteString(renderFeishuRichStyledInline(line, part.Styles))
+		}
+	}
+}
+
+func writeFeishuRichListItemPart(b *strings.Builder, part channel.MessagePart) {
+	lines := channel.SplitMessagePartTextLines(part.Text)
+	if len(lines) == 0 {
+		return
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n\n")
+	}
+	b.WriteString("- ")
+	b.WriteString(renderFeishuRichStyledInline(lines[0], part.Styles))
+	for _, line := range lines[1:] {
+		b.WriteString("\n  ")
+		if line != "" {
+			b.WriteString(renderFeishuRichStyledInline(line, part.Styles))
+		}
+	}
 }
 
 func renderFeishuRichStyledInline(text string, styles []channel.MessageTextStyle) string {

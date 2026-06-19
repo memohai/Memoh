@@ -29,6 +29,12 @@ func renderTelegramMessagePartsRichMessage(msg channel.Message) telegramInputRic
 				text = strings.TrimSpace(part.Emoji)
 			}
 			writeTelegramRichInlinePart(&b, text, part.Styles)
+		case channel.MessagePartHeading:
+			writeTelegramRichHeadingPart(&b, part)
+		case channel.MessagePartBlockquote:
+			writeTelegramRichBlockquotePart(&b, part)
+		case channel.MessagePartListItem:
+			writeTelegramRichListItemPart(&b, part)
 		}
 	}
 	html := strings.TrimSpace(b.String())
@@ -77,6 +83,18 @@ func renderTelegramMessagePartsHTMLFallback(msg channel.Message) string {
 			if text != "" {
 				blocks = append(blocks, renderTelegramStyledInline(text, part.Styles))
 			}
+		case channel.MessagePartHeading:
+			if block := renderTelegramHeadingFallback(part); block != "" {
+				blocks = append(blocks, block)
+			}
+		case channel.MessagePartBlockquote:
+			if block := renderTelegramBlockquoteFallback(part); block != "" {
+				blocks = append(blocks, block)
+			}
+		case channel.MessagePartListItem:
+			if block := renderTelegramListItemFallback(part); block != "" {
+				blocks = append(blocks, block)
+			}
 		}
 	}
 	return strings.TrimSpace(strings.Join(blocks, "\n\n"))
@@ -116,6 +134,30 @@ func renderTelegramCodeBlockFallback(part channel.MessagePart) string {
 		return `<pre><code class="language-` + telegramEscapeAttr(lang) + `">` + telegramEscapeHTML(text) + `</code></pre>`
 	}
 	return "<pre>" + telegramEscapeHTML(text) + "</pre>"
+}
+
+func renderTelegramHeadingFallback(part channel.MessagePart) string {
+	text := channel.CollapseMessagePartTextLine(part.Text)
+	if text == "" {
+		return ""
+	}
+	return "<b>" + telegramEscapeHTML(text) + "</b>"
+}
+
+func renderTelegramBlockquoteFallback(part channel.MessagePart) string {
+	lines := channel.SplitMessagePartTextLines(part.Text)
+	if len(lines) == 0 {
+		return ""
+	}
+	return "<blockquote>" + telegramEscapeHTML(strings.Join(lines, "\n")) + "</blockquote>"
+}
+
+func renderTelegramListItemFallback(part channel.MessagePart) string {
+	text := channel.CollapseMessagePartTextLine(part.Text)
+	if text == "" {
+		return ""
+	}
+	return renderTelegramStyledInline("- "+text, part.Styles)
 }
 
 func writeTelegramRichInlinePart(b *strings.Builder, text string, styles []channel.MessageTextStyle) {
@@ -191,13 +233,45 @@ func writeTelegramRichCodeBlockPart(b *strings.Builder, part channel.MessagePart
 	b.WriteString("</pre>")
 }
 
+func writeTelegramRichHeadingPart(b *strings.Builder, part channel.MessagePart) {
+	text := channel.CollapseMessagePartTextLine(part.Text)
+	if text == "" {
+		return
+	}
+	writeTelegramRichParagraph(b, "<b>"+telegramEscapeHTML(text)+"</b>")
+}
+
+func writeTelegramRichBlockquotePart(b *strings.Builder, part channel.MessagePart) {
+	lines := channel.SplitMessagePartTextLines(part.Text)
+	if len(lines) == 0 {
+		return
+	}
+	b.WriteString("<blockquote>")
+	b.WriteString(telegramEscapeHTML(strings.Join(lines, "\n")))
+	b.WriteString("</blockquote>")
+}
+
+func writeTelegramRichListItemPart(b *strings.Builder, part channel.MessagePart) {
+	text := channel.CollapseMessagePartTextLine(part.Text)
+	if text == "" {
+		return
+	}
+	writeTelegramRichParagraph(b, renderTelegramStyledInline("- "+text, part.Styles))
+}
+
 func renderTelegramStyledInline(text string, styles []channel.MessageTextStyle) string {
 	html := telegramEscapeHTML(text)
 	if hasTelegramTextStyle(styles, channel.MessageStyleCode) {
 		return "<code>" + html + "</code>"
 	}
+	if hasTelegramTextStyle(styles, channel.MessageStyleSpoiler) {
+		html = "<tg-spoiler>" + html + "</tg-spoiler>"
+	}
 	if hasTelegramTextStyle(styles, channel.MessageStyleStrikethrough) {
 		html = "<s>" + html + "</s>"
+	}
+	if hasTelegramTextStyle(styles, channel.MessageStyleUnderline) {
+		html = "<u>" + html + "</u>"
 	}
 	if hasTelegramTextStyle(styles, channel.MessageStyleItalic) {
 		html = "<i>" + html + "</i>"

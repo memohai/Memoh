@@ -374,7 +374,7 @@ func TestMessageProviderSendToolExposesStructuredMessagePartsSchema(t *testing.T
 	if !ok {
 		t.Fatalf("part type schema missing in %#v", partProps)
 	}
-	assertEnumContainsForTest(t, typeSchema["enum"], "text", "link", "code_block", "mention", "emoji")
+	assertEnumContainsForTest(t, typeSchema["enum"], "text", "link", "code_block", "mention", "emoji", "heading", "blockquote", "list_item")
 	styles, ok := partProps["styles"].(map[string]any)
 	if !ok {
 		t.Fatalf("part styles schema missing in %#v", partProps)
@@ -383,7 +383,7 @@ func TestMessageProviderSendToolExposesStructuredMessagePartsSchema(t *testing.T
 	if !ok {
 		t.Fatalf("part styles items schema = %T, want map[string]any", styles["items"])
 	}
-	assertEnumContainsForTest(t, styleItems["enum"], "bold", "italic", "strikethrough", "code")
+	assertEnumContainsForTest(t, styleItems["enum"], "bold", "italic", "strikethrough", "code", "underline", "spoiler")
 }
 
 func TestContainerProviderUsageGatesRegisteredTools(t *testing.T) {

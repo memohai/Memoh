@@ -126,7 +126,7 @@ func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sd
 func sendMessageObjectSchema() map[string]any {
 	return map[string]any{
 		"type":                 "object",
-		"description":          "Structured message payload. Use text for ordinary messages; use parts only when you need explicit links, code blocks, mentions, emoji, or inline styles.",
+		"description":          "Structured message payload. Use text for ordinary messages; use parts only when you need explicit links, code blocks, mentions, emoji, headings, quotes, list items, or inline styles.",
 		"additionalProperties": false,
 		"properties": map[string]any{
 			"format": map[string]any{
@@ -140,7 +140,7 @@ func sendMessageObjectSchema() map[string]any {
 			},
 			"parts": map[string]any{
 				"type":        "array",
-				"description": "Structured rich body. Use only for explicit link/code_block/mention/emoji/styled spans.",
+				"description": "Structured rich body. Use only for explicit link/code_block/mention/emoji/heading/blockquote/list_item parts or styled spans.",
 				"items":       sendMessagePartSchema(),
 			},
 			"attachments": map[string]any{
@@ -184,11 +184,11 @@ func sendMessagePartSchema() map[string]any {
 		"properties": map[string]any{
 			"type": map[string]any{
 				"type": "string",
-				"enum": []any{"text", "link", "code_block", "mention", "emoji"},
+				"enum": []any{"text", "link", "code_block", "mention", "emoji", "heading", "blockquote", "list_item"},
 			},
 			"text": map[string]any{
 				"type":        "string",
-				"description": "Visible text for text/link/code_block/mention/emoji parts.",
+				"description": "Visible text for text/link/code_block/mention/emoji/heading/blockquote/list_item parts.",
 			},
 			"url": map[string]any{
 				"type":        "string",
@@ -199,7 +199,7 @@ func sendMessagePartSchema() map[string]any {
 				"description": "Inline styles for text-like parts.",
 				"items": map[string]any{
 					"type": "string",
-					"enum": []any{"bold", "italic", "strikethrough", "code"},
+					"enum": []any{"bold", "italic", "strikethrough", "code", "underline", "spoiler"},
 				},
 			},
 			"language": map[string]any{

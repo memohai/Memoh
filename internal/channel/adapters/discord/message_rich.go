@@ -27,6 +27,12 @@ func renderDiscordMessagePartsMarkdown(msg channel.Message) string {
 				text = strings.TrimSpace(part.Emoji)
 			}
 			writeDiscordRichInlinePart(&b, text, part.Styles)
+		case channel.MessagePartHeading:
+			writeDiscordRichHeadingPart(&b, part)
+		case channel.MessagePartBlockquote:
+			writeDiscordRichBlockquotePart(&b, part)
+		case channel.MessagePartListItem:
+			writeDiscordRichListItemPart(&b, part)
 		}
 	}
 	return strings.TrimSpace(b.String())
@@ -118,13 +124,69 @@ func writeDiscordRichCodeBlockPart(b *strings.Builder, part channel.MessagePart)
 	b.WriteString(fence)
 }
 
+func writeDiscordRichHeadingPart(b *strings.Builder, part channel.MessagePart) {
+	text := channel.CollapseMessagePartTextLine(part.Text)
+	if text == "" {
+		return
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n\n")
+	}
+	b.WriteString("## ")
+	b.WriteString(renderDiscordRichStyledInline(text, part.Styles))
+}
+
+func writeDiscordRichBlockquotePart(b *strings.Builder, part channel.MessagePart) {
+	lines := channel.SplitMessagePartTextLines(part.Text)
+	if len(lines) == 0 {
+		return
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n\n")
+	}
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(">")
+		if line != "" {
+			b.WriteString(" ")
+			b.WriteString(renderDiscordRichStyledInline(line, part.Styles))
+		}
+	}
+}
+
+func writeDiscordRichListItemPart(b *strings.Builder, part channel.MessagePart) {
+	lines := channel.SplitMessagePartTextLines(part.Text)
+	if len(lines) == 0 {
+		return
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n\n")
+	}
+	b.WriteString("- ")
+	b.WriteString(renderDiscordRichStyledInline(lines[0], part.Styles))
+	for _, line := range lines[1:] {
+		b.WriteString("\n  ")
+		if line != "" {
+			b.WriteString(renderDiscordRichStyledInline(line, part.Styles))
+		}
+	}
+}
+
 func renderDiscordRichStyledInline(text string, styles []channel.MessageTextStyle) string {
 	if hasDiscordRichTextStyle(styles, channel.MessageStyleCode) {
 		return wrapDiscordInlineCode(text)
 	}
 	escaped := escapeDiscordInlineMarkdown(text)
+	if hasDiscordRichTextStyle(styles, channel.MessageStyleSpoiler) {
+		escaped = "||" + escaped + "||"
+	}
 	if hasDiscordRichTextStyle(styles, channel.MessageStyleStrikethrough) {
 		escaped = "~~" + escaped + "~~"
+	}
+	if hasDiscordRichTextStyle(styles, channel.MessageStyleUnderline) {
+		escaped = "__" + escaped + "__"
 	}
 	if hasDiscordRichTextStyle(styles, channel.MessageStyleItalic) {
 		escaped = "*" + escaped + "*"

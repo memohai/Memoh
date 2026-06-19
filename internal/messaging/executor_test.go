@@ -275,17 +275,37 @@ func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 					"text":     "go test ./...",
 					"language": "go",
 				},
+				map[string]any{
+					"type": "heading",
+					"text": "Summary",
+				},
+				map[string]any{
+					"type": "blockquote",
+					"text": "quoted",
+				},
+				map[string]any{
+					"type": "list_item",
+					"text": "first item",
+				},
+				map[string]any{
+					"type":   "text",
+					"text":   "hidden detail",
+					"styles": []any{"underline", "spoiler"},
+				},
 			},
 		},
 	}, "")
 	if err != nil {
 		t.Fatalf("ParseOutboundMessage returned error: %v", err)
 	}
-	if msg.Format != channel.MessageFormatRich || len(msg.Parts) != 2 {
+	if msg.Format != channel.MessageFormatRich || len(msg.Parts) != 6 {
 		t.Fatalf("unexpected parsed message: %#v", msg)
 	}
 	if got := msg.Parts[0]; got.Type != channel.MessagePartText || len(got.Styles) != 1 || got.Styles[0] != channel.MessageStyleBold {
 		t.Fatalf("unexpected first part: %#v", got)
+	}
+	if got := msg.Parts[5]; got.Type != channel.MessagePartText || len(got.Styles) != 2 || got.Styles[0] != channel.MessageStyleUnderline || got.Styles[1] != channel.MessageStyleSpoiler {
+		t.Fatalf("unexpected styled part: %#v", got)
 	}
 
 	tests := []struct {
@@ -308,14 +328,14 @@ func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 		{
 			name: "unknown part type",
 			raw: map[string]any{"message": map[string]any{"parts": []any{
-				map[string]any{"type": "heading", "text": "Title"},
+				map[string]any{"type": "table", "text": "Title"},
 			}}},
 			want: "unsupported message part type",
 		},
 		{
 			name: "unknown style",
 			raw: map[string]any{"message": map[string]any{"parts": []any{
-				map[string]any{"type": "text", "text": "hi", "styles": []any{"underline"}},
+				map[string]any{"type": "text", "text": "hi", "styles": []any{"rainbow"}},
 			}}},
 			want: "unsupported message part style",
 		},

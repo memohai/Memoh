@@ -38,3 +38,30 @@ func TestFormatMatrixMessageMarkdownUsesNormalizedBody(t *testing.T) {
 		t.Fatalf("expected no html table in formatted body, got %q", formatted.FormattedBody)
 	}
 }
+
+func TestFormatMatrixMessagePartsRenderBlockPartsAndStyles(t *testing.T) {
+	formatted := formatMatrixMessage(channel.Message{
+		Format: channel.MessageFormatRich,
+		Parts: []channel.MessagePart{
+			{Type: channel.MessagePartHeading, Text: "Title <x>"},
+			{Type: channel.MessagePartBlockquote, Text: "alpha <x>\nbeta"},
+			{Type: channel.MessagePartListItem, Text: "item <x>"},
+			{Type: channel.MessagePartText, Text: "under", Styles: []channel.MessageTextStyle{channel.MessageStyleUnderline}},
+			{Type: channel.MessagePartText, Text: "secret", Styles: []channel.MessageTextStyle{channel.MessageStyleSpoiler}},
+		},
+	})
+	if formatted.Body != "Title <x>\n\n> alpha <x>\n> beta\n\n- item <x>\n\nunder\n\nsecret" {
+		t.Fatalf("unexpected Matrix plain body: %q", formatted.Body)
+	}
+	for _, want := range []string{
+		"<h2>Title &lt;x&gt;</h2>",
+		"<blockquote>alpha &lt;x&gt;<br>beta</blockquote>",
+		"<ul><li>item &lt;x&gt;</li></ul>",
+		"<p><u>under</u></p>",
+		`<p><span data-mx-spoiler>secret</span></p>`,
+	} {
+		if !strings.Contains(formatted.FormattedBody, want) {
+			t.Fatalf("Matrix formatted body missing %q in %q", want, formatted.FormattedBody)
+		}
+	}
+}

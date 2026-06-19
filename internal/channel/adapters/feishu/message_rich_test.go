@@ -39,6 +39,20 @@ func TestRenderFeishuMessagePartsLarkMD(t *testing.T) {
 			want: "~~old~~",
 		},
 		{
+			name: "underline degrades to visible text",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: "under", Styles: []channel.MessageTextStyle{channel.MessageStyleUnderline}},
+			}},
+			want: "under",
+		},
+		{
+			name: "spoiler degrades to visible text",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: "secret", Styles: []channel.MessageTextStyle{channel.MessageStyleSpoiler}},
+			}},
+			want: "secret",
+		},
+		{
 			name: "inline code wins over other styles",
 			msg: channel.Message{Parts: []channel.MessagePart{
 				{Type: channel.MessagePartText, Text: "x.y", Styles: []channel.MessageTextStyle{channel.MessageStyleCode, channel.MessageStyleBold}},
@@ -118,6 +132,27 @@ func TestRenderFeishuMessagePartsLarkMD(t *testing.T) {
 				{Type: channel.MessagePartEmoji, Emoji: "🎉"},
 			}},
 			want: "🎉",
+		},
+		{
+			name: "heading degrades to bold title",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartHeading, Text: "Title [x]"},
+			}},
+			want: `**Title \[x\]**`,
+		},
+		{
+			name: "blockquote quotes each line",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartBlockquote, Text: "alpha [x]\nbeta"},
+			}},
+			want: "> alpha \\[x\\]\n> beta",
+		},
+		{
+			name: "list item emits bullet line",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartListItem, Text: "item [x]"},
+			}},
+			want: `- item \[x\]`,
 		},
 		{
 			name: "mixed inline + code block + link",

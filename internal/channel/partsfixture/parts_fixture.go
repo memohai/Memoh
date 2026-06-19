@@ -8,12 +8,11 @@ package partsfixture
 import "github.com/memohai/memoh/internal/channel"
 
 // Canonical returns the shared rich-message fixture used by the
-// cross-platform Parts rendering regression tests. The slice covers every
-// MessagePartType (text, link, code_block, mention, emoji), the bold and
-// italic styles, a code block with language hint, and a masked link URL,
-// so adapter renderers exercise their full happy-path shape against a
-// single source of truth. Each call returns a fresh copy so callers can
-// mutate the slice without affecting other tests.
+// cross-platform Parts rendering regression tests. The slice covers the
+// baseline inline/block mix (text, link, code_block, mention, emoji), the bold
+// and italic styles, a code block with language hint, and a masked link URL.
+// Each call returns a fresh copy so callers can mutate the slice without
+// affecting other tests.
 //
 // Adversarial inputs (injection text, fence collision, etc.) intentionally
 // stay in each adapter's own test file — this fixture pins the typical

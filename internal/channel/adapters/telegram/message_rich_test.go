@@ -69,3 +69,61 @@ func TestRenderTelegramMessagePartsRichMessage_Mentions(t *testing.T) {
 		})
 	}
 }
+
+func TestRenderTelegramMessagePartsRichMessage_BlockPartsAndStyles(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		msg  channel.Message
+		want string
+	}{
+		{
+			name: "underline",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: "under", Styles: []channel.MessageTextStyle{channel.MessageStyleUnderline}},
+			}},
+			want: `<p><u>under</u></p>`,
+		},
+		{
+			name: "spoiler",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: "secret", Styles: []channel.MessageTextStyle{channel.MessageStyleSpoiler}},
+			}},
+			want: `<p><tg-spoiler>secret</tg-spoiler></p>`,
+		},
+		{
+			name: "heading",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartHeading, Text: "Title <x>"},
+			}},
+			want: `<p><b>Title &lt;x&gt;</b></p>`,
+		},
+		{
+			name: "blockquote",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartBlockquote, Text: "alpha <x>\nbeta"},
+			}},
+			want: `<blockquote>alpha &lt;x&gt;
+beta</blockquote>`,
+		},
+		{
+			name: "list item",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartListItem, Text: "item <x>"},
+			}},
+			want: `<p>- item &lt;x&gt;</p>`,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rich := renderTelegramMessagePartsRichMessage(tc.msg)
+			if rich.HTML != tc.want {
+				t.Errorf("got %q\nwant %q", rich.HTML, tc.want)
+			}
+		})
+	}
+}
