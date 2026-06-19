@@ -264,3 +264,194 @@ CREATE TABLE bot_sessions (
 		t.Fatalf("page2[0] = %s, want %s (no duplicate, no skip)", got, ids[0])
 	}
 }
+
+// TestSQLiteListSessionsByBotPagedWithinOneSecond pins down the second-
+// precision invariant between SQLite's CURRENT_TIMESTAMP storage and the
+// cursor formatter in pagedCursorBindings. Several rows inserted inside the
+// same wall-clock second collide on `updated_at` after CURRENT_TIMESTAMP
+// truncation; only the (updated_at = ? AND id < ?) tiebreak in the cursor SQL
+// can separate them. A regression that lets sub-second precision leak into
+// either side of the compare would either revisit or skip rows here.
+func TestSQLiteListSessionsByBotPagedWithinOneSecond(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	execAll(t, conn, `
+CREATE TABLE bot_channel_routes (
+  id TEXT PRIMARY KEY,
+  metadata TEXT,
+  conversation_type TEXT
+);
+CREATE TABLE bot_sessions (
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL,
+  route_id TEXT REFERENCES bot_channel_routes(id),
+  channel_type TEXT,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  metadata TEXT NOT NULL DEFAULT '{}',
+  parent_session_id TEXT,
+  created_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted_at TEXT
+);
+`)
+
+	botID := "33333333-3333-3333-3333-333333333333"
+	ids := []string{
+		"cccccccc-cccc-cccc-cccc-cccccccccc01",
+		"cccccccc-cccc-cccc-cccc-cccccccccc02",
+		"cccccccc-cccc-cccc-cccc-cccccccccc03",
+		"cccccccc-cccc-cccc-cccc-cccccccccc04",
+		"cccccccc-cccc-cccc-cccc-cccccccccc05",
+	}
+	// Insert each row with a fresh CURRENT_TIMESTAMP read with no explicit
+	// updated_at; sleeping a few hundred microseconds between inserts gives
+	// SQLite distinct sub-second wall times that all collapse to the same
+	// second after CURRENT_TIMESTAMP truncation. That is exactly the state
+	// the cursor must navigate without revisiting or skipping rows.
+	for _, id := range ids {
+		if _, err := conn.ExecContext(ctx,
+			`INSERT INTO bot_sessions (id, bot_id, type) VALUES (?, ?, 'chat')`,
+			id, botID,
+		); err != nil {
+			t.Fatalf("insert seed %s: %v", id, err)
+		}
+		time.Sleep(500 * time.Microsecond)
+	}
+
+	st, err := New(conn)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	queries := NewQueries(st)
+	pgBotID := mustUUID(t, botID)
+
+	// Walk pages of size 2 until the listing is exhausted; every row id must
+	// appear exactly once and never be revisited.
+	visited := make(map[string]int, len(ids))
+	var cursor *pgsqlc.ListSessionsByBotPagedRow
+	for step := 0; step < len(ids)+2; step++ {
+		params := pgsqlc.ListSessionsByBotPagedParams{
+			BotID:      pgBotID,
+			Types:      []string{"chat"},
+			LimitCount: 2,
+		}
+		if cursor != nil {
+			params.UseCursor = true
+			params.CursorUpdatedAt = pgtype.Timestamptz{Time: cursor.UpdatedAt.Time, Valid: true}
+			params.CursorID = cursor.ID
+		}
+		page, err := queries.ListSessionsByBotPaged(ctx, params)
+		if err != nil {
+			t.Fatalf("page step %d: %v", step, err)
+		}
+		if len(page) == 0 {
+			break
+		}
+		for _, row := range page {
+			visited[row.ID.String()]++
+		}
+		last := page[len(page)-1]
+		cursor = &last
+	}
+	if len(visited) != len(ids) {
+		t.Fatalf("visited %d distinct rows, want %d (visited=%v)", len(visited), len(ids), visited)
+	}
+	for id, count := range visited {
+		if count != 1 {
+			t.Fatalf("row %s visited %d times, want exactly 1", id, count)
+		}
+	}
+}
+
+// TestSQLiteListSessionsByBotPagedSurfacesRouteJoinColumns guards the column
+// ordering in scanSessionPagedRows. The query selects 14 positional columns
+// including the two LEFT JOIN'd route columns; a regression that swaps two
+// fields would not fail the basic listing tests because most fields are
+// independently asserted as scalars on a single row. Forcing a non-null
+// route_metadata + route_conversation_type round-trip catches that class of
+// bug.
+func TestSQLiteListSessionsByBotPagedSurfacesRouteJoinColumns(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	execAll(t, conn, `
+CREATE TABLE bot_channel_routes (
+  id TEXT PRIMARY KEY,
+  metadata TEXT,
+  conversation_type TEXT
+);
+CREATE TABLE bot_sessions (
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL,
+  route_id TEXT REFERENCES bot_channel_routes(id),
+  channel_type TEXT,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  metadata TEXT NOT NULL DEFAULT '{}',
+  parent_session_id TEXT,
+  created_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted_at TEXT
+);
+`)
+
+	botID := "44444444-4444-4444-4444-444444444444"
+	routeID := "55555555-5555-5555-5555-555555555555"
+	sessionID := "66666666-6666-6666-6666-666666666666"
+	if _, err := conn.ExecContext(ctx,
+		`INSERT INTO bot_channel_routes (id, metadata, conversation_type) VALUES (?, ?, ?)`,
+		routeID, `{"channel":"telegram"}`, "group",
+	); err != nil {
+		t.Fatalf("insert route: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx,
+		`INSERT INTO bot_sessions (id, bot_id, route_id, type, updated_at, created_at)
+         VALUES (?, ?, ?, 'chat', '2026-06-19 12:00:00', '2026-06-19 12:00:00')`,
+		sessionID, botID, routeID,
+	); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+
+	st, err := New(conn)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	queries := NewQueries(st)
+
+	page, err := queries.ListSessionsByBotPaged(ctx, pgsqlc.ListSessionsByBotPagedParams{
+		BotID:      mustUUID(t, botID),
+		Types:      []string{"chat"},
+		LimitCount: 10,
+	})
+	if err != nil {
+		t.Fatalf("ListSessionsByBotPaged: %v", err)
+	}
+	if len(page) != 1 {
+		t.Fatalf("page len = %d, want 1", len(page))
+	}
+	row := page[0]
+	if row.ID.String() != sessionID {
+		t.Fatalf("row id = %s, want %s", row.ID.String(), sessionID)
+	}
+	if row.RouteID.String() != routeID {
+		t.Fatalf("row route_id = %s, want %s", row.RouteID.String(), routeID)
+	}
+	if string(row.RouteMetadata) != `{"channel":"telegram"}` {
+		t.Fatalf("RouteMetadata = %q, want telegram payload", string(row.RouteMetadata))
+	}
+	if !row.RouteConversationType.Valid || row.RouteConversationType.String != "group" {
+		t.Fatalf("RouteConversationType = %#v, want group", row.RouteConversationType)
+	}
+}

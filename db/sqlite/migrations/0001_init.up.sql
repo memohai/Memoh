@@ -445,6 +445,12 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   parent_session_id TEXT REFERENCES bot_sessions(id) ON DELETE SET NULL,
   created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  -- updated_at is stored at second precision via CURRENT_TIMESTAMP. The
+  -- keyset cursor in `internal/db/sqlite/store/sessions_paged.go` truncates
+  -- its bound timestamp to seconds to match this storage. If we ever upgrade
+  -- this column to sub-second precision, the cursor formatter MUST keep
+  -- sub-second too so the lexicographic compare stays consistent — otherwise
+  -- rows in the same second would be skipped or returned indefinitely.
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted_at TEXT
 );

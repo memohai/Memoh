@@ -24,12 +24,6 @@ import (
 // it compares lexicographically against `updated_at`, which SQLite stores in
 // that same text form via CURRENT_TIMESTAMP.
 
-// errUnsupportedSQLiteTimestamp is returned when parseSQLiteTimestamp fails
-// to match any known layout. Hoisted to a package-level sentinel so callers
-// can errors.Is-check and so static-analyzers don't flag the inline
-// errors.New as a dynamic-error allocation.
-var errUnsupportedSQLiteTimestamp = errors.New("sessions_paged: unsupported sqlite timestamp format")
-
 const sessionPagedColumns = `s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
   s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
   r.metadata AS route_metadata,
@@ -94,7 +88,7 @@ func (q *Queries) listSessionsByBotPaged(ctx context.Context, arg pgsqlc.ListSes
 	for _, t := range arg.Types {
 		args = append(args, t)
 	}
-	args = append(args, arg.LimitCount)
+	args = append(args, int64(arg.LimitCount))
 
 	rows, err := q.store.db.QueryContext(ctx, listSessionsByBotPagedQuery(len(arg.Types)), args...)
 	if err != nil {
@@ -125,7 +119,7 @@ func (q *Queries) listSessionsByBotAndCreatedByUserPaged(ctx context.Context, ar
 	for _, t := range arg.Types {
 		args = append(args, t)
 	}
-	args = append(args, arg.LimitCount)
+	args = append(args, int64(arg.LimitCount))
 
 	rows, err := q.store.db.QueryContext(ctx, listSessionsByBotAndUserPagedQuery(len(arg.Types)), args...)
 	if err != nil {
@@ -144,8 +138,13 @@ func (q *Queries) listSessionsByBotAndCreatedByUserPaged(ctx context.Context, ar
 
 // pagedCursorBindings converts Postgres-typed cursor inputs into the string /
 // int values the SQLite driver expects. The timestamp is formatted at second
-// precision to match SQLite's TEXT storage from CURRENT_TIMESTAMP — any
-// sub-second precision in the caller's timestamp is discarded deliberately.
+// precision to match SQLite's TEXT storage from CURRENT_TIMESTAMP — the
+// schema invariant pinned in `db/sqlite/migrations/0001_init.up.sql` next to
+// `bot_sessions.updated_at`. If a future migration upgrades the column to
+// sub-second precision, this formatter MUST also keep sub-second so the
+// lexicographic comparison in the cursor SQL stays consistent with what the
+// row stores; otherwise rows in the same second will be skipped or revisited.
+// Any sub-second precision in the caller's timestamp is discarded today.
 func pagedCursorBindings(botID pgtype.UUID, useCursor bool, cursorUpdatedAt pgtype.Timestamptz, cursorID pgtype.UUID) (string, int, string, string) {
 	useFlag := 0
 	if useCursor {
@@ -285,5 +284,5 @@ func parseSQLiteTimestamp(raw string) (pgtype.Timestamptz, error) {
 			return pgtype.Timestamptz{Time: parsed.UTC(), Valid: true}, nil
 		}
 	}
-	return pgtype.Timestamptz{}, fmt.Errorf("%w: %q", errUnsupportedSQLiteTimestamp, raw)
+	return pgtype.Timestamptz{}, fmt.Errorf("sessions_paged: unsupported sqlite timestamp format %q", raw)
 }
