@@ -26,6 +26,10 @@ func TestSQLiteListSessionsByBotPagedRespectsCursorAndTypes(t *testing.T) {
 	}
 	defer func() { _ = conn.Close() }()
 
+	// Hand-rolled minimal schema rather than the full SQLite migration
+	// baseline — see the comment in TestSQLiteListSessionsByBotPagedTiesOnUpdatedAt
+	// for the rationale; schema drift on the queried columns surfaces via
+	// the integration test path.
 	execAll(t, conn, `
 CREATE TABLE bot_channel_routes (
   id TEXT PRIMARY KEY,
