@@ -270,10 +270,11 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 		m.logger.Info("send outbound", slog.String("channel", channelType.String()), slog.String("bot_id", botID))
 	}
 	policy := m.resolveOutboundPolicy(channelType)
-	outbound, err := buildOutboundMessages(OutboundMessage{
+	caps, hasCaps := m.registry.GetOutboundCapabilities(channelType, config, target)
+	outbound, err := buildOutboundMessagesWithCaps(OutboundMessage{
 		Target:  target,
 		Message: req.Message,
-	}, policy)
+	}, policy, caps, hasCaps)
 	if err != nil {
 		return err
 	}

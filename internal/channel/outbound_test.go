@@ -440,6 +440,80 @@ func TestBuildOutboundMessages_InlineTextWithMediaMovesTextToCaption(t *testing.
 	}
 }
 
+func TestBuildOutboundMessagesWithCaps_OversizedRichPartsDegradeToMarkdownChunks(t *testing.T) {
+	t.Parallel()
+
+	msgs, err := buildOutboundMessagesWithCaps(OutboundMessage{
+		Target: "chat-1",
+		Message: Message{
+			Format: MessageFormatRich,
+			Parts: []MessagePart{
+				{Type: MessagePartText, Text: strings.Repeat("alpha ", 6)},
+				{Type: MessagePartText, Text: strings.Repeat("beta ", 6)},
+				{Type: MessagePartText, Text: strings.Repeat("gamma ", 6)},
+			},
+		},
+	}, OutboundPolicy{
+		TextChunkLimit: 50,
+		ChunkerMode:    ChunkerModeMarkdown,
+	}, ChannelCapabilities{Text: true, Markdown: true, RichText: true}, true)
+	if err != nil {
+		t.Fatalf("buildOutboundMessagesWithCaps failed: %v", err)
+	}
+	if len(msgs) < 2 {
+		t.Fatalf("expected oversized rich body to split, got %d message(s)", len(msgs))
+	}
+	for i, msg := range msgs {
+		if len(msg.Message.Parts) != 0 {
+			t.Fatalf("chunk %d should not keep rich parts: %+v", i, msg.Message.Parts)
+		}
+		if msg.Message.Format != MessageFormatMarkdown {
+			t.Fatalf("chunk %d format = %q, want markdown", i, msg.Message.Format)
+		}
+		if got := runeLen(msg.Message.Text); got > 50 {
+			t.Fatalf("chunk %d text length = %d, want <= 50: %q", i, got, msg.Message.Text)
+		}
+	}
+}
+
+func TestBuildOutboundMessagesWithCaps_OversizedRichOnlyCapsDegradeToPlainChunks(t *testing.T) {
+	t.Parallel()
+
+	msgs, err := buildOutboundMessagesWithCaps(OutboundMessage{
+		Target: "chat-1",
+		Message: Message{
+			Format: MessageFormatRich,
+			Parts: []MessagePart{
+				{Type: MessagePartText, Text: strings.Repeat("alpha ", 6), Styles: []MessageTextStyle{MessageStyleBold}},
+				{Type: MessagePartLink, Text: "docs", URL: "https://example.test/docs"},
+				{Type: MessagePartText, Text: strings.Repeat("gamma ", 6)},
+			},
+		},
+	}, OutboundPolicy{
+		TextChunkLimit: 50,
+	}, ChannelCapabilities{Text: true, RichText: true}, true)
+	if err != nil {
+		t.Fatalf("buildOutboundMessagesWithCaps failed: %v", err)
+	}
+	if len(msgs) < 2 {
+		t.Fatalf("expected oversized rich body to split, got %d message(s)", len(msgs))
+	}
+	for i, msg := range msgs {
+		if len(msg.Message.Parts) != 0 {
+			t.Fatalf("chunk %d should not keep rich parts: %+v", i, msg.Message.Parts)
+		}
+		if msg.Message.Format != MessageFormatPlain {
+			t.Fatalf("chunk %d format = %q, want plain", i, msg.Message.Format)
+		}
+		if strings.Contains(msg.Message.Text, "**") || strings.Contains(msg.Message.Text, "[docs](") {
+			t.Fatalf("chunk %d should be plain text, got %q", i, msg.Message.Text)
+		}
+		if got := runeLen(msg.Message.Text); got > 50 {
+			t.Fatalf("chunk %d text length = %d, want <= 50: %q", i, got, msg.Message.Text)
+		}
+	}
+}
+
 func TestPushFinalWithChunking_NonFinalPassthrough(t *testing.T) {
 	t.Parallel()
 	stream, rec, sent := newChunkingTestStream(t, 100)
@@ -497,7 +571,7 @@ func TestPushFinalWithChunking_MarkdownFormat(t *testing.T) {
 	}
 }
 
-func TestPushFinalWithChunking_RichPartsStayOnPreparedStream(t *testing.T) {
+func TestPushFinalWithChunking_ShortRichPartsStayOnPreparedStream(t *testing.T) {
 	t.Parallel()
 
 	channelType := ChannelType("richstream")
@@ -531,7 +605,7 @@ func TestPushFinalWithChunking_RichPartsStayOnPreparedStream(t *testing.T) {
 			Message: Message{
 				Format: MessageFormatRich,
 				Parts: []MessagePart{
-					{Type: MessagePartText, Text: strings.Repeat("rich ", 20), Styles: []MessageTextStyle{MessageStyleBold}},
+					{Type: MessagePartText, Text: "short rich", Styles: []MessageTextStyle{MessageStyleBold}},
 				},
 			},
 		},
@@ -549,6 +623,75 @@ func TestPushFinalWithChunking_RichPartsStayOnPreparedStream(t *testing.T) {
 	}
 	if len(sent) != 0 {
 		t.Fatalf("expected no overflow plain sends for rich parts, got %d", len(sent))
+	}
+}
+
+func TestPushFinalWithChunking_OversizedRichPartsDegradeToMarkdownChunks(t *testing.T) {
+	t.Parallel()
+
+	channelType := ChannelType("richstream-oversized")
+	registry := NewRegistry()
+	adapter := &streamValidationAdapter{
+		channelType:    channelType,
+		outboundPolicy: OutboundPolicy{TextChunkLimit: 50, ChunkerMode: ChunkerModeMarkdown},
+		richText:       true,
+	}
+	if err := registry.Register(adapter); err != nil {
+		t.Fatalf("register adapter failed: %v", err)
+	}
+	manager := &Manager{registry: registry, attachmentStore: channeltest.NewMemoryAttachmentStore()}
+	rec := &recordingStream{}
+	var sent []OutboundMessage
+	stream := &managerOutboundStream{
+		manager:     manager,
+		config:      ChannelConfig{BotID: "bot-1", ChannelType: channelType},
+		stream:      rec,
+		channelType: channelType,
+		policy:      manager.resolveOutboundPolicy(channelType),
+		send: func(_ context.Context, msg OutboundMessage) error {
+			sent = append(sent, msg)
+			return nil
+		},
+	}
+
+	event := StreamEvent{
+		Type: StreamEventFinal,
+		Final: &StreamFinalizePayload{
+			Message: Message{
+				Format: MessageFormatRich,
+				Parts: []MessagePart{
+					{Type: MessagePartText, Text: strings.Repeat("alpha ", 6)},
+					{Type: MessagePartText, Text: strings.Repeat("beta ", 6)},
+					{Type: MessagePartText, Text: strings.Repeat("gamma ", 6)},
+				},
+			},
+		},
+	}
+	if err := stream.Push(context.Background(), event); err != nil {
+		t.Fatalf("Push failed: %v", err)
+	}
+
+	events := rec.Events()
+	if len(events) != 1 {
+		t.Fatalf("expected first chunk on prepared stream, got %d events", len(events))
+	}
+	first := events[0].Final.Message
+	if len(first.Parts) != 0 || first.Format != MessageFormatMarkdown {
+		t.Fatalf("first chunk should be markdown text, got %+v", first)
+	}
+	if len(sent) == 0 {
+		t.Fatal("expected overflow chunks sent through fallback sender")
+	}
+	for i, msg := range sent {
+		if len(msg.Message.Parts) != 0 {
+			t.Fatalf("overflow chunk %d should not keep parts: %+v", i, msg.Message.Parts)
+		}
+		if msg.Message.Format != MessageFormatMarkdown {
+			t.Fatalf("overflow chunk %d format = %q, want markdown", i, msg.Message.Format)
+		}
+		if got := runeLen(msg.Message.Text); got > 50 {
+			t.Fatalf("overflow chunk %d text length = %d, want <= 50: %q", i, got, msg.Message.Text)
+		}
 	}
 }
 

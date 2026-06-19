@@ -196,14 +196,22 @@ func (m *Manager) resolveOutboundPolicy(channelType ChannelType) OutboundPolicy 
 
 // buildOutboundMessages splits an outbound message into multiple messages based on the policy.
 func buildOutboundMessages(msg OutboundMessage, policy OutboundPolicy) ([]OutboundMessage, error) {
+	return buildOutboundMessagesWithCaps(msg, policy, ChannelCapabilities{}, false)
+}
+
+func buildOutboundMessagesWithCaps(msg OutboundMessage, policy OutboundPolicy, caps ChannelCapabilities, hasCaps bool) ([]OutboundMessage, error) {
 	if msg.Message.IsEmpty() {
 		return nil, errors.New("message is required")
 	}
 	normalized := normalizeOutboundMessage(msg.Message)
+	normalized = coerceOversizedRichPartsForChunking(normalized, policy, caps, hasCaps)
 	attachments := append([]Attachment(nil), normalized.Attachments...)
 	chunker := policy.Chunker
 	if normalized.Format == MessageFormatMarkdown {
 		chunker = ChunkMarkdownText
+	}
+	if chunker == nil {
+		chunker = DefaultChunker(policy.ChunkerMode)
 	}
 	base := normalized
 	if shouldInlineTextWithMedia(policy, base, attachments) {
@@ -274,6 +282,25 @@ func buildOutboundMessages(msg OutboundMessage, policy OutboundPolicy) ([]Outbou
 		return append(textMessages, attachmentMessages...), nil
 	}
 	return append(attachmentMessages, textMessages...), nil
+}
+
+func coerceOversizedRichPartsForChunking(msg Message, policy OutboundPolicy, caps ChannelCapabilities, hasCaps bool) Message {
+	if !hasCaps || policy.TextChunkLimit <= 0 || len(msg.Parts) == 0 || strings.TrimSpace(msg.ID) != "" {
+		return msg
+	}
+	plain := strings.TrimSpace(RenderPartsAsPlain(msg.Parts))
+	if plain == "" || runeLen(plain) <= policy.TextChunkLimit {
+		return msg
+	}
+	if caps.Markdown {
+		msg.Text = RenderPartsAsMarkdown(msg.Parts)
+		msg.Format = MessageFormatMarkdown
+	} else {
+		msg.Text = plain
+		msg.Format = MessageFormatPlain
+	}
+	msg.Parts = nil
+	return msg
 }
 
 func shouldInlineTextWithMedia(policy OutboundPolicy, msg Message, attachments []Attachment) bool {
@@ -578,7 +605,8 @@ func (s *managerReplySender) Send(ctx context.Context, msg OutboundMessage) erro
 		return errors.New("channel manager not configured")
 	}
 	policy := s.manager.resolveOutboundPolicy(s.channelType)
-	outbound, err := buildOutboundMessages(msg, policy)
+	caps, hasCaps := s.manager.registry.GetOutboundCapabilities(s.channelType, s.config, msg.Target)
+	outbound, err := buildOutboundMessagesWithCaps(msg, policy, caps, hasCaps)
 	if err != nil {
 		return err
 	}
@@ -828,6 +856,9 @@ func (s *managerOutboundStream) pushFinalWithChunking(ctx context.Context, event
 		return s.pushPrepared(ctx, event)
 	}
 	msg := normalizeOutboundMessage(event.Final.Message)
+	if caps, ok := s.manager.registry.GetOutboundCapabilities(s.channelType, s.config, s.target); ok {
+		msg = coerceOversizedRichPartsForChunking(msg, policy, caps, ok)
+	}
 	text := strings.TrimSpace(msg.PlainText())
 	textRunes := runeLen(text)
 	if s.manager.logger != nil {
