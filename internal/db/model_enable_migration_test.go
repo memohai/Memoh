@@ -157,6 +157,17 @@ CREATE TABLE model_variants (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Minimal stub of bot_sessions so migrations targeting that table (e.g.
+-- the 0023 paged-sessions index) parse and apply against this pre-22
+-- fixture. Columns mirror only what newer migrations reference; this is
+-- not a full replica of the production schema.
+CREATE TABLE bot_sessions (
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted_at TEXT
+);
 `)
 	if err != nil {
 		t.Fatalf("create pre-model-enable schema: %v", err)
