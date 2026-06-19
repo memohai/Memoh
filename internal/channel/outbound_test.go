@@ -1168,6 +1168,50 @@ func TestPushDelta_FinalWithAttachmentsAfterSplit(t *testing.T) {
 	}
 }
 
+func TestPushDelta_FinalWithActionsAfterSplitStaysOnBufferedFinal(t *testing.T) {
+	t.Parallel()
+	stream, reo, sent := newDeltaSplitTestStream(t, 50, 3)
+
+	for range 8 {
+		if err := stream.Push(context.Background(), StreamEvent{
+			Type:  StreamEventDelta,
+			Delta: strings.Repeat("a", 10),
+		}); err != nil {
+			t.Fatalf("Push failed: %v", err)
+		}
+	}
+
+	actions := []Action{{Type: "button", Label: "Open", URL: "https://example.com"}}
+	finalEvent := StreamEvent{
+		Type: StreamEventFinal,
+		Final: &StreamFinalizePayload{
+			Message: Message{
+				Text:    strings.Repeat("a", 80),
+				Format:  MessageFormatPlain,
+				Actions: actions,
+			},
+		},
+	}
+	if err := stream.Push(context.Background(), finalEvent); err != nil {
+		t.Fatalf("Final Push failed: %v", err)
+	}
+
+	if len(*sent) != 0 {
+		t.Fatalf("expected actions to stay on stream final, got %d fallback sends", len(*sent))
+	}
+	lastStream := reo.current()
+	events := lastStream.Events()
+	for _, event := range events {
+		if event.Type == StreamEventFinal {
+			if len(event.Final.Message.Actions) != 1 || event.Final.Message.Actions[0].Label != "Open" {
+				t.Fatalf("expected actions on buffered final, got %+v", event.Final.Message.Actions)
+			}
+			return
+		}
+	}
+	t.Fatal("last stream should have received a Final event")
+}
+
 func TestPushDelta_FinalWithPartsAfterSplitDoesNotDuplicateStreamedBody(t *testing.T) {
 	t.Parallel()
 

@@ -812,9 +812,18 @@ func isNaturalBreakPoint(text string) bool {
 // empty-text Final so the adapter finalizes its internal buffer, then
 // delivers any remaining attachments / actions via the non-streaming path.
 func (s *managerOutboundStream) pushFinalAfterSplit(ctx context.Context, event StreamEvent) error {
+	var bufferMessage Message
+	if event.Final != nil && len(event.Final.Message.Attachments) == 0 && len(event.Final.Message.Actions) > 0 {
+		bufferMessage = Message{
+			Actions:  event.Final.Message.Actions,
+			Thread:   event.Final.Message.Thread,
+			Reply:    event.Final.Message.Reply,
+			Metadata: event.Final.Message.Metadata,
+		}
+	}
 	bufferFinal := StreamEvent{
 		Type:     StreamEventFinal,
-		Final:    &StreamFinalizePayload{},
+		Final:    &StreamFinalizePayload{Message: bufferMessage},
 		Metadata: event.Metadata,
 	}
 	if err := s.pushPrepared(ctx, bufferFinal); err != nil {
