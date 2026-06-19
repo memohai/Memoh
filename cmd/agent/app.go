@@ -452,11 +452,17 @@ func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *mod
 			if eventHub == nil {
 				return
 			}
-			// session_id is lifted to the top so the per-session SSE
-			// handler can route the event without unwrapping `task`.
-			// AgentStream events use the same shape (see
-			// resolver_trigger.go), keeping payloadSessionID's contract
-			// uniform across event types.
+			// The marshaled payload here IS the wire shape sent to per-session
+			// SSE subscribers — message_stream.go forwards it verbatim after
+			// stamping `type` and `bot_id`. Any field added below is added to
+			// the wire too; review for sensitivity. The top-level keys
+			// (`event`, `session_id`, `task`) are pinned by
+			// TestBackgroundTaskPayloadHasTopLevelSessionID.
+			//
+			// session_id is lifted to the top so the per-session SSE handler
+			// can route the event without unwrapping `task`. AgentStream
+			// events use the same shape (see resolver_trigger.go), keeping
+			// payloadSessionID's contract uniform across event types.
 			data, err := json.Marshal(map[string]any{
 				"event":      evt.Event,
 				"session_id": evt.SessionID,
