@@ -452,9 +452,15 @@ func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *mod
 			if eventHub == nil {
 				return
 			}
+			// session_id is lifted to the top so the per-session SSE
+			// handler can route the event without unwrapping `task`.
+			// AgentStream events use the same shape (see
+			// resolver_trigger.go), keeping payloadSessionID's contract
+			// uniform across event types.
 			data, err := json.Marshal(map[string]any{
-				"event": evt.Event,
-				"task":  evt,
+				"event":      evt.Event,
+				"session_id": evt.SessionID,
+				"task":       evt,
 			})
 			if err != nil {
 				return

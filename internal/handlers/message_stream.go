@@ -171,15 +171,6 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 				}
 				payload["type"] = string(event.Type)
 				payload["bot_id"] = botID
-				if event.Type == messageevent.EventTypeBackgroundTask {
-					if _, ok := payload["task"]; !ok {
-						taskPayload := make(map[string]any, len(payload))
-						for key, value := range payload {
-							taskPayload[key] = value
-						}
-						payload["task"] = taskPayload
-					}
-				}
 				if err := writeSSEJSON(writer, flusher, payload); err != nil {
 					return nil
 				}
@@ -434,12 +425,11 @@ func (c *sessionTypeCache) storeAccess(sessionID, channelIdentityID string, allo
 	c.mu.Unlock()
 }
 
-// payloadSessionID extracts the session id from an event payload, tolerating
-// both snake_case and camelCase keys that legacy publishers may use.
+// payloadSessionID extracts the session id from an event payload. All in-tree
+// publishers (BackgroundTask, AgentStream, MessageCreated, …) lift `session_id`
+// to the top level, so this is a single string lookup; if a future publisher
+// nests it differently the test suite will catch the mismatch loudly.
 func payloadSessionID(payload map[string]any) string {
-	if v, _ := payload["session_id"].(string); v != "" {
-		return v
-	}
-	v, _ := payload["sessionId"].(string)
+	v, _ := payload["session_id"].(string)
 	return v
 }
