@@ -112,6 +112,7 @@ func renderTelegramLinkFallback(part channel.MessagePart) string {
 	if url == "" || !isAllowedTelegramRichHref(url) {
 		return renderTelegramStyledInline(text, part.Styles)
 	}
+	url = channel.EscapeMessagePartLinkURL(url)
 	return `<a href="` + telegramEscapeAttr(url) + `">` + telegramEscapeHTML(text) + `</a>`
 }
 
@@ -181,6 +182,7 @@ func writeTelegramRichLinkPart(b *strings.Builder, part channel.MessagePart) {
 		writeTelegramRichParagraph(b, renderTelegramStyledInline(text, part.Styles))
 		return
 	}
+	url = channel.EscapeMessagePartLinkURL(url)
 	link := `<a href="` + telegramEscapeAttr(url) + `">` + telegramEscapeHTML(text) + `</a>`
 	writeTelegramRichParagraph(b, link)
 }

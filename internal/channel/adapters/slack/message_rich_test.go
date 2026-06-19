@@ -220,6 +220,20 @@ func TestRenderSlackMessagePartsMrkdwn(t *testing.T) {
 			want: "<https://example.test/%3Cscript%3E|docs>",
 		},
 		{
+			name: "link url percent encodes raw space",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartLink, Text: "docs", URL: "https://example.test/foo bar"},
+			}},
+			want: "<https://example.test/foo%20bar|docs>",
+		},
+		{
+			name: "link url strips CRLF delimiters",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartLink, Text: "docs", URL: "https://example.test/a\r\n<bad>|x"},
+			}},
+			want: "<https://example.test/a%3Cbad%3E%7Cx|docs>",
+		},
+		{
 			name: "empty parts returns empty",
 			msg:  channel.Message{Parts: nil},
 			want: "",

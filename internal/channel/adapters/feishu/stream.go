@@ -151,6 +151,9 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.PreparedS
 func renderFeishuStreamFinalText(msg channel.Message, buffered string) string {
 	if len(msg.Parts) > 0 {
 		if body := renderFeishuMessagePartsLarkMD(msg); body != "" {
+			if len([]rune(body)) > feishuStreamMaxRunes {
+				return channel.RenderPartsAsPlain(msg.Parts)
+			}
 			return body
 		}
 	}

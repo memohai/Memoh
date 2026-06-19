@@ -121,6 +121,20 @@ beta</blockquote>`,
 			}},
 			want: `<pre><code class="language-c#">Console.WriteLine(1);</code></pre>`,
 		},
+		{
+			name: "link url percent encodes raw space",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartLink, Text: "docs", URL: "https://example.test/foo bar"},
+			}},
+			want: `<p><a href="https://example.test/foo%20bar">docs</a></p>`,
+		},
+		{
+			name: "link url strips CRLF delimiters",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartLink, Text: "docs", URL: "https://example.test/a\r\n<bad>|x"},
+			}},
+			want: `<p><a href="https://example.test/a%3Cbad%3E%7Cx">docs</a></p>`,
+		},
 	}
 
 	for _, tc := range cases {

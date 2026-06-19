@@ -134,7 +134,7 @@ func writeDegradeMarkdownLink(b *strings.Builder, part MessagePart) {
 	b.WriteString("[")
 	b.WriteString(escapeDegradeMarkdownLinkText(text))
 	b.WriteString("](")
-	b.WriteString(escapeDegradeMarkdownLinkURL(url))
+	b.WriteString(EscapeMessagePartLinkURL(url))
 	b.WriteString(")")
 }
 
@@ -273,12 +273,16 @@ func escapeDegradeMarkdownLinkText(text string) string {
 	return escapeDegradeMarkdownInline(text)
 }
 
-func escapeDegradeMarkdownLinkURL(url string) string {
+// EscapeMessagePartLinkURL percent-encodes characters that can break platform
+// rich-link wrappers while preserving ordinary http(s), mailto, tel and
+// platform-specific URL prefixes.
+func EscapeMessagePartLinkURL(url string) string {
 	url = strings.ReplaceAll(strings.TrimSpace(url), "\n", "")
 	url = strings.ReplaceAll(url, "\r", "")
 	url = strings.ReplaceAll(url, " ", "%20")
 	url = strings.ReplaceAll(url, "<", "%3C")
 	url = strings.ReplaceAll(url, ">", "%3E")
+	url = strings.ReplaceAll(url, "|", "%7C")
 	url = strings.ReplaceAll(url, "(", "%28")
 	url = strings.ReplaceAll(url, ")", "%29")
 	return url

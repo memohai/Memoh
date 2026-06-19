@@ -204,12 +204,7 @@ func hasSlackRichTextStyle(styles []channel.MessageTextStyle, want channel.Messa
 // inside <...>, but a literal <, |, or > would corrupt the marker — a stray
 // < would let attacker-controlled URL content open a nested Slack mrkdwn tag.
 func slackEscapeMrkdwnURL(url string) string {
-	url = strings.ReplaceAll(strings.TrimSpace(url), "\n", "")
-	url = strings.ReplaceAll(url, "\r", "")
-	url = strings.ReplaceAll(url, "<", "%3C")
-	url = strings.ReplaceAll(url, "|", "%7C")
-	url = strings.ReplaceAll(url, ">", "%3E")
-	return url
+	return strings.ReplaceAll(channel.EscapeMessagePartLinkURL(url), "|", "%7C")
 }
 
 func isAllowedSlackRichHref(href string) bool {

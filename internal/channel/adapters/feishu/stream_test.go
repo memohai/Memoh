@@ -1,6 +1,7 @@
 package feishu
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/memohai/memoh/internal/channel"
@@ -46,6 +47,22 @@ func TestRenderFeishuStreamFinalTextUsesParts(t *testing.T) {
 	want := "**Hello**\n\n[docs](https://example.test)"
 	if got != want {
 		t.Fatalf("expected rich parts to drive Feishu stream final\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
+func TestRenderFeishuStreamFinalTextLongRichPartsFallsBackToPlain(t *testing.T) {
+	t.Parallel()
+
+	got := renderFeishuStreamFinalText(channel.Message{
+		Parts: []channel.MessagePart{
+			{Type: channel.MessagePartText, Text: strings.Repeat("你", feishuStreamMaxRunes+100), Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+		},
+	}, "buffered plain text")
+	if strings.Contains(got, "**") {
+		t.Fatalf("long rich stream final should fall back to plain text, got prefix %q", got[:20])
+	}
+	if len([]rune(got)) <= feishuStreamMaxRunes {
+		t.Fatalf("render helper should return full plain fallback before patch truncation, got len=%d", len([]rune(got)))
 	}
 }
 

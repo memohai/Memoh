@@ -1025,7 +1025,7 @@ func TestPushDelta_FinalWithAttachmentsAfterSplit(t *testing.T) {
 	}
 }
 
-func TestPushDelta_FinalWithPartsAfterSplitSendsRichBody(t *testing.T) {
+func TestPushDelta_FinalWithPartsAfterSplitDoesNotDuplicateStreamedBody(t *testing.T) {
 	t.Parallel()
 
 	channelType := ChannelType("rich-split")
@@ -1073,7 +1073,7 @@ func TestPushDelta_FinalWithPartsAfterSplitSendsRichBody(t *testing.T) {
 			Message: Message{
 				Format: MessageFormatRich,
 				Parts: []MessagePart{
-					{Type: MessagePartText, Text: "styled final", Styles: []MessageTextStyle{MessageStyleBold}},
+					{Type: MessagePartText, Text: strings.Repeat("r", 80), Styles: []MessageTextStyle{MessageStyleBold}},
 				},
 			},
 		},
@@ -1082,12 +1082,8 @@ func TestPushDelta_FinalWithPartsAfterSplitSendsRichBody(t *testing.T) {
 		t.Fatalf("Final Push failed: %v", err)
 	}
 
-	if len(sent) != 1 {
-		t.Fatalf("expected 1 rich final send, got %d", len(sent))
-	}
-	got := sent[0].Message
-	if got.Format != MessageFormatRich || len(got.Parts) != 1 || got.Parts[0].Text != "styled final" {
-		t.Fatalf("rich final was not preserved after split: %+v", got)
+	if len(sent) != 0 {
+		t.Fatalf("expected no duplicate rich final send after split, got %d", len(sent))
 	}
 }
 
