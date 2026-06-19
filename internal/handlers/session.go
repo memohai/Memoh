@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
@@ -179,23 +180,43 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 		return err
 	}
 
-	var sessions []session.Session
+	var (
+		sessions     []session.Session
+		nextCursor   session.SessionCursor
+		hasMorePages bool
+	)
 	if bots.HasPermission(perms, bots.PermissionManage) {
 		sessions, err = h.sessionService.ListByBotPaged(c.Request().Context(), bot.ID, types, cursor, limit)
+		if err == nil && len(sessions) == int(limit) {
+			hasMorePages = true
+			last := sessions[len(sessions)-1]
+			nextCursor = session.SessionCursor{UpdatedAt: last.UpdatedAt, ID: last.ID}
+		}
 	} else {
-		sessions, err = h.sessionService.ListByBotAndCreatedByUserPaged(c.Request().Context(), bot.ID, channelIdentityID, types, cursor, limit)
-		sessions = filterSessionsForPermissions(sessions, channelIdentityID, perms)
+		var preFilter []session.Session
+		preFilter, err = h.sessionService.ListByBotAndCreatedByUserPaged(c.Request().Context(), bot.ID, channelIdentityID, types, cursor, limit)
+		if err == nil {
+			// next_cursor must reflect the DB position to resume from, not the
+			// filter survivorship — otherwise a page whose rows were all
+			// dropped by the permission filter would terminate pagination
+			// while older accessible rows still exist on disk.
+			if len(preFilter) == int(limit) {
+				hasMorePages = true
+				last := preFilter[len(preFilter)-1]
+				nextCursor = session.SessionCursor{UpdatedAt: last.UpdatedAt, ID: last.ID}
+			}
+			sessions = filterSessionsForPermissions(preFilter, channelIdentityID, perms)
+		}
 	}
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	nextCursor := ""
-	if len(sessions) == int(limit) && len(sessions) > 0 {
-		last := sessions[len(sessions)-1]
-		nextCursor = encodeSessionCursor(session.SessionCursor{UpdatedAt: last.UpdatedAt, ID: last.ID})
+	encoded := ""
+	if hasMorePages {
+		encoded = encodeSessionCursor(nextCursor)
 	}
-	return c.JSON(http.StatusOK, listSessionsResponse{Items: sessions, NextCursor: nextCursor})
+	return c.JSON(http.StatusOK, listSessionsResponse{Items: sessions, NextCursor: encoded})
 }
 
 // listSessionsResponse is the shape returned by ListSessions.
@@ -275,6 +296,9 @@ func decodeSessionCursor(raw string) (session.SessionCursor, error) {
 	}
 	updatedAt, err := time.Parse(time.RFC3339Nano, parts[0])
 	if err != nil {
+		return session.SessionCursor{}, echo.NewHTTPError(http.StatusBadRequest, "invalid cursor")
+	}
+	if _, err := uuid.Parse(parts[1]); err != nil {
 		return session.SessionCursor{}, echo.NewHTTPError(http.StatusBadRequest, "invalid cursor")
 	}
 	return session.SessionCursor{UpdatedAt: updatedAt, ID: parts[1]}, nil

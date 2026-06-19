@@ -53,6 +53,16 @@ func (q *sessionListQueries) ListSessionsByBotAndCreatedByUserPaged(_ context.Co
 	return q.userPagedRows, nil
 }
 
+// ListBotUserGrantsForUser feeds the non-admin permission resolver. The
+// default response grants `chat`, which is enough for the list endpoint to
+// authorize but not enough to read `discuss` sessions — exactly the shape
+// needed to exercise the post-filter cursor path.
+func (q *sessionListQueries) ListBotUserGrantsForUser(_ context.Context, _ sqlc.ListBotUserGrantsForUserParams) ([]sqlc.ListBotUserGrantsForUserRow, error) {
+	return []sqlc.ListBotUserGrantsForUserRow{
+		{Permissions: []byte(`["chat"]`)},
+	}, nil
+}
+
 func newListSessionHandler(t *testing.T, queries *sessionListQueries) *SessionHandler {
 	t.Helper()
 	return NewSessionHandler(
@@ -240,6 +250,91 @@ func TestListSessionsRejectsMalformedCursor(t *testing.T) {
 	var httpErr *echo.HTTPError
 	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
 		t.Fatalf("ListSessions() error = %v, want HTTP 400", err)
+	}
+}
+
+// TestListSessionsRejectsCursorWithBadUUID guards against a cursor whose
+// timestamp portion parses but whose UUID portion does not. Without this
+// guard the malformed UUID would surface as a 500 from the service layer
+// instead of a 400 from the cursor decoder.
+func TestListSessionsRejectsCursorWithBadUUID(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	queries := &sessionListQueries{bot: testBotRow(botID, nil)}
+	handler := newListSessionHandler(t, queries)
+
+	cursor := base64.RawURLEncoding.EncodeToString([]byte("2026-06-19T00:00:00Z|not-a-uuid"))
+	_, err := callListSessions(handler, botID, "cursor="+url.QueryEscape(cursor))
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
+		t.Fatalf("ListSessions() error = %v, want HTTP 400", err)
+	}
+}
+
+// TestListSessionsCursorNotTruncatedByPermissionFilter pins down that
+// `next_cursor` reflects the database's resume position rather than the
+// post-filter survivorship. If the permission filter drops every row on a
+// full DB page, pagination must still surface a cursor — otherwise the
+// caller would silently stop walking at the first inaccessible page even
+// though older accessible rows remain on disk.
+func TestListSessionsCursorNotTruncatedByPermissionFilter(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	userID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	rowUpdated := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	keptID := "22222222-2222-2222-2222-222222222222"
+	droppedID := "33333333-3333-3333-3333-333333333333"
+
+	queries := &sessionListQueries{bot: testBotRow(botID, nil)}
+	// limit=2 page where the first row is the user's chat session and the
+	// second row is a discuss session created by the same user that the
+	// permission filter discards.
+	queries.userPagedRows = []sqlc.ListSessionsByBotAndCreatedByUserPagedRow{
+		userPagedRow(keptID, userID, session.TypeChat, rowUpdated.Add(2*time.Minute)),
+		userPagedRow(droppedID, userID, session.TypeDiscuss, rowUpdated),
+	}
+
+	handler := NewSessionHandler(
+		slog.Default(),
+		session.NewService(nil, queries),
+		nil,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("user"),
+	)
+
+	rec, err := callListSessions(handler, botID, "limit=2")
+	if err != nil {
+		t.Fatalf("ListSessions() error = %v", err)
+	}
+	resp := decodeListResponse(t, rec)
+	if len(resp.Items) != 1 || resp.Items[0].ID != keptID {
+		ids := make([]string, len(resp.Items))
+		for i, item := range resp.Items {
+			ids[i] = item.ID
+		}
+		t.Fatalf("filtered items = %v, want only %s", ids, keptID)
+	}
+	if resp.NextCursor == "" {
+		t.Fatalf("expected next_cursor when DB returned a full page, even though the filter trimmed it")
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(resp.NextCursor)
+	if err != nil {
+		t.Fatalf("decode cursor: %v", err)
+	}
+	parts := strings.SplitN(string(decoded), "|", 2)
+	if len(parts) != 2 || parts[1] != droppedID {
+		t.Fatalf("cursor payload = %q, want trailing dropped row id %s", string(decoded), droppedID)
+	}
+}
+
+func userPagedRow(id, userID, typ string, updatedAt time.Time) sqlc.ListSessionsByBotAndCreatedByUserPagedRow {
+	return sqlc.ListSessionsByBotAndCreatedByUserPagedRow{
+		ID:              testUUID(id),
+		BotID:           testUUID("11111111-1111-1111-1111-111111111111"),
+		Type:            typ,
+		Title:           "test session",
+		Metadata:        []byte(`{}`),
+		CreatedByUserID: testUUID(userID),
+		CreatedAt:       pgtype.Timestamptz{Time: updatedAt, Valid: true},
+		UpdatedAt:       pgtype.Timestamptz{Time: updatedAt, Valid: true},
 	}
 }
 
