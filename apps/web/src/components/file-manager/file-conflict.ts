@@ -81,3 +81,90 @@ export function detectSaveConflict(a: SaveConflictArgs): boolean {
   if (a.lastLoadedAt <= 0) return false
   return a.lastFsChangeAt > a.lastLoadedAt
 }
+
+export interface ExternalReloadGuardArgs {
+  contentAtRequestStart: string
+  originalContentAtRequestStart: string
+  currentContent: string
+  currentOriginalContent: string
+  force?: boolean
+}
+
+export function canApplyExternalReload(a: ExternalReloadGuardArgs): boolean {
+  if (a.force) return true
+  return a.currentContent === a.contentAtRequestStart
+    && a.currentOriginalContent === a.originalContentAtRequestStart
+    && a.currentContent === a.currentOriginalContent
+}
+
+export type DiskState = 'available' | 'stale' | 'deleted'
+
+export type ChipButton =
+  | { kind: 'compare' }
+  | { kind: 'reload'; labelKey: 'reload' | 'tryAgain' }
+  | { kind: 'forceSave'; labelKey: 'saveAnyway' | 'saveToRestore' }
+
+export interface ResolveChipButtonsArgs {
+  diskState: DiskState
+  isText: boolean
+  isDirty: boolean
+}
+
+// Decides the chip's action buttons for a given conflict surface. Mirrors VS
+// Code's ORPHAN UX: when the file is gone we hide Reload (it would just 404
+// again) and Compare (nothing to diff against), and re-label Save as
+// "Save to restore" — POSTing the buffer recreates the file.
+export function resolveChipButtons(a: ResolveChipButtonsArgs): ChipButton[] {
+  const buttons: ChipButton[] = []
+  if (a.diskState === 'deleted') {
+    // Restore is available for both clean and dirty buffers: a clean buffer
+    // still represents the last-known content, and recreating it from there is
+    // usually what the user wants.
+    if (a.isText) buttons.push({ kind: 'forceSave', labelKey: 'saveToRestore' })
+    return buttons
+  }
+  if (a.diskState === 'stale') {
+    buttons.push({ kind: 'reload', labelKey: 'tryAgain' })
+    if (a.isText && a.isDirty) buttons.push({ kind: 'forceSave', labelKey: 'saveAnyway' })
+    return buttons
+  }
+  // available
+  if (a.isText) buttons.push({ kind: 'compare' })
+  buttons.push({ kind: 'reload', labelKey: 'reload' })
+  if (a.isText && a.isDirty) buttons.push({ kind: 'forceSave', labelKey: 'saveAnyway' })
+  return buttons
+}
+
+export interface ResolveSaveBehaviorArgs {
+  readonly: boolean
+  saving: boolean
+  isDirty: boolean
+  force: boolean
+  diskState: DiskState
+}
+
+export interface SaveBehaviorPlan {
+  // 'noop' — return true without touching the network (read-only, or clean and
+  //   the file still exists). 'block' — currently saving, refuse. 'proceed' —
+  //   actually POST.
+  outcome: 'noop' | 'block' | 'proceed'
+  // True when the POST should skip the conflict guard (and the expectedRevision
+  // header). Implied by user-explicit "Save anyway" / "Save to restore", or by
+  // the deleted state (no concurrent disk version to race against).
+  bypassConflictGuard: boolean
+}
+
+// Single source of truth for the save state machine; lets us cover the ORPHAN
+// recreate path (deleted + clean) and the explicit force path with the same
+// table of decisions instead of nested if blocks in handleSave.
+export function resolveSaveBehavior(a: ResolveSaveBehaviorArgs): SaveBehaviorPlan {
+  if (a.readonly) return { outcome: 'noop', bypassConflictGuard: false }
+  if (a.saving) return { outcome: 'block', bypassConflictGuard: false }
+  if (a.diskState === 'deleted') {
+    // Even a clean buffer warrants a POST: that's how we resurrect the file.
+    // Skip the conflict guard since there's no concurrent disk version.
+    return { outcome: 'proceed', bypassConflictGuard: true }
+  }
+  if (!a.isDirty) return { outcome: 'noop', bypassConflictGuard: false }
+  return { outcome: 'proceed', bypassConflictGuard: a.force }
+}

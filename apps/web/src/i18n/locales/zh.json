@@ -1746,14 +1746,22 @@
         "ran": "{agent} 执行了命令 · {time}",
         "patched": "{agent} 应用了补丁 · {time}",
         "generic": "{agent} 更新了此文件 · {time}",
+        "deleted": "此文件已在工作区中被删除或移动",
+        "reloadFailed": "此文件在工作区中已变更，但无法加载最新版本",
+        "saveConflict": "文件已在工作区中变更。请先查看外部版本再保存。",
         "reload": "重新加载",
+        "tryAgain": "重试",
         "compare": "对比",
-        "saveAnyway": "强制保存"
+        "saveAnyway": "仍要保存",
+        "saveToRestore": "保存以重建"
       },
+      "imageDeleted": "此图片已在工作区中被删除",
       "compare": {
         "yours": "你的编辑",
-        "disk": "工作区中",
-        "close": "关闭"
+        "disk": "磁盘上",
+        "close": "关闭",
+        "refresh": "刷新差异",
+        "staleNotice": "Agent 又写过一次"
       },
       "compareLoadFailed": "无法加载工作区版本用于对比"
     },

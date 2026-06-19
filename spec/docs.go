@@ -15306,6 +15306,9 @@ const docTemplate = `{
                 "path": {
                     "type": "string"
                 },
+                "revision": {
+                    "type": "string"
+                },
                 "size": {
                     "type": "integer"
                 }
@@ -15337,6 +15340,9 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "content": {
+                    "type": "string"
+                },
+                "expectedRevision": {
                     "type": "string"
                 },
                 "path": {
@@ -16329,6 +16335,9 @@ const docTemplate = `{
             "properties": {
                 "ok": {
                     "type": "boolean"
+                },
+                "revision": {
+                    "type": "string"
                 }
             }
         },

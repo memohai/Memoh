@@ -1,12 +1,19 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { appKeyboardCommands } from '@/lib/keyboard-commands'
 import { useKeyboardCommand } from '@/composables/useKeyboardCommand'
 import { isFileSaveEligible } from './file-save-command'
-import { detectSaveConflict, deriveChipContext } from './file-conflict'
+import {
+  canApplyExternalReload,
+  detectSaveConflict,
+  deriveChipContext,
+  resolveChipButtons,
+  resolveSaveBehavior,
+  type ChipButton,
+} from './file-conflict'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
-import { File, Download, RefreshCw, GitCompare, X } from 'lucide-vue-next'
+import { File, FileX, Download, RefreshCw, GitCompare, X } from 'lucide-vue-next'
 import { Button, Spinner } from '@memohai/ui'
 import {
   getBotsByBotIdContainerFsRead,
@@ -38,6 +45,7 @@ const { t } = useI18n()
 
 const content = ref('')
 const originalContent = ref('')
+const baseRevision = ref('')
 const loading = ref(false)
 const saving = ref(false)
 const imageUrl = ref('')
@@ -54,11 +62,27 @@ const lastLoadedAt = ref(0)
 // usual choice (Compare / Reload / Save anyway). 'compare' = diff editor
 // replaces the main pane. 'none' = clean.
 const conflictState = ref<'none' | 'chip' | 'compare'>('none')
-// Right side of the diff editor. Snapshot at the moment Compare opens — if
-// the agent writes again while Compare is up, the snapshot stays put (user
-// closes Compare and re-opens to refresh).
+const diskState = ref<'available' | 'stale' | 'deleted'>('available')
+// Right side of the diff editor. Snapshot at the moment Compare opens; the
+// agent might write again while Compare is up, in which case we surface a
+// "Refresh diff" affordance in the compare toolbar rather than silently
+// updating the right pane underneath the user's review.
 const compareDiskContent = ref('')
+// Flips to true when a fsChangedAt for this path lands while we're in
+// conflictState='compare'. Reset on every successful openCompare(), on path
+// change, and on exit.
+const compareStale = ref(false)
 let compareController: AbortController | null = null
+// Stable ids so the chip buttons can aria-describedby the relevant inline
+// message span, giving keyboard / screen-reader users the "why is this here"
+// context. The compare-toolbar Refresh button uses the staleNotice id by the
+// same pattern.
+const chipMessageId = useId()
+const compareStaleId = useId()
+// Reference to MonacoEditor so we can hand focus back when an action removes
+// the chip / closes Compare and the activated button itself was just torn
+// down. Without this, focus would fall through to document.body.
+const monacoEditorRef = ref<{ $el?: HTMLElement } | null>(null)
 // Drives "5s ago" / "2m ago" relative-time labels in the chip. Ticks once a
 // minute; agent writes are usually fresh enough that "just now" wins, but a
 // chip left up across coffee should age gracefully.
@@ -80,7 +104,42 @@ const botName = computed(() => {
 const fsEvent = computed(() => chatStore.fsEventForPath(filePath.value))
 const chipContext = computed(() => deriveChipContext(fsEvent.value, botName.value))
 const fallbackAgent = computed(() => t('bots.files.externalChange.fallbackAgent'))
+const chipButtons = computed<ChipButton[]>(() => resolveChipButtons({
+  diskState: diskState.value,
+  isText: isText.value,
+  isDirty: isDirty.value,
+}))
+
+function focusEditor() {
+  const host = monacoEditorRef.value?.$el
+  if (!host) return
+  // Monaco renders a hidden <textarea.inputarea> inside its host that
+  // receives text input — focusing it routes keystrokes to the editor and
+  // restores the visible caret.
+  const textarea = host.querySelector?.<HTMLTextAreaElement>('textarea.inputarea')
+  if (textarea) {
+    textarea.focus()
+    return
+  }
+  if (typeof (host as HTMLElement).focus === 'function') (host as HTMLElement).focus()
+}
+
+async function onChipButton(btn: ChipButton) {
+  if (btn.kind === 'compare') await openCompare()
+  else if (btn.kind === 'reload') await acceptExternalChange()
+  else if (btn.kind === 'forceSave') await handleSave(true)
+  // Hand focus back to the editor when the chip just got unmounted (its
+  // wrapper v-if'd out); without this the browser drops focus to <body>.
+  await nextTick()
+  if (conflictState.value === 'none') focusEditor()
+}
+
+const reloadLabelKey = (key: 'reload' | 'tryAgain') => `bots.files.externalChange.${key}`
+const saveLabelKey = (key: 'saveAnyway' | 'saveToRestore') => `bots.files.externalChange.${key}`
+
 const chipMessage = computed(() => {
+  if (diskState.value === 'deleted') return t('bots.files.externalChange.deleted')
+  if (diskState.value === 'stale') return t('bots.files.externalChange.reloadFailed')
   const ctx = chipContext.value
   const agent = ctx.agentName ?? fallbackAgent.value
   // formatRelativeTime depends on Date.now(); reading the tick here makes the
@@ -112,10 +171,28 @@ watch(isDirty, (dirty) => {
 // in bursts.
 let activeReadController: AbortController | null = null
 
-async function loadTextContent() {
+function isHttpStatus(error: unknown, status: number): boolean {
+  const maybe = error as { status?: unknown; response?: { status?: unknown } } | null | undefined
+  return maybe?.status === status || maybe?.response?.status === status
+}
+
+// Force the chip back into view on a terminal disk-state transition (delete /
+// stale read). Tears down any active Compare so the user isn't reviewing a diff
+// against bytes that no longer exist.
+function dropToChipForBadDiskState() {
+  compareController?.abort()
+  compareController = null
+  compareDiskContent.value = ''
+  compareStale.value = false
+  conflictState.value = 'chip'
+}
+
+async function loadTextContent(options: { forceApply?: boolean; notifyOnError?: boolean } = {}) {
   activeReadController?.abort()
   const controller = new AbortController()
   activeReadController = controller
+  const contentAtRequestStart = content.value
+  const originalContentAtRequestStart = originalContent.value
   loading.value = true
   try {
     const { data } = await getBotsByBotIdContainerFsRead({
@@ -125,14 +202,41 @@ async function loadTextContent() {
       throwOnError: true,
     })
     if (controller.signal.aborted) return
+    if (!canApplyExternalReload({
+      contentAtRequestStart,
+      originalContentAtRequestStart,
+      currentContent: content.value,
+      currentOriginalContent: originalContent.value,
+      force: options.forceApply,
+    })) {
+      // The GET succeeded — disk is reachable. Clear any prior 'stale' so the
+      // chip stops claiming reloadFailed; the dirty buffer is left untouched.
+      diskState.value = 'available'
+      if (conflictState.value === 'none') conflictState.value = 'chip'
+      return
+    }
     content.value = data.content ?? ''
     originalContent.value = content.value
+    baseRevision.value = data.revision ?? ''
     lastLoadedAt.value = Date.now()
     loaded.value = true
-    conflictState.value = 'none'
+    diskState.value = 'available'
+    // Don't drop the user out of an open Compare; only clear the chip surface.
+    if (conflictState.value !== 'compare') conflictState.value = 'none'
   } catch (error) {
     if (controller.signal.aborted) return
-    toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
+    if (isHttpStatus(error, 404)) {
+      diskState.value = 'deleted'
+      loaded.value = true
+      dropToChipForBadDiskState()
+      return
+    }
+    diskState.value = 'stale'
+    loaded.value = true
+    dropToChipForBadDiskState()
+    if (options.notifyOnError !== false) {
+      toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
+    }
   } finally {
     if (activeReadController === controller) {
       activeReadController = null
@@ -141,7 +245,7 @@ async function loadTextContent() {
   }
 }
 
-async function loadImageBlob() {
+async function loadImageBlob(options: { notifyOnError?: boolean } = {}) {
   activeReadController?.abort()
   const controller = new AbortController()
   activeReadController = controller
@@ -163,10 +267,25 @@ async function loadImageBlob() {
     url = ''
     lastLoadedAt.value = Date.now()
     loaded.value = true
-    conflictState.value = 'none'
+    diskState.value = 'available'
+    if (conflictState.value !== 'compare') conflictState.value = 'none'
   } catch (error) {
     if (controller.signal.aborted) return
-    toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
+    // Release any stale blob URL from a prior successful load so the deleted /
+    // stale states don't keep a now-detached <img> source alive.
+    cleanupImageUrl()
+    if (isHttpStatus(error, 404)) {
+      diskState.value = 'deleted'
+      loaded.value = true
+      dropToChipForBadDiskState()
+      return
+    }
+    diskState.value = 'stale'
+    loaded.value = true
+    dropToChipForBadDiskState()
+    if (options.notifyOnError !== false) {
+      toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
+    }
   } finally {
     if (url) URL.revokeObjectURL(url)
     if (activeReadController === controller) {
@@ -180,41 +299,95 @@ async function loadImageBlob() {
 // (the tab close-confirm flow) can decide whether to proceed with closing. A
 // read-only or already-clean file reports success without a network round-trip.
 async function handleSave(force = false): Promise<boolean> {
-  if (props.readonly) return true
-  if (!isDirty.value) return true
-  if (saving.value) return false
+  const behavior = resolveSaveBehavior({
+    readonly: props.readonly ?? false,
+    saving: saving.value,
+    isDirty: isDirty.value,
+    force,
+    diskState: diskState.value,
+  })
+  if (behavior.outcome === 'noop') return true
+  if (behavior.outcome === 'block') return false
   // VS Code-style two-gate save: even if the chip wasn't surfaced yet (e.g.
-  // user pressed Cmd+S in the brief window between bump and consumer reaction),
-  // re-check the baseline before we POST. force=true skips this — that's the
-  // "Save anyway" path the user explicitly chose after seeing the conflict.
-  if (!force) {
+  // user pressed Cmd+S in the brief window between bump and consumer
+  // reaction), re-check the baseline before we POST. bypassConflictGuard skips
+  // this — that's the "Save anyway" / "Save to restore" path the user
+  // explicitly chose (or the ORPHAN-recreate path where there's no concurrent
+  // disk version).
+  if (!behavior.bypassConflictGuard) {
     const hasConflict = detectSaveConflict({
       lastFsChangeAt: fsChangedAt.value,
       lastLoadedAt: lastLoadedAt.value,
       affects: chatStore.affectsPath(filePath.value),
     })
     if (hasConflict) {
-      // Don't drop the user back to compare if they were already comparing.
-      if (conflictState.value !== 'compare') conflictState.value = 'chip'
+      // Don't drop the user back to compare if they were already comparing —
+      // but flag the diff as stale so the toolbar offers a Refresh diff
+      // affordance instead of leaving them on the now-outdated snapshot.
+      if (conflictState.value === 'compare') compareStale.value = true
+      else conflictState.value = 'chip'
       return false
     }
   }
   saving.value = true
+  // Snapshot pre-save chip context so we can:
+  //   a) detect an agent bump that lands inside the POST window (the
+  //      fsChangedAt watcher is gated by saving=true and would otherwise drop
+  //      that signal)
+  //   b) tone down the 409 toast when the conflict followed a known-bad read
+  const fsChangedAtBeforeSave = fsChangedAt.value
+  const diskStateBeforeSave = diskState.value
   try {
-    await postBotsByBotIdContainerFsWrite({
+    // Empty string isn't a meaningful baseline — fall through to an
+    // unconditional write rather than asking the backend to interpret '' as
+    // "expect file absent". The bypass path already drops the field; this
+    // covers the normal-save-with-no-known-baseline case (e.g. saving on top
+    // of a stale read that never returned a revision).
+    const sendBaseline = !behavior.bypassConflictGuard && baseRevision.value !== ''
+    const requestBody = sendBaseline
+      ? { path: filePath.value, content: content.value, expectedRevision: baseRevision.value }
+      : { path: filePath.value, content: content.value }
+    const { data } = await postBotsByBotIdContainerFsWrite({
       path: { bot_id: props.botId },
-      body: { path: filePath.value, content: content.value },
+      body: requestBody,
       throwOnError: true,
     })
     originalContent.value = content.value
-    // The save's POST is the new baseline; subsequent fs bumps from agent
-    // writes after this moment should re-trigger the save guard.
-    lastLoadedAt.value = Date.now()
-    conflictState.value = 'none'
+    baseRevision.value = data.revision ?? baseRevision.value
+    diskState.value = 'available'
+    // An agent bump observed during our POST window means the disk diverged
+    // from what our save just persisted. Anchor lastLoadedAt to BEFORE that
+    // bump so detectSaveConflict still fires on the next Cmd+S, and surface
+    // the chip now rather than waiting for the user to try again.
+    const interleavedBump =
+      fsChangedAt.value > fsChangedAtBeforeSave
+      && chatStore.affectsPath(filePath.value)
+    if (interleavedBump) {
+      lastLoadedAt.value = fsChangedAtBeforeSave > 0 ? fsChangedAtBeforeSave : 1
+      if (conflictState.value === 'compare') compareStale.value = true
+      else conflictState.value = 'chip'
+    } else {
+      lastLoadedAt.value = Date.now()
+      conflictState.value = 'none'
+    }
     toast.success(t('bots.files.saveSuccess'))
     emit('saved')
     return true
   } catch (error) {
+    if (isHttpStatus(error, 409)) {
+      // A 409 means our baseline is stale; bumping the disk state surfaces
+      // "Try again" (Reload) as the chip's primary affordance and prevents a
+      // Cmd+S loop from re-POSTing with the same stale expectedRevision.
+      diskState.value = 'stale'
+      if (conflictState.value === 'compare') compareStale.value = true
+      else conflictState.value = 'chip'
+      // Skip the saveConflict toast when the chip already explains a known-
+      // bad read; the wording would contradict the "couldn't load" chip text.
+      if (diskStateBeforeSave === 'available') {
+        toast.error(t('bots.files.externalChange.saveConflict'))
+      }
+      return false
+    }
     toast.error(resolveApiErrorMessage(error, t('bots.files.saveFailed')))
     return false
   } finally {
@@ -248,13 +421,22 @@ function cleanupImageUrl() {
 }
 
 watch(() => props.file.path, () => {
+  // Tear down any in-flight load and the compare snapshot before the new
+  // path's loaders kick off — otherwise a slow previous-path read could
+  // resolve onto the new path's empty buffer and silently surface a chip on a
+  // file that's never even been loaded.
+  activeReadController?.abort()
+  activeReadController = null
   compareController?.abort()
   compareController = null
   cleanupImageUrl()
   content.value = ''
   originalContent.value = ''
+  baseRevision.value = ''
+  diskState.value = 'available'
   conflictState.value = 'none'
   compareDiskContent.value = ''
+  compareStale.value = false
   lastLoadedAt.value = 0
   loaded.value = false
   if (isText.value) {
@@ -273,22 +455,45 @@ watch(fsChangedAt, () => {
   if (!props.botId || props.botId !== currentBotId.value) return
   if (!chatStore.affectsPath(filePath.value)) return
   if (saving.value) return
+  // While Compare is open the user is actively reviewing — never tear it down
+  // or silently rewrite the right pane underneath them. Mark the disk side as
+  // stale so the toolbar can offer a Refresh-diff affordance instead.
+  if (conflictState.value === 'compare') {
+    compareStale.value = true
+    return
+  }
   if (isDirty.value) {
-    // Don't disrupt an active compare view; user is in the middle of reviewing.
     if (conflictState.value === 'none') conflictState.value = 'chip'
     return
   }
-  if (isText.value) void loadTextContent()
-  else if (isImage.value) void loadImageBlob()
+  if (isText.value) void loadTextContent({ notifyOnError: false })
+  else if (isImage.value) void loadImageBlob({ notifyOnError: false })
 })
 
 async function acceptExternalChange() {
-  if (isText.value) await loadTextContent()
+  // Reload from the Compare toolbar means "apply the disk side and dismiss
+  // the diff" — keeping the user in Compare with the OLD compareDiskContent
+  // pointing at the previous snapshot and the new content from this load
+  // would render a meaningless diff against itself.
+  const wasInCompare = conflictState.value === 'compare'
+  if (isText.value) await loadTextContent({ forceApply: true })
   else if (isImage.value) await loadImageBlob()
+  if (wasInCompare && diskState.value === 'available') {
+    compareController?.abort()
+    compareController = null
+    compareDiskContent.value = ''
+    compareStale.value = false
+    conflictState.value = 'none'
+  }
 }
 
 async function openCompare() {
   if (!isText.value) return
+  // Abort any in-flight Compare read first so a previously dispatched
+  // fresh-read can't resolve later and clobber the writeContent we're about
+  // to set on the fast path (or this call's own fresh read).
+  compareController?.abort()
+  compareController = null
   // Prefer the agent's tool-message content — same bytes the server saw, no
   // extra round trip and immune to "what if disk changed again" races. Fall
   // back to a fresh read for edit / apply_patch / exec where we don't have the
@@ -296,10 +501,10 @@ async function openCompare() {
   const event = fsEvent.value
   if (event?.writeContent != null) {
     compareDiskContent.value = event.writeContent
+    compareStale.value = false
     conflictState.value = 'compare'
     return
   }
-  compareController?.abort()
   const controller = new AbortController()
   compareController = controller
   try {
@@ -311,9 +516,21 @@ async function openCompare() {
     })
     if (controller.signal.aborted) return
     compareDiskContent.value = data.content ?? ''
+    compareStale.value = false
     conflictState.value = 'compare'
   } catch (error) {
     if (controller.signal.aborted) return
+    if (isHttpStatus(error, 404)) {
+      // The disk version we wanted to diff against is gone. Fall back to the
+      // deleted-chip surface so the "Save to restore" affordance is reachable
+      // instead of leaving the user on the available chip clicking Compare
+      // into the same 404 repeatedly.
+      diskState.value = 'deleted'
+      compareDiskContent.value = ''
+      compareStale.value = false
+      conflictState.value = 'chip'
+      return
+    }
     toast.error(resolveApiErrorMessage(error, t('bots.files.compareLoadFailed')))
   } finally {
     if (compareController === controller) compareController = null
@@ -323,7 +540,16 @@ async function openCompare() {
 function exitCompare() {
   compareController?.abort()
   compareController = null
+  compareStale.value = false
   conflictState.value = 'chip'
+}
+
+async function refreshCompare() {
+  // Re-runs openCompare to re-snapshot the right pane against the latest
+  // tool-message content (or a fresh disk read when no event content is on
+  // hand). Used by the inline "Refresh diff" affordance the toolbar surfaces
+  // when compareStale is true.
+  await openCompare()
 }
 
 // Save on Cmd/Ctrl+S via the shared keyboard layer. Even if a conflict is
@@ -358,40 +584,71 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="flex h-full flex-col overflow-hidden bg-surface-editor">
-    <!-- Chip: inline banner above the editor when we have a pending external change -->
+    <!-- Chip: inline banner above the editor when we have a pending external
+         change. role=status + aria-live=polite live only on the chipMessage
+         span so the buttons aren't dragged into the per-minute re-announce
+         when the relative-time label ages; aria-describedby on every action
+         button gives the chip text as context. -->
     <div
       v-if="conflictState === 'chip'"
       class="flex shrink-0 items-center gap-2 border-b border-border bg-accent/40 px-3 py-1.5 text-caption text-foreground"
     >
-      <RefreshCw class="size-3.5 shrink-0 text-muted-foreground" />
-      <span class="min-w-0 flex-1 truncate">{{ chipMessage }}</span>
-      <Button
-        v-if="isText"
-        variant="ghost"
-        size="sm"
-        class="h-6 shrink-0 px-2 text-xs"
-        @click="openCompare"
+      <FileX
+        v-if="diskState === 'deleted'"
+        class="size-3.5 shrink-0 text-muted-foreground"
+        aria-hidden="true"
+      />
+      <RefreshCw
+        v-else
+        class="size-3.5 shrink-0 text-muted-foreground"
+        aria-hidden="true"
+      />
+      <span
+        :id="chipMessageId"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        class="min-w-0 flex-1 truncate"
+      >{{ chipMessage }}</span>
+      <template
+        v-for="(btn, idx) in chipButtons"
+        :key="idx"
       >
-        <GitCompare class="mr-1 size-3" />
-        {{ t('bots.files.externalChange.compare') }}
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        class="h-6 shrink-0 px-2 text-xs"
-        @click="acceptExternalChange"
-      >
-        {{ t('bots.files.externalChange.reload') }}
-      </Button>
-      <Button
-        v-if="isDirty"
-        variant="ghost"
-        size="sm"
-        class="h-6 shrink-0 px-2 text-xs"
-        @click="forceSave"
-      >
-        {{ t('bots.files.externalChange.saveAnyway') }}
-      </Button>
+        <Button
+          v-if="btn.kind === 'compare'"
+          variant="ghost"
+          size="sm"
+          class="h-6 shrink-0 px-2 text-xs"
+          :aria-describedby="chipMessageId"
+          @click="onChipButton(btn)"
+        >
+          <GitCompare
+            class="mr-1 size-3"
+            aria-hidden="true"
+          />
+          {{ t('bots.files.externalChange.compare') }}
+        </Button>
+        <Button
+          v-else-if="btn.kind === 'reload'"
+          variant="ghost"
+          size="sm"
+          class="h-6 shrink-0 px-2 text-xs"
+          :aria-describedby="chipMessageId"
+          @click="onChipButton(btn)"
+        >
+          {{ t(reloadLabelKey(btn.labelKey)) }}
+        </Button>
+        <Button
+          v-else-if="btn.kind === 'forceSave'"
+          variant="ghost"
+          size="sm"
+          class="h-6 shrink-0 px-2 text-xs"
+          :aria-describedby="chipMessageId"
+          @click="onChipButton(btn)"
+        >
+          {{ t(saveLabelKey(btn.labelKey)) }}
+        </Button>
+      </template>
     </div>
 
     <div class="flex-1 min-h-0 overflow-hidden">
@@ -402,9 +659,31 @@ onBeforeUnmount(() => {
       >
         <div class="flex shrink-0 items-center justify-between gap-3 border-b border-border px-3 py-1.5 text-caption text-muted-foreground">
           <span class="min-w-0 truncate">
-            {{ t('bots.files.compare.yours') }} ↔ {{ t('bots.files.compare.disk') }}
+            <span>{{ t('bots.files.compare.yours') }} ↔ {{ t('bots.files.compare.disk') }}</span>
+            <span
+              v-if="compareStale"
+              :id="compareStaleId"
+              class="ml-2 text-warning"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >· {{ t('bots.files.compare.staleNotice') }}</span>
           </span>
           <div class="flex items-center gap-1.5">
+            <Button
+              v-if="compareStale"
+              variant="ghost"
+              size="sm"
+              class="h-6 px-2 text-xs"
+              :aria-describedby="compareStaleId"
+              @click="refreshCompare"
+            >
+              <RefreshCw
+                class="mr-1 size-3"
+                aria-hidden="true"
+              />
+              {{ t('bots.files.compare.refresh') }}
+            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -428,7 +707,10 @@ onBeforeUnmount(() => {
               class="h-6 px-2 text-xs text-muted-foreground"
               @click="exitCompare"
             >
-              <X class="mr-1 size-3" />
+              <X
+                class="mr-1 size-3"
+                aria-hidden="true"
+              />
               {{ t('bots.files.compare.close') }}
             </Button>
           </div>
@@ -456,11 +738,22 @@ onBeforeUnmount(() => {
 
       <MonacoEditor
         v-else-if="isText"
+        ref="monacoEditorRef"
         v-model="content"
         :filename="filename"
         :readonly="readonly"
         class="h-full"
       />
+
+      <div
+        v-else-if="isImage && diskState === 'deleted'"
+        class="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground"
+      >
+        <FileX class="size-12 opacity-40 text-destructive" />
+        <p class="text-xs">
+          {{ t('bots.files.imageDeleted') }}
+        </p>
+      </div>
 
       <div
         v-else-if="isImage && imageUrl"

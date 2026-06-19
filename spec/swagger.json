@@ -15297,6 +15297,9 @@
                 "path": {
                     "type": "string"
                 },
+                "revision": {
+                    "type": "string"
+                },
                 "size": {
                     "type": "integer"
                 }
@@ -15328,6 +15331,9 @@
             "type": "object",
             "properties": {
                 "content": {
+                    "type": "string"
+                },
+                "expectedRevision": {
                     "type": "string"
                 },
                 "path": {
@@ -16320,6 +16326,9 @@
             "properties": {
                 "ok": {
                     "type": "boolean"
+                },
+                "revision": {
+                    "type": "string"
                 }
             }
         },

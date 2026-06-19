@@ -2282,6 +2282,8 @@ definitions:
         type: string
       path:
         type: string
+      revision:
+        type: string
       size:
         type: integer
     type: object
@@ -2302,6 +2304,8 @@ definitions:
   handlers.FSWriteRequest:
     properties:
       content:
+        type: string
+      expectedRevision:
         type: string
       path:
         type: string
@@ -2952,6 +2956,8 @@ definitions:
     properties:
       ok:
         type: boolean
+      revision:
+        type: string
     type: object
   handlers.memoryAddPayload:
     properties:

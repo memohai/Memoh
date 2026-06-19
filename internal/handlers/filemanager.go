@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -39,9 +40,10 @@ type FSListResponse struct {
 }
 
 type FSReadResponse struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
-	Size    int64  `json:"size"`
+	Path     string `json:"path"`
+	Content  string `json:"content"`
+	Size     int64  `json:"size"`
+	Revision string `json:"revision"`
 }
 
 type FSUploadResponse struct {
@@ -51,8 +53,9 @@ type FSUploadResponse struct {
 
 // FSWriteRequest is the body for creating / overwriting a file.
 type FSWriteRequest struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
+	Path             string  `json:"path"`
+	Content          string  `json:"content"`
+	ExpectedRevision *string `json:"expectedRevision,omitempty"`
 }
 
 // FSMkdirRequest is the body for creating a directory.
@@ -89,7 +92,8 @@ type FSExtractResponse struct {
 }
 
 type fsOpResponse struct {
-	OK bool `json:"ok"`
+	OK       bool   `json:"ok"`
+	Revision string `json:"revision,omitempty"`
 }
 
 // ---------- helpers ----------
@@ -215,6 +219,28 @@ func archiveDownloadName(containerPath string, isDir bool) string {
 		return name + ".tar.gz"
 	}
 	return name
+}
+
+func fsContentRevision(data []byte) string {
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("sha256:%x", sum)
+}
+
+func readContainerFileRevision(ctx context.Context, client *bridge.Client, containerPath string) (string, error) {
+	rc, err := client.ReadRaw(ctx, containerPath)
+	if err != nil {
+		if errors.Is(err, bridge.ErrNotFound) {
+			return "", nil
+		}
+		return "", err
+	}
+	defer func() { _ = rc.Close() }()
+
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return "", err
+	}
+	return fsContentRevision(data), nil
 }
 
 // getGRPCClient returns the gRPC client for the bot's container.
@@ -402,9 +428,10 @@ func (h *ContainerdHandler) FSRead(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, FSReadResponse{
-		Path:    containerPath,
-		Content: string(data),
-		Size:    int64(len(data)),
+		Path:     containerPath,
+		Content:  string(data),
+		Size:     int64(len(data)),
+		Revision: fsContentRevision(data),
 	})
 }
 
@@ -642,11 +669,31 @@ func (h *ContainerdHandler) FSWrite(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
 	}
 
-	if err := client.WriteFile(ctx, containerPath, []byte(req.Content)); err != nil {
+	if req.ExpectedRevision != nil {
+		// Empty string is not a meaningful baseline — it collapses to the same
+		// sentinel that readContainerFileRevision returns for a missing file,
+		// which would let an "I don't know the revision" client silently
+		// overwrite or create the file without an explicit unconditional
+		// write. Reject the ambiguous form; clients should omit the field
+		// instead.
+		if *req.ExpectedRevision == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "expectedRevision must be non-empty; omit the field for an unconditional write")
+		}
+		currentRevision, err := readContainerFileRevision(ctx, client, containerPath)
+		if err != nil {
+			return fsHTTPError(err)
+		}
+		if currentRevision != *req.ExpectedRevision {
+			return echo.NewHTTPError(http.StatusConflict, "file changed on disk")
+		}
+	}
+
+	contentBytes := []byte(req.Content)
+	if err := client.WriteFile(ctx, containerPath, contentBytes); err != nil {
 		return fsHTTPError(err)
 	}
 
-	return c.JSON(http.StatusOK, fsOpResponse{OK: true})
+	return c.JSON(http.StatusOK, fsOpResponse{OK: true, Revision: fsContentRevision(contentBytes)})
 }
 
 // FSUpload godoc

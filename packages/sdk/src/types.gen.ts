@@ -1372,6 +1372,7 @@ export type HandlersFsMkdirRequest = {
 export type HandlersFsReadResponse = {
     content?: string;
     path?: string;
+    revision?: string;
     size?: number;
 };
 
@@ -1387,6 +1388,7 @@ export type HandlersFsUploadResponse = {
 
 export type HandlersFsWriteRequest = {
     content?: string;
+    expectedRevision?: string;
     path?: string;
 };
 
@@ -1783,6 +1785,7 @@ export type HandlersEmailOAuthStatusResponse = {
 
 export type HandlersFsOpResponse = {
     ok?: boolean;
+    revision?: string;
 };
 
 export type HandlersMemoryAddPayload = {
