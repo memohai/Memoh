@@ -946,6 +946,47 @@ func TestChannelInboundProcessorSilentReply(t *testing.T) {
 	}
 }
 
+func TestBuildChannelMessageKeepsReasoningTextMarkdownOnRichChannels(t *testing.T) {
+	msg := buildChannelMessage(conversation.AssistantOutput{
+		Content: "**bold**",
+		Parts: []conversation.ContentPart{
+			{Type: "text", Text: "**bold**"},
+		},
+	}, channel.ChannelCapabilities{Text: true, Markdown: true, RichText: true})
+
+	if len(msg.Parts) != 0 {
+		t.Fatalf("plain text content part should not be promoted to rich Parts: %#v", msg.Parts)
+	}
+	if msg.Text != "**bold**" {
+		t.Fatalf("Text = %q, want markdown source", msg.Text)
+	}
+	if msg.Format != channel.MessageFormatMarkdown {
+		t.Fatalf("Format = %q, want markdown", msg.Format)
+	}
+}
+
+func TestBuildChannelMessagePromotesStyledPartWithoutDuplicateText(t *testing.T) {
+	msg := buildChannelMessage(conversation.AssistantOutput{
+		Content: "bold",
+		Parts: []conversation.ContentPart{
+			{Type: "text", Text: "bold", Styles: []string{"bold"}},
+		},
+	}, channel.ChannelCapabilities{Text: true, Markdown: true, RichText: true})
+
+	if msg.Text != "" {
+		t.Fatalf("rich Parts message should not keep duplicate Text, got %q", msg.Text)
+	}
+	if msg.Format != channel.MessageFormatRich {
+		t.Fatalf("Format = %q, want rich", msg.Format)
+	}
+	if len(msg.Parts) != 1 {
+		t.Fatalf("Parts len = %d, want 1", len(msg.Parts))
+	}
+	if got := msg.Parts[0]; got.Type != channel.MessagePartText || got.Text != "bold" || len(got.Styles) != 1 || got.Styles[0] != channel.MessageStyleBold {
+		t.Fatalf("unexpected rich part: %#v", got)
+	}
+}
+
 func TestChannelInboundProcessorGroupPassiveSync(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-5"}}
 	policySvc := &fakePolicyService{}
