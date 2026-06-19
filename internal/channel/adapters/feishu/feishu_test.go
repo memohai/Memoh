@@ -358,6 +358,44 @@ func TestBuildFeishuStreamCardContentWithState(t *testing.T) {
 	}
 }
 
+func TestBuildFeishuOutboundContentPlainTextUsesTextMessage(t *testing.T) {
+	t.Parallel()
+
+	msgType, content, err := buildFeishuOutboundContent(channel.Message{Text: "你好 **bold**"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msgType != larkim.MsgTypeText {
+		t.Fatalf("msg type = %q, want %q", msgType, larkim.MsgTypeText)
+	}
+	var got map[string]string
+	if err := json.Unmarshal([]byte(content), &got); err != nil {
+		t.Fatalf("content is not json: %v", err)
+	}
+	if got["text"] != "你好 **bold**" {
+		t.Fatalf("text content = %q", got["text"])
+	}
+}
+
+func TestBuildFeishuOutboundContentRichPartsUsesInteractiveCard(t *testing.T) {
+	t.Parallel()
+
+	msgType, content, err := buildFeishuOutboundContent(channel.Message{
+		Parts: []channel.MessagePart{
+			{Type: channel.MessagePartText, Text: "bold", Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msgType != larkim.MsgTypeInteractive {
+		t.Fatalf("msg type = %q, want %q", msgType, larkim.MsgTypeInteractive)
+	}
+	if !strings.Contains(content, `"tag":"lark_md"`) || !strings.Contains(content, "**bold**") {
+		t.Fatalf("expected interactive card lark_md content, got %s", content)
+	}
+}
+
 func TestNormalizeFeishuStreamText(t *testing.T) {
 	t.Parallel()
 
