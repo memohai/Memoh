@@ -184,6 +184,11 @@ func (a *MatrixAdapter) SetSyncStateSaver(fn func(context.Context, string, strin
 	a.saveSince = fn
 }
 
+var (
+	_ channel.Sender       = (*MatrixAdapter)(nil)
+	_ channel.StreamSender = (*MatrixAdapter)(nil)
+)
+
 func (*MatrixAdapter) Type() channel.ChannelType {
 	return Type
 }

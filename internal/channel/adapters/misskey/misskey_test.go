@@ -1,6 +1,111 @@
 package misskey
 
-import "testing"
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/memohai/memoh/internal/channel"
+)
+
+var (
+	_ channel.Sender       = (*MisskeyAdapter)(nil)
+	_ channel.StreamSender = (*MisskeyAdapter)(nil)
+	_ channel.Reactor      = (*MisskeyAdapter)(nil)
+	_ channel.Receiver     = (*MisskeyAdapter)(nil)
+)
+
+func withMisskeyHTTPStub(t *testing.T, handler http.HandlerFunc) (channel.ChannelConfig, *httptest.Server) {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	prev := httpClient
+	httpClient = &http.Client{Timeout: 5 * time.Second}
+	t.Cleanup(func() { httpClient = prev })
+	cfg := channel.ChannelConfig{
+		ID:    "cfg-1",
+		BotID: "bot-1",
+		Credentials: map[string]any{
+			"instanceURL": server.URL,
+			"accessToken": "tkn",
+		},
+	}
+	return cfg, server
+}
+
+func TestSendDeliversPreparedOutboundMessage(t *testing.T) {
+	t.Parallel()
+
+	var got struct {
+		path string
+		body createNoteRequest
+	}
+	cfg, _ := withMisskeyHTTPStub(t, func(w http.ResponseWriter, r *http.Request) {
+		got.path = r.URL.Path
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &got.body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"createdNote":{"id":"note-1"}}`))
+	})
+
+	adapter := NewMisskeyAdapter(nil)
+	err := adapter.Send(context.Background(), cfg, channel.PreparedOutboundMessage{
+		Target: "note-source",
+		Message: channel.PreparedMessage{Message: channel.Message{
+			Text: "hello misskey",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+	if !strings.HasSuffix(got.path, "/api/notes/create") {
+		t.Fatalf("unexpected api path: %q", got.path)
+	}
+	if got.body.Text != "hello misskey" || got.body.ReplyID != "note-source" {
+		t.Fatalf("unexpected note request: %#v", got.body)
+	}
+}
+
+func TestOpenStreamReturnsPreparedOutboundStream(t *testing.T) {
+	t.Parallel()
+
+	var sent createNoteRequest
+	cfg, _ := withMisskeyHTTPStub(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &sent)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"createdNote":{"id":"note-2"}}`))
+	})
+
+	adapter := NewMisskeyAdapter(nil)
+	stream, err := adapter.OpenStream(context.Background(), cfg, "note-source", channel.StreamOptions{})
+	if err != nil {
+		t.Fatalf("OpenStream returned error: %v", err)
+	}
+	if err := stream.Push(context.Background(), channel.PreparedStreamEvent{
+		Type:  channel.StreamEventDelta,
+		Delta: "hello ",
+	}); err != nil {
+		t.Fatalf("Push delta: %v", err)
+	}
+	if err := stream.Push(context.Background(), channel.PreparedStreamEvent{
+		Type:  channel.StreamEventDelta,
+		Delta: "stream",
+	}); err != nil {
+		t.Fatalf("Push delta: %v", err)
+	}
+	if err := stream.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if sent.Text != "hello stream" {
+		t.Fatalf("expected buffered text 'hello stream', got %q", sent.Text)
+	}
+}
 
 func TestBuildInboundMessageReplyKeepsTextClean(t *testing.T) {
 	t.Parallel()

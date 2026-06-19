@@ -57,6 +57,11 @@ func (a *DiscordAdapter) SetAssetOpener(opener assetOpener) {
 	a.assets = opener
 }
 
+var (
+	_ channel.Sender       = (*DiscordAdapter)(nil)
+	_ channel.StreamSender = (*DiscordAdapter)(nil)
+)
+
 func (*DiscordAdapter) Type() channel.ChannelType {
 	return Type
 }

@@ -41,6 +41,11 @@ func (a *WeixinAdapter) SetAssetOpener(opener assetOpener) {
 	a.assets = opener
 }
 
+var (
+	_ channel.Sender       = (*WeixinAdapter)(nil)
+	_ channel.StreamSender = (*WeixinAdapter)(nil)
+)
+
 func (*WeixinAdapter) Type() channel.ChannelType { return Type }
 
 func (*WeixinAdapter) Descriptor() channel.Descriptor {
