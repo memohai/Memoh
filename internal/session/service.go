@@ -285,9 +285,14 @@ type SessionCursor struct {
 	ID        string
 }
 
-// IsZero reports whether the cursor is the zero value (i.e. no cursor).
+// IsZero reports whether the cursor is missing either half and so cannot
+// position a keyset query. We treat a partially-constructed cursor (only the
+// timestamp or only the id set) the same as the zero value: the handler
+// decoder rejects empty halves already, but internal callers that build a
+// cursor by hand should also be funneled down the no-cursor path rather than
+// silently feeding malformed bindings to pagedCursorParams.
 func (c SessionCursor) IsZero() bool {
-	return c.ID == "" && c.UpdatedAt.IsZero()
+	return c.ID == "" || c.UpdatedAt.IsZero()
 }
 
 // ListByBotPaged returns one page of sessions for a bot, filtered to the given
