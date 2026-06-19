@@ -98,7 +98,7 @@ func writeSSEData(writer io.Writer, flusher http.Flusher, payload string) error 
 	if _, err := io.WriteString(writer, "data: "); err != nil {
 		return err
 	}
-	if _, err := io.WriteString(writer, safePayload); err != nil {
+	if _, err := io.WriteString(writer, safePayload); err != nil { //nolint:gosec // G705: SSE body is plain text and CR/LF are escaped above
 		return err
 	}
 	if _, err := io.WriteString(writer, "\n\n"); err != nil {

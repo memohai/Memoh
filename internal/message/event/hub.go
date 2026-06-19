@@ -61,14 +61,24 @@ type Hub struct {
 	mu      sync.RWMutex
 	streams map[string]map[string]chan Event
 
-	dropped     atomic.Int64
+	logger       *slog.Logger
+	dropped      atomic.Int64
 	lastLoggedNS atomic.Int64
 }
 
-// NewHub creates an empty message event hub.
-func NewHub() *Hub {
+// NewHub creates an empty message event hub. An optional logger is used to
+// rate-limit-log dropped events; if nil, slog.Default() is used.
+func NewHub(loggers ...*slog.Logger) *Hub {
+	var logger *slog.Logger
+	if len(loggers) > 0 {
+		logger = loggers[0]
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &Hub{
 		streams: map[string]map[string]chan Event{},
+		logger:  logger,
 	}
 }
 
@@ -107,7 +117,7 @@ func (h *Hub) recordDrop(botID string, typ EventType) {
 		return
 	}
 	dropped := h.dropped.Swap(0)
-	slog.Warn("message event hub dropped events on full subscriber buffer",
+	h.logger.Warn("message event hub dropped events on full subscriber buffer",
 		slog.Int64("dropped_since_last", dropped),
 		slog.String("bot_id", botID),
 		slog.String("last_event_type", string(typ)),

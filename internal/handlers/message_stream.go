@@ -370,10 +370,10 @@ func beginSSEResponse(c echo.Context) (io.Writer, http.Flusher, error) {
 // access entry is keyed by channel identity to keep the cache correct when
 // the same hub feeds multiple streams from different subscribers.
 type sessionTypeCache struct {
-	svc       *session.Service
-	mu        sync.Mutex
-	userFace  map[string]bool
-	access    map[accessKey]bool
+	svc      *session.Service
+	mu       sync.Mutex
+	userFace map[string]bool
+	access   map[accessKey]bool
 }
 
 type accessKey struct {
