@@ -396,6 +396,32 @@ func TestBuildFeishuOutboundContentRichPartsUsesInteractiveCard(t *testing.T) {
 	}
 }
 
+func TestBuildFeishuOutboundContentLongRichPartsFallsBackToText(t *testing.T) {
+	t.Parallel()
+
+	msgType, content, err := buildFeishuOutboundContent(channel.Message{
+		Parts: []channel.MessagePart{
+			{Type: channel.MessagePartText, Text: strings.Repeat("你", feishuStreamMaxRunes+100), Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msgType != larkim.MsgTypeText {
+		t.Fatalf("msg type = %q, want %q", msgType, larkim.MsgTypeText)
+	}
+	var got map[string]string
+	if err := json.Unmarshal([]byte(content), &got); err != nil {
+		t.Fatalf("content is not json: %v", err)
+	}
+	if len([]rune(got["text"])) > feishuStreamMaxRunes+4 {
+		t.Fatalf("text content should be truncated, got len=%d", len([]rune(got["text"])))
+	}
+	if strings.Contains(got["text"], "**") {
+		t.Fatalf("long rich fallback should be plain text, got %q", got["text"][:20])
+	}
+}
+
 func TestNormalizeFeishuStreamText(t *testing.T) {
 	t.Parallel()
 

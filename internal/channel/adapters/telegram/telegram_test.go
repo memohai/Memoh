@@ -611,6 +611,54 @@ func TestTelegramAdapter_SendRichPartsUsesRichMessage(t *testing.T) {
 	}
 }
 
+func TestTelegramAdapter_LongRichPartsFallsBackToPlainText(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+
+	var gotBody map[string]any
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			t.Fatalf("long rich parts should not call sendRichMessage")
+		}
+		if !strings.HasSuffix(req.URL.Path, "/sendMessage") {
+			t.Fatalf("expected sendMessage, got %s", req.URL.Path)
+		}
+		body, _ := io.ReadAll(req.Body)
+		gotBody = decodeTelegramBody(t, body)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":80,"chat":{"id":123}}}`)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	msg := channel.PreparedOutboundMessage{
+		Target: "123",
+		Message: channel.PreparedMessage{Message: channel.Message{
+			Format: channel.MessageFormatRich,
+			Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: strings.Repeat("你", telegramMaxMessageLength+100), Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+			},
+		}},
+	}
+
+	if err := adapter.Send(context.Background(), channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}}, msg); err != nil {
+		t.Fatalf("send long rich parts: %v", err)
+	}
+	text, _ := gotBody["text"].(string)
+	if utf8.RuneCountInString(text) > telegramMaxMessageLength {
+		t.Fatalf("fallback text should be truncated to %d runes, got %d", telegramMaxMessageLength, utf8.RuneCountInString(text))
+	}
+	if got, _ := gotBody["parse_mode"].(string); got != "" {
+		t.Fatalf("long rich fallback should use plain text parse mode, got body %v", gotBody)
+	}
+}
+
 func TestTelegramAdapter_SendRichPartsFallsBackToText(t *testing.T) {
 	adapter := NewTelegramAdapter(nil)
 

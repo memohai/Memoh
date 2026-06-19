@@ -823,7 +823,7 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 	if msg.Message.Message.IsEmpty() {
 		return errors.New("message is required")
 	}
-	text, parseMode := renderTelegramPartsFallbackText(msg.Message.Message)
+	rich, text, parseMode := renderTelegramOutboundBody(msg.Message.Message)
 	replyTo := parseReplyToMessageID(msg.Message.Message.Reply)
 	if len(msg.Message.Attachments) > 0 {
 		usedCaption := false
@@ -849,7 +849,6 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 		}
 		return nil
 	}
-	rich := renderTelegramMessagePartsRichMessage(msg.Message.Message)
 	if strings.TrimSpace(rich.HTML) != "" {
 		if _, _, err := sendTelegramRichMessageReturnMessage(bot, to, rich, replyTo, msg.Message.Message.Actions); err == nil {
 			return nil
@@ -864,6 +863,21 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 		return sendTelegramTextWithActions(bot, to, text, replyTo, parseMode, msg.Message.Message.Actions)
 	}
 	return sendTelegramText(bot, to, text, replyTo, parseMode)
+}
+
+func renderTelegramOutboundBody(msg channel.Message) (telegramInputRichMessage, string, string) {
+	text, parseMode := renderTelegramPartsFallbackText(msg)
+	rich := renderTelegramMessagePartsRichMessage(msg)
+	if strings.TrimSpace(rich.HTML) == "" {
+		return telegramInputRichMessage{}, text, parseMode
+	}
+	if utf8.RuneCountInString(rich.HTML) <= telegramMaxMessageLength {
+		return rich, text, parseMode
+	}
+	if len(msg.Parts) > 0 {
+		return telegramInputRichMessage{}, channel.RenderPartsAsPlain(msg.Parts), ""
+	}
+	return telegramInputRichMessage{}, text, parseMode
 }
 
 // Update edits an already-sent message in place (text + inline keyboard),
@@ -890,7 +904,7 @@ func (a *TelegramAdapter) Update(_ context.Context, cfg channel.ChannelConfig, t
 	if err != nil {
 		return fmt.Errorf("telegram: invalid message id %q: %w", messageID, err)
 	}
-	rich := renderTelegramMessagePartsRichMessage(msg.Message)
+	rich, text, parseMode := renderTelegramOutboundBody(msg.Message)
 	if strings.TrimSpace(rich.HTML) != "" {
 		if err := editTelegramRichMessage(bot, chatID, mid, rich, msg.Message.Actions); err == nil {
 			return nil
@@ -901,7 +915,6 @@ func (a *TelegramAdapter) Update(_ context.Context, cfg channel.ChannelConfig, t
 			)
 		}
 	}
-	text, parseMode := renderTelegramPartsFallbackText(msg.Message)
 	return editTelegramMessageTextWithActions(bot, chatID, mid, text, parseMode, msg.Message.Actions)
 }
 

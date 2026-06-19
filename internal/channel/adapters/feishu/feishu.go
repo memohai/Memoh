@@ -617,6 +617,13 @@ func (a *FeishuAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg
 func buildFeishuOutboundContent(msg channel.Message) (string, string, error) {
 	if len(msg.Parts) > 0 {
 		if body := renderFeishuMessagePartsLarkMD(msg); body != "" {
+			if len([]rune(body)) > feishuStreamMaxRunes {
+				content, err := buildFeishuTextContent(normalizeFeishuStreamText(channel.RenderPartsAsPlain(msg.Parts)))
+				if err != nil {
+					return "", "", err
+				}
+				return larkim.MsgTypeText, content, nil
+			}
 			content, err := buildFeishuCardContent(body)
 			if err != nil {
 				return "", "", err
@@ -628,11 +635,19 @@ func buildFeishuOutboundContent(msg channel.Message) (string, string, error) {
 	if body == "" {
 		return "", "", errors.New("message is required")
 	}
+	content, err := buildFeishuTextContent(body)
+	if err != nil {
+		return "", "", err
+	}
+	return larkim.MsgTypeText, content, nil
+}
+
+func buildFeishuTextContent(body string) (string, error) {
 	content, err := json.Marshal(map[string]string{"text": body})
 	if err != nil {
-		return "", "", fmt.Errorf("failed to marshal content: %w", err)
+		return "", fmt.Errorf("failed to marshal content: %w", err)
 	}
-	return larkim.MsgTypeText, string(content), nil
+	return string(content), nil
 }
 
 // OpenStream opens a Feishu streaming session.
