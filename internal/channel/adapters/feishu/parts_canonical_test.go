@@ -8,13 +8,12 @@ import (
 )
 
 // TestCanonicalPartsRendering pins the Feishu adapter's lark_md output for
-// the shared canonical fixture. lark_md is GFM-aligned, so the expected
-// output matches partsfixture.CanonicalMarkdown.
+// the shared canonical fixture.
 func TestCanonicalPartsRendering(t *testing.T) {
 	t.Parallel()
 	msg := channel.Message{Parts: partsfixture.Canonical()}
 	got := renderFeishuMessagePartsLarkMD(msg)
-	if got != partsfixture.CanonicalMarkdown {
-		t.Errorf("renderFeishuMessagePartsLarkMD(Canonical)\n  got:  %q\n  want: %q", got, partsfixture.CanonicalMarkdown)
+	if got != partsfixture.CanonicalFeishuLarkMD {
+		t.Errorf("renderFeishuMessagePartsLarkMD(Canonical)\n  got:  %q\n  want: %q", got, partsfixture.CanonicalFeishuLarkMD)
 	}
 }
