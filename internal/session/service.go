@@ -18,6 +18,7 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/hooks"
+	"github.com/memohai/memoh/internal/message/event"
 )
 
 // Session represents a chat session within a bot.
@@ -100,17 +101,23 @@ type CreateInput struct {
 type Service struct {
 	queries     dbstore.Queries
 	hookService *hooks.Service
+	publisher   event.Publisher
 	logger      *slog.Logger
 }
 
 // NewService creates a session service.
-func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
+func NewService(log *slog.Logger, queries dbstore.Queries, publishers ...event.Publisher) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
+	var publisher event.Publisher
+	if len(publishers) > 0 {
+		publisher = publishers[0]
+	}
 	return &Service{
-		queries: queries,
-		logger:  log.With(slog.String("service", "session")),
+		queries:   queries,
+		publisher: publisher,
+		logger:    log.With(slog.String("service", "session")),
 	}
 }
 
@@ -182,8 +189,35 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 		return Session{}, err
 	}
 	sess := toSession(row)
+	s.publishSessionCreated(sess)
 	s.runSessionStartHook(context.WithoutCancel(ctx), sess)
 	return sess, nil
+}
+
+// publishSessionCreated emits a session_created event for the new session.
+// Best-effort: failures are logged but never fail the create.
+func (s *Service) publishSessionCreated(sess Session) {
+	if s == nil || s.publisher == nil {
+		return
+	}
+	payload, err := json.Marshal(map[string]any{
+		"session_id": sess.ID,
+		"bot_id":     sess.BotID,
+		"type":       sess.Type,
+		"title":      sess.Title,
+		"created_at": sess.CreatedAt,
+	})
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("marshal session_created event failed", slog.Any("error", err))
+		}
+		return
+	}
+	s.publisher.Publish(event.Event{
+		Type:  event.EventTypeSessionCreated,
+		BotID: strings.TrimSpace(sess.BotID),
+		Data:  payload,
+	})
 }
 
 func (s *Service) runSessionStartHook(ctx context.Context, sess Session) {

@@ -329,8 +329,8 @@ func provideRouteService(log *slog.Logger, queries dbstore.Queries, chatService 
 	return route.NewService(log, queries, chatService)
 }
 
-func provideSessionService(log *slog.Logger, queries dbstore.Queries) *sessionpkg.Service {
-	return sessionpkg.NewService(log, queries)
+func provideSessionService(log *slog.Logger, queries dbstore.Queries, hub *event.Hub) *sessionpkg.Service {
+	return sessionpkg.NewService(log, queries, hub)
 }
 
 func provideMessageService(log *slog.Logger, queries dbstore.Queries, hub *event.Hub) *message.DBService {
