@@ -2,6 +2,7 @@ package matrix
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -157,6 +158,68 @@ func TestMatrixStreamFinalMarkdownUpdatesFormattedContent(t *testing.T) {
 	}
 	if !strings.Contains(bodies[1], "formatted_body") || !strings.Contains(bodies[1], "org.matrix.custom.html") {
 		t.Fatalf("expected markdown final edit, got %s", bodies[1])
+	}
+}
+
+func TestMatrixStreamFinalPreservesRichPartsAsFormattedHTML(t *testing.T) {
+	bodies := make([]string, 0, 1)
+	adapter := NewMatrixAdapter(nil)
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		payload, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		bodies = append(bodies, string(payload))
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"event_id":"$evt1"}`)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	stream := &matrixOutboundStream{
+		adapter: adapter,
+		cfg: Config{
+			HomeserverURL: "https://matrix.example.com",
+			AccessToken:   "tok",
+		},
+		target: "!room:example.com",
+	}
+
+	err := stream.Push(context.Background(), mustPreparedMatrixEvent(t, channel.StreamEvent{
+		Type: channel.StreamEventFinal,
+		Final: &channel.StreamFinalizePayload{Message: channel.Message{
+			Format: channel.MessageFormatRich,
+			Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: "done", Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+				{Type: channel.MessagePartMention, Text: "Alice", ChannelIdentityID: "@alice:example.com"},
+			},
+		}},
+	}))
+	if err != nil {
+		t.Fatalf("push final: %v", err)
+	}
+	if len(bodies) != 1 {
+		t.Fatalf("expected one final send, got %d", len(bodies))
+	}
+	var content map[string]any
+	if err := json.Unmarshal([]byte(bodies[0]), &content); err != nil {
+		t.Fatalf("unmarshal matrix final payload: %v", err)
+	}
+	if got := content["format"]; got != matrixHTMLFormat {
+		t.Fatalf("unexpected final format: %#v", got)
+	}
+	html, ok := content["formatted_body"].(string)
+	if !ok {
+		t.Fatalf("unexpected final formatted body: %#v", content["formatted_body"])
+	}
+	for _, want := range []string{
+		`<strong>done</strong>`,
+		`https://matrix.to/#/@alice:example.com`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("expected final formatted body to contain %q, got %s", want, html)
+		}
 	}
 }
 

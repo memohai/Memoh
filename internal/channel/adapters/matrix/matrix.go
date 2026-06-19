@@ -389,12 +389,10 @@ func (a *MatrixAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg
 	if err != nil {
 		return err
 	}
-	text := strings.TrimSpace(msg.Message.Message.PlainText())
+	text := matrixMessageBody(msg.Message.Message)
 	if text != "" {
 		textMsg := msg.Message.Message
 		textMsg.Attachments = nil
-		textMsg.Text = text
-		textMsg.Parts = nil
 		if _, err := a.sendTextEvent(ctx, parsed, roomID, buildMatrixMessageContent(textMsg, false, "")); err != nil {
 			return err
 		}

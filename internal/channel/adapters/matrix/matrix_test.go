@@ -994,6 +994,69 @@ func TestMatrixSendResolvesRoomAlias(t *testing.T) {
 	}
 }
 
+func TestMatrixSendPreservesRichPartsAsFormattedHTML(t *testing.T) {
+	var payload string
+	adapter := NewMatrixAdapter(nil)
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if !strings.Contains(req.URL.Path, "/_matrix/client/v3/rooms/!room:example.com/send/m.room.message/") {
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		payload = string(body)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"event_id":"$evt1"}`)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	err := adapter.Send(context.Background(), channel.ChannelConfig{
+		Credentials: map[string]any{
+			"homeserverUrl": "https://matrix.example.com",
+			"userId":        "@memoh:example.com",
+			"accessToken":   "tok",
+		},
+	}, channel.PreparedOutboundMessage{
+		Target: "!room:example.com",
+		Message: channel.PreparedMessage{
+			Message: channel.Message{
+				Format: channel.MessageFormatRich,
+				Parts: []channel.MessagePart{
+					{Type: channel.MessagePartText, Text: "hello", Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+					{Type: channel.MessagePartMention, Text: "Alice", ChannelIdentityID: "@alice:example.com"},
+					{Type: channel.MessagePartLink, Text: "docs", URL: "https://example.test/docs"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("send returned error: %v", err)
+	}
+	var content map[string]any
+	if err := json.Unmarshal([]byte(payload), &content); err != nil {
+		t.Fatalf("unmarshal matrix payload: %v", err)
+	}
+	if got := content["format"]; got != matrixHTMLFormat {
+		t.Fatalf("unexpected format: %#v", got)
+	}
+	html, ok := content["formatted_body"].(string)
+	if !ok {
+		t.Fatalf("unexpected formatted body: %#v", content["formatted_body"])
+	}
+	for _, want := range []string{
+		`<strong>hello</strong>`,
+		`https://matrix.to/#/@alice:example.com`,
+		`https://example.test/docs`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("expected formatted body to contain %q, got %s", want, html)
+		}
+	}
+}
+
 func TestMatrixResolveAttachmentDownloadsMXC(t *testing.T) {
 	adapter := NewMatrixAdapter(nil)
 	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {

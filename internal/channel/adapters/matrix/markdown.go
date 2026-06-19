@@ -60,6 +60,10 @@ func formatMatrixMessage(msg channel.Message) matrixFormattedMessage {
 	return formatted
 }
 
+func matrixMessageBody(msg channel.Message) string {
+	return strings.TrimSpace(formatMatrixMessage(msg).Body)
+}
+
 func renderMatrixMessagePartsHTML(parts []channel.MessagePart) string {
 	var b strings.Builder
 	for _, part := range parts {

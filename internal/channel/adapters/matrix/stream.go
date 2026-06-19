@@ -92,17 +92,17 @@ func (s *matrixOutboundStream) Push(ctx context.Context, event channel.PreparedS
 		if event.Final == nil {
 			return errors.New("matrix stream final payload is required")
 		}
-		text := strings.TrimSpace(event.Final.Message.Message.PlainText())
-		format := event.Final.Message.Message.Format
-		if format == "" {
-			format = channel.MessageFormatPlain
-		}
-		if text == "" {
+		finalMsg := event.Final.Message.Message
+		if matrixMessageBody(finalMsg) == "" {
 			s.mu.Lock()
-			text = strings.TrimSpace(s.rawBuffer.String())
+			text := strings.TrimSpace(s.rawBuffer.String())
 			s.mu.Unlock()
+			finalMsg.Text = text
+			if finalMsg.Format == "" {
+				finalMsg.Format = channel.MessageFormatPlain
+			}
 		}
-		if err := s.upsertText(ctx, text, format, true); err != nil {
+		if err := s.upsertMessage(ctx, finalMsg, true); err != nil {
 			return err
 		}
 		if err := s.pushAttachments(ctx, event.Final.Message.Attachments); err != nil {
@@ -136,6 +136,23 @@ func (s *matrixOutboundStream) upsertText(ctx context.Context, text string, form
 	if format == "" {
 		format = channel.MessageFormatPlain
 	}
+	return s.upsertMessage(ctx, channel.Message{Text: text, Format: format}, force)
+}
+
+func (s *matrixOutboundStream) upsertMessage(ctx context.Context, msg channel.Message, force bool) error {
+	text := matrixMessageBody(msg)
+	if text == "" {
+		return nil
+	}
+	format := msg.Format
+	if format == "" {
+		if len(msg.Parts) > 0 {
+			format = channel.MessageFormatRich
+		} else {
+			format = channel.MessageFormatPlain
+		}
+		msg.Format = format
+	}
 
 	s.mu.Lock()
 	roomID := s.roomID
@@ -158,11 +175,10 @@ func (s *matrixOutboundStream) upsertText(ctx context.Context, text string, form
 	}
 
 	if originalEventID == "" {
-		eventID, err := s.adapter.sendTextEvent(ctx, s.cfg, roomID, buildMatrixMessageContent(channel.Message{
-			Text:   text,
-			Format: format,
-			Reply:  reply,
-		}, false, ""))
+		if msg.Reply == nil {
+			msg.Reply = reply
+		}
+		eventID, err := s.adapter.sendTextEvent(ctx, s.cfg, roomID, buildMatrixMessageContent(msg, false, ""))
 		if err != nil {
 			return err
 		}
@@ -181,10 +197,8 @@ func (s *matrixOutboundStream) upsertText(ctx context.Context, text string, form
 	if !force && time.Since(lastEditedAt) < matrixEditThrottle {
 		return nil
 	}
-	_, err := s.adapter.sendTextEvent(ctx, s.cfg, roomID, buildMatrixMessageContent(channel.Message{
-		Text:   text,
-		Format: format,
-	}, true, originalEventID))
+	msg.Reply = nil
+	_, err := s.adapter.sendTextEvent(ctx, s.cfg, roomID, buildMatrixMessageContent(msg, true, originalEventID))
 	if err != nil {
 		return err
 	}
