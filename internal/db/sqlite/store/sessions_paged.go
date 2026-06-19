@@ -24,6 +24,12 @@ import (
 // it compares lexicographically against `updated_at`, which SQLite stores in
 // that same text form via CURRENT_TIMESTAMP.
 
+// errUnsupportedSQLiteTimestamp is returned when parseSQLiteTimestamp fails
+// to match any known layout. Hoisted to a package-level sentinel so callers
+// can errors.Is-check and so static-analyzers don't flag the inline
+// errors.New as a dynamic-error allocation.
+var errUnsupportedSQLiteTimestamp = errors.New("sessions_paged: unsupported sqlite timestamp format")
+
 const sessionPagedColumns = `s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
   s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
   r.metadata AS route_metadata,
@@ -253,9 +259,10 @@ func scanSessionPagedRows[T any](rows *sql.Rows, conv func(sessionPagedScan) T) 
 		}
 		out = append(out, conv(row))
 	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
+	// Callers `defer rows.Close()`; rely on that and just surface a deferred
+	// iteration error. Calling Close here would make the caller's defer a
+	// no-op and risks divergent behavior if a future caller forgets the
+	// defer.
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -278,5 +285,5 @@ func parseSQLiteTimestamp(raw string) (pgtype.Timestamptz, error) {
 			return pgtype.Timestamptz{Time: parsed.UTC(), Valid: true}, nil
 		}
 	}
-	return pgtype.Timestamptz{}, errors.New("unsupported timestamp format")
+	return pgtype.Timestamptz{}, fmt.Errorf("%w: %q", errUnsupportedSQLiteTimestamp, raw)
 }
