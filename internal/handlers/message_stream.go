@@ -298,8 +298,8 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 				if !session.IsUserFacingType(typ) {
 					continue
 				}
-				cache.set(sessionID, typ, true)
-				if !h.canReadMessageSession(c, channelIdentityID, botID, perms, sessionID) {
+				cache.setType(sessionID, typ)
+				if !h.canDeliverSessionActivity(c, channelIdentityID, botID, perms, cache, sessionID) {
 					continue
 				}
 				out := map[string]any{
@@ -322,7 +322,8 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 
 // canDeliverSessionActivity returns true when the subscriber may see an
 // activity event for sessionID: the session must be a user-facing type AND
-// the subscriber must have read access to it.
+// the subscriber must have read access to it. Access decisions are memoized
+// per stream so we don't hit the DB twice per event.
 func (h *MessageHandler) canDeliverSessionActivity(c echo.Context, channelIdentityID, botID string, perms []string, cache *sessionTypeCache, sessionID string) bool {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
@@ -335,7 +336,12 @@ func (h *MessageHandler) canDeliverSessionActivity(c echo.Context, channelIdenti
 	if bots.HasPermission(perms, bots.PermissionManage) {
 		return true
 	}
-	return h.canReadMessageSession(c, channelIdentityID, botID, perms, sessionID)
+	if allowed, ok := cache.accessCached(sessionID, channelIdentityID); ok {
+		return allowed
+	}
+	allowed := h.canReadMessageSession(c, channelIdentityID, botID, perms, sessionID)
+	cache.storeAccess(sessionID, channelIdentityID, allowed)
+	return allowed
 }
 
 func writeMessageCreated(writer *bufio.Writer, flusher http.Flusher, botID string, message messagepkg.Message) error {
@@ -358,22 +364,34 @@ func beginSSEResponse(c echo.Context) (*bufio.Writer, http.Flusher, error) {
 	return bufio.NewWriter(c.Response().Writer), flusher, nil
 }
 
-// sessionTypeCache memoizes session.type lookups for the lifetime of one
-// activity stream. Each event delivery would otherwise hit the DB to decide
-// whether the session is user-facing.
+// sessionTypeCache memoizes per-session decisions for the lifetime of one
+// activity stream. Each event delivery would otherwise hit the DB twice: once
+// for the user-facing-type check and once for the access check. The cached
+// access entry is keyed by channel identity to keep the cache correct when
+// the same hub feeds multiple streams from different subscribers.
 type sessionTypeCache struct {
-	svc   *session.Service
-	mu    sync.Mutex
-	known map[string]bool
+	svc       *session.Service
+	mu        sync.Mutex
+	userFace  map[string]bool
+	access    map[accessKey]bool
+}
+
+type accessKey struct {
+	sessionID         string
+	channelIdentityID string
 }
 
 func newSessionTypeCache(svc *session.Service) *sessionTypeCache {
-	return &sessionTypeCache{svc: svc, known: map[string]bool{}}
+	return &sessionTypeCache{
+		svc:      svc,
+		userFace: map[string]bool{},
+		access:   map[accessKey]bool{},
+	}
 }
 
 func (c *sessionTypeCache) userFacing(ctx context.Context, sessionID string) (bool, bool) {
 	c.mu.Lock()
-	if cached, ok := c.known[sessionID]; ok {
+	if cached, ok := c.userFace[sessionID]; ok {
 		c.mu.Unlock()
 		return cached, true
 	}
@@ -387,14 +405,32 @@ func (c *sessionTypeCache) userFacing(ctx context.Context, sessionID string) (bo
 	}
 	userFacing := session.IsUserFacingType(sess.Type)
 	c.mu.Lock()
-	c.known[sessionID] = userFacing
+	c.userFace[sessionID] = userFacing
 	c.mu.Unlock()
 	return userFacing, true
 }
 
-func (c *sessionTypeCache) set(sessionID, typ string, _ bool) {
+// setType primes the user-facing decision from an event payload that already
+// carries the session type, sparing one DB round-trip for newly-created
+// sessions whose type we just learned.
+func (c *sessionTypeCache) setType(sessionID, typ string) {
 	c.mu.Lock()
-	c.known[sessionID] = session.IsUserFacingType(typ)
+	c.userFace[sessionID] = session.IsUserFacingType(typ)
+	c.mu.Unlock()
+}
+
+// accessCached returns the cached access decision for (session, identity).
+func (c *sessionTypeCache) accessCached(sessionID, channelIdentityID string) (bool, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	v, ok := c.access[accessKey{sessionID, channelIdentityID}]
+	return v, ok
+}
+
+// storeAccess records an access decision for (session, identity).
+func (c *sessionTypeCache) storeAccess(sessionID, channelIdentityID string, allowed bool) {
+	c.mu.Lock()
+	c.access[accessKey{sessionID, channelIdentityID}] = allowed
 	c.mu.Unlock()
 }
 
