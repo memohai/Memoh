@@ -72,7 +72,11 @@ func (s *discordOutboundStream) Push(ctx context.Context, event channel.Prepared
 			finalText = renderDiscordStreamFinalText(event.Final.Message.Message, bufText)
 		}
 		if finalText != "" {
-			return s.finalizeMessage(finalText)
+			actions := []channel.Action(nil)
+			if event.Final != nil {
+				actions = event.Final.Message.Message.Actions
+			}
+			return s.finalizeMessage(finalText, actions)
 		}
 		return nil
 
@@ -81,7 +85,7 @@ func (s *discordOutboundStream) Push(ctx context.Context, event channel.Prepared
 		if errText == "" {
 			return nil
 		}
-		return s.finalizeMessage("Error: " + errText)
+		return s.finalizeMessage("Error: "+errText, nil)
 
 	case channel.StreamEventAttachment:
 		if len(event.Attachments) == 0 {
@@ -92,7 +96,7 @@ func (s *discordOutboundStream) Push(ctx context.Context, event channel.Prepared
 		finalText := strings.TrimSpace(s.buffer.String())
 		s.mu.Unlock()
 		if finalText != "" {
-			if err := s.finalizeMessage(finalText); err != nil {
+			if err := s.finalizeMessage(finalText, nil); err != nil {
 				return err
 			}
 		}
@@ -109,7 +113,7 @@ func (s *discordOutboundStream) Push(ctx context.Context, event channel.Prepared
 		bufText := strings.TrimSpace(s.buffer.String())
 		s.mu.Unlock()
 		if bufText != "" {
-			if err := s.finalizeMessage(bufText); err != nil {
+			if err := s.finalizeMessage(bufText, nil); err != nil {
 				return err
 			}
 		}
@@ -203,21 +207,35 @@ func (s *discordOutboundStream) updateMessage() error {
 	return nil
 }
 
-func (s *discordOutboundStream) finalizeMessage(text string) error {
+func (s *discordOutboundStream) finalizeMessage(text string, actions []channel.Action) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	text = truncateDiscordText(text)
+	components, err := discordURLActionComponents(actions)
+	if err != nil {
+		return err
+	}
 
 	if s.msgID == "" {
 		var msg *discordgo.Message
-		var err error
-		if s.reply != nil && s.reply.MessageID != "" {
-			msg, err = s.session.ChannelMessageSendReply(s.target, text, &discordgo.MessageReference{
-				ChannelID: s.target,
-				MessageID: s.reply.MessageID,
+		switch {
+		case s.reply != nil && s.reply.MessageID != "":
+			messageSend := &discordgo.MessageSend{
+				Content:    text,
+				Components: components,
+				Reference: &discordgo.MessageReference{
+					ChannelID: s.target,
+					MessageID: s.reply.MessageID,
+				},
+			}
+			msg, err = s.session.ChannelMessageSendComplex(s.target, messageSend)
+		case len(components) > 0:
+			msg, err = s.session.ChannelMessageSendComplex(s.target, &discordgo.MessageSend{
+				Content:    text,
+				Components: components,
 			})
-		} else {
+		default:
 			msg, err = s.session.ChannelMessageSend(s.target, text)
 		}
 		if err != nil {
@@ -228,7 +246,14 @@ func (s *discordOutboundStream) finalizeMessage(text string) error {
 		return nil
 	}
 
-	_, err := s.session.ChannelMessageEdit(s.target, s.msgID, text)
+	if len(components) > 0 {
+		edit := discordgo.NewMessageEdit(s.target, s.msgID)
+		edit.SetContent(text)
+		edit.Components = &components
+		_, err := s.session.ChannelMessageEditComplex(edit)
+		return err
+	}
+	_, err = s.session.ChannelMessageEdit(s.target, s.msgID, text)
 	return err
 }
 

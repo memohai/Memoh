@@ -1142,6 +1142,75 @@ func TestSlackStreamFinalUsesPartsRenderer(t *testing.T) {
 	}
 }
 
+func TestSlackStreamFinalPreservesURLActionsOnUpdate(t *testing.T) {
+	t.Parallel()
+
+	var gotUpdateBlocks string
+	client := slack.New(
+		testBotToken,
+		slack.OptionAPIURL("https://slack.test/api/"),
+		slack.OptionHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			switch r.URL.String() {
+			case "https://slack.test/api/chat.postMessage":
+				body, _ := json.Marshal(map[string]any{"ok": true, "channel": "C123", "ts": "1710000000.000600"})
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(string(body))),
+				}, nil
+			case "https://slack.test/api/chat.update":
+				if err := r.ParseForm(); err != nil {
+					t.Fatalf("ParseForm: %v", err)
+				}
+				gotUpdateBlocks = r.FormValue("blocks")
+				body, _ := json.Marshal(map[string]any{"ok": true, "channel": "C123", "ts": "1710000000.000600"})
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(string(body))),
+				}, nil
+			default:
+				return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("not found")), Header: make(http.Header)}, nil
+			}
+		})}),
+		slack.OptionRetry(3),
+	)
+	stream := &slackOutboundStream{
+		adapter: NewSlackAdapter(nil),
+		cfg:     channel.ChannelConfig{ID: "cfg-stream-actions"},
+		target:  "C123",
+		api:     client,
+	}
+
+	if err := stream.Push(context.Background(), channel.PreparedStreamEvent{
+		Type:   channel.StreamEventStatus,
+		Status: channel.StreamStatusStarted,
+	}); err != nil {
+		t.Fatalf("status push: %v", err)
+	}
+	if err := stream.Push(context.Background(), channel.PreparedStreamEvent{
+		Type: channel.StreamEventFinal,
+		Final: &channel.PreparedStreamFinalizePayload{
+			Message: channel.PreparedMessage{
+				Message: channel.Message{
+					Text: "Read this",
+					Actions: []channel.Action{
+						{Label: "Open docs", URL: "https://example.test/docs"},
+					},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("final push: %v", err)
+	}
+
+	if !strings.Contains(gotUpdateBlocks, `"type":"button"`) ||
+		!strings.Contains(gotUpdateBlocks, `"text":"Open docs"`) ||
+		!strings.Contains(gotUpdateBlocks, `"url":"https://example.test/docs"`) {
+		t.Fatalf("expected Slack final update button blocks, got %s", gotUpdateBlocks)
+	}
+}
+
 func preparedSlackUploadAttachment(name string, mime string, content string) channel.PreparedAttachment {
 	return channel.PreparedAttachment{
 		Logical: channel.Attachment{
