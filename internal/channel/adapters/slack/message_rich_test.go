@@ -176,6 +176,13 @@ func TestRenderSlackMessagePartsMrkdwn(t *testing.T) {
 			want: "<https://example.test|&lt;docs&gt;>",
 		},
 		{
+			name: "link text pipe is escaped",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartLink, Text: "docs|all", URL: "https://example.test"},
+			}},
+			want: "<https://example.test|docs&#124;all>",
+		},
+		{
 			name: "mixed inline + code block + link",
 			msg: channel.Message{Parts: []channel.MessagePart{
 				{Type: channel.MessagePartText, Text: "title", Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},

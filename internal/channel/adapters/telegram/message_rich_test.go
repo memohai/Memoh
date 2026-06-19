@@ -114,6 +114,13 @@ beta</blockquote>`,
 			}},
 			want: `<p>- item &lt;x&gt;</p>`,
 		},
+		{
+			name: "code block allows csharp language",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartCodeBlock, Text: "Console.WriteLine(1);", Language: "c#"},
+			}},
+			want: `<pre><code class="language-c#">Console.WriteLine(1);</code></pre>`,
+		},
 	}
 
 	for _, tc := range cases {

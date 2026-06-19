@@ -140,7 +140,7 @@ func writeMatrixRichCodeBlockPart(b *strings.Builder, part channel.MessagePart) 
 	if strings.TrimSpace(text) == "" {
 		return
 	}
-	lang := matrixRichLanguage(part.Language)
+	lang := channel.NormalizeMessagePartCodeLanguage(part.Language)
 	b.WriteString("<pre><code")
 	if lang != "" {
 		b.WriteString(` class="language-`)
@@ -225,20 +225,6 @@ func hasMatrixRichTextStyle(styles []channel.MessageTextStyle, want channel.Mess
 		}
 	}
 	return false
-}
-
-func matrixRichLanguage(language string) string {
-	language = strings.TrimSpace(language)
-	if language == "" || len(language) > 32 {
-		return ""
-	}
-	for _, r := range language {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '+' {
-			continue
-		}
-		return ""
-	}
-	return language
 }
 
 func isMatrixUserID(id string) bool {

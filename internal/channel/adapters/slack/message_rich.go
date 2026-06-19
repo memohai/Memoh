@@ -74,7 +74,7 @@ func writeSlackRichLinkPart(b *strings.Builder, part channel.MessagePart) {
 	b.WriteString(slackEscapeMrkdwnURL(url))
 	if text != "" {
 		b.WriteString("|")
-		b.WriteString(slackEscapeMrkdwn(text))
+		b.WriteString(slackEscapeMrkdwnLinkText(text))
 	}
 	b.WriteString(">")
 }

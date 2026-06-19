@@ -90,6 +90,13 @@ func TestRenderDiscordMessagePartsMarkdown(t *testing.T) {
 			want: "```python\nprint(1)\n```",
 		},
 		{
+			name: "code block allows csharp language",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartCodeBlock, Text: "Console.WriteLine(1);", Language: "c#"},
+			}},
+			want: "```c#\nConsole.WriteLine(1);\n```",
+		},
+		{
 			name: "code block no language",
 			msg: channel.Message{Parts: []channel.MessagePart{
 				{Type: channel.MessagePartCodeBlock, Text: "raw"},

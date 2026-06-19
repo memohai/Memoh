@@ -129,7 +129,7 @@ func renderTelegramCodeBlockFallback(part channel.MessagePart) string {
 	if strings.TrimSpace(text) == "" {
 		return ""
 	}
-	lang := telegramRichLanguage(part.Language)
+	lang := channel.NormalizeMessagePartCodeLanguage(part.Language)
 	if lang != "" {
 		return `<pre><code class="language-` + telegramEscapeAttr(lang) + `">` + telegramEscapeHTML(text) + `</code></pre>`
 	}
@@ -219,7 +219,7 @@ func writeTelegramRichCodeBlockPart(b *strings.Builder, part channel.MessagePart
 	if strings.TrimSpace(text) == "" {
 		return
 	}
-	lang := telegramRichLanguage(part.Language)
+	lang := channel.NormalizeMessagePartCodeLanguage(part.Language)
 	b.WriteString("<pre>")
 	if lang != "" {
 		b.WriteString(`<code class="language-`)
@@ -289,18 +289,4 @@ func hasTelegramTextStyle(styles []channel.MessageTextStyle, want channel.Messag
 		}
 	}
 	return false
-}
-
-func telegramRichLanguage(language string) string {
-	language = strings.TrimSpace(language)
-	if language == "" || len(language) > 32 {
-		return ""
-	}
-	for _, r := range language {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '+' {
-			continue
-		}
-		return ""
-	}
-	return language
 }

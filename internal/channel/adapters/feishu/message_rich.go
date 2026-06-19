@@ -113,7 +113,7 @@ func writeFeishuRichCodeBlockPart(b *strings.Builder, part channel.MessagePart) 
 		b.WriteString("\n\n")
 	}
 	fence := selectFeishuBacktickFence(text, 3)
-	lang := feishuRichLanguage(part.Language)
+	lang := channel.NormalizeMessagePartCodeLanguage(part.Language)
 	b.WriteString(fence)
 	b.WriteString(lang)
 	b.WriteString("\n")
@@ -196,20 +196,6 @@ func hasFeishuRichTextStyle(styles []channel.MessageTextStyle, want channel.Mess
 		}
 	}
 	return false
-}
-
-func feishuRichLanguage(language string) string {
-	language = strings.TrimSpace(language)
-	if language == "" || len(language) > 32 {
-		return ""
-	}
-	for _, r := range language {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '+' {
-			continue
-		}
-		return ""
-	}
-	return language
 }
 
 func isAllowedFeishuRichHref(href string) bool {

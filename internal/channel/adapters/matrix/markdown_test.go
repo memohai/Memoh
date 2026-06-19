@@ -65,3 +65,15 @@ func TestFormatMatrixMessagePartsRenderBlockPartsAndStyles(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatMatrixMessagePartsAllowCSharpLanguage(t *testing.T) {
+	formatted := formatMatrixMessage(channel.Message{
+		Format: channel.MessageFormatRich,
+		Parts: []channel.MessagePart{
+			{Type: channel.MessagePartCodeBlock, Text: "Console.WriteLine(1);", Language: "c#"},
+		},
+	})
+	if !strings.Contains(formatted.FormattedBody, `<pre><code class="language-c#">Console.WriteLine(1);</code></pre>`) {
+		t.Fatalf("Matrix formatted body should keep c# language hint, got %q", formatted.FormattedBody)
+	}
+}

@@ -147,7 +147,7 @@ func writeDegradeMarkdownCodeBlock(b *strings.Builder, part MessagePart) {
 		b.WriteString("\n\n")
 	}
 	fence := selectDegradeMarkdownBacktickFence(text, 3)
-	lang := degradeMarkdownLanguage(part.Language)
+	lang := NormalizeMessagePartCodeLanguage(part.Language)
 	b.WriteString(fence)
 	b.WriteString(lang)
 	b.WriteString("\n")
@@ -232,13 +232,14 @@ func hasDegradeMarkdownStyle(styles []MessageTextStyle, want MessageTextStyle) b
 	return false
 }
 
-func degradeMarkdownLanguage(language string) string {
+// NormalizeMessagePartCodeLanguage returns a safe code-fence language hint.
+func NormalizeMessagePartCodeLanguage(language string) string {
 	language = strings.TrimSpace(language)
 	if language == "" || len(language) > 32 {
 		return ""
 	}
 	for _, r := range language {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '+' {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '+' || r == '#' {
 			continue
 		}
 		return ""

@@ -115,7 +115,7 @@ func writeDiscordRichCodeBlockPart(b *strings.Builder, part channel.MessagePart)
 		b.WriteString("\n\n")
 	}
 	fence := selectBacktickFence(text, 3)
-	lang := discordRichLanguage(part.Language)
+	lang := channel.NormalizeMessagePartCodeLanguage(part.Language)
 	b.WriteString(fence)
 	b.WriteString(lang)
 	b.WriteString("\n")
@@ -204,20 +204,6 @@ func hasDiscordRichTextStyle(styles []channel.MessageTextStyle, want channel.Mes
 		}
 	}
 	return false
-}
-
-func discordRichLanguage(language string) string {
-	language = strings.TrimSpace(language)
-	if language == "" || len(language) > 32 {
-		return ""
-	}
-	for _, r := range language {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '+' {
-			continue
-		}
-		return ""
-	}
-	return language
 }
 
 func isAllowedDiscordRichHref(href string) bool {

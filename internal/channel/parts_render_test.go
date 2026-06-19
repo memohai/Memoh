@@ -90,6 +90,13 @@ func TestRenderPartsAsMarkdown(t *testing.T) {
 			want: "```python\nprint(1)\n```",
 		},
 		{
+			name: "code block allows csharp language",
+			parts: []MessagePart{
+				{Type: MessagePartCodeBlock, Text: "Console.WriteLine(1);", Language: "c#"},
+			},
+			want: "```c#\nConsole.WriteLine(1);\n```",
+		},
+		{
 			name: "code block fence expands for inner backticks",
 			parts: []MessagePart{
 				{Type: MessagePartCodeBlock, Text: "outer ``` end"},
