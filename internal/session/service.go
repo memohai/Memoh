@@ -206,9 +206,7 @@ func (s *Service) publishSessionCreated(sess Session) {
 		"created_at": sess.CreatedAt,
 	})
 	if err != nil {
-		if s.logger != nil {
-			s.logger.Warn("marshal session_created event failed", slog.Any("error", err))
-		}
+		s.logger.Warn("marshal session_created event failed", slog.Any("error", err))
 		return
 	}
 	s.publisher.Publish(event.Event{
@@ -236,7 +234,7 @@ func (s *Service) runSessionStartHook(ctx context.Context, sess Session) {
 			"channel_type": sess.ChannelType,
 		},
 	}
-	if _, err := s.hookService.Run(ctx, req, nil); err != nil && s.logger != nil {
+	if _, err := s.hookService.Run(ctx, req, nil); err != nil {
 		s.logger.Warn("session start hook failed",
 			slog.String("bot_id", sess.BotID),
 			slog.String("session_id", sess.ID),
