@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -19,9 +20,9 @@ import (
 // query use sequential anonymous `?` only, with a single, unambiguous binding
 // order.
 //
-// The cursor timestamp is funneled through strftime so it compares against
-// `updated_at`, which is stored in SQLite's `YYYY-MM-DD HH:MM:SS` text form
-// via CURRENT_TIMESTAMP.
+// The cursor timestamp is bound as a plain `YYYY-MM-DD HH:MM:SS` UTC string so
+// it compares lexicographically against `updated_at`, which SQLite stores in
+// that same text form via CURRENT_TIMESTAMP.
 
 const sessionPagedColumns = `s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
   s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
@@ -38,9 +39,9 @@ WHERE s.bot_id = ?
   AND s.deleted_at IS NULL
   AND (
     ? = 0
-    OR s.updated_at < strftime('%Y-%m-%d %H:%M:%S', ?)
+    OR s.updated_at < ?
     OR (
-      s.updated_at = strftime('%Y-%m-%d %H:%M:%S', ?)
+      s.updated_at = ?
       AND s.id < ?
     )
   )
@@ -60,9 +61,9 @@ WHERE s.bot_id = ?
   AND s.deleted_at IS NULL
   AND (
     ? = 0
-    OR s.updated_at < strftime('%Y-%m-%d %H:%M:%S', ?)
+    OR s.updated_at < ?
     OR (
-      s.updated_at = strftime('%Y-%m-%d %H:%M:%S', ?)
+      s.updated_at = ?
       AND s.id < ?
     )
   )
@@ -136,9 +137,9 @@ func (q *Queries) listSessionsByBotAndCreatedByUserPaged(ctx context.Context, ar
 }
 
 // pagedCursorBindings converts Postgres-typed cursor inputs into the string /
-// int values the SQLite driver expects. SQLite columns store text, so the
-// cursor compares as `YYYY-MM-DD HH:MM:SS` UTC; strftime in the query
-// truncates any sub-second precision a caller passes in.
+// int values the SQLite driver expects. The timestamp is formatted at second
+// precision to match SQLite's TEXT storage from CURRENT_TIMESTAMP — any
+// sub-second precision in the caller's timestamp is discarded deliberately.
 func pagedCursorBindings(botID pgtype.UUID, useCursor bool, cursorUpdatedAt pgtype.Timestamptz, cursorID pgtype.UUID) (string, int, string, string) {
 	useFlag := 0
 	if useCursor {
@@ -146,7 +147,7 @@ func pagedCursorBindings(botID pgtype.UUID, useCursor bool, cursorUpdatedAt pgty
 	}
 	tsText := ""
 	if cursorUpdatedAt.Valid {
-		tsText = cursorUpdatedAt.Time.UTC().Format("2006-01-02 15:04:05.999999999")
+		tsText = cursorUpdatedAt.Time.UTC().Format("2006-01-02 15:04:05")
 	}
 	return uuidToString(botID), useFlag, tsText, uuidToString(cursorID)
 }
@@ -230,10 +231,22 @@ func scanSessionPagedRows[T any](rows *sql.Rows, conv func(sessionPagedScan) T) 
 				return nil, err
 			}
 		}
-		row.CreatedAt = parseSQLiteTimestamp(createdAt)
-		row.UpdatedAt = parseSQLiteTimestamp(updatedAt)
+		createdTS, err := parseSQLiteTimestamp(createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("sqlite paged sessions: parse created_at %q: %w", createdAt, err)
+		}
+		row.CreatedAt = createdTS
+		updatedTS, err := parseSQLiteTimestamp(updatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("sqlite paged sessions: parse updated_at %q: %w", updatedAt, err)
+		}
+		row.UpdatedAt = updatedTS
 		if deletedAt.Valid {
-			row.DeletedAt = parseSQLiteTimestamp(deletedAt.String)
+			deletedTS, err := parseSQLiteTimestamp(deletedAt.String)
+			if err != nil {
+				return nil, fmt.Errorf("sqlite paged sessions: parse deleted_at %q: %w", deletedAt.String, err)
+			}
+			row.DeletedAt = deletedTS
 		}
 		if routeMetadata.Valid {
 			row.RouteMetadata = []byte(routeMetadata.String)
@@ -256,14 +269,14 @@ func textFromNullString(value sql.NullString) pgtype.Text {
 	return pgtype.Text{String: value.String, Valid: true}
 }
 
-func parseSQLiteTimestamp(raw string) pgtype.Timestamptz {
+func parseSQLiteTimestamp(raw string) (pgtype.Timestamptz, error) {
 	if raw == "" {
-		return pgtype.Timestamptz{}
+		return pgtype.Timestamptz{}, nil
 	}
 	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02 15:04:05.999999999", time.RFC3339Nano, time.RFC3339} {
 		if parsed, err := time.Parse(layout, raw); err == nil {
-			return pgtype.Timestamptz{Time: parsed.UTC(), Valid: true}
+			return pgtype.Timestamptz{Time: parsed.UTC(), Valid: true}, nil
 		}
 	}
-	return pgtype.Timestamptz{}
+	return pgtype.Timestamptz{}, fmt.Errorf("unsupported timestamp format")
 }
