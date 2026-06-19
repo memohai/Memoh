@@ -37,7 +37,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { FileText } from 'lucide-vue-next'
@@ -64,6 +64,7 @@ const props = defineProps<{
 const { t } = useI18n()
 const chatStore = useChatStore()
 const { currentBotId, fsChangedAt } = storeToRefs(chatStore)
+const PREVIEW_POLL_MS = 2_000
 
 const visible = usePanelVisible(props.params.api)
 const filePath = computed(() => props.params.params.filePath ?? '')
@@ -84,8 +85,13 @@ const loaded = ref(false)
 // One in-flight load at a time; a new load aborts the old one so stale
 // fast-fire responses can't clobber newer content.
 let activeLoadController: AbortController | null = null
+let previewPollTimer: ReturnType<typeof setInterval> | null = null
 
-async function load() {
+function isDocumentVisible(): boolean {
+  return typeof document === 'undefined' || document.visibilityState === 'visible'
+}
+
+async function load(options: { notifyOnError?: boolean } = {}) {
   const botId = currentBotId.value
   if (!botId || !filePath.value || !canPreview.value) return
   activeLoadController?.abort()
@@ -104,13 +110,24 @@ async function load() {
     loaded.value = true
   } catch (error) {
     if (controller.signal.aborted) return
-    toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
+    if (options.notifyOnError !== false) {
+      toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
+    }
   } finally {
     if (activeLoadController === controller) {
       activeLoadController = null
       loading.value = false
     }
   }
+}
+
+function pollPreview() {
+  if (!visible.value || !loaded.value || loading.value || !isDocumentVisible()) return
+  void load({ notifyOnError: false })
+}
+
+function handleVisibilityChange() {
+  if (visible.value && isDocumentVisible()) void load({ notifyOnError: false })
 }
 
 // Load when the panel first becomes visible / its target changes, and refresh
@@ -131,7 +148,17 @@ watch(fsChangedAt, () => {
   void load()
 })
 
+onMounted(() => {
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  previewPollTimer = window.setInterval(pollPreview, PREVIEW_POLL_MS)
+})
+
 onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  if (previewPollTimer !== null) {
+    window.clearInterval(previewPollTimer)
+    previewPollTimer = null
+  }
   activeLoadController?.abort()
 })
 </script>

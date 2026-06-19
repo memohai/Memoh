@@ -1787,6 +1787,51 @@ describe('chat-list store', () => {
     expect(store.affectsPath('/data/cross-channel.md')).toBe(true)
   })
 
+  it('bumps fsChangedAt when a non-current session refresh delivers a fs-mutating tool', async () => {
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-1', bot_id: 'bot-1', title: 'Current', type: 'chat' },
+      { id: 'session-2', bot_id: 'bot-1', title: 'Other', type: 'chat' },
+    ])
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    expect(store.sessionId).toBe('session-1')
+
+    api.fetchMessagesUI.mockClear()
+    api.fetchMessagesUI.mockResolvedValueOnce([{
+      id: 'assistant-2',
+      role: 'assistant',
+      messages: [{
+        id: 1,
+        type: 'tool',
+        name: 'write',
+        tool_call_id: 'call-other-session-write',
+        input: { path: '/data/other-session.md', content: 'hi' },
+        running: false,
+      }],
+      timestamp: new Date().toISOString(),
+    }])
+
+    messageEventsHandler?.({
+      type: 'message_created',
+      bot_id: 'bot-1',
+      message: {
+        id: 'msg-write-other-session',
+        bot_id: 'bot-1',
+        session_id: 'session-2',
+        role: 'assistant',
+        content: 'tool',
+        created_at: new Date().toISOString(),
+      },
+    })
+
+    await new Promise(resolve => setTimeout(resolve, 350))
+
+    expect(api.fetchMessagesUI).toHaveBeenCalledWith('bot-1', 'session-2', { limit: 30 })
+    expect(store.sessionId).toBe('session-1')
+    expect(store.affectsPath('/data/other-session.md')).toBe(true)
+  })
+
   it('does not bump fsChangedAt while a fs-mutating tool is still running', async () => {
     sendEvents = [
       { type: 'start' } as UIStreamEvent,

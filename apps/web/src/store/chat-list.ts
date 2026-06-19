@@ -430,6 +430,7 @@ export const useChatStore = defineStore('chat', () => {
   let messageEventsSince = ''
   let activeWs: ChatWebSocket | null = null
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
+  const nonCurrentSessionRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
   let refreshPromise: { key: string; promise: Promise<void> } | null = null
   let sessionListRefreshPromise: { botId: string; promise: Promise<void> } | null = null
   const pendingBackgroundEvents = new Map<string, BackgroundTask[]>()
@@ -1017,6 +1018,10 @@ export const useChatStore = defineStore('chat', () => {
       merge: mergeTurnInPlace,
     })
     updateSinceFromMessages(items)
+    bumpFsChangedAtForMessages(items)
+  }
+
+  function bumpFsChangedAtForMessages(items: ChatMessage[]) {
     // Refresh path: fs-mutating tools that landed via /messages/events (e.g.
     // a Telegram-triggered session writing to the workspace) never go through
     // upsertAssistantUIMessage, so this is the only chance to fire fsChangedAt
@@ -1520,6 +1525,7 @@ export const useChatStore = defineStore('chat', () => {
       clearTimeout(refreshTimer)
       refreshTimer = null
     }
+    cancelNonCurrentSessionRefreshes()
     refreshPromise = null
     sessionListRefreshPromise = null
     messageEventsSince = ''
@@ -1593,6 +1599,7 @@ export const useChatStore = defineStore('chat', () => {
         hasMoreOlder.value = moreOlder
         cacheCurrentMessages()
       } else {
+        bumpFsChangedAtForMessages(normalized)
         cacheFetchedMessages(bid, sid, normalized, moreOlder)
       }
       touchSession(sid, normalized.at(-1)?.timestamp)
@@ -1627,6 +1634,29 @@ export const useChatStore = defineStore('chat', () => {
 
     sessionListRefreshPromise = { botId: bid, promise }
     return promise
+  }
+
+  function cancelNonCurrentSessionRefreshes() {
+    for (const timer of nonCurrentSessionRefreshTimers.values()) {
+      clearTimeout(timer)
+    }
+    nonCurrentSessionRefreshTimers.clear()
+  }
+
+  function scheduleNonCurrentSessionRefreshForFs(targetBotId: string, targetSessionId?: string, delay = 100) {
+    const bid = targetBotId.trim()
+    const sid = targetSessionId?.trim() ?? ''
+    if (!bid || !sid) return
+    if (sid === (sessionId.value ?? '').trim()) return
+    const key = sessionMessageKey(bid, sid)
+    if (!key || nonCurrentSessionRefreshTimers.has(key)) return
+
+    const timer = setTimeout(() => {
+      nonCurrentSessionRefreshTimers.delete(key)
+      if ((currentBotId.value ?? '').trim() !== bid) return
+      void refreshCurrentSession(bid, sid)
+    }, delay)
+    nonCurrentSessionRefreshTimers.set(key, timer)
   }
 
   function scheduleRefreshCurrentSession(expectedSessionId?: string, delay = 100) {
@@ -1750,6 +1780,8 @@ export const useChatStore = defineStore('chat', () => {
       }
       if (shouldRefreshFromMessageCreated(targetBotId, sessionId.value, streamingSessionId.value, event)) {
         scheduleRefreshCurrentSession((raw.session_id ?? '').trim())
+      } else if (raw.role === 'assistant') {
+        scheduleNonCurrentSessionRefreshForFs(targetBotId, messageSessionId)
       }
       return
     }
@@ -2368,6 +2400,7 @@ export const useChatStore = defineStore('chat', () => {
     abort()
     abortAllAssistantStreams()
     clearPendingACPSession()
+    cancelNonCurrentSessionRefreshes()
     cancelPendingFsBump()
     lastFsChange.value = null
     lastFsEvents.value = new Map()
