@@ -8,7 +8,6 @@ package sqlc
 import (
 	"context"
 	"database/sql"
-	"strings"
 )
 
 const createSession = `-- name: CreateSession :one
@@ -270,208 +269,10 @@ func (q *Queries) ListSessionsByBotAndCreatedByUser(ctx context.Context, arg Lis
 	return items, nil
 }
 
-const listSessionsByBotAndCreatedByUserPaged = `-- name: ListSessionsByBotAndCreatedByUserPaged :many
-SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
-  r.metadata AS route_metadata,
-  r.conversation_type AS route_conversation_type
-FROM bot_sessions s
-LEFT JOIN bot_channel_routes r ON r.id = s.route_id
-WHERE s.bot_id = ?1
-  AND s.created_by_user_id = ?2
-  AND s.deleted_at IS NULL
-  AND s.type IN (/*SLICE:types*/?)
-  AND (
-    ?4 = 0
-    OR (s.updated_at < ?5
-        OR (s.updated_at = ?5 AND s.id < ?6))
-  )
-ORDER BY s.updated_at DESC, s.id DESC
-LIMIT ?7
-`
-
-type ListSessionsByBotAndCreatedByUserPagedParams struct {
-	BotID           string         `json:"bot_id"`
-	CreatedByUserID sql.NullString `json:"created_by_user_id"`
-	Types           []string       `json:"types"`
-	UseCursor       interface{}    `json:"use_cursor"`
-	CursorUpdatedAt string         `json:"cursor_updated_at"`
-	CursorID        string         `json:"cursor_id"`
-	LimitCount      int64          `json:"limit_count"`
-}
-
-type ListSessionsByBotAndCreatedByUserPagedRow struct {
-	ID                    string         `json:"id"`
-	BotID                 string         `json:"bot_id"`
-	RouteID               sql.NullString `json:"route_id"`
-	ChannelType           sql.NullString `json:"channel_type"`
-	Type                  string         `json:"type"`
-	Title                 string         `json:"title"`
-	Metadata              string         `json:"metadata"`
-	ParentSessionID       sql.NullString `json:"parent_session_id"`
-	CreatedByUserID       sql.NullString `json:"created_by_user_id"`
-	CreatedAt             string         `json:"created_at"`
-	UpdatedAt             string         `json:"updated_at"`
-	DeletedAt             sql.NullString `json:"deleted_at"`
-	RouteMetadata         sql.NullString `json:"route_metadata"`
-	RouteConversationType sql.NullString `json:"route_conversation_type"`
-}
-
-func (q *Queries) ListSessionsByBotAndCreatedByUserPaged(ctx context.Context, arg ListSessionsByBotAndCreatedByUserPagedParams) ([]ListSessionsByBotAndCreatedByUserPagedRow, error) {
-	query := listSessionsByBotAndCreatedByUserPaged
-	var queryParams []interface{}
-	queryParams = append(queryParams, arg.BotID)
-	queryParams = append(queryParams, arg.CreatedByUserID)
-	if len(arg.Types) > 0 {
-		for _, v := range arg.Types {
-			queryParams = append(queryParams, v)
-		}
-		query = strings.Replace(query, "/*SLICE:types*/?", strings.Repeat(",?", len(arg.Types))[1:], 1)
-	} else {
-		query = strings.Replace(query, "/*SLICE:types*/?", "NULL", 1)
-	}
-	queryParams = append(queryParams, arg.UseCursor)
-	queryParams = append(queryParams, arg.CursorUpdatedAt)
-	queryParams = append(queryParams, arg.CursorID)
-	queryParams = append(queryParams, arg.LimitCount)
-	rows, err := q.db.QueryContext(ctx, query, queryParams...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListSessionsByBotAndCreatedByUserPagedRow
-	for rows.Next() {
-		var i ListSessionsByBotAndCreatedByUserPagedRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.BotID,
-			&i.RouteID,
-			&i.ChannelType,
-			&i.Type,
-			&i.Title,
-			&i.Metadata,
-			&i.ParentSessionID,
-			&i.CreatedByUserID,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.DeletedAt,
-			&i.RouteMetadata,
-			&i.RouteConversationType,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listSessionsByBotPaged = `-- name: ListSessionsByBotPaged :many
-SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
-  r.metadata AS route_metadata,
-  r.conversation_type AS route_conversation_type
-FROM bot_sessions s
-LEFT JOIN bot_channel_routes r ON r.id = s.route_id
-WHERE s.bot_id = ?1
-  AND s.deleted_at IS NULL
-  AND s.type IN (/*SLICE:types*/?)
-  AND (
-    ?3 = 0
-    OR (s.updated_at < ?4
-        OR (s.updated_at = ?4 AND s.id < ?5))
-  )
-ORDER BY s.updated_at DESC, s.id DESC
-LIMIT ?6
-`
-
-type ListSessionsByBotPagedParams struct {
-	BotID           string      `json:"bot_id"`
-	Types           []string    `json:"types"`
-	UseCursor       interface{} `json:"use_cursor"`
-	CursorUpdatedAt string      `json:"cursor_updated_at"`
-	CursorID        string      `json:"cursor_id"`
-	LimitCount      int64       `json:"limit_count"`
-}
-
-type ListSessionsByBotPagedRow struct {
-	ID                    string         `json:"id"`
-	BotID                 string         `json:"bot_id"`
-	RouteID               sql.NullString `json:"route_id"`
-	ChannelType           sql.NullString `json:"channel_type"`
-	Type                  string         `json:"type"`
-	Title                 string         `json:"title"`
-	Metadata              string         `json:"metadata"`
-	ParentSessionID       sql.NullString `json:"parent_session_id"`
-	CreatedByUserID       sql.NullString `json:"created_by_user_id"`
-	CreatedAt             string         `json:"created_at"`
-	UpdatedAt             string         `json:"updated_at"`
-	DeletedAt             sql.NullString `json:"deleted_at"`
-	RouteMetadata         sql.NullString `json:"route_metadata"`
-	RouteConversationType sql.NullString `json:"route_conversation_type"`
-}
-
-func (q *Queries) ListSessionsByBotPaged(ctx context.Context, arg ListSessionsByBotPagedParams) ([]ListSessionsByBotPagedRow, error) {
-	query := listSessionsByBotPaged
-	var queryParams []interface{}
-	queryParams = append(queryParams, arg.BotID)
-	if len(arg.Types) > 0 {
-		for _, v := range arg.Types {
-			queryParams = append(queryParams, v)
-		}
-		query = strings.Replace(query, "/*SLICE:types*/?", strings.Repeat(",?", len(arg.Types))[1:], 1)
-	} else {
-		query = strings.Replace(query, "/*SLICE:types*/?", "NULL", 1)
-	}
-	queryParams = append(queryParams, arg.UseCursor)
-	queryParams = append(queryParams, arg.CursorUpdatedAt)
-	queryParams = append(queryParams, arg.CursorID)
-	queryParams = append(queryParams, arg.LimitCount)
-	rows, err := q.db.QueryContext(ctx, query, queryParams...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListSessionsByBotPagedRow
-	for rows.Next() {
-		var i ListSessionsByBotPagedRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.BotID,
-			&i.RouteID,
-			&i.ChannelType,
-			&i.Type,
-			&i.Title,
-			&i.Metadata,
-			&i.ParentSessionID,
-			&i.CreatedByUserID,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.DeletedAt,
-			&i.RouteMetadata,
-			&i.RouteConversationType,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listSessionsByRoute = `-- name: ListSessionsByRoute :many
+
+
+
 SELECT id, bot_id, route_id, channel_type, type, title, metadata, parent_session_id, created_at, updated_at, deleted_at, created_by_user_id
 FROM bot_sessions
 WHERE route_id = ?1
@@ -479,6 +280,11 @@ WHERE route_id = ?1
 ORDER BY updated_at DESC
 `
 
+// ListSessionsByBotPaged and ListSessionsByBotAndCreatedByUserPaged are not
+// generated for SQLite. The Postgres versions live in
+// db/postgres/queries/sessions.sql; the SQLite shim hand-rolls the query in
+// internal/db/sqlite/store/sessions_paged.go because sqlc-sqlite cannot mix
+// sqlc.slice with reused numbered placeholders without colliding bind indexes.
 func (q *Queries) ListSessionsByRoute(ctx context.Context, routeID sql.NullString) ([]BotSession, error) {
 	rows, err := q.db.QueryContext(ctx, listSessionsByRoute, routeID)
 	if err != nil {
