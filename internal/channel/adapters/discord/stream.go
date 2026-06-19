@@ -148,10 +148,10 @@ func renderDiscordStreamFinalText(msg channel.Message, buffered string) string {
 	if rich := renderDiscordMessagePartsMarkdown(msg); rich != "" {
 		return rich
 	}
-	if text := strings.TrimSpace(buffered); text != "" {
-		return text
+	if authoritative := strings.TrimSpace(msg.PlainText()); authoritative != "" {
+		return authoritative
 	}
-	return strings.TrimSpace(msg.PlainText())
+	return strings.TrimSpace(buffered)
 }
 
 func (s *discordOutboundStream) ensureMessage(text string) error {

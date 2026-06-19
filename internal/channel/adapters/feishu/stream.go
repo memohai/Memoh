@@ -154,10 +154,10 @@ func renderFeishuStreamFinalText(msg channel.Message, buffered string) string {
 			return body
 		}
 	}
-	if text := strings.TrimSpace(buffered); text != "" {
-		return text
+	if authoritative := strings.TrimSpace(msg.PlainText()); authoritative != "" {
+		return authoritative
 	}
-	return strings.TrimSpace(msg.PlainText())
+	return strings.TrimSpace(buffered)
 }
 
 func feishuLogicalAttachments(attachments []channel.PreparedAttachment) []channel.Attachment {

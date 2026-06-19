@@ -128,6 +128,15 @@ func TestDiscordOutboundStream_FinalUsesPartsRenderer(t *testing.T) {
 	}
 }
 
+func TestRenderDiscordStreamFinalTextUsesAuthoritativeTextBeforeBuffer(t *testing.T) {
+	t.Parallel()
+
+	got := renderDiscordStreamFinalText(channel.Message{Text: "final answer"}, "partial buffered text")
+	if got != "final answer" {
+		t.Fatalf("expected authoritative final text, got %q", got)
+	}
+}
+
 func TestDiscordOutboundStream_FinalPreservesURLActionsOnEdit(t *testing.T) {
 	t.Parallel()
 

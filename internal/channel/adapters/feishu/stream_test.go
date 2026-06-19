@@ -49,11 +49,11 @@ func TestRenderFeishuStreamFinalTextUsesParts(t *testing.T) {
 	}
 }
 
-func TestRenderFeishuStreamFinalTextFallsBackToBuffer(t *testing.T) {
+func TestRenderFeishuStreamFinalTextUsesAuthoritativeTextBeforeBuffer(t *testing.T) {
 	t.Parallel()
 
 	got := renderFeishuStreamFinalText(channel.Message{Text: "plain fallback"}, "buffered plain text")
-	if got != "buffered plain text" {
-		t.Fatalf("expected buffered stream text, got %q", got)
+	if got != "plain fallback" {
+		t.Fatalf("expected authoritative final text, got %q", got)
 	}
 }
