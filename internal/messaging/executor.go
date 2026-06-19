@@ -689,6 +689,11 @@ func validateOutboundMessageObject(raw map[string]any) error {
 			return err
 		}
 	}
+	if attachments, ok := raw["attachments"]; ok && attachments != nil {
+		if err := validateOutboundAttachmentInput(attachments); err != nil {
+			return err
+		}
+	}
 	if actions, ok := raw["actions"]; ok && actions != nil {
 		if err := validateOutboundMessageActions(actions); err != nil {
 			return err
@@ -811,6 +816,7 @@ func validateOutboundMessagePart(index int, raw map[string]any) error {
 	normalizedType := channel.MessagePartType(strings.TrimSpace(partType))
 	switch normalizedType {
 	case channel.MessagePartText, channel.MessagePartLink, channel.MessagePartCodeBlock, channel.MessagePartMention, channel.MessagePartEmoji, channel.MessagePartHeading, channel.MessagePartBlockquote, channel.MessagePartListItem:
+		raw["type"] = string(normalizedType)
 	default:
 		return fmt.Errorf("unsupported message part type %q at index %d", partType, index)
 	}
@@ -821,17 +827,34 @@ func validateOutboundMessagePart(index int, raw map[string]any) error {
 	if !ok || styles == nil {
 		return nil
 	}
-	styleItems, ok := styles.([]any)
-	if !ok {
-		return nil
-	}
-	for _, rawStyle := range styleItems {
-		style, _ := rawStyle.(string)
-		switch channel.MessageTextStyle(strings.TrimSpace(style)) {
-		case channel.MessageStyleBold, channel.MessageStyleItalic, channel.MessageStyleStrikethrough, channel.MessageStyleCode, channel.MessageStyleUnderline, channel.MessageStyleSpoiler:
-		default:
-			return fmt.Errorf("unsupported message part style %q at index %d", style, index)
+	return normalizeOutboundMessagePartStyles(index, styles)
+}
+
+func normalizeOutboundMessagePartStyles(index int, styles any) error {
+	switch styleItems := styles.(type) {
+	case []any:
+		for i, rawStyle := range styleItems {
+			style, _ := rawStyle.(string)
+			normalizedStyle := channel.MessageTextStyle(strings.TrimSpace(style))
+			switch normalizedStyle {
+			case channel.MessageStyleBold, channel.MessageStyleItalic, channel.MessageStyleStrikethrough, channel.MessageStyleCode, channel.MessageStyleUnderline, channel.MessageStyleSpoiler:
+				styleItems[i] = string(normalizedStyle)
+			default:
+				return fmt.Errorf("unsupported message part style %q at index %d", style, index)
+			}
 		}
+	case []string:
+		for i, style := range styleItems {
+			normalizedStyle := channel.MessageTextStyle(strings.TrimSpace(style))
+			switch normalizedStyle {
+			case channel.MessageStyleBold, channel.MessageStyleItalic, channel.MessageStyleStrikethrough, channel.MessageStyleCode, channel.MessageStyleUnderline, channel.MessageStyleSpoiler:
+				styleItems[i] = string(normalizedStyle)
+			default:
+				return fmt.Errorf("unsupported message part style %q at index %d", style, index)
+			}
+		}
+	default:
+		return errors.New("message part styles must be array")
 	}
 	return nil
 }

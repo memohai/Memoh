@@ -394,9 +394,9 @@ func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 			"format": "rich",
 			"parts": []any{
 				map[string]any{
-					"type":   "text",
+					"type":   " text ",
 					"text":   "bold",
-					"styles": []any{"bold"},
+					"styles": []any{" bold "},
 				},
 				map[string]any{
 					"type":     "code_block",
@@ -418,7 +418,7 @@ func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 				map[string]any{
 					"type":   "text",
 					"text":   "hidden detail",
-					"styles": []any{"underline", "spoiler"},
+					"styles": []any{" underline ", " spoiler "},
 				},
 			},
 		},
@@ -470,6 +470,22 @@ func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 			name: "unknown format",
 			raw:  map[string]any{"message": map[string]any{"text": "hi", "format": "html"}},
 			want: "unsupported message format",
+		},
+		{
+			name: "unknown nested attachment field",
+			raw: map[string]any{"message": map[string]any{
+				"text":        "see attachment",
+				"attachments": []any{map[string]any{"href": "https://example.com/file.png"}},
+			}},
+			want: "unknown attachment field",
+		},
+		{
+			name: "nested attachment without reference",
+			raw: map[string]any{"message": map[string]any{
+				"text":        "see attachment",
+				"attachments": []any{map[string]any{"name": "file.png"}},
+			}},
+			want: "attachment reference is required",
 		},
 		{
 			name: "non-object reply",
