@@ -81,7 +81,7 @@ func TestSubscribeBeforeBacklogDedupsLiveMessage(t *testing.T) {
 	sessionID := "22222222-2222-2222-2222-222222222222"
 
 	// Subscribe first — this is what the handler does before reading backlog.
-	_, stream, cancel := hub.Subscribe(botID, 8)
+	sub, cancel := hub.Subscribe(botID, 8)
 	defer cancel()
 
 	// Persistence happens; both the backlog query and the live channel will
@@ -111,7 +111,7 @@ func TestSubscribeBeforeBacklogDedupsLiveMessage(t *testing.T) {
 
 	// Drain the live channel and apply the same filter the handler does.
 	select {
-	case ev := <-stream:
+	case ev := <-sub.Events:
 		if ev.Type != messageevent.EventTypeMessageCreated {
 			t.Fatalf("event type = %q", ev.Type)
 		}

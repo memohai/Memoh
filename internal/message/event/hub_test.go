@@ -7,21 +7,21 @@ import (
 
 func TestHubPublishScopedByBotID(t *testing.T) {
 	hub := NewHub()
-	_, botAStream, cancelA := hub.Subscribe("bot-a", 8)
+	subA, cancelA := hub.Subscribe("bot-a", 8)
 	defer cancelA()
-	_, botBStream, cancelB := hub.Subscribe("bot-b", 8)
+	subB, cancelB := hub.Subscribe("bot-b", 8)
 	defer cancelB()
 
 	hub.Publish(Event{Type: EventTypeMessageCreated, BotID: "bot-a"})
 
 	select {
-	case <-botAStream:
+	case <-subA.Events:
 	case <-time.After(200 * time.Millisecond):
 		t.Fatalf("expected event for bot-a subscriber")
 	}
 
 	select {
-	case <-botBStream:
+	case <-subB.Events:
 		t.Fatalf("did not expect bot-b subscriber to receive bot-a event")
 	case <-time.After(120 * time.Millisecond):
 	}
@@ -29,11 +29,11 @@ func TestHubPublishScopedByBotID(t *testing.T) {
 
 func TestHubCancelUnsubscribe(t *testing.T) {
 	hub := NewHub()
-	_, stream, cancel := hub.Subscribe("bot-a", 8)
+	sub, cancel := hub.Subscribe("bot-a", 8)
 	cancel()
 
 	select {
-	case _, ok := <-stream:
+	case _, ok := <-sub.Events:
 		if ok {
 			t.Fatalf("expected stream to be closed after cancel")
 		}
@@ -44,7 +44,7 @@ func TestHubCancelUnsubscribe(t *testing.T) {
 
 func TestHubSlowSubscriberDoesNotBlockPublish(t *testing.T) {
 	hub := NewHub()
-	_, stream, cancel := hub.Subscribe("bot-a", 1)
+	sub, cancel := hub.Subscribe("bot-a", 1)
 	defer cancel()
 
 	hub.Publish(Event{Type: EventTypeMessageCreated, BotID: "bot-a"})
@@ -52,8 +52,29 @@ func TestHubSlowSubscriberDoesNotBlockPublish(t *testing.T) {
 	hub.Publish(Event{Type: EventTypeMessageCreated, BotID: "bot-a"})
 
 	select {
-	case <-stream:
+	case <-sub.Events:
 	case <-time.After(200 * time.Millisecond):
 		t.Fatalf("expected at least one event in buffer")
+	}
+}
+
+// TestHubSubscriptionDroppedCounter pins the per-subscription drop accounting
+// the SSE writers rely on to emit a `dropped` frame to the client. Sending
+// 5 events into a buffer-2 subscription yields 3 drops; reading the counter
+// resets it so the next read starts fresh.
+func TestHubSubscriptionDroppedCounter(t *testing.T) {
+	hub := NewHub()
+	sub, cancel := hub.Subscribe("bot-a", 2)
+	defer cancel()
+
+	for i := 0; i < 5; i++ {
+		hub.Publish(Event{Type: EventTypeMessageCreated, BotID: "bot-a"})
+	}
+
+	if got := sub.DroppedSinceLastRead(); got != 3 {
+		t.Fatalf("DroppedSinceLastRead = %d, want 3", got)
+	}
+	if got := sub.DroppedSinceLastRead(); got != 0 {
+		t.Fatalf("DroppedSinceLastRead after reset = %d, want 0", got)
 	}
 }

@@ -44,7 +44,7 @@ func TestSessionServicePublishesSessionCreated(t *testing.T) {
 
 	hub := messageevent.NewHub()
 	botID := "11111111-1111-1111-1111-111111111111"
-	_, stream, cancel := hub.Subscribe(botID, 8)
+	sub, cancel := hub.Subscribe(botID, 8)
 	defer cancel()
 
 	svc := session.NewService(nil, sessionCreateRecorder{}, hub)
@@ -59,7 +59,7 @@ func TestSessionServicePublishesSessionCreated(t *testing.T) {
 	}
 
 	select {
-	case ev := <-stream:
+	case ev := <-sub.Events:
 		if ev.Type != messageevent.EventTypeSessionCreated {
 			t.Fatalf("event type = %q, want %q", ev.Type, messageevent.EventTypeSessionCreated)
 		}
