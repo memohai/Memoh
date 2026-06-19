@@ -618,12 +618,12 @@ func validateOutboundMessageObject(raw map[string]any) error {
 func validateOutboundMessageParts(raw any) error {
 	parts, ok := raw.([]any)
 	if !ok {
-		return nil
+		return errors.New("message parts must be array")
 	}
 	for i, rawPart := range parts {
 		part, ok := rawPart.(map[string]any)
 		if !ok {
-			continue
+			return fmt.Errorf("message part must be object at index %d", i)
 		}
 		if err := validateOutboundMessagePart(i, part); err != nil {
 			return err
@@ -635,12 +635,12 @@ func validateOutboundMessageParts(raw any) error {
 func validateOutboundMessageActions(raw any) error {
 	actions, ok := raw.([]any)
 	if !ok {
-		return nil
+		return errors.New("message actions must be array")
 	}
 	for i, rawAction := range actions {
 		action, ok := rawAction.(map[string]any)
 		if !ok {
-			continue
+			return fmt.Errorf("message action must be object at index %d", i)
 		}
 		if err := validateOutboundMessageAction(i, action); err != nil {
 			return err
@@ -731,9 +731,8 @@ func validateOutboundMessagePartContent(index int, partType channel.MessagePartT
 			return fmt.Errorf("message link part text is required at index %d", index)
 		}
 	case channel.MessagePartMention:
-		channelIdentityID, _ := raw["channel_identity_id"].(string)
-		if text == "" && strings.TrimSpace(channelIdentityID) == "" {
-			return fmt.Errorf("message mention part text or channel_identity_id is required at index %d", index)
+		if text == "" {
+			return fmt.Errorf("message mention part text is required at index %d", index)
 		}
 	case channel.MessagePartEmoji:
 		emoji, _ := raw["emoji"].(string)

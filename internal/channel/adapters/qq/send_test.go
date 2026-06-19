@@ -149,10 +149,12 @@ func TestQQOutboundCapabilitiesReflectRuntimeMarkdownGate(t *testing.T) {
 	adapter := &QQAdapter{}
 	base := adapter.Descriptor().Capabilities
 	cases := []struct {
-		name        string
-		credentials map[string]any
-		target      string
-		want        bool
+		name            string
+		credentials     map[string]any
+		target          string
+		wantMarkdown    bool
+		wantAttachments bool
+		wantMedia       bool
 	}{
 		{
 			name: "group markdown enabled",
@@ -161,8 +163,10 @@ func TestQQOutboundCapabilitiesReflectRuntimeMarkdownGate(t *testing.T) {
 				"clientSecret":    "secret",
 				"markdownSupport": true,
 			},
-			target: "group:group-openid",
-			want:   true,
+			target:          "group:group-openid",
+			wantMarkdown:    true,
+			wantAttachments: true,
+			wantMedia:       true,
 		},
 		{
 			name: "group markdown disabled",
@@ -171,8 +175,10 @@ func TestQQOutboundCapabilitiesReflectRuntimeMarkdownGate(t *testing.T) {
 				"clientSecret":    "secret",
 				"markdownSupport": false,
 			},
-			target: "group:group-openid",
-			want:   false,
+			target:          "group:group-openid",
+			wantMarkdown:    false,
+			wantAttachments: true,
+			wantMedia:       true,
 		},
 		{
 			name: "channel target",
@@ -181,16 +187,24 @@ func TestQQOutboundCapabilitiesReflectRuntimeMarkdownGate(t *testing.T) {
 				"clientSecret":    "secret",
 				"markdownSupport": true,
 			},
-			target: "channel:channel-id",
-			want:   false,
+			target:          "channel:channel-id",
+			wantMarkdown:    false,
+			wantAttachments: false,
+			wantMedia:       false,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			caps := adapter.ResolveOutboundCapabilities(channel.ChannelConfig{Credentials: tc.credentials}, tc.target, base)
-			if caps.Markdown != tc.want {
-				t.Fatalf("Markdown = %v, want %v", caps.Markdown, tc.want)
+			if caps.Markdown != tc.wantMarkdown {
+				t.Fatalf("Markdown = %v, want %v", caps.Markdown, tc.wantMarkdown)
+			}
+			if caps.Attachments != tc.wantAttachments {
+				t.Fatalf("Attachments = %v, want %v", caps.Attachments, tc.wantAttachments)
+			}
+			if caps.Media != tc.wantMedia {
+				t.Fatalf("Media = %v, want %v", caps.Media, tc.wantMedia)
 			}
 		})
 	}

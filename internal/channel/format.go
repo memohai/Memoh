@@ -65,8 +65,9 @@ func StripInlineMarkup(s string) string {
 //   - Rich body on a Plain-only channel: render Parts via RenderPartsAsPlain,
 //     retype Plain.
 //
-// URL-only Actions on non-button channels are downgraded to ordinary links.
-// Callback Actions stay unsupported and are rejected by validateMessageCapabilities.
+// URL-only Actions on channels without any button support are downgraded to
+// ordinary links. Callback Actions stay unsupported and are rejected by
+// validateMessageCapabilities unless the channel advertises callback Buttons.
 func coerceFormatForCaps(msg Message, caps ChannelCapabilities) Message {
 	if msg.Format == MessageFormatMarkdown && !caps.Markdown {
 		if caps.RichText && strings.TrimSpace(msg.Text) != "" {
@@ -88,7 +89,7 @@ func coerceFormatForCaps(msg Message, caps ChannelCapabilities) Message {
 		}
 		msg.Parts = nil
 	}
-	if len(msg.Actions) > 0 && !caps.Buttons {
+	if len(msg.Actions) > 0 && !caps.Buttons && !caps.URLButtons {
 		msg = coerceURLActionsForCaps(msg, caps)
 	}
 	return msg

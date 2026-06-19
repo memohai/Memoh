@@ -59,10 +59,14 @@ func TestSlackDescriptorAdvertisesRichText(t *testing.T) {
 	}
 }
 
-func TestSlackDescriptorAdvertisesButtons(t *testing.T) {
+func TestSlackDescriptorAdvertisesURLButtonsOnly(t *testing.T) {
 	t.Parallel()
 
-	if !NewSlackAdapter(nil).Descriptor().Capabilities.Buttons {
+	caps := NewSlackAdapter(nil).Descriptor().Capabilities
+	if caps.Buttons {
+		t.Fatal("Slack descriptor must not advertise callback button support")
+	}
+	if !caps.URLButtons {
 		t.Fatal("Slack descriptor must advertise URL button support")
 	}
 }

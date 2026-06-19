@@ -21,10 +21,14 @@ func TestDiscordDescriptorAdvertisesRichText(t *testing.T) {
 	}
 }
 
-func TestDiscordDescriptorAdvertisesButtons(t *testing.T) {
+func TestDiscordDescriptorAdvertisesURLButtonsOnly(t *testing.T) {
 	t.Parallel()
 
-	if !(&DiscordAdapter{}).Descriptor().Capabilities.Buttons {
+	caps := (&DiscordAdapter{}).Descriptor().Capabilities
+	if caps.Buttons {
+		t.Fatal("Discord descriptor must not advertise callback button support")
+	}
+	if !caps.URLButtons {
 		t.Fatal("Discord descriptor must advertise URL button support")
 	}
 }

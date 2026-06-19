@@ -646,9 +646,9 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.Pr
 // when one was opened during delta streaming; otherwise sends a fresh rich
 // message.
 func (s *telegramOutboundStream) pushFinalRich(ctx context.Context, msg channel.PreparedMessage) error {
-	rich := renderTelegramMessagePartsRichMessage(msg.Message)
+	rich, fallbackText, fallbackParseMode := renderTelegramOutboundBody(msg.Message)
 	if strings.TrimSpace(rich.HTML) == "" {
-		return nil
+		return s.deliverFinalText(ctx, fallbackText, fallbackParseMode)
 	}
 	bot, replyTo, err := s.getBotAndReply(ctx)
 	if err != nil {
@@ -673,8 +673,7 @@ func (s *telegramOutboundStream) pushFinalRich(ctx context.Context, msg channel.
 	}
 
 	if _, _, err := sendTelegramRichMessageReturnMessage(bot, s.target, rich, replyTo, msg.Message.Actions); err != nil {
-		text, parseMode := renderTelegramPartsFallbackText(msg.Message)
-		return s.deliverFinalText(ctx, text, parseMode)
+		return s.deliverFinalText(ctx, fallbackText, fallbackParseMode)
 	}
 	s.resetStreamState()
 	return nil

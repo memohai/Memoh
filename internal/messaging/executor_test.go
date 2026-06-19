@@ -392,6 +392,20 @@ func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 			want: "unknown message field",
 		},
 		{
+			name: "null part",
+			raw: map[string]any{"message": map[string]any{"parts": []any{
+				nil,
+			}}},
+			want: "message part must be object",
+		},
+		{
+			name: "non-object part",
+			raw: map[string]any{"message": map[string]any{"parts": []any{
+				"hi",
+			}}},
+			want: "message part must be object",
+		},
+		{
 			name: "unknown part field",
 			raw: map[string]any{"message": map[string]any{"parts": []any{
 				map[string]any{"type": "text", "text": "hi", "typo": "dropped"},
@@ -452,7 +466,14 @@ func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 			raw: map[string]any{"message": map[string]any{"parts": []any{
 				map[string]any{"type": "mention"},
 			}}},
-			want: "message mention part text or channel_identity_id is required",
+			want: "message mention part text is required",
+		},
+		{
+			name: "mention without visible text",
+			raw: map[string]any{"message": map[string]any{"parts": []any{
+				map[string]any{"type": "mention", "channel_identity_id": "123"},
+			}}},
+			want: "message mention part text is required",
 		},
 		{
 			name: "emoji without text or emoji",
@@ -497,6 +518,22 @@ func TestParseOutboundMessageActionsValidation(t *testing.T) {
 		raw  map[string]any
 		want string
 	}{
+		{
+			name: "null action",
+			raw: map[string]any{"message": map[string]any{
+				"text":    "choose",
+				"actions": []any{nil},
+			}},
+			want: "message action must be object",
+		},
+		{
+			name: "non-object action",
+			raw: map[string]any{"message": map[string]any{
+				"text":    "choose",
+				"actions": []any{"open"},
+			}},
+			want: "message action must be object",
+		},
 		{
 			name: "unknown action field",
 			raw: map[string]any{"message": map[string]any{

@@ -164,6 +164,10 @@ func (*QQAdapter) ResolveOutboundCapabilities(cfg channel.ChannelConfig, target 
 		return caps
 	}
 	caps.Markdown = parsed.MarkdownSupport && parsedTarget.Kind != qqTargetChannel
+	if parsedTarget.Kind == qqTargetChannel {
+		caps.Attachments = false
+		caps.Media = false
+	}
 	return caps
 }
 

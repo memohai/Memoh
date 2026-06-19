@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	tele "gopkg.in/telebot.v4"
 
@@ -1074,5 +1075,73 @@ func TestStreamFinal_RichSendFallbackPreservesParseMode(t *testing.T) {
 	}
 	if got, _ := editPayload["text"].(string); got != "<b>hello</b>" {
 		t.Fatalf("expected HTML fallback final body, got %q", got)
+	}
+}
+
+func TestStreamFinal_LongRichPartsFallbacksToPlainText(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	s := &telegramOutboundStream{
+		adapter: adapter,
+		cfg:     channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		target:  "123",
+	}
+	ctx := context.Background()
+
+	var sendPayload map[string]any
+	var editPayload map[string]any
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			t.Fatalf("long rich stream final should not call sendRichMessage")
+		}
+		body, _ := io.ReadAll(req.Body)
+		payload := map[string]any{}
+		if len(body) > 0 {
+			payload = decodeTelegramBody(t, body)
+		}
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/sendMessage"):
+			sendPayload = payload
+		case strings.HasSuffix(req.URL.Path, "/editMessageText"):
+			editPayload = payload
+		case strings.HasSuffix(req.URL.Path, "/sendChatAction"):
+		default:
+			t.Fatalf("unexpected Telegram request path %s", req.URL.Path)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":91,"chat":{"id":123}}}`)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{
+		Type: channel.StreamEventFinal,
+		Final: &channel.StreamFinalizePayload{
+			Message: channel.Message{
+				Format: channel.MessageFormatRich,
+				Parts: []channel.MessagePart{
+					{Type: channel.MessagePartText, Text: strings.Repeat("你", telegramMaxMessageLength+100), Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+				},
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	text, _ := editPayload["text"].(string)
+	if utf8.RuneCountInString(text) > telegramMaxMessageLength {
+		t.Fatalf("fallback text should be truncated to %d runes, got %d", telegramMaxMessageLength, utf8.RuneCountInString(text))
+	}
+	if got, _ := sendPayload["parse_mode"].(string); got != "" {
+		t.Fatalf("long rich stream initial fallback should use plain text parse mode, got body %v", sendPayload)
+	}
+	if got, _ := editPayload["parse_mode"].(string); got != "" {
+		t.Fatalf("long rich stream final fallback should use plain text parse mode, got body %v", editPayload)
 	}
 }

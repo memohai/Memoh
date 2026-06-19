@@ -342,7 +342,12 @@ func validateMessageAgainstCapabilities(caps ChannelCapabilities, ok bool, msg M
 		return errors.New("channel does not support media")
 	}
 	if len(msg.Actions) > 0 && !caps.Buttons {
-		return errors.New("channel does not support actions")
+		if !caps.URLButtons {
+			return errors.New("channel does not support actions")
+		}
+		if _, ok := urlActionParts(msg.Actions); !ok {
+			return errors.New("channel supports url actions only; callback actions are unsupported")
+		}
 	}
 	if msg.Thread != nil && !caps.Threads {
 		return errors.New("channel does not support threads")

@@ -70,7 +70,7 @@ func (*DiscordAdapter) Descriptor() channel.Descriptor {
 			Text:           true,
 			Markdown:       true,
 			RichText:       true,
-			Buttons:        true,
+			URLButtons:     true,
 			Reply:          true,
 			Attachments:    true,
 			Media:          true,

@@ -1453,6 +1453,31 @@ func TestCoerceFormatForCaps_PreservesPartsOnRichTextChannel(t *testing.T) {
 	}
 }
 
+func TestValidateMessageAgainstCapabilities_URLButtonsOnly(t *testing.T) {
+	t.Parallel()
+
+	caps := ChannelCapabilities{Text: true, URLButtons: true}
+	urlMsg := Message{
+		Text: "Read this",
+		Actions: []Action{
+			{Label: "Open", URL: "https://example.com"},
+		},
+	}
+	if err := validateMessageAgainstCapabilities(caps, true, urlMsg); err != nil {
+		t.Fatalf("URL action should be allowed with URLButtons: %v", err)
+	}
+
+	callbackMsg := Message{
+		Text: "Choose",
+		Actions: []Action{
+			{Label: "Approve", Value: "approve:1"},
+		},
+	}
+	if err := validateMessageAgainstCapabilities(caps, true, callbackMsg); err == nil || !strings.Contains(err.Error(), "callback actions") {
+		t.Fatalf("callback action error = %v, want callback actions rejection", err)
+	}
+}
+
 // TestCoerceFormatForCaps_PreservesPlainEverywhere — explicit Plain is never
 // upgraded by coercion.
 func TestCoerceFormatForCaps_PreservesPlainEverywhere(t *testing.T) {

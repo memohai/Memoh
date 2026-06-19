@@ -194,7 +194,7 @@ func sendMessagePartSchema() map[string]any {
 			},
 			"text": map[string]any{
 				"type":        "string",
-				"description": "Visible text for text/link/code_block/mention/emoji/heading/blockquote/list_item parts.",
+				"description": "Visible text for text/link/code_block/mention/emoji/heading/blockquote/list_item parts. Required for mention parts.",
 			},
 			"url": map[string]any{
 				"type":        "string",
