@@ -2,12 +2,13 @@ package matrix
 
 import (
 	"bytes"
+	stdhtml "html"
 	"regexp"
 	"strings"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
-	"github.com/yuin/goldmark/renderer/html"
+	goldhtml "github.com/yuin/goldmark/renderer/html"
 
 	"github.com/memohai/memoh/internal/channel"
 )
@@ -17,7 +18,7 @@ const matrixHTMLFormat = "org.matrix.custom.html"
 var matrixMarkdownRenderer = goldmark.New(
 	goldmark.WithExtensions(extension.GFM),
 	goldmark.WithRendererOptions(
-		html.WithHardWraps(),
+		goldhtml.WithHardWraps(),
 	),
 )
 
@@ -33,6 +34,16 @@ var (
 )
 
 func formatMatrixMessage(msg channel.Message) matrixFormattedMessage {
+	if len(msg.Parts) > 0 {
+		body := strings.TrimSpace(channel.RenderPartsAsPlain(msg.Parts))
+		formatted := matrixFormattedMessage{Body: body}
+		htmlBody := renderMatrixMessagePartsHTML(msg.Parts)
+		if htmlBody != "" {
+			formatted.FormattedBody = htmlBody
+			formatted.HasHTML = true
+		}
+		return formatted
+	}
 	body := strings.TrimSpace(msg.PlainText())
 	formatted := matrixFormattedMessage{Body: body}
 	if msg.Format != channel.MessageFormatMarkdown || body == "" {
@@ -47,6 +58,139 @@ func formatMatrixMessage(msg channel.Message) matrixFormattedMessage {
 	formatted.FormattedBody = htmlBody
 	formatted.HasHTML = true
 	return formatted
+}
+
+func renderMatrixMessagePartsHTML(parts []channel.MessagePart) string {
+	var b strings.Builder
+	for _, part := range parts {
+		switch part.Type {
+		case channel.MessagePartText:
+			writeMatrixRichInlinePart(&b, part.Text, part.Styles)
+		case channel.MessagePartLink:
+			writeMatrixRichLinkPart(&b, part)
+		case channel.MessagePartCodeBlock:
+			writeMatrixRichCodeBlockPart(&b, part)
+		case channel.MessagePartMention:
+			writeMatrixRichMentionPart(&b, part)
+		case channel.MessagePartEmoji:
+			text := part.Text
+			if strings.TrimSpace(text) == "" {
+				text = part.Emoji
+			}
+			writeMatrixRichInlinePart(&b, text, nil)
+		default:
+			continue
+		}
+	}
+	return b.String()
+}
+
+func writeMatrixRichInlinePart(b *strings.Builder, text string, styles []channel.MessageTextStyle) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	b.WriteString("<p>")
+	b.WriteString(renderMatrixRichStyledInline(text, styles))
+	b.WriteString("</p>")
+}
+
+func writeMatrixRichLinkPart(b *strings.Builder, part channel.MessagePart) {
+	rawURL := strings.TrimSpace(part.URL)
+	text := strings.TrimSpace(part.Text)
+	if text == "" {
+		text = rawURL
+	}
+	if text == "" {
+		return
+	}
+	if rawURL == "" || !channel.IsHTTPURL(rawURL) {
+		writeMatrixRichInlinePart(b, text, part.Styles)
+		return
+	}
+	b.WriteString(`<p><a href="`)
+	b.WriteString(stdhtml.EscapeString(rawURL))
+	b.WriteString(`">`)
+	b.WriteString(stdhtml.EscapeString(text))
+	b.WriteString("</a></p>")
+}
+
+func writeMatrixRichMentionPart(b *strings.Builder, part channel.MessagePart) {
+	id := strings.TrimSpace(part.ChannelIdentityID)
+	text := strings.TrimSpace(part.Text)
+	if !isMatrixUserID(id) || text == "" {
+		writeMatrixRichInlinePart(b, part.Text, part.Styles)
+		return
+	}
+	b.WriteString(`<p><a href="https://matrix.to/#/`)
+	b.WriteString(stdhtml.EscapeString(id))
+	b.WriteString(`">`)
+	b.WriteString(stdhtml.EscapeString(text))
+	b.WriteString("</a></p>")
+}
+
+func writeMatrixRichCodeBlockPart(b *strings.Builder, part channel.MessagePart) {
+	text := strings.Trim(part.Text, "\n\r")
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	lang := matrixRichLanguage(part.Language)
+	b.WriteString("<pre><code")
+	if lang != "" {
+		b.WriteString(` class="language-`)
+		b.WriteString(stdhtml.EscapeString(lang))
+		b.WriteString(`"`)
+	}
+	b.WriteString(">")
+	b.WriteString(stdhtml.EscapeString(text))
+	b.WriteString("</code></pre>")
+}
+
+func renderMatrixRichStyledInline(text string, styles []channel.MessageTextStyle) string {
+	escaped := stdhtml.EscapeString(text)
+	if hasMatrixRichTextStyle(styles, channel.MessageStyleCode) {
+		return "<code>" + escaped + "</code>"
+	}
+	if hasMatrixRichTextStyle(styles, channel.MessageStyleStrikethrough) {
+		escaped = "<del>" + escaped + "</del>"
+	}
+	if hasMatrixRichTextStyle(styles, channel.MessageStyleItalic) {
+		escaped = "<em>" + escaped + "</em>"
+	}
+	if hasMatrixRichTextStyle(styles, channel.MessageStyleBold) {
+		escaped = "<strong>" + escaped + "</strong>"
+	}
+	return escaped
+}
+
+func hasMatrixRichTextStyle(styles []channel.MessageTextStyle, want channel.MessageTextStyle) bool {
+	for _, style := range styles {
+		if style == want {
+			return true
+		}
+	}
+	return false
+}
+
+func matrixRichLanguage(language string) string {
+	language = strings.TrimSpace(language)
+	if language == "" || len(language) > 32 {
+		return ""
+	}
+	for _, r := range language {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '+' {
+			continue
+		}
+		return ""
+	}
+	return language
+}
+
+func isMatrixUserID(id string) bool {
+	if !strings.HasPrefix(id, "@") || !strings.Contains(id, ":") {
+		return false
+	}
+	return !strings.ContainsAny(id, " \t\r\n<>\"'")
 }
 
 func renderMatrixMarkdown(text string) (string, error) {

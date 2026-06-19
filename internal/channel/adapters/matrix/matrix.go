@@ -195,6 +195,7 @@ func (*MatrixAdapter) Descriptor() channel.Descriptor {
 		Capabilities: channel.ChannelCapabilities{
 			Text:           true,
 			Markdown:       true,
+			RichText:       true,
 			Attachments:    true,
 			Media:          true,
 			Reply:          true,

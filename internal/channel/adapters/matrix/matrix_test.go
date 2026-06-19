@@ -330,6 +330,48 @@ func TestBuildMatrixMessageContentIncludesFormattedHTMLForMarkdown(t *testing.T)
 	}
 }
 
+func TestMatrixDescriptorAdvertisesRichText(t *testing.T) {
+	t.Parallel()
+
+	caps := NewMatrixAdapter(nil).Descriptor().Capabilities
+	if !caps.RichText {
+		t.Fatal("Matrix descriptor must advertise RichText for direct Parts rendering")
+	}
+}
+
+func TestBuildMatrixMessageContentRendersPartsDirectly(t *testing.T) {
+	content := buildMatrixMessageContent(channel.Message{
+		Format: channel.MessageFormatRich,
+		Parts: []channel.MessagePart{
+			{Type: channel.MessagePartText, Text: "ping", Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+			{Type: channel.MessagePartMention, Text: "Alice", ChannelIdentityID: "@alice:example.com"},
+			{Type: channel.MessagePartLink, Text: "docs", URL: "https://example.test/a?b=1&c=2"},
+			{Type: channel.MessagePartText, Text: `<script>alert(1)</script>`},
+		},
+	}, false, "")
+
+	if got := content["format"]; got != matrixHTMLFormat {
+		t.Fatalf("unexpected format: %#v", got)
+	}
+	html, ok := content["formatted_body"].(string)
+	if !ok {
+		t.Fatalf("unexpected formatted body: %#v", content["formatted_body"])
+	}
+	for _, want := range []string{
+		"<strong>ping</strong>",
+		`<a href="https://matrix.to/#/@alice:example.com">Alice</a>`,
+		`<a href="https://example.test/a?b=1&amp;c=2">docs</a>`,
+		`&lt;script&gt;alert(1)&lt;/script&gt;`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("expected formatted body to contain %q, got %q", want, html)
+		}
+	}
+	if strings.Contains(html, "<script>") {
+		t.Fatalf("formatted body contains unescaped script tag: %q", html)
+	}
+}
+
 func TestBuildMatrixMessageContentAddsFormattedHTMLToEdits(t *testing.T) {
 	content := buildMatrixMessageContent(channel.Message{
 		Text:   "`code`",
