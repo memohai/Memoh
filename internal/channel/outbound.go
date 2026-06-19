@@ -783,6 +783,10 @@ func (s *managerOutboundStream) pushFinalAfterSplit(ctx context.Context, event S
 	}
 	msg := event.Final.Message
 
+	if len(msg.Parts) > 0 {
+		return s.send(ctx, OutboundMessage{Message: msg})
+	}
+
 	if len(msg.Attachments) > 0 {
 		if err := s.send(ctx, OutboundMessage{
 			Message: Message{

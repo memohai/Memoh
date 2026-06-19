@@ -918,6 +918,72 @@ func TestPushDelta_FinalWithAttachmentsAfterSplit(t *testing.T) {
 	}
 }
 
+func TestPushDelta_FinalWithPartsAfterSplitSendsRichBody(t *testing.T) {
+	t.Parallel()
+
+	channelType := ChannelType("rich-split")
+	registry := NewRegistry()
+	adapter := &streamValidationAdapter{
+		channelType:    channelType,
+		outboundPolicy: OutboundPolicy{TextChunkLimit: 50},
+		richText:       true,
+	}
+	if err := registry.Register(adapter); err != nil {
+		t.Fatalf("register adapter failed: %v", err)
+	}
+	manager := &Manager{registry: registry, attachmentStore: channeltest.NewMemoryAttachmentStore()}
+	streams := []*recordingStream{{}, {}, {}}
+	reo := &reopenableStream{streams: streams}
+	var sent []OutboundMessage
+	stream := &managerOutboundStream{
+		manager:     manager,
+		config:      ChannelConfig{BotID: "bot-1", ChannelType: channelType},
+		stream:      streams[0],
+		channelType: channelType,
+		policy:      manager.resolveOutboundPolicy(channelType),
+		send: func(_ context.Context, msg OutboundMessage) error {
+			sent = append(sent, msg)
+			return nil
+		},
+		reopen: reo.reopen,
+	}
+
+	for range 8 {
+		if err := stream.Push(context.Background(), StreamEvent{
+			Type:  StreamEventDelta,
+			Delta: strings.Repeat("r", 10),
+		}); err != nil {
+			t.Fatalf("Push failed: %v", err)
+		}
+	}
+	if stream.splitCount == 0 {
+		t.Fatal("expected at least 1 split")
+	}
+
+	finalEvent := StreamEvent{
+		Type: StreamEventFinal,
+		Final: &StreamFinalizePayload{
+			Message: Message{
+				Format: MessageFormatRich,
+				Parts: []MessagePart{
+					{Type: MessagePartText, Text: "styled final", Styles: []MessageTextStyle{MessageStyleBold}},
+				},
+			},
+		},
+	}
+	if err := stream.Push(context.Background(), finalEvent); err != nil {
+		t.Fatalf("Final Push failed: %v", err)
+	}
+
+	if len(sent) != 1 {
+		t.Fatalf("expected 1 rich final send, got %d", len(sent))
+	}
+	got := sent[0].Message
+	if got.Format != MessageFormatRich || len(got.Parts) != 1 || got.Parts[0].Text != "styled final" {
+		t.Fatalf("rich final was not preserved after split: %+v", got)
+	}
+}
+
 func TestPushDelta_NoSplitWhenNoLimit(t *testing.T) {
 	t.Parallel()
 	stream, reo, _ := newDeltaSplitTestStream(t, 0, 2)
