@@ -302,3 +302,44 @@ func TestCoerceFormatForCaps_MarkdownBodyBecomesTextPartOnRichOnlyChannel(t *tes
 		t.Fatalf("unexpected text part: %#v", got.Parts[0])
 	}
 }
+
+func TestCoerceFormatForCaps_DegradesURLActionsToMarkdownLinks(t *testing.T) {
+	t.Parallel()
+
+	msg := Message{
+		Format: MessageFormatMarkdown,
+		Text:   "see details",
+		Actions: []Action{
+			{Label: "Open docs", URL: "https://example.test/docs"},
+		},
+	}
+	caps := ChannelCapabilities{Text: true, Markdown: true}
+
+	got := coerceFormatForCaps(msg, caps)
+	if len(got.Actions) != 0 {
+		t.Fatalf("Actions should be cleared after URL degradation, got %#v", got.Actions)
+	}
+	if got.Format != MessageFormatMarkdown {
+		t.Fatalf("Format = %q, want markdown", got.Format)
+	}
+	if got.Text != "see details\n\n[Open docs](https://example.test/docs)" {
+		t.Fatalf("unexpected text: %q", got.Text)
+	}
+}
+
+func TestCoerceFormatForCaps_KeepsCallbackActionsUnsupported(t *testing.T) {
+	t.Parallel()
+
+	msg := Message{
+		Text: "choose",
+		Actions: []Action{
+			{Label: "Approve", Value: "approve:1"},
+		},
+	}
+	caps := ChannelCapabilities{Text: true, Markdown: true}
+
+	got := coerceFormatForCaps(msg, caps)
+	if len(got.Actions) != 1 || got.Actions[0].Value != "approve:1" {
+		t.Fatalf("callback action should remain unsupported, got %#v", got.Actions)
+	}
+}

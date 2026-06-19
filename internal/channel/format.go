@@ -65,9 +65,8 @@ func StripInlineMarkup(s string) string {
 //   - Rich body on a Plain-only channel: render Parts via RenderPartsAsPlain,
 //     retype Plain.
 //
-// Button-bearing bodies (Actions) still have no equivalent fallback and are
-// rejected by validateMessageCapabilities — extend this function when a
-// handler needs to emit them on a non-capable channel.
+// URL-only Actions on non-button channels are downgraded to ordinary links.
+// Callback Actions stay unsupported and are rejected by validateMessageCapabilities.
 func coerceFormatForCaps(msg Message, caps ChannelCapabilities) Message {
 	if msg.Format == MessageFormatMarkdown && !caps.Markdown {
 		if caps.RichText && strings.TrimSpace(msg.Text) != "" {
@@ -89,5 +88,65 @@ func coerceFormatForCaps(msg Message, caps ChannelCapabilities) Message {
 		}
 		msg.Parts = nil
 	}
+	if len(msg.Actions) > 0 && !caps.Buttons {
+		msg = coerceURLActionsForCaps(msg, caps)
+	}
 	return msg
+}
+
+func coerceURLActionsForCaps(msg Message, caps ChannelCapabilities) Message {
+	parts, ok := urlActionParts(msg.Actions)
+	if !ok {
+		return msg
+	}
+	switch {
+	case caps.RichText && (msg.Format == MessageFormatRich || len(msg.Parts) > 0):
+		msg.Parts = append(msg.Parts, parts...)
+		msg.Format = MessageFormatRich
+	case msg.Format == MessageFormatMarkdown && caps.Markdown:
+		msg.Text = appendTextSection(msg.Text, RenderPartsAsMarkdown(parts))
+	case msg.Format == MessageFormatMarkdown && !caps.Markdown && caps.RichText:
+		msg.Parts = append(msg.Parts, parts...)
+		msg.Text = ""
+		msg.Format = MessageFormatRich
+	default:
+		msg.Text = appendTextSection(msg.Text, RenderPartsAsPlain(parts))
+		if msg.Format == "" {
+			msg.Format = MessageFormatPlain
+		}
+	}
+	msg.Actions = nil
+	return msg
+}
+
+func urlActionParts(actions []Action) ([]MessagePart, bool) {
+	parts := make([]MessagePart, 0, len(actions))
+	for _, action := range actions {
+		if strings.TrimSpace(action.Value) != "" {
+			return nil, false
+		}
+		rawURL := strings.TrimSpace(action.URL)
+		if rawURL == "" || !IsHTTPURL(rawURL) {
+			return nil, false
+		}
+		label := strings.TrimSpace(action.Label)
+		if label == "" {
+			label = rawURL
+		}
+		parts = append(parts, MessagePart{Type: MessagePartLink, Text: label, URL: rawURL})
+	}
+	return parts, true
+}
+
+func appendTextSection(base string, extra string) string {
+	base = strings.TrimSpace(base)
+	extra = strings.TrimSpace(extra)
+	switch {
+	case base == "":
+		return extra
+	case extra == "":
+		return base
+	default:
+		return base + "\n\n" + extra
+	}
 }
