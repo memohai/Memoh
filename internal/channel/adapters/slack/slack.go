@@ -130,6 +130,7 @@ func (*SlackAdapter) Descriptor() channel.Descriptor {
 			Text:           true,
 			Markdown:       true,
 			RichText:       true,
+			Buttons:        true,
 			Reply:          true,
 			Attachments:    true,
 			Media:          true,
@@ -602,6 +603,15 @@ func (a *SlackAdapter) sendSlackMessage(ctx context.Context, api *slack.Client, 
 	opts := []slack.MsgOption{
 		slack.MsgOptionText(text, false),
 	}
+	if len(msg.Message.Message.Actions) > 0 {
+		blocks, err := slackURLActionBlocks(text, msg.Message.Message.Actions)
+		if err != nil {
+			return err
+		}
+		if len(blocks) > 0 {
+			opts = append(opts, slack.MsgOptionBlocks(blocks...))
+		}
+	}
 
 	if threadTS != "" {
 		opts = append(opts, slack.MsgOptionTS(threadTS))
@@ -628,6 +638,44 @@ func (a *SlackAdapter) sendSlackMessage(ctx context.Context, api *slack.Client, 
 
 	_, _, err := api.PostMessageContext(ctx, channelID, opts...)
 	return err
+}
+
+func slackURLActionBlocks(text string, actions []channel.Action) ([]slack.Block, error) {
+	if len(actions) == 0 {
+		return nil, nil
+	}
+	blocks := make([]slack.Block, 0, 2)
+	if strings.TrimSpace(text) != "" {
+		blocks = append(blocks, slack.NewSectionBlock(
+			slack.NewTextBlockObject("mrkdwn", text, false, false),
+			nil,
+			nil,
+		))
+	}
+	elements := make([]slack.BlockElement, 0, len(actions))
+	for i, action := range actions {
+		label := strings.TrimSpace(action.Label)
+		rawURL := strings.TrimSpace(action.URL)
+		if strings.TrimSpace(action.Value) != "" || rawURL == "" {
+			return nil, errors.New("slack actions support url buttons only")
+		}
+		if !channel.IsHTTPURL(rawURL) {
+			return nil, errors.New("slack action url must be http(s)")
+		}
+		if label == "" {
+			label = rawURL
+		}
+		button := slack.NewButtonBlockElement(
+			fmt.Sprintf("memoh_url_%d", i),
+			fmt.Sprintf("url_%d", i),
+			slack.NewTextBlockObject("plain_text", label, false, false),
+		).WithURL(rawURL)
+		elements = append(elements, button)
+	}
+	if len(elements) > 0 {
+		blocks = append(blocks, slack.NewActionBlock("memoh_url_actions", elements...))
+	}
+	return blocks, nil
 }
 
 func (*SlackAdapter) uploadPreparedAttachment(ctx context.Context, api *slack.Client, channelID string, threadTS string, att channel.PreparedAttachment) error {

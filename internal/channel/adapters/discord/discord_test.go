@@ -21,6 +21,14 @@ func TestDiscordDescriptorAdvertisesRichText(t *testing.T) {
 	}
 }
 
+func TestDiscordDescriptorAdvertisesButtons(t *testing.T) {
+	t.Parallel()
+
+	if !(&DiscordAdapter{}).Descriptor().Capabilities.Buttons {
+		t.Fatal("Discord descriptor must advertise URL button support")
+	}
+}
+
 func TestMimeExtension(t *testing.T) {
 	tests := []struct {
 		mime string
@@ -87,6 +95,64 @@ func TestDiscordSendUsesPartsRenderer(t *testing.T) {
 	want := "**Hello**\n\n[docs](https://example.test/a)\n\n<@1234567890>"
 	if payload["content"] != want {
 		t.Fatalf("Discord rich content mismatch\n  got:  %q\n  want: %q", payload["content"], want)
+	}
+}
+
+func TestDiscordSendRendersURLActionsAsComponents(t *testing.T) {
+	t.Parallel()
+
+	var sentBody string
+	session, err := discordgo.New("Bot test")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	session.Client = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			body, _ := io.ReadAll(req.Body)
+			sentBody = string(body)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"id":"msg-1","channel_id":"ch-1"}`)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}, nil
+		}),
+	}
+
+	err = sendDiscordMessage(context.Background(), session, "ch-1", channel.PreparedOutboundMessage{
+		Message: channel.PreparedMessage{
+			Message: channel.Message{
+				Text: "Read this",
+				Actions: []channel.Action{
+					{Label: "Open docs", URL: "https://example.test/docs"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("sendDiscordMessage: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(sentBody), &payload); err != nil {
+		t.Fatalf("decode sent body: %v (body=%q)", err, sentBody)
+	}
+	components, ok := payload["components"].([]any)
+	if !ok || len(components) != 1 {
+		t.Fatalf("expected one component row, got %#v", payload["components"])
+	}
+	row, ok := components[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected component row object, got %#v", components[0])
+	}
+	buttons, ok := row["components"].([]any)
+	if !ok || len(buttons) != 1 {
+		t.Fatalf("expected one button, got %#v", row["components"])
+	}
+	button, ok := buttons[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected button object, got %#v", buttons[0])
+	}
+	if button["label"] != "Open docs" || button["url"] != "https://example.test/docs" || button["style"] != float64(discordgo.LinkButton) {
+		t.Fatalf("unexpected button payload: %#v", button)
 	}
 }
 

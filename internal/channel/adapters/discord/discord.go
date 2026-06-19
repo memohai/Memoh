@@ -69,6 +69,7 @@ func (*DiscordAdapter) Descriptor() channel.Descriptor {
 			Text:           true,
 			Markdown:       true,
 			RichText:       true,
+			Buttons:        true,
 			Reply:          true,
 			Attachments:    true,
 			Media:          true,
@@ -295,6 +296,13 @@ func sendDiscordMessage(ctx context.Context, session *discordgo.Session, channel
 	messageSend := &discordgo.MessageSend{
 		Content: content,
 	}
+	if len(msg.Message.Message.Actions) > 0 {
+		components, err := discordURLActionComponents(msg.Message.Message.Actions)
+		if err != nil {
+			return err
+		}
+		messageSend.Components = components
+	}
 
 	if msg.Message.Message.Reply != nil && msg.Message.Message.Reply.MessageID != "" {
 		messageSend.Reference = &discordgo.MessageReference{
@@ -322,12 +330,50 @@ func sendDiscordMessage(ctx context.Context, session *discordgo.Session, channel
 	}
 
 	// Validate: must have content or files
-	if messageSend.Content == "" && len(messageSend.Files) == 0 {
+	if messageSend.Content == "" && len(messageSend.Files) == 0 && len(messageSend.Components) == 0 {
 		return errors.New("cannot send empty message: no content and no valid attachments")
 	}
 
 	_, err := session.ChannelMessageSendComplex(channelID, messageSend)
 	return err
+}
+
+func discordURLActionComponents(actions []channel.Action) ([]discordgo.MessageComponent, error) {
+	if len(actions) == 0 {
+		return nil, nil
+	}
+	rows := make([]discordgo.MessageComponent, 0, (len(actions)+4)/5)
+	buttons := make([]discordgo.MessageComponent, 0, 5)
+	flush := func() {
+		if len(buttons) == 0 {
+			return
+		}
+		rows = append(rows, discordgo.ActionsRow{Components: buttons})
+		buttons = make([]discordgo.MessageComponent, 0, 5)
+	}
+	for _, action := range actions {
+		label := strings.TrimSpace(action.Label)
+		rawURL := strings.TrimSpace(action.URL)
+		if strings.TrimSpace(action.Value) != "" || rawURL == "" {
+			return nil, errors.New("discord actions support url buttons only")
+		}
+		if !channel.IsHTTPURL(rawURL) {
+			return nil, errors.New("discord action url must be http(s)")
+		}
+		if label == "" {
+			label = rawURL
+		}
+		buttons = append(buttons, discordgo.Button{
+			Label: label,
+			Style: discordgo.LinkButton,
+			URL:   rawURL,
+		})
+		if len(buttons) == 5 {
+			flush()
+		}
+	}
+	flush()
+	return rows, nil
 }
 
 func truncateDiscordText(text string) string {
