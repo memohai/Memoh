@@ -333,7 +333,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, provide, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
 import { CloudUpload, Download, FilePlus, FolderPlus, ListChecks, RefreshCw, Trash2, Upload, X } from 'lucide-vue-next'
@@ -379,10 +379,14 @@ const props = withDefaults(defineProps<{
   botId: string
   canWrite?: boolean
   botName?: string
+  active?: boolean
 }>(), {
   canWrite: false,
   botName: '',
+  active: true,
 })
+
+const FILE_TREE_POLL_MS = 2_000
 
 const { t } = useI18n()
 const workspaceTabs = useWorkspaceTabsStore()
@@ -523,6 +527,37 @@ function reload() {
 function reloadAndBroadcast() {
   reload()
   chatStore.markFsChanged()
+}
+
+let treePollTimer: ReturnType<typeof setInterval> | null = null
+
+function isDocumentVisible(): boolean {
+  return typeof document === 'undefined' || document.visibilityState === 'visible'
+}
+
+function pollTree() {
+  if (!props.botId || !props.active || !isDocumentVisible()) return
+  reload()
+}
+
+function startTreePoll() {
+  if (treePollTimer !== null || !props.botId || !props.active) return
+  treePollTimer = window.setInterval(pollTree, FILE_TREE_POLL_MS)
+}
+
+function stopTreePoll() {
+  if (treePollTimer === null) return
+  window.clearInterval(treePollTimer)
+  treePollTimer = null
+}
+
+function handleVisibilityChange() {
+  if (!props.active || !isDocumentVisible()) {
+    stopTreePoll()
+    return
+  }
+  reload()
+  startTreePoll()
 }
 
 // Reveal a path in the tree (expand its ancestors + scroll into view). Used by
@@ -1069,6 +1104,25 @@ watch(() => props.botId, () => {
 watch(fsChangedAt, () => {
   if (!props.botId) return
   reload()
+})
+
+watch(() => [props.botId, props.active] as const, ([botId, active]) => {
+  if (botId && active && isDocumentVisible()) {
+    reload()
+    startTreePoll()
+  } else {
+    stopTreePoll()
+  }
+}, { immediate: true })
+
+onMounted(() => {
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  if (props.active && isDocumentVisible()) startTreePoll()
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  stopTreePoll()
 })
 
 defineExpose({

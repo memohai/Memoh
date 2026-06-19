@@ -97,6 +97,50 @@ export function canApplyExternalReload(a: ExternalReloadGuardArgs): boolean {
     && a.currentContent === a.currentOriginalContent
 }
 
+export type ConflictState = 'none' | 'chip' | 'compare'
+
+export type PolledTextChangeAction =
+  | 'ignore'
+  | 'apply'
+  | 'show-chip'
+  | 'mark-compare-stale'
+
+export interface ResolvePolledTextChangeArgs {
+  loaded: boolean
+  loading: boolean
+  saving: boolean
+  currentRevision: string | null | undefined
+  nextRevision: string | null | undefined
+  isDirty: boolean
+  conflictState: ConflictState
+}
+
+export function resolvePolledTextChange(a: ResolvePolledTextChangeArgs): PolledTextChangeAction {
+  const currentRevision = a.currentRevision?.trim() ?? ''
+  const nextRevision = a.nextRevision?.trim() ?? ''
+  if (!a.loaded || a.loading || a.saving || !nextRevision) return 'ignore'
+  if (currentRevision === nextRevision) return 'ignore'
+  if (a.conflictState === 'compare') return 'mark-compare-stale'
+  if (a.isDirty) return 'show-chip'
+  return 'apply'
+}
+
+export interface FileMetadataLike {
+  path?: string | null
+  isDir?: boolean | null
+  size?: number | null
+  modTime?: string | null
+}
+
+export function fileMetadataFingerprint(info: FileMetadataLike): string {
+  return [
+    info.path ?? '',
+    info.isDir ? 'dir' : 'file',
+    info.size ?? -1,
+    info.modTime ?? '',
+  ].join('\u0000')
+}
+
 export type DiskState = 'available' | 'stale' | 'deleted'
 
 export type ChipButton =

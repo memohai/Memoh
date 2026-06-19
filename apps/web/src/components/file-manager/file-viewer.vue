@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, useId, watch } from 'vue'
 import { appKeyboardCommands } from '@/lib/keyboard-commands'
 import { useKeyboardCommand } from '@/composables/useKeyboardCommand'
 import { isFileSaveEligible } from './file-save-command'
@@ -7,7 +7,9 @@ import {
   canApplyExternalReload,
   detectSaveConflict,
   deriveChipContext,
+  fileMetadataFingerprint,
   resolveChipButtons,
+  resolvePolledTextChange,
   resolveSaveBehavior,
   type ChipButton,
 } from './file-conflict'
@@ -16,6 +18,7 @@ import { toast } from '@memohai/ui'
 import { File, FileX, Download, RefreshCw, GitCompare, X } from 'lucide-vue-next'
 import { Button, Spinner } from '@memohai/ui'
 import {
+  getBotsByBotIdContainerFs,
   getBotsByBotIdContainerFsRead,
   postBotsByBotIdContainerFsWrite,
   getBotsByBotIdContainerFsDownload,
@@ -35,6 +38,8 @@ const props = defineProps<{
   file: HandlersFsFileInfo
   readonly?: boolean
 }>()
+
+const EXTERNAL_FILE_POLL_MS = 2_000
 
 const emit = defineEmits<{
   saved: []
@@ -73,6 +78,11 @@ const compareDiskContent = ref('')
 // change, and on exit.
 const compareStale = ref(false)
 let compareController: AbortController | null = null
+const observedExternalRevision = ref('')
+const imageMetadataFingerprint = ref('')
+let externalPollTimer: ReturnType<typeof setInterval> | null = null
+let externalPollController: AbortController | null = null
+let externalPollingActive = false
 // Stable ids so the chip buttons can aria-describedby the relevant inline
 // message span, giving keyboard / screen-reader users the "why is this here"
 // context. The compare-toolbar Refresh button uses the staleNotice id by the
@@ -176,6 +186,10 @@ function isHttpStatus(error: unknown, status: number): boolean {
   return maybe?.status === status || maybe?.response?.status === status
 }
 
+function isDocumentVisible(): boolean {
+  return typeof document === 'undefined' || document.visibilityState === 'visible'
+}
+
 // Force the chip back into view on a terminal disk-state transition (delete /
 // stale read). Tears down any active Compare so the user isn't reviewing a diff
 // against bytes that no longer exist.
@@ -185,6 +199,126 @@ function dropToChipForBadDiskState() {
   compareDiskContent.value = ''
   compareStale.value = false
   conflictState.value = 'chip'
+}
+
+function notePolledExternalRevision(revision: string) {
+  if (observedExternalRevision.value === revision) return
+  observedExternalRevision.value = revision
+  chatStore.markFsChanged(filePath.value)
+}
+
+function applyPolledTextContent(contentValue: string, revision: string) {
+  content.value = contentValue
+  originalContent.value = contentValue
+  baseRevision.value = revision
+  observedExternalRevision.value = ''
+  lastLoadedAt.value = Date.now()
+  loaded.value = true
+  diskState.value = 'available'
+  conflictState.value = 'none'
+}
+
+async function pollTextFile(signal: AbortSignal) {
+  const { data } = await getBotsByBotIdContainerFsRead({
+    path: { bot_id: props.botId },
+    query: { path: filePath.value },
+    signal,
+    throwOnError: true,
+  })
+  if (signal.aborted) return
+  const nextRevision = data.revision ?? ''
+  const action = resolvePolledTextChange({
+    loaded: loaded.value,
+    loading: loading.value,
+    saving: saving.value,
+    currentRevision: baseRevision.value,
+    nextRevision,
+    isDirty: isDirty.value,
+    conflictState: conflictState.value,
+  })
+  if (action === 'ignore') return
+  if (action === 'apply') {
+    applyPolledTextContent(data.content ?? '', nextRevision)
+    return
+  }
+  notePolledExternalRevision(nextRevision)
+  diskState.value = 'available'
+  if (action === 'mark-compare-stale') {
+    compareStale.value = true
+    return
+  }
+  if (conflictState.value === 'none') conflictState.value = 'chip'
+}
+
+async function pollImageFile(signal: AbortSignal) {
+  const { data } = await getBotsByBotIdContainerFs({
+    path: { bot_id: props.botId },
+    query: { path: filePath.value },
+    signal,
+    throwOnError: true,
+  })
+  if (signal.aborted) return
+  const nextFingerprint = fileMetadataFingerprint(data)
+  if (!imageMetadataFingerprint.value) {
+    imageMetadataFingerprint.value = nextFingerprint
+    return
+  }
+  if (nextFingerprint === imageMetadataFingerprint.value) return
+  const previousFingerprint = imageMetadataFingerprint.value
+  await loadImageBlob({ notifyOnError: false })
+  imageMetadataFingerprint.value = diskState.value === 'available'
+    ? nextFingerprint
+    : previousFingerprint
+}
+
+async function pollExternalFile() {
+  if (!externalPollingActive) return
+  if (!props.botId || !loaded.value || loading.value || saving.value || externalPollController) return
+  if (!isDocumentVisible()) return
+  if (!isText.value && !isImage.value) return
+
+  const controller = new AbortController()
+  externalPollController = controller
+  try {
+    if (isText.value) await pollTextFile(controller.signal)
+    else if (isImage.value) await pollImageFile(controller.signal)
+  } catch (error) {
+    if (controller.signal.aborted) return
+    if (isHttpStatus(error, 404)) {
+      diskState.value = 'deleted'
+      loaded.value = true
+      observedExternalRevision.value = 'deleted'
+      imageMetadataFingerprint.value = ''
+      dropToChipForBadDiskState()
+      return
+    }
+    diskState.value = 'stale'
+    loaded.value = true
+    dropToChipForBadDiskState()
+  } finally {
+    if (externalPollController === controller) externalPollController = null
+  }
+}
+
+function startExternalFilePoll() {
+  if (!externalPollingActive || externalPollTimer !== null) return
+  externalPollTimer = window.setInterval(() => {
+    void pollExternalFile()
+  }, EXTERNAL_FILE_POLL_MS)
+}
+
+function stopExternalFilePoll() {
+  if (externalPollTimer !== null) {
+    window.clearInterval(externalPollTimer)
+    externalPollTimer = null
+  }
+  externalPollController?.abort()
+  externalPollController = null
+}
+
+function handleVisibilityChange() {
+  if (!externalPollingActive) return
+  if (isDocumentVisible()) void pollExternalFile()
 }
 
 async function loadTextContent(options: { forceApply?: boolean; notifyOnError?: boolean } = {}) {
@@ -218,6 +352,7 @@ async function loadTextContent(options: { forceApply?: boolean; notifyOnError?: 
     content.value = data.content ?? ''
     originalContent.value = content.value
     baseRevision.value = data.revision ?? ''
+    observedExternalRevision.value = ''
     lastLoadedAt.value = Date.now()
     loaded.value = true
     diskState.value = 'available'
@@ -265,6 +400,12 @@ async function loadImageBlob(options: { notifyOnError?: boolean } = {}) {
     cleanupImageUrl()
     imageUrl.value = url
     url = ''
+    imageMetadataFingerprint.value = fileMetadataFingerprint({
+      path: filePath.value,
+      isDir: false,
+      size: blob.size,
+      modTime: props.file.modTime,
+    })
     lastLoadedAt.value = Date.now()
     loaded.value = true
     diskState.value = 'available'
@@ -354,6 +495,7 @@ async function handleSave(force = false): Promise<boolean> {
     })
     originalContent.value = content.value
     baseRevision.value = data.revision ?? baseRevision.value
+    observedExternalRevision.value = ''
     diskState.value = 'available'
     // An agent bump observed during our POST window means the disk diverged
     // from what our save just persisted. Anchor lastLoadedAt to BEFORE that
@@ -438,6 +580,8 @@ watch(() => props.file.path, () => {
   compareDiskContent.value = ''
   compareStale.value = false
   lastLoadedAt.value = 0
+  observedExternalRevision.value = ''
+  imageMetadataFingerprint.value = ''
   loaded.value = false
   if (isText.value) {
     void loadTextContent()
@@ -570,12 +714,29 @@ useKeyboardCommand(appKeyboardCommands.saveActiveFile, () => {
 })
 
 onMounted(() => {
+  externalPollingActive = true
   nowTickInterval = setInterval(() => { nowTick.value = Date.now() }, 60_000)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  startExternalFilePoll()
+})
+
+onActivated(() => {
+  externalPollingActive = true
+  startExternalFilePoll()
+  void pollExternalFile()
+})
+
+onDeactivated(() => {
+  externalPollingActive = false
+  stopExternalFilePoll()
 })
 
 onBeforeUnmount(() => {
+  externalPollingActive = false
   if (nowTickInterval) clearInterval(nowTickInterval)
   nowTickInterval = null
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  stopExternalFilePoll()
   activeReadController?.abort()
   compareController?.abort()
   cleanupImageUrl()

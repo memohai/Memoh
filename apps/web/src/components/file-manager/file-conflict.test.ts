@@ -4,7 +4,9 @@ import {
   deriveChipContext,
   detectSaveConflict,
   EMPTY_CHIP_CONTEXT,
+  fileMetadataFingerprint,
   resolveChipButtons,
+  resolvePolledTextChange,
   resolveSaveBehavior,
   type FsChangeEventLike,
 } from './file-conflict'
@@ -184,6 +186,110 @@ describe('canApplyExternalReload', () => {
       currentOriginalContent: 'saved elsewhere',
       force: true,
     })).toBe(true)
+  })
+})
+
+describe('resolvePolledTextChange', () => {
+  it('ignores unchanged revisions', () => {
+    expect(resolvePolledTextChange({
+      loaded: true,
+      loading: false,
+      saving: false,
+      currentRevision: 'sha256:a',
+      nextRevision: 'sha256:a',
+      isDirty: false,
+      conflictState: 'none',
+    })).toBe('ignore')
+  })
+
+  it('applies changed revisions over a clean editor', () => {
+    expect(resolvePolledTextChange({
+      loaded: true,
+      loading: false,
+      saving: false,
+      currentRevision: 'sha256:a',
+      nextRevision: 'sha256:b',
+      isDirty: false,
+      conflictState: 'none',
+    })).toBe('apply')
+  })
+
+  it('surfaces the external-change chip for dirty editors', () => {
+    expect(resolvePolledTextChange({
+      loaded: true,
+      loading: false,
+      saving: false,
+      currentRevision: 'sha256:a',
+      nextRevision: 'sha256:b',
+      isDirty: true,
+      conflictState: 'none',
+    })).toBe('show-chip')
+  })
+
+  it('marks Compare stale instead of replacing its disk side', () => {
+    expect(resolvePolledTextChange({
+      loaded: true,
+      loading: false,
+      saving: false,
+      currentRevision: 'sha256:a',
+      nextRevision: 'sha256:b',
+      isDirty: true,
+      conflictState: 'compare',
+    })).toBe('mark-compare-stale')
+  })
+
+  it('does not poll-apply while initial loading or saving owns the buffer', () => {
+    const base = {
+      loaded: true,
+      loading: false,
+      saving: false,
+      currentRevision: 'sha256:a',
+      nextRevision: 'sha256:b',
+      isDirty: false,
+      conflictState: 'none' as const,
+    }
+
+    expect(resolvePolledTextChange({ ...base, loaded: false })).toBe('ignore')
+    expect(resolvePolledTextChange({ ...base, loading: true })).toBe('ignore')
+    expect(resolvePolledTextChange({ ...base, saving: true })).toBe('ignore')
+  })
+})
+
+describe('fileMetadataFingerprint', () => {
+  it('changes when file metadata that reflects disk content changes', () => {
+    const before = fileMetadataFingerprint({
+      path: '/data/app.ts',
+      isDir: false,
+      size: 10,
+      modTime: '2026-06-19T06:00:00Z',
+    })
+
+    expect(fileMetadataFingerprint({
+      path: '/data/app.ts',
+      isDir: false,
+      size: 11,
+      modTime: '2026-06-19T06:00:00Z',
+    })).not.toBe(before)
+    expect(fileMetadataFingerprint({
+      path: '/data/app.ts',
+      isDir: false,
+      size: 10,
+      modTime: '2026-06-19T06:00:01Z',
+    })).not.toBe(before)
+  })
+
+  it('keeps file and directory metadata distinct', () => {
+    expect(fileMetadataFingerprint({
+      path: '/data/build',
+      isDir: false,
+      size: 0,
+      modTime: '2026-06-19T06:00:00Z',
+    })).not.toBe(fileMetadataFingerprint({
+      path: '/data/build',
+      isDir: true,
+      size: 0,
+      modTime: '2026-06-19T06:00:00Z',
+    }))
   })
 })
 
