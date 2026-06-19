@@ -10,6 +10,7 @@
     :is="iconComponent"
     v-else-if="iconComponent"
     :size="size"
+    :style="iconStyle"
     v-bind="$attrs"
   />
   <span
@@ -84,6 +85,10 @@ const normalizedSize = computed(() =>
 const imageStyle = computed(() => ({
   width: normalizedSize.value,
   height: normalizedSize.value,
+}))
+
+const iconStyle = computed(() => ({
+  overflow: 'visible',
 }))
 
 const fallbackStyle = computed(() => ({
