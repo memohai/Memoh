@@ -20,8 +20,9 @@ import (
 )
 
 const (
-	inboundDedupTTL  = time.Minute
-	discordMaxLength = 2000
+	inboundDedupTTL            = time.Minute
+	discordMaxLength           = 2000
+	discordMaxURLActionButtons = 25
 )
 
 // assetOpener reads stored asset bytes by content hash.
@@ -341,6 +342,9 @@ func sendDiscordMessage(ctx context.Context, session *discordgo.Session, channel
 func discordURLActionComponents(actions []channel.Action) ([]discordgo.MessageComponent, error) {
 	if len(actions) == 0 {
 		return nil, nil
+	}
+	if len(actions) > discordMaxURLActionButtons {
+		return nil, fmt.Errorf("discord actions support at most %d url buttons", discordMaxURLActionButtons)
 	}
 	rows := make([]discordgo.MessageComponent, 0, (len(actions)+4)/5)
 	buttons := make([]discordgo.MessageComponent, 0, 5)

@@ -1307,6 +1307,43 @@ func TestSlackSendRendersURLActionsAsButtons(t *testing.T) {
 	}
 }
 
+func TestSlackURLActionBlocksSplitAtPlatformElementLimit(t *testing.T) {
+	t.Parallel()
+
+	actions := make([]channel.Action, 26)
+	for i := range actions {
+		actions[i] = channel.Action{
+			Label: "Open docs",
+			URL:   "https://example.test/docs",
+		}
+	}
+
+	blocks, err := slackURLActionBlocks("", actions)
+	if err != nil {
+		t.Fatalf("slackURLActionBlocks: %v", err)
+	}
+	raw, err := json.Marshal(blocks)
+	if err != nil {
+		t.Fatalf("marshal blocks: %v", err)
+	}
+	var payload []map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode blocks: %v (body=%s)", err, raw)
+	}
+	if len(payload) != 2 {
+		t.Fatalf("expected 2 action blocks, got %d: %s", len(payload), raw)
+	}
+	for i, want := range []int{25, 1} {
+		elements, ok := payload[i]["elements"].([]any)
+		if !ok {
+			t.Fatalf("block %d missing elements: %#v", i, payload[i])
+		}
+		if len(elements) != want {
+			t.Fatalf("block %d elements = %d, want %d", i, len(elements), want)
+		}
+	}
+}
+
 func TestSlackOpenStreamResolvesUserTargetToDMChannel(t *testing.T) {
 	t.Parallel()
 

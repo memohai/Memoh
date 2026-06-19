@@ -156,6 +156,23 @@ func TestDiscordSendRendersURLActionsAsComponents(t *testing.T) {
 	}
 }
 
+func TestDiscordURLActionComponentsRejectsMoreThanPlatformLimit(t *testing.T) {
+	t.Parallel()
+
+	actions := make([]channel.Action, 26)
+	for i := range actions {
+		actions[i] = channel.Action{
+			Label: "Open docs",
+			URL:   "https://example.test/docs",
+		}
+	}
+
+	_, err := discordURLActionComponents(actions)
+	if err == nil || !strings.Contains(err.Error(), "at most 25") {
+		t.Fatalf("expected platform limit error, got %v", err)
+	}
+}
+
 func TestDiscordPreparedAttachmentToFile(t *testing.T) {
 	file, err := discordPreparedAttachmentToFile(context.Background(), channel.PreparedAttachment{
 		Logical: channel.Attachment{Type: channel.AttachmentFile},

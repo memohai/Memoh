@@ -22,9 +22,10 @@ import (
 )
 
 const (
-	inboundDedupTTL = time.Minute
-	slackMaxLength  = 40000
-	channelNameTTL  = 5 * time.Minute
+	inboundDedupTTL             = time.Minute
+	slackMaxLength              = 40000
+	slackMaxActionBlockElements = 25
+	channelNameTTL              = 5 * time.Minute
 )
 
 // assetOpener reads stored asset bytes by content hash.
@@ -652,7 +653,20 @@ func slackURLActionBlocks(text string, actions []channel.Action) ([]slack.Block,
 			nil,
 		))
 	}
-	elements := make([]slack.BlockElement, 0, len(actions))
+	elements := make([]slack.BlockElement, 0, slackMaxActionBlockElements)
+	actionBlockIndex := 0
+	flushActions := func() {
+		if len(elements) == 0 {
+			return
+		}
+		blockID := "memoh_url_actions"
+		if actionBlockIndex > 0 || len(actions) > slackMaxActionBlockElements {
+			blockID = fmt.Sprintf("memoh_url_actions_%d", actionBlockIndex)
+		}
+		blocks = append(blocks, slack.NewActionBlock(blockID, elements...))
+		elements = make([]slack.BlockElement, 0, slackMaxActionBlockElements)
+		actionBlockIndex++
+	}
 	for i, action := range actions {
 		label := strings.TrimSpace(action.Label)
 		rawURL := strings.TrimSpace(action.URL)
@@ -671,10 +685,11 @@ func slackURLActionBlocks(text string, actions []channel.Action) ([]slack.Block,
 			slack.NewTextBlockObject("plain_text", label, false, false),
 		).WithURL(rawURL)
 		elements = append(elements, button)
+		if len(elements) == slackMaxActionBlockElements {
+			flushActions()
+		}
 	}
-	if len(elements) > 0 {
-		blocks = append(blocks, slack.NewActionBlock("memoh_url_actions", elements...))
-	}
+	flushActions()
 	return blocks, nil
 }
 
