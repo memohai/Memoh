@@ -311,6 +311,10 @@ func normalizeOutboundMessage(msg Message) Message {
 
 func validateMessageCapabilities(registry *Registry, channelType ChannelType, msg Message) error {
 	caps, ok := registry.GetCapabilities(channelType)
+	return validateMessageAgainstCapabilities(caps, ok, msg)
+}
+
+func validateMessageAgainstCapabilities(caps ChannelCapabilities, ok bool, msg Message) error {
 	if !ok {
 		return nil
 	}
@@ -372,10 +376,11 @@ func (m *Manager) sendWithConfig(ctx context.Context, sender Sender, cfg Channel
 	// Coerce Format down to what the channel can render BEFORE validation.
 	// Rich Parts degrade to Markdown/Plain when needed; Markdown degrades to
 	// Plain on plain-only channels.
-	if caps, ok := m.registry.GetCapabilities(cfg.ChannelType); ok {
+	caps, hasCaps := m.registry.GetOutboundCapabilities(cfg.ChannelType, cfg, target)
+	if hasCaps {
 		normalized.Message = coerceFormatForCaps(normalized.Message, caps)
 	}
-	if err := validateMessageCapabilities(m.registry, cfg.ChannelType, normalized.Message); err != nil {
+	if err := validateMessageAgainstCapabilities(caps, hasCaps, normalized.Message); err != nil {
 		return err
 	}
 	prepared, err := PrepareOutboundMessage(ctx, m.attachmentStore, cfg, OutboundMessage{
@@ -604,6 +609,7 @@ func (s *managerReplySender) OpenStream(ctx context.Context, target string, opts
 		config:      s.config,
 		stream:      stream,
 		channelType: s.channelType,
+		target:      target,
 		policy:      s.manager.resolveOutboundPolicy(s.channelType),
 		send: func(ctx context.Context, msg OutboundMessage) error {
 			msg.Target = target
@@ -628,6 +634,7 @@ type managerOutboundStream struct {
 	config      ChannelConfig
 	stream      PreparedOutboundStream
 	channelType ChannelType
+	target      string
 	policy      OutboundPolicy // cached at open time; immutable after creation
 	send        func(ctx context.Context, msg OutboundMessage) error
 	reopen      func(ctx context.Context) (PreparedOutboundStream, error)
@@ -650,9 +657,12 @@ func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) err
 	// fanned out to other channels via tee, where stripping markup for a
 	// plain-text channel would corrupt a Markdown-capable channel's copy.
 	if event.Type == StreamEventFinal && event.Final != nil {
-		if caps, ok := s.manager.registry.GetCapabilities(s.channelType); ok {
+		if caps, ok := s.manager.registry.GetOutboundCapabilities(s.channelType, s.config, s.target); ok {
 			final := *event.Final
 			final.Message = coerceFormatForCaps(final.Message, caps)
+			if err := validateMessageAgainstCapabilities(caps, true, final.Message); err != nil {
+				return err
+			}
 			event.Final = &final
 		}
 	}

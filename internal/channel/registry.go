@@ -149,6 +149,23 @@ func (r *Registry) GetCapabilities(channelType ChannelType) (ChannelCapabilities
 	return desc.Capabilities, true
 }
 
+// GetOutboundCapabilities returns capabilities refined for one outbound target.
+func (r *Registry) GetOutboundCapabilities(channelType ChannelType, cfg ChannelConfig, target string) (ChannelCapabilities, bool) {
+	desc, ok := r.GetDescriptor(channelType)
+	if !ok {
+		return ChannelCapabilities{}, false
+	}
+	caps := desc.Capabilities
+	adapter, ok := r.Get(channelType)
+	if !ok {
+		return caps, true
+	}
+	if resolver, ok := adapter.(OutboundCapabilityResolver); ok {
+		caps = resolver.ResolveOutboundCapabilities(cfg, target, caps)
+	}
+	return caps, true
+}
+
 // GetOutboundPolicy returns the outbound policy for the given channel type.
 func (r *Registry) GetOutboundPolicy(channelType ChannelType) (OutboundPolicy, bool) {
 	desc, ok := r.GetDescriptor(channelType)

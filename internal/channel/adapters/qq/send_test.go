@@ -143,6 +143,59 @@ func TestQQSendMarkdownFallsBackToPlainWhenRuntimeMarkdownDisabled(t *testing.T)
 	}
 }
 
+func TestQQOutboundCapabilitiesReflectRuntimeMarkdownGate(t *testing.T) {
+	t.Parallel()
+
+	adapter := &QQAdapter{}
+	base := adapter.Descriptor().Capabilities
+	cases := []struct {
+		name        string
+		credentials map[string]any
+		target      string
+		want        bool
+	}{
+		{
+			name: "group markdown enabled",
+			credentials: map[string]any{
+				"appId":           "1024",
+				"clientSecret":    "secret",
+				"markdownSupport": true,
+			},
+			target: "group:group-openid",
+			want:   true,
+		},
+		{
+			name: "group markdown disabled",
+			credentials: map[string]any{
+				"appId":           "1024",
+				"clientSecret":    "secret",
+				"markdownSupport": false,
+			},
+			target: "group:group-openid",
+			want:   false,
+		},
+		{
+			name: "channel target",
+			credentials: map[string]any{
+				"appId":           "1024",
+				"clientSecret":    "secret",
+				"markdownSupport": true,
+			},
+			target: "channel:channel-id",
+			want:   false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			caps := adapter.ResolveOutboundCapabilities(channel.ChannelConfig{Credentials: tc.credentials}, tc.target, base)
+			if caps.Markdown != tc.want {
+				t.Fatalf("Markdown = %v, want %v", caps.Markdown, tc.want)
+			}
+		})
+	}
+}
+
 func TestQQSendImageAttachment(t *testing.T) {
 	t.Parallel()
 

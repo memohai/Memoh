@@ -117,6 +117,12 @@ type Sender interface {
 	Send(ctx context.Context, cfg ChannelConfig, msg PreparedOutboundMessage) error
 }
 
+// OutboundCapabilityResolver can refine static descriptor capabilities for a
+// specific outbound config and target when platform support is runtime-gated.
+type OutboundCapabilityResolver interface {
+	ResolveOutboundCapabilities(cfg ChannelConfig, target string, base ChannelCapabilities) ChannelCapabilities
+}
+
 // StreamSender is an adapter capable of opening outbound stream sessions.
 type StreamSender interface {
 	OpenStream(ctx context.Context, cfg ChannelConfig, target string, opts StreamOptions) (PreparedOutboundStream, error)

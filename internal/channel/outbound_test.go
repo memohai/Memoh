@@ -15,6 +15,7 @@ type streamValidationAdapter struct {
 	outboundPolicy OutboundPolicy
 	noMarkdown     bool // when true, advertise a plain-text-only channel
 	richText       bool
+	dynamicCaps    *ChannelCapabilities
 }
 
 func (a *streamValidationAdapter) Type() ChannelType {
@@ -39,6 +40,13 @@ func (a *streamValidationAdapter) Descriptor() Descriptor {
 	}
 }
 
+func (a *streamValidationAdapter) ResolveOutboundCapabilities(_ ChannelConfig, _ string, base ChannelCapabilities) ChannelCapabilities {
+	if a.dynamicCaps != nil {
+		return *a.dynamicCaps
+	}
+	return base
+}
+
 func newStreamValidationRegistry(t *testing.T) *Registry {
 	t.Helper()
 	registry := NewRegistry()
@@ -46,6 +54,15 @@ func newStreamValidationRegistry(t *testing.T) *Registry {
 		t.Fatalf("register adapter failed: %v", err)
 	}
 	return registry
+}
+
+type recordingPreparedSender struct {
+	msg PreparedOutboundMessage
+}
+
+func (s *recordingPreparedSender) Send(_ context.Context, _ ChannelConfig, msg PreparedOutboundMessage) error {
+	s.msg = msg
+	return nil
 }
 
 func TestValidateStreamEventSupportedTypes(t *testing.T) {
@@ -108,6 +125,45 @@ func TestValidateStreamEventInvalidPayload(t *testing.T) {
 				t.Fatalf("expected error for %s", tt.name)
 			}
 		})
+	}
+}
+
+func TestSendWithConfigUsesDynamicOutboundCapabilities(t *testing.T) {
+	t.Parallel()
+
+	channelType := ChannelType("dynamic-caps-send")
+	registry := NewRegistry()
+	adapter := &streamValidationAdapter{
+		channelType: channelType,
+		dynamicCaps: &ChannelCapabilities{
+			Text: true,
+		},
+	}
+	if err := registry.Register(adapter); err != nil {
+		t.Fatalf("register adapter failed: %v", err)
+	}
+	manager := &Manager{registry: registry, attachmentStore: channeltest.NewMemoryAttachmentStore()}
+	sender := &recordingPreparedSender{}
+
+	err := manager.sendWithConfig(context.Background(), sender, ChannelConfig{
+		BotID:       "bot-1",
+		ChannelType: channelType,
+	}, OutboundMessage{
+		Target: "chat-1",
+		Message: Message{
+			Text:   "Hello **world**",
+			Format: MessageFormatMarkdown,
+		},
+	}, manager.resolveOutboundPolicy(channelType))
+	if err != nil {
+		t.Fatalf("sendWithConfig returned error: %v", err)
+	}
+	got := sender.msg.Message.Message
+	if got.Format != MessageFormatPlain {
+		t.Fatalf("expected dynamic plain downgrade, got format %q", got.Format)
+	}
+	if strings.Contains(got.Text, "**") || got.Text != "Hello world" {
+		t.Fatalf("expected stripped plain text, got %q", got.Text)
 	}
 }
 
@@ -201,6 +257,57 @@ func TestPushFinalWithChunking_ShortText(t *testing.T) {
 	}
 	if len(*sent) != 0 {
 		t.Fatalf("expected no overflow sends, got %d", len(*sent))
+	}
+}
+
+func TestManagerStreamFinalUsesDynamicOutboundCapabilities(t *testing.T) {
+	t.Parallel()
+
+	channelType := ChannelType("dynamic-caps-stream")
+	registry := NewRegistry()
+	adapter := &streamValidationAdapter{
+		channelType: channelType,
+		dynamicCaps: &ChannelCapabilities{
+			Text:           true,
+			Streaming:      true,
+			BlockStreaming: true,
+		},
+	}
+	if err := registry.Register(adapter); err != nil {
+		t.Fatalf("register adapter failed: %v", err)
+	}
+	manager := &Manager{registry: registry, attachmentStore: channeltest.NewMemoryAttachmentStore()}
+	rec := &recordingStream{}
+	stream := &managerOutboundStream{
+		manager:     manager,
+		config:      ChannelConfig{BotID: "bot-1", ChannelType: channelType},
+		stream:      rec,
+		channelType: channelType,
+		policy:      manager.resolveOutboundPolicy(channelType),
+	}
+
+	err := stream.Push(context.Background(), StreamEvent{
+		Type: StreamEventFinal,
+		Final: &StreamFinalizePayload{
+			Message: Message{
+				Text:   "Hello **world**",
+				Format: MessageFormatMarkdown,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Push returned error: %v", err)
+	}
+	events := rec.Events()
+	if len(events) != 1 {
+		t.Fatalf("expected one prepared event, got %d", len(events))
+	}
+	got := events[0].Final.Message
+	if got.Format != MessageFormatPlain {
+		t.Fatalf("expected dynamic plain downgrade, got format %q", got.Format)
+	}
+	if strings.Contains(got.Text, "**") || got.Text != "Hello world" {
+		t.Fatalf("expected stripped plain text, got %q", got.Text)
 	}
 }
 

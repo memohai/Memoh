@@ -153,6 +153,20 @@ func (*QQAdapter) Descriptor() channel.Descriptor {
 	}
 }
 
+func (*QQAdapter) ResolveOutboundCapabilities(cfg channel.ChannelConfig, target string, base channel.ChannelCapabilities) channel.ChannelCapabilities {
+	caps := base
+	parsed, err := parseConfig(cfg.Credentials)
+	if err != nil {
+		return caps
+	}
+	parsedTarget, err := parseTarget(target)
+	if err != nil {
+		return caps
+	}
+	caps.Markdown = parsed.MarkdownSupport && parsedTarget.Kind != qqTargetChannel
+	return caps
+}
+
 func (*QQAdapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
 	return normalizeConfig(raw)
 }
