@@ -24,6 +24,15 @@ import (
 // cursor allowed: a stale `since=` could replay the entire bot history.
 const sessionMessageBacklogSize = 50
 
+// sessionMessageStreamBuffer sizes the per-subscriber channel for both SSE
+// streams. Large enough to absorb a brief assistant-token burst without
+// dropping; smaller buffers get truncated quickly under load.
+const sessionMessageStreamBuffer = 128
+
+// sseHeartbeatInterval is the keep-alive cadence — tuned to land under a
+// 30s proxy idle cut.
+const sseHeartbeatInterval = 20 * time.Second
+
 // StreamSessionMessageEvents godoc
 // @Summary Stream message events for one session
 // @Description SSE stream that pushes a server-fixed backlog of the last 50
@@ -65,27 +74,36 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 	}
 	botID = bot.ID
 
+	// Subscribe BEFORE the backlog read so any message persisted during the
+	// DB call lands in the live channel. We then dedup against the backlog
+	// IDs so the client never sees a message twice across the seam.
+	_, stream, cancel := h.messageEvents.Subscribe(botID, sessionMessageStreamBuffer)
+
+	backlog, err := h.messageService.ListLatestBySession(c.Request().Context(), sessionID, sessionMessageBacklogSize)
+	if err != nil {
+		// Cancel the subscription before returning the HTTP error so we
+		// don't leak a channel — and so the framing stays JSON, not SSE.
+		cancel()
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	defer cancel()
+
 	writer, flusher, err := beginSSEResponse(c)
 	if err != nil {
 		return err
 	}
 
-	_, stream, cancel := h.messageEvents.Subscribe(botID, 128)
-	defer cancel()
-
-	backlog, err := h.messageService.ListLatestBySession(c.Request().Context(), sessionID, sessionMessageBacklogSize)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
 	reverseMessages(backlog)
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, backlog)
+	backlogIDs := make(map[string]struct{}, len(backlog))
 	for _, message := range backlog {
+		backlogIDs[message.ID] = struct{}{}
 		if err := writeMessageCreated(writer, flusher, botID, message); err != nil {
 			return nil
 		}
 	}
 
-	heartbeat := time.NewTicker(20 * time.Second)
+	heartbeat := time.NewTicker(sseHeartbeatInterval)
 	defer heartbeat.Stop()
 
 	for {
@@ -113,6 +131,12 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 				if message.SessionID != sessionID {
 					continue
 				}
+				// Skip messages already delivered as part of the backlog —
+				// the Subscribe-before-backlog ordering keeps the seam
+				// race-free at the cost of a small dedup set.
+				if _, dup := backlogIDs[message.ID]; dup {
+					continue
+				}
 				h.fillAssetMimeFromStorage(c.Request().Context(), botID, []messagepkg.Message{message})
 				if err := writeMessageCreated(writer, flusher, botID, message); err != nil {
 					return nil
@@ -131,6 +155,32 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 					"session_id": sessionID,
 					"title":      payload["title"],
 				}); err != nil {
+					return nil
+				}
+			case messageevent.EventTypeBackgroundTask, messageevent.EventTypeAgentStream:
+				// Forward only to the owning session. The old bot-wide
+				// stream forwarded these too — drop them here and the
+				// chat UI loses live background-task / agent-stream
+				// updates.
+				var payload map[string]any
+				if err := json.Unmarshal(event.Data, &payload); err != nil {
+					continue
+				}
+				if payloadSessionID(payload) != sessionID {
+					continue
+				}
+				payload["type"] = string(event.Type)
+				payload["bot_id"] = botID
+				if event.Type == messageevent.EventTypeBackgroundTask {
+					if _, ok := payload["task"]; !ok {
+						taskPayload := make(map[string]any, len(payload))
+						for key, value := range payload {
+							taskPayload[key] = value
+						}
+						payload["task"] = taskPayload
+					}
+				}
+				if err := writeSSEJSON(writer, flusher, payload); err != nil {
 					return nil
 				}
 			}
@@ -178,12 +228,12 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 		return err
 	}
 
-	_, stream, cancel := h.messageEvents.Subscribe(botID, 128)
+	_, stream, cancel := h.messageEvents.Subscribe(botID, sessionMessageStreamBuffer)
 	defer cancel()
 
 	cache := newSessionTypeCache(h.sessionService)
 
-	heartbeat := time.NewTicker(20 * time.Second)
+	heartbeat := time.NewTicker(sseHeartbeatInterval)
 	defer heartbeat.Stop()
 
 	for {
@@ -346,4 +396,14 @@ func (c *sessionTypeCache) set(sessionID, typ string, _ bool) {
 	c.mu.Lock()
 	c.known[sessionID] = session.IsUserFacingType(typ)
 	c.mu.Unlock()
+}
+
+// payloadSessionID extracts the session id from an event payload, tolerating
+// both snake_case and camelCase keys that legacy publishers may use.
+func payloadSessionID(payload map[string]any) string {
+	if v, _ := payload["session_id"].(string); v != "" {
+		return v
+	}
+	v, _ := payload["sessionId"].(string)
+	return v
 }
