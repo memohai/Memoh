@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -93,26 +92,23 @@ func (h *MessageHandler) Register(e *echo.Echo) {
 
 // --- Messages ---
 
-func writeSSEData(writer *bufio.Writer, flusher http.Flusher, payload string) error {
+func writeSSEData(writer io.Writer, flusher http.Flusher, payload string) error {
 	// SSE frames are line-oriented; fold CR/LF to avoid frame injection.
 	safePayload := strings.NewReplacer("\r", "\\r", "\n", "\\n").Replace(payload)
-	if _, err := writer.WriteString("data: "); err != nil {
+	if _, err := io.WriteString(writer, "data: "); err != nil {
 		return err
 	}
-	if _, err := writer.WriteString(safePayload); err != nil {
+	if _, err := io.WriteString(writer, safePayload); err != nil {
 		return err
 	}
-	if _, err := writer.WriteString("\n\n"); err != nil {
-		return err
-	}
-	if err := writer.Flush(); err != nil {
+	if _, err := io.WriteString(writer, "\n\n"); err != nil {
 		return err
 	}
 	flusher.Flush()
 	return nil
 }
 
-func writeSSEJSON(writer *bufio.Writer, flusher http.Flusher, payload any) error {
+func writeSSEJSON(writer io.Writer, flusher http.Flusher, payload any) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return err

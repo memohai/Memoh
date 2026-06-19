@@ -1,9 +1,9 @@
 package handlers
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -344,7 +344,7 @@ func (h *MessageHandler) canDeliverSessionActivity(c echo.Context, channelIdenti
 	return allowed
 }
 
-func writeMessageCreated(writer *bufio.Writer, flusher http.Flusher, botID string, message messagepkg.Message) error {
+func writeMessageCreated(writer io.Writer, flusher http.Flusher, botID string, message messagepkg.Message) error {
 	return writeSSEJSON(writer, flusher, map[string]any{
 		"type":    string(messageevent.EventTypeMessageCreated),
 		"bot_id":  botID,
@@ -352,7 +352,7 @@ func writeMessageCreated(writer *bufio.Writer, flusher http.Flusher, botID strin
 	})
 }
 
-func beginSSEResponse(c echo.Context) (*bufio.Writer, http.Flusher, error) {
+func beginSSEResponse(c echo.Context) (io.Writer, http.Flusher, error) {
 	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
 	c.Response().Header().Set(echo.HeaderCacheControl, "no-cache")
 	c.Response().Header().Set(echo.HeaderConnection, "keep-alive")
@@ -361,7 +361,7 @@ func beginSSEResponse(c echo.Context) (*bufio.Writer, http.Flusher, error) {
 	if !ok {
 		return nil, nil, echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
 	}
-	return bufio.NewWriter(c.Response().Writer), flusher, nil
+	return c.Response().Writer, flusher, nil
 }
 
 // sessionTypeCache memoizes per-session decisions for the lifetime of one

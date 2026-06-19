@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"strings"
@@ -46,8 +45,6 @@ func TestIsUserFacingSessionType(t *testing.T) {
 	}
 }
 
-// (no trailing helpers)
-
 func TestMergeToolApprovalsUsesCanApproveFunction(t *testing.T) {
 	t.Parallel()
 
@@ -91,10 +88,9 @@ func TestWriteSSEJSON(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	writer := bufio.NewWriter(&output)
 	flusher := &testFlusher{}
 
-	if err := writeSSEJSON(writer, flusher, map[string]any{"type": "ping"}); err != nil {
+	if err := writeSSEJSON(&output, flusher, map[string]any{"type": "ping"}); err != nil {
 		t.Fatalf("writeSSEJSON failed: %v", err)
 	}
 	raw := output.String()
