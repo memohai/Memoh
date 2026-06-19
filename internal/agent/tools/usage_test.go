@@ -355,6 +355,9 @@ func TestMessageProviderSendToolExposesStructuredMessagePartsSchema(t *testing.T
 	if !ok {
 		t.Fatalf("send properties = %T, want map[string]any", params["properties"])
 	}
+	if params["additionalProperties"] != false {
+		t.Fatalf("send root schema should be strict, got %#v", params["additionalProperties"])
+	}
 	message, ok := props["message"].(map[string]any)
 	if !ok {
 		t.Fatalf("message schema = %T, want map[string]any", props["message"])
@@ -406,6 +409,24 @@ func TestMessageProviderSendToolExposesStructuredMessagePartsSchema(t *testing.T
 	}
 	if _, ok := actionItems["anyOf"].([]any); !ok {
 		t.Fatalf("message action schema should require value or url via anyOf, got %#v", actionItems["anyOf"])
+	}
+	reply, ok := messageProps["reply"].(map[string]any)
+	if !ok {
+		t.Fatalf("message.reply schema missing in %#v", messageProps)
+	}
+	if reply["additionalProperties"] != false {
+		t.Fatalf("message reply schema should be strict, got %#v", reply["additionalProperties"])
+	}
+	replyRequired, ok := reply["required"].([]string)
+	if !ok || !requiredContainsForTest(replyRequired, "message_id") {
+		t.Fatalf("message reply schema should require message_id, required=%#v", reply["required"])
+	}
+	replyProps, ok := reply["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("message reply properties missing in %#v", reply)
+	}
+	if _, ok := replyProps["message_id"]; !ok {
+		t.Fatalf("message reply schema missing message_id in %#v", replyProps)
 	}
 
 	topLevelAttachments, ok := props["attachments"].(map[string]any)

@@ -73,7 +73,8 @@ func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sd
 			Name:        ToolSend().String(),
 			Description: sendDescription,
 			Parameters: map[string]any{
-				"type": "object",
+				"type":                 "object",
+				"additionalProperties": false,
 				"properties": map[string]any{
 					"bot_id":   map[string]any{"type": "string", "description": "Bot ID, optional and defaults to current bot"},
 					"platform": map[string]any{"type": "string", "description": sendPlatformDescription},
@@ -165,8 +166,13 @@ func sendMessageObjectSchema() map[string]any {
 				},
 			},
 			"reply": map[string]any{
-				"type":        "object",
-				"description": "Reply reference; normally use the top-level reply_to shortcut instead.",
+				"type":                 "object",
+				"description":          "Reply reference; normally use the top-level reply_to shortcut instead.",
+				"additionalProperties": false,
+				"required":             []string{"message_id"},
+				"properties": map[string]any{
+					"message_id": map[string]any{"type": "string"},
+				},
 			},
 		},
 	}

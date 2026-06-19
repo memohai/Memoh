@@ -178,6 +178,9 @@ func (e *Executor) prepareSendPlan(
 	args map[string]any,
 	mode sendMode,
 ) (*sendPlan, error) {
+	if err := validateSendArguments(args); err != nil {
+		return nil, err
+	}
 	botID, err := e.resolveBotID(args, session)
 	if err != nil {
 		return nil, err
@@ -218,6 +221,18 @@ func (e *Executor) prepareSendPlan(
 		sameConv:    sameConv,
 		message:     msg,
 	}, nil
+}
+
+func validateSendArguments(args map[string]any) error {
+	allowed := map[string]struct{}{
+		"bot_id": {}, "platform": {}, "target": {}, "text": {}, "reply_to": {}, "attachments": {}, "message": {},
+	}
+	for key := range args {
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("unknown send field %q", key)
+		}
+	}
+	return nil
 }
 
 func localShortcutCanRepresent(msg channel.Message) bool {
@@ -662,6 +677,13 @@ func validateOutboundMessageObject(raw map[string]any) error {
 			return fmt.Errorf("unknown message field %q", key)
 		}
 	}
+	if format, ok := raw["format"]; ok && format != nil {
+		normalized, err := validateOutboundMessageFormat(format)
+		if err != nil {
+			return err
+		}
+		raw["format"] = string(normalized)
+	}
 	if parts, ok := raw["parts"]; ok && parts != nil {
 		if err := validateOutboundMessageParts(parts); err != nil {
 			return err
@@ -672,6 +694,46 @@ func validateOutboundMessageObject(raw map[string]any) error {
 			return err
 		}
 	}
+	if reply, ok := raw["reply"]; ok && reply != nil {
+		if err := validateOutboundMessageReply(reply); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateOutboundMessageFormat(raw any) (channel.MessageFormat, error) {
+	value, ok := raw.(string)
+	if !ok {
+		return "", errors.New("message format must be string")
+	}
+	switch format := channel.MessageFormat(strings.TrimSpace(value)); format {
+	case channel.MessageFormatPlain, channel.MessageFormatMarkdown, channel.MessageFormatRich:
+		return format, nil
+	default:
+		return "", fmt.Errorf("unsupported message format %q", value)
+	}
+}
+
+func validateOutboundMessageReply(raw any) error {
+	reply, ok := raw.(map[string]any)
+	if !ok {
+		return errors.New("message reply must be object")
+	}
+	allowed := map[string]struct{}{
+		"message_id": {},
+	}
+	for key := range reply {
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("unknown message reply field %q", key)
+		}
+	}
+	messageID, _ := reply["message_id"].(string)
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return errors.New("message reply message_id is required")
+	}
+	reply["message_id"] = messageID
 	return nil
 }
 

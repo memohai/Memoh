@@ -362,6 +362,30 @@ func TestSendDirectInvalidAttachmentObjectReturnsError(t *testing.T) {
 	}
 }
 
+func TestSendDirectUnknownTopLevelFieldReturnsError(t *testing.T) {
+	t.Parallel()
+
+	sender := &testSender{}
+	exec := &Executor{
+		Sender:   sender,
+		Resolver: testResolver{},
+	}
+
+	_, err := exec.SendDirect(context.Background(), SessionContext{
+		BotID:           "bot_1",
+		CurrentPlatform: "telegram",
+	}, "chat-1", map[string]any{
+		"message":    map[string]any{"text": "see attachment"},
+		"attachment": []any{"https://example.com/file.png"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown send field") {
+		t.Fatalf("SendDirect error = %v, want unknown send field", err)
+	}
+	if sender.called != 0 {
+		t.Fatalf("expected sender not called, got %d", sender.called)
+	}
+}
+
 func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 	t.Parallel()
 
@@ -441,6 +465,26 @@ func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 			name: "schema external message metadata",
 			raw:  map[string]any{"message": map[string]any{"text": "hi", "metadata": map[string]any{"x": "y"}}},
 			want: "unknown message field",
+		},
+		{
+			name: "unknown format",
+			raw:  map[string]any{"message": map[string]any{"text": "hi", "format": "html"}},
+			want: "unsupported message format",
+		},
+		{
+			name: "non-object reply",
+			raw:  map[string]any{"message": map[string]any{"text": "hi", "reply": "msg-1"}},
+			want: "message reply must be object",
+		},
+		{
+			name: "unknown reply field",
+			raw:  map[string]any{"message": map[string]any{"text": "hi", "reply": map[string]any{"id": "msg-1"}}},
+			want: "unknown message reply field",
+		},
+		{
+			name: "reply without message id",
+			raw:  map[string]any{"message": map[string]any{"text": "hi", "reply": map[string]any{"message_id": "   "}}},
+			want: "message reply message_id is required",
 		},
 		{
 			name: "null part",
