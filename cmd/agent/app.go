@@ -26,6 +26,7 @@ import (
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/agent/background"
 	agenttools "github.com/memohai/memoh/internal/agent/tools"
+	"github.com/memohai/memoh/internal/agentpayload"
 	audiopkg "github.com/memohai/memoh/internal/audio"
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/botbackup"
@@ -452,22 +453,11 @@ func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *mod
 			if eventHub == nil {
 				return
 			}
-			// The marshaled payload here IS the wire shape sent to per-session
-			// SSE subscribers — message_stream.go forwards it verbatim after
-			// stamping `type` and `bot_id`. Any field added below is added to
-			// the wire too; review for sensitivity. The top-level keys
-			// (`event`, `session_id`, `task`) are pinned by
-			// TestBackgroundTaskPayloadHasTopLevelSessionID.
-			//
-			// session_id is lifted to the top so the per-session SSE handler
-			// can route the event without unwrapping `task`. AgentStream
-			// events use the same shape (see resolver_trigger.go), keeping
-			// payloadSessionID's contract uniform across event types.
-			data, err := json.Marshal(map[string]any{
-				"event":      evt.Event,
-				"session_id": evt.SessionID,
-				"task":       evt,
-			})
+			// The wire shape lives in internal/agentpayload — see its
+			// BackgroundTask helper and the tests there that pin the
+			// top-level `session_id` placement the per-session SSE handler
+			// routes on.
+			data, err := json.Marshal(agentpayload.BackgroundTask(evt))
 			if err != nil {
 				return
 			}

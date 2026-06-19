@@ -13,6 +13,7 @@ import (
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/agent/sessionmode"
+	"github.com/memohai/memoh/internal/agentpayload"
 	"github.com/memohai/memoh/internal/channel/route"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/heartbeat"
@@ -459,17 +460,10 @@ func (r *Resolver) publishBackgroundAgentStream(botID, sessionID string, stream 
 	if r.eventPublisher == nil || len(stream) == 0 {
 		return
 	}
-	// The marshaled payload IS the wire shape sent to per-session SSE
-	// subscribers (see internal/handlers/message_stream.go). Any field added
-	// here lands on the wire — review for sensitivity. The top-level
-	// `session_id` placement is pinned by
-	// TestAgentStreamPayloadHasTopLevelSessionID so payloadSessionID's
-	// contract stays uniform with the BackgroundTask publisher.
-	payload := map[string]any{
-		"session_id": sessionID,
-		"stream":     stream,
-	}
-	data, err := json.Marshal(payload)
+	// The wire shape lives in internal/agentpayload — see its AgentStream
+	// helper and the tests there that pin the top-level `session_id`
+	// placement the per-session SSE handler routes on.
+	data, err := json.Marshal(agentpayload.AgentStream(sessionID, stream))
 	if err != nil {
 		return
 	}

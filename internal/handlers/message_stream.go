@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -78,7 +77,11 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 	// Subscribe BEFORE the backlog read so any message persisted during the
 	// DB call lands in the live channel. We then dedup against the backlog
 	// IDs so the client never sees a message twice across the seam.
-	_, stream, cancel := h.messageEvents.Subscribe(botID, sessionMessageStreamBuffer)
+	//
+	// Authorization is checked at connection time only. The SSE reconnect
+	// cycle (~30s on typical proxies) re-runs the ACL, so revocations
+	// propagate within one reconnect window.
+	sub, cancel := h.messageEvents.Subscribe(botID, sessionMessageStreamBuffer)
 	defer cancel()
 
 	backlog, err := h.messageService.ListLatestBySession(c.Request().Context(), sessionID, sessionMessageBacklogSize)
@@ -112,9 +115,21 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 			if err := writeSSEJSON(writer, flusher, map[string]any{"type": "ping"}); err != nil {
 				return nil
 			}
-		case event, ok := <-stream:
+		case event, ok := <-sub.Events:
 			if !ok {
 				return nil
+			}
+			// Emit a `dropped` frame BEFORE the next normal event when the
+			// hub's per-subscription buffer overflowed since the previous
+			// read. The client treats this as "your view is stale; refresh
+			// via REST" — see the dropped-event docs on Subscription.
+			if dropped := sub.DroppedSinceLastRead(); dropped > 0 {
+				if err := writeSSEJSON(writer, flusher, map[string]any{
+					"type":  "dropped",
+					"count": dropped,
+				}); err != nil {
+					return nil
+				}
 			}
 			if strings.TrimSpace(event.BotID) != botID || len(event.Data) == 0 {
 				continue
@@ -229,7 +244,10 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 		return err
 	}
 
-	_, stream, cancel := h.messageEvents.Subscribe(botID, sessionMessageStreamBuffer)
+	// Authorization is checked at connection time only. The SSE reconnect
+	// cycle (~30s on typical proxies) re-runs the ACL, so revocations
+	// propagate within one reconnect window.
+	sub, cancel := h.messageEvents.Subscribe(botID, sessionMessageStreamBuffer)
 	defer cancel()
 
 	cache := newSessionCache(h.logger, h.sessionService)
@@ -245,9 +263,21 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 			if err := writeSSEJSON(writer, flusher, map[string]any{"type": "ping"}); err != nil {
 				return nil
 			}
-		case event, ok := <-stream:
+		case event, ok := <-sub.Events:
 			if !ok {
 				return nil
+			}
+			// Emit a `dropped` frame BEFORE the next normal event when the
+			// hub's per-subscription buffer overflowed since the previous
+			// read. The client treats this as "your view is stale; refresh
+			// via REST" — see the dropped-event docs on Subscription.
+			if dropped := sub.DroppedSinceLastRead(); dropped > 0 {
+				if err := writeSSEJSON(writer, flusher, map[string]any{
+					"type":  "dropped",
+					"count": dropped,
+				}); err != nil {
+					return nil
+				}
 			}
 			if strings.TrimSpace(event.BotID) != botID || len(event.Data) == 0 {
 				continue
@@ -396,10 +426,12 @@ func beginSSEResponse(c echo.Context) (io.Writer, http.Flusher, error) {
 // Caching the full row is safe because the only mutable bit either check
 // reads is `Type`, which IsUserFacingType doesn't filter on for an already
 // admitted session, and CreatedByUserID, which is immutable.
+//
+// The cache is stream-local and consulted only from the single goroutine
+// that drives the SSE writer loop, so no synchronization is needed.
 type sessionCache struct {
 	logger *slog.Logger
 	svc    *session.Service
-	mu     sync.Mutex
 	rows   map[string]session.Session
 	misses map[string]struct{}
 }
@@ -421,16 +453,12 @@ func newSessionCache(logger *slog.Logger, svc *session.Service) *sessionCache {
 // the service is not configured or because the DB lookup failed (which is
 // logged so an outage doesn't masquerade as normal filtering).
 func (c *sessionCache) get(ctx context.Context, sessionID string) (session.Session, bool) {
-	c.mu.Lock()
 	if cached, ok := c.rows[sessionID]; ok {
-		c.mu.Unlock()
 		return cached, true
 	}
 	if _, missed := c.misses[sessionID]; missed {
-		c.mu.Unlock()
 		return session.Session{}, false
 	}
-	c.mu.Unlock()
 	if c.svc == nil {
 		return session.Session{}, false
 	}
@@ -440,22 +468,17 @@ func (c *sessionCache) get(ctx context.Context, sessionID string) (session.Sessi
 			slog.String("session_id", sessionID),
 			slog.Any("error", err),
 		)
-		c.mu.Lock()
 		c.misses[sessionID] = struct{}{}
-		c.mu.Unlock()
 		return session.Session{}, false
 	}
-	c.mu.Lock()
 	c.rows[sessionID] = sess
-	c.mu.Unlock()
 	return sess, true
 }
 
 // payloadSessionID extracts the session id from an event payload. All in-tree
 // publishers (BackgroundTask, AgentStream, MessageCreated, …) lift `session_id`
 // to the top level of the payload; the producer-side contract is pinned by
-// TestBackgroundTaskPayloadHasTopLevelSessionID and
-// TestAgentStreamPayloadHasTopLevelSessionID so this is a single lookup.
+// the helper tests in internal/agentpayload, so this is a single lookup.
 func payloadSessionID(payload map[string]any) string {
 	v, _ := payload["session_id"].(string)
 	return v
