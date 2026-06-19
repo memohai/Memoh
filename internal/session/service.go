@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -70,12 +71,7 @@ func IsKnownType(typ string) bool {
 // IsUserFacingType reports whether a session type is one that user-facing
 // session list endpoints should return by default.
 func IsUserFacingType(typ string) bool {
-	switch strings.TrimSpace(typ) {
-	case TypeChat, TypeDiscuss, TypeACPAgent:
-		return true
-	default:
-		return false
-	}
+	return slices.Contains(UserFacingSessionTypes, strings.TrimSpace(typ))
 }
 
 // CreateInput holds input for creating a new session.
@@ -707,53 +703,67 @@ func toSessionFromUserListRow(row sqlc.ListSessionsByBotAndCreatedByUserRow) Ses
 }
 
 func toSessionFromPagedRow(row sqlc.ListSessionsByBotPagedRow) Session {
-	parentID := ""
-	if row.ParentSessionID.Valid {
-		parentID = row.ParentSessionID.String()
-	}
-	createdByUserID := ""
-	if row.CreatedByUserID.Valid {
-		createdByUserID = row.CreatedByUserID.String()
-	}
-	return Session{
-		ID:                    row.ID.String(),
-		BotID:                 row.BotID.String(),
-		RouteID:               row.RouteID.String(),
-		ChannelType:           dbpkg.TextToString(row.ChannelType),
-		Type:                  row.Type,
-		Title:                 row.Title,
-		Metadata:              parseJSONMap(row.Metadata),
-		ParentSessionID:       parentID,
-		CreatedByUserID:       createdByUserID,
-		CreatedAt:             row.CreatedAt.Time,
-		UpdatedAt:             row.UpdatedAt.Time,
-		RouteMetadata:         parseJSONMap(row.RouteMetadata),
-		RouteConversationType: dbpkg.TextToString(row.RouteConversationType),
-	}
+	return sessionFromPagedColumns(pagedColumns{
+		ID: row.ID, BotID: row.BotID, RouteID: row.RouteID, ChannelType: row.ChannelType,
+		Type: row.Type, Title: row.Title, Metadata: row.Metadata,
+		ParentSessionID: row.ParentSessionID, CreatedByUserID: row.CreatedByUserID,
+		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		RouteMetadata: row.RouteMetadata, RouteConversationType: row.RouteConversationType,
+	})
 }
 
 func toSessionFromUserPagedRow(row sqlc.ListSessionsByBotAndCreatedByUserPagedRow) Session {
+	return sessionFromPagedColumns(pagedColumns{
+		ID: row.ID, BotID: row.BotID, RouteID: row.RouteID, ChannelType: row.ChannelType,
+		Type: row.Type, Title: row.Title, Metadata: row.Metadata,
+		ParentSessionID: row.ParentSessionID, CreatedByUserID: row.CreatedByUserID,
+		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		RouteMetadata: row.RouteMetadata, RouteConversationType: row.RouteConversationType,
+	})
+}
+
+// pagedColumns is the shared shape of the bot/route-joined session row
+// returned by both paged list queries. The two sqlc-generated row structs
+// happen to be structurally identical; centralizing the projection here
+// keeps the conversion logic in one place.
+type pagedColumns struct {
+	ID                    pgtype.UUID
+	BotID                 pgtype.UUID
+	RouteID               pgtype.UUID
+	ChannelType           pgtype.Text
+	Type                  string
+	Title                 string
+	Metadata              []byte
+	ParentSessionID       pgtype.UUID
+	CreatedByUserID       pgtype.UUID
+	CreatedAt             pgtype.Timestamptz
+	UpdatedAt             pgtype.Timestamptz
+	RouteMetadata         []byte
+	RouteConversationType pgtype.Text
+}
+
+func sessionFromPagedColumns(c pagedColumns) Session {
 	parentID := ""
-	if row.ParentSessionID.Valid {
-		parentID = row.ParentSessionID.String()
+	if c.ParentSessionID.Valid {
+		parentID = c.ParentSessionID.String()
 	}
 	createdByUserID := ""
-	if row.CreatedByUserID.Valid {
-		createdByUserID = row.CreatedByUserID.String()
+	if c.CreatedByUserID.Valid {
+		createdByUserID = c.CreatedByUserID.String()
 	}
 	return Session{
-		ID:                    row.ID.String(),
-		BotID:                 row.BotID.String(),
-		RouteID:               row.RouteID.String(),
-		ChannelType:           dbpkg.TextToString(row.ChannelType),
-		Type:                  row.Type,
-		Title:                 row.Title,
-		Metadata:              parseJSONMap(row.Metadata),
+		ID:                    c.ID.String(),
+		BotID:                 c.BotID.String(),
+		RouteID:               c.RouteID.String(),
+		ChannelType:           dbpkg.TextToString(c.ChannelType),
+		Type:                  c.Type,
+		Title:                 c.Title,
+		Metadata:              parseJSONMap(c.Metadata),
 		ParentSessionID:       parentID,
 		CreatedByUserID:       createdByUserID,
-		CreatedAt:             row.CreatedAt.Time,
-		UpdatedAt:             row.UpdatedAt.Time,
-		RouteMetadata:         parseJSONMap(row.RouteMetadata),
-		RouteConversationType: dbpkg.TextToString(row.RouteConversationType),
+		CreatedAt:             c.CreatedAt.Time,
+		UpdatedAt:             c.UpdatedAt.Time,
+		RouteMetadata:         parseJSONMap(c.RouteMetadata),
+		RouteConversationType: dbpkg.TextToString(c.RouteConversationType),
 	}
 }
