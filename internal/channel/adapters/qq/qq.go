@@ -78,11 +78,6 @@ func NewQQAdapter(log *slog.Logger) *QQAdapter {
 	}
 }
 
-var (
-	_ channel.Sender       = (*QQAdapter)(nil)
-	_ channel.StreamSender = (*QQAdapter)(nil)
-)
-
 func (*QQAdapter) Type() channel.ChannelType {
 	return Type
 }

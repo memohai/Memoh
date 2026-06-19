@@ -44,11 +44,6 @@ func NewMisskeyAdapter(log *slog.Logger) *MisskeyAdapter {
 	}
 }
 
-var (
-	_ channel.Sender       = (*MisskeyAdapter)(nil)
-	_ channel.StreamSender = (*MisskeyAdapter)(nil)
-)
-
 // Type returns the Misskey channel type.
 func (*MisskeyAdapter) Type() channel.ChannelType {
 	return Type

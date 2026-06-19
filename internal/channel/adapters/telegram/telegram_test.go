@@ -539,6 +539,13 @@ func TestTelegramAdapter_SendRichPartsUsesRichMessage(t *testing.T) {
 
 	var gotBody map[string]any
 	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/sendChatAction") {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":true}`)),
+			}, nil
+		}
 		if !strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
 			t.Fatalf("expected sendRichMessage, got %s", req.URL.Path)
 		}

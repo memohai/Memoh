@@ -30,11 +30,6 @@ func NewWeChatOAAdapter(log *slog.Logger) *WeChatOAAdapter {
 	}
 }
 
-var (
-	_ channel.Sender       = (*WeChatOAAdapter)(nil)
-	_ channel.StreamSender = (*WeChatOAAdapter)(nil)
-)
-
 func (*WeChatOAAdapter) Type() channel.ChannelType { return Type }
 
 func (*WeChatOAAdapter) Descriptor() channel.Descriptor {

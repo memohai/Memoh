@@ -176,11 +176,6 @@ func formatTelegramFileURL(endpoint, token, filePath string) string {
 	}
 }
 
-var (
-	_ channel.Sender       = (*TelegramAdapter)(nil)
-	_ channel.StreamSender = (*TelegramAdapter)(nil)
-)
-
 // Type returns the Telegram channel type.
 func (*TelegramAdapter) Type() channel.ChannelType {
 	return Type

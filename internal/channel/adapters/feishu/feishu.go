@@ -117,11 +117,6 @@ func (a *FeishuAdapter) SetAssetOpener(opener assetOpener) {
 	a.assets = opener
 }
 
-var (
-	_ channel.Sender       = (*FeishuAdapter)(nil)
-	_ channel.StreamSender = (*FeishuAdapter)(nil)
-)
-
 // Type returns the Feishu channel type.
 func (*FeishuAdapter) Type() channel.ChannelType {
 	return Type

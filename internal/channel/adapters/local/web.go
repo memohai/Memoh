@@ -18,11 +18,6 @@ func NewWebAdapter(hub *RouteHub) *WebAdapter {
 	return &WebAdapter{hub: hub}
 }
 
-var (
-	_ channel.Sender       = (*WebAdapter)(nil)
-	_ channel.StreamSender = (*WebAdapter)(nil)
-)
-
 // Type returns the Web channel type.
 func (*WebAdapter) Type() channel.ChannelType {
 	return WebType

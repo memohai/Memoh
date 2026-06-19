@@ -41,11 +41,6 @@ func NewWeComAdapter(log *slog.Logger) *WeComAdapter {
 	}
 }
 
-var (
-	_ channel.Sender       = (*WeComAdapter)(nil)
-	_ channel.StreamSender = (*WeComAdapter)(nil)
-)
-
 func (*WeComAdapter) Type() channel.ChannelType { return Type }
 
 func (*WeComAdapter) Descriptor() channel.Descriptor {

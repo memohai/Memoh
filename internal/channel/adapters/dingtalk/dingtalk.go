@@ -46,11 +46,6 @@ func NewDingTalkAdapter(log *slog.Logger) *DingTalkAdapter {
 // SetAssetOpener is a no-op placeholder to match the adapter registration pattern.
 func (*DingTalkAdapter) SetAssetOpener(_ any) {}
 
-var (
-	_ channel.Sender       = (*DingTalkAdapter)(nil)
-	_ channel.StreamSender = (*DingTalkAdapter)(nil)
-)
-
 func (*DingTalkAdapter) Type() channel.ChannelType { return Type }
 
 func (*DingTalkAdapter) Descriptor() channel.Descriptor {
