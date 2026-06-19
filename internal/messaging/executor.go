@@ -595,8 +595,7 @@ func ParseOutboundMessage(arguments map[string]any, fallbackText string) (channe
 
 func validateOutboundMessageObject(raw map[string]any) error {
 	allowed := map[string]struct{}{
-		"id": {}, "format": {}, "text": {}, "parts": {}, "attachments": {}, "actions": {},
-		"thread": {}, "reply": {}, "forward": {}, "metadata": {},
+		"format": {}, "text": {}, "parts": {}, "attachments": {}, "actions": {}, "reply": {},
 	}
 	for key := range raw {
 		if _, ok := allowed[key]; !ok {
@@ -679,7 +678,7 @@ func validateOutboundMessageAction(index int, raw map[string]any) error {
 func validateOutboundMessagePart(index int, raw map[string]any) error {
 	allowed := map[string]struct{}{
 		"type": {}, "text": {}, "url": {}, "styles": {}, "language": {},
-		"channel_identity_id": {}, "emoji": {}, "metadata": {},
+		"channel_identity_id": {}, "emoji": {},
 	}
 	for key := range raw {
 		if _, ok := allowed[key]; !ok {

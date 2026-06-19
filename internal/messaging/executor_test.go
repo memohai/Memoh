@@ -372,9 +372,36 @@ func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 			want: "unknown message field",
 		},
 		{
+			name: "schema external message id",
+			raw:  map[string]any{"message": map[string]any{"text": "hi", "id": "msg-1"}},
+			want: "unknown message field",
+		},
+		{
+			name: "schema external message thread",
+			raw:  map[string]any{"message": map[string]any{"text": "hi", "thread": map[string]any{"id": "thread-1"}}},
+			want: "unknown message field",
+		},
+		{
+			name: "schema external message forward",
+			raw:  map[string]any{"message": map[string]any{"text": "hi", "forward": map[string]any{"message_id": "msg-1"}}},
+			want: "unknown message field",
+		},
+		{
+			name: "schema external message metadata",
+			raw:  map[string]any{"message": map[string]any{"text": "hi", "metadata": map[string]any{"x": "y"}}},
+			want: "unknown message field",
+		},
+		{
 			name: "unknown part field",
 			raw: map[string]any{"message": map[string]any{"parts": []any{
 				map[string]any{"type": "text", "text": "hi", "typo": "dropped"},
+			}}},
+			want: "unknown message part field",
+		},
+		{
+			name: "schema external part metadata",
+			raw: map[string]any{"message": map[string]any{"parts": []any{
+				map[string]any{"type": "text", "text": "hi", "metadata": map[string]any{"x": "y"}},
 			}}},
 			want: "unknown message part field",
 		},
