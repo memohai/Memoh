@@ -384,6 +384,24 @@ func TestMessageProviderSendToolExposesStructuredMessagePartsSchema(t *testing.T
 		t.Fatalf("part styles items schema = %T, want map[string]any", styles["items"])
 	}
 	assertEnumContainsForTest(t, styleItems["enum"], "bold", "italic", "strikethrough", "code", "underline", "spoiler")
+	actions, ok := messageProps["actions"].(map[string]any)
+	if !ok {
+		t.Fatalf("message.actions schema missing in %#v", messageProps)
+	}
+	actionItems, ok := actions["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("message.actions.items schema = %T, want map[string]any", actions["items"])
+	}
+	if actionItems["additionalProperties"] != false {
+		t.Fatalf("message action schema should be strict, got %#v", actionItems["additionalProperties"])
+	}
+	actionRequired, ok := actionItems["required"].([]string)
+	if !ok || !requiredContainsForTest(actionRequired, "label") {
+		t.Fatalf("message action schema should require label, required=%#v", actionItems["required"])
+	}
+	if _, ok := actionItems["anyOf"].([]any); !ok {
+		t.Fatalf("message action schema should require value or url via anyOf, got %#v", actionItems["anyOf"])
+	}
 }
 
 func TestContainerProviderUsageGatesRegisteredTools(t *testing.T) {

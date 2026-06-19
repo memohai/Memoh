@@ -258,6 +258,59 @@ func TestSendSameConversationStructuredMessageAttachmentShorthandIsNormalized(t 
 	}
 }
 
+func TestSendDirectInvalidStructuredMessageWithAttachmentsReturnsParseError(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		args map[string]any
+	}{
+		{
+			name: "top level attachments",
+			args: map[string]any{
+				"message": map[string]any{
+					"text": "see attachment",
+					"typo": "should not be dropped",
+				},
+				"attachments": []any{"https://example.com/file.png"},
+			},
+		},
+		{
+			name: "nested attachments",
+			args: map[string]any{
+				"message": map[string]any{
+					"text": "see attachment",
+					"typo": "should not be dropped",
+					"attachments": []any{
+						map[string]any{"url": "https://example.com/file.png"},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sender := &testSender{}
+			exec := &Executor{
+				Sender:   sender,
+				Resolver: testResolver{},
+			}
+
+			_, err := exec.SendDirect(context.Background(), SessionContext{
+				BotID:           "bot_1",
+				CurrentPlatform: "telegram",
+			}, "chat-1", tc.args)
+			if err == nil || !strings.Contains(err.Error(), "unknown message field") {
+				t.Fatalf("SendDirect error = %v, want unknown message field", err)
+			}
+			if sender.called != 0 {
+				t.Fatalf("expected sender not called, got %d", sender.called)
+			}
+		})
+	}
+}
+
 func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 	t.Parallel()
 
@@ -338,6 +391,66 @@ func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 				map[string]any{"type": "text", "text": "hi", "styles": []any{"rainbow"}},
 			}}},
 			want: "unsupported message part style",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseOutboundMessage(tt.raw, "")
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("ParseOutboundMessage error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseOutboundMessageActionsValidation(t *testing.T) {
+	t.Parallel()
+
+	msg, err := ParseOutboundMessage(map[string]any{
+		"message": map[string]any{
+			"text": "choose",
+			"actions": []any{
+				map[string]any{"label": "Open", "url": "https://example.com"},
+				map[string]any{"label": "Approve", "value": "approve:1"},
+			},
+		},
+	}, "")
+	if err != nil {
+		t.Fatalf("ParseOutboundMessage returned error: %v", err)
+	}
+	if len(msg.Actions) != 2 || msg.Actions[0].URL != "https://example.com" || msg.Actions[1].Value != "approve:1" {
+		t.Fatalf("unexpected actions: %#v", msg.Actions)
+	}
+
+	tests := []struct {
+		name string
+		raw  map[string]any
+		want string
+	}{
+		{
+			name: "unknown action field",
+			raw: map[string]any{"message": map[string]any{
+				"text":    "choose",
+				"actions": []any{map[string]any{"label": "Open", "href": "https://example.com"}},
+			}},
+			want: "unknown message action field",
+		},
+		{
+			name: "missing action target",
+			raw: map[string]any{"message": map[string]any{
+				"text":    "choose",
+				"actions": []any{map[string]any{"label": "Open"}},
+			}},
+			want: "message action target is required",
+		},
+		{
+			name: "unsafe url",
+			raw: map[string]any{"message": map[string]any{
+				"text":    "choose",
+				"actions": []any{map[string]any{"label": "Open", "url": "javascript:alert(1)"}},
+			}},
+			want: "message action url must be http",
 		},
 	}
 

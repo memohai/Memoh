@@ -159,6 +159,11 @@ func sendMessageObjectSchema() map[string]any {
 				"items": map[string]any{
 					"type":                 "object",
 					"additionalProperties": false,
+					"required":             []string{"label"},
+					"anyOf": []any{
+						map[string]any{"required": []string{"value"}},
+						map[string]any{"required": []string{"url"}},
+					},
 					"properties": map[string]any{
 						"type":  map[string]any{"type": "string"},
 						"label": map[string]any{"type": "string"},

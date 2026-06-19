@@ -96,6 +96,8 @@ type sendPlan struct {
 	message     channel.Message
 }
 
+var errOutboundMessageRequired = errors.New("message is required")
+
 // Send executes a send-message action. args are the tool call arguments.
 func (e *Executor) Send(ctx context.Context, session SessionContext, args map[string]any) (*SendResult, error) {
 	return e.sendWithMode(ctx, session, "", args, sendMode{
@@ -245,7 +247,8 @@ func (e *Executor) buildOutboundMessage(
 	outboundMessage, parseErr := ParseOutboundMessage(messageArgs, messageText)
 	if parseErr != nil {
 		rawAtt, hasTopLevelAttachments := args["attachments"]
-		if (!hasTopLevelAttachments || rawAtt == nil) && messageAttachments == nil {
+		hasAttachments := (hasTopLevelAttachments && rawAtt != nil) || messageAttachments != nil
+		if !hasAttachments || !errors.Is(parseErr, errOutboundMessageRequired) {
 			return channel.Message{}, parseErr
 		}
 		outboundMessage = channel.Message{Text: strings.TrimSpace(messageText)}
@@ -585,7 +588,7 @@ func ParseOutboundMessage(arguments map[string]any, fallbackText string) (channe
 		msg.Text = strings.TrimSpace(fallbackText)
 	}
 	if msg.IsEmpty() {
-		return channel.Message{}, errors.New("message is required")
+		return channel.Message{}, errOutboundMessageRequired
 	}
 	return msg, nil
 }
@@ -605,6 +608,11 @@ func validateOutboundMessageObject(raw map[string]any) error {
 			return err
 		}
 	}
+	if actions, ok := raw["actions"]; ok && actions != nil {
+		if err := validateOutboundMessageActions(actions); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -621,6 +629,49 @@ func validateOutboundMessageParts(raw any) error {
 		if err := validateOutboundMessagePart(i, part); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateOutboundMessageActions(raw any) error {
+	actions, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	for i, rawAction := range actions {
+		action, ok := rawAction.(map[string]any)
+		if !ok {
+			continue
+		}
+		if err := validateOutboundMessageAction(i, action); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateOutboundMessageAction(index int, raw map[string]any) error {
+	allowed := map[string]struct{}{
+		"type": {}, "label": {}, "value": {}, "url": {}, "row": {},
+	}
+	for key := range raw {
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("unknown message action field %q at index %d", key, index)
+		}
+	}
+	label, _ := raw["label"].(string)
+	if strings.TrimSpace(label) == "" {
+		return fmt.Errorf("message action label is required at index %d", index)
+	}
+	value, _ := raw["value"].(string)
+	rawURL, _ := raw["url"].(string)
+	value = strings.TrimSpace(value)
+	rawURL = strings.TrimSpace(rawURL)
+	if value == "" && rawURL == "" {
+		return fmt.Errorf("message action target is required at index %d", index)
+	}
+	if rawURL != "" && !channel.IsHTTPURL(rawURL) {
+		return fmt.Errorf("message action url must be http(s) at index %d", index)
 	}
 	return nil
 }
