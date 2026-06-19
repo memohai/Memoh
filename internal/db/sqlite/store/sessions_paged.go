@@ -278,5 +278,5 @@ func parseSQLiteTimestamp(raw string) (pgtype.Timestamptz, error) {
 			return pgtype.Timestamptz{Time: parsed.UTC(), Valid: true}, nil
 		}
 	}
-	return pgtype.Timestamptz{}, fmt.Errorf("unsupported timestamp format")
+	return pgtype.Timestamptz{}, errors.New("unsupported timestamp format")
 }
