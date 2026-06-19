@@ -197,7 +197,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 // publishSessionCreated emits a session_created event for the new session.
 // Best-effort: failures are logged but never fail the create.
 func (s *Service) publishSessionCreated(sess Session) {
-	if s == nil || s.publisher == nil {
+	if s.publisher == nil {
 		return
 	}
 	payload, err := json.Marshal(map[string]any{

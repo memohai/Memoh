@@ -159,9 +159,9 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 				}
 			case messageevent.EventTypeBackgroundTask, messageevent.EventTypeAgentStream:
 				// Forward only to the owning session. The old bot-wide
-				// stream forwarded these too — drop them here and the
-				// chat UI loses live background-task / agent-stream
-				// updates.
+				// stream carried these for every active session; if we
+				// drop them here the chat UI loses live background-task
+				// and agent-stream updates for the focused session.
 				var payload map[string]any
 				if err := json.Unmarshal(event.Data, &payload); err != nil {
 					continue
