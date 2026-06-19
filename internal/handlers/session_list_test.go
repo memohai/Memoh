@@ -111,13 +111,13 @@ func TestListSessionsDefaultsToUserFacingTypes(t *testing.T) {
 	}
 	got := append([]string(nil), queries.pagedCall.Types...)
 	sort.Strings(got)
-	want := append([]string(nil), session.UserFacingSessionTypes...)
+	want := session.UserFacingSessionTypes()
 	sort.Strings(want)
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("default types = %v, want %v", got, want)
 	}
-	if queries.pagedCall.LimitCount != sessionListDefaultLimit {
-		t.Fatalf("default limit = %d, want %d", queries.pagedCall.LimitCount, sessionListDefaultLimit)
+	if queries.pagedCall.LimitCount != sessionListDefaultLimit+1 {
+		t.Fatalf("default limit = %d, want %d (default+1 has-more probe)", queries.pagedCall.LimitCount, sessionListDefaultLimit+1)
 	}
 	if queries.pagedCall.UseCursor {
 		t.Fatalf("UseCursor should be false when no cursor was supplied")
@@ -169,8 +169,8 @@ func TestListSessionsClampsLimit(t *testing.T) {
 	if _, err := callListSessions(handler, botID, "limit=10"); err != nil {
 		t.Fatalf("ListSessions() error = %v", err)
 	}
-	if queries.pagedCall.LimitCount != 10 {
-		t.Fatalf("limit = %d, want 10", queries.pagedCall.LimitCount)
+	if queries.pagedCall.LimitCount != 11 {
+		t.Fatalf("limit = %d, want 11 (request+1 has-more probe)", queries.pagedCall.LimitCount)
 	}
 }
 
@@ -178,15 +178,20 @@ func TestListSessionsCursorRoundTrip(t *testing.T) {
 	botID := "11111111-1111-1111-1111-111111111111"
 	rowUpdated := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 	rowID := "33333333-3333-3333-3333-333333333333"
+	// The handler probes one row past `limit` to detect "has more". Returning
+	// two rows for a limit=1 request stands in for "the DB has more rows" and
+	// drives the cursor down the round-trip path.
 	queries := &sessionListQueries{
 		bot: testBotRow(botID, nil),
 		pagedRows: []sqlc.ListSessionsByBotPagedRow{
 			pagedRow(rowID, rowUpdated),
+			pagedRow("44444444-4444-4444-4444-444444444444", rowUpdated.Add(-time.Minute)),
 		},
 	}
 	handler := newListSessionHandler(t, queries)
 
-	// With limit=1 and 1 returned row, next_cursor must point at the last row.
+	// With limit=1 and 2 returned rows, next_cursor must point at the last
+	// kept row (the probe row is sliced off).
 	rec, err := callListSessions(handler, botID, "limit=1")
 	if err != nil {
 		t.Fatalf("ListSessions() error = %v", err)
@@ -286,10 +291,13 @@ func TestListSessionsCursorNotTruncatedByPermissionFilter(t *testing.T) {
 	queries := &sessionListQueries{bot: testBotRow(botID, nil)}
 	// limit=2 page where the first row is the user's chat session and the
 	// second row is a discuss session created by the same user that the
-	// permission filter discards.
+	// permission filter discards. The third row is the has-more probe — its
+	// id is what the cursor must surface so pagination resumes from the DB
+	// position rather than the post-filter survivorship.
 	queries.userPagedRows = []sqlc.ListSessionsByBotAndCreatedByUserPagedRow{
 		userPagedRow(keptID, userID, session.TypeChat, rowUpdated.Add(2*time.Minute)),
 		userPagedRow(droppedID, userID, session.TypeDiscuss, rowUpdated),
+		userPagedRow("44444444-4444-4444-4444-444444444444", userID, session.TypeChat, rowUpdated.Add(-time.Minute)),
 	}
 
 	handler := NewSessionHandler(

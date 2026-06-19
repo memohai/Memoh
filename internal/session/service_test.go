@@ -449,3 +449,36 @@ func TestListByBotAndCreatedByUserPagedForwardsUserScope(t *testing.T) {
 		t.Fatalf("LimitCount = %d, want 5", stub.userPagedArg.LimitCount)
 	}
 }
+
+// TestSessionCursorIsZeroDistinguishesPartialFromEmpty pins down the contract
+// that pagedCursorParams relies on: a partial cursor (only one half set) is
+// not zero, so a misconstructed cursor surfaces as an error rather than
+// silently restarting the listing from the head.
+func TestSessionCursorIsZeroDistinguishesPartialFromEmpty(t *testing.T) {
+	if !(SessionCursor{}).IsZero() {
+		t.Fatalf("zero-value cursor should be zero")
+	}
+	partialID := SessionCursor{ID: "33333333-3333-3333-3333-333333333333"}
+	if partialID.IsZero() {
+		t.Fatalf("cursor with only id set should not be zero")
+	}
+	partialTS := SessionCursor{UpdatedAt: time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC)}
+	if partialTS.IsZero() {
+		t.Fatalf("cursor with only updated_at set should not be zero")
+	}
+}
+
+func TestListByBotPagedRejectsPartialCursor(t *testing.T) {
+	stub := &pagedQueriesStub{}
+	svc := NewService(nil, stub)
+	botID := "11111111-1111-1111-1111-111111111111"
+
+	_, err := svc.ListByBotPaged(context.Background(), botID, []string{TypeChat},
+		SessionCursor{ID: "33333333-3333-3333-3333-333333333333"}, 10)
+	if err == nil {
+		t.Fatalf("ListByBotPaged with id-only cursor should error rather than restart from the head")
+	}
+	if !strings.Contains(err.Error(), "cursor must carry both") {
+		t.Fatalf("error = %v, want partial-cursor message", err)
+	}
+}

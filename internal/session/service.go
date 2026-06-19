@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -47,10 +48,19 @@ const (
 	DefaultACPProjectPath = "/data"
 )
 
-// UserFacingSessionTypes lists the session types intended to appear in
+// userFacingSessionTypes lists the session types intended to appear in
 // user-facing session lists. Heartbeat, schedule, and subagent sessions are
 // system-internal — they back agent-driven loops and never surface in the UI.
-var UserFacingSessionTypes = []string{TypeChat, TypeDiscuss, TypeACPAgent}
+var userFacingSessionTypes = []string{TypeChat, TypeDiscuss, TypeACPAgent}
+
+// UserFacingSessionTypes returns a fresh copy of the user-facing session type
+// list so callers can read or mutate it without disturbing the package-level
+// source of truth.
+func UserFacingSessionTypes() []string {
+	out := make([]string, len(userFacingSessionTypes))
+	copy(out, userFacingSessionTypes)
+	return out
+}
 
 var (
 	ErrACPAgentIDRequired    = errors.New("acp_agent_id is required for acp_agent sessions")
@@ -71,7 +81,7 @@ func IsKnownType(typ string) bool {
 // IsUserFacingType reports whether a session type is one that user-facing
 // session list endpoints should return by default.
 func IsUserFacingType(typ string) bool {
-	return slices.Contains(UserFacingSessionTypes, strings.TrimSpace(typ))
+	return slices.Contains(userFacingSessionTypes, strings.TrimSpace(typ))
 }
 
 // CreateInput holds input for creating a new session.
@@ -285,24 +295,28 @@ type SessionCursor struct {
 	ID        string
 }
 
-// IsZero reports whether the cursor is missing either half and so cannot
-// position a keyset query. We treat a partially-constructed cursor (only the
-// timestamp or only the id set) the same as the zero value: the handler
-// decoder rejects empty halves already, but internal callers that build a
-// cursor by hand should also be funneled down the no-cursor path rather than
-// silently feeding malformed bindings to pagedCursorParams.
+// IsZero reports whether the cursor carries neither half — the start-of-list
+// signal that pagedCursorParams maps to "no cursor predicate". A
+// partially-populated cursor (only the timestamp or only the id) is not zero;
+// pagedCursorParams rejects it as a programmer error so we never send
+// malformed bindings down to SQL.
 func (c SessionCursor) IsZero() bool {
-	return c.ID == "" || c.UpdatedAt.IsZero()
+	return c.ID == "" && c.UpdatedAt.IsZero()
 }
 
 // ListByBotPaged returns one page of sessions for a bot, filtered to the given
-// types and starting after the given cursor.
-func (s *Service) ListByBotPaged(ctx context.Context, botID string, types []string, cursor SessionCursor, limit int32) ([]Session, error) {
+// types and starting after the given cursor. Callers that want a "has more"
+// signal pass limit+1 and look for an extra row.
+func (s *Service) ListByBotPaged(ctx context.Context, botID string, types []string, cursor SessionCursor, limit int64) ([]Session, error) {
 	pgBotID, err := dbpkg.ParseUUID(botID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid bot id: %w", err)
 	}
 	cursorUpdatedAt, cursorID, useCursor, err := pagedCursorParams(cursor)
+	if err != nil {
+		return nil, err
+	}
+	limitParam, err := pagedLimitToInt32(limit)
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +326,7 @@ func (s *Service) ListByBotPaged(ctx context.Context, botID string, types []stri
 		UseCursor:       useCursor,
 		CursorUpdatedAt: cursorUpdatedAt,
 		CursorID:        cursorID,
-		LimitCount:      limit,
+		LimitCount:      limitParam,
 	})
 	if err != nil {
 		return nil, err
@@ -325,7 +339,7 @@ func (s *Service) ListByBotPaged(ctx context.Context, botID string, types []stri
 }
 
 // ListByBotAndCreatedByUserPaged is the paged variant scoped to a single user.
-func (s *Service) ListByBotAndCreatedByUserPaged(ctx context.Context, botID, userID string, types []string, cursor SessionCursor, limit int32) ([]Session, error) {
+func (s *Service) ListByBotAndCreatedByUserPaged(ctx context.Context, botID, userID string, types []string, cursor SessionCursor, limit int64) ([]Session, error) {
 	pgBotID, err := dbpkg.ParseUUID(botID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid bot id: %w", err)
@@ -338,6 +352,10 @@ func (s *Service) ListByBotAndCreatedByUserPaged(ctx context.Context, botID, use
 	if err != nil {
 		return nil, err
 	}
+	limitParam, err := pagedLimitToInt32(limit)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.queries.ListSessionsByBotAndCreatedByUserPaged(ctx, sqlc.ListSessionsByBotAndCreatedByUserPagedParams{
 		BotID:           pgBotID,
 		CreatedByUserID: pgUserID,
@@ -345,7 +363,7 @@ func (s *Service) ListByBotAndCreatedByUserPaged(ctx context.Context, botID, use
 		UseCursor:       useCursor,
 		CursorUpdatedAt: cursorUpdatedAt,
 		CursorID:        cursorID,
-		LimitCount:      limit,
+		LimitCount:      limitParam,
 	})
 	if err != nil {
 		return nil, err
@@ -357,9 +375,28 @@ func (s *Service) ListByBotAndCreatedByUserPaged(ctx context.Context, botID, use
 	return sessions, nil
 }
 
+// pagedLimitToInt32 narrows the int64 page-size that flows through the
+// service signatures into the int32 sqlc binds. The handler caps the user-
+// supplied limit at sessionListMaxLimit and bumps it by one for the
+// has-more probe; both fit in int32 by construction, so any out-of-range value
+// here is a programmer error and surfaces as such.
+func pagedLimitToInt32(limit int64) (int32, error) {
+	if limit < 1 || limit > math.MaxInt32 {
+		return 0, fmt.Errorf("session: paged limit %d is out of range", limit)
+	}
+	return int32(limit), nil
+}
+
 func pagedCursorParams(cursor SessionCursor) (pgtype.Timestamptz, pgtype.UUID, bool, error) {
 	if cursor.IsZero() {
 		return pgtype.Timestamptz{}, pgtype.UUID{}, false, nil
+	}
+	if cursor.ID == "" || cursor.UpdatedAt.IsZero() {
+		// The handler-side decoder rejects half-built cursors as 400, so by the
+		// time we get here a partial cursor is an internal-construction bug.
+		// Surface it loudly rather than silently restarting from the head and
+		// returning a duplicate page.
+		return pgtype.Timestamptz{}, pgtype.UUID{}, false, errors.New("session: cursor must carry both updated_at and id")
 	}
 	pgID, err := dbpkg.ParseUUID(cursor.ID)
 	if err != nil {

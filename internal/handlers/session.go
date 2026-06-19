@@ -185,27 +185,35 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 		nextCursor   session.SessionCursor
 		hasMorePages bool
 	)
+	// Probe one row past the requested page so we can answer "is there more?"
+	// without forcing the client into a tail request that returns []. The
+	// extra row is sliced off before the response is built.
+	probeLimit := limit + 1
 	if bots.HasPermission(perms, bots.PermissionManage) {
-		sessions, err = h.sessionService.ListByBotPaged(c.Request().Context(), bot.ID, types, cursor, limit)
-		if err == nil && len(sessions) == int(limit) {
-			hasMorePages = true
-			last := sessions[len(sessions)-1]
-			nextCursor = session.SessionCursor{UpdatedAt: last.UpdatedAt, ID: last.ID}
+		var rows []session.Session
+		rows, err = h.sessionService.ListByBotPaged(c.Request().Context(), bot.ID, types, cursor, probeLimit)
+		if err == nil {
+			sessions, hasMorePages = trimPagedSessions(rows, limit)
+			if hasMorePages {
+				last := sessions[len(sessions)-1]
+				nextCursor = session.SessionCursor{UpdatedAt: last.UpdatedAt, ID: last.ID}
+			}
 		}
 	} else {
 		var preFilter []session.Session
-		preFilter, err = h.sessionService.ListByBotAndCreatedByUserPaged(c.Request().Context(), bot.ID, channelIdentityID, types, cursor, limit)
+		preFilter, err = h.sessionService.ListByBotAndCreatedByUserPaged(c.Request().Context(), bot.ID, channelIdentityID, types, cursor, probeLimit)
 		if err == nil {
 			// next_cursor must reflect the DB position to resume from, not the
 			// filter survivorship — otherwise a page whose rows were all
 			// dropped by the permission filter would terminate pagination
 			// while older accessible rows still exist on disk.
-			if len(preFilter) == int(limit) {
-				hasMorePages = true
-				last := preFilter[len(preFilter)-1]
+			var page []session.Session
+			page, hasMorePages = trimPagedSessions(preFilter, limit)
+			if hasMorePages {
+				last := page[len(page)-1]
 				nextCursor = session.SessionCursor{UpdatedAt: last.UpdatedAt, ID: last.ID}
 			}
-			sessions = filterSessionsForPermissions(preFilter, channelIdentityID, perms)
+			sessions = filterSessionsForPermissions(page, channelIdentityID, perms)
 		}
 	}
 	if err != nil {
@@ -219,7 +227,19 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 	return c.JSON(http.StatusOK, listSessionsResponse{Items: sessions, NextCursor: encoded})
 }
 
-// listSessionsResponse is the shape returned by ListSessions.
+// trimPagedSessions implements the limit+1 has-more probe: if the SQL layer
+// returned the extra row, slice it off and signal hasMore; otherwise the
+// caller has reached the end of the listing and next_cursor must stay empty.
+func trimPagedSessions(rows []session.Session, limit int64) ([]session.Session, bool) {
+	if int64(len(rows)) > limit {
+		return rows[:limit], true
+	}
+	return rows, false
+}
+
+// listSessionsResponse carries one page of sessions. NextCursor is empty
+// exactly when the caller has reached the end of the listing — clients should
+// stop paging on an empty cursor and never expect a follow-up empty page.
 type listSessionsResponse struct {
 	Items      []session.Session `json:"items"`
 	NextCursor string            `json:"next_cursor"`
@@ -233,9 +253,7 @@ const (
 func parseSessionTypesParam(raw string) ([]string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		out := make([]string, len(session.UserFacingSessionTypes))
-		copy(out, session.UserFacingSessionTypes)
-		return out, nil
+		return session.UserFacingSessionTypes(), nil
 	}
 	parts := strings.Split(raw, ",")
 	out := make([]string, 0, len(parts))
@@ -260,20 +278,19 @@ func parseSessionTypesParam(raw string) ([]string, error) {
 	return out, nil
 }
 
-func parseSessionLimitParam(raw string) (int32, error) {
+func parseSessionLimitParam(raw string) (int64, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return sessionListDefaultLimit, nil
 	}
-	value, err := strconv.Atoi(raw)
+	value, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
 		return 0, echo.NewHTTPError(http.StatusBadRequest, "limit must be an integer")
 	}
 	if value < 1 || value > sessionListMaxLimit {
 		return 0, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("limit must be between 1 and %d", sessionListMaxLimit))
 	}
-	//nolint:gosec // bounded above by sessionListMaxLimit (200), safe for int32.
-	return int32(value), nil
+	return value, nil
 }
 
 // encodeSessionCursor packs the keyset cursor as base64(updated_at|id) where
