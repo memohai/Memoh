@@ -57,6 +57,8 @@ func StripInlineMarkup(s string) string {
 // channel gets retyped instead of being rejected.
 //
 // Degradation rules (applied in order):
+//   - Markdown body on a Rich-only channel: treat the body as literal text in
+//     a single rich part so channel renderers can escape it for their syntax.
 //   - Markdown body on a Plain-only channel: strip inline markup, retype Plain.
 //   - Rich body (Parts) on a Markdown-capable channel: render Parts via the
 //     canonical GFM degrader (RenderPartsAsMarkdown), retype Markdown.
@@ -67,9 +69,15 @@ func StripInlineMarkup(s string) string {
 // rejected by validateMessageCapabilities — extend this function when a
 // handler needs to emit them on a non-capable channel.
 func coerceFormatForCaps(msg Message, caps ChannelCapabilities) Message {
-	if msg.Format == MessageFormatMarkdown && !caps.Markdown && !caps.RichText {
-		msg.Text = StripInlineMarkup(msg.Text)
-		msg.Format = MessageFormatPlain
+	if msg.Format == MessageFormatMarkdown && !caps.Markdown {
+		if caps.RichText && strings.TrimSpace(msg.Text) != "" {
+			msg.Parts = []MessagePart{{Type: MessagePartText, Text: msg.Text}}
+			msg.Text = ""
+			msg.Format = MessageFormatRich
+		} else if !caps.RichText {
+			msg.Text = StripInlineMarkup(msg.Text)
+			msg.Format = MessageFormatPlain
+		}
 	}
 	if len(msg.Parts) > 0 && !caps.RichText {
 		if caps.Markdown {

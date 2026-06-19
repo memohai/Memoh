@@ -278,3 +278,27 @@ func TestCoerceFormatForCaps_PreservesPartsOnRichChannel(t *testing.T) {
 		t.Errorf("expected Parts preserved, got %d", len(got.Parts))
 	}
 }
+
+func TestCoerceFormatForCaps_MarkdownBodyBecomesTextPartOnRichOnlyChannel(t *testing.T) {
+	t.Parallel()
+
+	msg := Message{
+		Format: MessageFormatMarkdown,
+		Text:   `Hello [docs](https://example.test) <at user_id="all"></at> **bold**`,
+	}
+	richOnlyCaps := ChannelCapabilities{Text: true, RichText: true}
+
+	got := coerceFormatForCaps(msg, richOnlyCaps)
+	if got.Format != MessageFormatRich {
+		t.Fatalf("Format = %q, want rich", got.Format)
+	}
+	if got.Text != "" {
+		t.Fatalf("Text should be cleared after rich conversion, got %q", got.Text)
+	}
+	if len(got.Parts) != 1 {
+		t.Fatalf("Parts len = %d, want 1", len(got.Parts))
+	}
+	if got.Parts[0].Type != MessagePartText || got.Parts[0].Text != msg.Text {
+		t.Fatalf("unexpected text part: %#v", got.Parts[0])
+	}
+}

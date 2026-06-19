@@ -31,6 +31,7 @@ func (*WebAdapter) Descriptor() channel.Descriptor {
 		Configless:  true,
 		Capabilities: channel.ChannelCapabilities{
 			Text:           true,
+			Markdown:       true,
 			Reply:          true,
 			Attachments:    true,
 			Streaming:      true,
