@@ -407,6 +407,47 @@ func TestMessageProviderSendToolExposesStructuredMessagePartsSchema(t *testing.T
 	if _, ok := actionItems["anyOf"].([]any); !ok {
 		t.Fatalf("message action schema should require value or url via anyOf, got %#v", actionItems["anyOf"])
 	}
+
+	topLevelAttachments, ok := props["attachments"].(map[string]any)
+	if !ok {
+		t.Fatalf("top-level attachments schema missing in %#v", props)
+	}
+	messageAttachments, ok := messageProps["attachments"].(map[string]any)
+	if !ok {
+		t.Fatalf("message.attachments schema missing in %#v", messageProps)
+	}
+	for label, attachments := range map[string]map[string]any{
+		"top-level attachments": topLevelAttachments,
+		"message.attachments":   messageAttachments,
+	} {
+		attachmentItems, ok := attachments["items"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s.items schema = %T, want map[string]any", label, attachments["items"])
+		}
+		anyOf, ok := attachmentItems["anyOf"].([]any)
+		if !ok || len(anyOf) != 2 {
+			t.Fatalf("%s.items should accept string or strict object, got %#v", label, attachmentItems["anyOf"])
+		}
+		objectSchema, ok := anyOf[1].(map[string]any)
+		if !ok {
+			t.Fatalf("%s object schema = %T, want map[string]any", label, anyOf[1])
+		}
+		if objectSchema["additionalProperties"] != false {
+			t.Fatalf("%s object schema should be strict, got %#v", label, objectSchema["additionalProperties"])
+		}
+		objectProps, ok := objectSchema["properties"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s object properties missing in %#v", label, objectSchema)
+		}
+		for _, field := range []string{"path", "url", "base64", "content_hash", "platform_key"} {
+			if _, ok := objectProps[field]; !ok {
+				t.Fatalf("%s object schema missing %q in %#v", label, field, objectProps)
+			}
+		}
+		if _, ok := objectSchema["anyOf"].([]any); !ok {
+			t.Fatalf("%s object schema should require a reference field via anyOf, got %#v", label, objectSchema["anyOf"])
+		}
+	}
 }
 
 func TestContainerProviderUsageGatesRegisteredTools(t *testing.T) {

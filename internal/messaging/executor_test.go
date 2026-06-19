@@ -311,6 +311,57 @@ func TestSendDirectInvalidStructuredMessageWithAttachmentsReturnsParseError(t *t
 	}
 }
 
+func TestSendDirectInvalidAttachmentObjectReturnsError(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		args map[string]any
+	}{
+		{
+			name: "top level attachment typo",
+			args: map[string]any{
+				"message": map[string]any{"text": "see attachment"},
+				"attachments": []any{
+					map[string]any{"href": "https://example.com/file.png"},
+				},
+			},
+		},
+		{
+			name: "nested attachment typo",
+			args: map[string]any{
+				"message": map[string]any{
+					"text": "see attachment",
+					"attachments": []any{
+						map[string]any{"href": "https://example.com/file.png"},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sender := &testSender{}
+			exec := &Executor{
+				Sender:   sender,
+				Resolver: testResolver{},
+			}
+
+			_, err := exec.SendDirect(context.Background(), SessionContext{
+				BotID:           "bot_1",
+				CurrentPlatform: "telegram",
+			}, "chat-1", tc.args)
+			if err == nil || !strings.Contains(err.Error(), "unknown attachment field") {
+				t.Fatalf("SendDirect error = %v, want unknown attachment field", err)
+			}
+			if sender.called != 0 {
+				t.Fatalf("expected sender not called, got %d", sender.called)
+			}
+		})
+	}
+}
+
 func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 	t.Parallel()
 

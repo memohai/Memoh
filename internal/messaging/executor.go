@@ -332,6 +332,9 @@ func (e *Executor) resolveOutboundAttachments(
 	rawAttachments any,
 	allowSameConversationShortcut bool,
 ) ([]channel.Attachment, error) {
+	if err := validateOutboundAttachmentInput(rawAttachments); err != nil {
+		return nil, err
+	}
 	bundles, ok := attachmentpkg.ParseToolInputBundles(rawAttachments)
 	if !ok {
 		return nil, errors.New("attachments must be a string, object, or array")
@@ -348,6 +351,63 @@ func (e *Executor) resolveOutboundAttachments(
 		return nil, errors.New("attachments could not be resolved")
 	}
 	return resolved, nil
+}
+
+func validateOutboundAttachmentInput(raw any) error {
+	switch value := raw.(type) {
+	case nil:
+		return nil
+	case string:
+		return nil
+	case map[string]any:
+		return validateOutboundAttachmentObject("", value)
+	case []string:
+		return nil
+	case []any:
+		for i, item := range value {
+			if err := validateOutboundAttachmentItem(i, item); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+func validateOutboundAttachmentItem(index int, raw any) error {
+	switch value := raw.(type) {
+	case string:
+		return nil
+	case map[string]any:
+		return validateOutboundAttachmentObject(fmt.Sprintf(" at index %d", index), value)
+	default:
+		return fmt.Errorf("attachment must be string or object at index %d", index)
+	}
+}
+
+func validateOutboundAttachmentObject(location string, raw map[string]any) error {
+	allowed := map[string]struct{}{
+		"type": {}, "base64": {}, "path": {}, "url": {}, "platform_key": {}, "source_platform": {},
+		"content_hash": {}, "name": {}, "mime": {}, "size": {}, "duration_ms": {}, "width": {},
+		"height": {}, "thumbnail_url": {}, "caption": {}, "metadata": {},
+	}
+	for key := range raw {
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("unknown attachment field %q%s", key, location)
+		}
+	}
+	for _, key := range []string{"base64", "path", "url", "platform_key", "content_hash"} {
+		if strings.TrimSpace(stringMapValue(raw, key)) != "" {
+			return nil
+		}
+	}
+	return fmt.Errorf("attachment reference is required%s", location)
+}
+
+func stringMapValue(raw map[string]any, key string) string {
+	value, _ := raw[key].(string)
+	return value
 }
 
 func dropUnresolvedDataPathAttachments(attachments []channel.Attachment) []channel.Attachment {

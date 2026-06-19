@@ -83,12 +83,7 @@ func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sd
 					"attachments": map[string]any{
 						"type":        "array",
 						"description": "File paths, URLs, data URLs, or attachment objects to attach.",
-						"items": map[string]any{
-							"anyOf": []any{
-								map[string]any{"type": "string"},
-								map[string]any{"type": "object"},
-							},
-						},
+						"items":       sendAttachmentItemSchema(),
 					},
 					"message": sendMessageObjectSchema(),
 				},
@@ -147,12 +142,7 @@ func sendMessageObjectSchema() map[string]any {
 			"attachments": map[string]any{
 				"type":        "array",
 				"description": "File paths, URLs, data URLs, or attachment objects to attach.",
-				"items": map[string]any{
-					"anyOf": []any{
-						map[string]any{"type": "string"},
-						map[string]any{"type": "object"},
-					},
-				},
+				"items":       sendAttachmentItemSchema(),
 			},
 			"actions": map[string]any{
 				"type":        "array",
@@ -178,6 +168,47 @@ func sendMessageObjectSchema() map[string]any {
 				"type":        "object",
 				"description": "Reply reference; normally use the top-level reply_to shortcut instead.",
 			},
+		},
+	}
+}
+
+func sendAttachmentItemSchema() map[string]any {
+	return map[string]any{
+		"anyOf": []any{
+			map[string]any{"type": "string"},
+			sendAttachmentObjectSchema(),
+		},
+	}
+}
+
+func sendAttachmentObjectSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"anyOf": []any{
+			map[string]any{"required": []string{"path"}},
+			map[string]any{"required": []string{"url"}},
+			map[string]any{"required": []string{"base64"}},
+			map[string]any{"required": []string{"content_hash"}},
+			map[string]any{"required": []string{"platform_key"}},
+		},
+		"properties": map[string]any{
+			"type":            map[string]any{"type": "string"},
+			"base64":          map[string]any{"type": "string"},
+			"path":            map[string]any{"type": "string"},
+			"url":             map[string]any{"type": "string"},
+			"platform_key":    map[string]any{"type": "string"},
+			"source_platform": map[string]any{"type": "string"},
+			"content_hash":    map[string]any{"type": "string"},
+			"name":            map[string]any{"type": "string"},
+			"mime":            map[string]any{"type": "string"},
+			"size":            map[string]any{"type": "integer"},
+			"duration_ms":     map[string]any{"type": "integer"},
+			"width":           map[string]any{"type": "integer"},
+			"height":          map[string]any{"type": "integer"},
+			"thumbnail_url":   map[string]any{"type": "string"},
+			"caption":         map[string]any{"type": "string"},
+			"metadata":        map[string]any{"type": "object"},
 		},
 	}
 }
