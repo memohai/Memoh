@@ -49,6 +49,7 @@ func (*MessageProvider) Usage(_ context.Context, session SessionContext, availab
 				parts = append(parts, sendRef+": Send a message, file, or attachment. Specify `platform` and `target` in this session.")
 			}
 		}
+		parts = append(parts, "Use `message.parts` only when a messaging tool needs precise structured output such as link/code_block/mention/heading/blockquote/list_item parts or inline styles; keep ordinary prose and Markdown in `text`.")
 	}
 	if reactRef, ok := available.Ref(ToolReact()); ok {
 		if session.CanOmitMessagingTarget() {

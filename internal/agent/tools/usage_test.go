@@ -240,6 +240,11 @@ func TestMessageProviderUsageGatesRegisteredTools(t *testing.T) {
 	if !strings.Contains(got, "Use ordinary assistant text for normal replies") || !strings.Contains(got, "Omit `target` to react") {
 		t.Fatalf("Usage with an explicit current conversation should distinguish normal replies from local reactions, got:\n%s", got)
 	}
+	for _, want := range []string{"`message.parts`", "link/code_block/mention", "list_item"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Usage should expose structured message parts guidance containing %q, got:\n%s", want, got)
+		}
+	}
 
 	backgroundSession := SessionContext{SessionType: sessionmode.Heartbeat, CurrentPlatform: "telegram", ReplyTarget: "chat-1"}
 	got = provider.Usage(context.Background(), backgroundSession, availableToolsForTest(ToolReact()))
