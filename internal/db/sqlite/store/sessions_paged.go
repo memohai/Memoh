@@ -3,7 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
-	"fmt"
+	"errors"
 	"strings"
 	"time"
 
@@ -79,7 +79,7 @@ func (q *Queries) listSessionsByBotPaged(ctx context.Context, arg pgsqlc.ListSes
 		// The caller never opts out of filtering — the handler always passes
 		// an explicit non-empty types set. Fail loudly so we don't silently
 		// match nothing or scan the world.
-		return nil, fmt.Errorf("ListSessionsByBotPaged: types must not be empty")
+		return nil, errors.New("ListSessionsByBotPaged: types must not be empty")
 	}
 	botID, useCursor, cursorTS, cursorID := pagedCursorBindings(arg.BotID, arg.UseCursor, arg.CursorUpdatedAt, arg.CursorID)
 	args := make([]any, 0, 5+len(arg.Types)+1)
@@ -93,7 +93,7 @@ func (q *Queries) listSessionsByBotPaged(ctx context.Context, arg pgsqlc.ListSes
 	if err != nil {
 		return nil, mapQueryErr(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanSessionPagedRows(rows, func(r sessionPagedScan) pgsqlc.ListSessionsByBotPagedRow {
 		return pgsqlc.ListSessionsByBotPagedRow{
 			ID: r.ID, BotID: r.BotID, RouteID: r.RouteID, ChannelType: r.ChannelType, Type: r.Type,
@@ -109,7 +109,7 @@ func (q *Queries) listSessionsByBotAndCreatedByUserPaged(ctx context.Context, ar
 		return nil, errSQLiteQueriesNotConfigured
 	}
 	if len(arg.Types) == 0 {
-		return nil, fmt.Errorf("ListSessionsByBotAndCreatedByUserPaged: types must not be empty")
+		return nil, errors.New("ListSessionsByBotAndCreatedByUserPaged: types must not be empty")
 	}
 	botID, useCursor, cursorTS, cursorID := pagedCursorBindings(arg.BotID, arg.UseCursor, arg.CursorUpdatedAt, arg.CursorID)
 	userID := nullableUUIDToString(arg.CreatedByUserID)
@@ -124,7 +124,7 @@ func (q *Queries) listSessionsByBotAndCreatedByUserPaged(ctx context.Context, ar
 	if err != nil {
 		return nil, mapQueryErr(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanSessionPagedRows(rows, func(r sessionPagedScan) pgsqlc.ListSessionsByBotAndCreatedByUserPagedRow {
 		return pgsqlc.ListSessionsByBotAndCreatedByUserPagedRow{
 			ID: r.ID, BotID: r.BotID, RouteID: r.RouteID, ChannelType: r.ChannelType, Type: r.Type,
@@ -186,14 +186,14 @@ func scanSessionPagedRows[T any](rows *sql.Rows, conv func(sessionPagedScan) T) 
 	var out []T
 	for rows.Next() {
 		var (
-			id, botID                       string
-			routeID, channelType            sql.NullString
-			typ, title, metadata            string
-			parentSessionID, createdByUser  sql.NullString
-			createdAt, updatedAt            string
-			deletedAt                       sql.NullString
-			routeMetadata                   sql.NullString
-			routeConversationType           sql.NullString
+			id, botID                      string
+			routeID, channelType           sql.NullString
+			typ, title, metadata           string
+			parentSessionID, createdByUser sql.NullString
+			createdAt, updatedAt           string
+			deletedAt                      sql.NullString
+			routeMetadata                  sql.NullString
+			routeConversationType          sql.NullString
 		)
 		if err := rows.Scan(
 			&id, &botID, &routeID, &channelType, &typ, &title, &metadata,

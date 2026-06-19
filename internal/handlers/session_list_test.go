@@ -57,7 +57,7 @@ func (q *sessionListQueries) ListSessionsByBotAndCreatedByUserPaged(_ context.Co
 // default response grants `chat`, which is enough for the list endpoint to
 // authorize but not enough to read `discuss` sessions — exactly the shape
 // needed to exercise the post-filter cursor path.
-func (q *sessionListQueries) ListBotUserGrantsForUser(_ context.Context, _ sqlc.ListBotUserGrantsForUserParams) ([]sqlc.ListBotUserGrantsForUserRow, error) {
+func (*sessionListQueries) ListBotUserGrantsForUser(_ context.Context, _ sqlc.ListBotUserGrantsForUserParams) ([]sqlc.ListBotUserGrantsForUserRow, error) {
 	return []sqlc.ListBotUserGrantsForUserRow{
 		{Permissions: []byte(`["chat"]`)},
 	}, nil
