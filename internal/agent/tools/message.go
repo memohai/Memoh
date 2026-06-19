@@ -89,7 +89,7 @@ func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sd
 							},
 						},
 					},
-					"message": map[string]any{"type": "object", "description": "Structured message payload with text/parts/attachments"},
+					"message": sendMessageObjectSchema(),
 				},
 				"required": sendRequired,
 			},
@@ -121,6 +121,101 @@ func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sd
 		})
 	}
 	return tools, nil
+}
+
+func sendMessageObjectSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"description":          "Structured message payload. Use text for ordinary messages; use parts only when you need explicit links, code blocks, mentions, emoji, or inline styles.",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"format": map[string]any{
+				"type":        "string",
+				"description": "Rendering hint for text. Use markdown for ordinary Markdown text; use rich only with parts.",
+				"enum":        []any{"plain", "markdown", "rich"},
+			},
+			"text": map[string]any{
+				"type":        "string",
+				"description": "Message body. Prefer this for ordinary prose and Markdown replies.",
+			},
+			"parts": map[string]any{
+				"type":        "array",
+				"description": "Structured rich body. Use only for explicit link/code_block/mention/emoji/styled spans.",
+				"items":       sendMessagePartSchema(),
+			},
+			"attachments": map[string]any{
+				"type":        "array",
+				"description": "File paths, URLs, data URLs, or attachment objects to attach.",
+				"items": map[string]any{
+					"anyOf": []any{
+						map[string]any{"type": "string"},
+						map[string]any{"type": "object"},
+					},
+				},
+			},
+			"actions": map[string]any{
+				"type":        "array",
+				"description": "Optional action buttons. URL actions render only on channels with button support.",
+				"items": map[string]any{
+					"type":                 "object",
+					"additionalProperties": false,
+					"properties": map[string]any{
+						"type":  map[string]any{"type": "string"},
+						"label": map[string]any{"type": "string"},
+						"value": map[string]any{"type": "string"},
+						"url":   map[string]any{"type": "string"},
+						"row":   map[string]any{"type": "integer"},
+					},
+				},
+			},
+			"reply": map[string]any{
+				"type":        "object",
+				"description": "Reply reference; normally use the top-level reply_to shortcut instead.",
+			},
+		},
+	}
+}
+
+func sendMessagePartSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []any{"type"},
+		"properties": map[string]any{
+			"type": map[string]any{
+				"type": "string",
+				"enum": []any{"text", "link", "code_block", "mention", "emoji"},
+			},
+			"text": map[string]any{
+				"type":        "string",
+				"description": "Visible text for text/link/code_block/mention/emoji parts.",
+			},
+			"url": map[string]any{
+				"type":        "string",
+				"description": "URL for link parts.",
+			},
+			"styles": map[string]any{
+				"type":        "array",
+				"description": "Inline styles for text-like parts.",
+				"items": map[string]any{
+					"type": "string",
+					"enum": []any{"bold", "italic", "strikethrough", "code"},
+				},
+			},
+			"language": map[string]any{
+				"type":        "string",
+				"description": "Language hint for code_block parts.",
+			},
+			"channel_identity_id": map[string]any{
+				"type":        "string",
+				"description": "Platform identity ID for mention parts when known.",
+			},
+			"emoji": map[string]any{
+				"type":        "string",
+				"description": "Emoji fallback for emoji parts.",
+			},
+		},
+	}
 }
 
 func sendToolPromptMetadata(session SessionContext) (description string, platformDescription string, targetDescription string, required []string) {

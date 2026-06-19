@@ -119,6 +119,27 @@ func requiredContainsForTest(required []string, field string) bool {
 	return false
 }
 
+func assertEnumContainsForTest(t *testing.T, raw any, values ...string) {
+	t.Helper()
+	items, ok := raw.([]any)
+	if !ok {
+		t.Fatalf("enum = %T, want []any", raw)
+	}
+	have := make(map[string]bool, len(items))
+	for _, item := range items {
+		text, ok := item.(string)
+		if !ok {
+			t.Fatalf("enum item = %T, want string", item)
+		}
+		have[text] = true
+	}
+	for _, value := range values {
+		if !have[value] {
+			t.Fatalf("enum missing %q in %#v", value, items)
+		}
+	}
+}
+
 func TestBuiltInToolsHaveUsageGuidanceOrExplicitExemption(t *testing.T) {
 	t.Parallel()
 
@@ -305,6 +326,64 @@ func TestMessageProviderToolDescriptionsGateCurrentConversationTarget(t *testing
 			t.Fatalf("react should require %s for background sessions, required=%v", field, required)
 		}
 	}
+}
+
+func TestMessageProviderSendToolExposesStructuredMessagePartsSchema(t *testing.T) {
+	t.Parallel()
+
+	provider := NewMessageProvider(nil, usageTestSender{}, usageTestReactor{}, usageTestResolver{}, nil)
+	tools, err := provider.Tools(context.Background(), SessionContext{
+		SessionType:     sessionmode.Chat,
+		CurrentPlatform: "telegram",
+		ReplyTarget:     "chat-1",
+	})
+	if err != nil {
+		t.Fatalf("Tools returned error: %v", err)
+	}
+
+	send := toolByNameForTest(t, tools, ToolSend())
+	params, ok := send.Parameters.(map[string]any)
+	if !ok {
+		t.Fatalf("send parameters = %T, want map[string]any", send.Parameters)
+	}
+	props, ok := params["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("send properties = %T, want map[string]any", params["properties"])
+	}
+	message, ok := props["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("message schema = %T, want map[string]any", props["message"])
+	}
+	messageProps, ok := message["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("message schema should expose properties, got %#v", message)
+	}
+	parts, ok := messageProps["parts"].(map[string]any)
+	if !ok {
+		t.Fatalf("message.parts schema missing in %#v", messageProps)
+	}
+	items, ok := parts["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("message.parts.items schema = %T, want map[string]any", parts["items"])
+	}
+	partProps, ok := items["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("part properties missing in %#v", items)
+	}
+	typeSchema, ok := partProps["type"].(map[string]any)
+	if !ok {
+		t.Fatalf("part type schema missing in %#v", partProps)
+	}
+	assertEnumContainsForTest(t, typeSchema["enum"], "text", "link", "code_block", "mention", "emoji")
+	styles, ok := partProps["styles"].(map[string]any)
+	if !ok {
+		t.Fatalf("part styles schema missing in %#v", partProps)
+	}
+	styleItems, ok := styles["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("part styles items schema = %T, want map[string]any", styles["items"])
+	}
+	assertEnumContainsForTest(t, styleItems["enum"], "bold", "italic", "strikethrough", "code")
 }
 
 func TestContainerProviderUsageGatesRegisteredTools(t *testing.T) {

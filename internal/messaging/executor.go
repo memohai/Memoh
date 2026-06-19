@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -566,6 +567,9 @@ func ParseOutboundMessage(arguments map[string]any, fallbackText string) (channe
 		case string:
 			msg.Text = strings.TrimSpace(value)
 		case map[string]any:
+			if err := validateOutboundMessageObject(value); err != nil {
+				return channel.Message{}, err
+			}
 			data, err := json.Marshal(value)
 			if err != nil {
 				return channel.Message{}, err
@@ -584,6 +588,76 @@ func ParseOutboundMessage(arguments map[string]any, fallbackText string) (channe
 		return channel.Message{}, errors.New("message is required")
 	}
 	return msg, nil
+}
+
+func validateOutboundMessageObject(raw map[string]any) error {
+	allowed := map[string]struct{}{
+		"id": {}, "format": {}, "text": {}, "parts": {}, "attachments": {}, "actions": {},
+		"thread": {}, "reply": {}, "forward": {}, "metadata": {},
+	}
+	for key := range raw {
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("unknown message field %q", key)
+		}
+	}
+	if parts, ok := raw["parts"]; ok && parts != nil {
+		if err := validateOutboundMessageParts(parts); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateOutboundMessageParts(raw any) error {
+	parts, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	for i, rawPart := range parts {
+		part, ok := rawPart.(map[string]any)
+		if !ok {
+			continue
+		}
+		if err := validateOutboundMessagePart(i, part); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateOutboundMessagePart(index int, raw map[string]any) error {
+	allowed := map[string]struct{}{
+		"type": {}, "text": {}, "url": {}, "styles": {}, "language": {},
+		"channel_identity_id": {}, "emoji": {}, "metadata": {},
+	}
+	for key := range raw {
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("unknown message part field %q at index %d", key, index)
+		}
+	}
+	partType, _ := raw["type"].(string)
+	switch channel.MessagePartType(strings.TrimSpace(partType)) {
+	case channel.MessagePartText, channel.MessagePartLink, channel.MessagePartCodeBlock, channel.MessagePartMention, channel.MessagePartEmoji:
+	default:
+		return fmt.Errorf("unsupported message part type %q at index %d", partType, index)
+	}
+	styles, ok := raw["styles"]
+	if !ok || styles == nil {
+		return nil
+	}
+	styleItems, ok := styles.([]any)
+	if !ok {
+		return nil
+	}
+	for _, rawStyle := range styleItems {
+		style, _ := rawStyle.(string)
+		switch channel.MessageTextStyle(strings.TrimSpace(style)) {
+		case channel.MessageStyleBold, channel.MessageStyleItalic, channel.MessageStyleStrikethrough, channel.MessageStyleCode:
+		default:
+			return fmt.Errorf("unsupported message part style %q at index %d", style, index)
+		}
+	}
+	return nil
 }
 
 // AssetMetaToAttachment converts an AssetMeta to a channel.Attachment.

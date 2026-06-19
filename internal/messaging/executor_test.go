@@ -258,6 +258,79 @@ func TestSendSameConversationStructuredMessageAttachmentShorthandIsNormalized(t 
 	}
 }
 
+func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
+	t.Parallel()
+
+	msg, err := ParseOutboundMessage(map[string]any{
+		"message": map[string]any{
+			"format": "rich",
+			"parts": []any{
+				map[string]any{
+					"type":   "text",
+					"text":   "bold",
+					"styles": []any{"bold"},
+				},
+				map[string]any{
+					"type":     "code_block",
+					"text":     "go test ./...",
+					"language": "go",
+				},
+			},
+		},
+	}, "")
+	if err != nil {
+		t.Fatalf("ParseOutboundMessage returned error: %v", err)
+	}
+	if msg.Format != channel.MessageFormatRich || len(msg.Parts) != 2 {
+		t.Fatalf("unexpected parsed message: %#v", msg)
+	}
+	if got := msg.Parts[0]; got.Type != channel.MessagePartText || len(got.Styles) != 1 || got.Styles[0] != channel.MessageStyleBold {
+		t.Fatalf("unexpected first part: %#v", got)
+	}
+
+	tests := []struct {
+		name string
+		raw  map[string]any
+		want string
+	}{
+		{
+			name: "unknown message field",
+			raw:  map[string]any{"message": map[string]any{"text": "hi", "typo": "dropped"}},
+			want: "unknown message field",
+		},
+		{
+			name: "unknown part field",
+			raw: map[string]any{"message": map[string]any{"parts": []any{
+				map[string]any{"type": "text", "text": "hi", "typo": "dropped"},
+			}}},
+			want: "unknown message part field",
+		},
+		{
+			name: "unknown part type",
+			raw: map[string]any{"message": map[string]any{"parts": []any{
+				map[string]any{"type": "heading", "text": "Title"},
+			}}},
+			want: "unsupported message part type",
+		},
+		{
+			name: "unknown style",
+			raw: map[string]any{"message": map[string]any{"parts": []any{
+				map[string]any{"type": "text", "text": "hi", "styles": []any{"underline"}},
+			}}},
+			want: "unsupported message part style",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseOutboundMessage(tt.raw, "")
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("ParseOutboundMessage error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestSendSameConversationTextOnlyFails(t *testing.T) {
 	t.Parallel()
 
