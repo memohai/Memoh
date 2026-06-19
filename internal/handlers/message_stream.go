@@ -25,8 +25,9 @@ import (
 const sessionMessageBacklogSize = 50
 
 // sessionMessageStreamBuffer sizes the per-subscriber channel for both SSE
-// streams. Large enough to absorb a brief assistant-token burst without
-// dropping; smaller buffers get truncated quickly under load.
+// streams. The per-session stream is the high-rate path (assistant token
+// bursts); the activity stream's traffic is far lower but reuses the same
+// constant so a single tuning knob covers both.
 const sessionMessageStreamBuffer = 128
 
 // sseHeartbeatInterval is the keep-alive cadence — tuned to land under a
@@ -78,15 +79,12 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 	// DB call lands in the live channel. We then dedup against the backlog
 	// IDs so the client never sees a message twice across the seam.
 	_, stream, cancel := h.messageEvents.Subscribe(botID, sessionMessageStreamBuffer)
+	defer cancel()
 
 	backlog, err := h.messageService.ListLatestBySession(c.Request().Context(), sessionID, sessionMessageBacklogSize)
 	if err != nil {
-		// Cancel the subscription before returning the HTTP error so we
-		// don't leak a channel — and so the framing stays JSON, not SSE.
-		cancel()
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	defer cancel()
 
 	writer, flusher, err := beginSSEResponse(c)
 	if err != nil {
@@ -125,7 +123,10 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 			case messageevent.EventTypeMessageCreated:
 				var message messagepkg.Message
 				if err := json.Unmarshal(event.Data, &message); err != nil {
-					h.logger.Warn("decode message event failed", slog.Any("error", err))
+					h.logger.Warn("decode message_created event failed",
+						slog.String("session_id", sessionID),
+						slog.Any("error", err),
+					)
 					continue
 				}
 				if message.SessionID != sessionID {
@@ -144,6 +145,10 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 			case messageevent.EventTypeSessionTitleUpdated:
 				var payload map[string]string
 				if err := json.Unmarshal(event.Data, &payload); err != nil {
+					h.logger.Warn("decode session_title_updated event failed",
+						slog.String("session_id", sessionID),
+						slog.Any("error", err),
+					)
 					continue
 				}
 				if payload["session_id"] != sessionID {
@@ -164,6 +169,11 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 				// and agent-stream updates for the focused session.
 				var payload map[string]any
 				if err := json.Unmarshal(event.Data, &payload); err != nil {
+					h.logger.Warn("decode forwarded event failed",
+						slog.String("event_type", string(event.Type)),
+						slog.String("session_id", sessionID),
+						slog.Any("error", err),
+					)
 					continue
 				}
 				if payloadSessionID(payload) != sessionID {
@@ -222,7 +232,7 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 	_, stream, cancel := h.messageEvents.Subscribe(botID, sessionMessageStreamBuffer)
 	defer cancel()
 
-	cache := newSessionTypeCache(h.sessionService)
+	cache := newSessionCache(h.logger, h.sessionService)
 
 	heartbeat := time.NewTicker(sseHeartbeatInterval)
 	defer heartbeat.Stop()
@@ -247,9 +257,13 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 			case messageevent.EventTypeMessageCreated:
 				var message messagepkg.Message
 				if err := json.Unmarshal(event.Data, &message); err != nil {
+					h.logger.Warn("activity stream: decode message_created event failed",
+						slog.String("bot_id", botID),
+						slog.Any("error", err),
+					)
 					continue
 				}
-				if !h.canDeliverSessionActivity(c, channelIdentityID, botID, perms, cache, message.SessionID) {
+				if !canDeliverSessionActivity(c.Request().Context(), channelIdentityID, botID, perms, cache, message.SessionID) {
 					continue
 				}
 				if err := writeSSEJSON(writer, flusher, map[string]any{
@@ -262,14 +276,20 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 			case messageevent.EventTypeSessionTitleUpdated:
 				var payload map[string]string
 				if err := json.Unmarshal(event.Data, &payload); err != nil {
+					h.logger.Warn("activity stream: decode session_title_updated event failed",
+						slog.String("bot_id", botID),
+						slog.Any("error", err),
+					)
 					continue
 				}
 				sessionID := strings.TrimSpace(payload["session_id"])
-				if !h.canDeliverSessionActivity(c, channelIdentityID, botID, perms, cache, sessionID) {
+				if !canDeliverSessionActivity(c.Request().Context(), channelIdentityID, botID, perms, cache, sessionID) {
 					continue
 				}
+				// Use the same wire name as the per-session stream — both
+				// surfaces emit the event the producer named.
 				if err := writeSSEJSON(writer, flusher, map[string]any{
-					"type":       "session_title_changed",
+					"type":       string(messageevent.EventTypeSessionTitleUpdated),
 					"session_id": sessionID,
 					"title":      payload["title"],
 				}); err != nil {
@@ -278,6 +298,10 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 			case messageevent.EventTypeSessionCreated:
 				var payload map[string]any
 				if err := json.Unmarshal(event.Data, &payload); err != nil {
+					h.logger.Warn("activity stream: decode session_created event failed",
+						slog.String("bot_id", botID),
+						slog.Any("error", err),
+					)
 					continue
 				}
 				sessionID, _ := payload["session_id"].(string)
@@ -289,8 +313,7 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 				if !session.IsUserFacingType(typ) {
 					continue
 				}
-				cache.setType(sessionID, typ)
-				if !h.canDeliverSessionActivity(c, channelIdentityID, botID, perms, cache, sessionID) {
+				if !canDeliverSessionActivity(c.Request().Context(), channelIdentityID, botID, perms, cache, sessionID) {
 					continue
 				}
 				out := map[string]any{
@@ -313,26 +336,35 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 
 // canDeliverSessionActivity returns true when the subscriber may see an
 // activity event for sessionID: the session must be a user-facing type AND
-// the subscriber must have read access to it. Access decisions are memoized
-// per stream so we don't hit the DB twice per event.
-func (h *MessageHandler) canDeliverSessionActivity(c echo.Context, channelIdentityID, botID string, perms []string, cache *sessionTypeCache, sessionID string) bool {
+// the subscriber must have read access to it. The session row is loaded
+// at most once per stream — both the user-facing and access checks read
+// from the cached value.
+func canDeliverSessionActivity(ctx context.Context, channelIdentityID, botID string, perms []string, cache *sessionCache, sessionID string) bool {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return false
 	}
-	userFacing, ok := cache.userFacing(c.Request().Context(), sessionID)
-	if !ok || !userFacing {
+	sess, ok := cache.get(ctx, sessionID)
+	if !ok {
 		return false
 	}
+	if !session.IsUserFacingType(sess.Type) {
+		return false
+	}
+	return canReadMessageSessionFromCache(sess, channelIdentityID, botID, perms)
+}
+
+// canReadMessageSessionFromCache mirrors canReadMessageSession but skips the
+// session.Get call by accepting an already-loaded session. The authorization
+// policy lives in canAccessSession; this is the cached-path entry point.
+func canReadMessageSessionFromCache(sess session.Session, channelIdentityID, botID string, perms []string) bool {
 	if bots.HasPermission(perms, bots.PermissionManage) {
 		return true
 	}
-	if allowed, ok := cache.accessCached(sessionID, channelIdentityID); ok {
-		return allowed
+	if sess.BotID != botID {
+		return false
 	}
-	allowed := h.canReadMessageSession(c, channelIdentityID, botID, perms, sessionID)
-	cache.storeAccess(sessionID, channelIdentityID, allowed)
-	return allowed
+	return canAccessSession(sess, channelIdentityID, perms)
 }
 
 func writeMessageCreated(writer io.Writer, flusher http.Flusher, botID string, message messagepkg.Message) error {
@@ -355,80 +387,75 @@ func beginSSEResponse(c echo.Context) (io.Writer, http.Flusher, error) {
 	return c.Response().Writer, flusher, nil
 }
 
-// sessionTypeCache memoizes per-session decisions for the lifetime of one
-// activity stream. Each event delivery would otherwise hit the DB twice: once
-// for the user-facing-type check and once for the access check. The cached
-// access entry is keyed by channel identity to keep the cache correct when
-// the same hub feeds multiple streams from different subscribers.
-type sessionTypeCache struct {
-	svc      *session.Service
-	mu       sync.Mutex
-	userFace map[string]bool
-	access   map[accessKey]bool
+// sessionCache memoizes the session row for the lifetime of one activity
+// stream. Without it every delivered event would issue two DB reads — one
+// for the user-facing-type check and one for the access check. Both checks
+// now read the same cached value, so the first event for a session pays a
+// single Get and subsequent events for that session are DB-free.
+//
+// Caching the full row is safe because the only mutable bit either check
+// reads is `Type`, which IsUserFacingType doesn't filter on for an already
+// admitted session, and CreatedByUserID, which is immutable.
+type sessionCache struct {
+	logger *slog.Logger
+	svc    *session.Service
+	mu     sync.Mutex
+	rows   map[string]session.Session
+	misses map[string]struct{}
 }
 
-type accessKey struct {
-	sessionID         string
-	channelIdentityID string
-}
-
-func newSessionTypeCache(svc *session.Service) *sessionTypeCache {
-	return &sessionTypeCache{
-		svc:      svc,
-		userFace: map[string]bool{},
-		access:   map[accessKey]bool{},
+func newSessionCache(logger *slog.Logger, svc *session.Service) *sessionCache {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &sessionCache{
+		logger: logger,
+		svc:    svc,
+		rows:   map[string]session.Session{},
+		misses: map[string]struct{}{},
 	}
 }
 
-func (c *sessionTypeCache) userFacing(ctx context.Context, sessionID string) (bool, bool) {
+// get returns the cached session, loading it on first access. The second
+// return value is false when the session cannot be loaded — either because
+// the service is not configured or because the DB lookup failed (which is
+// logged so an outage doesn't masquerade as normal filtering).
+func (c *sessionCache) get(ctx context.Context, sessionID string) (session.Session, bool) {
 	c.mu.Lock()
-	if cached, ok := c.userFace[sessionID]; ok {
+	if cached, ok := c.rows[sessionID]; ok {
 		c.mu.Unlock()
 		return cached, true
 	}
+	if _, missed := c.misses[sessionID]; missed {
+		c.mu.Unlock()
+		return session.Session{}, false
+	}
 	c.mu.Unlock()
 	if c.svc == nil {
-		return false, false
+		return session.Session{}, false
 	}
 	sess, err := c.svc.Get(ctx, sessionID)
 	if err != nil {
-		return false, false
+		c.logger.Warn("activity stream: load session failed",
+			slog.String("session_id", sessionID),
+			slog.Any("error", err),
+		)
+		c.mu.Lock()
+		c.misses[sessionID] = struct{}{}
+		c.mu.Unlock()
+		return session.Session{}, false
 	}
-	userFacing := session.IsUserFacingType(sess.Type)
 	c.mu.Lock()
-	c.userFace[sessionID] = userFacing
+	c.rows[sessionID] = sess
 	c.mu.Unlock()
-	return userFacing, true
-}
-
-// setType primes the user-facing decision from an event payload that already
-// carries the session type, sparing one DB round-trip for newly-created
-// sessions whose type we just learned.
-func (c *sessionTypeCache) setType(sessionID, typ string) {
-	c.mu.Lock()
-	c.userFace[sessionID] = session.IsUserFacingType(typ)
-	c.mu.Unlock()
-}
-
-// accessCached returns the cached access decision for (session, identity).
-func (c *sessionTypeCache) accessCached(sessionID, channelIdentityID string) (bool, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	v, ok := c.access[accessKey{sessionID, channelIdentityID}]
-	return v, ok
-}
-
-// storeAccess records an access decision for (session, identity).
-func (c *sessionTypeCache) storeAccess(sessionID, channelIdentityID string, allowed bool) {
-	c.mu.Lock()
-	c.access[accessKey{sessionID, channelIdentityID}] = allowed
-	c.mu.Unlock()
+	return sess, true
 }
 
 // payloadSessionID extracts the session id from an event payload. All in-tree
 // publishers (BackgroundTask, AgentStream, MessageCreated, …) lift `session_id`
-// to the top level, so this is a single string lookup; if a future publisher
-// nests it differently the test suite will catch the mismatch loudly.
+// to the top level of the payload; the producer-side contract is pinned by
+// TestBackgroundTaskPayloadHasTopLevelSessionID and
+// TestAgentStreamPayloadHasTopLevelSessionID so this is a single lookup.
 func payloadSessionID(payload map[string]any) string {
 	v, _ := payload["session_id"].(string)
 	return v

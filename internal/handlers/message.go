@@ -582,24 +582,6 @@ func (h *MessageHandler) resolveCurrentUserPermissions(c echo.Context, channelId
 	return perms, nil
 }
 
-func (h *MessageHandler) canReadMessageSession(c echo.Context, channelIdentityID, botID string, perms []string, sessionID string) bool {
-	if bots.HasPermission(perms, bots.PermissionManage) {
-		return true
-	}
-	if h.sessionService == nil {
-		return false
-	}
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return false
-	}
-	sess, err := h.sessionService.Get(c.Request().Context(), sessionID)
-	if err != nil || sess.BotID != botID {
-		return false
-	}
-	return canAccessSession(sess, channelIdentityID, perms)
-}
-
 // ServeMedia streams a media asset by bot_id + content_hash with read-access authorization.
 func (h *MessageHandler) ServeMedia(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
