@@ -470,7 +470,7 @@ func TestSessionCursorIsZeroDistinguishesPartialFromEmpty(t *testing.T) {
 
 func TestListByBotPagedRejectsPartialCursor(t *testing.T) {
 	stub := &pagedQueriesStub{}
-	svc := NewService(nil, stub)
+	svc := NewService(nil, stub, nil)
 	botID := "11111111-1111-1111-1111-111111111111"
 
 	_, err := svc.ListByBotPaged(context.Background(), botID, []string{TypeChat},
