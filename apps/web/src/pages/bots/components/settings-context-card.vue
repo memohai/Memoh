@@ -219,7 +219,7 @@ const isSelectedMemoryProviderPersisted = computed(() =>
   !!props.form.memory_provider_id && props.form.memory_provider_id === props.persistedMemoryProviderID,
 )
 const showBuiltinIndexedMemoryStatus = computed(() =>
-  selectedBuiltinMemoryMode.value === 'sparse' || selectedBuiltinMemoryMode.value === 'dense',
+  selectedBuiltinMemoryMode.value === 'dense',
 )
 const showMemoryProviderStatusCard = computed(() =>
   showBuiltinIndexedMemoryStatus.value || !!selectedMem0MemoryProvider.value,
@@ -228,25 +228,21 @@ const showMemoryProviderStatusCard = computed(() =>
 const indexedMemoryStatusTitle = computed(() =>
   selectedMemoryProviderType.value === 'mem0'
     ? t('bots.settings.mem0StatusTitle')
-    : selectedBuiltinMemoryMode.value === 'dense'
-    ? t('bots.settings.denseStatusTitle')
-    : t('bots.settings.sparseStatusTitle'),
+    : t('bots.settings.denseStatusTitle'),
 )
 
 const statusCardData = computed(() => props.memoryStatus)
 const showQdrantDetails = computed(() =>
-  selectedBuiltinMemoryMode.value === 'sparse' || selectedBuiltinMemoryMode.value === 'dense',
+  selectedBuiltinMemoryMode.value === 'dense',
 )
 const showEncoderHealth = computed(() =>
-  selectedBuiltinMemoryMode.value === 'sparse' || selectedBuiltinMemoryMode.value === 'dense',
+  selectedBuiltinMemoryMode.value === 'dense',
 )
 const showQdrantHealth = computed(() =>
-  selectedBuiltinMemoryMode.value === 'sparse' || selectedBuiltinMemoryMode.value === 'dense',
+  selectedBuiltinMemoryMode.value === 'dense',
 )
 const encoderHealthLabel = computed(() =>
-  selectedBuiltinMemoryMode.value === 'dense'
-    ? t('bots.settings.memoryDenseEmbeddingHealth')
-    : t('bots.settings.memoryEncoderHealth'),
+  t('bots.settings.memoryDenseEmbeddingHealth'),
 )
 
 function healthLabel(ok: boolean | undefined, error?: string) {

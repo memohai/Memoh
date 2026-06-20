@@ -59,7 +59,6 @@ type Config struct {
 	Workspace     WorkspaceConfig     `toml:"workspace"`
 	Postgres      PostgresConfig      `toml:"postgres"`
 	Qdrant        QdrantConfig        `toml:"qdrant"`
-	Sparse        SparseConfig        `toml:"sparse"`
 	Registry      RegistryConfig      `toml:"registry"`
 	Supermarket   SupermarketConfig   `toml:"supermarket"`
 	OAuthClients  OAuthClientsConfig  `toml:"oauth_clients"`
@@ -353,10 +352,6 @@ type QdrantConfig struct {
 	BaseURL        string `toml:"base_url"`
 	APIKey         string `toml:"api_key" json:"-"`
 	TimeoutSeconds int    `toml:"timeout_seconds"`
-}
-
-type SparseConfig struct {
-	BaseURL string `toml:"base_url"`
 }
 
 const DefaultProvidersDir = "conf/providers"

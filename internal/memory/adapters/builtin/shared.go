@@ -2,10 +2,13 @@ package builtin
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,6 +17,13 @@ import (
 	qdrantclient "github.com/memohai/memoh/internal/memory/qdrant"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 )
+
+// memoryIDSeq is a process-wide monotonic counter appended to memory IDs so
+// that two Add calls landing in the same wall-clock nanosecond still produce
+// distinct IDs. The wall-clock nanosecond remains the dominant component, so
+// IDs stay human-readable and roughly time-ordered; the sequence only breaks
+// ties when the clock has not advanced.
+var memoryIDSeq uint64
 
 // memoryStore is the markdown file store consumed by the builtin runtimes.
 type memoryStore interface {
@@ -181,7 +191,16 @@ func runtimeText(message string, messages []adapters.Message) string {
 }
 
 func runtimeMemoryID(botID string, now time.Time) string {
-	return botID + ":" + "mem_" + strconv.FormatInt(now.UnixNano(), 10)
+	seq := atomic.AddUint64(&memoryIDSeq, 1)
+	return botID + ":" + "mem_" + strconv.FormatInt(now.UnixNano(), 10) + "_" + strconv.FormatUint(seq, 36)
+}
+
+// runtimeHash returns a stable SHA-256 hex digest of a trimmed memory body.
+// It is shared by the dense and file runtimes (and the upcoming graph runtime)
+// for content-addressing memory items.
+func runtimeHash(text string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(text)))
+	return hex.EncodeToString(sum[:])
 }
 
 func runtimePointID(botID, sourceID string) string {

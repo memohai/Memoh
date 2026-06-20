@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"strings"
 
 	"github.com/memohai/memoh/internal/config"
@@ -46,7 +45,7 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 					"memory_mode": {
 						Type:        "select",
 						Title:       "Memory Mode",
-						Description: "off = file-based, sparse = Qdrant sparse vectors, dense = embedding API + Qdrant dense vectors",
+						Description: "off = file-based, dense = embedding API + Qdrant dense vectors",
 						Required:    false,
 					},
 					"embedding_model_id": {
@@ -54,13 +53,6 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 						Title:       "Embedding Model",
 						Description: "Embedding model for dense vector search (dense mode only)",
 						Required:    false,
-					},
-					"qdrant_collection": {
-						Type:        "string",
-						Title:       "Qdrant Collection",
-						Description: "Qdrant collection name for sparse mode. Defaults to memory_sparse.",
-						Required:    false,
-						Example:     "memory_sparse",
 					},
 					"context_target_items": {
 						Type:        "integer",
@@ -182,11 +174,11 @@ func (s *Service) Status(ctx context.Context, id string) (ProviderStatusResponse
 	}
 	status.MemoryMode = StringFromConfig(resp.Config, "memory_mode")
 	status.EmbeddingModelID = StringFromConfig(resp.Config, "embedding_model_id")
-	collections := []string{"memory_sparse", "memory_dense"}
+	collections := []string{"memory_dense"}
 	status.Collections = make([]ProviderCollectionStatus, 0, len(collections))
 	for _, collection := range collections {
 		collStatus := ProviderCollectionStatus{Name: collection}
-		host, port := parseQdrantHostPort(s.cfg.Qdrant.BaseURL)
+		host, port := qdrantclient.ParseHostPort(s.cfg.Qdrant.BaseURL)
 		client, err := qdrantclient.NewClient(host, port, s.cfg.Qdrant.APIKey, collection)
 		if err != nil {
 			collStatus.Qdrant.Error = err.Error()
@@ -358,27 +350,4 @@ func isValidProviderType(t ProviderType) bool {
 	default:
 		return false
 	}
-}
-
-func parseQdrantHostPort(baseURL string) (string, int) {
-	baseURL = strings.TrimSpace(baseURL)
-	if baseURL == "" {
-		return "", 0
-	}
-	baseURL = strings.TrimPrefix(baseURL, "http://")
-	baseURL = strings.TrimPrefix(baseURL, "https://")
-	parts := strings.SplitN(baseURL, ":", 2)
-	host := parts[0]
-	if len(parts) == 2 {
-		httpPort, err := strconv.Atoi(strings.TrimRight(parts[1], "/"))
-		if err == nil {
-			switch httpPort {
-			case 6333, 6334:
-				return host, 6334
-			default:
-				return host, httpPort
-			}
-		}
-	}
-	return host, 6334
 }

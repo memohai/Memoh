@@ -20,12 +20,8 @@ services:
 
   web:
     build:
-      context: .
+      context: ..
       dockerfile: docker/Dockerfile.web
       args:
         - VITE_API_URL=${VITE_API_URL:-/api}
 
-  sparse:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.sparse

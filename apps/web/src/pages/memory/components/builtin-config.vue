@@ -21,20 +21,6 @@
       />
     </SettingsRow>
 
-    <!-- Keyword mode leans on the optional sparse retrieval service, so a bot
-         owner who picks it needs the one actionable fact: how to turn that
-         service on. Shown at selection time — that's when the prerequisite
-         matters — as a plain info row with no control. -->
-    <SettingsRow
-      v-if="mode === 'sparse'"
-    >
-      <template #content>
-        <p class="text-xs text-muted-foreground">
-          {{ $t('memory.sparseInstallHint') }}
-        </p>
-      </template>
-    </SettingsRow>
-
     <!-- Semantic mode vectorizes memories, so it needs an embedding model.
          Shown only for that mode; the storage backend it writes to is
          implementation trivia and stays out of the copy. -->
@@ -89,7 +75,7 @@ import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
 import ModelSelect from '@/pages/bots/components/model-select.vue'
 
-type MemoryMode = 'off' | 'sparse' | 'dense'
+type MemoryMode = 'off' | 'dense'
 type Collection = NonNullable<AdaptersProviderStatusResponse['collections']>[number]
 
 const props = defineProps<{
@@ -134,7 +120,6 @@ const collections = computed(() => (statusData.value as AdaptersProviderStatusRe
 
 const modeItems = computed<SegmentedItem<MemoryMode>[]>(() => [
   { value: 'off', label: t('memory.modeNames.off') },
-  { value: 'sparse', label: t('memory.modeNames.sparse') },
   { value: 'dense', label: t('memory.modeNames.dense') },
 ])
 
@@ -144,7 +129,7 @@ const modeItems = computed<SegmentedItem<MemoryMode>[]>(() => [
 const savedMode = computed<MemoryMode>(() => {
   const config = (props.provider?.config ?? {}) as Record<string, unknown>
   const m = config.memory_mode
-  return m === 'sparse' || m === 'dense' ? m : 'off'
+  return m === 'dense' ? m : 'off'
 })
 const savedEmbeddingModelId = computed(() => {
   const config = (props.provider?.config ?? {}) as Record<string, unknown>
@@ -165,22 +150,20 @@ const hasChanges = computed(() => {
 // vanishes on an unexpected collection name.
 const activeCollections = computed<Collection[]>(() => {
   if (savedMode.value === 'off') return []
-  const wanted = savedMode.value === 'sparse' ? 'sparse' : 'dense'
-  const matched = collections.value.filter((c) => (c.name ?? '').toLowerCase().includes(wanted))
+  const matched = collections.value.filter((c) => (c.name ?? '').toLowerCase().includes('dense'))
   return matched.length > 0 ? matched : collections.value
 })
 
 function collectionLabel(collection: Collection): string {
   const name = (collection.name ?? '').toLowerCase()
   if (name.includes('dense')) return t('memory.semanticIndex')
-  if (name.includes('sparse')) return t('memory.keywordIndex')
   return collection.name ?? ''
 }
 
 watch(() => props.provider, (val) => {
   const config = (val?.config ?? {}) as Record<string, unknown>
   const nextMode = config.memory_mode
-  mode.value = nextMode === 'sparse' || nextMode === 'dense' ? nextMode : 'off'
+  mode.value = nextMode === 'dense' ? 'dense' : 'off'
   embeddingModelId.value = typeof config.embedding_model_id === 'string' ? config.embedding_model_id : ''
 }, { immediate: true })
 

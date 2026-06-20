@@ -11,7 +11,6 @@ export interface Config {
   workspace?: WorkspaceConfig;
   postgres: PostgresConfig;
   qdrant: QdrantConfig;
-  sparse: SparseConfig;
   agent_gateway: AgentGatewayConfig;
   supermarket: SupermarketConfig;
   web: WebConfig;
@@ -84,10 +83,6 @@ export interface QdrantConfig {
   api_key: string;
   collection: string;
   timeout_seconds: number;
-}
-
-export interface SparseConfig {
-  base_url: string;
 }
 
 export interface AgentGatewayConfig {

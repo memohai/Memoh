@@ -2,8 +2,6 @@ package builtin
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -65,7 +63,7 @@ func newDenseRuntime(providerConfig map[string]any, queries dbstore.Queries, cfg
 		return nil, err
 	}
 
-	host, port := parseQdrantHostPort(cfg.Qdrant.BaseURL)
+	host, port := qdrantclient.ParseHostPort(cfg.Qdrant.BaseURL)
 	if host == "" {
 		host = "localhost"
 	}
@@ -663,11 +661,4 @@ func resolveDenseEmbeddingModel(ctx context.Context, queries dbstore.Queries, mo
 		apiKey:     strings.TrimSpace(apiKey),
 		dimensions: *cfg.Dimensions,
 	}, nil
-}
-
-// --- shared helpers (used by both dense and sparse runtimes) ---
-
-func runtimeHash(text string) string {
-	sum := sha256.Sum256([]byte(strings.TrimSpace(text)))
-	return hex.EncodeToString(sum[:])
 }

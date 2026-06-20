@@ -45,10 +45,8 @@ func (f *fakeLLM) Compact(_ context.Context, req adapters.CompactRequest) (adapt
 
 func TestFormationExtractAndAdd(t *testing.T) {
 	t.Parallel()
-	encoder := &fakeSparseEncoder{}
-	index := newFakeSparseIndex(encoder)
-	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	store := newFakeStore()
+	runtime := newFileRuntime(store)
 	llm := &fakeLLM{
 		extractFacts: []string{"User likes oolong tea", "User is based in Berlin"},
 		decideActions: []adapters.DecisionAction{
@@ -84,10 +82,8 @@ func TestFormationExtractAndAdd(t *testing.T) {
 
 func TestFormationUpdate(t *testing.T) {
 	t.Parallel()
-	encoder := &fakeSparseEncoder{}
-	index := newFakeSparseIndex(encoder)
-	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	store := newFakeStore()
+	runtime := newFileRuntime(store)
 
 	addResp, err := runtime.Add(context.Background(), adapters.AddRequest{
 		BotID:   "bot-1",
@@ -131,10 +127,8 @@ func TestFormationUpdate(t *testing.T) {
 
 func TestFormationDelete(t *testing.T) {
 	t.Parallel()
-	encoder := &fakeSparseEncoder{}
-	index := newFakeSparseIndex(encoder)
-	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	store := newFakeStore()
+	runtime := newFileRuntime(store)
 
 	addResp, err := runtime.Add(context.Background(), adapters.AddRequest{
 		BotID:   "bot-1",
@@ -170,10 +164,8 @@ func TestFormationDelete(t *testing.T) {
 
 func TestFormationNOOP(t *testing.T) {
 	t.Parallel()
-	encoder := &fakeSparseEncoder{}
-	index := newFakeSparseIndex(encoder)
-	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	store := newFakeStore()
+	runtime := newFileRuntime(store)
 
 	llm := &fakeLLM{
 		extractFacts: []string{"User likes tea"},
@@ -202,10 +194,8 @@ func TestFormationNOOP(t *testing.T) {
 
 func TestFormationNoFacts(t *testing.T) {
 	t.Parallel()
-	encoder := &fakeSparseEncoder{}
-	index := newFakeSparseIndex(encoder)
-	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	store := newFakeStore()
+	runtime := newFileRuntime(store)
 
 	llm := &fakeLLM{
 		extractFacts: []string{},
@@ -229,10 +219,8 @@ func TestFormationNoFacts(t *testing.T) {
 
 func TestFormationMixedActions(t *testing.T) {
 	t.Parallel()
-	encoder := &fakeSparseEncoder{}
-	index := newFakeSparseIndex(encoder)
-	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	store := newFakeStore()
+	runtime := newFileRuntime(store)
 
 	addResp, _ := runtime.Add(context.Background(), adapters.AddRequest{
 		BotID:   "bot-1",
@@ -273,10 +261,8 @@ func TestFormationMixedActions(t *testing.T) {
 
 func TestFormationInvalidActionsSkipped(t *testing.T) {
 	t.Parallel()
-	encoder := &fakeSparseEncoder{}
-	index := newFakeSparseIndex(encoder)
-	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	store := newFakeStore()
+	runtime := newFileRuntime(store)
 
 	llm := &fakeLLM{
 		extractFacts: []string{"User likes cats"},
@@ -306,10 +292,8 @@ func TestFormationInvalidActionsSkipped(t *testing.T) {
 
 func TestFormationDuplicateActionsSameID(t *testing.T) {
 	t.Parallel()
-	encoder := &fakeSparseEncoder{}
-	index := newFakeSparseIndex(encoder)
-	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	store := newFakeStore()
+	runtime := newFileRuntime(store)
 
 	addResp, _ := runtime.Add(context.Background(), adapters.AddRequest{
 		BotID:   "bot-1",
@@ -343,10 +327,8 @@ func TestFormationDuplicateActionsSameID(t *testing.T) {
 
 func TestOnAfterChatWithLLM(t *testing.T) {
 	t.Parallel()
-	encoder := &fakeSparseEncoder{}
-	index := newFakeSparseIndex(encoder)
-	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	store := newFakeStore()
+	runtime := newFileRuntime(store)
 	llm := &fakeLLM{
 		extractFacts: []string{"User prefers dark mode"},
 		decideActions: []adapters.DecisionAction{
@@ -379,10 +361,8 @@ func TestOnAfterChatWithLLM(t *testing.T) {
 
 func TestOnAfterChatFallbackWithoutLLM(t *testing.T) {
 	t.Parallel()
-	encoder := &fakeSparseEncoder{}
-	index := newFakeSparseIndex(encoder)
-	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	store := newFakeStore()
+	runtime := newFileRuntime(store)
 
 	p := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
 
@@ -402,10 +382,8 @@ func TestOnAfterChatFallbackWithoutLLM(t *testing.T) {
 
 func TestOnBeforeChatRecallsFactMemory(t *testing.T) {
 	t.Parallel()
-	encoder := &fakeSparseEncoder{}
-	index := newFakeSparseIndex(encoder)
-	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	store := newFakeStore()
+	runtime := newFileRuntime(store)
 	llm := &fakeLLM{
 		extractFacts: []string{"User prefers oolong tea"},
 		decideActions: []adapters.DecisionAction{

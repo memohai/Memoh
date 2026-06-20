@@ -1093,16 +1093,13 @@
     "modeHint": "决定智能体如何存取长期记忆。",
     "advanced": "高级",
     "advancedHint": "面向进阶场景的自定义记忆后端。",
-    "sparseSectionTitle": "稀疏检索",
     "denseSectionTitle": "稠密检索",
-    "sparseInstallHint": "Sparse 模式依赖可选的 sparse 服务。安装时请启用 sparse 选项，或在 Docker Compose 中启动 sparse profile。",
     "denseBackend": "Dense 后端",
     "denseBackendValue": "Embedding API + Qdrant",
     "denseEmbeddingModel": "Dense 向量模型",
     "denseEmbeddingModelDescription": "选择本地 rerank 之前使用的第三方 embedding 模型。",
     "denseQdrantHint": "后端接通后，dense memory 会以 Qdrant 作为存储后端。",
     "qdrantCollection": "Qdrant Collection",
-    "sparseQdrantCollectionDescription": "稀疏模式会写入对应的 Qdrant collection。当前/默认 collection：{collection}。",
     "denseQdrantCollectionDescription": "稠密模式会写入对应的 Qdrant collection。当前/默认 collection：{collection}。",
     "collectionPoints": "Collection 中的点数",
     "entriesStored": "已存储 {count} 条",
@@ -1114,13 +1111,11 @@
     "collectionUnavailable": "不可用",
     "modeNames": {
       "off": "关闭",
-      "sparse": "关键词",
       "dense": "语义"
     },
     "modeDescriptions": {
-      "off": "仅保留基础文件记忆，不建长期索引。",
-      "sparse": "按关键词匹配检索。",
-      "dense": "用向量模型按语义相近度检索。"
+      "off": "不建立长期记忆索引，仅保留基础的文件记忆。",
+      "dense": "用向量模型把记忆转成向量，按语义相近度检索。"
     },
     "providerNames": {
       "builtin": "内置",
@@ -2130,8 +2125,6 @@
       "memoryProvider": "记忆提供方",
       "memoryProviderPlaceholder": "选择记忆提供方（为空则禁用）",
       "memoryModePreview": "当前内置模式：{mode}",
-      "sparseStatusTitle": "稀疏检索状态",
-      "sparseStatusHint": "Markdown 文件是唯一可信源；手动同步将根据 /data/memory 重新构建 Qdrant 索引。",
       "denseStatusTitle": "稠密检索状态",
       "denseStatusHint": "Markdown 文件是唯一可信源；手动同步将根据 /data/memory 重建稠密 Qdrant 索引。",
       "mem0StatusTitle": "Mem0 同步状态",
@@ -2146,7 +2139,6 @@
       "memorySourceEntries": "源条目数",
       "memoryIndexedEntries": "索引条目数",
       "memoryQdrantCollection": "Qdrant Collection",
-      "memoryEncoderHealth": "Sparse Encoder",
       "memoryDenseEmbeddingHealth": "Embedding 后端",
       "memoryQdrantHealth": "Qdrant",
       "memoryHealthOk": "正常",

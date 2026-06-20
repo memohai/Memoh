@@ -24,10 +24,10 @@ nano config.toml   # Change passwords and JWT secret
 
 > **Important**: You must create `config.toml` before starting. `docker-compose.yml` mounts `./config.toml` into the containers — running without it will fail.
 
-### Standard startup (with Qdrant + Sparse)
+### Standard startup (with Qdrant)
 
 ```bash
-docker compose --profile qdrant --profile sparse up -d
+docker compose --profile qdrant up -d
 ```
 
 ### Minimal startup (core only)
@@ -75,13 +75,12 @@ The base `docker-compose.yml` contains all services. Core services (`postgres`, 
 | Profile | Service | Description |
 |---------|---------|-------------|
 | `qdrant` | Qdrant | Vector database for memory semantic search |
-| `sparse` | Sparse | Neural sparse memory retrieval service |
 
 ### Supported combinations
 
 ```bash
-# Core + Qdrant + Sparse (recommended default)
-docker compose --profile qdrant --profile sparse up -d
+# Core + Qdrant (recommended default)
+docker compose --profile qdrant up -d
 ```
 
 ### SaaS / external providers
@@ -94,7 +93,7 @@ Uncomment `registry = "memoh.cn"` in `config.toml` under `[container]`, then add
 
 ```bash
 docker compose -f docker-compose.yml -f docker/docker-compose.cn.yml \
-  --profile qdrant --profile sparse up -d
+  --profile qdrant up -d
 ```
 
 ## Prerequisites

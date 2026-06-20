@@ -85,57 +85,17 @@ type DeleteAllRequest struct {
 	Filters map[string]any `json:"filters,omitempty"`
 }
 
-type EmbedInput struct {
-	Text     string `json:"text,omitempty"`
-	ImageURL string `json:"image_url,omitempty"`
-	VideoURL string `json:"video_url,omitempty"`
-}
-
-type EmbedUpsertRequest struct {
-	Type     string         `json:"type"`
-	Provider string         `json:"provider,omitempty"`
-	Model    string         `json:"model,omitempty"`
-	Input    EmbedInput     `json:"input"`
-	Source   string         `json:"source,omitempty"`
-	BotID    string         `json:"bot_id,omitempty"`
-	AgentID  string         `json:"agent_id,omitempty"`
-	RunID    string         `json:"run_id,omitempty"`
-	Metadata map[string]any `json:"metadata,omitempty"`
-	Filters  map[string]any `json:"filters,omitempty"`
-}
-
-type EmbedUpsertResponse struct {
-	Item       MemoryItem `json:"item"`
-	Provider   string     `json:"provider"`
-	Model      string     `json:"model"`
-	Dimensions int        `json:"dimensions"`
-}
-
 type MemoryItem struct {
-	ID          string         `json:"id"`
-	Memory      string         `json:"memory"`
-	Hash        string         `json:"hash,omitempty"`
-	CreatedAt   string         `json:"created_at,omitempty"`
-	UpdatedAt   string         `json:"updated_at,omitempty"`
-	Score       float64        `json:"score,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	BotID       string         `json:"bot_id,omitempty"`
-	AgentID     string         `json:"agent_id,omitempty"`
-	RunID       string         `json:"run_id,omitempty"`
-	TopKBuckets []TopKBucket   `json:"top_k_buckets,omitempty"`
-	CDFCurve    []CDFPoint     `json:"cdf_curve,omitempty"`
-}
-
-// TopKBucket represents one bar in the Top-K sparse dimension bar chart.
-type TopKBucket struct {
-	Index uint32  `json:"index"` // sparse dimension index (term hash)
-	Value float32 `json:"value"` // weight (term frequency)
-}
-
-// CDFPoint represents one point on the cumulative contribution curve.
-type CDFPoint struct {
-	K          int     `json:"k"`          // rank position (1-based, sorted by value desc)
-	Cumulative float64 `json:"cumulative"` // cumulative weight fraction [0.0, 1.0]
+	ID        string         `json:"id"`
+	Memory    string         `json:"memory"`
+	Hash      string         `json:"hash,omitempty"`
+	CreatedAt string         `json:"created_at,omitempty"`
+	UpdatedAt string         `json:"updated_at,omitempty"`
+	Score     float64        `json:"score,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+	BotID     string         `json:"bot_id,omitempty"`
+	AgentID   string         `json:"agent_id,omitempty"`
+	RunID     string         `json:"run_id,omitempty"`
 }
 
 type SearchResponse struct {
@@ -205,7 +165,6 @@ type CompactResult struct {
 
 type MemoryCompactCapability struct {
 	Semantic     bool   `json:"semantic"`
-	Native       bool   `json:"native,omitempty"`
 	Archive      bool   `json:"archive,omitempty"`
 	RebuildIndex bool   `json:"rebuild_index,omitempty"`
 	Reason       string `json:"reason,omitempty"`
