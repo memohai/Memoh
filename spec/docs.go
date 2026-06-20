@@ -5999,7 +5999,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Comma-separated session types to include. Defaults to user-facing types (chat,discuss,acp_agent).",
+                        "description": "Comma-separated session types to include. Defaults to user-facing types (chat,discuss,acp_agent), or subagent when parent_session_id is set.",
                         "name": "types",
                         "in": "query"
                     },
@@ -12912,19 +12912,6 @@ const docTemplate = `{
                 }
             }
         },
-        "adapters.CDFPoint": {
-            "type": "object",
-            "properties": {
-                "cumulative": {
-                    "description": "cumulative weight fraction [0.0, 1.0]",
-                    "type": "number"
-                },
-                "k": {
-                    "description": "rank position (1-based, sorted by value desc)",
-                    "type": "integer"
-                }
-            }
-        },
         "adapters.CompactResult": {
             "type": "object",
             "properties": {
@@ -12970,9 +12957,6 @@ const docTemplate = `{
                 "archive": {
                     "type": "boolean"
                 },
-                "native": {
-                    "type": "boolean"
-                },
                 "reason": {
                     "type": "string"
                 },
@@ -12992,12 +12976,6 @@ const docTemplate = `{
                 },
                 "bot_id": {
                     "type": "string"
-                },
-                "cdf_curve": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/adapters.CDFPoint"
-                    }
                 },
                 "created_at": {
                     "type": "string"
@@ -13020,12 +12998,6 @@ const docTemplate = `{
                 },
                 "score": {
                     "type": "number"
-                },
-                "top_k_buckets": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/adapters.TopKBucket"
-                    }
                 },
                 "updated_at": {
                     "type": "string"
@@ -13263,19 +13235,6 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/adapters.MemoryItem"
                     }
-                }
-            }
-        },
-        "adapters.TopKBucket": {
-            "type": "object",
-            "properties": {
-                "index": {
-                    "description": "sparse dimension index (term hash)",
-                    "type": "integer"
-                },
-                "value": {
-                    "description": "weight (term frequency)",
-                    "type": "number"
                 }
             }
         },

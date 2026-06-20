@@ -187,17 +187,6 @@ export type AcpprofilePublicProfile = {
     supported_backends?: Array<string>;
 };
 
-export type AdaptersCdfPoint = {
-    /**
-     * cumulative weight fraction [0.0, 1.0]
-     */
-    cumulative?: number;
-    /**
-     * rank position (1-based, sorted by value desc)
-     */
-    k?: number;
-};
-
 export type AdaptersCompactResult = {
     after_count?: number;
     before_count?: number;
@@ -216,7 +205,6 @@ export type AdaptersHealthStatus = {
 
 export type AdaptersMemoryCompactCapability = {
     archive?: boolean;
-    native?: boolean;
     reason?: string;
     rebuild_index?: boolean;
     semantic?: boolean;
@@ -225,7 +213,6 @@ export type AdaptersMemoryCompactCapability = {
 export type AdaptersMemoryItem = {
     agent_id?: string;
     bot_id?: string;
-    cdf_curve?: Array<AdaptersCdfPoint>;
     created_at?: string;
     hash?: string;
     id?: string;
@@ -235,7 +222,6 @@ export type AdaptersMemoryItem = {
     };
     run_id?: string;
     score?: number;
-    top_k_buckets?: Array<AdaptersTopKBucket>;
     updated_at?: string;
 };
 
@@ -333,17 +319,6 @@ export type AdaptersRebuildResult = {
 export type AdaptersSearchResponse = {
     relations?: Array<unknown>;
     results?: Array<AdaptersMemoryItem>;
-};
-
-export type AdaptersTopKBucket = {
-    /**
-     * sparse dimension index (term hash)
-     */
-    index?: number;
-    /**
-     * weight (term frequency)
-     */
-    value?: number;
 };
 
 export type AdaptersUsageResponse = {
@@ -7518,7 +7493,7 @@ export type GetBotsByBotIdSessionsData = {
     };
     query?: {
         /**
-         * Comma-separated session types to include. Defaults to user-facing types (chat,discuss,acp_agent).
+         * Comma-separated session types to include. Defaults to user-facing types (chat,discuss,acp_agent), or subagent when parent_session_id is set.
          */
         types?: string;
         /**

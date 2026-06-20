@@ -308,15 +308,6 @@ definitions:
           type: string
         type: array
     type: object
-  adapters.CDFPoint:
-    properties:
-      cumulative:
-        description: cumulative weight fraction [0.0, 1.0]
-        type: number
-      k:
-        description: rank position (1-based, sorted by value desc)
-        type: integer
-    type: object
   adapters.CompactResult:
     properties:
       after_count:
@@ -346,8 +337,6 @@ definitions:
     properties:
       archive:
         type: boolean
-      native:
-        type: boolean
       reason:
         type: string
       rebuild_index:
@@ -361,10 +350,6 @@ definitions:
         type: string
       bot_id:
         type: string
-      cdf_curve:
-        items:
-          $ref: '#/definitions/adapters.CDFPoint'
-        type: array
       created_at:
         type: string
       hash:
@@ -380,10 +365,6 @@ definitions:
         type: string
       score:
         type: number
-      top_k_buckets:
-        items:
-          $ref: '#/definitions/adapters.TopKBucket'
-        type: array
       updated_at:
         type: string
     type: object
@@ -541,15 +522,6 @@ definitions:
         items:
           $ref: '#/definitions/adapters.MemoryItem'
         type: array
-    type: object
-  adapters.TopKBucket:
-    properties:
-      index:
-        description: sparse dimension index (term hash)
-        type: integer
-      value:
-        description: weight (term frequency)
-        type: number
     type: object
   adapters.UsageResponse:
     properties:
