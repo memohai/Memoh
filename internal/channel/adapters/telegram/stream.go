@@ -33,6 +33,7 @@ type telegramOutboundStream struct {
 	isPrivateChat bool
 	draftID       int
 	closed        atomic.Bool
+	wg            sync.WaitGroup
 	mu            sync.Mutex
 	buf           strings.Builder
 	streamChatID  int64
@@ -72,7 +73,7 @@ func (s *telegramOutboundStream) getBotAndReply(ctx context.Context) (bot *tele.
 	return bot, replyTo, nil
 }
 
-func (s *telegramOutboundStream) refreshTypingAction(ctx context.Context) error {
+func (s *telegramOutboundStream) refreshTypingAction(ctx context.Context, chatID int64) error {
 	if err := s.adapter.waitStreamLimit(ctx); err != nil {
 		return err
 	}
@@ -80,13 +81,16 @@ func (s *telegramOutboundStream) refreshTypingAction(ctx context.Context) error 
 	if err != nil {
 		return err
 	}
-	return bot.Notify(tele.ChatID(s.streamChatID), tele.Typing)
+	return bot.Notify(tele.ChatID(chatID), tele.Typing)
 }
 
 func (s *telegramOutboundStream) ensureStreamMessage(ctx context.Context, text string) error {
 	s.mu.Lock()
+	typingChatID := s.streamChatID
+	s.wg.Add(1)
 	go func() {
-		if err := s.refreshTypingAction(ctx); err != nil {
+		defer s.wg.Done()
+		if err := s.refreshTypingAction(ctx, typingChatID); err != nil {
 			if s.adapter != nil && s.adapter.logger != nil {
 				s.adapter.logger.Debug("refresh typing action failed", slog.Any("error", err))
 			}

@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/memohai/memoh/internal/channel"
 )
@@ -24,9 +23,6 @@ func withMisskeyHTTPStub(t *testing.T, handler http.HandlerFunc) (channel.Channe
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	prev := httpClient
-	httpClient = &http.Client{Timeout: 5 * time.Second}
-	t.Cleanup(func() { httpClient = prev })
 	cfg := channel.ChannelConfig{
 		ID:    "cfg-1",
 		BotID: "bot-1",

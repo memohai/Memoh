@@ -1101,7 +1101,7 @@ func TestStreamFinal_RichSendFallbackPreservesParseMode(t *testing.T) {
 	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
 		return bot, nil
 	}
-	defer func() { getOrCreateBotForTest = origGetBot }()
+	defer func() { s.wg.Wait(); getOrCreateBotForTest = origGetBot }()
 
 	err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{
 		Type: channel.StreamEventFinal,
