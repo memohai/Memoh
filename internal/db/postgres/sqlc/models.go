@@ -428,6 +428,36 @@ type MediaAsset struct {
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }
 
+type MemoryEdge struct {
+	ID        int64              `json:"id"`
+	BotID     pgtype.UUID        `json:"bot_id"`
+	SrcNode   string             `json:"src_node"`
+	DstNode   string             `json:"dst_node"`
+	Rel       string             `json:"rel"`
+	Weight    float32            `json:"weight"`
+	Metadata  []byte             `json:"metadata"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type MemoryNode struct {
+	ID               string             `json:"id"`
+	BotID            pgtype.UUID        `json:"bot_id"`
+	Body             string             `json:"body"`
+	Hash             string             `json:"hash"`
+	Layer            string             `json:"layer"`
+	FactType         string             `json:"fact_type"`
+	Subject          string             `json:"subject"`
+	Confidence       float32            `json:"confidence"`
+	Metadata         []byte             `json:"metadata"`
+	SourceMessageIds []byte             `json:"source_message_ids"`
+	ProfileRef       string             `json:"profile_ref"`
+	Topic            string             `json:"topic"`
+	CapturedAt       pgtype.Timestamptz `json:"captured_at"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
 type MemoryProvider struct {
 	ID        pgtype.UUID        `json:"id"`
 	Name      string             `json:"name"`
