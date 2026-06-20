@@ -91,6 +91,17 @@ func Plan(botID string, items []storefs.MemoryItem) ([]NodeSpec, []EdgeSpec) {
 	return nodes, edges
 }
 
+// PlanFromNodes derives implicit edges from an existing set of nodes (e.g.
+// already persisted in the wiki store) without re-classifying them. It is the
+// edge-derivation half of Plan, used by RebuildImplicitEdges.
+func PlanFromNodes(nodes []NodeSpec) []EdgeSpec {
+	return buildImplicitEdges(nodes)
+}
+
+// ImplicitEdgeRels is the canonical set of edges derived automatically from
+// node attributes (as opposed to explicit refs/supersedes/... authored later).
+var ImplicitEdgeRels = []EdgeRel{EdgeSameProfile, EdgeSameTopic, EdgeSameDay}
+
 // Summarise returns a Result for a planned node/edge set, suitable for CLI
 // dry-run reporting.
 func Summarise(botID string, nodes []NodeSpec, edges []EdgeSpec) Result {
