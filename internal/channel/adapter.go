@@ -123,6 +123,12 @@ type OutboundCapabilityResolver interface {
 	ResolveOutboundCapabilities(cfg ChannelConfig, target string, base ChannelCapabilities) ChannelCapabilities
 }
 
+// OutboundTargetResolver can resolve delivery aliases to the concrete platform
+// target before outbound capability checks run.
+type OutboundTargetResolver interface {
+	ResolveOutboundTarget(ctx context.Context, cfg ChannelConfig, target string) (string, error)
+}
+
 // StreamSender is an adapter capable of opening outbound stream sessions.
 type StreamSender interface {
 	OpenStream(ctx context.Context, cfg ChannelConfig, target string, opts StreamOptions) (PreparedOutboundStream, error)

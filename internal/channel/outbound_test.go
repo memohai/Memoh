@@ -15,6 +15,7 @@ type streamValidationAdapter struct {
 	outboundPolicy OutboundPolicy
 	noMarkdown     bool // when true, advertise a plain-text-only channel
 	richText       bool
+	noAttachments  bool
 	dynamicCaps    *ChannelCapabilities
 }
 
@@ -30,7 +31,7 @@ func (a *streamValidationAdapter) Descriptor() Descriptor {
 			Text:           true,
 			Markdown:       !a.noMarkdown,
 			RichText:       a.richText,
-			Attachments:    true,
+			Attachments:    !a.noAttachments,
 			Streaming:      true,
 			BlockStreaming: true,
 			Buttons:        true,
@@ -63,6 +64,62 @@ type recordingPreparedSender struct {
 func (s *recordingPreparedSender) Send(_ context.Context, _ ChannelConfig, msg PreparedOutboundMessage) error {
 	s.msg = msg
 	return nil
+}
+
+type targetResolvingAdapter struct {
+	channelType  ChannelType
+	sent         []OutboundMessage
+	openedTarget string
+	openedStream *recordingStream
+}
+
+func (a *targetResolvingAdapter) Type() ChannelType { return a.channelType }
+
+func (a *targetResolvingAdapter) Descriptor() Descriptor {
+	return Descriptor{
+		Type:        a.channelType,
+		DisplayName: "target-resolving",
+		Capabilities: ChannelCapabilities{
+			Text:           true,
+			Markdown:       true,
+			Attachments:    true,
+			Streaming:      true,
+			BlockStreaming: true,
+		},
+	}
+}
+
+func (*targetResolvingAdapter) NormalizeTarget(raw string) string { return strings.TrimSpace(raw) }
+
+func (*targetResolvingAdapter) ResolveTarget(_ map[string]any) (string, error) {
+	return "", errors.New("not used")
+}
+
+func (*targetResolvingAdapter) ResolveOutboundTarget(_ context.Context, _ ChannelConfig, target string) (string, error) {
+	if strings.TrimSpace(target) == "alias" {
+		return "channel-target", nil
+	}
+	return strings.TrimSpace(target), nil
+}
+
+func (*targetResolvingAdapter) ResolveOutboundCapabilities(_ ChannelConfig, target string, base ChannelCapabilities) ChannelCapabilities {
+	caps := base
+	if target == "channel-target" {
+		caps.Markdown = false
+		caps.Attachments = false
+	}
+	return caps
+}
+
+func (a *targetResolvingAdapter) Send(_ context.Context, _ ChannelConfig, msg PreparedOutboundMessage) error {
+	a.sent = append(a.sent, msg.LogicalMessage())
+	return nil
+}
+
+func (a *targetResolvingAdapter) OpenStream(_ context.Context, _ ChannelConfig, target string, _ StreamOptions) (PreparedOutboundStream, error) {
+	a.openedTarget = target
+	a.openedStream = &recordingStream{}
+	return a.openedStream, nil
 }
 
 func TestValidateStreamEventSupportedTypes(t *testing.T) {
@@ -125,6 +182,148 @@ func TestValidateStreamEventInvalidPayload(t *testing.T) {
 				t.Fatalf("expected error for %s", tt.name)
 			}
 		})
+	}
+}
+
+func TestValidateStreamEventRejectsUnsupportedAttachments(t *testing.T) {
+	t.Parallel()
+
+	channelType := ChannelType("no-stream-attachments")
+	registry := NewRegistry()
+	if err := registry.Register(&streamValidationAdapter{channelType: channelType, noAttachments: true}); err != nil {
+		t.Fatalf("register adapter failed: %v", err)
+	}
+
+	err := validateStreamEvent(registry, channelType, StreamEvent{
+		Type:        StreamEventAttachment,
+		Attachments: []Attachment{{Type: AttachmentImage, URL: "https://example.com/img.png"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "attachments") {
+		t.Fatalf("expected attachment capability error, got %v", err)
+	}
+}
+
+func TestManagerStreamAttachmentUsesDynamicOutboundCapabilities(t *testing.T) {
+	t.Parallel()
+
+	channelType := ChannelType("dynamic-stream-attachments")
+	registry := NewRegistry()
+	adapter := &streamValidationAdapter{
+		channelType: channelType,
+		dynamicCaps: &ChannelCapabilities{
+			Text:           true,
+			Streaming:      true,
+			BlockStreaming: true,
+			Attachments:    false,
+		},
+	}
+	if err := registry.Register(adapter); err != nil {
+		t.Fatalf("register adapter failed: %v", err)
+	}
+	manager := &Manager{registry: registry, attachmentStore: channeltest.NewMemoryAttachmentStore()}
+	stream := &managerOutboundStream{
+		manager:     manager,
+		config:      ChannelConfig{BotID: "bot-1", ChannelType: channelType},
+		stream:      &recordingStream{},
+		channelType: channelType,
+		target:      "chat-1",
+		policy:      manager.resolveOutboundPolicy(channelType),
+	}
+
+	err := stream.Push(context.Background(), StreamEvent{
+		Type:        StreamEventAttachment,
+		Attachments: []Attachment{{Type: AttachmentImage, URL: "https://example.com/img.png"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "attachments") {
+		t.Fatalf("expected dynamic attachment capability error, got %v", err)
+	}
+}
+
+func TestManagerSendResolvesOutboundTargetBeforeCapabilities(t *testing.T) {
+	t.Parallel()
+
+	channelType := ChannelType("target-resolving-send")
+	adapter := &targetResolvingAdapter{channelType: channelType}
+	registry := NewRegistry()
+	if err := registry.Register(adapter); err != nil {
+		t.Fatalf("register adapter failed: %v", err)
+	}
+	manager := NewManager(nil, registry, &fakeConfigStore{
+		effectiveConfig: ChannelConfig{BotID: "bot-1", ChannelType: channelType},
+	}, nil)
+
+	err := manager.Send(context.Background(), "bot-1", channelType, SendRequest{
+		Target: "alias",
+		Message: Message{
+			Text:   "Hello **world**",
+			Format: MessageFormatMarkdown,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Send failed: %v", err)
+	}
+	if len(adapter.sent) != 1 {
+		t.Fatalf("expected one send, got %d", len(adapter.sent))
+	}
+	got := adapter.sent[0]
+	if got.Target != "channel-target" {
+		t.Fatalf("expected resolved target, got %q", got.Target)
+	}
+	if got.Message.Format != MessageFormatPlain || got.Message.Text != "Hello world" {
+		t.Fatalf("expected markdown downgraded using resolved target caps, got %+v", got.Message)
+	}
+
+	err = manager.Send(context.Background(), "bot-1", channelType, SendRequest{
+		Target: "alias",
+		Message: Message{
+			Text:        "with attachment",
+			Attachments: []Attachment{{Type: AttachmentImage, URL: "https://example.com/img.png"}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "attachments") {
+		t.Fatalf("expected attachment rejection using resolved target caps, got %v", err)
+	}
+}
+
+func TestReplyStreamResolvesOutboundTargetBeforeCapabilities(t *testing.T) {
+	t.Parallel()
+
+	channelType := ChannelType("target-resolving-stream")
+	adapter := &targetResolvingAdapter{channelType: channelType}
+	registry := NewRegistry()
+	if err := registry.Register(adapter); err != nil {
+		t.Fatalf("register adapter failed: %v", err)
+	}
+	manager := NewManager(nil, registry, nil, nil)
+	sender := manager.newReplySender(ChannelConfig{BotID: "bot-1", ChannelType: channelType}, channelType)
+
+	stream, err := sender.OpenStream(context.Background(), "alias", StreamOptions{})
+	if err != nil {
+		t.Fatalf("OpenStream failed: %v", err)
+	}
+	if adapter.openedTarget != "channel-target" {
+		t.Fatalf("expected stream opened on resolved target, got %q", adapter.openedTarget)
+	}
+
+	err = stream.Push(context.Background(), StreamEvent{
+		Type: StreamEventFinal,
+		Final: &StreamFinalizePayload{
+			Message: Message{
+				Text:   "Hello **world**",
+				Format: MessageFormatMarkdown,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Push failed: %v", err)
+	}
+	events := adapter.openedStream.Events()
+	if len(events) != 1 {
+		t.Fatalf("expected one stream event, got %d", len(events))
+	}
+	got := events[0].Final.Message
+	if got.Format != MessageFormatPlain || got.Text != "Hello world" {
+		t.Fatalf("expected stream final downgraded using resolved target caps, got %+v", got)
 	}
 }
 
@@ -232,6 +431,61 @@ func newChunkingTestStream(t *testing.T, chunkLimit int) (*managerOutboundStream
 		},
 	}
 	return stream, rec, &sent
+}
+
+func TestBuildOutboundMessagesWithCaps_RechunksAfterURLActionDowngrade(t *testing.T) {
+	t.Parallel()
+
+	msgs, err := buildOutboundMessagesWithCaps(OutboundMessage{
+		Target: "chat-1",
+		Message: Message{
+			Text:   strings.Repeat("a", 18),
+			Format: MessageFormatPlain,
+			Actions: []Action{{
+				Label: "Open detailed report",
+				URL:   "https://example.com/reports/1234567890",
+			}},
+		},
+	}, OutboundPolicy{TextChunkLimit: 40}, ChannelCapabilities{Text: true, Markdown: true}, true)
+	if err != nil {
+		t.Fatalf("buildOutboundMessagesWithCaps failed: %v", err)
+	}
+	if len(msgs) < 2 {
+		t.Fatalf("expected URL action downgrade to be rechunked, got %d message(s)", len(msgs))
+	}
+	for i, msg := range msgs {
+		if len(msg.Message.Actions) != 0 {
+			t.Fatalf("chunk %d still has actions after downgrade: %+v", i, msg.Message.Actions)
+		}
+		if got := runeLen(msg.Message.Text); got > 40 {
+			t.Fatalf("chunk %d exceeds limit after downgrade: %d", i, got)
+		}
+	}
+}
+
+func TestBuildOutboundMessagesWithCaps_RichPartsUseRichTextChunkLimit(t *testing.T) {
+	t.Parallel()
+
+	msgs, err := buildOutboundMessagesWithCaps(OutboundMessage{
+		Target: "chat-1",
+		Message: Message{
+			Format: MessageFormatRich,
+			Parts: []MessagePart{{
+				Type:   MessagePartText,
+				Text:   strings.Repeat("r", 80),
+				Styles: []MessageTextStyle{MessageStyleBold},
+			}},
+		},
+	}, OutboundPolicy{TextChunkLimit: 50, RichTextChunkLimit: 200}, ChannelCapabilities{Text: true, Markdown: true, RichText: true}, true)
+	if err != nil {
+		t.Fatalf("buildOutboundMessagesWithCaps failed: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("expected rich parts within rich limit to stay as one message, got %d", len(msgs))
+	}
+	if len(msgs[0].Message.Parts) != 1 || msgs[0].Message.Format != MessageFormatRich {
+		t.Fatalf("expected rich parts preserved, got %+v", msgs[0].Message)
+	}
 }
 
 func TestPushFinalWithChunking_ShortText(t *testing.T) {
@@ -1210,6 +1464,84 @@ func TestPushDelta_FinalWithActionsAfterSplitStaysOnBufferedFinal(t *testing.T) 
 		}
 	}
 	t.Fatal("last stream should have received a Final event")
+}
+
+func TestPushDelta_FinalWithDowngradedURLActionsAfterSplitSendsLinks(t *testing.T) {
+	t.Parallel()
+
+	channelType := ChannelType("split-url-actions-no-buttons")
+	registry := NewRegistry()
+	adapter := &streamValidationAdapter{
+		channelType:    channelType,
+		outboundPolicy: OutboundPolicy{TextChunkLimit: 50},
+		dynamicCaps: &ChannelCapabilities{
+			Text:           true,
+			Markdown:       true,
+			Streaming:      true,
+			BlockStreaming: true,
+		},
+	}
+	if err := registry.Register(adapter); err != nil {
+		t.Fatalf("register adapter failed: %v", err)
+	}
+	manager := &Manager{registry: registry, attachmentStore: channeltest.NewMemoryAttachmentStore()}
+	streams := []*recordingStream{{}, {}, {}}
+	reo := &reopenableStream{streams: streams}
+	var sent []OutboundMessage
+	stream := &managerOutboundStream{
+		manager:     manager,
+		config:      ChannelConfig{BotID: "bot-1", ChannelType: channelType},
+		stream:      streams[0],
+		channelType: channelType,
+		target:      "chat-1",
+		policy:      manager.resolveOutboundPolicy(channelType),
+		send: func(_ context.Context, msg OutboundMessage) error {
+			sent = append(sent, msg)
+			return nil
+		},
+		reopen: reo.reopen,
+	}
+
+	for range 8 {
+		if err := stream.Push(context.Background(), StreamEvent{
+			Type:  StreamEventDelta,
+			Delta: strings.Repeat("a", 10),
+		}); err != nil {
+			t.Fatalf("Push failed: %v", err)
+		}
+	}
+	if stream.splitCount == 0 {
+		t.Fatal("expected at least 1 split")
+	}
+
+	finalText := strings.Repeat("a", 80)
+	err := stream.Push(context.Background(), StreamEvent{
+		Type: StreamEventFinal,
+		Final: &StreamFinalizePayload{
+			Message: Message{
+				Text:   finalText,
+				Format: MessageFormatPlain,
+				Actions: []Action{{
+					Label: "Open",
+					URL:   "https://example.com",
+				}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Final Push failed: %v", err)
+	}
+
+	if len(sent) != 1 {
+		t.Fatalf("expected one fallback link send, got %d", len(sent))
+	}
+	got := sent[0].Message.PlainText()
+	if !strings.Contains(got, "Open") || !strings.Contains(got, "https://example.com") {
+		t.Fatalf("expected downgraded URL action link, got %q", got)
+	}
+	if strings.Contains(got, finalText) {
+		t.Fatalf("fallback link send duplicated streamed final body: %q", got)
+	}
 }
 
 func TestPushDelta_FinalWithPartsAfterSplitDoesNotDuplicateStreamedBody(t *testing.T) {

@@ -938,6 +938,56 @@ func TestStreamFinal_RichPartsUseSendRichMessage(t *testing.T) {
 	}
 }
 
+func TestStreamFinal_MediumRichPartsUseSendRichMessage(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	s := &telegramOutboundStream{
+		adapter: adapter,
+		cfg:     channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		target:  "123",
+	}
+	ctx := context.Background()
+
+	var sawRich bool
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			sawRich = true
+		}
+		if strings.HasSuffix(req.URL.Path, "/sendMessage") || strings.HasSuffix(req.URL.Path, "/editMessageText") {
+			t.Fatalf("medium rich stream final should use sendRichMessage, got %s", req.URL.Path)
+		}
+		resp := `{"ok":true,"result":{"message_id":78,"chat":{"id":123}}}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(resp)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{
+		Type: channel.StreamEventFinal,
+		Final: &channel.StreamFinalizePayload{
+			Message: channel.Message{
+				Format: channel.MessageFormatRich,
+				Parts: []channel.MessagePart{
+					{Type: channel.MessagePartText, Text: strings.Repeat("你", telegramMaxMessageLength+100), Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+				},
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if !sawRich {
+		t.Fatal("expected sendRichMessage to be invoked for medium streaming final with Parts")
+	}
+}
+
 func TestStreamFinal_RichEditUnrecoverableFallsBackToNewRichMessage(t *testing.T) {
 	adapter := NewTelegramAdapter(nil)
 	s := &telegramOutboundStream{
@@ -1126,7 +1176,7 @@ func TestStreamFinal_LongRichPartsFallbacksToPlainText(t *testing.T) {
 			Message: channel.Message{
 				Format: channel.MessageFormatRich,
 				Parts: []channel.MessagePart{
-					{Type: channel.MessagePartText, Text: strings.Repeat("你", telegramMaxMessageLength+100), Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+					{Type: channel.MessagePartText, Text: strings.Repeat("你", telegramMaxMessageLength*9), Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
 				},
 			},
 		},

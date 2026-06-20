@@ -171,6 +171,10 @@ func (*QQAdapter) ResolveOutboundCapabilities(cfg channel.ChannelConfig, target 
 	return caps
 }
 
+func (a *QQAdapter) ResolveOutboundTarget(ctx context.Context, _ channel.ChannelConfig, target string) (string, error) {
+	return a.resolveTarget(ctx, target)
+}
+
 func (*QQAdapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
 	return normalizeConfig(raw)
 }

@@ -260,8 +260,9 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 			return err
 		}
 	}
-	if normalized, ok := m.registry.NormalizeTarget(channelType, target); ok {
-		target = normalized
+	target, err = m.resolveOutboundTarget(ctx, channelType, config, target)
+	if err != nil {
+		return err
 	}
 	if req.Message.IsEmpty() {
 		return errors.New("message is required")
@@ -287,6 +288,22 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 		}
 	}
 	return nil
+}
+
+func (m *Manager) resolveOutboundTarget(ctx context.Context, channelType ChannelType, cfg ChannelConfig, target string) (string, error) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return "", errors.New("target is required")
+	}
+	if normalized, ok := m.registry.NormalizeTarget(channelType, target); ok {
+		target = normalized
+	}
+	if resolved, ok, err := m.registry.ResolveOutboundTarget(ctx, channelType, cfg, target); err != nil {
+		return "", err
+	} else if ok {
+		target = resolved
+	}
+	return target, nil
 }
 
 // React adds or removes an emoji reaction on a channel message.

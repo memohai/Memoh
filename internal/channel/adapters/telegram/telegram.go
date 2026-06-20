@@ -29,6 +29,7 @@ import (
 
 const (
 	telegramMaxMessageLength        = 4096
+	telegramMaxRichMessageLength    = 32768
 	telegramMediaGroupCollectWindow = 700 * time.Millisecond
 	telegramUpdateDedupeTTL         = 10 * time.Minute
 	defaultTelegramFileEndpoint     = "https://api.telegram.org/file/bot%s/%s"
@@ -198,6 +199,11 @@ func (*TelegramAdapter) Descriptor() channel.Descriptor {
 			BlockStreaming: true,
 			Edit:           true,
 			Unsend:         true,
+		},
+		OutboundPolicy: channel.OutboundPolicy{
+			TextChunkLimit:     telegramMaxMessageLength,
+			RichTextChunkLimit: telegramMaxRichMessageLength,
+			ChunkerMode:        channel.ChunkerModeMarkdown,
 		},
 		ConfigSchema: channel.ConfigSchema{
 			Version: 1,
@@ -871,7 +877,7 @@ func renderTelegramOutboundBody(msg channel.Message) (telegramInputRichMessage, 
 	if strings.TrimSpace(rich.HTML) == "" {
 		return telegramInputRichMessage{}, text, parseMode
 	}
-	if utf8.RuneCountInString(rich.HTML) <= telegramMaxMessageLength {
+	if utf8.RuneCountInString(rich.HTML) <= telegramMaxRichMessageLength {
 		return rich, text, parseMode
 	}
 	if len(msg.Parts) > 0 {

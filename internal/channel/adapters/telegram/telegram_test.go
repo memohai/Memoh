@@ -611,6 +611,48 @@ func TestTelegramAdapter_SendRichPartsUsesRichMessage(t *testing.T) {
 	}
 }
 
+func TestTelegramAdapter_MediumRichPartsUsesRichMessage(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+
+	var gotBody map[string]any
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			t.Fatalf("expected sendRichMessage, got %s", req.URL.Path)
+		}
+		body, _ := io.ReadAll(req.Body)
+		gotBody = decodeTelegramBody(t, body)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":80,"chat":{"id":123}}}`)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	msg := channel.PreparedOutboundMessage{
+		Target: "123",
+		Message: channel.PreparedMessage{Message: channel.Message{
+			Format: channel.MessageFormatRich,
+			Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: strings.Repeat("你", telegramMaxMessageLength+100), Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+			},
+		}},
+	}
+
+	if err := adapter.Send(context.Background(), channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}}, msg); err != nil {
+		t.Fatalf("send medium rich parts: %v", err)
+	}
+	html := telegramRichHTMLFromBody(t, gotBody)
+	if got := utf8.RuneCountInString(html); got <= telegramMaxMessageLength {
+		t.Fatalf("test must exercise rich payloads above normal text limit, got %d", got)
+	}
+}
+
 func TestTelegramAdapter_LongRichPartsFallsBackToPlainText(t *testing.T) {
 	adapter := NewTelegramAdapter(nil)
 
@@ -642,7 +684,7 @@ func TestTelegramAdapter_LongRichPartsFallsBackToPlainText(t *testing.T) {
 		Message: channel.PreparedMessage{Message: channel.Message{
 			Format: channel.MessageFormatRich,
 			Parts: []channel.MessagePart{
-				{Type: channel.MessagePartText, Text: strings.Repeat("你", telegramMaxMessageLength+100), Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+				{Type: channel.MessagePartText, Text: strings.Repeat("你", telegramMaxMessageLength*9), Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
 			},
 		}},
 	}
@@ -656,6 +698,15 @@ func TestTelegramAdapter_LongRichPartsFallsBackToPlainText(t *testing.T) {
 	}
 	if got, _ := gotBody["parse_mode"].(string); got != "" {
 		t.Fatalf("long rich fallback should use plain text parse mode, got body %v", gotBody)
+	}
+}
+
+func TestTelegramDescriptorUsesRichTextChunkLimit(t *testing.T) {
+	t.Parallel()
+
+	policy := channel.NormalizeOutboundPolicy(NewTelegramAdapter(nil).Descriptor().OutboundPolicy)
+	if policy.RichTextChunkLimit <= policy.TextChunkLimit {
+		t.Fatalf("Telegram rich text limit should exceed text limit, got text=%d rich=%d", policy.TextChunkLimit, policy.RichTextChunkLimit)
 	}
 }
 

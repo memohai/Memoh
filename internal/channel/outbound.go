@@ -35,6 +35,7 @@ type Chunker func(text string, limit int) []string
 // OutboundPolicy configures how outbound messages are chunked, ordered, and retried.
 type OutboundPolicy struct {
 	TextChunkLimit      int           `json:"text_chunk_limit,omitempty"`
+	RichTextChunkLimit  int           `json:"rich_text_chunk_limit,omitempty"`
 	ChunkerMode         ChunkerMode   `json:"chunker_mode,omitempty"`
 	Chunker             Chunker       `json:"-"`
 	MediaOrder          OutboundOrder `json:"media_order,omitempty"`
@@ -47,6 +48,9 @@ type OutboundPolicy struct {
 func NormalizeOutboundPolicy(policy OutboundPolicy) OutboundPolicy {
 	if policy.TextChunkLimit <= 0 {
 		policy.TextChunkLimit = 2000
+	}
+	if policy.RichTextChunkLimit <= 0 {
+		policy.RichTextChunkLimit = policy.TextChunkLimit
 	}
 	if policy.MediaOrder == "" {
 		policy.MediaOrder = OutboundOrderMediaFirst
@@ -203,8 +207,12 @@ func buildOutboundMessagesWithCaps(msg OutboundMessage, policy OutboundPolicy, c
 	if msg.Message.IsEmpty() {
 		return nil, errors.New("message is required")
 	}
+	policy = NormalizeOutboundPolicy(policy)
 	normalized := normalizeOutboundMessage(msg.Message)
-	normalized = coerceOversizedRichPartsForChunking(normalized, policy, caps, hasCaps)
+	if hasCaps {
+		normalized = coerceFormatForCaps(normalized, caps)
+		normalized = coerceOversizedRichPartsForChunking(normalized, policy, caps)
+	}
 	attachments := append([]Attachment(nil), normalized.Attachments...)
 	chunker := policy.Chunker
 	if normalized.Format == MessageFormatMarkdown {
@@ -284,12 +292,13 @@ func buildOutboundMessagesWithCaps(msg OutboundMessage, policy OutboundPolicy, c
 	return append(attachmentMessages, textMessages...), nil
 }
 
-func coerceOversizedRichPartsForChunking(msg Message, policy OutboundPolicy, caps ChannelCapabilities, hasCaps bool) Message {
-	if !hasCaps || policy.TextChunkLimit <= 0 || len(msg.Parts) == 0 || strings.TrimSpace(msg.ID) != "" {
+func coerceOversizedRichPartsForChunking(msg Message, policy OutboundPolicy, caps ChannelCapabilities) Message {
+	limit := richPartsChunkLimit(policy, caps)
+	if limit <= 0 || len(msg.Parts) == 0 || strings.TrimSpace(msg.ID) != "" {
 		return msg
 	}
 	plain := strings.TrimSpace(RenderPartsAsPlain(msg.Parts))
-	if plain == "" || runeLen(plain) <= policy.TextChunkLimit {
+	if plain == "" || runeLen(plain) <= limit {
 		return msg
 	}
 	if caps.Markdown {
@@ -301,6 +310,13 @@ func coerceOversizedRichPartsForChunking(msg Message, policy OutboundPolicy, cap
 	}
 	msg.Parts = nil
 	return msg
+}
+
+func richPartsChunkLimit(policy OutboundPolicy, caps ChannelCapabilities) int {
+	if caps.RichText {
+		return policy.RichTextChunkLimit
+	}
+	return policy.TextChunkLimit
 }
 
 func shouldInlineTextWithMedia(policy OutboundPolicy, msg Message, attachments []Attachment) bool {
@@ -517,7 +533,7 @@ func requiresMedia(attachments []Attachment) bool {
 }
 
 func validateStreamEvent(registry *Registry, channelType ChannelType, event StreamEvent) error {
-	caps, _ := registry.GetCapabilities(channelType)
+	caps, ok := registry.GetCapabilities(channelType)
 	switch event.Type {
 	case StreamEventStatus:
 		if event.Status == "" {
@@ -543,6 +559,9 @@ func validateStreamEvent(registry *Registry, channelType ChannelType, event Stre
 			return errors.New("stream attachments are required")
 		}
 		if _, err := normalizeAttachmentRefs(event.Attachments, channelType); err != nil {
+			return err
+		}
+		if err := validateMessageAgainstCapabilities(caps, ok, Message{Attachments: event.Attachments}); err != nil {
 			return err
 		}
 	case StreamEventAgentStart, StreamEventAgentEnd, StreamEventProcessingStarted, StreamEventProcessingCompleted:
@@ -604,6 +623,11 @@ func (s *managerReplySender) Send(ctx context.Context, msg OutboundMessage) erro
 	if s.manager == nil {
 		return errors.New("channel manager not configured")
 	}
+	target, err := s.manager.resolveOutboundTarget(ctx, s.channelType, s.config, msg.Target)
+	if err != nil {
+		return err
+	}
+	msg.Target = target
 	policy := s.manager.resolveOutboundPolicy(s.channelType)
 	caps, hasCaps := s.manager.registry.GetOutboundCapabilities(s.channelType, s.config, msg.Target)
 	outbound, err := buildOutboundMessagesWithCaps(msg, policy, caps, hasCaps)
@@ -629,7 +653,12 @@ func (s *managerReplySender) OpenStream(ctx context.Context, target string, opts
 	if target == "" {
 		return nil, errors.New("target is required")
 	}
-	caps, _ := s.manager.registry.GetCapabilities(s.channelType)
+	var err error
+	target, err = s.manager.resolveOutboundTarget(ctx, s.channelType, s.config, target)
+	if err != nil {
+		return nil, err
+	}
+	caps, _ := s.manager.registry.GetOutboundCapabilities(s.channelType, s.config, target)
 	if !caps.Streaming && !caps.BlockStreaming {
 		return nil, errors.New("channel does not support streaming")
 	}
@@ -683,13 +712,22 @@ func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) err
 	if err := validateStreamEvent(s.manager.registry, s.channelType, event); err != nil {
 		return err
 	}
+	if event.Type == StreamEventAttachment {
+		if caps, ok := s.manager.registry.GetOutboundCapabilities(s.channelType, s.config, s.target); ok {
+			if err := validateMessageAgainstCapabilities(caps, true, Message{Attachments: event.Attachments}); err != nil {
+				return err
+			}
+		}
+	}
 
 	// Downgrade the final's Format to what the channel can render, on a LOCAL
 	// copy, so the adapter actually receives the coerced payload. Done here (not
 	// in validateStreamEvent) so the shared event is never mutated — it may be
 	// fanned out to other channels via tee, where stripping markup for a
 	// plain-text channel would corrupt a Markdown-capable channel's copy.
+	originalFinalText := ""
 	if event.Type == StreamEventFinal && event.Final != nil {
+		originalFinalText = strings.TrimSpace(event.Final.Message.PlainText())
 		if caps, ok := s.manager.registry.GetOutboundCapabilities(s.channelType, s.config, s.target); ok {
 			final := *event.Final
 			final.Message = coerceFormatForCaps(final.Message, caps)
@@ -706,7 +744,7 @@ func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) err
 
 	if event.Type == StreamEventFinal && event.Final != nil && s.send != nil {
 		if s.splitCount > 0 {
-			return s.pushFinalAfterSplit(ctx, event)
+			return s.pushFinalAfterSplit(ctx, event, originalFinalText)
 		}
 		return s.pushFinalWithChunking(ctx, event)
 	}
@@ -811,7 +849,7 @@ func isNaturalBreakPoint(text string) bool {
 // sent earlier portions of the response during streaming. It passes an
 // empty-text Final so the adapter finalizes its internal buffer, then
 // delivers any remaining attachments / actions via the non-streaming path.
-func (s *managerOutboundStream) pushFinalAfterSplit(ctx context.Context, event StreamEvent) error {
+func (s *managerOutboundStream) pushFinalAfterSplit(ctx context.Context, event StreamEvent, originalFinalText string) error {
 	var bufferMessage Message
 	if event.Final != nil && len(event.Final.Message.Attachments) == 0 && len(event.Final.Message.Actions) > 0 {
 		bufferMessage = Message{
@@ -838,12 +876,17 @@ func (s *managerOutboundStream) pushFinalAfterSplit(ctx context.Context, event S
 	if len(msg.Parts) > 0 {
 		msg.Parts = nil
 	}
+	msg.Text = trimSplitFinalDuplicateBody(msg.Text, originalFinalText)
 
-	if len(msg.Attachments) > 0 {
+	if strings.TrimSpace(msg.Text) != "" || len(msg.Attachments) > 0 {
 		if err := s.send(ctx, OutboundMessage{
 			Message: Message{
+				Format:      msg.Format,
+				Text:        msg.Text,
 				Attachments: msg.Attachments,
 				Thread:      msg.Thread,
+				Reply:       msg.Reply,
+				Metadata:    msg.Metadata,
 				Actions:     msg.Actions,
 			},
 		}); err != nil {
@@ -851,6 +894,24 @@ func (s *managerOutboundStream) pushFinalAfterSplit(ctx context.Context, event S
 		}
 	}
 	return nil
+}
+
+func trimSplitFinalDuplicateBody(text string, originalFinalText string) string {
+	text = strings.TrimSpace(text)
+	originalFinalText = strings.TrimSpace(originalFinalText)
+	if text == "" || originalFinalText == "" {
+		return text
+	}
+	if text == originalFinalText {
+		return ""
+	}
+	if strings.HasPrefix(text, originalFinalText) {
+		rest := strings.TrimSpace(strings.TrimPrefix(text, originalFinalText))
+		rest = strings.TrimPrefix(rest, "\n\n")
+		rest = strings.TrimPrefix(rest, "\n")
+		return strings.TrimSpace(rest)
+	}
+	return text
 }
 
 func (s *managerOutboundStream) pushFinalWithChunking(ctx context.Context, event StreamEvent) error {
@@ -866,7 +927,7 @@ func (s *managerOutboundStream) pushFinalWithChunking(ctx context.Context, event
 	}
 	msg := normalizeOutboundMessage(event.Final.Message)
 	if caps, ok := s.manager.registry.GetOutboundCapabilities(s.channelType, s.config, s.target); ok {
-		msg = coerceOversizedRichPartsForChunking(msg, policy, caps, ok)
+		msg = coerceOversizedRichPartsForChunking(msg, policy, caps)
 	}
 	text := strings.TrimSpace(msg.PlainText())
 	textRunes := runeLen(text)
