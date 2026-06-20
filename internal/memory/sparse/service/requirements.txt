@@ -1,6 +1,0 @@
-flask
-torch
-transformers
-huggingface_hub
-sentencepiece
-protobuf

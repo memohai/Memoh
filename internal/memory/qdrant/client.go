@@ -1,5 +1,5 @@
 // Package qdrant wraps the official github.com/qdrant/go-client SDK,
-// providing a thin facade for sparse-vector memory operations.
+// providing a thin facade for dense-vector memory operations.
 package qdrant
 
 import (
@@ -12,11 +12,7 @@ import (
 	pb "github.com/qdrant/go-client/qdrant"
 )
 
-const (
-	sparseVectorName = "sparse"
-)
-
-// Client wraps the official Qdrant gRPC client with sparse-memory-specific helpers.
+// Client wraps the official Qdrant gRPC client with dense-memory-specific helpers.
 type Client struct {
 	inner      *pb.Client
 	collection string
@@ -55,37 +51,12 @@ func (c *Client) Close() error {
 	return c.inner.Close()
 }
 
-func (c *Client) CollectionName() string {
-	return c.collection
-}
-
 func (c *Client) CollectionExists(ctx context.Context) (bool, error) {
 	exists, err := c.inner.CollectionExists(ctx, c.collection)
 	if err != nil {
 		return false, fmt.Errorf("qdrant: check collection: %w", err)
 	}
 	return exists, nil
-}
-
-// EnsureCollection creates the collection with a named sparse vector config if it does not exist.
-func (c *Client) EnsureCollection(ctx context.Context) error {
-	exists, err := c.CollectionExists(ctx)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return nil
-	}
-	err = c.inner.CreateCollection(ctx, &pb.CreateCollection{
-		CollectionName: c.collection,
-		SparseVectorsConfig: pb.NewSparseVectorsConfig(map[string]*pb.SparseVectorParams{
-			sparseVectorName: {},
-		}),
-	})
-	if err != nil {
-		return fmt.Errorf("qdrant: create collection: %w", err)
-	}
-	return nil
 }
 
 // EnsureDenseCollection creates the collection with dense vector config if it
@@ -114,46 +85,15 @@ func (c *Client) EnsureDenseCollection(ctx context.Context, dimensions int) erro
 	return nil
 }
 
-// SparseVector holds the non-zero components of a sparse text encoding.
-type SparseVector struct {
-	Indices []uint32
-	Values  []float32
-}
-
 type DenseVector struct {
 	Values []float32
 }
 
-// SearchResult is one result from a sparse search or scroll.
+// SearchResult is one result from a search or scroll.
 type SearchResult struct {
 	ID      string
 	Score   float64
 	Payload map[string]string
-}
-
-// Upsert inserts or updates points with named sparse vectors.
-func (c *Client) Upsert(ctx context.Context, id string, vec SparseVector, payload map[string]string) error {
-	wait := true
-	_, err := c.inner.Upsert(ctx, &pb.UpsertPoints{
-		CollectionName: c.collection,
-		Wait:           &wait,
-		Points: []*pb.PointStruct{
-			{
-				Id: pb.NewID(id),
-				Vectors: pb.NewVectorsMap(map[string]*pb.Vector{
-					sparseVectorName: {
-						Data:    vec.Values,
-						Indices: &pb.SparseIndices{Data: vec.Indices},
-					},
-				}),
-				Payload: stringPayloadToValueMap(payload),
-			},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("qdrant: upsert: %w", err)
-	}
-	return nil
 }
 
 // UpsertDense inserts or updates points with dense vectors.
@@ -174,29 +114,6 @@ func (c *Client) UpsertDense(ctx context.Context, id string, vec DenseVector, pa
 		return fmt.Errorf("qdrant: upsert dense: %w", err)
 	}
 	return nil
-}
-
-// Search performs a sparse-vector query against the collection, filtered by bot_id.
-func (c *Client) Search(ctx context.Context, vec SparseVector, botID string, limit int) ([]SearchResult, error) {
-	if limit <= 0 {
-		limit = 10
-	}
-	queryLimit, err := intToUint64(limit)
-	if err != nil {
-		return nil, fmt.Errorf("qdrant: invalid search limit: %w", err)
-	}
-	scored, err := c.inner.Query(ctx, &pb.QueryPoints{
-		CollectionName: c.collection,
-		Query:          pb.NewQuerySparse(vec.Indices, vec.Values),
-		Using:          strPtr(sparseVectorName),
-		Filter:         botFilter(botID),
-		Limit:          uint64Ptr(queryLimit),
-		WithPayload:    pb.NewWithPayload(true),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("qdrant: search: %w", err)
-	}
-	return scoredPointsToResults(scored), nil
 }
 
 // SearchDense performs a dense-vector query against the collection, filtered by bot_id.
@@ -329,6 +246,34 @@ func (c *Client) DeleteByBotID(ctx context.Context, botID string) error {
 
 // --- helpers ---
 
+// ParseHostPort extracts the host and gRPC port from a Qdrant base URL. Qdrant
+// base URLs are typically HTTP (port 6333), but the gRPC port is 6334; a bare
+// host or an unparseable port defaults to 6334. When the configured port is
+// neither 6333 nor 6334 the operator has usually already set the intended gRPC
+// port, so it is returned as-is.
+func ParseHostPort(baseURL string) (string, int) {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return "", 0
+	}
+	baseURL = strings.TrimPrefix(baseURL, "http://")
+	baseURL = strings.TrimPrefix(baseURL, "https://")
+	parts := strings.SplitN(baseURL, ":", 2)
+	host := parts[0]
+	if len(parts) == 2 {
+		httpPort, err := strconv.Atoi(strings.TrimRight(parts[1], "/"))
+		if err == nil {
+			switch httpPort {
+			case 6333, 6334:
+				return host, 6334
+			default:
+				return host, httpPort
+			}
+		}
+	}
+	return host, 6334
+}
+
 func botFilter(botID string) *pb.Filter {
 	return &pb.Filter{
 		Must: []*pb.Condition{
@@ -388,8 +333,6 @@ func extractID(id *pb.PointId) string {
 	}
 	return strconv.FormatUint(id.GetNum(), 10)
 }
-
-func strPtr(s string) *string { return &s }
 
 func uint64Ptr(v uint64) *uint64 { return &v }
 

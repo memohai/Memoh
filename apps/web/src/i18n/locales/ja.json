@@ -953,16 +953,13 @@
     "modeHint": "Botが長期記憶を保存し、呼び出す方法。",
     "advanced": "詳細",
     "advancedHint": "高度な設定向けのカスタムメモリバックエンド。",
-    "sparseSectionTitle": "スパース検索",
     "denseSectionTitle": "密な検索",
-    "sparseInstallHint": "スパース モードは、オプションのスパース サービスに依存します。インストーラーの実行時にスパース インストール オプションを有効にするか、Docker Compose でスパース プロファイルを開始します。",
     "denseBackend": "Dense バックエンド",
     "denseBackendValue": "埋め込みAPI+ Qdrant",
     "denseEmbeddingModel": "Dense 埋め込みモデル",
     "denseEmbeddingModelDescription": "ローカルの再ランク付け前に使用するサードパーティの埋め込みモデルを選択します。",
     "denseQdrantHint": "バックエンドランタイムの接続後、Dense メモリは Qdrant をストレージバックエンドとして使用します。",
     "qdrantCollection": "Qdrant コレクション",
-    "sparseQdrantCollectionDescription": "スパース モードは Qdrant コレクションに書き込みます。現在/デフォルトのコレクション: {collection}。",
     "denseQdrantCollectionDescription": "デンス モードは Qdrant コレクションに書き込みます。現在/デフォルトのコレクション: {collection}。",
     "collectionPoints": "コレクション内のポイント数",
     "collectionExists": "コレクションが存在します",
@@ -971,12 +968,10 @@
     "collectionUnavailable": "利用不可",
     "modeNames": {
       "off": "オフ",
-      "sparse": "キーワード",
       "dense": "セマンティック"
     },
     "modeDescriptions": {
       "off": "長期記憶インデックスを作成せず、基本的なファイルメモリのみを保持します。",
-      "sparse": "オプションのスパース検索サービスを使用して、キーワードで記憶を照合します。",
       "dense": "埋め込みモデルを使用して記憶をベクトルに変換し、意味の類似性で検索します。"
     },
     "providerNames": {
@@ -2011,8 +2006,6 @@
       "memoryProvider": "MemoryProvider",
       "memoryProviderPlaceholder": "MemoryProviderの選択 (空の場合は無効)",
       "memoryModePreview": "選択された組み込みモード: {mode}",
-      "sparseStatusTitle": "スパース取得ステータス",
-      "sparseStatusHint": "Markdown ファイルは信頼できる情報源です。同期すると、/data/memory から Qdrant インデックスが再構築されます。",
       "denseStatusTitle": "密集検索ステータス",
       "denseStatusHint": "Markdown ファイルは信頼できる情報源です。同期すると、/data/memory から高密度 Qdrant インデックスが再構築されます。",
       "mem0StatusTitle": "Mem0 同期ステータス",

@@ -1006,16 +1006,13 @@
     "modeHint": "How bots store and recall long-term memory.",
     "advanced": "Advanced",
     "advancedHint": "Custom memory backends for advanced setups.",
-    "sparseSectionTitle": "Sparse Retrieval",
     "denseSectionTitle": "Dense Retrieval",
-    "sparseInstallHint": "Sparse mode depends on the optional sparse service. Enable the sparse installation option when running the installer or start the sparse profile in Docker Compose.",
     "denseBackend": "Dense Backend",
     "denseBackendValue": "Embedding API + Qdrant",
     "denseEmbeddingModel": "Dense Embedding Model",
     "denseEmbeddingModelDescription": "Select the third-party embedding model used before local rerank.",
     "denseQdrantHint": "Dense memory will use Qdrant as the storage backend after the backend runtime is connected.",
     "qdrantCollection": "Qdrant Collection",
-    "sparseQdrantCollectionDescription": "Sparse mode writes to the Qdrant collection. Current/default collection: {collection}.",
     "denseQdrantCollectionDescription": "Dense mode writes to the Qdrant collection. Current/default collection: {collection}.",
     "collectionPoints": "Points in collection",
     "collectionExists": "Collection exists",
@@ -1024,12 +1021,10 @@
     "collectionUnavailable": "Unavailable",
     "modeNames": {
       "off": "Off",
-      "sparse": "Keyword",
       "dense": "Semantic"
     },
     "modeDescriptions": {
       "off": "Don't build a long-term memory index; keep only the basic file memory.",
-      "sparse": "Match memories by keyword, using the optional sparse retrieval service.",
       "dense": "Turn memories into vectors with an embedding model and retrieve by semantic similarity."
     },
     "providerNames": {
@@ -2030,8 +2025,6 @@
       "memoryProvider": "Memory Provider",
       "memoryProviderPlaceholder": "Select memory provider (disabled if empty)",
       "memoryModePreview": "Selected built-in mode: {mode}",
-      "sparseStatusTitle": "Sparse Retrieval Status",
-      "sparseStatusHint": "Markdown files are the source of truth. Syncing rebuilds the Qdrant index from /data/memory.",
       "denseStatusTitle": "Dense Retrieval Status",
       "denseStatusHint": "Markdown files are the source of truth. Syncing rebuilds the dense Qdrant index from /data/memory.",
       "mem0StatusTitle": "Mem0 Sync Status",
@@ -2046,7 +2039,6 @@
       "memorySourceEntries": "Source Entries",
       "memoryIndexedEntries": "Indexed Entries",
       "memoryQdrantCollection": "Qdrant Collection",
-      "memoryEncoderHealth": "Sparse Encoder",
       "memoryDenseEmbeddingHealth": "Embedding Backend",
       "memoryQdrantHealth": "Qdrant",
       "memoryHealthOk": "Healthy",

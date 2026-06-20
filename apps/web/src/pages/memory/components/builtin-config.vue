@@ -24,13 +24,6 @@
     </p>
 
     <div
-      v-if="mode === 'sparse'"
-      class="rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground"
-    >
-      {{ $t('memory.sparseInstallHint') }}
-    </div>
-
-    <div
       v-if="mode === 'dense'"
       class="space-y-3 rounded-lg border border-border bg-card p-4"
     >
@@ -108,7 +101,7 @@ import { useI18n } from 'vue-i18n'
 import LoadingButton from '@/components/loading-button/index.vue'
 import ModelSelect from '@/pages/bots/components/model-select.vue'
 
-type MemoryMode = 'off' | 'sparse' | 'dense'
+type MemoryMode = 'off' | 'dense'
 
 const props = defineProps<{
   provider?: AdaptersProviderGetResponse | null
@@ -152,14 +145,13 @@ const collections = computed(() => (statusData.value as AdaptersProviderStatusRe
 
 const modeItems = computed<SegmentedItem<MemoryMode>[]>(() => [
   { value: 'off', label: t('memory.modeNames.off') },
-  { value: 'sparse', label: t('memory.modeNames.sparse') },
   { value: 'dense', label: t('memory.modeNames.dense') },
 ])
 
 watch(() => props.provider, (val) => {
   const config = (val?.config ?? {}) as Record<string, unknown>
   const nextMode = config.memory_mode
-  mode.value = nextMode === 'sparse' || nextMode === 'dense' ? nextMode : 'off'
+  mode.value = nextMode === 'dense' ? 'dense' : 'off'
   embeddingModelId.value = typeof config.embedding_model_id === 'string' ? config.embedding_model_id : ''
 }, { immediate: true })
 

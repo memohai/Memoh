@@ -284,7 +284,7 @@ docker compose up -d        # Start all services
 ```
 
 Production deploy services are `postgres`, `migrate`, `server`, and `web`.
-Optional profiles: `qdrant` (vector DB), `sparse` (BM25 search). This is distinct from the native desktop client, which manages its own local server and embedded Qdrant instead of using the Compose web/server split.
+Optional profiles: `qdrant` (vector DB). This is distinct from the native desktop client, which manages its own local server and embedded Qdrant instead of using the Compose web/server split.
 
 ## Key Development Rules
 
@@ -458,7 +458,6 @@ The main configuration file is `config.toml` (copied from `conf/app.example.toml
 - `[postgres]` — PostgreSQL connection
 - `[sqlite]` — SQLite database file and WAL/lock settings
 - `[qdrant]` — Qdrant vector database connection
-- `[sparse]` — Sparse (BM25) search service connection
 - `[web]` — Web frontend address
 - `[registry]` — Provider registry (`providers_dir` pointing to `conf/providers/`)
 - `[supermarket]` — Supermarket integration (base_url)

@@ -7,5 +7,3 @@ services:
     image: memoh.cn/memohai/server:latest
   web:
     image: memoh.cn/memohai/web:latest
-  sparse:
-    image: memoh.cn/memohai/sparse:latest

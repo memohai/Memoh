@@ -71,9 +71,6 @@ base_url = "http://qdrant:6334"
 api_key = ""
 timeout_seconds = 10
 
-[sparse]
-base_url = "http://sparse:8085"
-
 [web]
 host = "0.0.0.0"
 port = 8082
