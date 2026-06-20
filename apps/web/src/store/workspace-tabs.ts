@@ -6,6 +6,7 @@ import { useChatStore } from '@/store/chat-list'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { hasBotPermission, type BotPermission } from '@/utils/bot-permissions'
+import { parseBrowserAddress } from '@/utils/browser-address'
 import {
   clearTerminalSnapshots,
   clearTerminalSnapshotsForBot,
@@ -742,19 +743,62 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   function openBrowser(groupId?: string) {
     if (!hasCurrentPermission('manage')) return
+    addBrowserPanel(DEFAULT_BROWSER_ADDRESS, undefined, groupId)
+  }
+
+  // Create a fresh browser panel at `address`. Shared by the manual "+ New
+  // Browser" entry (always-new, default "Browser N" title) and the link-click
+  // path (after a dedup miss, titled with the address). Returns false when there
+  // is no dock/bot layout.
+  function addBrowserPanel(address: string, title: string | undefined, groupId?: string): boolean {
     const bid = (currentBotId.value ?? '').trim()
     const state = ensureBotLayout(bid)
-    if (!state || !api.value) return
+    if (!state || !api.value) return false
     const next = state.browserCounter + 1
     patchBotLayout(bid, { browserCounter: next })
     focusOrAdd({
       id: `browser:${next}`,
       component: 'browser',
-      title: `Browser ${next}`,
-      params: { address: DEFAULT_BROWSER_ADDRESS },
+      title: title ?? `Browser ${next}`,
+      params: { address },
       groupId,
     })
+    return true
   }
+
+  // Open the workspace browser panel at a specific local address (e.g. from a
+  // clicked localhost link in chat markdown or terminal output). If a browser
+  // tab already shows the exact same normalized URL, focus it instead of opening
+  // a duplicate. Returns true when a tab was opened or focused, false when the
+  // browser is unavailable (no permission / no dock / unparseable address) so
+  // callers can fall back to the OS browser.
+  function openBrowserAt(address: string, groupId?: string): boolean {
+    if (!hasCurrentPermission('manage')) return false
+    const dock = api.value
+    if (!dock) return false
+    let target: string
+    try {
+      target = parseBrowserAddress(address).display
+    } catch {
+      return false
+    }
+    const existing = dock.panels.find((panel) => {
+      if (!panel.id.startsWith('browser:')) return false
+      const current = (panel.params as { address?: string } | undefined)?.address
+      if (!current) return false
+      try {
+        return parseBrowserAddress(current).display === target
+      } catch {
+        return false
+      }
+    })
+    if (existing) {
+      focusPanel(existing)
+      return true
+    }
+    return addBrowserPanel(target, target, groupId)
+  }
+
 
   function openDisplay(groupId?: string) {
     if (!hasCurrentPermission('manage')) return
@@ -1224,6 +1268,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     openTerminal,
     openTerminalInPanel,
     openBrowser,
+    openBrowserAt,
     openDisplay,
     splitGroup,
     openSchedule,

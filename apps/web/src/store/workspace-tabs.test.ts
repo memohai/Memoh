@@ -213,6 +213,36 @@ describe('workspace layout store', () => {
     expect(panel?.title).toBe('localhost:3000/app')
   })
 
+  it('opens a browser tab at an address and focuses the existing one on the same URL', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    // First click normalizes the address and titles the tab with it.
+    expect(store.openBrowserAt('http://localhost:5173/app')).toBe(true)
+    const first = dock.getPanel('browser:1')
+    expect(first?.params.address).toBe('localhost:5173/app')
+    expect(first?.title).toBe('localhost:5173/app')
+
+    // A different path on the same port opens a second tab.
+    expect(store.openBrowserAt('127.0.0.1:5173/other')).toBe(true)
+    expect(dock.getPanel('browser:2')?.params.address).toBe('localhost:5173/other')
+
+    // The exact same URL (after normalization) focuses the existing tab.
+    expect(store.openBrowserAt('localhost:5173/app')).toBe(true)
+    expect(dock.panels.filter(p => p.component === 'browser')).toHaveLength(2)
+    expect(dock.activePanel?.id).toBe('browser:1')
+  })
+
+  it('refuses to open a browser tab for a non-local address', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    expect(store.openBrowserAt('https://example.com/')).toBe(false)
+    expect(dock.panels.filter(p => p.component === 'browser')).toHaveLength(0)
+  })
+
   it('keeps terminal ids monotonic per bot', () => {
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()
