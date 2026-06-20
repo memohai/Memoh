@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
+	_ "modernc.org/sqlite"
+
 	"github.com/memohai/memoh/internal/db/sqlite/sqlc"
 	"github.com/memohai/memoh/internal/memory/migrate"
-
-	_ "modernc.org/sqlite"
 )
 
 // TestSQLiteStoreRoundTrip exercises the backend-agnostic Store contract
@@ -22,10 +22,10 @@ func TestSQLiteStoreRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "wiki.sqlite")
 	db := openSQLiteWikiDB(t, dbPath)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
-	createWikiSchema(t, db)
-	seedUserBot(t, db)
+	createWikiSchema(ctx, t, db)
+	seedUserBot(ctx, t, db)
 
 	store := NewSQLite(sqlc.New(db))
 
@@ -176,7 +176,7 @@ func openSQLiteWikiDB(t *testing.T, dbPath string) *sql.DB {
 // createWikiSchema creates the minimal schema (users, bots, memory_nodes,
 // memory_edges) mirroring the 0001 + 0024 migrations, enough to exercise the
 // wiki store without running the full migration set.
-func createWikiSchema(t *testing.T, db *sql.DB) {
+func createWikiSchema(ctx context.Context, t *testing.T, db *sql.DB) {
 	t.Helper()
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, role TEXT NOT NULL)`,
@@ -213,19 +213,19 @@ func createWikiSchema(t *testing.T, db *sql.DB) {
 		)`,
 	}
 	for i, s := range stmts {
-		if _, err := db.Exec(s); err != nil {
+		if _, err := db.ExecContext(ctx, s); err != nil {
 			t.Fatalf("create schema stmt %d: %v\n%s", i, err, s)
 		}
 	}
 }
 
-func seedUserBot(t *testing.T, db *sql.DB) {
+func seedUserBot(ctx context.Context, t *testing.T, db *sql.DB) {
 	t.Helper()
 	for _, s := range []string{
 		`INSERT INTO users(id,email,role) VALUES('00000000-0000-0000-0000-000000000101','wiki@example.com','member')`,
 		`INSERT INTO bots(id,owner_user_id,type,name,display_name) VALUES('00000000-0000-0000-0000-000000000201','00000000-0000-0000-0000-000000000101','personal','wikibot','Wiki Bot')`,
 	} {
-		if _, err := db.Exec(s); err != nil {
+		if _, err := db.ExecContext(ctx, s); err != nil {
 			t.Fatalf("seed: %v\n%s", err, fmt.Sprintf("stmt: %s", s))
 		}
 	}
