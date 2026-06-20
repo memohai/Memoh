@@ -55,3 +55,18 @@ func telegramRichHTMLFromBody(t *testing.T, body map[string]any) string {
 	}
 	return html
 }
+
+// telegramRichMarkdownFromBody decodes a JSON request body sent by telebot's
+// Raw() API and returns the rich_message.markdown field for assertions.
+func telegramRichMarkdownFromBody(t *testing.T, body map[string]any) string {
+	t.Helper()
+	rich, ok := body["rich_message"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected rich_message object in body: %#v", body)
+	}
+	markdown, _ := rich["markdown"].(string)
+	if markdown == "" {
+		t.Fatalf("expected rich_message.markdown, got %#v", rich)
+	}
+	return markdown
+}

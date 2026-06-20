@@ -50,6 +50,9 @@ func (*MessageProvider) Usage(_ context.Context, session SessionContext, availab
 			}
 		}
 		parts = append(parts, "Use `message.parts` only when a messaging tool needs precise structured output such as link/code_block/mention/heading/blockquote/list_item parts or inline styles; keep ordinary prose and Markdown in `text`.")
+		if messagingSessionSupportsMarkdownMath(session) {
+			parts = append(parts, "For Telegram targets, math formulas in Markdown text can use `$...$` for inline LaTeX and `$$...$$` for display LaTeX; do not wrap formulas in code blocks unless you want to show source code.")
+		}
 	}
 	if reactRef, ok := available.Ref(ToolReact()); ok {
 		if session.CanOmitMessagingTarget() {
@@ -264,6 +267,10 @@ func sendMessagePartSchema() map[string]any {
 			},
 		},
 	}
+}
+
+func messagingSessionSupportsMarkdownMath(session SessionContext) bool {
+	return strings.EqualFold(strings.TrimSpace(session.CurrentPlatform), "telegram")
 }
 
 func sendToolPromptMetadata(session SessionContext) (description string, platformDescription string, targetDescription string, required []string) {

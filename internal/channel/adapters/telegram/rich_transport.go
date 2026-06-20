@@ -12,7 +12,19 @@ import (
 
 type telegramInputRichMessage struct {
 	HTML                string `json:"html,omitempty"`
+	Markdown            string `json:"markdown,omitempty"`
 	SkipEntityDetection bool   `json:"skip_entity_detection,omitempty"`
+}
+
+func (rich telegramInputRichMessage) hasContent() bool {
+	return strings.TrimSpace(rich.HTML) != "" || strings.TrimSpace(rich.Markdown) != ""
+}
+
+func (rich telegramInputRichMessage) content() string {
+	if strings.TrimSpace(rich.HTML) != "" {
+		return rich.HTML
+	}
+	return rich.Markdown
 }
 
 func writeTelegramRichParagraph(b *strings.Builder, html string) {
@@ -46,7 +58,7 @@ func sendTelegramRichMessageReturnMessage(
 	replyTo int,
 	actions []channel.Action,
 ) (chatID int64, messageID int, err error) {
-	if strings.TrimSpace(rich.HTML) == "" {
+	if !rich.hasContent() {
 		return 0, 0, nil
 	}
 	if err := validateTelegramActions(actions); err != nil {
@@ -96,7 +108,7 @@ func rawEditTelegramRichMessage(
 	rich telegramInputRichMessage,
 	actions []channel.Action,
 ) error {
-	if strings.TrimSpace(rich.HTML) == "" {
+	if !rich.hasContent() {
 		return nil
 	}
 	if err := validateTelegramActions(actions); err != nil {

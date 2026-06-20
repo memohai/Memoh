@@ -254,6 +254,17 @@ func TestMessageProviderUsageGatesRegisteredTools(t *testing.T) {
 			t.Fatalf("Usage should expose structured message parts guidance containing %q, got:\n%s", want, got)
 		}
 	}
+	for _, want := range []string{"$...$", "$$...$$", "display LaTeX"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Usage should expose Markdown math guidance containing %q, got:\n%s", want, got)
+		}
+	}
+
+	nonTelegramSession := SessionContext{SessionType: sessionmode.Chat, CurrentPlatform: "discord", ReplyTarget: "channel-1"}
+	got = provider.Usage(context.Background(), nonTelegramSession, availableToolsForTest(ToolSend()))
+	if strings.Contains(got, "display LaTeX") || strings.Contains(got, "$$...$$") {
+		t.Fatalf("Usage should not expose Telegram Markdown math guidance for non-Telegram sessions, got:\n%s", got)
+	}
 
 	backgroundSession := SessionContext{SessionType: sessionmode.Heartbeat, CurrentPlatform: "telegram", ReplyTarget: "chat-1"}
 	got = provider.Usage(context.Background(), backgroundSession, availableToolsForTest(ToolReact()))

@@ -611,6 +611,132 @@ func TestTelegramAdapter_SendRichPartsUsesRichMessage(t *testing.T) {
 	}
 }
 
+func TestTelegramAdapter_SendMarkdownMathUsesRichMarkdown(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+
+	var gotBody map[string]any
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			t.Fatalf("expected sendRichMessage, got %s", req.URL.Path)
+		}
+		body, _ := io.ReadAll(req.Body)
+		gotBody = decodeTelegramBody(t, body)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":78,"chat":{"id":123}}}`)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	text := "Inline $x^2 + y^2$ and block:\n\n$$E = mc^2$$"
+	msg := channel.PreparedOutboundMessage{
+		Target: "123",
+		Message: channel.PreparedMessage{Message: channel.Message{
+			Text:   text,
+			Format: channel.MessageFormatMarkdown,
+		}},
+	}
+
+	if err := adapter.Send(context.Background(), channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}}, msg); err != nil {
+		t.Fatalf("send markdown math: %v", err)
+	}
+	if got := telegramRichMarkdownFromBody(t, gotBody); got != text {
+		t.Fatalf("unexpected rich markdown:\n got: %q\nwant: %q", got, text)
+	}
+	rich, _ := gotBody["rich_message"].(map[string]any)
+	if _, ok := rich["html"]; ok {
+		t.Fatalf("markdown math should not also send rich HTML: %#v", rich)
+	}
+	if _, ok := gotBody["parse_mode"]; ok {
+		t.Fatalf("sendRichMessage payload should not include parse_mode: %#v", gotBody)
+	}
+}
+
+func TestTelegramAdapter_SendPlainMathUsesRichMarkdown(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+
+	var gotBody map[string]any
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			t.Fatalf("expected sendRichMessage, got %s", req.URL.Path)
+		}
+		body, _ := io.ReadAll(req.Body)
+		gotBody = decodeTelegramBody(t, body)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":80,"chat":{"id":123}}}`)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	text := "麦克斯韦方程组：\n\n$$\n\\nabla \\cdot \\mathbf{E} = \\frac{\\rho}{\\varepsilon_0}\n$$"
+	msg := channel.PreparedOutboundMessage{
+		Target: "123",
+		Message: channel.PreparedMessage{Message: channel.Message{
+			Text:   text,
+			Format: channel.MessageFormatPlain,
+		}},
+	}
+
+	if err := adapter.Send(context.Background(), channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}}, msg); err != nil {
+		t.Fatalf("send plain math: %v", err)
+	}
+	if got := telegramRichMarkdownFromBody(t, gotBody); got != text {
+		t.Fatalf("unexpected rich markdown:\n got: %q\nwant: %q", got, text)
+	}
+}
+
+func TestTelegramAdapter_SendBracketLatexNormalizesToRichMarkdown(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+
+	var gotBody map[string]any
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			t.Fatalf("expected sendRichMessage, got %s", req.URL.Path)
+		}
+		body, _ := io.ReadAll(req.Body)
+		gotBody = decodeTelegramBody(t, body)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":79,"chat":{"id":123}}}`)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	msg := channel.PreparedOutboundMessage{
+		Target: "123",
+		Message: channel.PreparedMessage{Message: channel.Message{
+			Text:   `Use \(\alpha+\beta\), then \[E = mc^2\].`,
+			Format: channel.MessageFormatMarkdown,
+		}},
+	}
+
+	if err := adapter.Send(context.Background(), channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}}, msg); err != nil {
+		t.Fatalf("send bracket latex: %v", err)
+	}
+	if got, want := telegramRichMarkdownFromBody(t, gotBody), `Use $\alpha+\beta$, then $$E = mc^2$$.`; got != want {
+		t.Fatalf("unexpected normalized rich markdown:\n got: %q\nwant: %q", got, want)
+	}
+}
+
 func TestTelegramAdapter_MediumRichPartsUsesRichMessage(t *testing.T) {
 	adapter := NewTelegramAdapter(nil)
 

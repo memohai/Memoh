@@ -623,12 +623,11 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.Pr
 		return err
 	}
 
-	// Rich path: when the final carries canonical Parts (the channel is
-	// RichText-capable after item 1, so coerce kept them intact), render via
-	// sendRichMessage so styled spans/links/mentions reach the user instead of
-	// being silently degraded to markdown text via PlainText()+HTML conversion.
+	// Rich path: when the final carries canonical Parts or Markdown math,
+	// render via sendRichMessage so rich spans and formulas reach the user
+	// instead of being silently degraded to PlainText()+HTML conversion.
 	// Mirrors the rich branch in TelegramAdapter.Send.
-	if len(msg.Message.Parts) > 0 {
+	if shouldUseTelegramFinalRichMessage(msg.Message) {
 		if err := s.pushFinalRich(ctx, msg); err != nil {
 			return err
 		}
@@ -701,7 +700,7 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.Pr
 // message.
 func (s *telegramOutboundStream) pushFinalRich(ctx context.Context, msg channel.PreparedMessage) error {
 	rich, fallbackText, fallbackParseMode := renderTelegramOutboundBody(msg.Message)
-	if strings.TrimSpace(rich.HTML) == "" {
+	if !rich.hasContent() {
 		if fallbackParseMode == "" && runeLenTelegramText(fallbackText) > telegramMaxMessageLength {
 			return s.deliverLongPlainFallback(ctx, fallbackText, msg.Message.Actions)
 		}
@@ -742,6 +741,10 @@ func (s *telegramOutboundStream) pushFinalRich(ctx context.Context, msg channel.
 	}
 	s.resetStreamState()
 	return nil
+}
+
+func shouldUseTelegramFinalRichMessage(msg channel.Message) bool {
+	return len(msg.Parts) > 0 || renderTelegramMarkdownMathRichMessage(msg).hasContent()
 }
 
 func (s *telegramOutboundStream) deliverLongPlainFallback(ctx context.Context, text string, actions []channel.Action) error {

@@ -863,7 +863,7 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 		}
 		return nil
 	}
-	if strings.TrimSpace(rich.HTML) != "" {
+	if rich.hasContent() {
 		if _, _, err := sendTelegramRichMessageReturnMessage(bot, to, rich, replyTo, msg.Message.Message.Actions); err == nil {
 			return nil
 		} else if a.logger != nil {
@@ -896,10 +896,13 @@ func validateTelegramPreparedOutbound(msg channel.PreparedOutboundMessage) error
 func renderTelegramOutboundBody(msg channel.Message) (telegramInputRichMessage, string, string) {
 	text, parseMode := renderTelegramPartsFallbackText(msg)
 	rich := renderTelegramMessagePartsRichMessage(msg)
-	if strings.TrimSpace(rich.HTML) == "" {
+	if !rich.hasContent() {
+		rich = renderTelegramMarkdownMathRichMessage(msg)
+	}
+	if !rich.hasContent() {
 		return telegramInputRichMessage{}, text, parseMode
 	}
-	if utf8.RuneCountInString(rich.HTML) <= telegramMaxRichMessageLength {
+	if utf8.RuneCountInString(rich.content()) <= telegramMaxRichMessageLength {
 		return rich, text, parseMode
 	}
 	if len(msg.Parts) > 0 {
@@ -910,7 +913,7 @@ func renderTelegramOutboundBody(msg channel.Message) (telegramInputRichMessage, 
 
 func shouldSplitTelegramPlainFallback(msg channel.Message, rich telegramInputRichMessage, text string, parseMode string) bool {
 	return len(msg.Parts) > 0 &&
-		strings.TrimSpace(rich.HTML) == "" &&
+		!rich.hasContent() &&
 		parseMode == "" &&
 		runeLenTelegramText(text) > telegramMaxMessageLength
 }
@@ -944,7 +947,7 @@ func (a *TelegramAdapter) Update(_ context.Context, cfg channel.ChannelConfig, t
 		return fmt.Errorf("telegram: invalid message id %q: %w", messageID, err)
 	}
 	rich, text, parseMode := renderTelegramOutboundBody(msg.Message)
-	if strings.TrimSpace(rich.HTML) != "" {
+	if rich.hasContent() {
 		if err := editTelegramRichMessage(bot, chatID, mid, rich, msg.Message.Actions); err == nil {
 			return nil
 		} else if a.logger != nil {
