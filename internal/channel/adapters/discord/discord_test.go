@@ -3,6 +3,7 @@ package discord
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -100,6 +101,17 @@ func TestDiscordSendUsesPartsRenderer(t *testing.T) {
 	if payload["content"] != want {
 		t.Fatalf("Discord rich content mismatch\n  got:  %q\n  want: %q", payload["content"], want)
 	}
+	allowed, ok := payload["allowed_mentions"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected explicit allowed_mentions, got %#v", payload["allowed_mentions"])
+	}
+	if parse, ok := allowed["parse"].([]any); !ok || len(parse) != 0 {
+		t.Fatalf("expected parse=[] to suppress ambient mentions, got %#v", allowed["parse"])
+	}
+	users, ok := allowed["users"].([]any)
+	if !ok || len(users) != 1 || users[0] != "1234567890" {
+		t.Fatalf("expected canonical mention id to be whitelisted, got %#v", allowed["users"])
+	}
 }
 
 func TestDiscordSendRendersURLActionsAsComponents(t *testing.T) {
@@ -160,6 +172,51 @@ func TestDiscordSendRendersURLActionsAsComponents(t *testing.T) {
 	}
 }
 
+func TestDiscordAllowedMentionsFiltersAndDedupesUserIDs(t *testing.T) {
+	t.Parallel()
+
+	allowed := discordAllowedMentionsForMessage(channel.Message{Parts: []channel.MessagePart{
+		{Type: channel.MessagePartMention, Text: "@alice", ChannelIdentityID: "1234567890"},
+		{Type: channel.MessagePartMention, Text: "@alice again", ChannelIdentityID: "1234567890"},
+		{Type: channel.MessagePartMention, Text: "@role", ChannelIdentityID: "&1234567890"},
+		{Type: channel.MessagePartMention, Text: "@bad", ChannelIdentityID: "1234)>"},
+		{Type: channel.MessagePartText, Text: "@everyone"},
+	}})
+	if allowed == nil {
+		t.Fatal("expected allowed mentions")
+	}
+	if len(allowed.Parse) != 0 {
+		t.Fatalf("expected parse=[] to suppress ambient mentions, got %#v", allowed.Parse)
+	}
+	if len(allowed.Users) != 1 || allowed.Users[0] != "1234567890" {
+		t.Fatalf("expected one deduped user snowflake, got %#v", allowed.Users)
+	}
+	if len(allowed.Roles) != 0 {
+		t.Fatalf("expected no role whitelist, got %#v", allowed.Roles)
+	}
+}
+
+func TestDiscordAllowedMentionsCapsUserWhitelist(t *testing.T) {
+	t.Parallel()
+
+	parts := make([]channel.MessagePart, 101)
+	for i := range parts {
+		parts[i] = channel.MessagePart{
+			Type:              channel.MessagePartMention,
+			Text:              "@user",
+			ChannelIdentityID: fmt.Sprintf("%018d", i+1),
+		}
+	}
+
+	allowed := discordAllowedMentionsForMessage(channel.Message{Parts: parts})
+	if len(allowed.Users) != 100 {
+		t.Fatalf("allowed users len = %d, want 100", len(allowed.Users))
+	}
+	if allowed.Users[0] != "000000000000000001" || allowed.Users[99] != "000000000000000100" {
+		t.Fatalf("unexpected whitelist boundary: first=%q last=%q", allowed.Users[0], allowed.Users[99])
+	}
+}
+
 func TestDiscordURLActionComponentsRejectsMoreThanPlatformLimit(t *testing.T) {
 	t.Parallel()
 
@@ -174,6 +231,36 @@ func TestDiscordURLActionComponentsRejectsMoreThanPlatformLimit(t *testing.T) {
 	_, err := discordURLActionComponents(actions)
 	if err == nil || !strings.Contains(err.Error(), "at most 25") {
 		t.Fatalf("expected platform limit error, got %v", err)
+	}
+}
+
+func TestDiscordURLActionComponentsEnforcesFieldLimits(t *testing.T) {
+	t.Parallel()
+
+	const (
+		maxDiscordButtonLabelRunes = 80
+		maxDiscordButtonURLRunes   = 512
+	)
+
+	rows, err := discordURLActionComponents([]channel.Action{{
+		Label: strings.Repeat("L", maxDiscordButtonLabelRunes+1),
+		URL:   "https://example.test/docs",
+	}})
+	if err != nil {
+		t.Fatalf("discordURLActionComponents returned error for long label: %v", err)
+	}
+	row := rows[0].(discordgo.ActionsRow)
+	button := row.Components[0].(discordgo.Button)
+	if got := len([]rune(button.Label)); got != maxDiscordButtonLabelRunes {
+		t.Fatalf("button label runes = %d, want %d (%q)", got, maxDiscordButtonLabelRunes, button.Label)
+	}
+
+	_, err = discordURLActionComponents([]channel.Action{{
+		Label: "Open",
+		URL:   "https://example.test/" + strings.Repeat("x", maxDiscordButtonURLRunes),
+	}})
+	if err == nil || !strings.Contains(err.Error(), "url must be at most") {
+		t.Fatalf("expected URL length error, got %v", err)
 	}
 }
 

@@ -357,31 +357,16 @@ func (m Message) IsEmpty() bool {
 // PlainText extracts the plain text representation of the message.
 func (m Message) PlainText() string {
 	if strings.TrimSpace(m.Text) != "" {
-		return strings.TrimSpace(m.Text)
+		text := strings.TrimSpace(m.Text)
+		if len(m.Parts) == 0 {
+			return text
+		}
+		return appendTextSection(text, RenderPartsAsPlain(m.Parts))
 	}
 	if len(m.Parts) == 0 {
 		return ""
 	}
-	lines := make([]string, 0, len(m.Parts))
-	for _, part := range m.Parts {
-		switch part.Type {
-		case MessagePartText, MessagePartLink, MessagePartCodeBlock, MessagePartMention, MessagePartEmoji:
-			value := strings.TrimSpace(part.Text)
-			if value == "" && part.Type == MessagePartLink {
-				value = strings.TrimSpace(part.URL)
-			}
-			if value == "" && part.Type == MessagePartEmoji {
-				value = strings.TrimSpace(part.Emoji)
-			}
-			if value == "" {
-				continue
-			}
-			lines = append(lines, value)
-		default:
-			continue
-		}
-	}
-	return strings.Join(lines, "\n")
+	return strings.TrimSpace(RenderPartsAsPlain(m.Parts))
 }
 
 // BindingCriteria specifies conditions for matching a user-channel binding.

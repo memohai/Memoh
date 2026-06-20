@@ -119,6 +119,15 @@ func requiredContainsForTest(required []string, field string) bool {
 	return false
 }
 
+func requiredAnyContainsForTest(required []any, field string) bool {
+	for _, item := range required {
+		if item == field {
+			return true
+		}
+	}
+	return false
+}
+
 func assertEnumContainsForTest(t *testing.T, raw any, values ...string) {
 	t.Helper()
 	items, ok := raw.([]any)
@@ -383,6 +392,10 @@ func TestMessageProviderSendToolExposesStructuredMessagePartsSchema(t *testing.T
 		t.Fatalf("part type schema missing in %#v", partProps)
 	}
 	assertEnumContainsForTest(t, typeSchema["enum"], "text", "link", "code_block", "mention", "emoji", "heading", "blockquote", "list_item")
+	partRequired, ok := items["required"].([]any)
+	if !ok || !requiredAnyContainsForTest(partRequired, "type") || requiredAnyContainsForTest(partRequired, "text") {
+		t.Fatalf("message part schema should require type but not text, required=%#v", items["required"])
+	}
 	styles, ok := partProps["styles"].(map[string]any)
 	if !ok {
 		t.Fatalf("part styles schema missing in %#v", partProps)
@@ -404,11 +417,18 @@ func TestMessageProviderSendToolExposesStructuredMessagePartsSchema(t *testing.T
 		t.Fatalf("message action schema should be strict, got %#v", actionItems["additionalProperties"])
 	}
 	actionRequired, ok := actionItems["required"].([]string)
-	if !ok || !requiredContainsForTest(actionRequired, "label") {
-		t.Fatalf("message action schema should require label, required=%#v", actionItems["required"])
+	if !ok || !requiredContainsForTest(actionRequired, "label") || !requiredContainsForTest(actionRequired, "url") {
+		t.Fatalf("message action schema should require label and url, required=%#v", actionItems["required"])
 	}
-	if _, ok := actionItems["anyOf"].([]any); !ok {
-		t.Fatalf("message action schema should require value or url via anyOf, got %#v", actionItems["anyOf"])
+	actionProps, ok := actionItems["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("message action properties missing in %#v", actionItems)
+	}
+	if _, ok := actionProps["value"]; ok {
+		t.Fatalf("message action schema must not expose callback value to model: %#v", actionProps["value"])
+	}
+	if _, ok := actionItems["anyOf"]; ok {
+		t.Fatalf("message action schema should not expose value/url anyOf, got %#v", actionItems["anyOf"])
 	}
 	reply, ok := messageProps["reply"].(map[string]any)
 	if !ok {

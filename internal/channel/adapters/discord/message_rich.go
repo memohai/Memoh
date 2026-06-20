@@ -91,14 +91,15 @@ func writeDiscordRichMentionPart(b *strings.Builder, part channel.MessagePart) {
 	b.WriteString(">")
 }
 
-// isSafeDiscordMentionID limits the ID to the snowflake/role-id character
-// class so attacker-supplied data cannot break out of the <@…> wrapper.
+// isSafeDiscordMentionID limits native rich mentions to user snowflakes. Role,
+// channel, and decorated user syntaxes need separate first-class part fields
+// before they can be safely rendered and whitelisted.
 func isSafeDiscordMentionID(id string) bool {
 	if id == "" {
 		return false
 	}
 	for _, r := range id {
-		if (r >= '0' && r <= '9') || r == '&' || r == '!' || r == '#' {
+		if r >= '0' && r <= '9' {
 			continue
 		}
 		return false

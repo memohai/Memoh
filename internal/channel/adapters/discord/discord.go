@@ -23,6 +23,9 @@ const (
 	inboundDedupTTL            = time.Minute
 	discordMaxLength           = 2000
 	discordMaxURLActionButtons = 25
+	discordMaxURLActionLabel   = 80
+	discordMaxURLActionURL     = 512
+	discordMaxAllowedMentions  = 100
 )
 
 // assetOpener reads stored asset bytes by content hash.
@@ -295,7 +298,8 @@ func sendDiscordMessage(ctx context.Context, session *discordgo.Session, channel
 
 	// Build message send parameters
 	messageSend := &discordgo.MessageSend{
-		Content: content,
+		Content:         content,
+		AllowedMentions: discordAllowedMentionsForMessage(msg.Message.Message),
 	}
 	if len(msg.Message.Message.Actions) > 0 {
 		components, err := discordURLActionComponents(msg.Message.Message.Actions)
@@ -367,8 +371,11 @@ func discordURLActionComponents(actions []channel.Action) ([]discordgo.MessageCo
 		if label == "" {
 			label = rawURL
 		}
+		if utf8.RuneCountInString(rawURL) > discordMaxURLActionURL {
+			return nil, fmt.Errorf("discord action url must be at most %d characters", discordMaxURLActionURL)
+		}
 		buttons = append(buttons, discordgo.Button{
-			Label: label,
+			Label: truncateDiscordTextRunes(label, discordMaxURLActionLabel),
 			Style: discordgo.LinkButton,
 			URL:   rawURL,
 		})
@@ -380,12 +387,59 @@ func discordURLActionComponents(actions []channel.Action) ([]discordgo.MessageCo
 	return rows, nil
 }
 
+func discordAllowedMentionsNone() *discordgo.MessageAllowedMentions {
+	return &discordgo.MessageAllowedMentions{Parse: []discordgo.AllowedMentionType{}}
+}
+
+func discordAllowedMentionsForMessage(msg channel.Message) *discordgo.MessageAllowedMentions {
+	allowed := discordAllowedMentionsNone()
+	allowed.Users = discordMentionUserIDs(msg.Parts)
+	return allowed
+}
+
+func discordMentionUserIDs(parts []channel.MessagePart) []string {
+	if len(parts) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	ids := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part.Type != channel.MessagePartMention {
+			continue
+		}
+		id := strings.TrimSpace(part.ChannelIdentityID)
+		if !isSafeDiscordMentionID(id) {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+		if len(ids) == discordMaxAllowedMentions {
+			break
+		}
+	}
+	return ids
+}
+
 func truncateDiscordText(text string) string {
 	if utf8.RuneCountInString(text) <= discordMaxLength {
 		return text
 	}
 	runes := []rune(text)
 	return string(runes[:discordMaxLength-3]) + "..."
+}
+
+func truncateDiscordTextRunes(text string, limit int) string {
+	if limit <= 0 || utf8.RuneCountInString(text) <= limit {
+		return text
+	}
+	runes := []rune(text)
+	if limit <= 3 {
+		return string(runes[:limit])
+	}
+	return string(runes[:limit-3]) + "..."
 }
 
 // discordPreparedAttachmentToFile converts a prepared attachment to discordgo.File.

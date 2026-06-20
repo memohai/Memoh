@@ -992,6 +992,59 @@ func TestPushFinal_CoercesMarkdownToPlainForNoMarkdownChannel(t *testing.T) {
 	}
 }
 
+func TestPushFinal_NormalizesMixedTextAndPartsBeforePlainDowngrade(t *testing.T) {
+	t.Parallel()
+
+	channelType := ChannelType("plainstream-mixed")
+	registry := NewRegistry()
+	if err := registry.Register(&streamValidationAdapter{channelType: channelType, noMarkdown: true}); err != nil {
+		t.Fatalf("register adapter failed: %v", err)
+	}
+	manager := &Manager{registry: registry, attachmentStore: channeltest.NewMemoryAttachmentStore()}
+	rec := &recordingStream{}
+	stream := &managerOutboundStream{
+		manager:     manager,
+		config:      ChannelConfig{BotID: "bot-1", ChannelType: channelType},
+		stream:      rec,
+		channelType: channelType,
+		policy:      manager.resolveOutboundPolicy(channelType),
+	}
+
+	event := StreamEvent{
+		Type: StreamEventFinal,
+		Final: &StreamFinalizePayload{Message: Message{
+			Text:   "intro",
+			Format: MessageFormatRich,
+			Parts: []MessagePart{
+				{Type: MessagePartHeading, Text: "Title"},
+				{Type: MessagePartLink, Text: "docs", URL: "https://example.test/docs"},
+			},
+		}},
+	}
+	if err := stream.Push(context.Background(), event); err != nil {
+		t.Fatalf("Push failed: %v", err)
+	}
+
+	evs := rec.Events()
+	if len(evs) != 1 || evs[0].Final == nil {
+		t.Fatalf("expected a final event, got %+v", evs)
+	}
+	got := evs[0].Final.Message
+	if got.Format != MessageFormatPlain {
+		t.Fatalf("Format = %q, want plain", got.Format)
+	}
+	want := "intro\n\nTitle\n\ndocs (https://example.test/docs)"
+	if got.Text != want {
+		t.Fatalf("Text mismatch\n  got:  %q\n  want: %q", got.Text, want)
+	}
+	if len(got.Parts) != 0 {
+		t.Fatalf("plain stream payload should clear parts, got %#v", got.Parts)
+	}
+	if event.Final.Message.Text != "intro" || len(event.Final.Message.Parts) != 2 {
+		t.Fatalf("input event was mutated: %+v", event.Final.Message)
+	}
+}
+
 func TestPushFinalWithChunking_ActionsOnLastChunk(t *testing.T) {
 	t.Parallel()
 	stream, rec, sent := newChunkingTestStream(t, 50)
@@ -1869,6 +1922,38 @@ func TestNormalizeOutboundMessage_RichParts(t *testing.T) {
 	msg := normalizeOutboundMessage(Message{Parts: []MessagePart{{Type: "text", Text: "hello"}}})
 	if msg.Format != MessageFormatRich {
 		t.Errorf("expected %q, got %q", MessageFormatRich, msg.Format)
+	}
+}
+
+func TestNormalizeOutboundMessage_MovesTextIntoRichParts(t *testing.T) {
+	t.Parallel()
+
+	msg := normalizeOutboundMessage(Message{
+		Text: "intro",
+		Parts: []MessagePart{
+			{Type: MessagePartHeading, Text: "Title"},
+		},
+	})
+	if msg.Text != "" {
+		t.Fatalf("Text should be canonicalized into parts, got %q", msg.Text)
+	}
+	if msg.Format != MessageFormatRich {
+		t.Fatalf("Format = %q, want rich", msg.Format)
+	}
+	if len(msg.Parts) != 2 {
+		t.Fatalf("Parts len = %d, want 2: %#v", len(msg.Parts), msg.Parts)
+	}
+	if msg.Parts[0].Type != MessagePartText || msg.Parts[0].Text != "intro" {
+		t.Fatalf("first part should preserve original text, got %#v", msg.Parts[0])
+	}
+}
+
+func TestNormalizeOutboundMessage_TextOnlyRichPreservedUntilCapsKnown(t *testing.T) {
+	t.Parallel()
+
+	msg := normalizeOutboundMessage(Message{Text: "Hello world", Format: MessageFormatRich})
+	if msg.Format != MessageFormatRich {
+		t.Fatalf("text-only rich should be preserved until target capabilities are known, got %q", msg.Format)
 	}
 }
 

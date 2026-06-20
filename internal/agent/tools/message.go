@@ -151,15 +151,10 @@ func sendMessageObjectSchema() map[string]any {
 				"items": map[string]any{
 					"type":                 "object",
 					"additionalProperties": false,
-					"required":             []string{"label"},
-					"anyOf": []any{
-						map[string]any{"required": []string{"value"}},
-						map[string]any{"required": []string{"url"}},
-					},
+					"required":             []string{"label", "url"},
 					"properties": map[string]any{
 						"type":  map[string]any{"type": "string"},
 						"label": map[string]any{"type": "string"},
-						"value": map[string]any{"type": "string"},
 						"url":   map[string]any{"type": "string"},
 						"row":   map[string]any{"type": "integer"},
 					},
@@ -241,7 +236,7 @@ func sendMessagePartSchema() map[string]any {
 			},
 			"text": map[string]any{
 				"type":        "string",
-				"description": "Visible text for text/link/code_block/mention/emoji/heading/blockquote/list_item parts. Required for mention parts.",
+				"description": "Visible text for text/code_block/mention/emoji/heading/blockquote/list_item parts. Optional label for link parts; required for mention parts.",
 			},
 			"url": map[string]any{
 				"type":        "string",

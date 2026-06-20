@@ -1467,6 +1467,48 @@ func TestSlackURLActionBlocksSplitAtPlatformElementLimit(t *testing.T) {
 	}
 }
 
+func TestSlackURLActionBlocksEnforcesFieldLimits(t *testing.T) {
+	t.Parallel()
+
+	const (
+		maxSlackSectionTextRunes = 3000
+		maxSlackButtonTextRunes  = 75
+		maxSlackButtonURLRunes   = 3000
+	)
+
+	blocks, err := slackURLActionBlocks(strings.Repeat("b", maxSlackSectionTextRunes+1), []channel.Action{{
+		Label: strings.Repeat("L", maxSlackButtonTextRunes+1),
+		URL:   "https://example.test/docs",
+	}})
+	if err != nil {
+		t.Fatalf("slackURLActionBlocks returned error for long text/label: %v", err)
+	}
+	raw, err := json.Marshal(blocks)
+	if err != nil {
+		t.Fatalf("marshal blocks: %v", err)
+	}
+	var payload []map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode blocks: %v (body=%s)", err, raw)
+	}
+	sectionText := payload[0]["text"].(map[string]any)["text"].(string)
+	if got := len([]rune(sectionText)); got != maxSlackSectionTextRunes {
+		t.Fatalf("section text runes = %d, want %d", got, maxSlackSectionTextRunes)
+	}
+	buttonText := payload[1]["elements"].([]any)[0].(map[string]any)["text"].(map[string]any)["text"].(string)
+	if got := len([]rune(buttonText)); got != maxSlackButtonTextRunes {
+		t.Fatalf("button text runes = %d, want %d", got, maxSlackButtonTextRunes)
+	}
+
+	_, err = slackURLActionBlocks("", []channel.Action{{
+		Label: "Open",
+		URL:   "https://example.test/" + strings.Repeat("x", maxSlackButtonURLRunes),
+	}})
+	if err == nil || !strings.Contains(err.Error(), "url must be at most") {
+		t.Fatalf("expected URL length error, got %v", err)
+	}
+}
+
 func TestSlackOpenStreamResolvesUserTargetToDMChannel(t *testing.T) {
 	t.Parallel()
 

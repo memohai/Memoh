@@ -809,7 +809,7 @@ func validateOutboundMessageActions(raw any) error {
 
 func validateOutboundMessageAction(index int, raw map[string]any) error {
 	allowed := map[string]struct{}{
-		"type": {}, "label": {}, "value": {}, "url": {}, "row": {},
+		"type": {}, "label": {}, "url": {}, "row": {},
 	}
 	for key := range raw {
 		if _, ok := allowed[key]; !ok {
@@ -820,14 +820,12 @@ func validateOutboundMessageAction(index int, raw map[string]any) error {
 	if strings.TrimSpace(label) == "" {
 		return fmt.Errorf("message action label is required at index %d", index)
 	}
-	value, _ := raw["value"].(string)
 	rawURL, _ := raw["url"].(string)
-	value = strings.TrimSpace(value)
 	rawURL = strings.TrimSpace(rawURL)
-	if value == "" && rawURL == "" {
-		return fmt.Errorf("message action target is required at index %d", index)
+	if rawURL == "" {
+		return fmt.Errorf("message action url is required at index %d", index)
 	}
-	if rawURL != "" && !channel.IsHTTPURL(rawURL) {
+	if !channel.IsHTTPURL(rawURL) {
 		return fmt.Errorf("message action url must be http(s) at index %d", index)
 	}
 	return nil
@@ -902,9 +900,6 @@ func validateOutboundMessagePartContent(index int, partType channel.MessagePartT
 		}
 		if !channel.IsHTTPURL(rawURL) {
 			return fmt.Errorf("message link part url must be http(s) at index %d", index)
-		}
-		if text == "" {
-			return fmt.Errorf("message link part text is required at index %d", index)
 		}
 	case channel.MessagePartMention:
 		if text == "" {

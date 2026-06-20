@@ -69,6 +69,9 @@ func StripInlineMarkup(s string) string {
 // ordinary links. Callback Actions stay unsupported and are rejected by
 // validateMessageCapabilities unless the channel advertises callback Buttons.
 func coerceFormatForCaps(msg Message, caps ChannelCapabilities) Message {
+	if !caps.RichText {
+		msg = normalizeTextOnlyRichFormat(msg)
+	}
 	if msg.Format == MessageFormatMarkdown && !caps.Markdown {
 		if caps.RichText && strings.TrimSpace(msg.Text) != "" {
 			msg.Parts = []MessagePart{{Type: MessagePartText, Text: msg.Text}}
@@ -95,6 +98,18 @@ func coerceFormatForCaps(msg Message, caps ChannelCapabilities) Message {
 	return msg
 }
 
+func normalizeTextOnlyRichFormat(msg Message) Message {
+	if msg.Format != MessageFormatRich || len(msg.Parts) > 0 || strings.TrimSpace(msg.Text) == "" {
+		return msg
+	}
+	if ContainsMarkdown(msg.Text) {
+		msg.Format = MessageFormatMarkdown
+	} else {
+		msg.Format = MessageFormatPlain
+	}
+	return msg
+}
+
 func coerceURLActionsForCaps(msg Message, caps ChannelCapabilities) Message {
 	parts, ok := urlActionParts(msg.Actions)
 	if !ok {
@@ -102,13 +117,12 @@ func coerceURLActionsForCaps(msg Message, caps ChannelCapabilities) Message {
 	}
 	switch {
 	case caps.RichText && (msg.Format == MessageFormatRich || len(msg.Parts) > 0):
-		msg.Parts = append(msg.Parts, parts...)
+		msg = appendRichURLActionParts(msg, parts)
 		msg.Format = MessageFormatRich
 	case msg.Format == MessageFormatMarkdown && caps.Markdown:
 		msg.Text = appendTextSection(msg.Text, RenderPartsAsMarkdown(parts))
 	case msg.Format == MessageFormatMarkdown && !caps.Markdown && caps.RichText:
-		msg.Parts = append(msg.Parts, parts...)
-		msg.Text = ""
+		msg = appendRichURLActionParts(msg, parts)
 		msg.Format = MessageFormatRich
 	default:
 		msg.Text = appendTextSection(msg.Text, RenderPartsAsPlain(parts))
@@ -117,6 +131,15 @@ func coerceURLActionsForCaps(msg Message, caps ChannelCapabilities) Message {
 		}
 	}
 	msg.Actions = nil
+	return msg
+}
+
+func appendRichURLActionParts(msg Message, parts []MessagePart) Message {
+	if strings.TrimSpace(msg.Text) != "" {
+		msg.Parts = append([]MessagePart{{Type: MessagePartText, Text: msg.Text}}, msg.Parts...)
+		msg.Text = ""
+	}
+	msg.Parts = append(msg.Parts, parts...)
 	return msg
 }
 

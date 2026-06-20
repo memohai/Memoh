@@ -622,13 +622,6 @@ func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 			want: "message link part url is required",
 		},
 		{
-			name: "link without visible text",
-			raw: map[string]any{"message": map[string]any{"parts": []any{
-				map[string]any{"type": "link", "url": "https://example.com"},
-			}}},
-			want: "message link part text is required",
-		},
-		{
 			name: "code block without text",
 			raw: map[string]any{"message": map[string]any{"parts": []any{
 				map[string]any{"type": "code_block", "language": "go"},
@@ -668,6 +661,24 @@ func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 	}
 }
 
+func TestParseOutboundMessageAllowsURLOnlyLinkPart(t *testing.T) {
+	t.Parallel()
+
+	msg, err := ParseOutboundMessage(map[string]any{
+		"message": map[string]any{
+			"parts": []any{
+				map[string]any{"type": "link", "url": "https://example.com"},
+			},
+		},
+	}, "")
+	if err != nil {
+		t.Fatalf("ParseOutboundMessage returned error: %v", err)
+	}
+	if len(msg.Parts) != 1 || msg.Parts[0].Type != channel.MessagePartLink || msg.Parts[0].URL != "https://example.com" || msg.Parts[0].Text != "" {
+		t.Fatalf("unexpected parsed parts: %#v", msg.Parts)
+	}
+}
+
 func TestParseOutboundMessageActionsValidation(t *testing.T) {
 	t.Parallel()
 
@@ -676,14 +687,13 @@ func TestParseOutboundMessageActionsValidation(t *testing.T) {
 			"text": "choose",
 			"actions": []any{
 				map[string]any{"label": "Open", "url": "https://example.com"},
-				map[string]any{"label": "Approve", "value": "approve:1"},
 			},
 		},
 	}, "")
 	if err != nil {
 		t.Fatalf("ParseOutboundMessage returned error: %v", err)
 	}
-	if len(msg.Actions) != 2 || msg.Actions[0].URL != "https://example.com" || msg.Actions[1].Value != "approve:1" {
+	if len(msg.Actions) != 1 || msg.Actions[0].URL != "https://example.com" || msg.Actions[0].Value != "" {
 		t.Fatalf("unexpected actions: %#v", msg.Actions)
 	}
 
@@ -717,12 +727,20 @@ func TestParseOutboundMessageActionsValidation(t *testing.T) {
 			want: "unknown message action field",
 		},
 		{
-			name: "missing action target",
+			name: "callback action value is not model constructible",
+			raw: map[string]any{"message": map[string]any{
+				"text":    "choose",
+				"actions": []any{map[string]any{"label": "Approve", "value": "approve:1"}},
+			}},
+			want: "unknown message action field",
+		},
+		{
+			name: "missing action url",
 			raw: map[string]any{"message": map[string]any{
 				"text":    "choose",
 				"actions": []any{map[string]any{"label": "Open"}},
 			}},
-			want: "message action target is required",
+			want: "message action url is required",
 		},
 		{
 			name: "unsafe url",

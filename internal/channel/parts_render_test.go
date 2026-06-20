@@ -270,6 +270,40 @@ func TestRenderPartsAsPlain(t *testing.T) {
 	}
 }
 
+func TestMessagePlainTextUsesCanonicalPlainParts(t *testing.T) {
+	t.Parallel()
+
+	msg := Message{
+		Format: MessageFormatRich,
+		Parts: []MessagePart{
+			{Type: MessagePartHeading, Text: "Title"},
+			{Type: MessagePartBlockquote, Text: "quoted\nsecond"},
+			{Type: MessagePartListItem, Text: "item"},
+			{Type: MessagePartLink, Text: "docs", URL: "https://example.test"},
+		},
+	}
+	want := "Title\n\n> quoted\n> second\n\n- item\n\ndocs (https://example.test)"
+	if got := msg.PlainText(); got != want {
+		t.Fatalf("PlainText()\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
+func TestMessagePlainTextCombinesTextAndParts(t *testing.T) {
+	t.Parallel()
+
+	msg := Message{
+		Text: "intro",
+		Parts: []MessagePart{
+			{Type: MessagePartHeading, Text: "Title"},
+			{Type: MessagePartLink, Text: "docs", URL: "https://example.test"},
+		},
+	}
+	want := "intro\n\nTitle\n\ndocs (https://example.test)"
+	if got := msg.PlainText(); got != want {
+		t.Fatalf("PlainText()\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
 func TestCoerceFormatForCaps_DegradesPartsToMarkdown(t *testing.T) {
 	t.Parallel()
 
@@ -385,6 +419,63 @@ func TestCoerceFormatForCaps_DegradesURLActionsToMarkdownLinks(t *testing.T) {
 	}
 	if got.Text != "see details\n\n[Open docs](https://example.test/docs)" {
 		t.Fatalf("unexpected text: %q", got.Text)
+	}
+}
+
+func TestCoerceFormatForCaps_DegradesURLActionsToRichPartsKeepsText(t *testing.T) {
+	t.Parallel()
+
+	msg := Message{
+		Format: MessageFormatRich,
+		Text:   "see details",
+		Actions: []Action{
+			{Label: "Open docs", URL: "https://example.test/docs"},
+		},
+	}
+	caps := ChannelCapabilities{Text: true, RichText: true}
+
+	got := coerceFormatForCaps(msg, caps)
+	if len(got.Actions) != 0 {
+		t.Fatalf("Actions should be cleared after URL degradation, got %#v", got.Actions)
+	}
+	if got.Text != "" {
+		t.Fatalf("Text should be moved into parts on rich degradation, got %q", got.Text)
+	}
+	if got.Format != MessageFormatRich {
+		t.Fatalf("Format = %q, want rich", got.Format)
+	}
+	if len(got.Parts) != 2 {
+		t.Fatalf("Parts len = %d, want 2: %#v", len(got.Parts), got.Parts)
+	}
+	if got.Parts[0].Type != MessagePartText || got.Parts[0].Text != "see details" {
+		t.Fatalf("first part should preserve original text, got %#v", got.Parts[0])
+	}
+	if got.Parts[1].Type != MessagePartLink || got.Parts[1].Text != "Open docs" || got.Parts[1].URL != "https://example.test/docs" {
+		t.Fatalf("second part should be degraded URL action link, got %#v", got.Parts[1])
+	}
+}
+
+func TestCoerceFormatForCaps_TextOnlyRichWithURLActionDegradesToPlain(t *testing.T) {
+	t.Parallel()
+
+	msg := Message{
+		Format: MessageFormatRich,
+		Text:   "see details",
+		Actions: []Action{
+			{Label: "Open docs", URL: "https://example.test/docs"},
+		},
+	}
+	caps := ChannelCapabilities{Text: true}
+
+	got := coerceFormatForCaps(msg, caps)
+	if got.Format != MessageFormatPlain {
+		t.Fatalf("Format = %q, want plain", got.Format)
+	}
+	if got.Text != "see details\n\nOpen docs (https://example.test/docs)" {
+		t.Fatalf("unexpected text: %q", got.Text)
+	}
+	if len(got.Parts) != 0 || len(got.Actions) != 0 {
+		t.Fatalf("expected parts/actions cleared, got parts=%#v actions=%#v", got.Parts, got.Actions)
 	}
 }
 

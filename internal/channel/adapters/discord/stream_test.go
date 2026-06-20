@@ -210,4 +210,11 @@ func TestDiscordOutboundStream_FinalPreservesURLActionsOnEdit(t *testing.T) {
 	if button["label"] != "Open docs" || button["url"] != "https://example.test/docs" || button["style"] != float64(discordgo.LinkButton) {
 		t.Fatalf("unexpected button payload: %#v", button)
 	}
+	allowed, ok := payload["allowed_mentions"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected explicit allowed_mentions on edit, got %#v", payload["allowed_mentions"])
+	}
+	if parse, ok := allowed["parse"].([]any); !ok || len(parse) != 0 {
+		t.Fatalf("expected parse=[] to suppress ambient mentions, got %#v", allowed["parse"])
+	}
 }

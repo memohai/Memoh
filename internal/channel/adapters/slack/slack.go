@@ -25,6 +25,9 @@ const (
 	inboundDedupTTL             = time.Minute
 	slackMaxLength              = 40000
 	slackMaxActionBlockElements = 25
+	slackMaxSectionText         = 3000
+	slackMaxButtonText          = 75
+	slackMaxButtonURL           = 3000
 	channelNameTTL              = 5 * time.Minute
 )
 
@@ -663,7 +666,7 @@ func slackURLActionBlocks(text string, actions []channel.Action) ([]slack.Block,
 	blocks := make([]slack.Block, 0, 2)
 	if strings.TrimSpace(text) != "" {
 		blocks = append(blocks, slack.NewSectionBlock(
-			slack.NewTextBlockObject("mrkdwn", text, false, false),
+			slack.NewTextBlockObject("mrkdwn", truncateSlackRunes(text, slackMaxSectionText), false, false),
 			nil,
 			nil,
 		))
@@ -691,13 +694,16 @@ func slackURLActionBlocks(text string, actions []channel.Action) ([]slack.Block,
 		if !channel.IsHTTPURL(rawURL) {
 			return nil, errors.New("slack action url must be http(s)")
 		}
+		if utf8.RuneCountInString(rawURL) > slackMaxButtonURL {
+			return nil, fmt.Errorf("slack action url must be at most %d characters", slackMaxButtonURL)
+		}
 		if label == "" {
 			label = rawURL
 		}
 		button := slack.NewButtonBlockElement(
 			fmt.Sprintf("memoh_url_%d", i),
 			fmt.Sprintf("url_%d", i),
-			slack.NewTextBlockObject("plain_text", label, false, false),
+			slack.NewTextBlockObject("plain_text", truncateSlackRunes(label, slackMaxButtonText), false, false),
 		).WithURL(rawURL)
 		elements = append(elements, button)
 		if len(elements) == slackMaxActionBlockElements {
@@ -812,6 +818,17 @@ func truncateSlackText(text string) string {
 	}
 	runes := []rune(text)
 	return string(runes[:slackMaxLength-3]) + "..."
+}
+
+func truncateSlackRunes(text string, limit int) string {
+	if limit <= 0 || utf8.RuneCountInString(text) <= limit {
+		return text
+	}
+	runes := []rune(text)
+	if limit <= 3 {
+		return string(runes[:limit])
+	}
+	return string(runes[:limit-3]) + "..."
 }
 
 func mimeExtension(mime string) string {

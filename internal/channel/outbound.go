@@ -338,6 +338,7 @@ func shouldInlineTextWithMedia(policy OutboundPolicy, msg Message, attachments [
 }
 
 func normalizeOutboundMessage(msg Message) Message {
+	msg = normalizeMixedRichParts(msg)
 	if msg.Format == "" {
 		if len(msg.Parts) > 0 {
 			msg.Format = MessageFormatRich
@@ -348,6 +349,18 @@ func normalizeOutboundMessage(msg Message) Message {
 				msg.Format = MessageFormatPlain
 			}
 		}
+	}
+	return msg
+}
+
+func normalizeMixedRichParts(msg Message) Message {
+	if len(msg.Parts) == 0 || strings.TrimSpace(msg.Text) == "" {
+		return msg
+	}
+	msg.Parts = append([]MessagePart{{Type: MessagePartText, Text: msg.Text}}, msg.Parts...)
+	msg.Text = ""
+	if msg.Format == "" {
+		msg.Format = MessageFormatRich
 	}
 	return msg
 }
@@ -425,6 +438,7 @@ func (m *Manager) sendWithConfig(ctx context.Context, sender Sender, cfg Channel
 	// Rich Parts degrade to Markdown/Plain when needed; Markdown degrades to
 	// Plain on plain-only channels.
 	caps, hasCaps := m.registry.GetOutboundCapabilities(cfg.ChannelType, cfg, target)
+	normalized.Message = normalizeOutboundMessage(normalized.Message)
 	if hasCaps {
 		normalized.Message = coerceFormatForCaps(normalized.Message, caps)
 	}
@@ -580,6 +594,7 @@ func validateStreamEvent(registry *Registry, channelType ChannelType, event Stre
 		// a later Markdown-capable channel. The real downgrade is applied to a
 		// local copy in Push.
 		final := event.Final.Message
+		final = normalizeOutboundMessage(final)
 		if caps, ok := registry.GetCapabilities(channelType); ok {
 			final = coerceFormatForCaps(final, caps)
 		}
@@ -730,6 +745,7 @@ func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) err
 		originalFinalText = strings.TrimSpace(event.Final.Message.PlainText())
 		if caps, ok := s.manager.registry.GetOutboundCapabilities(s.channelType, s.config, s.target); ok {
 			final := *event.Final
+			final.Message = normalizeOutboundMessage(final.Message)
 			final.Message = coerceFormatForCaps(final.Message, caps)
 			if err := validateMessageAgainstCapabilities(caps, true, final.Message); err != nil {
 				return err
