@@ -24,6 +24,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getBotsById } from '@memohai/sdk'
 import { useChatStore } from '@/store/chat-list'
+import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { ACP_NO_PROJECT_MODE, createACPNoProjectPath, normalizeACPAgentID } from '@/utils/acp'
 import ChatWorkspace from './components/chat-workspace.vue'
 
@@ -31,6 +32,7 @@ const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
 const chatStore = useChatStore()
+const workspaceTabs = useWorkspaceTabsStore()
 const { currentBotId, bots } = storeToRefs(chatStore)
 
 // Resolve a bot UUID from a URL name slug. Prefers the already-loaded bot list,
@@ -101,7 +103,9 @@ async function maybeStartACPSession() {
   try {
     if (agentId) {
       const { session } = await chatStore.createACPSession({ agentId, projectMode: ACP_NO_PROJECT_MODE, projectPath: createACPNoProjectPath() })
-      await chatStore.selectSession(session.id)
+      // Open (or focus) the tab for the freshly created session; activation selects
+      // it. ensureChatPanel covers the case where the dock mounts later.
+      workspaceTabs.openSessionChat({ sessionId: session.id })
     }
   } catch {
     // Bot may not have the agent enabled; user can still pick it from the composer.

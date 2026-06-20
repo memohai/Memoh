@@ -86,6 +86,7 @@ import { CircleDot, ExternalLink } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/store/chat-list'
 import type { ToolCallBlock } from '@/store/chat-list'
+import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 
 interface AgentResult {
   agent_id?: string
@@ -99,6 +100,7 @@ interface AgentResult {
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()
 const chatStore = useChatStore()
+const workspaceTabs = useWorkspaceTabsStore()
 
 function resolveResult(): Record<string, unknown> | null {
   if (!props.block.result) return null
@@ -137,6 +139,7 @@ function statusClass(status?: string) {
 
 function navigateToSession(sessionId: string) {
   if (!sessionId || !chatStore.currentBotId) return
-  void chatStore.selectSession(sessionId)
+  // Open (or focus) a chat tab for the spawned session; activation selects it.
+  workspaceTabs.openSessionChat({ sessionId })
 }
 </script>

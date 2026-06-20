@@ -120,8 +120,10 @@ function iconOf(session: SessionSummary): Component {
 }
 
 function handleSelect(session: SessionSummary) {
-  void chatStore.selectSession(session.id)
-  workspaceTabs.openChat((session.title ?? '').trim() || t('chat.untitledSession'))
+  workspaceTabs.openSessionChat({
+    sessionId: session.id,
+    title: (session.title ?? '').trim() || t('chat.untitledSession'),
+  })
   emit('update:open', false)
 }
 

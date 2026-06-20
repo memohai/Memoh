@@ -758,10 +758,16 @@ interface ScrollRailSegment {
 }
 
 const props = withDefaults(defineProps<{
+  // Stable dockview panel id (e.g. `chat:3`). Used for per-tab composer drafts and
+  // the keep-alive key — it does NOT change when a draft acquires a real session.
   tabId?: string
+  // The session this pane renders (null = unsaved draft). Decoupled from tabId so
+  // a draft→real promotion never remounts this pane.
+  sessionId?: string | null
   active?: boolean
 }>(), {
   tabId: 'chat',
+  sessionId: null,
   active: true,
 })
 
@@ -1665,7 +1671,10 @@ watch([
   if (!failure || !isActive.value) return
   if (failure.botId && failure.botId !== currentBotId.value) return
   if (failure.sessionId && failure.sessionId !== chatStore.sessionId) return
-  if (failure.sessionId && props.tabId !== `chat:${failure.sessionId}`) return
+  // This pane carries the session it renders directly now (was derived from tabId
+  // which is the stable panel id, not the session). A draft pane (null) still
+  // accepts the restore for the send it just attempted.
+  if (failure.sessionId && props.sessionId && props.sessionId !== failure.sessionId) return
 
   inputText.value = failure.restoreInput
   saveInputDraft(inputDraftKey.value, failure.restoreInput)

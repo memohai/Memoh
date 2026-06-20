@@ -52,6 +52,9 @@ const fileInfo = computed<HandlersFsFileInfo>(() => {
 
 function handleDirty(dirty: boolean) {
   workspaceTabs.setFileDirty(props.tabId, dirty)
+  // First edit pins the (previously ephemeral) tab: it leaves the preview slot so
+  // opening another file no longer replaces it. Never un-pinned on undo.
+  if (dirty) workspaceTabs.pinPanel(props.tabId)
 }
 
 // Let the tab close-confirm dialog write this file even while it's backgrounded.

@@ -4,8 +4,9 @@
       <KeepAlive>
         <ChatPane
           v-if="visible"
-          :key="`chat-pane:${currentBotId}:${chatKey}`"
-          :tab-id="chatTabId"
+          :key="`chat-pane:${currentBotId}:${panelId}`"
+          :tab-id="panelId"
+          :session-id="paramsSessionId"
           :active="visible"
         />
       </KeepAlive>
@@ -21,24 +22,25 @@ import { useChatStore } from '@/store/chat-list'
 import ChatPane from '../chat-pane.vue'
 import { usePanelVisible } from './use-panel-visible'
 
-// The chat panel is a singleton whose content follows the active session
-// (chat-selection store). Multi-session side-by-side rendering needs
-// per-session message state in the chat store first. No breadcrumb: the tab
-// already carries the session title (kept in sync by the workspace store).
+// A per-session chat tab. The panel id (chat:<n>) is stable for the tab's whole
+// life; the session it renders lives in params.sessionId (null = unsaved draft)
+// and the workspace store mutates it (draft→real promotion) via updateParameters
+// WITHOUT remounting ChatPane — the keep-alive key is the panel id, not the
+// session. The single global messages array means only the ACTIVE chat tab is
+// live; activating a tab selects its session (see workspace-tabs onDidActivePanelChange).
+// No breadcrumb: the tab already carries the session title.
 const props = defineProps<{
   params: {
-    params: Record<string, unknown>
+    params: { sessionId?: string | null }
     api: DockviewPanelApi
     containerApi: DockviewApi
   }
 }>()
 
 const chatStore = useChatStore()
-const { currentBotId, sessionId } = storeToRefs(chatStore)
+const { currentBotId } = storeToRefs(chatStore)
 
 const visible = usePanelVisible(props.params.api)
-const chatKey = computed(() => sessionId.value ?? 'draft')
-const chatTabId = computed(() =>
-  sessionId.value ? `chat:${sessionId.value}` : 'draft',
-)
+const panelId = props.params.api.id
+const paramsSessionId = computed(() => props.params.params.sessionId ?? null)
 </script>

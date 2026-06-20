@@ -25,7 +25,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
+import { inject, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import {
@@ -62,7 +62,7 @@ const { t } = useI18n()
 const store = useWorkspaceTabsStore()
 const { api } = storeToRefs(store)
 const chatStore = useChatStore()
-const { currentBotId, sessionId, activeSession } = storeToRefs(chatStore)
+const { currentBotId } = storeToRefs(chatStore)
 
 // dockview's own auto-resize is disabled at construction (:disable-auto-resizing);
 // we drive layout from this ResizeObserver instead. The dock is a flex-1 sibling
@@ -140,32 +140,32 @@ function getTabContextMenuItems({ panel, group }: GetTabContextMenuItemsParams):
   ]
 }
 
-const chatPanelTitle = computed(() => {
-  if (!sessionId.value) return t('chat.newSession')
-  return (activeSession.value?.title ?? '').trim() || t('chat.untitledSession')
-})
-
 function onReady(event: DockviewReadyEvent) {
   store.registerApi(event.api)
   if (rootEl.value) event.api.layout(rootEl.value.clientWidth, rootEl.value.clientHeight)
   ensureChatPanel()
 }
 
+// Bot ready/switch: the store restores the persisted layout; make sure at least a
+// draft chat tab exists afterwards (all chat tabs may have been closed in a past
+// session). Per-tab titles are kept in sync by the store (syncChatTitles).
 function ensureChatPanel() {
-  if (!currentBotId.value || !api.value) return
-  store.openChat(chatPanelTitle.value)
+  const dock = api.value
+  if (!currentBotId.value || !dock) return
+  const hasChat = dock.panels.some(
+    p => p.id === 'chat' || p.id.startsWith('chat:') || p.id.startsWith('chat~'),
+  )
+  if (hasChat) return
+  // Open the active session's tab if one is already selected (e.g. initialize or an
+  // ACP start set it before the dock mounted); otherwise a fresh draft.
+  const sid = (chatStore.sessionId ?? '').trim()
+  if (sid) store.openSessionChat({ sessionId: sid, title: t('chat.untitledSession') })
+  else store.openDraftChat({ title: t('chat.newSession') })
 }
 
-// Bot ready/switch: the store restores the persisted layout; make sure the
-// chat panel exists afterwards (it may have been closed in a past session).
 watch(currentBotId, (bid) => {
   if (bid && api.value) ensureChatPanel()
 })
-
-// Keep the singleton chat tab title in sync with the active session.
-watch(chatPanelTitle, (title) => {
-  store.setChatTitle(title)
-}, { immediate: true })
 
 const FILE_MANAGER_ROOT = '/data'
 

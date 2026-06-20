@@ -217,8 +217,11 @@ watch(currentBotId, () => {
 })
 
 function handleSelect(session: SessionSummary) {
-  void chatStore.selectSession(session.id)
-  workspaceTabs.openChat((session.title ?? '').trim() || t('chat.untitledSession'))
+  // Opening (or focusing) the tab activates it, which selects the session.
+  workspaceTabs.openSessionChat({
+    sessionId: session.id,
+    title: (session.title ?? '').trim() || t('chat.untitledSession'),
+  })
 }
 
 const deleteSessionDialogOpen = ref(false)
