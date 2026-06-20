@@ -1128,6 +1128,75 @@ func TestStreamFinal_RichSendFallbackPreservesParseMode(t *testing.T) {
 	}
 }
 
+func TestStreamFinal_RichSendFallbackPreservesActions(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	s := &telegramOutboundStream{
+		adapter: adapter,
+		cfg:     channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		target:  "123",
+	}
+	ctx := context.Background()
+
+	var fallbackPayload map[string]any
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(req.Body)
+		if strings.HasSuffix(req.URL.Path, "/sendChatAction") {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":true}`)),
+			}, nil
+		}
+		if strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"ok":false,"error_code":404,"description":"Not Found: method not found"}`)),
+			}, nil
+		}
+		if !strings.HasSuffix(req.URL.Path, "/sendMessage") {
+			t.Fatalf("expected fallback sendMessage, got %s", req.URL.Path)
+		}
+		fallbackPayload = decodeTelegramBody(t, body)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":96,"chat":{"id":123}}}`)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{
+		Type: channel.StreamEventFinal,
+		Final: &channel.StreamFinalizePayload{
+			Message: channel.Message{
+				Format: channel.MessageFormatRich,
+				Parts: []channel.MessagePart{
+					{Type: channel.MessagePartText, Text: "hello", Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+				},
+				Actions: []channel.Action{{
+					Label: "Open",
+					URL:   "https://example.com",
+				}},
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if got, _ := fallbackPayload["text"].(string); got != "<b>hello</b>" {
+		t.Fatalf("expected fallback text, got payload %v", fallbackPayload)
+	}
+	if _, ok := fallbackPayload["reply_markup"]; !ok {
+		t.Fatalf("expected fallback reply_markup, got payload %v", fallbackPayload)
+	}
+}
+
 func TestStreamFinal_LongRichPartsFallbacksToPlainText(t *testing.T) {
 	adapter := NewTelegramAdapter(nil)
 	s := &telegramOutboundStream{
@@ -1257,6 +1326,44 @@ func TestStreamFinal_RichHTMLOverflowFallbackSplitsPlainText(t *testing.T) {
 	}
 }
 
+func TestStreamFinal_RichHTMLOverflowRejectsInvalidActionsBeforeFallbackChunks(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	s := &telegramOutboundStream{
+		adapter:       adapter,
+		cfg:           channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		target:        "123",
+		isPrivateChat: true,
+	}
+
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("invalid rich fallback action should fail before HTTP request: %s", req.URL.Path)
+		return nil, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	err := s.Push(context.Background(), mustPreparedTelegramEvent(t, channel.StreamEvent{
+		Type: channel.StreamEventFinal,
+		Final: &channel.StreamFinalizePayload{
+			Message: channel.Message{
+				Format: channel.MessageFormatRich,
+				Parts:  telegramHTMLOverflowParts(),
+				Actions: []channel.Action{{
+					Label: "Too large",
+					Value: strings.Repeat("x", telegramMaxCallbackDataBytes+1),
+				}},
+			},
+		},
+	}))
+	if err == nil || !strings.Contains(err.Error(), "callback data") {
+		t.Fatalf("expected invalid action error before fallback chunks, got %v", err)
+	}
+}
+
 func TestStreamFinal_RichHTMLOverflowFallbackClearsParseModeOnExistingMessage(t *testing.T) {
 	adapter := NewTelegramAdapter(nil)
 	s := &telegramOutboundStream{
@@ -1323,5 +1430,113 @@ func TestStreamFinal_RichHTMLOverflowFallbackClearsParseModeOnExistingMessage(t 
 		if got, _ := body["parse_mode"].(string); got != "" {
 			t.Fatalf("fallback send chunk %d should use plain parse mode, got %q", i, got)
 		}
+	}
+}
+
+func TestStreamFinal_AttachmentOnlyWithActionsDoesNotSendPlaceholderText(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	s := &telegramOutboundStream{
+		adapter: adapter,
+		cfg: channel.ChannelConfig{
+			ID:          "test",
+			BotID:       "bot-test",
+			ChannelType: channel.ChannelTypeTelegram,
+			Credentials: map[string]any{"bot_token": "fake"},
+		},
+		target: "123",
+	}
+
+	var paths []string
+	var photoBody string
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		paths = append(paths, req.URL.Path)
+		body, _ := io.ReadAll(req.Body)
+		if strings.HasSuffix(req.URL.Path, "/sendMessage") {
+			t.Fatalf("attachment-only final should not send placeholder text: %s", body)
+		}
+		if strings.HasSuffix(req.URL.Path, "/sendPhoto") {
+			photoBody = string(body)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":94,"chat":{"id":123},"photo":[{"file_id":"photo-1","file_unique_id":"u1","width":1,"height":1}]}}`)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	err := s.Push(context.Background(), mustPreparedTelegramEvent(t, channel.StreamEvent{
+		Type: channel.StreamEventFinal,
+		Final: &channel.StreamFinalizePayload{
+			Message: channel.Message{
+				Attachments: []channel.Attachment{{
+					Type: channel.AttachmentImage,
+					URL:  "https://example.com/photo.jpg",
+				}},
+				Actions: []channel.Action{{
+					Label: "Open",
+					URL:   "https://example.com",
+				}},
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if len(paths) != 1 || !strings.HasSuffix(paths[0], "/sendPhoto") {
+		t.Fatalf("expected only sendPhoto, got %v", paths)
+	}
+	if !strings.Contains(photoBody, "reply_markup") || !strings.Contains(photoBody, "https://example.com") {
+		t.Fatalf("expected attachment request to carry inline keyboard, body=%s", photoBody)
+	}
+}
+
+func TestStreamFinal_AttachmentActionsRejectInvalidBeforeTextOrUpload(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	s := &telegramOutboundStream{
+		adapter: adapter,
+		cfg: channel.ChannelConfig{
+			ID:          "test",
+			BotID:       "bot-test",
+			ChannelType: channel.ChannelTypeTelegram,
+			Credentials: map[string]any{"bot_token": "fake"},
+		},
+		target: "123",
+	}
+
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("invalid attachment action should fail before HTTP request: %s", req.URL.Path)
+		return nil, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	err := s.Push(context.Background(), mustPreparedTelegramEvent(t, channel.StreamEvent{
+		Type: channel.StreamEventFinal,
+		Final: &channel.StreamFinalizePayload{
+			Message: channel.Message{
+				Text: "Ready",
+				Attachments: []channel.Attachment{{
+					Type: channel.AttachmentImage,
+					URL:  "https://example.com/photo.jpg",
+				}},
+				Actions: []channel.Action{{
+					Label: "Too large",
+					Value: strings.Repeat("x", telegramMaxCallbackDataBytes+1),
+				}},
+			},
+		},
+	}))
+	if err == nil || !strings.Contains(err.Error(), "callback data") {
+		t.Fatalf("expected invalid attachment action error before send, got %v", err)
 	}
 }

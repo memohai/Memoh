@@ -237,12 +237,20 @@ func TestFeishuDescriptorIncludesStreamingAndMedia(t *testing.T) {
 	t.Parallel()
 
 	adapter := NewFeishuAdapter(nil)
-	caps := adapter.Descriptor().Capabilities
+	desc := adapter.Descriptor()
+	caps := desc.Capabilities
 	if !caps.Streaming {
 		t.Fatal("expected streaming capability")
 	}
 	if !caps.Media {
 		t.Fatal("expected media capability")
+	}
+	if !caps.Markdown {
+		t.Fatal("expected markdown capability for lark_md card rendering")
+	}
+	policy := channel.NormalizeOutboundPolicy(desc.OutboundPolicy)
+	if policy.RichTextChunkLimit != feishuStreamMaxRunes {
+		t.Fatalf("RichTextChunkLimit = %d, want %d", policy.RichTextChunkLimit, feishuStreamMaxRunes)
 	}
 }
 
@@ -358,22 +366,41 @@ func TestBuildFeishuStreamCardContentWithState(t *testing.T) {
 	}
 }
 
-func TestBuildFeishuOutboundContentPlainTextUsesTextMessage(t *testing.T) {
+func TestBuildFeishuOutboundContentPlainTextKeepsInteractiveCard(t *testing.T) {
 	t.Parallel()
 
 	msgType, content, err := buildFeishuOutboundContent(channel.Message{Text: "你好 **bold**"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if msgType != larkim.MsgTypeText {
-		t.Fatalf("msg type = %q, want %q", msgType, larkim.MsgTypeText)
+	if msgType != larkim.MsgTypeInteractive {
+		t.Fatalf("msg type = %q, want %q", msgType, larkim.MsgTypeInteractive)
 	}
-	var got map[string]string
-	if err := json.Unmarshal([]byte(content), &got); err != nil {
-		t.Fatalf("content is not json: %v", err)
+	if !strings.Contains(content, "你好 **bold**") {
+		t.Fatalf("expected interactive card content to preserve plain text, got %s", content)
 	}
-	if got["text"] != "你好 **bold**" {
-		t.Fatalf("text content = %q", got["text"])
+}
+
+func TestBuildFeishuOutboundContentPlainFormatUsesPlainTextCard(t *testing.T) {
+	t.Parallel()
+
+	raw := `literal **bold** [x](https://example.com) <at user_id="ou_123"></at>`
+	msgType, content, err := buildFeishuOutboundContent(channel.Message{
+		Text:   raw,
+		Format: channel.MessageFormatPlain,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msgType != larkim.MsgTypeInteractive {
+		t.Fatalf("msg type = %q, want %q", msgType, larkim.MsgTypeInteractive)
+	}
+	text := decodeFeishuCardTextObject(t, content)
+	if text["tag"] != "plain_text" {
+		t.Fatalf("plain format should use plain_text, got %#v", text)
+	}
+	if text["content"] != raw {
+		t.Fatalf("plain card content = %q, want %q", text["content"], raw)
 	}
 }
 
@@ -394,6 +421,25 @@ func TestBuildFeishuOutboundContentRichPartsUsesInteractiveCard(t *testing.T) {
 	if !strings.Contains(content, `"tag":"lark_md"`) || !strings.Contains(content, "**bold**") {
 		t.Fatalf("expected interactive card lark_md content, got %s", content)
 	}
+}
+
+func decodeFeishuCardTextObject(t *testing.T, content string) map[string]any {
+	t.Helper()
+
+	var card struct {
+		Elements []struct {
+			Fields []struct {
+				Text map[string]any `json:"text"`
+			} `json:"fields"`
+		} `json:"elements"`
+	}
+	if err := json.Unmarshal([]byte(content), &card); err != nil {
+		t.Fatalf("content is not json: %v", err)
+	}
+	if len(card.Elements) == 0 || len(card.Elements[0].Fields) == 0 || card.Elements[0].Fields[0].Text == nil {
+		t.Fatalf("missing card text object: %s", content)
+	}
+	return card.Elements[0].Fields[0].Text
 }
 
 func TestBuildFeishuOutboundContentLongRichPartsFallsBackToText(t *testing.T) {

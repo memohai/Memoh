@@ -129,6 +129,7 @@ func (*FeishuAdapter) Descriptor() channel.Descriptor {
 		DisplayName: "Feishu",
 		Capabilities: channel.ChannelCapabilities{
 			Text:           true,
+			Markdown:       true,
 			RichText:       true,
 			Attachments:    true,
 			Media:          true,
@@ -136,6 +137,9 @@ func (*FeishuAdapter) Descriptor() channel.Descriptor {
 			Reply:          true,
 			Streaming:      true,
 			BlockStreaming: true,
+		},
+		OutboundPolicy: channel.OutboundPolicy{
+			RichTextChunkLimit: feishuStreamMaxRunes,
 		},
 		ConfigSchema: channel.ConfigSchema{
 			Version: 2,
@@ -635,11 +639,17 @@ func buildFeishuOutboundContent(msg channel.Message) (string, string, error) {
 	if body == "" {
 		return "", "", errors.New("message is required")
 	}
-	content, err := buildFeishuTextContent(body)
+	var content string
+	var err error
+	if msg.Format == channel.MessageFormatPlain {
+		content, err = buildFeishuPlainCardContent(body)
+	} else {
+		content, err = buildFeishuCardContent(body)
+	}
 	if err != nil {
 		return "", "", err
 	}
-	return larkim.MsgTypeText, content, nil
+	return larkim.MsgTypeInteractive, content, nil
 }
 
 func buildFeishuTextContent(body string) (string, error) {

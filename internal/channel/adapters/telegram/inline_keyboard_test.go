@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"strings"
 	"testing"
 
 	tele "gopkg.in/telebot.v4"
@@ -42,6 +43,30 @@ func TestTelegramInlineKeyboard_ValuePrecedesURL(t *testing.T) {
 	}
 	if btn.URL != "" {
 		t.Fatalf("expected URL to be dropped when callback value is present, got %q", btn.URL)
+	}
+}
+
+func TestTelegramInlineKeyboard_DropsOversizedCallbackData(t *testing.T) {
+	t.Parallel()
+
+	mk := telegramInlineKeyboard([]channel.Action{{Label: "Too large", Value: strings.Repeat("x", telegramMaxCallbackDataBytes+1)}})
+	if len(mk.InlineKeyboard) != 0 {
+		t.Fatalf("expected oversized callback data to be dropped, got %+v", mk.InlineKeyboard)
+	}
+}
+
+func TestTelegramInlineKeyboard_SortsRowsNumerically(t *testing.T) {
+	t.Parallel()
+
+	mk := telegramInlineKeyboard([]channel.Action{
+		{Label: "Row 2", Value: "r2", Row: 2},
+		{Label: "Row 1", Value: "r1", Row: 1},
+	})
+	if len(mk.InlineKeyboard) != 2 {
+		t.Fatalf("expected two rows, got %+v", mk.InlineKeyboard)
+	}
+	if mk.InlineKeyboard[0][0].Text != "Row 1" || mk.InlineKeyboard[1][0].Text != "Row 2" {
+		t.Fatalf("rows not sorted numerically: %+v", mk.InlineKeyboard)
 	}
 }
 

@@ -332,7 +332,21 @@ func extractReadableFromJSON(text string) string {
 }
 
 func buildFeishuCardContent(text string) (string, error) {
+	return buildFeishuCardContentWithTag(text, "lark_md")
+}
+
+func buildFeishuPlainCardContent(text string) (string, error) {
+	return buildFeishuCardContentWithTag(text, "plain_text")
+}
+
+func buildFeishuCardContentWithTag(text string, tag string) (string, error) {
+	if tag == "" {
+		tag = "lark_md"
+	}
 	body := processFeishuCardMarkdown(strings.TrimSpace(text))
+	if tag == "plain_text" {
+		body = strings.TrimSpace(text)
+	}
 	card := map[string]any{
 		"config": map[string]any{
 			"wide_screen_mode": true,
@@ -346,7 +360,7 @@ func buildFeishuCardContent(text string) (string, error) {
 					{
 						"is_short": false,
 						"text": map[string]any{
-							"tag":     "lark_md",
+							"tag":     tag,
 							"content": body,
 						},
 					},

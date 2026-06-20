@@ -147,7 +147,7 @@ func (s *discordOutboundStream) Close(ctx context.Context) error {
 }
 
 func renderDiscordStreamFinalText(msg channel.Message, buffered string) string {
-	if rich := renderDiscordMessagePartsMarkdown(msg); rich != "" {
+	if rich := renderDiscordMessagePartsContent(msg); rich != "" {
 		return rich
 	}
 	if authoritative := strings.TrimSpace(msg.PlainText()); authoritative != "" {

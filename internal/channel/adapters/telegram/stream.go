@@ -333,6 +333,41 @@ func (s *telegramOutboundStream) deliverFinalText(ctx context.Context, text, par
 	return s.editStreamMessageFinal(ctx, text)
 }
 
+func (s *telegramOutboundStream) deliverFinalTextWithActions(ctx context.Context, text, parseMode string, actions []channel.Action) error {
+	if len(actions) == 0 {
+		return s.deliverFinalText(ctx, text, parseMode)
+	}
+	bot, replyTo, err := s.getBotAndReply(ctx)
+	if err != nil {
+		return err
+	}
+	if s.isPrivateChat {
+		s.resetStreamState()
+		return sendTelegramTextWithActions(bot, s.target, text, replyTo, parseMode, actions)
+	}
+	if parseMode != "" {
+		s.mu.Lock()
+		s.parseMode = parseMode
+		s.mu.Unlock()
+	}
+	s.mu.Lock()
+	chatID := s.streamChatID
+	msgID := s.streamMsgID
+	s.mu.Unlock()
+	if msgID > 0 && chatID != 0 {
+		editErr := rawEditTelegramMessageTextWithActions(bot, chatID, msgID, text, parseMode, actions)
+		if editErr == nil || isTelegramMessageNotModified(editErr) {
+			s.resetStreamState()
+			return nil
+		}
+		if !isTelegramEditUnrecoverable(editErr) {
+			return editErr
+		}
+	}
+	s.resetStreamState()
+	return sendTelegramTextWithActions(bot, s.target, text, replyTo, parseMode, actions)
+}
+
 func (s *telegramOutboundStream) pushToolCallStart(ctx context.Context, tc *channel.StreamToolCall) error {
 	s.mu.Lock()
 	bufText := strings.TrimSpace(s.buf.String())
@@ -503,7 +538,7 @@ func (s *telegramOutboundStream) pushAttachment(ctx context.Context, event chann
 		return err
 	}
 	for _, att := range event.Attachments {
-		if sendErr := sendTelegramAttachmentWithAssets(ctx, bot, s.target, att, "", replyTo, ""); sendErr != nil {
+		if sendErr := sendTelegramAttachmentWithAssets(ctx, bot, s.target, att, "", replyTo, "", nil); sendErr != nil {
 			if s.adapter != nil && s.adapter.logger != nil {
 				s.adapter.logger.Warn("telegram: stream attachment send failed",
 					slog.String("config_id", s.cfg.ID),
@@ -580,6 +615,9 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.Pr
 	}
 
 	msg := event.Final.Message
+	if err := validateTelegramActions(msg.Message.Actions); err != nil {
+		return err
+	}
 
 	// Rich path: when the final carries canonical Parts (the channel is
 	// RichText-capable after item 1, so coerce kept them intact), render via
@@ -611,16 +649,18 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.Pr
 		finalText = formatted
 	}
 
-	if len(msg.Message.Actions) > 0 && len(msg.Attachments) == 0 {
-		bot, replyTo, err := s.getBotAndReply(ctx)
-		if err != nil {
+	if strings.TrimSpace(finalText) != "" || len(msg.Attachments) == 0 {
+		if len(msg.Message.Actions) > 0 && len(msg.Attachments) == 0 {
+			bot, replyTo, err := s.getBotAndReply(ctx)
+			if err != nil {
+				return err
+			}
+			if err := sendTelegramTextWithActions(bot, s.target, finalText, replyTo, s.parseMode, msg.Message.Actions); err != nil {
+				return err
+			}
+		} else if err := s.deliverFinalText(ctx, finalText, s.parseMode); err != nil {
 			return err
 		}
-		if err := sendTelegramTextWithActions(bot, s.target, finalText, replyTo, s.parseMode, msg.Message.Actions); err != nil {
-			return err
-		}
-	} else if err := s.deliverFinalText(ctx, finalText, s.parseMode); err != nil {
-		return err
 	}
 
 	if len(msg.Attachments) > 0 {
@@ -635,8 +675,15 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.Pr
 			if i > 0 {
 				to = 0
 			}
-			if err := sendTelegramAttachmentWithAssets(ctx, bot, s.target, att, "", to, parseMode); err != nil && s.adapter.logger != nil {
-				s.adapter.logger.Error("stream final attachment failed", slog.String("config_id", s.cfg.ID), slog.Any("error", err))
+			var actions []channel.Action
+			if i == len(msg.Attachments)-1 {
+				actions = msg.Message.Actions
+			}
+			if err := sendTelegramAttachmentWithAssets(ctx, bot, s.target, att, "", to, parseMode, actions); err != nil {
+				if s.adapter.logger != nil {
+					s.adapter.logger.Error("stream final attachment failed", slog.String("config_id", s.cfg.ID), slog.Any("error", err))
+				}
+				return err
 			}
 		}
 	}
@@ -687,13 +734,16 @@ func (s *telegramOutboundStream) pushFinalRich(ctx context.Context, msg channel.
 	}
 
 	if _, _, err := sendTelegramRichMessageReturnMessage(bot, s.target, rich, replyTo, msg.Message.Actions); err != nil {
-		return s.deliverFinalText(ctx, fallbackText, fallbackParseMode)
+		return s.deliverFinalTextWithActions(ctx, fallbackText, fallbackParseMode, msg.Message.Actions)
 	}
 	s.resetStreamState()
 	return nil
 }
 
 func (s *telegramOutboundStream) deliverLongPlainFallback(ctx context.Context, text string, actions []channel.Action) error {
+	if err := validateTelegramActions(actions); err != nil {
+		return err
+	}
 	chunks := channel.ChunkText(text, telegramMaxMessageLength)
 	if len(chunks) == 0 {
 		return nil
@@ -754,7 +804,7 @@ func (s *telegramOutboundStream) pushFinalAttachments(ctx context.Context, msg c
 		if i > 0 {
 			to = 0
 		}
-		if err := sendTelegramAttachmentWithAssets(ctx, bot, s.target, att, "", to, parseMode); err != nil && s.adapter != nil && s.adapter.logger != nil {
+		if err := sendTelegramAttachmentWithAssets(ctx, bot, s.target, att, "", to, parseMode, nil); err != nil && s.adapter != nil && s.adapter.logger != nil {
 			s.adapter.logger.Error("stream final attachment failed", slog.String("config_id", s.cfg.ID), slog.Any("error", err))
 		}
 	}

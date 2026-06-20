@@ -297,7 +297,7 @@ type Action struct {
 	URL   string `json:"url,omitempty"`
 	// Row groups buttons into keyboard rows for renderers that support grids
 	// (e.g. Telegram inline keyboards). Buttons sharing a Row render together;
-	// rows appear in ascending first-seen order. Renderers without grid support
+	// rows appear in ascending numeric order. Renderers without grid support
 	// ignore this field. 0 is the default (single row, prior behavior).
 	Row int `json:"row,omitempty"`
 }

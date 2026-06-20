@@ -279,13 +279,11 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 	if err != nil {
 		return err
 	}
-	for _, item := range outbound {
-		if err := m.sendWithConfig(ctx, sender, config, item, policy); err != nil {
-			if m.logger != nil {
-				m.logger.Error("send outbound failed", slog.String("channel", channelType.String()), slog.String("bot_id", botID), slog.Any("error", err))
-			}
-			return err
+	if err := m.sendAllWithConfig(ctx, sender, config, outbound, policy); err != nil {
+		if m.logger != nil {
+			m.logger.Error("send outbound failed", slog.String("channel", channelType.String()), slog.String("bot_id", botID), slog.Any("error", err))
 		}
+		return err
 	}
 	return nil
 }

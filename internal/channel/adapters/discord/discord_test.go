@@ -234,6 +234,29 @@ func TestDiscordURLActionComponentsRejectsMoreThanPlatformLimit(t *testing.T) {
 	}
 }
 
+func TestDiscordPreparedOutboundValidationRejectsTooManyURLActions(t *testing.T) {
+	t.Parallel()
+
+	actions := make([]channel.Action, 26)
+	for i := range actions {
+		actions[i] = channel.Action{
+			Label: "Open docs",
+			URL:   "https://example.test/docs",
+		}
+	}
+
+	err := (&DiscordAdapter{}).ValidatePreparedOutbound(context.Background(), channel.ChannelConfig{}, "C123", channel.PreparedOutboundMessage{
+		Target: "C123",
+		Message: channel.PreparedMessage{Message: channel.Message{
+			Text:    "Choose",
+			Actions: actions,
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "at most 25") {
+		t.Fatalf("expected Discord action preflight error, got %v", err)
+	}
+}
+
 func TestDiscordURLActionComponentsEnforcesFieldLimits(t *testing.T) {
 	t.Parallel()
 

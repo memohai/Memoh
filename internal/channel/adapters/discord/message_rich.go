@@ -2,6 +2,7 @@ package discord
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/memohai/memoh/internal/channel"
 )
@@ -36,6 +37,20 @@ func renderDiscordMessagePartsMarkdown(msg channel.Message) string {
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func renderDiscordMessagePartsContent(msg channel.Message) string {
+	rich := renderDiscordMessagePartsMarkdown(msg)
+	if rich == "" {
+		return ""
+	}
+	if utf8.RuneCountInString(rich) <= discordMaxLength {
+		return rich
+	}
+	if plain := strings.TrimSpace(channel.RenderPartsAsPlain(msg.Parts)); plain != "" {
+		return plain
+	}
+	return rich
 }
 
 func writeDiscordRichInlinePart(b *strings.Builder, text string, styles []channel.MessageTextStyle) {

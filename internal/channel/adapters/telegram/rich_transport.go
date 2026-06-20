@@ -49,6 +49,9 @@ func sendTelegramRichMessageReturnMessage(
 	if strings.TrimSpace(rich.HTML) == "" {
 		return 0, 0, nil
 	}
+	if err := validateTelegramActions(actions); err != nil {
+		return 0, 0, err
+	}
 	parsedChatID, channelUsername, parseErr := parseTelegramTarget(target)
 	if parseErr != nil {
 		return 0, 0, parseErr
@@ -95,6 +98,9 @@ func rawEditTelegramRichMessage(
 ) error {
 	if strings.TrimSpace(rich.HTML) == "" {
 		return nil
+	}
+	if err := validateTelegramActions(actions); err != nil {
+		return err
 	}
 	payload := map[string]any{
 		"chat_id":      strconv.FormatInt(chatID, 10),

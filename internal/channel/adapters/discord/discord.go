@@ -289,8 +289,15 @@ func (a *DiscordAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, ms
 	return sendDiscordMessage(ctx, session, channelID, msg)
 }
 
+func (*DiscordAdapter) ValidatePreparedOutbound(_ context.Context, _ channel.ChannelConfig, _ string, msg channel.PreparedOutboundMessage) error {
+	return validateDiscordPreparedOutbound(msg)
+}
+
 func sendDiscordMessage(ctx context.Context, session *discordgo.Session, channelID string, msg channel.PreparedOutboundMessage) error {
-	body := renderDiscordMessagePartsMarkdown(msg.Message.Message)
+	if err := validateDiscordPreparedOutbound(msg); err != nil {
+		return err
+	}
+	body := renderDiscordMessagePartsContent(msg.Message.Message)
 	if body == "" {
 		body = msg.Message.Message.Text
 	}
@@ -341,6 +348,37 @@ func sendDiscordMessage(ctx context.Context, session *discordgo.Session, channel
 
 	_, err := session.ChannelMessageSendComplex(channelID, messageSend)
 	return err
+}
+
+func validateDiscordPreparedOutbound(msg channel.PreparedOutboundMessage) error {
+	body := renderDiscordMessagePartsContent(msg.Message.Message)
+	if body == "" {
+		body = msg.Message.Message.Text
+	}
+	content := truncateDiscordText(body)
+	components := []discordgo.MessageComponent(nil)
+	if len(msg.Message.Message.Actions) > 0 {
+		var err error
+		components, err = discordURLActionComponents(msg.Message.Message.Actions)
+		if err != nil {
+			return err
+		}
+	}
+	if len(msg.Message.Attachments) > 0 {
+		for _, att := range msg.Message.Attachments {
+			if att.Kind != channel.PreparedAttachmentUpload {
+				return fmt.Errorf("discord attachment requires upload source, got %s", att.Kind)
+			}
+			if att.Open == nil {
+				return errors.New("discord attachment upload is not openable")
+			}
+		}
+		return nil
+	}
+	if content == "" && len(components) == 0 {
+		return errors.New("cannot send empty message: no content and no valid attachments")
+	}
+	return nil
 }
 
 func discordURLActionComponents(actions []channel.Action) ([]discordgo.MessageComponent, error) {

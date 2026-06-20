@@ -24,6 +24,7 @@ import (
 const (
 	inboundDedupTTL             = time.Minute
 	slackMaxLength              = 40000
+	slackMaxMessageBlocks       = 50
 	slackMaxActionBlockElements = 25
 	slackMaxSectionText         = 3000
 	slackMaxButtonText          = 75
@@ -142,6 +143,9 @@ func (*SlackAdapter) Descriptor() channel.Descriptor {
 			BlockStreaming: true,
 			Reactions:      true,
 			Threads:        true,
+		},
+		OutboundPolicy: channel.OutboundPolicy{
+			RichTextChunkLimit: slackMaxLength,
 		},
 		ConfigSchema: channel.ConfigSchema{
 			Version: 1,
@@ -593,12 +597,17 @@ func (a *SlackAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg 
 	return a.sendSlackMessage(ctx, api, target, msg)
 }
 
+func (*SlackAdapter) ValidatePreparedOutbound(_ context.Context, _ channel.ChannelConfig, _ string, msg channel.PreparedOutboundMessage) error {
+	return validateSlackPreparedOutbound(msg)
+}
+
 func (a *SlackAdapter) sendSlackMessage(ctx context.Context, api *slack.Client, channelID string, msg channel.PreparedOutboundMessage) error {
-	body := renderSlackMessagePartsMrkdwn(msg.Message.Message)
-	if body == "" {
-		body = msg.Message.Message.PlainText()
+	if err := validateSlackPreparedOutbound(msg); err != nil {
+		return err
 	}
-	displayText := truncateSlackText(body)
+	body := renderSlackOutboundBody(msg.Message.Message)
+	displayText := truncateSlackText(body.Text)
+	blockText := truncateSlackText(body.BlockText)
 	text := displayText
 	if text == "" && len(msg.Message.Message.Actions) > 0 {
 		text = truncateSlackText(slackURLActionFallbackText(msg.Message.Message.Actions))
@@ -611,8 +620,11 @@ func (a *SlackAdapter) sendSlackMessage(ctx context.Context, api *slack.Client, 
 	opts := []slack.MsgOption{
 		slack.MsgOptionText(text, false),
 	}
+	if body.DisableMarkdown {
+		opts = append(opts, slack.MsgOptionDisableMarkdown())
+	}
 	if len(msg.Message.Message.Actions) > 0 {
-		blocks, err := slackURLActionBlocks(displayText, msg.Message.Message.Actions)
+		blocks, err := slackURLActionBlocks(blockText, msg.Message.Message.Actions)
 		if err != nil {
 			return err
 		}
@@ -648,6 +660,75 @@ func (a *SlackAdapter) sendSlackMessage(ctx context.Context, api *slack.Client, 
 	return err
 }
 
+func validateSlackPreparedOutbound(msg channel.PreparedOutboundMessage) error {
+	body := renderSlackOutboundBody(msg.Message.Message)
+	displayText := truncateSlackText(body.Text)
+	blockText := truncateSlackText(body.BlockText)
+	text := displayText
+	if text == "" && len(msg.Message.Message.Actions) > 0 {
+		text = truncateSlackText(slackURLActionFallbackText(msg.Message.Message.Actions))
+	}
+	if len(msg.Message.Message.Actions) > 0 {
+		if _, err := slackURLActionBlocks(blockText, msg.Message.Message.Actions); err != nil {
+			return err
+		}
+	}
+	if text == "" && len(msg.Message.Attachments) > 0 {
+		return nil
+	}
+	if text == "" {
+		return errors.New("cannot send empty message")
+	}
+	return nil
+}
+
+type slackOutboundBody struct {
+	Text            string
+	BlockText       string
+	DisableMarkdown bool
+}
+
+func renderSlackOutboundBody(msg channel.Message) slackOutboundBody {
+	if rich := renderSlackMessagePartsMrkdwn(msg); rich != "" {
+		if utf8.RuneCountInString(rich) <= slackMaxLength {
+			return slackOutboundBody{
+				Text:      rich,
+				BlockText: rich,
+			}
+		}
+		if plain := strings.TrimSpace(channel.RenderPartsAsPlain(msg.Parts)); plain != "" {
+			return slackOutboundPlainBody(plain)
+		}
+		return slackOutboundBody{
+			Text:      rich,
+			BlockText: rich,
+		}
+	}
+	text := msg.PlainText()
+	if msg.Format == channel.MessageFormatPlain {
+		return slackOutboundPlainBody(text)
+	}
+	return slackOutboundBody{
+		Text:      text,
+		BlockText: text,
+	}
+}
+
+func slackOutboundPlainBody(text string) slackOutboundBody {
+	return slackOutboundBody{
+		Text:            text,
+		BlockText:       slackEscapeMrkdwn(text),
+		DisableMarkdown: true,
+	}
+}
+
+func slackDefaultBody(text string) slackOutboundBody {
+	return slackOutboundBody{
+		Text:      text,
+		BlockText: text,
+	}
+}
+
 func slackURLActionFallbackText(actions []channel.Action) string {
 	labels := make([]string, 0, len(actions))
 	for _, action := range actions {
@@ -665,11 +746,7 @@ func slackURLActionBlocks(text string, actions []channel.Action) ([]slack.Block,
 	}
 	blocks := make([]slack.Block, 0, 2)
 	if strings.TrimSpace(text) != "" {
-		blocks = append(blocks, slack.NewSectionBlock(
-			slack.NewTextBlockObject("mrkdwn", truncateSlackRunes(text, slackMaxSectionText), false, false),
-			nil,
-			nil,
-		))
+		blocks = append(blocks, slackSectionTextBlocks(text)...)
 	}
 	elements := make([]slack.BlockElement, 0, slackMaxActionBlockElements)
 	actionBlockIndex := 0
@@ -711,7 +788,27 @@ func slackURLActionBlocks(text string, actions []channel.Action) ([]slack.Block,
 		}
 	}
 	flushActions()
+	if len(blocks) > slackMaxMessageBlocks {
+		return nil, fmt.Errorf("slack message blocks must be at most %d blocks", slackMaxMessageBlocks)
+	}
 	return blocks, nil
+}
+
+func slackSectionTextBlocks(text string) []slack.Block {
+	chunks := channel.ChunkMarkdownText(text, slackMaxSectionText)
+	blocks := make([]slack.Block, 0, len(chunks))
+	for _, chunk := range chunks {
+		chunk = strings.TrimSpace(chunk)
+		if chunk == "" {
+			continue
+		}
+		blocks = append(blocks, slack.NewSectionBlock(
+			slack.NewTextBlockObject("mrkdwn", truncateSlackRunes(chunk, slackMaxSectionText), false, false),
+			nil,
+			nil,
+		))
+	}
+	return blocks
 }
 
 func (*SlackAdapter) uploadPreparedAttachment(ctx context.Context, api *slack.Client, channelID string, threadTS string, att channel.PreparedAttachment) error {

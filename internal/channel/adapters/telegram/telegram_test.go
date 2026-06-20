@@ -773,6 +773,115 @@ func TestTelegramDescriptorUsesRichTextChunkLimit(t *testing.T) {
 	}
 }
 
+func TestTelegramAttachmentSendOptionsCarriesActions(t *testing.T) {
+	t.Parallel()
+
+	opts := telegramAttachmentSendOptions("", 0, []channel.Action{{
+		Label: "Open",
+		URL:   "https://example.com",
+	}})
+	if opts == nil || opts.ReplyMarkup == nil || len(opts.ReplyMarkup.InlineKeyboard) != 1 {
+		t.Fatalf("expected attachment send options to include inline keyboard, got %+v", opts)
+	}
+	btn := opts.ReplyMarkup.InlineKeyboard[0][0]
+	if btn.Text != "Open" || btn.URL != "https://example.com" {
+		t.Fatalf("unexpected inline keyboard button: %+v", btn)
+	}
+}
+
+func TestSendTelegramTextWithActionsUsesLabelFallbackForActionOnlyMessage(t *testing.T) {
+	var body map[string]any
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(req.URL.Path, "/sendMessage") {
+			t.Fatalf("expected sendMessage, got %s", req.URL.Path)
+		}
+		raw, _ := io.ReadAll(req.Body)
+		body = decodeTelegramBody(t, raw)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":95,"chat":{"id":123}}}`)),
+		}, nil
+	}))
+
+	_, _, err := sendTelegramTextWithActionsReturnMessage(bot, "123", "", 0, "", []channel.Action{{
+		Label: "Open",
+		URL:   "https://example.com",
+	}})
+	if err != nil {
+		t.Fatalf("sendTelegramTextWithActionsReturnMessage: %v", err)
+	}
+	if got, _ := body["text"].(string); got != "Open" {
+		t.Fatalf("expected action label fallback text, got body=%v", body)
+	}
+	if _, ok := body["reply_markup"]; !ok {
+		t.Fatalf("expected reply_markup, got body=%v", body)
+	}
+}
+
+func TestSendTelegramTextWithActionsRejectsActionOnlyInvalidButtons(t *testing.T) {
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("invalid action-only message should fail before HTTP request: %s", req.URL.Path)
+		return nil, nil
+	}))
+
+	_, _, err := sendTelegramTextWithActionsReturnMessage(bot, "123", "", 0, "", []channel.Action{{
+		Label: "Too large",
+		Value: strings.Repeat("x", telegramMaxCallbackDataBytes+1),
+	}})
+	if err == nil || !strings.Contains(err.Error(), "callback data") {
+		t.Fatalf("expected invalid action error, got %v", err)
+	}
+}
+
+func TestSendTelegramTextWithActionsRejectsTextInvalidButtons(t *testing.T) {
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("invalid action should fail before HTTP request: %s", req.URL.Path)
+		return nil, nil
+	}))
+
+	_, _, err := sendTelegramTextWithActionsReturnMessage(bot, "123", "Choose", 0, "", []channel.Action{{
+		Label: "Unsafe",
+		URL:   "javascript:alert(1)",
+	}})
+	if err == nil || !strings.Contains(err.Error(), "url must be http(s)") {
+		t.Fatalf("expected invalid action error, got %v", err)
+	}
+}
+
+func TestSendTelegramRichMessageRejectsInvalidActionsBeforeRequest(t *testing.T) {
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("invalid rich action should fail before HTTP request: %s", req.URL.Path)
+		return nil, nil
+	}))
+
+	_, _, err := sendTelegramRichMessageReturnMessage(bot, "123", telegramInputRichMessage{HTML: "<p>Choose</p>"}, 0, []channel.Action{{
+		Label: "Too large",
+		Value: strings.Repeat("x", telegramMaxCallbackDataBytes+1),
+	}})
+	if err == nil || !strings.Contains(err.Error(), "callback data") {
+		t.Fatalf("expected invalid rich action error, got %v", err)
+	}
+}
+
+func TestTelegramPreparedOutboundValidationRejectsInvalidActions(t *testing.T) {
+	t.Parallel()
+
+	err := NewTelegramAdapter(nil).ValidatePreparedOutbound(context.Background(), channel.ChannelConfig{}, "123", channel.PreparedOutboundMessage{
+		Target: "123",
+		Message: channel.PreparedMessage{Message: channel.Message{
+			Text: "Choose",
+			Actions: []channel.Action{{
+				Label: "Too large",
+				Value: strings.Repeat("x", telegramMaxCallbackDataBytes+1),
+			}},
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "callback data") {
+		t.Fatalf("expected invalid action preflight error, got %v", err)
+	}
+}
+
 func telegramHTMLOverflowParts() []channel.MessagePart {
 	parts := make([]channel.MessagePart, 0, 3000)
 	for range 3000 {

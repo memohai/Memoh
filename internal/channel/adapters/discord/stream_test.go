@@ -137,6 +137,19 @@ func TestRenderDiscordStreamFinalTextUsesAuthoritativeTextBeforeBuffer(t *testin
 	}
 }
 
+func TestRenderDiscordStreamFinalTextFallsBackWhenEscapedRichOverflows(t *testing.T) {
+	t.Parallel()
+
+	text := strings.Repeat(`\`, discordMaxLength)
+	msg := channel.Message{Parts: []channel.MessagePart{{
+		Type: channel.MessagePartText,
+		Text: text,
+	}}}
+	if got := renderDiscordStreamFinalText(msg, ""); got != text {
+		t.Fatalf("expected plain fallback when escaped rich overflows, got len=%d", len([]rune(got)))
+	}
+}
+
 func TestDiscordOutboundStream_FinalPreservesURLActionsOnEdit(t *testing.T) {
 	t.Parallel()
 

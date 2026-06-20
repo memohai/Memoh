@@ -77,9 +77,9 @@ func (s *slackOutboundStream) Push(ctx context.Context, event channel.PreparedSt
 		s.mu.Lock()
 		bufText := strings.TrimSpace(s.buffer.String())
 		s.mu.Unlock()
-		finalText := renderSlackStreamFinalText(event.Final.Message.Message, bufText)
-		if finalText != "" {
-			if err := s.finalizeMessage(ctx, finalText, event.Final.Message.Message.Actions); err != nil {
+		finalBody := renderSlackStreamFinalBody(event.Final.Message.Message, bufText)
+		if finalBody.Text != "" {
+			if err := s.finalizeMessageBody(ctx, finalBody, event.Final.Message.Message.Actions); err != nil {
 				return err
 			}
 		} else if err := s.clearPlaceholder(ctx); err != nil {
@@ -171,7 +171,7 @@ func (s *slackOutboundStream) ensureMessage(ctx context.Context, text string) er
 
 	text = truncateSlackText(text)
 
-	ts, err := s.postMessageWithRetry(ctx, text, nil)
+	ts, err := s.postMessageWithRetry(ctx, slackDefaultBody(text), nil)
 	if err != nil {
 		return err
 	}
@@ -201,7 +201,7 @@ func (s *slackOutboundStream) updateMessage(ctx context.Context) error {
 		return nil
 	}
 
-	err := s.updateMessageText(ctx, msgTS, content, nil)
+	err := s.updateMessageText(ctx, msgTS, slackDefaultBody(content), nil)
 	if err == nil {
 		s.mu.Lock()
 		s.lastSent = normalizeSlackStreamText(content)
@@ -234,19 +234,27 @@ func (s *slackOutboundStream) updateMessage(ctx context.Context) error {
 	return nil
 }
 
-func renderSlackStreamFinalText(msg channel.Message, buffered string) string {
-	if rich := renderSlackMessagePartsMrkdwn(msg); rich != "" {
-		return rich
+func renderSlackStreamFinalBody(msg channel.Message, buffered string) slackOutboundBody {
+	body := renderSlackOutboundBody(msg)
+	body.Text = strings.TrimSpace(body.Text)
+	body.BlockText = strings.TrimSpace(body.BlockText)
+	if body.Text != "" {
+		return body
 	}
-	if authoritative := strings.TrimSpace(msg.PlainText()); authoritative != "" {
-		return authoritative
-	}
-	return strings.TrimSpace(buffered)
+	return slackDefaultBody(strings.TrimSpace(buffered))
 }
 
 func (s *slackOutboundStream) finalizeMessage(ctx context.Context, text string, actions []channel.Action) error {
+	return s.finalizeMessageBody(ctx, slackDefaultBody(text), actions)
+}
+
+func (s *slackOutboundStream) finalizeMessageBody(ctx context.Context, body slackOutboundBody, actions []channel.Action) error {
 	s.mu.Lock()
-	text = truncateSlackText(text)
+	text := truncateSlackText(body.Text)
+	blockText := truncateSlackText(body.BlockText)
+	if blockText == "" {
+		blockText = text
+	}
 	msgTS := s.msgTS
 	lastSent := s.lastSent
 	s.mu.Unlock()
@@ -256,7 +264,9 @@ func (s *slackOutboundStream) finalizeMessage(ctx context.Context, text string, 
 	}
 
 	if msgTS == "" {
-		ts, err := s.postMessageWithRetry(ctx, text, actions)
+		body.Text = text
+		body.BlockText = blockText
+		ts, err := s.postMessageWithRetry(ctx, body, actions)
 		if err != nil {
 			return err
 		}
@@ -269,7 +279,9 @@ func (s *slackOutboundStream) finalizeMessage(ctx context.Context, text string, 
 		return nil
 	}
 
-	err := s.updateMessageTextWithRetry(ctx, msgTS, text, actions)
+	body.Text = text
+	body.BlockText = blockText
+	err := s.updateMessageTextWithRetry(ctx, msgTS, body, actions)
 	if err == nil {
 		s.mu.Lock()
 		s.lastSent = normalizeSlackStreamText(text)
@@ -291,7 +303,7 @@ func (s *slackOutboundStream) finalizeMessage(ctx context.Context, text string, 
 		return err
 	}
 
-	ts, postErr := s.postMessageWithRetry(ctx, text, actions)
+	ts, postErr := s.postMessageWithRetry(ctx, body, actions)
 	if postErr != nil {
 		return postErr
 	}
@@ -352,14 +364,14 @@ func (s *slackOutboundStream) sendToolCallMessage(
 	}
 	if p.Status != channel.ToolCallStatusRunning && callID != "" {
 		if ts, ok := s.lookupToolCallMessage(callID); ok {
-			if err := s.updateMessageTextWithRetry(ctx, ts, text, nil); err == nil {
+			if err := s.updateMessageTextWithRetry(ctx, ts, slackDefaultBody(text), nil); err == nil {
 				s.forgetToolCallMessage(callID)
 				return nil
 			}
 			s.forgetToolCallMessage(callID)
 		}
 	}
-	ts, err := s.postMessageWithRetry(ctx, text, nil)
+	ts, err := s.postMessageWithRetry(ctx, slackDefaultBody(text), nil)
 	if err != nil {
 		return err
 	}
@@ -407,12 +419,20 @@ func (s *slackOutboundStream) resetStreamState() {
 	s.mu.Unlock()
 }
 
-func (s *slackOutboundStream) postMessageWithRetry(ctx context.Context, text string, actions []channel.Action) (string, error) {
+func (s *slackOutboundStream) postMessageWithRetry(ctx context.Context, body slackOutboundBody, actions []channel.Action) (string, error) {
+	text := body.Text
+	blockText := body.BlockText
+	if blockText == "" {
+		blockText = text
+	}
 	opts := []slackapi.MsgOption{
 		slackapi.MsgOptionText(text, false),
 	}
+	if body.DisableMarkdown {
+		opts = append(opts, slackapi.MsgOptionDisableMarkdown())
+	}
 	if len(actions) > 0 {
-		blocks, err := slackURLActionBlocks(text, actions)
+		blocks, err := slackURLActionBlocks(blockText, actions)
 		if err != nil {
 			return "", err
 		}
@@ -442,12 +462,20 @@ func (s *slackOutboundStream) postMessageWithRetry(ctx context.Context, text str
 	return "", lastErr
 }
 
-func (s *slackOutboundStream) updateMessageText(ctx context.Context, msgTS string, text string, actions []channel.Action) error {
+func (s *slackOutboundStream) updateMessageText(ctx context.Context, msgTS string, body slackOutboundBody, actions []channel.Action) error {
+	text := body.Text
+	blockText := body.BlockText
+	if blockText == "" {
+		blockText = text
+	}
 	opts := []slackapi.MsgOption{
 		slackapi.MsgOptionText(text, false),
 	}
+	if body.DisableMarkdown {
+		opts = append(opts, slackapi.MsgOptionDisableMarkdown())
+	}
 	if len(actions) > 0 {
-		blocks, err := slackURLActionBlocks(text, actions)
+		blocks, err := slackURLActionBlocks(blockText, actions)
 		if err != nil {
 			return err
 		}
@@ -459,10 +487,10 @@ func (s *slackOutboundStream) updateMessageText(ctx context.Context, msgTS strin
 	return err
 }
 
-func (s *slackOutboundStream) updateMessageTextWithRetry(ctx context.Context, msgTS string, text string, actions []channel.Action) error {
+func (s *slackOutboundStream) updateMessageTextWithRetry(ctx context.Context, msgTS string, body slackOutboundBody, actions []channel.Action) error {
 	var lastErr error
 	for attempt := 0; attempt < slackStreamFinalMaxRetries; attempt++ {
-		err := s.updateMessageText(ctx, msgTS, text, actions)
+		err := s.updateMessageText(ctx, msgTS, body, actions)
 		if err == nil {
 			return nil
 		}
