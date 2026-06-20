@@ -232,6 +232,13 @@ func validateSendArguments(args map[string]any) error {
 			return fmt.Errorf("unknown send field %q", key)
 		}
 	}
+	if raw, ok := args["reply_to"]; ok && raw != nil {
+		replyTo, ok := raw.(string)
+		if !ok {
+			return errors.New("reply_to must be string")
+		}
+		args["reply_to"] = strings.TrimSpace(replyTo)
+	}
 	return nil
 }
 
@@ -411,6 +418,30 @@ func validateOutboundAttachmentObject(location string, raw map[string]any) error
 		if _, ok := allowed[key]; !ok {
 			return fmt.Errorf("unknown attachment field %q%s", key, location)
 		}
+	}
+	if rawType, ok := raw["type"]; ok && rawType != nil {
+		attType, ok := rawType.(string)
+		if !ok {
+			return fmt.Errorf("attachment type must be string%s", location)
+		}
+		attType = strings.TrimSpace(attType)
+		switch channel.AttachmentType(attType) {
+		case "", channel.AttachmentImage, channel.AttachmentAudio, channel.AttachmentVideo, channel.AttachmentVoice, channel.AttachmentFile, channel.AttachmentGIF:
+			raw["type"] = attType
+		default:
+			return fmt.Errorf("unsupported attachment type %q%s", attType, location)
+		}
+	}
+	if rawURL, ok := raw["url"]; ok && rawURL != nil {
+		url, ok := rawURL.(string)
+		if !ok {
+			return fmt.Errorf("attachment url must be string%s", location)
+		}
+		url = strings.TrimSpace(url)
+		if url != "" && !channel.IsHTTPURL(url) && !attachmentpkg.IsDataURL(url) {
+			return fmt.Errorf("attachment url must be http(s) or data URL%s", location)
+		}
+		raw["url"] = url
 	}
 	for _, key := range []string{"base64", "path", "url", "platform_key", "content_hash"} {
 		if strings.TrimSpace(stringMapValue(raw, key)) != "" {

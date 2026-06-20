@@ -317,6 +317,7 @@ func TestSendDirectInvalidAttachmentObjectReturnsError(t *testing.T) {
 	cases := []struct {
 		name string
 		args map[string]any
+		want string
 	}{
 		{
 			name: "top level attachment typo",
@@ -326,6 +327,7 @@ func TestSendDirectInvalidAttachmentObjectReturnsError(t *testing.T) {
 					map[string]any{"href": "https://example.com/file.png"},
 				},
 			},
+			want: "unknown attachment field",
 		},
 		{
 			name: "nested attachment typo",
@@ -337,6 +339,27 @@ func TestSendDirectInvalidAttachmentObjectReturnsError(t *testing.T) {
 					},
 				},
 			},
+			want: "unknown attachment field",
+		},
+		{
+			name: "top level attachment unknown type",
+			args: map[string]any{
+				"message": map[string]any{"text": "see attachment"},
+				"attachments": []any{
+					map[string]any{"type": "sticker", "url": "https://example.com/file.png"},
+				},
+			},
+			want: "unsupported attachment type",
+		},
+		{
+			name: "top level attachment url path",
+			args: map[string]any{
+				"message": map[string]any{"text": "see attachment"},
+				"attachments": []any{
+					map[string]any{"url": "/data/file.png"},
+				},
+			},
+			want: "attachment url must be http(s) or data URL",
 		},
 	}
 
@@ -352,13 +375,37 @@ func TestSendDirectInvalidAttachmentObjectReturnsError(t *testing.T) {
 				BotID:           "bot_1",
 				CurrentPlatform: "telegram",
 			}, "chat-1", tc.args)
-			if err == nil || !strings.Contains(err.Error(), "unknown attachment field") {
-				t.Fatalf("SendDirect error = %v, want unknown attachment field", err)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("SendDirect error = %v, want %q", err, tc.want)
 			}
 			if sender.called != 0 {
 				t.Fatalf("expected sender not called, got %d", sender.called)
 			}
 		})
+	}
+}
+
+func TestSendDirectInvalidReplyToReturnsError(t *testing.T) {
+	t.Parallel()
+
+	sender := &testSender{}
+	exec := &Executor{
+		Sender:   sender,
+		Resolver: testResolver{},
+	}
+
+	_, err := exec.SendDirect(context.Background(), SessionContext{
+		BotID:           "bot_1",
+		CurrentPlatform: "telegram",
+	}, "chat-1", map[string]any{
+		"text":     "reply",
+		"reply_to": 123,
+	})
+	if err == nil || !strings.Contains(err.Error(), "reply_to must be string") {
+		t.Fatalf("SendDirect error = %v, want reply_to type error", err)
+	}
+	if sender.called != 0 {
+		t.Fatalf("expected sender not called, got %d", sender.called)
 	}
 }
 
@@ -478,6 +525,22 @@ func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 				"attachments": []any{map[string]any{"href": "https://example.com/file.png"}},
 			}},
 			want: "unknown attachment field",
+		},
+		{
+			name: "unknown nested attachment type",
+			raw: map[string]any{"message": map[string]any{
+				"text":        "see attachment",
+				"attachments": []any{map[string]any{"type": "sticker", "url": "https://example.com/file.png"}},
+			}},
+			want: "unsupported attachment type",
+		},
+		{
+			name: "nested attachment url path",
+			raw: map[string]any{"message": map[string]any{
+				"text":        "see attachment",
+				"attachments": []any{map[string]any{"url": "/data/file.png"}},
+			}},
+			want: "attachment url must be http(s) or data URL",
 		},
 		{
 			name: "nested attachment without reference",

@@ -199,7 +199,17 @@ func sendAttachmentObjectSchema() map[string]any {
 			map[string]any{"required": []string{"platform_key"}},
 		},
 		"properties": map[string]any{
-			"type":            map[string]any{"type": "string"},
+			"type": map[string]any{
+				"type": "string",
+				"enum": []any{
+					string(channel.AttachmentImage),
+					string(channel.AttachmentAudio),
+					string(channel.AttachmentVideo),
+					string(channel.AttachmentVoice),
+					string(channel.AttachmentFile),
+					string(channel.AttachmentGIF),
+				},
+			},
 			"base64":          map[string]any{"type": "string"},
 			"path":            map[string]any{"type": "string"},
 			"url":             map[string]any{"type": "string"},

@@ -465,6 +465,11 @@ func TestMessageProviderSendToolExposesStructuredMessagePartsSchema(t *testing.T
 				t.Fatalf("%s object schema missing %q in %#v", label, field, objectProps)
 			}
 		}
+		attachmentType, ok := objectProps["type"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s object type schema missing in %#v", label, objectProps)
+		}
+		assertEnumContainsForTest(t, attachmentType["enum"], "image", "audio", "video", "voice", "file", "gif")
 		if _, ok := objectSchema["anyOf"].([]any); !ok {
 			t.Fatalf("%s object schema should require a reference field via anyOf, got %#v", label, objectSchema["anyOf"])
 		}

@@ -595,7 +595,11 @@ func (a *SlackAdapter) sendSlackMessage(ctx context.Context, api *slack.Client, 
 	if body == "" {
 		body = msg.Message.Message.PlainText()
 	}
-	text := truncateSlackText(body)
+	displayText := truncateSlackText(body)
+	text := displayText
+	if text == "" && len(msg.Message.Message.Actions) > 0 {
+		text = truncateSlackText(slackURLActionFallbackText(msg.Message.Message.Actions))
+	}
 	threadTS := ""
 	if msg.Message.Message.Reply != nil && msg.Message.Message.Reply.MessageID != "" {
 		threadTS = msg.Message.Message.Reply.MessageID
@@ -605,7 +609,7 @@ func (a *SlackAdapter) sendSlackMessage(ctx context.Context, api *slack.Client, 
 		slack.MsgOptionText(text, false),
 	}
 	if len(msg.Message.Message.Actions) > 0 {
-		blocks, err := slackURLActionBlocks(text, msg.Message.Message.Actions)
+		blocks, err := slackURLActionBlocks(displayText, msg.Message.Message.Actions)
 		if err != nil {
 			return err
 		}
@@ -639,6 +643,17 @@ func (a *SlackAdapter) sendSlackMessage(ctx context.Context, api *slack.Client, 
 
 	_, _, err := api.PostMessageContext(ctx, channelID, opts...)
 	return err
+}
+
+func slackURLActionFallbackText(actions []channel.Action) string {
+	labels := make([]string, 0, len(actions))
+	for _, action := range actions {
+		label := strings.TrimSpace(action.Label)
+		if label != "" {
+			labels = append(labels, label)
+		}
+	}
+	return strings.Join(labels, " / ")
 }
 
 func slackURLActionBlocks(text string, actions []channel.Action) ([]slack.Block, error) {

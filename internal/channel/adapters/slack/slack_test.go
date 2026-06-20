@@ -1380,6 +1380,56 @@ func TestSlackSendRendersURLActionsAsButtons(t *testing.T) {
 	}
 }
 
+func TestSlackSendRendersURLActionsWithoutText(t *testing.T) {
+	t.Parallel()
+
+	var gotText string
+	var gotBlocks string
+	adapter := NewSlackAdapter(nil)
+	api := slack.New(
+		testBotToken,
+		slack.OptionAPIURL("https://slack.test/api/"),
+		slack.OptionHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.URL.String() != "https://slack.test/api/chat.postMessage" {
+				return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("not found")), Header: make(http.Header)}, nil
+			}
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("ParseForm: %v", err)
+			}
+			gotText = r.FormValue("text")
+			gotBlocks = r.FormValue("blocks")
+			body, _ := json.Marshal(map[string]any{"ok": true, "channel": "C123", "ts": "1710000000.000300"})
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(string(body))),
+			}, nil
+		})}),
+		slack.OptionRetry(3),
+	)
+
+	err := adapter.sendSlackMessage(context.Background(), api, "C123", channel.PreparedOutboundMessage{
+		Message: channel.PreparedMessage{
+			Message: channel.Message{
+				Actions: []channel.Action{
+					{Label: "Open docs", URL: "https://example.test/docs"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("sendSlackMessage: %v", err)
+	}
+	if gotText != "Open docs" {
+		t.Fatalf("expected action label fallback text, got %q", gotText)
+	}
+	if !strings.Contains(gotBlocks, `"type":"button"`) ||
+		!strings.Contains(gotBlocks, `"text":"Open docs"`) ||
+		!strings.Contains(gotBlocks, `"url":"https://example.test/docs"`) {
+		t.Fatalf("expected Slack button block, got %s", gotBlocks)
+	}
+}
+
 func TestSlackURLActionBlocksSplitAtPlatformElementLimit(t *testing.T) {
 	t.Parallel()
 
