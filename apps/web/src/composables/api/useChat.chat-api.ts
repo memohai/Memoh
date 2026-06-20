@@ -33,14 +33,39 @@ export async function fetchBots(): Promise<Bot[]> {
   return data?.items ?? []
 }
 
-export async function fetchSessions(botId: string): Promise<SessionSummary[]> {
+export interface FetchSessionsOptions {
+  types?: string[]
+  limit?: number
+  cursor?: string
+}
+
+export interface FetchSessionsResult {
+  items: SessionSummary[]
+  nextCursor: string | null
+}
+
+const DEFAULT_SESSION_TYPES = ['chat', 'discuss', 'acp_agent']
+const DEFAULT_SESSION_PAGE_SIZE = 50
+
+export async function fetchSessions(botId: string, options?: FetchSessionsOptions): Promise<FetchSessionsResult> {
   const id = botId.trim()
-  if (!id) return []
+  if (!id) return { items: [], nextCursor: null }
+  const types = (options?.types ?? DEFAULT_SESSION_TYPES).map(t => t.trim()).filter(Boolean)
+  const cursor = options?.cursor?.trim() ?? ''
   const { data } = await getBotsByBotIdSessions({
     path: { bot_id: id },
+    query: {
+      types: types.join(','),
+      limit: options?.limit ?? DEFAULT_SESSION_PAGE_SIZE,
+      ...(cursor ? { cursor } : {}),
+    },
     throwOnError: true,
   })
-  return (data as Record<string, unknown>)?.items as SessionSummary[] ?? []
+  const payload = data as { items?: SessionSummary[]; next_cursor?: string } | undefined
+  return {
+    items: payload?.items ?? [],
+    nextCursor: payload?.next_cursor?.trim() || null,
+  }
 }
 
 export async function createSession(botId: string, options?: string | CreateSessionOptions): Promise<SessionSummary> {

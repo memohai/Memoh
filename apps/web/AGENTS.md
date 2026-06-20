@@ -91,9 +91,7 @@ src/
 │   │   ├── useChat.ts         #     Aggregated re-export of chat composables
 │   │   ├── useChat.types.ts   #     Bot, Session, Message, StreamEvent types
 │   │   ├── useChat.chat-api.ts  #   Bot/session CRUD (fetchBots, fetchSessions, etc.)
-│   │   ├── useChat.message-api.ts  # Message fetch, SSE streaming, local channel
-│   │   ├── useChat.sse.ts     #     SSE stream reader and parser
-│   │   ├── useChat.sse.test.ts  #   SSE parser tests
+│   │   ├── useChat.message-api.ts  # Message REST + SSE wrappers (per-session messages, bot-wide activity)
 │   │   ├── useChat.ws.ts      #     WebSocket connection (send, abort, reconnect)
 │   │   ├── useChat.ws.test.ts #     WebSocket tests
 │   │   ├── useChat.content.ts #     Message content parsing (tool calls, text, reasoning)
@@ -491,10 +489,14 @@ Stores use Composition API style (`defineStore(() => { ... })`), with persistenc
 Chat supports two transport modes: **Server-Sent Events (SSE)** and **WebSocket**.
 
 #### SSE Streaming
-- **Endpoints**: `/bots/{bot_id}/local/stream` (send + stream), `/bots/{bot_id}/sessions/{session_id}/messages/events` (per-session messages SSE: server-fixed last-50 backlog + live `message_created` / `session_title_updated` / `background_task` / `agent_stream` filtered to the subscribed session), `/bots/{bot_id}/sessions/events` (bot-wide lightweight activity SSE: `session_touched` / `session_title_updated` / `session_created` — never carries message bodies)
-- **Parsing**: `composables/api/useChat.sse.ts` reads `ReadableStream<Uint8Array>` and parses SSE `data:` lines
-- **Events**: `text_delta`, `reasoning_delta`, `tool_call_start/end`, `attachment_delta`, `processing_completed/failed`
-- **Retry**: `useRetryingStream` composable provides exponential backoff for reconnection
+#### SSE Streaming
+- **Endpoints**:
+  - `GET /bots/{bot_id}/local/stream` — local-channel send + stream pipe.
+  - `GET /bots/{bot_id}/sessions/{session_id}/messages/events` — per-session messages SSE; server-fixed last-50 backlog + live `message_created` / `session_title_updated` / `background_task` / `agent_stream` filtered to the subscribed session.
+  - `GET /bots/{bot_id}/sessions/events` — bot-wide lightweight activity SSE; `session_touched` / `session_title_updated` / `session_created` for sidebar live-sort. Never carries message bodies.
+- **Parsing**: handled by the generated SDK (`@memohai/sdk` `sse.get`); wrappers live in `composables/api/useChat.message-api.ts`. The hand-rolled `useChat.sse.ts` parser has been removed.
+- **Events**: `text_delta`, `reasoning_delta`, `tool_call_start/end`, `attachment_delta`, `processing_completed/failed` on the message SSE; lightweight session-activity events on the bot-wide SSE.
+- **Retry**: `useRetryingStream` composable drives reconnection with exponential backoff.
 
 #### WebSocket
 - **Endpoint**: `/bots/{bot_id}/local/ws` (with token query param)
