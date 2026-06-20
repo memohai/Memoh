@@ -762,8 +762,10 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 	}
 	richParts := extractTelegramMessageParts(raw)
 	format := channel.MessageFormatPlain
+	messageText := text
 	if len(richParts) > 0 {
 		format = channel.MessageFormatRich
+		messageText = ""
 	}
 
 	return channel.InboundMessage{
@@ -771,7 +773,7 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 		Message: channel.Message{
 			ID:          strconv.Itoa(raw.ID),
 			Format:      format,
-			Text:        text,
+			Text:        messageText,
 			Parts:       richParts,
 			Attachments: attachments,
 			Reply:       replyRef,

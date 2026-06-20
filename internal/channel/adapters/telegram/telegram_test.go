@@ -373,6 +373,45 @@ func TestBuildTelegramInboundMessage_RichFormatWhenEntitiesPopulateParts(t *test
 	if inbound.Message.Format != channel.MessageFormatRich {
 		t.Fatalf("expected rich format when Parts populate, got %q", inbound.Message.Format)
 	}
+	if inbound.Message.Text != "" {
+		t.Fatalf("rich inbound message should not keep duplicate Text, got %q", inbound.Message.Text)
+	}
+}
+
+func TestBuildTelegramInboundMessage_RichMentionDoesNotDuplicatePlainText(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewTelegramAdapter(nil)
+	bot := newStubTelegramBot(t)
+	bot.Me = &tele.User{ID: 1, Username: "memoh1bot"}
+	const body = "@memoh1bot telegram 新的bot api除了latex还支持什么富文本"
+	update := &tele.Update{
+		ID: 1,
+		Message: &tele.Message{
+			ID:     71890,
+			Text:   body,
+			Chat:   &tele.Chat{ID: -1001, Type: tele.ChatGroup, Title: "Project Memoh"},
+			Sender: &tele.User{ID: 7583740083, Username: "softboil"},
+			Entities: tele.Entities{
+				{Type: tele.EntityMention, Offset: 0, Length: len("@memoh1bot")},
+			},
+		},
+	}
+
+	inbound, ok := adapter.buildTelegramInboundMessage(bot, channel.ChannelConfig{}, update)
+	if !ok {
+		t.Fatal("expected inbound message")
+	}
+	if inbound.Message.Text != "" {
+		t.Fatalf("rich inbound message should not keep duplicate Text, got %q", inbound.Message.Text)
+	}
+	plain := inbound.Message.PlainText()
+	if strings.Count(plain, "telegram 新的bot api除了latex还支持什么富文本") != 1 {
+		t.Fatalf("PlainText should contain the question once, got %q", plain)
+	}
+	if got, _ := inbound.Metadata["raw_text"].(string); got != body {
+		t.Fatalf("raw_text = %q, want %q", got, body)
+	}
 }
 
 func TestSeenTelegramUpdate(t *testing.T) {
