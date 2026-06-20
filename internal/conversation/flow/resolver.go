@@ -657,10 +657,8 @@ func (r *Resolver) canDeliverUserInputWS(eventCh chan<- WSStreamEvent) bool {
 	return r.userInput != nil && eventCh != nil
 }
 
-func supportsImageInputForModel(_ models.GetResponse) bool {
-	// Keep in-process read-media image injection available until model-level
-	// capability metadata is authoritative; ACP keeps this disabled separately.
-	return true
+func supportsImageInputForModel(m models.GetResponse) bool {
+	return m.HasCompatibility(models.CompatVision)
 }
 
 const (

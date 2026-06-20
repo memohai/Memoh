@@ -119,7 +119,7 @@ func TestBuildModelSelectionRequest_PreservesOverrides(t *testing.T) {
 	}
 }
 
-func TestSupportsImageInputForModelDefaultsToSupported(t *testing.T) {
+func TestSupportsImageInputForModel(t *testing.T) {
 	t.Parallel()
 
 	visionModel := models.GetResponse{
@@ -134,8 +134,8 @@ func TestSupportsImageInputForModelDefaultsToSupported(t *testing.T) {
 	}
 
 	plainModel := models.GetResponse{}
-	if !supportsImageInputForModel(plainModel) {
-		t.Fatal("model image input should default to supported until model capability metadata is available")
+	if supportsImageInputForModel(plainModel) {
+		t.Fatal("model without vision compatibility should not support image input")
 	}
 }
 
