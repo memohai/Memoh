@@ -15,7 +15,7 @@ import (
 	_ "github.com/memohai/memoh/spec"
 )
 
-//go:generate go run github.com/swaggo/swag/cmd/swag@latest init -g swagger.go -o ../../spec --parseDependency --parseInternal
+//go:generate go tool swag init -g swagger.go -o ../../spec --parseDependency --parseInternal
 
 var (
 	swaggerSpec []byte
