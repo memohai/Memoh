@@ -297,6 +297,9 @@ func (s *telegramOutboundStream) sendPermanentMessage(ctx context.Context, text 
 	if err != nil {
 		return err
 	}
+	if parseMode == "" && runeLenTelegramText(text) > telegramMaxMessageLength {
+		return sendTelegramTextChunksWithActions(bot, s.target, text, replyTo, parseMode, nil)
+	}
 	return sendTelegramText(bot, s.target, text, replyTo, parseMode)
 }
 
@@ -648,6 +651,17 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.Pr
 func (s *telegramOutboundStream) pushFinalRich(ctx context.Context, msg channel.PreparedMessage) error {
 	rich, fallbackText, fallbackParseMode := renderTelegramOutboundBody(msg.Message)
 	if strings.TrimSpace(rich.HTML) == "" {
+		if fallbackParseMode == "" && runeLenTelegramText(fallbackText) > telegramMaxMessageLength {
+			return s.deliverLongPlainFallback(ctx, fallbackText, msg.Message.Actions)
+		}
+		if len(msg.Message.Actions) > 0 {
+			bot, replyTo, err := s.getBotAndReply(ctx)
+			if err != nil {
+				return err
+			}
+			s.resetStreamState()
+			return sendTelegramTextWithActions(bot, s.target, fallbackText, replyTo, fallbackParseMode, msg.Message.Actions)
+		}
 		return s.deliverFinalText(ctx, fallbackText, fallbackParseMode)
 	}
 	bot, replyTo, err := s.getBotAndReply(ctx)
@@ -677,6 +691,38 @@ func (s *telegramOutboundStream) pushFinalRich(ctx context.Context, msg channel.
 	}
 	s.resetStreamState()
 	return nil
+}
+
+func (s *telegramOutboundStream) deliverLongPlainFallback(ctx context.Context, text string, actions []channel.Action) error {
+	chunks := channel.ChunkText(text, telegramMaxMessageLength)
+	if len(chunks) == 0 {
+		return nil
+	}
+	replyToFirstChunk := true
+	if !s.isPrivateChat {
+		s.mu.Lock()
+		hasStreamMessage := s.streamMsgID != 0
+		s.mu.Unlock()
+		if hasStreamMessage {
+			if err := s.editStreamMessageFinal(ctx, chunks[0]); err != nil {
+				return err
+			}
+			chunks = chunks[1:]
+			s.resetStreamState()
+			replyToFirstChunk = false
+		}
+	}
+	if len(chunks) == 0 {
+		return nil
+	}
+	bot, replyTo, err := s.getBotAndReply(ctx)
+	if err != nil {
+		return err
+	}
+	if !replyToFirstChunk {
+		replyTo = 0
+	}
+	return sendTelegramTextChunkListWithActions(bot, s.target, chunks, replyTo, "", actions)
 }
 
 // pushFinalAttachments delivers the attachment tail after a rich-final send.

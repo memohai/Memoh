@@ -701,6 +701,69 @@ func TestTelegramAdapter_LongRichPartsFallsBackToPlainText(t *testing.T) {
 	}
 }
 
+func TestTelegramAdapter_RichHTMLOverflowFallbackSplitsPlainText(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+
+	var bodies []map[string]any
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			t.Fatalf("HTML-overflow rich parts should not call sendRichMessage")
+		}
+		if !strings.HasSuffix(req.URL.Path, "/sendMessage") {
+			t.Fatalf("expected sendMessage, got %s", req.URL.Path)
+		}
+		body, _ := io.ReadAll(req.Body)
+		bodies = append(bodies, decodeTelegramBody(t, body))
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":80,"chat":{"id":123}}}`)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	parts := telegramHTMLOverflowParts()
+	plain := channel.RenderPartsAsPlain(parts)
+	rich := renderTelegramMessagePartsRichMessage(channel.Message{Parts: parts})
+	if utf8.RuneCountInString(plain) > telegramMaxRichMessageLength {
+		t.Fatalf("test plain fallback must be within rich limit, got %d", utf8.RuneCountInString(plain))
+	}
+	if utf8.RuneCountInString(rich.HTML) <= telegramMaxRichMessageLength {
+		t.Fatalf("test rich HTML must exceed rich limit, got %d", utf8.RuneCountInString(rich.HTML))
+	}
+
+	msg := channel.PreparedOutboundMessage{
+		Target: "123",
+		Message: channel.PreparedMessage{Message: channel.Message{
+			Format: channel.MessageFormatRich,
+			Parts:  parts,
+		}},
+	}
+
+	if err := adapter.Send(context.Background(), channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}}, msg); err != nil {
+		t.Fatalf("send HTML-overflow rich parts: %v", err)
+	}
+	if len(bodies) < 2 {
+		t.Fatalf("expected fallback plain text to split, got %d sendMessage call(s)", len(bodies))
+	}
+	var joined strings.Builder
+	for i, body := range bodies {
+		text, _ := body["text"].(string)
+		if got := utf8.RuneCountInString(text); got > telegramMaxMessageLength {
+			t.Fatalf("fallback chunk %d exceeds Telegram text limit: %d", i, got)
+		}
+		joined.WriteString(text)
+	}
+	if got := utf8.RuneCountInString(joined.String()); got <= telegramMaxMessageLength {
+		t.Fatalf("fallback sent only one truncated text window, got %d runes", got)
+	}
+}
+
 func TestTelegramDescriptorUsesRichTextChunkLimit(t *testing.T) {
 	t.Parallel()
 
@@ -708,6 +771,18 @@ func TestTelegramDescriptorUsesRichTextChunkLimit(t *testing.T) {
 	if policy.RichTextChunkLimit <= policy.TextChunkLimit {
 		t.Fatalf("Telegram rich text limit should exceed text limit, got text=%d rich=%d", policy.TextChunkLimit, policy.RichTextChunkLimit)
 	}
+}
+
+func telegramHTMLOverflowParts() []channel.MessagePart {
+	parts := make([]channel.MessagePart, 0, 3000)
+	for range 3000 {
+		parts = append(parts, channel.MessagePart{
+			Type:   channel.MessagePartText,
+			Text:   "x",
+			Styles: []channel.MessageTextStyle{channel.MessageStyleBold},
+		})
+	}
+	return parts
 }
 
 func TestTelegramAdapter_SendRichPartsFallsBackToText(t *testing.T) {

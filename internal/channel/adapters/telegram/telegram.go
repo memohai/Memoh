@@ -865,6 +865,9 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 			)
 		}
 	}
+	if shouldSplitTelegramPlainFallback(msg.Message.Message, rich, text, parseMode) {
+		return sendTelegramTextChunksWithActions(bot, to, text, replyTo, parseMode, msg.Message.Message.Actions)
+	}
 	if len(msg.Message.Message.Actions) > 0 {
 		return sendTelegramTextWithActions(bot, to, text, replyTo, parseMode, msg.Message.Message.Actions)
 	}
@@ -884,6 +887,17 @@ func renderTelegramOutboundBody(msg channel.Message) (telegramInputRichMessage, 
 		return telegramInputRichMessage{}, channel.RenderPartsAsPlain(msg.Parts), ""
 	}
 	return telegramInputRichMessage{}, text, parseMode
+}
+
+func shouldSplitTelegramPlainFallback(msg channel.Message, rich telegramInputRichMessage, text string, parseMode string) bool {
+	return len(msg.Parts) > 0 &&
+		strings.TrimSpace(rich.HTML) == "" &&
+		parseMode == "" &&
+		runeLenTelegramText(text) > telegramMaxMessageLength
+}
+
+func runeLenTelegramText(text string) int {
+	return utf8.RuneCountInString(strings.TrimSpace(text))
 }
 
 // Update edits an already-sent message in place (text + inline keyboard),
@@ -1117,6 +1131,34 @@ func sendTelegramTextReturnMessage(bot *tele.Bot, target string, text string, re
 func sendTelegramTextWithActions(bot *tele.Bot, target string, text string, replyTo int, parseMode string, actions []channel.Action) error {
 	_, _, err := sendTelegramTextWithActionsReturnMessage(bot, target, text, replyTo, parseMode, actions)
 	return err
+}
+
+func sendTelegramTextChunksWithActions(bot *tele.Bot, target string, text string, replyTo int, parseMode string, actions []channel.Action) error {
+	chunks := channel.ChunkText(text, telegramMaxMessageLength)
+	if len(chunks) == 0 {
+		return sendTelegramTextWithActions(bot, target, text, replyTo, parseMode, actions)
+	}
+	return sendTelegramTextChunkListWithActions(bot, target, chunks, replyTo, parseMode, actions)
+}
+
+func sendTelegramTextChunkListWithActions(bot *tele.Bot, target string, chunks []string, replyTo int, parseMode string, actions []channel.Action) error {
+	for i, chunk := range chunks {
+		chunkReplyTo := replyTo
+		if i > 0 {
+			chunkReplyTo = 0
+		}
+		isLast := i == len(chunks)-1
+		if isLast && len(actions) > 0 {
+			if err := sendTelegramTextWithActions(bot, target, chunk, chunkReplyTo, parseMode, actions); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := sendTelegramText(bot, target, chunk, chunkReplyTo, parseMode); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func sendTelegramTextWithActionsReturnMessage(bot *tele.Bot, target string, text string, replyTo int, parseMode string, actions []channel.Action) (chatID int64, messageID int, err error) {

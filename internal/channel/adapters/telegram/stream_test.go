@@ -1195,3 +1195,64 @@ func TestStreamFinal_LongRichPartsFallbacksToPlainText(t *testing.T) {
 		t.Fatalf("long rich stream final fallback should use plain text parse mode, got body %v", editPayload)
 	}
 }
+
+func TestStreamFinal_RichHTMLOverflowFallbackSplitsPlainText(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	s := &telegramOutboundStream{
+		adapter:       adapter,
+		cfg:           channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		target:        "123",
+		isPrivateChat: true,
+	}
+	ctx := context.Background()
+
+	var bodies []map[string]any
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			t.Fatalf("HTML-overflow rich stream final should not call sendRichMessage")
+		}
+		if !strings.HasSuffix(req.URL.Path, "/sendMessage") {
+			t.Fatalf("expected sendMessage, got %s", req.URL.Path)
+		}
+		body, _ := io.ReadAll(req.Body)
+		bodies = append(bodies, decodeTelegramBody(t, body))
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":92,"chat":{"id":123}}}`)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{
+		Type: channel.StreamEventFinal,
+		Final: &channel.StreamFinalizePayload{
+			Message: channel.Message{
+				Format: channel.MessageFormatRich,
+				Parts:  telegramHTMLOverflowParts(),
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if len(bodies) < 2 {
+		t.Fatalf("expected fallback plain text to split, got %d sendMessage call(s)", len(bodies))
+	}
+	var joined strings.Builder
+	for i, body := range bodies {
+		text, _ := body["text"].(string)
+		if got := utf8.RuneCountInString(text); got > telegramMaxMessageLength {
+			t.Fatalf("fallback chunk %d exceeds Telegram text limit: %d", i, got)
+		}
+		joined.WriteString(text)
+	}
+	if got := utf8.RuneCountInString(joined.String()); got <= telegramMaxMessageLength {
+		t.Fatalf("fallback sent only one truncated text window, got %d runes", got)
+	}
+}
