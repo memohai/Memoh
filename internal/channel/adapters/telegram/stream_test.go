@@ -1256,3 +1256,72 @@ func TestStreamFinal_RichHTMLOverflowFallbackSplitsPlainText(t *testing.T) {
 		t.Fatalf("fallback sent only one truncated text window, got %d runes", got)
 	}
 }
+
+func TestStreamFinal_RichHTMLOverflowFallbackClearsParseModeOnExistingMessage(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	s := &telegramOutboundStream{
+		adapter:      adapter,
+		cfg:          channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		target:       "123",
+		parseMode:    tele.ModeHTML,
+		streamChatID: 123,
+		streamMsgID:  77,
+		lastEdited:   "pending",
+	}
+	ctx := context.Background()
+
+	var editParseMode string
+	var sendBodies []map[string]any
+	origEdit := testEditFunc
+	testEditFunc = func(_ *tele.Bot, _ int64, _ int, _ string, parseMode string) error {
+		editParseMode = parseMode
+		return nil
+	}
+	defer func() { testEditFunc = origEdit }()
+
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			t.Fatalf("HTML-overflow rich stream final should not call sendRichMessage")
+		}
+		if !strings.HasSuffix(req.URL.Path, "/sendMessage") {
+			t.Fatalf("expected sendMessage, got %s", req.URL.Path)
+		}
+		body, _ := io.ReadAll(req.Body)
+		sendBodies = append(sendBodies, decodeTelegramBody(t, body))
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":93,"chat":{"id":123}}}`)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{
+		Type: channel.StreamEventFinal,
+		Final: &channel.StreamFinalizePayload{
+			Message: channel.Message{
+				Format: channel.MessageFormatRich,
+				Parts:  telegramHTMLOverflowParts(),
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if editParseMode != "" {
+		t.Fatalf("existing stream message fallback edit should clear parse mode, got %q", editParseMode)
+	}
+	if len(sendBodies) == 0 {
+		t.Fatal("expected remaining fallback chunks to be sent")
+	}
+	for i, body := range sendBodies {
+		if got, _ := body["parse_mode"].(string); got != "" {
+			t.Fatalf("fallback send chunk %d should use plain parse mode, got %q", i, got)
+		}
+	}
+}

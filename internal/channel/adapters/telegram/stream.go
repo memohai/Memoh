@@ -704,7 +704,7 @@ func (s *telegramOutboundStream) deliverLongPlainFallback(ctx context.Context, t
 		hasStreamMessage := s.streamMsgID != 0
 		s.mu.Unlock()
 		if hasStreamMessage {
-			if err := s.editStreamMessageFinal(ctx, chunks[0]); err != nil {
+			if err := s.editStreamMessageFinalWithParseMode(ctx, chunks[0], ""); err != nil {
 				return err
 			}
 			chunks = chunks[1:]
@@ -723,6 +723,20 @@ func (s *telegramOutboundStream) deliverLongPlainFallback(ctx context.Context, t
 		replyTo = 0
 	}
 	return sendTelegramTextChunkListWithActions(bot, s.target, chunks, replyTo, "", actions)
+}
+
+func (s *telegramOutboundStream) editStreamMessageFinalWithParseMode(ctx context.Context, text string, parseMode string) error {
+	s.mu.Lock()
+	previousParseMode := s.parseMode
+	s.parseMode = parseMode
+	s.mu.Unlock()
+	err := s.editStreamMessageFinal(ctx, text)
+	if err != nil {
+		s.mu.Lock()
+		s.parseMode = previousParseMode
+		s.mu.Unlock()
+	}
+	return err
 }
 
 // pushFinalAttachments delivers the attachment tail after a rich-final send.
