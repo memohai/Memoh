@@ -679,6 +679,7 @@
     "infoContextTokensNoWindow": "{used} / --",
     "infoCacheHitRate": "Cache Hit Rate",
     "infoCacheRead": "Cache Read",
+    "infoSubagents": "Subagents",
     "infoSkills": "Skills",
     "infoNoSkills": "No skills used in this session",
     "infoNoData": "No data available",
