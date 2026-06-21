@@ -84,6 +84,7 @@ import (
 	memopenviking "github.com/memohai/memoh/internal/memory/adapters/openviking"
 	"github.com/memohai/memoh/internal/memory/memllm"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
+	"github.com/memohai/memoh/internal/memory/wikistore"
 	"github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/messaging"
@@ -208,6 +209,28 @@ func provideAccountService(log *slog.Logger, accountStore dbstore.AccountStore, 
 	return svc
 }
 
+// provideWikiStore selects the memory wiki store implementation for the
+// configured database driver, mirroring provideAccountStore. Returns a pointer
+// so FX can inject nil-safe into providers that may run without a wiki store.
+func provideWikiStore(cfg config.Config, postgresStore *postgresstore.Store, sqliteStore *sqlitestore.Store) (*wikistore.Store, error) {
+	switch db.DriverFromConfig(cfg) {
+	case db.DriverPostgres:
+		if postgresStore == nil {
+			return nil, errors.New("postgres wiki store not configured")
+		}
+		ws := wikistore.Store(wikistore.NewPostgres(postgresStore.SQLC()))
+		return &ws, nil
+	case db.DriverSQLite:
+		if sqliteStore == nil {
+			return nil, errors.New("sqlite wiki store not configured")
+		}
+		ws := wikistore.Store(wikistore.NewSQLite(sqliteStore.SQLC()))
+		return &ws, nil
+	default:
+		return nil, fmt.Errorf("unsupported database driver %q", db.DriverFromConfig(cfg))
+	}
+}
+
 func provideBridgeProvider(manage *workspace.Manager) bridge.Provider {
 	return manage
 }
@@ -252,11 +275,15 @@ func provideMemoryLLM(modelsService *models.Service, settingsService *settings.S
 	}
 }
 
-func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatService *conversation.Service, accountService *accounts.Service, provider bridge.Provider, queries dbstore.Queries, cfg config.Config) *memprovider.Registry {
+func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatService *conversation.Service, accountService *accounts.Service, provider bridge.Provider, queries dbstore.Queries, cfg config.Config, wikiStore *wikistore.Store) *memprovider.Registry {
 	registry := memprovider.NewRegistry(log)
 	fileStore := storefs.New(log, provider)
 	registry.RegisterFactory(string(memprovider.ProviderBuiltin), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
-		runtime, err := membuiltin.NewBuiltinRuntimeFromConfig(log, providerConfig, fileStore, queries, cfg)
+		var ws wikistore.Store
+		if wikiStore != nil {
+			ws = *wikiStore
+		}
+		runtime, err := membuiltin.NewBuiltinRuntimeFromConfig(log, providerConfig, fileStore, queries, cfg, ws)
 		if err != nil {
 			return nil, err
 		}
