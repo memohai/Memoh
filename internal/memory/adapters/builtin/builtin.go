@@ -141,7 +141,7 @@ func (p *BuiltinProvider) SemanticCompactCapability() adapters.MemoryCompactCapa
 	return adapters.MemoryCompactCapability{
 		Semantic:     true,
 		Archive:      true,
-		RebuildIndex: mode == "dense",
+		RebuildIndex: mode == "graph",
 	}
 }
 

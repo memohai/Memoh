@@ -1045,29 +1045,17 @@
     "modeHint": "Botが長期記憶を保存し、呼び出す方法。",
     "advanced": "詳細",
     "advancedHint": "高度な設定向けのカスタムメモリバックエンド。",
-    "denseSectionTitle": "密な検索",
-    "denseBackend": "Dense バックエンド",
-    "denseBackendValue": "埋め込みAPI+ Qdrant",
-    "denseEmbeddingModel": "Dense 埋め込みモデル",
-    "denseEmbeddingModelDescription": "ローカルの再ランク付け前に使用するサードパーティの埋め込みモデルを選択します。",
-    "denseQdrantHint": "バックエンドランタイムの接続後、Dense メモリは Qdrant をストレージバックエンドとして使用します。",
-    "qdrantCollection": "Qdrant コレクション",
-    "denseQdrantCollectionDescription": "デンス モードは Qdrant コレクションに書き込みます。現在/デフォルトのコレクション: {collection}。",
-    "collectionPoints": "コレクション内のポイント数",
-    "entriesStored": "{count} 件を保存済み",
-    "keywordIndex": "キーワードインデックス",
-    "semanticIndex": "セマンティックインデックス",
-    "collectionExists": "コレクションが存在します",
-    "collectionMissing": "コレクションはまだ作成されていません",
-    "collectionHealthy": "正常",
-    "collectionUnavailable": "利用不可",
+    "graphTitle": "メモリグラフ",
+    "graphDescription": "記憶はデータベース内の関連ノードとして保存されます。共有する人物、トピック、時間を通じて関連する記憶を見つけます。",
+    "graphNodes": "記憶",
+    "graphEdges": "リンク",
+    "graphFiles": "ファイル",
+    "graphDegraded": "補助インデックスが劣化しています。一部のセマンティック検索が利用できない可能性があります。記憶は引き続き保存され、関係性で検索できます。",
     "modeNames": {
-      "off": "オフ",
-      "dense": "セマンティック"
+      "graph": "グラフ"
     },
     "modeDescriptions": {
-      "off": "長期記憶インデックスを作成せず、基本的なファイルメモリのみを保持します。",
-      "dense": "埋め込みモデルを使用して記憶をベクトルに変換し、意味の類似性で検索します。"
+      "graph": "記憶を相互に関連するノード（人物、トピック、イベント）として保存し、キーワードだけでなく関係性を通じて想起します。"
     },
     "providerNames": {
       "builtin": "内蔵",
@@ -1399,6 +1387,10 @@
       },
       "restoreSecurity": "ツール承認を有効にする",
       "examples": "例",
+      "status": {
+        "on": "承認が有効です",
+        "off": "承認が無効です"
+      },
       "dangerZone": "危険な操作",
       "dangerZoneDesc": "主要なセキュリティポリシーを管理します。",
       "resetDefaults": "デフォルトにリセット",
@@ -1406,10 +1398,6 @@
       "resetWarningExtra": "カスタムのバイパスルールとレビュー必須ルールは失われます。",
       "title": "ツール呼び出しの承認",
       "intro": "Bot がファイルを読み取る、ファイルを変更する、またはコマンドを実行する前に承認を要求します。操作ごとにルールを設定できます。バイパスパターンは自動承認され、レビュー必須パターンは承認を強制します。",
-      "status": {
-        "on": "承認が有効です",
-        "off": "承認が無効です"
-      },
       "rules": {
         "title": "ツールルール",
         "reset": "推奨設定にリセット"
@@ -2113,8 +2101,7 @@
       "memoryProvider": "MemoryProvider",
       "memoryProviderPlaceholder": "MemoryProviderの選択 (空の場合は無効)",
       "memoryModePreview": "選択された組み込みモード: {mode}",
-      "denseStatusTitle": "密集検索ステータス",
-      "denseStatusHint": "Markdown ファイルは信頼できる情報源です。同期すると、/data/memory から高密度 Qdrant インデックスが再構築されます。",
+      "graphStatusTitle": "メモリグラフステータス",
       "mem0StatusTitle": "Mem0 同期ステータス",
       "mem0StatusHint": "Markdown ファイルは信頼できる情報源です。同期すると、Mem0 Memoryが /data/memory から再構築されます。",
       "indexedMemoryStatusPendingSave": "インデックス付きMemoryのステータスを表示したり、同期を実行したりする前に、選択したMemory Providerを保存してください。",
@@ -2126,10 +2113,6 @@
       "memoryMarkdownFiles": "マークダウンファイル",
       "memorySourceEntries": "ソースエントリ",
       "memoryIndexedEntries": "インデックス付きエントリ",
-      "memoryQdrantCollection": "Qdrant コレクション",
-      "memoryEncoderHealth": "スパースエンコーダ",
-      "memoryDenseEmbeddingHealth": "バックエンドの埋め込み",
-      "memoryQdrantHealth": "クドラント",
       "memoryHealthOk": "健康",
       "memoryHealthUnavailable": "利用不可",
       "ttsModel": "TTSModel",

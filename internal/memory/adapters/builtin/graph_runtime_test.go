@@ -108,7 +108,7 @@ func (s *fakeWikiStore) RebuildImplicitEdges(_ context.Context, _ string) (int, 
 func TestGraphRuntimeAddSearchDelete(t *testing.T) {
 	t.Parallel()
 	store := newFakeWikiStore()
-	rt := newGraphRuntime(nil, store, newFakeStore())
+	rt := NewGraphRuntime(nil, store, newFakeStore())
 
 	botID := "graph-bot-1"
 	ctx := context.Background()
@@ -198,7 +198,7 @@ func TestGraphRuntimeFileFallback(t *testing.T) {
 	fs := newFakeStore(
 		storefs.MemoryItem{ID: "bot-x:m1", Memory: "fallback oolong memory", CreatedAt: time.Now().Format(time.RFC3339)},
 	)
-	rt := newGraphRuntime(nil, store, fs)
+	rt := NewGraphRuntime(nil, store, fs)
 
 	resp, err := rt.Search(context.Background(), adapters.SearchRequest{
 		BotID: "bot-x", Query: "oolong", Limit: 5,

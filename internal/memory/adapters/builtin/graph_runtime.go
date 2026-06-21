@@ -19,28 +19,27 @@ import (
 )
 
 // ModeGraph is the graph-first memory mode: PG memory_nodes/memory_edges are
-// the source of truth, Markdown files are a derived view, and Qdrant (when an
-// embedding model is configured) is an optional auxiliary seed index.
-const ModeGraph BuiltinMemoryMode = "graph"
+// ModeGraph is the memory mode identifier for the graph runtime. It is the
+// only supported mode: PG memory nodes/edges are the source of truth, with
+// Markdown as a derived agent-facing view.
+const ModeGraph = "graph"
 
 // graphRuntime implements Runtime over the PG/SQLite wiki graph. The wiki
 // store (wikistore.Store) is authoritative; the filesystem store (memoryStore)
-// holds the derived Markdown view the agent reads. Qdrant dense-aux and its
-// retry queue are optional (wired by the factory only when embedding_model_id
-// is set) and never fail a write.
+// graphRuntime implements Runtime over the PG/SQLite wiki graph. The wiki
+// store (wikistore.Store) is authoritative; the filesystem store (memoryStore)
+// holds the derived Markdown view the agent reads.
 type graphRuntime struct {
-	store    wikistore.Store
-	fs       memoryStore
-	cache    *graphCache
-	syncer   *graphSync
-	retry    *auxIndexRetry
-	auxDense auxUpserter // nil when no dense auxiliary configured
-	logger   *slog.Logger
+	store  wikistore.Store
+	fs     memoryStore
+	cache  *graphCache
+	syncer *graphSync
+	logger *slog.Logger
 }
 
-// newGraphRuntime constructs a graphRuntime. wikiStore is required; fs is the
+// NewGraphRuntime constructs a graphRuntime. wikiStore is required; fs is the
 // derived-view filesystem store (may be nil in tests, which disables sync).
-func newGraphRuntime(logger *slog.Logger, wikiStore wikistore.Store, fs memoryStore) *graphRuntime {
+func NewGraphRuntime(logger *slog.Logger, wikiStore wikistore.Store, fs memoryStore) *graphRuntime {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -51,16 +50,6 @@ func newGraphRuntime(logger *slog.Logger, wikiStore wikistore.Store, fs memorySt
 		syncer: newGraphSync(fs, logger),
 		logger: logger.With("runtime", "graph"),
 	}
-}
-
-// SetAuxDense wires an optional dense auxiliary index + its retry queue. When
-// set, Add/Update/Rebuild fan out dense upserts best-effort.
-func (r *graphRuntime) SetAuxDense(upserter auxUpserter) {
-	if upserter == nil {
-		return
-	}
-	r.auxDense = upserter
-	r.retry = newAuxIndexRetry(r.logger, upserter)
 }
 
 func (*graphRuntime) Mode() string { return string(ModeGraph) }
@@ -85,26 +74,6 @@ func (r *graphRuntime) syncAndInvalidate(ctx context.Context, botID string) {
 		r.logger.Debug("graph: rebuild implicit edges failed", "bot_id", botID, "err", err)
 	}
 	r.cache.invalidate(botID)
-}
-
-// auxUpsertBestEffort fans a node out to the dense auxiliary index, enqueuing a
-// retry on failure so the write never fails.
-func (r *graphRuntime) auxUpsertBestEffort(botID string, n migrate.NodeSpec) {
-	if r.auxDense == nil || r.retry == nil {
-		return
-	}
-	payload := map[string]string{
-		"bot_id":      botID,
-		"source_node": n.ID,
-		"layer":       string(n.Layer),
-		"hash":        n.Hash,
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), denseEmbedTimeout)
-	defer cancel()
-	if err := r.auxDense.UpsertDense(ctx, botID, n.ID, n.Body, payload); err != nil {
-		r.logger.Debug("graph: aux dense upsert failed, enqueuing retry", "bot_id", botID, "node_id", n.ID, "err", err)
-		r.retry.Enqueue(botID, n.ID, n.Body, n.Hash, payload)
-	}
 }
 
 // ---- Runtime: CRUD ----
@@ -135,7 +104,6 @@ func (r *graphRuntime) Add(ctx context.Context, req adapters.AddRequest) (adapte
 	if err != nil {
 		return adapters.SearchResponse{}, fmt.Errorf("graph runtime: upsert node: %w", err)
 	}
-	r.auxUpsertBestEffort(botID, saved) //nolint:contextcheck // async aux upsert uses its own bounded context
 	r.syncAndInvalidate(ctx, botID)
 	return adapters.SearchResponse{Results: []adapters.MemoryItem{nodeSpecToMemoryItem(saved)}}, nil
 }
@@ -346,7 +314,6 @@ func (r *graphRuntime) Update(ctx context.Context, req adapters.UpdateRequest) (
 	if err != nil {
 		return adapters.MemoryItem{}, fmt.Errorf("graph runtime: update node: %w", err)
 	}
-	r.auxUpsertBestEffort(botID, saved) //nolint:contextcheck // async aux upsert uses its own bounded context
 	r.syncAndInvalidate(ctx, botID)
 	return nodeSpecToMemoryItem(saved), nil
 }
@@ -554,11 +521,6 @@ func (r *graphRuntime) Status(ctx context.Context, botID string) (adapters.Memor
 	if r.fs != nil {
 		if fc, err := r.fs.CountMemoryFiles(ctx, botID); err == nil {
 			resp.MarkdownFileCount = fc
-		}
-	}
-	if r.retry != nil {
-		if _, degraded := r.retry.Status(botID); degraded {
-			resp.Qdrant = adapters.HealthStatus{OK: false, Error: "auxiliary dense index degraded; retries pending"}
 		}
 	}
 	return resp, nil

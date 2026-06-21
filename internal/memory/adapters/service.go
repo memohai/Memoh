@@ -11,7 +11,6 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
-	qdrantclient "github.com/memohai/memoh/internal/memory/qdrant"
 )
 
 type Service struct {
@@ -45,13 +44,7 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 					"memory_mode": {
 						Type:        "select",
 						Title:       "Memory Mode",
-						Description: "off = file-based, dense = embedding API + Qdrant dense vectors",
-						Required:    false,
-					},
-					"embedding_model_id": {
-						Type:        "model_select",
-						Title:       "Embedding Model",
-						Description: "Embedding model for dense vector search (dense mode only)",
+						Description: "graph = relationship-based recall over connected memory nodes",
 						Required:    false,
 					},
 					"context_target_items": {
@@ -173,37 +166,6 @@ func (s *Service) Status(ctx context.Context, id string) (ProviderStatusResponse
 		return status, nil
 	}
 	status.MemoryMode = StringFromConfig(resp.Config, "memory_mode")
-	status.EmbeddingModelID = StringFromConfig(resp.Config, "embedding_model_id")
-	collections := []string{"memory_dense"}
-	status.Collections = make([]ProviderCollectionStatus, 0, len(collections))
-	for _, collection := range collections {
-		collStatus := ProviderCollectionStatus{Name: collection}
-		host, port := qdrantclient.ParseHostPort(s.cfg.Qdrant.BaseURL)
-		client, err := qdrantclient.NewClient(host, port, s.cfg.Qdrant.APIKey, collection)
-		if err != nil {
-			collStatus.Qdrant.Error = err.Error()
-			status.Collections = append(status.Collections, collStatus)
-			continue
-		}
-		exists, err := client.CollectionExists(ctx)
-		if err != nil {
-			collStatus.Qdrant.Error = err.Error()
-			status.Collections = append(status.Collections, collStatus)
-			continue
-		}
-		collStatus.Qdrant.OK = true
-		collStatus.Exists = exists
-		if exists {
-			points, err := client.CountAll(ctx)
-			if err != nil {
-				collStatus.Qdrant.OK = false
-				collStatus.Qdrant.Error = err.Error()
-			} else {
-				collStatus.Points = points
-			}
-		}
-		status.Collections = append(status.Collections, collStatus)
-	}
 	return status, nil
 }
 
