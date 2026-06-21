@@ -52,6 +52,7 @@ func (h *SessionHandler) Register(e *echo.Echo) {
 	g.GET("/:session_id", h.GetSession)
 	g.PATCH("/:session_id", h.UpdateSession)
 	g.DELETE("/:session_id", h.DeleteSession)
+	g.GET("/:session_id/subagents", h.ListSubagents)
 }
 
 type createSessionRequest struct {
@@ -644,4 +645,45 @@ func sessionMetadataString(metadata map[string]any, key string) string {
 	}
 	value, _ := metadata[key].(string)
 	return strings.TrimSpace(value)
+}
+
+type listSubagentsResponse struct {
+	Items []session.Session `json:"items"`
+}
+
+// ListSubagents godoc
+// @Summary List subagent sessions for a parent session
+// @Tags sessions
+// @Param bot_id path string true "Bot ID"
+// @Param session_id path string true "Parent session ID"
+// @Success 200 {object} listSubagentsResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /bots/{bot_id}/sessions/{session_id}/subagents [get].
+func (h *SessionHandler) ListSubagents(c echo.Context) error {
+	channelIdentityID, err := RequireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	sessionID := strings.TrimSpace(c.Param("session_id"))
+	if sessionID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
+	}
+	_, _, _, err = h.authorizeSession(c, channelIdentityID, botID, sessionID)
+	if err != nil {
+		return err
+	}
+	subagents, err := h.sessionService.ListSubagentsByParent(c.Request().Context(), sessionID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if subagents == nil {
+		subagents = []session.Session{}
+	}
+	return c.JSON(http.StatusOK, listSubagentsResponse{Items: subagents})
 }

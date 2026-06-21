@@ -188,6 +188,9 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 	}
 	sess := toSession(row)
 	s.publishSessionCreated(sess)
+	if sess.Type == TypeSubagent && sess.ParentSessionID != "" {
+		s.publishSubagentActivity(sess)
+	}
 	s.runSessionStartHook(context.WithoutCancel(ctx), sess)
 	return sess, nil
 }
@@ -211,6 +214,29 @@ func (s *Service) publishSessionCreated(sess Session) {
 	}
 	s.publisher.Publish(event.Event{
 		Type:  event.EventTypeSessionCreated,
+		BotID: strings.TrimSpace(sess.BotID),
+		Data:  payload,
+	})
+}
+
+func (s *Service) publishSubagentActivity(sess Session) {
+	if s.publisher == nil {
+		return
+	}
+	payload, err := json.Marshal(map[string]any{
+		"session_id":        sess.ID,
+		"parent_session_id": sess.ParentSessionID,
+		"bot_id":            sess.BotID,
+		"title":             sess.Title,
+		"metadata":          sess.Metadata,
+		"created_at":        sess.CreatedAt,
+	})
+	if err != nil {
+		s.logger.Warn("marshal subagent_activity event failed", slog.Any("error", err))
+		return
+	}
+	s.publisher.Publish(event.Event{
+		Type:  event.EventTypeSubagentActivity,
 		BotID: strings.TrimSpace(sess.BotID),
 		Data:  payload,
 	})

@@ -28,8 +28,14 @@ const (
 	EventTypeSessionCreated EventType = "session_created"
 	// EventTypeSessionTitleUpdated is emitted after a session title is auto-generated.
 	EventTypeSessionTitleUpdated EventType = "session_title_updated"
-	// EventTypeBackgroundTask is emitted for live background task updates.
+	// EventTypeBackgroundTask is emitted for live background exec task updates.
 	EventTypeBackgroundTask EventType = "background_task"
+	// EventTypeAgentStream is emitted for server-initiated agent stream updates.
+	EventTypeAgentStream EventType = "agent_stream"
+	// EventTypeSubagentActivity is emitted when a subagent session is created
+	// or updated under a parent session. The per-session message stream
+	// forwards this to the parent so the chat UI can show a live subagent list.
+	EventTypeSubagentActivity EventType = "subagent_activity"
 )
 
 // Event is the normalized payload emitted by the in-process message event hub.
