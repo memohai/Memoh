@@ -26,8 +26,13 @@
                  a floating card, which anchors the header and keeps back from
                  reading as a stray nav row — no hairline needed. -->
             <div
+              v-if="macTrafficReserve"
+              class="h-12 shrink-0 [-webkit-app-region:drag]"
+              aria-hidden="true"
+            />
+            <div
               class="px-4 pb-3 flex flex-col"
-              :class="macTrafficReserve ? 'pt-[48px] [-webkit-app-region:drag]' : 'pt-[18px]'"
+              :class="macTrafficReserve ? undefined : 'pt-[18px]'"
             >
               <NavItem
                 class="[-webkit-app-region:no-drag]"

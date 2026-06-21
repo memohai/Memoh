@@ -20,7 +20,7 @@
       class="flex h-11 shrink-0 items-center bg-sidebar pr-2 py-1.5 [-webkit-app-region:drag]"
       :class="macTrafficReserve ? 'pl-[76px]' : 'pl-3'"
     >
-      <div class="min-w-0 flex-1 [-webkit-app-region:no-drag]">
+      <div class="min-w-0 flex-1">
         <BotSwitcher :full-width="!macTrafficReserve" />
       </div>
     </header>

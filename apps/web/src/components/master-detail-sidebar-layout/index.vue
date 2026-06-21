@@ -76,9 +76,12 @@
             <SheetDescription>Sidebar navigation</SheetDescription>
           </SheetHeader>
           <div class="flex h-full w-full flex-col">
-            <SidebarHeader>
+            <component
+              :is="flush ? 'div' : SidebarHeader"
+              class="shrink-0"
+            >
               <slot name="sidebar-header" />
-            </SidebarHeader>
+            </component>
             <SidebarContent class="px-2 scrollbar-none">
               <slot name="sidebar-content" />
             </SidebarContent>
