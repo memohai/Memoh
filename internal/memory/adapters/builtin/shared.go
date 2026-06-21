@@ -11,10 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
-
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
-	qdrantclient "github.com/memohai/memoh/internal/memory/qdrant"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 )
 
@@ -44,39 +41,6 @@ func canonicalStoreItem(item storefs.MemoryItem) storefs.MemoryItem {
 		item.Hash = runtimeHash(item.Memory)
 	}
 	return item
-}
-
-func runtimePayload(botID string, item storefs.MemoryItem) map[string]string {
-	item = canonicalStoreItem(item)
-	payload := map[string]string{
-		"memory":          item.Memory,
-		"bot_id":          strings.TrimSpace(botID),
-		"source_entry_id": item.ID,
-		"hash":            item.Hash,
-	}
-	if item.CreatedAt != "" {
-		payload["created_at"] = item.CreatedAt
-	}
-	if item.UpdatedAt != "" {
-		payload["updated_at"] = item.UpdatedAt
-	}
-	for _, key := range []string{"profile_user_id", "profile_channel_identity_id", "profile_display_name", "profile_ref"} {
-		if v, ok := item.Metadata[key]; ok {
-			if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
-				payload[key] = strings.TrimSpace(s)
-			}
-		}
-	}
-	return payload
-}
-
-func payloadMatches(existing, expected map[string]string) bool {
-	for key, value := range expected {
-		if strings.TrimSpace(existing[key]) != strings.TrimSpace(value) {
-			return false
-		}
-	}
-	return true
 }
 
 func storeItemFromMemoryItem(item adapters.MemoryItem) storefs.MemoryItem {
@@ -119,33 +83,6 @@ func memoryItemsFromStore(items []storefs.MemoryItem) []adapters.MemoryItem {
 		out = append(out, memoryItemFromStore(item))
 	}
 	return out
-}
-
-func resultToItem(r qdrantclient.SearchResult) adapters.MemoryItem {
-	item := adapters.MemoryItem{
-		ID:    r.ID,
-		Score: r.Score,
-	}
-	if r.Payload != nil {
-		if sourceID := strings.TrimSpace(r.Payload["source_entry_id"]); sourceID != "" {
-			item.ID = sourceID
-		}
-		item.Memory = r.Payload["memory"]
-		item.Hash = r.Payload["hash"]
-		item.BotID = r.Payload["bot_id"]
-		item.CreatedAt = r.Payload["created_at"]
-		item.UpdatedAt = r.Payload["updated_at"]
-		meta := map[string]any{}
-		for _, key := range []string{"profile_user_id", "profile_channel_identity_id", "profile_display_name", "profile_ref"} {
-			if v := strings.TrimSpace(r.Payload[key]); v != "" {
-				meta[key] = v
-			}
-		}
-		if len(meta) > 0 {
-			item.Metadata = meta
-		}
-	}
-	return item
 }
 
 func runtimeBotID(botID string, filters map[string]any) (string, error) {
@@ -201,10 +138,6 @@ func runtimeMemoryID(botID string, now time.Time) string {
 func runtimeHash(text string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(text)))
 	return hex.EncodeToString(sum[:])
-}
-
-func runtimePointID(botID, sourceID string) string {
-	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.TrimSpace(botID)+"\n"+strings.TrimSpace(sourceID))).String()
 }
 
 func runtimeFilterString(m map[string]any, key string) string {

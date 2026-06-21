@@ -343,7 +343,17 @@ func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatSe
 	registry.RegisterFactory(string(memprovider.ProviderOpenViking), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
 		return memopenviking.NewOpenVikingProvider(log, providerConfig)
 	})
-	defaultProvider := membuiltin.NewBuiltinProvider(log, membuiltin.NewFileRuntime(fileStore), chatService, accountService)
+	// Default provider for bots without an explicit memory_provider_id. Uses the
+	// graph runtime (PG nodes/edges as source of truth) when a wiki store is
+	// wired; falls back to the file runtime otherwise (e.g. bootstrap before the
+	// DB is ready).
+	var defaultRuntime membuiltin.Runtime
+	if wikiStore != nil {
+		defaultRuntime = membuiltin.NewGraphRuntime(log, *wikiStore, fileStore)
+	} else {
+		defaultRuntime = membuiltin.NewFileRuntime(fileStore)
+	}
+	defaultProvider := membuiltin.NewBuiltinProvider(log, defaultRuntime, chatService, accountService)
 	defaultProvider.SetLLM(llm)
 	registry.Register("__builtin_default__", defaultProvider)
 	return registry

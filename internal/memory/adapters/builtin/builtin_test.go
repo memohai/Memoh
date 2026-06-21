@@ -359,14 +359,11 @@ func TestBuiltinProviderCRUDErrorsWithNilService(t *testing.T) {
 	}
 }
 
-func TestNewBuiltinRuntimeFromConfig_DefaultReturnsFileRuntime(t *testing.T) {
+func TestNewBuiltinRuntimeFromConfig_DefaultIsGraphRequiringWikiStore(t *testing.T) {
 	t.Parallel()
-	rt, err := NewBuiltinRuntimeFromConfig(nil, nil, nil, nil, defaultTestConfig(), nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rt.Mode() != string(ModeOff) {
-		t.Fatalf("expected file runtime in mode off, got %q", rt.Mode())
+	// Default mode is now graph, so without a wiki store it must error.
+	if _, err := NewBuiltinRuntimeFromConfig(nil, nil, nil, nil, defaultTestConfig(), nil); err == nil {
+		t.Fatal("expected error for default (graph) mode without wiki store")
 	}
 }
 
