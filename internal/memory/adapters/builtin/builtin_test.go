@@ -361,7 +361,7 @@ func TestBuiltinProviderCRUDErrorsWithNilService(t *testing.T) {
 
 func TestNewBuiltinRuntimeFromConfig_DefaultReturnsFileRuntime(t *testing.T) {
 	t.Parallel()
-	rt, err := NewBuiltinRuntimeFromConfig(nil, nil, nil, nil, defaultTestConfig())
+	rt, err := NewBuiltinRuntimeFromConfig(nil, nil, nil, nil, defaultTestConfig(), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -373,9 +373,18 @@ func TestNewBuiltinRuntimeFromConfig_DefaultReturnsFileRuntime(t *testing.T) {
 func TestNewBuiltinRuntimeFromConfig_DenseErrorPropagates(t *testing.T) {
 	t.Parallel()
 	cfg := map[string]any{"memory_mode": "dense"}
-	_, err := NewBuiltinRuntimeFromConfig(nil, cfg, nil, nil, defaultTestConfig())
+	_, err := NewBuiltinRuntimeFromConfig(nil, cfg, nil, nil, defaultTestConfig(), nil)
 	if err == nil {
 		t.Fatal("expected error for dense mode without embedding_model_id")
+	}
+}
+
+func TestNewBuiltinRuntimeFromConfig_GraphRequiresWikiStore(t *testing.T) {
+	t.Parallel()
+	cfg := map[string]any{"memory_mode": "graph"}
+	// No wiki store -> error.
+	if _, err := NewBuiltinRuntimeFromConfig(nil, cfg, nil, nil, defaultTestConfig(), nil); err == nil {
+		t.Fatal("expected error for graph mode without wiki store")
 	}
 }
 
