@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	"github.com/memohai/memoh/internal/agent/background"
 )
 
@@ -30,7 +32,7 @@ func TestBackgroundProviderWaitAndInspectAgentResult(t *testing.T) {
 		})
 	}()
 
-	waitRes, err := p.execWaitUntil(context.Background(), session, map[string]any{"task_id": taskID})
+	waitRes, err := p.execWaitUntil(context.Background(), session, map[string]any{"task_id": taskID}, nil)
 	if err != nil {
 		t.Fatalf("wait_until failed: %v", err)
 	}
@@ -114,14 +116,94 @@ func TestBackgroundProviderListKillAndWait(t *testing.T) {
 	if _, err := p.execKillBackground(context.Background(), session, map[string]any{"task_id": taskID}); err != nil {
 		t.Fatalf("kill_background failed: %v", err)
 	}
-	waitRes, err := p.execWaitUntil(context.Background(), session, map[string]any{"task_id": taskID})
+	waitRes, err := p.execWaitUntil(context.Background(), session, map[string]any{"task_id": taskID}, nil)
 	if err != nil {
 		t.Fatalf("wait_until failed: %v", err)
 	}
 	if waitRes.(map[string]any)["status"] != "killed" {
 		t.Fatalf("wait_until payload = %v, want killed", waitRes)
 	}
-	if _, err := p.execWait(context.Background(), session, map[string]any{"duration": 0.001}); err != nil {
+	progressCount := 0
+	if _, err := p.execWait(context.Background(), session, map[string]any{"duration": 0.001}, func(any) {
+		progressCount++
+	}); err != nil {
 		t.Fatalf("wait failed: %v", err)
 	}
+	if progressCount == 0 {
+		t.Fatal("wait did not emit progress")
+	}
+}
+
+func TestBackgroundProviderWaitUntilEmitsProgressWhileWaiting(t *testing.T) {
+	mgr := background.New(nil)
+	p := NewBackgroundProvider(nil, mgr)
+	session := SessionContext{BotID: "bot1", SessionID: "sess1"}
+
+	taskID, _, err := mgr.StartSpawnTask(context.Background(), "bot1", "sess1", "long spawn")
+	if err != nil {
+		t.Fatalf("StartSpawnTask failed: %v", err)
+	}
+
+	var waitUntil sdk.Tool
+	for _, tool := range mustTools(t, p, session) {
+		if tool.Name == ToolWaitUntil().String() {
+			waitUntil = tool
+			break
+		}
+	}
+	if waitUntil.Name == "" {
+		t.Fatal("wait_until tool not registered")
+	}
+
+	progressCh := make(chan any, 1)
+	done := make(chan struct{})
+	var waitRes any
+	var waitErr error
+	go func() {
+		defer close(done)
+		waitRes, waitErr = waitUntil.Execute(&sdk.ToolExecContext{
+			Context: context.Background(),
+			SendProgress: func(content any) {
+				select {
+				case progressCh <- content:
+				default:
+				}
+			},
+		}, map[string]any{"task_id": taskID})
+	}()
+
+	select {
+	case progress := <-progressCh:
+		payload, ok := progress.(map[string]any)
+		if !ok {
+			t.Fatalf("progress payload = %T, want map", progress)
+		}
+		if payload["status"] != "waiting" || payload["task_id"] != taskID {
+			t.Fatalf("progress payload = %v, want waiting task", payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("wait_until did not emit progress while waiting")
+	}
+
+	mgr.CompleteSpawnTask(taskID, []background.SpawnBranch{{Task: "alpha", Status: background.TaskCompleted, Report: "done"}})
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("wait_until did not return after task completed")
+	}
+	if waitErr != nil {
+		t.Fatalf("wait_until failed: %v", waitErr)
+	}
+	if waitRes.(map[string]any)["status"] != "completed" {
+		t.Fatalf("wait_until payload = %v, want completed", waitRes)
+	}
+}
+
+func mustTools(t *testing.T, p *BackgroundProvider, session SessionContext) []sdk.Tool {
+	t.Helper()
+	tools, err := p.Tools(context.Background(), session)
+	if err != nil {
+		t.Fatalf("Tools failed: %v", err)
+	}
+	return tools
 }

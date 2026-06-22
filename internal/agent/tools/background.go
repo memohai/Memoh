@@ -14,7 +14,10 @@ import (
 	"github.com/memohai/memoh/internal/agent/background"
 )
 
-const maxWaitDuration = 300 * time.Second
+const (
+	maxWaitDuration                = 300 * time.Second
+	backgroundWaitProgressInterval = 30 * time.Second
+)
 
 // BackgroundProvider exposes background task observation and control tools.
 type BackgroundProvider struct {
@@ -79,7 +82,7 @@ func (p *BackgroundProvider) Tools(_ context.Context, session SessionContext) ([
 				"required": []string{"duration"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execWait(ctx.Context, sess, inputAsMap(input))
+				return p.execWait(ctx.Context, sess, inputAsMap(input), ctx.SendProgress)
 			},
 		},
 		{
@@ -93,7 +96,7 @@ func (p *BackgroundProvider) Tools(_ context.Context, session SessionContext) ([
 				"required": []string{"task_id"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execWaitUntil(ctx.Context, sess, inputAsMap(input))
+				return p.execWaitUntil(ctx.Context, sess, inputAsMap(input), ctx.SendProgress)
 			},
 		},
 		{
@@ -151,29 +154,42 @@ func (p *BackgroundProvider) execListBackground(_ context.Context, session Sessi
 	return map[string]any{"tasks": entries, "count": len(entries)}, nil
 }
 
-func (*BackgroundProvider) execWait(ctx context.Context, _ SessionContext, args map[string]any) (any, error) {
+func (*BackgroundProvider) execWait(ctx context.Context, _ SessionContext, args map[string]any, sendProgress func(any)) (any, error) {
 	duration, err := durationArg(args, "duration")
 	if err != nil {
 		return nil, err
 	}
+	progress := func() {
+		emitWaitProgress(sendProgress, map[string]any{
+			"status":   "waiting",
+			"duration": duration.Seconds(),
+		})
+	}
+	progress()
 	timer := time.NewTimer(duration)
 	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return map[string]any{"ok": false, "duration": duration.Seconds(), "error": ctx.Err().Error()}, ctx.Err()
-	case <-timer.C:
-		return map[string]any{"ok": true, "duration": duration.Seconds()}, nil
+	ticker := time.NewTicker(backgroundWaitProgressInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return map[string]any{"ok": false, "duration": duration.Seconds(), "error": ctx.Err().Error()}, ctx.Err()
+		case <-timer.C:
+			return map[string]any{"ok": true, "duration": duration.Seconds()}, nil
+		case <-ticker.C:
+			progress()
+		}
 	}
 }
 
-func (p *BackgroundProvider) execWaitUntil(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+func (p *BackgroundProvider) execWaitUntil(ctx context.Context, session SessionContext, args map[string]any, sendProgress func(any)) (any, error) {
 	taskID := strings.TrimSpace(StringArg(args, "task_id"))
 	if taskID == "" {
 		return nil, errors.New("task_id is required")
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, time.Duration(background.BackgroundExecTimeout)*time.Second)
 	defer cancel()
-	s, err := p.bgManager.WaitForSessionTask(waitCtx, session.BotID, session.SessionID, taskID)
+	s, err := p.waitForSessionTaskWithProgress(waitCtx, session.BotID, session.SessionID, taskID, sendProgress)
 	if err != nil {
 		return nil, err
 	}
@@ -190,6 +206,48 @@ func (p *BackgroundProvider) execWaitUntil(ctx context.Context, session SessionC
 	result["completed_at"] = session.FormatTime(s.CompletedAt)
 	result["duration"] = s.Duration.Round(time.Millisecond).String()
 	return result, nil
+}
+
+func (p *BackgroundProvider) waitForSessionTaskWithProgress(ctx context.Context, botID, sessionID, taskID string, sendProgress func(any)) (background.TaskSnapshot, error) {
+	if sendProgress == nil {
+		return p.bgManager.WaitForSessionTask(ctx, botID, sessionID, taskID)
+	}
+
+	type waitResult struct {
+		snapshot background.TaskSnapshot
+		err      error
+	}
+	resultCh := make(chan waitResult, 1)
+	go func() {
+		s, err := p.bgManager.WaitForSessionTask(ctx, botID, sessionID, taskID)
+		resultCh <- waitResult{snapshot: s, err: err}
+	}()
+
+	progress := func() {
+		emitWaitProgress(sendProgress, map[string]any{
+			"status":  "waiting",
+			"task_id": taskID,
+		})
+	}
+	progress()
+	ticker := time.NewTicker(backgroundWaitProgressInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case result := <-resultCh:
+			return result.snapshot, result.err
+		case <-ctx.Done():
+			return background.TaskSnapshot{}, ctx.Err()
+		case <-ticker.C:
+			progress()
+		}
+	}
+}
+
+func emitWaitProgress(sendProgress func(any), payload map[string]any) {
+	if sendProgress != nil {
+		sendProgress(payload)
+	}
 }
 
 func (p *BackgroundProvider) execGetBackgroundStatus(_ context.Context, session SessionContext, args map[string]any) (any, error) {
