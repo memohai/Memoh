@@ -123,9 +123,8 @@ type RunConfig struct {
 	InjectedRecorder func(headerifiedText string, insertAfter int)
 
 	// BackgroundManager provides access to the background task system.
-	// When non-nil, the agent loop drains pending notifications at step
-	// boundaries and injects them as user messages so the model learns
-	// about completed background work.
+	// When non-nil, the agent loop refreshes running task summaries at step
+	// boundaries while tools handle waiting and result inspection.
 	BackgroundManager *background.Manager
 
 	ToolApprovalHandler func(ctx context.Context, call sdk.ToolCall) (sdk.ToolApprovalResult, error)

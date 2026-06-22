@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 )
 
@@ -28,7 +27,7 @@ const SpawnTaskTimeout = 30 * time.Minute
 // bot+session to prevent subagent storms across agent runs.
 const MaxRunningSpawnTasks = 3
 
-// spawnReportMaxBytes caps each branch report carried in join notifications,
+// spawnReportMaxBytes caps each branch report carried in task snapshots,
 // mirroring maxTailBytes for exec output tails. Full transcripts stay in the
 // child session.
 const spawnReportMaxBytes = 2048
@@ -43,7 +42,7 @@ const spawnBranchErrorMaxBytes = 512
 
 // SpawnBranch is the join-record entry for one subagent in a spawn batch.
 // ChildSessionID points at the persisted subagent session so the parent
-// agent can read the full transcript via history tools.
+// agent can read the full transcript via history tools when needed.
 type SpawnBranch struct {
 	Task           string
 	ChildSessionID string
@@ -91,6 +90,7 @@ func (m *Manager) StartAgentTask(parentCtx context.Context, botID, sessionID, ag
 		Status:         status,
 		StartedAt:      time.Now(),
 		cancel:         cancel,
+		changed:        make(chan struct{}),
 	}
 	m.tasks[taskID] = task
 	m.mu.Unlock()
@@ -134,14 +134,15 @@ func (m *Manager) MarkAgentTaskRunning(parentCtx context.Context, taskID string)
 	}
 	task.Status = TaskRunning
 	task.cancel = cancel
+	task.signalChangedLocked()
 	task.mu.Unlock()
 
 	m.emitTaskEvent(task, TaskEventStarted, "", "")
 	return ctx, true, nil
 }
 
-// CompleteAgentTask finalises a managed agent task and enqueues a completion
-// notification unless it was killed before completion.
+// CompleteAgentTask finalises a managed agent task unless it was killed before
+// completion.
 func (m *Manager) CompleteAgentTask(taskID string, result AgentTaskResult) {
 	m.mu.Lock()
 	task := m.tasks[taskID]
@@ -172,7 +173,7 @@ func (m *Manager) CompleteAgentTask(taskID string, result AgentTaskResult) {
 	if result.Message != "" {
 		task.AgentMessage = result.Message
 	}
-	duration := task.CompletedAt.Sub(task.StartedAt)
+	task.signalChangedLocked()
 	task.mu.Unlock()
 
 	eventType := TaskEventCompleted
@@ -180,30 +181,12 @@ func (m *Manager) CompleteAgentTask(taskID string, result AgentTaskResult) {
 		eventType = TaskEventFailed
 	}
 	m.emitTaskEvent(task, eventType, "", "")
-
-	if !task.MarkNotified() {
-		return
-	}
-	m.enqueueNotification(Notification{
-		TaskID:         task.ID,
-		Kind:           KindAgent,
-		BotID:          task.BotID,
-		SessionID:      task.SessionID,
-		Status:         status,
-		Description:    task.Description,
-		AgentID:        task.AgentID,
-		AgentSessionID: task.AgentSessionID,
-		AgentMessage:   task.AgentMessage,
-		AgentReport:    task.AgentReport,
-		AgentError:     task.AgentError,
-		Duration:       duration,
-	})
 }
 
 // CompleteSpawnTask finalises a spawn task with its branch outcomes and
-// enqueues the join notification. The task is completed when every branch
-// completed and failed when any branch failed. Branch outcomes are recorded
-// even for killed tasks, but killed tasks never notify.
+// records the join result. The task is completed when every branch completed
+// and failed when any branch failed. Branch outcomes are recorded even for
+// killed tasks.
 func (m *Manager) CompleteSpawnTask(taskID string, branches []SpawnBranch) {
 	m.mu.Lock()
 	task := m.tasks[taskID]
@@ -232,6 +215,7 @@ func (m *Manager) CompleteSpawnTask(taskID string, branches []SpawnBranch) {
 	task.CompletedAt = time.Now()
 	task.Status = status
 	duration := task.CompletedAt.Sub(task.StartedAt)
+	task.signalChangedLocked()
 	task.mu.Unlock()
 
 	m.logger.Info("background spawn task finished",
@@ -246,20 +230,6 @@ func (m *Manager) CompleteSpawnTask(taskID string, branches []SpawnBranch) {
 		eventType = TaskEventFailed
 	}
 	m.emitTaskEvent(task, eventType, "", "")
-
-	if !task.MarkNotified() {
-		return
-	}
-	m.enqueueNotification(Notification{
-		TaskID:      task.ID,
-		Kind:        KindSpawn,
-		BotID:       task.BotID,
-		SessionID:   task.SessionID,
-		Status:      status,
-		Description: task.Description,
-		Branches:    append([]SpawnBranch(nil), branches...),
-		Duration:    duration,
-	})
 }
 
 // clampSpawnBranches returns a copy of branches with each text field bounded:
@@ -276,68 +246,6 @@ func clampSpawnBranches(branches []SpawnBranch) []SpawnBranch {
 		out[i].Error = truncate(out[i].Error, spawnBranchErrorMaxBytes)
 	}
 	return out
-}
-
-// formatSpawnForAgent renders the join record of a spawn task.
-func (n Notification) formatSpawnForAgent() string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "<task-notification>\n")
-	fmt.Fprintf(&b, "  <task-id>%s</task-id>\n", n.TaskID)
-	fmt.Fprintf(&b, "  <kind>spawn</kind>\n")
-	fmt.Fprintf(&b, "  <status>%s</status>\n", n.Status)
-	if n.Description != "" {
-		fmt.Fprintf(&b, "  <description>%s</description>\n", n.Description)
-	}
-	fmt.Fprintf(&b, "  <duration>%s</duration>\n", n.Duration.Round(time.Millisecond))
-	fmt.Fprintf(&b, "  <branches>\n")
-	for _, br := range n.Branches {
-		fmt.Fprintf(&b, "    <branch status=%q", br.Status)
-		if br.ChildSessionID != "" {
-			fmt.Fprintf(&b, " session-id=%q", br.ChildSessionID)
-		}
-		fmt.Fprintf(&b, ">\n")
-		fmt.Fprintf(&b, "      <task>%s</task>\n", br.Task)
-		if br.Report != "" {
-			fmt.Fprintf(&b, "      <report>\n%s\n      </report>\n", strings.TrimRight(br.Report, "\n"))
-		}
-		if br.Error != "" {
-			fmt.Fprintf(&b, "      <error>%s</error>\n", br.Error)
-		}
-		fmt.Fprintf(&b, "    </branch>\n")
-	}
-	fmt.Fprintf(&b, "  </branches>\n")
-	fmt.Fprintf(&b, "  <suggestion>Use a branch session-id to read the full transcript when message-history search is available.</suggestion>\n")
-	fmt.Fprintf(&b, "</task-notification>")
-	return b.String()
-}
-
-// formatAgentForAgent renders the terminal record for one managed subagent.
-func (n Notification) formatAgentForAgent() string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "<task-notification>\n")
-	fmt.Fprintf(&b, "  <task-id>%s</task-id>\n", n.TaskID)
-	fmt.Fprintf(&b, "  <kind>agent</kind>\n")
-	fmt.Fprintf(&b, "  <agent-id>%s</agent-id>\n", n.AgentID)
-	if n.AgentSessionID != "" {
-		fmt.Fprintf(&b, "  <session-id>%s</session-id>\n", n.AgentSessionID)
-	}
-	fmt.Fprintf(&b, "  <status>%s</status>\n", n.Status)
-	if n.Description != "" {
-		fmt.Fprintf(&b, "  <description>%s</description>\n", n.Description)
-	}
-	if n.AgentMessage != "" {
-		fmt.Fprintf(&b, "  <message>%s</message>\n", n.AgentMessage)
-	}
-	fmt.Fprintf(&b, "  <duration>%s</duration>\n", n.Duration.Round(time.Millisecond))
-	if n.AgentReport != "" {
-		fmt.Fprintf(&b, "  <report>\n%s\n  </report>\n", strings.TrimRight(n.AgentReport, "\n"))
-	}
-	if n.AgentError != "" {
-		fmt.Fprintf(&b, "  <error>%s</error>\n", n.AgentError)
-	}
-	fmt.Fprintf(&b, "  <suggestion>Use the agent-control follow-up tool with this agent-id to continue the same subagent when that tool is available.</suggestion>\n")
-	fmt.Fprintf(&b, "</task-notification>")
-	return b.String()
 }
 
 // runningSpawnCountLocked counts running spawn tasks for a bot+session.
@@ -380,6 +288,7 @@ func (m *Manager) StartSpawnTask(parentCtx context.Context, botID, sessionID, de
 		Status:      TaskRunning,
 		StartedAt:   time.Now(),
 		cancel:      cancel,
+		changed:     make(chan struct{}),
 	}
 	m.tasks[taskID] = task
 	m.mu.Unlock()

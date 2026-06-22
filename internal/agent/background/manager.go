@@ -1,15 +1,6 @@
 // Package background implements a background task manager for long-running
-// commands executed inside bot containers. It follows a task-notification
-// architecture:
-//
-//  1. Commands can be started in the background (fire-and-forget).
-//  2. Output is collected asynchronously and written to a file in the container.
-//  3. When a task completes, a structured Notification is enqueued.
-//  4. Notifications are scoped to (botID, sessionID); the agent loop drains
-//     them at step boundaries and injects them as context messages so the
-//     model learns about completed work.
-//
-// The manager is a server-level singleton, safe for concurrent use.
+// commands and subagent work. Tasks can be started asynchronously, observed via
+// live UI events, waited on by tools, and queried for their final results.
 package background
 
 import (
@@ -60,14 +51,12 @@ type WriteFileFunc func(ctx context.Context, path string, data []byte) error
 // ReadFileFunc reads content from a file in the container.
 type ReadFileFunc func(ctx context.Context, path string) ([]byte, error)
 
-// Manager tracks background tasks and delivers completion notifications.
+// Manager tracks background tasks and emits live task events.
 type Manager struct {
-	mu            sync.Mutex
-	tasks         map[string]*Task // taskID -> Task
-	notifications []Notification   // pending notifications, protected by mu
-	logger        *slog.Logger
-	wakeFunc      func(botID, sessionID string) // optional callback to wake agent on new notification
-	eventFunc     func(TaskEvent)               // optional callback for live UI task updates
+	mu        sync.Mutex
+	tasks     map[string]*Task // taskID -> Task
+	logger    *slog.Logger
+	eventFunc func(TaskEvent) // optional callback for live UI task updates
 }
 
 // New creates a new background task Manager.
@@ -79,15 +68,6 @@ func New(logger *slog.Logger) *Manager {
 		tasks:  make(map[string]*Task),
 		logger: logger.With(slog.String("service", "background")),
 	}
-}
-
-// SetWakeFunc registers a callback that is invoked (in a goroutine) whenever a
-// new notification is enqueued. Use this to wake up a sleeping agent so it
-// can drain the notification immediately instead of waiting for user input.
-func (m *Manager) SetWakeFunc(fn func(botID, sessionID string)) {
-	m.mu.Lock()
-	m.wakeFunc = fn
-	m.mu.Unlock()
 }
 
 // SetEventFunc registers a callback for live background task events.
@@ -103,23 +83,6 @@ func (m *Manager) emitEvent(event TaskEvent) {
 	m.mu.Unlock()
 	if fn != nil {
 		fn(event)
-	}
-}
-
-// enqueueNotification appends n to the pending list and, if a wake function is
-// registered, calls it asynchronously so the agent can process the notification.
-func (m *Manager) enqueueNotification(n Notification) {
-	m.mu.Lock()
-	m.notifications = append(m.notifications, n)
-	wakeFn := m.wakeFunc
-	m.mu.Unlock()
-	m.logger.Info("notification enqueued",
-		slog.String("task_id", n.TaskID),
-		slog.String("bot_id", n.BotID),
-		slog.Bool("has_wake_func", wakeFn != nil),
-	)
-	if wakeFn != nil {
-		go wakeFn(n.BotID, n.SessionID)
 	}
 }
 
@@ -161,8 +124,7 @@ func (m *Manager) emitTaskEvent(task *Task, event TaskEventType, stream, chunk s
 }
 
 // Spawn starts a command in the background. It returns the task ID immediately.
-// The command runs asynchronously; when it completes, a Notification is sent
-// to the Notifications channel.
+// The command runs asynchronously and can be observed through task status tools.
 //
 // execFn should call bridge.Client.Exec (or equivalent).
 // writeFn should call bridge.Client.WriteFile to persist output logs.
@@ -188,6 +150,7 @@ func (m *Manager) Spawn(
 		Status:      TaskRunning,
 		OutputFile:  outputFile,
 		StartedAt:   time.Now(),
+		changed:     make(chan struct{}),
 	}
 	m.tasks[taskID] = task
 	m.mu.Unlock()
@@ -230,6 +193,7 @@ func (m *Manager) SpawnAdopt(
 		Status:      TaskRunning,
 		OutputFile:  outputFile,
 		StartedAt:   time.Now(),
+		changed:     make(chan struct{}),
 	}
 	m.tasks[taskID] = task
 	m.mu.Unlock()
@@ -443,6 +407,7 @@ func (m *Manager) completeTask(task *Task, stdout, stderr string, execErr error,
 	status := task.Status
 	finalExitCode := task.ExitCode
 	duration := task.CompletedAt.Sub(task.StartedAt)
+	task.signalChangedLocked()
 	task.mu.Unlock()
 
 	m.logger.Info("background task finished",
@@ -457,26 +422,6 @@ func (m *Manager) completeTask(task *Task, stdout, stderr string, execErr error,
 		eventType = TaskEventFailed
 	}
 	m.emitTaskEvent(task, eventType, "", "")
-
-	// Guard against double notification when Kill or an auto-background race
-	// already enqueued one for this task. UI terminal events are emitted above
-	// even if an earlier stalled notification already woke the agent.
-	if !task.MarkNotified() {
-		return
-	}
-
-	m.enqueueNotification(Notification{
-		TaskID:      task.ID,
-		BotID:       task.BotID,
-		SessionID:   task.SessionID,
-		Status:      status,
-		Command:     task.Command,
-		Description: task.Description,
-		ExitCode:    finalExitCode,
-		OutputFile:  task.OutputFile,
-		OutputTail:  task.OutputTail(),
-		Duration:    duration,
-	})
 }
 
 func readSentinelExitCode(ctx context.Context, path string, readFn ReadFileFunc) (int32, error) {
@@ -563,10 +508,12 @@ func (m *Manager) Kill(taskID string) error {
 	}
 	task.Status = TaskKilled
 	task.CompletedAt = time.Now()
+	task.signalChangedLocked()
 	task.mu.Unlock()
 
 	task.Cancel()
 	m.logger.Info("background task killed", slog.String("task_id", taskID))
+	m.emitTaskEvent(task, TaskEventKilled, "", "")
 	return nil
 }
 
@@ -634,37 +581,30 @@ func (m *Manager) KillForSession(botID, sessionID, taskID string) error {
 	return m.Kill(taskID)
 }
 
-// DrainNotifications returns all pending notifications for a given
-// bot+session without blocking. Used by the resolver to inject
-// notifications at the start of a new agent run.
-func (m *Manager) DrainNotifications(botID, sessionID string) []Notification {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	var matched []Notification
-	remaining := m.notifications[:0] // reuse backing array
-	for _, n := range m.notifications {
-		if n.BotID == botID && n.SessionID == sessionID {
-			matched = append(matched, n)
-		} else {
-			remaining = append(remaining, n)
+// WaitForSessionTask waits until a task reaches a terminal state or needs
+// attention. It returns the current snapshot when the task is completed,
+// failed, killed, or stalled.
+func (m *Manager) WaitForSessionTask(ctx context.Context, botID, sessionID, taskID string) (TaskSnapshot, error) {
+	task := m.GetForSession(botID, sessionID, taskID)
+	if task == nil {
+		return TaskSnapshot{}, fmt.Errorf("task %s not found", taskID)
+	}
+	for {
+		task.mu.Lock()
+		status := task.Status
+		stalled := task.stalled && status == TaskRunning
+		done := status == TaskCompleted || status == TaskFailed || status == TaskKilled || stalled
+		ch := task.changeChanLocked()
+		task.mu.Unlock()
+		if done {
+			return task.Snapshot(), nil
+		}
+		select {
+		case <-ctx.Done():
+			return task.Snapshot(), ctx.Err()
+		case <-ch:
 		}
 	}
-	m.notifications = remaining
-	return matched
-}
-
-// HasNotifications reports whether there are pending notifications for the
-// given bot+session without consuming them.
-func (m *Manager) HasNotifications(botID, sessionID string) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for _, n := range m.notifications {
-		if n.BotID == botID && n.SessionID == sessionID {
-			return true
-		}
-	}
-	return false
 }
 
 // RunningTasksSummary returns a text summary of currently running tasks
@@ -698,7 +638,7 @@ func (m *Manager) RunningTasksSummary(botID, sessionID string) string {
 	if len(lines) == 0 {
 		return ""
 	}
-	return "Currently running background tasks:\n" + joinLines(lines)
+	return "Currently running background tasks:\n" + joinLines(lines) + "Use wait_until(task_id) to wait for a task, then get_background_status(task_id) to inspect its result.\n"
 }
 
 // Cleanup removes completed tasks older than the given duration.
@@ -735,17 +675,6 @@ func (m *Manager) StartCleanupLoop(done <-chan struct{}, interval, maxAge time.D
 	}
 }
 
-// RequeueNotifications puts notifications back into the pending queue.
-// Used when proactive delivery for a session fails and the batch should be retried.
-func (m *Manager) RequeueNotifications(ns []Notification) {
-	if len(ns) == 0 {
-		return
-	}
-	m.mu.Lock()
-	m.notifications = append(m.notifications, ns...)
-	m.mu.Unlock()
-}
-
 // promptPatterns matches common interactive prompt endings that indicate
 // a command is waiting for user input.
 var promptPatterns = regexp.MustCompile(
@@ -753,8 +682,8 @@ var promptPatterns = regexp.MustCompile(
 )
 
 // stallWatchdog monitors a background task's output for stalls that might
-// indicate the command is waiting for interactive input. If detected, it
-// enqueues a notification advising the agent to kill and retry.
+// indicate the command is waiting for interactive input. If detected, it marks
+// the task so waiters and status tools can surface the state.
 func (m *Manager) stallWatchdog(ctx context.Context, task *Task) {
 	ticker := time.NewTicker(stallCheckInterval)
 	defer ticker.Stop()
@@ -808,30 +737,12 @@ func (m *Manager) stallWatchdog(ctx context.Context, task *Task) {
 			slog.String("task_id", task.ID),
 		)
 
-		// Enqueue a stall notification (only once). Terminal completion still
-		// gets its own notification later, so persisted UI can close the task
-		// after a reload.
-		if !task.MarkStalledNotified() {
+		if !task.MarkStalled() {
 			return
 		}
 
-		n := Notification{
-			TaskID:      task.ID,
-			BotID:       task.BotID,
-			SessionID:   task.SessionID,
-			Status:      TaskRunning, // still running, but stalled
-			Command:     task.Command,
-			Description: task.Description,
-			ExitCode:    0,
-			OutputFile:  task.OutputFile,
-			OutputTail:  tail,
-			Duration:    time.Since(task.StartedAt),
-			Stalled:     true,
-		}
-
 		m.emitTaskEvent(task, TaskEventStalled, "", "")
-		m.enqueueNotification(n)
-		return // only notify once per task
+		return // only mark stalled once per task
 	}
 }
 

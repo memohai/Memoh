@@ -3,7 +3,6 @@ package conversation
 import (
 	"encoding/json"
 	"regexp"
-	"strconv"
 	"strings"
 
 	messagepkg "github.com/memohai/memoh/internal/message"
@@ -16,7 +15,6 @@ var (
 	uiMessageYAMLHeaderRe        = regexp.MustCompile(`(?s)\A---\n.*?\n---\n?`)
 	uiMessageAgentTagsRe         = regexp.MustCompile(`(?s)<attachments>.*?</attachments>|<reactions>.*?</reactions>|<speech>.*?</speech>`)
 	uiMessageCollapsedNewlinesRe = regexp.MustCompile(`\n{3,}`)
-	uiTaskNotificationRe         = regexp.MustCompile(`(?s)<task-notification>\s*(.*?)\s*</task-notification>`)
 )
 
 type uiContentPart struct {
@@ -43,11 +41,6 @@ type uiExtractedToolCall struct {
 type uiExtractedToolResult struct {
 	ToolCallID string
 	Output     any
-}
-
-type uiBackgroundToolRef struct {
-	TurnIndex    int
-	MessageIndex int
 }
 
 type uiPendingAssistantTurn struct {
@@ -136,39 +129,6 @@ func ConvertModelMessagesToUIAssistantMessages(messages []ModelMessage) []UIMess
 func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 	result := make([]UITurn, 0, len(messages))
 	var pending *uiPendingAssistantTurn
-	backgroundToolRefs := map[string]uiBackgroundToolRef{}
-
-	registerBackgroundTools := func(turnIndex int) {
-		if turnIndex < 0 || turnIndex >= len(result) {
-			return
-		}
-		for msgIndex, message := range result[turnIndex].Messages {
-			if message.Background == nil {
-				continue
-			}
-			taskID := strings.TrimSpace(message.Background.TaskID)
-			if taskID == "" {
-				continue
-			}
-			backgroundToolRefs[taskID] = uiBackgroundToolRef{TurnIndex: turnIndex, MessageIndex: msgIndex}
-		}
-	}
-
-	completeBackgroundTool := func(task UIBackgroundTask) {
-		taskID := strings.TrimSpace(task.TaskID)
-		if taskID == "" {
-			return
-		}
-		ref, ok := backgroundToolRefs[taskID]
-		if !ok || ref.TurnIndex < 0 || ref.TurnIndex >= len(result) {
-			return
-		}
-		turn := &result[ref.TurnIndex]
-		if ref.MessageIndex < 0 || ref.MessageIndex >= len(turn.Messages) {
-			return
-		}
-		mergeBackgroundTaskIntoTool(&turn.Messages[ref.MessageIndex], task)
-	}
 
 	flushPending := func() {
 		if pending == nil {
@@ -186,7 +146,6 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 
 		if len(pending.Turn.Messages) > 0 {
 			result = append(result, pending.Turn)
-			registerBackgroundTools(len(result) - 1)
 		}
 		pending = nil
 	}
@@ -204,22 +163,6 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			if text == "" && len(attachments) == 0 && reply == nil && forward == nil {
 				continue
 			}
-			if task, ok := parseBackgroundTaskNotification(text); ok {
-				completeBackgroundTool(task)
-				result = append(result, UITurn{
-					Role:           "system",
-					Kind:           "background_task",
-					BackgroundTask: &task,
-					Timestamp:      raw.CreatedAt,
-					Platform:       resolveUIPersistencePlatform(raw),
-					ID:             strings.TrimSpace(raw.ID),
-				})
-				continue
-			}
-			if strings.EqualFold(strings.TrimSpace(text), "[background notification]") {
-				continue
-			}
-
 			turn := UITurn{
 				Role:              "user",
 				Text:              text,
@@ -320,7 +263,6 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 				ExternalMessageID: strings.TrimSpace(raw.ExternalMessageID),
 				ID:                strings.TrimSpace(raw.ID),
 			})
-			registerBackgroundTools(len(result) - 1)
 
 		case "tool":
 			if pending == nil {
@@ -1072,57 +1014,6 @@ func isBackgroundToolStillRunning(message UIMessage) bool {
 	}
 	status := normalizeBackgroundTaskStatus(message.Background.Status)
 	return status == "running" || status == "queued" || status == "stalled"
-}
-
-func parseBackgroundTaskNotification(text string) (UIBackgroundTask, bool) {
-	match := uiTaskNotificationRe.FindStringSubmatch(text)
-	if len(match) < 2 {
-		return UIBackgroundTask{}, false
-	}
-	body := match[1]
-	taskID := strings.TrimSpace(extractUITaskNotificationTag(body, "task-id"))
-	if taskID == "" {
-		return UIBackgroundTask{}, false
-	}
-
-	status := normalizeBackgroundTaskStatus(extractUITaskNotificationTag(body, "status"))
-	if status == "" {
-		status = "completed"
-	}
-	task := UIBackgroundTask{
-		TaskID: taskID,
-		Status: status,
-		Command: firstNonEmptyString(
-			strings.TrimSpace(extractUITaskNotificationTag(body, "command")),
-			strings.TrimSpace(extractUITaskNotificationTag(body, "description")),
-			strings.TrimSpace(extractUITaskNotificationTag(body, "message")),
-		),
-		AgentID:        strings.TrimSpace(extractUITaskNotificationTag(body, "agent-id")),
-		AgentSessionID: strings.TrimSpace(extractUITaskNotificationTag(body, "session-id")),
-		OutputFile:     strings.TrimSpace(extractUITaskNotificationTag(body, "output-file")),
-		Duration:       strings.TrimSpace(extractUITaskNotificationTag(body, "duration")),
-		OutputTail: firstNonEmptyString(
-			strings.TrimSpace(extractUITaskNotificationTag(body, "output-tail")),
-			strings.TrimSpace(extractUITaskNotificationTag(body, "report")),
-			strings.TrimSpace(extractUITaskNotificationTag(body, "error")),
-		),
-		Stalled: status == "stalled",
-	}
-	if rawExitCode := strings.TrimSpace(extractUITaskNotificationTag(body, "exit-code")); rawExitCode != "" {
-		if exitCode, err := strconv.ParseInt(rawExitCode, 10, 32); err == nil {
-			task.ExitCode = int32(exitCode)
-		}
-	}
-	return task, true
-}
-
-func extractUITaskNotificationTag(body, tag string) string {
-	re := regexp.MustCompile(`(?s)<` + regexp.QuoteMeta(tag) + `>\s*(.*?)\s*</` + regexp.QuoteMeta(tag) + `>`)
-	match := re.FindStringSubmatch(body)
-	if len(match) < 2 {
-		return ""
-	}
-	return match[1]
 }
 
 func toolResultMap(output any) (map[string]any, bool) {

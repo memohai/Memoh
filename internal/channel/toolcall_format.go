@@ -55,7 +55,8 @@ var builtinToolCallEmoji = map[string]string{
 
 	"spawn_agent":  "🤖",
 	"send_message": "🤖",
-	"wait_agent":   "🤖",
+	"wait":         "⏱️",
+	"wait_until":   "⏱️",
 	"list_agents":  "🤖",
 	"use_skill":    "🧩",
 

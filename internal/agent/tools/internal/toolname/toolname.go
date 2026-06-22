@@ -33,6 +33,8 @@ func ToolApplyPatch() Name          { return newName("apply_patch") }
 func ToolListBackground() Name      { return newName("list_background") }
 func ToolGetBackgroundStatus() Name { return newName("get_background_status") }
 func ToolKillBackground() Name      { return newName("kill_background") }
+func ToolWait() Name                { return newName("wait") }
+func ToolWaitUntil() Name           { return newName("wait_until") }
 
 func ToolSend() Name  { return newName("send") }
 func ToolReact() Name { return newName("react") }
@@ -47,7 +49,6 @@ func ToolListSkills() Name     { return newName("list_skills") }
 func ToolUseSkill() Name       { return newName("use_skill") }
 func ToolSpawnAgent() Name     { return newName("spawn_agent") }
 func ToolSendMessage() Name    { return newName("send_message") }
-func ToolWaitAgent() Name      { return newName("wait_agent") }
 func ToolListAgents() Name     { return newName("list_agents") }
 
 func ToolListSchedule() Name   { return newName("list_schedule") }
@@ -74,9 +75,9 @@ func ToolListEmail() Name         { return newName("list_email") }
 func ToolReadEmail() Name         { return newName("read_email") }
 
 var all = []Name{
-	ToolRead(), ToolWrite(), ToolList(), ToolEdit(), ToolExec(), ToolApplyPatch(), ToolListBackground(), ToolGetBackgroundStatus(), ToolKillBackground(),
+	ToolRead(), ToolWrite(), ToolList(), ToolEdit(), ToolExec(), ToolApplyPatch(), ToolListBackground(), ToolGetBackgroundStatus(), ToolKillBackground(), ToolWait(), ToolWaitUntil(),
 	ToolSend(), ToolReact(), ToolSpeak(),
-	ToolGetContacts(), ToolListSessions(), ToolGetMessages(), ToolSearchMessages(), ToolSearchMemory(), ToolListSkills(), ToolUseSkill(), ToolSpawnAgent(), ToolSendMessage(), ToolWaitAgent(), ToolListAgents(),
+	ToolGetContacts(), ToolListSessions(), ToolGetMessages(), ToolSearchMessages(), ToolSearchMemory(), ToolListSkills(), ToolUseSkill(), ToolSpawnAgent(), ToolSendMessage(), ToolListAgents(),
 	ToolListSchedule(), ToolGetSchedule(), ToolCreateSchedule(), ToolUpdateSchedule(), ToolDeleteSchedule(),
 	ToolBrowserAction(), ToolBrowserObserve(), ToolComputerObserve(), ToolComputerAction(), ToolBrowserRemoteSession(),
 	ToolWebSearch(), ToolWebFetch(), ToolGenerateImage(), ToolTranscribeAudio(), ToolAskUser(),

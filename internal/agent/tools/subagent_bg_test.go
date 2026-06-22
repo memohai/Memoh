@@ -272,7 +272,7 @@ func TestAgentControlToolsExposeSingleAgentSurface(t *testing.T) {
 		t.Fatalf("Tools failed: %v", err)
 	}
 	got := toolNames(tools)
-	want := []string{"spawn_agent", "send_message", "wait_agent", "list_agents"}
+	want := []string{"spawn_agent", "send_message", "list_agents"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected tools: got %v want %v", got, want)
 	}
@@ -298,15 +298,8 @@ func TestAgentControlToolSchemasDoNotReferenceSiblingTools(t *testing.T) {
 			t.Fatalf("marshal %s schema: %v", tool.Name, err)
 		}
 		schema := string(raw)
-		switch tool.Name {
-		case ToolSendMessage().String():
+		if tool.Name == ToolSendMessage().String() {
 			for _, absent := range []string{ToolSpawnAgent().String(), ToolListAgents().String()} {
-				if strings.Contains(schema, absent) {
-					t.Fatalf("%s schema references sibling tool %s:\n%s", tool.Name, absent, schema)
-				}
-			}
-		case ToolWaitAgent().String():
-			for _, absent := range []string{ToolSpawnAgent().String(), ToolSendMessage().String()} {
 				if strings.Contains(schema, absent) {
 					t.Fatalf("%s schema references sibling tool %s:\n%s", tool.Name, absent, schema)
 				}
@@ -383,7 +376,7 @@ func TestSendMessageReusesSessionAndHistory(t *testing.T) {
 func TestBusyAgentQueuesAndRunsFIFO(t *testing.T) {
 	block := make(chan struct{})
 	agent := &fakeSpawnAgent{block: block}
-	p, _, _, _ := newAgentControlProvider(t, agent)
+	p, mgr, _, _ := newAgentControlProvider(t, agent)
 	session := SessionContext{BotID: "bot1", SessionID: "parent1"}
 
 	first := asMap(t, mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{
@@ -394,8 +387,8 @@ func TestBusyAgentQueuesAndRunsFIFO(t *testing.T) {
 	if first["status"] != "background_started" {
 		t.Fatalf("expected background_started, got %v", first)
 	}
-	if msg, _ := first["message"].(string); strings.Contains(msg, "get_background_status") || strings.Contains(msg, "kill_background") {
-		t.Fatalf("background start message should not name tools that may be filtered out, got %q", msg)
+	if msg, _ := first["message"].(string); !strings.Contains(msg, "wait_until") || !strings.Contains(msg, "get_background_status") {
+		t.Fatalf("background start message should guide wait/status flow, got %q", msg)
 	}
 	second := asMap(t, mustExecuteAgentTool(t, p, session, "send_message", map[string]any{"id": "worker", "message": "second"}))
 	third := asMap(t, mustExecuteAgentTool(t, p, session, "send_message", map[string]any{"id": "worker", "message": "third"}))
@@ -410,13 +403,18 @@ func TestBusyAgentQueuesAndRunsFIFO(t *testing.T) {
 	waitUntil(t, 2*time.Second, func() bool {
 		return reflect.DeepEqual(agent.queries(), []string{"first", "second", "third"})
 	})
-	waited := p.waitAgent(context.Background(), session, agentRecord{AgentID: "worker", SessionID: first["session_id"].(string)}, third["task_id"].(string), time.Second)
-	if waited["status"] != "completed" {
-		t.Fatalf("expected third task completed, got %v", waited)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	snap, err := mgr.WaitForSessionTask(ctx, session.BotID, session.SessionID, third["task_id"].(string))
+	if err != nil {
+		t.Fatalf("WaitForSessionTask returned error: %v", err)
+	}
+	if snap.Status != background.TaskCompleted {
+		t.Fatalf("expected third task completed, got %+v", snap)
 	}
 }
 
-func TestWaitAgentTimeoutDoesNotCancelRunningTask(t *testing.T) {
+func TestBackgroundWaitTimeoutDoesNotCancelRunningAgentTask(t *testing.T) {
 	block := make(chan struct{})
 	p, mgr, _, _ := newAgentControlProvider(t, &fakeSpawnAgent{block: block})
 	session := SessionContext{BotID: "bot1", SessionID: "parent1"}
@@ -426,9 +424,10 @@ func TestWaitAgentTimeoutDoesNotCancelRunningTask(t *testing.T) {
 		"run_in_background": true,
 	}))
 
-	waited := p.waitAgent(context.Background(), session, agentRecord{AgentID: "worker", SessionID: started["session_id"].(string)}, "", 20*time.Millisecond)
-	if waited["timed_out"] != true || waited["status"] != "running" {
-		t.Fatalf("expected timed out running wait result, got %v", waited)
+	waitCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := mgr.WaitForSessionTask(waitCtx, session.BotID, session.SessionID, started["task_id"].(string)); err == nil {
+		t.Fatal("expected wait timeout")
 	}
 	if task := mgr.GetForSession("bot1", "parent1", started["task_id"].(string)); task == nil || task.Snapshot().Status != background.TaskRunning {
 		t.Fatalf("wait timeout should not cancel task, got %+v", task)
