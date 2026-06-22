@@ -23,7 +23,6 @@
 
 <script setup lang="ts">
 import { computed, type Component } from 'vue'
-import { MessageCircle } from 'lucide-vue-next'
 import {
   Dingtalk,
   Qq,
@@ -36,6 +35,7 @@ import {
   Wecom,
   Matrix,
   Misskey,
+  Whatsapp,
 } from '@memohai/icon'
 import { channelIconFallbackText } from '@/utils/channel-icon-fallback'
 
@@ -52,7 +52,7 @@ const channelIcons: Record<string, Component> = {
   matrix: Matrix,
   misskey: Misskey,
   dingtalk: Dingtalk,
-  whatsapp: MessageCircle,
+  whatsapp: Whatsapp,
 }
 
 const props = withDefaults(defineProps<{

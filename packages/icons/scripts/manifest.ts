@@ -91,6 +91,7 @@ const channelPlatforms: string[] = [
   'wecom',
   'matrix',
   'dingtalk',
+  'whatsapp',
 ]
 
 // ---------------------------------------------------------------------------
