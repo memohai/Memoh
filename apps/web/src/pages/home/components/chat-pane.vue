@@ -235,9 +235,9 @@
               <Button
                 v-if="showJumpToBottom"
                 type="button"
-                size="icon-sm"
-                variant="secondary"
-                class="absolute left-1/2 bottom-full z-20 mb-2 size-8 -translate-x-1/2 rounded-full"
+                size="icon"
+                variant="ghost"
+                class="absolute left-1/2 bottom-full z-20 mb-4 size-9 -translate-x-1/2 rounded-full border border-border bg-card text-foreground"
                 aria-label="Scroll to latest message"
                 @click="scrollToBottom"
               >
@@ -743,39 +743,51 @@
                       class="absolute inset-0 size-9 transition-[opacity,scale] duration-200 ease-out motion-reduce:transition-none"
                       :class="(!showSend && !streaming) ? 'scale-100 opacity-100' : 'pointer-events-none scale-75 opacity-0'"
                     />
+                    <!-- Send and stop are one brand circle: the surface never
+                         changes between the two states, only the glyph cross-fades
+                         (arrow ⇄ stop square), so the button can't blink color or
+                         shape mid-turn. While streaming it stays clickable to abort. -->
                     <Button
-                      v-if="!streaming"
                       type="button"
                       variant="brand"
-                      :disabled="!showSend || !currentBotId || activeChatReadOnly"
-                      aria-label="Send message"
+                      :disabled="streaming ? false : (!showSend || !currentBotId || activeChatReadOnly)"
+                      :aria-label="streaming ? 'Stop generating response' : 'Send message'"
                       class="absolute inset-0 size-9 rounded-full transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
-                      :class="sendButtonVisible ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
-                      @click="handleSend"
+                      :class="(sendButtonVisible || streaming) ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
+                      @click="streaming ? chatStore.abort() : handleSend()"
                     >
-                      <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2.25"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        class="size-[18px]"
+                      <span
+                        class="grid size-[20px] shrink-0 place-items-center"
                         aria-hidden="true"
                       >
-                        <path d="M12 19.5 V5" />
-                        <path d="M6 10.5 L12 4.5 L18 10.5" />
-                      </svg>
-                    </Button>
-                    <Button
-                      v-else
-                      type="button"
-                      variant="destructive"
-                      class="absolute inset-0 size-9 rounded-full"
-                      aria-label="Stop generating response"
-                      @click="chatStore.abort()"
-                    >
-                      <LoaderCircle class="size-[18px] animate-spin" />
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.75"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          class="col-start-1 row-start-1 size-[20px] transition-opacity duration-200 ease-out motion-reduce:transition-none"
+                          :class="streaming ? 'opacity-0' : 'opacity-100'"
+                        >
+                          <path d="M12 19.5 V5" />
+                          <path d="M6 10.5 L12 4.5 L18 10.5" />
+                        </svg>
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                          class="col-start-1 row-start-1 size-[18px] transition-opacity duration-200 ease-out motion-reduce:transition-none"
+                          :class="streaming ? 'opacity-100' : 'opacity-0'"
+                        >
+                          <rect
+                            x="4"
+                            y="4"
+                            width="16"
+                            height="16"
+                            rx="3"
+                          />
+                        </svg>
+                      </span>
                     </Button>
                   </div>
                 </div>
