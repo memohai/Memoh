@@ -10,7 +10,7 @@
       v-if="content"
       :code="content"
       :filename="filePath"
-      class="overflow-x-auto overflow-y-auto max-h-96 text-xs leading-relaxed"
+      class="overflow-x-auto text-xs leading-relaxed"
     />
     <p
       v-else
