@@ -45,7 +45,7 @@
                    has nothing. A fresh, writable chat instead gets the centered
                    welcome composer below, never a stray line in a blank pane. -->
               <div
-                v-if="messages.length === 0 && !loadingChats && activeChatReadOnly"
+                v-if="messages.length === 0 && !loadingChats && !loadingMessages && activeChatReadOnly"
                 class="flex items-center justify-center min-h-75"
               >
                 <p
@@ -67,7 +67,7 @@
                 :key="msg.id"
                 :data-message-id="msg.id"
                 :data-external-message-id="(msg.role === 'user' || msg.role === 'assistant') ? msg.externalMessageId : undefined"
-                class="transition-[background-color] duration-500 scroll-mt-2 px-2 -mx-2 [content-visibility:auto] [contain-intrinsic-size:auto_600px]"
+                class="transition-[background-color] duration-500 scroll-mt-2 px-2 -mx-2"
                 :class="highlightedMessageId === msg.id ? 'bg-muted/45' : ''"
                 :data-anchor="msg.id"
               >
@@ -985,6 +985,7 @@ const {
   activeChatReadOnly,
   loadingOlder,
   loadingChats,
+  loadingMessages,
   hasMoreOlder,
   overrideModelId,
   overrideReasoningEffort,
@@ -1802,7 +1803,8 @@ onBeforeUnmount(() => {
 })
 
 // The tween re-reads its target every frame, so positions shifted by
-// content-visibility materializing rows mid-flight still land exactly.
+// late layout settles (markdown re-render, code highlighting, image
+// loads, KaTeX/Mermaid resolves) still land exactly.
 function startScrollTween(root: HTMLElement, getTarget: () => number) {
   cancelScrollTween?.()
   const stop = animateScrollTo(root, () => {
@@ -1846,31 +1848,39 @@ function scrollToBottom() {
 }
 
 
-const elId: { id: string, top: number }[] = []
+// Tracks the viewport-relative top offset of every "active" message element so
+// onActivated can restore scroll to the same anchor. Keyed by message id for
+// O(1) update/remove on every active/inactive transition; long conversations
+// would otherwise pay a linear scan + splice on each transition.
+const elId = new Map<string, number>()
 function isActiveEl(isActive: boolean, item: { id: string, top: number }) {
   if (lockScroll.value) return
-  let index = elId.findIndex(v => v.id === item.id)
   if (isActive) {
-    if ((index < 0)) {
-      elId.push(item)
-    } else {
-      elId[index]!.top = item.top
-    }
+    elId.set(item.id, item.top)
   } else {
-    if (index >= 0) {
-      elId.splice(index, 1)
-    }
+    elId.delete(item.id)
   }
 }
+
+// Drop accumulated anchors when the active session changes. Otherwise an
+// anchor for a message that only exists in session B would survive into A
+// when the user switches back, and the onActivated restore would query
+// the DOM with a foreign id (or worse, find a coincidentally-matching
+// element from the new session's load). Scroll position restoration is
+// preserved across route activation but reset across cross-session
+// switches.
+watch(() => chatStore.sessionId, () => {
+  elId.clear()
+})
 
 
 const lockScroll = ref(true)
 
 watch(isScrolling, (scrolling) => {
   if (scrolling || lockScroll.value || !isActive.value) return
-  for (const item of elId) {
-    const el = findMessageElement(item.id)
-    if (el) item.top = el.getBoundingClientRect().top - 48
+  for (const [id] of elId) {
+    const el = findMessageElement(id)
+    if (el) elId.set(id, el.getBoundingClientRect().top - 48)
   }
 })
 
@@ -1879,40 +1889,59 @@ const transitionScroll=ref(false)
 onActivated(() => {
   if (!isActive.value) return
   transitionScroll.value=false
-  const unwatch = watch(loadingChats, async (newValue) => {
-    
-    if (elId[0]?.id && !newValue) {
-      elId.sort((v1, v2) => Math.abs(v1.top) - Math.abs(v2.top))
-      const el: HTMLElement | null = document.querySelector(`[data-message-id="${elId[0]?.id}"]`)
-      if (el) {
-        let cachePos = elId[0]?.top
-        el.scrollIntoView()
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            scrollEl.value?.scrollBy({
-              top: cachePos * -1
-            })
-            transitionScroll.value=true
-          })
-        })
-      } else {
-        transitionScroll.value=true
+  let done = false
+  const unwatch = watch(loadingMessages, async (newValue) => {
+    if (done) return
+    try {
+      // Pick the anchor closest to the top edge of the viewport so the
+      // restore lands on the message the user was reading rather than an
+      // arbitrary entry from earlier hover state.
+      let anchorId: string | undefined
+      let anchorTop = Number.POSITIVE_INFINITY
+      for (const [id, top] of elId) {
+        if (Math.abs(top) < Math.abs(anchorTop)) {
+          anchorId = id
+          anchorTop = top
+        }
       }
-      setTimeout(() => {
-        lockScroll.value = false
-        isInit = true
-        unwatch()
-      })
-    } else {
-     
-      isInit = true
-      if (!newValue) {
-        setTimeout(async () => {
-          lockScroll.value = false
+
+      if (anchorId && !newValue) {
+        const el: HTMLElement | null = document.querySelector(`[data-message-id="${anchorId}"]`)
+        if (el) {
+          const cachePos = anchorTop
+          el.scrollIntoView()
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              scrollEl.value?.scrollBy({
+                top: -cachePos
+              })
+              transitionScroll.value=true
+            })
+          })
+        } else {
           transitionScroll.value=true
+        }
+        setTimeout(() => {
+          lockScroll.value = false
+          isInit = true
+          done = true
           unwatch()
         })
+      } else {
+        isInit = true
+        if (!newValue) {
+          setTimeout(async () => {
+            lockScroll.value = false
+            transitionScroll.value=true
+            done = true
+            unwatch()
+          })
+        }
       }
+    } catch (error) {
+      done = true
+      unwatch()
+      throw error
     }
   }, {
     immediate: true,
@@ -1927,7 +1956,7 @@ onDeactivated(() => {
   isAutoScroll.value = true
   isInit = false
   if (arrivedState.bottom) {
-    elId.length=0
+    elId.clear()
   }
 })
 
@@ -1956,74 +1985,42 @@ watch([isAutoScroll, height, isActive], async () => {
   deep: true
 })
 
-// Sentinel-based infinite scroll for older history. The IntersectionObserver
-// fires reliably even when the user is pinned at scrollTop=0 (where scroll
-// events stop), and we restore the visual position via scrollHeight diff —
-// the only anchoring scheme that survives nested scroll containers and
-// arbitrary page offsets. After each load we re-check whether the sentinel
-// is still inside the rootMargin band and chain another load if so; this
-// avoids the "must scroll down then up to load again" symptom that arises
-// when IntersectionObserver's isIntersecting state stays sticky-true.
-let isLoadingOlderInFlight = false
-
-function isSentinelStillInRange(scrollElement: HTMLElement): boolean {
-  const sentinel = loadMoreSentinel.value
-  if (!sentinel) return false
-  const rootRect = scrollElement.getBoundingClientRect()
-  const sentinelRect = sentinel.getBoundingClientRect()
-  return sentinelRect.bottom >= rootRect.top - 200
-    && sentinelRect.top <= rootRect.bottom
-}
-
+// Sentinel-based infinite scroll for older history. Fires once per
+// IntersectionObserver transition: load one batch. We do NOT manually
+// reposition scrollTop after the prepend.
+//
+// Why no manual compensation: the browser's `overflow-anchor: auto`
+// already keeps the visible content stationary across a prepend when
+// `scrollTop > 0`, which is the case whenever the user is reading mid-
+// history. When the user has scrolled all the way to `scrollTop === 0`,
+// the spec deliberately suppresses overflow-anchor to avoid jitter at
+// the top of a document — and that's exactly what we want: leaving
+// scrollTop at 0 means the freshly-prepended older messages render at
+// the top of the viewport, which is what a user who just scrolled to
+// the top to see older history actually wants to see.
+//
+// Prior versions of this function ran an offset-from-bottom or anchor-
+// based scrollTop correction after each prepend. Both produced a
+// visible discontinuity: the user saw new content for one frame, then
+// got yanked to a different scroll position — the "scroll jumps back"
+// symptom users reported. The browser already does the right thing on
+// both sides of the scrollTop=0 boundary; our job is just to suppress
+// the `isAutoScroll`-driven jump-to-bottom and let the prepend land.
 async function ensureOlderLoaded() {
-
-  if (isLoadingOlderInFlight) return
   if (loadingOlder.value || !hasMoreOlder.value) return
   if (!messages.value.length) return
-  const scrollElement = scrollEl.value
-  if (!scrollElement) return
 
+  // The `watch([isAutoScroll, height, isActive], ...)` effect slams
+  // scrollTop to the bottom whenever content height grows and
+  // isAutoScroll is true. Prepend grows height, would fire that, would
+  // hurl the user back to the bottom. arrivedState.bottom will re-
+  // enable it when the user scrolls back down to the latest messages.
+  isAutoScroll.value = false
 
-  isLoadingOlderInFlight = true
-  // The `if (isAutoScroll) y = height` watchEffect above will otherwise stomp
-  // our restored scrollTop the moment new content lands (height grows, effect
-  // fires, viewport jumps to bottom, sentinel flies off-screen — and IO never
-  // fires again because the user can't scroll back up far enough). The user
-  // is at the top by definition (sentinel just intersected), so disabling
-  // stick-to-bottom here is correct; arrivedState.bottom will re-enable it
-  // when the user scrolls back down to the latest messages.
-  // isAutoScroll.value = false
   try {
-    while (hasMoreOlder.value) {
-      const prevScrollHeight = scrollElement.scrollHeight
-      // const prevScrollTop = scrollElement.scrollTop
-
-      let count = 0
-      try {
-        count = await chatStore.loadOlderMessages()
-      } catch (error) {
-        console.error('Failed to load older messages:', error)
-        return
-      }
-      if (count <= 0) return
-
-      await nextTick()
-
-      const newScrollHeight = scrollElement.scrollHeight
-      const delta = newScrollHeight - prevScrollHeight
-      if (delta > 0) {
-        // scrollElement.scrollTop = prevScrollTop + delta
-      }
-
-      // Yield one frame so the browser can re-evaluate layout and IO entries,
-      // then bail out unless the sentinel is still inside the trigger band —
-      // meaning the newly prepended page wasn't tall enough to push us out of
-      // range and we should keep paginating.
-      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
-      if (!isSentinelStillInRange(scrollElement)) return
-    }
-  } finally {
-    isLoadingOlderInFlight = false
+    await chatStore.loadOlderMessages()
+  } catch (error) {
+    console.error('Failed to load older messages:', error)
   }
 }
 

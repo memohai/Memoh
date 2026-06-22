@@ -635,41 +635,89 @@ func TestChannelInboundProcessorACLGuestDeniedDowngradesToNotify(t *testing.T) {
 }
 
 func TestChannelInboundProcessorACLReceivesThreadScope(t *testing.T) {
-	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-thread-scope"}}
-	policySvc := &fakePolicyService{}
-	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-thread", RouteID: "route-thread"}}
-	gateway := &fakeChatGateway{}
-	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, "", 0)
-	aclSvc := &fakeChatACL{allowed: false}
-	processor.SetACLService(aclSvc)
-	sender := &fakeReplySender{}
-
-	msg := channel.InboundMessage{
-		BotID:       "bot-1",
-		Channel:     channel.ChannelType("discord"),
-		Message:     channel.Message{Text: "hello", Thread: &channel.ThreadRef{ID: "thread-1"}},
-		ReplyTarget: "discord:thread-1",
-		Sender:      channel.Identity{SubjectID: "guest-thread"},
-		Conversation: channel.Conversation{
-			ID:   "guild-chat-1",
-			Type: channel.ConversationTypeThread,
+	cases := []struct {
+		name string
+		msg  channel.InboundMessage
+	}{
+		{
+			name: "conversation thread id",
+			msg: channel.InboundMessage{
+				BotID:       "bot-1",
+				Channel:     channel.ChannelType("discord"),
+				Message:     channel.Message{Text: "hello"},
+				ReplyTarget: "discord:thread-1",
+				Sender:      channel.Identity{SubjectID: "guest-thread"},
+				Conversation: channel.Conversation{
+					ID:       "guild-chat-1",
+					Type:     channel.ConversationTypeThread,
+					ThreadID: "thread-1",
+				},
+				Metadata: map[string]any{
+					"is_mentioned": true,
+				},
+			},
 		},
-		Metadata: map[string]any{
-			"is_mentioned": true,
+		{
+			name: "message thread compatibility",
+			msg: channel.InboundMessage{
+				BotID:       "bot-1",
+				Channel:     channel.ChannelType("discord"),
+				Message:     channel.Message{Text: "hello", Thread: &channel.ThreadRef{ID: "thread-1"}},
+				ReplyTarget: "discord:thread-1",
+				Sender:      channel.Identity{SubjectID: "guest-thread"},
+				Conversation: channel.Conversation{
+					ID:   "guild-chat-1",
+					Type: channel.ConversationTypeThread,
+				},
+				Metadata: map[string]any{
+					"is_mentioned": true,
+				},
+			},
+		},
+		{
+			name: "message thread wins over conversation compatibility fallback",
+			msg: channel.InboundMessage{
+				BotID:       "bot-1",
+				Channel:     channel.ChannelType("discord"),
+				Message:     channel.Message{Text: "hello", Thread: &channel.ThreadRef{ID: "thread-1"}},
+				ReplyTarget: "discord:thread-1",
+				Sender:      channel.Identity{SubjectID: "guest-thread"},
+				Conversation: channel.Conversation{
+					ID:       "guild-chat-1",
+					Type:     channel.ConversationTypeThread,
+					ThreadID: "thread-from-conversation",
+				},
+				Metadata: map[string]any{
+					"is_mentioned": true,
+				},
+			},
 		},
 	}
 
-	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"}, msg, sender); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if aclSvc.calls != 1 {
-		t.Fatalf("expected acl to be checked once, got %d", aclSvc.calls)
-	}
-	if aclSvc.lastReq.ChannelType != "discord" ||
-		aclSvc.lastReq.SourceScope.ConversationType != channel.ConversationTypeThread ||
-		aclSvc.lastReq.SourceScope.ConversationID != "guild-chat-1" ||
-		aclSvc.lastReq.SourceScope.ThreadID != "thread-1" {
-		t.Fatalf("unexpected thread acl evaluate request: %+v", aclSvc.lastReq)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-thread-scope"}}
+			policySvc := &fakePolicyService{}
+			chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-thread", RouteID: "route-thread"}}
+			gateway := &fakeChatGateway{}
+			processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, "", 0)
+			aclSvc := &fakeChatACL{allowed: false}
+			processor.SetACLService(aclSvc)
+			sender := &fakeReplySender{}
+
+			if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"}, tc.msg, sender); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if aclSvc.calls != 1 {
+				t.Fatalf("expected acl to be checked once, got %d", aclSvc.calls)
+			}
+			if aclSvc.lastReq.ChannelType != "discord" ||
+				aclSvc.lastReq.SourceScope.ConversationType != channel.ConversationTypeThread ||
+				aclSvc.lastReq.SourceScope.ConversationID != "guild-chat-1" ||
+				aclSvc.lastReq.SourceScope.ThreadID != "thread-1" {
+				t.Fatalf("unexpected thread acl evaluate request: %+v", aclSvc.lastReq)
+			}
+		})
 	}
 }
 
@@ -895,6 +943,47 @@ func TestChannelInboundProcessorSilentReply(t *testing.T) {
 	}
 	if len(sender.sent) != 0 {
 		t.Fatalf("NO_REPLY should suppress output: %+v", sender.sent)
+	}
+}
+
+func TestBuildChannelMessageKeepsReasoningTextMarkdownOnRichChannels(t *testing.T) {
+	msg := buildChannelMessage(conversation.AssistantOutput{
+		Content: "**bold**",
+		Parts: []conversation.ContentPart{
+			{Type: "text", Text: "**bold**"},
+		},
+	}, channel.ChannelCapabilities{Text: true, Markdown: true, RichText: true})
+
+	if len(msg.Parts) != 0 {
+		t.Fatalf("plain text content part should not be promoted to rich Parts: %#v", msg.Parts)
+	}
+	if msg.Text != "**bold**" {
+		t.Fatalf("Text = %q, want markdown source", msg.Text)
+	}
+	if msg.Format != channel.MessageFormatMarkdown {
+		t.Fatalf("Format = %q, want markdown", msg.Format)
+	}
+}
+
+func TestBuildChannelMessagePromotesStyledPartWithoutDuplicateText(t *testing.T) {
+	msg := buildChannelMessage(conversation.AssistantOutput{
+		Content: "bold",
+		Parts: []conversation.ContentPart{
+			{Type: "text", Text: "bold", Styles: []string{"bold"}},
+		},
+	}, channel.ChannelCapabilities{Text: true, Markdown: true, RichText: true})
+
+	if msg.Text != "" {
+		t.Fatalf("rich Parts message should not keep duplicate Text, got %q", msg.Text)
+	}
+	if msg.Format != channel.MessageFormatRich {
+		t.Fatalf("Format = %q, want rich", msg.Format)
+	}
+	if len(msg.Parts) != 1 {
+		t.Fatalf("Parts len = %d, want 1", len(msg.Parts))
+	}
+	if got := msg.Parts[0]; got.Type != channel.MessagePartText || got.Text != "bold" || len(got.Styles) != 1 || got.Styles[0] != channel.MessageStyleBold {
+		t.Fatalf("unexpected rich part: %#v", got)
 	}
 }
 

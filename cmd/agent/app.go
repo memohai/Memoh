@@ -26,6 +26,7 @@ import (
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/agent/background"
 	agenttools "github.com/memohai/memoh/internal/agent/tools"
+	"github.com/memohai/memoh/internal/agentpayload"
 	audiopkg "github.com/memohai/memoh/internal/audio"
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/botbackup"
@@ -329,8 +330,8 @@ func provideRouteService(log *slog.Logger, queries dbstore.Queries, chatService 
 	return route.NewService(log, queries, chatService)
 }
 
-func provideSessionService(log *slog.Logger, queries dbstore.Queries) *sessionpkg.Service {
-	return sessionpkg.NewService(log, queries)
+func provideSessionService(log *slog.Logger, queries dbstore.Queries, hub *event.Hub) *sessionpkg.Service {
+	return sessionpkg.NewService(log, queries, hub)
 }
 
 func provideMessageService(log *slog.Logger, queries dbstore.Queries, hub *event.Hub) *message.DBService {
@@ -452,10 +453,11 @@ func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *mod
 			if eventHub == nil {
 				return
 			}
-			data, err := json.Marshal(map[string]any{
-				"event": evt.Event,
-				"task":  evt,
-			})
+			// The wire shape lives in internal/agentpayload — see its
+			// BackgroundTask helper and the tests there that pin the
+			// top-level `session_id` placement the per-session SSE handler
+			// routes on.
+			data, err := json.Marshal(agentpayload.BackgroundTask(evt))
 			if err != nil {
 				return
 			}

@@ -1,26 +1,34 @@
 import { client } from '@memohai/sdk/client'
-import { getBotsByBotIdMessages, getBotsByBotIdMessagesLocate, postBotsByBotIdLocalMessages } from '@memohai/sdk'
+import {
+  getBotsByBotIdMessages,
+  getBotsByBotIdMessagesLocate,
+  getBotsByBotIdSessionsBySessionIdMessagesEvents,
+  getBotsByBotIdSessionsEvents,
+  postBotsByBotIdLocalMessages,
+} from '@memohai/sdk'
 import type { ChannelAttachment, ChannelMessage } from '@memohai/sdk'
 import type {
+  BotSessionActivityEvent,
   ChatAttachment,
   FetchMessagesOptions,
   Message,
-  MessageStreamEvent,
+  SessionMessageStreamEvent,
   UITurn,
 } from './useChat.types'
-import { readSSEStream } from './useChat.sse'
 
 export async function fetchMessages(
   botId: string,
-  sessionId?: string,
+  sessionId: string,
   options?: FetchMessagesOptions,
 ): Promise<Message[]> {
+  const sid = sessionId.trim()
+  if (!sid) throw new Error('session id is required')
   const { data } = await getBotsByBotIdMessages({
     path: { bot_id: botId },
     query: {
+      session_id: sid,
       limit: options?.limit ?? 30,
       ...(options?.before?.trim() ? { before: options.before.trim() } : {}),
-      ...(sessionId?.trim() ? { session_id: sessionId.trim() } : {}),
     },
     throwOnError: true,
   })
@@ -30,17 +38,19 @@ export async function fetchMessages(
 
 export async function fetchMessagesUI(
   botId: string,
-  sessionId?: string,
+  sessionId: string,
   options?: FetchMessagesOptions,
 ): Promise<UITurn[]> {
+  const sid = sessionId.trim()
+  if (!sid) throw new Error('session id is required')
   const response = await client.get({
     url: '/bots/{bot_id}/messages',
     path: { bot_id: botId },
     query: {
+      session_id: sid,
       limit: options?.limit ?? 30,
       format: 'ui',
       ...(options?.before?.trim() ? { before: options.before.trim() } : {}),
-      ...(sessionId?.trim() ? { session_id: sessionId.trim() } : {}),
     },
     throwOnError: true,
   })
@@ -114,38 +124,60 @@ export async function sendLocalChannelMessage(
   })
 }
 
-export async function streamMessageEvents(
+// The SDK's `sse.get` yields parsed `data` payloads from the async generator.
+// Wrap each subscription so callers receive typed events and a promise that
+// resolves when the stream ends (signal abort or server close).
+async function consumeSSE<T extends { type: string }>(
+  stream: AsyncGenerator<unknown>,
+  isEvent: (value: unknown) => value is T,
+  onEvent: (event: T) => void,
+): Promise<void> {
+  for await (const payload of stream) {
+    if (isEvent(payload)) onEvent(payload)
+  }
+}
+
+function isTypedEvent(value: unknown): value is { type: string } {
+  return !!value && typeof value === 'object' && 'type' in value
+    && typeof (value as { type: unknown }).type === 'string'
+    && (value as { type: string }).type.trim().length > 0
+}
+
+export async function streamSessionMessageEvents(
+  botId: string,
+  sessionId: string,
+  signal: AbortSignal,
+  onEvent: (event: SessionMessageStreamEvent) => void,
+): Promise<void> {
+  const bid = botId.trim()
+  const sid = sessionId.trim()
+  if (!bid) throw new Error('bot id is required')
+  if (!sid) throw new Error('session id is required')
+
+  const { stream } = await getBotsByBotIdSessionsBySessionIdMessagesEvents({
+    path: { bot_id: bid, session_id: sid },
+    signal,
+    // The SDK's built-in reconnect would race the store's per-session
+    // lifecycle; we drive retries from the caller via useRetryingStream.
+    sseMaxRetryAttempts: 1,
+  })
+
+  await consumeSSE(stream, (value): value is SessionMessageStreamEvent => isTypedEvent(value), onEvent)
+}
+
+export async function streamBotSessionsActivityEvents(
   botId: string,
   signal: AbortSignal,
-  onEvent: (event: MessageStreamEvent) => void,
-  since?: string,
+  onEvent: (event: BotSessionActivityEvent) => void,
 ): Promise<void> {
-  const id = botId.trim()
-  if (!id) throw new Error('bot id is required')
+  const bid = botId.trim()
+  if (!bid) throw new Error('bot id is required')
 
-  const query: Record<string, string> = {}
-  if (since?.trim()) query.since = since.trim()
-
-  const response = await client.get({
-    url: '/bots/{bot_id}/messages/events',
-    path: { bot_id: id },
-    query,
-    parseAs: 'stream',
+  const { stream } = await getBotsByBotIdSessionsEvents({
+    path: { bot_id: bid },
     signal,
-    throwOnError: true,
+    sseMaxRetryAttempts: 1,
   })
-  const body = response.data as ReadableStream<Uint8Array> | null
 
-  if (!body) throw new Error('No response body')
-
-  await readSSEStream(body, (payload) => {
-    try {
-      const parsed = JSON.parse(payload)
-      if (!parsed || typeof parsed !== 'object' || !('type' in parsed)) return
-      if (typeof parsed.type !== 'string' || !parsed.type.trim()) return
-      onEvent(parsed as MessageStreamEvent)
-    } catch {
-      // Ignore unparsable payloads
-    }
-  })
+  await consumeSSE(stream, (value): value is BotSessionActivityEvent => isTypedEvent(value), onEvent)
 }

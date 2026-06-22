@@ -1,19 +1,13 @@
-// Cross-window Pinia Colada query-cache synchronization.
-//
-// Desktop runs chat and settings as two separate BrowserWindows, each with
-// its own Vue/Pinia/PiniaColada instance. A mutation performed in one
-// window therefore only invalidates that window's in-memory query cache —
-// e.g. creating a bot in settings leaves the chat window's bot list stale
-// until the user manually reloads.
+// Pinia Colada query-cache synchronization for desktop renderer hosts.
 //
 // We wrap `queryCache.invalidateQueries` so every local invalidation also
 // asks the main process to broadcast the (serializable) filter to every
-// other BrowserWindow. Sibling windows replay the invalidation against
+// other renderer host. Sibling renderers replay the invalidation against
 // their own caches via the un-wrapped original method, which avoids
 // re-broadcasting and prevents echo loops.
 
 import type { useQueryCache } from '@pinia/colada'
-import type { CrossWindowInvalidatePayload } from '../../preload'
+import type { RendererInvalidatePayload } from '../../preload'
 
 type QueryCache = ReturnType<typeof useQueryCache>
 type InvalidateQueries = QueryCache['invalidateQueries']
@@ -23,15 +17,15 @@ type InvalidateRefetch = Parameters<InvalidateQueries>[1]
 // Pull only structured-clone-safe fields off the filter. If the caller
 // passed a `predicate` function we can't ship it across the IPC boundary;
 // in that case we skip the broadcast (returning `null`) — the local
-// invalidation still happens, only the cross-window mirror is dropped.
+// invalidation still happens, only the broadcast mirror is dropped.
 function toSerializableFilter(
   filters: InvalidateFilters,
-): CrossWindowInvalidatePayload['filters'] | null {
+): RendererInvalidatePayload['filters'] | null {
   if (filters == null) return undefined
   const raw = filters as Record<string, unknown>
   if (typeof raw.predicate === 'function') return null
 
-  const out: NonNullable<CrossWindowInvalidatePayload['filters']> = {}
+  const out: NonNullable<RendererInvalidatePayload['filters']> = {}
   if ('key' in raw && raw.key !== undefined) {
     try {
       out.key = JSON.parse(JSON.stringify(raw.key)) as unknown
@@ -46,12 +40,12 @@ function toSerializableFilter(
   return out
 }
 
-function toSerializableRefetch(refetch: InvalidateRefetch): CrossWindowInvalidatePayload['refetchActive'] {
+function toSerializableRefetch(refetch: InvalidateRefetch): RendererInvalidatePayload['refetchActive'] {
   if (refetch === true || refetch === false || refetch === 'all') return refetch
   return undefined
 }
 
-export function setupCrossWindowCacheSync(queryCache: QueryCache): void {
+export function setupRendererCacheSync(queryCache: QueryCache): void {
   const desktop = window.api?.desktop
   if (!desktop || typeof desktop.broadcastInvalidate !== 'function' || typeof desktop.onInvalidate !== 'function') {
     return

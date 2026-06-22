@@ -115,7 +115,7 @@ func TestValidateACPCreatePolicy(t *testing.T) {
 			svc := NewService(nil, acpPolicyQueries{
 				bot:      tt.bot,
 				sessions: tt.sessions,
-			})
+			}, nil)
 			err := svc.validateACPCreatePolicy(context.Background(), botID, tt.meta)
 			if tt.wantErr == "" {
 				if err != nil {
@@ -145,7 +145,7 @@ func TestCreateACPAgentSessionRunsValidationAndPersistsType(t *testing.T) {
 			}),
 		},
 	}
-	svc := NewService(nil, queries)
+	svc := NewService(nil, queries, nil)
 
 	created, err := svc.Create(context.Background(), CreateInput{
 		BotID: botID,
@@ -185,7 +185,7 @@ func TestCreateACPAgentSessionDefaultsProjectPath(t *testing.T) {
 			}),
 		},
 	}
-	svc := NewService(nil, queries)
+	svc := NewService(nil, queries, nil)
 
 	created, err := svc.Create(context.Background(), CreateInput{
 		BotID: botID,
@@ -228,7 +228,7 @@ func TestUpdateTypeAndMetadataACPAgentRunsPolicy(t *testing.T) {
 			Type:  TypeACPAgent,
 		},
 	}
-	svc := NewService(nil, queries)
+	svc := NewService(nil, queries, nil)
 
 	updated, err := svc.UpdateTypeAndMetadata(context.Background(), sessionID, TypeACPAgent, map[string]any{
 		"acp_agent_id": acpprofile.AgentCodexID,
@@ -355,7 +355,7 @@ func (s *pagedQueriesStub) ListSessionsByBotAndCreatedByUserPaged(_ context.Cont
 
 func TestListByBotPagedForwardsParams(t *testing.T) {
 	stub := &pagedQueriesStub{}
-	svc := NewService(nil, stub)
+	svc := NewService(nil, stub, nil)
 	botID := "11111111-1111-1111-1111-111111111111"
 	cursorID := "22222222-2222-2222-2222-222222222222"
 	cursorAt := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
@@ -386,7 +386,7 @@ func TestListByBotPagedForwardsParams(t *testing.T) {
 
 func TestListByBotPagedZeroCursorSkipsCursorFilter(t *testing.T) {
 	stub := &pagedQueriesStub{}
-	svc := NewService(nil, stub)
+	svc := NewService(nil, stub, nil)
 
 	if _, err := svc.ListByBotPaged(context.Background(), "11111111-1111-1111-1111-111111111111", []string{TypeChat}, SessionCursor{}, 10); err != nil {
 		t.Fatalf("ListByBotPaged: %v", err)
@@ -410,7 +410,7 @@ func TestListByBotPagedMapsRowsToSessions(t *testing.T) {
 			UpdatedAt: pgtype.Timestamptz{Time: updated, Valid: true},
 		}},
 	}
-	svc := NewService(nil, stub)
+	svc := NewService(nil, stub, nil)
 
 	got, err := svc.ListByBotPaged(context.Background(), "11111111-1111-1111-1111-111111111111", []string{TypeChat}, SessionCursor{}, 10)
 	if err != nil {
@@ -432,7 +432,7 @@ func TestListByBotPagedMapsRowsToSessions(t *testing.T) {
 
 func TestListByBotAndCreatedByUserPagedForwardsUserScope(t *testing.T) {
 	stub := &pagedQueriesStub{}
-	svc := NewService(nil, stub)
+	svc := NewService(nil, stub, nil)
 	botID := "11111111-1111-1111-1111-111111111111"
 	userID := "44444444-4444-4444-4444-444444444444"
 
@@ -470,7 +470,7 @@ func TestSessionCursorIsZeroDistinguishesPartialFromEmpty(t *testing.T) {
 
 func TestListByBotPagedRejectsPartialCursor(t *testing.T) {
 	stub := &pagedQueriesStub{}
-	svc := NewService(nil, stub)
+	svc := NewService(nil, stub, nil)
 	botID := "11111111-1111-1111-1111-111111111111"
 
 	_, err := svc.ListByBotPaged(context.Background(), botID, []string{TypeChat},

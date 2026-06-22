@@ -5,10 +5,11 @@
     disable-default-shortcut
   >
     <!-- Fixed width, never w-fit: the panel must not be sized by its content, or a
-         long back label / name would stretch the whole sidebar. Width is pinned per
-         breakpoint and inner text truncates inside it. -->
+         long back label / name would stretch the whole sidebar. Web keeps
+         responsive widths; desktop matches SettingsSidebar's fixed 15rem width. -->
     <Sidebar
-      class="relative! **:[[role=navigation]]:relative! sidebar-container h-full! w-48! lg:w-52! xl:w-60! border-0! [&_[data-sidebar=sidebar]]:bg-transparent!"
+      class="relative! **:[[role=navigation]]:relative! sidebar-container h-full! border-0! [&_[data-sidebar=sidebar]]:bg-transparent!"
+      :class="desktopShell ? 'w-60!' : 'w-48! lg:w-52! xl:w-60!'"
     >
       <SidebarContent
         class="overflow-hidden h-full flex flex-col"
@@ -93,7 +94,7 @@
 
 <script setup lang="ts">
 import { Menu } from 'lucide-vue-next'
-import {  ref } from 'vue'
+import { inject, ref, useSlots } from 'vue'
 import {
   Sheet,
   SheetContent,
@@ -108,7 +109,7 @@ import {
   SidebarInset,
   ScrollArea
 } from '@memohai/ui'
-import { useSlots } from 'vue'
+import { DesktopShellKey } from '@/lib/desktop-shell'
 
 withDefaults(defineProps<{
   // When true, this layout acts as the primary (only) sidebar: it drops the
@@ -120,6 +121,7 @@ withDefaults(defineProps<{
 })
 
 const slots=useSlots()
+const desktopShell = inject(DesktopShellKey, false)
 
 const mobileOpen = ref(false)
 </script>

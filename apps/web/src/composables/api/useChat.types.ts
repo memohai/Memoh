@@ -46,16 +46,60 @@ export interface Message {
   created_at?: string
 }
 
-export interface MessageStreamEvent {
-  type: string
+// Per-session SSE: `/bots/{bot_id}/sessions/{session_id}/messages/events`.
+// Server pushes a small backlog of `message_created` events followed by live
+// `message_created` / `session_title_updated` events scoped to this session
+// only. `ping` is a server heartbeat.
+export interface SessionMessageCreatedEvent {
+  type: 'message_created'
   bot_id?: string
-  message?: Message
-  session_id?: string
-  title?: string
-  event?: string
-  task?: UIBackgroundTask
-  stream?: UIStreamEvent
+  message: Message
 }
+
+export interface SessionTitleUpdatedEvent {
+  type: 'session_title_updated'
+  bot_id?: string
+  session_id: string
+  title: string
+}
+
+export interface SessionPingEvent {
+  type: 'ping'
+}
+
+export type SessionMessageStreamEvent =
+  | SessionMessageCreatedEvent
+  | SessionTitleUpdatedEvent
+  | SessionPingEvent
+
+// Bot-wide activity SSE: `/bots/{bot_id}/sessions/events`. Carries identifier
+// + minimal metadata for sidebar live-sort; never includes message bodies.
+export interface SessionTouchedEvent {
+  type: 'session_touched'
+  session_id: string
+  updated_at?: string
+}
+
+export interface SessionTitleChangedEvent {
+  type: 'session_title_changed'
+  session_id: string
+  title: string
+}
+
+export interface SessionCreatedEvent {
+  type: 'session_created'
+  session_id: string
+  // `type` here is the session kind (chat | discuss | acp_agent), already
+  // filtered server-side to user-facing types.
+  session_type?: string
+  title?: string
+}
+
+export type BotSessionActivityEvent =
+  | SessionTouchedEvent
+  | SessionTitleChangedEvent
+  | SessionCreatedEvent
+  | SessionPingEvent
 
 export interface FetchMessagesOptions {
   limit?: number

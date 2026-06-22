@@ -14,8 +14,8 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", default-features = false, features = ["derive", "std", "help", "usage"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tokio = { version = "1", features = ["rt", "macros", "time"] }
-atspi = { version = "0.30", features = ["tokio"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+futures-lite = "2"
+atspi = { version = "0.30", features = ["zbus"] }

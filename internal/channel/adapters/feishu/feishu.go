@@ -129,6 +129,7 @@ func (*FeishuAdapter) Descriptor() channel.Descriptor {
 		DisplayName: "Feishu",
 		Capabilities: channel.ChannelCapabilities{
 			Text:           true,
+			Markdown:       true,
 			RichText:       true,
 			Attachments:    true,
 			Media:          true,
@@ -136,6 +137,9 @@ func (*FeishuAdapter) Descriptor() channel.Descriptor {
 			Reply:          true,
 			Streaming:      true,
 			BlockStreaming: true,
+		},
+		OutboundPolicy: channel.OutboundPolicy{
+			RichTextChunkLimit: feishuStreamMaxRunes,
 		},
 		ConfigSchema: channel.ConfigSchema{
 			Version: 2,
@@ -581,15 +585,10 @@ func (a *FeishuAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg
 		return nil
 	}
 
-	text := strings.TrimSpace(msg.Message.Message.PlainText())
-	if text == "" {
-		return errors.New("message is required")
-	}
-	content, err := buildFeishuCardContent(text)
+	msgType, content, err := buildFeishuOutboundContent(msg.Message.Message)
 	if err != nil {
 		return err
 	}
-	msgType := larkim.MsgTypeInteractive
 
 	reqBuilder := larkim.NewCreateMessageReqBodyBuilder().
 		ReceiveId(receiveID).
@@ -617,6 +616,48 @@ func (a *FeishuAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg
 
 	resp, err := client.Im.Message.Create(ctx, req)
 	return a.handleResponse(cfg.ID, resp, err)
+}
+
+func buildFeishuOutboundContent(msg channel.Message) (string, string, error) {
+	if len(msg.Parts) > 0 {
+		if body := renderFeishuMessagePartsLarkMD(msg); body != "" {
+			if len([]rune(body)) > feishuStreamMaxRunes {
+				content, err := buildFeishuTextContent(normalizeFeishuStreamText(channel.RenderPartsAsPlain(msg.Parts)))
+				if err != nil {
+					return "", "", err
+				}
+				return larkim.MsgTypeText, content, nil
+			}
+			content, err := buildFeishuCardContent(body)
+			if err != nil {
+				return "", "", err
+			}
+			return larkim.MsgTypeInteractive, content, nil
+		}
+	}
+	body := strings.TrimSpace(msg.PlainText())
+	if body == "" {
+		return "", "", errors.New("message is required")
+	}
+	var content string
+	var err error
+	if msg.Format == channel.MessageFormatPlain {
+		content, err = buildFeishuPlainCardContent(body)
+	} else {
+		content, err = buildFeishuCardContent(body)
+	}
+	if err != nil {
+		return "", "", err
+	}
+	return larkim.MsgTypeInteractive, content, nil
+}
+
+func buildFeishuTextContent(body string) (string, error) {
+	content, err := json.Marshal(map[string]string{"text": body})
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal content: %w", err)
+	}
+	return string(content), nil
 }
 
 // OpenStream opens a Feishu streaming session.

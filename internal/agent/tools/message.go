@@ -49,6 +49,10 @@ func (*MessageProvider) Usage(_ context.Context, session SessionContext, availab
 				parts = append(parts, sendRef+": Send a message, file, or attachment. Specify `platform` and `target` in this session.")
 			}
 		}
+		parts = append(parts, "Use `message.parts` only when a messaging tool needs precise structured output such as link/code_block/mention/heading/blockquote/list_item parts or inline styles; keep ordinary prose and Markdown in `text`.")
+		if messagingSessionSupportsMarkdownMath(session) {
+			parts = append(parts, "For Telegram targets, math formulas in Markdown text can use `$...$` for inline LaTeX and `$$...$$` for display LaTeX; do not wrap formulas in code blocks unless you want to show source code.")
+		}
 	}
 	if reactRef, ok := available.Ref(ToolReact()); ok {
 		if session.CanOmitMessagingTarget() {
@@ -72,7 +76,8 @@ func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sd
 			Name:        ToolSend().String(),
 			Description: sendDescription,
 			Parameters: map[string]any{
-				"type": "object",
+				"type":                 "object",
+				"additionalProperties": false,
 				"properties": map[string]any{
 					"bot_id":   map[string]any{"type": "string", "description": "Bot ID, optional and defaults to current bot"},
 					"platform": map[string]any{"type": "string", "description": sendPlatformDescription},
@@ -82,14 +87,9 @@ func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sd
 					"attachments": map[string]any{
 						"type":        "array",
 						"description": "File paths, URLs, data URLs, or attachment objects to attach.",
-						"items": map[string]any{
-							"anyOf": []any{
-								map[string]any{"type": "string"},
-								map[string]any{"type": "object"},
-							},
-						},
+						"items":       sendAttachmentItemSchema(),
 					},
-					"message": map[string]any{"type": "object", "description": "Structured message payload with text/parts/attachments"},
+					"message": sendMessageObjectSchema(),
 				},
 				"required": sendRequired,
 			},
@@ -121,6 +121,156 @@ func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sd
 		})
 	}
 	return tools, nil
+}
+
+func sendMessageObjectSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"description":          "Structured message payload. Use text for ordinary messages; use parts only when you need explicit links, code blocks, mentions, emoji, headings, quotes, list items, or inline styles.",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"format": map[string]any{
+				"type":        "string",
+				"description": "Rendering hint for text. Use markdown for ordinary Markdown text; use rich only with parts.",
+				"enum":        []any{"plain", "markdown", "rich"},
+			},
+			"text": map[string]any{
+				"type":        "string",
+				"description": "Message body. Prefer this for ordinary prose and Markdown replies.",
+			},
+			"parts": map[string]any{
+				"type":        "array",
+				"description": "Structured rich body. Use only for explicit link/code_block/mention/emoji/heading/blockquote/list_item parts or styled spans.",
+				"items":       sendMessagePartSchema(),
+			},
+			"attachments": map[string]any{
+				"type":        "array",
+				"description": "File paths, URLs, data URLs, or attachment objects to attach.",
+				"items":       sendAttachmentItemSchema(),
+			},
+			"actions": map[string]any{
+				"type":        "array",
+				"description": "Optional action buttons. URL actions render only on channels with button support.",
+				"items": map[string]any{
+					"type":                 "object",
+					"additionalProperties": false,
+					"required":             []string{"label", "url"},
+					"properties": map[string]any{
+						"type":  map[string]any{"type": "string"},
+						"label": map[string]any{"type": "string"},
+						"url":   map[string]any{"type": "string"},
+						"row":   map[string]any{"type": "integer"},
+					},
+				},
+			},
+			"reply": map[string]any{
+				"type":                 "object",
+				"description":          "Reply reference; normally use the top-level reply_to shortcut instead.",
+				"additionalProperties": false,
+				"required":             []string{"message_id"},
+				"properties": map[string]any{
+					"message_id": map[string]any{"type": "string"},
+				},
+			},
+		},
+	}
+}
+
+func sendAttachmentItemSchema() map[string]any {
+	return map[string]any{
+		"anyOf": []any{
+			map[string]any{"type": "string"},
+			sendAttachmentObjectSchema(),
+		},
+	}
+}
+
+func sendAttachmentObjectSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"anyOf": []any{
+			map[string]any{"required": []string{"path"}},
+			map[string]any{"required": []string{"url"}},
+			map[string]any{"required": []string{"base64"}},
+			map[string]any{"required": []string{"content_hash"}},
+			map[string]any{"required": []string{"platform_key"}},
+		},
+		"properties": map[string]any{
+			"type": map[string]any{
+				"type": "string",
+				"enum": []any{
+					string(channel.AttachmentImage),
+					string(channel.AttachmentAudio),
+					string(channel.AttachmentVideo),
+					string(channel.AttachmentVoice),
+					string(channel.AttachmentFile),
+					string(channel.AttachmentGIF),
+				},
+			},
+			"base64":          map[string]any{"type": "string"},
+			"path":            map[string]any{"type": "string"},
+			"url":             map[string]any{"type": "string"},
+			"platform_key":    map[string]any{"type": "string"},
+			"source_platform": map[string]any{"type": "string"},
+			"content_hash":    map[string]any{"type": "string"},
+			"name":            map[string]any{"type": "string"},
+			"mime":            map[string]any{"type": "string"},
+			"size":            map[string]any{"type": "integer"},
+			"duration_ms":     map[string]any{"type": "integer"},
+			"width":           map[string]any{"type": "integer"},
+			"height":          map[string]any{"type": "integer"},
+			"thumbnail_url":   map[string]any{"type": "string"},
+			"caption":         map[string]any{"type": "string"},
+			"metadata":        map[string]any{"type": "object"},
+		},
+	}
+}
+
+func sendMessagePartSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []any{"type"},
+		"properties": map[string]any{
+			"type": map[string]any{
+				"type": "string",
+				"enum": []any{"text", "link", "code_block", "mention", "emoji", "heading", "blockquote", "list_item"},
+			},
+			"text": map[string]any{
+				"type":        "string",
+				"description": "Visible text for text/code_block/mention/emoji/heading/blockquote/list_item parts. Optional label for link parts; required for mention parts.",
+			},
+			"url": map[string]any{
+				"type":        "string",
+				"description": "URL for link parts.",
+			},
+			"styles": map[string]any{
+				"type":        "array",
+				"description": "Inline styles for text-like parts.",
+				"items": map[string]any{
+					"type": "string",
+					"enum": []any{"bold", "italic", "strikethrough", "code", "underline", "spoiler"},
+				},
+			},
+			"language": map[string]any{
+				"type":        "string",
+				"description": "Language hint for code_block parts.",
+			},
+			"channel_identity_id": map[string]any{
+				"type":        "string",
+				"description": "Platform identity ID for mention parts when known.",
+			},
+			"emoji": map[string]any{
+				"type":        "string",
+				"description": "Emoji fallback for emoji parts.",
+			},
+		},
+	}
+}
+
+func messagingSessionSupportsMarkdownMath(session SessionContext) bool {
+	return strings.EqualFold(strings.TrimSpace(session.CurrentPlatform), "telegram")
 }
 
 func sendToolPromptMetadata(session SessionContext) (description string, platformDescription string, targetDescription string, required []string) {

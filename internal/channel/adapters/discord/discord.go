@@ -20,8 +20,12 @@ import (
 )
 
 const (
-	inboundDedupTTL  = time.Minute
-	discordMaxLength = 2000
+	inboundDedupTTL            = time.Minute
+	discordMaxLength           = 2000
+	discordMaxURLActionButtons = 25
+	discordMaxURLActionLabel   = 80
+	discordMaxURLActionURL     = 512
+	discordMaxAllowedMentions  = 100
 )
 
 // assetOpener reads stored asset bytes by content hash.
@@ -68,6 +72,8 @@ func (*DiscordAdapter) Descriptor() channel.Descriptor {
 		Capabilities: channel.ChannelCapabilities{
 			Text:           true,
 			Markdown:       true,
+			RichText:       true,
+			URLButtons:     true,
 			Reply:          true,
 			Attachments:    true,
 			Media:          true,
@@ -283,12 +289,31 @@ func (a *DiscordAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, ms
 	return sendDiscordMessage(ctx, session, channelID, msg)
 }
 
+func (*DiscordAdapter) ValidatePreparedOutbound(_ context.Context, _ channel.ChannelConfig, _ string, msg channel.PreparedOutboundMessage) error {
+	return validateDiscordPreparedOutbound(msg)
+}
+
 func sendDiscordMessage(ctx context.Context, session *discordgo.Session, channelID string, msg channel.PreparedOutboundMessage) error {
-	content := truncateDiscordText(msg.Message.Message.Text)
+	if err := validateDiscordPreparedOutbound(msg); err != nil {
+		return err
+	}
+	body := renderDiscordMessagePartsContent(msg.Message.Message)
+	if body == "" {
+		body = msg.Message.Message.Text
+	}
+	content := truncateDiscordText(body)
 
 	// Build message send parameters
 	messageSend := &discordgo.MessageSend{
-		Content: content,
+		Content:         content,
+		AllowedMentions: discordAllowedMentionsForMessage(msg.Message.Message),
+	}
+	if len(msg.Message.Message.Actions) > 0 {
+		components, err := discordURLActionComponents(msg.Message.Message.Actions)
+		if err != nil {
+			return err
+		}
+		messageSend.Components = components
 	}
 
 	if msg.Message.Message.Reply != nil && msg.Message.Message.Reply.MessageID != "" {
@@ -317,12 +342,123 @@ func sendDiscordMessage(ctx context.Context, session *discordgo.Session, channel
 	}
 
 	// Validate: must have content or files
-	if messageSend.Content == "" && len(messageSend.Files) == 0 {
+	if messageSend.Content == "" && len(messageSend.Files) == 0 && len(messageSend.Components) == 0 {
 		return errors.New("cannot send empty message: no content and no valid attachments")
 	}
 
 	_, err := session.ChannelMessageSendComplex(channelID, messageSend)
 	return err
+}
+
+func validateDiscordPreparedOutbound(msg channel.PreparedOutboundMessage) error {
+	body := renderDiscordMessagePartsContent(msg.Message.Message)
+	if body == "" {
+		body = msg.Message.Message.Text
+	}
+	content := truncateDiscordText(body)
+	components := []discordgo.MessageComponent(nil)
+	if len(msg.Message.Message.Actions) > 0 {
+		var err error
+		components, err = discordURLActionComponents(msg.Message.Message.Actions)
+		if err != nil {
+			return err
+		}
+	}
+	if len(msg.Message.Attachments) > 0 {
+		for _, att := range msg.Message.Attachments {
+			if att.Kind != channel.PreparedAttachmentUpload {
+				return fmt.Errorf("discord attachment requires upload source, got %s", att.Kind)
+			}
+			if att.Open == nil {
+				return errors.New("discord attachment upload is not openable")
+			}
+		}
+		return nil
+	}
+	if content == "" && len(components) == 0 {
+		return errors.New("cannot send empty message: no content and no valid attachments")
+	}
+	return nil
+}
+
+func discordURLActionComponents(actions []channel.Action) ([]discordgo.MessageComponent, error) {
+	if len(actions) == 0 {
+		return nil, nil
+	}
+	if len(actions) > discordMaxURLActionButtons {
+		return nil, fmt.Errorf("discord actions support at most %d url buttons", discordMaxURLActionButtons)
+	}
+	rows := make([]discordgo.MessageComponent, 0, (len(actions)+4)/5)
+	buttons := make([]discordgo.MessageComponent, 0, 5)
+	flush := func() {
+		if len(buttons) == 0 {
+			return
+		}
+		rows = append(rows, discordgo.ActionsRow{Components: buttons})
+		buttons = make([]discordgo.MessageComponent, 0, 5)
+	}
+	for _, action := range actions {
+		label := strings.TrimSpace(action.Label)
+		rawURL := strings.TrimSpace(action.URL)
+		if strings.TrimSpace(action.Value) != "" || rawURL == "" {
+			return nil, errors.New("discord actions support url buttons only")
+		}
+		if !channel.IsHTTPURL(rawURL) {
+			return nil, errors.New("discord action url must be http(s)")
+		}
+		if label == "" {
+			label = rawURL
+		}
+		if utf8.RuneCountInString(rawURL) > discordMaxURLActionURL {
+			return nil, fmt.Errorf("discord action url must be at most %d characters", discordMaxURLActionURL)
+		}
+		buttons = append(buttons, discordgo.Button{
+			Label: truncateDiscordTextRunes(label, discordMaxURLActionLabel),
+			Style: discordgo.LinkButton,
+			URL:   rawURL,
+		})
+		if len(buttons) == 5 {
+			flush()
+		}
+	}
+	flush()
+	return rows, nil
+}
+
+func discordAllowedMentionsNone() *discordgo.MessageAllowedMentions {
+	return &discordgo.MessageAllowedMentions{Parse: []discordgo.AllowedMentionType{}}
+}
+
+func discordAllowedMentionsForMessage(msg channel.Message) *discordgo.MessageAllowedMentions {
+	allowed := discordAllowedMentionsNone()
+	allowed.Users = discordMentionUserIDs(msg.Parts)
+	return allowed
+}
+
+func discordMentionUserIDs(parts []channel.MessagePart) []string {
+	if len(parts) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	ids := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part.Type != channel.MessagePartMention {
+			continue
+		}
+		id := strings.TrimSpace(part.ChannelIdentityID)
+		if !isSafeDiscordMentionID(id) {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+		if len(ids) == discordMaxAllowedMentions {
+			break
+		}
+	}
+	return ids
 }
 
 func truncateDiscordText(text string) string {
@@ -331,6 +467,17 @@ func truncateDiscordText(text string) string {
 	}
 	runes := []rune(text)
 	return string(runes[:discordMaxLength-3]) + "..."
+}
+
+func truncateDiscordTextRunes(text string, limit int) string {
+	if limit <= 0 || utf8.RuneCountInString(text) <= limit {
+		return text
+	}
+	runes := []rune(text)
+	if limit <= 3 {
+		return string(runes[:limit])
+	}
+	return string(runes[:limit-3]) + "..."
 }
 
 // discordPreparedAttachmentToFile converts a prepared attachment to discordgo.File.

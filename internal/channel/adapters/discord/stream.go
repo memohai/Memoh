@@ -68,11 +68,17 @@ func (s *discordOutboundStream) Push(ctx context.Context, event channel.Prepared
 		bufText := strings.TrimSpace(s.buffer.String())
 		s.mu.Unlock()
 		finalText := bufText
-		if finalText == "" && event.Final != nil && !event.Final.Message.Message.IsEmpty() {
-			finalText = strings.TrimSpace(event.Final.Message.Message.PlainText())
+		var finalMessage *channel.Message
+		if event.Final != nil && !event.Final.Message.Message.IsEmpty() {
+			finalText = renderDiscordStreamFinalText(event.Final.Message.Message, bufText)
+			finalMessage = &event.Final.Message.Message
 		}
 		if finalText != "" {
-			return s.finalizeMessage(finalText)
+			actions := []channel.Action(nil)
+			if event.Final != nil {
+				actions = event.Final.Message.Message.Actions
+			}
+			return s.finalizeMessage(finalText, actions, finalMessage)
 		}
 		return nil
 
@@ -81,7 +87,7 @@ func (s *discordOutboundStream) Push(ctx context.Context, event channel.Prepared
 		if errText == "" {
 			return nil
 		}
-		return s.finalizeMessage("Error: " + errText)
+		return s.finalizeMessage("Error: "+errText, nil, nil)
 
 	case channel.StreamEventAttachment:
 		if len(event.Attachments) == 0 {
@@ -92,7 +98,7 @@ func (s *discordOutboundStream) Push(ctx context.Context, event channel.Prepared
 		finalText := strings.TrimSpace(s.buffer.String())
 		s.mu.Unlock()
 		if finalText != "" {
-			if err := s.finalizeMessage(finalText); err != nil {
+			if err := s.finalizeMessage(finalText, nil, nil); err != nil {
 				return err
 			}
 		}
@@ -109,7 +115,7 @@ func (s *discordOutboundStream) Push(ctx context.Context, event channel.Prepared
 		bufText := strings.TrimSpace(s.buffer.String())
 		s.mu.Unlock()
 		if bufText != "" {
-			if err := s.finalizeMessage(bufText); err != nil {
+			if err := s.finalizeMessage(bufText, nil, nil); err != nil {
 				return err
 			}
 		}
@@ -140,6 +146,16 @@ func (s *discordOutboundStream) Close(ctx context.Context) error {
 	return nil
 }
 
+func renderDiscordStreamFinalText(msg channel.Message, buffered string) string {
+	if rich := renderDiscordMessagePartsContent(msg); rich != "" {
+		return rich
+	}
+	if authoritative := strings.TrimSpace(msg.PlainText()); authoritative != "" {
+		return authoritative
+	}
+	return strings.TrimSpace(buffered)
+}
+
 func (s *discordOutboundStream) ensureMessage(text string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -149,17 +165,20 @@ func (s *discordOutboundStream) ensureMessage(text string) error {
 	}
 
 	content := truncateDiscordText(text)
+	messageSend := &discordgo.MessageSend{
+		Content:         content,
+		AllowedMentions: discordAllowedMentionsNone(),
+	}
+	if s.reply != nil && s.reply.MessageID != "" {
+		messageSend.Reference = &discordgo.MessageReference{
+			ChannelID: s.target,
+			MessageID: s.reply.MessageID,
+		}
+	}
 
 	var msg *discordgo.Message
 	var err error
-	if s.reply != nil && s.reply.MessageID != "" {
-		msg, err = s.session.ChannelMessageSendReply(s.target, content, &discordgo.MessageReference{
-			ChannelID: s.target,
-			MessageID: s.reply.MessageID,
-		})
-	} else {
-		msg, err = s.session.ChannelMessageSend(s.target, content)
-	}
+	msg, err = s.session.ChannelMessageSendComplex(s.target, messageSend)
 	if err != nil {
 		return err
 	}
@@ -184,7 +203,10 @@ func (s *discordOutboundStream) updateMessage() error {
 
 	content = truncateDiscordText(content)
 
-	_, err := s.session.ChannelMessageEdit(s.target, s.msgID, content)
+	edit := discordgo.NewMessageEdit(s.target, s.msgID)
+	edit.SetContent(content)
+	edit.AllowedMentions = discordAllowedMentionsNone()
+	_, err := s.session.ChannelMessageEditComplex(edit)
 	if err != nil {
 		return err
 	}
@@ -193,23 +215,34 @@ func (s *discordOutboundStream) updateMessage() error {
 	return nil
 }
 
-func (s *discordOutboundStream) finalizeMessage(text string) error {
+func (s *discordOutboundStream) finalizeMessage(text string, actions []channel.Action, source *channel.Message) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	text = truncateDiscordText(text)
+	components, err := discordURLActionComponents(actions)
+	if err != nil {
+		return err
+	}
+	allowedMentions := discordAllowedMentionsNone()
+	if source != nil {
+		allowedMentions = discordAllowedMentionsForMessage(*source)
+	}
 
 	if s.msgID == "" {
 		var msg *discordgo.Message
-		var err error
+		messageSend := &discordgo.MessageSend{
+			Content:         text,
+			Components:      components,
+			AllowedMentions: allowedMentions,
+		}
 		if s.reply != nil && s.reply.MessageID != "" {
-			msg, err = s.session.ChannelMessageSendReply(s.target, text, &discordgo.MessageReference{
+			messageSend.Reference = &discordgo.MessageReference{
 				ChannelID: s.target,
 				MessageID: s.reply.MessageID,
-			})
-		} else {
-			msg, err = s.session.ChannelMessageSend(s.target, text)
+			}
 		}
+		msg, err = s.session.ChannelMessageSendComplex(s.target, messageSend)
 		if err != nil {
 			return err
 		}
@@ -218,7 +251,18 @@ func (s *discordOutboundStream) finalizeMessage(text string) error {
 		return nil
 	}
 
-	_, err := s.session.ChannelMessageEdit(s.target, s.msgID, text)
+	if len(components) > 0 {
+		edit := discordgo.NewMessageEdit(s.target, s.msgID)
+		edit.SetContent(text)
+		edit.Components = &components
+		edit.AllowedMentions = allowedMentions
+		_, err := s.session.ChannelMessageEditComplex(edit)
+		return err
+	}
+	edit := discordgo.NewMessageEdit(s.target, s.msgID)
+	edit.SetContent(text)
+	edit.AllowedMentions = allowedMentions
+	_, err = s.session.ChannelMessageEditComplex(edit)
 	return err
 }
 
@@ -236,7 +280,10 @@ func (s *discordOutboundStream) sendToolCallMessage(tc *channel.StreamToolCall, 
 	}
 	if p.Status != channel.ToolCallStatusRunning && callID != "" {
 		if msgID, ok := s.lookupToolCallMessage(callID); ok {
-			if _, err := s.session.ChannelMessageEdit(s.target, msgID, text); err == nil {
+			edit := discordgo.NewMessageEdit(s.target, msgID)
+			edit.SetContent(text)
+			edit.AllowedMentions = discordAllowedMentionsNone()
+			if _, err := s.session.ChannelMessageEditComplex(edit); err == nil {
 				s.forgetToolCallMessage(callID)
 				return nil
 			}
@@ -245,14 +292,17 @@ func (s *discordOutboundStream) sendToolCallMessage(tc *channel.StreamToolCall, 
 	}
 	var msg *discordgo.Message
 	var err error
+	messageSend := &discordgo.MessageSend{
+		Content:         text,
+		AllowedMentions: discordAllowedMentionsNone(),
+	}
 	if s.reply != nil && s.reply.MessageID != "" {
-		msg, err = s.session.ChannelMessageSendReply(s.target, text, &discordgo.MessageReference{
+		messageSend.Reference = &discordgo.MessageReference{
 			ChannelID: s.target,
 			MessageID: s.reply.MessageID,
-		})
-	} else {
-		msg, err = s.session.ChannelMessageSend(s.target, text)
+		}
 	}
+	msg, err = s.session.ChannelMessageSendComplex(s.target, messageSend)
 	if err != nil {
 		return err
 	}
@@ -305,7 +355,8 @@ func (s *discordOutboundStream) sendAttachment(ctx context.Context, att channel.
 	}
 
 	messageSend := &discordgo.MessageSend{
-		Files: []*discordgo.File{file},
+		Files:           []*discordgo.File{file},
+		AllowedMentions: discordAllowedMentionsNone(),
 	}
 
 	// Add reply reference if this is the first message and we have a reply target

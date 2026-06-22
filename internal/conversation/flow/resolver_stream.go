@@ -401,13 +401,17 @@ func (r *Resolver) persistTerminalSnapshot(ctx context.Context, req conversation
 		return nil
 	}
 
-	roundMessages := prependUserMessage(req.Query, outputMessages)
+	storeReq := req
+	if rc.userMessageAlreadyInContext {
+		storeReq.UserMessagePersisted = true
+	}
+	roundMessages := prependUserMessage(storeReq.Query, outputMessages)
 
 	if rc.injectedRecords != nil && len(*rc.injectedRecords) > 0 {
 		roundMessages = interleaveInjectedMessages(roundMessages, *rc.injectedRecords)
 	}
 
-	if err := r.storeRoundWithOptions(ctx, req, roundMessages, rc.model.ID, storeRoundOptions{
+	if err := r.storeRoundWithOptions(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
 		AllowPendingToolCalls: snap.deferredToolID != "",
 	}); err != nil {
 		return err

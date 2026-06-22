@@ -93,6 +93,123 @@ func TestQQSendTextReply(t *testing.T) {
 	}
 }
 
+func TestQQSendMarkdownFallsBackToPlainWhenRuntimeMarkdownDisabled(t *testing.T) {
+	t.Parallel()
+
+	var messageBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/app/getAppAccessToken":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token": "token-1",
+				"expires_in":   7200,
+			})
+		case "/v2/groups/group-openid/messages":
+			if err := json.NewDecoder(r.Body).Decode(&messageBody); err != nil {
+				t.Fatalf("decode message body: %v", err)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "m-md-fallback"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	adapter := newTestQQAdapter(server)
+	err := sendPreparedQQ(t, adapter, channel.ChannelConfig{
+		ID:    "cfg-md-fallback",
+		BotID: "bot-md-fallback",
+		Credentials: map[string]any{
+			"appId":           "1025",
+			"clientSecret":    "secret",
+			"markdownSupport": false,
+		},
+	}, nil, channel.OutboundMessage{
+		Target: "group:group-openid",
+		Message: channel.Message{
+			Format: channel.MessageFormatMarkdown,
+			Text:   "**bold** and `code`",
+		},
+	})
+	if err != nil {
+		t.Fatalf("send markdown fallback: %v", err)
+	}
+
+	if messageBody["msg_type"] != float64(0) {
+		t.Fatalf("unexpected msg_type: %#v", messageBody["msg_type"])
+	}
+	if messageBody["content"] != "bold and code" {
+		t.Fatalf("unexpected content: %#v", messageBody["content"])
+	}
+}
+
+func TestQQOutboundCapabilitiesReflectRuntimeMarkdownGate(t *testing.T) {
+	t.Parallel()
+
+	adapter := &QQAdapter{}
+	base := adapter.Descriptor().Capabilities
+	cases := []struct {
+		name            string
+		credentials     map[string]any
+		target          string
+		wantMarkdown    bool
+		wantAttachments bool
+		wantMedia       bool
+	}{
+		{
+			name: "group markdown enabled",
+			credentials: map[string]any{
+				"appId":           "1024",
+				"clientSecret":    "secret",
+				"markdownSupport": true,
+			},
+			target:          "group:group-openid",
+			wantMarkdown:    true,
+			wantAttachments: true,
+			wantMedia:       true,
+		},
+		{
+			name: "group markdown disabled",
+			credentials: map[string]any{
+				"appId":           "1024",
+				"clientSecret":    "secret",
+				"markdownSupport": false,
+			},
+			target:          "group:group-openid",
+			wantMarkdown:    false,
+			wantAttachments: true,
+			wantMedia:       true,
+		},
+		{
+			name: "channel target",
+			credentials: map[string]any{
+				"appId":           "1024",
+				"clientSecret":    "secret",
+				"markdownSupport": true,
+			},
+			target:          "channel:channel-id",
+			wantMarkdown:    false,
+			wantAttachments: false,
+			wantMedia:       false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			caps := adapter.ResolveOutboundCapabilities(channel.ChannelConfig{Credentials: tc.credentials}, tc.target, base)
+			if caps.Markdown != tc.wantMarkdown {
+				t.Fatalf("Markdown = %v, want %v", caps.Markdown, tc.wantMarkdown)
+			}
+			if caps.Attachments != tc.wantAttachments {
+				t.Fatalf("Attachments = %v, want %v", caps.Attachments, tc.wantAttachments)
+			}
+			if caps.Media != tc.wantMedia {
+				t.Fatalf("Media = %v, want %v", caps.Media, tc.wantMedia)
+			}
+		})
+	}
+}
+
 func TestQQSendImageAttachment(t *testing.T) {
 	t.Parallel()
 

@@ -35,6 +35,103 @@ func formatTelegramOutput(text string, format channel.MessageFormat) (string, st
 	return text, ""
 }
 
+func renderTelegramMarkdownMathRichMessage(msg channel.Message) telegramInputRichMessage {
+	if len(msg.Parts) > 0 {
+		return telegramInputRichMessage{}
+	}
+	switch msg.Format {
+	case "", channel.MessageFormatPlain, channel.MessageFormatMarkdown:
+	default:
+		return telegramInputRichMessage{}
+	}
+	markdown := strings.TrimSpace(msg.PlainText())
+	if markdown == "" {
+		return telegramInputRichMessage{}
+	}
+	markdown = normalizeTelegramRichMarkdownMath(markdown)
+	if !telegramMarkdownHasMath(markdown) {
+		return telegramInputRichMessage{}
+	}
+	return telegramInputRichMessage{Markdown: markdown}
+}
+
+func normalizeTelegramRichMarkdownMath(text string) string {
+	text = replacePairedTelegramLatexDelimiters(text, `\[`, `\]`, "$$", "$$")
+	text = replacePairedTelegramLatexDelimiters(text, `\(`, `\)`, "$", "$")
+	return text
+}
+
+func replacePairedTelegramLatexDelimiters(text, openDelim, closeDelim, richOpen, richClose string) string {
+	var b strings.Builder
+	for {
+		start := strings.Index(text, openDelim)
+		if start < 0 {
+			b.WriteString(text)
+			return b.String()
+		}
+		contentStart := start + len(openDelim)
+		endRel := strings.Index(text[contentStart:], closeDelim)
+		if endRel < 0 {
+			b.WriteString(text)
+			return b.String()
+		}
+		end := contentStart + endRel
+		b.WriteString(text[:start])
+		b.WriteString(richOpen)
+		b.WriteString(text[contentStart:end])
+		b.WriteString(richClose)
+		text = text[end+len(closeDelim):]
+	}
+}
+
+func telegramMarkdownHasMath(text string) bool {
+	if strings.Contains(text, "```math") ||
+		strings.Contains(text, "$$") ||
+		(strings.Contains(text, `\(`) && strings.Contains(text, `\)`)) ||
+		(strings.Contains(text, `\[`) && strings.Contains(text, `\]`)) {
+		return true
+	}
+	return hasTelegramInlineDollarMath(text)
+}
+
+func hasTelegramInlineDollarMath(text string) bool {
+	for i := 0; i < len(text); i++ {
+		if text[i] != '$' || isEscapedTelegramMarkdownByte(text, i) {
+			continue
+		}
+		if i+1 >= len(text) || text[i+1] == '$' || isTelegramMarkdownSpace(text[i+1]) || isTelegramMarkdownDigit(text[i+1]) {
+			continue
+		}
+		for j := i + 1; j < len(text); j++ {
+			if text[j] != '$' || isEscapedTelegramMarkdownByte(text, j) {
+				continue
+			}
+			content := strings.TrimSpace(text[i+1 : j])
+			if content != "" && !strings.ContainsAny(content, "\r\n") {
+				return true
+			}
+			break
+		}
+	}
+	return false
+}
+
+func isEscapedTelegramMarkdownByte(text string, idx int) bool {
+	backslashes := 0
+	for i := idx - 1; i >= 0 && text[i] == '\\'; i-- {
+		backslashes++
+	}
+	return backslashes%2 == 1
+}
+
+func isTelegramMarkdownSpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
+}
+
+func isTelegramMarkdownDigit(b byte) bool {
+	return b >= '0' && b <= '9'
+}
+
 // markdownToTelegramHTML converts standard markdown to Telegram-compatible HTML.
 //
 // Supported conversions:

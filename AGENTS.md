@@ -15,7 +15,7 @@ Deploy/server mode consists of two core services:
 | **Server** (Backend) | Go + Echo | 8080 | Main service: REST API, auth, database, container management, **in-process AI agent** |
 | **Web** (Frontend) | Vue 3 + Vite | 8082 | Management UI: visual configuration for Bots, Models, Channels, etc. |
 
-The native desktop client is a separate distribution boundary, not just a hosted Web shell. `apps/desktop` reuses `@memohai/web` modules, but owns Electron windows, system tray behavior, local server lifecycle, embedded Qdrant startup, bundled CLI installation, and packaged resources. In desktop mode the app starts and stops a local `memoh-server` on `127.0.0.1:18731` with its own SQLite data, provider templates, bridge runtime, and Qdrant process under the user's app data directory.
+The native desktop client is a separate distribution boundary, not just a hosted Web shell. `apps/desktop` reuses `@memohai/web` modules, but owns the Electron shell, system tray behavior, local server lifecycle, embedded Qdrant startup, bundled CLI installation, and packaged resources. In desktop mode the app starts and stops a local `memoh-server` on `127.0.0.1:18731` with its own SQLite data, provider templates, bridge runtime, and Qdrant process under the user's app data directory.
 
 Infrastructure dependencies:
 - **PostgreSQL or SQLite** — Relational data storage
@@ -43,7 +43,7 @@ Infrastructure dependencies:
 - **Icons**: lucide-vue-next + `@memohai/icon` (brand/provider icons)
 - **i18n**: vue-i18n
 - **Markdown**: markstream-vue + Shiki + Mermaid + KaTeX
-- **Desktop**: Electron 34 + [electron-vite](https://electron-vite.github.io/) 4 native client, reusing `@memohai/web` modules while managing multi-window bootstrap, local server lifecycle, embedded Qdrant, bundled CLI, tray behavior, and packaged runtime resources
+- **Desktop**: Electron 34 + [electron-vite](https://electron-vite.github.io/) 4 native client, reusing `@memohai/web` modules while managing the desktop renderer, local server lifecycle, embedded Qdrant, bundled CLI, tray behavior, and packaged runtime resources
 - **Package Manager**: pnpm monorepo
 
 ### Tooling
@@ -168,7 +168,7 @@ Memoh/
 │       ├── bridge/             #     gRPC client for in-container bridge service
 │       └── bridgepb/           #     Protobuf definitions (bridge.proto)
 ├── apps/                       # Application services
-│   ├── desktop/                #   Native Electron app (@memohai/desktop): multi-window shell, tray, local server, embedded Qdrant, bundled CLI/runtime
+│   ├── desktop/                #   Native Electron app (@memohai/desktop): renderer, tray, local server, embedded Qdrant, bundled CLI/runtime
 │   └── web/                    #   Main web app (@memohai/web, Vue 3) — see apps/web/AGENTS.md
 ├── packages/                   # Shared TypeScript libraries
 │   ├── ui/                     #   Shared UI component library (@memohai/ui)
@@ -352,7 +352,7 @@ PostgreSQL migrations live in `db/postgres/migrations/` and follow a dual-update
 ### Desktop App
 
 - `apps/desktop/` is an [electron-vite](https://electron-vite.github.io/) project (`@memohai/desktop`) with its own managed renderer bootstrap. It reuses exported `@memohai/web` pages, layouts, stores, i18n, API setup, and design tokens, but owns the Electron shell instead of importing the full web `main.ts`.
-- The desktop app boots separate Chat and Settings `BrowserWindow`s with memory-history routers, desktop shell injection, IPC-mediated settings navigation, cross-window cache sync, native window chrome, and system tray reopen/quit behavior.
+- The desktop app boots its renderer with a memory-history router, desktop shell injection, native menu/keyboard integration, native chrome, and system tray reopen/quit behavior.
 - `src/main/local-server.ts` is the local server startup gate: it prepares a local SQLite config, starts embedded Qdrant, builds or resolves the bundled `memoh-server`, runs migrations, starts the server on `127.0.0.1:18731`, and writes `local-server.pid.json` / `local-server.log` under `userData`.
 - `src/main/qdrant.ts` manages the embedded Qdrant process and per-user `qdrant/ports.json`, `qdrant.pid.json`, `config.yaml`, and storage directory. Tray Quit and normal app quit both reuse the main-process shutdown path to stop the managed server, OAuth callback proxy, and embedded Qdrant.
 - Packaging is handled by `electron-builder` (config in `apps/desktop/electron-builder.yml`); output lands in `apps/desktop/dist/`. Packaged resources include `server`, `cli`, `runtime`, `config`, provider templates, Qdrant, and GStreamer assets.

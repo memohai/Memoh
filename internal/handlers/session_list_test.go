@@ -67,7 +67,7 @@ func newListSessionHandler(t *testing.T, queries *sessionListQueries) *SessionHa
 	t.Helper()
 	return NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -320,7 +320,7 @@ func TestListSessionsCursorNotTruncatedByPermissionFilter(t *testing.T) {
 
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("user"),

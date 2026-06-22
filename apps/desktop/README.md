@@ -2,16 +2,16 @@
 
 Memoh desktop application built with [electron-vite](https://electron-vite.github.io/).
 
-The renderer owns its own `src/renderer/src/main.ts` — it imports the reusable
-building blocks from `@memohai/web` (`App.vue`, `router`, `i18n`, `api-client`,
-`style.css`) but assembles the Vue app locally. Desktop-only customization (extra
-Pinia plugins, Electron-specific stores / providers, alternate routers, etc.)
-belongs in this `main.ts`, not in `@memohai/web`.
+The renderer owns its own `src/renderer/src/main.ts`, root component, and
+router. It imports reusable building blocks from `@memohai/web` (pages,
+layouts, stores, i18n, `api-client`, and `style.css`) but assembles the Vue app
+locally. Desktop-only renderer setup belongs in this entry, not in
+`@memohai/web`.
 
 ### How the reuse is wired
 
-- `@memohai/web/package.json` exposes `App.vue`, `router`, `i18n`, `api-client`,
-  and `style.css` through its `exports` field.
+- `@memohai/web/package.json` exposes pages, layouts, stores, i18n,
+  `api-client`, and `style.css` through its `exports` field.
 - Vite (via `electron.vite.config.ts`) resolves those subpaths to the real
   files in `apps/web/src/` at bundle time.
 - `vue-tsc` is pointed at local type stubs in `src/renderer/types/web-stubs.d.ts`

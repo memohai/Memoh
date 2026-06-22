@@ -273,12 +273,13 @@ type usageInfo struct {
 }
 
 type resolvedContext struct {
-	runConfig       agentpkg.RunConfig
-	model           models.GetResponse
-	provider        sqlc.Provider
-	query           string // headerified query
-	injectedRecords *[]conversation.InjectedMessageRecord
-	estimatedTokens int // estimated input token count for compaction
+	runConfig                   agentpkg.RunConfig
+	model                       models.GetResponse
+	provider                    sqlc.Provider
+	query                       string // headerified query
+	userMessageAlreadyInContext bool
+	injectedRecords             *[]conversation.InjectedMessageRecord
+	estimatedTokens             int // estimated input token count for compaction
 }
 
 func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (resolvedContext, error) {
@@ -469,12 +470,13 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	}
 
 	return resolvedContext{
-		runConfig:       runCfg,
-		model:           chatModel,
-		provider:        provider,
-		query:           headerifiedQuery,
-		injectedRecords: injectedRecords,
-		estimatedTokens: estimatedTokens,
+		runConfig:                   runCfg,
+		model:                       chatModel,
+		provider:                    provider,
+		query:                       headerifiedQuery,
+		userMessageAlreadyInContext: usePipeline,
+		injectedRecords:             injectedRecords,
+		estimatedTokens:             estimatedTokens,
 	}, nil
 }
 
@@ -508,8 +510,12 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	}
 
 	outputMessages := sdkMessagesToModelMessages(result.Messages)
-	roundMessages := prependUserMessage(req.Query, outputMessages)
-	if err := r.storeRound(ctx, req, roundMessages, rc.model.ID); err != nil {
+	storeReq := req
+	if rc.userMessageAlreadyInContext {
+		storeReq.UserMessagePersisted = true
+	}
+	roundMessages := prependUserMessage(storeReq.Query, outputMessages)
+	if err := r.storeRound(ctx, storeReq, roundMessages, rc.model.ID); err != nil {
 		return conversation.ChatResponse{}, err
 	}
 
@@ -657,10 +663,8 @@ func (r *Resolver) canDeliverUserInputWS(eventCh chan<- WSStreamEvent) bool {
 	return r.userInput != nil && eventCh != nil
 }
 
-func supportsImageInputForModel(_ models.GetResponse) bool {
-	// Keep in-process read-media image injection available until model-level
-	// capability metadata is authoritative; ACP keeps this disabled separately.
-	return true
+func supportsImageInputForModel(m models.GetResponse) bool {
+	return m.HasCompatibility(models.CompatVision)
 }
 
 const (

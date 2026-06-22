@@ -7511,11 +7511,16 @@ paths:
       tags:
       - messages
     get:
-      description: List messages for a bot history with optional pagination
+      description: List messages for one session with optional pagination
       parameters:
       - description: Bot ID
         in: path
         name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: query
+        name: session_id
         required: true
         type: string
       - description: Limit
@@ -7545,11 +7550,15 @@ paths:
           description: Forbidden
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List bot history messages
+      summary: List session history messages
       tags:
       - messages
   /bots/{bot_id}/messages/locate:
@@ -8391,6 +8400,49 @@ paths:
       summary: Trigger immediate context compaction
       tags:
       - compaction
+  /bots/{bot_id}/sessions/{session_id}/messages/events:
+    get:
+      description: |-
+        SSE stream that pushes a server-fixed backlog of the last 50
+        messages, then streams future message_created and
+        session_title_updated events scoped to this session only.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Stream message events for one session
+      tags:
+      - messages
   /bots/{bot_id}/sessions/{session_id}/status:
     get:
       description: Get aggregated info for a chat session including message count,
@@ -8430,6 +8482,41 @@ paths:
       summary: Get session info
       tags:
       - sessions
+  /bots/{bot_id}/sessions/events:
+    get:
+      description: |-
+        Lightweight SSE for sidebar live-sort. Carries only session
+        identifiers and minimal metadata (touched timestamps, titles).
+        Never includes message bodies. Filters out internal session
+        types such as heartbeat, schedule, subagent.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Stream bot-wide sessions activity
+      tags:
+      - messages
   /bots/{bot_id}/settings:
     delete:
       description: Remove agent settings for current user

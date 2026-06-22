@@ -1535,7 +1535,7 @@ func buildChannelMessage(output conversation.AssistantOutput, capabilities chann
 	if len(output.Parts) == 0 {
 		return msg
 	}
-	if capabilities.RichText {
+	if capabilities.RichText && hasNonTrivialContentPart(output.Parts) {
 		parts := make([]channel.MessagePart, 0, len(output.Parts))
 		for _, part := range output.Parts {
 			if !contentPartHasValue(part) {
@@ -1553,6 +1553,7 @@ func buildChannelMessage(output conversation.AssistantOutput, capabilities chann
 			})
 		}
 		if len(parts) > 0 {
+			msg.Text = ""
 			msg.Parts = parts
 			msg.Format = channel.MessageFormatRich
 		}
@@ -1572,6 +1573,27 @@ func buildChannelMessage(output conversation.AssistantOutput, capabilities chann
 		}
 	}
 	return msg
+}
+
+func hasNonTrivialContentPart(parts []conversation.ContentPart) bool {
+	for _, part := range parts {
+		if !contentPartHasValue(part) {
+			continue
+		}
+		if normalizeContentPartType(part.Type) != channel.MessagePartText {
+			return true
+		}
+		if len(normalizeContentPartStyles(part.Styles)) > 0 {
+			return true
+		}
+		if strings.TrimSpace(part.URL) != "" ||
+			strings.TrimSpace(part.Language) != "" ||
+			strings.TrimSpace(part.ChannelIdentityID) != "" ||
+			strings.TrimSpace(part.Emoji) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func contentPartHasValue(part conversation.ContentPart) bool {

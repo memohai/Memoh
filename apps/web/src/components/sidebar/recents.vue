@@ -23,7 +23,7 @@
       >
         <div class="px-2 pr-3">
           <div
-            v-if="visibleSessions.length > 0"
+            v-if="sessions.length > 0"
             :style="{ position: 'relative', width: '100%', height: `${totalSize}px` }"
           >
             <!-- pb-[2px] is the seam: the pill (SessionItem) keeps its own fill,
@@ -49,8 +49,29 @@
             </div>
           </div>
 
+          <!-- Sentinel + bottom loader for cursor-paginated session history.
+               Sits AFTER the virtualizer's height spacer so it lives at the
+               natural end of the scroll content; the IntersectionObserver
+               below uses scrollEl as its root and triggers the next page
+               200px before the user actually reaches the bottom. -->
           <div
-            v-if="currentBotId && !loadingChats && visibleSessions.length === 0"
+            v-if="hasMoreSessions"
+            ref="loadMoreSentinel"
+            data-testid="load-more-sentinel"
+            class="h-px w-full"
+          />
+
+          <div
+            v-if="loadingMoreSessions"
+            class="flex justify-center py-3"
+          >
+            <LoaderCircle
+              class="size-4 animate-spin text-muted-foreground"
+            />
+          </div>
+
+          <div
+            v-if="currentBotId && !loadingChats && sessions.length === 0"
             class="px-3 py-6 text-center text-xs text-muted-foreground"
           >
             {{ t('chat.noSessions') }}
@@ -145,10 +166,10 @@ import { LoaderCircle } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useVirtualizer } from '@tanstack/vue-virtual'
+import { useIntersectionObserver } from '@vueuse/core'
 import { toast } from '@memohai/ui'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
-import { sortByRecency } from '@/store/chat-list.utils'
 import type { SessionSummary } from '@/composables/api/useChat'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
@@ -166,16 +187,19 @@ import SessionItem from './session-item.vue'
 const { t } = useI18n()
 const chatStore = useChatStore()
 const workspaceTabs = useWorkspaceTabsStore()
-const { sessions, sessionId, currentBotId, loadingChats } = storeToRefs(chatStore)
+const {
+  sessions,
+  sessionId,
+  currentBotId,
+  loadingChats,
+  hasMoreSessions,
+  loadingMoreSessions,
+} = storeToRefs(chatStore)
 
-// One recency-ordered stream of the user's real conversations. The old type
-// FILTER is gone: chat, discuss and acp_agent are the human-facing types and
-// read as a single timeline, while heartbeat/schedule/subagent are
-// system-generated runs that live in their own surfaces, not this list.
-const USER_SESSION_TYPES = new Set(['chat', 'discuss', 'acp_agent'])
-const visibleSessions = computed(() =>
-  sortByRecency(sessions.value.filter(s => USER_SESSION_TYPES.has(s.type ?? 'chat'))),
-)
+// The list is a single recency-ordered stream of the user's real conversations.
+// The server filters to chat/discuss/acp_agent (heartbeat/schedule/subagent
+// runs live in their own surfaces), and the store keeps the order by always
+// prepending upserts — no client-side filter or re-sort needed.
 
 // ---- virtualized session list ----
 // Rows are MEASURED, not pinned to a px stride: SessionItem sizes in rem (min-h-9)
@@ -185,17 +209,17 @@ const visibleSessions = computed(() =>
 const scrollEl = ref<HTMLElement | null>(null)
 const virtualizer = useVirtualizer<HTMLElement, HTMLElement>(
   computed(() => ({
-    count: visibleSessions.value.length,
+    count: sessions.value.length,
     getScrollElement: () => scrollEl.value,
     estimateSize: () => 36,
     overscan: 10,
-    getItemKey: (index: number) => visibleSessions.value[index]?.id ?? index,
+    getItemKey: (index: number) => sessions.value[index]?.id ?? index,
   })),
 )
 const totalSize = computed(() => virtualizer.value.getTotalSize())
 const virtualRows = computed(() =>
   virtualizer.value.getVirtualItems().flatMap((vi) => {
-    const session = visibleSessions.value[vi.index]
+    const session = sessions.value[vi.index]
     return session ? [{ key: String(vi.key), index: vi.index, start: vi.start, session }] : []
   }),
 )
@@ -205,6 +229,24 @@ const virtualRows = computed(() =>
 function measureRow(el: unknown) {
   if (el instanceof HTMLElement) virtualizer.value.measureElement(el)
 }
+
+// Cursor-paginated load-more: a sentinel sits at the natural bottom of the
+// scroll content and fires the next page 200px before the user reaches it.
+// The store's loadMoreSessions guards re-entry (loadingMoreSessions / cursor
+// exhaustion), so the observer can fire freely as the user scrolls.
+const loadMoreSentinel = ref<HTMLElement | null>(null)
+useIntersectionObserver(
+  loadMoreSentinel,
+  ([entry]) => {
+    if (!entry?.isIntersecting) return
+    void chatStore.loadMoreSessions()
+  },
+  {
+    root: scrollEl,
+    rootMargin: '0px 0px 200px 0px',
+    threshold: 0,
+  },
+)
 
 // Switching bots swaps the whole list; start the new bot at the top instead of
 // inheriting the previous bot's scroll offset (which could land past the end of

@@ -119,6 +119,36 @@ func requiredContainsForTest(required []string, field string) bool {
 	return false
 }
 
+func requiredAnyContainsForTest(required []any, field string) bool {
+	for _, item := range required {
+		if item == field {
+			return true
+		}
+	}
+	return false
+}
+
+func assertEnumContainsForTest(t *testing.T, raw any, values ...string) {
+	t.Helper()
+	items, ok := raw.([]any)
+	if !ok {
+		t.Fatalf("enum = %T, want []any", raw)
+	}
+	have := make(map[string]bool, len(items))
+	for _, item := range items {
+		text, ok := item.(string)
+		if !ok {
+			t.Fatalf("enum item = %T, want string", item)
+		}
+		have[text] = true
+	}
+	for _, value := range values {
+		if !have[value] {
+			t.Fatalf("enum missing %q in %#v", value, items)
+		}
+	}
+}
+
 func TestBuiltInToolsHaveUsageGuidanceOrExplicitExemption(t *testing.T) {
 	t.Parallel()
 
@@ -219,6 +249,22 @@ func TestMessageProviderUsageGatesRegisteredTools(t *testing.T) {
 	if !strings.Contains(got, "Use ordinary assistant text for normal replies") || !strings.Contains(got, "Omit `target` to react") {
 		t.Fatalf("Usage with an explicit current conversation should distinguish normal replies from local reactions, got:\n%s", got)
 	}
+	for _, want := range []string{"`message.parts`", "link/code_block/mention", "list_item"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Usage should expose structured message parts guidance containing %q, got:\n%s", want, got)
+		}
+	}
+	for _, want := range []string{"$...$", "$$...$$", "display LaTeX"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Usage should expose Markdown math guidance containing %q, got:\n%s", want, got)
+		}
+	}
+
+	nonTelegramSession := SessionContext{SessionType: sessionmode.Chat, CurrentPlatform: "discord", ReplyTarget: "channel-1"}
+	got = provider.Usage(context.Background(), nonTelegramSession, availableToolsForTest(ToolSend()))
+	if strings.Contains(got, "display LaTeX") || strings.Contains(got, "$$...$$") {
+		t.Fatalf("Usage should not expose Telegram Markdown math guidance for non-Telegram sessions, got:\n%s", got)
+	}
 
 	backgroundSession := SessionContext{SessionType: sessionmode.Heartbeat, CurrentPlatform: "telegram", ReplyTarget: "chat-1"}
 	got = provider.Usage(context.Background(), backgroundSession, availableToolsForTest(ToolReact()))
@@ -303,6 +349,160 @@ func TestMessageProviderToolDescriptionsGateCurrentConversationTarget(t *testing
 	for _, field := range []string{"message_id", "platform", "target"} {
 		if !requiredContainsForTest(required, field) {
 			t.Fatalf("react should require %s for background sessions, required=%v", field, required)
+		}
+	}
+}
+
+func TestMessageProviderSendToolExposesStructuredMessagePartsSchema(t *testing.T) {
+	t.Parallel()
+
+	provider := NewMessageProvider(nil, usageTestSender{}, usageTestReactor{}, usageTestResolver{}, nil)
+	tools, err := provider.Tools(context.Background(), SessionContext{
+		SessionType:     sessionmode.Chat,
+		CurrentPlatform: "telegram",
+		ReplyTarget:     "chat-1",
+	})
+	if err != nil {
+		t.Fatalf("Tools returned error: %v", err)
+	}
+
+	send := toolByNameForTest(t, tools, ToolSend())
+	params, ok := send.Parameters.(map[string]any)
+	if !ok {
+		t.Fatalf("send parameters = %T, want map[string]any", send.Parameters)
+	}
+	props, ok := params["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("send properties = %T, want map[string]any", params["properties"])
+	}
+	if params["additionalProperties"] != false {
+		t.Fatalf("send root schema should be strict, got %#v", params["additionalProperties"])
+	}
+	message, ok := props["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("message schema = %T, want map[string]any", props["message"])
+	}
+	messageProps, ok := message["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("message schema should expose properties, got %#v", message)
+	}
+	parts, ok := messageProps["parts"].(map[string]any)
+	if !ok {
+		t.Fatalf("message.parts schema missing in %#v", messageProps)
+	}
+	items, ok := parts["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("message.parts.items schema = %T, want map[string]any", parts["items"])
+	}
+	partProps, ok := items["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("part properties missing in %#v", items)
+	}
+	typeSchema, ok := partProps["type"].(map[string]any)
+	if !ok {
+		t.Fatalf("part type schema missing in %#v", partProps)
+	}
+	assertEnumContainsForTest(t, typeSchema["enum"], "text", "link", "code_block", "mention", "emoji", "heading", "blockquote", "list_item")
+	partRequired, ok := items["required"].([]any)
+	if !ok || !requiredAnyContainsForTest(partRequired, "type") || requiredAnyContainsForTest(partRequired, "text") {
+		t.Fatalf("message part schema should require type but not text, required=%#v", items["required"])
+	}
+	styles, ok := partProps["styles"].(map[string]any)
+	if !ok {
+		t.Fatalf("part styles schema missing in %#v", partProps)
+	}
+	styleItems, ok := styles["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("part styles items schema = %T, want map[string]any", styles["items"])
+	}
+	assertEnumContainsForTest(t, styleItems["enum"], "bold", "italic", "strikethrough", "code", "underline", "spoiler")
+	actions, ok := messageProps["actions"].(map[string]any)
+	if !ok {
+		t.Fatalf("message.actions schema missing in %#v", messageProps)
+	}
+	actionItems, ok := actions["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("message.actions.items schema = %T, want map[string]any", actions["items"])
+	}
+	if actionItems["additionalProperties"] != false {
+		t.Fatalf("message action schema should be strict, got %#v", actionItems["additionalProperties"])
+	}
+	actionRequired, ok := actionItems["required"].([]string)
+	if !ok || !requiredContainsForTest(actionRequired, "label") || !requiredContainsForTest(actionRequired, "url") {
+		t.Fatalf("message action schema should require label and url, required=%#v", actionItems["required"])
+	}
+	actionProps, ok := actionItems["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("message action properties missing in %#v", actionItems)
+	}
+	if _, ok := actionProps["value"]; ok {
+		t.Fatalf("message action schema must not expose callback value to model: %#v", actionProps["value"])
+	}
+	if _, ok := actionItems["anyOf"]; ok {
+		t.Fatalf("message action schema should not expose value/url anyOf, got %#v", actionItems["anyOf"])
+	}
+	reply, ok := messageProps["reply"].(map[string]any)
+	if !ok {
+		t.Fatalf("message.reply schema missing in %#v", messageProps)
+	}
+	if reply["additionalProperties"] != false {
+		t.Fatalf("message reply schema should be strict, got %#v", reply["additionalProperties"])
+	}
+	replyRequired, ok := reply["required"].([]string)
+	if !ok || !requiredContainsForTest(replyRequired, "message_id") {
+		t.Fatalf("message reply schema should require message_id, required=%#v", reply["required"])
+	}
+	replyProps, ok := reply["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("message reply properties missing in %#v", reply)
+	}
+	if _, ok := replyProps["message_id"]; !ok {
+		t.Fatalf("message reply schema missing message_id in %#v", replyProps)
+	}
+
+	topLevelAttachments, ok := props["attachments"].(map[string]any)
+	if !ok {
+		t.Fatalf("top-level attachments schema missing in %#v", props)
+	}
+	messageAttachments, ok := messageProps["attachments"].(map[string]any)
+	if !ok {
+		t.Fatalf("message.attachments schema missing in %#v", messageProps)
+	}
+	for label, attachments := range map[string]map[string]any{
+		"top-level attachments": topLevelAttachments,
+		"message.attachments":   messageAttachments,
+	} {
+		attachmentItems, ok := attachments["items"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s.items schema = %T, want map[string]any", label, attachments["items"])
+		}
+		anyOf, ok := attachmentItems["anyOf"].([]any)
+		if !ok || len(anyOf) != 2 {
+			t.Fatalf("%s.items should accept string or strict object, got %#v", label, attachmentItems["anyOf"])
+		}
+		objectSchema, ok := anyOf[1].(map[string]any)
+		if !ok {
+			t.Fatalf("%s object schema = %T, want map[string]any", label, anyOf[1])
+		}
+		if objectSchema["additionalProperties"] != false {
+			t.Fatalf("%s object schema should be strict, got %#v", label, objectSchema["additionalProperties"])
+		}
+		objectProps, ok := objectSchema["properties"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s object properties missing in %#v", label, objectSchema)
+		}
+		for _, field := range []string{"path", "url", "base64", "content_hash", "platform_key"} {
+			if _, ok := objectProps[field]; !ok {
+				t.Fatalf("%s object schema missing %q in %#v", label, field, objectProps)
+			}
+		}
+		attachmentType, ok := objectProps["type"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s object type schema missing in %#v", label, objectProps)
+		}
+		assertEnumContainsForTest(t, attachmentType["enum"], "image", "audio", "video", "voice", "file", "gif")
+		if _, ok := objectSchema["anyOf"].([]any); !ok {
+			t.Fatalf("%s object schema should require a reference field via anyOf, got %#v", label, objectSchema["anyOf"])
 		}
 	}
 }

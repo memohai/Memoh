@@ -29,6 +29,8 @@ import (
 
 const (
 	telegramMaxMessageLength        = 4096
+	telegramMaxRichMessageLength    = 32768
+	telegramMaxCallbackDataBytes    = 64
 	telegramMediaGroupCollectWindow = 700 * time.Millisecond
 	telegramUpdateDedupeTTL         = 10 * time.Minute
 	defaultTelegramFileEndpoint     = "https://api.telegram.org/file/bot%s/%s"
@@ -189,6 +191,7 @@ func (*TelegramAdapter) Descriptor() channel.Descriptor {
 		Capabilities: channel.ChannelCapabilities{
 			Text:           true,
 			Markdown:       true,
+			RichText:       true,
 			Reply:          true,
 			Buttons:        true,
 			Attachments:    true,
@@ -197,6 +200,11 @@ func (*TelegramAdapter) Descriptor() channel.Descriptor {
 			BlockStreaming: true,
 			Edit:           true,
 			Unsend:         true,
+		},
+		OutboundPolicy: channel.OutboundPolicy{
+			TextChunkLimit:     telegramMaxMessageLength,
+			RichTextChunkLimit: telegramMaxRichMessageLength,
+			ChunkerMode:        channel.ChunkerModeMarkdown,
 		},
 		ConfigSchema: channel.ConfigSchema{
 			Version: 1,
@@ -754,8 +762,10 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 	}
 	richParts := extractTelegramMessageParts(raw)
 	format := channel.MessageFormatPlain
+	messageText := text
 	if len(richParts) > 0 {
 		format = channel.MessageFormatRich
+		messageText = ""
 	}
 
 	return channel.InboundMessage{
@@ -763,7 +773,7 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 		Message: channel.Message{
 			ID:          strconv.Itoa(raw.ID),
 			Format:      format,
-			Text:        text,
+			Text:        messageText,
 			Parts:       richParts,
 			Attachments: attachments,
 			Reply:       replyRef,
@@ -815,6 +825,9 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 	if to == "" {
 		return errors.New("telegram target is required")
 	}
+	if err := validateTelegramPreparedOutbound(msg); err != nil {
+		return err
+	}
 	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
 	if err != nil {
 		return err
@@ -822,8 +835,7 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 	if msg.Message.Message.IsEmpty() {
 		return errors.New("message is required")
 	}
-	text := strings.TrimSpace(msg.Message.Message.PlainText())
-	text, parseMode := formatTelegramOutput(text, msg.Message.Message.Format)
+	rich, text, parseMode := renderTelegramOutboundBody(msg.Message.Message)
 	replyTo := parseReplyToMessageID(msg.Message.Message.Reply)
 	if len(msg.Message.Attachments) > 0 {
 		usedCaption := false
@@ -837,7 +849,11 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 			if i > 0 {
 				applyReply = 0
 			}
-			if err := sendTelegramAttachmentWithAssets(ctx, bot, to, att, caption, applyReply, parseMode); err != nil {
+			var actions []channel.Action
+			if i == len(msg.Message.Attachments)-1 {
+				actions = msg.Message.Message.Actions
+			}
+			if err := sendTelegramAttachmentWithAssets(ctx, bot, to, att, caption, applyReply, parseMode, actions); err != nil {
 				if a.logger != nil {
 					a.logger.Error("send attachment failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
 				}
@@ -849,10 +865,63 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 		}
 		return nil
 	}
+	if rich.hasContent() {
+		if _, _, err := sendTelegramRichMessageReturnMessage(bot, to, rich, replyTo, msg.Message.Message.Actions); err == nil {
+			return nil
+		} else if a.logger != nil {
+			a.logger.Warn("telegram: rich message send failed, falling back to text",
+				slog.String("config_id", cfg.ID),
+				slog.Any("error", err),
+			)
+		}
+	}
+	if shouldSplitTelegramPlainFallback(msg.Message.Message, rich, text, parseMode) {
+		return sendTelegramTextChunksWithActions(bot, to, text, replyTo, parseMode, msg.Message.Message.Actions)
+	}
 	if len(msg.Message.Message.Actions) > 0 {
 		return sendTelegramTextWithActions(bot, to, text, replyTo, parseMode, msg.Message.Message.Actions)
 	}
 	return sendTelegramText(bot, to, text, replyTo, parseMode)
+}
+
+func (*TelegramAdapter) ValidatePreparedOutbound(_ context.Context, _ channel.ChannelConfig, _ string, msg channel.PreparedOutboundMessage) error {
+	return validateTelegramPreparedOutbound(msg)
+}
+
+func validateTelegramPreparedOutbound(msg channel.PreparedOutboundMessage) error {
+	if msg.Message.Message.IsEmpty() {
+		return errors.New("message is required")
+	}
+	return validateTelegramActions(msg.Message.Message.Actions)
+}
+
+func renderTelegramOutboundBody(msg channel.Message) (telegramInputRichMessage, string, string) {
+	text, parseMode := renderTelegramPartsFallbackText(msg)
+	rich := renderTelegramMessagePartsRichMessage(msg)
+	if !rich.hasContent() {
+		rich = renderTelegramMarkdownMathRichMessage(msg)
+	}
+	if !rich.hasContent() {
+		return telegramInputRichMessage{}, text, parseMode
+	}
+	if utf8.RuneCountInString(rich.content()) <= telegramMaxRichMessageLength {
+		return rich, text, parseMode
+	}
+	if len(msg.Parts) > 0 {
+		return telegramInputRichMessage{}, channel.RenderPartsAsPlain(msg.Parts), ""
+	}
+	return telegramInputRichMessage{}, text, parseMode
+}
+
+func shouldSplitTelegramPlainFallback(msg channel.Message, rich telegramInputRichMessage, text string, parseMode string) bool {
+	return len(msg.Parts) > 0 &&
+		!rich.hasContent() &&
+		parseMode == "" &&
+		runeLenTelegramText(text) > telegramMaxMessageLength
+}
+
+func runeLenTelegramText(text string) int {
+	return utf8.RuneCountInString(strings.TrimSpace(text))
 }
 
 // Update edits an already-sent message in place (text + inline keyboard),
@@ -879,8 +948,17 @@ func (a *TelegramAdapter) Update(_ context.Context, cfg channel.ChannelConfig, t
 	if err != nil {
 		return fmt.Errorf("telegram: invalid message id %q: %w", messageID, err)
 	}
-	text := strings.TrimSpace(msg.Message.PlainText())
-	text, parseMode := formatTelegramOutput(text, msg.Message.Format)
+	rich, text, parseMode := renderTelegramOutboundBody(msg.Message)
+	if rich.hasContent() {
+		if err := editTelegramRichMessage(bot, chatID, mid, rich, msg.Message.Actions); err == nil {
+			return nil
+		} else if a.logger != nil {
+			a.logger.Warn("telegram: rich message edit failed, falling back to text",
+				slog.String("config_id", cfg.ID),
+				slog.Any("error", err),
+			)
+		}
+	}
 	return editTelegramMessageTextWithActions(bot, chatID, mid, text, parseMode, msg.Message.Actions)
 }
 
@@ -1079,17 +1157,47 @@ func sendTelegramTextWithActions(bot *tele.Bot, target string, text string, repl
 	return err
 }
 
+func sendTelegramTextChunksWithActions(bot *tele.Bot, target string, text string, replyTo int, parseMode string, actions []channel.Action) error {
+	chunks := channel.ChunkText(text, telegramMaxMessageLength)
+	if len(chunks) == 0 {
+		return sendTelegramTextWithActions(bot, target, text, replyTo, parseMode, actions)
+	}
+	return sendTelegramTextChunkListWithActions(bot, target, chunks, replyTo, parseMode, actions)
+}
+
+func sendTelegramTextChunkListWithActions(bot *tele.Bot, target string, chunks []string, replyTo int, parseMode string, actions []channel.Action) error {
+	for i, chunk := range chunks {
+		chunkReplyTo := replyTo
+		if i > 0 {
+			chunkReplyTo = 0
+		}
+		isLast := i == len(chunks)-1
+		if isLast && len(actions) > 0 {
+			if err := sendTelegramTextWithActions(bot, target, chunk, chunkReplyTo, parseMode, actions); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := sendTelegramText(bot, target, chunk, chunkReplyTo, parseMode); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func sendTelegramTextWithActionsReturnMessage(bot *tele.Bot, target string, text string, replyTo int, parseMode string, actions []channel.Action) (chatID int64, messageID int, err error) {
-	text = truncateTelegramText(sanitizeTelegramText(text))
 	recipient, parsedChatID, parseErr := telegramRecipient(target)
 	if parseErr != nil {
 		return 0, 0, parseErr
+	}
+	text, markup, err := telegramTextWithActionMarkup(text, actions)
+	if err != nil {
+		return 0, 0, err
 	}
 	opts := &tele.SendOptions{ParseMode: parseMode}
 	if replyTo > 0 {
 		opts.ReplyTo = &tele.Message{ID: replyTo}
 	}
-	markup := telegramInlineKeyboard(actions)
 	if markup != nil && len(markup.InlineKeyboard) > 0 {
 		opts.ReplyMarkup = markup
 	}
@@ -1154,36 +1262,121 @@ func editTelegramMessageTextWithActions(bot *tele.Bot, chatID int64, messageID i
 	if len(actions) == 0 {
 		return editTelegramMessageText(bot, chatID, messageID, text, parseMode)
 	}
-	text = truncateTelegramText(sanitizeTelegramText(text))
-	markup := telegramInlineKeyboard(actions)
-	stored := &tele.StoredMessage{MessageID: strconv.Itoa(messageID), ChatID: chatID}
-	opts := &tele.SendOptions{ParseMode: parseMode, ReplyMarkup: markup}
-	_, err := bot.Edit(stored, text, opts)
+	err := rawEditTelegramMessageTextWithActions(bot, chatID, messageID, text, parseMode, actions)
 	if err != nil && (isTelegramMessageNotModified(err) || isTelegramEditUnrecoverable(err)) {
 		return nil
 	}
 	return err
 }
 
+func rawEditTelegramMessageTextWithActions(bot *tele.Bot, chatID int64, messageID int, text string, parseMode string, actions []channel.Action) error {
+	text, markup, err := telegramTextWithActionMarkup(text, actions)
+	if err != nil {
+		return err
+	}
+	if sendEditForTest != nil {
+		return sendEditForTest(bot, chatID, messageID, text, parseMode)
+	}
+	stored := &tele.StoredMessage{MessageID: strconv.Itoa(messageID), ChatID: chatID}
+	opts := &tele.SendOptions{ParseMode: parseMode, ReplyMarkup: markup}
+	_, err = bot.Edit(stored, text, opts)
+	return err
+}
+
+func telegramTextWithActionMarkup(text string, actions []channel.Action) (string, *tele.ReplyMarkup, error) {
+	if err := validateTelegramActions(actions); err != nil {
+		return "", nil, err
+	}
+	text = truncateTelegramText(sanitizeTelegramText(text))
+	markup, fallbackText := telegramInlineKeyboardWithFallback(actions)
+	if strings.TrimSpace(text) == "" {
+		if strings.TrimSpace(fallbackText) == "" {
+			return "", nil, errors.New("telegram action message requires text or at least one valid telegram action")
+		}
+		text = truncateTelegramText(sanitizeTelegramText(fallbackText))
+	}
+	return text, markup, nil
+}
+
 func telegramInlineKeyboard(actions []channel.Action) *tele.ReplyMarkup {
+	markup, _ := telegramInlineKeyboardWithFallback(actions)
+	return markup
+}
+
+func telegramInlineKeyboardWithFallback(actions []channel.Action) (*tele.ReplyMarkup, string) {
 	rowOrder := make([]int, 0, len(actions))
 	rowButtons := make(map[int][]tele.InlineButton, len(actions))
+	labels := make([]string, 0, len(actions))
 	for _, action := range actions {
 		label := strings.TrimSpace(action.Label)
-		value := strings.TrimSpace(action.Value)
-		if label == "" || value == "" {
+		if label == "" {
+			continue
+		}
+		btn, ok := telegramActionButton(label, action)
+		if !ok {
 			continue
 		}
 		if _, ok := rowButtons[action.Row]; !ok {
 			rowOrder = append(rowOrder, action.Row)
 		}
-		rowButtons[action.Row] = append(rowButtons[action.Row], tele.InlineButton{Text: label, Data: value})
+		rowButtons[action.Row] = append(rowButtons[action.Row], btn)
+		labels = append(labels, label)
 	}
+	slices.Sort(rowOrder)
 	rows := make([][]tele.InlineButton, 0, len(rowOrder))
 	for _, r := range rowOrder {
 		rows = append(rows, rowButtons[r])
 	}
-	return &tele.ReplyMarkup{InlineKeyboard: rows}
+	return &tele.ReplyMarkup{InlineKeyboard: rows}, strings.Join(labels, " / ")
+}
+
+func validateTelegramActions(actions []channel.Action) error {
+	for i, action := range actions {
+		label := strings.TrimSpace(action.Label)
+		if label == "" {
+			return fmt.Errorf("telegram action %d label is required", i+1)
+		}
+		if value := strings.TrimSpace(action.Value); value != "" {
+			if len([]byte(value)) > telegramMaxCallbackDataBytes {
+				return fmt.Errorf("telegram action %d callback data must be at most %d bytes", i+1, telegramMaxCallbackDataBytes)
+			}
+			continue
+		}
+		if url := strings.TrimSpace(action.URL); url != "" {
+			if !isAllowedTelegramInlineKeyboardURL(url) {
+				return fmt.Errorf("telegram action %d url must be http(s)", i+1)
+			}
+			continue
+		}
+		return fmt.Errorf("telegram action %d requires callback data or http(s) url", i+1)
+	}
+	return nil
+}
+
+// telegramActionButton renders a single Action as a Telegram inline-keyboard
+// button. Callback Value keeps precedence for compatibility with Memoh's
+// existing interactive actions; URL is used only for link-only actions.
+func telegramActionButton(label string, action channel.Action) (tele.InlineButton, bool) {
+	if value := strings.TrimSpace(action.Value); value != "" {
+		if len([]byte(value)) > telegramMaxCallbackDataBytes {
+			return tele.InlineButton{}, false
+		}
+		return tele.InlineButton{Text: label, Data: value}, true
+	}
+	if url := strings.TrimSpace(action.URL); url != "" {
+		if !isAllowedTelegramInlineKeyboardURL(url) {
+			return tele.InlineButton{}, false
+		}
+		return tele.InlineButton{Text: label, URL: url}, true
+	}
+	return tele.InlineButton{}, false
+}
+
+func isAllowedTelegramInlineKeyboardURL(url string) bool {
+	url = strings.TrimSpace(url)
+	return strings.HasPrefix(url, "https://") ||
+		strings.HasPrefix(url, "http://") ||
+		strings.HasPrefix(url, "tg://user?id=")
 }
 
 var sendDraftForTest func(bot *tele.Bot, chatID int64, draftID int, text string, parseMode string) error
@@ -1298,11 +1491,14 @@ func getTelegramRetryAfter(err error) time.Duration {
 	return 0
 }
 
-func sendTelegramAttachmentWithAssets(ctx context.Context, bot *tele.Bot, target string, att channel.PreparedAttachment, caption string, replyTo int, parseMode string) error {
-	return sendTelegramAttachmentImpl(ctx, bot, target, att, caption, replyTo, parseMode)
+func sendTelegramAttachmentWithAssets(ctx context.Context, bot *tele.Bot, target string, att channel.PreparedAttachment, caption string, replyTo int, parseMode string, actions []channel.Action) error {
+	return sendTelegramAttachmentImpl(ctx, bot, target, att, caption, replyTo, parseMode, actions)
 }
 
-func sendTelegramAttachmentImpl(ctx context.Context, bot *tele.Bot, target string, att channel.PreparedAttachment, caption string, replyTo int, parseMode string) error {
+func sendTelegramAttachmentImpl(ctx context.Context, bot *tele.Bot, target string, att channel.PreparedAttachment, caption string, replyTo int, parseMode string, actions []channel.Action) error {
+	if err := validateTelegramActions(actions); err != nil {
+		return err
+	}
 	if strings.TrimSpace(caption) == "" && strings.TrimSpace(att.Logical.Caption) != "" {
 		caption = strings.TrimSpace(att.Logical.Caption)
 	}
@@ -1314,10 +1510,7 @@ func sendTelegramAttachmentImpl(ctx context.Context, bot *tele.Bot, target strin
 	if recipErr != nil {
 		return recipErr
 	}
-	opts := &tele.SendOptions{ParseMode: parseMode}
-	if replyTo > 0 {
-		opts.ReplyTo = &tele.Message{ID: replyTo}
-	}
+	opts := telegramAttachmentSendOptions(parseMode, replyTo, actions)
 	name := strings.TrimSpace(att.Name)
 	if name == "" {
 		name = fileNameFromMime(att.Mime, string(att.Logical.Type))
@@ -1344,6 +1537,18 @@ func sendTelegramAttachmentImpl(ctx context.Context, bot *tele.Bot, target strin
 	default:
 		return fmt.Errorf("unsupported attachment type: %s", att.Logical.Type)
 	}
+}
+
+func telegramAttachmentSendOptions(parseMode string, replyTo int, actions []channel.Action) *tele.SendOptions {
+	opts := &tele.SendOptions{ParseMode: parseMode}
+	if replyTo > 0 {
+		opts.ReplyTo = &tele.Message{ID: replyTo}
+	}
+	markup := telegramInlineKeyboard(actions)
+	if markup != nil && len(markup.InlineKeyboard) > 0 {
+		opts.ReplyMarkup = markup
+	}
+	return opts
 }
 
 // resolveTelegramFile maps a prepared attachment into telebot's file model.

@@ -1767,9 +1767,9 @@ export const deleteBotsByBotIdMessagesMutation = (options?: Partial<Options<Dele
 export const getBotsByBotIdMessagesQueryKey = (options: Options<GetBotsByBotIdMessagesData>) => createQueryKey('getBotsByBotIdMessages', options);
 
 /**
- * List bot history messages
+ * List session history messages
  *
- * List messages for a bot history with optional pagination
+ * List messages for one session with optional pagination
  */
 export const getBotsByBotIdMessagesQuery = defineQueryOptions((options: Options<GetBotsByBotIdMessagesData>) => ({
     key: getBotsByBotIdMessagesQueryKey(options),

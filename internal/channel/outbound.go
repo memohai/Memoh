@@ -35,6 +35,7 @@ type Chunker func(text string, limit int) []string
 // OutboundPolicy configures how outbound messages are chunked, ordered, and retried.
 type OutboundPolicy struct {
 	TextChunkLimit      int           `json:"text_chunk_limit,omitempty"`
+	RichTextChunkLimit  int           `json:"rich_text_chunk_limit,omitempty"`
 	ChunkerMode         ChunkerMode   `json:"chunker_mode,omitempty"`
 	Chunker             Chunker       `json:"-"`
 	MediaOrder          OutboundOrder `json:"media_order,omitempty"`
@@ -47,6 +48,9 @@ type OutboundPolicy struct {
 func NormalizeOutboundPolicy(policy OutboundPolicy) OutboundPolicy {
 	if policy.TextChunkLimit <= 0 {
 		policy.TextChunkLimit = 2000
+	}
+	if policy.RichTextChunkLimit <= 0 {
+		policy.RichTextChunkLimit = policy.TextChunkLimit
 	}
 	if policy.MediaOrder == "" {
 		policy.MediaOrder = OutboundOrderMediaFirst
@@ -196,19 +200,35 @@ func (m *Manager) resolveOutboundPolicy(channelType ChannelType) OutboundPolicy 
 
 // buildOutboundMessages splits an outbound message into multiple messages based on the policy.
 func buildOutboundMessages(msg OutboundMessage, policy OutboundPolicy) ([]OutboundMessage, error) {
+	return buildOutboundMessagesWithCaps(msg, policy, ChannelCapabilities{}, false)
+}
+
+func buildOutboundMessagesWithCaps(msg OutboundMessage, policy OutboundPolicy, caps ChannelCapabilities, hasCaps bool) ([]OutboundMessage, error) {
 	if msg.Message.IsEmpty() {
 		return nil, errors.New("message is required")
 	}
+	policy = NormalizeOutboundPolicy(policy)
 	normalized := normalizeOutboundMessage(msg.Message)
+	if hasCaps {
+		normalized = coerceFormatForCaps(normalized, caps)
+		normalized = coerceOversizedRichPartsForChunking(normalized, policy, caps)
+	}
 	attachments := append([]Attachment(nil), normalized.Attachments...)
 	chunker := policy.Chunker
 	if normalized.Format == MessageFormatMarkdown {
 		chunker = ChunkMarkdownText
 	}
+	if chunker == nil {
+		chunker = DefaultChunker(policy.ChunkerMode)
+	}
 	base := normalized
 	if shouldInlineTextWithMedia(policy, base, attachments) {
 		attachments[0].Caption = strings.TrimSpace(base.Text)
 		base.Text = ""
+	}
+	mediaCarriesActions := mediaShouldCarryActions(policy, base, attachments)
+	if mediaCarriesActions {
+		base.Actions = nil
 	}
 	base.Attachments = nil
 	textMessages := make([]OutboundMessage, 0)
@@ -262,7 +282,9 @@ func buildOutboundMessages(msg OutboundMessage, policy OutboundPolicy) ([]Outbou
 		media.Format = ""
 		media.Text = ""
 		media.Parts = nil
-		media.Actions = nil
+		if !mediaCarriesActions {
+			media.Actions = nil
+		}
 		media.Attachments = attachments
 		attachmentMessages = append(attachmentMessages, OutboundMessage{Target: msg.Target, Message: media})
 	}
@@ -274,6 +296,33 @@ func buildOutboundMessages(msg OutboundMessage, policy OutboundPolicy) ([]Outbou
 		return append(textMessages, attachmentMessages...), nil
 	}
 	return append(attachmentMessages, textMessages...), nil
+}
+
+func coerceOversizedRichPartsForChunking(msg Message, policy OutboundPolicy, caps ChannelCapabilities) Message {
+	limit := richPartsChunkLimit(policy, caps)
+	if limit <= 0 || len(msg.Parts) == 0 || strings.TrimSpace(msg.ID) != "" {
+		return msg
+	}
+	plain := strings.TrimSpace(RenderPartsAsPlain(msg.Parts))
+	if plain == "" || runeLen(plain) <= limit {
+		return msg
+	}
+	if caps.Markdown {
+		msg.Text = RenderPartsAsMarkdown(msg.Parts)
+		msg.Format = MessageFormatMarkdown
+	} else {
+		msg.Text = plain
+		msg.Format = MessageFormatPlain
+	}
+	msg.Parts = nil
+	return msg
+}
+
+func richPartsChunkLimit(policy OutboundPolicy, caps ChannelCapabilities) int {
+	if caps.RichText {
+		return policy.RichTextChunkLimit
+	}
+	return policy.TextChunkLimit
 }
 
 func shouldInlineTextWithMedia(policy OutboundPolicy, msg Message, attachments []Attachment) bool {
@@ -294,7 +343,16 @@ func shouldInlineTextWithMedia(policy OutboundPolicy, msg Message, attachments [
 	}
 }
 
+func mediaShouldCarryActions(policy OutboundPolicy, msg Message, attachments []Attachment) bool {
+	if len(attachments) == 0 || len(msg.Actions) == 0 {
+		return false
+	}
+	hasBody := strings.TrimSpace(msg.Text) != "" || len(msg.Parts) > 0
+	return !hasBody || policy.MediaOrder == OutboundOrderTextFirst
+}
+
 func normalizeOutboundMessage(msg Message) Message {
+	msg = normalizeMixedRichParts(msg)
 	if msg.Format == "" {
 		if len(msg.Parts) > 0 {
 			msg.Format = MessageFormatRich
@@ -309,8 +367,24 @@ func normalizeOutboundMessage(msg Message) Message {
 	return msg
 }
 
+func normalizeMixedRichParts(msg Message) Message {
+	if len(msg.Parts) == 0 || strings.TrimSpace(msg.Text) == "" {
+		return msg
+	}
+	msg.Parts = append([]MessagePart{{Type: MessagePartText, Text: msg.Text}}, msg.Parts...)
+	msg.Text = ""
+	if msg.Format == "" {
+		msg.Format = MessageFormatRich
+	}
+	return msg
+}
+
 func validateMessageCapabilities(registry *Registry, channelType ChannelType, msg Message) error {
 	caps, ok := registry.GetCapabilities(channelType)
+	return validateMessageAgainstCapabilities(caps, ok, msg)
+}
+
+func validateMessageAgainstCapabilities(caps ChannelCapabilities, ok bool, msg Message) error {
 	if !ok {
 		return nil
 	}
@@ -338,7 +412,12 @@ func validateMessageCapabilities(registry *Registry, channelType ChannelType, ms
 		return errors.New("channel does not support media")
 	}
 	if len(msg.Actions) > 0 && !caps.Buttons {
-		return errors.New("channel does not support actions")
+		if !caps.URLButtons {
+			return errors.New("channel does not support actions")
+		}
+		if _, ok := urlActionParts(msg.Actions); !ok {
+			return errors.New("channel supports url actions only; callback actions are unsupported")
+		}
 	}
 	if msg.Thread != nil && !caps.Threads {
 		return errors.New("channel does not support threads")
@@ -352,53 +431,103 @@ func validateMessageCapabilities(registry *Registry, channelType ChannelType, ms
 	return nil
 }
 
+type preparedOutboundDelivery struct {
+	target   string
+	message  Message
+	prepared PreparedOutboundMessage
+	editor   MessageEditor
+}
+
+func (m *Manager) sendAllWithConfig(ctx context.Context, sender Sender, cfg ChannelConfig, msgs []OutboundMessage, policy OutboundPolicy) error {
+	prepared := make([]preparedOutboundDelivery, 0, len(msgs))
+	for _, msg := range msgs {
+		item, err := m.prepareOutboundForSend(ctx, sender, cfg, msg)
+		if err != nil {
+			return err
+		}
+		prepared = append(prepared, item)
+	}
+	for _, item := range prepared {
+		if err := m.sendPreparedWithConfig(ctx, sender, cfg, item, policy); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (m *Manager) sendWithConfig(ctx context.Context, sender Sender, cfg ChannelConfig, msg OutboundMessage, policy OutboundPolicy) error {
+	prepared, err := m.prepareOutboundForSend(ctx, sender, cfg, msg)
+	if err != nil {
+		return err
+	}
+	return m.sendPreparedWithConfig(ctx, sender, cfg, prepared, policy)
+}
+
+func (m *Manager) prepareOutboundForSend(ctx context.Context, sender Sender, cfg ChannelConfig, msg OutboundMessage) (preparedOutboundDelivery, error) {
 	if sender == nil {
-		return fmt.Errorf("unsupported channel type: %s", cfg.ChannelType)
+		return preparedOutboundDelivery{}, fmt.Errorf("unsupported channel type: %s", cfg.ChannelType)
 	}
 	target := strings.TrimSpace(msg.Target)
 	if target == "" {
-		return errors.New("target is required")
+		return preparedOutboundDelivery{}, errors.New("target is required")
 	}
 	if msg.Message.IsEmpty() {
-		return errors.New("message is required")
+		return preparedOutboundDelivery{}, errors.New("message is required")
 	}
 	normalized := msg
 	attachments, err := normalizeAttachmentRefs(msg.Message.Attachments, cfg.ChannelType)
 	if err != nil {
-		return err
+		return preparedOutboundDelivery{}, err
 	}
 	normalized.Message.Attachments = attachments
 	// Coerce Format down to what the channel can render BEFORE validation.
-	// Only Markdown→Plain degrades losslessly; other format/cap mismatches
-	// still fail validation below.
-	if caps, ok := m.registry.GetCapabilities(cfg.ChannelType); ok {
+	// Rich Parts degrade to Markdown/Plain when needed; Markdown degrades to
+	// Plain on plain-only channels.
+	caps, hasCaps := m.registry.GetOutboundCapabilities(cfg.ChannelType, cfg, target)
+	normalized.Message = normalizeOutboundMessage(normalized.Message)
+	if hasCaps {
 		normalized.Message = coerceFormatForCaps(normalized.Message, caps)
 	}
-	if err := validateMessageCapabilities(m.registry, cfg.ChannelType, normalized.Message); err != nil {
-		return err
+	if err := validateMessageAgainstCapabilities(caps, hasCaps, normalized.Message); err != nil {
+		return preparedOutboundDelivery{}, err
 	}
 	prepared, err := PrepareOutboundMessage(ctx, m.attachmentStore, cfg, OutboundMessage{
 		Target:  target,
 		Message: normalized.Message,
 	})
 	if err != nil {
-		return err
+		return preparedOutboundDelivery{}, err
+	}
+	if validator, ok := sender.(PreparedOutboundValidator); ok {
+		if err := validator.ValidatePreparedOutbound(ctx, cfg, target, prepared); err != nil {
+			return preparedOutboundDelivery{}, err
+		}
 	}
 	editor, _ := m.registry.GetMessageEditor(cfg.ChannelType)
 	if strings.TrimSpace(normalized.Message.ID) != "" {
 		if editor == nil {
-			return errors.New("channel does not support edit")
+			return preparedOutboundDelivery{}, errors.New("channel does not support edit")
 		}
+	}
+	return preparedOutboundDelivery{
+		target:   target,
+		message:  normalized.Message,
+		prepared: prepared,
+		editor:   editor,
+	}, nil
+}
+
+func (m *Manager) sendPreparedWithConfig(ctx context.Context, sender Sender, cfg ChannelConfig, item preparedOutboundDelivery, policy OutboundPolicy) error {
+	if strings.TrimSpace(item.message.ID) != "" {
 		var lastErr error
 		for i := 0; i < policy.RetryMax; i++ {
-			err := editor.Update(ctx, cfg, target, strings.TrimSpace(normalized.Message.ID), prepared.Message)
+			err := item.editor.Update(ctx, cfg, item.target, strings.TrimSpace(item.message.ID), item.prepared.Message)
 			if err == nil {
 				if m.logger != nil {
 					m.logger.Debug("edit outbound success",
 						slog.String("channel", cfg.ChannelType.String()),
 						slog.String("bot_id", cfg.BotID),
-						slog.String("target", target),
+						slog.String("target", item.target),
 					)
 				}
 				return nil
@@ -418,13 +547,13 @@ func (m *Manager) sendWithConfig(ctx context.Context, sender Sender, cfg Channel
 	}
 	var lastErr error
 	for i := 0; i < policy.RetryMax; i++ {
-		err := sender.Send(ctx, cfg, prepared)
+		err := sender.Send(ctx, cfg, item.prepared)
 		if err == nil {
 			if m.logger != nil {
 				m.logger.Debug("send outbound success",
 					slog.String("channel", cfg.ChannelType.String()),
 					slog.String("bot_id", cfg.BotID),
-					slog.String("target", target),
+					slog.String("target", item.target),
 				)
 			}
 			return nil
@@ -480,7 +609,7 @@ func requiresMedia(attachments []Attachment) bool {
 }
 
 func validateStreamEvent(registry *Registry, channelType ChannelType, event StreamEvent) error {
-	caps, _ := registry.GetCapabilities(channelType)
+	caps, ok := registry.GetCapabilities(channelType)
 	switch event.Type {
 	case StreamEventStatus:
 		if event.Status == "" {
@@ -508,6 +637,9 @@ func validateStreamEvent(registry *Registry, channelType ChannelType, event Stre
 		if _, err := normalizeAttachmentRefs(event.Attachments, channelType); err != nil {
 			return err
 		}
+		if err := validateMessageAgainstCapabilities(caps, ok, Message{Attachments: event.Attachments}); err != nil {
+			return err
+		}
 	case StreamEventAgentStart, StreamEventAgentEnd, StreamEventProcessingStarted, StreamEventProcessingCompleted:
 		return nil
 	case StreamEventProcessingFailed:
@@ -524,6 +656,7 @@ func validateStreamEvent(registry *Registry, channelType ChannelType, event Stre
 		// a later Markdown-capable channel. The real downgrade is applied to a
 		// local copy in Push.
 		final := event.Final.Message
+		final = normalizeOutboundMessage(final)
 		if caps, ok := registry.GetCapabilities(channelType); ok {
 			final = coerceFormatForCaps(final, caps)
 		}
@@ -567,17 +700,18 @@ func (s *managerReplySender) Send(ctx context.Context, msg OutboundMessage) erro
 	if s.manager == nil {
 		return errors.New("channel manager not configured")
 	}
-	policy := s.manager.resolveOutboundPolicy(s.channelType)
-	outbound, err := buildOutboundMessages(msg, policy)
+	target, err := s.manager.resolveOutboundTarget(ctx, s.channelType, s.config, msg.Target)
 	if err != nil {
 		return err
 	}
-	for _, item := range outbound {
-		if err := s.manager.sendWithConfig(ctx, s.sender, s.config, item, policy); err != nil {
-			return err
-		}
+	msg.Target = target
+	policy := s.manager.resolveOutboundPolicy(s.channelType)
+	caps, hasCaps := s.manager.registry.GetOutboundCapabilities(s.channelType, s.config, msg.Target)
+	outbound, err := buildOutboundMessagesWithCaps(msg, policy, caps, hasCaps)
+	if err != nil {
+		return err
 	}
-	return nil
+	return s.manager.sendAllWithConfig(ctx, s.sender, s.config, outbound, policy)
 }
 
 func (s *managerReplySender) OpenStream(ctx context.Context, target string, opts StreamOptions) (OutboundStream, error) {
@@ -591,7 +725,12 @@ func (s *managerReplySender) OpenStream(ctx context.Context, target string, opts
 	if target == "" {
 		return nil, errors.New("target is required")
 	}
-	caps, _ := s.manager.registry.GetCapabilities(s.channelType)
+	var err error
+	target, err = s.manager.resolveOutboundTarget(ctx, s.channelType, s.config, target)
+	if err != nil {
+		return nil, err
+	}
+	caps, _ := s.manager.registry.GetOutboundCapabilities(s.channelType, s.config, target)
 	if !caps.Streaming && !caps.BlockStreaming {
 		return nil, errors.New("channel does not support streaming")
 	}
@@ -604,7 +743,9 @@ func (s *managerReplySender) OpenStream(ctx context.Context, target string, opts
 		config:      s.config,
 		stream:      stream,
 		channelType: s.channelType,
+		target:      target,
 		policy:      s.manager.resolveOutboundPolicy(s.channelType),
+		sender:      s.sender,
 		send: func(ctx context.Context, msg OutboundMessage) error {
 			msg.Target = target
 			return s.Send(ctx, msg)
@@ -628,7 +769,9 @@ type managerOutboundStream struct {
 	config      ChannelConfig
 	stream      PreparedOutboundStream
 	channelType ChannelType
+	target      string
 	policy      OutboundPolicy // cached at open time; immutable after creation
+	sender      Sender
 	send        func(ctx context.Context, msg OutboundMessage) error
 	reopen      func(ctx context.Context) (PreparedOutboundStream, error)
 	deltaRunes  int
@@ -643,16 +786,29 @@ func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) err
 	if err := validateStreamEvent(s.manager.registry, s.channelType, event); err != nil {
 		return err
 	}
+	if event.Type == StreamEventAttachment {
+		if caps, ok := s.manager.registry.GetOutboundCapabilities(s.channelType, s.config, s.target); ok {
+			if err := validateMessageAgainstCapabilities(caps, true, Message{Attachments: event.Attachments}); err != nil {
+				return err
+			}
+		}
+	}
 
 	// Downgrade the final's Format to what the channel can render, on a LOCAL
 	// copy, so the adapter actually receives the coerced payload. Done here (not
 	// in validateStreamEvent) so the shared event is never mutated — it may be
 	// fanned out to other channels via tee, where stripping markup for a
 	// plain-text channel would corrupt a Markdown-capable channel's copy.
+	originalFinalText := ""
 	if event.Type == StreamEventFinal && event.Final != nil {
-		if caps, ok := s.manager.registry.GetCapabilities(s.channelType); ok {
+		originalFinalText = strings.TrimSpace(event.Final.Message.PlainText())
+		if caps, ok := s.manager.registry.GetOutboundCapabilities(s.channelType, s.config, s.target); ok {
 			final := *event.Final
+			final.Message = normalizeOutboundMessage(final.Message)
 			final.Message = coerceFormatForCaps(final.Message, caps)
+			if err := validateMessageAgainstCapabilities(caps, true, final.Message); err != nil {
+				return err
+			}
 			event.Final = &final
 		}
 	}
@@ -663,7 +819,7 @@ func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) err
 
 	if event.Type == StreamEventFinal && event.Final != nil && s.send != nil {
 		if s.splitCount > 0 {
-			return s.pushFinalAfterSplit(ctx, event)
+			return s.pushFinalAfterSplit(ctx, event, originalFinalText)
 		}
 		return s.pushFinalWithChunking(ctx, event)
 	}
@@ -768,10 +924,19 @@ func isNaturalBreakPoint(text string) bool {
 // sent earlier portions of the response during streaming. It passes an
 // empty-text Final so the adapter finalizes its internal buffer, then
 // delivers any remaining attachments / actions via the non-streaming path.
-func (s *managerOutboundStream) pushFinalAfterSplit(ctx context.Context, event StreamEvent) error {
+func (s *managerOutboundStream) pushFinalAfterSplit(ctx context.Context, event StreamEvent, originalFinalText string) error {
+	var bufferMessage Message
+	if event.Final != nil && len(event.Final.Message.Attachments) == 0 && len(event.Final.Message.Actions) > 0 {
+		bufferMessage = Message{
+			Actions:  event.Final.Message.Actions,
+			Thread:   event.Final.Message.Thread,
+			Reply:    event.Final.Message.Reply,
+			Metadata: event.Final.Message.Metadata,
+		}
+	}
 	bufferFinal := StreamEvent{
 		Type:     StreamEventFinal,
-		Final:    &StreamFinalizePayload{},
+		Final:    &StreamFinalizePayload{Message: bufferMessage},
 		Metadata: event.Metadata,
 	}
 	if err := s.pushPrepared(ctx, bufferFinal); err != nil {
@@ -783,11 +948,20 @@ func (s *managerOutboundStream) pushFinalAfterSplit(ctx context.Context, event S
 	}
 	msg := event.Final.Message
 
-	if len(msg.Attachments) > 0 {
+	if len(msg.Parts) > 0 {
+		msg.Parts = nil
+	}
+	msg.Text = trimSplitFinalDuplicateBody(msg.Text, originalFinalText)
+
+	if strings.TrimSpace(msg.Text) != "" || len(msg.Attachments) > 0 {
 		if err := s.send(ctx, OutboundMessage{
 			Message: Message{
+				Format:      msg.Format,
+				Text:        msg.Text,
 				Attachments: msg.Attachments,
 				Thread:      msg.Thread,
+				Reply:       msg.Reply,
+				Metadata:    msg.Metadata,
 				Actions:     msg.Actions,
 			},
 		}); err != nil {
@@ -795,6 +969,24 @@ func (s *managerOutboundStream) pushFinalAfterSplit(ctx context.Context, event S
 		}
 	}
 	return nil
+}
+
+func trimSplitFinalDuplicateBody(text string, originalFinalText string) string {
+	text = strings.TrimSpace(text)
+	originalFinalText = strings.TrimSpace(originalFinalText)
+	if text == "" || originalFinalText == "" {
+		return text
+	}
+	if text == originalFinalText {
+		return ""
+	}
+	if strings.HasPrefix(text, originalFinalText) {
+		rest := strings.TrimSpace(strings.TrimPrefix(text, originalFinalText))
+		rest = strings.TrimPrefix(rest, "\n\n")
+		rest = strings.TrimPrefix(rest, "\n")
+		return strings.TrimSpace(rest)
+	}
+	return text
 }
 
 func (s *managerOutboundStream) pushFinalWithChunking(ctx context.Context, event StreamEvent) error {
@@ -809,6 +1001,9 @@ func (s *managerOutboundStream) pushFinalWithChunking(ctx context.Context, event
 		return s.pushPrepared(ctx, event)
 	}
 	msg := normalizeOutboundMessage(event.Final.Message)
+	if caps, ok := s.manager.registry.GetOutboundCapabilities(s.channelType, s.config, s.target); ok {
+		msg = coerceOversizedRichPartsForChunking(msg, policy, caps)
+	}
 	text := strings.TrimSpace(msg.PlainText())
 	textRunes := runeLen(text)
 	if s.manager.logger != nil {
@@ -823,6 +1018,16 @@ func (s *managerOutboundStream) pushFinalWithChunking(ctx context.Context, event
 	if text == "" || runeLen(text) <= policy.TextChunkLimit {
 		if s.manager.logger != nil {
 			s.manager.logger.Debug("stream final chunking skipped: text within limit",
+				slog.String("channel", s.channelType.String()),
+				slog.Int("text_runes", textRunes),
+				slog.Int("chunk_limit", policy.TextChunkLimit),
+			)
+		}
+		return s.pushPrepared(ctx, event)
+	}
+	if len(msg.Parts) > 0 {
+		if s.manager.logger != nil {
+			s.manager.logger.Debug("stream final chunking skipped: rich parts preserve adapter renderer",
 				slog.String("channel", s.channelType.String()),
 				slog.Int("text_runes", textRunes),
 				slog.Int("chunk_limit", policy.TextChunkLimit),
@@ -855,6 +1060,11 @@ func (s *managerOutboundStream) pushFinalWithChunking(ctx context.Context, event
 		)
 	}
 
+	preparedOverflow, err := s.prepareChunkedFinalSends(ctx, msg, chunks, 1, hasAttachments)
+	if err != nil {
+		return err
+	}
+
 	firstMsg := msg
 	firstMsg.Text = chunks[0]
 	firstMsg.Parts = nil
@@ -877,7 +1087,7 @@ func (s *managerOutboundStream) pushFinalWithChunking(ctx context.Context, event
 		}
 		return s.sendChunkedFinal(ctx, msg, chunks, 0, hasAttachments)
 	}
-	return s.sendChunkedFinal(ctx, msg, chunks, 1, hasAttachments)
+	return s.sendPreparedChunkedFinal(ctx, preparedOverflow, 1, len(chunks), hasAttachments)
 }
 
 func (s *managerOutboundStream) pushPrepared(ctx context.Context, event StreamEvent) error {
@@ -895,6 +1105,55 @@ func (s *managerOutboundStream) sendChunkedFinal(ctx context.Context, msg Messag
 	if startIndex < 0 {
 		startIndex = 0
 	}
+	deliveries, err := s.prepareChunkedFinalSends(ctx, msg, chunks, startIndex, hasAttachments)
+	if err != nil {
+		return err
+	}
+	return s.sendPreparedChunkedFinal(ctx, deliveries, startIndex, len(chunks), hasAttachments)
+}
+
+func (s *managerOutboundStream) sendPreparedChunkedFinal(ctx context.Context, deliveries []preparedOutboundDelivery, startIndex int, totalChunks int, hasAttachments bool) error {
+	if s.sender != nil {
+		for idx, item := range deliveries {
+			if err := s.manager.sendPreparedWithConfig(ctx, s.sender, s.config, item, s.policy); err != nil {
+				if s.manager.logger != nil {
+					s.manager.logger.Error("stream final overflow chunk send failed",
+						slog.String("channel", s.channelType.String()),
+						slog.Int("chunk_index", startIndex+idx+1),
+						slog.Int("total_chunks", totalChunks),
+						slog.Any("error", err),
+					)
+				}
+				return err
+			}
+		}
+	} else {
+		for idx, item := range deliveries {
+			if err := s.send(ctx, OutboundMessage{Message: item.message}); err != nil {
+				if s.manager.logger != nil {
+					s.manager.logger.Error("stream final overflow chunk send failed",
+						slog.String("channel", s.channelType.String()),
+						slog.Int("chunk_index", startIndex+idx+1),
+						slog.Int("total_chunks", totalChunks),
+						slog.Any("error", err),
+					)
+				}
+				return err
+			}
+		}
+	}
+	if s.manager.logger != nil {
+		s.manager.logger.Info("stream final chunking completed",
+			slog.String("channel", s.channelType.String()),
+			slog.Int("chunks", totalChunks),
+			slog.Bool("has_attachments", hasAttachments),
+		)
+	}
+	return nil
+}
+
+func (s *managerOutboundStream) prepareChunkedFinalSends(ctx context.Context, msg Message, chunks []string, startIndex int, hasAttachments bool) ([]preparedOutboundDelivery, error) {
+	outbound := make([]OutboundMessage, 0, max(0, len(chunks)-startIndex)+1)
 	for idx := startIndex; idx < len(chunks); idx++ {
 		chunk := chunks[idx]
 		chunk = strings.TrimSpace(chunk)
@@ -906,7 +1165,7 @@ func (s *managerOutboundStream) sendChunkedFinal(ctx context.Context, msg Messag
 		if isLast && !hasAttachments {
 			actions = msg.Actions
 		}
-		if err := s.send(ctx, OutboundMessage{
+		outbound = append(outbound, OutboundMessage{
 			Message: Message{
 				Format:   msg.Format,
 				Text:     chunk,
@@ -915,21 +1174,11 @@ func (s *managerOutboundStream) sendChunkedFinal(ctx context.Context, msg Messag
 				Metadata: msg.Metadata,
 				Actions:  actions,
 			},
-		}); err != nil {
-			if s.manager.logger != nil {
-				s.manager.logger.Error("stream final overflow chunk send failed",
-					slog.String("channel", s.channelType.String()),
-					slog.Int("chunk_index", idx+1),
-					slog.Int("total_chunks", len(chunks)),
-					slog.Any("error", err),
-				)
-			}
-			return err
-		}
+		})
 	}
 
 	if hasAttachments {
-		if err := s.send(ctx, OutboundMessage{
+		outbound = append(outbound, OutboundMessage{
 			Message: Message{
 				Attachments: msg.Attachments,
 				Thread:      msg.Thread,
@@ -937,25 +1186,24 @@ func (s *managerOutboundStream) sendChunkedFinal(ctx context.Context, msg Messag
 				Metadata:    msg.Metadata,
 				Actions:     msg.Actions,
 			},
-		}); err != nil {
-			if s.manager.logger != nil {
-				s.manager.logger.Error("stream final attachments send failed",
-					slog.String("channel", s.channelType.String()),
-					slog.Int("attachments", len(msg.Attachments)),
-					slog.Any("error", err),
-				)
+		})
+	}
+	prepared := make([]preparedOutboundDelivery, 0, len(outbound))
+	if s.sender != nil {
+		for _, msg := range outbound {
+			msg.Target = s.target
+			item, err := s.manager.prepareOutboundForSend(ctx, s.sender, s.config, msg)
+			if err != nil {
+				return nil, err
 			}
-			return err
+			prepared = append(prepared, item)
 		}
+		return prepared, nil
 	}
-	if s.manager.logger != nil {
-		s.manager.logger.Info("stream final chunking completed",
-			slog.String("channel", s.channelType.String()),
-			slog.Int("chunks", len(chunks)),
-			slog.Bool("has_attachments", hasAttachments),
-		)
+	for _, msg := range outbound {
+		prepared = append(prepared, preparedOutboundDelivery{message: msg.Message})
 	}
-	return nil
+	return prepared, nil
 }
 
 func (s *managerOutboundStream) Close(ctx context.Context) error {

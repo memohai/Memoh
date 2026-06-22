@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -372,6 +373,45 @@ func TestBuildTelegramInboundMessage_RichFormatWhenEntitiesPopulateParts(t *test
 	if inbound.Message.Format != channel.MessageFormatRich {
 		t.Fatalf("expected rich format when Parts populate, got %q", inbound.Message.Format)
 	}
+	if inbound.Message.Text != "" {
+		t.Fatalf("rich inbound message should not keep duplicate Text, got %q", inbound.Message.Text)
+	}
+}
+
+func TestBuildTelegramInboundMessage_RichMentionDoesNotDuplicatePlainText(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewTelegramAdapter(nil)
+	bot := newStubTelegramBot(t)
+	bot.Me = &tele.User{ID: 1, Username: "memoh1bot"}
+	const body = "@memoh1bot telegram 新的bot api除了latex还支持什么富文本"
+	update := &tele.Update{
+		ID: 1,
+		Message: &tele.Message{
+			ID:     71890,
+			Text:   body,
+			Chat:   &tele.Chat{ID: -1001, Type: tele.ChatGroup, Title: "Project Memoh"},
+			Sender: &tele.User{ID: 7583740083, Username: "softboil"},
+			Entities: tele.Entities{
+				{Type: tele.EntityMention, Offset: 0, Length: len("@memoh1bot")},
+			},
+		},
+	}
+
+	inbound, ok := adapter.buildTelegramInboundMessage(bot, channel.ChannelConfig{}, update)
+	if !ok {
+		t.Fatal("expected inbound message")
+	}
+	if inbound.Message.Text != "" {
+		t.Fatalf("rich inbound message should not keep duplicate Text, got %q", inbound.Message.Text)
+	}
+	plain := inbound.Message.PlainText()
+	if strings.Count(plain, "telegram 新的bot api除了latex还支持什么富文本") != 1 {
+		t.Fatalf("PlainText should contain the question once, got %q", plain)
+	}
+	if got, _ := inbound.Metadata["raw_text"].(string); got != body {
+		t.Fatalf("raw_text = %q, want %q", got, body)
+	}
 }
 
 func TestSeenTelegramUpdate(t *testing.T) {
@@ -530,6 +570,667 @@ func TestTelegramAdapter_NormalizeAndResolve(t *testing.T) {
 	}
 	if target != "123" {
 		t.Fatalf("ResolveTarget: %s", target)
+	}
+}
+
+func TestTelegramAdapter_SendRichPartsUsesRichMessage(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+
+	var gotBody map[string]any
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/sendChatAction") {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":true}`)),
+			}, nil
+		}
+		if !strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			t.Fatalf("expected sendRichMessage, got %s", req.URL.Path)
+		}
+		body, _ := io.ReadAll(req.Body)
+		gotBody = decodeTelegramBody(t, body)
+		resp := `{"ok":true,"result":{"message_id":77,"chat":{"id":123}}}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(resp)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	msg := channel.PreparedOutboundMessage{
+		Target: "123",
+		Message: channel.PreparedMessage{Message: channel.Message{
+			Format: channel.MessageFormatRich,
+			Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: "hello <world>", Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+				{Type: channel.MessagePartLink, Text: "docs & more", URL: "https://example.test/path?a=1&b=2"},
+				{Type: channel.MessagePartCodeBlock, Text: "fmt.Println(\"<ok>\")", Language: "go"},
+			},
+			Reply: &channel.ReplyRef{MessageID: "42"},
+			Actions: []channel.Action{
+				{Label: "Approve", Value: "approve:1"},
+			},
+		}},
+	}
+
+	if err := adapter.Send(context.Background(), channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}}, msg); err != nil {
+		t.Fatalf("send rich parts: %v", err)
+	}
+
+	if got, _ := gotBody["chat_id"].(string); got != "123" {
+		t.Fatalf("expected chat_id=123, got %q", got)
+	}
+	reply, _ := gotBody["reply_parameters"].(map[string]any)
+	if reply == nil || reply["message_id"] != float64(42) {
+		t.Fatalf("expected reply_parameters message id, got %#v", reply)
+	}
+	if _, ok := gotBody["reply_markup"]; !ok {
+		t.Fatalf("expected inline keyboard reply_markup, got %v", gotBody)
+	}
+	html := telegramRichHTMLFromBody(t, gotBody)
+	for _, want := range []string{
+		"<p><b>hello &lt;world&gt;</b></p>",
+		`<p><a href="https://example.test/path?a=1&amp;b=2">docs &amp; more</a></p>`,
+		`<pre><code class="language-go">fmt.Println("&lt;ok&gt;")</code></pre>`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("expected rich html to contain %q, got:\n%s", want, html)
+		}
+	}
+	rich, _ := gotBody["rich_message"].(map[string]any)
+	if rich == nil || rich["skip_entity_detection"] != true {
+		t.Fatalf("expected skip_entity_detection=true, got %#v", rich)
+	}
+}
+
+func TestTelegramAdapter_SendMarkdownMathUsesRichMarkdown(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+
+	var gotBody map[string]any
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			t.Fatalf("expected sendRichMessage, got %s", req.URL.Path)
+		}
+		body, _ := io.ReadAll(req.Body)
+		gotBody = decodeTelegramBody(t, body)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":78,"chat":{"id":123}}}`)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	text := "Inline $x^2 + y^2$ and block:\n\n$$E = mc^2$$"
+	msg := channel.PreparedOutboundMessage{
+		Target: "123",
+		Message: channel.PreparedMessage{Message: channel.Message{
+			Text:   text,
+			Format: channel.MessageFormatMarkdown,
+		}},
+	}
+
+	if err := adapter.Send(context.Background(), channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}}, msg); err != nil {
+		t.Fatalf("send markdown math: %v", err)
+	}
+	if got := telegramRichMarkdownFromBody(t, gotBody); got != text {
+		t.Fatalf("unexpected rich markdown:\n got: %q\nwant: %q", got, text)
+	}
+	rich, _ := gotBody["rich_message"].(map[string]any)
+	if _, ok := rich["html"]; ok {
+		t.Fatalf("markdown math should not also send rich HTML: %#v", rich)
+	}
+	if _, ok := gotBody["parse_mode"]; ok {
+		t.Fatalf("sendRichMessage payload should not include parse_mode: %#v", gotBody)
+	}
+}
+
+func TestTelegramAdapter_SendPlainMathUsesRichMarkdown(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+
+	var gotBody map[string]any
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			t.Fatalf("expected sendRichMessage, got %s", req.URL.Path)
+		}
+		body, _ := io.ReadAll(req.Body)
+		gotBody = decodeTelegramBody(t, body)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":80,"chat":{"id":123}}}`)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	text := "麦克斯韦方程组：\n\n$$\n\\nabla \\cdot \\mathbf{E} = \\frac{\\rho}{\\varepsilon_0}\n$$"
+	msg := channel.PreparedOutboundMessage{
+		Target: "123",
+		Message: channel.PreparedMessage{Message: channel.Message{
+			Text:   text,
+			Format: channel.MessageFormatPlain,
+		}},
+	}
+
+	if err := adapter.Send(context.Background(), channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}}, msg); err != nil {
+		t.Fatalf("send plain math: %v", err)
+	}
+	if got := telegramRichMarkdownFromBody(t, gotBody); got != text {
+		t.Fatalf("unexpected rich markdown:\n got: %q\nwant: %q", got, text)
+	}
+}
+
+func TestTelegramAdapter_SendBracketLatexNormalizesToRichMarkdown(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+
+	var gotBody map[string]any
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			t.Fatalf("expected sendRichMessage, got %s", req.URL.Path)
+		}
+		body, _ := io.ReadAll(req.Body)
+		gotBody = decodeTelegramBody(t, body)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":79,"chat":{"id":123}}}`)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	msg := channel.PreparedOutboundMessage{
+		Target: "123",
+		Message: channel.PreparedMessage{Message: channel.Message{
+			Text:   `Use \(\alpha+\beta\), then \[E = mc^2\].`,
+			Format: channel.MessageFormatMarkdown,
+		}},
+	}
+
+	if err := adapter.Send(context.Background(), channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}}, msg); err != nil {
+		t.Fatalf("send bracket latex: %v", err)
+	}
+	if got, want := telegramRichMarkdownFromBody(t, gotBody), `Use $\alpha+\beta$, then $$E = mc^2$$.`; got != want {
+		t.Fatalf("unexpected normalized rich markdown:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestTelegramAdapter_MediumRichPartsUsesRichMessage(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+
+	var gotBody map[string]any
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			t.Fatalf("expected sendRichMessage, got %s", req.URL.Path)
+		}
+		body, _ := io.ReadAll(req.Body)
+		gotBody = decodeTelegramBody(t, body)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":80,"chat":{"id":123}}}`)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	msg := channel.PreparedOutboundMessage{
+		Target: "123",
+		Message: channel.PreparedMessage{Message: channel.Message{
+			Format: channel.MessageFormatRich,
+			Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: strings.Repeat("你", telegramMaxMessageLength+100), Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+			},
+		}},
+	}
+
+	if err := adapter.Send(context.Background(), channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}}, msg); err != nil {
+		t.Fatalf("send medium rich parts: %v", err)
+	}
+	html := telegramRichHTMLFromBody(t, gotBody)
+	if got := utf8.RuneCountInString(html); got <= telegramMaxMessageLength {
+		t.Fatalf("test must exercise rich payloads above normal text limit, got %d", got)
+	}
+}
+
+func TestTelegramAdapter_LongRichPartsFallsBackToPlainText(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+
+	var gotBody map[string]any
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			t.Fatalf("long rich parts should not call sendRichMessage")
+		}
+		if !strings.HasSuffix(req.URL.Path, "/sendMessage") {
+			t.Fatalf("expected sendMessage, got %s", req.URL.Path)
+		}
+		body, _ := io.ReadAll(req.Body)
+		gotBody = decodeTelegramBody(t, body)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":80,"chat":{"id":123}}}`)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	msg := channel.PreparedOutboundMessage{
+		Target: "123",
+		Message: channel.PreparedMessage{Message: channel.Message{
+			Format: channel.MessageFormatRich,
+			Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: strings.Repeat("你", telegramMaxMessageLength*9), Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+			},
+		}},
+	}
+
+	if err := adapter.Send(context.Background(), channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}}, msg); err != nil {
+		t.Fatalf("send long rich parts: %v", err)
+	}
+	text, _ := gotBody["text"].(string)
+	if utf8.RuneCountInString(text) > telegramMaxMessageLength {
+		t.Fatalf("fallback text should be truncated to %d runes, got %d", telegramMaxMessageLength, utf8.RuneCountInString(text))
+	}
+	if got, _ := gotBody["parse_mode"].(string); got != "" {
+		t.Fatalf("long rich fallback should use plain text parse mode, got body %v", gotBody)
+	}
+}
+
+func TestTelegramAdapter_RichHTMLOverflowFallbackSplitsPlainText(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+
+	var bodies []map[string]any
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			t.Fatalf("HTML-overflow rich parts should not call sendRichMessage")
+		}
+		if !strings.HasSuffix(req.URL.Path, "/sendMessage") {
+			t.Fatalf("expected sendMessage, got %s", req.URL.Path)
+		}
+		body, _ := io.ReadAll(req.Body)
+		bodies = append(bodies, decodeTelegramBody(t, body))
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":80,"chat":{"id":123}}}`)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	parts := telegramHTMLOverflowParts()
+	plain := channel.RenderPartsAsPlain(parts)
+	rich := renderTelegramMessagePartsRichMessage(channel.Message{Parts: parts})
+	if utf8.RuneCountInString(plain) > telegramMaxRichMessageLength {
+		t.Fatalf("test plain fallback must be within rich limit, got %d", utf8.RuneCountInString(plain))
+	}
+	if utf8.RuneCountInString(rich.HTML) <= telegramMaxRichMessageLength {
+		t.Fatalf("test rich HTML must exceed rich limit, got %d", utf8.RuneCountInString(rich.HTML))
+	}
+
+	msg := channel.PreparedOutboundMessage{
+		Target: "123",
+		Message: channel.PreparedMessage{Message: channel.Message{
+			Format: channel.MessageFormatRich,
+			Parts:  parts,
+		}},
+	}
+
+	if err := adapter.Send(context.Background(), channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}}, msg); err != nil {
+		t.Fatalf("send HTML-overflow rich parts: %v", err)
+	}
+	if len(bodies) < 2 {
+		t.Fatalf("expected fallback plain text to split, got %d sendMessage call(s)", len(bodies))
+	}
+	var joined strings.Builder
+	for i, body := range bodies {
+		text, _ := body["text"].(string)
+		if got := utf8.RuneCountInString(text); got > telegramMaxMessageLength {
+			t.Fatalf("fallback chunk %d exceeds Telegram text limit: %d", i, got)
+		}
+		joined.WriteString(text)
+	}
+	if got := utf8.RuneCountInString(joined.String()); got <= telegramMaxMessageLength {
+		t.Fatalf("fallback sent only one truncated text window, got %d runes", got)
+	}
+}
+
+func TestTelegramDescriptorUsesRichTextChunkLimit(t *testing.T) {
+	t.Parallel()
+
+	policy := channel.NormalizeOutboundPolicy(NewTelegramAdapter(nil).Descriptor().OutboundPolicy)
+	if policy.RichTextChunkLimit <= policy.TextChunkLimit {
+		t.Fatalf("Telegram rich text limit should exceed text limit, got text=%d rich=%d", policy.TextChunkLimit, policy.RichTextChunkLimit)
+	}
+}
+
+func TestTelegramAttachmentSendOptionsCarriesActions(t *testing.T) {
+	t.Parallel()
+
+	opts := telegramAttachmentSendOptions("", 0, []channel.Action{{
+		Label: "Open",
+		URL:   "https://example.com",
+	}})
+	if opts == nil || opts.ReplyMarkup == nil || len(opts.ReplyMarkup.InlineKeyboard) != 1 {
+		t.Fatalf("expected attachment send options to include inline keyboard, got %+v", opts)
+	}
+	btn := opts.ReplyMarkup.InlineKeyboard[0][0]
+	if btn.Text != "Open" || btn.URL != "https://example.com" {
+		t.Fatalf("unexpected inline keyboard button: %+v", btn)
+	}
+}
+
+func TestSendTelegramTextWithActionsUsesLabelFallbackForActionOnlyMessage(t *testing.T) {
+	var body map[string]any
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(req.URL.Path, "/sendMessage") {
+			t.Fatalf("expected sendMessage, got %s", req.URL.Path)
+		}
+		raw, _ := io.ReadAll(req.Body)
+		body = decodeTelegramBody(t, raw)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":95,"chat":{"id":123}}}`)),
+		}, nil
+	}))
+
+	_, _, err := sendTelegramTextWithActionsReturnMessage(bot, "123", "", 0, "", []channel.Action{{
+		Label: "Open",
+		URL:   "https://example.com",
+	}})
+	if err != nil {
+		t.Fatalf("sendTelegramTextWithActionsReturnMessage: %v", err)
+	}
+	if got, _ := body["text"].(string); got != "Open" {
+		t.Fatalf("expected action label fallback text, got body=%v", body)
+	}
+	if _, ok := body["reply_markup"]; !ok {
+		t.Fatalf("expected reply_markup, got body=%v", body)
+	}
+}
+
+func TestSendTelegramTextWithActionsRejectsActionOnlyInvalidButtons(t *testing.T) {
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("invalid action-only message should fail before HTTP request: %s", req.URL.Path)
+		return nil, nil
+	}))
+
+	_, _, err := sendTelegramTextWithActionsReturnMessage(bot, "123", "", 0, "", []channel.Action{{
+		Label: "Too large",
+		Value: strings.Repeat("x", telegramMaxCallbackDataBytes+1),
+	}})
+	if err == nil || !strings.Contains(err.Error(), "callback data") {
+		t.Fatalf("expected invalid action error, got %v", err)
+	}
+}
+
+func TestSendTelegramTextWithActionsRejectsTextInvalidButtons(t *testing.T) {
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("invalid action should fail before HTTP request: %s", req.URL.Path)
+		return nil, nil
+	}))
+
+	_, _, err := sendTelegramTextWithActionsReturnMessage(bot, "123", "Choose", 0, "", []channel.Action{{
+		Label: "Unsafe",
+		URL:   "javascript:alert(1)",
+	}})
+	if err == nil || !strings.Contains(err.Error(), "url must be http(s)") {
+		t.Fatalf("expected invalid action error, got %v", err)
+	}
+}
+
+func TestSendTelegramRichMessageRejectsInvalidActionsBeforeRequest(t *testing.T) {
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("invalid rich action should fail before HTTP request: %s", req.URL.Path)
+		return nil, nil
+	}))
+
+	_, _, err := sendTelegramRichMessageReturnMessage(bot, "123", telegramInputRichMessage{HTML: "<p>Choose</p>"}, 0, []channel.Action{{
+		Label: "Too large",
+		Value: strings.Repeat("x", telegramMaxCallbackDataBytes+1),
+	}})
+	if err == nil || !strings.Contains(err.Error(), "callback data") {
+		t.Fatalf("expected invalid rich action error, got %v", err)
+	}
+}
+
+func TestTelegramPreparedOutboundValidationRejectsInvalidActions(t *testing.T) {
+	t.Parallel()
+
+	err := NewTelegramAdapter(nil).ValidatePreparedOutbound(context.Background(), channel.ChannelConfig{}, "123", channel.PreparedOutboundMessage{
+		Target: "123",
+		Message: channel.PreparedMessage{Message: channel.Message{
+			Text: "Choose",
+			Actions: []channel.Action{{
+				Label: "Too large",
+				Value: strings.Repeat("x", telegramMaxCallbackDataBytes+1),
+			}},
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "callback data") {
+		t.Fatalf("expected invalid action preflight error, got %v", err)
+	}
+}
+
+func telegramHTMLOverflowParts() []channel.MessagePart {
+	parts := make([]channel.MessagePart, 0, 3000)
+	for range 3000 {
+		parts = append(parts, channel.MessagePart{
+			Type:   channel.MessagePartText,
+			Text:   "x",
+			Styles: []channel.MessageTextStyle{channel.MessageStyleBold},
+		})
+	}
+	return parts
+}
+
+func TestTelegramAdapter_SendRichPartsFallsBackToText(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+
+	var paths []string
+	var fallbackBody map[string]any
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		paths = append(paths, req.URL.Path)
+		body, _ := io.ReadAll(req.Body)
+		decoded := decodeTelegramBody(t, body)
+		if strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			resp := `{"ok":false,"error_code":404,"description":"Not Found: method not found"}`
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(resp)),
+			}, nil
+		}
+		if !strings.HasSuffix(req.URL.Path, "/sendMessage") {
+			t.Fatalf("expected fallback sendMessage, got %s", req.URL.Path)
+		}
+		fallbackBody = decoded
+		resp := `{"ok":true,"result":{"message_id":78,"chat":{"id":123}}}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(resp)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	msg := channel.PreparedOutboundMessage{
+		Target: "123",
+		Message: channel.PreparedMessage{Message: channel.Message{
+			Format: channel.MessageFormatRich,
+			Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: "hello"},
+				{Type: channel.MessagePartLink, Text: "docs", URL: "https://example.test"},
+			},
+		}},
+	}
+
+	if err := adapter.Send(context.Background(), channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}}, msg); err != nil {
+		t.Fatalf("send rich parts with fallback: %v", err)
+	}
+	if len(paths) != 2 {
+		t.Fatalf("expected rich send plus text fallback, got paths %v", paths)
+	}
+	if got, _ := fallbackBody["text"].(string); got != "hello\n\n<a href=\"https://example.test\">docs</a>" {
+		t.Fatalf("expected plain text fallback, got body %v", fallbackBody)
+	}
+	if got, _ := fallbackBody["parse_mode"].(string); got != tele.ModeHTML {
+		t.Fatalf("expected HTML parse mode for rich fallback, got body %v", fallbackBody)
+	}
+}
+
+func TestTelegramAdapter_SendRichPartsFallbackEscapesLiteralMarkdown(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+
+	var fallbackBody map[string]any
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(req.Body)
+		decoded := decodeTelegramBody(t, body)
+		if strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"ok":false,"error_code":404,"description":"Not Found: method not found"}`)),
+			}, nil
+		}
+		if !strings.HasSuffix(req.URL.Path, "/sendMessage") {
+			t.Fatalf("expected fallback sendMessage, got %s", req.URL.Path)
+		}
+		fallbackBody = decoded
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":79,"chat":{"id":123}}}`)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	msg := channel.PreparedOutboundMessage{
+		Target: "123",
+		Message: channel.PreparedMessage{Message: channel.Message{
+			Format: channel.MessageFormatRich,
+			Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: `literal [evil](https://evil.test) <tag>`},
+				{Type: channel.MessagePartLink, Text: `docs "quoted"`, URL: `https://example.test/?q="x"&ok=1`},
+			},
+		}},
+	}
+
+	if err := adapter.Send(context.Background(), channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}}, msg); err != nil {
+		t.Fatalf("send rich parts with fallback: %v", err)
+	}
+	text, _ := fallbackBody["text"].(string)
+	if strings.Contains(text, `<a href="https://evil.test">`) {
+		t.Fatalf("literal markdown text became a link in fallback: %q", text)
+	}
+	for _, want := range []string{
+		`literal [evil](https://evil.test) &lt;tag&gt;`,
+		`<a href="https://example.test/?q=&quot;x&quot;&amp;ok=1">docs "quoted"</a>`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected fallback text to contain %q, got %q", want, text)
+		}
+	}
+	if got, _ := fallbackBody["parse_mode"].(string); got != tele.ModeHTML {
+		t.Fatalf("expected HTML parse mode for rich fallback, got body %v", fallbackBody)
+	}
+}
+
+func TestTelegramAdapter_UpdateRichPartsUsesRichMessage(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+
+	var gotBody map[string]any
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(req.URL.Path, "/editMessageText") {
+			t.Fatalf("expected editMessageText, got %s", req.URL.Path)
+		}
+		body, _ := io.ReadAll(req.Body)
+		gotBody = decodeTelegramBody(t, body)
+		resp := `{"ok":true,"result":{"message_id":88,"chat":{"id":123}}}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(resp)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	err := adapter.Update(context.Background(),
+		channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		"123",
+		"88",
+		channel.PreparedMessage{Message: channel.Message{
+			Format: channel.MessageFormatRich,
+			Parts: []channel.MessagePart{
+				{Type: channel.MessagePartText, Text: "done", Styles: []channel.MessageTextStyle{channel.MessageStyleItalic}},
+			},
+		}},
+	)
+	if err != nil {
+		t.Fatalf("update rich parts: %v", err)
+	}
+
+	chatID, _ := gotBody["chat_id"].(string)
+	msgID, _ := gotBody["message_id"].(float64)
+	if chatID != "123" || msgID != 88 {
+		t.Fatalf("unexpected edit target: %v", gotBody)
+	}
+	if got, _ := gotBody["text"].(string); got != "" {
+		t.Fatalf("rich edit should not send text field, got %q", got)
+	}
+	html := telegramRichHTMLFromBody(t, gotBody)
+	if !strings.Contains(html, "<p><i>done</i></p>") {
+		t.Fatalf("expected italic rich html, got:\n%s", html)
 	}
 }
 
