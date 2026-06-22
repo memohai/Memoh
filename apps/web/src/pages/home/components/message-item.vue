@@ -374,7 +374,7 @@ enableMermaid()
 
 
 const settingsStore = useSettingsStore()
-const isDark = computed(() => settingsStore.theme === 'dark')
+const isDark = computed(() => settingsStore.isDark)
 const codeBlockTheme = computed(() => ({
   light: settingsStore.shikiThemeLight,
   dark: settingsStore.shikiThemeDark,

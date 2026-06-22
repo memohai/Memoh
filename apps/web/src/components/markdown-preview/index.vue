@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import MarkdownRender, { enableKatex, enableMermaid, setCustomComponents } from 'markstream-vue'
 import ThemedMermaidBlock from '@/components/themed-mermaid-block/index.vue'
+import ChatCodeBlock from '@/pages/home/components/chat-code-block.vue'
 import { useSettingsStore } from '@/store/settings'
 import { registerSharedMarkdownComponents } from '@/components/markdown'
 
@@ -19,20 +20,13 @@ enableMermaid()
 // covers chat + file preview + any other MarkdownRender call site.
 setCustomComponents({ mermaid: ThemedMermaidBlock })
 // File preview reuses the chat's design-system node components (library
-// Checkbox task markers, link-language footnotes). It keeps markstream's own
-// Monaco code block, so no code_block override here.
-registerSharedMarkdownComponents('file-preview-md')
+// Checkbox task markers, link-language footnotes). It also uses the same
+// non-Monaco code block as chat so the file editor's Monaco theme is not
+// affected by code blocks in the preview.
+registerSharedMarkdownComponents('file-preview-md', { code_block: ChatCodeBlock, shell: ChatCodeBlock })
 
 const settings = useSettingsStore()
-const isDark = computed(() => settings.theme === 'dark')
-const codeBlockMonacoOptions = computed(() => ({
-  fontFamily: settings.codeFontStack,
-  fontSize: settings.codeFontSizePx,
-}))
-const codeBlockTheme = computed(() => ({
-  light: settings.shikiThemeLight,
-  dark: settings.shikiThemeDark,
-}))
+const isDark = computed(() => settings.isDark)
 const codeFontRenderKey = computed(() => settings.codeFontStack)
 </script>
 
@@ -47,8 +41,6 @@ const codeFontRenderKey = computed(() => settings.codeFontStack)
         :fade="false"
         :show-tooltips="false"
         :mermaid-props="{ showTooltips: false }"
-        :code-block-monaco-options="codeBlockMonacoOptions"
-        :theme="codeBlockTheme"
         custom-id="file-preview-md"
       />
     </div>
