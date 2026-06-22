@@ -7758,6 +7758,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
                     }
                 }
             },
@@ -8005,6 +8011,78 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{id}/channel/{platform}/webhook-endpoint": {
+            "post": {
+                "description": "Set the platform-side webhook endpoint for a bot channel.",
+                "tags": [
+                    "bots"
+                ],
+                "summary": "Set bot channel webhook endpoint",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Channel platform",
+                        "name": "platform",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Webhook endpoint payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/channel.SetWebhookEndpointRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/channel.SetWebhookEndpointResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -12035,6 +12113,22 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/webhook-tunnel/status": {
+            "get": {
+                "tags": [
+                    "system"
+                ],
+                "summary": "Get webhook tunnel status",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/webhooktunnel.Status"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -13771,7 +13865,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "row": {
-                    "description": "Row groups buttons into keyboard rows for renderers that support grids\n(e.g. Telegram inline keyboards). Buttons sharing a Row render together;\nrows appear in ascending first-seen order. Renderers without grid support\nignore this field. 0 is the default (single row, prior behavior).",
+                    "description": "Row groups buttons into keyboard rows for renderers that support grids\n(e.g. Telegram inline keyboards). Buttons sharing a Row render together;\nrows appear in ascending numeric order. Renderers without grid support\nignore this field. 0 is the default (single row, prior behavior).",
                     "type": "integer"
                 },
                 "type": {
@@ -13914,6 +14008,9 @@ const docTemplate = `{
                 },
                 "unsend": {
                     "type": "boolean"
+                },
+                "url_buttons": {
+                    "type": "boolean"
                 }
             }
         },
@@ -13995,7 +14092,8 @@ const docTemplate = `{
                 "weixin",
                 "wechatoa",
                 "local",
-                "slack"
+                "slack",
+                "line"
             ],
             "x-enum-varnames": [
                 "ChannelTypeTelegram",
@@ -14008,7 +14106,8 @@ const docTemplate = `{
                 "ChannelTypeWeixin",
                 "ChannelTypeWeChatOA",
                 "ChannelTypeLocal",
-                "ChannelTypeSlack"
+                "ChannelTypeSlack",
+                "ChannelTypeLine"
             ]
         },
         "channel.ConfigSchema": {
@@ -14187,14 +14286,20 @@ const docTemplate = `{
                 "link",
                 "code_block",
                 "mention",
-                "emoji"
+                "emoji",
+                "heading",
+                "blockquote",
+                "list_item"
             ],
             "x-enum-varnames": [
                 "MessagePartText",
                 "MessagePartLink",
                 "MessagePartCodeBlock",
                 "MessagePartMention",
-                "MessagePartEmoji"
+                "MessagePartEmoji",
+                "MessagePartHeading",
+                "MessagePartBlockquote",
+                "MessagePartListItem"
             ]
         },
         "channel.MessageTextStyle": {
@@ -14203,13 +14308,17 @@ const docTemplate = `{
                 "bold",
                 "italic",
                 "strikethrough",
-                "code"
+                "code",
+                "underline",
+                "spoiler"
             ],
             "x-enum-varnames": [
                 "MessageStyleBold",
                 "MessageStyleItalic",
                 "MessageStyleStrikethrough",
-                "MessageStyleCode"
+                "MessageStyleCode",
+                "MessageStyleUnderline",
+                "MessageStyleSpoiler"
             ]
         },
         "channel.ReplyRef": {
@@ -14245,6 +14354,22 @@ const docTemplate = `{
                     "$ref": "#/definitions/channel.Message"
                 },
                 "target": {
+                    "type": "string"
+                }
+            }
+        },
+        "channel.SetWebhookEndpointRequest": {
+            "type": "object",
+            "properties": {
+                "endpoint": {
+                    "type": "string"
+                }
+            }
+        },
+        "channel.SetWebhookEndpointResponse": {
+            "type": "object",
+            "properties": {
+                "endpoint": {
                     "type": "string"
                 }
             }
@@ -18398,6 +18523,26 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "tts_model_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "webhooktunnel.Status": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "mode": {
+                    "type": "string"
+                },
+                "public_base_url": {
+                    "type": "string"
+                },
+                "status": {
                     "type": "string"
                 }
             }

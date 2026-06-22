@@ -12,8 +12,9 @@ import (
 )
 
 type fakeWebhookAdapter struct {
-	channelType ChannelType
-	calls       []struct {
+	channelType        ChannelType
+	ackDisabledWebhook bool
+	calls              []struct {
 		cfg    ChannelConfig
 		method string
 	}
@@ -23,8 +24,9 @@ func (a *fakeWebhookAdapter) Type() ChannelType { return a.channelType }
 
 func (a *fakeWebhookAdapter) Descriptor() Descriptor {
 	return Descriptor{
-		Type:        a.channelType,
-		DisplayName: strings.ToUpper(a.channelType.String()),
+		Type:               a.channelType,
+		DisplayName:        strings.ToUpper(a.channelType.String()),
+		AckDisabledWebhook: a.ackDisabledWebhook,
 	}
 }
 
@@ -151,5 +153,91 @@ func TestGenericWebhookHandlerRejectsUnknownConfig(t *testing.T) {
 	}
 	if httpErr.Code != http.StatusNotFound {
 		t.Fatalf("unexpected status code: %d", httpErr.Code)
+	}
+}
+
+func TestGenericWebhookHandlerAcksDisabledConfigWhenDescriptorRequestsIt(t *testing.T) {
+	t.Parallel()
+
+	registry := NewRegistry()
+	adapter := &fakeWebhookAdapter{channelType: ChannelType("ackhook"), ackDisabledWebhook: true}
+	registry.MustRegister(adapter)
+
+	store := &fakeWebhookStore{
+		configs: []ChannelConfig{{
+			ID:          "cfg-1",
+			BotID:       "bot-1",
+			ChannelType: adapter.channelType,
+			Disabled:    true,
+		}},
+	}
+	manager := &fakeWebhookManager{registry: registry}
+	h := NewWebhookServerHandler(nil, (*Store)(nil), (*Manager)(nil))
+	h.store = store
+	h.manager = manager
+	h.registry = registry
+
+	e := echo.New()
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/channels/ackhook/webhook/cfg-1", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("platform", "config_id")
+	c.SetParamValues("ackhook", "cfg-1")
+
+	if err := h.Handle(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status code: %d", rec.Code)
+	}
+	if len(adapter.calls) != 0 {
+		t.Fatalf("expected adapter not to be called, got %d calls", len(adapter.calls))
+	}
+	if len(manager.calls) != 0 {
+		t.Fatalf("expected inbound manager not to be called, got %d calls", len(manager.calls))
+	}
+}
+
+func TestGenericWebhookHandlerRejectsDisabledConfigByDefault(t *testing.T) {
+	t.Parallel()
+
+	registry := NewRegistry()
+	adapter := &fakeWebhookAdapter{channelType: ChannelType("testhook")}
+	registry.MustRegister(adapter)
+
+	store := &fakeWebhookStore{
+		configs: []ChannelConfig{{
+			ID:          "cfg-1",
+			BotID:       "bot-1",
+			ChannelType: adapter.channelType,
+			Disabled:    true,
+		}},
+	}
+	manager := &fakeWebhookManager{registry: registry}
+	h := NewWebhookServerHandler(nil, (*Store)(nil), (*Manager)(nil))
+	h.store = store
+	h.manager = manager
+	h.registry = registry
+
+	e := echo.New()
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/channels/testhook/webhook/cfg-1", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("platform", "config_id")
+	c.SetParamValues("testhook", "cfg-1")
+
+	err := h.Handle(c)
+	if err == nil {
+		t.Fatal("expected disabled config error")
+	}
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("expected HTTPError, got %T", err)
+	}
+	if httpErr.Code != http.StatusForbidden {
+		t.Fatalf("unexpected status code: %d", httpErr.Code)
+	}
+	if len(adapter.calls) != 0 {
+		t.Fatalf("expected adapter not to be called, got %d calls", len(adapter.calls))
 	}
 }

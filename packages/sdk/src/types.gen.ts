@@ -694,7 +694,7 @@ export type ChannelAction = {
     /**
      * Row groups buttons into keyboard rows for renderers that support grids
      * (e.g. Telegram inline keyboards). Buttons sharing a Row render together;
-     * rows appear in ascending first-seen order. Renderers without grid support
+     * rows appear in ascending numeric order. Renderers without grid support
      * ignore this field. 0 is the default (single row, prior behavior).
      */
     row?: number;
@@ -752,6 +752,7 @@ export type ChannelChannelCapabilities = {
     text?: boolean;
     threads?: boolean;
     unsend?: boolean;
+    url_buttons?: boolean;
 };
 
 export type ChannelChannelConfig = {
@@ -785,7 +786,7 @@ export type ChannelChannelIdentityBinding = {
     updated_at?: string;
 };
 
-export type ChannelChannelType = 'telegram' | 'feishu' | 'dingtalk' | 'matrix' | 'discord' | 'qq' | 'wecom' | 'weixin' | 'wechatoa' | 'local' | 'slack';
+export type ChannelChannelType = 'telegram' | 'feishu' | 'dingtalk' | 'matrix' | 'discord' | 'qq' | 'wecom' | 'weixin' | 'wechatoa' | 'local' | 'slack' | 'line';
 
 export type ChannelConfigSchema = {
     fields?: {
@@ -844,9 +845,9 @@ export type ChannelMessagePart = {
     url?: string;
 };
 
-export type ChannelMessagePartType = 'text' | 'link' | 'code_block' | 'mention' | 'emoji';
+export type ChannelMessagePartType = 'text' | 'link' | 'code_block' | 'mention' | 'emoji' | 'heading' | 'blockquote' | 'list_item';
 
-export type ChannelMessageTextStyle = 'bold' | 'italic' | 'strikethrough' | 'code';
+export type ChannelMessageTextStyle = 'bold' | 'italic' | 'strikethrough' | 'code' | 'underline' | 'spoiler';
 
 export type ChannelReplyRef = {
     attachments?: Array<ChannelAttachment>;
@@ -860,6 +861,14 @@ export type ChannelSendRequest = {
     channel_identity_id?: string;
     message?: ChannelMessage;
     target?: string;
+};
+
+export type ChannelSetWebhookEndpointRequest = {
+    endpoint?: string;
+};
+
+export type ChannelSetWebhookEndpointResponse = {
+    endpoint?: string;
 };
 
 export type ChannelTargetHint = {
@@ -2528,6 +2537,14 @@ export type SettingsUpsertRequest = {
     tool_approval_config?: SettingsToolApprovalConfig;
     transcription_model_id?: string;
     tts_model_id?: string;
+};
+
+export type WebhooktunnelStatus = {
+    enabled?: boolean;
+    error?: string;
+    mode?: string;
+    public_base_url?: string;
+    status?: string;
 };
 
 export type GetAcpProfilesData = {
@@ -8891,6 +8908,10 @@ export type PutBotsByIdChannelByPlatformErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
 };
 
 export type PutBotsByIdChannelByPlatformError = PutBotsByIdChannelByPlatformErrors[keyof PutBotsByIdChannelByPlatformErrors];
@@ -9042,6 +9063,10 @@ export type PatchBotsByIdChannelByPlatformStatusErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
 };
 
 export type PatchBotsByIdChannelByPlatformStatusError = PatchBotsByIdChannelByPlatformStatusErrors[keyof PatchBotsByIdChannelByPlatformStatusErrors];
@@ -9054,6 +9079,55 @@ export type PatchBotsByIdChannelByPlatformStatusResponses = {
 };
 
 export type PatchBotsByIdChannelByPlatformStatusResponse = PatchBotsByIdChannelByPlatformStatusResponses[keyof PatchBotsByIdChannelByPlatformStatusResponses];
+
+export type PostBotsByIdChannelByPlatformWebhookEndpointData = {
+    /**
+     * Webhook endpoint payload
+     */
+    body: ChannelSetWebhookEndpointRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        id: string;
+        /**
+         * Channel platform
+         */
+        platform: string;
+    };
+    query?: never;
+    url: '/bots/{id}/channel/{platform}/webhook-endpoint';
+};
+
+export type PostBotsByIdChannelByPlatformWebhookEndpointErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type PostBotsByIdChannelByPlatformWebhookEndpointError = PostBotsByIdChannelByPlatformWebhookEndpointErrors[keyof PostBotsByIdChannelByPlatformWebhookEndpointErrors];
+
+export type PostBotsByIdChannelByPlatformWebhookEndpointResponses = {
+    /**
+     * OK
+     */
+    200: ChannelSetWebhookEndpointResponse;
+};
+
+export type PostBotsByIdChannelByPlatformWebhookEndpointResponse = PostBotsByIdChannelByPlatformWebhookEndpointResponses[keyof PostBotsByIdChannelByPlatformWebhookEndpointResponses];
 
 export type GetBotsByIdChecksData = {
     body?: never;
@@ -12374,3 +12448,19 @@ export type PutUsersByIdPasswordResponses = {
      */
     204: unknown;
 };
+
+export type GetWebhookTunnelStatusData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/webhook-tunnel/status';
+};
+
+export type GetWebhookTunnelStatusResponses = {
+    /**
+     * OK
+     */
+    200: WebhooktunnelStatus;
+};
+
+export type GetWebhookTunnelStatusResponse = GetWebhookTunnelStatusResponses[keyof GetWebhookTunnelStatusResponses];

@@ -72,30 +72,57 @@
       >
         <div class="mx-4 space-y-3 py-4">
           <p class="text-xs text-muted-foreground">
-            {{ $t('bots.channels.webhookCallbackHint') }}
+            {{ $t(webhookCallbackHintKey) }}
+          </p>
+          <p
+            v-if="lineWebhookBaseWarningKey"
+            class="text-xs text-warning"
+          >
+            {{ $t(lineWebhookBaseWarningKey) }}
           </p>
           <div
             v-if="webhookCallbackUrl"
-            class="flex items-center gap-2"
+            class="flex flex-col gap-2 sm:flex-row sm:items-center"
           >
             <Input
               :model-value="webhookCallbackUrl"
               readonly
-              class="font-mono"
+              class="font-mono sm:flex-1"
             />
-            <Button
-              variant="outline"
-              class="shrink-0"
-              @click="copyWebhookCallback"
-            >
-              {{ $t('common.copy') }}
-            </Button>
+            <div class="flex shrink-0 items-center gap-2">
+              <Button
+                variant="outline"
+                class="shrink-0"
+                @click="copyWebhookCallback"
+              >
+                {{ $t('common.copy') }}
+              </Button>
+              <Button
+                v-if="isLineWebhook"
+                variant="outline"
+                class="shrink-0"
+                :disabled="isBusy"
+                @click="handleSetLineWebhookEndpoint"
+              >
+                <Spinner
+                  v-if="action === 'webhook'"
+                  class="size-4"
+                />
+                {{ action === 'webhook' ? $t('bots.channels.lineWebhookSetting') : $t('bots.channels.lineWebhookSet') }}
+              </Button>
+            </div>
           </div>
           <p
             v-else
             class="text-xs italic text-muted-foreground"
           >
-            {{ $t('bots.channels.webhookCallbackPending') }}
+            {{ $t(webhookCallbackPendingKey) }}
+          </p>
+          <p
+            v-if="isLineWebhook"
+            class="text-xs text-muted-foreground"
+          >
+            {{ $t('bots.channels.linePublicMediaLimit') }}
           </p>
         </div>
       </SettingsSection>
@@ -106,7 +133,7 @@
         :title="$t('bots.channels.credentials')"
       >
         <p
-          v-if="showWebhookCallback"
+          v-if="isFeishuWebhook"
           class="mx-4 border-b border-border py-3 text-xs text-warning"
         >
           {{ $t('bots.channels.feishuWebhookSecurityHint') }}
@@ -195,7 +222,7 @@ import { reactive, watch, computed, ref } from 'vue'
 import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { useMutation } from '@pinia/colada'
-import { putBotsByIdChannelByPlatform, deleteBotsByIdChannelByPlatform, patchBotsByIdChannelByPlatformStatus } from '@memohai/sdk'
+import { putBotsByIdChannelByPlatform, deleteBotsByIdChannelByPlatform, patchBotsByIdChannelByPlatformStatus, postBotsByIdChannelByPlatformWebhookEndpoint } from '@memohai/sdk'
 import type { HandlersChannelMeta, ChannelChannelConfig, ChannelFieldSchema, ChannelUpsertConfigRequest } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
@@ -206,6 +233,7 @@ import ChannelField from './channel-field.vue'
 import WeixinQrLogin from './weixin-qr-login.vue'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { useLineWebhookPublicBase } from '../composables/use-line-webhook-public-base'
 
 export interface BotChannelItem {
   meta: HandlersChannelMeta
@@ -229,7 +257,7 @@ const botIdRef = computed(() => props.botId)
 const platformType = computed(() => String(props.channelItem.meta.type || '').trim())
 const channelTitle = computed(() => channelTypeDisplayName(t, props.channelItem.meta.type, props.channelItem.meta.display_name))
 
-const action = ref<'save' | 'toggle' | 'delete' | ''>('')
+const action = ref<'save' | 'toggle' | 'delete' | 'webhook' | ''>('')
 const isBusy = computed(() => action.value !== '')
 const isEditMode = computed(() => props.channelItem.configured)
 const lastSavedConfigId = ref('')
@@ -247,6 +275,12 @@ const { mutateAsync: upsertChannel } = useMutation({
 const { mutateAsync: updateChannelStatus } = useMutation({
   mutation: async ({ platform, disabled }: { platform: string; disabled: boolean }) => {
     const { data } = await patchBotsByIdChannelByPlatformStatus({ path: { id: botIdRef.value, platform }, body: { disabled }, throwOnError: true })
+    return data
+  }
+})
+const { mutateAsync: setWebhookEndpoint } = useMutation({
+  mutation: async ({ platform, endpoint }: { platform: string; endpoint: string }) => {
+    const { data } = await postBotsByIdChannelByPlatformWebhookEndpoint({ path: { id: botIdRef.value, platform }, body: { endpoint }, throwOnError: true })
     return data
   }
 })
@@ -268,11 +302,26 @@ const requiredFieldsKeys = computed(() => Object.keys(orderedFields.value).filte
 const optionalFieldsKeys = computed(() => Object.keys(orderedFields.value).filter(k => !orderedFields.value[k].required))
 
 const currentInboundMode = computed(() => String(form.credentials.inboundMode ?? form.credentials.inbound_mode ?? '').trim().toLowerCase())
-const showWebhookCallback = computed(() => platformType.value === 'feishu' ? currentInboundMode.value === 'webhook' : platformType.value === 'wechatoa')
+const isFeishuWebhook = computed(() => platformType.value === 'feishu' && currentInboundMode.value === 'webhook')
+const isWechatOA = computed(() => platformType.value === 'wechatoa')
+const isLineWebhook = computed(() => platformType.value === 'line')
+const { publicBase: lineWebhookPublicBase, warningKey: lineWebhookBaseWarningKey } = useLineWebhookPublicBase(isLineWebhook)
+const showWebhookCallback = computed(() => isFeishuWebhook.value || isWechatOA.value || isLineWebhook.value)
+const webhookCallbackHintKey = computed(() => {
+  if (isLineWebhook.value) return 'bots.channels.lineWebhookCallbackHint'
+  if (isWechatOA.value) return 'bots.channels.wechatOAWebhookCallbackHint'
+  return 'bots.channels.webhookCallbackHint'
+})
+const webhookConfigId = computed(() => String(props.channelItem.config?.id || lastSavedConfigId.value || '').trim())
+const webhookCallbackPendingKey = computed(() => {
+  if (isLineWebhook.value && webhookConfigId.value && !lineWebhookPublicBase.value.url) {
+    return 'bots.channels.webhookCallbackPublicBasePending'
+  }
+  return 'bots.channels.webhookCallbackPending'
+})
 const webhookCallbackUrl = computed(() => {
   if (!showWebhookCallback.value) return ''
-  const configId = String(props.channelItem.config?.id || lastSavedConfigId.value || '').trim()
-  return configId ? buildWebhookCallbackUrl(configId) : ''
+  return webhookConfigId.value ? buildWebhookCallbackUrl(webhookConfigId.value) : ''
 })
 
 function initForm() {
@@ -371,6 +420,10 @@ async function handleDelete() {
 }
 
 function buildWebhookCallbackUrl(configId: string): string {
+  if (isLineWebhook.value) {
+    const base = lineWebhookPublicBase.value.url
+    return base ? `${base}/channels/line/webhook/${encodeURIComponent(configId)}` : ''
+  }
   const base = (import.meta.env.VITE_WEBHOOK_PUBLIC_BASE_URL?.trim() || import.meta.env.VITE_API_PUBLIC_URL?.trim() || client.getConfig().baseUrl || import.meta.env.VITE_API_URL?.trim() || (typeof window !== 'undefined' ? new URL(window.location.origin).toString() : '')).replace(/\/+$/, '')
   return `${base}/channels/${encodeURIComponent(platformType.value)}/webhook/${encodeURIComponent(configId)}`
 }
@@ -381,6 +434,23 @@ async function copyWebhookCallback() {
     toast.success(t('common.copied'))
   } else {
     toast.error(t('bots.channels.copyFailed'))
+  }
+}
+
+async function handleSetLineWebhookEndpoint() {
+  if (!webhookCallbackUrl.value) return
+  if (isFormDirty.value) {
+    toast.error(t('bots.channels.lineWebhookSaveFirst'))
+    return
+  }
+  action.value = 'webhook'
+  try {
+    await setWebhookEndpoint({ platform: platformType.value, endpoint: webhookCallbackUrl.value })
+    toast.success(t('bots.channels.lineWebhookSetSuccess'))
+  } catch (err) {
+    toast.error(resolveApiErrorMessage(err, t('bots.channels.lineWebhookSetFailed'), { prefixFallback: true }))
+  } finally {
+    action.value = ''
   }
 }
 

@@ -44,8 +44,18 @@ if [ "${USE_SPARSE+x}" = x ]; then
 else
   USE_SPARSE_SET=false
 fi
+if [ "${MEMOH_WEBHOOK_TUNNEL_MODE+x}" = x ]; then
+  WEBHOOK_TUNNEL_MODE_SET=true
+else
+  WEBHOOK_TUNNEL_MODE_SET=false
+fi
+if [ "${MEMOH_WEBHOOK_PUBLIC_BASE_URL+x}" = x ]; then
+  WEBHOOK_PUBLIC_BASE_SET=true
+else
+  WEBHOOK_PUBLIC_BASE_SET=false
+fi
 NETWORK_NAME="${COMPOSE_PROJECT_NAME}_memoh-network"
-PROJECT_CONTAINERS="memoh-postgres memoh-migrate memoh-server memoh-web memoh-sparse memoh-qdrant"
+PROJECT_CONTAINERS="memoh-postgres memoh-migrate memoh-server memoh-web memoh-sparse memoh-qdrant memoh-webhook-tunnel"
 PROJECT_VOLUMES="${COMPOSE_PROJECT_NAME}_postgres_data ${COMPOSE_PROJECT_NAME}_containerd_data ${COMPOSE_PROJECT_NAME}_memoh_data ${COMPOSE_PROJECT_NAME}_server_cni_state ${COMPOSE_PROJECT_NAME}_qdrant_data ${COMPOSE_PROJECT_NAME}_openviking_data"
 
 EXISTING_CONFIG_SOURCE=""
@@ -384,6 +394,22 @@ load_existing_settings() {
       value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "MEMOH_CONTAINER_BACKEND" || true)
       [ -n "$value" ] && CONTAINER_BACKEND="$value"
     fi
+
+    if [ "$WEBHOOK_PUBLIC_BASE_SET" = false ]; then
+      value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "MEMOH_WEBHOOK_PUBLIC_BASE_URL" || true)
+      [ -n "$value" ] && MEMOH_WEBHOOK_PUBLIC_BASE_URL="$value"
+    fi
+
+    if [ "$WEBHOOK_TUNNEL_MODE_SET" = false ]; then
+      value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "MEMOH_WEBHOOK_TUNNEL_MODE" || true)
+      [ -n "$value" ] && MEMOH_WEBHOOK_TUNNEL_MODE="$value"
+    fi
+
+    value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "MEMOH_WEBHOOK_TUNNEL_LISTEN_ADDR" || true)
+    [ -n "$value" ] && MEMOH_WEBHOOK_TUNNEL_LISTEN_ADDR="${MEMOH_WEBHOOK_TUNNEL_LISTEN_ADDR:-$value}"
+
+    value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "MEMOH_WEBHOOK_TUNNEL_METRICS_URL" || true)
+    [ -n "$value" ] && MEMOH_WEBHOOK_TUNNEL_METRICS_URL="${MEMOH_WEBHOOK_TUNNEL_METRICS_URL:-$value}"
   fi
 }
 
@@ -773,6 +799,38 @@ if [ "$USE_CN_MIRROR" = true ]; then
   COMPOSE_FILES="$COMPOSE_FILES -f ${CN_COMPOSE_FILE_NAME}"
   echo "${GREEN}✓ Using China mainland mirror (memoh.cn)${NC}"
 fi
+WEBHOOK_TUNNEL_MODE=$(printf '%s' "${MEMOH_WEBHOOK_TUNNEL_MODE:-}" | tr '[:upper:]' '[:lower:]')
+case "$WEBHOOK_TUNNEL_MODE" in
+  ""|disabled)
+    WEBHOOK_TUNNEL_MODE="disabled"
+    ;;
+  external)
+    COMPOSE_PROFILES="$COMPOSE_PROFILES --profile webhook-tunnel"
+    echo "${GREEN}✓ Webhook tunnel sidecar enabled${NC}"
+    if [ "$USE_CN_MIRROR" = true ]; then
+      echo "${YELLOW}ℹ Webhook tunnel sidecar uses cloudflare/cloudflared from Docker Hub; memoh.cn mirror does not cover this image${NC}"
+    fi
+    ;;
+  managed)
+    WEBHOOK_TUNNEL_MODE="external"
+    COMPOSE_PROFILES="$COMPOSE_PROFILES --profile webhook-tunnel"
+    echo "${YELLOW}ℹ Docker install uses the Cloudflare sidecar for webhook tunnels; using external mode${NC}"
+    if [ "$USE_CN_MIRROR" = true ]; then
+      echo "${YELLOW}ℹ Webhook tunnel sidecar uses cloudflare/cloudflared from Docker Hub; memoh.cn mirror does not cover this image${NC}"
+    fi
+    ;;
+  *)
+    echo "${RED}Error: unsupported MEMOH_WEBHOOK_TUNNEL_MODE '${MEMOH_WEBHOOK_TUNNEL_MODE}'. Use disabled, external, or managed.${NC}"
+    exit 1
+    ;;
+esac
+if [ "$WEBHOOK_TUNNEL_MODE" = "external" ]; then
+  MEMOH_WEBHOOK_TUNNEL_LISTEN_ADDR=":18734"
+  MEMOH_WEBHOOK_TUNNEL_METRICS_URL="http://webhook-tunnel:18735"
+fi
+export MEMOH_WEBHOOK_TUNNEL_MODE="$WEBHOOK_TUNNEL_MODE"
+export MEMOH_WEBHOOK_TUNNEL_LISTEN_ADDR="${MEMOH_WEBHOOK_TUNNEL_LISTEN_ADDR:-:18734}"
+export MEMOH_WEBHOOK_TUNNEL_METRICS_URL="${MEMOH_WEBHOOK_TUNNEL_METRICS_URL:-http://webhook-tunnel:18735}"
 
 : > .env
 write_env_value "POSTGRES_PASSWORD" "$PG_PASS"
@@ -780,6 +838,10 @@ write_env_value "MEMOH_CONFIG" "./config.toml"
 write_env_value "MEMOH_DATA_DIR" "$MEMOH_DATA_DIR"
 write_env_value "MEMOH_DATABASE_DRIVER" "$DATABASE_DRIVER"
 write_env_value "MEMOH_CONTAINER_BACKEND" "$CONTAINER_BACKEND"
+write_env_value "MEMOH_WEBHOOK_PUBLIC_BASE_URL" "${MEMOH_WEBHOOK_PUBLIC_BASE_URL:-}"
+write_env_value "MEMOH_WEBHOOK_TUNNEL_MODE" "$WEBHOOK_TUNNEL_MODE"
+write_env_value "MEMOH_WEBHOOK_TUNNEL_LISTEN_ADDR" "$MEMOH_WEBHOOK_TUNNEL_LISTEN_ADDR"
+write_env_value "MEMOH_WEBHOOK_TUNNEL_METRICS_URL" "$MEMOH_WEBHOOK_TUNNEL_METRICS_URL"
 write_env_value "USE_SPARSE" "$USE_SPARSE"
 echo "${GREEN}✓ Database backend: ${DATABASE_DRIVER}${NC}"
 echo "${GREEN}✓ Workspace backend: ${CONTAINER_BACKEND}${NC}"

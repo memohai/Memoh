@@ -1157,7 +1157,7 @@ definitions:
         description: |-
           Row groups buttons into keyboard rows for renderers that support grids
           (e.g. Telegram inline keyboards). Buttons sharing a Row render together;
-          rows appear in ascending first-seen order. Renderers without grid support
+          rows appear in ascending numeric order. Renderers without grid support
           ignore this field. 0 is the default (single row, prior behavior).
         type: integer
       type:
@@ -1258,6 +1258,8 @@ definitions:
         type: boolean
       unsend:
         type: boolean
+      url_buttons:
+        type: boolean
     type: object
   channel.ChannelConfig:
     properties:
@@ -1316,6 +1318,7 @@ definitions:
     - wechatoa
     - local
     - slack
+    - line
     type: string
     x-enum-varnames:
     - ChannelTypeTelegram
@@ -1329,6 +1332,7 @@ definitions:
     - ChannelTypeWeChatOA
     - ChannelTypeLocal
     - ChannelTypeSlack
+    - ChannelTypeLine
   channel.ConfigSchema:
     properties:
       fields:
@@ -1452,6 +1456,9 @@ definitions:
     - code_block
     - mention
     - emoji
+    - heading
+    - blockquote
+    - list_item
     type: string
     x-enum-varnames:
     - MessagePartText
@@ -1459,18 +1466,25 @@ definitions:
     - MessagePartCodeBlock
     - MessagePartMention
     - MessagePartEmoji
+    - MessagePartHeading
+    - MessagePartBlockquote
+    - MessagePartListItem
   channel.MessageTextStyle:
     enum:
     - bold
     - italic
     - strikethrough
     - code
+    - underline
+    - spoiler
     type: string
     x-enum-varnames:
     - MessageStyleBold
     - MessageStyleItalic
     - MessageStyleStrikethrough
     - MessageStyleCode
+    - MessageStyleUnderline
+    - MessageStyleSpoiler
   channel.ReplyRef:
     properties:
       attachments:
@@ -1493,6 +1507,16 @@ definitions:
       message:
         $ref: '#/definitions/channel.Message'
       target:
+        type: string
+    type: object
+  channel.SetWebhookEndpointRequest:
+    properties:
+      endpoint:
+        type: string
+    type: object
+  channel.SetWebhookEndpointResponse:
+    properties:
+      endpoint:
         type: string
     type: object
   channel.TargetHint:
@@ -4241,6 +4265,19 @@ definitions:
       transcription_model_id:
         type: string
       tts_model_id:
+        type: string
+    type: object
+  webhooktunnel.Status:
+    properties:
+      enabled:
+        type: boolean
+      error:
+        type: string
+      mode:
+        type: string
+      public_base_url:
+        type: string
+      status:
         type: string
     type: object
 info:
@@ -9325,6 +9362,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
       summary: Update bot channel config
       tags:
       - bots
@@ -9461,7 +9502,55 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
       summary: Update bot channel status
+      tags:
+      - bots
+  /bots/{id}/channel/{platform}/webhook-endpoint:
+    post:
+      description: Set the platform-side webhook endpoint for a bot channel.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Channel platform
+        in: path
+        name: platform
+        required: true
+        type: string
+      - description: Webhook endpoint payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/channel.SetWebhookEndpointRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/channel.SetWebhookEndpointResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Set bot channel webhook endpoint
       tags:
       - bots
   /bots/{id}/checks:
@@ -12244,4 +12333,14 @@ paths:
       summary: Update current user password
       tags:
       - users
+  /webhook-tunnel/status:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/webhooktunnel.Status'
+      summary: Get webhook tunnel status
+      tags:
+      - system
 swagger: "2.0"
