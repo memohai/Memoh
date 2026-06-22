@@ -164,17 +164,32 @@
            the bottom once a conversation exists, or lifted to the vertical
            centre (with a greeting above it) while the chat is still empty, so a
            fresh chat opens on an inviting page instead of a near-blank pane. -->
+      <!-- No outer horizontal gutter here on purpose: the message list lives in a
+           `section.absolute.inset-0` layer that fills its parent's padding box, so
+           it bypasses the section's px-3/sm:px-5/lg:px-8 gutter and only carries the
+           inner px-4/sm:px-6/lg:px-10. The composer must drop the same outer gutter
+           so its inner padding is the ONLY horizontal inset — matching the message
+           column edge-for-edge at every width. -->
       <div
         v-if="!activeChatReadOnly"
-        class="pointer-events-none absolute z-30 px-3 sm:px-5 lg:px-8"
+        class="pointer-events-none absolute z-30"
         :class="isWelcome
           ? 'inset-0 flex flex-col items-center justify-start pt-[38dvh]'
-          : 'inset-x-0 bottom-0 pt-2 pb-7'"
+          : 'inset-x-0 bottom-0 pt-2 pb-8'"
       >
+        <!-- Opaque backdrop, bottom-anchored, rising only to the box's widest point
+             (its vertical centre). The box is solid and sits above the messages, so
+             above that line its rounded top simply floats over whatever is there —
+             that area is left unmasked on purpose. From the widest point down (where
+             the box curves back in and would leave gaps by its bottom corners, plus
+             the strip beneath it) this fill hides everything, so nothing bleeds out
+             below the box. No fade: the top edge meets the box where it is already
+             full width, so the seam is hidden behind the box itself. -->
         <div
           v-if="!isWelcome"
           aria-hidden="true"
-          class="absolute inset-x-0 bottom-0 h-7 bg-surface-editor"
+          class="absolute inset-x-0 bottom-0 bg-surface-editor"
+          :style="{ height: composerMaskHeight }"
         />
         <!-- welcome: top-anchored column — the greeting and the composer's top
              edge stay pinned at pt-[38dvh], so a growing composer (multiline
@@ -522,7 +537,8 @@
                         type="button"
                         variant="ghost"
                         :disabled="!currentBotId || activeChatReadOnly || acpModelChanging"
-                        class="composer-pill-press h-9 min-w-0 max-w-60 gap-1 rounded-full px-3 text-muted-foreground"
+                        class="composer-pill-press h-9 min-w-0 gap-1 rounded-full px-3 text-muted-foreground"
+                        :style="{ maxWidth: `${modelTriggerMaxWidth}px` }"
                       >
                         <LoaderCircle
                           v-if="acpModelChanging || acpModelsLoading"
@@ -652,8 +668,61 @@
                     </PopoverContent>
                   </Popover>
 
+                  <DropdownMenu
+                    v-if="canChooseProjectFolder"
+                    v-model:open="projectFolderMenuOpen"
+                  >
+                    <DropdownMenuTrigger as-child>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        :disabled="agentChanging"
+                        class="composer-pill-press h-9 min-w-0 max-w-40 gap-1 rounded-full px-3 text-muted-foreground"
+                      >
+                        <component
+                          :is="activeProjectIsNone ? Folder : FolderOpen"
+                          class="size-3.5 shrink-0"
+                        />
+                        <span
+                          ref="acpProjectLabelEl"
+                          class="min-w-0 truncate text-label"
+                        >{{ activeACPProjectLabel }}</span>
+                        <ChevronDown class="size-3.5 shrink-0 opacity-50" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      class="w-64"
+                      align="end"
+                      side="top"
+                    >
+                      <DropdownMenuLabel>{{ $t('chat.projectFolder') }}</DropdownMenuLabel>
+                      <DropdownMenuItem @select="selectACPNoProject">
+                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.noProject') }}</span>
+                        <Check
+                          v-if="activeProjectIsNone"
+                          class="ml-auto"
+                        />
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        v-for="folder in projectFolderOptions"
+                        :key="folder"
+                        :title="folder"
+                        @select="selectACPProjectFolder(folder)"
+                      >
+                        <span class="min-w-0 flex-1 truncate">{{ folderBasename(folder) }}</span>
+                        <Check
+                          v-if="!activeProjectIsNone && folder === currentACPProjectPath"
+                          class="ml-auto"
+                        />
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem @select="onChooseProjectFolder">
+                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.chooseFolder') }}</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                   <Button
-                    v-if="activeIsACP"
+                    v-else-if="activeIsACP"
                     type="button"
                     variant="ghost"
                     class="h-9 min-w-0 max-w-40 gap-1 rounded-full px-3 text-muted-foreground"
@@ -662,7 +731,7 @@
                     <FolderOpen class="size-3.5 shrink-0" />
                     <span
                       ref="acpProjectLabelEl"
-                      class="min-w-0 truncate text-[11px]"
+                      class="min-w-0 truncate text-label"
                     >{{ activeACPProjectLabel }}</span>
                   </Button>
 
@@ -729,6 +798,7 @@ import {
   CircleAlert,
   ArrowDown,
   Check,
+  Folder,
   FolderOpen,
   Square,
   SquareCheck,
@@ -756,8 +826,10 @@ import { useMediaGallery } from '../composables/useMediaGallery'
 import type { ChatAttachment, UIUserInput, UIUserInputQuestion, WSUserInputAnswer } from '@/composables/api/useChat'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
-import { acpAgentIcon, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID } from '@/utils/acp'
+import { acpAgentIcon, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID, readRecentACPFolders, rememberACPFolder, ACP_DEFAULT_PROJECT_MODE, ACP_NO_PROJECT_MODE, createACPNoProjectPath } from '@/utils/acp'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { canPickProjectFolder, pickProjectFolder } from '@/utils/desktop-runtime'
+import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 
 interface PendingUserInputDraft {
   optionIds: string[]
@@ -1152,6 +1224,75 @@ const activeACPProjectLabel = computed(() => {
   return path ? parts[parts.length - 1] ?? path : t('chat.noProject')
 })
 const canChangeAgent = computed(() => !streaming.value && messages.value.length === 0)
+
+// Project folder picker. A host folder only maps to the agent's working
+// directory when the agent runs on a local desktop workspace; in remote/web
+// mode the path is fixed server-side, so the pill stays a read-only marker.
+// Mirrors the agent switcher's gate — the runtime binds its folder on the first
+// turn, so the choice is offered only while the session is still empty.
+function folderBasename(path: string): string {
+  const parts = path.split('/').filter(Boolean)
+  return parts[parts.length - 1] ?? path
+}
+const { isLocalDesktop, load: loadDesktopRuntime } = useDesktopRuntime()
+void loadDesktopRuntime()
+const projectFolderMenuOpen = ref(false)
+const recentACPFolders = ref<string[]>(readRecentACPFolders())
+const currentACPProjectPath = computed(() => String(activeSessionMetadata.value.project_path ?? '').trim())
+const activeProjectIsNone = computed(() => isACPNoProject(activeSessionMetadata.value))
+const canChooseProjectFolder = computed(() =>
+  activeIsACP.value && canChangeAgent.value && isLocalDesktop.value && canPickProjectFolder(),
+)
+const projectFolderOptions = computed(() => {
+  const list = [...recentACPFolders.value]
+  const current = currentACPProjectPath.value
+  if (current && !activeProjectIsNone.value && !list.includes(current)) list.unshift(current)
+  return list
+})
+
+watch(projectFolderMenuOpen, (open) => {
+  if (open) recentACPFolders.value = readRecentACPFolders()
+})
+
+async function applyACPProject(projectMode: string, projectPath: string) {
+  const agentId = activeACPAgentId.value
+  if (!agentId || agentChanging.value || !canChangeAgent.value) return
+  projectFolderMenuOpen.value = false
+  agentChanging.value = true
+  composerError.value = ''
+  try {
+    if (chatStore.sessionId) {
+      await withAgentSwitchTimeout(chatStore.updateCurrentSessionAgent({ agentId, projectMode, projectPath }))
+    }
+    else {
+      chatStore.stageACPSession({ agentId, projectMode, projectPath })
+      await withAgentSwitchTimeout(chatStore.ensurePendingACPRuntime())
+    }
+    pendingFiles.value = []
+  }
+  catch (error) {
+    composerError.value = agentSwitchErrorMessage(error)
+  }
+  finally {
+    agentChanging.value = false
+  }
+}
+
+function selectACPProjectFolder(path: string) {
+  const next = path.trim()
+  if (next) void applyACPProject(ACP_DEFAULT_PROJECT_MODE, next)
+}
+
+function selectACPNoProject() {
+  void applyACPProject(ACP_NO_PROJECT_MODE, createACPNoProjectPath())
+}
+
+async function onChooseProjectFolder() {
+  const path = await pickProjectFolder()
+  if (!path) return
+  recentACPFolders.value = rememberACPFolder(path)
+  void applyACPProject(ACP_DEFAULT_PROJECT_MODE, path)
+}
 // The composer's "+" menu is worth showing only when it can do something:
 // switch the agent (empty session with ACP profiles) or attach files (Memoh
 // mode). An in-progress ACP chat has neither, so the trigger is hidden rather
@@ -1430,6 +1571,8 @@ const textMultiline = ref(false)
 const narrowMultiline = ref(false)
 const isMultiline = computed(() => textMultiline.value || narrowMultiline.value)
 const compactContentWidth = ref(0)
+const composerInnerWidth = ref(0)
+const composerBoxHeight = ref(0)
 const showSend = computed(() => Boolean(inputText.value.trim()) || pendingFiles.value.length > 0)
 
 // Whether the trailing slot shows the send button at all. In standard chat the
@@ -1543,9 +1686,34 @@ function recomputeComposerFit() {
   const padX = Number.parseFloat(cs.paddingLeft) + Number.parseFloat(cs.paddingRight)
   const inner = el.clientWidth - padX
   if (inner <= 1) return
+  composerInnerWidth.value = inner
   const room = inner - PLUS_SLOT - ROW_GAPS - rightClusterNaturalWidth()
   narrowMultiline.value = room < MIN_INLINE_TEXTAREA
 }
+
+// The model trigger inherits the Button's `shrink-0`, so it won't yield in a
+// flex row — a long name would push past the box instead of truncating. A hard
+// max-width clamps it regardless of flex-shrink (the min-w-0 label then ellipses
+// within), sized to whatever the controls row can spare after the ＋, send, and
+// any project pill. It only bites when space is tight; otherwise it rests at the
+// 240px cap and the button still hugs a short name.
+const modelTriggerMaxWidth = computed(() => {
+  const inner = composerInnerWidth.value
+  if (inner <= 1) return MODEL_TRIGGER_MAX
+  let reserved = PLUS_SLOT + ROW_GAPS + CLUSTER_GAP + SEND_SLOT
+  const acpLabel = acpProjectLabelEl.value?.scrollWidth ?? 0
+  if (acpLabel > 0) reserved += Math.min(160, acpLabel + 28) + CLUSTER_GAP
+  return Math.max(72, Math.min(MODEL_TRIGGER_MAX, inner - reserved))
+})
+
+// The bottom mask rises only to the box's vertical centre — its widest point.
+// pb-8 (32px) is the strip beneath the box; + half the box height reaches the
+// centre line, which falls behind the box's full-width middle so the mask's top
+// edge is hidden by the box itself (no visible seam, no fade). Above that line
+// the box's rounded top is left to float over whatever is there; below it the
+// fill hides the bottom-corner gaps and the strip beneath, so nothing bleeds out.
+const COMPOSER_MASK_BELOW = 32 // pb-8
+const composerMaskHeight = computed(() => `${COMPOSER_MASK_BELOW + composerBoxHeight.value / 2}px`)
 
 let composerResizeObserver: ResizeObserver | null = null
 onMounted(() => {
@@ -1633,6 +1801,7 @@ function animateComposerHeight() {
   clearComposerMorphStyles(el)
   const target = el.offsetHeight
   composerHeight = target
+  composerBoxHeight.value = target
   // Only a pill↔multiline form change earns the height morph. Attachment rows
   // now reveal via their own grid 0fr↔1fr track (card stays put, box grows), and
   // plain line-wraps within multiline snap, so they're deliberately excluded.
@@ -1672,6 +1841,7 @@ watch([inputText, isMultiline], () => {
 onMounted(() => {
   void nextTick(() => {
     composerHeight = composerEl.value?.offsetHeight ?? 0
+    composerBoxHeight.value = composerHeight
     composerMultiline = isMultiline.value
     composerHeightReady = true
     composerSnapNext = false
@@ -1686,7 +1856,10 @@ onMounted(() => {
       // resizes so the next morph starts from the real current height. The
       // keystroke path sets composerHeightAnim before this fires, so normal
       // morphs are untouched.
-      if (!composerHeightAnim) composerHeight = el.offsetHeight
+      if (!composerHeightAnim) {
+        composerHeight = el.offsetHeight
+        composerBoxHeight.value = el.offsetHeight
+      }
     })
     composerSizeObserver.observe(el)
   }
