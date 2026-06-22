@@ -36,7 +36,12 @@
     <CollapseSection :open="open">
       <!-- Card body sets the in-card type scale (one notch below the root-level
            cop rows) + tighter leading so nested steps read as a distinct, denser
-           layer; nested rows inherit this instead of re-asserting their own size. -->
+           layer; nested rows inherit this instead of re-asserting their own size.
+           Deliberately NO inner scroll here: the process body must flow with the
+           main chat scroll so the mouse wheel is never latched inside the
+           capsule. Individual tool details (diffs, file content, exec output) keep
+           their own small scroll bounds for truly large blobs, but the capsule
+           itself never introduces a second scrollbar. -->
       <div class="mt-1 rounded-md bg-muted px-2.5 py-1.5 space-y-0.5 text-[0.84375rem] leading-snug">
         <template
           v-for="(item, i) in items"
