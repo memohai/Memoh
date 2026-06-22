@@ -7,14 +7,15 @@
         <!-- Name + the on/off intent share a row: what it's called, and whether
              the bot may use it. -->
         <div class="flex items-end gap-3">
-          <div class="min-w-0 flex-1 space-y-1.5">
-            <Label for="mcp-name">{{ $t('common.name') }}</Label>
-            <Input
-              id="mcp-name"
-              v-model="form.name"
-              :placeholder="$t('mcp.placeholders.name')"
-            />
-          </div>
+          <Field class="min-w-0 flex-1">
+            <FieldLabel>{{ $t('common.name') }}</FieldLabel>
+            <FieldControl>
+              <Input
+                v-model="form.name"
+                :placeholder="$t('mcp.placeholders.name')"
+              />
+            </FieldControl>
+          </Field>
           <div class="flex h-9 shrink-0 items-center gap-3">
             <!-- Delete sits beside the on/off intent — a quiet ghost affordance,
                  the way every backend detail handles it, not a separate danger
@@ -51,87 +52,94 @@
           </div>
         </div>
 
-        <div class="space-y-1.5">
-          <Label>{{ $t('mcp.transportType') }}</Label>
-          <SegmentedControl
-            :model-value="connectionType"
-            :items="transportItems"
-            :aria-label="$t('mcp.transportType')"
-            class="w-full sm:w-fit"
-            @update:model-value="(v) => connectionType = v === 'remote' ? 'remote' : 'stdio'"
-          />
-        </div>
+        <Field>
+          <FieldLabel>{{ $t('mcp.transportType') }}</FieldLabel>
+          <FieldControl>
+            <SegmentedControl
+              :model-value="connectionType"
+              :items="transportItems"
+              class="w-full sm:w-fit"
+              @update:model-value="(v) => connectionType = v === 'remote' ? 'remote' : 'stdio'"
+            />
+          </FieldControl>
+        </Field>
 
         <template v-if="connectionType === 'stdio'">
-          <div class="space-y-1.5">
-            <Label for="mcp-command">{{ $t('mcp.command') }}</Label>
-            <Input
-              id="mcp-command"
-              v-model="form.command"
-              class="font-mono"
-              :placeholder="$t('mcp.commandPlaceholder')"
-            />
-          </div>
-          <div class="space-y-1.5">
-            <Label>{{ $t('mcp.arguments') }}</Label>
-            <TagsInput
-              v-model="argsTags"
-              :add-on-blur="true"
-              :duplicate="true"
-              class="font-mono"
-            >
-              <TagsInputItem
-                v-for="tag in argsTags"
-                :key="tag"
-                :value="tag"
+          <Field>
+            <FieldLabel>{{ $t('mcp.command') }}</FieldLabel>
+            <FieldControl>
+              <Input
+                v-model="form.command"
+                class="font-mono"
+                :placeholder="$t('mcp.commandPlaceholder')"
+              />
+            </FieldControl>
+          </Field>
+          <Field>
+            <FieldLabel>{{ $t('mcp.arguments') }}</FieldLabel>
+            <FieldControl>
+              <TagsInput
+                v-model="argsTags"
+                :add-on-blur="true"
+                :duplicate="true"
+                class="font-mono"
               >
-                <TagsInputItemText />
-                <TagsInputItemDelete />
-              </TagsInputItem>
-              <TagsInputInput :placeholder="$t('mcp.argumentsPlaceholder')" />
-            </TagsInput>
-          </div>
-          <div class="space-y-1.5">
-            <Label for="mcp-cwd">
+                <TagsInputItem
+                  v-for="tag in argsTags"
+                  :key="tag"
+                  :value="tag"
+                >
+                  <TagsInputItemText />
+                  <TagsInputItemDelete />
+                </TagsInputItem>
+                <TagsInputInput :placeholder="$t('mcp.argumentsPlaceholder')" />
+              </TagsInput>
+            </FieldControl>
+          </Field>
+          <Field>
+            <FieldLabel :optional-text="$t('common.optional')">
               {{ $t('mcp.cwd') }}
-              <span class="ml-1 font-normal text-muted-foreground">({{ $t('common.optional') }})</span>
-            </Label>
-            <Input
-              id="mcp-cwd"
-              v-model="form.cwd"
-              class="font-mono"
-              :placeholder="$t('mcp.cwdPlaceholder')"
-            />
-          </div>
+            </FieldLabel>
+            <FieldControl>
+              <Input
+                v-model="form.cwd"
+                class="font-mono"
+                :placeholder="$t('mcp.cwdPlaceholder')"
+              />
+            </FieldControl>
+          </Field>
         </template>
 
         <template v-else>
-          <div class="space-y-1.5">
-            <Label for="mcp-url">{{ $t('mcp.endpointUrl') }}</Label>
-            <Input
-              id="mcp-url"
-              v-model="form.url"
-              type="url"
-              class="font-mono"
-              :placeholder="$t('mcp.placeholders.url')"
-            />
-          </div>
-          <div class="space-y-1.5">
-            <Label>{{ $t('mcp.streamProtocol') }}</Label>
-            <Select v-model="form.transport">
-              <SelectTrigger class="w-full sm:w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="http">
-                  {{ $t('mcp.protocol.http') }}
-                </SelectItem>
-                <SelectItem value="sse">
-                  {{ $t('mcp.protocol.sse') }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <Field>
+            <FieldLabel>{{ $t('mcp.endpointUrl') }}</FieldLabel>
+            <FieldControl>
+              <Input
+                v-model="form.url"
+                type="url"
+                class="font-mono"
+                :placeholder="$t('mcp.placeholders.url')"
+              />
+            </FieldControl>
+          </Field>
+          <Field>
+            <FieldLabel>{{ $t('mcp.streamProtocol') }}</FieldLabel>
+            <FieldControl>
+              <Select v-model="form.transport">
+                <SelectTrigger class="w-full sm:w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="http">
+                    {{ $t('mcp.protocol.http') }}
+                  </SelectItem>
+                  <SelectItem value="sse">
+                    {{ $t('mcp.protocol.sse') }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </FieldControl>
+          </Field>
         </template>
 
         <!-- Connection result: only meaningful once the server exists. A failed
@@ -265,27 +273,29 @@
               <p class="text-xs text-muted-foreground">
                 {{ $t('mcp.oauth.clientIdHint') }}
               </p>
-              <div class="space-y-1.5">
-                <Label for="mcp-oauth-client-id">{{ $t('mcp.oauth.clientId') }}</Label>
-                <Input
-                  id="mcp-oauth-client-id"
-                  v-model="oauthClientId"
-                  class="font-mono"
-                  autocomplete="off"
-                  :placeholder="$t('mcp.oauth.clientIdPlaceholder')"
-                />
-              </div>
-              <div class="space-y-1.5">
-                <Label for="mcp-oauth-client-secret">{{ $t('mcp.oauth.clientSecret') }}</Label>
-                <Input
-                  id="mcp-oauth-client-secret"
-                  v-model="oauthClientSecret"
-                  type="password"
-                  class="font-mono"
-                  autocomplete="new-password"
-                  :placeholder="$t('mcp.oauth.clientSecretPlaceholder')"
-                />
-              </div>
+              <Field>
+                <FieldLabel>{{ $t('mcp.oauth.clientId') }}</FieldLabel>
+                <FieldControl>
+                  <Input
+                    v-model="oauthClientId"
+                    class="font-mono"
+                    autocomplete="off"
+                    :placeholder="$t('mcp.oauth.clientIdPlaceholder')"
+                  />
+                </FieldControl>
+              </Field>
+              <Field>
+                <FieldLabel>{{ $t('mcp.oauth.clientSecret') }}</FieldLabel>
+                <FieldControl>
+                  <Input
+                    v-model="oauthClientSecret"
+                    type="password"
+                    class="font-mono"
+                    autocomplete="new-password"
+                    :placeholder="$t('mcp.oauth.clientSecretPlaceholder')"
+                  />
+                </FieldControl>
+              </Field>
             </template>
 
             <Button
@@ -391,9 +401,10 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  Badge, Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger,
-  SelectValue, SegmentedControl, Switch, TagsInput, TagsInputInput, TagsInputItem,
-  TagsInputItemDelete, TagsInputItemText, toast, type SegmentedItem,
+  Badge, Button, Field, FieldControl, FieldLabel, Input, Label, Select, SelectContent,
+  SelectItem, SelectTrigger, SelectValue, SegmentedControl, Switch, TagsInput,
+  TagsInputInput, TagsInputItem, TagsInputItemDelete, TagsInputItemText, toast,
+  type SegmentedItem,
 } from '@memohai/ui'
 import { ChevronRight, Download, KeyRound, Loader2, RefreshCw, Trash2 } from 'lucide-vue-next'
 import {
