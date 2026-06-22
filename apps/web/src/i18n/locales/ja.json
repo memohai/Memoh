@@ -1755,7 +1755,32 @@
       "extractFailed": "アーカイブの抽出に失敗しました",
       "deleteSuccess": "正常に削除されました",
       "batchDeletePartialFailed": "{failed}/{total} アイテムを削除できませんでした",
-      "deleteFailed": "削除に失敗しました"
+      "deleteFailed": "削除に失敗しました",
+      "externalChange": {
+        "fallbackAgent": "Agent",
+        "wrote": "{agent} が {lines} 行を書き込みました · {time}",
+        "edited": "{agent} が編集しました（+{added} / -{removed}）· {time}",
+        "ran": "{agent} がコマンドを実行しました · {time}",
+        "patched": "{agent} がパッチを適用しました · {time}",
+        "generic": "{agent} がこのファイルを更新しました · {time}",
+        "deleted": "このファイルはワークスペースで削除または移動されました",
+        "reloadFailed": "このファイルはワークスペースで変更されましたが、最新バージョンを読み込めませんでした",
+        "saveConflict": "ファイルはワークスペースで変更されています。保存前に外部バージョンを確認してください。",
+        "reload": "再読み込み",
+        "tryAgain": "もう一度試す",
+        "compare": "比較",
+        "saveAnyway": "このまま保存",
+        "saveToRestore": "保存して復元"
+      },
+      "imageDeleted": "この画像はワークスペースから削除されました",
+      "compare": {
+        "yours": "あなたの編集",
+        "disk": "ディスク上",
+        "close": "閉じる",
+        "refresh": "差分を更新",
+        "staleNotice": "Agent がもう一度書き込みました"
+      },
+      "compareLoadFailed": "比較用のワークスペースのバージョンを読み込めませんでした"
     },
     "email": {
       "title": "Email",

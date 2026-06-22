@@ -12,12 +12,13 @@ import (
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
-const (
-	// ReadMediaToolName is the tool name that the agent decoration layer
-	// matches on to intercept image payloads. After the merge this is "read".
-	ReadMediaToolName        = "read"
-	defaultReadMediaMaxBytes = 20 * 1024 * 1024
-)
+const defaultReadMediaMaxBytes = 20 * 1024 * 1024
+
+// ReadMediaToolName is the tool name that the agent decoration layer matches
+// on to intercept image payloads. After the merge this is "read".
+func ReadMediaToolName() ToolName {
+	return ToolRead()
+}
 
 var readMediaSupportedMimeTypes = map[string]struct{}{
 	"image/gif":  {},

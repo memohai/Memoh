@@ -459,6 +459,9 @@ func TestStreamACPAgentWSRequestsAutoTitle(t *testing.T) {
 		t.Fatalf("streamACPAgentWS() error = %v", err)
 	}
 
+	if pool.input.SupportsImageInput {
+		t.Fatalf("ACP prompt input SupportsImageInput = true, want false until ACP image transport is wired")
+	}
 	waitForSessionGets(t, sessionGets, 2)
 }
 

@@ -51,9 +51,8 @@ onMounted(() => {
   })
 })
 
-// toggleSidebar is registered here (not in main-layout, which is the settings
-// overlay) because MainSection owns the chat shell's visible sidebar +
-// workbench pane. MainSection stays mounted behind the settings overlay too,
+// toggleSidebar is registered here because MainSection owns the visible sidebar
+// and workbench pane. MainSection stays mounted while settings pages are active,
 // so the handler is always available; we no-op on settings routes to preserve
 // the desktop settings sidebar's pinned-open intent AND prevent the web
 // browser from falling through to its native Mod+B (bookmarks bar).

@@ -5,22 +5,79 @@ import (
 	"errors"
 	"testing"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
+	"github.com/memohai/memoh/internal/agent/sessionmode"
 	"github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/toolapproval"
+	"github.com/memohai/memoh/internal/userinput"
 )
 
 func TestIsInteractiveApprovalSession(t *testing.T) {
 	t.Parallel()
 
-	for _, sessionType := range []string{"", "chat", "CHAT", "acp_agent"} {
+	for _, sessionType := range []string{"", sessionmode.Chat, "CHAT", sessionmode.ACPAgent} {
 		if !isInteractiveApprovalSession(sessionType) {
 			t.Fatalf("expected %q to allow interactive approvals", sessionType)
 		}
 	}
 
-	for _, sessionType := range []string{"discuss", "schedule", "heartbeat", "subagent"} {
+	for _, sessionType := range []string{sessionmode.Discuss, sessionmode.Schedule, sessionmode.Heartbeat, sessionmode.Subagent, sessionmode.BackgroundDelivery} {
 		if isInteractiveApprovalSession(sessionType) {
 			t.Fatalf("expected %q to reject interactive approvals", sessionType)
+		}
+	}
+}
+
+func TestToolApprovalHandlerRejectsAskUserBeforeCreateInBackgroundDelivery(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeUserInputService{}
+	resolver := &Resolver{userInput: fake}
+	handler := resolver.buildToolApprovalHandler(baseRunConfigParams{
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		SessionType: sessionmode.BackgroundDelivery,
+	})
+
+	result, err := handler(context.Background(), sdk.ToolCall{
+		ToolCallID: "call-1",
+		ToolName:   userinput.ToolNameAskUser,
+		Input: map[string]any{
+			"questions": []any{
+				map[string]any{
+					"text":    "Continue?",
+					"kind":    userinput.QuestionKindSingleSelect,
+					"options": []any{map[string]any{"label": "Yes"}, map[string]any{"label": "No"}},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if result.Decision != sdk.ToolApprovalDecisionRejected {
+		t.Fatalf("decision = %q, want rejected", result.Decision)
+	}
+	if fake.createCalls != 0 || fake.cancelCalls != 0 {
+		t.Fatalf("background ask_user should reject before persistence, create=%d cancel=%d", fake.createCalls, fake.cancelCalls)
+	}
+}
+
+func TestAgentSessionModesMatchPersistedSessionTypes(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		sessionmode.Chat:      session.TypeChat,
+		sessionmode.Heartbeat: session.TypeHeartbeat,
+		sessionmode.Schedule:  session.TypeSchedule,
+		sessionmode.Subagent:  session.TypeSubagent,
+		sessionmode.Discuss:   session.TypeDiscuss,
+		sessionmode.ACPAgent:  session.TypeACPAgent,
+	}
+	for got, want := range cases {
+		if got != want {
+			t.Fatalf("agent session mode %q must match persisted type %q", got, want)
 		}
 	}
 }

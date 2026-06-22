@@ -6,10 +6,10 @@ import {
   type AppKeyboardCommand,
 } from '../shared/keyboard-commands'
 
-// Cross-window query-cache invalidation payload. Mirrors the subset of
+// Renderer query-cache invalidation payload. Mirrors the subset of
 // Pinia Colada's `UseQueryEntryFilter` that survives structured-clone
 // serialization across the IPC boundary (no functions / predicates).
-export interface CrossWindowInvalidatePayload {
+export interface RendererInvalidatePayload {
   filters?: {
     key?: unknown
     exact?: boolean
@@ -61,38 +61,26 @@ const api = {
     // items with the user's bindings instead of the static table defaults.
     setMenuAccelerators: (overrides: Record<string, string>): Promise<void> =>
       ipcRenderer.invoke('desktop:set-menu-accelerators', overrides),
-    // Tell the main process to fan a query-cache invalidation out to every
-    // other BrowserWindow. Used by `setupCrossWindowCacheSync` to mirror
-    // mutations performed in one renderer onto siblings.
-    broadcastInvalidate: (payload: CrossWindowInvalidatePayload): Promise<void> =>
+    openExternalUrl: (url: string): Promise<void> => ipcRenderer.invoke('desktop:open-external-url', url),
+    // Tell the main process to fan a query-cache invalidation out to other
+    // renderer hosts. Used by `setupRendererCacheSync` to mirror mutations
+    // without sharing JS heap state.
+    broadcastInvalidate: (payload: RendererInvalidatePayload): Promise<void> =>
       ipcRenderer.invoke('desktop:broadcast-invalidate', payload),
-    // Subscribe to invalidation events forwarded from sibling windows.
-    // Listener lives for the entire window lifetime.
-    onInvalidate: (cb: (payload: CrossWindowInvalidatePayload) => void): void => {
-      ipcRenderer.on('desktop:invalidate', (_event: IpcRendererEvent, payload: CrossWindowInvalidatePayload) => {
+    // Subscribe to invalidation events forwarded from sibling renderers.
+    // Listener lives for the entire renderer lifetime.
+    onInvalidate: (cb: (payload: RendererInvalidatePayload) => void): void => {
+      ipcRenderer.on('desktop:invalidate', (_event: IpcRendererEvent, payload: RendererInvalidatePayload) => {
         cb(payload)
       })
     },
   },
   window: {
-    // Focus (or create) the settings window. When `target` is supplied —
-    // e.g. `/settings/bots/<botId>?tab=mcp` resolved by the chat router —
-    // the main process forwards it to the settings renderer over the
-    // `settings:navigate` channel after the window has finished loading.
-    openSettings: (target?: string): Promise<void> =>
-      ipcRenderer.invoke('window:open-settings', target),
     closeSelf: (): Promise<void> => ipcRenderer.invoke('window:close-self'),
-    // Settings renderer subscribes here to handle in-window navigation
-    // requests pushed by the main process (cold-start replay or warm
-    // updates). Returns no unsubscribe handle — the listener is meant to
-    // live for the entire window lifetime.
-    onSettingsNavigate: (cb: (target: string) => void): void => {
-      ipcRenderer.on('settings:navigate', (_event: IpcRendererEvent, target: string) => {
-        cb(target)
-      })
-    },
-    onChatNavigate: (cb: (target: string) => void): void => {
-      ipcRenderer.on('chat:navigate', (_event: IpcRendererEvent, target: string) => {
+    // Native app/tray menu actions ask the renderer to navigate by route path.
+    // Listener lives for the entire renderer lifetime.
+    onNavigate: (cb: (target: string) => void): void => {
+      ipcRenderer.on('renderer:navigate', (_event: IpcRendererEvent, target: string) => {
         cb(target)
       })
     },

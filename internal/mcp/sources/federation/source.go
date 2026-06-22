@@ -50,21 +50,36 @@ type Source struct {
 	logger      *slog.Logger
 	gateway     Gateway
 	connections ConnectionLister
+	reserved    func(string) bool
 
 	mu    sync.Mutex
 	cache map[string]cacheEntry
 }
 
-func NewSource(log *slog.Logger, gateway Gateway, connections ConnectionLister) *Source {
+type SourceOption func(*Source)
+
+func WithReservedToolName(fn func(string) bool) SourceOption {
+	return func(s *Source) {
+		s.reserved = fn
+	}
+}
+
+func NewSource(log *slog.Logger, gateway Gateway, connections ConnectionLister, opts ...SourceOption) *Source {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Source{
+	source := &Source{
 		logger:      log.With(slog.String("tool_source", "federated_mcp_tool")),
 		gateway:     gateway,
 		connections: connections,
 		cache:       map[string]cacheEntry{},
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(source)
+		}
+	}
+	return source
 }
 
 func (s *Source) ListTools(ctx context.Context, session mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
@@ -147,14 +162,14 @@ func (s *Source) buildToolsAndRoutes(ctx context.Context, botID string) ([]mcpgw
 			return
 		}
 		finalName := name
-		if _, exists := routes[finalName]; exists {
+		if _, exists := routes[finalName]; exists || s.isReservedToolName(finalName) {
 			seed := strings.ReplaceAll(finalName, ".", "_")
 			if seed == "" {
 				seed = "tool"
 			}
 			for i := 2; ; i++ {
 				candidate := seed + "_" + strconv.Itoa(i)
-				if _, ok := routes[candidate]; ok {
+				if _, ok := routes[candidate]; ok || s.isReservedToolName(candidate) {
 					continue
 				}
 				finalName = candidate
@@ -220,6 +235,13 @@ func (s *Source) buildToolsAndRoutes(ctx context.Context, botID string) ([]mcpgw
 		}
 	}
 	return tools, routes
+}
+
+func (s *Source) isReservedToolName(name string) bool {
+	if s == nil || s.reserved == nil {
+		return false
+	}
+	return s.reserved(strings.TrimSpace(name))
 }
 
 func sanitizePrefix(raw string) string {

@@ -7,8 +7,12 @@ import (
 	"testing"
 	"time"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	"github.com/memohai/memoh/internal/agent/background"
 	"github.com/memohai/memoh/internal/channel/route"
+	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/session"
 )
 
@@ -229,5 +233,87 @@ func TestSessionTurnExit_TriggersPendingBackgroundNotifications(t *testing.T) {
 			t.Fatal("expected failed delivery attempt to requeue notifications")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestBackgroundDeliveryOutboundTextSuppressesHeartbeatOK(t *testing.T) {
+	t.Parallel()
+
+	for _, text := range []string{"", "   ", "HEARTBEAT_OK"} {
+		if got, ok := backgroundDeliveryOutboundText(text); ok || got != "" {
+			t.Fatalf("backgroundDeliveryOutboundText(%q) = %q, %v; want suppressed", text, got, ok)
+		}
+	}
+
+	for _, text := range []string{"task finished", "done\nHEARTBEAT_OK"} {
+		got, ok := backgroundDeliveryOutboundText(text)
+		if !ok || got != text {
+			t.Fatalf("backgroundDeliveryOutboundText returned %q, %v; want %q/true", got, ok, text)
+		}
+	}
+}
+
+func TestStoreBackgroundNotificationSnapshotSkipsEmptyAssistantOutput(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	err := resolver.storeBackgroundNotificationSnapshot(
+		context.Background(),
+		conversation.ChatRequest{
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			Query:     "[background notification]",
+		},
+		resolvedContext{},
+		[]sdk.Message{sdk.UserMessage("background task completed")},
+		terminalSnapshot{
+			sdkMessages: []sdk.Message{sdk.AssistantMessage("")},
+		},
+	)
+	if err != nil {
+		t.Fatalf("storeBackgroundNotificationSnapshot returned error: %v", err)
+	}
+
+	if len(messages.persisted) != 0 {
+		t.Fatalf("expected empty background delivery output not to persist, got %#v", messages.persisted)
+	}
+}
+
+func TestStoreBackgroundNotificationSnapshotStoresAssistantOutput(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	err := resolver.storeBackgroundNotificationSnapshot(
+		context.Background(),
+		conversation.ChatRequest{
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			Query:     "[background notification]",
+		},
+		resolvedContext{model: models.GetResponse{ID: "model-1"}},
+		[]sdk.Message{sdk.UserMessage("background task completed")},
+		terminalSnapshot{
+			sdkMessages: []sdk.Message{sdk.AssistantMessage("Task finished.")},
+		},
+	)
+	if err != nil {
+		t.Fatalf("storeBackgroundNotificationSnapshot returned error: %v", err)
+	}
+
+	if len(messages.persisted) != 2 {
+		t.Fatalf("expected notification and assistant output to persist, got %#v", messages.persisted)
+	}
+	if messages.persisted[0].Role != "user" || messages.persisted[1].Role != "assistant" {
+		t.Fatalf("unexpected persisted roles: %q, %q", messages.persisted[0].Role, messages.persisted[1].Role)
 	}
 }

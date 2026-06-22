@@ -116,6 +116,7 @@ CREATE TABLE IF NOT EXISTS models (
   name TEXT,
   provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
   type TEXT NOT NULL DEFAULT 'chat',
+  enable INTEGER NOT NULL DEFAULT 1,
   config TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -444,6 +445,12 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   parent_session_id TEXT REFERENCES bot_sessions(id) ON DELETE SET NULL,
   created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  -- updated_at is stored at second precision via CURRENT_TIMESTAMP. The
+  -- keyset cursor in `internal/db/sqlite/store/sessions_paged.go` truncates
+  -- its bound timestamp to seconds to match this storage. If we ever upgrade
+  -- this column to sub-second precision, the cursor formatter MUST keep
+  -- sub-second too so the lexicographic compare stays consistent — otherwise
+  -- rows in the same second would be skipped or returned indefinitely.
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted_at TEXT
 );
@@ -454,6 +461,7 @@ CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_active ON bot_sessions(bot_id, d
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_parent ON bot_sessions(parent_session_id) WHERE parent_session_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_created_by_user_id ON bot_sessions(created_by_user_id) WHERE created_by_user_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_created_by ON bot_sessions(bot_id, created_by_user_id, deleted_at);
+CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_active_updated ON bot_sessions(bot_id, updated_at DESC, id DESC) WHERE deleted_at IS NULL;
 
 -- bot_session_events: DCP pipeline event store for cold-start replay.
 CREATE TABLE IF NOT EXISTS bot_session_events (

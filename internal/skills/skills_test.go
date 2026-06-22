@@ -213,6 +213,7 @@ func TestDiscoveryRootsMatchDefaultPolicy(t *testing.T) {
 	roots := DiscoveryRoots(nil)
 	want := []Root{
 		{Path: ManagedDirPath, Kind: SourceKindManaged, Managed: true},
+		{Path: IndexDirPath, Kind: SourceKindManaged, Managed: true},
 		{Path: LegacyDirPath, Kind: SourceKindLegacy, Managed: false},
 		{Path: "/data/.agents/skills", Kind: SourceKindCompat, Managed: false},
 		{Path: "/root/.agents/skills", Kind: SourceKindCompat, Managed: false},
@@ -226,12 +227,14 @@ func TestDiscoveryRootsUseConfiguredCompatRoots(t *testing.T) {
 	roots := DiscoveryRoots([]string{
 		" /custom/skills ",
 		"/data/skills",
+		"/data/.memoh/skills",
 		"/custom/skills",
 		"relative/skills",
 		"/root/.openclaw/skills",
 	})
 	want := []Root{
 		{Path: ManagedDirPath, Kind: SourceKindManaged, Managed: true},
+		{Path: IndexDirPath, Kind: SourceKindManaged, Managed: true},
 		{Path: LegacyDirPath, Kind: SourceKindLegacy, Managed: false},
 		{Path: "/custom/skills", Kind: SourceKindCompat, Managed: false},
 		{Path: "/root/.openclaw/skills", Kind: SourceKindCompat, Managed: false},
@@ -245,6 +248,7 @@ func TestDiscoveryRootsAllowExplicitEmptyCompatRoots(t *testing.T) {
 	roots := DiscoveryRoots([]string{})
 	want := []Root{
 		{Path: ManagedDirPath, Kind: SourceKindManaged, Managed: true},
+		{Path: IndexDirPath, Kind: SourceKindManaged, Managed: true},
 		{Path: LegacyDirPath, Kind: SourceKindLegacy, Managed: false},
 	}
 	if !slices.Equal(roots, want) {
@@ -261,6 +265,7 @@ func TestDiscoveryRootsIncludePluginRootsAsServerManagedSource(t *testing.T) {
 	})
 	want := []Root{
 		{Path: ManagedDirPath, Kind: SourceKindManaged, Managed: true},
+		{Path: IndexDirPath, Kind: SourceKindManaged, Managed: true},
 		{Path: LegacyDirPath, Kind: SourceKindLegacy, Managed: false},
 		{Path: "/data/.memoh/plugins/github/skills", Kind: SourceKindPlugin, Managed: false},
 		{Path: "/custom/skills", Kind: SourceKindCompat, Managed: false},

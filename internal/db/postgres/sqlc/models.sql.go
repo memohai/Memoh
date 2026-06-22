@@ -959,6 +959,7 @@ const listSpeechModelsByProviderID = `-- name: ListSpeechModelsByProviderID :man
 SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
 WHERE provider_id = $1
   AND type = 'speech'
+  AND enable = true
 ORDER BY created_at DESC
 `
 
@@ -1096,6 +1097,7 @@ const listTranscriptionModelsByProviderID = `-- name: ListTranscriptionModelsByP
 SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
 WHERE provider_id = $1
   AND type = 'transcription'
+  AND enable = true
 ORDER BY created_at DESC
 `
 

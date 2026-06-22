@@ -51,6 +51,83 @@ func TestSlackDescriptorDoesNotAdvertiseEdit(t *testing.T) {
 	}
 }
 
+func TestSlackDescriptorAdvertisesRichText(t *testing.T) {
+	t.Parallel()
+
+	if !NewSlackAdapter(nil).Descriptor().Capabilities.RichText {
+		t.Fatal("Slack descriptor must advertise rich text so Message.Parts reaches the Slack renderer")
+	}
+}
+
+func TestSlackDescriptorAdvertisesURLButtonsOnly(t *testing.T) {
+	t.Parallel()
+
+	caps := NewSlackAdapter(nil).Descriptor().Capabilities
+	if caps.Buttons {
+		t.Fatal("Slack descriptor must not advertise callback button support")
+	}
+	if !caps.URLButtons {
+		t.Fatal("Slack descriptor must advertise URL button support")
+	}
+}
+
+func TestSlackDescriptorUsesRichTextChunkLimit(t *testing.T) {
+	t.Parallel()
+
+	policy := channel.NormalizeOutboundPolicy(NewSlackAdapter(nil).Descriptor().OutboundPolicy)
+	if policy.RichTextChunkLimit != slackMaxLength {
+		t.Fatalf("RichTextChunkLimit = %d, want %d", policy.RichTextChunkLimit, slackMaxLength)
+	}
+}
+
+func TestRenderSlackOutboundBodyFallsBackWhenEscapedRichOverflows(t *testing.T) {
+	t.Parallel()
+
+	text := strings.Repeat("&", slackMaxLength/4+1)
+	got := renderSlackOutboundBody(channel.Message{
+		Parts: []channel.MessagePart{{
+			Type: channel.MessagePartText,
+			Text: text,
+		}},
+	})
+	if got.Text != text {
+		t.Fatalf("expected raw plain fallback text, got len=%d prefix=%q", len([]rune(got.Text)), got.Text[:min(len(got.Text), 20)])
+	}
+	if got.BlockText != slackEscapeMrkdwn(text) {
+		t.Fatalf("expected escaped block fallback, got len=%d prefix=%q", len([]rune(got.BlockText)), got.BlockText[:min(len(got.BlockText), 20)])
+	}
+	if !got.DisableMarkdown {
+		t.Fatal("fallback should disable Slack markdown for raw plain text")
+	}
+	if strings.Contains(got.Text, "*") || strings.HasSuffix(truncateSlackText(got.Text), "...") {
+		t.Fatalf("fallback should avoid rich wrapper/truncation, got prefix=%q", got.Text[:min(len(got.Text), 20)])
+	}
+}
+
+func TestRenderSlackOutboundBodyEscapesPlainOverflowFallbackTags(t *testing.T) {
+	t.Parallel()
+
+	raw := "<!channel>" + strings.Repeat("&", slackMaxLength/4+1)
+	got := renderSlackOutboundBody(channel.Message{
+		Parts: []channel.MessagePart{{
+			Type: channel.MessagePartText,
+			Text: raw,
+		}},
+	})
+	if got.Text != raw {
+		t.Fatalf("expected raw top-level fallback text, got %q", got.Text[:min(len(got.Text), 32)])
+	}
+	if !got.DisableMarkdown {
+		t.Fatal("fallback should disable Slack markdown for raw control tags")
+	}
+	if strings.Contains(got.BlockText, "<!channel>") {
+		t.Fatalf("fallback block text must not re-enable Slack control tags: %q", got.BlockText[:min(len(got.BlockText), 32)])
+	}
+	if !strings.Contains(got.BlockText, "&lt;!channel&gt;") {
+		t.Fatalf("expected escaped Slack tag in fallback block text, got %q", got.BlockText[:min(len(got.BlockText), 64)])
+	}
+}
+
 func TestSlackResolveOutboundTargetUsesDMForUserID(t *testing.T) {
 	t.Parallel()
 
@@ -1071,6 +1148,130 @@ func TestSlackStreamFinalFallbackDeletesOldPlaceholder(t *testing.T) {
 	}
 }
 
+func TestSlackStreamFinalUsesPartsRenderer(t *testing.T) {
+	t.Parallel()
+
+	var gotText string
+	client := slack.New(
+		testBotToken,
+		slack.OptionAPIURL("https://slack.test/api/"),
+		slack.OptionHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.URL.String() != "https://slack.test/api/chat.postMessage" {
+				return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("not found")), Header: make(http.Header)}, nil
+			}
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("ParseForm: %v", err)
+			}
+			gotText = r.FormValue("text")
+			body, _ := json.Marshal(map[string]any{"ok": true, "channel": "C123", "ts": "1710000000.000500"})
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(string(body))),
+			}, nil
+		})}),
+		slack.OptionRetry(3),
+	)
+	stream := &slackOutboundStream{
+		adapter: NewSlackAdapter(nil),
+		cfg:     channel.ChannelConfig{ID: "cfg-stream-rich"},
+		target:  "C123",
+		api:     client,
+	}
+
+	if err := stream.Push(context.Background(), channel.PreparedStreamEvent{
+		Type: channel.StreamEventFinal,
+		Final: &channel.PreparedStreamFinalizePayload{
+			Message: channel.PreparedMessage{
+				Message: channel.Message{
+					Text:   "plain fallback",
+					Format: channel.MessageFormatRich,
+					Parts: []channel.MessagePart{
+						{Type: channel.MessagePartText, Text: "Hello", Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+						{Type: channel.MessagePartLink, Text: "docs", URL: "https://example.test/a"},
+					},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("rich final push: %v", err)
+	}
+
+	want := "*Hello*\n\n<https://example.test/a|docs>"
+	if gotText != want {
+		t.Fatalf("Slack stream rich text mismatch\n  got:  %q\n  want: %q", gotText, want)
+	}
+}
+
+func TestSlackStreamFinalPreservesURLActionsOnUpdate(t *testing.T) {
+	t.Parallel()
+
+	var gotUpdateBlocks string
+	client := slack.New(
+		testBotToken,
+		slack.OptionAPIURL("https://slack.test/api/"),
+		slack.OptionHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			switch r.URL.String() {
+			case "https://slack.test/api/chat.postMessage":
+				body, _ := json.Marshal(map[string]any{"ok": true, "channel": "C123", "ts": "1710000000.000600"})
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(string(body))),
+				}, nil
+			case "https://slack.test/api/chat.update":
+				if err := r.ParseForm(); err != nil {
+					t.Fatalf("ParseForm: %v", err)
+				}
+				gotUpdateBlocks = r.FormValue("blocks")
+				body, _ := json.Marshal(map[string]any{"ok": true, "channel": "C123", "ts": "1710000000.000600"})
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(string(body))),
+				}, nil
+			default:
+				return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("not found")), Header: make(http.Header)}, nil
+			}
+		})}),
+		slack.OptionRetry(3),
+	)
+	stream := &slackOutboundStream{
+		adapter: NewSlackAdapter(nil),
+		cfg:     channel.ChannelConfig{ID: "cfg-stream-actions"},
+		target:  "C123",
+		api:     client,
+	}
+
+	if err := stream.Push(context.Background(), channel.PreparedStreamEvent{
+		Type:   channel.StreamEventStatus,
+		Status: channel.StreamStatusStarted,
+	}); err != nil {
+		t.Fatalf("status push: %v", err)
+	}
+	if err := stream.Push(context.Background(), channel.PreparedStreamEvent{
+		Type: channel.StreamEventFinal,
+		Final: &channel.PreparedStreamFinalizePayload{
+			Message: channel.PreparedMessage{
+				Message: channel.Message{
+					Text: "Read this",
+					Actions: []channel.Action{
+						{Label: "Open docs", URL: "https://example.test/docs"},
+					},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("final push: %v", err)
+	}
+
+	if !strings.Contains(gotUpdateBlocks, `"type":"button"`) ||
+		!strings.Contains(gotUpdateBlocks, `"text":"Open docs"`) ||
+		!strings.Contains(gotUpdateBlocks, `"url":"https://example.test/docs"`) {
+		t.Fatalf("expected Slack final update button blocks, got %s", gotUpdateBlocks)
+	}
+}
+
 func preparedSlackUploadAttachment(name string, mime string, content string) channel.PreparedAttachment {
 	return channel.PreparedAttachment{
 		Logical: channel.Attachment{
@@ -1140,6 +1341,365 @@ func TestSlackSendResolvesUserTargetToDMChannel(t *testing.T) {
 	}
 	if gotChannel != "D456" {
 		t.Fatalf("expected postMessage channel D456, got %q", gotChannel)
+	}
+}
+
+func TestSlackSendUsesPartsRenderer(t *testing.T) {
+	t.Parallel()
+
+	var gotText string
+	adapter := NewSlackAdapter(nil)
+	api := slack.New(
+		testBotToken,
+		slack.OptionAPIURL("https://slack.test/api/"),
+		slack.OptionHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.URL.String() != "https://slack.test/api/chat.postMessage" {
+				return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("not found")), Header: make(http.Header)}, nil
+			}
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("ParseForm: %v", err)
+			}
+			gotText = r.FormValue("text")
+			body, _ := json.Marshal(map[string]any{"ok": true, "channel": "C123", "ts": "1710000000.000200"})
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(string(body))),
+			}, nil
+		})}),
+		slack.OptionRetry(3),
+	)
+
+	err := adapter.sendSlackMessage(context.Background(), api, "C123", channel.PreparedOutboundMessage{
+		Message: channel.PreparedMessage{
+			Message: channel.Message{
+				Format: channel.MessageFormatRich,
+				Parts: []channel.MessagePart{
+					{Type: channel.MessagePartText, Text: "Hello", Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+					{Type: channel.MessagePartLink, Text: "docs", URL: "https://example.test/a"},
+					{Type: channel.MessagePartMention, Text: "@alice", ChannelIdentityID: "U12345ABC"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("sendSlackMessage: %v", err)
+	}
+	want := "*Hello*\n\n<https://example.test/a|docs>\n\n<@U12345ABC>"
+	if gotText != want {
+		t.Fatalf("Slack rich text mismatch\n  got:  %q\n  want: %q", gotText, want)
+	}
+}
+
+func TestSlackSendPlainFallbackDisablesMarkdownAndEscapesBlocks(t *testing.T) {
+	t.Parallel()
+
+	raw := "<!channel>" + strings.Repeat("&", slackMaxLength/4+1)
+	var gotText string
+	var gotMrkdwn string
+	var gotBlocks string
+	adapter := NewSlackAdapter(nil)
+	api := slack.New(
+		testBotToken,
+		slack.OptionAPIURL("https://slack.test/api/"),
+		slack.OptionHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.URL.String() != "https://slack.test/api/chat.postMessage" {
+				return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("not found")), Header: make(http.Header)}, nil
+			}
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("ParseForm: %v", err)
+			}
+			gotText = r.FormValue("text")
+			gotMrkdwn = r.FormValue("mrkdwn")
+			gotBlocks = r.FormValue("blocks")
+			body, _ := json.Marshal(map[string]any{"ok": true, "channel": "C123", "ts": "1710000000.000201"})
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(string(body))),
+			}, nil
+		})}),
+		slack.OptionRetry(3),
+	)
+
+	err := adapter.sendSlackMessage(context.Background(), api, "C123", channel.PreparedOutboundMessage{
+		Message: channel.PreparedMessage{
+			Message: channel.Message{
+				Format: channel.MessageFormatRich,
+				Parts: []channel.MessagePart{{
+					Type: channel.MessagePartText,
+					Text: raw,
+				}},
+				Actions: []channel.Action{
+					{Label: "Open docs", URL: "https://example.test/docs"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("sendSlackMessage: %v", err)
+	}
+	if gotText != raw {
+		t.Fatalf("expected raw top-level fallback text, got %q", gotText[:min(len(gotText), 32)])
+	}
+	if gotMrkdwn != "false" {
+		t.Fatalf("expected Slack markdown disabled, got %q", gotMrkdwn)
+	}
+	var payload []map[string]any
+	if err := json.Unmarshal([]byte(gotBlocks), &payload); err != nil {
+		t.Fatalf("decode blocks: %v (body=%s)", err, gotBlocks)
+	}
+	sectionText := payload[0]["text"].(map[string]any)["text"].(string)
+	if strings.Contains(sectionText, "<!channel>") {
+		t.Fatalf("block section must not contain raw Slack control tag: %q", sectionText[:min(len(sectionText), 32)])
+	}
+	if !strings.Contains(sectionText, "&lt;!channel&gt;") {
+		t.Fatalf("expected escaped Slack control tag in block section, got %q", sectionText[:min(len(sectionText), 64)])
+	}
+}
+
+func TestSlackSendRendersURLActionsAsButtons(t *testing.T) {
+	t.Parallel()
+
+	var gotBlocks string
+	adapter := NewSlackAdapter(nil)
+	api := slack.New(
+		testBotToken,
+		slack.OptionAPIURL("https://slack.test/api/"),
+		slack.OptionHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.URL.String() != "https://slack.test/api/chat.postMessage" {
+				return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("not found")), Header: make(http.Header)}, nil
+			}
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("ParseForm: %v", err)
+			}
+			gotBlocks = r.FormValue("blocks")
+			body, _ := json.Marshal(map[string]any{"ok": true, "channel": "C123", "ts": "1710000000.000300"})
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(string(body))),
+			}, nil
+		})}),
+		slack.OptionRetry(3),
+	)
+
+	err := adapter.sendSlackMessage(context.Background(), api, "C123", channel.PreparedOutboundMessage{
+		Message: channel.PreparedMessage{
+			Message: channel.Message{
+				Text: "Read this",
+				Actions: []channel.Action{
+					{Label: "Open docs", URL: "https://example.test/docs"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("sendSlackMessage: %v", err)
+	}
+	if !strings.Contains(gotBlocks, `"type":"button"`) ||
+		!strings.Contains(gotBlocks, `"text":"Open docs"`) ||
+		!strings.Contains(gotBlocks, `"url":"https://example.test/docs"`) {
+		t.Fatalf("expected Slack button block, got %s", gotBlocks)
+	}
+}
+
+func TestSlackSendRendersURLActionsWithoutText(t *testing.T) {
+	t.Parallel()
+
+	var gotText string
+	var gotBlocks string
+	adapter := NewSlackAdapter(nil)
+	api := slack.New(
+		testBotToken,
+		slack.OptionAPIURL("https://slack.test/api/"),
+		slack.OptionHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.URL.String() != "https://slack.test/api/chat.postMessage" {
+				return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("not found")), Header: make(http.Header)}, nil
+			}
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("ParseForm: %v", err)
+			}
+			gotText = r.FormValue("text")
+			gotBlocks = r.FormValue("blocks")
+			body, _ := json.Marshal(map[string]any{"ok": true, "channel": "C123", "ts": "1710000000.000300"})
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(string(body))),
+			}, nil
+		})}),
+		slack.OptionRetry(3),
+	)
+
+	err := adapter.sendSlackMessage(context.Background(), api, "C123", channel.PreparedOutboundMessage{
+		Message: channel.PreparedMessage{
+			Message: channel.Message{
+				Actions: []channel.Action{
+					{Label: "Open docs", URL: "https://example.test/docs"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("sendSlackMessage: %v", err)
+	}
+	if gotText != "Open docs" {
+		t.Fatalf("expected action label fallback text, got %q", gotText)
+	}
+	if !strings.Contains(gotBlocks, `"type":"button"`) ||
+		!strings.Contains(gotBlocks, `"text":"Open docs"`) ||
+		!strings.Contains(gotBlocks, `"url":"https://example.test/docs"`) {
+		t.Fatalf("expected Slack button block, got %s", gotBlocks)
+	}
+}
+
+func TestSlackURLActionBlocksSplitAtPlatformElementLimit(t *testing.T) {
+	t.Parallel()
+
+	actions := make([]channel.Action, 26)
+	for i := range actions {
+		actions[i] = channel.Action{
+			Label: "Open docs",
+			URL:   "https://example.test/docs",
+		}
+	}
+
+	blocks, err := slackURLActionBlocks("", actions)
+	if err != nil {
+		t.Fatalf("slackURLActionBlocks: %v", err)
+	}
+	raw, err := json.Marshal(blocks)
+	if err != nil {
+		t.Fatalf("marshal blocks: %v", err)
+	}
+	var payload []map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode blocks: %v (body=%s)", err, raw)
+	}
+	if len(payload) != 2 {
+		t.Fatalf("expected 2 action blocks, got %d: %s", len(payload), raw)
+	}
+	for i, want := range []int{25, 1} {
+		elements, ok := payload[i]["elements"].([]any)
+		if !ok {
+			t.Fatalf("block %d missing elements: %#v", i, payload[i])
+		}
+		if len(elements) != want {
+			t.Fatalf("block %d elements = %d, want %d", i, len(elements), want)
+		}
+	}
+}
+
+func TestSlackURLActionBlocksRejectsPlatformBlockOverflow(t *testing.T) {
+	t.Parallel()
+
+	actions := make([]channel.Action, slackMaxActionBlockElements+1)
+	for i := range actions {
+		actions[i] = channel.Action{
+			Label: "Open docs",
+			URL:   "https://example.test/docs",
+		}
+	}
+
+	_, err := slackURLActionBlocks(strings.Repeat("b", slackMaxSectionText*49), actions)
+	if err == nil || !strings.Contains(err.Error(), "50 blocks") {
+		t.Fatalf("expected Slack block limit error, got %v", err)
+	}
+}
+
+func TestSlackPreparedOutboundValidationRejectsPlatformBlockOverflow(t *testing.T) {
+	t.Parallel()
+
+	actions := make([]channel.Action, slackMaxActionBlockElements*slackMaxMessageBlocks+1)
+	for i := range actions {
+		actions[i] = channel.Action{
+			Label: "Open docs",
+			URL:   "https://example.test/docs",
+		}
+	}
+
+	err := NewSlackAdapter(nil).ValidatePreparedOutbound(context.Background(), channel.ChannelConfig{}, "C123", channel.PreparedOutboundMessage{
+		Target: "C123",
+		Message: channel.PreparedMessage{Message: channel.Message{
+			Actions: actions,
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "50 blocks") {
+		t.Fatalf("expected Slack block preflight error, got %v", err)
+	}
+}
+
+func TestSlackURLActionBlocksEnforcesFieldLimits(t *testing.T) {
+	t.Parallel()
+
+	const (
+		maxSlackSectionTextRunes = 3000
+		maxSlackButtonTextRunes  = 75
+		maxSlackButtonURLRunes   = 3000
+	)
+
+	blocks, err := slackURLActionBlocks(strings.Repeat("b", maxSlackSectionTextRunes+1), []channel.Action{{
+		Label: strings.Repeat("L", maxSlackButtonTextRunes+1),
+		URL:   "https://example.test/docs",
+	}})
+	if err != nil {
+		t.Fatalf("slackURLActionBlocks returned error for long text/label: %v", err)
+	}
+	raw, err := json.Marshal(blocks)
+	if err != nil {
+		t.Fatalf("marshal blocks: %v", err)
+	}
+	var payload []map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode blocks: %v (body=%s)", err, raw)
+	}
+	sectionText := payload[0]["text"].(map[string]any)["text"].(string)
+	if got := len([]rune(sectionText)); got != maxSlackSectionTextRunes {
+		t.Fatalf("section text runes = %d, want %d", got, maxSlackSectionTextRunes)
+	}
+	buttonText := payload[len(payload)-1]["elements"].([]any)[0].(map[string]any)["text"].(map[string]any)["text"].(string)
+	if got := len([]rune(buttonText)); got != maxSlackButtonTextRunes {
+		t.Fatalf("button text runes = %d, want %d", got, maxSlackButtonTextRunes)
+	}
+
+	_, err = slackURLActionBlocks("", []channel.Action{{
+		Label: "Open",
+		URL:   "https://example.test/" + strings.Repeat("x", maxSlackButtonURLRunes),
+	}})
+	if err == nil || !strings.Contains(err.Error(), "url must be at most") {
+		t.Fatalf("expected URL length error, got %v", err)
+	}
+}
+
+func TestSlackURLActionBlocksSplitsLongTextIntoVisibleSections(t *testing.T) {
+	t.Parallel()
+
+	blocks, err := slackURLActionBlocks(strings.Repeat("b", slackMaxSectionText+1), []channel.Action{{
+		Label: "Open",
+		URL:   "https://example.test/docs",
+	}})
+	if err != nil {
+		t.Fatalf("slackURLActionBlocks returned error: %v", err)
+	}
+	raw, err := json.Marshal(blocks)
+	if err != nil {
+		t.Fatalf("marshal blocks: %v", err)
+	}
+	var payload []map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode blocks: %v (body=%s)", err, raw)
+	}
+	if len(payload) != 3 {
+		t.Fatalf("expected two section blocks plus actions, got %d: %s", len(payload), raw)
+	}
+	first := payload[0]["text"].(map[string]any)["text"].(string)
+	second := payload[1]["text"].(map[string]any)["text"].(string)
+	if len([]rune(first)) != slackMaxSectionText || len([]rune(second)) != 1 {
+		t.Fatalf("unexpected section lengths: first=%d second=%d", len([]rune(first)), len([]rune(second)))
+	}
+	if payload[2]["type"] != "actions" {
+		t.Fatalf("last block should contain actions, got %#v", payload[2])
 	}
 }
 

@@ -4158,6 +4158,14 @@ func (q *Queries) ListSessionsByBotAndCreatedByUser(ctx context.Context, arg pgs
 	return result, nil
 }
 
+func (q *Queries) ListSessionsByBotPaged(ctx context.Context, arg pgsqlc.ListSessionsByBotPagedParams) ([]pgsqlc.ListSessionsByBotPagedRow, error) {
+	return q.listSessionsByBotPaged(ctx, arg)
+}
+
+func (q *Queries) ListSessionsByBotAndCreatedByUserPaged(ctx context.Context, arg pgsqlc.ListSessionsByBotAndCreatedByUserPagedParams) ([]pgsqlc.ListSessionsByBotAndCreatedByUserPagedRow, error) {
+	return q.listSessionsByBotAndCreatedByUserPaged(ctx, arg)
+}
+
 func (q *Queries) ListSessionsByRoute(ctx context.Context, routeID pgtype.UUID) ([]pgsqlc.BotSession, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured

@@ -19,7 +19,6 @@ const (
 
 	defaultMemoryToolLimit = 8
 	maxMemoryToolLimit     = 50
-	toolSearchMemory       = "search_memory"
 )
 
 // BuiltinProvider wraps the existing Service as a Provider.
@@ -276,7 +275,7 @@ func (p *BuiltinProvider) ListTools(_ context.Context, _ mcp.ToolSessionContext)
 	}
 	return []mcp.ToolDescriptor{
 		{
-			Name:        toolSearchMemory,
+			Name:        adapters.ToolSearchMemory,
 			Description: "Search for memories relevant to the current chat",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -297,7 +296,7 @@ func (p *BuiltinProvider) ListTools(_ context.Context, _ mcp.ToolSessionContext)
 }
 
 func (p *BuiltinProvider) CallTool(ctx context.Context, session mcp.ToolSessionContext, toolName string, arguments map[string]any) (map[string]any, error) {
-	if toolName != toolSearchMemory {
+	if toolName != adapters.ToolSearchMemory {
 		return nil, mcp.ErrToolNotFound
 	}
 	if p.service == nil {

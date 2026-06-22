@@ -1161,7 +1161,7 @@ definitions:
         description: |-
           Row groups buttons into keyboard rows for renderers that support grids
           (e.g. Telegram inline keyboards). Buttons sharing a Row render together;
-          rows appear in ascending first-seen order. Renderers without grid support
+          rows appear in ascending numeric order. Renderers without grid support
           ignore this field. 0 is the default (single row, prior behavior).
         type: integer
       type:
@@ -1261,6 +1261,8 @@ definitions:
       threads:
         type: boolean
       unsend:
+        type: boolean
+      url_buttons:
         type: boolean
     type: object
   channel.ChannelConfig:
@@ -1458,6 +1460,9 @@ definitions:
     - code_block
     - mention
     - emoji
+    - heading
+    - blockquote
+    - list_item
     type: string
     x-enum-varnames:
     - MessagePartText
@@ -1465,18 +1470,25 @@ definitions:
     - MessagePartCodeBlock
     - MessagePartMention
     - MessagePartEmoji
+    - MessagePartHeading
+    - MessagePartBlockquote
+    - MessagePartListItem
   channel.MessageTextStyle:
     enum:
     - bold
     - italic
     - strikethrough
     - code
+    - underline
+    - spoiler
     type: string
     x-enum-varnames:
     - MessageStyleBold
     - MessageStyleItalic
     - MessageStyleStrikethrough
     - MessageStyleCode
+    - MessageStyleUnderline
+    - MessageStyleSpoiler
   channel.ReplyRef:
     properties:
       attachments:
@@ -2290,6 +2302,8 @@ definitions:
         type: string
       path:
         type: string
+      revision:
+        type: string
       size:
         type: integer
     type: object
@@ -2310,6 +2324,8 @@ definitions:
   handlers.FSWriteRequest:
     properties:
       content:
+        type: string
+      expectedRevision:
         type: string
       path:
         type: string
@@ -2988,6 +3004,17 @@ definitions:
     properties:
       ok:
         type: boolean
+      revision:
+        type: string
+    type: object
+  handlers.listSessionsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/session.Session'
+        type: array
+      next_cursor:
+        type: string
     type: object
   handlers.memoryAddPayload:
     properties:
@@ -7623,11 +7650,16 @@ paths:
       tags:
       - messages
     get:
-      description: List messages for a bot history with optional pagination
+      description: List messages for one session with optional pagination
       parameters:
       - description: Bot ID
         in: path
         name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: query
+        name: session_id
         required: true
         type: string
       - description: Limit
@@ -7657,11 +7689,15 @@ paths:
           description: Forbidden
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List bot history messages
+      summary: List session history messages
       tags:
       - messages
   /bots/{bot_id}/messages/locate:
@@ -8214,15 +8250,24 @@ paths:
         name: bot_id
         required: true
         type: string
+      - description: Comma-separated session types to include. Defaults to user-facing
+          types (chat,discuss,acp_agent).
+        in: query
+        name: types
+        type: string
+      - description: Page size (1..200). Defaults to 50.
+        in: query
+        name: limit
+        type: integer
+      - description: Opaque cursor returned as next_cursor on a previous page.
+        in: query
+        name: cursor
+        type: string
       responses:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              items:
-                $ref: '#/definitions/session.Session'
-              type: array
-            type: object
+            $ref: '#/definitions/handlers.listSessionsResponse'
         "400":
           description: Bad Request
           schema:
@@ -8494,6 +8539,49 @@ paths:
       summary: Trigger immediate context compaction
       tags:
       - compaction
+  /bots/{bot_id}/sessions/{session_id}/messages/events:
+    get:
+      description: |-
+        SSE stream that pushes a server-fixed backlog of the last 50
+        messages, then streams future message_created and
+        session_title_updated events scoped to this session only.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Stream message events for one session
+      tags:
+      - messages
   /bots/{bot_id}/sessions/{session_id}/status:
     get:
       description: Get aggregated info for a chat session including message count,
@@ -8533,6 +8621,41 @@ paths:
       summary: Get session info
       tags:
       - sessions
+  /bots/{bot_id}/sessions/events:
+    get:
+      description: |-
+        Lightweight SSE for sidebar live-sort. Carries only session
+        identifiers and minimal metadata (touched timestamps, titles).
+        Never includes message bodies. Filters out internal session
+        types such as heartbeat, schedule, subagent.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Stream bot-wide sessions activity
+      tags:
+      - messages
   /bots/{bot_id}/settings:
     delete:
       description: Remove agent settings for current user

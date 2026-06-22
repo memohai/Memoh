@@ -11,21 +11,25 @@ import (
 
 // ToolSessionContext carries request-scoped identity for tool execution.
 type ToolSessionContext struct {
-	BotID             string
-	ChatID            string
-	RuntimeID         string
-	SessionID         string
-	StreamID          string
-	ToolCallID        string
-	SessionType       string
-	RouteID           string
-	ChannelIdentityID string
-	SessionToken      string `json:"-"`
-	CurrentPlatform   string
-	ReplyTarget       string
-	ConversationType  string
-	IsSubagent        bool
-	RuntimeActive     bool
+	BotID               string
+	ChatID              string
+	RuntimeID           string
+	RuntimeToken        string `json:"-"`
+	SessionID           string
+	StreamID            string
+	ToolCallID          string
+	SessionType         string
+	RouteID             string
+	ChannelIdentityID   string
+	SessionToken        string `json:"-"`
+	CurrentPlatform     string
+	ReplyTarget         string
+	ConversationType    string
+	CanRequestUserInput bool
+	CanListUserInput    bool
+	IsSubagent          bool
+	RuntimeActive       bool
+	SupportsImageInput  bool
 }
 
 // ToolDescriptor is the MCP tools/list item shape used by the gateway.

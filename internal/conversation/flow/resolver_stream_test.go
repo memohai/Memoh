@@ -194,3 +194,37 @@ func TestPersistTerminalSnapshotStoresAssistantOutput(t *testing.T) {
 		t.Fatalf("unexpected persisted roles: %q, %q", messages.persisted[0].Role, messages.persisted[1].Role)
 	}
 }
+
+func TestPersistTerminalSnapshotSkipsUserWhenPipelineContextContainsCurrentMessage(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	if err := resolver.persistTerminalSnapshot(
+		context.Background(),
+		conversation.ChatRequest{
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			Query:     "---\nmessage-id: tg-1\nchannel: telegram\n---\n@memoh1bot ping",
+		},
+		resolvedContext{
+			userMessageAlreadyInContext: true,
+		},
+		terminalSnapshot{
+			sdkMessages: []sdk.Message{sdk.AssistantMessage("pong")},
+		},
+	); err != nil {
+		t.Fatalf("persistTerminalSnapshot returned error: %v", err)
+	}
+
+	if len(messages.persisted) != 1 {
+		t.Fatalf("expected only assistant output to persist, got %#v", messages.persisted)
+	}
+	if messages.persisted[0].Role != "assistant" {
+		t.Fatalf("unexpected persisted role: %q", messages.persisted[0].Role)
+	}
+}

@@ -12,14 +12,14 @@ const { t } = useI18n()
 const route = useRoute()
 
 // The chat workspace (MainSection: sidebar + dockview) is mounted persistently
-// here rather than as a route component, and settings renders as a fixed overlay
-// ON TOP of it. This keeps the chat DOM attached and full-size while the user is
-// in settings — so dockview never relayouts from a zero size, the message list
-// keeps its scroll position, and returning has no black flash / no re-scroll.
+// here rather than as a route component. This keeps the chat DOM attached and
+// full-size while the user is in settings, so dockview never relayouts from a
+// zero size, the message list keeps its scroll position, and returning has no
+// black flash / no re-scroll.
 // (KeepAlive can't achieve this: it detaches the subtree, which is what caused
 // all three regressions.)
 //   - chat routes (home/bot): only MainSection shows.
-//   - settings routes: MainSection stays behind, settings overlays it.
+//   - settings routes: MainSection stays mounted, settings content renders above it.
 //   - auth-boundary routes (login/onboarding/oauth/dev): MainSection is not
 //     mounted at all; those render alone via RouterView.
 const isChatRoute = computed(() => route.name === 'home' || route.name === 'bot')
@@ -39,16 +39,16 @@ const toastHeadings = computed(() => ({
 
 <template>
   <section>
-    <!-- Persistent chat shell. Stays mounted (and full-size) across chat↔settings
+    <!-- Persistent chat area. Stays mounted (and full-size) across chat↔settings
          so its dockview/scroll survive untouched. Unmounts only when leaving the
          authenticated app area (login/onboarding). -->
     <MainSection v-if="isAppArea" />
 
-    <!-- Single RouterView (v-slot) drives both the settings overlay and the
+    <!-- Single RouterView (v-slot) drives both the settings section and the
          auth-boundary pages. On chat routes the matched component is a null stub,
          so `Component` renders nothing. -->
     <RouterView v-slot="{ Component }">
-      <!-- Settings overlay: a PERMANENT fixed full-screen positioning layer
+      <!-- Settings section: a permanent fixed full-screen positioning layer
            (always in the DOM + compositor layer tree), toggled with `visibility`
            only — never v-if, never opacity. Why each matters:
            (1) v-if'ing the layer tore down a promoted compositor layer in one
@@ -68,7 +68,7 @@ const toastHeadings = computed(() => ({
         />
       </div>
       <!-- Auth-boundary routes (login/onboarding/oauth/dev) render full-screen on
-           their own; MainSection and the overlay content are both absent. -->
+           their own; MainSection and the settings content are both absent. -->
       <component
         :is="Component"
         v-if="!isAppArea"

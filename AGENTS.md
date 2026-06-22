@@ -15,7 +15,7 @@ Deploy/server mode consists of two core services:
 | **Server** (Backend) | Go + Echo | 8080 | Main service: REST API, auth, database, container management, **in-process AI agent** |
 | **Web** (Frontend) | Vue 3 + Vite | 8082 | Management UI: visual configuration for Bots, Models, Channels, etc. |
 
-The native desktop client is a separate distribution boundary, not just a hosted Web shell. `apps/desktop` reuses `@memohai/web` modules, but owns Electron windows, system tray behavior, local server lifecycle, embedded Qdrant startup, bundled CLI installation, and packaged resources. In desktop mode the app starts and stops a local `memoh-server` on `127.0.0.1:18731` with its own SQLite data, provider templates, bridge runtime, and Qdrant process under the user's app data directory.
+The native desktop client is a separate distribution boundary, not just a hosted Web shell. `apps/desktop` reuses `@memohai/web` modules, but owns the Electron shell, system tray behavior, local server lifecycle, embedded Qdrant startup, bundled CLI installation, and packaged resources. In desktop mode the app starts and stops a local `memoh-server` on `127.0.0.1:18731` with its own SQLite data, provider templates, bridge runtime, and Qdrant process under the user's app data directory.
 
 Infrastructure dependencies:
 - **PostgreSQL or SQLite** — Relational data storage
@@ -43,7 +43,7 @@ Infrastructure dependencies:
 - **Icons**: lucide-vue-next + `@memohai/icon` (brand/provider icons)
 - **i18n**: vue-i18n
 - **Markdown**: markstream-vue + Shiki + Mermaid + KaTeX
-- **Desktop**: Electron 34 + [electron-vite](https://electron-vite.github.io/) 4 native client, reusing `@memohai/web` modules while managing multi-window bootstrap, local server lifecycle, embedded Qdrant, bundled CLI, tray behavior, and packaged runtime resources
+- **Desktop**: Electron 34 + [electron-vite](https://electron-vite.github.io/) 4 native client, reusing `@memohai/web` modules while managing the desktop renderer, local server lifecycle, embedded Qdrant, bundled CLI, tray behavior, and packaged runtime resources
 - **Package Manager**: pnpm monorepo
 
 ### Tooling
@@ -83,9 +83,10 @@ Memoh/
 │   │   ├── read_media.go       #     Media reading utilities
 │   │   ├── spawn_adapter.go    #     Spawn adapter for sub-processes
 │   │   ├── prompts/            #     Prompt templates (Markdown, with partials prefixed by _)
-│   │   │   ├── system_chat.md, system_discuss.md, system_heartbeat.md, system_schedule.md, system_subagent.md
-│   │   │   ├── _tools.md, _memory.md, _contacts.md, _schedule_task.md, _subagent.md
-│   │   │   └── heartbeat.md, schedule.md
+│   │   │   ├── system_common.md, mode_chat.md, mode_discuss.md, mode_heartbeat.md, mode_schedule.md, mode_subagent.md
+│   │   │   ├── _memory.md, _identities.md
+│   │   │   ├── heartbeat.md, schedule.md
+│   │   │   └── memory_extract.md, memory_update.md
 │   │   └── tools/              #     Tool providers (ToolProvider interface)
 │   │       ├── message.go      #       Send message tool
 │   │       ├── contacts.go     #       Contact list tool
@@ -167,7 +168,7 @@ Memoh/
 │       ├── bridge/             #     gRPC client for in-container bridge service
 │       └── bridgepb/           #     Protobuf definitions (bridge.proto)
 ├── apps/                       # Application services
-│   ├── desktop/                #   Native Electron app (@memohai/desktop): multi-window shell, tray, local server, embedded Qdrant, bundled CLI/runtime
+│   ├── desktop/                #   Native Electron app (@memohai/desktop): renderer, tray, local server, embedded Qdrant, bundled CLI/runtime
 │   └── web/                    #   Main web app (@memohai/web, Vue 3) — see apps/web/AGENTS.md
 ├── packages/                   # Shared TypeScript libraries
 │   ├── ui/                     #   Shared UI component library (@memohai/ui)
@@ -329,7 +330,8 @@ PostgreSQL migrations live in `db/postgres/migrations/` and follow a dual-update
 - Model/client types are defined in `internal/models/types.go`: `openai-completions`, `openai-responses`, `anthropic-messages`, `google-generative-ai`, `openai-codex`, `github-copilot`, `edge-speech`.
 - Model types: `chat`, `embedding`, `speech`.
 - Tools are implemented as `ToolProvider` instances in `internal/agent/tools/`, loaded via setter injection to avoid FX dependency cycles.
-- Prompt templates are embedded Go Markdown files in `internal/agent/prompts/`. Partials (reusable fragments) are prefixed with `_` (e.g., `_tools.md`, `_memory.md`). System prompts include `system_chat.md` (standard chat) and `system_discuss.md` (discuss mode).
+- **Tool usage lives with the tool, never in the static prompt.** Per-tool usage goes in `sdk.Tool.Description`; cross-tool workflow guidance goes in an optional `tools.ToolUsage` `Usage()` method that `assembleTools` injects only when that provider registers tools for the session. Because both are gated with the tool itself, the prompt template never names conditionally-registered tools (guarded by a test in `internal/agent/prompt_test.go`) and can't drift — the cause of the original `speak` / `search_memory` / `schedule` bugs.
+- Prompt templates are embedded Go Markdown files in `internal/agent/prompts/`. Partials (reusable fragments) are prefixed with `_` (e.g., `_memory.md`, `_identities.md`). System prompting combines `system_common.md` with mode-specific prompts such as `mode_chat.md` and `mode_discuss.md`.
 - The conversation flow resolver (`internal/conversation/flow/`) orchestrates message assembly, memory injection, history trimming, and agent invocation.
 - The discuss/chat pipeline (`internal/pipeline/`) provides an alternative orchestration path with adaptation, projection, rendering, and driver layers.
 - Browser Use and Computer Use capabilities live in `internal/agent/tools/browser.go` (plus `internal/agent/tools/computer_a11y.go`) and are exposed only when the bot's workspace display is enabled. `browser_action` / `browser_observe` operate the headed workspace Chrome/Chromium instance over CDP, `browser_remote_session` exposes the same CDP endpoint for code-driven Playwright/CDP sessions, and the Computer Use pair (`computer_observe` / `computer_action`) drives the broader GUI desktop: snapshots come from the AT-SPI accessibility tree via the bundled `a11y-cli` Rust helper at `/opt/memoh/toolkit/display/bin/a11y-cli`, and raw RFB pointer/keyboard input remains as a fallback when accessibility cannot reach the target. Both browser and computer screenshots are saved to a workspace path and never auto-attached to the conversation, so the model must explicitly read the path when it wants the image. Prefer Browser Use for web pages; use Computer Use for native dialogs, non-browser apps, or GUI states that CDP cannot reach.
@@ -350,7 +352,7 @@ PostgreSQL migrations live in `db/postgres/migrations/` and follow a dual-update
 ### Desktop App
 
 - `apps/desktop/` is an [electron-vite](https://electron-vite.github.io/) project (`@memohai/desktop`) with its own managed renderer bootstrap. It reuses exported `@memohai/web` pages, layouts, stores, i18n, API setup, and design tokens, but owns the Electron shell instead of importing the full web `main.ts`.
-- The desktop app boots separate Chat and Settings `BrowserWindow`s with memory-history routers, desktop shell injection, IPC-mediated settings navigation, cross-window cache sync, native window chrome, and system tray reopen/quit behavior.
+- The desktop app boots its renderer with a memory-history router, desktop shell injection, native menu/keyboard integration, native chrome, and system tray reopen/quit behavior.
 - `src/main/local-server.ts` is the local server startup gate: it prepares a local SQLite config, starts embedded Qdrant, builds or resolves the bundled `memoh-server`, runs migrations, starts the server on `127.0.0.1:18731`, and writes `local-server.pid.json` / `local-server.log` under `userData`.
 - `src/main/qdrant.ts` manages the embedded Qdrant process and per-user `qdrant/ports.json`, `qdrant.pid.json`, `config.yaml`, and storage directory. Tray Quit and normal app quit both reuse the main-process shutdown path to stop the managed server, OAuth callback proxy, and embedded Qdrant.
 - Packaging is handled by `electron-builder` (config in `apps/desktop/electron-builder.yml`); output lands in `apps/desktop/dist/`. Packaged resources include `server`, `cli`, `runtime`, `config`, provider templates, Qdrant, and GStreamer assets.

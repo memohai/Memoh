@@ -33,17 +33,17 @@ describe('dispatchFocusedWindowCommand', () => {
 
   it('keeps the close-tab command mapped to native close for non-chat windows', () => {
     const chatWindow = createWindow()
-    const settingsWindow = createWindow()
+    const auxiliaryWindow = createWindow()
 
     const handled = dispatchFocusedWindowCommand(
       chatWindow,
-      settingsWindow,
+      auxiliaryWindow,
       appKeyboardCommands.closeCurrentWorkspaceTab,
     )
 
     expect(handled).toBe(true)
-    expect(settingsWindow.close).toHaveBeenCalledOnce()
-    expect(settingsWindow.webContents.send).not.toHaveBeenCalled()
+    expect(auxiliaryWindow.close).toHaveBeenCalledOnce()
+    expect(auxiliaryWindow.webContents.send).not.toHaveBeenCalled()
   })
 
   it('falls back to native close when the chat renderer cannot receive commands yet', () => {

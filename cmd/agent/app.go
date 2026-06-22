@@ -26,6 +26,7 @@ import (
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/agent/background"
 	agenttools "github.com/memohai/memoh/internal/agent/tools"
+	"github.com/memohai/memoh/internal/agentpayload"
 	audiopkg "github.com/memohai/memoh/internal/audio"
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/botbackup"
@@ -243,6 +244,10 @@ func provideBridgeProvider(manage *workspace.Manager) bridge.Provider {
 	return manage
 }
 
+func providePluginBridgeProvider(provider bridge.Provider) pluginspkg.BridgeProvider {
+	return pluginspkg.BridgeProvider{Provider: provider}
+}
+
 func provideHooksService(log *slog.Logger, provider bridge.Provider, pluginService *pluginspkg.Service) *hookspkg.Service {
 	service := hookspkg.NewService(log, provider)
 	service.SetPluginService(pluginService)
@@ -326,8 +331,8 @@ func provideRouteService(log *slog.Logger, queries dbstore.Queries, chatService 
 	return route.NewService(log, queries, chatService)
 }
 
-func provideSessionService(log *slog.Logger, queries dbstore.Queries) *sessionpkg.Service {
-	return sessionpkg.NewService(log, queries)
+func provideSessionService(log *slog.Logger, queries dbstore.Queries, hub *event.Hub) *sessionpkg.Service {
+	return sessionpkg.NewService(log, queries, hub)
 }
 
 func provideMessageService(log *slog.Logger, queries dbstore.Queries, hub *event.Hub) *message.DBService {
@@ -449,10 +454,11 @@ func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *mod
 			if eventHub == nil {
 				return
 			}
-			data, err := json.Marshal(map[string]any{
-				"event": evt.Event,
-				"task":  evt,
-			})
+			// The wire shape lives in internal/agentpayload — see its
+			// BackgroundTask helper and the tests there that pin the
+			// top-level `session_id` placement the per-session SSE handler
+			// routes on.
+			data, err := json.Marshal(agentpayload.BackgroundTask(evt))
 			if err != nil {
 				return
 			}
@@ -678,7 +684,7 @@ func injectACPToolProviders(source *agenttools.NativeToolSource, toolProviders [
 
 func provideToolGatewayService(log *slog.Logger, fedGateway *handlers.MCPFederationGateway, oauthService *mcp.OAuthService, mcpConnService *mcp.ConnectionService, containerdHandler *handlers.ContainerdHandler, nativeSource *agenttools.NativeToolSource, toolContexts *mcp.ToolSessionContextStore) *mcp.ToolGatewayService {
 	fedGateway.SetOAuthService(oauthService)
-	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService)
+	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService, mcpfederation.WithReservedToolName(agenttools.IsBuiltInToolName))
 	svc := mcp.NewToolGatewayService(log, []mcp.ToolSource{nativeSource, fedSource})
 	containerdHandler.SetToolGatewayService(svc)
 	containerdHandler.SetToolSessionContextStore(toolContexts)
@@ -708,7 +714,7 @@ func provideToolProviders(log *slog.Logger, channelManager *channel.Manager, reg
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
 	}
-	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService)
+	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService, mcpfederation.WithReservedToolName(agenttools.IsBuiltInToolName))
 	return []agenttools.ToolProvider{
 		agenttools.NewAskUserProvider(log),
 		agenttools.NewMessageProvider(log, channelManager, channelManager, registry, assetResolver),

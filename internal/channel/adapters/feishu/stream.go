@@ -111,10 +111,7 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.PreparedS
 		}
 		msg := event.Final.Message
 		bufText := strings.TrimSpace(s.textBuffer.String())
-		finalText := bufText
-		if finalText == "" {
-			finalText = strings.TrimSpace(msg.Message.PlainText())
-		}
+		finalText := renderFeishuStreamFinalText(msg.Message, bufText)
 		if finalText != "" {
 			if err := s.ensureCard(ctx, feishuStreamThinkingText); err != nil {
 				return err
@@ -149,6 +146,21 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.PreparedS
 	default:
 		return nil
 	}
+}
+
+func renderFeishuStreamFinalText(msg channel.Message, buffered string) string {
+	if len(msg.Parts) > 0 {
+		if body := renderFeishuMessagePartsLarkMD(msg); body != "" {
+			if len([]rune(body)) > feishuStreamMaxRunes {
+				return channel.RenderPartsAsPlain(msg.Parts)
+			}
+			return body
+		}
+	}
+	if authoritative := strings.TrimSpace(msg.PlainText()); authoritative != "" {
+		return authoritative
+	}
+	return strings.TrimSpace(buffered)
 }
 
 func feishuLogicalAttachments(attachments []channel.PreparedAttachment) []channel.Attachment {
@@ -320,7 +332,21 @@ func extractReadableFromJSON(text string) string {
 }
 
 func buildFeishuCardContent(text string) (string, error) {
+	return buildFeishuCardContentWithTag(text, "lark_md")
+}
+
+func buildFeishuPlainCardContent(text string) (string, error) {
+	return buildFeishuCardContentWithTag(text, "plain_text")
+}
+
+func buildFeishuCardContentWithTag(text string, tag string) (string, error) {
+	if tag == "" {
+		tag = "lark_md"
+	}
 	body := processFeishuCardMarkdown(strings.TrimSpace(text))
+	if tag == "plain_text" {
+		body = strings.TrimSpace(text)
+	}
 	card := map[string]any{
 		"config": map[string]any{
 			"wide_screen_mode": true,
@@ -334,7 +360,7 @@ func buildFeishuCardContent(text string) (string, error) {
 					{
 						"is_short": false,
 						"text": map[string]any{
-							"tag":     "lark_md",
+							"tag":     tag,
 							"content": body,
 						},
 					},

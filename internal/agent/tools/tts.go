@@ -27,10 +27,18 @@ type TTSChannelResolver interface {
 	ParseChannelType(raw string) (channel.ChannelType, error)
 }
 
+type ttsSettings interface {
+	GetBot(ctx context.Context, botID string) (settings.Settings, error)
+}
+
+type ttsAudio interface {
+	Synthesize(ctx context.Context, modelID string, text string, overrideCfg map[string]any) ([]byte, string, error)
+}
+
 type TTSProvider struct {
 	logger   *slog.Logger
-	settings *settings.Service
-	audio    *audiopkg.Service
+	settings ttsSettings
+	audio    ttsAudio
 	sender   TTSSender
 	resolver TTSChannelResolver
 }
@@ -39,13 +47,37 @@ func NewTTSProvider(log *slog.Logger, settingsSvc *settings.Service, audioSvc *a
 	if log == nil {
 		log = slog.Default()
 	}
+	var settingsDep ttsSettings
+	if settingsSvc != nil {
+		settingsDep = settingsSvc
+	}
+	var audioDep ttsAudio
+	if audioSvc != nil {
+		audioDep = audioSvc
+	}
 	return &TTSProvider{
 		logger:   log.With(slog.String("tool", "tts")),
-		settings: settingsSvc,
-		audio:    audioSvc,
+		settings: settingsDep,
+		audio:    audioDep,
 		sender:   sender,
 		resolver: resolver,
 	}
+}
+
+func (*TTSProvider) Usage(_ context.Context, session SessionContext, available AvailableTools) string {
+	ref, ok := available.Ref(ToolSpeak())
+	if !ok {
+		return ""
+	}
+	text := ref + ": Send a voice message."
+	if session.CanOmitMessagingTarget() {
+		text += " Omit `target` to speak in the current conversation; specify `target` for another channel/person."
+	} else {
+		text += " Specify `platform` and `target` in this session."
+	}
+	return usageSection("Voice messaging", []string{
+		text,
+	})
 }
 
 func (p *TTSProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
@@ -64,25 +96,39 @@ func (p *TTSProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.
 		return nil, nil
 	}
 	sess := session
+	description, platformDescription, targetDescription, required := speakToolPromptMetadata(session)
 	return []sdk.Tool{
 		{
-			Name:        "speak",
-			Description: "Send a voice message. When target is omitted, speaks in the current conversation. When target is specified, sends to that channel/person. Synthesizes text to speech and delivers as audio.",
+			Name:        ToolSpeak().String(),
+			Description: description,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"text":     map[string]any{"type": "string", "description": "The text to convert to speech (max 500 characters)"},
-					"platform": map[string]any{"type": "string", "description": "Channel platform name. Defaults to current session platform."},
-					"target":   map[string]any{"type": "string", "description": "Channel target (chat/group/thread ID). Optional — omit to speak in the current conversation. Use get_contacts to find targets for other conversations."},
+					"platform": map[string]any{"type": "string", "description": platformDescription},
+					"target":   map[string]any{"type": "string", "description": targetDescription},
 					"reply_to": map[string]any{"type": "string", "description": "Message ID to reply to. The voice message will reference this message on the platform."},
 				},
-				"required": []string{"text"},
+				"required": required,
 			},
 			Execute: func(execCtx *sdk.ToolExecContext, input any) (any, error) {
 				return p.execSpeak(execCtx.Context, sess, inputAsMap(input))
 			},
 		},
 	}, nil
+}
+
+func speakToolPromptMetadata(session SessionContext) (description string, platformDescription string, targetDescription string, required []string) {
+	if session.CanOmitMessagingTarget() {
+		return "Send a voice message. When target is omitted, speaks in the current conversation. When target is specified, sends to that channel/person. Synthesizes text to speech and delivers as audio.",
+			"Channel platform name. Defaults to current session platform.",
+			"Channel target (chat/group/thread ID). Optional — omit to speak in the current conversation.",
+			[]string{"text"}
+	}
+	return "Send a voice message. Specify platform and target when speaking to a person or channel from this session. Synthesizes text to speech and delivers as audio.",
+		"Channel platform name. Required in this session.",
+		"Channel target (chat/group/thread ID). Required in this session.",
+		[]string{"text", "platform", "target"}
 }
 
 func (p *TTSProvider) execSpeak(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
@@ -103,11 +149,13 @@ func (p *TTSProvider) execSpeak(ctx context.Context, session SessionContext, arg
 	}
 	target := FirstStringArg(args, "target")
 	if target == "" {
-		target = strings.TrimSpace(session.ReplyTarget)
+		target = defaultSpeakTargetForPlatform(args, session, channelType)
+	}
+	if target == "" {
+		return nil, errors.New("target is required for cross-conversation speak")
 	}
 
-	isSameConv := target == "" || session.IsSameConversation(channelType.String(), target)
-
+	isSameConv := session.IsSameConversation(channelType.String(), target)
 	botSettings, err := p.settings.GetBot(ctx, botID)
 	if err != nil {
 		return nil, errors.New("failed to load bot settings")
@@ -123,7 +171,7 @@ func (p *TTSProvider) execSpeak(ctx context.Context, session SessionContext, arg
 	dataURL := fmt.Sprintf("data:%s;base64,%s", contentType, base64.StdEncoding.EncodeToString(audioData))
 
 	// Same-conversation: emit the synthesized audio as a voice attachment.
-	if isSameConv && session.Emitter != nil {
+	if isSameConv && session.CanUseLocalMessagingShortcut() {
 		session.Emitter(ToolStreamEvent{
 			Type: StreamEventAttachment,
 			Attachments: []Attachment{{
@@ -138,9 +186,6 @@ func (p *TTSProvider) execSpeak(ctx context.Context, session SessionContext, arg
 			"delivered": "current_conversation",
 		}, nil
 	}
-	if target == "" {
-		return nil, errors.New("target is required for cross-conversation speak")
-	}
 	msg := channel.Message{
 		Attachments: []channel.Attachment{{Type: channel.AttachmentVoice, URL: dataURL, Mime: contentType, Size: int64(len(audioData))}},
 	}
@@ -154,6 +199,16 @@ func (p *TTSProvider) execSpeak(ctx context.Context, session SessionContext, arg
 		"ok": true, "bot_id": botID, "platform": channelType.String(), "target": target,
 		"instruction": "Voice message delivered successfully. You have completed your response. Please STOP now and do not call any more tools.",
 	}, nil
+}
+
+func defaultSpeakTargetForPlatform(args map[string]any, session SessionContext, channelType channel.ChannelType) string {
+	if !session.CanOmitMessagingTarget() {
+		return ""
+	}
+	if FirstStringArg(args, "platform") != "" && !strings.EqualFold(channelType.String(), strings.TrimSpace(session.CurrentPlatform)) {
+		return ""
+	}
+	return strings.TrimSpace(session.ReplyTarget)
 }
 
 func (p *TTSProvider) resolvePlatform(args map[string]any, session SessionContext) (channel.ChannelType, error) {

@@ -1,32 +1,15 @@
-import { h } from 'vue'
 import {
   createRouter,
   createMemoryHistory,
-  RouterView,
   type RouteLocationNormalized,
   type RouteRecordRaw,
 } from 'vue-router'
-import { SETTINGS_DEFAULT_PATH, SETTINGS_ROUTE_SPECS } from '../shared/settings-routes'
+import { mapSettingsSpecToRoute, SETTINGS_DEFAULT_PATH, SETTINGS_ROUTE_SPECS } from '../shared/settings-routes'
 import { ensureOnboarding } from '@memohai/web/router-guards/onboarding'
 import { useUserStore } from '@memohai/web/store/user'
 import { installBackHistory } from '@memohai/web/composables/useBackOr'
 
-import type { SettingsRouteSpec } from '../shared/settings-routes'
-
-// Map settings route specs to actual components instead of stubs
-const mapSpecToRoute = (spec: SettingsRouteSpec): RouteRecordRaw => {
-  const route = {
-    path: spec.path,
-    component: spec.loader ?? { render: () => h(RouterView) },
-    ...(spec.name ? { name: spec.name } : {}),
-    ...(spec.meta ? { meta: spec.meta } : {}),
-    ...(spec.children ? { children: spec.children.map(mapSpecToRoute) } : {}),
-  } satisfies RouteRecordRaw
-
-  return route
-}
-
-const realSettingsRoutes: RouteRecordRaw[] = SETTINGS_ROUTE_SPECS.map(mapSpecToRoute)
+const realSettingsRoutes: RouteRecordRaw[] = SETTINGS_ROUTE_SPECS.map(mapSettingsSpecToRoute)
 
 const routes: RouteRecordRaw[] = [
   {
@@ -159,10 +142,6 @@ router.beforeEach(async (to: RouteLocationNormalized) => {
   }
 
   return true
-})
-
-window.api?.window?.onSettingsNavigate?.((target: string) => {
-  void router.push(target)
 })
 
 // Dev convenience: reach the component wall from devtools without a URL bar

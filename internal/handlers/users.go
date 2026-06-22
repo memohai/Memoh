@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"log/slog"
@@ -536,7 +535,7 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 	c.Response().Header().Set(echo.HeaderCacheControl, "no-cache")
 	c.Response().Header().Set(echo.HeaderConnection, "keep-alive")
 	c.Response().WriteHeader(http.StatusOK)
-	writer := bufio.NewWriter(c.Response().Writer)
+	writer := c.Response().Writer
 
 	var mu sync.Mutex
 	var writeErr error

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import type { MessageStreamEvent, UIStreamEvent, UIStreamEventHandler, UIUserInput } from '@/composables/api/useChat'
+import type { BotSessionActivityEvent, SessionMessageStreamEvent, UIStreamEvent, UIStreamEventHandler, UIUserInput } from '@/composables/api/useChat'
 import { REASONING_EFFORT_DISABLE } from '@/pages/bots/components/reasoning-effort'
 import { useChatStore } from './chat-list'
 
@@ -17,7 +17,8 @@ const api = vi.hoisted(() => ({
   setACPRuntimeModel: vi.fn(),
   setACPRuntimeModelByID: vi.fn(),
   closeACPRuntime: vi.fn(),
-  streamMessageEvents: vi.fn(),
+  streamSessionMessageEvents: vi.fn(),
+  streamBotSessionsActivityEvents: vi.fn(),
   connectWebSocket: vi.fn(),
   locateMessageUI: vi.fn(),
 }))
@@ -79,7 +80,10 @@ function askUserTurn(userInput: UIUserInput, toolCallId = 'call-ask') {
 
 describe('chat-list store', () => {
   let streamHandler: UIStreamEventHandler | null
-  let messageEventsHandler: ((event: MessageStreamEvent) => void) | null
+  // Captured but not driven by any test body yet; keep the capture so future
+  // tests can simulate per-session SSE events without rewiring the mock.
+  let _sessionMessageHandler: ((event: SessionMessageStreamEvent) => void) | null
+  let sessionsActivityHandler: ((event: BotSessionActivityEvent) => void) | null
   let sendEvents: UIStreamEvent[]
   let sentWSMessages: Array<Record<string, unknown>>
   let lastStreamId = ''
@@ -88,7 +92,8 @@ describe('chat-list store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     streamHandler = null
-    messageEventsHandler = null
+    _sessionMessageHandler = null
+    sessionsActivityHandler = null
     lastStreamId = ''
     lastSessionId = ''
     sentWSMessages = []
@@ -101,7 +106,7 @@ describe('chat-list store', () => {
     api.fetchBots.mockResolvedValue([
       { id: 'bot-1', status: 'active', name: 'Bot' },
     ])
-    api.fetchSessions.mockResolvedValue([])
+    api.fetchSessions.mockResolvedValue({ items: [], nextCursor: null })
     api.createSession.mockResolvedValue({
       id: 'session-1',
       bot_id: 'bot-1',
@@ -159,8 +164,12 @@ describe('chat-list store', () => {
     })
     api.closeACPRuntime.mockResolvedValue(undefined)
     api.fetchMessagesUI.mockResolvedValue([])
-    api.streamMessageEvents.mockImplementation((_botId: string, signal: AbortSignal, onEvent: (event: MessageStreamEvent) => void) => new Promise<void>((resolve) => {
-      messageEventsHandler = onEvent
+    api.streamSessionMessageEvents.mockImplementation((_botId: string, _sessionId: string, signal: AbortSignal, onEvent: (event: SessionMessageStreamEvent) => void) => new Promise<void>((resolve) => {
+      _sessionMessageHandler = onEvent
+      signal.addEventListener('abort', () => resolve(), { once: true })
+    }))
+    api.streamBotSessionsActivityEvents.mockImplementation((_botId: string, signal: AbortSignal, onEvent: (event: BotSessionActivityEvent) => void) => new Promise<void>((resolve) => {
+      sessionsActivityHandler = onEvent
       signal.addEventListener('abort', () => resolve(), { once: true })
     }))
     api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
@@ -1042,9 +1051,9 @@ describe('chat-list store', () => {
   })
 
   it('responds to user input over websocket and marks the block answered', async () => {
-    api.fetchSessions.mockResolvedValueOnce([
+    api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
-    ])
+    ], nextCursor: null })
     sendEvents = [{ type: 'agent_end' } as UIStreamEvent]
     const store = useChatStore()
 
@@ -1074,9 +1083,9 @@ describe('chat-list store', () => {
   })
 
   it('cancels user input over websocket and marks the block canceled', async () => {
-    api.fetchSessions.mockResolvedValueOnce([
+    api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
-    ])
+    ], nextCursor: null })
     sendEvents = [{ type: 'agent_end' } as UIStreamEvent]
     const store = useChatStore()
 
@@ -1118,9 +1127,9 @@ describe('chat-list store', () => {
       onOpen: null,
       onClose: null,
     }))
-    api.fetchSessions.mockResolvedValueOnce([
+    api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
-    ])
+    ], nextCursor: null })
     const store = useChatStore()
 
     await store.selectBot('bot-1')
@@ -1144,9 +1153,9 @@ describe('chat-list store', () => {
   })
 
   it('responds to multi-select and text questions over websocket', async () => {
-    api.fetchSessions.mockResolvedValueOnce([
+    api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
-    ])
+    ], nextCursor: null })
     sendEvents = [{ type: 'end' } as UIStreamEvent]
     const store = useChatStore()
 
@@ -1214,9 +1223,9 @@ describe('chat-list store', () => {
   })
 
   it('does not refresh a user input response stream while the original session stream is still active', async () => {
-    api.fetchSessions.mockResolvedValueOnce([
+    api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
-    ])
+    ], nextCursor: null })
     sendEvents = [{ type: 'end' } as UIStreamEvent]
     const store = useChatStore()
 
@@ -1261,103 +1270,19 @@ describe('chat-list store', () => {
     expect(api.fetchMessagesUI).toHaveBeenCalledTimes(1)
   })
 
-  it('reconciles refreshed turns in place, preserving identity of unchanged turns', async () => {
-    api.fetchSessions.mockResolvedValueOnce([
-      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
-    ])
-    const store = useChatStore()
-    await store.selectBot('bot-1')
-    await flushPromises()
-
-    api.fetchMessagesUI.mockResolvedValueOnce([{
-      id: 'assistant-1',
-      role: 'assistant',
-      messages: [{ id: 0, type: 'text', content: 'hello' }],
-      timestamp: '2026-01-01T00:00:01Z',
-    }])
-    streamHandler?.({ type: 'start', stream_id: 'stream-a', session_id: 'session-1' } as UIStreamEvent)
-    streamHandler?.({ type: 'end', stream_id: 'stream-a', session_id: 'session-1' } as UIStreamEvent)
-    await flushPromises()
-
-    const turn = store.messages.find(message => message.id === 'assistant-1')
-    const block = turn?.role === 'assistant' ? turn.messages[0] : null
-    expect(turn?.role).toBe('assistant')
-    expect(block?.type).toBe('text')
-
-    api.fetchMessagesUI.mockResolvedValueOnce([{
-      id: 'assistant-1',
-      role: 'assistant',
-      messages: [{ id: 0, type: 'text', content: 'hello world' }],
-      timestamp: '2026-01-01T00:00:01Z',
-    }])
-    streamHandler?.({ type: 'start', stream_id: 'stream-b', session_id: 'session-1' } as UIStreamEvent)
-    streamHandler?.({ type: 'end', stream_id: 'stream-b', session_id: 'session-1' } as UIStreamEvent)
-    await flushPromises()
-
-    const turnAfter = store.messages.find(message => message.id === 'assistant-1')
-    const blockAfter = turnAfter?.role === 'assistant' ? turnAfter.messages[0] : null
-    expect(turnAfter).toBe(turn)
-    expect(blockAfter).toBe(block)
-    expect(blockAfter?.type === 'text' ? blockAfter.content : '').toBe('hello world')
-  })
-
-  it('adopts the server id onto the just-sent optimistic turn in place, keeping its key', async () => {
-    api.fetchSessions.mockResolvedValueOnce([
-      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
-    ])
-    sendEvents = [
-      { type: 'message', data: { id: 0, type: 'text', content: 'hello' } } as UIStreamEvent,
-      { type: 'end' } as UIStreamEvent,
-    ]
-    const store = useChatStore()
-    await store.selectBot('bot-1')
-    await flushPromises()
-
-    api.fetchMessagesUI.mockResolvedValueOnce([
-      { id: 'srv-user-1', role: 'user', text: 'hi', timestamp: '2026-01-01T00:00:00Z' },
-      { id: 'srv-asst-1', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'hello' }], timestamp: '2026-01-01T00:00:01Z' },
-    ])
-    await store.sendMessage('hi')
-    await flushPromises()
-
-    const asstTurn = store.messages.find(message => message.role === 'assistant')
-    expect(asstTurn).toBeTruthy()
-    expect(asstTurn!.id).not.toBe('srv-asst-1')
-    expect((asstTurn as { serverId?: string }).serverId).toBe('srv-asst-1')
-
-    api.fetchMessagesUI.mockResolvedValueOnce([
-      { id: 'srv-user-1', role: 'user', text: 'hi', timestamp: '2026-01-01T00:00:00Z' },
-      { id: 'srv-asst-1', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'hello' }], timestamp: '2026-01-01T00:00:01Z' },
-      { id: 'srv-user-2', role: 'user', text: 'again', timestamp: '2026-01-01T00:00:02Z' },
-      { id: 'srv-asst-2', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'reply 2' }], timestamp: '2026-01-01T00:00:03Z' },
-    ])
-    await store.sendMessage('again')
-    await flushPromises()
-
-    const asstTurnAfter = store.messages.find(message => (message as { serverId?: string }).serverId === 'srv-asst-1')
-    expect(asstTurnAfter).toBe(asstTurn)
-  })
-
   it('stamps session updated_at from the server message time, not the client clock or a reorder', async () => {
-    api.fetchSessions.mockResolvedValueOnce([
+    api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat', updated_at: '2026-01-01T00:00:00Z' },
       { id: 'session-2', bot_id: 'bot-1', title: 'B', type: 'chat', updated_at: '2026-01-02T00:00:00Z' },
-    ])
+    ], nextCursor: null })
     const store = useChatStore()
     await store.selectBot('bot-1')
     await flushPromises()
 
-    messageEventsHandler?.({
-      type: 'message_created',
-      bot_id: 'bot-1',
-      message: {
-        id: 'm1',
-        bot_id: 'bot-1',
-        session_id: 'session-2',
-        role: 'assistant',
-        content: 'hi',
-        created_at: '2026-01-03T00:00:00Z',
-      },
+    sessionsActivityHandler?.({
+      type: 'session_touched',
+      session_id: 'session-2',
+      updated_at: '2026-01-03T00:00:00Z',
     })
     await flushPromises()
 
@@ -1367,9 +1292,9 @@ describe('chat-list store', () => {
   })
 
   it('refreshes pending user input after response stream failure', async () => {
-    api.fetchSessions.mockResolvedValueOnce([
+    api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
-    ])
+    ], nextCursor: null })
     const store = useChatStore()
 
     await store.selectBot('bot-1')
@@ -1405,9 +1330,9 @@ describe('chat-list store', () => {
   })
 
   it('deduplicates concurrent ACP runtime ensure calls', async () => {
-    api.fetchSessions.mockResolvedValueOnce([
+    api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'acp-session-1', bot_id: 'bot-1', title: '', type: 'acp_agent' },
-    ])
+    ], nextCursor: null })
     let resolveRuntime!: (value: unknown) => void
     api.ensureACPRuntime.mockReturnValueOnce(new Promise(resolve => {
       resolveRuntime = resolve
@@ -1435,28 +1360,22 @@ describe('chat-list store', () => {
 
   it('refreshes the session list when message events arrive for an unknown session', async () => {
     api.fetchSessions
-      .mockResolvedValueOnce([
+      .mockResolvedValueOnce({ items: [
         { id: 'session-old', bot_id: 'bot-1', title: 'Old', type: 'chat' },
-      ])
-      .mockResolvedValueOnce([
+      ], nextCursor: null })
+      .mockResolvedValueOnce({ items: [
         { id: 'session-new', bot_id: 'bot-1', title: 'New from channel', type: 'chat' },
         { id: 'session-old', bot_id: 'bot-1', title: 'Old', type: 'chat' },
-      ])
+      ], nextCursor: null })
     const store = useChatStore()
 
     await store.selectBot('bot-1')
     expect(store.sessionId).toBe('session-old')
 
-    messageEventsHandler?.({
-      type: 'message_created',
-      bot_id: 'bot-1',
-      message: {
-        id: 'message-1',
-        bot_id: 'bot-1',
-        session_id: 'session-new',
-        role: 'user',
-        created_at: '2026-06-02T10:00:00.000Z',
-      },
+    sessionsActivityHandler?.({
+      type: 'session_touched',
+      session_id: 'session-new',
+      updated_at: '2026-06-02T10:00:00.000Z',
     })
     await flushPromises()
 
@@ -1557,11 +1476,18 @@ describe('chat-list store', () => {
   })
 
   it('routes interleaved websocket events by stream id', async () => {
+    // Two parallel assistant streams in two sessions: each turn must be
+    // updated by its own stream id, never crossed. Cross-session view
+    // visibility (showing session A's content while on session B) is no
+    // longer a thing — switching sessions issues a fresh REST refresh, and
+    // any in-flight stream on a non-active session keeps writing to its
+    // optimistic turn but the user does not see it until the server has
+    // persisted the response and a switch-back triggers a fetch.
     sendEvents = []
-    api.fetchSessions.mockResolvedValueOnce([
+    api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
       { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
-    ])
+    ], nextCursor: null })
     api.fetchMessagesUI.mockResolvedValue([])
 
     const sent: Array<{ stream_id?: string; session_id?: string }> = []
@@ -1610,6 +1536,7 @@ describe('chat-list store', () => {
       session_id: 'session-b',
       data: { id: 0, type: 'text', content: 'answer B' },
     } as UIStreamEvent)
+    // Active session is B, so its optimistic turn shows the message.
     expect(store.sessionId).toBe('session-b')
     expect(store.messages).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -1618,17 +1545,387 @@ describe('chat-list store', () => {
       }),
     ]))
 
-    await store.selectSession('session-a')
-    expect(store.messages).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        role: 'assistant',
-        messages: [expect.objectContaining({ type: 'text', content: 'answer A' })],
-      }),
-    ]))
-
     streamHandler?.({ type: 'end', stream_id: streamA, session_id: 'session-a' } as UIStreamEvent)
     streamHandler?.({ type: 'end', stream_id: streamB, session_id: 'session-b' } as UIStreamEvent)
     await first
     await second
+  })
+
+  it('paginates the sessions list and clears hasMoreSessions when the cursor is exhausted', async () => {
+    api.fetchSessions
+      .mockResolvedValueOnce({
+        items: [
+          { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' },
+          { id: 'session-2', bot_id: 'bot-1', title: 'B', type: 'chat' },
+        ],
+        nextCursor: 'cursor-2',
+      })
+      .mockResolvedValueOnce({
+        items: [
+          // Duplicate must be deduped; new entry appends.
+          { id: 'session-2', bot_id: 'bot-1', title: 'B', type: 'chat' },
+          { id: 'session-3', bot_id: 'bot-1', title: 'C', type: 'chat' },
+        ],
+        nextCursor: null,
+      })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    expect(store.sessions.map(s => s.id)).toEqual(['session-1', 'session-2'])
+    expect(store.hasMoreSessions).toBe(true)
+    expect(store.sessionsCursor).toBe('cursor-2')
+
+    await store.loadMoreSessions()
+
+    expect(api.fetchSessions).toHaveBeenLastCalledWith('bot-1', { cursor: 'cursor-2' })
+    expect(store.sessions.map(s => s.id)).toEqual(['session-1', 'session-2', 'session-3'])
+    expect(store.hasMoreSessions).toBe(false)
+    expect(store.sessionsCursor).toBeNull()
+
+    // Further load attempts are a no-op once the cursor is exhausted.
+    await store.loadMoreSessions()
+    expect(api.fetchSessions).toHaveBeenCalledTimes(2)
+  })
+
+  it('resets hasLoadedOlder on initialize so a fresh bot does not inherit the previous scroll-back flag', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    // Simulate the user having scrolled back in the previous session.
+    store._hasLoadedOlder = true
+    expect(store._hasLoadedOlder).toBe(true)
+
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-2', bot_id: 'bot-2', title: 'Chat 2', type: 'chat' }],
+      nextCursor: null,
+    })
+    await store.selectBot('bot-2')
+    await flushPromises()
+
+    expect(store._hasLoadedOlder).toBe(false)
+  })
+
+  it('does not duplicate the optimistic user turn when stream-end refresh returns the persisted version', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: { id: 0, type: 'text', content: 'hello' },
+      } as UIStreamEvent,
+    ]
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    // Drive the actual send: this appends an optimistic user turn plus a
+    // streaming assistant turn. The WS mock auto-replays sendEvents.
+    const sendPromise = store.sendMessage('hi')
+    await flushPromises()
+    expect(store.messages.map(m => m.role)).toEqual(['user', 'assistant'])
+
+    // Stream-end triggers refreshCurrentSession; the persisted user turn
+    // carries server ids different from the optimistic ids and a server
+    // timestamp slightly OLDER than the optimistic client timestamp (clock
+    // skew). The previous timestamp-based merge heuristic misclassified
+    // this as "user has scrolled back" and merged the two copies; the fix
+    // keys off the explicit hasLoadedOlder flag instead.
+    const past = new Date(Date.now() - 1_000).toISOString()
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      {
+        id: 'server-user',
+        role: 'user',
+        text: 'hi',
+        attachments: [],
+        timestamp: past,
+      },
+      {
+        id: 'server-assistant',
+        role: 'assistant',
+        messages: [{ id: 1, type: 'text', content: 'hello', running: false }],
+        timestamp: past,
+      },
+    ])
+    streamHandler?.({ type: 'end', stream_id: lastStreamId, session_id: lastSessionId } as UIStreamEvent)
+    await sendPromise
+    await flushPromises()
+
+    expect(store.messages.map(m => m.role)).toEqual(['user', 'assistant'])
+    expect(store.messages[0]).toMatchObject({ role: 'user', text: 'hi' })
+    expect(store._hasLoadedOlder).toBe(false)
+  })
+
+  it('keeps loadingMessages owned by the latest session start when an earlier refresh resolves late', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    // Inject sessions directly so we can drive selectSession ourselves
+    // (the initialize path would auto-pick the first session and consume
+    // the first fetchMessagesUI mock).
+    store.sessions.push(
+      { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' } as never,
+      { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' } as never,
+    )
+
+    let resolveA: (v: unknown[]) => void = () => {}
+    api.fetchMessagesUI.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveA = resolve as (v: unknown[]) => void
+    }))
+    store.selectSession('session-a')
+    await flushPromises()
+    expect(store.loadingMessages).toBe(true)
+
+    let resolveB: (v: unknown[]) => void = () => {}
+    api.fetchMessagesUI.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveB = resolve as (v: unknown[]) => void
+    }))
+    store.selectSession('session-b')
+    await flushPromises()
+    expect(store.loadingMessages).toBe(true)
+
+    // A's late refresh resolves: its `finally` MUST NOT clear B's flag.
+    resolveA([])
+    await flushPromises()
+    expect(store.loadingMessages).toBe(true)
+
+    resolveB([])
+    await flushPromises()
+    expect(store.loadingMessages).toBe(false)
+  })
+
+  it('preserves scrolled-back history when an SSE refresh fires', async () => {
+    // Initialize via fetchMessagesUI returning the most recent page; the
+    // initialize path auto-selects the only session and triggers the
+    // initial transcript refresh.
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
+      nextCursor: null,
+    })
+    // Initial page must be >= PAGE_SIZE (30) so hasMoreOlder stays true and
+    // loadOlderMessages is willing to fetch the older page.
+    const initialPage = Array.from({ length: 30 }, (_, idx) => ({
+      id: `recent-${idx}`,
+      role: 'user' as const,
+      text: `recent ${idx}`,
+      attachments: [],
+      timestamp: `2026-06-19T00:01:${String(idx).padStart(2, '0')}Z`,
+    }))
+    api.fetchMessagesUI.mockResolvedValueOnce(initialPage)
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    await flushPromises()
+    expect(store.hasMoreOlder).toBe(true)
+    expect(store.messages.length).toBe(30)
+
+    // User scrolls back and pulls in older content.
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      { id: 'msg-1', role: 'user', text: 'oldest', attachments: [], timestamp: '2026-06-19T00:00:01Z' },
+      { id: 'msg-2', role: 'user', text: 'older', attachments: [], timestamp: '2026-06-19T00:00:02Z' },
+    ])
+    await store.loadOlderMessages()
+    expect(store._hasLoadedOlder).toBe(true)
+    expect(store.messages[0]?.id).toBe('msg-1')
+    expect(store.messages[1]?.id).toBe('msg-2')
+    expect(store.messages.length).toBe(32)
+
+    // SSE-triggered refresh fetches only the most recent page; merge MUST
+    // preserve the older content the user pulled in.
+    api.fetchMessagesUI.mockResolvedValueOnce(initialPage)
+    _sessionMessageHandler?.({
+      type: 'message_created',
+      message: { id: 'recent-29', session_id: 'session-1', created_at: '2026-06-19T00:01:29Z' },
+    } as never)
+    await new Promise(r => setTimeout(r, 150))
+    await flushPromises()
+    expect(store.messages[0]?.id).toBe('msg-1')
+    expect(store.messages[1]?.id).toBe('msg-2')
+  })
+
+  it('replaces a scrolled-back optimistic user turn with its server twin instead of duplicating', async () => {
+    // The id-keyed dedup in the previous mergeMessages happily kept the
+    // optimistic and server copies side by side while the user was scrolled
+    // back. Logical-turn matching (role + content + ~timestamp), gated on
+    // the explicit `__optimistic` flag, collapses them in place. The flag
+    // (not id shape) is what isOptimisticTurn keys off, so this test also
+    // pins that a server turn whose id contains dashes (UUID-like) is NOT
+    // treated as optimistic — the prior heuristic would have misclassified
+    // it and eaten real history.
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
+      nextCursor: null,
+    })
+    const initialPage = Array.from({ length: 30 }, (_, idx) => ({
+      id: `recent-${idx}`,
+      role: 'user' as const,
+      text: `recent ${idx}`,
+      attachments: [],
+      timestamp: `2026-06-19T00:01:${String(idx).padStart(2, '0')}Z`,
+    }))
+    api.fetchMessagesUI.mockResolvedValueOnce(initialPage)
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    await flushPromises()
+
+    // Pull older history so hasLoadedOlder flips on. Use a UUID-shaped id to
+    // exercise the path where a server id contains dashes; the flag-based
+    // isOptimisticTurn must still leave it alone.
+    const dashedServerId = '550e8400-e29b-41d4-a716-446655440000'
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      { id: dashedServerId, role: 'user', text: 'oldest', attachments: [], timestamp: '2026-06-19T00:00:01Z' },
+    ])
+    await store.loadOlderMessages()
+    expect(store._hasLoadedOlder).toBe(true)
+    const baseLength = store.messages.length
+    // The dashed-id server turn survived the merge — it must not be classified
+    // as optimistic regardless of id shape.
+    expect(store.messages.some(m => m.id === dashedServerId)).toBe(true)
+
+    // Push an optimistic user turn directly: simulates send while scrolled
+    // back, without engaging the streaming machinery the surrounding suite
+    // already covers. The id intentionally has no dash so the test cannot
+    // accidentally pass via id-shape heuristics — the __optimistic flag is
+    // what drives the merge.
+    const optimisticTimestamp = '2026-06-19T00:02:00Z'
+    store.messages.push({
+      id: '1700000000000',
+      role: 'user',
+      text: 'just sent',
+      attachments: [],
+      timestamp: optimisticTimestamp,
+      streaming: false,
+      isSelf: true,
+      __optimistic: true,
+    } as never)
+    expect(store.messages.length).toBe(baseLength + 1)
+
+    // SSE-triggered refresh returns the server twin (different id, same
+    // role+content, timestamp within 5s).
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      {
+        id: 'server-user-1',
+        role: 'user',
+        text: 'just sent',
+        attachments: [],
+        timestamp: '2026-06-19T00:02:01Z',
+      },
+    ])
+    _sessionMessageHandler?.({
+      type: 'message_created',
+      message: { id: 'server-user-1', session_id: 'session-1', created_at: '2026-06-19T00:02:01Z' },
+    } as never)
+    await new Promise(r => setTimeout(r, 150))
+    await flushPromises()
+
+    // Both copies would survive id-keyed dedup; only the server turn must
+    // remain, and the optimistic id must be gone.
+    expect(store.messages.length).toBe(baseLength + 1)
+    const justSent = store.messages.filter(m => m.role === 'user' && (m as { text?: string }).text === 'just sent')
+    expect(justSent.length).toBe(1)
+    expect(justSent[0]?.id).toBe('server-user-1')
+    // And the dashed-id server turn from the older page is still here.
+    expect(store.messages.some(m => m.id === dashedServerId)).toBe(true)
+  })
+
+  it('keeps hasMoreOlder true after a short initial page (turn count is not a terminal signal)', async () => {
+    // The server pages by raw `bot_history_messages` rows but returns merged
+    // UI turns, so a 30-row page collapses to ~28 turns even when thousands
+    // of rows remain — the old `turns.length >= PAGE_SIZE` check truncated
+    // long sessions to one page on first paint (Project Memoh: 1144 raw rows
+    // collapsed to 28 turns => hasMoreOlder=false => scroll-up blocked).
+    // Initial loads now stay optimistic; `loadOlderMessages` flips the flag
+    // off the first time the server returns an authoritatively empty page.
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
+      nextCursor: null,
+    })
+    const shortPage = Array.from({ length: 5 }, (_, idx) => ({
+      id: `msg-${idx}`,
+      role: 'user' as const,
+      text: 'hi',
+      attachments: [],
+      timestamp: `2026-06-19T00:00:${String(idx).padStart(2, '0')}Z`,
+    }))
+    api.fetchMessagesUI.mockResolvedValueOnce(shortPage)
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    await flushPromises()
+    expect(store.messages.length).toBe(5)
+    expect(store.hasMoreOlder).toBe(true)
+  })
+
+  it('flips hasMoreOlder to false when the older page is empty and stops re-firing', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
+      nextCursor: null,
+    })
+    // Initial page == PAGE_SIZE so hasMoreOlder is true after refresh; the
+    // older fetch then returns empty to simulate end-of-history.
+    const initialPage = Array.from({ length: 30 }, (_, idx) => ({
+      id: `msg-${idx}`,
+      role: 'user' as const,
+      text: 'hi',
+      attachments: [],
+      timestamp: `2026-06-19T00:00:${String(idx).padStart(2, '0')}Z`,
+    }))
+    api.fetchMessagesUI.mockResolvedValueOnce(initialPage)
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    await flushPromises()
+    expect(store.hasMoreOlder).toBe(true)
+
+    api.fetchMessagesUI.mockResolvedValueOnce([])
+    await store.loadOlderMessages()
+    expect(store.hasMoreOlder).toBe(false)
+
+    const callsBefore = api.fetchMessagesUI.mock.calls.length
+    await store.loadOlderMessages()
+    expect(api.fetchMessagesUI.mock.calls.length).toBe(callsBefore)
+  })
+
+  it('appends sessions emitted by the bot-wide activity stream', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+
+    // session_created on the activity stream triggers a sessions-list reload
+    // (the server payload omits session type/metadata so a client-built stub
+    // would be incomplete).
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-2', bot_id: 'bot-1', title: 'New', type: 'discuss' },
+        { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    sessionsActivityHandler?.({
+      type: 'session_created',
+      session_id: 'session-2',
+      session_type: 'discuss',
+      title: 'New',
+    })
+    await flushPromises()
+
+    expect(store.sessions.map(s => s.id)).toEqual(['session-2', 'session-1'])
   })
 })

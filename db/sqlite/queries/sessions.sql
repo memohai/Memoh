@@ -50,6 +50,14 @@ WHERE s.bot_id = sqlc.arg(bot_id)
   AND s.deleted_at IS NULL
 ORDER BY s.updated_at DESC;
 
+-- ListSessionsByBotPaged and ListSessionsByBotAndCreatedByUserPaged are not
+-- generated for SQLite. The Postgres versions live in
+-- db/postgres/queries/sessions.sql; the SQLite shim hand-rolls the query in
+-- internal/db/sqlite/store/sessions_paged.go because sqlc-sqlite cannot mix
+-- sqlc.slice with reused numbered placeholders without colliding bind indexes.
+
+
+
 -- name: ListSessionsByRoute :many
 SELECT *
 FROM bot_sessions

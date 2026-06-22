@@ -260,8 +260,9 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 			return err
 		}
 	}
-	if normalized, ok := m.registry.NormalizeTarget(channelType, target); ok {
-		target = normalized
+	target, err = m.resolveOutboundTarget(ctx, channelType, config, target)
+	if err != nil {
+		return err
 	}
 	if req.Message.IsEmpty() {
 		return errors.New("message is required")
@@ -270,22 +271,37 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 		m.logger.Info("send outbound", slog.String("channel", channelType.String()), slog.String("bot_id", botID))
 	}
 	policy := m.resolveOutboundPolicy(channelType)
-	outbound, err := buildOutboundMessages(OutboundMessage{
+	caps, hasCaps := m.registry.GetOutboundCapabilities(channelType, config, target)
+	outbound, err := buildOutboundMessagesWithCaps(OutboundMessage{
 		Target:  target,
 		Message: req.Message,
-	}, policy)
+	}, policy, caps, hasCaps)
 	if err != nil {
 		return err
 	}
-	for _, item := range outbound {
-		if err := m.sendWithConfig(ctx, sender, config, item, policy); err != nil {
-			if m.logger != nil {
-				m.logger.Error("send outbound failed", slog.String("channel", channelType.String()), slog.String("bot_id", botID), slog.Any("error", err))
-			}
-			return err
+	if err := m.sendAllWithConfig(ctx, sender, config, outbound, policy); err != nil {
+		if m.logger != nil {
+			m.logger.Error("send outbound failed", slog.String("channel", channelType.String()), slog.String("bot_id", botID), slog.Any("error", err))
 		}
+		return err
 	}
 	return nil
+}
+
+func (m *Manager) resolveOutboundTarget(ctx context.Context, channelType ChannelType, cfg ChannelConfig, target string) (string, error) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return "", errors.New("target is required")
+	}
+	if normalized, ok := m.registry.NormalizeTarget(channelType, target); ok {
+		target = normalized
+	}
+	if resolved, ok, err := m.registry.ResolveOutboundTarget(ctx, channelType, cfg, target); err != nil {
+		return "", err
+	} else if ok {
+		target = resolved
+	}
+	return target, nil
 }
 
 // React adds or removes an emoji reaction on a channel message.

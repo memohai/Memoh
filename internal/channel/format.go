@@ -53,18 +53,124 @@ func StripInlineMarkup(s string) string {
 
 // coerceFormatForCaps degrades msg.Format when the target channel cannot
 // render it. Called right before validateMessageCapabilities at the outbound
-// boundary so a Markdown-typed body destined for a plain-text-only channel
-// gets stripped + retyped instead of being rejected.
+// boundary so a Rich- or Markdown-typed body destined for a less capable
+// channel gets retyped instead of being rejected.
 //
-// Today only Markdown→Plain is lossless enough to degrade automatically
-// (strip bold and code markers, retype). Rich-format bodies (with Parts) and
-// button-bearing bodies have no equivalent fallback and remain rejected by
-// validation — extend this function (and its tests) when a handler emits
-// such a body on a non-capable channel.
+// Degradation rules (applied in order):
+//   - Markdown body on a Rich-only channel: treat the body as literal text in
+//     a single rich part so channel renderers can escape it for their syntax.
+//   - Markdown body on a Plain-only channel: strip inline markup, retype Plain.
+//   - Rich body (Parts) on a Markdown-capable channel: render Parts via the
+//     canonical GFM degrader (RenderPartsAsMarkdown), retype Markdown.
+//   - Rich body on a Plain-only channel: render Parts via RenderPartsAsPlain,
+//     retype Plain.
+//
+// URL-only Actions on channels without any button support are downgraded to
+// ordinary links. Callback Actions stay unsupported and are rejected by
+// validateMessageCapabilities unless the channel advertises callback Buttons.
 func coerceFormatForCaps(msg Message, caps ChannelCapabilities) Message {
-	if msg.Format == MessageFormatMarkdown && !caps.Markdown && !caps.RichText {
-		msg.Text = StripInlineMarkup(msg.Text)
+	if !caps.RichText {
+		msg = normalizeTextOnlyRichFormat(msg)
+	}
+	if msg.Format == MessageFormatMarkdown && !caps.Markdown {
+		if caps.RichText && strings.TrimSpace(msg.Text) != "" {
+			msg.Parts = []MessagePart{{Type: MessagePartText, Text: msg.Text}}
+			msg.Text = ""
+			msg.Format = MessageFormatRich
+		} else if !caps.RichText {
+			msg.Text = StripInlineMarkup(msg.Text)
+			msg.Format = MessageFormatPlain
+		}
+	}
+	if len(msg.Parts) > 0 && !caps.RichText {
+		if caps.Markdown {
+			msg.Text = RenderPartsAsMarkdown(msg.Parts)
+			msg.Format = MessageFormatMarkdown
+		} else {
+			msg.Text = RenderPartsAsPlain(msg.Parts)
+			msg.Format = MessageFormatPlain
+		}
+		msg.Parts = nil
+	}
+	if len(msg.Actions) > 0 && !caps.Buttons && !caps.URLButtons {
+		msg = coerceURLActionsForCaps(msg, caps)
+	}
+	return msg
+}
+
+func normalizeTextOnlyRichFormat(msg Message) Message {
+	if msg.Format != MessageFormatRich || len(msg.Parts) > 0 || strings.TrimSpace(msg.Text) == "" {
+		return msg
+	}
+	if ContainsMarkdown(msg.Text) {
+		msg.Format = MessageFormatMarkdown
+	} else {
 		msg.Format = MessageFormatPlain
 	}
 	return msg
+}
+
+func coerceURLActionsForCaps(msg Message, caps ChannelCapabilities) Message {
+	parts, ok := urlActionParts(msg.Actions)
+	if !ok {
+		return msg
+	}
+	switch {
+	case caps.RichText && (msg.Format == MessageFormatRich || len(msg.Parts) > 0):
+		msg = appendRichURLActionParts(msg, parts)
+		msg.Format = MessageFormatRich
+	case msg.Format == MessageFormatMarkdown && caps.Markdown:
+		msg.Text = appendTextSection(msg.Text, RenderPartsAsMarkdown(parts))
+	case msg.Format == MessageFormatMarkdown && !caps.Markdown && caps.RichText:
+		msg = appendRichURLActionParts(msg, parts)
+		msg.Format = MessageFormatRich
+	default:
+		msg.Text = appendTextSection(msg.Text, RenderPartsAsPlain(parts))
+		if msg.Format == "" {
+			msg.Format = MessageFormatPlain
+		}
+	}
+	msg.Actions = nil
+	return msg
+}
+
+func appendRichURLActionParts(msg Message, parts []MessagePart) Message {
+	if strings.TrimSpace(msg.Text) != "" {
+		msg.Parts = append([]MessagePart{{Type: MessagePartText, Text: msg.Text}}, msg.Parts...)
+		msg.Text = ""
+	}
+	msg.Parts = append(msg.Parts, parts...)
+	return msg
+}
+
+func urlActionParts(actions []Action) ([]MessagePart, bool) {
+	parts := make([]MessagePart, 0, len(actions))
+	for _, action := range actions {
+		if strings.TrimSpace(action.Value) != "" {
+			return nil, false
+		}
+		rawURL := strings.TrimSpace(action.URL)
+		if rawURL == "" || !IsHTTPURL(rawURL) {
+			return nil, false
+		}
+		label := strings.TrimSpace(action.Label)
+		if label == "" {
+			label = rawURL
+		}
+		parts = append(parts, MessagePart{Type: MessagePartLink, Text: label, URL: rawURL})
+	}
+	return parts, true
+}
+
+func appendTextSection(base string, extra string) string {
+	base = strings.TrimSpace(base)
+	extra = strings.TrimSpace(extra)
+	switch {
+	case base == "":
+		return extra
+	case extra == "":
+		return base
+	default:
+		return base + "\n\n" + extra
+	}
 }

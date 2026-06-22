@@ -37,6 +37,7 @@ import {
 } from './cli-integration'
 import { acceleratorForCommand, appKeyboardCommands, type AppKeyboardCommand } from '../shared/keyboard-commands'
 import { dispatchFocusedWindowCommand } from './window-commands'
+import { dispatchRendererNavigate } from './window-navigation'
 
 type DesktopRuntimeMode = 'local' | 'remote'
 
@@ -47,6 +48,7 @@ const LEGACY_REMOTE_PRODUCT_NAME = 'Memoh Online'
 const LEGACY_LOCAL_PRODUCT_NAME = 'Memoh'
 const DESKTOP_PRODUCT_NAME = DESKTOP_RUNTIME_MODE === 'remote' ? ONLINE_PRODUCT_NAME : LOCAL_PRODUCT_NAME
 const DEFAULT_REMOTE_BASE_URL = is.dev ? 'http://localhost:18080' : 'http://localhost:8080'
+const guardedExternalLinkWebContents = new WeakSet<Electron.WebContents>()
 
 interface RemoteProfile {
   baseUrl?: string
@@ -380,10 +382,57 @@ app.on('will-quit', () => {
 })
 
 function applyExternalLinkHandler(window: BrowserWindow): void {
-  window.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+  attachExternalLinkGuards(window.webContents)
+}
+
+function normalizeExternalUrl(rawURL: unknown): { url: string, protocol: string, supported: boolean } {
+  const url = typeof rawURL === 'string' ? rawURL.trim() : ''
+  let protocol = ''
+  try {
+    protocol = new URL(url).protocol
+  } catch {
+    protocol = ''
+  }
+  return {
+    url,
+    protocol,
+    supported: ['http:', 'https:', 'mailto:'].includes(protocol),
+  }
+}
+
+function attachExternalLinkGuards(webContents: Electron.WebContents): void {
+  if (guardedExternalLinkWebContents.has(webContents)) return
+  guardedExternalLinkWebContents.add(webContents)
+
+  webContents.setWindowOpenHandler(({ url }) => {
+    const external = normalizeExternalUrl(url)
+    if (!external.supported) {
+      console.warn('blocked unsupported window.open URL', external.url || url)
+      return { action: 'deny' }
+    }
+    void shell.openExternal(external.url).catch((error) => {
+      console.error('failed to open external URL', external.url, error)
+    })
     return { action: 'deny' }
   })
+
+  webContents.on('will-navigate', (event, url) => {
+    const external = normalizeExternalUrl(url)
+    if (external.protocol === 'about:' || (!external.supported && external.protocol !== 'file:')) {
+      console.warn('blocked unsupported navigation URL', external.url || url)
+      event.preventDefault()
+    }
+  })
+}
+
+async function openExternalUrl(rawURL: unknown): Promise<void> {
+  const external = normalizeExternalUrl(rawURL)
+  if (!external.supported) {
+    const blockedURL = external.url || String(rawURL ?? '')
+    console.warn('blocked unsupported external URL', blockedURL)
+    throw new Error(`Unsupported external URL: ${blockedURL || 'empty URL'}`)
+  }
+  await shell.openExternal(external.url)
 }
 
 function loadRendererEntry(window: BrowserWindow, entry: 'index'): void {
@@ -417,41 +466,35 @@ function openBotWorkspace(botId: string): void {
   focusWindow(window)
   // The identifier may be a bot name or UUID; both resolve on the chat page.
   const target = `/bot/${encodeURIComponent(id)}`
-  if (window.webContents.isLoading()) {
-    window.webContents.once('did-finish-load', () => {
-      if (window.isDestroyed()) return
-      window.webContents.send('chat:navigate', target)
-    })
-    return
-  }
-  window.webContents.send('chat:navigate', target)
+  dispatchRendererNavigate(window, target)
 }
 
 const SETTINGS_TRAY_ITEMS: TraySettingsItem[] = [
   { label: 'Bots', target: '/settings/bots' },
   { label: 'Providers', target: '/settings/providers' },
-  { label: 'Web Search', target: '/settings/web-search' },
   { label: 'Memory', target: '/settings/memory' },
-  { label: 'Speech', target: '/settings/speech' },
-  { label: 'Transcription', target: '/settings/transcription' },
+  { label: 'Web Search', target: '/settings/web-search' },
+  { label: 'Voice', target: '/settings/voice' },
   { label: 'Email', target: '/settings/email' },
   { label: 'Supermarket', target: '/settings/supermarket' },
   { label: 'Usage', target: '/settings/usage' },
+  { label: 'Members', target: '/settings/people' },
   { label: 'Appearance', target: '/settings/appearance' },
+  { label: 'Keyboard', target: '/settings/keyboard' },
   { label: 'Profile', target: '/settings/profile' },
   { label: 'About', target: '/settings/about' },
 ]
 
-function openSettingsWindow(target?: string): void {
+function openSettingsRoute(target?: string): void {
   const window = ensureWindow('chat')
   focusWindow(window)
   if (target?.startsWith('/settings')) {
-    dispatchSettingsNavigate(window, target)
+    dispatchRendererNavigate(window, target)
   }
 }
 
 function openMemohSettings(): void {
-  openSettingsWindow('/settings')
+  openSettingsRoute('/settings')
 }
 
 function quitFromTray(): void {
@@ -483,12 +526,12 @@ function buildTrayMenu(bots: TrayBot[] = []): Electron.Menu {
       submenu: [
         {
           label: 'All Settings',
-          click: () => openSettingsWindow('/settings'),
+          click: () => openSettingsRoute('/settings'),
         },
         { type: 'separator' },
         ...SETTINGS_TRAY_ITEMS.map((item) => ({
           label: item.label,
-          click: () => openSettingsWindow(item.target),
+          click: () => openSettingsRoute(item.target),
         })),
       ],
     },
@@ -641,17 +684,6 @@ function focusWindow(window: BrowserWindow): void {
   if (window.isMinimized()) window.restore()
   window.show()
   window.focus()
-}
-
-function dispatchSettingsNavigate(window: BrowserWindow, target: string): void {
-  if (window.webContents.isLoading()) {
-    window.webContents.once('did-finish-load', () => {
-      if (window.isDestroyed()) return
-      window.webContents.send('settings:navigate', target)
-    })
-    return
-  }
-  window.webContents.send('settings:navigate', target)
 }
 
 // Renderer-supplied menu accelerators take precedence over the static table.
@@ -936,18 +968,11 @@ app.whenReady().then(async () => {
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
+    attachExternalLinkGuards(window.webContents)
   })
 
   createAppTray()
 
-  ipcMain.handle('window:open-settings', (_event, rawTarget: unknown) => {
-    const window = ensureWindow('chat')
-    focusWindow(window)
-    const target = typeof rawTarget === 'string' && rawTarget.startsWith('/settings')
-      ? rawTarget
-      : null
-    if (target) dispatchSettingsNavigate(window, target)
-  })
   ipcMain.handle('window:close-self', (event) => {
     const sender = BrowserWindow.fromWebContents(event.sender)
     sender?.close()
@@ -991,16 +1016,13 @@ app.whenReady().then(async () => {
     }
     await rebuildAppMenu()
   })
+  ipcMain.handle('desktop:open-external-url', (_event, rawURL: unknown) => openExternalUrl(rawURL))
 
-  // Cross-window Pinia Colada query-cache invalidation. Each renderer owns
-  // an independent in-memory cache (separate Vue/Pinia instances per
-  // BrowserWindow), so a mutation in the settings window can't directly
-  // refresh the chat window's bot list. The renderer wraps
-  // `queryCache.invalidateQueries` so that every local invalidation also
-  // posts the (serializable) filter here; we fan it back out to every other
-  // BrowserWindow's webContents, which then re-applies the same
-  // invalidation against its local cache. The sender is excluded so we
-  // don't echo back into the originating window.
+  // Renderer cache invalidation broadcast. Settings routes share the primary
+  // renderer cache, but auxiliary renderers can still exist in desktop builds;
+  // when one renderer invalidates Pinia Colada queries, this fans the
+  // serializable filter out to siblings. The sender is excluded so we don't
+  // echo back into the originating renderer.
   ipcMain.handle('desktop:broadcast-invalidate', (event, payload: unknown) => {
     const senderId = event.sender.id
     for (const target of BrowserWindow.getAllWindows()) {

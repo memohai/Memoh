@@ -62,6 +62,9 @@ func (a *QQAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg cha
 	text := strings.TrimSpace(msg.Message.Message.PlainText())
 	if text != "" {
 		useMarkdown := parsed.MarkdownSupport && msg.Message.Message.Format == channel.MessageFormatMarkdown && target.Kind != qqTargetChannel
+		if msg.Message.Message.Format == channel.MessageFormatMarkdown && !useMarkdown {
+			text = channel.StripInlineMarkup(text)
+		}
 		if err := client.sendText(ctx, target, text, replyTo, useMarkdown); err != nil {
 			return err
 		}

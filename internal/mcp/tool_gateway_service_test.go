@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 )
 
@@ -65,7 +66,7 @@ func (p *gatewayTestProvider) CallTool(_ context.Context, _ ToolSessionContext, 
 	return nil, ErrToolNotFound
 }
 
-func TestToolGatewayServiceCacheIgnoresSessionID(t *testing.T) {
+func TestToolGatewayServiceCacheSeparatesSessionID(t *testing.T) {
 	provider := &countingGatewayTestProvider{}
 	service := NewToolGatewayService(slog.Default(), []ToolSource{provider})
 	session := ToolSessionContext{
@@ -82,8 +83,166 @@ func TestToolGatewayServiceCacheIgnoresSessionID(t *testing.T) {
 	if _, err := service.ListTools(context.Background(), session); err != nil {
 		t.Fatalf("list tools failed: %v", err)
 	}
-	if provider.calls != 1 {
-		t.Fatalf("ListTools calls = %d, want cache hit across session IDs", provider.calls)
+	if provider.calls != 2 {
+		t.Fatalf("ListTools calls = %d, want separate cache entries by session ID", provider.calls)
+	}
+}
+
+func TestToolGatewayServiceCacheSeparatesStreamID(t *testing.T) {
+	provider := &countingGatewayTestProvider{}
+	service := NewToolGatewayService(slog.Default(), []ToolSource{provider})
+	session := ToolSessionContext{
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		SessionType: "chat",
+	}
+
+	if _, err := service.ListTools(context.Background(), session); err != nil {
+		t.Fatalf("list tools failed: %v", err)
+	}
+	session.StreamID = "stream-1"
+	if _, err := service.ListTools(context.Background(), session); err != nil {
+		t.Fatalf("list tools after stream change failed: %v", err)
+	}
+	if provider.calls != 2 {
+		t.Fatalf("ListTools calls = %d, want separate cache entries by stream ID", provider.calls)
+	}
+}
+
+func TestToolGatewayServiceCacheSeparatesSessionType(t *testing.T) {
+	provider := &countingGatewayTestProvider{}
+	service := NewToolGatewayService(slog.Default(), []ToolSource{provider})
+	session := ToolSessionContext{
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		SessionType: "chat",
+	}
+
+	if _, err := service.ListTools(context.Background(), session); err != nil {
+		t.Fatalf("list tools failed: %v", err)
+	}
+	session.SessionType = "background_delivery"
+	if _, err := service.ListTools(context.Background(), session); err != nil {
+		t.Fatalf("list tools after session type change failed: %v", err)
+	}
+	if provider.calls != 2 {
+		t.Fatalf("ListTools calls = %d, want separate cache entries by session type", provider.calls)
+	}
+}
+
+func TestToolGatewayServiceCacheSeparatesUserInputCapability(t *testing.T) {
+	provider := &countingGatewayTestProvider{}
+	service := NewToolGatewayService(slog.Default(), []ToolSource{provider})
+	session := ToolSessionContext{
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		StreamID:    "stream-1",
+		SessionType: "chat",
+	}
+
+	if _, err := service.ListTools(context.Background(), session); err != nil {
+		t.Fatalf("list tools failed: %v", err)
+	}
+	session.CanRequestUserInput = true
+	if _, err := service.ListTools(context.Background(), session); err != nil {
+		t.Fatalf("list tools after user input capability change failed: %v", err)
+	}
+	if provider.calls != 2 {
+		t.Fatalf("ListTools calls = %d, want separate cache entries by user input capability", provider.calls)
+	}
+}
+
+func TestToolGatewayServiceCacheSeparatesImageCapability(t *testing.T) {
+	provider := &countingGatewayTestProvider{}
+	service := NewToolGatewayService(slog.Default(), []ToolSource{provider})
+	session := ToolSessionContext{
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		SessionType: "chat",
+	}
+
+	if _, err := service.ListTools(context.Background(), session); err != nil {
+		t.Fatalf("list tools failed: %v", err)
+	}
+	session.SupportsImageInput = true
+	if _, err := service.ListTools(context.Background(), session); err != nil {
+		t.Fatalf("list tools after image capability change failed: %v", err)
+	}
+	if provider.calls != 2 {
+		t.Fatalf("ListTools calls = %d, want separate cache entries by image capability", provider.calls)
+	}
+}
+
+func TestToolGatewayServiceCacheSeparatesCurrentConversation(t *testing.T) {
+	provider := &countingGatewayTestProvider{}
+	service := NewToolGatewayService(slog.Default(), []ToolSource{provider})
+	session := ToolSessionContext{
+		BotID:             "bot-1",
+		SessionType:       "chat",
+		ChannelIdentityID: "user-1",
+		CurrentPlatform:   "telegram",
+		ReplyTarget:       "chat-1",
+	}
+
+	if _, err := service.ListTools(context.Background(), session); err != nil {
+		t.Fatalf("list tools failed: %v", err)
+	}
+	session.ReplyTarget = "chat-2"
+	if _, err := service.ListTools(context.Background(), session); err != nil {
+		t.Fatalf("list tools after target change failed: %v", err)
+	}
+	session.CurrentPlatform = "discord"
+	if _, err := service.ListTools(context.Background(), session); err != nil {
+		t.Fatalf("list tools after platform change failed: %v", err)
+	}
+	if provider.calls != 3 {
+		t.Fatalf("ListTools calls = %d, want separate cache entries for current conversation fields", provider.calls)
+	}
+}
+
+func TestToolGatewayServiceCacheSeparatesDiscoveryContext(t *testing.T) {
+	provider := &countingGatewayTestProvider{}
+	service := NewToolGatewayService(slog.Default(), []ToolSource{provider})
+	session := ToolSessionContext{
+		BotID:        "bot-1",
+		ChatID:       "chat-1",
+		RuntimeID:    "runtime-1",
+		RuntimeToken: "runtime-token-1",
+		RouteID:      "route-1",
+		SessionToken: "token-1",
+	}
+
+	if _, err := service.ListTools(context.Background(), session); err != nil {
+		t.Fatalf("list tools failed: %v", err)
+	}
+	session.ChatID = "chat-2"
+	if _, err := service.ListTools(context.Background(), session); err != nil {
+		t.Fatalf("list tools after chat change failed: %v", err)
+	}
+	session.RuntimeID = "runtime-2"
+	if _, err := service.ListTools(context.Background(), session); err != nil {
+		t.Fatalf("list tools after runtime change failed: %v", err)
+	}
+	session.RuntimeToken = "runtime-token-2"
+	if _, err := service.ListTools(context.Background(), session); err != nil {
+		t.Fatalf("list tools after runtime token change failed: %v", err)
+	}
+	session.RouteID = "route-2"
+	if _, err := service.ListTools(context.Background(), session); err != nil {
+		t.Fatalf("list tools after route change failed: %v", err)
+	}
+	session.SessionToken = "token-2"
+	if _, err := service.ListTools(context.Background(), session); err != nil {
+		t.Fatalf("list tools after session token change failed: %v", err)
+	}
+	if provider.calls != 6 {
+		t.Fatalf("ListTools calls = %d, want separate cache entries for discovery context fields", provider.calls)
+	}
+	if strings.Contains(toolRegistryCacheKey(session), session.RuntimeToken) {
+		t.Fatal("cache key must not contain the raw runtime token")
+	}
+	if strings.Contains(toolRegistryCacheKey(session), session.SessionToken) {
+		t.Fatal("cache key must not contain the raw session token")
 	}
 }
 

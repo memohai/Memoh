@@ -330,6 +330,48 @@ func TestBuildMatrixMessageContentIncludesFormattedHTMLForMarkdown(t *testing.T)
 	}
 }
 
+func TestMatrixDescriptorAdvertisesRichText(t *testing.T) {
+	t.Parallel()
+
+	caps := NewMatrixAdapter(nil).Descriptor().Capabilities
+	if !caps.RichText {
+		t.Fatal("Matrix descriptor must advertise RichText for direct Parts rendering")
+	}
+}
+
+func TestBuildMatrixMessageContentRendersPartsDirectly(t *testing.T) {
+	content := buildMatrixMessageContent(channel.Message{
+		Format: channel.MessageFormatRich,
+		Parts: []channel.MessagePart{
+			{Type: channel.MessagePartText, Text: "ping", Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+			{Type: channel.MessagePartMention, Text: "Alice", ChannelIdentityID: "@alice:example.com"},
+			{Type: channel.MessagePartLink, Text: "docs", URL: "https://example.test/a?b=1&c=2"},
+			{Type: channel.MessagePartText, Text: `<script>alert(1)</script>`},
+		},
+	}, false, "")
+
+	if got := content["format"]; got != matrixHTMLFormat {
+		t.Fatalf("unexpected format: %#v", got)
+	}
+	html, ok := content["formatted_body"].(string)
+	if !ok {
+		t.Fatalf("unexpected formatted body: %#v", content["formatted_body"])
+	}
+	for _, want := range []string{
+		"<strong>ping</strong>",
+		`<a href="https://matrix.to/#/@alice:example.com">Alice</a>`,
+		`<a href="https://example.test/a?b=1&amp;c=2">docs</a>`,
+		`&lt;script&gt;alert(1)&lt;/script&gt;`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("expected formatted body to contain %q, got %q", want, html)
+		}
+	}
+	if strings.Contains(html, "<script>") {
+		t.Fatalf("formatted body contains unescaped script tag: %q", html)
+	}
+}
+
 func TestBuildMatrixMessageContentAddsFormattedHTMLToEdits(t *testing.T) {
 	content := buildMatrixMessageContent(channel.Message{
 		Text:   "`code`",
@@ -949,6 +991,69 @@ func TestMatrixSendResolvesRoomAlias(t *testing.T) {
 	}
 	if len(requests) != 2 {
 		t.Fatalf("expected alias lookup and send requests, got %d", len(requests))
+	}
+}
+
+func TestMatrixSendPreservesRichPartsAsFormattedHTML(t *testing.T) {
+	var payload string
+	adapter := NewMatrixAdapter(nil)
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if !strings.Contains(req.URL.Path, "/_matrix/client/v3/rooms/!room:example.com/send/m.room.message/") {
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		payload = string(body)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"event_id":"$evt1"}`)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	err := adapter.Send(context.Background(), channel.ChannelConfig{
+		Credentials: map[string]any{
+			"homeserverUrl": "https://matrix.example.com",
+			"userId":        "@memoh:example.com",
+			"accessToken":   "tok",
+		},
+	}, channel.PreparedOutboundMessage{
+		Target: "!room:example.com",
+		Message: channel.PreparedMessage{
+			Message: channel.Message{
+				Format: channel.MessageFormatRich,
+				Parts: []channel.MessagePart{
+					{Type: channel.MessagePartText, Text: "hello", Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
+					{Type: channel.MessagePartMention, Text: "Alice", ChannelIdentityID: "@alice:example.com"},
+					{Type: channel.MessagePartLink, Text: "docs", URL: "https://example.test/docs"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("send returned error: %v", err)
+	}
+	var content map[string]any
+	if err := json.Unmarshal([]byte(payload), &content); err != nil {
+		t.Fatalf("unmarshal matrix payload: %v", err)
+	}
+	if got := content["format"]; got != matrixHTMLFormat {
+		t.Fatalf("unexpected format: %#v", got)
+	}
+	html, ok := content["formatted_body"].(string)
+	if !ok {
+		t.Fatalf("unexpected formatted body: %#v", content["formatted_body"])
+	}
+	for _, want := range []string{
+		`<strong>hello</strong>`,
+		`https://matrix.to/#/@alice:example.com`,
+		`https://example.test/docs`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("expected formatted body to contain %q, got %s", want, html)
+		}
 	}
 }
 

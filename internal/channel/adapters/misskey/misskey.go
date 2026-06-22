@@ -534,21 +534,18 @@ func (a *MisskeyAdapter) logInbound(configID string, msg channel.InboundMessage)
 // --- Sender ---
 
 // Send delivers an outbound message to Misskey by creating a note.
-func (a *MisskeyAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.OutboundMessage) error {
+func (a *MisskeyAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.PreparedOutboundMessage) error {
 	mkCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return err
 	}
-	text := strings.TrimSpace(msg.Message.PlainText())
+	text := strings.TrimSpace(msg.Message.Message.PlainText())
 	if text == "" {
 		return errors.New("message text is required")
 	}
 	text = textutil.TruncateRunesWithSuffix(text, misskeyMaxNoteLength, "...")
 
-	// The target in Misskey is the note ID to reply to.
 	replyID := strings.TrimSpace(msg.Target)
-
-	// Determine visibility: reply with "home" visibility.
 	visibility := "home"
 
 	_, err = createNote(ctx, mkCfg, text, replyID, visibility)
@@ -606,7 +603,7 @@ func (*MisskeyAdapter) ProcessingFailed(_ context.Context, _ channel.ChannelConf
 
 // OpenStream opens a block-streaming session that buffers all deltas and sends
 // the final message as a single note when the stream is closed.
-func (a *MisskeyAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig, target string, _ channel.StreamOptions) (channel.OutboundStream, error) {
+func (a *MisskeyAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig, target string, _ channel.StreamOptions) (channel.PreparedOutboundStream, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
 		return nil, errors.New("misskey target is required")
@@ -625,12 +622,12 @@ type misskeyBlockStream struct {
 	cfg         channel.ChannelConfig
 	target      string
 	textBuilder strings.Builder
-	attachments []channel.Attachment
-	final       *channel.Message
+	attachments []channel.PreparedAttachment
+	final       *channel.PreparedMessage
 	closed      bool
 }
 
-func (s *misskeyBlockStream) Push(_ context.Context, event channel.StreamEvent) error {
+func (s *misskeyBlockStream) Push(_ context.Context, event channel.PreparedStreamEvent) error {
 	if s.closed {
 		return nil
 	}
@@ -656,21 +653,21 @@ func (s *misskeyBlockStream) Close(ctx context.Context) error {
 	}
 	s.closed = true
 
-	msg := channel.Message{Format: channel.MessageFormatPlain}
+	prepared := channel.PreparedMessage{Message: channel.Message{Format: channel.MessageFormatPlain}}
 	if s.final != nil {
-		msg = *s.final
+		prepared = *s.final
 	}
-	if strings.TrimSpace(msg.Text) == "" {
-		msg.Text = strings.TrimSpace(s.textBuilder.String())
+	if strings.TrimSpace(prepared.Message.Text) == "" {
+		prepared.Message.Text = strings.TrimSpace(s.textBuilder.String())
 	}
-	if len(msg.Attachments) == 0 && len(s.attachments) > 0 {
-		msg.Attachments = append(msg.Attachments, s.attachments...)
+	if len(prepared.Attachments) == 0 && len(s.attachments) > 0 {
+		prepared.Attachments = append(prepared.Attachments, s.attachments...)
 	}
-	if msg.IsEmpty() {
+	if prepared.Message.IsEmpty() {
 		return nil
 	}
-	return s.adapter.Send(ctx, s.cfg, channel.OutboundMessage{
+	return s.adapter.Send(ctx, s.cfg, channel.PreparedOutboundMessage{
 		Target:  s.target,
-		Message: msg,
+		Message: prepared,
 	})
 }

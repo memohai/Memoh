@@ -22,6 +22,7 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/agent/background"
+	"github.com/memohai/memoh/internal/agent/sessionmode"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/conversation"
@@ -272,12 +273,13 @@ type usageInfo struct {
 }
 
 type resolvedContext struct {
-	runConfig       agentpkg.RunConfig
-	model           models.GetResponse
-	provider        sqlc.Provider
-	query           string // headerified query
-	injectedRecords *[]conversation.InjectedMessageRecord
-	estimatedTokens int // estimated input token count for compaction
+	runConfig                   agentpkg.RunConfig
+	model                       models.GetResponse
+	provider                    sqlc.Provider
+	query                       string // headerified query
+	userMessageAlreadyInContext bool
+	injectedRecords             *[]conversation.InjectedMessageRecord
+	estimatedTokens             int // estimated input token count for compaction
 }
 
 func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (resolvedContext, error) {
@@ -302,6 +304,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		ReplyTarget:       req.ReplyTarget,
 		ConversationType:  req.ConversationType,
 		SessionToken:      req.ChatToken,
+		SessionType:       req.SessionType,
 		Model:             req.Model,
 		Provider:          req.Provider,
 		ReasoningEffort:   req.ReasoningEffort,
@@ -467,12 +470,13 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	}
 
 	return resolvedContext{
-		runConfig:       runCfg,
-		model:           chatModel,
-		provider:        provider,
-		query:           headerifiedQuery,
-		injectedRecords: injectedRecords,
-		estimatedTokens: estimatedTokens,
+		runConfig:                   runCfg,
+		model:                       chatModel,
+		provider:                    provider,
+		query:                       headerifiedQuery,
+		userMessageAlreadyInContext: usePipeline,
+		injectedRecords:             injectedRecords,
+		estimatedTokens:             estimatedTokens,
 	}, nil
 }
 
@@ -506,8 +510,12 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	}
 
 	outputMessages := sdkMessagesToModelMessages(result.Messages)
-	roundMessages := prependUserMessage(req.Query, outputMessages)
-	if err := r.storeRound(ctx, req, roundMessages, rc.model.ID); err != nil {
+	storeReq := req
+	if rc.userMessageAlreadyInContext {
+		storeReq.UserMessagePersisted = true
+	}
+	roundMessages := prependUserMessage(storeReq.Query, outputMessages)
+	if err := r.storeRound(ctx, storeReq, roundMessages, rc.model.ID); err != nil {
 		return conversation.ChatResponse{}, err
 	}
 
@@ -621,9 +629,8 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 		ChatCompletionsCompat: chatCompletionsCompat,
 		PromptCacheTTL:        providers.ProviderConfigString(provider, "prompt_cache_ttl"),
 		SessionType:           p.SessionType,
-		SupportsImageInput:    chatModel.HasCompatibility(models.CompatVision),
+		SupportsImageInput:    supportsImageInputForModel(chatModel),
 		SupportsToolCall:      chatModel.HasCompatibility(models.CompatToolCall),
-		DisplayEnabled:        botSettings.DisplayEnabled,
 		Identity: agentpkg.SessionContext{
 			BotID:             p.BotID,
 			ChatID:            chatID,
@@ -646,6 +653,18 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 	}
 
 	return cfg, chatModel, provider, nil
+}
+
+func (r *Resolver) canDeliverUserInputStream() bool {
+	return r.userInput != nil
+}
+
+func (r *Resolver) canDeliverUserInputWS(eventCh chan<- WSStreamEvent) bool {
+	return r.userInput != nil && eventCh != nil
+}
+
+func supportsImageInputForModel(m models.GetResponse) bool {
+	return m.HasCompatibility(models.CompatVision)
 }
 
 const (
@@ -821,6 +840,12 @@ func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.
 					Reason:   "user input service is not configured",
 				}, nil
 			}
+			if !isInteractiveApprovalSession(p.SessionType) {
+				return sdk.ToolApprovalResult{
+					Decision: sdk.ToolApprovalDecisionRejected,
+					Reason:   "user input requested in a non-interactive session",
+				}, nil
+			}
 			// No ExpiresAt here: chat-flow requests have no in-process
 			// waiter — the run pauses and resumes whenever the user answers,
 			// even much later. Only waiter-backed (ACP/MCP) requests expire.
@@ -846,22 +871,6 @@ func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.
 					ApprovalID: req.ID,
 					Reason:     "ask_user request is already " + req.Status,
 					Metadata:   userinput.DeferredMetadata(req),
-				}, nil
-			}
-			if !isInteractiveApprovalSession(p.SessionType) {
-				canceled, err := r.userInput.Cancel(ctx, userinput.CancelInput{
-					RequestID:              req.ID,
-					ActorChannelIdentityID: p.ChannelIdentityID,
-					Reason:                 "non_interactive_session",
-				})
-				if err != nil {
-					return sdk.ToolApprovalResult{}, err
-				}
-				return sdk.ToolApprovalResult{
-					Decision:   sdk.ToolApprovalDecisionRejected,
-					ApprovalID: canceled.ID,
-					Reason:     "user input requested in a non-interactive session",
-					Metadata:   userinput.DeferredMetadata(canceled),
 				}, nil
 			}
 			return sdk.ToolApprovalResult{
@@ -953,12 +962,7 @@ func approvalResultMetadata(req toolapproval.Request) map[string]any {
 }
 
 func isInteractiveApprovalSession(sessionType string) bool {
-	switch strings.ToLower(strings.TrimSpace(sessionType)) {
-	case "", "chat", "acp_agent":
-		return true
-	default:
-		return false
-	}
+	return sessionmode.IsInteractive(sessionType)
 }
 
 func (r *Resolver) resolveRunConfigSessionType(ctx context.Context, sessionID string) string {
@@ -1025,7 +1029,6 @@ func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, chann
 
 // prepareRunConfig generates the system prompt and appends the user message.
 func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig) agentpkg.RunConfig {
-	supportsImageInput := cfg.SupportsImageInput
 	beforePromptContext := r.runPromptHook(ctx, agentRunConfigView{
 		BotID:        cfg.Identity.BotID,
 		SessionID:    cfg.Identity.SessionID,
@@ -1066,8 +1069,6 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 		Files:                     files,
 		Now:                       now,
 		Timezone:                  cfg.Identity.Timezone,
-		SupportsImageInput:        supportsImageInput,
-		DisplayEnabled:            cfg.DisplayEnabled,
 		PlatformIdentitiesSection: platformIdentitiesSection,
 	})
 	if beforePromptContext != "" {

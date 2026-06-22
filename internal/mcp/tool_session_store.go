@@ -231,6 +231,9 @@ func MergeToolSessionContext(base, latest ToolSessionContext) ToolSessionContext
 	if value := strings.TrimSpace(latest.RuntimeID); value != "" {
 		merged.RuntimeID = value
 	}
+	if value := strings.TrimSpace(latest.RuntimeToken); value != "" {
+		merged.RuntimeToken = value
+	}
 	if value := strings.TrimSpace(latest.SessionID); value != "" {
 		merged.SessionID = value
 	}
@@ -258,11 +261,20 @@ func MergeToolSessionContext(base, latest ToolSessionContext) ToolSessionContext
 	if value := strings.TrimSpace(latest.ConversationType); value != "" {
 		merged.ConversationType = value
 	}
+	if latest.CanRequestUserInput {
+		merged.CanRequestUserInput = true
+	}
+	if latest.CanListUserInput {
+		merged.CanListUserInput = true
+	}
 	if latest.IsSubagent {
 		merged.IsSubagent = true
 	}
 	if latest.RuntimeActive {
 		merged.RuntimeActive = true
+	}
+	if latest.SupportsImageInput {
+		merged.SupportsImageInput = true
 	}
 	return merged
 }

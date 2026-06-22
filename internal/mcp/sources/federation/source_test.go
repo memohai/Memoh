@@ -124,3 +124,45 @@ func TestSourceCallToolRoutesToSSEConnection(t *testing.T) {
 		t.Fatalf("expected ok=true in result")
 	}
 }
+
+func TestSourceRenamesReservedToolAliases(t *testing.T) {
+	gateway := &testGateway{
+		listSSE: []mcpgw.ToolDescriptor{
+			{
+				Name:        "observe",
+				Description: "observe browser state",
+				InputSchema: map[string]any{"type": "object"},
+			},
+		},
+	}
+	lister := &testConnectionLister{
+		items: []mcpgw.Connection{
+			{
+				ID:     "conn-1",
+				Name:   "browser",
+				Type:   "sse",
+				Active: true,
+				Config: map[string]any{"url": "http://example.com/sse"},
+			},
+		},
+	}
+	source := NewSource(slog.Default(), gateway, lister, WithReservedToolName(func(name string) bool {
+		return name == "browser_observe"
+	}))
+
+	tools, err := source.ListTools(context.Background(), mcpgw.ToolSessionContext{BotID: "bot-1"})
+	if err != nil {
+		t.Fatalf("list tools failed: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name != "browser_observe_2" {
+		t.Fatalf("tools = %#v, want reserved alias renamed to browser_observe_2", tools)
+	}
+
+	result, err := source.CallTool(context.Background(), mcpgw.ToolSessionContext{BotID: "bot-1"}, "browser_observe_2", map[string]any{})
+	if err != nil {
+		t.Fatalf("call renamed tool failed: %v", err)
+	}
+	if route, _ := result["route"].(string); route != "sse" {
+		t.Fatalf("result = %#v, want sse route", result)
+	}
+}

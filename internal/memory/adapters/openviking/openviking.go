@@ -14,11 +14,10 @@ import (
 const (
 	OpenVikingType = "openviking"
 
-	ovToolSearchMemory = "search_memory"
-	ovDefaultLimit     = 10
-	ovMaxLimit         = 50
-	ovContextMaxItems  = 8
-	ovContextMaxChars  = 220
+	ovDefaultLimit    = 10
+	ovMaxLimit        = 50
+	ovContextMaxItems = 8
+	ovContextMaxChars = 220
 )
 
 // OpenVikingProvider implements adapters.Provider by delegating to an OpenViking API (self-hosted or SaaS).
@@ -110,7 +109,7 @@ func (p *OpenVikingProvider) OnAfterChat(ctx context.Context, req adapters.After
 func (*OpenVikingProvider) ListTools(_ context.Context, _ mcp.ToolSessionContext) ([]mcp.ToolDescriptor, error) {
 	return []mcp.ToolDescriptor{
 		{
-			Name:        ovToolSearchMemory,
+			Name:        adapters.ToolSearchMemory,
 			Description: "Search for memories relevant to the current chat",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -131,7 +130,7 @@ func (*OpenVikingProvider) ListTools(_ context.Context, _ mcp.ToolSessionContext
 }
 
 func (p *OpenVikingProvider) CallTool(ctx context.Context, session mcp.ToolSessionContext, toolName string, arguments map[string]any) (map[string]any, error) {
-	if toolName != ovToolSearchMemory {
+	if toolName != adapters.ToolSearchMemory {
 		return nil, mcp.ErrToolNotFound
 	}
 	query := mcp.StringArg(arguments, "query")

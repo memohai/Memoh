@@ -2,8 +2,10 @@
   <div class="flex flex-col h-full w-full bg-surface-editor">
     <PanelBreadcrumb :path="filePath" />
     <div class="flex-1 min-h-0">
+      <!-- Full-area spinner only on the first load. Reloads keep the rendered
+           markdown/html mounted and swap content in place. -->
       <div
-        v-if="loading"
+        v-if="loading && !loaded"
         class="flex h-full items-center justify-center text-muted-foreground"
       >
         <Spinner class="mr-2" />
@@ -35,7 +37,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { FileText } from 'lucide-vue-next'
@@ -62,6 +64,7 @@ const props = defineProps<{
 const { t } = useI18n()
 const chatStore = useChatStore()
 const { currentBotId, fsChangedAt } = storeToRefs(chatStore)
+const PREVIEW_POLL_MS = 2_000
 
 const visible = usePanelVisible(props.params.api)
 const filePath = computed(() => props.params.params.filePath ?? '')
@@ -76,32 +79,86 @@ const canPreview = computed(() => isMd.value || isHtml.value)
 
 const content = ref('')
 const loading = ref(false)
+// True once the preview has been rendered at least once for the current path,
+// so subsequent reloads can update content in place without flashing a spinner.
+const loaded = ref(false)
+// One in-flight load at a time; a new load aborts the old one so stale
+// fast-fire responses can't clobber newer content.
+let activeLoadController: AbortController | null = null
+let previewPollTimer: ReturnType<typeof setInterval> | null = null
 
-async function load() {
+function isDocumentVisible(): boolean {
+  return typeof document === 'undefined' || document.visibilityState === 'visible'
+}
+
+async function load(options: { notifyOnError?: boolean } = {}) {
   const botId = currentBotId.value
   if (!botId || !filePath.value || !canPreview.value) return
+  activeLoadController?.abort()
+  const controller = new AbortController()
+  activeLoadController = controller
   loading.value = true
   try {
     const { data } = await getBotsByBotIdContainerFsRead({
       path: { bot_id: botId },
       query: { path: filePath.value },
+      signal: controller.signal,
       throwOnError: true,
     })
+    if (controller.signal.aborted) return
     content.value = data.content ?? ''
+    loaded.value = true
   } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
+    if (controller.signal.aborted) return
+    if (options.notifyOnError !== false) {
+      toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
+    }
   } finally {
-    loading.value = false
+    if (activeLoadController === controller) {
+      activeLoadController = null
+      loading.value = false
+    }
   }
 }
 
+function pollPreview() {
+  if (!visible.value || !loaded.value || loading.value || !isDocumentVisible()) return
+  void load({ notifyOnError: false })
+}
+
+function handleVisibilityChange() {
+  if (visible.value && isDocumentVisible()) void load({ notifyOnError: false })
+}
+
 // Load when the panel first becomes visible / its target changes, and refresh
-// when the agent mutates the workspace.
+// when the agent mutates the workspace. Path change starts the "loaded" clock
+// from scratch so the user sees the spinner only for the new target's first
+// fetch.
+watch(filePath, () => {
+  loaded.value = false
+  content.value = ''
+})
 watch([visible, filePath], ([isVisible]) => {
   if (isVisible) void load()
 }, { immediate: true })
 
 watch(fsChangedAt, () => {
-  if (visible.value) void load()
+  if (!visible.value) return
+  if (!chatStore.affectsPath(filePath.value)) return
+  void load()
+})
+
+onMounted(() => {
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  previewPollTimer = window.setInterval(pollPreview, PREVIEW_POLL_MS)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  if (previewPollTimer !== null) {
+    window.clearInterval(previewPollTimer)
+    previewPollTimer = null
+  }
+  activeLoadController?.abort()
 })
 </script>

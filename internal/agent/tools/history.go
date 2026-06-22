@@ -54,6 +54,28 @@ func NewHistoryProvider(log *slog.Logger, sessions SessionLister, messages Histo
 	}
 }
 
+func (*HistoryProvider) Usage(_ context.Context, _ SessionContext, available AvailableTools) string {
+	var parts []string
+	listSessionsRef := ""
+	if ref, ok := available.Ref(ToolListSessions()); ok {
+		listSessionsRef = ref
+		parts = append(parts, ref+": List all chat sessions with their bound contact/route info. Filter by `type` (chat/heartbeat/schedule) or `platform`.")
+	}
+	if ref, ok := available.Ref(ToolGetMessages()); ok {
+		parts = append(parts, ref+": Get recent messages from the current or selected session.")
+		if listSessionsRef != "" {
+			parts = append(parts, "Use session IDs from "+listSessionsRef+" as `session_id` for "+ref+" when reading a specific conversation.")
+		}
+	}
+	if ref, ok := available.Ref(ToolSearchMessages()); ok {
+		parts = append(parts, ref+": Search past message history. All parameters are optional: `start_time` / `end_time`, `keyword`, `session_id`, `contact_id`, and `role`.")
+		if listSessionsRef != "" {
+			parts = append(parts, "Use session IDs from "+listSessionsRef+" as `session_id` for "+ref+" when searching a specific conversation.")
+		}
+	}
+	return usageSection("Sessions & History", parts)
+}
+
 func (p *HistoryProvider) Tools(_ context.Context, sess SessionContext) ([]sdk.Tool, error) {
 	if sess.IsSubagent {
 		return nil, nil
@@ -63,8 +85,8 @@ func (p *HistoryProvider) Tools(_ context.Context, sess SessionContext) ([]sdk.T
 	if p.sessions != nil {
 		s := sess
 		tools = append(tools, sdk.Tool{
-			Name:        "list_sessions",
-			Description: "List all chat sessions for the current bot with their bound contact/route information. Use this to discover conversations and find session IDs for search_messages.",
+			Name:        ToolListSessions().String(),
+			Description: "List all chat sessions for the current bot with their bound contact/route information.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -93,8 +115,8 @@ func (p *HistoryProvider) Tools(_ context.Context, sess SessionContext) ([]sdk.T
 	if p.messages != nil {
 		s := sess
 		tools = append(tools, sdk.Tool{
-			Name:        "get_messages",
-			Description: "Get recent messages from a chat session. Defaults to the current session. Use list_sessions to find other session IDs. Results are returned oldest-first.",
+			Name:        ToolGetMessages().String(),
+			Description: "Get recent messages from a chat session. Defaults to the current session. Results are returned oldest-first.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -122,7 +144,7 @@ func (p *HistoryProvider) Tools(_ context.Context, sess SessionContext) ([]sdk.T
 	if p.queries != nil {
 		s := sess
 		tools = append(tools, sdk.Tool{
-			Name:        "search_messages",
+			Name:        ToolSearchMessages().String(),
 			Description: "Search message history across all sessions. Supports filtering by time range, keyword, session, contact, and role. All parameters are optional. If start_time is not provided, only the last 7 days are searched.",
 			Parameters: map[string]any{
 				"type": "object",
@@ -141,11 +163,11 @@ func (p *HistoryProvider) Tools(_ context.Context, sess SessionContext) ([]sdk.T
 					},
 					"session_id": map[string]any{
 						"type":        "string",
-						"description": "Filter by session ID. Use list_sessions to find session IDs.",
+						"description": "Filter by session ID.",
 					},
 					"contact_id": map[string]any{
 						"type":        "string",
-						"description": "Filter by sender channel identity ID. Use get_contacts to find contact IDs.",
+						"description": "Filter by sender channel identity ID.",
 					},
 					"role": map[string]any{
 						"type":        "string",

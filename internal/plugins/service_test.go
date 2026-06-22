@@ -1,68 +1,18 @@
 package plugins
 
 import (
-	"encoding/json"
-	"reflect"
+	"context"
+	"io"
+	"path"
+	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/mcp"
+	skillset "github.com/memohai/memoh/internal/skills"
 )
-
-func TestManifestInstallCommandsAcceptStringOrList(t *testing.T) {
-	tests := []struct {
-		name string
-		raw  string
-		want []string
-	}{
-		{
-			name: "string",
-			raw:  `{"id":"plugin","name":"Plugin","author":{"name":"Memoh"},"install":" sh scripts/install.sh "}`,
-			want: []string{"sh scripts/install.sh"},
-		},
-		{
-			name: "list",
-			raw:  `{"id":"plugin","name":"Plugin","author":{"name":"Memoh"},"install":[" sh scripts/a.sh ","","python3 scripts/b.py"]}`,
-			want: []string{"sh scripts/a.sh", "python3 scripts/b.py"},
-		},
-		{
-			name: "null",
-			raw:  `{"id":"plugin","name":"Plugin","author":{"name":"Memoh"},"install":null}`,
-			want: nil,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var manifest Manifest
-			if err := json.Unmarshal([]byte(tt.raw), &manifest); err != nil {
-				t.Fatalf("json.Unmarshal: %v", err)
-			}
-			if !reflect.DeepEqual([]string(manifest.Install), tt.want) {
-				t.Fatalf("install = %#v, want %#v", []string(manifest.Install), tt.want)
-			}
-		})
-	}
-}
-
-func TestManifestInstallCommandsRejectInvalidShape(t *testing.T) {
-	var manifest Manifest
-	if err := json.Unmarshal([]byte(`{"id":"plugin","install":7}`), &manifest); err == nil {
-		t.Fatal("expected invalid install shape to fail")
-	}
-}
-
-func TestNormalizeManifestTrimsInstallCommands(t *testing.T) {
-	manifest := NormalizeManifest(Manifest{
-		ID:      "Plugin.ID",
-		Name:    " Plugin ",
-		Install: InstallCommands{" sh scripts/install.sh ", "", "python3 scripts/setup.py"},
-	})
-
-	want := []string{"sh scripts/install.sh", "python3 scripts/setup.py"}
-	if !reflect.DeepEqual([]string(manifest.Install), want) {
-		t.Fatalf("install = %#v, want %#v", []string(manifest.Install), want)
-	}
-}
 
 func TestMissingRequiredVariablesTreatsSelfTemplateDefaultAsMissing(t *testing.T) {
 	manifest := Manifest{
@@ -140,4 +90,61 @@ func TestManifestScopesOverrideDiscoveredScopes(t *testing.T) {
 	if len(result.ScopesSupported) != 2 || result.ScopesSupported[0] != "repo" || result.ScopesSupported[1] != "read:org" {
 		t.Fatalf("scopes = %#v, want manifest scopes", result.ScopesSupported)
 	}
+}
+
+func TestPluginSkillRawAddsFrontmatterAndOwnership(t *testing.T) {
+	row := sqlc.BotPluginInstallation{
+		ID:         pgtype.UUID{Bytes: [16]byte{15: 1}, Valid: true},
+		PluginID:   "github",
+		PluginName: "GitHub",
+	}
+	raw := pluginSkillRaw(SkillEntry{
+		ID:          "github",
+		Name:        "github",
+		Description: "Use GitHub.",
+		Content:     "# GitHub\n\nUse the connected app.",
+	}, "github", row)
+
+	parsed := skillset.ParseFile(raw, "")
+	if parsed.Name != "github" {
+		t.Fatalf("parsed name = %q, want github", parsed.Name)
+	}
+	if parsed.Description != "Use GitHub." {
+		t.Fatalf("parsed description = %q", parsed.Description)
+	}
+	owner, ok := parsed.Metadata["managed_by_plugin"].(map[string]any)
+	if !ok {
+		t.Fatalf("managed_by_plugin metadata missing: %#v", parsed.Metadata)
+	}
+	if owner["plugin_id"] != "github" {
+		t.Fatalf("plugin_id = %#v, want github", owner["plugin_id"])
+	}
+}
+
+func TestCanDeletePluginSkillRequiresMatchingOwnerMarker(t *testing.T) {
+	dir := path.Join(skillset.ManagedDir(), "github")
+	client := &pluginSkillFileClient{
+		files: map[string]string{
+			path.Join(dir, ".memoh-plugin-owner.json"): `{"installation_id":"install-1"}`,
+		},
+	}
+
+	if !canDeletePluginSkill(context.Background(), client, dir, "install-1") {
+		t.Fatal("expected matching owner marker to allow deletion")
+	}
+	if canDeletePluginSkill(context.Background(), client, dir, "install-2") {
+		t.Fatal("expected mismatched owner marker to block deletion")
+	}
+}
+
+type pluginSkillFileClient struct {
+	files map[string]string
+}
+
+func (c *pluginSkillFileClient) ReadRaw(_ context.Context, filePath string) (io.ReadCloser, error) {
+	raw, ok := c.files[filePath]
+	if !ok {
+		return nil, io.ErrUnexpectedEOF
+	}
+	return io.NopCloser(strings.NewReader(raw)), nil
 }

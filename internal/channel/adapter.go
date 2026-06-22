@@ -123,6 +123,24 @@ type Sender interface {
 	Send(ctx context.Context, cfg ChannelConfig, msg PreparedOutboundMessage) error
 }
 
+// PreparedOutboundValidator lets adapters reject platform-invalid prepared
+// messages before a batched/chunked send starts delivering earlier items.
+type PreparedOutboundValidator interface {
+	ValidatePreparedOutbound(ctx context.Context, cfg ChannelConfig, target string, msg PreparedOutboundMessage) error
+}
+
+// OutboundCapabilityResolver can refine static descriptor capabilities for a
+// specific outbound config and target when platform support is runtime-gated.
+type OutboundCapabilityResolver interface {
+	ResolveOutboundCapabilities(cfg ChannelConfig, target string, base ChannelCapabilities) ChannelCapabilities
+}
+
+// OutboundTargetResolver can resolve delivery aliases to the concrete platform
+// target before outbound capability checks run.
+type OutboundTargetResolver interface {
+	ResolveOutboundTarget(ctx context.Context, cfg ChannelConfig, target string) (string, error)
+}
+
 // StreamSender is an adapter capable of opening outbound stream sessions.
 type StreamSender interface {
 	OpenStream(ctx context.Context, cfg ChannelConfig, target string, opts StreamOptions) (PreparedOutboundStream, error)

@@ -218,6 +218,43 @@ func (p *SpawnProvider) SetHookService(h *hooks.Service) {
 	p.hookService = h
 }
 
+// Usage frames how the available agent-control tools are meant to be used.
+func (*SpawnProvider) Usage(_ context.Context, _ SessionContext, available AvailableTools) string {
+	var parts []string
+	canStartBackground := false
+	if spawnRef, ok := available.Ref(ToolSpawnAgent()); ok {
+		canStartBackground = true
+		parts = append(parts,
+			"Use "+spawnRef+" to create a managed subagent for an independent task.",
+			"Each subagent has a restricted worker tool set: file tools, exec/background tools, web search, and web fetch.",
+			"Use subagents when work benefits from isolated context or can proceed while you continue. Don't use one for simple single-step work — just do it directly.",
+		)
+	}
+	if ref, ok := available.Ref(ToolSendMessage()); ok {
+		canStartBackground = true
+		parts = append(parts, "Use "+ref+" to continue an existing agent with a follow-up.")
+	}
+	if backgroundTools := available.Refs(ToolListBackground(), ToolGetBackgroundStatus(), ToolKillBackground()); len(backgroundTools) > 0 {
+		if canStartBackground {
+			parts = append(parts, "For long work, set `run_in_background: true`. The call returns a task ID immediately and you will be notified when the agent task finishes — do not poll or sleep while waiting.")
+		}
+		parts = append(parts, "Manage running agent tasks with "+joinRefs(backgroundTools, "and")+".")
+	}
+	if ref, ok := available.Ref(ToolWaitAgent()); ok {
+		parts = append(parts, "Use "+ref+" when you need to wait briefly.")
+	}
+	if ref, ok := available.Ref(ToolListAgents()); ok {
+		parts = append(parts, "Use "+ref+" to see agents created in the current session.")
+	}
+	if ref, ok := available.Ref(ToolSearchMessages()); ok {
+		parts = append(parts, "Read a finished task's full transcript with "+ref+" using the session ID from its notification.")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return usageSection("Subagents", parts)
+}
+
 func (p *SpawnProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
 	if session.IsSubagent || p.agent == nil {
 		return nil, nil
@@ -225,8 +262,8 @@ func (p *SpawnProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 	sess := session
 	return []sdk.Tool{
 		{
-			Name:        "spawn_agent",
-			Description: "Create one managed subagent for an independent task. Returns a memorable agent_id. Use send_message to continue an existing agent.",
+			Name:        ToolSpawnAgent().String(),
+			Description: "Create one managed subagent for an independent task. Returns a memorable agent_id.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -240,7 +277,7 @@ func (p *SpawnProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 					},
 					"run_in_background": map[string]any{
 						"type":        "boolean",
-						"description": "If true, return immediately with a task_id. Use bg_status to inspect or kill the task.",
+						"description": "If true, return immediately with a task_id. Use background task tools to inspect or kill the task when they are available.",
 					},
 				},
 				"required": []string{"task"},
@@ -250,14 +287,14 @@ func (p *SpawnProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 			},
 		},
 		{
-			Name:        "send_message",
+			Name:        ToolSendMessage().String(),
 			Description: "Send a follow-up message to an existing managed subagent. Messages to a busy agent are queued and run serially.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"id": map[string]any{
 						"type":        "string",
-						"description": "Existing agent id returned by spawn_agent or list_agents.",
+						"description": "Existing agent id returned when the agent was created or listed.",
 					},
 					"message": map[string]any{
 						"type":        "string",
@@ -275,7 +312,7 @@ func (p *SpawnProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 			},
 		},
 		{
-			Name:        "wait_agent",
+			Name:        ToolWaitAgent().String(),
 			Description: "Wait for a managed subagent task to finish. A timeout only stops waiting; it does not cancel the agent.",
 			Parameters: map[string]any{
 				"type": "object",
@@ -286,7 +323,7 @@ func (p *SpawnProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 					},
 					"task_id": map[string]any{
 						"type":        "string",
-						"description": "Optional specific task id returned by spawn_agent or send_message.",
+						"description": "Optional specific task id returned by an agent task-starting call.",
 					},
 					"timeout_seconds": map[string]any{
 						"type":        "integer",
@@ -302,7 +339,7 @@ func (p *SpawnProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 			},
 		},
 		{
-			Name:        "list_agents",
+			Name:        ToolListAgents().String(),
 			Description: "List managed subagents created in the current session only.",
 			Parameters: map[string]any{
 				"type":       "object",
@@ -426,7 +463,7 @@ func (p *SpawnProvider) execSpawnAgent(ctx context.Context, session SessionConte
 		return nil, err
 	}
 	if existing, err := p.findAgent(ctx, session, agentID); err == nil && existing.AgentID != "" {
-		return nil, fmt.Errorf("agent %q already exists; use send_message to continue it", agentID)
+		return nil, fmt.Errorf("agent %q already exists; choose a different id or continue the existing agent if follow-up messaging is available", agentID)
 	} else if err != nil && !errors.Is(err, errAgentNotFound) {
 		return nil, err
 	}
@@ -592,7 +629,7 @@ func (p *SpawnProvider) submitAgentTask(ctx context.Context, session SessionCont
 			"task_id":     taskID,
 			"status":      "background_started",
 			"description": description,
-			"message":     fmt.Sprintf("Agent %s started in background with task ID: %s. Use bg_status to inspect or kill it.", rec.AgentID, taskID),
+			"message":     fmt.Sprintf("Agent %s started in background with task ID: %s.", rec.AgentID, taskID),
 		}, nil
 	}
 
@@ -1201,6 +1238,9 @@ func (p *SpawnProvider) resolveModel(ctx context.Context, botID string) (*sdk.Mo
 	modelInfo, err := p.models.GetByID(ctx, chatModelID)
 	if err != nil {
 		return nil, "", "", err
+	}
+	if !modelInfo.Enable {
+		return nil, "", "", fmt.Errorf("subagent chat model %s is disabled", modelInfo.ModelID)
 	}
 	provider, err := models.FetchProviderByID(ctx, p.queries, modelInfo.ProviderID)
 	if err != nil {

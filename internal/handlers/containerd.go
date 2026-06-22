@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -372,7 +371,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	c.Response().Header().Set(echo.HeaderCacheControl, "no-cache")
 	c.Response().Header().Set(echo.HeaderConnection, "keep-alive")
 	c.Response().WriteHeader(http.StatusOK)
-	writer := bufio.NewWriter(c.Response().Writer)
+	writer := c.Response().Writer
 
 	var mu sync.Mutex
 	send := func(payload any) {

@@ -270,6 +270,9 @@ func (q *Queries) ListSessionsByBotAndCreatedByUser(ctx context.Context, arg Lis
 }
 
 const listSessionsByRoute = `-- name: ListSessionsByRoute :many
+
+
+
 SELECT id, bot_id, route_id, channel_type, type, title, metadata, parent_session_id, created_at, updated_at, deleted_at, created_by_user_id
 FROM bot_sessions
 WHERE route_id = ?1
@@ -277,6 +280,11 @@ WHERE route_id = ?1
 ORDER BY updated_at DESC
 `
 
+// ListSessionsByBotPaged and ListSessionsByBotAndCreatedByUserPaged are not
+// generated for SQLite. The Postgres versions live in
+// db/postgres/queries/sessions.sql; the SQLite shim hand-rolls the query in
+// internal/db/sqlite/store/sessions_paged.go because sqlc-sqlite cannot mix
+// sqlc.slice with reused numbered placeholders without colliding bind indexes.
 func (q *Queries) ListSessionsByRoute(ctx context.Context, routeID sql.NullString) ([]BotSession, error) {
 	rows, err := q.db.QueryContext(ctx, listSessionsByRoute, routeID)
 	if err != nil {

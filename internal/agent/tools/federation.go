@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
@@ -40,6 +41,10 @@ func (f *FederationProvider) Tools(ctx context.Context, session SessionContext) 
 	}
 	tools := make([]sdk.Tool, 0, len(descriptors))
 	for _, desc := range descriptors {
+		name := strings.TrimSpace(desc.Name)
+		if name == "" || IsBuiltInToolName(name) {
+			continue
+		}
 		desc := desc
 		src := f.source
 		sess := mcpSession

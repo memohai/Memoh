@@ -674,6 +674,16 @@ type dependencyMap struct {
 	emailProviders  map[string]string
 }
 
+type modelDependency struct {
+	ID         string               `json:"id"`
+	ModelID    string               `json:"model_id"`
+	Name       string               `json:"name"`
+	ProviderID string               `json:"provider_id"`
+	Type       modelpkg.ModelType   `json:"type"`
+	Enable     *bool                `json:"enable,omitempty"`
+	Config     modelpkg.ModelConfig `json:"config"`
+}
+
 func (s *Service) importDependencies(ctx context.Context, state *importState) (dependencyMap, error) {
 	deps := dependencyMap{
 		providers:       map[string]string{},
@@ -692,7 +702,7 @@ func (s *Service) importDependencies(ctx context.Context, state *importState) (d
 		}
 		deps.providers[item.ID] = id
 	}
-	models, _ := readEntry[[]modelpkg.GetResponse](state, "dependencies/models.json")
+	models, _ := readEntry[[]modelDependency](state, "dependencies/models.json")
 	for _, item := range models {
 		id, err := s.ensureModel(ctx, item, deps)
 		if err != nil {
@@ -1218,7 +1228,7 @@ func (s *Service) ensureProvider(ctx context.Context, item providerpkg.GetRespon
 	return created.ID, nil
 }
 
-func (s *Service) ensureModel(ctx context.Context, item modelpkg.GetResponse, deps dependencyMap) (string, error) {
+func (s *Service) ensureModel(ctx context.Context, item modelDependency, deps dependencyMap) (string, error) {
 	if s.models == nil {
 		return item.ID, errors.New("model service not configured")
 	}
@@ -1234,7 +1244,7 @@ func (s *Service) ensureModel(ctx context.Context, item modelpkg.GetResponse, de
 		Name:       item.Name,
 		ProviderID: providerID,
 		Type:       item.Type,
-		Enable:     &item.Enable,
+		Enable:     item.Enable,
 		Config:     item.Config,
 	})
 	if err != nil {

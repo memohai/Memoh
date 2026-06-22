@@ -1,14 +1,12 @@
 package handlers
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -79,37 +77,38 @@ func (h *MessageHandler) SetBackgroundManager(mgr *background.Manager) {
 
 // Register registers all conversation routes.
 func (h *MessageHandler) Register(e *echo.Echo) {
-	// Bot-scoped message container (single shared history per bot).
 	botGroup := e.Group("/bots/:bot_id")
 	botGroup.GET("/messages", h.ListMessages)
 	botGroup.GET("/messages/locate", h.LocateMessage)
-	botGroup.GET("/messages/events", h.StreamMessageEvents)
 	botGroup.DELETE("/messages", h.DeleteMessages)
 	botGroup.GET("/media/:content_hash", h.ServeMedia)
+
+	// SSE streams. Per-session messages are subscribed explicitly by the
+	// client; bot-wide activity carries only lightweight session metadata
+	// (no message bodies) for sidebar live-sort.
+	botGroup.GET("/sessions/:session_id/messages/events", h.StreamSessionMessageEvents)
+	botGroup.GET("/sessions/events", h.StreamSessionsActivityEvents)
 }
 
 // --- Messages ---
 
-func writeSSEData(writer *bufio.Writer, flusher http.Flusher, payload string) error {
+func writeSSEData(writer io.Writer, flusher http.Flusher, payload string) error {
 	// SSE frames are line-oriented; fold CR/LF to avoid frame injection.
 	safePayload := strings.NewReplacer("\r", "\\r", "\n", "\\n").Replace(payload)
-	if _, err := writer.WriteString("data: "); err != nil {
+	if _, err := io.WriteString(writer, "data: "); err != nil {
 		return err
 	}
-	if _, err := writer.WriteString(safePayload); err != nil {
+	if _, err := io.WriteString(writer, safePayload); err != nil { //nolint:gosec // G705: SSE body is plain text and CR/LF are escaped above
 		return err
 	}
-	if _, err := writer.WriteString("\n\n"); err != nil {
-		return err
-	}
-	if err := writer.Flush(); err != nil {
+	if _, err := io.WriteString(writer, "\n\n"); err != nil {
 		return err
 	}
 	flusher.Flush()
 	return nil
 }
 
-func writeSSEJSON(writer *bufio.Writer, flusher http.Flusher, payload any) error {
+func writeSSEJSON(writer io.Writer, flusher http.Flusher, payload any) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -117,35 +116,19 @@ func writeSSEJSON(writer *bufio.Writer, flusher http.Flusher, payload any) error
 	return writeSSEData(writer, flusher, string(data))
 }
 
-func parseSinceParam(raw string) (time.Time, bool, error) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return time.Time{}, false, nil
-	}
-	layouts := []string{time.RFC3339Nano, time.RFC3339}
-	for _, layout := range layouts {
-		parsed, err := time.Parse(layout, trimmed)
-		if err == nil {
-			return parsed.UTC(), true, nil
-		}
-	}
-	if epochMillis, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
-		return time.UnixMilli(epochMillis).UTC(), true, nil
-	}
-	return time.Time{}, false, errors.New("invalid since parameter")
-}
-
 // ListMessages godoc
-// @Summary List bot history messages
-// @Description List messages for a bot history with optional pagination
+// @Summary List session history messages
+// @Description List messages for one session with optional pagination
 // @Tags messages
 // @Produce json
 // @Param bot_id path string true "Bot ID"
+// @Param session_id query string true "Session ID"
 // @Param limit query int false "Limit"
 // @Param before query string false "Before"
 // @Success 200 {object} map[string][]messagepkg.Message
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/messages [get].
 func (h *MessageHandler) ListMessages(c echo.Context) error {
@@ -156,6 +139,10 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	sessionID := strings.TrimSpace(c.QueryParam("session_id"))
+	if sessionID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "session_id is required")
 	}
 	if h.messageService == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "message service not configured")
@@ -171,39 +158,19 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	before, hasBefore := parseBeforeParam(c.QueryParam("before"))
 	format := strings.ToLower(strings.TrimSpace(c.QueryParam("format")))
 
-	sessionID := strings.TrimSpace(c.QueryParam("session_id"))
-	if sessionID != "" {
-		bot, _, _, err := h.authorizeMessageSession(c, channelIdentityID, botID, sessionID)
-		if err != nil {
-			return err
-		}
-		botID = bot.ID
-	} else {
-		bot, err := h.authorizeBotManage(c.Request().Context(), channelIdentityID, botID)
-		if err != nil {
-			return err
-		}
-		botID = bot.ID
+	bot, _, _, err := h.authorizeMessageSession(c, channelIdentityID, botID, sessionID)
+	if err != nil {
+		return err
 	}
+	botID = bot.ID
 
 	var messages []messagepkg.Message
-	if sessionID != "" {
-		if hasBefore {
-			messages, err = h.messageService.ListBeforeBySession(c.Request().Context(), sessionID, before, limit)
-		} else {
-			messages, err = h.messageService.ListLatestBySession(c.Request().Context(), sessionID, limit)
-			if err == nil {
-				reverseMessages(messages)
-			}
-		}
+	if hasBefore {
+		messages, err = h.messageService.ListBeforeBySession(c.Request().Context(), sessionID, before, limit)
 	} else {
-		if hasBefore {
-			messages, err = h.messageService.ListBefore(c.Request().Context(), botID, before, limit)
-		} else {
-			messages, err = h.messageService.ListLatest(c.Request().Context(), botID, limit)
-			if err == nil {
-				reverseMessages(messages)
-			}
+		messages, err = h.messageService.ListLatestBySession(c.Request().Context(), sessionID, limit)
+		if err == nil {
+			reverseMessages(messages)
 		}
 	}
 	if err != nil {
@@ -212,15 +179,15 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, messages)
 	if format == "ui" {
 		items := conversation.ConvertMessagesToUITurns(messages)
-		if sessionID != "" && h.bgManager != nil {
+		if h.bgManager != nil {
 			conversation.ApplyBackgroundTaskSnapshots(items, h.backgroundTaskSnapshots(botID, sessionID))
 		}
-		if sessionID != "" && h.toolApproval != nil {
+		if h.toolApproval != nil {
 			if approvals, err := h.toolApproval.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
 				mergeToolApprovals(items, approvals, h.toolApprovalCanApproveFn(c.Request().Context(), sessionID))
 			}
 		}
-		if sessionID != "" && h.userInput != nil {
+		if h.userInput != nil {
 			if requests, err := h.userInput.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
 				mergeUserInputs(items, requests, h.userInput.CanRespond)
 			}
@@ -507,164 +474,10 @@ func reverseMessages(m []messagepkg.Message) {
 	}
 }
 
-// StreamMessageEvents streams bot-scoped message events to clients.
-func (h *MessageHandler) StreamMessageEvents(c echo.Context) error {
-	channelIdentityID, err := h.requireChannelIdentityID(c)
-	if err != nil {
-		return err
-	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
-	}
-	bot, perms, err := h.authorizeBotMessageAccess(c, channelIdentityID, botID)
-	if err != nil {
-		return err
-	}
-	botID = bot.ID
-	if h.messageService == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "message service not configured")
-	}
-	if h.messageEvents == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "message events not configured")
-	}
-
-	since, hasSince, err := parseSinceParam(c.QueryParam("since"))
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-
-	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
-	c.Response().Header().Set(echo.HeaderCacheControl, "no-cache")
-	c.Response().Header().Set(echo.HeaderConnection, "keep-alive")
-	c.Response().WriteHeader(http.StatusOK)
-
-	flusher, ok := c.Response().Writer.(http.Flusher)
-	if !ok {
-		return echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
-	}
-	writer := bufio.NewWriter(c.Response().Writer)
-
-	sentMessageIDs := map[string]struct{}{}
-	writeCreatedEvent := func(message messagepkg.Message) error {
-		msgID := strings.TrimSpace(message.ID)
-		if msgID != "" {
-			if _, exists := sentMessageIDs[msgID]; exists {
-				return nil
-			}
-			sentMessageIDs[msgID] = struct{}{}
-		}
-		return writeSSEJSON(writer, flusher, map[string]any{
-			"type":    string(messageevent.EventTypeMessageCreated),
-			"bot_id":  botID,
-			"message": message,
-		})
-	}
-
-	_, stream, cancel := h.messageEvents.Subscribe(botID, 128)
-	defer cancel()
-
-	if hasSince {
-		backlog, err := h.messageBacklogSince(c, channelIdentityID, botID, perms, since)
-		if err != nil {
-			return err
-		}
-		h.fillAssetMimeFromStorage(c.Request().Context(), botID, backlog)
-		for _, message := range backlog {
-			if err := writeCreatedEvent(message); err != nil {
-				return nil
-			}
-		}
-	}
-
-	heartbeatTicker := time.NewTicker(20 * time.Second)
-	defer heartbeatTicker.Stop()
-
-	for {
-		select {
-		case <-c.Request().Context().Done():
-			return nil
-		case <-heartbeatTicker.C:
-			if err := writeSSEJSON(writer, flusher, map[string]any{"type": "ping"}); err != nil {
-				return nil
-			}
-		case event, ok := <-stream:
-			if !ok {
-				return nil
-			}
-			if strings.TrimSpace(event.BotID) != botID {
-				continue
-			}
-			if len(event.Data) == 0 {
-				continue
-			}
-			switch event.Type {
-			case messageevent.EventTypeMessageCreated:
-				var message messagepkg.Message
-				if err := json.Unmarshal(event.Data, &message); err != nil {
-					h.logger.Warn("decode message event failed", slog.Any("error", err))
-					continue
-				}
-				if !h.canReadMessageSession(c, channelIdentityID, botID, perms, message.SessionID) {
-					continue
-				}
-				h.fillAssetMimeFromStorage(c.Request().Context(), botID, []messagepkg.Message{message})
-				if err := writeCreatedEvent(message); err != nil {
-					return nil
-				}
-			case messageevent.EventTypeSessionTitleUpdated:
-				var payload map[string]string
-				if err := json.Unmarshal(event.Data, &payload); err != nil {
-					continue
-				}
-				if !h.canReadMessageSession(c, channelIdentityID, botID, perms, payload["session_id"]) {
-					continue
-				}
-				if err := writeSSEJSON(writer, flusher, map[string]any{
-					"type":       string(messageevent.EventTypeSessionTitleUpdated),
-					"bot_id":     botID,
-					"session_id": payload["session_id"],
-					"title":      payload["title"],
-				}); err != nil {
-					return nil
-				}
-			case messageevent.EventTypeBackgroundTask:
-				var payload map[string]any
-				if err := json.Unmarshal(event.Data, &payload); err != nil {
-					continue
-				}
-				if !h.canReadPayloadSession(c, channelIdentityID, botID, perms, payload) {
-					continue
-				}
-				payload["type"] = string(messageevent.EventTypeBackgroundTask)
-				payload["bot_id"] = botID
-				if _, ok := payload["task"]; !ok {
-					taskPayload := make(map[string]any, len(payload))
-					for key, value := range payload {
-						taskPayload[key] = value
-					}
-					payload["task"] = taskPayload
-				}
-				if err := writeSSEJSON(writer, flusher, payload); err != nil {
-					return nil
-				}
-			case messageevent.EventTypeAgentStream:
-				var payload map[string]any
-				if err := json.Unmarshal(event.Data, &payload); err != nil {
-					continue
-				}
-				if !h.canReadPayloadSession(c, channelIdentityID, botID, perms, payload) {
-					continue
-				}
-				payload["type"] = string(messageevent.EventTypeAgentStream)
-				payload["bot_id"] = botID
-				if err := writeSSEJSON(writer, flusher, payload); err != nil {
-					return nil
-				}
-			}
-		}
-	}
-}
+// StreamMessageEvents was removed in favor of two narrower streams: a
+// per-session messages SSE (see message_stream.go) and a bot-wide lightweight
+// sessions activity SSE. Resolves a catch-up explosion where a stale client
+// `since=` cursor could force a multi-megabyte replay of bot history.
 
 // DeleteMessages godoc
 // @Summary Delete all bot history messages
@@ -767,62 +580,6 @@ func (h *MessageHandler) resolveCurrentUserPermissions(c echo.Context, channelId
 		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return perms, nil
-}
-
-func (h *MessageHandler) messageBacklogSince(c echo.Context, channelIdentityID, botID string, perms []string, since time.Time) ([]messagepkg.Message, error) {
-	if bots.HasPermission(perms, bots.PermissionManage) {
-		backlog, err := h.messageService.ListSince(c.Request().Context(), botID, since)
-		if err != nil {
-			return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-		}
-		return backlog, nil
-	}
-	if h.sessionService == nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, "session service not configured")
-	}
-	sessions, err := h.sessionService.ListByBotAndCreatedByUser(c.Request().Context(), botID, channelIdentityID)
-	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	sessions = filterSessionsForPermissions(sessions, channelIdentityID, perms)
-	backlog := make([]messagepkg.Message, 0)
-	for _, sess := range sessions {
-		items, err := h.messageService.ListSinceBySession(c.Request().Context(), sess.ID, since)
-		if err != nil {
-			return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-		}
-		backlog = append(backlog, items...)
-	}
-	sort.SliceStable(backlog, func(i, j int) bool {
-		return backlog[i].CreatedAt.Before(backlog[j].CreatedAt)
-	})
-	return backlog, nil
-}
-
-func (h *MessageHandler) canReadPayloadSession(c echo.Context, channelIdentityID, botID string, perms []string, payload map[string]any) bool {
-	sessionID, _ := payload["session_id"].(string)
-	if sessionID == "" {
-		sessionID, _ = payload["sessionId"].(string)
-	}
-	return h.canReadMessageSession(c, channelIdentityID, botID, perms, sessionID)
-}
-
-func (h *MessageHandler) canReadMessageSession(c echo.Context, channelIdentityID, botID string, perms []string, sessionID string) bool {
-	if bots.HasPermission(perms, bots.PermissionManage) {
-		return true
-	}
-	if h.sessionService == nil {
-		return false
-	}
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return false
-	}
-	sess, err := h.sessionService.Get(c.Request().Context(), sessionID)
-	if err != nil || sess.BotID != botID {
-		return false
-	}
-	return canAccessSession(sess, channelIdentityID, perms)
 }
 
 // ServeMedia streams a media asset by bot_id + content_hash with read-access authorization.

@@ -86,7 +86,7 @@ fn ensure_bus_address() {
             return;
         }
         log_attempt(format!("{existing}: stale (env), rediscovering"));
-        // SAFETY: single-threaded at startup, before any tokio worker spins up.
+        // SAFETY: single-threaded at startup, before async executor work starts.
         unsafe { env::remove_var("AT_SPI_BUS_ADDRESS") };
     }
     if let Some(addr) = discover_bus_address() {

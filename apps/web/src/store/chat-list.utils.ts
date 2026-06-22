@@ -1,4 +1,4 @@
-import type { MessageStreamEvent } from '@/composables/api/useChat'
+import type { SessionMessageCreatedEvent } from '@/composables/api/useChat'
 
 export function assignInPlace<T extends object>(target: T, source: T): void {
   for (const key of Object.keys(target)) {
@@ -320,10 +320,8 @@ export function shouldRefreshFromMessageCreated(
   targetBotId: string,
   currentSessionId: string | null,
   streamingSessionId: string | null,
-  event: MessageStreamEvent,
+  event: SessionMessageCreatedEvent,
 ): boolean {
-  if ((event.type ?? '').toLowerCase() !== 'message_created') return false
-
   const raw = event.message
   if (!raw) return false
 

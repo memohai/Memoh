@@ -198,14 +198,14 @@ func TestSpawnNotificationFormat(t *testing.T) {
 		"found A",
 		"child-b",
 		"watchdog timed out",
-		"search_messages",
+		"message-history search",
 		"</task-notification>",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("spawn notification missing %q:\n%s", want, text)
 		}
 	}
-	for _, reject := range []string{"exit-code", "output-file", "<command>"} {
+	for _, reject := range []string{"exit-code", "output-file", "<command>", "search_messages"} {
 		if strings.Contains(text, reject) {
 			t.Errorf("spawn notification should not contain %q:\n%s", reject, text)
 		}

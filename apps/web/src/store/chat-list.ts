@@ -8,7 +8,7 @@ import { useRetryingStream } from '@/composables/useRetryingStream'
 import { useUserStore } from '@/store/user'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
-import { reconcileById, shouldRefreshFromMessageCreated, upsertById } from './chat-list.utils'
+import { shouldRefreshFromMessageCreated, upsertById } from './chat-list.utils'
 import {
   createSession,
   deleteSession as requestDeleteSession,
@@ -21,8 +21,9 @@ import {
   updateSessionTitle as requestUpdateSessionTitle,
   fetchSessions,
   type Bot,
+  type BotSessionActivityEvent,
   type SessionSummary,
-  type MessageStreamEvent,
+  type SessionMessageStreamEvent,
   type ChatAttachment,
   type ChatWebSocket,
   type UIAttachment,
@@ -45,7 +46,8 @@ import {
   fetchBots,
   fetchMessagesUI,
   sendLocalChannelMessage,
-  streamMessageEvents,
+  streamBotSessionsActivityEvents,
+  streamSessionMessageEvents,
   connectWebSocket,
   locateMessageUI,
 } from '@/composables/api/useChat'
@@ -70,6 +72,29 @@ export interface ToolCallBlock extends UIToolMessage {
 
 export type ContentBlock = TextBlock | ThinkingBlock | ToolCallBlock | AttachmentBlock | ErrorBlock
 
+export interface FsChangeBatch {
+  at: number
+  // null = unknown / wildcard (exec completion, manual refresh, user-driven mutation)
+  paths: ReadonlySet<string> | null
+}
+
+export type FsToolKind = 'write' | 'edit' | 'apply_patch' | 'exec'
+
+// Rich metadata for fs-mutating tool calls that landed on a known absolute
+// path. Stored per-path so the file viewer can show context (which agent, when,
+// what was written) and so the Compare flow can diff against the agent's
+// content without an extra round-trip.
+export interface FsChangeEvent {
+  at: number
+  path: string
+  kind: FsToolKind
+  toolCallId: string
+  sessionId: string
+  writeContent?: string
+  editOldText?: string
+  editNewText?: string
+}
+
 export interface ChatUserTurn {
   id: string
   serverId?: string
@@ -86,6 +111,12 @@ export interface ChatUserTurn {
   externalMessageId?: string
   streaming: boolean
   isSelf: boolean
+  // Set by createOptimisticUserTurn / createOptimisticAssistantTurn and
+  // cleared as soon as the server twin replaces the optimistic row in
+  // mergeMessages. mergeMessages keys off this flag to decide which side of
+  // a (optimistic, server) pair to drop, so any new code path that creates a
+  // client-only turn before the server acknowledges it MUST set this.
+  __optimistic?: boolean
 }
 
 export interface ChatAssistantTurn {
@@ -97,6 +128,8 @@ export interface ChatAssistantTurn {
   platform?: string
   externalMessageId?: string
   streaming: boolean
+  // See ChatUserTurn.__optimistic.
+  __optimistic?: boolean
 }
 
 interface UserInputStateSnapshot {
@@ -212,11 +245,6 @@ class StreamFailureError extends Error {
   }
 }
 
-interface SessionMessageState {
-  items: ChatMessage[]
-  hasMoreOlder: boolean
-}
-
 interface EphemeralAssistantError {
   content: string
   timestamp: string
@@ -247,9 +275,25 @@ export const useChatStore = defineStore('chat', () => {
   const streaming = computed(() => isSessionStreaming(sessionId.value))
   const sessions = ref<SessionSummary[]>([])
   const loading = ref(false)
+  // `loadingChats` covers the bot-level boot path (sessions list fetch), so
+  // the sidebar can show its skeleton + suppress its empty-state placeholder
+  // exactly while the sessions list is in flight.
+  // `loadingMessages` covers the per-session transcript fetch — the sidebar
+  // never reacts to it, only the chat pane uses it to keep its own empty
+  // placeholders hidden while a fresh transcript is on its way.
   const loadingChats = ref(false)
+  const loadingMessages = ref(false)
   const loadingOlder = ref(false)
   const hasMoreOlder = ref(true)
+  // Tracks whether the user has scrolled back and loaded at least one page of
+  // older history for the current session. Used by `refreshCurrentSession` to
+  // decide between merge (preserve scrolled-back history) and replace
+  // (consolidate optimistic turns against the server view). Replaces a
+  // timestamp-based heuristic that misfired under client/server clock skew —
+  // on a fresh session's first send the optimistic user turn could carry a
+  // timestamp slightly newer than the server-persisted one, which made the
+  // heuristic merge instead of replace and left two user turns visible.
+  const hasLoadedOlder = ref(false)
   const initializing = ref(false)
   const bots = ref<Bot[]>([])
   const overrideModelId = ref<string>('')
@@ -258,30 +302,157 @@ export const useChatStore = defineStore('chat', () => {
 
   // Bumps every time a fs-mutating tool call (write/edit/apply_patch/exec) finishes for the
   // current bot. File-manager components watch this to refresh their listings
-  // and any open file viewers without polling.
+  // and any open file viewers without polling. Trailing fixed-delay throttle so
+  // a burst of edits within one window collapses into one refresh. Each batch
+  // carries the set of paths touched in that window (or null = wildcard, for
+  // exec and other unknown-impact triggers) so consumers can filter by path.
   const fsChangedAt = ref(0)
+  const lastFsChange = ref<FsChangeBatch | null>(null)
+  // Most recent rich event per absolute path. Powers the file-viewer chip's
+  // "who did what" context and the Compare view's diff baseline. Wildcard
+  // events (exec / apply_patch / relative paths) are intentionally absent —
+  // those still fire fsChangedAt but contribute no per-path metadata.
+  const lastFsEvents = ref<Map<string, FsChangeEvent>>(new Map())
   const FS_MUTATING_TOOLS = new Set(['write', 'edit', 'apply_patch', 'exec'])
+  const FS_CHANGED_DEBOUNCE_MS = 150
+  let fsChangedBumpTimer: ReturnType<typeof setTimeout> | null = null
+  let pendingFsPaths: Set<string> | null = new Set()
+  let pendingFsEvents = new Map<string, FsChangeEvent>()
+  // Bot at the moment the in-flight batch started. If currentBotId changes
+  // before the timer fires, the batch belongs to the old bot and we drop it
+  // rather than leak it into the new bot's UI.
+  let pendingFsBotId: string | null = null
+  // Tool calls we've already bumped (or seen at load time) for the current
+  // bot. Prevents double-bumping when a tool first arrives via the WS stream
+  // and then re-appears via the stream-end / message_created refresh path.
+  const seenFsToolCallIds = new Set<string>()
+
+  function markFsChanged(path?: string | null) {
+    if (path === undefined || path === null) {
+      pendingFsPaths = null
+    } else if (pendingFsPaths !== null) {
+      pendingFsPaths.add(path)
+    }
+    if (fsChangedBumpTimer != null) return
+    pendingFsBotId = currentBotId.value
+    fsChangedBumpTimer = setTimeout(() => {
+      fsChangedBumpTimer = null
+      const recordedBotId = pendingFsBotId
+      const paths = pendingFsPaths
+      const events = pendingFsEvents
+      pendingFsBotId = null
+      pendingFsPaths = new Set()
+      pendingFsEvents = new Map()
+      if (recordedBotId !== currentBotId.value) return
+      const at = Date.now()
+      lastFsChange.value = { at, paths }
+      fsChangedAt.value = at
+      if (events.size > 0) {
+        const next = new Map(lastFsEvents.value)
+        for (const [p, ev] of events) next.set(p, ev)
+        lastFsEvents.value = next
+      }
+    }, FS_CHANGED_DEBOUNCE_MS)
+  }
+
+  function cancelPendingFsBump() {
+    if (fsChangedBumpTimer != null) {
+      clearTimeout(fsChangedBumpTimer)
+      fsChangedBumpTimer = null
+    }
+    pendingFsPaths = new Set()
+    pendingFsEvents = new Map()
+    pendingFsBotId = null
+  }
+
+  function affectsPath(path: string): boolean {
+    const change = lastFsChange.value
+    if (!change) return false
+    if (change.paths === null) return true
+    return change.paths.has(path)
+  }
+
+  function fsEventForPath(path: string): FsChangeEvent | null {
+    return lastFsEvents.value.get(path) ?? null
+  }
+
+  function extractToolMessagePath(message: UIMessage): string | null {
+    if (message.type !== 'tool') return null
+    const input = message.input
+    if (typeof input !== 'object' || input === null) return null
+    const path = (input as Record<string, unknown>).path
+    if (typeof path !== 'string' || !path) return null
+    // Only emit absolute paths as path-targeted hints. Viewer filePaths are
+    // always absolute (the FS list API normalizes them); a relative path here
+    // can't be safely compared without knowing the agent's cwd, so fall through
+    // to wildcard and let every viewer decide whether to refresh.
+    if (!path.startsWith('/')) return null
+    return path
+  }
+
+  function buildFsChangeEvent(message: UIMessage, path: string, callId: string): FsChangeEvent | null {
+    if (message.type !== 'tool') return null
+    const input = message.input
+    const event: FsChangeEvent = {
+      at: Date.now(),
+      path,
+      kind: message.name as FsToolKind,
+      toolCallId: callId,
+      sessionId: (sessionId.value ?? '').trim(),
+    }
+    if (typeof input === 'object' && input !== null) {
+      const rec = input as Record<string, unknown>
+      if (message.name === 'write' && typeof rec.content === 'string') {
+        event.writeContent = rec.content
+      } else if (message.name === 'edit') {
+        if (typeof rec.old_text === 'string') event.editOldText = rec.old_text
+        if (typeof rec.new_text === 'string') event.editNewText = rec.new_text
+      }
+    }
+    return event
+  }
 
   function bumpFsChangedAtIfFsMutation(message: UIMessage) {
     if (message.type !== 'tool') return
     if (message.running) return
     if (!FS_MUTATING_TOOLS.has(message.name)) return
-    fsChangedAt.value = Date.now()
+    const callId = message.tool_call_id?.trim() ?? ''
+    if (callId && seenFsToolCallIds.has(callId)) return
+    if (callId) seenFsToolCallIds.add(callId)
+    // write / edit carry their target `path` in input. apply_patch can target
+    // many files (multi-path parsing belongs to the view layer, not the store)
+    // and exec is opaque — both fall back to wildcard.
+    const path = (message.name === 'write' || message.name === 'edit')
+      ? extractToolMessagePath(message)
+      : null
+    if (path) {
+      const event = buildFsChangeEvent(message, path, callId)
+      if (event) pendingFsEvents.set(path, event)
+    }
+    markFsChanged(path)
   }
 
-  let messageEventsSince = ''
   let activeWs: ChatWebSocket | null = null
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
   let refreshPromise: { key: string; promise: Promise<void> } | null = null
   let sessionListRefreshPromise: { botId: string; promise: Promise<void> } | null = null
-  const pendingBackgroundEvents = new Map<string, BackgroundTask[]>()
   const latestBackgroundTasks = new Map<string, BackgroundTask>()
-  // Open chat tabs share this store, so keep a small per-session view cache.
-  // Switching tabs saves/restores from here; the active session remains the
-  // only live `messages` array rendered by ChatPane.
-  const sessionMessageStates = new Map<string, SessionMessageState>()
   const ephemeralAssistantErrors = new Map<string, EphemeralAssistantError[]>()
-  const messageEventsStream = useRetryingStream()
+  // Two independent streams replace the deleted bot-wide messages SSE:
+  // - sessionMessagesStream follows the active sessionId and feeds the
+  //   transcript (server pushes a small backlog + live messages for that
+  //   session only, so no client-supplied cursor is needed).
+  // - botSessionsActivityStream is bot-wide and lightweight: identifiers
+  //   only, never message bodies, used to keep the sidebar live-sorted and
+  //   to notice sessions created from external channels.
+  const sessionMessagesStream = useRetryingStream()
+  const botSessionsActivityStream = useRetryingStream()
+  // O(1) lookup keeps event handlers off the list scan that previously
+  // blocked the UI on bots with thousands of heartbeat sessions.
+  const sessionById = new Map<string, SessionSummary>()
+  const sessionsCursor = ref<string | null>(null)
+  const hasMoreSessions = ref(false)
+  const loadingMoreSessions = ref(false)
   const acpRuntimeStatuses = ref<Record<string, AcpagentRuntimeStatus | undefined>>({})
   const acpRuntimePending = ref<Record<string, boolean>>({})
   const acpRuntimeRequests = new Map<string, Promise<AcpagentRuntimeStatus>>()
@@ -294,9 +465,38 @@ export const useChatStore = defineStore('chat', () => {
   let pendingACPCreateKey = ''
   let pendingACPGeneration = 0
 
-  const activeSession = computed(() =>
-    sessions.value.find((s) => s.id === sessionId.value) ?? null,
-  )
+  const activeSession = computed(() => sessionById.get(sessionId.value ?? '') ?? null)
+
+  function replaceSessions(items: SessionSummary[]) {
+    sessions.value = items
+    sessionById.clear()
+    for (const s of items) sessionById.set(s.id, s)
+  }
+
+  function appendSessions(items: SessionSummary[]) {
+    if (items.length === 0) return
+    const fresh = items.filter(s => !sessionById.has(s.id))
+    if (fresh.length === 0) return
+    sessions.value = [...sessions.value, ...fresh]
+    for (const s of fresh) sessionById.set(s.id, s)
+  }
+
+  function upsertSession(updated: SessionSummary) {
+    const existing = sessionById.get(updated.id)
+    if (existing) {
+      const rest = sessions.value.filter(session => session.id !== updated.id)
+      sessions.value = [updated, ...rest]
+    } else {
+      sessions.value = [updated, ...sessions.value]
+    }
+    sessionById.set(updated.id, updated)
+  }
+
+  function removeSessionFromList(id: string) {
+    if (!sessionById.has(id)) return
+    sessions.value = sessions.value.filter(session => session.id !== id)
+    sessionById.delete(id)
+  }
 
   const activeChatReadOnly = computed(() => {
     const session = activeSession.value
@@ -544,13 +744,6 @@ export const useChatStore = defineStore('chat', () => {
   function applyPendingBackgroundEventsToTool(block: ToolCallBlock) {
     const taskId = taskIdFromToolBlock(block)
     if (!taskId) return
-    const pending = pendingBackgroundEvents.get(taskId)
-    if (pending?.length) {
-      for (const task of pending) {
-        mergeBackgroundTaskIntoToolBlock(block, task)
-      }
-      pendingBackgroundEvents.delete(taskId)
-    }
     const latest = latestBackgroundTasks.get(taskId)
     if (latest) {
       mergeBackgroundTaskIntoToolBlock(block, latest)
@@ -654,33 +847,6 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function updateSince(value?: string) {
-    const next = (value ?? '').trim()
-    if (!next) return
-    if (!messageEventsSince) {
-      messageEventsSince = next
-      return
-    }
-    const currentTs = Date.parse(messageEventsSince)
-    const nextTs = Date.parse(next)
-    if (!Number.isNaN(nextTs) && (Number.isNaN(currentTs) || nextTs > currentTs)) {
-      messageEventsSince = next
-    }
-  }
-
-  function updateSinceFromMessages(items: ChatMessage[]) {
-    // Advance only. Restoring an older tab snapshot must not move the event
-    // cursor backwards and replay unrelated stream events.
-    for (const item of items) {
-      if (isEphemeralAssistantErrorTurn(item)) continue
-      updateSince(item.timestamp)
-    }
-  }
-
-  function isEphemeralAssistantErrorTurn(item: ChatMessage): boolean {
-    return item.role === 'assistant' && item.id.startsWith('ephemeral-error-')
-  }
-
   function ephemeralErrorId(sessionID: string, error: EphemeralAssistantError): string {
     let hash = 0
     const input = `${error.timestamp}:${error.content}`
@@ -718,12 +884,11 @@ export const useChatStore = defineStore('chat', () => {
     return target
   }
 
-  function findUserTurnBeforeAssistant(assistantTurn: ChatAssistantTurn, botId = currentBotId.value ?? '', targetSessionId = sessionId.value ?? ''): ChatUserTurn | null {
-    const items = collectionForTurn(botId, targetSessionId, assistantTurn)
-    const index = items.indexOf(assistantTurn)
+  function findUserTurnBeforeAssistant(assistantTurn: ChatAssistantTurn): ChatUserTurn | null {
+    const index = messages.indexOf(assistantTurn)
     if (index < 0) return null
     for (let i = index - 1; i >= 0; i -= 1) {
-      const item = items[i]
+      const item = messages[i]
       if (item?.role === 'user') return item
     }
     return null
@@ -807,61 +972,17 @@ export const useChatStore = defineStore('chat', () => {
     return normalized
   }
 
-  function setMessages(items: ChatMessage[]) {
-    messages.splice(0, messages.length, ...items)
-    updateSinceFromMessages(items)
-  }
-
-  const PRESERVED_TURN_KEYS = ['id', 'serverId']
-
-  function mergeTurnInPlace(current: ChatMessage, incoming: ChatMessage) {
-    const mergeBlocks = current.role === 'assistant' && incoming.role === 'assistant'
-    if (mergeBlocks) {
-      reconcileById(current.messages, incoming.messages)
-    }
-    const target = current as unknown as Record<string, unknown>
-    const source = incoming as unknown as Record<string, unknown>
-    for (const key of Object.keys(target)) {
-      if (PRESERVED_TURN_KEYS.includes(key)) continue
-      if (mergeBlocks && key === 'messages') continue
-      if (!(key in source)) delete target[key]
-    }
-    for (const key of Object.keys(source)) {
-      if (PRESERVED_TURN_KEYS.includes(key)) continue
-      if (mergeBlocks && key === 'messages') continue
-      target[key] = source[key]
-    }
-  }
-
-  function adoptTailOptimisticTurns(incoming: ChatMessage[]) {
-    const incomingIds = new Set(incoming.map(turn => turn.id))
-    const existingKeys = new Set(messages.map(turn => turn.serverId ?? turn.id))
-    let ei = messages.length - 1
-    let ii = incoming.length - 1
-    while (ei >= 0 && ii >= 0) {
-      const existing = messages[ei]
-      const candidate = incoming[ii]
-      if (!existing || !candidate) break
-      if (incomingIds.has(existing.serverId ?? existing.id)) break
-      if (existingKeys.has(candidate.id)) break
-      if (existing.role !== candidate.role) break
-      existing.serverId = candidate.id
-      ei -= 1
-      ii -= 1
-    }
-  }
-
-  function reconcileMessages(items: ChatMessage[]) {
-    adoptTailOptimisticTurns(items)
-    reconcileById(messages, items, {
-      keyOfExisting: turn => turn.serverId ?? turn.id,
-      merge: mergeTurnInPlace,
-    })
-    updateSinceFromMessages(items)
-  }
+  // Active-session-only view. There is no per-session message cache: switching
+  // sessions clears `messages` and re-fetches the new session's transcript via
+  // `refreshCurrentSession`. The previous identity-preserving reconciler held
+  // ChatMessage references across sessions in the cache and let
+  // mergeTurnInPlace mutate them, which corrupted the view when navigating
+  // between sessions. Per-session SSE delivers live updates without ever
+  // touching another session's data, so cross-session caching has no purpose.
 
   function replaceMessages(items: UITurn[], targetSessionId?: string) {
-    setMessages(normalizeTurns(items, targetSessionId))
+    const next = normalizeTurns(items, targetSessionId)
+    messages.splice(0, messages.length, ...next)
   }
 
   function sortChatMessages(items: ChatMessage[]): ChatMessage[] {
@@ -873,58 +994,63 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
+  // Used by locateMessageByExternalId to merge a server-supplied message window
+  // into the current view.
+  //
+  // While the user is scrolled-back (hasLoadedOlder), an SSE-triggered refresh
+  // can arrive with a server-side row for a turn the user just sent. The
+  // optimistic turn in `messages` carries a client-generated id and the server
+  // turn carries a different server id, so a pure id-keyed dedup leaves both
+  // visible until the next session switch. Match optimistic turns to their
+  // server counterparts first — by externalMessageId when present, otherwise
+  // by (role, content, timestamp within 5s) — and replace the optimistic turn
+  // with the server one in place.
   function mergeMessages(items: UITurn[], targetSessionId?: string) {
+    const incoming = normalizeTurns(items, targetSessionId)
+    const matched = new Set<string>()
+    for (let i = 0; i < messages.length; i += 1) {
+      const optimistic = messages[i]
+      if (!optimistic || !isOptimisticTurn(optimistic)) continue
+      const replacement = incoming.find(turn => !matched.has(turn.id) && isSameLogicalTurn(optimistic, turn))
+      if (replacement) {
+        messages[i] = replacement
+        matched.add(replacement.id)
+      }
+    }
     const merged = new Map<string, ChatMessage>()
-    for (const item of messages) {
-      merged.set(item.id, item)
+    for (const item of messages) merged.set(item.id, item)
+    for (const item of incoming) merged.set(item.id, item)
+    const sorted = sortChatMessages([...merged.values()])
+    messages.splice(0, messages.length, ...sorted)
+  }
+
+  // Optimistic turns set `__optimistic: true` at construction
+  // (createOptimisticUserTurn / createOptimisticAssistantTurn). Server-derived
+  // turns from fetchMessagesUI and SSE never carry this flag, so an opaque id
+  // shape (numeric, UUID, slug) is irrelevant here.
+  function isOptimisticTurn(turn: ChatMessage): boolean {
+    return turn.__optimistic === true
+  }
+
+  const SAME_TURN_TIMESTAMP_TOLERANCE_MS = 5_000
+
+  function isSameLogicalTurn(local: ChatMessage, incoming: ChatMessage): boolean {
+    if (local.role !== incoming.role) return false
+    const localExt = (local as { externalMessageId?: string }).externalMessageId
+    const incomingExt = (incoming as { externalMessageId?: string }).externalMessageId
+    if (localExt && incomingExt) return localExt === incomingExt
+    if (local.role === 'user' && incoming.role === 'user') {
+      if (local.text.trim() !== incoming.text.trim()) return false
+    } else if (local.role === 'assistant' && incoming.role === 'assistant') {
+      // Assistant turns rarely overlap as optimistic + server in this path
+      // because optimistic assistants stay attached to a live stream; bail
+      // out conservatively rather than guessing on opaque content blocks.
+      return false
+    } else {
+      return false
     }
-    for (const item of normalizeTurns(items, targetSessionId)) {
-      merged.set(item.id, item)
-    }
-    setMessages(sortChatMessages([...merged.values()]))
-  }
-
-  function sessionMessageKey(botId?: string | null, sid?: string | null): string {
-    const bid = (botId ?? '').trim()
-    const session = (sid ?? '').trim()
-    return bid && session ? `${bid}:${session}` : ''
-  }
-
-  function cacheCurrentMessages() {
-    const key = sessionMessageKey(currentBotId.value, sessionId.value)
-    if (!key) return
-    sessionMessageStates.set(key, {
-      items: [...messages],
-      hasMoreOlder: hasMoreOlder.value,
-    })
-  }
-
-  function restoreCachedMessages(botId: string, sid: string): boolean {
-    const key = sessionMessageKey(botId, sid)
-    const cached = key ? sessionMessageStates.get(key) : undefined
-    if (!cached) return false
-    messages.splice(0, messages.length, ...cached.items)
-    hasMoreOlder.value = cached.hasMoreOlder
-    updateSinceFromMessages(cached.items)
-    return true
-  }
-
-  function cacheFetchedMessages(botId: string, sid: string, items: ChatMessage[], moreOlder: boolean) {
-    const key = sessionMessageKey(botId, sid)
-    if (!key) return
-    sessionMessageStates.set(key, {
-      items: [...items],
-      hasMoreOlder: moreOlder,
-    })
-    for (const item of items) {
-      if (isEphemeralAssistantErrorTurn(item)) continue
-      updateSince(item.timestamp)
-    }
-  }
-
-  function clearCachedMessages(botId?: string | null, sid?: string | null) {
-    const key = sessionMessageKey(botId, sid)
-    if (key) sessionMessageStates.delete(key)
+    const dt = Math.abs(new Date(local.timestamp).getTime() - new Date(incoming.timestamp).getTime())
+    return Number.isFinite(dt) && dt <= SAME_TURN_TIMESTAMP_TOLERANCE_MS
   }
 
   function createStreamId(): string {
@@ -1006,43 +1132,24 @@ export const useChatStore = defineStore('chat', () => {
     pendingAssistantStreams.delete(streamId.trim())
   }
 
+  // Append/remove operate only on the active session's `messages` array.
+  // Optimistic turns belonging to a now-stale session (the user switched away
+  // before the assistant stream finished) are silently dropped from the view;
+  // the server keeps recording the conversation and the next REST refresh on
+  // that session will surface the response.
+
   function appendTurnToSession(botId: string, targetSessionId: string, turn: ChatMessage) {
     const bid = botId.trim()
     const sid = targetSessionId.trim()
     if (!bid || !sid) return
     if (currentBotId.value === bid && sessionId.value === sid) {
       messages.push(turn)
-      return
-    }
-    const key = sessionMessageKey(bid, sid)
-    if (!key) return
-    const cached = sessionMessageStates.get(key)
-    if (cached) {
-      cached.items.push(turn)
-    } else {
-      sessionMessageStates.set(key, {
-        items: [turn],
-        hasMoreOlder: true,
-      })
     }
   }
 
-  function removeTurnFromSession(botId: string, targetSessionId: string, turn: ChatMessage) {
+  function removeTurnFromSession(_botId: string, _targetSessionId: string, turn: ChatMessage) {
     const idx = messages.indexOf(turn)
     if (idx >= 0) messages.splice(idx, 1)
-    const key = sessionMessageKey(botId, targetSessionId)
-    const cached = key ? sessionMessageStates.get(key) : undefined
-    if (!cached) return
-    const cachedIdx = cached.items.indexOf(turn)
-    if (cachedIdx >= 0) cached.items.splice(cachedIdx, 1)
-  }
-
-  function collectionForTurn(botId: string, targetSessionId: string, turn: ChatMessage): ChatMessage[] {
-    if (messages.includes(turn)) return messages
-    const key = sessionMessageKey(botId, targetSessionId)
-    const cached = key ? sessionMessageStates.get(key) : undefined
-    if (cached?.items.includes(turn)) return cached.items
-    return messages
   }
 
   function createOptimisticAssistantTurn(): ChatAssistantTurn {
@@ -1052,6 +1159,7 @@ export const useChatStore = defineStore('chat', () => {
       messages: [],
       timestamp: new Date().toISOString(),
       streaming: true,
+      __optimistic: true,
     }
   }
 
@@ -1069,6 +1177,7 @@ export const useChatStore = defineStore('chat', () => {
       timestamp: new Date().toISOString(),
       streaming: false,
       isSelf: true,
+      __optimistic: true,
     }
   }
 
@@ -1109,6 +1218,12 @@ export const useChatStore = defineStore('chat', () => {
   // Approval and user-input snapshots are partial messages: the ?? / || guards
   // keep them from wiping fields the stream already filled in. The block keeps
   // its id (and reactive identity) — only content fields move.
+  //
+  // We use ?? / || here for partial-overlay semantics — preserving an
+  // already-populated field when the incoming partial omits it. This is
+  // distinct from fabricating defaults for unvalidated input, which the
+  // project conventions in CLAUDE.md prohibit; here both sides are typed
+  // server payloads and "absent" means "no update," not "missing data."
   function mergeToolCallBlock(existing: ToolCallBlock, incoming: ToolCallBlock) {
     Object.assign(existing, incoming, {
       id: existing.id,
@@ -1189,7 +1304,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!sid || !text) return
     const current = ephemeralAssistantErrors.get(sid) ?? []
     if (current.some(item => item.content === text)) return
-    const anchorUser = findUserTurnBeforeAssistant(assistantTurn, botId, sid)
+    const anchorUser = findUserTurnBeforeAssistant(assistantTurn)
     ephemeralAssistantErrors.set(sid, [...current, {
       content: text,
       timestamp: new Date().toISOString(),
@@ -1312,8 +1427,21 @@ export const useChatStore = defineStore('chat', () => {
         pruneEmptyAssistantTurnIfPending(streamId)
         resolveAssistantStream(streamId)
         loading.value = isSessionStreaming(sessionId.value)
-        if (!endedSessionId || !isSessionStreaming(endedSessionId)) {
+        // Only refresh when the ended stream belongs to the active session.
+        // Otherwise the REST round trip lands after the user has switched
+        // away and `refreshCurrentSession` drops the result anyway.
+        if (
+          endedSessionId
+          && !isSessionStreaming(endedSessionId)
+          && endedSessionId === (sessionId.value ?? '').trim()
+          && endedBotId === (currentBotId.value ?? '').trim()
+        ) {
           void refreshCurrentSession(endedBotId, endedSessionId)
+        } else if (endedSessionId && !isSessionStreaming(endedSessionId)) {
+          // Background session: skip the REST refresh, but still bump the
+          // sidebar timestamp so the ended session floats to the top of the
+          // list instead of remaining ordered by its last streamed delta.
+          touchSessionInList(endedSessionId, new Date().toISOString())
         }
         break
       case 'error': {
@@ -1329,10 +1457,6 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function stopMessageEvents() {
-    messageEventsStream.stop()
-  }
-
   function stopWebSocket() {
     if (activeWs) {
       activeWs.close()
@@ -1341,7 +1465,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function resetUserScopedState(options: { clearSelection?: boolean } = {}) {
-    stopMessageEvents()
+    stopStreams()
     abortAllAssistantStreams()
     stopWebSocket()
 
@@ -1351,9 +1475,11 @@ export const useChatStore = defineStore('chat', () => {
     }
     refreshPromise = null
     sessionListRefreshPromise = null
-    messageEventsSince = ''
 
-    sessions.value = []
+    replaceSessions([])
+    sessionsCursor.value = null
+    hasMoreSessions.value = false
+    loadingMoreSessions.value = false
     bots.value = []
     sessionId.value = null
     if (options.clearSelection && currentBotId.value) {
@@ -1361,6 +1487,7 @@ export const useChatStore = defineStore('chat', () => {
     }
     replaceMessages([])
     hasMoreOlder.value = true
+    hasLoadedOlder.value = false
     loading.value = false
     loadingChats.value = false
     loadingOlder.value = false
@@ -1368,14 +1495,16 @@ export const useChatStore = defineStore('chat', () => {
     overrideModelId.value = ''
     overrideReasoningEffort.value = ''
     startupSendFailure.value = null
+    cancelPendingFsBump()
     fsChangedAt.value = 0
+    lastFsChange.value = null
+    lastFsEvents.value = new Map()
+    seenFsToolCallIds.clear()
     clearPendingACPSession()
 
     pendingAssistantStreams.clear()
     approvalResponseStreams.clear()
-    pendingBackgroundEvents.clear()
     latestBackgroundTasks.clear()
-    sessionMessageStates.clear()
     ephemeralAssistantErrors.clear()
   }
 
@@ -1399,7 +1528,7 @@ export const useChatStore = defineStore('chat', () => {
     const bid = (targetBotId ?? currentBotId.value ?? '').trim()
     const sid = (targetSessionId ?? sessionId.value ?? '').trim()
     if (!bid || !sid) return
-    const key = sessionMessageKey(bid, sid)
+    const key = `${bid}:${sid}`
 
     if (refreshPromise) {
       if (refreshPromise.key === key) {
@@ -1411,16 +1540,34 @@ export const useChatStore = defineStore('chat', () => {
 
     const promise = (async () => {
       const turns = await fetchMessagesUI(bid, sid, { limit: PAGE_SIZE })
-      const normalized = normalizeTurns(turns, sid)
-      const moreOlder = turns.length > 0
-      if (currentBotId.value === bid && sessionId.value === sid) {
-        reconcileMessages(normalized)
-        hasMoreOlder.value = moreOlder
-        cacheCurrentMessages()
+      // The user may have switched away while the request was in flight. Drop
+      // the result silently — the new session has its own load underway.
+      if (currentBotId.value !== bid || sessionId.value !== sid) return
+      // Pick replace vs merge by whether the user has scrolled back to load
+      // older history. When older pages are present we MUST preserve them
+      // (otherwise an SSE-triggered refresh wipes the prepended history).
+      // Otherwise replace, so optimistic in-flight turns get consolidated
+      // against the server's authoritative view on stream end. The signal
+      // is a flag set by `loadOlderMessages` rather than a timestamp
+      // comparison, because client/server clock skew on a fresh session's
+      // first send could otherwise flip the decision and duplicate the user
+      // turn.
+      if (hasLoadedOlder.value) {
+        mergeMessages(turns, sid)
       } else {
-        cacheFetchedMessages(bid, sid, normalized, moreOlder)
+        replaceMessages(turns, sid)
+        // We cannot infer end-of-history from `turns.length < PAGE_SIZE`: the
+        // server pages by raw `bot_history_messages` rows but returns merged
+        // UI turns (multi-row user/assistant groups collapsed into one). A 30-
+        // row page collapses to ~28 turns even when the session has thousands
+        // more rows behind it, so trusting that count truncates real history.
+        // Leave `hasMoreOlder` at the optimistic default and let the first
+        // scroll-to-top call `loadOlderMessages`, whose authoritative
+        // empty-server-response handling settles the flag correctly.
+        hasMoreOlder.value = true
       }
-      touchSession(sid, normalized.at(-1)?.timestamp)
+      const latest = messages[messages.length - 1]?.timestamp
+      touchSessionInList(sid, latest)
     })().finally(() => {
       if (refreshPromise?.promise === promise) {
         refreshPromise = null
@@ -1437,9 +1584,11 @@ export const useChatStore = defineStore('chat', () => {
     if (sessionListRefreshPromise?.botId === bid) return sessionListRefreshPromise.promise
 
     const promise = fetchSessions(bid)
-      .then((visible) => {
+      .then((response) => {
         if ((currentBotId.value ?? '').trim() !== bid) return
-        sessions.value = visible
+        replaceSessions(response.items)
+        sessionsCursor.value = response.nextCursor
+        hasMoreSessions.value = response.nextCursor !== null
       })
       .catch((error) => {
         console.error('Failed to refresh sessions:', error)
@@ -1452,6 +1601,25 @@ export const useChatStore = defineStore('chat', () => {
 
     sessionListRefreshPromise = { botId: bid, promise }
     return promise
+  }
+
+  async function loadMoreSessions(): Promise<void> {
+    if (!hasMoreSessions.value || loadingMoreSessions.value) return
+    const bid = (currentBotId.value ?? '').trim()
+    const cursor = sessionsCursor.value
+    if (!bid || !cursor) return
+    loadingMoreSessions.value = true
+    try {
+      const response = await fetchSessions(bid, { cursor })
+      if ((currentBotId.value ?? '').trim() !== bid) return
+      appendSessions(response.items)
+      sessionsCursor.value = response.nextCursor
+      hasMoreSessions.value = response.nextCursor !== null
+    } catch (error) {
+      console.error('Failed to load more sessions:', error)
+    } finally {
+      loadingMoreSessions.value = false
+    }
   }
 
   function scheduleRefreshCurrentSession(expectedSessionId?: string, delay = 100) {
@@ -1469,138 +1637,123 @@ export const useChatStore = defineStore('chat', () => {
     }, delay)
   }
 
-  function findBackgroundToolBlockIn(items: ChatMessage[], taskId: string): ToolCallBlock | null {
-    const id = taskId.trim()
-    if (!id) return null
-    for (const item of items) {
-      if (item.role !== 'assistant') continue
-      for (const block of item.messages) {
-        if (block.type !== 'tool') continue
-        if (taskIdFromToolBlock(block) === id) return block
-      }
-    }
-    return null
-  }
+  function handleSessionMessageEvent(targetBotId: string, targetSessionId: string, event: SessionMessageStreamEvent) {
+    if (event.type === 'ping') return
 
-  function findBackgroundToolBlock(taskId: string): ToolCallBlock | null {
-    return findBackgroundToolBlockIn(messages, taskId)
-  }
-
-  function applyBackgroundTaskToCachedMessages(botId: string, task: BackgroundTask) {
-    const key = sessionMessageKey(botId, task.sessionId)
-    const cached = key ? sessionMessageStates.get(key) : undefined
-    if (!cached) return
-    const block = findBackgroundToolBlockIn(cached.items, task.taskId)
-    if (block) mergeBackgroundTaskIntoToolBlock(block, task)
-  }
-
-  function queuePendingBackgroundEvent(task: BackgroundTask) {
-    const current = pendingBackgroundEvents.get(task.taskId) ?? []
-    current.push(task)
-    pendingBackgroundEvents.set(task.taskId, current.slice(-40))
-  }
-
-  function applyBackgroundTaskEvent(targetBotId: string, event: MessageStreamEvent) {
-    const incoming = normalizeBackgroundTask(event.task ?? (event as UIBackgroundTask), event.event)
-    if (!incoming) return
-
-    const sid = (sessionId.value ?? '').trim()
-
-    const task = rememberBackgroundTask(incoming)
-
-    if (incoming.sessionId && sid && incoming.sessionId !== sid) {
-      applyBackgroundTaskToCachedMessages(targetBotId, task)
-      return
-    }
-
-    const block = findBackgroundToolBlock(task.taskId)
-    if (block) {
-      mergeBackgroundTaskIntoToolBlock(block, task)
-      if (!isBackgroundTaskActive(block.backgroundTask)) {
-        fsChangedAt.value = Date.now()
-      }
-    } else {
-      queuePendingBackgroundEvent(task)
-    }
-
-    if (!isBackgroundTaskActive(task) || task.status === 'stalled') {
-      scheduleRefreshCurrentSession(task.sessionId, 250)
-    }
-  }
-
-  function applyAgentStreamEvent(event: MessageStreamEvent) {
-    const stream = event.stream
-    if (!stream) return
-
-    const sid = (event.session_id ?? '').trim()
-    const activeSid = (sessionId.value ?? '').trim()
-    if (sid && activeSid && sid !== activeSid) {
-      const isKnownBackgroundStream = !!stream.stream_id && pendingAssistantStreams.has(stream.stream_id)
-      if (!isKnownBackgroundStream) return
-    }
-
-    if (stream.type === 'start' || stream.type === 'message') {
-      loading.value = true
-    }
-
-    handleWSStreamEvent(stream, sid || undefined)
-  }
-
-  function handleStreamEvent(targetBotId: string, event: MessageStreamEvent) {
-    const eventType = (event.type ?? '').toLowerCase()
-    const eBotId = (event.bot_id ?? '').trim()
-    if (eBotId && eBotId !== targetBotId) return
-
-    if (eventType === 'background_task') {
-      applyBackgroundTaskEvent(targetBotId, event)
-      return
-    }
-
-    if (eventType === 'agent_stream') {
-      applyAgentStreamEvent(event)
-      return
-    }
-
-    if (eventType === 'message_created') {
-      const raw = event.message
-      if (!raw) return
-      updateSince(raw.created_at)
-      const messageSessionId = String(raw.session_id ?? event.session_id ?? '').trim()
-      if (messageSessionId) {
-        if (sessions.value.some((session) => session.id === messageSessionId)) {
-          touchSession(messageSessionId, raw.created_at)
-        } else {
-          void refreshSessionsList(targetBotId)
-        }
-      }
-      if (shouldRefreshFromMessageCreated(targetBotId, sessionId.value, streamingSessionId.value, event)) {
-        scheduleRefreshCurrentSession((raw.session_id ?? '').trim())
-      }
-      return
-    }
-
-    if (eventType === 'session_title_updated') {
-      const sid = (event.session_id ?? '').trim()
-      const title = (event.title ?? '').trim()
+    if (event.type === 'session_title_updated') {
+      const sid = event.session_id.trim()
+      const title = event.title.trim()
       if (!sid || !title) return
-      const target = sessions.value.find((session) => session.id === sid)
+      const target = sessionById.get(sid)
       if (target) target.title = title
+      return
     }
+
+    // message_created. Per-session SSE delivers raw messages; the server's
+    // backlog handshake (per-stream backlogIDs) ensures the client sees only
+    // genuinely live events post-backlog, so we don't try to dedup against
+    // already-known message ids — the comparison was unsound anyway because
+    // `messages` holds aggregated UI turns whose ids live in a different
+    // namespace from raw bot_history_messages.id. The downstream
+    // `scheduleRefreshCurrentSession` is debounced and idempotent, so an
+    // occasional redundant REST round trip is cheap.
+    const raw = event.message
+    if (!raw) return
+    const messageSessionId = String(raw.session_id ?? '').trim()
+    if (messageSessionId && messageSessionId !== targetSessionId) return
+    if (messageSessionId) touchSessionInList(messageSessionId, raw.created_at)
+    if (!shouldRefreshFromMessageCreated(targetBotId, sessionId.value, streamingSessionId.value, event)) return
+    scheduleRefreshCurrentSession(messageSessionId)
   }
 
-  function startMessageEvents(targetBotId: string) {
+  function handleBotSessionsActivityEvent(targetBotId: string, event: BotSessionActivityEvent) {
+    if (event.type === 'ping') return
+
+    if (event.type === 'session_touched') {
+      const sid = event.session_id.trim()
+      if (!sid) return
+      const target = sessionById.get(sid)
+      if (target) {
+        if (event.updated_at && (!target.updated_at || event.updated_at > target.updated_at)) {
+          target.updated_at = event.updated_at
+        }
+        return
+      }
+      // Unknown session — likely created from another channel. Reload the
+      // first page so it shows up in the sidebar.
+      void refreshSessionsList(targetBotId)
+      return
+    }
+
+    if (event.type === 'session_title_changed') {
+      const sid = event.session_id.trim()
+      const title = event.title.trim()
+      if (!sid || !title) return
+      const target = sessionById.get(sid)
+      if (target) target.title = title
+      return
+    }
+
+    // session_created — server filters to user-facing types, but emits only
+    // `session_id` / `title` / `created_at` (no session type, no metadata).
+    // A stub with `type: undefined` would fail every consumer that branches
+    // on session.type, so reload the first page instead and let the server
+    // return the full summary.
+    const sid = event.session_id.trim()
+    if (!sid || sessionById.has(sid)) return
+    void refreshSessionsList(targetBotId)
+  }
+
+  // Bumped on every `startSessionMessagesStream` call. Late-resolving
+  // refreshes from a previous session must NOT clear `loadingMessages` if
+  // the user has already switched to another session — the newer start
+  // owns the flag now.
+  let loadingMessagesVersion = 0
+
+  function startSessionMessagesStream(targetBotId: string, targetSessionId: string) {
+    sessionMessagesStream.stop()
     const bid = targetBotId.trim()
-    stopMessageEvents()
+    const sid = targetSessionId.trim()
+    if (!bid || !sid) return
+
+    // The chat pane reads `loadingMessages` to suppress empty-state
+    // placeholders (e.g. "system session has no records") while a fresh
+    // transcript is on its way. The sidebar deliberately ignores it — only
+    // `loadingChats` (sessions-list boot) makes the sidebar spin.
+    loadingMessages.value = true
+    const myVersion = ++loadingMessagesVersion
+    sessionMessagesStream.start(async (signal) => {
+      try {
+        await refreshCurrentSession(bid, sid)
+      } catch (error) {
+        console.error('Failed to load session messages:', error)
+      } finally {
+        if (myVersion === loadingMessagesVersion) loadingMessages.value = false
+      }
+      await streamSessionMessageEvents(bid, sid, signal, (event) => {
+        handleSessionMessageEvent(bid, sid, event)
+      })
+    })
+  }
+
+  function startBotSessionsActivityStream(targetBotId: string) {
+    botSessionsActivityStream.stop()
+    const bid = targetBotId.trim()
     if (!bid) return
 
-    messageEventsStream.start(async (signal) => {
-      await streamMessageEvents(
-        bid,
-        signal,
-        (event) => handleStreamEvent(bid, event),
-        messageEventsSince || undefined,
-      )
+    botSessionsActivityStream.start(async (signal) => {
+      await streamBotSessionsActivityEvents(bid, signal, (event) => {
+        handleBotSessionsActivityEvent(bid, event)
+      })
     })
+  }
+
+  // Closes both SSE subscriptions. The per-session stream restarts on the
+  // next `sessionId` change; the bot-wide stream restarts on the next
+  // `initialize()` after a bot or session-token change.
+  function stopStreams() {
+    sessionMessagesStream.stop()
+    botSessionsActivityStream.stop()
   }
 
   function abort() {
@@ -1648,13 +1801,6 @@ export const useChatStore = defineStore('chat', () => {
 
   const PAGE_SIZE = 30
 
-  async function loadMessages(botId: string, sid: string) {
-    const turns = await fetchMessagesUI(botId, sid, { limit: PAGE_SIZE })
-    replaceMessages(turns)
-    hasMoreOlder.value = turns.length > 0
-    cacheCurrentMessages()
-  }
-
   async function loadOlderMessages(): Promise<number> {
     const bid = currentBotId.value ?? ''
     const sid = sessionId.value ?? ''
@@ -1688,6 +1834,7 @@ export const useChatStore = defineStore('chat', () => {
 
         if (older.length > 0) {
           messages.unshift(...older)
+          hasLoadedOlder.value = true
           // Don't infer end-of-history from `turns.length < PAGE_SIZE`: the
           // server pages by raw DB rows (bot_history_messages.created_at) but
           // we receive merged UI turns (multi-row user/assistant groups
@@ -1748,7 +1895,9 @@ export const useChatStore = defineStore('chat', () => {
       if (!result.items.length) return null
       mergeMessages(result.items, sid)
       hasMoreOlder.value = true
-      cacheCurrentMessages()
+      // locateMessage merges an older slice into the view; treat this as
+      // "the user has loaded older content" so future refreshes preserve it.
+      hasLoadedOlder.value = true
       return result.target_id?.trim() || findMessageIdByExternalId(target)
     } catch (error) {
       console.error('Failed to locate message:', error)
@@ -1756,8 +1905,8 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function touchSession(targetSessionId: string, timestamp?: string) {
-    const target = sessions.value.find(session => session.id === targetSessionId)
+  function touchSessionInList(targetSessionId: string, timestamp?: string) {
+    const target = sessionById.get(targetSessionId)
     if (!target) return
     if (timestamp && (!target.updated_at || timestamp > target.updated_at)) {
       target.updated_at = timestamp
@@ -1997,10 +2146,6 @@ export const useChatStore = defineStore('chat', () => {
     return { input: { ...pending }, runtimeId }
   }
 
-  function upsertSession(updated: SessionSummary) {
-    sessions.value = [updated, ...sessions.value.filter(session => session.id !== updated.id)]
-  }
-
   async function createACPSession(input: ACPAgentSessionInput): Promise<{ session: SessionSummary; runtime?: AcpagentRuntimeStatus }> {
     const bid = currentBotId.value ?? await ensureBot()
     if (!bid) throw new Error('Bot not ready')
@@ -2018,6 +2163,7 @@ export const useChatStore = defineStore('chat', () => {
     sessionId.value = created.id
     replaceMessages([])
     hasMoreOlder.value = false
+    hasLoadedOlder.value = false
     if (runtimeId) {
       // The staged runtime now belongs to the session — reset local staging
       // without closing it.
@@ -2037,12 +2183,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!bid) throw new Error('Bot not selected')
     const metadata = acpSessionMetadata(input)
     const updated = await requestUpdateSessionAgent(bid, sid, 'acp_agent', metadata)
-    const index = sessions.value.findIndex(session => session.id === updated.id)
-    if (index >= 0) {
-      sessions.value[index] = updated
-    } else {
-      upsertSession(updated)
-    }
+    upsertSession(updated)
     clearPendingACPSession()
     clearACPRuntimeStatus(bid, sid)
     const runtime = input.startRuntime ? await ensureACPRuntime(sid) : undefined
@@ -2055,12 +2196,7 @@ export const useChatStore = defineStore('chat', () => {
     const sid = sessionId.value ?? ''
     if (!bid || !sid) return null
     const updated = await requestUpdateSessionAgent(bid, sid, 'chat', {})
-    const index = sessions.value.findIndex(session => session.id === updated.id)
-    if (index >= 0) {
-      sessions.value[index] = updated
-    } else {
-      upsertSession(updated)
-    }
+    upsertSession(updated)
     clearACPRuntimeStatus(bid, sid)
     return updated
   }
@@ -2139,53 +2275,92 @@ export const useChatStore = defineStore('chat', () => {
     const bid = currentBotId.value ?? await ensureBot()
     if (!bid) throw new Error('Bot not ready')
     const created = await createSession(bid)
-    sessions.value = [created, ...sessions.value.filter(session => session.id !== created.id)]
+    upsertSession(created)
     sessionId.value = created.id
     replaceMessages([])
     hasMoreOlder.value = false
+    hasLoadedOlder.value = false
   }
 
   async function initialize() {
     if (initializing.value) return
     initializing.value = true
     loadingChats.value = true
-    stopMessageEvents()
+    // Every entry into initialize starts from a clean transcript window. We
+    // reset here unconditionally so the success path that hydrates
+    // `sessionId` without clearing messages can't carry a stale
+    // `hasLoadedOlder = true` from a previous bot into the new bot's first
+    // refresh (which would take the merge branch and duplicate optimistic
+    // turns).
+    hasLoadedOlder.value = false
+    stopStreams()
     stopWebSocket()
     try {
       const bid = await ensureBot()
       if (!bid) {
-        messageEventsSince = ''
-        sessions.value = []
+        replaceSessions([])
+        sessionsCursor.value = null
+        hasMoreSessions.value = false
         sessionId.value = null
         clearPendingACPSession()
         replaceMessages([])
         hasMoreOlder.value = false
+        hasLoadedOlder.value = false
         return
       }
 
-      const visible = await fetchSessions(bid)
-      sessions.value = visible
-      if (!visible.length) {
-        messageEventsSince = ''
+      const response = await fetchSessions(bid)
+      replaceSessions(response.items)
+      sessionsCursor.value = response.nextCursor
+      hasMoreSessions.value = response.nextCursor !== null
+
+      if (!response.items.length) {
         sessionId.value = null
         replaceMessages([])
         hasMoreOlder.value = false
+        hasLoadedOlder.value = false
       } else {
-        const activeSessionId = sessionId.value && visible.some(session => session.id === sessionId.value)
+        // Server already filtered to user-facing types and sorted by recency,
+        // so the first item is the right initial pick when nothing was
+        // already selected.
+        const activeSessionId = sessionId.value && sessionById.has(sessionId.value)
           ? sessionId.value
-          : (visible.find((s) => s.type === 'chat' || s.type === 'discuss')?.id ?? visible[0]!.id)
+          : response.items[0]!.id
         sessionId.value = activeSessionId
-        if (!restoreCachedMessages(bid, activeSessionId)) {
-          await loadMessages(bid, activeSessionId)
-        }
+        // Initial transcript hydration is driven by startSessionMessagesStream
+        // below — no eager loadMessages REST round trip from here.
       }
 
       startWebSocket(bid)
-      startMessageEvents(bid)
+      startBotSessionsActivityStream(bid)
+      if (sessionId.value) startSessionMessagesStream(bid, sessionId.value)
     } finally {
       loadingChats.value = false
       initializing.value = false
     }
+  }
+
+  // Switching sessions is an explicit operation: stop the active SSE, blank
+  // the view, restart the SSE for the new session. We do NOT use a watcher on
+  // `sessionId` — a watcher fires asynchronously and races with operations
+  // that mutate `messages` between the assignment and the watcher microtask
+  // (e.g. an optimistic turn appended during `sendMessage` is wiped when the
+  // pending watcher finally runs `replaceMessages([])`).
+  //
+  // We deliberately do NOT call `abortAllAssistantStreams()` here: an
+  // assistant stream that started in session A keeps running server-side
+  // after the user switches to B, and finalizes against A's history when
+  // the user comes back (the `appendTurnToSession` / WS handlers are
+  // already gated on `sessionId.value === <stream's sessionId>`, so the
+  // orphan does not bleed into B's view).
+  function switchActiveSession(sid: string) {
+    sessionMessagesStream.stop()
+    replaceMessages([])
+    hasMoreOlder.value = false
+    hasLoadedOlder.value = false
+    const bid = (currentBotId.value ?? '').trim()
+    if (!bid || !sid) return
+    startSessionMessagesStream(bid, sid)
   }
 
   async function selectBot(targetBotId: string) {
@@ -2193,62 +2368,54 @@ export const useChatStore = defineStore('chat', () => {
     abort()
     abortAllAssistantStreams()
     clearPendingACPSession()
+    cancelPendingFsBump()
+    lastFsChange.value = null
+    lastFsEvents.value = new Map()
+    seenFsToolCallIds.clear()
     currentBotId.value = targetBotId
     sessionId.value = null
     await initialize()
   }
 
-  async function selectSession(targetSessionId: string) {
+  function selectSession(targetSessionId: string) {
     const sid = targetSessionId.trim()
     if (!sid || sid === sessionId.value) return
-    cacheCurrentMessages()
     clearPendingACPSession()
     sessionId.value = sid
-    loadingChats.value = true
-    try {
-      const bid = currentBotId.value ?? ''
-      if (!bid) throw new Error('Bot not selected')
-      if (restoreCachedMessages(bid, sid)) return
-      await loadMessages(bid, sid)
-    } finally {
-      loadingChats.value = false
-    }
+    switchActiveSession(sid)
   }
 
   async function createNewSession() {
-    cacheCurrentMessages()
     const bid = await ensureBot()
     if (!bid) return
     clearPendingACPSession()
     sessionId.value = null
+    sessionMessagesStream.stop()
     replaceMessages([])
     hasMoreOlder.value = false
+    hasLoadedOlder.value = false
   }
 
   async function removeSession(targetSessionId: string) {
     const delId = targetSessionId.trim()
     if (!delId) return
-    loadingChats.value = true
-    try {
-      const bid = currentBotId.value ?? ''
-      if (!bid) throw new Error('Bot not selected')
-      await requestDeleteSession(bid, delId)
-      clearACPRuntimeStatus(bid, delId)
-      clearCachedMessages(bid, delId)
-      const remaining = sessions.value.filter(session => session.id !== delId)
-      sessions.value = remaining
-      if (sessionId.value !== delId) return
-      if (!remaining.length) {
-        sessionId.value = null
-        replaceMessages([])
-        hasMoreOlder.value = false
-        return
-      }
-      sessionId.value = remaining[0]!.id
-      await loadMessages(bid, remaining[0]!.id)
-    } finally {
-      loadingChats.value = false
+    const bid = currentBotId.value ?? ''
+    if (!bid) throw new Error('Bot not selected')
+    await requestDeleteSession(bid, delId)
+    clearACPRuntimeStatus(bid, delId)
+    removeSessionFromList(delId)
+    if (sessionId.value !== delId) return
+    if (sessions.value.length === 0) {
+      sessionId.value = null
+      sessionMessagesStream.stop()
+      replaceMessages([])
+      hasMoreOlder.value = false
+      hasLoadedOlder.value = false
+      return
     }
+    const next = sessions.value[0]!.id
+    sessionId.value = next
+    switchActiveSession(next)
   }
 
   async function renameSession(targetSessionId: string, title: string): Promise<SessionSummary> {
@@ -2258,7 +2425,7 @@ export const useChatStore = defineStore('chat', () => {
     const bid = currentBotId.value ?? ''
     if (!bid) throw new Error('Bot not selected')
     const updated = await requestUpdateSessionTitle(bid, sid, nextTitle)
-    const target = sessions.value.find(session => session.id === sid)
+    const target = sessionById.get(sid)
     if (target) {
       target.title = updated.title ?? nextTitle
       target.updated_at = updated.updated_at ?? target.updated_at
@@ -2441,7 +2608,7 @@ export const useChatStore = defineStore('chat', () => {
     abort()
     replaceMessages([])
     hasMoreOlder.value = false
-    cacheCurrentMessages()
+    hasLoadedOlder.value = false
   }
 
   const chats = sessions
@@ -2452,6 +2619,10 @@ export const useChatStore = defineStore('chat', () => {
     streaming,
     streamingSessionId,
     sessions,
+    sessionsCursor,
+    hasMoreSessions,
+    loadingMoreSessions,
+    loadMoreSessions,
     acpRuntimeStatuses,
     acpRuntimePending,
     pendingACPSessionInput,
@@ -2470,13 +2641,22 @@ export const useChatStore = defineStore('chat', () => {
     isSessionStreaming,
     loading,
     loadingChats,
+    loadingMessages,
     loadingOlder,
     hasMoreOlder,
+    // Exposed for tests only — do not branch on this in components. The
+    // leading underscore reflects the test-only contract at the call site.
+    _hasLoadedOlder: hasLoadedOlder,
     initializing,
     overrideModelId,
     overrideReasoningEffort,
     startupSendFailure,
     fsChangedAt,
+    lastFsChange,
+    lastFsEvents,
+    markFsChanged,
+    affectsPath,
+    fsEventForPath,
     initialize,
     selectBot,
     selectSession,

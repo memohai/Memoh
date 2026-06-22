@@ -149,6 +149,7 @@ func emitApprovalAck(ctx context.Context, eventCh chan<- WSStreamEvent) error {
 }
 
 func (r *Resolver) executeApprovedTool(ctx context.Context, req toolapproval.Request, input ToolApprovalResponseInput) (sdk.ToolResultPart, error) {
+	req = withLocalWebReplyTarget(req)
 	resolved, err := r.ResolveRunConfig(ctx,
 		input.BotID,
 		req.SessionID,
@@ -169,6 +170,7 @@ func (r *Resolver) executeApprovedTool(ctx context.Context, req toolapproval.Req
 }
 
 func (r *Resolver) storeToolResultAndContinue(ctx context.Context, approval toolapproval.Request, input ToolApprovalResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error {
+	approval = withLocalWebReplyTarget(approval)
 	modelMessages := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(result)})
 	storeReq := conversation.ChatRequest{
 		BotID:                   input.BotID,
@@ -187,6 +189,7 @@ func (r *Resolver) storeToolResultAndContinue(ctx context.Context, approval tool
 }
 
 func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval toolapproval.Request, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) error {
+	approval = withLocalWebReplyTarget(approval)
 	resolved, err := r.ResolveRunConfig(ctx,
 		input.BotID,
 		approval.SessionID,
@@ -211,6 +214,8 @@ func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval too
 	cfg := resolved.RunConfig
 	cfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(sanitizeMessages(messages)))
 	cfg.Query = ""
+	cfg.LiveToolStream = eventCh != nil
+	cfg.CanRequestUserInput = r.canDeliverUserInputWS(eventCh)
 	cfg = r.prepareRunConfig(ctx, cfg)
 
 	req := conversation.ChatRequest{
@@ -253,6 +258,13 @@ func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval too
 		}
 	}
 	return nil
+}
+
+func withLocalWebReplyTarget(req toolapproval.Request) toolapproval.Request {
+	if strings.EqualFold(strings.TrimSpace(req.SourcePlatform), "web") && strings.TrimSpace(req.ReplyTarget) == "" {
+		req.ReplyTarget = strings.TrimSpace(req.BotID)
+	}
+	return req
 }
 
 func rejectedToolResultText(reason string) string {

@@ -151,8 +151,8 @@ watch(
 
 watch(currentBotId, async (newBotId) => {
   if (suppressUrlSync) return
-  // Don't touch the URL while a non-chat route (e.g. settings) is current — home
-  // stays mounted behind the settings overlay and must not redirect away from it.
+  // Don't touch the URL while a non-chat route (e.g. settings) is current; home
+  // stays mounted during /settings route changes and must not redirect away from it.
   if (!isChatRoute()) return
   const storeBot = (newBotId ?? '').trim()
   if (!storeBot) {

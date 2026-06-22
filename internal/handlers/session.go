@@ -1,11 +1,16 @@
 package handlers
 
 import (
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
@@ -142,7 +147,10 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 // @Summary List bot sessions
 // @Tags sessions
 // @Param bot_id path string true "Bot ID"
-// @Success 200 {object} map[string][]session.Session
+// @Param types query string false "Comma-separated session types to include. Defaults to user-facing types (chat,discuss,acp_agent)."
+// @Param limit query int false "Page size (1..200). Defaults to 50."
+// @Param cursor query string false "Opaque cursor returned as next_cursor on a previous page."
+// @Success 200 {object} listSessionsResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Router /bots/{bot_id}/sessions [get].
@@ -159,17 +167,168 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	var sessions []session.Session
+	types, err := parseSessionTypesParam(c.QueryParam("types"))
+	if err != nil {
+		return err
+	}
+	limit, err := parseSessionLimitParam(c.QueryParam("limit"))
+	if err != nil {
+		return err
+	}
+	cursor, err := decodeSessionCursor(c.QueryParam("cursor"))
+	if err != nil {
+		return err
+	}
+
+	// Initialize to an empty slice so an empty page serializes as `"items": []`
+	// rather than `"items": null`, sparing clients a null check.
+	sessions := []session.Session{}
+	var (
+		nextCursor   session.SessionCursor
+		hasMorePages bool
+	)
+	// Probe one row past the requested page so we can answer "is there more?"
+	// without forcing the client into a tail request that returns []. The
+	// extra row is sliced off before the response is built.
+	probeLimit := limit + 1
 	if bots.HasPermission(perms, bots.PermissionManage) {
-		sessions, err = h.sessionService.ListByBot(c.Request().Context(), bot.ID)
+		var rows []session.Session
+		rows, err = h.sessionService.ListByBotPaged(c.Request().Context(), bot.ID, types, cursor, probeLimit)
+		if err == nil {
+			sessions, hasMorePages = trimPagedSessions(rows, limit)
+			if hasMorePages {
+				last := sessions[len(sessions)-1]
+				nextCursor = session.SessionCursor{UpdatedAt: last.UpdatedAt, ID: last.ID}
+			}
+		}
 	} else {
-		sessions, err = h.sessionService.ListByBotAndCreatedByUser(c.Request().Context(), bot.ID, channelIdentityID)
-		sessions = filterSessionsForPermissions(sessions, channelIdentityID, perms)
+		var preFilter []session.Session
+		preFilter, err = h.sessionService.ListByBotAndCreatedByUserPaged(c.Request().Context(), bot.ID, channelIdentityID, types, cursor, probeLimit)
+		if err == nil {
+			var page []session.Session
+			page, hasMorePages = trimPagedSessions(preFilter, limit)
+			if hasMorePages {
+				last := page[len(page)-1]
+				nextCursor = session.SessionCursor{UpdatedAt: last.UpdatedAt, ID: last.ID}
+			}
+			sessions = filterSessionsForPermissions(page, channelIdentityID, perms)
+		}
 	}
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	return c.JSON(http.StatusOK, map[string]any{"items": sessions})
+
+	encoded := ""
+	if hasMorePages {
+		encoded = encodeSessionCursor(nextCursor)
+	}
+	return c.JSON(http.StatusOK, listSessionsResponse{Items: sessions, NextCursor: encoded})
+}
+
+// trimPagedSessions implements the limit+1 has-more probe: if the SQL layer
+// returned the extra row, slice it off and signal hasMore; otherwise the
+// caller has reached the end of the listing and next_cursor must stay empty.
+//
+// The returned page is the slice the caller should derive next_cursor from
+// before any in-memory permission filtering. next_cursor must reflect the DB
+// position to resume from, not filter survivorship — otherwise a page whose
+// rows were all dropped by the permission filter would terminate pagination
+// while older accessible rows still exist on disk.
+func trimPagedSessions(rows []session.Session, limit int64) ([]session.Session, bool) {
+	if int64(len(rows)) > limit {
+		return rows[:limit], true
+	}
+	return rows, false
+}
+
+// listSessionsResponse carries one page of sessions. NextCursor is empty
+// exactly when the caller has reached the end of the listing — clients should
+// stop paging on an empty cursor and never expect a follow-up empty page.
+type listSessionsResponse struct {
+	Items      []session.Session `json:"items"`
+	NextCursor string            `json:"next_cursor"`
+}
+
+const (
+	sessionListDefaultLimit = 50
+	sessionListMaxLimit     = 200
+)
+
+func parseSessionTypesParam(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return session.UserFacingSessionTypes(), nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		token := strings.TrimSpace(part)
+		if token == "" {
+			continue
+		}
+		if !session.IsKnownType(token) {
+			return nil, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("unknown session type %q", token))
+		}
+		if _, ok := seen[token]; ok {
+			continue
+		}
+		seen[token] = struct{}{}
+		out = append(out, token)
+	}
+	if len(out) == 0 {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "types must contain at least one session type")
+	}
+	return out, nil
+}
+
+func parseSessionLimitParam(raw string) (int64, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return sessionListDefaultLimit, nil
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, echo.NewHTTPError(http.StatusBadRequest, "limit must be an integer")
+	}
+	if value < 1 || value > sessionListMaxLimit {
+		return 0, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("limit must be between 1 and %d", sessionListMaxLimit))
+	}
+	return value, nil
+}
+
+// encodeSessionCursor packs the keyset cursor as base64(updated_at|id) where
+// the timestamp is RFC3339Nano. The full nanosecond precision is preserved on
+// the wire and on Postgres, but the SQLite backend compares updated_at at
+// second precision because CURRENT_TIMESTAMP stores it that way — that
+// truncation is intentional and only matters when two rows share the same
+// second, where the id tiebreak in the SQL handles uniqueness.
+func encodeSessionCursor(c session.SessionCursor) string {
+	raw := c.UpdatedAt.UTC().Format(time.RFC3339Nano) + "|" + c.ID
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+func decodeSessionCursor(raw string) (session.SessionCursor, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return session.SessionCursor{}, nil
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return session.SessionCursor{}, echo.NewHTTPError(http.StatusBadRequest, "invalid cursor")
+	}
+	parts := strings.SplitN(string(decoded), "|", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return session.SessionCursor{}, echo.NewHTTPError(http.StatusBadRequest, "invalid cursor")
+	}
+	updatedAt, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil {
+		return session.SessionCursor{}, echo.NewHTTPError(http.StatusBadRequest, "invalid cursor")
+	}
+	if _, err := uuid.Parse(parts[1]); err != nil {
+		return session.SessionCursor{}, echo.NewHTTPError(http.StatusBadRequest, "invalid cursor")
+	}
+	return session.SessionCursor{UpdatedAt: updatedAt, ID: parts[1]}, nil
 }
 
 // GetSession godoc

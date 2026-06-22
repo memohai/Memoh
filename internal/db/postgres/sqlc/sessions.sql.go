@@ -259,6 +259,186 @@ func (q *Queries) ListSessionsByBotAndCreatedByUser(ctx context.Context, arg Lis
 	return items, nil
 }
 
+const listSessionsByBotAndCreatedByUserPaged = `-- name: ListSessionsByBotAndCreatedByUserPaged :many
+SELECT
+  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
+  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
+  r.metadata AS route_metadata,
+  r.conversation_type AS route_conversation_type
+FROM bot_sessions s
+LEFT JOIN bot_channel_routes r ON r.id = s.route_id
+WHERE s.bot_id = $1
+  AND s.created_by_user_id = $2
+  AND s.deleted_at IS NULL
+  AND s.type = ANY($3::text[])
+  AND (
+    NOT $4::bool
+    OR (s.updated_at, s.id) < ($5::timestamptz, $6::uuid)
+  )
+ORDER BY s.updated_at DESC, s.id DESC
+LIMIT $7::int
+`
+
+type ListSessionsByBotAndCreatedByUserPagedParams struct {
+	BotID           pgtype.UUID        `json:"bot_id"`
+	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
+	Types           []string           `json:"types"`
+	UseCursor       bool               `json:"use_cursor"`
+	CursorUpdatedAt pgtype.Timestamptz `json:"cursor_updated_at"`
+	CursorID        pgtype.UUID        `json:"cursor_id"`
+	LimitCount      int32              `json:"limit_count"`
+}
+
+type ListSessionsByBotAndCreatedByUserPagedRow struct {
+	ID                    pgtype.UUID        `json:"id"`
+	BotID                 pgtype.UUID        `json:"bot_id"`
+	RouteID               pgtype.UUID        `json:"route_id"`
+	ChannelType           pgtype.Text        `json:"channel_type"`
+	Type                  string             `json:"type"`
+	Title                 string             `json:"title"`
+	Metadata              []byte             `json:"metadata"`
+	ParentSessionID       pgtype.UUID        `json:"parent_session_id"`
+	CreatedByUserID       pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt             pgtype.Timestamptz `json:"deleted_at"`
+	RouteMetadata         []byte             `json:"route_metadata"`
+	RouteConversationType pgtype.Text        `json:"route_conversation_type"`
+}
+
+func (q *Queries) ListSessionsByBotAndCreatedByUserPaged(ctx context.Context, arg ListSessionsByBotAndCreatedByUserPagedParams) ([]ListSessionsByBotAndCreatedByUserPagedRow, error) {
+	rows, err := q.db.Query(ctx, listSessionsByBotAndCreatedByUserPaged,
+		arg.BotID,
+		arg.CreatedByUserID,
+		arg.Types,
+		arg.UseCursor,
+		arg.CursorUpdatedAt,
+		arg.CursorID,
+		arg.LimitCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSessionsByBotAndCreatedByUserPagedRow
+	for rows.Next() {
+		var i ListSessionsByBotAndCreatedByUserPagedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.RouteID,
+			&i.ChannelType,
+			&i.Type,
+			&i.Title,
+			&i.Metadata,
+			&i.ParentSessionID,
+			&i.CreatedByUserID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.RouteMetadata,
+			&i.RouteConversationType,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSessionsByBotPaged = `-- name: ListSessionsByBotPaged :many
+SELECT
+  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
+  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
+  r.metadata AS route_metadata,
+  r.conversation_type AS route_conversation_type
+FROM bot_sessions s
+LEFT JOIN bot_channel_routes r ON r.id = s.route_id
+WHERE s.bot_id = $1
+  AND s.deleted_at IS NULL
+  AND s.type = ANY($2::text[])
+  AND (
+    NOT $3::bool
+    OR (s.updated_at, s.id) < ($4::timestamptz, $5::uuid)
+  )
+ORDER BY s.updated_at DESC, s.id DESC
+LIMIT $6::int
+`
+
+type ListSessionsByBotPagedParams struct {
+	BotID           pgtype.UUID        `json:"bot_id"`
+	Types           []string           `json:"types"`
+	UseCursor       bool               `json:"use_cursor"`
+	CursorUpdatedAt pgtype.Timestamptz `json:"cursor_updated_at"`
+	CursorID        pgtype.UUID        `json:"cursor_id"`
+	LimitCount      int32              `json:"limit_count"`
+}
+
+type ListSessionsByBotPagedRow struct {
+	ID                    pgtype.UUID        `json:"id"`
+	BotID                 pgtype.UUID        `json:"bot_id"`
+	RouteID               pgtype.UUID        `json:"route_id"`
+	ChannelType           pgtype.Text        `json:"channel_type"`
+	Type                  string             `json:"type"`
+	Title                 string             `json:"title"`
+	Metadata              []byte             `json:"metadata"`
+	ParentSessionID       pgtype.UUID        `json:"parent_session_id"`
+	CreatedByUserID       pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt             pgtype.Timestamptz `json:"deleted_at"`
+	RouteMetadata         []byte             `json:"route_metadata"`
+	RouteConversationType pgtype.Text        `json:"route_conversation_type"`
+}
+
+// Cursor uses (updated_at, id) so pages stay stable when many rows share an
+// updated_at. Callers always pass an explicit types filter; to opt out of
+// filtering, pass every known type.
+func (q *Queries) ListSessionsByBotPaged(ctx context.Context, arg ListSessionsByBotPagedParams) ([]ListSessionsByBotPagedRow, error) {
+	rows, err := q.db.Query(ctx, listSessionsByBotPaged,
+		arg.BotID,
+		arg.Types,
+		arg.UseCursor,
+		arg.CursorUpdatedAt,
+		arg.CursorID,
+		arg.LimitCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSessionsByBotPagedRow
+	for rows.Next() {
+		var i ListSessionsByBotPagedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.RouteID,
+			&i.ChannelType,
+			&i.Type,
+			&i.Title,
+			&i.Metadata,
+			&i.ParentSessionID,
+			&i.CreatedByUserID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.RouteMetadata,
+			&i.RouteConversationType,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessionsByRoute = `-- name: ListSessionsByRoute :many
 SELECT id, bot_id, route_id, channel_type, type, title, metadata, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
 FROM bot_sessions

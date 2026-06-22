@@ -1741,7 +1741,32 @@
       "extractFailed": "Failed to extract archive",
       "deleteSuccess": "Deleted successfully",
       "batchDeletePartialFailed": "{failed}/{total} items failed to delete",
-      "deleteFailed": "Failed to delete"
+      "deleteFailed": "Failed to delete",
+      "externalChange": {
+        "fallbackAgent": "The agent",
+        "wrote": "{agent} wrote {lines} lines · {time}",
+        "edited": "{agent} edited (+{added} / -{removed}) · {time}",
+        "ran": "{agent} ran a command · {time}",
+        "patched": "{agent} applied a patch · {time}",
+        "generic": "{agent} updated this file · {time}",
+        "deleted": "This file was removed or moved on disk",
+        "reloadFailed": "This file changed on disk, but the latest version could not be loaded",
+        "saveConflict": "File changed on disk. Review the external version before saving.",
+        "reload": "Reload",
+        "tryAgain": "Try again",
+        "compare": "Compare",
+        "saveAnyway": "Save anyway",
+        "saveToRestore": "Save to restore"
+      },
+      "imageDeleted": "This image was removed from the workspace",
+      "compare": {
+        "yours": "Your edits",
+        "disk": "On disk",
+        "close": "Close",
+        "refresh": "Refresh diff",
+        "staleNotice": "The agent wrote again"
+      },
+      "compareLoadFailed": "Could not load the workspace version for comparison"
     },
     "email": {
       "title": "Email",

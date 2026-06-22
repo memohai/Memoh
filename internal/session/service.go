@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/hooks"
+	"github.com/memohai/memoh/internal/message/event"
 )
 
 // Session represents a chat session within a bot.
@@ -46,6 +49,20 @@ const (
 	DefaultACPProjectPath = "/data"
 )
 
+// userFacingSessionTypes lists the session types intended to appear in
+// user-facing session lists. Heartbeat, schedule, and subagent sessions are
+// system-internal — they back agent-driven loops and never surface in the UI.
+var userFacingSessionTypes = []string{TypeChat, TypeDiscuss, TypeACPAgent}
+
+// UserFacingSessionTypes returns a fresh copy of the user-facing session type
+// list so callers can read or mutate it without disturbing the package-level
+// source of truth.
+func UserFacingSessionTypes() []string {
+	out := make([]string, len(userFacingSessionTypes))
+	copy(out, userFacingSessionTypes)
+	return out
+}
+
 var (
 	ErrACPAgentIDRequired    = errors.New("acp_agent_id is required for acp_agent sessions")
 	ErrACPProjectPathMissing = errors.New("project_path is required for acp_agent sessions")
@@ -60,6 +77,12 @@ func IsKnownType(typ string) bool {
 	default:
 		return false
 	}
+}
+
+// IsUserFacingType reports whether a session type is one that user-facing
+// session list endpoints should return by default.
+func IsUserFacingType(typ string) bool {
+	return slices.Contains(userFacingSessionTypes, strings.TrimSpace(typ))
 }
 
 // CreateInput holds input for creating a new session.
@@ -78,17 +101,21 @@ type CreateInput struct {
 type Service struct {
 	queries     dbstore.Queries
 	hookService *hooks.Service
+	publisher   event.Publisher
 	logger      *slog.Logger
 }
 
-// NewService creates a session service.
-func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
+// NewService creates a session service. publisher may be nil — session
+// creation still succeeds when there is no event hub wired in (tests, or any
+// caller that doesn't surface activity events).
+func NewService(log *slog.Logger, queries dbstore.Queries, publisher event.Publisher) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Service{
-		queries: queries,
-		logger:  log.With(slog.String("service", "session")),
+		queries:   queries,
+		publisher: publisher,
+		logger:    log.With(slog.String("service", "session")),
 	}
 }
 
@@ -160,8 +187,33 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 		return Session{}, err
 	}
 	sess := toSession(row)
+	s.publishSessionCreated(sess)
 	s.runSessionStartHook(context.WithoutCancel(ctx), sess)
 	return sess, nil
+}
+
+// publishSessionCreated emits a session_created event for the new session.
+// Best-effort: failures are logged but never fail the create.
+func (s *Service) publishSessionCreated(sess Session) {
+	if s.publisher == nil {
+		return
+	}
+	payload, err := json.Marshal(map[string]any{
+		"session_id": sess.ID,
+		"bot_id":     sess.BotID,
+		"type":       sess.Type,
+		"title":      sess.Title,
+		"created_at": sess.CreatedAt,
+	})
+	if err != nil {
+		s.logger.Warn("marshal session_created event failed", slog.Any("error", err))
+		return
+	}
+	s.publisher.Publish(event.Event{
+		Type:  event.EventTypeSessionCreated,
+		BotID: strings.TrimSpace(sess.BotID),
+		Data:  payload,
+	})
 }
 
 func (s *Service) runSessionStartHook(ctx context.Context, sess Session) {
@@ -182,7 +234,7 @@ func (s *Service) runSessionStartHook(ctx context.Context, sess Session) {
 			"channel_type": sess.ChannelType,
 		},
 	}
-	if _, err := s.hookService.Run(ctx, req, nil); err != nil && s.logger != nil {
+	if _, err := s.hookService.Run(ctx, req, nil); err != nil {
 		s.logger.Warn("session start hook failed",
 			slog.String("bot_id", sess.BotID),
 			slog.String("session_id", sess.ID),
@@ -264,6 +316,123 @@ func (s *Service) ListByBot(ctx context.Context, botID string) ([]Session, error
 		sessions = append(sessions, toSessionFromListRow(row))
 	}
 	return sessions, nil
+}
+
+// SessionCursor identifies the position in a session listing for keyset
+// pagination. The zero value means "start from the head".
+type SessionCursor struct {
+	UpdatedAt time.Time
+	ID        string
+}
+
+// IsZero reports whether the cursor carries neither half — the start-of-list
+// signal that pagedCursorParams maps to "no cursor predicate". A
+// partially-populated cursor (only the timestamp or only the id) is not zero;
+// pagedCursorParams rejects it as a programmer error so we never send
+// malformed bindings down to SQL.
+func (c SessionCursor) IsZero() bool {
+	return c.ID == "" && c.UpdatedAt.IsZero()
+}
+
+// ListByBotPaged returns one page of sessions for a bot, filtered to the given
+// types and starting after the given cursor. Callers that want a "has more"
+// signal pass limit+1 and look for an extra row.
+func (s *Service) ListByBotPaged(ctx context.Context, botID string, types []string, cursor SessionCursor, limit int64) ([]Session, error) {
+	pgBotID, err := dbpkg.ParseUUID(botID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid bot id: %w", err)
+	}
+	cursorUpdatedAt, cursorID, useCursor, err := pagedCursorParams(cursor)
+	if err != nil {
+		return nil, err
+	}
+	limitParam, err := pagedLimitToInt32(limit)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListSessionsByBotPaged(ctx, sqlc.ListSessionsByBotPagedParams{
+		BotID:           pgBotID,
+		Types:           types,
+		UseCursor:       useCursor,
+		CursorUpdatedAt: cursorUpdatedAt,
+		CursorID:        cursorID,
+		LimitCount:      limitParam,
+	})
+	if err != nil {
+		return nil, err
+	}
+	sessions := make([]Session, 0, len(rows))
+	for _, row := range rows {
+		sessions = append(sessions, toSessionFromPagedRow(row))
+	}
+	return sessions, nil
+}
+
+// ListByBotAndCreatedByUserPaged is the paged variant scoped to a single user.
+func (s *Service) ListByBotAndCreatedByUserPaged(ctx context.Context, botID, userID string, types []string, cursor SessionCursor, limit int64) ([]Session, error) {
+	pgBotID, err := dbpkg.ParseUUID(botID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid bot id: %w", err)
+	}
+	pgUserID, err := dbpkg.ParseUUID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user id: %w", err)
+	}
+	cursorUpdatedAt, cursorID, useCursor, err := pagedCursorParams(cursor)
+	if err != nil {
+		return nil, err
+	}
+	limitParam, err := pagedLimitToInt32(limit)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListSessionsByBotAndCreatedByUserPaged(ctx, sqlc.ListSessionsByBotAndCreatedByUserPagedParams{
+		BotID:           pgBotID,
+		CreatedByUserID: pgUserID,
+		Types:           types,
+		UseCursor:       useCursor,
+		CursorUpdatedAt: cursorUpdatedAt,
+		CursorID:        cursorID,
+		LimitCount:      limitParam,
+	})
+	if err != nil {
+		return nil, err
+	}
+	sessions := make([]Session, 0, len(rows))
+	for _, row := range rows {
+		sessions = append(sessions, toSessionFromUserPagedRow(row))
+	}
+	return sessions, nil
+}
+
+// pagedLimitToInt32 narrows the int64 page-size that flows through the
+// service signatures into the int32 sqlc binds. The handler caps the user-
+// supplied limit at sessionListMaxLimit and bumps it by one for the
+// has-more probe; both fit in int32 by construction, so any out-of-range value
+// here is a programmer error and surfaces as such.
+func pagedLimitToInt32(limit int64) (int32, error) {
+	if limit < 1 || limit > math.MaxInt32 {
+		return 0, fmt.Errorf("session: paged limit %d is out of range", limit)
+	}
+	return int32(limit), nil
+}
+
+func pagedCursorParams(cursor SessionCursor) (pgtype.Timestamptz, pgtype.UUID, bool, error) {
+	if cursor.IsZero() {
+		return pgtype.Timestamptz{}, pgtype.UUID{}, false, nil
+	}
+	if cursor.ID == "" || cursor.UpdatedAt.IsZero() {
+		// The handler-side decoder rejects half-built cursors as 400, so by the
+		// time we get here a partial cursor is an internal-construction bug.
+		// Surface it loudly rather than silently restarting from the head and
+		// returning a duplicate page.
+		return pgtype.Timestamptz{}, pgtype.UUID{}, false, errors.New("session: cursor must carry both updated_at and id")
+	}
+	pgID, err := dbpkg.ParseUUID(cursor.ID)
+	if err != nil {
+		return pgtype.Timestamptz{}, pgtype.UUID{}, false, fmt.Errorf("invalid cursor id: %w", err)
+	}
+	return pgtype.Timestamptz{Time: cursor.UpdatedAt, Valid: true}, pgID, true, nil
 }
 
 // ListByBotAndCreatedByUser returns all active sessions for a bot created by a user.
@@ -602,5 +771,71 @@ func toSessionFromUserListRow(row sqlc.ListSessionsByBotAndCreatedByUserRow) Ses
 		UpdatedAt:             row.UpdatedAt.Time,
 		RouteMetadata:         parseJSONMap(row.RouteMetadata),
 		RouteConversationType: dbpkg.TextToString(row.RouteConversationType),
+	}
+}
+
+func toSessionFromPagedRow(row sqlc.ListSessionsByBotPagedRow) Session {
+	return sessionFromPagedColumns(pagedColumns{
+		ID: row.ID, BotID: row.BotID, RouteID: row.RouteID, ChannelType: row.ChannelType,
+		Type: row.Type, Title: row.Title, Metadata: row.Metadata,
+		ParentSessionID: row.ParentSessionID, CreatedByUserID: row.CreatedByUserID,
+		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		RouteMetadata: row.RouteMetadata, RouteConversationType: row.RouteConversationType,
+	})
+}
+
+func toSessionFromUserPagedRow(row sqlc.ListSessionsByBotAndCreatedByUserPagedRow) Session {
+	return sessionFromPagedColumns(pagedColumns{
+		ID: row.ID, BotID: row.BotID, RouteID: row.RouteID, ChannelType: row.ChannelType,
+		Type: row.Type, Title: row.Title, Metadata: row.Metadata,
+		ParentSessionID: row.ParentSessionID, CreatedByUserID: row.CreatedByUserID,
+		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		RouteMetadata: row.RouteMetadata, RouteConversationType: row.RouteConversationType,
+	})
+}
+
+// pagedColumns is the shared shape of the bot/route-joined session row
+// returned by both paged list queries. The two sqlc-generated row structs
+// happen to be structurally identical; centralizing the projection here
+// keeps the conversion logic in one place.
+type pagedColumns struct {
+	ID                    pgtype.UUID
+	BotID                 pgtype.UUID
+	RouteID               pgtype.UUID
+	ChannelType           pgtype.Text
+	Type                  string
+	Title                 string
+	Metadata              []byte
+	ParentSessionID       pgtype.UUID
+	CreatedByUserID       pgtype.UUID
+	CreatedAt             pgtype.Timestamptz
+	UpdatedAt             pgtype.Timestamptz
+	RouteMetadata         []byte
+	RouteConversationType pgtype.Text
+}
+
+func sessionFromPagedColumns(c pagedColumns) Session {
+	parentID := ""
+	if c.ParentSessionID.Valid {
+		parentID = c.ParentSessionID.String()
+	}
+	createdByUserID := ""
+	if c.CreatedByUserID.Valid {
+		createdByUserID = c.CreatedByUserID.String()
+	}
+	return Session{
+		ID:                    c.ID.String(),
+		BotID:                 c.BotID.String(),
+		RouteID:               c.RouteID.String(),
+		ChannelType:           dbpkg.TextToString(c.ChannelType),
+		Type:                  c.Type,
+		Title:                 c.Title,
+		Metadata:              parseJSONMap(c.Metadata),
+		ParentSessionID:       parentID,
+		CreatedByUserID:       createdByUserID,
+		CreatedAt:             c.CreatedAt.Time,
+		UpdatedAt:             c.UpdatedAt.Time,
+		RouteMetadata:         parseJSONMap(c.RouteMetadata),
+		RouteConversationType: dbpkg.TextToString(c.RouteConversationType),
 	}
 }

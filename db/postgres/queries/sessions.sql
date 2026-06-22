@@ -45,6 +45,46 @@ WHERE s.bot_id = sqlc.arg(bot_id)
   AND s.deleted_at IS NULL
 ORDER BY s.updated_at DESC;
 
+-- name: ListSessionsByBotPaged :many
+-- Cursor uses (updated_at, id) so pages stay stable when many rows share an
+-- updated_at. Callers always pass an explicit types filter; to opt out of
+-- filtering, pass every known type.
+SELECT
+  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
+  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
+  r.metadata AS route_metadata,
+  r.conversation_type AS route_conversation_type
+FROM bot_sessions s
+LEFT JOIN bot_channel_routes r ON r.id = s.route_id
+WHERE s.bot_id = sqlc.arg(bot_id)
+  AND s.deleted_at IS NULL
+  AND s.type = ANY(sqlc.arg(types)::text[])
+  AND (
+    NOT sqlc.arg(use_cursor)::bool
+    OR (s.updated_at, s.id) < (sqlc.arg(cursor_updated_at)::timestamptz, sqlc.arg(cursor_id)::uuid)
+  )
+ORDER BY s.updated_at DESC, s.id DESC
+LIMIT sqlc.arg(limit_count)::int;
+
+-- name: ListSessionsByBotAndCreatedByUserPaged :many
+SELECT
+  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
+  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
+  r.metadata AS route_metadata,
+  r.conversation_type AS route_conversation_type
+FROM bot_sessions s
+LEFT JOIN bot_channel_routes r ON r.id = s.route_id
+WHERE s.bot_id = sqlc.arg(bot_id)
+  AND s.created_by_user_id = sqlc.arg(created_by_user_id)
+  AND s.deleted_at IS NULL
+  AND s.type = ANY(sqlc.arg(types)::text[])
+  AND (
+    NOT sqlc.arg(use_cursor)::bool
+    OR (s.updated_at, s.id) < (sqlc.arg(cursor_updated_at)::timestamptz, sqlc.arg(cursor_id)::uuid)
+  )
+ORDER BY s.updated_at DESC, s.id DESC
+LIMIT sqlc.arg(limit_count)::int;
+
 -- name: ListSessionsByRoute :many
 SELECT *
 FROM bot_sessions

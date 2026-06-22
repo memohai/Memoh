@@ -1,4 +1,4 @@
-// Chat-window renderer entry. Owns its bootstrap chain so desktop can layer
+// Desktop renderer entry. Owns its bootstrap chain so desktop can layer
 // on Electron-specific plugins / stores / providers without touching
 // @memohai/web. Pairs with `src/renderer/index.html`.
 
@@ -27,7 +27,8 @@ import 'katex/dist/katex.min.css'
 
 import App from './chat/App.vue'
 import router from './chat/router'
-import { setupCrossWindowCacheSync } from './cross-window-cache-sync'
+import { setupRendererCacheSync } from './renderer-cache-sync'
+import { handleRendererNavigate } from './renderer-navigation'
 
 // Window-management fallback, intentionally kept separate from the close-tab app
 // command. Cmd/Ctrl+W closes the active workspace tab; when the registry reports
@@ -40,6 +41,16 @@ function closeWindowWhenNoTab(command: AppKeyboardCommand): void {
 }
 
 async function bootstrap() {
+  const pendingNavigationTargets: string[] = []
+  let navigationReady = false
+  window.api.window.onNavigate((target) => {
+    if (!navigationReady) {
+      pendingNavigationTargets.push(target)
+      return
+    }
+    handleRendererNavigate(router, target)
+  })
+
   const status = await window.api.desktop.getServerStatus()
   const token = await window.api.desktop.authToken()
   if (token) {
@@ -48,11 +59,6 @@ async function bootstrap() {
   setupApiClient({
     baseUrl: status.baseUrl || 'http://127.0.0.1:0',
     onUnauthorized: () => router.replace({ name: 'Login' }),
-  })
-  window.api.window.onChatNavigate((target) => {
-    if (!target.startsWith('/bot') && !target.startsWith('/chat')) return
-    if (router.currentRoute.value.fullPath === target) return
-    void router.push(target)
   })
 
   const pinia = createPinia().use(piniaPluginPersistedstate)
@@ -103,11 +109,16 @@ async function bootstrap() {
     .use(i18n)
     .provide(KEYBOARD_REGISTRY, keyboardCommands)
 
-  // Bridge query-cache invalidations between chat and settings windows.
+  // Bridge query-cache invalidations to other renderer hosts.
   // Must run after `PiniaColada` is installed so the store is registered.
-  setupCrossWindowCacheSync(useQueryCache())
+  setupRendererCacheSync(useQueryCache())
 
   app.mount('#app')
+
+  for (const target of pendingNavigationTargets.splice(0)) {
+    handleRendererNavigate(router, target)
+  }
+  navigationReady = true
 }
 
 void bootstrap()

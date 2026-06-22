@@ -1,16 +1,21 @@
 package agent
 
 import (
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/memohai/memoh/internal/agent/sessionmode"
+	agenttools "github.com/memohai/memoh/internal/agent/tools"
 )
 
 func TestGenerateSystemPromptIncludesPlatformIdentitiesInChat(t *testing.T) {
 	t.Parallel()
 
 	prompt := GenerateSystemPrompt(SystemPromptParams{
-		SessionType:               "chat",
+		SessionType:               sessionmode.Chat,
 		Now:                       time.Unix(1, 0).UTC(),
 		Timezone:                  "UTC",
 		PlatformIdentitiesSection: "## Platform Identities\n\n<identity channel=\"telegram\" username=\"@memoh\"/>",
@@ -32,7 +37,7 @@ func TestGenerateSystemPromptIncludesCommonAndModeContracts(t *testing.T) {
 		want        []string
 	}{
 		{
-			sessionType: "chat",
+			sessionType: sessionmode.Chat,
 			want: []string{
 				"You are an AI agent running inside a private Memoh workspace.",
 				"## Session mode: chat",
@@ -40,15 +45,15 @@ func TestGenerateSystemPromptIncludesCommonAndModeContracts(t *testing.T) {
 			},
 		},
 		{
-			sessionType: "discuss",
+			sessionType: sessionmode.Discuss,
 			want: []string{
 				"You are an AI agent running inside a private Memoh workspace.",
 				"## Session mode: discuss",
-				"Use `send` to speak in the conversation.",
+				"Speak in the conversation only through an available messaging capability.",
 			},
 		},
 		{
-			sessionType: "schedule",
+			sessionType: sessionmode.Schedule,
 			want: []string{
 				"You are an AI agent running inside a private Memoh workspace.",
 				"## Session mode: schedule",
@@ -56,7 +61,7 @@ func TestGenerateSystemPromptIncludesCommonAndModeContracts(t *testing.T) {
 			},
 		},
 		{
-			sessionType: "heartbeat",
+			sessionType: sessionmode.Heartbeat,
 			want: []string{
 				"You are an AI agent running inside a private Memoh workspace.",
 				"## Session mode: heartbeat",
@@ -64,7 +69,17 @@ func TestGenerateSystemPromptIncludesCommonAndModeContracts(t *testing.T) {
 			},
 		},
 		{
-			sessionType: "subagent",
+			sessionType: sessionmode.BackgroundDelivery,
+			want: []string{
+				"You are an AI agent running inside a private Memoh workspace.",
+				"## Session mode: background delivery",
+				"Background task notifications are being delivered between user turns.",
+				"Do not output `HEARTBEAT_OK`.",
+				"specify the delivery `platform` and `target`",
+			},
+		},
+		{
+			sessionType: sessionmode.Subagent,
 			want: []string{
 				"You are an AI agent running inside a private Memoh workspace.",
 				"## Session mode: subagent",
@@ -95,7 +110,7 @@ func TestGenerateSystemPromptIncludesServiceOwnedBotInfo(t *testing.T) {
 	t.Parallel()
 
 	prompt := GenerateSystemPrompt(SystemPromptParams{
-		SessionType: "chat",
+		SessionType: sessionmode.Chat,
 		Bot: BotInfo{
 			ID:          "bot-1",
 			Name:        "research-bot",
@@ -125,7 +140,7 @@ func TestGenerateSystemPromptIncludesServiceOwnedBotInfo(t *testing.T) {
 func TestGenerateSystemPromptOmitsLegacyCoreFiles(t *testing.T) {
 	t.Parallel()
 
-	for _, sessionType := range []string{"chat", "discuss", "schedule", "heartbeat", "subagent"} {
+	for _, sessionType := range allPromptSessionTypes() {
 		sessionType := sessionType
 		t.Run(sessionType, func(t *testing.T) {
 			t.Parallel()
@@ -143,59 +158,134 @@ func TestGenerateSystemPromptOmitsLegacyCoreFiles(t *testing.T) {
 	}
 }
 
-func TestGenerateSystemPromptIncludesDisplayToolsWhenEnabled(t *testing.T) {
+func TestGenerateSystemPromptOmitsToolSpecificMemorySearchGuidance(t *testing.T) {
 	t.Parallel()
 
-	prompt := GenerateSystemPrompt(SystemPromptParams{
-		SessionType:    "chat",
-		Now:            time.Unix(1, 0).UTC(),
-		Timezone:       "UTC",
-		DisplayEnabled: true,
-	})
-
-	if !strings.Contains(prompt, "## Workspace browser & desktop") {
-		t.Fatalf("expected display tools section in prompt")
-	}
-	if !strings.Contains(prompt, "browser_observe") {
-		t.Fatalf("expected browser tool mention in prompt")
+	for _, sessionType := range allPromptSessionTypes() {
+		sessionType := sessionType
+		t.Run(sessionType, func(t *testing.T) {
+			t.Parallel()
+			prompt := GenerateSystemPrompt(SystemPromptParams{
+				SessionType: sessionType,
+				Now:         time.Unix(1, 0).UTC(),
+				Timezone:    "UTC",
+			})
+			if strings.Contains(prompt, "`search_memory`") {
+				t.Fatalf("system prompt for %s should not statically mention search_memory, got:\n%s", sessionType, prompt)
+			}
+			if strings.Contains(prompt, "{{memorySearchSection}}") {
+				t.Fatalf("system prompt for %s leaked memorySearchSection placeholder, got:\n%s", sessionType, prompt)
+			}
+		})
 	}
 }
 
-func TestGenerateSystemPromptIncludesAskUserGuidance(t *testing.T) {
+// TestGenerateSystemPromptDoesNotReintroduceStaticToolSections enforces the
+// unified guidance-source contract: detailed tool availability guidance must
+// come from registered tools/ToolUsage, not the old static partial sections.
+func TestGenerateSystemPromptDoesNotReintroduceStaticToolSections(t *testing.T) {
 	t.Parallel()
 
-	prompt := GenerateSystemPrompt(SystemPromptParams{
-		SessionType: "chat",
-		Now:         time.Unix(1, 0).UTC(),
-		Timezone:    "UTC",
-	})
+	for _, sessionType := range allPromptSessionTypes() {
+		sessionType := sessionType
+		t.Run(sessionType, func(t *testing.T) {
+			t.Parallel()
+			prompt := GenerateSystemPrompt(SystemPromptParams{
+				SessionType:               sessionType,
+				Now:                       time.Unix(1, 0).UTC(),
+				Timezone:                  "UTC",
+				PlatformIdentitiesSection: "## Platform Identities\n\n<identity channel=\"telegram\" username=\"@memoh\"/>",
+			})
+			for _, legacySection := range []string{
+				"## Basic Tools",
+				"## Contacts & Messaging",
+				"## Sessions & History",
+				"## Schedule Tasks",
+				"## Subagents",
+				"## User Input",
+			} {
+				if strings.Contains(prompt, legacySection) {
+					t.Fatalf("system prompt for %s must not include legacy tool section %q", sessionType, legacySection)
+				}
+			}
+		})
+	}
+}
 
-	for _, want := range []string{
-		"## User Input",
-		"Use `ask_user` when you need the user to choose an option",
-		"If the user asks you to create a multiple-choice question",
-		"`single_select` for exactly one choice, `multi_select` for select-all-that-apply",
-		"never duplicate A/B/C choices inside the question text",
-		"Use `allow_custom: true` on a select question",
-		"do not treat that request itself as the user's answer",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("expected prompt to contain %q", want)
+func TestGenerateSystemPromptDoesNotEnumerateConditionalTools(t *testing.T) {
+	t.Parallel()
+
+	conditionalTools := make([]string, 0, len(agenttools.BuiltInToolNames()))
+	for _, name := range agenttools.BuiltInToolNames() {
+		conditionalTools = append(conditionalTools, name.String())
+	}
+	sort.Strings(conditionalTools)
+
+	for _, sessionType := range allPromptSessionTypes() {
+		sessionType := sessionType
+		t.Run(sessionType, func(t *testing.T) {
+			t.Parallel()
+			prompt := GenerateSystemPrompt(SystemPromptParams{
+				SessionType:               sessionType,
+				Now:                       time.Unix(1, 0).UTC(),
+				Timezone:                  "UTC",
+				PlatformIdentitiesSection: "## Platform Identities\n\n<identity channel=\"telegram\" username=\"@memoh\"/>",
+			})
+			for _, name := range conditionalTools {
+				if promptEnumeratesTool(prompt, name) {
+					t.Fatalf("system prompt for %s must not statically enumerate conditional tool %q; put its usage in ToolUsage gated by registration", sessionType, name)
+				}
+			}
+		})
+	}
+}
+
+func promptEnumeratesTool(prompt, name string) bool {
+	token := regexp.QuoteMeta(name)
+	if strings.Contains(prompt, "`"+name+"`") {
+		return true
+	}
+	if regexp.MustCompile(`(^|[^A-Za-z0-9_])` + token + `\s*\(`).MatchString(prompt) {
+		return true
+	}
+	if strings.Contains(name, "_") {
+		return regexp.MustCompile(`(^|[^A-Za-z0-9_])` + token + `([^A-Za-z0-9_]|$)`).MatchString(prompt)
+	}
+	switch name {
+	case "read":
+		if regexp.MustCompile(`(?i)\b(read\s+(and|or)\s+write\s+files?|read\s+files?|reading\s*/\s*writing\s+files?|file\s+reading\s+and\s+writing)\b`).MatchString(prompt) {
+			return true
+		}
+	case "write":
+		if regexp.MustCompile(`(?i)\b(read\s+(and|or)\s+write\s+files?|write\s+files?|reading\s*/\s*writing\s+files?|file\s+reading\s+and\s+writing)\b`).MatchString(prompt) {
+			return true
 		}
 	}
+	return regexp.MustCompile(`(?i)\b(call|tool|tools|use|using|invoke|invoking|available)\s+` + token + `\b|\b` + token + `\s+(tool|tools|capability|capabilities)\b`).MatchString(prompt)
 }
 
-func TestGenerateSystemPromptOmitsDisplayToolsWhenDisabled(t *testing.T) {
+func TestPromptEnumeratesToolDetectsCallSyntax(t *testing.T) {
 	t.Parallel()
 
-	prompt := GenerateSystemPrompt(SystemPromptParams{
-		SessionType: "chat",
-		Now:         time.Unix(1, 0).UTC(),
-		Timezone:    "UTC",
-	})
-
-	if strings.Contains(prompt, "## Workspace browser & desktop") {
-		t.Fatalf("expected display tools section to be omitted")
+	for _, tc := range []struct {
+		prompt string
+		name   string
+	}{
+		{prompt: "spawn({ tasks: [] })", name: "spawn"},
+		{prompt: "send({ text: \"hello\" })", name: "send"},
+		{prompt: "read(\"/tmp/image.png\")", name: "read"},
+		{prompt: "you can read and write files there freely", name: "read"},
+		{prompt: "you can read and write files there freely", name: "write"},
+		{prompt: "you can read or write files there freely", name: "read"},
+		{prompt: "you can read or write files there freely", name: "write"},
+		{prompt: "you can use it for reading/writing files", name: "read"},
+		{prompt: "you can use it for reading/writing files", name: "write"},
+		{prompt: "you can use it for file reading and writing", name: "read"},
+		{prompt: "you can use it for file reading and writing", name: "write"},
+	} {
+		if !promptEnumeratesTool(tc.prompt, tc.name) {
+			t.Fatalf("expected %q to enumerate %q", tc.prompt, tc.name)
+		}
 	}
 }
 
@@ -203,7 +293,7 @@ func TestGenerateSystemPromptIncludesPlatformIdentitiesInDiscuss(t *testing.T) {
 	t.Parallel()
 
 	prompt := GenerateSystemPrompt(SystemPromptParams{
-		SessionType:               "discuss",
+		SessionType:               sessionmode.Discuss,
 		Now:                       time.Unix(1, 0).UTC(),
 		Timezone:                  "UTC",
 		PlatformIdentitiesSection: "## Platform Identities\n\n<identity channel=\"discord\" username=\"@memoh\"/>",
@@ -214,5 +304,16 @@ func TestGenerateSystemPromptIncludesPlatformIdentitiesInDiscuss(t *testing.T) {
 	}
 	if !strings.Contains(prompt, `<identity channel="discord" username="@memoh"/>`) {
 		t.Fatalf("expected platform identity XML in discuss prompt")
+	}
+}
+
+func allPromptSessionTypes() []string {
+	return []string{
+		sessionmode.Chat,
+		sessionmode.Discuss,
+		sessionmode.Schedule,
+		sessionmode.Heartbeat,
+		sessionmode.Subagent,
+		sessionmode.BackgroundDelivery,
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -114,7 +115,7 @@ func TestValidateACPCreatePolicy(t *testing.T) {
 			svc := NewService(nil, acpPolicyQueries{
 				bot:      tt.bot,
 				sessions: tt.sessions,
-			})
+			}, nil)
 			err := svc.validateACPCreatePolicy(context.Background(), botID, tt.meta)
 			if tt.wantErr == "" {
 				if err != nil {
@@ -144,7 +145,7 @@ func TestCreateACPAgentSessionRunsValidationAndPersistsType(t *testing.T) {
 			}),
 		},
 	}
-	svc := NewService(nil, queries)
+	svc := NewService(nil, queries, nil)
 
 	created, err := svc.Create(context.Background(), CreateInput{
 		BotID: botID,
@@ -184,7 +185,7 @@ func TestCreateACPAgentSessionDefaultsProjectPath(t *testing.T) {
 			}),
 		},
 	}
-	svc := NewService(nil, queries)
+	svc := NewService(nil, queries, nil)
 
 	created, err := svc.Create(context.Background(), CreateInput{
 		BotID: botID,
@@ -227,7 +228,7 @@ func TestUpdateTypeAndMetadataACPAgentRunsPolicy(t *testing.T) {
 			Type:  TypeACPAgent,
 		},
 	}
-	svc := NewService(nil, queries)
+	svc := NewService(nil, queries, nil)
 
 	updated, err := svc.UpdateTypeAndMetadata(context.Background(), sessionID, TypeACPAgent, map[string]any{
 		"acp_agent_id": acpprofile.AgentCodexID,
@@ -329,4 +330,155 @@ func mustSessionJSON(value map[string]any) []byte {
 		panic(err)
 	}
 	return data
+}
+
+// pagedQueriesStub captures the params handed to the paged session queries so
+// the test can assert that the service forwards botID, types, cursor, and
+// limit without modification.
+type pagedQueriesStub struct {
+	dbstore.Queries
+	pagedArg     sqlc.ListSessionsByBotPagedParams
+	pagedRows    []sqlc.ListSessionsByBotPagedRow
+	userPagedArg sqlc.ListSessionsByBotAndCreatedByUserPagedParams
+	userRows     []sqlc.ListSessionsByBotAndCreatedByUserPagedRow
+}
+
+func (s *pagedQueriesStub) ListSessionsByBotPaged(_ context.Context, arg sqlc.ListSessionsByBotPagedParams) ([]sqlc.ListSessionsByBotPagedRow, error) {
+	s.pagedArg = arg
+	return s.pagedRows, nil
+}
+
+func (s *pagedQueriesStub) ListSessionsByBotAndCreatedByUserPaged(_ context.Context, arg sqlc.ListSessionsByBotAndCreatedByUserPagedParams) ([]sqlc.ListSessionsByBotAndCreatedByUserPagedRow, error) {
+	s.userPagedArg = arg
+	return s.userRows, nil
+}
+
+func TestListByBotPagedForwardsParams(t *testing.T) {
+	stub := &pagedQueriesStub{}
+	svc := NewService(nil, stub, nil)
+	botID := "11111111-1111-1111-1111-111111111111"
+	cursorID := "22222222-2222-2222-2222-222222222222"
+	cursorAt := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	types := []string{TypeChat, TypeDiscuss}
+
+	if _, err := svc.ListByBotPaged(context.Background(), botID, types, SessionCursor{UpdatedAt: cursorAt, ID: cursorID}, 25); err != nil {
+		t.Fatalf("ListByBotPaged: %v", err)
+	}
+	if stub.pagedArg.BotID.String() != botID {
+		t.Fatalf("BotID = %s, want %s", stub.pagedArg.BotID.String(), botID)
+	}
+	if got, want := stub.pagedArg.Types, types; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("Types = %v, want %v", got, want)
+	}
+	if !stub.pagedArg.UseCursor {
+		t.Fatalf("UseCursor should be true when a non-zero cursor is supplied")
+	}
+	if !stub.pagedArg.CursorUpdatedAt.Time.Equal(cursorAt) {
+		t.Fatalf("CursorUpdatedAt = %v, want %v", stub.pagedArg.CursorUpdatedAt.Time, cursorAt)
+	}
+	if stub.pagedArg.CursorID.String() != cursorID {
+		t.Fatalf("CursorID = %s, want %s", stub.pagedArg.CursorID.String(), cursorID)
+	}
+	if stub.pagedArg.LimitCount != 25 {
+		t.Fatalf("LimitCount = %d, want 25", stub.pagedArg.LimitCount)
+	}
+}
+
+func TestListByBotPagedZeroCursorSkipsCursorFilter(t *testing.T) {
+	stub := &pagedQueriesStub{}
+	svc := NewService(nil, stub, nil)
+
+	if _, err := svc.ListByBotPaged(context.Background(), "11111111-1111-1111-1111-111111111111", []string{TypeChat}, SessionCursor{}, 10); err != nil {
+		t.Fatalf("ListByBotPaged: %v", err)
+	}
+	if stub.pagedArg.UseCursor {
+		t.Fatalf("UseCursor should be false for the zero-value cursor")
+	}
+}
+
+func TestListByBotPagedMapsRowsToSessions(t *testing.T) {
+	rowID := "33333333-3333-3333-3333-333333333333"
+	updated := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	stub := &pagedQueriesStub{
+		pagedRows: []sqlc.ListSessionsByBotPagedRow{{
+			ID:        mustPGUUID(rowID),
+			BotID:     mustPGUUID("11111111-1111-1111-1111-111111111111"),
+			Type:      TypeChat,
+			Title:     "hello",
+			Metadata:  []byte(`{"k":"v"}`),
+			CreatedAt: pgtype.Timestamptz{Time: updated, Valid: true},
+			UpdatedAt: pgtype.Timestamptz{Time: updated, Valid: true},
+		}},
+	}
+	svc := NewService(nil, stub, nil)
+
+	got, err := svc.ListByBotPaged(context.Background(), "11111111-1111-1111-1111-111111111111", []string{TypeChat}, SessionCursor{}, 10)
+	if err != nil {
+		t.Fatalf("ListByBotPaged: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d sessions, want 1", len(got))
+	}
+	if got[0].ID != rowID {
+		t.Fatalf("session ID = %s, want %s", got[0].ID, rowID)
+	}
+	if !got[0].UpdatedAt.Equal(updated) {
+		t.Fatalf("session UpdatedAt = %v, want %v", got[0].UpdatedAt, updated)
+	}
+	if got[0].Metadata["k"] != "v" {
+		t.Fatalf("session metadata = %v, want k=v", got[0].Metadata)
+	}
+}
+
+func TestListByBotAndCreatedByUserPagedForwardsUserScope(t *testing.T) {
+	stub := &pagedQueriesStub{}
+	svc := NewService(nil, stub, nil)
+	botID := "11111111-1111-1111-1111-111111111111"
+	userID := "44444444-4444-4444-4444-444444444444"
+
+	if _, err := svc.ListByBotAndCreatedByUserPaged(context.Background(), botID, userID, []string{TypeChat}, SessionCursor{}, 5); err != nil {
+		t.Fatalf("ListByBotAndCreatedByUserPaged: %v", err)
+	}
+	if stub.userPagedArg.BotID.String() != botID {
+		t.Fatalf("BotID = %s, want %s", stub.userPagedArg.BotID.String(), botID)
+	}
+	if stub.userPagedArg.CreatedByUserID.String() != userID {
+		t.Fatalf("CreatedByUserID = %s, want %s", stub.userPagedArg.CreatedByUserID.String(), userID)
+	}
+	if stub.userPagedArg.LimitCount != 5 {
+		t.Fatalf("LimitCount = %d, want 5", stub.userPagedArg.LimitCount)
+	}
+}
+
+// TestSessionCursorIsZeroDistinguishesPartialFromEmpty pins down the contract
+// that pagedCursorParams relies on: a partial cursor (only one half set) is
+// not zero, so a misconstructed cursor surfaces as an error rather than
+// silently restarting the listing from the head.
+func TestSessionCursorIsZeroDistinguishesPartialFromEmpty(t *testing.T) {
+	if !(SessionCursor{}).IsZero() {
+		t.Fatalf("zero-value cursor should be zero")
+	}
+	partialID := SessionCursor{ID: "33333333-3333-3333-3333-333333333333"}
+	if partialID.IsZero() {
+		t.Fatalf("cursor with only id set should not be zero")
+	}
+	partialTS := SessionCursor{UpdatedAt: time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC)}
+	if partialTS.IsZero() {
+		t.Fatalf("cursor with only updated_at set should not be zero")
+	}
+}
+
+func TestListByBotPagedRejectsPartialCursor(t *testing.T) {
+	stub := &pagedQueriesStub{}
+	svc := NewService(nil, stub, nil)
+	botID := "11111111-1111-1111-1111-111111111111"
+
+	_, err := svc.ListByBotPaged(context.Background(), botID, []string{TypeChat},
+		SessionCursor{ID: "33333333-3333-3333-3333-333333333333"}, 10)
+	if err == nil {
+		t.Fatalf("ListByBotPaged with id-only cursor should error rather than restart from the head")
+	}
+	if !strings.Contains(err.Error(), "cursor must carry both") {
+		t.Fatalf("error = %v, want partial-cursor message", err)
+	}
 }

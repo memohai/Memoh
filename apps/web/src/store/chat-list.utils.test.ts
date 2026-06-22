@@ -174,13 +174,6 @@ describe('chat-list.utils', () => {
         created_at: '2026-04-10T10:00:00Z',
       },
     })).toBe(false)
-
-    expect(shouldRefreshFromMessageCreated('bot-1', 'session-1', null, {
-      type: 'session_title_updated',
-      bot_id: 'bot-1',
-      session_id: 'session-1',
-      title: 'new title',
-    })).toBe(false)
   })
 
   it('does not refresh current session while a local stream is active', () => {

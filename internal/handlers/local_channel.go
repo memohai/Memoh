@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -136,7 +135,7 @@ func (h *LocalChannelHandler) StreamMessages(c echo.Context) error {
 	if !ok {
 		return echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
 	}
-	writer := bufio.NewWriter(c.Response().Writer)
+	writer := c.Response().Writer
 
 	_, stream, cancel := h.routeHub.Subscribe(botID)
 	defer cancel()
@@ -155,9 +154,6 @@ func (h *LocalChannelHandler) StreamMessages(c echo.Context) error {
 			}
 			if _, err := fmt.Fprintf(writer, "data: %s\n\n", string(data)); err != nil {
 				return nil // client disconnected
-			}
-			if err := writer.Flush(); err != nil {
-				return nil
 			}
 			flusher.Flush()
 		}
@@ -733,6 +729,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						ConversationType:        channel.ConversationTypePrivate,
 						Query:                   text,
 						CurrentChannel:          h.channelType.String(),
+						ReplyTarget:             botID,
 						Channels:                []string{h.channelType.String()},
 						Attachments:             ingestedAttachments,
 						Model:                   strings.TrimSpace(msg.ModelID),

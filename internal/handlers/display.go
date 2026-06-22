@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -253,7 +252,7 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 	c.Response().Header().Set(echo.HeaderCacheControl, "no-cache")
 	c.Response().Header().Set(echo.HeaderConnection, "keep-alive")
 	c.Response().WriteHeader(http.StatusOK)
-	writer := bufio.NewWriter(c.Response().Writer)
+	writer := c.Response().Writer
 	send := func(payload displayPrepareStreamEvent) {
 		_ = writeSSEJSON(writer, flusher, payload)
 	}

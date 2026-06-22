@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -14,10 +15,12 @@ import (
 
 // SessionContext carries request-scoped identity for tool execution.
 type SessionContext struct {
-	BotID           string
-	ChatID          string
-	CurrentPlatform string
-	ReplyTarget     string
+	BotID              string
+	ChatID             string
+	CanOmitTarget      bool
+	AllowLocalShortcut bool
+	CurrentPlatform    string
+	ReplyTarget        string
 }
 
 // Sender sends outbound messages through a channel manager.
@@ -74,6 +77,8 @@ type ReactResult struct {
 	MessageID string
 	Emoji     string
 	Action    string // "added" or "removed"
+	Local     bool
+	Remove    bool
 }
 
 type sendMode struct {
@@ -90,6 +95,8 @@ type sendPlan struct {
 	sameConv    bool
 	message     channel.Message
 }
+
+var errOutboundMessageRequired = errors.New("message is required")
 
 // Send executes a send-message action. args are the tool call arguments.
 func (e *Executor) Send(ctx context.Context, session SessionContext, args map[string]any) (*SendResult, error) {
@@ -125,7 +132,10 @@ func (e *Executor) sendWithMode(
 		return nil, err
 	}
 
-	if mode.allowLocalShortcut && plan.sameConv {
+	if mode.allowLocalShortcut && session.AllowLocalShortcut && plan.sameConv {
+		if !localShortcutCanRepresent(plan.message) {
+			return nil, errors.New("send to the current conversation is only for standalone files or attachments; use assistant text for ordinary replies")
+		}
 		return &SendResult{
 			BotID:            plan.botID,
 			Platform:         plan.channelType.String(),
@@ -168,6 +178,9 @@ func (e *Executor) prepareSendPlan(
 	args map[string]any,
 	mode sendMode,
 ) (*sendPlan, error) {
+	if err := validateSendArguments(args); err != nil {
+		return nil, err
+	}
 	botID, err := e.resolveBotID(args, session)
 	if err != nil {
 		return nil, err
@@ -181,18 +194,22 @@ func (e *Executor) prepareSendPlan(
 		target = firstStringArg(args, "target")
 	}
 	if target == "" {
-		target = strings.TrimSpace(session.ReplyTarget)
+		target = defaultReplyTargetForPlatform(args, session, channelType)
 	}
 
-	sameConv := target == "" || IsSameConversation(session, channelType.String(), target)
 	if mode.requireTarget && target == "" {
 		return nil, errors.New("target is required")
 	}
 	if !mode.allowLocalShortcut && target == "" {
 		return nil, errors.New("target is required for cross-conversation send")
 	}
+	if target == "" {
+		return nil, errors.New("target is required")
+	}
 
-	msg, err := e.buildOutboundMessage(ctx, botID, session, channelType, target, args, sameConv)
+	sameConv := IsSameConversation(session, channelType.String(), target)
+	allowSameConversationShortcut := mode.allowLocalShortcut && session.AllowLocalShortcut && sameConv
+	msg, err := e.buildOutboundMessage(ctx, botID, session, channelType, target, args, allowSameConversationShortcut)
 	if err != nil {
 		return nil, err
 	}
@@ -206,6 +223,34 @@ func (e *Executor) prepareSendPlan(
 	}, nil
 }
 
+func validateSendArguments(args map[string]any) error {
+	allowed := map[string]struct{}{
+		"bot_id": {}, "platform": {}, "target": {}, "text": {}, "reply_to": {}, "attachments": {}, "message": {},
+	}
+	for key := range args {
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("unknown send field %q", key)
+		}
+	}
+	if raw, ok := args["reply_to"]; ok && raw != nil {
+		replyTo, ok := raw.(string)
+		if !ok {
+			return errors.New("reply_to must be string")
+		}
+		args["reply_to"] = strings.TrimSpace(replyTo)
+	}
+	return nil
+}
+
+func localShortcutCanRepresent(msg channel.Message) bool {
+	return strings.TrimSpace(msg.Text) == "" &&
+		len(msg.Parts) == 0 &&
+		len(msg.Attachments) > 0 &&
+		len(msg.Actions) == 0 &&
+		msg.Reply == nil &&
+		msg.Forward == nil
+}
+
 func (e *Executor) buildOutboundMessage(
 	ctx context.Context,
 	botID string,
@@ -216,14 +261,29 @@ func (e *Executor) buildOutboundMessage(
 	isSameConv bool,
 ) (channel.Message, error) {
 	messageText := firstStringArg(args, "text")
-	outboundMessage, parseErr := ParseOutboundMessage(args, messageText)
+	messageAttachments := messageAttachmentsArg(args)
+	messageArgs := args
+	if messageAttachments != nil {
+		messageArgs = withoutMessageAttachments(args)
+	}
+	outboundMessage, parseErr := ParseOutboundMessage(messageArgs, messageText)
 	if parseErr != nil {
-		if rawAtt, ok := args["attachments"]; !ok || rawAtt == nil {
+		rawAtt, hasTopLevelAttachments := args["attachments"]
+		hasAttachments := (hasTopLevelAttachments && rawAtt != nil) || messageAttachments != nil
+		if !hasAttachments || !errors.Is(parseErr, errOutboundMessageRequired) {
 			return channel.Message{}, parseErr
 		}
 		outboundMessage = channel.Message{Text: strings.TrimSpace(messageText)}
 	}
 
+	if messageAttachments != nil {
+		outboundMessage.Attachments = nil
+		attachments, err := e.resolveOutboundAttachments(ctx, botID, session, channelType, target, messageAttachments, isSameConv)
+		if err != nil {
+			return channel.Message{}, err
+		}
+		outboundMessage.Attachments = append(outboundMessage.Attachments, attachments...)
+	}
 	if rawAttachments, ok := args["attachments"]; ok && rawAttachments != nil {
 		attachments, err := e.resolveOutboundAttachments(ctx, botID, session, channelType, target, rawAttachments, isSameConv)
 		if err != nil {
@@ -243,15 +303,60 @@ func (e *Executor) buildOutboundMessage(
 	return outboundMessage, nil
 }
 
+func messageAttachmentsArg(args map[string]any) any {
+	if args == nil {
+		return nil
+	}
+	raw, ok := args["message"]
+	if !ok || raw == nil {
+		return nil
+	}
+	switch msg := raw.(type) {
+	case map[string]any:
+		return msg["attachments"]
+	default:
+		return nil
+	}
+}
+
+func withoutMessageAttachments(args map[string]any) map[string]any {
+	if args == nil {
+		return nil
+	}
+	raw, ok := args["message"]
+	if !ok || raw == nil {
+		return args
+	}
+	msg, ok := raw.(map[string]any)
+	if !ok {
+		return args
+	}
+	msgCopy := make(map[string]any, len(msg))
+	for k, v := range msg {
+		if k != "attachments" {
+			msgCopy[k] = v
+		}
+	}
+	argsCopy := make(map[string]any, len(args))
+	for k, v := range args {
+		argsCopy[k] = v
+	}
+	argsCopy["message"] = msgCopy
+	return argsCopy
+}
+
 func (e *Executor) resolveOutboundAttachments(
 	ctx context.Context,
 	botID string,
-	session SessionContext,
-	channelType channel.ChannelType,
-	target string,
+	_ SessionContext,
+	_ channel.ChannelType,
+	_ string,
 	rawAttachments any,
-	isSameConv bool,
+	allowSameConversationShortcut bool,
 ) ([]channel.Attachment, error) {
+	if err := validateOutboundAttachmentInput(rawAttachments); err != nil {
+		return nil, err
+	}
 	bundles, ok := attachmentpkg.ParseToolInputBundles(rawAttachments)
 	if !ok {
 		return nil, errors.New("attachments must be a string, object, or array")
@@ -259,14 +364,114 @@ func (e *Executor) resolveOutboundAttachments(
 	if len(bundles) == 0 {
 		return nil, nil
 	}
-	if isSameConv || IsSameConversation(session, channelType.String(), target) {
+	if allowSameConversationShortcut {
 		return resolveSameConversationAttachments(bundles), nil
 	}
 	resolved := e.ResolveAttachments(ctx, botID, bundles)
+	resolved = dropUnresolvedDataPathAttachments(resolved)
 	if len(resolved) == 0 {
 		return nil, errors.New("attachments could not be resolved")
 	}
 	return resolved, nil
+}
+
+func validateOutboundAttachmentInput(raw any) error {
+	switch value := raw.(type) {
+	case nil:
+		return nil
+	case string:
+		return nil
+	case map[string]any:
+		return validateOutboundAttachmentObject("", value)
+	case []string:
+		return nil
+	case []any:
+		for i, item := range value {
+			if err := validateOutboundAttachmentItem(i, item); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+func validateOutboundAttachmentItem(index int, raw any) error {
+	switch value := raw.(type) {
+	case string:
+		return nil
+	case map[string]any:
+		return validateOutboundAttachmentObject(fmt.Sprintf(" at index %d", index), value)
+	default:
+		return fmt.Errorf("attachment must be string or object at index %d", index)
+	}
+}
+
+func validateOutboundAttachmentObject(location string, raw map[string]any) error {
+	allowed := map[string]struct{}{
+		"type": {}, "base64": {}, "path": {}, "url": {}, "platform_key": {}, "source_platform": {},
+		"content_hash": {}, "name": {}, "mime": {}, "size": {}, "duration_ms": {}, "width": {},
+		"height": {}, "thumbnail_url": {}, "caption": {}, "metadata": {},
+	}
+	for key := range raw {
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("unknown attachment field %q%s", key, location)
+		}
+	}
+	if rawType, ok := raw["type"]; ok && rawType != nil {
+		attType, ok := rawType.(string)
+		if !ok {
+			return fmt.Errorf("attachment type must be string%s", location)
+		}
+		attType = strings.TrimSpace(attType)
+		switch channel.AttachmentType(attType) {
+		case "", channel.AttachmentImage, channel.AttachmentAudio, channel.AttachmentVideo, channel.AttachmentVoice, channel.AttachmentFile, channel.AttachmentGIF:
+			raw["type"] = attType
+		default:
+			return fmt.Errorf("unsupported attachment type %q%s", attType, location)
+		}
+	}
+	if rawURL, ok := raw["url"]; ok && rawURL != nil {
+		url, ok := rawURL.(string)
+		if !ok {
+			return fmt.Errorf("attachment url must be string%s", location)
+		}
+		url = strings.TrimSpace(url)
+		if url != "" && !channel.IsHTTPURL(url) && !attachmentpkg.IsDataURL(url) {
+			return fmt.Errorf("attachment url must be http(s) or data URL%s", location)
+		}
+		raw["url"] = url
+	}
+	for _, key := range []string{"base64", "path", "url", "platform_key", "content_hash"} {
+		if strings.TrimSpace(stringMapValue(raw, key)) != "" {
+			return nil
+		}
+	}
+	return fmt.Errorf("attachment reference is required%s", location)
+}
+
+func stringMapValue(raw map[string]any, key string) string {
+	value, _ := raw[key].(string)
+	return value
+}
+
+func dropUnresolvedDataPathAttachments(attachments []channel.Attachment) []channel.Attachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	filtered := attachments[:0]
+	for _, att := range attachments {
+		if strings.TrimSpace(att.ContentHash) == "" &&
+			strings.TrimSpace(att.URL) == "" &&
+			strings.TrimSpace(att.Base64) == "" &&
+			strings.TrimSpace(att.PlatformKey) == "" &&
+			attachmentpkg.IsDataPath(att.Path) {
+			continue
+		}
+		filtered = append(filtered, att)
+	}
+	return filtered
 }
 
 func resolveSameConversationAttachments(bundles []attachmentpkg.Bundle) []channel.Attachment {
@@ -314,7 +519,7 @@ func (e *Executor) React(ctx context.Context, session SessionContext, args map[s
 	}
 	target := firstStringArg(args, "target")
 	if target == "" {
-		target = strings.TrimSpace(session.ReplyTarget)
+		target = defaultReplyTargetForPlatform(args, session, channelType)
 	}
 	if target == "" {
 		return nil, errors.New("target is required")
@@ -325,6 +530,17 @@ func (e *Executor) React(ctx context.Context, session SessionContext, args map[s
 	}
 	emoji := firstStringArg(args, "emoji")
 	remove, _, _ := boolArg(args, "remove")
+	sameConv := IsSameConversation(session, channelType.String(), target)
+	if session.AllowLocalShortcut && sameConv {
+		action := "added"
+		if remove {
+			action = "removed"
+		}
+		return &ReactResult{
+			BotID: botID, Platform: channelType.String(), Target: target,
+			MessageID: messageID, Emoji: emoji, Action: action, Local: true, Remove: remove,
+		}, nil
+	}
 	if err := e.Reactor.React(ctx, botID, channelType, channel.ReactRequest{
 		Target: target, MessageID: messageID, Emoji: emoji, Remove: remove,
 	}); err != nil {
@@ -341,6 +557,16 @@ func (e *Executor) React(ctx context.Context, session SessionContext, args map[s
 		BotID: botID, Platform: channelType.String(), Target: target,
 		MessageID: messageID, Emoji: emoji, Action: action,
 	}, nil
+}
+
+func defaultReplyTargetForPlatform(args map[string]any, session SessionContext, channelType channel.ChannelType) string {
+	if !session.CanOmitTarget {
+		return ""
+	}
+	if firstStringArg(args, "platform") != "" && !strings.EqualFold(channelType.String(), strings.TrimSpace(session.CurrentPlatform)) {
+		return ""
+	}
+	return strings.TrimSpace(session.ReplyTarget)
 }
 
 // CanSend returns true if the executor has a sender and resolver configured.
@@ -450,6 +676,9 @@ func ParseOutboundMessage(arguments map[string]any, fallbackText string) (channe
 		case string:
 			msg.Text = strings.TrimSpace(value)
 		case map[string]any:
+			if err := validateOutboundMessageObject(value); err != nil {
+				return channel.Message{}, err
+			}
 			data, err := json.Marshal(value)
 			if err != nil {
 				return channel.Message{}, err
@@ -465,9 +694,228 @@ func ParseOutboundMessage(arguments map[string]any, fallbackText string) (channe
 		msg.Text = strings.TrimSpace(fallbackText)
 	}
 	if msg.IsEmpty() {
-		return channel.Message{}, errors.New("message is required")
+		return channel.Message{}, errOutboundMessageRequired
 	}
 	return msg, nil
+}
+
+func validateOutboundMessageObject(raw map[string]any) error {
+	allowed := map[string]struct{}{
+		"format": {}, "text": {}, "parts": {}, "attachments": {}, "actions": {}, "reply": {},
+	}
+	for key := range raw {
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("unknown message field %q", key)
+		}
+	}
+	if format, ok := raw["format"]; ok && format != nil {
+		normalized, err := validateOutboundMessageFormat(format)
+		if err != nil {
+			return err
+		}
+		raw["format"] = string(normalized)
+	}
+	if parts, ok := raw["parts"]; ok && parts != nil {
+		if err := validateOutboundMessageParts(parts); err != nil {
+			return err
+		}
+	}
+	if attachments, ok := raw["attachments"]; ok && attachments != nil {
+		if err := validateOutboundAttachmentInput(attachments); err != nil {
+			return err
+		}
+	}
+	if actions, ok := raw["actions"]; ok && actions != nil {
+		if err := validateOutboundMessageActions(actions); err != nil {
+			return err
+		}
+	}
+	if reply, ok := raw["reply"]; ok && reply != nil {
+		if err := validateOutboundMessageReply(reply); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateOutboundMessageFormat(raw any) (channel.MessageFormat, error) {
+	value, ok := raw.(string)
+	if !ok {
+		return "", errors.New("message format must be string")
+	}
+	switch format := channel.MessageFormat(strings.TrimSpace(value)); format {
+	case channel.MessageFormatPlain, channel.MessageFormatMarkdown, channel.MessageFormatRich:
+		return format, nil
+	default:
+		return "", fmt.Errorf("unsupported message format %q", value)
+	}
+}
+
+func validateOutboundMessageReply(raw any) error {
+	reply, ok := raw.(map[string]any)
+	if !ok {
+		return errors.New("message reply must be object")
+	}
+	allowed := map[string]struct{}{
+		"message_id": {},
+	}
+	for key := range reply {
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("unknown message reply field %q", key)
+		}
+	}
+	messageID, _ := reply["message_id"].(string)
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return errors.New("message reply message_id is required")
+	}
+	reply["message_id"] = messageID
+	return nil
+}
+
+func validateOutboundMessageParts(raw any) error {
+	parts, ok := raw.([]any)
+	if !ok {
+		return errors.New("message parts must be array")
+	}
+	for i, rawPart := range parts {
+		part, ok := rawPart.(map[string]any)
+		if !ok {
+			return fmt.Errorf("message part must be object at index %d", i)
+		}
+		if err := validateOutboundMessagePart(i, part); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateOutboundMessageActions(raw any) error {
+	actions, ok := raw.([]any)
+	if !ok {
+		return errors.New("message actions must be array")
+	}
+	for i, rawAction := range actions {
+		action, ok := rawAction.(map[string]any)
+		if !ok {
+			return fmt.Errorf("message action must be object at index %d", i)
+		}
+		if err := validateOutboundMessageAction(i, action); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateOutboundMessageAction(index int, raw map[string]any) error {
+	allowed := map[string]struct{}{
+		"type": {}, "label": {}, "url": {}, "row": {},
+	}
+	for key := range raw {
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("unknown message action field %q at index %d", key, index)
+		}
+	}
+	label, _ := raw["label"].(string)
+	if strings.TrimSpace(label) == "" {
+		return fmt.Errorf("message action label is required at index %d", index)
+	}
+	rawURL, _ := raw["url"].(string)
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return fmt.Errorf("message action url is required at index %d", index)
+	}
+	if !channel.IsHTTPURL(rawURL) {
+		return fmt.Errorf("message action url must be http(s) at index %d", index)
+	}
+	return nil
+}
+
+func validateOutboundMessagePart(index int, raw map[string]any) error {
+	allowed := map[string]struct{}{
+		"type": {}, "text": {}, "url": {}, "styles": {}, "language": {},
+		"channel_identity_id": {}, "emoji": {},
+	}
+	for key := range raw {
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("unknown message part field %q at index %d", key, index)
+		}
+	}
+	partType, _ := raw["type"].(string)
+	normalizedType := channel.MessagePartType(strings.TrimSpace(partType))
+	switch normalizedType {
+	case channel.MessagePartText, channel.MessagePartLink, channel.MessagePartCodeBlock, channel.MessagePartMention, channel.MessagePartEmoji, channel.MessagePartHeading, channel.MessagePartBlockquote, channel.MessagePartListItem:
+		raw["type"] = string(normalizedType)
+	default:
+		return fmt.Errorf("unsupported message part type %q at index %d", partType, index)
+	}
+	if err := validateOutboundMessagePartContent(index, normalizedType, raw); err != nil {
+		return err
+	}
+	styles, ok := raw["styles"]
+	if !ok || styles == nil {
+		return nil
+	}
+	return normalizeOutboundMessagePartStyles(index, styles)
+}
+
+func normalizeOutboundMessagePartStyles(index int, styles any) error {
+	switch styleItems := styles.(type) {
+	case []any:
+		for i, rawStyle := range styleItems {
+			style, _ := rawStyle.(string)
+			normalizedStyle := channel.MessageTextStyle(strings.TrimSpace(style))
+			switch normalizedStyle {
+			case channel.MessageStyleBold, channel.MessageStyleItalic, channel.MessageStyleStrikethrough, channel.MessageStyleCode, channel.MessageStyleUnderline, channel.MessageStyleSpoiler:
+				styleItems[i] = string(normalizedStyle)
+			default:
+				return fmt.Errorf("unsupported message part style %q at index %d", style, index)
+			}
+		}
+	case []string:
+		for i, style := range styleItems {
+			normalizedStyle := channel.MessageTextStyle(strings.TrimSpace(style))
+			switch normalizedStyle {
+			case channel.MessageStyleBold, channel.MessageStyleItalic, channel.MessageStyleStrikethrough, channel.MessageStyleCode, channel.MessageStyleUnderline, channel.MessageStyleSpoiler:
+				styleItems[i] = string(normalizedStyle)
+			default:
+				return fmt.Errorf("unsupported message part style %q at index %d", style, index)
+			}
+		}
+	default:
+		return errors.New("message part styles must be array")
+	}
+	return nil
+}
+
+func validateOutboundMessagePartContent(index int, partType channel.MessagePartType, raw map[string]any) error {
+	text, _ := raw["text"].(string)
+	text = strings.TrimSpace(text)
+	switch partType {
+	case channel.MessagePartLink:
+		rawURL, _ := raw["url"].(string)
+		rawURL = strings.TrimSpace(rawURL)
+		if rawURL == "" {
+			return fmt.Errorf("message link part url is required at index %d", index)
+		}
+		if !channel.IsHTTPURL(rawURL) {
+			return fmt.Errorf("message link part url must be http(s) at index %d", index)
+		}
+	case channel.MessagePartMention:
+		if text == "" {
+			return fmt.Errorf("message mention part text is required at index %d", index)
+		}
+	case channel.MessagePartEmoji:
+		emoji, _ := raw["emoji"].(string)
+		if text == "" && strings.TrimSpace(emoji) == "" {
+			return fmt.Errorf("message emoji part text or emoji is required at index %d", index)
+		}
+	default:
+		if text == "" {
+			return fmt.Errorf("message part content is required at index %d", index)
+		}
+	}
+	return nil
 }
 
 // AssetMetaToAttachment converts an AssetMeta to a channel.Attachment.

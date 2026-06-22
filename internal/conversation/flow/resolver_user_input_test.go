@@ -19,6 +19,7 @@ type fakeUserInputService struct {
 
 	submitCalls   int
 	cancelCalls   int
+	createCalls   int
 	submitted     userinput.SubmitInput
 	canceled      userinput.CancelInput
 	submitErr     error
@@ -28,7 +29,8 @@ type fakeUserInputService struct {
 	canRespondSet bool
 }
 
-func (*fakeUserInputService) CreatePending(context.Context, userinput.CreatePendingInput) (userinput.Request, error) {
+func (f *fakeUserInputService) CreatePending(context.Context, userinput.CreatePendingInput) (userinput.Request, error) {
+	f.createCalls++
 	return userinput.Request{}, errors.New("unexpected CreatePending")
 }
 

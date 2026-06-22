@@ -97,14 +97,17 @@
           <div
             v-for="mcp in plugin.mcps"
             :key="mcp.key || mcp.name"
-            class="flex items-center gap-3 py-4"
+            class="flex min-w-0 items-center gap-3 py-4"
           >
             <div class="flex size-10 shrink-0 items-center justify-center rounded-md border bg-background">
               <Plug class="size-5 text-muted-foreground" />
             </div>
             <div class="min-w-0 flex-1">
               <div class="flex flex-wrap items-center gap-2">
-                <p class="font-medium">
+                <p
+                  class="min-w-0 truncate font-medium"
+                  :title="mcp.display_name || mcp.name || mcp.key"
+                >
                   {{ mcp.display_name || mcp.name || mcp.key }}
                 </p>
                 <Badge
@@ -135,16 +138,22 @@
           <div
             v-for="skill in pluginSkills"
             :key="skillKey(skill)"
-            class="flex items-center gap-3 py-4"
+            class="flex min-w-0 items-center gap-3 py-4"
           >
             <div class="flex size-10 shrink-0 items-center justify-center rounded-md border bg-background">
               <Boxes class="size-5 text-muted-foreground" />
             </div>
             <div class="min-w-0 flex-1">
-              <p class="font-medium">
+              <p
+                class="min-w-0 truncate font-medium"
+                :title="skillName(skill)"
+              >
                 {{ skillName(skill) }}
               </p>
-              <p class="mt-1 text-sm text-muted-foreground">
+              <p
+                class="mt-1 line-clamp-2 break-words text-sm text-muted-foreground"
+                :title="skillDescription(skill)"
+              >
                 {{ skillDescription(skill) }}
               </p>
             </div>

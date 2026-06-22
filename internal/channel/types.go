@@ -206,11 +206,14 @@ const (
 type MessagePartType string
 
 const (
-	MessagePartText      MessagePartType = "text"
-	MessagePartLink      MessagePartType = "link"
-	MessagePartCodeBlock MessagePartType = "code_block"
-	MessagePartMention   MessagePartType = "mention"
-	MessagePartEmoji     MessagePartType = "emoji"
+	MessagePartText       MessagePartType = "text"
+	MessagePartLink       MessagePartType = "link"
+	MessagePartCodeBlock  MessagePartType = "code_block"
+	MessagePartMention    MessagePartType = "mention"
+	MessagePartEmoji      MessagePartType = "emoji"
+	MessagePartHeading    MessagePartType = "heading"
+	MessagePartBlockquote MessagePartType = "blockquote"
+	MessagePartListItem   MessagePartType = "list_item"
 )
 
 // MessageTextStyle describes inline formatting for a text part.
@@ -221,6 +224,8 @@ const (
 	MessageStyleItalic        MessageTextStyle = "italic"
 	MessageStyleStrikethrough MessageTextStyle = "strikethrough"
 	MessageStyleCode          MessageTextStyle = "code"
+	MessageStyleUnderline     MessageTextStyle = "underline"
+	MessageStyleSpoiler       MessageTextStyle = "spoiler"
 )
 
 // MessagePart is a single element within a rich-text message.
@@ -292,7 +297,7 @@ type Action struct {
 	URL   string `json:"url,omitempty"`
 	// Row groups buttons into keyboard rows for renderers that support grids
 	// (e.g. Telegram inline keyboards). Buttons sharing a Row render together;
-	// rows appear in ascending first-seen order. Renderers without grid support
+	// rows appear in ascending numeric order. Renderers without grid support
 	// ignore this field. 0 is the default (single row, prior behavior).
 	Row int `json:"row,omitempty"`
 }
@@ -321,6 +326,13 @@ type ForwardRef struct {
 }
 
 // Message is the unified message structure used across all channels.
+//
+// Thread routing should flow through Conversation.ThreadID at the envelope
+// level. Thread remains for API compatibility with existing callers that still
+// attach thread scope to the message body. Forward is populated inbound
+// (Telegram, Misskey) and persisted to history but no adapter Send currently
+// honors it on outbound — explicitly forwarding an existing message requires a
+// dedicated future feature.
 type Message struct {
 	ID          string         `json:"id,omitempty"`
 	Format      MessageFormat  `json:"format,omitempty"`
@@ -345,31 +357,16 @@ func (m Message) IsEmpty() bool {
 // PlainText extracts the plain text representation of the message.
 func (m Message) PlainText() string {
 	if strings.TrimSpace(m.Text) != "" {
-		return strings.TrimSpace(m.Text)
+		text := strings.TrimSpace(m.Text)
+		if len(m.Parts) == 0 {
+			return text
+		}
+		return appendTextSection(text, RenderPartsAsPlain(m.Parts))
 	}
 	if len(m.Parts) == 0 {
 		return ""
 	}
-	lines := make([]string, 0, len(m.Parts))
-	for _, part := range m.Parts {
-		switch part.Type {
-		case MessagePartText, MessagePartLink, MessagePartCodeBlock, MessagePartMention, MessagePartEmoji:
-			value := strings.TrimSpace(part.Text)
-			if value == "" && part.Type == MessagePartLink {
-				value = strings.TrimSpace(part.URL)
-			}
-			if value == "" && part.Type == MessagePartEmoji {
-				value = strings.TrimSpace(part.Emoji)
-			}
-			if value == "" {
-				continue
-			}
-			lines = append(lines, value)
-		default:
-			continue
-		}
-	}
-	return strings.Join(lines, "\n")
+	return strings.TrimSpace(RenderPartsAsPlain(m.Parts))
 }
 
 // BindingCriteria specifies conditions for matching a user-channel binding.

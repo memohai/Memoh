@@ -12,6 +12,8 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/agent/sessionmode"
+	"github.com/memohai/memoh/internal/agentpayload"
 	"github.com/memohai/memoh/internal/channel/route"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/heartbeat"
@@ -41,12 +43,13 @@ func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, payload sc
 	}
 
 	req := conversation.ChatRequest{
-		BotID:     botID,
-		ChatID:    botID,
-		SessionID: payload.SessionID,
-		Query:     payload.Command,
-		UserID:    payload.OwnerUserID,
-		Token:     token,
+		BotID:       botID,
+		ChatID:      botID,
+		SessionID:   payload.SessionID,
+		Query:       payload.Command,
+		UserID:      payload.OwnerUserID,
+		Token:       token,
+		SessionType: sessionmode.Schedule,
 	}
 	rc, err := r.resolve(ctx, req)
 	if err != nil {
@@ -54,7 +57,7 @@ func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, payload sc
 	}
 
 	cfg := rc.runConfig
-	cfg.SessionType = "schedule"
+	cfg.SessionType = sessionmode.Schedule
 	cfg.Identity.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
 
 	schedulePrompt := agentpkg.GenerateSchedulePrompt(agentpkg.Schedule{
@@ -98,13 +101,14 @@ func (r *Resolver) TriggerHeartbeat(ctx context.Context, botID string, payload h
 	}
 
 	req := conversation.ChatRequest{
-		BotID:     botID,
-		ChatID:    botID,
-		SessionID: payload.SessionID,
-		Query:     "heartbeat",
-		UserID:    payload.OwnerUserID,
-		Token:     token,
-		Model:     heartbeatModel,
+		BotID:       botID,
+		ChatID:      botID,
+		SessionID:   payload.SessionID,
+		Query:       "heartbeat",
+		UserID:      payload.OwnerUserID,
+		Token:       token,
+		Model:       heartbeatModel,
+		SessionType: sessionmode.Heartbeat,
 	}
 	rc, err := r.resolve(ctx, req)
 	if err != nil {
@@ -112,7 +116,7 @@ func (r *Resolver) TriggerHeartbeat(ctx context.Context, botID string, payload h
 	}
 
 	cfg := rc.runConfig
-	cfg.SessionType = "heartbeat"
+	cfg.SessionType = sessionmode.Heartbeat
 	cfg.Identity.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
 
 	var checklist string
@@ -291,6 +295,7 @@ func (r *Resolver) deliverBackgroundNotifications(ctx context.Context, botID, se
 		Query:          "[background notification]",
 		CurrentChannel: delivery.channelType,
 		ReplyTarget:    delivery.replyTarget,
+		SessionType:    sessionmode.BackgroundDelivery,
 	}
 	rc, err := r.resolve(ctx, req)
 	if err != nil {
@@ -298,13 +303,13 @@ func (r *Resolver) deliverBackgroundNotifications(ctx context.Context, botID, se
 	}
 
 	cfg := rc.runConfig
+	cfg.SessionType = sessionmode.BackgroundDelivery
 	// Inject drained notifications so the first LLM call sees them.
 	cfg.Messages = append(cfg.Messages, notifMessages...)
 	// Clear query so prepareRunConfig does not append a redundant user message.
 	cfg.Query = ""
-	// Use the natural session type — same system prompt, same tools, same
-	// personality as a regular conversation turn. Between-turn notifications
-	// should go through the same execution path as normal user messages.
+	// Use the dedicated background delivery mode: the model's normal text
+	// output is auto-delivered to the recovered route target below.
 	cfg = r.prepareRunConfig(ctx, cfg)
 
 	idleCtx, idleCancel := withIdleTimeout(ctx)
@@ -412,7 +417,7 @@ func (r *Resolver) deliverBackgroundNotifications(ctx context.Context, botID, se
 
 	// Auto-deliver the agent's text response to the user through the normal
 	// outbound path, not through a special "send" tool call.
-	if responseText := strings.TrimSpace(text.String()); responseText != "" && r.outboundFn != nil {
+	if responseText, ok := backgroundDeliveryOutboundText(text.String()); ok && r.outboundFn != nil {
 		if err := r.outboundFn(ctx, botID, delivery.channelType, delivery.replyTarget, responseText); err != nil {
 			r.logger.Warn("background notification: outbound delivery failed",
 				slog.String("bot_id", botID),
@@ -425,11 +430,27 @@ func (r *Resolver) deliverBackgroundNotifications(ctx context.Context, botID, se
 	return nil
 }
 
+func backgroundDeliveryOutboundText(text string) (string, bool) {
+	text = strings.TrimSpace(text)
+	if text == "" || text == "HEARTBEAT_OK" {
+		return "", false
+	}
+	return text, true
+}
+
 func (r *Resolver) storeBackgroundNotificationSnapshot(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, notifMessages []sdk.Message, snap terminalSnapshot) error {
 	if len(snap.sdkMessages) == 0 {
 		return nil
 	}
 	outputMessages := sdkMessagesToModelMessages(snap.sdkMessages)
+	if !hasPersistableAssistantOutput(outputMessages) {
+		r.logger.Info("skip persisting background notification snapshot without assistant output",
+			slog.String("bot_id", req.BotID),
+			slog.String("session_id", req.SessionID),
+			slog.Int("messages", len(outputMessages)),
+		)
+		return nil
+	}
 	notifModelMessages := sdkMessagesToModelMessages(notifMessages)
 	roundMessages := append(append(make([]conversation.ModelMessage, 0, len(notifModelMessages)+len(outputMessages)), notifModelMessages...), outputMessages...)
 	return r.storeRound(ctx, req, roundMessages, rc.model.ID)
@@ -439,11 +460,10 @@ func (r *Resolver) publishBackgroundAgentStream(botID, sessionID string, stream 
 	if r.eventPublisher == nil || len(stream) == 0 {
 		return
 	}
-	payload := map[string]any{
-		"session_id": sessionID,
-		"stream":     stream,
-	}
-	data, err := json.Marshal(payload)
+	// The wire shape lives in internal/agentpayload — see its AgentStream
+	// helper and the tests there that pin the top-level `session_id`
+	// placement the per-session SSE handler routes on.
+	data, err := json.Marshal(agentpayload.AgentStream(sessionID, stream))
 	if err != nil {
 		return
 	}

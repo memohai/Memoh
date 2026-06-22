@@ -5,6 +5,7 @@
     :bot-id="currentBotId"
     :can-write="canWorkspaceWrite"
     :bot-name="currentBot?.display_name || currentBot?.name || ''"
+    :active="sidebarView === 'files' && workbenchOpen"
   />
   <div
     v-else
@@ -27,7 +28,7 @@ const { t } = useI18n()
 const chatStore = useChatStore()
 const workspaceTabs = useWorkspaceTabsStore()
 const { currentBotId, bots } = storeToRefs(chatStore)
-const { pendingFilesPath } = storeToRefs(workspaceTabs)
+const { pendingFilesPath, sidebarView, workbenchOpen } = storeToRefs(workspaceTabs)
 
 const currentBot = computed(() =>
   bots.value.find(bot => bot.id === currentBotId.value) ?? null,

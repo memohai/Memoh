@@ -1,12 +1,10 @@
-// Single source of truth for the desktop settings routes. Both the settings
-// renderer (which mounts the real components) and the chat renderer (which
-// installs no-op stubs so name-based `router.push({ name: 'bot-detail' })`
-// calls coming from reused @memohai/web components resolve cleanly before
-// being intercepted and forwarded to the settings BrowserWindow over IPC)
-// import this list. Keep it in sync with @memohai/web's `/settings/*`
-// children — adding a new settings page to web means adding an entry here.
+// Single source of truth for desktop settings routes. The renderer mounts
+// these real settings components under `/settings/*` while keeping chat
+// mounted. Add current reusable settings pages here when desktop needs to
+// expose them; do not mirror retired web redirects as new desktop routes.
 
-import type { Component } from 'vue'
+import { h, type Component } from 'vue'
+import { RouterView, type RouteRecordRaw } from 'vue-router'
 import { i18nRef } from '@memohai/web/i18n'
 
 export interface SettingsRouteSpec {
@@ -117,10 +115,31 @@ export const SETTINGS_ROUTE_SPECS: SettingsRouteSpec[] = [
     meta: { breadcrumb: i18nRef('sidebar.platform') }
   },
   {
-    name: 'supermarket',
     path: '/settings/supermarket',
-    loader: () => import('@memohai/web/pages/supermarket/index.vue'),
-    meta: { breadcrumb: i18nRef('sidebar.supermarket') }
+    meta: { breadcrumb: i18nRef('sidebar.supermarket') },
+    children: [
+      {
+        name: 'supermarket',
+        path: '',
+        loader: () => import('@memohai/web/pages/supermarket/index.vue'),
+      },
+      {
+        name: 'supermarket-plugin-detail',
+        path: 'plugins/:pluginId',
+        loader: () => import('@memohai/web/pages/supermarket/plugin-detail.vue'),
+        meta: {
+          breadcrumb: (route) => String(route.params.pluginId ?? ''),
+        },
+      },
+      {
+        name: 'supermarket-skill-detail',
+        path: 'skills/:skillId',
+        loader: () => import('@memohai/web/pages/supermarket/skill-detail.vue'),
+        meta: {
+          breadcrumb: (route) => String(route.params.skillId ?? ''),
+        },
+      },
+    ],
   },
   {
     name: 'about',
@@ -130,6 +149,16 @@ export const SETTINGS_ROUTE_SPECS: SettingsRouteSpec[] = [
   },
 ]
 
-// Default landing path used by the settings window's root redirect, and by
-// the chat window when it forwards a generic `/settings` open request.
+// Default landing path used by the chat router's `/settings` redirect and by
+// generic desktop settings open requests.
 export const SETTINGS_DEFAULT_PATH = '/settings/bots'
+
+export function mapSettingsSpecToRoute(spec: SettingsRouteSpec): RouteRecordRaw {
+  return {
+    path: spec.path,
+    component: spec.loader ?? { render: () => h(RouterView) },
+    ...(spec.name ? { name: spec.name } : {}),
+    ...(spec.meta ? { meta: spec.meta } : {}),
+    ...(spec.children ? { children: spec.children.map(mapSettingsSpecToRoute) } : {}),
+  } satisfies RouteRecordRaw
+}

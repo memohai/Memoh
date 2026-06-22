@@ -68,7 +68,7 @@ func (p *ImageGenProvider) Tools(ctx context.Context, session SessionContext) ([
 	sess := session
 	return []sdk.Tool{
 		{
-			Name:        "generate_image",
+			Name:        ToolGenerateImage().String(),
 			Description: "Generate an image from a text description using the configured image generation model. Returns the file path of the generated image in the workspace.",
 			Parameters: map[string]any{
 				"type": "object",
@@ -111,6 +111,9 @@ func (p *ImageGenProvider) execGenerateImage(ctx context.Context, session Sessio
 	modelResp, err := p.models.GetByID(ctx, imageModelID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load image model: %w", err)
+	}
+	if !modelResp.Enable {
+		return nil, fmt.Errorf("image model %s is disabled", modelResp.ModelID)
 	}
 	if !modelResp.HasCompatibility(models.CompatImageOutput) {
 		return nil, errors.New("configured model does not support image generation")

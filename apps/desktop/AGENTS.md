@@ -4,8 +4,7 @@
 
 `@memohai/desktop` is the Memoh Electron desktop application. It does **not**
 re-implement the UI — it reuses Vue components, stores, router pieces, and
-styles from `@memohai/web` and assembles its own multi-window Electron shell
-on top.
+styles from `@memohai/web` and assembles its own Electron shell on top.
 
 Desktop is also the native local-client boundary. The main process manages a
 local `memoh-server` on `127.0.0.1:18731`, prepares SQLite/local-workspace
@@ -13,18 +12,11 @@ configuration, starts embedded Qdrant, owns tray reopen/quit behavior, and
 bundles the CLI, bridge runtime, provider templates, Qdrant, and display media
 runtime resources. Do not describe it as only a Web shell.
 
-The app boots two independent `BrowserWindow`s:
-
-| Window | Renderer entry | HTML | Router routes |
-|--------|----------------|------|---------------|
-| **Chat** (primary) | `src/renderer/src/main.ts` | `index.html` | `/`, `/chat/:botId?/:sessionId?`, `/login`, `/oauth/mcp/callback` |
-| **Settings** (satellite) | `src/renderer/src/settings.ts` | `settings.html` | `/settings/*` (bots, providers, memory, …) |
-
-The two windows are isolated renderer processes — separate Pinia, separate
-Vue Router, separate Vite chunks — but share user state via the
-`pinia-plugin-persistedstate` localStorage stores (chat-selection, user
-token, settings, etc.). Settings is a satellite of chat: chat hosts login,
-settings closes itself on 401.
+The desktop renderer starts at `src/renderer/src/main.ts` from
+`src/renderer/index.html`. It owns the desktop router, Pinia, Pinia Colada,
+and keyboard registry. `chat/App.vue` keeps the chat surface mounted while
+settings pages are active so dock state, scroll position, and workspace panels
+stay intact.
 
 ## Tech Stack
 
@@ -57,7 +49,7 @@ apps/desktop/
 │
 ├── src/
 │   ├── main/
-│   │   ├── index.ts                # Main process: BrowserWindow factories, tray, IPC, app lifecycle
+│   │   ├── index.ts                # Main process: renderer bootstrap, tray, IPC, app lifecycle
 │   │   ├── local-server.ts         # Managed local server startup, config, migrations, OAuth callback proxy
 │   │   ├── qdrant.ts               # Embedded Qdrant process, ports, pid, config, storage
 │   │   ├── daemon.ts               # Shared pid/liveness helpers for server and Qdrant
@@ -65,23 +57,18 @@ apps/desktop/
 │   │   ├── gstreamer.ts            # Packaged display media runtime environment
 │   │   └── paths.ts                # Repo/resource/userData path helpers
 │   ├── preload/
-│   │   ├── index.ts                # Preload bridge — exposes `window.electron` + `window.api`
-│   │   └── global.d.ts             # Window augmentation for renderer typecheck
+│   │   ├── index.ts                # Preload bridge — exposes renderer APIs
+│   │   └── global.d.ts             # Renderer API typings
 │   └── renderer/
-│       ├── index.html              # Chat window root
-│       ├── settings.html           # Settings window root
+│       ├── index.html              # Renderer root
 │       ├── src/
-│       │   ├── main.ts             # Chat renderer bootstrap (createApp, plugins, router, i18n)
-│       │   ├── settings.ts         # Settings renderer bootstrap (parallel chain) + onSettingsNavigate listener
+│       │   ├── main.ts             # Renderer bootstrap (createApp, plugins, router, i18n)
 │       │   ├── env.d.ts            # vite/client + *.vue ambient module
 │       │   ├── chat/
-│       │   │   ├── App.vue         # Chat root (provides DesktopShellKey, Toaster)
-│       │   │   └── router.ts       # Chat routes + settings name stubs + /settings/* IPC interception + auth guard
-│       │   ├── settings/
-│       │   │   ├── App.vue         # Settings root (provides DesktopShellKey, MainLayout)
-│       │   │   └── router.ts       # Settings routes (built from shared spec; mirrors web's /settings/* paths)
+│       │   │   ├── App.vue         # Renderer root: persistent chat surface + settings pages
+│       │   │   └── router.ts       # Chat/settings routes, auth guard, memory history
 │       │   └── shared/
-│       │       └── settings-routes.ts  # Single source of truth for settings name+path+loader, consumed by both routers
+│       │       └── settings-routes.ts  # Single source of truth for desktop settings routes
 │       └── types/
 │           ├── web-stubs.d.ts      # Path-mapped stub for @memohai/web/* — see "Type Stubbing"
 │           └── ui-stubs.d.ts       # Path-mapped stub for @memohai/ui (Toaster, SidebarInset)
@@ -132,8 +119,8 @@ exports declared in `apps/web/package.json`:
 | `@memohai/web/store/settings` | Theme + locale store (registered for side effects) |
 | `@memohai/web/lib/desktop-shell` | `DesktopShellKey` injection key |
 | `@memohai/web/layout/main-layout/index.vue` | Outer sidebar layout |
-| `@memohai/web/components/sidebar/index.vue` | Bot list sidebar (chat shell) |
-| `@memohai/web/components/settings-sidebar/index.vue` | Settings nav (settings shell) |
+| `@memohai/web/components/sidebar/index.vue` | Bot list sidebar |
+| `@memohai/web/components/settings-sidebar/index.vue` | Settings navigation |
 | `@memohai/web/pages/**/*.vue` | Routed pages (home, bots, providers, …) |
 
 Vite resolves these at bundle time via the package's `exports` field.
@@ -143,10 +130,9 @@ Vite resolves these at bundle time via the package's `exports` field.
 
 Desktop needs to do things `@memohai/web/main.ts` cannot: provide an
 `InjectionKey` so reusable components know they're in the Electron shell,
-swap the 401 handler (settings closes itself; chat redirects to `/login`),
-own its own router with memory history and the `/settings/*` IPC hijack,
-and be free to register desktop-only Pinia plugins without polluting the
-web bundle.
+own its own memory-history router, connect Electron menu and IPC-delivered
+keyboard commands into the shared command registry, and install desktop-only
+renderer setup such as cache synchronization without changing the web bundle.
 
 `@memohai/web/api-client`'s `setupApiClient(options)` accepts an
 `onUnauthorized` callback for exactly this reason — never hard-code redirect
@@ -188,90 +174,22 @@ When you import a new component directly from `@memohai/ui`, add that
 component to `ui-stubs.d.ts` as well. The package may export it correctly,
 but desktop's renderer typecheck only sees the stubbed surface.
 
-## Multi-Window Lifecycle
+## App Lifecycle
 
 ### Main process (`src/main/index.ts`)
 
-- `chatWindow: BrowserWindow | null` is the persistent primary window. `app.on('activate')` recreates it on macOS dock click.
-- `settingsWindow: BrowserWindow | null` is created lazily by IPC and is parented to the chat window (not modal).
-- Both windows share `webPreferences` (sandbox: false, contextIsolation: true, nodeIntegration: false) and the same preload script. The renderer is therefore strictly browser-grade — anything that needs node/Electron APIs must go through IPC.
+- The main process creates the renderer, tray, native menu, and IPC handlers.
+- Renderer code stays browser-grade through `webPreferences` (sandbox: false, contextIsolation: true, nodeIntegration: false). Anything that needs Node/Electron APIs must go through IPC.
 - `createAppTray()` installs the system tray. Clicking the tray opens/focuses chat; `Quit Memoh` calls the normal `app.quit()` path.
-- `before-quit` is the authoritative shutdown path: it hides/destroys windows, closes the provider OAuth callback proxy, stops the managed local server, stops embedded Qdrant, destroys the tray, and then exits.
+- `before-quit` is the authoritative shutdown path: it closes the provider OAuth callback proxy, stops the managed local server, stops embedded Qdrant, destroys the tray, and then exits.
 
 ### IPC surface (`src/preload/index.ts`)
 
-The preload bridge exposes a small, fixed surface to renderers via
-`contextBridge.exposeInMainWorld('api', api)`:
-
-```ts
-window.api = {
-  desktop: {
-    getServerStatus(): Promise<LocalServerStatus>
-    apiBaseUrl(): Promise<string>
-    authToken(): Promise<string>
-    defaultWorkspacePath(displayName: string): Promise<string>
-    getCliStatus(): Promise<CliStatusPayload>
-    installCli(): Promise<CliStatusPayload>
-    uninstallCli(): Promise<CliStatusPayload>
-    broadcastInvalidate(payload: CrossWindowInvalidatePayload): Promise<void>
-    onInvalidate(cb: (payload: CrossWindowInvalidatePayload) => void): void
-  },
-  window: {
-    openSettings(target?: string): Promise<void>          // ipc → main:'window:open-settings'
-    closeSelf(): Promise<void>                            // ipc → main:'window:close-self'
-    onSettingsNavigate(cb: (target: string) => void): void // settings-window subscription for IPC 'settings:navigate'
-  },
-}
-```
-
-Plus `window.electron` (from `@electron-toolkit/preload`) for the standard
-toolkit utilities. Keep this surface intentionally tiny — every entry is
-part of the security boundary.
-
-### Cross-window navigation
-
-Settings actions invoked from the chat window's reused @memohai/web
-components — the gear footer link, the bot switcher's "New Bot" /
-"Manage Bots" entries, the schedule/heartbeat trigger blocks, etc. —
-all eventually call either `router.push('/settings/...')` or
-`router.push({ name: 'bot-detail', ... })`.
-
-Both shapes are handled in the chat router. Name-based navigation works
-because the chat router registers no-op stub routes for every settings
-`name` from `shared/settings-routes.ts`. That lets vue-router resolve
-`{ name: 'bot-detail', params, query }` into a concrete `/settings/...`
-fullPath without warnings before the guard fires:
-
-```ts
-if (to.path === '/settings' || to.path.startsWith('/settings/')) {
-  void window.api?.window?.openSettings(to.fullPath)
-  return false   // abort in-place navigation
-}
-```
-
-The main process handler then:
-
-1. Creates the settings `BrowserWindow` if it doesn't exist, otherwise
-   restores/focuses the existing one (`focusWindow`).
-2. Sends `settings:navigate` with the requested path. If the renderer
-   isn't ready yet (cold start or in-flight reload), the target is
-   buffered in a Map keyed by webContents id and drained from the
-   per-window `did-finish-load` listener attached at creation time.
-
-The settings renderer subscribes via `onSettingsNavigate` before mount
-(in `src/renderer/src/settings.ts`) and pushes the path through its own
-router. A guard skips the push when the requested path equals the
-current `fullPath` so no spurious navigation is generated.
-
-When you add a new settings page in `@memohai/web`, also add an entry to
-`src/renderer/src/shared/settings-routes.ts`. Both routers consume it,
-so cross-window jumps stay correct without manual sync.
-
-### Settings 401 handling
-
-The chat renderer's `setupApiClient` calls `router.replace({ name: 'Login' })`
-on 401. The settings renderer instead calls `window.api.window.closeSelf()`.
-The chat window's own auth guard then takes over and routes to `/login`.
+The preload bridge is the renderer's only Electron/main-process API. Keep
+the surface small and typed in `src/preload/index.ts`: desktop runtime helpers
+belong under `window.api.desktop`, and renderer lifecycle hooks belong under
+`window.api.window`. Add entries only when a renderer feature truly needs
+main-process access.
 
 ## Desktop Shell Awareness — `DesktopShellKey`
 
@@ -285,8 +203,7 @@ Pattern:
    `DesktopShellKey: InjectionKey<boolean>`.
 2. Web (`apps/web/src/main.ts`) does **not** provide it → `inject(...,
    false)` falls back to `false`.
-3. Desktop renderer roots (`chat/App.vue`, `settings/App.vue`) call
-   `provide(DesktopShellKey, true)`.
+3. Desktop renderer root (`chat/App.vue`) calls `provide(DesktopShellKey, true)`.
 4. Consumers (`components/sidebar`, `components/settings-sidebar`,
    `layout/main-layout`, `pages/home/components/chat-area`) inject and gate
    their desktop affordances on the result.
@@ -298,17 +215,15 @@ update both Web/CI and desktop typecheck.
 
 ## macOS Chrome
 
-On `process.platform === 'darwin'` only, both `BrowserWindow`s opt in to:
+On `process.platform === 'darwin'` only, the desktop chrome opts in to:
 
 ```ts
 { titleBarStyle: 'hidden', trafficLightPosition: { x: 14, y: 12 } }
 ```
 
 The native titlebar is hidden but the traffic lights remain at a fixed
-position. To let the user grab the **entire** top of each window —
-not just the sidebar corner — the two windows take different paths,
-chosen so the chrome looks intentional rather than introducing an
-empty grey gap above the page content:
+position. Drag regions are handled in the renderer so the chrome looks
+intentional rather than introducing an empty grey gap above the page content:
 
 - **Both sidebars** (`components/sidebar/index.vue`,
   `components/settings-sidebar/index.vue`) render their existing
@@ -318,27 +233,17 @@ empty grey gap above the page content:
   inside (e.g. the chat sidebar `+` button) opt out with explicit
   `[-webkit-app-region:no-drag]` wrappers.
 
-- **Chat window** renders a single 36px full-width drag strip at the
+- **Main section** renders a single 36px full-width drag strip at the
   top of `pages/main-section/index.vue` (gated on the macOS desktop
-  shell), clearing the traffic lights for the entire window. The
-  workspace shell below it (activity rail + side panel + dockview
-  tabs) needs no per-column drag handling.
+  shell), clearing the traffic lights. The workspace shell below it
+  (activity rail + side panel + dockview tabs) needs no per-column drag
+  handling.
 
-- **Settings right side** can't reuse the chat trick — settings
-  pages vary too much (master/detail layouts, full-page tables,
-  forms) and a 36px chrome strip above the page looks out of place.
-  Instead, `apps/desktop/src/renderer/src/settings/App.vue` paints
-  an invisible 16px-tall (`h-4`) `position:fixed` drag strip across
-  the very top edge of the window at `z-10`, sized to match the
-  routed sections' `p-4` top padding so it lives in the page's
-  existing dead space. The SettingsSidebar's own drag header sits
-  at `z-20` and covers the strip on the left half; on the right
-  half the strip is the topmost layer and becomes a thin
-  transparent grab zone. On `MasterDetailSidebarLayout` pages the
-  inner sidebar's `SidebarMenu` only has `p-2` (8px), so the
-  strip's lower 8px clips the very top of the first sidebar item —
-  acceptable because those rows are `py-5` and the bulk of each
-  hit area remains clickable. No visible chrome is added.
+- **Settings routes** use `SettingsSidebar` and bot-detail
+  `MasterDetailSidebarLayout` traffic-light reserves when `DesktopShellKey`
+  is true, while detail panes use small top drag strips in existing padding.
+  Visible controls stay outside drag regions with explicit
+  `[-webkit-app-region:no-drag]` where needed.
 
 ## electron-vite Configuration
 
@@ -348,7 +253,7 @@ empty grey gap above the page content:
 |---------|------------------|
 | `main` | `externalizeDepsPlugin()` (don't bundle node_modules into the main bundle) |
 | `preload` | Same `externalizeDepsPlugin()` |
-| `renderer` | `root: src/renderer`, `publicDir: ../web/public` (so `/logo.svg` resolves), `resolve.alias` mirrors `apps/web/vite.config.ts` (`@` → `apps/web/src`, `#` → `packages/ui/src`), two HTML entries (`index` + `settings`), `optimizeDeps.entries` includes web sources, dev-only `/api` proxy reading port + base URL from `@memohai/config` |
+| `renderer` | `root: src/renderer`, `publicDir: ../web/public` (so `/logo.svg` resolves), `resolve.alias` mirrors `apps/web/vite.config.ts` (`@` → `apps/web/src`, `#` → `packages/ui/src`), single HTML entry (`index`), `optimizeDeps.entries` starts from `src/renderer/src/main.ts`, dev-only `/api` proxy reading port + base URL from `@memohai/config` |
 
 ### Important runtime gotcha — preload extension
 
@@ -472,47 +377,35 @@ Known limitations (v1, dev-only):
 
 ## Routing
 
-Both windows use `createMemoryHistory()` — the `file://` runtime makes
-`createWebHistory()` impractical.
+The desktop renderer uses `createMemoryHistory()` — the `file://` runtime
+makes `createWebHistory()` impractical.
 
 ### Chat router (`src/renderer/src/chat/router.ts`)
 
 | Path | Name | Component |
 |------|------|-----------|
 | `/` | `home` | `@memohai/web/pages/home/index.vue` |
-| `/chat/:botId?/:sessionId?` | `chat` | `@memohai/web/pages/home/index.vue` |
+| `/bot/:botName?/:sessionId?` | `bot` | no-op route; persistent `MainSection` owns chat UI |
+| `/chat/:botName?/:sessionId?` | redirect | legacy chat URL redirect to `/bot/...` |
 | `/login` | `Login` | `@memohai/web/pages/login/index.vue` |
 | `/oauth/mcp/callback` | `oauth-mcp-callback` | `@memohai/web/pages/oauth/mcp-callback.vue` |
-| `/settings/...` (every entry from `shared/settings-routes.ts`) | mirror of settings name | no-op stub component |
+| `/settings/...` (every entry from `shared/settings-routes.ts`) | mirror of settings name | `@memohai/web/pages/settings-section/index.vue` children |
 
-The settings rows above are placeholders — the guard intercepts them
-before they ever render. They exist so that `router.push({ name: 'bots' })`
-and friends from reused @memohai/web components resolve to a concrete
-`/settings/...` fullPath that gets forwarded to the settings window.
+Desktop builds those settings children from `shared/settings-routes.ts` so
+path-based and name-based navigation resolve in the same router as chat.
+Chat routes render `null` in the router because `chat/App.vue` keeps
+`MainSection` mounted persistently whenever the active route is chat or
+settings. Settings routes mount the real settings pages while the chat
+surface remains attached behind them.
 
 Three guards in `beforeEach`:
 
-1. `/settings*` → IPC `openSettings(to.fullPath)` → return `false`.
-2. `/login` while already logged in → redirect to `/`.
-3. Any other route without `localStorage.token` → redirect to `Login`.
+1. `/login` while already logged in → redirect to `/`.
+2. Any route without `localStorage.token` → redirect to `Login`.
+3. Onboarding redirects incomplete users to `/onboarding`.
 
-Plus an `onError` handler that reloads the window on dynamic-import chunk
-load failures (covers the case where the dev server restarts mid-session).
-
-### Settings router (`src/renderer/src/settings/router.ts`)
-
-Built from `shared/settings-routes.ts` (the same spec the chat router
-uses for its stubs). Path layout mirrors `@memohai/web/router`'s
-`/settings/*` children so the reused `SettingsSidebar`'s
-`route.path.startsWith('/settings/...')` active-state checks keep
-working. Route names mirror web exactly: `bots`, `bot-new`, `bot-detail`,
-`providers`, `web-search`, `memory`, `speech`, `transcription`, `email`,
-`usage`, `appearance`, `profile`, `platform`, `supermarket`, `about`.
-Default redirect: `/` → `/settings/bots`.
-
-The settings window has **no auth guard** — by design. If the chat window
-isn't authenticated yet, it owns login. Any 401 returned to a settings
-request closes the settings window (see "Settings 401 handling" above).
+Plus an `onError` handler that reloads on dynamic-import chunk load failures
+(covers the case where the dev server restarts mid-session).
 
 ## Icon Pipeline
 
@@ -545,7 +438,7 @@ electron-builder so the runtime icon is dereferenceable from disk.
 
 | Command | Output | Notes |
 |---------|--------|-------|
-| `pnpm --filter @memohai/desktop dev` | dev server + main process watch | Prepares current Qdrant/GStreamer resources first; renderer hot-reload; main needs window restart on changes |
+| `pnpm --filter @memohai/desktop dev` | dev server + main process watch | Prepares current Qdrant/GStreamer resources first; renderer hot-reload; main process restart on changes |
 | `pnpm --filter @memohai/desktop build` | `dist/` installers (current platform) | Runs `scripts/build.mjs`: prepare Qdrant/GStreamer/local-server resources, electron-vite build, then electron-builder |
 | `pnpm --filter @memohai/desktop build:dir` | `dist/<platform>-unpacked/` | Skip installer; smoke-test packaged app |
 | `pnpm --filter @memohai/desktop build:mac` | DMG (arm64 + x64) | Requires darwin |
@@ -704,12 +597,10 @@ list to check.
   `apps/web/package.json` and a matching stub in
   `src/renderer/types/web-stubs.d.ts`. Web should remain shippable as a
   pure browser app.
-- **Keep settings navigation in sync.** Reused web components may navigate
-  to settings with either `/settings/...` paths or named routes such as
-  `{ name: 'bot-detail' }`. The chat router depends on
-  `shared/settings-routes.ts` stubs to resolve named settings routes before
-  forwarding them to the settings window over IPC, so update that list when
-  Web adds or renames a settings page.
+- **Keep desktop settings routes in sync.** Reused web components may
+  navigate with either `/settings/...` paths or named routes such as
+  `{ name: 'bot-detail' }`. Update `shared/settings-routes.ts` when Web
+  adds or renames a settings page.
 - **Provide `DesktopShellKey` at the renderer App root, not deeper.** Web
   must keep injecting `false` (the default fallback) — never provide it
   from any web component.
@@ -720,8 +611,7 @@ list to check.
   true`.
 - **Persist user state through the existing web Pinia stores** (chat-
   selection, user, settings) — they're already configured with
-  `pinia-plugin-persistedstate` and shared across both windows via
-  localStorage. Don't add desktop-only persistence layers without a
+  `pinia-plugin-persistedstate`. Don't add desktop-only persistence layers without a
   compelling reason.
 - **Update both `tsconfig.web.json` paths and `web-stubs.d.ts`** when adding
   a new `@memohai/web/foo` import. Forgetting the stub yields
@@ -738,13 +628,12 @@ list to check.
   change.** It's fast (only types desktop's own code thanks to the stubs)
   and catches the common drift cases (missing stub, wrong store/component
   shape, untyped IPC arg).
-- **Update this file** when you add a new window, IPC handler, subpath
-  reuse, build target, or platform-specific affordance — the desktop
-  shell is small enough that out-of-date docs become obviously wrong
-  fast.
+- **Update this file** when you add an IPC handler, subpath reuse, build
+  target, or platform-specific affordance — the desktop shell is small
+  enough that out-of-date docs become obviously wrong fast.
 
 ## Cross-References
 
 - Repo root: `/AGENTS.md` (overall architecture, server-side packages, db conventions).
 - Web: `apps/web/AGENTS.md` (component / store / page conventions; consumed wholesale here).
-- Design system: `packages/ui/DESIGN.md` (tokens, elevation, spacing — applies to anything rendered in either desktop window).
+- Design system: `packages/ui/DESIGN.md` (tokens, elevation, spacing — applies to desktop-rendered surfaces).

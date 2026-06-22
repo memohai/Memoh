@@ -115,6 +115,8 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), streamReq, streamReq.Query)
 
 		cfg := rc.runConfig
+		cfg.LiveToolStream = true
+		cfg.CanRequestUserInput = r.canDeliverUserInputStream()
 		cfg = r.prepareRunConfig(ctx, cfg)
 
 		// Wrap with idle timeout: if no events arrive within the adaptive timeout, cancel the stream.
@@ -282,6 +284,8 @@ func (r *Resolver) StreamChatWS(
 	}()
 
 	cfg := rc.runConfig
+	cfg.LiveToolStream = true
+	cfg.CanRequestUserInput = r.canDeliverUserInputWS(eventCh)
 	cfg = r.prepareRunConfig(streamCtx, cfg)
 
 	// Wrap with idle timeout: if no events arrive within the adaptive timeout, cancel the stream.
@@ -397,13 +401,17 @@ func (r *Resolver) persistTerminalSnapshot(ctx context.Context, req conversation
 		return nil
 	}
 
-	roundMessages := prependUserMessage(req.Query, outputMessages)
+	storeReq := req
+	if rc.userMessageAlreadyInContext {
+		storeReq.UserMessagePersisted = true
+	}
+	roundMessages := prependUserMessage(storeReq.Query, outputMessages)
 
 	if rc.injectedRecords != nil && len(*rc.injectedRecords) > 0 {
 		roundMessages = interleaveInjectedMessages(roundMessages, *rc.injectedRecords)
 	}
 
-	if err := r.storeRoundWithOptions(ctx, req, roundMessages, rc.model.ID, storeRoundOptions{
+	if err := r.storeRoundWithOptions(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
 		AllowPendingToolCalls: snap.deferredToolID != "",
 	}); err != nil {
 		return err

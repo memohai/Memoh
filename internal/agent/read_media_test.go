@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -287,6 +289,101 @@ func TestAgentGenerateReadMediaInjectsImageIntoNextStep(t *testing.T) {
 	}
 	if modelProvider.calls != 2 {
 		t.Fatalf("expected 2 model calls, got %d", modelProvider.calls)
+	}
+}
+
+func TestAgentExecuteToolReadMediaReturnsPublicResultOnly(t *testing.T) {
+	t.Parallel()
+
+	pngBytes := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00payload")
+	bp := newAgentReadMediaBridgeProvider(t, map[string][]byte{
+		"images/demo.png": pngBytes,
+	})
+
+	a := New(Deps{})
+	a.SetToolProviders([]agenttools.ToolProvider{
+		agenttools.NewContainerProvider(nil, bp, nil, "/data"),
+	})
+
+	part, err := a.ExecuteTool(context.Background(), RunConfig{
+		Model:              &sdk.Model{ID: "mock-model", Provider: &agentReadMediaMockProvider{}},
+		SupportsImageInput: true,
+		SupportsToolCall:   true,
+		Identity: SessionContext{
+			BotID: "bot-1",
+		},
+	}, sdk.ToolCall{
+		ToolCallID: "call-1",
+		ToolName:   agenttools.ReadMediaToolName().String(),
+		Input:      map[string]any{"path": "/data/images/demo.png"},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteTool(read) returned error: %v", err)
+	}
+	result, ok := part.Result.(agenttools.ReadMediaToolResult)
+	if !ok {
+		t.Fatalf("ExecuteTool(read) result = %T, want public ReadMediaToolResult", part.Result)
+	}
+	if !result.OK || result.Path != "images/demo.png" || result.Mime != "image/png" {
+		t.Fatalf("unexpected public read result: %#v", result)
+	}
+	raw := fmt.Sprintf("%#v", part.Result)
+	if strings.Contains(raw, "ImageBase64") || strings.Contains(raw, "ImageMediaType") || strings.Contains(raw, base64.StdEncoding.EncodeToString(pngBytes)) {
+		t.Fatalf("ExecuteTool(read) leaked internal image payload: %#v", part.Result)
+	}
+}
+
+func TestDecorateReadMediaToolsConcurrentExecutions(t *testing.T) {
+	t.Parallel()
+
+	const calls = 32
+	imageBase64 := base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\n\x00payload"))
+	wrapped, state := decorateReadMediaTools(&sdk.Model{ID: "mock-model"}, []sdk.Tool{{
+		Name: agenttools.ReadMediaToolName().String(),
+		Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
+			return agenttools.ReadMediaToolOutput{
+				Public: agenttools.ReadMediaToolResult{
+					OK:   true,
+					Path: "/data/image.png",
+					Mime: "image/png",
+				},
+				ImageBase64:    imageBase64,
+				ImageMediaType: "image/png",
+			}, nil
+		},
+	}})
+	if state == nil || len(wrapped) != 1 {
+		t.Fatalf("decorateReadMediaTools did not wrap read tool: state=%v tools=%d", state, len(wrapped))
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(calls)
+	for i := 0; i < calls; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			result, err := wrapped[0].Execute(&sdk.ToolExecContext{
+				Context:    context.Background(),
+				ToolCallID: fmt.Sprintf("call-%02d", i),
+				ToolName:   agenttools.ReadMediaToolName().String(),
+			}, map[string]any{"path": "/data/image.png"})
+			if err != nil {
+				t.Errorf("wrapped read execute returned error: %v", err)
+				return
+			}
+			if _, ok := result.(agenttools.ReadMediaToolResult); !ok {
+				t.Errorf("wrapped read execute result = %T, want public ReadMediaToolResult", result)
+			}
+		}()
+	}
+	wg.Wait()
+
+	next := state.prepareStep(&sdk.GenerateParams{})
+	if next == nil || len(next.Messages) != 1 {
+		t.Fatalf("prepareStep messages = %#v, want one injected message", next)
+	}
+	if got := len(next.Messages[0].Content); got != calls {
+		t.Fatalf("injected image count = %d, want %d", got, calls)
 	}
 }
 

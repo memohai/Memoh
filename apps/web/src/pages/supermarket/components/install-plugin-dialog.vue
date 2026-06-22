@@ -20,8 +20,11 @@
           v-if="plugin"
           class="rounded-md border border-border p-3 space-y-1"
         >
-          <div class="flex items-center gap-2">
-            <p class="text-xs font-medium">
+          <div class="flex min-w-0 flex-wrap items-center gap-2">
+            <p
+              class="min-w-0 truncate text-xs font-medium"
+              :title="plugin.name"
+            >
               {{ plugin.name }}
             </p>
             <Badge
@@ -31,10 +34,43 @@
             >
               {{ plugin.mcps.length }} MCPs
             </Badge>
+            <Badge
+              v-if="pluginSkills.length"
+              variant="outline"
+              size="sm"
+            >
+              {{ pluginSkills.length }} Skills
+            </Badge>
           </div>
           <p class="text-[11px] text-muted-foreground line-clamp-3">
             {{ plugin.description }}
           </p>
+          <div
+            v-if="pluginSkills.length"
+            class="mt-3 grid gap-1.5"
+          >
+            <div
+              v-for="skill in pluginSkills"
+              :key="skillKey(skill)"
+              class="flex min-w-0 items-start gap-2 rounded border border-border/60 bg-muted/20 px-2 py-1.5"
+            >
+              <Boxes class="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+              <div class="min-w-0 flex-1">
+                <p
+                  class="truncate text-[11px] font-medium"
+                  :title="skillName(skill)"
+                >
+                  {{ skillName(skill) }}
+                </p>
+                <p
+                  class="truncate text-[10px] text-muted-foreground"
+                  :title="skillDescription(skill)"
+                >
+                  {{ skillDescription(skill) }}
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div
@@ -90,6 +126,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
+import { Boxes } from 'lucide-vue-next'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
   Button, Spinner, Badge, Input, toast,
@@ -101,6 +138,8 @@ import {
   type PluginsConfigVar,
   type PluginsInstallation,
   type PluginsManifest,
+  type PluginsSkillEntry,
+  type PluginsSkillResource,
 } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -125,6 +164,13 @@ const installing = ref(false)
 const variableValues = reactive<Record<string, string>>({})
 
 const variables = computed<PluginsConfigVar[]>(() => props.plugin?.variables ?? [])
+type PluginSkill = PluginsSkillEntry | PluginsSkillResource
+
+const pluginSkills = computed<PluginSkill[]>(() => [
+  ...(props.plugin?.bundled_skills ?? []),
+  ...(props.plugin?.skills ?? []),
+])
+
 const requiresManagedOAuth = computed(() => {
   return (props.plugin?.auth_requirements ?? []).some(item => item.type === 'managed_oauth')
 })
@@ -132,6 +178,25 @@ const canInstall = computed(() => {
   if (!selectedBotId.value || !props.plugin?.id) return false
   return variables.value.every(item => !item.required || !!variableValues[item.key || '']?.trim())
 })
+
+function skillKey(skill: PluginSkill): string {
+  if ('id' in skill && skill.id) return skill.id
+  if ('key' in skill && skill.key) return skill.key
+  return skillName(skill)
+}
+
+function skillName(skill: PluginSkill): string {
+  if ('name' in skill && skill.name) return skill.name
+  if ('id' in skill && skill.id) return skill.id
+  if ('key' in skill && skill.key) return skill.key
+  return t('supermarket.unnamedSkill')
+}
+
+function skillDescription(skill: PluginSkill): string {
+  if ('description' in skill && skill.description) return skill.description
+  if ('path' in skill && skill.path) return skill.path
+  return t('supermarket.noDescription')
+}
 
 watch(() => props.open, (open) => {
   if (!open) {
@@ -148,7 +213,9 @@ watch(() => props.open, (open) => {
 async function handleInstall() {
   if (!selectedBotId.value || !props.plugin?.id) return
   const botId = selectedBotId.value
-  const oauthPopup = requiresManagedOAuth.value ? window.open('', 'mcp-oauth', 'width=600,height=700') : null
+  const oauthPopup = requiresManagedOAuth.value && !canOpenOAuthExternally()
+    ? window.open('', 'mcp-oauth', 'width=600,height=700')
+    : null
   installing.value = true
   try {
     const { data } = await postBotsByBotIdSupermarketInstallPlugin({
@@ -205,7 +272,7 @@ async function startOAuthAfterInstall(botId: string, installation: PluginsInstal
     if (popup && !popup.closed) {
       popup.location.href = data.authorization_url
     } else {
-      popup = window.open(data.authorization_url, 'mcp-oauth', 'width=600,height=700')
+      popup = await openOAuthURL(data.authorization_url)
     }
 
     await waitForMCPOAuth(botId, installation.id!, popup)
@@ -225,6 +292,19 @@ async function startOAuthAfterInstall(botId: string, installation: PluginsInstal
     popup?.close()
     toast.error(resolveApiErrorMessage(error, t('mcp.oauth.flowInitFailed')))
   }
+}
+
+function canOpenOAuthExternally(): boolean {
+  return Boolean(window.api?.desktop?.openExternalUrl)
+}
+
+async function openOAuthURL(url: string): Promise<Window | null> {
+  const desktopOpenExternal = window.api?.desktop?.openExternalUrl
+  if (desktopOpenExternal) {
+    await desktopOpenExternal(url)
+    return null
+  }
+  return window.open(url, 'mcp-oauth', 'width=600,height=700')
 }
 
 function waitForMCPOAuth(botId: string, installationId: string, popup: Window | null): Promise<void> {
@@ -261,11 +341,11 @@ function waitForMCPOAuth(botId: string, installationId: string, popup: Window | 
           finish('success')
           return
         }
-        if (popup?.closed || Date.now() - startedAt > 120_000) {
+        if ((popup && popup.closed) || Date.now() - startedAt > 120_000) {
           finish('error')
         }
       }).catch(() => {
-        if (!completed && (popup?.closed || Date.now() - startedAt > 120_000)) {
+        if (!completed && ((popup && popup.closed) || Date.now() - startedAt > 120_000)) {
           finish('error')
         }
       })

@@ -1,6 +1,153 @@
 package tools
 
-import "testing"
+import (
+	"context"
+	"net"
+	"strings"
+	"testing"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
+
+	"github.com/memohai/memoh/internal/workspace/bridge"
+	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+)
+
+const readImageHint = "Also supports reading image files (PNG, JPEG, GIF, WebP)"
+
+type containerTestBridgeProvider struct {
+	client *bridge.Client
+}
+
+func (p containerTestBridgeProvider) MCPClient(context.Context, string) (*bridge.Client, error) {
+	return p.client, nil
+}
+
+type largeReadTestContainerService struct {
+	pb.UnimplementedContainerServiceServer
+	size int64
+}
+
+func (s *largeReadTestContainerService) Stat(_ context.Context, req *pb.StatRequest) (*pb.StatResponse, error) {
+	return &pb.StatResponse{
+		Entry: &pb.FileEntry{
+			Path: req.GetPath(),
+			Size: s.size,
+		},
+	}, nil
+}
+
+func newLargeReadTestClient(t *testing.T, size int64) *bridge.Client {
+	t.Helper()
+
+	lis := bufconn.Listen(1 << 20)
+	srv := grpc.NewServer()
+	pb.RegisterContainerServiceServer(srv, &largeReadTestContainerService{size: size})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = srv.Serve(lis)
+	}()
+	t.Cleanup(func() {
+		srv.Stop()
+		<-done
+	})
+
+	dialer := func(ctx context.Context, _ string) (net.Conn, error) {
+		return lis.DialContext(ctx)
+	}
+	conn, err := grpc.NewClient(
+		"passthrough://bufnet",
+		grpc.WithContextDialer(dialer),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("grpc.NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	return bridge.NewClientFromConn(conn)
+}
+
+func readToolDescription(t *testing.T, supportsImageInput bool) string {
+	t.Helper()
+	provider := NewContainerProvider(nil, nil, nil, "")
+	toolList, err := provider.Tools(context.Background(), SessionContext{
+		BotID:              "bot-1",
+		SupportsImageInput: supportsImageInput,
+	})
+	if err != nil {
+		t.Fatalf("Tools() error = %v", err)
+	}
+	for _, tool := range toolList {
+		if tool.Name == "read" {
+			return tool.Description
+		}
+	}
+	t.Fatalf("read tool not found in container provider tools")
+	return ""
+}
+
+func TestContainerReadDescriptionIncludesImageHintWhenImageInputSupported(t *testing.T) {
+	t.Parallel()
+	desc := readToolDescription(t, true)
+	if !strings.Contains(desc, readImageHint) {
+		t.Fatalf("expected read tool description to contain %q, got:\n%s", readImageHint, desc)
+	}
+}
+
+func TestContainerReadDescriptionOmitsImageHintWhenImageInputUnsupported(t *testing.T) {
+	t.Parallel()
+	desc := readToolDescription(t, false)
+	if strings.Contains(desc, readImageHint) {
+		t.Fatalf("expected read tool description to NOT contain %q, got:\n%s", readImageHint, desc)
+	}
+}
+
+func TestContainerApplyPatchDescriptionDoesNotReferenceSiblingTools(t *testing.T) {
+	t.Parallel()
+
+	provider := NewContainerProvider(nil, nil, nil, "")
+	toolList, err := provider.Tools(context.Background(), SessionContext{BotID: "bot-1"})
+	if err != nil {
+		t.Fatalf("Tools() error = %v", err)
+	}
+	for _, tool := range toolList {
+		if tool.Name != ToolApplyPatch().String() {
+			continue
+		}
+		for _, absent := range []string{"Use edit", "Use write", "`edit`", "`write`"} {
+			if strings.Contains(tool.Description, absent) {
+				t.Fatalf("apply_patch description references sibling tool %q:\n%s", absent, tool.Description)
+			}
+		}
+		return
+	}
+	t.Fatalf("apply_patch tool not found")
+}
+
+func TestContainerReadLargeFileErrorDoesNotReferenceSiblingTools(t *testing.T) {
+	t.Parallel()
+
+	client := newLargeReadTestClient(t, 17*1024*1024)
+	provider := NewContainerProvider(nil, containerTestBridgeProvider{client: client}, nil, "")
+	_, err := provider.execRead(context.Background(), SessionContext{BotID: "bot-1"}, map[string]any{
+		"path": "/data/large.log",
+	})
+	if err == nil {
+		t.Fatal("expected large file read to fail")
+	}
+	for _, absent := range []string{ToolExec().String(), "head/tail/sed", "line_offset", "n_lines"} {
+		if strings.Contains(err.Error(), absent) {
+			t.Fatalf("large file error should not reference unavailable or ineffective fallback %q: %v", absent, err)
+		}
+	}
+	if !strings.Contains(err.Error(), "read tool cannot read files above this limit") {
+		t.Fatalf("large file error should state the read limit directly, got %v", err)
+	}
+}
 
 func TestDetectBlockedSleep(t *testing.T) {
 	tests := []struct {

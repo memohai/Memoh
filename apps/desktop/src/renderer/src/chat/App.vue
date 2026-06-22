@@ -11,9 +11,9 @@ provide(DesktopShellKey, true)
 useSettingsStore()
 const updateStore = useUpdateStore()
 
-// Persistent chat shell + settings overlay, mirroring apps/web App.vue: keeps the
-// chat dockview/scroll alive (DOM attached, full-size) while in settings, so
-// returning has no black flash / re-scroll / relayout.
+// Mirror apps/web App.vue: keep chat dockview/scroll alive (DOM attached,
+// full-size) while in settings, so returning has no black flash / re-scroll /
+// relayout.
 const route = useRoute()
 const isChatRoute = computed(() => route.name === 'home' || route.name === 'bot')
 const isSettingsRoute = computed(() => route.path.startsWith('/settings'))
@@ -43,7 +43,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onDevKey))
 <template>
   <section>
     <MainSection v-if="isAppArea" />
-    <!-- Permanent fixed overlay layer (see apps/web App.vue): TRANSPARENT wrapper
+    <!-- Permanent fixed settings layer (see apps/web App.vue): TRANSPARENT wrapper
          toggled with `visibility` only. settings-section paints its own opaque
          bg, so chat (not black) shows behind its slide/fade. No v-if (avoids
          compositor layer teardown flash), no opacity transition. -->

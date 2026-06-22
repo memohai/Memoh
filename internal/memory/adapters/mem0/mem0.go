@@ -18,11 +18,10 @@ import (
 const (
 	Mem0Type = "mem0"
 
-	mem0ToolSearchMemory = "search_memory"
-	mem0DefaultLimit     = 8
-	mem0MaxLimit         = 50
-	mem0ContextMaxItems  = 8
-	mem0ContextMaxChars  = 220
+	mem0DefaultLimit    = 8
+	mem0MaxLimit        = 50
+	mem0ContextMaxItems = 8
+	mem0ContextMaxChars = 220
 
 	mem0SyncMetadataKeySourceEntryID = "source_entry_id"
 	mem0SyncMetadataKeySourceHash    = "source_hash"
@@ -109,7 +108,7 @@ func (p *Mem0Provider) OnAfterChat(ctx context.Context, req adapters.AfterChatRe
 func (*Mem0Provider) ListTools(_ context.Context, _ mcp.ToolSessionContext) ([]mcp.ToolDescriptor, error) {
 	return []mcp.ToolDescriptor{
 		{
-			Name:        mem0ToolSearchMemory,
+			Name:        adapters.ToolSearchMemory,
 			Description: "Search for memories relevant to the current chat",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -130,7 +129,7 @@ func (*Mem0Provider) ListTools(_ context.Context, _ mcp.ToolSessionContext) ([]m
 }
 
 func (p *Mem0Provider) CallTool(ctx context.Context, session mcp.ToolSessionContext, toolName string, arguments map[string]any) (map[string]any, error) {
-	if toolName != mem0ToolSearchMemory {
+	if toolName != adapters.ToolSearchMemory {
 		return nil, mcp.ErrToolNotFound
 	}
 	query := mcp.StringArg(arguments, "query")

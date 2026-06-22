@@ -49,13 +49,14 @@ func DecodeTurnResponseEntry(msg messagepkg.Message) (TurnResponseEntry, bool) {
 // purposefully uses json.RawMessage for tool input/output to avoid losing
 // structure while keeping the type declaration local to this package.
 type turnResponsePart struct {
-	Type       string          `json:"type"`
-	Text       string          `json:"text,omitempty"`
-	ToolCallID string          `json:"toolCallId,omitempty"`
-	ToolName   string          `json:"toolName,omitempty"`
-	Input      json.RawMessage `json:"input,omitempty"`
-	Output     json.RawMessage `json:"output,omitempty"`
-	Result     json.RawMessage `json:"result,omitempty"`
+	Type             string          `json:"type"`
+	Text             string          `json:"text,omitempty"`
+	ToolCallID       string          `json:"toolCallId,omitempty"`
+	ToolName         string          `json:"toolName,omitempty"`
+	Input            json.RawMessage `json:"input,omitempty"`
+	Output           json.RawMessage `json:"output,omitempty"`
+	Result           json.RawMessage `json:"result,omitempty"`
+	ProviderMetadata json.RawMessage `json:"providerMetadata,omitempty"`
 }
 
 func nativeAssistantContent(msg conversation.ModelMessage) json.RawMessage {
@@ -96,7 +97,7 @@ func nativeAssistantContent(msg conversation.ModelMessage) json.RawMessage {
 			// leak back into subsequent prompts verbatim.
 			continue
 		case "tool-call":
-			out = append(out, nativeToolCallPart(p.ToolCallID, p.ToolName, p.Input))
+			out = append(out, nativeToolCallPart(p.ToolCallID, p.ToolName, p.Input, p.ProviderMetadata))
 		case "tool-result":
 			payload := p.Output
 			if len(payload) == 0 {
@@ -122,7 +123,7 @@ func nativeAssistantContent(msg conversation.ModelMessage) json.RawMessage {
 				input = encoded
 			}
 		}
-		out = append(out, nativeToolCallPart(id, name, input))
+		out = append(out, nativeToolCallPart(id, name, input, nil))
 	}
 
 	return marshalParts(out)
@@ -159,7 +160,7 @@ func nativeToolRoleContent(msg conversation.ModelMessage) json.RawMessage {
 	return marshalParts(out)
 }
 
-func nativeToolCallPart(id, name string, input json.RawMessage) map[string]any {
+func nativeToolCallPart(id, name string, input, providerMetadata json.RawMessage) map[string]any {
 	part := map[string]any{
 		"type":       "tool-call",
 		"toolCallId": strings.TrimSpace(id),
@@ -169,6 +170,9 @@ func nativeToolCallPart(id, name string, input json.RawMessage) map[string]any {
 		part["input"] = input
 	} else {
 		part["input"] = map[string]any{}
+	}
+	if len(providerMetadata) > 0 && strings.TrimSpace(string(providerMetadata)) != "" {
+		part["providerMetadata"] = providerMetadata
 	}
 	return part
 }

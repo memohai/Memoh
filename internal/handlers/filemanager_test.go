@@ -113,6 +113,109 @@ func TestFSDownloadDirectoryReturnsTarGz(t *testing.T) {
 	}
 }
 
+func TestFSReadReturnsRevision(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	env.writeSkillFile(t, "/data/rev.txt", "hello workspace")
+
+	rec, err := env.callFileManager(t, http.MethodGet, "/bots/:bot_id/container/fs/read?path=/data/rev.txt", nil, env.handler.FSRead)
+	if err != nil {
+		t.Fatalf("FSRead returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got, _ := resp["revision"].(string); got == "" {
+		t.Fatalf("revision is empty in response %#v", resp)
+	}
+}
+
+func TestFSWriteRejectsStaleExpectedRevision(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	env.writeSkillFile(t, "/data/rev.txt", "base")
+
+	_, err := env.callFileManager(t, http.MethodPost, "/bots/:bot_id/container/fs/write", map[string]any{
+		"path":             "/data/rev.txt",
+		"content":          "mine",
+		"expectedRevision": "sha256:stale",
+	}, env.handler.FSWrite)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusConflict {
+		t.Fatalf("expected conflict error, got %v", err)
+	}
+	assertLocalFile(t, env.localPath("/data/rev.txt"), "base")
+}
+
+func TestFSWriteAcceptsMatchingExpectedRevision(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	env.writeSkillFile(t, "/data/rev.txt", "base")
+
+	readRec, err := env.callFileManager(t, http.MethodGet, "/bots/:bot_id/container/fs/read?path=/data/rev.txt", nil, env.handler.FSRead)
+	if err != nil {
+		t.Fatalf("FSRead returned error: %v", err)
+	}
+	var readResp map[string]any
+	if err := json.Unmarshal(readRec.Body.Bytes(), &readResp); err != nil {
+		t.Fatalf("decode read response: %v", err)
+	}
+	revision, _ := readResp["revision"].(string)
+	if revision == "" {
+		t.Fatalf("revision is empty in response %#v", readResp)
+	}
+
+	writeRec, err := env.callFileManager(t, http.MethodPost, "/bots/:bot_id/container/fs/write", map[string]any{
+		"path":             "/data/rev.txt",
+		"content":          "updated",
+		"expectedRevision": revision,
+	}, env.handler.FSWrite)
+	if err != nil {
+		t.Fatalf("FSWrite returned error: %v", err)
+	}
+	if writeRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", writeRec.Code, writeRec.Body.String())
+	}
+	assertLocalFile(t, env.localPath("/data/rev.txt"), "updated")
+}
+
+func TestFSWriteRejectsEmptyExpectedRevision(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	env.writeSkillFile(t, "/data/rev.txt", "base")
+
+	_, err := env.callFileManager(t, http.MethodPost, "/bots/:bot_id/container/fs/write", map[string]any{
+		"path":             "/data/rev.txt",
+		"content":          "mine",
+		"expectedRevision": "",
+	}, env.handler.FSWrite)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 bad request for empty expectedRevision, got %v", err)
+	}
+	// Buffer must not have been written under the ambiguous condition.
+	assertLocalFile(t, env.localPath("/data/rev.txt"), "base")
+}
+
+func TestFSWriteOmittedExpectedRevisionWritesUnconditionally(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	env.writeSkillFile(t, "/data/rev.txt", "base")
+
+	// Body without an expectedRevision field — the FE's "no known baseline"
+	// path (e.g. stale read, force-save, deleted-restore). Must succeed.
+	rec, err := env.callFileManager(t, http.MethodPost, "/bots/:bot_id/container/fs/write", map[string]any{
+		"path":    "/data/rev.txt",
+		"content": "mine",
+	}, env.handler.FSWrite)
+	if err != nil {
+		t.Fatalf("FSWrite returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	assertLocalFile(t, env.localPath("/data/rev.txt"), "mine")
+}
+
 func TestFSArchiveMultiplePathsDedupesNestedSelection(t *testing.T) {
 	env := newSkillsTestEnv(t)
 	env.writeSkillFile(t, "/data/project/main.go", "package main\n")

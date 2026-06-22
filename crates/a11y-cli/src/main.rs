@@ -55,10 +55,7 @@ enum Command {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    runtime.block_on(async move {
+    futures_lite::future::block_on(async move {
         match cli.command {
             Command::Probe => probe::run().await,
             Command::Snapshot { limit } => snapshot::run(limit).await,

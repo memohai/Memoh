@@ -80,11 +80,6 @@ const docTemplate = `{
         },
         "/auth/refresh": {
             "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
                 "description": "Issue a new JWT using the existing claims with updated expiration",
                 "tags": [
                     "auth"
@@ -109,7 +104,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             }
         },
         "/bots": {
@@ -5050,20 +5050,27 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/messages": {
             "get": {
-                "description": "List messages for a bot history with optional pagination",
+                "description": "List messages for one session with optional pagination",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "messages"
                 ],
-                "summary": "List bot history messages",
+                "summary": "List session history messages",
                 "parameters": [
                     {
                         "type": "string",
                         "description": "Bot ID",
                         "name": "bot_id",
                         "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "query",
                         "required": true
                     },
                     {
@@ -5100,6 +5107,12 @@ const docTemplate = `{
                     },
                     "403": {
                         "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -5983,19 +5996,31 @@ const docTemplate = `{
                         "name": "bot_id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated session types to include. Defaults to user-facing types (chat,discuss,acp_agent).",
+                        "name": "types",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (1..200). Defaults to 50.",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Opaque cursor returned as next_cursor on a previous page.",
+                        "name": "cursor",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "array",
-                                "items": {
-                                    "$ref": "#/definitions/session.Session"
-                                }
-                            }
+                            "$ref": "#/definitions/handlers.listSessionsResponse"
                         }
                     },
                     "400": {
@@ -6050,6 +6075,53 @@ const docTemplate = `{
                     },
                     "403": {
                         "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/sessions/events": {
+            "get": {
+                "description": "Lightweight SSE for sidebar live-sort. Carries only session\nidentifiers and minimal metadata (touched timestamps, titles).\nNever includes message bodies. Filters out internal session\ntypes such as heartbeat, schedule, subagent.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "messages"
+                ],
+                "summary": "Stream bot-wide sessions activity",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -6392,6 +6464,66 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/sessions/{session_id}/messages/events": {
+            "get": {
+                "description": "SSE stream that pushes a server-fixed backlog of the last 50\nmessages, then streams future message_created and\nsession_title_updated events scoped to this session only.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "messages"
+                ],
+                "summary": "Stream message events for one session",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -14031,7 +14163,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "row": {
-                    "description": "Row groups buttons into keyboard rows for renderers that support grids\n(e.g. Telegram inline keyboards). Buttons sharing a Row render together;\nrows appear in ascending first-seen order. Renderers without grid support\nignore this field. 0 is the default (single row, prior behavior).",
+                    "description": "Row groups buttons into keyboard rows for renderers that support grids\n(e.g. Telegram inline keyboards). Buttons sharing a Row render together;\nrows appear in ascending numeric order. Renderers without grid support\nignore this field. 0 is the default (single row, prior behavior).",
                     "type": "integer"
                 },
                 "type": {
@@ -14173,6 +14305,9 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "unsend": {
+                    "type": "boolean"
+                },
+                "url_buttons": {
                     "type": "boolean"
                 }
             }
@@ -14449,14 +14584,20 @@ const docTemplate = `{
                 "link",
                 "code_block",
                 "mention",
-                "emoji"
+                "emoji",
+                "heading",
+                "blockquote",
+                "list_item"
             ],
             "x-enum-varnames": [
                 "MessagePartText",
                 "MessagePartLink",
                 "MessagePartCodeBlock",
                 "MessagePartMention",
-                "MessagePartEmoji"
+                "MessagePartEmoji",
+                "MessagePartHeading",
+                "MessagePartBlockquote",
+                "MessagePartListItem"
             ]
         },
         "channel.MessageTextStyle": {
@@ -14465,13 +14606,17 @@ const docTemplate = `{
                 "bold",
                 "italic",
                 "strikethrough",
-                "code"
+                "code",
+                "underline",
+                "spoiler"
             ],
             "x-enum-varnames": [
                 "MessageStyleBold",
                 "MessageStyleItalic",
                 "MessageStyleStrikethrough",
-                "MessageStyleCode"
+                "MessageStyleCode",
+                "MessageStyleUnderline",
+                "MessageStyleSpoiler"
             ]
         },
         "channel.ReplyRef": {
@@ -15703,6 +15848,9 @@ const docTemplate = `{
                 "path": {
                     "type": "string"
                 },
+                "revision": {
+                    "type": "string"
+                },
                 "size": {
                     "type": "integer"
                 }
@@ -15734,6 +15882,9 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "content": {
+                    "type": "string"
+                },
+                "expectedRevision": {
                     "type": "string"
                 },
                 "path": {
@@ -16770,6 +16921,23 @@ const docTemplate = `{
             "properties": {
                 "ok": {
                     "type": "boolean"
+                },
+                "revision": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.listSessionsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/session.Session"
+                    }
+                },
+                "next_cursor": {
+                    "type": "string"
                 }
             }
         },

@@ -33,6 +33,7 @@ type telegramOutboundStream struct {
 	isPrivateChat bool
 	draftID       int
 	closed        atomic.Bool
+	wg            sync.WaitGroup
 	mu            sync.Mutex
 	buf           strings.Builder
 	streamChatID  int64
@@ -72,7 +73,7 @@ func (s *telegramOutboundStream) getBotAndReply(ctx context.Context) (bot *tele.
 	return bot, replyTo, nil
 }
 
-func (s *telegramOutboundStream) refreshTypingAction(ctx context.Context) error {
+func (s *telegramOutboundStream) refreshTypingAction(ctx context.Context, chatID int64) error {
 	if err := s.adapter.waitStreamLimit(ctx); err != nil {
 		return err
 	}
@@ -80,13 +81,16 @@ func (s *telegramOutboundStream) refreshTypingAction(ctx context.Context) error 
 	if err != nil {
 		return err
 	}
-	return bot.Notify(tele.ChatID(s.streamChatID), tele.Typing)
+	return bot.Notify(tele.ChatID(chatID), tele.Typing)
 }
 
 func (s *telegramOutboundStream) ensureStreamMessage(ctx context.Context, text string) error {
 	s.mu.Lock()
+	typingChatID := s.streamChatID
+	s.wg.Add(1)
 	go func() {
-		if err := s.refreshTypingAction(ctx); err != nil {
+		defer s.wg.Done()
+		if err := s.refreshTypingAction(ctx, typingChatID); err != nil {
 			if s.adapter != nil && s.adapter.logger != nil {
 				s.adapter.logger.Debug("refresh typing action failed", slog.Any("error", err))
 			}
@@ -297,6 +301,9 @@ func (s *telegramOutboundStream) sendPermanentMessage(ctx context.Context, text 
 	if err != nil {
 		return err
 	}
+	if parseMode == "" && runeLenTelegramText(text) > telegramMaxMessageLength {
+		return sendTelegramTextChunksWithActions(bot, s.target, text, replyTo, parseMode, nil)
+	}
 	return sendTelegramText(bot, s.target, text, replyTo, parseMode)
 }
 
@@ -319,10 +326,50 @@ func (s *telegramOutboundStream) deliverFinalText(ctx context.Context, text, par
 	if s.isPrivateChat {
 		return s.sendPermanentMessage(ctx, text, parseMode)
 	}
+	if parseMode != "" {
+		s.mu.Lock()
+		s.parseMode = parseMode
+		s.mu.Unlock()
+	}
 	if err := s.ensureStreamMessage(ctx, text); err != nil {
 		return err
 	}
 	return s.editStreamMessageFinal(ctx, text)
+}
+
+func (s *telegramOutboundStream) deliverFinalTextWithActions(ctx context.Context, text, parseMode string, actions []channel.Action) error {
+	if len(actions) == 0 {
+		return s.deliverFinalText(ctx, text, parseMode)
+	}
+	bot, replyTo, err := s.getBotAndReply(ctx)
+	if err != nil {
+		return err
+	}
+	if s.isPrivateChat {
+		s.resetStreamState()
+		return sendTelegramTextWithActions(bot, s.target, text, replyTo, parseMode, actions)
+	}
+	if parseMode != "" {
+		s.mu.Lock()
+		s.parseMode = parseMode
+		s.mu.Unlock()
+	}
+	s.mu.Lock()
+	chatID := s.streamChatID
+	msgID := s.streamMsgID
+	s.mu.Unlock()
+	if msgID > 0 && chatID != 0 {
+		editErr := rawEditTelegramMessageTextWithActions(bot, chatID, msgID, text, parseMode, actions)
+		if editErr == nil || isTelegramMessageNotModified(editErr) {
+			s.resetStreamState()
+			return nil
+		}
+		if !isTelegramEditUnrecoverable(editErr) {
+			return editErr
+		}
+	}
+	s.resetStreamState()
+	return sendTelegramTextWithActions(bot, s.target, text, replyTo, parseMode, actions)
 }
 
 func (s *telegramOutboundStream) pushToolCallStart(ctx context.Context, tc *channel.StreamToolCall) error {
@@ -495,7 +542,7 @@ func (s *telegramOutboundStream) pushAttachment(ctx context.Context, event chann
 		return err
 	}
 	for _, att := range event.Attachments {
-		if sendErr := sendTelegramAttachmentWithAssets(ctx, bot, s.target, att, "", replyTo, ""); sendErr != nil {
+		if sendErr := sendTelegramAttachmentWithAssets(ctx, bot, s.target, att, "", replyTo, "", nil); sendErr != nil {
 			if s.adapter != nil && s.adapter.logger != nil {
 				s.adapter.logger.Warn("telegram: stream attachment send failed",
 					slog.String("config_id", s.cfg.ID),
@@ -572,6 +619,24 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.Pr
 	}
 
 	msg := event.Final.Message
+	if err := validateTelegramActions(msg.Message.Actions); err != nil {
+		return err
+	}
+
+	// Rich path: when the final carries canonical Parts or Markdown math,
+	// render via sendRichMessage so rich spans and formulas reach the user
+	// instead of being silently degraded to PlainText()+HTML conversion.
+	// Mirrors the rich branch in TelegramAdapter.Send.
+	if shouldUseTelegramFinalRichMessage(msg.Message) {
+		if err := s.pushFinalRich(ctx, msg); err != nil {
+			return err
+		}
+		if len(msg.Attachments) > 0 {
+			return s.pushFinalAttachments(ctx, msg)
+		}
+		return nil
+	}
+
 	finalText := bufText
 	if authoritative := strings.TrimSpace(msg.Message.PlainText()); authoritative != "" {
 		if !s.isPrivateChat || bufText != "" || (finalText == "" && len(msg.Message.Actions) > 0) {
@@ -587,16 +652,18 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.Pr
 		finalText = formatted
 	}
 
-	if len(msg.Message.Actions) > 0 && len(msg.Attachments) == 0 {
-		bot, replyTo, err := s.getBotAndReply(ctx)
-		if err != nil {
+	if strings.TrimSpace(finalText) != "" || len(msg.Attachments) == 0 {
+		if len(msg.Message.Actions) > 0 && len(msg.Attachments) == 0 {
+			bot, replyTo, err := s.getBotAndReply(ctx)
+			if err != nil {
+				return err
+			}
+			if err := sendTelegramTextWithActions(bot, s.target, finalText, replyTo, s.parseMode, msg.Message.Actions); err != nil {
+				return err
+			}
+		} else if err := s.deliverFinalText(ctx, finalText, s.parseMode); err != nil {
 			return err
 		}
-		if err := sendTelegramTextWithActions(bot, s.target, finalText, replyTo, s.parseMode, msg.Message.Actions); err != nil {
-			return err
-		}
-	} else if err := s.deliverFinalText(ctx, finalText, s.parseMode); err != nil {
-		return err
 	}
 
 	if len(msg.Attachments) > 0 {
@@ -611,9 +678,141 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.Pr
 			if i > 0 {
 				to = 0
 			}
-			if err := sendTelegramAttachmentWithAssets(ctx, bot, s.target, att, "", to, parseMode); err != nil && s.adapter.logger != nil {
-				s.adapter.logger.Error("stream final attachment failed", slog.String("config_id", s.cfg.ID), slog.Any("error", err))
+			var actions []channel.Action
+			if i == len(msg.Attachments)-1 {
+				actions = msg.Message.Actions
 			}
+			if err := sendTelegramAttachmentWithAssets(ctx, bot, s.target, att, "", to, parseMode, actions); err != nil {
+				if s.adapter.logger != nil {
+					s.adapter.logger.Error("stream final attachment failed", slog.String("config_id", s.cfg.ID), slog.Any("error", err))
+				}
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// pushFinalRich delivers a streaming final whose canonical Parts should be
+// rendered via Telegram's sendRichMessage / editRichMessage APIs instead of
+// being collapsed to markdown text. Edits an existing stream message in place
+// when one was opened during delta streaming; otherwise sends a fresh rich
+// message.
+func (s *telegramOutboundStream) pushFinalRich(ctx context.Context, msg channel.PreparedMessage) error {
+	rich, fallbackText, fallbackParseMode := renderTelegramOutboundBody(msg.Message)
+	if !rich.hasContent() {
+		if fallbackParseMode == "" && runeLenTelegramText(fallbackText) > telegramMaxMessageLength {
+			return s.deliverLongPlainFallback(ctx, fallbackText, msg.Message.Actions)
+		}
+		if len(msg.Message.Actions) > 0 {
+			bot, replyTo, err := s.getBotAndReply(ctx)
+			if err != nil {
+				return err
+			}
+			s.resetStreamState()
+			return sendTelegramTextWithActions(bot, s.target, fallbackText, replyTo, fallbackParseMode, msg.Message.Actions)
+		}
+		return s.deliverFinalText(ctx, fallbackText, fallbackParseMode)
+	}
+	bot, replyTo, err := s.getBotAndReply(ctx)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	streamMsgID := s.streamMsgID
+	streamChatID := s.streamChatID
+	s.mu.Unlock()
+
+	if streamMsgID > 0 && streamChatID != 0 {
+		err := rawEditTelegramRichMessage(bot, streamChatID, streamMsgID, rich, msg.Message.Actions)
+		if err == nil || isTelegramMessageNotModified(err) {
+			s.resetStreamState()
+			return nil
+		}
+		// Editing the in-flight stream message to rich failed (e.g. message
+		// was originally a draft/sendMessageDraft that the rich endpoint
+		// can't replace). Fall through to a fresh rich send so the user
+		// still sees the final.
+	}
+
+	if _, _, err := sendTelegramRichMessageReturnMessage(bot, s.target, rich, replyTo, msg.Message.Actions); err != nil {
+		return s.deliverFinalTextWithActions(ctx, fallbackText, fallbackParseMode, msg.Message.Actions)
+	}
+	s.resetStreamState()
+	return nil
+}
+
+func shouldUseTelegramFinalRichMessage(msg channel.Message) bool {
+	return len(msg.Parts) > 0 || renderTelegramMarkdownMathRichMessage(msg).hasContent()
+}
+
+func (s *telegramOutboundStream) deliverLongPlainFallback(ctx context.Context, text string, actions []channel.Action) error {
+	if err := validateTelegramActions(actions); err != nil {
+		return err
+	}
+	chunks := channel.ChunkText(text, telegramMaxMessageLength)
+	if len(chunks) == 0 {
+		return nil
+	}
+	replyToFirstChunk := true
+	if !s.isPrivateChat {
+		s.mu.Lock()
+		hasStreamMessage := s.streamMsgID != 0
+		s.mu.Unlock()
+		if hasStreamMessage {
+			if err := s.editStreamMessageFinalWithParseMode(ctx, chunks[0], ""); err != nil {
+				return err
+			}
+			chunks = chunks[1:]
+			s.resetStreamState()
+			replyToFirstChunk = false
+		}
+	}
+	if len(chunks) == 0 {
+		return nil
+	}
+	bot, replyTo, err := s.getBotAndReply(ctx)
+	if err != nil {
+		return err
+	}
+	if !replyToFirstChunk {
+		replyTo = 0
+	}
+	return sendTelegramTextChunkListWithActions(bot, s.target, chunks, replyTo, "", actions)
+}
+
+func (s *telegramOutboundStream) editStreamMessageFinalWithParseMode(ctx context.Context, text string, parseMode string) error {
+	s.mu.Lock()
+	previousParseMode := s.parseMode
+	s.parseMode = parseMode
+	s.mu.Unlock()
+	err := s.editStreamMessageFinal(ctx, text)
+	if err != nil {
+		s.mu.Lock()
+		s.parseMode = previousParseMode
+		s.mu.Unlock()
+	}
+	return err
+}
+
+// pushFinalAttachments delivers the attachment tail after a rich-final send.
+// Extracted so the rich path can reuse the same logic as the existing text
+// final path.
+func (s *telegramOutboundStream) pushFinalAttachments(ctx context.Context, msg channel.PreparedMessage) error {
+	bot, err := s.getBot(ctx)
+	if err != nil {
+		return err
+	}
+	replyTo := parseReplyToMessageID(s.reply)
+	parseMode := s.parseMode
+	for i, att := range msg.Attachments {
+		to := replyTo
+		if i > 0 {
+			to = 0
+		}
+		if err := sendTelegramAttachmentWithAssets(ctx, bot, s.target, att, "", to, parseMode, nil); err != nil && s.adapter != nil && s.adapter.logger != nil {
+			s.adapter.logger.Error("stream final attachment failed", slog.String("config_id", s.cfg.ID), slog.Any("error", err))
 		}
 	}
 	return nil

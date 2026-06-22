@@ -5,13 +5,20 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"context"
+	"database/sql"
 	"io"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
+	_ "modernc.org/sqlite"
+
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/adapters/whatsapp"
+	sqlitestore "github.com/memohai/memoh/internal/db/sqlite/store"
+	modelpkg "github.com/memohai/memoh/internal/models"
 )
 
 func TestReadZipEntriesRejectsZipSlip(t *testing.T) {
@@ -97,6 +104,64 @@ func TestReplaceClearableChannelsPreservesWhatsApp(t *testing.T) {
 	}
 }
 
+func TestImportDependenciesLegacyModelEnableCompatibility(t *testing.T) {
+	t.Run("missing enable defaults to true", func(t *testing.T) {
+		ctx := context.Background()
+		conn, queries := newBotBackupModelTestDB(t)
+		const providerID = "00000000-0000-0000-0000-000000000501"
+		insertBotBackupProvider(t, conn, providerID)
+		modelsService := modelpkg.NewService(slog.New(slog.DiscardHandler), queries)
+		service := &Service{models: modelsService}
+		state := &importState{
+			entries: map[string]backupZipEntry{
+				"dependencies/models.json": {
+					data: []byte(`[{"id":"old-model","model_id":"legacy-gpt","name":"Legacy GPT","provider_id":"00000000-0000-0000-0000-000000000501","type":"chat","config":{}}]`),
+				},
+			},
+		}
+
+		deps, err := service.importDependencies(ctx, state)
+		if err != nil {
+			t.Fatalf("importDependencies() error = %v", err)
+		}
+		created, err := modelsService.GetByID(ctx, deps.models["old-model"])
+		if err != nil {
+			t.Fatalf("GetByID() error = %v", err)
+		}
+		if !created.Enable {
+			t.Fatalf("legacy backup model imported disabled, want enabled")
+		}
+	})
+
+	t.Run("explicit false stays disabled", func(t *testing.T) {
+		ctx := context.Background()
+		conn, queries := newBotBackupModelTestDB(t)
+		const providerID = "00000000-0000-0000-0000-000000000601"
+		insertBotBackupProvider(t, conn, providerID)
+		modelsService := modelpkg.NewService(slog.New(slog.DiscardHandler), queries)
+		service := &Service{models: modelsService}
+		state := &importState{
+			entries: map[string]backupZipEntry{
+				"dependencies/models.json": {
+					data: []byte(`[{"id":"old-model","model_id":"disabled-gpt","name":"Disabled GPT","provider_id":"00000000-0000-0000-0000-000000000601","type":"chat","enable":false,"config":{}}]`),
+				},
+			},
+		}
+
+		deps, err := service.importDependencies(ctx, state)
+		if err != nil {
+			t.Fatalf("importDependencies() error = %v", err)
+		}
+		created, err := modelsService.GetByID(ctx, deps.models["old-model"])
+		if err != nil {
+			t.Fatalf("GetByID() error = %v", err)
+		}
+		if created.Enable {
+			t.Fatalf("disabled backup model imported enabled, want disabled")
+		}
+	})
+}
+
 func TestWriteJSONPreservesSensitiveValues(t *testing.T) {
 	var buf bytes.Buffer
 	manifest := Manifest{}
@@ -125,6 +190,73 @@ func TestWriteJSONPreservesSensitiveValues(t *testing.T) {
 	raw := string(entries["dependencies/providers.json"].data)
 	if !strings.Contains(raw, "secret-value") {
 		t.Fatalf("sensitive value was not preserved: %s", raw)
+	}
+}
+
+func newBotBackupModelTestDB(t *testing.T) (*sql.DB, *sqlitestore.Queries) {
+	t.Helper()
+	conn, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	execBotBackupModelSchema(t, conn)
+	store, err := sqlitestore.New(conn)
+	if err != nil {
+		t.Fatalf("new sqlite store: %v", err)
+	}
+	return conn, sqlitestore.NewQueries(store)
+}
+
+func execBotBackupModelSchema(t *testing.T, conn *sql.DB) {
+	t.Helper()
+	_, err := conn.ExecContext(context.Background(), `
+CREATE TABLE providers (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  client_type TEXT NOT NULL DEFAULT 'openai-completions',
+  icon TEXT,
+  enable INTEGER NOT NULL DEFAULT 1,
+  config TEXT NOT NULL DEFAULT '{}',
+  metadata TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT providers_name_unique UNIQUE (name)
+);
+
+CREATE TABLE models (
+  id TEXT PRIMARY KEY,
+  model_id TEXT NOT NULL,
+  name TEXT,
+  provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+  type TEXT NOT NULL DEFAULT 'chat',
+  enable INTEGER NOT NULL DEFAULT 1,
+  config TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT models_provider_id_model_id_unique UNIQUE (provider_id, model_id)
+);
+`)
+	if err != nil {
+		t.Fatalf("exec botbackup model schema: %v", err)
+	}
+}
+
+func insertBotBackupProvider(t *testing.T, conn *sql.DB, id string) {
+	t.Helper()
+	_, err := conn.ExecContext(context.Background(), `
+INSERT INTO providers (id, name, client_type, icon, enable, config, metadata)
+VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		id,
+		"provider-"+id,
+		string(modelpkg.ClientTypeOpenAICompletions),
+		"",
+		1,
+		`{}`,
+		`{}`,
+	)
+	if err != nil {
+		t.Fatalf("insert botbackup provider: %v", err)
 	}
 }
 

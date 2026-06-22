@@ -72,7 +72,7 @@ func TestDeleteACPAgentSessionClosesRuntimeBeforeSoftDelete(t *testing.T) {
 	closer := &recordingACPSessionCloser{}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		closer,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -109,7 +109,7 @@ func TestDeleteChatSessionDoesNotCloseACPRuntime(t *testing.T) {
 	closer := &recordingACPSessionCloser{}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		closer,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),

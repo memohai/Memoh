@@ -261,6 +261,8 @@ type Queries interface {
 	ListSessionEventsBySessionAfter(ctx context.Context, arg dbsqlc.ListSessionEventsBySessionAfterParams) ([]dbsqlc.BotSessionEvent, error)
 	ListSessionsByBot(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.ListSessionsByBotRow, error)
 	ListSessionsByBotAndCreatedByUser(ctx context.Context, arg dbsqlc.ListSessionsByBotAndCreatedByUserParams) ([]dbsqlc.ListSessionsByBotAndCreatedByUserRow, error)
+	ListSessionsByBotAndCreatedByUserPaged(ctx context.Context, arg dbsqlc.ListSessionsByBotAndCreatedByUserPagedParams) ([]dbsqlc.ListSessionsByBotAndCreatedByUserPagedRow, error)
+	ListSessionsByBotPaged(ctx context.Context, arg dbsqlc.ListSessionsByBotPagedParams) ([]dbsqlc.ListSessionsByBotPagedRow, error)
 	ListSessionsByRoute(ctx context.Context, routeID pgtype.UUID) ([]dbsqlc.BotSession, error)
 	ListSnapshotsByContainerID(ctx context.Context, containerID string) ([]dbsqlc.Snapshot, error)
 	ListSnapshotsWithVersionByContainerID(ctx context.Context, containerID string) ([]dbsqlc.ListSnapshotsWithVersionByContainerIDRow, error)

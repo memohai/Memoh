@@ -115,7 +115,7 @@ func TestACPRuntimeHandlerReturnsIdleStatus(t *testing.T) {
 	}
 	handler := NewACPRuntimeHandler(
 		nil,
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
@@ -189,7 +189,7 @@ func TestACPRuntimeHandlerEnsureStartsRuntimeAndReturnsModels(t *testing.T) {
 	}
 	handler := newACPRuntimeHandler(
 		pool,
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
@@ -264,7 +264,7 @@ func TestACPRuntimeHandlerSetModel(t *testing.T) {
 	}
 	handler := newACPRuntimeHandler(
 		pool,
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
@@ -343,7 +343,7 @@ func TestACPRuntimeHandlerCreateRuntime(t *testing.T) {
 	}
 	handler := newACPRuntimeHandler(
 		pool,
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
@@ -391,7 +391,7 @@ func TestACPRuntimeHandlerCreateRuntimeRejectsDisabledAgent(t *testing.T) {
 	pool := &fakeACPRuntimePool{}
 	handler := newACPRuntimeHandler(
 		pool,
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
@@ -427,7 +427,7 @@ func TestACPRuntimeHandlerCreateRuntimeMapsCapToTooManyRequests(t *testing.T) {
 	pool := &fakeACPRuntimePool{createErr: acpagent.ErrTooManyRuntimes}
 	handler := newACPRuntimeHandler(
 		pool,
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
@@ -466,7 +466,7 @@ func TestACPRuntimeHandlerSetRuntimeModelAllowsReset(t *testing.T) {
 	}
 	handler := newACPRuntimeHandler(
 		pool,
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
@@ -503,7 +503,7 @@ func TestACPRuntimeHandlerRuntimeNotFoundMapsTo404(t *testing.T) {
 	pool := &fakeACPRuntimePool{statusErr: acpagent.ErrRuntimeNotFound}
 	handler := newACPRuntimeHandler(
 		pool,
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
@@ -534,7 +534,7 @@ func TestACPRuntimeHandlerCloseRuntimeToleratesMissingRuntime(t *testing.T) {
 	pool := &fakeACPRuntimePool{closeErr: acpagent.ErrRuntimeNotFound}
 	handler := newACPRuntimeHandler(
 		pool,
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
@@ -573,7 +573,7 @@ func TestACPRuntimeHandlerRejectsNonACPSession(t *testing.T) {
 	}
 	handler := NewACPRuntimeHandler(
 		nil,
-		session.NewService(nil, queries),
+		session.NewService(nil, queries, nil),
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)

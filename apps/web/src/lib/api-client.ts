@@ -4,10 +4,8 @@ import { notifyAuthSessionCleared } from './auth-session'
 export interface SetupApiClientOptions {
   baseUrl?: string
   fetch?: typeof fetch
-  // Called after the access token is cleared on a 401. Hosts (web / desktop
-  // chat window / desktop settings window) decide what to do — usually a
-  // router redirect to the login screen, but desktop satellite windows may
-  // prefer to close themselves and let the chat window take over auth.
+  // Called after the access token is cleared on a 401. Hosts decide what to
+  // do — usually a router redirect to the login screen.
   onUnauthorized?: () => void
 }
 

@@ -149,6 +149,45 @@ func (r *Registry) GetCapabilities(channelType ChannelType) (ChannelCapabilities
 	return desc.Capabilities, true
 }
 
+// GetOutboundCapabilities returns capabilities refined for one outbound target.
+func (r *Registry) GetOutboundCapabilities(channelType ChannelType, cfg ChannelConfig, target string) (ChannelCapabilities, bool) {
+	desc, ok := r.GetDescriptor(channelType)
+	if !ok {
+		return ChannelCapabilities{}, false
+	}
+	caps := desc.Capabilities
+	adapter, ok := r.Get(channelType)
+	if !ok {
+		return caps, true
+	}
+	if resolver, ok := adapter.(OutboundCapabilityResolver); ok {
+		caps = resolver.ResolveOutboundCapabilities(cfg, target, caps)
+	}
+	return caps, true
+}
+
+// ResolveOutboundTarget resolves runtime delivery aliases before outbound
+// capability checks and adapter dispatch.
+func (r *Registry) ResolveOutboundTarget(ctx context.Context, channelType ChannelType, cfg ChannelConfig, target string) (string, bool, error) {
+	adapter, ok := r.Get(channelType)
+	if !ok {
+		return strings.TrimSpace(target), false, nil
+	}
+	resolver, ok := adapter.(OutboundTargetResolver)
+	if !ok {
+		return strings.TrimSpace(target), false, nil
+	}
+	resolved, err := resolver.ResolveOutboundTarget(ctx, cfg, target)
+	if err != nil {
+		return "", true, err
+	}
+	resolved = strings.TrimSpace(resolved)
+	if resolved == "" {
+		return "", true, errors.New("resolved outbound target is empty")
+	}
+	return resolved, true, nil
+}
+
 // GetOutboundPolicy returns the outbound policy for the given channel type.
 func (r *Registry) GetOutboundPolicy(channelType ChannelType) (OutboundPolicy, bool) {
 	desc, ok := r.GetDescriptor(channelType)

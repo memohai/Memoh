@@ -82,9 +82,10 @@ type RunConfig struct {
 	Query                 string
 	System                string
 	SessionType           string
+	LiveToolStream        bool
+	CanRequestUserInput   bool
 	SupportsImageInput    bool
 	SupportsToolCall      bool
-	DisplayEnabled        bool
 	InlineImages          []sdk.ImagePart
 	Identity              SessionContext
 	Bot                   BotInfo
