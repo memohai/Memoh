@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/memohai/memoh/internal/agent/sessionmode"
+	textprune "github.com/memohai/memoh/internal/prune"
 	skillset "github.com/memohai/memoh/internal/skills"
 )
 
@@ -123,7 +124,7 @@ func GenerateSystemPrompt(params SystemPromptParams) string {
 
 	skillsSection := buildSkillsSection(params.Skills)
 
-	fileSections := buildFileSections(params.Files)
+	fileSections := buildFileSections(params.Files, params.MaxFilesBytes)
 
 	tmpl := strings.TrimSpace(systemCommonTmpl + "\n\n" + selectModeTemplate(params.SessionType))
 
@@ -146,6 +147,7 @@ type SystemPromptParams struct {
 	Bot                       BotInfo
 	Skills                    []SkillEntry
 	Files                     []SystemFile
+	MaxFilesBytes             int
 	Now                       time.Time
 	Timezone                  string
 	PlatformIdentitiesSection string
@@ -222,18 +224,85 @@ func buildSkillsSection(skills []SkillEntry) string {
 	return sb.String()
 }
 
-func buildFileSections(files []SystemFile) string {
+func buildFileSections(files []SystemFile, maxBytes int) string {
+	maxBytes = normalizeSystemFilesMaxBytes(maxBytes)
 	var sb strings.Builder
 	for _, f := range files {
 		if f.Content == "" {
 			continue
 		}
+		separator := ""
 		if sb.Len() > 0 {
-			sb.WriteString("\n\n")
+			separator = "\n\n"
 		}
-		sb.WriteString(formatSystemFile(f))
+		remaining := maxBytes - sb.Len() - len(separator)
+		if remaining <= 0 {
+			break
+		}
+		section := formatSystemFile(f)
+		if len(section) > remaining {
+			truncated, ok := truncateSystemFileSection(f, remaining)
+			if !ok {
+				break
+			}
+			section = truncated
+		}
+		if separator != "" {
+			sb.WriteString(separator)
+		}
+		sb.WriteString(section)
+		if len(section) == remaining {
+			break
+		}
 	}
 	return sb.String()
+}
+
+func normalizeSystemFilesMaxBytes(maxBytes int) int {
+	if maxBytes <= 0 {
+		return DefaultSystemFilesMaxBytes
+	}
+	return maxBytes
+}
+
+func truncateSystemFileSection(file SystemFile, maxBytes int) (string, bool) {
+	heading := fmt.Sprintf("## %s\n\n", file.Filename)
+	if maxBytes <= len(heading) {
+		return "", false
+	}
+	contentBudget := maxBytes - len(heading)
+	content := textprune.PruneWithEdges(file.Content, systemFilePruneLabel(file), systemFilePruneConfig(contentBudget))
+	return heading + content, true
+}
+
+func systemFilePruneLabel(file SystemFile) string {
+	filename := strings.TrimSpace(file.Filename)
+	if filename == "" {
+		return "workspace file"
+	}
+	return "workspace file " + filename
+}
+
+func systemFilePruneConfig(maxBytes int) textprune.Config {
+	headBytes, tailBytes := splitHeadTail(maxBytes)
+	return textprune.Config{
+		MaxBytes:  maxBytes,
+		MaxLines:  textprune.DefaultMaxLines,
+		HeadBytes: headBytes,
+		TailBytes: tailBytes,
+		HeadLines: 1500,
+		TailLines: 500,
+		Marker:    textprune.DefaultMarker,
+	}
+}
+
+func splitHeadTail(maxBytes int) (int, int) {
+	headBytes := maxBytes * 3 / 4
+	tailBytes := maxBytes - headBytes
+	if headBytes <= 0 {
+		return maxBytes, 0
+	}
+	return headBytes, tailBytes
 }
 
 func buildMainAgentSections(platformIdentitiesSection string, skillsSection, fileSections string) string {

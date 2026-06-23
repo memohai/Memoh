@@ -137,6 +137,34 @@ func TestGenerateSystemPromptIncludesServiceOwnedBotInfo(t *testing.T) {
 	}
 }
 
+func TestBuildFileSectionsRespectsMaxBytes(t *testing.T) {
+	t.Parallel()
+
+	sections := buildFileSections([]SystemFile{
+		{
+			Filename: "AGENTS.md",
+			Content:  "HEAD\n" + strings.Repeat("0123456789", 200) + "\nTAIL",
+		},
+		{
+			Filename: "MEMORY.md",
+			Content:  "SECOND_FILE_SHOULD_NOT_FIT",
+		},
+	}, 512)
+
+	if len(sections) > 512 {
+		t.Fatalf("file sections bytes = %d, want <= 512", len(sections))
+	}
+	if !strings.Contains(sections, "## AGENTS.md") {
+		t.Fatalf("file sections missing first file heading:\n%s", sections)
+	}
+	if !strings.Contains(sections, "[memoh pruned]") {
+		t.Fatalf("file sections should include prune marker:\n%s", sections)
+	}
+	if strings.Contains(sections, "SECOND_FILE_SHOULD_NOT_FIT") {
+		t.Fatalf("file sections included content beyond budget:\n%s", sections)
+	}
+}
+
 func TestGenerateSystemPromptOmitsLegacyCoreFiles(t *testing.T) {
 	t.Parallel()
 

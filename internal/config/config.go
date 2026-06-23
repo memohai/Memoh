@@ -36,6 +36,9 @@ const (
 	DefaultWorkspaceMirrorImage  = "memoh.cn/memohai/workspace:debian"
 	DefaultTimezone              = "UTC"
 	DefaultContainerdRuntimeType = "io.containerd.runc.v2"
+	DefaultAgentToolOutputBytes  = 64 * 1024
+	DefaultAgentToolOutputLines  = 2000
+	DefaultAgentSystemFilesBytes = 32 * 1024
 
 	ImagePullPolicyIfNotPresent = "if_not_present"
 	ImagePullPolicyAlways       = "always"
@@ -47,6 +50,7 @@ type Config struct {
 	Server       ServerConfig       `toml:"server"`
 	Admin        AdminConfig        `toml:"admin"`
 	Auth         AuthConfig         `toml:"auth"`
+	Agent        AgentConfig        `toml:"agent"`
 	Timezone     string             `toml:"timezone"`
 	Database     DatabaseConfig     `toml:"database"`
 	Container    ContainerConfig    `toml:"container"`
@@ -122,6 +126,12 @@ type AdminConfig struct {
 type AuthConfig struct {
 	JWTSecret    string `toml:"jwt_secret"    json:"-"`
 	JWTExpiresIn string `toml:"jwt_expires_in"`
+}
+
+type AgentConfig struct {
+	ToolOutputMaxBytes  int `toml:"tool_output_max_bytes"`
+	ToolOutputMaxLines  int `toml:"tool_output_max_lines"`
+	SystemFilesMaxBytes int `toml:"system_files_max_bytes"`
 }
 
 type DatabaseConfig struct {
@@ -395,6 +405,11 @@ func Load(path string) (Config, error) {
 		},
 		Auth: AuthConfig{
 			JWTExpiresIn: DefaultJWTExpiresIn,
+		},
+		Agent: AgentConfig{
+			ToolOutputMaxBytes:  DefaultAgentToolOutputBytes,
+			ToolOutputMaxLines:  DefaultAgentToolOutputLines,
+			SystemFilesMaxBytes: DefaultAgentSystemFilesBytes,
 		},
 		Timezone: DefaultTimezone,
 		Database: DatabaseConfig{

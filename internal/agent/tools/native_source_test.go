@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -255,6 +256,51 @@ func TestNativeToolSourceReadMediaReturnsPublicResultOnly(t *testing.T) {
 	}
 	if strings.Contains(fmt.Sprintf("%#v", result), "secret-image-bytes") || strings.Contains(fmt.Sprintf("%#v", result), "ImageBase64") || strings.Contains(fmt.Sprintf("%#v", result), "ImageMediaType") {
 		t.Fatalf("native MCP result leaked internal image payload: %#v", result)
+	}
+}
+
+func TestNativeToolSourceLimitsToolOutput(t *testing.T) {
+	large := "HEAD\n" + strings.Repeat("0123456789", 200) + "\nTAIL"
+	provider := &nativeSourceTestProvider{
+		tools: []sdk.Tool{{
+			Name:       ToolRead().String(),
+			Parameters: map[string]any{"type": "object"},
+			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
+				return map[string]any{
+					"content": large,
+					"ok":      true,
+				}, nil
+			},
+		}},
+	}
+	source := NewNativeToolSource(nil, []ToolProvider{provider}, NativeToolSourceOptions{
+		AllowTools:      map[string]bool{ToolRead().String(): true},
+		ToolOutputLimit: ToolOutputLimit{MaxBytes: 512, MaxLines: 80},
+	})
+
+	result, err := source.CallTool(context.Background(), mcp.ToolSessionContext{BotID: "bot-1"}, ToolRead().String(), map[string]any{
+		"path": "big.txt",
+	})
+	if err != nil {
+		t.Fatalf("CallTool(read) error = %v", err)
+	}
+	structured, ok := result["structuredContent"].(map[string]any)
+	if !ok {
+		t.Fatalf("structuredContent = %#v, want map", result["structuredContent"])
+	}
+	raw, err := json.Marshal(structured)
+	if err != nil {
+		t.Fatalf("marshal structuredContent: %v", err)
+	}
+	if len(raw) > 512 {
+		t.Fatalf("structuredContent JSON bytes = %d, want <= 512\n%s", len(raw), raw)
+	}
+	content, ok := structured["content"].(string)
+	if !ok {
+		t.Fatalf("content = %#v, want string", structured["content"])
+	}
+	if len(content) >= len(large) || !strings.Contains(content, "[memoh pruned]") {
+		t.Fatalf("content was not pruned:\n%s", content)
 	}
 }
 

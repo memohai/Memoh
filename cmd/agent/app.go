@@ -369,12 +369,21 @@ func provideScheduleSessionCreator(sessionService *sessionpkg.Service) schedule.
 	return &sessionCreatorAdapter{svc: sessionService}
 }
 
-func provideAgent(log *slog.Logger, provider bridge.Provider, hookService *hookspkg.Service) *agentpkg.Agent {
+func provideAgent(log *slog.Logger, provider bridge.Provider, hookService *hookspkg.Service, cfg config.Config) *agentpkg.Agent {
 	return agentpkg.New(agentpkg.Deps{
 		BridgeProvider: provider,
 		HookService:    hookService,
 		Logger:         log,
+		Limits:         agentLimitsFromConfig(cfg.Agent),
 	})
+}
+
+func agentLimitsFromConfig(cfg config.AgentConfig) agentpkg.Limits {
+	return agentpkg.LimitsFromValues(
+		cfg.ToolOutputMaxBytes,
+		cfg.ToolOutputMaxLines,
+		cfg.SystemFilesMaxBytes,
+	)
 }
 
 func injectToolProviders(a *agentpkg.Agent, msgService *message.DBService, hookService *hookspkg.Service, providers []agenttools.ToolProvider) {
@@ -657,12 +666,14 @@ func provideOAuthService(log *slog.Logger, queries dbstore.Queries, cfg config.C
 	return mcp.NewOAuthService(log, queries, callbackURL)
 }
 
-func provideACPToolSource(log *slog.Logger, toolApproval *toolapproval.Service, userInput *userinput.Service, toolContexts *mcp.ToolSessionContextStore) *agenttools.NativeToolSource {
+func provideACPToolSource(log *slog.Logger, toolApproval *toolapproval.Service, userInput *userinput.Service, toolContexts *mcp.ToolSessionContextStore, cfg config.Config) *agenttools.NativeToolSource {
+	limits := agentLimitsFromConfig(cfg.Agent)
 	return agenttools.NewNativeToolSource(log, nil, agenttools.NativeToolSourceOptions{
-		AllowAll:   true,
-		Approval:   toolApproval,
-		UserInput:  userInput,
-		ToolEvents: toolContexts,
+		AllowAll:        true,
+		Approval:        toolApproval,
+		UserInput:       userInput,
+		ToolEvents:      toolContexts,
+		ToolOutputLimit: limits.ToolOutputLimit(),
 	})
 }
 

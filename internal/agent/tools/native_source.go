@@ -17,11 +17,12 @@ import (
 )
 
 type NativeToolSourceOptions struct {
-	AllowAll   bool
-	AllowTools map[string]bool
-	Approval   NativeToolApprovalService
-	UserInput  NativeToolUserInputService
-	ToolEvents NativeToolEventSink
+	AllowAll        bool
+	AllowTools      map[string]bool
+	Approval        NativeToolApprovalService
+	UserInput       NativeToolUserInputService
+	ToolEvents      NativeToolEventSink
+	ToolOutputLimit ToolOutputLimit
 }
 
 type NativeToolApprovalService interface {
@@ -60,6 +61,7 @@ type NativeToolSource struct {
 	approval   NativeToolApprovalService
 	userInput  NativeToolUserInputService
 	toolEvents NativeToolEventSink
+	limit      ToolOutputLimit
 }
 
 type nativeLoadedTool struct {
@@ -90,6 +92,7 @@ func NewNativeToolSource(log *slog.Logger, providers []ToolProvider, opts Native
 		approval:   opts.Approval,
 		userInput:  opts.UserInput,
 		toolEvents: opts.ToolEvents,
+		limit:      opts.ToolOutputLimit,
 	}
 	source.SetProviders(providers)
 	return source
@@ -181,7 +184,9 @@ func (s *NativeToolSource) CallTool(ctx context.Context, session mcp.ToolSession
 		if err != nil {
 			return nil, err
 		}
-		return mcp.BuildToolSuccessResult(publicNativeToolResult(result)), nil
+		publicResult := publicNativeToolResult(result)
+		limitedResult := LimitToolOutput(publicResult, "tool result ("+toolName+")", s.limit)
+		return mcp.BuildToolSuccessResult(limitedResult), nil
 	}
 	return nil, mcp.ErrToolNotFound
 }

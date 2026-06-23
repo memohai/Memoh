@@ -1037,7 +1037,9 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 		MessageCount: len(cfg.Messages),
 	}, hooks.EventBeforePromptBuild)
 	var files []agentpkg.SystemFile
+	limits := agentpkg.DefaultLimits()
 	if r.agent != nil {
+		limits = r.agent.Limits()
 		nowFn := time.Now
 		if cfg.Identity.TimezoneLocation != nil {
 			nowFn = func() time.Time { return time.Now().In(cfg.Identity.TimezoneLocation) }
@@ -1067,6 +1069,7 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 		Bot:                       cfg.Bot,
 		Skills:                    cfg.Skills,
 		Files:                     files,
+		MaxFilesBytes:             limits.SystemFilesMaxBytes,
 		Now:                       now,
 		Timezone:                  cfg.Identity.Timezone,
 		PlatformIdentitiesSection: platformIdentitiesSection,

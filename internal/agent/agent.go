@@ -27,6 +27,7 @@ type Agent struct {
 	bridgeProvider bridge.Provider
 	hookService    *hooks.Service
 	logger         *slog.Logger
+	limits         Limits
 }
 
 // New creates a new Agent with the given dependencies.
@@ -40,12 +41,20 @@ func New(deps Deps) *Agent {
 		bridgeProvider: deps.BridgeProvider,
 		hookService:    deps.HookService,
 		logger:         logger.With(slog.String("service", "agent")),
+		limits:         deps.Limits.Normalize(),
 	}
 }
 
 // BridgeProvider returns the underlying bridge provider (workspace manager).
 func (a *Agent) BridgeProvider() bridge.Provider {
 	return a.bridgeProvider
+}
+
+func (a *Agent) Limits() Limits {
+	if a == nil {
+		return DefaultLimits()
+	}
+	return a.limits.Normalize()
 }
 
 // SetToolProviders sets the tool providers after construction.
@@ -74,6 +83,8 @@ func (a *Agent) ExecuteTool(ctx context.Context, cfg RunConfig, call sdk.ToolCal
 	if err != nil {
 		return sdk.ToolResultPart{}, fmt.Errorf("assemble tools: %w", err)
 	}
+	sdkTools, _ = decorateReadMediaTools(cfg.Model, sdkTools)
+	sdkTools = tools.WrapToolOutputLimits(sdkTools, a.Limits().ToolOutputLimit())
 	for i := range sdkTools {
 		tool := sdkTools[i]
 		if tool.Name != call.ToolName {
@@ -157,6 +168,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		}
 	}
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
+	sdkTools = tools.WrapToolOutputLimits(sdkTools, a.Limits().ToolOutputLimit())
 	approvalTools := append([]sdk.Tool(nil), sdkTools...)
 	sdkTools = a.wrapToolsWithHooks(ctx, cfg, sdkTools)
 
@@ -628,6 +640,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 		}
 	}
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
+	sdkTools = tools.WrapToolOutputLimits(sdkTools, a.Limits().ToolOutputLimit())
 	approvalTools := append([]sdk.Tool(nil), sdkTools...)
 	sdkTools = a.wrapToolsWithHooks(ctx, cfg, sdkTools)
 
