@@ -7,48 +7,50 @@
     <!-- Fixed width, never w-fit: the panel must not be sized by its content, or a
          long back label / name would stretch the whole sidebar. Web keeps
          responsive widths; desktop matches SettingsSidebar's fixed 15rem width. -->
-    <Sidebar
-      class="relative! **:[[role=navigation]]:relative! sidebar-container h-full! border-0! [&_[data-sidebar=sidebar]]:bg-transparent!"
-      :class="desktopShell ? 'w-60!' : 'w-48! lg:w-52! xl:w-60!'"
-    >
-      <SidebarContent
-        class="overflow-hidden h-full flex flex-col"
-        :class="flush ? 'p-0' : 'p-2 pb-4 pt-4'"
+    <div class="hidden h-full md:block">
+      <Sidebar
+        class="relative! **:[[role=navigation]]:relative! sidebar-container h-full! border-0! [&_[data-sidebar=sidebar]]:bg-transparent!"
+        :class="desktopShell ? 'w-60!' : 'w-48! lg:w-52! xl:w-60!'"
       >
-        <!-- Default: a nested card shell (box-in-box) for pages that sit to the
+        <SidebarContent
+          class="overflow-hidden h-full flex flex-col"
+          :class="flush ? 'p-0' : 'p-2 pb-4 pt-4'"
+        >
+          <!-- Default: a nested card shell (box-in-box) for pages that sit to the
              right of the settings nav. flush: this layout IS the primary nav, so
              it goes edge-to-edge with a right divider, matching SettingsSidebar. -->
-        <div
-          class="flex-1 flex flex-col overflow-hidden min-h-0"
-          :class="flush
-            ? 'bg-sidebar border-r border-sidebar-border'
-            : 'border border-border/60 bg-muted/10 rounded-lg'"
-        >
-          <!-- Integrated Header (if provided) -->
           <div
-            v-if="slots['sidebar-header']"
-            class="shrink-0"
+            class="flex-1 flex flex-col overflow-hidden min-h-0"
+            :class="flush
+              ? 'bg-sidebar border-r border-sidebar-border'
+              : 'border border-border/60 bg-muted/10 rounded-lg'"
           >
-            <slot name="sidebar-header" />
-          </div>
-          
-          <!-- Content Group with ScrollArea -->
-          <ScrollArea class="flex-1 min-h-0">
-            <div class="p-2 flex flex-col gap-1">
-              <slot name="sidebar-content" />
+            <!-- Integrated Header (if provided) -->
+            <div
+              v-if="slots['sidebar-header']"
+              class="shrink-0"
+            >
+              <slot name="sidebar-header" />
             </div>
-          </ScrollArea>
 
-          <!-- Integrated Footer (if provided) -->
-          <SidebarFooter
-            v-if="slots['sidebar-footer']"
-            class="p-2 pt-0"
-          >
-            <slot name="sidebar-footer" />
-          </SidebarFooter>
-        </div>
-      </SidebarContent>
-    </Sidebar>
+            <!-- Content Group with ScrollArea -->
+            <ScrollArea class="flex-1 min-h-0">
+              <div class="p-2 flex flex-col gap-1">
+                <slot name="sidebar-content" />
+              </div>
+            </ScrollArea>
+
+            <!-- Integrated Footer (if provided) -->
+            <SidebarFooter
+              v-if="slots['sidebar-footer']"
+              class="p-2 pt-0"
+            >
+              <slot name="sidebar-footer" />
+            </SidebarFooter>
+          </div>
+        </SidebarContent>
+      </Sidebar>
+    </div>
 
     <SidebarInset class="min-w-0 overflow-hidden">
       <section class="flex-1 min-w-0 relative min-h-0 overflow-hidden">
