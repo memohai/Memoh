@@ -314,6 +314,7 @@ type graphNode struct {
 	ID       string         `json:"id"`
 	Label    string         `json:"label"`
 	Memory   string         `json:"memory"`
+	Subject  string         `json:"subject,omitempty"`
 	Topic    string         `json:"topic,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
@@ -331,15 +332,16 @@ type graphResponse struct {
 	Edges []graphEdge `json:"edges"`
 }
 
-// ChatGraph returns the memory graph (nodes + markdown-link edges) for the
-// wiki visualization. Edges are derived from cross-references in memory bodies
-// — [[node_id]] wiki-links or [label](node_id) markdown links — mirroring the
-// LLM Wiki pattern where cross-references are explicit, authored connections,
-// not mechanical topic grouping.
+// ChatGraph returns the memory graph (nodes + cross-reference edges) for the
+// wiki visualization. Edges are derived from markdown links in memory bodies
+// that reference another memory's subject (slug) — e.g. [[alice-profile]] or
+// [background](alice-profile). This mirrors the LLM Wiki pattern: connections
+// are explicit, human/LLM-readable cross-references, authored with short
+// semantic slugs rather than database IDs.
 //
 // @Summary Get memory graph
 // @Tags memory
-// @Router /bots/{bot_id}/memory/graph [get]
+// @Router /bots/{bot_id}/memory/graph [get].
 func (h *MemoryHandler) ChatGraph(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -367,40 +369,45 @@ func (h *MemoryHandler) ChatGraph(c echo.Context) error {
 	}
 	allResults = deduplicateMemoryItems(allResults)
 
+	// Build nodes with slug = subject (or fallback). Build slug→id lookup so
+	// [[slug]] references in bodies can be resolved to target node IDs.
 	nodes := make([]graphNode, 0, len(allResults))
-	idSet := make(map[string]bool, len(allResults))
+	slugToID := make(map[string]string, len(allResults))
 	for _, item := range allResults {
-		idSet[item.ID] = true
 		label := item.Memory
 		if len(label) > 40 {
 			label = label[:37] + "..."
 		}
+		subject := ""
 		topic := ""
 		if item.Metadata != nil {
+			if s, ok := item.Metadata["subject"].(string); ok {
+				subject = s
+			}
 			if t, ok := item.Metadata["topic"].(string); ok {
 				topic = t
 			}
 		}
+		slug := memorySlug(item.ID, subject, topic)
+		slugToID[slug] = item.ID
 		nodes = append(nodes, graphNode{
 			ID:       item.ID,
 			Label:    label,
 			Memory:   item.Memory,
+			Subject:  slug,
 			Topic:    topic,
 			Metadata: item.Metadata,
 		})
 	}
 
-	// Derive edges from markdown cross-references in node bodies. Supports
-	// [[id]] wiki-links and [label](id) markdown links. A reference is only
-	// counted if the target id exists in the current node set.
+	// Derive edges from markdown cross-references in node bodies. A [[slug]]
+	// or [label](slug) resolves to a target node via the slug→id map.
 	edges := make([]graphEdge, 0)
 	seen := map[string]bool{}
 	for _, src := range nodes {
-		for _, targetID := range parseMemoryLinks(src.Memory) {
-			if !idSet[targetID] {
-				continue
-			}
-			if targetID == src.ID {
+		for _, slugRef := range parseMemoryLinks(src.Memory) {
+			targetID, ok := slugToID[strings.TrimSpace(slugRef)]
+			if !ok || targetID == src.ID {
 				continue
 			}
 			key := src.ID + "\x00" + targetID
@@ -415,19 +422,33 @@ func (h *MemoryHandler) ChatGraph(c echo.Context) error {
 	return c.JSON(http.StatusOK, graphResponse{Nodes: nodes, Edges: edges})
 }
 
-// memoryLinkPatterns are the regex patterns for parsing cross-references from
-// memory bodies. Compiled once at init.
+// memorySlug returns a short, human/LLM-friendly slug for a memory node. The
+// priority is: explicit subject > topic > a short hash of the id. Slugs are
+// what LLMs use when writing [[slug]] cross-references.
+func memorySlug(id, subject, topic string) string {
+	if s := strings.TrimSpace(subject); s != "" {
+		return s
+	}
+	if t := strings.TrimSpace(topic); t != "" {
+		return t
+	}
+	// Fallback: last meaningful fragment of the id (e.g. "mem_2").
+	if idx := strings.LastIndex(id, ":"); idx >= 0 && idx+1 < len(id) {
+		return id[idx+1:]
+	}
+	return id
+}
+
+// Link patterns for parsing [[slug]] and [label](slug) from memory bodies.
 var (
-	// [[id]] Obsidian-style wiki link.
 	wikiLinkRe = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
-	// [label](id) markdown link where the href looks like a memory id.
-	mdLinkRe = regexp.MustCompile(`\[[^\]]*\]\(([^)]+)\)`)
+	mdLinkRe   = regexp.MustCompile(`\[[^\]]*\]\(([^)]+)\)`)
 )
 
-// parseMemoryLinks extracts referenced node IDs from a memory body. Supports
-// [[id]] and [label](id) formats. Returns deduplicated IDs.
+// parseMemoryLinks extracts referenced slugs from a memory body. Supports
+// [[slug]] and [label](slug) formats. Returns deduplicated, trimmed slugs.
 func parseMemoryLinks(body string) []string {
-	var ids []string
+	var slugs []string
 	seen := map[string]bool{}
 	collect := func(raw string) {
 		raw = strings.TrimSpace(raw)
@@ -435,7 +456,7 @@ func parseMemoryLinks(body string) []string {
 			return
 		}
 		seen[raw] = true
-		ids = append(ids, raw)
+		slugs = append(slugs, raw)
 	}
 	for _, m := range wikiLinkRe.FindAllStringSubmatch(body, -1) {
 		if len(m) > 1 {
@@ -444,11 +465,16 @@ func parseMemoryLinks(body string) []string {
 	}
 	for _, m := range mdLinkRe.FindAllStringSubmatch(body, -1) {
 		if len(m) > 1 {
-			collect(m[1])
+			// Only treat as a memory link if the href is NOT a URL.
+			href := strings.TrimSpace(m[1])
+			if !strings.HasPrefix(href, "http") {
+				collect(href)
+			}
 		}
 	}
-	return ids
+	return slugs
 }
+
 // @Summary Delete memories
 // @Description Delete specific memories by IDs, or delete all memories if no IDs are provided
 // @Tags memory

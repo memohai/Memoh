@@ -319,7 +319,7 @@
 import { Brain, CalendarDays, Pencil, Plus, Trash2 } from 'lucide-vue-next'
 import type { DateRange } from 'reka-ui'
 import { DateFormatter, getLocalTimeZone, today } from '@internationalized/date'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   Button,
   Spinner,
@@ -427,10 +427,16 @@ const compactDecayDays = computed(() => {
 })
 
 async function loadMemories() {
+  const botId = props.botId.trim()
+  if (!botId) {
+    memories.value = []
+    return
+  }
+
   loading.value = true
   try {
     const { data } = await getBotsByBotIdMemory({
-      path: { bot_id: props.botId },
+      path: { bot_id: botId },
       throwOnError: true,
     })
     memories.value = (data.results ?? [])
@@ -454,9 +460,16 @@ async function loadMemories() {
 }
 
 async function loadMemoryStatus() {
+  const botId = props.botId.trim()
+  if (!botId) {
+    memoryStatus.value = null
+    memoryStatusError.value = ''
+    return
+  }
+
   try {
     const { data } = await getBotsByBotIdMemoryStatus({
-      path: { bot_id: props.botId },
+      path: { bot_id: botId },
       throwOnError: true,
     })
     memoryStatus.value = data ?? null
@@ -553,14 +566,9 @@ async function handleCompact() {
   }
 }
 
-onMounted(() => {
-  loadMemories()
-  loadMemoryStatus()
-})
-
 watch(() => props.botId, () => {
   memories.value = []
-  loadMemories()
-  loadMemoryStatus()
-})
+  void loadMemories()
+  void loadMemoryStatus()
+}, { immediate: true })
 </script>
