@@ -427,7 +427,7 @@ func (t *terminal) appendOutput(s string) {
 	defer t.mu.Unlock()
 	t.output += s
 	if hasToolOutputLimit(t.outputLimit) {
-		limited := limitToolOutputString(t.output, "tool result (exec)", t.outputLimit)
+		limited := limitToolOutputStringExact(t.output, "tool result (exec)", t.outputLimit)
 		if limited == t.output {
 			return
 		}

@@ -2,9 +2,11 @@ package acpclient
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/memohai/memoh/internal/agent/event"
 	"github.com/memohai/memoh/internal/contextlimit"
+	"github.com/memohai/memoh/internal/prune"
 )
 
 type ToolOutputLimit = contextlimit.ToolOutputLimit
@@ -31,4 +33,51 @@ func normalizedToolOutputLimit(limit ToolOutputLimit) ToolOutputLimit {
 
 func limitToolOutputString(text, label string, limit ToolOutputLimit) string {
 	return contextlimit.LimitString(text, label, limit)
+}
+
+func limitToolOutputStringExact(text, label string, limit ToolOutputLimit) string {
+	if !hasToolOutputLimit(limit) {
+		return text
+	}
+	maxBytes := limit.MaxBytes
+	if maxBytes <= 0 {
+		maxBytes = prune.DefaultMaxBytes
+	}
+	maxLines := limit.MaxLines
+	if maxLines <= 0 {
+		maxLines = prune.DefaultMaxLines
+	}
+	headBytes := maxBytes * 3 / 4
+	tailBytes := maxBytes - headBytes
+	headLines := maxLines * 3 / 4
+	tailLines := maxLines - headLines
+	limited := prune.PruneWithEdges(text, label, prune.Config{
+		MaxBytes:  maxBytes,
+		MaxLines:  maxLines,
+		HeadBytes: headBytes,
+		TailBytes: tailBytes,
+		HeadLines: headLines,
+		TailLines: tailLines,
+	})
+	if limit.MaxBytes > 0 && len(limited) > limit.MaxBytes {
+		return safeUTF8Prefix(limited, limit.MaxBytes)
+	}
+	return limited
+}
+
+func safeUTF8Prefix(s string, maxBytes int) string {
+	if maxBytes <= 0 || len(s) == 0 {
+		return ""
+	}
+	if maxBytes >= len(s) {
+		return s
+	}
+	cut := maxBytes
+	for cut > 0 && cut < len(s) && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	if cut <= 0 {
+		return ""
+	}
+	return s[:cut]
 }
