@@ -789,6 +789,7 @@
         "default": "Preparing desktop",
         "failed": "Failed to prepare desktop",
         "stageCheck": "Check",
+        "stageSetup": "Setup",
         "stageInstall": "Install",
         "stageBrowser": "Browser",
         "stageDesktop": "Desktop"
