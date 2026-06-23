@@ -114,7 +114,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
       <SelectViewport
         data-slot="select-viewport"
         :data-open-hint="openHint ? '' : undefined"
-        :class="cn(menuViewportClass, 'p-1!', position === 'popper' && 'w-full min-w-[calc(var(--reka-select-trigger-width)_+_8px)] scroll-my-1')"
+        :class="cn(menuViewportClass, position === 'popper' && 'w-full min-w-[calc(var(--reka-select-trigger-width)_+_8px)] scroll-my-1')"
         @pointermove="onMenuPointerMove"
       >
         <slot />
