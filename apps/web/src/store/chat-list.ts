@@ -20,6 +20,7 @@ import {
   updateSessionAgent as requestUpdateSessionAgent,
   updateSessionTitle as requestUpdateSessionTitle,
   fetchSessions,
+  fetchSession,
   type Bot,
   type BotSessionActivityEvent,
   type SessionSummary,
@@ -2391,9 +2392,16 @@ export const useChatStore = defineStore('chat', () => {
     await initialize()
   }
 
-  function selectSession(targetSessionId: string) {
+  async function selectSession(targetSessionId: string) {
     const sid = targetSessionId.trim()
     if (!sid || sid === sessionId.value) return
+    const bid = (currentBotId.value ?? '').trim()
+    if (bid && !sessionById.has(sid)) {
+      try {
+        const fetched = await fetchSession(bid, sid)
+        sessionById.set(fetched.id, fetched)
+      } catch { /* session may have been deleted; selectSession still sets the id */ }
+    }
     clearPendingACPSession()
     sessionId.value = sid
     draftIntent.value = false

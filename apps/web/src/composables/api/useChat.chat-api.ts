@@ -3,6 +3,7 @@ import {
   deleteBotsByBotIdMessages,
   deleteBotsByBotIdAcpRuntimesByRuntimeId,
   getBotsByBotIdSessions,
+  getBotsByBotIdSessionsBySessionId,
   getBotsByBotIdSessionsBySessionIdAcpRuntime,
   postBotsByBotIdAcpRuntimes,
   postBotsByBotIdSessions,
@@ -66,6 +67,14 @@ export async function fetchSessions(botId: string, options?: FetchSessionsOption
     items: payload?.items ?? [],
     nextCursor: payload?.next_cursor?.trim() || null,
   }
+}
+
+export async function fetchSession(botId: string, sessionId: string): Promise<SessionSummary> {
+  const { data } = await getBotsByBotIdSessionsBySessionId({
+    path: { bot_id: botId.trim(), session_id: sessionId.trim() },
+    throwOnError: true,
+  })
+  return data as SessionSummary
 }
 
 export async function createSession(botId: string, options?: string | CreateSessionOptions): Promise<SessionSummary> {
