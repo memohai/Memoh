@@ -1030,6 +1030,8 @@ startStream:
 		ReplySender:               inboundReplySender(msg.Message.Reply),
 		ReplyPreview:              inboundReplyPreview(msg.Message.Reply),
 		ReplyAttachments:          replyAttachments,
+		MentionsBot:               metadataBool(msg.Metadata, "is_mentioned"),
+		RepliesToBot:              metadataBool(msg.Metadata, "is_reply_to_bot"),
 		ForwardMessageID:          inboundForwardMessageID(msg.Message.Forward),
 		ForwardFromUserID:         inboundForwardFromUserID(msg.Message.Forward),
 		ForwardFromConversationID: inboundForwardFromConversationID(msg.Message.Forward),

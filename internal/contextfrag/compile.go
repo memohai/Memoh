@@ -1,0 +1,496 @@
+package contextfrag
+
+import (
+	"fmt"
+	"strings"
+
+	sdk "github.com/memohai/twilight-ai/sdk"
+)
+
+const (
+	CollectorRunConfigFields = "run_config_fields"
+	SourceRunConfig          = "run_config"
+	SourceAgentToolUsage     = "agent_tool_usage"
+)
+
+// CompileInput contains the legacy RunConfig fields used as phase-1 sources.
+type CompileInput struct {
+	Source          string
+	Scope           Scope
+	System          string
+	Messages        []sdk.Message
+	Query           string
+	InlineImages    []sdk.ImagePart
+	ToolUsage       string
+	View            ManifestView
+	DynamicMutators []DynamicMutator
+	Existing        []ContextFrag
+}
+
+// Compile builds typed fragments from the current SDK-shaped fields, preserving
+// explicit non-derived fragments such as tool usage.
+func Compile(input CompileInput) AssembledContext {
+	source := strings.TrimSpace(input.Source)
+	if source == "" {
+		source = SourceRunConfig
+	}
+	scope := normalizeScope(input.Scope)
+
+	frags := preserveExplicit(input.Existing)
+	if strings.TrimSpace(input.System) != "" {
+		frags = append(frags, systemFrags(input.System, strings.TrimSpace(input.ToolUsage), scope, source)...)
+	}
+	for i, msg := range input.Messages {
+		frags = append(frags, MessageFrag(MessageFragInput{
+			ID:         fmt.Sprintf("message.%03d", i),
+			Message:    msg,
+			Kind:       kindForMessage(msg),
+			Slot:       SlotHistory,
+			Priority:   priorityForMessage(msg),
+			CacheClass: cacheForMessage(msg),
+			Trust:      trustForMessage(msg),
+			Scope:      scope,
+			Source:     source,
+			Collector:  CollectorRunConfigFields,
+			Index:      i,
+		}))
+	}
+	if strings.TrimSpace(input.Query) != "" {
+		frags = append(frags, TextFrag(TextFragInput{
+			ID:         "current_user.message",
+			Kind:       KindCurrentUserMessage,
+			Role:       sdk.MessageRoleUser,
+			Slot:       SlotCurrentUser,
+			Text:       strings.TrimSpace(input.Query),
+			Priority:   90,
+			CacheClass: CacheNever,
+			Trust:      TrustUser,
+			Scope:      scope,
+			Source:     source,
+			Collector:  CollectorRunConfigFields,
+			Render:     RenderPolicy{Format: RenderSDKMessage},
+		}))
+	}
+	if len(input.InlineImages) > 0 {
+		imageFrag := ImageFrag("current_user.images", input.InlineImages, scope, source)
+		if len(imageFrag.Parts) > 0 {
+			frags = append(frags, imageFrag)
+		}
+	}
+
+	assembled := Render(frags)
+	assembled.Frags = frags
+	assembled.Manifest = BuildManifest(frags)
+	assembled.Manifest.View = input.View
+	if assembled.Manifest.View == "" {
+		assembled.Manifest.View = ViewRunConfigPreProvider
+	}
+	assembled.Manifest.DynamicMutators = normalizeDynamicMutators(input.DynamicMutators)
+	return assembled
+}
+
+func systemFrags(system string, toolUsage string, scope Scope, source string) []ContextFrag {
+	system = strings.TrimSpace(system)
+	if system == "" {
+		return nil
+	}
+	toolStart := -1
+	if toolUsage != "" {
+		toolStart = strings.Index(system, toolUsage)
+	}
+	if toolStart < 0 {
+		return []ContextFrag{systemTextFrag("system.prompt", KindSystemPrompt, system, 20, CacheStable, scope, source, 0)}
+	}
+
+	var frags []ContextFrag
+	if prefix := strings.TrimSpace(system[:toolStart]); prefix != "" {
+		frags = append(frags, systemTextFrag("system.prompt", KindSystemPrompt, prefix, 20, CacheStable, scope, source, 0))
+	}
+
+	rest := strings.TrimSpace(system[toolStart:])
+	toolEnd := len(toolUsage)
+	toolUsageText := strings.TrimSpace(rest[:toolEnd])
+	if toolUsageText != "" {
+		frags = append(frags, systemTextFrag("system.tool_usage", KindToolUsage, toolUsageText, 45, CacheStable, scope, SourceAgentToolUsage, 1))
+	}
+	if suffix := strings.TrimSpace(rest[toolEnd:]); suffix != "" {
+		kind := KindSystemPrompt
+		id := "system.prompt.tail"
+		if strings.HasPrefix(suffix, "## Workspace instruction files") {
+			kind = KindWorkspaceInstruction
+			id = "system.workspace_instructions"
+		}
+		frags = append(frags, systemTextFrag(id, kind, suffix, 50, CacheStable, scope, source, 2))
+	}
+	return frags
+}
+
+func systemTextFrag(id string, kind Kind, text string, priority int, cacheClass CacheClass, scope Scope, source string, index int) ContextFrag {
+	return TextFrag(TextFragInput{
+		ID:         id,
+		Kind:       kind,
+		Role:       sdk.MessageRoleSystem,
+		Slot:       SlotSystem,
+		Text:       text,
+		Priority:   priority,
+		CacheClass: cacheClass,
+		Trust:      TrustSystem,
+		Scope:      scope,
+		Source:     source,
+		Collector:  CollectorRunConfigFields,
+		Index:      index,
+		Render:     RenderPolicy{Format: RenderMarkdown},
+	})
+}
+
+// TextFragInput describes a text fragment to construct.
+type TextFragInput struct {
+	ID         string
+	Kind       Kind
+	Role       sdk.MessageRole
+	Slot       Slot
+	Text       string
+	Priority   int
+	CacheClass CacheClass
+	Trust      TrustLevel
+	Scope      Scope
+	Source     string
+	SourceID   string
+	Collector  string
+	Index      int
+	Render     RenderPolicy
+	Budget     BudgetPolicy
+}
+
+// TextFrag creates a text-backed fragment.
+func TextFrag(input TextFragInput) ContextFrag {
+	return ContextFrag{
+		ID:         strings.TrimSpace(input.ID),
+		Kind:       input.Kind,
+		Role:       input.Role,
+		Slot:       input.Slot,
+		Priority:   input.Priority,
+		CacheClass: input.CacheClass,
+		Trust:      input.Trust,
+		Scope:      normalizeScope(input.Scope),
+		Budget:     input.Budget,
+		Render:     input.Render,
+		Provenance: Provenance{
+			Source:    strings.TrimSpace(input.Source),
+			SourceID:  strings.TrimSpace(input.SourceID),
+			Collector: strings.TrimSpace(input.Collector),
+			Index:     input.Index,
+		},
+		Parts: []Part{{
+			Type: PartText,
+			Text: strings.TrimSpace(input.Text),
+		}},
+	}
+}
+
+// MessageFragInput describes an SDK message fragment.
+type MessageFragInput struct {
+	ID         string
+	Message    sdk.Message
+	Kind       Kind
+	Slot       Slot
+	Priority   int
+	CacheClass CacheClass
+	Trust      TrustLevel
+	Scope      Scope
+	Source     string
+	SourceID   string
+	Collector  string
+	Index      int
+}
+
+// MessageFrag creates a message-backed fragment.
+func MessageFrag(input MessageFragInput) ContextFrag {
+	msg := cloneMessage(input.Message)
+	return ContextFrag{
+		ID:         strings.TrimSpace(input.ID),
+		Kind:       input.Kind,
+		Role:       input.Message.Role,
+		Slot:       input.Slot,
+		Priority:   input.Priority,
+		CacheClass: input.CacheClass,
+		Trust:      input.Trust,
+		Scope:      normalizeScope(input.Scope),
+		Render:     RenderPolicy{Format: RenderSDKMessage},
+		Provenance: Provenance{
+			Source:    strings.TrimSpace(input.Source),
+			SourceID:  strings.TrimSpace(input.SourceID),
+			Collector: strings.TrimSpace(input.Collector),
+			Index:     input.Index,
+		},
+		Parts: []Part{{
+			Type:       PartSDKMessage,
+			SDKMessage: &msg,
+		}},
+	}
+}
+
+// ImageFrag creates one fragment for native image parts.
+func ImageFrag(id string, images []sdk.ImagePart, scope Scope, source string) ContextFrag {
+	parts := make([]Part, 0, len(images))
+	for _, image := range images {
+		if strings.TrimSpace(image.Image) == "" {
+			continue
+		}
+		img := image
+		parts = append(parts, Part{
+			Type: PartImage,
+			Image: ImageRef{
+				MediaType: strings.TrimSpace(image.MediaType),
+				Source:    "inline",
+			},
+			SDKImage: &img,
+		})
+	}
+	return ContextFrag{
+		ID:         strings.TrimSpace(id),
+		Kind:       KindNativeImage,
+		Role:       sdk.MessageRoleUser,
+		Slot:       SlotCurrentUser,
+		Priority:   90,
+		CacheClass: CacheNever,
+		Trust:      TrustUser,
+		Scope:      normalizeScope(scope),
+		Render:     RenderPolicy{Format: RenderNativePart},
+		Provenance: Provenance{
+			Source:    strings.TrimSpace(source),
+			Collector: CollectorRunConfigFields,
+		},
+		Parts: parts,
+	}
+}
+
+// Upsert returns frags with next inserted or replacing an existing fragment
+// with the same ID.
+func Upsert(frags []ContextFrag, next ContextFrag) []ContextFrag {
+	next.ID = strings.TrimSpace(next.ID)
+	if next.ID == "" {
+		return frags
+	}
+	out := make([]ContextFrag, 0, len(frags)+1)
+	replaced := false
+	for _, frag := range frags {
+		if frag.ID == next.ID {
+			if !replaced {
+				out = append(out, next)
+				replaced = true
+			}
+			continue
+		}
+		out = append(out, frag)
+	}
+	if !replaced {
+		out = append(out, next)
+	}
+	return out
+}
+
+// BuildManifest creates a non-sensitive summary from fragments.
+func BuildManifest(frags []ContextFrag) Manifest {
+	manifest := Manifest{Version: 1}
+	manifest.Items = make([]ManifestItem, 0, len(frags))
+	for _, frag := range frags {
+		item := ManifestItem{
+			ID:         frag.ID,
+			Kind:       frag.Kind,
+			Slot:       frag.Slot,
+			Role:       frag.Role,
+			Priority:   frag.Priority,
+			CacheClass: frag.CacheClass,
+			Trust:      frag.Trust,
+			Source:     frag.Provenance.Source,
+			SourceID:   frag.Provenance.SourceID,
+			Collector:  frag.Provenance.Collector,
+			Scope:      frag.Scope,
+		}
+		for _, part := range frag.Parts {
+			item.PartTypes = append(item.PartTypes, part.Type)
+			switch part.Type {
+			case PartText:
+				item.TextBytes += len(part.Text)
+			case PartSDKMessage:
+				item.TextBytes += messageTextBytes(part.SDKMessage)
+				item.ImageCount += messageImageCount(part.SDKMessage)
+				manifest.Counts.Messages++
+			case PartImage:
+				item.ImageCount++
+			}
+		}
+		manifest.Counts.TextBytes += item.TextBytes
+		manifest.Counts.Images += item.ImageCount
+		manifest.Items = append(manifest.Items, item)
+	}
+	manifest.Counts.Fragments = len(frags)
+	return manifest
+}
+
+// Render builds the legacy SDK-shaped view from fragments.
+func Render(frags []ContextFrag) AssembledContext {
+	var out AssembledContext
+	for _, frag := range frags {
+		switch frag.Slot {
+		case SlotSystem:
+			for _, part := range frag.Parts {
+				if part.Type != PartText || strings.TrimSpace(part.Text) == "" {
+					continue
+				}
+				if out.System != "" {
+					out.System += "\n\n"
+				}
+				out.System += strings.TrimSpace(part.Text)
+			}
+		case SlotCurrentUser:
+			for _, part := range frag.Parts {
+				switch part.Type {
+				case PartText:
+					if strings.TrimSpace(part.Text) != "" {
+						out.Query = strings.TrimSpace(part.Text)
+					}
+				case PartImage:
+					if part.SDKImage != nil && strings.TrimSpace(part.SDKImage.Image) != "" {
+						out.InlineImages = append(out.InlineImages, *part.SDKImage)
+					}
+				case PartSDKMessage:
+					if part.SDKMessage != nil {
+						out.Messages = append(out.Messages, cloneMessage(*part.SDKMessage))
+					}
+				}
+			}
+		default:
+			for _, part := range frag.Parts {
+				if part.Type == PartSDKMessage && part.SDKMessage != nil {
+					out.Messages = append(out.Messages, cloneMessage(*part.SDKMessage))
+				}
+			}
+		}
+	}
+	return out
+}
+
+func preserveExplicit(frags []ContextFrag) []ContextFrag {
+	if len(frags) == 0 {
+		return nil
+	}
+	out := make([]ContextFrag, 0, len(frags))
+	for _, frag := range frags {
+		if frag.Provenance.Collector == CollectorRunConfigFields {
+			continue
+		}
+		out = append(out, frag)
+	}
+	return out
+}
+
+func kindForMessage(msg sdk.Message) Kind {
+	switch msg.Role {
+	case sdk.MessageRoleSystem:
+		return KindSystemPolicy
+	case sdk.MessageRoleUser:
+		return KindConversationEvent
+	case sdk.MessageRoleAssistant:
+		return KindConversationEvent
+	case sdk.MessageRoleTool:
+		return KindConversationEvent
+	default:
+		return KindConversationEvent
+	}
+}
+
+func priorityForMessage(msg sdk.Message) int {
+	switch msg.Role {
+	case sdk.MessageRoleSystem:
+		return 30
+	case sdk.MessageRoleTool:
+		return 55
+	default:
+		return 70
+	}
+}
+
+func cacheForMessage(msg sdk.Message) CacheClass {
+	switch msg.Role {
+	case sdk.MessageRoleSystem:
+		return CacheDynamic
+	default:
+		return CacheNever
+	}
+}
+
+func trustForMessage(msg sdk.Message) TrustLevel {
+	switch msg.Role {
+	case sdk.MessageRoleSystem:
+		return TrustSystem
+	case sdk.MessageRoleAssistant, sdk.MessageRoleTool:
+		return TrustWorkspace
+	default:
+		return TrustExternal
+	}
+}
+
+func normalizeScope(scope Scope) Scope {
+	if len(scope.Attention) == 0 {
+		scope.Attention = nil
+	}
+	if len(scope.Metadata) == 0 {
+		scope.Metadata = nil
+	}
+	return scope
+}
+
+func cloneMessage(msg sdk.Message) sdk.Message {
+	out := msg
+	if len(msg.Content) > 0 {
+		out.Content = append([]sdk.MessagePart(nil), msg.Content...)
+	}
+	return out
+}
+
+func messageTextBytes(msg *sdk.Message) int {
+	if msg == nil {
+		return 0
+	}
+	total := 0
+	for _, part := range msg.Content {
+		switch p := part.(type) {
+		case sdk.TextPart:
+			total += len(p.Text)
+		case sdk.ReasoningPart:
+			total += len(p.Text)
+		}
+	}
+	return total
+}
+
+func messageImageCount(msg *sdk.Message) int {
+	if msg == nil {
+		return 0
+	}
+	total := 0
+	for _, part := range msg.Content {
+		if _, ok := part.(sdk.ImagePart); ok {
+			total++
+		}
+	}
+	return total
+}
+
+func normalizeDynamicMutators(mutators []DynamicMutator) []DynamicMutator {
+	if len(mutators) == 0 {
+		return nil
+	}
+	out := make([]DynamicMutator, 0, len(mutators))
+	seen := make(map[DynamicMutator]bool, len(mutators))
+	for _, mutator := range mutators {
+		if mutator == "" || seen[mutator] {
+			continue
+		}
+		seen[mutator] = true
+		out = append(out, mutator)
+	}
+	return out
+}

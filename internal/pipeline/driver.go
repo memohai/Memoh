@@ -344,6 +344,7 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 	isMentioned := wasRecentlyMentioned(rc, sess.lastProcessedMs)
 	lateBinding := buildLateBindingPrompt(isMentioned)
 	runConfig.Messages = append(runConfig.Messages, sdk.UserMessage(lateBinding))
+	runConfig = runConfig.RefreshContextFrag()
 
 	eventCh := agent.Stream(ctx, runConfig)
 

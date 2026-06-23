@@ -11,6 +11,7 @@ import (
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 )
@@ -723,6 +724,43 @@ func TestAgentEventToChannelEventMapsACPDecisionRequests(t *testing.T) {
 	}
 }
 
+func TestHandleReplyWithAgentRefreshesContextFragAfterLateBinding(t *testing.T) {
+	rc := RenderedContext{
+		{
+			ReceivedAtMs: 200,
+			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="x">hello</message>`}},
+		},
+	}
+	fakeAgent := &fakeDiscussStreamer{}
+	resolver := &fakeRunConfigResolver{
+		resolveResult: ResolveRunConfigResult{
+			RunConfig: agentpkg.RunConfig{System: "base system"},
+			ModelID:   "model-1",
+		},
+	}
+	driver := NewDiscussDriver(DiscussDriverDeps{
+		Pipeline: NewPipeline(RenderParams{}),
+		Resolver: resolver,
+	})
+	sess := &discussSession{
+		config:          DiscussSessionConfig{BotID: "b", SessionID: "s"},
+		lastProcessedMs: 0,
+	}
+
+	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, fakeAgent)
+
+	if fakeAgent.lastConfig == nil {
+		t.Fatal("expected agent to be invoked")
+	}
+	cfg := fakeAgent.lastConfig
+	if cfg.ContextManifest.Counts.Messages != len(cfg.Messages) {
+		t.Fatalf("manifest message count = %d, messages = %d", cfg.ContextManifest.Counts.Messages, len(cfg.Messages))
+	}
+	if !lastMessageFragContains(cfg.ContextFrags, "IMPORTANT: You MUST use the `send` tool") {
+		t.Fatalf("context frags do not include late-binding prompt: %#v", cfg.ContextManifest.Items)
+	}
+}
+
 // --- Test helpers ---
 
 type fakeDiscussStreamer struct {
@@ -798,4 +836,20 @@ func (f *fakeDiscussCursorStore) UpsertDiscussConsumedCursor(_ context.Context, 
 	f.upsertRouteID = routeID
 	f.upsertCursor = cursor
 	return nil
+}
+
+func lastMessageFragContains(frags []contextfrag.ContextFrag, needle string) bool {
+	for i := len(frags) - 1; i >= 0; i-- {
+		frag := frags[i]
+		if frag.Kind != contextfrag.KindConversationEvent || len(frag.Parts) == 0 || frag.Parts[0].SDKMessage == nil {
+			continue
+		}
+		for _, part := range frag.Parts[0].SDKMessage.Content {
+			if text, ok := part.(sdk.TextPart); ok && strings.Contains(text.Text, needle) {
+				return true
+			}
+		}
+		return false
+	}
+	return false
 }

@@ -206,6 +206,7 @@ func (a *Agent) applyBeforeModelCallHook(ctx context.Context, cfg RunConfig, ste
 	}
 	if strings.TrimSpace(res.AppendContext) != "" {
 		cfg.Messages = append(cfg.Messages, sdk.UserMessage(formatHookContext(hooks.EventBeforeModelCall, res.AppendContext)))
+		cfg = cfg.RefreshContextFrag()
 	}
 	return cfg, nil
 }

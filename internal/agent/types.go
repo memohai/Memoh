@@ -10,6 +10,7 @@ import (
 
 	"github.com/memohai/memoh/internal/agent/background"
 	"github.com/memohai/memoh/internal/agent/event"
+	"github.com/memohai/memoh/internal/contextfrag"
 )
 
 // SessionContext carries request-scoped identity and routing information.
@@ -72,27 +73,33 @@ type InjectMessage struct {
 
 // RunConfig holds everything needed for a single agent invocation.
 type RunConfig struct {
-	Model                 *sdk.Model
-	ReasoningEffort       string
-	ReasoningActive       bool
-	ReasoningDisabled     bool
-	ReasoningAdaptive     bool
-	ReasoningOffEffort    string
-	ChatCompletionsCompat string
-	Messages              []sdk.Message
-	Query                 string
-	System                string
-	SessionType           string
-	LiveToolStream        bool
-	CanRequestUserInput   bool
-	SupportsImageInput    bool
-	SupportsToolCall      bool
-	InlineImages          []sdk.ImagePart
-	Identity              SessionContext
-	Bot                   BotInfo
-	Skills                []SkillEntry
-	LoopDetection         LoopDetectionConfig
-	Retry                 RetryConfig
+	Model                    *sdk.Model
+	ReasoningEffort          string
+	ReasoningActive          bool
+	ReasoningDisabled        bool
+	ReasoningAdaptive        bool
+	ReasoningOffEffort       string
+	ChatCompletionsCompat    string
+	Messages                 []sdk.Message
+	Query                    string
+	System                   string
+	ContextFrags             []contextfrag.ContextFrag
+	ContextManifest          contextfrag.Manifest
+	ContextScope             contextfrag.Scope
+	ContextQueryMaterialized bool
+	ContextToolUsage         string
+	ContextDynamicMutators   []contextfrag.DynamicMutator
+	SessionType              string
+	LiveToolStream           bool
+	CanRequestUserInput      bool
+	SupportsImageInput       bool
+	SupportsToolCall         bool
+	InlineImages             []sdk.ImagePart
+	Identity                 SessionContext
+	Bot                      BotInfo
+	Skills                   []SkillEntry
+	LoopDetection            LoopDetectionConfig
+	Retry                    RetryConfig
 
 	// PromptCacheTTL controls prompt caching for this run. Empty or
 	// unrecognized values default to 5m. Use "1h" for the long-cache tier
