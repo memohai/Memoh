@@ -161,7 +161,11 @@ function connectWs() {
     }
   }
 
-  socket.onclose = () => {
+  socket.onclose = (event) => {
+    if (event.code === 1000) {
+      tabsStore.closeTab(props.tabId)
+      return
+    }
     status.value = 'disconnected'
     terminal?.write('\r\n\x1b[31m[Connection closed]\x1b[0m\r\n')
   }
