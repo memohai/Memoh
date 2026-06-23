@@ -2,8 +2,10 @@ package acpclient
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -86,6 +88,35 @@ func TestTerminalAppendOutputHonorsSmallByteLimit(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("terminal output missing %q:\n%s", want, output)
 		}
+	}
+}
+
+func TestTerminalAppendOutputHonorsTinyByteLimits(t *testing.T) {
+	t.Parallel()
+
+	for _, maxBytes := range []int{1, 8, 32} {
+		t.Run(fmt.Sprintf("%d bytes", maxBytes), func(t *testing.T) {
+			t.Parallel()
+
+			term := &terminal{
+				outputLimit: ToolOutputLimit{MaxBytes: maxBytes, MaxLines: 80},
+				done:        make(chan struct{}),
+			}
+			term.appendOutput("HEAD\n")
+			term.appendOutput(strings.Repeat("terminal output ", 300))
+			term.appendOutput("\nTAIL")
+
+			output, truncated, _ := term.snapshot()
+			if !truncated {
+				t.Fatal("terminal truncated = false, want true")
+			}
+			if len(output) > maxBytes {
+				t.Fatalf("terminal output bytes = %d, want <= %d", len(output), maxBytes)
+			}
+			if !utf8.ValidString(output) {
+				t.Fatalf("terminal output is not valid UTF-8: %q", output)
+			}
+		})
 	}
 }
 

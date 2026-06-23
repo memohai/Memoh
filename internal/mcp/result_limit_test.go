@@ -82,6 +82,23 @@ func TestLimitToolResultCapsLineOnlyMCPText(t *testing.T) {
 	}
 }
 
+func TestLimitToolResultBoundsOversizedStructuredContent(t *testing.T) {
+	t.Parallel()
+
+	result := LimitToolResult(BuildToolSuccessResult(map[string]any{
+		"message": "HEAD\n" + strings.Repeat("structured detail ", 300) + "\nTAIL",
+		"ok":      true,
+	}), "structured_tool", ToolOutputLimit{MaxBytes: 512, MaxLines: 80})
+
+	assertJSONBytesAtMost(t, result, 512)
+	text := toolResultText(result)
+	for _, want := range []string{"[memoh pruned]", "HEAD", "TAIL"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("structured result text missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestLimitToolResultNormalizesTinyPositiveByteLimit(t *testing.T) {
 	t.Parallel()
 
