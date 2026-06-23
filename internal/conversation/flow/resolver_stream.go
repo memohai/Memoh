@@ -112,7 +112,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		}
 		streamReq.Query = rc.query
 
-		go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), streamReq, streamReq.Query)
+		go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), streamReq, streamReq.RawQuery)
 
 		cfg := rc.runConfig
 		cfg.LiveToolStream = true
@@ -270,7 +270,7 @@ func (r *Resolver) StreamChatWS(
 	}
 	req.Query = rc.query
 
-	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.Query)
+	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
 
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()

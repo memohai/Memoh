@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -61,8 +62,22 @@ func (r *Resolver) maybeGenerateSessionTitle(ctx context.Context, req conversati
 		r.logger.Warn("title gen: failed to get session", slog.String("session_id", sessionID), slog.Any("error", err))
 		return
 	}
+	// Only generate a title when the session doesn't have one yet. Reading the
+	// DB title (rather than an in-memory cache) keeps this guard restart-safe:
+	// a session that already has an LLM-generated title is never re-run, even
+	// after a server restart.
 	if !shouldGenerateSessionTitle(sess) {
 		return
+	}
+
+	promptTitle := fallbackSessionTitle(userQuery)
+
+	// Persist a prompt-derived title immediately so a brand-new session is never
+	// left "Untitled" — before (or without) the LLM title model. The sidebar
+	// shows the user's first prompt right away; if a title model is configured
+	// and the LLM succeeds below, it upgrades this.
+	if strings.TrimSpace(sess.Title) == "" && promptTitle != "" {
+		r.applyFallbackTitle(ctx, req, sessionID, userQuery)
 	}
 
 	botSettings, err := r.loadBotSettings(ctx, req.BotID)
@@ -197,4 +212,80 @@ func truncate(s string, maxChars int) string {
 		return s
 	}
 	return string(runes[:maxChars])
+}
+
+// fallbackTitleMaxRunes caps the prompt-derived fallback title. Mirrors the
+// frontend provisionalSessionTitle so the value the client shows optimistically
+// matches what the server persists (no flicker when the SSE lands).
+const fallbackTitleMaxRunes = 50
+
+// stripMarkdown removes structural markdown so a prompt-derived title reads as
+// clean prose: fenced/inline code, images, links, heading/list/blockquote
+// markers, emphasis, and table pipes. Mirrors the frontend stripMarkdown used by
+// provisionalSessionTitle — keep them in lockstep so the persisted fallback
+// equals the optimistic client display.
+var (
+	fallbackReFencedCode = regexp.MustCompile("(?s)```.*?```")
+	fallbackReInlineCode = regexp.MustCompile("`([^`]+)`")
+	fallbackReImage      = regexp.MustCompile(`!\[([^\]]*)\]\([^)]*\)`)
+	fallbackReLink       = regexp.MustCompile(`\[([^\]]+)\]\([^)]*\)`)
+	fallbackReHeading    = regexp.MustCompile(`(?m)^\s{0,3}#{1,6}\s+`)
+	fallbackReBlockquote = regexp.MustCompile(`(?m)^\s*>+\s?`)
+	fallbackReListUl     = regexp.MustCompile(`(?m)^\s*[-*+]\s+`)
+	fallbackReListOl     = regexp.MustCompile(`(?m)^\s*\d+\.\s+`)
+	fallbackReEmphasis   = regexp.MustCompile(`(\*\*|\*|__|~~)`)
+	fallbackReTablePipe  = regexp.MustCompile(`\|`)
+	fallbackReWhitespace = regexp.MustCompile(`\s+`)
+)
+
+func stripMarkdown(md string) string {
+	md = fallbackReFencedCode.ReplaceAllString(md, " ")
+	md = fallbackReInlineCode.ReplaceAllString(md, "$1")
+	md = fallbackReImage.ReplaceAllString(md, "$1")
+	md = fallbackReLink.ReplaceAllString(md, "$1")
+	md = fallbackReHeading.ReplaceAllString(md, "")
+	md = fallbackReBlockquote.ReplaceAllString(md, "")
+	md = fallbackReListUl.ReplaceAllString(md, "")
+	md = fallbackReListOl.ReplaceAllString(md, "")
+	md = fallbackReEmphasis.ReplaceAllString(md, "")
+	md = fallbackReTablePipe.ReplaceAllString(md, " ")
+	return md
+}
+
+// fallbackSessionTitle derives a one-line sidebar title from a user's first
+// message: strip markdown across the whole prompt (so a complete code fence is
+// dropped, not just its opening line), take the first remaining line, collapse
+// whitespace, and cap at fallbackTitleMaxRunes with an ellipsis. Returns "" when
+// there is no usable text.
+func fallbackSessionTitle(userQuery string) string {
+	stripped := strings.TrimSpace(stripMarkdown(userQuery))
+	if stripped == "" {
+		return ""
+	}
+	firstLine := strings.SplitN(stripped, "\n", 2)[0]
+	firstLine = strings.TrimSpace(fallbackReWhitespace.ReplaceAllString(firstLine, " "))
+	if firstLine == "" {
+		return ""
+	}
+	if truncated := truncate(firstLine, fallbackTitleMaxRunes); truncated != firstLine {
+		return truncated + "…"
+	}
+	return firstLine
+}
+
+// applyFallbackTitle persists a prompt-derived title for a session that would
+// otherwise stay untitled, then publishes it so clients replace the
+// "Untitled" placeholder immediately. No-op when the prompt yields no usable
+// text.
+func (r *Resolver) applyFallbackTitle(ctx context.Context, req conversation.ChatRequest, sessionID, userQuery string) {
+	title := fallbackSessionTitle(userQuery)
+	if title == "" {
+		return
+	}
+	if _, err := r.sessionService.UpdateTitle(ctx, sessionID, title); err != nil {
+		r.logger.Warn("title gen: failed to apply fallback title", slog.String("session_id", sessionID), slog.Any("error", err))
+		return
+	}
+	r.logger.Info("title gen: applied fallback title", slog.String("session_id", sessionID), slog.String("title", title))
+	r.publishSessionTitleUpdated(req.BotID, sessionID, title)
 }
