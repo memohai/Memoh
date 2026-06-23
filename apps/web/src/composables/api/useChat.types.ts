@@ -10,6 +10,7 @@ export interface SessionSummary {
   type?: string
   title: string
   metadata?: Record<string, unknown>
+  parent_session_id?: string
   created_at?: string
   updated_at?: string
   route_metadata?: Record<string, unknown>

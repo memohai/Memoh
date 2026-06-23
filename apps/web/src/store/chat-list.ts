@@ -19,8 +19,8 @@ import {
   closeACPRuntime as requestCloseACPRuntime,
   updateSessionAgent as requestUpdateSessionAgent,
   updateSessionTitle as requestUpdateSessionTitle,
-  fetchSessions,
   fetchSession,
+  fetchSessions,
   type Bot,
   type BotSessionActivityEvent,
   type SessionSummary,
@@ -457,6 +457,7 @@ export const useChatStore = defineStore('chat', () => {
   // O(1) lookup keeps event handlers off the list scan that previously
   // blocked the UI on bots with thousands of heartbeat sessions.
   const sessionById = new Map<string, SessionSummary>()
+  const rememberedSessions = ref<Record<string, SessionSummary>>({})
   const sessionsCursor = ref<string | null>(null)
   const hasMoreSessions = ref(false)
   const loadingMoreSessions = ref(false)
@@ -471,8 +472,9 @@ export const useChatStore = defineStore('chat', () => {
   let pendingACPCreateRequest: Promise<AcpagentRuntimeStatus | undefined> | null = null
   let pendingACPCreateKey = ''
   let pendingACPGeneration = 0
+  let selectSessionRequestId = 0
 
-  const activeSession = computed(() => sessionById.get(sessionId.value ?? '') ?? null)
+  const activeSession = computed(() => knownSessionSummary(sessionId.value ?? ''))
 
   function replaceSessions(items: SessionSummary[]) {
     sessions.value = items
@@ -497,12 +499,35 @@ export const useChatStore = defineStore('chat', () => {
       sessions.value = [updated, ...sessions.value]
     }
     sessionById.set(updated.id, updated)
+    if (rememberedSessions.value[updated.id]) rememberSession(updated)
+  }
+
+  function rememberSession(updated: SessionSummary) {
+    sessionById.set(updated.id, updated)
+    rememberedSessions.value = {
+      ...rememberedSessions.value,
+      [updated.id]: updated,
+    }
+  }
+
+  function forgetRememberedSession(id: string) {
+    if (!rememberedSessions.value[id]) return
+    const next = { ...rememberedSessions.value }
+    delete next[id]
+    rememberedSessions.value = next
+  }
+
+  function knownSessionSummary(targetSessionId: string): SessionSummary | null {
+    const sid = targetSessionId.trim()
+    if (!sid) return null
+    return sessions.value.find(session => session.id === sid) ?? rememberedSessions.value[sid] ?? null
   }
 
   function removeSessionFromList(id: string) {
-    if (!sessionById.has(id)) return
+    if (!sessionById.has(id) && !rememberedSessions.value[id]) return
     sessions.value = sessions.value.filter(session => session.id !== id)
     sessionById.delete(id)
+    forgetRememberedSession(id)
   }
 
   const activeChatReadOnly = computed(() => {
@@ -2334,7 +2359,7 @@ export const useChatStore = defineStore('chat', () => {
         // server already filtered to user-facing types and sorted by recency).
         // Transcript hydration is driven by startSessionMessagesStream below — no
         // eager loadMessages REST round trip from here.
-        if (sessionId.value && sessionById.has(sessionId.value)) {
+        if (sessionId.value && knownSessionSummary(sessionId.value)) {
           draftIntent.value = false
         } else if (draftIntent.value) {
           sessionId.value = null
@@ -2380,6 +2405,7 @@ export const useChatStore = defineStore('chat', () => {
 
   async function selectBot(targetBotId: string) {
     if (currentBotId.value === targetBotId) return
+    selectSessionRequestId++
     abort()
     abortAllAssistantStreams()
     clearPendingACPSession()
@@ -2389,19 +2415,28 @@ export const useChatStore = defineStore('chat', () => {
     seenFsToolCallIds.clear()
     currentBotId.value = targetBotId
     sessionId.value = null
+    rememberedSessions.value = {}
     await initialize()
   }
 
   async function selectSession(targetSessionId: string) {
     const sid = targetSessionId.trim()
     if (!sid || sid === sessionId.value) return
+    const requestId = ++selectSessionRequestId
     const bid = (currentBotId.value ?? '').trim()
-    if (bid && !sessionById.has(sid)) {
+    let fetched: SessionSummary | null = null
+    if (bid && !knownSessionSummary(sid)) {
       try {
-        const fetched = await fetchSession(bid, sid)
-        sessionById.set(fetched.id, fetched)
-      } catch { /* session may have been deleted; selectSession still sets the id */ }
+        fetched = await fetchSession(bid, sid)
+      } catch {
+        // The target can disappear between a list render and activation. Keep
+        // selection behavior consistent; the session stream/message load will
+        // surface the missing-session state through the existing path.
+      }
     }
+    if (requestId !== selectSessionRequestId) return
+    if (bid && (currentBotId.value ?? '').trim() !== bid) return
+    if (fetched) rememberSession(fetched)
     clearPendingACPSession()
     sessionId.value = sid
     draftIntent.value = false
@@ -2411,6 +2446,7 @@ export const useChatStore = defineStore('chat', () => {
   async function createNewSession() {
     const bid = await ensureBot()
     if (!bid) return
+    selectSessionRequestId++
     clearPendingACPSession()
     sessionId.value = null
     draftIntent.value = true
@@ -2425,6 +2461,7 @@ export const useChatStore = defineStore('chat', () => {
   // view, so per-session chat tabs can activate their draft tab without minting a
   // session. selectSession early-returns on an empty id, so a draft needs this.
   function selectDraft() {
+    selectSessionRequestId++
     draftIntent.value = true
     if (!sessionId.value) return
     clearPendingACPSession()

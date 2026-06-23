@@ -7,6 +7,7 @@ import { useChatStore } from './chat-list'
 const api = vi.hoisted(() => ({
   createSession: vi.fn(),
   deleteSession: vi.fn(),
+  fetchSession: vi.fn(),
   fetchSessions: vi.fn(),
   fetchBots: vi.fn(),
   fetchMessagesUI: vi.fn(),
@@ -107,6 +108,12 @@ describe('chat-list store', () => {
       { id: 'bot-1', status: 'active', name: 'Bot' },
     ])
     api.fetchSessions.mockResolvedValue({ items: [], nextCursor: null })
+    api.fetchSession.mockResolvedValue({
+      id: 'session-unknown',
+      bot_id: 'bot-1',
+      title: 'Unknown session',
+      type: 'chat',
+    })
     api.createSession.mockResolvedValue({
       id: 'session-1',
       bot_id: 'bot-1',
@@ -1549,6 +1556,42 @@ describe('chat-list store', () => {
     streamHandler?.({ type: 'end', stream_id: streamB, session_id: 'session-b' } as UIStreamEvent)
     await first
     await second
+  })
+
+  it('hydrates hidden subagent session summaries before selecting them', async () => {
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-parent', bot_id: 'bot-1', title: 'Parent', type: 'chat' },
+    ], nextCursor: null })
+    api.fetchSession.mockResolvedValueOnce({
+      id: 'session-subagent',
+      bot_id: 'bot-1',
+      title: 'Subagent',
+      type: 'subagent',
+      parent_session_id: 'session-parent',
+    })
+    api.fetchMessagesUI.mockResolvedValue([])
+
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await store.selectSession('session-subagent')
+
+    expect(api.fetchSession).toHaveBeenCalledWith('bot-1', 'session-subagent')
+    expect(store.activeSession).toMatchObject({
+      id: 'session-subagent',
+      type: 'subagent',
+    })
+    expect(store.activeChatReadOnly).toBe(true)
+
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-parent', bot_id: 'bot-1', title: 'Parent', type: 'chat' },
+    ], nextCursor: null })
+    await store.initialize()
+
+    expect(store.sessionId).toBe('session-subagent')
+    expect(store.activeSession).toMatchObject({
+      id: 'session-subagent',
+      type: 'subagent',
+    })
   })
 
   it('paginates the sessions list and clears hasMoreSessions when the cursor is exhausted', async () => {
