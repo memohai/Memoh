@@ -43,7 +43,13 @@ const (
 	videoFrameRate       = 15
 	h264FmtpLine         = "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f"
 	displayProbePeriod   = 5 * time.Second
-	socketProbeTimeout   = 300 * time.Millisecond
+	// socketProbeTimeout gates the RFB reachability probe used by Status /
+	// Answer / session.start. 300ms was too tight for a busy container: a
+	// momentary stall flipped running=false and forced a full prepare
+	// (re-installing/starting Xvnc + desktop + Chrome) on every reconnect.
+	// 1.5s still fails fast when the port is genuinely closed, but tolerates
+	// the brief scheduling jitter that was causing spurious prepare runs.
+	socketProbeTimeout = 1500 * time.Millisecond
 	stalePeerTTL         = 2 * time.Minute
 	encoderIdleHold      = 90 * time.Second
 	screenshotTimeout    = 15 * time.Second
