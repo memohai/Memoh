@@ -100,10 +100,11 @@ func (a *Agent) ExecuteTool(ctx context.Context, cfg RunConfig, call sdk.ToolCal
 		}
 		output, err := tool.Execute(execCtx, call.Input)
 		if err != nil {
+			limitedErr := tools.LimitToolError(err, "tool result ("+call.ToolName+")", a.Limits().ToolOutputLimit())
 			return sdk.ToolResultPart{
 				ToolCallID: call.ToolCallID,
 				ToolName:   call.ToolName,
-				Result:     err.Error(),
+				Result:     limitedErr.Error(),
 				IsError:    true,
 			}, nil
 		}

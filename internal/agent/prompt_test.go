@@ -165,6 +165,21 @@ func TestBuildFileSectionsRespectsMaxBytes(t *testing.T) {
 	}
 }
 
+func TestBuildFileSectionsRespectsLineLimit(t *testing.T) {
+	t.Parallel()
+
+	sections := buildFileSections([]SystemFile{
+		{
+			Filename: "AGENTS.md",
+			Content:  strings.Repeat("x\n", 2100),
+		},
+	}, 32*1024)
+
+	if !strings.Contains(sections, "[memoh pruned]") {
+		t.Fatalf("file sections should include prune marker for line-only overflow:\n%s", sections)
+	}
+}
+
 func TestGenerateSystemPromptOmitsLegacyCoreFiles(t *testing.T) {
 	t.Parallel()
 

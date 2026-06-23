@@ -284,23 +284,9 @@ func TestNativeToolSourceLimitsToolOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CallTool(read) error = %v", err)
 	}
-	structured, ok := result["structuredContent"].(map[string]any)
-	if !ok {
-		t.Fatalf("structuredContent = %#v, want map", result["structuredContent"])
-	}
-	raw, err := json.Marshal(structured)
-	if err != nil {
-		t.Fatalf("marshal structuredContent: %v", err)
-	}
-	if len(raw) > 512 {
-		t.Fatalf("structuredContent JSON bytes = %d, want <= 512\n%s", len(raw), raw)
-	}
-	content, ok := structured["content"].(string)
-	if !ok {
-		t.Fatalf("content = %#v, want string", structured["content"])
-	}
-	if len(content) >= len(large) || !strings.Contains(content, "[memoh pruned]") {
-		t.Fatalf("content was not pruned:\n%s", content)
+	assertNativeToolResultJSONBytesAtMost(t, result, 512)
+	if !strings.Contains(fmt.Sprintf("%#v", result), "[memoh pruned]") {
+		t.Fatalf("result was not pruned:\n%#v", result)
 	}
 }
 
@@ -397,10 +383,11 @@ func TestNativeToolSourceRejectedApprovalDoesNotExecute(t *testing.T) {
 				ID:             "approval-2",
 				ShortID:        8,
 				Status:         toolapproval.StatusRejected,
-				DecisionReason: "not now",
+				DecisionReason: "HEAD\n" + strings.Repeat("rejected detail ", 300) + "\nTAIL",
 			},
 		},
-		ToolEvents: toolEvents,
+		ToolEvents:      toolEvents,
+		ToolOutputLimit: ToolOutputLimit{MaxBytes: 512, MaxLines: 80},
 	})
 
 	result, err := source.CallTool(context.Background(), mcp.ToolSessionContext{
@@ -416,6 +403,10 @@ func TestNativeToolSourceRejectedApprovalDoesNotExecute(t *testing.T) {
 	}
 	if isError, _ := result["isError"].(bool); !isError {
 		t.Fatalf("result = %#v, want MCP error result", result)
+	}
+	assertNativeToolResultJSONBytesAtMost(t, result, 512)
+	if !strings.Contains(fmt.Sprintf("%#v", result), "[memoh pruned]") {
+		t.Fatalf("rejected approval result was not pruned: %#v", result)
 	}
 	if len(toolEvents.events) != 2 {
 		t.Fatalf("tool events = %d, want pending and rejected approval events", len(toolEvents.events))
@@ -567,6 +558,17 @@ func nativeAskUserSession(toolCallID string) mcp.ToolSessionContext {
 	}
 }
 
+func assertNativeToolResultJSONBytesAtMost(t *testing.T, value any, max int) {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal value: %v", err)
+	}
+	if len(raw) > max {
+		t.Fatalf("JSON bytes = %d, want <= %d\n%s", len(raw), max, raw)
+	}
+}
+
 func TestNativeToolSourceAskUserWaitsForInputAndPublishesRequest(t *testing.T) {
 	provider := NewAskUserProvider(nil)
 	userInput := &nativeSourceUserInput{
@@ -655,6 +657,46 @@ func TestNativeToolSourceAskUserWaitsForInputAndPublishesRequest(t *testing.T) {
 	structured, ok := result["structuredContent"].(map[string]any)
 	if !ok || structured["status"] != userinput.StatusSubmitted {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestNativeToolSourceAskUserLimitsSubmittedResult(t *testing.T) {
+	provider := NewAskUserProvider(nil)
+	userInput := &nativeSourceUserInput{
+		response: userinput.Request{
+			ID:         "input-1",
+			ToolCallID: "mcp-http-call-1",
+			ToolName:   ToolAskUser().String(),
+			Status:     userinput.StatusSubmitted,
+			Result: map[string]any{
+				"status": userinput.StatusSubmitted,
+				"answers": []any{
+					map[string]any{
+						"question_id": "q1",
+						"text":        "HEAD\n" + strings.Repeat("answer detail ", 300) + "\nTAIL",
+					},
+				},
+			},
+		},
+	}
+	source := NewNativeToolSource(nil, []ToolProvider{provider}, NativeToolSourceOptions{
+		AllowAll:        true,
+		UserInput:       userInput,
+		ToolEvents:      &nativeSourceToolEvents{delivered: true},
+		ToolOutputLimit: ToolOutputLimit{MaxBytes: 512, MaxLines: 80},
+	})
+
+	result, err := source.CallTool(context.Background(), nativeAskUserSession("mcp-http-call-1"), ToolAskUser().String(), map[string]any{
+		"questions": []any{
+			map[string]any{"text": "Question?", "kind": "text"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(ask_user) error = %v", err)
+	}
+	assertNativeToolResultJSONBytesAtMost(t, result, 512)
+	if !strings.Contains(fmt.Sprintf("%#v", result), "[memoh pruned]") {
+		t.Fatalf("ask_user result was not pruned: %#v", result)
 	}
 }
 

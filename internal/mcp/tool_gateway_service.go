@@ -26,12 +26,21 @@ type ToolGatewayService struct {
 	logger   *slog.Logger
 	sources  []ToolSource
 	cacheTTL time.Duration
+	limit    ToolOutputLimit
 
 	mu    sync.Mutex
 	cache map[string]cachedToolRegistry
 }
 
-func NewToolGatewayService(log *slog.Logger, sources []ToolSource) *ToolGatewayService {
+type ToolGatewayOption func(*ToolGatewayService)
+
+func WithToolOutputLimit(limit ToolOutputLimit) ToolGatewayOption {
+	return func(s *ToolGatewayService) {
+		s.limit = limit
+	}
+}
+
+func NewToolGatewayService(log *slog.Logger, sources []ToolSource, opts ...ToolGatewayOption) *ToolGatewayService {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -41,12 +50,18 @@ func NewToolGatewayService(log *slog.Logger, sources []ToolSource) *ToolGatewayS
 			filteredSources = append(filteredSources, source)
 		}
 	}
-	return &ToolGatewayService{
+	svc := &ToolGatewayService{
 		logger:   log.With(slog.String("service", "tool_gateway")),
 		sources:  filteredSources,
 		cacheTTL: defaultToolRegistryCacheTTL,
 		cache:    map[string]cachedToolRegistry{},
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(svc)
+		}
+	}
+	return svc
 }
 
 func (s *ToolGatewayService) ListTools(ctx context.Context, session ToolSessionContext) ([]ToolDescriptor, error) {
@@ -95,7 +110,7 @@ func (s *ToolGatewayService) CallTool(ctx context.Context, session ToolSessionCo
 		}
 		source, _, ok = registry.Lookup(toolName)
 		if !ok {
-			return BuildToolErrorResult("tool not found: " + toolName), nil
+			return s.limitResult(toolName, BuildToolErrorResult("tool not found: "+toolName)), nil
 		}
 	}
 
@@ -106,14 +121,22 @@ func (s *ToolGatewayService) CallTool(ctx context.Context, session ToolSessionCo
 	result, err := source.CallTool(ctx, session, toolName, arguments)
 	if err != nil {
 		if errors.Is(err, ErrToolNotFound) {
-			return BuildToolErrorResult("tool not found: " + toolName), nil
+			return s.limitResult(toolName, BuildToolErrorResult("tool not found: "+toolName)), nil
 		}
-		return BuildToolErrorResult(err.Error()), nil
+		return s.limitResult(toolName, BuildToolErrorResult(err.Error())), nil
 	}
 	if result == nil {
-		return BuildToolSuccessResult(map[string]any{"ok": true}), nil
+		return s.limitResult(toolName, BuildToolSuccessResult(map[string]any{"ok": true})), nil
 	}
-	return result, nil
+	return s.limitResult(toolName, result), nil
+}
+
+func (s *ToolGatewayService) limitResult(toolName string, result map[string]any) map[string]any {
+	limit := ToolOutputLimit{}
+	if s != nil {
+		limit = s.limit
+	}
+	return LimitToolResult(result, "tool result ("+toolName+")", limit)
 }
 
 func (s *ToolGatewayService) getRegistry(ctx context.Context, session ToolSessionContext, force bool) (*ToolRegistry, error) {

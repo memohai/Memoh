@@ -168,14 +168,15 @@ func (s *NativeToolSource) CallTool(ctx context.Context, session mcp.ToolSession
 			arguments = map[string]any{}
 		}
 		if toolName == ToolAskUser().String() {
-			return s.callAskUser(ctx, session, arguments)
+			result, err := s.callAskUser(ctx, session, arguments)
+			return s.limitMCPResult(toolName, result), err
 		}
 		approval, err := s.requireApproval(ctx, session, toolName, arguments)
 		if err != nil {
 			return nil, err
 		}
 		if !approval.approved {
-			return mcp.BuildToolErrorResult(approval.message), nil
+			return s.limitMCPResult(toolName, mcp.BuildToolErrorResult(approval.message)), nil
 		}
 		result, err := tool.Execute(&sdk.ToolExecContext{
 			Context:  ctx,
@@ -185,10 +186,17 @@ func (s *NativeToolSource) CallTool(ctx context.Context, session mcp.ToolSession
 			return nil, err
 		}
 		publicResult := publicNativeToolResult(result)
-		limitedResult := LimitToolOutput(publicResult, "tool result ("+toolName+")", s.limit)
-		return mcp.BuildToolSuccessResult(limitedResult), nil
+		return s.limitMCPResult(toolName, mcp.BuildToolSuccessResult(publicResult)), nil
 	}
 	return nil, mcp.ErrToolNotFound
+}
+
+func (s *NativeToolSource) limitMCPResult(toolName string, result map[string]any) map[string]any {
+	limit := ToolOutputLimit{}
+	if s != nil {
+		limit = s.limit
+	}
+	return mcp.LimitToolResult(result, "tool result ("+toolName+")", limit)
 }
 
 func publicNativeToolResult(result any) any {

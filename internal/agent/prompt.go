@@ -240,7 +240,7 @@ func buildFileSections(files []SystemFile, maxBytes int) string {
 			break
 		}
 		section := formatSystemFile(f)
-		if len(section) > remaining {
+		if textprune.Exceeds(section, remaining, textprune.DefaultMaxLines) {
 			truncated, ok := truncateSystemFileSection(f, remaining)
 			if !ok {
 				break

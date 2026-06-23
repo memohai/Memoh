@@ -683,10 +683,11 @@ func injectACPToolProviders(source *agenttools.NativeToolSource, toolProviders [
 	}
 }
 
-func provideToolGatewayService(log *slog.Logger, fedGateway *handlers.MCPFederationGateway, oauthService *mcp.OAuthService, mcpConnService *mcp.ConnectionService, containerdHandler *handlers.ContainerdHandler, nativeSource *agenttools.NativeToolSource, toolContexts *mcp.ToolSessionContextStore) *mcp.ToolGatewayService {
+func provideToolGatewayService(log *slog.Logger, fedGateway *handlers.MCPFederationGateway, oauthService *mcp.OAuthService, mcpConnService *mcp.ConnectionService, containerdHandler *handlers.ContainerdHandler, nativeSource *agenttools.NativeToolSource, toolContexts *mcp.ToolSessionContextStore, cfg config.Config) *mcp.ToolGatewayService {
 	fedGateway.SetOAuthService(oauthService)
 	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService, mcpfederation.WithReservedToolName(agenttools.IsBuiltInToolName))
-	svc := mcp.NewToolGatewayService(log, []mcp.ToolSource{nativeSource, fedSource})
+	limits := agentLimitsFromConfig(cfg.Agent)
+	svc := mcp.NewToolGatewayService(log, []mcp.ToolSource{nativeSource, fedSource}, mcp.WithToolOutputLimit(limits.ToolOutputLimit()))
 	containerdHandler.SetToolGatewayService(svc)
 	containerdHandler.SetToolSessionContextStore(toolContexts)
 	return svc

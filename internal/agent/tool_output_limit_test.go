@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -84,6 +85,47 @@ func TestAgentGenerateLimitsToolOutputBeforeNextModelCall(t *testing.T) {
 	}
 	if result.Text != "ok" {
 		t.Fatalf("Generate() text = %q, want ok", result.Text)
+	}
+}
+
+func TestAgentExecuteToolLimitsToolError(t *testing.T) {
+	t.Parallel()
+
+	largeErr := "HEAD\n" + strings.Repeat("error detail ", 300) + "\nTAIL"
+	a := New(Deps{Limits: Limits{ToolOutputMaxBytes: 512, ToolOutputMaxLines: 80}})
+	a.SetToolProviders([]agenttools.ToolProvider{
+		staticToolProvider{
+			tools: []sdk.Tool{{
+				Name:       "broken_tool",
+				Parameters: &jsonschema.Schema{Type: "object"},
+				Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
+					return nil, errors.New(largeErr)
+				},
+			}},
+		},
+	})
+
+	result, err := a.ExecuteTool(context.Background(), RunConfig{
+		Model:            &sdk.Model{ID: "mock-model"},
+		SupportsToolCall: true,
+		Identity:         SessionContext{BotID: "bot-1"},
+	}, sdk.ToolCall{
+		ToolCallID: "call-broken",
+		ToolName:   "broken_tool",
+		Input:      map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteTool() error = %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("ExecuteTool() IsError = false, want true")
+	}
+	text, ok := result.Result.(string)
+	if !ok {
+		t.Fatalf("ExecuteTool() Result = %#v, want string", result.Result)
+	}
+	if len(text) >= len(largeErr) || !strings.Contains(text, "[memoh pruned]") {
+		t.Fatalf("tool error was not pruned:\n%s", text)
 	}
 }
 

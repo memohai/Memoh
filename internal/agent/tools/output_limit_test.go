@@ -1,10 +1,14 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
+
+	sdk "github.com/memohai/twilight-ai/sdk"
 )
 
 func TestLimitToolOutputPrunesLargeStringLeaves(t *testing.T) {
@@ -54,5 +58,48 @@ func TestLimitToolOutputFallsBackWhenStructuredJSONStillExceedsLimit(t *testing.
 	structured, ok := result.(map[string]any)
 	if !ok || structured["_memoh_truncated"] != true {
 		t.Fatalf("result = %#v, want fallback truncation marker", result)
+	}
+}
+
+func TestLimitToolOutputPreservesErrorSignalOnFallback(t *testing.T) {
+	t.Parallel()
+
+	result := LimitToolOutput(map[string]any{
+		"isError": true,
+		"content": "HEAD\n" + strings.Repeat("error detail ", 300) + "\nTAIL",
+	}, "error_tool", ToolOutputLimit{MaxBytes: 512, MaxLines: 80})
+
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	if len(raw) > 512 {
+		t.Fatalf("result JSON bytes = %d, want <= 512\n%s", len(raw), raw)
+	}
+	structured, ok := result.(map[string]any)
+	if !ok || structured["isError"] != true {
+		t.Fatalf("result = %#v, want isError preserved", result)
+	}
+}
+
+func TestWrapToolOutputLimitsPrunesErrors(t *testing.T) {
+	t.Parallel()
+
+	wrapped := WrapToolOutputLimits([]sdk.Tool{{
+		Name: "broken_tool",
+		Execute: func(*sdk.ToolExecContext, any) (any, error) {
+			return nil, errors.New("HEAD\n" + strings.Repeat("error detail ", 300) + "\nTAIL")
+		},
+	}}, ToolOutputLimit{MaxBytes: 512, MaxLines: 80})
+
+	_, err := wrapped[0].Execute(&sdk.ToolExecContext{Context: context.Background(), ToolName: "broken_tool"}, nil)
+	if err == nil {
+		t.Fatal("Execute() error = nil, want limited error")
+	}
+	if len(err.Error()) >= len("HEAD\n"+strings.Repeat("error detail ", 300)+"\nTAIL") {
+		t.Fatalf("error was not pruned: %d bytes", len(err.Error()))
+	}
+	if !strings.Contains(err.Error(), "[memoh pruned]") {
+		t.Fatalf("limited error missing prune marker:\n%s", err.Error())
 	}
 }
