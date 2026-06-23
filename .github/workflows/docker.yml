@@ -186,10 +186,10 @@ jobs:
             VITE_AGENT_URL=/agent
           cache-from: |
             type=gha,scope=${{ steps.resolve.outputs.artifact_key }}-${{ matrix.platform }}
-            type=registry,ref=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}:buildcache-${{ steps.resolve.outputs.artifact_key }}-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
+            ${{ env.PUSH == 'true' && format('type=registry,ref={0}/{1}/{2}:buildcache-{3}-{4}', env.REGISTRY, github.repository_owner, matrix.image, steps.resolve.outputs.artifact_key, matrix.platform == 'linux/amd64' && 'amd64' || 'arm64') || '' }}
           cache-to: |
-            type=gha,scope=${{ steps.resolve.outputs.artifact_key }}-${{ matrix.platform }},mode=max
-            ${{ env.PUSH == 'true' && format('type=registry,ref={0}/{1}/{2}:buildcache-{3}-{4},mode=max,compression=zstd', env.REGISTRY, github.repository_owner, matrix.image, steps.resolve.outputs.artifact_key, matrix.platform == 'linux/amd64' && 'amd64' || 'arm64') || '' }}
+            type=gha,scope=${{ steps.resolve.outputs.artifact_key }}-${{ matrix.platform }},mode=max,ignore-error=true
+            ${{ env.PUSH == 'true' && format('type=registry,ref={0}/{1}/{2}:buildcache-{3}-{4},mode=max,compression=zstd,ignore-error=true', env.REGISTRY, github.repository_owner, matrix.image, steps.resolve.outputs.artifact_key, matrix.platform == 'linux/amd64' && 'amd64' || 'arm64') || '' }}
 
       - name: Export digest
         if: steps.should-build.outputs.skip != 'true' && env.PUSH == 'true'

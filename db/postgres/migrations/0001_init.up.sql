@@ -998,8 +998,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_user_grants_unique_user ON bot_user_gr
 CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_user_grants_unique_everyone ON bot_user_grants(bot_id) WHERE subject_type = 'everyone';
 
 -- Memory wiki/graph (canonical memory content source of truth).
-CREATE EXTENSION IF NOT EXISTS vector;
-
 CREATE TABLE IF NOT EXISTS memory_nodes (
     id               TEXT        PRIMARY KEY,
     bot_id           UUID        NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
@@ -1040,18 +1038,3 @@ CREATE TABLE IF NOT EXISTS memory_edges (
 CREATE INDEX IF NOT EXISTS idx_memory_edges_src  ON memory_edges (bot_id, src_node);
 CREATE INDEX IF NOT EXISTS idx_memory_edges_dst  ON memory_edges (bot_id, dst_node);
 CREATE INDEX IF NOT EXISTS idx_memory_edges_rel  ON memory_edges (bot_id, rel);
-
-CREATE TABLE IF NOT EXISTS memory_node_embeddings (
-    bot_id      UUID        NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-    node_id     TEXT        NOT NULL REFERENCES memory_nodes(id) ON DELETE CASCADE,
-    model_id    UUID        NOT NULL REFERENCES models(id) ON DELETE CASCADE,
-    dimensions  INTEGER     NOT NULL,
-    body_hash   TEXT        NOT NULL DEFAULT '',
-    embedding   vector      NOT NULL,
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (bot_id, node_id, model_id),
-    CONSTRAINT memory_node_embeddings_dimensions_check CHECK (dimensions > 0)
-);
-
-CREATE INDEX IF NOT EXISTS idx_memory_node_embeddings_bot_model ON memory_node_embeddings (bot_id, model_id);

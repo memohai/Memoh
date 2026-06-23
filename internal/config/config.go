@@ -26,6 +26,11 @@ const (
 	DefaultPGUser                = "postgres"
 	DefaultPGDatabase            = "memoh"
 	DefaultPGSSLMode             = "disable"
+	DefaultPGVectorHost          = "127.0.0.1"
+	DefaultPGVectorPort          = 5432
+	DefaultPGVectorUser          = "memoh"
+	DefaultPGVectorDatabase      = "memoh_vector"
+	DefaultPGVectorSSLMode       = "disable"
 	DefaultRuntimeDir            = "/opt/memoh/runtime"
 	DefaultWorkspaceImage        = "memohai/workspace:debian"
 	DefaultBaseImage             = DefaultWorkspaceImage
@@ -56,6 +61,7 @@ type Config struct {
 	Local         LocalConfig         `toml:"local"`
 	Workspace     WorkspaceConfig     `toml:"workspace"`
 	Postgres      PostgresConfig      `toml:"postgres"`
+	PGVector      PGVectorConfig      `toml:"pgvector"`
 	Registry      RegistryConfig      `toml:"registry"`
 	Supermarket   SupermarketConfig   `toml:"supermarket"`
 	OAuthClients  OAuthClientsConfig  `toml:"oauth_clients"`
@@ -345,6 +351,47 @@ type PostgresConfig struct {
 	SSLMode  string `toml:"sslmode"`
 }
 
+
+type PGVectorConfig struct {
+	Enabled  bool   `toml:"enabled"`
+	Host     string `toml:"host"`
+	Port     int    `toml:"port"`
+	User     string `toml:"user"`
+	Password string `toml:"password" json:"-"`
+	Database string `toml:"database"`
+	SSLMode  string `toml:"sslmode"`
+}
+
+func (c PGVectorConfig) PostgresConfig() PostgresConfig {
+	host := strings.TrimSpace(c.Host)
+	if host == "" {
+		host = DefaultPGVectorHost
+	}
+	port := c.Port
+	if port == 0 {
+		port = DefaultPGVectorPort
+	}
+	user := strings.TrimSpace(c.User)
+	if user == "" {
+		user = DefaultPGVectorUser
+	}
+	database := strings.TrimSpace(c.Database)
+	if database == "" {
+		database = DefaultPGVectorDatabase
+	}
+	sslMode := strings.TrimSpace(c.SSLMode)
+	if sslMode == "" {
+		sslMode = DefaultPGVectorSSLMode
+	}
+	return PostgresConfig{
+		Host:     host,
+		Port:     port,
+		User:     user,
+		Password: c.Password,
+		Database: database,
+		SSLMode:  sslMode,
+	}
+}
 
 const DefaultProvidersDir = "conf/providers"
 

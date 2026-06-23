@@ -50,7 +50,7 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 					"embedding_model_id": {
 						Type:        "string",
 						Title:       "Embedding Model",
-						Description: "Optional embedding model used to maintain a Postgres pgvector semantic seed index for graph recall. SQLite/local stores remain graph-only.",
+						Description: "Optional embedding model used to maintain the dedicated pgvector semantic seed index for graph recall. SQLite/local stores remain graph-only.",
 						Required:    false,
 					},
 					"context_target_items": {

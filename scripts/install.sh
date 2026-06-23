@@ -50,8 +50,8 @@ else
   WEBHOOK_PUBLIC_BASE_SET=false
 fi
 NETWORK_NAME="${COMPOSE_PROJECT_NAME}_memoh-network"
-PROJECT_CONTAINERS="memoh-postgres memoh-migrate memoh-server memoh-web memoh-webhook-tunnel"
-PROJECT_VOLUMES="${COMPOSE_PROJECT_NAME}_postgres_data ${COMPOSE_PROJECT_NAME}_containerd_data ${COMPOSE_PROJECT_NAME}_memoh_data ${COMPOSE_PROJECT_NAME}_server_cni_state ${COMPOSE_PROJECT_NAME}_openviking_data"
+PROJECT_CONTAINERS="memoh-postgres memoh-pgvector memoh-migrate memoh-server memoh-web memoh-webhook-tunnel"
+PROJECT_VOLUMES="${COMPOSE_PROJECT_NAME}_postgres_data ${COMPOSE_PROJECT_NAME}_pgvector_data ${COMPOSE_PROJECT_NAME}_containerd_data ${COMPOSE_PROJECT_NAME}_memoh_data ${COMPOSE_PROJECT_NAME}_server_cni_state ${COMPOSE_PROJECT_NAME}_openviking_data"
 
 EXISTING_CONFIG_SOURCE=""
 EXISTING_ENV_SOURCE=""
@@ -241,6 +241,34 @@ set_toml_string_value() {
       indent = $0
       sub(/[^[:space:]].*/, "", indent)
       print indent target_key " = \"" target_value "\""
+      next
+    }
+    { print }
+  ' "$file" > "$tmp"; then
+    mv "$tmp" "$file"
+  else
+    rm -f "$tmp"
+    return 1
+  fi
+}
+
+set_toml_bool_value() {
+  file="$1"
+  section="$2"
+  key="$3"
+  value="$4"
+  tmp="${file}.tmp.$$"
+  if TOML_VALUE="$value" awk -v target_section="[$section]" -v target_key="$key" '
+    BEGIN {
+      target_value = ENVIRON["TOML_VALUE"]
+    }
+    /^\[[^]]+\]/ {
+      in_section = ($0 == target_section)
+    }
+    in_section && $0 ~ "^[[:space:]]*" target_key "[[:space:]]*=" {
+      indent = $0
+      sub(/[^[:space:]].*/, "", indent)
+      print indent target_key " = " target_value
       next
     }
     { print }
@@ -747,6 +775,10 @@ else
   set_toml_string_value config.toml "database" "driver" "$DATABASE_DRIVER"
   set_toml_string_value config.toml "container" "backend" "$CONTAINER_BACKEND"
   set_toml_string_value config.toml "postgres" "password" "$PG_PASS"
+  set_toml_string_value config.toml "pgvector" "password" "$PG_PASS"
+  if [ "$DATABASE_DRIVER" = "sqlite" ]; then
+    set_toml_bool_value config.toml "pgvector" "enabled" "false"
+  fi
   if [ "$USE_CN_MIRROR" = true ]; then
     sed -i.bak 's|# registry = "memoh.cn"|registry = "memoh.cn"|' config.toml
   fi

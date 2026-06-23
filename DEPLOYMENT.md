@@ -65,9 +65,10 @@ custom Kata paths, dev startup, production startup, and GitHub runner setup.
 ## Docker Compose Services
 
 The base `docker-compose.yml` contains the standard services: `postgres`,
-`migrate`, `server`, and `web`. The AI agent runs in-process inside `server`.
-PostgreSQL-backed deployments use pgvector for memory semantic search. SQLite
-deployments keep the local graph store only and do not run vector search.
+`pgvector`, `migrate`, `server`, and `web`. The AI agent runs in-process inside
+`server`. PostgreSQL-backed deployments keep the main Postgres service plain and
+use the separate pgvector service for memory semantic search. SQLite deployments
+keep the local graph store only and do not run vector search.
 
 ### SaaS / external providers
 

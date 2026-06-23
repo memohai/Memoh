@@ -8,10 +8,14 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	sdk "github.com/memohai/twilight-ai/sdk"
 	"github.com/pgvector/pgvector-go"
+	pgxvec "github.com/pgvector/pgvector-go/pgx"
 
+	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -24,17 +28,27 @@ const (
 	maxPgvectorInt32     = int64(1<<31 - 1)
 )
 
-type pgvectorQueries interface {
-	UpsertMemoryNodeEmbedding(ctx context.Context, arg dbsqlc.UpsertMemoryNodeEmbeddingParams) error
-	SearchMemoryNodeEmbeddings(ctx context.Context, arg dbsqlc.SearchMemoryNodeEmbeddingsParams) ([]dbsqlc.SearchMemoryNodeEmbeddingsRow, error)
-	CountMemoryNodeEmbeddingsByBotModel(ctx context.Context, arg dbsqlc.CountMemoryNodeEmbeddingsByBotModelParams) (int64, error)
-	DeleteMemoryNodeEmbeddings(ctx context.Context, arg dbsqlc.DeleteMemoryNodeEmbeddingsParams) error
-	DeleteAllMemoryNodeEmbeddingsByBot(ctx context.Context, botID pgtype.UUID) error
-	CheckMemoryNodeEmbeddingsStore(ctx context.Context) (bool, error)
-}
+const pgvectorSchemaSQL = `
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS memory_node_embeddings (
+    bot_id      UUID        NOT NULL,
+    node_id     TEXT        NOT NULL,
+    model_id    UUID        NOT NULL,
+    dimensions  INTEGER     NOT NULL,
+    body_hash   TEXT        NOT NULL DEFAULT '',
+    embedding   vector      NOT NULL,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (bot_id, node_id, model_id),
+    CONSTRAINT memory_node_embeddings_dimensions_check CHECK (dimensions > 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_node_embeddings_bot_model ON memory_node_embeddings (bot_id, model_id);
+`
 
 type pgvectorIndex struct {
-	queries    pgvectorQueries
+	pool       *pgxpool.Pool
 	lookup     dbstore.Queries
 	embedModel *sdk.EmbeddingModel
 	model      embeddingModelSpec
@@ -51,7 +65,7 @@ type embeddingModelSpec struct {
 	dimensions int
 }
 
-func newPGVectorIndex(logger *slog.Logger, providerConfig map[string]any, queries dbstore.Queries) (*pgvectorIndex, error) {
+func newPGVectorIndex(logger *slog.Logger, providerConfig map[string]any, queries dbstore.Queries, vectorConfig config.PGVectorConfig) (*pgvectorIndex, error) {
 	modelRef := strings.TrimSpace(adapters.StringFromConfig(providerConfig, "embedding_model_id"))
 	if modelRef == "" {
 		return nil, nil
@@ -59,23 +73,40 @@ func newPGVectorIndex(logger *slog.Logger, providerConfig map[string]any, querie
 	if logger == nil {
 		logger = slog.Default()
 	}
-	pgQueries, ok := queries.(pgvectorQueries)
-	if !ok {
-		logger.Debug("graph: pgvector semantic index disabled for non-postgres store", slog.String("embedding_model_id", modelRef))
+	if !vectorConfig.Enabled {
+		logger.Debug("graph: pgvector semantic index disabled by config", slog.String("embedding_model_id", modelRef))
+		return nil, nil
+	}
+	if queries == nil {
+		logger.Debug("graph: pgvector semantic index disabled without relational query store", slog.String("embedding_model_id", modelRef))
 		return nil, nil
 	}
 	spec, err := resolveEmbeddingModel(context.Background(), queries, modelRef)
 	if err != nil {
 		return nil, err
 	}
-	return &pgvectorIndex{
-		queries:    pgQueries,
+	poolCfg, err := pgxpool.ParseConfig(db.DSN(vectorConfig.PostgresConfig()))
+	if err != nil {
+		return nil, fmt.Errorf("pgvector semantic index: parse dsn: %w", err)
+	}
+	poolCfg.AfterConnect = pgxvec.RegisterTypes
+	pool, err := pgxpool.NewWithConfig(context.Background(), poolCfg)
+	if err != nil {
+		return nil, fmt.Errorf("pgvector semantic index: connect: %w", err)
+	}
+	index := &pgvectorIndex{
+		pool:       pool,
 		lookup:     queries,
 		embedModel: models.NewSDKEmbeddingModel(spec.clientType, spec.baseURL, spec.apiKey, spec.modelID, semanticEmbedTimeout, nil),
 		model:      spec,
 		modelRef:   modelRef,
 		logger:     logger,
-	}, nil
+	}
+	if err := index.ensureStore(context.Background()); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	return index, nil
 }
 
 func (r *pgvectorIndex) Name() string {
@@ -83,6 +114,16 @@ func (r *pgvectorIndex) Name() string {
 		return ""
 	}
 	return "pgvector"
+}
+
+func (r *pgvectorIndex) ensureStore(ctx context.Context) error {
+	if r == nil || r.pool == nil {
+		return nil
+	}
+	if _, err := r.pool.Exec(ctx, pgvectorSchemaSQL); err != nil {
+		return fmt.Errorf("pgvector semantic index: ensure store: %w", err)
+	}
+	return nil
 }
 
 func (r *pgvectorIndex) ensureEmbeddingEnabled(ctx context.Context) error {
@@ -130,7 +171,7 @@ func (r *pgvectorIndex) embedText(ctx context.Context, text string) ([]float32, 
 }
 
 func (r *pgvectorIndex) Upsert(ctx context.Context, botID, nodeID, body, hash string) error {
-	if r == nil || r.queries == nil || strings.TrimSpace(body) == "" {
+	if r == nil || r.pool == nil || strings.TrimSpace(body) == "" {
 		return nil
 	}
 	botUUID, err := db.ParseUUID(botID)
@@ -145,18 +186,25 @@ func (r *pgvectorIndex) Upsert(ctx context.Context, botID, nodeID, body, hash st
 	if err != nil {
 		return err
 	}
-	return r.queries.UpsertMemoryNodeEmbedding(ctx, dbsqlc.UpsertMemoryNodeEmbeddingParams{
-		BotID:      botUUID,
-		NodeID:     strings.TrimSpace(nodeID),
-		ModelID:    r.model.uuid,
-		Dimensions: dimensions,
-		BodyHash:   strings.TrimSpace(hash),
-		Embedding:  pgvector.NewVector(vec),
-	})
+	_, err = r.pool.Exec(ctx, `
+INSERT INTO memory_node_embeddings (
+  bot_id, node_id, model_id, dimensions, body_hash, embedding
+)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (bot_id, node_id, model_id) DO UPDATE SET
+  dimensions = EXCLUDED.dimensions,
+  body_hash = EXCLUDED.body_hash,
+  embedding = EXCLUDED.embedding,
+  updated_at = now();
+`, botUUID, strings.TrimSpace(nodeID), r.model.uuid, dimensions, strings.TrimSpace(hash), pgvector.NewVector(vec))
+	if err != nil {
+		return fmt.Errorf("pgvector semantic index: upsert: %w", err)
+	}
+	return nil
 }
 
 func (r *pgvectorIndex) SearchSeeds(ctx context.Context, botID, query string, limit int) (map[string]float64, error) {
-	if r == nil || r.queries == nil || strings.TrimSpace(query) == "" || limit <= 0 {
+	if r == nil || r.pool == nil || strings.TrimSpace(query) == "" || limit <= 0 {
 		return nil, nil
 	}
 	botUUID, err := db.ParseUUID(botID)
@@ -171,22 +219,35 @@ func (r *pgvectorIndex) SearchSeeds(ctx context.Context, botID, query string, li
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.queries.SearchMemoryNodeEmbeddings(ctx, dbsqlc.SearchMemoryNodeEmbeddingsParams{
-		QueryEmbedding: pgvector.NewVector(vec),
-		BotID:          botUUID,
-		ModelID:        r.model.uuid,
-		RowLimit:       rowLimit,
-	})
+	rows, err := r.pool.Query(ctx, `
+SELECT
+  node_id,
+  CAST(1.0 - (embedding <=> $1::vector) AS double precision) AS score
+FROM memory_node_embeddings
+WHERE bot_id = $2
+  AND model_id = $3
+ORDER BY embedding <=> $1::vector
+LIMIT $4;
+`, pgvector.NewVector(vec), botUUID, r.model.uuid, rowLimit)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("pgvector semantic index: search: %w", err)
 	}
-	seeds := make(map[string]float64, len(rows))
-	for _, row := range rows {
-		nodeID := strings.TrimSpace(row.NodeID)
-		if nodeID == "" {
-			continue
+	defer rows.Close()
+
+	seeds := map[string]float64{}
+	for rows.Next() {
+		var nodeID string
+		var score float64
+		if err := rows.Scan(&nodeID, &score); err != nil {
+			return nil, fmt.Errorf("pgvector semantic index: scan search row: %w", err)
 		}
-		seeds[nodeID] = row.Score
+		nodeID = strings.TrimSpace(nodeID)
+		if nodeID != "" {
+			seeds[nodeID] = score
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("pgvector semantic index: iterate search rows: %w", err)
 	}
 	return seeds, nil
 }
@@ -199,7 +260,7 @@ func checkedPgvectorInt32(name string, n int) (int32, error) {
 }
 
 func (r *pgvectorIndex) DeleteNodes(ctx context.Context, botID string, nodeIDs []string) error {
-	if r == nil || r.queries == nil || len(nodeIDs) == 0 {
+	if r == nil || r.pool == nil || len(nodeIDs) == 0 {
 		return nil
 	}
 	botUUID, err := db.ParseUUID(botID)
@@ -216,37 +277,51 @@ func (r *pgvectorIndex) DeleteNodes(ctx context.Context, botID string, nodeIDs [
 	if len(ids) == 0 {
 		return nil
 	}
-	return r.queries.DeleteMemoryNodeEmbeddings(ctx, dbsqlc.DeleteMemoryNodeEmbeddingsParams{
-		BotID:   botUUID,
-		NodeIds: ids,
-	})
+	_, err = r.pool.Exec(ctx, `
+DELETE FROM memory_node_embeddings
+WHERE bot_id = $1
+  AND node_id = ANY($2::text[]);
+`, botUUID, ids)
+	if err != nil {
+		return fmt.Errorf("pgvector semantic index: delete nodes: %w", err)
+	}
+	return nil
 }
 
 func (r *pgvectorIndex) DeleteBot(ctx context.Context, botID string) error {
-	if r == nil || r.queries == nil {
+	if r == nil || r.pool == nil {
 		return nil
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
 		return err
 	}
-	return r.queries.DeleteAllMemoryNodeEmbeddingsByBot(ctx, botUUID)
+	_, err = r.pool.Exec(ctx, `
+DELETE FROM memory_node_embeddings
+WHERE bot_id = $1;
+`, botUUID)
+	if err != nil {
+		return fmt.Errorf("pgvector semantic index: delete bot: %w", err)
+	}
+	return nil
 }
 
 func (r *pgvectorIndex) Count(ctx context.Context, botID string) (int, error) {
-	if r == nil || r.queries == nil {
+	if r == nil || r.pool == nil {
 		return 0, nil
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
 		return 0, err
 	}
-	count, err := r.queries.CountMemoryNodeEmbeddingsByBotModel(ctx, dbsqlc.CountMemoryNodeEmbeddingsByBotModelParams{
-		BotID:   botUUID,
-		ModelID: r.model.uuid,
-	})
-	if err != nil {
-		return 0, err
+	var count int64
+	if err := r.pool.QueryRow(ctx, `
+SELECT COUNT(*)
+FROM memory_node_embeddings
+WHERE bot_id = $1
+  AND model_id = $2;
+`, botUUID, r.model.uuid).Scan(&count); err != nil {
+		return 0, fmt.Errorf("pgvector semantic index: count: %w", err)
 	}
 	if count > int64(^uint(0)>>1) {
 		return 0, fmt.Errorf("pgvector semantic index: count overflow: %d", count)
@@ -255,14 +330,27 @@ func (r *pgvectorIndex) Count(ctx context.Context, botID string) (int, error) {
 }
 
 func (r *pgvectorIndex) Health(ctx context.Context) error {
-	if r == nil || r.queries == nil {
+	if r == nil || r.pool == nil {
 		return nil
 	}
 	if err := r.ensureEmbeddingEnabled(ctx); err != nil {
 		return err
 	}
-	_, err := r.queries.CheckMemoryNodeEmbeddingsStore(ctx)
-	return err
+	if err := r.ensureStore(ctx); err != nil {
+		return err
+	}
+	var ok bool
+	err := r.pool.QueryRow(ctx, `
+SELECT EXISTS (
+  SELECT 1
+  FROM memory_node_embeddings
+  LIMIT 1
+);
+`).Scan(&ok)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("pgvector semantic index: health: %w", err)
+	}
+	return nil
 }
 
 func float64sToFloat32s(in []float64) []float32 {
