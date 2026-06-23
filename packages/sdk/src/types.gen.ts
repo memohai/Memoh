@@ -694,7 +694,7 @@ export type ChannelAction = {
     /**
      * Row groups buttons into keyboard rows for renderers that support grids
      * (e.g. Telegram inline keyboards). Buttons sharing a Row render together;
-     * rows appear in ascending first-seen order. Renderers without grid support
+     * rows appear in ascending numeric order. Renderers without grid support
      * ignore this field. 0 is the default (single row, prior behavior).
      */
     row?: number;
@@ -752,6 +752,7 @@ export type ChannelChannelCapabilities = {
     text?: boolean;
     threads?: boolean;
     unsend?: boolean;
+    url_buttons?: boolean;
 };
 
 export type ChannelChannelConfig = {
@@ -844,9 +845,9 @@ export type ChannelMessagePart = {
     url?: string;
 };
 
-export type ChannelMessagePartType = 'text' | 'link' | 'code_block' | 'mention' | 'emoji';
+export type ChannelMessagePartType = 'text' | 'link' | 'code_block' | 'mention' | 'emoji' | 'heading' | 'blockquote' | 'list_item';
 
-export type ChannelMessageTextStyle = 'bold' | 'italic' | 'strikethrough' | 'code';
+export type ChannelMessageTextStyle = 'bold' | 'italic' | 'strikethrough' | 'code' | 'underline' | 'spoiler';
 
 export type ChannelReplyRef = {
     attachments?: Array<ChannelAttachment>;
@@ -2310,6 +2311,170 @@ export type ProvidersUpdateRequest = {
         [key: string]: unknown;
     };
     name?: string;
+};
+
+export type RuntimediagnosticsAcpAgentDiagnostic = {
+    agent_id?: string;
+    auth?: RuntimediagnosticsAcpAuthDiagnostic;
+    cli?: RuntimediagnosticsAcpcliDiagnostic;
+    code?: string;
+    detail?: string;
+    display_name?: string;
+    enabled?: boolean;
+    evidence?: {
+        [key: string]: unknown;
+    };
+    label?: string;
+    last_error?: RuntimediagnosticsRuntimeEventSummary;
+    model?: RuntimediagnosticsAcpModelDiagnostic;
+    next_action?: string;
+    profile?: RuntimediagnosticsAcpProfileDiagnostic;
+    session_resume?: RuntimediagnosticsAcpSessionResumeDiagnostic;
+    setup_mode?: string;
+    state?: RuntimediagnosticsState;
+    workspace_backend?: string;
+};
+
+export type RuntimediagnosticsAcpAuthDiagnostic = {
+    api_key_present?: boolean;
+    missing_fields?: Array<string>;
+    mode?: string;
+    oauth_present?: boolean;
+    required_fields?: Array<string>;
+    self_managed?: boolean;
+    source?: string;
+    warning_code?: string;
+    warning_detail?: string;
+};
+
+export type RuntimediagnosticsAcpcliDiagnostic = {
+    available?: boolean;
+    checks?: Array<string>;
+    configured_args?: Array<string>;
+    configured_command?: string;
+    effective_args?: Array<string>;
+    effective_command?: string;
+    error?: string;
+    resolved_path?: string;
+    source?: string;
+};
+
+export type RuntimediagnosticsAcpModelDiagnostic = {
+    available_models?: Array<AcpclientModelInfo>;
+    current_model_id?: string;
+    default_model_id?: string;
+    detail?: string;
+    state?: RuntimediagnosticsAcpModelState;
+};
+
+export type RuntimediagnosticsAcpModelState = 'known' | 'unknown' | 'unsupported' | 'unknown_until_runtime_start';
+
+export type RuntimediagnosticsAcpProfileDiagnostic = {
+    backend_supported?: boolean;
+    registered?: boolean;
+    session_config_pins?: {
+        [key: string]: string;
+    };
+    session_mode_pin?: string;
+};
+
+export type RuntimediagnosticsAcpSessionResumeDiagnostic = {
+    acp_session_id?: string;
+    detail?: string;
+    runtime_id?: string;
+    session_id?: string;
+    state?: RuntimediagnosticsAcpSessionResumeState;
+};
+
+export type RuntimediagnosticsAcpSessionResumeState = 'warm_resumable' | 'cold_start_required' | 'no_acp_session' | 'disabled' | 'blocked';
+
+export type RuntimediagnosticsContainerDiagnostic = {
+    code?: string;
+    container_id?: string;
+    detail?: string;
+    evidence?: {
+        [key: string]: unknown;
+    };
+    exists?: boolean;
+    label?: string;
+    metrics_supported?: boolean;
+    metrics_unsupported_reason?: string;
+    next_action?: string;
+    runtime_backend?: string;
+    sampled_at?: string;
+    state?: RuntimediagnosticsState;
+    status?: string;
+    task_running?: boolean;
+    workspace_backend?: string;
+};
+
+export type RuntimediagnosticsDisplayDiagnostic = {
+    a11y_available?: boolean;
+    available?: boolean;
+    browser_available?: boolean;
+    code?: string;
+    desktop_available?: boolean;
+    detail?: string;
+    enabled?: boolean;
+    encoder?: string;
+    encoder_available?: boolean;
+    evidence?: {
+        [key: string]: unknown;
+    };
+    label?: string;
+    next_action?: string;
+    prepare_supported?: boolean;
+    prepare_system?: string;
+    running?: boolean;
+    state?: RuntimediagnosticsState;
+    toolkit_available?: boolean;
+    transport?: string;
+    unavailable_reason?: string;
+};
+
+export type RuntimediagnosticsResponse = {
+    acp_agents?: Array<RuntimediagnosticsAcpAgentDiagnostic>;
+    checked_at?: string;
+    container?: RuntimediagnosticsContainerDiagnostic;
+    display?: RuntimediagnosticsDisplayDiagnostic;
+    overall_state?: RuntimediagnosticsState;
+    recent_events?: Array<RuntimediagnosticsRuntimeEventSummary>;
+    summary?: string;
+    workspace?: RuntimediagnosticsWorkspaceDiagnostic;
+};
+
+export type RuntimediagnosticsRuntimeEventSummary = {
+    agent_id?: string;
+    bot_id?: string;
+    code?: string;
+    created_at?: string;
+    id?: string;
+    message?: string;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    phase?: string;
+    runtime_id?: string;
+    scope?: string;
+    session_id?: string;
+    severity?: string;
+};
+
+export type RuntimediagnosticsState = 'ok' | 'warn' | 'error' | 'disabled' | 'unknown' | 'not_applicable';
+
+export type RuntimediagnosticsWorkspaceDiagnostic = {
+    backend?: string;
+    bridge_reachable?: boolean;
+    code?: string;
+    default_workdir?: string;
+    detail?: string;
+    evidence?: {
+        [key: string]: unknown;
+    };
+    label?: string;
+    mcp_reachable?: boolean;
+    next_action?: string;
+    state?: RuntimediagnosticsState;
 };
 
 export type ScheduleCreateRequest = {
@@ -7125,6 +7290,40 @@ export type PostBotsByBotIdPluginsByIdUninstallResponses = {
 };
 
 export type PostBotsByBotIdPluginsByIdUninstallResponse = PostBotsByBotIdPluginsByIdUninstallResponses[keyof PostBotsByBotIdPluginsByIdUninstallResponses];
+
+export type GetBotsByBotIdRuntimeDiagnosticsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/runtime-diagnostics';
+};
+
+export type GetBotsByBotIdRuntimeDiagnosticsErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdRuntimeDiagnosticsError = GetBotsByBotIdRuntimeDiagnosticsErrors[keyof GetBotsByBotIdRuntimeDiagnosticsErrors];
+
+export type GetBotsByBotIdRuntimeDiagnosticsResponses = {
+    /**
+     * OK
+     */
+    200: RuntimediagnosticsResponse;
+};
+
+export type GetBotsByBotIdRuntimeDiagnosticsResponse = GetBotsByBotIdRuntimeDiagnosticsResponses[keyof GetBotsByBotIdRuntimeDiagnosticsResponses];
 
 export type GetBotsByBotIdScheduleData = {
     body?: never;

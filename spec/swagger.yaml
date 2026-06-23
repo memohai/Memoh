@@ -1157,7 +1157,7 @@ definitions:
         description: |-
           Row groups buttons into keyboard rows for renderers that support grids
           (e.g. Telegram inline keyboards). Buttons sharing a Row render together;
-          rows appear in ascending first-seen order. Renderers without grid support
+          rows appear in ascending numeric order. Renderers without grid support
           ignore this field. 0 is the default (single row, prior behavior).
         type: integer
       type:
@@ -1257,6 +1257,8 @@ definitions:
       threads:
         type: boolean
       unsend:
+        type: boolean
+      url_buttons:
         type: boolean
     type: object
   channel.ChannelConfig:
@@ -1452,6 +1454,9 @@ definitions:
     - code_block
     - mention
     - emoji
+    - heading
+    - blockquote
+    - list_item
     type: string
     x-enum-varnames:
     - MessagePartText
@@ -1459,18 +1464,25 @@ definitions:
     - MessagePartCodeBlock
     - MessagePartMention
     - MessagePartEmoji
+    - MessagePartHeading
+    - MessagePartBlockquote
+    - MessagePartListItem
   channel.MessageTextStyle:
     enum:
     - bold
     - italic
     - strikethrough
     - code
+    - underline
+    - spoiler
     type: string
     x-enum-varnames:
     - MessageStyleBold
     - MessageStyleItalic
     - MessageStyleStrikethrough
     - MessageStyleCode
+    - MessageStyleUnderline
+    - MessageStyleSpoiler
   channel.ReplyRef:
     properties:
       attachments:
@@ -3850,6 +3862,330 @@ definitions:
         type: object
       name:
         type: string
+    type: object
+  runtimediagnostics.ACPAgentDiagnostic:
+    properties:
+      agent_id:
+        type: string
+      auth:
+        $ref: '#/definitions/runtimediagnostics.ACPAuthDiagnostic'
+      cli:
+        $ref: '#/definitions/runtimediagnostics.ACPCLIDiagnostic'
+      code:
+        type: string
+      detail:
+        type: string
+      display_name:
+        type: string
+      enabled:
+        type: boolean
+      evidence:
+        additionalProperties: {}
+        type: object
+      label:
+        type: string
+      last_error:
+        $ref: '#/definitions/runtimediagnostics.RuntimeEventSummary'
+      model:
+        $ref: '#/definitions/runtimediagnostics.ACPModelDiagnostic'
+      next_action:
+        type: string
+      profile:
+        $ref: '#/definitions/runtimediagnostics.ACPProfileDiagnostic'
+      session_resume:
+        $ref: '#/definitions/runtimediagnostics.ACPSessionResumeDiagnostic'
+      setup_mode:
+        type: string
+      state:
+        $ref: '#/definitions/runtimediagnostics.State'
+      workspace_backend:
+        type: string
+    type: object
+  runtimediagnostics.ACPAuthDiagnostic:
+    properties:
+      api_key_present:
+        type: boolean
+      missing_fields:
+        items:
+          type: string
+        type: array
+      mode:
+        type: string
+      oauth_present:
+        type: boolean
+      required_fields:
+        items:
+          type: string
+        type: array
+      self_managed:
+        type: boolean
+      source:
+        type: string
+      warning_code:
+        type: string
+      warning_detail:
+        type: string
+    type: object
+  runtimediagnostics.ACPCLIDiagnostic:
+    properties:
+      available:
+        type: boolean
+      checks:
+        items:
+          type: string
+        type: array
+      configured_args:
+        items:
+          type: string
+        type: array
+      configured_command:
+        type: string
+      effective_args:
+        items:
+          type: string
+        type: array
+      effective_command:
+        type: string
+      error:
+        type: string
+      resolved_path:
+        type: string
+      source:
+        type: string
+    type: object
+  runtimediagnostics.ACPModelDiagnostic:
+    properties:
+      available_models:
+        items:
+          $ref: '#/definitions/acpclient.ModelInfo'
+        type: array
+      current_model_id:
+        type: string
+      default_model_id:
+        type: string
+      detail:
+        type: string
+      state:
+        $ref: '#/definitions/runtimediagnostics.ACPModelState'
+    type: object
+  runtimediagnostics.ACPModelState:
+    enum:
+    - known
+    - unknown
+    - unsupported
+    - unknown_until_runtime_start
+    type: string
+    x-enum-varnames:
+    - ACPModelStateKnown
+    - ACPModelStateUnknown
+    - ACPModelStateUnsupported
+    - ACPModelStateUnknownUntilRuntimeStart
+  runtimediagnostics.ACPProfileDiagnostic:
+    properties:
+      backend_supported:
+        type: boolean
+      registered:
+        type: boolean
+      session_config_pins:
+        additionalProperties:
+          type: string
+        type: object
+      session_mode_pin:
+        type: string
+    type: object
+  runtimediagnostics.ACPSessionResumeDiagnostic:
+    properties:
+      acp_session_id:
+        type: string
+      detail:
+        type: string
+      runtime_id:
+        type: string
+      session_id:
+        type: string
+      state:
+        $ref: '#/definitions/runtimediagnostics.ACPSessionResumeState'
+    type: object
+  runtimediagnostics.ACPSessionResumeState:
+    enum:
+    - warm_resumable
+    - cold_start_required
+    - no_acp_session
+    - disabled
+    - blocked
+    type: string
+    x-enum-varnames:
+    - ACPSessionResumeStateWarmResumable
+    - ACPSessionResumeStateColdStartRequired
+    - ACPSessionResumeStateNoACPSession
+    - ACPSessionResumeStateDisabled
+    - ACPSessionResumeStateBlocked
+  runtimediagnostics.ContainerDiagnostic:
+    properties:
+      code:
+        type: string
+      container_id:
+        type: string
+      detail:
+        type: string
+      evidence:
+        additionalProperties: {}
+        type: object
+      exists:
+        type: boolean
+      label:
+        type: string
+      metrics_supported:
+        type: boolean
+      metrics_unsupported_reason:
+        type: string
+      next_action:
+        type: string
+      runtime_backend:
+        type: string
+      sampled_at:
+        type: string
+      state:
+        $ref: '#/definitions/runtimediagnostics.State'
+      status:
+        type: string
+      task_running:
+        type: boolean
+      workspace_backend:
+        type: string
+    type: object
+  runtimediagnostics.DisplayDiagnostic:
+    properties:
+      a11y_available:
+        type: boolean
+      available:
+        type: boolean
+      browser_available:
+        type: boolean
+      code:
+        type: string
+      desktop_available:
+        type: boolean
+      detail:
+        type: string
+      enabled:
+        type: boolean
+      encoder:
+        type: string
+      encoder_available:
+        type: boolean
+      evidence:
+        additionalProperties: {}
+        type: object
+      label:
+        type: string
+      next_action:
+        type: string
+      prepare_supported:
+        type: boolean
+      prepare_system:
+        type: string
+      running:
+        type: boolean
+      state:
+        $ref: '#/definitions/runtimediagnostics.State'
+      toolkit_available:
+        type: boolean
+      transport:
+        type: string
+      unavailable_reason:
+        type: string
+    type: object
+  runtimediagnostics.Response:
+    properties:
+      acp_agents:
+        items:
+          $ref: '#/definitions/runtimediagnostics.ACPAgentDiagnostic'
+        type: array
+      checked_at:
+        type: string
+      container:
+        $ref: '#/definitions/runtimediagnostics.ContainerDiagnostic'
+      display:
+        $ref: '#/definitions/runtimediagnostics.DisplayDiagnostic'
+      overall_state:
+        $ref: '#/definitions/runtimediagnostics.State'
+      recent_events:
+        items:
+          $ref: '#/definitions/runtimediagnostics.RuntimeEventSummary'
+        type: array
+      summary:
+        type: string
+      workspace:
+        $ref: '#/definitions/runtimediagnostics.WorkspaceDiagnostic'
+    type: object
+  runtimediagnostics.RuntimeEventSummary:
+    properties:
+      agent_id:
+        type: string
+      bot_id:
+        type: string
+      code:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      message:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      phase:
+        type: string
+      runtime_id:
+        type: string
+      scope:
+        type: string
+      session_id:
+        type: string
+      severity:
+        type: string
+    type: object
+  runtimediagnostics.State:
+    enum:
+    - ok
+    - warn
+    - error
+    - disabled
+    - unknown
+    - not_applicable
+    type: string
+    x-enum-varnames:
+    - StateOK
+    - StateWarn
+    - StateError
+    - StateDisabled
+    - StateUnknown
+    - StateNotApplicable
+  runtimediagnostics.WorkspaceDiagnostic:
+    properties:
+      backend:
+        type: string
+      bridge_reachable:
+        type: boolean
+      code:
+        type: string
+      default_workdir:
+        type: string
+      detail:
+        type: string
+      evidence:
+        additionalProperties: {}
+        type: object
+      label:
+        type: string
+      mcp_reachable:
+        type: boolean
+      next_action:
+        type: string
+      state:
+        $ref: '#/definitions/runtimediagnostics.State'
     type: object
   schedule.CreateRequest:
     properties:
@@ -7881,6 +8217,32 @@ paths:
       summary: Uninstall bot plugin
       tags:
       - plugins
+  /bots/{bot_id}/runtime-diagnostics:
+    get:
+      description: Returns read-only ACP, workspace, container, and display runtime
+        diagnostics for a bot.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/runtimediagnostics.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get bot runtime diagnostics
+      tags:
+      - bots
   /bots/{bot_id}/schedule:
     get:
       description: List schedules for current user

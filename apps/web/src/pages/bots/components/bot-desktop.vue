@@ -4,6 +4,13 @@
     :title="$t('bots.desktop.title')"
   >
     <div class="space-y-8">
+      <RuntimeDiagnosticsPanel
+        :bot-id="props.botId"
+        scope="workspace"
+        :jump-targets="[{ label: $t('bots.runtimeDiagnostics.jumpWorkspace'), target: 'container' }]"
+        @jump="handleDiagnosticsJump"
+      />
+
       <!-- No section title: the page heading already says "Desktop", so a section
            titled "Desktop" over a row labelled "Desktop" would stack the same word
            three deep. The toggle's own label carries it. -->
@@ -61,9 +68,11 @@ import {
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import DisplayPane from '@/pages/home/components/display-pane.vue'
+import RuntimeDiagnosticsPanel from './runtime-diagnostics-panel.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
 import PageShell from '@/components/page-shell/index.vue'
+import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 
 const props = defineProps<{
   botId: string
@@ -71,6 +80,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
+const activeTab = useSyncedQueryParam('tab', 'overview')
 
 const settingsForm = reactive({
   display_enabled: false,
@@ -128,6 +138,10 @@ async function handleToggleDisplay(enabled: boolean) {
     settingsForm.display_enabled = previous
     toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
   }
+}
+
+function handleDiagnosticsJump(target: string) {
+  activeTab.value = target
 }
 
 const info = computed<HandlersDisplayInfoResponse>(() => displayInfo.value ?? {})

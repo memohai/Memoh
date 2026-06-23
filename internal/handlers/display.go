@@ -253,14 +253,17 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 	c.Response().Header().Set(echo.HeaderConnection, "keep-alive")
 	c.Response().WriteHeader(http.StatusOK)
 	writer := c.Response().Writer
+	ctx := c.Request().Context()
 	send := func(payload displayPrepareStreamEvent) {
 		_ = writeSSEJSON(writer, flusher, payload)
 	}
 	sendError := func(step, message string) {
 		send(displayPrepareStreamEvent{Type: "error", Step: step, Message: message})
+		h.recordRuntimeDiagnosticFailure(ctx, botID, "display", "prepare", "display_prepare_failed", errors.New(message), map[string]any{
+			"step": step,
+		})
 	}
 
-	ctx := c.Request().Context()
 	if h.manager == nil {
 		sendError("checking", "manager not configured")
 		return nil
