@@ -494,6 +494,13 @@ type session struct {
 	udp   *net.UDPConn
 	cmd   *exec.Cmd
 
+	// firstPacket is closed by forwardRTP once the GStreamer pipeline emits
+	// its first RTP packet, so session.start can wait for real output rather
+	// than a fixed 150ms guess (which returned success before the encoder had
+	// produced any frames — the peer connected but the track stayed empty).
+	firstPacket    chan struct{}
+	firstPacketOnce sync.Once
+
 	tracksMu sync.RWMutex
 	tracks   map[string]*webrtc.TrackLocalStaticRTP
 	input    *rfbInputClient
@@ -523,14 +530,15 @@ type peerSession struct {
 func newSession(service *Service, botID, gstLaunch, codec string) *session {
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is stored on the session and called when the display session stops.
 	return &session{
-		service:   service,
-		botID:     botID,
-		gstLaunch: gstLaunch,
-		codec:     codec,
-		ctx:       ctx,
-		cancel:    cancel,
-		tracks:    make(map[string]*webrtc.TrackLocalStaticRTP),
-		peers:     make(map[string]*peerSession),
+		service:     service,
+		botID:       botID,
+		gstLaunch:   gstLaunch,
+		codec:       codec,
+		ctx:         ctx,
+		cancel:      cancel,
+		tracks:      make(map[string]*webrtc.TrackLocalStaticRTP),
+		peers:       make(map[string]*peerSession),
+		firstPacket: make(chan struct{}),
 	}
 }
 
@@ -626,11 +634,17 @@ func (s *session) start(ctx context.Context) error {
 			return fmt.Errorf("%w: display pipeline exited during startup: %w", ErrEncoderUnavailable, err)
 		}
 		return fmt.Errorf("%w: display pipeline exited during startup", ErrEncoderUnavailable)
-	case <-time.After(150 * time.Millisecond):
+	case <-s.firstPacket:
+		// GStreamer emitted its first RTP packet — the pipeline is actually
+		// producing frames, not just running. Returning here (instead of after
+		// a fixed 150ms) means the peer only connects once frames are flowing,
+		// so the <video> element receives data immediately on connect.
 		if s.closed() {
 			return fmt.Errorf("%w: display pipeline exited during startup", ErrEncoderUnavailable)
 		}
 		return nil
+	case <-time.After(10 * time.Second):
+		return fmt.Errorf("%w: display pipeline produced no frames within 10s", ErrEncoderUnavailable)
 	}
 }
 
@@ -1049,6 +1063,10 @@ func (s *session) forwardRTP() {
 			s.service.logger.Debug("display RTP packet dropped", slog.String("bot_id", s.botID), slog.Any("error", err))
 			continue
 		}
+
+		// Signal that the GStreamer pipeline has produced its first frame so
+		// session.start can return success based on real output, not a timer.
+		s.firstPacketOnce.Do(func() { close(s.firstPacket) })
 
 		s.tracksMu.RLock()
 		for _, track := range s.tracks {
