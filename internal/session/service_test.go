@@ -384,6 +384,25 @@ func TestListByBotPagedForwardsParams(t *testing.T) {
 	}
 }
 
+func TestListByBotPagedWithFilterForwardsParentSessionID(t *testing.T) {
+	stub := &pagedQueriesStub{}
+	svc := NewService(nil, stub, nil)
+	botID := "11111111-1111-1111-1111-111111111111"
+	parentID := "22222222-2222-2222-2222-222222222222"
+
+	if _, err := svc.ListByBotPagedWithFilter(context.Background(), botID, []string{TypeSubagent}, SessionCursor{}, 25, ListFilter{
+		ParentSessionID: parentID,
+	}); err != nil {
+		t.Fatalf("ListByBotPagedWithFilter: %v", err)
+	}
+	if !stub.pagedArg.UseParentSession {
+		t.Fatalf("UseParentSession should be true when a parent session filter is supplied")
+	}
+	if stub.pagedArg.ParentSessionID.String() != parentID {
+		t.Fatalf("ParentSessionID = %s, want %s", stub.pagedArg.ParentSessionID.String(), parentID)
+	}
+}
+
 func TestListByBotPagedZeroCursorSkipsCursorFilter(t *testing.T) {
 	stub := &pagedQueriesStub{}
 	svc := NewService(nil, stub, nil)

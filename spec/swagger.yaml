@@ -8112,9 +8112,13 @@ paths:
         required: true
         type: string
       - description: Comma-separated session types to include. Defaults to user-facing
-          types (chat,discuss,acp_agent).
+          types (chat,discuss,acp_agent), or subagent when parent_session_id is set.
         in: query
         name: types
+        type: string
+      - description: Only include child sessions under this parent session.
+        in: query
+        name: parent_session_id
         type: string
       - description: Page size (1..200). Defaults to 50.
         in: query

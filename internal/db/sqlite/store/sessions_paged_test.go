@@ -150,6 +150,38 @@ CREATE TABLE bot_sessions (
 	if len(pageAll) != 5 {
 		t.Fatalf("page-all len = %d, want 5 (ids %v)", len(pageAll), pageIDs(pageAll))
 	}
+
+	parentID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb01"
+	otherParentID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb02"
+	childID := "cccccccc-cccc-cccc-cccc-cccccccccc01"
+	otherChildID := "cccccccc-cccc-cccc-cccc-cccccccccc02"
+	for _, s := range []struct {
+		id       string
+		parentID string
+	}{
+		{childID, parentID},
+		{otherChildID, otherParentID},
+	} {
+		if _, err := conn.ExecContext(ctx,
+			`INSERT INTO bot_sessions (id, bot_id, type, parent_session_id, updated_at, created_at) VALUES (?, ?, 'subagent', ?, ?, ?)`,
+			s.id, botID, s.parentID, "2026-06-19 12:10:00", "2026-06-19 12:10:00",
+		); err != nil {
+			t.Fatalf("insert subagent seed %s: %v", s.id, err)
+		}
+	}
+	parentPage, err := queries.ListSessionsByBotPaged(ctx, pgsqlc.ListSessionsByBotPagedParams{
+		BotID:            pgBotID,
+		Types:            []string{"subagent"},
+		UseParentSession: true,
+		ParentSessionID:  mustUUID(t, parentID),
+		LimitCount:       10,
+	})
+	if err != nil {
+		t.Fatalf("parent-filtered page: %v", err)
+	}
+	if len(parentPage) != 1 || parentPage[0].ID.String() != childID {
+		t.Fatalf("parent-filtered ids = %v, want only %s", pageIDs(parentPage), childID)
+	}
 }
 
 func pageIDs(rows []pgsqlc.ListSessionsByBotPagedRow) []string {

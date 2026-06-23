@@ -60,6 +60,10 @@ WHERE s.bot_id = sqlc.arg(bot_id)
   AND s.deleted_at IS NULL
   AND s.type = ANY(sqlc.arg(types)::text[])
   AND (
+    NOT sqlc.arg(use_parent_session)::bool
+    OR s.parent_session_id = sqlc.narg(parent_session_id)::uuid
+  )
+  AND (
     NOT sqlc.arg(use_cursor)::bool
     OR (s.updated_at, s.id) < (sqlc.arg(cursor_updated_at)::timestamptz, sqlc.arg(cursor_id)::uuid)
   )
@@ -78,6 +82,10 @@ WHERE s.bot_id = sqlc.arg(bot_id)
   AND s.created_by_user_id = sqlc.arg(created_by_user_id)
   AND s.deleted_at IS NULL
   AND s.type = ANY(sqlc.arg(types)::text[])
+  AND (
+    NOT sqlc.arg(use_parent_session)::bool
+    OR s.parent_session_id = sqlc.narg(parent_session_id)::uuid
+  )
   AND (
     NOT sqlc.arg(use_cursor)::bool
     OR (s.updated_at, s.id) < (sqlc.arg(cursor_updated_at)::timestamptz, sqlc.arg(cursor_id)::uuid)

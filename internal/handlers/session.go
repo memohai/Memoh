@@ -52,7 +52,6 @@ func (h *SessionHandler) Register(e *echo.Echo) {
 	g.GET("/:session_id", h.GetSession)
 	g.PATCH("/:session_id", h.UpdateSession)
 	g.DELETE("/:session_id", h.DeleteSession)
-	g.GET("/:session_id/subagents", h.ListSubagents)
 }
 
 type createSessionRequest struct {
@@ -148,7 +147,8 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 // @Summary List bot sessions
 // @Tags sessions
 // @Param bot_id path string true "Bot ID"
-// @Param types query string false "Comma-separated session types to include. Defaults to user-facing types (chat,discuss,acp_agent)."
+// @Param types query string false "Comma-separated session types to include. Defaults to user-facing types (chat,discuss,acp_agent), or subagent when parent_session_id is set."
+// @Param parent_session_id query string false "Only include child sessions under this parent session."
 // @Param limit query int false "Page size (1..200). Defaults to 50."
 // @Param cursor query string false "Opaque cursor returned as next_cursor on a previous page."
 // @Success 200 {object} listSessionsResponse
@@ -168,10 +168,6 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	types, err := parseSessionTypesParam(c.QueryParam("types"))
-	if err != nil {
-		return err
-	}
 	limit, err := parseSessionLimitParam(c.QueryParam("limit"))
 	if err != nil {
 		return err
@@ -180,6 +176,20 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	parentSessionID, err := parseSessionParentIDParam(c.QueryParam("parent_session_id"))
+	if err != nil {
+		return err
+	}
+	if parentSessionID != "" {
+		if _, _, _, err := h.authorizeSession(c, channelIdentityID, bot.ID, parentSessionID); err != nil {
+			return err
+		}
+	}
+	types, err := parseSessionTypesParam(c.QueryParam("types"), parentSessionID != "")
+	if err != nil {
+		return err
+	}
+	filter := session.ListFilter{ParentSessionID: parentSessionID}
 
 	// Initialize to an empty slice so an empty page serializes as `"items": []`
 	// rather than `"items": null`, sparing clients a null check.
@@ -194,7 +204,7 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 	probeLimit := limit + 1
 	if bots.HasPermission(perms, bots.PermissionManage) {
 		var rows []session.Session
-		rows, err = h.sessionService.ListByBotPaged(c.Request().Context(), bot.ID, types, cursor, probeLimit)
+		rows, err = h.sessionService.ListByBotPagedWithFilter(c.Request().Context(), bot.ID, types, cursor, probeLimit, filter)
 		if err == nil {
 			sessions, hasMorePages = trimPagedSessions(rows, limit)
 			if hasMorePages {
@@ -204,7 +214,7 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 		}
 	} else {
 		var preFilter []session.Session
-		preFilter, err = h.sessionService.ListByBotAndCreatedByUserPaged(c.Request().Context(), bot.ID, channelIdentityID, types, cursor, probeLimit)
+		preFilter, err = h.sessionService.ListByBotAndCreatedByUserPagedWithFilter(c.Request().Context(), bot.ID, channelIdentityID, types, cursor, probeLimit, filter)
 		if err == nil {
 			var page []session.Session
 			page, hasMorePages = trimPagedSessions(preFilter, limit)
@@ -255,9 +265,12 @@ const (
 	sessionListMaxLimit     = 200
 )
 
-func parseSessionTypesParam(raw string) ([]string, error) {
+func parseSessionTypesParam(raw string, hasParentFilter bool) ([]string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
+		if hasParentFilter {
+			return []string{session.TypeSubagent}, nil
+		}
 		return session.UserFacingSessionTypes(), nil
 	}
 	parts := strings.Split(raw, ",")
@@ -294,6 +307,17 @@ func parseSessionLimitParam(raw string) (int64, error) {
 	}
 	if value < 1 || value > sessionListMaxLimit {
 		return 0, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("limit must be between 1 and %d", sessionListMaxLimit))
+	}
+	return value, nil
+}
+
+func parseSessionParentIDParam(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", nil
+	}
+	if _, err := uuid.Parse(value); err != nil {
+		return "", echo.NewHTTPError(http.StatusBadRequest, "parent_session_id must be a UUID")
 	}
 	return value, nil
 }
@@ -645,45 +669,4 @@ func sessionMetadataString(metadata map[string]any, key string) string {
 	}
 	value, _ := metadata[key].(string)
 	return strings.TrimSpace(value)
-}
-
-type listSubagentsResponse struct {
-	Items []session.Session `json:"items"`
-}
-
-// ListSubagents godoc
-// @Summary List subagent sessions for a parent session
-// @Tags sessions
-// @Param bot_id path string true "Bot ID"
-// @Param session_id path string true "Parent session ID"
-// @Success 200 {object} listSubagentsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Router /bots/{bot_id}/sessions/{session_id}/subagents [get].
-func (h *SessionHandler) ListSubagents(c echo.Context) error {
-	channelIdentityID, err := RequireChannelIdentityID(c)
-	if err != nil {
-		return err
-	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
-	}
-	sessionID := strings.TrimSpace(c.Param("session_id"))
-	if sessionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
-	}
-	_, _, _, err = h.authorizeSession(c, channelIdentityID, botID, sessionID)
-	if err != nil {
-		return err
-	}
-	subagents, err := h.sessionService.ListSubagentsByParent(c.Request().Context(), sessionID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	if subagents == nil {
-		subagents = []session.Session{}
-	}
-	return c.JSON(http.StatusOK, listSubagentsResponse{Items: subagents})
 }

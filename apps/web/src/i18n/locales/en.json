@@ -680,6 +680,7 @@
     "infoCacheHitRate": "Cache Hit Rate",
     "infoCacheRead": "Cache Read",
     "infoSubagents": "Subagents",
+    "infoSubagentsLoadFailed": "Failed to load subagents",
     "infoSkills": "Skills",
     "infoNoSkills": "No skills used in this session",
     "infoNoData": "No data available",

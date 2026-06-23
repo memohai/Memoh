@@ -273,20 +273,26 @@ WHERE s.bot_id = $1
   AND s.type = ANY($3::text[])
   AND (
     NOT $4::bool
-    OR (s.updated_at, s.id) < ($5::timestamptz, $6::uuid)
+    OR s.parent_session_id = $5::uuid
+  )
+  AND (
+    NOT $6::bool
+    OR (s.updated_at, s.id) < ($7::timestamptz, $8::uuid)
   )
 ORDER BY s.updated_at DESC, s.id DESC
-LIMIT $7::int
+LIMIT $9::int
 `
 
 type ListSessionsByBotAndCreatedByUserPagedParams struct {
-	BotID           pgtype.UUID        `json:"bot_id"`
-	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
-	Types           []string           `json:"types"`
-	UseCursor       bool               `json:"use_cursor"`
-	CursorUpdatedAt pgtype.Timestamptz `json:"cursor_updated_at"`
-	CursorID        pgtype.UUID        `json:"cursor_id"`
-	LimitCount      int32              `json:"limit_count"`
+	BotID            pgtype.UUID        `json:"bot_id"`
+	CreatedByUserID  pgtype.UUID        `json:"created_by_user_id"`
+	Types            []string           `json:"types"`
+	UseParentSession bool               `json:"use_parent_session"`
+	ParentSessionID  pgtype.UUID        `json:"parent_session_id"`
+	UseCursor        bool               `json:"use_cursor"`
+	CursorUpdatedAt  pgtype.Timestamptz `json:"cursor_updated_at"`
+	CursorID         pgtype.UUID        `json:"cursor_id"`
+	LimitCount       int32              `json:"limit_count"`
 }
 
 type ListSessionsByBotAndCreatedByUserPagedRow struct {
@@ -311,6 +317,8 @@ func (q *Queries) ListSessionsByBotAndCreatedByUserPaged(ctx context.Context, ar
 		arg.BotID,
 		arg.CreatedByUserID,
 		arg.Types,
+		arg.UseParentSession,
+		arg.ParentSessionID,
 		arg.UseCursor,
 		arg.CursorUpdatedAt,
 		arg.CursorID,
@@ -362,19 +370,25 @@ WHERE s.bot_id = $1
   AND s.type = ANY($2::text[])
   AND (
     NOT $3::bool
-    OR (s.updated_at, s.id) < ($4::timestamptz, $5::uuid)
+    OR s.parent_session_id = $4::uuid
+  )
+  AND (
+    NOT $5::bool
+    OR (s.updated_at, s.id) < ($6::timestamptz, $7::uuid)
   )
 ORDER BY s.updated_at DESC, s.id DESC
-LIMIT $6::int
+LIMIT $8::int
 `
 
 type ListSessionsByBotPagedParams struct {
-	BotID           pgtype.UUID        `json:"bot_id"`
-	Types           []string           `json:"types"`
-	UseCursor       bool               `json:"use_cursor"`
-	CursorUpdatedAt pgtype.Timestamptz `json:"cursor_updated_at"`
-	CursorID        pgtype.UUID        `json:"cursor_id"`
-	LimitCount      int32              `json:"limit_count"`
+	BotID            pgtype.UUID        `json:"bot_id"`
+	Types            []string           `json:"types"`
+	UseParentSession bool               `json:"use_parent_session"`
+	ParentSessionID  pgtype.UUID        `json:"parent_session_id"`
+	UseCursor        bool               `json:"use_cursor"`
+	CursorUpdatedAt  pgtype.Timestamptz `json:"cursor_updated_at"`
+	CursorID         pgtype.UUID        `json:"cursor_id"`
+	LimitCount       int32              `json:"limit_count"`
 }
 
 type ListSessionsByBotPagedRow struct {
@@ -401,6 +415,8 @@ func (q *Queries) ListSessionsByBotPaged(ctx context.Context, arg ListSessionsBy
 	rows, err := q.db.Query(ctx, listSessionsByBotPaged,
 		arg.BotID,
 		arg.Types,
+		arg.UseParentSession,
+		arg.ParentSessionID,
 		arg.UseCursor,
 		arg.CursorUpdatedAt,
 		arg.CursorID,
