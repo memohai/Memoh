@@ -1,7 +1,7 @@
 <template>
   <div
     ref="rootRef"
-    class=" inset-0 flex flex-col bg-background z-10 "
+    class=" inset-0 flex flex-col z-10 "
     :class="isFullScroll?'fixed':'absolute'"
     @click="closeStatsMenu"
   >
@@ -58,7 +58,7 @@
           <div
             v-for="stage in prepareStages"
             :key="stage.key"
-            class="flex min-w-0 flex-col items-center gap-2 rounded-md border border-border bg-background px-2 py-3 text-center"
+            class="flex min-w-0 flex-col items-center gap-2 rounded-md border border-border bg-surface-editor px-2 py-3 text-center"
             :class="stage.active ? 'text-foreground' : 'text-muted-foreground'"
           >
             <component
@@ -75,7 +75,7 @@
     </div>
     <div
       v-if="status === 'connected' || displaySessionId"
-      class="absolute right-2 top-2 flex items-center gap-1 rounded-md border border-border bg-background/95 p-1 text-xs text-muted-foreground"
+      class="absolute right-2 top-2 flex items-center gap-1 rounded-md border border-border bg-surface-editor/95 p-1 text-xs text-muted-foreground"
     >
       <span class="max-w-[180px] truncate px-2">
         {{ title || t('chat.display.title') }}
@@ -93,7 +93,7 @@
     </div>
     <div
       v-if="statsMenu.open"
-      class="absolute z-20 w-44 rounded-md border border-border bg-background/95 p-1 text-xs text-foreground shadow-lg"
+      class="absolute z-20 w-44 rounded-md border border-border bg-surface-editor/95 p-1 text-xs text-foreground shadow-lg"
       :style="{ left: `${statsMenu.x}px`, top: `${statsMenu.y}px` }"
       @click.stop
       @mousedown.stop
@@ -741,10 +741,7 @@ function resolveVideoPoint(event: MouseEvent | WheelEvent): { x: number; y: numb
 }
 
 function sendPointer(event: MouseEvent | WheelEvent, mask = pointerMask) {
-  if (!inputReady() && status.value === 'connected') {
-    void connect()
-    return
-  }
+  if (!inputReady()) return
   const point = resolveVideoPoint(event)
   if (!point) return
   lastPointerPoint = point
