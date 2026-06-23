@@ -43,10 +43,9 @@
           autocomplete="username"
           class="bg-background"
         />
-        <Input
+        <PasswordInput
           id="password"
           v-model="password"
-          type="password"
           :placeholder="$t('auth.password')"
           autocomplete="current-password"
           :disabled="isSubmitting"
@@ -75,6 +74,7 @@ import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { postAuthLogin } from '@memohai/sdk'
 import LoadingButton from '@/components/loading-button/index.vue'
+import PasswordInput from '@/components/password-input/index.vue'
 import DotMatrixBg from './components/dot-matrix-bg.vue'
 import { submitLogin } from './login-submit'
 import { safeSessionSet } from '@/utils/safe-storage'
@@ -141,5 +141,12 @@ form :deep([data-button]:is([data-variant="default"], [data-variant="primary"]):
 }
 form :deep([data-button]:is([data-variant="default"], [data-variant="primary"]):disabled)::before {
   background-color: var(--btn-primary-active);
+}
+
+/* 同一道理:禁用态的输入框也不能走 opacity,否则点阵会从框底透出。
+ * 保持不透明,只用降阶文字色表达锁定态。 */
+form :deep(input:disabled) {
+  opacity: 1;
+  color: var(--muted-foreground);
 }
 </style>

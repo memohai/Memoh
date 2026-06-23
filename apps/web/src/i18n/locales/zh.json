@@ -19,6 +19,8 @@
     "edit": "编辑",
     "show": "显示",
     "hide": "隐藏",
+    "showPassword": "显示密码",
+    "hidePassword": "隐藏密码",
     "delete": "删除",
     "rename": "重命名",
     "search": "搜索",

@@ -174,6 +174,7 @@ const formSchema = {
             <InputGroupAddon align="inline-end">
               <InputGroupButton
                 size="icon-xs"
+                variant="quiet"
                 :aria-label="showPassword ? 'Hide password' : 'Show password'"
                 @click="showPassword = !showPassword"
               >

@@ -185,6 +185,43 @@
     --field-edge: var(--destructive);
   }
 
+  /* ── Autofill — password managers stamp an opaque, sharp-cornered rectangle
+     onto the <input>. On a plain Input (rounded-md, fills its own box) that
+     reads as one filled field; inside an InputGroup the control is rounded-none
+     and only the left flex half, so the stamp splits the box into a sharp left
+     block + an unfilled right. Normalize every field: keep the text color, and
+     paint the field's own surface over the stamp. Chrome/Firefox stay
+     transparent (and thus match any surface) via the 9999s background-color
+     transition; Safari/WebKit ignore that and need an opaque inset shadow,
+     painted --background (the login surface — autofill on a --card dialog is
+     rare, and --card≈--background in light mode). */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  textarea:-webkit-autofill,
+  textarea:-webkit-autofill:hover,
+  textarea:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--foreground);
+    caret-color: var(--foreground);
+    transition: background-color 9999s ease-in-out 0s;
+  }
+  /* Plain fields keep their 1px field-edge; layer the surface fill on top. */
+  [data-slot="input"]:-webkit-autofill,
+  [data-slot="input"]:-webkit-autofill:hover,
+  [data-slot="input"]:-webkit-autofill:focus,
+  [data-slot="textarea"]:-webkit-autofill,
+  [data-slot="textarea"]:-webkit-autofill:hover,
+  [data-slot="textarea"]:-webkit-autofill:focus {
+    box-shadow: inset 0 0 0 1px var(--field-edge), 0 0 0 1000px var(--background) inset;
+  }
+  /* In-field control (InputGroup) has no edge of its own — the wrapper draws
+     it — so just the surface fill, no inner hairline. */
+  [data-slot="input-group-control"]:-webkit-autofill,
+  [data-slot="input-group-control"]:-webkit-autofill:hover,
+  [data-slot="input-group-control"]:-webkit-autofill:focus {
+    box-shadow: 0 0 0 1000px var(--background) inset;
+  }
+
   /* ── Select — a BUTTON, not a field. The trigger wears light secondary-button
      chrome: a faint resting hairline plus a gray fill on hover, instead of the
      input field-edge that flashed a near-black committed border. */

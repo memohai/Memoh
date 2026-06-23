@@ -28,7 +28,8 @@
         />
         <InputGroupAddon align="inline-end">
           <InputGroupButton
-            size="icon-sm"
+            size="icon-xs"
+            variant="quiet"
             :aria-label="revealed
               ? t('bots.channels.hideSecretField', { field: field.title || fieldKey })
               : t('bots.channels.showSecretField', { field: field.title || fieldKey })"

@@ -11,6 +11,8 @@
     "cancel": "キャンセル",
     "back": "戻る",
     "save": "保存",
+    "showPassword": "パスワードを表示",
+    "hidePassword": "パスワードを隠す",
     "create": "作成",
     "add": "追加",
     "edit": "編集",
