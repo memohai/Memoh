@@ -426,8 +426,14 @@ func (t *terminal) appendOutput(s string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.output += s
-	if hasToolOutputLimit(t.outputLimit) {
-		limited := limitToolOutputStringExact(t.output, "tool result (exec)", t.outputLimit)
+	if hasToolOutputLimit(t.outputLimit) && limitToolOutputStringExact(t.output, "tool result (exec)", t.outputLimit) != t.output {
+		t.truncated = true
+	}
+	if len(t.output) > maxTerminalOutputLimit {
+		limited := limitToolOutputStringExact(t.output, "tool result (exec)", ToolOutputLimit{
+			MaxBytes: maxTerminalOutputLimit,
+			MaxLines: t.outputLimit.MaxLines,
+		})
 		if limited == t.output {
 			return
 		}
@@ -443,7 +449,16 @@ func (t *terminal) snapshot() (string, bool, *acp.TerminalExitStatus) {
 	if t.exitCode != nil || t.signal != nil {
 		status = &acp.TerminalExitStatus{ExitCode: t.exitCode, Signal: t.signal}
 	}
-	return t.output, t.truncated, status
+	output := t.output
+	truncated := t.truncated
+	if hasToolOutputLimit(t.outputLimit) {
+		limited := limitToolOutputStringExact(output, "tool result (exec)", t.outputLimit)
+		if limited != output {
+			output = limited
+			truncated = true
+		}
+	}
+	return output, truncated, status
 }
 
 func (t *terminal) exit() (*int, *string) {

@@ -204,7 +204,8 @@ type Result struct {
 	ActionResults    []ActionResult `json:"action_results,omitempty"`
 	Metadata         map[string]any `json:"metadata,omitempty"`
 
-	appendContextRaw string
+	appendContextRaw   string
+	appendContextLimit int
 }
 
 func ParseConfig(data []byte) (Config, error) {

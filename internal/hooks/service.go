@@ -481,14 +481,12 @@ func mergeDecision(result *Result, actionResult ActionResult, maxOutputBytes int
 		if fragmentLimit <= 0 {
 			fragmentLimit = maxOutputBytes
 		}
-		if maxOutputBytes <= 0 || fragmentLimit < maxOutputBytes {
-			appendContext = limitHookOutputText(appendContext, fragmentLimit)
-		}
+		result.appendContextLimit = minPositiveLimit(result.appendContextLimit, maxOutputBytes, fragmentLimit)
 		if result.appendContextRaw != "" {
 			result.appendContextRaw += "\n"
 		}
 		result.appendContextRaw += appendContext
-		result.AppendContext = limitHookOutputText(result.appendContextRaw, maxOutputBytes)
+		result.AppendContext = limitHookOutputText(result.appendContextRaw, firstPositive(result.appendContextLimit, maxOutputBytes))
 	}
 	switch decision {
 	case DecisionDeny:
@@ -532,6 +530,28 @@ func hookMaxOutputBytes(cfg Config, source hookSource) int {
 		maxOutputBytes = source.MaxOutputBytes
 	}
 	return maxOutputBytes
+}
+
+func minPositiveLimit(values ...int) int {
+	limit := 0
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if limit == 0 || value < limit {
+			limit = value
+		}
+	}
+	return limit
+}
+
+func firstPositive(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func limitHookOutputText(text string, limit int) string {

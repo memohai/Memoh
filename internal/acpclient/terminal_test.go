@@ -120,6 +120,50 @@ func TestTerminalAppendOutputHonorsTinyByteLimits(t *testing.T) {
 	}
 }
 
+func TestCreateTerminalHonorsOutputByteLimitRequest(t *testing.T) {
+	t.Parallel()
+
+	for _, maxBytes := range []int{1, 8, 192} {
+		t.Run(fmt.Sprintf("%d bytes", maxBytes), func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			manager := newTerminalManager(context.Background(), newTestBridgeClient(t, root), "/data", "/data", 5, nil, true, nil)
+			term, err := manager.CreateTerminal(context.Background(), acp.CreateTerminalRequest{
+				Command:         "printf",
+				Args:            []string{"HEAD" + strings.Repeat("x", 5000) + "TAIL"},
+				OutputByteLimit: &maxBytes,
+			}, nil)
+			if err != nil {
+				t.Fatalf("CreateTerminal returned error: %v", err)
+			}
+			if _, err := manager.WaitForTerminalExit(context.Background(), acp.WaitForTerminalExitRequest{TerminalId: term.TerminalId}); err != nil {
+				t.Fatalf("WaitForTerminalExit returned error: %v", err)
+			}
+			resp, err := manager.TerminalOutput(context.Background(), acp.TerminalOutputRequest{TerminalId: term.TerminalId})
+			if err != nil {
+				t.Fatalf("TerminalOutput returned error: %v", err)
+			}
+			if !resp.Truncated {
+				t.Fatal("TerminalOutput Truncated = false, want true")
+			}
+			if len(resp.Output) > maxBytes {
+				t.Fatalf("terminal output bytes = %d, want <= %d", len(resp.Output), maxBytes)
+			}
+			if !utf8.ValidString(resp.Output) {
+				t.Fatalf("terminal output is not valid UTF-8: %q", resp.Output)
+			}
+			if maxBytes >= 192 {
+				for _, want := range []string{"[memoh pruned]", "HEAD", "TAIL"} {
+					if !strings.Contains(resp.Output, want) {
+						t.Fatalf("terminal output missing %q:\n%s", want, resp.Output)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestTerminalEndEventUsesPromptToolOutputLimit(t *testing.T) {
 	t.Parallel()
 

@@ -273,10 +273,10 @@ func TestRunConfigLimitsPluginAppendContextWithSourceCap(t *testing.T) {
 				PluginID:       "github",
 				MaxOutputBytes: 192,
 			},
-			Actions: []HookAction{{
-				Type: ActionTool,
-				Tool: "append",
-			}},
+			Actions: []HookAction{
+				{Type: ActionTool, Tool: "append_one"},
+				{Type: ActionTool, Tool: "append_two"},
+			},
 		}},
 	}
 	runner := &fakeToolRunner{
@@ -297,6 +297,51 @@ func TestRunConfigLimitsPluginAppendContextWithSourceCap(t *testing.T) {
 	}
 	if len(result.AppendContext) >= len(large) {
 		t.Fatalf("append_context was not limited by plugin cap")
+	}
+	assertHookTextPreservesHeadTail(t, result.AppendContext)
+}
+
+func TestRunConfigLimitsPluginAppendContextWithGlobalCap(t *testing.T) {
+	t.Parallel()
+
+	large := "HEAD\n" + strings.Repeat("plugin context detail ", 300) + "\nTAIL"
+	cfg := Config{
+		Version: 1,
+		Defaults: Defaults{
+			MaxOutputBytes: 192,
+		},
+		Hooks: []Hook{{
+			Name:  "plugin append-context",
+			Event: EventBeforeModelCall,
+			source: hookSource{
+				Kind:           sourceKindPlugin,
+				PluginID:       "github",
+				MaxOutputBytes: 4096,
+			},
+			Actions: []HookAction{{
+				Type: ActionTool,
+				Tool: "append",
+			}},
+		}},
+	}
+	runner := &fakeToolRunner{
+		fn: func(context.Context, string, map[string]any) (any, error) {
+			return map[string]any{
+				"decision":       DecisionAppendContext,
+				"append_context": large,
+			}, nil
+		},
+	}
+
+	result, err := NewService(nil, nil).RunConfig(context.Background(), cfg, Request{Event: EventBeforeModelCall}, runner)
+	if err != nil {
+		t.Fatalf("RunConfig returned error: %v", err)
+	}
+	if len(result.AppendContext) > 192 {
+		t.Fatalf("append_context bytes = %d, want <= global cap 192", len(result.AppendContext))
+	}
+	if len(result.AppendContext) >= len(large) {
+		t.Fatalf("append_context was not limited by global cap")
 	}
 	assertHookTextPreservesHeadTail(t, result.AppendContext)
 }
