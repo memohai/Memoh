@@ -184,7 +184,8 @@
                       />
                       <InputGroupAddon align="inline-end">
                         <InputGroupButton
-                          size="icon-sm"
+                          size="icon-xs"
+                          variant="quiet"
                           :aria-label="$t('common.preview')"
                           @click="visibleSecrets[field.key] = !visibleSecrets[field.key]"
                         >
@@ -333,7 +334,8 @@
                         />
                         <InputGroupAddon align="inline-end">
                           <InputGroupButton
-                            size="icon-sm"
+                            size="icon-xs"
+                            variant="quiet"
                             :aria-label="$t('common.preview')"
                             @click="visibleSecrets[field.key] = !visibleSecrets[field.key]"
                           >

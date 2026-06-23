@@ -19,6 +19,8 @@
     "edit": "Edit",
     "show": "Show",
     "hide": "Hide",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password",
     "delete": "Delete",
     "rename": "Rename",
     "search": "Search",
