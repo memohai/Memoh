@@ -11,6 +11,7 @@ import (
 	"go.uber.org/fx"
 
 	agenttools "github.com/memohai/memoh/internal/agent/tools"
+	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
@@ -41,6 +42,20 @@ func TestACPToolProvidersIncludeAskUser(t *testing.T) {
 	}
 	if len(providers) != 2 {
 		t.Fatalf("filtered providers = %d, want 2", len(providers))
+	}
+}
+
+func TestAgentLimitsFromConfigUsesCustomValues(t *testing.T) {
+	got := agentLimitsFromConfig(config.AgentConfig{
+		ToolOutputMaxBytes:  1234,
+		ToolOutputMaxLines:  56,
+		SystemFilesMaxBytes: 7890,
+	})
+
+	if got.ToolOutputMaxBytes != 1234 ||
+		got.ToolOutputMaxLines != 56 ||
+		got.SystemFilesMaxBytes != 7890 {
+		t.Fatalf("agent limits = %#v", got)
 	}
 }
 

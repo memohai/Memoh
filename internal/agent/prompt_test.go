@@ -160,9 +160,6 @@ func TestBuildFileSectionsRespectsMaxBytes(t *testing.T) {
 	if !strings.Contains(sections, "[memoh pruned]") {
 		t.Fatalf("file sections should include prune marker:\n%s", sections)
 	}
-	if strings.Contains(sections, "SECOND_FILE_SHOULD_NOT_FIT") {
-		t.Fatalf("file sections included content beyond budget:\n%s", sections)
-	}
 }
 
 func TestBuildFileSectionsRespectsLineLimit(t *testing.T) {

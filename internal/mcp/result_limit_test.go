@@ -19,6 +19,9 @@ func TestLimitToolResultCapsFullMCPResult(t *testing.T) {
 	if !strings.Contains(text, "[memoh pruned]") {
 		t.Fatalf("limited MCP result missing prune marker: %#v", result)
 	}
+	if !strings.Contains(text, "HEAD") || !strings.Contains(text, "TAIL") {
+		t.Fatalf("limited MCP result did not preserve head and tail: %#v", result)
+	}
 }
 
 func TestLimitToolResultPreservesErrorSignal(t *testing.T) {
@@ -33,6 +36,9 @@ func TestLimitToolResultPreservesErrorSignal(t *testing.T) {
 	text := toolResultText(result)
 	if !strings.Contains(text, "[memoh pruned]") {
 		t.Fatalf("limited MCP error missing prune marker: %#v", result)
+	}
+	if !strings.Contains(text, "HEAD") || !strings.Contains(text, "TAIL") {
+		t.Fatalf("limited MCP error did not preserve head and tail: %#v", result)
 	}
 }
 

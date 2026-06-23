@@ -271,7 +271,7 @@ func (s *Service) runAction(ctx context.Context, cfg Config, req Request, action
 	case ActionCommand:
 		return s.runCommand(ctx, cfg, req, action, source)
 	case ActionTool:
-		return s.runTool(ctx, req, action, runner)
+		return s.runTool(ctx, cfg, req, action, source, runner)
 	case ActionMCPTool:
 		return ActionResult{ActionType: action.Type, Error: ErrUnsupported.Error()}, ErrUnsupported
 	default:
@@ -345,10 +345,7 @@ func (s *Service) runCommand(ctx context.Context, cfg Config, req Request, actio
 	execCtx, cancel := context.WithTimeout(ctx, timeout+time.Second)
 	defer cancel()
 	execResult, err := client.ExecWithStdinEnv(execCtx, action.Command, workDir, int32(timeoutUnits), append(payload, '\n'), env)
-	maxOutputBytes := cfg.Defaults.MaxOutputBytes
-	if source.Kind == sourceKindPlugin && source.MaxOutputBytes > 0 {
-		maxOutputBytes = source.MaxOutputBytes
-	}
+	maxOutputBytes := hookMaxOutputBytes(cfg, source)
 	if execResult != nil {
 		res.Stdout = trimOutput(execResult.Stdout, maxOutputBytes)
 		res.Stderr = trimOutput(execResult.Stderr, maxOutputBytes)
@@ -364,14 +361,14 @@ func (s *Service) runCommand(ctx context.Context, cfg Config, req Request, actio
 		return res, err
 	}
 	if execResult != nil {
-		applyActionOutput(&res, execResult.Stdout)
+		applyActionOutput(&res, execResult.Stdout, maxOutputBytes)
 	} else {
-		applyActionOutput(&res, "")
+		applyActionOutput(&res, "", maxOutputBytes)
 	}
 	return res, nil
 }
 
-func (*Service) runTool(ctx context.Context, _ Request, action HookAction, runner ToolRunner) (ActionResult, error) {
+func (*Service) runTool(ctx context.Context, cfg Config, _ Request, action HookAction, source hookSource, runner ToolRunner) (ActionResult, error) {
 	res := ActionResult{ActionType: ActionTool, Name: action.Tool}
 	if runner == nil {
 		err := errors.New("hook tool runner is not configured")
@@ -395,11 +392,11 @@ func (*Service) runTool(ctx context.Context, _ Request, action HookAction, runne
 		res.Error = err.Error()
 		return res, err
 	}
-	applyToolOutput(&res, output)
+	applyToolOutput(&res, output, hookMaxOutputBytes(cfg, source))
 	return res, nil
 }
 
-func applyActionOutput(result *ActionResult, stdout string) {
+func applyActionOutput(result *ActionResult, stdout string, maxOutputBytes int) {
 	raw := strings.TrimSpace(stdout)
 	if raw == "" {
 		result.Decision = DecisionAllow
@@ -417,24 +414,29 @@ func applyActionOutput(result *ActionResult, stdout string) {
 		return
 	}
 	result.Decision = normalizeDecision(output.Decision)
-	result.Reason = strings.TrimSpace(output.Reason)
-	if output.AppendContext != "" {
-		if result.Metadata == nil {
-			result.Metadata = map[string]any{}
-		}
-		result.Metadata["append_context"] = output.AppendContext
-	}
+	result.Reason = limitHookOutputText(output.Reason, maxOutputBytes)
 	if output.Metadata != nil {
 		if result.Metadata == nil {
 			result.Metadata = map[string]any{}
 		}
 		for k, v := range output.Metadata {
+			if k == "append_context" {
+				if text, ok := v.(string); ok {
+					v = limitHookOutputText(text, maxOutputBytes)
+				}
+			}
 			result.Metadata[k] = v
 		}
 	}
+	if output.AppendContext != "" {
+		if result.Metadata == nil {
+			result.Metadata = map[string]any{}
+		}
+		result.Metadata["append_context"] = limitHookOutputText(output.AppendContext, maxOutputBytes)
+	}
 }
 
-func applyToolOutput(result *ActionResult, output any) {
+func applyToolOutput(result *ActionResult, output any, maxOutputBytes int) {
 	m, ok := output.(map[string]any)
 	if !ok {
 		raw, err := json.Marshal(output)
@@ -450,10 +452,10 @@ func applyToolOutput(result *ActionResult, output any) {
 		result.Decision = normalizeDecision(decision)
 	}
 	if reason, _ := m["reason"].(string); reason != "" {
-		result.Reason = strings.TrimSpace(reason)
+		result.Reason = limitHookOutputText(reason, maxOutputBytes)
 	}
 	if appendContext, _ := m["append_context"].(string); appendContext != "" {
-		result.Metadata = map[string]any{"append_context": appendContext}
+		result.Metadata = map[string]any{"append_context": limitHookOutputText(appendContext, maxOutputBytes)}
 	}
 }
 
@@ -504,6 +506,18 @@ func normalizeDecision(raw string) string {
 	default:
 		return DecisionAllow
 	}
+}
+
+func hookMaxOutputBytes(cfg Config, source hookSource) int {
+	maxOutputBytes := cfg.Defaults.MaxOutputBytes
+	if source.Kind == sourceKindPlugin && source.MaxOutputBytes > 0 {
+		maxOutputBytes = source.MaxOutputBytes
+	}
+	return maxOutputBytes
+}
+
+func limitHookOutputText(text string, limit int) string {
+	return trimOutput(strings.TrimSpace(text), limit)
 }
 
 func trimOutput(raw string, limit int) string {

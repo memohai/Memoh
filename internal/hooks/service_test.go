@@ -176,6 +176,45 @@ func TestRunConfigMergesDecisionsInPriorityOrder(t *testing.T) {
 	}
 }
 
+func TestRunConfigLimitsToolAppendContext(t *testing.T) {
+	t.Parallel()
+
+	large := "HEAD\n" + strings.Repeat("context detail ", 300) + "\nTAIL"
+	cfg := Config{
+		Version: 1,
+		Defaults: Defaults{
+			MaxOutputBytes: 256,
+		},
+		Hooks: []Hook{{
+			Name:  "append-context",
+			Event: EventBeforeModelCall,
+			Actions: []HookAction{{
+				Type: ActionTool,
+				Tool: "append",
+			}},
+		}},
+	}
+	runner := &fakeToolRunner{
+		fn: func(context.Context, string, map[string]any) (any, error) {
+			return map[string]any{
+				"decision":       DecisionAppendContext,
+				"append_context": large,
+			}, nil
+		},
+	}
+
+	result, err := NewService(nil, nil).RunConfig(context.Background(), cfg, Request{Event: EventBeforeModelCall}, runner)
+	if err != nil {
+		t.Fatalf("RunConfig returned error: %v", err)
+	}
+	if len(result.AppendContext) > 256 {
+		t.Fatalf("append_context bytes = %d, want <= 256", len(result.AppendContext))
+	}
+	if len(result.AppendContext) >= len(large) {
+		t.Fatalf("append_context was not limited")
+	}
+}
+
 func TestRunConfigOnErrorBlockDenies(t *testing.T) {
 	t.Parallel()
 
@@ -206,6 +245,60 @@ func TestRunConfigOnErrorBlockDenies(t *testing.T) {
 	}
 	if result.Reason != "tool failed" {
 		t.Fatalf("reason = %q, want tool error", result.Reason)
+	}
+}
+
+func TestRunLimitsCommandAppendContext(t *testing.T) {
+	t.Parallel()
+
+	large := "HEAD\n" + strings.Repeat("context detail ", 300) + "\nTAIL"
+	cfg := `{
+		"version": 1,
+		"enabled": true,
+		"defaults": {
+			"timeout": "3s",
+			"max_output_bytes": 256
+		},
+		"hooks": [{
+			"name": "command context",
+			"event": "BeforeModelCall",
+			"actions": [{
+				"type": "command",
+				"command": "node /data/.memoh/hook.js"
+			}]
+		}]
+	}`
+	payload, err := json.Marshal(map[string]string{
+		"decision":       DecisionAppendContext,
+		"append_context": large,
+	})
+	if err != nil {
+		t.Fatalf("marshal hook output: %v", err)
+	}
+	server := &hookBridgeTestServer{
+		files: map[string][]byte{
+			DefaultConfigPath: []byte(cfg),
+		},
+		stdout: string(payload),
+	}
+	service := NewService(nil, hookBridgeProvider{client: newHookBridgeTestClient(t, server)})
+
+	result, err := service.Run(context.Background(), Request{
+		Event: EventBeforeModelCall,
+		BotID: "bot-1",
+		Workspace: WorkspaceInfo{
+			CWD:     "/data/workspace",
+			Runtime: "container",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if len(result.AppendContext) > 256 {
+		t.Fatalf("append_context bytes = %d, want <= 256", len(result.AppendContext))
+	}
+	if len(result.AppendContext) >= len(large) {
+		t.Fatalf("append_context was not limited")
 	}
 }
 

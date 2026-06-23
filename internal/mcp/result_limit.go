@@ -51,6 +51,9 @@ func limitStructuredMCPResult(structured any, label string, limit ToolOutputLimi
 			MaxBytes: budget,
 			MaxLines: normalized.MaxLines,
 		})
+		if isTruncatedFallback(limitedStructured) {
+			return nil
+		}
 		result := BuildToolSuccessResult(limitedStructured)
 		if !contextlimit.EncodedExceeds(result, limit) {
 			return result
@@ -58,6 +61,15 @@ func limitStructuredMCPResult(structured any, label string, limit ToolOutputLimi
 		budget = budget * 3 / 4
 	}
 	return nil
+}
+
+func isTruncatedFallback(value any) bool {
+	result, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	truncated, _ := result["_memoh_truncated"].(bool)
+	return truncated
 }
 
 func limitToolErrorResult(result map[string]any, label string, limit ToolOutputLimit) map[string]any {

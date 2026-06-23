@@ -34,6 +34,9 @@ func TestLimitToolOutputPrunesLargeStringLeaves(t *testing.T) {
 	if !strings.Contains(content, "[memoh pruned]") {
 		t.Fatalf("content missing prune marker:\n%s", content)
 	}
+	if !strings.Contains(content, "HEAD") || !strings.Contains(content, "TAIL") {
+		t.Fatalf("content did not preserve head and tail:\n%s", content)
+	}
 	if structured["ok"] != true {
 		t.Fatalf("non-string field changed: %#v", structured)
 	}
@@ -117,5 +120,8 @@ func TestWrapToolOutputLimitsPrunesErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "[memoh pruned]") {
 		t.Fatalf("limited error missing prune marker:\n%s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "HEAD") || !strings.Contains(err.Error(), "TAIL") {
+		t.Fatalf("limited error did not preserve head and tail:\n%s", err.Error())
 	}
 }
