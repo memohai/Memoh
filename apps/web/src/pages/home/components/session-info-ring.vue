@@ -9,10 +9,10 @@
       ]"
       :disabled="!sessionId"
       :aria-label="t('chat.sessionInfoRingAria')"
-      @mouseenter="handleTriggerMouseEnter"
+      @mouseenter="handleMouseEnter"
       @mouseleave="handleMouseLeave"
+      @focus="handleMouseEnter"
       @blur="handleMouseLeave"
-      @click="handleTriggerClick"
     >
       <svg
         viewBox="0 0 24 24"
@@ -50,9 +50,7 @@
       :side-offset="8"
       @mouseenter="handleContentMouseEnter"
       @mouseleave="handleMouseLeave"
-      @focusin="handleContentFocusIn"
-      @focusout="handleContentFocusOut"
-      @open-auto-focus="handleOpenAutoFocus"
+      @open-auto-focus="(e) => e.preventDefault()"
     >
       <SessionInfoPanel
         :visible="open"
@@ -79,7 +77,6 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const open = ref(false)
-const focusContentOnOpen = ref(false)
 
 const overrideModelIdRef = computed(() => props.overrideModelId ?? '')
 const fallbackContextWindowRef = computed(() => props.fallbackContextWindow ?? null)
@@ -116,7 +113,7 @@ function clearTimers() {
   }
 }
 
-function scheduleOpen() {
+function handleMouseEnter() {
   if (!sessionId.value) return
   if (closeTimer) {
     clearTimeout(closeTimer)
@@ -129,41 +126,11 @@ function scheduleOpen() {
   }, 150)
 }
 
-function handleTriggerMouseEnter() {
-  focusContentOnOpen.value = false
-  scheduleOpen()
-}
-
-function handleTriggerClick() {
-  focusContentOnOpen.value = true
-  clearTimers()
-  open.value = true
-}
-
 function handleContentMouseEnter() {
   if (closeTimer) {
     clearTimeout(closeTimer)
     closeTimer = null
   }
-}
-
-function handleContentFocusIn() {
-  handleContentMouseEnter()
-}
-
-function handleContentFocusOut(event: FocusEvent) {
-  const current = event.currentTarget as HTMLElement | null
-  const next = event.relatedTarget as Node | null
-  if (current && next && current.contains(next)) return
-  handleMouseLeave()
-}
-
-function handleOpenAutoFocus(event: Event) {
-  if (focusContentOnOpen.value) {
-    focusContentOnOpen.value = false
-    return
-  }
-  event.preventDefault()
 }
 
 function handleMouseLeave() {

@@ -35,7 +35,6 @@ export async function fetchBots(): Promise<Bot[]> {
 
 export interface FetchSessionsOptions {
   types?: string[]
-  parentSessionId?: string
   limit?: number
   cursor?: string
 }
@@ -59,7 +58,6 @@ export async function fetchSessions(botId: string, options?: FetchSessionsOption
       types: types.join(','),
       limit: options?.limit ?? DEFAULT_SESSION_PAGE_SIZE,
       ...(cursor ? { cursor } : {}),
-      ...(options?.parentSessionId?.trim() ? { parent_session_id: options.parentSessionId.trim() } : {}),
     },
     throwOnError: true,
   })
@@ -68,17 +66,6 @@ export async function fetchSessions(botId: string, options?: FetchSessionsOption
     items: payload?.items ?? [],
     nextCursor: payload?.next_cursor?.trim() || null,
   }
-}
-
-export async function fetchAllSessions(botId: string, options: FetchSessionsOptions = {}): Promise<SessionSummary[]> {
-  const items: SessionSummary[] = []
-  let cursor: string | undefined = options.cursor?.trim() || undefined
-  do {
-    const page = await fetchSessions(botId, { ...options, cursor })
-    items.push(...page.items)
-    cursor = page.nextCursor?.trim() || undefined
-  } while (cursor)
-  return items
 }
 
 export async function createSession(botId: string, options?: string | CreateSessionOptions): Promise<SessionSummary> {
