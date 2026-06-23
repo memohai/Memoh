@@ -196,9 +196,9 @@ type MemoryStatusResponse struct {
 	CanManualSync     bool                    `json:"can_manual_sync"`
 	SourceDir         string                  `json:"source_dir,omitempty"`
 	OverviewPath      string                  `json:"overview_path,omitempty"`
-	MarkdownFileCount int                     `json:"markdown_file_count,omitempty"`
-	SourceCount       int                     `json:"source_count,omitempty"`
-	IndexedCount      int                     `json:"indexed_count,omitempty"`
+	MarkdownFileCount int                     `json:"markdown_file_count"`
+	SourceCount       int                     `json:"source_count"`
+	IndexedCount      int                     `json:"indexed_count"`
 	QdrantCollection  string                  `json:"qdrant_collection,omitempty"`
 	Encoder           HealthStatus            `json:"encoder"`
 	Qdrant            HealthStatus            `json:"qdrant"`
