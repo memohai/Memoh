@@ -28,8 +28,6 @@ const (
 	DefaultPGSSLMode             = "disable"
 	DefaultSQLitePath            = "data/memoh.db"
 	DefaultSQLiteBusyMS          = 5000
-	DefaultQdrantURL             = "http://127.0.0.1:6334"
-	DefaultQdrantCollection      = "memory"
 	DefaultRuntimeDir            = "/opt/memoh/runtime"
 	DefaultWorkspaceImage        = "memohai/workspace:debian"
 	DefaultBaseImage             = DefaultWorkspaceImage
@@ -61,7 +59,6 @@ type Config struct {
 	Workspace     WorkspaceConfig     `toml:"workspace"`
 	Postgres      PostgresConfig      `toml:"postgres"`
 	SQLite        SQLiteConfig        `toml:"sqlite"`
-	Qdrant        QdrantConfig        `toml:"qdrant"`
 	Registry      RegistryConfig      `toml:"registry"`
 	Supermarket   SupermarketConfig   `toml:"supermarket"`
 	OAuthClients  OAuthClientsConfig  `toml:"oauth_clients"`
@@ -363,12 +360,6 @@ func (c SQLiteConfig) PathOrDefault() string {
 		return absPath(path)
 	}
 	return absPath(DefaultSQLitePath)
-}
-
-type QdrantConfig struct {
-	BaseURL        string `toml:"base_url"`
-	APIKey         string `toml:"api_key" json:"-"`
-	TimeoutSeconds int    `toml:"timeout_seconds"`
 }
 
 const DefaultProvidersDir = "conf/providers"

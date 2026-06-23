@@ -44,10 +44,10 @@ type Store interface {
 	// CountEdges returns the edge count for a bot.
 	CountEdges(ctx context.Context, botID string) (int, error)
 
-	// RebuildImplicitEdges recomputes the same_profile / same_topic / same_day
-	// edges for a bot from its current nodes, replacing any prior implicit
-	// edges. Returns the number of edges written.
-	RebuildImplicitEdges(ctx context.Context, botID string) (int, error)
+	// RebuildDerivedEdges recomputes same_profile / same_topic / same_day / refs
+	// edges for a bot from its current nodes, replacing any prior derived edges.
+	// Returns the number of edges written.
+	RebuildDerivedEdges(ctx context.Context, botID string) (int, error)
 }
 
 // ErrNodeNotFound is returned by GetNode when no node matches the id.

@@ -49,10 +49,10 @@ services:
       #   HTTP_PROXY=http://host.docker.internal:7890 docker compose up -d
       HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
       HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
-      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,qdrant,server,web,migrate,webhook-tunnel,memoh-postgres,memoh-qdrant,memoh-server,memoh-web,memoh-migrate,memoh-webhook-tunnel"
+      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,server,web,migrate,webhook-tunnel,memoh-postgres,memoh-server,memoh-web,memoh-migrate,memoh-webhook-tunnel"
       http_proxy: "${http_proxy:-${HTTP_PROXY:-}}"
       https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
-      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,qdrant,server,web,migrate,webhook-tunnel,memoh-postgres,memoh-qdrant,memoh-server,memoh-web,memoh-migrate,memoh-webhook-tunnel"
+      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,server,web,migrate,webhook-tunnel,memoh-postgres,memoh-server,memoh-web,memoh-migrate,memoh-webhook-tunnel"
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN: "${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}"
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX: "${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}"
       MEMOH_WEBHOOK_TUNNEL_MODE: "${MEMOH_WEBHOOK_TUNNEL_MODE:-}"
@@ -115,24 +115,6 @@ services:
     networks:
       - memoh-network
 
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: memoh-qdrant
-    profiles: [qdrant]
-    volumes:
-      - qdrant_data:/qdrant/storage
-    expose:
-      - "6333"
-      - "6334"
-    healthcheck:
-      test: ["CMD-SHELL", "timeout 10s bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      - memoh-network
-
 volumes:
   postgres_data:
     driver: local
@@ -141,8 +123,6 @@ volumes:
   memoh_data:
     driver: local
   server_cni_state:
-    driver: local
-  qdrant_data:
     driver: local
   openviking_data:
     driver: local

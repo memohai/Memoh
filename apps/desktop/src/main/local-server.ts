@@ -3,7 +3,6 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, request, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { join } from 'node:path'
-import { ensureEmbeddedQdrant, getEmbeddedQdrantStatus } from './qdrant'
 import {
   appendLineLog,
   isProcessAlive,
@@ -81,11 +80,6 @@ export interface LocalServerStatus {
   ready: boolean
   managed: boolean
   error?: string
-  qdrant?: {
-    grpcBaseUrl: string
-    httpBaseUrl: string
-    ready: boolean
-  }
 }
 
 interface ServerCommand {
@@ -136,7 +130,7 @@ function buildDevServerBinary(root: string, cwd: string): string {
   return binary
 }
 
-function serverCommand(qdrantGrpcBaseUrl?: string): ServerCommand {
+function serverCommand(): ServerCommand {
   if (!app.isPackaged) {
     const root = repoRoot()
     const cwd = desktopServerWorkDir()
@@ -147,7 +141,6 @@ function serverCommand(qdrantGrpcBaseUrl?: string): ServerCommand {
       configPath: prepareConfig(
         cwd,
         join(root, 'conf', 'app.local.toml'),
-        qdrantGrpcBaseUrl,
         join(root, 'conf', 'providers'),
       ),
       sourceRoot: root,
@@ -162,7 +155,6 @@ function serverCommand(qdrantGrpcBaseUrl?: string): ServerCommand {
     configPath: prepareConfig(
       cwd,
       desktopResourcePath('config', 'app.local.toml'),
-      qdrantGrpcBaseUrl,
       toAbsoluteConfigPath(cwd, 'conf/providers'),
     ),
   }
@@ -172,7 +164,7 @@ function currentServerCommand(): ServerCommand {
   if (preparedServerCommand) {
     return preparedServerCommand
   }
-  return serverCommand(getEmbeddedQdrantStatus()?.grpcBaseUrl)
+  return serverCommand()
 }
 
 function logPath(): string {
@@ -263,11 +255,11 @@ export async function stopProviderOAuthCallbackProxy(): Promise<void> {
   })))
 }
 
-function prepareConfig(cwd: string, sourcePath: string, qdrantGrpcBaseUrl: string | undefined, providersDir: string): string {
+function prepareConfig(cwd: string, sourcePath: string, providersDir: string): string {
   mkdirSync(cwd, { recursive: true })
   const home = app.getPath('home')
   const source = readFileSync(sourcePath, 'utf8')
-  const contents = applyLocalConfigDefaults(source, cwd, home, providersDir, qdrantGrpcBaseUrl)
+  const contents = applyLocalConfigDefaults(source, cwd, home, providersDir)
   const targetPath = join(cwd, `config${slotSuffix()}.toml`)
   writeFileSync(targetPath, contents, { mode: 0o600 })
   return targetPath
@@ -278,7 +270,6 @@ function applyLocalConfigDefaults(
   cwd: string,
   home: string,
   providersDir: string,
-  qdrantGrpcBaseUrl?: string,
 ): string {
   let next = contents.replaceAll('__HOME__', home)
   const dataDir = slotDataDir()
@@ -293,9 +284,6 @@ function applyLocalConfigDefaults(
     // Vite dev port is handled separately via MEMOH_WEB_PORT in
     // electron.vite.config.ts, not by rewriting config here.
     next = setTomlString(next, 'server', 'addr', `:${slotServerPort()}`)
-  }
-  if (qdrantGrpcBaseUrl) {
-    next = setTomlString(next, 'qdrant', 'base_url', qdrantGrpcBaseUrl)
   }
   return setDockerHostIfEmpty(next, detectDockerHost(home))
 }
@@ -676,16 +664,15 @@ export async function ensureLocalServer(): Promise<LocalServerStatus> {
     const existing = await probeServer()
     if (existing) {
       if (hasLiveManagedServer()) {
-        appendLog('restarting managed local server to attach embedded Qdrant')
+        appendLog('restarting managed local server')
         await stopManagedServer()
       } else {
         const sameIdentity = sameServerIdentity(existing, bundledIdentity)
-        throw new Error(`Local server on ${LOCAL_SERVER_BASE_URL} is already running${sameIdentity ? '' : ` (${identityLabel(existing)})`}, but it is not managed by this desktop. Stop it and reopen Memoh so desktop memory uses the embedded Qdrant.`)
+        throw new Error(`Local server on ${LOCAL_SERVER_BASE_URL} is already running${sameIdentity ? '' : ` (${identityLabel(existing)})`}, but it is not managed by this desktop. Stop it and reopen Memoh.`)
       }
     }
 
-    const qdrant = await ensureEmbeddedQdrant()
-    const command = serverCommand(qdrant.grpcBaseUrl)
+    const command = serverCommand()
     preparedServerCommand = command
     startedProcess = spawnServer(command)
     if (!(await waitForServer())) {
@@ -713,19 +700,11 @@ export async function getDesktopAuthToken(): Promise<string> {
 }
 
 export function getLocalServerStatus(): LocalServerStatus {
-  const qdrant = getEmbeddedQdrantStatus()
   return {
     baseUrl: LOCAL_SERVER_BASE_URL,
     ready: serverReady,
     managed: startedProcess != null || hasLiveManagedServer(),
     error: serverError ?? undefined,
-    qdrant: qdrant
-      ? {
-          grpcBaseUrl: qdrant.grpcBaseUrl,
-          httpBaseUrl: qdrant.httpBaseUrl,
-          ready: qdrant.ready,
-        }
-      : undefined,
   }
 }
 

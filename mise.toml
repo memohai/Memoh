@@ -474,21 +474,6 @@ dir = "{{config_root}}/apps/desktop"
 env = { CONFIG_PATH = "../../conf/app.local.toml" }
 run = "pnpm preview"
 
-[tasks."desktop:qdrant:prepare"]
-description = "Download the Qdrant binary used by the Electron desktop app"
-dir = "{{config_root}}/apps/desktop"
-run = "pnpm run prepare:qdrant"
-
-[tasks."desktop:qdrant:prepare:all"]
-description = "Download all supported Qdrant binaries for desktop packaging"
-dir = "{{config_root}}/apps/desktop"
-run = "pnpm run prepare:qdrant:all"
-
-[tasks."desktop:qdrant:prepare:release-platform"]
-description = "Download Qdrant binaries for the current release platform"
-dir = "{{config_root}}/apps/desktop"
-run = "pnpm run prepare:qdrant:release-platform"
-
 [tasks."desktop:gstreamer:prepare"]
 description = "Download the GStreamer runtime used by the Electron desktop app"
 dir = "{{config_root}}/apps/desktop"

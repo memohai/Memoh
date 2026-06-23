@@ -89,12 +89,6 @@ wal = true
 # Wait up to this many milliseconds when another connection holds a write lock.
 busy_timeout_ms = 5000
 
-## Qdrant configuration
-[qdrant]
-base_url = "http://qdrant:6334"
-api_key = ""
-timeout_seconds = 10
-
 [registry]
 providers_dir = "conf/providers"
 

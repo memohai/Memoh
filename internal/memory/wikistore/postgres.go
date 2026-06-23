@@ -198,16 +198,16 @@ func (s *PostgresStore) CountEdges(ctx context.Context, botID string) (int, erro
 	return int(n), nil
 }
 
-func (s *PostgresStore) RebuildImplicitEdges(ctx context.Context, botID string) (int, error) {
+func (s *PostgresStore) RebuildDerivedEdges(ctx context.Context, botID string) (int, error) {
 	if s.q == nil {
 		return 0, errors.New("wikistore(postgres): queries not configured")
 	}
-	for _, rel := range migrate.ImplicitEdgeRels {
+	for _, rel := range migrate.DerivedEdgeRels {
 		if err := s.q.DeleteMemoryEdgesByRelForBot(ctx, dbsqlc.DeleteMemoryEdgesByRelForBotParams{
 			BotID: pgUUID(botID),
 			Rel:   string(rel),
 		}); err != nil {
-			return 0, fmt.Errorf("wikistore(postgres): clear implicit edges: %w", err)
+			return 0, fmt.Errorf("wikistore(postgres): clear derived edges: %w", err)
 		}
 	}
 	nodes, err := s.ListNodes(ctx, botID)
@@ -215,11 +215,11 @@ func (s *PostgresStore) RebuildImplicitEdges(ctx context.Context, botID string) 
 		return 0, err
 	}
 	edges := migrate.PlanFromNodes(nodes)
-	implicit := filterImplicitEdges(edges, migrate.ImplicitEdgeRels)
-	if err := s.UpsertEdges(ctx, implicit); err != nil {
+	derived := filterImplicitEdges(edges, migrate.DerivedEdgeRels)
+	if err := s.UpsertEdges(ctx, derived); err != nil {
 		return 0, err
 	}
-	return len(implicit), nil
+	return len(derived), nil
 }
 
 // ---- Postgres row -> record/spec helpers ----

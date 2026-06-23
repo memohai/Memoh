@@ -18,7 +18,6 @@ import (
 	"github.com/memohai/memoh/internal/memory/wikistore"
 )
 
-// ModeGraph is the graph-first memory mode: PG memory_nodes/memory_edges are
 // ModeGraph is the memory mode identifier for the graph runtime. It is the
 // only supported mode: PG memory nodes/edges are the source of truth, with
 // Markdown as a derived agent-facing view.
@@ -26,15 +25,14 @@ const ModeGraph = "graph"
 
 // graphRuntime implements Runtime over the PG/SQLite wiki graph. The wiki
 // store (wikistore.Store) is authoritative; the filesystem store (memoryStore)
-// graphRuntime implements Runtime over the PG/SQLite wiki graph. The wiki
-// store (wikistore.Store) is authoritative; the filesystem store (memoryStore)
 // holds the derived Markdown view the agent reads.
 type graphRuntime struct {
-	store  wikistore.Store
-	fs     memoryStore
-	cache  *graphCache
-	syncer *graphSync
-	logger *slog.Logger
+	store    wikistore.Store
+	fs       memoryStore
+	cache    *graphCache
+	syncer   *graphSync
+	semantic *pgvectorIndex
+	logger   *slog.Logger
 }
 
 // NewGraphRuntime constructs a graphRuntime. wikiStore is required; fs is the
@@ -50,6 +48,15 @@ func NewGraphRuntime(logger *slog.Logger, wikiStore wikistore.Store, fs memorySt
 		syncer: newGraphSync(fs, logger),
 		logger: logger.With("runtime", "graph"),
 	}
+}
+
+// SetSemanticIndex wires an optional Postgres pgvector seed index. It never
+// owns the memory source of truth; failures only degrade to graph lexical recall.
+func (r *graphRuntime) SetSemanticIndex(index *pgvectorIndex) {
+	if index == nil {
+		return
+	}
+	r.semantic = index
 }
 
 func (*graphRuntime) Mode() string { return string(ModeGraph) }
@@ -70,10 +77,21 @@ func (r *graphRuntime) syncAndInvalidate(ctx context.Context, botID string) {
 	} else if err := r.syncer.syncMarkdownFromNodes(ctx, botID, nodes); err != nil {
 		r.logger.Warn("graph: markdown sync failed", "bot_id", botID, "err", err)
 	}
-	if _, err := r.store.RebuildImplicitEdges(ctx, botID); err != nil {
-		r.logger.Debug("graph: rebuild implicit edges failed", "bot_id", botID, "err", err)
+	if _, err := r.store.RebuildDerivedEdges(ctx, botID); err != nil {
+		r.logger.Debug("graph: rebuild derived edges failed", "bot_id", botID, "err", err)
 	}
 	r.cache.invalidate(botID)
+}
+
+func (r *graphRuntime) semanticUpsertBestEffort(botID string, n migrate.NodeSpec) {
+	if r.semantic == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), semanticEmbedTimeout)
+	defer cancel()
+	if err := r.semantic.Upsert(ctx, botID, n.ID, n.Body, n.Hash); err != nil {
+		r.logger.Debug("graph: pgvector upsert failed; semantic seed index is degraded", "bot_id", botID, "node_id", n.ID, "err", err)
+	}
 }
 
 // ---- Runtime: CRUD ----
@@ -104,6 +122,7 @@ func (r *graphRuntime) Add(ctx context.Context, req adapters.AddRequest) (adapte
 	if err != nil {
 		return adapters.SearchResponse{}, fmt.Errorf("graph runtime: upsert node: %w", err)
 	}
+	r.semanticUpsertBestEffort(botID, saved) //nolint:contextcheck // async semantic upsert uses its own bounded context
 	r.syncAndInvalidate(ctx, botID)
 	return adapters.SearchResponse{Results: []adapters.MemoryItem{nodeSpecToMemoryItem(saved)}}, nil
 }
@@ -141,25 +160,40 @@ func (r *graphRuntime) searchGraph(ctx context.Context, botID, query string, lim
 	}
 	nodes := graph.nodeSlice()
 
-	// 1. Seed: lexical-score every node body against the query.
+	overfetch := limit * 3
+	if overfetch < 10 {
+		overfetch = 10
+	}
+
+	// 1. Seed: pgvector semantic seeds when configured, plus lexical seeds.
 	type seed struct {
 		id    string
 		score float64
 	}
-	seeds := make([]seed, 0, len(nodes))
+	seedScores := map[string]float64{}
+	if r.semantic != nil {
+		if semanticSeeds, semanticErr := r.semantic.SearchSeeds(ctx, botID, query, overfetch); semanticErr != nil {
+			r.logger.Debug("graph: pgvector seed search failed, using lexical seeds", "bot_id", botID, "err", semanticErr)
+		} else {
+			for id, score := range semanticSeeds {
+				if _, ok := graph.nodes[id]; ok {
+					seedScores[id] = max64(seedScores[id], score)
+				}
+			}
+		}
+	}
 	for _, n := range nodes {
 		s := graphLexicalScore(query, n.Body)
 		if s <= 0 && strings.TrimSpace(query) != "" {
 			continue
 		}
-		seeds = append(seeds, seed{id: n.ID, score: s})
+		seedScores[n.ID] = max64(seedScores[n.ID], s)
+	}
+	seeds := make([]seed, 0, len(seedScores))
+	for id, score := range seedScores {
+		seeds = append(seeds, seed{id: id, score: score})
 	}
 	sort.Slice(seeds, func(i, j int) bool { return seeds[i].score > seeds[j].score })
-
-	overfetch := limit * 3
-	if overfetch < 10 {
-		overfetch = 10
-	}
 	if len(seeds) > overfetch {
 		seeds = seeds[:overfetch]
 	}
@@ -314,6 +348,7 @@ func (r *graphRuntime) Update(ctx context.Context, req adapters.UpdateRequest) (
 	if err != nil {
 		return adapters.MemoryItem{}, fmt.Errorf("graph runtime: update node: %w", err)
 	}
+	r.semanticUpsertBestEffort(botID, saved) //nolint:contextcheck // async semantic upsert uses its own bounded context
 	r.syncAndInvalidate(ctx, botID)
 	return nodeSpecToMemoryItem(saved), nil
 }
@@ -327,6 +362,7 @@ func (r *graphRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (ada
 		return adapters.DeleteResponse{}, errors.New("graph runtime: wiki store not configured")
 	}
 	seen := map[string]bool{}
+	deletedByBot := map[string][]string{}
 	for _, rawID := range memoryIDs {
 		memoryID := strings.TrimSpace(rawID)
 		if memoryID == "" || seen[memoryID] {
@@ -340,7 +376,17 @@ func (r *graphRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (ada
 		if err := r.store.DeleteNode(ctx, botID, memoryID); err != nil {
 			return adapters.DeleteResponse{}, fmt.Errorf("graph runtime: delete node: %w", err)
 		}
+		deletedByBot[botID] = append(deletedByBot[botID], memoryID)
 		r.syncAndInvalidate(ctx, botID)
+	}
+	if r.semantic != nil {
+		semanticCtx, cancel := context.WithTimeout(ctx, semanticEmbedTimeout)
+		defer cancel()
+		for botID, ids := range deletedByBot {
+			if err := r.semantic.DeleteNodes(semanticCtx, botID, ids); err != nil {
+				r.logger.Debug("graph: pgvector delete failed", "bot_id", botID, "err", err)
+			}
+		}
 	}
 	return adapters.DeleteResponse{Message: "Memories deleted successfully!"}, nil
 }
@@ -359,6 +405,13 @@ func (r *graphRuntime) DeleteAll(ctx context.Context, req adapters.DeleteAllRequ
 	if r.fs != nil {
 		if err := r.fs.RemoveAllMemories(ctx, botID); err != nil {
 			r.logger.Warn("graph: remove derived markdown failed", "bot_id", botID, "err", err)
+		}
+	}
+	if r.semantic != nil {
+		auxCtx, cancel := context.WithTimeout(ctx, semanticEmbedTimeout)
+		defer cancel()
+		if err := r.semantic.DeleteBot(auxCtx, botID); err != nil {
+			r.logger.Debug("graph: pgvector delete bot failed", "bot_id", botID, "err", err)
 		}
 	}
 	r.cache.invalidate(botID)
@@ -395,12 +448,21 @@ func (r *graphRuntime) Compact(ctx context.Context, filters map[string]any, rati
 	if target > before {
 		target = before
 	}
+	droppedIDs := make([]string, 0, len(nodes)-target)
 	for _, n := range nodes[target:] {
 		if err := r.store.DeleteNode(ctx, botID, n.ID); err != nil {
 			return adapters.CompactResult{}, fmt.Errorf("graph runtime: compact delete: %w", err)
 		}
+		droppedIDs = append(droppedIDs, n.ID)
 	}
 	kept := nodes[:target]
+	if r.semantic != nil && len(droppedIDs) > 0 {
+		auxCtx, cancel := context.WithTimeout(ctx, semanticEmbedTimeout)
+		defer cancel()
+		if err := r.semantic.DeleteNodes(auxCtx, botID, droppedIDs); err != nil {
+			r.logger.Debug("graph: pgvector compact delete failed", "bot_id", botID, "err", err)
+		}
+	}
 	r.syncAndInvalidate(ctx, botID)
 	items := make([]adapters.MemoryItem, 0, len(kept))
 	for _, n := range kept {
@@ -454,6 +516,13 @@ func (r *graphRuntime) CompactWithLLM(ctx context.Context, filters map[string]an
 	if err := r.store.DeleteAllNodes(ctx, botID); err != nil {
 		return adapters.CompactResult{}, fmt.Errorf("graph runtime: compact clear: %w", err)
 	}
+	if r.semantic != nil {
+		auxCtx, cancel := context.WithTimeout(ctx, semanticEmbedTimeout)
+		defer cancel()
+		if err := r.semantic.DeleteBot(auxCtx, botID); err != nil {
+			r.logger.Debug("graph: pgvector compact clear failed", "bot_id", botID, "err", err)
+		}
+	}
 	now := time.Now().UTC()
 	for _, fact := range compacted {
 		spec := memoryItemToNodeSpec(adapters.MemoryItem{
@@ -466,6 +535,8 @@ func (r *graphRuntime) CompactWithLLM(ctx context.Context, filters map[string]an
 		}, botID)
 		if _, err := r.store.UpsertNode(ctx, spec); err != nil {
 			r.logger.Warn("graph: compact upsert failed", "bot_id", botID, "err", err)
+		} else {
+			r.semanticUpsertBestEffort(botID, spec) //nolint:contextcheck // async semantic upsert uses its own bounded context
 		}
 	}
 	keptNodes, _ := r.store.ListNodes(ctx, botID)
@@ -516,7 +587,19 @@ func (r *graphRuntime) Status(ctx context.Context, botID string) (adapters.Memor
 		SourceDir:     path.Join(config.DefaultDataMount, "memory"),
 		OverviewPath:  path.Join(config.DefaultDataMount, "MEMORY.md"),
 		SourceCount:   nodeCount,
-		IndexedCount:  edgeCount,
+		EdgeCount:     edgeCount,
+		IndexedCount:  0,
+	}
+	if r.semantic != nil {
+		resp.VectorIndex = r.semantic.Name()
+		if err := r.semantic.Health(ctx); err != nil {
+			resp.Pgvector = adapters.HealthStatus{Error: err.Error()}
+		} else {
+			resp.Pgvector = adapters.HealthStatus{OK: true}
+			if count, err := r.semantic.Count(ctx, botID); err == nil {
+				resp.IndexedCount = count
+			}
+		}
 	}
 	if r.fs != nil {
 		if fc, err := r.fs.CountMemoryFiles(ctx, botID); err == nil {
@@ -536,7 +619,19 @@ func (r *graphRuntime) Rebuild(ctx context.Context, botID string) (adapters.Rebu
 	}
 	r.syncAndInvalidate(ctx, botID)
 	count, _ := r.store.CountNodes(ctx, botID)
-	return adapters.RebuildResult{FsCount: len(nodes), StorageCount: count}, nil
+	result := adapters.RebuildResult{FsCount: len(nodes), StorageCount: count}
+	if r.semantic != nil {
+		if err := r.semantic.DeleteBot(ctx, botID); err != nil {
+			r.logger.Debug("graph: pgvector rebuild clear failed", "bot_id", botID, "err", err)
+		}
+		for _, node := range nodes {
+			r.semanticUpsertBestEffort(botID, node) //nolint:contextcheck // async semantic upsert uses its own bounded context
+		}
+		if indexed, err := r.semantic.Count(ctx, botID); err == nil {
+			result.StorageCount = indexed
+		}
+	}
+	return result, nil
 }
 
 // ---- node/memory item conversion ----

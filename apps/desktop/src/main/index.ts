@@ -16,7 +16,6 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import iconPng from '../../resources/icon.png?asset'
 import trayIconPng from '../../resources/tray-icon.png?asset'
-import { stopEmbeddedQdrant } from './qdrant'
 import {
   defaultWorkspacePath,
   ensureLocalServer,
@@ -59,7 +58,6 @@ const LOCAL_USER_DATA_ENTRIES = [
   'local-server',
   'local-server.log',
   'local-server.pid.json',
-  'qdrant',
   'gstreamer',
   'cli-token.json',
   'cli-prefs.json',
@@ -345,7 +343,6 @@ async function stopLocalProcesses(): Promise<void> {
   if (isRemoteMode()) return
   await stopProviderOAuthCallbackProxy()
   await stopManagedServer()
-  await stopEmbeddedQdrant()
 }
 
 function hideDesktopSurfacesForQuit(): void {

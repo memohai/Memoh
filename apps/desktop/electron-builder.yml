@@ -28,10 +28,6 @@ extraResources:
     to: config
   - from: resources/providers
     to: providers
-  - from: resources/qdrant
-    to: qdrant
-    filter:
-      - ${env.MEMOH_DESKTOP_QDRANT_TARGET}/**/*
   - from: resources/gstreamer
     to: gstreamer
     filter:

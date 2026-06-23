@@ -239,18 +239,18 @@ jobs:
 
           if [[ "$MEMOH_DESKTOP_FLAVOR" == "online" ]]; then
             declare -a bundles=(
-              "arm64:__none__:apps/desktop/dist/mac-arm64/Memoh.app"
-              "x64:__none__:apps/desktop/dist/mac/Memoh.app"
+              "arm64:apps/desktop/dist/mac-arm64/Memoh.app"
+              "x64:apps/desktop/dist/mac/Memoh.app"
             )
           else
             declare -a bundles=(
-              "arm64:darwin-arm64:apps/desktop/dist/mac-arm64/Memoh Local.app"
-              "x64:darwin-x64:apps/desktop/dist/mac/Memoh Local.app"
+              "arm64:apps/desktop/dist/mac-arm64/Memoh Local.app"
+              "x64:apps/desktop/dist/mac/Memoh Local.app"
             )
           fi
 
           for bundle in "${bundles[@]}"; do
-            IFS=: read -r arch qdrant_target app_path <<<"$bundle"
+            IFS=: read -r arch app_path <<<"$bundle"
 
             if [[ ! -d "$app_path" ]]; then
               echo "Missing $arch app bundle: $app_path" >&2
@@ -258,34 +258,19 @@ jobs:
             fi
 
             if [[ "$MEMOH_DESKTOP_FLAVOR" == "online" ]]; then
-              for local_resource in server cli runtime config providers qdrant gstreamer; do
+              for local_resource in server cli runtime config providers gstreamer; do
                 if [[ -e "$app_path/Contents/Resources/$local_resource" ]]; then
                   echo "Unexpected local-only resource in online $arch app: $local_resource" >&2
                   exit 1
                 fi
               done
             else
-              for local_resource in server cli runtime config providers qdrant gstreamer; do
+              for local_resource in server cli runtime config providers gstreamer; do
                 if [[ ! -e "$app_path/Contents/Resources/$local_resource" ]]; then
                   echo "Missing local resource in local $arch app: $local_resource" >&2
                   exit 1
                 fi
               done
-
-              qdrant_root="$app_path/Contents/Resources/qdrant"
-              qdrant_bin="$qdrant_root/$qdrant_target/qdrant"
-              if [[ ! -x "$qdrant_bin" ]]; then
-                echo "Missing $arch qdrant binary: $qdrant_bin" >&2
-                find "$qdrant_root" -maxdepth 3 -type f -print || true
-                exit 1
-              fi
-
-              extra_qdrant_dirs="$(find "$qdrant_root" -mindepth 1 -maxdepth 1 -type d ! -name "$qdrant_target" -print -quit)"
-              if [[ -n "$extra_qdrant_dirs" ]]; then
-                echo "Unexpected qdrant resource in $arch app: $extra_qdrant_dirs" >&2
-                find "$qdrant_root" -mindepth 1 -maxdepth 1 -type d -print
-                exit 1
-              fi
             fi
 
             codesign --verify --deep --strict --verbose=2 "$app_path"

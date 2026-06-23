@@ -50,8 +50,8 @@ else
   WEBHOOK_PUBLIC_BASE_SET=false
 fi
 NETWORK_NAME="${COMPOSE_PROJECT_NAME}_memoh-network"
-PROJECT_CONTAINERS="memoh-postgres memoh-migrate memoh-server memoh-web memoh-qdrant memoh-webhook-tunnel"
-PROJECT_VOLUMES="${COMPOSE_PROJECT_NAME}_postgres_data ${COMPOSE_PROJECT_NAME}_containerd_data ${COMPOSE_PROJECT_NAME}_memoh_data ${COMPOSE_PROJECT_NAME}_server_cni_state ${COMPOSE_PROJECT_NAME}_qdrant_data ${COMPOSE_PROJECT_NAME}_openviking_data"
+PROJECT_CONTAINERS="memoh-postgres memoh-migrate memoh-server memoh-web memoh-webhook-tunnel"
+PROJECT_VOLUMES="${COMPOSE_PROJECT_NAME}_postgres_data ${COMPOSE_PROJECT_NAME}_containerd_data ${COMPOSE_PROJECT_NAME}_memoh_data ${COMPOSE_PROJECT_NAME}_server_cni_state ${COMPOSE_PROJECT_NAME}_openviking_data"
 
 EXISTING_CONFIG_SOURCE=""
 EXISTING_ENV_SOURCE=""
@@ -768,7 +768,7 @@ export MEMOH_DATA_DIR
 export POSTGRES_PASSWORD="${PG_PASS}"
 
 COMPOSE_FILES="-f ${COMPOSE_FILE_NAME}"
-COMPOSE_PROFILES="--profile qdrant"
+COMPOSE_PROFILES=""
 if [ "$USE_CN_MIRROR" = true ]; then
   COMPOSE_FILES="$COMPOSE_FILES -f ${CN_COMPOSE_FILE_NAME}"
   echo "${GREEN}✓ Using China mainland mirror (memoh.cn)${NC}"

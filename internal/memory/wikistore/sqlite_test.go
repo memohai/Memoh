@@ -16,7 +16,7 @@ import (
 
 // TestSQLiteStoreRoundTrip exercises the backend-agnostic Store contract
 // against a real SQLite database with the wiki schema. It verifies
-// Upsert/Get/List/Delete for nodes, edge derivation via RebuildImplicitEdges,
+// Upsert/Get/List/Delete for nodes, edge derivation via RebuildDerivedEdges,
 // and that deletes clear incident edges.
 func TestSQLiteStoreRoundTrip(t *testing.T) {
 	ctx := context.Background()
@@ -91,12 +91,12 @@ func TestSQLiteStoreRoundTrip(t *testing.T) {
 	}
 
 	// Rebuild implicit edges: n1+n2 share profile_ref user:42 -> same_profile edge.
-	written, err := store.RebuildImplicitEdges(ctx, botID)
+	written, err := store.RebuildDerivedEdges(ctx, botID)
 	if err != nil {
-		t.Fatalf("RebuildImplicitEdges: %v", err)
+		t.Fatalf("RebuildDerivedEdges: %v", err)
 	}
 	if written == 0 {
-		t.Fatal("RebuildImplicitEdges wrote 0 edges, expected at least the same_profile edge")
+		t.Fatal("RebuildDerivedEdges wrote 0 edges, expected at least the same_profile edge")
 	}
 	edges, err := store.ListEdges(ctx, botID)
 	if err != nil {
@@ -116,12 +116,12 @@ func TestSQLiteStoreRoundTrip(t *testing.T) {
 	}
 
 	// Idempotent rebuild: same count.
-	written2, err := store.RebuildImplicitEdges(ctx, botID)
+	written2, err := store.RebuildDerivedEdges(ctx, botID)
 	if err != nil {
-		t.Fatalf("RebuildImplicitEdges (2nd): %v", err)
+		t.Fatalf("RebuildDerivedEdges (2nd): %v", err)
 	}
 	if written2 != written {
-		t.Fatalf("RebuildImplicitEdges not idempotent: %d then %d", written, written2)
+		t.Fatalf("RebuildDerivedEdges not idempotent: %d then %d", written, written2)
 	}
 
 	// Update n2 to point at a different profile; rebuild should drop the old edge.
@@ -132,8 +132,8 @@ func TestSQLiteStoreRoundTrip(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertNode 2 (update): %v", err)
 	}
-	if _, err := store.RebuildImplicitEdges(ctx, botID); err != nil {
-		t.Fatalf("RebuildImplicitEdges (3rd): %v", err)
+	if _, err := store.RebuildDerivedEdges(ctx, botID); err != nil {
+		t.Fatalf("RebuildDerivedEdges (3rd): %v", err)
 	}
 	edges2, _ := store.ListEdges(ctx, botID)
 	for _, e := range edges2 {

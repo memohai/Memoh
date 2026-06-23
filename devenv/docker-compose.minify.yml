@@ -19,21 +19,6 @@ services:
       retries: 5
     restart: unless-stopped
 
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: memoh-dev-qdrant
-    volumes:
-      - qdrant_data:/qdrant/storage
-    ports:
-      - "${MEMOH_DEV_QDRANT_HTTP_PORT:-16333}:6333"
-      - "${MEMOH_DEV_QDRANT_GRPC_PORT:-16334}:6334"
-    healthcheck:
-      test: ["CMD-SHELL", "timeout 5s bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    restart: unless-stopped
-
   deps:
     build:
       context: ..
@@ -68,8 +53,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      qdrant:
-        condition: service_healthy
     restart: "no"
 
   server:
@@ -90,10 +73,10 @@ services:
       #   HTTP_PROXY=http://host.docker.internal:7890 mise run dev
       HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
       HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
-      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,qdrant,server,web,migrate,deps,webhook-tunnel,memoh-dev-postgres,memoh-dev-qdrant,memoh-dev-server,memoh-dev-web,memoh-dev-migrate,memoh-dev-deps,memoh-dev-webhook-tunnel"
+      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,server,web,migrate,deps,webhook-tunnel,memoh-dev-postgres,memoh-dev-server,memoh-dev-web,memoh-dev-migrate,memoh-dev-deps,memoh-dev-webhook-tunnel"
       http_proxy: "${http_proxy:-${HTTP_PROXY:-}}"
       https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
-      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,qdrant,server,web,migrate,deps,webhook-tunnel,memoh-dev-postgres,memoh-dev-qdrant,memoh-dev-server,memoh-dev-web,memoh-dev-migrate,memoh-dev-deps,memoh-dev-webhook-tunnel"
+      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,server,web,migrate,deps,webhook-tunnel,memoh-dev-postgres,memoh-dev-server,memoh-dev-web,memoh-dev-migrate,memoh-dev-deps,memoh-dev-webhook-tunnel"
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN: "${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}"
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX: "${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}"
     volumes:
@@ -120,8 +103,6 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      qdrant:
-        condition: service_healthy
     restart: unless-stopped
 
   web:
@@ -148,8 +129,6 @@ services:
 
 volumes:
   postgres_data:
-    driver: local
-  qdrant_data:
     driver: local
   go_mod_cache:
     driver: local

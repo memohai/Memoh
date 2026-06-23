@@ -66,11 +66,6 @@ path = "/opt/memoh/data/memoh.sqlite.db"
 wal = true
 busy_timeout_ms = 5000
 
-[qdrant]
-base_url = "http://qdrant:6334"
-api_key = ""
-timeout_seconds = 10
-
 [web]
 host = "0.0.0.0"
 port = 8082

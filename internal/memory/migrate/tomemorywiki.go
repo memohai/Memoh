@@ -7,9 +7,11 @@ package migrate
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 )
@@ -35,6 +37,7 @@ const (
 	EdgeSameProfile EdgeRel = "same_profile"
 	EdgeSameTopic   EdgeRel = "same_topic"
 	EdgeSameDay     EdgeRel = "same_day"
+	EdgeRefs        EdgeRel = "refs"
 )
 
 // NodeSpec is a backend-agnostic description of a memory_nodes row, produced
@@ -76,7 +79,8 @@ type Result struct {
 }
 
 // Plan converts a bot's markdown memory items into wiki node specs plus the
-// implicit edges derivable from shared profile_ref / topic / captured day.
+// derived edges from shared profile_ref/topic/captured day and explicit wiki
+// cross-references in node bodies.
 // It performs no I/O and is safe to call in dry-run mode.
 //
 // Layer classification is intentionally conservative: items without any hint
@@ -87,20 +91,23 @@ func Plan(botID string, items []storefs.MemoryItem) ([]NodeSpec, []EdgeSpec) {
 	for _, item := range items {
 		nodes = append(nodes, nodeFromItem(botID, item))
 	}
-	edges := buildImplicitEdges(nodes)
+	edges := buildDerivedEdges(nodes)
 	return nodes, edges
 }
 
-// PlanFromNodes derives implicit edges from an existing set of nodes (e.g.
-// already persisted in the wiki store) without re-classifying them. It is the
-// edge-derivation half of Plan, used by RebuildImplicitEdges.
+// PlanFromNodes derives graph edges from an existing set of nodes (e.g. already
+// persisted in the wiki store) without re-classifying them. It is the
+// edge-derivation half of Plan, used by RebuildDerivedEdges.
 func PlanFromNodes(nodes []NodeSpec) []EdgeSpec {
-	return buildImplicitEdges(nodes)
+	return buildDerivedEdges(nodes)
 }
 
 // ImplicitEdgeRels is the canonical set of edges derived automatically from
 // node attributes (as opposed to explicit refs/supersedes/... authored later).
 var ImplicitEdgeRels = []EdgeRel{EdgeSameProfile, EdgeSameTopic, EdgeSameDay}
+
+// DerivedEdgeRels is the canonical set of edges rebuilt from node state.
+var DerivedEdgeRels = []EdgeRel{EdgeSameProfile, EdgeSameTopic, EdgeSameDay, EdgeRefs}
 
 // Summarise returns a Result for a planned node/edge set, suitable for CLI
 // dry-run reporting.
@@ -218,6 +225,130 @@ func buildImplicitEdges(nodes []NodeSpec) []EdgeSpec {
 		return edges[i].DstNode < edges[j].DstNode
 	})
 	return edges
+}
+
+func buildDerivedEdges(nodes []NodeSpec) []EdgeSpec {
+	edges := buildImplicitEdges(nodes)
+	edges = append(edges, buildRefEdges(nodes)...)
+	sort.Slice(edges, func(i, j int) bool {
+		if edges[i].Rel != edges[j].Rel {
+			return edges[i].Rel < edges[j].Rel
+		}
+		if edges[i].SrcNode != edges[j].SrcNode {
+			return edges[i].SrcNode < edges[j].SrcNode
+		}
+		return edges[i].DstNode < edges[j].DstNode
+	})
+	return edges
+}
+
+func buildRefEdges(nodes []NodeSpec) []EdgeSpec {
+	if len(nodes) < 2 {
+		return nil
+	}
+	slugToID := make(map[string]string, len(nodes))
+	for _, node := range nodes {
+		if slug := NodeSlug(node.ID, node.Subject, node.Topic); slug != "" {
+			slugToID[slug] = node.ID
+		}
+	}
+	seen := map[string]struct{}{}
+	edges := make([]EdgeSpec, 0)
+	for _, src := range nodes {
+		for _, raw := range ParseMemoryLinks(src.Body) {
+			dstID, ok := slugToID[Slugify(raw)]
+			if !ok || dstID == src.ID {
+				continue
+			}
+			key := src.ID + "\x00" + dstID + "\x00" + string(EdgeRefs)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			edges = append(edges, EdgeSpec{
+				BotID:   src.BotID,
+				SrcNode: src.ID,
+				DstNode: dstID,
+				Rel:     EdgeRefs,
+				Weight:  1.0,
+			})
+		}
+	}
+	return edges
+}
+
+// NodeSlug returns the human/LLM-friendly slug used in wiki cross-references.
+func NodeSlug(id, subject, topic string) string {
+	if slug := Slugify(subject); slug != "" {
+		return slug
+	}
+	if slug := Slugify(topic); slug != "" {
+		return slug
+	}
+	if idx := strings.LastIndex(id, ":"); idx >= 0 && idx+1 < len(id) {
+		return Slugify(id[idx+1:])
+	}
+	return Slugify(id)
+}
+
+// Slugify normalizes a user/LLM-facing memory label for [[slug]] links.
+func Slugify(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	lastDash := false
+	for _, r := range s {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			b.WriteRune(r)
+			lastDash = false
+		default:
+			if !lastDash && b.Len() > 0 {
+				b.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+var (
+	wikiLinkRe = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
+	mdLinkRe   = regexp.MustCompile(`\[[^\]]*\]\(([^)]+)\)`)
+)
+
+// ParseMemoryLinks extracts referenced slugs from a memory body. It supports
+// [[slug]] and [label](slug). HTTP(S) links are ignored.
+func ParseMemoryLinks(body string) []string {
+	var slugs []string
+	seen := map[string]bool{}
+	collect := func(raw string) {
+		slug := Slugify(raw)
+		if slug == "" || seen[slug] {
+			return
+		}
+		seen[slug] = true
+		slugs = append(slugs, slug)
+	}
+	for _, m := range wikiLinkRe.FindAllStringSubmatch(body, -1) {
+		if len(m) > 1 {
+			collect(m[1])
+		}
+	}
+	for _, m := range mdLinkRe.FindAllStringSubmatch(body, -1) {
+		if len(m) <= 1 {
+			continue
+		}
+		href := strings.TrimSpace(m[1])
+		lower := strings.ToLower(href)
+		if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+			continue
+		}
+		collect(href)
+	}
+	return slugs
 }
 
 // indexBy groups nodes sharing the same non-empty key.

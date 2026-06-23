@@ -15,11 +15,11 @@ Deploy/server mode consists of two core services:
 | **Server** (Backend) | Go + Echo | 8080 | Main service: REST API, auth, database, container management, **in-process AI agent** |
 | **Web** (Frontend) | Vue 3 + Vite | 8082 | Management UI: visual configuration for Bots, Models, Channels, etc. |
 
-The native desktop client is a separate distribution boundary, not just a hosted Web shell. `apps/desktop` reuses `@memohai/web` modules, but owns the Electron shell, system tray behavior, local server lifecycle, embedded Qdrant startup, bundled CLI installation, and packaged resources. In desktop mode the app starts and stops a local `memoh-server` on `127.0.0.1:18731` with its own SQLite data, provider templates, bridge runtime, and Qdrant process under the user's app data directory.
+The native desktop client is a separate distribution boundary, not just a hosted Web shell. `apps/desktop` reuses `@memohai/web` modules, but owns the Electron shell, system tray behavior, local server lifecycle, bundled CLI installation, and packaged resources. In desktop mode the app starts and stops a local `memoh-server` on `127.0.0.1:18731` with its own SQLite data, provider templates, and bridge runtime under the user's app data directory.
 
 Infrastructure dependencies:
 - **PostgreSQL or SQLite** — Relational data storage
-- **Qdrant** — Vector database for memory semantic search; external in deploy/server mode, embedded and managed by the desktop client for local desktop mode
+- **pgvector** — Postgres extension used for optional semantic memory seed search in deploy/server mode. SQLite/local desktop uses graph-only memory search.
 - **Workspace runtime** — Isolated containers per bot via Docker, containerd v2, or Apple Virtualization, plus trusted local workspaces for desktop/local development
 
 ## Tech Stack
@@ -43,7 +43,7 @@ Infrastructure dependencies:
 - **Icons**: lucide-vue-next + `@memohai/icon` (brand/provider icons)
 - **i18n**: vue-i18n
 - **Markdown**: markstream-vue + Shiki + Mermaid + KaTeX
-- **Desktop**: Electron 34 + [electron-vite](https://electron-vite.github.io/) 4 native client, reusing `@memohai/web` modules while managing the desktop renderer, local server lifecycle, embedded Qdrant, bundled CLI, tray behavior, and packaged runtime resources
+- **Desktop**: Electron 34 + [electron-vite](https://electron-vite.github.io/) 4 native client, reusing `@memohai/web` modules while managing the desktop renderer, local server lifecycle, bundled CLI, tray behavior, and packaged runtime resources
 - **Package Manager**: pnpm monorepo
 
 ### Tooling
@@ -136,7 +136,7 @@ Memoh/
 │   ├── logger/                 #   Structured logging (slog)
 │   ├── mcp/                    #   MCP protocol manager (connections, OAuth, tool gateway)
 │   ├── media/                  #   Content-addressed media asset service
-│   ├── memory/                 #   Long-term memory system (multi-provider: Qdrant, BM25, LLM extraction)
+│   ├── memory/                 #   Long-term memory system (graph store, optional Postgres pgvector seeds, LLM extraction)
 │   ├── message/                #   Message persistence and event publishing
 │   ├── messaging/              #   Outbound message executor
 │   ├── models/                 #   LLM model management (CRUD, variants, client types, probe)
@@ -168,7 +168,7 @@ Memoh/
 │       ├── bridge/             #     gRPC client for in-container bridge service
 │       └── bridgepb/           #     Protobuf definitions (bridge.proto)
 ├── apps/                       # Application services
-│   ├── desktop/                #   Native Electron app (@memohai/desktop): renderer, tray, local server, embedded Qdrant, bundled CLI/runtime
+│   ├── desktop/                #   Native Electron app (@memohai/desktop): renderer, tray, local server, bundled CLI/runtime
 │   └── web/                    #   Main web app (@memohai/web, Vue 3) — see apps/web/AGENTS.md
 ├── packages/                   # Shared TypeScript libraries
 │   ├── ui/                     #   Shared UI component library (@memohai/ui)
@@ -284,7 +284,7 @@ docker compose up -d        # Start all services
 ```
 
 Production deploy services are `postgres`, `migrate`, `server`, and `web`.
-Optional profiles: `qdrant` (vector DB). This is distinct from the native desktop client, which manages its own local server and embedded Qdrant instead of using the Compose web/server split.
+The Compose stack uses Postgres with pgvector for optional semantic memory seeds. This is distinct from the native desktop client, which manages its own SQLite-backed local server instead of using the Compose web/server split.
 
 ## Key Development Rules
 
@@ -353,9 +353,8 @@ PostgreSQL migrations live in `db/postgres/migrations/` and follow a dual-update
 
 - `apps/desktop/` is an [electron-vite](https://electron-vite.github.io/) project (`@memohai/desktop`) with its own managed renderer bootstrap. It reuses exported `@memohai/web` pages, layouts, stores, i18n, API setup, and design tokens, but owns the Electron shell instead of importing the full web `main.ts`.
 - The desktop app boots its renderer with a memory-history router, desktop shell injection, native menu/keyboard integration, native chrome, and system tray reopen/quit behavior.
-- `src/main/local-server.ts` is the local server startup gate: it prepares a local SQLite config, starts embedded Qdrant, builds or resolves the bundled `memoh-server`, runs migrations, starts the server on `127.0.0.1:18731`, and writes `local-server.pid.json` / `local-server.log` under `userData`.
-- `src/main/qdrant.ts` manages the embedded Qdrant process and per-user `qdrant/ports.json`, `qdrant.pid.json`, `config.yaml`, and storage directory. Tray Quit and normal app quit both reuse the main-process shutdown path to stop the managed server, OAuth callback proxy, and embedded Qdrant.
-- Packaging is handled by `electron-builder` (config in `apps/desktop/electron-builder.yml`); output lands in `apps/desktop/dist/`. Packaged resources include `server`, `cli`, `runtime`, `config`, provider templates, Qdrant, and GStreamer assets.
+- `src/main/local-server.ts` is the local server startup gate: it prepares a local SQLite config, builds or resolves the bundled `memoh-server`, runs migrations, starts the server on `127.0.0.1:18731`, and writes `local-server.pid.json` / `local-server.log` under `userData`.
+- Packaging is handled by `electron-builder` (config in `apps/desktop/electron-builder.yml`); output lands in `apps/desktop/dist/`. Packaged resources include `server`, `cli`, `runtime`, `config`, provider templates, and GStreamer assets.
 - The Memoh CLI (`cmd/memoh/`) is bundled into the app at `Resources/cli/memoh` next to `Resources/server/memoh-server`. On first launch (and via the `Install Command Line Tool…` menu item) the main process offers to add `memoh` to PATH (`/usr/local/bin/memoh` symlink on macOS, `~/.local/bin/memoh` on Linux, HKCU PATH on Windows). The CLI talks to the local server at `127.0.0.1:18731`, self-logs in with the `[admin]` credentials in `userData/config.toml`, and shares the same pid file (`local-server.pid.json`) so either side can `start`/`stop` the server. See `apps/desktop/AGENTS.md` § Bundled CLI.
 - The online desktop product name is `Memoh`; the local/offline desktop product name is `Memoh Local`, so local userData lives at `~/Library/Application Support/Memoh Local/` (macOS), `%APPDATA%\Memoh Local\` (Windows), `~/.config/Memoh Local/` (Linux). The Go CLI hard-codes the local product name in `internal/tui/local/paths.go`; if you ever rename the local app, both sides must change together.
 - When desktop needs to diverge from the web experience, extend the desktop bootstrap or add explicit `@memohai/web` subpath exports plus desktop type stubs. Do **not** fork `apps/web` itself.
@@ -457,7 +456,6 @@ The main configuration file is `config.toml` (copied from `conf/app.example.toml
 - `[local]` — Trusted local workspace support for desktop/local development (not container-isolated)
 - `[postgres]` — PostgreSQL connection
 - `[sqlite]` — SQLite database file and WAL/lock settings
-- `[qdrant]` — Qdrant vector database connection
 - `[web]` — Web frontend address
 - `[registry]` — Provider registry (`providers_dir` pointing to `conf/providers/`)
 - `[supermarket]` — Supermarket integration (base_url)

@@ -93,16 +93,24 @@ func (s *fakeWikiStore) CountEdges(_ context.Context, _ string) (int, error) {
 	return len(s.edges), nil
 }
 
-func (s *fakeWikiStore) RebuildImplicitEdges(_ context.Context, _ string) (int, error) {
+func (s *fakeWikiStore) RebuildDerivedEdges(_ context.Context, _ string) (int, error) {
 	nodes := []migrate.NodeSpec{}
 	for _, n := range s.nodes {
 		nodes = append(nodes, n)
 	}
-	implicit := migrate.PlanFromNodes(nodes)
-	for _, e := range implicit {
+	for key, edge := range s.edges {
+		for _, rel := range migrate.DerivedEdgeRels {
+			if edge.Rel == rel {
+				delete(s.edges, key)
+				break
+			}
+		}
+	}
+	derived := migrate.PlanFromNodes(nodes)
+	for _, e := range derived {
 		s.edges[e.SrcNode+"\x00"+e.DstNode+"\x00"+string(e.Rel)] = e
 	}
-	return len(implicit), nil
+	return len(derived), nil
 }
 
 func TestGraphRuntimeAddSearchDelete(t *testing.T) {
@@ -191,6 +199,53 @@ func TestGraphRuntimeAddSearchDelete(t *testing.T) {
 	}
 }
 
+func TestGraphRuntimeSearchExpandsRefs(t *testing.T) {
+	t.Parallel()
+	store := newFakeWikiStore()
+	rt := NewGraphRuntime(nil, store, newFakeStore())
+
+	botID := "graph-bot-refs"
+	ctx := context.Background()
+
+	if _, err := rt.Add(ctx, adapters.AddRequest{
+		BotID:    botID,
+		Message:  "Alice's favorite editor is Helix and she links [[berlin-home]].",
+		Metadata: map[string]any{"subject": "alice-profile"},
+	}); err != nil {
+		t.Fatalf("Add ref source: %v", err)
+	}
+	if _, err := rt.Add(ctx, adapters.AddRequest{
+		BotID:    botID,
+		Message:  "Berlin home details are kept here.",
+		Metadata: map[string]any{"subject": "Berlin Home"},
+	}); err != nil {
+		t.Fatalf("Add ref target: %v", err)
+	}
+
+	resp, err := rt.Search(ctx, adapters.SearchRequest{BotID: botID, Query: "Helix", Limit: 5})
+	if err != nil {
+		t.Fatalf("Search refs: %v", err)
+	}
+	foundBerlin := false
+	foundRefs := false
+	for _, r := range resp.Results {
+		if strings.Contains(r.Memory, "Berlin home") {
+			foundBerlin = true
+		}
+	}
+	for _, rel := range resp.Relations {
+		if relation, ok := rel.(map[string]any); ok && relation["rel"] == string(migrate.EdgeRefs) {
+			foundRefs = true
+		}
+	}
+	if !foundBerlin {
+		t.Fatal("Search did not expand across refs edge to the Berlin memory")
+	}
+	if !foundRefs {
+		t.Fatal("Search did not report the refs relation")
+	}
+}
+
 func TestGraphRuntimeFileFallback(t *testing.T) {
 	t.Parallel()
 	// A wiki store that returns an error on ListNodes forces the file fallback.
@@ -243,6 +298,6 @@ func (errWikiStore) ListEdges(context.Context, string) ([]migrate.EdgeSpec, erro
 func (errWikiStore) DeleteEdgesForNode(context.Context, string, string) error { return nil }
 func (errWikiStore) DeleteAllEdges(context.Context, string) error             { return nil }
 func (errWikiStore) CountEdges(context.Context, string) (int, error)          { return 0, errForced }
-func (errWikiStore) RebuildImplicitEdges(context.Context, string) (int, error) {
+func (errWikiStore) RebuildDerivedEdges(context.Context, string) (int, error) {
 	return 0, errForced
 }

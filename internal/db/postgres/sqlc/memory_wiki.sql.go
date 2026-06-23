@@ -9,7 +9,23 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/pgvector/pgvector-go"
 )
+
+const checkMemoryNodeEmbeddingsStore = `-- name: CheckMemoryNodeEmbeddingsStore :one
+SELECT EXISTS (
+  SELECT 1
+  FROM memory_node_embeddings
+  LIMIT 1
+)
+`
+
+func (q *Queries) CheckMemoryNodeEmbeddingsStore(ctx context.Context) (bool, error) {
+	row := q.db.QueryRow(ctx, checkMemoryNodeEmbeddingsStore)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
 
 const countMemoryEdgesByBot = `-- name: CountMemoryEdgesByBot :one
 SELECT COUNT(*) FROM memory_edges
@@ -18,6 +34,24 @@ WHERE bot_id = $1
 
 func (q *Queries) CountMemoryEdgesByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countMemoryEdgesByBot, botID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countMemoryNodeEmbeddingsByBotModel = `-- name: CountMemoryNodeEmbeddingsByBotModel :one
+SELECT COUNT(*) FROM memory_node_embeddings
+WHERE bot_id = $1
+  AND model_id = $2
+`
+
+type CountMemoryNodeEmbeddingsByBotModelParams struct {
+	BotID   pgtype.UUID `json:"bot_id"`
+	ModelID pgtype.UUID `json:"model_id"`
+}
+
+func (q *Queries) CountMemoryNodeEmbeddingsByBotModel(ctx context.Context, arg CountMemoryNodeEmbeddingsByBotModelParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countMemoryNodeEmbeddingsByBotModel, arg.BotID, arg.ModelID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -42,6 +76,16 @@ WHERE bot_id = $1
 
 func (q *Queries) DeleteAllMemoryEdgesByBot(ctx context.Context, botID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteAllMemoryEdgesByBot, botID)
+	return err
+}
+
+const deleteAllMemoryNodeEmbeddingsByBot = `-- name: DeleteAllMemoryNodeEmbeddingsByBot :exec
+DELETE FROM memory_node_embeddings
+WHERE bot_id = $1
+`
+
+func (q *Queries) DeleteAllMemoryNodeEmbeddingsByBot(ctx context.Context, botID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteAllMemoryNodeEmbeddingsByBot, botID)
 	return err
 }
 
@@ -97,6 +141,22 @@ type DeleteMemoryNodeParams struct {
 
 func (q *Queries) DeleteMemoryNode(ctx context.Context, arg DeleteMemoryNodeParams) error {
 	_, err := q.db.Exec(ctx, deleteMemoryNode, arg.BotID, arg.ID)
+	return err
+}
+
+const deleteMemoryNodeEmbeddings = `-- name: DeleteMemoryNodeEmbeddings :exec
+DELETE FROM memory_node_embeddings
+WHERE bot_id = $1
+  AND node_id = ANY($2::text[])
+`
+
+type DeleteMemoryNodeEmbeddingsParams struct {
+	BotID   pgtype.UUID `json:"bot_id"`
+	NodeIds []string    `json:"node_ids"`
+}
+
+func (q *Queries) DeleteMemoryNodeEmbeddings(ctx context.Context, arg DeleteMemoryNodeEmbeddingsParams) error {
+	_, err := q.db.Exec(ctx, deleteMemoryNodeEmbeddings, arg.BotID, arg.NodeIds)
 	return err
 }
 
@@ -415,6 +475,54 @@ func (q *Queries) ListMemoryNodesByBotProfile(ctx context.Context, arg ListMemor
 	return items, nil
 }
 
+const searchMemoryNodeEmbeddings = `-- name: SearchMemoryNodeEmbeddings :many
+SELECT
+  node_id,
+  CAST(1.0 - (embedding <=> $1::vector) AS double precision) AS score
+FROM memory_node_embeddings
+WHERE bot_id = $2
+  AND model_id = $3
+ORDER BY embedding <=> $1::vector
+LIMIT $4
+`
+
+type SearchMemoryNodeEmbeddingsParams struct {
+	QueryEmbedding pgvector.Vector `json:"query_embedding"`
+	BotID          pgtype.UUID     `json:"bot_id"`
+	ModelID        pgtype.UUID     `json:"model_id"`
+	RowLimit       int32           `json:"row_limit"`
+}
+
+type SearchMemoryNodeEmbeddingsRow struct {
+	NodeID string  `json:"node_id"`
+	Score  float64 `json:"score"`
+}
+
+func (q *Queries) SearchMemoryNodeEmbeddings(ctx context.Context, arg SearchMemoryNodeEmbeddingsParams) ([]SearchMemoryNodeEmbeddingsRow, error) {
+	rows, err := q.db.Query(ctx, searchMemoryNodeEmbeddings,
+		arg.QueryEmbedding,
+		arg.BotID,
+		arg.ModelID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchMemoryNodeEmbeddingsRow
+	for rows.Next() {
+		var i SearchMemoryNodeEmbeddingsRow
+		if err := rows.Scan(&i.NodeID, &i.Score); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertMemoryNode = `-- name: UpsertMemoryNode :one
 INSERT INTO memory_nodes (
   id, bot_id, body, hash, layer, fact_type, subject, confidence,
@@ -491,4 +599,44 @@ func (q *Queries) UpsertMemoryNode(ctx context.Context, arg UpsertMemoryNodePara
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const upsertMemoryNodeEmbedding = `-- name: UpsertMemoryNodeEmbedding :exec
+INSERT INTO memory_node_embeddings (
+  bot_id, node_id, model_id, dimensions, body_hash, embedding
+)
+VALUES (
+  $1,
+  $2,
+  $3,
+  $4,
+  $5,
+  $6
+)
+ON CONFLICT (bot_id, node_id, model_id) DO UPDATE SET
+  dimensions = EXCLUDED.dimensions,
+  body_hash = EXCLUDED.body_hash,
+  embedding = EXCLUDED.embedding,
+  updated_at = now()
+`
+
+type UpsertMemoryNodeEmbeddingParams struct {
+	BotID      pgtype.UUID     `json:"bot_id"`
+	NodeID     string          `json:"node_id"`
+	ModelID    pgtype.UUID     `json:"model_id"`
+	Dimensions int32           `json:"dimensions"`
+	BodyHash   string          `json:"body_hash"`
+	Embedding  pgvector.Vector `json:"embedding"`
+}
+
+func (q *Queries) UpsertMemoryNodeEmbedding(ctx context.Context, arg UpsertMemoryNodeEmbeddingParams) error {
+	_, err := q.db.Exec(ctx, upsertMemoryNodeEmbedding,
+		arg.BotID,
+		arg.NodeID,
+		arg.ModelID,
+		arg.Dimensions,
+		arg.BodyHash,
+		arg.Embedding,
+	)
+	return err
 }
