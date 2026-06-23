@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -330,9 +331,11 @@ type graphResponse struct {
 	Edges []graphEdge `json:"edges"`
 }
 
-// ChatGraph returns the memory graph (nodes + derived edges) for the wiki
-// visualization. Edges are derived from shared topic/profile_ref — mirroring
-// the LLM Wiki pattern where cross-references are already compiled and visible.
+// ChatGraph returns the memory graph (nodes + markdown-link edges) for the
+// wiki visualization. Edges are derived from cross-references in memory bodies
+// — [[node_id]] wiki-links or [label](node_id) markdown links — mirroring the
+// LLM Wiki pattern where cross-references are explicit, authored connections,
+// not mechanical topic grouping.
 //
 // @Summary Get memory graph
 // @Tags memory
@@ -365,7 +368,9 @@ func (h *MemoryHandler) ChatGraph(c echo.Context) error {
 	allResults = deduplicateMemoryItems(allResults)
 
 	nodes := make([]graphNode, 0, len(allResults))
+	idSet := make(map[string]bool, len(allResults))
 	for _, item := range allResults {
+		idSet[item.ID] = true
 		label := item.Memory
 		if len(label) > 40 {
 			label = label[:37] + "..."
@@ -385,31 +390,64 @@ func (h *MemoryHandler) ChatGraph(c echo.Context) error {
 		})
 	}
 
-	// Derive edges from shared topic (the primary cross-reference dimension).
+	// Derive edges from markdown cross-references in node bodies. Supports
+	// [[id]] wiki-links and [label](id) markdown links. A reference is only
+	// counted if the target id exists in the current node set.
 	edges := make([]graphEdge, 0)
 	seen := map[string]bool{}
-	addEdge := func(a, b, rel string) {
-		src, dst := a, b
-		if dst < src {
-			src, dst = dst, src
-		}
-		key := src + "\x00" + dst + "\x00" + rel
-		if seen[key] {
-			return
-		}
-		seen[key] = true
-		edges = append(edges, graphEdge{Source: src, Target: dst, Rel: rel})
-	}
-	for i, ni := range nodes {
-		for j := i + 1; j < len(nodes); j++ {
-			nj := nodes[j]
-			if ni.Topic != "" && ni.Topic == nj.Topic {
-				addEdge(ni.ID, nj.ID, "same_topic")
+	for _, src := range nodes {
+		for _, targetID := range parseMemoryLinks(src.Memory) {
+			if !idSet[targetID] {
+				continue
 			}
+			if targetID == src.ID {
+				continue
+			}
+			key := src.ID + "\x00" + targetID
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			edges = append(edges, graphEdge{Source: src.ID, Target: targetID, Rel: "refs"})
 		}
 	}
 
 	return c.JSON(http.StatusOK, graphResponse{Nodes: nodes, Edges: edges})
+}
+
+// memoryLinkPatterns are the regex patterns for parsing cross-references from
+// memory bodies. Compiled once at init.
+var (
+	// [[id]] Obsidian-style wiki link.
+	wikiLinkRe = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
+	// [label](id) markdown link where the href looks like a memory id.
+	mdLinkRe = regexp.MustCompile(`\[[^\]]*\]\(([^)]+)\)`)
+)
+
+// parseMemoryLinks extracts referenced node IDs from a memory body. Supports
+// [[id]] and [label](id) formats. Returns deduplicated IDs.
+func parseMemoryLinks(body string) []string {
+	var ids []string
+	seen := map[string]bool{}
+	collect := func(raw string) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" || seen[raw] {
+			return
+		}
+		seen[raw] = true
+		ids = append(ids, raw)
+	}
+	for _, m := range wikiLinkRe.FindAllStringSubmatch(body, -1) {
+		if len(m) > 1 {
+			collect(m[1])
+		}
+	}
+	for _, m := range mdLinkRe.FindAllStringSubmatch(body, -1) {
+		if len(m) > 1 {
+			collect(m[1])
+		}
+	}
+	return ids
 }
 // @Summary Delete memories
 // @Description Delete specific memories by IDs, or delete all memories if no IDs are provided
