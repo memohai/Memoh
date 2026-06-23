@@ -1,6 +1,6 @@
 import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useChatStore, type BackgroundTask, type ChatAssistantTurn, type ToolCallBlock } from '@/store/chat-list'
+import { useChatStore, type ChatAssistantTurn, type ToolCallBlock } from '@/store/chat-list'
 
 export interface SubagentSession {
   id: string
@@ -9,11 +9,6 @@ export interface SubagentSession {
 }
 
 const SPAWN_TOOLS = new Set(['spawn_agent', 'send_message'])
-
-function isActiveAgent(task: BackgroundTask): boolean {
-  const s = task.status
-  return s === 'running' || s === 'queued' || s === 'stalled'
-}
 
 export function useSubagentList() {
   const chatStore = useChatStore()
@@ -27,13 +22,16 @@ export function useSubagentList() {
         if (block.type !== 'tool') continue
         const tool = block as ToolCallBlock
         if (!SPAWN_TOOLS.has(tool.toolName)) continue
+        if (tool.done) continue
         const bg = tool.backgroundTask
-        if (!bg?.agentSessionId || !isActiveAgent(bg)) continue
-        if (seen.has(bg.agentSessionId)) continue
-        seen.set(bg.agentSessionId, {
-          id: bg.agentSessionId,
-          agentId: bg.agentId || bg.taskId,
-          title: bg.command || bg.agentId || bg.taskId,
+        const sessionId = bg?.agentSessionId
+        if (!sessionId) continue
+        if (seen.has(sessionId)) continue
+        const agentId = bg?.agentId || bg?.taskId || tool.toolCallId
+        seen.set(sessionId, {
+          id: sessionId,
+          agentId,
+          title: agentId,
         })
       }
     }
