@@ -28,7 +28,7 @@ const (
 	EventTypeSessionCreated EventType = "session_created"
 	// EventTypeSessionTitleUpdated is emitted after a session title is auto-generated.
 	EventTypeSessionTitleUpdated EventType = "session_title_updated"
-	// EventTypeBackgroundTask is emitted for live background exec task updates.
+	// EventTypeBackgroundTask is emitted for live background task updates.
 	EventTypeBackgroundTask EventType = "background_task"
 )
 
