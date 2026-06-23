@@ -37,7 +37,6 @@ export const TERMINAL_TAB_COMPONENT = 'terminalTab'
 
 const DEFAULT_BROWSER_ADDRESS = 'localhost:5173/'
 const DEFAULT_CHAT_TITLE = 'New Session'
-const DEFAULT_UNTITLED_SESSION_TITLE = 'Untitled Session'
 
 // Default share of the editor height the bottom terminal panel claims when it
 // first splits off below the chat. ~1/3 mirrors VS Code's editor:panel ratio
@@ -280,7 +279,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   function chatTitleFallbackFor(sid: string | null): string {
     if (!sid) return DEFAULT_CHAT_TITLE
     const session = chatStore.sessions.find(s => s.id === sid)
-    return (session?.title ?? '').trim() || DEFAULT_UNTITLED_SESSION_TITLE
+    return (session?.title ?? '').trim() || i18n.global.t('chat.untitledSession')
   }
 
   function panelTitleFallback(panel: { id: string, params?: Record<string, unknown> }): string {

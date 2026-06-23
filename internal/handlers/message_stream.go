@@ -316,10 +316,11 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 				if !canDeliverSessionActivity(c.Request().Context(), channelIdentityID, botID, perms, cache, sessionID) {
 					continue
 				}
-				// Use the same wire name as the per-session stream — both
-				// surfaces emit the event the producer named.
+				// Match the frontend's bot-activity wire name. The per-session
+				// stream emits `session_title_updated`; the bot-wide activity
+				// stream (consumed by the sidebar) expects `session_title_changed`.
 				if err := writeSSEJSON(writer, flusher, map[string]any{
-					"type":       string(messageevent.EventTypeSessionTitleUpdated),
+					"type":       "session_title_changed",
 					"session_id": sessionID,
 					"title":      payload["title"],
 				}); err != nil {
