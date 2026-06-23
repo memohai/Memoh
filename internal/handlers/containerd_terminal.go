@@ -145,6 +145,9 @@ func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 					}
 				}
 			case pb.ExecOutput_EXIT:
+				_ = conn.WriteControl(websocket.CloseMessage,
+					websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+					time.Now().Add(5*time.Second))
 				return
 			}
 		}

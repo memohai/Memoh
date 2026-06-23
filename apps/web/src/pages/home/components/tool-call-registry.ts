@@ -116,7 +116,7 @@ export function isDirPathTool(toolName: string): boolean {
 const READONLY_TOOLS = new Set([
   'read', 'list', 'web_search', 'web_fetch', 'search_memory', 'search_messages',
   'get_contacts', 'list_sessions', 'list_email', 'read_email', 'list_email_accounts',
-  'list_schedule', 'get_schedule', 'list_skills', 'bg_status', 'list_background', 'get_background_status',
+  'list_schedule', 'get_schedule', 'list_skills', 'bg_status', 'list_background', 'get_background_status', 'wait', 'wait_until',
   'browser_observe', 'computer_observe',
 ])
 
@@ -492,6 +492,14 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
       const taskId = pickString(input, 'task_id', 'taskId')
       return { icon: X, actionKey: 'kill_background', target: taskId }
     }
+    case 'wait': {
+      const duration = pickNumber(input, 'duration')
+      return { icon: Timer, actionKey: 'wait', target: duration ? `${duration}s` : '' }
+    }
+    case 'wait_until': {
+      const taskId = pickString(input, 'task_id', 'taskId')
+      return { icon: Timer, actionKey: 'wait_until', target: taskId }
+    }
     case 'web_search': {
       const query = pickString(input, 'query')
       return {
@@ -673,13 +681,6 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         detail: ToolCallDetailSpawn,
       }
     }
-    case 'wait_agent':
-      return {
-        icon: Timer,
-        actionKey: 'wait_agent',
-        target: pickString(input, 'id', 'task_id'),
-        detail: ToolCallDetailSpawn,
-      }
     case 'list_agents':
       return {
         icon: ListChecks,

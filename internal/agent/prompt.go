@@ -18,15 +18,14 @@ import (
 var promptsFS embed.FS
 
 var (
-	systemCommonTmpl           string
-	modeChatTmpl               string
-	modeDiscussTmpl            string
-	modeHeartbeatTmpl          string
-	modeBackgroundDeliveryTmpl string
-	modeScheduleTmpl           string
-	modeSubagentTmpl           string
-	scheduleTmpl               string
-	heartbeatTmpl              string
+	systemCommonTmpl  string
+	modeChatTmpl      string
+	modeDiscussTmpl   string
+	modeHeartbeatTmpl string
+	modeScheduleTmpl  string
+	modeSubagentTmpl  string
+	scheduleTmpl      string
+	heartbeatTmpl     string
 
 	includes map[string]string
 )
@@ -38,7 +37,6 @@ func init() {
 	modeChatTmpl = mustReadPrompt("prompts/mode_chat.md")
 	modeDiscussTmpl = mustReadPrompt("prompts/mode_discuss.md")
 	modeHeartbeatTmpl = mustReadPrompt("prompts/mode_heartbeat.md")
-	modeBackgroundDeliveryTmpl = mustReadPrompt("prompts/mode_background_delivery.md")
 	modeScheduleTmpl = mustReadPrompt("prompts/mode_schedule.md")
 	modeSubagentTmpl = mustReadPrompt("prompts/mode_subagent.md")
 	scheduleTmpl = mustReadPrompt("prompts/schedule.md")
@@ -53,7 +51,6 @@ func init() {
 	modeChatTmpl = resolveIncludes(modeChatTmpl)
 	modeDiscussTmpl = resolveIncludes(modeDiscussTmpl)
 	modeHeartbeatTmpl = resolveIncludes(modeHeartbeatTmpl)
-	modeBackgroundDeliveryTmpl = resolveIncludes(modeBackgroundDeliveryTmpl)
 	modeScheduleTmpl = resolveIncludes(modeScheduleTmpl)
 	modeSubagentTmpl = resolveIncludes(modeSubagentTmpl)
 }
@@ -96,8 +93,6 @@ func selectModeTemplate(sessionType string) string {
 		return modeDiscussTmpl
 	case sessionmode.Heartbeat:
 		return modeHeartbeatTmpl
-	case sessionmode.BackgroundDelivery:
-		return modeBackgroundDeliveryTmpl
 	case sessionmode.Schedule:
 		return modeScheduleTmpl
 	case sessionmode.Subagent:

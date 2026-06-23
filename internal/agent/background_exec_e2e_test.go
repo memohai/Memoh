@@ -173,7 +173,8 @@ func TestE2E_ExplicitBackgroundExec(t *testing.T) {
 
 	bgMgr := background.New(nil)
 
-	// Model calls exec with run_in_background, then on step 2 sees notification.
+	// Model calls exec with run_in_background. Completion should not inject
+	// a notification into later model steps.
 	var step2Params sdk.GenerateParams
 	modelProvider := &agentReadMediaMockProvider{
 		handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
@@ -208,7 +209,7 @@ func TestE2E_ExplicitBackgroundExec(t *testing.T) {
 					}},
 				}, nil
 			case 3:
-				// Step 3: model should see the background notification injected.
+				// Step 3 should not receive a background notification.
 				step2Params = params
 				return &sdk.GenerateResult{
 					Text:         "All done!",
@@ -243,13 +244,13 @@ func TestE2E_ExplicitBackgroundExec(t *testing.T) {
 		t.Errorf("unexpected text: %q", result.Text)
 	}
 
-	// Verify step 2 params contain the background notification.
+	// Verify later params do not contain a background notification.
 	found := false
 	for _, msg := range step2Params.Messages {
 		if msg.Role == sdk.MessageRoleUser {
 			for _, part := range msg.Content {
 				if tp, ok := part.(sdk.TextPart); ok {
-					if strings.Contains(tp.Text, "task-notification") &&
+					if strings.Contains(tp.Text, "task-"+"notification") &&
 						strings.Contains(tp.Text, "completed") {
 						found = true
 					}
@@ -257,8 +258,8 @@ func TestE2E_ExplicitBackgroundExec(t *testing.T) {
 			}
 		}
 	}
-	if !found {
-		t.Error("expected background task notification to be injected into step 3 messages")
+	if found {
+		t.Error("background task notification should not be injected into later model steps")
 	}
 }
 
@@ -353,25 +354,18 @@ func TestE2E_ForegroundTimeoutFlip(t *testing.T) {
 		t.Errorf("expected flip message mentioning no work lost, got %q", msg)
 	}
 
-	// Wait for the background task to complete and verify notification.
-	deadline := time.After(10 * time.Second)
-	for {
-		notifications := bgMgr.DrainNotifications("bot-test-2", "sess-2")
-		if len(notifications) > 0 {
-			n := notifications[0]
-			if n.Status != background.TaskCompleted {
-				t.Errorf("expected completed, got %s", n.Status)
-			}
-			if !strings.Contains(n.OutputTail, "build completed") {
-				t.Errorf("expected build output in tail, got %q", n.OutputTail)
-			}
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("timed out waiting for background task notification")
-		case <-time.After(50 * time.Millisecond):
-		}
+	// Wait for the background task to complete and verify the snapshot result.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	snap, err := bgMgr.WaitForSessionTask(ctx, "bot-test-2", "sess-2", taskID)
+	if err != nil {
+		t.Fatalf("WaitForSessionTask returned error: %v", err)
+	}
+	if snap.Status != background.TaskCompleted {
+		t.Errorf("expected completed, got %s", snap.Status)
+	}
+	if !strings.Contains(snap.OutputTail, "build completed") {
+		t.Errorf("expected build output in tail, got %q", snap.OutputTail)
 	}
 }
 

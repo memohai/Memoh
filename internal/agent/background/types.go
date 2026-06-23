@@ -2,7 +2,6 @@ package background
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -40,12 +39,12 @@ type Task struct {
 	StartedAt      time.Time
 	CompletedAt    time.Time
 
-	mu              sync.Mutex
-	cancel          context.CancelFunc
-	notified        bool            // true once a terminal notification has been enqueued; prevents duplicates
-	stalledNotified bool            // true once a stalled notification has been enqueued
-	output          strings.Builder // buffered output tail
-	branches        []SpawnBranch   // spawn-kind branch outcomes, set at completion
+	mu       sync.Mutex
+	cancel   context.CancelFunc
+	stalled  bool            // true once the task appears stuck on interactive input
+	changed  chan struct{}   // closed and replaced whenever waiters should re-check task state
+	output   strings.Builder // buffered output tail
+	branches []SpawnBranch   // spawn-kind branch outcomes, set at completion
 }
 
 // TaskSnapshot is a lock-safe, immutable view of a task for handler/UI code.
@@ -106,30 +105,19 @@ func (t *Task) Snapshot() TaskSnapshot {
 		StartedAt:      t.StartedAt,
 		CompletedAt:    t.CompletedAt,
 		Duration:       duration,
-		Stalled:        t.stalledNotified && t.Status == TaskRunning,
+		Stalled:        t.stalled && t.Status == TaskRunning,
 	}
 }
 
-// MarkNotified atomically sets the notified flag. Returns true if this call
-// was the one that flipped it (i.e., the caller should enqueue the notification).
-func (t *Task) MarkNotified() bool {
+// MarkStalled atomically marks the task as stalled and wakes any waiters.
+func (t *Task) MarkStalled() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.notified {
+	if t.stalled {
 		return false
 	}
-	t.notified = true
-	return true
-}
-
-// MarkStalledNotified atomically sets the stalled notification flag.
-func (t *Task) MarkStalledNotified() bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.stalledNotified {
-		return false
-	}
-	t.stalledNotified = true
+	t.stalled = true
+	t.signalChangedLocked()
 	return true
 }
 
@@ -175,6 +163,22 @@ func (t *Task) outputTailLocked() string {
 	return s
 }
 
+func (t *Task) changeChanLocked() <-chan struct{} {
+	if t.changed == nil {
+		t.changed = make(chan struct{})
+	}
+	return t.changed
+}
+
+func (t *Task) signalChangedLocked() {
+	if t.changed == nil {
+		t.changed = make(chan struct{})
+		return
+	}
+	close(t.changed)
+	t.changed = make(chan struct{})
+}
+
 const maxTailBytes = 4096
 
 // AdoptResult carries the outcome of a command whose execution was started
@@ -195,29 +199,6 @@ type AdoptResult struct {
 	OutputRecorded bool
 }
 
-// Notification is the structured event sent to the agent when a background
-// task reaches a terminal state or requires attention (e.g. stalled).
-type Notification struct {
-	TaskID         string
-	Kind           TaskKind
-	BotID          string
-	SessionID      string
-	Status         TaskStatus
-	Command        string
-	Description    string
-	AgentID        string
-	AgentSessionID string
-	AgentMessage   string
-	AgentReport    string
-	AgentError     string
-	ExitCode       int32
-	OutputFile     string
-	OutputTail     string // last N bytes of output for quick summary
-	Branches       []SpawnBranch
-	Duration       time.Duration
-	Stalled        bool // true when task appears stuck on interactive input
-}
-
 // TaskEventType identifies a UI-facing background task event.
 type TaskEventType string
 
@@ -227,12 +208,13 @@ const (
 	TaskEventOutput    TaskEventType = "output"
 	TaskEventCompleted TaskEventType = "completed"
 	TaskEventFailed    TaskEventType = "failed"
+	TaskEventKilled    TaskEventType = "killed"
 	TaskEventStalled   TaskEventType = "stalled"
 )
 
 // TaskEvent is emitted for live UI updates. Output events are intentionally
-// lightweight and non-persistent; completion notifications remain the source of
-// truth for agent wakeups and history.
+// lightweight and non-persistent; task snapshots remain the source of truth
+// for tool-visible state.
 type TaskEvent struct {
 	Event          TaskEventType `json:"event"`
 	TaskID         string        `json:"task_id"`
@@ -250,53 +232,4 @@ type TaskEvent struct {
 	ExitCode       int32         `json:"exit_code,omitempty"`
 	Duration       string        `json:"duration,omitempty"`
 	Stalled        bool          `json:"stalled,omitempty"`
-}
-
-// MessageText returns the full user-message text that should be injected into
-// the agent's message stream — a human lead-in line followed by the
-// <task-notification> block.
-func (n Notification) MessageText() string {
-	lead := "A background task completed:"
-	if n.Stalled {
-		lead = "A background task appears stuck and may need attention:"
-	}
-	return lead + "\n" + n.FormatForAgent()
-}
-
-// FormatForAgent returns a human-readable task-notification block that can be
-// injected into the agent's message stream.
-func (n Notification) FormatForAgent() string {
-	if n.Kind == KindAgent {
-		return n.formatAgentForAgent()
-	}
-	if n.Kind == KindSpawn {
-		return n.formatSpawnForAgent()
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "<task-notification>\n")
-	fmt.Fprintf(&b, "  <task-id>%s</task-id>\n", n.TaskID)
-	if n.Stalled {
-		fmt.Fprintf(&b, "  <status>stalled</status>\n")
-	} else {
-		fmt.Fprintf(&b, "  <status>%s</status>\n", n.Status)
-	}
-	fmt.Fprintf(&b, "  <command>%s</command>\n", n.Command)
-	if n.Description != "" {
-		fmt.Fprintf(&b, "  <description>%s</description>\n", n.Description)
-	}
-	if !n.Stalled {
-		fmt.Fprintf(&b, "  <exit-code>%d</exit-code>\n", n.ExitCode)
-	}
-	fmt.Fprintf(&b, "  <duration>%s</duration>\n", n.Duration.Round(time.Millisecond))
-	if n.OutputFile != "" {
-		fmt.Fprintf(&b, "  <output-file>%s</output-file>\n", n.OutputFile)
-	}
-	if n.OutputTail != "" {
-		fmt.Fprintf(&b, "  <output-tail>\n%s\n  </output-tail>\n", strings.TrimRight(n.OutputTail, "\n"))
-	}
-	if n.Stalled {
-		fmt.Fprintf(&b, "  <suggestion>This command appears to be waiting for interactive input. Kill it with an available background task tool and retry with a non-interactive flag (e.g. -y, --yes, --non-interactive).</suggestion>\n")
-	}
-	fmt.Fprintf(&b, "</task-notification>")
-	return b.String()
 }

@@ -16,6 +16,8 @@ func ToolApplyPatch() ToolName          { return toolname.ToolApplyPatch() }
 func ToolListBackground() ToolName      { return toolname.ToolListBackground() }
 func ToolGetBackgroundStatus() ToolName { return toolname.ToolGetBackgroundStatus() }
 func ToolKillBackground() ToolName      { return toolname.ToolKillBackground() }
+func ToolWait() ToolName                { return toolname.ToolWait() }
+func ToolWaitUntil() ToolName           { return toolname.ToolWaitUntil() }
 
 func ToolSend() ToolName  { return toolname.ToolSend() }
 func ToolReact() ToolName { return toolname.ToolReact() }
@@ -30,7 +32,6 @@ func ToolListSkills() ToolName     { return toolname.ToolListSkills() }
 func ToolUseSkill() ToolName       { return toolname.ToolUseSkill() }
 func ToolSpawnAgent() ToolName     { return toolname.ToolSpawnAgent() }
 func ToolSendMessage() ToolName    { return toolname.ToolSendMessage() }
-func ToolWaitAgent() ToolName      { return toolname.ToolWaitAgent() }
 func ToolListAgents() ToolName     { return toolname.ToolListAgents() }
 
 func ToolListSchedule() ToolName   { return toolname.ToolListSchedule() }

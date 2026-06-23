@@ -182,7 +182,6 @@ func options() fx.Option {
 			startSearchProviderBootstrap,
 			startScheduleService,
 			startHeartbeatService,
-			wireResolverOutbound,
 			startChannelManager,
 			startEmailManager,
 			startContainerReconciliation,

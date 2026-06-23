@@ -34,25 +34,6 @@ func TestBackgroundTaskHasTopLevelSessionID(t *testing.T) {
 	}
 }
 
-// TestAgentStreamHasTopLevelSessionID pins the AgentStream wire shape for
-// the same reasons.
-func TestAgentStreamHasTopLevelSessionID(t *testing.T) {
-	t.Parallel()
-
-	data, err := json.Marshal(AgentStream("sess-2", map[string]any{"text": "hello"}))
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	var decoded map[string]any
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	assertTopLevelKeys(t, decoded, []string{"session_id", "stream"})
-	if decoded["session_id"] != "sess-2" {
-		t.Fatalf("session_id = %v, want sess-2", decoded["session_id"])
-	}
-}
-
 func assertTopLevelKeys(t *testing.T, payload map[string]any, want []string) {
 	t.Helper()
 	got := make([]string, 0, len(payload))
