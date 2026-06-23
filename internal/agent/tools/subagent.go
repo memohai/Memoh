@@ -342,15 +342,16 @@ type agentRunResult struct {
 }
 
 type agentRequest struct {
-	taskID         string
-	agentID        string
-	agentSessionID string
-	message        string
-	parentSession  SessionContext
-	model          *sdk.Model
-	modelID        string
-	promptCacheTTL string
-	systemPrompt   string
+	taskID           string
+	agentID          string
+	agentSessionID   string
+	message          string
+	messagePersisted bool
+	parentSession    SessionContext
+	model            *sdk.Model
+	modelID          string
+	promptCacheTTL   string
+	systemPrompt     string
 }
 
 type agentCoordinator struct {
@@ -581,6 +582,7 @@ func (p *SpawnProvider) submitAgentTask(ctx context.Context, session SessionCont
 }
 
 func (p *SpawnProvider) runAgentRequest(ctx context.Context, key string, req *agentRequest) agentRunResult {
+	req.messagePersisted = p.persistUserMessage(context.WithoutCancel(ctx), req.parentSession.BotID, req.agentSessionID, req.message)
 	result := p.runSubagentTask(ctx, req)
 	if task := p.bgManager.Get(req.taskID); task != nil {
 		if snap := task.Snapshot(); snap.Status == background.TaskKilled {
@@ -680,6 +682,9 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		}
 	}()
 	history := p.loadAgentMessages(context.WithoutCancel(ctx), req.agentSessionID)
+	if req.messagePersisted {
+		history = dropLatestMatchingUserMessage(history, req.message)
+	}
 	cfg := SpawnRunConfig{
 		Model:          req.model,
 		System:         req.systemPrompt,
@@ -722,7 +727,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		if err == nil {
 			res.Text = genResult.Text
 			if p.messageService != nil && req.agentSessionID != "" {
-				p.persistMessages(context.WithoutCancel(ctx), req.parentSession.BotID, req.agentSessionID, req.modelID, req.message, genResult)
+				p.persistMessages(context.WithoutCancel(ctx), req.parentSession.BotID, req.agentSessionID, req.modelID, req.message, genResult, !req.messagePersisted)
 			}
 			return res
 		}
@@ -933,6 +938,37 @@ func sdkMessageFromPersisted(msg messagepkg.Message) (sdk.Message, bool) {
 	return sdk.Message{}, false
 }
 
+func dropLatestMatchingUserMessage(messages []sdk.Message, query string) []sdk.Message {
+	needle := strings.TrimSpace(query)
+	if needle == "" || len(messages) == 0 {
+		return messages
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role != sdk.MessageRoleUser {
+			continue
+		}
+		if strings.TrimSpace(messageTextContent(msg)) != needle {
+			continue
+		}
+		out := make([]sdk.Message, 0, len(messages)-1)
+		out = append(out, messages[:i]...)
+		out = append(out, messages[i+1:]...)
+		return out
+	}
+	return messages
+}
+
+func messageTextContent(msg sdk.Message) string {
+	var b strings.Builder
+	for _, part := range msg.Content {
+		if text, ok := part.(sdk.TextPart); ok {
+			b.WriteString(text.Text)
+		}
+	}
+	return b.String()
+}
+
 func validateParentSession(session SessionContext) error {
 	if strings.TrimSpace(session.BotID) == "" {
 		return errors.New("bot_id is required")
@@ -1026,18 +1062,10 @@ func (p *SpawnProvider) persistMessages(
 	ctx context.Context,
 	botID, sessionID, modelID, query string,
 	result *SpawnResult,
+	includeUser bool,
 ) {
-	userContent, _ := json.Marshal(map[string]any{
-		"role":    "user",
-		"content": query,
-	})
-	if _, err := p.messageService.Persist(ctx, messagepkg.PersistInput{
-		BotID:     botID,
-		SessionID: sessionID,
-		Role:      "user",
-		Content:   userContent,
-	}); err != nil {
-		p.logger.Warn("persist subagent user message failed", slog.Any("error", err))
+	if includeUser {
+		p.persistUserMessage(ctx, botID, sessionID, query)
 	}
 
 	for _, msg := range result.Messages {
@@ -1063,6 +1091,26 @@ func (p *SpawnProvider) persistMessages(
 			p.logger.Warn("persist subagent message failed", slog.Any("error", err))
 		}
 	}
+}
+
+func (p *SpawnProvider) persistUserMessage(ctx context.Context, botID, sessionID, query string) bool {
+	if p.messageService == nil || strings.TrimSpace(sessionID) == "" {
+		return false
+	}
+	userContent, _ := json.Marshal(map[string]any{
+		"role":    "user",
+		"content": query,
+	})
+	if _, err := p.messageService.Persist(ctx, messagepkg.PersistInput{
+		BotID:     botID,
+		SessionID: sessionID,
+		Role:      "user",
+		Content:   userContent,
+	}); err != nil {
+		p.logger.Warn("persist subagent user message failed", slog.Any("error", err))
+		return false
+	}
+	return true
 }
 
 // ModelCreator creates an sdk.Model from provider config. Set via SetModelCreator.
