@@ -158,6 +158,13 @@
       </div>
     </section>
 
+    <!-- Memory graph view: see the shape of the wiki — hubs, clusters, orphans.
+         Mirrors the LLM Wiki pattern where cross-references are compiled and
+         browsable, not re-derived on every query. -->
+    <section class="mb-8">
+      <MemoryGraph :bot-id="props.botId" />
+    </section>
+
     <!-- Loading skeleton: matches the card shape so the swap does not jump. -->
     <div
       v-if="loading && memories.length === 0"
@@ -364,6 +371,7 @@ import { formatRelativeTime } from '@/utils/date-time'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import PageShell from '@/components/page-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
+import MemoryGraph from './memory-graph.vue'
 import { useMemoryGroups } from './use-memory-groups'
 
 interface MemoryItem {

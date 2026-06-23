@@ -122,6 +122,7 @@ func (h *MemoryHandler) Register(e *echo.Echo) {
 	chatGroup.GET("/status", h.ChatStatus)
 	chatGroup.GET("", h.ChatGetAll)
 	chatGroup.GET("/usage", h.ChatUsage)
+	chatGroup.GET("/graph", h.ChatGraph)
 	chatGroup.DELETE("", h.ChatDelete)
 	chatGroup.DELETE("/:memory_id", h.ChatDeleteOne)
 }
@@ -307,7 +308,109 @@ func (h *MemoryHandler) ChatGetAll(c echo.Context) error {
 	return c.JSON(http.StatusOK, memprovider.SearchResponse{Results: allResults})
 }
 
-// ChatDelete godoc
+// graphNode is one node in the memory graph view.
+type graphNode struct {
+	ID       string         `json:"id"`
+	Label    string         `json:"label"`
+	Memory   string         `json:"memory"`
+	Topic    string         `json:"topic,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+// graphEdge is one edge in the memory graph view.
+type graphEdge struct {
+	Source string `json:"source"`
+	Target string `json:"target"`
+	Rel    string `json:"rel"`
+}
+
+// graphResponse is the payload for the memory graph view.
+type graphResponse struct {
+	Nodes []graphNode `json:"nodes"`
+	Edges []graphEdge `json:"edges"`
+}
+
+// ChatGraph returns the memory graph (nodes + derived edges) for the wiki
+// visualization. Edges are derived from shared topic/profile_ref — mirroring
+// the LLM Wiki pattern where cross-references are already compiled and visible.
+//
+// @Summary Get memory graph
+// @Tags memory
+// @Router /bots/{bot_id}/memory/graph [get]
+func (h *MemoryHandler) ChatGraph(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	scopes, err := h.resolveEnabledScopes(botID)
+	if err != nil {
+		return err
+	}
+	provider, checkErr := h.checkService(c.Request().Context(), botID)
+	if checkErr != nil {
+		return checkErr
+	}
+
+	var allResults []memprovider.MemoryItem
+	for _, scope := range scopes {
+		resp, getAllErr := provider.GetAll(c.Request().Context(), memprovider.GetAllRequest{
+			Filters: buildNamespaceFilters(scope.Namespace, scope.ScopeID, nil),
+			NoStats: true,
+		})
+		if getAllErr != nil {
+			continue
+		}
+		allResults = append(allResults, resp.Results...)
+	}
+	allResults = deduplicateMemoryItems(allResults)
+
+	nodes := make([]graphNode, 0, len(allResults))
+	for _, item := range allResults {
+		label := item.Memory
+		if len(label) > 40 {
+			label = label[:37] + "..."
+		}
+		topic := ""
+		if item.Metadata != nil {
+			if t, ok := item.Metadata["topic"].(string); ok {
+				topic = t
+			}
+		}
+		nodes = append(nodes, graphNode{
+			ID:       item.ID,
+			Label:    label,
+			Memory:   item.Memory,
+			Topic:    topic,
+			Metadata: item.Metadata,
+		})
+	}
+
+	// Derive edges from shared topic (the primary cross-reference dimension).
+	edges := make([]graphEdge, 0)
+	seen := map[string]bool{}
+	addEdge := func(a, b, rel string) {
+		src, dst := a, b
+		if dst < src {
+			src, dst = dst, src
+		}
+		key := src + "\x00" + dst + "\x00" + rel
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		edges = append(edges, graphEdge{Source: src, Target: dst, Rel: rel})
+	}
+	for i, ni := range nodes {
+		for j := i + 1; j < len(nodes); j++ {
+			nj := nodes[j]
+			if ni.Topic != "" && ni.Topic == nj.Topic {
+				addEdge(ni.ID, nj.ID, "same_topic")
+			}
+		}
+	}
+
+	return c.JSON(http.StatusOK, graphResponse{Nodes: nodes, Edges: edges})
+}
 // @Summary Delete memories
 // @Description Delete specific memories by IDs, or delete all memories if no IDs are provided
 // @Tags memory
