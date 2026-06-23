@@ -1476,6 +1476,50 @@ describe('chat-list store', () => {
     expect(store.knownSessions.find(session => session.id === 'session-subagent')?.title).toBe('Updated subagent title')
   })
 
+  it('refreshes recents when a remembered hidden chat session receives activity', async () => {
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-visible', bot_id: 'bot-1', title: 'Visible', type: 'chat' },
+    ], nextCursor: null })
+    api.fetchSession.mockResolvedValueOnce({
+      id: 'session-hidden',
+      bot_id: 'bot-1',
+      title: 'Hidden',
+      type: 'chat',
+      updated_at: '2026-06-01T00:00:00.000Z',
+    })
+    api.fetchMessagesUI.mockResolvedValue([])
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await store.selectSession('session-hidden')
+    await flushPromises()
+
+    expect(store.sessions.map(session => session.id)).toEqual(['session-visible'])
+    expect(store.knownSessionSummary('session-hidden')).toMatchObject({
+      id: 'session-hidden',
+      type: 'chat',
+    })
+
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      {
+        id: 'session-hidden',
+        bot_id: 'bot-1',
+        title: 'Hidden',
+        type: 'chat',
+        updated_at: '2026-06-23T10:00:00.000Z',
+      },
+      { id: 'session-visible', bot_id: 'bot-1', title: 'Visible', type: 'chat' },
+    ], nextCursor: null })
+    sessionsActivityHandler?.({
+      type: 'session_touched',
+      session_id: 'session-hidden',
+      updated_at: '2026-06-23T10:00:00.000Z',
+    })
+    await flushPromises()
+
+    expect(api.fetchSessions).toHaveBeenCalledTimes(2)
+    expect(store.sessions.map(session => session.id)).toEqual(['session-hidden', 'session-visible'])
+  })
+
   it('refreshes pending user input after response stream failure', async () => {
     api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },

@@ -478,7 +478,9 @@ export const useChatStore = defineStore('chat', () => {
   const knownSessions = computed<SessionSummary[]>(() => {
     const byId = new Map<string, SessionSummary>()
     for (const session of sessions.value) byId.set(session.id, session)
-    for (const session of Object.values(rememberedSessions.value)) byId.set(session.id, session)
+    for (const session of Object.values(rememberedSessions.value)) {
+      if (!byId.has(session.id)) byId.set(session.id, session)
+    }
     return [...byId.values()]
   })
 
@@ -509,7 +511,6 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function rememberSession(updated: SessionSummary) {
-    sessionById.set(updated.id, updated)
     rememberedSessions.value = {
       ...rememberedSessions.value,
       [updated.id]: updated,
@@ -526,7 +527,12 @@ export const useChatStore = defineStore('chat', () => {
   function knownSessionSummary(targetSessionId: string): SessionSummary | null {
     const sid = targetSessionId.trim()
     if (!sid) return null
-    return sessions.value.find(session => session.id === sid) ?? rememberedSessions.value[sid] ?? null
+    return sessionById.get(sid) ?? rememberedSessions.value[sid] ?? null
+  }
+
+  function isRecentsSession(session: SessionSummary): boolean {
+    const type = (session.type ?? 'chat').trim()
+    return type === 'chat' || type === 'discuss' || type === 'acp_agent'
   }
 
   function removeSessionFromList(id: string) {
@@ -1755,6 +1761,14 @@ export const useChatStore = defineStore('chat', () => {
         }
         return
       }
+      const remembered = rememberedSessions.value[sid]
+      if (remembered) {
+        if (event.updated_at && (!remembered.updated_at || event.updated_at > remembered.updated_at)) {
+          rememberSession({ ...remembered, updated_at: event.updated_at })
+        }
+        if (isRecentsSession(remembered)) void refreshSessionsList(targetBotId)
+        return
+      }
       // Unknown session — likely created from another channel. Reload the
       // first page so it shows up in the sidebar.
       void refreshSessionsList(targetBotId)
@@ -1767,6 +1781,8 @@ export const useChatStore = defineStore('chat', () => {
       if (!sid || !title) return
       const target = sessionById.get(sid)
       if (target) target.title = title
+      const remembered = rememberedSessions.value[sid]
+      if (remembered) rememberSession({ ...remembered, title })
       return
     }
 
