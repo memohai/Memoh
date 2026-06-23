@@ -158,15 +158,6 @@ export class BotDisplayConnection {
     }).catch(() => {})
   }
 
-  markDisconnected() {
-    this.status.value = 'disconnected'
-  }
-
-  markUnavailable(reason?: string) {
-    this.status.value = 'unavailable'
-    if (reason) this.unavailableReason.value = reason
-  }
-
   private async loadDisplayInfo(): Promise<DisplayInfoPayload> {
     const { data } = await getBotsByBotIdContainerDisplay({
       path: { bot_id: this.botId },
