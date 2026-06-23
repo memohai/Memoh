@@ -1003,6 +1003,89 @@ func TestReadTextFileUsesPromptToolOutputLimit(t *testing.T) {
 	}
 }
 
+func TestCallbackToolApprovalRejectionErrorsUsePromptToolOutputLimit(t *testing.T) {
+	t.Parallel()
+
+	reason := "HEAD\n" + strings.Repeat("rejection detail ", 300) + "\nTAIL"
+	limit := ToolOutputLimit{MaxBytes: 512, MaxLines: 80}
+	cases := []struct {
+		name string
+		run  func(context.Context, *clientCallbacks) error
+	}{
+		{
+			name: "read",
+			run: func(ctx context.Context, callbacks *clientCallbacks) error {
+				_, err := callbacks.ReadTextFile(ctx, acp.ReadTextFileRequest{Path: "/data/input.txt"})
+				return err
+			},
+		},
+		{
+			name: "write",
+			run: func(ctx context.Context, callbacks *clientCallbacks) error {
+				_, err := callbacks.WriteTextFile(ctx, acp.WriteTextFileRequest{Path: "/data/output.txt", Content: "hello\n"})
+				return err
+			},
+		},
+		{
+			name: "terminal",
+			run: func(ctx context.Context, callbacks *clientCallbacks) error {
+				_, err := callbacks.CreateTerminal(ctx, acp.CreateTerminalRequest{Command: "pwd"})
+				return err
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			approval := &fakeACPToolApproval{
+				decision: toolapproval.Request{
+					ID:             "approval-" + tc.name,
+					Status:         toolapproval.StatusRejected,
+					DecisionReason: reason,
+					DecidedByUser:  true,
+				},
+			}
+			callbacks := newClientCallbacks(
+				context.Background(),
+				nil,
+				"/data",
+				"/data",
+				time.Second,
+				nil,
+				nil,
+				true,
+				approval,
+				nil,
+				ToolSessionContext{
+					BotID:     "bot-1",
+					SessionID: "session-1",
+					StreamID:  "stream-1",
+				},
+				acpprofile.DefaultToolQuirks(),
+			)
+			callbacks.setPromptState(newEventCollector(limit), nil, callbacks.baseSession, limit)
+
+			err := tc.run(context.Background(), callbacks)
+			if err == nil {
+				t.Fatal("callback error = nil, want rejection")
+			}
+			message := err.Error()
+			if len(message) > limit.MaxBytes {
+				t.Fatalf("callback error bytes = %d, want <= %d\n%s", len(message), limit.MaxBytes, message)
+			}
+			if len(message) >= len(reason) {
+				t.Fatalf("callback error was not limited")
+			}
+			for _, want := range []string{"[memoh pruned]", "HEAD", "TAIL"} {
+				if !strings.Contains(message, want) {
+					t.Fatalf("callback error missing %q:\n%s", want, message)
+				}
+			}
+		})
+	}
+}
+
 type fakeACPToolSource struct {
 	tools []mcp.ToolDescriptor
 }

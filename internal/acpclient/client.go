@@ -276,7 +276,7 @@ func (c *clientCallbacks) ReadTextFile(ctx context.Context, p acp.ReadTextFileRe
 		return acp.ReadTextFileResponse{}, err
 	}
 	if !approval.Approved {
-		err := errors.New(toolapproval.RejectionMessage(approval))
+		err := errors.New(c.limitedApprovalRejectionMessage("read", approval))
 		c.emitToolCallEnd(toolID, "read", input, toolErrorResult(err), err)
 		return acp.ReadTextFileResponse{}, err
 	}
@@ -331,6 +331,14 @@ func (c *clientCallbacks) currentToolOutputLimit() ToolOutputLimit {
 	return c.toolLimit
 }
 
+func (c *clientCallbacks) limitedApprovalRejectionMessage(toolName string, approval toolapproval.FlowResult) string {
+	message := toolapproval.RejectionMessage(approval)
+	if limit := c.currentToolOutputLimit(); hasToolOutputLimit(limit) {
+		return limitToolOutputString(message, "tool result ("+toolName+")", limit)
+	}
+	return message
+}
+
 func (c *clientCallbacks) WriteTextFile(ctx context.Context, p acp.WriteTextFileRequest) (acp.WriteTextFileResponse, error) {
 	toolID := "write-" + uuid.NewString()
 	input := writeToolInput(p.Path, p.Content)
@@ -339,7 +347,7 @@ func (c *clientCallbacks) WriteTextFile(ctx context.Context, p acp.WriteTextFile
 		return acp.WriteTextFileResponse{}, err
 	}
 	if !approval.Approved {
-		err := errors.New(toolapproval.RejectionMessage(approval))
+		err := errors.New(c.limitedApprovalRejectionMessage("write", approval))
 		c.emitToolCallEnd(toolID, "write", input, toolErrorResult(err), err)
 		return acp.WriteTextFileResponse{}, err
 	}
@@ -980,7 +988,7 @@ func (c *clientCallbacks) CreateTerminal(ctx context.Context, p acp.CreateTermin
 		return terminalApprovalResult{
 			Approved:         approval.Approved,
 			ToolCallID:       id,
-			RejectionMessage: toolapproval.RejectionMessage(approval),
+			RejectionMessage: c.limitedApprovalRejectionMessage("exec", approval),
 		}, err
 	})
 }
