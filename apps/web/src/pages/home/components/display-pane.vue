@@ -513,9 +513,11 @@ function setPeerStatus(next: RTCPeerConnectionState) {
     case 'connected':
       clearConnectTimeout()
       status.value = 'connected'
-      startSnapshotCapture()
-      if (statsVisible.value) {
-        startStatsPolling()
+      if (props.active) {
+        startSnapshotCapture()
+        if (statsVisible.value) {
+          startStatsPolling()
+        }
       }
       break
     case 'failed':
@@ -988,10 +990,10 @@ function handleVisibilityChange() {
   const actualState = peer?.connectionState
   if (actualState === 'failed' || actualState === 'closed' || actualState === 'disconnected') {
     setPeerStatus(actualState)
-    void connect()
+    if (props.active) void connect()
     return
   }
-  if (status.value === 'connected') {
+  if (status.value === 'connected' && props.active) {
     startSnapshotCapture()
     if (statsVisible.value) {
       startStatsPolling()
