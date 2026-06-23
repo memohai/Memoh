@@ -12,6 +12,11 @@
       collapsible="none"
       :class="['border-r border-sidebar-border', desktopShell && 'h-dvh']"
     >
+      <div
+        v-if="macTrafficReserve"
+        class="h-12 shrink-0 [-webkit-app-region:drag]"
+        aria-hidden="true"
+      />
       <!-- Traffic-reserve top padding: clears the macOS traffic lights (bottom edge
            ≈28px from top) with a comfortable ~20px gap below them — tighter than the
            old full-width header's 62px (which read as over-reserved) but not cramped
@@ -21,10 +26,9 @@
       <SidebarHeader
         v-if="!hideHeader"
         class="px-[16px] pb-3 border-0"
-        :class="macTrafficReserve ? 'pt-[48px] [-webkit-app-region:drag]' : 'pt-[18px]'"
+        :class="macTrafficReserve ? 'pt-0' : 'pt-[18px]'"
       >
         <NavItem
-          class="[-webkit-app-region:no-drag]"
           @click="router.push(_backToChatRoute).catch(() => {})"
         >
           <ChevronLeft class="size-3.5 shrink-0" />
@@ -182,9 +186,8 @@ import NavItem from './nav-item.vue'
 const props = withDefaults(defineProps<{
   hideHeader?: boolean
   excludeItems?: string[]
-  // When true, the sidebar header reserves space for the macOS traffic lights and
-  // becomes a window drag region — used when this sidebar runs to the very top of
-  // the window (no full-width topbar above it), mirroring the chat SideBar.
+  // When true, the sidebar reserves a draggable macOS traffic-light strip above
+  // its visible controls.
   macTrafficReserve?: boolean
 }>(), {
   hideHeader: false,

@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"strings"
 
@@ -40,8 +39,6 @@ func (*MessageProvider) Usage(_ context.Context, session SessionContext, availab
 			parts = append(parts, "Use "+sendRef+" to speak in the observed conversation; if you do not call it, you stay silent.")
 		case sessionmode.Schedule, sessionmode.Heartbeat:
 			parts = append(parts, "Use "+sendRef+" only when the background task needs to notify a person or channel; specify `platform` and `target`.")
-		case sessionmode.BackgroundDelivery:
-			parts = append(parts, "Use "+sendRef+" only to message a different target, attach files, or send non-text media; ordinary text output is already sent to the current delivery target. Specify `platform` and `target`.")
 		default:
 			if session.CanOmitMessagingTarget() {
 				parts = append(parts, sendRef+": Send a file or attachment into the current conversation, or send a message/file/attachment to another channel/person. Use ordinary assistant text for normal replies in the current conversation.")
@@ -286,12 +283,6 @@ func sendToolPromptMetadata(session SessionContext) (description string, platfor
 			"Channel target (chat/group/thread ID). Required in this session.",
 			[]string{"platform", "target"}
 	}
-	if session.SessionType == sessionmode.BackgroundDelivery {
-		return "Send to a different target, attach files, or send non-text media. Do not use this for ordinary text updates to the current delivery target; normal assistant text is delivered automatically.",
-			"Channel platform name. Required for background delivery tool sends.",
-			"Channel target (chat/group/thread ID). Required for background delivery tool sends.",
-			[]string{"platform", "target"}
-	}
 	if session.CanOmitMessagingTarget() {
 		return "Send a file or attachment into the current conversation, or send a message, file, or attachment to another channel/person. Use ordinary assistant text for normal replies in the current conversation.",
 			"Channel platform name. Defaults to current session platform.",
@@ -331,9 +322,6 @@ func (p *MessageProvider) execSend(ctx context.Context, session SessionContext, 
 			resp["message_id"] = sendResult.MessageID
 		}
 		return resp, nil
-	}
-	if session.SessionType == sessionmode.BackgroundDelivery && isCurrentTargetTextOnlySend(session, args) {
-		return nil, errors.New("do not use send for ordinary text updates to the current delivery target; return assistant text instead")
 	}
 	result, err := p.exec.Send(ctx, toMessagingSession(session), args)
 	if err != nil {
@@ -385,50 +373,6 @@ func (p *MessageProvider) execSend(ctx context.Context, session SessionContext, 
 		resp["message_id"] = result.MessageID
 	}
 	return resp, nil
-}
-
-func isCurrentTargetTextOnlySend(session SessionContext, args map[string]any) bool {
-	if !session.IsSameConversation(stringArg(args, "platform"), stringArg(args, "target")) {
-		return false
-	}
-	if hasSendAttachments(args) {
-		return false
-	}
-	return strings.TrimSpace(stringArg(args, "text")) != "" || strings.TrimSpace(messageTextArg(args)) != ""
-}
-
-func stringArg(args map[string]any, key string) string {
-	if args == nil {
-		return ""
-	}
-	value, _ := args[key].(string)
-	return strings.TrimSpace(value)
-}
-
-func hasSendAttachments(args map[string]any) bool {
-	if args == nil {
-		return false
-	}
-	if raw := args["attachments"]; raw != nil {
-		return true
-	}
-	msg, _ := args["message"].(map[string]any)
-	return msg != nil && msg["attachments"] != nil
-}
-
-func messageTextArg(args map[string]any) string {
-	if args == nil {
-		return ""
-	}
-	switch msg := args["message"].(type) {
-	case string:
-		return msg
-	case map[string]any:
-		value, _ := msg["text"].(string)
-		return value
-	default:
-		return ""
-	}
 }
 
 func messageDeliveryLabel(session SessionContext, platform, target string) string {

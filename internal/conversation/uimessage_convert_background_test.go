@@ -2,9 +2,6 @@ package conversation
 
 import (
 	"testing"
-	"time"
-
-	"github.com/memohai/memoh/internal/agent/background"
 )
 
 func TestApplyToolResultRecognizesSpawnBackgroundStartByShape(t *testing.T) {
@@ -63,33 +60,5 @@ func TestApplyToolResultIgnoresTerminalTaskStatusPayloads(t *testing.T) {
 	}
 	if msg.Running == nil || *msg.Running {
 		t.Error("expected tool to be marked not running")
-	}
-}
-
-func TestParseBackgroundTaskNotificationSpawnJoinUsesDescription(t *testing.T) {
-	n := background.Notification{
-		TaskID:      "bg_bot1_dddd",
-		Kind:        background.KindSpawn,
-		Status:      background.TaskFailed,
-		Description: "spawn 2 task(s): alpha | beta",
-		Branches: []background.SpawnBranch{
-			{Task: "alpha", ChildSessionID: "child-a", Status: background.TaskCompleted, Report: "found A"},
-			{Task: "beta", Status: background.TaskFailed, Error: "boom"},
-		},
-		Duration: 90 * time.Second,
-	}
-
-	task, ok := parseBackgroundTaskNotification(n.MessageText())
-	if !ok {
-		t.Fatal("expected spawn join notification to parse")
-	}
-	if task.TaskID != "bg_bot1_dddd" || task.Status != "failed" {
-		t.Errorf("unexpected parsed task: %+v", task)
-	}
-	if task.Command != "spawn 2 task(s): alpha | beta" {
-		t.Errorf("expected description used as display label, got %q", task.Command)
-	}
-	if task.ExitCode != 0 || task.OutputFile != "" {
-		t.Errorf("expected no exec fields for spawn notification, got %+v", task)
 	}
 }

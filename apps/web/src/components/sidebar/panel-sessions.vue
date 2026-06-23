@@ -104,8 +104,9 @@ const currentBot = computed(() =>
 
 function handleNewSession() {
   if (!currentBotId.value) return
-  void chatStore.createNewSession()
-  workspaceTabs.openChat(t('chat.newSession'))
+  // Opens (or focuses) the single draft tab; its activation resets the view to a
+  // fresh draft (selectDraft), so no separate createNewSession is needed.
+  workspaceTabs.openDraftChat({ title: t('chat.newSession') })
 }
 
 // Navigate to the current bot's settings overview.

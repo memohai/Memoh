@@ -85,7 +85,6 @@ type Resolver struct {
 	settingsService   *settings.Service
 	accountService    *accounts.Service
 	sessionService    SessionService
-	routeService      RouteService
 	acpPool           acpPrompter
 	compactionService *compaction.Service
 	eventPublisher    messageevent.Publisher
@@ -103,8 +102,6 @@ type Resolver struct {
 	// continueUserInputFn overrides the chat-flow resume after a user input
 	// response; nil means storeUserInputResultAndContinue. Test seam.
 	continueUserInputFn func(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error
-	outboundFn          func(ctx context.Context, botID, channelType, target, text string) error
-	bgNotifDeferred     sync.Map // key: "botID:sessionID" → wake arrived while a session turn was active
 	sessionTurnMu       sync.Mutex
 	sessionTurnRefs     map[string]int // key: "botID:sessionID" → active turn refcount
 	timeout             time.Duration
@@ -193,8 +190,8 @@ func (r *Resolver) SetCompactionService(s *compaction.Service) {
 	r.compactionService = s
 }
 
-// SetBackgroundManager configures the background task manager so that
-// background exec notifications are injected into the agent loop.
+// SetBackgroundManager configures the background task manager used for task
+// summaries and background status tooling.
 func (r *Resolver) SetBackgroundManager(m *background.Manager) {
 	r.bgManager = m
 }
@@ -213,13 +210,6 @@ func (r *Resolver) SetUserInputService(s *userinput.Service) {
 		return
 	}
 	r.userInput = s
-}
-
-// SetOutboundFn configures the function used to deliver background notification
-// responses to the user. The agent's text output is delivered through the same
-// path as normal responses.
-func (r *Resolver) SetOutboundFn(fn func(ctx context.Context, botID, channelType, target, text string) error) {
-	r.outboundFn = fn
 }
 
 // SetPipeline configures the DCP pipeline for RC-based context assembly.

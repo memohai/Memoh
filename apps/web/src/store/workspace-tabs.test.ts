@@ -6,13 +6,17 @@ import { useWorkspaceTabsStore } from './workspace-tabs'
 
 const chatStoreMock = vi.hoisted(() => ({
   createNewSession: vi.fn(async () => {}),
+  selectSession: vi.fn(async () => {}),
+  selectDraft: vi.fn(() => {}),
 }))
 
 vi.mock('@/store/chat-list', () => ({
   useChatStore: () => ({
     sessionId: null,
     sessions: [],
+    loadingChats: false,
     activeSession: null,
+    userSentInSession: null,
     bots: [
       {
         id: 'bot-1',
@@ -25,6 +29,8 @@ vi.mock('@/store/chat-list', () => ({
     ],
     isSessionStreaming: vi.fn(() => false),
     createNewSession: chatStoreMock.createNewSession,
+    selectSession: chatStoreMock.selectSession,
+    selectDraft: chatStoreMock.selectDraft,
   }),
 }))
 
@@ -192,6 +198,8 @@ describe('workspace layout store', () => {
       clear: () => storage.clear(),
     })
     chatStoreMock.createNewSession.mockClear()
+    chatStoreMock.selectSession.mockClear()
+    chatStoreMock.selectDraft.mockClear()
     setActivePinia(createPinia())
     useChatSelectionStore().setBot('bot-1')
   })
@@ -211,6 +219,36 @@ describe('workspace layout store', () => {
     store.updateBrowserAddress('browser:1', 'localhost:3000/app')
     expect(panel?.params.address).toBe('localhost:3000/app')
     expect(panel?.title).toBe('localhost:3000/app')
+  })
+
+  it('opens a browser tab at an address and focuses the existing one on the same URL', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    // First click normalizes the address and titles the tab with it.
+    expect(store.openBrowserAt('http://localhost:5173/app')).toBe(true)
+    const first = dock.getPanel('browser:1')
+    expect(first?.params.address).toBe('localhost:5173/app')
+    expect(first?.title).toBe('localhost:5173/app')
+
+    // A different path on the same port opens a second tab.
+    expect(store.openBrowserAt('127.0.0.1:5173/other')).toBe(true)
+    expect(dock.getPanel('browser:2')?.params.address).toBe('localhost:5173/other')
+
+    // The exact same URL (after normalization) focuses the existing tab.
+    expect(store.openBrowserAt('localhost:5173/app')).toBe(true)
+    expect(dock.panels.filter(p => p.component === 'browser')).toHaveLength(2)
+    expect(dock.activePanel?.id).toBe('browser:1')
+  })
+
+  it('refuses to open a browser tab for a non-local address', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    expect(store.openBrowserAt('https://example.com/')).toBe(false)
+    expect(dock.panels.filter(p => p.component === 'browser')).toHaveLength(0)
   })
 
   it('keeps terminal ids monotonic per bot', () => {
@@ -241,33 +279,90 @@ describe('workspace layout store', () => {
     expect(dock.panels).toHaveLength(2)
   })
 
-  it('focuses the singleton chat panel instead of duplicating it', () => {
+  it('focuses the single draft chat tab instead of duplicating it', () => {
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()
     store.registerApi(dock as never)
 
-    store.openChat('First')
+    store.openDraftChat({ title: 'First' })
     store.openTerminal()
-    store.openChat('Second')
+    store.openDraftChat({ title: 'Second' })
 
     expect(dock.panels.filter((p) => p.component === 'chat')).toHaveLength(1)
-    expect(dock.activePanel?.id).toBe('chat')
-
-    store.setChatTitle('Renamed')
-    expect(dock.getPanel('chat')?.title).toBe('Renamed')
+    expect(dock.activePanel?.component).toBe('chat')
   })
 
-  it('keeps the final draft chat tab open when it is closed', async () => {
+  it('opens one chat tab per session and reuses the ephemeral slot', () => {
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()
     store.registerApi(dock as never)
 
-    store.openChat('Existing')
-    store.closeTab('chat')
+    store.openSessionChat({ sessionId: 's1', title: 'S1' })
+    const firstId = dock.panels.find((p) => p.component === 'chat')!.id
+
+    // Same session: focus the existing tab, no new panel.
+    store.openSessionChat({ sessionId: 's1', title: 'S1' })
+    expect(dock.panels.filter((p) => p.component === 'chat')).toHaveLength(1)
+
+    // Different session: repoint the group's ephemeral chat slot in place.
+    store.openSessionChat({ sessionId: 's2', title: 'S2' })
+    const chatPanels = dock.panels.filter((p) => p.component === 'chat')
+    expect(chatPanels).toHaveLength(1)
+    expect(chatPanels[0]!.id).toBe(firstId)
+    expect(chatPanels[0]!.params.sessionId).toBe('s2')
+  })
+
+  it('opens files into the ephemeral slot and replaces until pinned', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openFile('/data/a.md')
+    expect(store.ephemeralPanels['file:/data/a.md']).toBe(true)
+
+    // Another file replaces the ephemeral one in the same group.
+    store.openFile('/data/b.md')
+    expect(dock.getPanel('file:/data/a.md')).toBeUndefined()
+    expect(dock.getPanel('file:/data/b.md')).toBeTruthy()
+
+    // Pin b (mimics a first edit); opening c now keeps b.
+    store.pinPanel('file:/data/b.md')
+    expect(store.ephemeralPanels['file:/data/b.md']).toBeUndefined()
+    store.openFile('/data/c.md')
+    expect(dock.getPanel('file:/data/b.md')).toBeTruthy()
+    expect(dock.getPanel('file:/data/c.md')).toBeTruthy()
+  })
+
+  it('keeps the final draft chat tab open when it is closed', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openDraftChat({ title: 'Existing' })
+    const id = dock.panels.find((p) => p.component === 'chat')!.id
+    store.closeTab(id)
 
     expect(dock.panels).toHaveLength(1)
-    expect(dock.getPanel('chat')?.component).toBe('chat')
-    expect(chatStoreMock.createNewSession).not.toHaveBeenCalled()
+    expect(dock.getPanel(id)?.component).toBe('chat')
+  })
+
+  it('respawns a fresh draft when the last chat tab (a real session) is closed', async () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 's1', title: 'S1' })
+    const id = dock.panels.find((p) => p.component === 'chat')!.id
+
+    store.closeTab(id)
+    // Closing the last chat resets the global view to a draft so the respawn is a
+    // fresh New Session page, not the session that was just closed.
+    expect(chatStoreMock.selectDraft).toHaveBeenCalled()
+
+    await flushDraftChatFallback()
+    const chatPanels = dock.panels.filter((p) => p.component === 'chat')
+    expect(chatPanels).toHaveLength(1)
+    expect(chatPanels[0]!.params.sessionId ?? null).toBeNull()
   })
 
   it('opens a draft chat when a non-chat tab leaves the dock empty', async () => {
@@ -280,9 +375,10 @@ describe('workspace layout store', () => {
 
     await flushDraftChatFallback()
 
-    expect(chatStoreMock.createNewSession).toHaveBeenCalledOnce()
     expect(dock.panels).toHaveLength(1)
-    expect(dock.getPanel('chat')?.component).toBe('chat')
+    const chat = dock.panels[0]!
+    expect(chat.component).toBe('chat')
+    expect(chat.params.sessionId ?? null).toBeNull()
   })
 
   it('opens a draft chat when switching to a bot without a saved layout', async () => {
@@ -297,38 +393,21 @@ describe('workspace layout store', () => {
     selection.setBot('bot-without-layout')
     await flushDraftChatFallback()
 
-    expect(chatStoreMock.createNewSession).toHaveBeenCalledOnce()
     expect(dock.panels).toHaveLength(1)
-    expect(dock.getPanel('chat')?.component).toBe('chat')
-    expect(dock.getPanel('chat')?.title).toBe('New Session')
+    const chat = dock.panels[0]!
+    expect(chat.component).toBe('chat')
+    expect(chat.title).toBe('New Session')
   })
 
-  it('sets a fallback title when focusing an existing blank chat tab', () => {
+  it('does not split chat panels (single global session)', () => {
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()
     store.registerApi(dock as never)
 
-    dock.addPanel({ id: 'chat', component: 'chat', title: '' })
-    store.openChat()
-
-    expect(dock.getPanel('chat')?.title).toBe('New Session')
-  })
-
-  it('splits the chat panel into a duplicate chat pane', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openChat('Session')
+    store.openSessionChat({ sessionId: 's1', title: 'Session' })
     store.splitGroup('group-1', 'right')
 
-    expect(dock.getPanel('chat')).toBeTruthy()
-    expect(dock.getPanel('chat~2')).toBeTruthy()
-    expect(dock.getPanel('chat~2')?.component).toBe('chat')
-
-    store.setChatTitle('Renamed')
-    expect(dock.getPanel('chat')?.title).toBe('Renamed')
-    expect(dock.getPanel('chat~2')?.title).toBe('Renamed')
+    expect(dock.panels.filter((p) => p.component === 'chat')).toHaveLength(1)
   })
 
   it('opens multiple schedule panels and focuses an existing schedule', () => {

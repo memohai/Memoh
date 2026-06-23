@@ -4,8 +4,7 @@ import "strings"
 
 // ApplyBackgroundTaskSnapshots overlays live background-task state onto
 // converted UI turns. This keeps persisted background_started tool results
-// accurate after a page reload, even before a terminal notification message is
-// present in history.
+// accurate after a page reload.
 func ApplyBackgroundTaskSnapshots(turns []UITurn, tasks []UIBackgroundTask) {
 	if len(turns) == 0 || len(tasks) == 0 {
 		return

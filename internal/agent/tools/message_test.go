@@ -305,69 +305,6 @@ func TestExecSendCurrentConversationLiveStreamUsesEmitter(t *testing.T) {
 	}
 }
 
-func TestExecSendBackgroundDeliveryCurrentTargetUsesChannelAdapter(t *testing.T) {
-	t.Parallel()
-
-	sender := &recordingSender{}
-	provider := NewMessageProvider(nil, sender, usageTestReactor{}, usageTestResolver{}, messageTestAssetResolver{})
-	var emitted bool
-	result, err := provider.execSend(context.Background(), SessionContext{
-		BotID:           "bot_1",
-		SessionType:     sessionmode.BackgroundDelivery,
-		CurrentPlatform: "telegram",
-		ReplyTarget:     "chat-1",
-		Emitter: func(ToolStreamEvent) {
-			emitted = true
-		},
-	}, map[string]any{
-		"platform":    "telegram",
-		"target":      "chat-1",
-		"attachments": []any{"screenshot.png"},
-	})
-	if err != nil {
-		t.Fatalf("execSend returned error: %v", err)
-	}
-	if emitted {
-		t.Fatal("background delivery should not use local stream emitter for send")
-	}
-	if sender.called != 1 {
-		t.Fatalf("expected sender called once, got %d", sender.called)
-	}
-	if sender.req.Target != "chat-1" {
-		t.Fatalf("unexpected target: %q", sender.req.Target)
-	}
-	if got := sender.req.Message.Attachments[0].ContentHash; got != "hash_1" {
-		t.Fatalf("expected resolved attachment content hash, got %q", got)
-	}
-	resp, ok := result.(map[string]any)
-	if !ok || resp["ok"] != true || resp["delivered"] != "current_conversation" {
-		t.Fatalf("unexpected result: %#v", result)
-	}
-}
-
-func TestExecSendBackgroundDeliveryRejectsCurrentTargetTextOnly(t *testing.T) {
-	t.Parallel()
-
-	sender := &recordingSender{}
-	provider := NewMessageProvider(nil, sender, usageTestReactor{}, usageTestResolver{}, nil)
-	_, err := provider.execSend(context.Background(), SessionContext{
-		BotID:           "bot_1",
-		SessionType:     sessionmode.BackgroundDelivery,
-		CurrentPlatform: "telegram",
-		ReplyTarget:     "chat-1",
-	}, map[string]any{
-		"platform": "telegram",
-		"target":   "chat-1",
-		"text":     "ordinary update",
-	})
-	if err == nil || !strings.Contains(err.Error(), "return assistant text instead") {
-		t.Fatalf("execSend error = %v, want assistant text guidance", err)
-	}
-	if sender.called != 0 {
-		t.Fatalf("expected sender not called for rejected text-only current target, got %d", sender.called)
-	}
-}
-
 type recordingReactor struct {
 	called int
 	req    channel.ReactRequest

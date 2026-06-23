@@ -30,6 +30,8 @@
 
 Memoh is an open-source multi-agent platform. Each agent gets its own cloud computer — a dedicated container with a filesystem, desktop, browser, network, and long-term memory. Your agents stay online 24/7, even when your laptop is closed.
 
+Use your own API keys to run Memoh's built-in agent, or host your existing Claude Code and Codex agents inside Memoh workspaces.
+
 Talk to them through Telegram, Discord, Lark, WeChat, Web UI, and more. They remember context across sessions and platforms, drive a browser, call MCP tools, and run scheduled tasks. Run one for yourself, assign one to each team member, or spin up a fleet.
 
 ## Get Started
@@ -84,26 +86,17 @@ A native client for macOS, Windows, and Linux. [Download Memoh Desktop](https://
 
 ## Features
 
-### Core
-
 - **Multi-bot & multi-user**: Multiple bots that chat privately, in groups, or with each other. Cross-platform identity binding.
 - **Containerized workspaces**: Each bot runs in its own container with a dedicated filesystem, network, tools, and desktop.
 - **Built-in memory**: Long-term memory across sessions and platforms, out of the box. Also supports [Mem0](https://mem0.ai), OpenViking.
 - **10+ channels**: Telegram, Discord, Lark, WeChat, QQ, Email, and more.
-
-### Agent Capabilities
-
 - **MCP**: Connect external tool servers. Each bot manages its own connections.
+- **Plugins**: Install packaged skills, tools, and integrations to extend what bots can do.
+- **Agent Hosting**: Host external agents inside Memoh workspaces via ACP. Currently supports Codex and Claude Code, configured per bot.
 - **Browser Use**: Drive a browser inside the container.
 - **Computer Use**: Operate the container desktop for GUI workflows.
 - **Skills & Supermarket**: Modular skills, install curated templates from Supermarket, delegate to sub-agents.
 - **Automation**: Scheduled tasks and periodic heartbeat.
-
-## Memory
-
-Ships with a fully self-hosted memory engine. Every bot remembers what you've told it across sessions, days, and platforms.
-
-Also supports [**Mem0**](https://mem0.ai) and **OpenViking** as drop-in alternatives. See the [documentation](https://docs.memoh.ai/memory-providers/).
 
 ## Sub-projects
 

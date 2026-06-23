@@ -69,16 +69,6 @@ func TestGenerateSystemPromptIncludesCommonAndModeContracts(t *testing.T) {
 			},
 		},
 		{
-			sessionType: sessionmode.BackgroundDelivery,
-			want: []string{
-				"You are an AI agent running inside a private Memoh workspace.",
-				"## Session mode: background delivery",
-				"Background task notifications are being delivered between user turns.",
-				"Do not output `HEARTBEAT_OK`.",
-				"specify the delivery `platform` and `target`",
-			},
-		},
-		{
 			sessionType: sessionmode.Subagent,
 			want: []string{
 				"You are an AI agent running inside a private Memoh workspace.",
@@ -370,6 +360,5 @@ func allPromptSessionTypes() []string {
 		sessionmode.Schedule,
 		sessionmode.Heartbeat,
 		sessionmode.Subagent,
-		sessionmode.BackgroundDelivery,
 	}
 }

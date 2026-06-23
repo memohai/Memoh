@@ -79,9 +79,7 @@ const (
 	subagentRetryBaseDelay  = 2 * time.Second
 	subagentWatchdogTimeout = 3 * time.Minute
 
-	agentControlVersion     = "v1"
-	defaultWaitAgentTimeout = 30 * time.Second
-	maxWaitAgentTimeout     = 300 * time.Second
+	agentControlVersion = "v1"
 )
 
 // ErrWatchdogTimedOut is returned when the subagent watchdog fires.
@@ -234,20 +232,17 @@ func (*SpawnProvider) Usage(_ context.Context, _ SessionContext, available Avail
 		canStartBackground = true
 		parts = append(parts, "Use "+ref+" to continue an existing agent with a follow-up.")
 	}
-	if backgroundTools := available.Refs(ToolListBackground(), ToolGetBackgroundStatus(), ToolKillBackground()); len(backgroundTools) > 0 {
+	if backgroundTools := available.Refs(ToolWaitUntil(), ToolGetBackgroundStatus(), ToolListBackground(), ToolKillBackground()); len(backgroundTools) > 0 {
 		if canStartBackground {
-			parts = append(parts, "For long work, set `run_in_background: true`. The call returns a task ID immediately and you will be notified when the agent task finishes — do not poll or sleep while waiting.")
+			parts = append(parts, "For long work, set `run_in_background: true`. The call returns a task ID immediately. Use `wait_until(task_id)`, then `get_background_status(task_id)` to read `result`.")
 		}
 		parts = append(parts, "Manage running agent tasks with "+joinRefs(backgroundTools, "and")+".")
-	}
-	if ref, ok := available.Ref(ToolWaitAgent()); ok {
-		parts = append(parts, "Use "+ref+" when you need to wait briefly.")
 	}
 	if ref, ok := available.Ref(ToolListAgents()); ok {
 		parts = append(parts, "Use "+ref+" to see agents created in the current session.")
 	}
 	if ref, ok := available.Ref(ToolSearchMessages()); ok {
-		parts = append(parts, "Read a finished task's full transcript with "+ref+" using the session ID from its notification.")
+		parts = append(parts, "Read a finished task's full transcript with "+ref+" using the session ID returned by get_background_status when the brief result is not enough.")
 	}
 	if len(parts) == 0 {
 		return ""
@@ -277,7 +272,7 @@ func (p *SpawnProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 					},
 					"run_in_background": map[string]any{
 						"type":        "boolean",
-						"description": "If true, return immediately with a task_id. Use background task tools to inspect or kill the task when they are available.",
+						"description": "If true, return immediately with a task_id. Use wait_until(task_id), then get_background_status(task_id) to inspect result.",
 					},
 				},
 				"required": []string{"task"},
@@ -302,40 +297,13 @@ func (p *SpawnProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 					},
 					"run_in_background": map[string]any{
 						"type":        "boolean",
-						"description": "If true, return immediately with a task_id. If the agent is busy, the message is queued regardless of this value.",
+						"description": "If true, return immediately with a task_id. If the agent is busy, the message is queued regardless of this value. Use wait_until(task_id), then get_background_status(task_id) to inspect result.",
 					},
 				},
 				"required": []string{"id", "message"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return p.execSendMessage(ctx.Context, sess, inputAsMap(input))
-			},
-		},
-		{
-			Name:        ToolWaitAgent().String(),
-			Description: "Wait for a managed subagent task to finish. A timeout only stops waiting; it does not cancel the agent.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"id": map[string]any{
-						"type":        "string",
-						"description": "Existing agent id.",
-					},
-					"task_id": map[string]any{
-						"type":        "string",
-						"description": "Optional specific task id returned by an agent task-starting call.",
-					},
-					"timeout_seconds": map[string]any{
-						"type":        "integer",
-						"description": "Wait timeout in seconds. Default 30, maximum 300.",
-						"minimum":     1,
-						"maximum":     300,
-					},
-				},
-				"required": []string{"id"},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execWaitAgent(ctx.Context, sess, inputAsMap(input))
 			},
 		},
 		{
@@ -495,34 +463,6 @@ func (p *SpawnProvider) execSendMessage(ctx context.Context, session SessionCont
 	return p.submitAgentTask(ctx, session, rec, message, runInBackground)
 }
 
-func (p *SpawnProvider) execWaitAgent(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
-	if err := validateParentSession(session); err != nil {
-		return nil, err
-	}
-	agentID, err := normalizeAgentID(StringArg(args, "id"))
-	if err != nil {
-		return nil, err
-	}
-	rec, err := p.findAgent(ctx, session, agentID)
-	if err != nil {
-		return nil, err
-	}
-	timeout := defaultWaitAgentTimeout
-	if seconds, ok, err := IntArg(args, "timeout_seconds"); err != nil {
-		return nil, err
-	} else if ok {
-		if seconds < 1 {
-			seconds = 1
-		}
-		timeout = time.Duration(seconds) * time.Second
-		if timeout > maxWaitAgentTimeout {
-			timeout = maxWaitAgentTimeout
-		}
-	}
-	taskID := strings.TrimSpace(StringArg(args, "task_id"))
-	return p.waitAgent(ctx, session, rec, taskID, timeout), nil
-}
-
 func (p *SpawnProvider) execListAgents(ctx context.Context, session SessionContext, _ map[string]any) (any, error) {
 	if err := validateParentSession(session); err != nil {
 		return nil, err
@@ -608,7 +548,7 @@ func (p *SpawnProvider) submitAgentTask(ctx context.Context, session SessionCont
 			"status":         string(background.TaskQueued),
 			"description":    description,
 			"queue_position": queuePosition,
-			"message":        "Agent is currently running. Message queued.",
+			"message":        "Agent is currently running. Message queued. Use wait_until(task_id), then get_background_status(task_id) to inspect result.",
 		}, nil
 	}
 
@@ -629,7 +569,7 @@ func (p *SpawnProvider) submitAgentTask(ctx context.Context, session SessionCont
 			"task_id":     taskID,
 			"status":      "background_started",
 			"description": description,
-			"message":     fmt.Sprintf("Agent %s started in background with task ID: %s.", rec.AgentID, taskID),
+			"message":     fmt.Sprintf("Agent %s started in background with task ID: %s. Use wait_until(task_id), then get_background_status(task_id) to inspect result.", rec.AgentID, taskID),
 		}, nil
 	}
 
@@ -716,72 +656,6 @@ func (p *SpawnProvider) finishAgentRequest(ctx context.Context, key string, resu
 		return
 	}
 	go p.runAgentRequest(runCtx, key, next)
-}
-
-func (p *SpawnProvider) waitAgent(ctx context.Context, session SessionContext, rec agentRecord, taskID string, timeout time.Duration) map[string]any {
-	deadline := time.NewTimer(timeout)
-	defer deadline.Stop()
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		if result := p.currentWaitResult(session, rec, taskID); result != nil {
-			if isTerminalStatus(fmt.Sprintf("%v", result["status"])) || result["status"] == "idle" {
-				return result
-			}
-		}
-		select {
-		case <-ctx.Done():
-			result := p.currentWaitResult(session, rec, taskID)
-			if result == nil {
-				result = map[string]any{"agent_id": rec.AgentID, "session_id": rec.SessionID}
-			}
-			result["timed_out"] = true
-			result["error"] = ctx.Err().Error()
-			return result
-		case <-deadline.C:
-			result := p.currentWaitResult(session, rec, taskID)
-			if result == nil {
-				result = map[string]any{"agent_id": rec.AgentID, "session_id": rec.SessionID, "status": "idle"}
-			}
-			result["timed_out"] = true
-			return result
-		case <-ticker.C:
-		}
-	}
-}
-
-func (p *SpawnProvider) currentWaitResult(session SessionContext, rec agentRecord, taskID string) map[string]any {
-	if taskID != "" {
-		if task := p.bgManager.GetForSession(session.BotID, session.SessionID, taskID); task != nil {
-			return agentSnapshotMap(task.Snapshot())
-		}
-		return map[string]any{
-			"agent_id":   rec.AgentID,
-			"session_id": rec.SessionID,
-			"task_id":    taskID,
-			"status":     "not_found",
-		}
-	}
-	snap := p.coord.snapshot(session.BotID, session.SessionID, rec.AgentID)
-	if snap.RunningTaskID != "" {
-		if task := p.bgManager.GetForSession(session.BotID, session.SessionID, snap.RunningTaskID); task != nil {
-			return agentSnapshotMap(task.Snapshot())
-		}
-	}
-	if len(snap.QueuedTaskIDs) > 0 {
-		if task := p.bgManager.GetForSession(session.BotID, session.SessionID, snap.QueuedTaskIDs[0]); task != nil {
-			return agentSnapshotMap(task.Snapshot())
-		}
-	}
-	if snap.Last.Status != "" {
-		return agentResultMap(snap.Last)
-	}
-	return map[string]any{
-		"agent_id":   rec.AgentID,
-		"session_id": rec.SessionID,
-		"status":     "idle",
-	}
 }
 
 func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) agentRunResult {
@@ -1079,15 +953,6 @@ func normalizeAgentID(raw string) (string, error) {
 	return id, nil
 }
 
-func isTerminalStatus(status string) bool {
-	switch status {
-	case string(background.TaskCompleted), string(background.TaskFailed), string(background.TaskKilled), "idle", "not_found":
-		return true
-	default:
-		return false
-	}
-}
-
 func agentResultMap(res agentRunResult) map[string]any {
 	out := map[string]any{
 		"agent_id":   res.AgentID,
@@ -1112,23 +977,6 @@ func agentResultMap(res agentRunResult) map[string]any {
 	}
 	if res.TimedOut {
 		out["timed_out"] = true
-	}
-	return out
-}
-
-func agentSnapshotMap(s background.TaskSnapshot) map[string]any {
-	out := map[string]any{
-		"agent_id":   s.AgentID,
-		"session_id": s.AgentSessionID,
-		"task_id":    s.TaskID,
-		"status":     string(s.Status),
-		"message":    s.AgentMessage,
-	}
-	if s.AgentReport != "" {
-		out["text"] = s.AgentReport
-	}
-	if s.AgentError != "" {
-		out["error"] = s.AgentError
 	}
 	return out
 }

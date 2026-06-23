@@ -88,15 +88,6 @@ func (*ContainerProvider) Usage(_ context.Context, session SessionContext, avail
 	if ref, ok := available.Ref(ToolExec()); ok {
 		parts = append(parts, ref+": execute command")
 	}
-	if ref, ok := available.Ref(ToolListBackground()); ok {
-		parts = append(parts, ref+": list background commands")
-	}
-	if ref, ok := available.Ref(ToolGetBackgroundStatus()); ok {
-		parts = append(parts, ref+": inspect a background command")
-	}
-	if ref, ok := available.Ref(ToolKillBackground()); ok {
-		parts = append(parts, ref+": stop a background command")
-	}
 	return usageSection("Basic Tools", parts)
 }
 
@@ -238,14 +229,14 @@ Delete a file:
 
 # Instructions
 - Use this tool to run shell commands for installing packages, running scripts, building code, running tests, and other system operations.
-- If your command will take a long time (package installs, builds, test suites), set run_in_background to true. You will be notified when it completes. You do not need to add '&' at the end of the command when using this parameter.
-- If waiting for a background task, you will be notified when it completes — do NOT poll or sleep.
-- You may specify a custom timeout (up to %d seconds) for commands you know will take longer than the default %d seconds. If a foreground command times out, it will be automatically moved to the background and you will be notified when it completes.
+- If your command will take a long time (package installs, builds, test suites), set run_in_background to true. The call returns a task ID immediately. You do not need to add '&' at the end of the command when using this parameter.
+- If waiting for a background task, use wait_until(task_id), then get_background_status(task_id) to inspect result.
+- You may specify a custom timeout (up to %d seconds) for commands you know will take longer than the default %d seconds. If a foreground command times out, it will be automatically moved to the background; use wait_until(task_id), then get_background_status(task_id).
 - Avoid unnecessary sleep commands:
   - Do not sleep between commands that can run immediately — just run them.
   - If your command is long running, use run_in_background. No sleep needed.
   - Do not retry failing commands in a sleep loop — diagnose the root cause.
-  - If waiting for a background task, you will be notified when it completes automatically.
+  - If waiting for a background task, use wait_until(task_id).
   - sleep N (N >= 2) in foreground is blocked. If you genuinely need a short delay, keep it under 2 seconds.`, workspace.locationDescription, wd, background.MaxExecTimeout, background.DefaultExecTimeout),
 			Parameters: map[string]any{
 				"type": "object",
@@ -254,51 +245,12 @@ Delete a file:
 					"work_dir":          map[string]any{"type": "string", "description": fmt.Sprintf("Working directory (default: %s)", wd)},
 					"description":       map[string]any{"type": "string", "description": `Clear, concise description of what this command does in active voice. For simple commands keep it brief (5-10 words): ls -la → "List files with details". For complex commands add enough context: curl -s url | jq '.data[]' → "Fetch JSON and extract data array".`},
 					"timeout":           map[string]any{"type": "integer", "description": fmt.Sprintf("Timeout in seconds (default: %d, max: %d). Only applies to foreground execution. Commands that exceed this timeout are automatically moved to background.", background.DefaultExecTimeout, background.MaxExecTimeout), "minimum": 1, "maximum": background.MaxExecTimeout},
-					"run_in_background": map[string]any{"type": "boolean", "description": "If true, run the command in the background. Returns immediately with a task ID. You will be notified when it completes. Use for long-running commands (installs, builds, test suites). You do not need to use '&' at the end of the command."},
+					"run_in_background": map[string]any{"type": "boolean", "description": "If true, run the command in the background. Returns immediately with a task ID. Use wait_until(task_id), then get_background_status(task_id) to inspect result. Use for long-running commands (installs, builds, test suites). You do not need to use '&' at the end of the command."},
 				},
 				"required": []string{"command"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return p.execExec(ctx.Context, sess, inputAsMap(input))
-			},
-		},
-		{
-			Name:        ToolListBackground().String(),
-			Description: "List background tasks for the current session.",
-			Parameters: map[string]any{
-				"type":       "object",
-				"properties": map[string]any{},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execListBackground(ctx.Context, sess, inputAsMap(input))
-			},
-		},
-		{
-			Name:        ToolGetBackgroundStatus().String(),
-			Description: "Get the status and details of a background task.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"task_id": map[string]any{"type": "string", "description": "Task ID"},
-				},
-				"required": []string{"task_id"},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execGetBackgroundStatus(ctx.Context, sess, inputAsMap(input))
-			},
-		},
-		{
-			Name:        ToolKillBackground().String(),
-			Description: "Kill a running background task.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"task_id": map[string]any{"type": "string", "description": "Task ID"},
-				},
-				"required": []string{"task_id"},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execKillBackground(ctx.Context, sess, inputAsMap(input))
 			},
 		},
 	}, nil
@@ -725,7 +677,7 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 	runInBg, _, _ := BoolArg(args, "run_in_background")
 	if !runInBg {
 		if reason := detectBlockedSleep(command); reason != "" {
-			return nil, fmt.Errorf("blocked: %s. Run blocking commands in the background with run_in_background: true — you'll get a completion notification when done. If you genuinely need a delay (rate limiting, deliberate pacing), keep it under 2 seconds", reason)
+			return nil, fmt.Errorf("blocked: %s. Run blocking commands in the background with run_in_background: true, then use wait_until(task_id) and get_background_status(task_id). If you genuinely need a delay (rate limiting, deliberate pacing), keep it under 2 seconds", reason)
 		}
 	}
 
@@ -992,7 +944,7 @@ func (p *ContainerProvider) flipToBackground(
 		"message": fmt.Sprintf(
 			"Command exceeded the foreground timeout (%ds) and has been moved to the background with task ID: %s. "+
 				"The process is still running — no work was lost. "+
-				"You will be notified when it completes. Output is being written to: %s. "+
+				"Output is being written to: %s. Use wait_until(task_id) to wait, then get_background_status(task_id) to inspect result. "+
 				"For long-running commands, use run_in_background: true from the start to avoid this delay.",
 			softTimeout, taskID, outputFile,
 		),
@@ -1043,116 +995,8 @@ func (p *ContainerProvider) execExecBackground(
 		"status":      "background_started",
 		"task_id":     taskID,
 		"output_file": outputFile,
-		"message":     fmt.Sprintf("Command started in background with task ID: %s. You will be notified when it completes. Output is being written to: %s. Do NOT poll or sleep — you will receive a notification automatically.", taskID, outputFile),
+		"message":     fmt.Sprintf("Command started in background with task ID: %s. Output is being written to: %s. Use wait_until(task_id) to wait, then get_background_status(task_id) to inspect result.", taskID, outputFile),
 	}, nil
-}
-
-func (p *ContainerProvider) execListBackground(_ context.Context, session SessionContext, _ map[string]any) (any, error) {
-	if p.bgManager == nil {
-		return nil, errors.New("background task manager not available")
-	}
-
-	snapshots := p.bgManager.ListSnapshotsForSession(session.BotID, session.SessionID)
-	entries := make([]map[string]any, 0, len(snapshots))
-	for _, s := range snapshots {
-		entry := map[string]any{
-			"task_id":     s.TaskID,
-			"kind":        string(s.Kind),
-			"description": s.Description,
-			"status":      string(s.Status),
-			"started_at":  session.FormatTime(s.StartedAt),
-		}
-		if s.Kind == background.KindAgent {
-			entry["agent_id"] = s.AgentID
-			entry["session_id"] = s.AgentSessionID
-		}
-		if s.Kind != background.KindSpawn && s.Kind != background.KindAgent {
-			entry["command"] = truncateStr(s.Command, 120)
-			entry["output_file"] = s.OutputFile
-		}
-		entries = append(entries, entry)
-	}
-	return map[string]any{"tasks": entries, "count": len(entries)}, nil
-}
-
-func (p *ContainerProvider) execGetBackgroundStatus(_ context.Context, session SessionContext, args map[string]any) (any, error) {
-	if p.bgManager == nil {
-		return nil, errors.New("background task manager not available")
-	}
-
-	taskID := strings.TrimSpace(StringArg(args, "task_id"))
-	if taskID == "" {
-		return nil, errors.New("task_id is required")
-	}
-	task := p.bgManager.GetForSession(session.BotID, session.SessionID, taskID)
-	if task == nil {
-		return nil, fmt.Errorf("task %s not found", taskID)
-	}
-	s := task.Snapshot()
-	result := map[string]any{
-		"task_id":     s.TaskID,
-		"kind":        string(s.Kind),
-		"description": s.Description,
-		"status":      string(s.Status),
-		"started_at":  session.FormatTime(s.StartedAt),
-	}
-	if s.Status != background.TaskRunning && s.Status != background.TaskQueued {
-		result["completed_at"] = session.FormatTime(s.CompletedAt)
-	}
-	if s.Kind == background.KindAgent {
-		result["agent_id"] = s.AgentID
-		result["session_id"] = s.AgentSessionID
-		result["message"] = s.AgentMessage
-		if s.AgentReport != "" {
-			result["report"] = s.AgentReport
-		}
-		if s.AgentError != "" {
-			result["error"] = s.AgentError
-		}
-		return result, nil
-	}
-	if s.Kind == background.KindSpawn {
-		if len(s.Branches) > 0 {
-			branches := make([]map[string]any, 0, len(s.Branches))
-			for _, br := range s.Branches {
-				b := map[string]any{"task": br.Task, "status": string(br.Status)}
-				if br.ChildSessionID != "" {
-					b["session_id"] = br.ChildSessionID
-				}
-				if br.Report != "" {
-					b["report"] = br.Report
-				}
-				if br.Error != "" {
-					b["error"] = br.Error
-				}
-				branches = append(branches, b)
-			}
-			result["branches"] = branches
-		}
-		return result, nil
-	}
-	result["command"] = s.Command
-	result["output_file"] = s.OutputFile
-	if s.Status != background.TaskRunning && s.Status != background.TaskQueued {
-		result["exit_code"] = s.ExitCode
-		result["output_tail"] = s.OutputTail
-	}
-	return result, nil
-}
-
-func (p *ContainerProvider) execKillBackground(_ context.Context, session SessionContext, args map[string]any) (any, error) {
-	if p.bgManager == nil {
-		return nil, errors.New("background task manager not available")
-	}
-
-	taskID := strings.TrimSpace(StringArg(args, "task_id"))
-	if taskID == "" {
-		return nil, errors.New("task_id is required")
-	}
-	if err := p.bgManager.KillForSession(session.BotID, session.SessionID, taskID); err != nil {
-		return nil, err
-	}
-	return map[string]any{"ok": true, "message": fmt.Sprintf("Task %s has been killed.", taskID)}, nil
 }
 
 func truncateStr(s string, n int) string {

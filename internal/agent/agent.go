@@ -164,7 +164,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		}
 		if toolUsage != "" {
 			// Must run before buildGenerateOptions so prompt caching and
-			// background-notification steps see the usage-augmented text.
+			// background task summaries see the usage-augmented text.
 			cfg.System = appendToolUsageToSystem(cfg.System, toolUsage)
 		}
 	}
@@ -638,7 +638,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 		}
 		if toolUsage != "" {
 			// Must run before buildGenerateOptions so prompt caching and
-			// background-notification steps see the usage-augmented text.
+			// background task summaries see the usage-augmented text.
 			cfg.System = appendToolUsageToSystem(cfg.System, toolUsage)
 		}
 	}
@@ -760,7 +760,7 @@ func (a *Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, approvalTo
 					p = override
 				}
 			}
-			return drainBackgroundNotifications(p, cfg.BackgroundManager, baseSystem, cfg.Identity.BotID, cfg.Identity.SessionID, logger)
+			return injectBackgroundTaskSummary(p, cfg.BackgroundManager, baseSystem, cfg.Identity.BotID, cfg.Identity.SessionID, logger)
 		}
 	}
 	opts := []sdk.GenerateOption{
@@ -1026,10 +1026,9 @@ func toolStreamEventToAgentEvent(evt tools.ToolStreamEvent) StreamEvent {
 	}
 }
 
-// drainBackgroundNotifications non-blockingly drains pending background task
-// notifications for the given bot+session and injects them as user messages
-// into the next LLM step at step boundaries.
-func drainBackgroundNotifications(
+// injectBackgroundTaskSummary refreshes the background task summary in the
+// system prompt at step boundaries.
+func injectBackgroundTaskSummary(
 	p *sdk.GenerateParams,
 	mgr *background.Manager,
 	baseSystem backgroundSystem,
@@ -1040,16 +1039,8 @@ func drainBackgroundNotifications(
 	// knows about ongoing background work even after compaction.
 	// Always start from baseSystem to avoid accumulating summaries across steps.
 	injectBackgroundSummary(p, baseSystem, mgr.RunningTasksSummary(botID, sessionID))
-
-	notifications := mgr.DrainNotifications(botID, sessionID)
-	for _, n := range notifications {
-		p.Messages = append(p.Messages, sdk.UserMessage(n.MessageText()))
-		logger.Info("injected background task notification",
-			slog.String("task_id", n.TaskID),
-			slog.String("status", string(n.Status)),
-			slog.Bool("stalled", n.Stalled),
-			slog.String("bot_id", botID),
-		)
+	if logger != nil {
+		logger.Debug("refreshed background task summary", slog.String("bot_id", botID), slog.String("session_id", sessionID))
 	}
 	return p
 }

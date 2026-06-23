@@ -68,23 +68,6 @@ func TestExecSpeakWithDifferentPlatformDoesNotReuseCurrentTarget(t *testing.T) {
 	}
 }
 
-func TestExecSpeakBackgroundDeliveryCannotDefaultTarget(t *testing.T) {
-	t.Parallel()
-
-	provider := NewTTSProvider(nil, nil, nil, nil, usageTestResolver{})
-	_, err := provider.execSpeak(context.Background(), SessionContext{
-		BotID:           "bot_1",
-		SessionType:     sessionmode.BackgroundDelivery,
-		CurrentPlatform: "telegram",
-		ReplyTarget:     "telegram-chat-1",
-	}, map[string]any{
-		"text": "hello",
-	})
-	if err == nil || !strings.Contains(err.Error(), "target is required") {
-		t.Fatalf("execSpeak error = %v, want target is required", err)
-	}
-}
-
 func TestTTSProviderToolsTreatTypedNilDependenciesAsUnavailable(t *testing.T) {
 	t.Parallel()
 
@@ -95,52 +78,6 @@ func TestTTSProviderToolsTreatTypedNilDependenciesAsUnavailable(t *testing.T) {
 	}
 	if len(tools) != 0 {
 		t.Fatalf("expected no tools with nil typed dependencies, got %d", len(tools))
-	}
-}
-
-func TestExecSpeakBackgroundDeliveryCurrentTargetUsesChannelAdapter(t *testing.T) {
-	t.Parallel()
-
-	audio := &ttsTestAudio{}
-	sender := &ttsRecordingSender{}
-	provider := &TTSProvider{
-		settings: ttsTestSettings{},
-		audio:    audio,
-		sender:   sender,
-		resolver: usageTestResolver{},
-	}
-	var emitted bool
-	result, err := provider.execSpeak(context.Background(), SessionContext{
-		BotID:           "bot_1",
-		SessionType:     sessionmode.BackgroundDelivery,
-		CurrentPlatform: "telegram",
-		ReplyTarget:     "chat-1",
-		Emitter: func(ToolStreamEvent) {
-			emitted = true
-		},
-	}, map[string]any{
-		"platform": "telegram",
-		"target":   "chat-1",
-		"text":     "hello",
-	})
-	if err != nil {
-		t.Fatalf("execSpeak returned error: %v", err)
-	}
-	if emitted {
-		t.Fatal("background delivery should not use local stream emitter for speak")
-	}
-	if audio.called != 1 {
-		t.Fatalf("expected synthesize called once, got %d", audio.called)
-	}
-	if sender.called != 1 {
-		t.Fatalf("expected sender called once, got %d", sender.called)
-	}
-	if sender.req.Target != "chat-1" {
-		t.Fatalf("unexpected target: %q", sender.req.Target)
-	}
-	resp, ok := result.(map[string]any)
-	if !ok || resp["ok"] != true || resp["target"] != "chat-1" {
-		t.Fatalf("unexpected result: %#v", result)
 	}
 }
 

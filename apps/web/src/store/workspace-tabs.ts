@@ -6,6 +6,7 @@ import { useChatStore } from '@/store/chat-list'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { hasBotPermission, type BotPermission } from '@/utils/bot-permissions'
+import { parseBrowserAddress } from '@/utils/browser-address'
 import {
   clearTerminalSnapshots,
   clearTerminalSnapshotsForBot,
@@ -46,12 +47,25 @@ interface BotLayoutState {
   browserCounter: number
   displayCounter: number
   scheduleCounter: number
+  chatCounter: number
+  // Panel ids that were ephemeral (preview/draft) when the layout was saved, so
+  // the italic + replace behavior survives a reload. Intersected with the panels
+  // actually present on restore.
+  ephemeralIds: string[]
 }
 
 type WorkspaceLayoutStorage = Record<string, BotLayoutState>
 
 function emptyBotLayout(): BotLayoutState {
-  return { layout: null, terminalCounter: 0, browserCounter: 0, displayCounter: 0, scheduleCounter: 0 }
+  return {
+    layout: null,
+    terminalCounter: 0,
+    browserCounter: 0,
+    displayCounter: 0,
+    scheduleCounter: 0,
+    chatCounter: 0,
+    ephemeralIds: [],
+  }
 }
 
 function fileBaseName(filePath: string): string {
@@ -60,8 +74,11 @@ function fileBaseName(filePath: string): string {
 }
 
 function panelComponentOf(id: string): WorkspacePanelComponent | null {
+  // Per-session chat tabs use `chat:<n>`. `chat` (legacy singleton) and `chat~2`
+  // (legacy split twin) are still recognized so old persisted layouts migrate.
   if (id === CHAT_PANEL_ID) return 'chat'
   if (id.startsWith(`${CHAT_PANEL_ID}~`)) return 'chat'
+  if (id.startsWith(`${CHAT_PANEL_ID}:`)) return 'chat'
   if (id.startsWith('file:')) return 'file'
   if (id.startsWith('preview:')) return 'preview'
   if (id.startsWith('asset:')) return 'asset'
@@ -94,7 +111,7 @@ function syncAllTerminalGroupChrome(dock: DockviewApi) {
 
 export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   const selection = useChatSelectionStore()
-  const { currentBotId, sessionId } = storeToRefs(selection)
+  const { currentBotId } = storeToRefs(selection)
   const chatStore = useChatStore()
   const currentBot = computed(() =>
     chatStore.bots.find(bot => bot.id === currentBotId.value) ?? null,
@@ -125,6 +142,13 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // the tab title) so the tab dot, the sidebar count badge, and the close-confirm
   // dialog all read ONE reactive source. Keyed by dockview panel id.
   const fileDirty = ref<Record<string, boolean>>({})
+  // VS Code-style "preview tab" state. An ephemeral panel renders italic, occupies
+  // its group's single preview slot, and is replaced in place when another
+  // ephemeral-eligible tab opens into that group. It pins (drops out of this map)
+  // the first time the user changes it — a file edit, or a message sent in a chat
+  // session. Keyed by dockview panel id; the tab strip and persistence read this
+  // ONE reactive source. Mirrors the fileDirty pattern above.
+  const ephemeralPanels = ref<Record<string, true>>({})
   // Save callbacks registered by each mounted file panel, so a dirty tab can be
   // written from the close-confirm dialog even while it sits in the background.
   const saveHandlers = new Map<string, () => Promise<boolean>>()
@@ -156,8 +180,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       storage.value = { ...storage.value, [bid]: emptyBotLayout() }
     }
     const state = storage.value[bid]
-    if (state && typeof state.scheduleCounter !== 'number') {
-      storage.value = { ...storage.value, [bid]: { ...emptyBotLayout(), ...state, scheduleCounter: 0 } }
+    if (state && (typeof state.scheduleCounter !== 'number'
+      || typeof state.chatCounter !== 'number'
+      || !Array.isArray(state.ephemeralIds))) {
+      storage.value = { ...storage.value, [bid]: { ...emptyBotLayout(), ...state } }
     }
     return storage.value[bid] ?? null
   }
@@ -227,7 +253,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   function persistLayout() {
     if (!api.value || suppressPersist || !loadedBotId) return
     try {
-      patchBotLayout(loadedBotId, { layout: sanitizeLayout(api.value.toJSON()) })
+      const dock = api.value
+      const ephemeralIds = Object.keys(ephemeralPanels.value).filter(id => dock.getPanel(id))
+      patchBotLayout(loadedBotId, { layout: sanitizeLayout(dock.toJSON()), ephemeralIds })
     } catch {
       // Serialization should never throw, but a failed save must not break UI.
     }
@@ -242,16 +270,19 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     return suffix ? `${prefix} ${suffix}` : prefix
   }
 
-  function chatTitleFallback(): string {
-    if (!(sessionId.value ?? '').trim()) return DEFAULT_CHAT_TITLE
-    return (chatStore.activeSession?.title ?? '').trim() || DEFAULT_UNTITLED_SESSION_TITLE
+  // Per-session chat title fallback (English; the sidebar callers pass localized
+  // strings, and syncChatTitles overlays the server title once known).
+  function chatTitleFallbackFor(sid: string | null): string {
+    if (!sid) return DEFAULT_CHAT_TITLE
+    const session = chatStore.sessions.find(s => s.id === sid)
+    return (session?.title ?? '').trim() || DEFAULT_UNTITLED_SESSION_TITLE
   }
 
   function panelTitleFallback(panel: { id: string, params?: Record<string, unknown> }): string {
     const params = panel.params ?? {}
     switch (panelComponentOf(panel.id)) {
       case 'chat':
-        return chatTitleFallback()
+        return chatTitleFallbackFor(panelSessionId(panel))
       case 'file':
         return fileBaseName(panel.id.slice('file:'.length))
       case 'preview':
@@ -309,6 +340,14 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       }
       loadedBotId = botId
       prunePanels()
+      // Restore the ephemeral slot from storage, keeping only ids that survived
+      // restore + prune. Wholesale replace so the previous bot's flags are dropped.
+      const storedEphemeral = storage.value[botId]?.ephemeralIds ?? []
+      const nextEphemeral: Record<string, true> = {}
+      for (const id of storedEphemeral) {
+        if (dock.getPanel(id)) nextEphemeral[id] = true
+      }
+      ephemeralPanels.value = nextEphemeral
       activePanelId.value = dock.activePanel?.id ?? null
       syncAllTerminalGroupChrome(dock)
       repairedEmptyTitles = repairEmptyPanelTitles()
@@ -376,6 +415,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         if (group && !isTerminalOnlyGroup(group)) {
           lastNonTerminalGroupId = group.id
         }
+        // Activating a chat tab makes its session the live one. Strictly gated so
+        // file/terminal activation never touches chat state.
+        if (panel && panelComponentOf(panel.id) === 'chat') {
+          activateChatSession(panel)
+        }
       }),
       dock.onDidLayoutChange(() => {
         // Catch-all: keep terminal-group chrome (bottom header + class) in
@@ -393,6 +437,15 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         if (panel.id.startsWith('terminal:') && loadedBotId) {
           const bid = loadedBotId
           void nextTick(() => deleteTerminalSnapshot(terminalCacheKey(bid, panel.id)))
+        }
+        // Closing the LAST chat tab resets the global view to a fresh draft, so the
+        // dock respawns a "New Session" page instead of reopening the session that
+        // was just closed (its id is still the global one until we clear it).
+        if (
+          panelComponentOf(panel.id) === 'chat'
+          && !dock.panels.some(p => panelComponentOf(p.id) === 'chat')
+        ) {
+          chatStore.selectDraft()
         }
         syncAllTerminalGroupChrome(dock)
         ensureDraftChatPanel()
@@ -533,6 +586,63 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     return true
   }
 
+  function markEphemeral(id: string) {
+    if (ephemeralPanels.value[id]) return
+    ephemeralPanels.value = { ...ephemeralPanels.value, [id]: true }
+  }
+
+  // Pin a panel: drop it out of the ephemeral slot so it is no longer italic and
+  // never gets replaced. Idempotent. Triggered by the first user change (file edit
+  // or chat message); never reversed (VS Code keeps an edited tab pinned).
+  function pinPanel(id: string) {
+    if (!ephemeralPanels.value[id]) return
+    const next = { ...ephemeralPanels.value }
+    delete next[id]
+    ephemeralPanels.value = next
+  }
+
+  // Open (or focus) an ephemeral-slot panel. Each non-terminal group holds at most
+  // one ephemeral panel; opening another ephemeral-eligible tab into that group
+  // replaces it IN PLACE (add the new one first, then close the old so the group
+  // never empties mid-swap). Ephemeral panels are never dirty, so the close needs
+  // no save prompt. An existing panel for the same id is just focused (its current
+  // pinned/ephemeral state is preserved).
+  function openEphemeral(opts: {
+    id: string
+    component: WorkspacePanelComponent
+    title: string
+    params?: Record<string, unknown>
+    groupId?: string
+  }): boolean {
+    const dock = api.value
+    if (!dock) return false
+    const existing = dock.getPanel(opts.id)
+    if (existing) {
+      focusPanel(existing)
+      return true
+    }
+    const target = nonTerminalTarget(dock, opts.groupId)
+    // Only an in-place join ('within' an existing editor group) has a previous
+    // ephemeral to replace; opening a brand-new group never does.
+    const targetGroupId = target?.direction === 'within' ? target.referenceGroup : undefined
+    const prevEphemeral = targetGroupId
+      ? dock.getGroup(targetGroupId)?.panels.find(
+          p => ephemeralPanels.value[p.id] && p.id !== opts.id,
+        )
+      : undefined
+    dock.addPanel({
+      id: opts.id,
+      component: opts.component,
+      title: opts.title,
+      params: opts.params,
+      renderer: 'always',
+      ...(target ? { position: target } : {}),
+    })
+    markEphemeral(opts.id)
+    prevEphemeral?.api.close()
+    return true
+  }
+
   function defaultTerminalPosition(dock: DockviewApi, belowGroupId?: string) {
     // Reuse the bottom terminal panel (a terminal-ONLY group) if one exists, so a
     // new session stacks as another tab instead of spawning a parallel panel. We
@@ -550,7 +660,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const below
       = (belowGroupId ? dock.getGroup(belowGroupId) : undefined)
         ?? (dock.activeGroup && !isTerminalOnlyGroup(dock.activeGroup) ? dock.activeGroup : undefined)
-        ?? dock.groups.find(g => g.panels.some(p => p.id === CHAT_PANEL_ID))
+        ?? dock.groups.find(g => g.panels.some(p => panelComponentOf(p.id) === 'chat'))
     if (below && !isTerminalOnlyGroup(below)) {
       return { referenceGroup: below.id, direction: 'below' as const }
     }
@@ -600,24 +710,145 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     return true
   }
 
-  /** Open or focus the singleton chat panel. Content follows the active session. */
-  function openChat(title?: string) {
-    const panelTitle = title?.trim() || chatTitleFallback()
-    focusOrAdd({ id: CHAT_PANEL_ID, component: 'chat', title: panelTitle })
-    setChatTitle(panelTitle)
+  // The session a chat panel renders, read from its dockview params (null = draft).
+  function panelSessionId(panel: { params?: Record<string, unknown> }): string | null {
+    const sid = panel.params?.sessionId
+    return typeof sid === 'string' && sid.trim() ? sid : null
   }
 
-  function setChatTitle(title: string) {
+  function chatPanelForSession(sid: string) {
+    const dock = api.value
+    if (!dock) return undefined
+    return dock.panels.find(
+      p => panelComponentOf(p.id) === 'chat' && panelSessionId(p) === sid,
+    )
+  }
+
+  function nextChatPanelId(bid: string): string {
+    const state = ensureBotLayout(bid)
+    const next = (state?.chatCounter ?? 0) + 1
+    patchBotLayout(bid, { chatCounter: next })
+    return `chat:${next}`
+  }
+
+  /** Open or focus a chat tab for a session. An already-open tab for that session
+   * is focused; otherwise the open reuses the target group's ephemeral slot (so
+   * browsing sessions in the sidebar swaps one preview tab, VS Code-style). The
+   * tab starts ephemeral and pins when the user sends a message in it. */
+  function openSessionChat(opts: { sessionId: string, title?: string, groupId?: string }) {
+    const dock = api.value
+    if (!dock) return
+    const sid = opts.sessionId.trim()
+    if (!sid) return
+    const bid = (currentBotId.value ?? '').trim()
+    if (!bid) return
+    const title = opts.title?.trim() || chatTitleFallbackFor(sid)
+    const existing = chatPanelForSession(sid)
+    if (existing) {
+      existing.api.setTitle(title)
+      focusPanel(existing)
+      return
+    }
+    // Repoint the target group's existing ephemeral CHAT slot in place (no
+    // remount). If the slot holds a non-chat ephemeral (or none), fall through to
+    // openEphemeral, which replaces it or adds a fresh chat tab.
+    const target = nonTerminalTarget(dock, opts.groupId)
+    const targetGroupId = target?.direction === 'within' ? target.referenceGroup : undefined
+    const reusable = targetGroupId
+      ? dock.getGroup(targetGroupId)?.panels.find(
+          p => ephemeralPanels.value[p.id] && panelComponentOf(p.id) === 'chat',
+        )
+      : undefined
+    if (reusable) {
+      reusable.api.updateParameters({ sessionId: sid })
+      reusable.api.setTitle(title)
+      focusPanel(reusable)
+      // Repointing an already-active panel doesn't refire activation, so select
+      // the session explicitly (idempotent if it was already active).
+      void chatStore.selectSession(sid)
+      return
+    }
+    openEphemeral({
+      id: nextChatPanelId(bid),
+      component: 'chat',
+      title,
+      params: { sessionId: sid },
+      groupId: opts.groupId,
+    })
+  }
+
+  /** Open or focus the single draft chat tab (no session yet). */
+  function openDraftChat(opts?: { title?: string, groupId?: string }) {
+    const dock = api.value
+    if (!dock) return
+    const bid = (currentBotId.value ?? '').trim()
+    if (!bid) return
+    const existingDraft = dock.panels.find(
+      p => panelComponentOf(p.id) === 'chat' && panelSessionId(p) === null,
+    )
+    if (existingDraft) {
+      focusPanel(existingDraft)
+      return
+    }
+    openEphemeral({
+      id: nextChatPanelId(bid),
+      component: 'chat',
+      title: opts?.title?.trim() || DEFAULT_CHAT_TITLE,
+      params: { sessionId: null },
+      groupId: opts?.groupId,
+    })
+  }
+
+  // Activating a chat tab makes its session the live one (single global messages
+  // array). Gated to chat panels by the caller.
+  function activateChatSession(panel: { id: string, params?: Record<string, unknown> }) {
+    const sid = panelSessionId(panel)
+    if (sid) void chatStore.selectSession(sid)
+    else chatStore.selectDraft()
+  }
+
+  // Keep each open chat tab's title in step with its session's server title. Draft
+  // tabs (and real sessions with no title yet) keep their caller-set i18n title, so
+  // we only overwrite when the server has a non-empty title — guarded against
+  // setTitle thrash on background reorders.
+  function syncChatTitles() {
     const dock = api.value
     if (!dock) return
     for (const panel of dock.panels) {
-      if (panel.id !== CHAT_PANEL_ID && !panel.id.startsWith(`${CHAT_PANEL_ID}~`)) continue
-      if (panel.api.title !== title) {
-        panel.api.setTitle(title)
+      if (panelComponentOf(panel.id) !== 'chat') continue
+      const sid = panelSessionId(panel)
+      if (!sid) continue
+      const session = chatStore.sessions.find(s => s.id === sid)
+      const title = (session?.title ?? '').trim()
+      if (title && panel.api.title !== title) panel.api.setTitle(title)
+    }
+  }
+
+  // Drop chat tabs whose session no longer exists (deleted server-side). Run after
+  // the sessions list has loaded. The active orphan becomes a fresh draft so the
+  // user lands somewhere usable; inactive orphans close.
+  function reconcileChatPanels() {
+    const dock = api.value
+    if (!dock || chatStore.loadingChats) return
+    const known = new Set(chatStore.sessions.map(s => s.id))
+    for (const panel of [...dock.panels]) {
+      if (panelComponentOf(panel.id) !== 'chat') continue
+      const sid = panelSessionId(panel)
+      if (!sid || known.has(sid)) continue
+      if (panel.id === dock.activePanel?.id) {
+        panel.api.updateParameters({ sessionId: null })
+        panel.api.setTitle(DEFAULT_CHAT_TITLE)
+        pinPanel(panel.id)
+        chatStore.selectDraft()
+      } else {
+        panel.api.close()
       }
     }
   }
 
+  // Refill an EMPTY dock with the persistent "New Session" page. Guarded to the
+  // empty dock (not merely "no chat tab"): the respawn opens into the group's
+  // ephemeral slot, so firing while a file/preview tab is open would evict it.
   function ensureDraftChatPanel() {
     const dock = api.value
     if (!dock || suppressPersist || draftChatQueued) return
@@ -625,22 +856,16 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!(currentBotId.value ?? '').trim()) return
 
     draftChatQueued = true
-    void nextTick(async () => {
+    void nextTick(() => {
       draftChatQueued = false
       const latestDock = api.value
       if (!latestDock || suppressPersist || latestDock.panels.length > 0) return
       if (!(currentBotId.value ?? '').trim()) return
-
-      try {
-        await chatStore.createNewSession()
-      } catch {
-        // A draft reset should not leave the dock blank if the active bot is still usable.
-      }
-
-      const settledDock = api.value
-      if (!settledDock || suppressPersist || settledDock.panels.length > 0) return
-      if (!(currentBotId.value ?? '').trim()) return
-      openChat()
+      // The active session's tab if one is selected, else a fresh draft (its
+      // activation resets the global view via selectDraft).
+      const sid = (chatStore.sessionId ?? '').trim()
+      if (sid) openSessionChat({ sessionId: sid })
+      else openDraftChat()
     })
   }
 
@@ -648,7 +873,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!hasCurrentPermission('workspace_read')) return
     const path = (filePath ?? '').trim()
     if (!path) return
-    focusOrAdd({
+    openEphemeral({
       id: `file:${path}`,
       component: 'file',
       title: fileBaseName(path),
@@ -671,17 +896,31 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       focusPanel(existing)
       return
     }
-    // Split to the right of the source editor's own group (the preview action
-    // lives in that group's header); fall back to the active group.
-    const referenceGroup = groupId || dock.activeGroup
+    // A preview is the side equivalent of the editor's ephemeral slot: keep ONE
+    // preview to the side. If an ephemeral preview already exists, replace it in
+    // its own group; otherwise split to the right of the source editor's group
+    // (the preview action lives in that group's header), falling back to active.
+    const prevPreview = dock.panels.find(
+      p => ephemeralPanels.value[p.id] && panelComponentOf(p.id) === 'preview',
+    )
+    const position = prevPreview
+      ? { referenceGroup: prevPreview.group.id, direction: 'within' as const }
+      : (() => {
+          const referenceGroup = groupId || dock.activeGroup?.id
+          return referenceGroup
+            ? { referenceGroup, direction: 'right' as const }
+            : undefined
+        })()
     dock.addPanel({
       id,
       component: 'preview',
       title: title || fileBaseName(path),
       params: { filePath: path },
       renderer: 'always',
-      ...(referenceGroup ? { position: { referenceGroup, direction: 'right' as const } } : {}),
+      ...(position ? { position } : {}),
     })
+    markEphemeral(id)
+    if (prevPreview && prevPreview.id !== id) prevPreview.api.close()
   }
 
   // Open or focus a tab that renders a message attachment (a stored media asset).
@@ -690,19 +929,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // for the user's own uploads without a workspace_read grant. Lands in the editor
   // area like a file tab; refocuses an existing tab for the same asset.
   function openAsset(args: OpenAssetPreviewArgs) {
-    const dock = api.value
-    if (!dock) return
     const key = (args.key ?? '').trim()
     if (!key) return
-    const id = `asset:${key}`
-    const existing = dock.getPanel(id)
-    if (existing) {
-      existing.api.setActive()
-      return
-    }
-    const target = nonTerminalTarget(dock)
-    dock.addPanel({
-      id,
+    openEphemeral({
+      id: `asset:${key}`,
       component: 'asset',
       title: args.name || 'file',
       params: {
@@ -711,8 +941,6 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         contentHash: args.contentHash,
         src: args.src,
       },
-      renderer: 'always',
-      ...(target ? { position: target } : {}),
     })
   }
 
@@ -742,19 +970,62 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   function openBrowser(groupId?: string) {
     if (!hasCurrentPermission('manage')) return
+    addBrowserPanel(DEFAULT_BROWSER_ADDRESS, undefined, groupId)
+  }
+
+  // Create a fresh browser panel at `address`. Shared by the manual "+ New
+  // Browser" entry (always-new, default "Browser N" title) and the link-click
+  // path (after a dedup miss, titled with the address). Returns false when there
+  // is no dock/bot layout.
+  function addBrowserPanel(address: string, title: string | undefined, groupId?: string): boolean {
     const bid = (currentBotId.value ?? '').trim()
     const state = ensureBotLayout(bid)
-    if (!state || !api.value) return
+    if (!state || !api.value) return false
     const next = state.browserCounter + 1
     patchBotLayout(bid, { browserCounter: next })
     focusOrAdd({
       id: `browser:${next}`,
       component: 'browser',
-      title: `Browser ${next}`,
-      params: { address: DEFAULT_BROWSER_ADDRESS },
+      title: title ?? `Browser ${next}`,
+      params: { address },
       groupId,
     })
+    return true
   }
+
+  // Open the workspace browser panel at a specific local address (e.g. from a
+  // clicked localhost link in chat markdown or terminal output). If a browser
+  // tab already shows the exact same normalized URL, focus it instead of opening
+  // a duplicate. Returns true when a tab was opened or focused, false when the
+  // browser is unavailable (no permission / no dock / unparseable address) so
+  // callers can fall back to the OS browser.
+  function openBrowserAt(address: string, groupId?: string): boolean {
+    if (!hasCurrentPermission('manage')) return false
+    const dock = api.value
+    if (!dock) return false
+    let target: string
+    try {
+      target = parseBrowserAddress(address).display
+    } catch {
+      return false
+    }
+    const existing = dock.panels.find((panel) => {
+      if (!panel.id.startsWith('browser:')) return false
+      const current = (panel.params as { address?: string } | undefined)?.address
+      if (!current) return false
+      try {
+        return parseBrowserAddress(current).display === target
+      } catch {
+        return false
+      }
+    })
+    if (existing) {
+      focusPanel(existing)
+      return true
+    }
+    return addBrowserPanel(target, target, groupId)
+  }
+
 
   function openDisplay(groupId?: string) {
     if (!hasCurrentPermission('manage')) return
@@ -887,15 +1158,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         })
         break
       }
-      case 'chat':
-        dock.addPanel({
-          id: uniqueSplitPanelId(source.id),
-          component: 'chat',
-          title,
-          renderer: 'always',
-          position,
-        })
-        break
+      // No 'chat' case: the single global messages array means two chat panels in
+      // separate groups would both render the ACTIVE session (wrong data, not just
+      // stale). Splitting chat is disabled until per-session message state exists.
     }
   }
 
@@ -927,11 +1192,15 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     })
   }
 
+  // Don't let the sole remaining tab close if it's an empty draft chat — there is
+  // nothing to gain by closing then respawning a draft. A real-session chat tab
+  // CAN close (the dock then respawns a draft via ensureDraftChatPanel).
   function shouldKeepLastDraftChat(id: string) {
     const dock = api.value
     if (!dock || dock.panels.length !== 1) return false
-    if ((sessionId.value ?? '').trim()) return false
-    return !!dock.getPanel(id) && panelComponentOf(id) === 'chat'
+    const panel = dock.getPanel(id)
+    if (!panel) return false
+    return panelComponentOf(id) === 'chat' && panelSessionId(panel) === null
   }
 
   function closeTab(id: string) {
@@ -963,6 +1232,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       const next = { ...fileDirty.value }
       delete next[id]
       fileDirty.value = next
+    }
+    if (ephemeralPanels.value[id]) {
+      const next = { ...ephemeralPanels.value }
+      delete next[id]
+      ephemeralPanels.value = next
     }
     saveHandlers.delete(id)
     if (closeQueue.value.includes(id)) {
@@ -1196,11 +1470,66 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     () => prunePanels(),
   )
 
+  // A sent message pins the session's chat tab (it is no longer a preview). For a
+  // draft, this also repoints the active draft tab to the freshly created session.
+  watch(() => chatStore.userSentInSession, (sig) => {
+    if (!sig) return
+    const dock = api.value
+    if (!dock) return
+    let panel = chatPanelForSession(sig.id)
+    if (!panel && sig.wasDraft) {
+      const active = dock.activePanel
+      if (active && panelComponentOf(active.id) === 'chat' && panelSessionId(active) === null) {
+        active.api.updateParameters({ sessionId: sig.id })
+        panel = active
+      }
+    }
+    if (panel) {
+      pinPanel(panel.id)
+      syncChatTitles()
+    }
+  })
+
+  // Keep the active chat tab in step with the global session when it is set from
+  // OUTSIDE a tab activation (initialize picking a session, an ACP session being
+  // created, a session deleted). Declared AFTER the userSentInSession watch so a
+  // send-promotion has already repointed the draft tab by the time this runs —
+  // chatPanelForSession then finds it and this just focuses (no duplicate tab).
+  watch(() => chatStore.sessionId, (sid) => {
+    const dock = api.value
+    if (!dock || suppressPersist) return
+    const trimmed = (sid ?? '').trim()
+    if (!trimmed) return
+    const existing = chatPanelForSession(trimmed)
+    if (existing) {
+      focusPanel(existing)
+      return
+    }
+    // No tab yet: open one. If the group's ephemeral slot is a draft, this
+    // repoints it in place (no stray draft tab); otherwise it adds a chat tab.
+    openSessionChat({ sessionId: trimmed })
+  })
+
+  // Server renames flow into each open chat tab's title. Keyed by a sorted
+  // id:title digest so it fires on title changes, not on every sidebar reorder.
+  watch(
+    () => chatStore.sessions.map(s => `${s.id}:${s.title ?? ''}`).sort().join('|'),
+    () => syncChatTitles(),
+  )
+
+  // Once the sessions list has loaded (or changed), drop tabs for deleted sessions.
+  watch(
+    () => [chatStore.loadingChats, chatStore.sessions.length, currentBotId.value] as const,
+    () => { if (!chatStore.loadingChats) reconcileChatPanels() },
+  )
+
   return {
     api,
     activeId,
     panelDragging,
     fileDirty,
+    ephemeralPanels,
+    pinPanel,
     dirtyFileCount,
     pendingClose,
     sidebarView,
@@ -1214,8 +1543,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     toggleWorkbench,
     showWorkbench,
     hideWorkbench,
-    openChat,
-    setChatTitle,
+    openSessionChat,
+    openDraftChat,
     openFile,
     openPreview,
     openAsset,
@@ -1224,6 +1553,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     openTerminal,
     openTerminalInPanel,
     openBrowser,
+    openBrowserAt,
     openDisplay,
     splitGroup,
     openSchedule,

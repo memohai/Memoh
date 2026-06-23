@@ -18,7 +18,10 @@
          lifted to the bar centre), so it rides a touch below the top headroom. -->
     <span
       class="min-w-0 truncate text-[12.5px] leading-[1.4] transition-colors"
-      :class="isActive ? 'text-foreground' : 'text-muted-foreground'"
+      :class="[
+        isActive ? 'text-foreground' : 'text-muted-foreground',
+        isEphemeral ? 'italic' : '',
+      ]"
     >{{ title }}</span>
     <!-- Unsaved-changes dot: sits in the close slot AT REST so the affordance never
          shifts; hovering fades it out as the close button fades in (VS Code's tab).
@@ -89,6 +92,8 @@ const isActive = ref(props.params.api.isActive)
 // Unsaved-changes flag for file panels — read from the store's reactive map, so
 // the dot, the sidebar badge and the close dialog never drift apart.
 const isDirty = computed(() => !!workspaceTabs.fileDirty[panelId])
+// Ephemeral (VS Code "preview") tabs render italic until pinned by a first change.
+const isEphemeral = computed(() => !!workspaceTabs.ephemeralPanels[panelId])
 
 const disposables = [
   props.params.api.onDidTitleChange((event) => {

@@ -177,11 +177,11 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 				}); err != nil {
 					return nil
 				}
-			case messageevent.EventTypeBackgroundTask, messageevent.EventTypeAgentStream:
+			case messageevent.EventTypeBackgroundTask:
 				// Forward only to the owning session. The old bot-wide
 				// stream carried these for every active session; if we
 				// drop them here the chat UI loses live background-task
-				// and agent-stream updates for the focused session.
+				// updates for the focused session.
 				var payload map[string]any
 				if err := json.Unmarshal(event.Data, &payload); err != nil {
 					h.logger.Warn("decode forwarded event failed",
@@ -476,7 +476,7 @@ func (c *sessionCache) get(ctx context.Context, sessionID string) (session.Sessi
 }
 
 // payloadSessionID extracts the session id from an event payload. All in-tree
-// publishers (BackgroundTask, AgentStream, MessageCreated, …) lift `session_id`
+// publishers (BackgroundTask, MessageCreated, …) lift `session_id`
 // to the top level of the payload; the producer-side contract is pinned by
 // the helper tests in internal/agentpayload, so this is a single lookup.
 func payloadSessionID(payload map[string]any) string {

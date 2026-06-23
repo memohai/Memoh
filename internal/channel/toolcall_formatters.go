@@ -53,7 +53,8 @@ var toolFormatters = map[string]toolFormatter{
 
 	"spawn_agent":  formatAgentControl,
 	"send_message": formatAgentControl,
-	"wait_agent":   formatAgentControl,
+	"wait":         formatWait,
+	"wait_until":   formatWait,
 	"list_agents":  formatAgentControl,
 	"use_skill":    formatUseSkill,
 
@@ -1060,10 +1061,6 @@ func formatAgentControl(tc *StreamToolCall, status ToolCallStatus) ToolCallPrese
 		switch strings.ToLower(strings.TrimSpace(tc.Name)) {
 		case "list_agents":
 			p.Header = "list agents"
-		case "wait_agent":
-			if agentID != "" {
-				p.Header = "wait for " + agentID
-			}
 		default:
 			if agentID != "" {
 				p.Header = agentID + " · " + truncLine(task)
@@ -1131,6 +1128,29 @@ func formatUseSkill(tc *StreamToolCall, status ToolCallStatus) ToolCallPresentat
 		desc := pickStringField(res, "description", "summary")
 		if desc != "" {
 			p.Body = append(p.Body, ToolCallBlock{Type: ToolCallBlockText, Text: truncLine(desc)})
+		}
+	}
+	return p
+}
+
+func formatWait(tc *StreamToolCall, status ToolCallStatus) ToolCallPresentation {
+	p := ToolCallPresentation{}
+	if status != ToolCallStatusRunning {
+		return p
+	}
+	in := inputMap(tc)
+	switch strings.ToLower(strings.TrimSpace(tc.Name)) {
+	case "wait_until":
+		if taskID := pickStringField(in, "task_id"); taskID != "" {
+			p.Header = "wait until " + taskID
+		} else {
+			p.Header = "wait until task"
+		}
+	default:
+		if duration := pickStringField(in, "duration"); duration != "" {
+			p.Header = "wait " + duration + "s"
+		} else {
+			p.Header = "wait"
 		}
 	}
 	return p

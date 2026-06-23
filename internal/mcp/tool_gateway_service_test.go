@@ -121,7 +121,7 @@ func TestToolGatewayServiceCacheSeparatesSessionType(t *testing.T) {
 	if _, err := service.ListTools(context.Background(), session); err != nil {
 		t.Fatalf("list tools failed: %v", err)
 	}
-	session.SessionType = "background_delivery"
+	session.SessionType = "schedule"
 	if _, err := service.ListTools(context.Background(), session); err != nil {
 		t.Fatalf("list tools after session type change failed: %v", err)
 	}

@@ -28,7 +28,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Terminal } from '@xterm/xterm'
+import { Terminal, type ILink } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SerializeAddon } from '@xterm/addon-serialize'
 import { Button } from '@memohai/ui'
@@ -39,6 +39,8 @@ import {
 } from '@/composables/useTerminalCache'
 import { sdkAuthQuery, sdkWebSocketUrl } from '@/lib/api-client'
 import { useSettingsStore } from '@/store/settings'
+import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import { LOCALHOST_URL_REGEX, tryParseLocalhostHref } from '@/utils/localhost-link'
 import '@xterm/xterm/css/xterm.css'
 
 const props = withDefaults(defineProps<{
@@ -51,6 +53,7 @@ const props = withDefaults(defineProps<{
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
+const tabsStore = useWorkspaceTabsStore()
 
 function cssVar(name: string): string {
   if (typeof document === 'undefined') return ''
@@ -208,6 +211,43 @@ onMounted(() => {
   term.loadAddon(fa)
   term.loadAddon(sa)
   term.open(containerRef.value)
+
+  // Make container-local URLs in command output clickable: clicking opens the
+  // workspace browser panel (falling back to an OS tab when it is unavailable),
+  // rather than the user's OS browser, since the container's localhost differs.
+  disposables.push(term.registerLinkProvider({
+    provideLinks(bufferLineNumber, callback) {
+      const line = term.buffer.active.getLine(bufferLineNumber - 1)
+      const text = line?.translateToString(true)
+      if (!text) {
+        callback(undefined)
+        return
+      }
+      const links: ILink[] = []
+      const regex = new RegExp(LOCALHOST_URL_REGEX.source, 'gi')
+      let match: RegExpExecArray | null
+      while ((match = regex.exec(text)) !== null) {
+        const raw = match[0]
+        const parsed = tryParseLocalhostHref(raw)
+        if (!parsed) continue
+        const startIndex = match.index
+        links.push({
+          text: raw,
+          range: {
+            start: { x: startIndex + 1, y: bufferLineNumber },
+            end: { x: startIndex + raw.length, y: bufferLineNumber },
+          },
+          activate: () => {
+            if (!tabsStore.openBrowserAt(parsed.display)) {
+              const href = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`
+              window.open(href, '_blank', 'noopener')
+            }
+          },
+        })
+      }
+      callback(links.length ? links : undefined)
+    },
+  }))
 
   terminal = term
   fitAddon = fa

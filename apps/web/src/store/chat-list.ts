@@ -253,7 +253,7 @@ interface EphemeralAssistantError {
 
 export const useChatStore = defineStore('chat', () => {
   const selectionStore = useChatSelectionStore()
-  const { currentBotId, sessionId } = storeToRefs(selectionStore)
+  const { currentBotId, sessionId, draftIntent } = storeToRefs(selectionStore)
 
   const messages = reactive<ChatMessage[]>([])
   const pendingAssistantStreams = reactive(new Map<string, PendingAssistantStream>())
@@ -299,6 +299,12 @@ export const useChatStore = defineStore('chat', () => {
   const overrideModelId = ref<string>('')
   const overrideReasoningEffort = ref<string>('')
   const startupSendFailure = ref<StartupSendFailure | null>(null)
+  // Bumps when the user sends a message, carrying the resolved session id and
+  // whether that send just promoted a draft (created the session). The workspace
+  // tab store watches this to pin the chat tab — a session you have sent in is no
+  // longer an ephemeral "preview" tab. seq forces the watch to fire on repeats.
+  const userSentInSession = ref<{ id: string, wasDraft: boolean, seq: number } | null>(null)
+  let userSendSeq = 0
 
   // Bumps every time a fs-mutating tool call (write/edit/apply_patch/exec) finishes for the
   // current bot. File-manager components watch this to refresh their listings
@@ -2277,6 +2283,7 @@ export const useChatStore = defineStore('chat', () => {
     const created = await createSession(bid)
     upsertSession(created)
     sessionId.value = created.id
+    draftIntent.value = false
     replaceMessages([])
     hasMoreOlder.value = false
     hasLoadedOlder.value = false
@@ -2320,15 +2327,22 @@ export const useChatStore = defineStore('chat', () => {
         hasMoreOlder.value = false
         hasLoadedOlder.value = false
       } else {
-        // Server already filtered to user-facing types and sorted by recency,
-        // so the first item is the right initial pick when nothing was
-        // already selected.
-        const activeSessionId = sessionId.value && sessionById.has(sessionId.value)
-          ? sessionId.value
-          : response.items[0]!.id
-        sessionId.value = activeSessionId
-        // Initial transcript hydration is driven by startSessionMessagesStream
-        // below — no eager loadMessages REST round trip from here.
+        // Keep a VALID persisted session; otherwise, if the user intentionally
+        // closed down to the draft "New Session" page, keep that on reload instead
+        // of force-opening a random session; otherwise pick the most recent (the
+        // server already filtered to user-facing types and sorted by recency).
+        // Transcript hydration is driven by startSessionMessagesStream below — no
+        // eager loadMessages REST round trip from here.
+        if (sessionId.value && sessionById.has(sessionId.value)) {
+          draftIntent.value = false
+        } else if (draftIntent.value) {
+          sessionId.value = null
+          replaceMessages([])
+          hasMoreOlder.value = false
+          hasLoadedOlder.value = false
+        } else {
+          sessionId.value = response.items[0]!.id
+        }
       }
 
       startWebSocket(bid)
@@ -2382,12 +2396,29 @@ export const useChatStore = defineStore('chat', () => {
     if (!sid || sid === sessionId.value) return
     clearPendingACPSession()
     sessionId.value = sid
+    draftIntent.value = false
     switchActiveSession(sid)
   }
 
   async function createNewSession() {
     const bid = await ensureBot()
     if (!bid) return
+    clearPendingACPSession()
+    sessionId.value = null
+    draftIntent.value = true
+    sessionMessagesStream.stop()
+    replaceMessages([])
+    hasMoreOlder.value = false
+    hasLoadedOlder.value = false
+  }
+
+  // Switch the global view to the draft (no real session yet). Unlike
+  // createNewSession this assumes the bot is already active and only resets the
+  // view, so per-session chat tabs can activate their draft tab without minting a
+  // session. selectSession early-returns on an empty id, so a draft needs this.
+  function selectDraft() {
+    draftIntent.value = true
+    if (!sessionId.value) return
     clearPendingACPSession()
     sessionId.value = null
     sessionMessagesStream.stop()
@@ -2444,6 +2475,7 @@ export const useChatStore = defineStore('chat', () => {
     let sendSessionId = ''
     let sendStreamId = ''
 
+    const wasDraft = !sessionId.value
     try {
       await ensureActiveSession()
 
@@ -2452,6 +2484,8 @@ export const useChatStore = defineStore('chat', () => {
       sendBotId = bid
       sendSessionId = sid
       sendStreamId = createStreamId()
+      // Tell the tab store to pin (and, for a draft, repoint) this session's tab.
+      userSentInSession.value = { id: sid, wasDraft, seq: ++userSendSeq }
 
       userTurn = createOptimisticUserTurn(trimmed, attachments)
       messages.push(userTurn)
@@ -2673,6 +2707,8 @@ export const useChatStore = defineStore('chat', () => {
     setACPRuntimeModel,
     createNewSession,
     createNewChat: createNewSession,
+    selectDraft,
+    userSentInSession,
     removeSession,
     removeChat: removeSession,
     deleteChat: removeSession,

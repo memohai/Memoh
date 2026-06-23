@@ -9,10 +9,6 @@ const (
 	Subagent  = "subagent"
 	Discuss   = "discuss"
 	ACPAgent  = "acp_agent"
-
-	// BackgroundDelivery is an internal agent run mode used while draining
-	// proactive background notifications. It is not a persisted session type.
-	BackgroundDelivery = "background_delivery"
 )
 
 // IsInteractive reports whether a run mode can pause and wait for user-facing

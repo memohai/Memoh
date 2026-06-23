@@ -4,6 +4,7 @@ import MdCheckbox from './md-checkbox.vue'
 import MdFootnoteReference from './md-footnote-reference.vue'
 import MdFootnoteAnchor from './md-footnote-anchor.vue'
 import MdText from './md-text.vue'
+import MdLink from './md-link.vue'
 
 // Custom markstream node components shared by every markdown surface (chat +
 // file preview). They replace markstream's built-in glyphs with design-system
@@ -17,6 +18,9 @@ const sharedComponents: Record<string, Component> = {
   footnote_reference: MdFootnoteReference,
   footnote_anchor: MdFootnoteAnchor,
   text: MdText,
+  // Intercept clicks on container-local (localhost) links to open the workspace
+  // browser panel; delegates rendering/external links to markstream's LinkNode.
+  link: MdLink,
 }
 
 const registered = new Set<string>()
