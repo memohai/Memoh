@@ -189,6 +189,8 @@ type ActionResult struct {
 	Result     any            `json:"result,omitempty"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
 	Error      string         `json:"error,omitempty"`
+
+	appendContextRaw string
 }
 
 type Result struct {
@@ -200,6 +202,8 @@ type Result struct {
 	RuntimeSupported bool           `json:"runtime_supported"`
 	ActionResults    []ActionResult `json:"action_results,omitempty"`
 	Metadata         map[string]any `json:"metadata,omitempty"`
+
+	appendContextRaw string
 }
 
 func ParseConfig(data []byte) (Config, error) {

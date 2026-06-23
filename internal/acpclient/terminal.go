@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	acp "github.com/coder/acp-go-sdk"
 
@@ -50,10 +49,10 @@ type terminalApprovalResult struct {
 }
 
 type terminal struct {
-	stream *bridge.ExecStream
-	limit  int
-	id     string
-	input  map[string]any
+	stream      *bridge.ExecStream
+	outputLimit ToolOutputLimit
+	id          string
+	input       map[string]any
 
 	mu        sync.Mutex
 	output    string
@@ -144,17 +143,20 @@ func (m *terminalManager) CreateTerminal(_ context.Context, p acp.CreateTerminal
 	}
 	m.emitToolCallStart(toolCallID, "exec", input)
 
-	limit := defaultTerminalOutputLimit
+	outputLimit := ToolOutputLimit{MaxBytes: defaultTerminalOutputLimit}
 	if p.OutputByteLimit != nil && *p.OutputByteLimit > 0 {
-		limit = *p.OutputByteLimit
-		if limit > maxTerminalOutputLimit {
-			limit = maxTerminalOutputLimit
+		outputLimit.MaxBytes = *p.OutputByteLimit
+		if outputLimit.MaxBytes > maxTerminalOutputLimit {
+			outputLimit.MaxBytes = maxTerminalOutputLimit
 		}
 	}
 	if promptLimit := m.toolOutputLimit(); hasToolOutputLimit(promptLimit) {
 		normalized := normalizedToolOutputLimit(promptLimit)
-		if normalized.MaxBytes > 0 && normalized.MaxBytes < limit {
-			limit = normalized.MaxBytes
+		if normalized.MaxBytes > 0 && normalized.MaxBytes < outputLimit.MaxBytes {
+			outputLimit.MaxBytes = normalized.MaxBytes
+		}
+		if normalized.MaxLines > 0 {
+			outputLimit.MaxLines = normalized.MaxLines
 		}
 	}
 
@@ -172,7 +174,7 @@ func (m *terminalManager) CreateTerminal(_ context.Context, p acp.CreateTerminal
 		return acp.CreateTerminalResponse{}, err
 	}
 
-	term := &terminal{stream: stream, limit: limit, id: toolCallID, input: input, done: make(chan struct{}), endReported: make(chan struct{}), onDone: m.emitTerminalEnd}
+	term := &terminal{stream: stream, outputLimit: outputLimit, id: toolCallID, input: input, done: make(chan struct{}), endReported: make(chan struct{}), onDone: m.emitTerminalEnd}
 	m.mu.Lock()
 	m.terminals[id] = term
 	m.mu.Unlock()
@@ -424,9 +426,13 @@ func (t *terminal) appendOutput(s string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.output += s
-	if t.limit > 0 && len(t.output) > t.limit {
+	if hasToolOutputLimit(t.outputLimit) {
+		limited := limitToolOutputString(t.output, "tool result (exec)", t.outputLimit)
+		if limited == t.output {
+			return
+		}
 		t.truncated = true
-		t.output = safeUTF8Suffix(t.output, t.limit)
+		t.output = limited
 	}
 }
 
@@ -475,15 +481,4 @@ func (t *terminal) finish(code *int, signal *string) {
 		t.mu.Unlock()
 		close(t.done)
 	})
-}
-
-func safeUTF8Suffix(s string, maxBytes int) string {
-	if maxBytes <= 0 || len(s) <= maxBytes {
-		return s
-	}
-	start := len(s) - maxBytes
-	for start < len(s) && !utf8.RuneStart(s[start]) {
-		start++
-	}
-	return s[start:]
 }

@@ -39,6 +39,31 @@ func TestTerminalOutputUsesPromptToolOutputLimit(t *testing.T) {
 	}
 }
 
+func TestTerminalAppendOutputPreservesHeadTail(t *testing.T) {
+	t.Parallel()
+
+	term := &terminal{
+		outputLimit: ToolOutputLimit{MaxBytes: 512, MaxLines: 80},
+		done:        make(chan struct{}),
+	}
+	term.appendOutput("HEAD\n")
+	term.appendOutput(strings.Repeat("terminal output ", 300))
+	term.appendOutput("\nTAIL")
+
+	output, truncated, _ := term.snapshot()
+	if !truncated {
+		t.Fatal("terminal truncated = false, want true")
+	}
+	if len(output) > 512 {
+		t.Fatalf("terminal output bytes = %d, want <= 512", len(output))
+	}
+	for _, want := range []string{"[memoh pruned]", "HEAD", "TAIL"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("terminal output missing %q:\n%s", want, output)
+		}
+	}
+}
+
 func TestTerminalEndEventUsesPromptToolOutputLimit(t *testing.T) {
 	t.Parallel()
 

@@ -183,7 +183,7 @@ func TestRunConfigLimitsToolAppendContext(t *testing.T) {
 	cfg := Config{
 		Version: 1,
 		Defaults: Defaults{
-			MaxOutputBytes: 256,
+			MaxOutputBytes: 192,
 		},
 		Hooks: []Hook{{
 			Name:  "append-context",
@@ -207,8 +207,8 @@ func TestRunConfigLimitsToolAppendContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunConfig returned error: %v", err)
 	}
-	if len(result.AppendContext) > 256 {
-		t.Fatalf("append_context bytes = %d, want <= 256", len(result.AppendContext))
+	if len(result.AppendContext) > 192 {
+		t.Fatalf("append_context bytes = %d, want <= 192", len(result.AppendContext))
 	}
 	if len(result.AppendContext) >= len(large) {
 		t.Fatalf("append_context was not limited")
@@ -223,7 +223,7 @@ func TestRunConfigLimitsAggregatedAppendContext(t *testing.T) {
 	cfg := Config{
 		Version: 1,
 		Defaults: Defaults{
-			MaxOutputBytes: 256,
+			MaxOutputBytes: 192,
 		},
 		Hooks: []Hook{{
 			Name:  "append-context",
@@ -247,8 +247,8 @@ func TestRunConfigLimitsAggregatedAppendContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunConfig returned error: %v", err)
 	}
-	if len(result.AppendContext) > 256 {
-		t.Fatalf("append_context bytes = %d, want <= 256", len(result.AppendContext))
+	if len(result.AppendContext) > 192 {
+		t.Fatalf("append_context bytes = %d, want <= 192", len(result.AppendContext))
 	}
 	if len(result.AppendContext) >= len(large) {
 		t.Fatalf("append_context was not limited after aggregation")
@@ -298,7 +298,7 @@ func TestRunLimitsCommandAppendContext(t *testing.T) {
 		"enabled": true,
 		"defaults": {
 			"timeout": "3s",
-			"max_output_bytes": 256
+			"max_output_bytes": 192
 		},
 		"hooks": [{
 			"name": "command context",
@@ -335,8 +335,8 @@ func TestRunLimitsCommandAppendContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if len(result.AppendContext) > 256 {
-		t.Fatalf("append_context bytes = %d, want <= 256", len(result.AppendContext))
+	if len(result.AppendContext) > 192 {
+		t.Fatalf("append_context bytes = %d, want <= 192", len(result.AppendContext))
 	}
 	if len(result.AppendContext) >= len(large) {
 		t.Fatalf("append_context was not limited")
@@ -353,7 +353,7 @@ func TestRunLimitsCommandRawStdoutMetadata(t *testing.T) {
 		"enabled": true,
 		"defaults": {
 			"timeout": "3s",
-			"max_output_bytes": 256
+			"max_output_bytes": 192
 		},
 		"hooks": [{
 			"name": "command raw stdout",
@@ -388,8 +388,8 @@ func TestRunLimitsCommandRawStdoutMetadata(t *testing.T) {
 	if !ok {
 		t.Fatalf("raw_stdout metadata = %#v, want string", action.Metadata["raw_stdout"])
 	}
-	if len(raw) > 256 {
-		t.Fatalf("raw_stdout bytes = %d, want <= 256", len(raw))
+	if len(raw) > 192 {
+		t.Fatalf("raw_stdout bytes = %d, want <= 192", len(raw))
 	}
 	if len(raw) >= len(large) {
 		t.Fatalf("raw_stdout was not limited")

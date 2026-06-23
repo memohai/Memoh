@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/internal/contextlimit"
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
+	"github.com/memohai/memoh/internal/prune"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
@@ -348,8 +348,8 @@ func (s *Service) runCommand(ctx context.Context, cfg Config, req Request, actio
 	execResult, err := client.ExecWithStdinEnv(execCtx, action.Command, workDir, int32(timeoutUnits), append(payload, '\n'), env)
 	maxOutputBytes := hookMaxOutputBytes(cfg, source)
 	if execResult != nil {
-		res.Stdout = trimOutput(execResult.Stdout, maxOutputBytes)
-		res.Stderr = trimOutput(execResult.Stderr, maxOutputBytes)
+		res.Stdout = limitHookOutputText(execResult.Stdout, maxOutputBytes)
+		res.Stderr = limitHookOutputText(execResult.Stderr, maxOutputBytes)
 		res.ExitCode = execResult.ExitCode
 	}
 	if err != nil {
@@ -423,6 +423,7 @@ func applyActionOutput(result *ActionResult, stdout string, maxOutputBytes int) 
 		for k, v := range output.Metadata {
 			if k == "append_context" {
 				if text, ok := v.(string); ok {
+					result.appendContextRaw = text
 					v = limitHookOutputText(text, maxOutputBytes)
 				}
 			}
@@ -433,6 +434,7 @@ func applyActionOutput(result *ActionResult, stdout string, maxOutputBytes int) 
 		if result.Metadata == nil {
 			result.Metadata = map[string]any{}
 		}
+		result.appendContextRaw = output.AppendContext
 		result.Metadata["append_context"] = limitHookOutputText(output.AppendContext, maxOutputBytes)
 	}
 }
@@ -456,6 +458,7 @@ func applyToolOutput(result *ActionResult, output any, maxOutputBytes int) {
 		result.Reason = limitHookOutputText(reason, maxOutputBytes)
 	}
 	if appendContext, _ := m["append_context"].(string); appendContext != "" {
+		result.appendContextRaw = appendContext
 		result.Metadata = map[string]any{"append_context": limitHookOutputText(appendContext, maxOutputBytes)}
 	}
 }
@@ -465,14 +468,18 @@ func mergeDecision(result *Result, actionResult ActionResult, maxOutputBytes int
 	if decision == "" {
 		decision = DecisionAllow
 	}
+	appendContext := actionResult.appendContextRaw
 	if actionResult.Metadata != nil {
-		if appendContext, _ := actionResult.Metadata["append_context"].(string); strings.TrimSpace(appendContext) != "" {
-			if result.AppendContext != "" {
-				result.AppendContext += "\n"
-			}
-			result.AppendContext += appendContext
-			result.AppendContext = limitHookOutputText(result.AppendContext, maxOutputBytes)
+		if strings.TrimSpace(appendContext) == "" {
+			appendContext, _ = actionResult.Metadata["append_context"].(string)
 		}
+	}
+	if strings.TrimSpace(appendContext) != "" {
+		if result.appendContextRaw != "" {
+			result.appendContextRaw += "\n"
+		}
+		result.appendContextRaw += appendContext
+		result.AppendContext = limitHookOutputText(result.appendContextRaw, maxOutputBytes)
 	}
 	switch decision {
 	case DecisionDeny:
@@ -519,9 +526,22 @@ func hookMaxOutputBytes(cfg Config, source hookSource) int {
 }
 
 func limitHookOutputText(text string, limit int) string {
-	return contextlimit.LimitString(strings.TrimSpace(text), "hook output", contextlimit.ToolOutputLimit{
-		MaxBytes: limit,
+	text = strings.TrimSpace(text)
+	if limit <= 0 {
+		return text
+	}
+	limited := prune.PruneWithEdges(text, "hook output", prune.Config{
+		MaxBytes:  limit,
+		MaxLines:  prune.DefaultMaxLines,
+		HeadBytes: limit * 3 / 4,
+		TailBytes: limit / 4,
+		HeadLines: prune.DefaultMaxLines * 3 / 4,
+		TailLines: prune.DefaultMaxLines / 4,
 	})
+	if len(limited) > limit {
+		return trimOutput(limited, limit)
+	}
+	return limited
 }
 
 func trimOutput(raw string, limit int) string {
