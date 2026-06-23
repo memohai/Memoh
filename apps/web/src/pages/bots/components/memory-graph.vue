@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-4">
-    <div class="flex items-center justify-between">
+    <div class="flex items-center justify-between gap-3">
       <div>
         <h2 class="text-sm font-medium text-foreground">
           {{ $t('memory.graphTitle') }}
@@ -11,7 +11,7 @@
       </div>
       <div
         v-if="graphData"
-        class="flex gap-4 text-xs text-muted-foreground"
+        class="flex shrink-0 gap-4 text-xs text-muted-foreground"
       >
         <span>{{ graphData.nodes.length }} {{ $t('memory.graphNodes') }}</span>
         <span>{{ graphData.edges.length }} {{ $t('memory.graphEdges') }}</span>
@@ -32,7 +32,7 @@
       <VChart
         :option="chartOption"
         autoresize
-        style="height: 100%; width: 100%;"
+        class="size-full"
         @click="handleNodeClick"
       />
     </div>
@@ -44,84 +44,148 @@
       {{ $t('memory.graphEmpty') }}
     </div>
 
-    <!-- Node detail popover -->
-    <div
-      v-if="selectedNode"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      @click.self="selectedNode = null"
+    <Dialog
+      :open="!!selectedNode"
+      @update:open="handleDialogOpen"
     >
-      <div class="w-full max-w-lg space-y-3 rounded-lg border border-border bg-popover p-5 shadow-lg">
-        <div class="flex items-start justify-between gap-3">
-          <div class="space-y-1">
+      <DialogScrollContent class="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>
+            {{ selectedNodeTitle }}
+          </DialogTitle>
+        </DialogHeader>
+        <div
+          v-if="selectedNode"
+          class="space-y-3"
+        >
+          <div class="flex flex-wrap gap-2">
             <span
-              v-if="selectedNode.subject"
-              class="inline-block rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
+              v-if="selectedNode.slug"
+              class="rounded-full bg-[var(--accent-blue-soft-active)] px-2 py-0.5 text-xs font-medium text-[var(--accent-blue-deep)]"
             >
-              {{ selectedNode.subject }}
+              {{ selectedNode.slug }}
             </span>
-            <p class="text-sm leading-relaxed text-foreground">
-              {{ selectedNode.memory }}
-            </p>
+            <span
+              v-if="selectedNode.topic"
+              class="rounded-full bg-[var(--accent-green-soft-active)] px-2 py-0.5 text-xs font-medium text-[var(--accent-green-deep)]"
+            >
+              {{ selectedNode.topic }}
+            </span>
           </div>
-          <button
-            class="text-muted-foreground transition-colors hover:text-foreground"
-            @click="selectedNode = null"
-          >
-            ✕
-          </button>
+          <p class="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+            {{ selectedNode.memory }}
+          </p>
         </div>
-      </div>
-    </div>
+      </DialogScrollContent>
+    </Dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useDark } from '@vueuse/core'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
 import type { ECElementEvent } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { GraphChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
-import { sdkApiUrl } from '@/lib/api-client'
+import { Dialog, DialogHeader, DialogScrollContent, DialogTitle } from '@memohai/ui'
+import {
+  getBotsByBotIdMemoryGraph,
+  type HandlersGraphEdge,
+  type HandlersGraphNode,
+  type HandlersGraphResponse,
+} from '@memohai/sdk'
 
 use([CanvasRenderer, GraphChart, TooltipComponent])
 
-interface GraphNode {
-  id: string
-  label: string
-  memory: string
-  subject?: string
-  topic?: string
-  metadata?: Record<string, unknown>
-}
-interface GraphEdge {
-  source: string
-  target: string
-  rel: string
-}
+type GraphNode = HandlersGraphNode
+type GraphEdge = HandlersGraphEdge
+
 interface GraphData {
   nodes: GraphNode[]
   edges: GraphEdge[]
 }
+
 interface ChartNodeData extends GraphNode {
+  id: string
   name: string
   displayName: string
   symbolSize: number
   itemStyle: { color: string }
 }
 
+interface ChartTheme {
+  label: string
+  line: string
+  fallback: string
+  fontFamily: string
+  palette: string[]
+}
+
 const props = defineProps<{ botId: string }>()
 
+const isDark = useDark()
 const loading = ref(true)
 const graphData = ref<GraphData | null>(null)
 const selectedNode = ref<GraphNode | null>(null)
 let fetchSeq = 0
 
-// Topic → color palette is replaced by subjectColor() for deterministic hashing.
+const colorCanvas = typeof document !== 'undefined'
+  ? document.createElement('canvas').getContext('2d', { willReadFrequently: true })
+  : null
+
+function readColor(token: string, fallback: string): string {
+  if (typeof document === 'undefined') return fallback
+  const probe = document.createElement('span')
+  probe.style.color = `var(${token})`
+  probe.style.display = 'none'
+  document.body.appendChild(probe)
+  const resolved = getComputedStyle(probe).color
+  probe.remove()
+  if (!resolved) return fallback
+  if (!colorCanvas) return resolved
+  try {
+    colorCanvas.clearRect(0, 0, 1, 1)
+    colorCanvas.fillStyle = '#000'
+    colorCanvas.fillStyle = resolved
+    colorCanvas.fillRect(0, 0, 1, 1)
+    const [r = 0, g = 0, b = 0, a = 255] = colorCanvas.getImageData(0, 0, 1, 1).data
+    return a === 255 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`
+  }
+  catch {
+    return fallback
+  }
+}
+
+const chartTheme = computed<ChartTheme>(() => {
+  void isDark.value
+  return {
+    label: readColor('--muted-foreground', '#71717a'),
+    line: readColor('--border', '#d4d4d8'),
+    fallback: readColor('--muted-foreground', '#71717a'),
+    fontFamily: typeof document !== 'undefined' ? getComputedStyle(document.body).fontFamily : 'inherit',
+    palette: [
+      readColor('--accent-blue', '#2383e2'),
+      readColor('--accent-green', '#448361'),
+      readColor('--accent-teal', '#2c8b9e'),
+      readColor('--accent-orange', '#d9730d'),
+      readColor('--accent-pink', '#c14c8a'),
+      readColor('--accent-red', '#cd3c3a'),
+      readColor('--accent-yellow', '#cb912f'),
+      readColor('--accent-purple', '#9065b0'),
+    ],
+  }
+})
+
+const selectedNodeTitle = computed(() => selectedNode.value ? displayName(selectedNode.value) : '')
 
 const chartOption = computed(() => {
   if (!graphData.value || graphData.value.nodes.length === 0) return {}
+  const theme = chartTheme.value
+  const nodes = graphData.value.nodes.filter((node): node is GraphNode & { id: string } => !!node.id)
+  const edges = graphData.value.edges.filter((edge): edge is GraphEdge & { source: string; target: string } => !!edge.source && !!edge.target)
   return {
     tooltip: {
       trigger: 'item',
@@ -130,7 +194,7 @@ const chartOption = computed(() => {
         const text = params.data.memory || params.data.label || ''
         return escapeTooltip([
           params.data.displayName,
-          text.length > 100 ? text.slice(0, 97) + '...' : text,
+          text.length > 100 ? `${text.slice(0, 97)}...` : text,
         ].filter(Boolean).join('\n'))
       },
     },
@@ -142,7 +206,8 @@ const chartOption = computed(() => {
       label: {
         show: true,
         fontSize: 11,
-        color: '#888',
+        color: theme.label,
+        fontFamily: theme.fontFamily,
         formatter: (params: { data?: ChartNodeData }) => params.data?.displayName ?? '',
       },
       force: {
@@ -151,7 +216,7 @@ const chartOption = computed(() => {
         gravity: 0.08,
       },
       lineStyle: {
-        color: '#aaa',
+        color: theme.line,
         width: 1,
         curveness: 0.1,
       },
@@ -159,34 +224,34 @@ const chartOption = computed(() => {
         focus: 'adjacency',
         lineStyle: { width: 3 },
       },
-      data: graphData.value.nodes.map((n): ChartNodeData => {
-        const displayName = n.subject || n.label || n.id
-        return {
-          ...n,
-          name: n.id,
-          displayName,
-          symbolSize: 30,
-          itemStyle: {
-            color: subjectColor(n.subject),
-          },
-        }
-      }),
-      links: graphData.value.edges.map((e) => ({
-        source: e.source,
-        target: e.target,
+      data: nodes.map((node): ChartNodeData => ({
+        ...node,
+        name: node.id,
+        displayName: displayName(node),
+        symbolSize: 30,
+        itemStyle: {
+          color: subjectColor(node.subject || node.slug || node.topic, theme),
+        },
+      })),
+      links: edges.map((edge) => ({
+        source: edge.source,
+        target: edge.target,
       })),
     }],
   }
 })
 
-function subjectColor(subject?: string): string {
-  if (!subject) return '#888'
+function displayName(node: GraphNode): string {
+  return node.slug || node.subject || node.label || node.id || ''
+}
+
+function subjectColor(subject: string | undefined, theme: ChartTheme): string {
+  if (!subject || theme.palette.length === 0) return theme.fallback
   let hash = 0
   for (let i = 0; i < subject.length; i++) {
     hash = ((hash << 5) - hash + subject.charCodeAt(i)) | 0
   }
-  const palette = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316']
-  return palette[Math.abs(hash) % palette.length] ?? '#888'
+  return theme.palette[Math.abs(hash) % theme.palette.length] ?? theme.fallback
 }
 
 function escapeTooltip(value: string): string {
@@ -202,12 +267,25 @@ function isChartNodeData(data: unknown): data is ChartNodeData {
   return typeof data === 'object'
     && data !== null
     && 'id' in data
-    && 'memory' in data
+    && 'name' in data
 }
 
 function handleNodeClick(params: ECElementEvent) {
   if (params.dataType === 'node' && isChartNodeData(params.data)) {
     selectedNode.value = params.data
+  }
+}
+
+function handleDialogOpen(open: boolean) {
+  if (!open) {
+    selectedNode.value = null
+  }
+}
+
+function normalizeGraph(data: HandlersGraphResponse | undefined): GraphData {
+  return {
+    nodes: data?.nodes ?? [],
+    edges: data?.edges ?? [],
   }
 }
 
@@ -222,22 +300,21 @@ async function fetchGraph() {
 
   loading.value = true
   try {
-    const url = sdkApiUrl({ url: `/bots/${encodeURIComponent(botId)}/memory/graph` })
-    const token = localStorage.getItem('token')?.trim() ?? ''
-    const resp = await fetch(url, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    const { data } = await getBotsByBotIdMemoryGraph({
+      path: { bot_id: botId },
+      throwOnError: true,
     })
-    if (!resp.ok) throw new Error(`graph fetch failed: ${resp.status}`)
-    const data = await resp.json() as GraphData
     if (seq === fetchSeq) {
-      graphData.value = data
+      graphData.value = normalizeGraph(data)
     }
-  } catch (e) {
+  }
+  catch (error) {
     if (seq === fetchSeq) {
-      console.error('failed to load memory graph', e)
+      console.error('failed to load memory graph', error)
       graphData.value = { nodes: [], edges: [] }
     }
-  } finally {
+  }
+  finally {
     if (seq === fetchSeq) {
       loading.value = false
     }

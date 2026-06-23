@@ -107,7 +107,7 @@ const dialogName = ref('')
           <AccordionItem value="item-3">
             <AccordionTrigger>Can I run it locally?</AccordionTrigger>
             <AccordionContent>
-              Yes — the desktop app runs a local server with embedded Qdrant and a bundled CLI.
+              Yes — the desktop app runs a local server with SQLite, local workspaces, and a bundled CLI.
             </AccordionContent>
           </AccordionItem>
         </Accordion>

@@ -200,7 +200,7 @@ func (s *SQLiteStore) CountEdges(ctx context.Context, botID string) (int, error)
 	return int(n), nil
 }
 
-func (s *SQLiteStore) RebuildImplicitEdges(ctx context.Context, botID string) (int, error) {
+func (s *SQLiteStore) RebuildDerivedEdges(ctx context.Context, botID string) (int, error) {
 	if s.q == nil {
 		return 0, errors.New("wikistore(sqlite): queries not configured")
 	}
@@ -208,23 +208,22 @@ func (s *SQLiteStore) RebuildImplicitEdges(ctx context.Context, botID string) (i
 	if err != nil {
 		return 0, err
 	}
-	// Remove prior implicit edges then re-derive.
-	implicitRels := []migrate.EdgeRel{migrate.EdgeSameProfile, migrate.EdgeSameTopic, migrate.EdgeSameDay}
-	for _, rel := range implicitRels {
+	// Remove prior derived edges then re-derive.
+	for _, rel := range migrate.DerivedEdgeRels {
 		if err := s.q.DeleteMemoryEdgesByRelForBot(ctx, sqlitesqlc.DeleteMemoryEdgesByRelForBotParams{
 			BotID: botID,
 			Rel:   string(rel),
 		}); err != nil {
-			return 0, fmt.Errorf("wikistore(sqlite): clear implicit edges: %w", err)
+			return 0, fmt.Errorf("wikistore(sqlite): clear derived edges: %w", err)
 		}
 	}
 	specs := nodes
 	edges := migrate.PlanFromNodes(specs)
-	implicit := filterImplicitEdges(edges, implicitRels)
-	if err := s.UpsertEdges(ctx, implicit); err != nil {
+	derived := filterImplicitEdges(edges, migrate.DerivedEdgeRels)
+	if err := s.UpsertEdges(ctx, derived); err != nil {
 		return 0, err
 	}
-	return len(implicit), nil
+	return len(derived), nil
 }
 
 // ---- SQLite row -> record/spec helpers ----
@@ -263,7 +262,7 @@ func sqliteMemoryEdgeToSpec(r sqlitesqlc.MemoryEdge) migrate.EdgeSpec {
 }
 
 // filterImplicitEdges keeps only edges whose rel is in the allowed set. Used
-// by RebuildImplicitEdges to avoid clobbering explicit refs/supersedes edges.
+// by RebuildDerivedEdges to avoid clobbering non-derived supersedes edges.
 func filterImplicitEdges(edges []migrate.EdgeSpec, allowed []migrate.EdgeRel) []migrate.EdgeSpec {
 	if len(edges) == 0 {
 		return nil

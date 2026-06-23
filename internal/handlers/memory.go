@@ -5,14 +5,15 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"regexp"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
+	"github.com/memohai/memoh/internal/memory/migrate"
 	"github.com/memohai/memoh/internal/settings"
 )
 
@@ -313,6 +314,7 @@ func (h *MemoryHandler) ChatGetAll(c echo.Context) error {
 type graphNode struct {
 	ID       string         `json:"id"`
 	Label    string         `json:"label"`
+	Slug     string         `json:"slug"`
 	Memory   string         `json:"memory"`
 	Subject  string         `json:"subject,omitempty"`
 	Topic    string         `json:"topic,omitempty"`
@@ -332,15 +334,19 @@ type graphResponse struct {
 	Edges []graphEdge `json:"edges"`
 }
 
-// ChatGraph returns the memory graph (nodes + cross-reference edges) for the
-// wiki visualization. Edges are derived from markdown links in memory bodies
-// that reference another memory's subject (slug) — e.g. [[alice-profile]] or
-// [background](alice-profile). This mirrors the LLM Wiki pattern: connections
-// are explicit, human/LLM-readable cross-references, authored with short
-// semantic slugs rather than database IDs.
+// ChatGraph returns the memory graph (nodes + derived edges) for the wiki
+// visualization. The edge derivation uses the same migrate.PlanFromNodes path as
+// the graph runtime/store, so the API view and recall graph do not drift.
 //
 // @Summary Get memory graph
+// @Description Get derived memory graph nodes and edges for a bot.
 // @Tags memory
+// @Produce json
+// @Param bot_id path string true "Bot ID"
+// @Success 200 {object} graphResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
 // @Router /bots/{bot_id}/memory/graph [get].
 func (h *MemoryHandler) ChatGraph(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -369,10 +375,8 @@ func (h *MemoryHandler) ChatGraph(c echo.Context) error {
 	}
 	allResults = deduplicateMemoryItems(allResults)
 
-	// Build nodes with slug = subject (or fallback). Build slug→id lookup so
-	// [[slug]] references in bodies can be resolved to target node IDs.
 	nodes := make([]graphNode, 0, len(allResults))
-	slugToID := make(map[string]string, len(allResults))
+	nodeSpecs := make([]migrate.NodeSpec, 0, len(allResults))
 	for _, item := range allResults {
 		label := item.Memory
 		if len(label) > 40 {
@@ -388,91 +392,108 @@ func (h *MemoryHandler) ChatGraph(c echo.Context) error {
 				topic = t
 			}
 		}
-		slug := memorySlug(item.ID, subject, topic)
-		slugToID[slug] = item.ID
+		slug := migrate.NodeSlug(item.ID, subject, topic)
 		nodes = append(nodes, graphNode{
 			ID:       item.ID,
 			Label:    label,
+			Slug:     slug,
 			Memory:   item.Memory,
-			Subject:  slug,
+			Subject:  subject,
 			Topic:    topic,
 			Metadata: item.Metadata,
 		})
+		nodeSpecs = append(nodeSpecs, memoryItemToGraphNodeSpec(botID, item))
 	}
 
-	// Derive edges from markdown cross-references in node bodies. A [[slug]]
-	// or [label](slug) resolves to a target node via the slug→id map.
-	edges := make([]graphEdge, 0)
-	seen := map[string]bool{}
-	for _, src := range nodes {
-		for _, slugRef := range parseMemoryLinks(src.Memory) {
-			targetID, ok := slugToID[strings.TrimSpace(slugRef)]
-			if !ok || targetID == src.ID {
-				continue
-			}
-			key := src.ID + "\x00" + targetID
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-			edges = append(edges, graphEdge{Source: src.ID, Target: targetID, Rel: "refs"})
-		}
+	derivedEdges := migrate.PlanFromNodes(nodeSpecs)
+	edges := make([]graphEdge, 0, len(derivedEdges))
+	for _, edge := range derivedEdges {
+		edges = append(edges, graphEdge{
+			Source: edge.SrcNode,
+			Target: edge.DstNode,
+			Rel:    string(edge.Rel),
+		})
 	}
 
 	return c.JSON(http.StatusOK, graphResponse{Nodes: nodes, Edges: edges})
 }
 
-// memorySlug returns a short, human/LLM-friendly slug for a memory node. The
-// priority is: explicit subject > topic > a short hash of the id. Slugs are
-// what LLMs use when writing [[slug]] cross-references.
-func memorySlug(id, subject, topic string) string {
-	if s := strings.TrimSpace(subject); s != "" {
-		return s
+func memoryItemToGraphNodeSpec(botID string, item memprovider.MemoryItem) migrate.NodeSpec {
+	metadata := item.Metadata
+	layer := migrate.LayerNote
+	if raw, ok := metadata["layer"].(string); ok && strings.TrimSpace(raw) != "" {
+		switch migrate.MemoryLayer(strings.ToLower(strings.TrimSpace(raw))) {
+		case migrate.LayerPreference, migrate.LayerIdentity, migrate.LayerContext,
+			migrate.LayerExperience, migrate.LayerActivity, migrate.LayerPersona, migrate.LayerNote:
+			layer = migrate.MemoryLayer(strings.TrimSpace(raw))
+		}
 	}
-	if t := strings.TrimSpace(topic); t != "" {
-		return t
+	profileRef := graphMetadataString(metadata, "profile_ref")
+	if profileRef == "" {
+		profileRef = graphMetadataString(metadata, "profile_user_id")
 	}
-	// Fallback: last meaningful fragment of the id (e.g. "mem_2").
-	if idx := strings.LastIndex(id, ":"); idx >= 0 && idx+1 < len(id) {
-		return id[idx+1:]
+	return migrate.NodeSpec{
+		ID:         strings.TrimSpace(item.ID),
+		BotID:      botID,
+		Body:       strings.TrimSpace(item.Memory),
+		Hash:       strings.TrimSpace(item.Hash),
+		Layer:      layer,
+		Subject:    graphMetadataString(metadata, "subject"),
+		Confidence: graphMetadataFloat(metadata, "confidence", 0.5),
+		Metadata:   metadata,
+		ProfileRef: profileRef,
+		Topic:      graphMetadataString(metadata, "topic"),
+		CapturedAt: graphParseTime(item.CreatedAt),
 	}
-	return id
 }
 
-// Link patterns for parsing [[slug]] and [label](slug) from memory bodies.
-var (
-	wikiLinkRe = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
-	mdLinkRe   = regexp.MustCompile(`\[[^\]]*\]\(([^)]+)\)`)
-)
+func graphMetadataString(m map[string]any, key string) string {
+	if m == nil {
+		return ""
+	}
+	v, ok := m[key]
+	if !ok || v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return strings.TrimSpace(fmt.Sprint(v))
+}
 
-// parseMemoryLinks extracts referenced slugs from a memory body. Supports
-// [[slug]] and [label](slug) formats. Returns deduplicated, trimmed slugs.
-func parseMemoryLinks(body string) []string {
-	var slugs []string
-	seen := map[string]bool{}
-	collect := func(raw string) {
-		raw = strings.TrimSpace(raw)
-		if raw == "" || seen[raw] {
-			return
-		}
-		seen[raw] = true
-		slugs = append(slugs, raw)
+func graphMetadataFloat(m map[string]any, key string, def float32) float32 {
+	if m == nil {
+		return def
 	}
-	for _, m := range wikiLinkRe.FindAllStringSubmatch(body, -1) {
-		if len(m) > 1 {
-			collect(m[1])
-		}
+	v, ok := m[key]
+	if !ok || v == nil {
+		return def
 	}
-	for _, m := range mdLinkRe.FindAllStringSubmatch(body, -1) {
-		if len(m) > 1 {
-			// Only treat as a memory link if the href is NOT a URL.
-			href := strings.TrimSpace(m[1])
-			if !strings.HasPrefix(href, "http") {
-				collect(href)
-			}
+	switch n := v.(type) {
+	case float64:
+		f := float32(n)
+		if f >= 0 && f <= 1 {
+			return f
+		}
+	case float32:
+		if n >= 0 && n <= 1 {
+			return n
 		}
 	}
-	return slugs
+	return def
+}
+
+func graphParseTime(s string) time.Time {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Now().UTC()
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05Z", "2006-01-02 15:04:05", "2006-01-02"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UTC()
+		}
+	}
+	return time.Now().UTC()
 }
 
 // @Summary Delete memories

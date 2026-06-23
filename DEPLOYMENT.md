@@ -24,13 +24,7 @@ nano config.toml   # Change passwords and JWT secret
 
 > **Important**: You must create `config.toml` before starting. `docker-compose.yml` mounts `./config.toml` into the containers — running without it will fail.
 
-### Standard startup (with Qdrant)
-
-```bash
-docker compose --profile qdrant up -d
-```
-
-### Minimal startup (core only)
+### Standard Startup
 
 ```bash
 docker compose up -d
@@ -68,20 +62,12 @@ Compose file uses fixed container names such as `memoh-server` and
 See [docs/kata-containerd.md](docs/kata-containerd.md) for host requirements,
 custom Kata paths, dev startup, production startup, and GitHub runner setup.
 
-## Docker Compose Profiles
+## Docker Compose Services
 
-The base `docker-compose.yml` contains all services. Core services (`postgres`, `migrate`, `server`, and `web`) always start. The AI agent runs in-process inside `server`. Optional services are gated by profiles and only start when explicitly enabled:
-
-| Profile | Service | Description |
-|---------|---------|-------------|
-| `qdrant` | Qdrant | Vector database for memory semantic search |
-
-### Supported combinations
-
-```bash
-# Core + Qdrant (recommended default)
-docker compose --profile qdrant up -d
-```
+The base `docker-compose.yml` contains the standard services: `postgres`,
+`migrate`, `server`, and `web`. The AI agent runs in-process inside `server`.
+PostgreSQL-backed deployments use pgvector for memory semantic search. SQLite
+deployments keep the local graph store only and do not run vector search.
 
 ### SaaS / external providers
 
@@ -92,8 +78,7 @@ For Mem0, OpenViking SaaS, or a separately hosted OpenViking service, no Compose
 Uncomment `registry = "memoh.cn"` in `config.toml` under `[container]`, then add the CN overlay:
 
 ```bash
-docker compose -f docker-compose.yml -f docker/docker-compose.cn.yml \
-  --profile qdrant up -d
+docker compose -f docker-compose.yml -f docker/docker-compose.cn.yml up -d
 ```
 
 ## Prerequisites

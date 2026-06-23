@@ -26,8 +26,6 @@ const (
 	DefaultPGUser                = "postgres"
 	DefaultPGDatabase            = "memoh"
 	DefaultPGSSLMode             = "disable"
-	DefaultQdrantURL             = "http://127.0.0.1:6334"
-	DefaultQdrantCollection      = "memory"
 	DefaultRuntimeDir            = "/opt/memoh/runtime"
 	DefaultWorkspaceImage        = "memohai/workspace:debian"
 	DefaultBaseImage             = DefaultWorkspaceImage
@@ -58,7 +56,6 @@ type Config struct {
 	Local         LocalConfig         `toml:"local"`
 	Workspace     WorkspaceConfig     `toml:"workspace"`
 	Postgres      PostgresConfig      `toml:"postgres"`
-	Qdrant        QdrantConfig        `toml:"qdrant"`
 	Registry      RegistryConfig      `toml:"registry"`
 	Supermarket   SupermarketConfig   `toml:"supermarket"`
 	OAuthClients  OAuthClientsConfig  `toml:"oauth_clients"`
@@ -348,11 +345,6 @@ type PostgresConfig struct {
 	SSLMode  string `toml:"sslmode"`
 }
 
-type QdrantConfig struct {
-	BaseURL        string `toml:"base_url"`
-	APIKey         string `toml:"api_key" json:"-"`
-	TimeoutSeconds int    `toml:"timeout_seconds"`
-}
 
 const DefaultProvidersDir = "conf/providers"
 

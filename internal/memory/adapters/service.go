@@ -47,6 +47,12 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 						Description: "graph = relationship-based recall over connected memory nodes",
 						Required:    false,
 					},
+					"embedding_model_id": {
+						Type:        "string",
+						Title:       "Embedding Model",
+						Description: "Optional embedding model used to maintain a Postgres pgvector semantic seed index for graph recall. SQLite/local stores remain graph-only.",
+						Required:    false,
+					},
 					"context_target_items": {
 						Type:        "integer",
 						Title:       "Context Target Items",
@@ -166,6 +172,7 @@ func (s *Service) Status(ctx context.Context, id string) (ProviderStatusResponse
 		return status, nil
 	}
 	status.MemoryMode = StringFromConfig(resp.Config, "memory_mode")
+	status.EmbeddingModelID = StringFromConfig(resp.Config, "embedding_model_id")
 	return status, nil
 }
 

@@ -24,4 +24,3 @@ services:
       dockerfile: docker/Dockerfile.web
       args:
         - VITE_API_URL=${VITE_API_URL:-/api}
-

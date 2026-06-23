@@ -118,6 +118,31 @@ func TestPlanRejectsInvalidLayerAndConfidence(t *testing.T) {
 	}
 }
 
+func TestPlanDerivesRefsFromWikiLinks(t *testing.T) {
+	items := []storefs.MemoryItem{
+		{
+			ID:        "bot-1:mem_1",
+			Memory:    "Alice likes local-first tools and references [[tech-stack]].",
+			CreatedAt: "2026-06-01T00:00:00Z",
+			Metadata:  map[string]any{"subject": "alice-profile"},
+		},
+		{
+			ID:        "bot-1:mem_2",
+			Memory:    "The stack links back to [Alice](alice-profile), but ignores [web](https://example.com).",
+			CreatedAt: "2026-06-02T00:00:00Z",
+			Metadata:  map[string]any{"subject": "Tech Stack"},
+		},
+	}
+	_, edges := Plan("bot-1", items)
+	got := edgeSet(edges)
+
+	expectDirectedEdge(t, got, "bot-1:mem_1", "bot-1:mem_2", EdgeRefs)
+	expectDirectedEdge(t, got, "bot-1:mem_2", "bot-1:mem_1", EdgeRefs)
+	if links := ParseMemoryLinks("[web](https://example.com) and [[Tech Stack]]"); len(links) != 1 || links[0] != "tech-stack" {
+		t.Fatalf("ParseMemoryLinks normalized links = %#v, want [tech-stack]", links)
+	}
+}
+
 func TestPlanEmptyAndSingleton(t *testing.T) {
 	if nodes, edges := Plan("bot-1", nil); len(nodes) != 0 || len(edges) != 0 {
 		t.Fatalf("empty input should yield empty plan, got %d nodes %d edges", len(nodes), len(edges))
@@ -182,5 +207,12 @@ func expectEdge(t *testing.T, set map[string]struct{}, a, b string, rel EdgeRel)
 	t.Helper()
 	if _, ok := lookupEdge(set, a, b, rel); !ok {
 		t.Fatalf("expected edge %s <-> %s (%s) not found", a, b, rel)
+	}
+}
+
+func expectDirectedEdge(t *testing.T, set map[string]struct{}, src, dst string, rel EdgeRel) {
+	t.Helper()
+	if _, ok := set[src+"\x00"+dst+"\x00"+string(rel)]; !ok {
+		t.Fatalf("expected directed edge %s -> %s (%s) not found", src, dst, rel)
 	}
 }

@@ -27,13 +27,13 @@ mise run dev       # Start the full containerized dev environment
 
 `mise run dev` launches the development stack in Docker:
 
-1. PostgreSQL + Qdrant infrastructure
+1. PostgreSQL infrastructure
 2. Database migrations, run automatically on startup
 3. Go server with the in-process AI agent and containerd workspace backend
 4. Web frontend with Vite hot reload
 
 The dev stack uses `devenv/app.dev.toml` directly and does not overwrite the repo root `config.toml`.
-Default host ports are shifted away from the production compose stack: Web `18082`, API `18080`, Postgres `15432`, Qdrant `16333`/`16334`.
+Default host ports are shifted away from the production compose stack: Web `18082`, API `18080`, Postgres `15432`.
 
 ## Daily Development
 

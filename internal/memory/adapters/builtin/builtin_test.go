@@ -367,12 +367,15 @@ func TestNewBuiltinRuntimeFromConfig_DefaultIsGraphRequiringWikiStore(t *testing
 	}
 }
 
-func TestNewBuiltinRuntimeFromConfig_DenseErrorPropagates(t *testing.T) {
+func TestNewBuiltinRuntimeFromConfig_LegacyDenseConfigUsesGraphWithoutAuxIndex(t *testing.T) {
 	t.Parallel()
 	cfg := map[string]any{"memory_mode": "dense"}
-	_, err := NewBuiltinRuntimeFromConfig(nil, cfg, nil, nil, defaultTestConfig(), nil)
-	if err == nil {
-		t.Fatal("expected error for dense mode without embedding_model_id")
+	rt, err := NewBuiltinRuntimeFromConfig(nil, cfg, nil, nil, defaultTestConfig(), newFakeWikiStore())
+	if err != nil {
+		t.Fatalf("legacy dense config should fall back to graph without auxiliary index: %v", err)
+	}
+	if rt.Mode() != ModeGraph {
+		t.Fatalf("Mode = %q, want %q", rt.Mode(), ModeGraph)
 	}
 }
 

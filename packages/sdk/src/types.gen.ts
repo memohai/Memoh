@@ -228,16 +228,17 @@ export type AdaptersMemoryItem = {
 export type AdaptersMemoryStatusResponse = {
     can_manual_sync?: boolean;
     compact?: AdaptersMemoryCompactCapability;
+    edge_count?: number;
     encoder?: AdaptersHealthStatus;
     indexed_count?: number;
     markdown_file_count?: number;
     memory_mode?: string;
     overview_path?: string;
+    pgvector?: AdaptersHealthStatus;
     provider_type?: string;
-    qdrant?: AdaptersHealthStatus;
-    qdrant_collection?: string;
     source_count?: number;
     source_dir?: string;
+    vector_index?: string;
 };
 
 export type AdaptersMessage = {
@@ -247,9 +248,9 @@ export type AdaptersMessage = {
 
 export type AdaptersProviderCollectionStatus = {
     exists?: boolean;
+    health?: AdaptersHealthStatus;
     name?: string;
     points?: number;
-    qdrant?: AdaptersHealthStatus;
 };
 
 export type AdaptersProviderConfigSchema = {
@@ -1983,6 +1984,29 @@ export type HandlersForkSessionRequest = {
 export type HandlersFsOpResponse = {
     ok?: boolean;
     revision?: string;
+};
+
+export type HandlersGraphEdge = {
+    rel?: string;
+    source?: string;
+    target?: string;
+};
+
+export type HandlersGraphNode = {
+    id?: string;
+    label?: string;
+    memory?: string;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    slug?: string;
+    subject?: string;
+    topic?: string;
+};
+
+export type HandlersGraphResponse = {
+    edges?: Array<HandlersGraphEdge>;
+    nodes?: Array<HandlersGraphNode>;
 };
 
 export type HandlersListSessionsResponse = {
@@ -6821,6 +6845,44 @@ export type PostBotsByBotIdMemoryCompactResponses = {
 };
 
 export type PostBotsByBotIdMemoryCompactResponse = PostBotsByBotIdMemoryCompactResponses[keyof PostBotsByBotIdMemoryCompactResponses];
+
+export type GetBotsByBotIdMemoryGraphData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/memory/graph';
+};
+
+export type GetBotsByBotIdMemoryGraphErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdMemoryGraphError = GetBotsByBotIdMemoryGraphErrors[keyof GetBotsByBotIdMemoryGraphErrors];
+
+export type GetBotsByBotIdMemoryGraphResponses = {
+    /**
+     * OK
+     */
+    200: HandlersGraphResponse;
+};
+
+export type GetBotsByBotIdMemoryGraphResponse = GetBotsByBotIdMemoryGraphResponses[keyof GetBotsByBotIdMemoryGraphResponses];
 
 export type PostBotsByBotIdMemoryRebuildData = {
     body?: never;

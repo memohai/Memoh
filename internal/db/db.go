@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	pgxvec "github.com/pgvector/pgvector-go/pgx"
 
 	"github.com/memohai/memoh/internal/config"
 )
@@ -19,5 +20,10 @@ func Open(ctx context.Context, cfg config.Config) (*pgxpool.Pool, error) {
 }
 
 func OpenPostgres(ctx context.Context, cfg config.PostgresConfig) (*pgxpool.Pool, error) {
-	return pgxpool.New(ctx, DSN(cfg))
+	poolCfg, err := pgxpool.ParseConfig(DSN(cfg))
+	if err != nil {
+		return nil, err
+	}
+	poolCfg.AfterConnect = pgxvec.RegisterTypes
+	return pgxpool.NewWithConfig(ctx, poolCfg)
 }

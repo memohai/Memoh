@@ -4838,6 +4838,53 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/memory/graph": {
+            "get": {
+                "description": "Get derived memory graph nodes and edges for a bot.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "memory"
+                ],
+                "summary": "Get memory graph",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.graphResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/memory/rebuild": {
             "post": {
                 "description": "Read memory files from the container filesystem (source of truth) and restore missing entries to memory storage",
@@ -13481,6 +13528,9 @@ const docTemplate = `{
                 "compact": {
                     "$ref": "#/definitions/adapters.MemoryCompactCapability"
                 },
+                "edge_count": {
+                    "type": "integer"
+                },
                 "encoder": {
                     "$ref": "#/definitions/adapters.HealthStatus"
                 },
@@ -13496,19 +13546,19 @@ const docTemplate = `{
                 "overview_path": {
                     "type": "string"
                 },
-                "provider_type": {
-                    "type": "string"
-                },
-                "qdrant": {
+                "pgvector": {
                     "$ref": "#/definitions/adapters.HealthStatus"
                 },
-                "qdrant_collection": {
+                "provider_type": {
                     "type": "string"
                 },
                 "source_count": {
                     "type": "integer"
                 },
                 "source_dir": {
+                    "type": "string"
+                },
+                "vector_index": {
                     "type": "string"
                 }
             }
@@ -13530,14 +13580,14 @@ const docTemplate = `{
                 "exists": {
                     "type": "boolean"
                 },
+                "health": {
+                    "$ref": "#/definitions/adapters.HealthStatus"
+                },
                 "name": {
                     "type": "string"
                 },
                 "points": {
                     "type": "integer"
-                },
-                "qdrant": {
-                    "$ref": "#/definitions/adapters.HealthStatus"
                 }
             }
         },
@@ -17905,6 +17955,64 @@ const docTemplate = `{
                 },
                 "revision": {
                     "type": "string"
+                }
+            }
+        },
+        "handlers.graphEdge": {
+            "type": "object",
+            "properties": {
+                "rel": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.graphNode": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "memory": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "slug": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                },
+                "topic": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.graphResponse": {
+            "type": "object",
+            "properties": {
+                "edges": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.graphEdge"
+                    }
+                },
+                "nodes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.graphNode"
+                    }
                 }
             }
         },
