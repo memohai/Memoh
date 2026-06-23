@@ -77,7 +77,7 @@ import { computed, nextTick, ref, useId, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { Check } from 'lucide-vue-next'
 import { menuItemClass } from '@memohai/ui'
-import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
+import type { ModelsGetResponse, ModelsModelType, ProvidersGetResponse } from '@memohai/sdk'
 import { useListboxKeyboard } from '@/composables/useListboxKeyboard'
 
 export interface ModelOption {
@@ -105,15 +105,23 @@ interface ItemRow {
   posinset: number
 }
 
-type Row = HeaderRow | ItemRow
+interface NoneRow {
+  type: 'none'
+  key: string
+  option: ModelOption
+  posinset: number
+}
+
+type Row = HeaderRow | ItemRow | NoneRow
 
 const props = defineProps<{
   models: ModelsGetResponse[]
   providers: ProvidersGetResponse[]
-  modelType: 'chat' | 'embedding'
+  modelType: ModelsModelType
   open?: boolean
   showTags?: boolean
   showIcons?: boolean
+  noneLabel?: string
 }>()
 
 const emit = defineEmits<{
@@ -154,6 +162,19 @@ const options = computed<ModelOption[]>(() =>
   }),
 )
 
+const noneOption = computed<ModelOption | undefined>(() =>
+  props.noneLabel
+    ? {
+        value: '',
+        label: props.noneLabel,
+        description: undefined,
+        groupKey: '',
+        groupLabel: '',
+        keywords: [props.noneLabel],
+      }
+    : undefined,
+)
+
 const filteredOptions = computed(() => {
   const keyword = searchTerm.value.trim().toLowerCase()
   if (!keyword) return options.value
@@ -185,6 +206,15 @@ const filteredGroups = computed(() => {
 const rows = computed<Row[]>(() => {
   const result: Row[] = []
   let posinset = 0
+  if (noneOption.value) {
+    posinset += 1
+    result.push({
+      type: 'none',
+      key: 'none',
+      option: noneOption.value,
+      posinset,
+    })
+  }
   for (const group of filteredGroups.value) {
     if (group.label) {
       result.push({ type: 'header', key: `header:${group.key}`, label: group.label })
@@ -205,7 +235,7 @@ const rows = computed<Row[]>(() => {
 // Total option count (excludes group headers) for aria-setsize: virtualization
 // drops off-screen options from the DOM, so screen readers need this to know the
 // real set size rather than only the rendered window.
-const optionCount = computed(() => filteredOptions.value.length)
+const optionCount = computed(() => (noneOption.value ? 1 : 0) + filteredOptions.value.length)
 
 const virtualizer = useVirtualizer<HTMLElement, HTMLElement>(
   computed(() => ({
@@ -244,7 +274,7 @@ const { activeIndex, onKeydown, reset: resetActive } = useListboxKeyboard<Row>({
   rows,
   scrollToIndex: (index) => virtualizer.value.scrollToIndex(index),
   onSelect: (row) => {
-    if (row.type === 'item') emit('update:modelValue', row.option.value)
+    if (row.type === 'item' || row.type === 'none') emit('update:modelValue', row.option.value)
   },
 })
 
