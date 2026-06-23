@@ -940,6 +940,69 @@ func TestRequestPermissionUsesMemohToolApproval(t *testing.T) {
 	}
 }
 
+func TestReadTextFileUsesPromptToolOutputLimit(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	limit := ToolOutputLimit{MaxBytes: 512, MaxLines: 80}
+	cases := []struct {
+		name    string
+		path    string
+		content string
+		request acp.ReadTextFileRequest
+	}{
+		{
+			name:    "no requested limit",
+			path:    "large.txt",
+			content: "HEAD\n" + strings.Repeat("read content\n", 300) + "TAIL\n",
+			request: acp.ReadTextFileRequest{Path: "large.txt"},
+		},
+		{
+			name:    "requested limit above configured limit",
+			path:    "many-lines.txt",
+			content: "HEAD\n" + strings.Repeat("read content\n", 300) + "TAIL\n",
+			request: acp.ReadTextFileRequest{Path: "many-lines.txt", Limit: acp.Ptr(1000)},
+		},
+		{
+			name:    "long single line",
+			path:    "single-line.txt",
+			content: "HEAD " + strings.Repeat("x", 5000) + " TAIL\n",
+			request: acp.ReadTextFileRequest{Path: "single-line.txt"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(root, tc.path)
+			if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			callbacks := &clientCallbacks{
+				client: newTestBridgeClient(t, root),
+				root:   root,
+				cwd:    root,
+				events: &toolEventEmitter{},
+			}
+			callbacks.setPromptState(newEventCollector(limit), nil, ToolSessionContext{}, limit)
+
+			resp, err := callbacks.ReadTextFile(context.Background(), tc.request)
+			if err != nil {
+				t.Fatalf("ReadTextFile returned error: %v", err)
+			}
+			if len(resp.Content) > limit.MaxBytes {
+				t.Fatalf("read content bytes = %d, want <= %d", len(resp.Content), limit.MaxBytes)
+			}
+			if len(resp.Content) >= len(tc.content) {
+				t.Fatalf("read content was not limited")
+			}
+			for _, want := range []string{"[memoh pruned]", "HEAD", "TAIL"} {
+				if !strings.Contains(resp.Content, want) {
+					t.Fatalf("read content missing %q:\n%s", want, resp.Content)
+				}
+			}
+		})
+	}
+}
+
 type fakeACPToolSource struct {
 	tools []mcp.ToolDescriptor
 }

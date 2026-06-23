@@ -313,10 +313,22 @@ func (c *clientCallbacks) ReadTextFile(ctx context.Context, p acp.ReadTextFileRe
 		return acp.ReadTextFileResponse{}, toolErr
 	}
 	content := resp.GetContent()
+	if limit := c.currentToolOutputLimit(); hasToolOutputLimit(limit) {
+		content = limitToolOutputString(content, "tool result (read.content)", limit)
+	}
 	if content == "" {
 		content = "\n"
 	}
 	return acp.ReadTextFileResponse{Content: content}, nil
+}
+
+func (c *clientCallbacks) currentToolOutputLimit() ToolOutputLimit {
+	if c == nil {
+		return ToolOutputLimit{}
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.toolLimit
 }
 
 func (c *clientCallbacks) WriteTextFile(ctx context.Context, p acp.WriteTextFileRequest) (acp.WriteTextFileResponse, error) {

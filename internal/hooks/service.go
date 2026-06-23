@@ -398,6 +398,7 @@ func (*Service) runTool(ctx context.Context, cfg Config, _ Request, action HookA
 }
 
 func applyActionOutput(result *ActionResult, stdout string, maxOutputBytes int) {
+	result.appendContextLimit = maxOutputBytes
 	raw := strings.TrimSpace(stdout)
 	if raw == "" {
 		result.Decision = DecisionAllow
@@ -440,6 +441,7 @@ func applyActionOutput(result *ActionResult, stdout string, maxOutputBytes int) 
 }
 
 func applyToolOutput(result *ActionResult, output any, maxOutputBytes int) {
+	result.appendContextLimit = maxOutputBytes
 	m, ok := output.(map[string]any)
 	if !ok {
 		raw, err := json.Marshal(output)
@@ -475,6 +477,13 @@ func mergeDecision(result *Result, actionResult ActionResult, maxOutputBytes int
 		}
 	}
 	if strings.TrimSpace(appendContext) != "" {
+		fragmentLimit := actionResult.appendContextLimit
+		if fragmentLimit <= 0 {
+			fragmentLimit = maxOutputBytes
+		}
+		if maxOutputBytes <= 0 || fragmentLimit < maxOutputBytes {
+			appendContext = limitHookOutputText(appendContext, fragmentLimit)
+		}
 		if result.appendContextRaw != "" {
 			result.appendContextRaw += "\n"
 		}

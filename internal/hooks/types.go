@@ -190,7 +190,8 @@ type ActionResult struct {
 	Metadata   map[string]any `json:"metadata,omitempty"`
 	Error      string         `json:"error,omitempty"`
 
-	appendContextRaw string
+	appendContextRaw   string
+	appendContextLimit int
 }
 
 type Result struct {

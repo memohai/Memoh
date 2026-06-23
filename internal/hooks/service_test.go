@@ -256,6 +256,51 @@ func TestRunConfigLimitsAggregatedAppendContext(t *testing.T) {
 	assertHookTextPreservesHeadTail(t, result.AppendContext)
 }
 
+func TestRunConfigLimitsPluginAppendContextWithSourceCap(t *testing.T) {
+	t.Parallel()
+
+	large := "HEAD\n" + strings.Repeat("plugin context detail ", 300) + "\nTAIL"
+	cfg := Config{
+		Version: 1,
+		Defaults: Defaults{
+			MaxOutputBytes: 4096,
+		},
+		Hooks: []Hook{{
+			Name:  "plugin append-context",
+			Event: EventBeforeModelCall,
+			source: hookSource{
+				Kind:           sourceKindPlugin,
+				PluginID:       "github",
+				MaxOutputBytes: 192,
+			},
+			Actions: []HookAction{{
+				Type: ActionTool,
+				Tool: "append",
+			}},
+		}},
+	}
+	runner := &fakeToolRunner{
+		fn: func(context.Context, string, map[string]any) (any, error) {
+			return map[string]any{
+				"decision":       DecisionAppendContext,
+				"append_context": large,
+			}, nil
+		},
+	}
+
+	result, err := NewService(nil, nil).RunConfig(context.Background(), cfg, Request{Event: EventBeforeModelCall}, runner)
+	if err != nil {
+		t.Fatalf("RunConfig returned error: %v", err)
+	}
+	if len(result.AppendContext) > 192 {
+		t.Fatalf("append_context bytes = %d, want <= plugin cap 192", len(result.AppendContext))
+	}
+	if len(result.AppendContext) >= len(large) {
+		t.Fatalf("append_context was not limited by plugin cap")
+	}
+	assertHookTextPreservesHeadTail(t, result.AppendContext)
+}
+
 func TestRunConfigOnErrorBlockDenies(t *testing.T) {
 	t.Parallel()
 
@@ -348,6 +393,7 @@ func TestRunLimitsCommandRawStdoutMetadata(t *testing.T) {
 	t.Parallel()
 
 	large := "HEAD\n" + strings.Repeat("raw stdout ", 300) + "\nTAIL"
+	largeErr := "HEAD\n" + strings.Repeat("raw stderr ", 300) + "\nTAIL"
 	cfg := `{
 		"version": 1,
 		"enabled": true,
@@ -369,6 +415,7 @@ func TestRunLimitsCommandRawStdoutMetadata(t *testing.T) {
 			DefaultConfigPath: []byte(cfg),
 		},
 		stdout: large,
+		stderr: largeErr,
 	}
 	service := NewService(nil, hookBridgeProvider{client: newHookBridgeTestClient(t, server)})
 
@@ -395,6 +442,14 @@ func TestRunLimitsCommandRawStdoutMetadata(t *testing.T) {
 		t.Fatalf("raw_stdout was not limited")
 	}
 	assertHookTextPreservesHeadTail(t, raw)
+	if len(action.Stdout) > 192 {
+		t.Fatalf("stdout bytes = %d, want <= 192", len(action.Stdout))
+	}
+	if len(action.Stderr) > 192 {
+		t.Fatalf("stderr bytes = %d, want <= 192", len(action.Stderr))
+	}
+	assertHookTextPreservesHeadTail(t, action.Stdout)
+	assertHookTextPreservesHeadTail(t, action.Stderr)
 }
 
 func assertHookTextPreservesHeadTail(t *testing.T, text string) {
