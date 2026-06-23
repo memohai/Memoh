@@ -91,6 +91,7 @@ func (s *fakeAgentSessionService) Create(_ context.Context, input sessionpkg.Cre
 		Title:           input.Title,
 		Metadata:        input.Metadata,
 		ParentSessionID: input.ParentSessionID,
+		CreatedByUserID: input.CreatedByUserID,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
@@ -305,6 +306,20 @@ func TestAgentControlToolSchemasDoNotReferenceSiblingTools(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestSpawnAgentSessionInheritsParentUserIdentity(t *testing.T) {
+	p, _, sessions, _ := newAgentControlProvider(t, &fakeSpawnAgent{})
+	session := SessionContext{BotID: "bot1", SessionID: "parent1", ChannelIdentityID: "user1"}
+
+	res := asMap(t, mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{"id": "worker", "task": "alpha"}))
+	rec, ok := sessions.byAgent("parent1", "worker")
+	if !ok {
+		t.Fatalf("expected child session for worker, result=%v", res)
+	}
+	if rec.CreatedByUserID != "user1" {
+		t.Fatalf("expected child session creator to inherit parent user, got %q", rec.CreatedByUserID)
 	}
 }
 

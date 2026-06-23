@@ -6,7 +6,7 @@ import "strings"
 // converted UI turns. This keeps persisted background_started tool results
 // accurate after a page reload.
 func ApplyBackgroundTaskSnapshots(turns []UITurn, tasks []UIBackgroundTask) {
-	if len(turns) == 0 || len(tasks) == 0 {
+	if len(turns) == 0 {
 		return
 	}
 
@@ -16,10 +16,6 @@ func ApplyBackgroundTaskSnapshots(turns []UITurn, tasks []UIBackgroundTask) {
 			byID[taskID] = task
 		}
 	}
-	if len(byID) == 0 {
-		return
-	}
-
 	for turnIdx := range turns {
 		if turns[turnIdx].Role != "assistant" {
 			continue
@@ -31,9 +27,20 @@ func ApplyBackgroundTaskSnapshots(turns []UITurn, tasks []UIBackgroundTask) {
 			}
 			task, ok := byID[strings.TrimSpace(message.Background.TaskID)]
 			if !ok {
+				closeMissingBackgroundTaskSnapshot(message)
 				continue
 			}
 			mergeBackgroundTaskIntoTool(message, task)
 		}
 	}
+}
+
+func closeMissingBackgroundTaskSnapshot(message *UIMessage) {
+	if message == nil || !isBackgroundToolStillRunning(*message) {
+		return
+	}
+	mergeBackgroundTaskIntoTool(message, UIBackgroundTask{
+		TaskID: message.Background.TaskID,
+		Status: "unknown",
+	})
 }

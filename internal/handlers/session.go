@@ -100,7 +100,7 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 	if !session.IsKnownType(sessionType) {
 		return echo.NewHTTPError(http.StatusBadRequest, "unknown session type")
 	}
-	bot, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, requiredPermissionForSessionType(sessionType))
+	bot, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, requiredWritePermissionForSessionType(sessionType))
 	if err != nil {
 		return err
 	}
@@ -433,7 +433,7 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 		if !session.IsKnownType(targetType) {
 			return echo.NewHTTPError(http.StatusBadRequest, "unknown session type")
 		}
-		if !bots.HasPermission(perms, requiredPermissionForSessionType(targetType)) {
+		if !bots.HasPermission(perms, requiredWritePermissionForSessionType(targetType)) {
 			return echo.NewHTTPError(http.StatusForbidden, "bot access denied")
 		}
 		targetMetadata := cloneSessionMetadata(existing.Metadata)
@@ -473,6 +473,9 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 		}
 	}
 	if req.Title != nil {
+		if !bots.HasPermission(perms, requiredWritePermissionForSessionType(result.Type)) {
+			return echo.NewHTTPError(http.StatusForbidden, "bot access denied")
+		}
 		result, err = h.sessionService.UpdateTitle(c.Request().Context(), sessionID, *req.Title)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -506,9 +509,12 @@ func (h *SessionHandler) DeleteSession(c echo.Context) error {
 	if sessionID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
 	}
-	_, _, existing, err := h.authorizeSession(c, channelIdentityID, botID, sessionID)
+	_, perms, existing, err := h.authorizeSession(c, channelIdentityID, botID, sessionID)
 	if err != nil {
 		return err
+	}
+	if !bots.HasPermission(perms, requiredWritePermissionForSessionType(existing.Type)) {
+		return echo.NewHTTPError(http.StatusForbidden, "bot access denied")
 	}
 	if existing.Type == session.TypeACPAgent && h.acpPool != nil {
 		if closeErr := h.acpPool.CloseSession(sessionID); closeErr != nil {
@@ -566,7 +572,20 @@ func (h *SessionHandler) resolveCurrentUserPermissions(c echo.Context, channelId
 	return perms, nil
 }
 
-func requiredPermissionForSessionType(sessionType string) string {
+func requiredReadPermissionForSessionType(sessionType string) string {
+	switch strings.TrimSpace(sessionType) {
+	case session.TypeChat:
+		return bots.PermissionChat
+	case session.TypeSubagent:
+		return bots.PermissionChat
+	case session.TypeACPAgent:
+		return bots.PermissionWorkspaceExec
+	default:
+		return bots.PermissionManage
+	}
+}
+
+func requiredWritePermissionForSessionType(sessionType string) string {
 	switch strings.TrimSpace(sessionType) {
 	case session.TypeChat:
 		return bots.PermissionChat
@@ -584,7 +603,7 @@ func canAccessSession(sess session.Session, userID string, perms []string) bool 
 	if strings.TrimSpace(sess.CreatedByUserID) == "" || sess.CreatedByUserID != strings.TrimSpace(userID) {
 		return false
 	}
-	return bots.HasPermission(perms, requiredPermissionForSessionType(sess.Type))
+	return bots.HasPermission(perms, requiredReadPermissionForSessionType(sess.Type))
 }
 
 func filterSessionsForPermissions(items []session.Session, userID string, perms []string) []session.Session {

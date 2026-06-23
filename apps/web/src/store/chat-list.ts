@@ -475,6 +475,12 @@ export const useChatStore = defineStore('chat', () => {
   let selectSessionRequestId = 0
 
   const activeSession = computed(() => knownSessionSummary(sessionId.value ?? ''))
+  const knownSessions = computed<SessionSummary[]>(() => {
+    const byId = new Map<string, SessionSummary>()
+    for (const session of sessions.value) byId.set(session.id, session)
+    for (const session of Object.values(rememberedSessions.value)) byId.set(session.id, session)
+    return [...byId.values()]
+  })
 
   function replaceSessions(items: SessionSummary[]) {
     sessions.value = items
@@ -653,6 +659,14 @@ export const useChatStore = defineStore('chat', () => {
     return ''
   }
 
+  function pickRawString(obj: Record<string, unknown>, ...keys: string[]): string {
+    for (const key of keys) {
+      const value = obj[key]
+      if (typeof value === 'string' && value.length > 0) return value
+    }
+    return ''
+  }
+
   function normalizeBackgroundStatus(status?: string, event?: string): string {
     const token = (status || event || '').trim().toLowerCase()
     switch (token) {
@@ -680,6 +694,8 @@ export const useChatStore = defineStore('chat', () => {
       case 'cancelled':
       case 'canceled':
         return 'killed'
+      case 'unknown':
+        return 'unknown'
       default:
         return ''
     }
@@ -692,25 +708,27 @@ export const useChatStore = defineStore('chat', () => {
 
   function normalizeBackgroundTask(task?: UIBackgroundTask, eventType?: string): BackgroundTask | null {
     if (!task) return null
-    const record = task as Record<string, unknown>
+    const outer = task as Record<string, unknown>
+    const nested = asRecord(outer.task)
+    const record = Object.keys(nested).length > 0 ? nested : outer
     const taskId = pickString(record, 'task_id', 'taskId')
     if (!taskId) return null
-    const event = pickString(record, 'event') || (eventType ?? '').trim()
+    const event = pickString(record, 'event') || pickString(outer, 'event') || (eventType ?? '').trim()
     const status = normalizeBackgroundStatus(pickString(record, 'status'), event) || 'running'
     const exitCode = record.exit_code ?? record.exitCode
     return {
       taskId,
       status,
       event: event || undefined,
-      botId: pickString(record, 'bot_id', 'botId') || undefined,
-      sessionId: pickString(record, 'session_id', 'sessionId') || undefined,
+      botId: pickString(record, 'bot_id', 'botId') || pickString(outer, 'bot_id', 'botId') || undefined,
+      sessionId: pickString(record, 'session_id', 'sessionId') || pickString(outer, 'session_id', 'sessionId') || undefined,
       command: pickString(record, 'command') || undefined,
       agentId: pickString(record, 'agent_id', 'agentId') || undefined,
       agentSessionId: pickString(record, 'agent_session_id', 'agentSessionId') || undefined,
       outputFile: pickString(record, 'output_file', 'outputFile') || undefined,
-      outputTail: pickString(record, 'output_tail', 'outputTail', 'tail') || undefined,
+      outputTail: pickRawString(record, 'output_tail', 'outputTail', 'tail') || undefined,
       stream: pickString(record, 'stream') || undefined,
-      chunk: pickString(record, 'chunk') || undefined,
+      chunk: pickRawString(record, 'chunk') || undefined,
       exitCode: typeof exitCode === 'number' ? exitCode : undefined,
       duration: pickString(record, 'duration') || undefined,
       stalled: record.stalled === true || status === 'stalled',
@@ -875,6 +893,18 @@ export const useChatStore = defineStore('chat', () => {
       if (item.role === 'system' && item.kind === 'background_task') {
         const target = toolsByTaskId.get(item.backgroundTask.taskId)
         if (target) mergeBackgroundTaskIntoToolBlock(target, item.backgroundTask)
+      }
+    }
+  }
+
+  function mergeBackgroundTaskIntoMatchingTools(task: BackgroundTask) {
+    for (const item of messages) {
+      if (item.role !== 'assistant') continue
+      for (const block of item.messages) {
+        if (block.type !== 'tool') continue
+        if (taskIdFromToolBlock(block) === task.taskId) {
+          mergeBackgroundTaskIntoToolBlock(block, task)
+        }
       }
     }
   }
@@ -1672,12 +1702,26 @@ export const useChatStore = defineStore('chat', () => {
   function handleSessionMessageEvent(targetBotId: string, targetSessionId: string, event: SessionMessageStreamEvent) {
     if (event.type === 'ping') return
 
+    if (event.type === 'background_task') {
+      const eventSessionId = event.session_id?.trim()
+      if (eventSessionId && eventSessionId !== targetSessionId) return
+      const task = normalizeBackgroundTask(event, event.type)
+      if (!task) return
+      mergeBackgroundTaskIntoMatchingTools(rememberBackgroundTask(task))
+      if (eventSessionId) touchSessionInList(eventSessionId)
+      return
+    }
+
     if (event.type === 'session_title_updated') {
       const sid = event.session_id.trim()
       const title = event.title.trim()
       if (!sid || !title) return
-      const target = sessionById.get(sid)
-      if (target) target.title = title
+      const target = knownSessionSummary(sid)
+      if (target) {
+        const updated = { ...target, title }
+        if (rememberedSessions.value[sid]) rememberSession(updated)
+        else upsertSession(updated)
+      }
       return
     }
 
@@ -2717,6 +2761,8 @@ export const useChatStore = defineStore('chat', () => {
     bots,
     activeSession,
     activeChatReadOnly,
+    knownSessions,
+    knownSessionSummary,
     isSessionStreaming,
     loading,
     loadingChats,

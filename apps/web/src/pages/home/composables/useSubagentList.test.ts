@@ -118,6 +118,26 @@ describe('useSubagentList', () => {
     expect(subagents.value).toEqual([])
   })
 
+  it.each(['completed', 'failed', 'killed', 'canceled', 'unknown'])(
+    'does not treat %s background task status as active when done is stale',
+    (status) => {
+      const chatStore = useChatStore()
+      chatStore.currentBotId = 'bot-1'
+      chatStore.sessionId = 'parent-1'
+      pushSubagentTool(chatStore, {
+        agentSessionId: 'child-1',
+        agentId: 'agent-a',
+        status,
+        done: false,
+      })
+
+      const { subagents } = useSubagentList()
+
+      expect(colada.options[0]!.enabled()).toBe(false)
+      expect(subagents.value).toEqual([])
+    },
+  )
+
   it('opens the subagent through workspace tabs', () => {
     const chatStore = useChatStore()
     chatStore.currentBotId = 'bot-1'

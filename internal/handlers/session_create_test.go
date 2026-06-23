@@ -32,6 +32,10 @@ func (q *sessionCreateQueries) GetBotByID(_ context.Context, _ pgtype.UUID) (sql
 	return q.bot, nil
 }
 
+func (*sessionCreateQueries) ListBotUserGrantsForUser(_ context.Context, _ sqlc.ListBotUserGrantsForUserParams) ([]sqlc.ListBotUserGrantsForUserRow, error) {
+	return []sqlc.ListBotUserGrantsForUserRow{{Permissions: []byte(`["chat"]`)}}, nil
+}
+
 func (*sessionCreateQueries) ListSessionsByBot(_ context.Context, _ pgtype.UUID) ([]sqlc.ListSessionsByBotRow, error) {
 	return nil, nil
 }
@@ -105,6 +109,29 @@ func TestCreateSessionAcceptsACPAgentType(t *testing.T) {
 	}
 	if got := string(queries.createParams.Metadata); !strings.Contains(got, `"acp_agent_id":"codex"`) || !strings.Contains(got, `"project_path":"/data/app"`) {
 		t.Fatalf("CreateSession metadata = %s", got)
+	}
+}
+
+func TestCreateSessionRejectsSubagentTypeForChatUser(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	queries := &sessionCreateQueries{
+		bot: testBotRow(botID, map[string]any{}),
+	}
+	handler := NewSessionHandler(
+		slog.Default(),
+		session.NewService(nil, queries, nil),
+		nil,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("user"),
+	)
+
+	err := callCreateSession(handler, botID, `{"type":"subagent","title":"direct child"}`)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
+		t.Fatalf("CreateSession() error = %v, want HTTP 403", err)
+	}
+	if queries.createCalled {
+		t.Fatal("chat user should not be able to create subagent sessions directly")
 	}
 }
 

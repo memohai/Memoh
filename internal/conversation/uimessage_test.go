@@ -870,6 +870,129 @@ func TestApplyBackgroundTaskSnapshotsClosesPersistedStartedExec(t *testing.T) {
 	}
 }
 
+func TestApplyBackgroundTaskSnapshotsClosesMissingPersistedStartedExec(t *testing.T) {
+	baseTime := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
+	messages := []messagepkg.Message{
+		{
+			ID:        "assistant-1",
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			Role:      "assistant",
+			Content: mustUIMessageJSON(t, ModelMessage{
+				Role: "assistant",
+				Content: mustUIRawJSON(t, []map[string]any{
+					{"type": "tool-call", "toolCallId": "call-1", "toolName": "exec", "input": map[string]any{"command": "npm test"}},
+				}),
+			}),
+			CreatedAt: baseTime,
+		},
+		{
+			ID:        "tool-1",
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			Role:      "tool",
+			Content: mustUIMessageJSON(t, ModelMessage{
+				Role: "tool",
+				Content: mustUIRawJSON(t, []map[string]any{
+					{"type": "tool-result", "toolCallId": "call-1", "toolName": "exec", "result": map[string]any{"structuredContent": map[string]any{"status": "background_started", "task_id": "bg_1", "output_file": "/tmp/memoh-bg/bg_1.log"}}},
+				}),
+			}),
+			CreatedAt: baseTime.Add(time.Second),
+		},
+	}
+
+	turns := ConvertMessagesToUITurns(messages)
+	if len(turns) != 1 || len(turns[0].Messages) != 1 {
+		t.Fatalf("unexpected initial turns: %#v", turns)
+	}
+	tool := turns[0].Messages[0]
+	if tool.Running == nil || !*tool.Running {
+		t.Fatalf("expected persisted background_started tool to be running: %#v", tool)
+	}
+
+	ApplyBackgroundTaskSnapshots(turns, nil)
+
+	tool = turns[0].Messages[0]
+	if tool.Running == nil || *tool.Running {
+		t.Fatalf("expected missing snapshot to close exec tool: %#v", tool)
+	}
+	if tool.Background == nil || tool.Background.Status != "unknown" {
+		t.Fatalf("expected missing snapshot to mark background task unknown: %#v", tool.Background)
+	}
+}
+
+func TestApplyBackgroundTaskSnapshotsKeepsLiveTaskAndClosesMissingTask(t *testing.T) {
+	turns := []UITurn{{
+		Role: "assistant",
+		Messages: []UIMessage{
+			{
+				ID:         1,
+				Type:       UIMessageTool,
+				Name:       "exec",
+				ToolCallID: "call-live",
+				Running:    uiBoolPtr(true),
+				Background: &UIBackgroundTask{
+					TaskID: "bg-live",
+					Status: "running",
+				},
+			},
+			{
+				ID:         2,
+				Type:       UIMessageTool,
+				Name:       "exec",
+				ToolCallID: "call-missing",
+				Running:    uiBoolPtr(true),
+				Background: &UIBackgroundTask{
+					TaskID: "bg-missing",
+					Status: "running",
+				},
+			},
+		},
+	}}
+
+	ApplyBackgroundTaskSnapshots(turns, []UIBackgroundTask{{
+		TaskID: "bg-live",
+		Status: "running",
+	}})
+
+	live := turns[0].Messages[0]
+	if live.Running == nil || !*live.Running || live.Background == nil || live.Background.Status != "running" {
+		t.Fatalf("expected live snapshot to stay running: %#v", live)
+	}
+	missing := turns[0].Messages[1]
+	if missing.Running == nil || *missing.Running || missing.Background == nil || missing.Background.Status != "unknown" {
+		t.Fatalf("expected missing snapshot to close as unknown: %#v", missing)
+	}
+}
+
+func TestApplyBackgroundTaskSnapshotsDoesNotRewriteMissingTerminalTask(t *testing.T) {
+	turns := []UITurn{{
+		Role: "assistant",
+		Messages: []UIMessage{{
+			ID:         1,
+			Type:       UIMessageTool,
+			Name:       "exec",
+			ToolCallID: "call-completed",
+			Running:    uiBoolPtr(false),
+			Background: &UIBackgroundTask{
+				TaskID:     "bg-completed",
+				Status:     "completed",
+				OutputTail: "ok\n",
+			},
+		}},
+	}}
+
+	ApplyBackgroundTaskSnapshots(turns, nil)
+
+	tool := turns[0].Messages[0]
+	if tool.Running == nil || *tool.Running {
+		t.Fatalf("expected terminal tool to stay closed: %#v", tool)
+	}
+	if tool.Background == nil || tool.Background.Status != "completed" || tool.Background.OutputTail != "ok\n" {
+		t.Fatalf("expected missing terminal task to remain unchanged: %#v", tool.Background)
+	}
+}
+
 func mustUIRawJSON(t *testing.T, value any) json.RawMessage {
 	t.Helper()
 	data, err := json.Marshal(value)

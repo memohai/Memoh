@@ -96,7 +96,7 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "session not found")
 	}
-	bot, err := AuthorizeBotAccessWithPermission(ctx, h.botService, h.accountService, userID, botID, requiredPermissionForSessionType(sessionRow.Type))
+	bot, err := AuthorizeBotAccessWithPermission(ctx, h.botService, h.accountService, userID, botID, requiredReadPermissionForSessionType(sessionRow.Type))
 	if err != nil {
 		return err
 	}

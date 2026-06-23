@@ -1298,6 +1298,184 @@ describe('chat-list store', () => {
     expect(store.sessions.map(session => session.id)).toEqual(['session-1', 'session-2'])
   })
 
+  it('keeps unknown background task snapshots non-active when hydrating messages', async () => {
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ], nextCursor: null })
+    api.fetchMessagesUI.mockResolvedValueOnce([{
+      id: 'assistant-1',
+      role: 'assistant',
+      messages: [{
+        id: 1,
+        type: 'tool',
+        name: 'spawn_agent',
+        input: { id: 'agent-a' },
+        tool_call_id: 'call-spawn',
+        running: false,
+        background_task: {
+          task_id: 'bg-1',
+          status: 'unknown',
+          agent_id: 'agent-a',
+          agent_session_id: 'child-1',
+        },
+      }],
+      timestamp: new Date().toISOString(),
+    }])
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+
+    const tool = store.messages[0]?.role === 'assistant'
+      ? store.messages[0].messages[0]
+      : null
+    expect(tool?.type).toBe('tool')
+    if (tool?.type === 'tool') {
+      expect(tool.backgroundTask?.status).toBe('unknown')
+      expect(tool.running).toBe(false)
+      expect(tool.done).toBe(true)
+    }
+  })
+
+  it('applies live background task output and completion events to existing tool blocks', async () => {
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ], nextCursor: null })
+    api.fetchMessagesUI.mockResolvedValueOnce([{
+      id: 'assistant-1',
+      role: 'assistant',
+      messages: [{
+        id: 1,
+        type: 'tool',
+        name: 'spawn_agent',
+        input: { id: 'agent-a' },
+        tool_call_id: 'call-spawn',
+        running: true,
+        background_task: {
+          task_id: 'bg-1',
+          status: 'running',
+          agent_id: 'agent-a',
+          agent_session_id: 'child-1',
+        },
+      }],
+      timestamp: new Date().toISOString(),
+    }])
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    _sessionMessageHandler?.({
+      type: 'background_task',
+      event: 'output',
+      session_id: 'session-1',
+      task: {
+        task_id: 'bg-1',
+        status: 'running',
+        session_id: 'session-1',
+        agent_id: 'agent-a',
+        agent_session_id: 'child-1',
+        chunk: 'first line\n',
+      },
+    } as never)
+
+    let tool = store.messages[0]?.role === 'assistant'
+      ? store.messages[0].messages[0]
+      : null
+    expect(tool?.type).toBe('tool')
+    if (tool?.type === 'tool') {
+      expect(tool.backgroundTask?.status).toBe('running')
+      expect(tool.backgroundTask?.outputTail).toBe('first line\n')
+      expect(tool.background_task?.output_tail).toBe('first line\n')
+      expect(tool.running).toBe(true)
+      expect(tool.done).toBe(false)
+    }
+
+    _sessionMessageHandler?.({
+      type: 'background_task',
+      event: 'completed',
+      session_id: 'session-1',
+      task: {
+        task_id: 'bg-1',
+        status: 'completed',
+        session_id: 'session-1',
+        agent_id: 'agent-a',
+        agent_session_id: 'child-1',
+        output_tail: 'final line\n',
+      },
+    } as never)
+
+    tool = store.messages[0]?.role === 'assistant'
+      ? store.messages[0].messages[0]
+      : null
+    expect(tool?.type).toBe('tool')
+    if (tool?.type === 'tool') {
+      expect(tool.backgroundTask?.status).toBe('completed')
+      expect(tool.backgroundTask?.outputTail).toBe('final line\n')
+      expect(tool.background_task?.output_tail).toBe('final line\n')
+      expect(tool.running).toBe(false)
+      expect(tool.done).toBe(true)
+    }
+  })
+
+  it('updates remembered hidden session summaries from title events reactively', async () => {
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'parent-1', bot_id: 'bot-1', title: 'Parent', type: 'chat' },
+    ], nextCursor: null })
+    api.fetchMessagesUI.mockResolvedValue([])
+    api.fetchSession.mockResolvedValueOnce({
+      id: 'session-subagent',
+      bot_id: 'bot-1',
+      title: 'Initial subagent title',
+      type: 'subagent',
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await store.selectSession('session-subagent')
+    await flushPromises()
+
+    _sessionMessageHandler?.({
+      type: 'session_title_updated',
+      session_id: 'session-subagent',
+      title: 'Updated subagent title',
+    } as never)
+    await flushPromises()
+
+    expect(store.knownSessionSummary('session-subagent')?.title).toBe('Updated subagent title')
+    expect(store.knownSessions.find(session => session.id === 'session-subagent')?.title).toBe('Updated subagent title')
+  })
+
+  it('keeps remembered hidden session title updates after the visible session list refreshes', async () => {
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'parent-1', bot_id: 'bot-1', title: 'Parent', type: 'chat' },
+    ], nextCursor: null })
+    api.fetchMessagesUI.mockResolvedValue([])
+    api.fetchSession.mockResolvedValueOnce({
+      id: 'session-subagent',
+      bot_id: 'bot-1',
+      title: 'Initial subagent title',
+      type: 'subagent',
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await store.selectSession('session-subagent')
+    await flushPromises()
+
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'parent-1', bot_id: 'bot-1', title: 'Parent', type: 'chat' },
+    ], nextCursor: null })
+    await store.initialize()
+    await flushPromises()
+
+    _sessionMessageHandler?.({
+      type: 'session_title_updated',
+      session_id: 'session-subagent',
+      title: 'Updated subagent title',
+    } as never)
+    await flushPromises()
+
+    expect(store.knownSessionSummary('session-subagent')?.title).toBe('Updated subagent title')
+    expect(store.knownSessions.find(session => session.id === 'session-subagent')?.title).toBe('Updated subagent title')
+  })
+
   it('refreshes pending user input after response stream failure', async () => {
     api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
@@ -1580,6 +1758,10 @@ describe('chat-list store', () => {
       id: 'session-subagent',
       type: 'subagent',
     })
+    expect(store.knownSessionSummary('session-subagent')).toMatchObject({
+      id: 'session-subagent',
+      type: 'subagent',
+    })
     expect(store.activeChatReadOnly).toBe(true)
 
     api.fetchSessions.mockResolvedValueOnce({ items: [
@@ -1589,6 +1771,10 @@ describe('chat-list store', () => {
 
     expect(store.sessionId).toBe('session-subagent')
     expect(store.activeSession).toMatchObject({
+      id: 'session-subagent',
+      type: 'subagent',
+    })
+    expect(store.knownSessionSummary('session-subagent')).toMatchObject({
       id: 'session-subagent',
       type: 'subagent',
     })

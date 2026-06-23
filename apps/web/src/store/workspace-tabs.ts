@@ -274,7 +274,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // strings, and syncChatTitles overlays the server title once known).
   function chatTitleFallbackFor(sid: string | null): string {
     if (!sid) return DEFAULT_CHAT_TITLE
-    const session = chatStore.sessions.find(s => s.id === sid)
+    const session = chatStore.knownSessionSummary(sid)
     return (session?.title ?? '').trim() || DEFAULT_UNTITLED_SESSION_TITLE
   }
 
@@ -818,7 +818,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       if (panelComponentOf(panel.id) !== 'chat') continue
       const sid = panelSessionId(panel)
       if (!sid) continue
-      const session = chatStore.sessions.find(s => s.id === sid)
+      const session = chatStore.knownSessionSummary(sid)
       const title = (session?.title ?? '').trim()
       if (title && panel.api.title !== title) panel.api.setTitle(title)
     }
@@ -830,11 +830,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   function reconcileChatPanels() {
     const dock = api.value
     if (!dock || chatStore.loadingChats) return
-    const known = new Set(chatStore.sessions.map(s => s.id))
     for (const panel of [...dock.panels]) {
       if (panelComponentOf(panel.id) !== 'chat') continue
       const sid = panelSessionId(panel)
-      if (!sid || known.has(sid)) continue
+      if (!sid || chatStore.knownSessionSummary(sid)) continue
       if (panel.id === dock.activePanel?.id) {
         panel.api.updateParameters({ sessionId: null })
         panel.api.setTitle(DEFAULT_CHAT_TITLE)
@@ -1513,7 +1512,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // Server renames flow into each open chat tab's title. Keyed by a sorted
   // id:title digest so it fires on title changes, not on every sidebar reorder.
   watch(
-    () => chatStore.sessions.map(s => `${s.id}:${s.title ?? ''}`).sort().join('|'),
+    () => chatStore.knownSessions.map(s => `${s.id}:${s.title ?? ''}`).sort().join('|'),
     () => syncChatTitles(),
   )
 

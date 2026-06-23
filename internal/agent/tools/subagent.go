@@ -788,6 +788,7 @@ func (p *SpawnProvider) createAgentSession(ctx context.Context, parent SessionCo
 		Type:            sessionpkg.TypeSubagent,
 		Title:           truncateTitle(task, 100),
 		ParentSessionID: parent.SessionID,
+		CreatedByUserID: strings.TrimSpace(parent.ChannelIdentityID),
 		Metadata: map[string]any{
 			"agent_id":              agentID,
 			"agent_control_version": agentControlVersion,
