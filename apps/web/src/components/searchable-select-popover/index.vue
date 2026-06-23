@@ -30,7 +30,7 @@
       :style="{ minWidth: `calc(var(--reka-popover-trigger-width) * ${widthRatio} + ${-menuAlignOffset * 2}px)` }"
     >
       <div :class="menuChromeClass">
-        <div class="flex h-10 shrink-0 items-center gap-2 border-b border-border/40 px-4">
+        <div :class="menuSearchHeaderClass">
           <input
             v-model="searchTerm"
             role="combobox"
@@ -39,7 +39,7 @@
             :aria-activedescendant="activeIndex >= 0 ? `${listboxId}-${activeIndex}` : undefined"
             :placeholder="searchPlaceholder"
             :aria-label="searchAriaLabel"
-            class="flex h-full w-full bg-transparent text-control outline-hidden placeholder:text-muted-foreground"
+            :class="menuSearchInputClass"
             @keydown="onKeydown"
           >
         </div>
@@ -89,7 +89,7 @@
                 :aria-setsize="optionCount"
                 :aria-posinset="vRow.row.posinset"
                 :data-highlighted="activeIndex === vRow.virtual.index ? '' : undefined"
-                :class="[menuItemClass, 'h-8']"
+                :class="menuItemClass"
                 @click="selectOption(vRow.row.option.value)"
                 @pointermove="activeIndex = vRow.virtual.index"
               >
@@ -126,6 +126,8 @@ import {
   menuAlignOffset,
   menuChromeClass,
   menuLabelClass,
+  menuSearchHeaderClass,
+  menuSearchInputClass,
   Popover,
   PopoverTrigger,
   PopoverContent,
