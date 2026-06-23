@@ -558,14 +558,14 @@ func nativeAskUserSession(toolCallID string) mcp.ToolSessionContext {
 	}
 }
 
-func assertNativeToolResultJSONBytesAtMost(t *testing.T, value any, max int) {
+func assertNativeToolResultJSONBytesAtMost(t *testing.T, value any, maxBytes int) {
 	t.Helper()
 	raw, err := json.Marshal(value)
 	if err != nil {
 		t.Fatalf("marshal value: %v", err)
 	}
-	if len(raw) > max {
-		t.Fatalf("JSON bytes = %d, want <= %d\n%s", len(raw), max, raw)
+	if len(raw) > maxBytes {
+		t.Fatalf("JSON bytes = %d, want <= %d\n%s", len(raw), maxBytes, raw)
 	}
 }
 

@@ -267,17 +267,17 @@ func toolOutputPruneConfig(limit ToolOutputLimit) textprune.Config {
 	}
 }
 
-func fitHeadTail(max, head, tail int) (int, int) {
-	if max <= 0 {
+func fitHeadTail(maxValue, head, tail int) (int, int) {
+	if maxValue <= 0 {
 		return head, tail
 	}
-	if head+tail <= max {
+	if head+tail <= maxValue {
 		return head, tail
 	}
-	head = max * 3 / 4
-	tail = max - head
+	head = maxValue * 3 / 4
+	tail = maxValue - head
 	if head <= 0 {
-		return max, 0
+		return maxValue, 0
 	}
 	return head, tail
 }
