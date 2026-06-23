@@ -213,6 +213,7 @@ func TestRunConfigLimitsToolAppendContext(t *testing.T) {
 	if len(result.AppendContext) >= len(large) {
 		t.Fatalf("append_context was not limited")
 	}
+	assertHookTextPreservesHeadTail(t, result.AppendContext)
 }
 
 func TestRunConfigLimitsAggregatedAppendContext(t *testing.T) {
@@ -252,6 +253,7 @@ func TestRunConfigLimitsAggregatedAppendContext(t *testing.T) {
 	if len(result.AppendContext) >= len(large) {
 		t.Fatalf("append_context was not limited after aggregation")
 	}
+	assertHookTextPreservesHeadTail(t, result.AppendContext)
 }
 
 func TestRunConfigOnErrorBlockDenies(t *testing.T) {
@@ -339,6 +341,7 @@ func TestRunLimitsCommandAppendContext(t *testing.T) {
 	if len(result.AppendContext) >= len(large) {
 		t.Fatalf("append_context was not limited")
 	}
+	assertHookTextPreservesHeadTail(t, result.AppendContext)
 }
 
 func TestRunLimitsCommandRawStdoutMetadata(t *testing.T) {
@@ -390,6 +393,16 @@ func TestRunLimitsCommandRawStdoutMetadata(t *testing.T) {
 	}
 	if len(raw) >= len(large) {
 		t.Fatalf("raw_stdout was not limited")
+	}
+	assertHookTextPreservesHeadTail(t, raw)
+}
+
+func assertHookTextPreservesHeadTail(t *testing.T, text string) {
+	t.Helper()
+	for _, want := range []string{"[memoh pruned]", "HEAD", "TAIL"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("hook text missing %q:\n%s", want, text)
+		}
 	}
 }
 

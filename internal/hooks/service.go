@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/memohai/memoh/internal/contextlimit"
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace/bridge"
@@ -518,7 +519,9 @@ func hookMaxOutputBytes(cfg Config, source hookSource) int {
 }
 
 func limitHookOutputText(text string, limit int) string {
-	return trimOutput(strings.TrimSpace(text), limit)
+	return contextlimit.LimitString(strings.TrimSpace(text), "hook output", contextlimit.ToolOutputLimit{
+		MaxBytes: limit,
+	})
 }
 
 func trimOutput(raw string, limit int) string {
