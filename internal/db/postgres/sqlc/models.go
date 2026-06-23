@@ -6,7 +6,6 @@ package sqlc
 
 import (
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/pgvector/pgvector-go"
 )
 
 type Bot struct {
@@ -457,17 +456,6 @@ type MemoryNode struct {
 	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-}
-
-type MemoryNodeEmbedding struct {
-	BotID      pgtype.UUID        `json:"bot_id"`
-	NodeID     string             `json:"node_id"`
-	ModelID    pgtype.UUID        `json:"model_id"`
-	Dimensions int32              `json:"dimensions"`
-	BodyHash   string             `json:"body_hash"`
-	Embedding  pgvector.Vector    `json:"embedding"`
-	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
 type MemoryProvider struct {

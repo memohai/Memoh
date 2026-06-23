@@ -144,6 +144,17 @@ password = "memoh123"
 database = "memoh"
 sslmode = "disable"
 
+[pgvector]
+# Optional auxiliary Postgres service with the pgvector extension installed.
+# Leave disabled for SQLite/Local deployments.
+enabled = false
+host = "127.0.0.1"
+port = 5432
+user = "memoh"
+password = "memoh123"
+database = "memoh_vector"
+sslmode = "disable"
+
 [sqlite]
 # Used only when [database].driver = "sqlite".
 # Relative paths are resolved from the process working directory. For Docker,

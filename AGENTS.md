@@ -19,7 +19,7 @@ The native desktop client is a separate distribution boundary, not just a hosted
 
 Infrastructure dependencies:
 - **PostgreSQL or SQLite** — Relational data storage
-- **pgvector** — Postgres extension used for optional semantic memory seed search in deploy/server mode. SQLite/local desktop uses graph-only memory search.
+- **pgvector** — Separate Postgres service with the pgvector extension for optional semantic memory seed search in deploy/server mode. SQLite/local desktop uses graph-only memory search.
 - **Workspace runtime** — Isolated containers per bot via Docker, containerd v2, or Apple Virtualization, plus trusted local workspaces for desktop/local development
 
 ## Tech Stack
@@ -136,7 +136,7 @@ Memoh/
 │   ├── logger/                 #   Structured logging (slog)
 │   ├── mcp/                    #   MCP protocol manager (connections, OAuth, tool gateway)
 │   ├── media/                  #   Content-addressed media asset service
-│   ├── memory/                 #   Long-term memory system (graph store, optional Postgres pgvector seeds, LLM extraction)
+│   ├── memory/                 #   Long-term memory system (graph store, optional pgvector service seeds, LLM extraction)
 │   ├── message/                #   Message persistence and event publishing
 │   ├── messaging/              #   Outbound message executor
 │   ├── models/                 #   LLM model management (CRUD, variants, client types, probe)
@@ -283,8 +283,8 @@ docker compose up -d        # Start all services
 # Visit http://localhost:8082
 ```
 
-Production deploy services are `postgres`, `migrate`, `server`, and `web`.
-The Compose stack uses Postgres with pgvector for optional semantic memory seeds. This is distinct from the native desktop client, which manages its own SQLite-backed local server instead of using the Compose web/server split.
+Production deploy services are `postgres`, `pgvector`, `migrate`, `server`, and `web`.
+The Compose stack keeps the main Postgres service plain and uses a separate pgvector Postgres service for optional semantic memory seeds. This is distinct from the native desktop client, which manages its own SQLite-backed local server instead of using the Compose web/server split.
 
 ## Key Development Rules
 

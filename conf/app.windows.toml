@@ -57,6 +57,15 @@ password = "memoh123"
 database = "memoh"
 sslmode = "disable"
 
+[pgvector]
+enabled = false
+host = "127.0.0.1"
+port = 5432
+user = "memoh"
+password = "memoh123"
+database = "memoh_vector"
+sslmode = "disable"
+
 [sqlite]
 # Used only when [database].driver = "sqlite".
 path = "data/memoh.db"

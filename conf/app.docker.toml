@@ -78,6 +78,17 @@ password = "memoh123"
 database = "memoh"
 sslmode = "disable"
 
+## pgvector auxiliary index database. The main Postgres service remains the
+## relational source of truth; this separate service stores semantic seed vectors.
+[pgvector]
+enabled = true
+host = "pgvector"
+port = 5432
+user = "memoh"
+password = "memoh123"
+database = "memoh_vector"
+sslmode = "disable"
+
 [sqlite]
 # Used only when [database].driver = "sqlite".
 # This path is inside the server and migrate containers and is backed by the

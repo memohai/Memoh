@@ -58,6 +58,17 @@ password = "memoh123"
 database = "memoh"
 sslmode = "disable"
 
+[pgvector]
+# Optional semantic seed index for graph recall. This points to the separate
+# pgvector service in devenv/docker-compose.yml.
+enabled = true
+host = "pgvector"
+port = 5432
+user = "memoh"
+password = "memoh123"
+database = "memoh_vector"
+sslmode = "disable"
+
 [sqlite]
 # Used only when [database].driver = "sqlite". The SQLite dev profile mounts
 # /opt/memoh/data to a persistent Docker volume.

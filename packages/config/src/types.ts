@@ -10,6 +10,7 @@ export interface Config {
   apple?: AppleConfig;
   workspace?: WorkspaceConfig;
   postgres: PostgresConfig;
+  pgvector?: PGVectorConfig;
   agent_gateway: AgentGatewayConfig;
   supermarket: SupermarketConfig;
   web: WebConfig;
@@ -75,6 +76,10 @@ export interface PostgresConfig {
   password: string;
   database: string;
   sslmode: string;
+}
+
+export interface PGVectorConfig extends PostgresConfig {
+  enabled: boolean;
 }
 
 export interface AgentGatewayConfig {
