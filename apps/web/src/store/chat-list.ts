@@ -471,16 +471,25 @@ export const useChatStore = defineStore('chat', () => {
   let pendingACPCreateKey = ''
   let pendingACPGeneration = 0
 
+  // NOTE: activeSession reads from the plain (non-reactive) sessionById Map
+  // and only re-evaluates when sessionId.value changes — it is NOT live-updated
+  // by patchSessionInList (which swaps a *new* object into the Map). That is
+  // fine today because consumers here read only immutable-ish fields (.type /
+  // .metadata / .id), never a live title. If you bind a title display to
+  // activeSession it will go stale — read from chatStore.sessions instead.
   const activeSession = computed(() => sessionById.get(sessionId.value ?? '') ?? null)
 
   function replaceSessions(items: SessionSummary[]) {
-    // The server snapshot can lag the title we already hold: a session created
-    // client-side is untitled server-side until the title-generation flow runs,
-    // and a just-SSE-updated title lands locally before the DB catches up. An
-    // empty title in the snapshot means "DB hasn't caught up," not "title
-    // cleared" — so preserve our non-empty title when the snapshot's is empty,
-    // instead of letting a racing list refresh erase it (which split the sidebar
-    // from the sticky tab title).
+    // A racing list refresh can fetch a session before the backend's
+    // title-generation flow has persisted a title, while the client already
+    // holds one — the optimistic provisional title set in ensureActiveSession,
+    // which is local-only and never sent to the server. (Server-published
+    // titles don't have this problem: applyFallbackTitle and the LLM path
+    // both UpdateTitle before publishing, so the DB is current by the time any
+    // client sees the SSE.) An empty title in the snapshot means "server
+    // hasn't set one yet," not "title cleared," so preserve our non-empty title
+    // instead of letting the refresh erase it (which split the sidebar from
+    // the sticky tab title).
     const merged = items.map(s => {
       const known = sessionById.get(s.id)
       if (known && !(s.title ?? '').trim() && (known.title ?? '').trim()) {
