@@ -1780,7 +1780,7 @@ describe('chat-list store', () => {
     await second
   })
 
-  it('hydrates hidden subagent session summaries before selecting them', async () => {
+  it('hydrates hidden subagent session summaries after selecting them', async () => {
     api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-parent', bot_id: 'bot-1', title: 'Parent', type: 'chat' },
     ], nextCursor: null })
@@ -1820,6 +1820,46 @@ describe('chat-list store', () => {
     })
     expect(store.knownSessionSummary('session-subagent')).toMatchObject({
       id: 'session-subagent',
+      type: 'subagent',
+    })
+  })
+
+  it('switches to hidden sessions before their summary hydration resolves', async () => {
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-visible', bot_id: 'bot-1', title: 'Visible', type: 'chat' },
+    ], nextCursor: null })
+    api.fetchMessagesUI.mockResolvedValueOnce([{
+      id: 'visible-message',
+      role: 'user',
+      text: 'visible',
+      attachments: [],
+      timestamp: '2026-06-23T09:00:00.000Z',
+    }])
+    let resolveFetchSession: (session: unknown) => void = () => {}
+    api.fetchSession.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveFetchSession = resolve
+    }))
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const selection = store.selectSession('session-hidden')
+    await flushPromises()
+
+    expect(store.sessionId).toBe('session-hidden')
+    expect(store.messages).toEqual([])
+
+    resolveFetchSession({
+      id: 'session-hidden',
+      bot_id: 'bot-1',
+      title: 'Hidden',
+      type: 'subagent',
+      parent_session_id: 'session-visible',
+    })
+    await selection
+
+    expect(store.activeSession).toMatchObject({
+      id: 'session-hidden',
       type: 'subagent',
     })
   })

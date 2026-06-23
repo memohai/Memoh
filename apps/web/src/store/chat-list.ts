@@ -2484,23 +2484,22 @@ export const useChatStore = defineStore('chat', () => {
     if (!sid || sid === sessionId.value) return
     const requestId = ++selectSessionRequestId
     const bid = (currentBotId.value ?? '').trim()
-    let fetched: SessionSummary | null = null
-    if (bid && !knownSessionSummary(sid)) {
-      try {
-        fetched = await fetchSession(bid, sid)
-      } catch {
-        // The target can disappear between a list render and activation. Keep
-        // selection behavior consistent; the session stream/message load will
-        // surface the missing-session state through the existing path.
-      }
-    }
-    if (requestId !== selectSessionRequestId) return
-    if (bid && (currentBotId.value ?? '').trim() !== bid) return
-    if (fetched) rememberSession(fetched)
     clearPendingACPSession()
     sessionId.value = sid
     draftIntent.value = false
     switchActiveSession(sid)
+    if (!bid || knownSessionSummary(sid)) return
+
+    try {
+      const fetched = await fetchSession(bid, sid)
+      if (requestId !== selectSessionRequestId) return
+      if ((currentBotId.value ?? '').trim() !== bid || sessionId.value !== sid) return
+      rememberSession(fetched)
+    } catch {
+      // The target can disappear between a tab activation and hydration. Keep
+      // selection behavior consistent; the session stream/message load will
+      // surface the missing-session state through the existing path.
+    }
   }
 
   async function createNewSession() {
