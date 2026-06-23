@@ -94,6 +94,7 @@
         :tts-models="ttsModels"
         :tts-providers="ttsProviders"
         :transcription-models="transcriptionModels"
+        :transcription-providers="transcriptionProviders"
         :image-capable-models="imageCapableModels"
         :providers="providers"
         :video-models="videoModels"

@@ -19,24 +19,9 @@
         :aria-label="placeholder || 'Select exit node'"
         :class="[selectTriggerClass, 'w-full']"
       >
-        <span class="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
-          <CircleDot
-            v-if="selected"
-            class="size-3.5 shrink-0"
-            :class="selectedOption?.online ? 'text-success' : 'text-muted-foreground'"
-          />
-          <span class="line-clamp-1">{{ displayLabel || placeholder }}</span>
-        </span>
+        <span class="line-clamp-1">{{ displayLabel || placeholder }}</span>
         <ChevronsUpDown class="opacity-50" />
       </button>
-    </template>
-
-    <template #option-icon="{ option }">
-      <CircleDot
-        v-if="option.value"
-        class="size-3.5 shrink-0"
-        :class="option.meta?.online ? 'text-success' : 'text-muted-foreground'"
-      />
     </template>
 
     <template #option-label="{ option }">
@@ -52,7 +37,7 @@
 </template>
 
 <script setup lang="ts">
-import { CircleDot, ChevronsUpDown } from 'lucide-vue-next'
+import { ChevronsUpDown } from 'lucide-vue-next'
 import { selectTriggerClass } from '@memohai/ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -67,10 +52,6 @@ const props = defineProps<{
 
 const selected = defineModel<string>({ default: '' })
 const { t } = useI18n()
-
-const selectedOption = computed(() =>
-  props.nodes.find(node => node.value === selected.value),
-)
 
 const options = computed<SearchableSelectOption[]>(() => {
   const noneOption: SearchableSelectOption = {

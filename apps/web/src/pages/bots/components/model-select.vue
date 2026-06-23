@@ -31,6 +31,7 @@
           :providers="providers"
           :model-type="modelType"
           :open="open"
+          :none-label="noneLabel"
         />
       </div>
     </PopoverContent>
@@ -41,14 +42,15 @@
 import { computed, ref, watch } from 'vue'
 import { ChevronsUpDown } from 'lucide-vue-next'
 import { Popover, PopoverTrigger, PopoverContent, selectTriggerClass } from '@memohai/ui'
-import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
+import type { ModelsGetResponse, ModelsModelType, ProvidersGetResponse } from '@memohai/sdk'
 import ModelOptions from './model-options.vue'
 
 const props = defineProps<{
   models: ModelsGetResponse[]
   providers: ProvidersGetResponse[]
-  modelType: 'chat' | 'embedding' | 'video'
+  modelType: ModelsModelType
   placeholder?: string
+  noneLabel?: string
 }>()
 
 const selected = defineModel<string>({ default: '' })

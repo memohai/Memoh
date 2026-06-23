@@ -3,24 +3,26 @@
   <SettingsSection :title="$t('bots.settings.blocks.multimedia')">
     <SettingsRow :label="$t('bots.settings.ttsModel')">
       <div class="w-56">
-        <TtsModelSelect
+        <ModelSelect
           v-model="form.tts_model_id"
-          :models="ttsModels"
-          :providers="ttsProviders"
+          :models="speechModelOptions"
+          :providers="speechProviderOptions"
+          model-type="speech"
           :placeholder="$t('bots.settings.ttsModelPlaceholder')"
-          show-icons
+          :none-label="$t('common.none')"
         />
       </div>
     </SettingsRow>
 
     <SettingsRow :label="$t('bots.settings.transcriptionModel')">
       <div class="w-56">
-        <TtsModelSelect
+        <ModelSelect
           v-model="form.transcription_model_id"
-          :models="transcriptionModels"
-          :providers="ttsProviders"
+          :models="transcriptionModelOptions"
+          :providers="transcriptionProviderOptions"
+          model-type="transcription"
           :placeholder="$t('bots.settings.transcriptionModelPlaceholder')"
-          show-icons
+          :none-label="$t('common.none')"
         />
       </div>
     </SettingsRow>
@@ -58,8 +60,8 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import ModelSelect from './model-select.vue'
-import TtsModelSelect from './tts-model-select.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
 import type {
@@ -67,19 +69,55 @@ import type {
   AudioSpeechModelResponse,
   AudioSpeechProviderResponse,
   AudioTranscriptionModelResponse,
+  AudioTranscriptionProviderResponse,
   ModelsGetResponse,
   ProvidersGetResponse,
   VideoProviderResponse,
 } from '@memohai/sdk'
 
-defineProps<{
+function toModelOptions(
+  models: AudioSpeechModelResponse[] | AudioTranscriptionModelResponse[],
+  type: 'speech' | 'transcription',
+): ModelsGetResponse[] {
+  return models.map((m) => ({
+    id: m.id,
+    model_id: m.model_id,
+    name: m.name,
+    provider_id: m.provider_id,
+    type,
+  }))
+}
+
+function toProviderOptions(
+  providers: AudioSpeechProviderResponse[] | AudioTranscriptionProviderResponse[],
+): ProvidersGetResponse[] {
+  return providers.map((p) => ({
+    id: p.id,
+    name: p.name,
+    icon: p.icon,
+    enable: p.enable,
+    client_type: p.client_type,
+    config: p.config,
+    created_at: p.created_at,
+    updated_at: p.updated_at,
+    metadata: p.metadata,
+  }))
+}
+
+const props = defineProps<{
   form: SettingsSettings
   ttsModels: AudioSpeechModelResponse[]
   ttsProviders: AudioSpeechProviderResponse[]
   transcriptionModels: AudioTranscriptionModelResponse[]
+  transcriptionProviders: AudioTranscriptionProviderResponse[]
   imageCapableModels: ModelsGetResponse[]
   providers: ProvidersGetResponse[]
   videoModels: ModelsGetResponse[]
   videoProviders: VideoProviderResponse[]
 }>()
+
+const speechModelOptions = computed(() => toModelOptions(props.ttsModels, 'speech'))
+const speechProviderOptions = computed(() => toProviderOptions(props.ttsProviders))
+const transcriptionModelOptions = computed(() => toModelOptions(props.transcriptionModels, 'transcription'))
+const transcriptionProviderOptions = computed(() => toProviderOptions(props.transcriptionProviders))
 </script>

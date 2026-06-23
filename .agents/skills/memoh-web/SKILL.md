@@ -639,6 +639,20 @@ model, or make their relationship explicit and visible.
 - The rule: **don't overuse motion, but make every user action perceivable.** A click that
   changes nothing visible feels broken even when it worked.
 
+### Select triggers
+
+A recurring anti-pattern in settings rows is a select trigger rebuilt as a `<Button>`.
+
+- **A select trigger is not a button.** Use the shared `selectTriggerClass` or the default trigger
+  from `SearchableSelectPopover` / `Select` / `Combobox`. Do not drop a `<Button variant="outline">`
+  into the trigger slot — buttons carry a press-scale that visibly lurches on wide, full-width
+  selects and breaks the field-like select language. This applies to every chooser, not just the
+  ones that happen to be narrow today.
+- **Press-scale is a narrow, secondary-button signal.** It is dangerous on wide or primary buttons:
+  a full-width button that scales down looks like the whole surface is lurching. For wide / primary
+  actions, use a color-press (the library's `primary` / `brand` block mode) plus a `Spinner`, not a
+  scale-down. Keep scale for small, secondary, non-block controls.
+
 ### 7. Think the whole user path, including the exit
 
 Every entry needs a sane, short exit. Trace the full round-trip before you ship.

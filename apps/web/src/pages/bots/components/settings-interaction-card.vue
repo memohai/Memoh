@@ -34,39 +34,23 @@
     </SettingsRow>
 
     <SettingsRow :label="$t('bots.settings.reasoningEffort')">
-      <Popover v-model:open="reasoningPopoverOpen">
-        <PopoverTrigger as-child>
-          <button
-            data-slot="select-trigger"
-            data-size="default"
-            type="button"
-            :disabled="!chatModelSupportsReasoning"
-            :class="[selectTriggerClass, 'w-44']"
+      <Select
+        v-model="reasoningFormValue"
+        :disabled="!chatModelSupportsReasoning"
+      >
+        <SelectTrigger class="w-44">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem
+            v-for="effort in availableReasoningEfforts"
+            :key="effort"
+            :value="effort"
           >
-            <span class="flex items-center gap-2 truncate flex-1">
-              <Lightbulb
-                class="size-3.5 shrink-0"
-                :style="{ opacity: EFFORT_OPACITY[reasoningFormValue] ?? 0.5 }"
-              />
-              <span class="truncate">{{ $t(EFFORT_LABELS[reasoningFormValue] ?? reasoningFormValue) }}</span>
-            </span>
-            <ChevronDown class="size-3.5 shrink-0 opacity-50" />
-          </button>
-        </PopoverTrigger>
-        <PopoverContent
-          menu
-          align="end"
-          class="w-[var(--reka-popover-trigger-width)] p-0"
-        >
-          <div class="flex flex-col overflow-hidden rounded-[var(--radius-menu-shell)] border border-[color:var(--border-menu)] bg-popover text-popover-foreground shadow-[var(--shadow-dropdown)]">
-            <ReasoningEffortSelect
-              v-model="reasoningFormValue"
-              :efforts="availableReasoningEfforts"
-              @update:model-value="reasoningPopoverOpen = false"
-            />
-          </div>
-        </PopoverContent>
-      </Popover>
+            {{ $t(EFFORT_LABELS[effort] ?? effort) }}
+          </SelectItem>
+        </SelectContent>
+      </Select>
     </SettingsRow>
 
     <SettingsRow
@@ -82,12 +66,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { Popover, PopoverTrigger, PopoverContent, Switch, selectTriggerClass } from '@memohai/ui'
-import { Lightbulb, ChevronDown } from 'lucide-vue-next'
+import { computed, watch } from 'vue'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from '@memohai/ui'
 import ModelSelect from './model-select.vue'
-import ReasoningEffortSelect from './reasoning-effort-select.vue'
-import { EFFORT_LABELS, EFFORT_OPACITY, REASONING_EFFORT_DISABLE, availableEffortsForMode, resolveEffortLevels, resolveThinkingMode } from './reasoning-effort'
+import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, availableEffortsForMode, resolveEffortLevels, resolveThinkingMode } from './reasoning-effort'
 import type { SettingsSettings, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
@@ -126,8 +108,6 @@ watch([effortLevels, thinkingMode], ([levels]) => {
     props.form.reasoning_effort = levels.includes('medium') ? 'medium' : levels[0] ?? 'medium'
   }
 }, { immediate: true })
-
-const reasoningPopoverOpen = ref(false)
 
 const reasoningFormValue = computed({
   get: () => (props.form.reasoning_enabled ? (props.form.reasoning_effort ?? 'medium') : REASONING_EFFORT_DISABLE),
