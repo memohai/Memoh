@@ -10,7 +10,7 @@ import {
   useForwardPropsEmits,
 } from 'reka-ui'
 import { onBeforeUnmount, ref, watch } from 'vue'
-import { menuContentClass, menuSlideClass, menuViewportClass } from '#/lib/menu'
+import { menuContentClass, menuAlignOffset, menuSlideClass, menuViewportClass } from '#/lib/menu'
 import { cn } from '#/lib/utils'
 import { SelectScrollDownButton, SelectScrollUpButton } from '.'
 
@@ -72,14 +72,12 @@ const props = withDefaults(
     // pointer-events on the TRIGGER ALONE in style.css (so its hover tracks the
     // pointer), leaving everything else inert. The popper still follows the trigger.
     bodyLock: false,
-    // Shift the WHOLE menu left so the first row's text lands under the trigger
-    // text — without touching the menu's internal proportions. The menu's text
-    // sits at border(1)+p-1.5(6)+px-2.5(10)=17px from its edge; the trigger text
-    // at px-3=12px. Delta = 5px, so the menu overhangs the trigger by 5px on the
-    // start side (and, via the +8px viewport min-width below → +10px on the
-    // bordered box, 5px on the end side too — wider than the button on both
-    // sides, per the shared menu geometry).
-    alignOffset: -5,
+    // Shift the menu left by menuAlignOffset so the first row's TEXT lands under
+    // the trigger's TEXT (not the box edges). The offset is the geometric delta
+    // between the menu's text inset (border+viewport+item) and the trigger's
+    // (selectTriggerClass px-3); see menu.ts → menuAlignOffset. Long-content
+    // selects that widen the panel past the trigger override this to 0.
+    alignOffset: menuAlignOffset,
   },
 )
 const emits = defineEmits<SelectContentEmits>()

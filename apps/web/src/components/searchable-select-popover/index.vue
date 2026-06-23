@@ -25,8 +25,9 @@
     <PopoverContent
       menu
       :align="popoverAlign"
+      :align-offset="alignOffset"
       :class="popoverClass || 'p-0'"
-      :style="popoverClass ? undefined : { width: `calc(var(--reka-popover-trigger-width) * ${widthRatio})` }"
+      :style="{ minWidth: `calc(var(--reka-popover-trigger-width) * ${widthRatio} + ${-menuAlignOffset * 2}px)` }"
     >
       <div :class="menuChromeClass">
         <div class="flex h-10 shrink-0 items-center gap-2 border-b border-border/40 px-4">
@@ -122,6 +123,7 @@
 import { Check, ChevronsUpDown } from 'lucide-vue-next'
 import {
   menuItemClass,
+  menuAlignOffset,
   menuChromeClass,
   menuLabelClass,
   Popover,
@@ -177,6 +179,7 @@ const props = withDefaults(defineProps<{
   widthRatio?: number
   popoverClass?: string
   popoverAlign?: 'start' | 'center' | 'end'
+  alignOffset?: number
 }>(), {
   placeholder: '',
   ariaLabel: '',
@@ -186,6 +189,11 @@ const props = withDefaults(defineProps<{
   showGroupHeaders: true,
   widthRatio: 1,
   popoverAlign: 'start',
+  // Default to text-align: shift the panel so its first row's text lands under
+  // the trigger's text (see menu.ts → menuAlignOffset). Long-content surfaces
+  // that widen the panel past the trigger pass `:align-offset="0"` to align the
+  // box edge instead.
+  alignOffset: menuAlignOffset,
 })
 
 const selected = defineModel<string>({ default: '' })
