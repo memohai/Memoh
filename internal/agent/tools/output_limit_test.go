@@ -61,6 +61,22 @@ func TestLimitToolOutputFallsBackWhenStructuredJSONStillExceedsLimit(t *testing.
 	}
 }
 
+func TestLimitToolOutputNormalizesTinyPositiveByteLimit(t *testing.T) {
+	t.Parallel()
+
+	result := LimitToolOutput(map[string]any{
+		"content": strings.Repeat("x", 1024),
+	}, "tiny_tool", ToolOutputLimit{MaxBytes: 1, MaxLines: 80})
+
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	if len(raw) > 256 {
+		t.Fatalf("result JSON bytes = %d, want <= normalized minimum 256\n%s", len(raw), raw)
+	}
+}
+
 func TestLimitToolOutputPreservesErrorSignalOnFallback(t *testing.T) {
 	t.Parallel()
 

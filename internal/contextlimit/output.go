@@ -13,6 +13,8 @@ const (
 	toolOutputTailBytes = 8 * 1024
 	toolOutputHeadLines = 500
 	toolOutputTailLines = 100
+
+	minToolOutputMaxBytes = 256
 )
 
 type ToolOutputLimit struct {
@@ -245,6 +247,8 @@ func toolOutputPruneConfig(limit ToolOutputLimit) textprune.Config {
 	maxBytes := limit.MaxBytes
 	if maxBytes <= 0 {
 		maxBytes = textprune.DefaultMaxBytes
+	} else if maxBytes < minToolOutputMaxBytes {
+		maxBytes = minToolOutputMaxBytes
 	}
 	maxLines := limit.MaxLines
 	if maxLines <= 0 {

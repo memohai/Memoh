@@ -169,7 +169,10 @@ func (s *NativeToolSource) CallTool(ctx context.Context, session mcp.ToolSession
 		}
 		if toolName == ToolAskUser().String() {
 			result, err := s.callAskUser(ctx, session, arguments)
-			return s.limitMCPResult(toolName, result), err
+			if err != nil {
+				return nil, err
+			}
+			return s.limitMCPResult(toolName, result), nil
 		}
 		approval, err := s.requireApproval(ctx, session, toolName, arguments)
 		if err != nil {

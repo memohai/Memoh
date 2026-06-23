@@ -10,6 +10,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/contextlimit"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/models"
 	sessionpkg "github.com/memohai/memoh/internal/session"
@@ -67,7 +68,7 @@ func (r *Resolver) RespondToolApproval(ctx context.Context, input ToolApprovalRe
 		toolResult = sdk.ToolResultPart{
 			ToolCallID: rejected.ToolCallID,
 			ToolName:   rejected.ToolName,
-			Result:     rejectedToolResultText(input.Reason),
+			Result:     r.limitToolResultText(rejectedToolResultText(input.Reason), rejected.ToolName),
 			IsError:    true,
 		}
 	default:
@@ -75,6 +76,14 @@ func (r *Resolver) RespondToolApproval(ctx context.Context, input ToolApprovalRe
 	}
 
 	return r.storeToolResultAndContinue(ctx, target, input, toolResult, eventCh)
+}
+
+func (r *Resolver) limitToolResultText(text, toolName string) string {
+	limit := agentpkg.DefaultLimits().ToolOutputLimit()
+	if r != nil && r.agent != nil {
+		limit = r.agent.Limits().ToolOutputLimit()
+	}
+	return contextlimit.LimitString(text, "tool result ("+toolName+")", limit)
 }
 
 func (r *Resolver) isACPToolApprovalSession(ctx context.Context, sessionID string) (bool, error) {

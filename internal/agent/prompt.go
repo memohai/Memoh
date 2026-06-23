@@ -227,21 +227,25 @@ func buildSkillsSection(skills []SkillEntry) string {
 func buildFileSections(files []SystemFile, maxBytes int) string {
 	maxBytes = normalizeSystemFilesMaxBytes(maxBytes)
 	var sb strings.Builder
+	lineCount := 0
 	for _, f := range files {
 		if f.Content == "" {
 			continue
 		}
 		separator := ""
+		separatorLines := 0
 		if sb.Len() > 0 {
 			separator = "\n\n"
+			separatorLines = 2
 		}
 		remaining := maxBytes - sb.Len() - len(separator)
-		if remaining <= 0 {
+		remainingLines := textprune.DefaultMaxLines - lineCount - separatorLines
+		if remaining <= 0 || remainingLines <= 0 {
 			break
 		}
 		section := formatSystemFile(f)
-		if textprune.Exceeds(section, remaining, textprune.DefaultMaxLines) {
-			truncated, ok := truncateSystemFileSection(f, remaining)
+		if textprune.Exceeds(section, remaining, remainingLines) {
+			truncated, ok := truncateSystemFileSection(f, remaining, remainingLines)
 			if !ok {
 				break
 			}
@@ -251,6 +255,7 @@ func buildFileSections(files []SystemFile, maxBytes int) string {
 			sb.WriteString(separator)
 		}
 		sb.WriteString(section)
+		lineCount += separatorLines + textprune.CountLines(section)
 		if len(section) == remaining {
 			break
 		}
@@ -265,13 +270,14 @@ func normalizeSystemFilesMaxBytes(maxBytes int) int {
 	return maxBytes
 }
 
-func truncateSystemFileSection(file SystemFile, maxBytes int) (string, bool) {
+func truncateSystemFileSection(file SystemFile, maxBytes, maxLines int) (string, bool) {
 	heading := fmt.Sprintf("## %s\n\n", file.Filename)
-	if maxBytes <= len(heading) {
+	headingLines := textprune.CountLines(heading)
+	if maxBytes <= len(heading) || maxLines <= headingLines {
 		return "", false
 	}
 	contentBudget := maxBytes - len(heading)
-	content := textprune.PruneWithEdges(file.Content, systemFilePruneLabel(file), systemFilePruneConfig(contentBudget))
+	content := textprune.PruneWithEdges(file.Content, systemFilePruneLabel(file), systemFilePruneConfig(contentBudget, maxLines-headingLines))
 	return heading + content, true
 }
 
@@ -283,15 +289,16 @@ func systemFilePruneLabel(file SystemFile) string {
 	return "workspace file " + filename
 }
 
-func systemFilePruneConfig(maxBytes int) textprune.Config {
+func systemFilePruneConfig(maxBytes, maxLines int) textprune.Config {
 	headBytes, tailBytes := splitHeadTail(maxBytes)
+	headLines, tailLines := splitHeadTail(maxLines)
 	return textprune.Config{
 		MaxBytes:  maxBytes,
-		MaxLines:  textprune.DefaultMaxLines,
+		MaxLines:  maxLines,
 		HeadBytes: headBytes,
 		TailBytes: tailBytes,
-		HeadLines: 1500,
-		TailLines: 500,
+		HeadLines: headLines,
+		TailLines: tailLines,
 		Marker:    textprune.DefaultMarker,
 	}
 }

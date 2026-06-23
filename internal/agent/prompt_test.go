@@ -180,6 +180,22 @@ func TestBuildFileSectionsRespectsLineLimit(t *testing.T) {
 	}
 }
 
+func TestBuildFileSectionsRespectsCumulativeLineLimit(t *testing.T) {
+	t.Parallel()
+
+	sections := buildFileSections([]SystemFile{
+		{Filename: "AGENTS.md", Content: strings.Repeat("a\n", 1200)},
+		{Filename: "MEMORY.md", Content: strings.Repeat("m\n", 1200)},
+	}, 32*1024)
+
+	if got := strings.Count(sections, "\n") + 1; got > 2000 {
+		t.Fatalf("file sections lines = %d, want <= 2000", got)
+	}
+	if !strings.Contains(sections, "[memoh pruned]") {
+		t.Fatalf("file sections should include prune marker for cumulative line overflow:\n%s", sections)
+	}
+}
+
 func TestGenerateSystemPromptOmitsLegacyCoreFiles(t *testing.T) {
 	t.Parallel()
 

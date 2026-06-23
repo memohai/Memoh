@@ -168,10 +168,12 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			cfg.System = appendToolUsageToSystem(cfg.System, toolUsage)
 		}
 	}
+	limit := a.Limits().ToolOutputLimit()
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
-	sdkTools = tools.WrapToolOutputLimits(sdkTools, a.Limits().ToolOutputLimit())
+	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 	approvalTools := append([]sdk.Tool(nil), sdkTools...)
 	sdkTools = a.wrapToolsWithHooks(ctx, cfg, sdkTools)
+	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 
 	// Loop detection setup
 	var textLoopGuard *TextLoopGuard
@@ -640,10 +642,12 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 			cfg.System = appendToolUsageToSystem(cfg.System, toolUsage)
 		}
 	}
+	limit := a.Limits().ToolOutputLimit()
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
-	sdkTools = tools.WrapToolOutputLimits(sdkTools, a.Limits().ToolOutputLimit())
+	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 	approvalTools := append([]sdk.Tool(nil), sdkTools...)
 	sdkTools = a.wrapToolsWithHooks(ctx, cfg, sdkTools)
+	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 
 	var toolLoopGuard *ToolLoopGuard
 	var textLoopGuard *TextLoopGuard

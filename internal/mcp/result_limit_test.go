@@ -36,6 +36,16 @@ func TestLimitToolResultPreservesErrorSignal(t *testing.T) {
 	}
 }
 
+func TestLimitToolResultNormalizesTinyPositiveByteLimit(t *testing.T) {
+	t.Parallel()
+
+	result := LimitToolResult(BuildToolSuccessResult(map[string]any{
+		"content": strings.Repeat("x", 1024),
+	}), "tiny_mcp_tool", ToolOutputLimit{MaxBytes: 1, MaxLines: 80})
+
+	assertJSONBytesAtMost(t, result, 256)
+}
+
 func assertJSONBytesAtMost(t *testing.T, value any, max int) {
 	t.Helper()
 	raw, err := json.Marshal(value)

@@ -3,10 +3,12 @@ package flow
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/agent/sessionmode"
 	"github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/toolapproval"
@@ -132,5 +134,24 @@ func TestApprovalResultMetadata(t *testing.T) {
 		got["tool_name"] != "exec" ||
 		got["tool_call_id"] != "call-1" {
 		t.Fatalf("unexpected metadata: %#v", got)
+	}
+}
+
+func TestResolverLimitToolResultTextUsesAgentLimits(t *testing.T) {
+	t.Parallel()
+
+	r := &Resolver{
+		agent: agentpkg.New(agentpkg.Deps{
+			Limits: agentpkg.Limits{ToolOutputMaxBytes: 512, ToolOutputMaxLines: 80},
+		}),
+	}
+	large := "HEAD\n" + strings.Repeat("rejected detail ", 300) + "\nTAIL"
+
+	got := r.limitToolResultText(large, "write")
+	if len(got) >= len(large) {
+		t.Fatalf("tool result text was not pruned: got %d bytes, original %d", len(got), len(large))
+	}
+	if !strings.Contains(got, "[memoh pruned]") {
+		t.Fatalf("tool result text missing prune marker:\n%s", got)
 	}
 }
