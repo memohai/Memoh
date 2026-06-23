@@ -873,8 +873,19 @@ function bindStream() {
   const video = videoRef.value
   const stream = connection.stream.value
   if (!video || !stream) return
+  // Skip if already bound to this exact stream — multiple watchers (stream,
+  // status, connect) can fire bindStream back-to-back and re-assigning
+  // srcObject aborts the in-flight play() promise (AbortError).
+  if (video.srcObject === stream) {
+    // Already bound but maybe not playing yet (e.g. panel was hidden) — nudge it.
+    if (video.paused) video.play().catch(() => {})
+    return
+  }
   video.srcObject = stream
-  void video.play()
+  // play() resolves once playback begins; set videoReady here as the
+  // authoritative signal instead of relying solely on the @playing event,
+  // which can race or fail to fire when the panel visibility transitions.
+  video.play().then(() => { videoReady.value = true }).catch(() => {})
 }
 
 async function connect() {
