@@ -1,5 +1,5 @@
 <template>
-  <div class="flex h-10 shrink-0 items-center gap-2 border-b border-border/40 px-4">
+  <div :class="menuSearchHeaderClass">
     <input
       v-model="searchTerm"
       role="combobox"
@@ -8,7 +8,7 @@
       :aria-activedescendant="activeIndex >= 0 ? `${listboxId}-${activeIndex}` : undefined"
       :placeholder="$t('bots.settings.searchModel')"
       aria-label="Search models"
-      class="flex h-full w-full bg-transparent text-control outline-hidden placeholder:text-muted-foreground"
+      :class="menuSearchInputClass"
       @keydown="onKeydown"
     >
   </div>
@@ -53,7 +53,7 @@
           :aria-setsize="optionCount"
           :aria-posinset="vRow.row.posinset"
           :data-highlighted="activeIndex === vRow.virtual.index ? '' : undefined"
-          :class="[menuItemClass, 'h-8']"
+          :class="menuItemClass"
           @click="$emit('update:modelValue', vRow.row.option.value)"
           @pointermove="activeIndex = vRow.virtual.index"
         >
@@ -75,7 +75,7 @@
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { Check } from 'lucide-vue-next'
-import { menuItemClass, menuLabelClass, virtualListboxClass } from '@memohai/ui'
+import { menuItemClass, menuLabelClass, menuSearchHeaderClass, menuSearchInputClass, virtualListboxClass } from '@memohai/ui'
 import type { ModelsGetResponse, ModelsModelType, ProvidersGetResponse } from '@memohai/sdk'
 import { useListboxKeyboard } from '@/composables/useListboxKeyboard'
 
