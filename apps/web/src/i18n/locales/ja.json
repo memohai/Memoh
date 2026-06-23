@@ -641,7 +641,6 @@
     "infoCacheHitRate": "キャッシュヒット率",
     "infoCacheRead": "キャッシュ読み取り",
     "infoSubagents": "サブエージェント",
-    "infoSubagentsLoadFailed": "サブエージェントを読み込めませんでした",
     "infoSkills": "スキル",
     "infoNoSkills": "このセッションではスキルは使用されていません",
     "infoNoData": "利用可能なデータがありません",

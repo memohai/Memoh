@@ -80,7 +80,7 @@
 
         <!-- Subagents -->
         <div class="mt-4">
-          <SubagentList :visible="visible" />
+          <SubagentList />
         </div>
 
         <!-- Skills -->

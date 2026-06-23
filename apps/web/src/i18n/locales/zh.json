@@ -680,7 +680,6 @@
     "infoCacheHitRate": "Cache 命中率",
     "infoCacheRead": "Cache 读取",
     "infoSubagents": "子智能体",
-    "infoSubagentsLoadFailed": "子智能体加载失败",
     "infoSkills": "Skills",
     "infoNoSkills": "此会话未使用任何 Skill",
     "infoNoData": "暂无数据",

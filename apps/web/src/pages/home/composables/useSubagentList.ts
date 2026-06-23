@@ -1,83 +1,49 @@
-import { computed, onScopeDispose, type Ref, watch } from 'vue'
+import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useQuery } from '@pinia/colada'
-import { fetchAllSessions } from '@/composables/api/useChat'
-import { useChatStore } from '@/store/chat-list'
-import type { SessionSummary } from '@/composables/api/useChat.types'
+import { useChatStore, type BackgroundTask, type ChatAssistantTurn, type ToolCallBlock } from '@/store/chat-list'
 
-const SUBAGENT_LIST_REFRESH_MS = 3_000
-const SUBAGENT_LIST_LIMIT = 100
-
-interface SubagentSession {
+export interface SubagentSession {
   id: string
+  agentId: string
   title: string
-  agent_id?: string
-  created_at?: string
 }
 
-function toSubagentSession(s: SessionSummary): SubagentSession {
-  const meta = s.metadata as Record<string, unknown> | undefined
-  return {
-    id: s.id,
-    title: s.title || (meta?.agent_id as string) || s.id.slice(0, 8),
-    agent_id: (meta?.agent_id as string) ?? undefined,
-    created_at: s.created_at,
-  }
+const SPAWN_TOOLS = new Set(['spawn_agent', 'send_message'])
+
+function isActiveAgent(task: BackgroundTask): boolean {
+  const s = task.status
+  return s === 'running' || s === 'queued' || s === 'stalled'
 }
 
-export function useSubagentList(visible: Ref<boolean>) {
+export function useSubagentList() {
   const chatStore = useChatStore()
-  const { currentBotId, sessionId } = storeToRefs(chatStore)
+  const { messages, currentBotId } = storeToRefs(chatStore)
 
-  const { data, error, isLoading, refetch } = useQuery({
-    key: () => ['session-subagents', currentBotId.value ?? '', sessionId.value ?? ''],
-    query: async () => {
-      return fetchAllSessions(currentBotId.value!, {
-        types: ['subagent'],
-        parentSessionId: sessionId.value!,
-        limit: SUBAGENT_LIST_LIMIT,
-      })
-    },
-    enabled: () => !!currentBotId.value && !!sessionId.value && visible.value,
-    refetchOnWindowFocus: false,
-    staleTime: SUBAGENT_LIST_REFRESH_MS,
+  const subagents = computed<SubagentSession[]>(() => {
+    const seen = new Map<string, SubagentSession>()
+    for (const msg of messages.value) {
+      if (msg.role !== 'assistant') continue
+      for (const block of (msg as ChatAssistantTurn).messages) {
+        if (block.type !== 'tool') continue
+        const tool = block as ToolCallBlock
+        if (!SPAWN_TOOLS.has(tool.toolName)) continue
+        const bg = tool.backgroundTask
+        if (!bg?.agentSessionId || !isActiveAgent(bg)) continue
+        if (seen.has(bg.agentSessionId)) continue
+        seen.set(bg.agentSessionId, {
+          id: bg.agentSessionId,
+          agentId: bg.agentId || bg.taskId,
+          title: bg.command || bg.agentId || bg.taskId,
+        })
+      }
+    }
+    return [...seen.values()]
   })
-
-  const subagents = computed<SubagentSession[]>(() => (data.value ?? []).map(toSubagentSession))
-
-  let refreshTimer: ReturnType<typeof setInterval> | null = null
-  function stopRefreshTimer() {
-    if (!refreshTimer) return
-    clearInterval(refreshTimer)
-    refreshTimer = null
-  }
-
-  watch([currentBotId, sessionId, visible], ([botId, sid, isVisible]) => {
-    stopRefreshTimer()
-    if (!botId || !sid || !isVisible) return
-    refreshTimer = setInterval(() => {
-      void refetch()
-    }, SUBAGENT_LIST_REFRESH_MS)
-  }, { immediate: true })
-
-  onScopeDispose(stopRefreshTimer)
 
   function navigateToSession(subagentSessionId: string) {
     if (!subagentSessionId || !currentBotId.value) return
-    const target = data.value?.find(session => session.id === subagentSessionId)
-    if (target) {
-      chatStore.rememberSession(target)
-    }
     void chatStore.selectSession(subagentSessionId)
   }
 
-  return {
-    subagents,
-    error,
-    isLoading,
-    refetch,
-    navigateToSession,
-  }
+  return { subagents, navigateToSession }
 }
-
-export type { SubagentSession }
