@@ -47,6 +47,16 @@ export const menuChromeClass
 // option, not a wrapper. `scroll-my-1` keeps keyboard-scrolled rows off the edge.
 export const virtualListboxClass = 'max-h-64 scroll-my-1 overflow-y-auto p-1.5'
 
+// How far to shift a menu left (negative alignOffset) so its first row's TEXT
+// lands under the trigger's TEXT — not the menu box edge under the trigger edge.
+// This is a geometric consequence of the shared insets, not a magic number:
+//   menu text from its edge = border(1) + menuViewportClass p-1.5(6) + menuItemClass px-2.5(10) = 17
+//   trigger text from its edge = selectTriggerClass px-3 = 12
+//   delta = 17 - 12 = 5 → shift the menu left by 5px so the two text columns line up.
+// Applied by any menu host anchored to a selectTrigger (SelectContent, and the
+// searchable-select-popover family). Long-content selects that widen the panel
+// past the trigger (model-select) opt out and align the box edge instead.
+export const menuAlignOffset = -5
 
 // One menu row: layout + roving-focus highlight. Geometry is pinned to the
 // shared row contract: px-2.5 / py-1.5 / text-control (14px) / rounded-menu
