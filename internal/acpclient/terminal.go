@@ -33,6 +33,7 @@ type terminalManager struct {
 	baseEnv     []string
 	virtualRoot bool
 	events      *toolEventEmitter
+	limit       ToolOutputLimit
 
 	mu        sync.Mutex
 	nextID    int
@@ -90,6 +91,15 @@ func newTerminalManager(ctx context.Context, client *bridge.Client, root, defaul
 	}
 }
 
+func (m *terminalManager) setToolOutputLimit(limit ToolOutputLimit) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.limit = limit
+	m.mu.Unlock()
+}
+
 func (m *terminalManager) CreateTerminal(_ context.Context, p acp.CreateTerminalRequest, approve terminalApprovalFunc) (acp.CreateTerminalResponse, error) {
 	cwd := m.defaultCwd
 	if p.Cwd != nil && strings.TrimSpace(*p.Cwd) != "" {
@@ -141,6 +151,12 @@ func (m *terminalManager) CreateTerminal(_ context.Context, p acp.CreateTerminal
 			limit = maxTerminalOutputLimit
 		}
 	}
+	if promptLimit := m.toolOutputLimit(); hasToolOutputLimit(promptLimit) {
+		normalized := normalizedToolOutputLimit(promptLimit)
+		if normalized.MaxBytes > 0 && normalized.MaxBytes < limit {
+			limit = normalized.MaxBytes
+		}
+	}
 
 	env := append([]string(nil), m.baseEnv...)
 	for _, item := range p.Env {
@@ -188,6 +204,11 @@ func (m *terminalManager) TerminalOutput(_ context.Context, p acp.TerminalOutput
 		return acp.TerminalOutputResponse{}, err
 	}
 	output, truncated, status := term.snapshot()
+	limitedOutput := m.limitTerminalOutput(output)
+	if limitedOutput != output {
+		truncated = true
+	}
+	output = limitedOutput
 	if output == "" {
 		output = "\n"
 	}
@@ -280,6 +301,11 @@ func (m *terminalManager) emitTerminalEnd(term *terminal) {
 		defer close(term.endReported)
 	}
 	output, truncated, status := term.snapshot()
+	limitedOutput := m.limitTerminalOutput(output)
+	if limitedOutput != output {
+		truncated = true
+	}
+	output = limitedOutput
 	result := map[string]any{
 		"stdout":    output,
 		"truncated": truncated,
@@ -293,6 +319,23 @@ func (m *terminalManager) emitTerminalEnd(term *terminal) {
 		}
 	}
 	m.emitToolCallEnd(term.id, "exec", term.input, result, nil)
+}
+
+func (m *terminalManager) toolOutputLimit() ToolOutputLimit {
+	if m == nil {
+		return ToolOutputLimit{}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.limit
+}
+
+func (m *terminalManager) limitTerminalOutput(output string) string {
+	limit := m.toolOutputLimit()
+	if !hasToolOutputLimit(limit) {
+		return output
+	}
+	return limitToolOutputString(output, "tool result (exec)", limit)
 }
 
 func (m *terminalManager) nextTerminalID() string {

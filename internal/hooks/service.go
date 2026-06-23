@@ -257,7 +257,7 @@ func (s *Service) RunConfig(ctx context.Context, cfg Config, req Request, runner
 				}
 				return result, err
 			}
-			mergeDecision(&result, actionResult)
+			mergeDecision(&result, actionResult, cfg.Defaults.MaxOutputBytes)
 			if result.Decision == DecisionDeny {
 				return result, fmt.Errorf("%w: %s", ErrDenied, result.Reason)
 			}
@@ -410,7 +410,7 @@ func applyActionOutput(result *ActionResult, stdout string, maxOutputBytes int) 
 	}
 	if err := json.Unmarshal([]byte(raw), &output); err != nil {
 		result.Decision = DecisionAllow
-		result.Metadata = map[string]any{"raw_stdout": raw}
+		result.Metadata = map[string]any{"raw_stdout": limitHookOutputText(raw, maxOutputBytes)}
 		return
 	}
 	result.Decision = normalizeDecision(output.Decision)
@@ -459,7 +459,7 @@ func applyToolOutput(result *ActionResult, output any, maxOutputBytes int) {
 	}
 }
 
-func mergeDecision(result *Result, actionResult ActionResult) {
+func mergeDecision(result *Result, actionResult ActionResult, maxOutputBytes int) {
 	decision := normalizeDecision(actionResult.Decision)
 	if decision == "" {
 		decision = DecisionAllow
@@ -470,6 +470,7 @@ func mergeDecision(result *Result, actionResult ActionResult) {
 				result.AppendContext += "\n"
 			}
 			result.AppendContext += appendContext
+			result.AppendContext = limitHookOutputText(result.AppendContext, maxOutputBytes)
 		}
 	}
 	switch decision {

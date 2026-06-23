@@ -20,11 +20,16 @@ type TranscriptRecorder struct {
 	reasoning      strings.Builder
 	text           strings.Builder
 	sawTextDelta   bool
+	limit          ToolOutputLimit
 }
 
 // NewTranscriptRecorder creates an empty transcript recorder.
-func NewTranscriptRecorder() *TranscriptRecorder {
-	return &TranscriptRecorder{}
+func NewTranscriptRecorder(limits ...ToolOutputLimit) *TranscriptRecorder {
+	recorder := &TranscriptRecorder{}
+	if len(limits) > 0 {
+		recorder.limit = limits[0]
+	}
+	return recorder
 }
 
 // Add folds one event into the transcript in arrival order.
@@ -32,6 +37,7 @@ func (b *TranscriptRecorder) Add(ev event.StreamEvent) {
 	if b == nil {
 		return
 	}
+	ev = LimitStreamEvent(ev, b.limit)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	switch ev.Type {

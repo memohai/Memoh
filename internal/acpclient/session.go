@@ -65,6 +65,10 @@ type PromptResource struct {
 	Text     string
 }
 
+type PromptOptions struct {
+	ToolOutputLimit ToolOutputLimit
+}
+
 type Session struct {
 	logger          *slog.Logger
 	proc            *bridgeProcess
@@ -598,6 +602,10 @@ func (s *Session) PromptWithResources(ctx context.Context, prompt string, resour
 // PromptWithToolContext sends a user prompt and binds request-scoped tool
 // identity to ACP callbacks while that prompt is active.
 func (s *Session) PromptWithToolContext(ctx context.Context, prompt string, resources []PromptResource, toolSession ToolSessionContext, sinks ...EventSink) (PromptResult, error) {
+	return s.PromptWithToolContextOptions(ctx, prompt, resources, toolSession, PromptOptions{}, sinks...)
+}
+
+func (s *Session) PromptWithToolContextOptions(ctx context.Context, prompt string, resources []PromptResource, toolSession ToolSessionContext, options PromptOptions, sinks ...EventSink) (PromptResult, error) {
 	if s == nil || s.conn == nil {
 		return PromptResult{}, ErrSessionNotInitialized
 	}
@@ -644,17 +652,17 @@ func (s *Session) PromptWithToolContext(ctx context.Context, prompt string, reso
 	}
 
 	promptBlocks := s.promptBlocks(prompt, resources)
-	collector := newEventCollector()
+	collector := newEventCollector(options.ToolOutputLimit)
 	sink := defaultSink
 	if len(sinks) > 0 {
 		sink = sinks[0]
 	}
 	if callbacks != nil {
-		callbacks.setPromptState(collector, sink, toolSession)
+		callbacks.setPromptState(collector, sink, toolSession, options.ToolOutputLimit)
 	}
 	defer func() {
 		if callbacks != nil {
-			callbacks.setPromptState(nil, nil, ToolSessionContext{})
+			callbacks.setPromptState(nil, nil, ToolSessionContext{}, ToolOutputLimit{})
 		}
 	}()
 

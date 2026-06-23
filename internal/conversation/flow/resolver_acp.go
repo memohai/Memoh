@@ -156,6 +156,7 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		// path that turns read image bytes into model-native image input. Keep
 		// this false until ACP model capability and image transport are wired.
 		SupportsImageInput: false,
+		ToolOutputLimit:    r.toolOutputLimit(),
 		ToolHTTPURL:        req.ToolHTTPURL,
 		ContextURI:         acpContextURI,
 		ContextMarkdown:    contextMarkdown,

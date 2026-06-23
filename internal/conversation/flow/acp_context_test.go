@@ -70,3 +70,29 @@ func TestRenderACPContextMarkdownIncludesDynamicRuntimeAndMemory(t *testing.T) {
 		t.Fatalf("TOOLS.md content should not be injected into ACP context:\n%s", got)
 	}
 }
+
+func TestRenderACPContextMarkdownRespectsSystemFilesBudget(t *testing.T) {
+	t.Parallel()
+
+	large := "HEAD\n" + strings.Repeat("0123456789", 200) + "\nTAIL"
+	got := renderACPContextMarkdown(acpContextRenderInput{
+		Now:                 time.Date(2026, 6, 1, 9, 30, 0, 0, time.UTC),
+		Timezone:            "UTC",
+		BotID:               "bot-1",
+		SessionID:           "session-1",
+		AgentID:             "codex",
+		ProjectPath:         "/data/app",
+		SystemFilesMaxBytes: 512,
+		Files: []agentpkg.SystemFile{
+			{Filename: "MEMORY.md", Content: large},
+			{Filename: "PROFILES.md", Content: "SECOND_FILE_SHOULD_NOT_FIT"},
+		},
+	})
+
+	if !strings.Contains(got, "[memoh pruned]") {
+		t.Fatalf("context missing prune marker:\n%s", got)
+	}
+	if strings.Contains(got, "SECOND_FILE_SHOULD_NOT_FIT") {
+		t.Fatalf("context included system file content beyond budget:\n%s", got)
+	}
+}

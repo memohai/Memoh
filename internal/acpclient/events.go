@@ -32,15 +32,17 @@ type toolEventEmitter struct {
 	mu        sync.RWMutex
 	collector *eventCollector
 	sink      EventSink
+	limit     ToolOutputLimit
 }
 
-func (e *toolEventEmitter) setPromptState(collector *eventCollector, sink EventSink) {
+func (e *toolEventEmitter) setPromptState(collector *eventCollector, sink EventSink, limit ToolOutputLimit) {
 	if e == nil {
 		return
 	}
 	e.mu.Lock()
 	e.collector = collector
 	e.sink = sink
+	e.limit = limit
 	e.mu.Unlock()
 }
 
@@ -51,7 +53,9 @@ func (e *toolEventEmitter) emit(ev event.StreamEvent) {
 	e.mu.RLock()
 	collector := e.collector
 	sink := e.sink
+	limit := e.limit
 	e.mu.RUnlock()
+	ev = LimitStreamEvent(ev, limit)
 	if collector != nil {
 		collector.record(ev)
 	}
@@ -66,16 +70,22 @@ type eventCollector struct {
 	events []event.StreamEvent
 	// transcript is kept separately from the capped UI event buffer.
 	transcript *TranscriptRecorder
+	limit      ToolOutputLimit
 }
 
-func newEventCollector() *eventCollector {
-	return &eventCollector{transcript: NewTranscriptRecorder()}
+func newEventCollector(limits ...ToolOutputLimit) *eventCollector {
+	var limit ToolOutputLimit
+	if len(limits) > 0 {
+		limit = limits[0]
+	}
+	return &eventCollector{transcript: NewTranscriptRecorder(limit), limit: limit}
 }
 
 func (c *eventCollector) record(ev event.StreamEvent) {
 	if c == nil {
 		return
 	}
+	ev = LimitStreamEvent(ev, c.limit)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.events = appendBoundedStreamEvents(c.events, ev)
@@ -87,6 +97,7 @@ func (c *eventCollector) apply(n acp.SessionNotification, events []event.StreamE
 	defer c.mu.Unlock()
 
 	update := n.Update
+	events = limitStreamEvents(events, c.limit)
 	c.events = appendBoundedStreamEvents(c.events, events...)
 	for _, ev := range events {
 		c.transcript.Add(ev)
@@ -94,6 +105,17 @@ func (c *eventCollector) apply(n acp.SessionNotification, events []event.StreamE
 	if update.AgentMessageChunk != nil {
 		c.text.WriteString(contentText(update.AgentMessageChunk.Content))
 	}
+}
+
+func limitStreamEvents(events []event.StreamEvent, limit ToolOutputLimit) []event.StreamEvent {
+	if !hasToolOutputLimit(limit) || len(events) == 0 {
+		return events
+	}
+	out := make([]event.StreamEvent, len(events))
+	for i, ev := range events {
+		out[i] = LimitStreamEvent(ev, limit)
+	}
+	return out
 }
 
 func (c *eventCollector) result() RunResult {

@@ -200,6 +200,7 @@ type clientCallbacks struct {
 	events         *toolEventEmitter
 	toolMapper     *acpToolEventMapper
 	terminals      *terminalManager
+	toolLimit      ToolOutputLimit
 	// quirks carries the per-agent title heuristics (acpprofile owns them);
 	// the zero value behaves like the defaults.
 	quirks acpprofile.ToolQuirks
@@ -238,18 +239,26 @@ func (c *clientCallbacks) close() {
 	}
 }
 
-func (c *clientCallbacks) setPromptState(collector *eventCollector, sink EventSink, toolSession ToolSessionContext) {
+func (c *clientCallbacks) setPromptState(collector *eventCollector, sink EventSink, toolSession ToolSessionContext, limits ...ToolOutputLimit) {
 	if c == nil {
 		return
+	}
+	var limit ToolOutputLimit
+	if len(limits) > 0 {
+		limit = limits[0]
 	}
 	c.mu.Lock()
 	c.collector = collector
 	c.sink = sink
 	c.promptSession = toolSession
+	c.toolLimit = limit
 	c.approvalGrants = nil
 	c.mu.Unlock()
 	if c.events != nil {
-		c.events.setPromptState(collector, sink)
+		c.events.setPromptState(collector, sink, limit)
+	}
+	if c.terminals != nil {
+		c.terminals.setToolOutputLimit(limit)
 	}
 }
 
@@ -935,11 +944,13 @@ func (c *clientCallbacks) SessionUpdate(_ context.Context, p acp.SessionNotifica
 	c.mu.RLock()
 	collector := c.collector
 	sink := c.sink
+	limit := c.toolLimit
 	c.mu.RUnlock()
 	var events []event.StreamEvent
 	if c.toolMapper != nil {
 		events = c.toolMapper.eventsFromNotification(p)
 	}
+	events = limitStreamEvents(events, limit)
 	if collector != nil {
 		collector.apply(p, events)
 	}
