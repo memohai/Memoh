@@ -792,6 +792,7 @@
         "default": "正在准备桌面",
         "failed": "桌面准备失败",
         "stageCheck": "检查",
+        "stageSetup": "配置",
         "stageInstall": "安装",
         "stageBrowser": "浏览器",
         "stageDesktop": "桌面"

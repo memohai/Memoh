@@ -34,6 +34,7 @@
         <div class="relative aspect-[4/3] w-full overflow-hidden rounded-[var(--radius-menu-shell)] border border-border bg-card">
           <DisplayPane
             v-if="props.botId"
+            :key="props.botId"
             :bot-id="props.botId"
             tab-id="settings-desktop"
             :title="$t('bots.desktop.liveTitle')"

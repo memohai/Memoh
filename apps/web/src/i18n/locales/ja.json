@@ -739,6 +739,7 @@
         "default": "デスクトップを準備中",
         "failed": "デスクトップの準備に失敗しました",
         "stageCheck": "チェック",
+        "stageSetup": "セットアップ",
         "stageInstall": "インストール",
         "stageBrowser": "ブラウザー",
         "stageDesktop": "デスクトップ"
