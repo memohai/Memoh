@@ -1,4 +1,4 @@
-import { onScopeDispose, ref } from 'vue'
+import { onScopeDispose, ref, shallowRef } from 'vue'
 import {
   deleteBotsByBotIdContainerDisplaySessionsBySessionId,
   getBotsByBotIdContainerDisplay,
@@ -40,6 +40,12 @@ interface DisplayOfferResponse {
 
 const PREPARE_MAX_WAIT_ATTEMPTS = 12
 const PREPARE_WAIT_INTERVAL_MS = 500
+// After the last viewer detaches, keep the WebRTC peer + GStreamer session
+// alive for this long so a quick close/reopen reuses the live stream instead
+// of re-running ensureReady + ICE + offer/answer (the 'reconnect is slow'
+// symptom). Must stay under the backend encoderIdleHold (90s) so the peer
+// never outlives the pipeline feeding it.
+const PEER_IDLE_HOLD_MS = 30_000
 
 const connections = new Map<string, BotDisplayConnection>()
 
@@ -49,21 +55,143 @@ function delay(ms: number): Promise<void> {
 
 export class BotDisplayConnection {
   botId: string
+  status = ref<DisplayStatus>('idle')
   prepareProgress = ref<PrepareProgress | null>(null)
   unavailableReason = ref('')
+  sessionId = ref('')
+  peer = shallowRef<RTCPeerConnection | null>(null)
+  inputChannel = shallowRef<RTCDataChannel | null>(null)
+  stream = shallowRef<MediaStream | null>(null)
 
   private ensureReadyPromise: Promise<boolean> | null = null
+  private acquirePromise: Promise<boolean> | null = null
   private refs = 0
+  private idleTimer: ReturnType<typeof window.setTimeout> | null = null
 
   constructor(botId: string) {
     this.botId = botId
   }
 
-  addRef() { this.refs++ }
+  addRef() {
+    this.refs++
+    this.cancelIdleStop()
+  }
+
   removeRef() {
     this.refs--
     if (this.refs <= 0) {
+      this.scheduleIdleStop()
+    }
+  }
+
+  /**
+   * Acquire a live WebRTC peer for this bot. If a peer is already connected
+   * (e.g. a previous viewer detached within PEER_IDLE_HOLD_MS), reuse it and
+   * its stream — no ensureReady / ICE / offer round-trip. Otherwise run the
+   * full prepare-then-offer sequence once (concurrent callers wait on the
+   * same promise).
+   */
+  async acquireConnection(): Promise<boolean> {
+    this.cancelIdleStop()
+    if (this.peer.value && this.status.value === 'connected' && this.stream.value) {
+      return true
+    }
+    if (this.acquirePromise) return this.acquirePromise
+
+    this.acquirePromise = this.doAcquire().finally(() => {
+      this.acquirePromise = null
+    })
+    return this.acquirePromise
+  }
+
+  private async doAcquire(): Promise<boolean> {
+    // Drop any half-dead peer from a previous attempt before reconnecting.
+    if (this.peer.value && this.status.value !== 'connected') {
+      this.cleanupPeer()
+    }
+
+    this.status.value = 'connecting'
+    this.unavailableReason.value = ''
+    this.prepareProgress.value = null
+
+    const ready = await this.ensureReady()
+    if (!ready) {
+      this.status.value = 'unavailable'
+      return false
+    }
+
+    try {
+      await this.createPeer()
+      return true
+    } catch (error) {
+      this.cleanupPeer()
+      this.status.value = 'unavailable'
+      this.unavailableReason.value = resolveApiErrorMessage(error, this.t('chat.display.status.unavailable'))
+      this.prepareProgress.value = null
+      return false
+    }
+  }
+
+  private async createPeer(): Promise<void> {
+    const peer = new RTCPeerConnection()
+    const inputChannel = peer.createDataChannel('display-input', { ordered: true })
+    peer.addTransceiver('video', { direction: 'recvonly' })
+
+    peer.addEventListener('connectionstatechange', () => this.setPeerStatus(peer.connectionState))
+    peer.addEventListener('track', (event) => {
+      this.stream.value = event.streams[0] ?? new MediaStream([event.track])
+    })
+
+    const answer = await this.exchangeOffer(peer, this.sessionId.value || undefined)
+    this.sessionId.value = answer.session_id ?? ''
+
+    this.peer.value = peer
+    this.inputChannel.value = inputChannel
+    this.prepareProgress.value = null
+  }
+
+  private setPeerStatus(next: RTCPeerConnectionState) {
+    switch (next) {
+      case 'connected':
+        this.status.value = 'connected'
+        break
+      case 'failed':
+      case 'closed':
+      case 'disconnected':
+        this.status.value = 'disconnected'
+        break
+      default:
+        this.status.value = 'connecting'
+    }
+  }
+
+  private scheduleIdleStop() {
+    if (this.idleTimer) return
+    this.idleTimer = window.setTimeout(() => {
+      this.idleTimer = null
+      this.cleanupPeer()
+      this.closeSession()
       connections.delete(this.botId)
+    }, PEER_IDLE_HOLD_MS)
+  }
+
+  private cancelIdleStop() {
+    if (!this.idleTimer) return
+    window.clearTimeout(this.idleTimer)
+    this.idleTimer = null
+  }
+
+  private cleanupPeer() {
+    this.cancelIdleStop()
+    this.stream.value = null
+    if (this.inputChannel.value) {
+      this.inputChannel.value.close()
+      this.inputChannel.value = null
+    }
+    const peer = this.peer.value
+    if (peer) {
+      peer.close()
+      this.peer.value = null
     }
   }
 
@@ -121,7 +249,6 @@ export class BotDisplayConnection {
 
   /**
    * Exchange offer/answer for the given peer and set the remote description.
-   * The caller owns the peer and should attach event listeners before calling this.
    */
   async exchangeOffer(peer: RTCPeerConnection, existingSessionId?: string): Promise<DisplayOfferResponse> {
     const offer = await peer.createOffer()
@@ -151,11 +278,23 @@ export class BotDisplayConnection {
     return answer
   }
 
-  async closeSession(sessionID: string) {
+  closeSession() {
+    const sessionID = this.sessionId.value
+    this.sessionId.value = ''
     if (!sessionID) return
     void deleteBotsByBotIdContainerDisplaySessionsBySessionId({
       path: { bot_id: this.botId, session_id: sessionID },
     }).catch(() => {})
+  }
+
+  sendInput(payload: Record<string, unknown>) {
+    const channel = this.inputChannel.value
+    if (channel?.readyState !== 'open') return
+    channel.send(JSON.stringify(payload))
+  }
+
+  inputReady(): boolean {
+    return this.inputChannel.value?.readyState === 'open'
   }
 
   private async loadDisplayInfo(): Promise<DisplayInfoPayload> {
