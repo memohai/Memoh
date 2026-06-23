@@ -111,7 +111,7 @@ func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponse
 	toolResult := sdk.ToolResultPart{
 		ToolCallID: resolved.ToolCallID,
 		ToolName:   resolved.ToolName,
-		Result:     resolved.Result,
+		Result:     r.limitToolResultValue(resolved.Result, resolved.ToolName),
 		IsError:    false,
 	}
 	continueFn := r.continueUserInputFn

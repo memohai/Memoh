@@ -193,6 +193,37 @@ func TestLoadDefaultsContainerdRuntimeType(t *testing.T) {
 	}
 }
 
+func TestLoadAppExampleTemplateKeepsRootKeysOutsideAgentSection(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile(filepath.Join("..", "..", "conf", "app.example.toml"))
+	if err != nil {
+		t.Fatalf("read app.example.toml: %v", err)
+	}
+	rendered := strings.Replace(string(raw), `timezone = "UTC"`, `timezone = "Asia/Tokyo"`, 1)
+	rendered = strings.Replace(rendered, `instance_id = ""`, `instance_id = "instance-example"`, 1)
+	configPath := filepath.Join(t.TempDir(), "app.example.toml")
+	if err := os.WriteFile(configPath, []byte(rendered), 0o600); err != nil {
+		t.Fatalf("write rendered app.example.toml: %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("load app.example.toml: %v", err)
+	}
+	if cfg.Timezone != "Asia/Tokyo" {
+		t.Fatalf("timezone = %q, want Asia/Tokyo", cfg.Timezone)
+	}
+	if cfg.InstanceID != "instance-example" {
+		t.Fatalf("instance_id = %q, want instance-example", cfg.InstanceID)
+	}
+	if cfg.Agent.ToolOutputMaxBytes != DefaultAgentToolOutputBytes ||
+		cfg.Agent.ToolOutputMaxLines != DefaultAgentToolOutputLines ||
+		cfg.Agent.SystemFilesMaxBytes != DefaultAgentSystemFilesBytes {
+		t.Fatalf("agent limits = %#v", cfg.Agent)
+	}
+}
+
 func TestLoadAppLocalTemplate(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "conf", "app.local.toml"))
 	if err != nil {

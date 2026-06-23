@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -148,6 +149,67 @@ func TestRespondUserInputContinuesChatSession(t *testing.T) {
 	}
 	if len(eventCh) != 0 {
 		t.Fatalf("chat continuation must not emit ack events, got %d", len(eventCh))
+	}
+}
+
+func TestRespondUserInputLimitsChatToolResult(t *testing.T) {
+	t.Parallel()
+
+	large := "HEAD\n" + strings.Repeat("answer detail ", 300) + "\nTAIL"
+	resolved := chatResolvedRequest()
+	resolved.Result = map[string]any{
+		"status": userinput.StatusSubmitted,
+		"answers": []any{
+			map[string]any{"question_id": "q1", "text": large},
+		},
+		"instruction": "Continue with the answer.",
+	}
+	fake := &fakeUserInputService{
+		target:   userinput.Request{ID: "input-1", Status: userinput.StatusPending},
+		resolved: resolved,
+	}
+	var continued *sdk.ToolResultPart
+	resolver := &Resolver{
+		agent:     agentpkg.New(agentpkg.Deps{Limits: agentpkg.Limits{ToolOutputMaxBytes: 512, ToolOutputMaxLines: 80}}),
+		userInput: fake,
+		continueUserInputFn: func(_ context.Context, _ userinput.Request, _ UserInputResponseInput, result sdk.ToolResultPart, _ chan<- WSStreamEvent) error {
+			continued = &result
+			return nil
+		},
+	}
+
+	err := resolver.RespondUserInput(context.Background(), UserInputResponseInput{
+		BotID:     "bot-1",
+		SessionID: "session-1",
+		Answers:   []userinput.QuestionAnswer{{QuestionID: "q1", Text: large}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("respond user input: %v", err)
+	}
+	if continued == nil {
+		t.Fatal("chat request must continue the session")
+	}
+	result, ok := continued.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("continued result = %#v, want map", continued.Result)
+	}
+	answers, ok := result["answers"].([]any)
+	if !ok || len(answers) != 1 {
+		t.Fatalf("continued answers = %#v, want one answer", result["answers"])
+	}
+	answer, ok := answers[0].(map[string]any)
+	if !ok {
+		t.Fatalf("continued answer = %#v, want map", answers[0])
+	}
+	text, ok := answer["text"].(string)
+	if !ok {
+		t.Fatalf("continued answer text = %#v, want string", answer["text"])
+	}
+	if len(text) >= len(large) {
+		t.Fatalf("answer text was not pruned: got %d bytes, original %d", len(text), len(large))
+	}
+	if !strings.Contains(text, "[memoh pruned]") {
+		t.Fatalf("answer text missing prune marker:\n%s", text)
 	}
 }
 

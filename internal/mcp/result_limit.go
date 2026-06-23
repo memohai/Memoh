@@ -13,7 +13,7 @@ func LimitToolResult(result map[string]any, label string, limit ToolOutputLimit)
 	if result == nil {
 		result = BuildToolSuccessResult(map[string]any{"ok": true})
 	}
-	if !contextlimit.EncodedExceeds(result, limit) {
+	if !contextlimit.EncodedExceeds(result, limit) && !toolResultTextExceeds(result, limit) {
 		return result
 	}
 	if isToolErrorResult(result) {
@@ -25,6 +25,14 @@ func LimitToolResult(result map[string]any, label string, limit ToolOutputLimit)
 		}
 	}
 	return limitToolTextResult(false, toolResultText(result), label, limit)
+}
+
+func toolResultTextExceeds(result map[string]any, limit ToolOutputLimit) bool {
+	normalized := contextlimit.NormalizedLimit(limit)
+	if text := toolResultText(result); text != "" && textprune.Exceeds(text, normalized.MaxBytes, normalized.MaxLines) {
+		return true
+	}
+	return stringLeafExceeds(result["structuredContent"], normalized)
 }
 
 func isToolErrorResult(result map[string]any) bool {
@@ -140,4 +148,42 @@ func toolResultText(result map[string]any) string {
 		return contextlimit.MarshalString(structured)
 	}
 	return contextlimit.MarshalString(result)
+}
+
+func stringLeafExceeds(value any, limit ToolOutputLimit) bool {
+	switch v := value.(type) {
+	case string:
+		return textprune.Exceeds(v, limit.MaxBytes, limit.MaxLines)
+	case []string:
+		for _, item := range v {
+			if stringLeafExceeds(item, limit) {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range v {
+			if stringLeafExceeds(item, limit) {
+				return true
+			}
+		}
+	case []map[string]any:
+		for _, item := range v {
+			if stringLeafExceeds(item, limit) {
+				return true
+			}
+		}
+	case map[string]string:
+		for _, item := range v {
+			if stringLeafExceeds(item, limit) {
+				return true
+			}
+		}
+	case map[string]any:
+		for _, item := range v {
+			if stringLeafExceeds(item, limit) {
+				return true
+			}
+		}
+	}
+	return false
 }

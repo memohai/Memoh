@@ -66,6 +66,40 @@ func TestToolApprovalHandlerRejectsAskUserBeforeCreateInBackgroundDelivery(t *te
 	}
 }
 
+func TestToolApprovalHandlerLimitsForcedApprovalRejectionReason(t *testing.T) {
+	t.Parallel()
+
+	large := "HEAD\n" + strings.Repeat("rejected detail ", 300) + "\nTAIL"
+	resolver := &Resolver{
+		agent: agentpkg.New(agentpkg.Deps{
+			Limits: agentpkg.Limits{ToolOutputMaxBytes: 512, ToolOutputMaxLines: 80},
+		}),
+	}
+	handler := resolver.buildToolApprovalHandler(baseRunConfigParams{
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		SessionType: sessionmode.Chat,
+	})
+
+	result, err := handler(agentpkg.ContextWithHookForcedApproval(context.Background(), large), sdk.ToolCall{
+		ToolCallID: "call-1",
+		ToolName:   "write",
+		Input:      map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if result.Decision != sdk.ToolApprovalDecisionRejected {
+		t.Fatalf("decision = %q, want rejected", result.Decision)
+	}
+	if len(result.Reason) >= len(large) {
+		t.Fatalf("approval reason was not pruned: got %d bytes, original %d", len(result.Reason), len(large))
+	}
+	if !strings.Contains(result.Reason, "[memoh pruned]") {
+		t.Fatalf("approval reason missing prune marker:\n%s", result.Reason)
+	}
+}
+
 func TestAgentSessionModesMatchPersistedSessionTypes(t *testing.T) {
 	t.Parallel()
 

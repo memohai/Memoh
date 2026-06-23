@@ -110,6 +110,12 @@ func (a *Agent) wrapApprovalHandlerWithHooks(cfg RunConfig, sdkTools []sdk.Tool,
 		limitErr := func(err error) error {
 			return contextlimit.LimitError(err, limitLabel, a.Limits().ToolOutputLimit())
 		}
+		limitResult := func(result sdk.ToolApprovalResult) sdk.ToolApprovalResult {
+			if result.Decision == sdk.ToolApprovalDecisionRejected {
+				result.Reason = limitText(result.Reason)
+			}
+			return result
+		}
 		req := a.baseHookRequest(ctx, cfg, hooks.EventPreToolUse)
 		req.Tool = &hooks.ToolPayload{
 			Name:   call.ToolName,
@@ -139,12 +145,14 @@ func (a *Agent) wrapApprovalHandlerWithHooks(cfg RunConfig, sdkTools []sdk.Tool,
 					Reason:   limitText(firstHookText(res.Reason, "hook requested approval but no approval service is configured")),
 				}, nil
 			}
-			return next(ContextWithHookForcedApproval(ctx, limitText(res.Reason)), call)
+			result, err := next(ContextWithHookForcedApproval(ctx, limitText(res.Reason)), call)
+			return limitResult(result), err
 		}
 		if next == nil {
 			return sdk.ToolApprovalResult{Decision: sdk.ToolApprovalDecisionApproved}, nil
 		}
-		return next(ctx, call)
+		result, err := next(ctx, call)
+		return limitResult(result), err
 	}
 }
 

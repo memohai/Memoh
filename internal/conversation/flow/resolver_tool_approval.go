@@ -78,12 +78,28 @@ func (r *Resolver) RespondToolApproval(ctx context.Context, input ToolApprovalRe
 	return r.storeToolResultAndContinue(ctx, target, input, toolResult, eventCh)
 }
 
-func (r *Resolver) limitToolResultText(text, toolName string) string {
+func (r *Resolver) toolOutputLimit() contextlimit.ToolOutputLimit {
 	limit := agentpkg.DefaultLimits().ToolOutputLimit()
 	if r != nil && r.agent != nil {
 		limit = r.agent.Limits().ToolOutputLimit()
 	}
+	return limit
+}
+
+func (r *Resolver) limitToolResultText(text, toolName string) string {
+	limit := r.toolOutputLimit()
 	return contextlimit.LimitString(text, "tool result ("+toolName+")", limit)
+}
+
+func (r *Resolver) limitToolResultValue(value any, toolName string) any {
+	return contextlimit.LimitToolOutput(value, "tool result ("+toolName+")", r.toolOutputLimit())
+}
+
+func (r *Resolver) limitToolApprovalResult(result sdk.ToolApprovalResult, toolName string) sdk.ToolApprovalResult {
+	if result.Decision == sdk.ToolApprovalDecisionRejected {
+		result.Reason = r.limitToolResultText(result.Reason, toolName)
+	}
+	return result
 }
 
 func (r *Resolver) isACPToolApprovalSession(ctx context.Context, sessionID string) (bool, error) {

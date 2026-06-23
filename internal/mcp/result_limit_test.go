@@ -36,6 +36,46 @@ func TestLimitToolResultPreservesErrorSignal(t *testing.T) {
 	}
 }
 
+func TestLimitToolResultCapsLineOnlyMCPText(t *testing.T) {
+	t.Parallel()
+
+	text := "HEAD\n" + strings.Repeat("x\n", 80) + "TAIL"
+
+	for _, tc := range []struct {
+		name   string
+		result map[string]any
+		error  bool
+	}{
+		{
+			name:   "success",
+			result: BuildToolSuccessResult(text),
+		},
+		{
+			name:   "error",
+			result: BuildToolErrorResult(text),
+			error:  true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := LimitToolResult(tc.result, "line_tool", ToolOutputLimit{MaxBytes: 8192, MaxLines: 20})
+			limited := toolResultText(result)
+			if countLines(limited) > 20 {
+				t.Fatalf("MCP text lines = %d, want <= 20\n%s", countLines(limited), limited)
+			}
+			if !strings.Contains(limited, "[memoh pruned]") {
+				t.Fatalf("line-only MCP result missing prune marker: %#v", result)
+			}
+			if tc.error {
+				if isError, _ := result["isError"].(bool); !isError {
+					t.Fatalf("limited MCP error result lost isError: %#v", result)
+				}
+			}
+		})
+	}
+}
+
 func TestLimitToolResultNormalizesTinyPositiveByteLimit(t *testing.T) {
 	t.Parallel()
 
@@ -44,6 +84,13 @@ func TestLimitToolResultNormalizesTinyPositiveByteLimit(t *testing.T) {
 	}), "tiny_mcp_tool", ToolOutputLimit{MaxBytes: 1, MaxLines: 80})
 
 	assertJSONBytesAtMost(t, result, 256)
+}
+
+func countLines(text string) int {
+	if text == "" {
+		return 0
+	}
+	return strings.Count(text, "\n") + 1
 }
 
 func assertJSONBytesAtMost(t *testing.T, value any, max int) {

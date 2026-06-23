@@ -835,16 +835,16 @@ func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.
 				return sdk.ToolApprovalResult{Decision: sdk.ToolApprovalDecisionApproved}, nil
 			}
 			if r.userInput == nil {
-				return sdk.ToolApprovalResult{
+				return r.limitToolApprovalResult(sdk.ToolApprovalResult{
 					Decision: sdk.ToolApprovalDecisionRejected,
 					Reason:   "user input service is not configured",
-				}, nil
+				}, call.ToolName), nil
 			}
 			if !isInteractiveApprovalSession(p.SessionType) {
-				return sdk.ToolApprovalResult{
+				return r.limitToolApprovalResult(sdk.ToolApprovalResult{
 					Decision: sdk.ToolApprovalDecisionRejected,
 					Reason:   "user input requested in a non-interactive session",
-				}, nil
+				}, call.ToolName), nil
 			}
 			// No ExpiresAt here: chat-flow requests have no in-process
 			// waiter — the run pauses and resumes whenever the user answers,
@@ -866,12 +866,12 @@ func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.
 				return sdk.ToolApprovalResult{}, err
 			}
 			if req.Status != userinput.StatusPending {
-				return sdk.ToolApprovalResult{
+				return r.limitToolApprovalResult(sdk.ToolApprovalResult{
 					Decision:   sdk.ToolApprovalDecisionRejected,
 					ApprovalID: req.ID,
 					Reason:     "ask_user request is already " + req.Status,
 					Metadata:   userinput.DeferredMetadata(req),
-				}, nil
+				}, call.ToolName), nil
 			}
 			return sdk.ToolApprovalResult{
 				Decision:   sdk.ToolApprovalDecisionDeferred,
@@ -895,10 +895,10 @@ func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.
 		forcedApprovalReason, forcedApproval := agentpkg.HookForcedApprovalReason(ctx)
 		if r.toolApproval == nil {
 			if forcedApproval {
-				return sdk.ToolApprovalResult{
+				return r.limitToolApprovalResult(sdk.ToolApprovalResult{
 					Decision: sdk.ToolApprovalDecisionRejected,
 					Reason:   firstNonEmpty(forcedApprovalReason, "hook requested approval but tool approval is not configured"),
-				}, nil
+				}, call.ToolName), nil
 			}
 			return sdk.ToolApprovalResult{Decision: sdk.ToolApprovalDecisionApproved}, nil
 		}
@@ -921,12 +921,12 @@ func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.
 			if err != nil {
 				return sdk.ToolApprovalResult{}, err
 			}
-			return sdk.ToolApprovalResult{
+			return r.limitToolApprovalResult(sdk.ToolApprovalResult{
 				Decision:   sdk.ToolApprovalDecisionRejected,
 				ApprovalID: rejected.ID,
 				Reason:     reason,
 				Metadata:   approvalResultMetadata(rejected),
-			}, nil
+			}, call.ToolName), nil
 		}
 		if forcedApproval {
 			req, err := r.toolApproval.CreatePending(ctx, input)
