@@ -210,7 +210,6 @@ import { Button, Spinner } from '@memohai/ui'
 import { Activity, Globe, Maximize, Monitor, Package, Wrench, X } from 'lucide-vue-next'
 import { useMagicKeys, useMouseInElement, useToggle } from '@vueuse/core'
 import { useBotDisplayConnection } from '@/composables/useBotDisplayConnection'
-import { resolveApiErrorMessage } from '@/utils/api-error'
 import { captureDisplaySnapshot } from '@/utils/display-snapshot'
 
 const screenEl = useTemplateRef('rootRef')
@@ -314,16 +313,15 @@ const BITRATE_CHART_PADDING = 4
 const BITRATE_CHART_GRID = [14, 30, 46]
 const FALLBACK_DISPLAY_WIDTH = 1280
 const FALLBACK_DISPLAY_HEIGHT = 960
-const CONNECT_TIMEOUT_MS = 15000
 
 const { t } = useI18n()
 const rootRef = ref<HTMLElement | null>(null)
 const videoRef = ref<HTMLVideoElement | null>(null)
-const status = ref<DisplayStatus>('idle')
+const status = connection.status
 const videoReady = ref(false)
 const unavailableReason = connection.unavailableReason
 const prepareProgress = connection.prepareProgress
-const displaySessionId = ref('')
+const displaySessionId = connection.sessionId
 const statsVisible = ref(false)
 const statsUpdatedAt = ref<number | null>(null)
 const displayStats = ref<DisplayStats>(emptyDisplayStats())
@@ -333,16 +331,12 @@ const statsMenu = reactive({
   x: 0,
   y: 0,
 })
-let peer: RTCPeerConnection | null = null
-let inputChannel: RTCDataChannel | null = null
 let pointerMask = 0
 let lastPointerPoint: { x: number; y: number } | null = null
 let snapshotTimer: ReturnType<typeof window.setTimeout> | null = null
 let snapshotFrameRequest: number | null = null
 let statsTimer: ReturnType<typeof window.setInterval> | null = null
 let lastStatsSample: StatsSample | null = null
-let connectTimeoutTimer: ReturnType<typeof window.setTimeout> | null = null
-let connectAttempt = 0
 
 const statusLabel = computed(() => {
   if (status.value === 'unavailable') {
@@ -448,89 +442,21 @@ function emptyDisplayStats(): DisplayStats {
   }
 }
 
-function cleanupLocal() {
-  clearConnectTimeout()
+function cleanupLocalUI() {
   stopSnapshotCapture()
   stopStatsPolling()
   closeStatsMenu()
   videoReady.value = false
   pointerMask = 0
   lastPointerPoint = null
-  if (inputChannel) {
-    inputChannel.close()
-    inputChannel = null
-  }
-  if (peer) {
-    peer.close()
-    peer = null
-  }
-  if (videoRef.value?.srcObject) {
-    const stream = videoRef.value.srcObject as MediaStream
-    for (const track of stream.getTracks()) {
-      track.stop()
-    }
+  if (videoRef.value) {
     videoRef.value.srcObject = null
   }
 }
 
-function clearConnectTimeout() {
-  if (!connectTimeoutTimer) return
-  window.clearTimeout(connectTimeoutTimer)
-  connectTimeoutTimer = null
-}
-
-function startConnectTimeout(attempt: number) {
-  clearConnectTimeout()
-  connectTimeoutTimer = window.setTimeout(() => {
-    if (attempt !== connectAttempt || status.value !== 'connecting') return
-    cleanupLocal()
-    status.value = 'unavailable'
-    unavailableReason.value = t('chat.display.status.timeout')
-    prepareProgress.value = null
-  }, CONNECT_TIMEOUT_MS)
-}
-
-function closeRemoteSession() {
-  const sessionID = displaySessionId.value
-  displaySessionId.value = ''
-  if (!sessionID) return
-  void connection.closeSession(sessionID)
-}
-
-function cleanup() {
-  closeRemoteSession()
-  cleanupLocal()
-}
-
 function closeDisplayWindow() {
-  cleanup()
-  status.value = 'disconnected'
+  cleanupLocalUI()
   emit('close')
-}
-
-function setPeerStatus(next: RTCPeerConnectionState) {
-  switch (next) {
-    case 'connected':
-      clearConnectTimeout()
-      status.value = 'connected'
-      if (props.active) {
-        startSnapshotCapture()
-        if (statsVisible.value) {
-          startStatsPolling()
-        }
-      }
-      break
-    case 'failed':
-    case 'closed':
-    case 'disconnected':
-      clearConnectTimeout()
-      status.value = 'disconnected'
-      stopSnapshotCapture()
-      stopStatsPolling()
-      break
-    default:
-      status.value = 'connecting'
-  }
 }
 
 function startSnapshotCapture() {
@@ -645,6 +571,7 @@ function resetStatsState() {
 }
 
 async function updateDisplayStats() {
+  const peer = connection.peer.value
   if (!peer) {
     resetStatsState()
     return
@@ -703,12 +630,11 @@ async function updateDisplayStats() {
 }
 
 function sendInput(payload: Record<string, unknown>) {
-  if (inputChannel?.readyState !== 'open') return
-  inputChannel.send(JSON.stringify(payload))
+  connection.sendInput(payload)
 }
 
 function inputReady() {
-  return inputChannel?.readyState === 'open'
+  return connection.inputReady()
 }
 
 function buttonBit(button: number): number {
@@ -943,43 +869,38 @@ function shortID(value: string) {
   return value.length > 12 ? value.slice(0, 8) : value
 }
 
-async function connect() {
-  cleanupLocal()
-  const attempt = ++connectAttempt
-  status.value = 'connecting'
-  unavailableReason.value = ''
-  prepareProgress.value = null
-
-  const ready = await connection.ensureReady()
-  if (!ready) {
-    status.value = 'unavailable'
-    return
-  }
-
-  startConnectTimeout(attempt)
-  const next = new RTCPeerConnection()
-  peer = next
-  inputChannel = next.createDataChannel('display-input', { ordered: true })
-  next.addTransceiver('video', { direction: 'recvonly' })
-  next.addEventListener('connectionstatechange', () => setPeerStatus(next.connectionState))
-  next.addEventListener('track', (event) => {
-    const video = videoRef.value
-    if (!video) return
-    video.srcObject = event.streams[0] ?? new MediaStream([event.track])
-    void video.play()
-  })
-
-  try {
-    const answer = await connection.exchangeOffer(next, displaySessionId.value || undefined)
-    displaySessionId.value = answer.session_id ?? ''
-    prepareProgress.value = null
-  } catch (error) {
-    cleanupLocal()
-    status.value = 'unavailable'
-    unavailableReason.value = resolveApiErrorMessage(error, t('chat.display.status.unavailable'))
-    prepareProgress.value = null
-  }
+function bindStream() {
+  const video = videoRef.value
+  const stream = connection.stream.value
+  if (!video || !stream) return
+  video.srcObject = stream
+  void video.play()
 }
+
+async function connect() {
+  const ok = await connection.acquireConnection()
+  if (ok) bindStream()
+}
+
+// Snapshot/stats follow the shared peer state + this pane's visibility, so a
+// background pane never captures and a connected pane resumes on focus.
+watch([() => status.value, () => props.active], ([st, active]) => {
+  if (st === 'connected' && active) {
+    bindStream()
+    startSnapshotCapture()
+    if (statsVisible.value) startStatsPolling()
+  } else {
+    stopSnapshotCapture()
+    stopStatsPolling()
+  }
+})
+
+// The track event can land before connectionstatechange flips to 'connected'
+// (track is negotiated at setRemoteDescription, ICE may still be gathering),
+// so bind as soon as the stream arrives rather than gating on status.
+watch(() => connection.stream.value, () => {
+  bindStream()
+})
 
 function handleVisibilityChange() {
   if (document.visibilityState === 'hidden') {
@@ -987,17 +908,9 @@ function handleVisibilityChange() {
     stopStatsPolling()
     return
   }
-  const actualState = peer?.connectionState
-  if (actualState === 'failed' || actualState === 'closed' || actualState === 'disconnected') {
-    setPeerStatus(actualState)
-    if (props.active) void connect()
-    return
-  }
   if (status.value === 'connected' && props.active) {
     startSnapshotCapture()
-    if (statsVisible.value) {
-      startStatsPolling()
-    }
+    if (statsVisible.value) startStatsPolling()
   }
 }
 
@@ -1014,15 +927,9 @@ watch(() => props.active, (active) => {
     stopStatsPolling()
     return
   }
-  restartSnapshotCapture()
-  if (status.value === 'connecting' || status.value === 'connected') return
-  void connect()
-})
-
-watch(() => props.botId, () => {
-  if (!props.active) {
-    cleanup()
-    status.value = 'idle'
+  if (status.value === 'connected') {
+    bindStream()
+    restartSnapshotCapture()
     return
   }
   void connect()
@@ -1034,6 +941,6 @@ onBeforeUnmount(() => {
     clearTimeout(fullScreenIconTimer)
     fullScreenIconTimer = null
   }
-  cleanup()
+  cleanupLocalUI()
 })
 </script>
