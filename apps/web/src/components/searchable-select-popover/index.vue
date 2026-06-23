@@ -24,12 +24,12 @@
     </PopoverTrigger>
     <PopoverContent
       menu
-      align="start"
-      class="p-0"
-      :style="{ width: `calc(var(--reka-popover-trigger-width) * ${widthRatio})` }"
+      :align="popoverAlign"
+      :class="popoverClass || 'p-0'"
+      :style="popoverClass ? undefined : { width: `calc(var(--reka-popover-trigger-width) * ${widthRatio})` }"
     >
-      <div class="flex flex-col overflow-hidden rounded-[var(--radius-menu-shell)] border border-[color:var(--border-menu)] bg-popover text-popover-foreground shadow-[var(--shadow-dropdown)]">
-        <div class="flex h-10 shrink-0 items-center gap-2 border-b border-border/40 px-3.5">
+      <div :class="menuChromeClass">
+        <div class="flex h-10 shrink-0 items-center gap-2 border-b border-border/40 px-4">
           <input
             v-model="searchTerm"
             role="combobox"
@@ -46,7 +46,7 @@
         <div
           :id="listboxId"
           ref="scrollEl"
-          class="max-h-64 scroll-my-1 overflow-y-auto px-1"
+          :class="virtualListboxClass"
           role="listbox"
         >
           <div
@@ -65,7 +65,6 @@
               :key="vRow.key"
               :ref="measureRow"
               :data-index="vRow.virtual.index"
-              class="py-0.5"
               :style="{ position: 'absolute', top: '0', left: '0', width: '100%', transform: `translateY(${vRow.virtual.start}px)` }"
             >
               <div
@@ -123,11 +122,13 @@
 import { Check, ChevronsUpDown } from 'lucide-vue-next'
 import {
   menuItemClass,
+  menuChromeClass,
   menuLabelClass,
   Popover,
   PopoverTrigger,
   PopoverContent,
   selectTriggerClass,
+  virtualListboxClass,
 } from '@memohai/ui'
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
@@ -174,6 +175,8 @@ const props = withDefaults(defineProps<{
   emptyText?: string
   showGroupHeaders?: boolean
   widthRatio?: number
+  popoverClass?: string
+  popoverAlign?: 'start' | 'center' | 'end'
 }>(), {
   placeholder: '',
   ariaLabel: '',
@@ -182,6 +185,7 @@ const props = withDefaults(defineProps<{
   emptyText: 'No results.',
   showGroupHeaders: true,
   widthRatio: 1,
+  popoverAlign: 'start',
 })
 
 const selected = defineModel<string>({ default: '' })
@@ -258,6 +262,7 @@ const virtualizer = useVirtualizer<HTMLElement, HTMLElement>(
     // real so the scrollbar tracks. measureRow measures the true height at
     // runtime, so an off estimate only causes minor jitter, never misalignment.
     estimateSize: () => 32,
+    gap: 2,
     overscan: 8,
     getItemKey: (index: number) => rows.value[index]?.key ?? index,
   })),

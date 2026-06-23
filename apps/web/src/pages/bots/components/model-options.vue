@@ -1,5 +1,5 @@
 <template>
-  <div class="flex h-10 shrink-0 items-center gap-2 border-b border-border/40 px-3.5">
+  <div class="flex h-10 shrink-0 items-center gap-2 border-b border-border/40 px-4">
     <input
       v-model="searchTerm"
       role="combobox"
@@ -16,12 +16,12 @@
   <div
     :id="listboxId"
     ref="scrollEl"
-    class="max-h-64 overflow-y-auto px-1"
+    :class="virtualListboxClass"
     role="listbox"
   >
     <div
       v-if="rows.length === 0"
-      class="py-6 text-center text-xs text-muted-foreground"
+      class="py-6 text-center text-control text-muted-foreground"
     >
       {{ $t('bots.settings.noModel') }}
     </div>
@@ -35,12 +35,11 @@
         :key="vRow.key"
         :ref="measureRow"
         :data-index="vRow.virtual.index"
-        class="py-0.5"
         :style="{ position: 'absolute', top: '0', left: '0', width: '100%', transform: `translateY(${vRow.virtual.start}px)` }"
       >
         <div
           v-if="vRow.row.type === 'header'"
-          class="px-2 py-1.5 text-xs font-medium text-muted-foreground"
+          :class="menuLabelClass"
         >
           {{ vRow.row.label }}
         </div>
@@ -76,7 +75,7 @@
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { Check } from 'lucide-vue-next'
-import { menuItemClass } from '@memohai/ui'
+import { menuItemClass, menuLabelClass, virtualListboxClass } from '@memohai/ui'
 import type { ModelsGetResponse, ModelsModelType, ProvidersGetResponse } from '@memohai/sdk'
 import { useListboxKeyboard } from '@/composables/useListboxKeyboard'
 
@@ -246,11 +245,8 @@ const virtualizer = useVirtualizer<HTMLElement, HTMLElement>(
     // scrollbar drifts (estimate vs. measured mismatch). These are only seeds:
     // measureRow measures the true height at runtime, so being slightly off
     // causes minor jitter at worst, never clipping/misalignment.
-    estimateSize: (index) => {
-      const row = rows.value[index]
-      if (!row) return 36
-      return row.type === 'header' ? 32 : 36
-    },
+    estimateSize: () => 32,
+    gap: 2,
     overscan: 8,
     getItemKey: (index: number) => rows.value[index]?.key ?? index,
   })),

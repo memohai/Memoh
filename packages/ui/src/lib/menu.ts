@@ -34,6 +34,20 @@ export const menuSlideClass
 // flatter menus put it straight on the content box.
 export const menuViewportClass = 'flex flex-col gap-0.5 p-1.5'
 
+// Chrome-only subset of menuContentClass, for the inner panel div of a menu host
+// (Popover with `menu`). The host carries z-50 / overflow / animation on its own
+// box; this carries only the hairline + shadow + radius + surface tokens that the
+// inner div also needs, so the chrome quartet isn't hand-copied at every call site.
+export const menuChromeClass
+  = 'flex flex-col overflow-hidden rounded-menu-shell border border-[color:var(--border-menu)] bg-popover text-popover-foreground shadow-[var(--shadow-dropdown)]'
+
+// Virtualized listbox viewport: the scroll container for a searchable list whose
+// rows are absolutely positioned (so it can't take menuViewportClass's
+// `flex flex-col gap-0.5`). Inter-row spacing comes from the virtualizer's `gap`
+// option, not a wrapper. `scroll-my-1` keeps keyboard-scrolled rows off the edge.
+export const virtualListboxClass = 'max-h-64 scroll-my-1 overflow-y-auto p-1.5'
+
+
 // One menu row: layout + roving-focus highlight. Geometry is pinned to the
 // shared row contract: px-2.5 / py-1.5 / text-control (14px) / rounded-menu
 // (8px) — so every menu shares the exact same row height, text size and inset.
