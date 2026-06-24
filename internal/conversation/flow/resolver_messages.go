@@ -10,7 +10,7 @@ import (
 )
 
 // sdkMessagesToModelMessages converts SDK messages to the persistence/API format
-// at the resolver boundary. This is the only place where this conversion should happen.
+// for resolver call sites using the shared conversion helper.
 func sdkMessagesToModelMessages(msgs []sdk.Message) []conversation.ModelMessage {
 	return messageconv.SDKMessagesToModelMessages(msgs)
 }
