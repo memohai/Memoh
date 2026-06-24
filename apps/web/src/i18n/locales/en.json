@@ -758,6 +758,7 @@
       "status": {
         "idle": "Desktop is idle",
         "connecting": "Connecting desktop...",
+        "buffering": "Starting video stream...",
         "connected": "Desktop connected",
         "disconnected": "Desktop disconnected",
         "unavailable": "Desktop unavailable",
@@ -788,6 +789,7 @@
         "default": "Preparing desktop",
         "failed": "Failed to prepare desktop",
         "stageCheck": "Check",
+        "stageSetup": "Setup",
         "stageInstall": "Install",
         "stageBrowser": "Browser",
         "stageDesktop": "Desktop"
