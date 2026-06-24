@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	acp "github.com/coder/acp-go-sdk"
 
@@ -33,6 +32,7 @@ type terminalManager struct {
 	baseEnv     []string
 	virtualRoot bool
 	events      *toolEventEmitter
+	limit       ToolOutputLimit
 
 	mu        sync.Mutex
 	nextID    int
@@ -49,10 +49,10 @@ type terminalApprovalResult struct {
 }
 
 type terminal struct {
-	stream *bridge.ExecStream
-	limit  int
-	id     string
-	input  map[string]any
+	stream      *bridge.ExecStream
+	outputLimit ToolOutputLimit
+	id          string
+	input       map[string]any
 
 	mu        sync.Mutex
 	output    string
@@ -88,6 +88,15 @@ func newTerminalManager(ctx context.Context, client *bridge.Client, root, defaul
 		events:      events,
 		terminals:   map[string]*terminal{},
 	}
+}
+
+func (m *terminalManager) setToolOutputLimit(limit ToolOutputLimit) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.limit = limit
+	m.mu.Unlock()
 }
 
 func (m *terminalManager) CreateTerminal(_ context.Context, p acp.CreateTerminalRequest, approve terminalApprovalFunc) (acp.CreateTerminalResponse, error) {
@@ -134,11 +143,20 @@ func (m *terminalManager) CreateTerminal(_ context.Context, p acp.CreateTerminal
 	}
 	m.emitToolCallStart(toolCallID, "exec", input)
 
-	limit := defaultTerminalOutputLimit
+	outputLimit := ToolOutputLimit{MaxBytes: defaultTerminalOutputLimit}
 	if p.OutputByteLimit != nil && *p.OutputByteLimit > 0 {
-		limit = *p.OutputByteLimit
-		if limit > maxTerminalOutputLimit {
-			limit = maxTerminalOutputLimit
+		outputLimit.MaxBytes = *p.OutputByteLimit
+		if outputLimit.MaxBytes > maxTerminalOutputLimit {
+			outputLimit.MaxBytes = maxTerminalOutputLimit
+		}
+	}
+	if promptLimit := m.toolOutputLimit(); hasToolOutputLimit(promptLimit) {
+		normalized := normalizedToolOutputLimit(promptLimit)
+		if normalized.MaxBytes > 0 && normalized.MaxBytes < outputLimit.MaxBytes {
+			outputLimit.MaxBytes = normalized.MaxBytes
+		}
+		if normalized.MaxLines > 0 {
+			outputLimit.MaxLines = normalized.MaxLines
 		}
 	}
 
@@ -156,7 +174,7 @@ func (m *terminalManager) CreateTerminal(_ context.Context, p acp.CreateTerminal
 		return acp.CreateTerminalResponse{}, err
 	}
 
-	term := &terminal{stream: stream, limit: limit, id: toolCallID, input: input, done: make(chan struct{}), endReported: make(chan struct{}), onDone: m.emitTerminalEnd}
+	term := &terminal{stream: stream, outputLimit: outputLimit, id: toolCallID, input: input, done: make(chan struct{}), endReported: make(chan struct{}), onDone: m.emitTerminalEnd}
 	m.mu.Lock()
 	m.terminals[id] = term
 	m.mu.Unlock()
@@ -188,6 +206,11 @@ func (m *terminalManager) TerminalOutput(_ context.Context, p acp.TerminalOutput
 		return acp.TerminalOutputResponse{}, err
 	}
 	output, truncated, status := term.snapshot()
+	limitedOutput := m.limitTerminalOutput(output)
+	if limitedOutput != output {
+		truncated = true
+	}
+	output = limitedOutput
 	if output == "" {
 		output = "\n"
 	}
@@ -280,6 +303,11 @@ func (m *terminalManager) emitTerminalEnd(term *terminal) {
 		defer close(term.endReported)
 	}
 	output, truncated, status := term.snapshot()
+	limitedOutput := m.limitTerminalOutput(output)
+	if limitedOutput != output {
+		truncated = true
+	}
+	output = limitedOutput
 	result := map[string]any{
 		"stdout":    output,
 		"truncated": truncated,
@@ -293,6 +321,23 @@ func (m *terminalManager) emitTerminalEnd(term *terminal) {
 		}
 	}
 	m.emitToolCallEnd(term.id, "exec", term.input, result, nil)
+}
+
+func (m *terminalManager) toolOutputLimit() ToolOutputLimit {
+	if m == nil {
+		return ToolOutputLimit{}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.limit
+}
+
+func (m *terminalManager) limitTerminalOutput(output string) string {
+	limit := m.toolOutputLimit()
+	if !hasToolOutputLimit(limit) {
+		return output
+	}
+	return limitToolOutputString(output, "tool result (exec)", limit)
 }
 
 func (m *terminalManager) nextTerminalID() string {
@@ -381,9 +426,19 @@ func (t *terminal) appendOutput(s string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.output += s
-	if t.limit > 0 && len(t.output) > t.limit {
+	if hasToolOutputLimit(t.outputLimit) && limitToolOutputStringExact(t.output, "tool result (exec)", t.outputLimit) != t.output {
 		t.truncated = true
-		t.output = safeUTF8Suffix(t.output, t.limit)
+	}
+	if len(t.output) > maxTerminalOutputLimit {
+		limited := limitToolOutputStringExact(t.output, "tool result (exec)", ToolOutputLimit{
+			MaxBytes: maxTerminalOutputLimit,
+			MaxLines: t.outputLimit.MaxLines,
+		})
+		if limited == t.output {
+			return
+		}
+		t.truncated = true
+		t.output = limited
 	}
 }
 
@@ -394,7 +449,16 @@ func (t *terminal) snapshot() (string, bool, *acp.TerminalExitStatus) {
 	if t.exitCode != nil || t.signal != nil {
 		status = &acp.TerminalExitStatus{ExitCode: t.exitCode, Signal: t.signal}
 	}
-	return t.output, t.truncated, status
+	output := t.output
+	truncated := t.truncated
+	if hasToolOutputLimit(t.outputLimit) {
+		limited := limitToolOutputStringExact(output, "tool result (exec)", t.outputLimit)
+		if limited != output {
+			output = limited
+			truncated = true
+		}
+	}
+	return output, truncated, status
 }
 
 func (t *terminal) exit() (*int, *string) {
@@ -432,15 +496,4 @@ func (t *terminal) finish(code *int, signal *string) {
 		t.mu.Unlock()
 		close(t.done)
 	})
-}
-
-func safeUTF8Suffix(s string, maxBytes int) string {
-	if maxBytes <= 0 || len(s) <= maxBytes {
-		return s
-	}
-	start := len(s) - maxBytes
-	for start < len(s) && !utf8.RuneStart(s[start]) {
-		start++
-	}
-	return s[start:]
 }

@@ -383,12 +383,21 @@ func provideScheduleSessionCreator(sessionService *sessionpkg.Service) schedule.
 	return &sessionCreatorAdapter{svc: sessionService}
 }
 
-func provideAgent(log *slog.Logger, provider bridge.Provider, hookService *hookspkg.Service) *agentpkg.Agent {
+func provideAgent(log *slog.Logger, provider bridge.Provider, hookService *hookspkg.Service, cfg config.Config) *agentpkg.Agent {
 	return agentpkg.New(agentpkg.Deps{
 		BridgeProvider: provider,
 		HookService:    hookService,
 		Logger:         log,
+		Limits:         agentLimitsFromConfig(cfg.Agent),
 	})
+}
+
+func agentLimitsFromConfig(cfg config.AgentConfig) agentpkg.Limits {
+	return agentpkg.LimitsFromValues(
+		cfg.ToolOutputMaxBytes,
+		cfg.ToolOutputMaxLines,
+		cfg.SystemFilesMaxBytes,
+	)
 }
 
 func injectToolProviders(a *agentpkg.Agent, msgService *message.DBService, hookService *hookspkg.Service, providers []agenttools.ToolProvider) {
@@ -699,12 +708,14 @@ func provideOAuthService(log *slog.Logger, queries dbstore.Queries, cfg config.C
 	return mcp.NewOAuthService(log, queries, callbackURL)
 }
 
-func provideACPToolSource(log *slog.Logger, toolApproval *toolapproval.Service, userInput *userinput.Service, toolContexts *mcp.ToolSessionContextStore) *agenttools.NativeToolSource {
+func provideACPToolSource(log *slog.Logger, toolApproval *toolapproval.Service, userInput *userinput.Service, toolContexts *mcp.ToolSessionContextStore, cfg config.Config) *agenttools.NativeToolSource {
+	limits := agentLimitsFromConfig(cfg.Agent)
 	return agenttools.NewNativeToolSource(log, nil, agenttools.NativeToolSourceOptions{
-		AllowAll:   true,
-		Approval:   toolApproval,
-		UserInput:  userInput,
-		ToolEvents: toolContexts,
+		AllowAll:        true,
+		Approval:        toolApproval,
+		UserInput:       userInput,
+		ToolEvents:      toolContexts,
+		ToolOutputLimit: limits.ToolOutputLimit(),
 	})
 }
 
@@ -714,10 +725,11 @@ func injectACPToolProviders(source *agenttools.NativeToolSource, toolProviders [
 	}
 }
 
-func provideToolGatewayService(log *slog.Logger, fedGateway *handlers.MCPFederationGateway, oauthService *mcp.OAuthService, mcpConnService *mcp.ConnectionService, containerdHandler *handlers.ContainerdHandler, nativeSource *agenttools.NativeToolSource, toolContexts *mcp.ToolSessionContextStore) *mcp.ToolGatewayService {
+func provideToolGatewayService(log *slog.Logger, fedGateway *handlers.MCPFederationGateway, oauthService *mcp.OAuthService, mcpConnService *mcp.ConnectionService, containerdHandler *handlers.ContainerdHandler, nativeSource *agenttools.NativeToolSource, toolContexts *mcp.ToolSessionContextStore, cfg config.Config) *mcp.ToolGatewayService {
 	fedGateway.SetOAuthService(oauthService)
 	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService, mcpfederation.WithReservedToolName(agenttools.IsBuiltInToolName))
-	svc := mcp.NewToolGatewayService(log, []mcp.ToolSource{nativeSource, fedSource})
+	limits := agentLimitsFromConfig(cfg.Agent)
+	svc := mcp.NewToolGatewayService(log, []mcp.ToolSource{nativeSource, fedSource}, mcp.WithToolOutputLimit(limits.ToolOutputLimit()))
 	containerdHandler.SetToolGatewayService(svc)
 	containerdHandler.SetToolSessionContextStore(toolContexts)
 	return svc

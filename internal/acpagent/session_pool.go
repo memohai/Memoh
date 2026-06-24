@@ -162,6 +162,7 @@ type PromptInput struct {
 	ConversationType    string
 	CanRequestUserInput bool
 	SupportsImageInput  bool
+	ToolOutputLimit     acpclient.ToolOutputLimit
 	ToolHTTPURL         string
 	ContextURI          string
 	ContextMarkdown     string
@@ -557,11 +558,13 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 	// per-prompt context or sink behind.
 	defer h.clearActive()
 
-	toolSink := newPromptToolEventSink(input.Sink)
+	toolSink := newPromptToolEventSink(input.Sink, input.ToolOutputLimit)
 	unregisterToolSink := p.registerToolEventSink(input, toolSink)
 	defer unregisterToolSink()
 
-	result, err := sess.PromptWithToolContext(ctx, input.Prompt, promptResources(input), toolCtx, toolSink)
+	result, err := sess.PromptWithToolContextOptions(ctx, input.Prompt, promptResources(input), toolCtx, acpclient.PromptOptions{
+		ToolOutputLimit: input.ToolOutputLimit,
+	}, toolSink)
 	toolSink.ApplyToResult(&result)
 	if err != nil {
 		// Prompt failures usually indicate the ACP process is in a bad state
@@ -1299,12 +1302,18 @@ type promptToolEventSink struct {
 	next       acpclient.EventSink
 	events     []event.StreamEvent
 	transcript *acpclient.TranscriptRecorder
+	limit      acpclient.ToolOutputLimit
 }
 
-func newPromptToolEventSink(next acpclient.EventSink) *promptToolEventSink {
+func newPromptToolEventSink(next acpclient.EventSink, limits ...acpclient.ToolOutputLimit) *promptToolEventSink {
+	var limit acpclient.ToolOutputLimit
+	if len(limits) > 0 {
+		limit = limits[0]
+	}
 	return &promptToolEventSink{
 		next:       next,
-		transcript: acpclient.NewTranscriptRecorder(),
+		transcript: acpclient.NewTranscriptRecorder(limit),
+		limit:      limit,
 	}
 }
 
@@ -1312,6 +1321,7 @@ func (s *promptToolEventSink) EmitStreamEvent(ev event.StreamEvent) {
 	if s == nil {
 		return
 	}
+	ev = acpclient.LimitStreamEvent(ev, s.limit)
 	s.mu.Lock()
 	s.events = appendBoundedPromptEvents(s.events, ev)
 	if s.transcript != nil {

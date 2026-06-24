@@ -55,15 +55,14 @@ func PruneWithEdges(s, label string, cfg Config) string {
 	if cfg.TailBytes > 0 && cfg.TailLines > 0 {
 		tail = boundedSuffix(s, minInt(cfg.TailBytes, len(s)), cfg.TailLines)
 	}
-	return fitBudget(fmt.Sprintf(
-		"%s %s too long (bytes=%d, lines=%d), showing head/tail\n\n%s\n\n[...snip...]\n\n%s",
+	header := fmt.Sprintf(
+		"%s %s too long (bytes=%d, lines=%d), showing head/tail\n\n",
 		cfg.Marker,
 		label,
 		len(s),
 		CountLines(s),
-		head,
-		tail,
-	), cfg)
+	)
+	return fitHeadTailBudget(header, head, tail, cfg)
 }
 
 func normalizeConfig(cfg Config) Config {
@@ -100,6 +99,96 @@ func fitBudget(s string, cfg Config) string {
 		return cfg.Marker
 	}
 	return trimmed
+}
+
+func fitHeadTailBudget(header, head, tail string, cfg Config) string {
+	if tail == "" {
+		return fitBudget(header+head, cfg)
+	}
+	headTailSeparator := "\n\n[...snip...]\n\n"
+	for {
+		candidate := header + head + headTailSeparator + tail
+		if !Exceeds(candidate, cfg.MaxBytes, cfg.MaxLines) {
+			return candidate
+		}
+		nextHead, nextTail := shrinkHeadTail(head, tail)
+		if nextHead == head && nextTail == tail {
+			break
+		}
+		head, tail = nextHead, nextTail
+	}
+	return fitBudgetPreserveSuffix(header+head+headTailSeparator, tail, cfg)
+}
+
+func shrinkHeadTail(head, tail string) (string, string) {
+	if len(head) == 0 && len(tail) == 0 {
+		return head, tail
+	}
+	if len(head) >= len(tail) && (len(head) > 1 || CountLines(head) > 1) {
+		return shrinkPrefix(head), tail
+	}
+	if len(tail) > 1 || CountLines(tail) > 1 {
+		return head, shrinkSuffix(tail)
+	}
+	if len(head) > 0 {
+		return "", tail
+	}
+	return head, ""
+}
+
+func shrinkPrefix(s string) string {
+	return boundedPrefix(s, reducePositive(len(s)), reduceLines(CountLines(s)))
+}
+
+func shrinkSuffix(s string) string {
+	return boundedSuffix(s, reducePositive(len(s)), reduceLines(CountLines(s)))
+}
+
+func reducePositive(n int) int {
+	if n <= 1 {
+		return 0
+	}
+	next := n * 3 / 4
+	if next >= n {
+		next = n - 1
+	}
+	return next
+}
+
+func reduceLines(n int) int {
+	if n <= 1 {
+		return 1
+	}
+	return reducePositive(n)
+}
+
+func fitBudgetPreserveSuffix(prefix, suffix string, cfg Config) string {
+	if !Exceeds(prefix+suffix, cfg.MaxBytes, cfg.MaxLines) {
+		return prefix + suffix
+	}
+	prefixBudget := cfg.MaxBytes / 2
+	prefixLines := cfg.MaxLines / 2
+	if prefixLines <= 0 {
+		prefixLines = 1
+	}
+	trimmedPrefix := boundedPrefix(prefix, prefixBudget, prefixLines)
+	remainingBytes := cfg.MaxBytes - len(trimmedPrefix)
+	if remainingBytes <= 0 {
+		return fitBudget(prefix, cfg)
+	}
+	remainingLines := cfg.MaxLines - CountLines(trimmedPrefix)
+	if remainingLines <= 0 {
+		remainingLines = 1
+	}
+	trimmedSuffix := boundedSuffix(suffix, remainingBytes, remainingLines)
+	if trimmedSuffix == "" {
+		return fitBudget(prefix, cfg)
+	}
+	candidate := trimmedPrefix + trimmedSuffix
+	if !Exceeds(candidate, cfg.MaxBytes, cfg.MaxLines) {
+		return candidate
+	}
+	return fitBudget(candidate, cfg)
 }
 
 func boundedPrefix(s string, maxBytes, maxLines int) string {

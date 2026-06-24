@@ -9,6 +9,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/contextlimit"
 	"github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
@@ -102,6 +103,19 @@ func (a *Agent) wrapApprovalHandlerWithHooks(cfg RunConfig, sdkTools []sdk.Tool,
 	}
 	runner := hookToolRunner{tools: originalByName}
 	return func(ctx context.Context, call sdk.ToolCall) (sdk.ToolApprovalResult, error) {
+		limitLabel := "tool result (" + call.ToolName + ")"
+		limitText := func(text string) string {
+			return contextlimit.LimitString(text, limitLabel, a.Limits().ToolOutputLimit())
+		}
+		limitErr := func(err error) error {
+			return contextlimit.LimitError(err, limitLabel, a.Limits().ToolOutputLimit())
+		}
+		limitResult := func(result sdk.ToolApprovalResult) sdk.ToolApprovalResult {
+			if result.Decision == sdk.ToolApprovalDecisionRejected {
+				result.Reason = limitText(result.Reason)
+			}
+			return result
+		}
 		req := a.baseHookRequest(ctx, cfg, hooks.EventPreToolUse)
 		req.Tool = &hooks.ToolPayload{
 			Name:   call.ToolName,
@@ -113,30 +127,32 @@ func (a *Agent) wrapApprovalHandlerWithHooks(cfg RunConfig, sdkTools []sdk.Tool,
 			if errors.Is(err, hooks.ErrDenied) || res.Decision == hooks.DecisionDeny {
 				return sdk.ToolApprovalResult{
 					Decision: sdk.ToolApprovalDecisionRejected,
-					Reason:   firstHookText(res.Reason, err.Error()),
+					Reason:   limitText(firstHookText(res.Reason, err.Error())),
 				}, nil
 			}
-			return sdk.ToolApprovalResult{}, fmt.Errorf("pre tool hook failed for %q: %w", call.ToolName, err)
+			return sdk.ToolApprovalResult{}, limitErr(fmt.Errorf("pre tool hook failed for %q: %w", call.ToolName, err))
 		}
 		switch res.Decision {
 		case hooks.DecisionDeny:
 			return sdk.ToolApprovalResult{
 				Decision: sdk.ToolApprovalDecisionRejected,
-				Reason:   firstHookText(res.Reason, "denied by hook"),
+				Reason:   limitText(firstHookText(res.Reason, "denied by hook")),
 			}, nil
 		case hooks.DecisionAskApproval:
 			if next == nil {
 				return sdk.ToolApprovalResult{
 					Decision: sdk.ToolApprovalDecisionRejected,
-					Reason:   firstHookText(res.Reason, "hook requested approval but no approval service is configured"),
+					Reason:   limitText(firstHookText(res.Reason, "hook requested approval but no approval service is configured")),
 				}, nil
 			}
-			return next(ContextWithHookForcedApproval(ctx, res.Reason), call)
+			result, err := next(ContextWithHookForcedApproval(ctx, limitText(res.Reason)), call)
+			return limitResult(result), err
 		}
 		if next == nil {
 			return sdk.ToolApprovalResult{Decision: sdk.ToolApprovalDecisionApproved}, nil
 		}
-		return next(ctx, call)
+		result, err := next(ctx, call)
+		return limitResult(result), err
 	}
 }
 

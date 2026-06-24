@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -258,6 +259,37 @@ func TestNativeToolSourceReadMediaReturnsPublicResultOnly(t *testing.T) {
 	}
 }
 
+func TestNativeToolSourceLimitsToolOutput(t *testing.T) {
+	large := "HEAD\n" + strings.Repeat("0123456789", 200) + "\nTAIL"
+	provider := &nativeSourceTestProvider{
+		tools: []sdk.Tool{{
+			Name:       ToolRead().String(),
+			Parameters: map[string]any{"type": "object"},
+			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
+				return map[string]any{
+					"content": large,
+					"ok":      true,
+				}, nil
+			},
+		}},
+	}
+	source := NewNativeToolSource(nil, []ToolProvider{provider}, NativeToolSourceOptions{
+		AllowTools:      map[string]bool{ToolRead().String(): true},
+		ToolOutputLimit: ToolOutputLimit{MaxBytes: 512, MaxLines: 80},
+	})
+
+	result, err := source.CallTool(context.Background(), mcp.ToolSessionContext{BotID: "bot-1"}, ToolRead().String(), map[string]any{
+		"path": "big.txt",
+	})
+	if err != nil {
+		t.Fatalf("CallTool(read) error = %v", err)
+	}
+	assertNativeToolResultJSONBytesAtMost(t, result, 512)
+	if !strings.Contains(fmt.Sprintf("%#v", result), "[memoh pruned]") {
+		t.Fatalf("result was not pruned:\n%#v", result)
+	}
+}
+
 func TestNativeToolSourceWaitsForApprovalAndPublishesRequest(t *testing.T) {
 	executed := false
 	provider := &nativeSourceTestProvider{
@@ -351,10 +383,11 @@ func TestNativeToolSourceRejectedApprovalDoesNotExecute(t *testing.T) {
 				ID:             "approval-2",
 				ShortID:        8,
 				Status:         toolapproval.StatusRejected,
-				DecisionReason: "not now",
+				DecisionReason: "HEAD\n" + strings.Repeat("rejected detail ", 300) + "\nTAIL",
 			},
 		},
-		ToolEvents: toolEvents,
+		ToolEvents:      toolEvents,
+		ToolOutputLimit: ToolOutputLimit{MaxBytes: 512, MaxLines: 80},
 	})
 
 	result, err := source.CallTool(context.Background(), mcp.ToolSessionContext{
@@ -370,6 +403,10 @@ func TestNativeToolSourceRejectedApprovalDoesNotExecute(t *testing.T) {
 	}
 	if isError, _ := result["isError"].(bool); !isError {
 		t.Fatalf("result = %#v, want MCP error result", result)
+	}
+	assertNativeToolResultJSONBytesAtMost(t, result, 512)
+	if !strings.Contains(fmt.Sprintf("%#v", result), "[memoh pruned]") {
+		t.Fatalf("rejected approval result was not pruned: %#v", result)
 	}
 	if len(toolEvents.events) != 2 {
 		t.Fatalf("tool events = %d, want pending and rejected approval events", len(toolEvents.events))
@@ -521,6 +558,17 @@ func nativeAskUserSession(toolCallID string) mcp.ToolSessionContext {
 	}
 }
 
+func assertNativeToolResultJSONBytesAtMost(t *testing.T, value any, maxBytes int) {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal value: %v", err)
+	}
+	if len(raw) > maxBytes {
+		t.Fatalf("JSON bytes = %d, want <= %d\n%s", len(raw), maxBytes, raw)
+	}
+}
+
 func TestNativeToolSourceAskUserWaitsForInputAndPublishesRequest(t *testing.T) {
 	provider := NewAskUserProvider(nil)
 	userInput := &nativeSourceUserInput{
@@ -609,6 +657,46 @@ func TestNativeToolSourceAskUserWaitsForInputAndPublishesRequest(t *testing.T) {
 	structured, ok := result["structuredContent"].(map[string]any)
 	if !ok || structured["status"] != userinput.StatusSubmitted {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestNativeToolSourceAskUserLimitsSubmittedResult(t *testing.T) {
+	provider := NewAskUserProvider(nil)
+	userInput := &nativeSourceUserInput{
+		response: userinput.Request{
+			ID:         "input-1",
+			ToolCallID: "mcp-http-call-1",
+			ToolName:   ToolAskUser().String(),
+			Status:     userinput.StatusSubmitted,
+			Result: map[string]any{
+				"status": userinput.StatusSubmitted,
+				"answers": []any{
+					map[string]any{
+						"question_id": "q1",
+						"text":        "HEAD\n" + strings.Repeat("answer detail ", 300) + "\nTAIL",
+					},
+				},
+			},
+		},
+	}
+	source := NewNativeToolSource(nil, []ToolProvider{provider}, NativeToolSourceOptions{
+		AllowAll:        true,
+		UserInput:       userInput,
+		ToolEvents:      &nativeSourceToolEvents{delivered: true},
+		ToolOutputLimit: ToolOutputLimit{MaxBytes: 512, MaxLines: 80},
+	})
+
+	result, err := source.CallTool(context.Background(), nativeAskUserSession("mcp-http-call-1"), ToolAskUser().String(), map[string]any{
+		"questions": []any{
+			map[string]any{"text": "Question?", "kind": "text"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(ask_user) error = %v", err)
+	}
+	assertNativeToolResultJSONBytesAtMost(t, result, 512)
+	if !strings.Contains(fmt.Sprintf("%#v", result), "[memoh pruned]") {
+		t.Fatalf("ask_user result was not pruned: %#v", result)
 	}
 }
 

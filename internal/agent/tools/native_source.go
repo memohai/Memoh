@@ -17,11 +17,12 @@ import (
 )
 
 type NativeToolSourceOptions struct {
-	AllowAll   bool
-	AllowTools map[string]bool
-	Approval   NativeToolApprovalService
-	UserInput  NativeToolUserInputService
-	ToolEvents NativeToolEventSink
+	AllowAll        bool
+	AllowTools      map[string]bool
+	Approval        NativeToolApprovalService
+	UserInput       NativeToolUserInputService
+	ToolEvents      NativeToolEventSink
+	ToolOutputLimit ToolOutputLimit
 }
 
 type NativeToolApprovalService interface {
@@ -60,6 +61,7 @@ type NativeToolSource struct {
 	approval   NativeToolApprovalService
 	userInput  NativeToolUserInputService
 	toolEvents NativeToolEventSink
+	limit      ToolOutputLimit
 }
 
 type nativeLoadedTool struct {
@@ -90,6 +92,7 @@ func NewNativeToolSource(log *slog.Logger, providers []ToolProvider, opts Native
 		approval:   opts.Approval,
 		userInput:  opts.UserInput,
 		toolEvents: opts.ToolEvents,
+		limit:      opts.ToolOutputLimit,
 	}
 	source.SetProviders(providers)
 	return source
@@ -165,14 +168,18 @@ func (s *NativeToolSource) CallTool(ctx context.Context, session mcp.ToolSession
 			arguments = map[string]any{}
 		}
 		if toolName == ToolAskUser().String() {
-			return s.callAskUser(ctx, session, arguments)
+			result, err := s.callAskUser(ctx, session, arguments)
+			if err != nil {
+				return nil, err
+			}
+			return s.limitMCPResult(toolName, result), nil
 		}
 		approval, err := s.requireApproval(ctx, session, toolName, arguments)
 		if err != nil {
 			return nil, err
 		}
 		if !approval.approved {
-			return mcp.BuildToolErrorResult(approval.message), nil
+			return s.limitMCPResult(toolName, mcp.BuildToolErrorResult(approval.message)), nil
 		}
 		result, err := tool.Execute(&sdk.ToolExecContext{
 			Context:  ctx,
@@ -181,9 +188,18 @@ func (s *NativeToolSource) CallTool(ctx context.Context, session mcp.ToolSession
 		if err != nil {
 			return nil, err
 		}
-		return mcp.BuildToolSuccessResult(publicNativeToolResult(result)), nil
+		publicResult := publicNativeToolResult(result)
+		return s.limitMCPResult(toolName, mcp.BuildToolSuccessResult(publicResult)), nil
 	}
 	return nil, mcp.ErrToolNotFound
+}
+
+func (s *NativeToolSource) limitMCPResult(toolName string, result map[string]any) map[string]any {
+	limit := ToolOutputLimit{}
+	if s != nil {
+		limit = s.limit
+	}
+	return mcp.LimitToolResult(result, "tool result ("+toolName+")", limit)
 }
 
 func publicNativeToolResult(result any) any {

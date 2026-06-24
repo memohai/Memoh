@@ -2,6 +2,12 @@
 # Copy to config.toml and adjust values for your environment.
 # For local development, use: cp devenv/app.dev.toml config.toml
 
+timezone = "UTC"
+
+# Instance identity used by bridge mTLS strict mode.
+# Leave empty unless [bridge_tls].mode = "strict".
+instance_id = ""
+
 [log]
 level = "info"
 format = "text"
@@ -41,11 +47,10 @@ email = "admin@memoh.local"
 jwt_secret = "CHANGE-ME-TO-A-RANDOM-SECRET"
 jwt_expires_in = "168h"
 
-timezone = "UTC"
-
-# Instance identity used by bridge mTLS strict mode.
-# Leave empty unless [bridge_tls].mode = "strict".
-instance_id = ""
+[agent]
+tool_output_max_bytes = 65536
+tool_output_max_lines = 2000
+system_files_max_bytes = 32768
 
 [database]
 # Supported values: "postgres" or "sqlite".

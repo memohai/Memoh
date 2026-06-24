@@ -32,6 +32,7 @@ type acpContextRenderInput struct {
 	ReplyTarget               string
 	Attachments               []conversation.ChatAttachment
 	Files                     []agentpkg.SystemFile
+	SystemFilesMaxBytes       int
 	PlatformIdentitiesSection string
 }
 
@@ -43,7 +44,9 @@ func (r *Resolver) buildACPContextMarkdown(ctx context.Context, req conversation
 	}
 
 	var files []agentpkg.SystemFile
+	limits := agentpkg.DefaultLimits()
 	if r != nil && r.agent != nil {
+		limits = r.agent.Limits()
 		nowFn := func() time.Time { return now }
 		fs := agentpkg.NewFSClient(r.agent.BridgeProvider(), req.BotID, nowFn)
 		files = fs.LoadSystemFiles(ctx)
@@ -82,6 +85,7 @@ func (r *Resolver) buildACPContextMarkdown(ctx context.Context, req conversation
 		ReplyTarget:               req.ReplyTarget,
 		Attachments:               req.Attachments,
 		Files:                     files,
+		SystemFilesMaxBytes:       limits.SystemFilesMaxBytes,
 		PlatformIdentitiesSection: platformIdentitiesSection,
 	})
 }
@@ -129,7 +133,7 @@ func renderACPContextMarkdown(input acpContextRenderInput) string {
 		sb.WriteString("\n\n")
 	}
 
-	files := acpContextSystemFiles(input.Files)
+	files := acpContextSystemFiles(input.Files, input.SystemFilesMaxBytes)
 	for _, file := range files {
 		writeACPContextSection(&sb, file.Title, file.Content)
 	}
@@ -156,7 +160,10 @@ type acpContextFileSection struct {
 	Content string
 }
 
-func acpContextSystemFiles(files []agentpkg.SystemFile) []acpContextFileSection {
+func acpContextSystemFiles(files []agentpkg.SystemFile, maxBytes int) []acpContextFileSection {
+	if maxBytes <= 0 {
+		maxBytes = agentpkg.DefaultSystemFilesMaxBytes
+	}
 	titles := map[string]string{
 		"IDENTITY.md": "Bot Identity",
 		"SOUL.md":     "Bot Soul",
@@ -164,6 +171,7 @@ func acpContextSystemFiles(files []agentpkg.SystemFile) []acpContextFileSection 
 		"PROFILES.md": "Profiles",
 	}
 	out := make([]acpContextFileSection, 0, len(files))
+	used := 0
 	for _, file := range files {
 		name := strings.TrimSpace(file.Filename)
 		content := strings.TrimSpace(file.Content)
@@ -178,19 +186,64 @@ func acpContextSystemFiles(files []agentpkg.SystemFile) []acpContextFileSection 
 				continue
 			}
 		}
-		out = append(out, acpContextFileSection{
+		remaining := maxBytes - used
+		overhead := acpContextRenderedSectionOverhead(title)
+		if remaining <= overhead {
+			break
+		}
+		contentBudget := acpContextMinInt(14*1024, remaining-overhead)
+		if contentBudget <= 0 {
+			break
+		}
+		section := acpContextFileSection{
 			Title: title,
 			Content: formatACPContextFileExcerpt(name, prune.PruneWithEdges(content, name, prune.Config{
-				MaxBytes:  14 * 1024,
+				MaxBytes:  contentBudget,
 				MaxLines:  320,
-				HeadBytes: 9 * 1024,
-				TailBytes: 4 * 1024,
+				HeadBytes: contentBudget * 3 / 4,
+				TailBytes: contentBudget / 4,
 				HeadLines: 220,
 				TailLines: 80,
 			})),
-		})
+		}
+		sectionBytes := acpContextRenderedSectionBytes(section)
+		if sectionBytes > remaining {
+			contentBudget -= sectionBytes - remaining
+			if contentBudget <= 0 {
+				break
+			}
+			section.Content = prune.PruneWithEdges(section.Content, "ACP context file "+name, prune.Config{
+				MaxBytes:  contentBudget,
+				MaxLines:  320,
+				HeadBytes: contentBudget * 3 / 4,
+				TailBytes: contentBudget / 4,
+				HeadLines: 220,
+				TailLines: 80,
+			})
+			sectionBytes = acpContextRenderedSectionBytes(section)
+		}
+		if sectionBytes > remaining {
+			break
+		}
+		out = append(out, section)
+		used += sectionBytes
 	}
 	return out
+}
+
+func acpContextRenderedSectionOverhead(title string) int {
+	return len("## ") + len(strings.TrimSpace(title)) + len("\n\n\n\n")
+}
+
+func acpContextRenderedSectionBytes(section acpContextFileSection) int {
+	return acpContextRenderedSectionOverhead(section.Title) + len(strings.TrimSpace(section.Content))
+}
+
+func acpContextMinInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func formatACPContextFileExcerpt(name, content string) string {

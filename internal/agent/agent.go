@@ -27,6 +27,7 @@ type Agent struct {
 	bridgeProvider bridge.Provider
 	hookService    *hooks.Service
 	logger         *slog.Logger
+	limits         Limits
 }
 
 // New creates a new Agent with the given dependencies.
@@ -40,12 +41,20 @@ func New(deps Deps) *Agent {
 		bridgeProvider: deps.BridgeProvider,
 		hookService:    deps.HookService,
 		logger:         logger.With(slog.String("service", "agent")),
+		limits:         deps.Limits.Normalize(),
 	}
 }
 
 // BridgeProvider returns the underlying bridge provider (workspace manager).
 func (a *Agent) BridgeProvider() bridge.Provider {
 	return a.bridgeProvider
+}
+
+func (a *Agent) Limits() Limits {
+	if a == nil {
+		return DefaultLimits()
+	}
+	return a.limits.Normalize()
 }
 
 // SetToolProviders sets the tool providers after construction.
@@ -74,6 +83,8 @@ func (a *Agent) ExecuteTool(ctx context.Context, cfg RunConfig, call sdk.ToolCal
 	if err != nil {
 		return sdk.ToolResultPart{}, fmt.Errorf("assemble tools: %w", err)
 	}
+	sdkTools, _ = decorateReadMediaTools(cfg.Model, sdkTools)
+	sdkTools = tools.WrapToolOutputLimits(sdkTools, a.Limits().ToolOutputLimit())
 	for i := range sdkTools {
 		tool := sdkTools[i]
 		if tool.Name != call.ToolName {
@@ -89,10 +100,11 @@ func (a *Agent) ExecuteTool(ctx context.Context, cfg RunConfig, call sdk.ToolCal
 		}
 		output, err := tool.Execute(execCtx, call.Input)
 		if err != nil {
+			limitedErr := tools.LimitToolError(err, "tool result ("+call.ToolName+")", a.Limits().ToolOutputLimit())
 			return sdk.ToolResultPart{
 				ToolCallID: call.ToolCallID,
 				ToolName:   call.ToolName,
-				Result:     err.Error(),
+				Result:     limitedErr.Error(),
 				IsError:    true,
 			}, nil
 		}
@@ -156,9 +168,12 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			cfg.System = appendToolUsageToSystem(cfg.System, toolUsage)
 		}
 	}
+	limit := a.Limits().ToolOutputLimit()
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
+	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 	approvalTools := append([]sdk.Tool(nil), sdkTools...)
 	sdkTools = a.wrapToolsWithHooks(ctx, cfg, sdkTools)
+	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 
 	// Loop detection setup
 	var textLoopGuard *TextLoopGuard
@@ -627,9 +642,12 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 			cfg.System = appendToolUsageToSystem(cfg.System, toolUsage)
 		}
 	}
+	limit := a.Limits().ToolOutputLimit()
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
+	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 	approvalTools := append([]sdk.Tool(nil), sdkTools...)
 	sdkTools = a.wrapToolsWithHooks(ctx, cfg, sdkTools)
+	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 
 	var toolLoopGuard *ToolLoopGuard
 	var textLoopGuard *TextLoopGuard

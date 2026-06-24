@@ -105,3 +105,73 @@ func TestTranscriptMCPErrorResultSetsToolResultError(t *testing.T) {
 		t.Fatalf("tool result IsError = false, want true for MCP isError result")
 	}
 }
+
+func TestTranscriptLimitsToolResultOutput(t *testing.T) {
+	t.Parallel()
+
+	large := "HEAD\n" + strings.Repeat("tool output ", 300) + "\nTAIL"
+	recorder := NewTranscriptRecorder(ToolOutputLimit{MaxBytes: 512, MaxLines: 80})
+	recorder.Add(event.StreamEvent{
+		Type:       event.ToolCallStart,
+		ToolCallID: "call-1",
+		ToolName:   "exec",
+		Input:      map[string]any{"command": "test"},
+	})
+	recorder.Add(event.StreamEvent{
+		Type:       event.ToolCallEnd,
+		ToolCallID: "call-1",
+		ToolName:   "exec",
+		Result:     map[string]any{"stdout": large},
+	})
+
+	messages := recorder.Messages("")
+	result, ok := messages[1].Content[0].(sdk.ToolResultPart)
+	if !ok {
+		t.Fatalf("message[1] = %#v, want tool result", messages[1])
+	}
+	output, ok := result.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("tool result = %#v, want map", result.Result)
+	}
+	stdout, ok := output["stdout"].(string)
+	if !ok {
+		t.Fatalf("stdout = %#v, want string", output["stdout"])
+	}
+	if len(stdout) >= len(large) {
+		t.Fatalf("stdout was not limited")
+	}
+	for _, want := range []string{"[memoh pruned]", "HEAD", "TAIL"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestEventCollectorLimitsToolResultEvents(t *testing.T) {
+	t.Parallel()
+
+	large := "HEAD\n" + strings.Repeat("tool output ", 300) + "\nTAIL"
+	collector := newEventCollector(ToolOutputLimit{MaxBytes: 512, MaxLines: 80})
+	collector.record(event.StreamEvent{
+		Type:       event.ToolCallEnd,
+		ToolCallID: "call-1",
+		ToolName:   "exec",
+		Result:     map[string]any{"stdout": large},
+	})
+
+	result := collector.result()
+	if len(result.Events) != 1 {
+		t.Fatalf("events = %d, want 1", len(result.Events))
+	}
+	output, ok := result.Events[0].Result.(map[string]any)
+	if !ok {
+		t.Fatalf("event result = %#v, want map", result.Events[0].Result)
+	}
+	stdout, ok := output["stdout"].(string)
+	if !ok {
+		t.Fatalf("stdout = %#v, want string", output["stdout"])
+	}
+	if len(stdout) >= len(large) || !strings.Contains(stdout, "[memoh pruned]") {
+		t.Fatalf("event stdout was not limited:\n%s", stdout)
+	}
+}

@@ -127,6 +127,62 @@ func TestGenerateSystemPromptIncludesServiceOwnedBotInfo(t *testing.T) {
 	}
 }
 
+func TestBuildFileSectionsRespectsMaxBytes(t *testing.T) {
+	t.Parallel()
+
+	sections := buildFileSections([]SystemFile{
+		{
+			Filename: "AGENTS.md",
+			Content:  "HEAD\n" + strings.Repeat("0123456789", 200) + "\nTAIL",
+		},
+		{
+			Filename: "MEMORY.md",
+			Content:  "SECOND_FILE_SHOULD_NOT_FIT",
+		},
+	}, 512)
+
+	if len(sections) > 512 {
+		t.Fatalf("file sections bytes = %d, want <= 512", len(sections))
+	}
+	if !strings.Contains(sections, "## AGENTS.md") {
+		t.Fatalf("file sections missing first file heading:\n%s", sections)
+	}
+	if !strings.Contains(sections, "[memoh pruned]") {
+		t.Fatalf("file sections should include prune marker:\n%s", sections)
+	}
+}
+
+func TestBuildFileSectionsRespectsLineLimit(t *testing.T) {
+	t.Parallel()
+
+	sections := buildFileSections([]SystemFile{
+		{
+			Filename: "AGENTS.md",
+			Content:  strings.Repeat("x\n", 2100),
+		},
+	}, 32*1024)
+
+	if !strings.Contains(sections, "[memoh pruned]") {
+		t.Fatalf("file sections should include prune marker for line-only overflow:\n%s", sections)
+	}
+}
+
+func TestBuildFileSectionsRespectsCumulativeLineLimit(t *testing.T) {
+	t.Parallel()
+
+	sections := buildFileSections([]SystemFile{
+		{Filename: "AGENTS.md", Content: strings.Repeat("a\n", 1200)},
+		{Filename: "MEMORY.md", Content: strings.Repeat("m\n", 1200)},
+	}, 32*1024)
+
+	if got := strings.Count(sections, "\n") + 1; got > 2000 {
+		t.Fatalf("file sections lines = %d, want <= 2000", got)
+	}
+	if !strings.Contains(sections, "[memoh pruned]") {
+		t.Fatalf("file sections should include prune marker for cumulative line overflow:\n%s", sections)
+	}
+}
+
 func TestGenerateSystemPromptOmitsLegacyCoreFiles(t *testing.T) {
 	t.Parallel()
 

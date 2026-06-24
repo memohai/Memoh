@@ -402,3 +402,58 @@ func TestToolGatewayServiceCallToolProviderError(t *testing.T) {
 		t.Fatalf("expected isError=true for provider failure")
 	}
 }
+
+func TestToolGatewayServiceLimitsProviderResult(t *testing.T) {
+	provider := &gatewayTestProvider{
+		tools: []ToolDescriptor{
+			{Name: "big_tool", InputSchema: map[string]any{"type": "object"}},
+		},
+		callResult: map[string]map[string]any{
+			"big_tool": BuildToolSuccessResult(map[string]any{
+				"content": "HEAD\n" + strings.Repeat("0123456789", 200) + "\nTAIL",
+			}),
+		},
+		callErr: map[string]error{},
+	}
+	service := NewToolGatewayService(slog.Default(), []ToolSource{provider}, WithToolOutputLimit(ToolOutputLimit{MaxBytes: 512, MaxLines: 80}))
+
+	result, err := service.CallTool(context.Background(), ToolSessionContext{BotID: "bot-1"}, ToolCallPayload{
+		Name:      "big_tool",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("CallTool() error = %v", err)
+	}
+	assertJSONBytesAtMost(t, result, 512)
+	if !strings.Contains(toolResultText(result), "[memoh pruned]") {
+		t.Fatalf("limited gateway result missing prune marker: %#v", result)
+	}
+}
+
+func TestToolGatewayServiceLimitsProviderError(t *testing.T) {
+	provider := &gatewayTestProvider{
+		tools: []ToolDescriptor{
+			{Name: "broken_tool", InputSchema: map[string]any{"type": "object"}},
+		},
+		callResult: map[string]map[string]any{},
+		callErr: map[string]error{
+			"broken_tool": errors.New("HEAD\n" + strings.Repeat("error detail ", 300) + "\nTAIL"),
+		},
+	}
+	service := NewToolGatewayService(slog.Default(), []ToolSource{provider}, WithToolOutputLimit(ToolOutputLimit{MaxBytes: 512, MaxLines: 80}))
+
+	result, err := service.CallTool(context.Background(), ToolSessionContext{BotID: "bot-1"}, ToolCallPayload{
+		Name:      "broken_tool",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("CallTool() error = %v", err)
+	}
+	assertJSONBytesAtMost(t, result, 512)
+	if isErr, _ := result["isError"].(bool); !isErr {
+		t.Fatalf("limited provider error lost isError: %#v", result)
+	}
+	if !strings.Contains(toolResultText(result), "[memoh pruned]") {
+		t.Fatalf("limited provider error missing prune marker: %#v", result)
+	}
+}

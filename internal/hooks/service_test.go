@@ -176,6 +176,176 @@ func TestRunConfigMergesDecisionsInPriorityOrder(t *testing.T) {
 	}
 }
 
+func TestRunConfigLimitsToolAppendContext(t *testing.T) {
+	t.Parallel()
+
+	large := "HEAD\n" + strings.Repeat("context detail ", 300) + "\nTAIL"
+	cfg := Config{
+		Version: 1,
+		Defaults: Defaults{
+			MaxOutputBytes: 192,
+		},
+		Hooks: []Hook{{
+			Name:  "append-context",
+			Event: EventBeforeModelCall,
+			Actions: []HookAction{{
+				Type: ActionTool,
+				Tool: "append",
+			}},
+		}},
+	}
+	runner := &fakeToolRunner{
+		fn: func(context.Context, string, map[string]any) (any, error) {
+			return map[string]any{
+				"decision":       DecisionAppendContext,
+				"append_context": large,
+			}, nil
+		},
+	}
+
+	result, err := NewService(nil, nil).RunConfig(context.Background(), cfg, Request{Event: EventBeforeModelCall}, runner)
+	if err != nil {
+		t.Fatalf("RunConfig returned error: %v", err)
+	}
+	if len(result.AppendContext) > 192 {
+		t.Fatalf("append_context bytes = %d, want <= 192", len(result.AppendContext))
+	}
+	if len(result.AppendContext) >= len(large) {
+		t.Fatalf("append_context was not limited")
+	}
+	assertHookTextPreservesHeadTail(t, result.AppendContext)
+}
+
+func TestRunConfigLimitsAggregatedAppendContext(t *testing.T) {
+	t.Parallel()
+
+	large := "HEAD\n" + strings.Repeat("context detail ", 300) + "\nTAIL"
+	cfg := Config{
+		Version: 1,
+		Defaults: Defaults{
+			MaxOutputBytes: 192,
+		},
+		Hooks: []Hook{{
+			Name:  "append-context",
+			Event: EventBeforeModelCall,
+			Actions: []HookAction{
+				{Type: ActionTool, Tool: "append_one"},
+				{Type: ActionTool, Tool: "append_two"},
+			},
+		}},
+	}
+	runner := &fakeToolRunner{
+		fn: func(context.Context, string, map[string]any) (any, error) {
+			return map[string]any{
+				"decision":       DecisionAppendContext,
+				"append_context": large,
+			}, nil
+		},
+	}
+
+	result, err := NewService(nil, nil).RunConfig(context.Background(), cfg, Request{Event: EventBeforeModelCall}, runner)
+	if err != nil {
+		t.Fatalf("RunConfig returned error: %v", err)
+	}
+	if len(result.AppendContext) > 192 {
+		t.Fatalf("append_context bytes = %d, want <= 192", len(result.AppendContext))
+	}
+	if len(result.AppendContext) >= len(large) {
+		t.Fatalf("append_context was not limited after aggregation")
+	}
+	assertHookTextPreservesHeadTail(t, result.AppendContext)
+}
+
+func TestRunConfigLimitsPluginAppendContextWithSourceCap(t *testing.T) {
+	t.Parallel()
+
+	large := "HEAD\n" + strings.Repeat("plugin context detail ", 300) + "\nTAIL"
+	cfg := Config{
+		Version: 1,
+		Defaults: Defaults{
+			MaxOutputBytes: 4096,
+		},
+		Hooks: []Hook{{
+			Name:  "plugin append-context",
+			Event: EventBeforeModelCall,
+			source: hookSource{
+				Kind:           sourceKindPlugin,
+				PluginID:       "github",
+				MaxOutputBytes: 192,
+			},
+			Actions: []HookAction{
+				{Type: ActionTool, Tool: "append_one"},
+				{Type: ActionTool, Tool: "append_two"},
+			},
+		}},
+	}
+	runner := &fakeToolRunner{
+		fn: func(context.Context, string, map[string]any) (any, error) {
+			return map[string]any{
+				"decision":       DecisionAppendContext,
+				"append_context": large,
+			}, nil
+		},
+	}
+
+	result, err := NewService(nil, nil).RunConfig(context.Background(), cfg, Request{Event: EventBeforeModelCall}, runner)
+	if err != nil {
+		t.Fatalf("RunConfig returned error: %v", err)
+	}
+	if len(result.AppendContext) > 192 {
+		t.Fatalf("append_context bytes = %d, want <= plugin cap 192", len(result.AppendContext))
+	}
+	if len(result.AppendContext) >= len(large) {
+		t.Fatalf("append_context was not limited by plugin cap")
+	}
+	assertHookTextPreservesHeadTail(t, result.AppendContext)
+}
+
+func TestRunConfigLimitsPluginAppendContextWithGlobalCap(t *testing.T) {
+	t.Parallel()
+
+	large := "HEAD\n" + strings.Repeat("plugin context detail ", 300) + "\nTAIL"
+	cfg := Config{
+		Version: 1,
+		Defaults: Defaults{
+			MaxOutputBytes: 192,
+		},
+		Hooks: []Hook{{
+			Name:  "plugin append-context",
+			Event: EventBeforeModelCall,
+			source: hookSource{
+				Kind:           sourceKindPlugin,
+				PluginID:       "github",
+				MaxOutputBytes: 4096,
+			},
+			Actions: []HookAction{{
+				Type: ActionTool,
+				Tool: "append",
+			}},
+		}},
+	}
+	runner := &fakeToolRunner{
+		fn: func(context.Context, string, map[string]any) (any, error) {
+			return map[string]any{
+				"decision":       DecisionAppendContext,
+				"append_context": large,
+			}, nil
+		},
+	}
+
+	result, err := NewService(nil, nil).RunConfig(context.Background(), cfg, Request{Event: EventBeforeModelCall}, runner)
+	if err != nil {
+		t.Fatalf("RunConfig returned error: %v", err)
+	}
+	if len(result.AppendContext) > 192 {
+		t.Fatalf("append_context bytes = %d, want <= global cap 192", len(result.AppendContext))
+	}
+	if len(result.AppendContext) >= len(large) {
+		t.Fatalf("append_context was not limited by global cap")
+	}
+	assertHookTextPreservesHeadTail(t, result.AppendContext)
+}
+
 func TestRunConfigOnErrorBlockDenies(t *testing.T) {
 	t.Parallel()
 
@@ -206,6 +376,190 @@ func TestRunConfigOnErrorBlockDenies(t *testing.T) {
 	}
 	if result.Reason != "tool failed" {
 		t.Fatalf("reason = %q, want tool error", result.Reason)
+	}
+}
+
+func TestRunLimitsCommandAppendContext(t *testing.T) {
+	t.Parallel()
+
+	large := "HEAD\n" + strings.Repeat("context detail ", 300) + "\nTAIL"
+	cfg := `{
+		"version": 1,
+		"enabled": true,
+		"defaults": {
+			"timeout": "3s",
+			"max_output_bytes": 192
+		},
+		"hooks": [{
+			"name": "command context",
+			"event": "BeforeModelCall",
+			"actions": [{
+				"type": "command",
+				"command": "node /data/.memoh/hook.js"
+			}]
+		}]
+	}`
+	payload, err := json.Marshal(map[string]string{
+		"decision":       DecisionAppendContext,
+		"append_context": large,
+	})
+	if err != nil {
+		t.Fatalf("marshal hook output: %v", err)
+	}
+	server := &hookBridgeTestServer{
+		files: map[string][]byte{
+			DefaultConfigPath: []byte(cfg),
+		},
+		stdout: string(payload),
+	}
+	service := NewService(nil, hookBridgeProvider{client: newHookBridgeTestClient(t, server)})
+
+	result, err := service.Run(context.Background(), Request{
+		Event: EventBeforeModelCall,
+		BotID: "bot-1",
+		Workspace: WorkspaceInfo{
+			CWD:     "/data/workspace",
+			Runtime: "container",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if len(result.AppendContext) > 192 {
+		t.Fatalf("append_context bytes = %d, want <= 192", len(result.AppendContext))
+	}
+	if len(result.AppendContext) >= len(large) {
+		t.Fatalf("append_context was not limited")
+	}
+	assertHookTextPreservesHeadTail(t, result.AppendContext)
+}
+
+func TestRunLimitsCommandMetadataAppendContext(t *testing.T) {
+	t.Parallel()
+
+	large := "HEAD\n" + strings.Repeat("metadata context detail ", 300) + "\nTAIL"
+	cfg := `{
+		"version": 1,
+		"enabled": true,
+		"defaults": {
+			"timeout": "3s",
+			"max_output_bytes": 192
+		},
+		"hooks": [{
+			"name": "command metadata context",
+			"event": "BeforeModelCall",
+			"actions": [{
+				"type": "command",
+				"command": "node /data/.memoh/hook.js"
+			}]
+		}]
+	}`
+	payload, err := json.Marshal(map[string]any{
+		"decision": DecisionAppendContext,
+		"metadata": map[string]any{
+			"append_context": large,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal hook output: %v", err)
+	}
+	server := &hookBridgeTestServer{
+		files: map[string][]byte{
+			DefaultConfigPath: []byte(cfg),
+		},
+		stdout: string(payload),
+	}
+	service := NewService(nil, hookBridgeProvider{client: newHookBridgeTestClient(t, server)})
+
+	result, err := service.Run(context.Background(), Request{
+		Event: EventBeforeModelCall,
+		BotID: "bot-1",
+		Workspace: WorkspaceInfo{
+			CWD:     "/data/workspace",
+			Runtime: "container",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if len(result.AppendContext) > 192 {
+		t.Fatalf("append_context bytes = %d, want <= 192", len(result.AppendContext))
+	}
+	if len(result.AppendContext) >= len(large) {
+		t.Fatalf("metadata append_context was not limited")
+	}
+	assertHookTextPreservesHeadTail(t, result.AppendContext)
+}
+
+func TestRunLimitsCommandRawStdoutMetadata(t *testing.T) {
+	t.Parallel()
+
+	large := "HEAD\n" + strings.Repeat("raw stdout ", 300) + "\nTAIL"
+	largeErr := "HEAD\n" + strings.Repeat("raw stderr ", 300) + "\nTAIL"
+	cfg := `{
+		"version": 1,
+		"enabled": true,
+		"defaults": {
+			"timeout": "3s",
+			"max_output_bytes": 192
+		},
+		"hooks": [{
+			"name": "command raw stdout",
+			"event": "BeforeModelCall",
+			"actions": [{
+				"type": "command",
+				"command": "node /data/.memoh/hook.js"
+			}]
+		}]
+	}`
+	server := &hookBridgeTestServer{
+		files: map[string][]byte{
+			DefaultConfigPath: []byte(cfg),
+		},
+		stdout: large,
+		stderr: largeErr,
+	}
+	service := NewService(nil, hookBridgeProvider{client: newHookBridgeTestClient(t, server)})
+
+	result, err := service.Run(context.Background(), Request{
+		Event: EventBeforeModelCall,
+		BotID: "bot-1",
+		Workspace: WorkspaceInfo{
+			CWD:     "/data/workspace",
+			Runtime: "container",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	action := result.ActionResults[0]
+	raw, ok := action.Metadata["raw_stdout"].(string)
+	if !ok {
+		t.Fatalf("raw_stdout metadata = %#v, want string", action.Metadata["raw_stdout"])
+	}
+	if len(raw) > 192 {
+		t.Fatalf("raw_stdout bytes = %d, want <= 192", len(raw))
+	}
+	if len(raw) >= len(large) {
+		t.Fatalf("raw_stdout was not limited")
+	}
+	assertHookTextPreservesHeadTail(t, raw)
+	if len(action.Stdout) > 192 {
+		t.Fatalf("stdout bytes = %d, want <= 192", len(action.Stdout))
+	}
+	if len(action.Stderr) > 192 {
+		t.Fatalf("stderr bytes = %d, want <= 192", len(action.Stderr))
+	}
+	assertHookTextPreservesHeadTail(t, action.Stdout)
+	assertHookTextPreservesHeadTail(t, action.Stderr)
+}
+
+func assertHookTextPreservesHeadTail(t *testing.T, text string) {
+	t.Helper()
+	for _, want := range []string{"[memoh pruned]", "HEAD", "TAIL"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("hook text missing %q:\n%s", want, text)
+		}
 	}
 }
 
@@ -344,8 +698,18 @@ func TestRunLoadsReadyPluginHooksWithPluginRuntimeDefaults(t *testing.T) {
 		t.Fatalf("forged hooks path: %v", err)
 	}
 
+	largePluginContext := "HEAD\n" + strings.Repeat("plugin context detail ", 300) + "\nTAIL"
+	pluginPayload, err := json.Marshal(map[string]string{
+		"decision":       DecisionAppendContext,
+		"append_context": largePluginContext,
+	})
+	if err != nil {
+		t.Fatalf("marshal plugin hook output: %v", err)
+	}
+
 	userCfg := `{
 		"version": 1,
+		"defaults": {"max_output_bytes": 4096},
 		"env": {"USER_ENV": "enabled"},
 		"hooks": [{
 			"name": "user logger",
@@ -357,6 +721,7 @@ func TestRunLoadsReadyPluginHooksWithPluginRuntimeDefaults(t *testing.T) {
 	}`
 	pluginCfg := `{
 		"version": 1,
+		"defaults": {"max_output_bytes": 192},
 		"env": {"PLUGIN_ENV": "enabled"},
 		"hooks": [{
 			"name": "plugin logger",
@@ -383,6 +748,7 @@ func TestRunLoadsReadyPluginHooksWithPluginRuntimeDefaults(t *testing.T) {
 			needsAuthHooksPath: []byte(ignoredPluginCfg),
 			forgedHooksPath:    []byte(ignoredPluginCfg),
 		},
+		stdout: string(pluginPayload),
 	}
 	client := newHookBridgeTestClient(t, server)
 	service := NewService(nil, hookBridgeProvider{client: client})
@@ -454,6 +820,13 @@ func TestRunLoadsReadyPluginHooksWithPluginRuntimeDefaults(t *testing.T) {
 	if len(sources) != 2 || sources[0]["source_kind"] != sourceKindUser || sources[1]["source_kind"] != sourceKindPlugin || sources[1]["plugin_id"] != "github" {
 		t.Fatalf("hook_sources = %#v, want user then github plugin", sources)
 	}
+	if len(result.AppendContext) > 192 {
+		t.Fatalf("plugin append_context bytes = %d, want <= plugin cap 192", len(result.AppendContext))
+	}
+	if len(result.AppendContext) >= len(largePluginContext) {
+		t.Fatalf("plugin append_context was not limited by loaded plugin cap")
+	}
+	assertHookTextPreservesHeadTail(t, result.AppendContext)
 }
 
 func TestLoadCreatesEmptyConfigWhenMissing(t *testing.T) {

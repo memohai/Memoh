@@ -200,6 +200,7 @@ type clientCallbacks struct {
 	events         *toolEventEmitter
 	toolMapper     *acpToolEventMapper
 	terminals      *terminalManager
+	toolLimit      ToolOutputLimit
 	// quirks carries the per-agent title heuristics (acpprofile owns them);
 	// the zero value behaves like the defaults.
 	quirks acpprofile.ToolQuirks
@@ -238,18 +239,26 @@ func (c *clientCallbacks) close() {
 	}
 }
 
-func (c *clientCallbacks) setPromptState(collector *eventCollector, sink EventSink, toolSession ToolSessionContext) {
+func (c *clientCallbacks) setPromptState(collector *eventCollector, sink EventSink, toolSession ToolSessionContext, limits ...ToolOutputLimit) {
 	if c == nil {
 		return
+	}
+	var limit ToolOutputLimit
+	if len(limits) > 0 {
+		limit = limits[0]
 	}
 	c.mu.Lock()
 	c.collector = collector
 	c.sink = sink
 	c.promptSession = toolSession
+	c.toolLimit = limit
 	c.approvalGrants = nil
 	c.mu.Unlock()
 	if c.events != nil {
-		c.events.setPromptState(collector, sink)
+		c.events.setPromptState(collector, sink, limit)
+	}
+	if c.terminals != nil {
+		c.terminals.setToolOutputLimit(limit)
 	}
 }
 
@@ -267,7 +276,7 @@ func (c *clientCallbacks) ReadTextFile(ctx context.Context, p acp.ReadTextFileRe
 		return acp.ReadTextFileResponse{}, err
 	}
 	if !approval.Approved {
-		err := errors.New(toolapproval.RejectionMessage(approval))
+		err := errors.New(c.limitedApprovalRejectionMessage("read", approval))
 		c.emitToolCallEnd(toolID, "read", input, toolErrorResult(err), err)
 		return acp.ReadTextFileResponse{}, err
 	}
@@ -304,10 +313,30 @@ func (c *clientCallbacks) ReadTextFile(ctx context.Context, p acp.ReadTextFileRe
 		return acp.ReadTextFileResponse{}, toolErr
 	}
 	content := resp.GetContent()
+	if limit := c.currentToolOutputLimit(); hasToolOutputLimit(limit) {
+		content = limitToolOutputString(content, "tool result (read.content)", limit)
+	}
 	if content == "" {
 		content = "\n"
 	}
 	return acp.ReadTextFileResponse{Content: content}, nil
+}
+
+func (c *clientCallbacks) currentToolOutputLimit() ToolOutputLimit {
+	if c == nil {
+		return ToolOutputLimit{}
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.toolLimit
+}
+
+func (c *clientCallbacks) limitedApprovalRejectionMessage(toolName string, approval toolapproval.FlowResult) string {
+	message := toolapproval.RejectionMessage(approval)
+	if limit := c.currentToolOutputLimit(); hasToolOutputLimit(limit) {
+		return limitToolOutputString(message, "tool result ("+toolName+")", limit)
+	}
+	return message
 }
 
 func (c *clientCallbacks) WriteTextFile(ctx context.Context, p acp.WriteTextFileRequest) (acp.WriteTextFileResponse, error) {
@@ -318,7 +347,7 @@ func (c *clientCallbacks) WriteTextFile(ctx context.Context, p acp.WriteTextFile
 		return acp.WriteTextFileResponse{}, err
 	}
 	if !approval.Approved {
-		err := errors.New(toolapproval.RejectionMessage(approval))
+		err := errors.New(c.limitedApprovalRejectionMessage("write", approval))
 		c.emitToolCallEnd(toolID, "write", input, toolErrorResult(err), err)
 		return acp.WriteTextFileResponse{}, err
 	}
@@ -935,11 +964,13 @@ func (c *clientCallbacks) SessionUpdate(_ context.Context, p acp.SessionNotifica
 	c.mu.RLock()
 	collector := c.collector
 	sink := c.sink
+	limit := c.toolLimit
 	c.mu.RUnlock()
 	var events []event.StreamEvent
 	if c.toolMapper != nil {
 		events = c.toolMapper.eventsFromNotification(p)
 	}
+	events = limitStreamEvents(events, limit)
 	if collector != nil {
 		collector.apply(p, events)
 	}
@@ -957,7 +988,7 @@ func (c *clientCallbacks) CreateTerminal(ctx context.Context, p acp.CreateTermin
 		return terminalApprovalResult{
 			Approved:         approval.Approved,
 			ToolCallID:       id,
-			RejectionMessage: toolapproval.RejectionMessage(approval),
+			RejectionMessage: c.limitedApprovalRejectionMessage("exec", approval),
 		}, err
 	})
 }
