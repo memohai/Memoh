@@ -126,15 +126,26 @@ func ConvertModelMessagesToUIAssistantMessages(messages []ModelMessage) []UIMess
 }
 
 // IsUITurnBoundary reports whether a persisted message opens a new UI turn —
-// i.e. ConvertMessagesToUITurns would flush any pending assistant turn at this
-// row and start a fresh turn. Only such a message is a safe page head: pagination
-// that begins partway through an assistant turn (whose earlier rows landed on the
-// previous page) is what splits one reply into several action bars. The logic
-// here MUST stay in lockstep with the "user" case in ConvertMessagesToUITurns:
-// flushPending() fires unconditionally at the top of the user case, so every
-// user-role message is a turn boundary (invisible user rows flush too).
+// i.e. ConvertMessagesToUITurns would flush any pending assistant turn here and
+// start a fresh turn. Only such a message is a safe page head: pagination that
+// begins on an assistant/tool row (or an invisible screenshot-feedback user row)
+// may be partway through an assistant turn whose earlier rows landed on the
+// previous page, which is what splits one reply into several action bars. Handlers
+// use this to extend a page back to the nearest boundary so a turn is never cut
+// across pages. The branch logic here MUST stay in lockstep with the "user" case
+// in ConvertMessagesToUITurns: an invisible user message is skipped without
+// flushing, so it is NOT a boundary; only a visible user message flushes.
 func IsUITurnBoundary(raw messagepkg.Message) bool {
-	return strings.EqualFold(strings.TrimSpace(raw.Role), "user")
+	if !strings.EqualFold(strings.TrimSpace(raw.Role), "user") {
+		return false
+	}
+
+	model := decodePersistedModelMessage(raw)
+	text := extractPersistedMessageText(raw, model)
+	attachments := uiAttachmentsFromMessageAssets(raw)
+	reply := uiReplyFromMessage(raw)
+	forward := uiForwardFromMessage(raw)
+	return text != "" || len(attachments) > 0 || reply != nil || forward != nil
 }
 
 // ConvertMessagesToUITurns converts persisted message rows into frontend-friendly turns.
@@ -166,15 +177,25 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 		modelMessage := decodePersistedModelMessage(raw)
 		switch strings.ToLower(strings.TrimSpace(raw.Role)) {
 		case "user":
-			flushPending()
-
 			text := extractPersistedMessageText(raw, modelMessage)
 			attachments := uiAttachmentsFromMessageAssets(raw)
 			reply := uiReplyFromMessage(raw)
 			forward := uiForwardFromMessage(raw)
+
+			// Invisible user-role messages must NOT end the assistant turn. The
+			// agent loop injects user messages that never render: Computer Use /
+			// Browser Use feed screenshots back as image-only user messages (empty
+			// display text, inline base64, no stored asset) and other synthetic
+			// pings. Flushing on these is exactly what split one "talk while acting"
+			// reply into several turns (several action bars). Skip them WITHOUT
+			// flushing so the surrounding assistant/tool messages remain a single
+			// turn; only a real, visible user message below is a turn boundary.
 			if text == "" && len(attachments) == 0 && reply == nil && forward == nil {
 				continue
 			}
+
+			flushPending()
+
 			turn := UITurn{
 				Role:              "user",
 				Text:              text,
@@ -199,82 +220,50 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			reasonings := extractPersistedReasoning(modelMessage)
 			attachments := uiAttachmentsFromMessageAssets(raw)
 
-			if len(toolCalls) > 0 {
-				if pending == nil {
-					pending = newPendingAssistantTurn(raw)
-				}
-
-				for _, reasoning := range reasonings {
-					appendPendingAssistantMessage(pending, UIMessage{
-						ID:      pending.NextID,
-						Type:    UIMessageReasoning,
-						Content: reasoning,
-					})
-				}
-
-				if text != "" {
-					appendPendingAssistantMessage(pending, UIMessage{
-						ID:      pending.NextID,
-						Type:    UIMessageText,
-						Content: text,
-					})
-				}
-
-				for _, call := range toolCalls {
-					upsertPendingToolCall(pending, call)
-				}
-
-				if len(attachments) > 0 {
-					appendPendingAssistantMessage(pending, UIMessage{
-						ID:          pending.NextID,
-						Type:        UIMessageAttachments,
-						Attachments: attachments,
-					})
-				}
+			// Empty assistant messages carry nothing and neither open nor split a
+			// turn, so they are skipped.
+			if len(toolCalls) == 0 && text == "" && len(reasonings) == 0 && len(attachments) == 0 {
 				continue
 			}
 
-			if pending != nil && (text != "" || len(reasonings) > 0 || len(attachments) > 0) {
-				for _, reasoning := range reasonings {
-					appendPendingAssistantMessage(pending, UIMessage{
-						ID:      pending.NextID,
-						Type:    UIMessageReasoning,
-						Content: reasoning,
-					})
-				}
-				if text != "" {
-					appendPendingAssistantMessage(pending, UIMessage{
-						ID:      pending.NextID,
-						Type:    UIMessageText,
-						Content: text,
-					})
-				}
-				if len(attachments) > 0 {
-					appendPendingAssistantMessage(pending, UIMessage{
-						ID:          pending.NextID,
-						Type:        UIMessageAttachments,
-						Attachments: attachments,
-					})
-				}
-				flushPending()
-				continue
+			// An assistant turn spans the whole reply to a user message: every
+			// assistant + tool message that follows, in order. A plain-text
+			// assistant message must NOT split the turn — the "talk while acting"
+			// pattern (a remark before or between tool calls) is common, so it
+			// extends the current turn instead of opening a new one. The turn is
+			// closed only by the next user message (flushed in the "user" case)
+			// or by the trailing flush at the end of the list. Flushing mid-reply
+			// is what fragmented one reply into several turns (several action
+			// bars). A reply with no tool calls still becomes its own turn via the
+			// trailing flush.
+			if pending == nil {
+				pending = newPendingAssistantTurn(raw)
 			}
 
-			flushPending()
-
-			assistantMessages := buildStandaloneAssistantMessages(text, reasonings, attachments)
-			if len(assistantMessages) == 0 {
-				continue
+			for _, reasoning := range reasonings {
+				appendPendingAssistantMessage(pending, UIMessage{
+					ID:      pending.NextID,
+					Type:    UIMessageReasoning,
+					Content: reasoning,
+				})
 			}
-
-			result = append(result, UITurn{
-				Role:              "assistant",
-				Messages:          assistantMessages,
-				Timestamp:         raw.CreatedAt,
-				Platform:          resolveUIPersistencePlatform(raw),
-				ExternalMessageID: strings.TrimSpace(raw.ExternalMessageID),
-				ID:                strings.TrimSpace(raw.ID),
-			})
+			if text != "" {
+				appendPendingAssistantMessage(pending, UIMessage{
+					ID:      pending.NextID,
+					Type:    UIMessageText,
+					Content: text,
+				})
+			}
+			for _, call := range toolCalls {
+				upsertPendingToolCall(pending, call)
+			}
+			if len(attachments) > 0 {
+				appendPendingAssistantMessage(pending, UIMessage{
+					ID:          pending.NextID,
+					Type:        UIMessageAttachments,
+					Attachments: attachments,
+				})
+			}
 
 		case "tool":
 			if pending == nil {
@@ -354,35 +343,6 @@ func upsertPendingToolCall(pending *uiPendingAssistantTurn, call uiExtractedTool
 	if call.ID != "" {
 		pending.ToolIndexes[call.ID] = len(pending.Turn.Messages) - 1
 	}
-}
-
-func buildStandaloneAssistantMessages(text string, reasonings []string, attachments []UIAttachment) []UIMessage {
-	messages := make([]UIMessage, 0, len(reasonings)+2)
-	nextID := 0
-	for _, reasoning := range reasonings {
-		messages = append(messages, UIMessage{
-			ID:      nextID,
-			Type:    UIMessageReasoning,
-			Content: reasoning,
-		})
-		nextID++
-	}
-	if text != "" {
-		messages = append(messages, UIMessage{
-			ID:      nextID,
-			Type:    UIMessageText,
-			Content: text,
-		})
-		nextID++
-	}
-	if len(attachments) > 0 {
-		messages = append(messages, UIMessage{
-			ID:          nextID,
-			Type:        UIMessageAttachments,
-			Attachments: attachments,
-		})
-	}
-	return messages
 }
 
 func decodePersistedModelMessage(raw messagepkg.Message) ModelMessage {
