@@ -422,7 +422,7 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         target: basename(path),
         fullTarget: path,
         detail: ToolCallDetailWrite,
-        defaultOpen: true,
+        defaultOpen: false,
         diffAdd: contentLineCount || lineCount(content),
         hideAction: true,
       }
