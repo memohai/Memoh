@@ -28,6 +28,49 @@ const (
 	KindConversationSummary Kind = "conversation_summary"
 )
 
+const CurrentSchemaVersion = 1
+
+const (
+	SchemaContextManifest = "context_manifest"
+	SchemaContextFrag     = "context_frag"
+	SchemaContextRef      = "context_ref"
+	SchemaContextEdit     = "context_edit"
+	SchemaSummaryCoverage = "summary_coverage"
+	SchemaRenderPolicy    = "render_policy"
+)
+
+const (
+	HashAlgoSHA256             = "sha256"
+	HashScopeCanonicalFragment = "canonical_fragment"
+)
+
+type SchemaVersion struct {
+	Name    string `json:"name"`
+	Version int    `json:"version"`
+}
+
+type ContentRange struct {
+	Start int `json:"start"`
+	End   int `json:"end"`
+}
+
+type ContextRef struct {
+	Namespace   string        `json:"namespace"`
+	ID          string        `json:"id"`
+	Version     int           `json:"version,omitempty"`
+	Range       *ContentRange `json:"range,omitempty"`
+	HashAlgo    string        `json:"hash_algo,omitempty"`
+	ContentHash string        `json:"content_hash,omitempty"`
+	HashScope   string        `json:"hash_scope,omitempty"`
+	Schema      string        `json:"schema"`
+}
+
+type FragmentHash struct {
+	Algo  string `json:"algo"`
+	Scope string `json:"scope"`
+	Value string `json:"value"`
+}
+
 // Slot describes where a fragment is rendered in the LLM input layout.
 type Slot string
 
@@ -161,6 +204,8 @@ type Part struct {
 	Type       PartType       `json:"type"`
 	Text       string         `json:"text,omitempty"`
 	Image      ImageRef       `json:"image,omitempty"`
+	Message    *sdk.Message   `json:"message,omitempty"`
+	ImagePart  *sdk.ImagePart `json:"image_part,omitempty"`
 	SDKMessage *sdk.Message   `json:"-"`
 	SDKImage   *sdk.ImagePart `json:"-"`
 }
@@ -168,6 +213,7 @@ type Part struct {
 // ContextFrag is the typed context fragment abstraction.
 type ContextFrag struct {
 	ID         string          `json:"id"`
+	Ref        ContextRef      `json:"ref,omitempty"`
 	Kind       Kind            `json:"kind"`
 	Role       sdk.MessageRole `json:"role,omitempty"`
 	Slot       Slot            `json:"slot"`
@@ -193,11 +239,17 @@ type AssembledContext struct {
 
 // Manifest is a content-light accounting view for debugging and review.
 type Manifest struct {
-	Version         int              `json:"version"`
-	View            ManifestView     `json:"view,omitempty"`
-	DynamicMutators []DynamicMutator `json:"dynamic_mutators,omitempty"`
-	Counts          ManifestCounts   `json:"counts"`
-	Items           []ManifestItem   `json:"items,omitempty"`
+	SchemaVersions     []SchemaVersion     `json:"schema_versions,omitempty"`
+	View               ManifestView        `json:"view,omitempty"`
+	DynamicMutators    []DynamicMutator    `json:"dynamic_mutators,omitempty"`
+	SlotPolicies       []SlotRenderPolicy  `json:"slot_policies,omitempty"`
+	RenderedOutputs    []RenderedOutputRef `json:"rendered_outputs,omitempty"`
+	EditTrace          []ContextEditTrace  `json:"edit_trace,omitempty"`
+	CoverageTrace      []SummaryCoverage   `json:"coverage_trace,omitempty"`
+	ContinuityGroups   []ContinuityGroup   `json:"continuity_groups,omitempty"`
+	ValidationWarnings []ValidationWarning `json:"validation_warnings,omitempty"`
+	Counts             ManifestCounts      `json:"counts"`
+	Items              []ManifestItem      `json:"items,omitempty"`
 }
 
 // ManifestView names the exact view represented by a manifest.
@@ -231,6 +283,7 @@ type ManifestCounts struct {
 // ManifestItem is one non-sensitive fragment entry.
 type ManifestItem struct {
 	ID         string          `json:"id"`
+	Ref        ContextRef      `json:"ref,omitempty"`
 	Kind       Kind            `json:"kind"`
 	Slot       Slot            `json:"slot"`
 	Role       sdk.MessageRole `json:"role,omitempty"`
@@ -244,4 +297,92 @@ type ManifestItem struct {
 	TextBytes  int             `json:"text_bytes,omitempty"`
 	ImageCount int             `json:"image_count,omitempty"`
 	Scope      Scope           `json:"scope,omitempty"`
+}
+
+type SlotRenderPolicy struct {
+	Slot          Slot   `json:"slot"`
+	Order         string `json:"order,omitempty"`
+	DedupeBy      string `json:"dedupe_by,omitempty"`
+	CoverageAware bool   `json:"coverage_aware,omitempty"`
+	Target        string `json:"target"`
+}
+
+type RenderedOutputRef struct {
+	Target string       `json:"target"`
+	Slot   Slot         `json:"slot,omitempty"`
+	Refs   []ContextRef `json:"refs,omitempty"`
+}
+
+type ContextEditOp string
+
+const (
+	EditAppend   ContextEditOp = "append"
+	EditReplace  ContextEditOp = "replace"
+	EditRemove   ContextEditOp = "remove"
+	EditCover    ContextEditOp = "cover"
+	EditAnnotate ContextEditOp = "annotate"
+)
+
+type ContextEdit struct {
+	EditID        string            `json:"edit_id"`
+	Slot          Slot              `json:"slot"`
+	Op            ContextEditOp     `json:"op"`
+	Refs          []ContextRef      `json:"refs,omitempty"`
+	Payload       []ContextFrag     `json:"payload,omitempty"`
+	Preconditions EditPreconditions `json:"preconditions,omitempty"`
+	Schema        SchemaVersion     `json:"schema"`
+}
+
+type EditPreconditions struct {
+	ExpectedRevision string            `json:"expected_revision,omitempty"`
+	MaxSequence      int64             `json:"max_sequence,omitempty"`
+	ExpectedHashes   map[string]string `json:"expected_hashes,omitempty"`
+}
+
+type ContextEditTrace struct {
+	EditID string        `json:"edit_id,omitempty"`
+	Op     ContextEditOp `json:"op,omitempty"`
+	Slot   Slot          `json:"slot,omitempty"`
+	Refs   []ContextRef  `json:"refs,omitempty"`
+}
+
+type SummaryCoverage struct {
+	CoverageID     string        `json:"coverage_id"`
+	SummaryRef     ContextRef    `json:"summary_ref"`
+	CoveredRefs    []ContextRef  `json:"covered_refs,omitempty"`
+	CoveredFragIDs []string      `json:"covered_frag_ids,omitempty"`
+	Schema         SchemaVersion `json:"schema"`
+}
+
+type ContinuityGroup struct {
+	ID               string       `json:"id"`
+	Kind             string       `json:"kind"`
+	Provider         string       `json:"provider,omitempty"`
+	ModelFamily      string       `json:"model_family,omitempty"`
+	Refs             []ContextRef `json:"refs,omitempty"`
+	MustKeepTogether bool         `json:"must_keep_together,omitempty"`
+	MustKeepRaw      bool         `json:"must_keep_raw,omitempty"`
+	MustKeepOrder    bool         `json:"must_keep_order,omitempty"`
+	MustBeComplete   bool         `json:"must_be_complete,omitempty"`
+}
+
+type ValidationWarning struct {
+	Code    string     `json:"code"`
+	Message string     `json:"message,omitempty"`
+	Ref     ContextRef `json:"ref,omitempty"`
+}
+
+type ConflictKind string
+
+const (
+	ConflictMissingRef          ConflictKind = "missing_ref"
+	ConflictContentHashMismatch ConflictKind = "content_hash_mismatch"
+	ConflictInvalidSchema       ConflictKind = "invalid_schema"
+)
+
+type ContextConflict struct {
+	Kind     ConflictKind `json:"kind"`
+	Key      string       `json:"key,omitempty"`
+	Expected string       `json:"expected,omitempty"`
+	Actual   string       `json:"actual,omitempty"`
 }

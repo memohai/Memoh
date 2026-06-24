@@ -78,6 +78,7 @@ func Compile(input CompileInput) AssembledContext {
 		}
 	}
 
+	frags, warnings := normalizeContextRefs(frags)
 	assembled := Render(frags)
 	assembled.Frags = frags
 	assembled.Manifest = BuildManifest(frags)
@@ -86,6 +87,7 @@ func Compile(input CompileInput) AssembledContext {
 		assembled.Manifest.View = ViewRunConfigPreProvider
 	}
 	assembled.Manifest.DynamicMutators = normalizeDynamicMutators(input.DynamicMutators)
+	assembled.Manifest.ValidationWarnings = append(assembled.Manifest.ValidationWarnings, warnings...)
 	return assembled
 }
 
@@ -225,6 +227,7 @@ func MessageFrag(input MessageFragInput) ContextFrag {
 		},
 		Parts: []Part{{
 			Type:       PartSDKMessage,
+			Message:    &msg,
 			SDKMessage: &msg,
 		}},
 	}
@@ -244,7 +247,8 @@ func ImageFrag(id string, images []sdk.ImagePart, scope Scope, source string) Co
 				MediaType: strings.TrimSpace(image.MediaType),
 				Source:    "inline",
 			},
-			SDKImage: &img,
+			ImagePart: &img,
+			SDKImage:  &img,
 		})
 	}
 	return ContextFrag{
@@ -286,88 +290,6 @@ func Upsert(frags []ContextFrag, next ContextFrag) []ContextFrag {
 	}
 	if !replaced {
 		out = append(out, next)
-	}
-	return out
-}
-
-// BuildManifest creates a non-sensitive summary from fragments.
-func BuildManifest(frags []ContextFrag) Manifest {
-	manifest := Manifest{Version: 1}
-	manifest.Items = make([]ManifestItem, 0, len(frags))
-	for _, frag := range frags {
-		item := ManifestItem{
-			ID:         frag.ID,
-			Kind:       frag.Kind,
-			Slot:       frag.Slot,
-			Role:       frag.Role,
-			Priority:   frag.Priority,
-			CacheClass: frag.CacheClass,
-			Trust:      frag.Trust,
-			Source:     frag.Provenance.Source,
-			SourceID:   frag.Provenance.SourceID,
-			Collector:  frag.Provenance.Collector,
-			Scope:      frag.Scope,
-		}
-		for _, part := range frag.Parts {
-			item.PartTypes = append(item.PartTypes, part.Type)
-			switch part.Type {
-			case PartText:
-				item.TextBytes += len(part.Text)
-			case PartSDKMessage:
-				item.TextBytes += messageTextBytes(part.SDKMessage)
-				item.ImageCount += messageImageCount(part.SDKMessage)
-				manifest.Counts.Messages++
-			case PartImage:
-				item.ImageCount++
-			}
-		}
-		manifest.Counts.TextBytes += item.TextBytes
-		manifest.Counts.Images += item.ImageCount
-		manifest.Items = append(manifest.Items, item)
-	}
-	manifest.Counts.Fragments = len(frags)
-	return manifest
-}
-
-// Render builds the legacy SDK-shaped view from fragments.
-func Render(frags []ContextFrag) AssembledContext {
-	var out AssembledContext
-	for _, frag := range frags {
-		switch frag.Slot {
-		case SlotSystem:
-			for _, part := range frag.Parts {
-				if part.Type != PartText || strings.TrimSpace(part.Text) == "" {
-					continue
-				}
-				if out.System != "" {
-					out.System += "\n\n"
-				}
-				out.System += strings.TrimSpace(part.Text)
-			}
-		case SlotCurrentUser:
-			for _, part := range frag.Parts {
-				switch part.Type {
-				case PartText:
-					if strings.TrimSpace(part.Text) != "" {
-						out.Query = strings.TrimSpace(part.Text)
-					}
-				case PartImage:
-					if part.SDKImage != nil && strings.TrimSpace(part.SDKImage.Image) != "" {
-						out.InlineImages = append(out.InlineImages, *part.SDKImage)
-					}
-				case PartSDKMessage:
-					if part.SDKMessage != nil {
-						out.Messages = append(out.Messages, cloneMessage(*part.SDKMessage))
-					}
-				}
-			}
-		default:
-			for _, part := range frag.Parts {
-				if part.Type == PartSDKMessage && part.SDKMessage != nil {
-					out.Messages = append(out.Messages, cloneMessage(*part.SDKMessage))
-				}
-			}
-		}
 	}
 	return out
 }
@@ -442,41 +364,24 @@ func normalizeScope(scope Scope) Scope {
 	return scope
 }
 
-func cloneMessage(msg sdk.Message) sdk.Message {
-	out := msg
-	if len(msg.Content) > 0 {
-		out.Content = append([]sdk.MessagePart(nil), msg.Content...)
+func normalizeContextRefs(frags []ContextFrag) ([]ContextFrag, []ValidationWarning) {
+	if len(frags) == 0 {
+		return nil, nil
 	}
-	return out
-}
-
-func messageTextBytes(msg *sdk.Message) int {
-	if msg == nil {
-		return 0
-	}
-	total := 0
-	for _, part := range msg.Content {
-		switch p := part.(type) {
-		case sdk.TextPart:
-			total += len(p.Text)
-		case sdk.ReasoningPart:
-			total += len(p.Text)
+	out := make([]ContextFrag, 0, len(frags))
+	var warnings []ValidationWarning
+	for _, frag := range frags {
+		normalized := WithContextRef(frag, frag.Ref)
+		if err := ValidateContextRef(normalized.Ref); err != nil {
+			warnings = append(warnings, ValidationWarning{
+				Code:    "invalid_context_ref",
+				Message: err.Error(),
+				Ref:     normalized.Ref,
+			})
 		}
+		out = append(out, normalized)
 	}
-	return total
-}
-
-func messageImageCount(msg *sdk.Message) int {
-	if msg == nil {
-		return 0
-	}
-	total := 0
-	for _, part := range msg.Content {
-		if _, ok := part.(sdk.ImagePart); ok {
-			total++
-		}
-	}
-	return total
+	return out, warnings
 }
 
 func normalizeDynamicMutators(mutators []DynamicMutator) []DynamicMutator {
