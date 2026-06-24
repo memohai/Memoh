@@ -8,6 +8,7 @@ DROP TABLE IF EXISTS bot_storage_bindings;
 DROP TABLE IF EXISTS storage_providers;
 DROP TABLE IF EXISTS subagents;
 DROP TABLE IF EXISTS schedule;
+DROP TABLE IF EXISTS runtime_diagnostic_events;
 DROP TABLE IF EXISTS lifecycle_events;
 DROP TABLE IF EXISTS container_versions;
 DROP TABLE IF EXISTS snapshots;

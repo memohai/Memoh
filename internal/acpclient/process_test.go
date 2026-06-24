@@ -681,6 +681,49 @@ func TestStartBridgeProcessReportsToolkitFallbackFailure(t *testing.T) {
 	}
 }
 
+func TestResolveCommandDiagnosticReportsToolkitFallbackSource(t *testing.T) {
+	client, server := newRecordingBridgeClient(t)
+	server.setExitCode("command -v codex-acp >/dev/null 2>&1", 127)
+	server.setExitCode("test -x "+containerToolkitBin+"/codex-acp", 0)
+
+	diag := ResolveCommandDiagnostic(context.Background(), client, CommandDiagnosticRequest{
+		Command: "codex-acp",
+		WorkDir: "/data",
+		Backend: WorkspaceBackendContainer,
+	})
+
+	if !diag.Available {
+		t.Fatalf("diagnostic available = false, error = %q", diag.Error)
+	}
+	if diag.ResolvedCommand != containerToolkitBin+"/codex-acp" {
+		t.Fatalf("resolved command = %q, want toolkit fallback", diag.ResolvedCommand)
+	}
+	if diag.Source != "container_toolkit" {
+		t.Fatalf("source = %q, want container_toolkit", diag.Source)
+	}
+}
+
+func TestResolveCommandDiagnosticReportsLocalPathFailure(t *testing.T) {
+	client, server := newRecordingBridgeClient(t)
+	server.setExitCode("test -x /opt/bin/codex-acp", 1)
+
+	diag := ResolveCommandDiagnostic(context.Background(), client, CommandDiagnosticRequest{
+		Command: "/opt/bin/codex-acp",
+		WorkDir: "/Users/user/project",
+		Backend: WorkspaceBackendLocal,
+	})
+
+	if diag.Available {
+		t.Fatalf("diagnostic available = true, want missing path")
+	}
+	if diag.Source != "absolute_path" {
+		t.Fatalf("source = %q, want absolute_path", diag.Source)
+	}
+	if !strings.Contains(diag.Error, "/opt/bin/codex-acp") {
+		t.Fatalf("error %q does not explain missing path", diag.Error)
+	}
+}
+
 type execRecord struct {
 	Command string
 	WorkDir string

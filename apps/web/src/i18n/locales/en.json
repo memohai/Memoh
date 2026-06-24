@@ -61,6 +61,7 @@
     "active": "Active",
     "inactive": "Inactive",
     "loadFailed": "Failed to load",
+    "retry": "Retry",
     "saveFailed": "Failed to save",
     "createdAt": "Created at",
     "none": "None",
@@ -1678,6 +1679,112 @@
       "liveTitle": "Live view",
       "desktopEnabledSuccess": "Desktop environment enabled",
       "desktopDisabledSuccess": "Desktop environment disabled"
+    },
+    "runtimeDiagnostics": {
+      "acpTitle": "ACP Runtime Health",
+      "workspaceTitle": "Workspace Runtime Health",
+      "summaryLabel": "Startup decision",
+      "loadingSummary": "Checking runtime diagnostics...",
+      "checkedAt": "Checked {time}",
+      "evidenceLabel": "Diagnostic evidence",
+      "evidenceDescription": "Read-only probes only. This panel never starts, stops, prepares, ensures, or resumes a runtime.",
+      "drawerDescription": "Provider CLI, auth, profile/model, session reuse, workspace/container/display evidence, and recent runtime errors.",
+      "loadFailed": "Failed to load runtime diagnostics",
+      "errorLabel": "Load error",
+      "jumpDesktop": "Go to Desktop",
+      "jumpWorkspace": "Go to Workspace",
+      "summaryTemplate": "Workspace {workspace}, container {container}, display {display}. ACP providers: {enabled} enabled, {blocked} blocked, {warm} warm resumable.",
+      "emptyValue": "-",
+      "emptyGroup": "No diagnostic evidence for this group yet.",
+      "states": {
+        "ok": "OK",
+        "warn": "Warning",
+        "error": "Error",
+        "disabled": "Disabled",
+        "unknown": "Unknown",
+        "not_applicable": "N/A"
+      },
+      "sections": {
+        "startup": "Startup Decision",
+        "auth": "Auth",
+        "cli": "CLI",
+        "model_profile": "Model/Profile",
+        "session": "Session Resume",
+        "events": "Recent Errors",
+        "raw": "Raw Evidence"
+      },
+      "rows": {
+        "overall": "Overall",
+        "workspace": "Workspace",
+        "container": "Container",
+        "display": "Display",
+        "acpAgent": "ACP agent",
+        "event": "event",
+        "providerProfile": "{name} profile",
+        "providerModel": "{name} model"
+      },
+      "values": {
+        "available": "available",
+        "registered": "registered",
+        "notRegistered": "not registered",
+        "backendSupported": "backend supported",
+        "backendUnsupported": "backend unsupported",
+        "selfManaged": "self-managed",
+        "authReady": "{mode} ready",
+        "authMissing": "{mode} missing",
+        "authWarning": "{mode} warning"
+      },
+      "detail": {
+        "source": "source: {value}",
+        "path": "path: {value}",
+        "session": "session: {value}",
+        "runtime": "runtime: {value}",
+        "mode": "mode: {value}",
+        "current": "current: {value}",
+        "default": "default: {value}",
+        "missing": "missing: {value}",
+        "pins": "pins: {value}"
+      },
+      "raw": {
+        "checkedAt": "Checked at",
+        "overall": "Overall state",
+        "acpAgents": "ACP agents",
+        "workspace": "Workspace",
+        "container": "Container",
+        "display": "Display",
+        "recentEvents": "Recent events"
+      },
+      "sessionStates": {
+        "warm_resumable": "warm reusable",
+        "cold_start_required": "cold start required",
+        "no_acp_session": "no ACP session",
+        "blocked": "blocked"
+      },
+      "modelStates": {
+        "known": "known",
+        "unknown": "unknown",
+        "unsupported": "unsupported",
+        "unknown_until_runtime_start": "unknown until runtime start"
+      },
+      "codes": {
+        "workspace_local": { "detail": "Trusted local workspace is configured. Bridge probes are skipped to keep diagnostics read-only." },
+        "workspace_reachable": { "detail": "Workspace bridge is reachable." },
+        "bridge_unreachable": { "detail": "Workspace bridge is not reachable.", "nextAction": "Start or repair the workspace runtime before launching ACP." },
+        "runtime_cold_start_required": { "detail": "Runtime exists in saved state, but no matching warm process is available." },
+        "container_running": { "detail": "Workspace container task is running." },
+        "container_stopped": { "detail": "Workspace container exists but its task is not running." },
+        "display_disabled": { "detail": "Workspace display is disabled for this bot." },
+        "display_available": { "detail": "Workspace display is enabled and reachable." },
+        "display_unavailable": { "detail": "Workspace display is enabled but not currently reachable." },
+        "acp_agent_disabled": { "detail": "ACP provider is disabled for this bot." },
+        "unsupported_backend": { "detail": "This ACP provider does not support the current workspace backend.", "nextAction": "Switch workspace backend or choose a provider that supports this backend." },
+        "workspace_bridge_unreachable": { "detail": "Workspace bridge is not reachable.", "nextAction": "Start or repair the workspace runtime before launching ACP." },
+        "cli_missing": { "detail": "Provider CLI is not available in the selected workspace.", "nextAction": "Install the provider CLI or adjust the provider command." },
+        "auth_missing": { "detail": "Required provider authentication is missing.", "nextAction": "Open ACP provider settings and configure authentication." },
+        "auth_file_permissive": { "detail": "Local provider auth file is readable by group or other users.", "nextAction": "Tighten local auth file permissions before starting ACP." },
+        "warm_resumable": { "detail": "A matching ACP runtime is already warm and can resume this session." },
+        "no_acp_session": { "detail": "No ACP session exists yet for this provider." }
+      }
     },
     "terminal": {
       "title": "Terminal",

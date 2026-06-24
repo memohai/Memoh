@@ -46,6 +46,7 @@ import {
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ContainerCreateProgress from './container-create-progress.vue'
+import RuntimeDiagnosticsPanel from './runtime-diagnostics-panel.vue'
 import PageShell from '@/components/page-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
@@ -885,6 +886,10 @@ const showDataRow = computed(() =>
 
 const activeTab = useSyncedQueryParam('tab', 'overview')
 
+function handleDiagnosticsJump(target: string) {
+  activeTab.value = target
+}
+
 watch(containerMissing, (missing) => {
   if (!missing) {
     createImagePrefilled.value = false
@@ -975,6 +980,14 @@ watch([activeTab, botId], ([tab]) => {
   >
     <!-- No title-row toolbar: usage keeps itself fresh by polling while the tab is
          open and visible, so there is no manual "refresh" to push onto the user. -->
+    <RuntimeDiagnosticsPanel
+      v-if="botId"
+      class="mb-8"
+      :bot-id="botId"
+      scope="workspace"
+      :jump-targets="[{ label: $t('bots.runtimeDiagnostics.jumpDesktop'), target: 'desktop' }]"
+      @jump="handleDiagnosticsJump"
+    />
 
     <!-- Loading -->
     <div

@@ -8,92 +8,98 @@
       variant="tab"
       :title="$t('bots.tabs.acp')"
     >
-      <div
-        v-if="profilesLoading && profiles.length === 0"
-        class="space-y-3"
-      >
-        <Skeleton
-          v-for="n in 2"
-          :key="n"
-          class="h-[4.5rem] w-full rounded-[var(--radius-menu-shell)]"
+      <div class="space-y-8">
+        <RuntimeDiagnosticsPanel
+          :bot-id="botId"
+          scope="acp"
         />
-      </div>
 
-      <Empty
-        v-else-if="profiles.length === 0"
-        class="rounded-[var(--radius-menu-shell)] border border-dashed border-border py-16"
-      >
-        <EmptyTitle>{{ $t('bots.settings.acpEmptyTitle') }}</EmptyTitle>
-        <EmptyDescription>{{ $t('bots.settings.acpEmptyDescription') }}</EmptyDescription>
-      </Empty>
-
-      <div
-        v-else
-        class="space-y-3"
-      >
         <div
-          v-for="profile in profiles"
-          :key="profile.id"
-          class="relative flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card p-3.5 transition-colors hover:bg-accent/30 dark:hover:bg-accent"
+          v-if="profilesLoading && profiles.length === 0"
+          class="space-y-3"
         >
-          <!-- Stretched navigate target: fills the card so the whole row opens
-               setup, while the Switch above keeps its own click. -->
-          <button
-            type="button"
-            class="absolute inset-0 rounded-[var(--radius-menu-shell)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            :aria-label="profile.display_name || profile.id"
-            @click="openAgent(profile)"
+          <Skeleton
+            v-for="n in 2"
+            :key="n"
+            class="h-[4.5rem] w-full rounded-[var(--radius-menu-shell)]"
           />
+        </div>
 
-          <span class="pointer-events-none relative flex size-10 shrink-0 items-center justify-center rounded-full bg-muted">
-            <component
-              :is="acpAgentIcon(profile.id, true)"
-              class="size-5"
-            />
-            <!-- Green dot: on + ready (healthy state — small, says nothing more). -->
-            <span
-              v-if="agentRowState(profile) === 'on_ready'"
-              class="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full bg-success ring-2 ring-card"
-            />
-          </span>
+        <Empty
+          v-else-if="profiles.length === 0"
+          class="rounded-[var(--radius-menu-shell)] border border-dashed border-border py-16"
+        >
+          <EmptyTitle>{{ $t('bots.settings.acpEmptyTitle') }}</EmptyTitle>
+          <EmptyDescription>{{ $t('bots.settings.acpEmptyDescription') }}</EmptyDescription>
+        </Empty>
 
-          <span class="pointer-events-none relative min-w-0 flex-1">
-            <span class="block truncate text-sm font-medium text-foreground">
-              {{ profile.display_name || profile.id }}
-            </span>
-            <span
-              v-if="profile.description"
-              class="mt-0.5 block truncate text-xs text-muted-foreground"
-            >
-              {{ profile.description }}
-            </span>
-          </span>
-
-          <div class="relative flex shrink-0 items-center gap-3">
-            <!-- Row status: surfaced as a Badge (aligns to a region, not a loose dot).
-                 Needs-config is actionable so it earns its place; "Disabled" distinguishes
-                 a previously-configured agent from one never touched. -->
-            <Badge
-              v-if="agentRowState(profile) === 'on_needs_config'"
-              variant="outline"
-              size="sm"
-              class="border-warning/30 text-warning"
-            >
-              {{ $t('bots.settings.acpStatusNeedsConfig') }}
-            </Badge>
-            <Badge
-              v-else-if="agentRowState(profile) === 'off_configured'"
-              variant="outline"
-              size="sm"
-            >
-              {{ $t('bots.settings.acpStatusOff') }}
-            </Badge>
-            <ChevronRight class="size-4 text-muted-foreground/60" />
-            <Switch
-              :model-value="agentForm(profile).enabled"
+        <div
+          v-else
+          class="space-y-3"
+        >
+          <div
+            v-for="profile in profiles"
+            :key="profile.id"
+            class="relative flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card p-3.5 transition-colors hover:bg-accent"
+          >
+            <!-- Stretched navigate target: fills the card so the whole row opens
+                 setup, while the Switch above keeps its own click. -->
+            <button
+              type="button"
+              class="absolute inset-0 rounded-[var(--radius-menu-shell)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               :aria-label="profile.display_name || profile.id"
-              @update:model-value="(val) => setAgentEnabled(profile, !!val)"
+              @click="openAgent(profile)"
             />
+
+            <span class="pointer-events-none relative flex size-10 shrink-0 items-center justify-center rounded-full bg-muted">
+              <component
+                :is="acpAgentIcon(profile.id, true)"
+                class="size-5"
+              />
+              <!-- Green dot: on + ready (healthy state — small, says nothing more). -->
+              <span
+                v-if="agentRowState(profile) === 'on_ready'"
+                class="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full bg-success ring-2 ring-card"
+              />
+            </span>
+
+            <span class="pointer-events-none relative min-w-0 flex-1">
+              <span class="block truncate text-sm font-medium text-foreground">
+                {{ profile.display_name || profile.id }}
+              </span>
+              <span
+                v-if="profile.description"
+                class="mt-0.5 block truncate text-xs text-muted-foreground"
+              >
+                {{ profile.description }}
+              </span>
+            </span>
+
+            <div class="relative flex shrink-0 items-center gap-3">
+              <!-- Row status: surfaced as a Badge (aligns to a region, not a loose dot).
+                   Needs-config is actionable so it earns its place; "Disabled" distinguishes
+                   a previously-configured agent from one never touched. -->
+              <Badge
+                v-if="agentRowState(profile) === 'on_needs_config'"
+                variant="warning"
+                size="sm"
+              >
+                {{ $t('bots.settings.acpStatusNeedsConfig') }}
+              </Badge>
+              <Badge
+                v-else-if="agentRowState(profile) === 'off_configured'"
+                variant="outline"
+                size="sm"
+              >
+                {{ $t('bots.settings.acpStatusOff') }}
+              </Badge>
+              <ChevronRight class="size-4 text-muted-foreground" />
+              <Switch
+                :model-value="agentForm(profile).enabled"
+                :aria-label="profile.display_name || profile.id"
+                @update:model-value="(val) => setAgentEnabled(profile, !!val)"
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -109,12 +115,20 @@
     >
       <Button
         variant="ghost"
-        class="mb-6 text-foreground/85"
+        class="mb-6 text-foreground"
         @click="backToList()"
       >
         <ChevronLeft class="size-4" />
         {{ $t('bots.tabs.acp') }}
       </Button>
+
+      <RuntimeDiagnosticsPanel
+        v-if="selectedProfile"
+        class="mb-8"
+        :bot-id="botId"
+        scope="acp"
+        :agent-id="selectedProfile.id"
+      />
 
       <SettingsAcpDetail
         v-if="selectedProfile"
@@ -138,6 +152,7 @@ import { getAcpProfiles, getBotsById, putBotsById } from '@memohai/sdk'
 import type { AcpprofilePublicProfile, BotsUpdateBotRequest } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import SettingsAcpDetail from './settings-acp-detail.vue'
+import RuntimeDiagnosticsPanel from './runtime-diagnostics-panel.vue'
 import PageShell from '@/components/page-shell/index.vue'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 import { useViewSwap } from '@/composables/useViewSwap'

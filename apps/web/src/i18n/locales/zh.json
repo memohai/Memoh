@@ -61,6 +61,7 @@
     "active": "启用",
     "inactive": "未启用",
     "loadFailed": "加载失败",
+    "retry": "重试",
     "saveFailed": "保存失败",
     "createdAt": "创建时间",
     "none": "无",
@@ -1678,6 +1679,112 @@
       "liveTitle": "实时画面",
       "desktopEnabledSuccess": "桌面环境已开启",
       "desktopDisabledSuccess": "桌面环境已关闭"
+    },
+    "runtimeDiagnostics": {
+      "acpTitle": "ACP Runtime Health",
+      "workspaceTitle": "Workspace Runtime Health",
+      "summaryLabel": "启动判定",
+      "loadingSummary": "正在检查 runtime 诊断...",
+      "checkedAt": "{time} 检查",
+      "evidenceLabel": "诊断证据",
+      "evidenceDescription": "这里只做只读探测，不会启动、停止、prepare、ensure 或 resume runtime。",
+      "drawerDescription": "查看 provider CLI、auth、profile/model、session 复用、workspace/container/display 证据和最近 runtime 错误。",
+      "loadFailed": "加载 runtime 诊断失败",
+      "errorLabel": "加载错误",
+      "jumpDesktop": "跳到桌面设置",
+      "jumpWorkspace": "跳到工作区设置",
+      "summaryTemplate": "Workspace {workspace}，container {container}，display {display}。ACP provider：{enabled} 个已启用，{blocked} 个阻塞，{warm} 个可热复用。",
+      "emptyValue": "-",
+      "emptyGroup": "这一组暂时没有诊断证据。",
+      "states": {
+        "ok": "正常",
+        "warn": "警告",
+        "error": "错误",
+        "disabled": "已关闭",
+        "unknown": "未知",
+        "not_applicable": "不适用"
+      },
+      "sections": {
+        "startup": "启动判定",
+        "auth": "身份认证",
+        "cli": "CLI",
+        "model_profile": "模型/Profile",
+        "session": "Session 复用",
+        "events": "最近错误",
+        "raw": "原始证据"
+      },
+      "rows": {
+        "overall": "整体状态",
+        "workspace": "Workspace",
+        "container": "Container",
+        "display": "Display",
+        "acpAgent": "ACP provider",
+        "event": "事件",
+        "providerProfile": "{name} profile",
+        "providerModel": "{name} model"
+      },
+      "values": {
+        "available": "可用",
+        "registered": "已注册",
+        "notRegistered": "未注册",
+        "backendSupported": "backend 支持",
+        "backendUnsupported": "backend 不支持",
+        "selfManaged": "自行管理",
+        "authReady": "{mode} 已就绪",
+        "authMissing": "{mode} 缺失",
+        "authWarning": "{mode} 有警告"
+      },
+      "detail": {
+        "source": "来源：{value}",
+        "path": "路径：{value}",
+        "session": "session：{value}",
+        "runtime": "runtime：{value}",
+        "mode": "模式：{value}",
+        "current": "当前：{value}",
+        "default": "默认：{value}",
+        "missing": "缺失：{value}",
+        "pins": "固定项：{value}"
+      },
+      "raw": {
+        "checkedAt": "检查时间",
+        "overall": "整体状态",
+        "acpAgents": "ACP providers",
+        "workspace": "Workspace",
+        "container": "Container",
+        "display": "Display",
+        "recentEvents": "最近事件"
+      },
+      "sessionStates": {
+        "warm_resumable": "可热复用",
+        "cold_start_required": "需要冷启动",
+        "no_acp_session": "没有 ACP session",
+        "blocked": "已阻塞"
+      },
+      "modelStates": {
+        "known": "已知",
+        "unknown": "未知",
+        "unsupported": "不支持",
+        "unknown_until_runtime_start": "runtime 启动前未知"
+      },
+      "codes": {
+        "workspace_local": { "detail": "已配置可信本地 workspace。为保持诊断只读，跳过 bridge 探测。" },
+        "workspace_reachable": { "detail": "Workspace bridge 可访问。" },
+        "bridge_unreachable": { "detail": "Workspace bridge 不可访问。", "nextAction": "启动或修复 workspace runtime 后再启动 ACP。" },
+        "runtime_cold_start_required": { "detail": "存在保存的 runtime/session 状态，但当前没有匹配的热进程。" },
+        "container_running": { "detail": "Workspace container task 正在运行。" },
+        "container_stopped": { "detail": "Workspace container 存在，但 task 未运行。" },
+        "display_disabled": { "detail": "此 bot 的 workspace display 已关闭。" },
+        "display_available": { "detail": "Workspace display 已启用并可访问。" },
+        "display_unavailable": { "detail": "Workspace display 已启用，但当前不可访问。" },
+        "acp_agent_disabled": { "detail": "此 bot 未启用该 ACP provider。" },
+        "unsupported_backend": { "detail": "该 ACP provider 不支持当前 workspace backend。", "nextAction": "切换 workspace backend，或选择支持当前 backend 的 provider。" },
+        "workspace_bridge_unreachable": { "detail": "Workspace bridge 不可访问。", "nextAction": "启动或修复 workspace runtime 后再启动 ACP。" },
+        "cli_missing": { "detail": "所选 workspace 中找不到 provider CLI。", "nextAction": "安装 provider CLI，或调整 provider command。" },
+        "auth_missing": { "detail": "缺少必要的 provider auth。", "nextAction": "打开 ACP provider 设置并配置 auth。" },
+        "auth_file_permissive": { "detail": "本地 provider auth 文件可被 group 或 other 用户读取。", "nextAction": "启动 ACP 前收紧本地 auth 文件权限。" },
+        "warm_resumable": { "detail": "已有匹配的 ACP runtime 处于热状态，可复用此 session。" },
+        "no_acp_session": { "detail": "该 provider 还没有 ACP session。" }
+      }
     },
     "terminal": {
       "title": "终端",

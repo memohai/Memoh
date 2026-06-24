@@ -468,6 +468,21 @@ type ProviderOauthToken struct {
 	UpdatedAt        string         `json:"updated_at"`
 }
 
+type RuntimeDiagnosticEvent struct {
+	ID        string         `json:"id"`
+	BotID     string         `json:"bot_id"`
+	Scope     string         `json:"scope"`
+	AgentID   string         `json:"agent_id"`
+	SessionID sql.NullString `json:"session_id"`
+	RuntimeID string         `json:"runtime_id"`
+	Phase     string         `json:"phase"`
+	Severity  string         `json:"severity"`
+	Code      string         `json:"code"`
+	Message   string         `json:"message"`
+	Metadata  string         `json:"metadata"`
+	CreatedAt string         `json:"created_at"`
+}
+
 type Schedule struct {
 	ID           string        `json:"id"`
 	Name         string        `json:"name"`

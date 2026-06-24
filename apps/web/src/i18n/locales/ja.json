@@ -55,6 +55,7 @@
     "active": "アクティブ",
     "inactive": "非アクティブ",
     "loadFailed": "読み込みに失敗しました",
+    "retry": "リトライ",
     "saveFailed": "保存に失敗しました",
     "createdAt": "作成日時",
     "none": "なし",
@@ -1692,6 +1693,112 @@
       "desktopEnabledSuccess": "Desktop環境が有効になっている",
       "desktopDisabledSuccess": "Desktop環境が無効になっている",
       "unknown": "未知"
+    },
+    "runtimeDiagnostics": {
+      "acpTitle": "ACP Runtime Health",
+      "workspaceTitle": "Workspace Runtime Health",
+      "summaryLabel": "起動判定",
+      "loadingSummary": "runtime診断を確認しています...",
+      "checkedAt": "{time} に確認",
+      "evidenceLabel": "診断エビデンス",
+      "evidenceDescription": "読み取り専用のprobeです。このパネルからruntimeの起動、停止、prepare、ensure、resumeは実行しません。",
+      "drawerDescription": "provider CLI、auth、profile/model、session再利用、workspace/container/displayのエビデンス、最近のruntimeエラーを表示します。",
+      "loadFailed": "runtime診断の読み込みに失敗しました",
+      "errorLabel": "読み込みエラー",
+      "jumpDesktop": "Desktop設定へ",
+      "jumpWorkspace": "Workspace設定へ",
+      "summaryTemplate": "Workspace {workspace}、container {container}、display {display}。ACP provider: {enabled}件有効、{blocked}件ブロック、{warm}件がwarm再利用可能。",
+      "emptyValue": "-",
+      "emptyGroup": "このグループにはまだ診断エビデンスがありません。",
+      "states": {
+        "ok": "OK",
+        "warn": "警告",
+        "error": "エラー",
+        "disabled": "無効",
+        "unknown": "不明",
+        "not_applicable": "対象外"
+      },
+      "sections": {
+        "startup": "起動判定",
+        "auth": "認証",
+        "cli": "CLI",
+        "model_profile": "モデル/Profile",
+        "session": "Session再利用",
+        "events": "最近のエラー",
+        "raw": "生のエビデンス"
+      },
+      "rows": {
+        "overall": "全体",
+        "workspace": "Workspace",
+        "container": "Container",
+        "display": "Display",
+        "acpAgent": "ACP provider",
+        "event": "イベント",
+        "providerProfile": "{name} profile",
+        "providerModel": "{name} model"
+      },
+      "values": {
+        "available": "利用可能",
+        "registered": "登録済み",
+        "notRegistered": "未登録",
+        "backendSupported": "backend対応",
+        "backendUnsupported": "backend非対応",
+        "selfManaged": "自己管理",
+        "authReady": "{mode} 準備完了",
+        "authMissing": "{mode} 不足",
+        "authWarning": "{mode} 警告"
+      },
+      "detail": {
+        "source": "ソース: {value}",
+        "path": "パス: {value}",
+        "session": "session: {value}",
+        "runtime": "runtime: {value}",
+        "mode": "モード: {value}",
+        "current": "現在: {value}",
+        "default": "デフォルト: {value}",
+        "missing": "不足: {value}",
+        "pins": "固定値: {value}"
+      },
+      "raw": {
+        "checkedAt": "確認日時",
+        "overall": "全体状態",
+        "acpAgents": "ACP providers",
+        "workspace": "Workspace",
+        "container": "Container",
+        "display": "Display",
+        "recentEvents": "最近のイベント"
+      },
+      "sessionStates": {
+        "warm_resumable": "warm再利用可能",
+        "cold_start_required": "cold startが必要",
+        "no_acp_session": "ACP sessionなし",
+        "blocked": "ブロック中"
+      },
+      "modelStates": {
+        "known": "既知",
+        "unknown": "不明",
+        "unsupported": "非対応",
+        "unknown_until_runtime_start": "runtime起動まで不明"
+      },
+      "codes": {
+        "workspace_local": { "detail": "信頼済みlocal workspaceが設定されています。診断を読み取り専用に保つためbridge probeはスキップします。" },
+        "workspace_reachable": { "detail": "Workspace bridgeに到達できます。" },
+        "bridge_unreachable": { "detail": "Workspace bridgeに到達できません。", "nextAction": "ACPを起動する前にworkspace runtimeを起動または修復してください。" },
+        "runtime_cold_start_required": { "detail": "保存済みruntime/session状態はありますが、一致するwarm processはありません。" },
+        "container_running": { "detail": "Workspace container taskは実行中です。" },
+        "container_stopped": { "detail": "Workspace containerはありますが、taskは実行中ではありません。" },
+        "display_disabled": { "detail": "このbotではworkspace displayが無効です。" },
+        "display_available": { "detail": "Workspace displayは有効で到達可能です。" },
+        "display_unavailable": { "detail": "Workspace displayは有効ですが、現在到達できません。" },
+        "acp_agent_disabled": { "detail": "このbotではACP providerが無効です。" },
+        "unsupported_backend": { "detail": "このACP providerは現在のworkspace backendに対応していません。", "nextAction": "workspace backendを切り替えるか、対応するproviderを選択してください。" },
+        "workspace_bridge_unreachable": { "detail": "Workspace bridgeに到達できません。", "nextAction": "ACPを起動する前にworkspace runtimeを起動または修復してください。" },
+        "cli_missing": { "detail": "選択中のworkspaceでprovider CLIを利用できません。", "nextAction": "provider CLIをインストールするか、provider commandを調整してください。" },
+        "auth_missing": { "detail": "必要なprovider authがありません。", "nextAction": "ACP provider設定を開いてauthを設定してください。" },
+        "auth_file_permissive": { "detail": "local provider authファイルがgroupまたはotherユーザーから読み取り可能です。", "nextAction": "ACPを起動する前にlocal authファイルの権限を絞ってください。" },
+        "warm_resumable": { "detail": "一致するACP runtimeはすでにwarmで、このsessionを再利用できます。" },
+        "no_acp_session": { "detail": "このproviderにはまだACP sessionがありません。" }
+      }
     },
     "terminal": {
       "title": "Terminal",

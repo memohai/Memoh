@@ -5641,6 +5641,44 @@
                 }
             }
         },
+        "/bots/{bot_id}/runtime-diagnostics": {
+            "get": {
+                "description": "Returns read-only ACP, workspace, container, and display runtime diagnostics for a bot.",
+                "tags": [
+                    "bots"
+                ],
+                "summary": "Get bot runtime diagnostics",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/runtimediagnostics.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/schedule": {
             "get": {
                 "description": "List schedules for current user",
@@ -13762,7 +13800,7 @@
                     "type": "string"
                 },
                 "row": {
-                    "description": "Row groups buttons into keyboard rows for renderers that support grids\n(e.g. Telegram inline keyboards). Buttons sharing a Row render together;\nrows appear in ascending first-seen order. Renderers without grid support\nignore this field. 0 is the default (single row, prior behavior).",
+                    "description": "Row groups buttons into keyboard rows for renderers that support grids\n(e.g. Telegram inline keyboards). Buttons sharing a Row render together;\nrows appear in ascending numeric order. Renderers without grid support\nignore this field. 0 is the default (single row, prior behavior).",
                     "type": "integer"
                 },
                 "type": {
@@ -13904,6 +13942,9 @@
                     "type": "boolean"
                 },
                 "unsend": {
+                    "type": "boolean"
+                },
+                "url_buttons": {
                     "type": "boolean"
                 }
             }
@@ -14178,14 +14219,20 @@
                 "link",
                 "code_block",
                 "mention",
-                "emoji"
+                "emoji",
+                "heading",
+                "blockquote",
+                "list_item"
             ],
             "x-enum-varnames": [
                 "MessagePartText",
                 "MessagePartLink",
                 "MessagePartCodeBlock",
                 "MessagePartMention",
-                "MessagePartEmoji"
+                "MessagePartEmoji",
+                "MessagePartHeading",
+                "MessagePartBlockquote",
+                "MessagePartListItem"
             ]
         },
         "channel.MessageTextStyle": {
@@ -14194,13 +14241,17 @@
                 "bold",
                 "italic",
                 "strikethrough",
-                "code"
+                "code",
+                "underline",
+                "spoiler"
             ],
             "x-enum-varnames": [
                 "MessageStyleBold",
                 "MessageStyleItalic",
                 "MessageStyleStrikethrough",
-                "MessageStyleCode"
+                "MessageStyleCode",
+                "MessageStyleUnderline",
+                "MessageStyleSpoiler"
             ]
         },
         "channel.ReplyRef": {
@@ -17808,6 +17859,483 @@
                 },
                 "name": {
                     "type": "string"
+                }
+            }
+        },
+        "runtimediagnostics.ACPAgentDiagnostic": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string"
+                },
+                "auth": {
+                    "$ref": "#/definitions/runtimediagnostics.ACPAuthDiagnostic"
+                },
+                "cli": {
+                    "$ref": "#/definitions/runtimediagnostics.ACPCLIDiagnostic"
+                },
+                "code": {
+                    "type": "string"
+                },
+                "detail": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "evidence": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "label": {
+                    "type": "string"
+                },
+                "last_error": {
+                    "$ref": "#/definitions/runtimediagnostics.RuntimeEventSummary"
+                },
+                "model": {
+                    "$ref": "#/definitions/runtimediagnostics.ACPModelDiagnostic"
+                },
+                "next_action": {
+                    "type": "string"
+                },
+                "profile": {
+                    "$ref": "#/definitions/runtimediagnostics.ACPProfileDiagnostic"
+                },
+                "session_resume": {
+                    "$ref": "#/definitions/runtimediagnostics.ACPSessionResumeDiagnostic"
+                },
+                "setup_mode": {
+                    "type": "string"
+                },
+                "state": {
+                    "$ref": "#/definitions/runtimediagnostics.State"
+                },
+                "workspace_backend": {
+                    "type": "string"
+                }
+            }
+        },
+        "runtimediagnostics.ACPAuthDiagnostic": {
+            "type": "object",
+            "properties": {
+                "api_key_present": {
+                    "type": "boolean"
+                },
+                "missing_fields": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "mode": {
+                    "type": "string"
+                },
+                "oauth_present": {
+                    "type": "boolean"
+                },
+                "required_fields": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "self_managed": {
+                    "type": "boolean"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "warning_code": {
+                    "type": "string"
+                },
+                "warning_detail": {
+                    "type": "string"
+                }
+            }
+        },
+        "runtimediagnostics.ACPCLIDiagnostic": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
+                },
+                "checks": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "configured_args": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "configured_command": {
+                    "type": "string"
+                },
+                "effective_args": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "effective_command": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "resolved_path": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                }
+            }
+        },
+        "runtimediagnostics.ACPModelDiagnostic": {
+            "type": "object",
+            "properties": {
+                "available_models": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/acpclient.ModelInfo"
+                    }
+                },
+                "current_model_id": {
+                    "type": "string"
+                },
+                "default_model_id": {
+                    "type": "string"
+                },
+                "detail": {
+                    "type": "string"
+                },
+                "state": {
+                    "$ref": "#/definitions/runtimediagnostics.ACPModelState"
+                }
+            }
+        },
+        "runtimediagnostics.ACPModelState": {
+            "type": "string",
+            "enum": [
+                "known",
+                "unknown",
+                "unsupported",
+                "unknown_until_runtime_start"
+            ],
+            "x-enum-varnames": [
+                "ACPModelStateKnown",
+                "ACPModelStateUnknown",
+                "ACPModelStateUnsupported",
+                "ACPModelStateUnknownUntilRuntimeStart"
+            ]
+        },
+        "runtimediagnostics.ACPProfileDiagnostic": {
+            "type": "object",
+            "properties": {
+                "backend_supported": {
+                    "type": "boolean"
+                },
+                "registered": {
+                    "type": "boolean"
+                },
+                "session_config_pins": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "session_mode_pin": {
+                    "type": "string"
+                }
+            }
+        },
+        "runtimediagnostics.ACPSessionResumeDiagnostic": {
+            "type": "object",
+            "properties": {
+                "acp_session_id": {
+                    "type": "string"
+                },
+                "detail": {
+                    "type": "string"
+                },
+                "runtime_id": {
+                    "type": "string"
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "state": {
+                    "$ref": "#/definitions/runtimediagnostics.ACPSessionResumeState"
+                }
+            }
+        },
+        "runtimediagnostics.ACPSessionResumeState": {
+            "type": "string",
+            "enum": [
+                "warm_resumable",
+                "cold_start_required",
+                "no_acp_session",
+                "disabled",
+                "blocked"
+            ],
+            "x-enum-varnames": [
+                "ACPSessionResumeStateWarmResumable",
+                "ACPSessionResumeStateColdStartRequired",
+                "ACPSessionResumeStateNoACPSession",
+                "ACPSessionResumeStateDisabled",
+                "ACPSessionResumeStateBlocked"
+            ]
+        },
+        "runtimediagnostics.ContainerDiagnostic": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "container_id": {
+                    "type": "string"
+                },
+                "detail": {
+                    "type": "string"
+                },
+                "evidence": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "exists": {
+                    "type": "boolean"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "metrics_supported": {
+                    "type": "boolean"
+                },
+                "metrics_unsupported_reason": {
+                    "type": "string"
+                },
+                "next_action": {
+                    "type": "string"
+                },
+                "runtime_backend": {
+                    "type": "string"
+                },
+                "sampled_at": {
+                    "type": "string"
+                },
+                "state": {
+                    "$ref": "#/definitions/runtimediagnostics.State"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "task_running": {
+                    "type": "boolean"
+                },
+                "workspace_backend": {
+                    "type": "string"
+                }
+            }
+        },
+        "runtimediagnostics.DisplayDiagnostic": {
+            "type": "object",
+            "properties": {
+                "a11y_available": {
+                    "type": "boolean"
+                },
+                "available": {
+                    "type": "boolean"
+                },
+                "browser_available": {
+                    "type": "boolean"
+                },
+                "code": {
+                    "type": "string"
+                },
+                "desktop_available": {
+                    "type": "boolean"
+                },
+                "detail": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "encoder": {
+                    "type": "string"
+                },
+                "encoder_available": {
+                    "type": "boolean"
+                },
+                "evidence": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "label": {
+                    "type": "string"
+                },
+                "next_action": {
+                    "type": "string"
+                },
+                "prepare_supported": {
+                    "type": "boolean"
+                },
+                "prepare_system": {
+                    "type": "string"
+                },
+                "running": {
+                    "type": "boolean"
+                },
+                "state": {
+                    "$ref": "#/definitions/runtimediagnostics.State"
+                },
+                "toolkit_available": {
+                    "type": "boolean"
+                },
+                "transport": {
+                    "type": "string"
+                },
+                "unavailable_reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "runtimediagnostics.Response": {
+            "type": "object",
+            "properties": {
+                "acp_agents": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/runtimediagnostics.ACPAgentDiagnostic"
+                    }
+                },
+                "checked_at": {
+                    "type": "string"
+                },
+                "container": {
+                    "$ref": "#/definitions/runtimediagnostics.ContainerDiagnostic"
+                },
+                "display": {
+                    "$ref": "#/definitions/runtimediagnostics.DisplayDiagnostic"
+                },
+                "overall_state": {
+                    "$ref": "#/definitions/runtimediagnostics.State"
+                },
+                "recent_events": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/runtimediagnostics.RuntimeEventSummary"
+                    }
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "workspace": {
+                    "$ref": "#/definitions/runtimediagnostics.WorkspaceDiagnostic"
+                }
+            }
+        },
+        "runtimediagnostics.RuntimeEventSummary": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string"
+                },
+                "bot_id": {
+                    "type": "string"
+                },
+                "code": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "phase": {
+                    "type": "string"
+                },
+                "runtime_id": {
+                    "type": "string"
+                },
+                "scope": {
+                    "type": "string"
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "severity": {
+                    "type": "string"
+                }
+            }
+        },
+        "runtimediagnostics.State": {
+            "type": "string",
+            "enum": [
+                "ok",
+                "warn",
+                "error",
+                "disabled",
+                "unknown",
+                "not_applicable"
+            ],
+            "x-enum-varnames": [
+                "StateOK",
+                "StateWarn",
+                "StateError",
+                "StateDisabled",
+                "StateUnknown",
+                "StateNotApplicable"
+            ]
+        },
+        "runtimediagnostics.WorkspaceDiagnostic": {
+            "type": "object",
+            "properties": {
+                "backend": {
+                    "type": "string"
+                },
+                "bridge_reachable": {
+                    "type": "boolean"
+                },
+                "code": {
+                    "type": "string"
+                },
+                "default_workdir": {
+                    "type": "string"
+                },
+                "detail": {
+                    "type": "string"
+                },
+                "evidence": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "label": {
+                    "type": "string"
+                },
+                "mcp_reachable": {
+                    "type": "boolean"
+                },
+                "next_action": {
+                    "type": "string"
+                },
+                "state": {
+                    "$ref": "#/definitions/runtimediagnostics.State"
                 }
             }
         },

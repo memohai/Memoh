@@ -76,6 +76,7 @@ type Queries interface {
 	CreateModel(ctx context.Context, arg dbsqlc.CreateModelParams) (dbsqlc.Model, error)
 	CreateModelVariant(ctx context.Context, arg dbsqlc.CreateModelVariantParams) (dbsqlc.ModelVariant, error)
 	CreateProvider(ctx context.Context, arg dbsqlc.CreateProviderParams) (dbsqlc.Provider, error)
+	CreateRuntimeDiagnosticEvent(ctx context.Context, arg dbsqlc.CreateRuntimeDiagnosticEventParams) (dbsqlc.RuntimeDiagnosticEvent, error)
 	CreateSchedule(ctx context.Context, arg dbsqlc.CreateScheduleParams) (dbsqlc.Schedule, error)
 	CreateScheduleLog(ctx context.Context, arg dbsqlc.CreateScheduleLogParams) (dbsqlc.CreateScheduleLogRow, error)
 	CreateSearchProvider(ctx context.Context, arg dbsqlc.CreateSearchProviderParams) (dbsqlc.SearchProvider, error)
@@ -112,6 +113,7 @@ type Queries interface {
 	DeleteModelByProviderIDAndModelID(ctx context.Context, arg dbsqlc.DeleteModelByProviderIDAndModelIDParams) error
 	DeleteProvider(ctx context.Context, id pgtype.UUID) error
 	DeleteProviderOAuthToken(ctx context.Context, providerID pgtype.UUID) error
+	DeleteRuntimeDiagnosticEventsBefore(ctx context.Context, before pgtype.Timestamptz) error
 	DeleteSchedule(ctx context.Context, id pgtype.UUID) error
 	DeleteScheduleLogsByBot(ctx context.Context, botID pgtype.UUID) error
 	DeleteScheduleLogsBySchedule(ctx context.Context, scheduleID pgtype.UUID) error
@@ -252,6 +254,8 @@ type Queries interface {
 	ListPendingUserInputsBySession(ctx context.Context, arg dbsqlc.ListPendingUserInputsBySessionParams) ([]dbsqlc.UserInputRequest, error)
 	ListProviders(ctx context.Context) ([]dbsqlc.Provider, error)
 	ListReadableBindingsByProvider(ctx context.Context, emailProviderID pgtype.UUID) ([]dbsqlc.BotEmailBinding, error)
+	ListRuntimeDiagnosticEventBotIDs(ctx context.Context) ([]pgtype.UUID, error)
+	ListRuntimeDiagnosticEventsByBot(ctx context.Context, arg dbsqlc.ListRuntimeDiagnosticEventsByBotParams) ([]dbsqlc.RuntimeDiagnosticEvent, error)
 	ListScheduleLogsByBot(ctx context.Context, arg dbsqlc.ListScheduleLogsByBotParams) ([]dbsqlc.ListScheduleLogsByBotRow, error)
 	ListScheduleLogsBySchedule(ctx context.Context, arg dbsqlc.ListScheduleLogsByScheduleParams) ([]dbsqlc.ListScheduleLogsByScheduleRow, error)
 	ListSchedulesByBot(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.Schedule, error)
@@ -285,6 +289,7 @@ type Queries interface {
 	MarkMessagesCompacted(ctx context.Context, arg dbsqlc.MarkMessagesCompactedParams) error
 	NextVersion(ctx context.Context, containerID string) (int32, error)
 	RejectToolApprovalRequest(ctx context.Context, arg dbsqlc.RejectToolApprovalRequestParams) (dbsqlc.ToolApprovalRequest, error)
+	PruneRuntimeDiagnosticEventsByBotLimit(ctx context.Context, arg dbsqlc.PruneRuntimeDiagnosticEventsByBotLimitParams) error
 	RedeemChannelLinkCode(ctx context.Context, arg dbsqlc.RedeemChannelLinkCodeParams) (dbsqlc.UserChannelIdentityBinding, error)
 	RemoveChatParticipant(ctx context.Context, arg dbsqlc.RemoveChatParticipantParams) error
 	SaveMatrixSyncSinceToken(ctx context.Context, arg dbsqlc.SaveMatrixSyncSinceTokenParams) (int64, error)

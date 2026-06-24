@@ -1,6 +1,6 @@
 <template>
   <div
-    class="group/card relative flex cursor-pointer items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card transition-colors hover:bg-accent/30 dark:hover:bg-accent focus-visible:outline-none"
+    class="group/card relative flex cursor-pointer items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card transition-colors hover:bg-accent focus-visible:outline-none"
     :class="variant === 'sidebar' ? '' : 'px-4 py-3.5'"
     role="button"
     tabindex="0"
@@ -21,7 +21,7 @@
         </p>
         <span
           v-if="timeLabel"
-          class="shrink-0 text-[11px] tabular-nums text-muted-foreground"
+          class="shrink-0 text-caption tabular-nums text-muted-foreground"
         >
           {{ timeLabel }}
         </span>

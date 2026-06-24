@@ -92,6 +92,7 @@ import (
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/registry"
+	"github.com/memohai/memoh/internal/runtimediagnostics"
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
 	"github.com/memohai/memoh/internal/server"
@@ -273,6 +274,10 @@ func provideWorkspaceManager(lc fx.Lifecycle, log *slog.Logger, service ctr.Serv
 	return mgr, nil
 }
 
+func provideRuntimeDiagnosticsService(log *slog.Logger, manager *workspace.Manager, pool *acpagent.SessionPool, sessionService *sessionpkg.Service, queries dbstore.Queries) *runtimediagnostics.Service {
+	return runtimediagnostics.NewService(log, manager, pool, sessionService, queries)
+}
+
 func provideMemoryLLM(modelsService *models.Service, settingsService *settings.Service, queries dbstore.Queries, log *slog.Logger) memprovider.LLM {
 	return &lazyLLMClient{
 		modelsService:   modelsService,
@@ -415,6 +420,15 @@ func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.
 		},
 	})
 	return pool
+}
+
+func injectRuntimeDiagnosticsRecorder(pool *acpagent.SessionPool, diagnostics *runtimediagnostics.Service, containerdHandler *handlers.ContainerdHandler) {
+	if pool != nil && diagnostics != nil {
+		pool.SetDiagnosticRecorder(diagnostics.Recorder())
+	}
+	if containerdHandler != nil && diagnostics != nil {
+		containerdHandler.SetRuntimeDiagnosticRecorder(diagnostics.Recorder())
+	}
 }
 
 func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries dbstore.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *pipelinepkg.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, hookService *hookspkg.Service) *flow.Resolver {
@@ -823,6 +837,20 @@ func startBackgroundTaskCleanup(lc fx.Lifecycle, mgr *background.Manager) {
 		},
 		OnStop: func(_ context.Context) error {
 			close(done)
+			return nil
+		},
+	})
+}
+
+func startRuntimeDiagnosticsHousekeeper(lc fx.Lifecycle, diagnostics *runtimediagnostics.Service) {
+	ctx, cancel := context.WithCancel(context.Background())
+	lc.Append(fx.Hook{
+		OnStart: func(context.Context) error {
+			go diagnostics.StartHousekeeper(ctx, runtimediagnostics.DefaultHousekeepingInterval)
+			return nil
+		},
+		OnStop: func(context.Context) error {
+			cancel()
 			return nil
 		},
 	})

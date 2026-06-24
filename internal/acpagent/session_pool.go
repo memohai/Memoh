@@ -77,15 +77,16 @@ const (
 // handle.state (budget scans), but handle.state is never held while taking
 // p.mu, and p.mu is never held while taking handle.op.
 type SessionPool struct {
-	logger    *slog.Logger
-	runner    sessionRunner
-	bots      botGetter
-	store     sessionGetter
-	tools     *mcp.ToolGatewayService
-	contexts  *mcp.ToolSessionContextStore
-	approval  acpclient.ToolApprovalService
-	userInput pendingUserInputCanceller
-	timeout   time.Duration
+	logger      *slog.Logger
+	runner      sessionRunner
+	bots        botGetter
+	store       sessionGetter
+	tools       *mcp.ToolGatewayService
+	contexts    *mcp.ToolSessionContextStore
+	approval    acpclient.ToolApprovalService
+	userInput   pendingUserInputCanceller
+	diagnostics diagnosticRecorder
+	timeout     time.Duration
 
 	mu        sync.RWMutex
 	runtimes  map[string]*runtimeHandle
@@ -103,6 +104,10 @@ type workspaceClientRunner interface {
 
 type pendingUserInputCanceller interface {
 	CancelPendingForSession(context.Context, string, string, string) ([]userinput.Request, error)
+}
+
+type diagnosticRecorder interface {
+	RecordRuntimeDiagnosticEvent(ctx context.Context, botID, scope, agentID, sessionID, runtimeID, phase, severity, code, message string, metadata map[string]any)
 }
 
 type botGetter interface {
@@ -241,6 +246,12 @@ func (p *SessionPool) SetUserInputService(service pendingUserInputCanceller) {
 	}
 }
 
+func (p *SessionPool) SetDiagnosticRecorder(recorder diagnosticRecorder) {
+	if p != nil {
+		p.diagnostics = recorder
+	}
+}
+
 func newRuntimeID() string {
 	return runtimeIDPrefix + uuid.NewString()
 }
@@ -369,6 +380,7 @@ func (p *SessionPool) BindRuntime(botID, runtimeID, sessionID, agentID, projectP
 	}
 	h, err := p.owned(botID, runtimeID)
 	if err != nil {
+		p.recordRuntimeDiagnosticByFields(context.Background(), botID, agentID, sessionID, runtimeID, "bind", "bind_warm_runtime_failed", err, map[string]any{"project_path": projectPath})
 		return err
 	}
 	normalizedAgent := acpprofile.NormalizeAgentID(agentID)
@@ -386,13 +398,17 @@ func (p *SessionPool) BindRuntime(botID, runtimeID, sessionID, agentID, projectP
 		h.agentID == normalizedAgent && h.projectPath == projectPath
 	h.state.Unlock()
 	if !ok {
-		return ErrRuntimeBindRejected
+		err := ErrRuntimeBindRejected
+		p.recordRuntimeDiagnosticByFields(context.Background(), botID, normalizedAgent, sessionID, runtimeID, "bind", "bind_warm_runtime_failed", err, map[string]any{"project_path": projectPath})
+		return err
 	}
 
 	p.mu.Lock()
 	if existing, taken := p.bySession[sessionID]; taken && existing != h.id {
 		p.mu.Unlock()
-		return ErrRuntimeBindRejected
+		err := ErrRuntimeBindRejected
+		p.recordRuntimeDiagnosticByFields(context.Background(), botID, normalizedAgent, sessionID, runtimeID, "bind", "bind_warm_runtime_failed", err, map[string]any{"existing_runtime_id": existing, "project_path": projectPath})
+		return err
 	}
 	p.bySession[sessionID] = h.id
 	p.mu.Unlock()
@@ -426,7 +442,7 @@ func (p *SessionPool) SetRuntimeModel(ctx context.Context, botID, runtimeID, mod
 	return p.statusOf(h), nil
 }
 
-func (*SessionPool) setModelOnHandle(ctx context.Context, h *runtimeHandle, modelID string) error {
+func (p *SessionPool) setModelOnHandle(ctx context.Context, h *runtimeHandle, modelID string) error {
 	modelID = strings.TrimSpace(modelID)
 
 	h.op.Lock()
@@ -455,6 +471,9 @@ func (*SessionPool) setModelOnHandle(ctx context.Context, h *runtimeHandle, mode
 	// Model selection errors are validation/protocol issues, not process
 	// failures; keep the runtime alive so the user can pick another model.
 	h.setStatus(stateIdle)
+	if err != nil {
+		p.recordRuntimeDiagnostic(ctx, h, "model", "model_set_failed", err, map[string]any{"model_id": modelID})
+	}
 	return err
 }
 
@@ -564,6 +583,7 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 	result, err := sess.PromptWithToolContext(ctx, input.Prompt, promptResources(input), toolCtx, toolSink)
 	toolSink.ApplyToResult(&result)
 	if err != nil {
+		p.recordRuntimeDiagnostic(ctx, h, "prompt", "upstream_adapter_failed", err, nil)
 		// Prompt failures usually indicate the ACP process is in a bad state
 		// (transport hang, agent crash); drop the runtime so the next call
 		// starts fresh.
@@ -707,26 +727,27 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 	h.startCancel = cancelStart
 	h.state.Unlock()
 
-	fail := func(err error) error {
+	fail := func(phase, code string, err error) error {
+		p.recordRuntimeDiagnostic(ctx, h, phase, code, err, nil)
 		_ = p.teardown(h)
 		return err
 	}
 
 	bot, err := p.bots.Get(startCtx, h.botID)
 	if err != nil {
-		return fail(fmt.Errorf("load bot ACP setup: %w", err))
+		return fail("config", "prompt_config_failed", fmt.Errorf("load bot ACP setup: %w", err))
 	}
 	setup := acpprofile.ParseAgentSetup(bot.Metadata, h.agentID)
 	if !setup.Enabled {
-		return fail(fmt.Errorf("ACP agent %q is not enabled for this bot", h.agentID))
+		return fail("config", "prompt_config_failed", fmt.Errorf("ACP agent %q is not enabled for this bot", h.agentID))
 	}
 	profile, ok := acpprofile.Lookup(h.agentID)
 	if !ok {
-		return fail(fmt.Errorf("unknown ACP agent %q", h.agentID))
+		return fail("config", "prompt_config_failed", fmt.Errorf("unknown ACP agent %q", h.agentID))
 	}
 	workspaceInfo, err := p.runner.WorkspaceInfo(startCtx, h.botID)
 	if err != nil {
-		return fail(fmt.Errorf("resolve workspace: %w", err))
+		return fail("config", "prompt_config_failed", fmt.Errorf("resolve workspace: %w", err))
 	}
 
 	mode := acpclient.SetupMode(setup.Mode)
@@ -743,11 +764,11 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 	}
 	if mode != acpclient.SetupModeSelf {
 		if err := validateManagedFields(profile, setup.Managed, mode); err != nil {
-			return fail(err)
+			return fail("config", "auth_missing", err)
 		}
 	}
 	if err := p.reconcileManagedCodexConfig(startCtx, h.botID, profile, setup, mode); err != nil {
-		return fail(fmt.Errorf("prepare Codex managed config: %w", err))
+		return fail("config", "prompt_config_failed", fmt.Errorf("prepare Codex managed config: %w", err))
 	}
 	// Managed env (Claude Code BYOK tokens) is injected for every backend.
 	// Local processes inherit the host env and only get our overrides appended;
@@ -757,12 +778,12 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 	var env []string
 	env, err = managedProcessEnv(profile, setup.Managed, mode)
 	if err != nil {
-		return fail(err)
+		return fail("config", "prompt_config_failed", err)
 	}
 
 	toolHTTPURL, err := p.resolveToolHTTPURL(opts.ToolHTTPURL, workspaceInfo)
 	if err != nil {
-		return fail(err)
+		return fail("config", "prompt_config_failed", err)
 	}
 
 	sess, err := p.runner.StartSession(startCtx, acpclient.StartRequest{
@@ -787,7 +808,7 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 		ToolApproval:    p.approval,
 	}, opts.Sink)
 	if err != nil {
-		return fail(err)
+		return fail("start", "runtime_start_failed", err)
 	}
 
 	h.state.Lock()
@@ -870,6 +891,28 @@ func (*SessionPool) statusOf(h *runtimeHandle) RuntimeStatus {
 		status.Models = &modelState
 	}
 	return status
+}
+
+func (p *SessionPool) recordRuntimeDiagnostic(ctx context.Context, h *runtimeHandle, phase, code string, err error, metadata map[string]any) {
+	if p == nil || p.diagnostics == nil || h == nil || err == nil {
+		return
+	}
+	h.state.Lock()
+	sessionID := h.boundSession
+	state := h.status
+	h.state.Unlock()
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	metadata["state"] = state
+	p.diagnostics.RecordRuntimeDiagnosticEvent(ctx, h.botID, "acp", h.agentID, sessionID, h.id, phase, "error", code, err.Error(), metadata)
+}
+
+func (p *SessionPool) recordRuntimeDiagnosticByFields(ctx context.Context, botID, agentID, sessionID, runtimeID, phase, code string, err error, metadata map[string]any) {
+	if p == nil || p.diagnostics == nil || err == nil {
+		return
+	}
+	p.diagnostics.RecordRuntimeDiagnosticEvent(ctx, botID, "acp", agentID, sessionID, runtimeID, phase, "error", code, err.Error(), metadata)
 }
 
 // IsSessionActive reports whether the session's runtime is currently serving

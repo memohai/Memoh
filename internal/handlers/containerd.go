@@ -26,22 +26,27 @@ import (
 )
 
 type ContainerdHandler struct {
-	manager          containerWorkspace
-	cfg              config.WorkspaceConfig
-	containerBackend string
-	logger           *slog.Logger
-	toolGateway      *mcp.ToolGatewayService
-	toolContexts     *mcp.ToolSessionContextStore
-	acpRuntimes      acpRuntimeContextResolver
-	mcpSess          map[string]*mcpSession
-	mcpStdioMu       sync.Mutex
-	mcpStdioSess     map[string]*mcpStdioSession
-	botService       *bots.Service
-	accountService   *accounts.Service
-	policyService    *policy.Service
-	pluginService    PluginInstallationLister
-	displayService   *displaypkg.Service
-	browserSessions  *browserSessionStore
+	manager            containerWorkspace
+	cfg                config.WorkspaceConfig
+	containerBackend   string
+	logger             *slog.Logger
+	toolGateway        *mcp.ToolGatewayService
+	toolContexts       *mcp.ToolSessionContextStore
+	acpRuntimes        acpRuntimeContextResolver
+	mcpSess            map[string]*mcpSession
+	mcpStdioMu         sync.Mutex
+	mcpStdioSess       map[string]*mcpStdioSession
+	botService         *bots.Service
+	accountService     *accounts.Service
+	policyService      *policy.Service
+	pluginService      PluginInstallationLister
+	displayService     *displaypkg.Service
+	browserSessions    *browserSessionStore
+	runtimeDiagnostics runtimeDiagnosticEventRecorder
+}
+
+type runtimeDiagnosticEventRecorder interface {
+	RecordRuntimeDiagnosticEvent(ctx context.Context, botID, scope, agentID, sessionID, runtimeID, phase, severity, code, message string, metadata map[string]any)
 }
 
 type ContainerGPURequest struct {
@@ -314,6 +319,12 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	root.POST("/tools", h.HandleMCPTools)
 }
 
+func (h *ContainerdHandler) SetRuntimeDiagnosticRecorder(recorder runtimeDiagnosticEventRecorder) {
+	if h != nil {
+		h.runtimeDiagnostics = recorder
+	}
+}
+
 // CreateContainer godoc
 // @Summary Create and start MCP container for bot
 // @Tags containerd
@@ -527,6 +538,14 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 }
 
 func (h *ContainerdHandler) recordContainerSetupFailure(ctx context.Context, botID, phase string, err error) {
+	code := "container_setup_failed"
+	switch strings.TrimSpace(phase) {
+	case "image_prepare":
+		code = "container_image_prepare_failed"
+	case "start":
+		code = "container_start_failed"
+	}
+	h.recordRuntimeDiagnosticFailure(ctx, botID, "container", phase, code, err, nil)
 	if h.botService == nil {
 		return
 	}
@@ -536,6 +555,13 @@ func (h *ContainerdHandler) recordContainerSetupFailure(ctx context.Context, bot
 			slog.Any("error", recordErr),
 		)
 	}
+}
+
+func (h *ContainerdHandler) recordRuntimeDiagnosticFailure(ctx context.Context, botID, scope, phase, code string, err error, metadata map[string]any) {
+	if h == nil || h.runtimeDiagnostics == nil || err == nil {
+		return
+	}
+	h.runtimeDiagnostics.RecordRuntimeDiagnosticEvent(ctx, botID, scope, "", "", "", phase, "error", code, err.Error(), metadata)
 }
 
 func (h *ContainerdHandler) clearContainerSetupFailure(ctx context.Context, botID string) {
@@ -722,8 +748,10 @@ func (h *ContainerdHandler) StartContainer(c echo.Context) error {
 	}
 	if err := h.manager.EnsureRunning(c.Request().Context(), botID); err != nil {
 		if errors.Is(err, workspace.ErrContainerNotFound) {
+			h.recordRuntimeDiagnosticFailure(c.Request().Context(), botID, "container", "start", "container_not_found", err, nil)
 			return echo.NewHTTPError(http.StatusNotFound, "container not found for bot")
 		}
+		h.recordRuntimeDiagnosticFailure(c.Request().Context(), botID, "container", "start", "container_start_failed", err, nil)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, map[string]bool{"started": true})
@@ -744,8 +772,10 @@ func (h *ContainerdHandler) StopContainer(c echo.Context) error {
 	}
 	if err := h.manager.StopBot(c.Request().Context(), botID); err != nil {
 		if errors.Is(err, workspace.ErrContainerNotFound) {
+			h.recordRuntimeDiagnosticFailure(c.Request().Context(), botID, "container", "stop", "container_not_found", err, nil)
 			return echo.NewHTTPError(http.StatusNotFound, "container not found for bot")
 		}
+		h.recordRuntimeDiagnosticFailure(c.Request().Context(), botID, "container", "stop", "container_stop_failed", err, nil)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, map[string]bool{"stopped": true})

@@ -484,6 +484,21 @@ type ProviderOauthToken struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
+type RuntimeDiagnosticEvent struct {
+	ID        pgtype.UUID        `json:"id"`
+	BotID     pgtype.UUID        `json:"bot_id"`
+	Scope     string             `json:"scope"`
+	AgentID   string             `json:"agent_id"`
+	SessionID pgtype.UUID        `json:"session_id"`
+	RuntimeID string             `json:"runtime_id"`
+	Phase     string             `json:"phase"`
+	Severity  string             `json:"severity"`
+	Code      string             `json:"code"`
+	Message   string             `json:"message"`
+	Metadata  []byte             `json:"metadata"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type Schedule struct {
 	ID           pgtype.UUID        `json:"id"`
 	Name         string             `json:"name"`

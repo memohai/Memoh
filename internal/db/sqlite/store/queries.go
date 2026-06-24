@@ -1159,6 +1159,25 @@ func (q *Queries) CreateProvider(ctx context.Context, arg pgsqlc.CreateProviderP
 	return result, nil
 }
 
+func (q *Queries) CreateRuntimeDiagnosticEvent(ctx context.Context, arg pgsqlc.CreateRuntimeDiagnosticEventParams) (pgsqlc.RuntimeDiagnosticEvent, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.RuntimeDiagnosticEvent{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.CreateRuntimeDiagnosticEventParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.RuntimeDiagnosticEvent{}, err
+	}
+	out, err := q.store.queries.CreateRuntimeDiagnosticEvent(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.RuntimeDiagnosticEvent{}, mapQueryErr(err)
+	}
+	var result pgsqlc.RuntimeDiagnosticEvent
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.RuntimeDiagnosticEvent{}, err
+	}
+	return result, nil
+}
+
 func (q *Queries) CreateSchedule(ctx context.Context, arg pgsqlc.CreateScheduleParams) (pgsqlc.Schedule, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return pgsqlc.Schedule{}, errSQLiteQueriesNotConfigured
@@ -1603,6 +1622,18 @@ func (q *Queries) DeleteProviderOAuthToken(ctx context.Context, providerID pgtyp
 		return err
 	}
 	err := q.store.queries.DeleteProviderOAuthToken(ctx, sqliteProviderID)
+	return mapQueryErr(err)
+}
+
+func (q *Queries) DeleteRuntimeDiagnosticEventsBefore(ctx context.Context, before pgtype.Timestamptz) error {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return errSQLiteQueriesNotConfigured
+	}
+	sqliteBefore := ""
+	if before.Valid {
+		sqliteBefore = before.Time.UTC().Format("2006-01-02 15:04:05")
+	}
+	err := q.store.queries.DeleteRuntimeDiagnosticEventsBefore(ctx, sqliteBefore)
 	return mapQueryErr(err)
 }
 
@@ -3957,6 +3988,40 @@ func (q *Queries) ListReadableBindingsByProvider(ctx context.Context, emailProvi
 	return result, nil
 }
 
+func (q *Queries) ListRuntimeDiagnosticEventsByBot(ctx context.Context, arg pgsqlc.ListRuntimeDiagnosticEventsByBotParams) ([]pgsqlc.RuntimeDiagnosticEvent, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListRuntimeDiagnosticEventsByBotParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListRuntimeDiagnosticEventsByBot(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.RuntimeDiagnosticEvent
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListRuntimeDiagnosticEventBotIDs(ctx context.Context) ([]pgtype.UUID, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	out, err := q.store.queries.ListRuntimeDiagnosticEventBotIDs(ctx)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgtype.UUID
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (q *Queries) ListScheduleLogsByBot(ctx context.Context, arg pgsqlc.ListScheduleLogsByBotParams) ([]pgsqlc.ListScheduleLogsByBotRow, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured
@@ -4536,6 +4601,18 @@ func (q *Queries) RejectToolApprovalRequest(ctx context.Context, arg pgsqlc.Reje
 		return pgsqlc.ToolApprovalRequest{}, err
 	}
 	return result, nil
+}
+
+func (q *Queries) PruneRuntimeDiagnosticEventsByBotLimit(ctx context.Context, arg pgsqlc.PruneRuntimeDiagnosticEventsByBotLimitParams) error {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.PruneRuntimeDiagnosticEventsByBotLimitParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return err
+	}
+	err := q.store.queries.PruneRuntimeDiagnosticEventsByBotLimit(ctx, sqliteArg)
+	return mapQueryErr(err)
 }
 
 func (q *Queries) RemoveChatParticipant(ctx context.Context, arg pgsqlc.RemoveChatParticipantParams) error {
