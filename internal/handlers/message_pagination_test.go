@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sort"
 	"testing"
@@ -24,7 +25,12 @@ func (s *stubMessageService) latest(sid string, limit int) []messagepkg.Message 
 	all := s.bySession[sid]
 	desc := make([]messagepkg.Message, len(all))
 	copy(desc, all)
-	sort.Slice(desc, func(i, j int) bool { return desc[i].CreatedAt.After(desc[j].CreatedAt) })
+	sort.Slice(desc, func(i, j int) bool {
+		if desc[i].CreatedAt.Equal(desc[j].CreatedAt) {
+			return desc[i].ID > desc[j].ID
+		}
+		return desc[i].CreatedAt.After(desc[j].CreatedAt)
+	})
 	if len(desc) > limit {
 		desc = desc[:limit]
 	}
@@ -63,6 +69,15 @@ func msg(role string, t time.Time) messagepkg.Message {
 // test.
 func userMsg(t time.Time, text string) messagepkg.Message {
 	return messagepkg.Message{Role: "user", CreatedAt: t, Content: []byte(`{}`), DisplayContent: text}
+}
+
+func indexedMsg(id int, role string, t time.Time) messagepkg.Message {
+	return messagepkg.Message{
+		ID:        fmt.Sprintf("%04d", id),
+		Role:      role,
+		CreatedAt: t,
+		Content:   []byte(`{}`),
+	}
 }
 
 // TestExtendToUITurnHead_PreservesMonotonicOrder is the regression test for the
@@ -132,5 +147,83 @@ func TestExtendToUITurnHead_StopsAtBoundary(t *testing.T) {
 	}
 	if got[0].Role != "user" {
 		t.Fatalf("expected head to be the user boundary, got role %q", got[0].Role)
+	}
+}
+
+func TestEnsureUITurnHead_ExpandsSameSecondPage(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 6, 24, 13, 17, 26, 0, time.UTC)
+	const sessionID = "same-second"
+	all := []messagepkg.Message{{
+		ID:             "0001",
+		Role:           "user",
+		CreatedAt:      base,
+		Content:        []byte(`{}`),
+		DisplayContent: "run many commands",
+	}}
+	all = append(all, indexedMsg(2, "assistant", base))
+	for i := 3; i <= 32; i++ {
+		role := "assistant"
+		if i%2 == 1 {
+			role = "tool"
+		}
+		all = append(all, indexedMsg(i, role, base))
+	}
+	svc := &stubMessageService{bySession: map[string][]messagepkg.Message{sessionID: all}}
+	h := &MessageHandler{messageService: svc, logger: slog.Default()}
+
+	latest := svc.latest(sessionID, 30)
+	reverseMessages(latest)
+	if len(latest) != 30 || latest[0].Role == "user" {
+		t.Fatalf("test setup failed: latest 30 should start mid-turn, got len=%d role=%q", len(latest), latest[0].Role)
+	}
+	if extended := h.extendToUITurnHead(context.Background(), sessionID, latest); len(extended) != len(latest) {
+		t.Fatalf("test setup failed: created_at-only backfill unexpectedly changed same-second page")
+	}
+
+	got := h.ensureUITurnHead(context.Background(), sessionID, latest, false, time.Time{}, 30)
+	if len(got) != len(all) {
+		t.Fatalf("expected same-second fallback to expand to full test turn, got %d want %d", len(got), len(all))
+	}
+	if got[0].Role != "user" {
+		t.Fatalf("expected expanded page to start at user boundary, got role %q", got[0].Role)
+	}
+}
+
+func TestEnsureUITurnHead_EscalatesSameSecondPagePastFirstFallback(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 6, 24, 12, 40, 57, 0, time.UTC)
+	const sessionID = "same-second-large"
+	all := []messagepkg.Message{{
+		ID:             "0001",
+		Role:           "user",
+		CreatedAt:      base,
+		Content:        []byte(`{}`),
+		DisplayContent: "run a very long command-heavy task",
+	}}
+	for i := 2; i <= 132; i++ {
+		role := "assistant"
+		if i%2 == 0 {
+			role = "tool"
+		}
+		all = append(all, indexedMsg(i, role, base))
+	}
+	svc := &stubMessageService{bySession: map[string][]messagepkg.Message{sessionID: all}}
+	h := &MessageHandler{messageService: svc, logger: slog.Default()}
+
+	latest := svc.latest(sessionID, 30)
+	reverseMessages(latest)
+	firstFallback := svc.latest(sessionID, 100)
+	reverseMessages(firstFallback)
+	if len(firstFallback) != 100 || firstFallback[0].Role == "user" {
+		t.Fatalf("test setup failed: first fallback should still start mid-turn, got len=%d role=%q", len(firstFallback), firstFallback[0].Role)
+	}
+
+	got := h.ensureUITurnHead(context.Background(), sessionID, latest, false, time.Time{}, 30)
+	if len(got) != len(all) {
+		t.Fatalf("expected second fallback to expand to full test turn, got %d want %d", len(got), len(all))
+	}
+	if got[0].Role != "user" {
+		t.Fatalf("expected expanded page to start at user boundary, got role %q", got[0].Role)
 	}
 }

@@ -314,6 +314,7 @@ describe('workspace layout store', () => {
 
     expect(dock.panels.filter((p) => p.component === 'chat')).toHaveLength(1)
     expect(dock.activePanel?.component).toBe('chat')
+    expect(chatStoreMock.selectDraft).toHaveBeenCalledTimes(2)
   })
 
   it('opens one chat tab per session and reuses the ephemeral slot', () => {
@@ -334,6 +335,7 @@ describe('workspace layout store', () => {
     expect(chatPanels).toHaveLength(1)
     expect(chatPanels[0]!.id).toBe(firstId)
     expect(chatPanels[0]!.params.sessionId).toBe('s2')
+    expect(chatStoreMock.selectSession).toHaveBeenLastCalledWith('s2')
   })
 
   it('uses remembered hidden session summaries for subagent chat tabs', () => {

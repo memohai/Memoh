@@ -1105,6 +1105,8 @@ const isWelcome = computed(() =>
   !!currentBotId.value
   && !activeChatReadOnly.value
   && !loadingChats.value
+  && !loadingMessages.value
+  && !streaming.value
   && messages.value.length === 0,
 )
 

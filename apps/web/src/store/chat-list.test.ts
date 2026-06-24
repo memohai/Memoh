@@ -1780,6 +1780,68 @@ describe('chat-list store', () => {
     await second
   })
 
+  it('reattaches an in-flight local turn when switching back before history is persisted', async () => {
+    // Long local tasks persist their bot_history_messages as a terminal
+    // snapshot. Until the stream ends, switching back to the session can
+    // legitimately fetch an empty REST transcript; the pending stream must
+    // still keep the optimistic user prompt and assistant turn visible.
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: { id: 0, type: 'text', content: 'working' },
+      } as UIStreamEvent,
+    ]
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+      { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+    ], nextCursor: null })
+    api.fetchMessagesUI.mockResolvedValue([])
+
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const sendPromise = store.sendMessage('long job')
+    await flushPromises()
+    expect(store.sessionId).toBe('session-a')
+    expect(store.messages.map(m => m.role)).toEqual(['user', 'assistant'])
+
+    await store.selectSession('session-b')
+    await flushPromises()
+    expect(store.sessionId).toBe('session-b')
+    expect(store.messages).toEqual([])
+
+    await store.selectSession('session-a')
+    await flushPromises()
+    expect(store.sessionId).toBe('session-a')
+    expect(store.messages.map(m => m.role)).toEqual(['user', 'assistant'])
+    expect(store.messages[0]).toMatchObject({ role: 'user', text: 'long job' })
+    expect(store.messages[1]).toMatchObject({
+      role: 'assistant',
+      messages: [expect.objectContaining({ type: 'text', content: 'working' })],
+      streaming: true,
+    })
+
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      {
+        id: 'server-user',
+        role: 'user',
+        text: 'long job',
+        attachments: [],
+        timestamp: '2026-06-24T10:00:00.000Z',
+      },
+      {
+        id: 'server-assistant',
+        role: 'assistant',
+        messages: [{ id: 0, type: 'text', content: 'done' }],
+        timestamp: '2026-06-24T10:00:01.000Z',
+      },
+    ])
+    streamHandler?.({ type: 'end', stream_id: lastStreamId, session_id: lastSessionId } as UIStreamEvent)
+    await sendPromise
+  })
+
   it('hydrates hidden subagent session summaries after selecting them', async () => {
     api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-parent', bot_id: 'bot-1', title: 'Parent', type: 'chat' },

@@ -164,22 +164,7 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	}
 	botID = bot.ID
 
-	var messages []messagepkg.Message
-	if hasBefore {
-		messages, err = h.messageService.ListBeforeBySession(c.Request().Context(), sessionID, before, limit)
-		// ListBeforeBySession returns DESC (newest-first), but the UI turn
-		// converter and the frontend both need oldest-first. The latest-page
-		// branch reverses below; the before-page must match — otherwise older
-		// history renders in reverse and turns fall apart.
-		if err == nil {
-			reverseMessages(messages)
-		}
-	} else {
-		messages, err = h.messageService.ListLatestBySession(c.Request().Context(), sessionID, limit)
-		if err == nil {
-			reverseMessages(messages)
-		}
-	}
+	messages, err := h.listSessionMessageWindow(c.Request().Context(), sessionID, hasBefore, before, limit)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -188,7 +173,7 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	// reply as several turns/action bars. Extend the head back to a real turn
 	// boundary so a turn is never split across pages.
 	if format == "ui" && sessionID != "" && len(messages) > 0 {
-		messages = h.extendToUITurnHead(c.Request().Context(), sessionID, messages)
+		messages = h.ensureUITurnHead(c.Request().Context(), sessionID, messages, hasBefore, before, limit)
 	}
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, messages)
 	if format == "ui" {
@@ -486,6 +471,57 @@ func reverseMessages(m []messagepkg.Message) {
 	for i, j := 0, len(m)-1; i < j; i, j = i+1, j-1 {
 		m[i], m[j] = m[j], m[i]
 	}
+}
+
+var uiTurnHeadFallbackLimits = []int32{100, 250, 500}
+
+func (h *MessageHandler) listSessionMessageWindow(ctx context.Context, sessionID string, hasBefore bool, before time.Time, limit int32) ([]messagepkg.Message, error) {
+	var messages []messagepkg.Message
+	var err error
+	if hasBefore {
+		messages, err = h.messageService.ListBeforeBySession(ctx, sessionID, before, limit)
+	} else {
+		messages, err = h.messageService.ListLatestBySession(ctx, sessionID, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	reverseMessages(messages)
+	return messages, nil
+}
+
+func (h *MessageHandler) ensureUITurnHead(ctx context.Context, sessionID string, messages []messagepkg.Message, hasBefore bool, before time.Time, limit int32) []messagepkg.Message {
+	messages = h.extendToUITurnHead(ctx, sessionID, messages)
+	if len(messages) == 0 || conversation.IsUITurnBoundary(messages[0]) {
+		return messages
+	}
+
+	// Stopgap for long single-turn runs persisted in one SQLite second: the
+	// 30-row default can land inside assistant/tool rows, while the
+	// created_at-only cursor cannot reliably walk through same-second rows to
+	// the user boundary. Keep the normal page size for ordinary turns, but
+	// progressively widen this UI-only page when the head is still not a safe
+	// boundary after the usual backfill.
+	for _, expandedLimit := range uiTurnHeadFallbackLimits {
+		if expandedLimit <= limit {
+			continue
+		}
+		expanded, err := h.listSessionMessageWindow(ctx, sessionID, hasBefore, before, expandedLimit)
+		if err != nil {
+			if h.logger != nil {
+				h.logger.Warn("expand UI message page failed", slog.Int("limit", int(expandedLimit)), slog.Any("error", err))
+			}
+			return messages
+		}
+		if len(expanded) <= len(messages) {
+			continue
+		}
+		messages = h.extendToUITurnHead(ctx, sessionID, expanded)
+		if len(messages) == 0 || conversation.IsUITurnBoundary(messages[0]) {
+			return messages
+		}
+	}
+	return messages
 }
 
 // StreamMessageEvents was removed in favor of two narrower streams: a

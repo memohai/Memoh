@@ -185,6 +185,7 @@ function userInputConnectionLostMessage() {
 
 interface PendingAssistantStream {
   streamId: string
+  userTurn?: ChatUserTurn
   assistantTurn: ChatAssistantTurn
   botId: string
   sessionId: string
@@ -1072,13 +1073,13 @@ export const useChatStore = defineStore('chat', () => {
     return normalized
   }
 
-  // Active-session-only view. There is no per-session message cache: switching
-  // sessions clears `messages` and re-fetches the new session's transcript via
-  // `refreshCurrentSession`. The previous identity-preserving reconciler held
-  // ChatMessage references across sessions in the cache and let
-  // mergeTurnInPlace mutate them, which corrupted the view when navigating
-  // between sessions. Per-session SSE delivers live updates without ever
-  // touching another session's data, so cross-session caching has no purpose.
+  // Active-session-only view. There is no full per-session message cache:
+  // switching sessions clears `messages` and re-fetches the target session's
+  // persisted transcript via `refreshCurrentSession`. The one exception is an
+  // in-flight assistant stream. Long agent tasks are persisted as a terminal
+  // snapshot, so the server can legitimately return an empty transcript while
+  // the task is still running. Keep those optimistic turns in the stream entry
+  // and reattach them when the user switches back to that session.
 
   function replaceMessages(items: UITurn[], targetSessionId?: string) {
     const next = normalizeTurns(items, targetSessionId)
@@ -1184,7 +1185,28 @@ export const useChatStore = defineStore('chat', () => {
     return activeIds.length === 1 ? activeIds[0]! : fallbackStreamId(sid)
   }
 
-  function trackAssistantStream(streamId: string, assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string): Promise<void> {
+  function hasTurnInView(turn: ChatMessage): boolean {
+    return messages.some(item => item === turn || item.id === turn.id || isSameLogicalTurn(turn, item))
+  }
+
+  function restorePendingStreamTurns(botId: string, targetSessionId: string) {
+    const bid = botId.trim()
+    const sid = targetSessionId.trim()
+    if (!bid || !sid) return
+    if (currentBotId.value !== bid || sessionId.value !== sid) return
+
+    for (const stream of pendingStreams()) {
+      if (stream.botId !== bid || stream.sessionId !== sid) continue
+      if (stream.userTurn && !hasTurnInView(stream.userTurn)) {
+        messages.push(stream.userTurn)
+      }
+      if (!hasTurnInView(stream.assistantTurn)) {
+        messages.push(stream.assistantTurn)
+      }
+    }
+  }
+
+  function trackAssistantStream(streamId: string, assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string, userTurn?: ChatUserTurn): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const id = streamId.trim()
       if (!id) {
@@ -1197,6 +1219,7 @@ export const useChatStore = defineStore('chat', () => {
       }
       pendingAssistantStreams.set(id, {
         streamId: id,
+        userTurn,
         assistantTurn,
         botId,
         sessionId: targetSessionId.trim(),
@@ -1232,11 +1255,10 @@ export const useChatStore = defineStore('chat', () => {
     pendingAssistantStreams.delete(streamId.trim())
   }
 
-  // Append/remove operate only on the active session's `messages` array.
-  // Optimistic turns belonging to a now-stale session (the user switched away
-  // before the assistant stream finished) are silently dropped from the view;
-  // the server keeps recording the conversation and the next REST refresh on
-  // that session will surface the response.
+  // Append/remove operate only on the active session's `messages` array. If an
+  // optimistic turn belongs to a now-stale session, the pending stream retains
+  // it and `restorePendingStreamTurns` reattaches it when that session becomes
+  // active again.
 
   function appendTurnToSession(botId: string, targetSessionId: string, turn: ChatMessage) {
     const bid = botId.trim()
@@ -1666,6 +1688,7 @@ export const useChatStore = defineStore('chat', () => {
         // empty-server-response handling settles the flag correctly.
         hasMoreOlder.value = true
       }
+      restorePendingStreamTurns(bid, sid)
       const latest = messages[messages.length - 1]?.timestamp
       touchSessionInList(sid, latest)
     })().finally(() => {
@@ -2513,6 +2536,7 @@ export const useChatStore = defineStore('chat', () => {
     hasLoadedOlder.value = false
     const bid = (currentBotId.value ?? '').trim()
     if (!bid || !sid) return
+    restorePendingStreamTurns(bid, sid)
     startSessionMessagesStream(bid, sid)
   }
 
@@ -2656,7 +2680,7 @@ export const useChatStore = defineStore('chat', () => {
         if (!ws.connected) {
           throw new StreamFailureError('WebSocket is not connected', 'startup')
         }
-        const completion = trackAssistantStream(sendStreamId, assistantTurn, bid, sid)
+        const completion = trackAssistantStream(sendStreamId, assistantTurn, bid, sid, userTurn)
         ws.send({
           type: 'message',
           stream_id: sendStreamId,

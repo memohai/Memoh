@@ -752,6 +752,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (existing) {
       existing.api.setTitle(title)
       focusPanel(existing)
+      void chatStore.selectSession(sid)
       return
     }
     // Repoint the target group's existing ephemeral CHAT slot in place (no
@@ -773,13 +774,15 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       void chatStore.selectSession(sid)
       return
     }
-    openEphemeral({
+    if (openEphemeral({
       id: nextChatPanelId(bid),
       component: 'chat',
       title,
       params: { sessionId: sid },
       groupId: opts.groupId,
-    })
+    })) {
+      void chatStore.selectSession(sid)
+    }
   }
 
   /** Open or focus the single draft chat tab (no session yet). */
@@ -793,15 +796,18 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     )
     if (existingDraft) {
       focusPanel(existingDraft)
+      chatStore.selectDraft()
       return
     }
-    openEphemeral({
+    if (openEphemeral({
       id: nextChatPanelId(bid),
       component: 'chat',
       title: opts?.title?.trim() || DEFAULT_CHAT_TITLE,
       params: { sessionId: null },
       groupId: opts?.groupId,
-    })
+    })) {
+      chatStore.selectDraft()
+    }
   }
 
   // Activating a chat tab makes its session the live one (single global messages
