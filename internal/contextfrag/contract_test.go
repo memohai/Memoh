@@ -154,6 +154,42 @@ func TestCanonicalFragmentHashIncludesNativeImageSDKPayload(t *testing.T) {
 	}
 }
 
+func TestWithContextRefPreservesExplicitSourcePayloadHash(t *testing.T) {
+	t.Parallel()
+
+	frag := TextFrag(TextFragInput{
+		ID:         "history.001",
+		Kind:       KindConversationEvent,
+		Role:       sdk.MessageRoleUser,
+		Slot:       SlotHistory,
+		Text:       "hello",
+		Priority:   70,
+		CacheClass: CacheNever,
+		Trust:      TrustExternal,
+		Scope:      Scope{ChatID: "request-scope"},
+		Source:     "history",
+		SourceID:   "row-1",
+		Collector:  "test",
+	})
+	frag = WithContextRef(frag, ContextRef{
+		Namespace:   "history",
+		ID:          "row-1",
+		Version:     1,
+		HashAlgo:    HashAlgoSHA256,
+		HashScope:   HashScopeSourcePayload,
+		ContentHash: "source-hash",
+		Schema:      SchemaContextRef,
+		Durability:  RefDurable,
+	})
+
+	if frag.Ref.HashScope != HashScopeSourcePayload || frag.Ref.ContentHash != "source-hash" {
+		t.Fatalf("explicit source payload hash should be preserved: %#v", frag.Ref)
+	}
+	if err := ValidateContextRef(frag.Ref); err != nil {
+		t.Fatalf("source payload ref should validate: %#v: %v", frag.Ref, err)
+	}
+}
+
 func TestSerdeRoundTripsContextFragManifestEditAndCoverage(t *testing.T) {
 	t.Parallel()
 

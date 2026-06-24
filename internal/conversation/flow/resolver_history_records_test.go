@@ -1,12 +1,14 @@
 package flow
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/historyfrag"
+	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
 )
@@ -107,6 +109,83 @@ func TestReplaceCompactedHistoryRecordsKeepsOriginalGroupWithoutSummary(t *testi
 	}
 }
 
+func TestHistoryRecordPathPreservesLegacyResolverMessagePipeline(t *testing.T) {
+	t.Parallel()
+
+	assistantToolCall := conversation.ModelMessage{
+		Role: "assistant",
+		ToolCalls: []conversation.ToolCall{{
+			ID:   "call-1",
+			Type: "function",
+			Function: conversation.ToolCallFunction{
+				Name:      "lookup",
+				Arguments: `{"q":"memoh"}`,
+			},
+		}},
+	}
+	rows := []messagepkg.Message{
+		dbHistoryRow(t, "row-compact-user", "user", conversation.NewTextContent("old compacted user"), func(msg *messagepkg.Message) {
+			msg.CompactID = "compact-ok"
+		}),
+		dbHistoryRow(t, "row-compact-assistant", "assistant", conversation.NewTextContent("old compacted assistant"), func(msg *messagepkg.Message) {
+			msg.CompactID = "compact-ok"
+		}),
+		dbHistoryRow(t, "row-missing-summary", "user", conversation.NewTextContent("missing summary body"), func(msg *messagepkg.Message) {
+			msg.CompactID = "compact-missing"
+		}),
+		dbHistoryRow(t, "row-current", "user", conversation.NewTextContent("already persisted current"), func(msg *messagepkg.Message) {
+			msg.SessionID = "sess-1"
+			msg.ExternalMessageID = "msg-current"
+			msg.Platform = "telegram"
+			msg.SenderChannelIdentityID = "sender-1"
+		}),
+		{
+			ID:      "row-plain",
+			BotID:   "bot-1",
+			Role:    "user",
+			Content: conversation.NewTextContent("plain string content"),
+		},
+		dbHistoryRow(t, "row-tool-call", "assistant", mustRawJSON(t, assistantToolCall), nil),
+		dbHistoryRow(t, "row-tool-result", "tool", mustRawJSON(t, conversation.ModelMessage{
+			Role:       "tool",
+			ToolCallID: "call-1",
+			Content:    conversation.NewTextContent("tool result"),
+		}), nil),
+	}
+
+	records := make([]historyfrag.HistoryRecord, 0, len(rows))
+	for _, row := range rows {
+		record, err := historyfrag.FromDBMessage(row, historyfrag.ScopeFallback{ChatID: "chat-1"})
+		if err != nil {
+			t.Fatalf("FromDBMessage(%s): %v", row.ID, err)
+		}
+		records = append(records, record)
+	}
+	records = dedupePersistedCurrentUserMessage(records, conversation.ChatRequest{
+		UserMessagePersisted:    true,
+		SessionID:               "sess-1",
+		ExternalMessageID:       "msg-current",
+		CurrentChannel:          "telegram",
+		SourceChannelIdentityID: "sender-1",
+	})
+	records = replaceCompactedHistoryRecords(records, map[string]string{"compact-ok": "condensed"})
+	got, tokens := trimMessagesByTokens(nil, records, 0)
+
+	want := []conversation.ModelMessage{
+		{Role: "user", Content: conversation.NewTextContent("<summary>\ncondensed\n</summary>")},
+		{Role: "user", Content: conversation.NewTextContent("missing summary body")},
+		{Role: "user", Content: conversation.NewTextContent("plain string content")},
+		assistantToolCall,
+		{Role: "tool", ToolCallID: "call-1", Content: conversation.NewTextContent("tool result")},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("history pipeline payload mismatch:\ngot  %#v\nwant %#v", got, want)
+	}
+	if tokens == 0 {
+		t.Fatal("history pipeline should report estimated tokens for retained records")
+	}
+}
+
 func TestHistoryScopeFallbackFromChatRequestUsesRequestTopology(t *testing.T) {
 	t.Parallel()
 
@@ -151,6 +230,29 @@ func TestResumeHistoryFallbackDoesNotUseBotIDAsChatID(t *testing.T) {
 	if approvalFallback.ConversationType != "direct" || approvalFallback.ReplyTarget != "target-2" {
 		t.Fatalf("approval fallback lost topology: %#v", approvalFallback)
 	}
+}
+
+func dbHistoryRow(t *testing.T, id string, role string, content json.RawMessage, mutate func(*messagepkg.Message)) messagepkg.Message {
+	t.Helper()
+	msg := messagepkg.Message{
+		ID:      id,
+		BotID:   "bot-1",
+		Role:    role,
+		Content: content,
+	}
+	if mutate != nil {
+		mutate(&msg)
+	}
+	return msg
+}
+
+func mustRawJSON(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal %T: %v", value, err)
+	}
+	return raw
 }
 
 func historyRecord(id string, msg conversation.ModelMessage, mutate func(*historyfrag.HistoryRecord)) historyfrag.HistoryRecord {

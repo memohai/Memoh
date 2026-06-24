@@ -31,10 +31,20 @@ func TestFromDBMessageBuildsDurableRecordScopeAndFrag(t *testing.T) {
 		Role:                    "user",
 		Content:                 persistedModelMessage(t, conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("hello")}),
 		Usage:                   mustJSON(t, map[string]int{"inputTokens": inputTokens, "outputTokens": outputTokens}),
-		CompactID:               "compact-1",
-		EventID:                 "evt-1",
-		DisplayContent:          "hello",
-		CreatedAt:               time.Date(2026, 6, 24, 3, 0, 0, 0, time.UTC),
+		Assets: []messagepkg.MessageAsset{{
+			ContentHash: "asset-hash-1",
+			Role:        "attachment",
+			Ordinal:     2,
+			Mime:        "image/png",
+			SizeBytes:   1234,
+			StorageKey:  "objects/asset-hash-1",
+			Name:        "image.png",
+			Metadata:    map[string]any{"width": float64(640)},
+		}},
+		CompactID:      "compact-1",
+		EventID:        "evt-1",
+		DisplayContent: "hello",
+		CreatedAt:      time.Date(2026, 6, 24, 3, 0, 0, 0, time.UTC),
 	}
 
 	record, err := FromDBMessage(msg, ScopeFallback{
@@ -72,6 +82,15 @@ func TestFromDBMessageBuildsDurableRecordScopeAndFrag(t *testing.T) {
 	if record.UsageOutputTokens == nil || *record.UsageOutputTokens != outputTokens {
 		t.Fatalf("UsageOutputTokens = %#v, want %d", record.UsageOutputTokens, outputTokens)
 	}
+	if len(record.Assets) != 1 ||
+		record.Assets[0].ContentHash != "asset-hash-1" ||
+		record.Assets[0].Role != "attachment" ||
+		record.Assets[0].Ordinal != 2 ||
+		record.Assets[0].Mime != "image/png" ||
+		record.Assets[0].SizeBytes != 1234 ||
+		record.Assets[0].Name != "image.png" {
+		t.Fatalf("record lost media refs: %#v", record.Assets)
+	}
 
 	frag := ToFrag(record)
 	if err := contextfrag.ValidateContextRef(frag.Ref); err != nil {
@@ -80,8 +99,8 @@ func TestFromDBMessageBuildsDurableRecordScopeAndFrag(t *testing.T) {
 	if frag.Ref.Namespace != "bot_history_message" || frag.Ref.ID != "row-1" || frag.Ref.Durability != contextfrag.RefDurable {
 		t.Fatalf("frag ref should be durable DB row identity: %#v", frag.Ref)
 	}
-	if frag.Ref.ContentHash == "" || frag.Ref.HashAlgo != contextfrag.HashAlgoSHA256 || frag.Ref.HashScope != contextfrag.HashScopeCanonicalFragment {
-		t.Fatalf("frag ref missing canonical content hash: %#v", frag.Ref)
+	if frag.Ref.ContentHash == "" || frag.Ref.HashAlgo != contextfrag.HashAlgoSHA256 || frag.Ref.HashScope != contextfrag.HashScopeSourcePayload {
+		t.Fatalf("frag ref missing source payload hash: %#v", frag.Ref)
 	}
 	if frag.Kind != contextfrag.KindConversationEvent || frag.Slot != contextfrag.SlotHistory {
 		t.Fatalf("unexpected frag kind/slot: %s %s", frag.Kind, frag.Slot)
@@ -169,6 +188,41 @@ func TestFromDBMessageContentHashChangesWhenRowContentChanges(t *testing.T) {
 	}
 }
 
+func TestFromDBMessageContentHashChangesWhenAssetsChange(t *testing.T) {
+	t.Parallel()
+
+	msg := messagepkg.Message{
+		ID:      "row-1",
+		BotID:   "bot-1",
+		Role:    "user",
+		Content: persistedModelMessage(t, conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("with asset")}),
+		Assets: []messagepkg.MessageAsset{{
+			ContentHash: "asset-hash-1",
+			Role:        "attachment",
+			Ordinal:     0,
+			Mime:        "image/png",
+		}},
+	}
+	original, err := FromDBMessage(msg, ScopeFallback{})
+	if err != nil {
+		t.Fatalf("original FromDBMessage failed: %v", err)
+	}
+	msg.Assets[0].ContentHash = "asset-hash-2"
+	edited, err := FromDBMessage(msg, ScopeFallback{})
+	if err != nil {
+		t.Fatalf("edited FromDBMessage failed: %v", err)
+	}
+
+	originalFrag := ToFrag(original)
+	editedFrag := ToFrag(edited)
+	if originalFrag.Ref.ID != editedFrag.Ref.ID {
+		t.Fatalf("same DB row should keep stable durable identity: original=%#v edited=%#v", originalFrag.Ref, editedFrag.Ref)
+	}
+	if originalFrag.Ref.ContentHash == "" || editedFrag.Ref.ContentHash == "" || originalFrag.Ref.ContentHash == editedFrag.Ref.ContentHash {
+		t.Fatalf("content hash should fence asset changes: original=%#v edited=%#v", originalFrag.Ref, editedFrag.Ref)
+	}
+}
+
 func TestHistoryRecordsRenderLegacyModelAndSDKMessages(t *testing.T) {
 	t.Parallel()
 
@@ -242,6 +296,9 @@ func TestFromDBMessageScopeFallbackDoesNotChangeDurableRefID(t *testing.T) {
 	}
 	if ToFrag(first).Ref.ID != ToFrag(second).Ref.ID {
 		t.Fatalf("fallback scope changed durable frag identity: first=%#v second=%#v", ToFrag(first).Ref, ToFrag(second).Ref)
+	}
+	if ToFrag(first).Ref.ContentHash != ToFrag(second).Ref.ContentHash {
+		t.Fatalf("fallback scope changed durable content hash: first=%#v second=%#v", ToFrag(first).Ref, ToFrag(second).Ref)
 	}
 }
 

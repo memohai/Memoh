@@ -37,6 +37,7 @@ type HistoryRecord struct {
 	Lifecycle  Lifecycle
 
 	ModelMessage conversation.ModelMessage
+	Assets       []MediaRef
 
 	Scope      contextfrag.Scope
 	Provenance contextfrag.Provenance
@@ -58,4 +59,13 @@ type HistoryRecord struct {
 
 	UsageInputTokens  *int
 	UsageOutputTokens *int
+}
+
+type MediaRef struct {
+	ContentHash string
+	Role        string
+	Ordinal     int
+	Mime        string
+	SizeBytes   int64
+	Name        string
 }
