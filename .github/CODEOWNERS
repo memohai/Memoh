@@ -1,0 +1,5 @@
+# Frontend code owners
+# 前端相关 PR 自动将以下 owner 加为 reviewer
+
+apps/web/          @qqqqqf-q
+packages/ui/       @qqqqqf-q
