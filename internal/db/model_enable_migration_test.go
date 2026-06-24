@@ -158,6 +158,12 @@ CREATE TABLE model_variants (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Minimal stub so later bot-level settings migrations can apply while this
+-- fixture focuses on preserving legacy model rows.
+CREATE TABLE bots (
+  id TEXT PRIMARY KEY
+);
+
 -- Minimal stub of bot_sessions so migrations targeting that table (e.g.
 -- the 0023 paged-sessions index) parse and apply against this pre-22
 -- fixture. Columns mirror only what newer migrations reference; this is

@@ -52,6 +52,7 @@ const llmProviders: string[] = [
   ...withVariants('bailian', ['color']),
   ...withVariants('siliconcloud', ['color']),
   ...withVariants('volcengine', ['color']),
+  ...withVariants('modelark', ['color']),
   ...withVariants('newapi', ['color']),
   ...withVariants('github-copilot', []),
 ]

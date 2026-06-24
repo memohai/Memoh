@@ -7,6 +7,7 @@ export interface ProviderPreset {
   icon: string
   source: string
   requiresApiKey?: boolean
+  domain?: 'llm' | 'video'
 }
 
 export const providerPresets: ProviderPreset[] = [
@@ -152,6 +153,33 @@ export const providerPresets: ProviderPreset[] = [
     icon: 'github-copilot',
     source: 'github-copilot.yaml',
     requiresApiKey: false,
+  },
+  {
+    id: 'openrouter-video',
+    name: 'OpenRouter',
+    clientType: 'openrouter-video',
+    baseUrl: 'https://openrouter.ai/api',
+    icon: 'openrouter',
+    source: 'openrouter-video.yaml',
+    domain: 'video',
+  },
+  {
+    id: 'modelark-video',
+    name: 'ModelArk',
+    clientType: 'modelark-video',
+    baseUrl: 'https://ark.ap-southeast.bytepluses.com/api/v3',
+    icon: 'modelark-color',
+    source: 'modelark-video.yaml',
+    domain: 'video',
+  },
+  {
+    id: 'volcengine-video',
+    name: 'Volcengine',
+    clientType: 'volcengine-video',
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    icon: 'volcengine-color',
+    source: 'volcengine-video.yaml',
+    domain: 'video',
   },
 ]
 

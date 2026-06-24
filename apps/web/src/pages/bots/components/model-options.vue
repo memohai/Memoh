@@ -110,7 +110,7 @@ type Row = HeaderRow | ItemRow
 const props = defineProps<{
   models: ModelsGetResponse[]
   providers: ProvidersGetResponse[]
-  modelType: 'chat' | 'embedding'
+  modelType: 'chat' | 'embedding' | 'video'
   open?: boolean
   showTags?: boolean
   showIcons?: boolean

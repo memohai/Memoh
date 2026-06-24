@@ -19,6 +19,7 @@ import {
   FilePen,
   FilePlus2,
   FileText,
+  Film,
   FolderOpen,
   Focus,
   Globe,
@@ -625,6 +626,16 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         target: truncate(prompt, 60),
         fullTarget: prompt,
         detail: ToolCallDetailImage,
+      }
+    }
+    case 'generate_video': {
+      const prompt = pickString(input, 'prompt')
+      return {
+        icon: Film,
+        actionKey: 'generate_video',
+        target: truncate(prompt, 60),
+        fullTarget: prompt,
+        detail: ToolCallDetailOutput,
       }
     }
     case 'spawn_agent': {

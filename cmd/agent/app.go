@@ -108,6 +108,7 @@ import (
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
 	"github.com/memohai/memoh/internal/version"
+	videopkg "github.com/memohai/memoh/internal/video"
 	"github.com/memohai/memoh/internal/webhooktunnel"
 	"github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
@@ -733,7 +734,7 @@ func provideBackgroundManager(log *slog.Logger) *background.Manager {
 	return background.New(log)
 }
 
-func provideToolProviders(log *slog.Logger, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service) []agenttools.ToolProvider {
+func provideToolProviders(log *slog.Logger, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service) []agenttools.ToolProvider {
 	var assetResolver messaging.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
@@ -756,6 +757,7 @@ func provideToolProviders(log *slog.Logger, channelManager *channel.Manager, reg
 		agenttools.NewTTSProvider(log, settingsService, audioService, channelManager, registry),
 		agenttools.NewTranscriptionProvider(log, settingsService, audioService, mediaService),
 		agenttools.NewImageGenProvider(log, settingsService, modelsService, queries, manager, config.DefaultDataMount),
+		agenttools.NewVideoGenProvider(log, settingsService, videoService, bgManager, manager, config.DefaultDataMount),
 		agenttools.NewFederationProvider(log, fedSource),
 		agenttools.NewHistoryProvider(log, sessionService, messageService, queries),
 	}
@@ -832,6 +834,10 @@ func provideWebHandler(channelManager *channel.Manager, channelStore *channel.St
 
 func provideAudioRegistry() *audiopkg.Registry {
 	return audiopkg.NewRegistry()
+}
+
+func provideVideoRegistry() *videopkg.Registry {
+	return videopkg.NewRegistry()
 }
 
 func provideAudioTempStore() (*audiopkg.TempStore, error) {
@@ -1118,6 +1124,17 @@ func startAudioProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, queries dbst
 		OnStart: func(ctx context.Context) error {
 			if err := audiopkg.SyncRegistry(ctx, log, queries, registry); err != nil {
 				log.Warn("audio registry bootstrap failed", slog.Any("error", err))
+			}
+			return nil
+		},
+	})
+}
+
+func startVideoProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, queries dbstore.Queries, registry *videopkg.Registry) {
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			if err := videopkg.SyncRegistry(ctx, log, queries, registry); err != nil {
+				log.Warn("video registry bootstrap failed", slog.Any("error", err))
 			}
 			return nil
 		},

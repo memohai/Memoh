@@ -165,6 +165,7 @@ import {
   MousePointer2,
   Store,
   Users,
+  Video,
 } from 'lucide-vue-next'
 import AppearanceIcon from './appearance-icon.vue'
 import { useChatSelectionStore } from '@/store/chat-selection'
@@ -291,6 +292,7 @@ const coreNavItems = computed<NavItem[]>(() => filterItems([
   { title: t('sidebar.memory'), name: 'memory', icon: Database },
   { title: t('sidebar.webSearch'), name: 'web-search', icon: Globe },
   { title: t('sidebar.voice'), name: 'voice', icon: AudioLines },
+  { title: t('sidebar.video'), name: 'video', icon: Video },
 ]))
 
 const integrationsNavItems = computed<NavItem[]>(() => filterItems([

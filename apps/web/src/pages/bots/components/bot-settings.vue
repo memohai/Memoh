@@ -96,6 +96,8 @@
         :transcription-models="transcriptionModels"
         :image-capable-models="imageCapableModels"
         :providers="providers"
+        :video-models="videoModels"
+        :video-providers="videoProviders"
       />
 
       <!-- Backup -->
@@ -142,7 +144,7 @@ import PageShell from '@/components/page-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getBotsById, putBotsById, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getFetchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild, getBotsNameAvailability } from '@memohai/sdk'
+import { getBotsById, putBotsById, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getFetchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getVideoProviders, getVideoModels, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild, getBotsNameAvailability } from '@memohai/sdk'
 import type { SettingsSettings } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -275,6 +277,22 @@ const { data: transcriptionProviderData } = useQuery({
   },
 })
 
+const { data: videoProviderData } = useQuery({
+  key: ['video-providers'],
+  query: async () => {
+    const { data } = await getVideoProviders({ throwOnError: true })
+    return data
+  },
+})
+
+const { data: videoModelData } = useQuery({
+  key: ['video-models'],
+  query: async () => {
+    const { data } = await getVideoModels({ throwOnError: true })
+    return data
+  },
+})
+
 const { mutateAsync: updateSettings, isLoading } = useMutation({
   mutation: async (body: Partial<SettingsSettings>) => {
     const { data } = await putBotsByBotIdSettings({
@@ -385,6 +403,13 @@ const transcriptionProviders = computed(() => (transcriptionProviderData.value ?
 const enabledTranscriptionProviderIds = computed(() => new Set(transcriptionProviders.value.map((p: Record<string, unknown>) => p.id as string)))
 const ttsModels = computed(() => (ttsModelData.value ?? []).filter((m: Record<string, unknown>) => enabledTtsProviderIds.value.has(m.provider_id as string)))
 const transcriptionModels = computed(() => (transcriptionModelData.value ?? []).filter((m: Record<string, unknown>) => enabledTranscriptionProviderIds.value.has(m.provider_id as string)))
+const videoProviders = computed(() => (videoProviderData.value ?? []).filter((p: Record<string, unknown>) => p.enable !== false))
+const enabledVideoProviderIds = computed(() => new Set(videoProviders.value.map((p: Record<string, unknown>) => p.id as string)))
+const videoModels = computed(() =>
+  (videoModelData.value ?? [])
+    .filter((m: Record<string, unknown>) => enabledVideoProviderIds.value.has(m.provider_id as string))
+    .map((model) => ({ ...model, type: 'video' as const })),
+)
 
 // ---- Form ----
 const form = reactive({
@@ -396,6 +421,7 @@ const form = reactive({
   memory_provider_id: '',
   tts_model_id: '',
   transcription_model_id: '',
+  video_model_id: '',
   timezone: '',
   language: '',
   reasoning_enabled: false,
@@ -442,6 +468,7 @@ watch(settings, (val) => {
     form.memory_provider_id = val.memory_provider_id ?? ''
     form.tts_model_id = val.tts_model_id ?? ''
     form.transcription_model_id = val.transcription_model_id ?? ''
+    form.video_model_id = val.video_model_id ?? ''
     form.language = val.language ?? ''
     form.reasoning_enabled = val.reasoning_enabled ?? false
     form.reasoning_effort = val.reasoning_effort || 'medium'
@@ -465,6 +492,7 @@ const hasSettingsChanges = computed(() => {
     || form.memory_provider_id !== (s.memory_provider_id ?? '')
     || form.tts_model_id !== (s.tts_model_id ?? '')
     || form.transcription_model_id !== (s.transcription_model_id ?? '')
+    || form.video_model_id !== (s.video_model_id ?? '')
     || form.language !== (s.language ?? '')
     || form.reasoning_enabled !== (s.reasoning_enabled ?? false)
     || form.reasoning_effort !== (s.reasoning_effort || 'medium')

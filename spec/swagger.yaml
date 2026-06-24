@@ -3450,12 +3450,14 @@ definitions:
     - embedding
     - speech
     - transcription
+    - video
     type: string
     x-enum-varnames:
     - ModelTypeChat
     - ModelTypeEmbedding
     - ModelTypeSpeech
     - ModelTypeTranscription
+    - ModelTypeVideo
   models.TestResponse:
     properties:
       latency_ms:
@@ -4167,6 +4169,8 @@ definitions:
         type: string
       tts_model_id:
         type: string
+      video_model_id:
+        type: string
     type: object
   settings.ToolApprovalConfig:
     properties:
@@ -4265,6 +4269,126 @@ definitions:
       transcription_model_id:
         type: string
       tts_model_id:
+        type: string
+      video_model_id:
+        type: string
+    type: object
+  video.ConfigSchema:
+    properties:
+      fields:
+        items:
+          $ref: '#/definitions/video.FieldSchema'
+        type: array
+    type: object
+  video.FieldSchema:
+    properties:
+      advanced:
+        type: boolean
+      description:
+        type: string
+      enum:
+        items:
+          type: string
+        type: array
+      example: {}
+      key:
+        type: string
+      order:
+        type: integer
+      required:
+        type: boolean
+      title:
+        type: string
+      type:
+        type: string
+    type: object
+  video.ImportModelsResponse:
+    properties:
+      created:
+        type: integer
+      models:
+        items:
+          type: string
+        type: array
+      skipped:
+        type: integer
+    type: object
+  video.ModelInfo:
+    properties:
+      config_schema:
+        $ref: '#/definitions/video.ConfigSchema'
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+    type: object
+  video.ModelResponse:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      created_at:
+        type: string
+      id:
+        type: string
+      model_id:
+        type: string
+      name:
+        type: string
+      provider_id:
+        type: string
+      provider_type:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  video.ProviderMetaResponse:
+    properties:
+      config_schema:
+        $ref: '#/definitions/video.ConfigSchema'
+      default_model:
+        type: string
+      description:
+        type: string
+      display_name:
+        type: string
+      models:
+        items:
+          $ref: '#/definitions/video.ModelInfo'
+        type: array
+      provider:
+        type: string
+      supports_list:
+        type: boolean
+    type: object
+  video.ProviderResponse:
+    properties:
+      client_type:
+        type: string
+      config:
+        additionalProperties: {}
+        type: object
+      created_at:
+        type: string
+      enable:
+        type: boolean
+      icon:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  video.UpdateModelRequest:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      name:
         type: string
     type: object
   webhooktunnel.Status:
@@ -12333,6 +12457,201 @@ paths:
       summary: Update current user password
       tags:
       - users
+  /video-models:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/video.ModelResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List all video models
+      tags:
+      - video-models
+  /video-models/{id}:
+    get:
+      parameters:
+      - description: Model ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/video.ModelResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a video model
+      tags:
+      - video-models
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Model ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Model update payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/video.UpdateModelRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/video.ModelResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update a video model
+      tags:
+      - video-models
+  /video-providers:
+    get:
+      description: List providers that support video generation
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/video.ProviderResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List video providers
+      tags:
+      - video-providers
+  /video-providers/{id}:
+    get:
+      parameters:
+      - description: Provider ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/video.ProviderResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get video provider
+      tags:
+      - video-providers
+  /video-providers/{id}/import-models:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Provider ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/video.ImportModelsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Import video models from provider
+      tags:
+      - video-providers
+  /video-providers/{id}/models:
+    get:
+      parameters:
+      - description: Provider ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/video.ModelResponse'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List video models by provider
+      tags:
+      - video-providers
+  /video-providers/meta:
+    get:
+      description: List available video provider types with their models and capabilities
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/video.ProviderMetaResponse'
+            type: array
+      summary: List video provider metadata
+      tags:
+      - video-providers
   /webhook-tunnel/status:
     get:
       responses:

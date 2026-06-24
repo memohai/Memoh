@@ -47,7 +47,7 @@ import ModelOptions from './model-options.vue'
 const props = defineProps<{
   models: ModelsGetResponse[]
   providers: ProvidersGetResponse[]
-  modelType: 'chat' | 'embedding'
+  modelType: 'chat' | 'embedding' | 'video'
   placeholder?: string
 }>()
 

@@ -256,6 +256,14 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 		transcriptionModelUUID = modelID
 	}
+	videoModelUUID := pgtype.UUID{}
+	if value := strings.TrimSpace(req.VideoModelID); value != "" {
+		modelID, err := db.ParseUUID(value)
+		if err != nil {
+			return Settings{}, err
+		}
+		videoModelUUID = modelID
+	}
 	toolApprovalConfig, err := json.Marshal(current.ToolApprovalConfig)
 	if err != nil {
 		return Settings{}, err
@@ -312,6 +320,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		MemoryProviderID:       memoryProviderUUID,
 		TtsModelID:             ttsModelUUID,
 		TranscriptionModelID:   transcriptionModelUUID,
+		VideoModelID:           videoModelUUID,
 		PersistFullToolResults: current.PersistFullToolResults,
 		ShowToolCallsInIm:      current.ShowToolCallsInIM,
 		ToolApprovalConfig:     toolApprovalConfig,
@@ -419,6 +428,7 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.MemoryProviderID,
 		row.TtsModelID,
 		row.TranscriptionModelID,
+		row.VideoModelID,
 		row.PersistFullToolResults,
 		row.ShowToolCallsInIm,
 		row.ToolApprovalConfig,
@@ -451,6 +461,7 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.MemoryProviderID,
 		row.TtsModelID,
 		row.TranscriptionModelID,
+		row.VideoModelID,
 		row.PersistFullToolResults,
 		row.ShowToolCallsInIm,
 		row.ToolApprovalConfig,
@@ -482,6 +493,7 @@ func normalizeBotSettingsFields(
 	memoryProviderID pgtype.UUID,
 	ttsModelID pgtype.UUID,
 	transcriptionModelID pgtype.UUID,
+	videoModelID pgtype.UUID,
 	persistFullToolResults bool,
 	showToolCallsInIM bool,
 	toolApprovalConfig []byte,
@@ -523,6 +535,9 @@ func normalizeBotSettingsFields(
 	}
 	if transcriptionModelID.Valid {
 		settings.TranscriptionModelID = uuid.UUID(transcriptionModelID.Bytes).String()
+	}
+	if videoModelID.Valid {
+		settings.VideoModelID = uuid.UUID(videoModelID.Bytes).String()
 	}
 	settings.PersistFullToolResults = persistFullToolResults
 	settings.ShowToolCallsInIM = showToolCallsInIM

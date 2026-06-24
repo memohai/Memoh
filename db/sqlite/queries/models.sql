@@ -41,7 +41,10 @@ WHERE client_type NOT IN (
   'alibabacloud-speech',
   'microsoft-speech',
   'google-speech',
-  'google-transcription'
+  'google-transcription',
+  'openrouter-video',
+  'modelark-video',
+  'volcengine-video'
 )
 ORDER BY created_at DESC;
 
@@ -79,7 +82,10 @@ WHERE client_type NOT IN (
   'alibabacloud-speech',
   'microsoft-speech',
   'google-speech',
-  'google-transcription'
+  'google-transcription',
+  'openrouter-video',
+  'modelark-video',
+  'volcengine-video'
 );
 
 -- name: CreateModel :one
@@ -112,7 +118,7 @@ ORDER BY created_at DESC;
 
 -- name: ListModels :many
 SELECT * FROM models
-WHERE type NOT IN ('speech', 'transcription')
+WHERE type NOT IN ('speech', 'transcription', 'video')
 ORDER BY created_at DESC;
 
 -- name: ListModelsByType :many
@@ -123,7 +129,7 @@ ORDER BY created_at DESC;
 -- name: ListModelsByProviderID :many
 SELECT * FROM models
 WHERE provider_id = sqlc.arg(provider_id)
-  AND type NOT IN ('speech', 'transcription')
+  AND type NOT IN ('speech', 'transcription', 'video')
 ORDER BY created_at DESC;
 
 -- name: ListModelsByProviderIDAndType :many
@@ -171,7 +177,7 @@ WHERE provider_id = sqlc.arg(provider_id)
 
 -- name: CountModels :one
 SELECT COUNT(*) FROM models
-WHERE type NOT IN ('speech', 'transcription');
+WHERE type NOT IN ('speech', 'transcription', 'video');
 
 -- name: CountModelsByType :one
 SELECT COUNT(*) FROM models WHERE type = sqlc.arg(type);
@@ -224,7 +230,7 @@ FROM models m
 JOIN providers p ON m.provider_id = p.id
 WHERE p.enable = true
   AND m.enable = true
-  AND m.type NOT IN ('speech', 'transcription')
+  AND m.type NOT IN ('speech', 'transcription', 'video')
 ORDER BY m.created_at DESC;
 
 -- name: ListEnabledModelsByType :many
@@ -344,5 +350,40 @@ ORDER BY m.created_at DESC;
 SELECT * FROM models
 WHERE provider_id = sqlc.arg(provider_id)
   AND type = 'transcription'
+  AND enable = true
+ORDER BY created_at DESC;
+
+
+-- name: GetVideoModelWithProvider :one
+SELECT
+  m.*,
+  p.client_type AS provider_type
+FROM models m
+JOIN providers p ON p.id = m.provider_id
+WHERE m.id = sqlc.arg(id)
+  AND m.type = 'video';
+
+-- name: ListVideoProviders :many
+SELECT * FROM providers
+WHERE client_type IN (
+  'openrouter-video',
+  'modelark-video',
+  'volcengine-video'
+)
+ORDER BY created_at DESC;
+
+-- name: ListVideoModels :many
+SELECT m.*,
+  p.client_type AS provider_type
+FROM models m
+JOIN providers p ON p.id = m.provider_id
+WHERE m.type = 'video'
+  AND m.enable = true
+ORDER BY m.created_at DESC;
+
+-- name: ListVideoModelsByProviderID :many
+SELECT * FROM models
+WHERE provider_id = sqlc.arg(provider_id)
+  AND type = 'video'
   AND enable = true
 ORDER BY created_at DESC;

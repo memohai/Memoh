@@ -39,6 +39,21 @@
         />
       </div>
     </SettingsRow>
+
+    <SettingsRow
+      :label="$t('bots.settings.videoModel')"
+      :description="$t('bots.settings.videoModelDescription')"
+    >
+      <div class="w-56">
+        <ModelSelect
+          v-model="form.video_model_id"
+          :models="videoModels"
+          :providers="videoProviders"
+          model-type="video"
+          :placeholder="$t('bots.settings.videoModelPlaceholder')"
+        />
+      </div>
+    </SettingsRow>
   </SettingsSection>
 </template>
 
@@ -54,6 +69,7 @@ import type {
   AudioTranscriptionModelResponse,
   ModelsGetResponse,
   ProvidersGetResponse,
+  VideoProviderResponse,
 } from '@memohai/sdk'
 
 defineProps<{
@@ -63,5 +79,7 @@ defineProps<{
   transcriptionModels: AudioTranscriptionModelResponse[]
   imageCapableModels: ModelsGetResponse[]
   providers: ProvidersGetResponse[]
+  videoModels: ModelsGetResponse[]
+  videoProviders: VideoProviderResponse[]
 }>()
 </script>

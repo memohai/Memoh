@@ -49,6 +49,7 @@ func ToolBrowserRemoteSession() ToolName { return toolname.ToolBrowserRemoteSess
 func ToolWebSearch() ToolName       { return toolname.ToolWebSearch() }
 func ToolWebFetch() ToolName        { return toolname.ToolWebFetch() }
 func ToolGenerateImage() ToolName   { return toolname.ToolGenerateImage() }
+func ToolGenerateVideo() ToolName   { return toolname.ToolGenerateVideo() }
 func ToolTranscribeAudio() ToolName { return toolname.ToolTranscribeAudio() }
 func ToolAskUser() ToolName         { return toolname.ToolAskUser() }
 
