@@ -44,6 +44,7 @@ const (
 const (
 	HashAlgoSHA256             = "sha256"
 	HashScopeCanonicalFragment = "canonical_fragment"
+	HashScopeSourcePayload     = "source_payload"
 )
 
 type SchemaVersion struct {

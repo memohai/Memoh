@@ -37,6 +37,7 @@ type HistoryRecord struct {
 	Lifecycle  Lifecycle
 
 	ModelMessage conversation.ModelMessage
+	Assets       []MediaRef
 
 	Scope      contextfrag.Scope
 	Provenance contextfrag.Provenance
@@ -62,4 +63,13 @@ type HistoryRecord struct {
 	// Required marks a record that must survive trimming/compaction because it
 	// is pinned by a retry/edit request (conversation.ChatRequest.RequiredHistoryMessageID).
 	Required bool
+}
+
+type MediaRef struct {
+	ContentHash string
+	Role        string
+	Ordinal     int
+	Mime        string
+	SizeBytes   int64
+	Name        string
 }

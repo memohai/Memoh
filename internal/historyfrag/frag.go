@@ -10,6 +10,8 @@ import (
 	"github.com/memohai/memoh/internal/messageconv"
 )
 
+// ToFrag renders the history record for context-frag manifests. Consumers that
+// need provider-continuity details should classify from HistoryRecord.ModelMessage.
 func ToFrag(record HistoryRecord) contextfrag.ContextFrag {
 	msg := messageconv.ModelMessageToSDKMessage(record.ModelMessage)
 	kind := record.Kind
