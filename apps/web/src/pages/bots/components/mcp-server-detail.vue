@@ -97,7 +97,7 @@
             </FieldControl>
           </Field>
           <Field>
-            <FieldLabel :optional-text="$t('common.optional')">
+            <FieldLabel optional :optional-text="$t('common.optional')">
               {{ $t('mcp.cwd') }}
             </FieldLabel>
             <FieldControl>
