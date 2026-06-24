@@ -1,0 +1,256 @@
+package historyfrag
+
+import (
+	"encoding/json"
+	"reflect"
+	"testing"
+	"time"
+
+	sdk "github.com/memohai/twilight-ai/sdk"
+
+	"github.com/memohai/memoh/internal/contextfrag"
+	"github.com/memohai/memoh/internal/conversation"
+	messagepkg "github.com/memohai/memoh/internal/message"
+)
+
+func TestFromDBMessageBuildsDurableRecordScopeAndFrag(t *testing.T) {
+	t.Parallel()
+
+	inputTokens := 12
+	outputTokens := 34
+	msg := messagepkg.Message{
+		ID:                      "row-1",
+		BotID:                   "bot-1",
+		SessionID:               "sess-1",
+		SenderChannelIdentityID: "sender-1",
+		SenderUserID:            "user-1",
+		SenderDisplayName:       "Alice",
+		Platform:                "telegram",
+		ExternalMessageID:       "msg-1",
+		SourceReplyToMessageID:  "msg-0",
+		Role:                    "user",
+		Content:                 persistedModelMessage(t, conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("hello")}),
+		Usage:                   mustJSON(t, map[string]int{"inputTokens": inputTokens, "outputTokens": outputTokens}),
+		CompactID:               "compact-1",
+		EventID:                 "evt-1",
+		DisplayContent:          "hello",
+		CreatedAt:               time.Date(2026, 6, 24, 3, 0, 0, 0, time.UTC),
+	}
+
+	record, err := FromDBMessage(msg, ScopeFallback{
+		ChatID:           "chat-1",
+		ConversationType: "group",
+		ConversationName: "Dev Chat",
+		ReplyTarget:      "target-1",
+	})
+	if err != nil {
+		t.Fatalf("FromDBMessage failed: %v", err)
+	}
+
+	if record.Ref.Namespace != "bot_history_message" || record.Ref.ID != "row-1" || record.Ref.Schema != contextfrag.SchemaContextRef {
+		t.Fatalf("unexpected record ref: %#v", record.Ref)
+	}
+	if record.SourceKind != SourceDBMessage || record.Lifecycle != LifecyclePersisted {
+		t.Fatalf("unexpected source/lifecycle: %s %s", record.SourceKind, record.Lifecycle)
+	}
+	if record.DBMessageID != "row-1" ||
+		record.ExternalMessageID != "msg-1" ||
+		record.EventID != "evt-1" ||
+		record.SessionID != "sess-1" ||
+		record.BotID != "bot-1" ||
+		record.SenderChannelIdentityID != "sender-1" ||
+		record.SenderUserID != "user-1" ||
+		record.SenderDisplayName != "Alice" ||
+		record.Platform != "telegram" ||
+		record.SourceReplyToMessageID != "msg-0" ||
+		record.CompactID != "compact-1" {
+		t.Fatalf("record lost DB provenance: %#v", record)
+	}
+	if record.UsageInputTokens == nil || *record.UsageInputTokens != inputTokens {
+		t.Fatalf("UsageInputTokens = %#v, want %d", record.UsageInputTokens, inputTokens)
+	}
+	if record.UsageOutputTokens == nil || *record.UsageOutputTokens != outputTokens {
+		t.Fatalf("UsageOutputTokens = %#v, want %d", record.UsageOutputTokens, outputTokens)
+	}
+
+	frag := ToFrag(record)
+	if err := contextfrag.ValidateContextRef(frag.Ref); err != nil {
+		t.Fatalf("frag ref invalid: %#v: %v", frag.Ref, err)
+	}
+	if frag.Ref.Namespace != "bot_history_message" || frag.Ref.ID != "row-1" || frag.Ref.Durability != contextfrag.RefDurable {
+		t.Fatalf("frag ref should be durable DB row identity: %#v", frag.Ref)
+	}
+	if frag.Ref.ContentHash == "" || frag.Ref.HashAlgo != contextfrag.HashAlgoSHA256 || frag.Ref.HashScope != contextfrag.HashScopeCanonicalFragment {
+		t.Fatalf("frag ref missing canonical content hash: %#v", frag.Ref)
+	}
+	if frag.Kind != contextfrag.KindConversationEvent || frag.Slot != contextfrag.SlotHistory {
+		t.Fatalf("unexpected frag kind/slot: %s %s", frag.Kind, frag.Slot)
+	}
+	if frag.Scope.BotID != "bot-1" ||
+		frag.Scope.ChatID != "chat-1" ||
+		frag.Scope.SessionID != "sess-1" ||
+		frag.Scope.ChannelIdentityID != "sender-1" ||
+		frag.Scope.DisplayName != "Alice" ||
+		frag.Scope.Platform != "telegram" ||
+		frag.Scope.CurrentMessageID != "msg-1" ||
+		frag.Scope.EventID != "evt-1" ||
+		frag.Scope.ReplyToMessageID != "msg-0" ||
+		frag.Scope.ConversationType != "group" ||
+		frag.Scope.ConversationName != "Dev Chat" ||
+		frag.Scope.ReplyTarget != "target-1" {
+		t.Fatalf("frag scope lost DB row topology: %#v", frag.Scope)
+	}
+	if frag.Provenance.Source != string(SourceDBMessage) || frag.Provenance.SourceID != "row-1" || frag.Provenance.Collector != CollectorHistoryRecords {
+		t.Fatalf("unexpected frag provenance: %#v", frag.Provenance)
+	}
+}
+
+func TestFromDBMessageDuplicateContentUsesDurableRowIDs(t *testing.T) {
+	t.Parallel()
+
+	first, err := FromDBMessage(messagepkg.Message{
+		ID:      "row-1",
+		BotID:   "bot-1",
+		Role:    "user",
+		Content: persistedModelMessage(t, conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("same")}),
+	}, ScopeFallback{})
+	if err != nil {
+		t.Fatalf("first FromDBMessage failed: %v", err)
+	}
+	second, err := FromDBMessage(messagepkg.Message{
+		ID:      "row-2",
+		BotID:   "bot-1",
+		Role:    "user",
+		Content: persistedModelMessage(t, conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("same")}),
+	}, ScopeFallback{})
+	if err != nil {
+		t.Fatalf("second FromDBMessage failed: %v", err)
+	}
+
+	firstFrag := ToFrag(first)
+	secondFrag := ToFrag(second)
+	if firstFrag.Ref.ID == secondFrag.Ref.ID {
+		t.Fatalf("duplicate content must not collapse durable row identity: first=%#v second=%#v", firstFrag.Ref, secondFrag.Ref)
+	}
+	if firstFrag.Ref.Durability != contextfrag.RefDurable || secondFrag.Ref.Durability != contextfrag.RefDurable {
+		t.Fatalf("DB row refs must be durable: first=%#v second=%#v", firstFrag.Ref, secondFrag.Ref)
+	}
+}
+
+func TestFromDBMessageContentHashChangesWhenRowContentChanges(t *testing.T) {
+	t.Parallel()
+
+	original, err := FromDBMessage(messagepkg.Message{
+		ID:      "row-1",
+		BotID:   "bot-1",
+		Role:    "user",
+		Content: persistedModelMessage(t, conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("original")}),
+	}, ScopeFallback{})
+	if err != nil {
+		t.Fatalf("original FromDBMessage failed: %v", err)
+	}
+	edited, err := FromDBMessage(messagepkg.Message{
+		ID:      "row-1",
+		BotID:   "bot-1",
+		Role:    "user",
+		Content: persistedModelMessage(t, conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("edited")}),
+	}, ScopeFallback{})
+	if err != nil {
+		t.Fatalf("edited FromDBMessage failed: %v", err)
+	}
+
+	originalFrag := ToFrag(original)
+	editedFrag := ToFrag(edited)
+	if originalFrag.Ref.ID != editedFrag.Ref.ID {
+		t.Fatalf("same DB row should keep stable durable identity: original=%#v edited=%#v", originalFrag.Ref, editedFrag.Ref)
+	}
+	if originalFrag.Ref.ContentHash == "" || editedFrag.Ref.ContentHash == "" || originalFrag.Ref.ContentHash == editedFrag.Ref.ContentHash {
+		t.Fatalf("content hash should fence row content changes: original=%#v edited=%#v", originalFrag.Ref, editedFrag.Ref)
+	}
+}
+
+func TestHistoryRecordsRenderLegacyModelAndSDKMessages(t *testing.T) {
+	t.Parallel()
+
+	expectedModel := []conversation.ModelMessage{
+		{Role: "user", Content: conversation.NewTextContent("hello")},
+		{Role: "assistant", Content: conversation.NewTextContent("hi")},
+	}
+	records := make([]HistoryRecord, 0, len(expectedModel))
+	for i, msg := range expectedModel {
+		record, err := FromDBMessage(messagepkg.Message{
+			ID:      string(rune('a' + i)),
+			BotID:   "bot-1",
+			Role:    msg.Role,
+			Content: persistedModelMessage(t, msg),
+		}, ScopeFallback{})
+		if err != nil {
+			t.Fatalf("FromDBMessage %d failed: %v", i, err)
+		}
+		records = append(records, record)
+	}
+
+	if got := ToModelMessages(records); !reflect.DeepEqual(got, expectedModel) {
+		t.Fatalf("ToModelMessages mismatch:\ngot  %#v\nwant %#v", got, expectedModel)
+	}
+
+	assertSameJSON(t, ToSDKMessages(records), []sdk.Message{
+		sdk.UserMessage("hello"),
+		sdk.AssistantMessage("hi"),
+	})
+}
+
+func TestFromDBMessageScopeFallbackDoesNotChangeDurableRefID(t *testing.T) {
+	t.Parallel()
+
+	msg := messagepkg.Message{
+		ID:      "row-1",
+		BotID:   "bot-1",
+		Role:    "user",
+		Content: persistedModelMessage(t, conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("hello")}),
+	}
+	first, err := FromDBMessage(msg, ScopeFallback{ChatID: "chat-1", ConversationType: "group"})
+	if err != nil {
+		t.Fatalf("first FromDBMessage failed: %v", err)
+	}
+	second, err := FromDBMessage(msg, ScopeFallback{ChatID: "chat-2", ConversationType: "private"})
+	if err != nil {
+		t.Fatalf("second FromDBMessage failed: %v", err)
+	}
+
+	if first.Ref.ID != second.Ref.ID {
+		t.Fatalf("current-request fallback scope must not change DB row identity: first=%#v second=%#v", first.Ref, second.Ref)
+	}
+	if ToFrag(first).Ref.ID != ToFrag(second).Ref.ID {
+		t.Fatalf("fallback scope changed durable frag identity: first=%#v second=%#v", ToFrag(first).Ref, ToFrag(second).Ref)
+	}
+}
+
+func persistedModelMessage(t *testing.T, msg conversation.ModelMessage) json.RawMessage {
+	t.Helper()
+	return mustJSON(t, msg)
+}
+
+func mustJSON(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal %T: %v", value, err)
+	}
+	return raw
+}
+
+func assertSameJSON(t *testing.T, got any, want any) {
+	t.Helper()
+	gotRaw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal got: %v", err)
+	}
+	wantRaw, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("marshal want: %v", err)
+	}
+	if string(gotRaw) != string(wantRaw) {
+		t.Fatalf("json mismatch:\ngot  %s\nwant %s", gotRaw, wantRaw)
+	}
+}
