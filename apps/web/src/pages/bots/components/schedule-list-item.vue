@@ -21,7 +21,7 @@
         </p>
         <span
           v-if="timeLabel"
-          class="shrink-0 text-[11px] tabular-nums text-muted-foreground"
+          class="shrink-0 text-caption tabular-nums text-muted-foreground"
         >
           {{ timeLabel }}
         </span>
