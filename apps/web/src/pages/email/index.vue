@@ -14,7 +14,7 @@ import {
 } from '@memohai/ui'
 import { getEmailProviders } from '@memohai/sdk'
 import type { EmailProviderResponse } from '@memohai/sdk'
-import { Mail, Plus, Search } from 'lucide-vue-next'
+import { Plus, Search } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import AddEmailProvider from './components/add-email-provider.vue'
 import ProviderSetting from './components/provider-setting.vue'
@@ -23,6 +23,7 @@ import DetailPane from '@/components/settings/detail-pane.vue'
 import { useViewSwap } from '@/composables/useViewSwap'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 import PageShell from '@/components/page-shell/index.vue'
+import EmailProviderIcon from '@/components/email-provider-icon/index.vue'
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
@@ -124,7 +125,10 @@ watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
         >
           <template #leading>
             <span class="flex size-10 items-center justify-center rounded-full bg-muted">
-              <Mail class="size-5 text-muted-foreground" />
+              <EmailProviderIcon
+                :provider="provider.provider"
+                class="size-5 text-muted-foreground"
+              />
             </span>
           </template>
         </BackendCard>

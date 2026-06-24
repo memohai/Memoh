@@ -15,18 +15,21 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 
+	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/email"
 	emailgmail "github.com/memohai/memoh/internal/email/adapters/gmail"
+	"github.com/memohai/memoh/internal/oauthclients"
 )
 
 const emailOAuthCallbackPath = "/api/email/oauth/callback"
 
 // EmailOAuthHandler handles the OAuth2 authorization flow for Gmail providers.
 type EmailOAuthHandler struct {
-	service     *email.Service
-	tokenStore  email.OAuthTokenStore
-	callbackURL string
-	logger      *slog.Logger
+	service      *email.Service
+	tokenStore   email.OAuthTokenStore
+	oauthClients oauthclients.Resolver
+	callbackURL  string
+	logger       *slog.Logger
 }
 
 type emailOAuthStatusResponse struct {
@@ -38,12 +41,13 @@ type emailOAuthStatusResponse struct {
 	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
 }
 
-func NewEmailOAuthHandler(log *slog.Logger, service *email.Service, tokenStore email.OAuthTokenStore, callbackURL string) *EmailOAuthHandler {
+func NewEmailOAuthHandler(log *slog.Logger, service *email.Service, tokenStore email.OAuthTokenStore, oauthClients oauthclients.Resolver, callbackURL string) *EmailOAuthHandler {
 	return &EmailOAuthHandler{
-		service:     service,
-		tokenStore:  tokenStore,
-		callbackURL: callbackURL,
-		logger:      log.With(slog.String("handler", "email_oauth")),
+		service:      service,
+		tokenStore:   tokenStore,
+		oauthClients: oauthClients,
+		callbackURL:  callbackURL,
+		logger:       log.With(slog.String("handler", "email_oauth")),
 	}
 }
 
@@ -65,17 +69,22 @@ func (h *EmailOAuthHandler) Register(e *echo.Echo) {
 // @Failure 404 {object} ErrorResponse
 // @Router /email-providers/{id}/oauth/authorize [get].
 func (h *EmailOAuthHandler) Authorize(c echo.Context) error {
+	userID, err := auth.UserIDFromContext(c)
+	if err != nil {
+		return err
+	}
 	providerID := strings.TrimSpace(c.Param("id"))
 	if providerID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
 	}
 
-	provider, err := h.service.GetProvider(c.Request().Context(), providerID)
+	provider, err := h.service.GetProvider(c.Request().Context(), userID, providerID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "provider not found")
 	}
 
-	callbackURL := h.effectiveCallbackURL(c)
+	adapter := emailgmail.New(h.logger, h.tokenStore, h.oauthClients)
+	callbackURL := adapter.EffectiveRedirectURI(h.effectiveCallbackURL(c))
 	state, err := generateState(callbackURL)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate state")
@@ -87,12 +96,13 @@ func (h *EmailOAuthHandler) Authorize(c echo.Context) error {
 
 	var authURL string
 	if email.ProviderName(provider.Provider) == emailgmail.ProviderName {
-		clientID, _ := provider.Config["client_id"].(string)
-		if strings.TrimSpace(clientID) == "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "client_id is not configured for this provider")
+		if !isProviderConfigured(provider, adapter) {
+			return echo.NewHTTPError(http.StatusBadRequest, "gmail oauth is not configured")
 		}
-		adapter := emailgmail.New(h.logger, h.tokenStore)
-		authURL = adapter.AuthorizeURL(clientID, callbackURL, state)
+		authURL, err = adapter.AuthorizeURL(callbackURL, state)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
 	}
 	if authURL == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "provider does not support OAuth2")
@@ -130,7 +140,7 @@ func (h *EmailOAuthHandler) Callback(c echo.Context) error {
 		return renderEmailOAuthCallbackResult(c, http.StatusBadRequest, "", "error", "invalid or expired state")
 	}
 
-	provider, err := h.service.GetProvider(ctx, stored.ProviderID)
+	provider, err := h.service.GetProviderInternal(ctx, stored.ProviderID)
 	if err != nil {
 		return renderEmailOAuthCallbackResult(c, http.StatusInternalServerError, stored.ProviderID, "error", "provider not found")
 	}
@@ -138,10 +148,10 @@ func (h *EmailOAuthHandler) Callback(c echo.Context) error {
 	if email.ProviderName(provider.Provider) != emailgmail.ProviderName {
 		return renderEmailOAuthCallbackResult(c, http.StatusBadRequest, stored.ProviderID, "error", "provider does not support OAuth2")
 	}
-	adapter := emailgmail.New(h.logger, h.tokenStore)
+	adapter := emailgmail.New(h.logger, h.tokenStore, h.oauthClients)
 	redirectURI := callbackURLFromState(state)
 	if redirectURI == "" {
-		redirectURI = h.effectiveCallbackURL(c)
+		redirectURI = adapter.EffectiveRedirectURI(h.effectiveCallbackURL(c))
 	}
 	if err := adapter.ExchangeCode(ctx, provider.Config, stored.ProviderID, code, redirectURI); err != nil {
 		h.logger.Error("gmail code exchange failed", slog.Any("error", err))
@@ -161,13 +171,17 @@ func (h *EmailOAuthHandler) Callback(c echo.Context) error {
 // @Failure 404 {object} ErrorResponse
 // @Router /email-providers/{id}/oauth/status [get].
 func (h *EmailOAuthHandler) Status(c echo.Context) error {
+	userID, err := auth.UserIDFromContext(c)
+	if err != nil {
+		return err
+	}
 	providerID := strings.TrimSpace(c.Param("id"))
 	if providerID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
 	}
 
 	ctx := c.Request().Context()
-	provider, err := h.service.GetProvider(ctx, providerID)
+	provider, err := h.service.GetProvider(ctx, userID, providerID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "provider not found")
 	}
@@ -177,7 +191,7 @@ func (h *EmailOAuthHandler) Status(c echo.Context) error {
 
 	resp := emailOAuthStatusResponse{
 		Provider:   provider.Provider,
-		Configured: isProviderConfigured(provider),
+		Configured: isProviderConfigured(provider, emailgmail.New(h.logger, h.tokenStore, h.oauthClients)),
 	}
 
 	token, err := h.tokenStore.Get(ctx, providerID)
@@ -209,13 +223,17 @@ func (h *EmailOAuthHandler) Status(c echo.Context) error {
 // @Failure 404 {object} ErrorResponse
 // @Router /email-providers/{id}/oauth/token [delete].
 func (h *EmailOAuthHandler) Revoke(c echo.Context) error {
+	userID, err := auth.UserIDFromContext(c)
+	if err != nil {
+		return err
+	}
 	providerID := strings.TrimSpace(c.Param("id"))
 	if providerID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
 	}
 
 	ctx := c.Request().Context()
-	provider, err := h.service.GetProvider(ctx, providerID)
+	provider, err := h.service.GetProvider(ctx, userID, providerID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "provider not found")
 	}
@@ -235,7 +253,7 @@ func supportsEmailOAuth(name email.ProviderName) bool {
 	return name == emailgmail.ProviderName
 }
 
-func isProviderConfigured(provider email.ProviderResponse) bool {
+func isProviderConfigured(provider email.ProviderResponse, adapter *emailgmail.Adapter) bool {
 	config := provider.Config
 	if config == nil {
 		config = map[string]any{}
@@ -243,8 +261,8 @@ func isProviderConfigured(provider email.ProviderResponse) bool {
 	if email.ProviderName(provider.Provider) != emailgmail.ProviderName {
 		return false
 	}
-	clientID, _ := config["client_id"].(string)
-	return strings.TrimSpace(clientID) != ""
+	emailAddress, _ := config["email_address"].(string)
+	return strings.TrimSpace(emailAddress) != "" && adapter.HasOAuthClient()
 }
 
 func generateState(callbackURL string) (string, error) {

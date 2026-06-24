@@ -97,6 +97,7 @@ type Queries interface {
 	DeleteContainerByBotID(ctx context.Context, botID pgtype.UUID) error
 	DeleteEmailOAuthToken(ctx context.Context, emailProviderID pgtype.UUID) error
 	DeleteEmailProvider(ctx context.Context, id pgtype.UUID) error
+	DeleteEmailProviderByIDAndUser(ctx context.Context, arg dbsqlc.DeleteEmailProviderByIDAndUserParams) error
 	DeleteFetchProvider(ctx context.Context, id pgtype.UUID) error
 	DeleteHeartbeatLogsByBot(ctx context.Context, botID pgtype.UUID) error
 	DeleteMCPConnection(ctx context.Context, arg dbsqlc.DeleteMCPConnectionParams) error
@@ -150,7 +151,8 @@ type Queries interface {
 	GetEmailOAuthTokenByState(ctx context.Context, state string) (dbsqlc.EmailOauthToken, error)
 	GetEmailOutboxByID(ctx context.Context, id pgtype.UUID) (dbsqlc.EmailOutbox, error)
 	GetEmailProviderByID(ctx context.Context, id pgtype.UUID) (dbsqlc.EmailProvider, error)
-	GetEmailProviderByName(ctx context.Context, name string) (dbsqlc.EmailProvider, error)
+	GetEmailProviderByIDAndUser(ctx context.Context, arg dbsqlc.GetEmailProviderByIDAndUserParams) (dbsqlc.EmailProvider, error)
+	GetEmailProviderByNameAndUser(ctx context.Context, arg dbsqlc.GetEmailProviderByNameAndUserParams) (dbsqlc.EmailProvider, error)
 	GetFetchProviderByID(ctx context.Context, id pgtype.UUID) (dbsqlc.FetchProvider, error)
 	GetFetchProviderByName(ctx context.Context, name string) (dbsqlc.FetchProvider, error)
 	GetLatestAssistantUsage(ctx context.Context, sessionID pgtype.UUID) (int64, error)
@@ -216,6 +218,8 @@ type Queries interface {
 	ListEmailOutboxByBot(ctx context.Context, arg dbsqlc.ListEmailOutboxByBotParams) ([]dbsqlc.EmailOutbox, error)
 	ListEmailProviders(ctx context.Context) ([]dbsqlc.EmailProvider, error)
 	ListEmailProvidersByProvider(ctx context.Context, provider string) ([]dbsqlc.EmailProvider, error)
+	ListEmailProvidersByUser(ctx context.Context, userID pgtype.UUID) ([]dbsqlc.EmailProvider, error)
+	ListEmailProvidersByUserAndProvider(ctx context.Context, arg dbsqlc.ListEmailProvidersByUserAndProviderParams) ([]dbsqlc.EmailProvider, error)
 	ListFetchProviders(ctx context.Context) ([]dbsqlc.FetchProvider, error)
 	ListFetchProvidersByProvider(ctx context.Context, provider string) ([]dbsqlc.FetchProvider, error)
 	ListEnabledModels(ctx context.Context) ([]dbsqlc.Model, error)
@@ -322,6 +326,7 @@ type Queries interface {
 	UpdateEmailOutboxFailed(ctx context.Context, arg dbsqlc.UpdateEmailOutboxFailedParams) error
 	UpdateEmailOutboxSent(ctx context.Context, arg dbsqlc.UpdateEmailOutboxSentParams) error
 	UpdateEmailProvider(ctx context.Context, arg dbsqlc.UpdateEmailProviderParams) (dbsqlc.EmailProvider, error)
+	UpdateEmailProviderByIDAndUser(ctx context.Context, arg dbsqlc.UpdateEmailProviderByIDAndUserParams) (dbsqlc.EmailProvider, error)
 	UpdateFetchProvider(ctx context.Context, arg dbsqlc.UpdateFetchProviderParams) (dbsqlc.FetchProvider, error)
 	UpdateBotPluginInstallationStatus(ctx context.Context, arg dbsqlc.UpdateBotPluginInstallationStatusParams) (dbsqlc.BotPluginInstallation, error)
 	UpdateMCPConnection(ctx context.Context, arg dbsqlc.UpdateMCPConnectionParams) (dbsqlc.McpConnection, error)

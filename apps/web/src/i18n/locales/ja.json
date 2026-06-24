@@ -1116,7 +1116,7 @@
         "authorizedUnknown": "認可された",
         "expired": "認証の有効期限が切れました - 再認証してください。",
         "missing": "認可されていません。 Gmail へのアクセスを許可します。",
-        "notConfigured": "クライアントIDが欠けています。認証する前に追加してください。"
+        "notConfigured": "Gmail アドレスを入力し、サーバー側の Gmail OAuth client を設定してから認可してください。"
       },
       "logout": "ログアウト",
       "logoutSuccess": "認可が取り消されました",
@@ -1817,6 +1817,7 @@
       "unbindConfirm": "このEmail バインドを削除してもよろしいですか?",
       "bindSuccess": "Emailバインディングが追加されました",
       "unbindSuccess": "Emailバインドが削除されました",
+      "missingAddress": "このプロバイダーをバインドする前に Gmail アドレスを追加してください。",
       "from": "から",
       "to": "に",
       "subject": "主題",

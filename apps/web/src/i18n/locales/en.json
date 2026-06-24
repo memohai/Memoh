@@ -1169,7 +1169,7 @@
         "authorizedUnknown": "Authorized",
         "expired": "Authorization expired — please re-authorize.",
         "missing": "Not authorized. Authorize to enable Gmail access.",
-        "notConfigured": "Client ID is missing. Add it before authorizing."
+        "notConfigured": "Add a Gmail address and configure the server Gmail OAuth client before authorizing."
       },
       "logout": "Log out",
       "logoutSuccess": "Authorization revoked",
@@ -1805,6 +1805,7 @@
       "unbindConfirm": "Are you sure you want to remove this email binding?",
       "bindSuccess": "Email binding added",
       "unbindSuccess": "Email binding removed",
+      "missingAddress": "Add a Gmail address before binding this provider.",
       "from": "From",
       "to": "To",
       "subject": "Subject",

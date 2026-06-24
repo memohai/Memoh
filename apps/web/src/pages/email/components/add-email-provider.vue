@@ -67,7 +67,13 @@
                         :key="meta.provider"
                         :value="meta.provider!"
                       >
-                        {{ meta.display_name }}
+                        <span class="flex items-center gap-2">
+                          <EmailProviderIcon
+                            :provider="meta.provider"
+                            class="size-4 text-muted-foreground"
+                          />
+                          <span>{{ meta.display_name }}</span>
+                        </span>
                       </SelectItem>
                     </SelectGroup>
                   </SelectContent>
@@ -106,6 +112,7 @@ import { useI18n } from 'vue-i18n'
 import { Plus } from 'lucide-vue-next'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
+import EmailProviderIcon from '@/components/email-provider-icon/index.vue'
 
 const open = defineModel<boolean>('open')
 withDefaults(defineProps<{

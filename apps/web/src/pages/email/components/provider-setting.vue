@@ -5,7 +5,10 @@
            shape as the provider / web search / voice details. -->
       <section class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3">
         <span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
-          <Mail class="size-5 text-muted-foreground" />
+          <EmailProviderIcon
+            :provider="curProvider?.provider"
+            class="size-5 text-muted-foreground"
+          />
         </span>
         <div class="min-w-0 flex-1">
           <h2 class="truncate text-sm font-semibold">
@@ -219,12 +222,13 @@ import {
   SelectItem,
   Switch,
 } from '@memohai/ui'
-import { Mail, Eye, EyeOff, KeyRound, Trash2 } from 'lucide-vue-next'
+import { Eye, EyeOff, KeyRound, Trash2 } from 'lucide-vue-next'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
 import SettingsShell from '@/components/settings-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import EmailProviderIcon from '@/components/email-provider-icon/index.vue'
 import { computed, inject, reactive, ref, watch } from 'vue'
 import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'

@@ -161,7 +161,8 @@ CREATE TABLE model_variants (
 -- Minimal stub so later bot-level settings migrations can apply while this
 -- fixture focuses on preserving legacy model rows.
 CREATE TABLE bots (
-  id TEXT PRIMARY KEY
+  id TEXT PRIMARY KEY,
+  owner_user_id TEXT
 );
 
 -- Minimal stub of bot_sessions so migrations targeting that table (e.g.

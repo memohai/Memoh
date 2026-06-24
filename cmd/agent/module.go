@@ -6,7 +6,6 @@ import (
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
 
-	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/acl"
 	audiopkg "github.com/memohai/memoh/internal/audio"
 	"github.com/memohai/memoh/internal/boot"
@@ -26,6 +25,7 @@ import (
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/oauthclients"
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/schedule"
@@ -69,7 +69,7 @@ func options() fx.Option {
 			provideACPSessionPool,
 			provideACPCodexOAuthHandler,
 			provideACPClaudeCodeOAuthHandler,
-			accounts.NewService,
+			provideAccountService,
 			acl.NewService,
 			channelaccess.NewService,
 			settings.NewService,
@@ -81,7 +81,7 @@ func options() fx.Option {
 			searchproviders.NewService,
 			policy.NewService,
 			mcp.NewConnectionService,
-			pluginspkg.NewOAuthClientRegistry,
+			oauthclients.NewRegistry,
 			pluginspkg.NewService,
 			mcp.NewToolSessionContextStore,
 			conversation.NewService,

@@ -341,6 +341,7 @@ type EmailOutbox struct {
 
 type EmailProvider struct {
 	ID        pgtype.UUID        `json:"id"`
+	UserID    pgtype.UUID        `json:"user_id"`
 	Name      string             `json:"name"`
 	Provider  string             `json:"provider"`
 	Config    []byte             `json:"config"`

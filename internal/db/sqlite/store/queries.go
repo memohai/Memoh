@@ -1450,6 +1450,18 @@ func (q *Queries) DeleteEmailProvider(ctx context.Context, id pgtype.UUID) error
 	return mapQueryErr(err)
 }
 
+func (q *Queries) DeleteEmailProviderByIDAndUser(ctx context.Context, arg pgsqlc.DeleteEmailProviderByIDAndUserParams) error {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.DeleteEmailProviderByIDAndUserParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return err
+	}
+	err := q.store.queries.DeleteEmailProviderByIDAndUser(ctx, sqliteArg)
+	return mapQueryErr(err)
+}
+
 func (q *Queries) DeleteHeartbeatLogsByBot(ctx context.Context, botID pgtype.UUID) error {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return errSQLiteQueriesNotConfigured
@@ -2252,15 +2264,34 @@ func (q *Queries) GetEmailProviderByID(ctx context.Context, id pgtype.UUID) (pgs
 	return result, nil
 }
 
-func (q *Queries) GetEmailProviderByName(ctx context.Context, name string) (pgsqlc.EmailProvider, error) {
+func (q *Queries) GetEmailProviderByIDAndUser(ctx context.Context, arg pgsqlc.GetEmailProviderByIDAndUserParams) (pgsqlc.EmailProvider, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return pgsqlc.EmailProvider{}, errSQLiteQueriesNotConfigured
 	}
-	var sqliteName string
-	if err := convertValue(name, &sqliteName); err != nil {
+	var sqliteArg sqlitesqlc.GetEmailProviderByIDAndUserParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
 		return pgsqlc.EmailProvider{}, err
 	}
-	out, err := q.store.queries.GetEmailProviderByName(ctx, sqliteName)
+	out, err := q.store.queries.GetEmailProviderByIDAndUser(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.EmailProvider{}, mapQueryErr(err)
+	}
+	var result pgsqlc.EmailProvider
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.EmailProvider{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) GetEmailProviderByNameAndUser(ctx context.Context, arg pgsqlc.GetEmailProviderByNameAndUserParams) (pgsqlc.EmailProvider, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.EmailProvider{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.GetEmailProviderByNameAndUserParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.EmailProvider{}, err
+	}
+	out, err := q.store.queries.GetEmailProviderByNameAndUser(ctx, sqliteArg)
 	if err != nil {
 		return pgsqlc.EmailProvider{}, mapQueryErr(err)
 	}
@@ -3382,6 +3413,44 @@ func (q *Queries) ListEmailProvidersByProvider(ctx context.Context, provider str
 		return nil, err
 	}
 	out, err := q.store.queries.ListEmailProvidersByProvider(ctx, sqliteProvider)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.EmailProvider
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListEmailProvidersByUser(ctx context.Context, userID pgtype.UUID) ([]pgsqlc.EmailProvider, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteUserID string
+	if err := convertValue(userID, &sqliteUserID); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListEmailProvidersByUser(ctx, sqliteUserID)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.EmailProvider
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListEmailProvidersByUserAndProvider(ctx context.Context, arg pgsqlc.ListEmailProvidersByUserAndProviderParams) ([]pgsqlc.EmailProvider, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListEmailProvidersByUserAndProviderParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListEmailProvidersByUserAndProvider(ctx, sqliteArg)
 	if err != nil {
 		return nil, mapQueryErr(err)
 	}
@@ -5073,6 +5142,25 @@ func (q *Queries) UpdateEmailProvider(ctx context.Context, arg pgsqlc.UpdateEmai
 		return pgsqlc.EmailProvider{}, err
 	}
 	out, err := q.store.queries.UpdateEmailProvider(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.EmailProvider{}, mapQueryErr(err)
+	}
+	var result pgsqlc.EmailProvider
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.EmailProvider{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) UpdateEmailProviderByIDAndUser(ctx context.Context, arg pgsqlc.UpdateEmailProviderByIDAndUserParams) (pgsqlc.EmailProvider, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.EmailProvider{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.UpdateEmailProviderByIDAndUserParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.EmailProvider{}, err
+	}
+	out, err := q.store.queries.UpdateEmailProviderByIDAndUser(ctx, sqliteArg)
 	if err != nil {
 		return pgsqlc.EmailProvider{}, mapQueryErr(err)
 	}

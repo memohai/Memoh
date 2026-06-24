@@ -50,7 +50,7 @@ func (h *EmailWebhookHandler) HandleMailgun(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "config_id is required")
 	}
 
-	provider, err := h.service.GetProvider(c.Request().Context(), configID)
+	provider, err := h.service.GetProviderInternal(c.Request().Context(), configID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "provider not found")
 	}

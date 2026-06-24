@@ -1839,6 +1839,8 @@ definitions:
         type: string
       updated_at:
         type: string
+      user_id:
+        type: string
     type: object
   email.UpdateBindingRequest:
     properties:

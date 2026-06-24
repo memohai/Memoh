@@ -436,7 +436,7 @@ func (s *Service) collectEmailProviderDependencies(ctx context.Context, data bac
 			continue
 		}
 		seen[id] = struct{}{}
-		if provider, err := s.email.GetProvider(ctx, id); err == nil {
+		if provider, err := s.email.GetProviderInternal(ctx, id); err == nil {
 			out = append(out, provider)
 		}
 	}

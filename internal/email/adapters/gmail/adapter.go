@@ -19,21 +19,27 @@ import (
 	"golang.org/x/oauth2/google"
 
 	"github.com/memohai/memoh/internal/email"
+	"github.com/memohai/memoh/internal/oauthclients"
 )
 
 const ProviderName email.ProviderName = "gmail"
 
-const gmailScope = "https://mail.google.com/"
+const (
+	gmailScope     = "https://mail.google.com/"
+	oauthClientRef = "gmail"
+)
 
 type Adapter struct {
-	logger     *slog.Logger
-	tokenStore email.OAuthTokenStore
+	logger       *slog.Logger
+	tokenStore   email.OAuthTokenStore
+	oauthClients oauthclients.Resolver
 }
 
-func New(log *slog.Logger, tokenStore email.OAuthTokenStore) *Adapter {
+func New(log *slog.Logger, tokenStore email.OAuthTokenStore, oauthClients oauthclients.Resolver) *Adapter {
 	return &Adapter{
-		logger:     log.With(slog.String("adapter", "gmail")),
-		tokenStore: tokenStore,
+		logger:       log.With(slog.String("adapter", "gmail")),
+		tokenStore:   tokenStore,
+		oauthClients: oauthClients,
 	}
 }
 
@@ -45,44 +51,56 @@ func (*Adapter) Meta() email.ProviderMeta {
 		DisplayName: "Gmail (OAuth2)",
 		ConfigSchema: email.ConfigSchema{
 			Fields: []email.FieldSchema{
-				{Key: "client_id", Type: "string", Title: "Client ID", Required: true, Order: 1},
-				{Key: "client_secret", Type: "secret", Title: "Client Secret", Required: true, Order: 2},
-				{Key: "email_address", Type: "string", Title: "Gmail Address", Required: true, Example: "you@gmail.com", Order: 3},
+				{Key: "email_address", Type: "string", Title: "Gmail Address", Required: true, Example: "you@gmail.com", Order: 1},
 			},
 		},
 	}
 }
 
 func (*Adapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
-	for _, key := range []string{"client_id", "client_secret", "email_address"} {
-		if v, _ := raw[key].(string); strings.TrimSpace(v) == "" {
-			return nil, fmt.Errorf("%s is required", key)
+	clean := make(map[string]any, len(raw))
+	for key, value := range raw {
+		if key == "client_id" || key == "client_secret" {
+			continue
 		}
+		clean[key] = value
 	}
-	return raw, nil
+	if len(clean) == 0 {
+		return clean, nil
+	}
+	if v, _ := clean["email_address"].(string); strings.TrimSpace(v) == "" {
+		return nil, errors.New("email_address is required")
+	}
+	return clean, nil
 }
 
-func (*Adapter) AuthorizeURL(clientID, redirectURI, state string) string {
-	cfg := &oauth2.Config{
-		ClientID:    clientID,
-		Scopes:      []string{gmailScope},
-		Endpoint:    google.Endpoint,
-		RedirectURL: redirectURI,
+func (a *Adapter) HasOAuthClient() bool {
+	client, ok := a.oauthClient()
+	return ok && strings.TrimSpace(client.ClientID) != "" && strings.TrimSpace(client.ClientSecret) != ""
+}
+
+func (a *Adapter) EffectiveRedirectURI(fallback string) string {
+	client, ok := a.oauthClient()
+	if ok && strings.TrimSpace(client.RedirectURI) != "" {
+		return strings.TrimSpace(client.RedirectURI)
 	}
-	return cfg.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("prompt", "consent"))
+	return fallback
+}
+
+func (a *Adapter) AuthorizeURL(redirectURI, state string) (string, error) {
+	cfg, err := a.oauth2Config(redirectURI)
+	if err != nil {
+		return "", err
+	}
+	return cfg.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("prompt", "consent")), nil
 }
 
 func (a *Adapter) ExchangeCode(ctx context.Context, config map[string]any, providerID, code, redirectURI string) error {
-	clientID, _ := config["client_id"].(string)
-	clientSecret, _ := config["client_secret"].(string)
 	emailAddress, _ := config["email_address"].(string)
 
-	cfg := &oauth2.Config{
-		ClientID:     clientID,
-		ClientSecret: clientSecret,
-		Scopes:       []string{gmailScope},
-		Endpoint:     google.Endpoint,
-		RedirectURL:  redirectURI,
+	cfg, err := a.oauth2Config(redirectURI)
+	if err != nil {
+		return err
 	}
 	tok, err := cfg.Exchange(ctx, code)
 	if err != nil {
@@ -126,7 +144,8 @@ func (a *Adapter) Send(ctx context.Context, config map[string]any, msg email.Out
 	}
 	m.SetMessageID()
 
-	client, err := mail.NewClient("smtp.gmail.com",
+	client, err := mail.NewClient(
+		"smtp.gmail.com",
 		mail.WithPort(587),
 		mail.WithTLSPolicy(mail.TLSMandatory),
 		mail.WithSMTPAuth(mail.SMTPAuthXOAUTH2),
@@ -469,18 +488,34 @@ func (a *Adapter) validToken(ctx context.Context, config map[string]any, provide
 	return stored.AccessToken, emailAddr, nil
 }
 
-func (*Adapter) refresh(ctx context.Context, config map[string]any, refreshToken string) (*oauth2.Token, error) {
-	clientID, _ := config["client_id"].(string)
-	clientSecret, _ := config["client_secret"].(string)
-
-	cfg := &oauth2.Config{
-		ClientID:     clientID,
-		ClientSecret: clientSecret,
-		Scopes:       []string{gmailScope},
-		Endpoint:     google.Endpoint,
+func (a *Adapter) refresh(ctx context.Context, _ map[string]any, refreshToken string) (*oauth2.Token, error) {
+	cfg, err := a.oauth2Config("")
+	if err != nil {
+		return nil, err
 	}
 	src := cfg.TokenSource(ctx, &oauth2.Token{RefreshToken: refreshToken})
 	return src.Token()
+}
+
+func (a *Adapter) oauth2Config(redirectURI string) (*oauth2.Config, error) {
+	client, ok := a.oauthClient()
+	if !ok || strings.TrimSpace(client.ClientID) == "" || strings.TrimSpace(client.ClientSecret) == "" {
+		return nil, errors.New("gmail oauth client is not configured")
+	}
+	return &oauth2.Config{
+		ClientID:     strings.TrimSpace(client.ClientID),
+		ClientSecret: strings.TrimSpace(client.ClientSecret),
+		Scopes:       []string{gmailScope},
+		Endpoint:     google.Endpoint,
+		RedirectURL:  a.EffectiveRedirectURI(redirectURI),
+	}, nil
+}
+
+func (a *Adapter) oauthClient() (oauthclients.Client, bool) {
+	if a.oauthClients == nil {
+		return oauthclients.Client{}, false
+	}
+	return a.oauthClients.Get(oauthClientRef)
 }
 
 func bufToInbound(buf *imapclient.FetchMessageBuffer) *email.InboundEmail {

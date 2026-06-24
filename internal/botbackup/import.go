@@ -470,8 +470,8 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 	// Dependencies (providers/models/...) are global, idempotent resources; they
 	// are created before the bot and are intentionally NOT rolled back, so a
 	// retry reuses them by name.
-	var deps dependencyMap
-	if opts.wants(SectionModels) || opts.wants(SectionEmail) {
+	deps := newDependencyMap()
+	if opts.wants(SectionModels) {
 		deps, err = s.importDependencies(ctx, state)
 		if err != nil {
 			return ImportResult{}, err
@@ -483,6 +483,11 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 	}
 	state.idMap[profile.ID] = targetBotID
 	state.createMode = created
+	if opts.wants(SectionEmail) {
+		if err := s.importEmailDependencies(ctx, state, targetBotID, &deps); err != nil {
+			return ImportResult{}, err
+		}
+	}
 
 	// Compensation: in create mode, undo a partially-imported bot on any fatal
 	// failure. Deleting the bot cascades to all its child rows (settings, acl,
@@ -660,6 +665,17 @@ type dependencyMap struct {
 	emailProviders  map[string]string
 }
 
+func newDependencyMap() dependencyMap {
+	return dependencyMap{
+		providers:       map[string]string{},
+		models:          map[string]string{},
+		searchProviders: map[string]string{},
+		fetchProviders:  map[string]string{},
+		memoryProviders: map[string]string{},
+		emailProviders:  map[string]string{},
+	}
+}
+
 type modelDependency struct {
 	ID         string               `json:"id"`
 	ModelID    string               `json:"model_id"`
@@ -671,14 +687,7 @@ type modelDependency struct {
 }
 
 func (s *Service) importDependencies(ctx context.Context, state *importState) (dependencyMap, error) {
-	deps := dependencyMap{
-		providers:       map[string]string{},
-		models:          map[string]string{},
-		searchProviders: map[string]string{},
-		fetchProviders:  map[string]string{},
-		memoryProviders: map[string]string{},
-		emailProviders:  map[string]string{},
-	}
+	deps := newDependencyMap()
 	providers, _ := readEntry[[]providerpkg.GetResponse](state, "dependencies/providers.json")
 	for _, item := range providers {
 		id, err := s.ensureProvider(ctx, item)
@@ -724,16 +733,30 @@ func (s *Service) importDependencies(ctx context.Context, state *importState) (d
 		}
 		deps.memoryProviders[item.ID] = id
 	}
+	return deps, nil
+}
+
+func (s *Service) importEmailDependencies(ctx context.Context, state *importState, targetBotID string, deps *dependencyMap) error {
+	if s.email == nil {
+		return nil
+	}
+	if s.bots == nil {
+		return errors.New("bot service not configured")
+	}
+	targetBot, err := s.bots.Get(ctx, targetBotID)
+	if err != nil {
+		return fmt.Errorf("get target bot owner: %w", err)
+	}
 	emailProviders, _ := readEntry[[]emailpkg.ProviderResponse](state, "dependencies/email_providers.json")
 	for _, item := range emailProviders {
-		id, err := s.ensureEmailProvider(ctx, item)
+		id, err := s.ensureEmailProvider(ctx, targetBot.OwnerUserID, item)
 		if err != nil {
 			state.warnings = append(state.warnings, "email provider dependency skipped: "+err.Error())
 			continue
 		}
 		deps.emailProviders[item.ID] = id
 	}
-	return deps, nil
+	return nil
 }
 
 func (s *Service) restoreBot(ctx context.Context, actorUserID string, profile bots.Bot, opts ImportOptions) (string, bool, error) {
@@ -1295,17 +1318,30 @@ func (s *Service) ensureMemoryProvider(ctx context.Context, item memprovider.Pro
 	return created.ID, nil
 }
 
-func (s *Service) ensureEmailProvider(ctx context.Context, item emailpkg.ProviderResponse) (string, error) {
+func (s *Service) ensureEmailProvider(ctx context.Context, ownerUserID string, item emailpkg.ProviderResponse) (string, error) {
 	if s.email == nil {
 		return item.ID, errors.New("email service not configured")
 	}
-	list, _ := s.email.ListProviders(ctx, "")
+	ownerUserID = strings.TrimSpace(ownerUserID)
+	if ownerUserID == "" {
+		return item.ID, errors.New("target bot owner is required")
+	}
+	list, _ := s.email.ListProviders(ctx, ownerUserID, "")
 	for _, existing := range list {
 		if existing.Name == item.Name {
+			if shouldUpdateImportedEmailProvider(existing, item) {
+				updated, err := s.email.UpdateProvider(ctx, ownerUserID, existing.ID, emailpkg.UpdateProviderRequest{
+					Config: item.Config,
+				})
+				if err != nil {
+					return "", err
+				}
+				return updated.ID, nil
+			}
 			return existing.ID, nil
 		}
 	}
-	created, err := s.email.CreateProvider(ctx, emailpkg.CreateProviderRequest{
+	created, err := s.email.CreateProvider(ctx, ownerUserID, emailpkg.CreateProviderRequest{
 		Name:     item.Name,
 		Provider: emailpkg.ProviderName(item.Provider),
 		Config:   item.Config,
@@ -1314,6 +1350,26 @@ func (s *Service) ensureEmailProvider(ctx context.Context, item emailpkg.Provide
 		return "", err
 	}
 	return created.ID, nil
+}
+
+func shouldUpdateImportedEmailProvider(existing, imported emailpkg.ProviderResponse) bool {
+	if existing.Provider != imported.Provider || imported.Provider != "gmail" {
+		return false
+	}
+	return emailProviderConfigString(existing.Config, "email_address") == "" &&
+		emailProviderConfigString(imported.Config, "email_address") != ""
+}
+
+func emailProviderConfigString(config map[string]any, key string) string {
+	value, ok := config[key]
+	if !ok {
+		return ""
+	}
+	text, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(text)
 }
 
 func loadManifest(raw []byte) (map[string]backupZipEntry, Manifest, error) {

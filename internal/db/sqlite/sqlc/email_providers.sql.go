@@ -10,7 +10,7 @@ import (
 )
 
 const createEmailProvider = `-- name: CreateEmailProvider :one
-INSERT INTO email_providers (id, name, provider, config)
+INSERT INTO email_providers (id, user_id, name, provider, config)
 VALUES (
   lower(hex(randomblob(4))) || '-' ||
   lower(hex(randomblob(2))) || '-' ||
@@ -19,22 +19,30 @@ VALUES (
   lower(hex(randomblob(6))),
   ?1,
   ?2,
-  ?3
+  ?3,
+  ?4
 )
-RETURNING id, name, provider, config, created_at, updated_at
+RETURNING id, user_id, name, provider, config, created_at, updated_at
 `
 
 type CreateEmailProviderParams struct {
+	UserID   string `json:"user_id"`
 	Name     string `json:"name"`
 	Provider string `json:"provider"`
 	Config   string `json:"config"`
 }
 
 func (q *Queries) CreateEmailProvider(ctx context.Context, arg CreateEmailProviderParams) (EmailProvider, error) {
-	row := q.db.QueryRowContext(ctx, createEmailProvider, arg.Name, arg.Provider, arg.Config)
+	row := q.db.QueryRowContext(ctx, createEmailProvider,
+		arg.UserID,
+		arg.Name,
+		arg.Provider,
+		arg.Config,
+	)
 	var i EmailProvider
 	err := row.Scan(
 		&i.ID,
+		&i.UserID,
 		&i.Name,
 		&i.Provider,
 		&i.Config,
@@ -53,8 +61,24 @@ func (q *Queries) DeleteEmailProvider(ctx context.Context, id string) error {
 	return err
 }
 
+const deleteEmailProviderByIDAndUser = `-- name: DeleteEmailProviderByIDAndUser :exec
+DELETE FROM email_providers
+WHERE id = ?1
+  AND user_id = ?2
+`
+
+type DeleteEmailProviderByIDAndUserParams struct {
+	ID     string `json:"id"`
+	UserID string `json:"user_id"`
+}
+
+func (q *Queries) DeleteEmailProviderByIDAndUser(ctx context.Context, arg DeleteEmailProviderByIDAndUserParams) error {
+	_, err := q.db.ExecContext(ctx, deleteEmailProviderByIDAndUser, arg.ID, arg.UserID)
+	return err
+}
+
 const getEmailProviderByID = `-- name: GetEmailProviderByID :one
-SELECT id, name, provider, config, created_at, updated_at FROM email_providers WHERE id = ?1
+SELECT id, user_id, name, provider, config, created_at, updated_at FROM email_providers WHERE id = ?1
 `
 
 func (q *Queries) GetEmailProviderByID(ctx context.Context, id string) (EmailProvider, error) {
@@ -62,6 +86,7 @@ func (q *Queries) GetEmailProviderByID(ctx context.Context, id string) (EmailPro
 	var i EmailProvider
 	err := row.Scan(
 		&i.ID,
+		&i.UserID,
 		&i.Name,
 		&i.Provider,
 		&i.Config,
@@ -71,15 +96,49 @@ func (q *Queries) GetEmailProviderByID(ctx context.Context, id string) (EmailPro
 	return i, err
 }
 
-const getEmailProviderByName = `-- name: GetEmailProviderByName :one
-SELECT id, name, provider, config, created_at, updated_at FROM email_providers WHERE name = ?1
+const getEmailProviderByIDAndUser = `-- name: GetEmailProviderByIDAndUser :one
+SELECT id, user_id, name, provider, config, created_at, updated_at FROM email_providers
+WHERE id = ?1
+  AND user_id = ?2
 `
 
-func (q *Queries) GetEmailProviderByName(ctx context.Context, name string) (EmailProvider, error) {
-	row := q.db.QueryRowContext(ctx, getEmailProviderByName, name)
+type GetEmailProviderByIDAndUserParams struct {
+	ID     string `json:"id"`
+	UserID string `json:"user_id"`
+}
+
+func (q *Queries) GetEmailProviderByIDAndUser(ctx context.Context, arg GetEmailProviderByIDAndUserParams) (EmailProvider, error) {
+	row := q.db.QueryRowContext(ctx, getEmailProviderByIDAndUser, arg.ID, arg.UserID)
 	var i EmailProvider
 	err := row.Scan(
 		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.Provider,
+		&i.Config,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getEmailProviderByNameAndUser = `-- name: GetEmailProviderByNameAndUser :one
+SELECT id, user_id, name, provider, config, created_at, updated_at FROM email_providers
+WHERE user_id = ?1
+  AND name = ?2
+`
+
+type GetEmailProviderByNameAndUserParams struct {
+	UserID string `json:"user_id"`
+	Name   string `json:"name"`
+}
+
+func (q *Queries) GetEmailProviderByNameAndUser(ctx context.Context, arg GetEmailProviderByNameAndUserParams) (EmailProvider, error) {
+	row := q.db.QueryRowContext(ctx, getEmailProviderByNameAndUser, arg.UserID, arg.Name)
+	var i EmailProvider
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
 		&i.Name,
 		&i.Provider,
 		&i.Config,
@@ -90,7 +149,7 @@ func (q *Queries) GetEmailProviderByName(ctx context.Context, name string) (Emai
 }
 
 const listEmailProviders = `-- name: ListEmailProviders :many
-SELECT id, name, provider, config, created_at, updated_at FROM email_providers
+SELECT id, user_id, name, provider, config, created_at, updated_at FROM email_providers
 ORDER BY created_at DESC
 `
 
@@ -105,6 +164,7 @@ func (q *Queries) ListEmailProviders(ctx context.Context) ([]EmailProvider, erro
 		var i EmailProvider
 		if err := rows.Scan(
 			&i.ID,
+			&i.UserID,
 			&i.Name,
 			&i.Provider,
 			&i.Config,
@@ -125,7 +185,7 @@ func (q *Queries) ListEmailProviders(ctx context.Context) ([]EmailProvider, erro
 }
 
 const listEmailProvidersByProvider = `-- name: ListEmailProvidersByProvider :many
-SELECT id, name, provider, config, created_at, updated_at FROM email_providers
+SELECT id, user_id, name, provider, config, created_at, updated_at FROM email_providers
 WHERE provider = ?1
 ORDER BY created_at DESC
 `
@@ -141,6 +201,87 @@ func (q *Queries) ListEmailProvidersByProvider(ctx context.Context, provider str
 		var i EmailProvider
 		if err := rows.Scan(
 			&i.ID,
+			&i.UserID,
+			&i.Name,
+			&i.Provider,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEmailProvidersByUser = `-- name: ListEmailProvidersByUser :many
+SELECT id, user_id, name, provider, config, created_at, updated_at FROM email_providers
+WHERE user_id = ?1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListEmailProvidersByUser(ctx context.Context, userID string) ([]EmailProvider, error) {
+	rows, err := q.db.QueryContext(ctx, listEmailProvidersByUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EmailProvider
+	for rows.Next() {
+		var i EmailProvider
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Name,
+			&i.Provider,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEmailProvidersByUserAndProvider = `-- name: ListEmailProvidersByUserAndProvider :many
+SELECT id, user_id, name, provider, config, created_at, updated_at FROM email_providers
+WHERE user_id = ?1
+  AND provider = ?2
+ORDER BY created_at DESC
+`
+
+type ListEmailProvidersByUserAndProviderParams struct {
+	UserID   string `json:"user_id"`
+	Provider string `json:"provider"`
+}
+
+func (q *Queries) ListEmailProvidersByUserAndProvider(ctx context.Context, arg ListEmailProvidersByUserAndProviderParams) ([]EmailProvider, error) {
+	rows, err := q.db.QueryContext(ctx, listEmailProvidersByUserAndProvider, arg.UserID, arg.Provider)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EmailProvider
+	for rows.Next() {
+		var i EmailProvider
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
 			&i.Name,
 			&i.Provider,
 			&i.Config,
@@ -168,7 +309,7 @@ SET
   config = ?3,
   updated_at = CURRENT_TIMESTAMP
 WHERE id = ?4
-RETURNING id, name, provider, config, created_at, updated_at
+RETURNING id, user_id, name, provider, config, created_at, updated_at
 `
 
 type UpdateEmailProviderParams struct {
@@ -188,6 +329,48 @@ func (q *Queries) UpdateEmailProvider(ctx context.Context, arg UpdateEmailProvid
 	var i EmailProvider
 	err := row.Scan(
 		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.Provider,
+		&i.Config,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateEmailProviderByIDAndUser = `-- name: UpdateEmailProviderByIDAndUser :one
+UPDATE email_providers
+SET
+  name = ?1,
+  provider = ?2,
+  config = ?3,
+  updated_at = CURRENT_TIMESTAMP
+WHERE id = ?4
+  AND user_id = ?5
+RETURNING id, user_id, name, provider, config, created_at, updated_at
+`
+
+type UpdateEmailProviderByIDAndUserParams struct {
+	Name     string `json:"name"`
+	Provider string `json:"provider"`
+	Config   string `json:"config"`
+	ID       string `json:"id"`
+	UserID   string `json:"user_id"`
+}
+
+func (q *Queries) UpdateEmailProviderByIDAndUser(ctx context.Context, arg UpdateEmailProviderByIDAndUserParams) (EmailProvider, error) {
+	row := q.db.QueryRowContext(ctx, updateEmailProviderByIDAndUser,
+		arg.Name,
+		arg.Provider,
+		arg.Config,
+		arg.ID,
+		arg.UserID,
+	)
+	var i EmailProvider
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
 		&i.Name,
 		&i.Provider,
 		&i.Config,

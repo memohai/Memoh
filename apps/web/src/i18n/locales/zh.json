@@ -1169,7 +1169,7 @@
         "authorizedUnknown": "已授权",
         "expired": "授权已过期，请重新授权。",
         "missing": "尚未授权。完成授权后 Bot 才能访问 Gmail。",
-        "notConfigured": "缺少 Client ID，填写后才能发起授权。"
+        "notConfigured": "先填写 Gmail 地址，并在服务端配置 Gmail OAuth client 后才能发起授权。"
       },
       "logout": "注销授权",
       "logoutSuccess": "授权已撤销",
@@ -1805,6 +1805,7 @@
       "unbindConfirm": "确定要解除此邮箱绑定吗？",
       "bindSuccess": "邮箱绑定成功",
       "unbindSuccess": "邮箱已解绑",
+      "missingAddress": "请先填写 Gmail 地址，再绑定此提供方。",
       "from": "发件人",
       "to": "收件人",
       "subject": "主题",

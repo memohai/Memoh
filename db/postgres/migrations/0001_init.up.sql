@@ -786,13 +786,16 @@ CREATE INDEX IF NOT EXISTS idx_schedule_logs_bot ON schedule_logs(bot_id, starte
 -- email_providers: pluggable email service backends
 CREATE TABLE IF NOT EXISTS email_providers (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   provider TEXT NOT NULL,
   config JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT email_providers_name_unique UNIQUE (name)
+  CONSTRAINT email_providers_user_name_unique UNIQUE (user_id, name)
 );
+
+CREATE INDEX IF NOT EXISTS idx_email_providers_user_id ON email_providers(user_id);
 
 -- email_oauth_tokens: stored OAuth2 tokens for Gmail email providers
 CREATE TABLE IF NOT EXISTS email_oauth_tokens (

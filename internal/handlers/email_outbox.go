@@ -8,18 +8,25 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/memohai/memoh/internal/accounts"
+	"github.com/memohai/memoh/internal/auth"
+	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/email"
 )
 
 type EmailOutboxHandler struct {
-	outbox *email.OutboxService
-	logger *slog.Logger
+	outbox         *email.OutboxService
+	botService     *bots.Service
+	accountService *accounts.Service
+	logger         *slog.Logger
 }
 
-func NewEmailOutboxHandler(log *slog.Logger, outbox *email.OutboxService) *EmailOutboxHandler {
+func NewEmailOutboxHandler(log *slog.Logger, outbox *email.OutboxService, botService *bots.Service, accountService *accounts.Service) *EmailOutboxHandler {
 	return &EmailOutboxHandler{
-		outbox: outbox,
-		logger: log.With(slog.String("handler", "email_outbox")),
+		outbox:         outbox,
+		botService:     botService,
+		accountService: accountService,
+		logger:         log.With(slog.String("handler", "email_outbox")),
 	}
 }
 
@@ -43,6 +50,9 @@ func (h *EmailOutboxHandler) List(c echo.Context) error {
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+	}
+	if _, err := h.authorizeBot(c, botID); err != nil {
+		return err
 	}
 	limit, err := parseInt32Query(c.QueryParam("limit"), 20)
 	if err != nil {
@@ -89,6 +99,13 @@ func parseInt32Query(raw string, defaultValue int32) (int32, error) {
 // @Failure 404 {object} ErrorResponse
 // @Router /bots/{bot_id}/email-outbox/{id} [get].
 func (h *EmailOutboxHandler) Get(c echo.Context) error {
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+	}
+	if _, err := h.authorizeBot(c, botID); err != nil {
+		return err
+	}
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
@@ -97,5 +114,16 @@ func (h *EmailOutboxHandler) Get(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	}
+	if resp.BotID != botID {
+		return echo.NewHTTPError(http.StatusNotFound, "email outbox item not found")
+	}
 	return c.JSON(http.StatusOK, resp)
+}
+
+func (h *EmailOutboxHandler) authorizeBot(c echo.Context, botID string) (bots.Bot, error) {
+	userID, err := auth.UserIDFromContext(c)
+	if err != nil {
+		return bots.Bot{}, err
+	}
+	return AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, userID, botID)
 }

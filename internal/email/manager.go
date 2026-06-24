@@ -32,7 +32,7 @@ func NewManager(log *slog.Logger, service *Service, trigger *Trigger, outbox *Ou
 
 // Start initializes receiving for all providers that have readable bindings.
 func (m *Manager) Start(ctx context.Context) error {
-	providers, err := m.service.ListProviders(ctx, "")
+	providers, err := m.service.ListProvidersInternal(ctx, "")
 	if err != nil {
 		return fmt.Errorf("list email providers: %w", err)
 	}
@@ -89,7 +89,7 @@ func (m *Manager) startProvider(ctx context.Context, p ProviderResponse) error {
 func (m *Manager) RefreshProvider(ctx context.Context, providerID string) error {
 	m.stopProvider(ctx, providerID)
 
-	p, err := m.service.GetProvider(ctx, providerID)
+	p, err := m.service.GetProviderInternal(ctx, providerID)
 	if err != nil {
 		return err
 	}

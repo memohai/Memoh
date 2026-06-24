@@ -342,6 +342,7 @@ type EmailOutbox struct {
 
 type EmailProvider struct {
 	ID        string `json:"id"`
+	UserID    string `json:"user_id"`
 	Name      string `json:"name"`
 	Provider  string `json:"provider"`
 	Config    string `json:"config"`

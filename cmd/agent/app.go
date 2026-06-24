@@ -92,6 +92,7 @@ import (
 	"github.com/memohai/memoh/internal/models"
 	netctl "github.com/memohai/memoh/internal/network"
 	netoverlay "github.com/memohai/memoh/internal/network/overlay"
+	"github.com/memohai/memoh/internal/oauthclients"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	"github.com/memohai/memoh/internal/policy"
@@ -244,6 +245,12 @@ func provideAccountStore(cfg config.Config, postgresStore *postgresstore.Store, 
 	default:
 		return nil, fmt.Errorf("unsupported database driver %q", db.DriverFromConfig(cfg))
 	}
+}
+
+func provideAccountService(log *slog.Logger, accountStore dbstore.AccountStore, emailService *emailpkg.Service) *accounts.Service {
+	svc := accounts.NewService(log, accountStore)
+	svc.SetEmailProviderBootstrapper(emailService)
+	return svc
 }
 
 func provideBridgeProvider(manage *workspace.Manager) bridge.Provider {
@@ -1011,11 +1018,11 @@ func (a *settingsTranscriptionAdapter) Transcribe(ctx context.Context, modelID s
 	return inboundTranscriptionResult{text: result.Text}, nil
 }
 
-func provideEmailRegistry(log *slog.Logger, tokenStore *emailpkg.DBOAuthTokenStore) *emailpkg.Registry {
+func provideEmailRegistry(log *slog.Logger, tokenStore *emailpkg.DBOAuthTokenStore, oauthClients *oauthclients.Registry) *emailpkg.Registry {
 	reg := emailpkg.NewRegistry()
 	reg.Register(emailgeneric.New(log))
 	reg.Register(emailmailgun.New(log))
-	reg.Register(emailgmail.New(log, tokenStore))
+	reg.Register(emailgmail.New(log, tokenStore, oauthClients))
 	return reg
 }
 
@@ -1031,7 +1038,7 @@ func defaultACPCodexOAuthCallbackURL() string {
 	return defaultProviderOAuthCallbackURL()
 }
 
-func provideEmailOAuthHandler(log *slog.Logger, service *emailpkg.Service, tokenStore *emailpkg.DBOAuthTokenStore, cfg config.Config) *handlers.EmailOAuthHandler {
+func provideEmailOAuthHandler(log *slog.Logger, service *emailpkg.Service, tokenStore *emailpkg.DBOAuthTokenStore, oauthClients *oauthclients.Registry, cfg config.Config) *handlers.EmailOAuthHandler {
 	addr := strings.TrimSpace(cfg.Server.Addr)
 	if addr == "" {
 		addr = ":8080"
@@ -1041,7 +1048,7 @@ func provideEmailOAuthHandler(log *slog.Logger, service *emailpkg.Service, token
 		host = "localhost" + host
 	}
 	callbackURL := "http://" + host + "/api/email/oauth/callback"
-	return handlers.NewEmailOAuthHandler(log, service, tokenStore, callbackURL)
+	return handlers.NewEmailOAuthHandler(log, service, tokenStore, oauthClients, callbackURL)
 }
 
 func provideEmailChatGateway(resolver *flow.Resolver, queries dbstore.Queries, cfg config.Config, log *slog.Logger) emailpkg.ChatTriggerer {
@@ -1222,12 +1229,12 @@ func startContainerReconciliation(lc fx.Lifecycle, manager *workspace.Manager, _
 	})
 }
 
-func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutdowner fx.Shutdowner, cfg config.Config, queries dbstore.Queries, accountStore dbstore.AccountStore, botService *bots.Service, _ *handlers.ContainerdHandler, manager *workspace.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelManager *channel.Manager, modelsService *models.Service) {
+func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutdowner fx.Shutdowner, cfg config.Config, queries dbstore.Queries, accountStore dbstore.AccountStore, emailService *emailpkg.Service, botService *bots.Service, _ *handlers.ContainerdHandler, manager *workspace.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelManager *channel.Manager, modelsService *models.Service) {
 	fmt.Printf("Starting Memoh Agent %s\n", version.GetInfo())
 
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			if err := ensureAdminUser(ctx, logger, accountStore, cfg); err != nil {
+			if err := ensureAdminUser(ctx, logger, accountStore, emailService, cfg); err != nil {
 				return err
 			}
 			botService.SetContainerLifecycle(manager)
@@ -1262,7 +1269,7 @@ func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutd
 	})
 }
 
-func ensureAdminUser(ctx context.Context, log *slog.Logger, accountStore dbstore.AccountStore, cfg config.Config) error {
+func ensureAdminUser(ctx context.Context, log *slog.Logger, accountStore dbstore.AccountStore, emailService *emailpkg.Service, cfg config.Config) error {
 	if accountStore == nil {
 		return errors.New("account store not configured")
 	}
@@ -1309,6 +1316,11 @@ func ensureAdminUser(ctx context.Context, log *slog.Logger, accountStore dbstore
 	})
 	if err != nil {
 		return err
+	}
+	if emailService != nil {
+		if err := emailService.EnsureDefaultGmailProvider(ctx, user.ID); err != nil {
+			return fmt.Errorf("ensure admin gmail provider: %w", err)
+		}
 	}
 	log.Info("Admin user created", slog.String("username", username))
 	return nil

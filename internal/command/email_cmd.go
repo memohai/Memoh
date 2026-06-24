@@ -2,6 +2,8 @@ package command
 
 import (
 	"strings"
+
+	emailpkg "github.com/memohai/memoh/internal/email"
 )
 
 func (h *Handler) buildEmailGroup() *CommandGroup {
@@ -11,7 +13,15 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 		Name:  "providers",
 		Usage: "providers - List email providers",
 		ResultHandler: func(cc CommandContext) (*Result, error) {
-			items, err := h.emailService.ListProviders(cc.Ctx, "")
+			var (
+				items []emailpkg.ProviderResponse
+				err   error
+			)
+			if strings.TrimSpace(cc.UserID) != "" {
+				items, err = h.emailService.ListProviders(cc.Ctx, cc.UserID, "")
+			} else {
+				items, err = h.emailService.ListProvidersInternal(cc.Ctx, "")
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -31,7 +41,8 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 				records = append(records, listRecord{fields: fields})
 			}
 			result := buildListResult(cc.T("cmd.email.providersTitle"), "email", "providers", nil, records, cc.Page, defaultListLimit, cc.L)
-			return WithExtraActions(result,
+			return WithExtraActions(
+				result,
 				ListItem{Label: cc.T("cmd.email.section.bindings"), Action: &ItemAction{Resource: "email", Action: "bindings"}},
 				ListItem{Label: cc.T("cmd.email.section.outbox"), Action: &ItemAction{Resource: "email", Action: "outbox"}},
 			), nil
@@ -61,7 +72,8 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 				}})
 			}
 			result := buildListResult(cc.T("cmd.email.bindingsTitle"), "email", "bindings", nil, records, cc.Page, defaultListLimit, cc.L)
-			return WithExtraActions(result,
+			return WithExtraActions(
+				result,
 				ListItem{Label: cc.T("cmd.email.section.providers"), Action: &ItemAction{Resource: "email", Action: "providers"}},
 				ListItem{Label: cc.T("cmd.email.section.outbox"), Action: &ItemAction{Resource: "email", Action: "outbox"}},
 			), nil
@@ -118,7 +130,8 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 				records = append(records, listRecord{fields: fields, note: note})
 			}
 			result := buildPagedListResult(cc.T("cmd.email.outboxTitle"), "email", "outbox", nil, records, page, pageSize, int(total), "", cc.L)
-			return WithExtraActions(result,
+			return WithExtraActions(
+				result,
 				ListItem{Label: cc.T("cmd.email.section.providers"), Action: &ItemAction{Resource: "email", Action: "providers"}},
 				ListItem{Label: cc.T("cmd.email.section.bindings"), Action: &ItemAction{Resource: "email", Action: "bindings"}},
 			), nil

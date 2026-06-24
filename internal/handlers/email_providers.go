@@ -7,6 +7,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/email"
 )
 
@@ -53,6 +54,10 @@ func (h *EmailProvidersHandler) ListMeta(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /email-providers [post].
 func (h *EmailProvidersHandler) Create(c echo.Context) error {
+	userID, err := auth.UserIDFromContext(c)
+	if err != nil {
+		return err
+	}
 	var req email.CreateProviderRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -63,7 +68,7 @@ func (h *EmailProvidersHandler) Create(c echo.Context) error {
 	if strings.TrimSpace(string(req.Provider)) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "provider is required")
 	}
-	resp, err := h.service.CreateProvider(c.Request().Context(), req)
+	resp, err := h.service.CreateProvider(c.Request().Context(), userID, req)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -79,7 +84,11 @@ func (h *EmailProvidersHandler) Create(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /email-providers [get].
 func (h *EmailProvidersHandler) List(c echo.Context) error {
-	items, err := h.service.ListProviders(c.Request().Context(), c.QueryParam("provider"))
+	userID, err := auth.UserIDFromContext(c)
+	if err != nil {
+		return err
+	}
+	items, err := h.service.ListProviders(c.Request().Context(), userID, c.QueryParam("provider"))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -95,11 +104,15 @@ func (h *EmailProvidersHandler) List(c echo.Context) error {
 // @Failure 404 {object} ErrorResponse
 // @Router /email-providers/{id} [get].
 func (h *EmailProvidersHandler) Get(c echo.Context) error {
+	userID, err := auth.UserIDFromContext(c)
+	if err != nil {
+		return err
+	}
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
 	}
-	resp, err := h.service.GetProvider(c.Request().Context(), id)
+	resp, err := h.service.GetProvider(c.Request().Context(), userID, id)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	}
@@ -118,6 +131,10 @@ func (h *EmailProvidersHandler) Get(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /email-providers/{id} [put].
 func (h *EmailProvidersHandler) Update(c echo.Context) error {
+	userID, err := auth.UserIDFromContext(c)
+	if err != nil {
+		return err
+	}
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
@@ -126,7 +143,7 @@ func (h *EmailProvidersHandler) Update(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	resp, err := h.service.UpdateProvider(c.Request().Context(), id, req)
+	resp, err := h.service.UpdateProvider(c.Request().Context(), userID, id, req)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -141,11 +158,18 @@ func (h *EmailProvidersHandler) Update(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /email-providers/{id} [delete].
 func (h *EmailProvidersHandler) Delete(c echo.Context) error {
+	userID, err := auth.UserIDFromContext(c)
+	if err != nil {
+		return err
+	}
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
 	}
-	if err := h.service.DeleteProvider(c.Request().Context(), id); err != nil {
+	if _, err := h.service.GetProvider(c.Request().Context(), userID, id); err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+	}
+	if err := h.service.DeleteProvider(c.Request().Context(), userID, id); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.NoContent(http.StatusNoContent)

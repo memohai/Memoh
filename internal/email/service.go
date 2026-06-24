@@ -3,14 +3,19 @@ package email
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 )
+
+const DefaultGmailProviderName = "Gmail"
 
 // Service manages email provider CRUD and bindings.
 type Service struct {
@@ -35,7 +40,14 @@ func (s *Service) ListMeta(_ context.Context) []ProviderMeta {
 	return s.registry.ListMeta()
 }
 
-func (s *Service) CreateProvider(ctx context.Context, req CreateProviderRequest) (ProviderResponse, error) {
+func (s *Service) CreateProvider(ctx context.Context, userID string, req CreateProviderRequest) (ProviderResponse, error) {
+	pgUserID, err := db.ParseUUID(userID)
+	if err != nil {
+		return ProviderResponse{}, fmt.Errorf("invalid user_id: %w", err)
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		return ProviderResponse{}, errors.New("name is required")
+	}
 	if _, err := s.registry.Get(req.Provider); err != nil {
 		return ProviderResponse{}, fmt.Errorf("unsupported provider: %s", req.Provider)
 	}
@@ -56,6 +68,7 @@ func (s *Service) CreateProvider(ctx context.Context, req CreateProviderRequest)
 		return ProviderResponse{}, fmt.Errorf("marshal config: %w", err)
 	}
 	row, err := s.queries.CreateEmailProvider(ctx, sqlc.CreateEmailProviderParams{
+		UserID:   pgUserID,
 		Name:     strings.TrimSpace(req.Name),
 		Provider: string(req.Provider),
 		Config:   configJSON,
@@ -66,7 +79,49 @@ func (s *Service) CreateProvider(ctx context.Context, req CreateProviderRequest)
 	return s.toProviderResponse(row), nil
 }
 
-func (s *Service) GetProvider(ctx context.Context, id string) (ProviderResponse, error) {
+func (s *Service) EnsureDefaultGmailProvider(ctx context.Context, userID string) error {
+	pgUserID, err := db.ParseUUID(userID)
+	if err != nil {
+		return fmt.Errorf("invalid user_id: %w", err)
+	}
+	_, err = s.queries.GetEmailProviderByNameAndUser(ctx, sqlc.GetEmailProviderByNameAndUserParams{
+		UserID: pgUserID,
+		Name:   DefaultGmailProviderName,
+	})
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) && !errors.Is(err, db.ErrNotFound) {
+		return fmt.Errorf("get default gmail provider: %w", err)
+	}
+	_, err = s.CreateProvider(ctx, userID, CreateProviderRequest{
+		Name:     DefaultGmailProviderName,
+		Provider: ProviderName("gmail"),
+		Config:   map[string]any{},
+	})
+	return err
+}
+
+func (s *Service) GetProvider(ctx context.Context, userID, id string) (ProviderResponse, error) {
+	pgUserID, err := db.ParseUUID(userID)
+	if err != nil {
+		return ProviderResponse{}, fmt.Errorf("invalid user_id: %w", err)
+	}
+	pgID, err := db.ParseUUID(id)
+	if err != nil {
+		return ProviderResponse{}, err
+	}
+	row, err := s.queries.GetEmailProviderByIDAndUser(ctx, sqlc.GetEmailProviderByIDAndUserParams{
+		ID:     pgID,
+		UserID: pgUserID,
+	})
+	if err != nil {
+		return ProviderResponse{}, fmt.Errorf("get email provider: %w", err)
+	}
+	return s.toProviderResponse(row), nil
+}
+
+func (s *Service) GetProviderInternal(ctx context.Context, id string) (ProviderResponse, error) {
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
 		return ProviderResponse{}, err
@@ -86,7 +141,28 @@ func (s *Service) GetRawProvider(ctx context.Context, id string) (sqlc.EmailProv
 	return s.queries.GetEmailProviderByID(ctx, pgID)
 }
 
-func (s *Service) ListProviders(ctx context.Context, provider string) ([]ProviderResponse, error) {
+func (s *Service) ListProviders(ctx context.Context, userID, provider string) ([]ProviderResponse, error) {
+	pgUserID, err := db.ParseUUID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user_id: %w", err)
+	}
+	provider = strings.TrimSpace(provider)
+	var rows []sqlc.EmailProvider
+	if provider == "" {
+		rows, err = s.queries.ListEmailProvidersByUser(ctx, pgUserID)
+	} else {
+		rows, err = s.queries.ListEmailProvidersByUserAndProvider(ctx, sqlc.ListEmailProvidersByUserAndProviderParams{
+			UserID:   pgUserID,
+			Provider: provider,
+		})
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list email providers: %w", err)
+	}
+	return s.providerResponses(rows), nil
+}
+
+func (s *Service) ListProvidersInternal(ctx context.Context, provider string) ([]ProviderResponse, error) {
 	provider = strings.TrimSpace(provider)
 	var (
 		rows []sqlc.EmailProvider
@@ -100,19 +176,30 @@ func (s *Service) ListProviders(ctx context.Context, provider string) ([]Provide
 	if err != nil {
 		return nil, fmt.Errorf("list email providers: %w", err)
 	}
+	return s.providerResponses(rows), nil
+}
+
+func (s *Service) providerResponses(rows []sqlc.EmailProvider) []ProviderResponse {
 	items := make([]ProviderResponse, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, s.toProviderResponse(row))
 	}
-	return items, nil
+	return items
 }
 
-func (s *Service) UpdateProvider(ctx context.Context, id string, req UpdateProviderRequest) (ProviderResponse, error) {
+func (s *Service) UpdateProvider(ctx context.Context, userID, id string, req UpdateProviderRequest) (ProviderResponse, error) {
+	pgUserID, err := db.ParseUUID(userID)
+	if err != nil {
+		return ProviderResponse{}, fmt.Errorf("invalid user_id: %w", err)
+	}
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
 		return ProviderResponse{}, err
 	}
-	current, err := s.queries.GetEmailProviderByID(ctx, pgID)
+	current, err := s.queries.GetEmailProviderByIDAndUser(ctx, sqlc.GetEmailProviderByIDAndUserParams{
+		ID:     pgID,
+		UserID: pgUserID,
+	})
 	if err != nil {
 		return ProviderResponse{}, fmt.Errorf("get email provider: %w", err)
 	}
@@ -142,8 +229,9 @@ func (s *Service) UpdateProvider(ctx context.Context, id string, req UpdateProvi
 		}
 		config = configJSON
 	}
-	updated, err := s.queries.UpdateEmailProvider(ctx, sqlc.UpdateEmailProviderParams{
+	updated, err := s.queries.UpdateEmailProviderByIDAndUser(ctx, sqlc.UpdateEmailProviderByIDAndUserParams{
 		ID:       pgID,
+		UserID:   pgUserID,
 		Name:     name,
 		Provider: provider,
 		Config:   config,
@@ -154,12 +242,19 @@ func (s *Service) UpdateProvider(ctx context.Context, id string, req UpdateProvi
 	return s.toProviderResponse(updated), nil
 }
 
-func (s *Service) DeleteProvider(ctx context.Context, id string) error {
+func (s *Service) DeleteProvider(ctx context.Context, userID, id string) error {
+	pgUserID, err := db.ParseUUID(userID)
+	if err != nil {
+		return fmt.Errorf("invalid user_id: %w", err)
+	}
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
 		return err
 	}
-	return s.queries.DeleteEmailProvider(ctx, pgID)
+	return s.queries.DeleteEmailProviderByIDAndUser(ctx, sqlc.DeleteEmailProviderByIDAndUserParams{
+		ID:     pgID,
+		UserID: pgUserID,
+	})
 }
 
 func (s *Service) toProviderResponse(row sqlc.EmailProvider) ProviderResponse {
@@ -169,14 +264,30 @@ func (s *Service) toProviderResponse(row sqlc.EmailProvider) ProviderResponse {
 			s.logger.Warn("email provider config unmarshal failed", slog.String("id", row.ID.String()), slog.Any("error", err))
 		}
 	}
+	cfg = sanitizeProviderConfig(row.Provider, cfg)
 	return ProviderResponse{
 		ID:        row.ID.String(),
+		UserID:    row.UserID.String(),
 		Name:      row.Name,
 		Provider:  row.Provider,
 		Config:    cfg,
 		CreatedAt: row.CreatedAt.Time,
 		UpdatedAt: row.UpdatedAt.Time,
 	}
+}
+
+func sanitizeProviderConfig(provider string, cfg map[string]any) map[string]any {
+	if cfg == nil {
+		return nil
+	}
+	clean := make(map[string]any, len(cfg))
+	for key, value := range cfg {
+		if provider == "gmail" && (key == "client_id" || key == "client_secret") {
+			continue
+		}
+		clean[key] = value
+	}
+	return clean
 }
 
 // ---- Binding CRUD ----
@@ -352,7 +463,7 @@ func (s *Service) toBindingResponse(row sqlc.BotEmailBinding) BindingResponse {
 
 // ProviderConfig returns the deserialized config for a given provider ID.
 func (s *Service) ProviderConfig(ctx context.Context, providerID string) (ProviderName, map[string]any, error) {
-	resp, err := s.GetProvider(ctx, providerID)
+	resp, err := s.GetProviderInternal(ctx, providerID)
 	if err != nil {
 		return "", nil, err
 	}

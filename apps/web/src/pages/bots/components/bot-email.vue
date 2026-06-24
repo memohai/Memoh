@@ -43,7 +43,12 @@
                   v-if="addingProviderId === p.id"
                   class="size-3"
                 />
-                {{ p.name }}
+                <EmailProviderIcon
+                  v-else
+                  :provider="p.provider"
+                  class="size-4 text-muted-foreground"
+                />
+                <span class="truncate">{{ p.name }}</span>
                 <span class="ml-auto text-xs text-muted-foreground">{{ p.provider }}</span>
               </button>
             </PopoverContent>
@@ -75,16 +80,24 @@
             class="mx-4 border-b border-border py-4 last:border-b-0"
           >
             <div class="flex items-center justify-between gap-4">
-              <div class="min-w-0">
-                <p class="text-sm font-medium text-foreground">
-                  {{ providerNameMap[binding.email_provider_id!] || binding.email_provider_id }}
-                </p>
-                <p
-                  v-if="binding.email_address"
-                  class="mt-0.5 text-xs text-muted-foreground"
-                >
-                  {{ binding.email_address }}
-                </p>
+              <div class="flex min-w-0 items-center gap-3">
+                <span class="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted">
+                  <EmailProviderIcon
+                    :provider="providerMap[binding.email_provider_id!]?.provider"
+                    class="size-4 text-muted-foreground"
+                  />
+                </span>
+                <div class="min-w-0">
+                  <p class="truncate text-sm font-medium text-foreground">
+                    {{ providerNameMap[binding.email_provider_id!] || binding.email_provider_id }}
+                  </p>
+                  <p
+                    v-if="binding.email_address"
+                    class="mt-0.5 truncate text-xs text-muted-foreground"
+                  >
+                    {{ binding.email_address }}
+                  </p>
+                </div>
               </div>
               <ConfirmPopover
                 :message="$t('bots.email.unbindConfirm')"
@@ -218,6 +231,7 @@ import type { EmailProviderResponse, EmailBindingResponse, EmailOutboxItemRespon
 import { formatDateTime } from '@/utils/date-time'
 import SettingsSection from '@/components/settings/section.vue'
 import PageShell from '@/components/page-shell/index.vue'
+import EmailProviderIcon from '@/components/email-provider-icon/index.vue'
 
 const props = defineProps<{ botId: string }>()
 const { t } = useI18n()
@@ -272,6 +286,14 @@ const providerNameMap = computed(() => {
   return map
 })
 
+const providerMap = computed(() => {
+  const map: Record<string, EmailProviderResponse> = {}
+  for (const p of providers.value) {
+    if (p.id) map[p.id] = p
+  }
+  return map
+})
+
 const unboundProviders = computed(() => {
   const boundIds = new Set(bindings.value.map((b) => b.email_provider_id))
   return providers.value.filter((p) => !boundIds.has(p.id))
@@ -282,9 +304,13 @@ function invalidateBindings() {
 }
 
 async function handleAddBinding(provider: EmailProviderResponse) {
+  const emailAddr = bindingEmailAddress(provider)
+  if (!emailAddr) {
+    toast.error(t('bots.email.missingAddress'))
+    return
+  }
   addingBinding.value = true
   addingProviderId.value = provider.id!
-  const emailAddr = (provider.config as Record<string, unknown>)?.username as string || provider.name || ''
   try {
     await postBotsByBotIdEmailBindings({
       path: { bot_id: props.botId },
@@ -337,6 +363,17 @@ async function handleDeleteBinding(id: string) {
   } finally {
     deletingId.value = ''
   }
+}
+
+function bindingEmailAddress(provider: EmailProviderResponse) {
+  const emailAddress = configString(provider.config, 'email_address')
+  if (provider.provider === 'gmail') return emailAddress
+  return emailAddress || configString(provider.config, 'username') || provider.name || ''
+}
+
+function configString(config: EmailProviderResponse['config'], key: string) {
+  const value = (config as Record<string, unknown> | undefined)?.[key]
+  return typeof value === 'string' ? value.trim() : ''
 }
 
 function formatDate(value: string | undefined) {
