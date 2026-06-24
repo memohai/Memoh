@@ -64,4 +64,8 @@ type HistoryRecord struct {
 
 	UsageInputTokens  *int
 	UsageOutputTokens *int
+
+	// Required marks a record that must survive trimming/compaction because it
+	// is pinned by a retry/edit request (conversation.ChatRequest.RequiredHistoryMessageID).
+	Required bool
 }
