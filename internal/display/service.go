@@ -853,6 +853,21 @@ func (s *session) removeTrack(id string) {
 	}
 }
 
+// scheduleIdleStop keeps the encoder alive for encoderIdleHold after the last
+// viewer leaves, so a quick tab-switch reconnect reuses the running pipeline
+// instead of cold-starting.
+//
+// TODO(display): this only covers the IDLE case (no viewers). It does NOT
+// cover the GStreamer pipeline exiting on its own — which is what actually
+// happens on session close: the RFB (VNC) connection to the bot is torn down,
+// rfb_src emits "Connection was closed", the pipeline exits with status 1,
+// and the encoder is gone. The next reconnect then pays a full cold start
+// (firstPacket wait, slow/flaky under Orbstack), which is the "close tab →
+// reconnect takes forever" symptom. Fix: catch the pipeline-error exit in
+// waitGStreamer and either re-establish the RFB connection + restart the
+// pipeline in place, or surface it as a recoverable state so the next offer
+// reuses the session shell instead of rebuilding it. encoderIdleHold cannot
+// help here because the pipeline is gone, not idle.
 func (s *session) scheduleIdleStop() {
 	s.idleStopMu.Lock()
 	defer s.idleStopMu.Unlock()
