@@ -17,6 +17,7 @@ import (
 	"github.com/containerd/containerd/v2/core/mount"
 
 	ctr "github.com/memohai/memoh/internal/container"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 const (
@@ -257,6 +258,19 @@ func (m *Manager) restorePreservedIntoSnapshot(ctx context.Context, botID string
 // (e.g. Apple Virtualization). Callers fall back to gRPC-based data operations.
 var errMountNotSupported = errors.New("snapshot mount not supported on this backend")
 
+// Workspace archive filtering is intentionally enforced at this layer because
+// container backups can bypass higher-level bot/profile metadata scrub. Keep
+// these ACP home prefixes in sync with acpclient managed/self home locations;
+// workspace stays agent-agnostic otherwise, so do not import acpclient here.
+var (
+	workspaceACPSecretDirPrefixes = []string{".memoh-hermes/", ".hermes/", ".codex/"}
+	workspaceACPSecretDirNames    = map[string]struct{}{
+		"auth":       {},
+		"mcp-tokens": {},
+		"sessions":   {},
+	}
+)
+
 func (m *Manager) snapshotMounts(ctx context.Context, info ctr.ContainerInfo) ([]mount.Mount, error) {
 	mounter, ok := m.service.(snapshotMountProvider)
 	if !ok {
@@ -431,7 +445,13 @@ func (m *Manager) exportDataViaGRPC(ctx context.Context, botID string) (io.ReadC
 			if entry.GetIsDir() {
 				continue
 			}
-			relPath := entry.GetPath()
+			if isWorkspaceArchiveSymlinkMode(entry.GetMode()) {
+				continue
+			}
+			relPath := strings.TrimPrefix(entry.GetPath(), "/")
+			if shouldSkipWorkspaceArchivePath(relPath, false) {
+				continue
+			}
 			absPath := containerDataDir + "/" + strings.TrimPrefix(relPath, "/")
 
 			r, readErr := client.ReadRaw(ctx, absPath)
@@ -543,6 +563,10 @@ func (m *Manager) importDataViaGRPC(ctx context.Context, botID string, r io.Read
 	}
 	defer func() { _ = gr.Close() }()
 
+	if err := cleanWorkspaceACPSecretsViaGRPC(ctx, client); err != nil {
+		return err
+	}
+
 	tr := tar.NewReader(gr)
 	for {
 		header, err := tr.Next()
@@ -555,7 +579,14 @@ func (m *Manager) importDataViaGRPC(ctx context.Context, botID string, r io.Read
 		if header.Typeflag == tar.TypeDir {
 			continue
 		}
-		absPath := containerDataDir + "/" + strings.TrimPrefix(header.Name, "/")
+		target, err := sanitizeArchivePath(header.Name)
+		if err != nil {
+			return err
+		}
+		if target == "" || shouldSkipWorkspaceArchivePath(target, false) {
+			continue
+		}
+		absPath := containerDataDir + "/" + filepath.ToSlash(target)
 		if _, err := client.WriteRaw(ctx, absPath, io.LimitReader(tr, header.Size)); err != nil {
 			return fmt.Errorf("write %s: %w", absPath, err)
 		}
@@ -581,6 +612,15 @@ func tarGzDir(w io.Writer, dir string) error {
 		rel, err := filepath.Rel(dir, path)
 		if err != nil || rel == "." {
 			return err
+		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
+		if shouldSkipWorkspaceArchivePath(rel, d.IsDir()) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 
 		if d.IsDir() {
@@ -624,6 +664,111 @@ func tarGzDir(w io.Writer, dir string) error {
 	})
 }
 
+func shouldSkipWorkspaceArchivePath(rel string, isDir bool) bool {
+	rel = filepath.ToSlash(filepath.Clean(rel))
+	rel = strings.TrimPrefix(rel, "/")
+	sub, ok := workspaceACPSecretSubpath(rel)
+	if !ok {
+		return false
+	}
+	if isDir {
+		return workspaceACPSecretDirSubpath(sub)
+	}
+	switch {
+	case sub == ".env", sub == "auth.json":
+		return true
+	case strings.HasSuffix(sub, "/.env"), strings.HasSuffix(sub, "/auth.json"):
+		return true
+	case workspaceACPSecretDirSubpath(filepath.ToSlash(filepath.Dir(sub))):
+		return true
+	case sub == "state.db", strings.HasPrefix(sub, "state.db-"):
+		return true
+	default:
+		return false
+	}
+}
+
+func isWorkspaceArchiveSymlinkMode(mode string) bool {
+	return strings.HasPrefix(mode, "L")
+}
+
+func workspaceACPSecretDirSubpath(sub string) bool {
+	sub = strings.Trim(strings.TrimSpace(filepath.ToSlash(sub)), "/")
+	if sub == "" || sub == "." {
+		return false
+	}
+	for _, part := range strings.Split(sub, "/") {
+		if _, ok := workspaceACPSecretDirNames[part]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func workspaceACPSecretSubpath(rel string) (string, bool) {
+	for _, prefix := range workspaceACPSecretDirPrefixes {
+		if strings.HasPrefix(rel, prefix) {
+			return strings.TrimPrefix(rel, prefix), true
+		}
+	}
+	return "", false
+}
+
+func cleanWorkspaceACPSecretsViaGRPC(ctx context.Context, client *bridge.Client) error {
+	entries, err := client.ListDirAll(ctx, containerDataDir, true)
+	if err != nil {
+		return fmt.Errorf("list workspace for ACP secret cleanup: %w", err)
+	}
+	for _, entry := range entries {
+		relPath := strings.TrimPrefix(entry.GetPath(), "/")
+		if !shouldSkipWorkspaceArchivePath(relPath, entry.GetIsDir()) {
+			continue
+		}
+		absPath := containerDataDir + "/" + strings.TrimPrefix(relPath, "/")
+		if err := client.DeleteFile(ctx, absPath, entry.GetIsDir()); err != nil {
+			return fmt.Errorf("delete workspace ACP secret %s: %w", absPath, err)
+		}
+	}
+	return nil
+}
+
+func cleanWorkspaceACPSecretsInDir(root string) error {
+	for _, prefix := range workspaceACPSecretDirPrefixes {
+		base := filepath.Join(root, filepath.FromSlash(strings.TrimSuffix(prefix, "/")))
+		if _, err := os.Stat(base); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
+		}
+		if err := filepath.WalkDir(base, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return err
+			}
+			if !shouldSkipWorkspaceArchivePath(rel, d.IsDir()) {
+				return nil
+			}
+			if d.IsDir() {
+				if err := os.RemoveAll(path); err != nil {
+					return err
+				}
+				return filepath.SkipDir
+			}
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // untarGzDir extracts a gzip-compressed tar archive into dst.
 func untarGzDir(r io.Reader, dst string) error {
 	gr, err := gzip.NewReader(r)
@@ -637,6 +782,10 @@ func untarGzDir(r io.Reader, dst string) error {
 		return fmt.Errorf("open root: %w", err)
 	}
 	defer func() { _ = root.Close() }()
+
+	if err := cleanWorkspaceACPSecretsInDir(dst); err != nil {
+		return fmt.Errorf("clean ACP secrets: %w", err)
+	}
 
 	for {
 		header, err := tr.Next()
@@ -652,6 +801,9 @@ func untarGzDir(r io.Reader, dst string) error {
 			return err
 		}
 		if target == "" {
+			continue
+		}
+		if shouldSkipWorkspaceArchivePath(target, header.Typeflag == tar.TypeDir) {
 			continue
 		}
 

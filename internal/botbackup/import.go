@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/acl"
+	"github.com/memohai/memoh/internal/acpprofile"
 	"github.com/memohai/memoh/internal/botbackup/secure"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
@@ -463,6 +464,7 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 	if err != nil {
 		return ImportResult{}, err
 	}
+	profile = scrubImportedProfileACPSecrets(profile, state)
 	cfg, err := readEntry[settings.Settings](state, "bot/settings.json")
 	if err != nil {
 		return ImportResult{}, err
@@ -480,6 +482,9 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 	targetBotID, created, err := s.restoreBot(ctx, actorUserID, profile, opts)
 	if err != nil {
 		return ImportResult{}, err
+	}
+	if shouldCloseOverwriteACPRuntimes(opts, created) {
+		s.closeBotACPRuntimes(targetBotID)
 	}
 	state.idMap[profile.ID] = targetBotID
 	state.createMode = created
@@ -512,6 +517,27 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 
 	committed = true
 	return ImportResult{BotID: targetBotID, Created: created, Warnings: state.warnings, Imported: state.counts}, nil
+}
+
+func scrubImportedProfileACPSecrets(profile bots.Bot, state *importState) bots.Bot {
+	scrubbed, changed := acpprofile.ScrubMetadataForExport(profile.Metadata)
+	if !changed {
+		return profile
+	}
+	profile.Metadata = scrubbed
+	if state != nil {
+		state.warnings = appendWarningOnce(state.warnings, acpManagedSecretsWarning)
+	}
+	return profile
+}
+
+func appendWarningOnce(warnings []string, warning string) []string {
+	for _, item := range warnings {
+		if item == warning {
+			return warnings
+		}
+	}
+	return append(warnings, warning)
 }
 
 // applyRestore runs every selected section in order. A returned error is fatal
@@ -775,7 +801,7 @@ func (s *Service) restoreBot(ctx context.Context, actorUserID string, profile bo
 		name := profile.DisplayName
 		active := profile.IsActive
 		tz := profile.Timezone
-		_, err := s.bots.Update(ctx, target, bots.UpdateBotRequest{
+		_, err := s.bots.UpdateReplacingMetadata(ctx, target, bots.UpdateBotRequest{
 			DisplayName: &name,
 			AvatarURL:   &avatar,
 			Timezone:    &tz,
@@ -797,6 +823,28 @@ func (s *Service) restoreBot(ctx context.Context, actorUserID string, profile bo
 		return "", false, err
 	}
 	return created.ID, true, nil
+}
+
+func shouldCloseOverwriteACPRuntimes(opts ImportOptions, created bool) bool {
+	if created || normalizeImportMode(opts.Mode) != ImportModeOverwrite {
+		return false
+	}
+	return opts.wants(SectionProfile) || opts.wants(SectionWorkspace)
+}
+
+func (s *Service) closeBotACPRuntimes(botID string) {
+	if s == nil || s.acpRuntimes == nil {
+		return
+	}
+	for _, profile := range acpprofile.List() {
+		if err := s.acpRuntimes.CloseBotAgentRuntimes(botID, profile.ID); err != nil {
+			s.logger.Warn("close ACP runtime after bot backup import failed",
+				slog.String("bot_id", botID),
+				slog.String("agent_id", profile.ID),
+				slog.Any("error", err),
+			)
+		}
+	}
 }
 
 // restoreSettings writes the bot settings, importing the behavior group

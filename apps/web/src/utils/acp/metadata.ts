@@ -25,6 +25,8 @@ export interface MissingACPRequiredField {
   field: AcpprofileManagedField
 }
 
+const HERMES_MANAGED_PROVIDERS = ['openrouter', 'openai', 'openai-api', 'gemini', 'google', 'google-gemini', 'google-ai-studio', 'custom']
+
 export function readACPConfig(metadata: Record<string, unknown> | undefined, profiles: AcpprofilePublicProfile[]): ACPForm {
   const out: ACPForm = { agents: {} }
   const acp = isRecord(metadata?.acp) ? metadata.acp : {}
@@ -96,7 +98,11 @@ export function findMissingRequiredACPField(value: ACPForm, profiles: Acpprofile
 
 export function findMissingRequiredManagedField(profile: AcpprofilePublicProfile | null | undefined, managed: Record<string, unknown>, setupMode: string): AcpprofileManagedField | null {
   const mode = normalizeSetupMode(setupMode, managed)
-  if (!profile || mode === 'self') return null
+  if (!profile) return null
+  if (!profileSupportsSetupMode(profile, mode)) {
+    return { id: 'setup_mode', label: 'Setup', type: 'text', required: true }
+  }
+  if (mode === 'self') return null
   const agentID = normalizeACPAgentID(profile.id)
   if (agentID === 'codex') {
     if (mode === 'oauth') {
@@ -115,12 +121,43 @@ export function findMissingRequiredManagedField(profile: AcpprofilePublicProfile
     }
     return null
   }
+  if (agentID === 'hermes') {
+    const provider = normalizeACPAgentID(managed.provider)
+    if (!provider) return managedField(profile, 'provider')
+    if (!HERMES_MANAGED_PROVIDERS.includes(provider)) return managedField(profile, 'provider')
+    if (!String(managed.model ?? '').trim()) return managedField(profile, 'model')
+    if (!String(managed.api_key ?? '').trim()) return managedField(profile, 'api_key')
+    if (provider === 'custom' && !validHTTPURL(managed.base_url)) return managedField(profile, 'base_url')
+    return null
+  }
   for (const field of profile.managed_fields ?? []) {
     const id = normalizeACPAgentID(field.id)
     if (!id || !field.required) continue
     if (!String(managed[id] ?? '').trim()) return field
   }
   return null
+}
+
+function profileSupportsSetupMode(profile: AcpprofilePublicProfile, mode: string): boolean {
+  const modes = profile.setup_modes?.filter(Boolean)
+  if (!modes || modes.length === 0) return true
+  return modes.some(supported => normalizeACPAgentID(supported) === mode)
+}
+
+function validHTTPURL(value: unknown): boolean {
+  const raw = typeof value === 'string' ? value.trim() : ''
+  if (!raw) return false
+  try {
+    const url = new URL(raw)
+    return url.protocol === 'http:' || url.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+function managedField(profile: AcpprofilePublicProfile, fieldID: string): AcpprofileManagedField {
+  return profile.managed_fields?.find(field => normalizeACPAgentID(field.id) === fieldID)
+    ?? { id: fieldID, label: fieldID, type: 'text', required: true }
 }
 
 export function readACPAgentConfig(metadata: Record<string, unknown> | undefined, rawAgentID: string | undefined): ACPAgentConfig {

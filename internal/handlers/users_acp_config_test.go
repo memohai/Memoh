@@ -2,7 +2,10 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -133,6 +136,218 @@ func TestPrepareACPWorkspaceConfigSkipsSelf(t *testing.T) {
 	}
 }
 
+func TestPrepareACPWorkspaceConfigSurfacesWriteErrors(t *testing.T) {
+	handler := &UsersHandler{
+		acpWorkspace: &usersACPConfigWorkspace{
+			backend: bridge.WorkspaceBackendContainer,
+			mcpErr:  errors.New("bridge unavailable"),
+		},
+	}
+
+	err := handler.prepareACPWorkspaceConfig(context.Background(), bots.Bot{
+		ID: "bot-1",
+		Metadata: map[string]any{
+			acpprofile.MetadataKeyACP: map[string]any{
+				"agents": map[string]any{
+					acpprofile.AgentHermesID: map[string]any{
+						"enabled":    true,
+						"setup_mode": "api_key",
+						"managed": map[string]any{
+							"provider": "openrouter",
+							"model":    "anthropic/claude-sonnet-4",
+							"api_key":  "sk-hermes",
+						},
+					},
+				},
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "bridge unavailable") {
+		t.Fatalf("prepareACPWorkspaceConfig() error = %v, want bridge unavailable", err)
+	}
+}
+
+func TestValidateACPManagedConfigRejectsInvalidHermesCustom(t *testing.T) {
+	err := validateACPManagedConfig(map[string]any{
+		acpprofile.MetadataKeyACP: map[string]any{
+			"agents": map[string]any{
+				acpprofile.AgentHermesID: map[string]any{
+					"enabled":    true,
+					"setup_mode": "api_key",
+					"managed": map[string]any{
+						"provider": "custom",
+						"model":    "my-model",
+						"api_key":  "sk-hermes",
+					},
+				},
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "base_url required") {
+		t.Fatalf("validateACPManagedConfig() error = %v, want base_url required", err)
+	}
+}
+
+func TestValidateACPManagedConfigRejectsUnsupportedHermesSetupMode(t *testing.T) {
+	err := validateACPManagedConfig(map[string]any{
+		acpprofile.MetadataKeyACP: map[string]any{
+			"agents": map[string]any{
+				acpprofile.AgentHermesID: map[string]any{
+					"enabled":    true,
+					"setup_mode": "oauth",
+					"managed": map[string]any{
+						"provider": "gemini",
+						"model":    "gemini-3.5-flash",
+						"api_key":  "AIza-test",
+					},
+				},
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), `Hermes does not support setup mode "oauth"`) {
+		t.Fatalf("validateACPManagedConfig() error = %v, want unsupported setup mode", err)
+	}
+}
+
+func TestValidateACPManagedConfigAcceptsLegacyHermesManagedMode(t *testing.T) {
+	err := validateACPManagedConfig(map[string]any{
+		acpprofile.MetadataKeyACP: map[string]any{
+			"agents": map[string]any{
+				acpprofile.AgentHermesID: map[string]any{
+					"enabled":    true,
+					"setup_mode": "managed",
+					"managed": map[string]any{
+						"provider": "gemini",
+						"model":    "gemini-3.5-flash",
+						"api_key":  "AIza-test",
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("validateACPManagedConfig() error = %v, want legacy managed accepted as api_key", err)
+	}
+}
+
+func TestValidateACPManagedConfigAcceptsLegacyCodexManagedOAuthMode(t *testing.T) {
+	err := validateACPManagedConfig(map[string]any{
+		acpprofile.MetadataKeyACP: map[string]any{
+			"agents": map[string]any{
+				acpprofile.AgentCodexID: map[string]any{
+					"enabled":    true,
+					"setup_mode": "managed",
+					"managed": map[string]any{
+						"auth_type": "provider_oauth",
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("validateACPManagedConfig() error = %v, want legacy managed provider_oauth accepted as oauth", err)
+	}
+}
+
+func TestACPManagedConfigNeedsWriteOnlyWhenManagedTargetChanges(t *testing.T) {
+	existing := map[string]any{
+		acpprofile.MetadataKeyACP: map[string]any{
+			"agents": map[string]any{
+				acpprofile.AgentHermesID: map[string]any{
+					"enabled":    true,
+					"setup_mode": "api_key",
+					"managed": map[string]any{
+						"provider": "openrouter",
+						"model":    "anthropic/claude-sonnet-4",
+						"api_key":  "sk-existing",
+					},
+				},
+			},
+		},
+		"unrelated": "old",
+	}
+	unchanged := acpprofile.MergeSensitiveFieldsForUpdate(existing, map[string]any{
+		acpprofile.MetadataKeyACP: map[string]any{
+			"agents": map[string]any{
+				acpprofile.AgentHermesID: map[string]any{
+					"enabled":    true,
+					"setup_mode": "api_key",
+					"managed": map[string]any{
+						"provider": "openrouter",
+						"model":    "anthropic/claude-sonnet-4",
+						"api_key":  "sk-...ting",
+					},
+				},
+			},
+		},
+		"unrelated": "new",
+	})
+	if acpManagedConfigNeedsWrite(existing, unchanged) {
+		t.Fatal("unchanged managed config should not require workspace write")
+	}
+
+	changed := acpprofile.MergeSensitiveFieldsForUpdate(existing, map[string]any{
+		acpprofile.MetadataKeyACP: map[string]any{
+			"agents": map[string]any{
+				acpprofile.AgentHermesID: map[string]any{
+					"enabled":    true,
+					"setup_mode": "api_key",
+					"managed": map[string]any{
+						"provider": "openrouter",
+						"model":    "openrouter/auto",
+						"api_key":  "sk-...ting",
+					},
+				},
+			},
+		},
+	})
+	if !acpManagedConfigNeedsWrite(existing, changed) {
+		t.Fatal("changed managed model should require workspace write")
+	}
+}
+
+func TestACPRuntimeMetadataChangedIgnoresUnrelatedMetadata(t *testing.T) {
+	existing := map[string]any{
+		acpprofile.MetadataKeyACP: map[string]any{
+			"agents": map[string]any{
+				acpprofile.AgentHermesID: map[string]any{
+					"enabled":    true,
+					"setup_mode": "api_key",
+					"managed": map[string]any{
+						"provider": "openrouter",
+						"model":    "anthropic/claude-sonnet-4",
+					},
+				},
+			},
+		},
+		"unrelated": "old",
+	}
+	unchanged := map[string]any{
+		acpprofile.MetadataKeyACP: existing[acpprofile.MetadataKeyACP],
+		"unrelated":               "new",
+	}
+	if acpRuntimeMetadataChanged(existing, unchanged) {
+		t.Fatal("unrelated metadata change should not close ACP runtimes")
+	}
+	changed := map[string]any{
+		acpprofile.MetadataKeyACP: map[string]any{
+			"agents": map[string]any{
+				acpprofile.AgentHermesID: map[string]any{
+					"enabled":    false,
+					"setup_mode": "api_key",
+					"managed": map[string]any{
+						"provider": "openrouter",
+						"model":    "anthropic/claude-sonnet-4",
+					},
+				},
+			},
+		},
+	}
+	if !acpRuntimeMetadataChanged(existing, changed) {
+		t.Fatal("ACP metadata change should close ACP runtimes")
+	}
+}
+
 func TestPrepareACPWorkspaceConfigWritesCodexAPIKeyConfigForLocalBYOK(t *testing.T) {
 	client, recorder := newUsersACPConfigBridgeClient(t)
 	handler := &UsersHandler{
@@ -168,16 +383,128 @@ func TestPrepareACPWorkspaceConfigWritesCodexAPIKeyConfigForLocalBYOK(t *testing
 	}
 }
 
+func TestPrepareACPWorkspaceConfigWritesHermesManagedConfig(t *testing.T) {
+	client, recorder := newUsersACPConfigBridgeClient(t)
+	handler := &UsersHandler{
+		acpWorkspace: &usersACPConfigWorkspace{
+			backend: bridge.WorkspaceBackendContainer,
+			client:  client,
+		},
+	}
+
+	err := handler.prepareACPWorkspaceConfig(context.Background(), bots.Bot{
+		ID: "bot-1",
+		Metadata: map[string]any{
+			acpprofile.MetadataKeyACP: map[string]any{
+				"agents": map[string]any{
+					acpprofile.AgentHermesID: map[string]any{
+						"enabled":    true,
+						"setup_mode": "api_key",
+						"managed": map[string]any{
+							"provider": "openrouter",
+							"model":    "anthropic/claude-sonnet-4",
+							"api_key":  "sk-hermes",
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("prepareACPWorkspaceConfig() error = %v", err)
+	}
+
+	writes := recorder.writes()
+	configWrite, ok := findUsersACPConfigWrite(writes, acpclient.HermesContainerHome+"/config.yaml")
+	if !ok {
+		t.Fatalf("missing Hermes config.yaml write: %#v", writes)
+	}
+	if !strings.Contains(string(configWrite.Content), `provider: "openrouter"`) ||
+		!strings.Contains(string(configWrite.Content), `default: "anthropic/claude-sonnet-4"`) {
+		t.Fatalf("Hermes config content =\n%s", string(configWrite.Content))
+	}
+	envWrite, ok := findUsersACPConfigWrite(writes, acpclient.HermesContainerHome+"/.env")
+	if !ok {
+		t.Fatalf("missing Hermes .env write: %#v", writes)
+	}
+	if !strings.Contains(string(envWrite.Content), `OPENROUTER_API_KEY='sk-hermes'`) {
+		t.Fatalf("Hermes env content =\n%s", string(envWrite.Content))
+	}
+}
+
+func TestPrepareACPWorkspaceConfigWritesHermesLocalManagedConfigToDataRoot(t *testing.T) {
+	localWorkDir := t.TempDir()
+	localDataRoot := t.TempDir()
+	handler := &UsersHandler{
+		acpWorkspace: &usersACPConfigWorkspace{
+			backend:        bridge.WorkspaceBackendLocal,
+			defaultWorkDir: localWorkDir,
+			localDataRoot:  localDataRoot,
+			mcpErr:         errors.New("local Hermes managed config should not use bridge"),
+		},
+	}
+
+	err := handler.prepareACPWorkspaceConfig(context.Background(), bots.Bot{
+		ID: "bot-1",
+		Metadata: map[string]any{
+			acpprofile.MetadataKeyACP: map[string]any{
+				"agents": map[string]any{
+					acpprofile.AgentHermesID: map[string]any{
+						"enabled":    true,
+						"setup_mode": "api_key",
+						"managed": map[string]any{
+							"provider": "custom",
+							"model":    "my-model",
+							"base_url": "https://llm.example/v1",
+							"api_key":  "sk-hermes",
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("prepareACPWorkspaceConfig() error = %v", err)
+	}
+
+	configPath := filepath.Join(localDataRoot, "acp", "hermes", "bot-1", "config.yaml")
+	configBytes, err := os.ReadFile(configPath) //nolint:gosec // test path under t.TempDir.
+	if err != nil {
+		t.Fatalf("read local Hermes config %q: %v", configPath, err)
+	}
+	if !strings.Contains(string(configBytes), `base_url: "https://llm.example/v1"`) {
+		t.Fatalf("Hermes local config content =\n%s", string(configBytes))
+	}
+	envPath := filepath.Join(localDataRoot, "acp", "hermes", "bot-1", ".env")
+	envBytes, err := os.ReadFile(envPath) //nolint:gosec // test path under t.TempDir.
+	if err != nil {
+		t.Fatalf("read local Hermes env %q: %v", envPath, err)
+	}
+	if !strings.Contains(string(envBytes), `MEMOH_HERMES_API_KEY='sk-hermes'`) {
+		t.Fatalf("Hermes local env content =\n%s", string(envBytes))
+	}
+}
+
 type usersACPConfigWorkspace struct {
-	backend string
-	client  *bridge.Client
+	backend        string
+	defaultWorkDir string
+	localDataRoot  string
+	client         *bridge.Client
+	mcpErr         error
 }
 
 func (w *usersACPConfigWorkspace) WorkspaceInfo(context.Context, string) (bridge.WorkspaceInfo, error) {
-	return bridge.WorkspaceInfo{Backend: w.backend, DefaultWorkDir: "/data"}, nil
+	defaultWorkDir := w.defaultWorkDir
+	if defaultWorkDir == "" {
+		defaultWorkDir = "/data"
+	}
+	return bridge.WorkspaceInfo{Backend: w.backend, DefaultWorkDir: defaultWorkDir, LocalDataRoot: w.localDataRoot}, nil
 }
 
 func (w *usersACPConfigWorkspace) MCPClient(context.Context, string) (*bridge.Client, error) {
+	if w.mcpErr != nil {
+		return nil, w.mcpErr
+	}
 	return w.client, nil
 }
 

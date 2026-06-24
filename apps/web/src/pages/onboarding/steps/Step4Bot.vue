@@ -168,11 +168,14 @@ const { data: providerData } = useQuery({
 const models = computed(() => modelData.value ?? [])
 const providers = computed(() => providerData.value ?? [])
 
-const canSubmit = computed(() => {
-  return !!form.display_name.trim()
-})
-
 const isLocalWorkspace = computed(() => allowLocalWorkspaceCreate.value && form.workspace_backend === 'local')
+const acpSelfRequiresLocalWorkspace = computed(() =>
+  acpAgentId.value === 'hermes' && acpSelection.value?.setupMode === 'self' && !isLocalWorkspace.value,
+)
+
+const canSubmit = computed(() => {
+  return !!form.display_name.trim() && !acpSelfRequiresLocalWorkspace.value
+})
 
 const isContainerSubmitting = computed(() => submitting.value && !isLocalWorkspace.value)
 
@@ -490,7 +493,15 @@ function skipOAuth() {
             </template>
 
             <div
-              v-if="!isLocalWorkspace"
+              v-if="acpSelfRequiresLocalWorkspace"
+              class="rounded-md border border-warning-border bg-warning-soft px-3 py-2 text-xs text-warning-foreground mt-6 transition-all duration-[350ms] ease-out delay-[180ms]"
+              :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+            >
+              {{ t('onboarding.bot.acp.selfRequiresLocalWorkspace', { agent: acpAgentName }) }}
+            </div>
+
+            <div
+              v-if="!isLocalWorkspace && !acpSelfRequiresLocalWorkspace"
               class="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground mt-6 transition-all duration-[350ms] ease-out delay-[200ms]"
               :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
             >

@@ -744,13 +744,31 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 			mode = acpclient.SetupModeAPIKey
 		}
 	}
+	if !profileSupportsSetupMode(profile, mode) {
+		return fail(fmt.Errorf("%s does not support setup mode %q", profile.DisplayName, mode))
+	}
+	if !profileSupportsBackend(profile, workspaceInfo.Backend) {
+		return fail(fmt.Errorf("%s does not support workspace backend %q", profile.DisplayName, workspaceInfo.Backend))
+	}
 	if mode != acpclient.SetupModeSelf {
-		if err := validateManagedFields(profile, setup.Managed, mode); err != nil {
+		if err := acpclient.ValidateManagedACPConfig(profile, setup, mode); err != nil {
 			return fail(err)
 		}
 	}
-	if err := p.reconcileManagedCodexConfig(startCtx, h.botID, profile, setup, mode); err != nil {
-		return fail(fmt.Errorf("prepare Codex managed config: %w", err))
+	resolved, err := acpclient.ResolveSessionContext(acpclient.SessionContextInput{
+		AgentID:       h.agentID,
+		SetupMode:     mode,
+		BotID:         h.botID,
+		Backend:       workspaceInfo.Backend,
+		WorkspaceRoot: workspaceInfo.DefaultWorkDir,
+		ProjectPath:   h.projectPath,
+		LocalDataRoot: workspaceInfo.LocalDataRoot,
+	})
+	if err != nil {
+		return fail(fmt.Errorf("resolve ACP session context: %w", err))
+	}
+	if err := p.reconcileManagedACPConfig(startCtx, h.botID, profile, setup, mode, resolved); err != nil {
+		return fail(fmt.Errorf("prepare %s managed config: %w", profile.DisplayName, err))
 	}
 	// Managed env (Claude Code BYOK tokens) is injected for every backend.
 	// Local processes inherit the host env and only get our overrides appended;
@@ -762,6 +780,7 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 	if err != nil {
 		return fail(err)
 	}
+	cleanEnv, unsetEnv := managedEnvControls(profile, mode, resolved.Backend)
 
 	toolHTTPURL, err := p.resolveToolHTTPURL(opts.ToolHTTPURL, workspaceInfo)
 	if err != nil {
@@ -777,6 +796,9 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 		LocalCommand:        profile.LocalCommand,
 		LocalArgs:           profile.LocalArgs,
 		Env:                 env,
+		CleanEnv:            cleanEnv,
+		UnsetEnv:            unsetEnv,
+		Resolved:            &resolved,
 		SetupMode:           mode,
 		SessionMode:         profile.SessionModeID,
 		SessionConfigValues: profile.SessionConfigValues,
@@ -1066,6 +1088,40 @@ func (p *SessionPool) CloseAll() {
 	}
 }
 
+func (p *SessionPool) CloseBotAgentRuntimes(botID, agentID string) error {
+	if p == nil {
+		return nil
+	}
+	botID = strings.TrimSpace(botID)
+	agentID = acpprofile.NormalizeAgentID(agentID)
+	if botID == "" {
+		return nil
+	}
+	p.mu.RLock()
+	handles := make([]*runtimeHandle, 0)
+	for _, h := range p.runtimes {
+		if h == nil || h.botID != botID {
+			continue
+		}
+		if agentID != "" && h.agentID != agentID {
+			continue
+		}
+		handles = append(handles, h)
+	}
+	p.mu.RUnlock()
+
+	var firstErr error
+	for _, h := range handles {
+		// Bot metadata updates must not wait for an active prompt that may itself
+		// be waiting on user input or tool approval. Closing the session directly
+		// cancels the in-flight prompt and lets its op holder unwind.
+		if err := p.teardown(h); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
 func (p *SessionPool) reapIdle(now time.Time) int {
 	if p == nil {
 		return 0
@@ -1147,17 +1203,17 @@ func (h *runtimeHandle) toolContext() mcp.ToolSessionContext {
 	h.state.Lock()
 	defer h.state.Unlock()
 	ctx := mcp.ToolSessionContext{
-		BotID:       h.botID,
-		ChatID:      h.botID,
-		RuntimeID:   h.id,
-		SessionID:   h.boundSession,
-		SessionType: session.TypeACPAgent,
+		BotID:            h.botID,
+		ChatID:           h.botID,
+		RuntimeID:        h.id,
+		SessionID:        h.boundSession,
+		SessionType:      session.TypeACPAgent,
+		CanListUserInput: true,
 	}
 	if h.active == nil {
 		return ctx
 	}
 	ctx.RuntimeActive = true
-	ctx.CanListUserInput = true
 	overlay := func(dst *string, value string) {
 		if value = strings.TrimSpace(value); value != "" {
 			*dst = value
@@ -1275,26 +1331,22 @@ func (p *SessionPool) toolHTTPHandler(h *runtimeHandle) http.Handler {
 	})
 }
 
-func (p *SessionPool) reconcileManagedCodexConfig(ctx context.Context, botID string, profile acpprofile.Profile, setup acpprofile.AgentSetup, mode acpclient.SetupMode) error {
-	if profile.ID != acpprofile.AgentCodexID || mode == acpclient.SetupModeSelf {
+func (p *SessionPool) reconcileManagedACPConfig(ctx context.Context, botID string, profile acpprofile.Profile, setup acpprofile.AgentSetup, mode acpclient.SetupMode, resolved acpclient.ResolvedSessionContext) error {
+	if mode == acpclient.SetupModeSelf {
 		return nil
 	}
-	runner, ok := p.runner.(workspaceClientRunner)
-	if !ok {
+	runner, hasWorkspaceClient := p.runner.(workspaceClientRunner)
+	if !hasWorkspaceClient && (profile.ID != acpprofile.AgentHermesID || resolved.Backend != acpclient.WorkspaceBackendLocal) {
 		return nil
 	}
-	client, err := runner.MCPClient(ctx, botID)
-	if err != nil {
-		return err
-	}
-	cfg := acpclient.CodexManagedConfig{
-		Mode:    mode,
-		Managed: setup.Managed,
-	}
-	if mode == acpclient.SetupModeOAuth {
-		return acpclient.WriteCodexManagedConfigFile(ctx, client, cfg)
-	}
-	return acpclient.WriteCodexManagedConfigWithAuth(ctx, client, cfg)
+	return acpclient.WriteManagedACPConfig(ctx, acpclient.ManagedACPConfigRequest{
+		Profile:  profile,
+		Setup:    setup,
+		Mode:     mode,
+		Resolved: resolved,
+	}, func() (*bridge.Client, error) {
+		return runner.MCPClient(ctx, botID)
+	})
 }
 
 type promptToolEventSink struct {
@@ -1378,41 +1430,39 @@ func appendBoundedPromptEvents(events []event.StreamEvent, incoming ...event.Str
 
 const maxCollectedPromptToolEvents = 4096
 
-func validateManagedFields(profile acpprofile.Profile, values map[string]string, mode acpclient.SetupMode) error {
-	if profile.ID == acpprofile.AgentCodexID {
-		switch mode {
-		case acpclient.SetupModeOAuth:
-			return nil
-		default:
-			if strings.TrimSpace(values["api_key"]) == "" {
-				return fmt.Errorf("api_key required for %s api_key setup", profile.DisplayName)
-			}
-			return nil
+func managedEnvControls(profile acpprofile.Profile, mode acpclient.SetupMode, backend acpclient.WorkspaceBackend) (bool, []string) {
+	if profile.ID != acpprofile.AgentHermesID || mode == acpclient.SetupModeSelf {
+		return false, nil
+	}
+	return backend == acpclient.WorkspaceBackendContainer, acpclient.HermesManagedUnsetEnvKeys()
+}
+
+func profileSupportsSetupMode(profile acpprofile.Profile, mode acpclient.SetupMode) bool {
+	if len(profile.SetupModes) == 0 {
+		return true
+	}
+	for _, supported := range profile.SetupModes {
+		if strings.EqualFold(strings.TrimSpace(supported), string(mode)) {
+			return true
 		}
 	}
-	if profile.ID == acpprofile.AgentClaudeCodeID {
-		switch mode {
-		case acpclient.SetupModeOAuth:
-			if strings.TrimSpace(values["oauth_token"]) == "" {
-				return fmt.Errorf("oauth_token required for %s oauth setup", profile.DisplayName)
-			}
-			return nil
-		default:
-			if strings.TrimSpace(values["api_key"]) == "" {
-				return fmt.Errorf("api_key required for %s api_key setup", profile.DisplayName)
-			}
-			return nil
+	return false
+}
+
+func profileSupportsBackend(profile acpprofile.Profile, backend string) bool {
+	if len(profile.SupportedBackends) == 0 {
+		return true
+	}
+	normalized := strings.TrimSpace(backend)
+	if normalized == "" {
+		normalized = bridge.WorkspaceBackendContainer
+	}
+	for _, supported := range profile.SupportedBackends {
+		if strings.EqualFold(strings.TrimSpace(supported), normalized) {
+			return true
 		}
 	}
-	for _, field := range profile.ManagedFields {
-		if !field.Required {
-			continue
-		}
-		if strings.TrimSpace(values[field.ID]) == "" {
-			return fmt.Errorf("%s required for %s %s setup", field.ID, profile.DisplayName, mode)
-		}
-	}
-	return nil
+	return false
 }
 
 func managedProcessEnv(profile acpprofile.Profile, values map[string]string, mode acpclient.SetupMode) ([]string, error) {

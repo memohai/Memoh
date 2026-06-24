@@ -377,8 +377,7 @@ func (s *Server) execPTY(stream pb.ContainerService_ExecServer, firstMsg *pb.Exe
 	}
 	configurePTYCommandCancellation(cmd)
 	cmd.Dir = workDir
-	cmd.Env = append(os.Environ(), firstMsg.GetEnv()...)
-	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
+	cmd.Env = execPTYEnv(firstMsg)
 
 	initialSize := &pty.Winsize{Rows: 24, Cols: 80}
 	if r := firstMsg.GetResize(); r != nil && r.GetCols() > 0 && r.GetRows() > 0 {
@@ -441,9 +440,7 @@ func (s *Server) execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.Ex
 	cmd := exec.CommandContext(procCtx, "/bin/sh", "-c", command) //nolint:gosec // G204: intentional agent command execution.
 	configureCommandCancellation(cmd)
 	cmd.Dir = workDir
-	if len(firstMsg.GetEnv()) > 0 {
-		cmd.Env = append(os.Environ(), firstMsg.GetEnv()...)
-	}
+	cmd.Env = execEnv(firstMsg)
 
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
@@ -505,6 +502,82 @@ func (s *Server) execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.Ex
 		ExitCode: exitCode,
 	})
 	return nil
+}
+
+func execEnv(input *pb.ExecInput) []string {
+	if input == nil {
+		return nil
+	}
+	env := input.GetEnv()
+	unset := input.GetUnsetEnv()
+	clean := input.GetCleanEnv()
+	if !clean && len(env) == 0 && len(unset) == 0 {
+		return nil
+	}
+	out := []string{}
+	if !clean {
+		out = append(out, os.Environ()...)
+	}
+	if len(unset) > 0 {
+		out = filterUnsetEnv(out, unset)
+	}
+	out = append(out, env...)
+	return out
+}
+
+func execPTYEnv(input *pb.ExecInput) []string {
+	env := execEnv(input)
+	if env == nil {
+		env = os.Environ()
+	}
+	return append(env, "TERM=xterm-256color")
+}
+
+func filterUnsetEnv(env []string, unset []string) []string {
+	if len(env) == 0 || len(unset) == 0 {
+		return env
+	}
+	// Keep wildcard semantics aligned with acpclient.envNameBlocked. This side
+	// filters inherited bridge process env before launching the workspace command.
+	blocked := make(map[string]struct{}, len(unset))
+	prefixes := make([]string, 0)
+	for _, key := range unset {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if strings.HasSuffix(key, "*") {
+			prefix := strings.TrimSuffix(key, "*")
+			if prefix != "" {
+				prefixes = append(prefixes, prefix)
+			}
+			continue
+		}
+		blocked[key] = struct{}{}
+	}
+	filtered := env[:0]
+	for _, item := range env {
+		key, _, ok := strings.Cut(item, "=")
+		if !ok {
+			filtered = append(filtered, item)
+			continue
+		}
+		if _, skip := blocked[key]; skip {
+			continue
+		}
+		skip := false
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(key, prefix) {
+				skip = true
+				break
+			}
+		}
+		if skip {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
 }
 
 // resolveExitCode normalises the result of cmd.Wait() into a single int32

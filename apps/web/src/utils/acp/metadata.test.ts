@@ -59,6 +59,18 @@ const claudeCodeProfile: AcpprofilePublicProfile = {
   ],
 }
 
+const hermesProfile: AcpprofilePublicProfile = {
+  id: 'hermes',
+  display_name: 'Hermes',
+  setup_modes: ['self', 'api_key'],
+  managed_fields: [
+    { id: 'provider', label: 'Provider', type: 'text', required: true },
+    { id: 'model', label: 'Model', type: 'text', required: true },
+    { id: 'base_url', label: 'Base URL', type: 'url' },
+    { id: 'api_key', label: 'API key', type: 'password', required: true, sensitive: true },
+  ],
+}
+
 describe('acp-metadata', () => {
   it('builds ACP form state from profile schema and metadata', () => {
     const metadata = {
@@ -178,6 +190,76 @@ describe('acp-metadata', () => {
       oauth_token: 'oauth-token',
     }, 'oauth')).toBeNull()
     expect(findMissingRequiredManagedField(claudeCodeProfile, {}, 'self')).toBeNull()
+  })
+
+	it('validates Hermes managed provider fields', () => {
+		expect(findMissingRequiredManagedField(hermesProfile, {}, 'self')).toBeNull()
+		expect(findMissingRequiredManagedField(hermesProfile, {
+			provider: 'gemini',
+			model: 'gemini-3.5-flash',
+			api_key: 'AIza-test',
+		}, 'oauth')?.id).toBe('setup_mode')
+		expect(findMissingRequiredManagedField(hermesProfile, {
+			provider: '',
+			model: 'anthropic/claude-sonnet-4',
+      api_key: 'sk-test',
+    }, 'api_key')?.id).toBe('provider')
+    expect(findMissingRequiredManagedField(hermesProfile, {
+      provider: 'openrouter',
+      model: '',
+      api_key: 'sk-test',
+    }, 'api_key')?.id).toBe('model')
+    expect(findMissingRequiredManagedField(hermesProfile, {
+      provider: 'openrouter',
+      model: 'anthropic/claude-sonnet-4',
+      api_key: '',
+    }, 'api_key')?.id).toBe('api_key')
+		expect(findMissingRequiredManagedField(hermesProfile, {
+			provider: 'custom',
+			model: 'my-model',
+			api_key: 'sk-test',
+			base_url: '',
+		}, 'api_key')?.id).toBe('base_url')
+		expect(findMissingRequiredManagedField(hermesProfile, {
+			provider: 'custom',
+			model: 'my-model',
+			api_key: 'sk-test',
+			base_url: 'localhost:1234',
+		}, 'api_key')?.id).toBe('base_url')
+		expect(findMissingRequiredManagedField(hermesProfile, {
+			provider: 'custom',
+			model: 'my-model',
+			api_key: 'sk-test',
+			base_url: 'ftp://llm.example/v1',
+		}, 'api_key')?.id).toBe('base_url')
+		expect(findMissingRequiredManagedField(hermesProfile, {
+			provider: 'custom',
+			model: 'my-model',
+			api_key: 'sk-test',
+			base_url: 'https://llm.example/v1',
+		}, 'api_key')).toBeNull()
+		expect(findMissingRequiredManagedField(hermesProfile, {
+			provider: 'openai-api',
+      model: 'gpt-4.1',
+      api_key: 'sk-test',
+    }, 'api_key')).toBeNull()
+    expect(findMissingRequiredManagedField(hermesProfile, {
+      provider: 'openai',
+      model: 'gpt-4.1',
+      api_key: 'sk-test',
+    }, 'api_key')).toBeNull()
+    for (const provider of ['gemini', 'google', 'google-gemini', 'google-ai-studio']) {
+      expect(findMissingRequiredManagedField(hermesProfile, {
+        provider,
+        model: 'gemini-3.5-flash',
+        api_key: 'AIza-test',
+      }, 'api_key')).toBeNull()
+    }
+    expect(findMissingRequiredManagedField(hermesProfile, {
+      provider: 'unknown',
+      model: 'model',
+      api_key: 'sk-test',
+    }, 'api_key')?.id).toBe('provider')
   })
 
   it('writes ACP metadata into the agents map', () => {

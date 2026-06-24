@@ -199,6 +199,7 @@ func TestRunnerStartSessionStreamsEvents(t *testing.T) {
 	writeEvent := findStreamedToolEvent(streamedEventsSnapshot, event.ToolCallEnd, "write")
 	if writeEvent == nil {
 		t.Fatalf("streamed events missing write tool end: %#v", streamedEventsSnapshot)
+		return
 	}
 	writeInput, ok := writeEvent.Input.(map[string]any)
 	if !ok {
@@ -206,6 +207,141 @@ func TestRunnerStartSessionStreamsEvents(t *testing.T) {
 	}
 	if writeInput["path"] == "" || writeInput["content"] != "written by fake agent\n" {
 		t.Fatalf("write input = %#v, want path and content", writeInput)
+	}
+}
+
+func TestRunnerStartSessionHermesManagedLocalIntegration(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	if err := os.MkdirAll(project, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "input.txt"), []byte("hello hermes\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	localDataRoot := t.TempDir()
+	resolved, err := ResolveSessionContext(SessionContextInput{
+		AgentID:       acpprofile.AgentHermesID,
+		SetupMode:     SetupModeAPIKey,
+		BotID:         "bot-hermes",
+		Backend:       bridge.WorkspaceBackendLocal,
+		WorkspaceRoot: root,
+		ProjectPath:   "/data/project",
+		LocalDataRoot: localDataRoot,
+	})
+	if err != nil {
+		t.Fatalf("ResolveSessionContext() error = %v", err)
+	}
+	profile, ok := acpprofile.Lookup(acpprofile.AgentHermesID)
+	if !ok {
+		t.Fatalf("missing Hermes profile")
+	}
+	setup := acpprofile.AgentSetup{
+		AgentID: acpprofile.AgentHermesID,
+		Enabled: true,
+		Mode:    string(SetupModeAPIKey),
+		Managed: map[string]string{
+			"provider": "gemini",
+			"model":    "gemini-3.5-flash",
+			"api_key":  "AIza-test-key",
+		},
+	}
+	if err := WriteManagedACPConfig(context.Background(), ManagedACPConfigRequest{
+		Profile:  profile,
+		Setup:    setup,
+		Mode:     SetupModeAPIKey,
+		Resolved: resolved,
+	}, nil); err != nil {
+		t.Fatalf("WriteManagedACPConfig() error = %v", err)
+	}
+	configBytes, err := os.ReadFile(filepath.Join(resolved.HermesHome, "config.yaml")) //nolint:gosec // test path is under t.TempDir.
+	if err != nil {
+		t.Fatalf("read Hermes config: %v", err)
+	}
+	if content := string(configBytes); !strings.Contains(content, `provider: "gemini"`) ||
+		!strings.Contains(content, `default: "gemini-3.5-flash"`) ||
+		strings.Contains(content, "AIza-test-key") {
+		t.Fatalf("Hermes config content =\n%s", content)
+	}
+	envBytes, err := os.ReadFile(filepath.Join(resolved.HermesHome, ".env")) //nolint:gosec // test path is under t.TempDir.
+	if err != nil {
+		t.Fatalf("read Hermes env: %v", err)
+	}
+	if got := string(envBytes); !strings.Contains(got, `GOOGLE_API_KEY='AIza-test-key'`) {
+		t.Fatalf("Hermes env content = %q", got)
+	}
+
+	t.Setenv("GOOGLE_API_KEY", "host-google")
+	t.Setenv("OPENROUTER_API_KEY", "host-openrouter")
+	t.Setenv("HERMES_TRACE", "host-hermes")
+	captureEnvPath := filepath.Join(root, "fake-agent-env.json")
+	client := newTestBridgeClient(t, root)
+	agentPath := writeFakeAgentScript(t, root)
+	runner := NewRunner(nil, testWorkspace{
+		client: client,
+		info: bridge.WorkspaceInfo{
+			Backend:        bridge.WorkspaceBackendLocal,
+			DefaultWorkDir: root,
+			LocalDataRoot:  localDataRoot,
+		},
+	})
+
+	sess, err := runner.StartSession(context.Background(), StartRequest{
+		AgentID:     acpprofile.AgentHermesID,
+		BotID:       "bot-hermes",
+		ProjectPath: "/data/project",
+		Command:     agentPath,
+		Env: []string{
+			"GOOGLE_API_KEY=explicit-google",
+			"OPENROUTER_API_KEY=explicit-openrouter",
+			"HERMES_HOME=/host/hermes",
+			"HERMES_TRACE=explicit-hermes",
+			"MEMOH_ACP_FAKE_AGENT_CAPTURE_ENV_FILE=" + captureEnvPath,
+			"MEMOH_ACP_FAKE_AGENT_VALIDATE_HERMES_HOME=1",
+			"MEMOH_ACP_FAKE_AGENT_EXPECT_HERMES_PROVIDER=gemini",
+			"MEMOH_ACP_FAKE_AGENT_EXPECT_HERMES_MODEL=gemini-3.5-flash",
+			"MEMOH_ACP_FAKE_AGENT_EXPECT_HERMES_ENV_KEY=GOOGLE_API_KEY",
+			"MEMOH_ACP_FAKE_AGENT_EXPECT_HERMES_SECRET=AIza-test-key",
+		},
+		UnsetEnv:  HermesManagedUnsetEnvKeys(),
+		Resolved:  &resolved,
+		SetupMode: SetupModeAPIKey,
+		Timeout:   10 * time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	defer func() { _ = sess.Close() }()
+
+	result, err := sess.Prompt(context.Background(), "touch the project")
+	if err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	if !strings.Contains(result.Text, "read: hello hermes") || !strings.Contains(result.Text, "term: terminal-ok") {
+		t.Fatalf("result text = %q, want fake agent file and terminal output", result.Text)
+	}
+	if got, err := os.ReadFile(filepath.Join(project, "output.txt")); err != nil { //nolint:gosec // test path is under t.TempDir.
+		t.Fatalf("read output file: %v", err)
+	} else if string(got) != "written by fake agent\n" {
+		t.Fatalf("output file = %q", got)
+	}
+
+	rawCaptured, err := os.ReadFile(captureEnvPath) //nolint:gosec // test path is under t.TempDir.
+	if err != nil {
+		t.Fatalf("read captured fake agent env: %v", err)
+	}
+	var captured map[string]string
+	if err := json.Unmarshal(rawCaptured, &captured); err != nil {
+		t.Fatalf("decode captured fake agent env: %v", err)
+	}
+	if got := captured["HERMES_HOME"]; got != resolved.HermesHome {
+		t.Fatalf("fake agent HERMES_HOME = %q, want %q; captured=%#v", got, resolved.HermesHome, captured)
+	}
+	for _, key := range []string{"GOOGLE_API_KEY", "OPENROUTER_API_KEY", "MEMOH_HERMES_API_KEY", "GEMINI_API_KEY", "HERMES_TRACE"} {
+		if value, ok := captured[key]; ok {
+			t.Fatalf("fake agent captured blocked env %s=%q in %#v", key, value, captured)
+		}
 	}
 }
 
@@ -578,6 +714,101 @@ func TestRunnerStartSessionInjectsHTTPToolServer(t *testing.T) {
 	}
 }
 
+func TestRunnerStartSessionSkipsHTTPToolServerWithoutCapability(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	if err := os.MkdirAll(project, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	capturePath := filepath.Join(root, "mcp-servers.json")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_CAPTURE_MCP_FILE", capturePath)
+
+	client := newTestBridgeClient(t, root)
+	agentPath := writeFakeAgentScript(t, root)
+	runner := NewRunner(nil, testWorkspace{
+		client: client,
+		info: bridge.WorkspaceInfo{
+			Backend:        bridge.WorkspaceBackendLocal,
+			DefaultWorkDir: root,
+		},
+	})
+
+	sess, err := runner.StartSession(context.Background(), StartRequest{
+		AgentID:     acpprofile.AgentCodexID,
+		BotID:       "bot-1",
+		ProjectPath: "/data/project",
+		Command:     agentPath,
+		Timeout:     10 * time.Second,
+		ToolHTTPURL: "http://memoh.test/bots/bot-1/tools",
+		ToolHTTPHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"1","result":{}}`))
+		}),
+		ToolSession: ToolSessionContext{BotID: "bot-1"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	defer func() { _ = sess.Close() }()
+
+	servers := readCapturedMCPServers(t, capturePath)
+	if len(servers) != 0 {
+		t.Fatalf("captured MCP servers = %#v, want none without capability", servers)
+	}
+}
+
+func TestRunnerStartSessionInjectsHTTPToolServerForHermesCapabilityQuirk(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	if err := os.MkdirAll(project, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	capturePath := filepath.Join(root, "mcp-servers.json")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_CAPTURE_MCP_FILE", capturePath)
+
+	client := newTestBridgeClient(t, root)
+	agentPath := writeFakeAgentScript(t, root)
+	runner := NewRunner(nil, testWorkspace{
+		client: client,
+		info: bridge.WorkspaceInfo{
+			Backend:        bridge.WorkspaceBackendLocal,
+			DefaultWorkDir: root,
+		},
+	})
+
+	sess, err := runner.StartSession(context.Background(), StartRequest{
+		AgentID:     acpprofile.AgentHermesID,
+		BotID:       "bot-hermes",
+		ProjectPath: "/data/project",
+		Command:     agentPath,
+		SetupMode:   SetupModeSelf,
+		Timeout:     10 * time.Second,
+		ToolHTTPURL: "http://memoh.test/bots/bot-hermes/tools",
+		ToolHTTPHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"1","result":{}}`))
+		}),
+		ToolSession: ToolSessionContext{
+			BotID:       "bot-hermes",
+			SessionID:   "session-hermes",
+			SessionType: "acp_agent",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	defer func() { _ = sess.Close() }()
+
+	servers := readCapturedMCPServers(t, capturePath)
+	if len(servers) != 1 {
+		t.Fatalf("captured MCP servers = %#v, want one Memoh tools server for Hermes", servers)
+	}
+	rawURL, _ := servers[0]["url"].(string)
+	if servers[0]["type"] != "http" || servers[0]["name"] != "Memoh Tools" || !strings.HasPrefix(rawURL, "http://127.0.0.1:") {
+		t.Fatalf("captured MCP server = %#v", servers[0])
+	}
+}
+
 func TestRedactedToolHTTPURLHidesRouteSecrets(t *testing.T) {
 	tests := []struct {
 		name string
@@ -607,6 +838,19 @@ func TestRedactedToolHTTPURLHidesRouteSecrets(t *testing.T) {
 			}
 		})
 	}
+}
+
+func readCapturedMCPServers(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(path) //nolint:gosec // test path is under t.TempDir.
+	if err != nil {
+		t.Fatalf("read captured MCP servers: %v", err)
+	}
+	var servers []map[string]any
+	if err := json.Unmarshal(raw, &servers); err != nil {
+		t.Fatalf("decode captured MCP servers: %v", err)
+	}
+	return servers
 }
 
 func hasCapturedHeader(headers []any, name, value string) bool {
@@ -1055,6 +1299,8 @@ func TestCallbackToolApprovalRejectionErrorsUsePromptToolOutputLimit(t *testing.
 				nil,
 				nil,
 				true,
+				nil,
+				false,
 				approval,
 				nil,
 				ToolSessionContext{
@@ -1652,6 +1898,8 @@ func TestCreateTerminalUsesMemohToolApproval(t *testing.T) {
 		time.Second,
 		nil,
 		nil,
+		false,
+		nil,
 		true,
 		approval,
 		nil,
@@ -1724,6 +1972,8 @@ func TestCreateTerminalRejectedByMemohToolApprovalDoesNotStartTerminal(t *testin
 		"/data",
 		time.Second,
 		nil,
+		nil,
+		false,
 		nil,
 		true,
 		approval,
@@ -1799,6 +2049,8 @@ func TestWriteTextFileUsesMemohToolApproval(t *testing.T) {
 		time.Second,
 		nil,
 		nil,
+		false,
+		nil,
 		true,
 		approval,
 		nil,
@@ -1848,6 +2100,8 @@ func TestWriteTextFileWithoutToolSessionIsRejectedWhenApprovalEnabled(t *testing
 		"/data",
 		time.Second,
 		nil,
+		nil,
+		false,
 		nil,
 		true,
 		&fakeACPToolApproval{decision: toolapproval.Request{Status: toolapproval.StatusApproved}},
@@ -2052,6 +2306,8 @@ func TestRequestPermissionGrantDedupesWriteTextFileApproval(t *testing.T) {
 		time.Second,
 		nil,
 		nil,
+		false,
+		nil,
 		true,
 		approval,
 		nil,
@@ -2119,6 +2375,8 @@ func TestRequestPermissionGrantDedupesCreateTerminalApproval(t *testing.T) {
 		time.Second,
 		nil,
 		nil,
+		false,
+		nil,
 		true,
 		approval,
 		nil,
@@ -2179,6 +2437,8 @@ func TestRequestPermissionGrantDedupesTerminalWithCwdAndArgs(t *testing.T) {
 		"/data",
 		time.Second,
 		nil,
+		nil,
+		false,
 		nil,
 		true,
 		approval,
@@ -2561,11 +2821,83 @@ func TestFakeACPAgentHelper(_ *testing.T) {
 	if os.Getenv("MEMOH_ACP_FAKE_AGENT") != "1" {
 		return
 	}
+	if err := captureFakeAgentEnv(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	if err := validateFakeAgentHermesHome(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 	agent := &fakeACPAgent{}
 	conn := acp.NewAgentSideConnection(agent, os.Stdout, os.Stdin)
 	agent.conn = conn
 	<-conn.Done()
 	os.Exit(0)
+}
+
+func captureFakeAgentEnv() error {
+	path := os.Getenv("MEMOH_ACP_FAKE_AGENT_CAPTURE_ENV_FILE")
+	if path == "" {
+		return nil
+	}
+	captured := map[string]string{}
+	for _, key := range []string{
+		"HERMES_HOME",
+		"HERMES_TRACE",
+		"GOOGLE_API_KEY",
+		"GEMINI_API_KEY",
+		"OPENROUTER_API_KEY",
+		"OPENAI_API_KEY",
+		"MEMOH_HERMES_API_KEY",
+	} {
+		if value, ok := os.LookupEnv(key); ok {
+			captured[key] = value
+		}
+	}
+	raw, err := json.Marshal(captured)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, raw, 0o600) //nolint:gosec // test helper writes to env-provided temp path.
+}
+
+func validateFakeAgentHermesHome() error {
+	if os.Getenv("MEMOH_ACP_FAKE_AGENT_VALIDATE_HERMES_HOME") != "1" {
+		return nil
+	}
+	home := os.Getenv("HERMES_HOME")
+	if strings.TrimSpace(home) == "" {
+		return errors.New("fake Hermes agent missing HERMES_HOME")
+	}
+	config, err := os.ReadFile(filepath.Join(home, "config.yaml")) //nolint:gosec // test helper reads env-provided temp path.
+	if err != nil {
+		return fmt.Errorf("fake Hermes agent read config.yaml: %w", err)
+	}
+	env, err := os.ReadFile(filepath.Join(home, ".env")) //nolint:gosec // test helper reads env-provided temp path.
+	if err != nil {
+		return fmt.Errorf("fake Hermes agent read .env: %w", err)
+	}
+	configText := string(config)
+	for _, item := range []string{
+		`provider: "` + os.Getenv("MEMOH_ACP_FAKE_AGENT_EXPECT_HERMES_PROVIDER") + `"`,
+		`default: "` + os.Getenv("MEMOH_ACP_FAKE_AGENT_EXPECT_HERMES_MODEL") + `"`,
+	} {
+		if !strings.Contains(configText, item) {
+			return fmt.Errorf("fake Hermes agent config missing %q", item)
+		}
+	}
+	if secret := os.Getenv("MEMOH_ACP_FAKE_AGENT_EXPECT_HERMES_SECRET"); secret != "" && strings.Contains(configText, secret) {
+		return errors.New("fake Hermes agent config leaked secret")
+	}
+	envKey := os.Getenv("MEMOH_ACP_FAKE_AGENT_EXPECT_HERMES_ENV_KEY")
+	if envKey == "" {
+		return errors.New("fake Hermes agent expected env key is empty")
+	}
+	if !strings.Contains(string(env), envKey+"=") {
+		return fmt.Errorf("fake Hermes agent .env missing %s", envKey)
+	}
+	return nil
 }
 
 type fakeACPAgent struct {

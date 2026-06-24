@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/agent/sessionmode"
 	"github.com/memohai/memoh/internal/userinput"
 )
 
@@ -115,5 +117,12 @@ func (*AskUserProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 }
 
 func canExposeAskUserTool(session SessionContext) bool {
-	return session.CanAskUser()
+	if session.CanAskUser() {
+		return true
+	}
+	// ACP agents such as Hermes discover MCP tools before a prompt is active,
+	// then cache that tool surface for later prompt turns. Let discovery see
+	// ask_user for interactive ACP sessions; execution still requires
+	// CanRequestUserInput so non-active/background calls cannot hang.
+	return session.CanListUserInput && strings.EqualFold(strings.TrimSpace(session.SessionType), sessionmode.ACPAgent)
 }

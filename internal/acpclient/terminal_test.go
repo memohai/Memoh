@@ -128,7 +128,7 @@ func TestCreateTerminalHonorsOutputByteLimitRequest(t *testing.T) {
 			t.Parallel()
 
 			root := t.TempDir()
-			manager := newTerminalManager(context.Background(), newTestBridgeClient(t, root), "/data", "/data", 5, nil, true, nil)
+			manager := newTerminalManager(context.Background(), newTestBridgeClient(t, root), "/data", "/data", 5, nil, true, nil, false, nil)
 			term, err := manager.CreateTerminal(context.Background(), acp.CreateTerminalRequest{
 				Command:         "printf",
 				Args:            []string{"HEAD" + strings.Repeat("x", 5000) + "TAIL"},

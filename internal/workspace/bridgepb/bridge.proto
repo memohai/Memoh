@@ -69,6 +69,8 @@ message ExecInput {
   bytes stdin_data = 5;
   bool pty = 6;
   TerminalResize resize = 7;
+  bool clean_env = 8;
+  repeated string unset_env = 9;
 }
 
 message TerminalResize {

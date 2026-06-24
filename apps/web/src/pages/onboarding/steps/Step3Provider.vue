@@ -20,7 +20,22 @@ import ProviderIcon from '@/components/provider-icon/index.vue'
 import CreateModel from '@/components/create-model/index.vue'
 import ModelItem from '@/pages/providers/components/model-item.vue'
 import { onboardingProviderPresets as providerPresets, type ProviderPreset } from '@/constants/provider-presets'
-import { acpAgentIcon, defaultSetupMode, findMissingRequiredManagedField, normalizeACPAgentID } from '@/utils/acp'
+import {
+  HERMES_CUSTOM_MODEL_VALUE,
+  HERMES_PROVIDER_PRESETS,
+  acpAgentIcon,
+  defaultSetupMode,
+  ensureHermesManagedDefaults,
+  findMissingRequiredManagedField,
+  hermesAPIKeyPlaceholder,
+  hermesDefaultModel,
+  hermesModelPresets,
+  hermesModelSelectValue,
+  hermesProviderValue,
+  isHermesCustomProvider,
+  isHermesPresetModel,
+  normalizeACPAgentID,
+} from '@/utils/acp'
 import { canCreateLocalWorkspace } from '@/utils/desktop-runtime'
 import { useStepTransition, nextFrame } from '../useStepTransition'
 import { safeSessionGet, safeSessionSet } from '@/utils/safe-storage'
@@ -147,6 +162,9 @@ async function openAcpForm(profile: AcpprofilePublicProfile) {
   // Clean container workspaces have no credentials, so they default to api_key.
   const preferred = allowLocalWorkspaceCreate.value ? 'self' : 'api_key'
   acpSetupMode.value = modes.includes(preferred) ? preferred : (modes[0] ?? defaultSetupMode(profile))
+  if (isAcpHermesProfile(profile) && acpSetupMode.value === 'api_key') {
+    ensureHermesManagedDefaults(acpManaged)
+  }
   listVisible.value = false
   setTimeout(() => {
     mode.value = 'acp'
@@ -175,11 +193,19 @@ function acpSetupModeLabel(modeValue: string, profile: AcpprofilePublicProfile):
   return modeValue
 }
 
+function setAcpSetupMode(modeValue: string) {
+  acpSetupMode.value = modeValue
+  if (selectedAcpProfile.value && isAcpHermesProfile(selectedAcpProfile.value) && modeValue === 'api_key') {
+    ensureHermesManagedDefaults(acpManaged)
+  }
+}
+
 function acpVisibleFields(profile: AcpprofilePublicProfile): AcpprofileManagedField[] {
   if (acpSetupMode.value !== 'api_key') return []
   return (profile.managed_fields ?? []).filter((field) => {
     const id = normalizeACPAgentID(field.id)
     if (!id || id === 'provider_id' || id === 'oauth_token') return false
+    if (isAcpHermesProfile(profile) && id === 'base_url') return isHermesCustomProvider(acpManaged.provider)
     return true
   })
 }
@@ -190,10 +216,62 @@ function acpInputType(type: string | undefined): string {
   return 'text'
 }
 
+function acpManagedPlaceholder(field: AcpprofileManagedField): string | undefined {
+  if (isAcpHermesProfile(selectedAcpProfile.value) && normalizeACPAgentID(field.id) === 'api_key') {
+    return hermesAPIKeyPlaceholder(acpHermesProvider(), field.placeholder)
+  }
+  return field.placeholder
+}
+
 function setAcpManaged(fieldID: string | undefined, value: string) {
   const id = normalizeACPAgentID(fieldID)
   if (!id) return
   acpManaged[id] = value
+}
+
+function isAcpHermesProfile(profile: AcpprofilePublicProfile | null | undefined): boolean {
+  return normalizeACPAgentID(profile?.id) === 'hermes'
+}
+
+function isAcpHermesProviderField(field: AcpprofileManagedField): boolean {
+  return isAcpHermesProfile(selectedAcpProfile.value) && normalizeACPAgentID(field.id) === 'provider'
+}
+
+function isAcpHermesModelField(field: AcpprofileManagedField): boolean {
+  return isAcpHermesProfile(selectedAcpProfile.value) && normalizeACPAgentID(field.id) === 'model'
+}
+
+function acpHermesProvider(): string {
+  return hermesProviderValue(acpManaged.provider)
+}
+
+function acpHermesModelOptions() {
+  return hermesModelPresets(acpHermesProvider())
+}
+
+function acpHermesModelSelect(): string {
+  return hermesModelSelectValue(acpHermesProvider(), acpManaged.model)
+}
+
+function acpHermesUsingCustomModel(): boolean {
+  return acpHermesModelSelect() === HERMES_CUSTOM_MODEL_VALUE
+}
+
+function setAcpHermesProvider(value: string) {
+  const provider = hermesProviderValue(value)
+  acpManaged.provider = provider
+  acpManaged.model = hermesDefaultModel(provider)
+  if (!isHermesCustomProvider(provider)) acpManaged.base_url = ''
+}
+
+function setAcpHermesModel(value: string) {
+  if (value === HERMES_CUSTOM_MODEL_VALUE) {
+    if (isHermesPresetModel(acpHermesProvider(), acpManaged.model)) {
+      acpManaged.model = ''
+    }
+  } else {
+    acpManaged.model = value
+  }
 }
 
 function saveAcpAndNext() {
@@ -677,7 +755,7 @@ onMounted(() => {
                 type="button"
                 class="min-h-10 rounded-lg border px-3 py-2 text-sm font-medium leading-tight transition-colors"
                 :class="acpSetupMode === m ? 'border-foreground bg-foreground text-background' : 'border-border bg-background text-foreground hover:bg-accent/40'"
-                @click="acpSetupMode = m"
+                @click="setAcpSetupMode(m)"
               >
                 {{ acpSetupModeLabel(m, selectedAcpProfile) }}
               </button>
@@ -694,14 +772,66 @@ onMounted(() => {
             <Label class="mb-2 block text-sm font-medium">
               {{ field.label || field.id }}
             </Label>
+            <Select
+              v-if="isAcpHermesProviderField(field)"
+              :model-value="acpHermesProvider()"
+              @update:model-value="(value) => setAcpHermesProvider(String(value))"
+            >
+              <SelectTrigger class="w-full">
+                <SelectValue :placeholder="t('bots.settings.acpHermesProviderPlaceholder')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="provider in HERMES_PROVIDER_PRESETS"
+                  :key="provider.value"
+                  :value="provider.value"
+                >
+                  {{ t(provider.labelKey) }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <template v-else-if="isAcpHermesModelField(field)">
+              <Select
+                :model-value="acpHermesModelSelect()"
+                @update:model-value="(value) => setAcpHermesModel(String(value))"
+              >
+                <SelectTrigger class="w-full">
+                  <SelectValue :placeholder="t('bots.settings.acpHermesModelPlaceholder')" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    v-for="model in acpHermesModelOptions()"
+                    :key="model.value"
+                    :value="model.value"
+                  >
+                    {{ model.label }}
+                  </SelectItem>
+                  <SelectItem :value="HERMES_CUSTOM_MODEL_VALUE">
+                    {{ t('bots.settings.acpHermesCustomModel') }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <Input
+                v-if="acpHermesUsingCustomModel()"
+                class="mt-2"
+                :model-value="acpManaged.model || ''"
+                autocomplete="off"
+                autocapitalize="off"
+                autocorrect="off"
+                spellcheck="false"
+                :placeholder="t('bots.settings.acpHermesCustomModelPlaceholder')"
+                @update:model-value="(val) => setAcpManaged(field.id, String(val ?? ''))"
+              />
+            </template>
             <Input
+              v-else
               :model-value="acpManaged[field.id || ''] || ''"
               :type="acpInputType(field.type)"
               autocomplete="off"
               autocapitalize="off"
               autocorrect="off"
               spellcheck="false"
-              :placeholder="field.placeholder"
+              :placeholder="acpManagedPlaceholder(field)"
               @update:model-value="(val) => setAcpManaged(field.id, String(val ?? ''))"
             />
           </div>
@@ -719,7 +849,7 @@ onMounted(() => {
             class="rounded-lg border border-border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground leading-relaxed transition-all duration-[200ms] ease-out delay-[40ms]"
             :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
           >
-            {{ t('onboarding.provider.acp.selfHint') }}
+            {{ isAcpHermesProfile(selectedAcpProfile) ? t('bots.settings.acpHermesSelfModeHint') : t('onboarding.provider.acp.selfHint') }}
           </div>
         </div>
 

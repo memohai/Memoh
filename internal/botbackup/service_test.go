@@ -7,16 +7,23 @@ import (
 	"compress/gzip"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	_ "modernc.org/sqlite"
 
+	"github.com/memohai/memoh/internal/acpprofile"
+	"github.com/memohai/memoh/internal/bots"
 	sqlitestore "github.com/memohai/memoh/internal/db/sqlite/store"
 	modelpkg "github.com/memohai/memoh/internal/models"
+	settingspkg "github.com/memohai/memoh/internal/settings"
 )
 
 func TestReadZipEntriesRejectsZipSlip(t *testing.T) {
@@ -143,6 +150,249 @@ func TestWriteJSONPreservesSensitiveValues(t *testing.T) {
 	}
 }
 
+func TestExportScrubsACPManagedSecretsFromProfile(t *testing.T) {
+	ctx := context.Background()
+	conn, queries := newBotBackupExportTestDB(t)
+	const ownerID = "00000000-0000-0000-0000-000000000101"
+	const botID = "00000000-0000-0000-0000-000000000102"
+	metadata := `{"acp":{"agents":{"hermes":{"enabled":true,"setup_mode":"api_key","managed":{"provider":"openrouter","model":"nousresearch/hermes","api_key":"secret-value"}}}}}`
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO users (id, username, email, role)
+VALUES (?, ?, ?, ?)`, ownerID, "owner", "owner@example.com", "member"); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO bots (id, owner_user_id, type, name, display_name, is_active, status, metadata)
+VALUES (?, ?, 'personal', ?, ?, 1, 'ready', ?)`, botID, ownerID, "hermes-bot", "Hermes Bot", metadata); err != nil {
+		t.Fatalf("insert bot: %v", err)
+	}
+
+	service := New(Params{
+		Queries:  queries,
+		Bots:     bots.NewService(slog.New(slog.DiscardHandler), queries),
+		Settings: settingspkg.NewService(slog.New(slog.DiscardHandler), queries, nil, nil),
+	})
+	var out bytes.Buffer
+	if err := service.Export(ctx, botID, ExportOptions{Sections: []Section{SectionProfile}}, &out); err != nil {
+		t.Fatalf("Export() error = %v", err)
+	}
+
+	entries, err := readZipEntries(out.Bytes())
+	if err != nil {
+		t.Fatalf("readZipEntries() error = %v", err)
+	}
+	profileRaw := string(entries["bot/profile.json"].data)
+	if strings.Contains(profileRaw, "secret-value") || strings.Contains(profileRaw, `"api_key":`) {
+		t.Fatalf("bot/profile.json leaked ACP secret: %s", profileRaw)
+	}
+	var manifest Manifest
+	if err := json.Unmarshal(entries[ManifestPath].data, &manifest); err != nil {
+		t.Fatalf("unmarshal manifest: %v", err)
+	}
+	if !containsWarning(manifest.Warnings, "ACP managed secrets were excluded") {
+		t.Fatalf("manifest warnings = %v, want ACP secret warning", manifest.Warnings)
+	}
+}
+
+func TestScrubImportedProfileACPSecrets(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		warnings     []string
+		wantWarnings []string
+	}{
+		{
+			name:         "adds warning",
+			wantWarnings: []string{acpManagedSecretsWarning},
+		},
+		{
+			name:         "dedupes warning",
+			warnings:     []string{acpManagedSecretsWarning},
+			wantWarnings: []string{acpManagedSecretsWarning},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := &importState{warnings: append([]string(nil), tc.warnings...)}
+			profile := bots.Bot{
+				Metadata: map[string]any{
+					"acp": map[string]any{
+						"agents": map[string]any{
+							"hermes": map[string]any{
+								"enabled":    true,
+								"setup_mode": "api_key",
+								"managed": map[string]any{
+									"provider": "openrouter",
+									"model":    "nousresearch/hermes",
+									"api_key":  "secret-value",
+								},
+							},
+						},
+					},
+				},
+			}
+
+			scrubbed := scrubImportedProfileACPSecrets(profile, state)
+			raw, err := json.Marshal(scrubbed.Metadata)
+			if err != nil {
+				t.Fatalf("marshal metadata: %v", err)
+			}
+			if strings.Contains(string(raw), "secret-value") || strings.Contains(string(raw), `"api_key":`) {
+				t.Fatalf("imported profile kept ACP secret: %s", raw)
+			}
+			if len(state.warnings) != len(tc.wantWarnings) {
+				t.Fatalf("warnings = %v, want %v", state.warnings, tc.wantWarnings)
+			}
+			for i := range tc.wantWarnings {
+				if state.warnings[i] != tc.wantWarnings[i] {
+					t.Fatalf("warnings = %v, want %v", state.warnings, tc.wantWarnings)
+				}
+			}
+		})
+	}
+}
+
+func TestImportOverwriteScrubsACPSecretsAndClosesRuntimes(t *testing.T) {
+	ctx := context.Background()
+	conn, queries := newBotBackupExportTestDB(t)
+	const ownerID = "00000000-0000-0000-0000-000000000201"
+	const targetBotID = "00000000-0000-0000-0000-000000000202"
+	const sourceBotID = "00000000-0000-0000-0000-000000000203"
+	targetMetadata := `{"acp":{"agents":{"hermes":{"enabled":true,"setup_mode":"api_key","managed":{"provider":"openrouter","model":"target-model","api_key":"target-secret","base_url":"https://target.example"}}}}}`
+	sourceProfile := bots.Bot{
+		ID:          sourceBotID,
+		DisplayName: "Imported Hermes",
+		Timezone:    "UTC",
+		IsActive:    true,
+		Metadata: map[string]any{
+			"acp": map[string]any{
+				"agents": map[string]any{
+					"hermes": map[string]any{
+						"enabled":    true,
+						"setup_mode": "api_key",
+						"managed": map[string]any{
+							"provider": "openrouter",
+							"model":    "source-model",
+							"api_key":  "source-secret",
+						},
+					},
+				},
+			},
+		},
+	}
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO users (id, username, email, role)
+VALUES (?, ?, ?, ?)`, ownerID, "owner", "owner@example.com", "member"); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO bots (id, owner_user_id, type, name, display_name, is_active, status, metadata)
+VALUES (?, ?, 'personal', ?, ?, 1, 'ready', ?)`, targetBotID, ownerID, "target-hermes", "Target Hermes", targetMetadata); err != nil {
+		t.Fatalf("insert target bot: %v", err)
+	}
+
+	closer := &recordingACPRuntimeCloser{}
+	service := New(Params{
+		Queries:     queries,
+		Bots:        bots.NewService(slog.New(slog.DiscardHandler), queries),
+		ACPRuntimes: closer,
+	})
+	result, err := service.Import(ctx, ownerID, makeProfileImportBundle(t, sourceProfile), ImportOptions{
+		Mode:        ImportModeOverwrite,
+		TargetBotID: targetBotID,
+		Sections: map[Section]ImportStrategy{
+			SectionProfile: StrategyMerge,
+		},
+	}, "")
+	if err != nil {
+		t.Fatalf("Import() error = %v", err)
+	}
+	if result.BotID != targetBotID || result.Created {
+		t.Fatalf("Import() result = %+v, want overwrite target", result)
+	}
+	if !containsWarning(result.Warnings, "ACP managed secrets were excluded") {
+		t.Fatalf("warnings = %v, want ACP secret warning", result.Warnings)
+	}
+	var rawMetadata string
+	if err := conn.QueryRowContext(ctx, `SELECT metadata FROM bots WHERE id = ?`, targetBotID).Scan(&rawMetadata); err != nil {
+		t.Fatalf("select target metadata: %v", err)
+	}
+	if strings.Contains(rawMetadata, "target-secret") || strings.Contains(rawMetadata, "source-secret") {
+		t.Fatalf("overwrite import retained ACP secret metadata: %s", rawMetadata)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(rawMetadata), &metadata); err != nil {
+		t.Fatalf("unmarshal target metadata: %v", err)
+	}
+	setup := acpprofile.ParseAgentSetup(metadata, acpprofile.AgentHermesID)
+	if _, ok := setup.Managed["api_key"]; ok {
+		t.Fatalf("overwrite import retained managed api_key: %s", rawMetadata)
+	}
+	if got := setup.Managed["model"]; got != "source-model" {
+		t.Fatalf("imported Hermes model = %q, want source-model", got)
+	}
+	if !closer.hasCall(targetBotID, acpprofile.AgentHermesID) {
+		t.Fatalf("runtime closer calls = %#v, missing Hermes close for target bot", closer.calls)
+	}
+}
+
+type recordingACPRuntimeCloser struct {
+	calls []string
+}
+
+func (r *recordingACPRuntimeCloser) CloseBotAgentRuntimes(botID, agentID string) error {
+	r.calls = append(r.calls, botID+"/"+agentID)
+	return nil
+}
+
+func (r *recordingACPRuntimeCloser) hasCall(botID, agentID string) bool {
+	want := botID + "/" + agentID
+	for _, call := range r.calls {
+		if call == want {
+			return true
+		}
+	}
+	return false
+}
+
+func makeProfileImportBundle(t *testing.T, profile bots.Bot) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	profileRaw, err := json.Marshal(profile)
+	if err != nil {
+		t.Fatalf("marshal profile: %v", err)
+	}
+	w, err := zw.Create("bot/profile.json")
+	if err != nil {
+		t.Fatalf("create profile entry: %v", err)
+	}
+	if _, err := w.Write(profileRaw); err != nil {
+		t.Fatalf("write profile entry: %v", err)
+	}
+	manifestRaw, err := json.Marshal(Manifest{
+		SchemaVersion: BackupSchemaVersion,
+		SourceBotID:   profile.ID,
+		SourceBotName: profile.DisplayName,
+		Entries: []ManifestEntry{{
+			Path: "bot/profile.json",
+			Type: "bot_profile",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	w, err = zw.Create(ManifestPath)
+	if err != nil {
+		t.Fatalf("create manifest entry: %v", err)
+	}
+	if _, err := w.Write(manifestRaw); err != nil {
+		t.Fatalf("write manifest entry: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	return buf.Bytes()
+}
+
 func newBotBackupModelTestDB(t *testing.T) (*sql.DB, *sqlitestore.Queries) {
 	t.Helper()
 	conn, err := sql.Open("sqlite", ":memory:")
@@ -151,6 +401,34 @@ func newBotBackupModelTestDB(t *testing.T) (*sql.DB, *sqlitestore.Queries) {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	execBotBackupModelSchema(t, conn)
+	store, err := sqlitestore.New(conn)
+	if err != nil {
+		t.Fatalf("new sqlite store: %v", err)
+	}
+	return conn, sqlitestore.NewQueries(store)
+}
+
+func newBotBackupExportTestDB(t *testing.T) (*sql.DB, *sqlitestore.Queries) {
+	t.Helper()
+	conn, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	migrationPaths, err := filepath.Glob(filepath.Join("..", "..", "db", "sqlite", "migrations", "*.up.sql"))
+	if err != nil {
+		t.Fatalf("glob sqlite migrations: %v", err)
+	}
+	sort.Strings(migrationPaths)
+	for _, schemaPath := range migrationPaths {
+		schema, err := os.ReadFile(schemaPath) //nolint:gosec // test fixture path
+		if err != nil {
+			t.Fatalf("read sqlite schema %s: %v", schemaPath, err)
+		}
+		if _, err := conn.ExecContext(context.Background(), string(schema)); err != nil {
+			t.Fatalf("exec sqlite schema %s: %v", schemaPath, err)
+		}
+	}
 	store, err := sqlitestore.New(conn)
 	if err != nil {
 		t.Fatalf("new sqlite store: %v", err)
@@ -208,6 +486,15 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`,
 	if err != nil {
 		t.Fatalf("insert botbackup provider: %v", err)
 	}
+}
+
+func containsWarning(warnings []string, want string) bool {
+	for _, item := range warnings {
+		if strings.Contains(item, want) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestWorkspaceStoredVerbatimAsTarGz(t *testing.T) {

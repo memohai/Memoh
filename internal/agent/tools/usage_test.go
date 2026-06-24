@@ -575,8 +575,11 @@ func TestAskUserProviderUsageGatesAskUser(t *testing.T) {
 	}
 
 	got = provider.Usage(context.Background(), SessionContext{SessionType: sessionmode.ACPAgent, CanListUserInput: true}, availableToolsForTest(ToolAskUser()))
-	if got != "" {
-		t.Fatalf("Usage with ACP list-only user input discovery = %q, want empty", got)
+	assertUsageItemsAreBulleted(t, got)
+	for _, want := range []string{"`ask_user`", "multiple-choice question", "allow_custom"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Usage with ACP list-only discovery should contain %q, got:\n%s", want, got)
+		}
 	}
 
 	got = provider.Usage(context.Background(), SessionContext{SessionType: sessionmode.Schedule, CanListUserInput: true}, availableToolsForTest(ToolAskUser()))
@@ -622,8 +625,8 @@ func TestAskUserProviderUsageGatesAskUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tools with ACP list-only user input discovery: %v", err)
 	}
-	if len(listOnlyACPTools) != 0 {
-		t.Fatalf("ACP list-only tools = %#v, want none", listOnlyACPTools)
+	if len(listOnlyACPTools) != 1 || listOnlyACPTools[0].Name != ToolAskUser().String() {
+		t.Fatalf("ACP list-only tools = %#v, want ask_user", listOnlyACPTools)
 	}
 
 	backgroundTools, err := provider.Tools(context.Background(), SessionContext{SessionType: sessionmode.Schedule, CanRequestUserInput: true})

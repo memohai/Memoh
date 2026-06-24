@@ -22,6 +22,31 @@ func TestListIncludesClaudeCode(t *testing.T) {
 	}
 }
 
+func TestListIncludesHermes(t *testing.T) {
+	profile, ok := Lookup(AgentHermesID)
+	if !ok {
+		t.Fatalf("Hermes profile was not registered")
+	}
+	if profile.Command != "hermes-acp" || profile.LocalCommand != "hermes-acp" {
+		t.Fatalf("Hermes commands = %q / %q", profile.Command, profile.LocalCommand)
+	}
+	if len(profile.ManagedFields) != 4 {
+		t.Fatalf("Hermes managed fields = %#v", profile.ManagedFields)
+	}
+	if len(profile.SetupModes) != 2 || profile.SetupModes[0] != setupModeSelf || profile.SetupModes[1] != setupModeAPIKey {
+		t.Fatalf("Hermes setup modes = %#v", profile.SetupModes)
+	}
+	if len(profile.SupportedBackends) != 2 || profile.SupportedBackends[0] != "local" || profile.SupportedBackends[1] != "container" {
+		t.Fatalf("Hermes supported backends = %#v", profile.SupportedBackends)
+	}
+	if !ShouldForceHTTPMCPServer(AgentHermesID) {
+		t.Fatalf("Hermes should force HTTP MCP server injection until upstream advertises mcpCapabilities.http")
+	}
+	if ShouldForceHTTPMCPServer(AgentCodexID) {
+		t.Fatalf("Codex should rely on advertised HTTP MCP capability")
+	}
+}
+
 func TestMetadataAgentEnabled(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -58,6 +83,44 @@ func TestMetadataAgentEnabled(t *testing.T) {
 				t.Fatalf("MetadataAgentEnabled() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseAgentSetupNormalizesLegacyManagedMode(t *testing.T) {
+	apiKeySetup := ParseAgentSetup(map[string]any{
+		MetadataKeyACP: map[string]any{
+			"agents": map[string]any{
+				AgentHermesID: map[string]any{
+					"enabled":    true,
+					"setup_mode": "managed",
+					"managed": map[string]any{
+						"provider": "gemini",
+						"model":    "gemini-3.5-flash",
+						"api_key":  "AIza-test",
+					},
+				},
+			},
+		},
+	}, AgentHermesID)
+	if apiKeySetup.Mode != setupModeAPIKey {
+		t.Fatalf("legacy managed mode = %q, want api_key", apiKeySetup.Mode)
+	}
+
+	oauthSetup := ParseAgentSetup(map[string]any{
+		MetadataKeyACP: map[string]any{
+			"agents": map[string]any{
+				AgentCodexID: map[string]any{
+					"enabled":    true,
+					"setup_mode": "managed",
+					"managed": map[string]any{
+						"auth_type": "provider_oauth",
+					},
+				},
+			},
+		},
+	}, AgentCodexID)
+	if oauthSetup.Mode != setupModeOAuth {
+		t.Fatalf("legacy provider_oauth mode = %q, want oauth", oauthSetup.Mode)
 	}
 }
 
@@ -102,6 +165,58 @@ func TestSensitiveMergeAndScrub(t *testing.T) {
 	setup = ParseAgentSetup(scrubbed, AgentCodexID)
 	if got := setup.Managed["api_key"]; got == "sk-oldsecret" || got == "" {
 		t.Fatalf("scrubbed api_key = %q, want masked", got)
+	}
+}
+
+func TestScrubMetadataForExportDropsManagedSecrets(t *testing.T) {
+	metadata := map[string]any{
+		MetadataKeyACP: map[string]any{
+			"agents": map[string]any{
+				AgentHermesID: map[string]any{
+					"enabled":    true,
+					"setup_mode": "api_key",
+					"managed": map[string]any{
+						"provider": "openrouter",
+						"model":    "anthropic/claude-sonnet-4",
+						"api_key":  map[string]any{"value": "sk-hermes"},
+					},
+				},
+				AgentCodexID: map[string]any{
+					"enabled": true,
+					"managed": map[string]any{
+						"api_key":  "sk-codex",
+						"base_url": "https://codex.example",
+					},
+				},
+			},
+		},
+	}
+
+	scrubbed, changed := ScrubMetadataForExport(metadata)
+	if !changed {
+		t.Fatal("ScrubMetadataForExport changed = false, want true")
+	}
+	hermesSetup := ParseAgentSetup(scrubbed, AgentHermesID)
+	if _, ok := hermesSetup.Managed["api_key"]; ok {
+		t.Fatalf("Hermes api_key was not removed: %#v", hermesSetup.Managed)
+	}
+	if hermesSetup.Managed["provider"] != "openrouter" || hermesSetup.Managed["model"] != "anthropic/claude-sonnet-4" {
+		t.Fatalf("Hermes non-secret managed fields = %#v", hermesSetup.Managed)
+	}
+	codexSetup := ParseAgentSetup(scrubbed, AgentCodexID)
+	if _, ok := codexSetup.Managed["api_key"]; ok {
+		t.Fatalf("Codex api_key was not removed: %#v", codexSetup.Managed)
+	}
+	if codexSetup.Managed["base_url"] != "https://codex.example" {
+		t.Fatalf("Codex base_url = %q", codexSetup.Managed["base_url"])
+	}
+
+	acpConfig, _ := metadataRecord(metadata[MetadataKeyACP])
+	agents, _ := metadataRecord(acpConfig["agents"])
+	agentConfig, _ := metadataRecord(agents[AgentHermesID])
+	managed, _ := metadataRecord(agentConfig["managed"])
+	if _, ok := managed["api_key"].(map[string]any); !ok {
+		t.Fatalf("original metadata mutated: %#v", managed)
 	}
 }
 

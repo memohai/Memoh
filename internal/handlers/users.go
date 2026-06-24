@@ -3,8 +3,10 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +38,10 @@ type botCreateWorkspace interface {
 	SetupBotContainerWithProgress(ctx context.Context, botID string, progress workspace.ContainerSetupProgress) error
 }
 
+type acpRuntimeCloser interface {
+	CloseBotAgentRuntimes(botID, agentID string) error
+}
+
 type createBotStreamBotEvent struct {
 	Type string   `json:"type"`
 	Bot  bots.Bot `json:"bot"`
@@ -51,6 +57,7 @@ type UsersHandler struct {
 	channelManager   *channel.Manager
 	registry         *channel.Registry
 	acpWorkspace     botCreateWorkspace
+	acpRuntimes      acpRuntimeCloser
 	logger           *slog.Logger
 }
 
@@ -70,6 +77,10 @@ func NewUsersHandler(log *slog.Logger, service *accounts.Service, botService *bo
 		acpWorkspace:     acpWorkspace,
 		logger:           log.With(slog.String("handler", "users")),
 	}
+}
+
+func (h *UsersHandler) SetACPRuntimeCloser(closer acpRuntimeCloser) {
+	h.acpRuntimes = closer
 }
 
 func (h *UsersHandler) Register(e *echo.Echo) {
@@ -461,6 +472,11 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 			}
 		}
 	}
+	if req.Metadata != nil {
+		if err := validateACPManagedConfig(req.Metadata); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid ACP metadata: "+err.Error())
+		}
+	}
 	if acceptsEventStream(c) {
 		return h.createBotStream(c, ownerID, ownerFromToken, req)
 	}
@@ -484,6 +500,7 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 		if err := h.prepareACPWorkspaceConfig(c.Request().Context(), resp); err != nil {
 			h.logger.Warn("write ACP workspace config after bot create failed",
 				slog.String("bot_id", resp.ID), slog.Any("error", err))
+			c.Response().Header().Set("X-Memoh-ACP-Config-Error", headerSafeError("write ACP workspace config: "+err.Error()))
 		}
 	}
 	return c.JSON(http.StatusCreated, scrubBotForResponse(resp))
@@ -635,10 +652,15 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 		if err := h.prepareACPWorkspaceConfig(lifecycleCtx, readyBot); err != nil {
 			h.logger.Warn("write ACP workspace config after stream bot create failed",
 				slog.String("bot_id", readyBot.ID), slog.Any("error", err))
+			sendError("write ACP workspace config: " + err.Error())
 		}
 	}
 	send(createBotStreamBotEvent{Type: "ready", Bot: scrubBotForResponse(readyBot)})
 	return nil
+}
+
+func headerSafeError(message string) string {
+	return strings.NewReplacer("\r", " ", "\n", " ").Replace(message)
 }
 
 // CheckBotName godoc
@@ -814,69 +836,224 @@ func (h *UsersHandler) UpdateBot(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	needsACPWorkspaceConfigWrite := false
+	shouldCloseACPRuntimes := false
+	if req.Metadata != nil {
+		if err := h.botService.ValidateUpdate(c.Request().Context(), bot.ID, req); err != nil {
+			return updateBotHTTPError(err)
+		}
+		pending := bot
+		pending.Metadata = acpprofile.MergeSensitiveFieldsForUpdate(bot.Metadata, req.Metadata)
+		if err := validateACPManagedConfig(pending.Metadata); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid ACP metadata: "+err.Error())
+		}
+		needsACPWorkspaceConfigWrite = acpManagedConfigNeedsWrite(bot.Metadata, pending.Metadata)
+		shouldCloseACPRuntimes = acpRuntimeMetadataChanged(bot.Metadata, pending.Metadata)
+	}
 	resp, err := h.botService.Update(c.Request().Context(), bot.ID, req)
 	if err != nil {
-		if errors.Is(err, bots.ErrBotNameTaken) {
-			return echo.NewHTTPError(http.StatusConflict, err.Error())
-		}
-		if errors.Is(err, bots.ErrBotNameInvalid) || errors.Is(err, bots.ErrBotNameReserved) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return updateBotHTTPError(err)
 	}
-	// The bot row is already updated, so a workspace-config write failure
-	// (e.g. the user is mid-typing an API key and it is still empty) must NOT
-	// fail the request. Log and continue — the managed config can be
-	// (re)written from the bot settings page once the credentials are complete.
 	if req.Metadata != nil {
-		if err := h.prepareACPWorkspaceConfig(c.Request().Context(), resp); err != nil {
-			h.logger.Warn("write ACP workspace config after bot update failed",
-				slog.String("bot_id", resp.ID), slog.Any("error", err))
+		if needsACPWorkspaceConfigWrite {
+			if err := h.prepareACPWorkspaceConfig(c.Request().Context(), resp); err != nil {
+				if shouldCloseACPRuntimes {
+					h.closeUpdatedACPRuntimes(resp.ID)
+				}
+				return echo.NewHTTPError(http.StatusInternalServerError, "write ACP workspace config: "+err.Error())
+			}
+		}
+		if shouldCloseACPRuntimes {
+			h.closeUpdatedACPRuntimes(resp.ID)
 		}
 	}
 	return c.JSON(http.StatusOK, scrubBotForResponse(resp))
+}
+
+func validateACPManagedConfig(metadata map[string]any) error {
+	for _, item := range acpprofile.List() {
+		profile, ok := acpprofile.Lookup(item.ID)
+		if !ok {
+			continue
+		}
+		setup := acpprofile.ParseAgentSetup(metadata, profile.ID)
+		if !setup.Enabled {
+			continue
+		}
+		mode := acpclient.SetupMode(setup.Mode)
+		if !acpProfileSupportsSetupMode(profile, mode) {
+			return fmt.Errorf("%s does not support setup mode %q", profile.DisplayName, mode)
+		}
+		if mode == acpclient.SetupModeSelf {
+			continue
+		}
+		if err := acpclient.ValidateManagedACPConfig(profile, setup, mode); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func acpProfileSupportsSetupMode(profile acpprofile.Profile, mode acpclient.SetupMode) bool {
+	if len(profile.SetupModes) == 0 {
+		return true
+	}
+	for _, supported := range profile.SetupModes {
+		if strings.EqualFold(strings.TrimSpace(supported), string(mode)) {
+			return true
+		}
+	}
+	return false
+}
+
+func acpManagedConfigNeedsWrite(existing, pending map[string]any) bool {
+	for _, item := range acpprofile.List() {
+		profile, ok := acpprofile.Lookup(item.ID)
+		if !ok {
+			continue
+		}
+		before := acpprofile.ParseAgentSetup(existing, profile.ID)
+		after := acpprofile.ParseAgentSetup(pending, profile.ID)
+		if !acpWorkspaceConfigWriteTarget(after) {
+			continue
+		}
+		if !acpWorkspaceConfigWriteTarget(before) {
+			return true
+		}
+		if !strings.EqualFold(before.Mode, after.Mode) {
+			return true
+		}
+		if !stringMapEqual(before.Managed, after.Managed) {
+			return true
+		}
+	}
+	return false
+}
+
+func acpRuntimeMetadataChanged(existing, pending map[string]any) bool {
+	return !reflect.DeepEqual(acpRuntimeMetadata(existing), acpRuntimeMetadata(pending))
+}
+
+func acpRuntimeMetadata(metadata map[string]any) map[string]any {
+	acp, ok := metadata[acpprofile.MetadataKeyACP].(map[string]any)
+	if !ok {
+		return nil
+	}
+	return acp
+}
+
+func acpWorkspaceConfigWriteTarget(setup acpprofile.AgentSetup) bool {
+	if !setup.Enabled || !setup.ModeSet {
+		return false
+	}
+	mode := acpclient.SetupMode(setup.Mode)
+	return mode != acpclient.SetupModeSelf && mode != acpclient.SetupModeOAuth
+}
+
+func stringMapEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key, av := range a {
+		if b[key] != av {
+			return false
+		}
+	}
+	return true
+}
+
+func updateBotHTTPError(err error) error {
+	if errors.Is(err, bots.ErrBotNameTaken) {
+		return echo.NewHTTPError(http.StatusConflict, err.Error())
+	}
+	if errors.Is(err, bots.ErrBotNameInvalid) || errors.Is(err, bots.ErrBotNameReserved) {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+}
+
+func (h *UsersHandler) closeUpdatedACPRuntimes(botID string) {
+	if h == nil || h.acpRuntimes == nil {
+		return
+	}
+	for _, profile := range acpprofile.List() {
+		if err := h.acpRuntimes.CloseBotAgentRuntimes(botID, profile.ID); err != nil {
+			h.logger.Warn("close ACP runtime after bot metadata update failed",
+				slog.String("bot_id", botID),
+				slog.String("agent_id", profile.ID),
+				slog.Any("error", err),
+			)
+		}
+	}
 }
 
 func (h *UsersHandler) prepareACPWorkspaceConfig(ctx context.Context, bot bots.Bot) error {
 	if h.acpWorkspace == nil {
 		return nil
 	}
-	setup := acpprofile.ParseAgentSetup(bot.Metadata, acpprofile.AgentCodexID)
-	if !setup.Enabled {
+	type configTarget struct {
+		profile acpprofile.Profile
+		setup   acpprofile.AgentSetup
+		mode    acpclient.SetupMode
+	}
+	targets := []configTarget{}
+	for _, item := range acpprofile.List() {
+		profile, ok := acpprofile.Lookup(item.ID)
+		if !ok {
+			continue
+		}
+		setup := acpprofile.ParseAgentSetup(bot.Metadata, profile.ID)
+		if !setup.Enabled || !setup.ModeSet {
+			continue
+		}
+		mode := acpclient.SetupMode(setup.Mode)
+		if mode == acpclient.SetupModeSelf || mode == acpclient.SetupModeOAuth {
+			continue
+		}
+		targets = append(targets, configTarget{profile: profile, setup: setup, mode: mode})
+	}
+	if len(targets) == 0 {
 		return nil
 	}
 	workspaceInfo, err := h.acpWorkspace.WorkspaceInfo(ctx, bot.ID)
 	if err != nil {
 		return err
 	}
-	mode := acpclient.SetupMode(setup.Mode)
-	if !setup.ModeSet {
-		// Legacy bots predate explicit setup_mode. Local workspaces use the
-		// host's configured credentials (self); container workspaces have no
-		// credentials to write, so skip in both cases.
-		if workspaceInfo.Backend == bridge.WorkspaceBackendLocal {
-			mode = acpclient.SetupModeSelf
+	var client *bridge.Client
+	getClient := func() (*bridge.Client, error) {
+		if client != nil {
+			return client, nil
 		}
-		// container legacy bots: nothing to write either
-		if mode != acpclient.SetupModeSelf {
-			return nil
+		var err error
+		client, err = h.acpWorkspace.MCPClient(ctx, bot.ID)
+		return client, err
+	}
+	for _, target := range targets {
+		resolved := acpclient.ResolvedSessionContext{}
+		if target.profile.ID == acpprofile.AgentHermesID {
+			var err error
+			resolved, err = acpclient.ResolveSessionContext(acpclient.SessionContextInput{
+				AgentID:       target.profile.ID,
+				SetupMode:     target.mode,
+				BotID:         bot.ID,
+				Backend:       workspaceInfo.Backend,
+				WorkspaceRoot: workspaceInfo.DefaultWorkDir,
+				LocalDataRoot: workspaceInfo.LocalDataRoot,
+			})
+			if err != nil {
+				return err
+			}
+		}
+		if err := acpclient.WriteManagedACPConfig(ctx, acpclient.ManagedACPConfigRequest{
+			Profile:  target.profile,
+			Setup:    target.setup,
+			Mode:     target.mode,
+			Resolved: resolved,
+		}, getClient); err != nil {
+			return err
 		}
 	}
-	// self and oauth modes: credentials are not managed here.
-	if mode == acpclient.SetupModeSelf || mode == acpclient.SetupModeOAuth {
-		return nil
-	}
-	// OAuth credentials are written by the dedicated OAuth callback handler, not
-	// here. For api_key mode we write the managed config now; on local (desktop
-	// BYOK) the bridge maps /data/.codex onto the bot's workspace .codex dir.
-	client, err := h.acpWorkspace.MCPClient(ctx, bot.ID)
-	if err != nil {
-		return err
-	}
-	return acpclient.WriteCodexManagedConfigWithAuth(ctx, client, acpclient.CodexManagedConfig{
-		Mode:    acpclient.SetupModeAPIKey,
-		Managed: setup.Managed,
-	})
+	return nil
 }
 
 // TransferBotOwner godoc

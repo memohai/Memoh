@@ -161,28 +161,6 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	return result, nil
 }
 
-func resolveWorkspacePaths(info bridge.WorkspaceInfo, rawProjectPath string) (string, string, WorkspaceBackend, error) {
-	backend := WorkspaceBackendContainer
-	if strings.EqualFold(info.Backend, bridge.WorkspaceBackendLocal) {
-		backend = WorkspaceBackendLocal
-	}
-	root := strings.TrimSpace(info.DefaultWorkDir)
-	if root == "" {
-		root = dataMountPath
-	}
-	if backend == WorkspaceBackendLocal {
-		resolvedRoot, err := resolveRoot(root)
-		if err != nil {
-			return "", "", backend, err
-		}
-		projectPath, err := ResolvePathUnderRoot(resolvedRoot, rawProjectPath)
-		return resolvedRoot, projectPath, backend, err
-	}
-	root = dataMountPath
-	projectPath, err := ResolvePathUnderVirtualRoot(root, rawProjectPath)
-	return root, projectPath, backend, err
-}
-
 type clientCallbacks struct {
 	client         *bridge.Client
 	logger         *slog.Logger
@@ -211,7 +189,7 @@ type approvedToolGrant struct {
 	ExpiresAt  time.Time
 }
 
-func newClientCallbacks(ctx context.Context, client *bridge.Client, root, cwd string, timeout time.Duration, sink EventSink, env []string, virtualRoot bool, approval ToolApprovalService, toolGateway *mcp.ToolGatewayService, toolSession ToolSessionContext, quirks acpprofile.ToolQuirks) *clientCallbacks {
+func newClientCallbacks(ctx context.Context, client *bridge.Client, root, cwd string, timeout time.Duration, sink EventSink, env []string, cleanEnv bool, unsetEnv []string, virtualRoot bool, approval ToolApprovalService, toolGateway *mcp.ToolGatewayService, toolSession ToolSessionContext, quirks acpprofile.ToolQuirks) *clientCallbacks {
 	timeoutSeconds := int32(timeout.Seconds())
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = defaultTerminalTimeout
@@ -228,7 +206,7 @@ func newClientCallbacks(ctx context.Context, client *bridge.Client, root, cwd st
 		sink:        sink,
 		events:      events,
 		toolMapper:  newACPToolEventMapper(quirks),
-		terminals:   newTerminalManager(ctx, client, root, cwd, timeoutSeconds, env, virtualRoot, events),
+		terminals:   newTerminalManager(ctx, client, root, cwd, timeoutSeconds, env, cleanEnv, unsetEnv, virtualRoot, events),
 		quirks:      quirks,
 	}
 }

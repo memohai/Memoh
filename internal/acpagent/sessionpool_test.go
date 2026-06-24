@@ -465,6 +465,51 @@ func TestSessionPoolOwnedGateHasZeroSideEffectsAcrossBots(t *testing.T) {
 	}
 }
 
+func TestSessionPoolCloseBotAgentRuntimesDoesNotWaitForActivePrompt(t *testing.T) {
+	pool := newSessionPool(nil, nil, nil)
+	active := &runtimeHandle{
+		id:           newRuntimeID(),
+		botID:        "bot-1",
+		agentID:      acpprofile.AgentHermesID,
+		projectPath:  "/data",
+		session:      &acpclient.Session{},
+		status:       stateActive,
+		lastActive:   time.Now(),
+		boundSession: "session-1",
+		active: &acpclient.ToolSessionContext{
+			BotID:     "bot-1",
+			SessionID: "session-1",
+		},
+	}
+	injectRuntime(pool, active)
+	active.op.Lock()
+	defer active.op.Unlock()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- pool.CloseBotAgentRuntimes("bot-1", acpprofile.AgentHermesID)
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("CloseBotAgentRuntimes() error = %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("CloseBotAgentRuntimes waited for the active prompt op lock")
+	}
+
+	active.state.Lock()
+	closed := active.closed
+	active.state.Unlock()
+	if !closed {
+		t.Fatal("runtime was not marked closed")
+	}
+	if got := pool.sessionHandle("session-1"); got != nil {
+		t.Fatalf("session index still points at closed runtime: %#v", got)
+	}
+}
+
 func TestSessionPoolUnboundCapEvictsOldestIdle(t *testing.T) {
 	pool := newFakeScriptPool(t)
 
@@ -1050,6 +1095,124 @@ func TestSessionPoolSetupModeResolution(t *testing.T) {
 		t.Fatalf("Claude Code api_key env = %#v, want conflicting auth env cleared", claudeRunner.req.Env)
 	}
 
+	hermesRoot := t.TempDir()
+	hermesRunner := &hermesRecordingRunner{
+		info: bridge.WorkspaceInfo{
+			Backend:        bridge.WorkspaceBackendContainer,
+			DefaultWorkDir: "/data",
+		},
+		client:   newSessionPoolBridgeClient(t, hermesRoot),
+		startErr: errors.New("started"),
+	}
+	hermesPool := newSessionPool(nil, hermesRunner, fakeBotGetter{bot: enabledACPAgentBot("bot-1", acpprofile.AgentHermesID, "api_key", map[string]any{
+		"provider": "openrouter",
+		"model":    "anthropic/claude-sonnet-4",
+		"api_key":  "sk-hermes",
+	})})
+	_, err = hermesPool.Prompt(context.Background(), PromptInput{
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		AgentID:     acpprofile.AgentHermesID,
+		ProjectPath: "/data/project",
+		Prompt:      "run",
+	})
+	if err == nil || err.Error() != "started" {
+		t.Fatalf("container Hermes api_key error = %v, want runner start error", err)
+	}
+	if hermesRunner.req.Command != "hermes-acp" || hermesRunner.req.LocalCommand != "hermes-acp" {
+		t.Fatalf("Hermes command = %q local=%q", hermesRunner.req.Command, hermesRunner.req.LocalCommand)
+	}
+	if !hermesRunner.req.CleanEnv {
+		t.Fatalf("Hermes managed CleanEnv = false, want true")
+	}
+	if !hasString(hermesRunner.req.UnsetEnv, "HERMES_*") || !hasString(hermesRunner.req.UnsetEnv, "OPENROUTER_API_KEY") || !hasString(hermesRunner.req.UnsetEnv, "OPENROUTER_BASE_URL") {
+		t.Fatalf("Hermes managed UnsetEnv = %#v", hermesRunner.req.UnsetEnv)
+	}
+	if hermesRunner.req.Resolved == nil || hermesRunner.req.Resolved.HermesHome != acpclient.HermesContainerHome {
+		t.Fatalf("Hermes resolved context = %#v", hermesRunner.req.Resolved)
+	}
+	configPath := filepath.Join(hermesRoot, ".memoh-hermes", "config.yaml")
+	configBytes, readErr := os.ReadFile(configPath) //nolint:gosec // test path is under t.TempDir.
+	if readErr != nil {
+		t.Fatalf("read Hermes config: %v", readErr)
+	}
+	if content := string(configBytes); !strings.Contains(content, `provider: "openrouter"`) || strings.Contains(content, "sk-hermes") {
+		t.Fatalf("Hermes config content =\n%s", content)
+	}
+
+	defaultBackendRoot := t.TempDir()
+	defaultBackendRunner := &hermesRecordingRunner{
+		info: bridge.WorkspaceInfo{
+			DefaultWorkDir: "/data",
+		},
+		client:   newSessionPoolBridgeClient(t, defaultBackendRoot),
+		startErr: errors.New("started"),
+	}
+	defaultBackendPool := newSessionPool(nil, defaultBackendRunner, fakeBotGetter{bot: enabledACPAgentBot("bot-1", acpprofile.AgentHermesID, "api_key", map[string]any{
+		"provider": "gemini",
+		"model":    "gemini-3.5-flash",
+		"api_key":  "AIza-hermes",
+	})})
+	_, err = defaultBackendPool.Prompt(context.Background(), PromptInput{
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		AgentID:     acpprofile.AgentHermesID,
+		ProjectPath: "/data/project",
+		Prompt:      "run",
+	})
+	if err == nil || err.Error() != "started" {
+		t.Fatalf("default backend Hermes api_key error = %v, want runner start error", err)
+	}
+	if defaultBackendRunner.req.Resolved == nil || defaultBackendRunner.req.Resolved.Backend != acpclient.WorkspaceBackendContainer {
+		t.Fatalf("default backend resolved context = %#v, want container backend", defaultBackendRunner.req.Resolved)
+	}
+
+	localHermesWorkDir := t.TempDir()
+	localHermesDataRoot := t.TempDir()
+	localHermesRunner := &recordingRunner{
+		info: bridge.WorkspaceInfo{
+			Backend:        bridge.WorkspaceBackendLocal,
+			DefaultWorkDir: localHermesWorkDir,
+			LocalDataRoot:  localHermesDataRoot,
+		},
+		startErr: errors.New("started"),
+	}
+	localHermesPool := newSessionPool(nil, localHermesRunner, fakeBotGetter{bot: enabledACPAgentBot("bot-1", acpprofile.AgentHermesID, "api_key", map[string]any{
+		"provider": "custom",
+		"model":    "my-model",
+		"base_url": "https://llm.example/v1",
+		"api_key":  "sk-local-hermes",
+	})})
+	_, err = localHermesPool.Prompt(context.Background(), PromptInput{
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		AgentID:     acpprofile.AgentHermesID,
+		ProjectPath: localHermesWorkDir,
+		Prompt:      "run",
+	})
+	if err == nil || err.Error() != "started" {
+		t.Fatalf("local Hermes api_key error = %v, want runner start error", err)
+	}
+	if localHermesRunner.req.CleanEnv {
+		t.Fatalf("local Hermes managed CleanEnv = true, want false")
+	}
+	for _, key := range []string{"HERMES_*", "MEMOH_HERMES_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "GOOGLE_API_KEY", "GOOGLE_BASE_URL", "GEMINI_API_KEY", "GEMINI_BASE_URL"} {
+		if !hasString(localHermesRunner.req.UnsetEnv, key) {
+			t.Fatalf("local Hermes UnsetEnv = %#v, missing %q", localHermesRunner.req.UnsetEnv, key)
+		}
+	}
+	wantHermesHome := filepath.Join(localHermesDataRoot, "acp", "hermes", "bot-1")
+	if localHermesRunner.req.Resolved == nil || localHermesRunner.req.Resolved.HermesHome != wantHermesHome {
+		t.Fatalf("local Hermes resolved context = %#v, want HERMES_HOME %q", localHermesRunner.req.Resolved, wantHermesHome)
+	}
+	localConfigBytes, readErr := os.ReadFile(filepath.Join(wantHermesHome, "config.yaml")) //nolint:gosec // test path is under t.TempDir.
+	if readErr != nil {
+		t.Fatalf("read local Hermes config: %v", readErr)
+	}
+	if content := string(localConfigBytes); !strings.Contains(content, `provider: "custom:memoh-managed"`) || !strings.Contains(content, `base_url: "https://llm.example/v1"`) || strings.Contains(content, "sk-local-hermes") {
+		t.Fatalf("local Hermes config content =\n%s", content)
+	}
+
 	claudeOAuthRunner := &recordingRunner{
 		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
 		startErr: errors.New("started"),
@@ -1076,6 +1239,43 @@ func TestSessionPoolSetupModeResolution(t *testing.T) {
 	if !startRequestEnvHas(claudeOAuthRunner.req.Env, "ANTHROPIC_API_KEY", "") ||
 		!startRequestEnvHas(claudeOAuthRunner.req.Env, "ANTHROPIC_AUTH_TOKEN", "") {
 		t.Fatalf("Claude Code oauth env = %#v, want conflicting auth env cleared", claudeOAuthRunner.req.Env)
+	}
+}
+
+func TestSessionPoolRejectsUnsupportedSetupMode(t *testing.T) {
+	runner := &recordingRunner{
+		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
+		startErr: errors.New("started"),
+	}
+	pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPAgentBot("bot-1", acpprofile.AgentHermesID, "oauth", map[string]any{
+		"oauth_token": "fake",
+	})})
+	_, err := pool.Prompt(context.Background(), PromptInput{
+		BotID:     "bot-1",
+		SessionID: "session-1",
+		AgentID:   acpprofile.AgentHermesID,
+		Prompt:    "run",
+	})
+	if err == nil || !strings.Contains(err.Error(), `does not support setup mode "oauth"`) {
+		t.Fatalf("Prompt() error = %v, want unsupported setup mode", err)
+	}
+	if runner.req.AgentID != "" {
+		t.Fatalf("runner should not have been started: %#v", runner.req)
+	}
+}
+
+func TestValidateManagedACPConfigAcceptsHermesOpenAIAPIProvider(t *testing.T) {
+	profile, ok := acpprofile.Lookup(acpprofile.AgentHermesID)
+	if !ok {
+		t.Fatal("missing Hermes profile")
+	}
+	err := acpclient.ValidateManagedACPConfig(profile, acpprofile.AgentSetup{Managed: map[string]string{
+		"provider": "openai-api",
+		"model":    "gpt-5.4",
+		"api_key":  "sk-test",
+	}}, acpclient.SetupModeAPIKey)
+	if err != nil {
+		t.Fatalf("ValidateManagedACPConfig() error = %v, want openai-api accepted", err)
 	}
 }
 
@@ -1216,8 +1416,8 @@ func TestRuntimeHandleToolContextOverlaysActivePrompt(t *testing.T) {
 	if ctx.RuntimeActive {
 		t.Fatalf("idle tool context must not allow tools/call: %#v", ctx)
 	}
-	if ctx.CanListUserInput || ctx.CanRequestUserInput {
-		t.Fatalf("idle tool context must not expose user input tools: %#v", ctx)
+	if !ctx.CanListUserInput || ctx.CanRequestUserInput {
+		t.Fatalf("idle tool context must expose list-only user input tools: %#v", ctx)
 	}
 
 	// During a prompt the live per-prompt fields overlay.
@@ -1251,7 +1451,7 @@ func TestRuntimeHandleToolContextOverlaysActivePrompt(t *testing.T) {
 	// clearActive removes every per-prompt field again.
 	h.clearActive()
 	ctx = h.toolContext()
-	if ctx.StreamID != "" || ctx.SessionToken != "" || ctx.ChatID != "bot-1" || ctx.RuntimeActive || ctx.SupportsImageInput || ctx.CanListUserInput {
+	if ctx.StreamID != "" || ctx.SessionToken != "" || ctx.ChatID != "bot-1" || ctx.RuntimeActive || ctx.SupportsImageInput || !ctx.CanListUserInput {
 		t.Fatalf("cleared tool context = %#v", ctx)
 	}
 }
@@ -1534,6 +1734,13 @@ type recordingRunner struct {
 	startErr error
 }
 
+type hermesRecordingRunner struct {
+	info     bridge.WorkspaceInfo
+	client   *bridge.Client
+	req      acpclient.StartRequest
+	startErr error
+}
+
 type blockingRunner struct {
 	info    bridge.WorkspaceInfo
 	started chan struct{}
@@ -1593,6 +1800,19 @@ func (r *recordingRunner) StartSession(_ context.Context, req acpclient.StartReq
 	return nil, r.startErr
 }
 
+func (r *hermesRecordingRunner) WorkspaceInfo(context.Context, string) (bridge.WorkspaceInfo, error) {
+	return r.info, nil
+}
+
+func (r *hermesRecordingRunner) MCPClient(context.Context, string) (*bridge.Client, error) {
+	return r.client, nil
+}
+
+func (r *hermesRecordingRunner) StartSession(_ context.Context, req acpclient.StartRequest, _ acpclient.EventSink) (*acpclient.Session, error) {
+	r.req = req
+	return nil, r.startErr
+}
+
 type sessionPoolWorkspace struct {
 	client *bridge.Client
 	info   bridge.WorkspaceInfo
@@ -1635,6 +1855,15 @@ func startRequestEnvHas(env []string, key, want string) bool {
 	for _, item := range env {
 		if strings.HasPrefix(item, prefix) {
 			return strings.TrimPrefix(item, prefix) == want
+		}
+	}
+	return false
+}
+
+func hasString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
 		}
 	}
 	return false

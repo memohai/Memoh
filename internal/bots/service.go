@@ -336,68 +336,34 @@ func (s *Service) ListAccessible(ctx context.Context, channelIdentityID string) 
 	return items, nil
 }
 
+// ValidateUpdate validates bot profile updates without persisting them.
+func (s *Service) ValidateUpdate(ctx context.Context, botID string, req UpdateBotRequest) error {
+	_, err := s.prepareUpdateParams(ctx, botID, req, true)
+	return err
+}
+
 // Update updates bot profile fields.
 func (s *Service) Update(ctx context.Context, botID string, req UpdateBotRequest) (Bot, error) {
-	if s.queries == nil {
-		return Bot{}, errors.New("bot queries not configured")
-	}
-	botUUID, err := db.ParseUUID(botID)
+	params, err := s.prepareUpdateParams(ctx, botID, req, true)
 	if err != nil {
 		return Bot{}, err
 	}
-	existing, err := s.queries.GetBotByID(ctx, botUUID)
+	return s.updateWithParams(ctx, params)
+}
+
+// UpdateReplacingMetadata updates bot profile fields and writes metadata exactly
+// as supplied. It is intended for restore/import paths where scrubbed metadata
+// must not preserve existing sensitive fields.
+func (s *Service) UpdateReplacingMetadata(ctx context.Context, botID string, req UpdateBotRequest) (Bot, error) {
+	params, err := s.prepareUpdateParams(ctx, botID, req, false)
 	if err != nil {
 		return Bot{}, err
 	}
-	displayName := strings.TrimSpace(existing.DisplayName.String)
-	avatarURL := strings.TrimSpace(existing.AvatarUrl.String)
-	isActive := existing.IsActive
-	metadata, err := decodeMetadata(existing.Metadata)
-	if err != nil {
-		return Bot{}, err
-	}
-	if req.DisplayName != nil {
-		displayName = strings.TrimSpace(*req.DisplayName)
-	}
-	if req.AvatarURL != nil {
-		avatarURL = strings.TrimSpace(*req.AvatarURL)
-	}
-	if req.IsActive != nil {
-		isActive = *req.IsActive
-	}
-	timezoneValue := existing.Timezone
-	if req.Timezone != nil {
-		timezoneValue, err = normalizeOptionalTimezone(req.Timezone)
-		if err != nil {
-			return Bot{}, err
-		}
-	}
-	if req.Metadata != nil {
-		metadata = acpprofile.MergeSensitiveFieldsForUpdate(metadata, req.Metadata)
-	}
-	if displayName == "" {
-		displayName = "bot-" + uuid.NewString()
-	}
-	botName := existing.Name
-	if req.Name != nil {
-		botName, err = s.resolveName(ctx, *req.Name, displayName, existing.ID.String())
-		if err != nil {
-			return Bot{}, err
-		}
-	}
-	payload, err := json.Marshal(metadata)
-	if err != nil {
-		return Bot{}, err
-	}
-	row, err := s.queries.UpdateBotProfile(ctx, sqlc.UpdateBotProfileParams{
-		ID:          botUUID,
-		Name:        botName,
-		DisplayName: pgtype.Text{String: displayName, Valid: displayName != ""},
-		AvatarUrl:   pgtype.Text{String: avatarURL, Valid: avatarURL != ""},
-		Timezone:    timezoneValue,
-		IsActive:    isActive,
-		Metadata:    payload,
-	})
+	return s.updateWithParams(ctx, params)
+}
+
+func (s *Service) updateWithParams(ctx context.Context, params sqlc.UpdateBotProfileParams) (Bot, error) {
+	row, err := s.queries.UpdateBotProfile(ctx, params)
 	if err != nil {
 		if db.IsUniqueViolation(err) {
 			return Bot{}, ErrBotNameTaken
@@ -412,6 +378,73 @@ func (s *Service) Update(ctx context.Context, botID string, req UpdateBotRequest
 		return Bot{}, err
 	}
 	return bot, nil
+}
+
+func (s *Service) prepareUpdateParams(ctx context.Context, botID string, req UpdateBotRequest, mergeSensitiveMetadata bool) (sqlc.UpdateBotProfileParams, error) {
+	if s.queries == nil {
+		return sqlc.UpdateBotProfileParams{}, errors.New("bot queries not configured")
+	}
+	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		return sqlc.UpdateBotProfileParams{}, err
+	}
+	existing, err := s.queries.GetBotByID(ctx, botUUID)
+	if err != nil {
+		return sqlc.UpdateBotProfileParams{}, err
+	}
+	displayName := strings.TrimSpace(existing.DisplayName.String)
+	avatarURL := strings.TrimSpace(existing.AvatarUrl.String)
+	isActive := existing.IsActive
+	metadata, err := decodeMetadata(existing.Metadata)
+	if err != nil {
+		return sqlc.UpdateBotProfileParams{}, err
+	}
+	if req.DisplayName != nil {
+		displayName = strings.TrimSpace(*req.DisplayName)
+	}
+	if req.AvatarURL != nil {
+		avatarURL = strings.TrimSpace(*req.AvatarURL)
+	}
+	if req.IsActive != nil {
+		isActive = *req.IsActive
+	}
+	timezoneValue := existing.Timezone
+	if req.Timezone != nil {
+		timezoneValue, err = normalizeOptionalTimezone(req.Timezone)
+		if err != nil {
+			return sqlc.UpdateBotProfileParams{}, err
+		}
+	}
+	if req.Metadata != nil {
+		if mergeSensitiveMetadata {
+			metadata = acpprofile.MergeSensitiveFieldsForUpdate(metadata, req.Metadata)
+		} else {
+			metadata = req.Metadata
+		}
+	}
+	if displayName == "" {
+		displayName = "bot-" + uuid.NewString()
+	}
+	botName := existing.Name
+	if req.Name != nil {
+		botName, err = s.resolveName(ctx, *req.Name, displayName, existing.ID.String())
+		if err != nil {
+			return sqlc.UpdateBotProfileParams{}, err
+		}
+	}
+	payload, err := json.Marshal(metadata)
+	if err != nil {
+		return sqlc.UpdateBotProfileParams{}, err
+	}
+	return sqlc.UpdateBotProfileParams{
+		ID:          botUUID,
+		Name:        botName,
+		DisplayName: pgtype.Text{String: displayName, Valid: displayName != ""},
+		AvatarUrl:   pgtype.Text{String: avatarURL, Valid: avatarURL != ""},
+		Timezone:    timezoneValue,
+		IsActive:    isActive,
+		Metadata:    payload,
+	}, nil
 }
 
 // TransferOwner transfers bot ownership to another user.

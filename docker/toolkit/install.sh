@@ -18,6 +18,10 @@
 #   CODEX_ACP_VERSION   Default: pinned @zed-industries/codex-acp version below
 #   CLAUDE_AGENT_ACP_VERSION
 #                       Default: pinned @agentclientprotocol/claude-agent-acp version below
+#   HERMES_AGENT_VERSION
+#                       Default: pinned hermes-agent[acp,mcp] version below
+#   HERMES_AGENT_PACKAGE
+#                       Default: hermes-agent[acp,mcp]==$HERMES_AGENT_VERSION
 #   ALPINE_MIRROR       Default: https://dl-cdn.alpinelinux.org/alpine
 #   DEBIAN_MIRROR       Default: https://deb.debian.org/debian
 #   DEBIAN_VERSION      Default: bookworm
@@ -33,6 +37,8 @@ NPM_VERSION=10.9.2
 CODEX_VERSION="${CODEX_VERSION:-0.133.0}"
 CODEX_ACP_VERSION="${CODEX_ACP_VERSION:-0.15.0}"
 CLAUDE_AGENT_ACP_VERSION="${CLAUDE_AGENT_ACP_VERSION:-0.44.0}"
+HERMES_AGENT_VERSION="${HERMES_AGENT_VERSION:-0.17.0}"
+HERMES_AGENT_PACKAGE="${HERMES_AGENT_PACKAGE:-hermes-agent[acp,mcp]==$HERMES_AGENT_VERSION}"
 
 OUTDIR="${1:-.toolkit}"
 ARCH="${2:-}"
@@ -589,6 +595,32 @@ install_acp_packages() {
   exit 1
 }
 
+install_hermes_acp_package() {
+  if [ "$(uname -s)" != "Linux" ]; then
+    echo "warning: skipping Hermes ACP package cache on non-Linux host; build the Linux workspace toolkit in Docker/CI for container Hermes support." >&2
+    return
+  fi
+  if [ ! -x "$OUTDIR/uv" ]; then
+    echo "ERROR: uv is required to install Hermes ACP into the workspace toolkit." >&2
+    exit 1
+  fi
+
+  mkdir -p "$OUTDIR/uv-cache" "$OUTDIR/uv-tools" "$OUTDIR/python"
+  if UV_CACHE_DIR="$OUTDIR/uv-cache" \
+    UV_TOOL_DIR="$OUTDIR/uv-tools" \
+    UV_PYTHON_INSTALL_DIR="$OUTDIR/python" \
+    "$OUTDIR/uv" tool run --offline --from "$HERMES_AGENT_PACKAGE" hermes-acp --help >/dev/null 2>&1; then
+    echo "Hermes ACP package already cached at pinned version; skipping uv install."
+    return
+  fi
+
+  echo "Installing Hermes ACP package with uv ($HERMES_AGENT_PACKAGE)..."
+  UV_CACHE_DIR="$OUTDIR/uv-cache" \
+    UV_TOOL_DIR="$OUTDIR/uv-tools" \
+    UV_PYTHON_INSTALL_DIR="$OUTDIR/python" \
+    "$OUTDIR/uv" tool run --from "$HERMES_AGENT_PACKAGE" hermes-acp --help >/dev/null
+}
+
 install_toolkit_wrappers() {
   source_dir="$SCRIPT_DIR/bin"
   if [ ! -d "$source_dir" ]; then
@@ -873,6 +905,7 @@ install_pinned_npm node-musl
 
 install_uv
 install_acp_packages
+install_hermes_acp_package
 install_toolkit_wrappers
 install_ca_bundle
 

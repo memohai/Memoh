@@ -33,6 +33,9 @@ type StartRequest struct {
 	LocalCommand string
 	LocalArgs    []string
 	Env          []string
+	CleanEnv     bool
+	UnsetEnv     []string
+	Resolved     *ResolvedSessionContext
 	SetupMode    SetupMode
 	// SessionMode, when set, is pinned via session/set_mode right after the
 	// session is created (see acpprofile.Profile.SessionModeID).
@@ -102,9 +105,21 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	if err != nil {
 		return nil, fmt.Errorf("resolve workspace: %w", err)
 	}
-	root, projectPath, backend, err := resolveWorkspacePaths(info, req.ProjectPath)
-	if err != nil {
-		return nil, fmt.Errorf("invalid project_path: %w", err)
+	var root string
+	var projectPath string
+	var backend WorkspaceBackend
+	if req.Resolved != nil {
+		root = strings.TrimSpace(req.Resolved.WorkspaceRoot)
+		projectPath = strings.TrimSpace(req.Resolved.ProjectPath)
+		backend = req.Resolved.Backend
+		if root == "" || projectPath == "" {
+			return nil, errors.New("resolved ACP session context is incomplete")
+		}
+	} else {
+		root, projectPath, backend, err = resolveWorkspacePaths(info, req.ProjectPath)
+		if err != nil {
+			return nil, fmt.Errorf("invalid project_path: %w", err)
+		}
 	}
 
 	client, err := r.workspace.MCPClient(ctx, req.BotID)
@@ -190,7 +205,10 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 		AgentID:       req.AgentID,
 		SetupMode:     req.SetupMode,
 		Env:           req.Env,
+		CleanEnv:      req.CleanEnv,
+		UnsetEnv:      req.UnsetEnv,
 		WorkspaceRoot: root,
+		HermesHome:    resolvedHermesHome(req.Resolved),
 		NoTimeout:     true,
 	})
 	if err != nil {
@@ -212,7 +230,7 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	if preflightGateway == nil {
 		preflightGateway = req.ToolGateway
 	}
-	callbacks := newClientCallbacks(lifecycleCtx, client, root, projectPath, timeout, sink, proc.env, backend == WorkspaceBackendContainer, req.ToolApproval, preflightGateway, toolSession, acpprofile.QuirksFor(req.AgentID))
+	callbacks := newClientCallbacks(lifecycleCtx, client, root, projectPath, timeout, sink, proc.env, req.CleanEnv, req.UnsetEnv, backend == WorkspaceBackendContainer, req.ToolApproval, preflightGateway, toolSession, acpprofile.QuirksFor(req.AgentID))
 	callbacks.logger = r.logger
 	conn := newClientConnection(callbacks, proc, proc)
 
@@ -238,7 +256,8 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	}
 
 	mcpServers := []acp.McpServer{}
-	if initResp.AgentCapabilities.McpCapabilities.Http {
+	forceHTTPMCPServer := acpprofile.ShouldForceHTTPMCPServer(req.AgentID)
+	if initResp.AgentCapabilities.McpCapabilities.Http || forceHTTPMCPServer {
 		if server := memohToolsHTTPMCPServer(toolHTTPURL, toolSession); server.Http != nil {
 			mcpServers = append(mcpServers, server)
 		}
@@ -251,6 +270,7 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 			slog.Bool("mcp_acp", caps.Acp),
 			slog.Bool("mcp_http", caps.Http),
 			slog.Bool("mcp_sse", caps.Sse),
+			slog.Bool("mcp_http_forced", forceHTTPMCPServer && !caps.Http),
 			slog.Bool("memoh_tools_http_configured", toolHTTPURL != ""),
 			slog.String("memoh_tools_http_url", redactedToolHTTPURL(toolHTTPURL)),
 			slog.Int("mcp_servers", len(mcpServers)),

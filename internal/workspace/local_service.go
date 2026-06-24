@@ -323,6 +323,7 @@ func (s *LocalService) WorkspaceInfo(_ context.Context, botID string) (bridge.Wo
 	return bridge.WorkspaceInfo{
 		Backend:        bridge.WorkspaceBackendLocal,
 		DefaultWorkDir: meta.WorkspacePath,
+		LocalDataRoot:  s.dataRoot,
 	}, nil
 }
 

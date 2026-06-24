@@ -2115,6 +2115,16 @@
       "acpClaudeOAuthExchange": "保存 Token",
       "acpClaudeOAuthExchangeFailed": "保存 Claude Token 失败",
       "acpSelfModeHint": "该模式直接使用工作区运行环境里你已配置好的对应 ACP Agent（例如已登录的凭据）。",
+      "acpHermesSelfModeHint": "该模式直接使用当前工作区里已配置好的 Hermes Profile。本地模式可能共享宿主机的 ~/.hermes 凭据；如果需要按 Bot 隔离凭据，请使用 API Key 配置。",
+      "acpHermesSelfModeConfirm": "使用自行配置的 Hermes",
+      "acpHermesProviderPlaceholder": "选择提供商",
+      "acpHermesProviderGemini": "Gemini（Google AI Studio）",
+      "acpHermesProviderOpenRouter": "OpenRouter",
+      "acpHermesProviderOpenAI": "OpenAI API",
+      "acpHermesProviderCustom": "自定义端点",
+      "acpHermesModelPlaceholder": "选择模型",
+      "acpHermesCustomModel": "自定义模型 ID",
+      "acpHermesCustomModelPlaceholder": "输入模型 ID",
       "acpStatusNeedsConfig": "需要配置",
       "acpStatusOff": "已关闭",
       "acpEmptyTitle": "暂无可用 Agent",
@@ -2968,7 +2978,8 @@
         "oauthExchange": "提交",
         "oauthSkip": "稍后再说",
         "oauthSuccess": "授权成功",
-        "oauthExchangeFailed": "授权失败，请重试"
+        "oauthExchangeFailed": "授权失败，请重试",
+        "selfRequiresLocalWorkspace": "{agent} 的自行配置模式需要使用本地工作区。请将工作区后端切换为本地，或返回上一步改用 API Key 配置。"
       }
     },
     "im": {

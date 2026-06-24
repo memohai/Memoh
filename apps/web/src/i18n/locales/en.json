@@ -2115,6 +2115,16 @@
       "acpClaudeOAuthExchange": "Save Token",
       "acpClaudeOAuthExchangeFailed": "Failed to save Claude token",
       "acpSelfModeHint": "Uses the ACP agent you've already configured inside the workspace runtime (e.g. an existing login).",
+      "acpHermesSelfModeHint": "Uses the Hermes profile already configured in this workspace. In local mode this can share the host ~/.hermes credentials; use API Key setup for bot-scoped credentials.",
+      "acpHermesSelfModeConfirm": "Use self-managed Hermes",
+      "acpHermesProviderPlaceholder": "Select a provider",
+      "acpHermesProviderGemini": "Gemini (Google AI Studio)",
+      "acpHermesProviderOpenRouter": "OpenRouter",
+      "acpHermesProviderOpenAI": "OpenAI API",
+      "acpHermesProviderCustom": "Custom endpoint",
+      "acpHermesModelPlaceholder": "Select a model",
+      "acpHermesCustomModel": "Custom model ID",
+      "acpHermesCustomModelPlaceholder": "Enter model ID",
       "acpStatusNeedsConfig": "Needs setup",
       "acpStatusOff": "Disabled",
       "acpEmptyTitle": "No agents available",
@@ -2968,7 +2978,8 @@
         "oauthExchange": "Submit",
         "oauthSkip": "Skip for now",
         "oauthSuccess": "Authorization successful",
-        "oauthExchangeFailed": "Authorization failed, please try again"
+        "oauthExchangeFailed": "Authorization failed, please try again",
+        "selfRequiresLocalWorkspace": "{agent} self-managed setup requires a local workspace. Switch the workspace backend to Local, or go back and choose API Key setup."
       }
     },
     "im": {

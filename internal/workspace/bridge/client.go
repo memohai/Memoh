@@ -167,6 +167,19 @@ type ExecResult struct {
 	ExitCode int32
 }
 
+// ExecOptions controls how a workspace command is launched.
+//
+// Env entries are KEY=value overrides. By default the bridge preserves its
+// process environment and appends Env, matching the historical ExecWithEnv
+// behavior. CleanEnv starts from an empty environment instead. UnsetEnv scrubs
+// inherited environment keys before Env is appended, so explicit Env entries
+// remain authoritative.
+type ExecOptions struct {
+	Env      []string
+	CleanEnv bool
+	UnsetEnv []string
+}
+
 // Exec runs a command and collects all output. For streaming, use ExecStream.
 func (c *Client) Exec(ctx context.Context, command, workDir string, timeout int32) (*ExecResult, error) {
 	return c.ExecWithStdin(ctx, command, workDir, timeout, nil)
@@ -174,21 +187,21 @@ func (c *Client) Exec(ctx context.Context, command, workDir string, timeout int3
 
 // ExecWithEnv runs a command with additional environment variables.
 func (c *Client) ExecWithEnv(ctx context.Context, command, workDir string, timeout int32, env []string) (*ExecResult, error) {
-	return c.exec(ctx, command, workDir, timeout, nil, env)
+	return c.ExecWithOptions(ctx, command, workDir, timeout, nil, ExecOptions{Env: env})
 }
 
 // ExecWithStdin runs a command with optional stdin data.
 func (c *Client) ExecWithStdin(ctx context.Context, command, workDir string, timeout int32, stdinData []byte) (*ExecResult, error) {
-	return c.exec(ctx, command, workDir, timeout, stdinData, nil)
+	return c.ExecWithOptions(ctx, command, workDir, timeout, stdinData, ExecOptions{})
 }
 
 // ExecWithStdinEnv runs a command with optional stdin data and additional
 // environment variables.
 func (c *Client) ExecWithStdinEnv(ctx context.Context, command, workDir string, timeout int32, stdinData []byte, env []string) (*ExecResult, error) {
-	return c.exec(ctx, command, workDir, timeout, stdinData, env)
+	return c.ExecWithOptions(ctx, command, workDir, timeout, stdinData, ExecOptions{Env: env})
 }
 
-func (c *Client) exec(ctx context.Context, command, workDir string, timeout int32, stdinData []byte, env []string) (*ExecResult, error) {
+func (c *Client) ExecWithOptions(ctx context.Context, command, workDir string, timeout int32, stdinData []byte, opts ExecOptions) (*ExecResult, error) {
 	stream, err := c.svc.Exec(ctx)
 	if err != nil {
 		return nil, mapError(err)
@@ -198,8 +211,10 @@ func (c *Client) exec(ctx context.Context, command, workDir string, timeout int3
 	err = stream.Send(&pb.ExecInput{
 		Command:        command,
 		WorkDir:        workDir,
-		Env:            env,
+		Env:            opts.Env,
 		TimeoutSeconds: timeout,
+		CleanEnv:       opts.CleanEnv,
+		UnsetEnv:       opts.UnsetEnv,
 	})
 	if err != nil {
 		return nil, err
@@ -249,6 +264,12 @@ func (c *Client) ExecStream(ctx context.Context, command, workDir string, timeou
 
 // ExecStreamWithEnv returns a bidirectional exec stream with additional env.
 func (c *Client) ExecStreamWithEnv(ctx context.Context, command, workDir string, timeout int32, env []string) (*ExecStream, error) {
+	return c.ExecStreamWithOptions(ctx, command, workDir, timeout, ExecOptions{Env: env})
+}
+
+// ExecStreamWithOptions returns a bidirectional exec stream with environment
+// controls.
+func (c *Client) ExecStreamWithOptions(ctx context.Context, command, workDir string, timeout int32, opts ExecOptions) (*ExecStream, error) {
 	streamCtx, cancel := context.WithCancel(ctx)
 	stream, err := c.svc.Exec(streamCtx)
 	if err != nil {
@@ -260,8 +281,10 @@ func (c *Client) ExecStreamWithEnv(ctx context.Context, command, workDir string,
 	err = stream.Send(&pb.ExecInput{
 		Command:        command,
 		WorkDir:        workDir,
-		Env:            env,
+		Env:            opts.Env,
 		TimeoutSeconds: timeout,
+		CleanEnv:       opts.CleanEnv,
+		UnsetEnv:       opts.UnsetEnv,
 	})
 	if err != nil {
 		cancel()
@@ -314,6 +337,10 @@ func (s *ExecStream) Close() error {
 // ExecStreamPTY opens a bidirectional PTY exec stream.
 // The command runs inside a pseudo-terminal with the given initial size.
 func (c *Client) ExecStreamPTY(ctx context.Context, command, workDir string, cols, rows uint32) (*ExecStream, error) {
+	return c.ExecStreamPTYWithOptions(ctx, command, workDir, cols, rows, ExecOptions{})
+}
+
+func (c *Client) ExecStreamPTYWithOptions(ctx context.Context, command, workDir string, cols, rows uint32, opts ExecOptions) (*ExecStream, error) {
 	streamCtx, cancel := context.WithCancel(ctx)
 	stream, err := c.svc.Exec(streamCtx)
 	if err != nil {
@@ -322,10 +349,13 @@ func (c *Client) ExecStreamPTY(ctx context.Context, command, workDir string, col
 	}
 
 	err = stream.Send(&pb.ExecInput{
-		Command: command,
-		WorkDir: workDir,
-		Pty:     true,
-		Resize:  &pb.TerminalResize{Cols: cols, Rows: rows},
+		Command:  command,
+		WorkDir:  workDir,
+		Env:      opts.Env,
+		Pty:      true,
+		Resize:   &pb.TerminalResize{Cols: cols, Rows: rows},
+		CleanEnv: opts.CleanEnv,
+		UnsetEnv: opts.UnsetEnv,
 	})
 	if err != nil {
 		cancel()

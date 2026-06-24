@@ -356,7 +356,37 @@ run = "cargo check -p a11y-cli"
 [tasks.install-workspace-toolkit]
 description = "Install workspace toolkit"
 depends = ["//:a11y-cli:build"]
-run = "./docker/toolkit/install.sh .toolkit"
+run = """
+#!/bin/bash
+set -euo pipefail
+
+./docker/toolkit/install.sh .toolkit
+
+host_is_glibc_linux=0
+if [ "$(uname -s)" = "Linux" ] && ldd --version 2>&1 | grep -qi 'glibc\\|GNU libc'; then
+  host_is_glibc_linux=1
+fi
+
+if [ "$host_is_glibc_linux" = "1" ]; then
+  exit 0
+fi
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "warning: Docker is required to prewarm the Hermes glibc/manylinux cache on this host." >&2
+  echo "         Hermes ACP may fail to start offline in Debian workspace containers until CI or a glibc host builds the toolkit." >&2
+  exit 0
+fi
+
+hermes_agent_version="${HERMES_AGENT_VERSION:-0.17.0}"
+hermes_agent_package="${HERMES_AGENT_PACKAGE:-hermes-agent[acp,mcp]==$hermes_agent_version}"
+
+docker run --rm \
+  -e HERMES_AGENT_PACKAGE="$hermes_agent_package" \
+  -v "$PWD:/workspace" \
+  -w /workspace \
+  debian:bookworm-slim \
+  sh -lc 'set -eu; apt-get update >/dev/null; DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates >/dev/null; UV_CACHE_DIR=.toolkit/uv-cache UV_TOOL_DIR=.toolkit/uv-tools UV_PYTHON_INSTALL_DIR=.toolkit/python .toolkit/uv tool run --from "$HERMES_AGENT_PACKAGE" hermes-acp --help >/dev/null'
+"""
 
 [tasks."docker:workspace:build"]
 description = "Build the Debian workspace image used by desktop"

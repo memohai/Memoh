@@ -71,7 +71,25 @@ COPY --from=a11y-cli-builder /out-a11y-cli /tmp/a11y-cli
 ENV MEMOH_A11Y_CLI_BINARY=/tmp/a11y-cli
 RUN /tmp/install.sh /assembly/toolkit "${TARGETARCH:-amd64}"
 
+# Add the glibc/manylinux Hermes ACP cache on top of the musl cache produced
+# above. Workspace images are often Debian-based, while the server runtime image
+# is Alpine; Hermes needs both wheel families for offline startup.
+FROM debian:bookworm-slim AS toolkit-assembly-glibc
+ARG TARGETARCH
+
+RUN apt-get update \
+  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    binutils \
+    ca-certificates \
+    wget \
+    xz-utils \
+  && rm -rf /var/lib/apt/lists/*
+COPY docker/toolkit/install.sh /tmp/install.sh
+COPY --from=toolkit-assembly /assembly /assembly
+RUN /tmp/install.sh /assembly/toolkit "${TARGETARCH:-amd64}"
+
 # Assemble runtime directory
+FROM toolkit-assembly-glibc AS toolkit-assembly-final
 COPY --from=bridge-builder /out/bridge /assembly/bridge
 COPY cmd/bridge/template /assembly/templates
 COPY docker/toolkit/bin /assembly/toolkit/bin
@@ -90,12 +108,12 @@ FROM debian:bookworm-slim AS toolkit-acp-bridge-live
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates procps \
   && rm -rf /var/lib/apt/lists/*
-COPY --from=toolkit-assembly /assembly/toolkit /opt/memoh/toolkit
-COPY --from=toolkit-assembly /assembly/bridge /usr/local/bin/bridge
+COPY --from=toolkit-assembly-final /assembly/toolkit /opt/memoh/toolkit
+COPY --from=toolkit-assembly-final /assembly/bridge /usr/local/bin/bridge
 # Templates let the bridge seed /data with AGENTS.md on first boot, matching
 # real workspace containers - agents read AGENTS.md, so the live environment
 # must show them the same files production does.
-COPY --from=toolkit-assembly /assembly/templates /opt/memoh/templates
+COPY --from=toolkit-assembly-final /assembly/templates /opt/memoh/templates
 RUN mkdir -p /data
 ENV BRIDGE_TCP_ADDR=":1455" \
     PATH="/opt/memoh/toolkit/bin:/usr/local/bin:/usr/bin:/bin"
@@ -156,7 +174,7 @@ RUN apt-get update \
     '  ]' \
     '}' > /etc/cni/net.d/10-memoh.conflist
 
-COPY --from=toolkit-assembly /assembly /opt/memoh/runtime
+COPY --from=toolkit-assembly-final /assembly /opt/memoh/runtime
 COPY --from=server-builder /build/memoh-server /app/memoh-server
 COPY --from=server-builder /build/spec /app/spec
 COPY --from=server-builder /build/conf/providers /app/conf/providers
@@ -221,7 +239,7 @@ RUN apk add --no-cache ca-certificates tzdata wget cni-plugins iptables \
       '}' > /etc/cni/net.d/10-memoh.conflist
 
 # Workspace runtime (bind-mounted into bot containers)
-COPY --from=toolkit-assembly /assembly /opt/memoh/runtime
+COPY --from=toolkit-assembly-final /assembly /opt/memoh/runtime
 
 # Server binary, spec, and provider presets
 COPY --from=server-builder /build/memoh-server /app/memoh-server

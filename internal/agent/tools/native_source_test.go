@@ -12,6 +12,7 @@ import (
 
 	"github.com/memohai/memoh/internal/agent/sessionmode"
 	"github.com/memohai/memoh/internal/mcp"
+	sched "github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
 )
@@ -169,6 +170,36 @@ func TestNativeToolSourceAllowAllOnlyAllowsBuiltIns(t *testing.T) {
 	structured, _ := result["structuredContent"].(map[string]any)
 	if structured["ok"] != true {
 		t.Fatalf("CallTool(read) result = %#v", result)
+	}
+}
+
+func TestNativeToolSourceExposesScheduleTools(t *testing.T) {
+	source := NewNativeToolSource(nil, []ToolProvider{
+		NewScheduleProvider(nil, nativeSourceTestScheduler{}),
+	}, NativeToolSourceOptions{AllowAll: true})
+
+	descriptors, err := source.ListTools(context.Background(), mcp.ToolSessionContext{
+		BotID:     "bot-1",
+		SessionID: "session-1",
+	})
+	if err != nil {
+		t.Fatalf("ListTools() error = %v", err)
+	}
+
+	got := map[string]bool{}
+	for _, descriptor := range descriptors {
+		got[descriptor.Name] = true
+	}
+	for _, want := range []ToolName{
+		ToolListSchedule(),
+		ToolGetSchedule(),
+		ToolCreateSchedule(),
+		ToolUpdateSchedule(),
+		ToolDeleteSchedule(),
+	} {
+		if !got[want.String()] {
+			t.Fatalf("schedule tool %q missing from descriptors: %#v", want.String(), descriptors)
+		}
 	}
 }
 
@@ -494,8 +525,8 @@ func TestNativeToolSourceAskUserRequiresInteractiveStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools with list capability: %v", err)
 	}
-	if len(tools) != 0 {
-		t.Fatalf("tools with list-only capability = %#v, want none", tools)
+	if len(tools) != 1 || tools[0].Name != ToolAskUser().String() {
+		t.Fatalf("tools with list-only capability = %#v, want ask_user", tools)
 	}
 	result, err := source.CallTool(context.Background(), mcp.ToolSessionContext{
 		BotID:            "bot-1",
@@ -508,11 +539,11 @@ func TestNativeToolSourceAskUserRequiresInteractiveStream(t *testing.T) {
 			map[string]any{"text": "Question?", "kind": "text"},
 		},
 	})
-	if !errors.Is(err, mcp.ErrToolNotFound) {
-		t.Fatalf("CallTool without delivery capability error = %v, want tool not found", err)
+	if err != nil {
+		t.Fatalf("CallTool without delivery capability error = %v", err)
 	}
-	if result != nil {
-		t.Fatalf("CallTool without delivery capability result = %#v, want nil", result)
+	if isError, _ := result["isError"].(bool); !isError {
+		t.Fatalf("CallTool without delivery capability result = %#v, want MCP error result", result)
 	}
 	result, err = source.CallTool(context.Background(), mcp.ToolSessionContext{
 		BotID:            "bot-1",
@@ -522,8 +553,8 @@ func TestNativeToolSourceAskUserRequiresInteractiveStream(t *testing.T) {
 	}, ToolAskUser().String(), map[string]any{
 		"questions": []any{},
 	})
-	if !errors.Is(err, mcp.ErrToolNotFound) {
-		t.Fatalf("CallTool invalid args without delivery capability error = %v, want tool not found", err)
+	if err != nil {
+		t.Fatalf("CallTool invalid args without delivery capability error = %v", err)
 	}
 	if result != nil && strings.Contains(fmt.Sprintf("%#v", result), "invalid_arguments") {
 		t.Fatalf("CallTool invalid args without delivery capability should not return retry guidance: %#v", result)
@@ -921,6 +952,28 @@ type nativeSourceTestProvider struct {
 func (p *nativeSourceTestProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
 	p.session = session
 	return p.tools, nil
+}
+
+type nativeSourceTestScheduler struct{}
+
+func (nativeSourceTestScheduler) List(context.Context, string) ([]sched.Schedule, error) {
+	return nil, nil
+}
+
+func (nativeSourceTestScheduler) Get(context.Context, string) (sched.Schedule, error) {
+	return sched.Schedule{}, nil
+}
+
+func (nativeSourceTestScheduler) Create(context.Context, string, sched.CreateRequest) (sched.Schedule, error) {
+	return sched.Schedule{}, nil
+}
+
+func (nativeSourceTestScheduler) Update(context.Context, string, sched.UpdateRequest) (sched.Schedule, error) {
+	return sched.Schedule{}, nil
+}
+
+func (nativeSourceTestScheduler) Delete(context.Context, string) error {
+	return nil
 }
 
 type nativeSourceUsageProvider struct{}

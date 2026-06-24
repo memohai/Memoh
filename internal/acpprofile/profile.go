@@ -11,6 +11,8 @@ const (
 	AgentCodexName      = "Codex"
 	AgentClaudeCodeID   = "claude-code"
 	AgentClaudeCodeName = "Claude Code"
+	AgentHermesID       = "hermes"
+	AgentHermesName     = "Hermes"
 
 	MetadataKeyACP = "acp"
 
@@ -38,10 +40,14 @@ type Profile struct {
 	SessionConfigValues map[string]string
 	// ToolQuirks override the default title heuristics for this agent; nil
 	// means DefaultToolQuirks. See ToolQuirks for why this lives here.
-	ToolQuirks        *ToolQuirks
-	ManagedFields     []ManagedField
-	SupportedBackends []string
-	SetupModes        []string
+	ToolQuirks *ToolQuirks
+	// ForceHTTPMCPServer sends HTTP MCP servers even when the agent omits
+	// mcpCapabilities.http. This is for agents that accept session/new
+	// mcpServers but do not advertise the capability yet.
+	ForceHTTPMCPServer bool
+	ManagedFields      []ManagedField
+	SupportedBackends  []string
+	SetupModes         []string
 }
 
 type ManagedField struct {
@@ -88,6 +94,7 @@ var registry = map[string]Profile{}
 func init() {
 	Register(codexProfile())
 	Register(claudeCodeProfile())
+	Register(hermesProfile())
 }
 
 // Register adds (or replaces) a profile in the registry. Intended to be
@@ -189,6 +196,61 @@ func claudeCodeProfile() Profile {
 	}
 }
 
+func hermesProfile() Profile {
+	return Profile{
+		ID:           AgentHermesID,
+		DisplayName:  AgentHermesName,
+		Description:  "Hermes Agent ACP adapter",
+		Command:      "hermes-acp",
+		LocalCommand: "hermes-acp",
+		ToolQuirks: &ToolQuirks{
+			WriteTitleKeywords: []string{"write", "write file", "create", "create file", "new file"},
+			GenericExecTitles: []string{
+				"shell", "shell command", "command", "run", "run command",
+				"execute", "exec", "bash", "terminal", "terminal command",
+				"execute_code", "execute code", "python", "python code",
+			},
+		},
+		ForceHTTPMCPServer: true,
+		ManagedFields: []ManagedField{
+			{
+				ID:          "provider",
+				Label:       "Provider",
+				Type:        "text",
+				Required:    true,
+				Placeholder: "gemini",
+				Help:        "Select Gemini, OpenRouter, OpenAI API, or a custom OpenAI-compatible endpoint.",
+			},
+			{
+				ID:          "model",
+				Label:       "Model",
+				Type:        "text",
+				Required:    true,
+				Placeholder: "gemini-3.5-flash",
+				Help:        "Hermes model name for managed sessions.",
+			},
+			{
+				ID:          "base_url",
+				Label:       "Base URL",
+				Type:        "url",
+				Placeholder: "https://api.example.com/v1",
+				Help:        "Only required when Provider is Custom endpoint.",
+			},
+			{
+				ID:          "api_key",
+				Label:       "API key",
+				Type:        "password",
+				Required:    true,
+				Sensitive:   true,
+				Placeholder: "sk-...",
+				Help:        "Written to the bot-scoped Hermes .env file.",
+			},
+		},
+		SupportedBackends: []string{"local", "container"},
+		SetupModes:        []string{setupModeSelf, setupModeAPIKey},
+	}
+}
+
 // List returns all registered public profiles, sorted by ID for stable
 // API responses.
 func List() []PublicProfile {
@@ -205,6 +267,11 @@ func Lookup(id string) (Profile, bool) {
 	id = NormalizeAgentID(id)
 	profile, ok := registry[id]
 	return profile, ok
+}
+
+func ShouldForceHTTPMCPServer(agentID string) bool {
+	profile, ok := Lookup(agentID)
+	return ok && profile.ForceHTTPMCPServer
 }
 
 func (p Profile) Public() PublicProfile {
@@ -265,7 +332,7 @@ func ParseAgentSetup(metadata map[string]any, agentID string) AgentSetup {
 					}
 				}
 			}
-			setup.Mode = normalizeSetupMode(setup.Mode)
+			setup.Mode = normalizeSetupMode(setup.Mode, setup.Managed)
 			return setup
 		}
 	}
@@ -273,11 +340,17 @@ func ParseAgentSetup(metadata map[string]any, agentID string) AgentSetup {
 	return setup
 }
 
-func normalizeSetupMode(mode string) string {
+func normalizeSetupMode(mode string, managed map[string]string) string {
 	mode = NormalizeAgentID(mode)
 	switch mode {
 	case setupModeOAuth, setupModeSelf:
 		return mode
+	case "managed":
+		authType := NormalizeAgentID(managed["auth_type"])
+		if authType == "provider_oauth" || authType == setupModeOAuth {
+			return setupModeOAuth
+		}
+		return setupModeAPIKey
 	case setupModeAPIKey, "":
 		return setupModeAPIKey
 	default:
@@ -320,6 +393,39 @@ func ScrubMetadataForResponse(metadata map[string]any) map[string]any {
 		}
 	}
 	return cloned
+}
+
+func ScrubMetadataForExport(metadata map[string]any) (map[string]any, bool) {
+	cloned := cloneMap(metadata)
+	acpConfig, ok := metadataRecord(cloned[MetadataKeyACP])
+	if !ok {
+		return cloned, false
+	}
+	agents, ok := metadataRecord(acpConfig["agents"])
+	if !ok {
+		return cloned, false
+	}
+	changed := false
+	for rawAgentID, rawAgent := range agents {
+		agentConfig, ok := metadataRecord(rawAgent)
+		if !ok {
+			continue
+		}
+		managed, ok := metadataRecord(agentConfig["managed"])
+		if !ok {
+			continue
+		}
+		profile, _ := Lookup(rawAgentID)
+		sensitive := sensitiveFieldSet(profile)
+		for key := range managed {
+			if !sensitive[key] && !looksSensitiveKey(key) {
+				continue
+			}
+			delete(managed, key)
+			changed = true
+		}
+	}
+	return cloned, changed
 }
 
 func MergeSensitiveFieldsForUpdate(existing, incoming map[string]any) map[string]any {

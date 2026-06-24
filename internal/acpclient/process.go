@@ -48,11 +48,16 @@ type processOptions struct {
 	AgentID   string
 	SetupMode SetupMode
 	Env       []string
+	CleanEnv  bool
+	UnsetEnv  []string
 	// WorkspaceRoot is the real (host) workspace root for local backends. It is
 	// used to point Codex at a bot-scoped CODEX_HOME so BYOK credentials stay
 	// isolated from the user's real ~/.codex.
 	WorkspaceRoot string
-	NoTimeout     bool
+	// HermesHome is the bot-scoped HERMES_HOME resolved by SessionPool and
+	// reused by Runner so config writes and process startup share one path.
+	HermesHome string
+	NoTimeout  bool
 }
 
 type bridgeProcess struct {
@@ -91,7 +96,7 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 		return nil, err
 	}
 
-	resolvedCommand, err := resolveCommand(ctx, client, command, workDir, env, opts.Backend)
+	resolvedCommand, err := resolveCommand(ctx, client, command, workDir, env, opts)
 	if err != nil {
 		if cleanup != nil {
 			cleanup()
@@ -100,7 +105,11 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 	}
 
 	shellCommand := buildShellCommand(resolvedCommand, args)
-	execStream, err := client.ExecStreamWithEnv(ctx, shellCommand, workDir, timeoutSeconds, env)
+	execStream, err := client.ExecStreamWithOptions(ctx, shellCommand, workDir, timeoutSeconds, bridge.ExecOptions{
+		Env:      env,
+		CleanEnv: opts.CleanEnv,
+		UnsetEnv: opts.UnsetEnv,
+	})
 	if err != nil {
 		if cleanup != nil {
 			cleanup()
@@ -192,6 +201,18 @@ func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir strin
 	env := withoutEnvKeys(opts.Env, "HOME", "PATH", "CODEX_HOME")
 	switch mode {
 	case SetupModeAPIKey, SetupModeOAuth:
+		if isHermesAgent(opts.AgentID) {
+			hermesHome := strings.TrimSpace(opts.HermesHome)
+			if hermesHome == "" {
+				return nil, nil, errors.New("container Hermes managed setup requires HERMES_HOME isolation")
+			}
+			env = withoutEnvKeys(withoutBlockedEnvNames(opts.Env, HermesManagedUnsetEnvKeys()), "HOME", "PATH", "CODEX_HOME")
+			env = append(env, "HOME="+dataMountPath, "PATH="+defaultContainerPath, "HERMES_HOME="+hermesHome)
+			if err := client.Mkdir(ctx, hermesHome); err != nil {
+				return nil, nil, fmt.Errorf("prepare Hermes HOME: %w", err)
+			}
+			return env, nil, nil
+		}
 		homeDir := dataMountPath
 		tempHomeDir := "/tmp/memoh-acp/" + uuid.NewString()
 		if !isCodexAgent(opts.AgentID) {
@@ -218,7 +239,11 @@ func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir strin
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if homeDir == tempHomeDir {
-				_, _ = client.ExecWithEnv(cleanupCtx, "rm -rf "+escapeShellArg(homeDir), workDir, 5, env)
+				_, _ = client.ExecWithOptions(cleanupCtx, "rm -rf "+escapeShellArg(homeDir), workDir, 5, nil, bridge.ExecOptions{
+					Env:      env,
+					CleanEnv: opts.CleanEnv,
+					UnsetEnv: opts.UnsetEnv,
+				})
 			}
 		}
 		return env, cleanup, nil
@@ -227,6 +252,13 @@ func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir strin
 		env = append(env, "PATH="+defaultContainerPath)
 		if isCodexAgent(opts.AgentID) {
 			env = append(env, "HOME="+dataMountPath)
+		}
+		if isHermesAgent(opts.AgentID) {
+			home := dataMountPath + "/.hermes"
+			env = append(env, "HOME="+dataMountPath, "HERMES_HOME="+home)
+			if err := client.Mkdir(ctx, home); err != nil {
+				return nil, nil, fmt.Errorf("prepare Hermes self HOME: %w", err)
+			}
 		}
 		return env, nil, nil
 	default:
@@ -268,6 +300,14 @@ func prepareLocalProcessEnv(opts processOptions) ([]string, error) {
 		env = withoutEnvKeys(env, "CLAUDE_CONFIG_DIR")
 		env = append(env, "CLAUDE_CONFIG_DIR="+configDir)
 	}
+	if isHermesAgent(opts.AgentID) {
+		home := strings.TrimSpace(opts.HermesHome)
+		if home == "" {
+			return nil, errors.New("local Hermes BYOK requires HERMES_HOME isolation")
+		}
+		env = withoutBlockedEnvNames(env, HermesManagedUnsetEnvKeys())
+		env = append(env, "HERMES_HOME="+home)
+	}
 	if len(env) == 0 {
 		return nil, nil
 	}
@@ -304,14 +344,14 @@ func normalizeSetupMode(mode SetupMode) SetupMode {
 	}
 }
 
-func resolveCommand(ctx context.Context, client *bridge.Client, command, workDir string, env []string, backend WorkspaceBackend) (string, error) {
+func resolveCommand(ctx context.Context, client *bridge.Client, command, workDir string, env []string, opts processOptions) (string, error) {
 	command = strings.TrimSpace(command)
-	resolved, lastResult, err := resolveCommandOnce(ctx, client, command, workDir, env, backend)
-	if err != nil || resolved != "" || backend != WorkspaceBackendContainer {
+	resolved, lastResult, err := resolveCommandOnce(ctx, client, command, workDir, env, opts)
+	if err != nil || resolved != "" || opts.Backend != WorkspaceBackendContainer {
 		if resolved != "" || err != nil {
 			return resolved, err
 		}
-		return "", commandNotAvailableError(command, lastResult, backend)
+		return "", commandNotAvailableError(command, lastResult, opts.Backend)
 	}
 
 	deadline := time.Now().Add(commandResolveWindow)
@@ -324,7 +364,7 @@ func resolveCommand(ctx context.Context, client *bridge.Client, command, workDir
 		case <-timer.C:
 		}
 
-		resolved, result, err := resolveCommandOnce(ctx, client, command, workDir, env, backend)
+		resolved, result, err := resolveCommandOnce(ctx, client, command, workDir, env, opts)
 		if result != nil {
 			lastResult = result
 		}
@@ -335,17 +375,17 @@ func resolveCommand(ctx context.Context, client *bridge.Client, command, workDir
 			return resolved, nil
 		}
 	}
-	return "", commandNotAvailableError(command, lastResult, backend)
+	return "", commandNotAvailableError(command, lastResult, opts.Backend)
 }
 
-func resolveCommandOnce(ctx context.Context, client *bridge.Client, command, workDir string, env []string, backend WorkspaceBackend) (string, *bridge.ExecResult, error) {
+func resolveCommandOnce(ctx context.Context, client *bridge.Client, command, workDir string, env []string, opts processOptions) (string, *bridge.ExecResult, error) {
 	command = strings.TrimSpace(command)
 	if !isPlainCommand(command) {
 		return command, nil, nil
 	}
 
 	if strings.Contains(command, "/") {
-		result, err := checkCommand(ctx, client, "test -x "+escapeShellArg(command), workDir, env)
+		result, err := checkCommand(ctx, client, "test -x "+escapeShellArg(command), workDir, env, opts)
 		if err != nil {
 			return "", nil, fmt.Errorf("check ACP command %q: %w", command, err)
 		}
@@ -355,7 +395,7 @@ func resolveCommandOnce(ctx context.Context, client *bridge.Client, command, wor
 		return "", result, nil
 	}
 
-	result, err := checkCommand(ctx, client, "command -v "+escapeShellArg(command)+" >/dev/null 2>&1", workDir, env)
+	result, err := checkCommand(ctx, client, "command -v "+escapeShellArg(command)+" >/dev/null 2>&1", workDir, env, opts)
 	if err != nil {
 		return "", nil, fmt.Errorf("check ACP command %q: %w", command, err)
 	}
@@ -364,9 +404,9 @@ func resolveCommandOnce(ctx context.Context, client *bridge.Client, command, wor
 	}
 	lastResult := result
 
-	if backend == WorkspaceBackendContainer {
+	if opts.Backend == WorkspaceBackendContainer {
 		toolkitCommand := containerToolkitBin + "/" + command
-		toolkitResult, err := checkCommand(ctx, client, "test -x "+escapeShellArg(toolkitCommand), workDir, env)
+		toolkitResult, err := checkCommand(ctx, client, "test -x "+escapeShellArg(toolkitCommand), workDir, env, opts)
 		if err != nil {
 			return "", nil, fmt.Errorf("check ACP command %q: %w", command, err)
 		}
@@ -379,8 +419,12 @@ func resolveCommandOnce(ctx context.Context, client *bridge.Client, command, wor
 	return "", lastResult, nil
 }
 
-func checkCommand(ctx context.Context, client *bridge.Client, check, workDir string, env []string) (*bridge.ExecResult, error) {
-	return client.ExecWithEnv(ctx, check, workDir, 10, env)
+func checkCommand(ctx context.Context, client *bridge.Client, check, workDir string, env []string, opts processOptions) (*bridge.ExecResult, error) {
+	return client.ExecWithOptions(ctx, check, workDir, 10, nil, bridge.ExecOptions{
+		Env:      env,
+		CleanEnv: opts.CleanEnv,
+		UnsetEnv: opts.UnsetEnv,
+	})
 }
 
 func commandNotAvailableError(command string, result *bridge.ExecResult, backend WorkspaceBackend) error {
@@ -406,6 +450,28 @@ func isPlainCommand(command string) bool {
 		return false
 	}
 	return !strings.ContainsAny(command, " \t\n'\"\\$&;|<>*?()[]{}!`")
+}
+
+func HermesManagedUnsetEnvKeys() []string {
+	return []string{
+		"HERMES_HOME",
+		"HERMES_*",
+		hermesManagedCustomProviderEnvKey,
+		"OPENAI_API_KEY",
+		"OPENAI_BASE_URL",
+		"OPENAI_API_BASE",
+		"OPENROUTER_API_KEY",
+		"OPENROUTER_BASE_URL",
+		"ANTHROPIC_API_KEY",
+		"ANTHROPIC_BASE_URL",
+		"ANTHROPIC_API_BASE",
+		"GOOGLE_API_KEY",
+		"GOOGLE_BASE_URL",
+		"GOOGLE_API_BASE",
+		"GEMINI_API_KEY",
+		"GEMINI_BASE_URL",
+		"GEMINI_API_BASE",
+	}
 }
 
 func (p *bridgeProcess) Read(b []byte) (int, error) {
@@ -459,6 +525,47 @@ func withoutEnvKeys(env []string, keys ...string) []string {
 		out = append(out, item)
 	}
 	return out
+}
+
+func withoutBlockedEnvNames(env []string, blocked []string) []string {
+	out := make([]string, 0, len(env))
+	for _, item := range env {
+		name, _, ok := strings.Cut(item, "=")
+		if !ok {
+			name = item
+		}
+		if envNameBlocked(name, blocked) {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func envNameBlocked(name string, keys []string) bool {
+	// Keep wildcard semantics aligned with bridgesvc.filterUnsetEnv. The client
+	// side filters ACP terminal p.Env before sending it; the bridge side filters
+	// inherited os.Environ before launching the process.
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	for _, key := range keys {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if strings.HasSuffix(key, "*") {
+			if prefix := strings.TrimSuffix(key, "*"); prefix != "" && strings.HasPrefix(name, prefix) {
+				return true
+			}
+			continue
+		}
+		if name == key {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *bridgeProcess) errorWithStderr(err error) error {

@@ -28,8 +28,8 @@ func TestACPProfilesResponseIsSafeMetadata(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(resp.Items) != 2 {
-		t.Fatalf("profiles len = %d, want 2", len(resp.Items))
+	if len(resp.Items) != 3 {
+		t.Fatalf("profiles len = %d, want 3", len(resp.Items))
 	}
 	profile := resp.Items[0]
 	if profile.ID != acpprofile.AgentClaudeCodeID {
@@ -44,7 +44,12 @@ func TestACPProfilesResponseIsSafeMetadata(t *testing.T) {
 	}
 
 	raw := rec.Body.String()
-	for _, forbidden := range []string{"codex-acp", "claude-agent-acp", "npx", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"} {
+	profile = resp.Items[2]
+	if profile.ID != acpprofile.AgentHermesID {
+		t.Fatalf("profile id = %q", profile.ID)
+	}
+
+	for _, forbidden := range []string{"codex-acp", "claude-agent-acp", "hermes-acp", "npx", "uvx", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "HERMES_HOME"} {
 		if jsonContainsSubstring(raw, forbidden) {
 			t.Fatalf("profiles response leaked unsafe implementation detail %q: %s", forbidden, raw)
 		}

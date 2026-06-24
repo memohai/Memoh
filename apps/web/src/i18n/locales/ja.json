@@ -2096,6 +2096,16 @@
       "acpClaudeOAuthExchange": "Tokenの保存",
       "acpClaudeOAuthExchangeFailed": "クロードTokenの保存に失敗しました",
       "acpSelfModeHint": "を使用します。ACPWorkspace ランタイム内ですでに構成されているエージェント (既存のログインなど)。",
+      "acpHermesSelfModeHint": "このWorkspaceで構成済みの Hermes Profile を使用します。ローカルモードではホストの ~/.hermes 認証情報を共有する場合があります。Botごとに認証情報を分離するには API Key 設定を使用してください。",
+      "acpHermesSelfModeConfirm": "自己管理の Hermes を使用",
+      "acpHermesProviderPlaceholder": "Providerを選択",
+      "acpHermesProviderGemini": "Gemini（Google AI Studio）",
+      "acpHermesProviderOpenRouter": "OpenRouter",
+      "acpHermesProviderOpenAI": "OpenAI API",
+      "acpHermesProviderCustom": "カスタムエンドポイント",
+      "acpHermesModelPlaceholder": "Modelを選択",
+      "acpHermesCustomModel": "カスタムModel ID",
+      "acpHermesCustomModelPlaceholder": "Model IDを入力",
       "acpRequiredField": "{agent} には {field} が必要です。",
       "toolApprovalBypass": "バイパス",
       "toolApprovalMustReview": "要検討",
@@ -2924,7 +2934,8 @@
         "oauthExchange": "提出する",
         "oauthSkip": "今のところスキップしてください",
         "oauthSuccess": "認可成功",
-        "oauthExchangeFailed": "認証に失敗しました。もう一度お試しください。"
+        "oauthExchangeFailed": "認証に失敗しました。もう一度お試しください。",
+        "selfRequiresLocalWorkspace": "{agent} のセルフ管理設定にはローカルワークスペースが必要です。ワークスペースのバックエンドをローカルに切り替えるか、前の手順に戻って API Key 設定を選択してください。"
       }
     },
     "im": {

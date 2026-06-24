@@ -110,7 +110,7 @@
       <Button
         variant="ghost"
         class="mb-6 text-foreground/85"
-        @click="backToList()"
+        @click="closeDetail()"
       >
         <ChevronLeft class="size-4" />
         {{ $t('bots.tabs.acp') }}
@@ -122,7 +122,8 @@
         :bot-id="botId"
         :profile="selectedProfile"
         :form="form"
-        @commit="persistACPForm"
+        :pending-self-confirm="selectedPendingHermesSelfConfirm"
+        @commit="handleDetailCommit"
       />
     </section>
   </SwapTransition>
@@ -169,6 +170,7 @@ const form = reactive<ACPForm>({
 const lastPersistedSnapshot = ref('')
 const persistRunning = ref(false)
 const persistQueued = ref(false)
+const pendingHermesSelfConfirm = ref<Set<string>>(new Set())
 
 const { view, direction, openDetail, backToList } = useViewSwap()
 const selectedId = ref('')
@@ -185,6 +187,9 @@ const profiles = computed<AcpprofilePublicProfile[]>(() => profileData.value?.it
 
 const selectedProfile = computed(() =>
   profiles.value.find(p => normalizeACPAgentID(p.id) === selectedId.value) ?? null,
+)
+const selectedPendingHermesSelfConfirm = computed(() =>
+  selectedId.value ? pendingHermesSelfConfirm.value.has(selectedId.value) : false,
 )
 
 const { data: bot } = useQuery({
@@ -218,7 +223,7 @@ watch([bot, profiles], ([value, list]) => {
 // If the open agent vanishes after a profile refetch, fall back to the list.
 watch(profiles, (list) => {
   if (view.value === 'detail' && selectedId.value && !list.some(p => normalizeACPAgentID(p.id) === selectedId.value)) {
-    backToList()
+    closeDetail()
   }
 })
 
@@ -231,24 +236,34 @@ function openAgent(profile: AcpprofilePublicProfile) {
   openDetail()
 }
 
-// The switch is the user's *intent* ("I want to use this agent"), not a claim
-// that they've finished setup. So it always commits immediately — no gate.
-// Smart guidance: if turning ON and the agent lacks credentials for its current
-// setup_mode, carry them into the detail page to finish configuring rather than
-// leaving a half-ready switch with no hint. Self-managed mode has no credentials
-// to supply here, so it is always "ready" and never triggers the jump.
 function setAgentEnabled(profile: AcpprofilePublicProfile, enabled: boolean) {
-  agentForm(profile).enabled = enabled
-  void persistACPForm()
-  if (enabled && agentNeedsConfig(profile)) {
+  const id = normalizeACPAgentID(profile.id)
+  const agent = agentForm(profile)
+  agent.enabled = enabled
+  if (enabled && shouldOpenAgentOnEnable(profile)) {
     openAgent(profile)
+    if (isHermesSelfMode(profile)) {
+      if (id) pendingHermesSelfConfirm.value.add(id)
+      return
+    }
+    if (agentNeedsConfig(profile)) return
   }
+  if (id) pendingHermesSelfConfirm.value.delete(id)
+  void persistACPForm()
+}
+
+function shouldOpenAgentOnEnable(profile: AcpprofilePublicProfile): boolean {
+  return agentNeedsConfig(profile) || isHermesSelfMode(profile)
 }
 
 function agentNeedsConfig(profile: AcpprofilePublicProfile): boolean {
   const agent = agentForm(profile)
   if (agent.setup_mode === 'self') return false
   return findMissingRequiredManagedField(profile, agent.managed, agent.setup_mode) !== null
+}
+
+function isHermesSelfMode(profile: AcpprofilePublicProfile): boolean {
+  return normalizeACPAgentID(profile.id) === 'hermes' && agentForm(profile).setup_mode === 'self'
 }
 
 // Drives the row's status Badge / dot. Four honest states:
@@ -269,7 +284,7 @@ async function persistACPForm() {
     persistQueued.value = true
     return
   }
-  const normalized = normalizeACPForm(form, profiles.value)
+  const normalized = normalizedFormForPersist()
   const snapshot = JSON.stringify(normalized)
   if (snapshot === lastPersistedSnapshot.value) return
   persistRunning.value = true
@@ -284,6 +299,9 @@ async function persistACPForm() {
     lastPersistedSnapshot.value = snapshot
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
+    if (!persistQueued.value) {
+      applyMetadataToForm(bot.value?.metadata as Record<string, unknown> | undefined, profiles.value, true)
+    }
   } finally {
     persistRunning.value = false
     if (persistQueued.value) {
@@ -293,11 +311,74 @@ async function persistACPForm() {
   }
 }
 
-function applyMetadataToForm(metadata: Record<string, unknown> | undefined, list: AcpprofilePublicProfile[]) {
+interface ACPCommitOptions {
+  confirmSelf?: boolean
+}
+
+function handleDetailCommit(options?: ACPCommitOptions) {
+  const id = selectedId.value
+  if (id && (options?.confirmSelf || !selectedProfile.value || !isHermesSelfMode(selectedProfile.value))) {
+    pendingHermesSelfConfirm.value.delete(id)
+  }
+  void persistACPForm()
+}
+
+function closeDetail() {
+  discardPendingHermesSelfConfirm()
+  backToList()
+}
+
+function normalizedFormForPersist(): ACPForm {
+  const normalized = normalizeACPForm(form, profiles.value)
+  const persisted = parsePersistedSnapshot()
+  for (const id of pendingHermesSelfConfirm.value) {
+    const existing = persisted?.agents?.[id]
+    if (existing) {
+      normalized.agents[id] = {
+        enabled: existing.enabled,
+        setup_mode: existing.setup_mode,
+        managed: { ...existing.managed },
+      }
+      continue
+    }
+    if (normalized.agents[id]) {
+      normalized.agents[id].enabled = false
+    }
+  }
+  return normalized
+}
+
+function discardPendingHermesSelfConfirm() {
+  const id = selectedId.value
+  if (!id || !pendingHermesSelfConfirm.value.has(id)) return
+  const profile = selectedProfile.value
+  const persisted = parsePersistedSnapshot()?.agents?.[id]
+  if (persisted) {
+    form.agents[id] = {
+      enabled: persisted.enabled,
+      setup_mode: persisted.setup_mode,
+      managed: { ...persisted.managed },
+    }
+  } else if (profile) {
+    form.agents[id] = emptyACPAgentForm(profile)
+  }
+  pendingHermesSelfConfirm.value.delete(id)
+}
+
+function parsePersistedSnapshot(): ACPForm | null {
+  if (!lastPersistedSnapshot.value) return null
+  try {
+    return JSON.parse(lastPersistedSnapshot.value) as ACPForm
+  } catch {
+    return null
+  }
+}
+
+function applyMetadataToForm(metadata: Record<string, unknown> | undefined, list: AcpprofilePublicProfile[], force = false) {
   const next = readACPConfig(metadata, list)
   const nextSnapshot = JSON.stringify(next)
   const currentSnapshot = JSON.stringify(normalizeACPForm(form, list))
-  if ((persistRunning.value || persistQueued.value || currentSnapshot !== lastPersistedSnapshot.value) && nextSnapshot === lastPersistedSnapshot.value) {
+  if (!force && (persistRunning.value || persistQueued.value || currentSnapshot !== lastPersistedSnapshot.value) && nextSnapshot === lastPersistedSnapshot.value) {
     return
   }
   for (const key of Object.keys(form.agents)) {

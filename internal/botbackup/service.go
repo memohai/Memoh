@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/memohai/memoh/internal/acl"
+	"github.com/memohai/memoh/internal/acpprofile"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/db"
@@ -46,6 +47,10 @@ type WorkspaceData interface {
 	CountData(ctx context.Context, botID string) (int, error)
 }
 
+type ACPRuntimeCloser interface {
+	CloseBotAgentRuntimes(botID, agentID string) error
+}
+
 type Service struct {
 	logger          *slog.Logger
 	db              *pgxpool.Pool
@@ -63,7 +68,10 @@ type Service struct {
 	fetchProviders  *fetchpkg.Service
 	memoryProviders *memprovider.Service
 	workspace       WorkspaceData
+	acpRuntimes     ACPRuntimeCloser
 }
+
+const acpManagedSecretsWarning = "ACP managed secrets were excluded from bot/profile.json; re-enter API keys after import" // #nosec G101 -- user-facing warning text, not a credential.
 
 type Params struct {
 	Logger          *slog.Logger
@@ -82,6 +90,7 @@ type Params struct {
 	FetchProviders  *fetchpkg.Service
 	MemoryProviders *memprovider.Service
 	Workspace       WorkspaceData
+	ACPRuntimes     ACPRuntimeCloser
 }
 
 func New(params Params) *Service {
@@ -106,6 +115,7 @@ func New(params Params) *Service {
 		fetchProviders:  params.FetchProviders,
 		memoryProviders: params.MemoryProviders,
 		workspace:       params.Workspace,
+		acpRuntimes:     params.ACPRuntimes,
 	}
 }
 
@@ -130,6 +140,10 @@ func (s *Service) Export(ctx context.Context, botID string, opts ExportOptions, 
 	if originalBot.ID != "" {
 		data.Profile = originalBot
 		manifest.SourceBotName = originalBot.DisplayName
+	}
+	if scrubbed, changed := scrubBotACPSecretsForBackup(data.Profile); changed {
+		data.Profile = scrubbed
+		manifest.Warnings = append(manifest.Warnings, acpManagedSecretsWarning)
 	}
 
 	zw := zip.NewWriter(dst)
@@ -220,6 +234,18 @@ func (s *Service) Export(ctx context.Context, botID string, opts ExportOptions, 
 	}
 	manifest.Checksums = writer.checksum
 	return writer.writeManifest()
+}
+
+func scrubBotACPSecretsForBackup(profile any) (any, bool) {
+	bot, err := roundTripJSON[bots.Bot](profile)
+	if err != nil {
+		return profile, false
+	}
+	scrubbed, changed := acpprofile.ScrubMetadataForExport(bot.Metadata)
+	if changed {
+		bot.Metadata = scrubbed
+	}
+	return bot, changed
 }
 
 func (s *Service) pauseBotForExport(ctx context.Context, botID string) (bots.Bot, func(), error) {

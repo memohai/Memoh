@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	acp "github.com/coder/acp-go-sdk"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
@@ -330,6 +331,236 @@ func TestPrepareProcessEnvContainerSelfGenericAgentDoesNotOverrideHome(t *testin
 	}
 	if got := envValue(env, "PATH"); got != defaultContainerPath {
 		t.Fatalf("generic self PATH = %q, want %q", got, defaultContainerPath)
+	}
+}
+
+func TestPrepareProcessEnvContainerSelfHermesUsesPersistentHome(t *testing.T) {
+	client, server := newRecordingBridgeClient(t)
+	env, cleanup, err := prepareProcessEnv(context.Background(), client, "/data", processOptions{
+		Backend:   WorkspaceBackendContainer,
+		AgentID:   "hermes",
+		Env:       []string{"HOME=/profile-home", "PATH=/profile-bin"},
+		SetupMode: SetupModeSelf,
+	})
+	if err != nil {
+		t.Fatalf("prepareProcessEnv() error = %v", err)
+	}
+	if cleanup != nil {
+		t.Fatalf("self cleanup should be nil")
+	}
+	if got := envValue(env, "HOME"); got != dataMountPath {
+		t.Fatalf("self Hermes HOME = %q, want %q", got, dataMountPath)
+	}
+	if got := envValue(env, "HERMES_HOME"); got != dataMountPath+"/.hermes" {
+		t.Fatalf("self Hermes HERMES_HOME = %q", got)
+	}
+	if dirs := server.dirs(); len(dirs) != 1 || dirs[0] != dataMountPath+"/.hermes" {
+		t.Fatalf("prepare dirs = %#v, want Hermes self home", dirs)
+	}
+	if writes := server.writes(); len(writes) != 0 {
+		t.Fatalf("self writes = %#v, want no managed config", writes)
+	}
+}
+
+func TestPrepareProcessEnvContainerHermesManagedUsesStableHermesHome(t *testing.T) {
+	client, server := newRecordingBridgeClient(t)
+	env, cleanup, err := prepareProcessEnv(context.Background(), client, "/data", processOptions{
+		Backend:    WorkspaceBackendContainer,
+		AgentID:    "hermes",
+		SetupMode:  SetupModeAPIKey,
+		Env:        []string{"HOME=/tmp/profile", "PATH=/bad", "HERMES_HOME=/host/hermes", "MEMOH_HERMES_API_KEY=sk-host-memoh", "OPENAI_API_KEY=sk-host", "OPENROUTER_API_KEY=sk-host-router", "CUSTOM_FLAG=1"},
+		HermesHome: "/data/.memoh-hermes",
+	})
+	if err != nil {
+		t.Fatalf("prepareProcessEnv() error = %v", err)
+	}
+	if cleanup != nil {
+		t.Fatalf("Hermes managed cleanup should be nil")
+	}
+	if got := envValue(env, "HERMES_HOME"); got != "/data/.memoh-hermes" {
+		t.Fatalf("HERMES_HOME = %q, want /data/.memoh-hermes; env=%v", got, env)
+	}
+	if got := envValue(env, "HOME"); got != dataMountPath {
+		t.Fatalf("HOME = %q, want %q", got, dataMountPath)
+	}
+	if got := envValue(env, "PATH"); got != defaultContainerPath {
+		t.Fatalf("PATH = %q, want %q", got, defaultContainerPath)
+	}
+	if envHasKeyValue(env, "HERMES_HOME", "/host/hermes") {
+		t.Fatalf("host HERMES_HOME leaked into env: %v", env)
+	}
+	if envHasKey(env, "MEMOH_HERMES_API_KEY") || envHasKey(env, "OPENAI_API_KEY") || envHasKey(env, "OPENROUTER_API_KEY") {
+		t.Fatalf("host provider key leaked into env: %v", env)
+	}
+	dirs := server.dirs()
+	if len(dirs) != 1 || dirs[0] != "/data/.memoh-hermes" {
+		t.Fatalf("prepare dirs = %#v, want Hermes home", dirs)
+	}
+}
+
+func TestPrepareProcessEnvContainerHermesManagedRequiresHermesHome(t *testing.T) {
+	client, _ := newRecordingBridgeClient(t)
+	_, _, err := prepareProcessEnv(context.Background(), client, "/data", processOptions{
+		Backend:   WorkspaceBackendContainer,
+		AgentID:   "hermes",
+		SetupMode: SetupModeAPIKey,
+	})
+	if err == nil || !strings.Contains(err.Error(), "HERMES_HOME") {
+		t.Fatalf("prepareProcessEnv() error = %v, want HERMES_HOME isolation error", err)
+	}
+}
+
+func TestPrepareProcessEnvLocalHermesManagedRequiresHermesHome(t *testing.T) {
+	client, _ := newRecordingBridgeClient(t)
+	_, _, err := prepareProcessEnv(context.Background(), client, "/workspace", processOptions{
+		Backend:   WorkspaceBackendLocal,
+		AgentID:   "hermes",
+		SetupMode: SetupModeAPIKey,
+	})
+	if err == nil || !strings.Contains(err.Error(), "HERMES_HOME") {
+		t.Fatalf("prepareProcessEnv() error = %v, want HERMES_HOME isolation error", err)
+	}
+}
+
+func TestPrepareProcessEnvLocalHermesManagedFiltersHostKeys(t *testing.T) {
+	client, _ := newRecordingBridgeClient(t)
+	env, cleanup, err := prepareProcessEnv(context.Background(), client, "/workspace", processOptions{
+		Backend:    WorkspaceBackendLocal,
+		AgentID:    "hermes",
+		SetupMode:  SetupModeAPIKey,
+		Env:        []string{"HERMES_HOME=/host/hermes", "MEMOH_HERMES_API_KEY=sk-host-memoh", "OPENAI_API_KEY=sk-host", "OPENAI_BASE_URL=https://host-openai.example/v1", "OPENROUTER_BASE_URL=https://host-router.example/api", "CUSTOM_FLAG=1"},
+		HermesHome: "/memoh/local/acp/hermes/bot-1",
+	})
+	if err != nil {
+		t.Fatalf("prepareProcessEnv() error = %v", err)
+	}
+	if cleanup != nil {
+		t.Fatalf("local Hermes managed cleanup should be nil")
+	}
+	if got := envValue(env, "HERMES_HOME"); got != "/memoh/local/acp/hermes/bot-1" {
+		t.Fatalf("HERMES_HOME = %q, env=%v", got, env)
+	}
+	if envHasKey(env, "MEMOH_HERMES_API_KEY") || envHasKey(env, "OPENAI_API_KEY") || envHasKey(env, "OPENAI_BASE_URL") || envHasKey(env, "OPENROUTER_BASE_URL") {
+		t.Fatalf("host provider env leaked into local env: %v", env)
+	}
+	if !envHasKeyValue(env, "CUSTOM_FLAG", "1") {
+		t.Fatalf("custom env was not preserved: %v", env)
+	}
+}
+
+func TestStartBridgeProcessHermesManagedPassesCleanEnvControls(t *testing.T) {
+	client, server := newRecordingBridgeClient(t)
+	proc, err := startBridgeProcess(context.Background(), client, "hermes-acp", nil, "/data", time.Minute, processOptions{
+		Backend:    WorkspaceBackendContainer,
+		AgentID:    "hermes",
+		SetupMode:  SetupModeAPIKey,
+		HermesHome: "/data/.memoh-hermes",
+		CleanEnv:   true,
+		UnsetEnv:   HermesManagedUnsetEnvKeys(),
+	})
+	if err != nil {
+		t.Fatalf("startBridgeProcess() error = %v", err)
+	}
+	server.waitForRecordWithTimeout(t, int32(time.Minute.Seconds()), 2*time.Second)
+	_ = proc.Close()
+	processRecord, ok := findRecordWithTimeout(server.records(), int32(time.Minute.Seconds()))
+	if !ok {
+		t.Fatalf("missing process exec record: %#v", server.records())
+	}
+	if !processRecord.CleanEnv {
+		t.Fatalf("CleanEnv = false, want true")
+	}
+	if !hasString(processRecord.UnsetEnv, "HERMES_*") || !hasString(processRecord.UnsetEnv, "MEMOH_HERMES_API_KEY") || !hasString(processRecord.UnsetEnv, "OPENAI_API_KEY") || !hasString(processRecord.UnsetEnv, "OPENAI_BASE_URL") {
+		t.Fatalf("UnsetEnv = %#v, want Hermes/provider cleanup keys", processRecord.UnsetEnv)
+	}
+}
+
+func TestCreateTerminalFiltersBlockedHermesEnv(t *testing.T) {
+	client, server := newRecordingBridgeClient(t)
+	manager := newTerminalManager(
+		context.Background(),
+		client,
+		"/data",
+		"/data",
+		7,
+		[]string{"HERMES_HOME=/data/.memoh-hermes"},
+		true,
+		HermesManagedUnsetEnvKeys(),
+		false,
+		nil,
+	)
+	term, err := manager.CreateTerminal(context.Background(), acp.CreateTerminalRequest{
+		Command: "env",
+		Env: []acp.EnvVariable{
+			{Name: "OPENAI_API_KEY", Value: "sk-agent"},
+			{Name: "MEMOH_HERMES_API_KEY", Value: "sk-agent-memoh"},
+			{Name: "OPENROUTER_API_KEY", Value: "sk-router"},
+			{Name: "CUSTOM_FLAG", Value: "1"},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("CreateTerminal() error = %v", err)
+	}
+	if _, err := manager.WaitForTerminalExit(context.Background(), acp.WaitForTerminalExitRequest{TerminalId: term.TerminalId}); err != nil {
+		t.Fatalf("WaitForTerminalExit() error = %v", err)
+	}
+	server.waitForRecordWithTimeout(t, 7, time.Second)
+	record, ok := findRecordWithTimeout(server.records(), 7)
+	if !ok {
+		t.Fatalf("missing terminal exec record: %#v", server.records())
+	}
+	if !record.CleanEnv {
+		t.Fatalf("terminal CleanEnv = false, want true")
+	}
+	if !envHasKeyValue(record.Env, "HERMES_HOME", "/data/.memoh-hermes") {
+		t.Fatalf("terminal env missing managed HERMES_HOME: %#v", record.Env)
+	}
+	if !envHasKeyValue(record.Env, "CUSTOM_FLAG", "1") {
+		t.Fatalf("terminal env missing allowed custom flag: %#v", record.Env)
+	}
+	if envHasKey(record.Env, "MEMOH_HERMES_API_KEY") || envHasKey(record.Env, "OPENAI_API_KEY") || envHasKey(record.Env, "OPENROUTER_API_KEY") {
+		t.Fatalf("terminal env leaked provider key: %#v", record.Env)
+	}
+	for _, key := range []string{"HERMES_*", "MEMOH_HERMES_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "GOOGLE_API_KEY", "GOOGLE_BASE_URL", "GEMINI_API_KEY", "GEMINI_BASE_URL"} {
+		if !hasString(record.UnsetEnv, key) {
+			t.Fatalf("terminal UnsetEnv = %#v, missing %q", record.UnsetEnv, key)
+		}
+	}
+}
+
+func TestCreateTerminalPassesUnsetEnvWithoutCleanEnv(t *testing.T) {
+	client, server := newRecordingBridgeClient(t)
+	manager := newTerminalManager(
+		context.Background(),
+		client,
+		"/workspace",
+		"/workspace",
+		7,
+		[]string{"HERMES_HOME=/memoh/local/acp/hermes/bot-1"},
+		false,
+		HermesManagedUnsetEnvKeys(),
+		false,
+		nil,
+	)
+	term, err := manager.CreateTerminal(context.Background(), acp.CreateTerminalRequest{Command: "env"}, nil)
+	if err != nil {
+		t.Fatalf("CreateTerminal() error = %v", err)
+	}
+	if _, err := manager.WaitForTerminalExit(context.Background(), acp.WaitForTerminalExitRequest{TerminalId: term.TerminalId}); err != nil {
+		t.Fatalf("WaitForTerminalExit() error = %v", err)
+	}
+	server.waitForRecordWithTimeout(t, 7, time.Second)
+	record, ok := findRecordWithTimeout(server.records(), 7)
+	if !ok {
+		t.Fatalf("missing terminal exec record: %#v", server.records())
+	}
+	if record.CleanEnv {
+		t.Fatalf("terminal CleanEnv = true, want false for local managed env")
+	}
+	for _, key := range []string{"HERMES_*", "MEMOH_HERMES_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "GOOGLE_API_KEY", "GOOGLE_BASE_URL", "GEMINI_API_KEY", "GEMINI_BASE_URL"} {
+		if !hasString(record.UnsetEnv, key) {
+			t.Fatalf("terminal UnsetEnv = %#v, missing %q", record.UnsetEnv, key)
+		}
 	}
 }
 
@@ -682,10 +913,12 @@ func TestStartBridgeProcessReportsToolkitFallbackFailure(t *testing.T) {
 }
 
 type execRecord struct {
-	Command string
-	WorkDir string
-	Env     []string
-	Timeout int32
+	Command  string
+	WorkDir  string
+	Env      []string
+	CleanEnv bool
+	UnsetEnv []string
+	Timeout  int32
 }
 
 type writeRecord struct {
@@ -716,10 +949,12 @@ func (s *recordingBridgeServer) Exec(stream grpc.BidiStreamingServer[pb.ExecInpu
 		s.seqs[input.GetCommand()] = s.seqs[input.GetCommand()][1:]
 	}
 	s.execs = append(s.execs, execRecord{
-		Command: input.GetCommand(),
-		WorkDir: input.GetWorkDir(),
-		Env:     append([]string(nil), input.GetEnv()...),
-		Timeout: input.GetTimeoutSeconds(),
+		Command:  input.GetCommand(),
+		WorkDir:  input.GetWorkDir(),
+		Env:      append([]string(nil), input.GetEnv()...),
+		CleanEnv: input.GetCleanEnv(),
+		UnsetEnv: append([]string(nil), input.GetUnsetEnv()...),
+		Timeout:  input.GetTimeoutSeconds(),
 	})
 	s.mu.Unlock()
 	if err := stream.Send(&pb.ExecOutput{Stream: pb.ExecOutput_EXIT, ExitCode: exitCode}); err != nil {
@@ -880,6 +1115,15 @@ func envHasKey(env []string, key string) bool {
 	prefix := key + "="
 	for _, item := range env {
 		if strings.HasPrefix(item, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
 			return true
 		}
 	}

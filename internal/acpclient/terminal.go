@@ -30,6 +30,8 @@ type terminalManager struct {
 	defaultCwd  string
 	timeout     int32
 	baseEnv     []string
+	cleanEnv    bool
+	unsetEnv    []string
 	virtualRoot bool
 	events      *toolEventEmitter
 	limit       ToolOutputLimit
@@ -70,7 +72,7 @@ type terminal struct {
 	onDone      func(*terminal)
 }
 
-func newTerminalManager(ctx context.Context, client *bridge.Client, root, defaultCwd string, timeoutSeconds int32, baseEnv []string, virtualRoot bool, events *toolEventEmitter) *terminalManager { //nolint:contextcheck // terminal streams must live for the ACP turn, not a single RPC callback.
+func newTerminalManager(ctx context.Context, client *bridge.Client, root, defaultCwd string, timeoutSeconds int32, baseEnv []string, cleanEnv bool, unsetEnv []string, virtualRoot bool, events *toolEventEmitter) *terminalManager { //nolint:contextcheck // terminal streams must live for the ACP turn, not a single RPC callback.
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = defaultTerminalTimeout
 	}
@@ -84,6 +86,8 @@ func newTerminalManager(ctx context.Context, client *bridge.Client, root, defaul
 		defaultCwd:  defaultCwd,
 		timeout:     timeoutSeconds,
 		baseEnv:     append([]string(nil), baseEnv...),
+		cleanEnv:    cleanEnv,
+		unsetEnv:    append([]string(nil), unsetEnv...),
 		virtualRoot: virtualRoot,
 		events:      events,
 		terminals:   map[string]*terminal{},
@@ -166,9 +170,16 @@ func (m *terminalManager) CreateTerminal(_ context.Context, p acp.CreateTerminal
 		if name == "" {
 			continue
 		}
+		if envNameBlocked(name, m.unsetEnv) {
+			continue
+		}
 		env = append(env, name+"="+item.Value)
 	}
-	stream, err := m.client.ExecStreamWithEnv(m.ctx, command, cwd, m.timeout, env) //nolint:contextcheck // use the ACP turn context so terminal output survives the create RPC.
+	stream, err := m.client.ExecStreamWithOptions(m.ctx, command, cwd, m.timeout, bridge.ExecOptions{ //nolint:contextcheck // use the ACP turn context so terminal output survives the create RPC.
+		Env:      env,
+		CleanEnv: m.cleanEnv,
+		UnsetEnv: m.unsetEnv,
+	})
 	if err != nil {
 		m.emitToolCallEnd(toolCallID, "exec", input, toolErrorResult(err), err)
 		return acp.CreateTerminalResponse{}, err
