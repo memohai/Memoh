@@ -33,6 +33,7 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
+	"github.com/memohai/memoh/internal/webhooktunnel"
 )
 
 func runServe() {
@@ -123,8 +124,11 @@ func options() fx.Option {
 			provideACPToolSource,
 			provideToolGatewayService,
 			provideBackgroundManager,
+			webhooktunnel.NewManager,
 			provideToolProviders,
 			provideServerHandler(handlers.NewPingHandler),
+			provideServerHandler(handlers.NewWebhookTunnelHandler),
+			provideServerHandler(handlers.NewConfiguredPublicMediaHandler),
 			provideServerHandler(provideAuthHandler),
 			provideServerHandler(provideMemoryHandler),
 			provideServerHandler(provideMessageHandler),
@@ -186,6 +190,8 @@ func options() fx.Option {
 			startEmailManager,
 			startContainerReconciliation,
 			startBackgroundTaskCleanup,
+			startWebhookTunnelListener,
+			startWebhookTunnel,
 			startAudioTempStoreCleanup,
 			startServer,
 		),

@@ -438,9 +438,26 @@ func allowsPreparedPublicURL(channelType ChannelType, item Attachment) bool {
 		return true
 	case ChannelTypeDingtalk:
 		return item.Type == AttachmentImage || item.Type == AttachmentGIF
+	case ChannelTypeLine:
+		return allowsLinePreparedPublicURL(item)
 	default:
 		return false
 	}
+}
+
+func allowsLinePreparedPublicURL(item Attachment) bool {
+	if item.Type != "" && item.Type != AttachmentImage {
+		return false
+	}
+	raw := strings.TrimSpace(item.URL)
+	if raw == "" || len(raw) > 2000 {
+		return false
+	}
+	parsed, err := neturl.Parse(raw)
+	if err != nil || parsed == nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+		return false
+	}
+	return IsPublicHost(parsed.Hostname())
 }
 
 func applyPreparedAsset(store OutboundAttachmentStore, asset media.Asset, botID string, item *Attachment, sourcePath string) {

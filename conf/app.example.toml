@@ -9,6 +9,29 @@ format = "text"
 [server]
 addr = ":8080"
 
+[webhook_tunnel]
+# Optional Cloudflare Quick Tunnel support for local webhook testing.
+# disabled: no tunnel. managed: this server starts cloudflared. external: read
+# an already-running cloudflared metrics endpoint, useful for Docker sidecars.
+mode = "disabled"
+# Public HTTPS base used for channel webhook callbacks and signed public media
+# URLs. Set this to a public HTTPS origin without a path or port when Memoh is
+# already reachable via your own domain; leave empty to use the Cloudflare Quick
+# Tunnel URL when tunnel mode is enabled.
+public_base_url = ""
+# Webhook-only listener used by managed/external tunnel mode. It exposes only
+# /health, /channels/:platform/webhook/:config_id, and signed channel public
+# media URLs.
+listen_addr = "127.0.0.1:18734"
+# Path to cloudflared for managed mode. Empty means PATH lookup.
+cloudflared_path = ""
+# Local URL cloudflared forwards to. Empty derives from listen_addr.
+target_url = ""
+# Local cloudflared metrics address for managed mode.
+metrics_addr = "127.0.0.1:18735"
+# Existing cloudflared metrics URL for external mode.
+metrics_url = ""
+
 [admin]
 username = "admin"
 password = "admin123"

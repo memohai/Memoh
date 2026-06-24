@@ -96,6 +96,7 @@ func (h *UsersHandler) Register(e *echo.Echo) {
 	botGroup.GET("/:id/channel/:platform", h.GetBotChannelConfig)
 	botGroup.PUT("/:id/channel/:platform", h.UpsertBotChannelConfig)
 	botGroup.PATCH("/:id/channel/:platform/status", h.UpdateBotChannelStatus)
+	botGroup.POST("/:id/channel/:platform/webhook-endpoint", h.SetBotChannelWebhookEndpoint)
 	botGroup.DELETE("/:id/channel/:platform", h.DeleteBotChannelConfig)
 	botGroup.POST("/:id/channel/:platform/send", h.SendBotMessage)
 	botGroup.POST("/:id/channel/:platform/send_chat", h.SendBotMessageSession)
@@ -1010,6 +1011,7 @@ func (h *UsersHandler) GetBotChannelConfig(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
+// @Failure 502 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{id}/channel/{platform} [put].
 func (h *UsersHandler) UpsertBotChannelConfig(c echo.Context) error {
@@ -1041,7 +1043,9 @@ func (h *UsersHandler) UpsertBotChannelConfig(c echo.Context) error {
 	resp, err := h.channelLifecycle.UpsertBotChannelConfig(c.Request().Context(), botID, channelType, req)
 	if err != nil {
 		status := http.StatusInternalServerError
-		if errors.Is(err, channel.ErrEnableChannelFailed) {
+		if errors.Is(err, channel.ErrChannelDiscoveryFailed) {
+			status = http.StatusBadGateway
+		} else if errors.Is(err, channel.ErrEnableChannelFailed) {
 			status = http.StatusBadRequest
 		}
 		return echo.NewHTTPError(status, err.Error())
@@ -1060,6 +1064,7 @@ func (h *UsersHandler) UpsertBotChannelConfig(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
+// @Failure 502 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{id}/channel/{platform}/status [patch].
 func (h *UsersHandler) UpdateBotChannelStatus(c echo.Context) error {
@@ -1091,10 +1096,62 @@ func (h *UsersHandler) UpdateBotChannelStatus(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusNotFound, err.Error())
 		}
 		status := http.StatusInternalServerError
-		if errors.Is(err, channel.ErrEnableChannelFailed) {
+		if errors.Is(err, channel.ErrChannelDiscoveryFailed) {
+			status = http.StatusBadGateway
+		} else if errors.Is(err, channel.ErrEnableChannelFailed) {
 			status = http.StatusBadRequest
 		}
 		return echo.NewHTTPError(status, err.Error())
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+// SetBotChannelWebhookEndpoint godoc
+// @Summary Set bot channel webhook endpoint
+// @Description Set the platform-side webhook endpoint for a bot channel.
+// @Tags bots
+// @Param id path string true "Bot ID"
+// @Param platform path string true "Channel platform"
+// @Param payload body channel.SetWebhookEndpointRequest true "Webhook endpoint payload"
+// @Success 200 {object} channel.SetWebhookEndpointResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 502 {object} ErrorResponse
+// @Router /bots/{id}/channel/{platform}/webhook-endpoint [post].
+func (h *UsersHandler) SetBotChannelWebhookEndpoint(c echo.Context) error {
+	channelIdentityID, err := h.requireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
+		return err
+	}
+	channelType, err := h.registry.ParseChannelType(c.Param("platform"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	var req channel.SetWebhookEndpointRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if h.channelStore == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "channel store not configured")
+	}
+	resp, err := h.channelStore.SetWebhookEndpoint(c.Request().Context(), botID, channelType, req)
+	if err != nil {
+		switch {
+		case errors.Is(err, channel.ErrChannelConfigNotFound):
+			return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		case errors.Is(err, channel.ErrInvalidWebhookEndpoint), errors.Is(err, channel.ErrWebhookEndpointUnsupported):
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		default:
+			return echo.NewHTTPError(http.StatusBadGateway, err.Error())
+		}
 	}
 	return c.JSON(http.StatusOK, resp)
 }

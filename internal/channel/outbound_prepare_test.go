@@ -246,6 +246,71 @@ func TestPrepareOutboundMessage_TelegramPublicURLPassthrough(t *testing.T) {
 	}
 }
 
+func TestPrepareOutboundMessage_LINEPublicURLPassthroughOnlyForDirectlySendableURL(t *testing.T) {
+	t.Parallel()
+
+	store := channeltest.NewMemoryAttachmentStore()
+	const rawURL = "https://example.com/photo.jpg"
+	prepared, err := PrepareOutboundMessage(context.Background(), store, ChannelConfig{
+		BotID:       "bot-1",
+		ChannelType: ChannelTypeLine,
+	}, OutboundMessage{
+		Target: "chat-1",
+		Message: Message{
+			Attachments: []Attachment{{
+				Type: AttachmentImage,
+				URL:  rawURL,
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareOutboundMessage failed: %v", err)
+	}
+	att := prepared.Message.Attachments[0]
+	if att.Kind != PreparedAttachmentPublicURL {
+		t.Fatalf("expected public_url, got %s", att.Kind)
+	}
+	if att.PublicURL != rawURL {
+		t.Fatalf("unexpected public URL: %q", att.PublicURL)
+	}
+}
+
+func TestPrepareOutboundMessage_LINEHTTPURLFallsBackToDownloadAndUpload(t *testing.T) {
+	t.Parallel()
+
+	imgData := []byte("fake-image-content")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Header().Set("Content-Disposition", `attachment; filename="photo.jpg"`)
+		_, _ = w.Write(imgData)
+	}))
+	defer srv.Close()
+
+	store := channeltest.NewMemoryAttachmentStore()
+	prepared, err := PrepareOutboundMessage(context.Background(), store, ChannelConfig{
+		BotID:       "bot-1",
+		ChannelType: ChannelTypeLine,
+	}, OutboundMessage{
+		Target: "chat-1",
+		Message: Message{
+			Attachments: []Attachment{{
+				Type: AttachmentImage,
+				URL:  srv.URL + "/photo.jpg",
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareOutboundMessage failed: %v", err)
+	}
+	att := prepared.Message.Attachments[0]
+	if att.Kind != PreparedAttachmentUpload {
+		t.Fatalf("expected upload after HTTP download, got %s", att.Kind)
+	}
+	if att.Mime != "image/jpeg" {
+		t.Fatalf("expected image/jpeg, got %q", att.Mime)
+	}
+}
+
 func TestPrepareOutboundMessage_DingtalkPublicURLOnlyForImageAndGIF(t *testing.T) {
 	t.Parallel()
 
