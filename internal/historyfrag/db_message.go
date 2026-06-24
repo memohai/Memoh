@@ -184,10 +184,24 @@ func mediaRefsFromDBMessage(msg messagepkg.Message) []MediaRef {
 			ContentHash: contentHash,
 			Role:        strings.TrimSpace(asset.Role),
 			Ordinal:     asset.Ordinal,
-			Mime:        strings.TrimSpace(asset.Mime),
-			SizeBytes:   asset.SizeBytes,
 			Name:        strings.TrimSpace(asset.Name),
+			Metadata:    cloneMetadata(asset.Metadata),
 		})
+	}
+	return out
+}
+
+func cloneMetadata(metadata map[string]any) map[string]any {
+	if len(metadata) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(metadata)
+	if err != nil {
+		return nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil
 	}
 	return out
 }

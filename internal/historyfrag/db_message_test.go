@@ -86,9 +86,8 @@ func TestFromDBMessageBuildsDurableRecordScopeAndFrag(t *testing.T) {
 		record.Assets[0].ContentHash != "asset-hash-1" ||
 		record.Assets[0].Role != "attachment" ||
 		record.Assets[0].Ordinal != 2 ||
-		record.Assets[0].Mime != "image/png" ||
-		record.Assets[0].SizeBytes != 1234 ||
-		record.Assets[0].Name != "image.png" {
+		record.Assets[0].Name != "image.png" ||
+		record.Assets[0].Metadata["width"] != float64(640) {
 		t.Fatalf("record lost media refs: %#v", record.Assets)
 	}
 
@@ -220,6 +219,66 @@ func TestFromDBMessageContentHashChangesWhenAssetsChange(t *testing.T) {
 	}
 	if originalFrag.Ref.ContentHash == "" || editedFrag.Ref.ContentHash == "" || originalFrag.Ref.ContentHash == editedFrag.Ref.ContentHash {
 		t.Fatalf("content hash should fence asset changes: original=%#v edited=%#v", originalFrag.Ref, editedFrag.Ref)
+	}
+}
+
+func TestFromDBMessageContentHashUsesPersistedAssetIdentityFields(t *testing.T) {
+	t.Parallel()
+
+	msg := messagepkg.Message{
+		ID:      "row-1",
+		BotID:   "bot-1",
+		Role:    "user",
+		Content: persistedModelMessage(t, conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("with asset")}),
+		Assets: []messagepkg.MessageAsset{{
+			ContentHash: "asset-hash-1",
+			Role:        "attachment",
+			Ordinal:     0,
+			Mime:        "image/png",
+			SizeBytes:   1234,
+			StorageKey:  "objects/asset-hash-1",
+			Name:        "image.png",
+			Metadata:    map[string]any{"width": float64(640)},
+		}},
+	}
+	inMemory, err := FromDBMessage(msg, ScopeFallback{})
+	if err != nil {
+		t.Fatalf("inMemory FromDBMessage failed: %v", err)
+	}
+	msg.Assets[0].Mime = ""
+	msg.Assets[0].SizeBytes = 0
+	msg.Assets[0].StorageKey = ""
+	hydrated, err := FromDBMessage(msg, ScopeFallback{})
+	if err != nil {
+		t.Fatalf("hydrated FromDBMessage failed: %v", err)
+	}
+
+	if ToFrag(inMemory).Ref.ContentHash != ToFrag(hydrated).Ref.ContentHash {
+		t.Fatalf("non-persisted asset fields changed source hash: inMemory=%#v hydrated=%#v", ToFrag(inMemory).Ref, ToFrag(hydrated).Ref)
+	}
+}
+
+func TestFromDBMessageContentHashIgnoresCompactionMarker(t *testing.T) {
+	t.Parallel()
+
+	msg := messagepkg.Message{
+		ID:      "row-1",
+		BotID:   "bot-1",
+		Role:    "user",
+		Content: persistedModelMessage(t, conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("hello")}),
+	}
+	uncompacted, err := FromDBMessage(msg, ScopeFallback{})
+	if err != nil {
+		t.Fatalf("uncompacted FromDBMessage failed: %v", err)
+	}
+	msg.CompactID = "compact-1"
+	compacted, err := FromDBMessage(msg, ScopeFallback{})
+	if err != nil {
+		t.Fatalf("compacted FromDBMessage failed: %v", err)
+	}
+
+	if ToFrag(uncompacted).Ref.ContentHash != ToFrag(compacted).Ref.ContentHash {
+		t.Fatalf("compaction marker changed source hash: uncompacted=%#v compacted=%#v", ToFrag(uncompacted).Ref, ToFrag(compacted).Ref)
 	}
 }
 
