@@ -215,7 +215,7 @@ const open = defineModel<boolean>('open')
 const props = withDefaults(defineProps<{
   providers?: Array<{ name?: string }>
   hideTrigger?: boolean
-  presetDomain?: 'llm' | 'video'
+  presetDomain?: 'llm' | 'video' | 'speech' | 'transcription'
   importModels?: (providerId: string) => Promise<{ created?: number, skipped?: number } | null | undefined>
 }>(), {
   providers: () => [],
@@ -228,7 +228,9 @@ const { run } = useDialogMutation()
 
 const customPresetId = 'custom'
 const availablePresets = computed(() => providerPresets.filter(preset => (preset.domain ?? 'llm') === props.presetDomain))
-const defaultPresetId = computed(() => props.presetDomain === 'video' ? (availablePresets.value[0]?.id ?? customPresetId) : customPresetId)
+// Only the LLM domain offers a free-form "custom" entry; the others (video,
+// speech, transcription) always start on a concrete preset.
+const defaultPresetId = computed(() => props.presetDomain === 'llm' ? customPresetId : (availablePresets.value[0]?.id ?? customPresetId))
 const selectedPresetId = ref(defaultPresetId.value)
 
 const selectedPreset = computed(() => getPresetById(selectedPresetId.value))
@@ -341,7 +343,8 @@ const providerSchema = toTypedSchema(z.object({
       message: 'API key is required',
     })
   }
-  if (value.client_type !== 'github-copilot' && !value.base_url?.trim()) {
+  const requiresBaseUrl = value.client_type !== 'github-copilot' && selectedPreset.value?.requiresBaseUrl !== false
+  if (requiresBaseUrl && !value.base_url?.trim()) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['base_url'],

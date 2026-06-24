@@ -2,7 +2,7 @@
 import { computed, provide, reactive, ref, watch } from 'vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { Button } from '@memohai/ui'
-import { getSpeechProviders, getTranscriptionProviders } from '@memohai/sdk'
+import { getSpeechProviders, getTranscriptionProviders, postSpeechProvidersByIdImportModels, postTranscriptionProvidersByIdImportModels } from '@memohai/sdk'
 import type { AudioSpeechProviderResponse } from '@memohai/sdk'
 import { Plus } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -40,7 +40,29 @@ provide('curTranscriptionProvider', curTranscription)
 
 const { view, direction, openDetail, backToList } = useViewSwap()
 const detailKind = ref<'speech' | 'transcription'>('speech')
-const openStatus = reactive({ addOpen: false })
+const openStatus = reactive({ addSpeechOpen: false, addTranscriptionOpen: false })
+
+async function importSpeechModels(providerId: string) {
+  const { data } = await postSpeechProvidersByIdImportModels({
+    path: { id: providerId },
+    throwOnError: true,
+  })
+  queryCache.invalidateQueries({ key: ['speech-providers'] })
+  queryCache.invalidateQueries({ key: ['speech-models'] })
+  queryCache.invalidateQueries({ key: ['speech-provider-models', providerId] })
+  return data
+}
+
+async function importTranscriptionModels(providerId: string) {
+  const { data } = await postTranscriptionProvidersByIdImportModels({
+    path: { id: providerId },
+    throwOnError: true,
+  })
+  queryCache.invalidateQueries({ key: ['transcription-providers'] })
+  queryCache.invalidateQueries({ key: ['transcription-models'] })
+  queryCache.invalidateQueries({ key: ['transcription-provider-models', providerId] })
+  return data
+}
 
 function sortByEnabled<T extends { enable?: boolean }>(list: T[]) {
   return [...list].sort((a, b) => Number(b.enable !== false) - Number(a.enable !== false))
@@ -75,11 +97,15 @@ function openTranscription(provider: AudioSpeechProviderResponse) {
   openDetail()
 }
 
-// A provider becomes voice-capable once added under Providers, so refresh both
-// lists when the add dialog closes.
-watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
+// Each section adds its own kind of provider, so refresh just that list when
+// the matching add dialog closes.
+watch(() => openStatus.addSpeechOpen, (isOpen, wasOpen) => {
   if (wasOpen && !isOpen) {
     queryCache.invalidateQueries({ key: ['speech-providers'] })
+  }
+})
+watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
+  if (wasOpen && !isOpen) {
     queryCache.invalidateQueries({ key: ['transcription-providers'] })
   }
 })
@@ -126,7 +152,7 @@ watch(transcriptionProviders, (list) => {
             variant="secondary"
             size="sm"
             class="shrink-0"
-            @click="openStatus.addOpen = true"
+            @click="openStatus.addSpeechOpen = true"
           >
             <Plus class="size-4" />
             {{ t('common.add') }}
@@ -184,7 +210,7 @@ watch(transcriptionProviders, (list) => {
             variant="secondary"
             size="sm"
             class="shrink-0"
-            @click="openStatus.addOpen = true"
+            @click="openStatus.addTranscriptionOpen = true"
           >
             <Plus class="size-4" />
             {{ t('common.add') }}
@@ -228,9 +254,18 @@ watch(transcriptionProviders, (list) => {
       </section>
 
       <AddProvider
-        v-model:open="openStatus.addOpen"
-        :providers="addProviderNames"
+        v-model:open="openStatus.addSpeechOpen"
         hide-trigger
+        preset-domain="speech"
+        :providers="addProviderNames"
+        :import-models="importSpeechModels"
+      />
+      <AddProvider
+        v-model:open="openStatus.addTranscriptionOpen"
+        hide-trigger
+        preset-domain="transcription"
+        :providers="addProviderNames"
+        :import-models="importTranscriptionModels"
       />
     </section>
 

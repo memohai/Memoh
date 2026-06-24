@@ -290,13 +290,13 @@ const coreNavItems = computed<NavItem[]>(() => filterItems([
   { title: t('sidebar.bots'), name: 'bots', icon: MousePointer2, flipX: true },
   { title: t('sidebar.providers'), name: 'providers', icon: Box },
   { title: t('sidebar.memory'), name: 'memory', icon: Database },
-  { title: t('sidebar.webSearch'), name: 'web-search', icon: Globe },
-  { title: t('sidebar.voice'), name: 'voice', icon: AudioLines },
-  { title: t('sidebar.video'), name: 'video', icon: Video },
 ]))
 
 const integrationsNavItems = computed<NavItem[]>(() => filterItems([
+  { title: t('sidebar.webSearch'), name: 'web-search', icon: Globe },
+  { title: t('sidebar.voice'), name: 'voice', icon: AudioLines },
   { title: t('sidebar.email'), name: 'email', icon: Mail },
+  { title: t('sidebar.video'), name: 'video', icon: Video },
   { title: t('sidebar.supermarket'), name: 'supermarket', icon: Store },
   { title: t('sidebar.usage'), name: 'usage', icon: ChartNoAxesColumn },
   { title: t('sidebar.people'), name: 'people', icon: Users, adminOnly: true },

@@ -73,7 +73,13 @@
                         :key="type"
                         :value="type"
                       >
-                        {{ $t(`webSearch.fetchProviderNames.${type}`, type) }}
+                        <span class="flex items-center gap-2">
+                          <SearchProviderLogo
+                            :provider="type"
+                            size="xs"
+                          />
+                          <span>{{ $t(`webSearch.fetchProviderNames.${type}`, type) }}</span>
+                        </span>
                       </SelectItem>
                     </SelectGroup>
                   </SelectContent>
@@ -112,6 +118,7 @@ import { useI18n } from 'vue-i18n'
 import { Plus } from 'lucide-vue-next'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
+import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
 
 const PROVIDER_TYPES = ['jina', 'cloudflare_markdown'] as const
 
