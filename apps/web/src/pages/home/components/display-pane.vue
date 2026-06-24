@@ -630,6 +630,10 @@ async function updateDisplayStats() {
 }
 
 function sendInput(payload: Record<string, unknown>) {
+  // Only the active pane drives input. There is one shared input channel per
+  // bot, so a background/inactive pane forwarding pointer + key events would
+  // race the focused pane's input on the desktop.
+  if (!props.active) return
   connection.sendInput(payload)
 }
 
@@ -922,6 +926,15 @@ function handleVisibilityChange() {
   if (status.value === 'connected' && props.active) {
     startSnapshotCapture()
     if (statsVisible.value) startStatsPolling()
+    return
+  }
+  // The peer can die while the tab is hidden (ICE timeout in a backgrounded
+  // browser tab). On return, auto-reconnect a dead peer instead of leaving a
+  // disconnected pane for a manual Reconnect click. acquireConnection is
+  // idempotent (concurrent callers share acquirePromise), so this is safe even
+  // if a reconnect is already in flight.
+  if (props.active && status.value !== 'connected') {
+    void connect()
   }
 }
 
