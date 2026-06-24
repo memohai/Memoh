@@ -44,7 +44,7 @@ export interface FetchSessionsResult {
   nextCursor: string | null
 }
 
-const DEFAULT_SESSION_TYPES = ['chat', 'discuss', 'acp_agent']
+const DEFAULT_SESSION_TYPES = ['chat', 'discuss', 'acp_agent', 'schedule']
 const DEFAULT_SESSION_PAGE_SIZE = 50
 
 export async function fetchSessions(botId: string, options?: FetchSessionsOptions): Promise<FetchSessionsResult> {

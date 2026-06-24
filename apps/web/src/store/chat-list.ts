@@ -2390,8 +2390,11 @@ export const useChatStore = defineStore('chat', () => {
       } else {
         // Keep a VALID persisted session; otherwise, if the user intentionally
         // closed down to the draft "New Session" page, keep that on reload instead
-        // of force-opening a random session; otherwise pick the most recent (the
-        // server already filtered to user-facing types and sorted by recency).
+        // of force-opening a random session; otherwise pick the most recent real
+        // conversation (the server sorts by recency). Skip schedule runs — they
+        // are read-only execution history, so landing on a cron run when
+        // switching bots would be surprising; a schedule run is reachable from
+        // the sidebar's Schedule pivot.
         // Transcript hydration is driven by startSessionMessagesStream below — no
         // eager loadMessages REST round trip from here.
         if (sessionId.value && sessionById.has(sessionId.value)) {
@@ -2402,7 +2405,8 @@ export const useChatStore = defineStore('chat', () => {
           hasMoreOlder.value = false
           hasLoadedOlder.value = false
         } else {
-          sessionId.value = response.items[0]!.id
+          const firstConversation = response.items.find(s => (s.type ?? 'chat') !== 'schedule')
+          sessionId.value = (firstConversation ?? response.items[0]!).id
         }
       }
 

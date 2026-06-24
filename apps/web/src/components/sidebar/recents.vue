@@ -1,13 +1,34 @@
 <template>
   <div class="flex flex-col h-full min-w-0">
-    <!-- Section label where the type filter used to be. The list below is a
-         single recency-ordered stream of the user's real conversations
-         (chat / discuss / agent); system-generated runs (heartbeat / schedule /
-         subagent) are not surfaced here. -->
+    <!-- Mode switcher where the old type filter used to live. A <TextButton>
+         (ghost + text size = "clickable text with a hover chip") drives a
+         DropdownMenu to pivot the list between human conversations (Recent) and
+         system run streams (Schedule / Agent), restoring visibility of those
+         runs without a separate history entry elsewhere. The button is
+         naturally content-sized — only the text + chevron are the hit area. -->
     <div class="shrink-0 px-2 pb-0.5 pt-1">
-      <span class="pl-[11px] text-xs font-[550] tracking-[-0.02em] text-muted-foreground/80">
-        {{ t('chat.recents') }}
-      </span>
+      <DropdownMenu>
+        <DropdownMenuTrigger as-child>
+          <TextButton class="text-xs font-[550] tracking-[-0.02em] pl-[11px] select-none">
+            {{ t(activeMode.labelKey) }}
+            <ChevronDown class="size-2.5" />
+          </TextButton>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start">
+          <DropdownMenuItem
+            v-for="m in MODES"
+            :key="m.id"
+            class="justify-between gap-4"
+            @select="mode = m.id"
+          >
+            <span>{{ t(m.labelKey) }}</span>
+            <Check
+              class="size-3.5 shrink-0"
+              :class="mode === m.id ? 'opacity-100' : 'opacity-0'"
+            />
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
 
     <div class="flex-1 relative min-h-0">
@@ -23,7 +44,7 @@
       >
         <div class="px-2 pr-3">
           <div
-            v-if="sessions.length > 0"
+            v-if="visibleSessions.length > 0"
             :style="{ position: 'relative', width: '100%', height: `${totalSize}px` }"
           >
             <!-- pb-[2px] is the seam: the pill (SessionItem) keeps its own fill,
@@ -71,7 +92,7 @@
           </div>
 
           <div
-            v-if="currentBotId && !loadingChats && sessions.length === 0"
+            v-if="currentBotId && !loadingChats && visibleSessions.length === 0"
             class="px-3 py-6 text-center text-xs text-muted-foreground"
           >
             {{ t('chat.noSessions') }}
@@ -162,19 +183,26 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
-import { LoaderCircle } from 'lucide-vue-next'
-import { storeToRefs } from 'pinia'
-import { useI18n } from 'vue-i18n'
+import { Check, ChevronDown, LoaderCircle } from 'lucide-vue-next'
+import { useLocalStorage } from '@vueuse/core'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useIntersectionObserver } from '@vueuse/core'
+import { storeToRefs } from 'pinia'
+import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import { sortByRecency } from '@/store/chat-list.utils'
 import type { SessionSummary } from '@/composables/api/useChat'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
   Button,
+  TextButton,
   Input,
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
   Dialog,
   DialogContent,
   DialogHeader,
@@ -196,10 +224,24 @@ const {
   loadingMoreSessions,
 } = storeToRefs(chatStore)
 
-// The list is a single recency-ordered stream of the user's real conversations.
-// The server filters to chat/discuss/acp_agent (heartbeat/schedule/subagent
-// runs live in their own surfaces), and the store keeps the order by always
-// prepending upserts — no client-side filter or re-sort needed.
+// The list pivots between human conversations (Recent) and system run streams
+// (Schedule / Agent) via the header button. Recent keeps the user's real
+// chat/discuss timeline; Schedule and Agent surface the previously-hidden
+// system runs so a user can re-open a run to see whether it broke — no
+// separate history entry needed elsewhere.
+type RecentMode = 'recent' | 'schedule' | 'agent'
+const MODES: { id: RecentMode, labelKey: string, types: string[] }[] = [
+  { id: 'recent', labelKey: 'chat.recents', types: ['chat', 'discuss'] },
+  { id: 'schedule', labelKey: 'chat.activityBar.schedule', types: ['schedule'] },
+  { id: 'agent', labelKey: 'chat.sessionTypeACPAgent', types: ['acp_agent'] },
+]
+const mode = useLocalStorage<RecentMode>('workspace-sidebar-recents-mode', 'recent')
+const activeMode = computed(() => MODES.find(m => m.id === mode.value) ?? MODES[0]!)
+
+const visibleSessions = computed(() => {
+  const types = new Set(activeMode.value.types)
+  return sortByRecency(sessions.value.filter(s => types.has(s.type ?? 'chat')))
+})
 
 // ---- virtualized session list ----
 // Rows are MEASURED, not pinned to a px stride: SessionItem sizes in rem (min-h-9)
@@ -209,17 +251,17 @@ const {
 const scrollEl = ref<HTMLElement | null>(null)
 const virtualizer = useVirtualizer<HTMLElement, HTMLElement>(
   computed(() => ({
-    count: sessions.value.length,
+    count: visibleSessions.value.length,
     getScrollElement: () => scrollEl.value,
     estimateSize: () => 36,
     overscan: 10,
-    getItemKey: (index: number) => sessions.value[index]?.id ?? index,
+    getItemKey: (index: number) => visibleSessions.value[index]?.id ?? index,
   })),
 )
 const totalSize = computed(() => virtualizer.value.getTotalSize())
 const virtualRows = computed(() =>
   virtualizer.value.getVirtualItems().flatMap((vi) => {
-    const session = sessions.value[vi.index]
+    const session = visibleSessions.value[vi.index]
     return session ? [{ key: String(vi.key), index: vi.index, start: vi.start, session }] : []
   }),
 )
