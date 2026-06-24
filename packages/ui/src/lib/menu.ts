@@ -34,6 +34,38 @@ export const menuSlideClass
 // flatter menus put it straight on the content box.
 export const menuViewportClass = 'flex flex-col gap-0.5 p-1.5'
 
+// Chrome-only subset of menuContentClass, for the inner panel div of a menu host
+// (Popover with `menu`). The host carries z-50 / overflow / animation on its own
+// box; this carries only the hairline + shadow + radius + surface tokens that the
+// inner div also needs, so the chrome quartet isn't hand-copied at every call site.
+export const menuChromeClass
+  = 'flex flex-col overflow-hidden rounded-menu-shell border border-[color:var(--border-menu)] bg-popover text-popover-foreground shadow-[var(--shadow-dropdown)]'
+
+// Virtualized listbox viewport: the scroll container for a searchable list whose
+// rows are absolutely positioned (so it can't take menuViewportClass's
+// `flex flex-col gap-0.5`). Inter-row spacing comes from the virtualizer's `gap`
+// option, not a wrapper. `scroll-my-1` keeps keyboard-scrolled rows off the edge.
+export const virtualListboxClass = 'max-h-64 scroll-my-1 overflow-y-auto p-1.5'
+
+// How far to shift a menu left (negative alignOffset) so its first row's TEXT
+// lands under the trigger's TEXT — not the menu box edge under the trigger edge.
+// This is a geometric consequence of the shared insets, not a magic number:
+//   menu text from its edge = border(1) + menuViewportClass p-1.5(6) + menuItemClass px-2.5(10) = 17
+//   trigger text from its edge = selectTriggerClass px-3 = 12
+//   delta = 17 - 12 = 5 → shift the menu left by 5px so the two text columns line up.
+// Applied by any menu host anchored to a selectTrigger (SelectContent, and the
+// searchable-select-popover family). Long-content selects that widen the panel
+// past the trigger (model-select) opt out and align the box edge instead.
+export const menuAlignOffset = -5
+
+// Search field header inside a menu host (SearchableSelectPopover, ModelOptions):
+// a 40px row with a bottom hairline. The input's px-4 (16) lines its text up with
+// the row text (border(1) + viewport p-1.5(6) + item px-2.5(10) = 17 — the 1px is
+// the chrome border the search row sits inside, so both land at 17 from the panel
+// edge). Shared so the two searchable surfaces don't each hand-write the header.
+export const menuSearchHeaderClass = 'flex h-10 shrink-0 items-center gap-2 border-b border-border/40 px-4'
+export const menuSearchInputClass = 'flex h-full w-full bg-transparent text-control outline-hidden placeholder:text-muted-foreground'
+
 // One menu row: layout + roving-focus highlight. Geometry is pinned to the
 // shared row contract: px-2.5 / py-1.5 / text-control (14px) / rounded-menu
 // (8px) — so every menu shares the exact same row height, text size and inset.

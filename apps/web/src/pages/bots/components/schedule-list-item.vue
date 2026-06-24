@@ -21,7 +21,7 @@
         </p>
         <span
           v-if="timeLabel"
-          class="shrink-0 text-[11px] tabular-nums text-muted-foreground"
+          class="shrink-0 text-caption tabular-nums text-muted-foreground"
         >
           {{ timeLabel }}
         </span>
@@ -66,7 +66,8 @@
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            class="gap-2 text-destructive focus:text-destructive"
+            variant="destructive"
+            class="gap-2"
             @select="$emit('delete')"
           >
             <Trash2 class="size-3.5" />

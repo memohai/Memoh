@@ -110,9 +110,24 @@ export const CLIENT_TYPE_META: Record<string, ClientTypeMeta> = {
     label: 'Google Transcription',
     hint: 'Gemini speech transcription',
   },
+  'openrouter-video': {
+    value: 'openrouter-video',
+    label: 'OpenRouter Video',
+    hint: 'OpenRouter video generation',
+  },
+  'modelark-video': {
+    value: 'modelark-video',
+    label: 'ModelArk Video',
+    hint: 'BytePlus ModelArk video generation',
+  },
+  'volcengine-video': {
+    value: 'volcengine-video',
+    label: 'Volcengine Video',
+    hint: 'Volcengine Ark video generation',
+  },
 }
 
 export const CLIENT_TYPE_LIST: ClientTypeMeta[] = Object.values(CLIENT_TYPE_META)
 
 export const LLM_CLIENT_TYPE_LIST: ClientTypeMeta[] = CLIENT_TYPE_LIST
-  .filter(ct => !ct.value.endsWith('-speech') && !ct.value.endsWith('-transcription'))
+  .filter(ct => !ct.value.endsWith('-speech') && !ct.value.endsWith('-transcription') && !ct.value.endsWith('-video'))

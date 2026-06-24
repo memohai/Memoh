@@ -111,11 +111,10 @@ function buildMarkdownHeadingSymbols(model: Monaco.editor.ITextModel, monaco: ty
   return roots
 }
 
-// The applied light/dark mode is driven by the `.dark` class on <html> (set by the
-// color-mode store, which also honors "system"). Read it straight from the DOM so we
-// pick the right base theme even when the preference is "system".
+// The applied light/dark mode is driven by the settings store's resolved color
+// mode so it stays correct in "system" mode and matches the rest of the UI.
 function resolveThemeName(): string {
-  return document.documentElement.classList.contains('dark')
+  return settings.resolvedColorMode === 'dark'
     ? settings.shikiThemeDark
     : settings.shikiThemeLight
 }
@@ -350,7 +349,7 @@ watch([() => props.language, () => props.filename], () => {
 })
 
 watch(
-  () => [settings.shikiThemeLight, settings.shikiThemeDark] as const,
+  () => [settings.shikiThemeLight, settings.shikiThemeDark, settings.resolvedColorMode] as const,
   () => { void syncEditorTheme() },
 )
 </script>

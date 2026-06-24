@@ -10,8 +10,9 @@ models:
     name: MiniMax M2.7
     type: chat
     config:
-      compatibilities: [tool-call, reasoning]
+      compatibilities: [tool-call]
       context_window: 204800
+      thinking_mode: none
 
   - model_id: MiniMax-M2.7-highspeed
     name: MiniMax M2.7 Highspeed

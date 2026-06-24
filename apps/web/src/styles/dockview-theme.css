@@ -118,16 +118,22 @@
    * arrow (VS Code), not a pointer. dockview defaults .dv-tab to cursor:pointer;
    * the close button re-enables the pointer on itself only. */
   cursor: default;
-  /* Natural width, no grow/shrink. Unlike the old VS-Code layout (flex:1 1 0 +
-   * grow-to-fill, where a lone tab rested at max-width), Chrome tabs hug their title
-   * so the "+" can sit right after the LAST tab — which means min-width is now the
-   * RESTING width of a short tab, not just a crowded-floor. So it's a comfortable
-   * 8rem (a one-word tab still reads as a real tab, with room for the close button),
-   * growing to max-width then truncating. The title span is sized by content (NOT
-   * flex-grow): a flex-basis:0 grow child made the flex container's intrinsic width
-   * ambiguous, so a live title change produced a wrong/jumping width (worse with
-   * many tabs). Overflow scrolls (flex-shrink:0 keeps each tab's width). */
-  flex: 0 0 auto;
+  /* HYBRID width model (Chrome): a tab hugs its title when the strip has room,
+   * and shrinks together with its siblings when it doesn't.
+   *   flex-basis AUTO (not 0): the item is sized to its own title first, so a
+   *     live title change resizes the tab smoothly instead of collapsing toward a
+   *     zero basis (the jumping-width bug that forced flex:0 0 auto before).
+   *   grow:1: only claims free space the strip actually has — when few tabs are
+   *     open there is none (the container hugs their content), so each rests at
+   *     its natural width and "+" sits right after the LAST tab (Chrome/Notion).
+   *   shrink:1: once the tabs out-measure the strip they all give back width
+   *     TOGETHER down to the min-width floor — like #624's flex:1 1 0 row, but
+   *     without that layout's basis-0 ambiguity — and only past the floor does
+   *     the row scroll.
+   * min-width is the RESTING width of a short tab (a one-word tab still reads as
+   * a real tab, with room for the close button), not just a crowded floor. The
+   * title span truncates once a tab hits max-width. */
+  flex: 1 1 auto;
   min-width: 8rem;
   max-width: 11rem;
   /* Rounded crown on EVERY tab, always — radius is state-independent so it can
@@ -197,9 +203,11 @@
 }
 
 /* The tab row hugs its content (does not grow), so the "+" actions land right
- * after the last tab. It may still SHRINK (flex-shrink:1 + min-width:0) so that
- * when the tabs out-measure the strip the scroll container clips them and they
- * scroll — rather than pushing the "+" off-screen. */
+ * after the last tab. It may still SHRINK (flex-shrink:1 + min-width:0): when
+ * the tabs out-measure the strip the container gives back width, the tabs'
+ * own shrink:1 distributes that loss evenly down to their min-width floor, and
+ * only past the floor does the scroll container clip them and scroll — rather
+ * than pushing the "+" off-screen. */
 .dockview-theme-memoh .dv-tabs-and-actions-container > .dv-scrollable,
 .dockview-theme-memoh .dv-scrollable > .dv-tabs-container {
   flex: 0 1 auto;

@@ -24,15 +24,24 @@
       :class="run.script === 'cjk' ? 'sidebar-cjk' : 'sidebar-latin'"
     >{{ run.text }}</span></span>
 
-    <!-- Trailing slot: only a streaming spinner reserves space in flow; the
-         actions button overlays the title's tail and fades in on row hover, so a
-         resting row spends its whole width on the title. -->
+    <!-- Trailing slot: spinner and the actions button share one 24px right
+         slot so they sit at the same center and never both show at once. The
+         spinner reserves the slot in flow (keeps the title tail clear while
+         streaming and stops the title from jumping on hover); the actions
+         button is the same size-6 box anchored to the same right edge, and on
+         row hover or while the menu is open it fades in as the spinner fades
+         out — streaming + hover no longer stacks the two icons. -->
     <div class="relative ml-1.5 flex h-6 shrink-0 items-center justify-end">
-      <LoaderCircle
+      <div
         v-if="streaming"
-        class="size-3 animate-spin text-muted-foreground"
-        :aria-label="t('chat.sessionStreaming')"
-      />
+        class="flex h-6 w-6 items-center justify-center transition-opacity duration-150 group-hover:opacity-0"
+        :class="menuOpen ? 'opacity-0' : 'opacity-100'"
+      >
+        <LoaderCircle
+          class="size-3 animate-spin text-muted-foreground"
+          :aria-label="t('chat.sessionStreaming')"
+        />
+      </div>
 
       <DropdownMenu v-model:open="menuOpen">
         <DropdownMenuTrigger as-child>

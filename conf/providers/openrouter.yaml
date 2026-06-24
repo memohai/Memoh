@@ -9,7 +9,6 @@ models:
     type: chat
     config:
       context_window: 2000000
-
   - model_id: "ai21/jamba-large-1.7"
     name: "AI21: Jamba Large 1.7"
     type: chat
@@ -388,6 +387,8 @@ models:
     config:
       compatibilities: [reasoning]
       context_window: 32768
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
   - model_id: "deepseek/deepseek-v3.1-terminus"
     name: "DeepSeek: DeepSeek V3.1 Terminus"
     type: chat
@@ -580,6 +581,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
   - model_id: "google/gemma-4-26b-a4b-it:free"
     name: "Google: Gemma 4 26B A4B  (free)"
     type: chat
@@ -831,8 +834,9 @@ models:
     name: "MiniMax: MiniMax M2.7"
     type: chat
     config:
-      compatibilities: [tool-call, reasoning]
+      compatibilities: [tool-call]
       context_window: 196608
+      thinking_mode: none
   - model_id: "mistralai/codestral-2508"
     name: "Mistral: Codestral 2508"
     type: chat
@@ -1901,6 +1905,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
   - model_id: "qwen/qwen3.5-9b"
     name: "Qwen: Qwen3.5-9B"
     type: chat

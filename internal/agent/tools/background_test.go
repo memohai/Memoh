@@ -95,6 +95,43 @@ func TestBackgroundProviderSpawnResultShape(t *testing.T) {
 	}
 }
 
+func TestBackgroundProviderVideoResultShape(t *testing.T) {
+	mgr := background.New(nil)
+	p := NewBackgroundProvider(nil, mgr)
+	session := SessionContext{BotID: "bot1", SessionID: "sess1"}
+
+	taskID, _, err := mgr.StartVideoTask(context.Background(), "bot1", "sess1", "generate video: waves")
+	if err != nil {
+		t.Fatalf("StartVideoTask failed: %v", err)
+	}
+	mgr.CompleteVideoTask(taskID, background.TaskCompleted, map[string]any{
+		"job_id":           "job-1",
+		"provider_status":  "succeeded",
+		"model_id":         "video-model",
+		"output_url":       "https://example.com/video.mp4",
+		"path":             "/data/generated-videos/bg_bot1_abcd.mp4",
+		"media_type":       "video/mp4",
+		"size_bytes":       12,
+		"duration_seconds": 8.0,
+	}, "")
+
+	statusRes, err := p.execGetBackgroundStatus(context.Background(), session, map[string]any{"task_id": taskID})
+	if err != nil {
+		t.Fatalf("get_background_status failed: %v", err)
+	}
+	sm := statusRes.(map[string]any)
+	if sm["kind"] != "video" || sm["status"] != "completed" {
+		t.Fatalf("unexpected video status payload: %v", sm)
+	}
+	result := sm["result"].(map[string]any)
+	if result["job_id"] != "job-1" || result["path"] != "/data/generated-videos/bg_bot1_abcd.mp4" {
+		t.Fatalf("video result not preserved: %v", result)
+	}
+	if _, ok := sm["exit_code"]; ok {
+		t.Fatalf("video status should not expose exec exit_code: %v", sm)
+	}
+}
+
 func TestBackgroundProviderListKillAndWait(t *testing.T) {
 	mgr := background.New(nil)
 	p := NewBackgroundProvider(nil, mgr)

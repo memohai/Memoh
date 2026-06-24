@@ -27,6 +27,12 @@ export const buttonVariants = cva(
         // GHOST = ported verbatim: no chrome at rest; hover fills gray-3, press
         // scales. Interaction on ::before (style.css, data-variant="ghost").
         ghost: 'text-foreground',
+        // QUIET = in-field state/peek toggle (password / secret reveal): no chrome
+        // at rest and none on hover — the glyph itself shifts muted→foreground, so
+        // the field stays one clean rectangle instead of sprouting a second hover
+        // chip. Ghost earns its chip for discrete actions (Clear); quiet is for
+        // low-stakes peeks. No ::before shell (it's keyed off data-variant="ghost").
+        quiet: 'text-muted-foreground hover:text-foreground',
         // LINK variants mirror the contract bench:
         // - link: fade-in underline on hover
         // - link-static: underline always visible, only color brightens

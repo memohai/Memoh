@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canSummarizeRailSegment, clusterRailBlocks, computeBgTaskPill, distinctToolNames, latestOutputLine, reconcileById, segmentHasLiveBg, segmentTurnBlocks, shouldRefreshFromMessageCreated, sortByRecency, splitActiveRail, summarizeRailSegment, thinkingPeek, upsertById } from './chat-list.utils'
+import { canSummarizeRailSegment, clusterRailBlocks, computeBgTaskPill, distinctToolNames, latestOutputLine, provisionalSessionTitle, reconcileById, segmentHasLiveBg, segmentTurnBlocks, shouldRefreshFromMessageCreated, sortByRecency, splitActiveRail, summarizeRailSegment, thinkingPeek, upsertById } from './chat-list.utils'
 
 describe('chat-list.utils', () => {
   it('replaces existing item with same id and preserves order', () => {
@@ -562,5 +562,35 @@ describe('computeBgTaskPill', () => {
       beacon('t1', 'done', false),
       beacon('t2', 'active', false, 'working'),
     ])).toEqual({ tone: 'running', count: 1, latestLine: 'working' })
+  })
+})
+
+describe('provisionalSessionTitle', () => {
+  it('returns the trimmed first line as-is when short', () => {
+    expect(provisionalSessionTitle('How do I parse JSON in Go?')).toBe('How do I parse JSON in Go?')
+  })
+
+  it('uses only the first line, dropping the rest', () => {
+    expect(provisionalSessionTitle('Summarize this file\n\nHere is the content:\nlots\nof\nlines')).toBe('Summarize this file')
+  })
+
+  it('truncates to the cap and appends an ellipsis', () => {
+    expect(provisionalSessionTitle('A'.repeat(120))).toBe('A'.repeat(50) + '…')
+  })
+
+  it('counts runes, not utf-16 units, when truncating CJK text', () => {
+    expect(provisionalSessionTitle('あ'.repeat(80))).toBe('あ'.repeat(50) + '…')
+  })
+
+  it('strips markdown so the label stays a clean one-line peek', () => {
+    expect(provisionalSessionTitle('## Title\n`code` and [a link](https://x)')).toBe('Title')
+  })
+
+  it('strips emphasis markers so it matches the backend fallback', () => {
+    expect(provisionalSessionTitle('**bold** and *italic* here')).toBe('bold and italic here')
+  })
+
+  it('returns empty when the first line has no usable text', () => {
+    expect(provisionalSessionTitle('```js\nconst x = 1\n```')).toBe('')
   })
 })

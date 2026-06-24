@@ -36,6 +36,8 @@ type Task struct {
 	Status         TaskStatus
 	ExitCode       int32
 	OutputFile     string // path inside container where output is being written
+	Result         map[string]any
+	Error          string
 	StartedAt      time.Time
 	CompletedAt    time.Time
 
@@ -65,6 +67,8 @@ type TaskSnapshot struct {
 	ExitCode       int32
 	OutputFile     string
 	OutputTail     string
+	Result         map[string]any
+	Error          string
 	Branches       []SpawnBranch
 	StartedAt      time.Time
 	CompletedAt    time.Time
@@ -101,6 +105,8 @@ func (t *Task) Snapshot() TaskSnapshot {
 		ExitCode:       t.ExitCode,
 		OutputFile:     t.OutputFile,
 		OutputTail:     t.outputTailLocked(),
+		Result:         cloneResultMap(t.Result),
+		Error:          t.Error,
 		Branches:       append([]SpawnBranch(nil), t.branches...),
 		StartedAt:      t.StartedAt,
 		CompletedAt:    t.CompletedAt,
@@ -135,6 +141,10 @@ func (t *Task) Cancel() {
 func (t *Task) AppendOutput(s string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.appendOutputLocked(s)
+}
+
+func (t *Task) appendOutputLocked(s string) {
 	t.output.WriteString(s)
 	// Keep tail bounded
 	if t.output.Len() > maxTailBytes*2 {
@@ -232,4 +242,15 @@ type TaskEvent struct {
 	ExitCode       int32         `json:"exit_code,omitempty"`
 	Duration       string        `json:"duration,omitempty"`
 	Stalled        bool          `json:"stalled,omitempty"`
+}
+
+func cloneResultMap(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }

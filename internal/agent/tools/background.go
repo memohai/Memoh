@@ -145,7 +145,7 @@ func (p *BackgroundProvider) execListBackground(_ context.Context, session Sessi
 			entry["agent_id"] = s.AgentID
 			entry["session_id"] = s.AgentSessionID
 		}
-		if s.Kind != background.KindSpawn && s.Kind != background.KindAgent {
+		if s.Kind == background.KindExec {
 			entry["command"] = truncateStr(s.Command, 120)
 			entry["output_file"] = s.OutputFile
 		}
@@ -317,6 +317,19 @@ func backgroundStatusMap(session SessionContext, s background.TaskSnapshot) map[
 		// Keep the branch list at the top level for existing UI rendering.
 		if len(branches) > 0 {
 			result["branches"] = branches
+		}
+	case background.KindVideo:
+		videoResult := make(map[string]any, len(s.Result)+1)
+		for k, v := range s.Result {
+			videoResult[k] = v
+		}
+		if s.Error != "" {
+			videoResult["error"] = s.Error
+			result["error"] = s.Error
+		}
+		result["result"] = videoResult
+		if s.OutputTail != "" {
+			result["output_tail"] = s.OutputTail
 		}
 	default:
 		result["command"] = s.Command

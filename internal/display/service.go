@@ -43,14 +43,31 @@ const (
 	videoFrameRate       = 15
 	h264FmtpLine         = "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f"
 	displayProbePeriod   = 5 * time.Second
-	socketProbeTimeout   = 300 * time.Millisecond
-	stalePeerTTL         = 2 * time.Minute
-	screenshotTimeout    = 15 * time.Second
-	screenshotWidth      = 1280
-	screenshotQuality    = 82
-	screenshotMaxBytes   = 512 * 1024
-	screenshotMIME       = "image/jpeg"
-	rfbTCPAddress        = "127.0.0.1:5999"
+	// socketProbeTimeout gates the RFB reachability probe used by Status /
+	// Answer / session.start. 300ms was too tight for a busy container: a
+	// momentary stall flipped running=false and forced a full prepare
+	// (re-installing/starting Xvnc + desktop + Chrome) on every reconnect.
+	// 1.5s still fails fast when the port is genuinely closed, but tolerates
+	// the brief scheduling jitter that was causing spurious prepare runs.
+	socketProbeTimeout = 1500 * time.Millisecond
+	stalePeerTTL       = 2 * time.Minute
+	encoderIdleHold    = 90 * time.Second
+	// firstPacketTimeout gates how long session.start waits for GStreamer to
+	// emit its first RTP packet before declaring the encoder dead. 10s was too
+	// tight for cold starts (Xvnc + GStreamer + desktop spin-up on a freshly
+	// prepared container), surfacing as "produced no frames within 10s" right
+	// when the pipeline was about to produce them — under Orbstack the cold
+	// start regularly exceeded 10s, so the encoder was killed and the WebRTC
+	// offer got 503, looping the frontend in "connecting to desktop" for
+	// minutes. 30s gives cold starts real room while still failing fast when
+	// the pipeline is genuinely broken.
+	firstPacketTimeout = 30 * time.Second
+	screenshotTimeout  = 15 * time.Second
+	screenshotWidth    = 1280
+	screenshotQuality  = 82
+	screenshotMaxBytes = 512 * 1024
+	screenshotMIME     = "image/jpeg"
+	rfbTCPAddress      = "127.0.0.1:5999"
 )
 
 type screenshotJPEGCandidate struct {
@@ -487,12 +504,22 @@ type session struct {
 	udp   *net.UDPConn
 	cmd   *exec.Cmd
 
+	// firstPacket is closed by forwardRTP once the GStreamer pipeline emits
+	// its first RTP packet, so session.start can wait for real output rather
+	// than a fixed 150ms guess (which returned success before the encoder had
+	// produced any frames — the peer connected but the track stayed empty).
+	firstPacket     chan struct{}
+	firstPacketOnce sync.Once
+
 	tracksMu sync.RWMutex
 	tracks   map[string]*webrtc.TrackLocalStaticRTP
 	input    *rfbInputClient
 
 	peersMu sync.RWMutex
 	peers   map[string]*peerSession
+
+	idleStopMu    sync.Mutex
+	idleStopTimer *time.Timer
 
 	stopOnce sync.Once
 }
@@ -513,14 +540,15 @@ type peerSession struct {
 func newSession(service *Service, botID, gstLaunch, codec string) *session {
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is stored on the session and called when the display session stops.
 	return &session{
-		service:   service,
-		botID:     botID,
-		gstLaunch: gstLaunch,
-		codec:     codec,
-		ctx:       ctx,
-		cancel:    cancel,
-		tracks:    make(map[string]*webrtc.TrackLocalStaticRTP),
-		peers:     make(map[string]*peerSession),
+		service:     service,
+		botID:       botID,
+		gstLaunch:   gstLaunch,
+		codec:       codec,
+		ctx:         ctx,
+		cancel:      cancel,
+		tracks:      make(map[string]*webrtc.TrackLocalStaticRTP),
+		peers:       make(map[string]*peerSession),
+		firstPacket: make(chan struct{}),
 	}
 }
 
@@ -616,11 +644,17 @@ func (s *session) start(ctx context.Context) error {
 			return fmt.Errorf("%w: display pipeline exited during startup: %w", ErrEncoderUnavailable, err)
 		}
 		return fmt.Errorf("%w: display pipeline exited during startup", ErrEncoderUnavailable)
-	case <-time.After(150 * time.Millisecond):
+	case <-s.firstPacket:
+		// GStreamer emitted its first RTP packet — the pipeline is actually
+		// producing frames, not just running. Returning here (instead of after
+		// a fixed 150ms) means the peer only connects once frames are flowing,
+		// so the <video> element receives data immediately on connect.
 		if s.closed() {
 			return fmt.Errorf("%w: display pipeline exited during startup", ErrEncoderUnavailable)
 		}
 		return nil
+	case <-time.After(firstPacketTimeout):
+		return fmt.Errorf("%w: display pipeline produced no frames within %s", ErrEncoderUnavailable, firstPacketTimeout)
 	}
 }
 
@@ -801,6 +835,11 @@ func (s *session) handleInput(data []byte) error {
 func (s *session) addTrack(id string, track *webrtc.TrackLocalStaticRTP) {
 	s.tracksMu.Lock()
 	s.tracks[id] = track
+	// Cancel the idle-stop timer while still holding tracksMu so the timer
+	// callback cannot observe an empty track set and stop() the encoder in the
+	// gap between adding the track and cancelling the timer — which would bind
+	// a new viewer to a stopped pipeline (black video, no error).
+	s.cancelIdleStop()
 	s.tracksMu.Unlock()
 }
 
@@ -810,7 +849,51 @@ func (s *session) removeTrack(id string) {
 	empty := len(s.tracks) == 0
 	s.tracksMu.Unlock()
 	if empty {
-		go s.stop()
+		s.scheduleIdleStop()
+	}
+}
+
+// scheduleIdleStop keeps the encoder alive for encoderIdleHold after the last
+// viewer leaves, so a quick tab-switch reconnect reuses the running pipeline
+// instead of cold-starting.
+//
+// TODO(display): this only covers the IDLE case (no viewers). It does NOT
+// cover the GStreamer pipeline exiting on its own — which is what actually
+// happens on session close: the RFB (VNC) connection to the bot is torn down,
+// rfb_src emits "Connection was closed", the pipeline exits with status 1,
+// and the encoder is gone. The next reconnect then pays a full cold start
+// (firstPacket wait, slow/flaky under Orbstack), which is the "close tab →
+// reconnect takes forever" symptom. Fix: catch the pipeline-error exit in
+// waitGStreamer and either re-establish the RFB connection + restart the
+// pipeline in place, or surface it as a recoverable state so the next offer
+// reuses the session shell instead of rebuilding it. encoderIdleHold cannot
+// help here because the pipeline is gone, not idle.
+func (s *session) scheduleIdleStop() {
+	s.idleStopMu.Lock()
+	defer s.idleStopMu.Unlock()
+	if s.idleStopTimer != nil {
+		s.idleStopTimer.Stop()
+	}
+	s.idleStopTimer = time.AfterFunc(encoderIdleHold, func() {
+		// Hold tracksMu for the empty-check AND the stop() so a concurrent
+		// addTrack cannot insert a track between "still empty" and "stop the
+		// encoder" — that race bound a new viewer to a pipeline being torn
+		// down. stop() is idempotent (stopOnce) and lock-free w.r.t. tracksMu.
+		s.tracksMu.Lock()
+		empty := len(s.tracks) == 0
+		if empty && !s.closed() {
+			s.stop()
+		}
+		s.tracksMu.Unlock()
+	})
+}
+
+func (s *session) cancelIdleStop() {
+	s.idleStopMu.Lock()
+	defer s.idleStopMu.Unlock()
+	if s.idleStopTimer != nil {
+		s.idleStopTimer.Stop()
+		s.idleStopTimer = nil
 	}
 }
 
@@ -921,6 +1004,7 @@ func (p *peerSession) stale(now time.Time) bool {
 
 func (s *session) stop() {
 	s.stopOnce.Do(func() {
+		s.cancelIdleStop()
 		s.cancel()
 		if s.runCtxCancel != nil {
 			s.runCtxCancel()
@@ -1012,6 +1096,10 @@ func (s *session) forwardRTP() {
 			s.service.logger.Debug("display RTP packet dropped", slog.String("bot_id", s.botID), slog.Any("error", err))
 			continue
 		}
+
+		// Signal that the GStreamer pipeline has produced its first frame so
+		// session.start can return success based on real output, not a timer.
+		s.firstPacketOnce.Do(func() { close(s.firstPacket) })
 
 		s.tracksMu.RLock()
 		for _, track := range s.tracks {

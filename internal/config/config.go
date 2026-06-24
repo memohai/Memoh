@@ -46,28 +46,29 @@ const (
 )
 
 type Config struct {
-	Log          LogConfig          `toml:"log"`
-	Server       ServerConfig       `toml:"server"`
-	Admin        AdminConfig        `toml:"admin"`
-	Auth         AuthConfig         `toml:"auth"`
-	Agent        AgentConfig        `toml:"agent"`
-	Timezone     string             `toml:"timezone"`
-	Database     DatabaseConfig     `toml:"database"`
-	Container    ContainerConfig    `toml:"container"`
-	Containerd   ContainerdConfig   `toml:"containerd"`
-	Docker       DockerConfig       `toml:"docker"`
-	Apple        AppleConfig        `toml:"apple"`
-	Local        LocalConfig        `toml:"local"`
-	Workspace    WorkspaceConfig    `toml:"workspace"`
-	Postgres     PostgresConfig     `toml:"postgres"`
-	SQLite       SQLiteConfig       `toml:"sqlite"`
-	Qdrant       QdrantConfig       `toml:"qdrant"`
-	Sparse       SparseConfig       `toml:"sparse"`
-	Registry     RegistryConfig     `toml:"registry"`
-	Supermarket  SupermarketConfig  `toml:"supermarket"`
-	OAuthClients OAuthClientsConfig `toml:"oauth_clients"`
-	InstanceID   string             `toml:"instance_id"`
-	BridgeTLS    BridgeTLSConfig    `toml:"bridge_tls"`
+	Log           LogConfig           `toml:"log"`
+	Server        ServerConfig        `toml:"server"`
+	Admin         AdminConfig         `toml:"admin"`
+	Auth          AuthConfig          `toml:"auth"`
+	Agent         AgentConfig         `toml:"agent"`
+	Timezone      string              `toml:"timezone"`
+	Database      DatabaseConfig      `toml:"database"`
+	Container     ContainerConfig     `toml:"container"`
+	Containerd    ContainerdConfig    `toml:"containerd"`
+	Docker        DockerConfig        `toml:"docker"`
+	Apple         AppleConfig         `toml:"apple"`
+	Local         LocalConfig         `toml:"local"`
+	Workspace     WorkspaceConfig     `toml:"workspace"`
+	Postgres      PostgresConfig      `toml:"postgres"`
+	SQLite        SQLiteConfig        `toml:"sqlite"`
+	Qdrant        QdrantConfig        `toml:"qdrant"`
+	Sparse        SparseConfig        `toml:"sparse"`
+	Registry      RegistryConfig      `toml:"registry"`
+	Supermarket   SupermarketConfig   `toml:"supermarket"`
+	OAuthClients  OAuthClientsConfig  `toml:"oauth_clients"`
+	InstanceID    string              `toml:"instance_id"`
+	BridgeTLS     BridgeTLSConfig     `toml:"bridge_tls"`
+	WebhookTunnel WebhookTunnelConfig `toml:"webhook_tunnel"`
 }
 
 const (
@@ -115,6 +116,39 @@ type LogConfig struct {
 
 type ServerConfig struct {
 	Addr string `toml:"addr"`
+}
+
+const (
+	WebhookTunnelModeDisabled = "disabled"
+	WebhookTunnelModeManaged  = "managed"
+	WebhookTunnelModeExternal = "external"
+)
+
+type WebhookTunnelConfig struct {
+	Mode            string `toml:"mode"`
+	PublicBaseURL   string `toml:"public_base_url"`
+	ListenAddr      string `toml:"listen_addr"`
+	CloudflaredPath string `toml:"cloudflared_path"`
+	TargetURL       string `toml:"target_url"`
+	MetricsAddr     string `toml:"metrics_addr"`
+	MetricsURL      string `toml:"metrics_url"`
+}
+
+func (c WebhookTunnelConfig) EffectiveMode() string {
+	mode := strings.TrimSpace(strings.ToLower(c.Mode))
+	if mode == "" {
+		return WebhookTunnelModeDisabled
+	}
+	return mode
+}
+
+func (c WebhookTunnelConfig) Validate() error {
+	switch c.EffectiveMode() {
+	case WebhookTunnelModeDisabled, WebhookTunnelModeManaged, WebhookTunnelModeExternal:
+		return nil
+	default:
+		return fmt.Errorf("unsupported webhook_tunnel mode %q", c.Mode)
+	}
 }
 
 type AdminConfig struct {
@@ -447,6 +481,9 @@ func Load(path string) (Config, error) {
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			cfg.applyBridgeTLSEnvOverrides()
+			if err := cfg.validate(); err != nil {
+				return cfg, err
+			}
 			cfg.resolvePaths()
 			return cfg, nil
 		}
@@ -486,9 +523,19 @@ func Load(path string) (Config, error) {
 		cfg.Workspace = cfg.Container.WorkspaceConfig
 	}
 	cfg.applyBridgeTLSEnvOverrides()
+	if err := cfg.validate(); err != nil {
+		return cfg, err
+	}
 	cfg.resolvePaths()
 
 	return cfg, nil
+}
+
+func (cfg Config) validate() error {
+	if err := cfg.WebhookTunnel.Validate(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (cfg *Config) applyBridgeTLSEnvOverrides() {
@@ -506,6 +553,27 @@ func (cfg *Config) applyBridgeTLSEnvOverrides() {
 	}
 	if value := strings.TrimSpace(os.Getenv("MEMOH_BRIDGE_TLS_SERVER_NAME")); value != "" {
 		cfg.BridgeTLS.ServerName = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_WEBHOOK_TUNNEL_MODE")); value != "" {
+		cfg.WebhookTunnel.Mode = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_WEBHOOK_PUBLIC_BASE_URL")); value != "" {
+		cfg.WebhookTunnel.PublicBaseURL = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_WEBHOOK_TUNNEL_LISTEN_ADDR")); value != "" {
+		cfg.WebhookTunnel.ListenAddr = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_CLOUDFLARED_BIN")); value != "" {
+		cfg.WebhookTunnel.CloudflaredPath = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_WEBHOOK_TUNNEL_TARGET_URL")); value != "" {
+		cfg.WebhookTunnel.TargetURL = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_WEBHOOK_TUNNEL_METRICS_ADDR")); value != "" {
+		cfg.WebhookTunnel.MetricsAddr = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_WEBHOOK_TUNNEL_METRICS_URL")); value != "" {
+		cfg.WebhookTunnel.MetricsURL = value
 	}
 }
 

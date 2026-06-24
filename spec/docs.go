@@ -7758,6 +7758,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
                     }
                 }
             },
@@ -8005,6 +8011,78 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{id}/channel/{platform}/webhook-endpoint": {
+            "post": {
+                "description": "Set the platform-side webhook endpoint for a bot channel.",
+                "tags": [
+                    "bots"
+                ],
+                "summary": "Set bot channel webhook endpoint",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Channel platform",
+                        "name": "platform",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Webhook endpoint payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/channel.SetWebhookEndpointRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/channel.SetWebhookEndpointResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -12035,6 +12113,321 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/video-models": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "video-models"
+                ],
+                "summary": "List all video models",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/video.ModelResponse"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/video-models/{id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "video-models"
+                ],
+                "summary": "Get a video model",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/video.ModelResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "video-models"
+                ],
+                "summary": "Update a video model",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Model update payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/video.UpdateModelRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/video.ModelResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/video-providers": {
+            "get": {
+                "description": "List providers that support video generation",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "video-providers"
+                ],
+                "summary": "List video providers",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/video.ProviderResponse"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/video-providers/meta": {
+            "get": {
+                "description": "List available video provider types with their models and capabilities",
+                "tags": [
+                    "video-providers"
+                ],
+                "summary": "List video provider metadata",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/video.ProviderMetaResponse"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/video-providers/{id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "video-providers"
+                ],
+                "summary": "Get video provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/video.ProviderResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/video-providers/{id}/import-models": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "video-providers"
+                ],
+                "summary": "Import video models from provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/video.ImportModelsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/video-providers/{id}/models": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "video-providers"
+                ],
+                "summary": "List video models by provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/video.ModelResponse"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/webhook-tunnel/status": {
+            "get": {
+                "tags": [
+                    "system"
+                ],
+                "summary": "Get webhook tunnel status",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/webhooktunnel.Status"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -13771,7 +14164,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "row": {
-                    "description": "Row groups buttons into keyboard rows for renderers that support grids\n(e.g. Telegram inline keyboards). Buttons sharing a Row render together;\nrows appear in ascending first-seen order. Renderers without grid support\nignore this field. 0 is the default (single row, prior behavior).",
+                    "description": "Row groups buttons into keyboard rows for renderers that support grids\n(e.g. Telegram inline keyboards). Buttons sharing a Row render together;\nrows appear in ascending numeric order. Renderers without grid support\nignore this field. 0 is the default (single row, prior behavior).",
                     "type": "integer"
                 },
                 "type": {
@@ -13914,6 +14307,9 @@ const docTemplate = `{
                 },
                 "unsend": {
                     "type": "boolean"
+                },
+                "url_buttons": {
+                    "type": "boolean"
                 }
             }
         },
@@ -13995,7 +14391,8 @@ const docTemplate = `{
                 "weixin",
                 "wechatoa",
                 "local",
-                "slack"
+                "slack",
+                "line"
             ],
             "x-enum-varnames": [
                 "ChannelTypeTelegram",
@@ -14008,7 +14405,8 @@ const docTemplate = `{
                 "ChannelTypeWeixin",
                 "ChannelTypeWeChatOA",
                 "ChannelTypeLocal",
-                "ChannelTypeSlack"
+                "ChannelTypeSlack",
+                "ChannelTypeLine"
             ]
         },
         "channel.ConfigSchema": {
@@ -14187,14 +14585,20 @@ const docTemplate = `{
                 "link",
                 "code_block",
                 "mention",
-                "emoji"
+                "emoji",
+                "heading",
+                "blockquote",
+                "list_item"
             ],
             "x-enum-varnames": [
                 "MessagePartText",
                 "MessagePartLink",
                 "MessagePartCodeBlock",
                 "MessagePartMention",
-                "MessagePartEmoji"
+                "MessagePartEmoji",
+                "MessagePartHeading",
+                "MessagePartBlockquote",
+                "MessagePartListItem"
             ]
         },
         "channel.MessageTextStyle": {
@@ -14203,13 +14607,17 @@ const docTemplate = `{
                 "bold",
                 "italic",
                 "strikethrough",
-                "code"
+                "code",
+                "underline",
+                "spoiler"
             ],
             "x-enum-varnames": [
                 "MessageStyleBold",
                 "MessageStyleItalic",
                 "MessageStyleStrikethrough",
-                "MessageStyleCode"
+                "MessageStyleCode",
+                "MessageStyleUnderline",
+                "MessageStyleSpoiler"
             ]
         },
         "channel.ReplyRef": {
@@ -14245,6 +14653,22 @@ const docTemplate = `{
                     "$ref": "#/definitions/channel.Message"
                 },
                 "target": {
+                    "type": "string"
+                }
+            }
+        },
+        "channel.SetWebhookEndpointRequest": {
+            "type": "object",
+            "properties": {
+                "endpoint": {
+                    "type": "string"
+                }
+            }
+        },
+        "channel.SetWebhookEndpointResponse": {
+            "type": "object",
+            "properties": {
+                "endpoint": {
                     "type": "string"
                 }
             }
@@ -17181,13 +17605,15 @@ const docTemplate = `{
                 "chat",
                 "embedding",
                 "speech",
-                "transcription"
+                "transcription",
+                "video"
             ],
             "x-enum-varnames": [
                 "ModelTypeChat",
                 "ModelTypeEmbedding",
                 "ModelTypeSpeech",
-                "ModelTypeTranscription"
+                "ModelTypeTranscription",
+                "ModelTypeVideo"
             ]
         },
         "models.TestResponse": {
@@ -18249,6 +18675,9 @@ const docTemplate = `{
                 },
                 "tts_model_id": {
                     "type": "string"
+                },
+                "video_model_id": {
+                    "type": "string"
                 }
             }
         },
@@ -18398,6 +18827,208 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "tts_model_id": {
+                    "type": "string"
+                },
+                "video_model_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "video.ConfigSchema": {
+            "type": "object",
+            "properties": {
+                "fields": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/video.FieldSchema"
+                    }
+                }
+            }
+        },
+        "video.FieldSchema": {
+            "type": "object",
+            "properties": {
+                "advanced": {
+                    "type": "boolean"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "enum": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "example": {},
+                "key": {
+                    "type": "string"
+                },
+                "order": {
+                    "type": "integer"
+                },
+                "required": {
+                    "type": "boolean"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "video.ImportModelsResponse": {
+            "type": "object",
+            "properties": {
+                "created": {
+                    "type": "integer"
+                },
+                "models": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "skipped": {
+                    "type": "integer"
+                }
+            }
+        },
+        "video.ModelInfo": {
+            "type": "object",
+            "properties": {
+                "config_schema": {
+                    "$ref": "#/definitions/video.ConfigSchema"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "video.ModelResponse": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "model_id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "provider_id": {
+                    "type": "string"
+                },
+                "provider_type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "video.ProviderMetaResponse": {
+            "type": "object",
+            "properties": {
+                "config_schema": {
+                    "$ref": "#/definitions/video.ConfigSchema"
+                },
+                "default_model": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "models": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/video.ModelInfo"
+                    }
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "supports_list": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "video.ProviderResponse": {
+            "type": "object",
+            "properties": {
+                "client_type": {
+                    "type": "string"
+                },
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "enable": {
+                    "type": "boolean"
+                },
+                "icon": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "video.UpdateModelRequest": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "webhooktunnel.Status": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "mode": {
+                    "type": "string"
+                },
+                "public_base_url": {
+                    "type": "string"
+                },
+                "status": {
                     "type": "string"
                 }
             }

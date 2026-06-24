@@ -2936,6 +2936,25 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (pgsqlc.User,
 	return result, nil
 }
 
+func (q *Queries) GetVideoModelWithProvider(ctx context.Context, id pgtype.UUID) (pgsqlc.GetVideoModelWithProviderRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.GetVideoModelWithProviderRow{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteId string
+	if err := convertValue(id, &sqliteId); err != nil {
+		return pgsqlc.GetVideoModelWithProviderRow{}, err
+	}
+	out, err := q.store.queries.GetVideoModelWithProvider(ctx, sqliteId)
+	if err != nil {
+		return pgsqlc.GetVideoModelWithProviderRow{}, mapQueryErr(err)
+	}
+	var result pgsqlc.GetVideoModelWithProviderRow
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.GetVideoModelWithProviderRow{}, err
+	}
+	return result, nil
+}
+
 func (q *Queries) GetUserChannelBinding(ctx context.Context, arg pgsqlc.GetUserChannelBindingParams) (pgsqlc.UserChannelBinding, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return pgsqlc.UserChannelBinding{}, errSQLiteQueriesNotConfigured
@@ -4425,6 +4444,55 @@ func (q *Queries) ListUncompactedMessagesBySession(ctx context.Context, sessionI
 		return nil, mapQueryErr(err)
 	}
 	var result []pgsqlc.ListUncompactedMessagesBySessionRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListVideoModels(ctx context.Context) ([]pgsqlc.ListVideoModelsRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	out, err := q.store.queries.ListVideoModels(ctx)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ListVideoModelsRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListVideoModelsByProviderID(ctx context.Context, providerID pgtype.UUID) ([]pgsqlc.Model, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteProviderID string
+	if err := convertValue(providerID, &sqliteProviderID); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListVideoModelsByProviderID(ctx, sqliteProviderID)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.Model
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListVideoProviders(ctx context.Context) ([]pgsqlc.Provider, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	out, err := q.store.queries.ListVideoProviders(ctx)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.Provider
 	if err := convertValue(out, &result); err != nil {
 		return nil, err
 	}

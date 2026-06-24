@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, provide, reactive, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useQuery } from '@pinia/colada'
 import {
   Button,
@@ -22,6 +22,7 @@ import ProviderIcon from '@/components/provider-icon/index.vue'
 import BackendCard from '@/components/settings/backend-card.vue'
 import DetailPane from '@/components/settings/detail-pane.vue'
 import { useViewSwap } from '@/composables/useViewSwap'
+import { avatarInitials } from '@/composables/useAvatarInitials'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 import PageShell from '@/components/page-shell/index.vue'
 import ModelSetting from './model-setting.vue'
@@ -45,11 +46,10 @@ const { data: modelData } = useQuery({
 })
 
 const curProvider = ref<ProvidersGetResponse>()
-provide('curProvider', curProvider)
 
 const { view, direction, openDetail, backToList } = useViewSwap()
 const searchQuery = ref('')
-const openStatus = reactive({ provideOpen: false })
+const addOpen = ref(false)
 
 const providers = computed<ProvidersGetResponse[]>(() => {
   if (!Array.isArray(providerData.value)) return []
@@ -83,11 +83,6 @@ const filteredProviders = computed(() => {
     return name.includes(keyword) || url.includes(keyword)
   })
 })
-
-function getInitials(name: string | undefined) {
-  const label = name?.trim() ?? ''
-  return label ? label.slice(0, 2).toUpperCase() : '?'
-}
 
 function providerSubtitle(provider: ProvidersGetResponse) {
   const baseUrl = (provider.config as Record<string, unknown> | undefined)?.base_url
@@ -142,7 +137,7 @@ watch(providers, (list) => {
             />
           </InputGroup>
         </div>
-        <Button @click="openStatus.provideOpen = true">
+        <Button @click="addOpen = true">
           <Plus class="size-4" />
           {{ t('provider.addBtn') }}
         </Button>
@@ -171,7 +166,7 @@ watch(providers, (list) => {
                 v-else
                 class="text-xs font-medium text-muted-foreground"
               >
-                {{ getInitials(provider.name) }}
+                {{ avatarInitials(provider.name, '?') }}
               </span>
             </span>
           </template>
@@ -189,15 +184,6 @@ watch(providers, (list) => {
             />
           </template>
         </BackendCard>
-
-        <button
-          type="button"
-          class="group/add flex min-h-[4.5rem] items-center justify-center gap-2 rounded-[var(--radius-menu-shell)] border border-dashed border-border bg-background text-sm text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          @click="openStatus.provideOpen = true"
-        >
-          <Plus class="size-4" />
-          {{ t('provider.addBtn') }}
-        </button>
       </div>
 
       <Empty
@@ -214,7 +200,7 @@ watch(providers, (list) => {
         <EmptyContent>
           <Button
             variant="outline"
-            @click="openStatus.provideOpen = true"
+            @click="addOpen = true"
           >
             <Plus class="size-4" />
             {{ t('provider.addBtn') }}
@@ -223,7 +209,7 @@ watch(providers, (list) => {
       </Empty>
 
       <AddProvider
-        v-model:open="openStatus.provideOpen"
+        v-model:open="addOpen"
         :providers="providers"
         hide-trigger
       />
@@ -236,7 +222,10 @@ watch(providers, (list) => {
       :back-label="t('sidebar.providers')"
       @back="backToList()"
     >
-      <ModelSetting v-if="curProvider?.id" />
+      <ModelSetting
+        v-if="curProvider?.id"
+        v-model:provider="curProvider"
+      />
     </DetailPane>
   </SwapTransition>
 </template>

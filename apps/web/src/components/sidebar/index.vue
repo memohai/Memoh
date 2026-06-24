@@ -18,8 +18,7 @@
          full-width (right edge aligns with the search row below). -->
     <header
       class="flex h-11 shrink-0 items-center bg-sidebar pr-2 py-1.5 [-webkit-app-region:drag]"
-      :class="macTrafficReserve ? 'pl-[76px]' : 'pl-3'"
-    >
+      :class="macTrafficReserve ? 'pl-[76px]' : 'pl-3'"><!-- ui-allow-px: macOS traffic-light reserve is OS-pixel-precise, cannot be rem -->
       <div class="min-w-0 flex-1">
         <BotSwitcher :full-width="!macTrafficReserve" />
       </div>

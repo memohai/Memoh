@@ -58,7 +58,7 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 	}
 	req.Query = strings.TrimSpace(req.Query)
 	req = r.persistACPLeadingUserMessage(context.WithoutCancel(ctx), req)
-	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.Query)
+	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
 
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()

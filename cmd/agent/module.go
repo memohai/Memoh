@@ -33,6 +33,8 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
+	videopkg "github.com/memohai/memoh/internal/video"
+	"github.com/memohai/memoh/internal/webhooktunnel"
 )
 
 func runServe() {
@@ -87,6 +89,8 @@ func options() fx.Option {
 			event.NewHub,
 			provideAudioRegistry,
 			audiopkg.NewService,
+			provideVideoRegistry,
+			videopkg.NewService,
 			provideAudioTempStore,
 			emailpkg.NewDBOAuthTokenStore,
 			provideEmailRegistry,
@@ -123,8 +127,11 @@ func options() fx.Option {
 			provideACPToolSource,
 			provideToolGatewayService,
 			provideBackgroundManager,
+			webhooktunnel.NewManager,
 			provideToolProviders,
 			provideServerHandler(handlers.NewPingHandler),
+			provideServerHandler(handlers.NewWebhookTunnelHandler),
+			provideServerHandler(handlers.NewConfiguredPublicMediaHandler),
 			provideServerHandler(provideAuthHandler),
 			provideServerHandler(provideMemoryHandler),
 			provideServerHandler(provideMessageHandler),
@@ -155,6 +162,7 @@ func options() fx.Option {
 			provideServerHandler(handlers.NewMemoryProvidersHandler),
 			provideServerHandler(handlers.NewNetworkHandler),
 			provideServerHandler(handlers.NewAudioHandler),
+			provideServerHandler(handlers.NewVideoHandler),
 			provideServerHandler(handlers.NewBotAudioHandler),
 			provideServerHandler(handlers.NewEmailProvidersHandler),
 			provideServerHandler(handlers.NewEmailBindingsHandler),
@@ -177,6 +185,7 @@ func options() fx.Option {
 			injectACPToolProviders,
 			startRegistrySync,
 			startAudioProviderBootstrap,
+			startVideoProviderBootstrap,
 			startMemoryProviderBootstrap,
 			startFetchProviderBootstrap,
 			startSearchProviderBootstrap,
@@ -186,6 +195,8 @@ func options() fx.Option {
 			startEmailManager,
 			startContainerReconciliation,
 			startBackgroundTaskCleanup,
+			startWebhookTunnelListener,
+			startWebhookTunnel,
 			startAudioTempStoreCleanup,
 			startServer,
 		),

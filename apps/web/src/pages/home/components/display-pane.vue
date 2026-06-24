@@ -1,7 +1,7 @@
 <template>
   <div
     ref="rootRef"
-    class=" inset-0 flex flex-col bg-card z-10 "
+    class=" inset-0 flex flex-col z-10 "
     :class="isFullScroll?'fixed':'absolute'"
     @click="closeStatsMenu"
   >
@@ -12,7 +12,7 @@
     />
     <video
       ref="videoRef"
-      class="size-full min-h-0 flex-1 bg-card object-contain"
+      class="size-full min-h-0 flex-1 object-contain"
       autoplay
       playsinline
       muted
@@ -29,7 +29,7 @@
     />
     <div
       v-if="prepareProgress"
-      class="absolute inset-0 flex items-center justify-center bg-card px-6"
+      class="absolute inset-0 flex items-center justify-center px-6"
     >
       <div class="w-full max-w-[520px] rounded-lg border border-border bg-card p-5">
         <div class="flex items-start justify-between gap-4">
@@ -51,11 +51,14 @@
             :style="{ width: `${preparePercent}%` }"
           />
         </div>
-        <div class="mt-5 grid grid-cols-4 gap-2">
+        <div
+          class="mt-5 grid gap-2"
+          :class="prepareStageGridClass"
+        >
           <div
             v-for="stage in prepareStages"
             :key="stage.key"
-            class="flex min-w-0 flex-col items-center gap-2 rounded-md border border-border bg-background px-2 py-3 text-center"
+            class="flex min-w-0 flex-col items-center gap-2 rounded-md border border-border bg-surface-editor px-2 py-3 text-center"
             :class="stage.active ? 'text-foreground' : 'text-muted-foreground'"
           >
             <component
@@ -72,7 +75,7 @@
     </div>
     <div
       v-if="status === 'connected' || displaySessionId"
-      class="absolute right-2 top-2 flex items-center gap-1 rounded-md border border-border bg-background/95 p-1 text-xs text-muted-foreground"
+      class="absolute right-2 top-2 flex items-center gap-1 rounded-md border border-border bg-surface-editor/95 p-1 text-xs text-muted-foreground"
     >
       <span class="max-w-[180px] truncate px-2">
         {{ title || t('chat.display.title') }}
@@ -90,7 +93,7 @@
     </div>
     <div
       v-if="statsMenu.open"
-      class="absolute z-20 w-44 rounded-md border border-border bg-background/95 p-1 text-xs text-foreground shadow-lg"
+      class="absolute z-20 w-44 rounded-md border border-border bg-surface-editor/95 p-1 text-xs text-foreground shadow-lg"
       :style="{ left: `${statsMenu.x}px`, top: `${statsMenu.y}px` }"
       @click.stop
       @mousedown.stop
@@ -179,7 +182,7 @@
     </div>
     <div
       v-if="!prepareProgress && (status !== 'connected' || !videoReady)"
-      class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-card px-6 text-center"
+      class="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center"
     >
       <Spinner
         v-if="status !== 'disconnected' && status !== 'unavailable'"
@@ -203,20 +206,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch, type Component, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
-import {
-  deleteBotsByBotIdContainerDisplaySessionsBySessionId,
-  getBotsByBotIdContainerDisplay,
-  postBotsByBotIdContainerDisplayWebrtcOffer,
-} from '@memohai/sdk'
 import { Button, Spinner } from '@memohai/ui'
 import { Activity, Globe, Maximize, Monitor, Package, Wrench, X } from 'lucide-vue-next'
-import { resolveApiErrorMessage } from '@/utils/api-error'
-import { captureDisplaySnapshot } from '@/utils/display-snapshot'
-import {
-  postBotsByBotIdContainerDisplayPrepareStream,
-  type DisplayPrepareStreamEvent,
-} from '@/composables/api/useDisplayPrepareStream'
 import { useMagicKeys, useMouseInElement, useToggle } from '@vueuse/core'
+import { useBotDisplayConnection } from '@/composables/useBotDisplayConnection'
+import { captureDisplaySnapshot } from '@/utils/display-snapshot'
 
 const screenEl = useTemplateRef('rootRef')
 const fullScreenIcon = useTemplateRef('fullScreenIcon')
@@ -266,32 +260,7 @@ const emit = defineEmits<{
   snapshot: [payload: { tabId: string; sessionId?: string; dataUrl: string }]
 }>()
 
-type DisplayStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'unavailable'
-
-interface DisplayOfferResponse {
-  type: 'answer'
-  sdp: string
-  session_id?: string
-}
-
-interface DisplayInfoPayload {
-  enabled?: boolean
-  available?: boolean
-  running?: boolean
-  encoder_available?: boolean
-  desktop_available?: boolean
-  browser_available?: boolean
-  toolkit_available?: boolean
-  prepare_supported?: boolean
-  prepare_system?: string
-  unavailable_reason?: string
-}
-
-interface PrepareProgress {
-  percent: number
-  message: string
-  step?: string
-}
+const connection = useBotDisplayConnection(props.botId)
 
 interface PrepareStage {
   key: string
@@ -344,17 +313,15 @@ const BITRATE_CHART_PADDING = 4
 const BITRATE_CHART_GRID = [14, 30, 46]
 const FALLBACK_DISPLAY_WIDTH = 1280
 const FALLBACK_DISPLAY_HEIGHT = 960
-const CONNECT_TIMEOUT_MS = 15000
-const INACTIVE_RECONNECT_MS = 10000
 
 const { t } = useI18n()
 const rootRef = ref<HTMLElement | null>(null)
 const videoRef = ref<HTMLVideoElement | null>(null)
-const status = ref<DisplayStatus>('idle')
+const status = connection.status
 const videoReady = ref(false)
-const unavailableReason = ref('')
-const prepareProgress = ref<PrepareProgress | null>(null)
-const displaySessionId = ref('')
+const unavailableReason = connection.unavailableReason
+const prepareProgress = connection.prepareProgress
+const displaySessionId = connection.sessionId
 const statsVisible = ref(false)
 const statsUpdatedAt = ref<number | null>(null)
 const displayStats = ref<DisplayStats>(emptyDisplayStats())
@@ -364,17 +331,12 @@ const statsMenu = reactive({
   x: 0,
   y: 0,
 })
-let peer: RTCPeerConnection | null = null
-let inputChannel: RTCDataChannel | null = null
 let pointerMask = 0
 let lastPointerPoint: { x: number; y: number } | null = null
 let snapshotTimer: ReturnType<typeof window.setTimeout> | null = null
 let snapshotFrameRequest: number | null = null
 let statsTimer: ReturnType<typeof window.setInterval> | null = null
 let lastStatsSample: StatsSample | null = null
-let connectTimeoutTimer: ReturnType<typeof window.setTimeout> | null = null
-let connectAttempt = 0
-let inactiveSince: number | null = null
 
 const statusLabel = computed(() => {
   if (status.value === 'unavailable') {
@@ -392,18 +354,30 @@ const preparePercent = computed(() => Math.max(0, Math.min(100, Math.round(prepa
 
 const prepareStageOrder = ['checking', 'system', 'installing', 'browser', 'starting', 'desktop', 'styling', 'complete']
 
+const prepareStageDefs: PrepareStage[] = [
+  { key: 'checking', label: t('chat.display.prepare.stageCheck'), icon: Wrench, active: false },
+  { key: 'installing', label: t('chat.display.prepare.stageSetup'), icon: Package, active: false },
+  { key: 'browser', label: t('chat.display.prepare.stageBrowser'), icon: Globe, active: false },
+  { key: 'desktop', label: t('chat.display.prepare.stageDesktop'), icon: Monitor, active: false },
+]
+
 const prepareStages = computed<PrepareStage[]>(() => {
   const current = prepareProgress.value?.step ?? 'checking'
   const currentIndex = Math.max(0, prepareStageOrder.indexOf(current))
-  return [
-    { key: 'checking', label: t('chat.display.prepare.stageCheck'), icon: Wrench },
-    { key: 'installing', label: t('chat.display.prepare.stageInstall'), icon: Package },
-    { key: 'browser', label: t('chat.display.prepare.stageBrowser'), icon: Globe },
-    { key: 'desktop', label: t('chat.display.prepare.stageDesktop'), icon: Monitor },
-  ].map((stage) => ({
-    ...stage,
-    active: stage.key === current || prepareStageOrder.indexOf(stage.key) <= currentIndex,
-  }))
+  return prepareStageDefs
+    .filter((stage) => prepareStageOrder.indexOf(stage.key) <= currentIndex)
+    .map((stage) => ({
+      ...stage,
+      active: prepareStageOrder.indexOf(stage.key) <= currentIndex,
+    }))
+})
+
+const prepareStageGridClass = computed(() => {
+  const count = prepareStages.value.length
+  if (count <= 1) return 'grid-cols-1'
+  if (count <= 2) return 'grid-cols-2'
+  if (count <= 3) return 'grid-cols-3'
+  return 'grid-cols-4'
 })
 
 const statsRows = computed(() => [
@@ -468,115 +442,21 @@ function emptyDisplayStats(): DisplayStats {
   }
 }
 
-function formatUnavailableReason(reason: string): string {
-  switch (reason) {
-    case 'container not reachable':
-      return t('chat.display.unavailable.container')
-    case 'display bundle unavailable':
-      return t('chat.display.unavailable.bundle')
-    case 'display server not reachable':
-      return t('chat.display.unavailable.server')
-    case 'gstreamer unavailable':
-      return t('chat.display.unavailable.encoder')
-    case 'manager not configured':
-      return t('chat.display.unavailable.manager')
-    case 'browser unavailable':
-      return t('chat.display.unavailable.browser')
-    case 'desktop unavailable':
-      return t('chat.display.unavailable.desktop')
-    case 'toolkit unavailable':
-      return t('chat.display.unavailable.toolkit')
-    default:
-      return reason || t('chat.display.status.unavailable')
-  }
-}
-
-function cleanupLocal() {
-  clearConnectTimeout()
+function cleanupLocalUI() {
   stopSnapshotCapture()
   stopStatsPolling()
   closeStatsMenu()
   videoReady.value = false
   pointerMask = 0
   lastPointerPoint = null
-  if (inputChannel) {
-    inputChannel.close()
-    inputChannel = null
-  }
-  if (peer) {
-    peer.close()
-    peer = null
-  }
-  if (videoRef.value?.srcObject) {
-    const stream = videoRef.value.srcObject as MediaStream
-    for (const track of stream.getTracks()) {
-      track.stop()
-    }
+  if (videoRef.value) {
     videoRef.value.srcObject = null
   }
 }
 
-function clearConnectTimeout() {
-  if (!connectTimeoutTimer) return
-  window.clearTimeout(connectTimeoutTimer)
-  connectTimeoutTimer = null
-}
-
-function startConnectTimeout(attempt: number) {
-  clearConnectTimeout()
-  connectTimeoutTimer = window.setTimeout(() => {
-    if (attempt !== connectAttempt || status.value !== 'connecting') return
-    cleanupLocal()
-    status.value = 'unavailable'
-    unavailableReason.value = t('chat.display.status.timeout')
-    prepareProgress.value = null
-  }, CONNECT_TIMEOUT_MS)
-}
-
-function closeRemoteSession() {
-  const sessionID = displaySessionId.value
-  displaySessionId.value = ''
-  if (!sessionID) return
-  void deleteBotsByBotIdContainerDisplaySessionsBySessionId({
-    path: {
-      bot_id: props.botId,
-      session_id: sessionID,
-    },
-  }).catch(() => {})
-}
-
-function cleanup() {
-  closeRemoteSession()
-  cleanupLocal()
-}
-
 function closeDisplayWindow() {
-  cleanup()
-  status.value = 'disconnected'
+  cleanupLocalUI()
   emit('close')
-}
-
-function setPeerStatus(next: RTCPeerConnectionState) {
-  switch (next) {
-    case 'connected':
-      clearConnectTimeout()
-      status.value = 'connected'
-      startSnapshotCapture()
-      if (statsVisible.value) {
-        startStatsPolling()
-      }
-      break
-    case 'failed':
-    case 'closed':
-    case 'disconnected':
-      clearConnectTimeout()
-      status.value = 'disconnected'
-      stopSnapshotCapture()
-      stopStatsPolling()
-      break
-    default:
-      status.value = 'connecting'
-  }
 }
 
 function startSnapshotCapture() {
@@ -691,6 +571,7 @@ function resetStatsState() {
 }
 
 async function updateDisplayStats() {
+  const peer = connection.peer.value
   if (!peer) {
     resetStatsState()
     return
@@ -748,54 +629,16 @@ async function updateDisplayStats() {
   }
 }
 
-function waitForIceGatheringComplete(pc: RTCPeerConnection): Promise<void> {
-  if (pc.iceGatheringState === 'complete') {
-    return Promise.resolve()
-  }
-  return new Promise((resolve) => {
-    const timeout = window.setTimeout(done, 3000)
-    function done() {
-      window.clearTimeout(timeout)
-      pc.removeEventListener('icegatheringstatechange', onChange)
-      resolve()
-    }
-    function onChange() {
-      if (pc.iceGatheringState === 'complete') {
-        done()
-      }
-    }
-    pc.addEventListener('icegatheringstatechange', onChange)
-  })
-}
-
-async function createDisplayAnswer(pc: RTCPeerConnection): Promise<DisplayOfferResponse> {
-  const local = pc.localDescription
-  if (!local?.sdp) {
-    throw new Error('local WebRTC offer is unavailable')
-  }
-  const { data } = await postBotsByBotIdContainerDisplayWebrtcOffer({
-    path: { bot_id: props.botId },
-    body: {
-      type: local.type,
-      sdp: local.sdp,
-      session_id: displaySessionId.value || undefined,
-      candidate_host: window.location.hostname,
-    },
-    throwOnError: true,
-  })
-  if (!data?.sdp) {
-    throw new Error('display WebRTC answer is empty')
-  }
-  return { type: 'answer', sdp: data.sdp, session_id: data.session_id }
-}
-
 function sendInput(payload: Record<string, unknown>) {
-  if (inputChannel?.readyState !== 'open') return
-  inputChannel.send(JSON.stringify(payload))
+  // Only the active pane drives input. There is one shared input channel per
+  // bot, so a background/inactive pane forwarding pointer + key events would
+  // race the focused pane's input on the desktop.
+  if (!props.active) return
+  connection.sendInput(payload)
 }
 
 function inputReady() {
-  return inputChannel?.readyState === 'open'
+  return connection.inputReady()
 }
 
 function buttonBit(button: number): number {
@@ -830,10 +673,7 @@ function resolveVideoPoint(event: MouseEvent | WheelEvent): { x: number; y: numb
 }
 
 function sendPointer(event: MouseEvent | WheelEvent, mask = pointerMask) {
-  if (!inputReady() && status.value === 'connected') {
-    void connect()
-    return
-  }
+  if (!inputReady()) return
   const point = resolveVideoPoint(event)
   if (!point) return
   lastPointerPoint = point
@@ -925,26 +765,6 @@ function onKeyDown(event: KeyboardEvent) {
 
 function onKeyUp(event: KeyboardEvent) {
   sendKey(event, false)
-}
-
-async function loadDisplayInfo(): Promise<DisplayInfoPayload> {
-  const { data } = await getBotsByBotIdContainerDisplay({
-    path: { bot_id: props.botId },
-    throwOnError: true,
-  })
-  return data ?? {}
-}
-
-function isDisplayReady(info: DisplayInfoPayload): boolean {
-  return info.enabled === true
-    && info.available === true
-    && info.running === true
-    && info.desktop_available !== false
-    && info.browser_available !== false
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => window.setTimeout(resolve, ms))
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -1053,174 +873,68 @@ function shortID(value: string) {
   return value.length > 12 ? value.slice(0, 8) : value
 }
 
-async function waitForDisplayReady(): Promise<DisplayInfoPayload> {
-  let last = await loadDisplayInfo()
-  for (let attempt = 0; attempt < 12 && !isDisplayReady(last); attempt += 1) {
-    await delay(500)
-    last = await loadDisplayInfo()
+function bindStream() {
+  const video = videoRef.value
+  const stream = connection.stream.value
+  if (!video || !stream) return
+  // Skip if already bound to this exact stream — multiple watchers (stream,
+  // status, connect) can fire bindStream back-to-back and re-assigning
+  // srcObject aborts the in-flight play() promise (AbortError).
+  if (video.srcObject === stream) {
+    // Already bound but maybe not playing yet (e.g. panel was hidden) — nudge it.
+    if (video.paused) video.play().catch(() => {})
+    return
   }
-  return last
-}
-
-function canPrepareDisplay(info: DisplayInfoPayload): boolean {
-  const reason = info.unavailable_reason ?? ''
-  if (!info.enabled) return false
-  if (reason === 'container not reachable' || reason === 'manager not configured') return false
-  if (info.encoder_available === false && reason === 'gstreamer unavailable') return false
-  return !info.available
-    || !info.running
-    || info.desktop_available === false
-    || info.browser_available === false
-}
-
-function prepareEventMessage(event: DisplayPrepareStreamEvent): string {
-  switch (event.step) {
-    case 'checking': return t('chat.display.prepare.checking')
-    case 'toolkit': return t('chat.display.prepare.toolkit')
-    case 'system': return t('chat.display.prepare.system')
-    case 'installing': return t('chat.display.prepare.installing')
-    case 'browser': return t('chat.display.prepare.browser')
-    case 'starting': return t('chat.display.prepare.starting')
-    case 'desktop': return t('chat.display.prepare.desktop')
-    case 'styling': return t('chat.display.prepare.styling')
-    case 'complete': return t('chat.display.prepare.complete')
-    default: return event.message || t('chat.display.prepare.default')
-  }
-}
-
-async function prepareDisplay(): Promise<boolean> {
-  prepareProgress.value = {
-    percent: 5,
-    message: t('chat.display.prepare.checking'),
-    step: 'checking',
-  }
-  try {
-    const { stream } = await postBotsByBotIdContainerDisplayPrepareStream({
-      path: { bot_id: props.botId },
-      throwOnError: true,
-    })
-    for await (const event of stream) {
-      if (event.type === 'error') {
-        throw new Error(event.message)
-      }
-      prepareProgress.value = {
-        percent: event.percent ?? prepareProgress.value?.percent ?? 0,
-        message: prepareEventMessage(event),
-        step: event.step ?? prepareProgress.value?.step,
-      }
-      if (event.type === 'complete') {
-        return true
-      }
-    }
-    return true
-  } catch (error) {
-    status.value = 'unavailable'
-    unavailableReason.value = resolveApiErrorMessage(error, t('chat.display.prepare.failed'))
-    return false
-  } finally {
-    if (status.value === 'unavailable') {
-      prepareProgress.value = null
-    }
-  }
+  video.srcObject = stream
+  // play() resolves once playback begins; set videoReady here as the
+  // authoritative signal instead of relying solely on the @playing event,
+  // which can race or fail to fire when the panel visibility transitions.
+  video.play().then(() => { videoReady.value = true }).catch(() => {})
 }
 
 async function connect() {
-  cleanupLocal()
-  const attempt = ++connectAttempt
-  status.value = 'connecting'
-  unavailableReason.value = ''
-  prepareProgress.value = null
-
-  try {
-    let info = await loadDisplayInfo()
-    if (!info.enabled) {
-      status.value = 'unavailable'
-      unavailableReason.value = t('chat.display.unavailable.disabled')
-      return
-    }
-    if (canPrepareDisplay(info)) {
-      const prepared = await prepareDisplay()
-      if (!prepared) return
-      info = await waitForDisplayReady()
-    }
-    if (!info.available || !info.running) {
-      status.value = 'unavailable'
-      unavailableReason.value = formatUnavailableReason(info.unavailable_reason ?? '')
-      prepareProgress.value = null
-      return
-    }
-    if (info.desktop_available === false) {
-      status.value = 'unavailable'
-      unavailableReason.value = formatUnavailableReason('desktop unavailable')
-      prepareProgress.value = null
-      return
-    }
-    if (info.browser_available === false) {
-      status.value = 'unavailable'
-      unavailableReason.value = formatUnavailableReason('browser unavailable')
-      prepareProgress.value = null
-      return
-    }
-  } catch (error) {
-    status.value = 'unavailable'
-    unavailableReason.value = resolveApiErrorMessage(error, t('chat.display.status.unavailable'))
-    prepareProgress.value = null
-    return
-  }
-
-  startConnectTimeout(attempt)
-  const next = new RTCPeerConnection()
-  peer = next
-  inputChannel = next.createDataChannel('display-input', { ordered: true })
-  next.addTransceiver('video', { direction: 'recvonly' })
-  next.addEventListener('connectionstatechange', () => setPeerStatus(next.connectionState))
-  next.addEventListener('track', (event) => {
-    const video = videoRef.value
-    if (!video) return
-    video.srcObject = event.streams[0] ?? new MediaStream([event.track])
-    void video.play()
-  })
-
-  try {
-    const offer = await next.createOffer()
-    await next.setLocalDescription(offer)
-    await waitForIceGatheringComplete(next)
-    const answer = await createDisplayAnswer(next)
-    displaySessionId.value = answer.session_id ?? ''
-    await next.setRemoteDescription(new RTCSessionDescription(answer))
-    prepareProgress.value = null
-  } catch (error) {
-    cleanupLocal()
-    status.value = 'unavailable'
-    unavailableReason.value = resolveApiErrorMessage(error, t('chat.display.status.unavailable'))
-    prepareProgress.value = null
-  }
+  const ok = await connection.acquireConnection()
+  if (ok) bindStream()
 }
+
+// Snapshot/stats follow the shared peer state + this pane's visibility, so a
+// background pane never captures and a connected pane resumes on focus.
+watch([() => status.value, () => props.active], ([st, active]) => {
+  if (st === 'connected' && active) {
+    bindStream()
+    startSnapshotCapture()
+    if (statsVisible.value) startStatsPolling()
+  } else {
+    stopSnapshotCapture()
+    stopStatsPolling()
+  }
+})
+
+// The track event can land before connectionstatechange flips to 'connected'
+// (track is negotiated at setRemoteDescription, ICE may still be gathering),
+// so bind as soon as the stream arrives rather than gating on status.
+watch(() => connection.stream.value, () => {
+  bindStream()
+})
 
 function handleVisibilityChange() {
   if (document.visibilityState === 'hidden') {
-    inactiveSince = Date.now()
     stopSnapshotCapture()
     stopStatsPolling()
     return
   }
-  const actualState = peer?.connectionState
-  if (actualState === 'failed' || actualState === 'closed' || actualState === 'disconnected') {
-    setPeerStatus(actualState)
-    void connect()
+  if (status.value === 'connected' && props.active) {
+    startSnapshotCapture()
+    if (statsVisible.value) startStatsPolling()
     return
   }
-  if (status.value === 'connected') {
-    if (inactiveSince && Date.now() - inactiveSince >= INACTIVE_RECONNECT_MS) {
-      inactiveSince = null
-      void connect()
-      return
-    }
-    inactiveSince = null
-    startSnapshotCapture()
-    if (statsVisible.value) {
-      startStatsPolling()
-    }
+  // The peer can die while the tab is hidden (ICE timeout in a backgrounded
+  // browser tab). On return, auto-reconnect a dead peer instead of leaving a
+  // disconnected pane for a manual Reconnect click. acquireConnection is
+  // idempotent (concurrent callers share acquirePromise), so this is safe even
+  // if a reconnect is already in flight.
+  if (props.active && status.value !== 'connected') {
+    void connect()
   }
 }
 
@@ -1233,25 +947,13 @@ onMounted(() => {
 
 watch(() => props.active, (active) => {
   if (!active) {
-    inactiveSince = Date.now()
+    stopSnapshotCapture()
+    stopStatsPolling()
+    return
+  }
+  if (status.value === 'connected') {
+    bindStream()
     restartSnapshotCapture()
-    return
-  }
-  if (inactiveSince && Date.now() - inactiveSince >= INACTIVE_RECONNECT_MS && status.value === 'connected') {
-    inactiveSince = null
-    void connect()
-    return
-  }
-  inactiveSince = null
-  restartSnapshotCapture()
-  if (peer || status.value === 'connecting' || status.value === 'connected') return
-  void connect()
-})
-
-watch(() => props.botId, () => {
-  if (!props.active) {
-    cleanup()
-    status.value = 'idle'
     return
   }
   void connect()
@@ -1263,6 +965,6 @@ onBeforeUnmount(() => {
     clearTimeout(fullScreenIconTimer)
     fullScreenIconTimer = null
   }
-  cleanup()
+  cleanupLocalUI()
 })
 </script>

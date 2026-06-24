@@ -81,17 +81,19 @@ type Adapter interface {
 	Descriptor() Descriptor
 }
 
-// Descriptor holds read-only metadata for a registered channel type.
-// It contains no behavior — all behavior is expressed through optional interfaces.
+// Descriptor holds read-only metadata and static policy flags for a registered
+// channel type. Request handling and platform operations are expressed through
+// optional interfaces.
 type Descriptor struct {
-	Type             ChannelType
-	DisplayName      string
-	Configless       bool
-	Capabilities     ChannelCapabilities
-	OutboundPolicy   OutboundPolicy
-	ConfigSchema     ConfigSchema
-	UserConfigSchema ConfigSchema
-	TargetSpec       TargetSpec
+	Type               ChannelType
+	DisplayName        string
+	Configless         bool
+	AckDisabledWebhook bool
+	Capabilities       ChannelCapabilities
+	OutboundPolicy     OutboundPolicy
+	ConfigSchema       ConfigSchema
+	UserConfigSchema   ConfigSchema
+	TargetSpec         TargetSpec
 }
 
 // ConfigNormalizer validates and normalizes channel and user-binding configurations.
@@ -156,6 +158,28 @@ type Reactor interface {
 // The returned map is merged into ChannelConfig.SelfIdentity and persisted.
 type SelfDiscoverer interface {
 	DiscoverSelf(ctx context.Context, credentials map[string]any) (identity map[string]any, externalID string, err error)
+}
+
+// SelfIdentityPolicy describes adapter-specific requirements for persisting a
+// platform bot identity discovered from credentials.
+type SelfIdentityPolicy struct {
+	RefreshOnCredentialsChange       bool
+	RequireDiscoveryOnEnable         bool
+	RequiredSelfIdentityKey          string
+	DiscoveryErrorMessage            string
+	MissingIdentityMessage           string
+	DuplicateExternalIdentityMessage string
+}
+
+// SelfIdentityPolicyProvider lets adapters opt into stricter self-identity
+// discovery semantics than the default best-effort behavior.
+type SelfIdentityPolicyProvider interface {
+	SelfIdentityPolicy() SelfIdentityPolicy
+}
+
+// WebhookEndpointSetter updates the platform-side webhook endpoint.
+type WebhookEndpointSetter interface {
+	SetWebhookEndpoint(ctx context.Context, credentials map[string]any, endpoint string) error
 }
 
 // Receiver is an adapter capable of establishing a long-lived connection to receive messages.

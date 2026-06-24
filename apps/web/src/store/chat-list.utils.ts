@@ -316,6 +316,43 @@ export function thinkingPeek(content?: string): string {
   return segments[segments.length - 1]!
 }
 
+// Provisional title shown in the sidebar before the server's title model has
+// generated the real title. Falls back to the truncated first line of the
+// prompt instead of "Untitled". Strips markdown across the whole prompt
+// (so a complete code fence is dropped, not just its opening line), takes the
+// first remaining line, collapses whitespace, and caps at 50 runes.
+const provisionalTitleMaxRunes = 50
+
+const markdownPatterns = [
+  { re: /```[^]*?```/g, replace: ' ' },
+  { re: /`([^`]+)`/g, replace: '$1' },
+  { re: /!\[([^\]]*)\]\([^)]*\)/g, replace: '$1' },
+  { re: /\[([^\]]+)\]\([^)]*\)/g, replace: '$1' },
+  { re: /^\s{0,3}#{1,6}\s+/gm, replace: '' },
+  { re: /^\s*>+\s?/gm, replace: '' },
+  { re: /^\s*[-*+]\s+/gm, replace: '' },
+  { re: /^\s*\d+\.\s+/gm, replace: '' },
+  { re: /(\*\*|\*|__|~~)/g, replace: '' },
+  { re: /\|/g, replace: ' ' },
+]
+
+function stripMarkdownForTitle(md: string): string {
+  let text = md
+  for (const { re, replace } of markdownPatterns) {
+    text = text.replace(re, replace)
+  }
+  return text
+}
+
+export function provisionalSessionTitle(userQuery: string): string {
+  const stripped = stripMarkdownForTitle(userQuery).trim()
+  if (!stripped) return ''
+  const firstLine = stripped.split('\n')[0]!.replace(/\s+/g, ' ').trim()
+  if (!firstLine) return ''
+  const runes = Array.from(firstLine)
+  if (runes.length <= provisionalTitleMaxRunes) return firstLine
+  return `${runes.slice(0, provisionalTitleMaxRunes).join('')}…`
+}
 export function shouldRefreshFromMessageCreated(
   targetBotId: string,
   currentSessionId: string | null,

@@ -8,7 +8,7 @@ import { cn } from '#/lib/utils'
 
 const props = defineProps<ContextMenuLabelProps & { class?: HTMLAttributes['class'], inset?: boolean }>()
 
-const delegatedProps = reactiveOmit(props, 'class')
+const delegatedProps = reactiveOmit(props, 'class', 'inset')
 </script>
 
 <template>

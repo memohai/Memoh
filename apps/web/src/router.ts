@@ -134,6 +134,14 @@ const routes = [
           breadcrumb: i18nRef('sidebar.voice'),
         },
       },
+      {
+        name: 'video',
+        path: 'video',
+        component: () => import('@/pages/video/index.vue'),
+        meta: {
+          breadcrumb: i18nRef('sidebar.video'),
+        },
+      },
       // Speech and transcription merged into the Voice page; keep the old paths
       // working for existing links/bookmarks.
       {

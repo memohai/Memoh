@@ -17,6 +17,8 @@ const (
 	KindSpawn TaskKind = "spawn"
 	// KindAgent is a single managed subagent task.
 	KindAgent TaskKind = "agent"
+	// KindVideo is an asynchronous video generation task.
+	KindVideo TaskKind = "video"
 )
 
 // SpawnTaskTimeout is the safety ceiling for a background spawn task,

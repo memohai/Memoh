@@ -66,6 +66,7 @@ function removeRow(index: number) {
         variant="ghost"
         size="icon"
         class="shrink-0 size-8 text-muted-foreground hover:text-destructive"
+        :aria-label="$t('common.delete')"
         @click="removeRow(index)"
       >
         <X />

@@ -215,27 +215,33 @@ const open = defineModel<boolean>('open')
 const props = withDefaults(defineProps<{
   providers?: Array<{ name?: string }>
   hideTrigger?: boolean
+  presetDomain?: 'llm' | 'video'
+  importModels?: (providerId: string) => Promise<{ created?: number, skipped?: number } | null | undefined>
 }>(), {
   providers: () => [],
   hideTrigger: false,
+  presetDomain: 'llm',
+  importModels: undefined,
 })
 const { t } = useI18n()
 const { run } = useDialogMutation()
 
 const customPresetId = 'custom'
-const selectedPresetId = ref(customPresetId)
+const availablePresets = computed(() => providerPresets.filter(preset => (preset.domain ?? 'llm') === props.presetDomain))
+const defaultPresetId = computed(() => props.presetDomain === 'video' ? (availablePresets.value[0]?.id ?? customPresetId) : customPresetId)
+const selectedPresetId = ref(defaultPresetId.value)
 
 const selectedPreset = computed(() => getPresetById(selectedPresetId.value))
 
 const providerPresetOptions = computed(() => [
-  {
+  ...(props.presetDomain === 'llm' ? [{
     value: customPresetId,
     label: t('provider.customProvider'),
     group: 'custom',
     groupLabel: t('provider.presetGroupCustom'),
     keywords: ['custom', 'provider'],
-  },
-  ...providerPresets.map(preset => ({
+  }] : []),
+  ...availablePresets.value.map(preset => ({
     value: preset.id,
     label: preset.name,
     description: CLIENT_TYPE_META[preset.clientType]?.label ?? preset.clientType,
@@ -294,10 +300,12 @@ const { mutateAsync: createProviderMutation, isLoading } = useMutation({
     const { data: result } = await postProviders({ body: payload, throwOnError: true })
     if (data.auto_import && result?.id) {
       try {
-        const { data: importResult } = await postProvidersByIdImportModels({
-          path: { id: result.id },
-          throwOnError: true,
-        })
+        const importResult = props.importModels
+          ? await props.importModels(result.id)
+          : (await postProvidersByIdImportModels({
+              path: { id: result.id },
+              throwOnError: true,
+            })).data
         if (importResult) {
           toast.success(t('models.importSuccess', {
             created: importResult.created,
@@ -350,29 +358,32 @@ const defaultFormValues = {
   auto_import: false,
 }
 
-const form = useForm({
-  validationSchema: providerSchema,
-  initialValues: defaultFormValues,
-})
-
-function applyPreset(value: string) {
-  selectedPresetId.value = value || customPresetId
-  const preset = selectedPreset.value
+function valuesForPreset(preset: ProviderPreset | null) {
   if (!preset) {
-    form.setValues(defaultFormValues)
-    return
+    return { ...defaultFormValues }
   }
-  form.setValues({
+  return {
     ...defaultFormValues,
     name: suggestProviderName(preset.name, props.providers),
     base_url: preset.baseUrl,
     client_type: preset.clientType,
-  })
+  }
+}
+
+const form = useForm({
+  validationSchema: providerSchema,
+  initialValues: valuesForPreset(getPresetById(selectedPresetId.value)),
+})
+
+function applyPreset(value: string) {
+  selectedPresetId.value = value || defaultPresetId.value
+  const preset = selectedPreset.value
+  form.setValues(valuesForPreset(preset))
 }
 
 function resetCreateForm() {
-  selectedPresetId.value = customPresetId
-  form.resetForm({ values: defaultFormValues })
+  selectedPresetId.value = defaultPresetId.value
+  form.resetForm({ values: valuesForPreset(selectedPreset.value) })
 }
 
 watch(() => form.values.client_type, (clientType) => {
@@ -384,11 +395,7 @@ watch(() => form.values.client_type, (clientType) => {
   }
 })
 
-watch(open, (isOpen) => {
-  if (!isOpen) {
-    resetCreateForm()
-  }
-})
+watch(open, () => resetCreateForm())
 
 const createProvider = form.handleSubmit(async (value) => {
   await run(

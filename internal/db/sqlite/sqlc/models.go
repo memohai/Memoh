@@ -50,6 +50,7 @@ type Bot struct {
 	Metadata               string         `json:"metadata"`
 	CreatedAt              string         `json:"created_at"`
 	UpdatedAt              string         `json:"updated_at"`
+	VideoModelID           sql.NullString `json:"video_model_id"`
 }
 
 type BotAclRule struct {

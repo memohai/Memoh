@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -19,6 +20,9 @@ import (
 
 // ErrChannelConfigNotFound indicates the bot has no persisted config for the channel type.
 var ErrChannelConfigNotFound = errors.New("channel config not found")
+
+// ErrChannelDiscoveryFailed indicates that a platform-side self identity check failed.
+var ErrChannelDiscoveryFailed = errors.New("channel identity discovery failed")
 
 // Store provides CRUD operations for channel configurations, user bindings, and sessions.
 type Store struct {
@@ -54,19 +58,40 @@ func (s *Store) UpsertConfig(ctx context.Context, botID string, channelType Chan
 	if err != nil {
 		return ChannelConfig{}, err
 	}
-	selfIdentity := req.SelfIdentity
-	if selfIdentity == nil {
-		selfIdentity = map[string]any{}
+	disabled := false
+	if req.Disabled != nil {
+		disabled = *req.Disabled
 	}
 	externalIdentity := strings.TrimSpace(req.ExternalIdentity)
-	if discovered, extID, err := s.registry.DiscoverSelf(ctx, channelType, normalized); err == nil && discovered != nil {
-		for k, v := range discovered {
-			if _, exists := selfIdentity[k]; !exists {
-				selfIdentity[k] = v
-			}
+	policy := s.registry.SelfIdentityPolicy(channelType)
+	var selfIdentity map[string]any
+	if policy.RequireDiscoveryOnEnable {
+		var (
+			previous    ChannelConfig
+			hadPrevious bool
+		)
+		previous, hadPrevious, err = s.getPreviousConfig(ctx, botID, channelType)
+		if err != nil {
+			return ChannelConfig{}, err
 		}
-		if externalIdentity == "" && strings.TrimSpace(extID) != "" {
-			externalIdentity = strings.TrimSpace(extID)
+		selfIdentity, externalIdentity, err = s.prepareSelfIdentity(ctx, channelType, normalized, req, disabled, previous, hadPrevious, policy)
+		if err != nil {
+			return ChannelConfig{}, err
+		}
+	} else {
+		selfIdentity = req.SelfIdentity
+		if selfIdentity == nil {
+			selfIdentity = map[string]any{}
+		}
+		if discovered, extID, err := s.registry.DiscoverSelf(ctx, channelType, normalized); err == nil && discovered != nil {
+			for k, v := range discovered {
+				if _, exists := selfIdentity[k]; !exists {
+					selfIdentity[k] = v
+				}
+			}
+			if externalIdentity == "" && strings.TrimSpace(extID) != "" {
+				externalIdentity = strings.TrimSpace(extID)
+			}
 		}
 	}
 	selfPayload, err := json.Marshal(selfIdentity)
@@ -80,10 +105,6 @@ func (s *Store) UpsertConfig(ctx context.Context, botID string, channelType Chan
 	routingPayload, err := json.Marshal(routing)
 	if err != nil {
 		return ChannelConfig{}, err
-	}
-	disabled := false
-	if req.Disabled != nil {
-		disabled = *req.Disabled
 	}
 	verifiedAt := pgtype.Timestamptz{Valid: false}
 	if req.VerifiedAt != nil {
@@ -104,6 +125,9 @@ func (s *Store) UpsertConfig(ctx context.Context, botID string, channelType Chan
 		VerifiedAt:   verifiedAt,
 	})
 	if err != nil {
+		if db.IsUniqueViolation(err) && strings.TrimSpace(policy.DuplicateExternalIdentityMessage) != "" {
+			return ChannelConfig{}, errors.New(policy.DuplicateExternalIdentityMessage)
+		}
 		return ChannelConfig{}, err
 	}
 	return normalizeChannelConfigFromRow(row)
@@ -135,6 +159,15 @@ func (s *Store) UpdateConfigDisabled(ctx context.Context, botID string, channelT
 	if channelType == "" {
 		return ChannelConfig{}, errors.New("channel type is required")
 	}
+	if s.registry.SelfIdentityPolicy(channelType).RequireDiscoveryOnEnable && !disabled {
+		cfg, err := s.ResolveEffectiveConfig(ctx, botID, channelType)
+		if err != nil {
+			return ChannelConfig{}, err
+		}
+		req := upsertRequestFromConfig(cfg)
+		req.Disabled = &disabled
+		return s.UpsertConfig(ctx, botID, channelType, req)
+	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
 		return ChannelConfig{}, err
@@ -151,6 +184,91 @@ func (s *Store) UpdateConfigDisabled(ctx context.Context, botID string, channelT
 		return ChannelConfig{}, err
 	}
 	return normalizeChannelConfigFromRow(row)
+}
+
+func (s *Store) getPreviousConfig(ctx context.Context, botID string, channelType ChannelType) (ChannelConfig, bool, error) {
+	cfg, err := s.ResolveEffectiveConfig(ctx, botID, channelType)
+	if err == nil {
+		return cfg, true, nil
+	}
+	if errors.Is(err, ErrChannelConfigNotFound) {
+		return ChannelConfig{}, false, nil
+	}
+	return ChannelConfig{}, false, err
+}
+
+func (s *Store) prepareSelfIdentity(
+	ctx context.Context,
+	channelType ChannelType,
+	normalized map[string]any,
+	req UpsertConfigRequest,
+	disabled bool,
+	previous ChannelConfig,
+	hadPrevious bool,
+	policy SelfIdentityPolicy,
+) (map[string]any, string, error) {
+	credsChanged := policy.RefreshOnCredentialsChange && (!hadPrevious || !reflect.DeepEqual(normalized, previous.Credentials))
+	selfIdentity := cloneAnyMap(req.SelfIdentity)
+	externalIdentity := strings.TrimSpace(req.ExternalIdentity)
+
+	if credsChanged {
+		selfIdentity = map[string]any{}
+		externalIdentity = ""
+	} else {
+		if req.SelfIdentity == nil {
+			selfIdentity = cloneAnyMap(previous.SelfIdentity)
+		}
+		if externalIdentity == "" {
+			externalIdentity = strings.TrimSpace(previous.ExternalIdentity)
+		}
+	}
+
+	discovered, extID, discoverErr := s.registry.DiscoverSelf(ctx, channelType, normalized)
+	if discoverErr != nil {
+		if disabled {
+			return selfIdentity, externalIdentity, nil
+		}
+		message := strings.TrimSpace(policy.DiscoveryErrorMessage)
+		if message == "" {
+			message = fmt.Sprintf("%s identity discovery failed", channelType)
+		}
+		return nil, "", fmt.Errorf("%s: %w: %w", message, ErrChannelDiscoveryFailed, discoverErr)
+	}
+	for key, value := range discovered {
+		selfIdentity[key] = value
+	}
+	if value := strings.TrimSpace(extID); value != "" {
+		externalIdentity = value
+	}
+	if externalIdentity == "" {
+		externalIdentity = readAnyMapString(selfIdentity, policy.RequiredSelfIdentityKey)
+	}
+	if !disabled {
+		if readAnyMapString(selfIdentity, policy.RequiredSelfIdentityKey) == "" || strings.TrimSpace(externalIdentity) == "" {
+			message := strings.TrimSpace(policy.MissingIdentityMessage)
+			if message == "" {
+				message = fmt.Sprintf("%s identity discovery returned no required identity", channelType)
+			}
+			return nil, "", errors.New(message)
+		}
+	}
+	return selfIdentity, externalIdentity, nil
+}
+
+func readAnyMapString(values map[string]any, key string) string {
+	if values == nil {
+		return ""
+	}
+	value, ok := values[key]
+	if !ok {
+		return ""
+	}
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	default:
+		return strings.TrimSpace(fmt.Sprint(v))
+	}
 }
 
 // ListConfigs returns all persisted channel configurations for a bot.

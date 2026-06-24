@@ -12,7 +12,7 @@ import (
 
 const countModels = `-- name: CountModels :one
 SELECT COUNT(*) FROM models
-WHERE type NOT IN ('speech', 'transcription')
+WHERE type NOT IN ('speech', 'transcription', 'video')
 `
 
 func (q *Queries) CountModels(ctx context.Context) (int64, error) {
@@ -51,7 +51,10 @@ WHERE client_type NOT IN (
   'alibabacloud-speech',
   'microsoft-speech',
   'google-speech',
-  'google-transcription'
+  'google-transcription',
+  'openrouter-video',
+  'modelark-video',
+  'volcengine-video'
 )
 `
 
@@ -484,13 +487,54 @@ func (q *Queries) GetTranscriptionModelWithProvider(ctx context.Context, id stri
 	return i, err
 }
 
+const getVideoModelWithProvider = `-- name: GetVideoModelWithProvider :one
+SELECT
+  m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at,
+  p.client_type AS provider_type
+FROM models m
+JOIN providers p ON p.id = m.provider_id
+WHERE m.id = ?1
+  AND m.type = 'video'
+`
+
+type GetVideoModelWithProviderRow struct {
+	ID           string         `json:"id"`
+	ModelID      string         `json:"model_id"`
+	Name         sql.NullString `json:"name"`
+	ProviderID   string         `json:"provider_id"`
+	Type         string         `json:"type"`
+	Enable       int64          `json:"enable"`
+	Config       string         `json:"config"`
+	CreatedAt    string         `json:"created_at"`
+	UpdatedAt    string         `json:"updated_at"`
+	ProviderType string         `json:"provider_type"`
+}
+
+func (q *Queries) GetVideoModelWithProvider(ctx context.Context, id string) (GetVideoModelWithProviderRow, error) {
+	row := q.db.QueryRowContext(ctx, getVideoModelWithProvider, id)
+	var i GetVideoModelWithProviderRow
+	err := row.Scan(
+		&i.ID,
+		&i.ModelID,
+		&i.Name,
+		&i.ProviderID,
+		&i.Type,
+		&i.Enable,
+		&i.Config,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ProviderType,
+	)
+	return i, err
+}
+
 const listEnabledModels = `-- name: ListEnabledModels :many
 SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at
 FROM models m
 JOIN providers p ON m.provider_id = p.id
 WHERE p.enable = true
   AND m.enable = true
-  AND m.type NOT IN ('speech', 'transcription')
+  AND m.type NOT IN ('speech', 'transcription', 'video')
 ORDER BY m.created_at DESC
 `
 
@@ -652,7 +696,7 @@ func (q *Queries) ListModelVariantsByModelUUID(ctx context.Context, modelUuid st
 
 const listModels = `-- name: ListModels :many
 SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
-WHERE type NOT IN ('speech', 'transcription')
+WHERE type NOT IN ('speech', 'transcription', 'video')
 ORDER BY created_at DESC
 `
 
@@ -772,7 +816,7 @@ func (q *Queries) ListModelsByProviderClientType(ctx context.Context, clientType
 const listModelsByProviderID = `-- name: ListModelsByProviderID :many
 SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
 WHERE provider_id = ?1
-  AND type NOT IN ('speech', 'transcription')
+  AND type NOT IN ('speech', 'transcription', 'video')
 ORDER BY created_at DESC
 `
 
@@ -910,7 +954,10 @@ WHERE client_type NOT IN (
   'alibabacloud-speech',
   'microsoft-speech',
   'google-speech',
-  'google-transcription'
+  'google-transcription',
+  'openrouter-video',
+  'modelark-video',
+  'volcengine-video'
 )
 ORDER BY created_at DESC
 `
@@ -1207,6 +1254,147 @@ ORDER BY created_at DESC
 
 func (q *Queries) ListTranscriptionProviders(ctx context.Context) ([]Provider, error) {
 	rows, err := q.db.QueryContext(ctx, listTranscriptionProviders)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Provider
+	for rows.Next() {
+		var i Provider
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.ClientType,
+			&i.Icon,
+			&i.Enable,
+			&i.Config,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVideoModels = `-- name: ListVideoModels :many
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at,
+  p.client_type AS provider_type
+FROM models m
+JOIN providers p ON p.id = m.provider_id
+WHERE m.type = 'video'
+  AND m.enable = true
+ORDER BY m.created_at DESC
+`
+
+type ListVideoModelsRow struct {
+	ID           string         `json:"id"`
+	ModelID      string         `json:"model_id"`
+	Name         sql.NullString `json:"name"`
+	ProviderID   string         `json:"provider_id"`
+	Type         string         `json:"type"`
+	Enable       int64          `json:"enable"`
+	Config       string         `json:"config"`
+	CreatedAt    string         `json:"created_at"`
+	UpdatedAt    string         `json:"updated_at"`
+	ProviderType string         `json:"provider_type"`
+}
+
+func (q *Queries) ListVideoModels(ctx context.Context) ([]ListVideoModelsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listVideoModels)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListVideoModelsRow
+	for rows.Next() {
+		var i ListVideoModelsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ModelID,
+			&i.Name,
+			&i.ProviderID,
+			&i.Type,
+			&i.Enable,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ProviderType,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVideoModelsByProviderID = `-- name: ListVideoModelsByProviderID :many
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
+WHERE provider_id = ?1
+  AND type = 'video'
+  AND enable = true
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListVideoModelsByProviderID(ctx context.Context, providerID string) ([]Model, error) {
+	rows, err := q.db.QueryContext(ctx, listVideoModelsByProviderID, providerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Model
+	for rows.Next() {
+		var i Model
+		if err := rows.Scan(
+			&i.ID,
+			&i.ModelID,
+			&i.Name,
+			&i.ProviderID,
+			&i.Type,
+			&i.Enable,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVideoProviders = `-- name: ListVideoProviders :many
+SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at FROM providers
+WHERE client_type IN (
+  'openrouter-video',
+  'modelark-video',
+  'volcengine-video'
+)
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListVideoProviders(ctx context.Context) ([]Provider, error) {
+	rows, err := q.db.QueryContext(ctx, listVideoProviders)
 	if err != nil {
 		return nil, err
 	}
