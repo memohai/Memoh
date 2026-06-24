@@ -983,6 +983,10 @@ definitions:
         items:
           $ref: '#/definitions/botbackup.SectionSummary'
         type: array
+      warnings:
+        items:
+          type: string
+        type: array
     type: object
   bots.Bot:
     properties:
@@ -1157,7 +1161,7 @@ definitions:
         description: |-
           Row groups buttons into keyboard rows for renderers that support grids
           (e.g. Telegram inline keyboards). Buttons sharing a Row render together;
-          rows appear in ascending first-seen order. Renderers without grid support
+          rows appear in ascending numeric order. Renderers without grid support
           ignore this field. 0 is the default (single row, prior behavior).
         type: integer
       type:
@@ -1258,6 +1262,8 @@ definitions:
         type: boolean
       unsend:
         type: boolean
+      url_buttons:
+        type: boolean
     type: object
   channel.ChannelConfig:
     properties:
@@ -1316,6 +1322,7 @@ definitions:
     - wechatoa
     - local
     - slack
+    - whatsapp
     type: string
     x-enum-varnames:
     - ChannelTypeTelegram
@@ -1329,6 +1336,7 @@ definitions:
     - ChannelTypeWeChatOA
     - ChannelTypeLocal
     - ChannelTypeSlack
+    - ChannelTypeWhatsApp
   channel.ConfigSchema:
     properties:
       fields:
@@ -1452,6 +1460,9 @@ definitions:
     - code_block
     - mention
     - emoji
+    - heading
+    - blockquote
+    - list_item
     type: string
     x-enum-varnames:
     - MessagePartText
@@ -1459,18 +1470,25 @@ definitions:
     - MessagePartCodeBlock
     - MessagePartMention
     - MessagePartEmoji
+    - MessagePartHeading
+    - MessagePartBlockquote
+    - MessagePartListItem
   channel.MessageTextStyle:
     enum:
     - bold
     - italic
     - strikethrough
     - code
+    - underline
+    - spoiler
     type: string
     x-enum-varnames:
     - MessageStyleBold
     - MessageStyleItalic
     - MessageStyleStrikethrough
     - MessageStyleCode
+    - MessageStyleUnderline
+    - MessageStyleSpoiler
   channel.ReplyRef:
     properties:
       attachments:
@@ -2034,6 +2052,8 @@ definitions:
       configless:
         type: boolean
       display_name:
+        type: string
+      setup_mode:
         type: string
       target_spec:
         $ref: '#/definitions/channel.TargetSpec'
@@ -2827,6 +2847,34 @@ definitions:
         type: integer
       storage_bytes:
         type: integer
+    type: object
+  handlers.WhatsAppCancelLoginRequest:
+    properties:
+      login_id:
+        type: string
+    required:
+    - login_id
+    type: object
+  handlers.WhatsAppPhonePollRequest:
+    properties:
+      login_id:
+        type: string
+    required:
+    - login_id
+    type: object
+  handlers.WhatsAppPhoneStartRequest:
+    properties:
+      phone:
+        type: string
+    required:
+    - phone
+    type: object
+  handlers.WhatsAppQRPollRequest:
+    properties:
+      login_id:
+        type: string
+    required:
+    - login_id
     type: object
   handlers.acpRuntimeCreateRequest:
     properties:
@@ -4241,6 +4289,97 @@ definitions:
       transcription_model_id:
         type: string
       tts_model_id:
+        type: string
+    type: object
+  whatsapp.CancelLoginResponse:
+    properties:
+      status:
+        type: string
+    type: object
+  whatsapp.LogoutResponse:
+    properties:
+      message:
+        type: string
+      status:
+        type: string
+    type: object
+  whatsapp.PhonePollResponse:
+    properties:
+      config_id:
+        type: string
+      expires_at:
+        type: string
+      login_id:
+        type: string
+      message:
+        type: string
+      pairing_code:
+        type: string
+      status:
+        type: string
+    type: object
+  whatsapp.PhoneStartResponse:
+    properties:
+      expires_at:
+        type: string
+      login_id:
+        type: string
+      message:
+        type: string
+      pairing_code:
+        type: string
+      status:
+        type: string
+    type: object
+  whatsapp.QRPollResponse:
+    properties:
+      config_id:
+        type: string
+      expires_at:
+        type: string
+      login_id:
+        type: string
+      message:
+        type: string
+      qr_code:
+        type: string
+      status:
+        type: string
+    type: object
+  whatsapp.QRStartResponse:
+    properties:
+      expires_at:
+        type: string
+      login_id:
+        type: string
+      message:
+        type: string
+      qr_code:
+        type: string
+      status:
+        type: string
+    type: object
+  whatsapp.StatusResponse:
+    properties:
+      config:
+        $ref: '#/definitions/channel.ChannelConfig'
+      config_id:
+        type: string
+      configured:
+        type: boolean
+      device_jid:
+        type: string
+      last_error:
+        type: string
+      phone:
+        type: string
+      push_name:
+        type: string
+      running:
+        type: boolean
+      status:
+        type: string
+      updated_at:
         type: string
     type: object
 info:
@@ -9462,6 +9601,267 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Update bot channel status
+      tags:
+      - bots
+  /bots/{id}/channel/whatsapp/login/cancel:
+    post:
+      description: Cancels an in-progress experimental WhatsApp Web QR or phone pairing
+        flow.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: WhatsApp login id
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.WhatsAppCancelLoginRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/whatsapp.CancelLoginResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Cancel WhatsApp pairing
+      tags:
+      - bots
+  /bots/{id}/channel/whatsapp/logout:
+    post:
+      description: Unlinks the WhatsApp Web session when possible, stops runtime connection,
+        deletes local store, and removes channel config.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/whatsapp.LogoutResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Logout WhatsApp channel
+      tags:
+      - bots
+  /bots/{id}/channel/whatsapp/phone/poll:
+    post:
+      description: Polls a WhatsApp phone pairing flow and finalizes the bot channel
+        when pairing succeeds.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: WhatsApp phone pairing login id
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.WhatsAppPhonePollRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/whatsapp.PhonePollResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Poll WhatsApp phone pairing
+      tags:
+      - bots
+  /bots/{id}/channel/whatsapp/phone/start:
+    post:
+      description: Starts an experimental WhatsApp Web phone pairing flow and returns
+        a pairing code to enter on the phone.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: WhatsApp phone number
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.WhatsAppPhoneStartRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/whatsapp.PhoneStartResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Start WhatsApp phone pairing
+      tags:
+      - bots
+  /bots/{id}/channel/whatsapp/qr/poll:
+    post:
+      description: Polls a WhatsApp QR pairing flow and finalizes the bot channel
+        when pairing succeeds.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: WhatsApp QR login id
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.WhatsAppQRPollRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/whatsapp.QRPollResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Poll WhatsApp QR login
+      tags:
+      - bots
+  /bots/{id}/channel/whatsapp/qr/start:
+    post:
+      description: Starts an experimental WhatsApp Web QR pairing flow for a bot channel.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/whatsapp.QRStartResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Start WhatsApp QR login
+      tags:
+      - bots
+  /bots/{id}/channel/whatsapp/status:
+    get:
+      description: Gets the persisted and runtime status for the bot's experimental
+        WhatsApp channel.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/whatsapp.StatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get WhatsApp channel status
       tags:
       - bots
   /bots/{id}/checks:

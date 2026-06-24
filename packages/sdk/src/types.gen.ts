@@ -585,6 +585,7 @@ export type BotbackupSectionSummary = {
 export type BotbackupSummaryResult = {
     profile?: BotbackupProfilePreview;
     sections?: Array<BotbackupSectionSummary>;
+    warnings?: Array<string>;
 };
 
 export type BotsBot = {
@@ -694,7 +695,7 @@ export type ChannelAction = {
     /**
      * Row groups buttons into keyboard rows for renderers that support grids
      * (e.g. Telegram inline keyboards). Buttons sharing a Row render together;
-     * rows appear in ascending first-seen order. Renderers without grid support
+     * rows appear in ascending numeric order. Renderers without grid support
      * ignore this field. 0 is the default (single row, prior behavior).
      */
     row?: number;
@@ -752,6 +753,7 @@ export type ChannelChannelCapabilities = {
     text?: boolean;
     threads?: boolean;
     unsend?: boolean;
+    url_buttons?: boolean;
 };
 
 export type ChannelChannelConfig = {
@@ -785,7 +787,7 @@ export type ChannelChannelIdentityBinding = {
     updated_at?: string;
 };
 
-export type ChannelChannelType = 'telegram' | 'feishu' | 'dingtalk' | 'matrix' | 'discord' | 'qq' | 'wecom' | 'weixin' | 'wechatoa' | 'local' | 'slack';
+export type ChannelChannelType = 'telegram' | 'feishu' | 'dingtalk' | 'matrix' | 'discord' | 'qq' | 'wecom' | 'weixin' | 'wechatoa' | 'local' | 'slack' | 'whatsapp';
 
 export type ChannelConfigSchema = {
     fields?: {
@@ -844,9 +846,9 @@ export type ChannelMessagePart = {
     url?: string;
 };
 
-export type ChannelMessagePartType = 'text' | 'link' | 'code_block' | 'mention' | 'emoji';
+export type ChannelMessagePartType = 'text' | 'link' | 'code_block' | 'mention' | 'emoji' | 'heading' | 'blockquote' | 'list_item';
 
-export type ChannelMessageTextStyle = 'bold' | 'italic' | 'strikethrough' | 'code';
+export type ChannelMessageTextStyle = 'bold' | 'italic' | 'strikethrough' | 'code' | 'underline' | 'spoiler';
 
 export type ChannelReplyRef = {
     attachments?: Array<ChannelAttachment>;
@@ -1215,6 +1217,7 @@ export type HandlersChannelMeta = {
     config_schema?: ChannelConfigSchema;
     configless?: boolean;
     display_name?: string;
+    setup_mode?: string;
     target_spec?: ChannelTargetSpec;
     type?: string;
     user_config_schema?: ChannelConfigSchema;
@@ -1699,6 +1702,22 @@ export type HandlersUpdateContainerResourceLimitsRequest = {
     cpu_millicores?: number;
     memory_bytes?: number;
     storage_bytes?: number;
+};
+
+export type HandlersWhatsAppCancelLoginRequest = {
+    login_id: string;
+};
+
+export type HandlersWhatsAppPhonePollRequest = {
+    login_id: string;
+};
+
+export type HandlersWhatsAppPhoneStartRequest = {
+    phone: string;
+};
+
+export type HandlersWhatsAppQrPollRequest = {
+    login_id: string;
 };
 
 export type HandlersAcpRuntimeCreateRequest = {
@@ -2528,6 +2547,62 @@ export type SettingsUpsertRequest = {
     tool_approval_config?: SettingsToolApprovalConfig;
     transcription_model_id?: string;
     tts_model_id?: string;
+};
+
+export type WhatsappCancelLoginResponse = {
+    status?: string;
+};
+
+export type WhatsappLogoutResponse = {
+    message?: string;
+    status?: string;
+};
+
+export type WhatsappPhonePollResponse = {
+    config_id?: string;
+    expires_at?: string;
+    login_id?: string;
+    message?: string;
+    pairing_code?: string;
+    status?: string;
+};
+
+export type WhatsappPhoneStartResponse = {
+    expires_at?: string;
+    login_id?: string;
+    message?: string;
+    pairing_code?: string;
+    status?: string;
+};
+
+export type WhatsappQrPollResponse = {
+    config_id?: string;
+    expires_at?: string;
+    login_id?: string;
+    message?: string;
+    qr_code?: string;
+    status?: string;
+};
+
+export type WhatsappQrStartResponse = {
+    expires_at?: string;
+    login_id?: string;
+    message?: string;
+    qr_code?: string;
+    status?: string;
+};
+
+export type WhatsappStatusResponse = {
+    config?: ChannelChannelConfig;
+    config_id?: string;
+    configured?: boolean;
+    device_jid?: string;
+    last_error?: string;
+    phone?: string;
+    push_name?: string;
+    running?: boolean;
+    status?: string;
+    updated_at?: string;
 };
 
 export type GetAcpProfilesData = {
@@ -8768,6 +8843,312 @@ export type PutBotsByIdResponses = {
 };
 
 export type PutBotsByIdResponse = PutBotsByIdResponses[keyof PutBotsByIdResponses];
+
+export type PostBotsByIdChannelWhatsappLoginCancelData = {
+    /**
+     * WhatsApp login id
+     */
+    body: HandlersWhatsAppCancelLoginRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{id}/channel/whatsapp/login/cancel';
+};
+
+export type PostBotsByIdChannelWhatsappLoginCancelErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByIdChannelWhatsappLoginCancelError = PostBotsByIdChannelWhatsappLoginCancelErrors[keyof PostBotsByIdChannelWhatsappLoginCancelErrors];
+
+export type PostBotsByIdChannelWhatsappLoginCancelResponses = {
+    /**
+     * OK
+     */
+    200: WhatsappCancelLoginResponse;
+};
+
+export type PostBotsByIdChannelWhatsappLoginCancelResponse = PostBotsByIdChannelWhatsappLoginCancelResponses[keyof PostBotsByIdChannelWhatsappLoginCancelResponses];
+
+export type PostBotsByIdChannelWhatsappLogoutData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{id}/channel/whatsapp/logout';
+};
+
+export type PostBotsByIdChannelWhatsappLogoutErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByIdChannelWhatsappLogoutError = PostBotsByIdChannelWhatsappLogoutErrors[keyof PostBotsByIdChannelWhatsappLogoutErrors];
+
+export type PostBotsByIdChannelWhatsappLogoutResponses = {
+    /**
+     * OK
+     */
+    200: WhatsappLogoutResponse;
+};
+
+export type PostBotsByIdChannelWhatsappLogoutResponse = PostBotsByIdChannelWhatsappLogoutResponses[keyof PostBotsByIdChannelWhatsappLogoutResponses];
+
+export type PostBotsByIdChannelWhatsappPhonePollData = {
+    /**
+     * WhatsApp phone pairing login id
+     */
+    body: HandlersWhatsAppPhonePollRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{id}/channel/whatsapp/phone/poll';
+};
+
+export type PostBotsByIdChannelWhatsappPhonePollErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByIdChannelWhatsappPhonePollError = PostBotsByIdChannelWhatsappPhonePollErrors[keyof PostBotsByIdChannelWhatsappPhonePollErrors];
+
+export type PostBotsByIdChannelWhatsappPhonePollResponses = {
+    /**
+     * OK
+     */
+    200: WhatsappPhonePollResponse;
+};
+
+export type PostBotsByIdChannelWhatsappPhonePollResponse = PostBotsByIdChannelWhatsappPhonePollResponses[keyof PostBotsByIdChannelWhatsappPhonePollResponses];
+
+export type PostBotsByIdChannelWhatsappPhoneStartData = {
+    /**
+     * WhatsApp phone number
+     */
+    body: HandlersWhatsAppPhoneStartRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{id}/channel/whatsapp/phone/start';
+};
+
+export type PostBotsByIdChannelWhatsappPhoneStartErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByIdChannelWhatsappPhoneStartError = PostBotsByIdChannelWhatsappPhoneStartErrors[keyof PostBotsByIdChannelWhatsappPhoneStartErrors];
+
+export type PostBotsByIdChannelWhatsappPhoneStartResponses = {
+    /**
+     * OK
+     */
+    200: WhatsappPhoneStartResponse;
+};
+
+export type PostBotsByIdChannelWhatsappPhoneStartResponse = PostBotsByIdChannelWhatsappPhoneStartResponses[keyof PostBotsByIdChannelWhatsappPhoneStartResponses];
+
+export type PostBotsByIdChannelWhatsappQrPollData = {
+    /**
+     * WhatsApp QR login id
+     */
+    body: HandlersWhatsAppQrPollRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{id}/channel/whatsapp/qr/poll';
+};
+
+export type PostBotsByIdChannelWhatsappQrPollErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByIdChannelWhatsappQrPollError = PostBotsByIdChannelWhatsappQrPollErrors[keyof PostBotsByIdChannelWhatsappQrPollErrors];
+
+export type PostBotsByIdChannelWhatsappQrPollResponses = {
+    /**
+     * OK
+     */
+    200: WhatsappQrPollResponse;
+};
+
+export type PostBotsByIdChannelWhatsappQrPollResponse = PostBotsByIdChannelWhatsappQrPollResponses[keyof PostBotsByIdChannelWhatsappQrPollResponses];
+
+export type PostBotsByIdChannelWhatsappQrStartData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{id}/channel/whatsapp/qr/start';
+};
+
+export type PostBotsByIdChannelWhatsappQrStartErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByIdChannelWhatsappQrStartError = PostBotsByIdChannelWhatsappQrStartErrors[keyof PostBotsByIdChannelWhatsappQrStartErrors];
+
+export type PostBotsByIdChannelWhatsappQrStartResponses = {
+    /**
+     * OK
+     */
+    200: WhatsappQrStartResponse;
+};
+
+export type PostBotsByIdChannelWhatsappQrStartResponse = PostBotsByIdChannelWhatsappQrStartResponses[keyof PostBotsByIdChannelWhatsappQrStartResponses];
+
+export type GetBotsByIdChannelWhatsappStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{id}/channel/whatsapp/status';
+};
+
+export type GetBotsByIdChannelWhatsappStatusErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByIdChannelWhatsappStatusError = GetBotsByIdChannelWhatsappStatusErrors[keyof GetBotsByIdChannelWhatsappStatusErrors];
+
+export type GetBotsByIdChannelWhatsappStatusResponses = {
+    /**
+     * OK
+     */
+    200: WhatsappStatusResponse;
+};
+
+export type GetBotsByIdChannelWhatsappStatusResponse = GetBotsByIdChannelWhatsappStatusResponses[keyof GetBotsByIdChannelWhatsappStatusResponses];
 
 export type DeleteBotsByIdChannelByPlatformData = {
     body?: never;

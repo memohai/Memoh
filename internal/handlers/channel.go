@@ -95,6 +95,7 @@ type ChannelMeta struct {
 	Type             string                      `json:"type"`
 	DisplayName      string                      `json:"display_name"`
 	Configless       bool                        `json:"configless"`
+	SetupMode        string                      `json:"setup_mode,omitempty"`
 	Capabilities     channel.ChannelCapabilities `json:"capabilities"`
 	ConfigSchema     channel.ConfigSchema        `json:"config_schema"`
 	UserConfigSchema channel.ConfigSchema        `json:"user_config_schema"`
@@ -116,6 +117,7 @@ func (h *ChannelHandler) ListChannels(c echo.Context) error {
 			Type:             desc.Type.String(),
 			DisplayName:      desc.DisplayName,
 			Configless:       desc.Configless,
+			SetupMode:        desc.SetupMode,
 			Capabilities:     desc.Capabilities,
 			ConfigSchema:     desc.ConfigSchema,
 			UserConfigSchema: desc.UserConfigSchema,
@@ -150,6 +152,7 @@ func (h *ChannelHandler) GetChannel(c echo.Context) error {
 		Type:             desc.Type.String(),
 		DisplayName:      desc.DisplayName,
 		Configless:       desc.Configless,
+		SetupMode:        desc.SetupMode,
 		Capabilities:     desc.Capabilities,
 		ConfigSchema:     desc.ConfigSchema,
 		UserConfigSchema: desc.UserConfigSchema,

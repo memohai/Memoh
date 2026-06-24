@@ -44,6 +44,7 @@ import (
 	"github.com/memohai/memoh/internal/channel/adapters/wechatoa"
 	"github.com/memohai/memoh/internal/channel/adapters/wecom"
 	"github.com/memohai/memoh/internal/channel/adapters/weixin"
+	"github.com/memohai/memoh/internal/channel/adapters/whatsapp"
 	"github.com/memohai/memoh/internal/channel/identities"
 	"github.com/memohai/memoh/internal/channel/inbound"
 	"github.com/memohai/memoh/internal/channel/route"
@@ -467,7 +468,11 @@ func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *mod
 	return resolver
 }
 
-func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService *media.Service) *channel.Registry {
+func provideWhatsAppAdapter(log *slog.Logger, cfg config.Config) *whatsapp.Adapter {
+	return whatsapp.NewAdapter(log, cfg.Workspace.DataRoot)
+}
+
+func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService *media.Service, whatsappAdapter *whatsapp.Adapter) *channel.Registry {
 	registry := channel.NewRegistry()
 
 	tgAdapter := telegram.NewTelegramAdapter(log)
@@ -503,10 +508,15 @@ func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService 
 	weixinAdapter := weixin.NewWeixinAdapter(log)
 	weixinAdapter.SetAssetOpener(mediaService)
 	registry.MustRegister(weixinAdapter)
+	registry.MustRegister(whatsappAdapter)
 	registry.MustRegister(local.NewWebAdapter(hub))
 	registry.MustRegister(misskey.NewMisskeyAdapter(log))
 
 	return registry
+}
+
+func provideWhatsAppService(log *slog.Logger, cfg config.Config, channelStore *channel.Store, lifecycle *channel.Lifecycle, manager *channel.Manager, adapter *whatsapp.Adapter) *whatsapp.Service {
+	return whatsapp.NewService(log, cfg.Workspace.DataRoot, channelStore, lifecycle, manager, adapter)
 }
 
 func provideChannelRouter(

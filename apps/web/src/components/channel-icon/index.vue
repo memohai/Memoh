@@ -35,6 +35,7 @@ import {
   Wecom,
   Matrix,
   Misskey,
+  Whatsapp,
 } from '@memohai/icon'
 import { channelIconFallbackText } from '@/utils/channel-icon-fallback'
 
@@ -51,6 +52,7 @@ const channelIcons: Record<string, Component> = {
   matrix: Matrix,
   misskey: Misskey,
   dingtalk: Dingtalk,
+  whatsapp: Whatsapp,
 }
 
 const props = withDefaults(defineProps<{

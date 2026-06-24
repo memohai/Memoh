@@ -15,6 +15,8 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/channel/adapters/whatsapp"
 	sqlitestore "github.com/memohai/memoh/internal/db/sqlite/store"
 	modelpkg "github.com/memohai/memoh/internal/models"
 )
@@ -51,6 +53,54 @@ func TestNormalizeExportOptionsDefaultsAllSections(t *testing.T) {
 	}
 	if !opts.wants(SectionProfile) {
 		t.Fatal("profile is always exported")
+	}
+}
+
+func TestFilterExportableChannelsSkipsWhatsApp(t *testing.T) {
+	var warnings []string
+	got := filterExportableChannels([]channel.ChannelConfig{
+		{ChannelType: channel.ChannelType("telegram")},
+		{ChannelType: whatsapp.Type},
+		{ChannelType: channel.ChannelType("discord")},
+	}, &warnings)
+	if len(got) != 2 {
+		t.Fatalf("exportable channels = %d, want 2", len(got))
+	}
+	if got[0].ChannelType != channel.ChannelType("telegram") || got[1].ChannelType != channel.ChannelType("discord") {
+		t.Fatalf("exportable channels = %#v", got)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "whatsapp channel config skipped") {
+		t.Fatalf("warnings = %#v", warnings)
+	}
+}
+
+func TestFilterImportableChannelsSkipsWhatsApp(t *testing.T) {
+	var warnings []string
+	got := filterImportableChannels([]channel.ChannelConfig{
+		{ChannelType: whatsapp.Type},
+		{ChannelType: channel.ChannelType("telegram")},
+	}, &warnings)
+	if len(got) != 1 || got[0].ChannelType != channel.ChannelType("telegram") {
+		t.Fatalf("importable channels = %#v", got)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "scan QR again") {
+		t.Fatalf("warnings = %#v", warnings)
+	}
+}
+
+func TestReplaceClearableChannelsPreservesWhatsApp(t *testing.T) {
+	got := replaceClearableChannels([]channel.ChannelConfig{
+		{ChannelType: channel.ChannelType("telegram")},
+		{ChannelType: whatsapp.Type},
+		{ChannelType: channel.ChannelType("discord")},
+	})
+	if len(got) != 2 {
+		t.Fatalf("clearable channels = %d, want 2", len(got))
+	}
+	for _, cfg := range got {
+		if cfg.ChannelType == whatsapp.Type {
+			t.Fatalf("whatsapp channel should not be replace-clearable: %#v", got)
+		}
 	}
 }
 

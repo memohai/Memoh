@@ -1028,6 +1028,9 @@ func (h *UsersHandler) UpsertBotChannelConfig(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	if desc, ok := h.registry.GetDescriptor(channelType); ok && desc.SetupMode == channel.SetupModeQR {
+		return echo.NewHTTPError(http.StatusBadRequest, "channel requires QR setup flow")
+	}
 	var req channel.UpsertConfigRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -1125,6 +1128,9 @@ func (h *UsersHandler) DeleteBotChannelConfig(c echo.Context) error {
 	channelType, err := h.registry.ParseChannelType(c.Param("platform"))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if desc, ok := h.registry.GetDescriptor(channelType); ok && desc.SetupMode == channel.SetupModeQR {
+		return echo.NewHTTPError(http.StatusBadRequest, "channel requires its dedicated logout flow")
 	}
 	if h.channelLifecycle == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "channel lifecycle not configured")

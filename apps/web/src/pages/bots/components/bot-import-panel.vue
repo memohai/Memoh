@@ -13,7 +13,7 @@ import {
   TabsList,
   TabsTrigger,
 } from '@memohai/ui'
-import { Check, FileArchive, Lock, Upload, X } from 'lucide-vue-next'
+import { Check, FileArchive, Lock, TriangleAlert, Upload, X } from 'lucide-vue-next'
 import {
   postBotsBackupImportPreview,
   type BotbackupImportResult,
@@ -299,6 +299,17 @@ async function handleImport() {
 
       <!-- Preview -->
       <template v-else-if="preview">
+        <div
+          v-for="warning in preview.warnings || []"
+          :key="warning"
+          class="rounded-md border border-warning-border bg-warning-soft p-2.5 text-xs text-warning-foreground"
+        >
+          <div class="flex items-start gap-2">
+            <TriangleAlert class="mt-0.5 size-3.5 shrink-0" />
+            <span>{{ warning }}</span>
+          </div>
+        </div>
+
         <div
           v-for="conflict in preview.conflicts || []"
           :key="conflict"
