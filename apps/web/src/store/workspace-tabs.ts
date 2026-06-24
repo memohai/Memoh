@@ -53,7 +53,7 @@ interface BotLayoutState {
   scheduleCounter: number
   chatCounter: number
   // Panel ids that were ephemeral (preview/draft) when the layout was saved, so
-  // the italic + replace behavior survives a reload. Intersected with the panels
+  // the replace behavior survives a reload. Intersected with the panels
   // actually present on restore.
   ephemeralIds: string[]
 }
@@ -146,12 +146,13 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // the tab title) so the tab dot, the sidebar count badge, and the close-confirm
   // dialog all read ONE reactive source. Keyed by dockview panel id.
   const fileDirty = ref<Record<string, boolean>>({})
-  // VS Code-style "preview tab" state. An ephemeral panel renders italic, occupies
-  // its group's single preview slot, and is replaced in place when another
-  // ephemeral-eligible tab opens into that group. It pins (drops out of this map)
-  // the first time the user changes it — a file edit, or a message sent in a chat
-  // session. Keyed by dockview panel id; the tab strip and persistence read this
-  // ONE reactive source. Mirrors the fileDirty pattern above.
+  // VS Code-style "preview tab" state. An ephemeral panel occupies its group's
+  // single preview slot, and is replaced in place when another ephemeral-eligible
+  // tab opens into that group. It pins (drops out of this map) the first time the
+  // user changes it — a file edit, or a message sent in a chat session. The state
+  // is NOT surfaced visually (no italic, no marker): it only drives the in-place
+  // replacement. Keyed by dockview panel id; persistence reads this ONE reactive
+  // source. Mirrors the fileDirty pattern above.
   const ephemeralPanels = ref<Record<string, true>>({})
   // Save callbacks registered by each mounted file panel, so a dirty tab can be
   // written from the close-confirm dialog even while it sits in the background.
@@ -595,9 +596,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     ephemeralPanels.value = { ...ephemeralPanels.value, [id]: true }
   }
 
-  // Pin a panel: drop it out of the ephemeral slot so it is no longer italic and
-  // never gets replaced. Idempotent. Triggered by the first user change (file edit
-  // or chat message); never reversed (VS Code keeps an edited tab pinned).
+  // Pin a panel: drop it out of the ephemeral slot so it stops getting replaced.
+  // Idempotent. Triggered by the first user change (file edit or chat message);
+  // never reversed (VS Code keeps an edited tab pinned).
   function pinPanel(id: string) {
     if (!ephemeralPanels.value[id]) return
     const next = { ...ephemeralPanels.value }
