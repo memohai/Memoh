@@ -213,7 +213,7 @@ const virtualizer = useVirtualizer<HTMLElement, HTMLElement>(
     getScrollElement: () => scrollEl.value,
     estimateSize: () => 36,
     overscan: 10,
-    getItemKey: (index: number) => `${sessions.value[index]?.id}:${sessions.value[index]?.title ?? ''}`,
+    getItemKey: (index: number) => sessions.value[index]?.id ?? index,
   })),
 )
 const totalSize = computed(() => virtualizer.value.getTotalSize())
