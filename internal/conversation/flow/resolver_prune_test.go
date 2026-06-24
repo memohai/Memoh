@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/historyfrag"
 )
 
 func TestPruneMessagesForGateway_PrunesToolResultContent(t *testing.T) {
@@ -80,15 +81,13 @@ func TestPruneHistoryForGateway_ClearsStaleUsageTokensAfterPrune(t *testing.T) {
 	firstTokens := 123
 	secondTokens := 456
 
-	in := []messageWithUsage{
-		{
-			Message:          conversation.ModelMessage{Role: "tool", Content: conversation.NewTextContent(huge), ToolCallID: "call-1"},
-			UsageInputTokens: &firstTokens,
-		},
-		{
-			Message:          conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("hi")},
-			UsageInputTokens: &secondTokens,
-		},
+	in := []historyfrag.HistoryRecord{
+		historyRecord("row-1", conversation.ModelMessage{Role: "tool", Content: conversation.NewTextContent(huge), ToolCallID: "call-1"}, func(record *historyfrag.HistoryRecord) {
+			record.UsageInputTokens = &firstTokens
+		}),
+		historyRecord("row-2", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("hi")}, func(record *historyfrag.HistoryRecord) {
+			record.UsageInputTokens = &secondTokens
+		}),
 	}
 
 	out := pruneHistoryForGateway(in)
@@ -107,11 +106,10 @@ func TestPruneHistoryForGateway_PreservesUsageTokensWhenUnchanged(t *testing.T) 
 	t.Parallel()
 
 	tokens := 321
-	in := []messageWithUsage{
-		{
-			Message:          conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("short")},
-			UsageInputTokens: &tokens,
-		},
+	in := []historyfrag.HistoryRecord{
+		historyRecord("row-1", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("short")}, func(record *historyfrag.HistoryRecord) {
+			record.UsageInputTokens = &tokens
+		}),
 	}
 	out := pruneHistoryForGateway(in)
 	if len(out) != 1 {

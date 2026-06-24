@@ -11,23 +11,13 @@ import (
 
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db"
+	"github.com/memohai/memoh/internal/historyfrag"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	"github.com/memohai/memoh/internal/userinput"
 )
 
-type messageWithUsage struct {
-	Message           conversation.ModelMessage
-	UsageInputTokens  *int
-	UsageOutputTokens *int
-	SessionID         string
-	ExternalMessageID string
-	Platform          string
-	SenderChannelID   string
-	CompactID         string
-}
-
-func (r *Resolver) loadMessages(ctx context.Context, chatID string, sessionID string, maxContextMinutes int) ([]messageWithUsage, error) {
+func (r *Resolver) loadHistoryRecords(ctx context.Context, chatID string, sessionID string, maxContextMinutes int) ([]historyfrag.HistoryRecord, error) {
 	if r.messageService == nil {
 		return nil, nil
 	}
@@ -42,40 +32,18 @@ func (r *Resolver) loadMessages(ctx context.Context, chatID string, sessionID st
 	if err != nil {
 		return nil, err
 	}
-	var result []messageWithUsage
+	result := make([]historyfrag.HistoryRecord, 0, len(msgs))
 	for _, m := range msgs {
-		var mm conversation.ModelMessage
-		if err := json.Unmarshal(m.Content, &mm); err != nil {
-			r.logger.Warn("loadMessages: content unmarshal failed, treating as raw text",
-				slog.String("chat_id", chatID), slog.Any("error", err))
-			mm = conversation.ModelMessage{Role: m.Role, Content: m.Content}
-		} else {
-			mm.Role = m.Role
+		record, err := historyfrag.FromDBMessage(m, historyfrag.ScopeFallback{ChatID: chatID})
+		if err != nil {
+			return nil, err
 		}
-		var inputTokens *int
-		var outputTokens *int
-		if len(m.Usage) > 0 {
-			var u usageInfo
-			if json.Unmarshal(m.Usage, &u) == nil {
-				inputTokens = u.InputTokens
-				outputTokens = u.OutputTokens
-			}
-		}
-		result = append(result, messageWithUsage{
-			Message:           mm,
-			UsageInputTokens:  inputTokens,
-			UsageOutputTokens: outputTokens,
-			SessionID:         strings.TrimSpace(m.SessionID),
-			ExternalMessageID: strings.TrimSpace(m.ExternalMessageID),
-			Platform:          strings.TrimSpace(m.Platform),
-			SenderChannelID:   strings.TrimSpace(m.SenderChannelIdentityID),
-			CompactID:         strings.TrimSpace(m.CompactID),
-		})
+		result = append(result, record)
 	}
 	return result, nil
 }
 
-func dedupePersistedCurrentUserMessage(messages []messageWithUsage, req conversation.ChatRequest) []messageWithUsage {
+func dedupePersistedCurrentUserMessage(messages []historyfrag.HistoryRecord, req conversation.ChatRequest) []historyfrag.HistoryRecord {
 	if !req.UserMessagePersisted || len(messages) == 0 {
 		return messages
 	}
@@ -90,7 +58,7 @@ func dedupePersistedCurrentUserMessage(messages []messageWithUsage, req conversa
 
 	for i := len(messages) - 1; i >= 0; i-- {
 		item := messages[i]
-		if !strings.EqualFold(strings.TrimSpace(item.Message.Role), "user") {
+		if !strings.EqualFold(strings.TrimSpace(item.ModelMessage.Role), "user") {
 			continue
 		}
 		if strings.TrimSpace(item.ExternalMessageID) != targetExternalID {
@@ -102,7 +70,7 @@ func dedupePersistedCurrentUserMessage(messages []messageWithUsage, req conversa
 		if targetPlatform != "" && item.Platform != "" && !strings.EqualFold(item.Platform, targetPlatform) {
 			continue
 		}
-		if targetSenderChannelID != "" && item.SenderChannelID != "" && item.SenderChannelID != targetSenderChannelID {
+		if targetSenderChannelID != "" && item.SenderChannelIdentityID != "" && item.SenderChannelIdentityID != targetSenderChannelID {
 			continue
 		}
 		return append(messages[:i], messages[i+1:]...)
@@ -120,17 +88,13 @@ func estimateMessageTokens(msg conversation.ModelMessage) int {
 	return len(text) / 4
 }
 
-func trimMessagesByTokens(log *slog.Logger, messages []messageWithUsage, maxTokens int) ([]conversation.ModelMessage, int) {
+func trimMessagesByTokens(log *slog.Logger, messages []historyfrag.HistoryRecord, maxTokens int) ([]conversation.ModelMessage, int) {
 	if maxTokens == 0 || len(messages) == 0 {
-		result := make([]conversation.ModelMessage, len(messages))
-		for i, m := range messages {
-			result[i] = m.Message
-		}
 		totalTokens := 0
 		for _, m := range messages {
-			totalTokens += estimateMessageTokens(m.Message)
+			totalTokens += estimateMessageTokens(m.ModelMessage)
 		}
-		return result, totalTokens
+		return historyfrag.ToModelMessages(messages), totalTokens
 	}
 
 	// Scan from newest to oldest, accumulating per-message estimated context
@@ -140,7 +104,7 @@ func trimMessagesByTokens(log *slog.Logger, messages []messageWithUsage, maxToke
 	totalTokens := 0
 	cutoff := 0
 	for i := len(messages) - 1; i >= 0; i-- {
-		totalTokens += estimateMessageTokens(messages[i].Message)
+		totalTokens += estimateMessageTokens(messages[i].ModelMessage)
 		if totalTokens > maxTokens {
 			cutoff = i + 1
 			break
@@ -150,7 +114,7 @@ func trimMessagesByTokens(log *slog.Logger, messages []messageWithUsage, maxToke
 	// Keep provider-valid message order: a "tool" message must follow a preceding
 	// assistant tool call. When history is head-trimmed, a leading tool message
 	// may become orphaned and cause provider 400 errors.
-	for cutoff < len(messages) && strings.EqualFold(strings.TrimSpace(messages[cutoff].Message.Role), "tool") {
+	for cutoff < len(messages) && strings.EqualFold(strings.TrimSpace(messages[cutoff].ModelMessage.Role), "tool") {
 		cutoff++
 	}
 
@@ -179,12 +143,12 @@ func trimMessagesByTokens(log *slog.Logger, messages []messageWithUsage, maxToke
 		})
 	}
 	for _, m := range messages[cutoff:] {
-		result = append(result, m.Message)
+		result = append(result, m.ModelMessage)
 	}
 	return result, totalTokens
 }
 
-func (r *Resolver) replaceCompactedMessages(ctx context.Context, messages []messageWithUsage) []messageWithUsage {
+func (r *Resolver) replaceCompactedMessages(ctx context.Context, messages []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
 	if r.queries == nil {
 		return messages
 	}
@@ -215,7 +179,21 @@ func (r *Resolver) replaceCompactedMessages(ctx context.Context, messages []mess
 		}
 	}
 
-	var result []messageWithUsage
+	return replaceCompactedHistoryRecords(messages, summaries)
+}
+
+func replaceCompactedHistoryRecords(messages []historyfrag.HistoryRecord, summaries map[string]string) []historyfrag.HistoryRecord {
+	compactGroups := make(map[string][]int)
+	for i, m := range messages {
+		if m.CompactID != "" {
+			compactGroups[m.CompactID] = append(compactGroups[m.CompactID], i)
+		}
+	}
+	if len(compactGroups) == 0 {
+		return messages
+	}
+
+	var result []historyfrag.HistoryRecord
 	replaced := make(map[string]bool)
 	for _, m := range messages {
 		if m.CompactID == "" {
@@ -233,12 +211,7 @@ func (r *Resolver) replaceCompactedMessages(ctx context.Context, messages []mess
 			}
 			continue
 		}
-		result = append(result, messageWithUsage{
-			Message: conversation.ModelMessage{
-				Role:    "user",
-				Content: json.RawMessage(`"<summary>\n` + summary + `\n</summary>"`),
-			},
-		})
+		result = append(result, historyfrag.LegacySummaryRecord(m.CompactID, summary, m.Scope))
 	}
 	return result
 }
