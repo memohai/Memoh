@@ -52,6 +52,16 @@ const (
 	socketProbeTimeout = 1500 * time.Millisecond
 	stalePeerTTL         = 2 * time.Minute
 	encoderIdleHold      = 90 * time.Second
+	// firstPacketTimeout gates how long session.start waits for GStreamer to
+	// emit its first RTP packet before declaring the encoder dead. 10s was too
+	// tight for cold starts (Xvnc + GStreamer + desktop spin-up on a freshly
+	// prepared container), surfacing as "produced no frames within 10s" right
+	// when the pipeline was about to produce them — under Orbstack the cold
+	// start regularly exceeded 10s, so the encoder was killed and the WebRTC
+	// offer got 503, looping the frontend in "connecting to desktop" for
+	// minutes. 30s gives cold starts real room while still failing fast when
+	// the pipeline is genuinely broken.
+	firstPacketTimeout    = 30 * time.Second
 	screenshotTimeout    = 15 * time.Second
 	screenshotWidth      = 1280
 	screenshotQuality    = 82
@@ -643,8 +653,8 @@ func (s *session) start(ctx context.Context) error {
 			return fmt.Errorf("%w: display pipeline exited during startup", ErrEncoderUnavailable)
 		}
 		return nil
-	case <-time.After(10 * time.Second):
-		return fmt.Errorf("%w: display pipeline produced no frames within 10s", ErrEncoderUnavailable)
+	case <-time.After(firstPacketTimeout):
+		return fmt.Errorf("%w: display pipeline produced no frames within %s", ErrEncoderUnavailable, firstPacketTimeout)
 	}
 }
 
