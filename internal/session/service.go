@@ -325,6 +325,10 @@ type SessionCursor struct {
 	ID        string
 }
 
+type ListFilter struct {
+	ParentSessionID string
+}
+
 // IsZero reports whether the cursor carries neither half — the start-of-list
 // signal that pagedCursorParams maps to "no cursor predicate". A
 // partially-populated cursor (only the timestamp or only the id) is not zero;
@@ -338,9 +342,17 @@ func (c SessionCursor) IsZero() bool {
 // types and starting after the given cursor. Callers that want a "has more"
 // signal pass limit+1 and look for an extra row.
 func (s *Service) ListByBotPaged(ctx context.Context, botID string, types []string, cursor SessionCursor, limit int64) ([]Session, error) {
+	return s.ListByBotPagedWithFilter(ctx, botID, types, cursor, limit, ListFilter{})
+}
+
+func (s *Service) ListByBotPagedWithFilter(ctx context.Context, botID string, types []string, cursor SessionCursor, limit int64, filter ListFilter) ([]Session, error) {
 	pgBotID, err := dbpkg.ParseUUID(botID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid bot id: %w", err)
+	}
+	parentSessionID, useParentSession, err := pagedParentSessionParam(filter)
+	if err != nil {
+		return nil, err
 	}
 	cursorUpdatedAt, cursorID, useCursor, err := pagedCursorParams(cursor)
 	if err != nil {
@@ -351,12 +363,14 @@ func (s *Service) ListByBotPaged(ctx context.Context, botID string, types []stri
 		return nil, err
 	}
 	rows, err := s.queries.ListSessionsByBotPaged(ctx, sqlc.ListSessionsByBotPagedParams{
-		BotID:           pgBotID,
-		Types:           types,
-		UseCursor:       useCursor,
-		CursorUpdatedAt: cursorUpdatedAt,
-		CursorID:        cursorID,
-		LimitCount:      limitParam,
+		BotID:            pgBotID,
+		Types:            types,
+		UseParentSession: useParentSession,
+		ParentSessionID:  parentSessionID,
+		UseCursor:        useCursor,
+		CursorUpdatedAt:  cursorUpdatedAt,
+		CursorID:         cursorID,
+		LimitCount:       limitParam,
 	})
 	if err != nil {
 		return nil, err
@@ -370,6 +384,10 @@ func (s *Service) ListByBotPaged(ctx context.Context, botID string, types []stri
 
 // ListByBotAndCreatedByUserPaged is the paged variant scoped to a single user.
 func (s *Service) ListByBotAndCreatedByUserPaged(ctx context.Context, botID, userID string, types []string, cursor SessionCursor, limit int64) ([]Session, error) {
+	return s.ListByBotAndCreatedByUserPagedWithFilter(ctx, botID, userID, types, cursor, limit, ListFilter{})
+}
+
+func (s *Service) ListByBotAndCreatedByUserPagedWithFilter(ctx context.Context, botID, userID string, types []string, cursor SessionCursor, limit int64, filter ListFilter) ([]Session, error) {
 	pgBotID, err := dbpkg.ParseUUID(botID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid bot id: %w", err)
@@ -377,6 +395,10 @@ func (s *Service) ListByBotAndCreatedByUserPaged(ctx context.Context, botID, use
 	pgUserID, err := dbpkg.ParseUUID(userID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid user id: %w", err)
+	}
+	parentSessionID, useParentSession, err := pagedParentSessionParam(filter)
+	if err != nil {
+		return nil, err
 	}
 	cursorUpdatedAt, cursorID, useCursor, err := pagedCursorParams(cursor)
 	if err != nil {
@@ -387,13 +409,15 @@ func (s *Service) ListByBotAndCreatedByUserPaged(ctx context.Context, botID, use
 		return nil, err
 	}
 	rows, err := s.queries.ListSessionsByBotAndCreatedByUserPaged(ctx, sqlc.ListSessionsByBotAndCreatedByUserPagedParams{
-		BotID:           pgBotID,
-		CreatedByUserID: pgUserID,
-		Types:           types,
-		UseCursor:       useCursor,
-		CursorUpdatedAt: cursorUpdatedAt,
-		CursorID:        cursorID,
-		LimitCount:      limitParam,
+		BotID:            pgBotID,
+		CreatedByUserID:  pgUserID,
+		Types:            types,
+		UseParentSession: useParentSession,
+		ParentSessionID:  parentSessionID,
+		UseCursor:        useCursor,
+		CursorUpdatedAt:  cursorUpdatedAt,
+		CursorID:         cursorID,
+		LimitCount:       limitParam,
 	})
 	if err != nil {
 		return nil, err
@@ -415,6 +439,18 @@ func pagedLimitToInt32(limit int64) (int32, error) {
 		return 0, fmt.Errorf("session: paged limit %d is out of range", limit)
 	}
 	return int32(limit), nil
+}
+
+func pagedParentSessionParam(filter ListFilter) (pgtype.UUID, bool, error) {
+	parentID := strings.TrimSpace(filter.ParentSessionID)
+	if parentID == "" {
+		return pgtype.UUID{}, false, nil
+	}
+	parsed, err := dbpkg.ParseUUID(parentID)
+	if err != nil {
+		return pgtype.UUID{}, false, fmt.Errorf("invalid parent session id: %w", err)
+	}
+	return parsed, true, nil
 }
 
 func pagedCursorParams(cursor SessionCursor) (pgtype.Timestamptz, pgtype.UUID, bool, error) {

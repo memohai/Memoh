@@ -3,6 +3,7 @@ import {
   deleteBotsByBotIdMessages,
   deleteBotsByBotIdAcpRuntimesByRuntimeId,
   getBotsByBotIdSessions,
+  getBotsByBotIdSessionsBySessionId,
   getBotsByBotIdSessionsBySessionIdAcpRuntime,
   postBotsByBotIdAcpRuntimes,
   postBotsByBotIdSessions,
@@ -35,6 +36,7 @@ export async function fetchBots(): Promise<Bot[]> {
 
 export interface FetchSessionsOptions {
   types?: string[]
+  parentSessionId?: string
   limit?: number
   cursor?: string
 }
@@ -51,11 +53,13 @@ export async function fetchSessions(botId: string, options?: FetchSessionsOption
   const id = botId.trim()
   if (!id) return { items: [], nextCursor: null }
   const types = (options?.types ?? DEFAULT_SESSION_TYPES).map(t => t.trim()).filter(Boolean)
+  const parentSessionId = options?.parentSessionId?.trim() ?? ''
   const cursor = options?.cursor?.trim() ?? ''
   const { data } = await getBotsByBotIdSessions({
     path: { bot_id: id },
     query: {
       types: types.join(','),
+      ...(parentSessionId ? { parent_session_id: parentSessionId } : {}),
       limit: options?.limit ?? DEFAULT_SESSION_PAGE_SIZE,
       ...(cursor ? { cursor } : {}),
     },
@@ -66,6 +70,14 @@ export async function fetchSessions(botId: string, options?: FetchSessionsOption
     items: payload?.items ?? [],
     nextCursor: payload?.next_cursor?.trim() || null,
   }
+}
+
+export async function fetchSession(botId: string, sessionId: string): Promise<SessionSummary> {
+  const { data } = await getBotsByBotIdSessionsBySessionId({
+    path: { bot_id: botId.trim(), session_id: sessionId.trim() },
+    throwOnError: true,
+  })
+  return data as SessionSummary
 }
 
 export async function createSession(botId: string, options?: string | CreateSessionOptions): Promise<SessionSummary> {

@@ -19,6 +19,7 @@ import {
   closeACPRuntime as requestCloseACPRuntime,
   updateSessionAgent as requestUpdateSessionAgent,
   updateSessionTitle as requestUpdateSessionTitle,
+  fetchSession,
   fetchSessions,
   type Bot,
   type BotSessionActivityEvent,
@@ -456,6 +457,7 @@ export const useChatStore = defineStore('chat', () => {
   // O(1) lookup keeps event handlers off the list scan that previously
   // blocked the UI on bots with thousands of heartbeat sessions.
   const sessionById = new Map<string, SessionSummary>()
+  const rememberedSessions = ref<Record<string, SessionSummary>>({})
   const sessionsCursor = ref<string | null>(null)
   const hasMoreSessions = ref(false)
   const loadingMoreSessions = ref(false)
@@ -470,14 +472,17 @@ export const useChatStore = defineStore('chat', () => {
   let pendingACPCreateRequest: Promise<AcpagentRuntimeStatus | undefined> | null = null
   let pendingACPCreateKey = ''
   let pendingACPGeneration = 0
+  let selectSessionRequestId = 0
 
-  // NOTE: activeSession reads from the plain (non-reactive) sessionById Map
-  // and only re-evaluates when sessionId.value changes — it is NOT live-updated
-  // by patchSessionInList (which swaps a *new* object into the Map). That is
-  // fine today because consumers here read only immutable-ish fields (.type /
-  // .metadata / .id), never a live title. If you bind a title display to
-  // activeSession it will go stale — read from chatStore.sessions instead.
-  const activeSession = computed(() => sessionById.get(sessionId.value ?? '') ?? null)
+  const activeSession = computed(() => knownSessionSummary(sessionId.value ?? ''))
+  const knownSessions = computed<SessionSummary[]>(() => {
+    const byId = new Map<string, SessionSummary>()
+    for (const session of sessions.value) byId.set(session.id, session)
+    for (const session of Object.values(rememberedSessions.value)) {
+      if (!byId.has(session.id)) byId.set(session.id, session)
+    }
+    return [...byId.values()]
+  })
 
   function replaceSessions(items: SessionSummary[]) {
     // A racing list refresh can fetch a session before the backend's
@@ -519,6 +524,32 @@ export const useChatStore = defineStore('chat', () => {
       sessions.value = [updated, ...sessions.value]
     }
     sessionById.set(updated.id, updated)
+    if (rememberedSessions.value[updated.id]) rememberSession(updated)
+  }
+
+  function rememberSession(updated: SessionSummary) {
+    rememberedSessions.value = {
+      ...rememberedSessions.value,
+      [updated.id]: updated,
+    }
+  }
+
+  function forgetRememberedSession(id: string) {
+    if (!rememberedSessions.value[id]) return
+    const next = { ...rememberedSessions.value }
+    delete next[id]
+    rememberedSessions.value = next
+  }
+
+  function knownSessionSummary(targetSessionId: string): SessionSummary | null {
+    const sid = targetSessionId.trim()
+    if (!sid) return null
+    return sessionById.get(sid) ?? rememberedSessions.value[sid] ?? null
+  }
+
+  function isRecentsSession(session: SessionSummary): boolean {
+    const type = (session.type ?? 'chat').trim()
+    return type === 'chat' || type === 'discuss' || type === 'acp_agent'
   }
 
   // patchSessionInList applies a partial update to one session in BOTH the
@@ -537,9 +568,10 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function removeSessionFromList(id: string) {
-    if (!sessionById.has(id)) return
+    if (!sessionById.has(id) && !rememberedSessions.value[id]) return
     sessions.value = sessions.value.filter(session => session.id !== id)
     sessionById.delete(id)
+    forgetRememberedSession(id)
   }
 
   const activeChatReadOnly = computed(() => {
@@ -665,6 +697,14 @@ export const useChatStore = defineStore('chat', () => {
     return ''
   }
 
+  function pickRawString(obj: Record<string, unknown>, ...keys: string[]): string {
+    for (const key of keys) {
+      const value = obj[key]
+      if (typeof value === 'string' && value.length > 0) return value
+    }
+    return ''
+  }
+
   function normalizeBackgroundStatus(status?: string, event?: string): string {
     const token = (status || event || '').trim().toLowerCase()
     switch (token) {
@@ -692,6 +732,8 @@ export const useChatStore = defineStore('chat', () => {
       case 'cancelled':
       case 'canceled':
         return 'killed'
+      case 'unknown':
+        return 'unknown'
       default:
         return ''
     }
@@ -704,25 +746,27 @@ export const useChatStore = defineStore('chat', () => {
 
   function normalizeBackgroundTask(task?: UIBackgroundTask, eventType?: string): BackgroundTask | null {
     if (!task) return null
-    const record = task as Record<string, unknown>
+    const outer = task as Record<string, unknown>
+    const nested = asRecord(outer.task)
+    const record = Object.keys(nested).length > 0 ? nested : outer
     const taskId = pickString(record, 'task_id', 'taskId')
     if (!taskId) return null
-    const event = pickString(record, 'event') || (eventType ?? '').trim()
+    const event = pickString(record, 'event') || pickString(outer, 'event') || (eventType ?? '').trim()
     const status = normalizeBackgroundStatus(pickString(record, 'status'), event) || 'running'
     const exitCode = record.exit_code ?? record.exitCode
     return {
       taskId,
       status,
       event: event || undefined,
-      botId: pickString(record, 'bot_id', 'botId') || undefined,
-      sessionId: pickString(record, 'session_id', 'sessionId') || undefined,
+      botId: pickString(record, 'bot_id', 'botId') || pickString(outer, 'bot_id', 'botId') || undefined,
+      sessionId: pickString(record, 'session_id', 'sessionId') || pickString(outer, 'session_id', 'sessionId') || undefined,
       command: pickString(record, 'command') || undefined,
       agentId: pickString(record, 'agent_id', 'agentId') || undefined,
       agentSessionId: pickString(record, 'agent_session_id', 'agentSessionId') || undefined,
       outputFile: pickString(record, 'output_file', 'outputFile') || undefined,
-      outputTail: pickString(record, 'output_tail', 'outputTail', 'tail') || undefined,
+      outputTail: pickRawString(record, 'output_tail', 'outputTail', 'tail') || undefined,
       stream: pickString(record, 'stream') || undefined,
-      chunk: pickString(record, 'chunk') || undefined,
+      chunk: pickRawString(record, 'chunk') || undefined,
       exitCode: typeof exitCode === 'number' ? exitCode : undefined,
       duration: pickString(record, 'duration') || undefined,
       stalled: record.stalled === true || status === 'stalled',
@@ -887,6 +931,18 @@ export const useChatStore = defineStore('chat', () => {
       if (item.role === 'system' && item.kind === 'background_task') {
         const target = toolsByTaskId.get(item.backgroundTask.taskId)
         if (target) mergeBackgroundTaskIntoToolBlock(target, item.backgroundTask)
+      }
+    }
+  }
+
+  function mergeBackgroundTaskIntoMatchingTools(task: BackgroundTask) {
+    for (const item of messages) {
+      if (item.role !== 'assistant') continue
+      for (const block of item.messages) {
+        if (block.type !== 'tool') continue
+        if (taskIdFromToolBlock(block) === task.taskId) {
+          mergeBackgroundTaskIntoToolBlock(block, task)
+        }
       }
     }
   }
@@ -1684,11 +1740,23 @@ export const useChatStore = defineStore('chat', () => {
   function handleSessionMessageEvent(targetBotId: string, targetSessionId: string, event: SessionMessageStreamEvent) {
     if (event.type === 'ping') return
 
+    if (event.type === 'background_task') {
+      const eventSessionId = event.session_id?.trim()
+      if (eventSessionId && eventSessionId !== targetSessionId) return
+      const task = normalizeBackgroundTask(event, event.type)
+      if (!task) return
+      mergeBackgroundTaskIntoMatchingTools(rememberBackgroundTask(task))
+      if (eventSessionId) touchSessionInList(eventSessionId)
+      return
+    }
+
     if (event.type === 'session_title_updated') {
       const sid = event.session_id.trim()
       const title = event.title.trim()
       if (!sid || !title) return
       patchSessionInList(sid, { title })
+      const remembered = rememberedSessions.value[sid]
+      if (remembered) rememberSession({ ...remembered, title })
       return
     }
 
@@ -1722,6 +1790,14 @@ export const useChatStore = defineStore('chat', () => {
         }
         return
       }
+      const remembered = rememberedSessions.value[sid]
+      if (remembered) {
+        if (event.updated_at && (!remembered.updated_at || event.updated_at > remembered.updated_at)) {
+          rememberSession({ ...remembered, updated_at: event.updated_at })
+        }
+        if (isRecentsSession(remembered)) void refreshSessionsList(targetBotId)
+        return
+      }
       // Unknown session — likely created from another channel. Reload the
       // first page so it shows up in the sidebar.
       void refreshSessionsList(targetBotId)
@@ -1733,6 +1809,8 @@ export const useChatStore = defineStore('chat', () => {
       const title = event.title.trim()
       if (!sid || !title) return
       patchSessionInList(sid, { title })
+      const remembered = rememberedSessions.value[sid]
+      if (remembered) rememberSession({ ...remembered, title })
       return
     }
 
@@ -2394,7 +2472,7 @@ export const useChatStore = defineStore('chat', () => {
         // server already filtered to user-facing types and sorted by recency).
         // Transcript hydration is driven by startSessionMessagesStream below — no
         // eager loadMessages REST round trip from here.
-        if (sessionId.value && sessionById.has(sessionId.value)) {
+        if (sessionId.value && knownSessionSummary(sessionId.value)) {
           draftIntent.value = false
         } else if (draftIntent.value) {
           sessionId.value = null
@@ -2440,6 +2518,7 @@ export const useChatStore = defineStore('chat', () => {
 
   async function selectBot(targetBotId: string) {
     if (currentBotId.value === targetBotId) return
+    selectSessionRequestId++
     abort()
     abortAllAssistantStreams()
     clearPendingACPSession()
@@ -2449,21 +2528,37 @@ export const useChatStore = defineStore('chat', () => {
     seenFsToolCallIds.clear()
     currentBotId.value = targetBotId
     sessionId.value = null
+    rememberedSessions.value = {}
     await initialize()
   }
 
-  function selectSession(targetSessionId: string) {
+  async function selectSession(targetSessionId: string) {
     const sid = targetSessionId.trim()
     if (!sid || sid === sessionId.value) return
+    const requestId = ++selectSessionRequestId
+    const bid = (currentBotId.value ?? '').trim()
     clearPendingACPSession()
     sessionId.value = sid
     draftIntent.value = false
     switchActiveSession(sid)
+    if (!bid || knownSessionSummary(sid)) return
+
+    try {
+      const fetched = await fetchSession(bid, sid)
+      if (requestId !== selectSessionRequestId) return
+      if ((currentBotId.value ?? '').trim() !== bid || sessionId.value !== sid) return
+      rememberSession(fetched)
+    } catch {
+      // The target can disappear between a tab activation and hydration. Keep
+      // selection behavior consistent; the session stream/message load will
+      // surface the missing-session state through the existing path.
+    }
   }
 
   async function createNewSession() {
     const bid = await ensureBot()
     if (!bid) return
+    selectSessionRequestId++
     clearPendingACPSession()
     sessionId.value = null
     draftIntent.value = true
@@ -2478,6 +2573,7 @@ export const useChatStore = defineStore('chat', () => {
   // view, so per-session chat tabs can activate their draft tab without minting a
   // session. selectSession early-returns on an empty id, so a draft needs this.
   function selectDraft() {
+    selectSessionRequestId++
     draftIntent.value = true
     if (!sessionId.value) return
     clearPendingACPSession()
@@ -2731,6 +2827,8 @@ export const useChatStore = defineStore('chat', () => {
     bots,
     activeSession,
     activeChatReadOnly,
+    knownSessions,
+    knownSessionSummary,
     isSessionStreaming,
     loading,
     loadingChats,

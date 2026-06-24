@@ -10,6 +10,7 @@ export interface SessionSummary {
   type?: string
   title: string
   metadata?: Record<string, unknown>
+  parent_session_id?: string
   created_at?: string
   updated_at?: string
   route_metadata?: Record<string, unknown>
@@ -67,9 +68,15 @@ export interface SessionPingEvent {
   type: 'ping'
 }
 
+export interface SessionBackgroundTaskEvent extends UIBackgroundTask {
+  type: 'background_task'
+  task?: UIBackgroundTask
+}
+
 export type SessionMessageStreamEvent =
   | SessionMessageCreatedEvent
   | SessionTitleUpdatedEvent
+  | SessionBackgroundTaskEvent
   | SessionPingEvent
 
 // Bot-wide activity SSE: `/bots/{bot_id}/sessions/events`. Carries identifier

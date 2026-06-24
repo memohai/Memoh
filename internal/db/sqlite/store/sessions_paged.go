@@ -39,6 +39,10 @@ WHERE s.bot_id = ?
   AND s.deleted_at IS NULL
   AND (
     ? = 0
+    OR s.parent_session_id = ?
+  )
+  AND (
+    ? = 0
     OR s.updated_at < ?
     OR (
       s.updated_at = ?
@@ -59,6 +63,10 @@ LEFT JOIN bot_channel_routes r ON r.id = s.route_id
 WHERE s.bot_id = ?
   AND s.created_by_user_id = ?
   AND s.deleted_at IS NULL
+  AND (
+    ? = 0
+    OR s.parent_session_id = ?
+  )
   AND (
     ? = 0
     OR s.updated_at < ?
@@ -83,8 +91,13 @@ func (q *Queries) listSessionsByBotPaged(ctx context.Context, arg pgsqlc.ListSes
 		return nil, errors.New("ListSessionsByBotPaged: types must not be empty")
 	}
 	botID, useCursor, cursorTS, cursorID := pagedCursorBindings(arg.BotID, arg.UseCursor, arg.CursorUpdatedAt, arg.CursorID)
-	args := make([]any, 0, 5+len(arg.Types)+1)
-	args = append(args, botID, useCursor, cursorTS, cursorTS, cursorID)
+	parentID := nullableUUIDToString(arg.ParentSessionID)
+	useParent := 0
+	if arg.UseParentSession {
+		useParent = 1
+	}
+	args := make([]any, 0, 7+len(arg.Types)+1)
+	args = append(args, botID, useParent, parentID, useCursor, cursorTS, cursorTS, cursorID)
 	for _, t := range arg.Types {
 		args = append(args, t)
 	}
@@ -114,8 +127,13 @@ func (q *Queries) listSessionsByBotAndCreatedByUserPaged(ctx context.Context, ar
 	}
 	botID, useCursor, cursorTS, cursorID := pagedCursorBindings(arg.BotID, arg.UseCursor, arg.CursorUpdatedAt, arg.CursorID)
 	userID := nullableUUIDToString(arg.CreatedByUserID)
-	args := make([]any, 0, 6+len(arg.Types)+1)
-	args = append(args, botID, userID, useCursor, cursorTS, cursorTS, cursorID)
+	parentID := nullableUUIDToString(arg.ParentSessionID)
+	useParent := 0
+	if arg.UseParentSession {
+		useParent = 1
+	}
+	args := make([]any, 0, 8+len(arg.Types)+1)
+	args = append(args, botID, userID, useParent, parentID, useCursor, cursorTS, cursorTS, cursorID)
 	for _, t := range arg.Types {
 		args = append(args, t)
 	}

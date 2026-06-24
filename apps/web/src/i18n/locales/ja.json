@@ -648,6 +648,7 @@
     "infoContextTokensNoWindow": "{used} / --",
     "infoCacheHitRate": "キャッシュヒット率",
     "infoCacheRead": "キャッシュ読み取り",
+    "infoSubagents": "サブエージェント",
     "infoSkills": "スキル",
     "infoNoSkills": "このセッションではスキルは使用されていません",
     "infoNoData": "利用可能なデータがありません",

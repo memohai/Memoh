@@ -6004,6 +6004,12 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "Only include child sessions under this parent session.",
+                        "name": "parent_session_id",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
                         "description": "Page size (1..200). Defaults to 50.",
                         "name": "limit",

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -30,6 +31,10 @@ func (q *sessionDeleteQueries) GetBotByID(_ context.Context, _ pgtype.UUID) (sql
 
 func (q *sessionDeleteQueries) GetSessionByID(_ context.Context, _ pgtype.UUID) (sqlc.BotSession, error) {
 	return q.session, nil
+}
+
+func (*sessionDeleteQueries) ListBotUserGrantsForUser(_ context.Context, _ sqlc.ListBotUserGrantsForUserParams) ([]sqlc.ListBotUserGrantsForUserRow, error) {
+	return []sqlc.ListBotUserGrantsForUserRow{{Permissions: []byte(`["chat"]`)}}, nil
 }
 
 func (q *sessionDeleteQueries) SoftDeleteSession(_ context.Context, id pgtype.UUID) error {
@@ -126,11 +131,48 @@ func TestDeleteChatSessionDoesNotCloseACPRuntime(t *testing.T) {
 	}
 }
 
+func TestDeleteSessionRejectsSubagentForChatUser(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	sessionID := "33333333-3333-3333-3333-333333333333"
+	userID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	queries := &sessionDeleteQueries{
+		bot: testBotRow(botID, map[string]any{}),
+		session: sqlc.BotSession{
+			ID:              testUUID(sessionID),
+			BotID:           testUUID(botID),
+			Type:            session.TypeSubagent,
+			Title:           "spawned worker",
+			Metadata:        testJSON(map[string]any{"agent_id": "worker"}),
+			CreatedByUserID: testUUID(userID),
+		},
+	}
+	handler := NewSessionHandler(
+		slog.Default(),
+		session.NewService(nil, queries, nil),
+		nil,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("user"),
+	)
+
+	_, err := callDeleteSessionAs(handler, botID, sessionID, userID)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
+		t.Fatalf("DeleteSession() error = %v, want HTTP 403", err)
+	}
+	if queries.softDeleteCalled {
+		t.Fatal("chat user should not be able to delete subagent sessions directly")
+	}
+}
+
 func callDeleteSession(handler *SessionHandler, botID, sessionID string) (*httptest.ResponseRecorder, error) {
+	return callDeleteSessionAs(handler, botID, sessionID, "user-1")
+}
+
+func callDeleteSessionAs(handler *SessionHandler, botID, sessionID, userID string) (*httptest.ResponseRecorder, error) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodDelete, "/bots/"+botID+"/sessions/"+sessionID, nil)
 	rec := httptest.NewRecorder()
-	ctx := testAuthContext(e, req, rec, "user-1")
+	ctx := testAuthContext(e, req, rec, userID)
 	ctx.SetPath("/bots/:bot_id/sessions/:session_id")
 	ctx.SetParamNames("bot_id", "session_id")
 	ctx.SetParamValues(botID, sessionID)

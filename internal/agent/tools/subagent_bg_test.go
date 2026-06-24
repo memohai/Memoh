@@ -91,6 +91,7 @@ func (s *fakeAgentSessionService) Create(_ context.Context, input sessionpkg.Cre
 		Title:           input.Title,
 		Metadata:        input.Metadata,
 		ParentSessionID: input.ParentSessionID,
+		CreatedByUserID: input.CreatedByUserID,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
@@ -308,6 +309,20 @@ func TestAgentControlToolSchemasDoNotReferenceSiblingTools(t *testing.T) {
 	}
 }
 
+func TestSpawnAgentSessionInheritsParentUserIdentity(t *testing.T) {
+	p, _, sessions, _ := newAgentControlProvider(t, &fakeSpawnAgent{})
+	session := SessionContext{BotID: "bot1", SessionID: "parent1", ChannelIdentityID: "user1"}
+
+	res := asMap(t, mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{"id": "worker", "task": "alpha"}))
+	rec, ok := sessions.byAgent("parent1", "worker")
+	if !ok {
+		t.Fatalf("expected child session for worker, result=%v", res)
+	}
+	if rec.CreatedByUserID != "user1" {
+		t.Fatalf("expected child session creator to inherit parent user, got %q", rec.CreatedByUserID)
+	}
+}
+
 func TestSpawnAgentIDsAndDuplicateValidation(t *testing.T) {
 	p, _, _, _ := newAgentControlProvider(t, &fakeSpawnAgent{})
 	session := SessionContext{BotID: "bot1", SessionID: "parent1"}
@@ -412,6 +427,94 @@ func TestBusyAgentQueuesAndRunsFIFO(t *testing.T) {
 	if snap.Status != background.TaskCompleted {
 		t.Fatalf("expected third task completed, got %+v", snap)
 	}
+}
+
+func TestBackgroundSpawnPersistsUserMessageBeforeAgentCompletes(t *testing.T) {
+	block := make(chan struct{})
+	p, _, _, messages := newAgentControlProvider(t, &fakeSpawnAgent{block: block})
+	session := SessionContext{BotID: "bot1", SessionID: "parent1"}
+
+	started := asMap(t, mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{
+		"id":                "worker",
+		"task":              "slow visible task",
+		"run_in_background": true,
+	}))
+	childSessionID, _ := started["session_id"].(string)
+	if childSessionID == "" {
+		t.Fatalf("expected child session id, got %v", started)
+	}
+	defer close(block)
+
+	waitUntil(t, 200*time.Millisecond, func() bool {
+		stored, _ := messages.ListBySession(context.Background(), childSessionID)
+		return len(stored) == 1
+	})
+	stored, _ := messages.ListBySession(context.Background(), childSessionID)
+	if got := stored[0].Role; got != "user" {
+		t.Fatalf("expected initial persisted message role user, got %q", got)
+	}
+	if !strings.Contains(string(stored[0].Content), "slow visible task") {
+		t.Fatalf("expected persisted user content to include task, got %s", stored[0].Content)
+	}
+}
+
+func TestQueuedAgentMessageDoesNotPersistBeforeItRuns(t *testing.T) {
+	block := make(chan struct{})
+	agent := &fakeSpawnAgent{block: block}
+	p, _, _, messages := newAgentControlProvider(t, agent)
+	session := SessionContext{BotID: "bot1", SessionID: "parent1"}
+
+	started := asMap(t, mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{
+		"id":                "worker",
+		"task":              "repeat",
+		"run_in_background": true,
+	}))
+	childSessionID, _ := started["session_id"].(string)
+	if childSessionID == "" {
+		t.Fatalf("expected child session id, got %v", started)
+	}
+	waitUntil(t, 200*time.Millisecond, func() bool {
+		stored, _ := messages.ListBySession(context.Background(), childSessionID)
+		return len(stored) == 1
+	})
+
+	queued := asMap(t, mustExecuteAgentTool(t, p, session, "send_message", map[string]any{
+		"id":      "worker",
+		"message": "repeat",
+	}))
+	if queued["status"] != string(background.TaskQueued) {
+		t.Fatalf("expected queued second message, got %v", queued)
+	}
+	stored, _ := messages.ListBySession(context.Background(), childSessionID)
+	if len(stored) != 1 {
+		raw, _ := json.Marshal(stored)
+		t.Fatalf("queued message should not be persisted before it runs, got %d: %s", len(stored), raw)
+	}
+	if !strings.Contains(string(stored[0].Content), "repeat") {
+		t.Fatalf("expected only running task persisted, got %s", stored[0].Content)
+	}
+
+	close(block)
+	waitUntil(t, 2*time.Second, func() bool {
+		return len(agent.queries()) == 2
+	})
+	secondCall, ok := agent.callAt(1)
+	if !ok {
+		t.Fatal("expected queued message to run")
+	}
+	if got := len(secondCall.Messages); got != 2 {
+		t.Fatalf("expected second run history to exclude current repeated query, got %d messages", got)
+	}
+	if secondCall.Messages[0].Role != sdk.MessageRoleUser || strings.TrimSpace(messageTextContent(secondCall.Messages[0])) != "repeat" {
+		t.Fatalf("expected previous user turn first in history, got %+v", secondCall.Messages[0])
+	}
+	if secondCall.Messages[1].Role != sdk.MessageRoleAssistant {
+		t.Fatalf("expected previous assistant turn second in history, got %+v", secondCall.Messages[1])
+	}
+	waitUntil(t, 2*time.Second, func() bool {
+		stored, _ := messages.ListBySession(context.Background(), childSessionID)
+		return len(stored) == 4
+	})
 }
 
 func TestBackgroundWaitTimeoutDoesNotCancelRunningAgentTask(t *testing.T) {

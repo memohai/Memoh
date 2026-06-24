@@ -28,6 +28,8 @@ type sessionUpdateQueries struct {
 
 	updateCalled bool
 	updateParams sqlc.UpdateSessionTypeAndMetadataParams
+
+	titleUpdateCalled bool
 }
 
 func (q *sessionUpdateQueries) GetBotByID(_ context.Context, _ pgtype.UUID) (sqlc.GetBotByIDRow, error) {
@@ -36,6 +38,10 @@ func (q *sessionUpdateQueries) GetBotByID(_ context.Context, _ pgtype.UUID) (sql
 
 func (q *sessionUpdateQueries) GetSessionByID(_ context.Context, _ pgtype.UUID) (sqlc.BotSession, error) {
 	return q.session, nil
+}
+
+func (*sessionUpdateQueries) ListBotUserGrantsForUser(_ context.Context, _ sqlc.ListBotUserGrantsForUserParams) ([]sqlc.ListBotUserGrantsForUserRow, error) {
+	return []sqlc.ListBotUserGrantsForUserRow{{Permissions: []byte(`["chat"]`)}}, nil
 }
 
 func (*sessionUpdateQueries) ListSessionsByBot(_ context.Context, _ pgtype.UUID) ([]sqlc.ListSessionsByBotRow, error) {
@@ -52,6 +58,13 @@ func (q *sessionUpdateQueries) UpdateSessionTypeAndMetadata(_ context.Context, a
 	updated := q.session
 	updated.Type = arg.Type
 	updated.Metadata = arg.Metadata
+	return updated, nil
+}
+
+func (q *sessionUpdateQueries) UpdateSessionTitle(_ context.Context, arg sqlc.UpdateSessionTitleParams) (sqlc.BotSession, error) {
+	q.titleUpdateCalled = true
+	updated := q.session
+	updated.Title = arg.Title
 	return updated, nil
 }
 
@@ -233,6 +246,104 @@ func TestUpdateSessionRejectsAgentChangeAfterFirstMessage(t *testing.T) {
 	}
 }
 
+func TestUpdateSessionRejectsRetagToSubagentForChatUser(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	sessionID := "33333333-3333-3333-3333-333333333333"
+	userID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	queries := &sessionUpdateQueries{
+		bot: testBotRow(botID, map[string]any{}),
+		session: sqlc.BotSession{
+			ID:              testUUID(sessionID),
+			BotID:           testUUID(botID),
+			Type:            session.TypeChat,
+			Title:           "",
+			Metadata:        testJSON(map[string]any{}),
+			CreatedByUserID: testUUID(userID),
+		},
+	}
+	handler := NewSessionHandler(
+		slog.Default(),
+		session.NewService(nil, queries, nil),
+		nil,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("user"),
+	)
+
+	_, err := callUpdateSessionAs(handler, botID, sessionID, userID, `{"type":"subagent","metadata":{"agent_id":"direct"}}`)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
+		t.Fatalf("UpdateSession() error = %v, want HTTP 403", err)
+	}
+	if queries.updateCalled {
+		t.Fatal("chat user should not be able to retag sessions as subagent")
+	}
+}
+
+func TestGetSessionAllowsChatUserToReadOwnSubagent(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	sessionID := "33333333-3333-3333-3333-333333333333"
+	userID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	queries := &sessionUpdateQueries{
+		bot: testBotRow(botID, map[string]any{}),
+		session: sqlc.BotSession{
+			ID:              testUUID(sessionID),
+			BotID:           testUUID(botID),
+			Type:            session.TypeSubagent,
+			Title:           "spawned worker",
+			Metadata:        testJSON(map[string]any{"agent_id": "worker"}),
+			CreatedByUserID: testUUID(userID),
+		},
+	}
+	handler := NewSessionHandler(
+		slog.Default(),
+		session.NewService(nil, queries, nil),
+		nil,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("user"),
+	)
+
+	rec, err := callGetSession(handler, botID, sessionID, userID)
+	if err != nil {
+		t.Fatalf("GetSession() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestUpdateSessionRejectsSubagentTitleUpdateForChatUser(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	sessionID := "33333333-3333-3333-3333-333333333333"
+	userID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	queries := &sessionUpdateQueries{
+		bot: testBotRow(botID, map[string]any{}),
+		session: sqlc.BotSession{
+			ID:              testUUID(sessionID),
+			BotID:           testUUID(botID),
+			Type:            session.TypeSubagent,
+			Title:           "spawned worker",
+			Metadata:        testJSON(map[string]any{"agent_id": "worker"}),
+			CreatedByUserID: testUUID(userID),
+		},
+	}
+	handler := NewSessionHandler(
+		slog.Default(),
+		session.NewService(nil, queries, nil),
+		nil,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("user"),
+	)
+
+	_, err := callUpdateSessionAs(handler, botID, sessionID, userID, `{"title":"renamed directly"}`)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
+		t.Fatalf("UpdateSession() error = %v, want HTTP 403", err)
+	}
+	if queries.titleUpdateCalled {
+		t.Fatal("chat user should not be able to title-update subagent sessions directly")
+	}
+}
+
 func TestUpdateSessionAllowsEmptyACPAgentChangeAndClosesRuntime(t *testing.T) {
 	botID := "11111111-1111-1111-1111-111111111111"
 	sessionID := "55555555-5555-5555-5555-555555555555"
@@ -333,13 +444,28 @@ func TestUpdateSessionSwitchesACPAgentToChatClearsMetadataAndClosesRuntime(t *te
 }
 
 func callUpdateSession(handler *SessionHandler, botID, sessionID, body string) (*httptest.ResponseRecorder, error) {
+	return callUpdateSessionAs(handler, botID, sessionID, "user-1", body)
+}
+
+func callUpdateSessionAs(handler *SessionHandler, botID, sessionID, userID, body string) (*httptest.ResponseRecorder, error) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPatch, "/bots/"+botID+"/sessions/"+sessionID, bytes.NewBufferString(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
-	ctx := testAuthContext(e, req, rec, "user-1")
+	ctx := testAuthContext(e, req, rec, userID)
 	ctx.SetPath("/bots/:bot_id/sessions/:session_id")
 	ctx.SetParamNames("bot_id", "session_id")
 	ctx.SetParamValues(botID, sessionID)
 	return rec, handler.UpdateSession(ctx)
+}
+
+func callGetSession(handler *SessionHandler, botID, sessionID, userID string) (*httptest.ResponseRecorder, error) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/sessions/"+sessionID, nil)
+	rec := httptest.NewRecorder()
+	ctx := testAuthContext(e, req, rec, userID)
+	ctx.SetPath("/bots/:bot_id/sessions/:session_id")
+	ctx.SetParamNames("bot_id", "session_id")
+	ctx.SetParamValues(botID, sessionID)
+	return rec, handler.GetSession(ctx)
 }

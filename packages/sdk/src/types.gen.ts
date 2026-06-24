@@ -7522,6 +7522,10 @@ export type GetBotsByBotIdSessionsData = {
          */
         types?: string;
         /**
+         * Only include child sessions under this parent session.
+         */
+        parent_session_id?: string;
+        /**
          * Page size (1..200). Defaults to 50.
          */
         limit?: number;

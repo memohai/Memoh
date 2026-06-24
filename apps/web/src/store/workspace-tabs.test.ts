@@ -1,4 +1,4 @@
-import { nextTick } from 'vue'
+import { nextTick, reactive } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatSelectionStore } from './chat-selection'
@@ -13,15 +13,23 @@ vi.mock('@/i18n', () => ({
 }))
 
 const chatStoreMock = vi.hoisted(() => ({
+  sessions: [] as Array<{ id: string, title?: string }>,
+  knownSessions: [] as Array<{ id: string, title?: string, type?: string }>,
   createNewSession: vi.fn(async () => {}),
   selectSession: vi.fn(async () => {}),
   selectDraft: vi.fn(() => {}),
+  knownSessionSummary: vi.fn((sessionId: string) =>
+    chatStoreMock.knownSessions.find(session => session.id === sessionId)
+    ?? chatStoreMock.sessions.find(session => session.id === sessionId)
+    ?? null,
+  ),
 }))
 
 vi.mock('@/store/chat-list', () => ({
   useChatStore: () => ({
     sessionId: null,
-    sessions: [],
+    sessions: chatStoreMock.sessions,
+    knownSessions: chatStoreMock.knownSessions,
     loadingChats: false,
     activeSession: null,
     userSentInSession: null,
@@ -36,6 +44,7 @@ vi.mock('@/store/chat-list', () => ({
       },
     ],
     isSessionStreaming: vi.fn(() => false),
+    knownSessionSummary: chatStoreMock.knownSessionSummary,
     createNewSession: chatStoreMock.createNewSession,
     selectSession: chatStoreMock.selectSession,
     selectDraft: chatStoreMock.selectDraft,
@@ -208,6 +217,13 @@ describe('workspace layout store', () => {
     chatStoreMock.createNewSession.mockClear()
     chatStoreMock.selectSession.mockClear()
     chatStoreMock.selectDraft.mockClear()
+    chatStoreMock.sessions = reactive([]) as typeof chatStoreMock.sessions
+    chatStoreMock.knownSessions = reactive([]) as typeof chatStoreMock.knownSessions
+    chatStoreMock.knownSessionSummary.mockImplementation((sessionId: string) =>
+      chatStoreMock.knownSessions.find(session => session.id === sessionId)
+      ?? chatStoreMock.sessions.find(session => session.id === sessionId)
+      ?? null,
+    )
     setActivePinia(createPinia())
     useChatSelectionStore().setBot('bot-1')
   })
@@ -318,6 +334,71 @@ describe('workspace layout store', () => {
     expect(chatPanels).toHaveLength(1)
     expect(chatPanels[0]!.id).toBe(firstId)
     expect(chatPanels[0]!.params.sessionId).toBe('s2')
+  })
+
+  it('uses remembered hidden session summaries for subagent chat tabs', () => {
+    chatStoreMock.knownSessionSummary.mockImplementation((sessionId: string) => {
+      if (sessionId === 'subagent-1') {
+        return {
+          id: 'subagent-1',
+          title: 'Subagent task',
+          type: 'subagent',
+        }
+      }
+      return chatStoreMock.sessions.find(session => session.id === sessionId) ?? null
+    })
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 'subagent-1' })
+
+    const chatPanel = dock.panels.find(panel => panel.component === 'chat')
+    expect(chatPanel?.params.sessionId).toBe('subagent-1')
+    expect(chatPanel?.title).toBe('Subagent task')
+  })
+
+  it('updates open hidden subagent tab titles when their summary is remembered later', async () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 'subagent-1', title: 'agent-a' })
+    const chatPanel = dock.panels.find(panel => panel.component === 'chat')!
+    expect(chatPanel.title).toBe('agent-a')
+
+    chatStoreMock.knownSessions.push({
+      id: 'subagent-1',
+      title: 'Fetched subagent task',
+      type: 'subagent',
+    })
+    await nextTick()
+
+    expect(dock.getPanel(chatPanel.id)?.title).toBe('Fetched subagent task')
+  })
+
+  it('does not reconcile remembered hidden subagent chat tabs as deleted', async () => {
+    chatStoreMock.knownSessionSummary.mockImplementation((sessionId: string) => {
+      if (sessionId === 'subagent-1') {
+        return {
+          id: 'subagent-1',
+          title: 'Subagent task',
+          type: 'subagent',
+        }
+      }
+      return chatStoreMock.sessions.find(session => session.id === sessionId) ?? null
+    })
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openSessionChat({ sessionId: 'subagent-1' })
+    const chatPanel = dock.panels.find(panel => panel.component === 'chat')!
+
+    chatStoreMock.sessions.push({ id: 'parent-1', title: 'Parent' })
+    await nextTick()
+
+    expect(dock.getPanel(chatPanel.id)?.params.sessionId).toBe('subagent-1')
+    expect(chatStoreMock.selectDraft).not.toHaveBeenCalled()
   })
 
   it('opens files into the ephemeral slot and replaces until pinned', () => {

@@ -78,6 +78,11 @@
           {{ $t('chat.compactNow') }}
         </Button>
 
+        <!-- Subagents -->
+        <div class="mt-4">
+          <SubagentList />
+        </div>
+
         <!-- Skills -->
         <div class="mt-4">
           <p class="mb-1.5 text-caption font-medium uppercase tracking-wider text-muted-foreground">
@@ -123,6 +128,7 @@ import type { HandlersSkillItem } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { openInFileManagerKey } from '../composables/useFileManagerProvider'
 import { useSessionInfo } from '../composables/useSessionInfo'
+import SubagentList from './subagent-list.vue'
 
 const props = defineProps<{
   visible: boolean
