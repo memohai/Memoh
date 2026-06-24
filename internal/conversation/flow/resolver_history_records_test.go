@@ -7,6 +7,8 @@ import (
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/historyfrag"
+	"github.com/memohai/memoh/internal/toolapproval"
+	"github.com/memohai/memoh/internal/userinput"
 )
 
 func TestDedupePersistedCurrentUserMessageUsesHistoryRecordProvenance(t *testing.T) {
@@ -102,6 +104,52 @@ func TestReplaceCompactedHistoryRecordsKeepsOriginalGroupWithoutSummary(t *testi
 	gotEmpty := replaceCompactedHistoryRecords(records, map[string]string{"compact-1": ""})
 	if gotMessages := historyfrag.ToModelMessages(gotEmpty); !reflect.DeepEqual(gotMessages, historyfrag.ToModelMessages(records)) {
 		t.Fatalf("empty summary should keep original group:\ngot  %#v\nwant %#v", gotMessages, historyfrag.ToModelMessages(records))
+	}
+}
+
+func TestHistoryScopeFallbackFromChatRequestUsesRequestTopology(t *testing.T) {
+	t.Parallel()
+
+	got := historyScopeFallbackFromChatRequest(conversation.ChatRequest{
+		ChatID:           " chat-1 ",
+		ConversationType: " group ",
+		ConversationName: " Dev Chat ",
+		ReplyTarget:      " target-1 ",
+	})
+
+	if got.ChatID != "chat-1" ||
+		got.ConversationType != "group" ||
+		got.ConversationName != "Dev Chat" ||
+		got.ReplyTarget != "target-1" {
+		t.Fatalf("unexpected fallback: %#v", got)
+	}
+}
+
+func TestResumeHistoryFallbackDoesNotUseBotIDAsChatID(t *testing.T) {
+	t.Parallel()
+
+	userInputFallback := historyScopeFallbackFromUserInputRequest(userinput.Request{
+		BotID:            "bot-1",
+		ConversationType: "group",
+		ReplyTarget:      "target-1",
+	})
+	if userInputFallback.ChatID != "" {
+		t.Fatalf("user input fallback ChatID = %q, want empty", userInputFallback.ChatID)
+	}
+	if userInputFallback.ConversationType != "group" || userInputFallback.ReplyTarget != "target-1" {
+		t.Fatalf("user input fallback lost topology: %#v", userInputFallback)
+	}
+
+	approvalFallback := historyScopeFallbackFromToolApprovalRequest(toolapproval.Request{
+		BotID:            "bot-1",
+		ConversationType: "direct",
+		ReplyTarget:      "target-2",
+	})
+	if approvalFallback.ChatID != "" {
+		t.Fatalf("approval fallback ChatID = %q, want empty", approvalFallback.ChatID)
+	}
+	if approvalFallback.ConversationType != "direct" || approvalFallback.ReplyTarget != "target-2" {
+		t.Fatalf("approval fallback lost topology: %#v", approvalFallback)
 	}
 }
 

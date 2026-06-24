@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/memohai/memoh/internal/conversation"
-	"github.com/memohai/memoh/internal/conversation/messageconv"
 	"github.com/memohai/memoh/internal/historyfrag"
 	textprune "github.com/memohai/memoh/internal/prune"
 )
@@ -39,7 +38,6 @@ func pruneHistoryForGateway(messages []historyfrag.HistoryRecord) []historyfrag.
 		msg, changed := pruneMessageForGateway(item.ModelMessage)
 		if changed {
 			item.ModelMessage = msg
-			item.SDKMessage = messageconv.ModelMessageToSDKMessage(msg)
 			staleUsage = true
 		}
 		if staleUsage {

@@ -7,7 +7,6 @@ import (
 
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
-	"github.com/memohai/memoh/internal/conversation/messageconv"
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
@@ -47,7 +46,6 @@ func FromDBMessage(msg messagepkg.Message, fallback ScopeFallback) (HistoryRecor
 		Lifecycle:  LifecyclePersisted,
 
 		ModelMessage: modelMessage,
-		SDKMessage:   messageconv.ModelMessageToSDKMessage(modelMessage),
 
 		Scope:      scope,
 		Provenance: provenance,
