@@ -167,6 +167,13 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	var messages []messagepkg.Message
 	if hasBefore {
 		messages, err = h.messageService.ListBeforeBySession(c.Request().Context(), sessionID, before, limit)
+		// ListBeforeBySession returns DESC (newest-first), but the UI turn
+		// converter and the frontend both need oldest-first. The latest-page
+		// branch reverses below; the before-page must match — otherwise older
+		// history renders in reverse and turns fall apart.
+		if err == nil {
+			reverseMessages(messages)
+		}
 	} else {
 		messages, err = h.messageService.ListLatestBySession(c.Request().Context(), sessionID, limit)
 		if err == nil {
@@ -495,11 +502,18 @@ func reverseMessages(m []messagepkg.Message) {
 func (h *MessageHandler) extendToUITurnHead(ctx context.Context, sessionID string, messages []messagepkg.Message) []messagepkg.Message {
 	const batch = int32(50)
 	const maxRows = 2000
+	// messages is oldest-first (callers reverse the DESC DB rows). The cursor
+	// is messages[0].CreatedAt — the oldest row on the current page — and we
+	// pull rows older than it, so ListBeforeBySession returns DESC (newest of
+	// the older batch first). Reverse each fetched batch to oldest-first
+	// before prepending, so the combined slice stays monotonic and the turn
+	// converter (which scans in order) keeps one reply in a single turn.
 	for len(messages) > 0 && len(messages) < maxRows && !conversation.IsUITurnBoundary(messages[0]) {
 		older, err := h.messageService.ListBeforeBySession(ctx, sessionID, messages[0].CreatedAt, batch)
 		if err != nil || len(older) == 0 {
 			break
 		}
+		reverseMessages(older)
 		messages = append(older, messages...)
 		if len(older) < int(batch) {
 			break // reached the start of the session
