@@ -50,8 +50,8 @@ const (
 	// 1.5s still fails fast when the port is genuinely closed, but tolerates
 	// the brief scheduling jitter that was causing spurious prepare runs.
 	socketProbeTimeout = 1500 * time.Millisecond
-	stalePeerTTL         = 2 * time.Minute
-	encoderIdleHold      = 90 * time.Second
+	stalePeerTTL       = 2 * time.Minute
+	encoderIdleHold    = 90 * time.Second
 	// firstPacketTimeout gates how long session.start waits for GStreamer to
 	// emit its first RTP packet before declaring the encoder dead. 10s was too
 	// tight for cold starts (Xvnc + GStreamer + desktop spin-up on a freshly
@@ -61,13 +61,13 @@ const (
 	// offer got 503, looping the frontend in "connecting to desktop" for
 	// minutes. 30s gives cold starts real room while still failing fast when
 	// the pipeline is genuinely broken.
-	firstPacketTimeout    = 30 * time.Second
-	screenshotTimeout    = 15 * time.Second
-	screenshotWidth      = 1280
-	screenshotQuality    = 82
-	screenshotMaxBytes   = 512 * 1024
-	screenshotMIME       = "image/jpeg"
-	rfbTCPAddress        = "127.0.0.1:5999"
+	firstPacketTimeout = 30 * time.Second
+	screenshotTimeout  = 15 * time.Second
+	screenshotWidth    = 1280
+	screenshotQuality  = 82
+	screenshotMaxBytes = 512 * 1024
+	screenshotMIME     = "image/jpeg"
+	rfbTCPAddress      = "127.0.0.1:5999"
 )
 
 type screenshotJPEGCandidate struct {
@@ -508,7 +508,7 @@ type session struct {
 	// its first RTP packet, so session.start can wait for real output rather
 	// than a fixed 150ms guess (which returned success before the encoder had
 	// produced any frames — the peer connected but the track stayed empty).
-	firstPacket    chan struct{}
+	firstPacket     chan struct{}
 	firstPacketOnce sync.Once
 
 	tracksMu sync.RWMutex
