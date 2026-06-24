@@ -190,6 +190,39 @@ func TestWithContextRefPreservesExplicitSourcePayloadHash(t *testing.T) {
 	}
 }
 
+func TestWithContextRefRepairsIncompleteExplicitHash(t *testing.T) {
+	t.Parallel()
+
+	frag := TextFrag(TextFragInput{
+		ID:         "history.001",
+		Kind:       KindConversationEvent,
+		Role:       sdk.MessageRoleUser,
+		Slot:       SlotHistory,
+		Text:       "hello",
+		Priority:   70,
+		CacheClass: CacheNever,
+		Trust:      TrustExternal,
+		Source:     "history",
+		SourceID:   "row-1",
+		Collector:  "test",
+	})
+	frag = WithContextRef(frag, ContextRef{
+		Namespace:   "history",
+		ID:          "row-1",
+		Version:     1,
+		ContentHash: "bare-hash",
+		Schema:      SchemaContextRef,
+		Durability:  RefDurable,
+	})
+
+	if frag.Ref.ContentHash == "bare-hash" || frag.Ref.HashScope != HashScopeCanonicalFragment || frag.Ref.HashAlgo != HashAlgoSHA256 {
+		t.Fatalf("incomplete explicit hash should be repaired with canonical hash: %#v", frag.Ref)
+	}
+	if err := ValidateContextRef(frag.Ref); err != nil {
+		t.Fatalf("repaired ref should validate: %#v: %v", frag.Ref, err)
+	}
+}
+
 func TestSerdeRoundTripsContextFragManifestEditAndCoverage(t *testing.T) {
 	t.Parallel()
 
@@ -386,6 +419,34 @@ func TestSchemaAndHashValidationRejectsSilentDrift(t *testing.T) {
 	conflicts := CheckEditPreconditions(edit, []ContextRef{ref})
 	if len(conflicts) != 1 || conflicts[0].Kind != ConflictContentHashMismatch {
 		t.Fatalf("expected one content-hash conflict, got %#v", conflicts)
+	}
+
+	sourceRef := ContextRef{
+		Namespace:   "history",
+		ID:          "row-source",
+		HashAlgo:    HashAlgoSHA256,
+		HashScope:   HashScopeSourcePayload,
+		ContentHash: "source-good",
+		Schema:      SchemaContextRef,
+		Durability:  RefDurable,
+	}
+	sourceEdit := ContextEdit{
+		EditID: "edit-source",
+		Slot:   SlotHistory,
+		Op:     EditReplace,
+		Refs:   []ContextRef{sourceRef},
+		Preconditions: EditPreconditions{
+			ExpectedHashes: map[string]string{sourceRef.StableKey(): "source-good"},
+		},
+		Schema: SchemaVersion{Name: SchemaContextEdit, Version: CurrentSchemaVersion},
+	}
+	if conflicts := CheckEditPreconditions(sourceEdit, []ContextRef{sourceRef}); len(conflicts) != 0 {
+		t.Fatalf("source payload expected hash should match, got %#v", conflicts)
+	}
+	sourceEdit.Preconditions.ExpectedHashes[sourceRef.StableKey()] = "source-bad"
+	sourceConflicts := CheckEditPreconditions(sourceEdit, []ContextRef{sourceRef})
+	if len(sourceConflicts) != 1 || sourceConflicts[0].Kind != ConflictContentHashMismatch {
+		t.Fatalf("source payload mismatch should produce one hash conflict, got %#v", sourceConflicts)
 	}
 
 	missing := CheckEditPreconditions(edit, nil)

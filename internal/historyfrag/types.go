@@ -69,7 +69,6 @@ type MediaRef struct {
 	ContentHash string
 	Role        string
 	Ordinal     int
-	Mime        string
-	SizeBytes   int64
 	Name        string
+	Metadata    map[string]any
 }

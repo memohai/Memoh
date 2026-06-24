@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"testing"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/historyfrag"
@@ -112,17 +114,23 @@ func TestReplaceCompactedHistoryRecordsKeepsOriginalGroupWithoutSummary(t *testi
 func TestHistoryRecordPathPreservesLegacyResolverMessagePipeline(t *testing.T) {
 	t.Parallel()
 
-	assistantToolCall := conversation.ModelMessage{
-		Role: "assistant",
-		ToolCalls: []conversation.ToolCall{{
-			ID:   "call-1",
-			Type: "function",
-			Function: conversation.ToolCallFunction{
-				Name:      "lookup",
-				Arguments: `{"q":"memoh"}`,
+	assistantToolCallSDK := sdk.Message{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{
+			sdk.ToolCallPart{
+				ToolCallID: "call-1",
+				ToolName:   "lookup",
+				Input:      map[string]any{"q": "memoh"},
 			},
-		}},
+		},
 	}
+	assistantToolCall := sdkMessagesToModelMessages([]sdk.Message{assistantToolCallSDK})[0]
+	toolResultSDK := sdk.ToolMessage(sdk.ToolResultPart{
+		ToolCallID: "call-1",
+		ToolName:   "lookup",
+		Result:     "tool result",
+	})
+	toolResult := sdkMessagesToModelMessages([]sdk.Message{toolResultSDK})[0]
 	rows := []messagepkg.Message{
 		dbHistoryRow(t, "row-compact-user", "user", conversation.NewTextContent("old compacted user"), func(msg *messagepkg.Message) {
 			msg.CompactID = "compact-ok"
@@ -146,11 +154,7 @@ func TestHistoryRecordPathPreservesLegacyResolverMessagePipeline(t *testing.T) {
 			Content: conversation.NewTextContent("plain string content"),
 		},
 		dbHistoryRow(t, "row-tool-call", "assistant", mustRawJSON(t, assistantToolCall), nil),
-		dbHistoryRow(t, "row-tool-result", "tool", mustRawJSON(t, conversation.ModelMessage{
-			Role:       "tool",
-			ToolCallID: "call-1",
-			Content:    conversation.NewTextContent("tool result"),
-		}), nil),
+		dbHistoryRow(t, "row-tool-result", "tool", mustRawJSON(t, toolResult), nil),
 	}
 
 	records := make([]historyfrag.HistoryRecord, 0, len(rows))
@@ -176,7 +180,7 @@ func TestHistoryRecordPathPreservesLegacyResolverMessagePipeline(t *testing.T) {
 		{Role: "user", Content: conversation.NewTextContent("missing summary body")},
 		{Role: "user", Content: conversation.NewTextContent("plain string content")},
 		assistantToolCall,
-		{Role: "tool", ToolCallID: "call-1", Content: conversation.NewTextContent("tool result")},
+		toolResult,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("history pipeline payload mismatch:\ngot  %#v\nwant %#v", got, want)
@@ -184,6 +188,15 @@ func TestHistoryRecordPathPreservesLegacyResolverMessagePipeline(t *testing.T) {
 	if tokens == 0 {
 		t.Fatal("history pipeline should report estimated tokens for retained records")
 	}
+
+	repaired := repairToolCallClosures(sanitizeMessages(got), syntheticToolClosureError)
+	assertSameJSON(t, modelMessagesToSDKMessages(nonNilModelMessages(repaired)), []sdk.Message{
+		sdk.UserMessage("<summary>\ncondensed\n</summary>"),
+		sdk.UserMessage("missing summary body"),
+		sdk.UserMessage("plain string content"),
+		assistantToolCallSDK,
+		toolResultSDK,
+	})
 }
 
 func TestHistoryScopeFallbackFromChatRequestUsesRequestTopology(t *testing.T) {
@@ -253,6 +266,21 @@ func mustRawJSON(t *testing.T, value any) json.RawMessage {
 		t.Fatalf("marshal %T: %v", value, err)
 	}
 	return raw
+}
+
+func assertSameJSON(t *testing.T, got any, want any) {
+	t.Helper()
+	gotRaw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal got: %v", err)
+	}
+	wantRaw, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("marshal want: %v", err)
+	}
+	if string(gotRaw) != string(wantRaw) {
+		t.Fatalf("json mismatch:\ngot  %s\nwant %s", gotRaw, wantRaw)
+	}
 }
 
 func historyRecord(id string, msg conversation.ModelMessage, mutate func(*historyfrag.HistoryRecord)) historyfrag.HistoryRecord {
