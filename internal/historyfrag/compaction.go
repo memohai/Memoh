@@ -5,7 +5,6 @@ import (
 
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
-	"github.com/memohai/memoh/internal/conversation/messageconv"
 )
 
 const NamespaceCompactionLog = "compaction_log"
@@ -28,7 +27,6 @@ func LegacySummaryRecord(compactID string, summary string, scope contextfrag.Sco
 		SourceKind:   SourceCompactionLog,
 		Lifecycle:    LifecycleLegacySummary,
 		ModelMessage: modelMessage,
-		SDKMessage:   messageconv.ModelMessageToSDKMessage(modelMessage),
 		Scope:        scope,
 		Provenance: contextfrag.Provenance{
 			Source:    string(SourceCompactionLog),

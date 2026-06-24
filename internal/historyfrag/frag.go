@@ -7,14 +7,11 @@ import (
 
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
-	"github.com/memohai/memoh/internal/conversation/messageconv"
+	"github.com/memohai/memoh/internal/messageconv"
 )
 
 func ToFrag(record HistoryRecord) contextfrag.ContextFrag {
-	msg := record.SDKMessage
-	if msg.Role == "" && strings.TrimSpace(record.ModelMessage.Role) != "" {
-		msg = messageconv.ModelMessageToSDKMessage(record.ModelMessage)
-	}
+	msg := messageconv.ModelMessageToSDKMessage(record.ModelMessage)
 	kind := record.Kind
 	if kind == "" {
 		kind = contextfrag.KindConversationEvent
@@ -37,7 +34,7 @@ func ToFrag(record HistoryRecord) contextfrag.ContextFrag {
 		Slot:       contextfrag.SlotHistory,
 		Priority:   priorityForMessage(msg),
 		CacheClass: contextfrag.CacheNever,
-		Trust:      trustForHistoryMessage(msg),
+		Trust:      trustForHistoryRecord(record),
 		Scope:      record.Scope,
 		Source:     provenance.Source,
 		SourceID:   provenance.SourceID,
@@ -58,11 +55,7 @@ func ToModelMessages(records []HistoryRecord) []conversation.ModelMessage {
 func ToSDKMessages(records []HistoryRecord) []sdk.Message {
 	out := make([]sdk.Message, 0, len(records))
 	for _, record := range records {
-		msg := record.SDKMessage
-		if msg.Role == "" && strings.TrimSpace(record.ModelMessage.Role) != "" {
-			msg = messageconv.ModelMessageToSDKMessage(record.ModelMessage)
-		}
-		out = append(out, msg)
+		out = append(out, messageconv.ModelMessageToSDKMessage(record.ModelMessage))
 	}
 	return out
 }
@@ -93,9 +86,6 @@ func priorityForMessage(msg sdk.Message) int {
 	}
 }
 
-func trustForHistoryMessage(msg sdk.Message) contextfrag.TrustLevel {
-	if msg.Role == sdk.MessageRoleSystem {
-		return contextfrag.TrustSystem
-	}
+func trustForHistoryRecord(HistoryRecord) contextfrag.TrustLevel {
 	return contextfrag.TrustExternal
 }

@@ -289,7 +289,7 @@ func (r *Resolver) continueUserInputSession(ctx context.Context, req userinput.R
 		return err
 	}
 
-	loaded, err := r.loadHistoryRecords(ctx, input.BotID, req.SessionID, defaultMaxContextMinutes)
+	loaded, err := r.loadHistoryRecords(ctx, historyScopeFallbackFromUserInputRequest(req), req.SessionID, defaultMaxContextMinutes)
 	if err != nil {
 		return err
 	}

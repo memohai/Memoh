@@ -3,8 +3,6 @@ package historyfrag
 import (
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
-
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 )
@@ -16,16 +14,13 @@ type SourceKind string
 const (
 	SourceDBMessage     SourceKind = "db_message"
 	SourceCompactionLog SourceKind = "compaction_log"
-	SourcePipelineRC    SourceKind = "pipeline_rc"
-	SourcePipelineTR    SourceKind = "pipeline_tr"
 )
 
 type Lifecycle string
 
 const (
-	LifecyclePersisted       Lifecycle = "persisted"
-	LifecycleLegacySummary   Lifecycle = "legacy_summary"
-	LifecycleRuntimeInjected Lifecycle = "runtime_injected"
+	LifecyclePersisted     Lifecycle = "persisted"
+	LifecycleLegacySummary Lifecycle = "legacy_summary"
 )
 
 type ScopeFallback struct {
@@ -42,7 +37,6 @@ type HistoryRecord struct {
 	Lifecycle  Lifecycle
 
 	ModelMessage conversation.ModelMessage
-	SDKMessage   sdk.Message
 
 	Scope      contextfrag.Scope
 	Provenance contextfrag.Provenance

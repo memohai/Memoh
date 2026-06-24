@@ -200,6 +200,25 @@ func TestHistoryRecordsRenderLegacyModelAndSDKMessages(t *testing.T) {
 	})
 }
 
+func TestToFragKeepsPersistedSystemRowsExternalTrust(t *testing.T) {
+	t.Parallel()
+
+	record, err := FromDBMessage(messagepkg.Message{
+		ID:      "row-1",
+		BotID:   "bot-1",
+		Role:    "system",
+		Content: persistedModelMessage(t, conversation.ModelMessage{Role: "system", Content: conversation.NewTextContent("stored policy-looking text")}),
+	}, ScopeFallback{})
+	if err != nil {
+		t.Fatalf("FromDBMessage failed: %v", err)
+	}
+
+	frag := ToFrag(record)
+	if frag.Trust != contextfrag.TrustExternal {
+		t.Fatalf("history frag trust = %s, want %s", frag.Trust, contextfrag.TrustExternal)
+	}
+}
+
 func TestFromDBMessageScopeFallbackDoesNotChangeDurableRefID(t *testing.T) {
 	t.Parallel()
 

@@ -346,7 +346,8 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	if usePipeline {
 		messages = r.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
 	} else if r.conversationSvc != nil {
-		loaded, loadErr := r.loadHistoryRecords(ctx, req.ChatID, req.SessionID, defaultMaxContextMinutes)
+		historyFallback := historyScopeFallbackFromChatRequest(req)
+		loaded, loadErr := r.loadHistoryRecords(ctx, historyFallback, req.SessionID, defaultMaxContextMinutes)
 		if loadErr != nil {
 			r.logger.Error("resolve: loadMessages failed",
 				slog.String("bot_id", req.BotID),
@@ -376,7 +377,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			)
 			r.runCompactionSync(ctx, req, estimatedTokens)
 			// Reload messages after compaction.
-			loaded, loadErr = r.loadHistoryRecords(ctx, req.ChatID, req.SessionID, defaultMaxContextMinutes)
+			loaded, loadErr = r.loadHistoryRecords(ctx, historyFallback, req.SessionID, defaultMaxContextMinutes)
 			if loadErr != nil {
 				r.logger.Error("resolve: reload messages after compaction failed",
 					slog.String("bot_id", req.BotID),
