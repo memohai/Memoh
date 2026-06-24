@@ -169,6 +169,12 @@ export class BotDisplayConnection {
     if (this.idleTimer) return
     this.idleTimer = window.setTimeout(() => {
       this.idleTimer = null
+      // If a viewer re-acquired the connection during the hold (addRef ran
+      // after this callback was already queued, so clearTimeout was a no-op),
+      // the peer is back in use — tearing it down would silently drop the
+      // stream the user just reopened. Bail out and let the next release
+      // reschedule.
+      if (this.refs > 0) return
       this.cleanupPeer()
       this.closeSession()
       connections.delete(this.botId)
