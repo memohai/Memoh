@@ -3,7 +3,7 @@
     <!-- No bot -->
     <p
       v-if="!currentBotId"
-      class="px-[23px] pt-3 text-[11px] text-muted-foreground/60"
+      class="px-[23px] pt-3 text-caption text-muted-foreground/60"
     >
       {{ t('chat.noBotSelected') }}
     </p>
@@ -11,7 +11,7 @@
     <!-- Loading (initial) -->
     <div
       v-else-if="isLoading && schedules.length === 0"
-      class="flex items-center gap-2 px-[23px] pt-3 text-[11px] text-muted-foreground/60"
+      class="flex items-center gap-2 px-[23px] pt-3 text-caption text-muted-foreground/60"
     >
       <Spinner class="size-3" />
     </div>
@@ -26,12 +26,12 @@
         v-if="groupedSchedules.length === 0"
         class="px-2 pt-2 space-y-1.5"
       >
-        <p class="pl-[11px] text-[11px] text-muted-foreground/60">
+        <p class="pl-[11px] text-caption text-muted-foreground/60">
           {{ t('bots.schedule.empty') }}
         </p>
         <button
           type="button"
-          class="pl-[11px] text-left text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+          class="pl-[11px] text-left text-caption text-muted-foreground transition-colors hover:text-foreground"
           @click="handleManage"
         >
           + {{ t('bots.schedule.create') }}
