@@ -84,7 +84,10 @@ CREATE TABLE IF NOT EXISTS providers (
     'alibabacloud-speech',
     'microsoft-speech',
     'google-speech',
-    'google-transcription'
+    'google-transcription',
+    'openrouter-video',
+    'modelark-video',
+    'volcengine-video'
   ))
 );
 
@@ -121,7 +124,7 @@ CREATE TABLE IF NOT EXISTS models (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT models_provider_id_model_id_unique UNIQUE (provider_id, model_id),
-  CONSTRAINT models_type_check CHECK (type IN ('chat', 'embedding', 'speech', 'transcription'))
+  CONSTRAINT models_type_check CHECK (type IN ('chat', 'embedding', 'speech', 'transcription', 'video'))
 );
 
 CREATE TABLE IF NOT EXISTS model_variants (
@@ -180,6 +183,7 @@ CREATE TABLE IF NOT EXISTS bots (
   discuss_probe_model_id TEXT REFERENCES models(id) ON DELETE SET NULL,
   tts_model_id TEXT REFERENCES models(id) ON DELETE SET NULL,
   transcription_model_id TEXT REFERENCES models(id) ON DELETE SET NULL,
+  video_model_id TEXT REFERENCES models(id) ON DELETE SET NULL,
   persist_full_tool_results INTEGER NOT NULL DEFAULT 0,
   show_tool_calls_in_im INTEGER NOT NULL DEFAULT 0,
   tool_approval_config TEXT NOT NULL DEFAULT '{"enabled":false,"read":{"require_approval":false,"bypass_globs":[],"force_review_globs":[]},"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}',

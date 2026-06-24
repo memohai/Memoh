@@ -269,11 +269,14 @@
                 <span class="min-w-0 whitespace-pre-wrap break-words">{{ node.block.content }}</span>
               </div>
 
-              <!-- Attachment block -->
+              <!-- Attachment block. An assistant turn posts images as reply
+                   content, so they render inline at natural aspect ratio rather
+                   than as square upload chips. -->
               <AttachmentBlock
                 v-else-if="node.block.type === 'attachments'"
                 :block="(node.block as AttachmentBlockType)"
                 :on-open-media="onOpenMedia"
+                variant="content"
               />
             </template>
           </template>
@@ -341,7 +344,8 @@ import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
 import ToolCallGroup from './tool-call-group.vue'
-import { isReadOnlyTool } from './tool-call-registry'
+import { toolSegmentCategoryForBlock } from './tool-call-registry'
+import type { ToolSegmentCategory } from './tool-call-registry'
 import { finalizeReasoning, markReasoningSeen } from './reasoning-timing'
 import AttachmentBlock from './attachment-block.vue'
 import CollapsibleUserText from './collapsible-user-text.vue'
@@ -370,7 +374,7 @@ enableMermaid()
 
 
 const settingsStore = useSettingsStore()
-const isDark = computed(() => settingsStore.theme === 'dark')
+const isDark = computed(() => settingsStore.isDark)
 const codeBlockTheme = computed(() => ({
   light: settingsStore.shikiThemeLight,
   dark: settingsStore.shikiThemeDark,
@@ -612,12 +616,13 @@ function isVisibleAssistantBlock(block: ContentBlock): boolean {
 
 // Project the flat assistant block list into render nodes.
 //  - A "process" node is a run of consecutive tool + reasoning blocks. It splits
-//    by tool category (read-only "explore" vs side-effecting "action") so reads
-//    and edits don't merge into one bucket; reasoning rides along with whichever
-//    segment it sits next to (it is never rendered standalone).
+//    by tool category (read-only "explore" vs side-effecting "action" vs "gui")
+//    so reads and edits don't merge into one bucket, while browser/computer
+//    observe+action steps stay together as one browsing activity; reasoning
+//    rides along with whichever segment it sits next to (never standalone).
 //  - Every other block type (text / error / attachments) keeps its place.
 // Keyed by stable block id.
-type ProcessNode = { kind: 'process'; key: string; items: ContentBlock[]; cat: 'explore' | 'action' | null; lastIndex: number }
+type ProcessNode = { kind: 'process'; key: string; items: ContentBlock[]; cat: ToolSegmentCategory | null; lastIndex: number }
 type BlockNode = { kind: 'block'; key: string; block: ContentBlock; index: number }
 type RenderNode = ProcessNode | BlockNode
 
@@ -629,7 +634,7 @@ const renderNodes = computed<RenderNode[]>(() => {
     if (!isVisibleAssistantBlock(block)) return
     if (block.type === 'tool' || block.type === 'reasoning') {
       const cat = block.type === 'tool'
-        ? (isReadOnlyTool((block as ToolCallBlockType).toolName) ? 'explore' : 'action')
+        ? toolSegmentCategoryForBlock(block as ToolCallBlockType)
         : null
       if (!run) {
         run = { kind: 'process', key: `p${block.id}`, items: [block], cat, lastIndex: index }

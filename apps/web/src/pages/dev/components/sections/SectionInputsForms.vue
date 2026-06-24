@@ -23,6 +23,8 @@ import {
   TagsInput, TagsInputInput, TagsInputItem, TagsInputItemDelete, TagsInputItemText,
   Textarea,
   Button,
+  menuChromeClass,
+  selectTriggerClass,
 } from '@memohai/ui'
 import { Check, ChevronsUpDown, Eye, EyeOff, Search, X } from 'lucide-vue-next'
 import SectionShell from '../components/SectionShell.vue'
@@ -172,6 +174,7 @@ const formSchema = {
             <InputGroupAddon align="inline-end">
               <InputGroupButton
                 size="icon-xs"
+                variant="quiet"
                 :aria-label="showPassword ? 'Hide password' : 'Show password'"
                 @click="showPassword = !showPassword"
               >
@@ -378,11 +381,8 @@ const formSchema = {
               data-slot="select-trigger"
               data-size="default"
               type="button"
-              :class="[
-                'flex h-9 w-56 items-center justify-between gap-2 rounded-md px-3 py-2 text-label tracking-[0.01em] whitespace-nowrap outline-none select-none',
-                '[&_svg:not([class*=text-])]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=size-])]:size-4',
-                comboVal ? '' : 'text-muted-foreground',
-              ]"
+              :data-placeholder="comboVal ? undefined : ''"
+              :class="[selectTriggerClass, 'w-56']"
             >
               <span class="line-clamp-1">{{ comboVal || 'Select fruit' }}</span>
               <ChevronsUpDown class="opacity-50" />
@@ -397,7 +397,7 @@ const formSchema = {
               v-model="comboVal"
               highlight-on-hover
               :highlight-first-on-open="false"
-              class="border border-[color:var(--border-menu)] shadow-[var(--shadow-dropdown)]"
+              :class="menuChromeClass"
               @update:model-value="() => nextTick(() => (comboOpen = false))"
             >
               <CommandInput
@@ -437,11 +437,8 @@ const formSchema = {
               data-slot="select-trigger"
               data-size="default"
               type="button"
-              :class="[
-                'flex h-9 w-56 items-center justify-between gap-2 rounded-md px-3 py-2 text-label tracking-[0.01em] whitespace-nowrap outline-none select-none',
-                '[&_svg:not([class*=text-])]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=size-])]:size-4',
-                comboMultiVal.length ? '' : 'text-muted-foreground',
-              ]"
+              :data-placeholder="comboMultiVal.length ? undefined : ''"
+              :class="[selectTriggerClass, 'w-56']"
             >
               <span class="line-clamp-1">{{ comboMultiVal.length ? comboMultiVal.join(', ') : 'Select fruits' }}</span>
               <ChevronsUpDown class="opacity-50" />
@@ -457,7 +454,7 @@ const formSchema = {
               multiple
               highlight-on-hover
               :highlight-first-on-open="false"
-              class="border border-[color:var(--border-menu)] shadow-[var(--shadow-dropdown)]"
+              :class="menuChromeClass"
             >
               <CommandInput
                 :search-icon="false"

@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full w-full overflow-y-auto bg-background">
+  <div class="h-full w-full overflow-y-auto">
     <section
       v-if="currentBotId"
       class="mx-auto max-w-2xl px-6 py-8"

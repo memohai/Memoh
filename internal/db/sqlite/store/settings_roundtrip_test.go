@@ -53,6 +53,7 @@ CREATE TABLE bots (
   memory_provider_id TEXT,
   tts_model_id TEXT,
   transcription_model_id TEXT,
+  video_model_id TEXT,
   persist_full_tool_results INTEGER NOT NULL DEFAULT 0,
   show_tool_calls_in_im INTEGER NOT NULL DEFAULT 0,
   tool_approval_config TEXT NOT NULL DEFAULT '{}',

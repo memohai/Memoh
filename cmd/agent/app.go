@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	stdpath "path"
@@ -16,6 +17,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 	"go.uber.org/fx"
 	"golang.org/x/crypto/bcrypt"
 
@@ -35,6 +38,7 @@ import (
 	"github.com/memohai/memoh/internal/channel/adapters/dingtalk"
 	"github.com/memohai/memoh/internal/channel/adapters/discord"
 	"github.com/memohai/memoh/internal/channel/adapters/feishu"
+	"github.com/memohai/memoh/internal/channel/adapters/line"
 	"github.com/memohai/memoh/internal/channel/adapters/local"
 	"github.com/memohai/memoh/internal/channel/adapters/matrix"
 	"github.com/memohai/memoh/internal/channel/adapters/misskey"
@@ -46,6 +50,7 @@ import (
 	"github.com/memohai/memoh/internal/channel/adapters/weixin"
 	"github.com/memohai/memoh/internal/channel/identities"
 	"github.com/memohai/memoh/internal/channel/inbound"
+	"github.com/memohai/memoh/internal/channel/publicmedia"
 	"github.com/memohai/memoh/internal/channel/route"
 	"github.com/memohai/memoh/internal/channelaccess"
 	"github.com/memohai/memoh/internal/command"
@@ -103,6 +108,8 @@ import (
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
 	"github.com/memohai/memoh/internal/version"
+	videopkg "github.com/memohai/memoh/internal/video"
+	"github.com/memohai/memoh/internal/webhooktunnel"
 	"github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
@@ -467,7 +474,7 @@ func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *mod
 	return resolver
 }
 
-func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService *media.Service) *channel.Registry {
+func provideChannelRegistry(log *slog.Logger, cfg config.Config, hub *local.RouteHub, mediaService *media.Service, tunnelManager *webhooktunnel.Manager) *channel.Registry {
 	registry := channel.NewRegistry()
 
 	tgAdapter := telegram.NewTelegramAdapter(log)
@@ -499,6 +506,9 @@ func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService 
 	dingTalkAdapter := dingtalk.NewDingTalkAdapter(log)
 	registry.MustRegister(dingTalkAdapter)
 	registry.MustRegister(wechatoa.NewWeChatOAAdapter(log))
+	lineAdapter := line.NewAdapter(log)
+	lineAdapter.SetPublicBaseURLProvider(newPublicMediaBaseProvider(cfg, tunnelManager))
+	registry.MustRegister(lineAdapter)
 
 	weixinAdapter := weixin.NewWeixinAdapter(log)
 	weixinAdapter.SetAssetOpener(mediaService)
@@ -507,6 +517,35 @@ func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService 
 	registry.MustRegister(misskey.NewMisskeyAdapter(log))
 
 	return registry
+}
+
+type publicMediaBaseProvider struct {
+	tunnel *webhooktunnel.Manager
+	signer *publicmedia.Signer
+}
+
+func newPublicMediaBaseProvider(cfg config.Config, tunnel *webhooktunnel.Manager) *publicMediaBaseProvider {
+	return &publicMediaBaseProvider{
+		tunnel: tunnel,
+		signer: publicmedia.NewSigner(cfg.Auth.JWTSecret, publicmedia.SignedURLTTL),
+	}
+}
+
+func (p *publicMediaBaseProvider) PublicBaseURL() string {
+	if p == nil {
+		return ""
+	}
+	if p.tunnel != nil {
+		return p.tunnel.PublicBaseURL()
+	}
+	return ""
+}
+
+func (p *publicMediaBaseProvider) SignPublicMediaPath(path string) (string, bool) {
+	if p == nil || p.signer == nil {
+		return "", false
+	}
+	return p.signer.SignPath(path, time.Now().UTC())
 }
 
 func provideChannelRouter(
@@ -695,7 +734,7 @@ func provideBackgroundManager(log *slog.Logger) *background.Manager {
 	return background.New(log)
 }
 
-func provideToolProviders(log *slog.Logger, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service) []agenttools.ToolProvider {
+func provideToolProviders(log *slog.Logger, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service) []agenttools.ToolProvider {
 	var assetResolver messaging.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
@@ -718,6 +757,7 @@ func provideToolProviders(log *slog.Logger, channelManager *channel.Manager, reg
 		agenttools.NewTTSProvider(log, settingsService, audioService, channelManager, registry),
 		agenttools.NewTranscriptionProvider(log, settingsService, audioService, mediaService),
 		agenttools.NewImageGenProvider(log, settingsService, modelsService, queries, manager, config.DefaultDataMount),
+		agenttools.NewVideoGenProvider(log, settingsService, videoService, bgManager, manager, config.DefaultDataMount),
 		agenttools.NewFederationProvider(log, fedSource),
 		agenttools.NewHistoryProvider(log, sessionService, messageService, queries),
 	}
@@ -796,6 +836,10 @@ func provideAudioRegistry() *audiopkg.Registry {
 	return audiopkg.NewRegistry()
 }
 
+func provideVideoRegistry() *videopkg.Registry {
+	return videopkg.NewRegistry()
+}
+
 func provideAudioTempStore() (*audiopkg.TempStore, error) {
 	return audiopkg.NewTempStore(os.TempDir())
 }
@@ -824,6 +868,63 @@ func startBackgroundTaskCleanup(lc fx.Lifecycle, mgr *background.Manager) {
 		OnStop: func(_ context.Context) error {
 			close(done)
 			return nil
+		},
+	})
+}
+
+func startWebhookTunnel(lc fx.Lifecycle, manager *webhooktunnel.Manager) {
+	ctx, cancel := context.WithCancel(context.Background())
+	lc.Append(fx.Hook{
+		OnStart: func(_ context.Context) error {
+			return manager.Start(ctx)
+		},
+		OnStop: func(stopCtx context.Context) error {
+			err := manager.Stop(stopCtx)
+			cancel()
+			return err
+		},
+	})
+}
+
+func startWebhookTunnelListener(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, store *channel.Store, channelManager *channel.Manager, mediaService *media.Service) {
+	if cfg.WebhookTunnel.EffectiveMode() == config.WebhookTunnelModeDisabled {
+		return
+	}
+	addr := strings.TrimSpace(cfg.WebhookTunnel.ListenAddr)
+	if addr == "" {
+		addr = webhooktunnel.DefaultListenAddr
+	}
+	e := echo.New()
+	e.HideBanner = true
+	e.HidePort = true
+	e.Use(middleware.Recover())
+	e.Use(middleware.BodyLimit("1M"))
+	e.GET("/health", func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok\n")
+	})
+	channel.NewWebhookServerHandler(log, store, channelManager).Register(e)
+	// This listener is only started for tunnel modes. Its public base URL is
+	// resolved from either configured public_base_url or the running tunnel, so
+	// the configured-public-base gate used by the main server is intentionally
+	// not applied here.
+	handlers.NewPublicMediaHandler(log, mediaService, cfg.Auth.JWTSecret).Register(e)
+	logger := log.With(slog.String("component", "webhook_tunnel_listener"), slog.String("addr", addr))
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			lis, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
+			if err != nil {
+				return fmt.Errorf("webhook tunnel listener: %w", err)
+			}
+			go func() {
+				logger.Info("webhook tunnel listener started")
+				if err := e.Server.Serve(lis); err != nil && !errors.Is(err, http.ErrServerClosed) {
+					logger.Error("webhook tunnel listener failed", slog.Any("error", err))
+				}
+			}()
+			return nil
+		},
+		OnStop: func(ctx context.Context) error {
+			return e.Shutdown(ctx)
 		},
 	})
 }
@@ -1023,6 +1124,17 @@ func startAudioProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, queries dbst
 		OnStart: func(ctx context.Context) error {
 			if err := audiopkg.SyncRegistry(ctx, log, queries, registry); err != nil {
 				log.Warn("audio registry bootstrap failed", slog.Any("error", err))
+			}
+			return nil
+		},
+	})
+}
+
+func startVideoProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, queries dbstore.Queries, registry *videopkg.Registry) {
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			if err := videopkg.SyncRegistry(ctx, log, queries, registry); err != nil {
+				log.Warn("video registry bootstrap failed", slog.Any("error", err))
 			}
 			return nil
 		},

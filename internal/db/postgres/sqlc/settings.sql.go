@@ -33,6 +33,7 @@ SET language = 'auto',
     memory_provider_id = NULL,
     tts_model_id = NULL,
     transcription_model_id = NULL,
+    video_model_id = NULL,
     persist_full_tool_results = false,
     show_tool_calls_in_im = false,
     tool_approval_config = '{"enabled":false,"read":{"require_approval":false,"bypass_globs":[],"force_review_globs":[]},"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}'::jsonb,
@@ -72,6 +73,7 @@ SELECT
   image_models.id AS image_model_id,
   tts_models.id AS tts_model_id,
   transcription_models.id AS transcription_model_id,
+  video_models.id AS video_model_id,
   bots.persist_full_tool_results,
   bots.show_tool_calls_in_im,
   bots.tool_approval_config,
@@ -91,6 +93,7 @@ LEFT JOIN fetch_providers ON fetch_providers.id = bots.fetch_provider_id
 LEFT JOIN memory_providers ON memory_providers.id = bots.memory_provider_id
 LEFT JOIN models AS tts_models ON tts_models.id = bots.tts_model_id
 LEFT JOIN models AS transcription_models ON transcription_models.id = bots.transcription_model_id
+LEFT JOIN models AS video_models ON video_models.id = bots.video_model_id
 WHERE bots.id = $1
 `
 
@@ -116,6 +119,7 @@ type GetSettingsByBotIDRow struct {
 	ImageModelID           pgtype.UUID `json:"image_model_id"`
 	TtsModelID             pgtype.UUID `json:"tts_model_id"`
 	TranscriptionModelID   pgtype.UUID `json:"transcription_model_id"`
+	VideoModelID           pgtype.UUID `json:"video_model_id"`
 	PersistFullToolResults bool        `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      bool        `json:"show_tool_calls_in_im"`
 	ToolApprovalConfig     []byte      `json:"tool_approval_config"`
@@ -151,6 +155,7 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 		&i.ImageModelID,
 		&i.TtsModelID,
 		&i.TranscriptionModelID,
+		&i.VideoModelID,
 		&i.PersistFullToolResults,
 		&i.ShowToolCallsInIm,
 		&i.ToolApprovalConfig,
@@ -189,17 +194,18 @@ WITH updated AS (
       image_model_id = COALESCE($19::uuid, bots.image_model_id),
       tts_model_id = COALESCE($20::uuid, bots.tts_model_id),
       transcription_model_id = COALESCE($21::uuid, bots.transcription_model_id),
-      persist_full_tool_results = $22,
-      show_tool_calls_in_im = $23,
-      tool_approval_config = $24,
-      display_enabled = $25,
-      overlay_provider = $26,
-      overlay_enabled = $27,
-      overlay_config = $28,
-      command_ui_language = $29,
+      video_model_id = COALESCE($22::uuid, bots.video_model_id),
+      persist_full_tool_results = $23,
+      show_tool_calls_in_im = $24,
+      tool_approval_config = $25,
+      display_enabled = $26,
+      overlay_provider = $27,
+      overlay_enabled = $28,
+      overlay_config = $29,
+      command_ui_language = $30,
       updated_at = now()
-  WHERE bots.id = $30
-  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
+  WHERE bots.id = $31
+  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
 )
 SELECT
   updated.id AS bot_id,
@@ -223,6 +229,7 @@ SELECT
   image_models.id AS image_model_id,
   tts_models.id AS tts_model_id,
   transcription_models.id AS transcription_model_id,
+  video_models.id AS video_model_id,
   updated.persist_full_tool_results,
   updated.show_tool_calls_in_im,
   updated.tool_approval_config,
@@ -242,6 +249,7 @@ LEFT JOIN fetch_providers ON fetch_providers.id = updated.fetch_provider_id
 LEFT JOIN memory_providers ON memory_providers.id = updated.memory_provider_id
 LEFT JOIN models AS tts_models ON tts_models.id = updated.tts_model_id
 LEFT JOIN models AS transcription_models ON transcription_models.id = updated.transcription_model_id
+LEFT JOIN models AS video_models ON video_models.id = updated.video_model_id
 `
 
 type UpsertBotSettingsParams struct {
@@ -266,6 +274,7 @@ type UpsertBotSettingsParams struct {
 	ImageModelID           pgtype.UUID `json:"image_model_id"`
 	TtsModelID             pgtype.UUID `json:"tts_model_id"`
 	TranscriptionModelID   pgtype.UUID `json:"transcription_model_id"`
+	VideoModelID           pgtype.UUID `json:"video_model_id"`
 	PersistFullToolResults bool        `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      bool        `json:"show_tool_calls_in_im"`
 	ToolApprovalConfig     []byte      `json:"tool_approval_config"`
@@ -299,6 +308,7 @@ type UpsertBotSettingsRow struct {
 	ImageModelID           pgtype.UUID `json:"image_model_id"`
 	TtsModelID             pgtype.UUID `json:"tts_model_id"`
 	TranscriptionModelID   pgtype.UUID `json:"transcription_model_id"`
+	VideoModelID           pgtype.UUID `json:"video_model_id"`
 	PersistFullToolResults bool        `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      bool        `json:"show_tool_calls_in_im"`
 	ToolApprovalConfig     []byte      `json:"tool_approval_config"`
@@ -332,6 +342,7 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.ImageModelID,
 		arg.TtsModelID,
 		arg.TranscriptionModelID,
+		arg.VideoModelID,
 		arg.PersistFullToolResults,
 		arg.ShowToolCallsInIm,
 		arg.ToolApprovalConfig,
@@ -365,6 +376,7 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.ImageModelID,
 		&i.TtsModelID,
 		&i.TranscriptionModelID,
+		&i.VideoModelID,
 		&i.PersistFullToolResults,
 		&i.ShowToolCallsInIm,
 		&i.ToolApprovalConfig,

@@ -320,6 +320,32 @@ func (r *Registry) DiscoverSelf(ctx context.Context, channelType ChannelType, cr
 	return discoverer.DiscoverSelf(ctx, credentials)
 }
 
+// SelfIdentityPolicy returns adapter-specific persistence requirements for
+// discovered platform bot identity. Most adapters use the zero-value best-effort
+// policy; webhook adapters that cannot route safely without self identity can
+// opt into stricter enable-time validation.
+func (r *Registry) SelfIdentityPolicy(channelType ChannelType) SelfIdentityPolicy {
+	adapter, ok := r.Get(channelType)
+	if !ok {
+		return SelfIdentityPolicy{}
+	}
+	provider, ok := adapter.(SelfIdentityPolicyProvider)
+	if !ok {
+		return SelfIdentityPolicy{}
+	}
+	return provider.SelfIdentityPolicy()
+}
+
+// GetWebhookEndpointSetter returns the platform webhook endpoint setter for the given channel.
+func (r *Registry) GetWebhookEndpointSetter(channelType ChannelType) (WebhookEndpointSetter, bool) {
+	adapter, ok := r.Get(channelType)
+	if !ok {
+		return nil, false
+	}
+	setter, ok := adapter.(WebhookEndpointSetter)
+	return setter, ok
+}
+
 // --- Dispatch methods (replace former global functions in config.go / target.go) ---
 
 // NormalizeConfig validates and normalizes a channel configuration map.

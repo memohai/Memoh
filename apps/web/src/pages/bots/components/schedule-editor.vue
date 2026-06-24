@@ -31,7 +31,7 @@
     <div class="space-y-1.5">
       <Label for="sched-desc">
         {{ t('bots.schedule.form.description') }}
-        <span class="ml-1 text-[11px] text-muted-foreground font-normal">({{ t('common.optional') }})</span>
+        <span class="ml-1 text-caption text-muted-foreground font-normal">({{ t('common.optional') }})</span>
       </Label>
       <Input
         id="sched-desc"
@@ -163,7 +163,7 @@
         />
         <p
           v-if="patternState.advancedPattern && !isValidCron(patternState.advancedPattern)"
-          class="text-[11px] text-destructive"
+          class="text-caption text-destructive"
         >
           {{ t('bots.schedule.form.invalidPattern') }}
         </p>
@@ -171,7 +171,7 @@
 
       <p
         v-if="schedulePreviewText && ['weekly', 'monthly', 'advanced'].includes(patternState.mode)"
-        class="text-[11px] text-muted-foreground"
+        class="text-caption text-muted-foreground"
       >
         {{ schedulePreviewText }}
       </p>
@@ -216,7 +216,7 @@
 
     <p
       v-if="submitError"
-      class="text-[11px] text-destructive"
+      class="text-caption text-destructive"
     >
       {{ submitError }}
     </p>

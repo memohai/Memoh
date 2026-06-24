@@ -194,7 +194,7 @@ function ensureChatPanel() {
   // Open the active session's tab if one is already selected (e.g. initialize or an
   // ACP start set it before the dock mounted); otherwise a fresh draft.
   const sid = (chatStore.sessionId ?? '').trim()
-  if (sid) store.openSessionChat({ sessionId: sid, title: t('chat.untitledSession') })
+  if (sid) store.openSessionChat({ sessionId: sid })
   else store.openDraftChat({ title: t('chat.newSession') })
 }
 

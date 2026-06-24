@@ -8,7 +8,7 @@ import { useRetryingStream } from '@/composables/useRetryingStream'
 import { useUserStore } from '@/store/user'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
-import { shouldRefreshFromMessageCreated, upsertById } from './chat-list.utils'
+import { provisionalSessionTitle, shouldRefreshFromMessageCreated, upsertById } from './chat-list.utils'
 import {
   createSession,
   deleteSession as requestDeleteSession,
@@ -485,9 +485,26 @@ export const useChatStore = defineStore('chat', () => {
   })
 
   function replaceSessions(items: SessionSummary[]) {
-    sessions.value = items
+    // A racing list refresh can fetch a session before the backend's
+    // title-generation flow has persisted a title, while the client already
+    // holds one — the optimistic provisional title set in ensureActiveSession,
+    // which is local-only and never sent to the server. (Server-published
+    // titles don't have this problem: applyFallbackTitle and the LLM path
+    // both UpdateTitle before publishing, so the DB is current by the time any
+    // client sees the SSE.) An empty title in the snapshot means "server
+    // hasn't set one yet," not "title cleared," so preserve our non-empty title
+    // instead of letting the refresh erase it (which split the sidebar from
+    // the sticky tab title).
+    const merged = items.map(s => {
+      const known = sessionById.get(s.id)
+      if (known && !(s.title ?? '').trim() && (known.title ?? '').trim()) {
+        return { ...s, title: known.title }
+      }
+      return s
+    })
+    sessions.value = merged
     sessionById.clear()
-    for (const s of items) sessionById.set(s.id, s)
+    for (const s of merged) sessionById.set(s.id, s)
   }
 
   function appendSessions(items: SessionSummary[]) {
@@ -533,6 +550,21 @@ export const useChatStore = defineStore('chat', () => {
   function isRecentsSession(session: SessionSummary): boolean {
     const type = (session.type ?? 'chat').trim()
     return type === 'chat' || type === 'discuss' || type === 'acp_agent'
+  }
+
+  // patchSessionInList applies a partial update to one session in BOTH the
+  // reactive `sessions` array (reassigned so the sidebar virtualizer and any
+  // `sessions`-derived computed re-run) and the `sessionById` lookup map. SSE
+  // title/touch handlers must route through this: mutating the map's stored
+  // object in place (`target.title = ...`) writes the raw object but never
+  // triggers `sessions.value`, so the UI stays stale until a full REST refresh
+  // (the Cmd+R symptom).
+  function patchSessionInList(id: string, patch: Partial<SessionSummary>) {
+    const existing = sessionById.get(id)
+    if (!existing) return
+    const next = { ...existing, ...patch }
+    sessionById.set(id, next)
+    sessions.value = sessions.value.map(session => (session.id === id ? next : session))
   }
 
   function removeSessionFromList(id: string) {
@@ -1722,12 +1754,9 @@ export const useChatStore = defineStore('chat', () => {
       const sid = event.session_id.trim()
       const title = event.title.trim()
       if (!sid || !title) return
-      const target = knownSessionSummary(sid)
-      if (target) {
-        const updated = { ...target, title }
-        if (rememberedSessions.value[sid]) rememberSession(updated)
-        else upsertSession(updated)
-      }
+      patchSessionInList(sid, { title })
+      const remembered = rememberedSessions.value[sid]
+      if (remembered) rememberSession({ ...remembered, title })
       return
     }
 
@@ -1757,7 +1786,7 @@ export const useChatStore = defineStore('chat', () => {
       const target = sessionById.get(sid)
       if (target) {
         if (event.updated_at && (!target.updated_at || event.updated_at > target.updated_at)) {
-          target.updated_at = event.updated_at
+          patchSessionInList(sid, { updated_at: event.updated_at })
         }
         return
       }
@@ -1779,8 +1808,7 @@ export const useChatStore = defineStore('chat', () => {
       const sid = event.session_id.trim()
       const title = event.title.trim()
       if (!sid || !title) return
-      const target = sessionById.get(sid)
-      if (target) target.title = title
+      patchSessionInList(sid, { title })
       const remembered = rememberedSessions.value[sid]
       if (remembered) rememberSession({ ...remembered, title })
       return
@@ -1888,6 +1916,20 @@ export const useChatStore = defineStore('chat', () => {
     } catch (error) {
       console.error('Failed to fetch bots:', error)
       return currentBotId.value
+    }
+  }
+
+  // Re-pull the bot list without touching the current bot/session selection.
+  // The store loads bots once at init and isn't wired to the settings pages'
+  // query cache, so per-bot config edited in settings (enabled agents, model,
+  // name…) would otherwise stay stale in the composer until a full reload.
+  // currentBot is a computed over bots, so swapping the list reactively
+  // refreshes the composer's agent list and metadata in place.
+  async function refreshBots(): Promise<void> {
+    try {
+      bots.value = await fetchBots()
+    } catch (error) {
+      console.error('Failed to refresh bots:', error)
     }
   }
 
@@ -2001,7 +2043,7 @@ export const useChatStore = defineStore('chat', () => {
     const target = sessionById.get(targetSessionId)
     if (!target) return
     if (timestamp && (!target.updated_at || timestamp > target.updated_at)) {
-      target.updated_at = timestamp
+      patchSessionInList(targetSessionId, { updated_at: timestamp })
     }
   }
 
@@ -2329,7 +2371,7 @@ export const useChatStore = defineStore('chat', () => {
     return runtime
   }
 
-  async function ensureActiveSession() {
+  async function ensureActiveSession(firstPrompt?: string) {
     if (sessionId.value) return
     if (pendingACPSessionInput.value) {
       const detached = detachPendingACPSession()
@@ -2367,6 +2409,17 @@ export const useChatStore = defineStore('chat', () => {
     const bid = currentBotId.value ?? await ensureBot()
     if (!bid) throw new Error('Bot not ready')
     const created = await createSession(bid)
+    // Show the first prompt optimistically as the title so the sidebar/tab never
+    // flashes "Untitled Session" while the server's title model runs. This is a
+    // LOCAL display value only — the server creates the session untitled and
+    // persists the real title via the title-generation flow. Keeping the session
+    // untitled server-side preserves the "title empty ⇒ needs an LLM title"
+    // invariant the backend guards on (restart-safe), and the optimistic value
+    // mirrors backend fallbackSessionTitle so the SSE-confirmed title lands
+    // without flicker.
+    if (firstPrompt?.trim()) {
+      created.title = provisionalSessionTitle(firstPrompt)
+    }
     upsertSession(created)
     sessionId.value = created.id
     draftIntent.value = false
@@ -2560,11 +2613,9 @@ export const useChatStore = defineStore('chat', () => {
     const bid = currentBotId.value ?? ''
     if (!bid) throw new Error('Bot not selected')
     const updated = await requestUpdateSessionTitle(bid, sid, nextTitle)
-    const target = sessionById.get(sid)
-    if (target) {
-      target.title = updated.title ?? nextTitle
-      target.updated_at = updated.updated_at ?? target.updated_at
-    }
+    const patch: Partial<SessionSummary> = { title: updated.title ?? nextTitle }
+    if (updated.updated_at) patch.updated_at = updated.updated_at
+    patchSessionInList(sid, patch)
     return updated
   }
 
@@ -2581,7 +2632,7 @@ export const useChatStore = defineStore('chat', () => {
 
     const wasDraft = !sessionId.value
     try {
-      await ensureActiveSession()
+      await ensureActiveSession(wasDraft ? trimmed : undefined)
 
       const bid = currentBotId.value!
       const sid = sessionId.value!
@@ -2798,6 +2849,7 @@ export const useChatStore = defineStore('chat', () => {
     affectsPath,
     fsEventForPath,
     initialize,
+    refreshBots,
     selectBot,
     selectSession,
     selectChat: selectSession,

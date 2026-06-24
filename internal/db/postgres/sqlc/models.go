@@ -38,6 +38,7 @@ type Bot struct {
 	DiscussProbeModelID    pgtype.UUID        `json:"discuss_probe_model_id"`
 	TtsModelID             pgtype.UUID        `json:"tts_model_id"`
 	TranscriptionModelID   pgtype.UUID        `json:"transcription_model_id"`
+	VideoModelID           pgtype.UUID        `json:"video_model_id"`
 	PersistFullToolResults bool               `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      bool               `json:"show_tool_calls_in_im"`
 	ToolApprovalConfig     []byte             `json:"tool_approval_config"`

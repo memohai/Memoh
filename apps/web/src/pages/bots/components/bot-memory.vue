@@ -270,6 +270,7 @@
                   size="icon"
                   type="button"
                   class="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  :aria-label="$t('common.delete')"
                 >
                   <Trash2 class="size-4" />
                 </Button>

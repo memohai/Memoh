@@ -32,7 +32,7 @@ function resolveLanguage(): string {
 }
 
 function resolveThemeName(): string {
-  return document.documentElement.classList.contains('dark')
+  return settings.resolvedColorMode === 'dark'
     ? settings.shikiThemeDark
     : settings.shikiThemeLight
 }
@@ -100,7 +100,7 @@ watch(() => props.filename, () => setLanguage(resolveLanguage()))
 watch(fontSize, (v) => getDiffEditorView()?.updateOptions({ fontSize: v }))
 watch(fontFamily, (v) => getDiffEditorView()?.updateOptions({ fontFamily: v }))
 watch(
-  () => [settings.shikiThemeLight, settings.shikiThemeDark] as const,
+  () => [settings.shikiThemeLight, settings.shikiThemeDark, settings.resolvedColorMode] as const,
   () => { void setTheme(resolveThemeName(), true) },
 )
 </script>

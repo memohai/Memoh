@@ -1,5 +1,5 @@
 <template>
-  <div class="flex h-10 shrink-0 items-center gap-2 border-b border-border/40 px-3.5">
+  <div :class="menuSearchHeaderClass">
     <input
       v-model="searchTerm"
       role="combobox"
@@ -8,7 +8,7 @@
       :aria-activedescendant="activeIndex >= 0 ? `${listboxId}-${activeIndex}` : undefined"
       :placeholder="$t('bots.settings.searchModel')"
       aria-label="Search models"
-      class="flex h-full w-full bg-transparent text-control outline-hidden placeholder:text-muted-foreground"
+      :class="menuSearchInputClass"
       @keydown="onKeydown"
     >
   </div>
@@ -16,12 +16,12 @@
   <div
     :id="listboxId"
     ref="scrollEl"
-    class="max-h-64 overflow-y-auto px-1"
+    :class="virtualListboxClass"
     role="listbox"
   >
     <div
       v-if="rows.length === 0"
-      class="py-6 text-center text-xs text-muted-foreground"
+      class="py-6 text-center text-control text-muted-foreground"
     >
       {{ $t('bots.settings.noModel') }}
     </div>
@@ -35,12 +35,11 @@
         :key="vRow.key"
         :ref="measureRow"
         :data-index="vRow.virtual.index"
-        class="py-0.5"
         :style="{ position: 'absolute', top: '0', left: '0', width: '100%', transform: `translateY(${vRow.virtual.start}px)` }"
       >
         <div
           v-if="vRow.row.type === 'header'"
-          class="px-2 py-1.5 text-xs font-medium text-muted-foreground"
+          :class="menuLabelClass"
         >
           {{ vRow.row.label }}
         </div>
@@ -54,7 +53,7 @@
           :aria-setsize="optionCount"
           :aria-posinset="vRow.row.posinset"
           :data-highlighted="activeIndex === vRow.virtual.index ? '' : undefined"
-          :class="[menuItemClass, 'h-8']"
+          :class="menuItemClass"
           @click="$emit('update:modelValue', vRow.row.option.value)"
           @pointermove="activeIndex = vRow.virtual.index"
         >
@@ -76,8 +75,8 @@
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { Check } from 'lucide-vue-next'
-import { menuItemClass } from '@memohai/ui'
-import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
+import { menuItemClass, menuLabelClass, menuSearchHeaderClass, menuSearchInputClass, virtualListboxClass } from '@memohai/ui'
+import type { ModelsGetResponse, ModelsModelType, ProvidersGetResponse } from '@memohai/sdk'
 import { useListboxKeyboard } from '@/composables/useListboxKeyboard'
 
 export interface ModelOption {
@@ -105,15 +104,23 @@ interface ItemRow {
   posinset: number
 }
 
-type Row = HeaderRow | ItemRow
+interface NoneRow {
+  type: 'none'
+  key: string
+  option: ModelOption
+  posinset: number
+}
+
+type Row = HeaderRow | ItemRow | NoneRow
 
 const props = defineProps<{
   models: ModelsGetResponse[]
   providers: ProvidersGetResponse[]
-  modelType: 'chat' | 'embedding'
+  modelType: ModelsModelType
   open?: boolean
   showTags?: boolean
   showIcons?: boolean
+  noneLabel?: string
 }>()
 
 const emit = defineEmits<{
@@ -154,6 +161,19 @@ const options = computed<ModelOption[]>(() =>
   }),
 )
 
+const noneOption = computed<ModelOption | undefined>(() =>
+  props.noneLabel
+    ? {
+        value: '',
+        label: props.noneLabel,
+        description: undefined,
+        groupKey: '',
+        groupLabel: '',
+        keywords: [props.noneLabel],
+      }
+    : undefined,
+)
+
 const filteredOptions = computed(() => {
   const keyword = searchTerm.value.trim().toLowerCase()
   if (!keyword) return options.value
@@ -185,6 +205,15 @@ const filteredGroups = computed(() => {
 const rows = computed<Row[]>(() => {
   const result: Row[] = []
   let posinset = 0
+  if (noneOption.value) {
+    posinset += 1
+    result.push({
+      type: 'none',
+      key: 'none',
+      option: noneOption.value,
+      posinset,
+    })
+  }
   for (const group of filteredGroups.value) {
     if (group.label) {
       result.push({ type: 'header', key: `header:${group.key}`, label: group.label })
@@ -205,7 +234,7 @@ const rows = computed<Row[]>(() => {
 // Total option count (excludes group headers) for aria-setsize: virtualization
 // drops off-screen options from the DOM, so screen readers need this to know the
 // real set size rather than only the rendered window.
-const optionCount = computed(() => filteredOptions.value.length)
+const optionCount = computed(() => (noneOption.value ? 1 : 0) + filteredOptions.value.length)
 
 const virtualizer = useVirtualizer<HTMLElement, HTMLElement>(
   computed(() => ({
@@ -216,11 +245,8 @@ const virtualizer = useVirtualizer<HTMLElement, HTMLElement>(
     // scrollbar drifts (estimate vs. measured mismatch). These are only seeds:
     // measureRow measures the true height at runtime, so being slightly off
     // causes minor jitter at worst, never clipping/misalignment.
-    estimateSize: (index) => {
-      const row = rows.value[index]
-      if (!row) return 36
-      return row.type === 'header' ? 32 : 36
-    },
+    estimateSize: () => 32,
+    gap: 2,
     overscan: 8,
     getItemKey: (index: number) => rows.value[index]?.key ?? index,
   })),
@@ -244,7 +270,7 @@ const { activeIndex, onKeydown, reset: resetActive } = useListboxKeyboard<Row>({
   rows,
   scrollToIndex: (index) => virtualizer.value.scrollToIndex(index),
   onSelect: (row) => {
-    if (row.type === 'item') emit('update:modelValue', row.option.value)
+    if (row.type === 'item' || row.type === 'none') emit('update:modelValue', row.option.value)
   },
 })
 

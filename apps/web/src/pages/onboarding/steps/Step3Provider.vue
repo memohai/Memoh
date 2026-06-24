@@ -45,6 +45,7 @@ const allowLocalWorkspaceCreate = computed(() =>
 )
 
 const listVisible = ref(false)
+const gridVisible = ref(false)
 const mode = ref<'list' | 'form' | 'acp'>('list')
 const formVisible = ref(false)
 const formContentVisible = ref(false)
@@ -241,6 +242,10 @@ onMounted(() => {
       acpProfiles.value = data?.items ?? []
     } catch {
       acpProfiles.value = []
+    } finally {
+      nextFrame(() => {
+        gridVisible.value = true
+      })
     }
   })()
 
@@ -309,7 +314,7 @@ onMounted(() => {
         </p>
         <div
           class="grid grid-cols-3 gap-3 transition-all duration-[350ms] ease-out delay-[140ms]"
-          :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+          :class="gridVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
         >
           <button
             type="button"

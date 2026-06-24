@@ -694,7 +694,7 @@ export type ChannelAction = {
     /**
      * Row groups buttons into keyboard rows for renderers that support grids
      * (e.g. Telegram inline keyboards). Buttons sharing a Row render together;
-     * rows appear in ascending first-seen order. Renderers without grid support
+     * rows appear in ascending numeric order. Renderers without grid support
      * ignore this field. 0 is the default (single row, prior behavior).
      */
     row?: number;
@@ -752,6 +752,7 @@ export type ChannelChannelCapabilities = {
     text?: boolean;
     threads?: boolean;
     unsend?: boolean;
+    url_buttons?: boolean;
 };
 
 export type ChannelChannelConfig = {
@@ -785,7 +786,7 @@ export type ChannelChannelIdentityBinding = {
     updated_at?: string;
 };
 
-export type ChannelChannelType = 'telegram' | 'feishu' | 'dingtalk' | 'matrix' | 'discord' | 'qq' | 'wecom' | 'weixin' | 'wechatoa' | 'local' | 'slack';
+export type ChannelChannelType = 'telegram' | 'feishu' | 'dingtalk' | 'matrix' | 'discord' | 'qq' | 'wecom' | 'weixin' | 'wechatoa' | 'local' | 'slack' | 'line';
 
 export type ChannelConfigSchema = {
     fields?: {
@@ -844,9 +845,9 @@ export type ChannelMessagePart = {
     url?: string;
 };
 
-export type ChannelMessagePartType = 'text' | 'link' | 'code_block' | 'mention' | 'emoji';
+export type ChannelMessagePartType = 'text' | 'link' | 'code_block' | 'mention' | 'emoji' | 'heading' | 'blockquote' | 'list_item';
 
-export type ChannelMessageTextStyle = 'bold' | 'italic' | 'strikethrough' | 'code';
+export type ChannelMessageTextStyle = 'bold' | 'italic' | 'strikethrough' | 'code' | 'underline' | 'spoiler';
 
 export type ChannelReplyRef = {
     attachments?: Array<ChannelAttachment>;
@@ -860,6 +861,14 @@ export type ChannelSendRequest = {
     channel_identity_id?: string;
     message?: ChannelMessage;
     target?: string;
+};
+
+export type ChannelSetWebhookEndpointRequest = {
+    endpoint?: string;
+};
+
+export type ChannelSetWebhookEndpointResponse = {
+    endpoint?: string;
 };
 
 export type ChannelTargetHint = {
@@ -2076,7 +2085,7 @@ export type ModelsModelConfig = {
     thinking_mode?: string;
 };
 
-export type ModelsModelType = 'chat' | 'embedding' | 'speech' | 'transcription';
+export type ModelsModelType = 'chat' | 'embedding' | 'speech' | 'transcription' | 'video';
 
 export type ModelsTestResponse = {
     latency_ms?: number;
@@ -2475,6 +2484,7 @@ export type SettingsSettings = {
     tool_approval_config?: SettingsToolApprovalConfig;
     transcription_model_id?: string;
     tts_model_id?: string;
+    video_model_id?: string;
 };
 
 export type SettingsToolApprovalConfig = {
@@ -2528,6 +2538,87 @@ export type SettingsUpsertRequest = {
     tool_approval_config?: SettingsToolApprovalConfig;
     transcription_model_id?: string;
     tts_model_id?: string;
+    video_model_id?: string;
+};
+
+export type VideoConfigSchema = {
+    fields?: Array<VideoFieldSchema>;
+};
+
+export type VideoFieldSchema = {
+    advanced?: boolean;
+    description?: string;
+    enum?: Array<string>;
+    example?: unknown;
+    key?: string;
+    order?: number;
+    required?: boolean;
+    title?: string;
+    type?: string;
+};
+
+export type VideoImportModelsResponse = {
+    created?: number;
+    models?: Array<string>;
+    skipped?: number;
+};
+
+export type VideoModelInfo = {
+    config_schema?: VideoConfigSchema;
+    description?: string;
+    id?: string;
+    name?: string;
+};
+
+export type VideoModelResponse = {
+    config?: {
+        [key: string]: unknown;
+    };
+    created_at?: string;
+    id?: string;
+    model_id?: string;
+    name?: string;
+    provider_id?: string;
+    provider_type?: string;
+    updated_at?: string;
+};
+
+export type VideoProviderMetaResponse = {
+    config_schema?: VideoConfigSchema;
+    default_model?: string;
+    description?: string;
+    display_name?: string;
+    models?: Array<VideoModelInfo>;
+    provider?: string;
+    supports_list?: boolean;
+};
+
+export type VideoProviderResponse = {
+    client_type?: string;
+    config?: {
+        [key: string]: unknown;
+    };
+    created_at?: string;
+    enable?: boolean;
+    icon?: string;
+    id?: string;
+    name?: string;
+    updated_at?: string;
+};
+
+export type VideoUpdateModelRequest = {
+    config?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+};
+
+export type WebhooktunnelStatus = {
+    enabled?: boolean;
+    error?: string;
+    mode?: string;
+    public_base_url?: string;
+    status?: string;
 };
 
 export type GetAcpProfilesData = {
@@ -8895,6 +8986,10 @@ export type PutBotsByIdChannelByPlatformErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
 };
 
 export type PutBotsByIdChannelByPlatformError = PutBotsByIdChannelByPlatformErrors[keyof PutBotsByIdChannelByPlatformErrors];
@@ -9046,6 +9141,10 @@ export type PatchBotsByIdChannelByPlatformStatusErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
 };
 
 export type PatchBotsByIdChannelByPlatformStatusError = PatchBotsByIdChannelByPlatformStatusErrors[keyof PatchBotsByIdChannelByPlatformStatusErrors];
@@ -9058,6 +9157,55 @@ export type PatchBotsByIdChannelByPlatformStatusResponses = {
 };
 
 export type PatchBotsByIdChannelByPlatformStatusResponse = PatchBotsByIdChannelByPlatformStatusResponses[keyof PatchBotsByIdChannelByPlatformStatusResponses];
+
+export type PostBotsByIdChannelByPlatformWebhookEndpointData = {
+    /**
+     * Webhook endpoint payload
+     */
+    body: ChannelSetWebhookEndpointRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        id: string;
+        /**
+         * Channel platform
+         */
+        platform: string;
+    };
+    query?: never;
+    url: '/bots/{id}/channel/{platform}/webhook-endpoint';
+};
+
+export type PostBotsByIdChannelByPlatformWebhookEndpointErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type PostBotsByIdChannelByPlatformWebhookEndpointError = PostBotsByIdChannelByPlatformWebhookEndpointErrors[keyof PostBotsByIdChannelByPlatformWebhookEndpointErrors];
+
+export type PostBotsByIdChannelByPlatformWebhookEndpointResponses = {
+    /**
+     * OK
+     */
+    200: ChannelSetWebhookEndpointResponse;
+};
+
+export type PostBotsByIdChannelByPlatformWebhookEndpointResponse = PostBotsByIdChannelByPlatformWebhookEndpointResponses[keyof PostBotsByIdChannelByPlatformWebhookEndpointResponses];
 
 export type GetBotsByIdChecksData = {
     body?: never;
@@ -12378,3 +12526,262 @@ export type PutUsersByIdPasswordResponses = {
      */
     204: unknown;
 };
+
+export type GetVideoModelsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/video-models';
+};
+
+export type GetVideoModelsErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetVideoModelsError = GetVideoModelsErrors[keyof GetVideoModelsErrors];
+
+export type GetVideoModelsResponses = {
+    /**
+     * OK
+     */
+    200: Array<VideoModelResponse>;
+};
+
+export type GetVideoModelsResponse = GetVideoModelsResponses[keyof GetVideoModelsResponses];
+
+export type GetVideoModelsByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Model ID (UUID)
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/video-models/{id}';
+};
+
+export type GetVideoModelsByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetVideoModelsByIdError = GetVideoModelsByIdErrors[keyof GetVideoModelsByIdErrors];
+
+export type GetVideoModelsByIdResponses = {
+    /**
+     * OK
+     */
+    200: VideoModelResponse;
+};
+
+export type GetVideoModelsByIdResponse = GetVideoModelsByIdResponses[keyof GetVideoModelsByIdResponses];
+
+export type PutVideoModelsByIdData = {
+    /**
+     * Model update payload
+     */
+    body: VideoUpdateModelRequest;
+    path: {
+        /**
+         * Model ID (UUID)
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/video-models/{id}';
+};
+
+export type PutVideoModelsByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutVideoModelsByIdError = PutVideoModelsByIdErrors[keyof PutVideoModelsByIdErrors];
+
+export type PutVideoModelsByIdResponses = {
+    /**
+     * OK
+     */
+    200: VideoModelResponse;
+};
+
+export type PutVideoModelsByIdResponse = PutVideoModelsByIdResponses[keyof PutVideoModelsByIdResponses];
+
+export type GetVideoProvidersData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/video-providers';
+};
+
+export type GetVideoProvidersErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetVideoProvidersError = GetVideoProvidersErrors[keyof GetVideoProvidersErrors];
+
+export type GetVideoProvidersResponses = {
+    /**
+     * OK
+     */
+    200: Array<VideoProviderResponse>;
+};
+
+export type GetVideoProvidersResponse = GetVideoProvidersResponses[keyof GetVideoProvidersResponses];
+
+export type GetVideoProvidersMetaData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/video-providers/meta';
+};
+
+export type GetVideoProvidersMetaResponses = {
+    /**
+     * OK
+     */
+    200: Array<VideoProviderMetaResponse>;
+};
+
+export type GetVideoProvidersMetaResponse = GetVideoProvidersMetaResponses[keyof GetVideoProvidersMetaResponses];
+
+export type GetVideoProvidersByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID (UUID)
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/video-providers/{id}';
+};
+
+export type GetVideoProvidersByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetVideoProvidersByIdError = GetVideoProvidersByIdErrors[keyof GetVideoProvidersByIdErrors];
+
+export type GetVideoProvidersByIdResponses = {
+    /**
+     * OK
+     */
+    200: VideoProviderResponse;
+};
+
+export type GetVideoProvidersByIdResponse = GetVideoProvidersByIdResponses[keyof GetVideoProvidersByIdResponses];
+
+export type PostVideoProvidersByIdImportModelsData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID (UUID)
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/video-providers/{id}/import-models';
+};
+
+export type PostVideoProvidersByIdImportModelsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostVideoProvidersByIdImportModelsError = PostVideoProvidersByIdImportModelsErrors[keyof PostVideoProvidersByIdImportModelsErrors];
+
+export type PostVideoProvidersByIdImportModelsResponses = {
+    /**
+     * OK
+     */
+    200: VideoImportModelsResponse;
+};
+
+export type PostVideoProvidersByIdImportModelsResponse = PostVideoProvidersByIdImportModelsResponses[keyof PostVideoProvidersByIdImportModelsResponses];
+
+export type GetVideoProvidersByIdModelsData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID (UUID)
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/video-providers/{id}/models';
+};
+
+export type GetVideoProvidersByIdModelsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetVideoProvidersByIdModelsError = GetVideoProvidersByIdModelsErrors[keyof GetVideoProvidersByIdModelsErrors];
+
+export type GetVideoProvidersByIdModelsResponses = {
+    /**
+     * OK
+     */
+    200: Array<VideoModelResponse>;
+};
+
+export type GetVideoProvidersByIdModelsResponse = GetVideoProvidersByIdModelsResponses[keyof GetVideoProvidersByIdModelsResponses];
+
+export type GetWebhookTunnelStatusData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/webhook-tunnel/status';
+};
+
+export type GetWebhookTunnelStatusResponses = {
+    /**
+     * OK
+     */
+    200: WebhooktunnelStatus;
+};
+
+export type GetWebhookTunnelStatusResponse = GetWebhookTunnelStatusResponses[keyof GetWebhookTunnelStatusResponses];

@@ -36,7 +36,12 @@
     <CollapseSection :open="open">
       <!-- Card body sets the in-card type scale (one notch below the root-level
            cop rows) + tighter leading so nested steps read as a distinct, denser
-           layer; nested rows inherit this instead of re-asserting their own size. -->
+           layer; nested rows inherit this instead of re-asserting their own size.
+           Deliberately NO inner scroll here: the process body must flow with the
+           main chat scroll so the mouse wheel is never latched inside the
+           capsule. Individual tool details (diffs, file content, exec output) keep
+           their own small scroll bounds for truly large blobs, but the capsule
+           itself never introduces a second scrollbar. -->
       <div class="mt-1 rounded-md bg-muted px-2.5 py-1.5 space-y-0.5 text-[0.84375rem] leading-snug">
         <template
           v-for="(item, i) in items"
@@ -64,7 +69,7 @@ import { computed, ref, watch } from 'vue'
 import { ChevronDown, ChevronRight } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import type { ContentBlock, ThinkingBlock as ThinkingBlockType, ToolCallBlock as ToolCallBlockType } from '@/store/chat-list'
-import { getToolDisplay } from './tool-call-registry'
+import { getToolDisplay, isGuiTool } from './tool-call-registry'
 import ToolCallInline from './tool-call-inline.vue'
 import ThinkingBlock from './thinking-block.vue'
 import CollapseSection from './collapse-section.vue'
@@ -144,10 +149,33 @@ function bucket(name: string): 'browse' | 'edit' | 'run' | 'other' {
   return 'other'
 }
 
+// Where a browser navigation went, by host — the one piece of a browsing run
+// worth surfacing in the collapsed header ("Browsed example.com").
+function navigateHost(tool: ToolCallBlockType): string {
+  if (tool.toolName !== 'browser_action') return ''
+  const input = tool.input && typeof tool.input === 'object' ? tool.input as Record<string, unknown> : {}
+  if (input.action !== 'navigate') return ''
+  const url = typeof input.url === 'string' ? input.url : ''
+  if (!url) return ''
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return (url.replace(/^[a-z]+:\/\//i, '').split('/')[0] ?? '').replace(/^www\./, '')
+  }
+}
+
 const aggregateLabel = computed(() => {
   const tools = toolItems.value
   if (tools.length === 0) return t('chat.process.thought')
   if (tools.length === 1) return labelFor(tools[0]!)
+  // A browsing/desktop run is summarized by where it went, not by the screenshot
+  // reads it folded in — name the destination, fall back to a step count.
+  if (tools.some(tool => isGuiTool(tool.toolName))) {
+    const hosts = [...new Set(tools.map(navigateHost).filter(Boolean))]
+    if (hosts.length === 1) return t('chat.process.browsed', { target: hosts[0] })
+    if (hosts.length > 1) return t('chat.process.browsedSites', { count: hosts.length })
+    return t('chat.process.steps', { count: tools.length })
+  }
   const acc = { browse: 0, edit: 0, run: 0 }
   for (const tool of tools) {
     const b = bucket(tool.toolName)

@@ -4,6 +4,14 @@ import { createPinia, setActivePinia } from 'pinia'
 import { useChatSelectionStore } from './chat-selection'
 import { useWorkspaceTabsStore } from './workspace-tabs'
 
+// workspace-tabs imports @/i18n to localize the desktop panel title; that
+// module reads localStorage at load to pick the initial locale, which isn't
+// polyfilled in this test's environment. Mock it so the import stays
+// side-effect free here.
+vi.mock('@/i18n', () => ({
+  default: { global: { t: (key: string) => key } },
+}))
+
 const chatStoreMock = vi.hoisted(() => ({
   sessions: [] as Array<{ id: string, title?: string }>,
   knownSessions: [] as Array<{ id: string, title?: string, type?: string }>,

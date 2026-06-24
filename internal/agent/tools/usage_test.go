@@ -199,6 +199,7 @@ func TestBuiltInToolsHaveUsageGuidanceOrExplicitExemption(t *testing.T) {
 		ToolWebSearch():         "self-describing one-shot search tool",
 		ToolWebFetch():          "self-describing one-shot fetch tool",
 		ToolGenerateImage():     "self-describing media generation tool",
+		ToolGenerateVideo():     "self-describing media generation tool",
 		ToolTranscribeAudio():   "self-describing media transcription tool",
 		ToolListEmailAccounts(): "email tool descriptions carry account/read/write semantics",
 		ToolSendEmail():         "email tool descriptions carry account/read/write semantics",

@@ -14,6 +14,7 @@ import {
   terminalCacheKey,
 } from '@/composables/useTerminalCache'
 import type { OpenAssetPreviewArgs } from '@/pages/home/composables/useFileManagerProvider'
+import i18n from '@/i18n'
 
 // Workspace shell state (activity bar + side panel + dockview layout):
 // - the dockview layout in the center area (chat / file / terminal / browser /
@@ -22,17 +23,20 @@ import type { OpenAssetPreviewArgs } from '@/pages/home/composables/useFileManag
 //
 // The active chat session itself lives in the chat-selection store. The chat
 // panel is a singleton dockview panel whose content follows the active
-// session; files/terminals/browsers/displays are multi-instance panels.
+// session; files/terminals/browsers are multi-instance panels. Desktop is a
+// singleton WebRTC viewer per bot (DISPLAY_PANEL_ID).
 
 export type SidebarView = 'sessions' | 'files' | 'schedule'
 
 export const CHAT_PANEL_ID = 'chat'
 
+/** One desktop WebRTC viewer per bot; reconnect reuses this panel instead of display:2, display:3, … */
+export const DISPLAY_PANEL_ID = 'display:1'
+
 export const TERMINAL_TAB_COMPONENT = 'terminalTab'
 
 const DEFAULT_BROWSER_ADDRESS = 'localhost:5173/'
 const DEFAULT_CHAT_TITLE = 'New Session'
-const DEFAULT_UNTITLED_SESSION_TITLE = 'Untitled Session'
 
 // Default share of the editor height the bottom terminal panel claims when it
 // first splits off below the chat. ~1/3 mirrors VS Code's editor:panel ratio
@@ -49,7 +53,7 @@ interface BotLayoutState {
   scheduleCounter: number
   chatCounter: number
   // Panel ids that were ephemeral (preview/draft) when the layout was saved, so
-  // the italic + replace behavior survives a reload. Intersected with the panels
+  // the replace behavior survives a reload. Intersected with the panels
   // actually present on restore.
   ephemeralIds: string[]
 }
@@ -142,12 +146,13 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // the tab title) so the tab dot, the sidebar count badge, and the close-confirm
   // dialog all read ONE reactive source. Keyed by dockview panel id.
   const fileDirty = ref<Record<string, boolean>>({})
-  // VS Code-style "preview tab" state. An ephemeral panel renders italic, occupies
-  // its group's single preview slot, and is replaced in place when another
-  // ephemeral-eligible tab opens into that group. It pins (drops out of this map)
-  // the first time the user changes it — a file edit, or a message sent in a chat
-  // session. Keyed by dockview panel id; the tab strip and persistence read this
-  // ONE reactive source. Mirrors the fileDirty pattern above.
+  // VS Code-style "preview tab" state. An ephemeral panel occupies its group's
+  // single preview slot, and is replaced in place when another ephemeral-eligible
+  // tab opens into that group. It pins (drops out of this map) the first time the
+  // user changes it — a file edit, or a message sent in a chat session. The state
+  // is NOT surfaced visually (no italic, no marker): it only drives the in-place
+  // replacement. Keyed by dockview panel id; persistence reads this ONE reactive
+  // source. Mirrors the fileDirty pattern above.
   const ephemeralPanels = ref<Record<string, true>>({})
   // Save callbacks registered by each mounted file panel, so a dirty tab can be
   // written from the close-confirm dialog even while it sits in the background.
@@ -275,7 +280,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   function chatTitleFallbackFor(sid: string | null): string {
     if (!sid) return DEFAULT_CHAT_TITLE
     const session = chatStore.knownSessionSummary(sid)
-    return (session?.title ?? '').trim() || DEFAULT_UNTITLED_SESSION_TITLE
+    return (session?.title ?? '').trim() || i18n.global.t('chat.untitledSession')
   }
 
   function panelTitleFallback(panel: { id: string, params?: Record<string, unknown> }): string {
@@ -591,9 +596,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     ephemeralPanels.value = { ...ephemeralPanels.value, [id]: true }
   }
 
-  // Pin a panel: drop it out of the ephemeral slot so it is no longer italic and
-  // never gets replaced. Idempotent. Triggered by the first user change (file edit
-  // or chat message); never reversed (VS Code keeps an edited tab pinned).
+  // Pin a panel: drop it out of the ephemeral slot so it stops getting replaced.
+  // Idempotent. Triggered by the first user change (file edit or chat message);
+  // never reversed (VS Code keeps an edited tab pinned).
   function pinPanel(id: string) {
     if (!ephemeralPanels.value[id]) return
     const next = { ...ephemeralPanels.value }
@@ -1025,25 +1030,25 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     return addBrowserPanel(target, target, groupId)
   }
 
+  function focusExistingDisplayPanel(dock: DockviewApi): boolean {
+    const panels = dock.panels.filter(panel => panel.id.startsWith('display:'))
+    if (!panels.length) return false
+    focusPanel(panels[0]!)
+    for (const extra of panels.slice(1)) {
+      extra.api.close()
+    }
+    return true
+  }
 
   function openDisplay(groupId?: string) {
     if (!hasCurrentPermission('manage')) return
     const dock = api.value
     if (!dock) return
-    const existing = dock.panels.find((panel) => panel.id.startsWith('display:'))
-    if (existing) {
-      focusPanel(existing)
-      return
-    }
-    const bid = (currentBotId.value ?? '').trim()
-    const state = ensureBotLayout(bid)
-    if (!state) return
-    const next = state.displayCounter + 1
-    patchBotLayout(bid, { displayCounter: next })
+    if (focusExistingDisplayPanel(dock)) return
     focusOrAdd({
-      id: `display:${next}`,
+      id: DISPLAY_PANEL_ID,
       component: 'display',
-      title: `Desktop ${next}`,
+      title: i18n.global.t('chat.display.title'),
       groupId,
     })
   }
@@ -1120,18 +1125,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       }
       case 'display': {
         if (!hasCurrentPermission('manage')) return
-        const bid = (currentBotId.value ?? '').trim()
-        const state = ensureBotLayout(bid)
-        if (!state) return
-        const next = state.displayCounter + 1
-        patchBotLayout(bid, { displayCounter: next })
-        dock.addPanel({
-          id: `display:${next}`,
-          component: 'display',
-          title: title || `Desktop ${next}`,
-          renderer: 'always',
-          position,
-        })
+        if (focusExistingDisplayPanel(dock)) return
+        openDisplay(group.id)
         break
       }
       case 'schedule': {

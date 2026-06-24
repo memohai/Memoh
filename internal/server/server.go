@@ -3,12 +3,14 @@ package server
 import (
 	"context"
 	"log/slog"
+	neturl "net/url"
 	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
 	"github.com/memohai/memoh/internal/auth"
+	"github.com/memohai/memoh/internal/channel/publicmedia"
 )
 
 type Server struct {
@@ -31,6 +33,12 @@ func NewServer(log *slog.Logger, addr string, jwtSecret string,
 	e := echo.New()
 	e.HideBanner = true
 	e.Use(middleware.Recover())
+	e.Use(middleware.BodyLimitWithConfig(middleware.BodyLimitConfig{
+		Limit: "1M",
+		Skipper: func(c echo.Context) bool {
+			return !shouldLimitPublicRequestBody(c.Request().URL.Path)
+		},
+	}))
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins: []string{"*"},
 		AllowMethods: []string{echo.GET, echo.HEAD, echo.POST, echo.PUT, echo.PATCH, echo.DELETE, echo.OPTIONS},
@@ -43,7 +51,7 @@ func NewServer(log *slog.Logger, addr string, jwtSecret string,
 		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
 			log.Info("request",
 				slog.String("method", v.Method),
-				slog.String("uri", v.URI),
+				slog.String("uri", safeRequestLogURI(c.Request().URL, v.URI)),
 				slog.Int("status", v.Status),
 				slog.Duration("latency", v.Latency),
 				slog.String("remote_ip", c.RealIP()),
@@ -89,6 +97,9 @@ func shouldSkipJWT(path string) bool {
 	if isPublicChannelWebhookPath(path) {
 		return true
 	}
+	if isPublicChannelMediaPath(path) {
+		return true
+	}
 	if strings.HasPrefix(path, "/email/mailgun/webhook/") {
 		return true
 	}
@@ -107,6 +118,10 @@ func shouldSkipJWT(path string) bool {
 	return false
 }
 
+func shouldLimitPublicRequestBody(path string) bool {
+	return isPublicChannelWebhookPath(path)
+}
+
 func isPublicChannelWebhookPath(path string) bool {
 	if !strings.HasPrefix(path, "/channels/") {
 		return false
@@ -114,4 +129,22 @@ func isPublicChannelWebhookPath(path string) bool {
 	trimmed := strings.Trim(strings.TrimPrefix(path, "/channels/"), "/")
 	parts := strings.Split(trimmed, "/")
 	return len(parts) >= 3 && strings.TrimSpace(parts[0]) != "" && parts[1] == "webhook" && strings.TrimSpace(parts[2]) != ""
+}
+
+func isPublicChannelMediaPath(path string) bool {
+	return publicmedia.IsPath(path)
+}
+
+func safeRequestLogURI(u *neturl.URL, fallback string) string {
+	if u == nil {
+		return fallback
+	}
+	escapedPath := u.EscapedPath()
+	if isPublicChannelMediaPath(escapedPath) {
+		return escapedPath
+	}
+	if fallback != "" {
+		return fallback
+	}
+	return u.RequestURI()
 }

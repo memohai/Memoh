@@ -24,12 +24,13 @@
     </PopoverTrigger>
     <PopoverContent
       menu
-      align="start"
-      class="p-0"
-      :style="{ width: `calc(var(--reka-popover-trigger-width) * ${widthRatio})` }"
+      :align="popoverAlign"
+      :align-offset="alignOffset"
+      :class="popoverClass || 'p-0'"
+      :style="{ minWidth: `calc(var(--reka-popover-trigger-width) * ${widthRatio} + ${-menuAlignOffset * 2}px)` }"
     >
-      <div class="flex flex-col overflow-hidden rounded-[var(--radius-menu-shell)] border border-[color:var(--border-menu)] bg-popover text-popover-foreground shadow-[var(--shadow-dropdown)]">
-        <div class="flex h-10 shrink-0 items-center gap-2 border-b border-border/40 px-3.5">
+      <div :class="menuChromeClass">
+        <div :class="menuSearchHeaderClass">
           <input
             v-model="searchTerm"
             role="combobox"
@@ -38,7 +39,7 @@
             :aria-activedescendant="activeIndex >= 0 ? `${listboxId}-${activeIndex}` : undefined"
             :placeholder="searchPlaceholder"
             :aria-label="searchAriaLabel"
-            class="flex h-full w-full bg-transparent text-control outline-hidden placeholder:text-muted-foreground"
+            :class="menuSearchInputClass"
             @keydown="onKeydown"
           >
         </div>
@@ -46,7 +47,7 @@
         <div
           :id="listboxId"
           ref="scrollEl"
-          class="max-h-64 scroll-my-1 overflow-y-auto px-1"
+          :class="virtualListboxClass"
           role="listbox"
         >
           <div
@@ -65,7 +66,6 @@
               :key="vRow.key"
               :ref="measureRow"
               :data-index="vRow.virtual.index"
-              class="py-0.5"
               :style="{ position: 'absolute', top: '0', left: '0', width: '100%', transform: `translateY(${vRow.virtual.start}px)` }"
             >
               <div
@@ -89,7 +89,7 @@
                 :aria-setsize="optionCount"
                 :aria-posinset="vRow.row.posinset"
                 :data-highlighted="activeIndex === vRow.virtual.index ? '' : undefined"
-                :class="[menuItemClass, 'h-8']"
+                :class="menuItemClass"
                 @click="selectOption(vRow.row.option.value)"
                 @pointermove="activeIndex = vRow.virtual.index"
               >
@@ -123,11 +123,16 @@
 import { Check, ChevronsUpDown } from 'lucide-vue-next'
 import {
   menuItemClass,
+  menuAlignOffset,
+  menuChromeClass,
   menuLabelClass,
+  menuSearchHeaderClass,
+  menuSearchInputClass,
   Popover,
   PopoverTrigger,
   PopoverContent,
   selectTriggerClass,
+  virtualListboxClass,
 } from '@memohai/ui'
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
@@ -174,6 +179,9 @@ const props = withDefaults(defineProps<{
   emptyText?: string
   showGroupHeaders?: boolean
   widthRatio?: number
+  popoverClass?: string
+  popoverAlign?: 'start' | 'center' | 'end'
+  alignOffset?: number
 }>(), {
   placeholder: '',
   ariaLabel: '',
@@ -182,6 +190,12 @@ const props = withDefaults(defineProps<{
   emptyText: 'No results.',
   showGroupHeaders: true,
   widthRatio: 1,
+  popoverAlign: 'start',
+  // Default to text-align: shift the panel so its first row's text lands under
+  // the trigger's text (see menu.ts → menuAlignOffset). Long-content surfaces
+  // that widen the panel past the trigger pass `:align-offset="0"` to align the
+  // box edge instead.
+  alignOffset: menuAlignOffset,
 })
 
 const selected = defineModel<string>({ default: '' })
@@ -258,6 +272,7 @@ const virtualizer = useVirtualizer<HTMLElement, HTMLElement>(
     // real so the scrollbar tracks. measureRow measures the true height at
     // runtime, so an off estimate only causes minor jitter, never misalignment.
     estimateSize: () => 32,
+    gap: 2,
     overscan: 8,
     getItemKey: (index: number) => rows.value[index]?.key ?? index,
   })),

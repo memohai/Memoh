@@ -27,7 +27,7 @@ function refreshThemeStyle() {
   const muted = cs.getPropertyValue('--color-muted-foreground').trim()
   const border = cs.getPropertyValue('--color-border').trim()
   const accent = cs.getPropertyValue('--color-accent').trim()
-  const isDark = settings.theme === 'dark'
+  const isDark = settings.resolvedColorMode === 'dark'
   const uiFontFamily = settings.uiFontStack
   // Preserve the preview's historical 14px baseline unless the user
   // explicitly overrides the UI font size.
@@ -68,6 +68,7 @@ onMounted(() => refreshThemeStyle())
 
 watch([
   () => settings.theme,
+  () => settings.resolvedColorMode,
   () => settings.uiFontStack,
   () => settings.uiFontSizePx,
   () => settings.codeFontStack,

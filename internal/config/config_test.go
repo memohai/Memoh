@@ -178,6 +178,59 @@ func TestLoadAppliesBridgeTLSEnvOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadAppliesWebhookTunnelEnvOverrides(t *testing.T) {
+	t.Setenv("MEMOH_WEBHOOK_TUNNEL_MODE", WebhookTunnelModeExternal)
+	t.Setenv("MEMOH_WEBHOOK_PUBLIC_BASE_URL", "https://memoh.example.com")
+	t.Setenv("MEMOH_WEBHOOK_TUNNEL_LISTEN_ADDR", ":18732")
+	t.Setenv("MEMOH_CLOUDFLARED_BIN", "/usr/local/bin/cloudflared")
+	t.Setenv("MEMOH_WEBHOOK_TUNNEL_TARGET_URL", "http://127.0.0.1:18732")
+	t.Setenv("MEMOH_WEBHOOK_TUNNEL_METRICS_ADDR", "127.0.0.1:18733")
+	t.Setenv("MEMOH_WEBHOOK_TUNNEL_METRICS_URL", "http://webhook-tunnel:18733")
+
+	cfg, err := Load(filepath.Join(t.TempDir(), "missing.toml"))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.WebhookTunnel.Mode != WebhookTunnelModeExternal ||
+		cfg.WebhookTunnel.PublicBaseURL != "https://memoh.example.com" ||
+		cfg.WebhookTunnel.ListenAddr != ":18732" ||
+		cfg.WebhookTunnel.CloudflaredPath != "/usr/local/bin/cloudflared" ||
+		cfg.WebhookTunnel.TargetURL != "http://127.0.0.1:18732" ||
+		cfg.WebhookTunnel.MetricsAddr != "127.0.0.1:18733" ||
+		cfg.WebhookTunnel.MetricsURL != "http://webhook-tunnel:18733" {
+		t.Fatalf("webhook tunnel config = %#v", cfg.WebhookTunnel)
+	}
+}
+
+func TestLoadRejectsInvalidWebhookTunnelMode(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte("[webhook_tunnel]\nmode = \"managd\"\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("expected invalid webhook tunnel mode to fail")
+	}
+	if !strings.Contains(err.Error(), "unsupported webhook_tunnel mode") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadRejectsInvalidWebhookTunnelModeFromEnv(t *testing.T) {
+	t.Setenv("MEMOH_WEBHOOK_TUNNEL_MODE", "managd")
+
+	_, err := Load(filepath.Join(t.TempDir(), "missing.toml"))
+	if err == nil {
+		t.Fatal("expected invalid webhook tunnel mode env to fail")
+	}
+	if !strings.Contains(err.Error(), "unsupported webhook_tunnel mode") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestLoadDefaultsContainerdRuntimeType(t *testing.T) {
 	t.Parallel()
 

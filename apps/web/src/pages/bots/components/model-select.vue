@@ -24,13 +24,14 @@
       align="end"
       class="min-w-[var(--reka-popover-trigger-width)] w-80 p-0"
     >
-      <div class="flex flex-col overflow-hidden rounded-[var(--radius-menu-shell)] border border-[color:var(--border-menu)] bg-popover text-popover-foreground shadow-[var(--shadow-dropdown)]">
+      <div :class="menuChromeClass">
         <ModelOptions
           v-model="selected"
           :models="models"
           :providers="providers"
           :model-type="modelType"
           :open="open"
+          :none-label="noneLabel"
         />
       </div>
     </PopoverContent>
@@ -40,15 +41,16 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ChevronsUpDown } from 'lucide-vue-next'
-import { Popover, PopoverTrigger, PopoverContent, selectTriggerClass } from '@memohai/ui'
-import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
+import { Popover, PopoverTrigger, PopoverContent, menuChromeClass, selectTriggerClass } from '@memohai/ui'
+import type { ModelsGetResponse, ModelsModelType, ProvidersGetResponse } from '@memohai/sdk'
 import ModelOptions from './model-options.vue'
 
 const props = defineProps<{
   models: ModelsGetResponse[]
   providers: ProvidersGetResponse[]
-  modelType: 'chat' | 'embedding'
+  modelType: ModelsModelType
   placeholder?: string
+  noneLabel?: string
 }>()
 
 const selected = defineModel<string>({ default: '' })

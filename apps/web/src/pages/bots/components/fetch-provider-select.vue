@@ -19,24 +19,9 @@
         :aria-label="placeholder || 'Select fetch provider'"
         :class="[selectTriggerClass, 'w-full']"
       >
-        <span class="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
-          <SearchProviderLogo
-            v-if="selectedProvider"
-            :provider="selectedProvider.provider || ''"
-            size="xs"
-          />
-          <span class="line-clamp-1">{{ displayLabel || selectedProvider?.name || placeholder }}</span>
-        </span>
+        <span class="line-clamp-1">{{ displayLabel || selectedProvider?.name || placeholder }}</span>
         <ChevronsUpDown class="opacity-50" />
       </button>
-    </template>
-
-    <template #option-icon="{ option }">
-      <SearchProviderLogo
-        v-if="option.value"
-        :provider="getProviderName(option.value)"
-        size="xs"
-      />
     </template>
 
     <template #option-label="{ option }">
@@ -56,7 +41,6 @@ import { selectTriggerClass } from '@memohai/ui'
 import { computed } from 'vue'
 import type { FetchprovidersGetResponse } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
-import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 
@@ -83,8 +67,4 @@ const options = computed<SearchableSelectOption[]>(() => {
     keywords: [provider.name ?? '', provider.provider ?? '', provider.enable === false ? t('common.disabled') : '', t(`webSearch.providerNames.${provider.provider}`, '')],
   }))
 })
-
-function getProviderName(id: string) {
-  return props.providers.find((provider) => provider.id === id)?.provider || ''
-}
 </script>

@@ -167,6 +167,13 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	var messages []messagepkg.Message
 	if hasBefore {
 		messages, err = h.messageService.ListBeforeBySession(c.Request().Context(), sessionID, before, limit)
+		// ListBeforeBySession returns DESC (newest-first), but the UI turn
+		// converter and the frontend both need oldest-first. The latest-page
+		// branch reverses below; the before-page must match — otherwise older
+		// history renders in reverse and turns fall apart.
+		if err == nil {
+			reverseMessages(messages)
+		}
 	} else {
 		messages, err = h.messageService.ListLatestBySession(c.Request().Context(), sessionID, limit)
 		if err == nil {
@@ -175,6 +182,13 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	}
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	// format=ui converts each page independently, so a page that begins mid
+	// assistant turn (its earlier rows on the previous page) would render one
+	// reply as several turns/action bars. Extend the head back to a real turn
+	// boundary so a turn is never split across pages.
+	if format == "ui" && sessionID != "" && len(messages) > 0 {
+		messages = h.extendToUITurnHead(c.Request().Context(), sessionID, messages)
 	}
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, messages)
 	if format == "ui" {
@@ -478,6 +492,35 @@ func reverseMessages(m []messagepkg.Message) {
 // per-session messages SSE (see message_stream.go) and a bot-wide lightweight
 // sessions activity SSE. Resolves a catch-up explosion where a stale client
 // `since=` cursor could force a multi-megabyte replay of bot history.
+// extendToUITurnHead prepends older session messages (oldest-first) until the
+// slice starts on a real UI turn boundary — a visible user message or a
+// background-task system turn. A turn is the unit of an action bar and is
+// indivisible, so when a fixed-size page lands in the middle of an assistant
+// turn we pull the turn's earlier rows back in. This makes the page larger than
+// `limit`, which is fine: the frontend already pages by turns, not rows. The
+// row cap guards against a single pathologically long turn.
+func (h *MessageHandler) extendToUITurnHead(ctx context.Context, sessionID string, messages []messagepkg.Message) []messagepkg.Message {
+	const batch = int32(50)
+	const maxRows = 2000
+	// messages is oldest-first (callers reverse the DESC DB rows). The cursor
+	// is messages[0].CreatedAt — the oldest row on the current page — and we
+	// pull rows older than it, so ListBeforeBySession returns DESC (newest of
+	// the older batch first). Reverse each fetched batch to oldest-first
+	// before prepending, so the combined slice stays monotonic and the turn
+	// converter (which scans in order) keeps one reply in a single turn.
+	for len(messages) > 0 && len(messages) < maxRows && !conversation.IsUITurnBoundary(messages[0]) {
+		older, err := h.messageService.ListBeforeBySession(ctx, sessionID, messages[0].CreatedAt, batch)
+		if err != nil || len(older) == 0 {
+			break
+		}
+		reverseMessages(older)
+		messages = append(older, messages...)
+		if len(older) < int(batch) {
+			break // reached the start of the session
+		}
+	}
+	return messages
+}
 
 // DeleteMessages godoc
 // @Summary Delete all bot history messages

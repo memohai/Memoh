@@ -66,6 +66,7 @@ func ToolBrowserRemoteSession() Name { return newName("browser_remote_session") 
 func ToolWebSearch() Name       { return newName("web_search") }
 func ToolWebFetch() Name        { return newName("web_fetch") }
 func ToolGenerateImage() Name   { return newName("generate_image") }
+func ToolGenerateVideo() Name   { return newName("generate_video") }
 func ToolTranscribeAudio() Name { return newName("transcribe_audio") }
 func ToolAskUser() Name         { return newName(userinput.ToolNameAskUser) }
 
@@ -80,7 +81,7 @@ var all = []Name{
 	ToolGetContacts(), ToolListSessions(), ToolGetMessages(), ToolSearchMessages(), ToolSearchMemory(), ToolListSkills(), ToolUseSkill(), ToolSpawnAgent(), ToolSendMessage(), ToolListAgents(),
 	ToolListSchedule(), ToolGetSchedule(), ToolCreateSchedule(), ToolUpdateSchedule(), ToolDeleteSchedule(),
 	ToolBrowserAction(), ToolBrowserObserve(), ToolComputerObserve(), ToolComputerAction(), ToolBrowserRemoteSession(),
-	ToolWebSearch(), ToolWebFetch(), ToolGenerateImage(), ToolTranscribeAudio(), ToolAskUser(),
+	ToolWebSearch(), ToolWebFetch(), ToolGenerateImage(), ToolGenerateVideo(), ToolTranscribeAudio(), ToolAskUser(),
 	ToolListEmailAccounts(), ToolSendEmail(), ToolListEmail(), ToolReadEmail(),
 }
 

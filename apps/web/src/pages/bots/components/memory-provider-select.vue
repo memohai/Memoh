@@ -9,34 +9,6 @@
     :empty-text="$t('memory.empty')"
     :show-group-headers="false"
   >
-    <template #trigger="{ open, displayLabel }">
-      <button
-        data-slot="select-trigger"
-        data-size="default"
-        :data-placeholder="!selected ? '' : undefined"
-        type="button"
-        :aria-expanded="open"
-        :aria-label="placeholder || 'Select memory provider'"
-        :class="[selectTriggerClass, 'w-full']"
-      >
-        <span class="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
-          <Brain
-            v-if="selected"
-            class="size-3.5 shrink-0 text-primary"
-          />
-          <span class="line-clamp-1">{{ displayLabel || placeholder }}</span>
-        </span>
-        <ChevronsUpDown class="opacity-50" />
-      </button>
-    </template>
-
-    <template #option-icon="{ option }">
-      <Brain
-        v-if="option.value"
-        class="size-3.5 shrink-0 text-primary"
-      />
-    </template>
-
     <template #option-label="{ option }">
       <span
         class="truncate flex-1 text-left"
@@ -50,8 +22,6 @@
 </template>
 
 <script setup lang="ts">
-import { Brain, ChevronsUpDown } from 'lucide-vue-next'
-import { selectTriggerClass } from '@memohai/ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'

@@ -984,6 +984,19 @@ app.whenReady().then(async () => {
     if (isRemoteMode()) return ''
     return defaultWorkspacePath(typeof rawDisplayName === 'string' ? rawDisplayName : '')
   })
+  // A local-mode agent session runs inside a real host folder, so the composer
+  // can offer the OS directory picker and bind the chosen path. In remote mode
+  // the project lives on the server, where a host path is meaningless, so the
+  // picker is withheld and this returns nothing.
+  ipcMain.handle('desktop:open-project-folder', async (event) => {
+    if (isRemoteMode()) return null
+    const owner = BrowserWindow.fromWebContents(event.sender) ?? BrowserWindow.getFocusedWindow()
+    const result = owner
+      ? await dialog.showOpenDialog(owner, { properties: ['openDirectory', 'createDirectory'] })
+      : await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
+    if (result.canceled) return null
+    return result.filePaths[0] ?? null
+  })
   ipcMain.handle('desktop:cli-status', () => detectCliState())
   ipcMain.handle('desktop:cli-install', async () => {
     await installCli()

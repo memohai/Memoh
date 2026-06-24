@@ -83,7 +83,7 @@ export default defineConfig(async ({ command }) => {
   const bundledElectronToolkit = ['@electron-toolkit/preload', '@electron-toolkit/utils']
 
   const devtoolsPlugins: PluginOption[] = []
-  if (command !== 'build') {
+  if (command !== 'build' && process.env.MEMOH_VUE_DEVTOOLS !== '0') {
     try {
       const { default: vueDevTools } = await import('vite-plugin-vue-devtools')
       devtoolsPlugins.push(vueDevTools())
@@ -131,6 +131,21 @@ export default defineConfig(async ({ command }) => {
         // discovered without listing every page here.
         entries: [
           'src/renderer/src/main.ts',
+        ],
+        // Monaco is the one heavy dependency the scanner can't front-load from
+        // the entry: the editor host (stream-monaco) pulls Monaco's many ESM
+        // sub-modules lazily, so the first mount of a bot-settings tab that
+        // hosts an editor (bot-network / bot-skills / bot-mcp) makes the dev
+        // server discover them mid-session, re-run esbuild, and force a full
+        // page reload (in-flight dynamic imports 504, caught by the router's
+        // onError → window.location.reload). Pre-bundling these once at
+        // startup trades a slightly slower cold start for no mid-session
+        // reload. Unlike adding them to `entries`, `include` does not re-crawl
+        // on every edit, so the concern above still holds.
+        include: [
+          'monaco-editor',
+          'stream-monaco',
+          'shiki',
         ],
       },
       build: {

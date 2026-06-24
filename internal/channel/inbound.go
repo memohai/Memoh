@@ -6,6 +6,16 @@ import (
 	"log/slog"
 )
 
+// ErrInboundQueueFull indicates the synchronous inbound queue admission failed
+// because all worker slots are saturated.
+var ErrInboundQueueFull = errors.New("inbound queue full")
+
+// IsInboundQueueFull reports whether err means the inbound queue rejected a
+// message due to local capacity.
+func IsInboundQueueFull(err error) bool {
+	return errors.Is(err, ErrInboundQueueFull)
+}
+
 type inboundTask struct {
 	cfg ChannelConfig
 	msg InboundMessage
@@ -28,7 +38,7 @@ func (m *Manager) HandleInbound(ctx context.Context, cfg ChannelConfig, msg Inbo
 	case m.inboundQueue <- task:
 		return nil
 	default:
-		return errors.New("inbound queue full")
+		return ErrInboundQueueFull
 	}
 }
 

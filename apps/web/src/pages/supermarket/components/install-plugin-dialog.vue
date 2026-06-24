@@ -42,7 +42,7 @@
               {{ pluginSkills.length }} Skills
             </Badge>
           </div>
-          <p class="text-[11px] text-muted-foreground line-clamp-3">
+          <p class="text-caption text-muted-foreground line-clamp-3">
             {{ plugin.description }}
           </p>
           <div
@@ -57,7 +57,7 @@
               <Boxes class="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
               <div class="min-w-0 flex-1">
                 <p
-                  class="truncate text-[11px] font-medium"
+                  class="truncate text-caption font-medium"
                   :title="skillName(skill)"
                 >
                   {{ skillName(skill) }}

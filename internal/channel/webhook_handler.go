@@ -68,6 +68,18 @@ func (h *WebhookHandler) Handle(c echo.Context) error {
 		return err
 	}
 	if cfg.Disabled {
+		desc, _ := h.registry.GetDescriptor(channelType)
+		if desc.AckDisabledWebhook {
+			if h.logger != nil {
+				h.logger.Warn(
+					"channel webhook ignored for disabled channel config",
+					slog.String("channel", channelType.String()),
+					slog.String("config_id", configID),
+				)
+			}
+			c.Response().WriteHeader(http.StatusOK)
+			return nil
+		}
 		return echo.NewHTTPError(http.StatusForbidden, "channel config is disabled")
 	}
 	receiver, ok := h.registry.GetWebhookReceiver(channelType)

@@ -25,8 +25,11 @@
             ref="scrollContainer"
             :class="`${transitionScroll?'opacity-100':'opacity-0'} h-full`"
           >
+            <!-- Same horizontal rhythm as the composer below (px-4 sm:px-6
+                 lg:px-10) so the input box and the message column share one
+                 width at every pane size — they must never diverge. -->
             <div
-              class="w-full max-w-[840px] mx-auto px-10 pt-6 pb-28 space-y-6"
+              class="w-full max-w-[840px] mx-auto px-4 pt-6 pb-28 space-y-6 sm:px-6 lg:px-10"
             >
               <div
                 ref="loadMoreSentinel"
@@ -161,17 +164,32 @@
            the bottom once a conversation exists, or lifted to the vertical
            centre (with a greeting above it) while the chat is still empty, so a
            fresh chat opens on an inviting page instead of a near-blank pane. -->
+      <!-- No outer horizontal gutter here on purpose: the message list lives in a
+           `section.absolute.inset-0` layer that fills its parent's padding box, so
+           it bypasses the section's px-3/sm:px-5/lg:px-8 gutter and only carries the
+           inner px-4/sm:px-6/lg:px-10. The composer must drop the same outer gutter
+           so its inner padding is the ONLY horizontal inset — matching the message
+           column edge-for-edge at every width. -->
       <div
         v-if="!activeChatReadOnly"
-        class="pointer-events-none absolute z-30 px-3 sm:px-5 lg:px-8"
+        class="pointer-events-none absolute z-30"
         :class="isWelcome
           ? 'inset-0 flex flex-col items-center justify-start pt-[38dvh]'
-          : 'inset-x-0 bottom-0 pt-2 pb-7'"
+          : 'inset-x-0 bottom-0 pt-2 pb-8'"
       >
+        <!-- Opaque backdrop, bottom-anchored, rising only to the box's widest point
+             (its vertical centre). The box is solid and sits above the messages, so
+             above that line its rounded top simply floats over whatever is there —
+             that area is left unmasked on purpose. From the widest point down (where
+             the box curves back in and would leave gaps by its bottom corners, plus
+             the strip beneath it) this fill hides everything, so nothing bleeds out
+             below the box. No fade: the top edge meets the box where it is already
+             full width, so the seam is hidden behind the box itself. -->
         <div
           v-if="!isWelcome"
           aria-hidden="true"
-          class="absolute inset-x-0 bottom-0 h-7 bg-surface-editor"
+          class="absolute inset-x-0 bottom-0 bg-surface-editor"
+          :style="{ height: composerMaskHeight }"
         />
         <!-- welcome: top-anchored column — the greeting and the composer's top
              edge stay pinned at pt-[38dvh], so a growing composer (multiline
@@ -180,13 +198,16 @@
         <div :class="isWelcome ? 'flex flex-col items-center gap-10 w-full' : 'contents'">
           <div
             v-if="isWelcome"
-            class="w-full max-w-[840px] mx-auto px-10 text-center"
+            class="w-full max-w-[840px] mx-auto px-4 text-center sm:px-6 lg:px-10"
           >
             <h1 class="text-balance text-2xl font-semibold tracking-tight text-foreground">
               {{ welcomeGreeting }}
             </h1>
           </div>
-          <div class="pointer-events-auto relative w-full max-w-[840px] mx-auto px-10">
+          <!-- Mirror the message column's padding (px-4 sm:px-6 lg:px-10) exactly
+               so the composer and the chat body always share one width — the inner
+               gutter still relaxes on a cramped pane, but both edges move together. -->
+          <div class="pointer-events-auto relative w-full max-w-[840px] mx-auto px-4 sm:px-6 lg:px-10">
             <Transition
               enter-active-class="motion-safe:transition-opacity motion-safe:duration-150 ease-out"
               enter-from-class="motion-safe:opacity-0"
@@ -214,9 +235,9 @@
               <Button
                 v-if="showJumpToBottom"
                 type="button"
-                size="icon-sm"
-                variant="secondary"
-                class="absolute left-1/2 bottom-full z-20 mb-2 size-8 -translate-x-1/2 rounded-full"
+                size="icon"
+                variant="ghost"
+                class="absolute left-1/2 bottom-full z-20 mb-4 size-9 -translate-x-1/2 rounded-full border border-border bg-card text-foreground"
                 aria-label="Scroll to latest message"
                 @click="scrollToBottom"
               >
@@ -422,7 +443,7 @@
                   class="field-sizing-content resize-none break-words bg-transparent text-base leading-[var(--chat-leading)] text-foreground outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
                   :class="isMultiline
                     ? 'order-none w-full basis-full pl-2 pr-1 pt-2 pb-1.5 max-h-52'
-                    : 'order-2 min-w-0 flex-1 self-center pl-1 pr-1 py-1 max-h-32'"
+                    : 'order-2 min-w-0 flex-1 self-center overflow-hidden whitespace-nowrap pl-1 pr-1 py-1 max-h-32'"
                   @keydown.enter.exact="handleKeydown"
                   @paste="handlePaste"
                   @input="syncMultiline"
@@ -502,9 +523,13 @@
                   </DropdownMenuContent>
                 </DropdownMenu>
 
+                <!-- Compact: content-sized and pushed right (ml-auto) so the
+                     textarea (flex-1) owns the slack. Multiline: grows to fill the
+                     controls row (flex-1) and right-aligns, so a long model name
+                     truncates within the row instead of overflowing it. -->
                 <div
-                  class="order-3 ml-auto flex min-w-0 items-center gap-2"
-                  :class="isMultiline ? 'self-end' : 'self-center'"
+                  class="order-3 flex min-w-0 items-center gap-2"
+                  :class="isMultiline ? 'flex-1 justify-end self-end' : 'ml-auto self-center'"
                 >
                   <Popover v-model:open="modelPopoverOpen">
                     <PopoverTrigger as-child>
@@ -512,13 +537,17 @@
                         type="button"
                         variant="ghost"
                         :disabled="!currentBotId || activeChatReadOnly || acpModelChanging"
-                        class="composer-pill-press h-9 max-w-60 gap-1 rounded-full px-3 text-muted-foreground"
+                        class="composer-pill-press h-9 min-w-0 gap-1 rounded-full px-3 text-muted-foreground"
+                        :style="{ maxWidth: `${modelTriggerMaxWidth}px` }"
                       >
                         <LoaderCircle
                           v-if="acpModelChanging || acpModelsLoading"
-                          class="size-3.5 animate-spin"
+                          class="size-3.5 shrink-0 animate-spin"
                         />
-                        <span class="truncate text-label">{{ modelTriggerLabel }}</span>
+                        <span
+                          ref="modelLabelEl"
+                          class="min-w-0 truncate text-label"
+                        >{{ modelTriggerLabel }}</span>
                         <ChevronDown class="size-3.5 shrink-0 opacity-50" />
                       </Button>
                     </PopoverTrigger>
@@ -639,15 +668,71 @@
                     </PopoverContent>
                   </Popover>
 
+                  <DropdownMenu
+                    v-if="canChooseProjectFolder"
+                    v-model:open="projectFolderMenuOpen"
+                  >
+                    <DropdownMenuTrigger as-child>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        :disabled="agentChanging"
+                        class="composer-pill-press h-9 min-w-0 max-w-40 gap-1 rounded-full px-3 text-muted-foreground"
+                      >
+                        <component
+                          :is="activeProjectIsNone ? Folder : FolderOpen"
+                          class="size-3.5 shrink-0"
+                        />
+                        <span
+                          ref="acpProjectLabelEl"
+                          class="min-w-0 truncate text-label"
+                        >{{ activeACPProjectLabel }}</span>
+                        <ChevronDown class="size-3.5 shrink-0 opacity-50" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      class="w-64"
+                      align="end"
+                      side="top"
+                    >
+                      <DropdownMenuLabel>{{ $t('chat.projectFolder') }}</DropdownMenuLabel>
+                      <DropdownMenuItem @select="selectACPNoProject">
+                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.noProject') }}</span>
+                        <Check
+                          v-if="activeProjectIsNone"
+                          class="ml-auto"
+                        />
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        v-for="folder in projectFolderOptions"
+                        :key="folder"
+                        :title="folder"
+                        @select="selectACPProjectFolder(folder)"
+                      >
+                        <span class="min-w-0 flex-1 truncate">{{ folderBasename(folder) }}</span>
+                        <Check
+                          v-if="!activeProjectIsNone && folder === currentACPProjectPath"
+                          class="ml-auto"
+                        />
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem @select="onChooseProjectFolder">
+                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.chooseFolder') }}</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                   <Button
-                    v-if="activeIsACP"
+                    v-else-if="activeIsACP"
                     type="button"
                     variant="ghost"
-                    class="h-9 gap-1 rounded-full px-3 text-muted-foreground max-w-40"
+                    class="h-9 min-w-0 max-w-40 gap-1 rounded-full px-3 text-muted-foreground"
                     disabled
                   >
                     <FolderOpen class="size-3.5 shrink-0" />
-                    <span class="truncate text-[11px]">{{ activeACPProjectLabel }}</span>
+                    <span
+                      ref="acpProjectLabelEl"
+                      class="min-w-0 truncate text-label"
+                    >{{ activeACPProjectLabel }}</span>
                   </Button>
 
                   <div class="relative size-9 shrink-0">
@@ -658,39 +743,51 @@
                       class="absolute inset-0 size-9 transition-[opacity,scale] duration-200 ease-out motion-reduce:transition-none"
                       :class="(!showSend && !streaming) ? 'scale-100 opacity-100' : 'pointer-events-none scale-75 opacity-0'"
                     />
+                    <!-- Send and stop are one brand circle: the surface never
+                         changes between the two states, only the glyph cross-fades
+                         (arrow ⇄ stop square), so the button can't blink color or
+                         shape mid-turn. While streaming it stays clickable to abort. -->
                     <Button
-                      v-if="!streaming"
                       type="button"
                       variant="brand"
-                      :disabled="!showSend || !currentBotId || activeChatReadOnly"
-                      aria-label="Send message"
+                      :disabled="streaming ? false : (!showSend || !currentBotId || activeChatReadOnly)"
+                      :aria-label="streaming ? 'Stop generating response' : 'Send message'"
                       class="absolute inset-0 size-9 rounded-full transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
-                      :class="showSend ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
-                      @click="handleSend"
+                      :class="(sendButtonVisible || streaming) ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
+                      @click="streaming ? chatStore.abort() : handleSend()"
                     >
-                      <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2.25"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        class="size-[18px]"
+                      <span
+                        class="grid size-[20px] shrink-0 place-items-center"
                         aria-hidden="true"
                       >
-                        <path d="M12 19.5 V5" />
-                        <path d="M6 10.5 L12 4.5 L18 10.5" />
-                      </svg>
-                    </Button>
-                    <Button
-                      v-else
-                      type="button"
-                      variant="destructive"
-                      class="absolute inset-0 size-9 rounded-full"
-                      aria-label="Stop generating response"
-                      @click="chatStore.abort()"
-                    >
-                      <LoaderCircle class="size-[18px] animate-spin" />
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.75"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          class="col-start-1 row-start-1 size-[20px] transition-opacity duration-200 ease-out motion-reduce:transition-none"
+                          :class="streaming ? 'opacity-0' : 'opacity-100'"
+                        >
+                          <path d="M12 19.5 V5" />
+                          <path d="M6 10.5 L12 4.5 L18 10.5" />
+                        </svg>
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                          class="col-start-1 row-start-1 size-[18px] transition-opacity duration-200 ease-out motion-reduce:transition-none"
+                          :class="streaming ? 'opacity-100' : 'opacity-0'"
+                        >
+                          <rect
+                            x="4"
+                            y="4"
+                            width="16"
+                            height="16"
+                            rx="3"
+                          />
+                        </svg>
+                      </span>
                     </Button>
                   </div>
                 </div>
@@ -713,6 +810,7 @@ import {
   CircleAlert,
   ArrowDown,
   Check,
+  Folder,
   FolderOpen,
   Square,
   SquareCheck,
@@ -740,8 +838,10 @@ import { useMediaGallery } from '../composables/useMediaGallery'
 import type { ChatAttachment, UIUserInput, UIUserInputQuestion, WSUserInputAnswer } from '@/composables/api/useChat'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
-import { acpAgentIcon, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID } from '@/utils/acp'
+import { acpAgentIcon, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID, readRecentACPFolders, rememberACPFolder, ACP_DEFAULT_PROJECT_MODE, ACP_NO_PROJECT_MODE, createACPNoProjectPath } from '@/utils/acp'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { canPickProjectFolder, pickProjectFolder } from '@/utils/desktop-runtime'
+import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 
 interface PendingUserInputDraft {
   optionIds: string[]
@@ -1136,6 +1236,75 @@ const activeACPProjectLabel = computed(() => {
   return path ? parts[parts.length - 1] ?? path : t('chat.noProject')
 })
 const canChangeAgent = computed(() => !streaming.value && messages.value.length === 0)
+
+// Project folder picker. A host folder only maps to the agent's working
+// directory when the agent runs on a local desktop workspace; in remote/web
+// mode the path is fixed server-side, so the pill stays a read-only marker.
+// Mirrors the agent switcher's gate — the runtime binds its folder on the first
+// turn, so the choice is offered only while the session is still empty.
+function folderBasename(path: string): string {
+  const parts = path.split('/').filter(Boolean)
+  return parts[parts.length - 1] ?? path
+}
+const { isLocalDesktop, load: loadDesktopRuntime } = useDesktopRuntime()
+void loadDesktopRuntime()
+const projectFolderMenuOpen = ref(false)
+const recentACPFolders = ref<string[]>(readRecentACPFolders())
+const currentACPProjectPath = computed(() => String(activeSessionMetadata.value.project_path ?? '').trim())
+const activeProjectIsNone = computed(() => isACPNoProject(activeSessionMetadata.value))
+const canChooseProjectFolder = computed(() =>
+  activeIsACP.value && canChangeAgent.value && isLocalDesktop.value && canPickProjectFolder(),
+)
+const projectFolderOptions = computed(() => {
+  const list = [...recentACPFolders.value]
+  const current = currentACPProjectPath.value
+  if (current && !activeProjectIsNone.value && !list.includes(current)) list.unshift(current)
+  return list
+})
+
+watch(projectFolderMenuOpen, (open) => {
+  if (open) recentACPFolders.value = readRecentACPFolders()
+})
+
+async function applyACPProject(projectMode: string, projectPath: string) {
+  const agentId = activeACPAgentId.value
+  if (!agentId || agentChanging.value || !canChangeAgent.value) return
+  projectFolderMenuOpen.value = false
+  agentChanging.value = true
+  composerError.value = ''
+  try {
+    if (chatStore.sessionId) {
+      await withAgentSwitchTimeout(chatStore.updateCurrentSessionAgent({ agentId, projectMode, projectPath }))
+    }
+    else {
+      chatStore.stageACPSession({ agentId, projectMode, projectPath })
+      await withAgentSwitchTimeout(chatStore.ensurePendingACPRuntime())
+    }
+    pendingFiles.value = []
+  }
+  catch (error) {
+    composerError.value = agentSwitchErrorMessage(error)
+  }
+  finally {
+    agentChanging.value = false
+  }
+}
+
+function selectACPProjectFolder(path: string) {
+  const next = path.trim()
+  if (next) void applyACPProject(ACP_DEFAULT_PROJECT_MODE, next)
+}
+
+function selectACPNoProject() {
+  void applyACPProject(ACP_NO_PROJECT_MODE, createACPNoProjectPath())
+}
+
+async function onChooseProjectFolder() {
+  const path = await pickProjectFolder()
+  if (!path) return
+  recentACPFolders.value = rememberACPFolder(path)
+  void applyACPProject(ACP_DEFAULT_PROJECT_MODE, path)
+}
 // The composer's "+" menu is worth showing only when it can do something:
 // switch the agent (empty session with ACP profiles) or attach files (Memoh
 // mode). An in-progress ACP chat has neither, so the trigger is hidden rather
@@ -1403,9 +1572,27 @@ const {
 const inputText = ref('')
 const textareaEl = ref<HTMLTextAreaElement | null>(null)
 const composerEl = ref<HTMLElement | null>(null)
-const isMultiline = ref(false)
+const modelLabelEl = ref<HTMLElement | null>(null)
+const acpProjectLabelEl = ref<HTMLElement | null>(null)
+// The composer lifts to its multiline layout (textarea on its own row, controls
+// below) for two independent reasons: the typed text wraps or holds a newline
+// (textMultiline), or the pane is too narrow to seat the input + model capsule +
+// send on one pill row (narrowMultiline). Either trigger flips isMultiline, so a
+// cramped pane reflows into multiline instead of letting the pill explode.
+const textMultiline = ref(false)
+const narrowMultiline = ref(false)
+const isMultiline = computed(() => textMultiline.value || narrowMultiline.value)
 const compactContentWidth = ref(0)
+const composerInnerWidth = ref(0)
+const composerBoxHeight = ref(0)
 const showSend = computed(() => Boolean(inputText.value.trim()) || pendingFiles.value.length > 0)
+
+// Whether the trailing slot shows the send button at all. In standard chat the
+// SessionInfoRing fills that slot while idle and the send button only reveals
+// once there's content (showSend). ACP sessions have no ring, so without this
+// the slot would sit empty on empty input — the button must stay put and just
+// fall to its disabled (dimmed brand) state instead of vanishing.
+const sendButtonVisible = computed(() => showSend.value || activeIsACP.value)
 
 // Border-radius morph, kept on the SAME clock as whatever box change drives it.
 // An attachment open/close keys off showAttachmentGrid — which flips at the START
@@ -1466,7 +1653,7 @@ function measureWraps(text: string, width: number): boolean {
 function syncMultiline() {
   const text = inputText.value
   if (text.includes('\n')) {
-    isMultiline.value = true
+    textMultiline.value = true
     return
   }
   const el = textareaEl.value
@@ -1476,16 +1663,86 @@ function syncMultiline() {
     const w = el.clientWidth - padX
     if (w > 1) compactContentWidth.value = w
   }
-  isMultiline.value = measureWraps(text, compactContentWidth.value)
+  textMultiline.value = measureWraps(text, compactContentWidth.value)
 }
+
+// Pixel budget for the compact (pill) row. The right cluster's *natural* width is
+// derived from intrinsic measurements (the model label's scrollWidth, which a
+// `truncate` span still reports in full) so the verdict never depends on the
+// current layout — switching to multiline can't change the inputs and oscillate.
+// When the inline textarea would be squeezed under MIN_INLINE_TEXTAREA, the pill
+// can't host input + capsule + send on one line, so we reflow to multiline.
+const MIN_INLINE_TEXTAREA = 120
+const MODEL_TRIGGER_MAX = 240 // max-w-60
+const PLUS_SLOT = 40 // size-9 (36) + gap-1 (4)
+const SEND_SLOT = 36 // send / ring size-9
+const MODEL_CHROME = 46 // px-3 ×2 + gap-1 + chevron + a little slack
+const CLUSTER_GAP = 8 // gap-2 between cluster children
+const ROW_GAPS = 8 // gap-1 on each flank of the textarea
+
+function rightClusterNaturalWidth(): number {
+  const modelLabel = modelLabelEl.value?.scrollWidth ?? 0
+  const modelWidth = modelLabel > 0
+    ? Math.min(MODEL_TRIGGER_MAX, modelLabel + MODEL_CHROME)
+    : MODEL_TRIGGER_MAX
+  let width = modelWidth + CLUSTER_GAP + SEND_SLOT
+  const acpLabel = acpProjectLabelEl.value?.scrollWidth ?? 0
+  if (acpLabel > 0) width += Math.min(160, acpLabel + 28) + CLUSTER_GAP
+  return width
+}
+
+function recomputeComposerFit() {
+  const el = composerEl.value
+  if (!el) return
+  const cs = getComputedStyle(el)
+  const padX = Number.parseFloat(cs.paddingLeft) + Number.parseFloat(cs.paddingRight)
+  const inner = el.clientWidth - padX
+  if (inner <= 1) return
+  composerInnerWidth.value = inner
+  const room = inner - PLUS_SLOT - ROW_GAPS - rightClusterNaturalWidth()
+  narrowMultiline.value = room < MIN_INLINE_TEXTAREA
+}
+
+// The model trigger inherits the Button's `shrink-0`, so it won't yield in a
+// flex row — a long name would push past the box instead of truncating. A hard
+// max-width clamps it regardless of flex-shrink (the min-w-0 label then ellipses
+// within), sized to whatever the controls row can spare after the ＋, send, and
+// any project pill. It only bites when space is tight; otherwise it rests at the
+// 240px cap and the button still hugs a short name.
+const modelTriggerMaxWidth = computed(() => {
+  const inner = composerInnerWidth.value
+  if (inner <= 1) return MODEL_TRIGGER_MAX
+  let reserved = PLUS_SLOT + ROW_GAPS + CLUSTER_GAP + SEND_SLOT
+  const acpLabel = acpProjectLabelEl.value?.scrollWidth ?? 0
+  if (acpLabel > 0) reserved += Math.min(160, acpLabel + 28) + CLUSTER_GAP
+  return Math.max(72, Math.min(MODEL_TRIGGER_MAX, inner - reserved))
+})
+
+// The bottom mask rises only to the box's vertical centre — its widest point.
+// pb-8 (32px) is the strip beneath the box; + half the box height reaches the
+// centre line, which falls behind the box's full-width middle so the mask's top
+// edge is hidden by the box itself (no visible seam, no fade). Above that line
+// the box's rounded top is left to float over whatever is there; below it the
+// fill hides the bottom-corner gaps and the strip beneath, so nothing bleeds out.
+const COMPOSER_MASK_BELOW = 32 // pb-8
+const composerMaskHeight = computed(() => `${COMPOSER_MASK_BELOW + composerBoxHeight.value / 2}px`)
 
 let composerResizeObserver: ResizeObserver | null = null
 onMounted(() => {
-  void nextTick(syncMultiline)
+  void nextTick(() => {
+    syncMultiline()
+    recomputeComposerFit()
+  })
   if (typeof ResizeObserver !== 'undefined' && textareaEl.value) {
     composerResizeObserver = new ResizeObserver(() => syncMultiline())
     composerResizeObserver.observe(textareaEl.value)
   }
+})
+
+// A different model name (or switching to/from an ACP project pill) changes the
+// right cluster's natural width, so re-run the fit check when the labels change.
+watch([modelTriggerLabel, activeIsACP, activeACPProjectLabel], () => {
+  void nextTick(recomputeComposerFit)
 })
 onBeforeUnmount(() => {
   composerResizeObserver?.disconnect()
@@ -1556,6 +1813,7 @@ function animateComposerHeight() {
   clearComposerMorphStyles(el)
   const target = el.offsetHeight
   composerHeight = target
+  composerBoxHeight.value = target
   // Only a pill↔multiline form change earns the height morph. Attachment rows
   // now reveal via their own grid 0fr↔1fr track (card stays put, box grows), and
   // plain line-wraps within multiline snap, so they're deliberately excluded.
@@ -1595,6 +1853,7 @@ watch([inputText, isMultiline], () => {
 onMounted(() => {
   void nextTick(() => {
     composerHeight = composerEl.value?.offsetHeight ?? 0
+    composerBoxHeight.value = composerHeight
     composerMultiline = isMultiline.value
     composerHeightReady = true
     composerSnapNext = false
@@ -1602,11 +1861,17 @@ onMounted(() => {
   const el = composerEl.value
   if (el && typeof ResizeObserver !== 'undefined') {
     composerSizeObserver = new ResizeObserver(() => {
+      // The fit check keys off width only, so the height swing of a pill↔multiline
+      // morph (same width) can't feed back and re-toggle it.
+      recomputeComposerFit()
       // Skip while we drive the height ourselves; only capture layout-driven
       // resizes so the next morph starts from the real current height. The
       // keystroke path sets composerHeightAnim before this fires, so normal
       // morphs are untouched.
-      if (!composerHeightAnim) composerHeight = el.offsetHeight
+      if (!composerHeightAnim) {
+        composerHeight = el.offsetHeight
+        composerBoxHeight.value = el.offsetHeight
+      }
     })
     composerSizeObserver.observe(el)
   }

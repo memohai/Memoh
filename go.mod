@@ -33,10 +33,11 @@ require (
 	github.com/labstack/echo-jwt/v4 v4.4.0
 	github.com/labstack/echo/v4 v4.15.0
 	github.com/larksuite/oapi-sdk-go/v3 v3.5.3
+	github.com/line/line-bot-sdk-go/v8 v8.20.1
 	github.com/mailgun/mailgun-go/v5 v5.14.0
 	github.com/memohai/acgo v0.0.0-20260221232113-babac0d6acd7
 	github.com/memohai/dingtalk-stream-sdk-go v0.0.0-20260405113102-87e23096b978
-	github.com/memohai/twilight-ai v0.4.1-0.20260603165258-f4a48c387b9b
+	github.com/memohai/twilight-ai v0.4.1-0.20260623064358-a8230254367e
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/opencontainers/runtime-spec v1.3.0

@@ -21,10 +21,9 @@
           <Label for="pw-current">
             {{ $t('settings.currentPassword') }}
           </Label>
-          <Input
+          <PasswordInput
             id="pw-current"
             v-model="currentPassword"
-            type="password"
             autocomplete="current-password"
           />
         </div>
@@ -32,10 +31,9 @@
           <Label for="pw-new">
             {{ $t('settings.newPassword') }}
           </Label>
-          <Input
+          <PasswordInput
             id="pw-new"
             v-model="newPassword"
-            type="password"
             autocomplete="new-password"
             :aria-invalid="isMismatch || undefined"
           />
@@ -44,10 +42,9 @@
           <Label for="pw-confirm">
             {{ $t('settings.confirmPassword') }}
           </Label>
-          <Input
+          <PasswordInput
             id="pw-confirm"
             v-model="confirmPassword"
-            type="password"
             autocomplete="new-password"
             :aria-invalid="isMismatch || undefined"
           />
@@ -92,10 +89,10 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-  Input,
   Label,
   Spinner,
 } from '@memohai/ui'
+import PasswordInput from '@/components/password-input/index.vue'
 
 const props = defineProps<{
   open: boolean

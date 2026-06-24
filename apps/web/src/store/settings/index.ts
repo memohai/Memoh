@@ -58,6 +58,13 @@ export const useSettingsStore = defineStore('settings', () => {
   const codeFontStack = computed(() => cssFontFamilyDeclaration(codeFontFamily.value, DEFAULT_CODE_FONT_FAMILY))
   const shikiThemes = computed(() => ({ light: shikiThemeLight.value, dark: shikiThemeDark.value }))
 
+  // Expose the resolved active color mode as the single source of truth.
+  // 'system' is resolved against the OS/browser preference so consumers don't
+  // need to re-implement that logic. isDark is a derived convenience for APIs
+  // that only accept a boolean.
+  const resolvedColorMode = computed(() => colorMode.state.value)
+  const isDark = computed(() => resolvedColorMode.value === 'dark')
+
   const applyColorScheme = (value: ColorSchemeId) => {
     if (typeof document === 'undefined') return
     document.documentElement.dataset.colorScheme = value
@@ -185,6 +192,8 @@ export const useSettingsStore = defineStore('settings', () => {
     shikiThemeLight,
     shikiThemeDark,
     shikiThemes,
+    resolvedColorMode,
+    isDark,
     mermaidTheme,
     defaultUiFontFamily,
     defaultCodeFontFamily,

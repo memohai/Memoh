@@ -49,12 +49,16 @@ services:
       #   HTTP_PROXY=http://host.docker.internal:7890 docker compose up -d
       HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
       HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
-      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,qdrant,sparse,server,web,migrate,memoh-postgres,memoh-qdrant,memoh-sparse,memoh-server,memoh-web,memoh-migrate"
+      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,qdrant,sparse,server,web,migrate,webhook-tunnel,memoh-postgres,memoh-qdrant,memoh-sparse,memoh-server,memoh-web,memoh-migrate,memoh-webhook-tunnel"
       http_proxy: "${http_proxy:-${HTTP_PROXY:-}}"
       https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
-      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,qdrant,sparse,server,web,migrate,memoh-postgres,memoh-qdrant,memoh-sparse,memoh-server,memoh-web,memoh-migrate"
+      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,qdrant,sparse,server,web,migrate,webhook-tunnel,memoh-postgres,memoh-qdrant,memoh-sparse,memoh-server,memoh-web,memoh-migrate,memoh-webhook-tunnel"
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN: "${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}"
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX: "${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}"
+      MEMOH_WEBHOOK_TUNNEL_MODE: "${MEMOH_WEBHOOK_TUNNEL_MODE:-}"
+      MEMOH_WEBHOOK_PUBLIC_BASE_URL: "${MEMOH_WEBHOOK_PUBLIC_BASE_URL:-}"
+      MEMOH_WEBHOOK_TUNNEL_LISTEN_ADDR: ":18734"
+      MEMOH_WEBHOOK_TUNNEL_METRICS_URL: "http://webhook-tunnel:18735"
     volumes:
       - ${MEMOH_CONFIG:-./config.toml}:/app/config.toml:ro
       - ./conf/providers:/app/conf/providers:ro
@@ -69,9 +73,31 @@ services:
       - "8080:8080"
       - "1455:8080"
       - "${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}-${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}:${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}-${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}/udp"
+    expose:
+      - "18734"
     depends_on:
       migrate:
         condition: service_completed_successfully
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
+  webhook-tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: memoh-webhook-tunnel
+    command: tunnel --no-autoupdate --url http://server:18734 --metrics 0.0.0.0:18735
+    profiles: [webhook-tunnel]
+    environment:
+      HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
+      HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
+      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},server,memoh-server"
+      http_proxy: "${http_proxy:-${HTTP_PROXY:-}}"
+      https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
+      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},server,memoh-server"
+    depends_on:
+      - server
+    expose:
+      - "18735"
     restart: unless-stopped
     networks:
       - memoh-network

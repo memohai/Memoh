@@ -19,6 +19,7 @@ type Settings struct {
 	MemoryProviderID       string             `json:"memory_provider_id"`
 	TtsModelID             string             `json:"tts_model_id"`
 	TranscriptionModelID   string             `json:"transcription_model_id"`
+	VideoModelID           string             `json:"video_model_id"`
 	Language               string             `json:"language"`
 	CommandUILanguage      string             `json:"command_ui_language"`
 	AclDefaultEffect       string             `json:"acl_default_effect"`
@@ -51,6 +52,7 @@ type UpsertRequest struct {
 	MemoryProviderID       string              `json:"memory_provider_id,omitempty"`
 	TtsModelID             string              `json:"tts_model_id,omitempty"`
 	TranscriptionModelID   string              `json:"transcription_model_id,omitempty"`
+	VideoModelID           string              `json:"video_model_id,omitempty"`
 	Language               string              `json:"language,omitempty"`
 	CommandUILanguage      string              `json:"command_ui_language,omitempty"`
 	AclDefaultEffect       string              `json:"acl_default_effect,omitempty"`

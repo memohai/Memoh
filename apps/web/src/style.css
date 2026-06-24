@@ -94,7 +94,12 @@
    * purple-black ink. Tune the L/C/tilt numbers (not the hue) so the proportion
    * stays portable to whatever accent is active. */
   --chat-user-bubble: oklch(from var(--brand) 0.936 0.035 calc(h + 12));
-  --chat-user-bubble-fg: oklch(from var(--brand) 0.285 0.06 calc(h + 12));
+  /* Ink pushed toward black: low L (dark) and low C (only a whisper of the purple
+   * tilt). The prompt and answer share ONE weight (--chat-cjk-body / --chat-latin-body
+   * — no per-surface weight exception, which would dirty the system); the prompt
+   * reading a touch lighter is purely the tinted bubble's lower contrast, so the
+   * density is restored here through contrast (darker ink), not a bespoke weight. */
+  --chat-user-bubble-fg: oklch(from var(--brand) 0.235 0.04 calc(h + 12));
 
   /* Process / "Thought for Ns" header ink — one notch grayer (lower contrast)
    * than --muted-foreground so the channel-process line sits quieter above the
@@ -149,6 +154,19 @@
 [data-button][data-variant="ghost"].composer-pill-press:active::before {
   inset: 0.5px;
   scale: 1;
+}
+
+/* The model preview pill is a WIDE control trigger, not a small icon button. The
+ * shared ghost hover (--btn-ghost-hover = --overlay-hover-strong, tuned for a
+ * small square glyph) reads far too heavy spread across the pill's width. Use the
+ * standard control hover (--ui-hover = --overlay-hover) — the same lighter overlay
+ * a Select trigger gets — so its hover sits at the calm weight of the controls
+ * around it instead of a dense block. */
+[data-button][data-variant="ghost"].composer-pill-press:hover::before,
+[data-button][data-variant="ghost"].composer-pill-press:active::before,
+[data-button][data-variant="ghost"].composer-pill-press[data-state="open"]::before,
+[data-button][data-variant="ghost"].composer-pill-press[aria-expanded="true"]::before {
+  background-color: var(--ui-hover);
 }
 
 /* Inter-script spacing (W3C CLREQ / CSS Text 4): insert the standard ~1/8em gap
@@ -237,12 +255,12 @@
   --chat-latin-size: 0.9375em;
   --chat-latin-track: 0.005em;
   /* Per-script WEIGHT pairs (Latin / CJK) per tier. */
-  --chat-latin-body: 420;   --chat-cjk-body: 330;
-  --chat-latin-strong: 520; --chat-cjk-strong: 430;
-  --chat-latin-h1: 600;     --chat-cjk-h1: 500;
-  --chat-latin-h2: 560;     --chat-cjk-h2: 470;
-  --chat-latin-h3: 520;     --chat-cjk-h3: 440;
-  --chat-latin-h4: 500;     --chat-cjk-h4: 420;
+  --chat-latin-body: 420;   --chat-cjk-body: 340;
+  --chat-latin-strong: 520; --chat-cjk-strong: 440;
+  --chat-latin-h1: 600;     --chat-cjk-h1: 510;
+  --chat-latin-h2: 560;     --chat-cjk-h2: 480;
+  --chat-latin-h3: 520;     --chat-cjk-h3: 450;
+  --chat-latin-h4: 500;     --chat-cjk-h4: 430;
 }
 /* Latin's optical compensation (size/weight/tracking) ALL lives on the span, not
  * the block. A block-level :lang(en) size only fires when the whole block is pure
