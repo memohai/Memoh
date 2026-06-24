@@ -18,14 +18,8 @@ func BuildManifest(frags []ContextFrag) Manifest {
 		if err := ValidateContextRef(ref); err != nil {
 			normalized := WithContextRef(frag, ref)
 			ref = normalized.Ref
-			if err := ValidateContextRef(ref); err != nil {
-				manifest.ValidationWarnings = append(manifest.ValidationWarnings, ValidationWarning{
-					Code:    "invalid_context_ref",
-					Message: err.Error(),
-					Ref:     ref,
-				})
-			}
 		}
+		manifest.ValidationWarnings = append(manifest.ValidationWarnings, ContextRefWarnings(ref)...)
 		item := ManifestItem{
 			ID:         frag.ID,
 			Ref:        ref,

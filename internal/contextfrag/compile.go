@@ -78,7 +78,7 @@ func Compile(input CompileInput) AssembledContext {
 		}
 	}
 
-	frags, warnings := normalizeContextRefs(frags)
+	frags = normalizeContextRefs(frags)
 	assembled := Render(frags)
 	assembled.Frags = frags
 	assembled.Manifest = BuildManifest(frags)
@@ -87,7 +87,6 @@ func Compile(input CompileInput) AssembledContext {
 		assembled.Manifest.View = ViewRunConfigPreProvider
 	}
 	assembled.Manifest.DynamicMutators = normalizeDynamicMutators(input.DynamicMutators)
-	assembled.Manifest.ValidationWarnings = append(assembled.Manifest.ValidationWarnings, warnings...)
 	return assembled
 }
 
@@ -364,24 +363,16 @@ func normalizeScope(scope Scope) Scope {
 	return scope
 }
 
-func normalizeContextRefs(frags []ContextFrag) ([]ContextFrag, []ValidationWarning) {
+func normalizeContextRefs(frags []ContextFrag) []ContextFrag {
 	if len(frags) == 0 {
-		return nil, nil
+		return nil
 	}
 	out := make([]ContextFrag, 0, len(frags))
-	var warnings []ValidationWarning
 	for _, frag := range frags {
 		normalized := WithContextRef(frag, frag.Ref)
-		if err := ValidateContextRef(normalized.Ref); err != nil {
-			warnings = append(warnings, ValidationWarning{
-				Code:    "invalid_context_ref",
-				Message: err.Error(),
-				Ref:     normalized.Ref,
-			})
-		}
 		out = append(out, normalized)
 	}
-	return out, warnings
+	return out
 }
 
 func normalizeDynamicMutators(mutators []DynamicMutator) []DynamicMutator {

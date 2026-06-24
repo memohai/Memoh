@@ -20,6 +20,7 @@ func TestContextRefRoundTripPreservesReducerIdentity(t *testing.T) {
 		ContentHash: "abc123",
 		HashScope:   HashScopeCanonicalFragment,
 		Schema:      SchemaContextRef,
+		Durability:  RefDurable,
 	}
 
 	raw, err := json.Marshal(ref)
@@ -252,15 +253,25 @@ func TestSerdeRoundTripsContextFragManifestEditAndCoverage(t *testing.T) {
 	})
 
 	coverage := SummaryCoverage{
-		CoverageID:     "coverage-1",
-		SummaryRef:     ContextRef{Namespace: "summary", ID: "summary-1", Schema: SchemaContextRef},
-		CoveredRefs:    []ContextRef{frag.Ref},
-		CoveredFragIDs: []string{frag.ID},
-		Schema:         SchemaVersion{Name: SchemaSummaryCoverage, Version: CurrentSchemaVersion},
+		CoverageID:   "coverage-1",
+		SummaryRef:   ContextRef{Namespace: "summary", ID: "summary-1", Schema: SchemaContextRef, Durability: RefDurable},
+		CoveredRefs:  []ContextRef{frag.Ref},
+		TraceFragIDs: []string{frag.ID},
+		Schema:       SchemaVersion{Name: SchemaSummaryCoverage, Version: CurrentSchemaVersion},
 	}
 	roundTripJSON(t, coverage, func(got SummaryCoverage) {
 		if len(got.CoveredRefs) != 1 || !got.CoveredRefs[0].EqualIdentity(frag.Ref) {
 			t.Fatalf("coverage refs mismatch after roundtrip: %#v", got.CoveredRefs)
+		}
+		if len(got.TraceFragIDs) != 1 || got.TraceFragIDs[0] != frag.ID {
+			t.Fatalf("coverage trace frag IDs mismatch after roundtrip: %#v", got.TraceFragIDs)
+		}
+		raw, err := json.Marshal(got)
+		if err != nil {
+			t.Fatalf("marshal coverage: %v", err)
+		}
+		if json.Valid(raw) && containsJSONField(raw, "covered_frag_ids") {
+			t.Fatalf("coverage JSON should use trace_frag_ids, got %s", raw)
 		}
 	})
 
@@ -290,6 +301,14 @@ func TestSchemaAndHashValidationRejectsSilentDrift(t *testing.T) {
 	}
 	if err := ValidateSchemaVersions([]SchemaVersion{{Name: "unknown_schema", Version: CurrentSchemaVersion}}); err == nil {
 		t.Fatal("unknown schema name should fail validation")
+	}
+	if !UsesLockstepSchemaVersions() {
+		t.Fatal("PR0 schema strategy should explicitly report lockstep schema versions")
+	}
+	for _, schema := range DefaultSchemaVersions() {
+		if schema.Version != CurrentSchemaVersion {
+			t.Fatalf("lockstep schema %q version = %d, want %d", schema.Name, schema.Version, CurrentSchemaVersion)
+		}
 	}
 	if err := ValidateContextRef(ContextRef{
 		Namespace: "history",
@@ -336,99 +355,6 @@ func TestSchemaAndHashValidationRejectsSilentDrift(t *testing.T) {
 	missing := CheckEditPreconditions(edit, nil)
 	if len(missing) != 1 || missing[0].Kind != ConflictMissingRef {
 		t.Fatalf("expected one missing-ref conflict, got %#v", missing)
-	}
-}
-
-func TestCompileAddsRefsAndManifestTraceWithoutChangingRenderedLegacyView(t *testing.T) {
-	t.Parallel()
-
-	system := "base system"
-	messages := []sdk.Message{sdk.UserMessage("history")}
-	images := []sdk.ImagePart{{Image: "data:image/png;base64,abc", MediaType: "image/png"}}
-
-	got := Compile(CompileInput{
-		Source:       "test",
-		System:       system,
-		Messages:     messages,
-		Query:        "current",
-		InlineImages: images,
-	})
-
-	if got.System != system || got.Query != "current" || len(got.Messages) != 1 || len(got.InlineImages) != 1 {
-		t.Fatalf("rendered legacy view changed: system=%q query=%q messages=%d images=%d", got.System, got.Query, len(got.Messages), len(got.InlineImages))
-	}
-	for _, frag := range got.Frags {
-		if err := ValidateContextRef(frag.Ref); err != nil {
-			t.Fatalf("compiled frag %q has invalid ref %#v: %v", frag.ID, frag.Ref, err)
-		}
-		if frag.Ref.HashScope != HashScopeCanonicalFragment || frag.Ref.ContentHash == "" {
-			t.Fatalf("compiled frag %q missing canonical hash ref: %#v", frag.ID, frag.Ref)
-		}
-	}
-	if len(got.Manifest.RenderedOutputs) == 0 {
-		t.Fatal("manifest should explain rendered output refs")
-	}
-	if len(got.Manifest.ValidationWarnings) != 0 {
-		t.Fatalf("unexpected manifest validation warnings: %#v", got.Manifest.ValidationWarnings)
-	}
-}
-
-func TestCompileUsesStableContentAddressedRefsWhenSourceIDIsMissing(t *testing.T) {
-	t.Parallel()
-
-	first := Compile(CompileInput{
-		Source:   "test",
-		Messages: []sdk.Message{sdk.UserMessage("target")},
-	})
-	second := Compile(CompileInput{
-		Source:   "test",
-		Messages: []sdk.Message{sdk.UserMessage("prefix"), sdk.UserMessage("target")},
-	})
-
-	firstRef, ok := refForRenderedMessageText(first.Frags, "target")
-	if !ok {
-		t.Fatalf("missing target ref in first compile: %#v", first.Manifest.Items)
-	}
-	secondRef, ok := refForRenderedMessageText(second.Frags, "target")
-	if !ok {
-		t.Fatalf("missing target ref in second compile: %#v", second.Manifest.Items)
-	}
-	if firstRef.ID != secondRef.ID {
-		t.Fatalf("source-less legacy message ref drifted with position: first=%#v second=%#v", firstRef, secondRef)
-	}
-}
-
-func TestManifestRenderedOutputsOnlyIncludeRenderedRefs(t *testing.T) {
-	t.Parallel()
-
-	historyText := WithContextRef(TextFrag(TextFragInput{
-		ID:   "history.text",
-		Kind: KindConversationEvent,
-		Slot: SlotHistory,
-		Text: "not rendered by legacy renderer",
-	}), ContextRef{Namespace: "test", ID: "history.text", Schema: SchemaContextRef})
-	currentA := WithContextRef(TextFrag(TextFragInput{
-		ID:   "current.a",
-		Kind: KindCurrentUserMessage,
-		Slot: SlotCurrentUser,
-		Text: "a",
-	}), ContextRef{Namespace: "test", ID: "current.a", Schema: SchemaContextRef})
-	currentB := WithContextRef(TextFrag(TextFragInput{
-		ID:   "current.b",
-		Kind: KindCurrentUserMessage,
-		Slot: SlotCurrentUser,
-		Text: "b",
-	}), ContextRef{Namespace: "test", ID: "current.b", Schema: SchemaContextRef})
-
-	manifest := BuildManifest([]ContextFrag{historyText, currentA, currentB})
-	if renderedOutputContainsRef(manifest.RenderedOutputs, historyText.Ref) {
-		t.Fatalf("history text ref should not be listed as rendered output: %#v", manifest.RenderedOutputs)
-	}
-	if renderedOutputContainsRef(manifest.RenderedOutputs, currentA.Ref) {
-		t.Fatalf("overwritten current-user text ref should not be listed as rendered output: %#v", manifest.RenderedOutputs)
-	}
-	if !renderedOutputContainsRef(manifest.RenderedOutputs, currentB.Ref) {
-		t.Fatalf("last current-user text ref should be listed as rendered output: %#v", manifest.RenderedOutputs)
 	}
 }
 
@@ -482,4 +408,27 @@ func renderedOutputContainsRef(outputs []RenderedOutputRef, ref ContextRef) bool
 		}
 	}
 	return false
+}
+
+func manifestHasWarning(manifest Manifest, code string) bool {
+	return countManifestWarnings(manifest, code) > 0
+}
+
+func countManifestWarnings(manifest Manifest, code string) int {
+	total := 0
+	for _, warning := range manifest.ValidationWarnings {
+		if warning.Code == code {
+			total++
+		}
+	}
+	return total
+}
+
+func containsJSONField(raw []byte, field string) bool {
+	var value map[string]any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false
+	}
+	_, ok := value[field]
+	return ok
 }

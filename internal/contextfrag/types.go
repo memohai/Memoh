@@ -28,6 +28,8 @@ const (
 	KindConversationSummary Kind = "conversation_summary"
 )
 
+// v1 keeps all context schema versions in lockstep; future migrations can
+// split this into per-schema supported ranges without changing manifest shape.
 const CurrentSchemaVersion = 1
 
 const (
@@ -63,6 +65,7 @@ type ContextRef struct {
 	ContentHash string        `json:"content_hash,omitempty"`
 	HashScope   string        `json:"hash_scope,omitempty"`
 	Schema      string        `json:"schema"`
+	Durability  RefDurability `json:"durability,omitempty"`
 }
 
 type FragmentHash struct {
@@ -70,6 +73,14 @@ type FragmentHash struct {
 	Scope string `json:"scope"`
 	Value string `json:"value"`
 }
+
+type RefDurability string
+
+const (
+	RefDurable   RefDurability = "durable"
+	RefSynthetic RefDurability = "synthetic"
+	RefDebug     RefDurability = "debug"
+)
 
 // Slot describes where a fragment is rendered in the LLM input layout.
 type Slot string
@@ -347,11 +358,12 @@ type ContextEditTrace struct {
 }
 
 type SummaryCoverage struct {
-	CoverageID     string        `json:"coverage_id"`
-	SummaryRef     ContextRef    `json:"summary_ref"`
-	CoveredRefs    []ContextRef  `json:"covered_refs,omitempty"`
-	CoveredFragIDs []string      `json:"covered_frag_ids,omitempty"`
-	Schema         SchemaVersion `json:"schema"`
+	CoverageID  string       `json:"coverage_id"`
+	SummaryRef  ContextRef   `json:"summary_ref"`
+	CoveredRefs []ContextRef `json:"covered_refs,omitempty"`
+	// TraceFragIDs is debug-only and must not be used as durable coverage identity.
+	TraceFragIDs []string      `json:"trace_frag_ids,omitempty"`
+	Schema       SchemaVersion `json:"schema"`
 }
 
 type ContinuityGroup struct {

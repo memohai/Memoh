@@ -10,6 +10,7 @@ func (ref ContextRef) StableKey() string {
 	namespace := strings.TrimSpace(ref.Namespace)
 	id := strings.TrimSpace(ref.ID)
 	schema := strings.TrimSpace(ref.Schema)
+	durability := strings.TrimSpace(string(normalizeRefDurability(ref.Durability)))
 	key := namespace + ":" + id
 	if ref.Version != 0 {
 		key += fmt.Sprintf("@v%d", ref.Version)
@@ -19,6 +20,9 @@ func (ref ContextRef) StableKey() string {
 	}
 	if schema != "" {
 		key += "#" + schema
+	}
+	if durability != "" && durability != string(RefDurable) {
+		key += "$" + durability
 	}
 	return key
 }
@@ -36,10 +40,17 @@ func (ref ContextRef) EqualIdentity(other ContextRef) bool {
 	if strings.TrimSpace(ref.Schema) != strings.TrimSpace(other.Schema) {
 		return false
 	}
+	if normalizeRefDurability(ref.Durability) != normalizeRefDurability(other.Durability) {
+		return false
+	}
 	if ref.Range == nil || other.Range == nil {
 		return ref.Range == nil && other.Range == nil
 	}
 	return ref.Range.Start == other.Range.Start && ref.Range.End == other.Range.End
+}
+
+func (ref ContextRef) IsDurable() bool {
+	return normalizeRefDurability(ref.Durability) == RefDurable
 }
 
 func ValidateContextRef(ref ContextRef) error {
@@ -51,6 +62,9 @@ func ValidateContextRef(ref ContextRef) error {
 	}
 	if strings.TrimSpace(ref.Schema) == "" {
 		return errors.New("context ref schema is required")
+	}
+	if ref.Durability != "" && !knownRefDurability(ref.Durability) {
+		return fmt.Errorf("unknown context ref durability %q", ref.Durability)
 	}
 	if err := ValidateSchemaVersions([]SchemaVersion{{Name: ref.Schema, Version: CurrentSchemaVersion}}); err != nil {
 		return err
@@ -141,9 +155,29 @@ func CheckEditPreconditions(edit ContextEdit, stateRefs []ContextRef) []ContextC
 
 func WithContextRef(frag ContextFrag, ref ContextRef) ContextFrag {
 	hash, hashErr := CanonicalFragmentHash(frag)
+	hasExplicitID := strings.TrimSpace(ref.ID) != ""
+	hasSourceID := strings.TrimSpace(frag.Provenance.SourceID) != ""
 	ref.Namespace = firstNonEmpty(ref.Namespace, frag.Provenance.Source, "context_frag")
-	ref.ID = firstNonEmpty(ref.ID, frag.Provenance.SourceID, hash.Value, frag.ID)
+	if hasExplicitID {
+		ref.ID = strings.TrimSpace(ref.ID)
+	} else if hasSourceID {
+		ref.ID = strings.TrimSpace(frag.Provenance.SourceID)
+	} else if hashErr == nil && hash.Value != "" {
+		ref.ID = hash.Value
+	} else {
+		ref.ID = strings.TrimSpace(frag.ID)
+	}
 	ref.Schema = firstNonEmpty(ref.Schema, SchemaContextRef)
+	if ref.Durability == "" {
+		switch {
+		case hasExplicitID || hasSourceID:
+			ref.Durability = RefDurable
+		case hashErr == nil && hash.Value != "":
+			ref.Durability = RefSynthetic
+		default:
+			ref.Durability = RefDebug
+		}
+	}
 	if hashErr == nil {
 		ref.HashAlgo = hash.Algo
 		ref.HashScope = hash.Scope
@@ -151,6 +185,31 @@ func WithContextRef(frag ContextFrag, ref ContextRef) ContextFrag {
 	}
 	frag.Ref = ref
 	return frag
+}
+
+// UsesLockstepSchemaVersions reports the PR0 schema strategy: all context
+// schemas share CurrentSchemaVersion until per-schema migration ranges exist.
+func UsesLockstepSchemaVersions() bool {
+	return true
+}
+
+func ContextRefWarnings(ref ContextRef) []ValidationWarning {
+	var warnings []ValidationWarning
+	if err := ValidateContextRef(ref); err != nil {
+		warnings = append(warnings, ValidationWarning{
+			Code:    "invalid_context_ref",
+			Message: err.Error(),
+			Ref:     ref,
+		})
+	}
+	if !ref.IsDurable() {
+		warnings = append(warnings, ValidationWarning{
+			Code:    "non_durable_context_ref",
+			Message: fmt.Sprintf("context ref durability %q is for phase-1 trace only; durable sources should provide ContextRef IDs", ref.Durability),
+			Ref:     ref,
+		})
+	}
+	return warnings
 }
 
 func DefaultSchemaVersions() []SchemaVersion {
@@ -173,6 +232,22 @@ func DefaultSlotRenderPolicies() []SlotRenderPolicy {
 		{Slot: SlotCurrentUser, Order: "last_text_wins_images_append", DedupeBy: "ref", CoverageAware: true, Target: "query_inline_images"},
 		{Slot: SlotAfterCurrent, Order: "fragment_order", DedupeBy: "ref", CoverageAware: true, Target: "messages"},
 	}
+}
+
+func knownRefDurability(durability RefDurability) bool {
+	switch durability {
+	case RefDurable, RefSynthetic, RefDebug:
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeRefDurability(durability RefDurability) RefDurability {
+	if durability == "" {
+		return RefDurable
+	}
+	return durability
 }
 
 func knownSchemaName(name string) bool {
