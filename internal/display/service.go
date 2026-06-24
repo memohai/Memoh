@@ -825,8 +825,12 @@ func (s *session) handleInput(data []byte) error {
 func (s *session) addTrack(id string, track *webrtc.TrackLocalStaticRTP) {
 	s.tracksMu.Lock()
 	s.tracks[id] = track
-	s.tracksMu.Unlock()
+	// Cancel the idle-stop timer while still holding tracksMu so the timer
+	// callback cannot observe an empty track set and stop() the encoder in the
+	// gap between adding the track and cancelling the timer — which would bind
+	// a new viewer to a stopped pipeline (black video, no error).
 	s.cancelIdleStop()
+	s.tracksMu.Unlock()
 }
 
 func (s *session) removeTrack(id string) {
@@ -846,12 +850,16 @@ func (s *session) scheduleIdleStop() {
 		s.idleStopTimer.Stop()
 	}
 	s.idleStopTimer = time.AfterFunc(encoderIdleHold, func() {
-		s.tracksMu.RLock()
+		// Hold tracksMu for the empty-check AND the stop() so a concurrent
+		// addTrack cannot insert a track between "still empty" and "stop the
+		// encoder" — that race bound a new viewer to a pipeline being torn
+		// down. stop() is idempotent (stopOnce) and lock-free w.r.t. tracksMu.
+		s.tracksMu.Lock()
 		empty := len(s.tracks) == 0
-		s.tracksMu.RUnlock()
 		if empty && !s.closed() {
 			s.stop()
 		}
+		s.tracksMu.Unlock()
 	})
 }
 
