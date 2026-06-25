@@ -52,10 +52,7 @@ func TestEstimateItemTokensPrefersOutputTokensThenContentFallback(t *testing.T) 
 		mkRow(t, "user", `"hello"`, 50),
 		mkRow(t, "assistant", `"`+repeat("a", 400)+`"`, 0),
 	}
-	items, err := itemsFromRows(rows)
-	if err != nil {
-		t.Fatalf("itemsFromRows: %v", err)
-	}
+	items, _ := itemsFromRows(rows)
 	got := itemTokens(items)
 	// First: usage output_tokens. Second: len(content)/4 = 402/4 = 100.
 	if got[0] != 50 {
@@ -70,10 +67,7 @@ func TestItemsFromRowsPreservesIDContentAndClassifiesRecord(t *testing.T) {
 	t.Parallel()
 
 	row := mkRow(t, "user", `"hi there"`, 0)
-	items, err := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{row})
-	if err != nil {
-		t.Fatalf("itemsFromRows: %v", err)
-	}
+	items, _ := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{row})
 	if len(items) != 1 {
 		t.Fatalf("items len = %d, want 1", len(items))
 	}
@@ -92,6 +86,24 @@ func TestItemsFromRowsPreservesIDContentAndClassifiesRecord(t *testing.T) {
 	}
 }
 
+func TestItemsFromRowsSkipsUnparseableRowsWithoutAborting(t *testing.T) {
+	t.Parallel()
+
+	good := mkRow(t, "user", `"ok"`, 0)
+	bad := sqlc.ListUncompactedMessagesBySessionRow{
+		ID:      pgtype.UUID{Valid: false}, // empty id -> FromDBMessage rejects it
+		Role:    "user",
+		Content: json.RawMessage(`"x"`),
+	}
+	items, skipped := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{good, bad})
+	if skipped != 1 {
+		t.Fatalf("skipped = %d, want 1", skipped)
+	}
+	if len(items) != 1 || items[0].id != good.ID {
+		t.Fatalf("a bad row must be skipped, not abort the batch: got %d items", len(items))
+	}
+}
+
 func TestSplitByTargetCompactsOldestBeyondTarget(t *testing.T) {
 	t.Parallel()
 
@@ -102,10 +114,7 @@ func TestSplitByTargetCompactsOldestBeyondTarget(t *testing.T) {
 		mkRow(t, "assistant", `"b"`, 100),
 		mkRow(t, "user", `"c"`, 100),
 	}
-	items, err := itemsFromRows(rows)
-	if err != nil {
-		t.Fatalf("itemsFromRows: %v", err)
-	}
+	items, _ := itemsFromRows(rows)
 	toCompact := splitByTarget(items, 150)
 	if len(toCompact) != 2 {
 		t.Fatalf("compact count = %d, want 2", len(toCompact))
@@ -124,10 +133,7 @@ func TestSplitByRatioKeepsNewestByRatio(t *testing.T) {
 		mkRow(t, "assistant", `"b"`, 100),
 		mkRow(t, "user", `"c"`, 100),
 	}
-	items, err := itemsFromRows(rows)
-	if err != nil {
-		t.Fatalf("itemsFromRows: %v", err)
-	}
+	items, _ := itemsFromRows(rows)
 	toCompact := splitByRatio(items, 300, 50)
 	if len(toCompact) != 2 {
 		t.Fatalf("compact count = %d, want 2", len(toCompact))

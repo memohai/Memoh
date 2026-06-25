@@ -22,12 +22,18 @@ type compactionItem struct {
 	record  historyfrag.HistoryRecord
 }
 
-func itemsFromRows(rows []sqlc.ListUncompactedMessagesBySessionRow) ([]compactionItem, error) {
+// itemsFromRows classifies each uncompacted row into a typed compactionItem.
+// A row that cannot be classified is skipped (and counted) rather than aborting
+// the whole compaction: it simply stays in active history to be retried, which
+// matches the legacy path's inability to fail at selection time.
+func itemsFromRows(rows []sqlc.ListUncompactedMessagesBySessionRow) ([]compactionItem, int) {
 	items := make([]compactionItem, 0, len(rows))
+	skipped := 0
 	for _, row := range rows {
 		record, err := historyfrag.FromDBMessage(rowToMessage(row), historyfrag.ScopeFallback{})
 		if err != nil {
-			return nil, err
+			skipped++
+			continue
 		}
 		items = append(items, compactionItem{
 			id:      row.ID,
@@ -36,7 +42,7 @@ func itemsFromRows(rows []sqlc.ListUncompactedMessagesBySessionRow) ([]compactio
 			record:  record,
 		})
 	}
-	return items, nil
+	return items, skipped
 }
 
 func rowToMessage(row sqlc.ListUncompactedMessagesBySessionRow) messagepkg.Message {
