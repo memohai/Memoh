@@ -194,6 +194,12 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 	}
 
 	entries, messageIDs := buildEntriesAndIDs(toCompact)
+	if len(entries) == 0 {
+		// Every selected message rendered empty (e.g. reasoning-only): summarizing
+		// nothing would destroy them for a junk summary. Leave them in history.
+		s.completeLog(ctx, logID, "ok", "", "", 0, nil, pgtype.UUID{})
+		return nil
+	}
 
 	userPrompt := buildUserPrompt(priorSummaries, entries)
 
