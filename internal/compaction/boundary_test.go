@@ -115,6 +115,34 @@ func TestAdjustForToolBoundaryAllToolsCompactsAll(t *testing.T) {
 	}
 }
 
+func TestTrimCompactMessagesKeepsToolExchangeIntact(t *testing.T) {
+	t.Parallel()
+
+	// compact input (oldest -> newest): assistant(tool-call), tool(result), user, assistant.
+	// maxTokens 350 trims the oldest (the tool call), which would orphan the tool
+	// result at the head of the retained compact input.
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		toolCallRow(t, 100),
+		toolResultRow(t, 100),
+		mkRow(t, "user", `"c"`, 100),
+		mkRow(t, "assistant", `"d"`, 100),
+	}
+	items, err := itemsFromRows(rows)
+	if err != nil {
+		t.Fatalf("itemsFromRows: %v", err)
+	}
+	trimmed := trimCompactMessages(items, 350)
+	if len(trimmed) == 0 {
+		t.Fatalf("trim dropped everything")
+	}
+	if isToolResultItem(trimmed[0]) {
+		t.Fatalf("trim left an orphan tool result at the head of the compact input")
+	}
+	if len(trimmed) != 2 {
+		t.Fatalf("trimmed = %d, want 2 (orphan tool result dropped with its call)", len(trimmed))
+	}
+}
+
 func TestAdjustForToolBoundaryIgnoresZeroCutoff(t *testing.T) {
 	t.Parallel()
 
