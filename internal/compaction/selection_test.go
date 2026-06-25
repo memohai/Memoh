@@ -2,6 +2,7 @@ package compaction
 
 import (
 	"encoding/json"
+	"strconv"
 	"testing"
 
 	"github.com/google/uuid"
@@ -23,18 +24,9 @@ func mkRow(t *testing.T, role, content string, outputTokens int) sqlc.ListUncomp
 		Content: json.RawMessage(content),
 	}
 	if outputTokens > 0 {
-		row.Usage = json.RawMessage(`{"output_tokens":` + itoa(outputTokens) + `}`)
+		row.Usage = json.RawMessage(`{"output_tokens":` + strconv.Itoa(outputTokens) + `}`)
 	}
 	return row
-}
-
-func itoa(v int) string {
-	return string([]byte(jsonNumber(v)))
-}
-
-func jsonNumber(v int) []byte {
-	b, _ := json.Marshal(v)
-	return b
 }
 
 func itemTokens(items []compactionItem) []int {
