@@ -140,6 +140,23 @@ func TestRenderEntryContentToolResultScrubsBareBase64(t *testing.T) {
 	}
 }
 
+func TestRenderEntryContentToolResultDataURIDoesNotSwallowFollowingText(t *testing.T) {
+	t.Parallel()
+
+	mm := conversation.ModelMessage{
+		Role:       "tool",
+		ToolCallID: "c1",
+		Content:    []byte(`[{"type":"tool-result","toolName":"render","output":{"type":"text","value":"data:image/png;base64,iVBORw0KGgo= and the screenshot shows the login page"}}]`),
+	}
+	got := renderEntryContent(mm)
+	if strings.Contains(got, "iVBORw0KGgo") {
+		t.Fatalf("data URI not scrubbed: %q", got)
+	}
+	if !strings.Contains(got, "the screenshot shows the login page") {
+		t.Fatalf("data URI scrub swallowed the following prose: %q", got)
+	}
+}
+
 func TestRenderEntryContentToolResultBoundsCleanText(t *testing.T) {
 	t.Parallel()
 

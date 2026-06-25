@@ -15,7 +15,7 @@ import (
 const toolOutputMaxBytes = 2048
 
 var (
-	dataURIRe = regexp.MustCompile(`data:[a-zA-Z0-9.+/-]+;base64,[A-Za-z0-9+/=\s]+`)
+	dataURIRe = regexp.MustCompile(`data:[a-zA-Z0-9.+/-]+;base64,[A-Za-z0-9+/=]+`)
 	// base64BlobRe matches long continuous base64-alphabet runs (data-URI-less
 	// media such as MCP ImageContent's bare "data" field). The high threshold
 	// avoids scrubbing ordinary tokens/words, which are broken by punctuation or
