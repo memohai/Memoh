@@ -186,15 +186,7 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 		}
 	}
 
-	entries := make([]messageEntry, 0, len(toCompact))
-	messageIDs := make([]pgtype.UUID, 0, len(toCompact))
-	for _, it := range toCompact {
-		entries = append(entries, messageEntry{
-			Role:    it.record.ModelMessage.Role,
-			Content: renderEntryContent(it.record.ModelMessage),
-		})
-		messageIDs = append(messageIDs, it.id)
-	}
+	entries, messageIDs := buildEntriesAndIDs(toCompact)
 
 	userPrompt := buildUserPrompt(priorSummaries, entries)
 
