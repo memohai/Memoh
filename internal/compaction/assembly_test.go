@@ -17,10 +17,7 @@ func TestBuildEntriesAndIDsMarksAllSelectedButSkipsEmptyEntries(t *testing.T) {
 		mkRow(t, "assistant", `[{"type":"reasoning","text":"thinking"}]`, 0),
 		mkRow(t, "assistant", `"the answer"`, 0),
 	}
-	items, err := itemsFromRows(rows)
-	if err != nil {
-		t.Fatalf("itemsFromRows: %v", err)
-	}
+	items, _ := itemsFromRows(rows)
 
 	entries, ids := buildEntriesAndIDs(items)
 

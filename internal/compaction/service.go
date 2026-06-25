@@ -139,9 +139,16 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 		return nil
 	}
 
-	messages, err := itemsFromRows(rows)
-	if err != nil {
-		return err
+	messages, skipped := itemsFromRows(rows)
+	if skipped > 0 {
+		s.logger.Warn("compaction: skipped unparseable history rows",
+			slog.Int("skipped", skipped),
+			slog.String("session_id", cfg.SessionID),
+		)
+	}
+	if len(messages) == 0 {
+		s.completeLog(ctx, logID, "ok", "", "", 0, nil, pgtype.UUID{})
+		return nil
 	}
 
 	var toCompact []compactionItem

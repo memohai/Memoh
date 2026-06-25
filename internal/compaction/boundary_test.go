@@ -36,10 +36,7 @@ func TestSplitByTargetDoesNotOrphanToolResult(t *testing.T) {
 		toolResultRow(t, 100),
 		mkRow(t, "assistant", `"done"`, 100),
 	}
-	items, err := itemsFromRows(rows)
-	if err != nil {
-		t.Fatalf("itemsFromRows: %v", err)
-	}
+	items, _ := itemsFromRows(rows)
 	toCompact := splitByTarget(items, 250)
 	firstKeptIsNotOrphanTool(t, items, toCompact)
 	if len(toCompact) != 3 {
@@ -59,10 +56,7 @@ func TestSplitByRatioDoesNotOrphanToolResult(t *testing.T) {
 		toolResultRow(t, 100),
 		mkRow(t, "assistant", `"done"`, 100),
 	}
-	items, err := itemsFromRows(rows)
-	if err != nil {
-		t.Fatalf("itemsFromRows: %v", err)
-	}
+	items, _ := itemsFromRows(rows)
 	// total=500, ratio=50 -> keepTokens=250 -> unadjusted cutoff would keep the
 	// tool result at the head of the keep side.
 	toCompact := splitByRatio(items, 500, 50)
@@ -127,10 +121,7 @@ func TestTrimCompactMessagesKeepsToolExchangeIntact(t *testing.T) {
 		mkRow(t, "user", `"c"`, 100),
 		mkRow(t, "assistant", `"d"`, 100),
 	}
-	items, err := itemsFromRows(rows)
-	if err != nil {
-		t.Fatalf("itemsFromRows: %v", err)
-	}
+	items, _ := itemsFromRows(rows)
 	trimmed := trimCompactMessages(items, 350)
 	if len(trimmed) == 0 {
 		t.Fatalf("trim dropped everything")
