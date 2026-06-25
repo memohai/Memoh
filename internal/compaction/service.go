@@ -130,16 +130,21 @@ func (s *Service) runCompactionHook(ctx context.Context, eventName string, cfg T
 }
 
 func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUUID pgtype.UUID, cfg TriggerConfig) error {
-	messages, err := s.queries.ListUncompactedMessagesBySession(ctx, sessionUUID)
+	rows, err := s.queries.ListUncompactedMessagesBySession(ctx, sessionUUID)
 	if err != nil {
 		return err
 	}
-	if len(messages) == 0 {
+	if len(rows) == 0 {
 		s.completeLog(ctx, logID, "ok", "", "", 0, nil, pgtype.UUID{})
 		return nil
 	}
 
-	var toCompact []sqlc.ListUncompactedMessagesBySessionRow
+	messages, err := itemsFromRows(rows)
+	if err != nil {
+		return err
+	}
+
+	var toCompact []compactionItem
 	if cfg.TargetTokens > 0 {
 		// Sync compaction: compress enough messages to bring context
 		// down to TargetTokens. Calculate how many tokens to keep
@@ -183,12 +188,12 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 
 	entries := make([]messageEntry, 0, len(toCompact))
 	messageIDs := make([]pgtype.UUID, 0, len(toCompact))
-	for _, m := range toCompact {
+	for _, it := range toCompact {
 		entries = append(entries, messageEntry{
-			Role:    m.Role,
-			Content: string(m.Content),
+			Role:    it.record.ModelMessage.Role,
+			Content: string(it.content),
 		})
-		messageIDs = append(messageIDs, m.ID)
+		messageIDs = append(messageIDs, it.id)
 	}
 
 	userPrompt := buildUserPrompt(priorSummaries, entries)
@@ -319,106 +324,4 @@ func formatUUID(id pgtype.UUID) string {
 		return ""
 	}
 	return uuid.UUID(id.Bytes).String()
-}
-
-// splitByRatio splits messages so that roughly the first ratio% (by token weight)
-// are returned for compaction, and the rest are kept as-is.
-// When ratio >= 100, all messages are returned for compaction.
-// When ratio <= 0 or totalInputTokens <= 0 or messages is empty, nil is returned (no compaction).
-func splitByRatio(messages []sqlc.ListUncompactedMessagesBySessionRow, totalInputTokens, ratio int) []sqlc.ListUncompactedMessagesBySessionRow {
-	if ratio <= 0 || totalInputTokens <= 0 || len(messages) == 0 {
-		return nil
-	}
-	if ratio >= 100 {
-		return messages
-	}
-
-	keepTokens := totalInputTokens * (100 - ratio) / 100
-	if keepTokens <= 0 {
-		return messages
-	}
-
-	accumulated := 0
-	cutoff := len(messages)
-	for i := len(messages) - 1; i >= 0; i-- {
-		accumulated += estimateRowTokens(messages[i])
-		if accumulated >= keepTokens {
-			cutoff = i + 1
-			break
-		}
-	}
-
-	if cutoff <= 0 {
-		return nil
-	}
-	if cutoff >= len(messages) {
-		return messages
-	}
-	return messages[:cutoff]
-}
-
-// splitByTarget returns the oldest messages to compact so that the remaining
-// newest messages fit within targetTokens. This is used for synchronous
-// compaction where the goal is to reduce context to a specific size.
-func splitByTarget(messages []sqlc.ListUncompactedMessagesBySessionRow, targetTokens int) []sqlc.ListUncompactedMessagesBySessionRow {
-	if targetTokens <= 0 || len(messages) == 0 {
-		return nil
-	}
-	// Scan from newest to oldest, keeping messages that fit within target.
-	accumulated := 0
-	cutoff := 0
-	for i := len(messages) - 1; i >= 0; i-- {
-		accumulated += estimateRowTokens(messages[i])
-		if accumulated > targetTokens {
-			cutoff = i + 1
-			break
-		}
-	}
-	if cutoff <= 0 {
-		return nil
-	}
-	return messages[:cutoff]
-}
-
-type usagePayload struct {
-	OutputTokens *int `json:"output_tokens"`
-}
-
-func estimateRowTokens(m sqlc.ListUncompactedMessagesBySessionRow) int {
-	if len(m.Usage) > 0 {
-		var u usagePayload
-		if json.Unmarshal(m.Usage, &u) == nil && u.OutputTokens != nil && *u.OutputTokens > 0 {
-			return *u.OutputTokens
-		}
-	}
-	return len(m.Content) / 4
-}
-
-// trimCompactMessages trims the compaction input from the tail (oldest)
-// so the total estimated tokens stay within maxTokens.
-func trimCompactMessages(messages []sqlc.ListUncompactedMessagesBySessionRow, maxTokens int) []sqlc.ListUncompactedMessagesBySessionRow {
-	if len(messages) == 0 || maxTokens <= 0 {
-		return messages
-	}
-	total := 0
-	for _, m := range messages {
-		total += estimateRowTokens(m)
-	}
-	if total <= maxTokens {
-		return messages
-	}
-	// Drop oldest messages from the tail until within budget.
-	accumulated := 0
-	cutoff := len(messages)
-	for i := len(messages) - 1; i >= 0; i-- {
-		accumulated += estimateRowTokens(messages[i])
-		if accumulated > maxTokens {
-			cutoff = i + 1
-			break
-		}
-	}
-	if cutoff >= len(messages) {
-		return messages
-	}
-	return messages[cutoff:]
 }
