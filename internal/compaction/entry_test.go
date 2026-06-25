@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
 
 func TestRenderEntryContentPlainString(t *testing.T) {
@@ -103,11 +104,12 @@ func TestRenderEntryContentToolResultPreservesStructuredOutcome(t *testing.T) {
 func TestRenderEntryContentToolResultTruncatesOversizedOutput(t *testing.T) {
 	t.Parallel()
 
-	big := strings.Repeat("x", toolOutputMaxBytes*2)
+	// Realistic oversized text output (whitespace-separated, not a base64 run).
+	big := strings.Repeat("log line text ", 1000)
 	mm := conversation.ModelMessage{
 		Role:       "tool",
 		ToolCallID: "c1",
-		Content:    []byte(`[{"type":"tool-result","toolName":"dump","result":{"blob":"` + big + `"}}]`),
+		Content:    []byte(`[{"type":"tool-result","toolName":"dump","result":{"log":"` + big + `"}}]`),
 	}
 	got := renderEntryContent(mm)
 	if len(got) > toolOutputMaxBytes+64 {
@@ -115,6 +117,64 @@ func TestRenderEntryContentToolResultTruncatesOversizedOutput(t *testing.T) {
 	}
 	if !strings.Contains(got, "[truncated]") {
 		t.Fatalf("expected truncation marker: %q", got[:80])
+	}
+}
+
+func TestRenderEntryContentToolResultScrubsBareBase64(t *testing.T) {
+	t.Parallel()
+
+	// MCP ImageContent / conversation MediaContent persist raw base64 in a bare
+	// "data"/"base64" field with no data: URI prefix.
+	blob := strings.Repeat("QUJD", 100) // 400 chars of base64 alphabet
+	mm := conversation.ModelMessage{
+		Role:       "tool",
+		ToolCallID: "c1",
+		Content:    []byte(`[{"type":"tool-result","toolName":"screenshot","output":{"content":[{"type":"image","data":"` + blob + `"}]}}]`),
+	}
+	got := renderEntryContent(mm)
+	if strings.Contains(got, blob) || strings.Contains(got, "QUJDQUJDQUJD") {
+		t.Fatalf("bare base64 media leaked into summarizer input: %q", got[:80])
+	}
+	if !strings.Contains(got, "[media]") {
+		t.Fatalf("expected media marker for scrubbed base64: %q", got)
+	}
+}
+
+func TestRenderEntryContentToolResultBoundsCleanText(t *testing.T) {
+	t.Parallel()
+
+	// A clean text field (output.value) must also be bounded, not just the fallback.
+	big := strings.Repeat("sentence words here ", 1000)
+	mm := conversation.ModelMessage{
+		Role:       "tool",
+		ToolCallID: "c1",
+		Content:    []byte(`[{"type":"tool-result","toolName":"big","output":{"type":"text","value":"` + big + `"}}]`),
+	}
+	got := renderEntryContent(mm)
+	if len(got) > toolOutputMaxBytes+64 {
+		t.Fatalf("clean-text tool output not bounded: %d bytes", len(got))
+	}
+	if !strings.Contains(got, "[truncated]") {
+		t.Fatalf("expected truncation marker on clean-text path: %q", got[:80])
+	}
+}
+
+func TestBuildEntriesAndIDsAllEmptyWindow(t *testing.T) {
+	t.Parallel()
+
+	// A window of only reasoning-only messages renders to no entries, but all
+	// ids are still returned so the caller can detect the all-empty no-op case.
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "assistant", `[{"type":"reasoning","text":"think a"}]`, 0),
+		mkRow(t, "assistant", `[{"type":"reasoning","text":"think b"}]`, 0),
+	}
+	items, _ := itemsFromRows(rows)
+	entries, ids := buildEntriesAndIDs(items)
+	if len(entries) != 0 {
+		t.Fatalf("reasoning-only window should yield no entries, got %d", len(entries))
+	}
+	if len(ids) != 2 {
+		t.Fatalf("ids should still cover all selected, got %d", len(ids))
 	}
 }
 

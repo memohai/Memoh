@@ -14,7 +14,14 @@ import (
 // input compact while preserving the outcome gist.
 const toolOutputMaxBytes = 2048
 
-var dataURIRe = regexp.MustCompile(`data:[a-zA-Z0-9.+/-]+;base64,[A-Za-z0-9+/=\s]+`)
+var (
+	dataURIRe = regexp.MustCompile(`data:[a-zA-Z0-9.+/-]+;base64,[A-Za-z0-9+/=\s]+`)
+	// base64BlobRe matches long continuous base64-alphabet runs (data-URI-less
+	// media such as MCP ImageContent's bare "data" field). The high threshold
+	// avoids scrubbing ordinary tokens/words, which are broken by punctuation or
+	// whitespace.
+	base64BlobRe = regexp.MustCompile(`[A-Za-z0-9+/_-]{256,}={0,2}`)
+)
 
 // entryPart is a minimal view of one stored content part, enough to render a
 // summarizer-friendly entry without leaking raw JSON, media payloads, or
@@ -85,12 +92,21 @@ func toolCallMarker(name string) string {
 // structured data) survives. Falls back to a marker only when there is nothing.
 func renderToolResult(candidates ...json.RawMessage) string {
 	if s := firstOutputText(candidates...); s != "" {
-		return s
+		return sanitizeToolText(s)
 	}
-	if s := compactToolOutput(candidates...); s != "" {
-		return s
+	if s := rawToolOutput(candidates...); s != "" {
+		return sanitizeToolText(s)
 	}
 	return "[tool result]"
+}
+
+// sanitizeToolText bounds and de-medias any tool outcome text before it reaches
+// the summarizer, applied uniformly to both the clean-text and raw-JSON paths so
+// neither can leak base64/data-URI payloads or unbounded output.
+func sanitizeToolText(s string) string {
+	s = dataURIRe.ReplaceAllString(s, "[media]")
+	s = base64BlobRe.ReplaceAllString(s, "[media]")
+	return truncateBytes(s, toolOutputMaxBytes)
 }
 
 // firstOutputText returns the first cleanly extractable string from a tool
@@ -141,17 +157,16 @@ func outputText(raw json.RawMessage) string {
 	return ""
 }
 
-// compactToolOutput renders the raw outcome as bounded, media-scrubbed text so
-// structured tool results (maps, arrays) still reach the summarizer instead of
-// being dropped, without leaking base64/data-URI payloads.
-func compactToolOutput(candidates ...json.RawMessage) string {
+// rawToolOutput returns the first non-empty raw outcome payload so structured
+// tool results (maps, arrays) still reach the summarizer (after sanitizing)
+// instead of being dropped.
+func rawToolOutput(candidates ...json.RawMessage) string {
 	for _, raw := range candidates {
 		s := strings.TrimSpace(string(raw))
 		if s == "" || s == "null" {
 			continue
 		}
-		s = dataURIRe.ReplaceAllString(s, "[media]")
-		return truncateBytes(s, toolOutputMaxBytes)
+		return s
 	}
 	return ""
 }
