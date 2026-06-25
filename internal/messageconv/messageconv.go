@@ -2,6 +2,7 @@ package messageconv
 
 import (
 	"encoding/json"
+	"log/slog"
 	"strings"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -14,12 +15,14 @@ func SDKMessagesToModelMessages(msgs []sdk.Message) []conversation.ModelMessage 
 	for _, msg := range msgs {
 		data, err := json.Marshal(msg)
 		if err != nil {
+			slog.Warn("messageconv: sdk message marshal failed", slog.String("role", string(msg.Role)), slog.Any("error", err))
 			continue
 		}
 		var envelope struct {
 			Content json.RawMessage `json:"content"`
 		}
 		if err := json.Unmarshal(data, &envelope); err != nil {
+			slog.Warn("messageconv: sdk message content extract failed", slog.String("role", string(msg.Role)), slog.Any("error", err))
 			continue
 		}
 		var usage json.RawMessage

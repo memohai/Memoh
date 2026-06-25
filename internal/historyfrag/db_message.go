@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -132,6 +133,11 @@ type dbMessageSourceHashPayload struct {
 func modelMessageFromDBMessage(msg messagepkg.Message) conversation.ModelMessage {
 	var modelMessage conversation.ModelMessage
 	if err := json.Unmarshal(msg.Content, &modelMessage); err != nil {
+		slog.Warn("historyfrag: content unmarshal failed, treating as raw text",
+			slog.String("message_id", msg.ID),
+			slog.String("role", msg.Role),
+			slog.Any("error", err),
+		)
 		modelMessage = conversation.ModelMessage{
 			Role:    strings.TrimSpace(msg.Role),
 			Content: cloneRawMessage(msg.Content),

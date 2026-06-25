@@ -356,7 +356,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		historyFallback := historyScopeFallbackFromChatRequest(req)
 		loaded, loadErr := r.loadHistoryRecords(ctx, historyFallback, req.SessionID, defaultMaxContextMinutes)
 		if loadErr != nil {
-			r.logger.Error("resolve: loadMessages failed",
+			r.logger.Error("resolve: loadHistoryRecords failed",
 				slog.String("bot_id", req.BotID),
 				slog.Any("error", loadErr),
 			)

@@ -34,7 +34,7 @@ func ToFrag(record HistoryRecord) contextfrag.ContextFrag {
 		Message:    msg,
 		Kind:       kind,
 		Slot:       contextfrag.SlotHistory,
-		Priority:   priorityForMessage(msg),
+		Priority:   contextfrag.PriorityForMessage(msg),
 		CacheClass: contextfrag.CacheNever,
 		Trust:      trustForHistoryRecord(record),
 		Scope:      record.Scope,
@@ -75,17 +75,6 @@ func fragmentID(record HistoryRecord) string {
 		return "history." + source
 	}
 	return "history." + source + "." + id
-}
-
-func priorityForMessage(msg sdk.Message) int {
-	switch msg.Role {
-	case sdk.MessageRoleSystem:
-		return 30
-	case sdk.MessageRoleTool:
-		return 55
-	default:
-		return 70
-	}
 }
 
 func trustForHistoryRecord(HistoryRecord) contextfrag.TrustLevel {

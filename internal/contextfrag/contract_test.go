@@ -99,6 +99,32 @@ func TestCanonicalFragmentHashIsStableAndIgnoresDebugID(t *testing.T) {
 	}
 }
 
+func TestCanonicalFragmentHashGoldenValue(t *testing.T) {
+	t.Parallel()
+
+	frag := TextFrag(TextFragInput{
+		ID:         "golden",
+		Kind:       KindConversationEvent,
+		Role:       sdk.MessageRoleUser,
+		Slot:       SlotHistory,
+		Text:       "hello",
+		Priority:   70,
+		CacheClass: CacheNever,
+		Trust:      TrustExternal,
+		Source:     "test",
+		SourceID:   "row-1",
+		Collector:  "golden_test",
+	})
+	hash, err := CanonicalFragmentHash(frag)
+	if err != nil {
+		t.Fatalf("canonical hash: %v", err)
+	}
+	const want = "a33139d731966124ebcadf9eb4f2ce815b63650e866794086fc587c504193764"
+	if hash.Value != want {
+		t.Fatalf("golden hash drifted: got %q, want %q — if the canonical struct shape changed intentionally, update this value", hash.Value, want)
+	}
+}
+
 func TestCanonicalFragmentHashDiscriminatesSDKMessagePartTypes(t *testing.T) {
 	t.Parallel()
 
