@@ -191,7 +191,7 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 	for _, it := range toCompact {
 		entries = append(entries, messageEntry{
 			Role:    it.record.ModelMessage.Role,
-			Content: string(it.content),
+			Content: renderEntryContent(it.record.ModelMessage),
 		})
 		messageIDs = append(messageIDs, it.id)
 	}
