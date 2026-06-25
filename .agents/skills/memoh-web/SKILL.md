@@ -638,6 +638,15 @@ model, or make their relationship explicit and visible.
 - The motion duration palette is fixed (see `packages/ui/AGENTS.md` § Motion). Stay in it.
 - The rule: **don't overuse motion, but make every user action perceivable.** A click that
   changes nothing visible feels broken even when it worked.
+- **A button that swaps the whole card's structure is a last resort, not a pattern.** An
+  "Add member" button that replaces the member list with a picker form (Cancel/Confirm and
+  all) reflows the entire card on click — the frame the user was just reading vanishes.
+  Prefer an inline control that commits in place — a select trigger in the header that adds
+  on pick, a popover off the row — so the card's layout never changes. Caveat: the design
+  system does not yet have a settled pattern for "inline add to a list", so until it does,
+  treat the button→swap as an anti-pattern to **avoid**, not a template to copy. (The Bot
+  Access members card moved off this swap to an inline header select; the old swap form is
+  the anti-example.)
 
 ### Select triggers
 
