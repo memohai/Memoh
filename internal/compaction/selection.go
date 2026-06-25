@@ -2,6 +2,7 @@ package compaction
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -94,6 +95,7 @@ func splitByRatio(items []compactionItem, totalInputTokens, ratio int) []compact
 	if cutoff <= 0 {
 		return nil
 	}
+	cutoff = adjustForToolBoundary(items, cutoff)
 	if cutoff >= len(items) {
 		return items
 	}
@@ -118,7 +120,23 @@ func splitByTarget(items []compactionItem, targetTokens int) []compactionItem {
 	if cutoff <= 0 {
 		return nil
 	}
+	cutoff = adjustForToolBoundary(items, cutoff)
 	return items[:cutoff]
+}
+
+// adjustForToolBoundary moves the compact/keep cutoff forward so the kept
+// (newest) side never begins with an orphan tool result whose tool call is
+// being compacted. Tool results are pulled into the compact set so each tool
+// exchange stays intact on one side of the boundary.
+func adjustForToolBoundary(items []compactionItem, cutoff int) int {
+	for cutoff > 0 && cutoff < len(items) && isToolResultItem(items[cutoff]) {
+		cutoff++
+	}
+	return cutoff
+}
+
+func isToolResultItem(item compactionItem) bool {
+	return strings.EqualFold(strings.TrimSpace(item.record.ModelMessage.Role), "tool")
 }
 
 // trimCompactMessages trims the compaction input from the tail (oldest) so the
