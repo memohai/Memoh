@@ -139,6 +139,27 @@ func isToolResultItem(item compactionItem) bool {
 	return strings.EqualFold(strings.TrimSpace(item.record.ModelMessage.Role), "tool")
 }
 
+// buildEntriesAndIDs renders the summarizer entries and the ids to mark
+// compacted from the selected items. Every selected item is marked compacted so
+// it leaves active history; entries that render empty (e.g. reasoning-only
+// messages) are skipped from the prompt to avoid bare "role:" noise.
+func buildEntriesAndIDs(items []compactionItem) ([]messageEntry, []pgtype.UUID) {
+	entries := make([]messageEntry, 0, len(items))
+	ids := make([]pgtype.UUID, 0, len(items))
+	for _, it := range items {
+		ids = append(ids, it.id)
+		content := renderEntryContent(it.record.ModelMessage)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		entries = append(entries, messageEntry{
+			Role:    it.record.ModelMessage.Role,
+			Content: content,
+		})
+	}
+	return entries, ids
+}
+
 // trimCompactMessages trims the compaction input from the tail (oldest) so the
 // total estimated tokens stay within maxTokens.
 func trimCompactMessages(items []compactionItem, maxTokens int) []compactionItem {
