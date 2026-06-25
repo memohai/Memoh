@@ -161,6 +161,7 @@ func trimCompactMessages(items []compactionItem, maxTokens int) []compactionItem
 			break
 		}
 	}
+	cutoff = adjustForToolBoundary(items, cutoff)
 	if cutoff >= len(items) {
 		return items
 	}
