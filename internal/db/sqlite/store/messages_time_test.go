@@ -36,6 +36,11 @@ CREATE TABLE bot_history_turns (
   id TEXT PRIMARY KEY,
   parent_turn_id TEXT
 );
+CREATE TABLE bot_session_turn_heads (
+  session_id TEXT NOT NULL,
+  head_turn_id TEXT NOT NULL,
+  PRIMARY KEY (session_id, head_turn_id)
+);
 CREATE TABLE bot_history_messages (
   id TEXT PRIMARY KEY,
   bot_id TEXT NOT NULL,
@@ -64,6 +69,9 @@ CREATE TABLE bot_history_messages (
 	}
 	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id, default_head_turn_id, channel_type) VALUES (?, ?, ?)`, sessionID, turnID, "local"); err != nil {
 		t.Fatalf("insert session: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_session_turn_heads (session_id, head_turn_id) VALUES (?, ?)`, sessionID, turnID); err != nil {
+		t.Fatalf("insert session turn head: %v", err)
 	}
 	for index, item := range []struct {
 		id      string

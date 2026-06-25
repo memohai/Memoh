@@ -385,6 +385,7 @@
     "showLess": "Show less",
     "errors": {
       "forkFailed": "Failed to fork session",
+      "loadVariantFailed": "Failed to switch response",
       "sessionDeleted": "This session has been deleted"
     },
     "actions": {

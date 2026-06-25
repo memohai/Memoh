@@ -62,6 +62,7 @@
               <SessionItem
                 :session="vRow.session"
                 :is-active="sessionId === vRow.session.id"
+                :disabled="messageActionLoading"
                 :streaming="chatStore.isSessionStreaming(vRow.session.id)"
                 @select="handleSelect"
                 @rename="openRenameSessionDialog"

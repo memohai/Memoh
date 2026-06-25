@@ -27,7 +27,10 @@ export async function fetchMessagesUI(
     path: { bot_id: botId },
     query: {
       session_id: sid,
+      format: 'ui',
       limit: options?.limit ?? 30,
+      ...(options?.includeGraph ? { include_graph: '1' } : {}),
+      ...(options?.headTurnId?.trim() ? { head_turn_id: options.headTurnId.trim() } : {}),
       ...(options?.before?.trim() ? { before: options.before.trim() } : {}),
       ...(options?.beforeId?.trim() ? { before_id: options.beforeId.trim() } : {}),
     },
@@ -35,12 +38,13 @@ export async function fetchMessagesUI(
   })
 
   const data = response.data as FetchMessagesUIResult | undefined
-  return {
+  const result: FetchMessagesUIResult = {
     items: data?.items ?? [],
-    default_head_turn_id: data?.default_head_turn_id,
-    head_turn_ids: data?.head_turn_ids ?? [],
-    nodes: data?.nodes ?? [],
   }
+  if (data && 'default_head_turn_id' in data) result.default_head_turn_id = data.default_head_turn_id
+  if (data && 'head_turn_ids' in data) result.head_turn_ids = data.head_turn_ids ?? []
+  if (data && 'nodes' in data) result.nodes = data.nodes ?? []
+  return result
 }
 
 export interface LocateMessageResult {
@@ -78,7 +82,7 @@ export async function locateMessageUI(
 export interface SendMessageOverrides {
   modelId?: string
   reasoningEffort?: string
-  selectedHeadTurnId?: string
+  baseHeadTurnId?: string
 }
 
 export async function sendLocalChannelMessage(
@@ -103,7 +107,7 @@ export async function sendLocalChannelMessage(
   const body: Record<string, unknown> = { message: msg }
   if (overrides?.modelId) body.model_id = overrides.modelId
   if (overrides?.reasoningEffort) body.reasoning_effort = overrides.reasoningEffort
-  if (overrides?.selectedHeadTurnId) body.base_head_turn_id = overrides.selectedHeadTurnId
+  if (overrides?.baseHeadTurnId) body.base_head_turn_id = overrides.baseHeadTurnId
   await postBotsByBotIdWebMessages({
     path: { bot_id: botId },
     body: body as { message: ChannelMessage; model_id?: string; reasoning_effort?: string; base_head_turn_id?: string },

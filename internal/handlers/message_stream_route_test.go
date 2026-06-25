@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -137,48 +138,22 @@ func TestSubscribeBeforeBacklogDedupsLiveMessage(t *testing.T) {
 	}
 }
 
-func TestLatestMessagesFromGraphUsesSelectedHeadPath(t *testing.T) {
+func TestStreamBacklogUsesSelectedHeadTranscriptPage(t *testing.T) {
 	t.Parallel()
 
 	at := time.Unix(1700000000, 0).UTC()
-	graph := messagepkg.SessionTurnGraph{
-		DefaultHeadTurnID: "turn-c",
-		HeadTurnIDs:       []string{"turn-b", "turn-c"},
-		Nodes: []messagepkg.SessionTurnGraphNode{
-			{
-				TurnID: "turn-a",
-				Messages: []messagepkg.Message{{
-					ID:        "m-a",
-					SessionID: "session-1",
-					TurnID:    "turn-a",
-					CreatedAt: at,
-				}},
-			},
-			{
-				TurnID:       "turn-b",
-				ParentTurnID: "turn-a",
-				Messages: []messagepkg.Message{{
-					ID:        "m-b",
-					SessionID: "session-1",
-					TurnID:    "turn-b",
-					CreatedAt: at.Add(time.Second),
-				}},
-			},
-			{
-				TurnID:       "turn-c",
-				ParentTurnID: "turn-a",
-				Messages: []messagepkg.Message{{
-					ID:        "m-c",
-					SessionID: "session-1",
-					TurnID:    "turn-c",
-					CreatedAt: at.Add(2 * time.Second),
-				}},
-			},
+	svc := &streamBacklogMessageService{
+		messages: []messagepkg.Message{
+			{ID: "m-b", SessionID: "session-1", TurnID: "turn-b", CreatedAt: at.Add(time.Second)},
+			{ID: "m-a", SessionID: "session-1", TurnID: "turn-a", CreatedAt: at},
 		},
 	}
+	h := &MessageHandler{messageService: svc}
 
-	visible := visibleTurnIDSetForHead(graph, "turn-b")
-	messages := latestMessagesFromGraph(graph, visible, 50)
+	messages, err := h.latestSessionMessagesForStreamBacklog(context.Background(), "session-1", "turn-b", false, 50)
+	if err != nil {
+		t.Fatalf("latestSessionMessagesForStreamBacklog() error = %v", err)
+	}
 	got := make([]string, 0, len(messages))
 	for _, message := range messages {
 		got = append(got, message.ID)
@@ -192,6 +167,24 @@ func TestLatestMessagesFromGraphUsesSelectedHeadPath(t *testing.T) {
 			t.Fatalf("messages = %v, want %v", got, want)
 		}
 	}
+	if svc.headTurnID != "turn-b" {
+		t.Fatalf("selected head = %q, want turn-b", svc.headTurnID)
+	}
+}
+
+type streamBacklogMessageService struct {
+	messagepkg.Service
+	headTurnID string
+	messages   []messagepkg.Message
+}
+
+func (s *streamBacklogMessageService) ListLatestBySessionHead(_ context.Context, _ string, headTurnID string, _ int32) ([]messagepkg.Message, error) {
+	s.headTurnID = headTurnID
+	return append([]messagepkg.Message(nil), s.messages...), nil
+}
+
+func (*streamBacklogMessageService) ListBeforeBySessionHead(context.Context, string, string, time.Time, string, int32) ([]messagepkg.Message, error) {
+	return nil, nil
 }
 
 func TestLiveMessageVisibilityUsesSelectedHeadPath(t *testing.T) {
@@ -255,7 +248,7 @@ func TestLiveMessageVisibilityAllowsDescendantsOfSelectedHead(t *testing.T) {
 	}
 }
 
-func TestVisibleTurnIDSetForHeadFallsBackFromInvalidHead(t *testing.T) {
+func TestVisibleTurnIDSetForHeadRejectsInvalidRequestedHead(t *testing.T) {
 	t.Parallel()
 
 	graph := messagepkg.SessionTurnGraph{
@@ -267,14 +260,37 @@ func TestVisibleTurnIDSetForHeadFallsBackFromInvalidHead(t *testing.T) {
 		},
 	}
 	visible := visibleTurnIDSetForHead(graph, "missing")
+	if len(visible) == 0 {
+		t.Fatalf("invalid requested head must not fall through to legacy all-visible mode")
+	}
+	if _, ok := visible["turn-a"]; ok {
+		t.Fatalf("visible included parent from default head after invalid request: %#v", visible)
+	}
+	if _, ok := visible["turn-b"]; ok {
+		t.Fatalf("visible included default head after invalid request: %#v", visible)
+	}
+	if _, ok := visible["missing"]; ok {
+		t.Fatalf("visible included invalid requested head: %#v", visible)
+	}
+}
+
+func TestVisibleTurnIDSetForHeadFallsBackToDefaultWhenUnspecified(t *testing.T) {
+	t.Parallel()
+
+	graph := messagepkg.SessionTurnGraph{
+		DefaultHeadTurnID: "turn-b",
+		HeadTurnIDs:       []string{"turn-b"},
+		Nodes: []messagepkg.SessionTurnGraphNode{
+			{TurnID: "turn-a"},
+			{TurnID: "turn-b", ParentTurnID: "turn-a"},
+		},
+	}
+	visible := visibleTurnIDSetForHead(graph, "")
 	if _, ok := visible["turn-a"]; !ok {
 		t.Fatalf("visible did not include parent turn: %#v", visible)
 	}
 	if _, ok := visible["turn-b"]; !ok {
 		t.Fatalf("visible did not include default head turn: %#v", visible)
-	}
-	if _, ok := visible["missing"]; ok {
-		t.Fatalf("visible included invalid requested head: %#v", visible)
 	}
 }
 

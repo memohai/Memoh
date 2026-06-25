@@ -2362,7 +2362,7 @@ function handleRetryMessage(messageId: string) {
 }
 
 function handleSelectVariant(headTurnId: string) {
-  chatStore.selectTurnVariant(headTurnId)
+  void chatStore.selectTurnVariant(headTurnId)
 }
 
 function handleEditMessage(messageId: string, text: string, done: (started: boolean) => void) {

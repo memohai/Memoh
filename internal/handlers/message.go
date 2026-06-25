@@ -76,9 +76,12 @@ func (h *MessageHandler) SetBackgroundManager(mgr *background.Manager) {
 }
 
 type sessionTurnGraphUINode struct {
-	TurnID       string                `json:"turn_id"`
-	ParentTurnID string                `json:"parent_turn_id,omitempty"`
-	Items        []conversation.UITurn `json:"items"`
+	TurnID       string `json:"turn_id"`
+	ParentTurnID string `json:"parent_turn_id,omitempty"`
+	Timestamp    string `json:"timestamp,omitempty"`
+	RequestKey   string `json:"request_key,omitempty"`
+	HasUser      bool   `json:"has_user,omitempty"`
+	HasAssistant bool   `json:"has_assistant,omitempty"`
 }
 
 type messageUIListResponse struct {
@@ -139,6 +142,8 @@ func writeSSEJSON(writer io.Writer, flusher http.Flusher, payload any) error {
 // @Param limit query int false "Limit"
 // @Param before query string false "Before"
 // @Param before_id query string false "Message ID at the pagination boundary"
+// @Param head_turn_id query string false "Selected session head turn ID"
+// @Param include_graph query bool false "Include session turn graph metadata"
 // @Success 200 {object} messageUIListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
@@ -172,6 +177,8 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	before, hasBefore := parseBeforeParam(c.QueryParam("before"))
 	beforeID := strings.TrimSpace(c.QueryParam("before_id"))
 	format := strings.TrimSpace(c.QueryParam("format"))
+	headTurnID := strings.TrimSpace(c.QueryParam("head_turn_id"))
+	includeGraph := parseBoolQuery(c.QueryParam("include_graph"))
 
 	bot, _, _, err := h.authorizeMessageSession(c, channelIdentityID, botID, sessionID)
 	if err != nil {
@@ -181,7 +188,7 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 
 	var messages []messagepkg.Message
 	if hasBefore {
-		messages, err = h.messageService.ListBeforeBySession(c.Request().Context(), sessionID, before, beforeID, limit)
+		messages, err = h.listBeforeBySessionHead(c.Request().Context(), sessionID, headTurnID, before, beforeID, limit)
 		// ListBeforeBySession returns DESC (newest-first), but the UI turn
 		// converter and the frontend both need oldest-first. The latest-page
 		// branch reverses below; the before-page must match — otherwise older
@@ -190,7 +197,7 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 			reverseMessages(messages)
 		}
 	} else {
-		messages, err = h.messageService.ListLatestBySession(c.Request().Context(), sessionID, limit)
+		messages, err = h.listLatestBySessionHead(c.Request().Context(), sessionID, headTurnID, limit)
 		if err == nil {
 			reverseMessages(messages)
 		}
@@ -203,19 +210,46 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	// reply as several turns/action bars. Extend the head back to a real turn
 	// boundary so a turn is never split across pages.
 	if format == "ui" && sessionID != "" && len(messages) > 0 {
-		messages = h.extendToUITurnHead(c.Request().Context(), sessionID, messages)
+		messages = h.extendToUITurnHead(c.Request().Context(), sessionID, headTurnID, messages)
 	}
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, messages)
-	if !hasBefore {
+	items := conversation.ConvertMessagesToUITurns(messages)
+	h.decorateUITurns(c.Request().Context(), botID, sessionID, items)
+	resp := messageUIListResponse{Items: items}
+	if format == "ui" && includeGraph && !hasBefore {
 		graph, err := h.messageService.GetSessionTurnGraph(c.Request().Context(), sessionID)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
-		return c.JSON(http.StatusOK, h.sessionTurnGraphUIResponse(c.Request().Context(), botID, sessionID, graph))
+		graphResp := h.sessionTurnGraphUIResponse(graph)
+		resp.DefaultHeadTurnID = graphResp.DefaultHeadTurnID
+		resp.HeadTurnIDs = graphResp.HeadTurnIDs
+		resp.Nodes = graphResp.Nodes
 	}
-	items := conversation.ConvertMessagesToUITurns(messages)
-	h.decorateUITurns(c.Request().Context(), botID, sessionID, items)
-	return c.JSON(http.StatusOK, messageUIListResponse{Items: items})
+	return c.JSON(http.StatusOK, resp)
+}
+
+func (h *MessageHandler) listLatestBySessionHead(ctx context.Context, sessionID, headTurnID string, limit int32) ([]messagepkg.Message, error) {
+	if pager, ok := h.messageService.(messagepkg.SessionHeadPager); ok {
+		return pager.ListLatestBySessionHead(ctx, sessionID, headTurnID, limit)
+	}
+	return h.messageService.ListLatestBySession(ctx, sessionID, limit)
+}
+
+func (h *MessageHandler) listBeforeBySessionHead(ctx context.Context, sessionID, headTurnID string, before time.Time, beforeID string, limit int32) ([]messagepkg.Message, error) {
+	if pager, ok := h.messageService.(messagepkg.SessionHeadPager); ok {
+		return pager.ListBeforeBySessionHead(ctx, sessionID, headTurnID, before, beforeID, limit)
+	}
+	return h.messageService.ListBeforeBySession(ctx, sessionID, before, beforeID, limit)
+}
+
+func parseBoolQuery(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "t", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 // LocateMessage godoc
@@ -341,67 +375,24 @@ func firstNonEmptyString(values ...string) string {
 	return ""
 }
 
-func (h *MessageHandler) sessionTurnGraphUIResponse(ctx context.Context, botID, sessionID string, graph messagepkg.SessionTurnGraph) messageUIListResponse {
+func (*MessageHandler) sessionTurnGraphUIResponse(graph messagepkg.SessionTurnGraph) messageUIListResponse {
 	nodes := make([]sessionTurnGraphUINode, 0, len(graph.Nodes))
-	itemsByTurn := make(map[string][]conversation.UITurn, len(graph.Nodes))
-	parentByTurn := make(map[string]string, len(graph.Nodes))
-	decorator := h.graphUIDecorator(ctx, botID, sessionID)
 
 	for _, node := range graph.Nodes {
-		items := conversation.ConvertMessagesToUITurns(node.Messages)
-		decorator(items)
 		nodes = append(nodes, sessionTurnGraphUINode{
-			TurnID:       node.TurnID,
-			ParentTurnID: node.ParentTurnID,
-			Items:        items,
+			TurnID:       strings.TrimSpace(node.TurnID),
+			ParentTurnID: strings.TrimSpace(node.ParentTurnID),
+			Timestamp:    strings.TrimSpace(node.Timestamp),
+			RequestKey:   strings.TrimSpace(node.RequestKey),
+			HasUser:      node.HasUser,
+			HasAssistant: node.HasAssistant,
 		})
-		itemsByTurn[node.TurnID] = items
-		parentByTurn[node.TurnID] = node.ParentTurnID
-	}
-
-	defaultItems := make([]conversation.UITurn, 0)
-	seen := map[string]bool{}
-	var path []string
-	for turnID := strings.TrimSpace(graph.DefaultHeadTurnID); turnID != ""; turnID = strings.TrimSpace(parentByTurn[turnID]) {
-		if seen[turnID] {
-			break
-		}
-		seen[turnID] = true
-		path = append(path, turnID)
-	}
-	for i := len(path) - 1; i >= 0; i-- {
-		defaultItems = append(defaultItems, itemsByTurn[path[i]]...)
 	}
 
 	return messageUIListResponse{
-		Items:             defaultItems,
 		DefaultHeadTurnID: graph.DefaultHeadTurnID,
 		HeadTurnIDs:       graph.HeadTurnIDs,
 		Nodes:             nodes,
-	}
-}
-
-func (h *MessageHandler) graphUIDecorator(ctx context.Context, botID, sessionID string) func([]conversation.UITurn) {
-	var approvals []toolapproval.Request
-	if h.toolApproval != nil {
-		approvals, _ = h.toolApproval.ListBySessionTurnGraph(ctx, botID, sessionID)
-	}
-	var requests []userinput.Request
-	if h.userInput != nil {
-		requests, _ = h.userInput.ListBySessionTurnGraph(ctx, botID, sessionID)
-	}
-	tasks := h.backgroundTaskSnapshots(botID, sessionID)
-	canApprove := h.toolApprovalCanApproveFn(ctx, sessionID)
-	return func(items []conversation.UITurn) {
-		if len(tasks) > 0 {
-			conversation.ApplyBackgroundTaskSnapshots(items, tasks)
-		}
-		if len(approvals) > 0 {
-			mergeToolApprovals(items, approvals, canApprove)
-		}
-		if len(requests) > 0 && h.userInput != nil {
-			mergeUserInputs(items, requests, h.userInput.CanRespond)
-		}
 	}
 }
 
@@ -572,7 +563,7 @@ func reverseMessages(m []messagepkg.Message) {
 // turn we pull the turn's earlier rows back in. This makes the page larger than
 // `limit`, which is fine: the frontend already pages by turns, not rows. The
 // row cap guards against a single pathologically long turn.
-func (h *MessageHandler) extendToUITurnHead(ctx context.Context, sessionID string, messages []messagepkg.Message) []messagepkg.Message {
+func (h *MessageHandler) extendToUITurnHead(ctx context.Context, sessionID string, headTurnID string, messages []messagepkg.Message) []messagepkg.Message {
 	const batch = int32(50)
 	const maxRows = 2000
 	// messages is oldest-first (callers reverse the DESC DB rows). The cursor
@@ -582,7 +573,7 @@ func (h *MessageHandler) extendToUITurnHead(ctx context.Context, sessionID strin
 	// before prepending, so the combined slice stays monotonic and the turn
 	// converter (which scans in order) keeps one reply in a single turn.
 	for len(messages) > 0 && len(messages) < maxRows && !conversation.IsUITurnBoundary(messages[0]) {
-		older, err := h.messageService.ListBeforeBySession(ctx, sessionID, messages[0].CreatedAt, "", batch)
+		older, err := h.listBeforeBySessionHead(ctx, sessionID, headTurnID, messages[0].CreatedAt, "", batch)
 		if err != nil || len(older) == 0 {
 			break
 		}

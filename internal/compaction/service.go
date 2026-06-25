@@ -130,6 +130,8 @@ func (s *Service) runCompactionHook(ctx context.Context, eventName string, cfg T
 }
 
 func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUUID pgtype.UUID, cfg TriggerConfig) error {
+	// Compaction intentionally follows the session's default head: it is a
+	// server-side maintenance job, not the client's transient selected variant.
 	messages, err := s.queries.ListUncompactedMessagesBySession(ctx, sessionUUID)
 	if err != nil {
 		return err

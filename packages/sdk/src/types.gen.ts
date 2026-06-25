@@ -1970,8 +1970,11 @@ export type HandlersOauthExchangeRequest = {
 };
 
 export type HandlersSessionTurnGraphUiNode = {
-    items?: Array<ConversationUiTurn>;
+    has_assistant?: boolean;
+    has_user?: boolean;
     parent_turn_id?: string;
+    request_key?: string;
+    timestamp?: string;
     turn_id?: string;
 };
 
@@ -2629,6 +2632,21 @@ export type SettingsUpsertRequest = {
     video_model_id?: string;
 };
 
+export type UserinputUiOption = {
+    description?: string;
+    id?: string;
+    label?: string;
+};
+
+export type UserinputUiQuestion = {
+    allow_custom?: boolean;
+    id?: string;
+    kind?: string;
+    options?: Array<UserinputUiOption>;
+    placeholder?: string;
+    text?: string;
+};
+
 export type VideoConfigSchema = {
     fields?: Array<VideoFieldSchema>;
 };
@@ -2707,21 +2725,6 @@ export type WebhooktunnelStatus = {
     mode?: string;
     public_base_url?: string;
     status?: string;
-};
-
-export type UserinputUiOption = {
-    description?: string;
-    id?: string;
-    label?: string;
-};
-
-export type UserinputUiQuestion = {
-    allow_custom?: boolean;
-    id?: string;
-    kind?: string;
-    options?: Array<UserinputUiOption>;
-    placeholder?: string;
-    text?: string;
 };
 
 export type GetAcpProfilesData = {
@@ -6780,6 +6783,14 @@ export type GetBotsByBotIdMessagesData = {
          * Message ID at the pagination boundary
          */
         before_id?: string;
+        /**
+         * Selected session head turn ID
+         */
+        head_turn_id?: string;
+        /**
+         * Include session turn graph metadata
+         */
+        include_graph?: boolean;
     };
     url: '/bots/{bot_id}/messages';
 };
@@ -7512,7 +7523,7 @@ export type GetBotsByBotIdSessionsData = {
     };
     query?: {
         /**
-         * Comma-separated session types to include. Defaults to user-facing types (chat,discuss,acp_agent).
+         * Comma-separated session types to include. Defaults to user-facing types (chat,discuss,acp_agent), or subagent when parent_session_id is set.
          */
         types?: string;
         /**

@@ -4092,7 +4092,7 @@ func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID pgtype.UU
 	return result, nil
 }
 
-func (q *Queries) ListMessagesBySessionTurnGraph(ctx context.Context, sessionID pgtype.UUID) ([]pgsqlc.ListMessagesBySessionTurnGraphRow, error) {
+func (q *Queries) ListSessionTurnGraphNodeMetadata(ctx context.Context, sessionID pgtype.UUID) ([]pgsqlc.ListSessionTurnGraphNodeMetadataRow, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured
 	}
@@ -4100,11 +4100,11 @@ func (q *Queries) ListMessagesBySessionTurnGraph(ctx context.Context, sessionID 
 	if err := convertValue(sessionID, &sqliteSessionID); err != nil {
 		return nil, err
 	}
-	out, err := q.store.queries.ListMessagesBySessionTurnGraph(ctx, sqliteSessionID)
+	out, err := q.store.queries.ListSessionTurnGraphNodeMetadata(ctx, sqliteSessionID)
 	if err != nil {
 		return nil, mapQueryErr(err)
 	}
-	var result []pgsqlc.ListMessagesBySessionTurnGraphRow
+	var result []pgsqlc.ListSessionTurnGraphNodeMetadataRow
 	if err := convertValue(out, &result); err != nil {
 		return nil, err
 	}

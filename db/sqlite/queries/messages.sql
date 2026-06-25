@@ -296,7 +296,7 @@ LEFT JOIN bot_sessions s ON s.id = m.session_id
 ORDER BY vt.depth DESC, COALESCE(m.turn_message_seq, 0) ASC, m.created_at ASC, m.id ASC
 LIMIT 10000;
 
--- name: ListMessagesBySessionTurnGraph :many
+-- name: ListSessionTurnGraphNodeMetadata :many
 WITH RECURSIVE graph_turns(id, parent_turn_id) AS (
   SELECT t.id, t.parent_turn_id
   FROM bot_sessions bs
@@ -308,21 +308,44 @@ WITH RECURSIVE graph_turns(id, parent_turn_id) AS (
   SELECT p.id, p.parent_turn_id
   FROM bot_history_turns p
   JOIN graph_turns gt ON gt.parent_turn_id = p.id
+),
+request_assets AS (
+  SELECT
+    a.message_id,
+    GROUP_CONCAT(
+      COALESCE(a.content_hash, '') || ':' ||
+      COALESCE(a.name, '') || ':' ||
+      COALESCE(a.role, '') || ':' ||
+      COALESCE(CAST(a.ordinal AS TEXT), ''),
+      '|'
+    ) AS request_asset_key
+  FROM (
+    SELECT *
+    FROM bot_history_message_assets
+    ORDER BY content_hash, name, role, ordinal, id
+  ) a
+  GROUP BY a.message_id
 )
 SELECT
-  m.id, m.bot_id, m.session_id, m.turn_id, m.turn_message_seq, m.sender_channel_identity_id,
-  m.sender_account_user_id AS sender_user_id,
-  m.source_message_id AS external_message_id,
-  m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
-  m.event_id, m.display_text, m.created_at,
-  ci.display_name AS sender_display_name,
-  ci.avatar_url AS sender_avatar_url,
-  s.channel_type AS platform
+  gt.id AS turn_id,
+  COALESCE(MIN(m.created_at), t.created_at) AS node_created_at,
+  COALESCE(rm.content, 'null') AS request_content,
+  COALESCE(rm.display_text, '') AS request_display_text,
+  COALESCE(ra.request_asset_key, '') AS request_asset_key,
+  t.request_message_id IS NOT NULL AS has_user,
+  EXISTS (
+    SELECT 1
+    FROM bot_history_messages assistant_m
+    WHERE assistant_m.turn_id = gt.id
+      AND assistant_m.role = 'assistant'
+  ) AS has_assistant
 FROM graph_turns gt
-JOIN bot_history_messages m ON m.turn_id = gt.id
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-ORDER BY m.created_at ASC, COALESCE(m.turn_message_seq, 0) ASC, m.id ASC;
+JOIN bot_history_turns t ON t.id = gt.id
+LEFT JOIN bot_history_messages m ON m.turn_id = gt.id
+LEFT JOIN bot_history_messages rm ON rm.id = t.request_message_id
+LEFT JOIN request_assets ra ON ra.message_id = t.request_message_id
+GROUP BY gt.id, t.created_at, rm.content, rm.display_text, ra.request_asset_key
+ORDER BY COALESCE(MIN(m.created_at), t.created_at) ASC, gt.id ASC;
 
 -- name: ListMessagesSince :many
 SELECT
@@ -462,12 +485,22 @@ ORDER BY m.created_at DESC
 LIMIT sqlc.arg(max_count);
 
 -- name: ListMessagesBeforeBySession :many
-WITH RECURSIVE visible_turns(id, parent_turn_id, depth) AS (
-  SELECT t.id, t.parent_turn_id, 0
+WITH RECURSIVE selected_head(session_id, head_turn_id) AS (
+  SELECT
+    bs.id,
+    CASE
+      WHEN sqlc.narg(head_turn_id) IS NULL THEN bs.default_head_turn_id
+      ELSE h.head_turn_id
+    END
   FROM bot_sessions bs
-  JOIN bot_history_turns t ON t.id = bs.default_head_turn_id
+  LEFT JOIN bot_session_turn_heads h ON h.session_id = bs.id
+    AND h.head_turn_id = sqlc.narg(head_turn_id)
   WHERE bs.id = sqlc.arg(session_id)
     AND bs.deleted_at IS NULL
+), visible_turns(id, parent_turn_id, depth) AS (
+  SELECT t.id, t.parent_turn_id, 0
+  FROM selected_head sh
+  JOIN bot_history_turns t ON t.id = sh.head_turn_id
   UNION ALL
   SELECT p.id, p.parent_turn_id, vt.depth + 1
   FROM bot_history_turns p
@@ -525,12 +558,22 @@ ORDER BY m.created_at DESC
 LIMIT sqlc.arg(max_count);
 
 -- name: ListMessagesLatestBySession :many
-WITH RECURSIVE visible_turns(id, parent_turn_id, depth) AS (
-  SELECT t.id, t.parent_turn_id, 0
+WITH RECURSIVE selected_head(session_id, head_turn_id) AS (
+  SELECT
+    bs.id,
+    CASE
+      WHEN sqlc.narg(head_turn_id) IS NULL THEN bs.default_head_turn_id
+      ELSE h.head_turn_id
+    END
   FROM bot_sessions bs
-  JOIN bot_history_turns t ON t.id = bs.default_head_turn_id
+  LEFT JOIN bot_session_turn_heads h ON h.session_id = bs.id
+    AND h.head_turn_id = sqlc.narg(head_turn_id)
   WHERE bs.id = sqlc.arg(session_id)
     AND bs.deleted_at IS NULL
+), visible_turns(id, parent_turn_id, depth) AS (
+  SELECT t.id, t.parent_turn_id, 0
+  FROM selected_head sh
+  JOIN bot_history_turns t ON t.id = sh.head_turn_id
   UNION ALL
   SELECT p.id, p.parent_turn_id, vt.depth + 1
   FROM bot_history_turns p
@@ -718,6 +761,8 @@ JOIN bot_channel_routes r ON r.id = rr.route_id
 ORDER BY rr.last_observed_at DESC;
 
 -- name: SearchMessages :many
+-- Session-scoped search follows bot_sessions.default_head_turn_id. The client
+-- selected variant is intentionally not part of this tool/query contract.
 WITH RECURSIVE visible_turns(id, parent_turn_id, depth) AS (
   SELECT t.id, t.parent_turn_id, 0
   FROM bot_sessions bs
@@ -766,6 +811,8 @@ SET compact_id = sqlc.arg(compact_id)
 WHERE id IN (sqlc.slice(ids));
 
 -- name: ListUncompactedMessagesBySession :many
+-- Compaction uses the session's server-canonical default head, not a client's
+-- transient selected variant.
 WITH RECURSIVE visible_turns(id, parent_turn_id, depth) AS (
   SELECT t.id, t.parent_turn_id, 0
   FROM bot_sessions bs

@@ -297,6 +297,8 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest, ru
 		SessionToken:      req.ChatToken,
 		SessionType:       req.SessionType,
 		PersistTurnID:     run.PersistTurnID,
+		BaseHeadTurnID:    run.Variant.BaseHeadTurnID,
+		ViewHeadTurnID:    run.ViewHeadTurnID(),
 		EnsurePersistTurnID: func(ctx context.Context) (string, error) {
 			return r.ensurePersistTurn(ctx, run)
 		},
@@ -544,6 +546,8 @@ type baseRunConfigParams struct {
 	SessionToken        string //nolint:gosec // session credential material, not a hardcoded secret
 	SessionType         string
 	PersistTurnID       string
+	BaseHeadTurnID      string
+	ViewHeadTurnID      string
 	EnsurePersistTurnID func(context.Context) (string, error)
 	Model               string
 	Provider            string
@@ -636,6 +640,7 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 			BotID:             p.BotID,
 			ChatID:            chatID,
 			SessionID:         p.SessionID,
+			ViewHeadTurnID:    strings.TrimSpace(p.ViewHeadTurnID),
 			ChannelIdentityID: strings.TrimSpace(p.ChannelIdentityID),
 			CurrentPlatform:   p.CurrentPlatform,
 			ReplyTarget:       strings.TrimSpace(p.ReplyTarget),

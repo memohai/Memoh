@@ -101,7 +101,7 @@ export async function createSession(botId: string, options?: string | CreateSess
   return data as SessionSummary
 }
 
-export async function forkSessionFromMessage(botId: string, sessionId: string, messageId: string, selectedHeadTurnId?: string): Promise<SessionSummary> {
+export async function forkSessionFromMessage(botId: string, sessionId: string, messageId: string, baseHeadTurnId?: string): Promise<SessionSummary> {
   const bid = botId.trim()
   const sid = sessionId.trim()
   const mid = messageId.trim()
@@ -112,7 +112,7 @@ export async function forkSessionFromMessage(botId: string, sessionId: string, m
     path: { bot_id: bid, session_id: sid },
     body: {
       message_id: mid,
-      base_head_turn_id: selectedHeadTurnId?.trim() || undefined,
+      base_head_turn_id: baseHeadTurnId?.trim() || undefined,
     },
     throwOnError: true,
   })

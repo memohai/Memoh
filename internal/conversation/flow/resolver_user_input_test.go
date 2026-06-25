@@ -228,19 +228,19 @@ func TestRespondUserInputRejectsStaleSelectedHeadBeforeSubmitting(t *testing.T) 
 	resolver := &Resolver{
 		userInput: fake,
 		continueUserInputFn: func(context.Context, userinput.Request, UserInputResponseInput, sdk.ToolResultPart, chan<- WSStreamEvent) error {
-			t.Error("stale selected head must not continue the session")
+			t.Error("stale base head must not continue the session")
 			return nil
 		},
 	}
 
 	err := resolver.RespondUserInput(context.Background(), UserInputResponseInput{
-		BotID:              "bot-1",
-		SessionID:          "session-1",
-		SelectedHeadTurnID: "turn-stale",
-		Answers:            []userinput.QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
+		BotID:          "bot-1",
+		SessionID:      "session-1",
+		BaseHeadTurnID: "turn-stale",
+		Answers:        []userinput.QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
 	}, nil)
 	if err == nil {
-		t.Fatal("RespondUserInput() error = nil, want stale selected head error")
+		t.Fatal("RespondUserInput() error = nil, want stale base head error")
 	}
 	if fake.submitCalls != 0 || fake.cancelCalls != 0 {
 		t.Fatalf("submit/cancel calls = %d/%d, want 0/0", fake.submitCalls, fake.cancelCalls)

@@ -195,11 +195,11 @@ func (h *SessionHandler) ForkSession(c echo.Context) error {
 	}
 
 	forked, err := h.sessionService.ForkFromAssistantMessage(c.Request().Context(), session.ForkFromAssistantInput{
-		BotID:              bot.ID,
-		SessionID:          source.ID,
-		MessageID:          messageID,
-		SelectedHeadTurnID: strings.TrimSpace(req.BaseHeadTurnID),
-		CreatedByUserID:    channelIdentityID,
+		BotID:           bot.ID,
+		SessionID:       source.ID,
+		MessageID:       messageID,
+		BaseHeadTurnID:  strings.TrimSpace(req.BaseHeadTurnID),
+		CreatedByUserID: channelIdentityID,
 	})
 	if err != nil {
 		return sessionForkError(err)

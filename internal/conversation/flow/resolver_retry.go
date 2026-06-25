@@ -72,17 +72,17 @@ func (r *Resolver) StreamRetryWS(
 	if err != nil {
 		return fmt.Errorf("invalid retry message id: %w", err)
 	}
-	selectedHead, err := resolveSelectedSessionHead(ctx, store, pgSessionID, req.SelectedHeadTurnID)
+	baseHead, err := resolveBaseSessionHead(ctx, store, pgSessionID, req.BaseHeadTurnID)
 	if err != nil {
-		return fmt.Errorf("resolve retry selected head: %w", err)
+		return fmt.Errorf("resolve retry base head: %w", err)
 	}
-	pgSelectedHeadTurnID := selectedHead.HeadTurnID
-	if !pgSelectedHeadTurnID.Valid {
+	pgBaseHeadTurnID := baseHead.HeadTurnID
+	if !pgBaseHeadTurnID.Valid {
 		return errors.New("retry requires a session head")
 	}
 	row, err := store.GetVisibleAssistantTurnForRetry(ctx, dbsqlc.GetVisibleAssistantTurnForRetryParams{
 		MessageID:      pgReplyID,
-		BaseHeadTurnID: pgSelectedHeadTurnID,
+		BaseHeadTurnID: pgBaseHeadTurnID,
 		SessionID:      pgSessionID,
 	})
 	if err != nil {
@@ -100,11 +100,11 @@ func (r *Resolver) StreamRetryWS(
 		return errors.New("rewrite request is empty")
 	}
 	anchor := conversation.TurnAnchor{
-		Role:               conversation.TurnAnchorRoleUser,
-		MessageID:          row.RequestMessageID.String(),
-		TurnID:             row.TurnID.String(),
-		ParentTurnID:       uuidString(row.ParentTurnID),
-		SelectedHeadTurnID: pgSelectedHeadTurnID.String(),
+		Role:           conversation.TurnAnchorRoleUser,
+		MessageID:      row.RequestMessageID.String(),
+		TurnID:         row.TurnID.String(),
+		ParentTurnID:   uuidString(row.ParentTurnID),
+		BaseHeadTurnID: pgBaseHeadTurnID.String(),
 	}
 	retryReq := req
 	retryReq.Attachments = attachments
@@ -144,15 +144,15 @@ func (r *Resolver) StreamRewriteWS(
 	if err != nil {
 		return fmt.Errorf("invalid session id: %w", err)
 	}
-	selectedHead, err := resolveSelectedSessionHead(ctx, store, pgSessionID, req.SelectedHeadTurnID)
+	baseHead, err := resolveBaseSessionHead(ctx, store, pgSessionID, req.BaseHeadTurnID)
 	if err != nil {
 		return err
 	}
-	pgSelectedHeadTurnID := selectedHead.HeadTurnID
-	if !pgSelectedHeadTurnID.Valid {
+	pgBaseHeadTurnID := baseHead.HeadTurnID
+	if !pgBaseHeadTurnID.Valid {
 		return errors.New("rewrite requires a session head")
 	}
-	anchor, err := resolveVisibleUserTurnAnchor(ctx, store, pgSessionID, pgSelectedHeadTurnID, targetMessageID)
+	anchor, err := resolveVisibleUserTurnAnchor(ctx, store, pgSessionID, pgBaseHeadTurnID, targetMessageID)
 	if err != nil {
 		return err
 	}

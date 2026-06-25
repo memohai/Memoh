@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
@@ -34,6 +34,8 @@ const sessionMessageStreamBuffer = 128
 // 30s proxy idle cut.
 const sseHeartbeatInterval = 20 * time.Second
 
+const invalidRequestedHeadTurnID = "\x00invalid-requested-head"
+
 func resolvedHeadTurnIDForGraph(graph messagepkg.SessionTurnGraph, requestedHeadTurnID string) string {
 	nodes := make(map[string]messagepkg.SessionTurnGraphNode, len(graph.Nodes))
 	for _, node := range graph.Nodes {
@@ -44,6 +46,12 @@ func resolvedHeadTurnIDForGraph(graph messagepkg.SessionTurnGraph, requestedHead
 		nodes[turnID] = node
 	}
 	head := strings.TrimSpace(requestedHeadTurnID)
+	if head != "" {
+		if nodes[head].TurnID != "" {
+			return head
+		}
+		return ""
+	}
 	if head == "" || nodes[head].TurnID == "" {
 		head = strings.TrimSpace(graph.DefaultHeadTurnID)
 	}
@@ -68,8 +76,12 @@ func visibleTurnIDSetForHead(graph messagepkg.SessionTurnGraph, requestedHeadTur
 		}
 		nodes[turnID] = node
 	}
-	head := resolvedHeadTurnIDForGraph(graph, requestedHeadTurnID)
 	visible := make(map[string]struct{})
+	if requested := strings.TrimSpace(requestedHeadTurnID); requested != "" && nodes[requested].TurnID == "" {
+		visible[invalidRequestedHeadTurnID] = struct{}{}
+		return visible
+	}
+	head := resolvedHeadTurnIDForGraph(graph, requestedHeadTurnID)
 	seen := make(map[string]struct{})
 	for head != "" {
 		if _, ok := seen[head]; ok {
@@ -154,34 +166,6 @@ func addVisibleDescendantPathFromGraph(visibleTurnIDs map[string]struct{}, liveH
 	return liveTurnHidden
 }
 
-func latestMessagesFromGraph(graph messagepkg.SessionTurnGraph, visibleTurnIDs map[string]struct{}, limit int) []messagepkg.Message {
-	if limit <= 0 {
-		return nil
-	}
-	if len(graph.Nodes) > 0 && len(visibleTurnIDs) == 0 {
-		return nil
-	}
-	messages := make([]messagepkg.Message, 0, limit)
-	for _, node := range graph.Nodes {
-		if _, ok := visibleTurnIDs[strings.TrimSpace(node.TurnID)]; !ok {
-			continue
-		}
-		messages = append(messages, node.Messages...)
-	}
-	sort.SliceStable(messages, func(i, j int) bool {
-		left := messages[i]
-		right := messages[j]
-		if !left.CreatedAt.Equal(right.CreatedAt) {
-			return left.CreatedAt.Before(right.CreatedAt)
-		}
-		return left.ID < right.ID
-	})
-	if len(messages) > limit {
-		messages = messages[len(messages)-limit:]
-	}
-	return messages
-}
-
 // StreamSessionMessageEvents godoc
 // @Summary Stream message events for one session
 // @Description SSE stream that pushes a server-fixed backlog of the last 50
@@ -229,6 +213,7 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	selectedHeadTurnID := resolvedHeadTurnIDForGraph(graph, headTurnID)
+	requestedHeadMissing := headTurnID != "" && selectedHeadTurnID == ""
 	visibleTurnIDs := visibleTurnIDSetForHead(graph, headTurnID)
 	liveHeadTurnIDs := make(map[string]struct{}, 1)
 	if selectedHeadTurnID != "" {
@@ -245,11 +230,23 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 	sub, cancel := h.messageEvents.Subscribe(botID, sessionMessageStreamBuffer)
 	defer cancel()
 
-	backlog := latestMessagesFromGraph(graph, visibleTurnIDs, sessionMessageBacklogSize)
+	backlog, err := h.latestSessionMessagesForStreamBacklog(c.Request().Context(), sessionID, selectedHeadTurnID, requestedHeadMissing, sessionMessageBacklogSize)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
 
 	writer, flusher, err := beginSSEResponse(c)
 	if err != nil {
 		return err
+	}
+
+	if requestedHeadMissing {
+		if err := writeSSEJSON(writer, flusher, map[string]any{
+			"type":       "stale",
+			"session_id": sessionID,
+		}); err != nil {
+			return nil
+		}
 	}
 
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, backlog)
@@ -383,6 +380,21 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 			}
 		}
 	}
+}
+
+func (h *MessageHandler) latestSessionMessagesForStreamBacklog(ctx context.Context, sessionID, selectedHeadTurnID string, requestedHeadMissing bool, limit int) ([]messagepkg.Message, error) {
+	if requestedHeadMissing || limit <= 0 {
+		return nil, nil
+	}
+	if limit > math.MaxInt32 {
+		limit = math.MaxInt32
+	}
+	messages, err := h.listLatestBySessionHead(ctx, sessionID, selectedHeadTurnID, int32(limit))
+	if err != nil {
+		return nil, err
+	}
+	reverseMessages(messages)
+	return messages, nil
 }
 
 // StreamSessionsActivityEvents godoc

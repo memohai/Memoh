@@ -3298,11 +3298,15 @@ definitions:
     type: object
   handlers.sessionTurnGraphUINode:
     properties:
-      items:
-        items:
-          $ref: '#/definitions/conversation.UITurn'
-        type: array
+      has_assistant:
+        type: boolean
+      has_user:
+        type: boolean
       parent_turn_id:
+        type: string
+      request_key:
+        type: string
+      timestamp:
         type: string
       turn_id:
         type: string
@@ -4448,6 +4452,32 @@ definitions:
       video_model_id:
         type: string
     type: object
+  userinput.UIOption:
+    properties:
+      description:
+        type: string
+      id:
+        type: string
+      label:
+        type: string
+    type: object
+  userinput.UIQuestion:
+    properties:
+      allow_custom:
+        type: boolean
+      id:
+        type: string
+      kind:
+        type: string
+      options:
+        items:
+          $ref: '#/definitions/userinput.UIOption'
+        type: array
+      placeholder:
+        type: string
+      text:
+        type: string
+    type: object
   video.ConfigSchema:
     properties:
       fields:
@@ -4577,32 +4607,6 @@ definitions:
       public_base_url:
         type: string
       status:
-        type: string
-    type: object
-  userinput.UIOption:
-    properties:
-      description:
-        type: string
-      id:
-        type: string
-      label:
-        type: string
-    type: object
-  userinput.UIQuestion:
-    properties:
-      allow_custom:
-        type: boolean
-      id:
-        type: string
-      kind:
-        type: string
-      options:
-        items:
-          $ref: '#/definitions/userinput.UIOption'
-        type: array
-      placeholder:
-        type: string
-      text:
         type: string
     type: object
 info:
@@ -7793,6 +7797,14 @@ paths:
         in: query
         name: before_id
         type: string
+      - description: Selected session head turn ID
+        in: query
+        name: head_turn_id
+        type: string
+      - description: Include session turn graph metadata
+        in: query
+        name: include_graph
+        type: boolean
       produces:
       - application/json
       responses:

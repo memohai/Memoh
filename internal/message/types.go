@@ -83,9 +83,12 @@ type LocateResult struct {
 }
 
 type SessionTurnGraphNode struct {
-	TurnID       string    `json:"turn_id"`
-	ParentTurnID string    `json:"parent_turn_id,omitempty"`
-	Messages     []Message `json:"messages"`
+	TurnID       string `json:"turn_id"`
+	ParentTurnID string `json:"parent_turn_id,omitempty"`
+	Timestamp    string `json:"timestamp,omitempty"`
+	RequestKey   string `json:"request_key,omitempty"`
+	HasUser      bool   `json:"has_user,omitempty"`
+	HasAssistant bool   `json:"has_assistant,omitempty"`
 }
 
 type SessionTurnGraph struct {
@@ -118,4 +121,12 @@ type Service interface {
 	DeleteByBot(ctx context.Context, botID string) error
 	DeleteBySession(ctx context.Context, sessionID string) error
 	LinkAssets(ctx context.Context, messageID string, assets []AssetRef) error
+}
+
+// SessionHeadPager reads a session transcript from an explicitly selected leaf
+// head. The ordinary Service methods intentionally keep the server default head
+// contract for older tools and maintenance paths.
+type SessionHeadPager interface {
+	ListLatestBySessionHead(ctx context.Context, sessionID string, headTurnID string, limit int32) ([]Message, error)
+	ListBeforeBySessionHead(ctx context.Context, sessionID string, headTurnID string, before time.Time, beforeID string, limit int32) ([]Message, error)
 }

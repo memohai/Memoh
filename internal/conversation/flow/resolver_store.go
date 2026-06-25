@@ -282,7 +282,10 @@ func (r *Resolver) persistMessage(ctx context.Context, queries dbstore.Queries, 
 }
 
 func (r *Resolver) storeRoundAndApplyVariantTransition(ctx context.Context, req conversation.ChatRequest, run *TurnRun, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) (storedRoundContext, error) {
-	if r.canPersistRoundAndTransitionAtomically(run) {
+	if runRequiresVariantTransition(run) {
+		if !r.canPersistRoundAndTransitionAtomically(run) {
+			return storedRoundContext{}, errors.New("store round: transaction-bound turn persistence is required")
+		}
 		runner := r.queries.(turnTxRunner)
 		txOpts := opts
 		txOpts.SkipMemory = true
@@ -313,14 +316,11 @@ func (r *Resolver) storeRoundAndApplyVariantTransition(ctx context.Context, req 
 	if err != nil {
 		return storedRoundContext{}, err
 	}
-	if err := r.applyVariantTransition(ctx, run, stored.TurnID); err != nil {
-		return storedRoundContext{}, err
-	}
 	return stored, nil
 }
 
 func (r *Resolver) canPersistRoundAndTransitionAtomically(run *TurnRun) bool {
-	if r == nil || r.queries == nil || r.messageService == nil || run == nil {
+	if r == nil || r.queries == nil || r.messageService == nil || !runRequiresVariantTransition(run) {
 		return false
 	}
 	runner, ok := r.queries.(turnTxRunner)
@@ -332,6 +332,13 @@ func (r *Resolver) canPersistRoundAndTransitionAtomically(run *TurnRun) bool {
 	}
 	_, ok = r.messageService.(messageCreatedPublisher)
 	return ok
+}
+
+func runRequiresVariantTransition(run *TurnRun) bool {
+	if run == nil {
+		return false
+	}
+	return normalizeVariantTransitionAction(run.Variant.Action) != VariantTransitionNone
 }
 
 type messageCreatedPublisher interface {

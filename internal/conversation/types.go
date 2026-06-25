@@ -247,7 +247,7 @@ type ChatRequest struct {
 	ForwardDate               int64            `json:"-"`
 	UserMessagePersisted      bool             `json:"-"`
 	RewriteTargetMessageID    string           `json:"-"`
-	SelectedHeadTurnID        string           `json:"-"`
+	BaseHeadTurnID            string           `json:"-"`
 	EventID                   string           `json:"-"`
 	RawQuery                  string           `json:"-"`
 	ToolHTTPURL               string           `json:"-"`
@@ -299,11 +299,11 @@ const (
 // TurnAnchor is the boundary object that maps a clicked UI message to the turn
 // it belongs to under a specific session head.
 type TurnAnchor struct {
-	Role               TurnAnchorRole
-	MessageID          string
-	TurnID             string
-	ParentTurnID       string
-	SelectedHeadTurnID string
+	Role           TurnAnchorRole
+	MessageID      string
+	TurnID         string
+	ParentTurnID   string
+	BaseHeadTurnID string
 }
 
 // ChatResponse is the output of a non-streaming chat call.

@@ -20,7 +20,7 @@ import (
 type ToolApprovalResponseInput struct {
 	BotID                      string
 	SessionID                  string
-	SelectedHeadTurnID         string
+	BaseHeadTurnID             string
 	ActorChannelIdentityID     string
 	ApprovalID                 string
 	ExplicitID                 string
@@ -44,7 +44,7 @@ func (r *Resolver) RespondToolApproval(ctx context.Context, input ToolApprovalRe
 	if err != nil {
 		return err
 	}
-	if err := r.validateSelectedContinuationTurnHead(ctx, target.SessionID, target.PersistTurnID, input.SelectedHeadTurnID, "tool approval"); err != nil {
+	if err := r.validateBaseContinuationTurnHead(ctx, target.SessionID, target.PersistTurnID, input.BaseHeadTurnID, "tool approval"); err != nil {
 		return err
 	}
 	if isACP, err := r.isACPToolApprovalSession(ctx, target.SessionID); err != nil {
@@ -188,6 +188,7 @@ func (r *Resolver) executeApprovedTool(ctx context.Context, req toolapproval.Req
 		ConversationType:  req.ConversationType,
 		SessionToken:      input.ChatToken,
 		PersistTurnID:     req.PersistTurnID,
+		BaseHeadTurnID:    req.PersistTurnID,
 	})
 	if err != nil {
 		return sdk.ToolResultPart{}, err
@@ -203,7 +204,7 @@ func (r *Resolver) storeToolResultAndContinue(ctx context.Context, approval tool
 	approval = withLocalWebReplyTarget(approval)
 	doneTurn := r.enterSessionTurn(ctx, input.BotID, approval.SessionID)
 	defer doneTurn()
-	if err := r.validateSelectedContinuationTurnHead(ctx, approval.SessionID, approval.PersistTurnID, input.SelectedHeadTurnID, "tool approval"); err != nil {
+	if err := r.validateBaseContinuationTurnHead(ctx, approval.SessionID, approval.PersistTurnID, input.BaseHeadTurnID, "tool approval"); err != nil {
 		return err
 	}
 	modelMessages := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(result)})
@@ -235,6 +236,7 @@ func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval too
 		ConversationType:  approval.ConversationType,
 		SessionToken:      input.ChatToken,
 		PersistTurnID:     approval.PersistTurnID,
+		BaseHeadTurnID:    approval.PersistTurnID,
 	})
 	if err != nil {
 		return err

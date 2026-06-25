@@ -385,6 +385,7 @@
     "showLess": "收起",
     "errors": {
       "forkFailed": "分叉会话失败",
+      "loadVariantFailed": "切换版本失败",
       "sessionDeleted": "这个会话已被删除"
     },
     "actions": {

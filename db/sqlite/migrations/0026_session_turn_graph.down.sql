@@ -1,5 +1,8 @@
 -- 0026_session_turn_graph (down)
 -- Remove immutable turn chains and session-level fork pointers.
+-- Downgrading removes the turn graph model. Tool approval and user input rows
+-- that were distinct only by persist_turn_id are folded back to the old
+-- (session_id, tool_call_id) uniqueness shape, keeping the newest row.
 
 PRAGMA foreign_keys = OFF;
 

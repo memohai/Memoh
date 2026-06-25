@@ -4937,6 +4937,18 @@ const docTemplate = `{
                         "description": "Message ID at the pagination boundary",
                         "name": "before_id",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Selected session head turn ID",
+                        "name": "head_turn_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Include session turn graph metadata",
+                        "name": "include_graph",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -5846,7 +5858,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Comma-separated session types to include. Defaults to user-facing types (chat,discuss,acp_agent).",
+                        "description": "Comma-separated session types to include. Defaults to user-facing types (chat,discuss,acp_agent), or subagent when parent_session_id is set.",
                         "name": "types",
                         "in": "query"
                     },
@@ -17449,13 +17461,19 @@ const docTemplate = `{
         "handlers.sessionTurnGraphUINode": {
             "type": "object",
             "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/conversation.UITurn"
-                    }
+                "has_assistant": {
+                    "type": "boolean"
+                },
+                "has_user": {
+                    "type": "boolean"
                 },
                 "parent_turn_id": {
+                    "type": "string"
+                },
+                "request_key": {
+                    "type": "string"
+                },
+                "timestamp": {
                     "type": "string"
                 },
                 "turn_id": {
@@ -19174,6 +19192,46 @@ const docTemplate = `{
                 }
             }
         },
+        "userinput.UIOption": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                }
+            }
+        },
+        "userinput.UIQuestion": {
+            "type": "object",
+            "properties": {
+                "allow_custom": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/userinput.UIOption"
+                    }
+                },
+                "placeholder": {
+                    "type": "string"
+                },
+                "text": {
+                    "type": "string"
+                }
+            }
+        },
         "video.ConfigSchema": {
             "type": "object",
             "properties": {
@@ -19369,46 +19427,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
-                    "type": "string"
-                }
-            }
-        },
-        "userinput.UIOption": {
-            "type": "object",
-            "properties": {
-                "description": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "label": {
-                    "type": "string"
-                }
-            }
-        },
-        "userinput.UIQuestion": {
-            "type": "object",
-            "properties": {
-                "allow_custom": {
-                    "type": "boolean"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "kind": {
-                    "type": "string"
-                },
-                "options": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/userinput.UIOption"
-                    }
-                },
-                "placeholder": {
-                    "type": "string"
-                },
-                "text": {
                     "type": "string"
                 }
             }

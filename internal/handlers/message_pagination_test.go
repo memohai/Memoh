@@ -90,7 +90,7 @@ func TestExtendToUITurnHead_PreservesMonotonicOrder(t *testing.T) {
 	latest := svc.latest(sessionID, 30)
 	reverseMessages(latest) // mirrors the handler's latest-page branch
 	before := len(latest)
-	got := h.extendToUITurnHead(context.Background(), sessionID, latest)
+	got := h.extendToUITurnHead(context.Background(), sessionID, "", latest)
 
 	if len(got) <= before {
 		t.Fatalf("extendToUITurnHead did not pull back the turn head: got %d, had %d", len(got), before)
@@ -125,7 +125,7 @@ func TestExtendToUITurnHead_StopsAtBoundary(t *testing.T) {
 
 	latest := svc.latest(sessionID, 5) // 5 newest = all assistant, no boundary
 	reverseMessages(latest)
-	got := h.extendToUITurnHead(context.Background(), sessionID, latest)
+	got := h.extendToUITurnHead(context.Background(), sessionID, "", latest)
 	// Must pull back exactly the one user boundary and stop — 6 total, not more.
 	if len(got) != 6 {
 		t.Fatalf("expected exactly the user boundary + 5 assistant = 6, got %d (over-pulled?)", len(got))

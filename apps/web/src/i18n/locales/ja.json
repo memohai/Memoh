@@ -364,6 +364,7 @@
     "thinkingDone": "思考完了",
     "errors": {
       "forkFailed": "セッションのフォークに失敗しました",
+      "loadVariantFailed": "バージョンの切り替えに失敗しました",
       "sessionDeleted": "このセッションは削除されています"
     },
     "actions": {

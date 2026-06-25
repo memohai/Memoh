@@ -89,7 +89,7 @@ func (h *ToolApprovalHandler) respond(c echo.Context, decision string) error {
 	if err := h.resolver.RespondToolApproval(context.WithoutCancel(c.Request().Context()), flow.ToolApprovalResponseInput{
 		BotID:                  botID,
 		SessionID:              strings.TrimSpace(req.SessionID),
-		SelectedHeadTurnID:     strings.TrimSpace(req.BaseHeadTurnID),
+		BaseHeadTurnID:         strings.TrimSpace(req.BaseHeadTurnID),
 		ActorChannelIdentityID: channelIdentityID,
 		ApprovalID:             approvalID,
 		Decision:               decision,

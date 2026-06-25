@@ -129,6 +129,8 @@ export interface FetchMessagesOptions {
   before?: string
   beforeId?: string
   session_id?: string
+  includeGraph?: boolean
+  headTurnId?: string
 }
 
 export interface ChatAttachment {
@@ -299,7 +301,10 @@ export type UITurn = UIUserTurn | UIAssistantTurn | UISystemTurn
 export interface UITurnGraphNode {
   turn_id: string
   parent_turn_id?: string
-  items: UITurn[]
+  timestamp?: string
+  request_key?: string
+  has_user?: boolean
+  has_assistant?: boolean
 }
 
 export interface FetchMessagesUIResult {

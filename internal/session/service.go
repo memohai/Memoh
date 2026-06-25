@@ -111,11 +111,11 @@ type CreateInput struct {
 // ForkFromAssistantInput creates a new session whose head points at the turn
 // that produced a visible assistant reply in the source session.
 type ForkFromAssistantInput struct {
-	BotID              string
-	SessionID          string
-	MessageID          string
-	SelectedHeadTurnID string
-	CreatedByUserID    string
+	BotID           string
+	SessionID       string
+	MessageID       string
+	BaseHeadTurnID  string
+	CreatedByUserID string
 }
 
 // Service manages bot chat sessions.
@@ -278,9 +278,9 @@ func (s *Service) ForkFromAssistantMessage(ctx context.Context, input ForkFromAs
 	if err != nil {
 		return Session{}, fmt.Errorf("invalid message id: %w", err)
 	}
-	pgSelectedHeadTurnID, err := parseOptionalUUID(input.SelectedHeadTurnID)
+	pgBaseHeadTurnID, err := parseOptionalUUID(input.BaseHeadTurnID)
 	if err != nil {
-		return Session{}, fmt.Errorf("invalid selected head turn id: %w", err)
+		return Session{}, fmt.Errorf("invalid base head turn id: %w", err)
 	}
 
 	sourceRow, err := s.queries.GetSessionByID(ctx, pgSessionID)
@@ -297,14 +297,14 @@ func (s *Service) ForkFromAssistantMessage(ctx context.Context, input ForkFromAs
 	if source.Type != TypeChat {
 		return Session{}, ErrForkSourceNotChat
 	}
-	if !pgSelectedHeadTurnID.Valid {
-		pgSelectedHeadTurnID = sourceRow.DefaultHeadTurnID
+	if !pgBaseHeadTurnID.Valid {
+		pgBaseHeadTurnID = sourceRow.DefaultHeadTurnID
 	}
-	if !pgSelectedHeadTurnID.Valid {
+	if !pgBaseHeadTurnID.Valid {
 		return Session{}, ErrForkSourceNotReply
 	}
 
-	anchor, err := s.resolveForkTurnAnchor(ctx, pgSessionID, pgSelectedHeadTurnID, pgMessageID)
+	anchor, err := s.resolveForkTurnAnchor(ctx, pgSessionID, pgBaseHeadTurnID, pgMessageID)
 	if err != nil {
 		return Session{}, err
 	}
@@ -326,10 +326,10 @@ func (s *Service) ForkFromAssistantMessage(ctx context.Context, input ForkFromAs
 	})
 }
 
-func (s *Service) resolveForkTurnAnchor(ctx context.Context, sessionID, selectedHeadTurnID, messageID pgtype.UUID) (conversation.TurnAnchor, error) {
+func (s *Service) resolveForkTurnAnchor(ctx context.Context, sessionID, baseHeadTurnID, messageID pgtype.UUID) (conversation.TurnAnchor, error) {
 	turn, err := s.queries.GetVisibleAssistantMessageTurnForFork(ctx, sqlc.GetVisibleAssistantMessageTurnForForkParams{
 		MessageID:      messageID,
-		BaseHeadTurnID: selectedHeadTurnID,
+		BaseHeadTurnID: baseHeadTurnID,
 		SessionID:      sessionID,
 	})
 	if err != nil {
@@ -342,11 +342,11 @@ func (s *Service) resolveForkTurnAnchor(ctx context.Context, sessionID, selected
 		return conversation.TurnAnchor{}, ErrForkSourceNotReply
 	}
 	return conversation.TurnAnchor{
-		Role:               conversation.TurnAnchorRoleAssistant,
-		MessageID:          turn.MessageID.String(),
-		TurnID:             turn.TurnID.String(),
-		ParentTurnID:       uuidString(turn.ParentTurnID),
-		SelectedHeadTurnID: selectedHeadTurnID.String(),
+		Role:           conversation.TurnAnchorRoleAssistant,
+		MessageID:      turn.MessageID.String(),
+		TurnID:         turn.TurnID.String(),
+		ParentTurnID:   uuidString(turn.ParentTurnID),
+		BaseHeadTurnID: baseHeadTurnID.String(),
 	}, nil
 }
 

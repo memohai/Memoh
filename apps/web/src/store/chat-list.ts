@@ -8,6 +8,7 @@ import { useRetryingStream } from '@/composables/useRetryingStream'
 import { useUserStore } from '@/store/user'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 import { provisionalSessionTitle, shouldRefreshFromMessageCreated, upsertById } from './chat-list.utils'
 import {
   createSession,
@@ -44,8 +45,6 @@ import {
   type FetchMessagesUIResult,
   type UITurnGraphNode,
   type UITurn,
-  type UIUserTurn,
-  type UIAssistantTurn,
   type UIStreamEvent,
   fetchBots,
   fetchMessagesUI,
@@ -198,7 +197,11 @@ function forkSourceSessionDeletedMessage() {
 }
 
 function forkFailedMessage() {
-  return localizedMessages().chat.errors.forkFailed
+	return localizedMessages().chat.errors.forkFailed
+}
+
+function variantLoadFailedMessage() {
+	return localizedMessages().chat.errors.loadVariantFailed
 }
 
 function isSessionNotFoundError(error: unknown): boolean {
@@ -288,7 +291,10 @@ interface EphemeralAssistantError {
 interface SessionTurnGraphNodeState {
   turnId: string
   parentTurnId?: string
-  items: UITurn[]
+  timestamp?: string
+  requestKey?: string
+  hasUser: boolean
+  hasAssistant: boolean
 }
 
 interface SessionTurnGraphState {
@@ -1173,7 +1179,10 @@ export const useChatStore = defineStore('chat', () => {
     return {
       turnId,
       parentTurnId: node.parent_turn_id?.trim() || undefined,
-      items: node.items ?? [],
+      timestamp: node.timestamp?.trim() || undefined,
+      requestKey: node.request_key?.trim() || undefined,
+      hasUser: node.has_user === true,
+      hasAssistant: node.has_assistant === true,
     }
   }
 
@@ -1191,37 +1200,31 @@ export const useChatStore = defineStore('chat', () => {
     return path.reverse()
   }
 
-  function graphItemsForHead(graph: SessionTurnGraphState, headTurnId: string): UITurn[] {
-    const items: UITurn[] = []
-    for (const turnId of graphPathTurnIds(graph, headTurnId)) {
-      const node = graph.nodes.get(turnId)
-      if (node) items.push(...node.items)
-    }
-    return items
-  }
-
   function selectedHeadForSession(targetSessionId?: string | null): string {
     const sid = (targetSessionId ?? sessionId.value ?? '').trim()
     if (!sid) return ''
     return selectedHeadTurnIds.get(sid)?.trim() || turnGraphs.get(sid)?.defaultHeadTurnId || ''
   }
 
-  function selectedHeadForRequest(targetSessionId?: string | null): string | undefined {
+  function baseHeadForRequest(targetSessionId?: string | null): string | undefined {
     return selectedHeadForSession(targetSessionId).trim() || undefined
+  }
+
+  function explicitSelectedHeadForSession(targetSessionId?: string | null): string {
+    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
+    if (!sid) return ''
+    return selectedHeadTurnIds.get(sid)?.trim() || ''
+  }
+
+  function viewHeadFetchOption(targetSessionId?: string | null): { headTurnId: string } | Record<string, never> {
+    const headTurnId = explicitSelectedHeadForSession(targetSessionId)
+    return headTurnId ? { headTurnId } : {}
   }
 
   function resetSelectedHeadForSession(targetSessionId?: string | null) {
     const sid = (targetSessionId ?? sessionId.value ?? '').trim()
     if (!sid) return
     selectedHeadTurnIds.delete(sid)
-  }
-
-  function replaceMessagesFromGraph(targetSessionId: string) {
-    const graph = turnGraphs.get(targetSessionId)
-    if (!graph) return
-    const selectedHead = selectedHeadForSession(targetSessionId)
-    const turns = selectedHead ? graphItemsForHead(graph, selectedHead) : []
-    replaceMessages(turns, targetSessionId)
   }
 
   function applySessionTurnGraph(targetSessionId: string, payload: FetchMessagesUIResult) {
@@ -1248,12 +1251,9 @@ export const useChatStore = defineStore('chat', () => {
     const selected = selectedHeadTurnIds.get(sid)?.trim() ?? ''
     if (selected && headTurnIds.includes(selected)) {
       selectedHeadTurnIds.set(sid, selected)
-    } else if (defaultHead) {
-      selectedHeadTurnIds.set(sid, defaultHead)
     } else {
       selectedHeadTurnIds.delete(sid)
     }
-    replaceMessagesFromGraph(sid)
   }
 
   function clearSessionTurnGraph(targetSessionId?: string | null) {
@@ -1267,43 +1267,9 @@ export const useChatStore = defineStore('chat', () => {
     return new Set(graphPathTurnIds(graph, headTurnId))
   }
 
-  function firstUserTurnInNode(node: SessionTurnGraphNodeState): UIUserTurn | null {
-    return (node.items.find((item): item is UIUserTurn => item.role === 'user') ?? null)
-  }
-
-  function firstAssistantTurnInNode(node: SessionTurnGraphNodeState): UIAssistantTurn | null {
-    return (node.items.find((item): item is UIAssistantTurn => item.role === 'assistant') ?? null)
-  }
-
-  function normalizeRequestVariantText(text?: string): string {
-    return (text ?? '')
-      .split('\n')
-      .filter(line => !/^\[attachment:\w+\]\s/.test(line.trim()))
-      .join('\n')
-      .trim()
-  }
-
-  function attachmentSignature(att: UIAttachment): string {
-    return [
-      (att.content_hash ?? '').trim(),
-      (att.name ?? '').trim(),
-      (att.mime ?? '').trim(),
-      String(att.size ?? ''),
-    ].join(':')
-  }
-
-  function requestVariantKey(turn: UIUserTurn | null): string {
-    if (!turn) return ''
-    const attachments = (turn.attachments ?? [])
-      .map(attachmentSignature)
-      .sort()
-      .join('|')
-    return `${normalizeRequestVariantText(turn.text)}\u0000${attachments}`
-  }
-
   function turnTimestamp(graph: SessionTurnGraphState, turnId: string): string {
     const node = graph.nodes.get(turnId)
-    return node?.items[0]?.timestamp ?? ''
+    return node?.timestamp ?? ''
   }
 
   function sortTurnIdsByTimestamp(graph: SessionTurnGraphState, turnIds: string[]): string[] {
@@ -1384,14 +1350,14 @@ export const useChatStore = defineStore('chat', () => {
     for (const siblingTurnId of siblings) {
       const siblingNode = ctx.graph.nodes.get(siblingTurnId)
       if (!siblingNode) continue
-      const key = requestVariantKey(firstUserTurnInNode(siblingNode))
+      const key = siblingNode.requestKey ?? ''
       if (!key) continue
       const existing = requestGroups.get(key)
       if (existing && !ctx.getHeadPath(ctx.selectedHead).has(siblingTurnId)) continue
       requestGroups.set(key, siblingTurnId)
     }
 
-    const targetKey = requestVariantKey(firstUserTurnInNode(ctx.node))
+    const targetKey = ctx.node.requestKey ?? ''
     const targetTurnId = targetKey ? requestGroups.get(targetKey) : undefined
     if (!targetTurnId) return null
 
@@ -1404,14 +1370,14 @@ export const useChatStore = defineStore('chat', () => {
   function responseVariantStateForMessage(messageId: string): TurnVariantState | null {
     const ctx = variantContextForMessage(messageId)
     if (!ctx || ctx.message?.role !== 'assistant') return null
-    if (!firstAssistantTurnInNode(ctx.node)) return null
+    if (!ctx.node.hasAssistant) return null
 
-    const requestKey = requestVariantKey(firstUserTurnInNode(ctx.node))
+    const requestKey = ctx.node.requestKey ?? ''
     if (!requestKey) return null
     const siblings = siblingTurnIdsForNode(ctx.graph, ctx.node)
       .filter((siblingTurnId) => {
         const siblingNode = ctx.graph.nodes.get(siblingTurnId)
-        return siblingNode ? requestVariantKey(firstUserTurnInNode(siblingNode)) === requestKey : false
+        return siblingNode ? siblingNode.requestKey === requestKey : false
       })
     if (siblings.length <= 1) return null
 
@@ -1421,18 +1387,45 @@ export const useChatStore = defineStore('chat', () => {
     return buildVariantState(ctx.turnId, siblingOptions)
   }
 
-  function selectTurnVariant(headTurnId: string): boolean {
+  async function selectTurnVariant(headTurnId: string): Promise<boolean> {
     const sid = (sessionId.value ?? '').trim()
     if (streaming.value || isMessageActionLoading(sid)) return false
     const head = headTurnId.trim()
     const graph = turnGraphs.get(sid)
     if (!sid || !head || !graph || !graph.headTurnIds.includes(head)) return false
-    selectedHeadTurnIds.set(sid, head)
-    replaceMessagesFromGraph(sid)
-    hasLoadedOlder.value = false
-    hasMoreOlder.value = false
     const bid = (currentBotId.value ?? '').trim()
-    if (bid) startSessionMessagesStream(bid, sid, { skipInitialRefreshOnce: true })
+    if (!bid) return false
+    const previousHead = selectedHeadForSession(sid)
+    const previousHasLoadedOlder = hasLoadedOlder.value
+    const previousHasMoreOlder = hasMoreOlder.value
+    selectedHeadTurnIds.set(sid, head)
+    hasLoadedOlder.value = false
+    hasMoreOlder.value = true
+    loadingMessages.value = true
+    try {
+      const payload = await fetchMessagesUI(bid, sid, {
+        limit: PAGE_SIZE,
+        headTurnId: head,
+      })
+      if ((currentBotId.value ?? '').trim() !== bid || (sessionId.value ?? '').trim() !== sid) return false
+      replaceMessages(payload.items, sid)
+      reattachPendingAssistantStreams(sid)
+      startSessionMessagesStream(bid, sid, { skipInitialRefreshOnce: true })
+    } catch (error) {
+      if ((currentBotId.value ?? '').trim() === bid && (sessionId.value ?? '').trim() === sid) {
+        if (previousHead) selectedHeadTurnIds.set(sid, previousHead)
+        else selectedHeadTurnIds.delete(sid)
+        hasLoadedOlder.value = previousHasLoadedOlder
+        hasMoreOlder.value = previousHasMoreOlder
+      }
+      console.error('Failed to load selected turn variant:', error)
+      toast.error(resolveApiErrorMessage(error, variantLoadFailedMessage()))
+      return false
+    } finally {
+      if ((currentBotId.value ?? '').trim() === bid && (sessionId.value ?? '').trim() === sid) {
+        loadingMessages.value = false
+      }
+    }
     return true
   }
 
@@ -1732,7 +1725,7 @@ export const useChatStore = defineStore('chat', () => {
       loading.value = true
       await completion
       resetSelectedHeadForSession(sid)
-      await refreshCurrentSession(bid, sid)
+      await refreshCurrentSession(bid, sid, { useSelectedView: false })
       assistantTurn.streaming = false
       loading.value = false
       return { ok: true }
@@ -2107,14 +2100,13 @@ export const useChatStore = defineStore('chat', () => {
   function applyFetchedMessagesPayload(targetSessionId: string, payload: FetchMessagesUIResult) {
     const sid = targetSessionId.trim()
     if (!sid) return
-    if (hasLoadedOlder.value && !(payload.nodes?.length)) {
+    if (payload.nodes !== undefined) {
+      applySessionTurnGraph(sid, payload)
+    }
+    if (hasLoadedOlder.value) {
       mergeMessages(payload.items, sid)
     } else {
-      if (payload.nodes?.length) {
-        applySessionTurnGraph(sid, payload)
-      } else {
-        replaceMessages(payload.items, sid)
-      }
+      replaceMessages(payload.items, sid)
       // We cannot infer end-of-history from `turns.length < PAGE_SIZE`: the
       // server pages by raw `bot_history_messages` rows but returns merged
       // UI turns (multi-row user/assistant groups collapsed into one). A 30-
@@ -2130,11 +2122,16 @@ export const useChatStore = defineStore('chat', () => {
     touchSessionInList(sid, latest)
   }
 
-  async function refreshCurrentSession(targetBotId?: string, targetSessionId?: string) {
+  async function refreshCurrentSession(
+    targetBotId?: string,
+    targetSessionId?: string,
+    options: { useSelectedView?: boolean } = {},
+  ) {
     const bid = (targetBotId ?? currentBotId.value ?? '').trim()
     const sid = (targetSessionId ?? sessionId.value ?? '').trim()
     if (!bid || !sid) return
-    const key = `${bid}:${sid}`
+    const useSelectedView = options.useSelectedView !== false
+    const key = `${bid}:${sid}:${useSelectedView ? 'selected-view' : 'default-view'}`
 
     if (refreshPromise) {
       if (refreshPromise.key === key) {
@@ -2145,7 +2142,11 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     const promise = (async () => {
-      const payload = await fetchMessagesUI(bid, sid, { limit: PAGE_SIZE })
+      const payload = await fetchMessagesUI(bid, sid, {
+        limit: PAGE_SIZE,
+        includeGraph: true,
+        ...(useSelectedView ? viewHeadFetchOption(sid) : {}),
+      })
       // The user may have switched away while the request was in flight. Drop
       // the result silently — the new session has its own load underway.
       if (currentBotId.value !== bid || sessionId.value !== sid) return
@@ -2459,10 +2460,6 @@ export const useChatStore = defineStore('chat', () => {
     const bid = currentBotId.value ?? ''
     const sid = sessionId.value ?? ''
     if (!bid || !sid || loadingOlder.value || !hasMoreOlder.value) return 0
-    if (turnGraphs.has(sid)) {
-      hasMoreOlder.value = false
-      return 0
-    }
     const first = messages[0]
     if (!first?.timestamp) return 0
 
@@ -2479,6 +2476,7 @@ export const useChatStore = defineStore('chat', () => {
       for (let hop = 0; hop < MAX_DEDUP_HOPS; hop++) {
         const payload = await fetchMessagesUI(bid, sid, {
           limit: PAGE_SIZE,
+          ...viewHeadFetchOption(sid),
           before: cursor,
           beforeId: cursorId,
         })
@@ -3053,6 +3051,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function selectBot(targetBotId: string) {
+    if (messageActionLoading.value) return
     if (currentBotId.value === targetBotId) return
     selectSessionRequestId++
     abort()
@@ -3071,6 +3070,7 @@ export const useChatStore = defineStore('chat', () => {
   async function selectSession(targetSessionId: string) {
     const sid = targetSessionId.trim()
     if (!sid || sid === sessionId.value) return
+    if (messageActionLoading.value) return
     const requestId = ++selectSessionRequestId
     const bid = (currentBotId.value ?? '').trim()
     clearPendingACPSession()
@@ -3167,10 +3167,10 @@ export const useChatStore = defineStore('chat', () => {
     let switchedToForkedSessionId = ''
     setMessageActionLoading(sid, true)
     try {
-      const forked = await requestForkSessionFromMessage(bid, sid, mid, selectedHeadForRequest(sid))
+      const forked = await requestForkSessionFromMessage(bid, sid, mid, baseHeadForRequest(sid))
       upsertSession(forked)
       void refreshSessionsList(bid, { keep: [forked] })
-      const payload = await fetchMessagesUI(bid, forked.id, { limit: PAGE_SIZE })
+      const payload = await fetchMessagesUI(bid, forked.id, { limit: PAGE_SIZE, includeGraph: true })
       if ((currentBotId.value ?? '').trim() !== bid || (sessionId.value ?? '').trim() !== sid) {
         return false
       }
@@ -3223,7 +3223,7 @@ export const useChatStore = defineStore('chat', () => {
           type: 'retry_message',
           stream_id: streamId,
           session_id: sid,
-          base_head_turn_id: selectedHeadForRequest(sid),
+          base_head_turn_id: baseHeadForRequest(sid),
           retry_message_id: mid,
           model_id: modelId,
           reasoning_effort: reasoningEffort,
@@ -3252,7 +3252,7 @@ export const useChatStore = defineStore('chat', () => {
           type: 'edit_message',
           stream_id: streamId,
           session_id: sid,
-          base_head_turn_id: selectedHeadForRequest(sid),
+          base_head_turn_id: baseHeadForRequest(sid),
           edit_message_id: mid,
           text: trimmed,
           model_id: modelId,
@@ -3305,20 +3305,22 @@ export const useChatStore = defineStore('chat', () => {
           stream_id: sendStreamId,
           text: trimmed,
           session_id: sid,
-          base_head_turn_id: selectedHeadForRequest(sid),
+          base_head_turn_id: baseHeadForRequest(sid),
           attachments,
           model_id: modelId,
           reasoning_effort: reasoningEffort,
         })
         await completion
-        await refreshCurrentSession(bid, sid)
+        resetSelectedHeadForSession(sid)
+        await refreshCurrentSession(bid, sid, { useSelectedView: false })
       } else {
         await sendLocalChannelMessage(bid, trimmed, attachments, {
           modelId,
           reasoningEffort,
-          selectedHeadTurnId: selectedHeadForRequest(sid),
+          baseHeadTurnId: baseHeadForRequest(sid),
         })
-        await refreshCurrentSession(bid, sid)
+        resetSelectedHeadForSession(sid)
+        await refreshCurrentSession(bid, sid, { useSelectedView: false })
       }
 
       assistantTurn.streaming = false
@@ -3382,7 +3384,7 @@ export const useChatStore = defineStore('chat', () => {
         type: 'tool_approval_response',
         stream_id: streamId,
         session_id: sid,
-        base_head_turn_id: selectedHeadForRequest(sid),
+        base_head_turn_id: baseHeadForRequest(sid),
         approval_id: approvalId,
         short_id: approval.short_id,
         decision,
@@ -3451,7 +3453,7 @@ export const useChatStore = defineStore('chat', () => {
         type: 'user_input_response',
         stream_id: streamId,
         session_id: sid,
-        base_head_turn_id: selectedHeadForRequest(sid),
+        base_head_turn_id: baseHeadForRequest(sid),
         user_input_id: userInput.user_input_id,
         short_id: userInput.short_id,
         answers: payload.answers,
