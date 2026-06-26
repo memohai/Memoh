@@ -432,6 +432,140 @@ func TestBuildMessagesFromPipelineUsesCompactionSummaryAndSkipsCoveredReplay(t *
 	}
 }
 
+func TestBuildMessagesFromPipelineCompactionEndToEnd(t *testing.T) {
+	t.Parallel()
+
+	const sessionID = "sess-compact-e2e"
+	const compactID = "55555555-5555-5555-5555-555555555555"
+	completedAt := time.UnixMilli(200).UTC()
+
+	p := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
+	p.PushEvent(sessionID, pipelinepkg.MessageEvent{
+		SessionID:    sessionID,
+		MessageID:    "external-old",
+		ReceivedAtMs: 100,
+		TimestampSec: 100,
+		Content:      []pipelinepkg.ContentNode{{Type: "text", Text: "old compacted user"}},
+		Conversation: pipelinepkg.ConversationMeta{Channel: "telegram", ConversationType: "group"},
+	})
+	p.PushEvent(sessionID, pipelinepkg.MessageEvent{
+		SessionID:    sessionID,
+		MessageID:    "external-edited",
+		ReceivedAtMs: 120,
+		TimestampSec: 120,
+		Content:      []pipelinepkg.ContentNode{{Type: "text", Text: "old edit body"}},
+		Conversation: pipelinepkg.ConversationMeta{Channel: "telegram", ConversationType: "group"},
+	})
+	p.PushEvent(sessionID, pipelinepkg.MessageEvent{
+		SessionID:    sessionID,
+		MessageID:    "external-deleted",
+		ReceivedAtMs: 130,
+		TimestampSec: 130,
+		Content:      []pipelinepkg.ContentNode{{Type: "text", Text: "old delete body"}},
+		Conversation: pipelinepkg.ConversationMeta{Channel: "telegram", ConversationType: "group"},
+	})
+	p.PushEvent(sessionID, pipelinepkg.EditEvent{
+		SessionID:    sessionID,
+		MessageID:    "external-edited",
+		ReceivedAtMs: 250,
+		TimestampSec: 250,
+		Content:      []pipelinepkg.ContentNode{{Type: "text", Text: "edited after compact"}},
+	})
+	p.PushEvent(sessionID, pipelinepkg.DeleteEvent{
+		SessionID:    sessionID,
+		MessageIDs:   []string{"external-deleted"},
+		ReceivedAtMs: 260,
+		TimestampSec: 260,
+	})
+	p.PushEvent(sessionID, pipelinepkg.MessageEvent{
+		SessionID:    sessionID,
+		MessageID:    "external-new",
+		ReceivedAtMs: 300,
+		TimestampSec: 300,
+		Content:      []pipelinepkg.ContentNode{{Type: "text", Text: "fresh user"}},
+		Conversation: pipelinepkg.ConversationMeta{Channel: "telegram", ConversationType: "group"},
+	})
+
+	resolver := &Resolver{
+		logger:   slog.New(slog.DiscardHandler),
+		pipeline: p,
+		messageService: &pipelineHistoryMessageService{rows: []messagepkg.Message{
+			dbHistoryRow(t, "row-old-user", "user", conversation.NewTextContent("old compacted user"), func(msg *messagepkg.Message) {
+				msg.SessionID = sessionID
+				msg.ExternalMessageID = "external-old"
+				msg.CompactID = compactID
+				msg.CreatedAt = time.UnixMilli(100).UTC()
+			}),
+			dbHistoryRow(t, "row-edited", "user", conversation.NewTextContent("old edit body"), func(msg *messagepkg.Message) {
+				msg.SessionID = sessionID
+				msg.ExternalMessageID = "external-edited"
+				msg.CompactID = compactID
+				msg.CreatedAt = time.UnixMilli(120).UTC()
+			}),
+			dbHistoryRow(t, "row-deleted", "user", conversation.NewTextContent("old delete body"), func(msg *messagepkg.Message) {
+				msg.SessionID = sessionID
+				msg.ExternalMessageID = "external-deleted"
+				msg.CompactID = compactID
+				msg.CreatedAt = time.UnixMilli(130).UTC()
+			}),
+			dbHistoryRow(t, "row-old-assistant", "assistant", mustRawJSON(t, conversation.ModelMessage{
+				Role:    "assistant",
+				Content: conversation.NewTextContent("old compacted assistant"),
+			}), func(msg *messagepkg.Message) {
+				msg.SessionID = sessionID
+				msg.CompactID = compactID
+				msg.CreatedAt = time.UnixMilli(150).UTC()
+			}),
+			dbHistoryRow(t, "row-new-assistant", "assistant", mustRawJSON(t, conversation.ModelMessage{
+				Role:    "assistant",
+				Content: conversation.NewTextContent("fresh assistant"),
+			}), func(msg *messagepkg.Message) {
+				msg.SessionID = sessionID
+				msg.CreatedAt = time.UnixMilli(400).UTC()
+			}),
+		}},
+		queries: pipelineCompactionQueries{
+			logs: map[string]dbsqlc.BotHistoryMessageCompact{
+				compactID: {
+					ID:          flowTestUUID(compactID),
+					Status:      "ok",
+					Summary:     "compacted segment summary",
+					CompletedAt: pgtype.Timestamptz{Time: completedAt, Valid: true},
+				},
+			},
+		},
+	}
+
+	messages := resolver.buildMessagesFromPipeline(context.Background(), conversation.ChatRequest{SessionID: sessionID}, 0)
+	got := make([]string, 0, len(messages))
+	for _, msg := range messages {
+		got = append(got, msg.TextContent())
+	}
+	joined := strings.Join(got, "\n")
+
+	if len(got) < 3 {
+		t.Fatalf("message count = %d, want summary, replayed user context, and assistant response: %#v", len(got), got)
+	}
+	if got[0] != "[Conversation summary]\ncompacted segment summary" {
+		t.Fatalf("first message = %q, want compaction summary; all=%#v", got[0], got)
+	}
+	if got[len(got)-1] != "fresh assistant" {
+		t.Fatalf("last message = %q, want fresh assistant TR; all=%#v", got[len(got)-1], got)
+	}
+	if strings.Contains(joined, "old compacted user") || strings.Contains(joined, "old compacted assistant") {
+		t.Fatalf("covered compacted messages were replayed: %#v", got)
+	}
+	if !strings.Contains(joined, "edited after compact") || strings.Contains(joined, "old edit body") {
+		t.Fatalf("post-compact edit was not preserved cleanly: %#v", got)
+	}
+	if !strings.Contains(joined, `<message id="external-deleted"`) || !strings.Contains(joined, "/>") || strings.Contains(joined, "old delete body") {
+		t.Fatalf("post-compact delete tombstone was not preserved cleanly: %#v", got)
+	}
+	if !strings.Contains(joined, "fresh user") || !strings.Contains(joined, "fresh assistant") {
+		t.Fatalf("fresh RC/TR messages were not retained: %#v", got)
+	}
+}
+
 func TestTrimPipelineMessagesPreservesCompactionSummary(t *testing.T) {
 	t.Parallel()
 
