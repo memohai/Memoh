@@ -60,15 +60,15 @@
   /* Tab geometry knobs. --tab-top-inset lifts every tab off the top of the
    * strip so the rounded crown floats below the window edge. Main editor tabs
    * touch edge-to-edge; selection is carried by fill, stroke, and the bottom
-   * fillet rather than inter-tab whitespace. --tab-edge-pad gives the first and
-   * last tab just enough room for the connected bottom edge without turning the
-   * prefix-actions-to-first-tab space into a second large gutter. */
+   * fillet rather than inter-tab whitespace. --tab-edge-pad must be at least the
+   * active flare radius; otherwise the first/last active tab's connected corner
+   * is clipped by dockview's scroll container. */
   --tab-top-inset: 0.3125rem;
   --chrome-center: 20px;
   --tab-crown-radius: var(--radius-md);
   --tab-gap: 0rem;
   --tab-flare: var(--tab-crown-radius);
-  --tab-edge-pad: 0.1875rem;
+  --tab-edge-pad: var(--tab-flare);
   --tab-hover-radius: 0.34375rem;
   --tab-hover-open-edge-radius: 0.28125rem;
   /* Horizontal breathing room between the last tab's foot and the "+" cluster. */
@@ -180,10 +180,10 @@
 }
 
 /* Adjacent editor tabs touch; separation is state and surface, not whitespace.
- * The small edge padding prevents the first/last connected edge from being clipped
- * by dockview's scroll container without adding a second large gutter after the
- * prefix action buttons. Horizontal gap from the last tab to "+" is
- * --tab-actions-gap on the actions container, not extra padding here. */
+ * Edge padding is geometry protection for the connected active corner, not a
+ * visual gutter; the prefix action spacing is tuned outside this scroll area.
+ * Horizontal gap from the last tab to "+" is --tab-actions-gap on the actions
+ * container, not extra padding here. */
 .dockview-theme-memoh .dv-tabs-container {
   gap: var(--tab-gap);
   padding-inline: var(--tab-edge-pad);
