@@ -63,3 +63,40 @@ func TestBuildManifestCollectsSummaryCoverageTrace(t *testing.T) {
 		t.Fatalf("summary manifest item not retained: %#v", manifest.Items)
 	}
 }
+
+func TestCompilePreservesExplicitSummaryMessageFragWithoutDuplication(t *testing.T) {
+	t.Parallel()
+
+	summaryRef := ContextRef{Namespace: "compaction_log", ID: "log-1", Schema: SchemaContextRef, Durability: RefDurable}
+	covered := []ContextRef{{Namespace: "bot_history_message", ID: "row-1", Schema: SchemaContextRef, Durability: RefDurable}}
+	cov := NewSummaryCoverage(summaryRef, covered)
+	msg := sdk.UserMessage("<summary>\ncondensed\n</summary>")
+	summaryFrag := MessageFrag(MessageFragInput{
+		ID:      "message.000",
+		Message: msg,
+		Kind:    KindConversationSummary,
+		Slot:    SlotHistory,
+		Source:  "compaction_log",
+	})
+	summaryFrag.Ref = summaryRef
+	summaryFrag.Coverage = &cov
+
+	assembled := Compile(CompileInput{
+		Source:   SourceRunConfig,
+		Messages: []sdk.Message{msg},
+		Existing: []ContextFrag{summaryFrag},
+	})
+
+	if len(assembled.Messages) != 1 {
+		t.Fatalf("rendered messages = %d, want 1 summary message", len(assembled.Messages))
+	}
+	if len(assembled.Manifest.Items) != 1 {
+		t.Fatalf("manifest items = %d, want 1 explicit summary item: %#v", len(assembled.Manifest.Items), assembled.Manifest.Items)
+	}
+	if assembled.Manifest.Items[0].Kind != KindConversationSummary {
+		t.Fatalf("summary item kind = %q", assembled.Manifest.Items[0].Kind)
+	}
+	if len(assembled.Manifest.CoverageTrace) != 1 || len(assembled.Manifest.CoverageTrace[0].CoveredRefs) != 1 {
+		t.Fatalf("coverage trace missing: %#v", assembled.Manifest.CoverageTrace)
+	}
+}

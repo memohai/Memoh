@@ -279,9 +279,11 @@ func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval too
 	loaded = pruneHistoryForGateway(loaded)
 	loaded = r.replaceCompactedMessages(ctx, loaded)
 	messages, _ := trimMessagesByTokens(r.logger, loaded, 0)
+	messages = sanitizeMessages(messages)
 
 	cfg := resolved.RunConfig
-	cfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(sanitizeMessages(messages)))
+	cfg.ContextFrags = historyContextFragsForMessages(messages, loaded)
+	cfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(messages))
 	cfg.Query = ""
 	cfg.LiveToolStream = eventCh != nil
 	cfg.CanRequestUserInput = r.canDeliverUserInputWS(eventCh)

@@ -3,6 +3,7 @@ package flow
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -171,6 +172,45 @@ func trimMessagesByTokens(log *slog.Logger, messages []historyfrag.HistoryRecord
 		result = append(result, m.ModelMessage)
 	}
 	return result, totalTokens
+}
+
+func historyContextFragsForMessages(messages []conversation.ModelMessage, records []historyfrag.HistoryRecord) []contextfrag.ContextFrag {
+	if len(messages) == 0 || len(records) == 0 {
+		return nil
+	}
+	frags := make([]contextfrag.ContextFrag, 0)
+	recordStart := 0
+	for i, msg := range messages {
+		if !looksLikeSummaryMessage(msg) {
+			continue
+		}
+		for j := recordStart; j < len(records); j++ {
+			record := records[j]
+			if record.Kind != contextfrag.KindConversationSummary || record.Coverage == nil {
+				continue
+			}
+			if !sameModelMessage(record.ModelMessage, msg) {
+				continue
+			}
+			frag := historyfrag.ToFrag(record)
+			frag.ID = fmt.Sprintf("message.%03d", i)
+			frag.Provenance.Index = i
+			frags = append(frags, frag)
+			recordStart = j + 1
+			break
+		}
+	}
+	return frags
+}
+
+func looksLikeSummaryMessage(msg conversation.ModelMessage) bool {
+	return strings.EqualFold(strings.TrimSpace(msg.Role), "user") &&
+		strings.HasPrefix(strings.TrimSpace(msg.TextContent()), "<summary>")
+}
+
+func sameModelMessage(a conversation.ModelMessage, b conversation.ModelMessage) bool {
+	return strings.EqualFold(strings.TrimSpace(a.Role), strings.TrimSpace(b.Role)) &&
+		string(a.Content) == string(b.Content)
 }
 
 func (r *Resolver) replaceCompactedMessages(ctx context.Context, messages []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
