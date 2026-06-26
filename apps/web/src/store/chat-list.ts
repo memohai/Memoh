@@ -372,6 +372,11 @@ export const useChatStore = defineStore('chat', () => {
   // longer an ephemeral "preview" tab. seq forces the watch to fire on repeats.
   const userSentInSession = ref<{ id: string, wasDraft: boolean, seq: number } | null>(null)
   let userSendSeq = 0
+  // Bumps after a session delete succeeds. Consumers that own per-session UI
+  // chrome must not infer deletion from the paginated session list: a valid open
+  // tab can fall off the current page without being deleted.
+  const deletedSession = ref<{ id: string, botId: string, seq: number } | null>(null)
+  let deletedSessionSeq = 0
 
   function isMessageActionLoading(targetSessionId?: string | null): boolean {
     const sid = (targetSessionId ?? sessionId.value ?? '').trim()
@@ -541,6 +546,7 @@ export const useChatStore = defineStore('chat', () => {
   // blocked the UI on bots with thousands of heartbeat sessions.
   const sessionById = new Map<string, SessionSummary>()
   const rememberedSessions = ref<Record<string, SessionSummary>>({})
+  const deletedSessionIdsByBot = new Map<string, Set<string>>()
   const sessionsCursor = ref<string | null>(null)
   const hasMoreSessions = ref(false)
   const loadingMoreSessions = ref(false)
@@ -568,6 +574,7 @@ export const useChatStore = defineStore('chat', () => {
   })
 
   function replaceSessions(items: SessionSummary[]) {
+    const currentDeleted = deletedSessionIdsByBot.get((currentBotId.value ?? '').trim())
     // A racing list refresh can fetch a session before the backend's
     // title-generation flow has persisted a title, while the client already
     // holds one — the optimistic provisional title set in ensureActiveSession,
@@ -578,7 +585,7 @@ export const useChatStore = defineStore('chat', () => {
     // hasn't set one yet," not "title cleared," so preserve our non-empty title
     // instead of letting the refresh erase it (which split the sidebar from
     // the sticky tab title).
-    const merged = items.map(s => {
+    const merged = items.filter(s => !currentDeleted?.has(s.id)).map(s => {
       const known = sessionById.get(s.id)
       if (known && !(s.title ?? '').trim() && (known.title ?? '').trim()) {
         return { ...s, title: known.title }
@@ -592,13 +599,16 @@ export const useChatStore = defineStore('chat', () => {
 
   function appendSessions(items: SessionSummary[]) {
     if (items.length === 0) return
-    const fresh = items.filter(s => !sessionById.has(s.id))
+    const currentDeleted = deletedSessionIdsByBot.get((currentBotId.value ?? '').trim())
+    const fresh = items.filter(s => !sessionById.has(s.id) && !currentDeleted?.has(s.id))
     if (fresh.length === 0) return
     sessions.value = [...sessions.value, ...fresh]
     for (const s of fresh) sessionById.set(s.id, s)
   }
 
   function upsertSession(updated: SessionSummary) {
+    const currentDeleted = deletedSessionIdsByBot.get((currentBotId.value ?? '').trim())
+    if (currentDeleted?.has(updated.id)) return
     const existing = sessionById.get(updated.id)
     if (existing) {
       const rest = sessions.value.filter(session => session.id !== updated.id)
@@ -643,6 +653,8 @@ export const useChatStore = defineStore('chat', () => {
   // triggers `sessions.value`, so the UI stays stale until a full REST refresh
   // (the Cmd+R symptom).
   function patchSessionInList(id: string, patch: Partial<SessionSummary>) {
+    const currentDeleted = deletedSessionIdsByBot.get((currentBotId.value ?? '').trim())
+    if (currentDeleted?.has(id)) return
     const existing = sessionById.get(id)
     if (!existing) return
     const next = { ...existing, ...patch }
@@ -657,6 +669,15 @@ export const useChatStore = defineStore('chat', () => {
     forgetRememberedSession(id)
     turnGraphs.delete(id)
     selectedHeadTurnIds.delete(id)
+  }
+
+  function markSessionDeleted(botId: string, targetSessionId: string) {
+    const bid = botId.trim()
+    const sid = targetSessionId.trim()
+    if (!bid || !sid) return
+    const deletedIds = deletedSessionIdsByBot.get(bid) ?? new Set<string>()
+    deletedIds.add(sid)
+    deletedSessionIdsByBot.set(bid, deletedIds)
   }
 
   const activeChatReadOnly = computed(() => {
@@ -3127,20 +3148,24 @@ export const useChatStore = defineStore('chat', () => {
     const bid = currentBotId.value ?? ''
     if (!bid) throw new Error('Bot not selected')
     await requestDeleteSession(bid, delId)
+    markSessionDeleted(bid, delId)
+    deletedSession.value = { id: delId, botId: bid, seq: ++deletedSessionSeq }
+    if ((currentBotId.value ?? '').trim() !== bid) return
     clearACPRuntimeStatus(bid, delId)
     removeSessionFromList(delId)
-    if (sessionId.value !== delId) return
-    if (sessions.value.length === 0) {
-      sessionId.value = null
-      sessionMessagesStream.stop()
-      replaceMessages([])
-      hasMoreOlder.value = false
-      hasLoadedOlder.value = false
-      return
+    if (sessionId.value === delId) {
+      if (sessions.value.length === 0) {
+        sessionId.value = null
+        sessionMessagesStream.stop()
+        replaceMessages([])
+        hasMoreOlder.value = false
+        hasLoadedOlder.value = false
+      } else {
+        const next = sessions.value[0]!.id
+        sessionId.value = next
+        switchActiveSession(next)
+      }
     }
-    const next = sessions.value[0]!.id
-    sessionId.value = next
-    switchActiveSession(next)
   }
 
   async function renameSession(targetSessionId: string, title: string): Promise<SessionSummary> {
@@ -3547,6 +3572,7 @@ export const useChatStore = defineStore('chat', () => {
     createNewChat: createNewSession,
     selectDraft,
     userSentInSession,
+    deletedSession,
     removeSession,
     removeChat: removeSession,
     deleteChat: removeSession,

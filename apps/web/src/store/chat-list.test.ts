@@ -3175,6 +3175,128 @@ describe('chat-list store', () => {
     expect(api.fetchMessagesUI.mock.calls.length).toBe(callsBefore)
   })
 
+  it('emits an explicit deleted-session signal after a session delete succeeds', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-2', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    api.deleteSession.mockResolvedValueOnce(undefined)
+    await store.removeSession('session-2')
+
+    expect(api.deleteSession).toHaveBeenCalledWith('bot-1', 'session-2')
+    expect(store.deletedSession).toEqual({
+      id: 'session-2',
+      botId: 'bot-1',
+      seq: 1,
+    })
+    expect(store.sessions.map(session => session.id)).toEqual(['session-1'])
+    expect(store.sessionId).toBe('session-1')
+  })
+
+  it('does not mutate the active bot state when a delete resolves after switching bots', async () => {
+    api.fetchBots.mockResolvedValue([
+      { id: 'bot-1', status: 'active', name: 'Bot A' },
+      { id: 'bot-2', status: 'active', name: 'Bot B' },
+    ])
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'shared-session', bot_id: 'bot-1', title: 'A shared id', type: 'chat' },
+        { id: 'session-a2', bot_id: 'bot-1', title: 'A2', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    let resolveDelete: () => void = () => {}
+    api.deleteSession.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      resolveDelete = resolve
+    }))
+    const deletePromise = store.removeSession('shared-session')
+
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'shared-session', bot_id: 'bot-2', title: 'B shared id', type: 'chat' },
+        { id: 'session-b2', bot_id: 'bot-2', title: 'B2', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValueOnce(messagesPayload([
+      { id: 'bot-2-user', turn_id: 'bot-2-turn', role: 'user', text: 'bot two prompt', timestamp: '2026-06-20T00:00:00.000Z' },
+      {
+        id: 'bot-2-assistant',
+        turn_id: 'bot-2-turn',
+        role: 'assistant',
+        messages: [{ id: 1, type: 'text', content: 'bot two reply' }],
+        timestamp: '2026-06-20T00:00:01.000Z',
+      },
+    ]))
+    await store.selectBot('bot-2')
+    await flushPromises()
+
+    resolveDelete()
+    await deletePromise
+
+    expect(store.currentBotId).toBe('bot-2')
+    expect(store.sessions.map(session => session.id)).toEqual(['shared-session', 'session-b2'])
+    expect(store.sessionId).toBe('shared-session')
+    expect(store.messages.map(message => message.id)).toEqual(['bot-2-user', 'bot-2-assistant'])
+    expect(store.deletedSession).toEqual({
+      id: 'shared-session',
+      botId: 'bot-1',
+      seq: 1,
+    })
+  })
+
+  it('does not resurrect a deleted session when an older same-bot list refresh resolves late', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-2', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    let resolveRefresh: (value: { items: Array<{ id: string, bot_id: string, title: string, type: string }>, nextCursor: null }) => void = () => {}
+    api.fetchSessions.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveRefresh = resolve
+    }))
+    sessionsActivityHandler?.({
+      type: 'session_created',
+      session_id: 'session-3',
+      session_type: 'chat',
+      title: 'C',
+    })
+    await flushPromises()
+
+    api.deleteSession.mockResolvedValueOnce(undefined)
+    await store.removeSession('session-2')
+
+    resolveRefresh({
+      items: [
+        { id: 'session-2', bot_id: 'bot-1', title: 'Deleted stale copy', type: 'chat' },
+        { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-3', bot_id: 'bot-1', title: 'C', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    await flushPromises()
+
+    expect(store.sessions.map(session => session.id)).toEqual(['session-1', 'session-3'])
+    expect(store.knownSessionSummary('session-2')).toBeNull()
+  })
+
   it('appends sessions emitted by the bot-wide activity stream', async () => {
     api.fetchSessions.mockResolvedValueOnce({
       items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
