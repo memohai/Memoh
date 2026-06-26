@@ -609,8 +609,14 @@ type pipelineHistoryMessageService struct {
 	rows []messagepkg.Message
 }
 
-func (s *pipelineHistoryMessageService) ListActiveSinceBySession(context.Context, string, time.Time) ([]messagepkg.Message, error) {
-	return s.rows, nil
+func (s *pipelineHistoryMessageService) ListActiveSinceBySession(_ context.Context, _ string, since time.Time) ([]messagepkg.Message, error) {
+	filtered := make([]messagepkg.Message, 0, len(s.rows))
+	for _, row := range s.rows {
+		if row.CreatedAt.IsZero() || !row.CreatedAt.Before(since) {
+			filtered = append(filtered, row)
+		}
+	}
+	return filtered, nil
 }
 
 type pipelineCompactionQueries struct {

@@ -538,8 +538,9 @@ func (r *Resolver) buildMessagesFromPipeline(ctx context.Context, req conversati
 		return nil
 	}
 
-	trs := r.loadTurnResponses(ctx, sessionID)
-	compactSummary := r.loadPipelineCompactionSummary(ctx, sessionID)
+	historyMessages := r.loadPipelineHistoryMessages(ctx, sessionID)
+	trs := pipelineTurnResponsesFromMessages(historyMessages)
+	compactSummary := r.LoadCompactionSummary(ctx, historyMessages)
 
 	composed := pipelinepkg.ComposeContextWithSummary(rc, trs, compactSummary)
 	if composed == nil {
@@ -570,16 +571,16 @@ func (r *Resolver) buildMessagesFromPipeline(ctx context.Context, req conversati
 	return messages
 }
 
-func (r *Resolver) loadPipelineCompactionSummary(ctx context.Context, sessionID string) pipelinepkg.CompactSummary {
+func (r *Resolver) loadPipelineHistoryMessages(ctx context.Context, sessionID string) []messagepkg.Message {
 	if r.messageService == nil || strings.TrimSpace(sessionID) == "" {
-		return pipelinepkg.CompactSummary{}
+		return nil
 	}
 	msgs, err := r.messageService.ListActiveSinceBySession(ctx, sessionID, time.Unix(0, 0).UTC())
 	if err != nil {
-		r.logger.Warn("load pipeline compaction summary messages failed", slog.String("session_id", sessionID), slog.Any("error", err))
-		return pipelinepkg.CompactSummary{}
+		r.logger.Warn("load pipeline history messages failed", slog.String("session_id", sessionID), slog.Any("error", err))
+		return nil
 	}
-	return r.LoadCompactionSummary(ctx, msgs)
+	return msgs
 }
 
 func (r *Resolver) LoadCompactionSummary(ctx context.Context, messages []messagepkg.Message) pipelinepkg.CompactSummary {
@@ -670,18 +671,13 @@ func trimPipelineMessagesByTokens(log *slog.Logger, messages []conversation.Mode
 	return messages[cutoff:]
 }
 
-// loadTurnResponses loads recent assistant/tool messages from bot_history_messages
-// for use as the TR stream in pipeline-based context assembly.
+// loadTurnResponses loads every active assistant/tool message in a session for
+// use as the TR stream in pipeline-based context assembly.
 func (r *Resolver) loadTurnResponses(ctx context.Context, sessionID string) []pipelinepkg.TurnResponseEntry {
-	if r.messageService == nil {
-		return nil
-	}
-	since := time.Now().UTC().Add(-24 * time.Hour)
-	msgs, err := r.messageService.ListActiveSinceBySession(ctx, sessionID, since)
-	if err != nil {
-		r.logger.Warn("load TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
-		return nil
-	}
+	return pipelineTurnResponsesFromMessages(r.loadPipelineHistoryMessages(ctx, sessionID))
+}
+
+func pipelineTurnResponsesFromMessages(msgs []messagepkg.Message) []pipelinepkg.TurnResponseEntry {
 	var trs []pipelinepkg.TurnResponseEntry
 	for _, m := range msgs {
 		entry, ok := pipelinepkg.DecodeTurnResponseEntry(m)
