@@ -484,13 +484,13 @@ func discussACPFullContextPrompt(messages []ContextMessage, lateBinding string) 
 	return strings.TrimSpace(b.String())
 }
 
-// latestRCReceivedAtMs returns the maximum ReceivedAtMs across all segments
+// latestRCReceivedAtMs returns the maximum event timestamp across all segments
 // in the given RC, or 0 if the RC is empty.
 func latestRCReceivedAtMs(rc RenderedContext) int64 {
 	var latest int64
 	for _, seg := range rc {
-		if seg.ReceivedAtMs > latest {
-			latest = seg.ReceivedAtMs
+		if eventAtMs := seg.eventAtMs(); eventAtMs > latest {
+			latest = eventAtMs
 		}
 	}
 	return latest
@@ -690,7 +690,7 @@ func (d *DiscussDriver) loadTurnResponsesWithMessages(ctx context.Context, sessi
 func extractNewImageRefs(rc RenderedContext, afterMs int64) []ImageAttachmentRef {
 	var refs []ImageAttachmentRef
 	for _, seg := range rc {
-		if seg.ReceivedAtMs > afterMs && !seg.IsMyself {
+		if seg.eventAtMs() > afterMs && !seg.IsMyself {
 			refs = append(refs, seg.ImageRefs...)
 		}
 	}
@@ -722,7 +722,7 @@ func injectImagePartsIntoLastUserMessage(msgs []sdk.Message, parts []sdk.ImagePa
 
 func wasRecentlyMentioned(rc RenderedContext, afterMs int64) bool {
 	for _, seg := range rc {
-		if seg.ReceivedAtMs > afterMs && (seg.MentionsMe || seg.RepliesToMe) {
+		if seg.eventAtMs() > afterMs && (seg.MentionsMe || seg.RepliesToMe) {
 			return true
 		}
 	}

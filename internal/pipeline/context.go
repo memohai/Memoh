@@ -47,9 +47,10 @@ type CompactSummary struct {
 func LatestExternalEventMs(rc RenderedContext, afterMs int64) int64 {
 	var latest int64
 	for _, seg := range rc {
-		if seg.ReceivedAtMs > afterMs && !seg.IsMyself {
-			if seg.ReceivedAtMs > latest {
-				latest = seg.ReceivedAtMs
+		eventAtMs := seg.eventAtMs()
+		if eventAtMs > afterMs && !seg.IsMyself {
+			if eventAtMs > latest {
+				latest = eventAtMs
 			}
 		}
 	}
@@ -172,12 +173,19 @@ func filterCoveredRenderedContext(rc RenderedContext, compactSummary CompactSumm
 	filtered := make(RenderedContext, 0, len(rc))
 	for _, seg := range rc {
 		messageID := strings.TrimSpace(seg.MessageID)
-		if _, ok := covered[messageID]; ok && compactSummary.coversRenderedMessage(messageID, seg.ReceivedAtMs) {
+		if _, ok := covered[messageID]; ok && compactSummary.coversRenderedMessage(messageID, seg.eventAtMs()) {
 			continue
 		}
 		filtered = append(filtered, seg)
 	}
 	return filtered
+}
+
+func (seg RenderedSegment) eventAtMs() int64 {
+	if seg.LastEventAtMs > 0 {
+		return seg.LastEventAtMs
+	}
+	return seg.ReceivedAtMs
 }
 
 func (s CompactSummary) coversRenderedMessage(messageID string, receivedAtMs int64) bool {
@@ -193,16 +201,12 @@ func (s CompactSummary) coversRenderedMessage(messageID string, receivedAtMs int
 
 func filterCoveredTurnResponses(trs []TurnResponseEntry, compactSummary CompactSummary) []TurnResponseEntry {
 	coveredHistory := stringSet(compactSummary.CoveredHistoryMessageIDs)
-	coveredExternal := stringSet(compactSummary.CoveredMessageIDs)
-	if len(coveredHistory) == 0 && len(coveredExternal) == 0 {
+	if len(coveredHistory) == 0 {
 		return trs
 	}
 	filtered := make([]TurnResponseEntry, 0, len(trs))
 	for _, tr := range trs {
 		if _, ok := coveredHistory[strings.TrimSpace(tr.SourceMessageID)]; ok {
-			continue
-		}
-		if _, ok := coveredExternal[strings.TrimSpace(tr.ExternalMessageID)]; ok {
 			continue
 		}
 		filtered = append(filtered, tr)
