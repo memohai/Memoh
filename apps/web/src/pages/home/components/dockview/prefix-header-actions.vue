@@ -5,7 +5,7 @@
        off the first tab; the tab's own pl-4 keeps its title off the gap. -->
   <div
     v-if="isFirstGroup"
-    class="flex h-full items-center gap-0.5 pr-1 [-webkit-app-region:drag] transition-[padding] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+    class="flex h-full items-center gap-0.5 pr-0 [-webkit-app-region:drag] transition-[padding] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
     :class="shouldReserveTrafficLight ? 'pl-[88px]' : 'pl-2'"
   >
     <Button
