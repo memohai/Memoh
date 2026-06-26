@@ -668,7 +668,18 @@ func trimPipelineMessagesByTokens(log *slog.Logger, messages []conversation.Mode
 		)
 	}
 
+	if cutoff > 0 && isPipelineCompactionSummaryMessage(messages[0]) {
+		result := make([]conversation.ModelMessage, 0, len(messages)-cutoff+1)
+		result = append(result, messages[0])
+		result = append(result, messages[cutoff:]...)
+		return result
+	}
 	return messages[cutoff:]
+}
+
+func isPipelineCompactionSummaryMessage(msg conversation.ModelMessage) bool {
+	return strings.EqualFold(strings.TrimSpace(msg.Role), "user") &&
+		strings.HasPrefix(strings.TrimSpace(msg.TextContent()), "[Conversation summary]\n")
 }
 
 // loadTurnResponses loads every active assistant/tool message in a session for

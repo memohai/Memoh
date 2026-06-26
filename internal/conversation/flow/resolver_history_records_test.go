@@ -432,6 +432,29 @@ func TestBuildMessagesFromPipelineUsesCompactionSummaryAndSkipsCoveredReplay(t *
 	}
 }
 
+func TestTrimPipelineMessagesPreservesCompactionSummary(t *testing.T) {
+	t.Parallel()
+
+	summary := conversation.ModelMessage{
+		Role:    "user",
+		Content: conversation.NewTextContent("[Conversation summary]\ncovered history"),
+	}
+	messages := []conversation.ModelMessage{
+		summary,
+		{Role: "user", Content: conversation.NewTextContent(strings.Repeat("old filler ", 200))},
+		{Role: "assistant", Content: conversation.NewTextContent("fresh reply")},
+	}
+
+	trimmed := trimPipelineMessagesByTokens(nil, messages, 10)
+
+	if len(trimmed) == 0 || trimmed[0].TextContent() != summary.TextContent() {
+		t.Fatalf("trimmed messages lost compaction summary: %#v", trimmed)
+	}
+	if len(trimmed) != 2 || trimmed[1].TextContent() != "fresh reply" {
+		t.Fatalf("trimmed messages should keep summary and newest reply, got %#v", trimmed)
+	}
+}
+
 func TestHistoryRecordPathPreservesLegacyResolverMessagePipeline(t *testing.T) {
 	t.Parallel()
 
