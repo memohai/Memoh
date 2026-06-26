@@ -49,6 +49,9 @@ func BuildManifest(frags []ContextFrag) Manifest {
 		}
 		manifest.Counts.TextBytes += item.TextBytes
 		manifest.Counts.Images += item.ImageCount
+		if frag.Coverage != nil {
+			manifest.CoverageTrace = append(manifest.CoverageTrace, *frag.Coverage)
+		}
 		manifest.Items = append(manifest.Items, item)
 	}
 	manifest.Counts.Fragments = len(frags)

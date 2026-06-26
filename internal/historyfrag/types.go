@@ -21,6 +21,7 @@ type Lifecycle string
 const (
 	LifecyclePersisted     Lifecycle = "persisted"
 	LifecycleLegacySummary Lifecycle = "legacy_summary"
+	LifecycleActiveSummary Lifecycle = "active_summary"
 )
 
 type ScopeFallback struct {
@@ -60,6 +61,8 @@ type HistoryRecord struct {
 
 	UsageInputTokens  *int
 	UsageOutputTokens *int
+
+	Coverage *contextfrag.SummaryCoverage
 }
 
 type MediaRef struct {

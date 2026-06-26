@@ -9,6 +9,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/historyfrag"
@@ -235,7 +236,11 @@ func replaceCompactedHistoryRecords(messages []historyfrag.HistoryRecord, summar
 			}
 			continue
 		}
-		result = append(result, historyfrag.LegacySummaryRecord(m.CompactID, summary, m.Scope))
+		coveredRefs := make([]contextfrag.ContextRef, 0, len(compactGroups[m.CompactID]))
+		for _, idx := range compactGroups[m.CompactID] {
+			coveredRefs = append(coveredRefs, messages[idx].Ref)
+		}
+		result = append(result, historyfrag.SummaryRecord(m.CompactID, summary, coveredRefs, m.Scope))
 	}
 	return result
 }

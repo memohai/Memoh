@@ -49,7 +49,7 @@ func TestDedupePersistedCurrentUserMessageUsesHistoryRecordProvenance(t *testing
 	}
 }
 
-func TestReplaceCompactedHistoryRecordsUsesLegacySummaryRecord(t *testing.T) {
+func TestReplaceCompactedHistoryRecordsUsesTypedSummaryRecord(t *testing.T) {
 	t.Parallel()
 
 	records := []historyfrag.HistoryRecord{
@@ -74,17 +74,23 @@ func TestReplaceCompactedHistoryRecordsUsesLegacySummaryRecord(t *testing.T) {
 		t.Fatalf("expected 2 records, got %d", len(got))
 	}
 	summary := got[0]
-	if summary.SourceKind != historyfrag.SourceCompactionLog || summary.Lifecycle != historyfrag.LifecycleLegacySummary {
+	if summary.SourceKind != historyfrag.SourceCompactionLog || summary.Lifecycle != historyfrag.LifecycleActiveSummary {
 		t.Fatalf("summary record source/lifecycle mismatch: %#v", summary)
 	}
-	if summary.Kind != contextfrag.KindConversationEvent {
-		t.Fatalf("summary should remain conversation_event in PR1, got %s", summary.Kind)
+	if summary.Kind != contextfrag.KindConversationSummary {
+		t.Fatalf("summary should be conversation_summary, got %s", summary.Kind)
 	}
 	if summary.Ref.Namespace != "compaction_log" || summary.Ref.ID != "compact-1" || summary.Ref.Durability != contextfrag.RefDurable {
 		t.Fatalf("summary ref should be durable compaction log identity: %#v", summary.Ref)
 	}
-	if frag := historyfrag.ToFrag(summary); frag.Kind != contextfrag.KindConversationEvent || frag.Slot != contextfrag.SlotHistory {
-		t.Fatalf("summary frag should stay history conversation event in PR1: %#v", frag)
+	if summary.Coverage == nil || len(summary.Coverage.CoveredRefs) != 2 {
+		t.Fatalf("summary should cover compacted records: %#v", summary.Coverage)
+	}
+	if summary.Coverage.CoveredRefs[0].ID != "row-1" || summary.Coverage.CoveredRefs[1].ID != "row-2" {
+		t.Fatalf("summary coverage should preserve covered record refs: %#v", summary.Coverage.CoveredRefs)
+	}
+	if frag := historyfrag.ToFrag(summary); frag.Kind != contextfrag.KindConversationSummary || frag.Slot != contextfrag.SlotHistory || frag.Coverage == nil {
+		t.Fatalf("summary frag should carry active summary coverage: %#v", frag)
 	}
 }
 
