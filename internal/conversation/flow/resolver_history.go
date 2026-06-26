@@ -539,8 +539,9 @@ func (r *Resolver) buildMessagesFromPipeline(ctx context.Context, req conversati
 	}
 
 	trs := r.loadTurnResponses(ctx, sessionID)
+	compactSummary := r.loadPipelineCompactionSummary(ctx, sessionID)
 
-	composed := pipelinepkg.ComposeContext(rc, trs, "")
+	composed := pipelinepkg.ComposeContextWithSummary(rc, trs, compactSummary)
 	if composed == nil {
 		return nil
 	}
@@ -567,6 +568,76 @@ func (r *Resolver) buildMessagesFromPipeline(ctx context.Context, req conversati
 	}
 
 	return messages
+}
+
+func (r *Resolver) loadPipelineCompactionSummary(ctx context.Context, sessionID string) pipelinepkg.CompactSummary {
+	if r.messageService == nil || strings.TrimSpace(sessionID) == "" {
+		return pipelinepkg.CompactSummary{}
+	}
+	msgs, err := r.messageService.ListActiveSinceBySession(ctx, sessionID, time.Unix(0, 0).UTC())
+	if err != nil {
+		r.logger.Warn("load pipeline compaction summary messages failed", slog.String("session_id", sessionID), slog.Any("error", err))
+		return pipelinepkg.CompactSummary{}
+	}
+	return r.LoadCompactionSummary(ctx, msgs)
+}
+
+func (r *Resolver) LoadCompactionSummary(ctx context.Context, messages []messagepkg.Message) pipelinepkg.CompactSummary {
+	if r.queries == nil || len(messages) == 0 {
+		return pipelinepkg.CompactSummary{}
+	}
+
+	groups := make(map[string][]messagepkg.Message)
+	order := make([]string, 0)
+	for _, msg := range messages {
+		compactID := strings.TrimSpace(msg.CompactID)
+		if compactID == "" {
+			continue
+		}
+		if _, ok := groups[compactID]; !ok {
+			order = append(order, compactID)
+		}
+		groups[compactID] = append(groups[compactID], msg)
+	}
+	if len(order) == 0 {
+		return pipelinepkg.CompactSummary{}
+	}
+
+	var summaries []string
+	var coveredHistoryIDs []string
+	var coveredMessageIDs []string
+	for _, compactID := range order {
+		cUUID, err := db.ParseUUID(compactID)
+		if err != nil {
+			continue
+		}
+		log, err := r.queries.GetCompactionLogByID(ctx, cUUID)
+		if err != nil {
+			r.logger.Warn("load pipeline compaction summary: failed to load compact log", slog.String("compact_id", compactID), slog.Any("error", err))
+			continue
+		}
+		summary := strings.TrimSpace(log.Summary)
+		if log.Status != "ok" || summary == "" {
+			continue
+		}
+		summaries = append(summaries, summary)
+		for _, msg := range groups[compactID] {
+			if id := strings.TrimSpace(msg.ID); id != "" {
+				coveredHistoryIDs = append(coveredHistoryIDs, id)
+			}
+			if externalID := strings.TrimSpace(msg.ExternalMessageID); externalID != "" {
+				coveredMessageIDs = append(coveredMessageIDs, externalID)
+			}
+		}
+	}
+	if len(summaries) == 0 {
+		return pipelinepkg.CompactSummary{}
+	}
+	return pipelinepkg.CompactSummary{
+		Text:                     strings.Join(summaries, "\n\n"),
+		CoveredMessageIDs:        coveredMessageIDs,
+		CoveredHistoryMessageIDs: coveredHistoryIDs,
+	}
 }
 
 // trimPipelineMessagesByTokens trims pipeline-assembled messages to fit within

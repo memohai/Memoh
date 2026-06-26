@@ -12,10 +12,13 @@ const charsPerToken = 2
 // TurnResponseEntry represents an assistant or tool message from bot_history_messages,
 // used as the "TR" stream in context composition.
 type TurnResponseEntry struct {
-	RequestedAtMs int64           `json:"requested_at_ms"`
-	Role          string          `json:"role"`
-	Content       string          `json:"content"`
-	RawContent    json.RawMessage `json:"raw_content,omitempty"`
+	RequestedAtMs     int64           `json:"requested_at_ms"`
+	Role              string          `json:"role"`
+	Content           string          `json:"content"`
+	RawContent        json.RawMessage `json:"raw_content,omitempty"`
+	SourceMessageID   string          `json:"source_message_id,omitempty"`
+	ExternalMessageID string          `json:"external_message_id,omitempty"`
+	CompactID         string          `json:"compact_id,omitempty"`
 }
 
 // ContextMessage is a unified message for LLM context, produced by MergeContext.
@@ -29,6 +32,12 @@ type ContextMessage struct {
 type ComposeContextResult struct {
 	Messages        []ContextMessage
 	EstimatedTokens int
+}
+
+type CompactSummary struct {
+	Text                     string   `json:"text,omitempty"`
+	CoveredMessageIDs        []string `json:"covered_message_ids,omitempty"`
+	CoveredHistoryMessageIDs []string `json:"covered_history_message_ids,omitempty"`
 }
 
 // LatestExternalEventMs returns the receivedAtMs of the latest non-self segment
@@ -130,13 +139,20 @@ func MergeContext(rc RenderedContext, trs []TurnResponseEntry) []ContextMessage 
 
 // ComposeContext merges RC and TRs, optionally prepends a compaction summary.
 func ComposeContext(rc RenderedContext, trs []TurnResponseEntry, compactSummary string) *ComposeContextResult {
+	return ComposeContextWithSummary(rc, trs, CompactSummary{Text: compactSummary})
+}
+
+func ComposeContextWithSummary(rc RenderedContext, trs []TurnResponseEntry, compactSummary CompactSummary) *ComposeContextResult {
+	rc = filterCoveredRenderedContext(rc, compactSummary)
+	trs = filterCoveredTurnResponses(trs, compactSummary)
 	allMessages := MergeContext(rc, trs)
-	if len(allMessages) == 0 && compactSummary == "" {
+	summaryText := strings.TrimSpace(compactSummary.Text)
+	if len(allMessages) == 0 && summaryText == "" {
 		return nil
 	}
 
-	if compactSummary != "" {
-		summary := ContextMessage{Role: "user", Content: "[Conversation summary]\n" + compactSummary}
+	if summaryText != "" {
+		summary := ContextMessage{Role: "user", Content: "[Conversation summary]\n" + summaryText}
 		allMessages = append([]ContextMessage{summary}, allMessages...)
 	}
 
@@ -144,6 +160,55 @@ func ComposeContext(rc RenderedContext, trs []TurnResponseEntry, compactSummary 
 		Messages:        allMessages,
 		EstimatedTokens: estimateMessagesTokens(allMessages),
 	}
+}
+
+func filterCoveredRenderedContext(rc RenderedContext, compactSummary CompactSummary) RenderedContext {
+	covered := stringSet(compactSummary.CoveredMessageIDs)
+	if len(covered) == 0 {
+		return rc
+	}
+	filtered := make(RenderedContext, 0, len(rc))
+	for _, seg := range rc {
+		if _, ok := covered[strings.TrimSpace(seg.MessageID)]; ok {
+			continue
+		}
+		filtered = append(filtered, seg)
+	}
+	return filtered
+}
+
+func filterCoveredTurnResponses(trs []TurnResponseEntry, compactSummary CompactSummary) []TurnResponseEntry {
+	coveredHistory := stringSet(compactSummary.CoveredHistoryMessageIDs)
+	coveredExternal := stringSet(compactSummary.CoveredMessageIDs)
+	if len(coveredHistory) == 0 && len(coveredExternal) == 0 {
+		return trs
+	}
+	filtered := make([]TurnResponseEntry, 0, len(trs))
+	for _, tr := range trs {
+		if _, ok := coveredHistory[strings.TrimSpace(tr.SourceMessageID)]; ok {
+			continue
+		}
+		if _, ok := coveredExternal[strings.TrimSpace(tr.ExternalMessageID)]; ok {
+			continue
+		}
+		filtered = append(filtered, tr)
+	}
+	return filtered
+}
+
+func stringSet(values []string) map[string]struct{} {
+	if len(values) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		set[value] = struct{}{}
+	}
+	return set
 }
 
 func estimateMessagesTokens(messages []ContextMessage) int {

@@ -29,6 +29,7 @@ type ResolveRunConfigResult struct {
 type RunConfigResolver interface {
 	ResolveRunConfig(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error)
 	InlineImageAttachments(ctx context.Context, botID string, refs []ImageAttachmentRef) []sdk.ImagePart
+	LoadCompactionSummary(ctx context.Context, messages []messagepkg.Message) CompactSummary
 	StoreRound(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform string, messages []sdk.Message, modelID string) error
 }
 
@@ -257,7 +258,7 @@ func (d *DiscussDriver) handleReply(ctx context.Context, sess *discussSession, r
 func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussSession, rc RenderedContext, log *slog.Logger, agent discussStreamer) {
 	cfg := d.sessionConfigSnapshot(sess)
 
-	trs := d.loadTurnResponses(ctx, cfg.SessionID)
+	trs, historyMessages := d.loadTurnResponsesWithMessages(ctx, cfg.SessionID)
 
 	// Cold-start / post-idle initialisation: if we haven't processed anything
 	// in this goroutine's lifetime yet, anchor `lastProcessedMs` to the most
@@ -278,7 +279,11 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 		return
 	}
 
-	composed := ComposeContext(rc, trs, "")
+	compactSummary := CompactSummary{}
+	if d.deps.Resolver != nil {
+		compactSummary = d.deps.Resolver.LoadCompactionSummary(ctx, historyMessages)
+	}
+	composed := ComposeContextWithSummary(rc, trs, compactSummary)
 	if composed == nil {
 		return
 	}
@@ -647,8 +652,13 @@ func agentEventToChannelEvent(e agentpkg.StreamEvent) (channel.StreamEvent, bool
 // earlier replies missing) that confuses both the LLM and loop-detection.
 // Any size-bound trimming should happen later via compaction, not here.
 func (d *DiscussDriver) loadTurnResponses(ctx context.Context, sessionID string) []TurnResponseEntry {
+	trs, _ := d.loadTurnResponsesWithMessages(ctx, sessionID)
+	return trs
+}
+
+func (d *DiscussDriver) loadTurnResponsesWithMessages(ctx context.Context, sessionID string) ([]TurnResponseEntry, []messagepkg.Message) {
 	if d.deps.MessageService == nil {
-		return nil
+		return nil, nil
 	}
 
 	// time.Unix(0, 0) is the Unix epoch; the underlying query uses
@@ -656,7 +666,7 @@ func (d *DiscussDriver) loadTurnResponses(ctx context.Context, sessionID string)
 	msgs, err := d.deps.MessageService.ListActiveSinceBySession(ctx, sessionID, time.Unix(0, 0).UTC())
 	if err != nil {
 		d.logger.Warn("load TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
-		return nil
+		return nil, nil
 	}
 
 	var trs []TurnResponseEntry
@@ -667,7 +677,7 @@ func (d *DiscussDriver) loadTurnResponses(ctx context.Context, sessionID string)
 		}
 		trs = append(trs, entry)
 	}
-	return trs
+	return trs, msgs
 }
 
 // extractNewImageRefs collects ImageAttachmentRef entries from RC segments
