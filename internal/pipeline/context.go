@@ -35,8 +35,10 @@ type ComposeContextResult struct {
 }
 
 type CompactSummary struct {
-	Text                     string   `json:"text,omitempty"`
-	CoveredMessageIDs        []string `json:"covered_message_ids,omitempty"`
+	Text                   string           `json:"text,omitempty"`
+	CoveredMessageIDs      []string         `json:"covered_message_ids,omitempty"`
+	CoveredMessageCutoffMs map[string]int64 `json:"covered_message_cutoff_ms,omitempty"`
+
 	CoveredHistoryMessageIDs []string `json:"covered_history_message_ids,omitempty"`
 }
 
@@ -169,12 +171,24 @@ func filterCoveredRenderedContext(rc RenderedContext, compactSummary CompactSumm
 	}
 	filtered := make(RenderedContext, 0, len(rc))
 	for _, seg := range rc {
-		if _, ok := covered[strings.TrimSpace(seg.MessageID)]; ok {
+		messageID := strings.TrimSpace(seg.MessageID)
+		if _, ok := covered[messageID]; ok && compactSummary.coversRenderedMessage(messageID, seg.ReceivedAtMs) {
 			continue
 		}
 		filtered = append(filtered, seg)
 	}
 	return filtered
+}
+
+func (s CompactSummary) coversRenderedMessage(messageID string, receivedAtMs int64) bool {
+	if len(s.CoveredMessageCutoffMs) == 0 {
+		return true
+	}
+	cutoffMs, ok := s.CoveredMessageCutoffMs[messageID]
+	if !ok || cutoffMs <= 0 {
+		return true
+	}
+	return receivedAtMs <= cutoffMs
 }
 
 func filterCoveredTurnResponses(trs []TurnResponseEntry, compactSummary CompactSummary) []TurnResponseEntry {

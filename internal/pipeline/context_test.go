@@ -58,6 +58,41 @@ func TestComposeContextWithSummarySkipsCoveredReplay(t *testing.T) {
 	}
 }
 
+func TestComposeContextKeepsCoveredMessageAfterSummaryCutoff(t *testing.T) {
+	t.Parallel()
+
+	rc := RenderedContext{
+		{
+			MessageID:    "external-old",
+			ReceivedAtMs: 250,
+			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="external-old">edited after compact</message>`}},
+		},
+	}
+	summary := CompactSummary{
+		Text:                   "old user summarized",
+		CoveredMessageIDs:      []string{"external-old"},
+		CoveredMessageCutoffMs: map[string]int64{"external-old": 200},
+	}
+
+	composed := ComposeContextWithSummary(rc, nil, summary)
+	if composed == nil {
+		t.Fatal("expected composed context")
+	}
+	got := messageContents(composed.Messages)
+	want := []string{
+		"[Conversation summary]\nold user summarized",
+		`<message id="external-old">edited after compact</message>`,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("message count = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("message[%d] = %q, want %q; all=%#v", i, got[i], want[i], got)
+		}
+	}
+}
+
 func messageContents(messages []ContextMessage) []string {
 	out := make([]string, 0, len(messages))
 	for _, msg := range messages {

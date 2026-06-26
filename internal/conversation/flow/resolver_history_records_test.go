@@ -455,6 +455,35 @@ func TestTrimPipelineMessagesPreservesCompactionSummary(t *testing.T) {
 	}
 }
 
+func TestLoadCompactionSummaryCarriesMessageCutoff(t *testing.T) {
+	t.Parallel()
+
+	const compactID = "22222222-2222-2222-2222-222222222222"
+	completedAt := time.UnixMilli(200).UTC()
+	resolver := &Resolver{
+		logger: slog.New(slog.DiscardHandler),
+		queries: pipelineCompactionQueries{
+			logs: map[string]dbsqlc.BotHistoryMessageCompact{
+				compactID: {
+					ID:          flowTestUUID(compactID),
+					Status:      "ok",
+					Summary:     "old summarized",
+					CompletedAt: pgtype.Timestamptz{Time: completedAt, Valid: true},
+				},
+			},
+		},
+	}
+	messages := []messagepkg.Message{
+		{ID: "row-old-user", ExternalMessageID: "external-old", CompactID: compactID},
+	}
+
+	summary := resolver.LoadCompactionSummary(context.Background(), messages)
+
+	if got := summary.CoveredMessageCutoffMs["external-old"]; got != completedAt.UnixMilli() {
+		t.Fatalf("covered message cutoff = %d, want %d; summary=%#v", got, completedAt.UnixMilli(), summary)
+	}
+}
+
 func TestHistoryRecordPathPreservesLegacyResolverMessagePipeline(t *testing.T) {
 	t.Parallel()
 
