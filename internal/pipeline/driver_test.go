@@ -768,6 +768,8 @@ func TestHandleReplyWithAgentUsesCompactionSummary(t *testing.T) {
 			MessageID:    "external-old",
 			ReceivedAtMs: 100,
 			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="external-old">old</message>`}},
+			MentionsMe:   true,
+			ImageRefs:    []ImageAttachmentRef{{ContentHash: "covered-image", Mime: "image/png"}},
 		},
 		{
 			MessageID:    "external-new",
@@ -778,8 +780,12 @@ func TestHandleReplyWithAgentUsesCompactionSummary(t *testing.T) {
 	fakeAgent := &fakeDiscussStreamer{}
 	resolver := &fakeRunConfigResolver{
 		resolveResult: ResolveRunConfigResult{
-			RunConfig: agentpkg.RunConfig{System: "base system"},
+			RunConfig: agentpkg.RunConfig{System: "base system", SupportsImageInput: true},
 			ModelID:   "model-1",
+		},
+		inlineFn: func(_ context.Context, _ string, refs []ImageAttachmentRef) []sdk.ImagePart {
+			t.Fatalf("covered image refs must not be inlined: %#v", refs)
+			return nil
 		},
 		compactionSummary: CompactSummary{
 			Text:              "old summarized",
@@ -812,6 +818,43 @@ func TestHandleReplyWithAgentUsesCompactionSummary(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(got, "\n"), "external-new") {
 		t.Fatalf("uncovered RC replay missing: %#v", got)
+	}
+	if strings.Contains(got[len(got)-1], "You were mentioned or replied to") {
+		t.Fatalf("covered mention should not force late-binding response: %#v", got[len(got)-1])
+	}
+}
+
+func TestHandleReplyWithAgentSkipsCoveredReplayAndAdvancesCursor(t *testing.T) {
+	rc := RenderedContext{
+		{
+			MessageID:    "external-old",
+			ReceivedAtMs: 100,
+			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="external-old">old</message>`}},
+		},
+	}
+	fakeAgent := &fakeDiscussStreamer{}
+	resolver := &fakeRunConfigResolver{
+		compactionSummary: CompactSummary{
+			Text:              "old summarized",
+			CoveredMessageIDs: []string{"external-old"},
+		},
+	}
+	driver := NewDiscussDriver(DiscussDriverDeps{
+		Pipeline: NewPipeline(RenderParams{}),
+		Resolver: resolver,
+	})
+	sess := &discussSession{
+		config:          DiscussSessionConfig{BotID: "b", SessionID: "s"},
+		lastProcessedMs: 0,
+	}
+
+	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, fakeAgent)
+
+	if fakeAgent.lastConfig != nil {
+		t.Fatal("covered replay must not invoke the agent")
+	}
+	if sess.lastProcessedMs != 100 {
+		t.Fatalf("lastProcessedMs = %d, want covered RC cursor to advance", sess.lastProcessedMs)
 	}
 }
 

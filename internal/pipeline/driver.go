@@ -271,19 +271,24 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 		sess.lastProcessedMs = maxInt64(anchorFromTRs(trs), d.loadDiscussCursor(ctx, cfg, log))
 	}
 
-	// Re-evaluate the trigger condition now that lastProcessedMs is anchored.
-	// The outer loop used lastProcessedMs=0 to allow first-time dispatch into
-	// this function; after initialisation, we must verify there's actually a
-	// new external event past the anchor before spending an LLM call.
-	if LatestExternalEventMs(rc, sess.lastProcessedMs) == 0 {
-		return
-	}
-
 	compactSummary := CompactSummary{}
 	if d.deps.Resolver != nil {
 		compactSummary = d.deps.Resolver.LoadCompactionSummary(ctx, historyMessages)
 	}
-	composed := ComposeContextWithSummary(rc, trs, compactSummary)
+	activeRC := filterCoveredRenderedContext(rc, compactSummary)
+
+	// Re-evaluate the trigger condition now that lastProcessedMs is anchored.
+	// The outer loop used lastProcessedMs=0 to allow first-time dispatch into
+	// this function; after initialisation, we must verify there's actually a
+	// new external event past the anchor before spending an LLM call.
+	if LatestExternalEventMs(activeRC, sess.lastProcessedMs) == 0 {
+		if LatestExternalEventMs(rc, sess.lastProcessedMs) > 0 {
+			d.advanceDiscussCursor(ctx, sess, cfg, latestRCReceivedAtMs(rc), log)
+		}
+		return
+	}
+
+	composed := ComposeContextWithSummary(activeRC, trs, compactSummary)
 	if composed == nil {
 		return
 	}
@@ -339,14 +344,14 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 	// them as native vision input (ImagePart) on the first encounter.
 	// Subsequent turns only see the file path in the XML rendering.
 	if runConfig.SupportsImageInput && d.deps.Resolver != nil {
-		imageRefs := extractNewImageRefs(rc, sess.lastProcessedMs)
+		imageRefs := extractNewImageRefs(activeRC, sess.lastProcessedMs)
 		if len(imageRefs) > 0 {
 			imageParts := d.deps.Resolver.InlineImageAttachments(ctx, cfg.BotID, imageRefs)
 			injectImagePartsIntoLastUserMessage(runConfig.Messages, imageParts)
 		}
 	}
 
-	isMentioned := wasRecentlyMentioned(rc, sess.lastProcessedMs)
+	isMentioned := wasRecentlyMentioned(activeRC, sess.lastProcessedMs)
 	lateBinding := buildLateBindingPrompt(isMentioned)
 	runConfig.Messages = append(runConfig.Messages, sdk.UserMessage(lateBinding))
 	runConfig = runConfig.RefreshContextFrag()
