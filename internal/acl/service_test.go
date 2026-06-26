@@ -207,6 +207,58 @@ func TestEvaluate(t *testing.T) {
 	}
 }
 
+func TestEvaluatePassesGroupScopeToQuery(t *testing.T) {
+	botUUID := pgtype.UUID{Bytes: uuid.MustParse("11111111-1111-1111-1111-111111111111"), Valid: true}
+	identityUUID := "55555555-5555-5555-5555-555555555555"
+	var captured []any
+	db := &fakeDBTX{
+		queryRowFunc: func(_ context.Context, sql string, args ...any) pgx.Row {
+			if strings.Contains(sql, "COALESCE((") && strings.Contains(sql, "source_conversation_id") {
+				captured = append([]any(nil), args...)
+				return makeStringRow(EffectAllow)
+			}
+			return noRule()
+		},
+	}
+	service := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
+	_, err := service.Evaluate(context.Background(), EvaluateRequest{
+		BotID:             botUUID.String(),
+		ChannelIdentityID: identityUUID,
+		ChannelType:       "slack",
+		SourceScope: SourceScope{
+			ConversationType: "group",
+			ConversationID:   "C123",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(captured) != 7 {
+		t.Fatalf("expected 7 evaluate args, got %d: %#v", len(captured), captured)
+	}
+	if captured[0] != ActionChatTrigger {
+		t.Fatalf("unexpected action arg: %#v", captured[0])
+	}
+	if got := textFromArg(captured[1]); got != "slack" {
+		t.Fatalf("subject channel arg = %q, want slack", got)
+	}
+	if got := captured[2].(pgtype.UUID); !got.Valid || uuid.UUID(got.Bytes).String() != identityUUID {
+		t.Fatalf("channel identity arg = %#v, want %s", captured[2], identityUUID)
+	}
+	if got := textFromArg(captured[3]); got != "group" {
+		t.Fatalf("conversation type arg = %q, want group", got)
+	}
+	if got := textFromArg(captured[4]); got != "C123" {
+		t.Fatalf("conversation id arg = %q, want C123", got)
+	}
+	if got := textFromArg(captured[5]); got != "" {
+		t.Fatalf("thread id arg = %q, want empty", got)
+	}
+	if got := captured[6].(pgtype.UUID); !got.Valid || uuid.UUID(got.Bytes).String() != botUUID.String() {
+		t.Fatalf("bot id arg = %#v, want %s", captured[6], botUUID.String())
+	}
+}
+
 func TestEvaluateRejectsInvalidScope(t *testing.T) {
 	service := NewService(nil, nil)
 	_, err := service.Evaluate(context.Background(), EvaluateRequest{
@@ -263,6 +315,73 @@ func TestValidateTarget(t *testing.T) {
 				t.Fatalf("validateTarget() error = %v, wantErr = %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestCreateGroupRuleResolvesSourceChannelFromSubjectChannel(t *testing.T) {
+	botUUID := "11111111-1111-1111-1111-111111111111"
+	actorUUID := "22222222-2222-2222-2222-222222222222"
+	ruleUUID := pgtype.UUID{Bytes: uuid.MustParse("33333333-3333-3333-3333-333333333333"), Valid: true}
+	var captured []any
+	db := &fakeDBTX{
+		queryRowFunc: func(_ context.Context, sql string, args ...any) pgx.Row {
+			if strings.Contains(sql, "INSERT INTO bot_acl_rules") {
+				captured = append([]any(nil), args...)
+				return &fakeRow{scanFunc: func(dest ...any) error {
+					*dest[0].(*pgtype.UUID) = ruleUUID
+					*dest[1].(*pgtype.UUID) = args[0].(pgtype.UUID)
+					*dest[2].(*string) = ActionChatTrigger
+					*dest[3].(*string) = args[2].(string)
+					*dest[4].(*pgtype.UUID) = pgtype.UUID{}
+					*dest[5].(*pgtype.Text) = args[7].(pgtype.Text)
+					*dest[6].(*pgtype.Text) = args[8].(pgtype.Text)
+					*dest[7].(*pgtype.Text) = args[9].(pgtype.Text)
+					*dest[8].(*pgtype.Text) = args[10].(pgtype.Text)
+					*dest[9].(*pgtype.UUID) = args[3].(pgtype.UUID)
+					*dest[10].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+					*dest[11].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+					*dest[12].(*bool) = args[1].(bool)
+					*dest[13].(*pgtype.Text) = args[4].(pgtype.Text)
+					*dest[14].(*pgtype.Text) = args[6].(pgtype.Text)
+					return nil
+				}}
+			}
+			return noRule()
+		},
+	}
+	service := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
+	rule, err := service.CreateRule(context.Background(), botUUID, actorUUID, CreateRuleRequest{
+		Enabled:            true,
+		Effect:             EffectDeny,
+		SubjectChannelType: "slack",
+		SourceScope: &SourceScope{
+			ConversationType: "group",
+			ConversationID:   "C123",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(captured) != 11 {
+		t.Fatalf("expected 11 create args, got %d: %#v", len(captured), captured)
+	}
+	if got := captured[5].(pgtype.UUID); got.Valid {
+		t.Fatalf("channel identity arg should be empty for group rule: %#v", got)
+	}
+	if got := textFromArg(captured[6]); got != "slack" {
+		t.Fatalf("subject channel arg = %q, want slack", got)
+	}
+	if got := textFromArg(captured[7]); got != "slack" {
+		t.Fatalf("source channel arg = %q, want slack", got)
+	}
+	if got := textFromArg(captured[8]); got != "group" {
+		t.Fatalf("source conversation type arg = %q, want group", got)
+	}
+	if got := textFromArg(captured[9]); got != "C123" {
+		t.Fatalf("source conversation id arg = %q, want C123", got)
+	}
+	if rule.SubjectChannelType != "slack" || rule.SourceScope == nil || rule.SourceScope.ConversationID != "C123" {
+		t.Fatalf("unexpected returned rule: %+v", rule)
 	}
 }
 
