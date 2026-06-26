@@ -609,10 +609,10 @@ func TestHandleReplyWithAgent_ColdStartAnchoredByTR(t *testing.T) {
 }
 
 // TestHandleReplyWithAgent_CursorAdvancesToRCNotWallClock ensures that after
-// a turn we set lastProcessedMs to the max ReceivedAtMs actually consumed in
-// the RC snapshot, not time.Now(). This matters for messages that arrive
-// mid-turn: they end up in a fresher RC with ReceivedAtMs > cursor, which
-// correctly triggers the next round.
+// a turn we set lastProcessedMs to the max event timestamp actually consumed
+// in the RC snapshot, not time.Now(). This matters for messages that arrive
+// mid-turn: they end up in a fresher RC with an event timestamp > cursor,
+// which correctly triggers the next round.
 func TestHandleReplyWithAgent_CursorAdvancesToRCNotWallClock(t *testing.T) {
 	rc := RenderedContext{
 		{
@@ -637,7 +637,7 @@ func TestHandleReplyWithAgent_CursorAdvancesToRCNotWallClock(t *testing.T) {
 		t.Fatal("expected agent to be invoked")
 	}
 	if sess.lastProcessedMs != 777 {
-		t.Fatalf("lastProcessedMs = %d, want 777 (max RC ReceivedAtMs)", sess.lastProcessedMs)
+		t.Fatalf("lastProcessedMs = %d, want 777 (max RC event timestamp)", sess.lastProcessedMs)
 	}
 }
 

@@ -42,7 +42,7 @@ type CompactSummary struct {
 	CoveredHistoryMessageIDs []string `json:"covered_history_message_ids,omitempty"`
 }
 
-// LatestExternalEventMs returns the receivedAtMs of the latest non-self segment
+// LatestExternalEventMs returns the latest non-self segment event timestamp
 // after afterMs, or 0 if none found.
 func LatestExternalEventMs(rc RenderedContext, afterMs int64) int64 {
 	var latest int64
