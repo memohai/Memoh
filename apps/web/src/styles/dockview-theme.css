@@ -2,7 +2,7 @@
  * tokens from @memohai/ui style.css so the dock chrome follows light/dark
  * and any future palette swap automatically.
  *
- * Two-plane editor model (VS-Code): the active tab and the view it owns both
+ * Two-plane editor model: the active tab and the view it owns both
  * sit on --surface-editor, so the selected tab reads as continuous with its
  * pane. The tab strip and every unselected tab sit on --surface-chrome — the
  * same recessed chrome as the left rail. Because the two planes differ in BOTH
@@ -24,7 +24,7 @@
   --dv-activegroup-hiddenpanel-tab-color: var(--muted-foreground);
 
   /* Inactive group: its selected tab must still read as selected (same editor
-   * surface, just a dimmer label — VS Code's unfocused-active tab). Without this
+   * surface, just a dimmer label). Without this
    * the second pane's current tab looked grey/unselected after a split. */
   --dv-inactivegroup-visiblepanel-tab-background-color: var(--surface-editor);
   --dv-inactivegroup-visiblepanel-tab-color: var(--muted-foreground);
@@ -57,22 +57,24 @@
 
   --dv-floating-border: 1px solid var(--border);
 
-  /* Chrome-tab geometry knobs (tunable). --tab-top-inset lifts every tab off the
-   * top of the strip so the rounded crown floats below the window edge. --tab-gap
-   * is the breathing room between adjacent tabs (no border dividers any more —
-   * separation is space). --tab-flare is the radius of the active tab's bottom
-   * "feet" that splay outward and curve down into the pane; tying it to --tab-gap
-   * makes the flare exactly bridge the gap to the neighbour, so the active tab
-   * reads as connected to the surface below (Chrome). */
-  --tab-top-inset: 0.1875rem;
-  --tab-gap: var(--radius-sm);
-  --tab-flare: var(--tab-gap);
+  /* Tab geometry knobs. --tab-top-inset lifts every tab off the top of the
+   * strip so the rounded crown floats below the window edge. Main editor tabs
+   * touch edge-to-edge; selection is carried by fill, stroke, and the bottom
+   * fillet rather than inter-tab whitespace. --tab-edge-pad gives the first and
+   * last tab just enough room for the connected bottom edge without turning the
+   * prefix-actions-to-first-tab space into a second large gutter. */
+  --tab-top-inset: 0.3125rem;
+  --chrome-center: 20px;
+  --tab-crown-radius: var(--radius-md);
+  --tab-gap: 0rem;
+  --tab-flare: var(--tab-crown-radius);
+  --tab-edge-pad: 0.1875rem;
+  --tab-hover-radius: 0.34375rem;
+  --tab-hover-open-edge-radius: 0.28125rem;
   /* Horizontal breathing room between the last tab's foot and the "+" cluster. */
-  --tab-actions-gap: 6px;
-  /* Shared timing for inactive-tab hover fill + close-fade (workspace-tab.vue). */
+  --tab-actions-gap: 0.015625rem;
+  /* Shared timing for close-fade (workspace-tab.vue). Tab hover fill itself is instant. */
   --tab-hover-duration: 150ms;
-  /* How far the inactive hover colour layer sits below a flush-top fill (subpixel ok). */
-  --tab-hover-fill-offset: 0.5px;
   /* ONE stroke colour for the whole dock outline — the strip's bottom hairline, the
    * active tab's crown/side border, and the fillet-foot ring. It MUST be opaque, yet
    * it must also read as the SAME line as the rest of the app's dividers (the sidebar's
@@ -103,11 +105,10 @@
 }
 
 /* The custom tab content (workspace-tab.vue) owns its padding/ellipsis; .dv-tab
- * carries the chip background (from the --dv-* vars above). Tabs are NATURAL width
- * — a tab is as wide as its title, capped at max-width (then the title truncates,
- * see workspace-tab.vue) — never stretched to fill the row. The row hugs its
- * content so the right-side actions ("+") sit directly after the LAST tab
- * (Chrome/Notion), not pinned to the viewport edge. The close button overlays the
+ * carries the chip background (from the --dv-* vars above). Editor tabs use a
+ * fixed measure so label truncation, hover geometry, and close placement remain
+ * stable. The row hugs its content so the right-side actions ("+") sit directly
+ * after the LAST tab, not pinned to the viewport edge. The close button overlays the
  * title on hover (no reserved slot — see workspace-tab.vue). --tab-hover-bg is the
  * opaque colour a tab wears while hovered; the close affordance paints it to blot
  * out the text beneath the button. */
@@ -115,39 +116,29 @@
   box-sizing: border-box;
   padding: 0;
   /* A tab activates on click but is not a link/button affordance — keep the plain
-   * arrow (VS Code), not a pointer. dockview defaults .dv-tab to cursor:pointer;
+   * arrow. dockview defaults .dv-tab to cursor:pointer;
    * the close button re-enables the pointer on itself only. */
   cursor: default;
-  /* HYBRID width model (Chrome): a tab hugs its title when the strip has room,
-   * and shrinks together with its siblings when it doesn't.
-   *   flex-basis AUTO (not 0): the item is sized to its own title first, so a
-   *     live title change resizes the tab smoothly instead of collapsing toward a
-   *     zero basis (the jumping-width bug that forced flex:0 0 auto before).
-   *   grow:1: only claims free space the strip actually has — when few tabs are
-   *     open there is none (the container hugs their content), so each rests at
-   *     its natural width and "+" sits right after the LAST tab (Chrome/Notion).
-   *   shrink:1: once the tabs out-measure the strip they all give back width
-   *     TOGETHER down to the min-width floor — like #624's flex:1 1 0 row, but
-   *     without that layout's basis-0 ambiguity — and only past the floor does
-   *     the row scroll.
-   * min-width is the RESTING width of a short tab (a one-word tab still reads as
-   * a real tab, with room for the close button), not just a crowded floor. The
-   * title span truncates once a tab hits max-width. */
-  flex: 1 1 auto;
-  min-width: 8rem;
-  max-width: 11rem;
+  /* Fixed editor-tab measure keeps title truncation, close placement, and the
+   * hover fill stable from tab to tab. Overflow scrolls instead of shrinking, so
+   * the tab geometry never changes under pointer movement. */
+  flex: 0 0 12.5rem;
+  width: 12.5rem;
+  min-width: 12.5rem;
+  max-width: 12.5rem;
   /* Rounded crown on EVERY tab, always — radius is state-independent so it can
    * never flash square for a frame while dockview swaps active/hover classes (it
    * only used to live on the active/hover rules). Invisible on a transparent
    * inactive tab; revealed once a fill paints. */
-  border-top-left-radius: var(--radius-sm);
-  border-top-right-radius: var(--radius-sm);
+  border-top-left-radius: var(--tab-crown-radius);
+  border-top-right-radius: var(--tab-crown-radius);
   /* Float the chip below the strip's top edge — the rounded crown needs headroom
-   * (Chrome). Applied to EVERY tab uniformly, so selecting one never shifts it
+   * above the strip. Applied to EVERY tab uniformly, so selecting one never shifts it
    * vertically. The fill still reaches the bottom, so the active tab meets the
    * pane. position:relative anchors the ::before bottom-flare (see active rule). */
   position: relative;
   margin-top: var(--tab-top-inset);
+  height: calc(100% - var(--tab-top-inset));
   /* A transparent 1px border on EVERY tab reserves the active tab's outline width
    * up front, so selecting a tab only RECOLOURS its crown stroke — it never resizes
    * or nudges the chip. Bottom edge stays borderless (the active fill bleeds into
@@ -155,27 +146,23 @@
   border: 1px solid transparent;
   border-bottom: none;
   --tab-hover-bg: var(--surface-chrome-hover);
-  --tab-hover-fill-top: 0;
-}
-
-/* Inactive tabs: the hover COLOUR lives on ::before (see below), not on the tab box.
- * Text stays put; only the fill layer's top edge sits 1px lower to match the active
- * tab's crown stroke optically. --tab-hover-fill-top tells close-fade where that layer
- * starts (workspace-tab.vue). */
-.dockview-theme-memoh .dv-tab:not(.dv-active-tab) {
-  --tab-hover-fill-top: var(--tab-hover-fill-offset);
+  --tab-hover-left-radius: var(--tab-hover-radius);
+  --tab-hover-right-radius: var(--tab-hover-radius);
 }
 
 .dockview-theme-memoh .dv-tab:not(.dv-active-tab)::before {
   content: '';
   position: absolute;
-  top: var(--tab-hover-fill-offset);
-  right: 0;
-  bottom: 0;
-  left: 0;
+  top: 0;
+  right: 2px;
+  bottom: 3.5px;
+  left: 2px;
   z-index: 0;
-  border-top-left-radius: var(--radius-sm);
-  border-top-right-radius: var(--radius-sm);
+  border-radius:
+    var(--tab-hover-left-radius)
+    var(--tab-hover-right-radius)
+    var(--tab-hover-right-radius)
+    var(--tab-hover-left-radius);
   background-color: var(--surface-chrome-hover);
   opacity: 0;
   /* Instant hide when hover ends (e.g. after switching tabs) — only fade IN. */
@@ -183,31 +170,28 @@
   pointer-events: none;
 }
 
+.dockview-theme-memoh .dv-tab.dv-active-tab + .dv-tab:not(.dv-active-tab):hover {
+  --tab-hover-right-radius: var(--tab-hover-open-edge-radius);
+}
+
 .dockview-theme-memoh .dv-tab:not(.dv-active-tab):hover::before {
   opacity: 1;
-  transition: opacity var(--tab-hover-duration) ease-out;
+  transition: none;
 }
 
-/* Space between adjacent tabs — separation is breathing room, not a divider line
- * (the old per-tab border seams are gone). The active tab's bottom flare is sized
- * to exactly bridge this gap, so its feet reach the neighbours.
- *
- * Left/right padding matches --tab-flare so the FIRST and LAST tab feet have room
- * INSIDE the scroll content (dockview's .dv-scrollable is overflow:hidden — without
- * this inset an edge tab's foot, which spills --tab-flare past the chip, gets
- * clipped). Horizontal gap from foot to "+" is --tab-actions-gap on the
- * right-actions container, not extra padding here (avoids double-counting). */
+/* Adjacent editor tabs touch; separation is state and surface, not whitespace.
+ * The small edge padding prevents the first/last connected edge from being clipped
+ * by dockview's scroll container without adding a second large gutter after the
+ * prefix action buttons. Horizontal gap from the last tab to "+" is
+ * --tab-actions-gap on the actions container, not extra padding here. */
 .dockview-theme-memoh .dv-tabs-container {
   gap: var(--tab-gap);
-  padding-inline: var(--tab-flare);
+  padding-inline: var(--tab-edge-pad);
 }
 
-/* The tab row hugs its content (does not grow), so the "+" actions land right
- * after the last tab. It may still SHRINK (flex-shrink:1 + min-width:0): when
- * the tabs out-measure the strip the container gives back width, the tabs'
- * own shrink:1 distributes that loss evenly down to their min-width floor, and
- * only past the floor does the scroll container clip them and scroll — rather
- * than pushing the "+" off-screen. */
+/* The tab row hugs its content, so the "+" actions land right after the last tab.
+ * It may still shrink as a scroll container so overflowing fixed-width tabs clip
+ * and scroll rather than pushing the "+" off-screen. */
 .dockview-theme-memoh .dv-tabs-and-actions-container > .dv-scrollable,
 .dockview-theme-memoh .dv-scrollable > .dv-tabs-container {
   flex: 0 1 auto;
@@ -215,7 +199,7 @@
 }
 
 /* No native/dockview horizontal scrollbar on the tab row (it clashed with the
- * hairline), and no edge shadow either — VS Code shows none. When there are more tabs
+ * hairline), and no edge shadow either. When there are more tabs
  * than fit they've already shrunk to their min-width floor, then scroll via
  * wheel/trackpad. */
 .dockview-theme-memoh .dv-tabs-container {
@@ -228,7 +212,7 @@
   display: none;
 }
 
-/* Active tab = the full Chrome silhouette: editor-surface fill (continuous with the
+/* Active tab = the full connected silhouette: editor-surface fill (continuous with the
  * pane below), a --dock-stroke crown/side stroke, and the bottom fillet feet
  * (::before) that curve down into the bar. It ALONE wears the 倒角 — selection is a
  * physical "grafted onto the pane" shape. The crown is rounded; the bottom is left
@@ -244,8 +228,9 @@
   --tab-hover-bg: var(--surface-editor);
 }
 
-/* Hover on an UNSELECTED tab: tab box stays transparent; the chrome-hover fill is
- * painted by ::before (top: --tab-hover-fill-offset → bottom). Text does not move. */
+/* Hover on an UNSELECTED tab: the tab box stays transparent at rest; the
+ * chrome-hover fill is painted by ::before as a rounded rectangle centred on the
+ * label. Text does not move. */
 .dockview-theme-memoh .dv-tab:not(.dv-active-tab):hover {
   background-color: transparent !important;
 }
@@ -255,7 +240,7 @@
  * colour with a quarter-circle CARVED OUT of its OUTER-TOP corner (transparent
  * inside the radius, fill outside). What remains is an inward-curving foot: the
  * tab's vertical edge sweeps down and splays out to meet the bar tangentially —
- * the same negative curve Chrome uses to seat a tab on its toolbar. (Filling the
+ * a negative curve that seats the tab on the strip. (Filling the
  * disc instead of carving it would bulge two convex "circles" out of the corners,
  * which is the opposite of a fillet.) dockview leaves ::before unused (it only
  * styles ::after on :focus), so this is a clean slot. ACTIVE-ONLY: a hover is a plain
@@ -284,12 +269,8 @@
 .dockview-theme-memoh .dv-right-actions-container,
 .dockview-theme-memoh .dv-left-actions-container {
   align-items: center;
-  /* Match the tab chip band: tabs sit margin-top below the strip crown so they can
-   * graft onto the pane; centering "+" in the full strip height put it above the
-   * close button (workspace-tab.vue). */
   box-sizing: border-box;
-  margin-top: var(--tab-top-inset);
-  height: calc(100% - var(--tab-top-inset));
+  height: 100%;
 }
 
 /* Prefix actions container: renders navigation buttons before the tabs. */
@@ -297,6 +278,7 @@
   display: flex;
   align-items: center;
   flex-shrink: 0;
+  height: 100%;
 }
 
 /* The void is dockview's droppable empty-header region — it owns the
@@ -344,10 +326,8 @@
   box-shadow: inset 0 -1px 0 var(--dock-stroke);
 }
 
-/* No vertical inter-tab divider lines: tabs are separated by --tab-gap (see the
- * .dv-tabs-container gap rule above) the way Chrome separates them — space, not a
- * seam. The old per-tab border-left/right dividers and the active-tab frame were
- * removed so selecting a tab changes only its fill + flare, never an edge. */
+/* No vertical inter-tab divider lines: selecting a tab changes only fill, stroke,
+ * and the connected bottom edge, never a divider seam. */
 
 /* Dockview paints its tab "selection" box as a PSEUDO-ELEMENT outline, not as an
  * outline on the tab element itself: it ships `.dv-tab:focus::after` /
@@ -431,7 +411,7 @@
    * scroll) these SHRINK: flex-shrink:1 lets the constrained tabs-container
    * squeeze every chip toward a 5.5rem floor (icon + a few title chars + close;
    * the chip's flex-1 min-w-0 span truncates) before the strip ever scrolls, so
-   * a stack of sessions stays on screen the way VS Code's do. */
+   * a stack of sessions stays on screen without immediately scrolling. */
   flex: 0 1 8.75rem;
   min-width: 5.5rem;
   max-width: 8.75rem;
