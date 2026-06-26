@@ -292,6 +292,95 @@ describe('chat-list store', () => {
     expect(api.fetchSessions).toHaveBeenCalledWith('bot-ready')
   })
 
+  it('drops stale initialize results when the current bot changes mid-fetch', async () => {
+    api.fetchBots.mockResolvedValue([
+      { id: 'bot-1', status: 'active', name: 'Bot A' },
+      { id: 'bot-2', status: 'active', name: 'Bot B' },
+    ])
+    let resolveBotOneSessions: (value: { items: Array<{ id: string, bot_id: string, title: string, type: string }>, nextCursor: null }) => void = () => {}
+    api.fetchSessions.mockImplementation((botId: string) => {
+      if (botId === 'bot-1') {
+        return new Promise((resolve) => {
+          resolveBotOneSessions = resolve
+        })
+      }
+      if (botId === 'bot-2') {
+        return Promise.resolve({
+          items: [{ id: 'session-b', bot_id: 'bot-2', title: 'Bot B session', type: 'chat' }],
+          nextCursor: null,
+        })
+      }
+      return Promise.resolve({ items: [], nextCursor: null })
+    })
+    const store = useChatStore()
+
+    const botOneSelect = store.selectBot('bot-1')
+    await flushPromises()
+    expect(api.fetchSessions).toHaveBeenCalledWith('bot-1')
+
+    let botTwoResolved = false
+    const botTwoSelect = store.selectBot('bot-2').then(() => {
+      botTwoResolved = true
+    })
+    await flushPromises()
+    expect(botTwoResolved).toBe(false)
+
+    resolveBotOneSessions({
+      items: [{ id: 'session-a', bot_id: 'bot-1', title: 'Stale Bot A session', type: 'chat' }],
+      nextCursor: null,
+    })
+    await botOneSelect
+    await botTwoSelect
+    await flushPromises()
+    await flushPromises()
+
+    expect(botTwoResolved).toBe(true)
+    expect(store.currentBotId).toBe('bot-2')
+    expect(store.sessions.map(session => session.id)).toEqual(['session-b'])
+    expect(store.sessionId).toBe('session-b')
+    expect(api.connectWebSocket).not.toHaveBeenCalledWith('bot-1', expect.any(Function))
+    expect(api.connectWebSocket).toHaveBeenCalledWith('bot-2', expect.any(Function))
+  })
+
+  it('continues rerun initialization when the stale bot fetch fails after switching bots', async () => {
+    api.fetchBots.mockResolvedValue([
+      { id: 'bot-1', status: 'active', name: 'Bot A' },
+      { id: 'bot-2', status: 'active', name: 'Bot B' },
+    ])
+    let rejectBotOneSessions: (error: Error) => void = () => {}
+    api.fetchSessions.mockImplementation((botId: string) => {
+      if (botId === 'bot-1') {
+        return new Promise((_resolve, reject) => {
+          rejectBotOneSessions = reject
+        })
+      }
+      if (botId === 'bot-2') {
+        return Promise.resolve({
+          items: [{ id: 'session-b', bot_id: 'bot-2', title: 'Bot B session', type: 'chat' }],
+          nextCursor: null,
+        })
+      }
+      return Promise.resolve({ items: [], nextCursor: null })
+    })
+    const store = useChatStore()
+
+    const botOneSelect = store.selectBot('bot-1')
+    await flushPromises()
+    expect(api.fetchSessions).toHaveBeenCalledWith('bot-1')
+
+    const botTwoSelect = store.selectBot('bot-2')
+    await flushPromises()
+    rejectBotOneSessions(new Error('bot one stale fetch failed'))
+    await botOneSelect
+    await botTwoSelect
+
+    expect(store.currentBotId).toBe('bot-2')
+    expect(store.sessions.map(session => session.id)).toEqual(['session-b'])
+    expect(store.sessionId).toBe('session-b')
+    expect(api.connectWebSocket).not.toHaveBeenCalledWith('bot-1', expect.any(Function))
+    expect(api.connectWebSocket).toHaveBeenCalledWith('bot-2', expect.any(Function))
+  })
+
   it('returns startup stream errors to the composer when no assistant output exists', async () => {
     const store = useChatStore()
 
@@ -3294,6 +3383,34 @@ describe('chat-list store', () => {
     await flushPromises()
 
     expect(store.sessions.map(session => session.id)).toEqual(['session-1', 'session-3'])
+    expect(store.knownSessionSummary('session-2')).toBeNull()
+  })
+
+  it('does not select a tombstoned session from a stale initialize response', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-2', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    api.deleteSession.mockResolvedValueOnce(undefined)
+    await store.removeSession('session-2')
+
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-2', bot_id: 'bot-1', title: 'Deleted stale copy', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    await store.initialize()
+
+    expect(store.sessions).toEqual([])
+    expect(store.sessionId).toBeNull()
     expect(store.knownSessionSummary('session-2')).toBeNull()
   })
 

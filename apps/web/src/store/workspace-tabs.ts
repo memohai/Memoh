@@ -519,7 +519,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     ]
     const bid = (currentBotId.value ?? '').trim()
     if (bid) {
+      if (deletedSessionIdsByBot.get(bid)?.size) holdDeletedChatActivation()
       restoreLayout(bid)
+      reconcileDeletedChatPanels()
     }
   }
 
@@ -546,6 +548,38 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         }
       }
     }, 0)
+  }
+
+  function releaseDeletedChatActivationNow() {
+    reconcileActivationReleaseToken++
+    if (reconcileActivationReleaseTimer) {
+      clearTimeout(reconcileActivationReleaseTimer)
+      reconcileActivationReleaseTimer = null
+    }
+    if (reconcilingDeletedChatPanelIds.size !== 0) return
+    suppressReconcileActivation = false
+    const active = api.value?.activePanel
+    const activeSid = active ? panelSessionId(active) : null
+    if (active && panelComponentOf(active.id) === 'chat' && activeSid && !isDeletedSessionForCurrentBot(activeSid)) {
+      activateChatSession(active)
+    }
+  }
+
+  function ensureSelectedChatPanel() {
+    const sid = (selection.sessionId ?? '').trim()
+    if (!sid || isDeletedSessionForCurrentBot(sid)) return
+    if (chatPanelForSession(sid)) return
+    const bid = (currentBotId.value ?? '').trim()
+    if (!bid) return
+    const id = nextChatPanelId(bid)
+    if (focusOrAdd({
+      id,
+      component: 'chat',
+      title: chatTitleFallbackFor(sid),
+      params: { sessionId: sid },
+    })) {
+      markEphemeral(id)
+    }
   }
 
   function releaseApi() {
@@ -802,6 +836,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!sid) return
     const bid = (currentBotId.value ?? '').trim()
     if (!bid) return
+    if (isDeletedSessionForCurrentBot(sid)) return
     const title = opts.title?.trim() || chatTitleFallbackFor(sid)
     const existing = chatPanelForSession(sid)
     if (existing) {
@@ -897,29 +932,22 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!dock || !bid) return
     const deletedSessionIds = deletedSessionIdsByBot.get(bid)
     if (!deletedSessionIds || deletedSessionIds.size === 0) return
-    const visibleDeletedSessionIds = new Set<string>()
-    const closingPanels: Array<{ id: string, sid: string }> = []
+    const closingPanels: Array<{ id: string }> = []
     for (const panel of [...dock.panels]) {
       if (panelComponentOf(panel.id) !== 'chat') continue
       const sid = panelSessionId(panel)
       if (!sid || !deletedSessionIds.has(sid)) continue
-      visibleDeletedSessionIds.add(sid)
       reconcilingDeletedChatPanelIds.add(panel.id)
-      closingPanels.push({ id: panel.id, sid })
+      closingPanels.push({ id: panel.id })
       holdDeletedChatActivation()
       panel.api.close()
     }
-    for (const sid of [...deletedSessionIds]) {
-      if (!visibleDeletedSessionIds.has(sid)) deletedSessionIds.delete(sid)
-    }
-    if (deletedSessionIds.size === 0) {
-      deletedSessionIdsByBot.delete(bid)
-    }
     if (closingPanels.length === 0) {
-      releaseDeletedChatActivationAfterRemove()
+      releaseDeletedChatActivationNow()
+      ensureSelectedChatPanel()
       return
     }
-    for (const { id, sid } of closingPanels) {
+    for (const { id } of closingPanels) {
       void nextTick(() => {
         if (api.value?.getPanel(id)) {
           reconcilingDeletedChatPanelIds.delete(id)
@@ -929,12 +957,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
           return
         }
         reconcilingDeletedChatPanelIds.delete(id)
-        deletedSessionIds.delete(sid)
-        if (deletedSessionIds.size === 0) {
-          deletedSessionIdsByBot.delete(bid)
-        }
         if (reconcilingDeletedChatPanelIds.size === 0) {
           releaseDeletedChatActivationAfterRemove()
+          void nextTick(() => ensureSelectedChatPanel())
         }
       })
     }

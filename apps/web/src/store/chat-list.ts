@@ -362,6 +362,9 @@ export const useChatStore = defineStore('chat', () => {
   // heuristic merge instead of replace and left two user turns visible.
   const hasLoadedOlder = ref(false)
   const initializing = ref(false)
+  let initializeRerunRequested = false
+  let initializingBotId: string | null = null
+  let initializePromise: Promise<void> | null = null
   const bots = ref<Bot[]>([])
   const overrideModelId = ref<string>('')
   const overrideReasoningEffort = ref<string>('')
@@ -573,7 +576,7 @@ export const useChatStore = defineStore('chat', () => {
     return [...byId.values()]
   })
 
-  function replaceSessions(items: SessionSummary[]) {
+  function replaceSessions(items: SessionSummary[]): SessionSummary[] {
     const currentDeleted = deletedSessionIdsByBot.get((currentBotId.value ?? '').trim())
     // A racing list refresh can fetch a session before the backend's
     // title-generation flow has persisted a title, while the client already
@@ -595,6 +598,7 @@ export const useChatStore = defineStore('chat', () => {
     sessions.value = merged
     sessionById.clear()
     for (const s of merged) sessionById.set(s.id, s)
+    return merged
   }
 
   function appendSessions(items: SessionSummary[]) {
@@ -2086,6 +2090,9 @@ export const useChatStore = defineStore('chat', () => {
     messageActionSessionIds.clear()
     loadingOlder.value = false
     initializing.value = false
+    initializeRerunRequested = false
+    initializingBotId = null
+    initializePromise = null
     overrideModelId.value = ''
     overrideReasoningEffort.value = ''
     startupSendFailure.value = null
@@ -2980,72 +2987,108 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function initialize() {
-    if (initializing.value) return
-    initializing.value = true
-    loadingChats.value = true
-    // Every entry into initialize starts from a clean transcript window. We
-    // reset here unconditionally so the success path that hydrates
-    // `sessionId` without clearing messages can't carry a stale
-    // `hasLoadedOlder = true` from a previous bot into the new bot's first
-    // refresh (which would take the merge branch and duplicate optimistic
-    // turns).
-    hasLoadedOlder.value = false
-    stopStreams()
-    stopWebSocket()
-    try {
-      const bid = await ensureBot()
-      if (!bid) {
-        replaceSessions([])
-        sessionsCursor.value = null
-        hasMoreSessions.value = false
-        sessionId.value = null
-        clearPendingACPSession()
-        replaceMessages([])
-        hasMoreOlder.value = false
-        hasLoadedOlder.value = false
-        return
+    if (initializing.value) {
+      const requestedBotId = (currentBotId.value ?? '').trim() || null
+      if (initializingBotId && requestedBotId !== initializingBotId) {
+        initializeRerunRequested = true
       }
+      if (initializePromise) await initializePromise
+      return
+    }
 
-      const response = await fetchSessions(bid)
-      replaceSessions(response.items)
-      sessionsCursor.value = response.nextCursor
-      hasMoreSessions.value = response.nextCursor !== null
-
-      if (!response.items.length) {
-        sessionId.value = null
-        replaceMessages([])
-        hasMoreOlder.value = false
-        hasLoadedOlder.value = false
-      } else {
-        // Keep a VALID persisted session; otherwise, if the user intentionally
-        // closed down to the draft "New Session" page, keep that on reload instead
-        // of force-opening a random session; otherwise pick the most recent real
-        // conversation (the server sorts by recency). Skip schedule runs — they
-        // are read-only execution history, so landing on a cron run when
-        // switching bots would be surprising; a schedule run is reachable from
-        // the sidebar's Schedule pivot.
-        // Transcript hydration is driven by startSessionMessagesStream below — no
-        // eager loadMessages REST round trip from here.
-        if (sessionId.value && knownSessionSummary(sessionId.value)) {
-          draftIntent.value = false
-        } else if (draftIntent.value) {
-          sessionId.value = null
-          replaceMessages([])
-          hasMoreOlder.value = false
+    const run = (async () => {
+      initializing.value = true
+      loadingChats.value = true
+      try {
+        do {
+          initializeRerunRequested = false
+          initializingBotId = (currentBotId.value ?? '').trim() || null
+          // Every entry into initialize starts from a clean transcript window. We
+          // reset here unconditionally so the success path that hydrates
+          // `sessionId` without clearing messages can't carry a stale
+          // `hasLoadedOlder = true` from a previous bot into the new bot's first
+          // refresh (which would take the merge branch and duplicate optimistic
+          // turns).
           hasLoadedOlder.value = false
-        } else {
-          const firstConversation = response.items.find(s => (s.type ?? 'chat') !== 'schedule')
-          sessionId.value = (firstConversation ?? response.items[0]!).id
+          stopStreams()
+          stopWebSocket()
+
+          const bid = await ensureBot()
+          if (!bid) {
+            replaceSessions([])
+            sessionsCursor.value = null
+            hasMoreSessions.value = false
+            sessionId.value = null
+            clearPendingACPSession()
+            replaceMessages([])
+            hasMoreOlder.value = false
+            hasLoadedOlder.value = false
+            continue
+          }
+          initializingBotId = bid
+
+          let response: Awaited<ReturnType<typeof fetchSessions>>
+          try {
+            response = await fetchSessions(bid)
+          } catch (error) {
+            if ((currentBotId.value ?? '').trim() !== bid) {
+              initializeRerunRequested = true
+              continue
+            }
+            throw error
+          }
+          if ((currentBotId.value ?? '').trim() !== bid) {
+            initializeRerunRequested = true
+            continue
+          }
+          const visibleSessions = replaceSessions(response.items)
+          sessionsCursor.value = response.nextCursor
+          hasMoreSessions.value = response.nextCursor !== null
+
+          if (!visibleSessions.length) {
+            sessionId.value = null
+            replaceMessages([])
+            hasMoreOlder.value = false
+            hasLoadedOlder.value = false
+          } else {
+            // Keep a VALID persisted session; otherwise, if the user intentionally
+            // closed down to the draft "New Session" page, keep that on reload instead
+            // of force-opening a random session; otherwise pick the most recent real
+            // conversation (the server sorts by recency). Skip schedule runs — they
+            // are read-only execution history, so landing on a cron run when
+            // switching bots would be surprising; a schedule run is reachable from
+            // the sidebar's Schedule pivot.
+            // Transcript hydration is driven by startSessionMessagesStream below — no
+            // eager loadMessages REST round trip from here.
+            if (sessionId.value && knownSessionSummary(sessionId.value)) {
+              draftIntent.value = false
+            } else if (draftIntent.value) {
+              sessionId.value = null
+              replaceMessages([])
+              hasMoreOlder.value = false
+              hasLoadedOlder.value = false
+            } else {
+              const firstConversation = visibleSessions.find(s => (s.type ?? 'chat') !== 'schedule')
+              sessionId.value = (firstConversation ?? visibleSessions[0]!).id
+            }
+          }
+
+          startWebSocket(bid)
+          startBotSessionsActivityStream(bid)
+          if (sessionId.value) startSessionMessagesStream(bid, sessionId.value)
+        } while (initializeRerunRequested)
+      } finally {
+        loadingChats.value = false
+        initializing.value = false
+        initializingBotId = null
+        initializeRerunRequested = false
+        if (initializePromise === run) {
+          initializePromise = null
         }
       }
-
-      startWebSocket(bid)
-      startBotSessionsActivityStream(bid)
-      if (sessionId.value) startSessionMessagesStream(bid, sessionId.value)
-    } finally {
-      loadingChats.value = false
-      initializing.value = false
-    }
+    })()
+    initializePromise = run
+    await run
   }
 
   // Switching sessions is an explicit operation: stop the active SSE, blank

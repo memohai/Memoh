@@ -727,6 +727,82 @@ describe('workspace layout store', () => {
     expect(nextDock.panels.some(panel => panel.component === 'chat' && panel.params.sessionId === 's1')).toBe(false)
   })
 
+  it('reconciles buffered deletes when the same bot dock api re-registers', async () => {
+    const selection = useChatSelectionStore()
+    selection.setSession('s1')
+    chatStoreMock.sessions.push({ id: 's1', title: 'Deleted session' })
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
+    const deletedPanel = dock.panels.find(panel => panel.component === 'chat')!
+    await nextTick()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    store.releaseApi()
+    emitDeletedSession('s1', 'bot-1')
+    await nextTick()
+
+    chatStoreMock.selectSession.mockClear()
+    const nextDock = createFakeDock()
+    store.registerApi(nextDock as never)
+    await nextTick()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(nextDock.getPanel(deletedPanel.id)).toBeUndefined()
+    expect(nextDock.panels.some(panel => panel.component === 'chat' && panel.params.sessionId === 's1')).toBe(false)
+    expect(chatStoreMock.selectSession).not.toHaveBeenCalledWith('s1')
+  })
+
+  it('opens the selected fallback session after re-registering a layout with deleted chat and other panels', async () => {
+    const selection = useChatSelectionStore()
+    selection.setSession('s1')
+    chatStoreMock.sessions.push(
+      { id: 's1', title: 'Deleted session' },
+      { id: 's2', title: 'Fallback session' },
+    )
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
+    const deletedPanel = dock.panels.find(panel => panel.component === 'chat')!
+    store.openFile('/data/notes.md')
+    await nextTick()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    store.releaseApi()
+    selection.setSession('s2')
+    emitDeletedSession('s1', 'bot-1')
+    await nextTick()
+
+    const nextDock = createFakeDock()
+    store.registerApi(nextDock as never)
+    await nextTick()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await nextTick()
+
+    expect(nextDock.getPanel(deletedPanel.id)).toBeUndefined()
+    expect(nextDock.panels.some(panel => panel.component === 'file')).toBe(true)
+    expect(nextDock.panels.some(panel => panel.component === 'chat' && panel.params.sessionId === 's2')).toBe(true)
+    expect(nextDock.panels.some(panel => panel.component === 'chat' && panel.params.sessionId === 's1')).toBe(false)
+  })
+
+  it('does not reopen a tombstoned chat session from a stale caller', async () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    emitDeletedSession('s1', 'bot-1')
+    await nextTick()
+
+    store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
+
+    expect(dock.panels.some(panel => panel.component === 'chat' && panel.params.sessionId === 's1')).toBe(false)
+    expect(chatStoreMock.selectSession).not.toHaveBeenCalledWith('s1')
+  })
+
   it('does not repeat activation suppression after an empty delete reconciliation', async () => {
     const selection = useChatSelectionStore()
     selection.setSession('s2')
@@ -756,7 +832,7 @@ describe('workspace layout store', () => {
     expect(chatStoreMock.selectSession).toHaveBeenCalledWith('s2')
   })
 
-  it('clears unmatched tombstones when another deleted tab is reconciled', async () => {
+  it('keeps older tombstones available to block stale opens after reconciliation', async () => {
     const selection = useChatSelectionStore()
     selection.setSession('s1')
     chatStoreMock.sessions.push(
@@ -787,6 +863,9 @@ describe('workspace layout store', () => {
     await new Promise(resolve => setTimeout(resolve, 0))
 
     chatStoreMock.selectSession.mockClear()
+    store.openSessionChat({ sessionId: 'missing-session', title: 'Missing deleted session' })
+    expect(dock.panels.some(panel => panel.component === 'chat' && panel.params.sessionId === 'missing-session')).toBe(false)
+
     store.openSessionChat({ sessionId: 's2', title: 'Existing session' })
     const s2Panel = dock.panels.find(panel => panel.component === 'chat' && panel.params.sessionId === 's2')
     expect(s2Panel).toBeTruthy()
