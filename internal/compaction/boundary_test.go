@@ -142,6 +142,59 @@ func TestSplitByRatioPreservesNewestUserTurnSuffix(t *testing.T) {
 	}
 }
 
+func TestSplitByRatioCompactsCurrentTurnMiddleWhenUserIsFirst(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", `"current instruction"`, 100),
+		mkRow(t, "assistant", `"loop step 1"`, 100),
+		mkRow(t, "assistant", `"loop step 2"`, 100),
+		mkRow(t, "assistant", `"latest tail"`, 100),
+	}
+	items, _ := itemsFromRows(rows)
+	toCompact := splitByRatio(items, 400, 100)
+	if len(toCompact) != 2 {
+		t.Fatalf("compact count = %d, want 2 middle current-turn messages", len(toCompact))
+	}
+	if toCompact[0].ID != rows[1].ID || toCompact[1].ID != rows[2].ID {
+		t.Fatalf("should compact current-turn middle while keeping user and latest tail")
+	}
+}
+
+func TestSplitByRatioPreservesCurrentTurnTailToolClosure(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", `"current instruction"`, 100),
+		mkRow(t, "assistant", `"loop step 1"`, 100),
+		toolCallRow(t, 100),
+		toolResultRow(t, 100),
+	}
+	items, _ := itemsFromRows(rows)
+	toCompact := splitByRatio(items, 400, 100)
+	if len(toCompact) != 1 {
+		t.Fatalf("compact count = %d, want only pre-tool middle message", len(toCompact))
+	}
+	if toCompact[0].ID != rows[1].ID {
+		t.Fatalf("should keep user plus tail tool closure")
+	}
+}
+
+func TestToolBoundaryGuardRequiresToolClosurePolicy(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		toolCallRow(t, 100),
+		toolResultRow(t, 100),
+		mkRow(t, "assistant", `"done"`, 100),
+	}
+	items, _ := itemsFromRows(rows)
+	items[1].Policies = nil
+	if got := adjustForToolBoundary(items, 1); got != 1 {
+		t.Fatalf("boundary should be policy-driven when tool-result policy is absent, got %d", got)
+	}
+}
+
 func TestTrimCompactMessagesKeepsToolExchangeIntact(t *testing.T) {
 	t.Parallel()
 
