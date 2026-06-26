@@ -13,6 +13,7 @@ import (
 type fakeChannelIdentityService struct {
 	channelIdentity identities.ChannelIdentity
 	bySubject       map[string]identities.ChannelIdentity
+	linkedUserIDs   map[string][]string
 	err             error
 	canonical       map[string]string
 	calls           int
@@ -43,6 +44,13 @@ func (f *fakeChannelIdentityService) Canonicalize(_ context.Context, channelIden
 		}
 	}
 	return channelIdentityID, nil
+}
+
+func (f *fakeChannelIdentityService) ListUserIDsByChannelIdentity(_ context.Context, channelIdentityID string) ([]string, error) {
+	if f.linkedUserIDs == nil {
+		return nil, nil
+	}
+	return f.linkedUserIDs[channelIdentityID], nil
 }
 
 type fakePolicyService struct {
@@ -163,6 +171,26 @@ func TestIdentityResolverResolveDisplayNameFromDirectory(t *testing.T) {
 	}
 	if channelIdentitySvc.lastDisplayName != "Directory Name" {
 		t.Fatalf("expected upsert display name Directory Name, got %q", channelIdentitySvc.lastDisplayName)
+	}
+}
+
+func TestIdentityResolverMapsLinkedChannelIdentityToAccountUser(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{
+		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-linked"},
+		linkedUserIDs:   map[string][]string{"channelIdentity-linked": {"account-user-1"}},
+	}
+	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, nil, "")
+
+	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, channel.InboundMessage{
+		BotID:   "bot-1",
+		Channel: channel.ChannelType("feishu"),
+		Sender:  channel.Identity{SubjectID: "ext-1"},
+	})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if state.Identity.UserID != "account-user-1" {
+		t.Fatalf("UserID = %q, want linked account user", state.Identity.UserID)
 	}
 }
 

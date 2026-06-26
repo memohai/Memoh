@@ -24,6 +24,7 @@
     "title": "✨ 已开启新{mode}。",
     "modeChat": "对话",
     "modeDiscussion": "讨论",
+    "modeWithRuntime": "{mode}（{runtime}）",
     "usage": "无法识别参数。用 /new 开始对话，/new discuss 开始讨论。",
     "confirmTitle": "⚠️ 确认 /new",
     "confirmBody": "将开始全新{mode}会话，当前对话记录会被清除。",
@@ -37,6 +38,26 @@
     "labelContext": "上下文",
     "contextUnit": "tokens",
     "tip": "提示：随时用 {model} 或 {reasoning} 调整。"
+  },
+  "chat": {
+    "acp": {
+      "agentNotConfigured": "该 Bot 的外部 Agent 配置尚未完成。",
+      "agentNotFound": "选中的外部 Agent 不可用。",
+      "agentNotEnabled": "该 Bot 已停用选中的外部 Agent。",
+      "codexOAuthIncomplete": "该 Bot 工作区尚未完成 Codex ChatGPT 登录。",
+      "codexAuthTokenMissing": "该 Bot 工作区的 Codex 认证缺失或不完整。",
+      "agentAuthInvalid": "外部 Agent 认证无效。请更新 Agent 配置后重试。",
+      "noWorkspaceExec": "你没有执行该 Bot 工作区命令的权限。",
+      "runtimeOwnerMissing": "这个外部 Agent 会话没有运行时所有者。请重新开始一个会话。",
+      "discussUnsupported": "这个外部 Agent 无法在讨论模式中运行。",
+      "groupChatUnsupported": "群聊不能创建对话模式的外部 Agent 会话。请使用 /new codex 或 /new discuss codex。",
+      "projectModeInvalid": "外部 Agent 的项目模式无效。",
+      "projectPathInvalid": "外部 Agent 的项目路径必须是绝对路径。",
+      "displayArgsInvalid": "外部 Agent 的显示参数无效。",
+      "runtimeStartFailed": "外部 Agent 运行时启动失败。",
+      "runtimeBusy": "外部 Agent 正在处理该会话的上一轮请求。",
+      "invalidChatRuntime": "选择的对话运行时无效。"
+    }
   },
   "ops": {
     "template": "⚠️ 暂时无法{verb}，请稍后再试。",
@@ -414,6 +435,7 @@
       "summaryTitle": "Token 用量（{range}）",
       "byModelTitle": "按模型统计 token 用量（{range}）",
       "bucketChat": "对话",
+      "bucketDiscuss": "讨论",
       "bucketHeartbeat": "心跳",
       "bucketSchedule": "定时任务",
       "inOut": "输入 {in} · 输出 {out}",
@@ -435,6 +457,10 @@
     "toolApproval": {
       "unavailable": "⚠️ 当前无法审批工具调用。",
       "parseFailed": "无法识别。请回复对应请求发送 /approve 或 /reject，或点按下方按钮。"
+    },
+    "userInput": {
+      "unavailable": "⚠️ 当前无法回复用户输入请求。",
+      "parseFailed": "无法识别。请发送 /respond <request> <answer> 回复。"
     },
     "fallback": {
       "switch": "切换：{command}",

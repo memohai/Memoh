@@ -195,7 +195,7 @@ function ensureChatPanel() {
   // ACP start set it before the dock mounted); otherwise a fresh draft.
   const sid = (chatStore.sessionId ?? '').trim()
   if (sid) store.openSessionChat({ sessionId: sid })
-  else store.openDraftChat({ title: t('chat.newSession') })
+  else store.openDraftChat({ title: t('chat.newSession'), explicitSelection: false })
 }
 
 watch(currentBotId, (bid) => {

@@ -171,6 +171,10 @@ CREATE TABLE IF NOT EXISTS bots (
   reasoning_enabled BOOLEAN NOT NULL DEFAULT false,
   reasoning_effort TEXT NOT NULL DEFAULT 'medium',
   chat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  chat_runtime TEXT NOT NULL DEFAULT 'model' CHECK (chat_runtime IN ('model', 'acp_agent')),
+  chat_acp_agent_id TEXT,
+  chat_acp_project_path TEXT NOT NULL DEFAULT '/data',
+  chat_acp_project_mode TEXT NOT NULL DEFAULT 'project' CHECK (chat_acp_project_mode IN ('project', 'none')),
   search_provider_id UUID REFERENCES search_providers(id) ON DELETE SET NULL,
   fetch_provider_id UUID REFERENCES fetch_providers(id) ON DELETE SET NULL,
   memory_provider_id UUID REFERENCES memory_providers(id) ON DELETE SET NULL,
@@ -448,6 +452,9 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   route_id UUID REFERENCES bot_channel_routes(id) ON DELETE SET NULL,
   channel_type TEXT,
   type TEXT NOT NULL DEFAULT 'chat' CHECK (type IN ('chat', 'heartbeat', 'schedule', 'subagent', 'discuss', 'acp_agent')),
+  session_mode TEXT NOT NULL DEFAULT 'chat' CHECK (session_mode IN ('chat', 'discuss', 'heartbeat', 'schedule', 'subagent')),
+  runtime_type TEXT NOT NULL DEFAULT 'model' CHECK (runtime_type IN ('model', 'acp_agent')),
+  runtime_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   title TEXT NOT NULL DEFAULT '',
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   default_head_turn_id UUID,
@@ -471,6 +478,9 @@ CREATE INDEX IF NOT EXISTS idx_bot_sessions_created_by_user_id ON bot_sessions(c
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_created_by ON bot_sessions(bot_id, created_by_user_id, deleted_at);
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_active_updated ON bot_sessions(bot_id, updated_at DESC, id DESC) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_sessions_id_bot_unique ON bot_sessions(id, bot_id);
+CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_mode_runtime_active_updated
+  ON bot_sessions(bot_id, session_mode, runtime_type, updated_at DESC, id DESC)
+  WHERE deleted_at IS NULL;
 
 -- Add FK from routes to sessions (deferred to avoid circular dependency during CREATE).
 ALTER TABLE bot_channel_routes
@@ -554,6 +564,8 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   content JSONB NOT NULL,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   usage JSONB,
+  session_mode TEXT NOT NULL DEFAULT 'chat' CHECK (session_mode IN ('chat', 'discuss', 'heartbeat', 'schedule', 'subagent')),
+  runtime_type TEXT NOT NULL DEFAULT 'model' CHECK (runtime_type IN ('model', 'acp_agent')),
   model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   compact_id UUID,
   event_id UUID REFERENCES bot_session_events(id) ON DELETE SET NULL,
@@ -590,6 +602,20 @@ ALTER TABLE bot_history_turns
 ALTER TABLE bot_history_turns
   ADD CONSTRAINT fk_bot_history_turns_final_assistant_message
   FOREIGN KEY (final_assistant_message_id) REFERENCES bot_history_messages(id) ON DELETE SET NULL;
+
+CREATE TABLE IF NOT EXISTS bot_session_discuss_cursors (
+  session_id UUID NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
+  scope_key TEXT NOT NULL DEFAULT 'default',
+  route_id UUID REFERENCES bot_channel_routes(id) ON DELETE SET NULL,
+  source TEXT NOT NULL DEFAULT '',
+  consumed_cursor BIGINT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (session_id, scope_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_session_discuss_cursors_route
+  ON bot_session_discuss_cursors(route_id)
+  WHERE route_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS tool_approval_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

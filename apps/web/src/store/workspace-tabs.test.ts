@@ -13,12 +13,20 @@ vi.mock('@/i18n', () => ({
 }))
 
 const chatStoreMock = vi.hoisted(() => ({
+  sessionId: null as string | null,
+  hasExplicitSessionSelection: false,
   sessions: [] as Array<{ id: string, title?: string }>,
   knownSessions: [] as Array<{ id: string, title?: string, type?: string }>,
   createNewSession: vi.fn(async () => {}),
-  selectSession: vi.fn(async () => {}),
-  selectDraft: vi.fn(() => {}),
   deletedSession: undefined as unknown as ReturnType<typeof ref<{ id: string, botId: string, seq: number } | null>>,
+  selectSession: vi.fn(async (sessionId: string) => {
+    chatStoreMock.sessionId = sessionId
+    chatStoreMock.hasExplicitSessionSelection = true
+  }),
+  selectDraft: vi.fn((options?: { explicitSelection?: boolean }) => {
+    chatStoreMock.sessionId = null
+    chatStoreMock.hasExplicitSessionSelection = options?.explicitSelection === true
+  }),
   knownSessionSummary: vi.fn((sessionId: string) =>
     chatStoreMock.knownSessions.find(session => session.id === sessionId)
     ?? chatStoreMock.sessions.find(session => session.id === sessionId)
@@ -26,13 +34,14 @@ const chatStoreMock = vi.hoisted(() => ({
   ),
 }))
 
-const chatStoreReturn = vi.hoisted(() => ({
-  value: null as Record<string, unknown> | null,
-}))
-
 vi.mock('@/store/chat-list', () => ({
-  useChatStore: () => chatStoreReturn.value ?? (chatStoreReturn.value = {
-    sessionId: null,
+  useChatStore: () => ({
+    get sessionId() {
+      return chatStoreMock.sessionId
+    },
+    get hasExplicitSessionSelection() {
+      return chatStoreMock.hasExplicitSessionSelection
+    },
     sessions: chatStoreMock.sessions,
     knownSessions: chatStoreMock.knownSessions,
     loadingChats: false,
@@ -292,9 +301,10 @@ describe('workspace layout store', () => {
     chatStoreMock.selectSession.mockClear()
     chatStoreMock.selectDraft.mockClear()
     chatStoreMock.deletedSession = ref(null)
+    chatStoreMock.sessionId = null
+    chatStoreMock.hasExplicitSessionSelection = false
     chatStoreMock.sessions = reactive([]) as typeof chatStoreMock.sessions
     chatStoreMock.knownSessions = reactive([]) as typeof chatStoreMock.knownSessions
-    chatStoreReturn.value = null
     chatStoreMock.knownSessionSummary.mockImplementation((sessionId: string) =>
       chatStoreMock.knownSessions.find(session => session.id === sessionId)
       ?? chatStoreMock.sessions.find(session => session.id === sessionId)
@@ -401,6 +411,50 @@ describe('workspace layout store', () => {
 
     expect(dock.panels.filter((p) => p.component === 'chat')).toHaveLength(1)
     expect(dock.activePanel?.component).toBe('chat')
+  })
+
+  it('marks sidebar-created draft chats as non-explicit so default ACP can stage', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openDraftChat({ title: 'New Session', explicitSelection: false })
+
+    const draft = dock.panels.find((p) => p.component === 'chat')
+    expect(draft?.params).toMatchObject({ sessionId: null, explicitSelection: false })
+
+    store.openTerminal()
+    store.openDraftChat({ title: 'New Session', explicitSelection: false })
+
+    expect(chatStoreMock.selectDraft).toHaveBeenLastCalledWith({ explicitSelection: false })
+  })
+
+  it('does not let restored draft panel params clear an explicit empty composer', async () => {
+    const staleLayout = {
+      panels: {
+        draft: {
+          id: 'chat:bot-1:1',
+          contentComponent: 'chat',
+          title: 'New Session',
+          params: { sessionId: null, explicitSelection: false },
+        },
+      },
+    }
+    localStorage.setItem('workspace-layout', JSON.stringify({
+      'bot-1': {
+        layout: staleLayout,
+        ephemeralIds: ['chat:bot-1:1'],
+      },
+    }))
+    chatStoreMock.hasExplicitSessionSelection = true
+
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    await nextTick()
+
+    expect(chatStoreMock.selectDraft).toHaveBeenCalledWith({ explicitSelection: true })
+    expect(chatStoreMock.hasExplicitSessionSelection).toBe(true)
   })
 
   it('opens one chat tab per session and reuses the ephemeral slot', () => {

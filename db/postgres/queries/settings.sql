@@ -12,6 +12,10 @@ SELECT
   bots.compaction_ratio,
   bots.timezone,
   chat_models.id AS chat_model_id,
+  bots.chat_runtime,
+  bots.chat_acp_agent_id,
+  bots.chat_acp_project_path,
+  bots.chat_acp_project_mode,
   heartbeat_models.id AS heartbeat_model_id,
   compaction_models.id AS compaction_model_id,
   title_models.id AS title_model_id,
@@ -58,6 +62,10 @@ WITH updated AS (
       compaction_ratio = sqlc.arg(compaction_ratio),
       timezone = COALESCE(sqlc.narg(timezone)::text, bots.timezone),
       chat_model_id = COALESCE(sqlc.narg(chat_model_id)::uuid, bots.chat_model_id),
+      chat_runtime = sqlc.arg(chat_runtime),
+      chat_acp_agent_id = sqlc.narg(chat_acp_agent_id)::text,
+      chat_acp_project_path = sqlc.arg(chat_acp_project_path),
+      chat_acp_project_mode = sqlc.arg(chat_acp_project_mode),
       heartbeat_model_id = COALESCE(sqlc.narg(heartbeat_model_id)::uuid, bots.heartbeat_model_id),
       compaction_model_id = COALESCE(sqlc.narg(compaction_model_id)::uuid, bots.compaction_model_id),
       title_model_id = COALESCE(sqlc.narg(title_model_id)::uuid, bots.title_model_id),
@@ -81,7 +89,7 @@ WITH updated AS (
       command_ui_language = sqlc.arg(command_ui_language),
       updated_at = now()
   WHERE bots.id = sqlc.arg(id)
-  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
+  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
 )
 SELECT
   updated.id AS bot_id,
@@ -96,6 +104,10 @@ SELECT
   updated.compaction_ratio,
   updated.timezone,
   chat_models.id AS chat_model_id,
+  updated.chat_runtime,
+  updated.chat_acp_agent_id,
+  updated.chat_acp_project_path,
+  updated.chat_acp_project_mode,
   heartbeat_models.id AS heartbeat_model_id,
   compaction_models.id AS compaction_model_id,
   title_models.id AS title_model_id,
@@ -140,6 +152,10 @@ SET language = 'auto',
     compaction_threshold = 100000,
     compaction_ratio = 80,
     chat_model_id = NULL,
+    chat_runtime = 'model',
+    chat_acp_agent_id = NULL,
+    chat_acp_project_path = '/data',
+    chat_acp_project_mode = 'project',
     heartbeat_model_id = NULL,
     compaction_model_id = NULL,
     title_model_id = NULL,

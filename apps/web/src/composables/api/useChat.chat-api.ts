@@ -20,7 +20,10 @@ import type { Bot, SessionSummary } from './useChat.types'
 export interface CreateSessionOptions {
   title?: string
   type?: string
+  sessionMode?: string
+  runtimeType?: string
   metadata?: Record<string, unknown>
+  runtimeMetadata?: Record<string, unknown>
   /** Warm pre-session ACP runtime to bind at creation time. */
   acpRuntimeId?: string
 }
@@ -90,7 +93,10 @@ export async function createSession(botId: string, options?: string | CreateSess
         title: options?.title ?? '',
         channel_type: 'local',
         type: options?.type,
+        session_mode: options?.sessionMode,
+        runtime_type: options?.runtimeType,
         metadata: options?.metadata,
+        runtime_metadata: options?.runtimeMetadata,
         acp_runtime_id: options?.acpRuntimeId?.trim() || undefined,
       }
   const { data } = await postBotsByBotIdSessions({
@@ -128,10 +134,24 @@ export async function updateSessionTitle(botId: string, sessionId: string, title
   return data as SessionSummary
 }
 
-export async function updateSessionAgent(botId: string, sessionId: string, type: string, metadata: Record<string, unknown>): Promise<SessionSummary> {
+export interface UpdateSessionAgentOptions {
+  type?: string
+  sessionMode?: string
+  runtimeType?: string
+  metadata?: Record<string, unknown>
+  runtimeMetadata?: Record<string, unknown>
+}
+
+export async function updateSessionAgent(botId: string, sessionId: string, options: UpdateSessionAgentOptions): Promise<SessionSummary> {
   const { data } = await patchBotsByBotIdSessionsBySessionId({
     path: { bot_id: botId.trim(), session_id: sessionId.trim() },
-    body: { type, metadata },
+    body: {
+      type: options.type,
+      session_mode: options.sessionMode,
+      runtime_type: options.runtimeType,
+      metadata: options.metadata,
+      runtime_metadata: options.runtimeMetadata,
+    },
     throwOnError: true,
   })
   return data as SessionSummary

@@ -9,10 +9,18 @@ const (
 	DefaultCommandUILanguage = "auto"
 	DefaultReasoningEffort   = "medium"
 	DefaultHeartbeatInterval = 1440
+	ChatRuntimeModel         = "model"
+	ChatRuntimeACPAgent      = "acp_agent"
+	DefaultACPProjectPath    = "/data"
+	DefaultACPProjectMode    = "project"
 )
 
 type Settings struct {
 	ChatModelID            string             `json:"chat_model_id"`
+	ChatRuntime            string             `json:"chat_runtime"`
+	ChatACPAgentID         string             `json:"chat_acp_agent_id,omitempty"`
+	ChatACPProjectPath     string             `json:"chat_acp_project_path,omitempty"`
+	ChatACPProjectMode     string             `json:"chat_acp_project_mode,omitempty"`
 	ImageModelID           string             `json:"image_model_id"`
 	SearchProviderID       string             `json:"search_provider_id"`
 	FetchProviderID        string             `json:"fetch_provider_id"`
@@ -46,6 +54,10 @@ type Settings struct {
 
 type UpsertRequest struct {
 	ChatModelID            string              `json:"chat_model_id,omitempty"`
+	ChatRuntime            *string             `json:"chat_runtime,omitempty"`
+	ChatACPAgentID         *string             `json:"chat_acp_agent_id,omitempty"`
+	ChatACPProjectPath     *string             `json:"chat_acp_project_path,omitempty"`
+	ChatACPProjectMode     *string             `json:"chat_acp_project_mode,omitempty"`
 	ImageModelID           string              `json:"image_model_id,omitempty"`
 	SearchProviderID       string              `json:"search_provider_id,omitempty"`
 	FetchProviderID        *string             `json:"fetch_provider_id,omitempty"`

@@ -85,6 +85,83 @@ type AgentSetup struct {
 	Managed map[string]string
 }
 
+// MissingRequiredManagedField returns the first profile field required for the
+// selected setup mode that has not been configured. It mirrors the frontend
+// lightweight validation and intentionally does not inspect workspace-local
+// OAuth/token files; runtime readiness owns those checks.
+func MissingRequiredManagedField(profile Profile, setup AgentSetup) (ManagedField, bool) {
+	mode := normalizeSetupMode(setup.Mode, setup.Managed)
+	if mode == setupModeSelf {
+		return ManagedField{}, false
+	}
+	managed := setup.Managed
+	if managed == nil {
+		managed = map[string]string{}
+	}
+	switch NormalizeAgentID(profile.ID) {
+	case AgentCodexID:
+		if mode == setupModeOAuth {
+			return ManagedField{}, false
+		}
+		if strings.TrimSpace(managed["api_key"]) == "" {
+			return managedFieldOrFallback(profile, "api_key", ManagedField{
+				ID:        "api_key",
+				Label:     "OpenAI API key",
+				Type:      "password",
+				Required:  true,
+				Sensitive: true,
+			}), true
+		}
+		return ManagedField{}, false
+	case AgentClaudeCodeID:
+		fieldID := "api_key"
+		if mode == setupModeOAuth {
+			fieldID = "oauth_token"
+		}
+		if strings.TrimSpace(managed[fieldID]) == "" {
+			return managedFieldOrFallback(profile, fieldID, ManagedField{
+				ID:        fieldID,
+				Label:     fieldID,
+				Type:      "password",
+				Required:  true,
+				Sensitive: true,
+			}), true
+		}
+		return ManagedField{}, false
+	}
+	for _, field := range profile.ManagedFields {
+		id := NormalizeAgentID(field.ID)
+		if id == "" || !field.Required {
+			continue
+		}
+		if strings.TrimSpace(managed[id]) == "" {
+			return field, true
+		}
+	}
+	return ManagedField{}, false
+}
+
+// MissingRequiredManagedFieldForPreflight applies only the checks that can be
+// decided without a workspace backend. Legacy metadata with no explicit
+// setup_mode is resolved by the runtime pool because local workspaces default to
+// self while container workspaces default to api_key.
+func MissingRequiredManagedFieldForPreflight(profile Profile, setup AgentSetup) (ManagedField, bool) {
+	if !setup.ModeSet {
+		return ManagedField{}, false
+	}
+	return MissingRequiredManagedField(profile, setup)
+}
+
+func managedFieldOrFallback(profile Profile, fieldID string, fallback ManagedField) ManagedField {
+	fieldID = NormalizeAgentID(fieldID)
+	for _, field := range profile.ManagedFields {
+		if NormalizeAgentID(field.ID) == fieldID {
+			return field
+		}
+	}
+	return fallback
+}
+
 // registry holds all known ACP agent profiles keyed by NormalizeAgentID.
 // It is initialised via init() in this package; downstream code should only
 // access it via Lookup / List / Register so we keep the registration logic

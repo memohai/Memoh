@@ -62,6 +62,10 @@ type ChannelIdentityService interface {
 	Canonicalize(ctx context.Context, channelIdentityID string) (string, error)
 }
 
+type channelIdentityUserResolver interface {
+	ListUserIDsByChannelIdentity(ctx context.Context, channelIdentityID string) ([]string, error)
+}
+
 // PolicyService resolves access policy for a bot.
 type PolicyService interface {
 	BotOwnerUserID(ctx context.Context, botID string) (string, error)
@@ -151,6 +155,13 @@ func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.ChannelConfi
 	}
 	state.Identity.ChannelIdentityID = channelIdentityID
 	state.Identity.UserID = r.configlessUserID(msg)
+	if strings.TrimSpace(state.Identity.UserID) == "" {
+		userID, err := r.accountUserIDForChannelIdentity(ctx, channelIdentityID)
+		if err != nil {
+			return state, err
+		}
+		state.Identity.UserID = userID
+	}
 	state.Identity.DisplayName = displayName
 	state.Identity.AvatarURL = avatarURL
 
@@ -167,6 +178,26 @@ func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.ChannelConfi
 
 	// Non-owner messages pass identity resolution; downstream ACL decides allow/deny.
 	return state, nil
+}
+
+func (r *IdentityResolver) accountUserIDForChannelIdentity(ctx context.Context, channelIdentityID string) (string, error) {
+	resolver, ok := r.channelIdentities.(channelIdentityUserResolver)
+	if !ok {
+		return "", nil
+	}
+	userIDs, err := resolver.ListUserIDsByChannelIdentity(ctx, channelIdentityID)
+	if err != nil {
+		return "", err
+	}
+	if len(userIDs) == 1 {
+		return strings.TrimSpace(userIDs[0]), nil
+	}
+	if len(userIDs) > 1 && r.logger != nil {
+		r.logger.Warn("channel identity has multiple linked users; account principal is ambiguous",
+			slog.String("channel_identity_id", strings.TrimSpace(channelIdentityID)),
+			slog.Int("linked_user_count", len(userIDs)))
+	}
+	return "", nil
 }
 
 func (r *IdentityResolver) resolveIdentity(ctx context.Context, msg channel.InboundMessage, primarySubjectID, displayName, avatarURL string) (string, error) {

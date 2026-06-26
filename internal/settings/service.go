@@ -13,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/acl"
+	"github.com/memohai/memoh/internal/acpfeedback"
+	"github.com/memohai/memoh/internal/acpprofile"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -104,7 +106,22 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		return Settings{}, err
 	}
 	current := normalizeBotSetting(botRow.Language, "", aclDefaultEffect, botRow.ReasoningEnabled, botRow.ReasoningEffort, botRow.HeartbeatEnabled, botRow.HeartbeatInterval, botRow.CompactionEnabled, botRow.CompactionThreshold, botRow.CompactionRatio)
-	if settingsRow, err := s.queries.GetSettingsByBotID(ctx, pgID); err == nil {
+	// A read error here must abort: falling through would leave `current` at the
+	// model defaults and silently overwrite a saved chat_runtime=acp_agent (and
+	// its agent id) on the next save. ErrNoRows is impossible because the bot
+	// row was already fetched, but treat it as "keep defaults" defensively and
+	// only fail on a real DB error.
+	if settingsRow, settingsErr := s.queries.GetSettingsByBotID(ctx, pgID); settingsErr != nil {
+		if !errors.Is(settingsErr, pgx.ErrNoRows) {
+			return Settings{}, settingsErr
+		}
+	} else {
+		existingSettings := normalizeBotSettingsReadRow(settingsRow)
+		current.ChatModelID = existingSettings.ChatModelID
+		current.ChatRuntime = existingSettings.ChatRuntime
+		current.ChatACPAgentID = existingSettings.ChatACPAgentID
+		current.ChatACPProjectPath = existingSettings.ChatACPProjectPath
+		current.ChatACPProjectMode = existingSettings.ChatACPProjectMode
 		current.ToolApprovalConfig = parseToolApprovalConfig(settingsRow.ToolApprovalConfig)
 		current.DisplayEnabled = settingsRow.DisplayEnabled
 		current.CommandUILanguage = settingsRow.CommandUiLanguage
@@ -154,6 +171,38 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if req.DisplayEnabled != nil {
 		current.DisplayEnabled = *req.DisplayEnabled
 	}
+	if req.ChatRuntime != nil {
+		current.ChatRuntime = normalizeChatRuntime(*req.ChatRuntime)
+		if current.ChatRuntime == "" {
+			return Settings{}, acpfeedback.New(
+				acpfeedback.CodeInvalidChatRuntime,
+				"invalid_chat_runtime",
+				400,
+				"chat.acp.invalidChatRuntime",
+				"invalid chat_runtime",
+				nil,
+			)
+		}
+	}
+	if req.ChatACPAgentID != nil {
+		current.ChatACPAgentID = acpprofile.NormalizeAgentID(*req.ChatACPAgentID)
+	}
+	if req.ChatACPProjectPath != nil {
+		current.ChatACPProjectPath = strings.TrimSpace(*req.ChatACPProjectPath)
+	}
+	if req.ChatACPProjectMode != nil {
+		current.ChatACPProjectMode = normalizeACPProjectMode(*req.ChatACPProjectMode)
+		if current.ChatACPProjectMode == "" {
+			return Settings{}, acpfeedback.New(
+				acpfeedback.CodeProjectModeInvalid,
+				"invalid_project_mode",
+				400,
+				"chat.acp.projectModeInvalid",
+				"invalid chat_acp_project_mode",
+				map[string]string{"project_mode": strings.TrimSpace(*req.ChatACPProjectMode)},
+			)
+		}
+	}
 	timezoneValue := pgtype.Text{}
 	if req.Timezone != nil {
 		normalized, err := normalizeOptionalTimezone(*req.Timezone)
@@ -178,6 +227,9 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 			return Settings{}, err
 		}
 		chatModelUUID = modelID
+		if modelID.Valid {
+			current.ChatModelID = uuid.UUID(modelID.Bytes).String()
+		}
 	}
 	heartbeatModelUUID := pgtype.UUID{}
 	if value := strings.TrimSpace(req.HeartbeatModelID); value != "" {
@@ -264,6 +316,10 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 		videoModelUUID = modelID
 	}
+	current = normalizeChatRuntimeFields(current)
+	if err := validateChatRuntimeSettings(botRow.Metadata, current); err != nil {
+		return Settings{}, err
+	}
 	toolApprovalConfig, err := json.Marshal(current.ToolApprovalConfig)
 	if err != nil {
 		return Settings{}, err
@@ -310,6 +366,10 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		CompactionThreshold:    int32(current.CompactionThreshold), //nolint:gosec // bounded by non-negative setter above
 		CompactionRatio:        int32(current.CompactionRatio),     //nolint:gosec // bounded 1-100 above
 		ChatModelID:            chatModelUUID,
+		ChatRuntime:            current.ChatRuntime,
+		ChatAcpAgentID:         nullableText(current.ChatACPAgentID),
+		ChatAcpProjectPath:     current.ChatACPProjectPath,
+		ChatAcpProjectMode:     current.ChatACPProjectMode,
 		HeartbeatModelID:       heartbeatModelUUID,
 		CompactionModelID:      compactionModelUUID,
 		TitleModelID:           titleModelUUID,
@@ -372,6 +432,9 @@ func normalizeBotSetting(language string, commandUILanguage string, aclDefaultEf
 		CompactionThreshold: int(compactionThreshold),
 		CompactionRatio:     int(compactionRatio),
 		ToolApprovalConfig:  DefaultToolApprovalConfig(),
+		ChatRuntime:         ChatRuntimeModel,
+		ChatACPProjectPath:  DefaultACPProjectPath,
+		ChatACPProjectMode:  DefaultACPProjectMode,
 	}
 	if settings.Language == "" {
 		settings.Language = DefaultLanguage
@@ -419,6 +482,10 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.CompactionRatio,
 		row.Timezone,
 		row.ChatModelID,
+		row.ChatRuntime,
+		row.ChatAcpAgentID,
+		row.ChatAcpProjectPath,
+		row.ChatAcpProjectMode,
 		row.HeartbeatModelID,
 		row.CompactionModelID,
 		row.TitleModelID,
@@ -452,6 +519,10 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.CompactionRatio,
 		row.Timezone,
 		row.ChatModelID,
+		row.ChatRuntime,
+		row.ChatAcpAgentID,
+		row.ChatAcpProjectPath,
+		row.ChatAcpProjectMode,
 		row.HeartbeatModelID,
 		row.CompactionModelID,
 		row.TitleModelID,
@@ -484,6 +555,10 @@ func normalizeBotSettingsFields(
 	compactionRatio int32,
 	timezone pgtype.Text,
 	chatModelID pgtype.UUID,
+	chatRuntime string,
+	chatACPAgentID pgtype.Text,
+	chatACPProjectPath string,
+	chatACPProjectMode string,
 	heartbeatModelID pgtype.UUID,
 	compactionModelID pgtype.UUID,
 	titleModelID pgtype.UUID,
@@ -508,6 +583,21 @@ func normalizeBotSettingsFields(
 	}
 	if chatModelID.Valid {
 		settings.ChatModelID = uuid.UUID(chatModelID.Bytes).String()
+	}
+	settings.ChatRuntime = normalizeChatRuntimeValue(chatRuntime)
+	if settings.ChatRuntime == "" {
+		settings.ChatRuntime = ChatRuntimeModel
+	}
+	if chatACPAgentID.Valid {
+		settings.ChatACPAgentID = acpprofile.NormalizeAgentID(chatACPAgentID.String)
+	}
+	settings.ChatACPProjectPath = strings.TrimSpace(chatACPProjectPath)
+	if settings.ChatACPProjectPath == "" {
+		settings.ChatACPProjectPath = DefaultACPProjectPath
+	}
+	settings.ChatACPProjectMode = normalizeACPProjectMode(chatACPProjectMode)
+	if settings.ChatACPProjectMode == "" {
+		settings.ChatACPProjectMode = DefaultACPProjectMode
 	}
 	if heartbeatModelID.Valid {
 		settings.HeartbeatModelID = uuid.UUID(heartbeatModelID.Bytes).String()
@@ -569,6 +659,139 @@ func normalizeJSONObject(raw []byte) map[string]any {
 		return map[string]any{}
 	}
 	return out
+}
+
+func normalizeChatRuntime(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", ChatRuntimeModel:
+		return ChatRuntimeModel
+	case ChatRuntimeACPAgent:
+		return ChatRuntimeACPAgent
+	default:
+		return ""
+	}
+}
+
+func normalizeChatRuntimeValue(raw string) string {
+	if normalized := normalizeChatRuntime(raw); normalized != "" {
+		return normalized
+	}
+	return ChatRuntimeModel
+}
+
+func normalizeACPProjectMode(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", DefaultACPProjectMode:
+		return DefaultACPProjectMode
+	case "none":
+		return "none"
+	default:
+		return ""
+	}
+}
+
+func nullableText(value string) pgtype.Text {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: value, Valid: true}
+}
+
+func normalizeChatRuntimeFields(current Settings) Settings {
+	current.ChatRuntime = normalizeChatRuntimeValue(current.ChatRuntime)
+	current.ChatACPAgentID = acpprofile.NormalizeAgentID(current.ChatACPAgentID)
+	current.ChatACPProjectPath = strings.TrimSpace(current.ChatACPProjectPath)
+	if current.ChatACPProjectPath == "" {
+		current.ChatACPProjectPath = DefaultACPProjectPath
+	}
+	current.ChatACPProjectMode = normalizeACPProjectMode(current.ChatACPProjectMode)
+	if current.ChatACPProjectMode == "" {
+		current.ChatACPProjectMode = DefaultACPProjectMode
+	}
+	return current
+}
+
+func validateChatRuntimeSettings(botMetadata []byte, current Settings) error {
+	current = normalizeChatRuntimeFields(current)
+	if current.ChatRuntime != ChatRuntimeACPAgent {
+		return nil
+	}
+	if strings.TrimSpace(current.ChatModelID) == "" {
+		return acpfeedback.New(
+			acpfeedback.CodeInvalidChatRuntime,
+			"missing_chat_model_id",
+			400,
+			"chat.acp.invalidChatRuntime",
+			"chat_model_id is required when chat_runtime is acp_agent",
+			nil,
+		)
+	}
+	agentID := acpprofile.NormalizeAgentID(current.ChatACPAgentID)
+	if agentID == "" {
+		return acpfeedback.New(
+			acpfeedback.CodeAgentNotConfigured,
+			"missing_agent_id",
+			400,
+			"chat.acp.agentNotConfigured",
+			"chat_acp_agent_id is required when chat_runtime is acp_agent",
+			nil,
+		)
+	}
+	if current.ChatACPProjectMode == "none" {
+		return acpfeedback.New(
+			acpfeedback.CodeProjectModeInvalid,
+			"none_not_supported_for_default_chat",
+			400,
+			"chat.acp.projectModeInvalid",
+			"chat_acp_project_mode=none is not supported for default chat runtime",
+			map[string]string{"agent_id": agentID, "project_mode": current.ChatACPProjectMode},
+		)
+	}
+	if !strings.HasPrefix(strings.TrimSpace(current.ChatACPProjectPath), "/") {
+		return acpfeedback.New(
+			acpfeedback.CodeProjectPathInvalid,
+			"project_path_must_be_absolute",
+			400,
+			"chat.acp.projectPathInvalid",
+			"chat_acp_project_path must be absolute",
+			map[string]string{"agent_id": agentID},
+		)
+	}
+	profile, ok := acpprofile.Lookup(agentID)
+	if !ok {
+		return acpfeedback.New(
+			acpfeedback.CodeAgentNotFound,
+			"unknown_agent",
+			400,
+			"chat.acp.agentNotFound",
+			fmt.Sprintf("unknown ACP agent %q", agentID),
+			map[string]string{"agent_id": agentID, "agent_name": agentID},
+		)
+	}
+	metadata := normalizeJSONObject(botMetadata)
+	setup := acpprofile.ParseAgentSetup(metadata, agentID)
+	if !setup.Enabled {
+		return acpfeedback.New(
+			acpfeedback.CodeAgentNotEnabled,
+			"agent_disabled",
+			400,
+			"chat.acp.agentNotEnabled",
+			fmt.Sprintf("ACP agent %q is not enabled for this bot", agentID),
+			map[string]string{"agent_id": agentID, "agent_name": profile.DisplayName},
+		)
+	}
+	if field, missing := acpprofile.MissingRequiredManagedFieldForPreflight(profile, setup); missing {
+		return acpfeedback.New(
+			acpfeedback.CodeAgentNotConfigured,
+			"missing_"+acpprofile.NormalizeAgentID(field.ID),
+			400,
+			"chat.acp.agentNotConfigured",
+			fmt.Sprintf("ACP agent %q is missing required field %q", agentID, field.ID),
+			map[string]string{"agent_id": agentID, "agent_name": profile.DisplayName, "field_id": field.ID, "field_label": field.Label},
+		)
+	}
+	return nil
 }
 
 func (s *Service) normalizeOverlayConfig(current Settings) (Settings, error) {

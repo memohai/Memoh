@@ -11,9 +11,13 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/bots"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/userinput"
 )
+
+const testACPUserInputOwnerID = "owner-user"
 
 type fakeUserInputService struct {
 	target   userinput.Request
@@ -106,6 +110,122 @@ func collectAgentStreamEvents(t *testing.T, ch <-chan WSStreamEvent, count int) 
 		}
 	}
 	return events
+}
+
+func attachACPUserInputAuth(resolver *Resolver) {
+	resolver.botPermissions = &fakeBotPermissionChecker{
+		values: map[string]bool{
+			"bot-1:" + testACPUserInputOwnerID + ":" + bots.PermissionWorkspaceExec: true,
+		},
+	}
+	resolver.sessionService = &fakeBackgroundSessionService{
+		getFn: func(_ context.Context, sessionID string) (session.Session, error) {
+			return session.Session{
+				ID:          sessionID,
+				BotID:       "bot-1",
+				Type:        session.TypeACPAgent,
+				RuntimeType: session.RuntimeACPAgent,
+				RuntimeMetadata: map[string]any{
+					"runtime_owner_account_id": testACPUserInputOwnerID,
+				},
+			}, nil
+		},
+	}
+}
+
+func TestUserInputAnswersFromText(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		payload    userinput.UIPayload
+		text       string
+		wantAnswer userinput.QuestionAnswer
+		wantErr    bool
+	}{
+		{
+			name: "text question",
+			payload: userinput.UIPayload{Questions: []userinput.UIQuestion{{
+				ID:   "q1",
+				Kind: userinput.QuestionKindText,
+			}}},
+			text:       "ship it",
+			wantAnswer: userinput.QuestionAnswer{QuestionID: "q1", Text: "ship it"},
+		},
+		{
+			name: "single select by label",
+			payload: userinput.UIPayload{Questions: []userinput.UIQuestion{{
+				ID:   "q1",
+				Kind: userinput.QuestionKindSingleSelect,
+				Options: []userinput.UIOption{
+					{ID: "q1.o1", Label: "Plan A"},
+					{ID: "q1.o2", Label: "Plan B"},
+				},
+			}}},
+			text:       "plan b",
+			wantAnswer: userinput.QuestionAnswer{QuestionID: "q1", OptionIDs: []string{"q1.o2"}},
+		},
+		{
+			name: "multi select by labels",
+			payload: userinput.UIPayload{Questions: []userinput.UIQuestion{{
+				ID:   "q1",
+				Kind: userinput.QuestionKindMultiSelect,
+				Options: []userinput.UIOption{
+					{ID: "q1.o1", Label: "One"},
+					{ID: "q1.o2", Label: "Two"},
+				},
+			}}},
+			text:       "One, Two",
+			wantAnswer: userinput.QuestionAnswer{QuestionID: "q1", OptionIDs: []string{"q1.o1", "q1.o2"}},
+		},
+		{
+			name: "custom select answer",
+			payload: userinput.UIPayload{Questions: []userinput.UIQuestion{{
+				ID:          "q1",
+				Kind:        userinput.QuestionKindSingleSelect,
+				AllowCustom: true,
+				Options:     []userinput.UIOption{{ID: "q1.o1", Label: "Known"}},
+			}}},
+			text:       "Something else",
+			wantAnswer: userinput.QuestionAnswer{QuestionID: "q1", CustomText: "Something else"},
+		},
+		{
+			name: "multiple questions unsupported",
+			payload: userinput.UIPayload{Questions: []userinput.UIQuestion{
+				{ID: "q1", Kind: userinput.QuestionKindText},
+				{ID: "q2", Kind: userinput.QuestionKindText},
+			}},
+			text:    "answer",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := userInputAnswersFromText(tt.payload, tt.text)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("userInputAnswersFromText() error = %v", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("answers = %#v, want one", got)
+			}
+			if got[0].QuestionID != tt.wantAnswer.QuestionID || got[0].Text != tt.wantAnswer.Text || got[0].CustomText != tt.wantAnswer.CustomText {
+				t.Fatalf("answer = %#v, want %#v", got[0], tt.wantAnswer)
+			}
+			if strings.Join(got[0].OptionIDs, ",") != strings.Join(tt.wantAnswer.OptionIDs, ",") {
+				t.Fatalf("option ids = %#v, want %#v", got[0].OptionIDs, tt.wantAnswer.OptionIDs)
+			}
+		})
+	}
 }
 
 func TestRespondUserInputContinuesChatSession(t *testing.T) {
@@ -290,12 +410,14 @@ func TestRespondUserInputOnlyAcksACPRequests(t *testing.T) {
 			return nil
 		},
 	}
+	attachACPUserInputAuth(resolver)
 
 	eventCh := make(chan WSStreamEvent, 4)
 	err := resolver.RespondUserInput(context.Background(), UserInputResponseInput{
-		BotID:     "bot-1",
-		SessionID: "session-1",
-		Answers:   []userinput.QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		ActorUserID: testACPUserInputOwnerID,
+		Answers:     []userinput.QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
 	}, eventCh)
 	if err != nil {
 		t.Fatalf("respond user input: %v", err)
@@ -329,12 +451,14 @@ func TestRespondUserInputAcksAlreadyDecidedACPRequest(t *testing.T) {
 			return nil
 		},
 	}
+	attachACPUserInputAuth(resolver)
 
 	eventCh := make(chan WSStreamEvent, 4)
 	err := resolver.RespondUserInput(context.Background(), UserInputResponseInput{
-		BotID:     "bot-1",
-		SessionID: "session-1",
-		Answers:   []userinput.QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		ActorUserID: testACPUserInputOwnerID,
+		Answers:     []userinput.QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
 	}, eventCh)
 	if err != nil {
 		t.Fatalf("respond user input: %v", err)
@@ -369,12 +493,14 @@ func TestRespondUserInputACPRequestSubmitsWithLiveWaiter(t *testing.T) {
 			return nil
 		},
 	}
+	attachACPUserInputAuth(resolver)
 
 	eventCh := make(chan WSStreamEvent, 4)
 	err := resolver.RespondUserInput(context.Background(), UserInputResponseInput{
-		BotID:     "bot-1",
-		SessionID: "session-1",
-		Answers:   []userinput.QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		ActorUserID: testACPUserInputOwnerID,
+		Answers:     []userinput.QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
 	}, eventCh)
 	if err != nil {
 		t.Fatalf("respond user input: %v", err)
@@ -416,6 +542,7 @@ func TestRespondUserInputACPRequestReattachesActivePrompt(t *testing.T) {
 			return nil
 		},
 	}
+	attachACPUserInputAuth(resolver)
 	hub := resolver.registerACPActivePrompt("bot-1", "session-1")
 	if hub == nil {
 		t.Fatal("expected active ACP prompt hub")
@@ -426,9 +553,10 @@ func TestRespondUserInputACPRequestReattachesActivePrompt(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- resolver.RespondUserInput(context.Background(), UserInputResponseInput{
-			BotID:     "bot-1",
-			SessionID: "session-1",
-			Answers:   []userinput.QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
+			BotID:       "bot-1",
+			SessionID:   "session-1",
+			ActorUserID: testACPUserInputOwnerID,
+			Answers:     []userinput.QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
 		}, eventCh)
 	}()
 
@@ -500,6 +628,7 @@ func TestRespondUserInputACPRequestCanSuppressActivePromptReattach(t *testing.T)
 			return nil
 		},
 	}
+	attachACPUserInputAuth(resolver)
 	hub := resolver.registerACPActivePrompt("bot-1", "session-1")
 	if hub == nil {
 		t.Fatal("expected active ACP prompt hub")
@@ -510,6 +639,7 @@ func TestRespondUserInputACPRequestCanSuppressActivePromptReattach(t *testing.T)
 	err := resolver.RespondUserInput(context.Background(), UserInputResponseInput{
 		BotID:                      "bot-1",
 		SessionID:                  "session-1",
+		ActorUserID:                testACPUserInputOwnerID,
 		Answers:                    []userinput.QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
 		SuppressActivePromptAttach: true,
 	}, eventCh)
@@ -544,12 +674,14 @@ func TestRespondUserInputACPRequestWithoutWaiterCancelsInsteadOfSubmitting(t *te
 			return nil
 		},
 	}
+	attachACPUserInputAuth(resolver)
 
 	eventCh := make(chan WSStreamEvent, 4)
 	err := resolver.RespondUserInput(context.Background(), UserInputResponseInput{
-		BotID:     "bot-1",
-		SessionID: "session-1",
-		Answers:   []userinput.QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		ActorUserID: testACPUserInputOwnerID,
+		Answers:     []userinput.QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
 	}, eventCh)
 	if err != nil {
 		t.Fatalf("respond user input: %v", err)

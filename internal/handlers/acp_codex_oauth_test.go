@@ -3,6 +3,8 @@ package handlers
 import (
 	"strings"
 	"testing"
+
+	"github.com/memohai/memoh/internal/acpclient"
 )
 
 func TestGenerateACPCodexOAuthStateUsesCallbackPrefix(t *testing.T) {
@@ -23,7 +25,7 @@ func TestGenerateACPCodexOAuthStateUsesCallbackPrefix(t *testing.T) {
 }
 
 func TestParseCodexOAuthAuthRequiresDistinctIDToken(t *testing.T) {
-	valid := parseCodexOAuthAuth(`{
+	valid := acpclient.ParseCodexOAuthAuth(`{
   "auth_mode": "chatgpt",
   "tokens": {
     "id_token": "id.jwt.token",
@@ -39,7 +41,7 @@ func TestParseCodexOAuthAuthRequiresDistinctIDToken(t *testing.T) {
 		t.Fatalf("account id = %q, want account-123", valid.AccountID)
 	}
 
-	invalidSameToken := parseCodexOAuthAuth(`{
+	invalidSameToken := acpclient.ParseCodexOAuthAuth(`{
   "auth_mode": "chatgpt",
   "tokens": {
     "id_token": "same.jwt.token",

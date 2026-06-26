@@ -106,7 +106,7 @@ function handleNewSession() {
   if (!currentBotId.value) return
   // Opens (or focuses) the single draft tab; its activation resets the view to a
   // fresh draft (selectDraft), so no separate createNewSession is needed.
-  workspaceTabs.openDraftChat({ title: t('chat.newSession') })
+  workspaceTabs.openDraftChat({ title: t('chat.newSession'), explicitSelection: false })
 }
 
 // Navigate to the current bot's settings overview.

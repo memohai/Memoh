@@ -8,8 +8,11 @@ export interface SessionSummary {
   route_id?: string
   channel_type?: string
   type?: string
+  session_mode?: string
+  runtime_type?: string
   title: string
   metadata?: Record<string, unknown>
+  runtime_metadata?: Record<string, unknown>
   parent_session_id?: string
   default_head_turn_id?: string
   forked_from_session_id?: string
@@ -341,6 +344,7 @@ export interface UIStreamErrorEvent {
   stream_id?: string
   session_id?: string
   message: string
+  feedback?: unknown
 }
 
 export type UIStreamEvent =

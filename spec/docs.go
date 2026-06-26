@@ -5070,6 +5070,12 @@ const docTemplate = `{
                         "description": "Messages after target",
                         "name": "after",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Selected session head turn ID",
+                        "name": "head_turn_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -6537,6 +6543,15 @@ const docTemplate = `{
                     "settings"
                 ],
                 "summary": "Get user settings",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -6565,6 +6580,13 @@ const docTemplate = `{
                 ],
                 "summary": "Update user settings",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "description": "Settings payload",
                         "name": "payload",
@@ -6604,6 +6626,13 @@ const docTemplate = `{
                 "summary": "Update user settings",
                 "parameters": [
                     {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
                         "description": "Settings payload",
                         "name": "payload",
                         "in": "body",
@@ -6640,6 +6669,15 @@ const docTemplate = `{
                     "settings"
                 ],
                 "summary": "Delete user settings",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "204": {
                         "description": "No Content"
@@ -6768,7 +6806,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/token-usage": {
             "get": {
-                "description": "Get daily aggregated token usage for a bot, split by chat, heartbeat, and schedule session types, with optional model filter and per-model breakdown",
+                "description": "Get daily aggregated token usage for a bot, split by chat, discuss, heartbeat, and schedule session types, with optional model filter and per-model breakdown",
                 "tags": [
                     "token-usage"
                 ],
@@ -6799,6 +6837,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Optional model UUID to filter by",
                         "name": "model_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional session type: chat, discuss, heartbeat, schedule, or acp_agent. acp_agent filters by runtime.",
+                        "name": "session_type",
                         "in": "query"
                     }
                 ],
@@ -6870,7 +6914,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Optional session type: chat, heartbeat, schedule, or acp_agent",
+                        "description": "Optional session type: chat, discuss, heartbeat, schedule, or acp_agent. acp_agent filters by runtime.",
                         "name": "session_type",
                         "in": "query"
                     },
@@ -15209,6 +15253,9 @@ const docTemplate = `{
                 "decision_reason": {
                     "type": "string"
                 },
+                "persist_turn_id": {
+                    "type": "string"
+                },
                 "short_id": {
                     "type": "integer"
                 },
@@ -15281,6 +15328,9 @@ const docTemplate = `{
             "properties": {
                 "can_respond": {
                     "type": "boolean"
+                },
+                "persist_turn_id": {
+                    "type": "string"
                 },
                 "questions": {
                     "type": "array",
@@ -16135,7 +16185,25 @@ const docTemplate = `{
         "handlers.ErrorResponse": {
             "type": "object",
             "properties": {
+                "args": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "code": {
+                    "type": "string"
+                },
+                "http_status": {
+                    "type": "integer"
+                },
+                "i18n_key": {
+                    "type": "string"
+                },
                 "message": {
+                    "type": "string"
+                },
+                "reason": {
                     "type": "string"
                 }
             }
@@ -17012,6 +17080,12 @@ const docTemplate = `{
         "handlers.TokenUsageResponse": {
             "type": "object",
             "properties": {
+                "acp_agent": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.DailyTokenUsage"
+                    }
+                },
                 "by_model": {
                     "type": "array",
                     "items": {
@@ -17019,6 +17093,12 @@ const docTemplate = `{
                     }
                 },
                 "chat": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.DailyTokenUsage"
+                    }
+                },
+                "discuss": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/handlers.DailyTokenUsage"
@@ -17156,6 +17236,16 @@ const docTemplate = `{
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
+                },
+                "runtime_metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "runtime_type": {
+                    "type": "string"
+                },
+                "session_mode": {
+                    "type": "string"
                 },
                 "title": {
                     "type": "string"
@@ -17528,6 +17618,16 @@ const docTemplate = `{
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
+                },
+                "runtime_metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "runtime_type": {
+                    "type": "string"
+                },
+                "session_mode": {
+                    "type": "string"
                 },
                 "title": {
                     "type": "string"
@@ -18932,6 +19032,16 @@ const docTemplate = `{
                     "type": "object",
                     "additionalProperties": {}
                 },
+                "runtime_metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "runtime_type": {
+                    "type": "string"
+                },
+                "session_mode": {
+                    "type": "string"
+                },
                 "title": {
                     "type": "string"
                 },
@@ -18949,7 +19059,19 @@ const docTemplate = `{
                 "acl_default_effect": {
                     "type": "string"
                 },
+                "chat_acp_agent_id": {
+                    "type": "string"
+                },
+                "chat_acp_project_mode": {
+                    "type": "string"
+                },
+                "chat_acp_project_path": {
+                    "type": "string"
+                },
                 "chat_model_id": {
+                    "type": "string"
+                },
+                "chat_runtime": {
                     "type": "string"
                 },
                 "command_ui_language": {
@@ -19102,7 +19224,19 @@ const docTemplate = `{
                 "acl_default_effect": {
                     "type": "string"
                 },
+                "chat_acp_agent_id": {
+                    "type": "string"
+                },
+                "chat_acp_project_mode": {
+                    "type": "string"
+                },
+                "chat_acp_project_path": {
+                    "type": "string"
+                },
                 "chat_model_id": {
+                    "type": "string"
+                },
+                "chat_runtime": {
                     "type": "string"
                 },
                 "command_ui_language": {

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -25,6 +26,7 @@ type sessionUpdateQueries struct {
 	bot          sqlc.GetBotByIDRow
 	session      sqlc.BotSession
 	messageCount int64
+	permissions  []byte
 
 	updateCalled bool
 	updateParams sqlc.UpdateSessionTypeAndMetadataParams
@@ -40,10 +42,6 @@ func (q *sessionUpdateQueries) GetSessionByID(_ context.Context, _ pgtype.UUID) 
 	return q.session, nil
 }
 
-func (*sessionUpdateQueries) ListBotUserGrantsForUser(_ context.Context, _ sqlc.ListBotUserGrantsForUserParams) ([]sqlc.ListBotUserGrantsForUserRow, error) {
-	return []sqlc.ListBotUserGrantsForUserRow{{Permissions: []byte(`["chat"]`)}}, nil
-}
-
 func (*sessionUpdateQueries) ListSessionsByBot(_ context.Context, _ pgtype.UUID) ([]sqlc.ListSessionsByBotRow, error) {
 	return nil, nil
 }
@@ -52,11 +50,22 @@ func (q *sessionUpdateQueries) CountMessagesBySession(_ context.Context, _ pgtyp
 	return q.messageCount, nil
 }
 
+func (q *sessionUpdateQueries) ListBotUserGrantsForUser(_ context.Context, _ sqlc.ListBotUserGrantsForUserParams) ([]sqlc.ListBotUserGrantsForUserRow, error) {
+	permissions := q.permissions
+	if permissions == nil {
+		permissions = []byte(`["chat"]`)
+	}
+	return []sqlc.ListBotUserGrantsForUserRow{{Permissions: permissions}}, nil
+}
+
 func (q *sessionUpdateQueries) UpdateSessionTypeAndMetadata(_ context.Context, arg sqlc.UpdateSessionTypeAndMetadataParams) (sqlc.BotSession, error) {
 	q.updateCalled = true
 	q.updateParams = arg
 	updated := q.session
 	updated.Type = arg.Type
+	updated.SessionMode = arg.SessionMode
+	updated.RuntimeType = arg.RuntimeType
+	updated.RuntimeMetadata = arg.RuntimeMetadata
 	updated.Metadata = arg.Metadata
 	return updated, nil
 }
@@ -75,7 +84,7 @@ func TestUpdateSessionSwitchesEmptyChatToACPAgent(t *testing.T) {
 		bot: testBotRow(botID, map[string]any{
 			acpprofile.MetadataKeyACP: map[string]any{
 				"agents": map[string]any{
-					acpprofile.AgentCodexID: map[string]any{"enabled": true},
+					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
 				},
 			},
 		}),
@@ -95,7 +104,7 @@ func TestUpdateSessionSwitchesEmptyChatToACPAgent(t *testing.T) {
 		newTestAdminAccountService("admin"),
 	)
 
-	rec, err := callUpdateSession(handler, botID, sessionID, `{"type":"acp_agent","metadata":{"acp_agent_id":"codex","project_path":"/data/app"}}`)
+	rec, err := callUpdateSession(handler, botID, sessionID, `{"type":"acp_agent","metadata":{"acp_agent_id":"codex","project_path":"/data/app","runtime_owner_account_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}`)
 	if err != nil {
 		t.Fatalf("UpdateSession() error = %v", err)
 	}
@@ -115,6 +124,232 @@ func TestUpdateSessionSwitchesEmptyChatToACPAgent(t *testing.T) {
 	if metadata["acp_agent_id"] != "codex" || metadata["project_path"] != "/data/app" {
 		t.Fatalf("metadata = %#v, want ACP agent metadata", metadata)
 	}
+	if metadata["runtime_owner_account_id"] != "user-1" {
+		t.Fatalf("runtime owner = %#v, want authenticated user", metadata["runtime_owner_account_id"])
+	}
+	var runtimeMetadata map[string]any
+	if err := json.Unmarshal(queries.updateParams.RuntimeMetadata, &runtimeMetadata); err != nil {
+		t.Fatalf("runtime metadata json = %v", err)
+	}
+	if runtimeMetadata["runtime_owner_account_id"] != "user-1" {
+		t.Fatalf("runtime metadata owner = %#v, want authenticated user", runtimeMetadata["runtime_owner_account_id"])
+	}
+}
+
+func TestUpdateSessionRejectsConflictingTypeAndRuntime(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	sessionID := "22222222-2222-2222-2222-222222222222"
+	queries := &sessionUpdateQueries{
+		bot: testBotRow(botID, map[string]any{
+			acpprofile.MetadataKeyACP: map[string]any{
+				"agents": map[string]any{
+					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
+				},
+			},
+		}),
+		session: sqlc.BotSession{
+			ID:       testUUID(sessionID),
+			BotID:    testUUID(botID),
+			Type:     session.TypeChat,
+			Metadata: testJSON(map[string]any{}),
+		},
+	}
+	handler := NewSessionHandler(
+		slog.Default(),
+		session.NewService(nil, queries, nil),
+		nil,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("admin"),
+	)
+
+	// type=acp_agent contradicts runtime_type=model; this must 400, not silently
+	// downgrade the session to a plain model chat.
+	_, err := callUpdateSession(handler, botID, sessionID, `{"type":"acp_agent","runtime_type":"model"}`)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
+		t.Fatalf("UpdateSession() error = %v, want HTTP 400", err)
+	}
+	// The 400 must come from the conflict guard specifically, not an unrelated
+	// validation, so assert its message.
+	if msg, _ := httpErr.Message.(string); !strings.Contains(msg, "conflicts with runtime_type") {
+		t.Fatalf("error message = %q, want a 'conflicts with runtime_type' conflict error", msg)
+	}
+	if queries.updateCalled {
+		t.Fatal("UpdateSessionTypeAndMetadata must not be called for a contradictory type/runtime payload")
+	}
+}
+
+func TestUpdateSessionRejectsSystemACPRuntimeAsBadRequest(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	sessionID := "22222222-2222-2222-2222-222222222222"
+	queries := &sessionUpdateQueries{
+		bot: testBotRow(botID, map[string]any{}),
+		session: sqlc.BotSession{
+			ID:          testUUID(sessionID),
+			BotID:       testUUID(botID),
+			Type:        session.TypeChat,
+			SessionMode: session.TypeChat,
+			RuntimeType: session.RuntimeModel,
+			Title:       "",
+			Metadata:    testJSON(map[string]any{}),
+		},
+	}
+	handler := NewSessionHandler(
+		slog.Default(),
+		session.NewService(nil, queries, nil),
+		nil,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("admin"),
+	)
+
+	_, err := callUpdateSession(handler, botID, sessionID, `{"session_mode":"schedule","runtime_type":"acp_agent","metadata":{"acp_agent_id":"codex"}}`)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
+		t.Fatalf("UpdateSession() error = %v, want HTTP 400", err)
+	}
+	if msg, _ := httpErr.Message.(string); !strings.Contains(msg, "only supported") {
+		t.Fatalf("error message = %q, want an unsupported runtime/mode message", msg)
+	}
+	if queries.updateCalled {
+		t.Fatal("UpdateSessionTypeAndMetadata must not be called for an unsupported runtime/mode payload")
+	}
+}
+
+func TestUpdateSessionAllowsConcordantACPTypeAndRuntime(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	sessionID := "22222222-2222-2222-2222-222222222222"
+	queries := &sessionUpdateQueries{
+		bot: testBotRow(botID, map[string]any{
+			acpprofile.MetadataKeyACP: map[string]any{
+				"agents": map[string]any{
+					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
+				},
+			},
+		}),
+		session: sqlc.BotSession{
+			ID:       testUUID(sessionID),
+			BotID:    testUUID(botID),
+			Type:     session.TypeChat,
+			Metadata: testJSON(map[string]any{}),
+		},
+	}
+	handler := NewSessionHandler(
+		slog.Default(),
+		session.NewService(nil, queries, nil),
+		nil,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("admin"),
+	)
+
+	// type=acp_agent WITH a concordant runtime_type=acp_agent is NOT a conflict
+	// and must be allowed through (locks the guard's RuntimeACPAgent exclusion).
+	rec, err := callUpdateSession(handler, botID, sessionID,
+		`{"type":"acp_agent","runtime_type":"acp_agent","metadata":{"acp_agent_id":"codex","project_path":"/data/app","runtime_owner_account_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}`)
+	if err != nil {
+		t.Fatalf("UpdateSession() error = %v, want success for concordant payload", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !queries.updateCalled {
+		t.Fatal("UpdateSessionTypeAndMetadata should be called for a concordant acp_agent payload")
+	}
+	if queries.updateParams.Type != session.TypeACPAgent {
+		t.Fatalf("updated type = %q, want %q", queries.updateParams.Type, session.TypeACPAgent)
+	}
+}
+
+func TestUpdateSessionSwitchToACPDoesNotInheritOwnerFromNonACPMetadata(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	sessionID := "22222222-2222-2222-2222-222222222222"
+	queries := &sessionUpdateQueries{
+		bot: testBotRow(botID, map[string]any{
+			acpprofile.MetadataKeyACP: map[string]any{
+				"agents": map[string]any{
+					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
+				},
+			},
+		}),
+		session: sqlc.BotSession{
+			ID:       testUUID(sessionID),
+			BotID:    testUUID(botID),
+			Type:     session.TypeChat,
+			Title:    "",
+			Metadata: testJSON(map[string]any{"runtime_owner_account_id": "stale-metadata-owner"}),
+			RuntimeMetadata: testJSON(map[string]any{
+				"runtime_owner_account_id": "stale-runtime-owner",
+			}),
+		},
+	}
+	handler := NewSessionHandler(
+		slog.Default(),
+		session.NewService(nil, queries, nil),
+		nil,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("admin"),
+	)
+
+	rec, err := callUpdateSession(handler, botID, sessionID, `{"type":"acp_agent","metadata":{"acp_agent_id":"codex","project_path":"/data/app"}}`)
+	if err != nil {
+		t.Fatalf("UpdateSession() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(queries.updateParams.Metadata, &metadata); err != nil {
+		t.Fatalf("metadata json = %v", err)
+	}
+	if metadata["runtime_owner_account_id"] != "user-1" {
+		t.Fatalf("runtime owner = %#v, want authenticated user", metadata["runtime_owner_account_id"])
+	}
+	var runtimeMetadata map[string]any
+	if err := json.Unmarshal(queries.updateParams.RuntimeMetadata, &runtimeMetadata); err != nil {
+		t.Fatalf("runtime metadata json = %v", err)
+	}
+	if runtimeMetadata["runtime_owner_account_id"] != "user-1" {
+		t.Fatalf("runtime metadata owner = %#v, want authenticated user", runtimeMetadata["runtime_owner_account_id"])
+	}
+}
+
+func TestUpdateSessionSwitchToACPRequiresWorkspaceExec(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	sessionID := "22222222-2222-2222-2222-222222222222"
+	userID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	queries := &sessionUpdateQueries{
+		bot: testBotRow(botID, map[string]any{
+			acpprofile.MetadataKeyACP: map[string]any{
+				"agents": map[string]any{
+					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
+				},
+			},
+		}),
+		session: sqlc.BotSession{
+			ID:              testUUID(sessionID),
+			BotID:           testUUID(botID),
+			Type:            session.TypeChat,
+			Title:           "",
+			Metadata:        testJSON(map[string]any{}),
+			CreatedByUserID: testUUID(userID),
+		},
+		permissions: []byte(`["chat"]`),
+	}
+	handler := NewSessionHandler(
+		slog.Default(),
+		session.NewService(nil, queries, nil),
+		nil,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("user"),
+	)
+
+	_, err := callUpdateSessionAs(handler, botID, sessionID, userID, `{"type":"acp_agent","metadata":{"acp_agent_id":"codex","project_path":"/data/app"}}`)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
+		t.Fatalf("UpdateSession() error = %v, want HTTP 403", err)
+	}
+	if queries.updateCalled {
+		t.Fatal("UpdateSessionTypeAndMetadata should not be called without workspace_exec")
+	}
 }
 
 func TestUpdateSessionDefaultsACPProjectPath(t *testing.T) {
@@ -124,7 +359,7 @@ func TestUpdateSessionDefaultsACPProjectPath(t *testing.T) {
 		bot: testBotRow(botID, map[string]any{
 			acpprofile.MetadataKeyACP: map[string]any{
 				"agents": map[string]any{
-					acpprofile.AgentCodexID: map[string]any{"enabled": true},
+					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
 				},
 			},
 		}),
@@ -167,7 +402,7 @@ func TestUpdateSessionDefaultsACPProjectPathBeforeAgentChangeCheck(t *testing.T)
 		bot: testBotRow(botID, map[string]any{
 			acpprofile.MetadataKeyACP: map[string]any{
 				"agents": map[string]any{
-					acpprofile.AgentCodexID: map[string]any{"enabled": true},
+					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
 				},
 			},
 		}),
@@ -177,9 +412,10 @@ func TestUpdateSessionDefaultsACPProjectPathBeforeAgentChangeCheck(t *testing.T)
 			Type:  session.TypeACPAgent,
 			Title: "",
 			Metadata: testJSON(map[string]any{
-				"acp_agent_id":     "codex",
-				"project_path":     session.DefaultACPProjectPath,
-				"acp_project_mode": session.DefaultACPProjectMode,
+				"acp_agent_id":             "codex",
+				"project_path":             session.DefaultACPProjectPath,
+				"acp_project_mode":         session.DefaultACPProjectMode,
+				"runtime_owner_account_id": "original-owner",
 			}),
 		},
 		messageCount: 1,
@@ -215,7 +451,7 @@ func TestUpdateSessionRejectsAgentChangeAfterFirstMessage(t *testing.T) {
 		bot: testBotRow(botID, map[string]any{
 			acpprofile.MetadataKeyACP: map[string]any{
 				"agents": map[string]any{
-					acpprofile.AgentCodexID: map[string]any{"enabled": true},
+					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
 				},
 			},
 		}),
@@ -351,7 +587,7 @@ func TestUpdateSessionAllowsEmptyACPAgentChangeAndClosesRuntime(t *testing.T) {
 		bot: testBotRow(botID, map[string]any{
 			acpprofile.MetadataKeyACP: map[string]any{
 				"agents": map[string]any{
-					acpprofile.AgentCodexID: map[string]any{"enabled": true},
+					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
 				},
 			},
 		}),
@@ -361,8 +597,9 @@ func TestUpdateSessionAllowsEmptyACPAgentChangeAndClosesRuntime(t *testing.T) {
 			Type:  session.TypeACPAgent,
 			Title: "",
 			Metadata: testJSON(map[string]any{
-				"acp_agent_id": "codex",
-				"project_path": "/data/app",
+				"acp_agent_id":             "codex",
+				"project_path":             "/data/app",
+				"runtime_owner_account_id": "original-owner",
 			}),
 		},
 		messageCount: 0,
@@ -389,6 +626,79 @@ func TestUpdateSessionAllowsEmptyACPAgentChangeAndClosesRuntime(t *testing.T) {
 	if len(closer.closed) != 1 || closer.closed[0] != sessionID {
 		t.Fatalf("closed ACP sessions = %#v, want [%s]", closer.closed, sessionID)
 	}
+	var metadata map[string]any
+	if err := json.Unmarshal(queries.updateParams.Metadata, &metadata); err != nil {
+		t.Fatalf("metadata json = %v", err)
+	}
+	if metadata["runtime_owner_account_id"] != "original-owner" {
+		t.Fatalf("runtime owner = %#v, want original owner", metadata["runtime_owner_account_id"])
+	}
+}
+
+func TestUpdateSessionMetadataPatchPreservesDiscussACPRuntime(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	sessionID := "66666666-6666-6666-6666-666666666666"
+	queries := &sessionUpdateQueries{
+		bot: testBotRow(botID, map[string]any{
+			acpprofile.MetadataKeyACP: map[string]any{
+				"agents": map[string]any{
+					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
+				},
+			},
+		}),
+		session: sqlc.BotSession{
+			ID:          testUUID(sessionID),
+			BotID:       testUUID(botID),
+			Type:        session.TypeDiscuss,
+			SessionMode: session.TypeDiscuss,
+			RuntimeType: session.RuntimeACPAgent,
+			Title:       "Discuss Codex",
+			Metadata: testJSON(map[string]any{
+				"acp_agent_id":     "codex",
+				"project_path":     "/data/app",
+				"acp_project_mode": "project",
+				"topic":            "old",
+			}),
+			RuntimeMetadata: testJSON(map[string]any{
+				"acp_agent_id":             "codex",
+				"project_path":             "/data/app",
+				"acp_project_mode":         "project",
+				"runtime_owner_account_id": "original-owner",
+			}),
+		},
+	}
+	handler := NewSessionHandler(
+		slog.Default(),
+		session.NewService(nil, queries, nil),
+		nil,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("admin"),
+	)
+
+	rec, err := callUpdateSession(handler, botID, sessionID, `{"metadata":{"topic":"new"}}`)
+	if err != nil {
+		t.Fatalf("UpdateSession() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if queries.updateParams.Type != session.TypeDiscuss || queries.updateParams.SessionMode != session.TypeDiscuss || queries.updateParams.RuntimeType != session.RuntimeACPAgent {
+		t.Fatalf("descriptor = %q/%q/%q, want discuss/discuss/acp_agent", queries.updateParams.Type, queries.updateParams.SessionMode, queries.updateParams.RuntimeType)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(queries.updateParams.Metadata, &metadata); err != nil {
+		t.Fatalf("metadata json = %v", err)
+	}
+	if metadata["topic"] != "new" || metadata["acp_agent_id"] != "codex" || metadata["project_path"] != "/data/app" {
+		t.Fatalf("metadata = %#v, want patched topic with ACP metadata preserved", metadata)
+	}
+	var runtimeMetadata map[string]any
+	if err := json.Unmarshal(queries.updateParams.RuntimeMetadata, &runtimeMetadata); err != nil {
+		t.Fatalf("runtime metadata json = %v", err)
+	}
+	if runtimeMetadata["runtime_owner_account_id"] != "original-owner" || runtimeMetadata["acp_agent_id"] != "codex" {
+		t.Fatalf("runtime metadata = %#v, want ACP runtime metadata preserved", runtimeMetadata)
+	}
 }
 
 func TestUpdateSessionSwitchesACPAgentToChatClearsMetadataAndClosesRuntime(t *testing.T) {
@@ -407,6 +717,12 @@ func TestUpdateSessionSwitchesACPAgentToChatClearsMetadataAndClosesRuntime(t *te
 				"acp_project_mode": "project",
 				"acp_session_id":   "runtime-1",
 				"acp_status":       "active",
+			}),
+			RuntimeMetadata: testJSON(map[string]any{
+				"acp_agent_id":             "codex",
+				"project_path":             "/data/app",
+				"acp_project_mode":         "project",
+				"runtime_owner_account_id": "original-owner",
 			}),
 		},
 	}
@@ -437,6 +753,13 @@ func TestUpdateSessionSwitchesACPAgentToChatClearsMetadataAndClosesRuntime(t *te
 		if _, ok := metadata[key]; ok {
 			t.Fatalf("metadata key %q was not cleared: %#v", key, metadata)
 		}
+	}
+	var runtimeMetadata map[string]any
+	if err := json.Unmarshal(queries.updateParams.RuntimeMetadata, &runtimeMetadata); err != nil {
+		t.Fatalf("runtime metadata json = %v", err)
+	}
+	if len(runtimeMetadata) != 0 {
+		t.Fatalf("runtime metadata = %#v, want cleared", runtimeMetadata)
 	}
 	if len(closer.closed) != 1 || closer.closed[0] != sessionID {
 		t.Fatalf("closed ACP sessions = %#v, want [%s]", closer.closed, sessionID)

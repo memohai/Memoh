@@ -827,7 +827,7 @@ import {
   CircleDot,
 } from 'lucide-vue-next'
 import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogHeader, DialogTitle } from '@memohai/ui'
-import { useChatStore } from '@/store/chat-list'
+import { useChatStore, type ACPAgentSessionInput } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
 import { useScroll, useElementBounding, useIntersectionObserver, useStorage } from '@vueuse/core'
 import { useQuery } from '@pinia/colada'
@@ -847,10 +847,11 @@ import { useMediaGallery } from '../composables/useMediaGallery'
 import type { ChatAttachment, UIUserInput, UIUserInputQuestion, WSUserInputAnswer } from '@/composables/api/useChat'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
-import { acpAgentIcon, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID, readRecentACPFolders, rememberACPFolder, ACP_DEFAULT_PROJECT_MODE, ACP_NO_PROJECT_MODE, createACPNoProjectPath } from '@/utils/acp'
+import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, ACP_NO_PROJECT_MODE, acpAgentIcon, createACPNoProjectPath, findMissingRequiredManagedField, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID, readACPAgentConfig, readRecentACPFolders, rememberACPFolder } from '@/utils/acp'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { canPickProjectFolder, pickProjectFolder } from '@/utils/desktop-runtime'
 import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
+import { hasBotPermission } from '@/utils/bot-permissions'
 
 interface PendingUserInputDraft {
   optionIds: string[]
@@ -1105,6 +1106,7 @@ const {
   pendingACPModelId,
   pendingACPRuntimeStatus,
   pendingACPRuntimeEnsuring,
+  hasExplicitSessionSelection,
 } = storeToRefs(chatStore)
 
 const isActive = computed(() => props.active !== false)
@@ -1215,7 +1217,7 @@ const { data: providerData } = useQuery({
   },
 })
 
-const { data: botSettings } = useQuery({
+const { data: botSettings, isLoading: botSettingsLoading } = useQuery({
   key: () => ['bot-settings', currentBotId.value],
   query: async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1228,7 +1230,7 @@ const { data: botSettings } = useQuery({
   enabled: () => !!currentBotId.value,
 })
 
-const { data: acpProfileData } = useQuery({
+const { data: acpProfileData, isLoading: acpProfilesLoading } = useQuery({
   key: () => ['acp-profiles'],
   query: async () => {
     const { data } = await getAcpProfiles({ throwOnError: true })
@@ -1246,17 +1248,21 @@ const channelPlatform = computed(() => (activeSession.value?.channel_type ?? '')
 const isChannelThread = computed(() => !!channelPlatform.value && channelPlatform.value !== 'local')
 
 const acpProfiles = computed<AcpprofilePublicProfile[]>(() => acpProfileData.value?.items ?? [])
+const currentBotMetadata = computed(() => currentBot.value?.metadata as Record<string, unknown> | undefined)
 const enabledACPProfiles = computed(() =>
-  acpProfiles.value.filter(profile => isACPAgentEnabled(currentBot.value?.metadata as Record<string, unknown> | undefined, profile.id)),
+  acpProfiles.value.filter(profile => isACPAgentEnabled(currentBotMetadata.value, profile.id)),
 )
 
 const activeSessionMetadata = computed<Record<string, unknown>>(() =>
-  activeSession.value?.metadata && typeof activeSession.value.metadata === 'object'
-    ? activeSession.value.metadata
+  activeSession.value
+    ? {
+        ...(activeSession.value.metadata && typeof activeSession.value.metadata === 'object' ? activeSession.value.metadata : {}),
+        ...(activeSession.value.runtime_metadata && typeof activeSession.value.runtime_metadata === 'object' ? activeSession.value.runtime_metadata : {}),
+      }
     : pendingACPSessionMetadata.value ?? {},
 )
 const activeIsPendingACP = computed(() => !activeSession.value && !!pendingACPSessionMetadata.value)
-const activeIsACP = computed(() => activeSession.value?.type === 'acp_agent' || activeIsPendingACP.value)
+const activeIsACP = computed(() => activeSession.value?.type === 'acp_agent' || activeSession.value?.runtime_type === 'acp_agent' || activeIsPendingACP.value)
 const activeACPAgentId = computed(() => normalizeACPAgentID(activeSessionMetadata.value.acp_agent_id))
 const activeACPProjectLabel = computed(() => {
   if (isACPNoProject(activeSessionMetadata.value)) return t('chat.noProject')
@@ -1347,6 +1353,7 @@ const {
   models: acpModels,
   currentModelId: currentACPModelId,
   isEnsuring: acpRuntimeEnsuring,
+  ensure: ensureActiveACPRuntime,
   setModel: setActiveACPModel,
 } = useACPRuntime({
   botId: currentBotId,
@@ -1375,6 +1382,70 @@ const activeModel = computed(() => {
   const id = overrideModelId.value || botSettings.value?.chat_model_id || ''
   return models.value.find((m) => m.id === id)
 })
+
+type DefaultACPSettings = {
+  chat_runtime?: string
+  chat_acp_agent_id?: string
+  chat_acp_project_path?: string
+  chat_acp_project_mode?: string
+}
+
+type DefaultACPAvailability = {
+  input: ACPAgentSessionInput | null
+  messageKey: string
+  loading: boolean
+}
+
+const defaultACPAvailability = computed<DefaultACPAvailability>(() => {
+  const settings = botSettings.value as (DefaultACPSettings | undefined)
+  if (!settings) {
+    return { input: null, messageKey: '', loading: !!currentBotId.value && botSettingsLoading.value }
+  }
+  if (settings.chat_runtime !== 'acp_agent') return { input: null, messageKey: '', loading: false }
+  if (!hasBotPermission(currentBot.value?.current_user_permissions, 'workspace_exec')) {
+    return { input: null, messageKey: 'chat.defaultACPNoWorkspaceExec', loading: false }
+  }
+  const agentId = normalizeACPAgentID(settings.chat_acp_agent_id)
+  if (!agentId) return { input: null, messageKey: 'chat.defaultACPAgentMissing', loading: false }
+  if (!acpProfileData.value) {
+    return {
+      input: null,
+      messageKey: acpProfilesLoading.value ? 'chat.defaultACPLoading' : 'chat.defaultACPAgentUnavailable',
+      loading: acpProfilesLoading.value,
+    }
+  }
+  const profile = acpProfiles.value.find(item => normalizeACPAgentID(item.id) === agentId)
+  if (!profile) return { input: null, messageKey: 'chat.defaultACPAgentUnavailable', loading: false }
+  if (!isACPAgentEnabled(currentBotMetadata.value, profile.id)) {
+    return { input: null, messageKey: 'chat.defaultACPAgentDisabled', loading: false }
+  }
+  const config = readACPAgentConfig(currentBotMetadata.value, profile.id)
+  if (config.setupModeSet && findMissingRequiredManagedField(profile, config.managed, config.setupMode)) {
+    return { input: null, messageKey: 'chat.defaultACPAgentNotConfigured', loading: false }
+  }
+  return {
+    input: {
+      agentId,
+      projectPath: settings.chat_acp_project_path?.trim() || ACP_DEFAULT_PROJECT_PATH,
+      projectMode: settings.chat_acp_project_mode?.trim() || ACP_DEFAULT_PROJECT_MODE,
+    },
+    messageKey: '',
+    loading: false,
+  }
+})
+const defaultACPSessionInput = computed(() => defaultACPAvailability.value.input)
+const defaultACPUnavailableMessage = computed(() =>
+  defaultACPAvailability.value.messageKey ? t(defaultACPAvailability.value.messageKey) : '',
+)
+const defaultACPLoading = computed(() => defaultACPAvailability.value.loading)
+const defaultACPComposerError = ref('')
+
+function clearDefaultACPComposerError() {
+  if (defaultACPComposerError.value && composerError.value === defaultACPComposerError.value) {
+    composerError.value = ''
+  }
+  defaultACPComposerError.value = ''
+}
 
 const activeThinkingMode = computed(() => resolveThinkingMode(activeModel.value?.config))
 
@@ -1457,12 +1528,53 @@ watch(activeIsACP, (isACP) => {
   }
 })
 
-watch(activeIsPendingACP, (isPending) => {
-  if (!isPending) return
-  void chatStore.ensurePendingACPRuntime().catch((error) => {
+function pendingMatchesDefaultACP(input: ACPAgentSessionInput): boolean {
+  const metadata = pendingACPSessionMetadata.value
+  return !chatStore.sessionId
+    && metadata?.acp_agent_id === input.agentId
+    && metadata?.project_path === (input.projectPath || ACP_DEFAULT_PROJECT_PATH)
+    && metadata?.acp_project_mode === (input.projectMode || ACP_DEFAULT_PROJECT_MODE)
+}
+
+watch([defaultACPUnavailableMessage, defaultACPLoading, currentBotId, hasExplicitSessionSelection], ([message, loading]) => {
+  clearDefaultACPComposerError()
+  if (!message || !currentBotId.value) return
+  if (hasExplicitSessionSelection.value) return
+  if (!loading) {
+    chatStore.resetToEmptyComposer()
+  }
+  defaultACPComposerError.value = message
+  composerError.value = message
+}, { immediate: true })
+
+watch([defaultACPSessionInput, defaultACPLoading, currentBotId, hasExplicitSessionSelection, () => chatStore.sessionId, pendingACPSessionMetadata], ([input, loading]) => {
+  if (!currentBotId.value) return
+  if (!input) {
+    if (!loading && !hasExplicitSessionSelection.value && activeIsPendingACP.value) {
+      chatStore.resetToEmptyComposer()
+    }
+    return
+  }
+  if (hasExplicitSessionSelection.value) return
+  clearDefaultACPComposerError()
+  if (pendingMatchesDefaultACP(input)) return
+  chatStore.stageDefaultACPSession(input)
+}, { immediate: true })
+
+watch([modelPopoverOpen, activeIsPendingACP, activeIsACP, activeSessionId], ([open, isPending, isACP, sessionID]) => {
+  if (!open) return
+  if (isPending) {
+    if (pendingACPRuntimeStatus.value || pendingACPRuntimeEnsuring.value) return
+    void chatStore.ensurePendingACPRuntime().catch((error) => {
+      composerError.value = resolveApiErrorMessage(error, t('chat.agentSwitchFailed'))
+    })
+    return
+  }
+  if (!isACP || !sessionID || acpRuntime.value || acpRuntimeEnsuring.value) return
+  void ensureActiveACPRuntime().catch((error) => {
     composerError.value = resolveApiErrorMessage(error, t('chat.agentSwitchFailed'))
   })
-}, { immediate: true })
+})
 
 function normalizedProfileID(value: unknown): string {
   return normalizeACPAgentID(value)
@@ -1523,12 +1635,14 @@ async function selectACPAgent(profile: AcpprofilePublicProfile) {
 async function selectMemohAgent() {
   if (agentChanging.value || !canChangeAgent.value) return
   agentPopoverOpen.value = false
-  if (!activeIsACP.value) return
   if (!chatStore.sessionId) {
-    chatStore.clearPendingACPSession()
+    chatStore.resetToEmptyComposer({ explicitSelection: true })
+    clearDefaultACPComposerError()
+    composerError.value = ''
     pendingFiles.value = []
     return
   }
+  if (!activeIsACP.value) return
   agentChanging.value = true
   composerError.value = ''
   try {
@@ -2550,6 +2664,11 @@ async function handleSend() {
   const text = inputText.value.trim()
   const files = [...pendingFiles.value]
   if ((!text && !files.length) || streaming.value || loadingMessages.value || activeChatReadOnly.value || messageActionLoading.value) return
+  const isNewCommand = /^\/new(?:\s|$)/i.test(text)
+  if (defaultACPComposerError.value && !hasExplicitSessionSelection.value && !isNewCommand) {
+    composerError.value = defaultACPComposerError.value
+    return
+  }
   if (activeIsACP.value && files.length) {
     composerError.value = t('chat.acpAttachmentsUnsupported')
     return

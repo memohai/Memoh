@@ -57,6 +57,7 @@ type PromptResult struct {
 	StopReason string              `json:"stop_reason,omitempty"`
 	Text       string              `json:"text,omitempty"`
 	Events     []event.StreamEvent `json:"events,omitempty"`
+	Usage      *sdk.Usage          `json:"usage,omitempty"`
 	// Output is the in-process transcript used for persistence.
 	Output []sdk.Message `json:"-"`
 }
@@ -329,13 +330,15 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 // pinSessionMode forces the agent session into the requested permission mode
 // so tool approvals flow through ACP regardless of ambient agent-side
 // configuration (e.g. a host ~/.claude/settings.json defaultMode). A desired
-// mode the agent does not advertise is logged and skipped; a failed set_mode
-// call aborts startup because the session would otherwise run with unknown
-// permission behavior.
+// mode the agent does not advertise aborts startup because the session would
+// otherwise run with unknown permission behavior.
 func pinSessionMode(ctx context.Context, conn *clientConnection, sessionID acp.SessionId, modes *acp.SessionModeState, desired string, logger *slog.Logger, agentID string) error {
 	desired = strings.TrimSpace(desired)
-	if desired == "" || modes == nil {
+	if desired == "" {
 		return nil
+	}
+	if modes == nil {
+		return fmt.Errorf("pin ACP session mode %q: agent did not report session modes", desired)
 	}
 	if string(modes.CurrentModeId) == desired {
 		return nil
@@ -349,12 +352,12 @@ func pinSessionMode(ctx context.Context, conn *clientConnection, sessionID acp.S
 	}
 	if !available {
 		if logger != nil {
-			logger.Warn("ACP agent does not advertise the pinned session mode; leaving agent default",
+			logger.Warn("ACP agent does not advertise the pinned session mode",
 				slog.String("agent_id", agentID),
 				slog.String("desired_mode", desired),
 				slog.String("current_mode", string(modes.CurrentModeId)))
 		}
-		return nil
+		return fmt.Errorf("pin ACP session mode %q: mode is not advertised by agent", desired)
 	}
 	if _, err := conn.SetSessionMode(ctx, acp.SetSessionModeRequest{
 		SessionId: sessionID,
@@ -691,11 +694,13 @@ func (s *Session) PromptWithToolContextOptions(ctx context.Context, prompt strin
 		Prompt:    promptBlocks,
 	})
 	collected := collector.result()
+	usage := promptUsageFromACP(resp.Usage)
 	result := PromptResult{
 		StopReason: string(resp.StopReason),
 		Text:       collected.Text,
 		Events:     collected.Events,
-		Output:     collected.Output,
+		Usage:      usage,
+		Output:     attachUsageToLastAssistant(collected.Output, usage),
 	}
 	if err != nil {
 		if proc != nil {
@@ -704,6 +709,42 @@ func (s *Session) PromptWithToolContextOptions(ctx context.Context, prompt strin
 		return result, fmt.Errorf("send ACP prompt: %w", err)
 	}
 	return result, nil
+}
+
+func promptUsageFromACP(usage *acp.Usage) *sdk.Usage {
+	if usage == nil {
+		return nil
+	}
+	out := &sdk.Usage{
+		InputTokens:  usage.InputTokens,
+		OutputTokens: usage.OutputTokens,
+		TotalTokens:  usage.TotalTokens,
+	}
+	if usage.CachedReadTokens != nil {
+		out.CachedInputTokens = *usage.CachedReadTokens
+		out.InputTokenDetails.CacheReadTokens = *usage.CachedReadTokens
+	}
+	if usage.CachedWriteTokens != nil {
+		out.InputTokenDetails.CacheWriteTokens = *usage.CachedWriteTokens
+	}
+	if usage.ThoughtTokens != nil {
+		out.ReasoningTokens = *usage.ThoughtTokens
+		out.OutputTokenDetails.ReasoningTokens = *usage.ThoughtTokens
+	}
+	return out
+}
+
+func attachUsageToLastAssistant(output []sdk.Message, usage *sdk.Usage) []sdk.Message {
+	if usage == nil {
+		return output
+	}
+	for i := len(output) - 1; i >= 0; i-- {
+		if output[i].Role == sdk.MessageRoleAssistant {
+			output[i].Usage = usage
+			return output
+		}
+	}
+	return output
 }
 
 func (s *Session) promptBlocks(prompt string, resources []PromptResource) []acp.ContentBlock {

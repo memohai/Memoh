@@ -21,6 +21,15 @@ SELECT * FROM bot_session_events
 WHERE session_id = $1 AND received_at_ms >= $2
 ORDER BY received_at_ms ASC;
 
+-- name: ListSessionEventsByBot :many
+SELECT * FROM bot_session_events
+WHERE bot_id = $1
+ORDER BY received_at_ms ASC, id ASC;
+
 -- name: CountSessionEvents :one
 SELECT COUNT(*) FROM bot_session_events
 WHERE session_id = $1;
+
+-- name: DeleteSessionEventsByBot :exec
+DELETE FROM bot_session_events
+WHERE bot_id = $1;

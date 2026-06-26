@@ -138,6 +138,8 @@ func prepareCreateMessageInput(input PersistInput) (createMessageWithSeqInput, e
 		Content:                 content,
 		Metadata:                metaBytes,
 		Usage:                   input.Usage,
+		SessionMode:             input.SessionMode,
+		RuntimeType:             input.RuntimeType,
 		ModelID:                 pgModelID,
 		EventID:                 pgEventID,
 		DisplayText:             input.DisplayText,
@@ -170,6 +172,99 @@ func attachPersistedAssetRefs(message *Message, refs []AssetRef) {
 
 func (s *DBService) PublishMessageCreated(message Message) {
 	s.publishMessageCreated(message)
+}
+
+func (s *DBService) resolveRuntimeSnapshot(ctx context.Context, sessionID pgtype.UUID, sessionMode, runtimeType string) (string, string) {
+	var queries dbstore.Queries
+	if s != nil {
+		queries = s.queries
+	}
+	return resolveRuntimeSnapshotWithQueries(ctx, queries, sessionID, sessionMode, runtimeType)
+}
+
+func resolveRuntimeSnapshotWithQueries(ctx context.Context, queries dbstore.Queries, sessionID pgtype.UUID, sessionMode, runtimeType string) (string, string) {
+	sessionMode = normalizeSessionMode(sessionMode)
+	runtimeType = normalizeRuntimeType(runtimeType)
+	if sessionMode != "" && runtimeType != "" && sessionMode != "subagent" {
+		return sessionMode, runtimeType
+	}
+	if sessionID.Valid && queries != nil {
+		if row, err := queries.GetSessionByID(ctx, sessionID); err == nil {
+			rowMode, rowRuntime := sessionSnapshotFromRow(row)
+			if rowMode == "subagent" && row.ParentSessionID.Valid {
+				if parent, parentErr := queries.GetSessionByID(ctx, row.ParentSessionID); parentErr == nil {
+					parentMode, parentRuntime := sessionSnapshotFromRow(parent)
+					if sessionMode == "" || sessionMode == "subagent" {
+						sessionMode = parentMode
+					}
+					if runtimeType == "" {
+						runtimeType = parentRuntime
+					}
+				}
+			}
+			if sessionMode == "" {
+				sessionMode = rowMode
+			}
+			if runtimeType == "" {
+				runtimeType = rowRuntime
+			}
+		}
+	}
+	if sessionMode == "" {
+		sessionMode = "chat"
+	}
+	if runtimeType == "" {
+		runtimeType = "model"
+	}
+	return sessionMode, runtimeType
+}
+
+func sessionSnapshotFromRow(row sqlc.BotSession) (string, string) {
+	sessionMode := normalizeSessionMode(row.SessionMode)
+	if sessionMode == "" {
+		sessionMode = legacySessionMode(row.Type)
+	}
+	runtimeType := normalizeRuntimeType(row.RuntimeType)
+	if runtimeType == "" {
+		runtimeType = legacyRuntimeType(row.Type)
+	}
+	return sessionMode, runtimeType
+}
+
+func normalizeSessionMode(mode string) string {
+	switch strings.TrimSpace(mode) {
+	case "chat", "discuss", "heartbeat", "schedule", "subagent":
+		return strings.TrimSpace(mode)
+	default:
+		return ""
+	}
+}
+
+func normalizeRuntimeType(runtimeType string) string {
+	switch strings.TrimSpace(runtimeType) {
+	case "model", "acp_agent":
+		return strings.TrimSpace(runtimeType)
+	default:
+		return ""
+	}
+}
+
+func legacySessionMode(typ string) string {
+	switch strings.TrimSpace(typ) {
+	case "acp_agent":
+		return "chat"
+	case "discuss", "heartbeat", "schedule", "subagent":
+		return strings.TrimSpace(typ)
+	default:
+		return "chat"
+	}
+}
+
+func legacyRuntimeType(typ string) string {
+	if strings.TrimSpace(typ) == "acp_agent" {
+		return "acp_agent"
+	}
+	return "model"
 }
 
 // List returns all messages for a bot.
@@ -860,6 +955,8 @@ type createMessageWithSeqInput struct {
 	Metadata                []byte
 	Usage                   []byte
 	ModelID                 pgtype.UUID
+	SessionMode             string
+	RuntimeType             string
 	EventID                 pgtype.UUID
 	DisplayText             string
 }
@@ -922,6 +1019,7 @@ func createMessageWithTurnSeq(ctx context.Context, q dbstore.Queries, input crea
 	if err != nil {
 		return sqlc.CreateMessageRow{}, err
 	}
+	sessionMode, runtimeType := resolveRuntimeSnapshotWithQueries(ctx, q, input.SessionID, input.SessionMode, input.RuntimeType)
 	return q.CreateMessage(ctx, sqlc.CreateMessageParams{
 		BotID:                   input.BotID,
 		SessionID:               input.SessionID,
@@ -935,6 +1033,8 @@ func createMessageWithTurnSeq(ctx context.Context, q dbstore.Queries, input crea
 		Content:                 input.Content,
 		Metadata:                input.Metadata,
 		Usage:                   input.Usage,
+		SessionMode:             sessionMode,
+		RuntimeType:             runtimeType,
 		ModelID:                 input.ModelID,
 		EventID:                 input.EventID,
 		DisplayText:             toPgText(input.DisplayText),
@@ -1008,6 +1108,8 @@ func toMessageFromCreate(row sqlc.CreateMessageRow) Message {
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,
@@ -1040,6 +1142,8 @@ func toMessageFromListRow(row sqlc.ListMessagesRow) Message {
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,
@@ -1064,6 +1168,8 @@ func toMessageFromSessionListRow(row sqlc.ListMessagesBySessionRow) Message {
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,
@@ -1088,6 +1194,8 @@ func toMessageFromSinceRow(row sqlc.ListMessagesSinceRow) Message {
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,
@@ -1112,6 +1220,8 @@ func toMessageFromSinceBySessionRow(row sqlc.ListMessagesSinceBySessionRow) Mess
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,
@@ -1136,6 +1246,8 @@ func toMessageFromActiveSinceRow(row sqlc.ListActiveMessagesSinceRow) Message {
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,
@@ -1192,6 +1304,8 @@ func toMessageFromActiveSinceByTurnRow(row sqlc.ListActiveMessagesSinceByTurnRow
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,
@@ -1220,6 +1334,8 @@ func toMessageFromLatestRow(row sqlc.ListMessagesLatestRow) Message {
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,
@@ -1244,6 +1360,8 @@ func toMessageFromLatestBySessionRow(row sqlc.ListMessagesLatestBySessionRow) Me
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,
@@ -1268,6 +1386,8 @@ func toMessageFromBeforeRow(row sqlc.ListMessagesBeforeRow) Message {
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,
@@ -1292,6 +1412,8 @@ func toMessageFromBeforeBySessionRow(row sqlc.ListMessagesBeforeBySessionRow) Me
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,
@@ -1316,6 +1438,8 @@ func toMessageFromExternalIDBySessionRow(row sqlc.GetMessageByExternalIDBySessio
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,
@@ -1340,6 +1464,8 @@ func toMessageFromAfterBySessionRow(row sqlc.ListMessagesAfterBySessionRow) Mess
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,
@@ -1363,6 +1489,8 @@ func toMessageFields(
 	content []byte,
 	metadata []byte,
 	usage []byte,
+	sessionMode string,
+	runtimeType string,
 	eventID pgtype.UUID,
 	displayText pgtype.Text,
 	createdAt pgtype.Timestamptz,
@@ -1384,6 +1512,8 @@ func toMessageFields(
 		Content:                 json.RawMessage(content),
 		Metadata:                parseJSONMap(metadata),
 		Usage:                   json.RawMessage(usage),
+		SessionMode:             sessionMode,
+		RuntimeType:             runtimeType,
 		DisplayContent:          dbpkg.TextToString(displayText),
 		CreatedAt:               createdAt.Time,
 	}

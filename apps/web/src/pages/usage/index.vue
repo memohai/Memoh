@@ -41,6 +41,12 @@
                 <SelectItem value="chat">
                   {{ $t('usage.chat') }}
                 </SelectItem>
+                <SelectItem value="discuss">
+                  {{ $t('usage.discuss') }}
+                </SelectItem>
+                <SelectItem value="acp_agent">
+                  {{ $t('usage.acpAgent') }}
+                </SelectItem>
                 <SelectItem value="heartbeat">
                   {{ $t('usage.heartbeat') }}
                 </SelectItem>
@@ -454,7 +460,7 @@ const modelIdFilter = computed(() =>
 )
 
 const { data: usageData, asyncStatus, refetch } = useQuery({
-  key: () => ['token-usage', selectedBotId.value, dateFrom.value, dateTo.value, modelIdFilter.value ?? ''],
+  key: () => ['token-usage', selectedBotId.value, dateFrom.value, dateTo.value, modelIdFilter.value ?? '', sessionTypeFilter.value ?? ''],
   query: async () => {
     const { data } = await getBotsByBotIdTokenUsage({
       path: { bot_id: selectedBotId.value },
@@ -462,6 +468,7 @@ const { data: usageData, asyncStatus, refetch } = useQuery({
         from: dateFrom.value,
         to: dateTo.value,
         model_id: modelIdFilter.value,
+        session_type: sessionTypeFilter.value ?? undefined,
       },
       throwOnError: true,
     })
@@ -485,10 +492,11 @@ const modelOptions = computed(() =>
   byModelData.value.filter(m => m.model_id),
 )
 
-type SessionType = 'chat' | 'heartbeat' | 'schedule'
+type UsageBucketType = 'chat' | 'discuss' | 'acp_agent' | 'heartbeat' | 'schedule'
+type SessionTypeFilter = UsageBucketType
 
 const sessionTypeFilter = computed(() =>
-  selectedSessionType.value === 'all' ? null : selectedSessionType.value as SessionType,
+  selectedSessionType.value === 'all' ? null : selectedSessionType.value as SessionTypeFilter,
 )
 
 const recordsPageNumber = computed(() => {
@@ -565,6 +573,8 @@ function setRecordsPage(page: number) {
 function sessionTypeLabel(type: string | undefined): string {
   switch (type) {
     case 'chat': return t('usage.chat')
+    case 'discuss': return t('usage.discuss')
+    case 'acp_agent': return t('usage.acpAgent')
     case 'heartbeat': return t('usage.heartbeat')
     case 'schedule': return t('usage.schedule')
     default: return type || '-'
@@ -583,9 +593,13 @@ onMounted(() => {
 
 interface TypedDayMaps {
   chat: Map<string, HandlersDailyTokenUsage>
+  discuss: Map<string, HandlersDailyTokenUsage>
+  acp_agent: Map<string, HandlersDailyTokenUsage>
   heartbeat: Map<string, HandlersDailyTokenUsage>
   schedule: Map<string, HandlersDailyTokenUsage>
 }
+
+const usageBucketTypes: UsageBucketType[] = ['chat', 'discuss', 'acp_agent', 'heartbeat', 'schedule']
 
 function buildDayMap(rows: HandlersDailyTokenUsage[] | undefined) {
   const map = new Map<string, HandlersDailyTokenUsage>()
@@ -597,14 +611,16 @@ function buildDayMap(rows: HandlersDailyTokenUsage[] | undefined) {
 
 const dayMaps = computed<TypedDayMaps>(() => ({
   chat: buildDayMap(usageData.value?.chat),
+  discuss: buildDayMap(usageData.value?.discuss),
+  acp_agent: buildDayMap(usageData.value?.acp_agent),
   heartbeat: buildDayMap(usageData.value?.heartbeat),
   schedule: buildDayMap(usageData.value?.schedule),
 }))
 
-const activeTypes = computed<SessionType[]>(() => {
+const activeTypes = computed<UsageBucketType[]>(() => {
   const filter = sessionTypeFilter.value
   if (filter) return [filter]
-  return ['chat', 'heartbeat', 'schedule']
+  return usageBucketTypes
 })
 
 const allDays = computed(() => {
@@ -627,9 +643,11 @@ const allDays = computed(() => {
 
 const hasData = computed(() => {
   const chat = usageData.value?.chat ?? []
+  const discuss = usageData.value?.discuss ?? []
+  const acpAgent = usageData.value?.acp_agent ?? []
   const heartbeat = usageData.value?.heartbeat ?? []
   const schedule = usageData.value?.schedule ?? []
-  return chat.length > 0 || heartbeat.length > 0 || schedule.length > 0 || byModelData.value.length > 0
+  return chat.length > 0 || discuss.length > 0 || acpAgent.length > 0 || heartbeat.length > 0 || schedule.length > 0 || byModelData.value.length > 0
 })
 
 const summary = computed(() => {

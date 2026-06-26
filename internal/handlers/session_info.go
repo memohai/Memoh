@@ -96,7 +96,12 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "session not found")
 	}
-	bot, err := AuthorizeBotAccessWithPermission(ctx, h.botService, h.accountService, userID, botID, requiredReadPermissionForSessionType(sessionRow.Type))
+	sessionMode, runtimeType := normalizedSessionDescriptor(session.Session{
+		Type:        sessionRow.Type,
+		SessionMode: sessionRow.SessionMode,
+		RuntimeType: sessionRow.RuntimeType,
+	})
+	bot, err := AuthorizeBotAccessWithPermission(ctx, h.botService, h.accountService, userID, botID, requiredReadPermissionForSessionRuntime(sessionMode, runtimeType))
 	if err != nil {
 		return err
 	}
@@ -108,9 +113,11 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 		return err
 	}
 	sess := session.Session{
-		ID:    sessionRow.ID.String(),
-		BotID: sessionRow.BotID.String(),
-		Type:  sessionRow.Type,
+		ID:          sessionRow.ID.String(),
+		BotID:       sessionRow.BotID.String(),
+		Type:        sessionRow.Type,
+		SessionMode: sessionMode,
+		RuntimeType: runtimeType,
 	}
 	if sessionRow.CreatedByUserID.Valid {
 		sess.CreatedByUserID = sessionRow.CreatedByUserID.String()

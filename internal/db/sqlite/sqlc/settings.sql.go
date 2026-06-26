@@ -23,6 +23,10 @@ SET language = 'auto',
     compaction_threshold = 100000,
     compaction_ratio = 80,
     chat_model_id = NULL,
+    chat_runtime = 'model',
+    chat_acp_agent_id = NULL,
+    chat_acp_project_path = '/data',
+    chat_acp_project_mode = 'project',
     heartbeat_model_id = NULL,
     compaction_model_id = NULL,
     title_model_id = NULL,
@@ -63,6 +67,10 @@ SELECT
   bots.compaction_ratio,
   bots.timezone,
   chat_models.id AS chat_model_id,
+  bots.chat_runtime,
+  bots.chat_acp_agent_id,
+  bots.chat_acp_project_path,
+  bots.chat_acp_project_mode,
   heartbeat_models.id AS heartbeat_model_id,
   compaction_models.id AS compaction_model_id,
   title_models.id AS title_model_id,
@@ -109,6 +117,10 @@ type GetSettingsByBotIDRow struct {
 	CompactionRatio        int64          `json:"compaction_ratio"`
 	Timezone               sql.NullString `json:"timezone"`
 	ChatModelID            sql.NullString `json:"chat_model_id"`
+	ChatRuntime            string         `json:"chat_runtime"`
+	ChatAcpAgentID         sql.NullString `json:"chat_acp_agent_id"`
+	ChatAcpProjectPath     string         `json:"chat_acp_project_path"`
+	ChatAcpProjectMode     string         `json:"chat_acp_project_mode"`
 	HeartbeatModelID       sql.NullString `json:"heartbeat_model_id"`
 	CompactionModelID      sql.NullString `json:"compaction_model_id"`
 	TitleModelID           sql.NullString `json:"title_model_id"`
@@ -145,6 +157,10 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id string) (GetSetting
 		&i.CompactionRatio,
 		&i.Timezone,
 		&i.ChatModelID,
+		&i.ChatRuntime,
+		&i.ChatAcpAgentID,
+		&i.ChatAcpProjectPath,
+		&i.ChatAcpProjectMode,
 		&i.HeartbeatModelID,
 		&i.CompactionModelID,
 		&i.TitleModelID,
@@ -180,29 +196,33 @@ SET language = ?1,
     compaction_ratio = ?9,
     timezone = COALESCE(?10, bots.timezone),
     chat_model_id = COALESCE(?11, bots.chat_model_id),
-    heartbeat_model_id = COALESCE(?12, bots.heartbeat_model_id),
-    compaction_model_id = COALESCE(?13, bots.compaction_model_id),
-    title_model_id = COALESCE(?14, bots.title_model_id),
-    search_provider_id = COALESCE(?15, bots.search_provider_id),
+    chat_runtime = ?12,
+    chat_acp_agent_id = ?13,
+    chat_acp_project_path = ?14,
+    chat_acp_project_mode = ?15,
+    heartbeat_model_id = COALESCE(?16, bots.heartbeat_model_id),
+    compaction_model_id = COALESCE(?17, bots.compaction_model_id),
+    title_model_id = COALESCE(?18, bots.title_model_id),
+    search_provider_id = COALESCE(?19, bots.search_provider_id),
     fetch_provider_id = CASE
-      WHEN ?16 = 1 THEN ?17
+      WHEN ?20 = 1 THEN ?21
       ELSE bots.fetch_provider_id
     END,
-    memory_provider_id = COALESCE(?18, bots.memory_provider_id),
-    image_model_id = COALESCE(?19, bots.image_model_id),
-    tts_model_id = COALESCE(?20, bots.tts_model_id),
-    transcription_model_id = COALESCE(?21, bots.transcription_model_id),
-    video_model_id = COALESCE(?22, bots.video_model_id),
-    persist_full_tool_results = ?23,
-    show_tool_calls_in_im = ?24,
-    tool_approval_config = ?25,
-    display_enabled = ?26,
-    overlay_provider = ?27,
-    overlay_enabled = ?28,
-    overlay_config = ?29,
-    command_ui_language = ?30,
+    memory_provider_id = COALESCE(?22, bots.memory_provider_id),
+    image_model_id = COALESCE(?23, bots.image_model_id),
+    tts_model_id = COALESCE(?24, bots.tts_model_id),
+    transcription_model_id = COALESCE(?25, bots.transcription_model_id),
+    video_model_id = COALESCE(?26, bots.video_model_id),
+    persist_full_tool_results = ?27,
+    show_tool_calls_in_im = ?28,
+    tool_approval_config = ?29,
+    display_enabled = ?30,
+    overlay_provider = ?31,
+    overlay_enabled = ?32,
+    overlay_config = ?33,
+    command_ui_language = ?34,
     updated_at = CURRENT_TIMESTAMP
-WHERE id = ?31
+WHERE id = ?35
 RETURNING
   id AS bot_id,
   language,
@@ -216,6 +236,10 @@ RETURNING
   compaction_ratio,
   timezone,
   chat_model_id,
+  chat_runtime,
+  chat_acp_agent_id,
+  chat_acp_project_path,
+  chat_acp_project_mode,
   heartbeat_model_id,
   compaction_model_id,
   title_model_id,
@@ -248,6 +272,10 @@ type UpsertBotSettingsParams struct {
 	CompactionRatio        int64          `json:"compaction_ratio"`
 	Timezone               sql.NullString `json:"timezone"`
 	ChatModelID            sql.NullString `json:"chat_model_id"`
+	ChatRuntime            string         `json:"chat_runtime"`
+	ChatAcpAgentID         sql.NullString `json:"chat_acp_agent_id"`
+	ChatAcpProjectPath     string         `json:"chat_acp_project_path"`
+	ChatAcpProjectMode     string         `json:"chat_acp_project_mode"`
 	HeartbeatModelID       sql.NullString `json:"heartbeat_model_id"`
 	CompactionModelID      sql.NullString `json:"compaction_model_id"`
 	TitleModelID           sql.NullString `json:"title_model_id"`
@@ -283,6 +311,10 @@ type UpsertBotSettingsRow struct {
 	CompactionRatio        int64          `json:"compaction_ratio"`
 	Timezone               sql.NullString `json:"timezone"`
 	ChatModelID            sql.NullString `json:"chat_model_id"`
+	ChatRuntime            string         `json:"chat_runtime"`
+	ChatAcpAgentID         sql.NullString `json:"chat_acp_agent_id"`
+	ChatAcpProjectPath     string         `json:"chat_acp_project_path"`
+	ChatAcpProjectMode     string         `json:"chat_acp_project_mode"`
 	HeartbeatModelID       sql.NullString `json:"heartbeat_model_id"`
 	CompactionModelID      sql.NullString `json:"compaction_model_id"`
 	TitleModelID           sql.NullString `json:"title_model_id"`
@@ -316,6 +348,10 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.CompactionRatio,
 		arg.Timezone,
 		arg.ChatModelID,
+		arg.ChatRuntime,
+		arg.ChatAcpAgentID,
+		arg.ChatAcpProjectPath,
+		arg.ChatAcpProjectMode,
 		arg.HeartbeatModelID,
 		arg.CompactionModelID,
 		arg.TitleModelID,
@@ -351,6 +387,10 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.CompactionRatio,
 		&i.Timezone,
 		&i.ChatModelID,
+		&i.ChatRuntime,
+		&i.ChatAcpAgentID,
+		&i.ChatAcpProjectPath,
+		&i.ChatAcpProjectMode,
 		&i.HeartbeatModelID,
 		&i.CompactionModelID,
 		&i.TitleModelID,

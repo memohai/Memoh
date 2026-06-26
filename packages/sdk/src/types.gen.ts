@@ -1064,6 +1064,7 @@ export type ConversationUiToolApproval = {
     approval_id?: string;
     can_approve?: boolean;
     decision_reason?: string;
+    persist_turn_id?: string;
     short_id?: number;
     status?: string;
 };
@@ -1089,6 +1090,7 @@ export type ConversationUiTurn = {
 
 export type ConversationUiUserInput = {
     can_respond?: boolean;
+    persist_turn_id?: string;
     questions?: Array<UserinputUiQuestion>;
     short_id?: number;
     status?: string;
@@ -1439,7 +1441,14 @@ export type HandlersDailyTokenUsage = {
 };
 
 export type HandlersErrorResponse = {
+    args?: {
+        [key: string]: string;
+    };
+    code?: string;
+    http_status?: number;
+    i18n_key?: string;
     message?: string;
+    reason?: string;
 };
 
 export type HandlersFsArchiveRequest = {
@@ -1786,8 +1795,10 @@ export type HandlersTokenUsageRecordsResponse = {
 };
 
 export type HandlersTokenUsageResponse = {
+    acp_agent?: Array<HandlersDailyTokenUsage>;
     by_model?: Array<HandlersModelTokenUsage>;
     chat?: Array<HandlersDailyTokenUsage>;
+    discuss?: Array<HandlersDailyTokenUsage>;
     heartbeat?: Array<HandlersDailyTokenUsage>;
     schedule?: Array<HandlersDailyTokenUsage>;
 };
@@ -1850,6 +1861,11 @@ export type HandlersCreateSessionRequest = {
     metadata?: {
         [key: string]: unknown;
     };
+    runtime_metadata?: {
+        [key: string]: unknown;
+    };
+    runtime_type?: string;
+    session_mode?: string;
     title?: string;
     type?: string;
 };
@@ -2001,6 +2017,11 @@ export type HandlersUpdateSessionRequest = {
     metadata?: {
         [key: string]: unknown;
     };
+    runtime_metadata?: {
+        [key: string]: unknown;
+    };
+    runtime_type?: string;
+    session_mode?: string;
     title?: string;
     type?: string;
 };
@@ -2538,6 +2559,11 @@ export type SessionSession = {
     route_metadata?: {
         [key: string]: unknown;
     };
+    runtime_metadata?: {
+        [key: string]: unknown;
+    };
+    runtime_type?: string;
+    session_mode?: string;
     title?: string;
     type?: string;
     updated_at?: string;
@@ -2545,7 +2571,11 @@ export type SessionSession = {
 
 export type SettingsSettings = {
     acl_default_effect?: string;
+    chat_acp_agent_id?: string;
+    chat_acp_project_mode?: string;
+    chat_acp_project_path?: string;
     chat_model_id?: string;
+    chat_runtime?: string;
     command_ui_language?: string;
     compaction_enabled?: boolean;
     compaction_model_id?: string;
@@ -2599,7 +2629,11 @@ export type SettingsToolApprovalFilePolicy = {
 
 export type SettingsUpsertRequest = {
     acl_default_effect?: string;
+    chat_acp_agent_id?: string;
+    chat_acp_project_mode?: string;
+    chat_acp_project_path?: string;
     chat_model_id?: string;
+    chat_runtime?: string;
     command_ui_language?: string;
     compaction_enabled?: boolean;
     compaction_model_id?: string;
@@ -6850,6 +6884,10 @@ export type GetBotsByBotIdMessagesLocateData = {
          * Messages after target
          */
         after?: number;
+        /**
+         * Selected session head turn ID
+         */
+        head_turn_id?: string;
     };
     url: '/bots/{bot_id}/messages/locate';
 };
@@ -8078,7 +8116,12 @@ export type GetBotsByBotIdSessionsBySessionIdStatusResponse = GetBotsByBotIdSess
 
 export type DeleteBotsByBotIdSettingsData = {
     body?: never;
-    path?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
     query?: never;
     url: '/bots/{bot_id}/settings';
 };
@@ -8105,7 +8148,12 @@ export type DeleteBotsByBotIdSettingsResponses = {
 
 export type GetBotsByBotIdSettingsData = {
     body?: never;
-    path?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
     query?: never;
     url: '/bots/{bot_id}/settings';
 };
@@ -8137,7 +8185,12 @@ export type PostBotsByBotIdSettingsData = {
      * Settings payload
      */
     body: SettingsUpsertRequest;
-    path?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
     query?: never;
     url: '/bots/{bot_id}/settings';
 };
@@ -8169,7 +8222,12 @@ export type PutBotsByBotIdSettingsData = {
      * Settings payload
      */
     body: SettingsUpsertRequest;
-    path?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
     query?: never;
     url: '/bots/{bot_id}/settings';
 };
@@ -8301,6 +8359,10 @@ export type GetBotsByBotIdTokenUsageData = {
          * Optional model UUID to filter by
          */
         model_id?: string;
+        /**
+         * Optional session type: chat, discuss, heartbeat, schedule, or acp_agent. acp_agent filters by runtime.
+         */
+        session_type?: string;
     };
     url: '/bots/{bot_id}/token-usage';
 };
@@ -8353,7 +8415,7 @@ export type GetBotsByBotIdTokenUsageRecordsData = {
          */
         model_id?: string;
         /**
-         * Optional session type: chat, heartbeat, schedule, or acp_agent
+         * Optional session type: chat, discuss, heartbeat, schedule, or acp_agent. acp_agent filters by runtime.
          */
         session_type?: string;
         /**

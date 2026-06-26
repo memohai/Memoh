@@ -49,6 +49,11 @@ var codexConfigTemplate = template.Must(template.New("codex-managed-config").
 	Funcs(template.FuncMap{"tomlString": strconv.Quote}).
 	Parse(codexManagedConfigTemplate))
 
+var (
+	ErrCodexOAuthIncomplete  = errors.New("codex OAuth is incomplete")
+	ErrCodexAuthTokenMissing = errors.New("codex auth token is missing")
+)
+
 type codexManagedConfigData struct {
 	ProviderID         string
 	ProviderName       string
@@ -70,6 +75,11 @@ type CodexOAuthCredentials struct {
 	BaseURL      string
 	ExpiresAt    time.Time
 	LastRefresh  time.Time
+}
+
+type CodexOAuthAuthStatus struct {
+	Valid     bool
+	AccountID string
 }
 
 // WriteCodexManagedConfig writes the fixed Codex config.toml and auth.json
@@ -124,6 +134,49 @@ func WriteCodexManagedConfigFile(ctx context.Context, client *bridge.Client, cfg
 		return fmt.Errorf("write Codex config: %w", err)
 	}
 	return nil
+}
+
+func CheckCodexManagedOAuthAuth(ctx context.Context, client *bridge.Client) (CodexOAuthAuthStatus, error) {
+	if client == nil {
+		return CodexOAuthAuthStatus{}, errors.New("workspace bridge client is required")
+	}
+	resp, err := client.ReadFile(ctx, path.Join(CodexManagedConfigDir, "auth.json"), 0, 0)
+	if err != nil {
+		return CodexOAuthAuthStatus{}, ErrCodexOAuthIncomplete
+	}
+	status := ParseCodexOAuthAuth(resp.GetContent())
+	if !status.Valid {
+		return status, ErrCodexAuthTokenMissing
+	}
+	return status, nil
+}
+
+func ParseCodexOAuthAuth(content string) CodexOAuthAuthStatus {
+	var auth struct {
+		AuthMode string `json:"auth_mode"`
+		Tokens   struct {
+			IDToken      string `json:"id_token"`
+			AccessToken  string `json:"access_token"`  //nolint:gosec // Codex auth status parses existing runtime token material.
+			RefreshToken string `json:"refresh_token"` //nolint:gosec // Codex auth status parses existing runtime token material.
+			AccountID    string `json:"account_id"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal([]byte(content), &auth); err != nil {
+		return CodexOAuthAuthStatus{}
+	}
+	idToken := strings.TrimSpace(auth.Tokens.IDToken)
+	accessToken := strings.TrimSpace(auth.Tokens.AccessToken)
+	refreshToken := strings.TrimSpace(auth.Tokens.RefreshToken)
+	accountID := strings.TrimSpace(auth.Tokens.AccountID)
+	return CodexOAuthAuthStatus{
+		Valid: strings.EqualFold(strings.TrimSpace(auth.AuthMode), "chatgpt") &&
+			idToken != "" &&
+			accessToken != "" &&
+			refreshToken != "" &&
+			accountID != "" &&
+			idToken != accessToken,
+		AccountID: accountID,
+	}
 }
 
 // readCodexManagedOAuthBaseURL extracts the provider base_url from an existing

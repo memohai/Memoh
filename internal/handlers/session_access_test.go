@@ -52,3 +52,32 @@ func TestCanAccessSessionAllowsWorkspaceExecForOwnACP(t *testing.T) {
 		t.Fatal("manage should access all sessions")
 	}
 }
+
+func TestRequiredPermissionForACPRuntimeKeepsSystemModesManaged(t *testing.T) {
+	workspaceModes := []string{session.TypeChat, session.TypeDiscuss, session.TypeACPAgent}
+	for _, mode := range workspaceModes {
+		if got := requiredPermissionForSessionRuntime(mode, session.RuntimeACPAgent); got != bots.PermissionWorkspaceExec {
+			t.Fatalf("%s ACP permission = %q, want workspace_exec", mode, got)
+		}
+	}
+
+	managedModes := []string{session.TypeHeartbeat, session.TypeSchedule, session.TypeSubagent}
+	for _, mode := range managedModes {
+		if got := requiredPermissionForSessionRuntime(mode, session.RuntimeACPAgent); got != bots.PermissionManage {
+			t.Fatalf("%s ACP permission = %q, want manage", mode, got)
+		}
+	}
+}
+
+func TestRequiredReadPermissionForACPRuntimeAllowsUserFacingModes(t *testing.T) {
+	workspaceModes := []string{session.TypeChat, session.TypeDiscuss, session.TypeACPAgent}
+	for _, mode := range workspaceModes {
+		if got := requiredReadPermissionForSessionRuntime(mode, session.RuntimeACPAgent); got != bots.PermissionWorkspaceExec {
+			t.Fatalf("%s ACP read permission = %q, want workspace_exec", mode, got)
+		}
+	}
+
+	if got := requiredReadPermissionForSessionRuntime(session.TypeSubagent, session.RuntimeACPAgent); got != bots.PermissionChat {
+		t.Fatalf("subagent ACP read permission = %q, want chat", got)
+	}
+}

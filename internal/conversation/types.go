@@ -248,10 +248,12 @@ type ChatRequest struct {
 	UserMessagePersisted      bool             `json:"-"`
 	RewriteTargetMessageID    string           `json:"-"`
 	BaseHeadTurnID            string           `json:"-"`
+	SkipMemoryExtraction      bool             `json:"-"`
 	EventID                   string           `json:"-"`
 	RawQuery                  string           `json:"-"`
 	ToolHTTPURL               string           `json:"-"`
 	SessionType               string           `json:"-"`
+	ForceFreshRuntime         bool             `json:"-"`
 
 	// OutboundAssetCollector returns asset refs accumulated during outbound streaming.
 	// Set by the inbound channel processor; called by the resolver at persist time.

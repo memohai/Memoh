@@ -67,6 +67,55 @@ func (q *Queries) CreateSessionEvent(ctx context.Context, arg CreateSessionEvent
 	return id, err
 }
 
+const deleteSessionEventsByBot = `-- name: DeleteSessionEventsByBot :exec
+DELETE FROM bot_session_events
+WHERE bot_id = ?1
+`
+
+func (q *Queries) DeleteSessionEventsByBot(ctx context.Context, botID string) error {
+	_, err := q.db.ExecContext(ctx, deleteSessionEventsByBot, botID)
+	return err
+}
+
+const listSessionEventsByBot = `-- name: ListSessionEventsByBot :many
+SELECT id, bot_id, session_id, event_kind, event_data, external_message_id, sender_channel_identity_id, received_at_ms, created_at FROM bot_session_events
+WHERE bot_id = ?1
+ORDER BY received_at_ms ASC, id ASC
+`
+
+func (q *Queries) ListSessionEventsByBot(ctx context.Context, botID string) ([]BotSessionEvent, error) {
+	rows, err := q.db.QueryContext(ctx, listSessionEventsByBot, botID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BotSessionEvent
+	for rows.Next() {
+		var i BotSessionEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.EventKind,
+			&i.EventData,
+			&i.ExternalMessageID,
+			&i.SenderChannelIdentityID,
+			&i.ReceivedAtMs,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessionEventsBySession = `-- name: ListSessionEventsBySession :many
 SELECT id, bot_id, session_id, event_kind, event_data, external_message_id, sender_channel_identity_id, received_at_ms, created_at FROM bot_session_events
 WHERE session_id = ?1

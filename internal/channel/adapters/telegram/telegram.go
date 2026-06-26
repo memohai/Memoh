@@ -515,10 +515,19 @@ func (a *TelegramAdapter) buildTelegramInboundMessage(bot *tele.Bot, cfg channel
 // Interactive callbacks (namespace "m~") re-render the originating message in
 // place: pagination/selection re-dispatch a synthetic command, dismiss strips
 // the keyboard, and the page-indicator noop is ignored. Legacy approval
-// callbacks keep their prior behavior (clear buttons, then dispatch).
+// callbacks keep their prior behavior (clear buttons, then dispatch). ask_user
+// respond buttons only show reply instructions because the callback has no
+// answer text to submit.
 func (a *TelegramAdapter) handleTelegramCallback(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler, bot *tele.Bot, update *tele.Update) {
 	cb := update.Callback
 	if cb == nil {
+		return
+	}
+	if userInputID, ok := parseTelegramUserInputCallback(cb.Data); ok {
+		_ = bot.Respond(cb, &tele.CallbackResponse{
+			Text:      telegramUserInputCallbackHint(userInputID),
+			ShowAlert: true,
+		})
 		return
 	}
 	// Acknowledge immediately so the client stops showing a spinner.
@@ -552,7 +561,7 @@ func (a *TelegramAdapter) handleTelegramCallback(ctx context.Context, cfg channe
 		}
 	}
 
-	// Legacy tool-approval callbacks.
+	// Legacy tool-approval and user-input callbacks.
 	if msg, ok := a.buildTelegramCallbackInboundMessage(cfg, update); ok {
 		_ = clearTelegramCallbackButtons(bot, cb)
 		a.dispatchInbound(ctx, cfg, handler, msg)
@@ -571,6 +580,10 @@ func (a *TelegramAdapter) buildTelegramCallbackInboundMessage(cfg channel.Channe
 	var text string
 	if action, approvalID, ok := parseTelegramApprovalCallback(cb.Data); ok {
 		text = "/" + action + " " + approvalID
+		extraMeta["is_mentioned"] = true
+	} else if userInputID, ok := parseTelegramUserInputCallback(cb.Data); ok {
+		text = "/respond " + userInputID
+		extraMeta["is_mentioned"] = true
 	} else if parsed, ok := command.DecodeCallback(strings.TrimSpace(cb.Data)); ok {
 		syntheticCmd := parsed.SyntheticCommand()
 		if syntheticCmd == "" {
@@ -608,6 +621,21 @@ func parseTelegramApprovalCallback(data string) (action, approvalID string, ok b
 	default:
 		return "", "", false
 	}
+}
+
+func parseTelegramUserInputCallback(data string) (userInputID string, ok bool) {
+	parts := strings.SplitN(strings.TrimSpace(data), ":", 2)
+	if len(parts) != 2 {
+		return "", false
+	}
+	if parts[0] != "respond" {
+		return "", false
+	}
+	return strings.TrimSpace(parts[1]), strings.TrimSpace(parts[1]) != ""
+}
+
+func telegramUserInputCallbackHint(_ string) string {
+	return "Reply to this message with /respond <answer>."
 }
 
 func clearTelegramCallbackButtons(bot *tele.Bot, cb *tele.Callback) error {

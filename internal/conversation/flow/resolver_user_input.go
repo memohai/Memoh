@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/models"
+	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/userinput"
 )
 
@@ -29,10 +32,12 @@ type UserInputResponseInput struct {
 	SessionID                  string
 	BaseHeadTurnID             string
 	ActorChannelIdentityID     string
+	ActorUserID                string
 	UserInputID                string
 	ExplicitID                 string
 	ReplyExternalMessageID     string
 	Answers                    []userinput.QuestionAnswer
+	TextAnswer                 string
 	Canceled                   bool
 	Reason                     string
 	ChatToken                  string
@@ -58,6 +63,11 @@ func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponse
 	}
 
 	isACPMCP := userinput.IsACPMCPRequest(target)
+	if isACPMCP {
+		if err := r.authorizeACPUserInputResponse(ctx, target, input); err != nil {
+			return err
+		}
+	}
 	if isACPMCP && !r.userInput.CanRespond(target) {
 		if _, err := r.userInput.Cancel(ctx, userinput.CancelInput{
 			RequestID:              target.ID,
@@ -84,10 +94,20 @@ func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponse
 			Reason:                 input.Reason,
 		})
 	} else {
+		answers := input.Answers
+		if len(answers) == 0 && strings.TrimSpace(input.TextAnswer) != "" {
+			answers, err = userInputAnswersFromText(target.UIPayload, input.TextAnswer)
+			if err != nil {
+				if activePrompt != nil {
+					activePrompt.release()
+				}
+				return err
+			}
+		}
 		resolved, err = r.userInput.Submit(ctx, userinput.SubmitInput{
 			RequestID:              target.ID,
 			ActorChannelIdentityID: input.ActorChannelIdentityID,
-			Answers:                input.Answers,
+			Answers:                answers,
 		})
 	}
 	if err != nil {
@@ -124,6 +144,120 @@ func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponse
 		continueFn = r.storeUserInputResultAndContinue
 	}
 	return continueFn(ctx, resolved, input, toolResult, eventCh)
+}
+
+func (r *Resolver) authorizeACPUserInputResponse(ctx context.Context, target userinput.Request, input UserInputResponseInput) error {
+	if r == nil || r.sessionService == nil {
+		return errors.New("session service not configured")
+	}
+	if r.botPermissions == nil {
+		return errors.New("bot permission checker not configured")
+	}
+	sessionID := firstNonEmpty(target.SessionID, input.SessionID)
+	sess, err := r.sessionService.Get(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if !sessionpkg.IsACPRuntime(sess) {
+		return nil
+	}
+	botID := firstNonEmpty(target.BotID, input.BotID)
+	if strings.TrimSpace(sess.BotID) != "" && strings.TrimSpace(botID) != "" && sess.BotID != botID {
+		return userinput.ErrForbidden
+	}
+	if strings.TrimSpace(botID) == "" {
+		botID = sess.BotID
+	}
+	actorID := firstNonEmpty(input.ActorUserID, input.ActorChannelIdentityID)
+	if actorID == "" {
+		return userinput.ErrForbidden
+	}
+	acpMeta := mergeACPRuntimeMetadata(sess.Metadata, sess.RuntimeMetadata)
+	runtimeOwnerID := metadataString(acpMeta, "runtime_owner_account_id")
+	if runtimeOwnerID == "" {
+		return userinput.ErrForbidden
+	}
+	if ok, err := r.botPermissions.HasBotPermission(ctx, botID, runtimeOwnerID, bots.PermissionWorkspaceExec); err != nil {
+		return err
+	} else if !ok {
+		return userinput.ErrForbidden
+	}
+	if actorID != runtimeOwnerID {
+		return userinput.ErrForbidden
+	}
+	return nil
+}
+
+func userInputAnswersFromText(payload userinput.UIPayload, text string) ([]userinput.QuestionAnswer, error) {
+	answerText := strings.TrimSpace(text)
+	if answerText == "" {
+		return nil, errors.New("user input answer is required")
+	}
+	if len(payload.Questions) != 1 {
+		return nil, errors.New("text response command can answer exactly one user input question")
+	}
+	question := payload.Questions[0]
+	answer := userinput.QuestionAnswer{QuestionID: question.ID}
+	switch question.Kind {
+	case userinput.QuestionKindText:
+		answer.Text = answerText
+	case userinput.QuestionKindSingleSelect:
+		optionID, ok := matchUserInputOption(question, answerText)
+		switch {
+		case ok:
+			answer.OptionIDs = []string{optionID}
+		case question.AllowCustom:
+			answer.CustomText = answerText
+		default:
+			return nil, fmt.Errorf("answer %q does not match an option for question %q", answerText, question.ID)
+		}
+	case userinput.QuestionKindMultiSelect:
+		parts := splitUserInputAnswerText(answerText)
+		optionIDs := make([]string, 0, len(parts))
+		custom := ""
+		for _, part := range parts {
+			if optionID, ok := matchUserInputOption(question, part); ok {
+				optionIDs = append(optionIDs, optionID)
+				continue
+			}
+			if question.AllowCustom && custom == "" {
+				custom = part
+				continue
+			}
+			return nil, fmt.Errorf("answer %q does not match an option for question %q", part, question.ID)
+		}
+		answer.OptionIDs = optionIDs
+		answer.CustomText = custom
+	default:
+		return nil, fmt.Errorf("question %q has unsupported kind %q", question.ID, question.Kind)
+	}
+	return []userinput.QuestionAnswer{answer}, nil
+}
+
+func matchUserInputOption(question userinput.UIQuestion, text string) (string, bool) {
+	target := strings.TrimSpace(text)
+	for _, option := range question.Options {
+		if strings.EqualFold(strings.TrimSpace(option.ID), target) || strings.EqualFold(strings.TrimSpace(option.Label), target) {
+			return option.ID, true
+		}
+	}
+	return "", false
+}
+
+func splitUserInputAnswerText(text string) []string {
+	fields := strings.FieldsFunc(text, func(r rune) bool {
+		return r == ',' || r == '，' || r == ';' || r == '；'
+	})
+	parts := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if part := strings.TrimSpace(field); part != "" {
+			parts = append(parts, part)
+		}
+	}
+	if len(parts) == 0 && strings.TrimSpace(text) != "" {
+		parts = append(parts, strings.TrimSpace(text))
+	}
+	return parts
 }
 
 func (r *Resolver) storeUserInputResultAndContinue(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error {

@@ -136,7 +136,10 @@ const isIMSession = computed(() => {
   return ct !== '' && !WEB_CHANNELS.has(ct)
 })
 
-const acpAgentId = computed(() => normalizeACPAgentID(props.session.metadata?.acp_agent_id))
+const acpAgentId = computed(() => normalizeACPAgentID(
+  props.session.runtime_metadata?.acp_agent_id ?? props.session.metadata?.acp_agent_id,
+))
+const isACPSession = computed(() => props.session.type === 'acp_agent' || props.session.runtime_type === 'acp_agent')
 
 function routeMeta(): Record<string, unknown> {
   return props.session.route_metadata ?? {}
@@ -154,7 +157,7 @@ const displayLabel = computed(() => {
 // for IM sessions, agent name for ACP sessions.
 const hoverTitle = computed(() => {
   const title = props.session.title || t('chat.untitledSession')
-  if (props.session.type === 'acp_agent') {
+  if (isACPSession.value) {
     return `${title} — ${acpAgentDisplayName(acpAgentId.value, t('chat.sessionTypeACPAgent'))}`
   }
   if (!isIMSession.value) return title
