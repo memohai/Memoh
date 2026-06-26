@@ -295,11 +295,11 @@ func (r *Resolver) continueUserInputSession(ctx context.Context, req userinput.R
 	}
 	loaded = pruneHistoryForGateway(loaded)
 	loaded = r.replaceCompactedMessages(ctx, loaded)
-	messages, _ := trimMessagesByTokens(r.logger, loaded, 0)
+	messages, retained, _ := trimMessagesAndRecordsByTokens(r.logger, loaded, 0)
 	messages = sanitizeMessages(messages)
 
 	cfg := resolved.RunConfig
-	cfg.ContextFrags = historyContextFragsForMessages(messages, loaded)
+	cfg.ContextFrags = historyContextFragsForMessages(messages, retained)
 	cfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(messages))
 	cfg.Query = ""
 	cfg.LiveToolStream = eventCh != nil

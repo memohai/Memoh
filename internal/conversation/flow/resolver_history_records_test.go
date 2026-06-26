@@ -3,6 +3,7 @@ package flow
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -161,6 +162,30 @@ func TestHistoryContextFragsForMessagesCarriesActiveSummaryCoverage(t *testing.T
 	}
 	if summaryItems != 1 {
 		t.Fatalf("run config manifest summary items = %d, want 1: %#v", summaryItems, cfg.ContextManifest.Items)
+	}
+}
+
+func TestHistoryContextFragsUseRetainedSummaryRecordsAfterTrim(t *testing.T) {
+	t.Parallel()
+
+	firstCovered := []contextfrag.ContextRef{{Namespace: "bot_history_message", ID: "old-covered", Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable}}
+	secondCovered := []contextfrag.ContextRef{{Namespace: "bot_history_message", ID: "new-covered", Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable}}
+	first := historyfrag.SummaryRecord("compact-old", "same summary", firstCovered, contextfrag.Scope{})
+	second := historyfrag.SummaryRecord("compact-new", "same summary", secondCovered, contextfrag.Scope{})
+	records := []historyfrag.HistoryRecord{
+		first,
+		historyRecord("row-long", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent(strings.Repeat("x", 400))}, nil),
+		second,
+	}
+
+	messages, retained, _ := trimMessagesAndRecordsByTokens(nil, records, 20)
+	frags := historyContextFragsForMessages(messages, retained)
+
+	if len(frags) != 1 || frags[0].Coverage == nil || len(frags[0].Coverage.CoveredRefs) != 1 {
+		t.Fatalf("summary frag coverage mismatch: %#v", frags)
+	}
+	if got := frags[0].Coverage.CoveredRefs[0].ID; got != "new-covered" {
+		t.Fatalf("summary coverage = %q, want retained summary coverage", got)
 	}
 }
 

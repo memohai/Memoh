@@ -115,12 +115,17 @@ func estimateMessageTokens(msg conversation.ModelMessage) int {
 }
 
 func trimMessagesByTokens(log *slog.Logger, messages []historyfrag.HistoryRecord, maxTokens int) ([]conversation.ModelMessage, int) {
+	trimmed, _, totalTokens := trimMessagesAndRecordsByTokens(log, messages, maxTokens)
+	return trimmed, totalTokens
+}
+
+func trimMessagesAndRecordsByTokens(log *slog.Logger, messages []historyfrag.HistoryRecord, maxTokens int) ([]conversation.ModelMessage, []historyfrag.HistoryRecord, int) {
 	if maxTokens == 0 || len(messages) == 0 {
 		totalTokens := 0
 		for _, m := range messages {
 			totalTokens += estimateMessageTokens(m.ModelMessage)
 		}
-		return historyfrag.ToModelMessages(messages), totalTokens
+		return historyfrag.ToModelMessages(messages), messages, totalTokens
 	}
 
 	// Scan from newest to oldest, accumulating per-message estimated context
@@ -154,7 +159,8 @@ func trimMessagesByTokens(log *slog.Logger, messages []historyfrag.HistoryRecord
 		)
 	}
 
-	result := make([]conversation.ModelMessage, 0, len(messages)-cutoff)
+	retained := messages[cutoff:]
+	result := make([]conversation.ModelMessage, 0, len(retained))
 	if cutoff > 0 {
 		// Add a truncation notice at the beginning so the LLM knows earlier
 		// context was trimmed and it can use tools (memory, search) to look up
@@ -168,10 +174,10 @@ func trimMessagesByTokens(log *slog.Logger, messages []historyfrag.HistoryRecord
 			),
 		})
 	}
-	for _, m := range messages[cutoff:] {
+	for _, m := range retained {
 		result = append(result, m.ModelMessage)
 	}
-	return result, totalTokens
+	return result, retained, totalTokens
 }
 
 func historyContextFragsForMessages(messages []conversation.ModelMessage, records []historyfrag.HistoryRecord) []contextfrag.ContextFrag {
