@@ -7,12 +7,14 @@ import (
 	"unicode/utf8"
 
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/historyfrag"
 )
 
 // toolOutputMaxBytes bounds the tool-result outcome rendered into the summarizer
 // input. Stored tool payloads are already gateway-pruned; this keeps the summary
 // input compact while preserving the outcome gist.
 const toolOutputMaxBytes = 2048
+const entryMetadataMaxBytes = 256
 
 var (
 	dataURIRe = regexp.MustCompile(`data:[a-zA-Z0-9.+/-]+;base64,[A-Za-z0-9+/=]+`)
@@ -20,7 +22,8 @@ var (
 	// media such as MCP ImageContent's bare "data" field). The high threshold
 	// avoids scrubbing ordinary tokens/words, which are broken by punctuation or
 	// whitespace.
-	base64BlobRe = regexp.MustCompile(`[A-Za-z0-9+/_-]{256,}={0,2}`)
+	base64BlobRe              = regexp.MustCompile(`[A-Za-z0-9+/_-]{256,}={0,2}`)
+	entryMetadataValueEscaper = strings.NewReplacer("[", "(", "]", ")")
 )
 
 // entryPart is a minimal view of one stored content part, enough to render a
@@ -31,6 +34,46 @@ type entryPart struct {
 	ToolName string          `json:"toolName"`
 	Output   json.RawMessage `json:"output"`
 	Result   json.RawMessage `json:"result"`
+}
+
+func renderCandidateEntry(record historyfrag.HistoryRecord) string {
+	content := strings.TrimSpace(renderEntryContent(record.ModelMessage))
+	if content == "" {
+		return ""
+	}
+	if header := renderEntryHeader(record); header != "" {
+		return header + "\n" + content
+	}
+	return content
+}
+
+func renderEntryHeader(record historyfrag.HistoryRecord) string {
+	var lines []string
+	add := func(label, value string) {
+		value = cleanEntryMetadataValue(value)
+		if value == "" {
+			return
+		}
+		lines = append(lines, "["+label+": "+value+"]")
+	}
+
+	add("message_id", record.ExternalMessageID)
+	add("reply_to", record.SourceReplyToMessageID)
+	add("sender", record.SenderDisplayName)
+	add("platform", record.Platform)
+	add("conversation_type", record.Scope.ConversationType)
+	add("conversation_name", record.Scope.ConversationName)
+	add("reply_target", record.Scope.ReplyTarget)
+	return strings.Join(lines, "\n")
+}
+
+func cleanEntryMetadataValue(value string) string {
+	value = strings.Join(strings.Fields(value), " ")
+	if value == "" {
+		return ""
+	}
+	value = entryMetadataValueEscaper.Replace(value)
+	return truncateBytes(value, entryMetadataMaxBytes)
 }
 
 // renderEntryContent turns a stored history message into clean text for the

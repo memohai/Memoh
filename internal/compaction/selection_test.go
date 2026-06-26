@@ -29,7 +29,7 @@ func mkRow(t *testing.T, role, content string, outputTokens int) sqlc.ListUncomp
 	return row
 }
 
-func itemTokens(items []compactionItem) []int {
+func itemTokens(items []CompactionCandidate) []int {
 	out := make([]int, len(items))
 	for i, it := range items {
 		out[i] = estimateItemTokens(it)
@@ -50,8 +50,8 @@ func TestEstimateItemTokensPrefersOutputTokensThenContentFallback(t *testing.T) 
 	if got[0] != 50 {
 		t.Fatalf("usage token estimate = %d, want 50", got[0])
 	}
-	if got[1] != len(items[1].content)/4 {
-		t.Fatalf("content token estimate = %d, want %d", got[1], len(items[1].content)/4)
+	if got[1] != len(items[1].RawContent)/4 {
+		t.Fatalf("content token estimate = %d, want %d", got[1], len(items[1].RawContent)/4)
 	}
 }
 
@@ -64,18 +64,77 @@ func TestItemsFromRowsPreservesIDContentAndClassifiesRecord(t *testing.T) {
 		t.Fatalf("items len = %d, want 1", len(items))
 	}
 	it := items[0]
-	if it.id != row.ID {
+	if it.ID != row.ID {
 		t.Fatalf("item id mismatch")
 	}
-	if string(it.content) != string(row.Content) {
-		t.Fatalf("item content = %q, want %q", it.content, row.Content)
+	if string(it.RawContent) != string(row.Content) {
+		t.Fatalf("item content = %q, want %q", it.RawContent, row.Content)
 	}
-	if it.record.ModelMessage.Role != "user" {
-		t.Fatalf("record role = %q, want user", it.record.ModelMessage.Role)
+	if it.Record.ModelMessage.Role != "user" {
+		t.Fatalf("record role = %q, want user", it.Record.ModelMessage.Role)
 	}
-	if it.record.ModelMessage.TextContent() != "hi there" {
-		t.Fatalf("record text = %q, want 'hi there'", it.record.ModelMessage.TextContent())
+	if it.Record.ModelMessage.TextContent() != "hi there" {
+		t.Fatalf("record text = %q, want 'hi there'", it.Record.ModelMessage.TextContent())
 	}
+}
+
+func TestItemsFromRowsPreservesDirectedSignalMetadata(t *testing.T) {
+	t.Parallel()
+
+	row := mkRow(t, "user", `"please check the reply"`, 0)
+	row.SenderUserID = testUUID(t)
+	row.ExternalMessageID = pgtype.Text{String: "msg-123", Valid: true}
+	row.SourceReplyToMessageID = pgtype.Text{String: "msg-parent", Valid: true}
+	row.EventID = testUUID(t)
+	row.SenderDisplayName = pgtype.Text{String: "Alice", Valid: true}
+	row.Platform = pgtype.Text{String: "telegram", Valid: true}
+	row.ConversationType = pgtype.Text{String: "group", Valid: true}
+	row.ConversationName = "Ops Room"
+	row.ReplyTarget = pgtype.Text{String: "thread-9", Valid: true}
+
+	items, skipped := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{row})
+	if skipped != 0 || len(items) != 1 {
+		t.Fatalf("items=%d skipped=%d, want one classified row", len(items), skipped)
+	}
+	record := items[0].Record
+	if record.ExternalMessageID != "msg-123" ||
+		record.SourceReplyToMessageID != "msg-parent" ||
+		record.SenderDisplayName != "Alice" ||
+		record.Platform != "telegram" ||
+		record.Scope.ConversationType != "group" ||
+		record.Scope.ConversationName != "Ops Room" ||
+		record.Scope.ReplyTarget != "thread-9" {
+		t.Fatalf("directed signal was not preserved: %#v scope=%#v", record, record.Scope)
+	}
+}
+
+func TestItemsFromRowsAnnotatesCompactionCandidatePolicy(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", `"old question"`, 100),
+		mkRow(t, "assistant", `"old answer"`, 100),
+		mkRow(t, "user", `"current question"`, 100),
+		toolCallRow(t, 100),
+		toolResultRow(t, 100),
+	}
+	items, skipped := itemsFromRows(rows)
+	if skipped != 0 || len(items) != 5 {
+		t.Fatalf("items=%d skipped=%d, want five classified candidates", len(items), skipped)
+	}
+
+	assertPolicy(t, items[0], CompactPolicyCanDrop)
+	assertPolicy(t, items[1], CompactPolicyCanDrop)
+	assertNoPolicy(t, items[0], CompactPolicyPreserveRecent)
+	assertNoPolicy(t, items[1], CompactPolicyPreserveRecent)
+	assertPolicy(t, items[2], CompactPolicyPreserveRecent)
+	assertNoPolicy(t, items[2], CompactPolicyCanDrop)
+	assertPolicy(t, items[3], CompactPolicyPreserveToolClosure)
+	assertPolicy(t, items[3], CompactPolicyPreserveRecent)
+	assertNoPolicy(t, items[3], CompactPolicyCanDrop)
+	assertPolicy(t, items[4], CompactPolicyPreserveToolClosure)
+	assertPolicy(t, items[4], CompactPolicyPreserveRecent)
+	assertNoPolicy(t, items[4], CompactPolicyCanDrop)
 }
 
 func TestItemsFromRowsSkipsUnparseableRowsWithoutAborting(t *testing.T) {
@@ -91,8 +150,22 @@ func TestItemsFromRowsSkipsUnparseableRowsWithoutAborting(t *testing.T) {
 	if skipped != 1 {
 		t.Fatalf("skipped = %d, want 1", skipped)
 	}
-	if len(items) != 1 || items[0].id != good.ID {
+	if len(items) != 1 || items[0].ID != good.ID {
 		t.Fatalf("a bad row must be skipped, not abort the batch: got %d items", len(items))
+	}
+}
+
+func assertPolicy(t *testing.T, item CompactionCandidate, policy CompactPolicy) {
+	t.Helper()
+	if !item.HasPolicy(policy) {
+		t.Fatalf("candidate %s missing policy %s; got %#v", formatUUID(item.ID), policy, item.Policies)
+	}
+}
+
+func assertNoPolicy(t *testing.T, item CompactionCandidate, policy CompactPolicy) {
+	t.Helper()
+	if item.HasPolicy(policy) {
+		t.Fatalf("candidate %s unexpectedly has policy %s; got %#v", formatUUID(item.ID), policy, item.Policies)
 	}
 }
 
@@ -111,7 +184,7 @@ func TestSplitByTargetCompactsOldestBeyondTarget(t *testing.T) {
 	if len(toCompact) != 2 {
 		t.Fatalf("compact count = %d, want 2", len(toCompact))
 	}
-	if toCompact[0].id != rows[0].ID || toCompact[1].id != rows[1].ID {
+	if toCompact[0].ID != rows[0].ID || toCompact[1].ID != rows[1].ID {
 		t.Fatalf("compacted the wrong (non-oldest) messages")
 	}
 }
@@ -130,7 +203,7 @@ func TestSplitByRatioKeepsNewestByRatio(t *testing.T) {
 	if len(toCompact) != 2 {
 		t.Fatalf("compact count = %d, want 2", len(toCompact))
 	}
-	if toCompact[0].id != rows[0].ID || toCompact[1].id != rows[1].ID {
+	if toCompact[0].ID != rows[0].ID || toCompact[1].ID != rows[1].ID {
 		t.Fatalf("compacted the wrong messages")
 	}
 }
@@ -147,8 +220,8 @@ func TestSplitByRatioBoundaryConditions(t *testing.T) {
 	if got := splitByRatio(items, 100, 0); got != nil {
 		t.Fatalf("zero ratio should yield nil, got %d", len(got))
 	}
-	if got := splitByRatio(items, 100, 100); len(got) != 1 {
-		t.Fatalf("ratio 100 should compact all, got %d", len(got))
+	if got := splitByRatio(items, 100, 100); len(got) != 0 {
+		t.Fatalf("ratio 100 should preserve the only recent candidate, got %d", len(got))
 	}
 }
 
@@ -167,8 +240,33 @@ func TestTrimCompactMessagesDropsOldestBeyondBudget(t *testing.T) {
 	if len(trimmed) != 1 {
 		t.Fatalf("trimmed count = %d, want 1", len(trimmed))
 	}
-	if trimmed[0].id != rows[2].ID {
+	if trimmed[0].ID != rows[2].ID {
 		t.Fatalf("trim should keep the newest message and drop older ones")
+	}
+}
+
+func TestTrimCompactMessagesAccountsForDirectedSignalHeaders(t *testing.T) {
+	t.Parallel()
+
+	longID := repeat("m", entryMetadataMaxBytes)
+	longSender := repeat("s", entryMetadataMaxBytes)
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "assistant", `"one"`, 1),
+		mkRow(t, "assistant", `"two"`, 1),
+		mkRow(t, "assistant", `"three"`, 1),
+	}
+	for i := range rows {
+		rows[i].ExternalMessageID = pgtype.Text{String: longID, Valid: true}
+		rows[i].SenderDisplayName = pgtype.Text{String: longSender, Valid: true}
+	}
+	items, _ := itemsFromRows(rows)
+
+	trimmed := trimCompactMessages(items, 300)
+	if len(trimmed) != 2 {
+		t.Fatalf("trimmed count = %d, want 2 after accounting for header tokens", len(trimmed))
+	}
+	if trimmed[0].ID != rows[1].ID || trimmed[1].ID != rows[2].ID {
+		t.Fatalf("trim should drop the oldest message when headers exceed budget")
 	}
 }
 

@@ -2281,8 +2281,36 @@ SET compact_id = $1
 WHERE id = ANY($2::uuid[]);
 
 -- name: ListUncompactedMessagesBySession :many
-SELECT id, bot_id, session_id, role, content, usage, sender_channel_identity_id, compact_id, created_at
-FROM bot_visible_history_messages
-WHERE session_id = $1
-  AND compact_id IS NULL
-ORDER BY turn_position ASC, turn_message_seq ASC, created_at ASC, id ASC;
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.event_id,
+  m.display_text,
+  m.compact_id,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform,
+  r.conversation_type AS conversation_type,
+  COALESCE(
+    NULLIF(TRIM(COALESCE(r.metadata->>'conversation_name', '')), ''),
+    NULLIF(TRIM(COALESCE(r.metadata->>'conversation_handle', '')), ''),
+    ''
+  )::text AS conversation_name,
+  r.default_reply_target AS reply_target
+FROM bot_visible_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+LEFT JOIN bot_channel_routes r ON r.id = s.route_id
+WHERE m.session_id = $1
+  AND m.compact_id IS NULL
+ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
