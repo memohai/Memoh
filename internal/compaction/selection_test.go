@@ -24,7 +24,7 @@ func mkRow(t *testing.T, role, content string, outputTokens int) sqlc.ListUncomp
 		Content: json.RawMessage(content),
 	}
 	if outputTokens > 0 {
-		row.Usage = json.RawMessage(`{"output_tokens":` + strconv.Itoa(outputTokens) + `}`)
+		row.Usage = json.RawMessage(`{"outputTokens":` + strconv.Itoa(outputTokens) + `}`)
 	}
 	return row
 }
@@ -46,12 +46,23 @@ func TestEstimateItemTokensPrefersOutputTokensThenContentFallback(t *testing.T) 
 	}
 	items, _ := itemsFromRows(rows)
 	got := itemTokens(items)
-	// First: usage output_tokens. Second: len(content)/4 = 402/4 = 100.
+	// First: persisted usage outputTokens. Second: len(content)/4 = 402/4 = 100.
 	if got[0] != 50 {
 		t.Fatalf("usage token estimate = %d, want 50", got[0])
 	}
 	if got[1] != len(items[1].RawContent)/4 {
 		t.Fatalf("content token estimate = %d, want %d", got[1], len(items[1].RawContent)/4)
+	}
+}
+
+func TestEstimateItemTokensAcceptsSnakeCaseUsage(t *testing.T) {
+	t.Parallel()
+
+	row := mkRow(t, "assistant", `"hello"`, 0)
+	row.Usage = json.RawMessage(`{"output_tokens":77}`)
+	items, _ := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{row})
+	if got := estimateItemTokens(items[0]); got != 77 {
+		t.Fatalf("snake-case usage token estimate = %d, want 77", got)
 	}
 }
 
@@ -135,6 +146,28 @@ func TestItemsFromRowsAnnotatesCompactionCandidatePolicy(t *testing.T) {
 	assertPolicy(t, items[4], CompactPolicyPreserveToolClosure)
 	assertPolicy(t, items[4], CompactPolicyPreserveRecent)
 	assertNoPolicy(t, items[4], CompactPolicyCanDrop)
+}
+
+func TestItemsFromRowsAllowsCurrentTurnMiddleCompaction(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", `"current instruction"`, 100),
+		mkRow(t, "assistant", `"loop step 1"`, 100),
+		mkRow(t, "assistant", `"loop step 2"`, 100),
+		mkRow(t, "assistant", `"latest tail"`, 100),
+	}
+	items, skipped := itemsFromRows(rows)
+	if skipped != 0 || len(items) != 4 {
+		t.Fatalf("items=%d skipped=%d, want four classified candidates", len(items), skipped)
+	}
+
+	assertPolicy(t, items[0], CompactPolicyPreserveRecent)
+	assertNoPolicy(t, items[0], CompactPolicyCanDrop)
+	assertPolicy(t, items[1], CompactPolicyCanDrop)
+	assertPolicy(t, items[2], CompactPolicyCanDrop)
+	assertPolicy(t, items[3], CompactPolicyPreserveRecent)
+	assertNoPolicy(t, items[3], CompactPolicyCanDrop)
 }
 
 func TestItemsFromRowsSkipsUnparseableRowsWithoutAborting(t *testing.T) {

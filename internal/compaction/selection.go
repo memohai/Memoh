@@ -69,6 +69,18 @@ func itemsFromRows(rows []sqlc.ListUncompactedMessagesBySessionRow) ([]Compactio
 }
 
 func markSelectionPolicies(items []CompactionCandidate) {
+	if latestUser := latestUserIndex(items); latestUser == 0 && len(items) > 1 {
+		tailStart := recentTailProtectedStart(items, 1)
+		for i := range items {
+			if i == 0 || i >= tailStart {
+				items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyPreserveRecent)
+				continue
+			}
+			items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyCanDrop)
+		}
+		return
+	}
+
 	start := recentProtectedStart(items)
 	for i := range items {
 		if i < start {
@@ -83,13 +95,24 @@ func recentProtectedStart(items []CompactionCandidate) int {
 	if len(items) == 0 {
 		return 0
 	}
+	if latestUser := latestUserIndex(items); latestUser >= 0 {
+		return latestUser
+	}
+	return recentTailProtectedStart(items, 0)
+}
+
+func latestUserIndex(items []CompactionCandidate) int {
 	for i := len(items) - 1; i >= 0; i-- {
 		if strings.EqualFold(strings.TrimSpace(items[i].Record.ModelMessage.Role), "user") {
 			return i
 		}
 	}
+	return -1
+}
+
+func recentTailProtectedStart(items []CompactionCandidate, min int) int {
 	start := len(items) - 1
-	for start > 0 && isToolResultItem(items[start]) {
+	for start > min && isToolClosureResultItem(items[start]) {
 		start--
 	}
 	return start
@@ -181,14 +204,20 @@ func isToolExchangeRecord(record historyfrag.HistoryRecord) bool {
 }
 
 type usagePayload struct {
-	OutputTokens *int `json:"output_tokens"`
+	OutputTokens      *int `json:"outputTokens"`
+	OutputTokensSnake *int `json:"output_tokens"`
 }
 
 func estimateItemTokens(item CompactionCandidate) int {
 	if len(item.RawUsage) > 0 {
 		var u usagePayload
-		if json.Unmarshal(item.RawUsage, &u) == nil && u.OutputTokens != nil && *u.OutputTokens > 0 {
-			return *u.OutputTokens
+		if json.Unmarshal(item.RawUsage, &u) == nil {
+			if u.OutputTokens != nil && *u.OutputTokens > 0 {
+				return *u.OutputTokens
+			}
+			if u.OutputTokensSnake != nil && *u.OutputTokensSnake > 0 {
+				return *u.OutputTokensSnake
+			}
 		}
 	}
 	return len(item.RawContent) / 4
@@ -216,20 +245,12 @@ func splitByRatio(items []CompactionCandidate, totalInputTokens, ratio int) []Co
 		return nil
 	}
 	if ratio >= 100 {
-		cutoff := applySelectionGuards(items, len(items))
-		if cutoff <= 0 {
-			return nil
-		}
-		return items[:cutoff]
+		return guardedCompactionItems(items, len(items))
 	}
 
 	keepTokens := totalInputTokens * (100 - ratio) / 100
 	if keepTokens <= 0 {
-		cutoff := applySelectionGuards(items, len(items))
-		if cutoff <= 0 {
-			return nil
-		}
-		return items[:cutoff]
+		return guardedCompactionItems(items, len(items))
 	}
 
 	accumulated := 0
@@ -245,11 +266,7 @@ func splitByRatio(items []CompactionCandidate, totalInputTokens, ratio int) []Co
 	if cutoff <= 0 {
 		return nil
 	}
-	cutoff = applySelectionGuards(items, cutoff)
-	if cutoff <= 0 {
-		return nil
-	}
-	return items[:cutoff]
+	return guardedCompactionItems(items, cutoff)
 }
 
 // splitByTarget returns the oldest items to compact so that the remaining newest
@@ -270,33 +287,63 @@ func splitByTarget(items []CompactionCandidate, targetTokens int) []CompactionCa
 	if cutoff <= 0 {
 		return nil
 	}
-	cutoff = applySelectionGuards(items, cutoff)
-	if cutoff <= 0 {
-		return nil
-	}
-	return items[:cutoff]
+	return guardedCompactionItems(items, cutoff)
 }
 
-func applySelectionGuards(items []CompactionCandidate, cutoff int) int {
+func guardedCompactionItems(items []CompactionCandidate, cutoff int) []CompactionCandidate {
 	if cutoff <= 0 || len(items) == 0 {
-		return 0
+		return nil
 	}
 	protectedStart := firstPolicyStart(items, CompactPolicyPreserveRecent)
 	if protectedStart <= 0 {
-		return 0
+		return guardedCurrentTurnCompactionItems(items, cutoff)
 	}
 	if cutoff > protectedStart {
 		cutoff = protectedStart
 	}
 	cutoff = adjustForToolBoundary(items, cutoff)
 	if cutoff > protectedStart {
-		return 0
+		return nil
 	}
-	return cutoff
+	if cutoff <= 0 {
+		return nil
+	}
+	return items[:cutoff]
+}
+
+func guardedCurrentTurnCompactionItems(items []CompactionCandidate, cutoff int) []CompactionCandidate {
+	if len(items) <= 1 {
+		return nil
+	}
+	protectedTailStart := firstPolicyStartAfter(items, CompactPolicyPreserveRecent, 1)
+	if protectedTailStart <= 1 {
+		return nil
+	}
+	if cutoff > protectedTailStart {
+		cutoff = protectedTailStart
+	}
+	if cutoff <= 1 {
+		return nil
+	}
+	cutoff = adjustForToolBoundary(items, cutoff)
+	if cutoff > protectedTailStart {
+		return nil
+	}
+	return items[1:cutoff]
 }
 
 func firstPolicyStart(items []CompactionCandidate, policy CompactPolicy) int {
+	return firstPolicyStartAfter(items, policy, 0)
+}
+
+func firstPolicyStartAfter(items []CompactionCandidate, policy CompactPolicy, start int) int {
+	if start < 0 {
+		start = 0
+	}
 	for i, item := range items {
+		if i < start {
+			continue
+		}
 		if item.HasPolicy(policy) {
 			return i
 		}
@@ -309,10 +356,14 @@ func firstPolicyStart(items []CompactionCandidate, policy CompactPolicy) int {
 // being compacted. Tool results are pulled into the compact set so each tool
 // exchange stays intact on one side of the boundary.
 func adjustForToolBoundary(items []CompactionCandidate, cutoff int) int {
-	for cutoff > 0 && cutoff < len(items) && isToolResultItem(items[cutoff]) {
+	for cutoff > 0 && cutoff < len(items) && isToolClosureResultItem(items[cutoff]) {
 		cutoff++
 	}
 	return cutoff
+}
+
+func isToolClosureResultItem(item CompactionCandidate) bool {
+	return item.HasPolicy(CompactPolicyPreserveToolClosure) && isToolResultItem(item)
 }
 
 func isToolResultItem(item CompactionCandidate) bool {
