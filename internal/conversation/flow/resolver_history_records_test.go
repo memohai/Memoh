@@ -484,6 +484,55 @@ func TestLoadCompactionSummaryCarriesMessageCutoff(t *testing.T) {
 	}
 }
 
+func TestLoadCompactionSummaryMergesMultipleCompactsInOrderAndCoverage(t *testing.T) {
+	t.Parallel()
+
+	const compactA = "33333333-3333-3333-3333-333333333333"
+	const compactB = "44444444-4444-4444-4444-444444444444"
+	completedA := time.UnixMilli(300).UTC()
+	completedB := time.UnixMilli(400).UTC()
+	resolver := &Resolver{
+		logger: slog.New(slog.DiscardHandler),
+		queries: pipelineCompactionQueries{
+			logs: map[string]dbsqlc.BotHistoryMessageCompact{
+				compactA: {
+					ID:          flowTestUUID(compactA),
+					Status:      "ok",
+					Summary:     "summary A",
+					CompletedAt: pgtype.Timestamptz{Time: completedA, Valid: true},
+				},
+				compactB: {
+					ID:          flowTestUUID(compactB),
+					Status:      "ok",
+					Summary:     "summary B",
+					CompletedAt: pgtype.Timestamptz{Time: completedB, Valid: true},
+				},
+			},
+		},
+	}
+	messages := []messagepkg.Message{
+		{ID: "row-a1", ExternalMessageID: "external-a", CompactID: compactA},
+		{ID: "row-b1", ExternalMessageID: "external-b", CompactID: compactB},
+		{ID: "row-a2", CompactID: compactA},
+	}
+
+	summary := resolver.LoadCompactionSummary(context.Background(), messages)
+
+	if summary.Text != "summary A\n\nsummary B" {
+		t.Fatalf("summary text = %q", summary.Text)
+	}
+	if !reflect.DeepEqual(summary.CoveredHistoryMessageIDs, []string{"row-a1", "row-a2", "row-b1"}) {
+		t.Fatalf("covered history ids mismatch: %#v", summary.CoveredHistoryMessageIDs)
+	}
+	if !reflect.DeepEqual(summary.CoveredMessageIDs, []string{"external-a", "external-b"}) {
+		t.Fatalf("covered external ids mismatch: %#v", summary.CoveredMessageIDs)
+	}
+	if summary.CoveredMessageCutoffMs["external-a"] != completedA.UnixMilli() ||
+		summary.CoveredMessageCutoffMs["external-b"] != completedB.UnixMilli() {
+		t.Fatalf("covered cutoffs mismatch: %#v", summary.CoveredMessageCutoffMs)
+	}
+}
+
 func TestHistoryRecordPathPreservesLegacyResolverMessagePipeline(t *testing.T) {
 	t.Parallel()
 
