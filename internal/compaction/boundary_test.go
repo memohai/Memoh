@@ -16,7 +16,7 @@ func toolResultRow(t *testing.T, tokens int) sqlc.ListUncompactedMessagesBySessi
 	return mkRow(t, "tool", `[{"type":"tool-result","toolName":"calc","toolCallId":"c1","output":{"type":"text","value":"42"}}]`, tokens)
 }
 
-func firstKeptIsNotOrphanTool(t *testing.T, items, toCompact []compactionItem) {
+func firstKeptIsNotOrphanTool(t *testing.T, items, toCompact []CompactionCandidate) {
 	t.Helper()
 	keepStart := len(toCompact)
 	if keepStart < len(items) && isToolResultItem(items[keepStart]) {
@@ -27,11 +27,11 @@ func firstKeptIsNotOrphanTool(t *testing.T, items, toCompact []compactionItem) {
 func TestSplitByTargetDoesNotOrphanToolResult(t *testing.T) {
 	t.Parallel()
 
-	// oldest -> newest: user, assistant(tool-call), tool(result), assistant.
+	// oldest -> newest: assistant, assistant(tool-call), tool(result), assistant.
 	// target 250 would otherwise cut between the tool call and its result,
 	// leaving the kept side starting with an orphan tool result.
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `"q"`, 100),
+		mkRow(t, "assistant", `"context"`, 100),
 		toolCallRow(t, 100),
 		toolResultRow(t, 100),
 		mkRow(t, "assistant", `"done"`, 100),
@@ -51,7 +51,7 @@ func TestSplitByRatioDoesNotOrphanToolResult(t *testing.T) {
 	t.Parallel()
 
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `"q"`, 100),
+		mkRow(t, "assistant", `"context"`, 100),
 		toolCallRow(t, 100),
 		toolResultRow(t, 100),
 		mkRow(t, "assistant", `"done"`, 100),
@@ -106,6 +106,39 @@ func TestAdjustForToolBoundaryAllToolsCompactsAll(t *testing.T) {
 	items, _ := itemsFromRows(rows)
 	if got := adjustForToolBoundary(items, 1); got != 2 {
 		t.Fatalf("all-tool tail should compact everything, got %d", got)
+	}
+}
+
+func TestSplitByRatioNoOpsWhenToolBoundaryWouldConsumeRecentTail(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		toolCallRow(t, 100),
+		toolResultRow(t, 100),
+	}
+	items, _ := itemsFromRows(rows)
+	toCompact := splitByRatio(items, 200, 100)
+	if len(toCompact) != 0 {
+		t.Fatalf("compaction should no-op rather than consume the recent tool tail, got %d items", len(toCompact))
+	}
+}
+
+func TestSplitByRatioPreservesNewestUserTurnSuffix(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", `"old question"`, 100),
+		mkRow(t, "assistant", `"old answer"`, 100),
+		mkRow(t, "user", `"current question"`, 100),
+		mkRow(t, "assistant", `"current answer"`, 100),
+	}
+	items, _ := itemsFromRows(rows)
+	toCompact := splitByRatio(items, 400, 100)
+	if len(toCompact) != 2 {
+		t.Fatalf("compact count = %d, want 2 (keep newest user turn suffix)", len(toCompact))
+	}
+	if toCompact[0].ID != rows[0].ID || toCompact[1].ID != rows[1].ID {
+		t.Fatalf("should compact only rows before the newest user turn")
 	}
 }
 

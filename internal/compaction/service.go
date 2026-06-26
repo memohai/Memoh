@@ -151,7 +151,7 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 		return nil
 	}
 
-	var toCompact []compactionItem
+	var toCompact []CompactionCandidate
 	if cfg.TargetTokens > 0 {
 		// Sync compaction: compress enough messages to bring context
 		// down to TargetTokens. Calculate how many tokens to keep
