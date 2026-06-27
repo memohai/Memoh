@@ -35,7 +35,7 @@ func (r *Resolver) loadHistoryRecords(ctx context.Context, fallback historyfrag.
 	}
 	result := make([]historyfrag.HistoryRecord, 0, len(msgs))
 	for _, m := range msgs {
-		record, err := historyfrag.FromDBMessage(m, fallback)
+		record, err := historyfrag.FromDBMessageWithLogger(r.logger, m, fallback)
 		if err != nil {
 			return nil, err
 		}

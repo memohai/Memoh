@@ -269,11 +269,6 @@ func (r *Resolver) InlineImageAttachments(ctx context.Context, botID string, ref
 	return parts
 }
 
-type usageInfo struct {
-	InputTokens  *int `json:"inputTokens"`
-	OutputTokens *int `json:"outputTokens"`
-}
-
 type resolvedContext struct {
 	runConfig                   agentpkg.RunConfig
 	model                       models.GetResponse

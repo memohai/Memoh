@@ -11,18 +11,26 @@ import (
 )
 
 func SDKMessagesToModelMessages(msgs []sdk.Message) []conversation.ModelMessage {
+	return SDKMessagesToModelMessagesWithLogger(nil, msgs)
+}
+
+func SDKMessagesToModelMessagesWithLogger(log *slog.Logger, msgs []sdk.Message) []conversation.ModelMessage {
 	result := make([]conversation.ModelMessage, 0, len(msgs))
 	for _, msg := range msgs {
 		data, err := json.Marshal(msg)
 		if err != nil {
-			slog.Warn("messageconv: sdk message marshal failed", slog.String("role", string(msg.Role)), slog.Any("error", err))
+			if log != nil {
+				log.Warn("messageconv: sdk message marshal failed", slog.String("role", string(msg.Role)), slog.Any("error", err))
+			}
 			continue
 		}
 		var envelope struct {
 			Content json.RawMessage `json:"content"`
 		}
 		if err := json.Unmarshal(data, &envelope); err != nil {
-			slog.Warn("messageconv: sdk message content extract failed", slog.String("role", string(msg.Role)), slog.Any("error", err))
+			if log != nil {
+				log.Warn("messageconv: sdk message content extract failed", slog.String("role", string(msg.Role)), slog.Any("error", err))
+			}
 			continue
 		}
 		var usage json.RawMessage
