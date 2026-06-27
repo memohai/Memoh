@@ -3348,9 +3348,14 @@ func (q *Queries) ListCompactionLogsByBot(ctx context.Context, arg pgsqlc.ListCo
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured
 	}
-	var sqliteArg sqlitesqlc.ListCompactionLogsByBotParams
-	if err := convertValue(arg, &sqliteArg); err != nil {
+	var botID string
+	if err := convertValue(arg.BotID, &botID); err != nil {
 		return nil, err
+	}
+	sqliteArg := sqlitesqlc.ListCompactionLogsByBotParams{
+		BotID: botID,
+		Off:   int64(arg.Offset),
+		Lim:   int64(arg.Limit),
 	}
 	out, err := q.store.queries.ListCompactionLogsByBot(ctx, sqliteArg)
 	if err != nil {
@@ -4679,9 +4684,21 @@ func (q *Queries) MarkMessagesCompacted(ctx context.Context, arg pgsqlc.MarkMess
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return errSQLiteQueriesNotConfigured
 	}
-	var sqliteArg sqlitesqlc.MarkMessagesCompactedParams
-	if err := convertValue(arg, &sqliteArg); err != nil {
+	var compactID sql.NullString
+	if err := convertValue(arg.CompactID, &compactID); err != nil {
 		return err
+	}
+	ids := make([]string, 0, len(arg.Column2))
+	for _, id := range arg.Column2 {
+		var sqliteID string
+		if err := convertValue(id, &sqliteID); err != nil {
+			return err
+		}
+		ids = append(ids, sqliteID)
+	}
+	sqliteArg := sqlitesqlc.MarkMessagesCompactedParams{
+		CompactID: compactID,
+		Ids:       ids,
 	}
 	err := q.store.queries.MarkMessagesCompacted(ctx, sqliteArg)
 	return mapQueryErr(err)
