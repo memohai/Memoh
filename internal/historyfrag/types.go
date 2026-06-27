@@ -20,7 +20,6 @@ type Lifecycle string
 
 const (
 	LifecyclePersisted     Lifecycle = "persisted"
-	LifecycleLegacySummary Lifecycle = "legacy_summary"
 	LifecycleActiveSummary Lifecycle = "active_summary"
 )
 
