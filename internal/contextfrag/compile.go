@@ -36,13 +36,27 @@ func Compile(input CompileInput) AssembledContext {
 	}
 	scope := normalizeScope(input.Scope)
 
-	frags := preserveExplicit(input.Existing)
+	explicit := preserveExplicit(input.Existing)
+	frags := make([]ContextFrag, 0, len(explicit)+len(input.Messages)+4)
+	messageOverrides := make(map[string]ContextFrag, len(explicit))
+	for _, frag := range explicit {
+		if id := strings.TrimSpace(frag.ID); id != "" && overridesDerivedMessage(frag) {
+			messageOverrides[id] = frag
+			continue
+		}
+		frags = append(frags, frag)
+	}
 	if strings.TrimSpace(input.System) != "" {
 		frags = append(frags, systemFrags(input.System, strings.TrimSpace(input.ToolUsage), scope, source)...)
 	}
 	for i, msg := range input.Messages {
+		id := fmt.Sprintf("message.%03d", i)
+		if frag, ok := messageOverrides[id]; ok {
+			frags = append(frags, frag)
+			continue
+		}
 		frags = append(frags, MessageFrag(MessageFragInput{
-			ID:         fmt.Sprintf("message.%03d", i),
+			ID:         id,
 			Message:    msg,
 			Kind:       kindForMessage(msg),
 			Slot:       SlotHistory,
@@ -305,6 +319,18 @@ func preserveExplicit(frags []ContextFrag) []ContextFrag {
 		out = append(out, frag)
 	}
 	return out
+}
+
+func overridesDerivedMessage(frag ContextFrag) bool {
+	if frag.Slot != SlotHistory {
+		return false
+	}
+	for _, part := range frag.Parts {
+		if part.Type == PartSDKMessage && partMessage(part) != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func kindForMessage(msg sdk.Message) Kind {
