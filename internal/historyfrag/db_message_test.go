@@ -30,6 +30,7 @@ func TestFromDBMessageBuildsDurableRecordScopeAndFrag(t *testing.T) {
 		SourceReplyToMessageID:  "msg-0",
 		Role:                    "user",
 		Content:                 persistedModelMessage(t, conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("hello")}),
+		Metadata:                map[string]any{"reply": map[string]any{"sender": "Bob"}},
 		Usage:                   mustJSON(t, map[string]int{"inputTokens": inputTokens, "outputTokens": outputTokens}),
 		Assets: []messagepkg.MessageAsset{{
 			ContentHash: "asset-hash-1",
@@ -76,6 +77,9 @@ func TestFromDBMessageBuildsDurableRecordScopeAndFrag(t *testing.T) {
 		record.CompactID != "compact-1" {
 		t.Fatalf("record lost DB provenance: %#v", record)
 	}
+	if reply, _ := record.Metadata["reply"].(map[string]any); reply["sender"] != "Bob" {
+		t.Fatalf("record lost message metadata: %#v", record.Metadata)
+	}
 	if record.UsageInputTokens == nil || *record.UsageInputTokens != inputTokens {
 		t.Fatalf("UsageInputTokens = %#v, want %d", record.UsageInputTokens, inputTokens)
 	}
@@ -120,6 +124,24 @@ func TestFromDBMessageBuildsDurableRecordScopeAndFrag(t *testing.T) {
 	}
 	if frag.Provenance.Source != string(SourceDBMessage) || frag.Provenance.SourceID != "row-1" || frag.Provenance.Collector != CollectorHistoryRecords {
 		t.Fatalf("unexpected frag provenance: %#v", frag.Provenance)
+	}
+}
+
+func TestDBMessageSourceHashIncludesMessageMetadata(t *testing.T) {
+	t.Parallel()
+
+	msg := messagepkg.Message{
+		ID:       "row-1",
+		BotID:    "bot-1",
+		Role:     "user",
+		Content:  conversation.NewTextContent("hello"),
+		Metadata: map[string]any{"reply": map[string]any{"sender": "Alice"}},
+	}
+	changed := msg
+	changed.Metadata = map[string]any{"reply": map[string]any{"sender": "Bob"}}
+
+	if DBMessageSourceHash(msg).Value == DBMessageSourceHash(changed).Value {
+		t.Fatal("message metadata change should affect DB source payload hash")
 	}
 }
 

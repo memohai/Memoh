@@ -24,12 +24,16 @@ type usageInfo struct {
 }
 
 func FromDBMessage(msg messagepkg.Message, fallback ScopeFallback) (HistoryRecord, error) {
+	return FromDBMessageWithLogger(nil, msg, fallback)
+}
+
+func FromDBMessageWithLogger(log *slog.Logger, msg messagepkg.Message, fallback ScopeFallback) (HistoryRecord, error) {
 	rowID := strings.TrimSpace(msg.ID)
 	if rowID == "" {
 		return HistoryRecord{}, errors.New("history db message id is required")
 	}
 
-	modelMessage := modelMessageFromDBMessage(msg)
+	modelMessage := modelMessageFromDBMessage(log, msg)
 	inputTokens, outputTokens := parseUsage(msg.Usage)
 	ref := contextfrag.ContextRef{
 		Namespace:   namespaceDBHistoryMessage,
@@ -56,6 +60,7 @@ func FromDBMessage(msg messagepkg.Message, fallback ScopeFallback) (HistoryRecor
 
 		ModelMessage: modelMessage,
 		Assets:       mediaRefsFromDBMessage(msg),
+		Metadata:     cloneMetadata(msg.Metadata),
 
 		Scope:      scope,
 		Provenance: provenance,
@@ -93,6 +98,7 @@ func DBMessageSourceHash(msg messagepkg.Message) contextfrag.FragmentHash {
 		SourceReplyToMessageID:  strings.TrimSpace(msg.SourceReplyToMessageID),
 		Role:                    strings.TrimSpace(msg.Role),
 		Content:                 string(msg.Content),
+		Metadata:                cloneMetadata(msg.Metadata),
 		Usage:                   string(msg.Usage),
 		EventID:                 strings.TrimSpace(msg.EventID),
 		Assets:                  mediaRefsFromDBMessage(msg),
@@ -116,30 +122,33 @@ func DBMessageSourceHash(msg messagepkg.Message) contextfrag.FragmentHash {
 }
 
 type dbMessageSourceHashPayload struct {
-	ID                      string     `json:"id"`
-	BotID                   string     `json:"bot_id,omitempty"`
-	SessionID               string     `json:"session_id,omitempty"`
-	SenderChannelIdentityID string     `json:"sender_channel_identity_id,omitempty"`
-	SenderUserID            string     `json:"sender_user_id,omitempty"`
-	SenderDisplayName       string     `json:"sender_display_name,omitempty"`
-	Platform                string     `json:"platform,omitempty"`
-	ExternalMessageID       string     `json:"external_message_id,omitempty"`
-	SourceReplyToMessageID  string     `json:"source_reply_to_message_id,omitempty"`
-	Role                    string     `json:"role"`
-	Content                 string     `json:"content,omitempty"`
-	Usage                   string     `json:"usage,omitempty"`
-	EventID                 string     `json:"event_id,omitempty"`
-	Assets                  []MediaRef `json:"assets,omitempty"`
+	ID                      string         `json:"id"`
+	BotID                   string         `json:"bot_id,omitempty"`
+	SessionID               string         `json:"session_id,omitempty"`
+	SenderChannelIdentityID string         `json:"sender_channel_identity_id,omitempty"`
+	SenderUserID            string         `json:"sender_user_id,omitempty"`
+	SenderDisplayName       string         `json:"sender_display_name,omitempty"`
+	Platform                string         `json:"platform,omitempty"`
+	ExternalMessageID       string         `json:"external_message_id,omitempty"`
+	SourceReplyToMessageID  string         `json:"source_reply_to_message_id,omitempty"`
+	Role                    string         `json:"role"`
+	Content                 string         `json:"content,omitempty"`
+	Metadata                map[string]any `json:"metadata,omitempty"`
+	Usage                   string         `json:"usage,omitempty"`
+	EventID                 string         `json:"event_id,omitempty"`
+	Assets                  []MediaRef     `json:"assets,omitempty"`
 }
 
-func modelMessageFromDBMessage(msg messagepkg.Message) conversation.ModelMessage {
+func modelMessageFromDBMessage(log *slog.Logger, msg messagepkg.Message) conversation.ModelMessage {
 	var modelMessage conversation.ModelMessage
 	if err := json.Unmarshal(msg.Content, &modelMessage); err != nil {
-		slog.Warn("historyfrag: content unmarshal failed, treating as raw text",
-			slog.String("message_id", msg.ID),
-			slog.String("role", msg.Role),
-			slog.Any("error", err),
-		)
+		if log != nil {
+			log.Warn("historyfrag: content unmarshal failed, treating as raw text",
+				slog.String("message_id", msg.ID),
+				slog.String("role", msg.Role),
+				slog.Any("error", err),
+			)
+		}
 		modelMessage = conversation.ModelMessage{
 			Role:    strings.TrimSpace(msg.Role),
 			Content: cloneRawMessage(msg.Content),

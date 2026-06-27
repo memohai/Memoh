@@ -38,6 +38,7 @@ type HistoryRecord struct {
 
 	ModelMessage conversation.ModelMessage
 	Assets       []MediaRef
+	Metadata     map[string]any
 
 	Scope      contextfrag.Scope
 	Provenance contextfrag.Provenance
