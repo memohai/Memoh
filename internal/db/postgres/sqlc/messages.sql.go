@@ -4348,6 +4348,7 @@ LEFT JOIN bot_sessions s ON s.id = m.session_id
 LEFT JOIN bot_channel_routes r ON r.id = s.route_id
 WHERE m.session_id = $1
   AND m.compact_id IS NULL
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 `
 
