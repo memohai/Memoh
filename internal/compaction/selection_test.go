@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/memohai/memoh/internal/userinput"
 )
 
 func testUUID(t *testing.T) pgtype.UUID {
@@ -146,6 +147,28 @@ func TestItemsFromRowsAnnotatesCompactionCandidatePolicy(t *testing.T) {
 	assertPolicy(t, items[4], CompactPolicyPreserveToolClosure)
 	assertPolicy(t, items[4], CompactPolicyPreserveRecent)
 	assertNoPolicy(t, items[4], CompactPolicyCanDrop)
+}
+
+func TestItemsFromRowsKeepsAskUserToolExchange(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", `"current instruction"`, 100),
+		mkRow(t, "assistant", `[{"type":"tool-call","toolName":"`+userinput.ToolNameAskUser+`","toolCallId":"ask-1","input":{"questions":[]}}]`, 100),
+		mkRow(t, "tool", `[{"type":"tool-result","toolName":"`+userinput.ToolNameAskUser+`","toolCallId":"ask-1","result":{"status":"submitted"}}]`, 100),
+		mkRow(t, "assistant", `"latest tail"`, 100),
+	}
+	items, skipped := itemsFromRows(rows)
+	if skipped != 0 || len(items) != 4 {
+		t.Fatalf("items=%d skipped=%d, want four classified candidates", len(items), skipped)
+	}
+
+	for _, idx := range []int{1, 2} {
+		assertPolicy(t, items[idx], CompactPolicy("must_keep"))
+		assertPolicy(t, items[idx], CompactPolicyPreserveRecent)
+		assertPolicy(t, items[idx], CompactPolicyPreserveToolClosure)
+		assertNoPolicy(t, items[idx], CompactPolicyCanDrop)
+	}
 }
 
 func TestItemsFromRowsAllowsCurrentTurnMiddleCompaction(t *testing.T) {

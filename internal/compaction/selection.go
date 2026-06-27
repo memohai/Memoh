@@ -9,6 +9,7 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/historyfrag"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	"github.com/memohai/memoh/internal/userinput"
 )
 
 type CompactPolicy string
@@ -17,6 +18,7 @@ const (
 	CompactPolicyCanDrop             CompactPolicy = "can_drop"
 	CompactPolicyPreserveRecent      CompactPolicy = "preserve_recent"
 	CompactPolicyPreserveToolClosure CompactPolicy = "preserve_tool_closure"
+	CompactPolicyMustKeep            CompactPolicy = "must_keep"
 )
 
 // CompactionCandidate is the typed view of one uncompacted history row used
@@ -76,6 +78,10 @@ func markSelectionPolicies(items []CompactionCandidate) {
 				items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyPreserveRecent)
 				continue
 			}
+			if items[i].HasPolicy(CompactPolicyMustKeep) {
+				items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyPreserveRecent)
+				continue
+			}
 			items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyCanDrop)
 		}
 		return
@@ -83,6 +89,10 @@ func markSelectionPolicies(items []CompactionCandidate) {
 
 	start := recentProtectedStart(items)
 	for i := range items {
+		if items[i].HasPolicy(CompactPolicyMustKeep) {
+			items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyPreserveRecent)
+			continue
+		}
 		if i < start {
 			items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyCanDrop)
 			continue
@@ -172,6 +182,11 @@ func candidatePolicies(record historyfrag.HistoryRecord) []CompactPolicy {
 	if isToolExchangeRecord(record) {
 		policies = appendPolicy(policies, CompactPolicyPreserveToolClosure)
 	}
+	if isAskUserRecord(record) {
+		policies = appendPolicy(policies, CompactPolicyMustKeep)
+		policies = appendPolicy(policies, CompactPolicyPreserveRecent)
+		policies = appendPolicy(policies, CompactPolicyPreserveToolClosure)
+	}
 	return policies
 }
 
@@ -201,6 +216,28 @@ func isToolExchangeRecord(record historyfrag.HistoryRecord) bool {
 		}
 	}
 	return false
+}
+
+func isAskUserRecord(record historyfrag.HistoryRecord) bool {
+	mm := record.ModelMessage
+	if isAskUserToolName(mm.Name) {
+		return true
+	}
+	for _, call := range mm.ToolCalls {
+		if isAskUserToolName(call.Function.Name) {
+			return true
+		}
+	}
+	for _, p := range parseEntryParts(mm.Content) {
+		if isAskUserToolName(p.ToolName) {
+			return true
+		}
+	}
+	return false
+}
+
+func isAskUserToolName(name string) bool {
+	return strings.EqualFold(strings.TrimSpace(name), userinput.ToolNameAskUser)
 }
 
 type usagePayload struct {
@@ -371,24 +408,30 @@ func isToolResultItem(item CompactionCandidate) bool {
 }
 
 // buildEntriesAndIDs renders the summarizer entries and the ids to mark
-// compacted from the selected items. Every selected item is marked compacted so
-// it leaves active history; entries that render empty (e.g. reasoning-only
-// messages) are skipped from the prompt to avoid bare "role:" noise.
+// compacted from the selected items. Entries that render empty (e.g.
+// reasoning-only messages) are skipped from the prompt to avoid bare "role:"
+// noise. If every selected item renders empty, all ids are still returned so the
+// caller can detect the all-empty no-op case.
 func buildEntriesAndIDs(items []CompactionCandidate) ([]messageEntry, []pgtype.UUID) {
 	entries := make([]messageEntry, 0, len(items))
-	ids := make([]pgtype.UUID, 0, len(items))
+	allIDs := make([]pgtype.UUID, 0, len(items))
+	renderedIDs := make([]pgtype.UUID, 0, len(items))
 	for _, it := range items {
-		ids = append(ids, it.ID)
+		allIDs = append(allIDs, it.ID)
 		content := renderCandidateEntry(it.Record)
 		if strings.TrimSpace(content) == "" {
 			continue
 		}
+		renderedIDs = append(renderedIDs, it.ID)
 		entries = append(entries, messageEntry{
 			Role:    it.Record.ModelMessage.Role,
 			Content: content,
 		})
 	}
-	return entries, ids
+	if len(entries) == 0 {
+		return entries, allIDs
+	}
+	return entries, renderedIDs
 }
 
 // trimCompactMessages trims the compaction input from the tail (oldest) so the
