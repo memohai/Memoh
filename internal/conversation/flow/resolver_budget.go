@@ -264,10 +264,6 @@ func isToolRecord(record historyfrag.HistoryRecord) bool {
 	return strings.EqualFold(strings.TrimSpace(record.ModelMessage.Role), "tool")
 }
 
-func isAssistantToolCallRecord(record historyfrag.HistoryRecord) bool {
-	return len(historyRecordToolCallIDs(record)) > 0
-}
-
 func historyRecordToolCallIDs(record historyfrag.HistoryRecord) map[string]struct{} {
 	msg := record.ModelMessage
 	if !strings.EqualFold(strings.TrimSpace(msg.Role), "assistant") {

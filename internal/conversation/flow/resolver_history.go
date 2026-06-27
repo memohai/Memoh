@@ -197,8 +197,7 @@ func trimMessagesAndRecordsByTokens(log *slog.Logger, messages []historyfrag.His
 	for _, m := range retained {
 		result = append(result, m.ModelMessage)
 	}
-	retainedTokens := totalModelMessageTokens(result)
-	return result, retained, retainedTokens
+	return result, retained, totalTokens
 }
 
 func historyContextFragsForMessages(messages []conversation.ModelMessage, records []historyfrag.HistoryRecord) []contextfrag.ContextFrag {

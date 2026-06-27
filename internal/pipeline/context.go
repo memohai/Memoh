@@ -434,13 +434,6 @@ func turnResponseBudgetPriority(tr TurnResponseEntry) int {
 	return 70
 }
 
-func isAssistantTurnResponseWithToolCall(tr TurnResponseEntry) bool {
-	if !strings.EqualFold(strings.TrimSpace(tr.Role), "assistant") {
-		return false
-	}
-	return len(turnResponseToolCallIDs(tr)) > 0
-}
-
 func turnResponseToolCallIDs(tr TurnResponseEntry) map[string]struct{} {
 	if !strings.EqualFold(strings.TrimSpace(tr.Role), "assistant") {
 		return nil

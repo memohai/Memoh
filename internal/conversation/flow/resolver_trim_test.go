@@ -320,7 +320,7 @@ func TestEstimateMessageTokensRoundsUpShortNonEmptyMessages(t *testing.T) {
 	}
 }
 
-func TestTrimMessagesByTokens_NoUsage_KeepsAll(t *testing.T) {
+func TestTrimMessagesByTokens_NoUsageWithinBudgetKeepsAll(t *testing.T) {
 	t.Parallel()
 
 	messages := []historyfrag.HistoryRecord{
@@ -330,7 +330,7 @@ func TestTrimMessagesByTokens_NoUsage_KeepsAll(t *testing.T) {
 
 	trimmed, _ := trimMessagesByTokens(nil, messages, 10)
 	if len(trimmed) != 2 {
-		t.Fatalf("messages without outputTokens should all be kept, got %d", len(trimmed))
+		t.Fatalf("messages without usage but within budget should all be kept, got %d", len(trimmed))
 	}
 }
 
@@ -400,6 +400,30 @@ func TestTrimMessagesByTokens_EstimatesFallback(t *testing.T) {
 	// The key check is that the long user message was removed.
 	if len(trimmed) != 2 || trimmed[0].Role != "system" || trimmed[1].Role != "assistant" {
 		t.Fatalf("expected [system notice, assistant message], got %d messages: %+v", len(trimmed), trimmed)
+	}
+}
+
+func TestTrimMessagesByTokensReturnsRawEstimateAfterBudgetTrim(t *testing.T) {
+	t.Parallel()
+
+	longText := strings.Repeat("raw history pressure ", 80)
+	records := []historyfrag.HistoryRecord{
+		trimRecord(conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent(longText)}, nil),
+		trimRecord(conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("fresh reply")}, nil),
+	}
+
+	messages, retained, tokens := trimMessagesAndRecordsByTokens(nil, records, 20)
+	retainedTokens := totalModelMessageTokens(messages)
+	rawTokens := totalHistoryTokens(records)
+
+	if len(retained) >= len(records) {
+		t.Fatalf("test setup did not trim history: retained=%#v", retained)
+	}
+	if tokens != rawTokens {
+		t.Fatalf("returned token estimate = %d, want raw history pressure %d; retained prompt estimate=%d", tokens, rawTokens, retainedTokens)
+	}
+	if retainedTokens >= rawTokens {
+		t.Fatalf("test setup did not create retained/raw token gap: retained=%d raw=%d", retainedTokens, rawTokens)
 	}
 }
 
@@ -505,8 +529,8 @@ func TestTrimMessagesByTokens_DropsOverflowDropRecordEvenWhenGlobalBudgetFits(t 
 	if len(retained) != 2 || retained[0].ModelMessage.TextContent() != "important short context" || retained[1].ModelMessage.TextContent() != "fresh reply" {
 		t.Fatalf("retained records mismatch: %#v", retained)
 	}
-	if want := totalModelMessageTokens(messages); tokens != want {
-		t.Fatalf("returned token estimate = %d, want retained rendered estimate %d", tokens, want)
+	if want := totalHistoryTokens(records); tokens != want {
+		t.Fatalf("returned token estimate = %d, want raw history pressure %d", tokens, want)
 	}
 }
 
