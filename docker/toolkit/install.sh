@@ -1,6 +1,6 @@
 #!/bin/sh
-# Download Node.js (glibc + musl), uv, and Xvnc runtime files into a workspace
-# runtime assembly.
+# Download Node.js (glibc + musl), Python (glibc + musl), uv, and Xvnc runtime
+# files into a workspace runtime assembly.
 #
 # Usage:
 #   ./docker/toolkit/install.sh [toolkit_output_dir] [arch] [display_output_dir]
@@ -14,6 +14,14 @@
 #   NODEJS_MIRROR       Default: https://nodejs.org/dist
 #   NODEJS_MUSL_MIRROR  Default: https://unofficial-builds.nodejs.org/download/release
 #   NPM_MIRROR          Default: https://registry.npmjs.org
+#   PYTHON_VERSION      Default: pinned CPython version below
+#   PYTHON_STANDALONE_TAG
+#                       Default: pinned python-build-standalone release tag below
+#   PYTHON_STANDALONE_MIRROR
+#                       Default: https://github.com/astral-sh/python-build-standalone/releases/download
+#   PYTHON_EXTRA_ARCHES Optional space-separated extra Python runtime arches:
+#                       amd64/x86_64 or arm64/aarch64. Useful for emulated
+#                       workspace images in local development.
 #   CODEX_VERSION       Default: pinned @openai/codex version below
 #   CODEX_ACP_VERSION   Default: pinned @zed-industries/codex-acp version below
 #   CLAUDE_AGENT_ACP_VERSION
@@ -30,6 +38,8 @@ set -eu
 ALPINE_VERSION=3.23
 NODE_VERSION=24.14.0
 NPM_VERSION=10.9.2
+PYTHON_VERSION="${PYTHON_VERSION:-3.14.6}"
+PYTHON_STANDALONE_TAG="${PYTHON_STANDALONE_TAG:-20260623}"
 CODEX_VERSION="${CODEX_VERSION:-0.133.0}"
 CODEX_ACP_VERSION="${CODEX_ACP_VERSION:-0.15.0}"
 CLAUDE_AGENT_ACP_VERSION="${CLAUDE_AGENT_ACP_VERSION:-0.44.0}"
@@ -51,14 +61,15 @@ fi
 NODEJS_MIRROR="${NODEJS_MIRROR:-https://nodejs.org/dist}"
 NODEJS_MUSL_MIRROR="${NODEJS_MUSL_MIRROR:-https://unofficial-builds.nodejs.org/download/release}"
 NPM_MIRROR="${NPM_MIRROR:-https://registry.npmjs.org}"
+PYTHON_STANDALONE_MIRROR="${PYTHON_STANDALONE_MIRROR:-https://github.com/astral-sh/python-build-standalone/releases/download}"
 ALPINE_MIRROR="${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}"
 DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://deb.debian.org/debian}"
 DEBIAN_VERSION="${DEBIAN_VERSION:-bookworm}"
 UV_MIRROR="${UV_MIRROR:-https://github.com/astral-sh/uv/releases/latest/download}"
 
 case "$ARCH" in
-  amd64) NODE_ARCH=x64;  UV_ARCH=x86_64;  APK_ARCH=x86_64;  DEB_ARCH=amd64; NPM_CPU=x64 ;;
-  arm64) NODE_ARCH=arm64; UV_ARCH=aarch64; APK_ARCH=aarch64; DEB_ARCH=arm64; NPM_CPU=arm64 ;;
+  amd64) NODE_ARCH=x64;  UV_ARCH=x86_64;  APK_ARCH=x86_64;  DEB_ARCH=amd64; NPM_CPU=x64;  PYTHON_ARCH=x86_64 ;;
+  arm64) NODE_ARCH=arm64; UV_ARCH=aarch64; APK_ARCH=aarch64; DEB_ARCH=arm64; NPM_CPU=arm64; PYTHON_ARCH=aarch64 ;;
   *) echo "ERROR: unsupported arch: $ARCH" >&2; exit 1 ;;
 esac
 
@@ -477,6 +488,52 @@ install_uv() {
   chmod +x "$OUTDIR/uv"
 }
 
+python_arch_from_toolkit_arch() {
+  case "$1" in
+    amd64|x86_64) echo x86_64 ;;
+    arm64|aarch64) echo aarch64 ;;
+    *) echo "ERROR: unsupported Python runtime arch: $1" >&2; exit 1 ;;
+  esac
+}
+
+install_python_runtime() {
+  libc="$1"
+  python_arch="$2"
+  link_default="$3"
+  triple="${python_arch}-unknown-linux-$libc"
+  dest_dir="$OUTDIR/python-$libc-$python_arch"
+  marker="$dest_dir/.memoh-python-version"
+
+  if [ -x "$dest_dir/bin/python3" ] &&
+    [ -f "$marker" ] &&
+    grep -qx "${PYTHON_VERSION}+${PYTHON_STANDALONE_TAG} ${triple}" "$marker"; then
+    echo "Python ${PYTHON_VERSION} (${libc}, ${python_arch}) already installed; skipping download."
+    if [ "$link_default" = "true" ]; then
+      rm -f "$OUTDIR/python-$libc"
+      ln -s "$(basename "$dest_dir")" "$OUTDIR/python-$libc"
+    fi
+    return
+  fi
+
+  rm -rf "$dest_dir"
+  mkdir -p "$dest_dir"
+
+  archive="cpython-${PYTHON_VERSION}+${PYTHON_STANDALONE_TAG}-${triple}-install_only_stripped.tar.gz"
+  url="${PYTHON_STANDALONE_MIRROR}/${PYTHON_STANDALONE_TAG}/${archive}"
+  echo "Downloading Python ${PYTHON_VERSION} (${libc}, ${python_arch})..."
+  wget -qO- "$url" | tar -xzf - --strip-components=1 -C "$dest_dir"
+
+  if [ ! -x "$dest_dir/bin/python3" ]; then
+    echo "ERROR: Python archive did not install bin/python3 for ${triple}" >&2
+    exit 1
+  fi
+  echo "${PYTHON_VERSION}+${PYTHON_STANDALONE_TAG} ${triple}" > "$marker"
+  if [ "$link_default" = "true" ]; then
+    rm -f "$OUTDIR/python-$libc"
+    ln -s "$(basename "$dest_dir")" "$OUTDIR/python-$libc"
+  fi
+}
+
 npm_cli() {
   node_dir="$1"
   echo "$OUTDIR/$node_dir/lib/node_modules/npm/bin/npm-cli.js"
@@ -867,6 +924,16 @@ install_node_glibc
 install_node_musl
 install_musl_runtime_libs
 install_glibc_openssl_libs
+install_python_runtime gnu "$PYTHON_ARCH" true
+install_python_runtime musl "$PYTHON_ARCH" true
+for extra_arch in ${PYTHON_EXTRA_ARCHES:-}; do
+  extra_python_arch="$(python_arch_from_toolkit_arch "$extra_arch")"
+  if [ "$extra_python_arch" = "$PYTHON_ARCH" ]; then
+    continue
+  fi
+  install_python_runtime gnu "$extra_python_arch" false
+  install_python_runtime musl "$extra_python_arch" false
+done
 
 install_pinned_npm node-glibc
 install_pinned_npm node-musl
