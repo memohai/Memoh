@@ -221,20 +221,22 @@ func ComposeContextWithSummary(rc RenderedContext, trs []TurnResponseEntry, comp
 const earliestMergeTime int64 = -1 << 63
 
 func TrimContextSourcesByBudget(rc RenderedContext, trs []TurnResponseEntry, compactSummary CompactSummary, maxTokens int) (RenderedContext, []TurnResponseEntry) {
-	rc = filterCoveredRenderedContext(rc, compactSummary)
-	trs = filterCoveredTurnResponses(trs, compactSummary)
+	sourceRC := rc
+	sourceTRs := trs
+	budgetRC := filterCoveredRenderedContext(rc, compactSummary)
+	budgetTRs := filterCoveredTurnResponses(trs, compactSummary)
 	if maxTokens <= 0 {
-		return rc, trs
+		return sourceRC, sourceTRs
 	}
-	composed := ComposeContextWithSummary(rc, trs, compactSummary)
+	composed := ComposeContextWithSummary(sourceRC, sourceTRs, compactSummary)
 	if composed == nil || composed.EstimatedTokens <= maxTokens {
-		return rc, trs
+		return sourceRC, sourceTRs
 	}
 
-	selectedRC := make(map[int]bool, len(rc))
-	selectedTR := make(map[int]bool, len(trs))
+	selectedRC := make(map[int]bool, len(budgetRC))
+	selectedTR := make(map[int]bool, len(budgetTRs))
 	usedTokens := compactSummaryBudgetTokens(compactSummary)
-	groups := budgetSourceGroups(rc, trs, compactSummary)
+	groups := budgetSourceGroups(budgetRC, budgetTRs, compactSummary)
 	for _, group := range groups {
 		if !group.forceKeep {
 			continue
@@ -276,19 +278,49 @@ func TrimContextSourcesByBudget(rc RenderedContext, trs []TurnResponseEntry, com
 		remaining -= group.tokens
 	}
 
-	outRC := make(RenderedContext, 0, len(rc))
-	for i, seg := range rc {
+	outRC := make(RenderedContext, 0, len(budgetRC))
+	for i, seg := range budgetRC {
 		if selectedRC[i] {
 			outRC = append(outRC, seg)
 		}
 	}
-	outTRs := make([]TurnResponseEntry, 0, len(trs))
-	for i, tr := range trs {
+	outTRs := make([]TurnResponseEntry, 0, len(budgetTRs))
+	for i, tr := range budgetTRs {
 		if selectedTR[i] {
 			outTRs = append(outTRs, tr)
 		}
 	}
-	return outRC, dropOrphanTurnResponseTools(outTRs)
+	outRC = appendCoveredRenderedAnchors(outRC, sourceRC, compactSummary)
+	outTRs = dropOrphanTurnResponseTools(outTRs)
+	outTRs = appendCoveredTurnResponseAnchors(outTRs, sourceTRs, compactSummary)
+	return outRC, outTRs
+}
+
+func appendCoveredRenderedAnchors(out RenderedContext, source RenderedContext, summary CompactSummary) RenderedContext {
+	covered := stringSet(summary.CoveredMessageIDs)
+	if len(covered) == 0 {
+		return out
+	}
+	for _, seg := range source {
+		messageID := strings.TrimSpace(seg.MessageID)
+		if _, ok := covered[messageID]; ok && summary.coversRenderedMessage(messageID, seg.eventAtMs()) {
+			out = append(out, seg)
+		}
+	}
+	return out
+}
+
+func appendCoveredTurnResponseAnchors(out []TurnResponseEntry, source []TurnResponseEntry, summary CompactSummary) []TurnResponseEntry {
+	covered := stringSet(summary.CoveredHistoryMessageIDs)
+	if len(covered) == 0 {
+		return out
+	}
+	for _, tr := range source {
+		if _, ok := covered[strings.TrimSpace(tr.SourceMessageID)]; ok {
+			out = append(out, tr)
+		}
+	}
+	return out
 }
 
 func budgetSourceGroups(rc RenderedContext, trs []TurnResponseEntry, compactSummary CompactSummary) []budgetSourceGroup {
@@ -310,8 +342,11 @@ func budgetSourceGroups(rc RenderedContext, trs []TurnResponseEntry, compactSumm
 			priority:  turnResponseBudgetPriority(trs[i]),
 			time:      trs[i].RequestedAtMs,
 		}
-		if isAssistantTurnResponseWithToolCall(trs[i]) {
+		if callIDs := turnResponseToolCallIDs(trs[i]); len(callIDs) > 0 {
 			for j := i + 1; j < len(trs) && strings.EqualFold(strings.TrimSpace(trs[j].Role), "tool"); j++ {
+				if !turnResponseHasMatchingToolResult(trs[j], callIDs) {
+					continue
+				}
 				group.trIndices = append(group.trIndices, j)
 				group.tokens += estimateTurnResponseTokens(trs[j])
 				group.time = max(group.time, trs[j].RequestedAtMs)
@@ -355,7 +390,7 @@ func estimateRenderedSegmentTokens(seg RenderedSegment) int {
 	if total == 0 {
 		return 0
 	}
-	return int(math.Ceil(float64(total) / charsPerToken))
+	return int(math.Ceil(float64(total+1) / charsPerToken))
 }
 
 func estimateTurnResponseTokens(tr TurnResponseEntry) int {
@@ -399,13 +434,46 @@ func isAssistantTurnResponseWithToolCall(tr TurnResponseEntry) bool {
 	if !strings.EqualFold(strings.TrimSpace(tr.Role), "assistant") {
 		return false
 	}
+	return len(turnResponseToolCallIDs(tr)) > 0
+}
+
+func turnResponseToolCallIDs(tr TurnResponseEntry) map[string]struct{} {
+	if !strings.EqualFold(strings.TrimSpace(tr.Role), "assistant") {
+		return nil
+	}
+	ids := make(map[string]struct{})
+	var parts []turnResponsePart
+	if err := json.Unmarshal(tr.RawContent, &parts); err != nil {
+		return nil
+	}
+	for _, part := range parts {
+		partType := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(part.Type)), "_", "-")
+		if strings.Contains(partType, "tool-call") {
+			if id := strings.TrimSpace(part.ToolCallID); id != "" {
+				ids[id] = struct{}{}
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return ids
+}
+
+func turnResponseHasMatchingToolResult(tr TurnResponseEntry, callIDs map[string]struct{}) bool {
+	if len(callIDs) == 0 || !strings.EqualFold(strings.TrimSpace(tr.Role), "tool") {
+		return false
+	}
 	var parts []turnResponsePart
 	if err := json.Unmarshal(tr.RawContent, &parts); err != nil {
 		return false
 	}
 	for _, part := range parts {
 		partType := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(part.Type)), "_", "-")
-		if strings.Contains(partType, "tool-call") {
+		if !strings.Contains(partType, "tool-result") {
+			continue
+		}
+		if _, ok := callIDs[strings.TrimSpace(part.ToolCallID)]; ok {
 			return true
 		}
 	}
@@ -414,16 +482,16 @@ func isAssistantTurnResponseWithToolCall(tr TurnResponseEntry) bool {
 
 func dropOrphanTurnResponseTools(trs []TurnResponseEntry) []TurnResponseEntry {
 	out := trs[:0]
-	previousAssistantToolCall := false
+	pendingToolCallIDs := map[string]struct{}{}
 	for _, tr := range trs {
 		if strings.EqualFold(strings.TrimSpace(tr.Role), "tool") {
-			if previousAssistantToolCall {
+			if turnResponseHasMatchingToolResult(tr, pendingToolCallIDs) {
 				out = append(out, tr)
 			}
 			continue
 		}
 		out = append(out, tr)
-		previousAssistantToolCall = isAssistantTurnResponseWithToolCall(tr)
+		pendingToolCallIDs = turnResponseToolCallIDs(tr)
 	}
 	return out
 }

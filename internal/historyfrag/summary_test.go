@@ -59,7 +59,11 @@ func TestSummaryRecordToFragCarriesKindAndCoverage(t *testing.T) {
 	if frag.Coverage == nil || len(frag.Coverage.CoveredRefs) != 1 || frag.Coverage.CoveredRefs[0].ID != "row-1" {
 		t.Fatalf("frag coverage mismatch: %#v", frag.Coverage)
 	}
-	if manifest := contextfrag.BuildManifest([]contextfrag.ContextFrag{frag}); len(manifest.CoverageTrace) != 1 {
+	manifest := contextfrag.BuildManifest([]contextfrag.ContextFrag{frag})
+	if len(manifest.CoverageTrace) != 1 {
 		t.Fatalf("coverage trace not built: %#v", manifest.CoverageTrace)
+	}
+	if len(manifest.Items) != 1 || manifest.Items[0].Budget != rec.Budget {
+		t.Fatalf("manifest item budget = %#v, want %#v", manifest.Items, rec.Budget)
 	}
 }

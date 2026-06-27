@@ -128,6 +128,14 @@ func estimateMessageTokens(msg conversation.ModelMessage) int {
 	return len(text) / 4
 }
 
+func totalModelMessageTokens(messages []conversation.ModelMessage) int {
+	total := 0
+	for _, msg := range messages {
+		total += estimateMessageTokens(msg)
+	}
+	return total
+}
+
 func trimMessagesByTokens(log *slog.Logger, messages []historyfrag.HistoryRecord, maxTokens int) ([]conversation.ModelMessage, int) {
 	trimmed, _, totalTokens := trimMessagesAndRecordsByTokens(log, messages, maxTokens)
 	return trimmed, totalTokens
@@ -181,7 +189,8 @@ func trimMessagesAndRecordsByTokens(log *slog.Logger, messages []historyfrag.His
 	for _, m := range retained {
 		result = append(result, m.ModelMessage)
 	}
-	return result, retained, totalTokens
+	retainedTokens := totalModelMessageTokens(result)
+	return result, retained, retainedTokens
 }
 
 func historyContextFragsForMessages(messages []conversation.ModelMessage, records []historyfrag.HistoryRecord) []contextfrag.ContextFrag {
@@ -570,6 +579,21 @@ func (r *Resolver) buildPipelineContext(ctx context.Context, req conversation.Ch
 	}
 }
 
+func appendCurrentQueryRenderedSegmentIfMissing(rc pipelinepkg.RenderedContext, req conversation.ChatRequest) pipelinepkg.RenderedContext {
+	query := strings.TrimSpace(firstNonEmpty(req.RawQuery, req.Query))
+	currentMessageID := strings.TrimSpace(req.ExternalMessageID)
+	if query == "" || currentMessageID == "" || renderedContextHasMessageID(rc, currentMessageID) {
+		return rc
+	}
+	out := append(pipelinepkg.RenderedContext(nil), rc...)
+	out = append(out, pipelinepkg.RenderedSegment{
+		MessageID:    currentMessageID,
+		ReceivedAtMs: latestRenderedContextEventMs(rc) + 1,
+		Content:      []pipelinepkg.RenderedContentPiece{{Type: "text", Text: query}},
+	})
+	return out
+}
+
 func appendCurrentPipelineQueryIfMissing(messages []conversation.ModelMessage, rc pipelinepkg.RenderedContext, req conversation.ChatRequest) []conversation.ModelMessage {
 	query := strings.TrimSpace(firstNonEmpty(req.RawQuery, req.Query))
 	if query == "" {
@@ -628,6 +652,20 @@ func modelMessagesContainText(messages []conversation.ModelMessage, text string)
 		}
 	}
 	return false
+}
+
+func latestRenderedContextEventMs(rc pipelinepkg.RenderedContext) int64 {
+	var latest int64
+	for _, seg := range rc {
+		eventAt := seg.ReceivedAtMs
+		if seg.LastEventAtMs > 0 {
+			eventAt = seg.LastEventAtMs
+		}
+		if eventAt > latest {
+			latest = eventAt
+		}
+	}
+	return latest
 }
 
 func (r *Resolver) loadPipelineHistoryMessages(ctx context.Context, sessionID string) []messagepkg.Message {

@@ -321,6 +321,30 @@ func TestTrimMessagesByTokens_DropsOverflowDropRecordBeforeImportantHistory(t *t
 	}
 }
 
+func TestTrimMessagesByTokens_DropsOverflowDropRecordEvenWhenGlobalBudgetFits(t *testing.T) {
+	t.Parallel()
+
+	important := trimRecord(conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("important short context")}, nil)
+	oversized := trimRecord(conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent(strings.Repeat("drop-me ", 80))}, func(record *historyfrag.HistoryRecord) {
+		record.Budget = contextfrag.BudgetPolicy{MaxTokens: 5, Overflow: contextfrag.OverflowDrop}
+	})
+	fresh := trimRecord(conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("fresh reply")}, nil)
+	records := []historyfrag.HistoryRecord{important, oversized, fresh}
+
+	messages, retained, tokens := trimMessagesAndRecordsByTokens(nil, records, 1000)
+	joined := trimMessageTexts(messages)
+
+	if strings.Contains(joined, "drop-me") {
+		t.Fatalf("overflow=drop record should be dropped even when global budget fits: %#v", messages)
+	}
+	if len(retained) != 2 || retained[0].ModelMessage.TextContent() != "important short context" || retained[1].ModelMessage.TextContent() != "fresh reply" {
+		t.Fatalf("retained records mismatch: %#v", retained)
+	}
+	if want := totalModelMessageTokens(messages); tokens != want {
+		t.Fatalf("returned token estimate = %d, want retained rendered estimate %d", tokens, want)
+	}
+}
+
 func trimMessageTexts(messages []conversation.ModelMessage) string {
 	texts := make([]string, 0, len(messages))
 	for _, msg := range messages {

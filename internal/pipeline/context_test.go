@@ -420,6 +420,58 @@ func TestTrimContextSourcesByBudgetKeepsPostCompactMutationsOverFiller(t *testin
 	}
 }
 
+func TestTrimContextSourcesByBudgetPreservesSummaryAnchor(t *testing.T) {
+	t.Parallel()
+
+	rc := RenderedContext{
+		{
+			MessageID:    "external-before",
+			ReceivedAtMs: 50,
+			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="external-before">before compact</message>`}},
+		},
+		{
+			MessageID:    "external-covered",
+			ReceivedAtMs: 100,
+			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="external-covered">covered user</message>`}},
+		},
+		{
+			MessageID:    "external-filler",
+			ReceivedAtMs: 200,
+			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="external-filler">` + strings.Repeat("budget filler ", 80) + `</message>`}},
+		},
+		{
+			MessageID:    "external-after",
+			ReceivedAtMs: 300,
+			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="external-after">after compact</message>`}},
+		},
+	}
+	summary := CompactSummary{
+		Text:                   "covered user summarized",
+		CoveredMessageIDs:      []string{"external-covered"},
+		CoveredMessageCutoffMs: map[string]int64{"external-covered": 100},
+	}
+
+	trimmedRC, trimmedTRs := TrimContextSourcesByBudget(rc, nil, summary, 150)
+	composed := ComposeContextWithSummary(trimmedRC, trimmedTRs, summary)
+	if composed == nil {
+		t.Fatal("expected composed context")
+	}
+	got := messageContents(composed.Messages)
+	want := []string{
+		`<message id="external-before">before compact</message>`,
+		"[Conversation summary]\ncovered user summarized",
+		`<message id="external-after">after compact</message>`,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("message count = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("message[%d] = %q, want %q; all=%#v", i, got[i], want[i], got)
+		}
+	}
+}
+
 func TestTrimContextSourcesByBudgetKeepsTurnResponseToolPair(t *testing.T) {
 	t.Parallel()
 
@@ -455,6 +507,47 @@ func TestTrimContextSourcesByBudgetKeepsTurnResponseToolPair(t *testing.T) {
 	}
 	if trimmedTRs[0].Role != "assistant" || trimmedTRs[1].Role != "tool" || trimmedTRs[2].Role != "tool" {
 		t.Fatalf("unexpected retained roles: %#v", trimmedTRs)
+	}
+}
+
+func TestTrimContextSourcesByBudgetIgnoresUnmatchedToolResultWhenKeepingPair(t *testing.T) {
+	t.Parallel()
+
+	trs := []TurnResponseEntry{
+		{
+			RequestedAtMs: 100,
+			Role:          "assistant",
+			Content:       "tool call",
+			RawContent:    []byte(`[{"type":"tool-call","toolCallId":"call-1","toolName":"lookup","input":{"q":"memoh"}}]`),
+		},
+		{
+			RequestedAtMs: 110,
+			Role:          "tool",
+			Content:       "matching tool result",
+			RawContent:    []byte(`[{"type":"tool-result","toolCallId":"call-1","toolName":"lookup","output":{"ok":true}}]`),
+		},
+		{
+			RequestedAtMs: 120,
+			Role:          "tool",
+			Content:       strings.Repeat("unmatched orphan tool result ", 80),
+			RawContent:    []byte(`[{"type":"tool-result","toolCallId":"call-old","toolName":"lookup","output":{"ok":true}}]`),
+		},
+		{
+			RequestedAtMs: 200,
+			Role:          "assistant",
+			Content:       strings.Repeat("newer overflow ", 80),
+		},
+	}
+
+	_, trimmedTRs := TrimContextSourcesByBudget(nil, trs, CompactSummary{}, 120)
+	if len(trimmedTRs) != 2 {
+		t.Fatalf("expected matching assistant/tool pair only, got %#v", trimmedTRs)
+	}
+	if trimmedTRs[0].Role != "assistant" || trimmedTRs[1].Role != "tool" {
+		t.Fatalf("unexpected retained roles: %#v", trimmedTRs)
+	}
+	if strings.Contains(trimmedTRs[1].Content, "unmatched orphan") {
+		t.Fatalf("unmatched orphan tool result was retained: %#v", trimmedTRs)
 	}
 }
 
@@ -543,6 +636,41 @@ func TestTrimContextSourcesByBudgetForceKeepsLatestExternalTriggerByOrderOnTimes
 	}
 	if strings.Contains(joined, "old same timestamp") {
 		t.Fatalf("older same-timestamp message should be dropped before trigger: %q", joined)
+	}
+}
+
+func TestTrimContextSourcesByBudgetAccountsForMergedRCSeparators(t *testing.T) {
+	t.Parallel()
+
+	rc := RenderedContext{
+		{
+			MessageID:    "external-old-1",
+			ReceivedAtMs: 100,
+			Content:      []RenderedContentPiece{{Type: "text", Text: "aa"}},
+		},
+		{
+			MessageID:    "external-old-2",
+			ReceivedAtMs: 200,
+			Content:      []RenderedContentPiece{{Type: "text", Text: "bb"}},
+		},
+		{
+			MessageID:    "external-trigger",
+			ReceivedAtMs: 300,
+			Content:      []RenderedContentPiece{{Type: "text", Text: "cc"}},
+		},
+	}
+
+	trimmedRC, trimmedTRs := TrimContextSourcesByBudget(rc, nil, CompactSummary{}, 2)
+	composed := ComposeContextWithSummary(trimmedRC, trimmedTRs, CompactSummary{})
+	if composed == nil {
+		t.Fatal("expected composed context")
+	}
+	got := messageContents(composed.Messages)
+	if len(got) != 1 || got[0] != "cc" {
+		t.Fatalf("budget should only retain latest trigger after RC merge overhead, got %#v", got)
+	}
+	if composed.EstimatedTokens > 2 {
+		t.Fatalf("composed tokens = %d, want within budget", composed.EstimatedTokens)
 	}
 }
 

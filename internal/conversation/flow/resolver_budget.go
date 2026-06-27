@@ -28,19 +28,22 @@ type historyBudgetGroup struct {
 
 func selectHistoryRecordsForBudget(records []historyfrag.HistoryRecord, maxTokens int) ([]historyfrag.HistoryRecord, bool, int) {
 	totalTokens := totalHistoryTokens(records)
-	if maxTokens == 0 || len(records) == 0 || totalTokens <= maxTokens {
+	if maxTokens == 0 || len(records) == 0 {
 		return records, false, totalTokens
 	}
 
 	groups := historyBudgetGroups(records)
-	selected := make(map[int]bool, len(records))
+	if totalTokens <= maxTokens && !historyBudgetGroupsHaveOverflowDrop(groups) {
+		return records, false, totalTokens
+	}
+	selected := make(map[int]historyfrag.HistoryRecord, len(records))
 	usedTokens := 0
 	for _, group := range groups {
 		if !group.forceKeep {
 			continue
 		}
 		for _, item := range group.items {
-			selected[item.index] = true
+			selected[item.index] = item.record
 		}
 		usedTokens += group.tokens
 	}
@@ -67,19 +70,28 @@ func selectHistoryRecordsForBudget(records []historyfrag.HistoryRecord, maxToken
 			continue
 		}
 		for _, item := range group.items {
-			selected[item.index] = true
+			selected[item.index] = item.record
 		}
 		remaining -= group.tokens
 	}
 
 	retained := make([]historyfrag.HistoryRecord, 0, len(records))
-	for i, record := range records {
-		if selected[i] {
+	for i := range records {
+		if record, ok := selected[i]; ok {
 			retained = append(retained, record)
 		}
 	}
 	retained = dropOrphanToolRecords(retained)
 	return retained, len(retained) != len(records), totalTokens
+}
+
+func historyBudgetGroupsHaveOverflowDrop(groups []historyBudgetGroup) bool {
+	for _, group := range groups {
+		if group.overflowDrop {
+			return true
+		}
+	}
+	return false
 }
 
 func totalHistoryTokens(records []historyfrag.HistoryRecord) int {
@@ -133,6 +145,7 @@ func historyBudgetItems(records []historyfrag.HistoryRecord) []historyBudgetItem
 				item.overflowDrop = true
 				item.forceKeep = false
 			} else {
+				item.record.Coverage = mergedSummaryCoverageForKey(item.record, records, key)
 				item.forceKeep = true
 			}
 		}
@@ -143,6 +156,37 @@ func historyBudgetItems(records []historyfrag.HistoryRecord) []historyBudgetItem
 		items = append(items, item)
 	}
 	return items
+}
+
+func mergedSummaryCoverageForKey(record historyfrag.HistoryRecord, records []historyfrag.HistoryRecord, key string) *contextfrag.SummaryCoverage {
+	var coveredRefs []contextfrag.ContextRef
+	for _, candidate := range records {
+		if summaryMessageKey(candidate) != key || candidate.Coverage == nil {
+			continue
+		}
+		coveredRefs = appendUniqueContextRefs(coveredRefs, candidate.Coverage.CoveredRefs...)
+	}
+	if len(coveredRefs) == 0 {
+		return record.Coverage
+	}
+	coverage := contextfrag.NewSummaryCoverage(record.Ref, append([]contextfrag.ContextRef(nil), coveredRefs...))
+	return &coverage
+}
+
+func appendUniqueContextRefs(refs []contextfrag.ContextRef, incoming ...contextfrag.ContextRef) []contextfrag.ContextRef {
+	for _, ref := range incoming {
+		found := false
+		for _, existing := range refs {
+			if existing.EqualIdentity(ref) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			refs = append(refs, ref)
+		}
+	}
+	return refs
 }
 
 func summarizeHistoryBudgetGroup(group historyBudgetGroup) historyBudgetGroup {

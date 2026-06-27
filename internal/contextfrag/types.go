@@ -309,6 +309,7 @@ type ManifestItem struct {
 	TextBytes  int             `json:"text_bytes,omitempty"`
 	ImageCount int             `json:"image_count,omitempty"`
 	Scope      Scope           `json:"scope,omitempty"`
+	Budget     BudgetPolicy    `json:"budget,omitempty"`
 }
 
 type SlotRenderPolicy struct {

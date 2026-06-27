@@ -33,6 +33,7 @@ func BuildManifest(frags []ContextFrag) Manifest {
 			SourceID:   frag.Provenance.SourceID,
 			Collector:  frag.Provenance.Collector,
 			Scope:      frag.Scope,
+			Budget:     frag.Budget,
 		}
 		for _, part := range frag.Parts {
 			item.PartTypes = append(item.PartTypes, part.Type)

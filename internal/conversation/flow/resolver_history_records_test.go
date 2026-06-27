@@ -181,20 +181,36 @@ func TestHistoryContextFragsUseRetainedSummaryRecordsAfterTrim(t *testing.T) {
 	secondCovered := []contextfrag.ContextRef{{Namespace: "bot_history_message", ID: "new-covered", Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable}}
 	first := historyfrag.SummaryRecord("compact-old", "same summary", firstCovered, contextfrag.Scope{})
 	second := historyfrag.SummaryRecord("compact-new", "same summary", secondCovered, contextfrag.Scope{})
+	if summaryMessageKey(first) != summaryMessageKey(second) {
+		t.Fatalf("test setup summaries should share a dedupe key: %q != %q", summaryMessageKey(first), summaryMessageKey(second))
+	}
+	if first.Coverage == nil || second.Coverage == nil || len(first.Coverage.CoveredRefs) != 1 || len(second.Coverage.CoveredRefs) != 1 {
+		t.Fatalf("test setup summaries should carry coverage: %#v %#v", first.Coverage, second.Coverage)
+	}
 	records := []historyfrag.HistoryRecord{
 		first,
 		historyRecord("row-long", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent(strings.Repeat("x", 400))}, nil),
 		second,
 	}
 
+	selected, _, _ := selectHistoryRecordsForBudget(records, 20)
+	if len(selected) != 1 || selected[0].Coverage == nil || len(selected[0].Coverage.CoveredRefs) != 2 {
+		var selectedCoverage []contextfrag.ContextRef
+		if len(selected) == 1 && selected[0].Coverage != nil {
+			selectedCoverage = selected[0].Coverage.CoveredRefs
+		}
+		t.Fatalf("selected summary coverage mismatch: %#v", selectedCoverage)
+	}
+
 	messages, retained, _ := trimMessagesAndRecordsByTokens(nil, records, 20)
 	frags := historyContextFragsForMessages(messages, retained)
 
-	if len(frags) != 1 || frags[0].Coverage == nil || len(frags[0].Coverage.CoveredRefs) != 1 {
-		t.Fatalf("summary frag coverage mismatch: %#v", frags)
+	if len(frags) != 1 || frags[0].Coverage == nil || len(frags[0].Coverage.CoveredRefs) != 2 {
+		t.Fatalf("summary frag coverage mismatch: %#v", frags[0].Coverage)
 	}
-	if got := frags[0].Coverage.CoveredRefs[0].ID; got != "new-covered" {
-		t.Fatalf("summary coverage = %q, want retained summary coverage", got)
+	gotCovered := []string{frags[0].Coverage.CoveredRefs[0].ID, frags[0].Coverage.CoveredRefs[1].ID}
+	if !reflect.DeepEqual(gotCovered, []string{"old-covered", "new-covered"}) {
+		t.Fatalf("summary coverage = %#v, want merged duplicate summary coverage", gotCovered)
 	}
 }
 
@@ -678,6 +694,39 @@ func TestBuildPipelineContextAppendsCurrentQueryWhenOldRCOnlyContainsSubstring(t
 	}
 }
 
+func TestBuildPipelineContextBudgetsStaleCurrentQuery(t *testing.T) {
+	t.Parallel()
+
+	const sessionID = "sess-stale-budget"
+	p := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
+	p.PushEvent(sessionID, pipelinepkg.MessageEvent{
+		SessionID:    sessionID,
+		MessageID:    "external-old",
+		ReceivedAtMs: 100,
+		TimestampSec: 100,
+		Content:      []pipelinepkg.ContentNode{{Type: "text", Text: strings.Repeat("old stale filler ", 80)}},
+		Conversation: pipelinepkg.ConversationMeta{Channel: "telegram", ConversationType: "group"},
+	})
+	resolver := &Resolver{
+		logger:   slog.New(slog.DiscardHandler),
+		pipeline: p,
+	}
+
+	messages := resolver.buildPipelineContext(context.Background(), conversation.ChatRequest{
+		SessionID:         sessionID,
+		ExternalMessageID: "external-current",
+		Query:             "current user query",
+	}, 20).Messages
+	joined := strings.Join(modelMessageTexts(messages), "\n")
+
+	if !strings.Contains(joined, "current user query") {
+		t.Fatalf("budgeted stale pipeline context lost current query: %#v", messages)
+	}
+	if strings.Contains(joined, "old stale filler") {
+		t.Fatalf("budgeted stale pipeline context retained stale RC before current query: %#v", messages)
+	}
+}
+
 func TestBuildPipelineContextCompactionEndToEnd(t *testing.T) {
 	t.Parallel()
 
@@ -819,7 +868,7 @@ func TestBuildPipelineContextCompactionEndToEnd(t *testing.T) {
 		t.Fatalf("fresh RC/TR messages were not retained: %#v", got)
 	}
 
-	budgeted := resolver.buildMessagesFromPipeline(context.Background(), conversation.ChatRequest{SessionID: sessionID}, 300)
+	budgeted := resolver.buildPipelineContext(context.Background(), conversation.ChatRequest{SessionID: sessionID}, 300).Messages
 	budgetedGot := make([]string, 0, len(budgeted))
 	for _, msg := range budgeted {
 		budgetedGot = append(budgetedGot, msg.TextContent())
@@ -840,7 +889,7 @@ func TestBuildPipelineContextCompactionEndToEnd(t *testing.T) {
 		}
 	}
 
-	tinyBudgeted := resolver.buildMessagesFromPipeline(context.Background(), conversation.ChatRequest{SessionID: sessionID}, 1)
+	tinyBudgeted := resolver.buildPipelineContext(context.Background(), conversation.ChatRequest{SessionID: sessionID}, 1).Messages
 	tinyGot := make([]string, 0, len(tinyBudgeted))
 	for _, msg := range tinyBudgeted {
 		tinyGot = append(tinyGot, msg.TextContent())
@@ -848,30 +897,6 @@ func TestBuildPipelineContextCompactionEndToEnd(t *testing.T) {
 	tinyJoined := strings.Join(tinyGot, "\n")
 	if !strings.Contains(tinyJoined, "fresh user") {
 		t.Fatalf("tiny-budget pipeline context lost current trigger: %#v", tinyGot)
-	}
-}
-
-func TestTrimPipelineMessagesPreservesMidHistoryCompactionSummary(t *testing.T) {
-	t.Parallel()
-
-	summary := conversation.ModelMessage{
-		Role:    "user",
-		Content: conversation.NewTextContent("[Conversation summary]\ncovered history"),
-	}
-	messages := []conversation.ModelMessage{
-		{Role: "user", Content: conversation.NewTextContent("must keep trigger")},
-		summary,
-		{Role: "user", Content: conversation.NewTextContent(strings.Repeat("old filler ", 200))},
-		{Role: "assistant", Content: conversation.NewTextContent("fresh reply")},
-	}
-
-	trimmed := trimPipelineMessagesByTokens(nil, messages, 10)
-
-	if len(trimmed) == 0 || trimmed[0].TextContent() != summary.TextContent() {
-		t.Fatalf("trimmed mid-history messages lost compaction summary: %#v", trimmed)
-	}
-	if len(trimmed) != 2 || trimmed[1].TextContent() != "fresh reply" {
-		t.Fatalf("trimmed messages should keep summary and newest reply, got %#v", trimmed)
 	}
 }
 
@@ -1123,6 +1148,14 @@ func assertSameJSON(t *testing.T, got any, want any) {
 	if string(gotRaw) != string(wantRaw) {
 		t.Fatalf("json mismatch:\ngot  %s\nwant %s", gotRaw, wantRaw)
 	}
+}
+
+func modelMessageTexts(messages []conversation.ModelMessage) []string {
+	out := make([]string, 0, len(messages))
+	for _, msg := range messages {
+		out = append(out, msg.TextContent())
+	}
+	return out
 }
 
 type pipelineHistoryMessageService struct {
