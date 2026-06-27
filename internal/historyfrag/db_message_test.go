@@ -123,6 +123,30 @@ func TestFromDBMessageBuildsDurableRecordScopeAndFrag(t *testing.T) {
 	}
 }
 
+func TestFromDBMessageParsesSnakeCaseUsageTokens(t *testing.T) {
+	t.Parallel()
+
+	inputTokens := 21
+	outputTokens := 43
+	record, err := FromDBMessage(messagepkg.Message{
+		ID:      "row-1",
+		BotID:   "bot-1",
+		Role:    "assistant",
+		Content: persistedModelMessage(t, conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("done")}),
+		Usage:   mustJSON(t, map[string]int{"input_tokens": inputTokens, "output_tokens": outputTokens}),
+	}, ScopeFallback{})
+	if err != nil {
+		t.Fatalf("FromDBMessage failed: %v", err)
+	}
+
+	if record.UsageInputTokens == nil || *record.UsageInputTokens != inputTokens {
+		t.Fatalf("UsageInputTokens = %#v, want %d", record.UsageInputTokens, inputTokens)
+	}
+	if record.UsageOutputTokens == nil || *record.UsageOutputTokens != outputTokens {
+		t.Fatalf("UsageOutputTokens = %#v, want %d", record.UsageOutputTokens, outputTokens)
+	}
+}
+
 func TestFromDBMessageDuplicateContentUsesDurableRowIDs(t *testing.T) {
 	t.Parallel()
 
