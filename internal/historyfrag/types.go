@@ -61,6 +61,7 @@ type HistoryRecord struct {
 	UsageInputTokens  *int
 	UsageOutputTokens *int
 
+	Budget   contextfrag.BudgetPolicy
 	Coverage *contextfrag.SummaryCoverage
 }
 

@@ -2,8 +2,10 @@ package flow
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/historyfrag"
 	"github.com/memohai/memoh/internal/userinput"
@@ -100,6 +102,59 @@ func TestTrimMessagesByTokens_KeepsToolWhenPaired(t *testing.T) {
 	}
 }
 
+func TestTrimMessagesByTokens_KeepsToolPairWhenBudgetDropsNewerOverflow(t *testing.T) {
+	t.Parallel()
+
+	messages := []historyfrag.HistoryRecord{
+		trimRecord(conversation.ModelMessage{
+			Role: "assistant",
+			ToolCalls: []conversation.ToolCall{
+				{
+					ID:   "call-1",
+					Type: "function",
+					Function: conversation.ToolCallFunction{
+						Name:      "calc",
+						Arguments: `{"x":1}`,
+					},
+				},
+				{
+					ID:   "call-2",
+					Type: "function",
+					Function: conversation.ToolCallFunction{
+						Name:      "calc",
+						Arguments: `{"x":2}`,
+					},
+				},
+			},
+		}, nil),
+		trimRecord(conversation.ModelMessage{
+			Role:       "tool",
+			ToolCallID: "call-1",
+			Content:    conversation.NewTextContent("2"),
+		}, nil),
+		trimRecord(conversation.ModelMessage{
+			Role:       "tool",
+			ToolCallID: "call-2",
+			Content:    conversation.NewTextContent("4"),
+		}, nil),
+		trimRecord(conversation.ModelMessage{
+			Role:    "user",
+			Content: conversation.NewTextContent(strings.Repeat("newer overflow ", 80)),
+		}, nil),
+	}
+
+	trimmed, retained, _ := trimMessagesAndRecordsByTokens(nil, messages, 5)
+	if len(retained) != 3 {
+		t.Fatalf("expected paired assistant/tool retained, got %#v", retained)
+	}
+	if retained[0].ModelMessage.Role != "assistant" || retained[1].ModelMessage.Role != "tool" || retained[2].ModelMessage.Role != "tool" {
+		t.Fatalf("unexpected retained roles: %#v", retained)
+	}
+	if len(trimmed) != 4 || trimmed[1].Role != "assistant" || trimmed[2].Role != "tool" || trimmed[3].Role != "tool" {
+		t.Fatalf("unexpected rendered roles: %#v", trimmed)
+	}
+}
+
 func TestTrimMessagesByTokens_NoUsage_KeepsAll(t *testing.T) {
 	t.Parallel()
 
@@ -181,6 +236,97 @@ func TestTrimMessagesByTokens_EstimatesFallback(t *testing.T) {
 	if len(trimmed) != 2 || trimmed[0].Role != "system" || trimmed[1].Role != "assistant" {
 		t.Fatalf("expected [system notice, assistant message], got %d messages: %+v", len(trimmed), trimmed)
 	}
+}
+
+func TestTrimMessagesByTokens_PreservesCompactionSummaryWhenMiddleHistoryExceedsBudget(t *testing.T) {
+	t.Parallel()
+
+	summary := historyfrag.SummaryRecord(
+		"compact-prior",
+		"critical compact summary",
+		[]contextfrag.ContextRef{{Namespace: "bot_history_message", ID: "old-covered", Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable}},
+		contextfrag.Scope{},
+	)
+	records := []historyfrag.HistoryRecord{
+		summary,
+		trimRecord(conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent(strings.Repeat("x", 400))}, nil),
+		trimRecord(conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("fresh reply")}, nil),
+	}
+
+	messages, retained, _ := trimMessagesAndRecordsByTokens(nil, records, 20)
+	joined := trimMessageTexts(messages)
+
+	if !strings.Contains(joined, "critical compact summary") {
+		t.Fatalf("compaction summary should be preserved by budget-aware trim: %#v", messages)
+	}
+	if strings.Contains(joined, strings.Repeat("x", 80)) {
+		t.Fatalf("middle low-priority history should be dropped before summary: %#v", messages)
+	}
+	if !strings.Contains(joined, "fresh reply") {
+		t.Fatalf("fresh reply should be preserved: %#v", messages)
+	}
+	frags := historyContextFragsForMessages(messages, retained)
+	if len(frags) != 1 || frags[0].Coverage == nil || frags[0].Coverage.CoveredRefs[0].ID != "old-covered" {
+		t.Fatalf("retained summary coverage mismatch: %#v", frags)
+	}
+}
+
+func TestTrimMessagesByTokens_ForceKeepsOversizedCompactionSummary(t *testing.T) {
+	t.Parallel()
+
+	summary := historyfrag.SummaryRecord(
+		"compact-large",
+		strings.Repeat("critical compact summary ", 40),
+		[]contextfrag.ContextRef{{Namespace: "bot_history_message", ID: "old-covered", Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable}},
+		contextfrag.Scope{},
+	)
+	records := []historyfrag.HistoryRecord{
+		summary,
+		trimRecord(conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("fresh reply")}, nil),
+	}
+
+	messages, retained, _ := trimMessagesAndRecordsByTokens(nil, records, 1)
+	joined := trimMessageTexts(messages)
+
+	if !strings.Contains(joined, "critical compact summary") {
+		t.Fatalf("oversized compaction summary should be force-kept: %#v", messages)
+	}
+	frags := historyContextFragsForMessages(messages, retained)
+	if len(frags) != 1 || frags[0].Coverage == nil || frags[0].Coverage.CoveredRefs[0].ID != "old-covered" {
+		t.Fatalf("retained oversized summary coverage mismatch: %#v", frags)
+	}
+}
+
+func TestTrimMessagesByTokens_DropsOverflowDropRecordBeforeImportantHistory(t *testing.T) {
+	t.Parallel()
+
+	important := trimRecord(conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("important short context")}, nil)
+	oversized := trimRecord(conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent(strings.Repeat("drop-me ", 80))}, func(record *historyfrag.HistoryRecord) {
+		record.Budget = contextfrag.BudgetPolicy{MaxTokens: 5, Overflow: contextfrag.OverflowDrop}
+	})
+	fresh := trimRecord(conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("fresh reply")}, nil)
+	records := []historyfrag.HistoryRecord{important, oversized, fresh}
+
+	messages, retained, _ := trimMessagesAndRecordsByTokens(nil, records, 20)
+	joined := trimMessageTexts(messages)
+
+	if strings.Contains(joined, "drop-me") {
+		t.Fatalf("overflow=drop record should be dropped before lower-cost history: %#v", messages)
+	}
+	if !strings.Contains(joined, "important short context") || !strings.Contains(joined, "fresh reply") {
+		t.Fatalf("budget-aware trim should keep important old context and fresh reply: %#v", messages)
+	}
+	if len(retained) != 2 || retained[0].ModelMessage.TextContent() != "important short context" || retained[1].ModelMessage.TextContent() != "fresh reply" {
+		t.Fatalf("retained records mismatch: %#v", retained)
+	}
+}
+
+func trimMessageTexts(messages []conversation.ModelMessage) string {
+	texts := make([]string, 0, len(messages))
+	for _, msg := range messages {
+		texts = append(texts, msg.TextContent())
+	}
+	return strings.Join(texts, "\n")
 }
 
 func TestStripToolMessages_RemovesAssistantToolCallContentParts(t *testing.T) {

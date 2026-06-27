@@ -42,6 +42,7 @@ func ToFrag(record HistoryRecord) contextfrag.ContextFrag {
 		SourceID:   provenance.SourceID,
 		Collector:  provenance.Collector,
 		Index:      provenance.Index,
+		Budget:     record.Budget,
 	})
 	frag = contextfrag.WithContextRef(frag, record.Ref)
 	frag.Coverage = record.Coverage

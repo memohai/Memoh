@@ -725,6 +725,14 @@ func TestBuildPipelineContextCompactionEndToEnd(t *testing.T) {
 	})
 	p.PushEvent(sessionID, pipelinepkg.MessageEvent{
 		SessionID:    sessionID,
+		MessageID:    "external-filler",
+		ReceivedAtMs: 280,
+		TimestampSec: 280,
+		Content:      []pipelinepkg.ContentNode{{Type: "text", Text: strings.Repeat("budget filler ", 80)}},
+		Conversation: pipelinepkg.ConversationMeta{Channel: "telegram", ConversationType: "group"},
+	})
+	p.PushEvent(sessionID, pipelinepkg.MessageEvent{
+		SessionID:    sessionID,
 		MessageID:    "external-new",
 		ReceivedAtMs: 300,
 		TimestampSec: 300,
@@ -810,28 +818,36 @@ func TestBuildPipelineContextCompactionEndToEnd(t *testing.T) {
 	if !strings.Contains(joined, "fresh user") || !strings.Contains(joined, "fresh assistant") {
 		t.Fatalf("fresh RC/TR messages were not retained: %#v", got)
 	}
-}
 
-func TestTrimPipelineMessagesPreservesCompactionSummary(t *testing.T) {
-	t.Parallel()
-
-	summary := conversation.ModelMessage{
-		Role:    "user",
-		Content: conversation.NewTextContent("[Conversation summary]\ncovered history"),
+	budgeted := resolver.buildMessagesFromPipeline(context.Background(), conversation.ChatRequest{SessionID: sessionID}, 300)
+	budgetedGot := make([]string, 0, len(budgeted))
+	for _, msg := range budgeted {
+		budgetedGot = append(budgetedGot, msg.TextContent())
 	}
-	messages := []conversation.ModelMessage{
-		summary,
-		{Role: "user", Content: conversation.NewTextContent(strings.Repeat("old filler ", 200))},
-		{Role: "assistant", Content: conversation.NewTextContent("fresh reply")},
+	budgetedJoined := strings.Join(budgetedGot, "\n")
+	if strings.Contains(budgetedJoined, "budget filler") {
+		t.Fatalf("budgeted pipeline context retained filler: %#v", budgetedGot)
+	}
+	for _, want := range []string{
+		"[Conversation summary]\ncompacted segment summary",
+		"edited after compact",
+		`<message id="external-deleted"`,
+		"fresh user",
+		"fresh assistant",
+	} {
+		if !strings.Contains(budgetedJoined, want) {
+			t.Fatalf("budgeted pipeline context lost %q: %#v", want, budgetedGot)
+		}
 	}
 
-	trimmed := trimPipelineMessagesByTokens(nil, messages, 10)
-
-	if len(trimmed) == 0 || trimmed[0].TextContent() != summary.TextContent() {
-		t.Fatalf("trimmed messages lost compaction summary: %#v", trimmed)
+	tinyBudgeted := resolver.buildMessagesFromPipeline(context.Background(), conversation.ChatRequest{SessionID: sessionID}, 1)
+	tinyGot := make([]string, 0, len(tinyBudgeted))
+	for _, msg := range tinyBudgeted {
+		tinyGot = append(tinyGot, msg.TextContent())
 	}
-	if len(trimmed) != 2 || trimmed[1].TextContent() != "fresh reply" {
-		t.Fatalf("trimmed messages should keep summary and newest reply, got %#v", trimmed)
+	tinyJoined := strings.Join(tinyGot, "\n")
+	if !strings.Contains(tinyJoined, "fresh user") {
+		t.Fatalf("tiny-budget pipeline context lost current trigger: %#v", tinyGot)
 	}
 }
 

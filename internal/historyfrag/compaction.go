@@ -40,5 +40,6 @@ func summaryRecordBase(compactID string, summary string, scope contextfrag.Scope
 			Collector: CollectorHistoryRecords,
 		},
 		CompactID: compactID,
+		Budget:    contextfrag.BudgetPolicy{Overflow: contextfrag.OverflowKeep},
 	}
 }

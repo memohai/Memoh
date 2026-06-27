@@ -125,8 +125,7 @@ const (
 	OverflowDrop      OverflowAction = "drop"
 )
 
-// BudgetPolicy captures the planned budget behavior for a fragment. Phase 1
-// records policy only; enforcement remains in the existing trimming paths.
+// BudgetPolicy captures budget hints for context allocators.
 type BudgetPolicy struct {
 	MaxTokens int            `json:"max_tokens,omitempty"`
 	MaxChars  int            `json:"max_chars,omitempty"`

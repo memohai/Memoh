@@ -150,47 +150,22 @@ func totalCompactableHistoryTokens(records []historyfrag.HistoryRecord) int {
 
 func trimMessagesAndRecordsByTokens(log *slog.Logger, messages []historyfrag.HistoryRecord, maxTokens int) ([]conversation.ModelMessage, []historyfrag.HistoryRecord, int) {
 	if maxTokens == 0 || len(messages) == 0 {
-		totalTokens := 0
-		for _, m := range messages {
-			totalTokens += estimateMessageTokens(m.ModelMessage)
-		}
+		totalTokens := totalHistoryTokens(messages)
 		return historyfrag.ToModelMessages(messages), messages, totalTokens
 	}
 
-	// Scan from newest to oldest, accumulating per-message estimated context
-	// token costs. Each message's cost represents the tokens it occupies in the
-	// context window (not the output tokens it generated). We use a character-
-	// based estimate for all messages since this measures context window impact.
-	totalTokens := 0
-	cutoff := 0
-	for i := len(messages) - 1; i >= 0; i-- {
-		totalTokens += estimateMessageTokens(messages[i].ModelMessage)
-		if totalTokens > maxTokens {
-			cutoff = i + 1
-			break
-		}
-	}
-
-	// Keep provider-valid message order: a "tool" message must follow a preceding
-	// assistant tool call. When history is head-trimmed, a leading tool message
-	// may become orphaned and cause provider 400 errors.
-	for cutoff < len(messages) && strings.EqualFold(strings.TrimSpace(messages[cutoff].ModelMessage.Role), "tool") {
-		cutoff++
-	}
-
-	if cutoff > 0 && log != nil {
+	retained, trimmed, totalTokens := selectHistoryRecordsForBudget(messages, maxTokens)
+	if trimmed && log != nil {
 		log.Info("trimMessagesByTokens: context trimmed",
 			slog.Int("total_messages", len(messages)),
 			slog.Int("estimated_tokens", totalTokens),
 			slog.Int("max_tokens", maxTokens),
-			slog.Int("cutoff_index", cutoff),
-			slog.Int("kept_messages", len(messages)-cutoff),
+			slog.Int("kept_messages", len(retained)),
 		)
 	}
 
-	retained := messages[cutoff:]
 	result := make([]conversation.ModelMessage, 0, len(retained))
-	if cutoff > 0 {
+	if trimmed {
 		// Add a truncation notice at the beginning so the LLM knows earlier
 		// context was trimmed and it can use tools (memory, search) to look up
 		// past information if needed.
@@ -559,6 +534,10 @@ func (r *Resolver) buildPipelineContext(ctx context.Context, req conversation.Ch
 	historyMessages := r.loadPipelineHistoryMessages(ctx, sessionID)
 	trs := pipelineTurnResponsesFromMessages(historyMessages)
 	compactContext := r.loadPipelineCompactionContext(ctx, historyMessages)
+	if contextTokenBudget > 0 {
+		rc = appendCurrentQueryRenderedSegmentIfMissing(rc, req)
+		rc, trs = pipelinepkg.TrimContextSourcesByBudget(rc, trs, compactContext.Summary, contextTokenBudget)
+	}
 
 	var messages []conversation.ModelMessage
 	if composed := pipelinepkg.ComposeContextWithSummary(rc, trs, compactContext.Summary); composed != nil {
@@ -579,11 +558,6 @@ func (r *Resolver) buildPipelineContext(ctx context.Context, req conversation.Ch
 		}
 	}
 	messages = appendCurrentPipelineQueryIfMissing(messages, rc, req)
-
-	// Apply context token budget trimming to pipeline path as well.
-	if contextTokenBudget > 0 && len(messages) > 0 {
-		messages = trimPipelineMessagesByTokens(r.logger, messages, contextTokenBudget)
-	}
 
 	estimatedTokens := 0
 	for _, msg := range messages {
@@ -773,58 +747,6 @@ func (r *Resolver) loadPipelineCompactionContext(ctx context.Context, messages [
 			historyfrag.SummaryRecord(summaryRecordID, summaryText, summaryCoveredRefs, summaryScope),
 		},
 	}
-}
-
-// trimPipelineMessagesByTokens trims pipeline-assembled messages to fit within
-// the context token budget using character-based estimation.
-func trimPipelineMessagesByTokens(log *slog.Logger, messages []conversation.ModelMessage, maxTokens int) []conversation.ModelMessage {
-	totalTokens := 0
-	cutoff := 0
-	for i := len(messages) - 1; i >= 0; i-- {
-		totalTokens += estimateMessageTokens(messages[i])
-		if totalTokens > maxTokens {
-			cutoff = i + 1
-			break
-		}
-	}
-
-	// Avoid orphaned tool messages at the cutoff boundary.
-	for cutoff < len(messages) && strings.EqualFold(strings.TrimSpace(messages[cutoff].Role), "tool") {
-		cutoff++
-	}
-
-	if cutoff > 0 && log != nil {
-		log.Info("trimPipelineMessagesByTokens: context trimmed",
-			slog.Int("total_messages", len(messages)),
-			slog.Int("estimated_tokens", totalTokens),
-			slog.Int("max_tokens", maxTokens),
-			slog.Int("kept_messages", len(messages)-cutoff),
-		)
-	}
-
-	if cutoff > 0 {
-		if summaryIndex := firstPipelineCompactionSummaryMessageIndex(messages); summaryIndex >= 0 && summaryIndex < cutoff {
-			result := make([]conversation.ModelMessage, 0, len(messages)-cutoff+1)
-			result = append(result, messages[summaryIndex])
-			result = append(result, messages[cutoff:]...)
-			return result
-		}
-	}
-	return messages[cutoff:]
-}
-
-func firstPipelineCompactionSummaryMessageIndex(messages []conversation.ModelMessage) int {
-	for i, msg := range messages {
-		if isPipelineCompactionSummaryMessage(msg) {
-			return i
-		}
-	}
-	return -1
-}
-
-func isPipelineCompactionSummaryMessage(msg conversation.ModelMessage) bool {
-	return strings.EqualFold(strings.TrimSpace(msg.Role), "user") &&
-		strings.HasPrefix(strings.TrimSpace(msg.TextContent()), "[Conversation summary]\n")
 }
 
 func pipelineTurnResponsesFromMessages(msgs []messagepkg.Message) []pipelinepkg.TurnResponseEntry {

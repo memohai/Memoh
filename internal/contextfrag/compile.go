@@ -223,6 +223,7 @@ type MessageFragInput struct {
 	SourceID   string
 	Collector  string
 	Index      int
+	Budget     BudgetPolicy
 }
 
 // MessageFrag creates a message-backed fragment.
@@ -237,6 +238,7 @@ func MessageFrag(input MessageFragInput) ContextFrag {
 		CacheClass: input.CacheClass,
 		Trust:      input.Trust,
 		Scope:      normalizeScope(input.Scope),
+		Budget:     input.Budget,
 		Render:     RenderPolicy{Format: RenderSDKMessage},
 		Provenance: Provenance{
 			Source:    strings.TrimSpace(input.Source),

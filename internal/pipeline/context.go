@@ -71,6 +71,15 @@ type mergeEntry struct {
 	trRawContent json.RawMessage
 }
 
+type budgetSourceGroup struct {
+	rcIndices []int
+	trIndices []int
+	tokens    int
+	priority  int
+	time      int64
+	forceKeep bool
+}
+
 // MergeContext interleaves RC segments and TR entries by timestamp.
 // RC entries use receivedAtMs; TR entries use requestedAtMs.
 // Tiebreaker: RC before TR on equal timestamp.
@@ -210,6 +219,214 @@ func ComposeContextWithSummary(rc RenderedContext, trs []TurnResponseEntry, comp
 }
 
 const earliestMergeTime int64 = -1 << 63
+
+func TrimContextSourcesByBudget(rc RenderedContext, trs []TurnResponseEntry, compactSummary CompactSummary, maxTokens int) (RenderedContext, []TurnResponseEntry) {
+	rc = filterCoveredRenderedContext(rc, compactSummary)
+	trs = filterCoveredTurnResponses(trs, compactSummary)
+	if maxTokens <= 0 {
+		return rc, trs
+	}
+	composed := ComposeContextWithSummary(rc, trs, compactSummary)
+	if composed == nil || composed.EstimatedTokens <= maxTokens {
+		return rc, trs
+	}
+
+	selectedRC := make(map[int]bool, len(rc))
+	selectedTR := make(map[int]bool, len(trs))
+	usedTokens := compactSummaryBudgetTokens(compactSummary)
+	groups := budgetSourceGroups(rc, trs, compactSummary)
+	for _, group := range groups {
+		if !group.forceKeep {
+			continue
+		}
+		for _, idx := range group.rcIndices {
+			selectedRC[idx] = true
+		}
+		for _, idx := range group.trIndices {
+			selectedTR[idx] = true
+		}
+		usedTokens += group.tokens
+	}
+
+	remaining := maxTokens - usedTokens
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	sort.SliceStable(groups, func(i, j int) bool {
+		if groups[i].priority != groups[j].priority {
+			return groups[i].priority > groups[j].priority
+		}
+		return groups[i].time > groups[j].time
+	})
+
+	for _, group := range groups {
+		if group.forceKeep {
+			continue
+		}
+		if group.tokens > remaining {
+			continue
+		}
+		for _, idx := range group.rcIndices {
+			selectedRC[idx] = true
+		}
+		for _, idx := range group.trIndices {
+			selectedTR[idx] = true
+		}
+		remaining -= group.tokens
+	}
+
+	outRC := make(RenderedContext, 0, len(rc))
+	for i, seg := range rc {
+		if selectedRC[i] {
+			outRC = append(outRC, seg)
+		}
+	}
+	outTRs := make([]TurnResponseEntry, 0, len(trs))
+	for i, tr := range trs {
+		if selectedTR[i] {
+			outTRs = append(outTRs, tr)
+		}
+	}
+	return outRC, dropOrphanTurnResponseTools(outTRs)
+}
+
+func budgetSourceGroups(rc RenderedContext, trs []TurnResponseEntry, compactSummary CompactSummary) []budgetSourceGroup {
+	latestTriggerIndex := latestExternalRenderedSegmentIndex(rc)
+	groups := make([]budgetSourceGroup, 0, len(rc)+len(trs))
+	for i, seg := range rc {
+		groups = append(groups, budgetSourceGroup{
+			rcIndices: []int{i},
+			tokens:    estimateRenderedSegmentTokens(seg),
+			priority:  renderedSegmentBudgetPriority(seg, compactSummary),
+			time:      seg.eventAtMs(),
+			forceKeep: isPostCompactRenderedSegment(seg, compactSummary) || i == latestTriggerIndex,
+		})
+	}
+	for i := 0; i < len(trs); i++ {
+		group := budgetSourceGroup{
+			trIndices: []int{i},
+			tokens:    estimateTurnResponseTokens(trs[i]),
+			priority:  turnResponseBudgetPriority(trs[i]),
+			time:      trs[i].RequestedAtMs,
+		}
+		if isAssistantTurnResponseWithToolCall(trs[i]) {
+			for j := i + 1; j < len(trs) && strings.EqualFold(strings.TrimSpace(trs[j].Role), "tool"); j++ {
+				group.trIndices = append(group.trIndices, j)
+				group.tokens += estimateTurnResponseTokens(trs[j])
+				group.time = max(group.time, trs[j].RequestedAtMs)
+				i = j
+			}
+		}
+		groups = append(groups, group)
+	}
+	return groups
+}
+
+func latestExternalRenderedSegmentIndex(rc RenderedContext) int {
+	latestIndex := -1
+	var latestTime int64
+	for i, seg := range rc {
+		if seg.IsMyself || seg.IsSelfSent {
+			continue
+		}
+		eventAt := seg.eventAtMs()
+		if latestIndex == -1 || eventAt >= latestTime {
+			latestIndex = i
+			latestTime = eventAt
+		}
+	}
+	return latestIndex
+}
+
+func compactSummaryBudgetTokens(summary CompactSummary) int {
+	text := strings.TrimSpace(summary.Text)
+	if text == "" {
+		return 0
+	}
+	return estimateMessageTokens(ContextMessage{Role: "user", Content: "[Conversation summary]\n" + text})
+}
+
+func estimateRenderedSegmentTokens(seg RenderedSegment) int {
+	total := 0
+	for _, piece := range seg.Content {
+		total += len(piece.Text) + len(piece.URL)
+	}
+	if total == 0 {
+		return 0
+	}
+	return int(math.Ceil(float64(total) / charsPerToken))
+}
+
+func estimateTurnResponseTokens(tr TurnResponseEntry) int {
+	return estimateMessageTokens(ContextMessage{
+		Role:       tr.Role,
+		Content:    tr.Content,
+		RawContent: tr.RawContent,
+	})
+}
+
+func renderedSegmentBudgetPriority(seg RenderedSegment, summary CompactSummary) int {
+	if isPostCompactRenderedSegment(seg, summary) {
+		return 90
+	}
+	if seg.MentionsMe || seg.RepliesToMe {
+		return 85
+	}
+	if seg.IsMyself || seg.IsSelfSent {
+		return 60
+	}
+	return 70
+}
+
+func isPostCompactRenderedSegment(seg RenderedSegment, summary CompactSummary) bool {
+	messageID := strings.TrimSpace(seg.MessageID)
+	if messageID == "" {
+		return false
+	}
+	_, ok := stringSet(summary.CoveredMessageIDs)[messageID]
+	return ok && !summary.coversRenderedMessage(messageID, seg.eventAtMs())
+}
+
+func turnResponseBudgetPriority(tr TurnResponseEntry) int {
+	if strings.EqualFold(strings.TrimSpace(tr.Role), "tool") {
+		return 55
+	}
+	return 70
+}
+
+func isAssistantTurnResponseWithToolCall(tr TurnResponseEntry) bool {
+	if !strings.EqualFold(strings.TrimSpace(tr.Role), "assistant") {
+		return false
+	}
+	var parts []turnResponsePart
+	if err := json.Unmarshal(tr.RawContent, &parts); err != nil {
+		return false
+	}
+	for _, part := range parts {
+		partType := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(part.Type)), "_", "-")
+		if strings.Contains(partType, "tool-call") {
+			return true
+		}
+	}
+	return false
+}
+
+func dropOrphanTurnResponseTools(trs []TurnResponseEntry) []TurnResponseEntry {
+	out := trs[:0]
+	previousAssistantToolCall := false
+	for _, tr := range trs {
+		if strings.EqualFold(strings.TrimSpace(tr.Role), "tool") {
+			if previousAssistantToolCall {
+				out = append(out, tr)
+			}
+			continue
+		}
+		out = append(out, tr)
+		previousAssistantToolCall = isAssistantTurnResponseWithToolCall(tr)
+	}
+	return out
+}
 
 func filterCoveredRenderedContext(rc RenderedContext, compactSummary CompactSummary) RenderedContext {
 	covered := stringSet(compactSummary.CoveredMessageIDs)
