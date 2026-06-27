@@ -17,8 +17,10 @@ import (
 const namespaceDBHistoryMessage = "bot_history_message"
 
 type usageInfo struct {
-	InputTokens  *int `json:"inputTokens"`
-	OutputTokens *int `json:"outputTokens"`
+	InputTokens       *int `json:"inputTokens"`
+	OutputTokens      *int `json:"outputTokens"`
+	SnakeInputTokens  *int `json:"input_tokens"`
+	SnakeOutputTokens *int `json:"output_tokens"`
 }
 
 func FromDBMessage(msg messagepkg.Message, fallback ScopeFallback) (HistoryRecord, error) {
@@ -155,6 +157,12 @@ func parseUsage(raw json.RawMessage) (*int, *int) {
 	var usage usageInfo
 	if err := json.Unmarshal(raw, &usage); err != nil {
 		return nil, nil
+	}
+	if usage.InputTokens == nil {
+		usage.InputTokens = usage.SnakeInputTokens
+	}
+	if usage.OutputTokens == nil {
+		usage.OutputTokens = usage.SnakeOutputTokens
 	}
 	return usage.InputTokens, usage.OutputTokens
 }
