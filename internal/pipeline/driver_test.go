@@ -788,8 +788,9 @@ func TestHandleReplyWithAgentUsesCompactionSummary(t *testing.T) {
 			return nil
 		},
 		compactionSummary: CompactSummary{
-			Text:              "old summarized",
-			CoveredMessageIDs: []string{"external-old"},
+			Text:                   "old summarized",
+			CoveredMessageIDs:      []string{"external-old"},
+			CoveredMessageCutoffMs: map[string]int64{"external-old": 100},
 		},
 	}
 	driver := NewDiscussDriver(DiscussDriverDeps{
@@ -835,8 +836,9 @@ func TestHandleReplyWithAgentSkipsCoveredReplayAndAdvancesCursor(t *testing.T) {
 	fakeAgent := &fakeDiscussStreamer{}
 	resolver := &fakeRunConfigResolver{
 		compactionSummary: CompactSummary{
-			Text:              "old summarized",
-			CoveredMessageIDs: []string{"external-old"},
+			Text:                   "old summarized",
+			CoveredMessageIDs:      []string{"external-old"},
+			CoveredMessageCutoffMs: map[string]int64{"external-old": 100},
 		},
 	}
 	driver := NewDiscussDriver(DiscussDriverDeps{

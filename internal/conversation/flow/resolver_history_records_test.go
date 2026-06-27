@@ -432,6 +432,62 @@ func TestBuildMessagesFromPipelineUsesCompactionSummaryAndSkipsCoveredReplay(t *
 	}
 }
 
+func TestBuildMessagesFromPipelineReturnsCurrentQueryWhenRCEmpty(t *testing.T) {
+	t.Parallel()
+
+	const sessionID = "sess-empty-rc"
+	p := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
+	p.ReplaySession(sessionID, nil)
+	resolver := &Resolver{
+		logger:   slog.New(slog.DiscardHandler),
+		pipeline: p,
+	}
+
+	messages := resolver.buildMessagesFromPipeline(context.Background(), conversation.ChatRequest{
+		SessionID: sessionID,
+		Query:     "current user query",
+	}, 0)
+
+	if len(messages) != 1 {
+		t.Fatalf("messages = %d, want current query only: %#v", len(messages), messages)
+	}
+	if messages[0].Role != "user" || messages[0].TextContent() != "current user query" {
+		t.Fatalf("unexpected fallback message: %#v", messages[0])
+	}
+}
+
+func TestBuildMessagesFromPipelineAppendsCurrentQueryWhenRCStale(t *testing.T) {
+	t.Parallel()
+
+	const sessionID = "sess-stale-rc"
+	p := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
+	p.PushEvent(sessionID, pipelinepkg.MessageEvent{
+		SessionID:    sessionID,
+		MessageID:    "external-old",
+		ReceivedAtMs: 100,
+		TimestampSec: 100,
+		Content:      []pipelinepkg.ContentNode{{Type: "text", Text: "old user"}},
+		Conversation: pipelinepkg.ConversationMeta{Channel: "telegram", ConversationType: "group"},
+	})
+	resolver := &Resolver{
+		logger:   slog.New(slog.DiscardHandler),
+		pipeline: p,
+	}
+
+	messages := resolver.buildMessagesFromPipeline(context.Background(), conversation.ChatRequest{
+		SessionID:         sessionID,
+		ExternalMessageID: "external-current",
+		Query:             "current user query",
+	}, 0)
+
+	if len(messages) != 2 {
+		t.Fatalf("messages = %d, want RC plus current query: %#v", len(messages), messages)
+	}
+	if got := messages[len(messages)-1].TextContent(); got != "current user query" {
+		t.Fatalf("last message = %q, want current query; all=%#v", got, messages)
+	}
+}
+
 func TestBuildMessagesFromPipelineCompactionEndToEnd(t *testing.T) {
 	t.Parallel()
 
@@ -608,13 +664,13 @@ func TestLoadCompactionSummaryCarriesMessageCutoff(t *testing.T) {
 		},
 	}
 	messages := []messagepkg.Message{
-		{ID: "row-old-user", ExternalMessageID: "external-old", CompactID: compactID},
+		{ID: "row-old-user", ExternalMessageID: "external-old", CompactID: compactID, CreatedAt: time.UnixMilli(100).UTC()},
 	}
 
 	summary := resolver.LoadCompactionSummary(context.Background(), messages)
 
-	if got := summary.CoveredMessageCutoffMs["external-old"]; got != completedAt.UnixMilli() {
-		t.Fatalf("covered message cutoff = %d, want %d; summary=%#v", got, completedAt.UnixMilli(), summary)
+	if got := summary.CoveredMessageCutoffMs["external-old"]; got != 100 {
+		t.Fatalf("covered message cutoff = %d, want source message timestamp; summary=%#v", got, summary)
 	}
 }
 
@@ -645,9 +701,9 @@ func TestLoadCompactionSummaryMergesMultipleCompactsInOrderAndCoverage(t *testin
 		},
 	}
 	messages := []messagepkg.Message{
-		{ID: "row-a1", ExternalMessageID: "external-a", CompactID: compactA},
-		{ID: "row-b1", ExternalMessageID: "external-b", CompactID: compactB},
-		{ID: "row-a2", CompactID: compactA},
+		{ID: "row-a1", ExternalMessageID: "external-a", CompactID: compactA, CreatedAt: time.UnixMilli(100).UTC()},
+		{ID: "row-b1", ExternalMessageID: "external-b", CompactID: compactB, CreatedAt: time.UnixMilli(200).UTC()},
+		{ID: "row-a2", CompactID: compactA, CreatedAt: time.UnixMilli(250).UTC()},
 	}
 
 	summary := resolver.LoadCompactionSummary(context.Background(), messages)
@@ -661,8 +717,8 @@ func TestLoadCompactionSummaryMergesMultipleCompactsInOrderAndCoverage(t *testin
 	if !reflect.DeepEqual(summary.CoveredMessageIDs, []string{"external-a", "external-b"}) {
 		t.Fatalf("covered external ids mismatch: %#v", summary.CoveredMessageIDs)
 	}
-	if summary.CoveredMessageCutoffMs["external-a"] != completedA.UnixMilli() ||
-		summary.CoveredMessageCutoffMs["external-b"] != completedB.UnixMilli() {
+	if summary.CoveredMessageCutoffMs["external-a"] != 100 ||
+		summary.CoveredMessageCutoffMs["external-b"] != 200 {
 		t.Fatalf("covered cutoffs mismatch: %#v", summary.CoveredMessageCutoffMs)
 	}
 }
