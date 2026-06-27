@@ -294,10 +294,10 @@ func (r *Resolver) loadSessionCompactionSummaries(ctx context.Context, sessionID
 		}
 		return nil
 	}
-	return summaryRecordsFromCompactionLogs(logs, scope)
+	return r.summaryRecordsFromCompactionLogs(ctx, logs, scope)
 }
 
-func summaryRecordsFromCompactionLogs(logs []sqlc.BotHistoryMessageCompact, scope contextfrag.Scope) []historyfrag.HistoryRecord {
+func (r *Resolver) summaryRecordsFromCompactionLogs(ctx context.Context, logs []sqlc.BotHistoryMessageCompact, scope contextfrag.Scope) []historyfrag.HistoryRecord {
 	if len(logs) == 0 {
 		return nil
 	}
@@ -317,9 +317,58 @@ func summaryRecordsFromCompactionLogs(logs []sqlc.BotHistoryMessageCompact, scop
 		if logScope.SessionID == "" {
 			logScope.SessionID = pgUUIDString(log.SessionID)
 		}
-		records = append(records, historyfrag.SummaryRecord(compactID, log.Summary, nil, logScope))
+		coveredRefs := r.coveredRefsForCompact(ctx, log.ID, logScope)
+		records = append(records, historyfrag.SummaryRecord(compactID, log.Summary, coveredRefs, logScope))
 	}
 	return records
+}
+
+func (r *Resolver) coveredRefsForCompact(ctx context.Context, compactID pgtype.UUID, scope contextfrag.Scope) []contextfrag.ContextRef {
+	if r.queries == nil || !compactID.Valid {
+		return nil
+	}
+	rows, err := r.queries.ListMessagesByCompactID(ctx, compactID)
+	if err != nil {
+		if r.logger != nil {
+			r.logger.Warn("loadSessionCompactionSummaries: failed to load compacted message refs", slog.String("compact_id", pgUUIDString(compactID)), slog.Any("error", err))
+		}
+		return nil
+	}
+	refs := make([]contextfrag.ContextRef, 0, len(rows))
+	for _, row := range rows {
+		record, err := historyfrag.FromDBMessage(messageFromCompactRow(row), historyfrag.ScopeFallback{
+			ConversationType: scope.ConversationType,
+			ConversationName: scope.ConversationName,
+			ReplyTarget:      scope.ReplyTarget,
+		})
+		if err != nil {
+			if r.logger != nil {
+				r.logger.Warn("loadSessionCompactionSummaries: skipped compacted message ref", slog.String("compact_id", pgUUIDString(compactID)), slog.Any("error", err))
+			}
+			continue
+		}
+		refs = append(refs, record.Ref)
+	}
+	return refs
+}
+
+func messageFromCompactRow(row sqlc.ListMessagesByCompactIDRow) messagepkg.Message {
+	return messagepkg.Message{
+		ID:                      pgUUIDString(row.ID),
+		BotID:                   pgUUIDString(row.BotID),
+		SessionID:               pgUUIDString(row.SessionID),
+		SenderChannelIdentityID: pgUUIDString(row.SenderChannelIdentityID),
+		SenderUserID:            pgUUIDString(row.SenderUserID),
+		ExternalMessageID:       pgTextString(row.ExternalMessageID),
+		SourceReplyToMessageID:  pgTextString(row.SourceReplyToMessageID),
+		Role:                    strings.TrimSpace(row.Role),
+		Content:                 json.RawMessage(row.Content),
+		Usage:                   json.RawMessage(row.Usage),
+		CompactID:               pgUUIDString(row.CompactID),
+		EventID:                 pgUUIDString(row.EventID),
+		DisplayContent:          pgTextString(row.DisplayText),
+		CreatedAt:               row.CreatedAt.Time,
+	}
 }
 
 func prependMissingCompactionSummaries(messages []historyfrag.HistoryRecord, summaries []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
@@ -370,6 +419,13 @@ func pgUUIDString(value pgtype.UUID) string {
 		return ""
 	}
 	return parsed.String()
+}
+
+func pgTextString(value pgtype.Text) string {
+	if !value.Valid {
+		return ""
+	}
+	return strings.TrimSpace(value.String)
 }
 
 func replaceCompactedHistoryRecords(messages []historyfrag.HistoryRecord, summaries map[string]string) []historyfrag.HistoryRecord {

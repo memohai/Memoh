@@ -778,6 +778,85 @@ func (q *Queries) ListMessagesBeforeBySession(ctx context.Context, arg ListMessa
 	return items, nil
 }
 
+const listMessagesByCompactID = `-- name: ListMessagesByCompactID :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.event_id,
+  m.display_text,
+  NULLIF(TRIM(COALESCE(m.compact_id, '')), '') AS compact_id,
+  m.created_at
+FROM bot_history_messages m
+WHERE NULLIF(TRIM(COALESCE(m.compact_id, '')), '') = ?1
+ORDER BY m.created_at ASC, m.id ASC
+`
+
+type ListMessagesByCompactIDRow struct {
+	ID                      string         `json:"id"`
+	BotID                   string         `json:"bot_id"`
+	SessionID               sql.NullString `json:"session_id"`
+	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
+	SenderUserID            sql.NullString `json:"sender_user_id"`
+	ExternalMessageID       sql.NullString `json:"external_message_id"`
+	SourceReplyToMessageID  sql.NullString `json:"source_reply_to_message_id"`
+	Role                    string         `json:"role"`
+	Content                 string         `json:"content"`
+	Metadata                string         `json:"metadata"`
+	Usage                   sql.NullString `json:"usage"`
+	EventID                 sql.NullString `json:"event_id"`
+	DisplayText             sql.NullString `json:"display_text"`
+	CompactID               interface{}    `json:"compact_id"`
+	CreatedAt               string         `json:"created_at"`
+}
+
+func (q *Queries) ListMessagesByCompactID(ctx context.Context, compactID sql.NullString) ([]ListMessagesByCompactIDRow, error) {
+	rows, err := q.db.QueryContext(ctx, listMessagesByCompactID, compactID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMessagesByCompactIDRow
+	for rows.Next() {
+		var i ListMessagesByCompactIDRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.SenderChannelIdentityID,
+			&i.SenderUserID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.Role,
+			&i.Content,
+			&i.Metadata,
+			&i.Usage,
+			&i.EventID,
+			&i.DisplayText,
+			&i.CompactID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMessagesBySession = `-- name: ListMessagesBySession :many
 SELECT
   m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,

@@ -233,6 +233,57 @@ func TestReplaceCompactedMessagesLoadsSessionSummaryWithoutRecentRows(t *testing
 	}
 }
 
+func TestReplaceCompactedMessagesLoadsSessionSummaryCoverageFromCompactedRows(t *testing.T) {
+	t.Parallel()
+
+	sessionID := "00000000-0000-0000-0000-00000000f004"
+	compactID := "00000000-0000-0000-0000-00000000c004"
+	queries := &recordingCompactionLogQueries{
+		logs: []sqlc.BotHistoryMessageCompact{
+			{
+				ID:        mustPGUUID(t, compactID),
+				SessionID: mustPGUUID(t, sessionID),
+				Status:    "ok",
+				Summary:   "older condensed context",
+			},
+		},
+		covered: map[pgtype.UUID][]sqlc.ListMessagesByCompactIDRow{
+			mustPGUUID(t, compactID): {
+				{
+					ID:      mustPGUUID(t, "00000000-0000-0000-0000-000000000401"),
+					BotID:   mustPGUUID(t, "00000000-0000-0000-0000-000000000001"),
+					Role:    "user",
+					Content: []byte(`"covered user"`),
+				},
+				{
+					ID:      mustPGUUID(t, "00000000-0000-0000-0000-000000000402"),
+					BotID:   mustPGUUID(t, "00000000-0000-0000-0000-000000000001"),
+					Role:    "assistant",
+					Content: []byte(`"covered assistant"`),
+				},
+			},
+		},
+	}
+	resolver := &Resolver{queries: queries}
+
+	got := resolver.replaceCompactedMessages(context.Background(), sessionID, contextfrag.Scope{BotID: "bot-1", SessionID: sessionID}, nil)
+
+	if len(got) != 1 {
+		t.Fatalf("records = %d, want one session summary: %#v", len(got), got)
+	}
+	if got[0].Coverage == nil || len(got[0].Coverage.CoveredRefs) != 2 {
+		t.Fatalf("summary coverage = %#v, want covered message refs", got[0].Coverage)
+	}
+	if got[0].Coverage.CoveredRefs[0].ID != "00000000-0000-0000-0000-000000000401" ||
+		got[0].Coverage.CoveredRefs[1].ID != "00000000-0000-0000-0000-000000000402" {
+		t.Fatalf("covered refs mismatch: %#v", got[0].Coverage.CoveredRefs)
+	}
+	frags := historyContextFragsForMessages(historyfrag.ToModelMessages(got), got)
+	if len(frags) != 1 || frags[0].Coverage == nil || len(frags[0].Coverage.CoveredRefs) != 2 {
+		t.Fatalf("summary frag lost loaded coverage: %#v", frags)
+	}
+}
+
 func TestHistoryRecordPathPreservesLegacyResolverMessagePipeline(t *testing.T) {
 	t.Parallel()
 
@@ -429,12 +480,17 @@ func historyRecord(id string, msg conversation.ModelMessage, mutate func(*histor
 type recordingCompactionLogQueries struct {
 	dbstore.Queries
 	logs      []sqlc.BotHistoryMessageCompact
+	covered   map[pgtype.UUID][]sqlc.ListMessagesByCompactIDRow
 	sessionID pgtype.UUID
 }
 
 func (q *recordingCompactionLogQueries) ListCompactionLogsBySession(_ context.Context, sessionID pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
 	q.sessionID = sessionID
 	return q.logs, nil
+}
+
+func (q *recordingCompactionLogQueries) ListMessagesByCompactID(_ context.Context, compactID pgtype.UUID) ([]sqlc.ListMessagesByCompactIDRow, error) {
+	return q.covered[compactID], nil
 }
 
 func mustPGUUID(t *testing.T, value string) pgtype.UUID {

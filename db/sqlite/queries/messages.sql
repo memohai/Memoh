@@ -422,3 +422,24 @@ WHERE m.session_id = sqlc.arg(session_id)
   ))
   AND (json_extract(m.metadata, '$.trigger_mode') IS NULL OR json_extract(m.metadata, '$.trigger_mode') != 'passive_sync')
 ORDER BY m.created_at ASC, m.id ASC;
+
+-- name: ListMessagesByCompactID :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.event_id,
+  m.display_text,
+  NULLIF(TRIM(COALESCE(m.compact_id, '')), '') AS compact_id,
+  m.created_at
+FROM bot_history_messages m
+WHERE NULLIF(TRIM(COALESCE(m.compact_id, '')), '') = sqlc.arg(compact_id)
+ORDER BY m.created_at ASC, m.id ASC;
