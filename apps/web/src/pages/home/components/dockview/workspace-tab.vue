@@ -1,14 +1,36 @@
 <template>
   <div
-    class="group/tab relative z-[1] flex h-full min-w-0 items-center pr-[1.6875rem] pb-[3.5px] pl-2"
+    ref="rootEl"
+    class="group/tab relative z-[1] flex h-full min-w-0 items-center overflow-visible pr-[1.6875rem] pb-[3.5px] pl-2"
     @auxclick.middle.prevent="close"
   >
+    <svg
+      v-if="isActive"
+      class="active-tab-shape z-0"
+      :viewBox="activeTabViewBox"
+      :style="activeTabShapeStyle"
+      preserveAspectRatio="none"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        :d="activeTabFillPath"
+        fill="var(--surface-editor)"
+      />
+      <path
+        :d="activeTabStrokePath"
+        fill="none"
+        stroke="var(--dock-stroke)"
+        stroke-width="1"
+        vector-effect="non-scaling-stroke"
+      />
+    </svg>
     <!-- Active state is signalled by text colour, fill, and the connected chip
          shape, not by weight or size. Every tab is the same height. The tab's
          reserved top border plus this bottom padding parks label and close on
          the same optical center for active and inactive states. -->
     <span
-      class="min-w-0 flex-1 truncate text-label leading-[1.3] tracking-normal transition-colors"
+      class="relative z-[1] min-w-0 flex-1 truncate text-label leading-[1.3] tracking-normal transition-colors"
       :class="[
         isActive ? 'text-foreground' : 'text-muted-foreground',
       ]"
@@ -19,7 +41,7 @@
          it instead of colliding with the glyph. -->
     <div
       v-if="isDirty"
-      class="close-fade pointer-events-none absolute right-[0.1875rem] flex items-center pl-6 pr-[0.1875rem] opacity-100 group-hover/tab:opacity-0"
+      class="close-fade pointer-events-none absolute right-[0.1875rem] z-[2] flex items-center pl-6 pr-[0.1875rem] opacity-100 group-hover/tab:opacity-0"
     >
       <span class="flex size-5 items-center justify-center">
         <span
@@ -35,7 +57,7 @@
          button. The fade layer is click-through; only the button takes pointer
          events. Keyboard focus reveals it for a11y; middle-click closes without it. -->
     <div
-      class="close-fade pointer-events-none absolute right-[0.1875rem] flex items-center pl-6 pr-[0.1875rem] opacity-0 group-hover/tab:opacity-100 focus-within:opacity-100"
+      class="close-fade pointer-events-none absolute right-[0.1875rem] z-[2] flex items-center pl-6 pr-[0.1875rem] opacity-0 group-hover/tab:opacity-100 focus-within:opacity-100"
     >
       <!-- No own hover fill: the close affordance is read through the left→right
            fade (which already paints the chip's hover surface) plus the icon
@@ -56,7 +78,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { X } from 'lucide-vue-next'
 import { Button } from '@memohai/ui'
@@ -76,9 +98,27 @@ const props = defineProps<{
 const { t } = useI18n()
 const workspaceTabs = useWorkspaceTabsStore()
 
+const rootEl = ref<HTMLElement | null>(null)
 const panelId = props.params.api.id
 const title = ref(props.params.api.title ?? '')
 const isActive = ref(props.params.api.isActive)
+const initialTabShape = buildActiveTabShape({
+  width: 200,
+  height: 31,
+  radius: 8,
+  strokeWidth: 1,
+})
+const activeTabViewBox = ref(initialTabShape.viewBox)
+const activeTabFillPath = ref(initialTabShape.fillPath)
+const activeTabStrokePath = ref(initialTabShape.strokePath)
+const activeTabShapeStyle = ref<Record<string, string>>({
+  left: '-8px',
+  top: '0px',
+  width: '216px',
+  height: '31px',
+})
+let resizeObserver: ResizeObserver | null = null
+let pendingShapeFrame = 0
 // Unsaved-changes flag for file panels — read from the store's reactive map, so
 // the dot, the sidebar badge and the close dialog never drift apart.
 const isDirty = computed(() => !!workspaceTabs.fileDirty[panelId])
@@ -92,6 +132,10 @@ const disposables = [
   }),
   props.params.api.onDidActiveChange((event) => {
     isActive.value = event.isActive
+    if (event.isActive) scheduleActiveTabShapeUpdate()
+  }),
+  props.params.containerApi.onDidLayoutChange(() => {
+    scheduleActiveTabShapeUpdate()
   }),
 ]
 
@@ -100,6 +144,11 @@ const disposables = [
 onMounted(() => {
   title.value = props.params.api.title ?? title.value
   isActive.value = props.params.api.isActive
+  nextTick(() => {
+    installShapeObserver()
+    window.addEventListener('resize', scheduleActiveTabShapeUpdate)
+    scheduleActiveTabShapeUpdate()
+  })
 })
 
 // Route through the store guard: a dirty file opens the save-confirm dialog
@@ -109,11 +158,147 @@ function close() {
 }
 
 onBeforeUnmount(() => {
+  if (pendingShapeFrame) cancelAnimationFrame(pendingShapeFrame)
+  resizeObserver?.disconnect()
+  window.removeEventListener('resize', scheduleActiveTabShapeUpdate)
   for (const d of disposables) d.dispose()
 })
+
+watch(isActive, (active) => {
+  if (active) nextTick(scheduleActiveTabShapeUpdate)
+})
+
+function installShapeObserver() {
+  const root = rootEl.value
+  if (!root || resizeObserver) return
+
+  resizeObserver = new ResizeObserver(() => scheduleActiveTabShapeUpdate())
+  resizeObserver.observe(root)
+
+  const tab = root.closest<HTMLElement>('.dv-tab')
+  if (tab && tab !== root) resizeObserver.observe(tab)
+}
+
+function scheduleActiveTabShapeUpdate() {
+  if (!isActive.value || pendingShapeFrame) return
+
+  pendingShapeFrame = requestAnimationFrame(() => {
+    pendingShapeFrame = 0
+    updateActiveTabShape()
+  })
+}
+
+function updateActiveTabShape() {
+  const root = rootEl.value
+  const tab = root?.closest<HTMLElement>('.dv-tab')
+  if (!root || !tab) return
+
+  const rootRect = root.getBoundingClientRect()
+  const tabRect = tab.getBoundingClientRect()
+  if (tabRect.width <= 0 || tabRect.height <= 0) return
+
+  const scale = window.devicePixelRatio || 1
+  const alignedLeft = snapToDevicePixel(tabRect.left, scale)
+  const alignedTop = snapToDevicePixel(tabRect.top, scale)
+  const alignedRight = snapToDevicePixel(tabRect.right, scale)
+  const alignedBottom = snapToDevicePixel(tabRect.bottom, scale)
+  const width = alignedRight - alignedLeft
+  const height = alignedBottom - alignedTop
+  const radius = Math.min(
+    snapToDevicePixel(readTabRadius(tab), scale),
+    Math.max(0, width / 2),
+    Math.max(0, height),
+  )
+
+  const shape = buildActiveTabShape({
+    width,
+    height,
+    radius,
+    strokeWidth: 1,
+  })
+
+  activeTabViewBox.value = shape.viewBox
+  activeTabFillPath.value = shape.fillPath
+  activeTabStrokePath.value = shape.strokePath
+  activeTabShapeStyle.value = {
+    left: `${formatPx(alignedLeft - rootRect.left - radius)}`,
+    top: `${formatPx(alignedTop - rootRect.top)}`,
+    width: `${formatPx(width + radius * 2)}`,
+    height: `${formatPx(height)}`,
+  }
+}
+
+function buildActiveTabShape({
+  width,
+  height,
+  radius,
+  strokeWidth,
+}: {
+  width: number
+  height: number
+  radius: number
+  strokeWidth: number
+}) {
+  const strokeAdjustment = strokeWidth * 0.5
+  const extension = radius
+  const left = -extension
+  const right = width + extension
+  const extendedBottom = height
+  const tabLeft = strokeAdjustment
+  const tabRight = width - strokeAdjustment
+  const tabTop = strokeAdjustment
+  const tabBottom = height - strokeAdjustment
+  const topRadius = Math.max(0, radius - strokeAdjustment)
+  const bottomRadius = Math.max(0, radius - strokeAdjustment)
+
+  const outline = [
+    `M ${fmt(left)} ${fmt(extendedBottom)}`,
+    `L ${fmt(left)} ${fmt(tabBottom)}`,
+    `L ${fmt(tabLeft - bottomRadius)} ${fmt(tabBottom)}`,
+    `A ${fmt(bottomRadius)} ${fmt(bottomRadius)} 0 0 0 ${fmt(tabLeft)} ${fmt(tabBottom - bottomRadius)}`,
+    `L ${fmt(tabLeft)} ${fmt(tabTop + topRadius)}`,
+    `A ${fmt(topRadius)} ${fmt(topRadius)} 0 0 1 ${fmt(tabLeft + topRadius)} ${fmt(tabTop)}`,
+    `L ${fmt(tabRight - topRadius)} ${fmt(tabTop)}`,
+    `A ${fmt(topRadius)} ${fmt(topRadius)} 0 0 1 ${fmt(tabRight)} ${fmt(tabTop + topRadius)}`,
+    `L ${fmt(tabRight)} ${fmt(tabBottom - bottomRadius)}`,
+    `A ${fmt(bottomRadius)} ${fmt(bottomRadius)} 0 0 0 ${fmt(tabRight + bottomRadius)} ${fmt(tabBottom)}`,
+    `L ${fmt(right)} ${fmt(tabBottom)}`,
+    `L ${fmt(right)} ${fmt(extendedBottom)}`,
+  ].join(' ')
+
+  return {
+    viewBox: `${fmt(left)} 0 ${fmt(width + extension * 2)} ${fmt(height)}`,
+    fillPath: `${outline} L ${fmt(left)} ${fmt(extendedBottom)} Z`,
+    strokePath: outline,
+  }
+}
+
+function readTabRadius(tab: HTMLElement) {
+  const radius = Number.parseFloat(getComputedStyle(tab).borderTopLeftRadius)
+  return Number.isFinite(radius) && radius > 0 ? radius : 8
+}
+
+function snapToDevicePixel(value: number, scale: number) {
+  return Math.round(value * scale) / scale
+}
+
+function formatPx(value: number) {
+  return `${fmt(value)}px`
+}
+
+function fmt(value: number) {
+  const normalized = Math.abs(value) < 0.0001 ? 0 : value
+  return Number(normalized.toFixed(3)).toString()
+}
 </script>
 
 <style scoped>
+.active-tab-shape {
+  position: absolute;
+  overflow: visible;
+  pointer-events: none;
+}
+
 /* The close affordance blots out the title with the chip's own opaque hover colour:
  * transparent on the left so the text dissolves into the chip, fully opaque by the
  * button so NOTHING is legible underneath. --tab-hover-bg is inherited from .dv-tab

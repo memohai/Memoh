@@ -212,17 +212,13 @@
   display: none;
 }
 
-/* Active tab = the full connected silhouette: editor-surface fill (continuous with the
- * pane below), a --dock-stroke crown/side stroke, and the bottom fillet feet
- * (::before) that curve down into the bar. It ALONE wears the 倒角 — selection is a
- * physical "grafted onto the pane" shape. The crown is rounded; the bottom is left
- * open so the fill bleeds into the pane and the feet carry the stroke down to the bar
- * (outline reads as one line: bar → left foot → up the crown → down the right foot). */
+/* Active tab paint is owned by the tab content's single path shape. The wrapper
+ * keeps the same box metrics as inactive tabs, but it no longer paints its own
+ * fill/border/foot pieces; otherwise separate raster models meet at the lower
+ * turns and produce doubled pixels. */
 .dockview-theme-memoh .dv-tab.dv-active-tab {
-  background-color: var(--surface-editor);
-  border-top-color: var(--dock-stroke);
-  border-left-color: var(--dock-stroke);
-  border-right-color: var(--dock-stroke);
+  background-color: transparent !important;
+  border-color: transparent;
   /* The active tab never takes the hover lift, so its blot-out colour is the
    * editor surface it already wears. */
   --tab-hover-bg: var(--surface-editor);
@@ -235,35 +231,10 @@
   background-color: transparent !important;
 }
 
-/* Bottom flare = a CONCAVE fillet (倒角), not a bump. A single pseudo spans
- * --tab-flare BEYOND each side at the bottom; each side is a solid tile of the pane
- * colour with a quarter-circle CARVED OUT of its OUTER-TOP corner (transparent
- * inside the radius, fill outside). What remains is an inward-curving foot: the
- * tab's vertical edge sweeps down and splays out to meet the bar tangentially —
- * a negative curve that seats the tab on the strip. (Filling the
- * disc instead of carving it would bulge two convex "circles" out of the corners,
- * which is the opposite of a fillet.) dockview leaves ::before unused (it only
- * styles ::after on :focus), so this is a clean slot. ACTIVE-ONLY: a hover is a plain
- * rounded rectangle (above), never these feet. */
+/* The active path layer owns the lower fillets. Keep the wrapper pseudo empty so
+ * the old gradient flare cannot stack under the path stroke. */
 .dockview-theme-memoh .dv-tab.dv-active-tab::before {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: calc(-1 * var(--tab-flare));
-  right: calc(-1 * var(--tab-flare));
-  height: var(--tab-flare);
-  pointer-events: none;
-  /* Three layers, top to bottom:
-   *  1. left foot  — carved concave fill with a 1px --dock-stroke ring ALONG the curve
-   *     (transparent inside the radius → chrome shows; ring at [r-1,r]; fill beyond).
-   *  2. right foot — mirror.
-   *  3. middle fill — a plain fill spanning exactly the tab body's width, painted
-   *     over the bottom strip so the crown's side borders don't leave a stray
-   *     vertical nub in the foot zone (the stroke there is the curve, not a line). */
-  background:
-    radial-gradient(circle at top left, transparent calc(var(--tab-flare) - 1px), var(--dock-stroke) calc(var(--tab-flare) - 1px), var(--dock-stroke) var(--tab-flare), var(--surface-editor) calc(var(--tab-flare) + 0.5px)) left bottom / var(--tab-flare) var(--tab-flare) no-repeat,
-    radial-gradient(circle at top right, transparent calc(var(--tab-flare) - 1px), var(--dock-stroke) calc(var(--tab-flare) - 1px), var(--dock-stroke) var(--tab-flare), var(--surface-editor) calc(var(--tab-flare) + 0.5px)) right bottom / var(--tab-flare) var(--tab-flare) no-repeat,
-    linear-gradient(var(--surface-editor), var(--surface-editor)) center bottom / calc(100% - 2 * var(--tab-flare)) 100% no-repeat;
+  content: none;
 }
 
 .dockview-theme-memoh .dv-right-actions-container,
