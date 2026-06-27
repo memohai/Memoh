@@ -158,13 +158,14 @@ func WithContextRef(frag ContextFrag, ref ContextRef) ContextFrag {
 	hasExplicitID := strings.TrimSpace(ref.ID) != ""
 	hasSourceID := strings.TrimSpace(frag.Provenance.SourceID) != ""
 	ref.Namespace = firstNonEmpty(ref.Namespace, frag.Provenance.Source, "context_frag")
-	if hasExplicitID {
+	switch {
+	case hasExplicitID:
 		ref.ID = strings.TrimSpace(ref.ID)
-	} else if hasSourceID {
+	case hasSourceID:
 		ref.ID = strings.TrimSpace(frag.Provenance.SourceID)
-	} else if hashErr == nil && hash.Value != "" {
+	case hashErr == nil && hash.Value != "":
 		ref.ID = hash.Value
-	} else {
+	default:
 		ref.ID = strings.TrimSpace(frag.ID)
 	}
 	ref.Schema = firstNonEmpty(ref.Schema, SchemaContextRef)
