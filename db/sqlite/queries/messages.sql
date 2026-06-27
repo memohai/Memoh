@@ -397,7 +397,7 @@ SELECT
   m.usage,
   m.event_id,
   m.display_text,
-  m.compact_id,
+  NULLIF(TRIM(COALESCE(m.compact_id, '')), '') AS compact_id,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -414,5 +414,5 @@ LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 LEFT JOIN bot_channel_routes r ON r.id = s.route_id
 WHERE m.session_id = sqlc.arg(session_id)
-  AND m.compact_id IS NULL
-ORDER BY m.created_at ASC;
+  AND NULLIF(TRIM(COALESCE(m.compact_id, '')), '') IS NULL
+ORDER BY m.created_at ASC, m.id ASC;

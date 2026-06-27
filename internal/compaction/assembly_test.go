@@ -7,13 +7,13 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
 
-func TestBuildEntriesAndIDsMarksAllSelectedButSkipsEmptyEntries(t *testing.T) {
+func TestBuildEntriesAndIDsMarksOnlyRenderedItemsInMixedWindow(t *testing.T) {
 	t.Parallel()
 
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
 		mkRow(t, "user", `"first question"`, 0),
-		// reasoning-only: renders to empty, must NOT add a bare "assistant:" line,
-		// but must still be marked compacted.
+		// reasoning-only: renders to empty and must NOT add a bare
+		// "assistant:" line or be marked compacted in a mixed window.
 		mkRow(t, "assistant", `[{"type":"reasoning","text":"thinking"}]`, 0),
 		mkRow(t, "assistant", `"the answer"`, 0),
 	}
@@ -21,13 +21,13 @@ func TestBuildEntriesAndIDsMarksAllSelectedButSkipsEmptyEntries(t *testing.T) {
 
 	entries, ids := buildEntriesAndIDs(items)
 
-	// Every selected item is marked compacted, in order.
-	if len(ids) != 3 {
-		t.Fatalf("ids = %d, want 3 (all selected marked)", len(ids))
+	if len(ids) != 2 {
+		t.Fatalf("ids = %d, want 2 (only rendered rows marked)", len(ids))
 	}
-	for i := range rows {
-		if ids[i] != rows[i].ID {
-			t.Fatalf("id[%d] misaligned with selected order", i)
+	wantIDs := []int{0, 2}
+	for i, rowIdx := range wantIDs {
+		if ids[i] != rows[rowIdx].ID {
+			t.Fatalf("id[%d] misaligned with rendered row %d", i, rowIdx)
 		}
 	}
 

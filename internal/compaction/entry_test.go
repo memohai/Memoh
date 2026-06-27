@@ -197,6 +197,22 @@ func TestBuildEntriesAndIDsAllEmptyWindow(t *testing.T) {
 	}
 }
 
+func TestBuildEntriesAndIDsDoesNotCompactUnrenderedRowInMixedWindow(t *testing.T) {
+	t.Parallel()
+
+	unrendered := mkRow(t, "user", `not-json`, 0)
+	rendered := mkRow(t, "assistant", `"visible"`, 0)
+	items, _ := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{unrendered, rendered})
+
+	entries, ids := buildEntriesAndIDs(items)
+	if len(entries) != 1 || entries[0].Content != "visible" {
+		t.Fatalf("entries = %#v, want only rendered row", entries)
+	}
+	if len(ids) != 1 || ids[0] != rendered.ID {
+		t.Fatalf("ids = %#v, want only rendered row id %s", ids, formatUUID(rendered.ID))
+	}
+}
+
 func TestBuildEntriesAndIDsIncludesDirectedSignalHeader(t *testing.T) {
 	t.Parallel()
 

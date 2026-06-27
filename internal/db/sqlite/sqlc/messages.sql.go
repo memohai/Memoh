@@ -1403,7 +1403,7 @@ SELECT
   m.usage,
   m.event_id,
   m.display_text,
-  m.compact_id,
+  NULLIF(TRIM(COALESCE(m.compact_id, '')), '') AS compact_id,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -1420,8 +1420,8 @@ LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 LEFT JOIN bot_channel_routes r ON r.id = s.route_id
 WHERE m.session_id = ?1
-  AND m.compact_id IS NULL
-ORDER BY m.created_at ASC
+  AND NULLIF(TRIM(COALESCE(m.compact_id, '')), '') IS NULL
+ORDER BY m.created_at ASC, m.id ASC
 `
 
 type ListUncompactedMessagesBySessionRow struct {
@@ -1438,7 +1438,7 @@ type ListUncompactedMessagesBySessionRow struct {
 	Usage                   sql.NullString `json:"usage"`
 	EventID                 sql.NullString `json:"event_id"`
 	DisplayText             sql.NullString `json:"display_text"`
-	CompactID               sql.NullString `json:"compact_id"`
+	CompactID               interface{}    `json:"compact_id"`
 	CreatedAt               string         `json:"created_at"`
 	SenderDisplayName       sql.NullString `json:"sender_display_name"`
 	SenderAvatarUrl         sql.NullString `json:"sender_avatar_url"`

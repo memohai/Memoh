@@ -563,4 +563,4 @@ LEFT JOIN bot_sessions s ON s.id = m.session_id
 LEFT JOIN bot_channel_routes r ON r.id = s.route_id
 WHERE m.session_id = $1
   AND m.compact_id IS NULL
-ORDER BY m.created_at ASC;
+ORDER BY m.created_at ASC, m.id ASC;
