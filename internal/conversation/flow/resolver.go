@@ -1078,10 +1078,15 @@ func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, chann
 	}
 
 	cfg = r.prepareRunConfig(ctx, cfg)
+	contextTokenBudget := 0
+	if chatModel.Config.ContextWindow != nil && *chatModel.Config.ContextWindow > 0 {
+		contextTokenBudget = *chatModel.Config.ContextWindow
+	}
 	return pipelinepkg.ResolveRunConfigResult{
-		RunConfig:   cfg,
-		ModelID:     chatModel.ID,
-		RuntimeType: runtimeType,
+		RunConfig:          cfg,
+		ModelID:            chatModel.ID,
+		RuntimeType:        runtimeType,
+		ContextTokenBudget: contextTokenBudget,
 	}, nil
 }
 

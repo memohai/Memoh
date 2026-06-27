@@ -26,7 +26,8 @@ func TestTrimMessagesByTokens_DropsLeadingOrphanTool(t *testing.T) {
 			Content: conversation.NewTextContent("1111"),
 		}, nil),
 		trimRecord(conversation.ModelMessage{
-			Role: "assistant",
+			Role:    "assistant",
+			Content: conversation.NewTextContent(strings.Repeat("large tool setup ", 80)),
 			ToolCalls: []conversation.ToolCall{
 				{
 					ID:   "call-1",
@@ -37,9 +38,7 @@ func TestTrimMessagesByTokens_DropsLeadingOrphanTool(t *testing.T) {
 					},
 				},
 			},
-		}, func(record *historyfrag.HistoryRecord) {
-			record.UsageOutputTokens = intPtr(50)
-		}),
+		}, nil),
 		trimRecord(conversation.ModelMessage{
 			Role:       "tool",
 			ToolCallID: "call-1",
@@ -53,17 +52,17 @@ func TestTrimMessagesByTokens_DropsLeadingOrphanTool(t *testing.T) {
 		}),
 	}
 
-	// Budget 70: assistant(60) fits, adding assistant-tool-call(50) exceeds →
-	// cutoff lands on the tool message which must be skipped.
-	// NOTE: estimateMessageTokens uses character-based estimation (not UsageOutputTokens),
-	// so all messages fit within budget=70. This test verifies the orphan-tool skip logic
-	// still works correctly when trimming does occur.
-	trimmed, _ := trimMessagesByTokens(nil, messages, 70)
-	if len(trimmed) == 0 {
-		t.Fatal("expected non-empty trimmed messages")
+	trimmed, retained, totalTokens := trimMessagesAndRecordsByTokens(nil, messages, 20)
+	if totalTokens <= 20 {
+		t.Fatalf("test setup did not exercise trimming: total tokens = %d", totalTokens)
 	}
-	if trimmed[0].Role == "tool" {
-		t.Fatal("expected first trimmed message not to be tool")
+	if len(retained) >= len(messages) {
+		t.Fatalf("expected history to be trimmed, retained=%#v", retained)
+	}
+	for _, msg := range trimmed {
+		if msg.Role == "tool" {
+			t.Fatalf("trimmed messages should not contain an orphan tool result: %#v", trimmed)
+		}
 	}
 }
 
@@ -152,6 +151,172 @@ func TestTrimMessagesByTokens_KeepsToolPairWhenBudgetDropsNewerOverflow(t *testi
 	}
 	if len(trimmed) != 4 || trimmed[1].Role != "assistant" || trimmed[2].Role != "tool" || trimmed[3].Role != "tool" {
 		t.Fatalf("unexpected rendered roles: %#v", trimmed)
+	}
+}
+
+func TestDropOrphanToolRecordsMatchesToolCallID(t *testing.T) {
+	t.Parallel()
+
+	records := []historyfrag.HistoryRecord{
+		trimRecord(conversation.ModelMessage{
+			Role: "assistant",
+			ToolCalls: []conversation.ToolCall{
+				{
+					ID:   "call-keep",
+					Type: "function",
+					Function: conversation.ToolCallFunction{
+						Name: "lookup",
+					},
+				},
+			},
+		}, nil),
+		trimRecord(conversation.ModelMessage{
+			Role:       "tool",
+			ToolCallID: "call-drop",
+			Content:    conversation.NewTextContent("stale orphan result"),
+		}, nil),
+		trimRecord(conversation.ModelMessage{
+			Role:       "tool",
+			ToolCallID: "call-keep",
+			Content:    conversation.NewTextContent("matching result"),
+		}, nil),
+	}
+
+	got := dropOrphanToolRecords(records)
+
+	if len(got) != 2 {
+		t.Fatalf("records = %d, want assistant and matching tool only: %#v", len(got), got)
+	}
+	if got[1].ModelMessage.ToolCallID != "call-keep" {
+		t.Fatalf("kept tool call id = %q, want matching call", got[1].ModelMessage.ToolCallID)
+	}
+}
+
+func TestTrimMessagesByTokensForceKeepsMarkedToolResultPair(t *testing.T) {
+	t.Parallel()
+
+	records := []historyfrag.HistoryRecord{
+		trimRecord(conversation.ModelMessage{
+			Role:    "user",
+			Content: conversation.NewTextContent(strings.Repeat("old filler ", 100)),
+		}, nil),
+		trimRecord(conversation.ModelMessage{
+			Role: "assistant",
+			ToolCalls: []conversation.ToolCall{
+				{
+					ID:   "call-1",
+					Type: "function",
+					Function: conversation.ToolCallFunction{
+						Name: "ask_user",
+					},
+				},
+			},
+		}, nil),
+		trimRecord(conversation.ModelMessage{
+			Role:       "tool",
+			ToolCallID: "call-1",
+			Content:    conversation.NewTextContent(strings.Repeat("latest user answer ", 80)),
+		}, func(record *historyfrag.HistoryRecord) {
+			record.Budget = contextfrag.BudgetPolicy{Overflow: contextfrag.OverflowKeep}
+		}),
+	}
+
+	messages, retained, _ := trimMessagesAndRecordsByTokens(nil, records, 1)
+	joined := trimMessageTexts(messages)
+
+	if !strings.Contains(joined, "latest user answer") {
+		t.Fatalf("force-kept continuation result was trimmed: %#v", messages)
+	}
+	if len(retained) != 2 || retained[0].ModelMessage.Role != "assistant" || retained[1].ModelMessage.Role != "tool" {
+		t.Fatalf("force-kept tool result should retain its assistant/tool pair: %#v", retained)
+	}
+}
+
+func TestTrimMessagesByTokensIgnoresDuplicateToolResultWhenKeepingPair(t *testing.T) {
+	t.Parallel()
+
+	records := []historyfrag.HistoryRecord{
+		trimRecord(conversation.ModelMessage{
+			Role: "assistant",
+			ToolCalls: []conversation.ToolCall{
+				{
+					ID:   "call-1",
+					Type: "function",
+					Function: conversation.ToolCallFunction{
+						Name: "lookup",
+					},
+				},
+			},
+		}, nil),
+		trimRecord(conversation.ModelMessage{
+			Role:       "tool",
+			ToolCallID: "call-1",
+			Content:    conversation.NewTextContent("ok"),
+		}, nil),
+		trimRecord(conversation.ModelMessage{
+			Role:       "tool",
+			ToolCallID: "call-1",
+			Content:    conversation.NewTextContent(strings.Repeat("duplicate stale result ", 80)),
+		}, nil),
+		trimRecord(conversation.ModelMessage{
+			Role:    "user",
+			Content: conversation.NewTextContent(strings.Repeat("newer overflow ", 80)),
+		}, nil),
+	}
+
+	_, retained, _ := trimMessagesAndRecordsByTokens(nil, records, 5)
+	if len(retained) != 2 {
+		t.Fatalf("expected assistant plus first matching tool only, got %#v", retained)
+	}
+	if retained[0].ModelMessage.Role != "assistant" || retained[1].ModelMessage.ToolCallID != "call-1" {
+		t.Fatalf("unexpected retained pair: %#v", retained)
+	}
+	if strings.Contains(retained[1].ModelMessage.TextContent(), "duplicate stale") {
+		t.Fatalf("duplicate tool result was retained: %#v", retained)
+	}
+}
+
+func TestForceKeepToolResultForBudgetMarksLatestMatchingResult(t *testing.T) {
+	t.Parallel()
+
+	records := []historyfrag.HistoryRecord{
+		trimRecord(conversation.ModelMessage{
+			Role:       "tool",
+			ToolCallID: "call-1",
+			Content:    conversation.NewTextContent("old result"),
+		}, nil),
+		trimRecord(conversation.ModelMessage{
+			Role:       "tool",
+			ToolCallID: "call-2",
+			Content:    conversation.NewTextContent("other result"),
+		}, nil),
+		trimRecord(conversation.ModelMessage{
+			Role:       "tool",
+			ToolCallID: "call-1",
+			Content:    conversation.NewTextContent("latest result"),
+		}, nil),
+	}
+
+	got := forceKeepToolResultForBudget(records, "call-1")
+	if got[0].Budget.Overflow == contextfrag.OverflowKeep {
+		t.Fatal("old matching result should not be marked")
+	}
+	if got[1].Budget.Overflow == contextfrag.OverflowKeep {
+		t.Fatal("non-matching result should not be marked")
+	}
+	if got[2].Budget.Overflow != contextfrag.OverflowKeep {
+		t.Fatalf("latest matching result budget = %#v, want overflow keep", got[2].Budget)
+	}
+}
+
+func TestEstimateMessageTokensRoundsUpShortNonEmptyMessages(t *testing.T) {
+	t.Parallel()
+
+	if got := estimateMessageTokens(conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("hi")}); got != 1 {
+		t.Fatalf("short non-empty text estimated tokens = %d, want 1", got)
+	}
+	if got := estimateMessageTokens(conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("hello")}); got != 2 {
+		t.Fatalf("text length above divisor estimated tokens = %d, want rounded-up 2", got)
 	}
 }
 

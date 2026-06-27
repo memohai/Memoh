@@ -344,12 +344,16 @@ func budgetSourceGroups(rc RenderedContext, trs []TurnResponseEntry, compactSumm
 		}
 		if callIDs := turnResponseToolCallIDs(trs[i]); len(callIDs) > 0 {
 			for j := i + 1; j < len(trs) && strings.EqualFold(strings.TrimSpace(trs[j].Role), "tool"); j++ {
-				if !turnResponseHasMatchingToolResult(trs[j], callIDs) {
+				matchedIDs := turnResponseMatchingToolResultIDs(trs[j], callIDs)
+				if len(matchedIDs) == 0 {
 					continue
 				}
 				group.trIndices = append(group.trIndices, j)
 				group.tokens += estimateTurnResponseTokens(trs[j])
 				group.time = max(group.time, trs[j].RequestedAtMs)
+				for _, id := range matchedIDs {
+					delete(callIDs, id)
+				}
 				i = j
 			}
 		}
@@ -461,23 +465,35 @@ func turnResponseToolCallIDs(tr TurnResponseEntry) map[string]struct{} {
 }
 
 func turnResponseHasMatchingToolResult(tr TurnResponseEntry, callIDs map[string]struct{}) bool {
+	return len(turnResponseMatchingToolResultIDs(tr, callIDs)) > 0
+}
+
+func turnResponseMatchingToolResultIDs(tr TurnResponseEntry, callIDs map[string]struct{}) []string {
 	if len(callIDs) == 0 || !strings.EqualFold(strings.TrimSpace(tr.Role), "tool") {
-		return false
+		return nil
 	}
 	var parts []turnResponsePart
 	if err := json.Unmarshal(tr.RawContent, &parts); err != nil {
-		return false
+		return nil
 	}
+	var matched []string
 	for _, part := range parts {
 		partType := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(part.Type)), "_", "-")
 		if !strings.Contains(partType, "tool-result") {
 			continue
 		}
-		if _, ok := callIDs[strings.TrimSpace(part.ToolCallID)]; ok {
-			return true
+		id := strings.TrimSpace(part.ToolCallID)
+		if _, ok := callIDs[id]; ok {
+			matched = append(matched, id)
 		}
 	}
-	return false
+	return matched
+}
+
+func deleteTurnResponseToolResultIDs(callIDs map[string]struct{}, tr TurnResponseEntry) {
+	for _, id := range turnResponseMatchingToolResultIDs(tr, callIDs) {
+		delete(callIDs, id)
+	}
 }
 
 func dropOrphanTurnResponseTools(trs []TurnResponseEntry) []TurnResponseEntry {
@@ -487,6 +503,7 @@ func dropOrphanTurnResponseTools(trs []TurnResponseEntry) []TurnResponseEntry {
 		if strings.EqualFold(strings.TrimSpace(tr.Role), "tool") {
 			if turnResponseHasMatchingToolResult(tr, pendingToolCallIDs) {
 				out = append(out, tr)
+				deleteTurnResponseToolResultIDs(pendingToolCallIDs, tr)
 			}
 			continue
 		}

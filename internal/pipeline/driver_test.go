@@ -880,6 +880,50 @@ func TestHandleReplyWithAgentAnchorsSummaryAgainstFullRenderedContext(t *testing
 	}
 }
 
+func TestHandleReplyWithAgentAppliesResolvedContextBudget(t *testing.T) {
+	rc := RenderedContext{
+		{
+			MessageID:    "external-old",
+			ReceivedAtMs: 100,
+			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="external-old">` + strings.Repeat("old stale filler ", 80) + `</message>`}},
+		},
+		{
+			MessageID:    "external-new",
+			ReceivedAtMs: 300,
+			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="external-new">fresh</message>`}},
+		},
+	}
+	fakeAgent := &fakeDiscussStreamer{}
+	resolver := &fakeRunConfigResolver{
+		resolveResult: ResolveRunConfigResult{
+			RunConfig:          agentpkg.RunConfig{System: "base system"},
+			ModelID:            "model-1",
+			ContextTokenBudget: 20,
+		},
+	}
+	driver := NewDiscussDriver(DiscussDriverDeps{
+		Pipeline: NewPipeline(RenderParams{}),
+		Resolver: resolver,
+	})
+	sess := &discussSession{
+		config:          DiscussSessionConfig{BotID: "b", SessionID: "s"},
+		lastProcessedMs: 0,
+	}
+
+	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, fakeAgent)
+
+	if fakeAgent.lastConfig == nil {
+		t.Fatal("expected agent to be invoked")
+	}
+	got := strings.Join(sdkMessageTexts(fakeAgent.lastConfig.Messages), "\n")
+	if strings.Contains(got, "old stale filler") {
+		t.Fatalf("discuss context retained stale filler despite budget: %s", got)
+	}
+	if !strings.Contains(got, "external-new") {
+		t.Fatalf("discuss context lost latest trigger: %s", got)
+	}
+}
+
 func TestHandleReplyWithAgentSkipsCoveredReplayAndAdvancesCursor(t *testing.T) {
 	rc := RenderedContext{
 		{

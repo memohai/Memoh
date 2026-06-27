@@ -278,7 +278,8 @@ func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval too
 	}
 	loaded = pruneHistoryForGateway(loaded)
 	loaded = r.replaceCompactedMessages(ctx, approval.SessionID, compactionSummaryScope(firstNonEmpty(approval.BotID, input.BotID), "", approval.SessionID, approval.ConversationType, "", approval.ReplyTarget), loaded)
-	messages, retained, _ := trimMessagesAndRecordsByTokens(r.logger, loaded, 0)
+	loaded = forceKeepToolResultForBudget(loaded, approval.ToolCallID)
+	messages, retained, _ := trimMessagesAndRecordsByTokens(r.logger, loaded, resolved.ContextTokenBudget)
 	messages = sanitizeMessages(messages)
 
 	cfg := resolved.RunConfig

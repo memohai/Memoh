@@ -123,9 +123,17 @@ func estimateMessageTokens(msg conversation.ModelMessage) int {
 	text := msg.TextContent()
 	if len(text) == 0 {
 		data, _ := json.Marshal(msg.Content)
-		return len(data) / 4
+		return estimateCharsAsTokens(len(data))
 	}
-	return len(text) / 4
+	return estimateCharsAsTokens(len(text))
+}
+
+func estimateCharsAsTokens(chars int) int {
+	if chars <= 0 {
+		return 0
+	}
+	const charsPerToken = 4
+	return (chars + charsPerToken - 1) / charsPerToken
 }
 
 func totalModelMessageTokens(messages []conversation.ModelMessage) int {
@@ -582,7 +590,19 @@ func (r *Resolver) buildPipelineContext(ctx context.Context, req conversation.Ch
 func appendCurrentQueryRenderedSegmentIfMissing(rc pipelinepkg.RenderedContext, req conversation.ChatRequest) pipelinepkg.RenderedContext {
 	query := strings.TrimSpace(firstNonEmpty(req.RawQuery, req.Query))
 	currentMessageID := strings.TrimSpace(req.ExternalMessageID)
-	if query == "" || currentMessageID == "" || renderedContextHasMessageID(rc, currentMessageID) {
+	if query == "" {
+		return rc
+	}
+	if currentMessageID != "" && renderedContextHasMessageID(rc, currentMessageID) {
+		return rc
+	}
+	if currentMessageID == "" {
+		if renderedContextHasText(rc, query) {
+			return rc
+		}
+		currentMessageID = "__current_query__"
+	}
+	if renderedContextHasMessageID(rc, currentMessageID) {
 		return rc
 	}
 	out := append(pipelinepkg.RenderedContext(nil), rc...)

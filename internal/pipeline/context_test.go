@@ -535,11 +535,11 @@ func TestTrimContextSourcesByBudgetIgnoresUnmatchedToolResultWhenKeepingPair(t *
 		{
 			RequestedAtMs: 200,
 			Role:          "assistant",
-			Content:       strings.Repeat("newer overflow ", 80),
+			Content:       strings.Repeat("newer overflow ", 800),
 		},
 	}
 
-	_, trimmedTRs := TrimContextSourcesByBudget(nil, trs, CompactSummary{}, 120)
+	_, trimmedTRs := TrimContextSourcesByBudget(nil, trs, CompactSummary{}, 500)
 	if len(trimmedTRs) != 2 {
 		t.Fatalf("expected matching assistant/tool pair only, got %#v", trimmedTRs)
 	}
@@ -548,6 +548,42 @@ func TestTrimContextSourcesByBudgetIgnoresUnmatchedToolResultWhenKeepingPair(t *
 	}
 	if strings.Contains(trimmedTRs[1].Content, "unmatched orphan") {
 		t.Fatalf("unmatched orphan tool result was retained: %#v", trimmedTRs)
+	}
+}
+
+func TestDropOrphanTurnResponseToolsDropsDuplicateToolResultForConsumedCallID(t *testing.T) {
+	t.Parallel()
+
+	trs := []TurnResponseEntry{
+		{
+			RequestedAtMs: 100,
+			Role:          "assistant",
+			Content:       "tool call",
+			RawContent:    []byte(`[{"type":"tool-call","toolCallId":"call-1","toolName":"lookup","input":{"q":"memoh"}}]`),
+		},
+		{
+			RequestedAtMs: 110,
+			Role:          "tool",
+			Content:       "matching tool result",
+			RawContent:    []byte(`[{"type":"tool-result","toolCallId":"call-1","toolName":"lookup","output":{"ok":true}}]`),
+		},
+		{
+			RequestedAtMs: 120,
+			Role:          "tool",
+			Content:       "duplicate stale tool result",
+			RawContent:    []byte(`[{"type":"tool-result","toolCallId":"call-1","toolName":"lookup","output":{"ok":false}}]`),
+		},
+	}
+
+	trimmedTRs := dropOrphanTurnResponseTools(trs)
+	if len(trimmedTRs) != 2 {
+		t.Fatalf("expected assistant plus first matching tool only, got %#v", trimmedTRs)
+	}
+	if trimmedTRs[0].Role != "assistant" || trimmedTRs[1].Role != "tool" {
+		t.Fatalf("unexpected retained roles: %#v", trimmedTRs)
+	}
+	if strings.Contains(trimmedTRs[1].Content, "duplicate stale") {
+		t.Fatalf("duplicate tool result was retained: %#v", trimmedTRs)
 	}
 }
 

@@ -19,9 +19,10 @@ import (
 
 // ResolveRunConfigResult holds the output of ResolveRunConfig.
 type ResolveRunConfigResult struct {
-	RunConfig   agentpkg.RunConfig
-	ModelID     string // database UUID of the selected model
-	RuntimeType string
+	RunConfig          agentpkg.RunConfig
+	ModelID            string // database UUID of the selected model
+	RuntimeType        string
+	ContextTokenBudget int
 }
 
 // RunConfigResolver resolves a complete agent RunConfig and persists output
@@ -288,15 +289,6 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 		return
 	}
 
-	composed := ComposeContextWithSummary(rc, trs, compactSummary)
-	if composed == nil {
-		return
-	}
-
-	log.Info("triggering discuss LLM call",
-		slog.Int("messages", len(composed.Messages)),
-		slog.Int("estimated_tokens", composed.EstimatedTokens))
-
 	if d.deps.Resolver == nil {
 		log.Error("discuss driver: resolver not configured")
 		return
@@ -329,12 +321,33 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 			d.advanceDiscussCursor(ctx, sess, cfg, consumedMs, log)
 			return
 		}
+		composed := ComposeContextWithSummary(rc, trs, compactSummary)
+		if composed == nil {
+			return
+		}
 		if d.streamDiscussACPRuntime(ctx, cfg, composed, addressed, log) {
 			d.advanceDiscussCursor(ctx, sess, cfg, consumedMs, log)
 		}
 		return
 	}
 	runConfig := resolved.RunConfig
+	if resolved.ContextTokenBudget > 0 {
+		sourceBudget := resolved.ContextTokenBudget - estimateMessageTokens(ContextMessage{Role: "user", Content: buildLateBindingPrompt(true)})
+		if sourceBudget < 1 {
+			sourceBudget = 1
+		}
+		rc, trs = TrimContextSourcesByBudget(rc, trs, compactSummary, sourceBudget)
+		activeRC = filterCoveredRenderedContext(rc, compactSummary)
+	}
+
+	composed := ComposeContextWithSummary(rc, trs, compactSummary)
+	if composed == nil {
+		return
+	}
+
+	log.Info("triggering discuss LLM call",
+		slog.Int("messages", len(composed.Messages)),
+		slog.Int("estimated_tokens", composed.EstimatedTokens))
 
 	// Coverage filtering can orphan one side of a tool exchange (a covered
 	// call whose result stayed raw, or vice versa); repair before the provider
