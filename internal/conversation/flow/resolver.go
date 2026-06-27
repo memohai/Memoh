@@ -341,7 +341,9 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	var historyRecords []historyfrag.HistoryRecord
 	var estimatedTokens int
 	if usePipeline {
-		messages = r.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
+		built := r.buildPipelineContext(ctx, req, contextTokenBudget)
+		messages = built.Messages
+		historyRecords = built.HistoryRecords
 	} else if r.conversationSvc != nil {
 		historyFallback := historyScopeFallbackFromChatRequest(req)
 		loaded, loadErr := r.loadHistoryRecords(ctx, historyFallback, req.SessionID, defaultMaxContextMinutes)

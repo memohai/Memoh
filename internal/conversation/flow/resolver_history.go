@@ -239,13 +239,28 @@ func historyContextFragsForMessages(messages []conversation.ModelMessage, record
 }
 
 func looksLikeSummaryMessage(msg conversation.ModelMessage) bool {
-	return strings.EqualFold(strings.TrimSpace(msg.Role), "user") &&
-		strings.HasPrefix(strings.TrimSpace(msg.TextContent()), "<summary>")
+	if !strings.EqualFold(strings.TrimSpace(msg.Role), "user") {
+		return false
+	}
+	text := strings.TrimSpace(msg.TextContent())
+	return strings.HasPrefix(text, "<summary>") || strings.HasPrefix(text, "[Conversation summary]")
 }
 
 func sameModelMessage(a conversation.ModelMessage, b conversation.ModelMessage) bool {
+	if looksLikeSummaryMessage(a) && looksLikeSummaryMessage(b) {
+		return normalizeSummaryText(a.TextContent()) == normalizeSummaryText(b.TextContent())
+	}
 	return strings.EqualFold(strings.TrimSpace(a.Role), strings.TrimSpace(b.Role)) &&
 		string(a.Content) == string(b.Content)
+}
+
+func normalizeSummaryText(text string) string {
+	text = strings.TrimSpace(text)
+	text = strings.TrimPrefix(text, "[Conversation summary]")
+	text = strings.TrimSpace(text)
+	text = strings.TrimPrefix(text, "<summary>")
+	text = strings.TrimSuffix(text, "</summary>")
+	return strings.TrimSpace(text)
 }
 
 func (r *Resolver) replaceCompactedMessages(ctx context.Context, sessionID string, scope contextfrag.Scope, messages []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
@@ -524,43 +539,49 @@ func replaceCompactedHistoryRecords(messages []historyfrag.HistoryRecord, summar
 	return result
 }
 
-// buildMessagesFromPipeline assembles chat context from the DCP pipeline's
+type pipelineContextBuild struct {
+	Messages       []conversation.ModelMessage
+	HistoryRecords []historyfrag.HistoryRecord
+}
+
+// buildMessagesFromPipeline preserves the legacy helper API for tests and
+// callers that only need provider messages.
+func (r *Resolver) buildMessagesFromPipeline(ctx context.Context, req conversation.ChatRequest, contextTokenBudget int) []conversation.ModelMessage {
+	return r.buildPipelineContext(ctx, req, contextTokenBudget).Messages
+}
+
+// buildPipelineContext assembles chat context from the DCP pipeline's
 // RenderedContext (RC) merged with assistant/tool turns (TR) from
 // bot_history_messages. This gives chat mode the same event-driven context
 // that discuss mode uses, replacing the legacy loadMessages path.
-func (r *Resolver) buildMessagesFromPipeline(ctx context.Context, req conversation.ChatRequest, contextTokenBudget int) []conversation.ModelMessage {
+func (r *Resolver) buildPipelineContext(ctx context.Context, req conversation.ChatRequest, contextTokenBudget int) pipelineContextBuild {
 	sessionID := strings.TrimSpace(req.SessionID)
 	if r.pipeline == nil || sessionID == "" {
-		return nil
+		return pipelineContextBuild{}
 	}
 	rc := r.pipeline.GetRC(sessionID)
-	if len(rc) == 0 {
-		return appendCurrentPipelineQueryIfMissing(nil, rc, req)
-	}
 
 	historyMessages := r.loadPipelineHistoryMessages(ctx, sessionID)
 	trs := pipelineTurnResponsesFromMessages(historyMessages)
-	compactSummary := r.LoadCompactionSummary(ctx, historyMessages)
+	compactContext := r.loadPipelineCompactionContext(ctx, historyMessages)
 
-	composed := pipelinepkg.ComposeContextWithSummary(rc, trs, compactSummary)
-	if composed == nil {
-		return nil
-	}
-
-	messages := make([]conversation.ModelMessage, 0, len(composed.Messages))
-	for _, m := range composed.Messages {
-		contentJSON := m.RawContent
-		if len(contentJSON) == 0 {
-			var err error
-			contentJSON, err = json.Marshal(m.Content)
-			if err != nil {
-				continue
+	var messages []conversation.ModelMessage
+	if composed := pipelinepkg.ComposeContextWithSummary(rc, trs, compactContext.Summary); composed != nil {
+		messages = make([]conversation.ModelMessage, 0, len(composed.Messages))
+		for _, m := range composed.Messages {
+			contentJSON := m.RawContent
+			if len(contentJSON) == 0 {
+				var err error
+				contentJSON, err = json.Marshal(m.Content)
+				if err != nil {
+					continue
+				}
 			}
+			messages = append(messages, conversation.ModelMessage{
+				Role:    m.Role,
+				Content: contentJSON,
+			})
 		}
-		messages = append(messages, conversation.ModelMessage{
-			Role:    m.Role,
-			Content: contentJSON,
-		})
 	}
 	messages = appendCurrentPipelineQueryIfMissing(messages, rc, req)
 
@@ -569,7 +590,10 @@ func (r *Resolver) buildMessagesFromPipeline(ctx context.Context, req conversati
 		messages = trimPipelineMessagesByTokens(r.logger, messages, contextTokenBudget)
 	}
 
-	return messages
+	return pipelineContextBuild{
+		Messages:       messages,
+		HistoryRecords: compactContext.HistoryRecords,
+	}
 }
 
 func appendCurrentPipelineQueryIfMissing(messages []conversation.ModelMessage, rc pipelinepkg.RenderedContext, req conversation.ChatRequest) []conversation.ModelMessage {
@@ -579,7 +603,10 @@ func appendCurrentPipelineQueryIfMissing(messages []conversation.ModelMessage, r
 	}
 	currentMessageID := strings.TrimSpace(req.ExternalMessageID)
 	if len(rc) > 0 {
-		if currentMessageID == "" || renderedContextHasMessageID(rc, currentMessageID) {
+		if currentMessageID != "" && renderedContextHasMessageID(rc, currentMessageID) {
+			return messages
+		}
+		if currentMessageID == "" && (renderedContextHasText(rc, query) || modelMessagesContainText(messages, query)) {
 			return messages
 		}
 	}
@@ -601,6 +628,34 @@ func renderedContextHasMessageID(rc pipelinepkg.RenderedContext, messageID strin
 	return false
 }
 
+func renderedContextHasText(rc pipelinepkg.RenderedContext, text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	for _, seg := range rc {
+		for _, piece := range seg.Content {
+			if strings.Contains(strings.TrimSpace(piece.Text), text) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func modelMessagesContainText(messages []conversation.ModelMessage, text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	for _, msg := range messages {
+		if strings.TrimSpace(msg.TextContent()) == text {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *Resolver) loadPipelineHistoryMessages(ctx context.Context, sessionID string) []messagepkg.Message {
 	if r.messageService == nil || strings.TrimSpace(sessionID) == "" {
 		return nil
@@ -614,11 +669,21 @@ func (r *Resolver) loadPipelineHistoryMessages(ctx context.Context, sessionID st
 }
 
 func (r *Resolver) LoadCompactionSummary(ctx context.Context, messages []messagepkg.Message) pipelinepkg.CompactSummary {
+	return r.loadPipelineCompactionContext(ctx, messages).Summary
+}
+
+type pipelineCompactionContext struct {
+	Summary        pipelinepkg.CompactSummary
+	HistoryRecords []historyfrag.HistoryRecord
+}
+
+func (r *Resolver) loadPipelineCompactionContext(ctx context.Context, messages []messagepkg.Message) pipelineCompactionContext {
 	if r.queries == nil || len(messages) == 0 {
-		return pipelinepkg.CompactSummary{}
+		return pipelineCompactionContext{}
 	}
 
 	groups := make(map[string][]messagepkg.Message)
+	recordGroups := make(map[string][]historyfrag.HistoryRecord)
 	order := make([]string, 0)
 	for _, msg := range messages {
 		compactID := strings.TrimSpace(msg.CompactID)
@@ -629,12 +694,16 @@ func (r *Resolver) LoadCompactionSummary(ctx context.Context, messages []message
 			order = append(order, compactID)
 		}
 		groups[compactID] = append(groups[compactID], msg)
+		if record, err := historyfrag.FromDBMessage(msg, historyfrag.ScopeFallback{}); err == nil {
+			recordGroups[compactID] = append(recordGroups[compactID], record)
+		}
 	}
 	if len(order) == 0 {
-		return pipelinepkg.CompactSummary{}
+		return pipelineCompactionContext{}
 	}
 
 	var summaries []string
+	var summaryRecords []historyfrag.HistoryRecord
 	var coveredHistoryIDs []string
 	var coveredMessageIDs []string
 	coveredMessageCutoffMs := make(map[string]int64)
@@ -653,6 +722,16 @@ func (r *Resolver) LoadCompactionSummary(ctx context.Context, messages []message
 			continue
 		}
 		summaries = append(summaries, summary)
+		records := recordGroups[compactID]
+		coveredRefs := make([]contextfrag.ContextRef, 0, len(records))
+		for _, record := range records {
+			coveredRefs = append(coveredRefs, record.Ref)
+		}
+		scope := contextfrag.Scope{}
+		if len(records) > 0 {
+			scope = records[0].Scope
+		}
+		summaryRecords = append(summaryRecords, historyfrag.SummaryRecord(compactID, summary, coveredRefs, scope))
 		for _, msg := range groups[compactID] {
 			if id := strings.TrimSpace(msg.ID); id != "" {
 				coveredHistoryIDs = append(coveredHistoryIDs, id)
@@ -667,17 +746,20 @@ func (r *Resolver) LoadCompactionSummary(ctx context.Context, messages []message
 		}
 	}
 	if len(summaries) == 0 {
-		return pipelinepkg.CompactSummary{}
+		return pipelineCompactionContext{}
 	}
 	if len(coveredMessageCutoffMs) == 0 {
 		coveredMessageCutoffMs = nil
 	}
-	return pipelinepkg.CompactSummary{
-		Text:                   strings.Join(summaries, "\n\n"),
-		CoveredMessageIDs:      coveredMessageIDs,
-		CoveredMessageCutoffMs: coveredMessageCutoffMs,
+	return pipelineCompactionContext{
+		Summary: pipelinepkg.CompactSummary{
+			Text:                   strings.Join(summaries, "\n\n"),
+			CoveredMessageIDs:      coveredMessageIDs,
+			CoveredMessageCutoffMs: coveredMessageCutoffMs,
 
-		CoveredHistoryMessageIDs: coveredHistoryIDs,
+			CoveredHistoryMessageIDs: coveredHistoryIDs,
+		},
+		HistoryRecords: summaryRecords,
 	}
 }
 

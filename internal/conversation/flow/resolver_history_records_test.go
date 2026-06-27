@@ -432,7 +432,71 @@ func TestBuildMessagesFromPipelineUsesCompactionSummaryAndSkipsCoveredReplay(t *
 	}
 }
 
-func TestBuildMessagesFromPipelineReturnsCurrentQueryWhenRCEmpty(t *testing.T) {
+func TestBuildPipelineContextCarriesCompactionSummaryCoverage(t *testing.T) {
+	t.Parallel()
+
+	const sessionID = "sess-pipeline-summary-frag"
+	const compactID = "22222222-2222-2222-2222-222222222222"
+
+	p := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
+	p.PushEvent(sessionID, pipelinepkg.MessageEvent{
+		SessionID:    sessionID,
+		MessageID:    "external-old",
+		ReceivedAtMs: 100,
+		TimestampSec: 100,
+		Content:      []pipelinepkg.ContentNode{{Type: "text", Text: "old user"}},
+		Conversation: pipelinepkg.ConversationMeta{Channel: "telegram", ConversationType: "group"},
+	})
+	p.PushEvent(sessionID, pipelinepkg.MessageEvent{
+		SessionID:    sessionID,
+		MessageID:    "external-new",
+		ReceivedAtMs: 300,
+		TimestampSec: 300,
+		Content:      []pipelinepkg.ContentNode{{Type: "text", Text: "new user"}},
+		Conversation: pipelinepkg.ConversationMeta{Channel: "telegram", ConversationType: "group"},
+	})
+
+	resolver := &Resolver{
+		logger:   slog.New(slog.DiscardHandler),
+		pipeline: p,
+		messageService: &pipelineHistoryMessageService{rows: []messagepkg.Message{
+			dbHistoryRow(t, "row-old-user", "user", conversation.NewTextContent("old user"), func(msg *messagepkg.Message) {
+				msg.SessionID = sessionID
+				msg.ExternalMessageID = "external-old"
+				msg.CompactID = compactID
+				msg.CreatedAt = time.UnixMilli(100).UTC()
+			}),
+			dbHistoryRow(t, "row-old-assistant", "assistant", mustRawJSON(t, conversation.ModelMessage{
+				Role:    "assistant",
+				Content: conversation.NewTextContent("old assistant"),
+			}), func(msg *messagepkg.Message) {
+				msg.SessionID = sessionID
+				msg.CompactID = compactID
+				msg.CreatedAt = time.UnixMilli(200).UTC()
+			}),
+		}},
+		queries: pipelineCompactionQueries{
+			logs: map[string]dbsqlc.BotHistoryMessageCompact{
+				compactID: {ID: flowTestUUID(compactID), Status: "ok", Summary: "old user and assistant summarized"},
+			},
+		},
+	}
+
+	built := resolver.buildPipelineContext(context.Background(), conversation.ChatRequest{SessionID: sessionID}, 0)
+	frags := historyContextFragsForMessages(built.Messages, built.HistoryRecords)
+
+	if len(frags) != 1 {
+		t.Fatalf("summary frags = %d, want 1: %#v", len(frags), frags)
+	}
+	if frags[0].Kind != contextfrag.KindConversationSummary || frags[0].Coverage == nil || len(frags[0].Coverage.CoveredRefs) != 2 {
+		t.Fatalf("summary frag lost typed coverage: %#v", frags[0])
+	}
+	if len(contextfrag.BuildManifest(frags).CoverageTrace) != 1 {
+		t.Fatalf("manifest lost pipeline summary coverage: %#v", contextfrag.BuildManifest(frags))
+	}
+}
+
+func TestBuildMessagesFromPipelineKeepsHistoryWhenRCEmpty(t *testing.T) {
 	t.Parallel()
 
 	const sessionID = "sess-empty-rc"
@@ -441,18 +505,29 @@ func TestBuildMessagesFromPipelineReturnsCurrentQueryWhenRCEmpty(t *testing.T) {
 	resolver := &Resolver{
 		logger:   slog.New(slog.DiscardHandler),
 		pipeline: p,
+		messageService: &pipelineHistoryMessageService{rows: []messagepkg.Message{
+			dbHistoryRow(t, "row-assistant", "assistant", mustRawJSON(t, conversation.ModelMessage{
+				Role:    "assistant",
+				Content: conversation.NewTextContent("retained assistant"),
+			}), func(msg *messagepkg.Message) {
+				msg.SessionID = sessionID
+				msg.CreatedAt = time.UnixMilli(200).UTC()
+			}),
+		}},
 	}
 
 	messages := resolver.buildMessagesFromPipeline(context.Background(), conversation.ChatRequest{
 		SessionID: sessionID,
 		Query:     "current user query",
 	}, 0)
-
-	if len(messages) != 1 {
-		t.Fatalf("messages = %d, want current query only: %#v", len(messages), messages)
+	got := make([]string, 0, len(messages))
+	for _, msg := range messages {
+		got = append(got, msg.TextContent())
 	}
-	if messages[0].Role != "user" || messages[0].TextContent() != "current user query" {
-		t.Fatalf("unexpected fallback message: %#v", messages[0])
+	want := []string{"retained assistant", "current user query"}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("pipeline messages mismatch:\ngot  %#v\nwant %#v", got, want)
 	}
 }
 
@@ -478,6 +553,37 @@ func TestBuildMessagesFromPipelineAppendsCurrentQueryWhenRCStale(t *testing.T) {
 		SessionID:         sessionID,
 		ExternalMessageID: "external-current",
 		Query:             "current user query",
+	}, 0)
+
+	if len(messages) != 2 {
+		t.Fatalf("messages = %d, want RC plus current query: %#v", len(messages), messages)
+	}
+	if got := messages[len(messages)-1].TextContent(); got != "current user query" {
+		t.Fatalf("last message = %q, want current query; all=%#v", got, messages)
+	}
+}
+
+func TestBuildMessagesFromPipelineAppendsCurrentQueryWithoutExternalMessageID(t *testing.T) {
+	t.Parallel()
+
+	const sessionID = "sess-stale-rc-empty-external-id"
+	p := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
+	p.PushEvent(sessionID, pipelinepkg.MessageEvent{
+		SessionID:    sessionID,
+		MessageID:    "external-old",
+		ReceivedAtMs: 100,
+		TimestampSec: 100,
+		Content:      []pipelinepkg.ContentNode{{Type: "text", Text: "old user"}},
+		Conversation: pipelinepkg.ConversationMeta{Channel: "telegram", ConversationType: "group"},
+	})
+	resolver := &Resolver{
+		logger:   slog.New(slog.DiscardHandler),
+		pipeline: p,
+	}
+
+	messages := resolver.buildMessagesFromPipeline(context.Background(), conversation.ChatRequest{
+		SessionID: sessionID,
+		Query:     "current user query",
 	}, 0)
 
 	if len(messages) != 2 {

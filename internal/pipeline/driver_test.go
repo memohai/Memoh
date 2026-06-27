@@ -825,6 +825,61 @@ func TestHandleReplyWithAgentUsesCompactionSummary(t *testing.T) {
 	}
 }
 
+func TestHandleReplyWithAgentAnchorsSummaryAgainstFullRenderedContext(t *testing.T) {
+	rc := RenderedContext{
+		{
+			MessageID:    "external-before",
+			ReceivedAtMs: 50,
+			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="external-before">before</message>`}},
+		},
+		{
+			MessageID:    "external-covered",
+			ReceivedAtMs: 100,
+			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="external-covered">covered</message>`}},
+		},
+		{
+			MessageID:    "external-new",
+			ReceivedAtMs: 300,
+			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="external-new">new</message>`}},
+		},
+	}
+	fakeAgent := &fakeDiscussStreamer{}
+	resolver := &fakeRunConfigResolver{
+		resolveResult: ResolveRunConfigResult{
+			RunConfig: agentpkg.RunConfig{System: "base system"},
+			ModelID:   "model-1",
+		},
+		compactionSummary: CompactSummary{
+			Text:                   "covered summarized",
+			CoveredMessageIDs:      []string{"external-covered"},
+			CoveredMessageCutoffMs: map[string]int64{"external-covered": 100},
+		},
+	}
+	driver := NewDiscussDriver(DiscussDriverDeps{
+		Pipeline: NewPipeline(RenderParams{}),
+		Resolver: resolver,
+	})
+	sess := &discussSession{
+		config:          DiscussSessionConfig{BotID: "b", SessionID: "s"},
+		lastProcessedMs: 0,
+	}
+
+	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, fakeAgent)
+
+	if fakeAgent.lastConfig == nil {
+		t.Fatal("expected agent to be invoked")
+	}
+	got := sdkMessageTexts(fakeAgent.lastConfig.Messages)
+	if len(got) < 4 {
+		t.Fatalf("expected before, summary, new, and late binding messages: %#v", got)
+	}
+	if !strings.Contains(got[0], "external-before") ||
+		got[1] != "[Conversation summary]\ncovered summarized" ||
+		!strings.Contains(got[2], "external-new") {
+		t.Fatalf("summary order mismatch: %#v", got)
+	}
+}
+
 func TestHandleReplyWithAgentSkipsCoveredReplayAndAdvancesCursor(t *testing.T) {
 	rc := RenderedContext{
 		{
