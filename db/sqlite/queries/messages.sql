@@ -415,4 +415,5 @@ LEFT JOIN bot_sessions s ON s.id = m.session_id
 LEFT JOIN bot_channel_routes r ON r.id = s.route_id
 WHERE m.session_id = sqlc.arg(session_id)
   AND NULLIF(TRIM(COALESCE(m.compact_id, '')), '') IS NULL
+  AND (json_extract(m.metadata, '$.trigger_mode') IS NULL OR json_extract(m.metadata, '$.trigger_mode') != 'passive_sync')
 ORDER BY m.created_at ASC, m.id ASC;

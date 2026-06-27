@@ -153,20 +153,23 @@ CREATE TABLE bot_history_messages (
 	for _, item := range []struct {
 		id        string
 		compactID any
+		metadata  string
 	}{
-		{"00000000-0000-0000-0000-000000003004", ""},
-		{"00000000-0000-0000-0000-000000003003", nil},
-		{"00000000-0000-0000-0000-000000003005", compactedID},
+		{"00000000-0000-0000-0000-000000003004", "", "{}"},
+		{"00000000-0000-0000-0000-000000003003", nil, "{}"},
+		{"00000000-0000-0000-0000-000000003005", compactedID, "{}"},
+		{"00000000-0000-0000-0000-000000003006", nil, `{"trigger_mode":"passive_sync"}`},
 	} {
 		_, err := conn.ExecContext(ctx, `
-INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, compact_id, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)`,
+INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, compact_id, metadata, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 			item.id,
 			botID,
 			sessionID,
 			"user",
 			`"hello"`,
 			item.compactID,
+			item.metadata,
 			"2026-06-13 19:53:50",
 		)
 		if err != nil {
@@ -185,7 +188,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		t.Fatalf("list uncompacted messages: %v", err)
 	}
 	if len(rows) != 2 {
-		t.Fatalf("rows = %d, want null and empty compact_id rows", len(rows))
+		t.Fatalf("rows = %d, want active null and empty compact_id rows", len(rows))
 	}
 	want := []pgtype.UUID{
 		mustUUID(t, "00000000-0000-0000-0000-000000003003"),
