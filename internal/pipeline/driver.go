@@ -651,16 +651,6 @@ func agentEventToChannelEvent(e agentpkg.StreamEvent) (channel.StreamEvent, bool
 }
 
 // loadTurnResponses loads every assistant/tool message ever persisted for
-// this session and decodes them into TR entries. There is no time-based cut
-// off on purpose: truncating TRs while RC is replayed in full from the events
-// table creates an asymmetric context (user messages visible, the bot's own
-// earlier replies missing) that confuses both the LLM and loop-detection.
-// Any size-bound trimming should happen later via compaction, not here.
-func (d *DiscussDriver) loadTurnResponses(ctx context.Context, sessionID string) []TurnResponseEntry {
-	trs, _ := d.loadTurnResponsesWithMessages(ctx, sessionID)
-	return trs
-}
-
 func (d *DiscussDriver) loadTurnResponsesWithMessages(ctx context.Context, sessionID string) ([]TurnResponseEntry, []messagepkg.Message) {
 	if d.deps.MessageService == nil {
 		return nil, nil

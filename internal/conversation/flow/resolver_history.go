@@ -804,12 +804,6 @@ func isPipelineCompactionSummaryMessage(msg conversation.ModelMessage) bool {
 		strings.HasPrefix(strings.TrimSpace(msg.TextContent()), "[Conversation summary]\n")
 }
 
-// loadTurnResponses loads every active assistant/tool message in a session for
-// use as the TR stream in pipeline-based context assembly.
-func (r *Resolver) loadTurnResponses(ctx context.Context, sessionID string) []pipelinepkg.TurnResponseEntry {
-	return pipelineTurnResponsesFromMessages(r.loadPipelineHistoryMessages(ctx, sessionID))
-}
-
 func pipelineTurnResponsesFromMessages(msgs []messagepkg.Message) []pipelinepkg.TurnResponseEntry {
 	var trs []pipelinepkg.TurnResponseEntry
 	for _, m := range msgs {
