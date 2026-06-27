@@ -9,13 +9,6 @@ import (
 
 const NamespaceCompactionLog = "compaction_log"
 
-func LegacySummaryRecord(compactID string, summary string, scope contextfrag.Scope) HistoryRecord {
-	rec := summaryRecordBase(compactID, summary, scope)
-	rec.Kind = contextfrag.KindConversationEvent
-	rec.Lifecycle = LifecycleLegacySummary
-	return rec
-}
-
 func SummaryRecord(compactID string, summary string, coveredRefs []contextfrag.ContextRef, scope contextfrag.Scope) HistoryRecord {
 	rec := summaryRecordBase(compactID, summary, scope)
 	rec.Kind = contextfrag.KindConversationSummary
