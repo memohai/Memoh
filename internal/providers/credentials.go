@@ -89,3 +89,14 @@ func codexAccountIDFromToken(token string) (string, error) {
 	}
 	return accountID, nil
 }
+
+func codexAccountIDFromTokens(accessToken, idToken string) string {
+	if accountID, err := codexAccountIDFromToken(idToken); err == nil {
+		return accountID
+	}
+	accountID, err := codexAccountIDFromToken(accessToken)
+	if err != nil {
+		return ""
+	}
+	return accountID
+}

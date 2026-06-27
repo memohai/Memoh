@@ -1064,6 +1064,7 @@ export type ConversationUiToolApproval = {
     approval_id?: string;
     can_approve?: boolean;
     decision_reason?: string;
+    persist_turn_id?: string;
     short_id?: number;
     status?: string;
 };
@@ -1089,6 +1090,7 @@ export type ConversationUiTurn = {
 
 export type ConversationUiUserInput = {
     can_respond?: boolean;
+    persist_turn_id?: string;
     questions?: Array<UserinputUiQuestion>;
     short_id?: number;
     status?: string;
@@ -1291,6 +1293,39 @@ export type HandlersAcpClaudeCodeOAuthExchangeRequest = {
 };
 
 export type HandlersAcpClaudeCodeOAuthStatus = {
+    configured?: boolean;
+    has_token?: boolean;
+};
+
+export type HandlersAcpCodexOAuthAuthorizeResponse = {
+    auth_url?: string;
+};
+
+export type HandlersAcpCodexOAuthDeviceAuthorizeResponse = {
+    expires_at?: string;
+    interval_seconds?: number;
+    session_id?: string;
+    user_code?: string;
+    verification_url?: string;
+};
+
+export type HandlersAcpCodexOAuthDeviceSessionRequest = {
+    session_id: string;
+};
+
+export type HandlersAcpCodexOAuthDeviceStatusResponse = {
+    account_id?: string;
+    error?: string;
+    expires_at?: string;
+    has_token?: boolean;
+    interval_seconds?: number;
+    next_poll_after?: string;
+    status?: string;
+};
+
+export type HandlersAcpCodexOAuthStatus = {
+    account_id?: string;
+    callback_url?: string;
     configured?: boolean;
     has_token?: boolean;
 };
@@ -3668,6 +3703,206 @@ export type GetBotsByBotIdAcpClaudeCodeOauthStatusResponses = {
 };
 
 export type GetBotsByBotIdAcpClaudeCodeOauthStatusResponse = GetBotsByBotIdAcpClaudeCodeOauthStatusResponses[keyof GetBotsByBotIdAcpClaudeCodeOauthStatusResponses];
+
+export type GetBotsByBotIdAcpCodexOauthAuthorizeData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/acp/codex/oauth/authorize';
+};
+
+export type GetBotsByBotIdAcpCodexOauthAuthorizeErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdAcpCodexOauthAuthorizeError = GetBotsByBotIdAcpCodexOauthAuthorizeErrors[keyof GetBotsByBotIdAcpCodexOauthAuthorizeErrors];
+
+export type GetBotsByBotIdAcpCodexOauthAuthorizeResponses = {
+    /**
+     * OK
+     */
+    200: HandlersAcpCodexOAuthAuthorizeResponse;
+};
+
+export type GetBotsByBotIdAcpCodexOauthAuthorizeResponse = GetBotsByBotIdAcpCodexOauthAuthorizeResponses[keyof GetBotsByBotIdAcpCodexOauthAuthorizeResponses];
+
+export type PostBotsByBotIdAcpCodexOauthDeviceAuthorizeData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/acp/codex/oauth/device/authorize';
+};
+
+export type PostBotsByBotIdAcpCodexOauthDeviceAuthorizeErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdAcpCodexOauthDeviceAuthorizeError = PostBotsByBotIdAcpCodexOauthDeviceAuthorizeErrors[keyof PostBotsByBotIdAcpCodexOauthDeviceAuthorizeErrors];
+
+export type PostBotsByBotIdAcpCodexOauthDeviceAuthorizeResponses = {
+    /**
+     * OK
+     */
+    200: HandlersAcpCodexOAuthDeviceAuthorizeResponse;
+};
+
+export type PostBotsByBotIdAcpCodexOauthDeviceAuthorizeResponse = PostBotsByBotIdAcpCodexOauthDeviceAuthorizeResponses[keyof PostBotsByBotIdAcpCodexOauthDeviceAuthorizeResponses];
+
+export type PostBotsByBotIdAcpCodexOauthDeviceCancelData = {
+    /**
+     * Device authorization session
+     */
+    body: HandlersAcpCodexOAuthDeviceSessionRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/acp/codex/oauth/device/cancel';
+};
+
+export type PostBotsByBotIdAcpCodexOauthDeviceCancelErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdAcpCodexOauthDeviceCancelError = PostBotsByBotIdAcpCodexOauthDeviceCancelErrors[keyof PostBotsByBotIdAcpCodexOauthDeviceCancelErrors];
+
+export type PostBotsByBotIdAcpCodexOauthDeviceCancelResponses = {
+    /**
+     * OK
+     */
+    200: HandlersAcpCodexOAuthDeviceStatusResponse;
+};
+
+export type PostBotsByBotIdAcpCodexOauthDeviceCancelResponse = PostBotsByBotIdAcpCodexOauthDeviceCancelResponses[keyof PostBotsByBotIdAcpCodexOauthDeviceCancelResponses];
+
+export type PostBotsByBotIdAcpCodexOauthDevicePollData = {
+    /**
+     * Device authorization session
+     */
+    body: HandlersAcpCodexOAuthDeviceSessionRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/acp/codex/oauth/device/poll';
+};
+
+export type PostBotsByBotIdAcpCodexOauthDevicePollErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdAcpCodexOauthDevicePollError = PostBotsByBotIdAcpCodexOauthDevicePollErrors[keyof PostBotsByBotIdAcpCodexOauthDevicePollErrors];
+
+export type PostBotsByBotIdAcpCodexOauthDevicePollResponses = {
+    /**
+     * OK
+     */
+    200: HandlersAcpCodexOAuthDeviceStatusResponse;
+};
+
+export type PostBotsByBotIdAcpCodexOauthDevicePollResponse = PostBotsByBotIdAcpCodexOauthDevicePollResponses[keyof PostBotsByBotIdAcpCodexOauthDevicePollResponses];
+
+export type GetBotsByBotIdAcpCodexOauthStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/acp/codex/oauth/status';
+};
+
+export type GetBotsByBotIdAcpCodexOauthStatusErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdAcpCodexOauthStatusError = GetBotsByBotIdAcpCodexOauthStatusErrors[keyof GetBotsByBotIdAcpCodexOauthStatusErrors];
+
+export type GetBotsByBotIdAcpCodexOauthStatusResponses = {
+    /**
+     * OK
+     */
+    200: HandlersAcpCodexOAuthStatus;
+};
+
+export type GetBotsByBotIdAcpCodexOauthStatusResponse = GetBotsByBotIdAcpCodexOauthStatusResponses[keyof GetBotsByBotIdAcpCodexOauthStatusResponses];
 
 export type PostBotsByBotIdBackupExportData = {
     /**
@@ -6850,6 +7085,10 @@ export type GetBotsByBotIdMessagesLocateData = {
          * Messages after target
          */
         after?: number;
+        /**
+         * Selected session head turn ID
+         */
+        head_turn_id?: string;
     };
     url: '/bots/{bot_id}/messages/locate';
 };

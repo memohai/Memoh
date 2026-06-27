@@ -118,7 +118,7 @@
 
       <SettingsAcpDetail
         v-if="selectedProfile"
-        :key="selectedProfile.id"
+        :key="`${botId}:${selectedProfile.id}`"
         :bot-id="botId"
         :profile="selectedProfile"
         :form="form"

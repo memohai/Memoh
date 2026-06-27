@@ -520,13 +520,32 @@ type usersACPConfigWrite struct {
 type usersACPConfigBridgeServer struct {
 	pb.UnimplementedContainerServiceServer
 
-	mu    sync.Mutex
-	files []usersACPConfigWrite
+	mu           sync.Mutex
+	files        []usersACPConfigWrite
+	writeErr     error
+	writeStarted chan string
+	unblockWrite <-chan struct{}
 }
 
-func (s *usersACPConfigBridgeServer) WriteFile(_ context.Context, req *pb.WriteFileRequest) (*pb.WriteFileResponse, error) {
+func (s *usersACPConfigBridgeServer) WriteFile(ctx context.Context, req *pb.WriteFileRequest) (*pb.WriteFileResponse, error) {
+	if s.writeStarted != nil {
+		select {
+		case s.writeStarted <- req.GetPath():
+		default:
+		}
+	}
+	if s.unblockWrite != nil {
+		select {
+		case <-s.unblockWrite:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.writeErr != nil {
+		return nil, s.writeErr
+	}
 	s.files = append(s.files, usersACPConfigWrite{
 		Path:    req.GetPath(),
 		Content: append([]byte(nil), req.GetContent()...),

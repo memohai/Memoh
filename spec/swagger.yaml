@@ -1824,6 +1824,8 @@ definitions:
         type: boolean
       decision_reason:
         type: string
+      persist_turn_id:
+        type: string
       short_id:
         type: integer
       status:
@@ -1872,6 +1874,8 @@ definitions:
     properties:
       can_respond:
         type: boolean
+      persist_turn_id:
+        type: string
       questions:
         items:
           $ref: '#/definitions/userinput.UIQuestion'
@@ -2195,6 +2199,59 @@ definitions:
     type: object
   handlers.ACPClaudeCodeOAuthStatus:
     properties:
+      configured:
+        type: boolean
+      has_token:
+        type: boolean
+    type: object
+  handlers.ACPCodexOAuthAuthorizeResponse:
+    properties:
+      auth_url:
+        type: string
+    type: object
+  handlers.ACPCodexOAuthDeviceAuthorizeResponse:
+    properties:
+      expires_at:
+        type: string
+      interval_seconds:
+        type: integer
+      session_id:
+        type: string
+      user_code:
+        type: string
+      verification_url:
+        type: string
+    type: object
+  handlers.ACPCodexOAuthDeviceSessionRequest:
+    properties:
+      session_id:
+        type: string
+    required:
+    - session_id
+    type: object
+  handlers.ACPCodexOAuthDeviceStatusResponse:
+    properties:
+      account_id:
+        type: string
+      error:
+        type: string
+      expires_at:
+        type: string
+      has_token:
+        type: boolean
+      interval_seconds:
+        type: integer
+      next_poll_after:
+        type: string
+      status:
+        type: string
+    type: object
+  handlers.ACPCodexOAuthStatus:
+    properties:
+      account_id:
+        type: string
+      callback_url:
+        type: string
       configured:
         type: boolean
       has_token:
@@ -5257,6 +5314,162 @@ paths:
       summary: Get Claude Code ACP OAuth status
       tags:
       - acp
+  /bots/{bot_id}/acp/codex/oauth/authorize:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ACPCodexOAuthAuthorizeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Start Codex ACP OAuth authorization
+      tags:
+      - acp
+  /bots/{bot_id}/acp/codex/oauth/device/authorize:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ACPCodexOAuthDeviceAuthorizeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Start Codex ACP device code authorization
+      tags:
+      - acp
+  /bots/{bot_id}/acp/codex/oauth/device/cancel:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Device authorization session
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ACPCodexOAuthDeviceSessionRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ACPCodexOAuthDeviceStatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Cancel Codex ACP device code authorization
+      tags:
+      - acp
+  /bots/{bot_id}/acp/codex/oauth/device/poll:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Device authorization session
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ACPCodexOAuthDeviceSessionRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ACPCodexOAuthDeviceStatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Poll Codex ACP device code authorization
+      tags:
+      - acp
+  /bots/{bot_id}/acp/codex/oauth/status:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ACPCodexOAuthStatus'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get Codex ACP OAuth status
+      tags:
+      - acp
   /bots/{bot_id}/backup/export:
     post:
       consumes:
@@ -7859,6 +8072,10 @@ paths:
         in: query
         name: after
         type: integer
+      - description: Selected session head turn ID
+        in: query
+        name: head_turn_id
+        type: string
       produces:
       - application/json
       responses:

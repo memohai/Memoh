@@ -153,20 +153,68 @@ func (s *Server) ReadFile(_ context.Context, req *pb.ReadFileRequest) (*pb.ReadF
 	}, nil
 }
 
-func (s *Server) WriteFile(_ context.Context, req *pb.WriteFileRequest) (*pb.WriteFileResponse, error) {
+func (s *Server) WriteFile(ctx context.Context, req *pb.WriteFileRequest) (*pb.WriteFileResponse, error) {
 	path := req.GetPath()
 	if path == "" {
 		return nil, status.Error(codes.InvalidArgument, "path is required")
+	}
+	if err := contextStatusError(ctx); err != nil {
+		return nil, err
 	}
 	path = s.resolvePath(path)
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, status.Errorf(codes.Internal, "mkdir: %v", err)
 	}
-	if err := os.WriteFile(path, req.GetContent(), 0o600); err != nil {
+	if err := contextStatusError(ctx); err != nil {
+		return nil, err
+	}
+	if err := writeFileAtomic(ctx, path, req.GetContent()); err != nil {
+		if code := status.Code(err); code != codes.Unknown {
+			return nil, err
+		}
 		return nil, status.Errorf(codes.Internal, "write: %v", err)
 	}
 	return &pb.WriteFileResponse{}, nil
+}
+
+func contextStatusError(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return status.FromContextError(err).Err()
+	}
+	return nil
+}
+
+func writeFileAtomic(ctx context.Context, targetPath string, content []byte) error {
+	dir := filepath.Dir(targetPath)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(targetPath)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := tmp.Write(content); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := contextStatusError(ctx); err != nil {
+		return err
+	}
+	// #nosec G703 -- targetPath is resolved through safePath, and tmpPath is created in the same validated directory.
+	if err := os.Rename(tmpPath, targetPath); err != nil {
+		return err
+	}
+	cleanup = false
+	return nil
 }
 
 func (s *Server) ListDir(_ context.Context, req *pb.ListDirRequest) (*pb.ListDirResponse, error) {

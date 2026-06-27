@@ -18,7 +18,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@memohai/ui'
-import { SquarePen, CircleHelp, Bot, LoaderCircle } from 'lucide-vue-next'
+import { SquarePen, CircleHelp, Bot, Copy, LoaderCircle } from 'lucide-vue-next'
 import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
 import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
@@ -28,6 +28,7 @@ import { getBotsQueryKey } from '@memohai/sdk/colada'
 import { storeToRefs } from 'pinia'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { useACPOAuth } from '@/composables/useACPOAuth'
+import { useClipboard } from '@/composables/useClipboard'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
@@ -48,6 +49,7 @@ const { nextStep, prevStep } = useOnboarding()
 const queryCache = useQueryCache()
 const capabilities = useCapabilitiesStore()
 const desktopRuntime = useDesktopRuntime()
+const { copyText } = useClipboard()
 const { visible, exiting, leave } = useStepTransition()
 
 const workspaceVisible = ref(false)
@@ -71,6 +73,11 @@ const oauthBotId = ref('')
 const claudeCode = ref('')
 const {
   codexStatus,
+  authorizingCodexDevice,
+  codexAuthorizing,
+  codexDeviceSession,
+  codexDevicePending,
+  codexDeviceVerificationReady,
   claudeStatus,
   authorizingCodex,
   authorizingClaude,
@@ -79,6 +86,9 @@ const {
   loadCodexStatus,
   loadClaudeStatus,
   authorizeCodex,
+  authorizeCodexDevice,
+  cancelCodexDeviceAuthorization,
+  openCodexDeviceVerification,
   authorizeClaude,
   exchangeClaude,
 } = useACPOAuth(() => oauthBotId.value)
@@ -281,16 +291,77 @@ function enterOAuthPhase(botId: string) {
 }
 
 const oauthAuthorized = computed(() => {
-  if (isCodexAgent(acpAgentId.value)) return !!codexStatus.value?.has_token
+  if (isCodexAgent(acpAgentId.value)) {
+    return !!codexStatus.value?.has_token ||
+      codexDeviceSession.value?.status === 'success' ||
+      !!codexDeviceSession.value?.has_token
+  }
   if (isClaudeCodeAgent(acpAgentId.value)) return !!claudeStatus.value?.has_token
   return false
 })
+
+const codexDevicePanelVisible = computed(() =>
+  !!codexDeviceSession.value &&
+  codexDeviceSession.value.bot_id === oauthBotId.value &&
+  !codexDeviceSession.value.has_token &&
+  codexDeviceSession.value.status !== 'success',
+)
+
+const codexDeviceExpired = computed(() =>
+  !!codexDeviceSession.value &&
+  codexDeviceSession.value.bot_id === oauthBotId.value &&
+  codexDeviceSession.value.status === 'expired',
+)
+
+const oauthStatusText = computed(() => {
+  if (oauthAuthorized.value) return t('onboarding.bot.acp.oauthAuthorized')
+  if (codexDevicePending.value) return t('provider.oauth.status.pendingDevice')
+  if (codexDeviceExpired.value) return t('onboarding.bot.acp.oauthDeviceExpired')
+  return t('onboarding.bot.acp.oauthNotAuthorized')
+})
+
+const oauthStatusTextClass = computed(() =>
+  oauthAuthorized.value || codexDevicePending.value
+    ? 'text-muted-foreground'
+    : 'text-destructive',
+)
 
 async function authorizeCodexFlow() {
   const ok = await authorizeCodex()
   if (ok) toast.success(t('onboarding.bot.acp.oauthSuccess'))
   else toast.error(t('onboarding.bot.acp.oauthExchangeFailed'))
 }
+
+async function authorizeCodexDeviceFlow() {
+  const ok = await authorizeCodexDevice()
+  if (!ok) toast.error(t('onboarding.bot.acp.oauthExchangeFailed'))
+}
+
+async function openCodexDeviceVerificationFlow() {
+  const result = await openCodexDeviceVerification(copyText)
+  if (result === 'opened') toast.success(t('common.copied'))
+  else if (result === 'popup_blocked') toast.error(t('bots.settings.acpCodexDevicePopupBlocked'))
+  else toast.error(t('provider.oauth.copyFailed'))
+}
+
+async function cancelCodexDeviceFlow() {
+  await cancelCodexDeviceAuthorization()
+}
+
+watch(() => codexDeviceSession.value?.status, (status, previousStatus) => {
+  if (!status || status === previousStatus) return
+  if (status === 'success') {
+    toast.success(t('onboarding.bot.acp.oauthSuccess'))
+    return
+  }
+  if (status === 'expired') {
+    toast.error(t('onboarding.bot.acp.oauthDeviceExpired'))
+    return
+  }
+  if (status === 'error') {
+    toast.error(codexDeviceSession.value?.error || t('onboarding.bot.acp.oauthDeviceFailed'))
+  }
+})
 
 async function authorizeClaudeFlow() {
   const ok = await authorizeClaude()
@@ -315,6 +386,7 @@ function skipOAuth() {
   // User skipped OAuth — clear ACP selection so the completion step does not
   // redirect with ?acp=<agent>. Starting an ACP session without a token would
   // fail on the first prompt; the user can authorize later via bot settings.
+  if (codexDevicePending.value) void cancelCodexDeviceAuthorization()
   clearACPSelection()
   leave(nextStep)
 }
@@ -535,9 +607,9 @@ function skipOAuth() {
               </h3>
               <p
                 class="text-xs"
-                :class="oauthAuthorized ? 'text-muted-foreground' : 'text-destructive'"
+                :class="oauthStatusTextClass"
               >
-                {{ oauthAuthorized ? t('onboarding.bot.acp.oauthAuthorized') : t('onboarding.bot.acp.oauthNotAuthorized') }}
+                {{ oauthStatusText }}
               </p>
             </div>
           </div>
@@ -551,22 +623,108 @@ function skipOAuth() {
 
           <div
             v-if="isCodexAgent(acpAgentId)"
-            class="mt-5 transition-all duration-[350ms] ease-out delay-[100ms]"
+            class="mt-5 space-y-3 transition-all duration-[350ms] ease-out delay-[100ms]"
             :class="oauthVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
           >
-            <Button
-              type="button"
-              variant="outline"
-              class="h-10 shadow-none"
-              :disabled="authorizingCodex"
-              @click="authorizeCodexFlow"
+            <div
+              class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center"
             >
-              <LoaderCircle
-                v-if="authorizingCodex"
-                class="size-4 animate-spin"
-              />
-              {{ t('onboarding.bot.acp.oauthAuthorizeChatGPT') }}
-            </Button>
+              <Button
+                type="button"
+                variant="outline"
+                :disabled="codexAuthorizing"
+                @click="authorizeCodexFlow"
+              >
+                <LoaderCircle
+                  v-if="authorizingCodex"
+                  class="size-4 animate-spin"
+                />
+                {{ t('onboarding.bot.acp.oauthAuthorizeChatGPT') }}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                :disabled="codexAuthorizing"
+                @click="authorizeCodexDeviceFlow"
+              >
+                <LoaderCircle
+                  v-if="authorizingCodexDevice"
+                  class="size-4 animate-spin"
+                />
+                {{ t('onboarding.bot.acp.oauthAuthorizeChatGPTDevice') }}
+              </Button>
+              <Button
+                v-if="codexDevicePending"
+                type="button"
+                variant="ghost"
+                @click="cancelCodexDeviceFlow"
+              >
+                {{ t('common.cancel') }}
+              </Button>
+            </div>
+
+            <div
+              v-if="codexDevicePanelVisible"
+              class="space-y-3 rounded-md bg-accent p-3 text-left"
+            >
+              <p class="text-sm text-muted-foreground">
+                {{ t('onboarding.bot.acp.oauthDeviceHint') }}
+              </p>
+              <div
+                v-if="codexDeviceVerificationReady"
+                class="space-y-1"
+              >
+                <div class="text-sm font-medium">
+                  {{ t('provider.oauth.deviceVerificationUri') }}
+                </div>
+                <code class="block break-all rounded-md bg-background px-2 py-1 text-sm select-all">{{ codexDeviceSession.verification_url }}</code>
+              </div>
+              <div
+                v-if="codexDeviceVerificationReady"
+                class="space-y-1"
+              >
+                <div class="text-sm font-medium">
+                  {{ t('provider.oauth.deviceUserCode') }}
+                </div>
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <code class="block min-w-0 flex-1 rounded-md bg-background px-2 py-1 font-mono text-sm select-all">{{ codexDeviceSession.user_code }}</code>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    class="shrink-0"
+                    @click="openCodexDeviceVerificationFlow"
+                  >
+                    <Copy class="size-4" />
+                    {{ t('onboarding.bot.acp.oauthDeviceCopyOpen') }}
+                  </Button>
+                </div>
+              </div>
+              <div
+                v-if="codexDeviceSession.expires_at"
+                class="text-xs text-muted-foreground"
+              >
+                {{ t('provider.oauth.deviceExpiresAt') }}: {{ codexDeviceSession.expires_at }}
+              </div>
+              <div
+                v-if="codexDevicePending"
+                class="flex items-center gap-2 text-sm text-foreground"
+              >
+                <LoaderCircle class="size-4 animate-spin" />
+                <span>{{ t('provider.oauth.status.pendingDevice') }}</span>
+              </div>
+              <p
+                v-else-if="codexDeviceSession.status === 'error' && codexDeviceSession.error"
+                class="text-sm text-destructive"
+              >
+                {{ codexDeviceSession.error }}
+              </p>
+              <p
+                v-else-if="codexDeviceSession.status === 'expired'"
+                class="text-sm text-destructive"
+              >
+                {{ t('onboarding.bot.acp.oauthDeviceExpired') }}
+              </p>
+            </div>
           </div>
 
           <div
@@ -577,7 +735,7 @@ function skipOAuth() {
             <Button
               type="button"
               variant="outline"
-              class="h-10 shadow-none"
+              class="h-10"
               :disabled="authorizingClaude"
               @click="authorizeClaudeFlow"
             >
@@ -603,7 +761,7 @@ function skipOAuth() {
                 />
                 <Button
                   type="button"
-                  class="h-10 shrink-0 shadow-none"
+                  class="h-10 shrink-0"
                   :disabled="exchangingClaude"
                   @click="exchangeClaudeFlow"
                 >
