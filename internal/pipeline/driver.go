@@ -34,6 +34,11 @@ type RunConfigResolver interface {
 	StoreRound(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform string, messages []sdk.Message, modelID string) error
 }
 
+const (
+	discussSourceStaticReserveTokens = 256
+	discussInlineImageReserveTokens  = 256
+)
+
 // discussStreamer abstracts the agent streaming capability for testability.
 type discussStreamer interface {
 	Stream(ctx context.Context, cfg agentpkg.RunConfig) <-chan agentpkg.StreamEvent
@@ -332,7 +337,11 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 	}
 	runConfig := resolved.RunConfig
 	if resolved.ContextTokenBudget > 0 {
-		sourceBudget := resolved.ContextTokenBudget - estimateMessageTokens(ContextMessage{Role: "user", Content: buildLateBindingPrompt(true)})
+		reservedTokens := discussSourceStaticReserveTokens
+		reservedTokens += estimateMessageTokens(ContextMessage{Role: "system", Content: runConfig.System})
+		reservedTokens += estimateMessageTokens(ContextMessage{Role: "user", Content: buildLateBindingPrompt(true)})
+		reservedTokens += len(extractNewImageRefs(activeRC, sess.lastProcessedMs)) * discussInlineImageReserveTokens
+		sourceBudget := resolved.ContextTokenBudget - reservedTokens
 		if sourceBudget < 1 {
 			sourceBudget = 1
 		}

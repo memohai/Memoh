@@ -296,8 +296,12 @@ func (r *Resolver) continueUserInputSession(ctx context.Context, req userinput.R
 	loaded = pruneHistoryForGateway(loaded)
 	loaded = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(firstNonEmpty(req.BotID, input.BotID), "", req.SessionID, req.ConversationType, "", req.ReplyTarget), loaded)
 	loaded = forceKeepToolResultForBudget(loaded, req.ToolCallID)
-	messages, retained, _ := trimMessagesAndRecordsByTokens(r.logger, loaded, resolved.ContextTokenBudget)
+	sourceTokenBudget := contextSourceTokenBudget(resolved.ContextTokenBudget, contextSourceReserve{
+		System: resolved.RunConfig.System,
+	})
+	messages, retained, _ := trimMessagesAndRecordsByTokens(r.logger, loaded, sourceTokenBudget)
 	messages = sanitizeMessages(messages)
+	messages = repairToolCallClosures(messages, syntheticToolClosureError)
 
 	cfg := resolved.RunConfig
 	cfg.ContextFrags = historyContextFragsForMessages(messages, retained)

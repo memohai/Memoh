@@ -10,6 +10,18 @@ import (
 	"github.com/memohai/memoh/internal/historyfrag"
 )
 
+const (
+	contextSourceStaticReserveTokens = 256
+	inlineImageReserveTokens         = 256
+)
+
+type contextSourceReserve struct {
+	System           string
+	Messages         []conversation.ModelMessage
+	Query            string
+	InlineImageCount int
+}
+
 type historyBudgetItem struct {
 	index        int
 	record       historyfrag.HistoryRecord
@@ -87,6 +99,33 @@ func selectHistoryRecordsForBudget(records []historyfrag.HistoryRecord, maxToken
 	return retained, len(retained) != len(records), totalTokens
 }
 
+func contextSourceTokenBudget(maxTokens int, reserve contextSourceReserve) int {
+	if maxTokens == 0 {
+		return 0
+	}
+	reserved := contextSourceStaticReserveTokens
+	if system := strings.TrimSpace(reserve.System); system != "" {
+		reserved += estimateCharsAsTokens(len(system))
+	}
+	for _, msg := range reserve.Messages {
+		reserved += estimateMessageTokens(msg)
+	}
+	if query := strings.TrimSpace(reserve.Query); query != "" {
+		reserved += estimateMessageTokens(conversation.ModelMessage{
+			Role:    "user",
+			Content: conversation.NewTextContent(query),
+		})
+	}
+	if reserve.InlineImageCount > 0 {
+		reserved += reserve.InlineImageCount * inlineImageReserveTokens
+	}
+	budget := maxTokens - reserved
+	if budget < 1 {
+		return 1
+	}
+	return budget
+}
+
 func historyBudgetGroupsHaveOverflowDrop(groups []historyBudgetGroup) bool {
 	for _, group := range groups {
 		if group.overflowDrop {
@@ -107,15 +146,22 @@ func totalHistoryTokens(records []historyfrag.HistoryRecord) int {
 func historyBudgetGroups(records []historyfrag.HistoryRecord) []historyBudgetGroup {
 	items := historyBudgetItems(records)
 	groups := make([]historyBudgetGroup, 0, len(items))
+	groupedToolIndices := make(map[int]struct{})
 	for i := 0; i < len(items); i++ {
+		if _, ok := groupedToolIndices[i]; ok {
+			continue
+		}
 		group := historyBudgetGroup{items: []historyBudgetItem{items[i]}}
 		if callIDs := historyRecordToolCallIDs(items[i].record); len(callIDs) > 0 {
-			for j := i + 1; j < len(items) && isToolRecord(items[j].record); j++ {
+			for j := i + 1; j < len(items) && len(callIDs) > 0; j++ {
+				if !isToolRecord(items[j].record) {
+					continue
+				}
 				if historyRecordHasMatchingToolResult(items[j].record, callIDs) {
 					group.items = append(group.items, items[j])
+					groupedToolIndices[j] = struct{}{}
 					deleteToolResultIDs(callIDs, items[j].record)
 				}
-				i = j
 			}
 		}
 		group = summarizeHistoryBudgetGroup(group)
@@ -245,17 +291,30 @@ func exceedsDropBudget(policy contextfrag.BudgetPolicy, record historyfrag.Histo
 
 func dropOrphanToolRecords(records []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
 	out := records[:0]
-	pendingToolCallIDs := map[string]struct{}{}
+	assistantCallIDs := make(map[string]struct{})
+	for _, record := range records {
+		for id := range historyRecordToolCallIDs(record) {
+			assistantCallIDs[id] = struct{}{}
+		}
+	}
+	keptToolResultIDs := make(map[string]struct{})
 	for _, record := range records {
 		if isToolRecord(record) {
-			if historyRecordHasMatchingToolResult(record, pendingToolCallIDs) {
+			matchedIDs := historyRecordMatchingToolResultIDs(record, assistantCallIDs)
+			keep := false
+			for _, id := range matchedIDs {
+				if _, ok := keptToolResultIDs[id]; ok {
+					continue
+				}
+				keptToolResultIDs[id] = struct{}{}
+				keep = true
+			}
+			if keep {
 				out = append(out, record)
-				deleteToolResultIDs(pendingToolCallIDs, record)
 			}
 			continue
 		}
 		out = append(out, record)
-		pendingToolCallIDs = historyRecordToolCallIDs(record)
 	}
 	return out
 }
@@ -290,15 +349,20 @@ func historyRecordToolCallIDs(record historyfrag.HistoryRecord) map[string]struc
 }
 
 func historyRecordHasMatchingToolResult(record historyfrag.HistoryRecord, callIDs map[string]struct{}) bool {
+	return len(historyRecordMatchingToolResultIDs(record, callIDs)) > 0
+}
+
+func historyRecordMatchingToolResultIDs(record historyfrag.HistoryRecord, callIDs map[string]struct{}) []string {
 	if len(callIDs) == 0 || !isToolRecord(record) {
-		return false
+		return nil
 	}
+	var matched []string
 	for _, id := range historyRecordToolResultIDs(record) {
 		if _, ok := callIDs[id]; ok {
-			return true
+			matched = append(matched, id)
 		}
 	}
-	return false
+	return matched
 }
 
 func deleteToolResultIDs(callIDs map[string]struct{}, record historyfrag.HistoryRecord) {
@@ -350,7 +414,7 @@ func toolPartString(part map[string]any, keys ...string) string {
 }
 
 func summaryMessageKey(record historyfrag.HistoryRecord) string {
-	if record.Kind != contextfrag.KindConversationSummary && record.Lifecycle != historyfrag.LifecycleActiveSummary && record.Lifecycle != historyfrag.LifecycleLegacySummary {
+	if record.Kind != contextfrag.KindConversationSummary && record.Lifecycle != historyfrag.LifecycleActiveSummary {
 		return ""
 	}
 	text := strings.TrimSpace(record.ModelMessage.TextContent())

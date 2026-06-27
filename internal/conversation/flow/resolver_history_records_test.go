@@ -1208,14 +1208,6 @@ func historyRecord(id string, msg conversation.ModelMessage, mutate func(*histor
 	return record
 }
 
-func modelMessageTexts(messages []conversation.ModelMessage) []string {
-	texts := make([]string, 0, len(messages))
-	for _, msg := range messages {
-		texts = append(texts, msg.TextContent())
-	}
-	return texts
-}
-
 type recordingCompactionLogQueries struct {
 	dbstore.Queries
 	logs         []dbsqlc.BotHistoryMessageCompact

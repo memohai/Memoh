@@ -192,6 +192,52 @@ func TestDropOrphanToolRecordsMatchesToolCallID(t *testing.T) {
 	}
 }
 
+func TestDropOrphanToolRecordsMatchesNonAdjacentToolCallID(t *testing.T) {
+	t.Parallel()
+
+	records := []historyfrag.HistoryRecord{
+		trimRecord(conversation.ModelMessage{
+			Role: "assistant",
+			ToolCalls: []conversation.ToolCall{{
+				ID:   "call-1",
+				Type: "function",
+				Function: conversation.ToolCallFunction{
+					Name: "lookup",
+				},
+			}},
+		}, nil),
+		trimRecord(conversation.ModelMessage{
+			Role: "assistant",
+			ToolCalls: []conversation.ToolCall{{
+				ID:   "call-2",
+				Type: "function",
+				Function: conversation.ToolCallFunction{
+					Name: "lookup",
+				},
+			}},
+		}, nil),
+		trimRecord(conversation.ModelMessage{
+			Role:       "tool",
+			ToolCallID: "call-1",
+			Content:    conversation.NewTextContent("result 1"),
+		}, nil),
+		trimRecord(conversation.ModelMessage{
+			Role:       "tool",
+			ToolCallID: "call-2",
+			Content:    conversation.NewTextContent("result 2"),
+		}, nil),
+	}
+
+	got := dropOrphanToolRecords(records)
+
+	if len(got) != 4 {
+		t.Fatalf("records = %d, want both assistant/tool pairs retained by id: %#v", len(got), got)
+	}
+	if got[2].ModelMessage.ToolCallID != "call-1" || got[3].ModelMessage.ToolCallID != "call-2" {
+		t.Fatalf("non-adjacent tool results were not matched by id: %#v", got)
+	}
+}
+
 func TestTrimMessagesByTokensForceKeepsMarkedToolResultPair(t *testing.T) {
 	t.Parallel()
 
@@ -229,6 +275,59 @@ func TestTrimMessagesByTokensForceKeepsMarkedToolResultPair(t *testing.T) {
 	}
 	if len(retained) != 2 || retained[0].ModelMessage.Role != "assistant" || retained[1].ModelMessage.Role != "tool" {
 		t.Fatalf("force-kept tool result should retain its assistant/tool pair: %#v", retained)
+	}
+}
+
+func TestTrimMessagesByTokensForceKeepsNonAdjacentToolResultPair(t *testing.T) {
+	t.Parallel()
+
+	records := []historyfrag.HistoryRecord{
+		trimRecord(conversation.ModelMessage{
+			Role:    "user",
+			Content: conversation.NewTextContent(strings.Repeat("old filler ", 100)),
+		}, nil),
+		trimRecord(conversation.ModelMessage{
+			Role: "assistant",
+			ToolCalls: []conversation.ToolCall{{
+				ID:   "call-1",
+				Type: "function",
+				Function: conversation.ToolCallFunction{
+					Name: "ask_user",
+				},
+			}},
+		}, nil),
+		trimRecord(conversation.ModelMessage{
+			Role: "assistant",
+			ToolCalls: []conversation.ToolCall{{
+				ID:   "call-2",
+				Type: "function",
+				Function: conversation.ToolCallFunction{
+					Name: "lookup",
+				},
+			}},
+		}, nil),
+		trimRecord(conversation.ModelMessage{
+			Role:       "tool",
+			ToolCallID: "call-1",
+			Content:    conversation.NewTextContent("latest user answer"),
+		}, func(record *historyfrag.HistoryRecord) {
+			record.Budget = contextfrag.BudgetPolicy{Overflow: contextfrag.OverflowKeep}
+		}),
+		trimRecord(conversation.ModelMessage{
+			Role:       "tool",
+			ToolCallID: "call-2",
+			Content:    conversation.NewTextContent(strings.Repeat("lookup result ", 80)),
+		}, nil),
+	}
+
+	messages, retained, _ := trimMessagesAndRecordsByTokens(nil, records, 1)
+	joined := trimMessageTexts(messages)
+
+	if !strings.Contains(joined, "latest user answer") {
+		t.Fatalf("force-kept non-adjacent continuation result was trimmed: %#v", messages)
+	}
+	if len(retained) != 2 || retained[0].ModelMessage.Role != "assistant" || retained[1].ModelMessage.ToolCallID != "call-1" {
+		t.Fatalf("force-kept non-adjacent tool result should retain its owning assistant pair: %#v", retained)
 	}
 }
 
@@ -317,6 +416,62 @@ func TestEstimateMessageTokensRoundsUpShortNonEmptyMessages(t *testing.T) {
 	}
 	if got := estimateMessageTokens(conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("hello")}); got != 2 {
 		t.Fatalf("text length above divisor estimated tokens = %d, want rounded-up 2", got)
+	}
+}
+
+func TestContextSourceTokenBudgetReservesPromptMaterial(t *testing.T) {
+	t.Parallel()
+
+	budget := contextSourceTokenBudget(1000, contextSourceReserve{
+		System: strings.Repeat("system prompt ", 40),
+		Messages: []conversation.ModelMessage{{
+			Role:    "user",
+			Content: conversation.NewTextContent(strings.Repeat("memory context ", 40)),
+		}},
+		Query:            strings.Repeat("current query ", 20),
+		InlineImageCount: 1,
+	})
+
+	if budget <= 0 || budget >= 1000 {
+		t.Fatalf("source budget = %d, want positive budget below model window", budget)
+	}
+	if got := contextSourceTokenBudget(0, contextSourceReserve{Query: "ignored"}); got != 0 {
+		t.Fatalf("zero context window source budget = %d, want unlimited sentinel 0", got)
+	}
+}
+
+func TestContextSourceTokenBudgetDrivesHistoryTrim(t *testing.T) {
+	t.Parallel()
+
+	records := []historyfrag.HistoryRecord{
+		trimRecord(conversation.ModelMessage{
+			Role:    "user",
+			Content: conversation.NewTextContent(strings.Repeat("old filler ", 80)),
+		}, nil),
+		trimRecord(conversation.ModelMessage{
+			Role:    "assistant",
+			Content: conversation.NewTextContent("fresh reply"),
+		}, nil),
+	}
+	sourceBudget := contextSourceTokenBudget(460, contextSourceReserve{
+		Messages: []conversation.ModelMessage{{
+			Role:    "user",
+			Content: conversation.NewTextContent(strings.Repeat("memory reserve ", 30)),
+		}},
+		Query: strings.Repeat("query reserve ", 20),
+	})
+
+	messages, retained, _ := trimMessagesAndRecordsByTokens(nil, records, sourceBudget)
+	joined := trimMessageTexts(messages)
+
+	if sourceBudget >= totalHistoryTokens(records) {
+		t.Fatalf("test setup did not reduce source budget enough: budget=%d history=%d", sourceBudget, totalHistoryTokens(records))
+	}
+	if len(retained) >= len(records) || strings.Contains(joined, "old filler") {
+		t.Fatalf("source-budget trim should drop old filler before final prompt append: budget=%d messages=%#v", sourceBudget, messages)
+	}
+	if !strings.Contains(joined, "fresh reply") {
+		t.Fatalf("source-budget trim should keep fresh reply: %#v", messages)
 	}
 }
 
