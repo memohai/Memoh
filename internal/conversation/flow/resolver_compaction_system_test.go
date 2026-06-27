@@ -165,7 +165,7 @@ func TestCompactOrdinaryStrategySystemFlow(t *testing.T) {
 		queries:        store,
 	}
 
-	messages := resolver.buildMessagesFromPipeline(context.Background(), conversation.ChatRequest{SessionID: sessionID}, 0)
+	messages := resolver.buildPipelineContext(context.Background(), conversation.ChatRequest{SessionID: sessionID}, 0).Messages
 	got := make([]string, 0, len(messages))
 	for _, msg := range messages {
 		got = append(got, msg.TextContent())

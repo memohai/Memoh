@@ -544,12 +544,6 @@ type pipelineContextBuild struct {
 	HistoryRecords []historyfrag.HistoryRecord
 }
 
-// buildMessagesFromPipeline preserves the legacy helper API for tests and
-// callers that only need provider messages.
-func (r *Resolver) buildMessagesFromPipeline(ctx context.Context, req conversation.ChatRequest, contextTokenBudget int) []conversation.ModelMessage {
-	return r.buildPipelineContext(ctx, req, contextTokenBudget).Messages
-}
-
 // buildPipelineContext assembles chat context from the DCP pipeline's
 // RenderedContext (RC) merged with assistant/tool turns (TR) from
 // bot_history_messages. This gives chat mode the same event-driven context
@@ -635,7 +629,7 @@ func renderedContextHasText(rc pipelinepkg.RenderedContext, text string) bool {
 	}
 	for _, seg := range rc {
 		for _, piece := range seg.Content {
-			if strings.Contains(strings.TrimSpace(piece.Text), text) {
+			if strings.TrimSpace(piece.Text) == text {
 				return true
 			}
 		}
@@ -703,7 +697,11 @@ func (r *Resolver) loadPipelineCompactionContext(ctx context.Context, messages [
 	}
 
 	var summaries []string
-	var summaryRecords []historyfrag.HistoryRecord
+	var summaryCompactIDs []string
+	var summaryCoveredRefs []contextfrag.ContextRef
+	seenCoveredRefs := make(map[string]struct{})
+	var summaryScope contextfrag.Scope
+	summaryScopeSet := false
 	var coveredHistoryIDs []string
 	var coveredMessageIDs []string
 	coveredMessageCutoffMs := make(map[string]int64)
@@ -722,16 +720,20 @@ func (r *Resolver) loadPipelineCompactionContext(ctx context.Context, messages [
 			continue
 		}
 		summaries = append(summaries, summary)
+		summaryCompactIDs = append(summaryCompactIDs, compactID)
 		records := recordGroups[compactID]
-		coveredRefs := make([]contextfrag.ContextRef, 0, len(records))
 		for _, record := range records {
-			coveredRefs = append(coveredRefs, record.Ref)
+			key := record.Ref.StableKey()
+			if _, ok := seenCoveredRefs[key]; ok {
+				continue
+			}
+			seenCoveredRefs[key] = struct{}{}
+			summaryCoveredRefs = append(summaryCoveredRefs, record.Ref)
 		}
-		scope := contextfrag.Scope{}
-		if len(records) > 0 {
-			scope = records[0].Scope
+		if !summaryScopeSet && len(records) > 0 {
+			summaryScope = records[0].Scope
+			summaryScopeSet = true
 		}
-		summaryRecords = append(summaryRecords, historyfrag.SummaryRecord(compactID, summary, coveredRefs, scope))
 		for _, msg := range groups[compactID] {
 			if id := strings.TrimSpace(msg.ID); id != "" {
 				coveredHistoryIDs = append(coveredHistoryIDs, id)
@@ -751,15 +753,19 @@ func (r *Resolver) loadPipelineCompactionContext(ctx context.Context, messages [
 	if len(coveredMessageCutoffMs) == 0 {
 		coveredMessageCutoffMs = nil
 	}
+	summaryText := strings.Join(summaries, "\n\n")
+	summaryRecordID := strings.Join(summaryCompactIDs, "+")
 	return pipelineCompactionContext{
 		Summary: pipelinepkg.CompactSummary{
-			Text:                   strings.Join(summaries, "\n\n"),
+			Text:                   summaryText,
 			CoveredMessageIDs:      coveredMessageIDs,
 			CoveredMessageCutoffMs: coveredMessageCutoffMs,
 
 			CoveredHistoryMessageIDs: coveredHistoryIDs,
 		},
-		HistoryRecords: summaryRecords,
+		HistoryRecords: []historyfrag.HistoryRecord{
+			historyfrag.SummaryRecord(summaryRecordID, summaryText, summaryCoveredRefs, summaryScope),
+		},
 	}
 }
 
@@ -790,13 +796,24 @@ func trimPipelineMessagesByTokens(log *slog.Logger, messages []conversation.Mode
 		)
 	}
 
-	if cutoff > 0 && isPipelineCompactionSummaryMessage(messages[0]) {
-		result := make([]conversation.ModelMessage, 0, len(messages)-cutoff+1)
-		result = append(result, messages[0])
-		result = append(result, messages[cutoff:]...)
-		return result
+	if cutoff > 0 {
+		if summaryIndex := firstPipelineCompactionSummaryMessageIndex(messages); summaryIndex >= 0 && summaryIndex < cutoff {
+			result := make([]conversation.ModelMessage, 0, len(messages)-cutoff+1)
+			result = append(result, messages[summaryIndex])
+			result = append(result, messages[cutoff:]...)
+			return result
+		}
 	}
 	return messages[cutoff:]
+}
+
+func firstPipelineCompactionSummaryMessageIndex(messages []conversation.ModelMessage) int {
+	for i, msg := range messages {
+		if isPipelineCompactionSummaryMessage(msg) {
+			return i
+		}
+	}
+	return -1
 }
 
 func isPipelineCompactionSummaryMessage(msg conversation.ModelMessage) bool {

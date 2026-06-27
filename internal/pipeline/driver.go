@@ -650,7 +650,9 @@ func agentEventToChannelEvent(e agentpkg.StreamEvent) (channel.StreamEvent, bool
 	}
 }
 
-// loadTurnResponses loads every assistant/tool message ever persisted for
+// loadTurnResponsesWithMessages loads active session history from the epoch,
+// decodes assistant/tool turn-response entries, and returns the raw messages so
+// compact-summary coverage can be reconstructed from the same active history.
 func (d *DiscussDriver) loadTurnResponsesWithMessages(ctx context.Context, sessionID string) ([]TurnResponseEntry, []messagepkg.Message) {
 	if d.deps.MessageService == nil {
 		return nil, nil
