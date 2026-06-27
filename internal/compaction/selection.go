@@ -120,9 +120,9 @@ func latestUserIndex(items []CompactionCandidate) int {
 	return -1
 }
 
-func recentTailProtectedStart(items []CompactionCandidate, min int) int {
+func recentTailProtectedStart(items []CompactionCandidate, minStart int) int {
 	start := len(items) - 1
-	for start > min && isToolClosureResultItem(items[start]) {
+	for start > minStart && isToolClosureResultItem(items[start]) {
 		start--
 	}
 	return start

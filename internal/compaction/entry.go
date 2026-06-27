@@ -13,8 +13,10 @@ import (
 // toolOutputMaxBytes bounds the tool-result outcome rendered into the summarizer
 // input. Stored tool payloads are already gateway-pruned; this keeps the summary
 // input compact while preserving the outcome gist.
-const toolOutputMaxBytes = 2048
-const entryMetadataMaxBytes = 256
+const (
+	toolOutputMaxBytes    = 2048
+	entryMetadataMaxBytes = 256
+)
 
 var (
 	dataURIRe = regexp.MustCompile(`data:[a-zA-Z0-9.+/-]+;base64,[A-Za-z0-9+/=]+`)
