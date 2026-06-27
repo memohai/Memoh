@@ -204,3 +204,103 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		}
 	}
 }
+
+func TestSQLiteListActiveMessagesSinceExcludesPassiveSync(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	execAll(t, conn, `
+CREATE TABLE channel_identities (
+  id TEXT PRIMARY KEY,
+  display_name TEXT,
+  avatar_url TEXT
+);
+CREATE TABLE bot_sessions (
+  id TEXT PRIMARY KEY,
+  channel_type TEXT
+);
+CREATE TABLE bot_history_messages (
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL,
+  session_id TEXT,
+  sender_channel_identity_id TEXT,
+  sender_account_user_id TEXT,
+  source_message_id TEXT,
+  source_reply_to_message_id TEXT,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL DEFAULT '{}',
+  metadata TEXT NOT NULL DEFAULT '{}',
+  usage TEXT,
+  session_mode TEXT NOT NULL DEFAULT 'chat',
+  runtime_type TEXT NOT NULL DEFAULT 'model',
+  event_id TEXT,
+  display_text TEXT,
+  compact_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`)
+
+	botID := "00000000-0000-0000-0000-000000004001"
+	sessionID := "00000000-0000-0000-0000-000000004002"
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id, channel_type) VALUES (?, ?)`, sessionID, "local"); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	for _, item := range []struct {
+		id       string
+		metadata string
+	}{
+		{"00000000-0000-0000-0000-000000004003", "{}"},
+		{"00000000-0000-0000-0000-000000004004", `{"trigger_mode":"passive_sync"}`},
+	} {
+		_, err := conn.ExecContext(ctx, `
+INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, metadata, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			item.id,
+			botID,
+			sessionID,
+			"user",
+			`"hello"`,
+			item.metadata,
+			"2026-06-13 19:53:50",
+		)
+		if err != nil {
+			t.Fatalf("insert message %s: %v", item.id, err)
+		}
+	}
+
+	store, err := New(conn)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	q := NewQueries(store)
+	since := pgtype.Timestamptz{
+		Time:  time.Date(2026, 6, 13, 19, 53, 49, 0, time.UTC),
+		Valid: true,
+	}
+
+	activeByBot, err := q.ListActiveMessagesSince(ctx, pgsqlc.ListActiveMessagesSinceParams{
+		BotID:     mustUUID(t, botID),
+		CreatedAt: since,
+	})
+	if err != nil {
+		t.Fatalf("list active messages: %v", err)
+	}
+	if len(activeByBot) != 1 || activeByBot[0].ID != mustUUID(t, "00000000-0000-0000-0000-000000004003") {
+		t.Fatalf("active by bot rows = %#v, want only non-passive row", activeByBot)
+	}
+
+	activeBySession, err := q.ListActiveMessagesSinceBySession(ctx, pgsqlc.ListActiveMessagesSinceBySessionParams{
+		SessionID: mustUUID(t, sessionID),
+		CreatedAt: since,
+	})
+	if err != nil {
+		t.Fatalf("list active messages by session: %v", err)
+	}
+	if len(activeBySession) != 1 || activeBySession[0].ID != mustUUID(t, "00000000-0000-0000-0000-000000004003") {
+		t.Fatalf("active by session rows = %#v, want only non-passive row", activeBySession)
+	}
+}
