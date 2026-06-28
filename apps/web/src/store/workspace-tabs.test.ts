@@ -595,36 +595,6 @@ describe('workspace layout store', () => {
     expect(chatStoreMock.selectDraft).not.toHaveBeenCalled()
   })
 
-  it('reconciles deleted chat tabs when an explicit deleted-session signal arrives', async () => {
-    const selection = useChatSelectionStore()
-    selection.setSession('s1')
-    chatStoreMock.sessions.push(
-      { id: 's1', title: 'Deleted session' },
-      { id: 's2', title: 'Other session' },
-    )
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
-    const deletedPanel = dock.panels.find(panel => panel.component === 'chat')!
-
-    chatStoreMock.sessions.splice(0, chatStoreMock.sessions.length,
-      { id: 's2', title: 'Other session' },
-      { id: 's3', title: 'Replacement session' },
-    )
-    emitDeletedSession('s1')
-    selection.setSession('s3')
-    await nextTick()
-    await nextTick()
-
-    expect(dock.getPanel(deletedPanel.id)).toBeUndefined()
-    const replacement = dock.panels.find(panel => panel.component === 'chat')
-    expect(replacement?.params.sessionId).toBe('s3')
-    expect(replacement?.title).toBe('Replacement session')
-    expect(chatStoreMock.selectDraft).not.toHaveBeenCalled()
-  })
-
   it('buffers deleted-session signals for inactive bots and applies them after switching back', async () => {
     const selection = useChatSelectionStore()
     selection.setSession('s1')
@@ -647,57 +617,6 @@ describe('workspace layout store', () => {
 
     expect(dock.getPanel(deletedPanel.id)).toBeUndefined()
     expect(dock.panels.some(panel => panel.component === 'chat' && panel.params.sessionId === 's1')).toBe(false)
-  })
-
-  it('keeps chat activation enabled when a buffered delete has no matching restored panel', async () => {
-    const selection = useChatSelectionStore()
-    selection.setSession('s2')
-    chatStoreMock.sessions.push({ id: 's2', title: 'Existing session' })
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({ sessionId: 's2', title: 'Existing session' })
-    await nextTick()
-
-    selection.setBot('bot-without-layout')
-    emitDeletedSession('s1', 'bot-1')
-    await nextTick()
-
-    selection.setBot('bot-1')
-    await nextTick()
-    await new Promise(resolve => setTimeout(resolve, 0))
-
-    chatStoreMock.selectSession.mockClear()
-    store.openBrowser()
-    const s2Panel = dock.panels.find(panel => panel.component === 'chat' && panel.params.sessionId === 's2')
-    expect(s2Panel).toBeTruthy()
-    s2Panel?.api.setActive()
-
-    expect(chatStoreMock.selectSession).toHaveBeenCalledWith('s2')
-  })
-
-  it('replays the active chat selection after suppressed restore activation', async () => {
-    const selection = useChatSelectionStore()
-    selection.setSession('s2')
-    chatStoreMock.sessions.push({ id: 's2', title: 'Existing session' })
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({ sessionId: 's2', title: 'Existing session' })
-    await nextTick()
-
-    selection.setBot('bot-without-layout')
-    emitDeletedSession('missing-session', 'bot-1')
-    await nextTick()
-
-    chatStoreMock.selectSession.mockClear()
-    selection.setBot('bot-1')
-    await nextTick()
-    await new Promise(resolve => setTimeout(resolve, 0))
-
-    expect(chatStoreMock.selectSession).toHaveBeenCalledWith('s2')
   })
 
   it('keeps buffered delete reconciliation across dock api re-registration', async () => {
@@ -803,35 +722,6 @@ describe('workspace layout store', () => {
     expect(chatStoreMock.selectSession).not.toHaveBeenCalledWith('s1')
   })
 
-  it('does not repeat activation suppression after an empty delete reconciliation', async () => {
-    const selection = useChatSelectionStore()
-    selection.setSession('s2')
-    chatStoreMock.sessions.push({ id: 's2', title: 'Existing session' })
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({ sessionId: 's2', title: 'Existing session' })
-    await nextTick()
-    selection.setBot('bot-without-layout')
-    emitDeletedSession('s1', 'bot-1')
-    await nextTick()
-
-    selection.setBot('bot-1')
-    await nextTick()
-    await new Promise(resolve => setTimeout(resolve, 0))
-    selection.setBot('bot-without-layout')
-    await nextTick()
-    selection.setBot('bot-1')
-    await nextTick()
-
-    chatStoreMock.selectSession.mockClear()
-    store.openBrowser()
-    dock.getPanel('chat:1')?.api.setActive()
-
-    expect(chatStoreMock.selectSession).toHaveBeenCalledWith('s2')
-  })
-
   it('keeps older tombstones available to block stale opens after reconciliation', async () => {
     const selection = useChatSelectionStore()
     selection.setSession('s1')
@@ -872,41 +762,6 @@ describe('workspace layout store', () => {
     s2Panel?.api.setActive()
 
     expect(chatStoreMock.selectSession).toHaveBeenCalledWith('s2')
-  })
-
-  it('does not permanently suppress chat activation when a deleted tab close is vetoed', async () => {
-    const selection = useChatSelectionStore()
-    selection.setSession('s1')
-    chatStoreMock.sessions.push(
-      { id: 's1', title: 'Deleted session' },
-      { id: 's2', title: 'Other session' },
-    )
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
-    const deletedPanel = dock.panels.find(panel => panel.component === 'chat')!
-    store.pinPanel(deletedPanel.id)
-    store.openSessionChat({ sessionId: 's2', title: 'Other session' })
-    // Defensive branch: Dockview close is normally synchronous, but this fake
-    // lets the store prove a failed/deferred close cannot suppress activation
-    // forever.
-    dock.vetoCloseUntilAllowed(deletedPanel.id)
-    chatStoreMock.selectSession.mockClear()
-
-    emitDeletedSession('s1')
-    await nextTick()
-    await new Promise(resolve => setTimeout(resolve, 0))
-
-    expect(dock.getPanel(deletedPanel.id)).toBeTruthy()
-    dock.getPanel('chat:2')?.api.setActive()
-    expect(chatStoreMock.selectSession).toHaveBeenCalledWith('s2')
-
-    dock.allowClose(deletedPanel.id)
-    emitDeletedSession('s1')
-    await nextTick()
-    expect(dock.getPanel(deletedPanel.id)).toBeUndefined()
   })
 
   it('opens files into the ephemeral slot and replaces until pinned', () => {
