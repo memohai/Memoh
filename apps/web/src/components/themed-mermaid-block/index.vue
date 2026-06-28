@@ -16,10 +16,10 @@ const settings = useSettingsStore()
 
 const themedNode = computed<CodeBlockNode>(() => {
   if (settings.mermaidTheme === 'auto') return props.node
-  const content = props.node?.content ?? ''
-  const next = applyMermaidThemeToSource(content, settings.mermaidTheme)
-  if (next === content) return props.node
-  return { ...props.node, content: next }
+  const code = props.node?.code ?? ''
+  const next = applyMermaidThemeToSource(code, settings.mermaidTheme)
+  if (next === code) return props.node
+  return { ...props.node, code: next }
 })
 
 const themedIsDark = computed(() =>
