@@ -12,7 +12,7 @@ import (
 
 func TestFileRuntimeRejectsEmptyMemoryWithoutHTTPError(t *testing.T) {
 	t.Parallel()
-	runtime := newFileRuntime(newFakeSparseStore())
+	runtime := newFileRuntime(newFakeStore())
 
 	_, err := runtime.Add(context.Background(), adapters.AddRequest{BotID: "bot-1"})
 	if err == nil {
@@ -28,7 +28,7 @@ func TestFileRuntimeRejectsEmptyMemoryWithoutHTTPError(t *testing.T) {
 
 func TestFileRuntimeCompactWithLLMArchivesSourceMemories(t *testing.T) {
 	t.Parallel()
-	store := newFakeSparseStore(
+	store := newFakeStore(
 		storefs.MemoryItem{ID: "bot-1:mem_1", Memory: "Ran likes green tea", CreatedAt: "2026-06-01T00:00:00Z", UpdatedAt: "2026-06-01T00:00:00Z"},
 		storefs.MemoryItem{ID: "bot-1:mem_2", Memory: "Ran likes oolong tea", CreatedAt: "2026-06-02T00:00:00Z", UpdatedAt: "2026-06-02T00:00:00Z"},
 	)

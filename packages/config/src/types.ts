@@ -10,8 +10,7 @@ export interface Config {
   apple?: AppleConfig;
   workspace?: WorkspaceConfig;
   postgres: PostgresConfig;
-  qdrant: QdrantConfig;
-  sparse: SparseConfig;
+  pgvector?: PGVectorConfig;
   agent_gateway: AgentGatewayConfig;
   supermarket: SupermarketConfig;
   web: WebConfig;
@@ -79,15 +78,8 @@ export interface PostgresConfig {
   sslmode: string;
 }
 
-export interface QdrantConfig {
-  base_url: string;
-  api_key: string;
-  collection: string;
-  timeout_seconds: number;
-}
-
-export interface SparseConfig {
-  base_url: string;
+export interface PGVectorConfig extends PostgresConfig {
+  enabled: boolean;
 }
 
 export interface AgentGatewayConfig {

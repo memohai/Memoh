@@ -412,6 +412,36 @@ type McpOauthToken struct {
 	UpdatedAt              string         `json:"updated_at"`
 }
 
+type MemoryEdge struct {
+	ID        int64   `json:"id"`
+	BotID     string  `json:"bot_id"`
+	SrcNode   string  `json:"src_node"`
+	DstNode   string  `json:"dst_node"`
+	Rel       string  `json:"rel"`
+	Weight    float64 `json:"weight"`
+	Metadata  string  `json:"metadata"`
+	CreatedAt string  `json:"created_at"`
+}
+
+type MemoryNode struct {
+	ID               string         `json:"id"`
+	BotID            string         `json:"bot_id"`
+	Body             string         `json:"body"`
+	Hash             string         `json:"hash"`
+	Layer            string         `json:"layer"`
+	FactType         string         `json:"fact_type"`
+	Subject          string         `json:"subject"`
+	Confidence       float64        `json:"confidence"`
+	Metadata         string         `json:"metadata"`
+	SourceMessageIds string         `json:"source_message_ids"`
+	ProfileRef       string         `json:"profile_ref"`
+	Topic            string         `json:"topic"`
+	CapturedAt       string         `json:"captured_at"`
+	ExpiresAt        sql.NullString `json:"expires_at"`
+	UpdatedAt        string         `json:"updated_at"`
+	CreatedAt        string         `json:"created_at"`
+}
+
 type MemoryProvider struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`

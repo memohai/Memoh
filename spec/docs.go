@@ -4746,6 +4746,53 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/memory/graph": {
+            "get": {
+                "description": "Get derived memory graph nodes and edges for a bot.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "memory"
+                ],
+                "summary": "Get memory graph",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.graphResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/memory/rebuild": {
             "post": {
                 "description": "Read memory files from the container filesystem (source of truth) and restore missing entries to memory storage",
@@ -5999,7 +6046,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Comma-separated session types to include. Defaults to user-facing types (chat,discuss,acp_agent).",
+                        "description": "Comma-separated session types to include. Defaults to user-facing types (chat,discuss,acp_agent), or subagent when parent_session_id is set.",
                         "name": "types",
                         "in": "query"
                     },
@@ -12912,19 +12959,6 @@ const docTemplate = `{
                 }
             }
         },
-        "adapters.CDFPoint": {
-            "type": "object",
-            "properties": {
-                "cumulative": {
-                    "description": "cumulative weight fraction [0.0, 1.0]",
-                    "type": "number"
-                },
-                "k": {
-                    "description": "rank position (1-based, sorted by value desc)",
-                    "type": "integer"
-                }
-            }
-        },
         "adapters.CompactResult": {
             "type": "object",
             "properties": {
@@ -12970,9 +13004,6 @@ const docTemplate = `{
                 "archive": {
                     "type": "boolean"
                 },
-                "native": {
-                    "type": "boolean"
-                },
                 "reason": {
                     "type": "string"
                 },
@@ -12992,12 +13023,6 @@ const docTemplate = `{
                 },
                 "bot_id": {
                     "type": "string"
-                },
-                "cdf_curve": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/adapters.CDFPoint"
-                    }
                 },
                 "created_at": {
                     "type": "string"
@@ -13021,12 +13046,6 @@ const docTemplate = `{
                 "score": {
                     "type": "number"
                 },
-                "top_k_buckets": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/adapters.TopKBucket"
-                    }
-                },
                 "updated_at": {
                     "type": "string"
                 }
@@ -13040,6 +13059,9 @@ const docTemplate = `{
                 },
                 "compact": {
                     "$ref": "#/definitions/adapters.MemoryCompactCapability"
+                },
+                "edge_count": {
+                    "type": "integer"
                 },
                 "encoder": {
                     "$ref": "#/definitions/adapters.HealthStatus"
@@ -13056,19 +13078,19 @@ const docTemplate = `{
                 "overview_path": {
                     "type": "string"
                 },
-                "provider_type": {
-                    "type": "string"
-                },
-                "qdrant": {
+                "pgvector": {
                     "$ref": "#/definitions/adapters.HealthStatus"
                 },
-                "qdrant_collection": {
+                "provider_type": {
                     "type": "string"
                 },
                 "source_count": {
                     "type": "integer"
                 },
                 "source_dir": {
+                    "type": "string"
+                },
+                "vector_index": {
                     "type": "string"
                 }
             }
@@ -13090,14 +13112,14 @@ const docTemplate = `{
                 "exists": {
                     "type": "boolean"
                 },
+                "health": {
+                    "$ref": "#/definitions/adapters.HealthStatus"
+                },
                 "name": {
                     "type": "string"
                 },
                 "points": {
                     "type": "integer"
-                },
-                "qdrant": {
-                    "$ref": "#/definitions/adapters.HealthStatus"
                 }
             }
         },
@@ -13263,19 +13285,6 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/adapters.MemoryItem"
                     }
-                }
-            }
-        },
-        "adapters.TopKBucket": {
-            "type": "object",
-            "properties": {
-                "index": {
-                    "description": "sparse dimension index (term hash)",
-                    "type": "integer"
-                },
-                "value": {
-                    "description": "weight (term frequency)",
-                    "type": "number"
                 }
             }
         },
@@ -16903,6 +16912,64 @@ const docTemplate = `{
                 },
                 "revision": {
                     "type": "string"
+                }
+            }
+        },
+        "handlers.graphEdge": {
+            "type": "object",
+            "properties": {
+                "rel": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.graphNode": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "memory": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "slug": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                },
+                "topic": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.graphResponse": {
+            "type": "object",
+            "properties": {
+                "edges": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.graphEdge"
+                    }
+                },
+                "nodes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.graphNode"
+                    }
                 }
             }
         },

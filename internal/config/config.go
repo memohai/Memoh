@@ -26,10 +26,13 @@ const (
 	DefaultPGUser                = "postgres"
 	DefaultPGDatabase            = "memoh"
 	DefaultPGSSLMode             = "disable"
+	DefaultPGVectorHost          = "127.0.0.1"
+	DefaultPGVectorPort          = 5432
+	DefaultPGVectorUser          = "memoh"
+	DefaultPGVectorDatabase      = "memoh_vector"
+	DefaultPGVectorSSLMode       = "disable"
 	DefaultSQLitePath            = "data/memoh.db"
 	DefaultSQLiteBusyMS          = 5000
-	DefaultQdrantURL             = "http://127.0.0.1:6334"
-	DefaultQdrantCollection      = "memory"
 	DefaultRuntimeDir            = "/opt/memoh/runtime"
 	DefaultWorkspaceImage        = "memohai/workspace:debian"
 	DefaultBaseImage             = DefaultWorkspaceImage
@@ -60,9 +63,8 @@ type Config struct {
 	Local         LocalConfig         `toml:"local"`
 	Workspace     WorkspaceConfig     `toml:"workspace"`
 	Postgres      PostgresConfig      `toml:"postgres"`
+	PGVector      PGVectorConfig      `toml:"pgvector"`
 	SQLite        SQLiteConfig        `toml:"sqlite"`
-	Qdrant        QdrantConfig        `toml:"qdrant"`
-	Sparse        SparseConfig        `toml:"sparse"`
 	Registry      RegistryConfig      `toml:"registry"`
 	Supermarket   SupermarketConfig   `toml:"supermarket"`
 	OAuthClients  OAuthClientsConfig  `toml:"oauth_clients"`
@@ -352,6 +354,47 @@ type PostgresConfig struct {
 	SSLMode  string `toml:"sslmode"`
 }
 
+type PGVectorConfig struct {
+	Enabled  bool   `toml:"enabled"`
+	Host     string `toml:"host"`
+	Port     int    `toml:"port"`
+	User     string `toml:"user"`
+	Password string `toml:"password" json:"-"`
+	Database string `toml:"database"`
+	SSLMode  string `toml:"sslmode"`
+}
+
+func (c PGVectorConfig) PostgresConfig() PostgresConfig {
+	host := strings.TrimSpace(c.Host)
+	if host == "" {
+		host = DefaultPGVectorHost
+	}
+	port := c.Port
+	if port == 0 {
+		port = DefaultPGVectorPort
+	}
+	user := strings.TrimSpace(c.User)
+	if user == "" {
+		user = DefaultPGVectorUser
+	}
+	database := strings.TrimSpace(c.Database)
+	if database == "" {
+		database = DefaultPGVectorDatabase
+	}
+	sslMode := strings.TrimSpace(c.SSLMode)
+	if sslMode == "" {
+		sslMode = DefaultPGVectorSSLMode
+	}
+	return PostgresConfig{
+		Host:     host,
+		Port:     port,
+		User:     user,
+		Password: c.Password,
+		Database: database,
+		SSLMode:  sslMode,
+	}
+}
+
 type SQLiteConfig struct {
 	Path          string `toml:"path"`
 	DSN           string `toml:"dsn"`
@@ -364,16 +407,6 @@ func (c SQLiteConfig) PathOrDefault() string {
 		return absPath(path)
 	}
 	return absPath(DefaultSQLitePath)
-}
-
-type QdrantConfig struct {
-	BaseURL        string `toml:"base_url"`
-	APIKey         string `toml:"api_key" json:"-"`
-	TimeoutSeconds int    `toml:"timeout_seconds"`
-}
-
-type SparseConfig struct {
-	BaseURL string `toml:"base_url"`
 }
 
 const DefaultProvidersDir = "conf/providers"
@@ -465,6 +498,13 @@ func Load(path string) (Config, error) {
 			User:     DefaultPGUser,
 			Database: DefaultPGDatabase,
 			SSLMode:  DefaultPGSSLMode,
+		},
+		PGVector: PGVectorConfig{
+			Host:     DefaultPGVectorHost,
+			Port:     DefaultPGVectorPort,
+			User:     DefaultPGVectorUser,
+			Database: DefaultPGVectorDatabase,
+			SSLMode:  DefaultPGVectorSSLMode,
 		},
 		SQLite: SQLiteConfig{
 			Path:          DefaultSQLitePath,

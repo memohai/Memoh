@@ -6,12 +6,14 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
+	"github.com/memohai/memoh/internal/memory/migrate"
 	"github.com/memohai/memoh/internal/settings"
 )
 
@@ -122,6 +124,7 @@ func (h *MemoryHandler) Register(e *echo.Echo) {
 	chatGroup.GET("/status", h.ChatStatus)
 	chatGroup.GET("", h.ChatGetAll)
 	chatGroup.GET("/usage", h.ChatUsage)
+	chatGroup.GET("/graph", h.ChatGraph)
 	chatGroup.DELETE("", h.ChatDelete)
 	chatGroup.DELETE("/:memory_id", h.ChatDeleteOne)
 }
@@ -307,7 +310,192 @@ func (h *MemoryHandler) ChatGetAll(c echo.Context) error {
 	return c.JSON(http.StatusOK, memprovider.SearchResponse{Results: allResults})
 }
 
-// ChatDelete godoc
+// graphNode is one node in the memory graph view.
+type graphNode struct {
+	ID       string         `json:"id"`
+	Label    string         `json:"label"`
+	Slug     string         `json:"slug"`
+	Memory   string         `json:"memory"`
+	Subject  string         `json:"subject,omitempty"`
+	Topic    string         `json:"topic,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+// graphEdge is one edge in the memory graph view.
+type graphEdge struct {
+	Source string `json:"source"`
+	Target string `json:"target"`
+	Rel    string `json:"rel"`
+}
+
+// graphResponse is the payload for the memory graph view.
+type graphResponse struct {
+	Nodes []graphNode `json:"nodes"`
+	Edges []graphEdge `json:"edges"`
+}
+
+// ChatGraph returns the memory graph (nodes + derived edges) for the wiki
+// visualization. The edge derivation uses the same migrate.PlanFromNodes path as
+// the graph runtime/store, so the API view and recall graph do not drift.
+//
+// @Summary Get memory graph
+// @Description Get derived memory graph nodes and edges for a bot.
+// @Tags memory
+// @Produce json
+// @Param bot_id path string true "Bot ID"
+// @Success 200 {object} graphResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
+// @Router /bots/{bot_id}/memory/graph [get].
+func (h *MemoryHandler) ChatGraph(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	scopes, err := h.resolveEnabledScopes(botID)
+	if err != nil {
+		return err
+	}
+	provider, checkErr := h.checkService(c.Request().Context(), botID)
+	if checkErr != nil {
+		return checkErr
+	}
+
+	var allResults []memprovider.MemoryItem
+	for _, scope := range scopes {
+		resp, getAllErr := provider.GetAll(c.Request().Context(), memprovider.GetAllRequest{
+			Filters: buildNamespaceFilters(scope.Namespace, scope.ScopeID, nil),
+			NoStats: true,
+		})
+		if getAllErr != nil {
+			continue
+		}
+		allResults = append(allResults, resp.Results...)
+	}
+	allResults = deduplicateMemoryItems(allResults)
+
+	nodes := make([]graphNode, 0, len(allResults))
+	nodeSpecs := make([]migrate.NodeSpec, 0, len(allResults))
+	for _, item := range allResults {
+		label := item.Memory
+		if len(label) > 40 {
+			label = label[:37] + "..."
+		}
+		subject := ""
+		topic := ""
+		if item.Metadata != nil {
+			if s, ok := item.Metadata["subject"].(string); ok {
+				subject = s
+			}
+			if t, ok := item.Metadata["topic"].(string); ok {
+				topic = t
+			}
+		}
+		slug := migrate.NodeSlug(item.ID, subject, topic)
+		nodes = append(nodes, graphNode{
+			ID:       item.ID,
+			Label:    label,
+			Slug:     slug,
+			Memory:   item.Memory,
+			Subject:  subject,
+			Topic:    topic,
+			Metadata: item.Metadata,
+		})
+		nodeSpecs = append(nodeSpecs, memoryItemToGraphNodeSpec(botID, item))
+	}
+
+	derivedEdges := migrate.PlanFromNodes(nodeSpecs)
+	edges := make([]graphEdge, 0, len(derivedEdges))
+	for _, edge := range derivedEdges {
+		edges = append(edges, graphEdge{
+			Source: edge.SrcNode,
+			Target: edge.DstNode,
+			Rel:    string(edge.Rel),
+		})
+	}
+
+	return c.JSON(http.StatusOK, graphResponse{Nodes: nodes, Edges: edges})
+}
+
+func memoryItemToGraphNodeSpec(botID string, item memprovider.MemoryItem) migrate.NodeSpec {
+	metadata := item.Metadata
+	layer := migrate.LayerNote
+	if raw, ok := metadata["layer"].(string); ok && strings.TrimSpace(raw) != "" {
+		switch migrate.MemoryLayer(strings.ToLower(strings.TrimSpace(raw))) {
+		case migrate.LayerPreference, migrate.LayerIdentity, migrate.LayerContext,
+			migrate.LayerExperience, migrate.LayerActivity, migrate.LayerPersona, migrate.LayerNote:
+			layer = migrate.MemoryLayer(strings.TrimSpace(raw))
+		}
+	}
+	profileRef := graphMetadataString(metadata, "profile_ref")
+	if profileRef == "" {
+		profileRef = graphMetadataString(metadata, "profile_user_id")
+	}
+	return migrate.NodeSpec{
+		ID:         strings.TrimSpace(item.ID),
+		BotID:      botID,
+		Body:       strings.TrimSpace(item.Memory),
+		Hash:       strings.TrimSpace(item.Hash),
+		Layer:      layer,
+		Subject:    graphMetadataString(metadata, "subject"),
+		Confidence: graphMetadataFloat(metadata, "confidence", 0.5),
+		Metadata:   metadata,
+		ProfileRef: profileRef,
+		Topic:      graphMetadataString(metadata, "topic"),
+		CapturedAt: graphParseTime(item.CreatedAt),
+	}
+}
+
+func graphMetadataString(m map[string]any, key string) string {
+	if m == nil {
+		return ""
+	}
+	v, ok := m[key]
+	if !ok || v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return strings.TrimSpace(fmt.Sprint(v))
+}
+
+func graphMetadataFloat(m map[string]any, key string, def float32) float32 {
+	if m == nil {
+		return def
+	}
+	v, ok := m[key]
+	if !ok || v == nil {
+		return def
+	}
+	switch n := v.(type) {
+	case float64:
+		f := float32(n)
+		if f >= 0 && f <= 1 {
+			return f
+		}
+	case float32:
+		if n >= 0 && n <= 1 {
+			return n
+		}
+	}
+	return def
+}
+
+func graphParseTime(s string) time.Time {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Now().UTC()
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05Z", "2006-01-02 15:04:05", "2006-01-02"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UTC()
+		}
+	}
+	return time.Now().UTC()
+}
+
 // @Summary Delete memories
 // @Description Delete specific memories by IDs, or delete all memories if no IDs are provided
 // @Tags memory

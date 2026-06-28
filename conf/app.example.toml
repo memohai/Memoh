@@ -144,6 +144,17 @@ password = "memoh123"
 database = "memoh"
 sslmode = "disable"
 
+[pgvector]
+# Optional auxiliary Postgres service with the pgvector extension installed.
+# Leave disabled for SQLite/Local deployments.
+enabled = false
+host = "127.0.0.1"
+port = 5432
+user = "memoh"
+password = "memoh123"
+database = "memoh_vector"
+sslmode = "disable"
+
 [sqlite]
 # Used only when [database].driver = "sqlite".
 # Relative paths are resolved from the process working directory. For Docker,
@@ -154,14 +165,6 @@ path = "data/memoh.db"
 wal = true
 # How long SQLite waits for a locked database before returning "database is locked".
 busy_timeout_ms = 5000
-
-[qdrant]
-base_url = "http://127.0.0.1:6334"
-api_key = ""
-timeout_seconds = 10
-
-[sparse]
-base_url = "http://127.0.0.1:8085"
 
 [registry]
 providers_dir = "conf/providers"

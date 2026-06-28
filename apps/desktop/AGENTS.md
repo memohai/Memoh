@@ -8,8 +8,8 @@ styles from `@memohai/web` and assembles its own Electron shell on top.
 
 Desktop is also the native local-client boundary. The main process manages a
 local `memoh-server` on `127.0.0.1:18731`, prepares SQLite/local-workspace
-configuration, starts embedded Qdrant, owns tray reopen/quit behavior, and
-bundles the CLI, bridge runtime, provider templates, Qdrant, and display media
+configuration, owns tray reopen/quit behavior, and bundles the CLI, bridge
+runtime, provider templates, and display media
 runtime resources. Do not describe it as only a Web shell.
 
 The desktop renderer starts at `src/renderer/src/main.ts` from
@@ -29,7 +29,7 @@ stay intact.
 | Vue ecosystem | Vue 3, Vue Router 4 (`createMemoryHistory`), Pinia 3, `@pinia/colada`, vue-i18n, vue-sonner |
 | Reused workspace packages | `@memohai/web`, `@memohai/ui`, `@memohai/sdk`, `@memohai/icon`, `@memohai/config` |
 | Preload helpers | `@electron-toolkit/preload`, `@electron-toolkit/utils` |
-| Local runtime | Bundled Go `memoh-server`, desktop CLI, bridge runtime/templates, provider templates, SQLite config, embedded Qdrant |
+| Local runtime | Bundled Go `memoh-server`, desktop CLI, bridge runtime/templates, provider templates, SQLite config |
 | Display media runtime | GStreamer bundle where supported (currently macOS universal; optional Windows bundle via `GSTREAMER_ENABLE_WINDOWS_BUNDLE`) |
 | Icon pipeline | `sharp` (PNG / resize) + `png-to-ico` (Windows) + `iconutil` (macOS, system tool) |
 | Type checking | TypeScript ~5.9 strict + `vue-tsc` for the renderer |
@@ -51,8 +51,7 @@ apps/desktop/
 │   ├── main/
 │   │   ├── index.ts                # Main process: renderer bootstrap, tray, IPC, app lifecycle
 │   │   ├── local-server.ts         # Managed local server startup, config, migrations, OAuth callback proxy
-│   │   ├── qdrant.ts               # Embedded Qdrant process, ports, pid, config, storage
-│   │   ├── daemon.ts               # Shared pid/liveness helpers for server and Qdrant
+│   │   ├── daemon.ts               # Shared pid/liveness helpers for the local server
 │   │   ├── cli-integration.ts      # PATH install/uninstall/status for bundled CLI
 │   │   ├── gstreamer.ts            # Packaged display media runtime environment
 │   │   └── paths.ts                # Repo/resource/userData path helpers
@@ -77,7 +76,6 @@ apps/desktop/
 │   ├── build.mjs                   # Prepares runtime targets, then runs electron-vite/electron-builder
 │   ├── install-icon-tools.mjs      # Installs isolated icon generator dependencies
 │   ├── prepare-local-server.mjs    # Builds server/CLI/bridge and copies config/providers
-│   ├── prepare-qdrant.mjs          # Downloads/prepares Qdrant per release target
 │   └── prepare-gstreamer.mjs       # Downloads/prepares display media runtime where supported
 │
 ├── icon-tools/
@@ -93,7 +91,6 @@ apps/desktop/
 │   ├── runtime/                    # Linux bridge binary + templates for bot workspaces
 │   ├── config/                     # app.local.toml template
 │   ├── providers/                  # Provider registry YAML templates
-│   ├── qdrant/                     # Qdrant binaries by target
 │   └── gstreamer/                  # Display media runtime by target
 │
 ├── build/                          # Packager input assets (gitignored at root, re-included here)
@@ -181,7 +178,7 @@ but desktop's renderer typecheck only sees the stubbed surface.
 - The main process creates the renderer, tray, native menu, and IPC handlers.
 - Renderer code stays browser-grade through `webPreferences` (sandbox: false, contextIsolation: true, nodeIntegration: false). Anything that needs Node/Electron APIs must go through IPC.
 - `createAppTray()` installs the system tray. Clicking the tray opens/focuses chat; `Quit Memoh` calls the normal `app.quit()` path.
-- `before-quit` is the authoritative shutdown path: it closes the provider OAuth callback proxy, stops the managed local server, stops embedded Qdrant, destroys the tray, and then exits.
+- `before-quit` is the authoritative shutdown path: it closes the provider OAuth callback proxy, stops the managed local server, destroys the tray, and then exits.
 
 ### IPC surface (`src/preload/index.ts`)
 
@@ -276,7 +273,7 @@ listens on the port configured in `config.toml` (default 8082) and proxies
 `/api/*` to the backend's `getBaseUrl(config)`. `MEMOH_WEB_PROXY_TARGET` env
 var overrides the proxy target.
 
-## Local Server, Qdrant, and Workspace Runtime
+## Local Server and Workspace Runtime
 
 Desktop starts its own local backend instead of depending on an external
 deploy/server stack. `src/main/local-server.ts` is the startup gate:
@@ -284,8 +281,7 @@ deploy/server stack. `src/main/local-server.ts` is the startup gate:
 1. In dev, it builds `./cmd/agent` into `apps/desktop/local-server/bin/`.
    In packaged apps, it resolves `Resources/server/memoh-server`.
 2. It renders `userData/config.toml` from `resources/config/app.local.toml`,
-   setting SQLite, local workspace, Docker socket, registry providers, and
-   the embedded Qdrant gRPC URL.
+   setting SQLite, local workspace, Docker socket, and registry providers.
 3. It syncs or prepares the bridge runtime/templates, runs `migrate up`,
    starts `memoh-server serve` on `127.0.0.1:18731`, writes
    `local-server.pid.json`, and appends to `local-server.log`.
@@ -293,17 +289,11 @@ deploy/server stack. `src/main/local-server.ts` is the startup gate:
    `desktop:auth-token` over IPC so renderer API setup can target the
    managed local server.
 
-`src/main/qdrant.ts` owns embedded Qdrant. It stores runtime state under
-`userData/qdrant/` (`ports.json`, `qdrant.pid.json`, `config.yaml`,
-`qdrant.log`, `storage/`), probes `/healthz`, reuses a healthy managed
-process when possible, and selects new ports when persisted ports collide.
-
 `scripts/build.mjs` prepares platform-specific resources before
-`electron-builder`: Qdrant for the target platform, GStreamer for supported
-display targets, and local server resources with
+`electron-builder`: GStreamer for supported display targets and local server resources with
 `MEMOH_DESKTOP_BUNDLE_TARGET`. `electron-builder.yml` then packages
-`server`, `cli`, `runtime`, `config`, `providers`, `qdrant`, and
-`gstreamer` through `extraResources`.
+`server`, `cli`, `runtime`, `config`, `providers`, and `gstreamer` through
+`extraResources`.
 
 Desktop local workspaces are trusted host folders configured through
 `[local]` in `app.local.toml`; they are not container-isolated. Container
@@ -363,9 +353,6 @@ the same keyword must run in only one place at a time (it is one database).
 
 Known limitations (v1, dev-only):
 
-- Embedded Qdrant is shared across slots. It only cross-contaminates if you
-  duplicate a DB so two slots use identical bot ids and both write memory;
-  quitting one running instance stops the shared Qdrant for the others.
 - The provider OAuth callback proxy binds a single fixed port (1455); only
   one running slot gets it.
 - The ACP tools proxy binds a single fixed port (18732), shared across slots.
@@ -438,9 +425,9 @@ electron-builder so the runtime icon is dereferenceable from disk.
 
 | Command | Output | Notes |
 |---------|--------|-------|
-| `pnpm --filter @memohai/desktop dev` | dev server + main process watch | Prepares current Qdrant/GStreamer resources first; renderer hot-reload; main needs window restart on changes |
+| `pnpm --filter @memohai/desktop dev` | dev server + main process watch | Prepares current GStreamer resources first; renderer hot-reload; main needs window restart on changes |
 | `pnpm --filter @memohai/desktop preview` (or `mise run desktop:preview`) | production renderer bundle + main process | Builds `out/` then runs `electron-vite preview` — no Vite dev server, no HMR, no `optimizeDeps`. Closest "what a user sees" frontend while still backed by the local dev Go server (built from source because `!app.isPackaged`). Use to reproduce/triage prod-only rendering issues without a full package build |
-| `pnpm --filter @memohai/desktop build` | `dist/` installers (current platform) | Runs `scripts/build.mjs`: prepare Qdrant/GStreamer/local-server resources, electron-vite build, then electron-builder |
+| `pnpm --filter @memohai/desktop build` | `dist/` installers (current platform) | Runs `scripts/build.mjs`: prepare GStreamer/local-server resources, electron-vite build, then electron-builder |
 | `pnpm --filter @memohai/desktop build:dir` | `dist/<platform>-unpacked/` | Skip installer; smoke-test packaged app |
 | `pnpm --filter @memohai/desktop build:mac` | DMG (arm64 + x64) | Requires darwin |
 | `pnpm --filter @memohai/desktop build:linux:x64` | AppImage + deb + rpm | x64 |
@@ -471,7 +458,6 @@ Memoh Local.app/Contents/Resources/
 ├── runtime/                # bridge binary + templates
 ├── config/app.local.toml    # local desktop server config template
 ├── providers/               # provider registry YAML templates
-├── qdrant/<target>/qdrant   # embedded Qdrant binary for packaged target
 ├── gstreamer/<target>/...   # display media runtime where bundled
 └── …
 ```
@@ -499,11 +485,6 @@ macOS — see `productName` pinning below):
 | `config.toml` | desktop main (renders from `resources/config/app.local.toml` on first launch) | both — server's `CONFIG_PATH`, CLI's `[admin]` source |
 | `local-server.pid.json` | whoever spawned the server (desktop or CLI) | both — graceful stop / liveness probe |
 | `local-server.log` | server itself (stdout/stderr append) | both — `memoh logs`, desktop log dump |
-| `qdrant/ports.json` | desktop main | desktop main — persisted HTTP/gRPC ports |
-| `qdrant/config.yaml` | desktop main | embedded Qdrant process |
-| `qdrant/qdrant.pid.json` | desktop main (CLI never spawns qdrant on its own) | desktop main only |
-| `qdrant/qdrant.log` | embedded Qdrant | desktop diagnostics |
-| `qdrant/storage/` | embedded Qdrant | local memory vector storage |
 | `cli-token.json` | CLI (after self-login against `[admin]`) | CLI only |
 | `cli-prefs.json` | desktop main (records `dontAskAgain` for the install prompt) | desktop main only |
 

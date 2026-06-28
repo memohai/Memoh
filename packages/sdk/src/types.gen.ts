@@ -187,17 +187,6 @@ export type AcpprofilePublicProfile = {
     supported_backends?: Array<string>;
 };
 
-export type AdaptersCdfPoint = {
-    /**
-     * cumulative weight fraction [0.0, 1.0]
-     */
-    cumulative?: number;
-    /**
-     * rank position (1-based, sorted by value desc)
-     */
-    k?: number;
-};
-
 export type AdaptersCompactResult = {
     after_count?: number;
     before_count?: number;
@@ -216,7 +205,6 @@ export type AdaptersHealthStatus = {
 
 export type AdaptersMemoryCompactCapability = {
     archive?: boolean;
-    native?: boolean;
     reason?: string;
     rebuild_index?: boolean;
     semantic?: boolean;
@@ -225,7 +213,6 @@ export type AdaptersMemoryCompactCapability = {
 export type AdaptersMemoryItem = {
     agent_id?: string;
     bot_id?: string;
-    cdf_curve?: Array<AdaptersCdfPoint>;
     created_at?: string;
     hash?: string;
     id?: string;
@@ -235,23 +222,23 @@ export type AdaptersMemoryItem = {
     };
     run_id?: string;
     score?: number;
-    top_k_buckets?: Array<AdaptersTopKBucket>;
     updated_at?: string;
 };
 
 export type AdaptersMemoryStatusResponse = {
     can_manual_sync?: boolean;
     compact?: AdaptersMemoryCompactCapability;
+    edge_count?: number;
     encoder?: AdaptersHealthStatus;
     indexed_count?: number;
     markdown_file_count?: number;
     memory_mode?: string;
     overview_path?: string;
+    pgvector?: AdaptersHealthStatus;
     provider_type?: string;
-    qdrant?: AdaptersHealthStatus;
-    qdrant_collection?: string;
     source_count?: number;
     source_dir?: string;
+    vector_index?: string;
 };
 
 export type AdaptersMessage = {
@@ -261,9 +248,9 @@ export type AdaptersMessage = {
 
 export type AdaptersProviderCollectionStatus = {
     exists?: boolean;
+    health?: AdaptersHealthStatus;
     name?: string;
     points?: number;
-    qdrant?: AdaptersHealthStatus;
 };
 
 export type AdaptersProviderConfigSchema = {
@@ -333,17 +320,6 @@ export type AdaptersRebuildResult = {
 export type AdaptersSearchResponse = {
     relations?: Array<unknown>;
     results?: Array<AdaptersMemoryItem>;
-};
-
-export type AdaptersTopKBucket = {
-    /**
-     * sparse dimension index (term hash)
-     */
-    index?: number;
-    /**
-     * weight (term frequency)
-     */
-    value?: number;
 };
 
 export type AdaptersUsageResponse = {
@@ -1796,6 +1772,29 @@ export type HandlersEmailOAuthStatusResponse = {
 export type HandlersFsOpResponse = {
     ok?: boolean;
     revision?: string;
+};
+
+export type HandlersGraphEdge = {
+    rel?: string;
+    source?: string;
+    target?: string;
+};
+
+export type HandlersGraphNode = {
+    id?: string;
+    label?: string;
+    memory?: string;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    slug?: string;
+    subject?: string;
+    topic?: string;
+};
+
+export type HandlersGraphResponse = {
+    edges?: Array<HandlersGraphEdge>;
+    nodes?: Array<HandlersGraphNode>;
 };
 
 export type HandlersListSessionsResponse = {
@@ -6498,6 +6497,44 @@ export type PostBotsByBotIdMemoryCompactResponses = {
 
 export type PostBotsByBotIdMemoryCompactResponse = PostBotsByBotIdMemoryCompactResponses[keyof PostBotsByBotIdMemoryCompactResponses];
 
+export type GetBotsByBotIdMemoryGraphData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/memory/graph';
+};
+
+export type GetBotsByBotIdMemoryGraphErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdMemoryGraphError = GetBotsByBotIdMemoryGraphErrors[keyof GetBotsByBotIdMemoryGraphErrors];
+
+export type GetBotsByBotIdMemoryGraphResponses = {
+    /**
+     * OK
+     */
+    200: HandlersGraphResponse;
+};
+
+export type GetBotsByBotIdMemoryGraphResponse = GetBotsByBotIdMemoryGraphResponses[keyof GetBotsByBotIdMemoryGraphResponses];
+
 export type PostBotsByBotIdMemoryRebuildData = {
     body?: never;
     path: {
@@ -7518,7 +7555,7 @@ export type GetBotsByBotIdSessionsData = {
     };
     query?: {
         /**
-         * Comma-separated session types to include. Defaults to user-facing types (chat,discuss,acp_agent).
+         * Comma-separated session types to include. Defaults to user-facing types (chat,discuss,acp_agent), or subagent when parent_session_id is set.
          */
         types?: string;
         /**

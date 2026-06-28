@@ -1,7 +1,7 @@
 // Package local resolves the on-disk layout shared between the Memoh
 // desktop Electron shell (apps/desktop) and the bundled CLI binary
 // (cmd/memoh). The two cooperate purely through files under the same
-// userData directory: config.toml, local-server.pid.json, qdrant/, etc.
+// userData directory: config.toml, local-server.pid.json, CLI prefs, etc.
 //
 // Path rules mirror Electron's app.getPath('userData') with the local
 // desktop product name pinned to "Memoh Local" in apps/desktop.
@@ -142,25 +142,6 @@ func PrefsPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "cli-prefs.json"), nil
-}
-
-// QdrantPidPath returns the path to the embedded qdrant pid file.
-func QdrantPidPath() (string, error) {
-	dir, err := UserDataDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "qdrant", "qdrant.pid.json"), nil
-}
-
-// QdrantPortsPath returns the path to the json file recording the
-// dynamically-assigned qdrant ports.
-func QdrantPortsPath() (string, error) {
-	dir, err := UserDataDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "qdrant", "ports.json"), nil
 }
 
 // BundledServerBinary returns the absolute path to the memoh-server

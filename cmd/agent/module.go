@@ -57,6 +57,7 @@ func options() fx.Option {
 			provideSQLiteStore,
 			provideDBQueries,
 			provideAccountStore,
+			provideWikiStore,
 			provideWorkspaceManager,
 			provideBridgeProvider,
 			providePluginBridgeProvider,

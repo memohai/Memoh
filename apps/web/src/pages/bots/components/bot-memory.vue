@@ -158,6 +158,13 @@
       </div>
     </section>
 
+    <!-- Memory graph view: see the shape of the wiki — hubs, clusters, orphans.
+         Mirrors the LLM Wiki pattern where cross-references are compiled and
+         browsable, not re-derived on every query. -->
+    <section class="mb-8">
+      <MemoryGraph :bot-id="props.botId" />
+    </section>
+
     <!-- Loading skeleton: matches the card shape so the swap does not jump. -->
     <div
       v-if="loading && memories.length === 0"
@@ -312,7 +319,7 @@
 import { Brain, CalendarDays, Pencil, Plus, Trash2 } from 'lucide-vue-next'
 import type { DateRange } from 'reka-ui'
 import { DateFormatter, getLocalTimeZone, today } from '@internationalized/date'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   Button,
   Spinner,
@@ -364,6 +371,7 @@ import { formatRelativeTime } from '@/utils/date-time'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import PageShell from '@/components/page-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
+import MemoryGraph from './memory-graph.vue'
 import { useMemoryGroups } from './use-memory-groups'
 
 interface MemoryItem {
@@ -419,10 +427,16 @@ const compactDecayDays = computed(() => {
 })
 
 async function loadMemories() {
+  const botId = props.botId.trim()
+  if (!botId) {
+    memories.value = []
+    return
+  }
+
   loading.value = true
   try {
     const { data } = await getBotsByBotIdMemory({
-      path: { bot_id: props.botId },
+      path: { bot_id: botId },
       throwOnError: true,
     })
     memories.value = (data.results ?? [])
@@ -446,9 +460,16 @@ async function loadMemories() {
 }
 
 async function loadMemoryStatus() {
+  const botId = props.botId.trim()
+  if (!botId) {
+    memoryStatus.value = null
+    memoryStatusError.value = ''
+    return
+  }
+
   try {
     const { data } = await getBotsByBotIdMemoryStatus({
-      path: { bot_id: props.botId },
+      path: { bot_id: botId },
       throwOnError: true,
     })
     memoryStatus.value = data ?? null
@@ -545,14 +566,9 @@ async function handleCompact() {
   }
 }
 
-onMounted(() => {
-  loadMemories()
-  loadMemoryStatus()
-})
-
 watch(() => props.botId, () => {
   memories.value = []
-  loadMemories()
-  loadMemoryStatus()
-})
+  void loadMemories()
+  void loadMemoryStatus()
+}, { immediate: true })
 </script>

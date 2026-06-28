@@ -78,6 +78,17 @@ password = "memoh123"
 database = "memoh"
 sslmode = "disable"
 
+## pgvector auxiliary index database. The main Postgres service remains the
+## relational source of truth; this separate service stores semantic seed vectors.
+[pgvector]
+enabled = true
+host = "pgvector"
+port = 5432
+user = "memoh"
+password = "memoh123"
+database = "memoh_vector"
+sslmode = "disable"
+
 [sqlite]
 # Used only when [database].driver = "sqlite".
 # This path is inside the server and migrate containers and is backed by the
@@ -87,15 +98,6 @@ path = "/opt/memoh/data/memoh.db"
 wal = true
 # Wait up to this many milliseconds when another connection holds a write lock.
 busy_timeout_ms = 5000
-
-## Qdrant configuration
-[qdrant]
-base_url = "http://qdrant:6334"
-api_key = ""
-timeout_seconds = 10
-
-[sparse]
-base_url = "http://sparse:8085"
 
 [registry]
 providers_dir = "conf/providers"

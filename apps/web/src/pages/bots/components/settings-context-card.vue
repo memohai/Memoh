@@ -126,7 +126,19 @@
 
           <div class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[4.375rem]">
             <p class="text-caption text-muted-foreground tracking-tight">
-              {{ $t('bots.settings.memoryIndexedEntries') }}
+              {{ selectedMemoryProviderType === 'builtin' ? $t('bots.settings.memoryGraphEdges') : $t('bots.settings.memoryIndexedEntries') }}
+            </p>
+            <p class="mt-1 text-base font-mono font-semibold text-foreground leading-none">
+              {{ selectedMemoryProviderType === 'builtin' ? (statusCardData.edge_count ?? 0) : (statusCardData.indexed_count ?? 0) }}
+            </p>
+          </div>
+
+          <div
+            v-if="showPgvectorDetails"
+            class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[4.375rem]"
+          >
+            <p class="text-caption text-muted-foreground tracking-tight">
+              {{ $t('bots.settings.memorySemanticEntries') }}
             </p>
             <p class="mt-1 text-base font-mono font-semibold text-foreground leading-none">
               {{ statusCardData.indexed_count ?? 0 }}
@@ -134,14 +146,14 @@
           </div>
 
           <div
-            v-if="showQdrantDetails"
+            v-if="showPgvectorDetails"
             class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[4.375rem] sm:col-span-1"
           >
             <p class="text-caption text-muted-foreground tracking-tight">
-              {{ $t('bots.settings.memoryQdrantCollection') }}
+              {{ $t('bots.settings.memoryVectorIndex') }}
             </p>
             <p class="mt-1 text-xs font-mono font-medium text-foreground break-all leading-snug">
-              {{ statusCardData.qdrant_collection || '-' }}
+              {{ statusCardData.vector_index || '-' }}
             </p>
           </div>
 
@@ -167,22 +179,22 @@
           </div>
 
           <div
-            v-if="showQdrantHealth"
+            v-if="showPgvectorHealth"
             class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[4.375rem]"
           >
             <p class="text-caption text-muted-foreground tracking-tight">
-              {{ $t('bots.settings.memoryQdrantHealth') }}
+              {{ $t('bots.settings.memoryPgvectorHealth') }}
             </p>
             <div class="flex items-center gap-1.5 mt-1">
               <div
                 class="size-1.5 rounded-full"
-                :class="statusCardData.qdrant?.ok ? 'bg-foreground' : 'bg-destructive'"
+                :class="statusCardData.pgvector?.ok ? 'bg-foreground' : 'bg-destructive'"
               />
               <p
                 class="text-xs font-medium leading-none"
-                :class="healthTextClass(statusCardData.qdrant?.ok)"
+                :class="healthTextClass(statusCardData.pgvector?.ok)"
               >
-                {{ healthLabel(statusCardData.qdrant?.ok, statusCardData.qdrant?.error) }}
+                {{ healthLabel(statusCardData.pgvector?.ok, statusCardData.pgvector?.error) }}
               </p>
             </div>
           </div>
@@ -241,42 +253,24 @@ const selectedBuiltinMemoryProvider = computed(() =>
 const selectedMem0MemoryProvider = computed(() =>
   selectedMemoryProvider.value?.provider === 'mem0' ? selectedMemoryProvider.value : null,
 )
-const selectedBuiltinMemoryMode = computed(() =>
-  (selectedBuiltinMemoryProvider.value?.config as Record<string, string> | undefined)?.memory_mode || 'off',
-)
 const isSelectedMemoryProviderPersisted = computed(() =>
   !!props.form.memory_provider_id && props.form.memory_provider_id === props.persistedMemoryProviderID,
 )
-const showBuiltinIndexedMemoryStatus = computed(() =>
-  selectedBuiltinMemoryMode.value === 'sparse' || selectedBuiltinMemoryMode.value === 'dense',
-)
+const showBuiltinIndexedMemoryStatus = computed(() => !!selectedBuiltinMemoryProvider.value)
 const showMemoryProviderStatusCard = computed(() =>
   showBuiltinIndexedMemoryStatus.value || !!selectedMem0MemoryProvider.value,
 )
 
-const indexedMemoryStatusTitle = computed(() =>
-  selectedMemoryProviderType.value === 'mem0'
-    ? t('bots.settings.mem0StatusTitle')
-    : selectedBuiltinMemoryMode.value === 'dense'
-    ? t('bots.settings.denseStatusTitle')
-    : t('bots.settings.sparseStatusTitle'),
-)
+const indexedMemoryStatusTitle = computed(() => {
+  if (selectedMemoryProviderType.value === 'mem0') return t('bots.settings.mem0StatusTitle')
+  return t('bots.settings.graphStatusTitle')
+})
 
 const statusCardData = computed(() => props.memoryStatus)
-const showQdrantDetails = computed(() =>
-  selectedBuiltinMemoryMode.value === 'sparse' || selectedBuiltinMemoryMode.value === 'dense',
-)
-const showEncoderHealth = computed(() =>
-  selectedBuiltinMemoryMode.value === 'sparse' || selectedBuiltinMemoryMode.value === 'dense',
-)
-const showQdrantHealth = computed(() =>
-  selectedBuiltinMemoryMode.value === 'sparse' || selectedBuiltinMemoryMode.value === 'dense',
-)
-const encoderHealthLabel = computed(() =>
-  selectedBuiltinMemoryMode.value === 'dense'
-    ? t('bots.settings.memoryDenseEmbeddingHealth')
-    : t('bots.settings.memoryEncoderHealth'),
-)
+const showPgvectorDetails = computed(() => !!statusCardData.value?.vector_index)
+const showEncoderHealth = computed(() => false)
+const showPgvectorHealth = computed(() => !!statusCardData.value?.vector_index)
+const encoderHealthLabel = computed(() => '')
 
 function healthTextClass(ok: boolean | undefined) {
   return ok ? 'text-foreground' : 'text-destructive'

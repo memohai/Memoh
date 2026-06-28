@@ -39,11 +39,6 @@ if [ "${USE_CN_MIRROR+x}" = x ]; then
 else
   USE_CN_MIRROR_SET=false
 fi
-if [ "${USE_SPARSE+x}" = x ]; then
-  USE_SPARSE_SET=true
-else
-  USE_SPARSE_SET=false
-fi
 if [ "${MEMOH_WEBHOOK_TUNNEL_MODE+x}" = x ]; then
   WEBHOOK_TUNNEL_MODE_SET=true
 else
@@ -55,8 +50,8 @@ else
   WEBHOOK_PUBLIC_BASE_SET=false
 fi
 NETWORK_NAME="${COMPOSE_PROJECT_NAME}_memoh-network"
-PROJECT_CONTAINERS="memoh-postgres memoh-migrate memoh-server memoh-web memoh-sparse memoh-qdrant memoh-webhook-tunnel"
-PROJECT_VOLUMES="${COMPOSE_PROJECT_NAME}_postgres_data ${COMPOSE_PROJECT_NAME}_containerd_data ${COMPOSE_PROJECT_NAME}_memoh_data ${COMPOSE_PROJECT_NAME}_server_cni_state ${COMPOSE_PROJECT_NAME}_qdrant_data ${COMPOSE_PROJECT_NAME}_openviking_data"
+PROJECT_CONTAINERS="memoh-postgres memoh-pgvector memoh-migrate memoh-server memoh-web memoh-webhook-tunnel"
+PROJECT_VOLUMES="${COMPOSE_PROJECT_NAME}_postgres_data ${COMPOSE_PROJECT_NAME}_pgvector_data ${COMPOSE_PROJECT_NAME}_containerd_data ${COMPOSE_PROJECT_NAME}_memoh_data ${COMPOSE_PROJECT_NAME}_server_cni_state ${COMPOSE_PROJECT_NAME}_openviking_data"
 
 EXISTING_CONFIG_SOURCE=""
 EXISTING_ENV_SOURCE=""
@@ -258,6 +253,34 @@ set_toml_string_value() {
   fi
 }
 
+set_toml_bool_value() {
+  file="$1"
+  section="$2"
+  key="$3"
+  value="$4"
+  tmp="${file}.tmp.$$"
+  if TOML_VALUE="$value" awk -v target_section="[$section]" -v target_key="$key" '
+    BEGIN {
+      target_value = ENVIRON["TOML_VALUE"]
+    }
+    /^\[[^]]+\]/ {
+      in_section = ($0 == target_section)
+    }
+    in_section && $0 ~ "^[[:space:]]*" target_key "[[:space:]]*=" {
+      indent = $0
+      sub(/[^[:space:]].*/, "", indent)
+      print indent target_key " = " target_value
+      next
+    }
+    { print }
+  ' "$file" > "$tmp"; then
+    mv "$tmp" "$file"
+  else
+    rm -f "$tmp"
+    return 1
+  fi
+}
+
 write_env_value() {
   key="$1"
   value=$(printf '%s' "$2" | sed "s/'/\\\\'/g")
@@ -374,11 +397,6 @@ load_existing_settings() {
   fi
 
   if [ -n "$EXISTING_ENV_SOURCE" ]; then
-    if [ "$USE_SPARSE_SET" = false ]; then
-      value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "USE_SPARSE" || true)
-      [ -n "$value" ] && USE_SPARSE="$value"
-    fi
-
     value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "POSTGRES_PASSWORD" || true)
     [ -n "$value" ] && PG_PASS="$value"
 
@@ -584,7 +602,6 @@ PG_PASS="memoh123"
 WORKSPACE="$WORKSPACE_DEFAULT"
 MEMOH_DATA_DIR="$MEMOH_DATA_DIR_DEFAULT"
 USE_CN_MIRROR="${USE_CN_MIRROR:-false}"
-USE_SPARSE="${USE_SPARSE:-false}"
 
 if [ "$SILENT" = false ]; then
   echo "Configure Memoh (press Enter to use defaults):" > /dev/tty
@@ -686,13 +703,6 @@ if [ "$SILENT" = false ] && [ "$INSTALL_MODE" != "upgrade" ]; then
   echo "  Workspace backend: containerd (Docker Compose default; starts an embedded containerd inside memoh-server)" > /dev/tty
   echo "  Other backends such as docker and apple are configured manually in config.toml." > /dev/tty
 
-  printf "  Enable sparse memory service? [%s]: " "$( [ "$USE_SPARSE" = true ] && printf 'Y/n' || printf 'y/N' )" > /dev/tty
-  read -r input < /dev/tty || true
-  case "$input" in
-    y|Y|yes|YES) USE_SPARSE=true ;;
-    n|N|no|NO) USE_SPARSE=false ;;
-  esac
-
   echo "" > /dev/tty
 elif [ "$INSTALL_MODE" = "upgrade" ]; then
   echo "${GREEN}✓ Upgrade mode: reusing existing configuration and database credentials${NC}"
@@ -751,12 +761,10 @@ if [ "$MEMOH_DOCKER_VERSION" != "latest" ]; then
     sed -i.bak "s|memohai/server:latest|memohai/server:${MEMOH_DOCKER_VERSION}|g" "$COMPOSE_FILE_NAME"
     sed -i.bak "s|memohai/agent:latest|memohai/agent:${MEMOH_DOCKER_VERSION}|g" "$COMPOSE_FILE_NAME"
     sed -i.bak "s|memohai/web:latest|memohai/web:${MEMOH_DOCKER_VERSION}|g" "$COMPOSE_FILE_NAME"
-    sed -i.bak "s|memohai/sparse:latest|memohai/sparse:${MEMOH_DOCKER_VERSION}|g" "$COMPOSE_FILE_NAME"
     rm -f "${COMPOSE_FILE_NAME}.bak"
     if [ "$USE_CN_MIRROR" = true ]; then
       sed -i.bak "s|memoh.cn/memohai/server:latest|memoh.cn/memohai/server:${MEMOH_DOCKER_VERSION}|g" "$CN_COMPOSE_FILE_NAME"
       sed -i.bak "s|memoh.cn/memohai/web:latest|memoh.cn/memohai/web:${MEMOH_DOCKER_VERSION}|g" "$CN_COMPOSE_FILE_NAME"
-      sed -i.bak "s|memoh.cn/memohai/sparse:latest|memoh.cn/memohai/sparse:${MEMOH_DOCKER_VERSION}|g" "$CN_COMPOSE_FILE_NAME"
       rm -f "${CN_COMPOSE_FILE_NAME}.bak"
     fi
     echo "${GREEN}✓ Docker images pinned to ${MEMOH_DOCKER_VERSION}${NC}"
@@ -774,6 +782,10 @@ else
   set_toml_string_value config.toml "database" "driver" "$DATABASE_DRIVER"
   set_toml_string_value config.toml "container" "backend" "$CONTAINER_BACKEND"
   set_toml_string_value config.toml "postgres" "password" "$PG_PASS"
+  set_toml_string_value config.toml "pgvector" "password" "$PG_PASS"
+  if [ "$DATABASE_DRIVER" = "sqlite" ]; then
+    set_toml_bool_value config.toml "pgvector" "enabled" "false"
+  fi
   if [ "$USE_CN_MIRROR" = true ]; then
     sed -i.bak 's|# registry = "memoh.cn"|registry = "memoh.cn"|' config.toml
   fi
@@ -788,13 +800,7 @@ export MEMOH_DATA_DIR
 export POSTGRES_PASSWORD="${PG_PASS}"
 
 COMPOSE_FILES="-f ${COMPOSE_FILE_NAME}"
-COMPOSE_PROFILES="--profile qdrant"
-if [ "$USE_SPARSE" = true ]; then
-  COMPOSE_PROFILES="$COMPOSE_PROFILES --profile sparse"
-  echo "${GREEN}✓ Sparse memory service enabled${NC}"
-else
-  echo "${YELLOW}ℹ Sparse memory service disabled${NC}"
-fi
+COMPOSE_PROFILES=""
 if [ "$USE_CN_MIRROR" = true ]; then
   COMPOSE_FILES="$COMPOSE_FILES -f ${CN_COMPOSE_FILE_NAME}"
   echo "${GREEN}✓ Using China mainland mirror (memoh.cn)${NC}"
@@ -842,7 +848,6 @@ write_env_value "MEMOH_WEBHOOK_PUBLIC_BASE_URL" "${MEMOH_WEBHOOK_PUBLIC_BASE_URL
 write_env_value "MEMOH_WEBHOOK_TUNNEL_MODE" "$WEBHOOK_TUNNEL_MODE"
 write_env_value "MEMOH_WEBHOOK_TUNNEL_LISTEN_ADDR" "$MEMOH_WEBHOOK_TUNNEL_LISTEN_ADDR"
 write_env_value "MEMOH_WEBHOOK_TUNNEL_METRICS_URL" "$MEMOH_WEBHOOK_TUNNEL_METRICS_URL"
-write_env_value "USE_SPARSE" "$USE_SPARSE"
 echo "${GREEN}✓ Database backend: ${DATABASE_DRIVER}${NC}"
 echo "${GREEN}✓ Workspace backend: ${CONTAINER_BACKEND}${NC}"
 

@@ -59,20 +59,21 @@ password = "memoh123"
 database = "memoh"
 sslmode = "disable"
 
+[pgvector]
+enabled = false
+host = "pgvector"
+port = 5432
+user = "memoh"
+password = "memoh123"
+database = "memoh_vector"
+sslmode = "disable"
+
 [sqlite]
 # The SQLite database lives in the memoh_data Docker volume mounted at
 # /opt/memoh/data by devenv/docker-compose.sqlite*.yml.
 path = "/opt/memoh/data/memoh.sqlite.db"
 wal = true
 busy_timeout_ms = 5000
-
-[qdrant]
-base_url = "http://qdrant:6334"
-api_key = ""
-timeout_seconds = 10
-
-[sparse]
-base_url = "http://sparse:8085"
 
 [web]
 host = "0.0.0.0"

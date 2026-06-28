@@ -36,6 +36,8 @@ DROP TABLE IF EXISTS bot_channel_configs;
 DROP TABLE IF EXISTS mcp_oauth_tokens;
 DROP TABLE IF EXISTS mcp_connections;
 DROP TABLE IF EXISTS bot_acl_rules;
+DROP TABLE IF EXISTS memory_edges;
+DROP TABLE IF EXISTS memory_nodes;
 DROP TABLE IF EXISTS bots;
 DROP TABLE IF EXISTS browser_contexts;
 DROP TABLE IF EXISTS memory_providers;

@@ -13,15 +13,19 @@ import (
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 )
 
-// fileRuntime implements the built-in file-backed memory runtime. Markdown files
-// remain the source of truth, with no derived vector index.
+// fileRuntime implements a file-backed memory runtime. It serves markdown files
+// directly as the source of truth with lexical search and no derived index. It
+// is no longer a user-selectable mode: it survives as the graphRuntime's
+// reliability fallback (graph_runtime.searchFileFallback) and as the
+// __builtin_default__ provider when no database-backed wiki store is available
+// (e.g. during bootstrap). Its lexical scorer fileRuntimeScore is also reused
+// by the graph cache.
 type fileRuntime struct {
 	store memoryStore
 }
 
-// NewFileRuntime returns the file-only Runtime used when the builtin provider
-// runs with memory_mode "off": markdown files are served directly without any
-// derived vector index.
+// NewFileRuntime returns the file-only Runtime. Used for the bootstrap default
+// provider when no wiki store is wired; not exposed as a memory_mode option.
 func NewFileRuntime(store *storefs.Service) Runtime {
 	return newFileRuntime(store)
 }
@@ -280,8 +284,12 @@ func (r *fileRuntime) Usage(ctx context.Context, filters map[string]any) (adapte
 	return usage, nil
 }
 
+// Mode returns the internal identifier for the file runtime. It is used as a
+// fallback component (graphRuntime degrades to it when the wiki store is
+// unavailable) and as the __builtin_default__ provider when no DB is wired.
+// It is no longer a user-selectable memory_mode.
 func (*fileRuntime) Mode() string {
-	return string(ModeOff)
+	return "file"
 }
 
 func (r *fileRuntime) Status(ctx context.Context, botID string) (adapters.MemoryStatusResponse, error) {
@@ -295,7 +303,7 @@ func (r *fileRuntime) Status(ctx context.Context, botID string) (adapters.Memory
 	}
 	return adapters.MemoryStatusResponse{
 		ProviderType:      BuiltinType,
-		MemoryMode:        string(ModeOff),
+		MemoryMode:        "file",
 		CanManualSync:     false,
 		SourceDir:         path.Join(config.DefaultDataMount, "memory"),
 		OverviewPath:      path.Join(config.DefaultDataMount, "MEMORY.md"),

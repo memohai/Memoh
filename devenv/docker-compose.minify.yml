@@ -19,16 +19,20 @@ services:
       retries: 5
     restart: unless-stopped
 
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: memoh-dev-qdrant
+  pgvector:
+    image: pgvector/pgvector:pg18
+    container_name: memoh-dev-pgvector
+    environment:
+      POSTGRES_DB: memoh_vector
+      POSTGRES_USER: memoh
+      POSTGRES_PASSWORD: memoh123
     volumes:
-      - qdrant_data:/qdrant/storage
+      - pgvector_data:/var/lib/postgresql
+      - /etc/localtime:/etc/localtime:ro
     ports:
-      - "${MEMOH_DEV_QDRANT_HTTP_PORT:-16333}:6333"
-      - "${MEMOH_DEV_QDRANT_GRPC_PORT:-16334}:6334"
+      - "${MEMOH_DEV_PGVECTOR_PORT:-15433}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "timeout 5s bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      test: ["CMD-SHELL", "pg_isready -U memoh -d memoh_vector"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -68,8 +72,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      qdrant:
-        condition: service_healthy
     restart: "no"
 
   server:
@@ -90,10 +92,10 @@ services:
       #   HTTP_PROXY=http://host.docker.internal:7890 mise run dev
       HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
       HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
-      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,qdrant,sparse,server,web,migrate,deps,webhook-tunnel,memoh-dev-postgres,memoh-dev-qdrant,memoh-dev-sparse,memoh-dev-server,memoh-dev-web,memoh-dev-migrate,memoh-dev-deps,memoh-dev-webhook-tunnel"
+      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,pgvector,server,web,migrate,deps,webhook-tunnel,memoh-dev-postgres,memoh-dev-pgvector,memoh-dev-server,memoh-dev-web,memoh-dev-migrate,memoh-dev-deps,memoh-dev-webhook-tunnel"
       http_proxy: "${http_proxy:-${HTTP_PROXY:-}}"
       https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
-      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,qdrant,sparse,server,web,migrate,deps,webhook-tunnel,memoh-dev-postgres,memoh-dev-qdrant,memoh-dev-sparse,memoh-dev-server,memoh-dev-web,memoh-dev-migrate,memoh-dev-deps,memoh-dev-webhook-tunnel"
+      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,pgvector,server,web,migrate,deps,webhook-tunnel,memoh-dev-postgres,memoh-dev-pgvector,memoh-dev-server,memoh-dev-web,memoh-dev-migrate,memoh-dev-deps,memoh-dev-webhook-tunnel"
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN: "${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}"
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX: "${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}"
     volumes:
@@ -120,7 +122,7 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      qdrant:
+      pgvector:
         condition: service_healthy
     restart: unless-stopped
 
@@ -146,25 +148,10 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # sparse:
-  #   build:
-  #     context: ..
-  #     dockerfile: docker/Dockerfile.sparse
-  #   container_name: memoh-dev-sparse
-  #   ports:
-  #     - "${MEMOH_DEV_SPARSE_PORT:-18085}:8085"
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8085/health')\" || exit 1"]
-  #     interval: 15s
-  #     timeout: 10s
-  #     start_period: 30s
-  #     retries: 3
-  #   restart: unless-stopped
-
 volumes:
   postgres_data:
     driver: local
-  qdrant_data:
+  pgvector_data:
     driver: local
   go_mod_cache:
     driver: local

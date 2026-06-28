@@ -42,11 +42,6 @@ const api = {
       ready: boolean
       managed: boolean
       error?: string
-      qdrant?: {
-        grpcBaseUrl: string
-        httpBaseUrl: string
-        ready: boolean
-      }
     }> =>
       ipcRenderer.invoke('desktop:server-status'),
     apiBaseUrl: (): Promise<string> => ipcRenderer.invoke('desktop:api-base-url'),

@@ -31,8 +31,8 @@ const builderArgs = marker >= 0
   ? rawArgs.slice(marker + 1)
   : rawArgs.filter((arg, index) => index !== targetIndex && !arg.startsWith('--runtime=') && !arg.startsWith('--flavor='))
 const runtimeMode = resolveRuntimeMode(buildOptions)
-const qdrantTarget = rawTarget === 'current' ? `${process.platform}-${process.arch}` : rawTarget
-const gstreamerTarget = resolveGStreamerTarget(qdrantTarget)
+const bundleTarget = rawTarget === 'current' ? `${process.platform}-${process.arch}` : rawTarget
+const gstreamerTarget = resolveGStreamerTarget(bundleTarget)
 const macToolchainEnv = process.platform === 'darwin' && xcodeDeveloperDir
   ? { DEVELOPER_DIR: xcodeDeveloperDir }
   : {}
@@ -92,14 +92,13 @@ function run(command, args, extraEnv = {}) {
 }
 
 if (runtimeMode === 'local') {
-  run(process.execPath, ['scripts/prepare-qdrant.mjs', `--targets=${qdrantTarget}`])
   if (gstreamerTarget !== '__none__') {
     run(process.execPath, ['scripts/prepare-gstreamer.mjs', `--targets=${gstreamerTarget}`])
   } else {
     run(process.execPath, ['scripts/prepare-gstreamer.mjs', '--targets=none'])
   }
   runPnpm(['run', 'prepare:local-server'], {
-    MEMOH_DESKTOP_BUNDLE_TARGET: qdrantTarget,
+    MEMOH_DESKTOP_BUNDLE_TARGET: bundleTarget,
   })
 }
 runPnpm(['exec', 'electron-vite', 'build'], {
@@ -110,7 +109,6 @@ runPnpm(['exec', 'electron-builder', ...builderConfigArgs(runtimeMode), ...build
   ...macToolchainEnv,
   MEMOH_DESKTOP_RUNTIME_MODE: runtimeMode,
   MEMOH_DESKTOP_FLAVOR: runtimeMode === 'remote' ? 'online' : 'offline',
-  MEMOH_DESKTOP_QDRANT_TARGET: qdrantTarget,
   MEMOH_DESKTOP_GSTREAMER_TARGET: gstreamerTarget,
 })
 
