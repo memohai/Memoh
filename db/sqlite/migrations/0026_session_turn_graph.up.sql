@@ -5,8 +5,10 @@ PRAGMA foreign_keys = OFF;
 
 BEGIN;
 
-ALTER TABLE bot_sessions RENAME TO bot_sessions_old;
-CREATE TABLE bot_sessions (
+-- Use the create/copy/drop/rename rebuild pattern instead of renaming the
+-- original table first. SQLite may rewrite dependent child foreign keys when a
+-- parent table is renamed, even with foreign_keys disabled.
+CREATE TABLE bot_sessions_new (
   id TEXT PRIMARY KEY,
   bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   route_id TEXT REFERENCES bot_channel_routes(id) ON DELETE SET NULL,
@@ -23,7 +25,7 @@ CREATE TABLE bot_sessions (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted_at TEXT
 );
-INSERT INTO bot_sessions (
+INSERT INTO bot_sessions_new (
   id,
   bot_id,
   route_id,
@@ -56,11 +58,11 @@ SELECT
   created_at,
   updated_at,
   deleted_at
-FROM bot_sessions_old;
-DROP TABLE bot_sessions_old;
+FROM bot_sessions;
+DROP TABLE bot_sessions;
+ALTER TABLE bot_sessions_new RENAME TO bot_sessions;
 
-ALTER TABLE bot_history_messages RENAME TO bot_history_messages_old;
-CREATE TABLE bot_history_messages (
+CREATE TABLE bot_history_messages_new (
   id TEXT PRIMARY KEY,
   bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   session_id TEXT REFERENCES bot_sessions(id) ON DELETE SET NULL,
@@ -80,7 +82,7 @@ CREATE TABLE bot_history_messages (
   display_text TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-INSERT INTO bot_history_messages (
+INSERT INTO bot_history_messages_new (
   id,
   bot_id,
   session_id,
@@ -119,8 +121,9 @@ SELECT
   event_id,
   display_text,
   created_at
-FROM bot_history_messages_old;
-DROP TABLE bot_history_messages_old;
+FROM bot_history_messages;
+DROP TABLE bot_history_messages;
+ALTER TABLE bot_history_messages_new RENAME TO bot_history_messages;
 
 CREATE TABLE IF NOT EXISTS bot_history_turns (
   id TEXT PRIMARY KEY,
@@ -133,8 +136,7 @@ CREATE TABLE IF NOT EXISTS bot_history_turns (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-ALTER TABLE tool_approval_requests RENAME TO tool_approval_requests_old;
-CREATE TABLE tool_approval_requests (
+CREATE TABLE tool_approval_requests_new (
   id TEXT PRIMARY KEY,
   bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
@@ -162,7 +164,7 @@ CREATE TABLE tool_approval_requests (
   CONSTRAINT tool_approval_status_check CHECK (status IN ('pending', 'approved', 'rejected', 'expired', 'cancelled')),
   CONSTRAINT tool_approval_short_id_unique UNIQUE (session_id, short_id)
 );
-INSERT INTO tool_approval_requests (
+INSERT INTO tool_approval_requests_new (
   id,
   bot_id,
   session_id,
@@ -211,11 +213,11 @@ SELECT
   conversation_type,
   created_at,
   decided_at
-FROM tool_approval_requests_old;
-DROP TABLE tool_approval_requests_old;
+FROM tool_approval_requests;
+DROP TABLE tool_approval_requests;
+ALTER TABLE tool_approval_requests_new RENAME TO tool_approval_requests;
 
-ALTER TABLE user_input_requests RENAME TO user_input_requests_old;
-CREATE TABLE user_input_requests (
+CREATE TABLE user_input_requests_new (
   id TEXT PRIMARY KEY,
   bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
@@ -248,7 +250,7 @@ CREATE TABLE user_input_requests (
   CONSTRAINT user_input_status_check CHECK (status IN ('pending', 'submitted', 'canceled', 'expired', 'failed')),
   CONSTRAINT user_input_short_id_unique UNIQUE (session_id, short_id)
 );
-INSERT INTO user_input_requests (
+INSERT INTO user_input_requests_new (
   id,
   bot_id,
   session_id,
@@ -307,8 +309,9 @@ SELECT
   responded_at,
   canceled_at,
   updated_at
-FROM user_input_requests_old;
-DROP TABLE user_input_requests_old;
+FROM user_input_requests;
+DROP TABLE user_input_requests;
+ALTER TABLE user_input_requests_new RENAME TO user_input_requests;
 
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_id ON bot_sessions(bot_id);
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_route_id ON bot_sessions(route_id);
