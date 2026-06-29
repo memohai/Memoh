@@ -139,7 +139,6 @@
    *      since tabs and "+" sit in sibling containers a sibling selector can't span). */
   /* VERTICAL lane */
   --tab-inset: 0.3125rem;
-  --chrome-center: 20px;
   /* The active crown/foot is a 1px stroke; single-sourced here so the hover-top
    * trim that matches it can never drift from the SVG's stroke-width. */
   --tab-active-stroke: 1px;
