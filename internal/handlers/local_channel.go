@@ -843,6 +843,15 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
 				continue
 			}
+			acpInfo, err := h.authorizeWSACPExecution(c.Request().Context(), channelIdentityID, botID, sessionID)
+			if err != nil {
+				sendWSErrorFromError(writer, streamID, sessionID, err)
+				continue
+			}
+			streamToken := bearerToken
+			if acpInfo.IsACP {
+				streamToken = h.issueRuntimeOwnerBearerToken(acpInfo.RuntimeOwnerAccountID, bearerToken)
+			}
 
 			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws retry stream error",
 				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}) error {
@@ -852,7 +861,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						SessionID:               sessionID,
 						BaseHeadTurnID:          strings.TrimSpace(msg.BaseHeadTurnID),
 						StreamID:                streamID,
-						Token:                   bearerToken,
+						Token:                   streamToken,
 						UserID:                  channelIdentityID,
 						SourceChannelIdentityID: channelIdentityID,
 						ConversationType:        channel.ConversationTypePrivate,
@@ -892,6 +901,15 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
 				continue
 			}
+			acpInfo, err := h.authorizeWSACPExecution(c.Request().Context(), channelIdentityID, botID, sessionID)
+			if err != nil {
+				sendWSErrorFromError(writer, streamID, sessionID, err)
+				continue
+			}
+			streamToken := bearerToken
+			if acpInfo.IsACP {
+				streamToken = h.issueRuntimeOwnerBearerToken(acpInfo.RuntimeOwnerAccountID, bearerToken)
+			}
 
 			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws edit stream error",
 				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}) error {
@@ -901,7 +919,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						SessionID:               sessionID,
 						BaseHeadTurnID:          strings.TrimSpace(msg.BaseHeadTurnID),
 						StreamID:                streamID,
-						Token:                   bearerToken,
+						Token:                   streamToken,
 						UserID:                  channelIdentityID,
 						SourceChannelIdentityID: channelIdentityID,
 						ConversationType:        channel.ConversationTypePrivate,

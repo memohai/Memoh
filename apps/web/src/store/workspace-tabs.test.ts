@@ -20,6 +20,7 @@ const chatStoreMock = vi.hoisted(() => ({
   knownSessions: [] as Array<{ id: string, title?: string, type?: string }>,
   createNewSession: vi.fn(async () => {}),
   deletedSession: undefined as unknown as ReturnType<typeof ref<{ id: string, botId: string, seq: number } | null>>,
+  pendingACPSessionInput: undefined as unknown as ReturnType<typeof ref<Record<string, unknown> | null>>,
   selectSession: vi.fn(async (sessionId: string, options?: { explicitSelection?: boolean }) => {
     chatStoreMock.sessionId = sessionId
     chatStoreMock.hasExplicitSessionSelection = options?.explicitSelection !== false
@@ -50,6 +51,9 @@ vi.mock('@/store/chat-list', () => ({
     },
     activeSession: null,
     userSentInSession: null,
+    get pendingACPSessionInput() {
+      return chatStoreMock.pendingACPSessionInput.value
+    },
     get deletedSession() {
       return chatStoreMock.deletedSession.value
     },
@@ -305,6 +309,7 @@ describe('workspace layout store', () => {
     chatStoreMock.selectSession.mockClear()
     chatStoreMock.selectDraft.mockClear()
     chatStoreMock.deletedSession = ref(null)
+    chatStoreMock.pendingACPSessionInput = ref(null)
     chatStoreMock.sessionId = null
     chatStoreMock.hasExplicitSessionSelection = false
     chatStoreMock.loadingChats = false
@@ -436,6 +441,65 @@ describe('workspace layout store', () => {
     store.openDraftChat({ title: 'New Session', explicitSelection: false })
 
     expect(chatStoreMock.selectDraft).toHaveBeenLastCalledWith({ explicitSelection: false })
+  })
+
+  it('keeps a non-explicit draft non-explicit after an explicit session was active', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 's1', title: 'Session 1', explicitSelection: true })
+    expect(chatStoreMock.hasExplicitSessionSelection).toBe(true)
+
+    store.openDraftChat({ title: 'New Session', explicitSelection: false })
+
+    expect(dock.activePanel?.params).toMatchObject({ sessionId: null, explicitSelection: false })
+    expect(chatStoreMock.selectDraft).toHaveBeenLastCalledWith({ explicitSelection: false })
+    expect(chatStoreMock.hasExplicitSessionSelection).toBe(false)
+  })
+
+  it('switches the active stale chat tab to draft when default ACP stages later', async () => {
+    const selection = useChatSelectionStore()
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 'native-session', title: 'Native Session' })
+    expect(dock.activePanel?.params.sessionId).toBe('native-session')
+
+    chatStoreMock.sessionId = null
+    chatStoreMock.hasExplicitSessionSelection = false
+    selection.setSession(null, { explicitSelection: false })
+    await nextTick()
+    expect(dock.activePanel?.params.sessionId).toBe('native-session')
+
+    chatStoreMock.pendingACPSessionInput.value = { agentId: 'codex' }
+    await nextTick()
+
+    expect(dock.activePanel?.component).toBe('chat')
+    expect(dock.activePanel?.params).toMatchObject({ sessionId: null, explicitSelection: false })
+    expect(chatStoreMock.selectDraft).toHaveBeenLastCalledWith({ explicitSelection: false })
+  })
+
+  it('opens an explicit draft from a stale active chat session', async () => {
+    const selection = useChatSelectionStore()
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 's1', title: 'Session 1' })
+    expect(dock.activePanel?.params.sessionId).toBe('s1')
+
+    selection.setSession('s1', { explicitSelection: true })
+    await nextTick()
+    chatStoreMock.sessionId = null
+    chatStoreMock.hasExplicitSessionSelection = true
+    selection.setSession(null, { explicitSelection: true })
+    await nextTick()
+
+    expect(dock.activePanel?.component).toBe('chat')
+    expect(dock.activePanel?.params).toMatchObject({ sessionId: null, explicitSelection: true })
+    expect(chatStoreMock.selectDraft).toHaveBeenLastCalledWith({ explicitSelection: true })
   })
 
   it('does not let restored draft panel params clear an explicit empty composer', async () => {
@@ -686,6 +750,7 @@ describe('workspace layout store', () => {
       { id: 's3', title: 'Neighbor session' },
     )
     emitDeletedSession('s1')
+    chatStoreMock.hasExplicitSessionSelection = false
     selection.setSession('s2')
     await nextTick()
     await nextTick()
@@ -694,6 +759,7 @@ describe('workspace layout store', () => {
     expect(selection.sessionId).toBe('s2')
     expect(chatStoreMock.selectSession).not.toHaveBeenCalledWith('s3')
     expect(dock.activePanel?.params.sessionId).toBe('s2')
+    expect(chatStoreMock.hasExplicitSessionSelection).toBe(false)
     expect(chatStoreMock.selectDraft).not.toHaveBeenCalled()
   })
 

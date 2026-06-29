@@ -565,8 +565,15 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         suppressReconcileActivation = false
         const active = api.value?.activePanel
         const activeSid = active ? panelSessionId(active) : null
-        if (active && panelComponentOf(active.id) === 'chat' && activeSid && !isDeletedSessionForCurrentBot(activeSid)) {
-          activateChatSession(active)
+        const selectedSid = (selection.sessionId ?? '').trim()
+        if (
+          active
+          && panelComponentOf(active.id) === 'chat'
+          && activeSid
+          && (!selectedSid || activeSid === selectedSid)
+          && !isDeletedSessionForCurrentBot(activeSid)
+        ) {
+          activateChatSession(active, { explicitSelection: chatStore.hasExplicitSessionSelection === true })
         }
       }
     }, 0)
@@ -582,8 +589,15 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     suppressReconcileActivation = false
     const active = api.value?.activePanel
     const activeSid = active ? panelSessionId(active) : null
-    if (active && panelComponentOf(active.id) === 'chat' && activeSid && !isDeletedSessionForCurrentBot(activeSid)) {
-      activateChatSession(active)
+    const selectedSid = (selection.sessionId ?? '').trim()
+    if (
+      active
+      && panelComponentOf(active.id) === 'chat'
+      && activeSid
+      && (!selectedSid || activeSid === selectedSid)
+      && !isDeletedSessionForCurrentBot(activeSid)
+    ) {
+      activateChatSession(active, { explicitSelection: chatStore.hasExplicitSessionSelection === true })
     }
   }
 
@@ -594,6 +608,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const bid = (currentBotId.value ?? '').trim()
     if (!bid) return
     const id = nextChatPanelId(bid)
+    setNextChatActivationExplicit(id, chatStore.hasExplicitSessionSelection === true)
     if (focusOrAdd({
       id,
       component: 'chat',
@@ -939,18 +954,27 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   // Activating a chat tab makes its session the live one (single global messages
   // array). Gated to chat panels by the caller.
-  function activateChatSession(panel: { id: string, params?: Record<string, unknown> }) {
+  function activateChatSession(
+    panel: { id: string, params?: Record<string, unknown> },
+    options?: { explicitSelection?: boolean },
+  ) {
     // Dockview emits active-panel changes while fromJSON restores the saved layout.
     // That is not a user click, and must not promote a stale restored chat tab into
     // an explicit chat-selection entry before chat initialization/default ACP wins.
     if (suppressPersist) return
     const explicitOverride = consumeNextChatActivationExplicit(panel.id)
     const sid = panelSessionId(panel)
-    if (sid) selectChatSession(sid, explicitOverride !== false)
+    if (sid) {
+      const explicitSelection = options?.explicitSelection ?? explicitOverride !== false
+      selectChatSession(sid, explicitSelection)
+    }
     else {
-      const explicitSelection = chatStore.hasExplicitSessionSelection === true
-        || explicitOverride === true
-        || panel.params?.explicitSelection === true
+      const explicitSelection = options?.explicitSelection
+        ?? explicitOverride
+        ?? (
+          chatStore.hasExplicitSessionSelection === true
+          || panel.params?.explicitSelection === true
+        )
       chatStore.selectDraft({ explicitSelection })
     }
   }
@@ -979,9 +1003,18 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       if (active.params?.explicitSelection !== explicitSelection) {
         active.api.updateParameters({ explicitSelection })
       }
+      chatStore.selectDraft({ explicitSelection })
       return
     }
     openDraftChat({ groupId, explicitSelection })
+  }
+
+  function syncDraftTargetFromState() {
+    const dock = api.value
+    if (!dock || suppressPersist) return
+    if ((selection.sessionId ?? '').trim()) return
+    if (chatStore.hasExplicitSessionSelection !== true && !chatStore.pendingACPSessionInput) return
+    syncRestoredChatSelection()
   }
 
   function syncDraftChatExplicitSelection() {
@@ -1079,7 +1112,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
           explicitSelection: chatStore.hasExplicitSessionSelection === true,
         })
       }
-      else openDraftChat({ explicitSelection: false })
+      else openDraftChat({ explicitSelection: chatStore.hasExplicitSessionSelection === true })
     })
   }
 
@@ -1705,7 +1738,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const dock = api.value
     if (!dock || suppressPersist) return
     const trimmed = (sid ?? '').trim()
-    if (!trimmed) return
+    if (!trimmed) {
+      syncDraftTargetFromState()
+      return
+    }
     if (isDeletedSessionForCurrentBot(trimmed)) return
     const existing = chatPanelForSession(trimmed)
     if (existing) {
@@ -1720,6 +1756,14 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       explicitSelection: chatStore.hasExplicitSessionSelection === true,
     })
   })
+
+  watch(
+    () => chatStore.pendingACPSessionInput,
+    (pending) => {
+      if (!pending) return
+      syncDraftTargetFromState()
+    },
+  )
 
   watch(
     () => `${chatStore.sessionId ?? ''}:${chatStore.hasExplicitSessionSelection === true ? '1' : '0'}`,

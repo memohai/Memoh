@@ -569,6 +569,11 @@ func TestStreamChatWSPersistsACPUserInputProjectionBeforePromptReturns(t *testin
 	if len(messages.persisted) != 4 {
 		t.Fatalf("persisted %d messages, want user + pending projection + terminal projection + final assistant", len(messages.persisted))
 	}
+	for i := 1; i < len(messages.persisted); i++ {
+		if messages.persisted[i].TurnID != "33333333-3333-3333-3333-333333333333" {
+			t.Fatalf("persisted[%d].TurnID = %q, want ACP turn id", i, messages.persisted[i].TurnID)
+		}
+	}
 	pendingProjection := persistedModelMessage(t, messages.persisted[1].Content)
 	pendingCalls := extractAssistantToolCallParts(pendingProjection)
 	if len(pendingCalls) != 1 || pendingCalls[0].ToolCallID != "ask-1" {
@@ -689,6 +694,11 @@ func TestStreamChatWSPersistsACPApprovalProjectionTerminalState(t *testing.T) {
 
 	if len(messages.persisted) != 4 {
 		t.Fatalf("persisted %d messages, want user + pending approval projection + terminal approval projection + final assistant", len(messages.persisted))
+	}
+	for i := 1; i < len(messages.persisted); i++ {
+		if messages.persisted[i].TurnID != "33333333-3333-3333-3333-333333333333" {
+			t.Fatalf("persisted[%d].TurnID = %q, want ACP turn id", i, messages.persisted[i].TurnID)
+		}
 	}
 	pendingProjection := persistedModelMessage(t, messages.persisted[1].Content)
 	pendingCalls := extractAssistantToolCallParts(pendingProjection)

@@ -29,7 +29,11 @@ type recordingMessageService struct {
 
 func (s *recordingMessageService) Persist(_ context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
 	s.persisted = append(s.persisted, input)
-	return messagepkg.Message{ID: "message-id", Role: input.Role}, nil
+	turnID := strings.TrimSpace(input.TurnID)
+	if turnID == "" && strings.TrimSpace(input.SessionID) != "" {
+		turnID = "33333333-3333-3333-3333-333333333333"
+	}
+	return messagepkg.Message{ID: "message-id", Role: input.Role, TurnID: turnID}, nil
 }
 
 func (*recordingMessageService) List(context.Context, string) ([]messagepkg.Message, error) {
