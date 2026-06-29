@@ -718,6 +718,9 @@ func TestChannelInboundProcessorAutoCreatesDefaultACPSession(t *testing.T) {
 	if ensurer.lastSpec.RuntimeOwnerAccountID != "account-user-acp" {
 		t.Fatalf("runtime owner = %q, want account user", ensurer.lastSpec.RuntimeOwnerAccountID)
 	}
+	if ensurer.lastSpec.CreatedByUserID != "account-user-acp" {
+		t.Fatalf("created_by_user_id = %q, want account user", ensurer.lastSpec.CreatedByUserID)
+	}
 	if permChecker.account != "account-user-acp" {
 		t.Fatalf("permission principal = %q, want account user", permChecker.account)
 	}

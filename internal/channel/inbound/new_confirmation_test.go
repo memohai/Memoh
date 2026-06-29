@@ -145,11 +145,53 @@ func TestHandleNewSessionCommandCreatesACPChatSpec(t *testing.T) {
 	if spec.RuntimeOwnerAccountID != ownerID {
 		t.Fatalf("runtime owner = %q, want authenticated channel identity", spec.RuntimeOwnerAccountID)
 	}
+	if spec.CreatedByUserID != ownerID {
+		t.Fatalf("created_by_user_id = %q, want authenticated channel identity", spec.CreatedByUserID)
+	}
 	if got := newSessionMetadataString(spec.Metadata, "acp_agent_id"); got != "codex" {
 		t.Fatalf("agent = %q, want codex", got)
 	}
 	if len(sender.sent) != 1 {
 		t.Fatalf("sent replies = %d, want 1", len(sender.sent))
+	}
+}
+
+func TestHandleNewSessionCommandCreatesNativeSessionWithCreator(t *testing.T) {
+	creatorID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "11111111-1111-1111-1111-111111111111"}}
+	ensurer := &fakeSessionEnsurer{}
+	p := &ChannelInboundProcessor{
+		routeResolver:  chatSvc,
+		sessionEnsurer: ensurer,
+	}
+	sender := &fakeReplySender{}
+	msg := channel.InboundMessage{
+		Channel:     channel.ChannelTypeTelegram,
+		Message:     channel.Message{ID: "msg-1", Text: "/new chat"},
+		ReplyTarget: "target-1",
+		Conversation: channel.Conversation{
+			ID:   "dm-1",
+			Type: channel.ConversationTypePrivate,
+		},
+	}
+
+	err := p.handleNewSessionCommand(context.Background(), channel.ChannelConfig{}, msg, sender, InboundIdentity{
+		BotID:             "bot-1",
+		ChannelIdentityID: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+		UserID:            creatorID,
+	})
+	if err != nil {
+		t.Fatalf("handleNewSessionCommand() error = %v", err)
+	}
+	spec := ensurer.lastSpec
+	if spec.Mode != sessionpkg.TypeChat || spec.Runtime != sessionpkg.RuntimeModel || spec.Type != sessionpkg.TypeChat {
+		t.Fatalf("spec = %#v, want native chat session", spec)
+	}
+	if spec.CreatedByUserID != creatorID {
+		t.Fatalf("created_by_user_id = %q, want authenticated channel identity", spec.CreatedByUserID)
+	}
+	if spec.RuntimeOwnerAccountID != "" {
+		t.Fatalf("runtime owner = %q, want empty for native session", spec.RuntimeOwnerAccountID)
 	}
 }
 

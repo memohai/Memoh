@@ -150,6 +150,7 @@ type NewSessionSpec struct {
 	Type                  string
 	Metadata              map[string]any
 	Title                 string
+	CreatedByUserID       string
 	RuntimeOwnerAccountID string
 }
 
@@ -3743,6 +3744,11 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	if spec.Runtime == sessionpkg.RuntimeACPAgent {
 		spec.RuntimeOwnerAccountID = acpRuntimeOwnerPrincipal(identity, spec.RuntimeOwnerAccountID)
 	}
+	if strings.TrimSpace(spec.CreatedByUserID) == "" {
+		spec.CreatedByUserID = strings.TrimSpace(identity.UserID)
+	} else {
+		spec.CreatedByUserID = strings.TrimSpace(spec.CreatedByUserID)
+	}
 	sess, err := p.sessionEnsurer.CreateNewSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String(), spec)
 	if err != nil {
 		if p.logger != nil {
@@ -3850,9 +3856,10 @@ func (p *ChannelInboundProcessor) defaultSessionSpecForInbound(ctx context.Conte
 		mode = sessionpkg.TypeDiscuss
 	}
 	spec := NewSessionSpec{
-		Mode:    mode,
-		Runtime: sessionpkg.RuntimeModel,
-		Type:    mode,
+		Mode:            mode,
+		Runtime:         sessionpkg.RuntimeModel,
+		Type:            mode,
+		CreatedByUserID: strings.TrimSpace(identity.UserID),
 	}
 	if mode == sessionpkg.TypeDiscuss {
 		return spec, true, nil
