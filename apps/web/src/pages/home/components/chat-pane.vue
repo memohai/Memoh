@@ -1093,6 +1093,7 @@ const {
   bots,
   activeSession,
   activeSessionSupportsTurnVariants,
+  activeChatTarget,
   activeChatReadOnly,
   messageActionLoading,
   loadingOlder,
@@ -1102,7 +1103,6 @@ const {
   overrideModelId,
   overrideReasoningEffort,
   startupSendFailure,
-  pendingACPSessionMetadata,
   pendingACPModelId,
   pendingACPRuntimeStatus,
   pendingACPRuntimeEnsuring,
@@ -1253,16 +1253,9 @@ const enabledACPProfiles = computed(() =>
   acpProfiles.value.filter(profile => isACPAgentEnabled(currentBotMetadata.value, profile.id)),
 )
 
-const activeSessionMetadata = computed<Record<string, unknown>>(() =>
-  activeSession.value
-    ? {
-        ...(activeSession.value.metadata && typeof activeSession.value.metadata === 'object' ? activeSession.value.metadata : {}),
-        ...(activeSession.value.runtime_metadata && typeof activeSession.value.runtime_metadata === 'object' ? activeSession.value.runtime_metadata : {}),
-      }
-    : pendingACPSessionMetadata.value ?? {},
-)
-const activeIsPendingACP = computed(() => !activeSession.value && !!pendingACPSessionMetadata.value)
-const activeIsACP = computed(() => activeSession.value?.type === 'acp_agent' || activeSession.value?.runtime_type === 'acp_agent' || activeIsPendingACP.value)
+const activeSessionMetadata = computed<Record<string, unknown>>(() => activeChatTarget.value.metadata)
+const activeIsPendingACP = computed(() => activeChatTarget.value.isPendingACP)
+const activeIsACP = computed(() => activeChatTarget.value.isACP)
 const activeACPAgentId = computed(() => normalizeACPAgentID(activeSessionMetadata.value.acp_agent_id))
 const activeACPProjectLabel = computed(() => {
   if (isACPNoProject(activeSessionMetadata.value)) return t('chat.noProject')
@@ -1529,8 +1522,8 @@ watch(activeIsACP, (isACP) => {
 })
 
 function pendingMatchesDefaultACP(input: ACPAgentSessionInput): boolean {
-  const metadata = pendingACPSessionMetadata.value
-  return !chatStore.sessionId
+  const metadata = activeChatTarget.value.metadata
+  return activeChatTarget.value.kind === 'draft-acp'
     && metadata?.acp_agent_id === input.agentId
     && metadata?.project_path === (input.projectPath || ACP_DEFAULT_PROJECT_PATH)
     && metadata?.acp_project_mode === (input.projectMode || ACP_DEFAULT_PROJECT_MODE)
@@ -1547,14 +1540,18 @@ watch([defaultACPUnavailableMessage, defaultACPLoading, currentBotId, hasExplici
   composerError.value = message
 }, { immediate: true })
 
-watch([defaultACPSessionInput, defaultACPLoading, currentBotId, hasExplicitSessionSelection, () => chatStore.sessionId, pendingACPSessionMetadata], ([input, loading]) => {
+watch([defaultACPSessionInput, defaultACPLoading, currentBotId, hasExplicitSessionSelection, activeChatTarget], ([input, loading]) => {
   if (!currentBotId.value) return
   if (!input) {
+    if (!loading) {
+      chatStore.cacheDefaultACPSession(null)
+    }
     if (!loading && !hasExplicitSessionSelection.value && activeIsPendingACP.value) {
       chatStore.resetToEmptyComposer()
     }
     return
   }
+  chatStore.cacheDefaultACPSession(input)
   if (hasExplicitSessionSelection.value) return
   clearDefaultACPComposerError()
   if (pendingMatchesDefaultACP(input)) return

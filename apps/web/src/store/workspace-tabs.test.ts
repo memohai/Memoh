@@ -15,13 +15,14 @@ vi.mock('@/i18n', () => ({
 const chatStoreMock = vi.hoisted(() => ({
   sessionId: null as string | null,
   hasExplicitSessionSelection: false,
+  loadingChats: false,
   sessions: [] as Array<{ id: string, title?: string }>,
   knownSessions: [] as Array<{ id: string, title?: string, type?: string }>,
   createNewSession: vi.fn(async () => {}),
   deletedSession: undefined as unknown as ReturnType<typeof ref<{ id: string, botId: string, seq: number } | null>>,
-  selectSession: vi.fn(async (sessionId: string) => {
+  selectSession: vi.fn(async (sessionId: string, options?: { explicitSelection?: boolean }) => {
     chatStoreMock.sessionId = sessionId
-    chatStoreMock.hasExplicitSessionSelection = true
+    chatStoreMock.hasExplicitSessionSelection = options?.explicitSelection !== false
   }),
   selectDraft: vi.fn((options?: { explicitSelection?: boolean }) => {
     chatStoreMock.sessionId = null
@@ -44,7 +45,9 @@ vi.mock('@/store/chat-list', () => ({
     },
     sessions: chatStoreMock.sessions,
     knownSessions: chatStoreMock.knownSessions,
-    loadingChats: false,
+    get loadingChats() {
+      return chatStoreMock.loadingChats
+    },
     activeSession: null,
     userSentInSession: null,
     get deletedSession() {
@@ -105,6 +108,7 @@ function createFakeDock() {
   const closeVetoPanelIds = new Set<string>()
   let activePanel: FakePanel | null = null
   const setActivePanel = (panel: FakePanel | null) => {
+    if (activePanel === panel) return
     activePanel = panel
     activePanelListeners.forEach(listener => listener(panel))
   }
@@ -303,6 +307,7 @@ describe('workspace layout store', () => {
     chatStoreMock.deletedSession = ref(null)
     chatStoreMock.sessionId = null
     chatStoreMock.hasExplicitSessionSelection = false
+    chatStoreMock.loadingChats = false
     chatStoreMock.sessions = reactive([]) as typeof chatStoreMock.sessions
     chatStoreMock.knownSessions = reactive([]) as typeof chatStoreMock.knownSessions
     chatStoreMock.knownSessionSummary.mockImplementation((sessionId: string) =>
@@ -312,11 +317,15 @@ describe('workspace layout store', () => {
     )
     setActivePinia(createPinia())
     useChatSelectionStore().setBot('bot-1')
-    chatStoreMock.selectSession.mockImplementation(async (sessionId: string) => {
+    chatStoreMock.selectSession.mockImplementation(async (sessionId: string, options?: { explicitSelection?: boolean }) => {
       useChatSelectionStore().setSession(sessionId)
+      chatStoreMock.sessionId = sessionId
+      chatStoreMock.hasExplicitSessionSelection = options?.explicitSelection !== false
     })
-    chatStoreMock.selectDraft.mockImplementation(() => {
+    chatStoreMock.selectDraft.mockImplementation((options?: { explicitSelection?: boolean }) => {
       useChatSelectionStore().setSession(null)
+      chatStoreMock.sessionId = null
+      chatStoreMock.hasExplicitSessionSelection = options?.explicitSelection === true
     })
   })
 
@@ -457,6 +466,67 @@ describe('workspace layout store', () => {
     expect(chatStoreMock.hasExplicitSessionSelection).toBe(true)
   })
 
+  it('does not let a restored draft chat tab clear an explicitly selected session', async () => {
+    const staleLayout = {
+      panels: {
+        draft: {
+          id: 'chat:bot-1:1',
+          contentComponent: 'chat',
+          title: 'New Session',
+          params: { sessionId: null, explicitSelection: false },
+        },
+      },
+    }
+    localStorage.setItem('workspace-layout', JSON.stringify({
+      'bot-1': {
+        layout: staleLayout,
+        ephemeralIds: ['chat:bot-1:1'],
+      },
+    }))
+    chatStoreMock.sessionId = 'history-session-1'
+    chatStoreMock.hasExplicitSessionSelection = true
+
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    await nextTick()
+
+    expect(chatStoreMock.selectDraft).not.toHaveBeenCalled()
+    expect(chatStoreMock.selectSession).toHaveBeenCalledWith('history-session-1')
+    expect(dock.activePanel?.params.sessionId).toBe('history-session-1')
+  })
+
+  it('does not promote a restored auto-selected native session into explicit selection while chats load', async () => {
+    const staleLayout = {
+      panels: {
+        native: {
+          id: 'chat:bot-1:1',
+          contentComponent: 'chat',
+          title: 'Native Session',
+          params: { sessionId: 'native-session' },
+        },
+      },
+    }
+    localStorage.setItem('workspace-layout', JSON.stringify({
+      'bot-1': {
+        layout: staleLayout,
+        ephemeralIds: ['chat:bot-1:1'],
+      },
+    }))
+    chatStoreMock.sessionId = 'native-session'
+    chatStoreMock.hasExplicitSessionSelection = false
+    chatStoreMock.loadingChats = true
+
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    await nextTick()
+
+    expect(chatStoreMock.selectSession).toHaveBeenCalledWith('native-session', { explicitSelection: false })
+    expect(chatStoreMock.hasExplicitSessionSelection).toBe(false)
+    expect(dock.activePanel?.params.sessionId).toBe('native-session')
+  })
+
   it('opens one chat tab per session and reuses the ephemeral slot', () => {
     chatStoreMock.sessions.push(
       { id: 's1', title: 'S1' },
@@ -470,8 +540,10 @@ describe('workspace layout store', () => {
     const firstId = dock.panels.find((p) => p.component === 'chat')!.id
 
     // Same session: focus the existing tab, no new panel.
+    chatStoreMock.selectSession.mockClear()
     store.openSessionChat({ sessionId: 's1', title: 'S1' })
     expect(dock.panels.filter((p) => p.component === 'chat')).toHaveLength(1)
+    expect(chatStoreMock.selectSession).toHaveBeenCalledWith('s1')
 
     // Different session: repoint the group's ephemeral chat slot in place.
     store.openSessionChat({ sessionId: 's2', title: 'S2' })

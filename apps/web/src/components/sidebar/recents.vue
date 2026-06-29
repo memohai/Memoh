@@ -193,7 +193,7 @@ import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
-import { sortByRecency } from '@/store/chat-list.utils'
+import { isSessionVisibleInSidebarMode, sortByRecency, type SidebarSessionMode } from '@/store/chat-list.utils'
 import type { SessionSummary } from '@/composables/api/useChat'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
@@ -231,18 +231,17 @@ const {
 // chat/discuss timeline; Schedule and Agent surface the previously-hidden
 // system runs so a user can re-open a run to see whether it broke — no
 // separate history entry needed elsewhere.
-type RecentMode = 'recent' | 'schedule' | 'agent'
-const MODES: { id: RecentMode, labelKey: string, types: string[] }[] = [
-  { id: 'recent', labelKey: 'chat.recents', types: ['chat', 'discuss'] },
-  { id: 'schedule', labelKey: 'chat.activityBar.schedule', types: ['schedule'] },
-  { id: 'agent', labelKey: 'chat.sessionTypeACPAgent', types: ['acp_agent'] },
+type RecentMode = SidebarSessionMode
+const MODES: { id: RecentMode, labelKey: string }[] = [
+  { id: 'recent', labelKey: 'chat.recents' },
+  { id: 'schedule', labelKey: 'chat.activityBar.schedule' },
+  { id: 'agent', labelKey: 'chat.sessionTypeACPAgent' },
 ]
 const mode = useLocalStorage<RecentMode>('workspace-sidebar-recents-mode', 'recent')
 const activeMode = computed(() => MODES.find(m => m.id === mode.value) ?? MODES[0]!)
 
 const visibleSessions = computed(() => {
-  const types = new Set(activeMode.value.types)
-  return sortByRecency(sessions.value.filter(s => types.has(s.type ?? 'chat')))
+  return sortByRecency(sessions.value.filter(s => isSessionVisibleInSidebarMode(s, activeMode.value.id)))
 })
 
 // ---- virtualized session list ----

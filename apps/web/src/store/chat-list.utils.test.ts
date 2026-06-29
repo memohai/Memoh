@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canSummarizeRailSegment, clusterRailBlocks, computeBgTaskPill, distinctToolNames, latestOutputLine, provisionalSessionTitle, reconcileById, segmentHasLiveBg, segmentTurnBlocks, shouldRefreshFromMessageCreated, sortByRecency, splitActiveRail, summarizeRailSegment, thinkingPeek, upsertById } from './chat-list.utils'
+import { canSummarizeRailSegment, clusterRailBlocks, computeBgTaskPill, distinctToolNames, isSessionVisibleInSidebarMode, latestOutputLine, normalizedRuntimeType, normalizedSessionMode, provisionalSessionTitle, reconcileById, segmentHasLiveBg, segmentTurnBlocks, shouldRefreshFromMessageCreated, sortByRecency, splitActiveRail, summarizeRailSegment, thinkingPeek, upsertById } from './chat-list.utils'
 
 describe('chat-list.utils', () => {
   it('replaces existing item with same id and preserves order', () => {
@@ -127,6 +127,30 @@ describe('chat-list.utils', () => {
     sortByRecency(input)
 
     expect(input.map(x => x.id)).toEqual(['a', 'b'])
+  })
+
+  it('keeps ACP chat sessions in Recent while also allowing the Agent filter', () => {
+    const acpChat = {
+      type: 'acp_agent',
+      session_mode: 'chat',
+      runtime_type: 'acp_agent',
+    }
+
+    expect(isSessionVisibleInSidebarMode(acpChat, 'recent')).toBe(true)
+    expect(isSessionVisibleInSidebarMode(acpChat, 'agent')).toBe(true)
+    expect(isSessionVisibleInSidebarMode(acpChat, 'schedule')).toBe(false)
+  })
+
+  it('normalizes legacy ACP session descriptors for sidebar filtering', () => {
+    const legacyACPChat = { type: 'acp_agent' }
+    const schedule = { type: 'schedule' }
+
+    expect(normalizedSessionMode(legacyACPChat)).toBe('chat')
+    expect(normalizedRuntimeType(legacyACPChat)).toBe('acp_agent')
+    expect(isSessionVisibleInSidebarMode(legacyACPChat, 'recent')).toBe(true)
+    expect(isSessionVisibleInSidebarMode(legacyACPChat, 'agent')).toBe(true)
+    expect(isSessionVisibleInSidebarMode(schedule, 'schedule')).toBe(true)
+    expect(isSessionVisibleInSidebarMode(schedule, 'recent')).toBe(false)
   })
 
   it('latestOutputLine returns the last non-empty line, trimmed', () => {
