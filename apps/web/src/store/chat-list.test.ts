@@ -4480,6 +4480,49 @@ describe('chat-list store', () => {
     expect(store.sessionId).toBe('session-1')
   })
 
+  it('does not fall back to a hidden schedule session after deleting the active recent session', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'schedule-1', bot_id: 'bot-1', title: 'Morning run', type: 'schedule' },
+        { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    expect(store.sessionId).toBe('session-1')
+
+    api.deleteSession.mockResolvedValueOnce(undefined)
+    await store.removeSession('session-1')
+
+    expect(store.sessions.map(session => session.id)).toEqual(['schedule-1'])
+    expect(store.sessionId).toBeNull()
+    expect(store.messages).toEqual([])
+  })
+
+  it('falls back within the schedule sidebar mode when deleting an active schedule session', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'schedule-1', bot_id: 'bot-1', title: 'Morning run', type: 'schedule' },
+        { id: 'schedule-2', bot_id: 'bot-1', title: 'Evening run', type: 'schedule' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    expect(store.sessionId).toBe('schedule-1')
+
+    api.deleteSession.mockResolvedValueOnce(undefined)
+    await store.removeSession('schedule-1', { fallbackMode: 'schedule' })
+
+    expect(store.sessions.map(session => session.id)).toEqual(['schedule-2'])
+    expect(store.sessionId).toBe('schedule-2')
+  })
+
   it('does not mutate the active bot state when a delete resolves after switching bots', async () => {
     api.fetchBots.mockResolvedValue([
       { id: 'bot-1', status: 'active', name: 'Bot A' },

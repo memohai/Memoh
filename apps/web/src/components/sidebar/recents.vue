@@ -351,7 +351,7 @@ async function handleDeleteSession() {
   if (!target || deleteSessionLoading.value) return
   deleteSessionLoading.value = true
   try {
-    await chatStore.removeSession(target.id)
+    await chatStore.removeSession(target.id, { fallbackMode: activeMode.value.id })
     deleteSessionDialogOpen.value = false
     sessionPendingDelete.value = null
   } finally {

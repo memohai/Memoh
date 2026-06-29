@@ -9,7 +9,7 @@ import { useUserStore } from '@/store/user'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { normalizedRuntimeType, provisionalSessionTitle, shouldRefreshFromMessageCreated, upsertById } from './chat-list.utils'
+import { isSessionVisibleInSidebarMode, normalizedRuntimeType, provisionalSessionTitle, shouldRefreshFromMessageCreated, sortByRecency, upsertById, type SidebarSessionMode } from './chat-list.utils'
 import {
   createSession,
   deleteSession as requestDeleteSession,
@@ -801,6 +801,11 @@ export const useChatStore = defineStore('chat', () => {
     forgetRememberedSession(id)
     turnGraphs.delete(id)
     selectedHeadTurnIds.delete(id)
+  }
+
+  function fallbackSessionAfterDelete(mode: SidebarSessionMode): SessionSummary | null {
+    const visibleSessions = sessions.value.filter(session => isSessionVisibleInSidebarMode(session, mode))
+    return sortByRecency(visibleSessions)[0] ?? null
   }
 
   function markSessionDeleted(botId: string, targetSessionId: string) {
@@ -3820,7 +3825,7 @@ export const useChatStore = defineStore('chat', () => {
     return { kind: 'handled' }
   }
 
-  async function removeSession(targetSessionId: string) {
+  async function removeSession(targetSessionId: string, options: { fallbackMode?: SidebarSessionMode } = {}) {
     const delId = targetSessionId.trim()
     if (!delId) return
     const bid = currentBotId.value ?? ''
@@ -3832,7 +3837,9 @@ export const useChatStore = defineStore('chat', () => {
     clearACPRuntimeStatus(bid, delId)
     removeSessionFromList(delId)
     if (sessionId.value !== delId) return
-    if (sessions.value.length === 0) {
+    const fallbackMode = options.fallbackMode ?? 'recent'
+    const nextSession = fallbackSessionAfterDelete(fallbackMode)
+    if (!nextSession) {
       cancelVariantSelectionLoad()
       sessionId.value = null
       explicitSessionSelection.value = false
@@ -3843,7 +3850,7 @@ export const useChatStore = defineStore('chat', () => {
       hasLoadedOlder.value = false
       return
     }
-    const next = sessions.value[0]!.id
+    const next = nextSession.id
     sessionId.value = next
     explicitSessionSelection.value = false
     draftIntent.value = false
