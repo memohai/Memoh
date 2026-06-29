@@ -87,7 +87,7 @@ base_url = "http://127.0.0.1:8085"
 providers_dir = "conf/providers"
 
 [supermarket]
-base_url = "http://127.0.0.1:5174"
+base_url = "https://supermarket.memoh.ai"
 
 [oauth_clients]
 config_path = "conf/oauth-clients.toml"
