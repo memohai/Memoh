@@ -1280,6 +1280,17 @@ func (p *SessionPool) resolveAgentSetup(ctx context.Context, botID, agentID stri
 			map[string]string{"agent_id": agentID, "setup_mode": string(mode)},
 		)
 	}
+	if !profileSupportsBackend(profile, workspaceInfo.Backend) {
+		reason := fmt.Sprintf("does not support workspace backend %q", workspaceInfo.Backend)
+		return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, acpfeedback.New(
+			acpfeedback.CodeAgentNotConfigured,
+			reason,
+			http.StatusBadRequest,
+			"chat.acp.agentNotConfigured",
+			fmt.Sprintf("%s %s", profile.DisplayName, reason),
+			map[string]string{"agent_id": agentID, "workspace_backend": workspaceInfo.Backend},
+		)
+	}
 	if mode != acpclient.SetupModeSelf {
 		if err := validateManagedFields(profile, setup.Managed, mode); err != nil {
 			return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, acpfeedback.New(
@@ -1585,6 +1596,22 @@ func profileSupportsSetupMode(profile acpprofile.Profile, mode acpclient.SetupMo
 	}
 	for _, supported := range profile.SetupModes {
 		if strings.EqualFold(strings.TrimSpace(supported), string(mode)) {
+			return true
+		}
+	}
+	return false
+}
+
+func profileSupportsBackend(profile acpprofile.Profile, backend string) bool {
+	if len(profile.SupportedBackends) == 0 {
+		return true
+	}
+	normalized := strings.TrimSpace(backend)
+	if normalized == "" {
+		normalized = bridge.WorkspaceBackendContainer
+	}
+	for _, supported := range profile.SupportedBackends {
+		if strings.EqualFold(strings.TrimSpace(supported), normalized) {
 			return true
 		}
 	}

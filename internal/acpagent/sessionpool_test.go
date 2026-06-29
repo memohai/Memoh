@@ -1402,6 +1402,38 @@ func TestSessionPoolRejectsUnsupportedSetupMode(t *testing.T) {
 	}
 }
 
+func TestSessionPoolRejectsUnsupportedBackend(t *testing.T) {
+	runner := &recordingRunner{
+		info:     bridge.WorkspaceInfo{Backend: "remote", DefaultWorkDir: "/data"},
+		startErr: errors.New("started"),
+	}
+	pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPAgentBot("bot-1", acpprofile.AgentHermesID, "api_key", nil)})
+	_, err := pool.Prompt(context.Background(), PromptInput{
+		BotID:     "bot-1",
+		SessionID: "session-1",
+		AgentID:   acpprofile.AgentHermesID,
+		Prompt:    "run",
+	})
+	if err == nil || !strings.Contains(err.Error(), `does not support workspace backend "remote"`) {
+		t.Fatalf("Prompt() error = %v, want unsupported workspace backend", err)
+	}
+	if runner.req.AgentID != "" {
+		t.Fatalf("runner should not have been started: %#v", runner.req)
+	}
+}
+
+func TestProfileSupportsBackend(t *testing.T) {
+	if !profileSupportsBackend(acpprofile.Profile{}, "custom-backend") {
+		t.Fatal("profile with no supported_backends should allow any backend")
+	}
+	if !profileSupportsBackend(acpprofile.Profile{SupportedBackends: []string{bridge.WorkspaceBackendContainer}}, "") {
+		t.Fatal("empty backend should be treated as container")
+	}
+	if profileSupportsBackend(acpprofile.Profile{SupportedBackends: []string{bridge.WorkspaceBackendLocal}}, bridge.WorkspaceBackendContainer) {
+		t.Fatal("local-only profile should reject container backend")
+	}
+}
+
 func TestValidateManagedACPConfigAcceptsHermesOpenAIAPIProvider(t *testing.T) {
 	profile, ok := acpprofile.Lookup(acpprofile.AgentHermesID)
 	if !ok {
