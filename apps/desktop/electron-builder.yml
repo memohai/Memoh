@@ -38,6 +38,10 @@ extraResources:
       - ${env.MEMOH_DESKTOP_GSTREAMER_TARGET}/**/*
 mac:
   category: public.app-category.productivity
+  # Electron 42 ships Chromium 148, whose hard floor is macOS 12 (Monterey).
+  # Pinning it stamps LSMinimumSystemVersion so the installer refuses macOS 11
+  # rather than installing an app that can't launch.
+  minimumSystemVersion: '12.0'
   target:
     - dmg
   icon: build/icon.icon
