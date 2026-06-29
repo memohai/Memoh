@@ -621,6 +621,8 @@ SELECT
   m.content,
   m.metadata,
   m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id,
   m.display_text,
   m.compact_id,

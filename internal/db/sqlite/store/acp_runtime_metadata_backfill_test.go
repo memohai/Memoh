@@ -20,7 +20,7 @@ const (
 // extractBotSessionsBackfillUpdate pulls the single "UPDATE bot_sessions ... ;"
 // backfill statement out of the EMBEDDED migration file so the test exercises
 // the real production SQL rather than a hand-copied literal. Reverting migration
-// 0026's json_patch(...) back to json_object(...) therefore fails this test.
+// 0027's json_patch(...) back to json_object(...) therefore fails this test.
 func extractBotSessionsBackfillUpdate(t *testing.T) string {
 	t.Helper()
 	raw, err := embeddeddb.MigrationsFS.ReadFile(sqliteACPRuntimeMigrationUp)

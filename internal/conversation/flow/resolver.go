@@ -1079,7 +1079,7 @@ func (r *Resolver) resolveRunConfig(ctx context.Context, p baseRunConfigParams) 
 	}
 
 	sessionType := strings.TrimSpace(p.SessionType)
-	runtimeType := sessionpkg.RuntimeModel
+	var runtimeType string
 	if sessionType == "" {
 		sessionType, runtimeType = r.resolveRunConfigSessionDescriptor(ctx, p.SessionID)
 	} else {

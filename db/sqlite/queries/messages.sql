@@ -531,6 +531,8 @@ SELECT
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id, m.display_text, m.compact_id, m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,

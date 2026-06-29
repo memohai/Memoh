@@ -884,6 +884,8 @@ SELECT
   m.content,
   m.metadata,
   m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id,
   m.display_text,
   m.compact_id,
@@ -919,6 +921,8 @@ type ListActiveMessagesSinceByTurnRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CompactID               pgtype.UUID        `json:"compact_id"`
@@ -951,6 +955,8 @@ func (q *Queries) ListActiveMessagesSinceByTurn(ctx context.Context, arg ListAct
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CompactID,

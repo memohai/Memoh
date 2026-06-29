@@ -3127,6 +3127,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function stageNewACPSession(input: ACPAgentSessionInput) {
+    cancelVariantSelectionLoad()
     selectSessionRequestId++
     clearPendingACPSession()
     sessionId.value = null
@@ -3139,6 +3140,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function resetToEmptyComposer(options: { clearPendingACP?: boolean; explicitSelection?: boolean; draftIntent?: boolean } = {}) {
+    cancelVariantSelectionLoad()
     selectSessionRequestId++
     if (options.clearPendingACP !== false) {
       clearPendingACPSession()
@@ -3995,13 +3997,14 @@ export const useChatStore = defineStore('chat', () => {
 
   async function sendMessage(text: string, attachments?: ChatAttachment[]): Promise<SendMessageResult> {
     const trimmed = text.trim()
-    if ((!trimmed && !attachments?.length) || streaming.value || loadingMessages.value || isMessageActionLoading(sessionId.value)) return { ok: false, stage: 'startup' }
+    if (!trimmed && !attachments?.length) return { ok: false, stage: 'startup' }
 
     const newCommand = await handleWebNewCommand(trimmed, attachments)
     if (newCommand.kind === 'handled') return { ok: true }
     if (newCommand.kind === 'error') {
       return { ok: false, stage: 'startup', error: newCommand.message, restoreInput: text, restoreAttachments: attachments }
     }
+    if (streaming.value || loadingMessages.value || isMessageActionLoading(sessionId.value)) return { ok: false, stage: 'startup' }
     if (!currentBotId.value) return { ok: false, stage: 'startup' }
 
     loading.value = true

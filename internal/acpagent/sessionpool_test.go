@@ -1244,11 +1244,12 @@ func TestSessionPoolSetupModeResolution(t *testing.T) {
 		"api_key":  "sk-hermes",
 	})})
 	_, err = hermesPool.Prompt(context.Background(), PromptInput{
-		BotID:       "bot-1",
-		SessionID:   "session-1",
-		AgentID:     acpprofile.AgentHermesID,
-		ProjectPath: "/data/project",
-		Prompt:      "run",
+		BotID:                 "bot-1",
+		SessionID:             "session-1",
+		AgentID:               acpprofile.AgentHermesID,
+		ProjectPath:           "/data/project",
+		Prompt:                "run",
+		RuntimeOwnerAccountID: "user-1",
 	})
 	if err == nil || err.Error() != "started" {
 		t.Fatalf("container Hermes api_key error = %v, want runner start error", err)
@@ -1288,11 +1289,12 @@ func TestSessionPoolSetupModeResolution(t *testing.T) {
 		"api_key":  "AIza-hermes",
 	})})
 	_, err = defaultBackendPool.Prompt(context.Background(), PromptInput{
-		BotID:       "bot-1",
-		SessionID:   "session-1",
-		AgentID:     acpprofile.AgentHermesID,
-		ProjectPath: "/data/project",
-		Prompt:      "run",
+		BotID:                 "bot-1",
+		SessionID:             "session-1",
+		AgentID:               acpprofile.AgentHermesID,
+		ProjectPath:           "/data/project",
+		Prompt:                "run",
+		RuntimeOwnerAccountID: "user-1",
 	})
 	if err == nil || err.Error() != "started" {
 		t.Fatalf("default backend Hermes api_key error = %v, want runner start error", err)
@@ -1318,11 +1320,12 @@ func TestSessionPoolSetupModeResolution(t *testing.T) {
 		"api_key":  "sk-local-hermes",
 	})})
 	_, err = localHermesPool.Prompt(context.Background(), PromptInput{
-		BotID:       "bot-1",
-		SessionID:   "session-1",
-		AgentID:     acpprofile.AgentHermesID,
-		ProjectPath: localHermesWorkDir,
-		Prompt:      "run",
+		BotID:                 "bot-1",
+		SessionID:             "session-1",
+		AgentID:               acpprofile.AgentHermesID,
+		ProjectPath:           localHermesWorkDir,
+		Prompt:                "run",
+		RuntimeOwnerAccountID: "user-1",
 	})
 	if err == nil || err.Error() != "started" {
 		t.Fatalf("local Hermes api_key error = %v, want runner start error", err)

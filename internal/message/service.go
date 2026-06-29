@@ -174,14 +174,6 @@ func (s *DBService) PublishMessageCreated(message Message) {
 	s.publishMessageCreated(message)
 }
 
-func (s *DBService) resolveRuntimeSnapshot(ctx context.Context, sessionID pgtype.UUID, sessionMode, runtimeType string) (string, string) {
-	var queries dbstore.Queries
-	if s != nil {
-		queries = s.queries
-	}
-	return resolveRuntimeSnapshotWithQueries(ctx, queries, sessionID, sessionMode, runtimeType)
-}
-
 func resolveRuntimeSnapshotWithQueries(ctx context.Context, queries dbstore.Queries, sessionID pgtype.UUID, sessionMode, runtimeType string) (string, string) {
 	sessionMode = normalizeSessionMode(sessionMode)
 	runtimeType = normalizeRuntimeType(runtimeType)
@@ -1276,6 +1268,8 @@ func toMessageFromActiveSinceBySessionRow(row sqlc.ListActiveMessagesSinceBySess
 		row.Content,
 		row.Metadata,
 		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
 		row.EventID,
 		row.DisplayText,
 		row.CreatedAt,

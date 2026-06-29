@@ -1015,10 +1015,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // Drop chat tabs for sessions whose delete request has actually succeeded.
   // Do not infer this from the paginated sessions list: an open older tab may be
   // valid even when it is not present in the current sidebar page.
-  function reconcileDeletedChatPanels() {
+  function reconcileDeletedChatPanels(targetBotId?: string | null) {
     const dock = api.value
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = (targetBotId ?? loadedBotId ?? currentBotId.value ?? '').trim()
     if (!dock || !bid) return
+    if (!targetBotId && loadedBotId && loadedBotId !== bid) return
     const deletedSessionIds = deletedSessionIdsByBot.get(bid)
     if (!deletedSessionIds || deletedSessionIds.size === 0) return
     const closingPanels: Array<{ id: string }> = []
@@ -1071,7 +1072,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       if (!(currentBotId.value ?? '').trim()) return
       // The active session's tab if one is selected, else a fresh draft (its
       // activation resets the global view via selectDraft).
-      const sid = ((selection.sessionId ?? '').trim() || (chatStore.sessionId ?? '').trim())
+      const sid = (chatStore.sessionId ?? '').trim()
       if (sid && !isDeletedSessionForCurrentBot(sid)) {
         openSessionChat({
           sessionId: sid,
@@ -1737,7 +1738,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const deletedIds = deletedSessionIdsByBot.get(deleted.botId) ?? new Set<string>()
     deletedIds.add(deleted.id)
     deletedSessionIdsByBot.set(deleted.botId, deletedIds)
-    reconcileDeletedChatPanels()
+    reconcileDeletedChatPanels(deleted.botId)
   })
 
   watch(
