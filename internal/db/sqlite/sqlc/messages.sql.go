@@ -2258,7 +2258,7 @@ JOIN bot_history_turns t ON t.id = gt.id
 LEFT JOIN bot_history_messages m ON m.turn_id = gt.id
 LEFT JOIN bot_history_messages rm ON rm.id = t.request_message_id
 LEFT JOIN request_assets ra ON ra.message_id = t.request_message_id
-GROUP BY gt.id, t.created_at, rm.content, rm.display_text, ra.request_asset_key
+GROUP BY gt.id, t.created_at, t.request_message_id, rm.content, rm.display_text, ra.request_asset_key
 ORDER BY COALESCE(MIN(m.created_at), t.created_at) ASC, gt.id ASC
 `
 
