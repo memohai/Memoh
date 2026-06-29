@@ -24,6 +24,8 @@ models:
     config:
       compatibilities: [tool-call]
       context_window: 131072
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
 
   - model_id: magistral-medium-latest
     name: Magistral Medium 1.2
