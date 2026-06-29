@@ -920,6 +920,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
   - model_id: "mistralai/mistral-medium-3.1"
     name: "Mistral: Mistral Medium 3.1"
     type: chat
@@ -2259,6 +2261,8 @@ models:
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 202752
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
   - model_id: "z-ai/glm-5v-turbo"
     name: "Z.ai: GLM 5V Turbo"
     type: chat
