@@ -244,6 +244,7 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		if errors.As(err, &feedbackErr) {
 			return err
 		}
+		result = ensureACPPromptOutput(result)
 		failedResult, failureDelta := acpFailureResult(result, err)
 		projected := projectedSnapshot()
 		failedResult.Output = filterACPProjectedOutput(failedResult.Output, projected)
@@ -252,18 +253,40 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		}
 		_ = r.persistACPRound(context.WithoutCancel(ctx), req, agentID, projectPath, failedResult, err)
 		emit(agentpkg.StreamEvent{Type: agentpkg.EventTextEnd})
-		emit(agentpkg.StreamEvent{Type: agentpkg.EventAbort})
+		emit(acpTerminalStreamEvent(agentpkg.EventAbort, failedResult))
 		return nil
 	}
 
 	emit(agentpkg.StreamEvent{Type: agentpkg.EventTextEnd})
 	projected := projectedSnapshot()
+	result = ensureACPPromptOutput(result)
 	result.Output = filterACPProjectedOutput(result.Output, projected)
 	if err := r.persistACPRound(context.WithoutCancel(ctx), req, agentID, projectPath, result, nil); err != nil {
 		r.logger.Error("ACP persist failed", slog.Any("error", err), slog.String("session_id", req.SessionID))
 	}
-	emit(agentpkg.StreamEvent{Type: agentpkg.EventEnd})
+	emit(acpTerminalStreamEvent(agentpkg.EventEnd, result))
 	return nil
+}
+
+func ensureACPPromptOutput(result acpclient.PromptResult) acpclient.PromptResult {
+	if len(result.Output) == 0 {
+		result.Output = acpclient.TranscriptFromEvents(result.Events, result.Text)
+	}
+	return result
+}
+
+func acpTerminalStreamEvent(eventType agentpkg.StreamEventType, result acpclient.PromptResult) agentpkg.StreamEvent {
+	result = ensureACPPromptOutput(result)
+	ev := agentpkg.StreamEvent{Type: eventType}
+	if data, err := json.Marshal(result.Output); err == nil {
+		ev.Messages = data
+	}
+	if result.Usage != nil {
+		if data, err := json.Marshal(result.Usage); err == nil {
+			ev.Usage = data
+		}
+	}
+	return ev
 }
 
 func validateSessionBot(botID, sessionID, sessionBotID string) error {

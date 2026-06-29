@@ -42,6 +42,7 @@ func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 		result: acpclient.PromptResult{
 			Text:       "done from codex",
 			StopReason: "end_turn",
+			Usage:      &sdk.Usage{InputTokens: 3, OutputTokens: 5, TotalTokens: 8},
 		},
 	}
 	resolver := &Resolver{
@@ -100,6 +101,9 @@ func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 	if got := messages.persisted[1].Metadata["acp_agent_id"]; got != "codex" {
 		t.Fatalf("assistant acp_agent_id = %#v, want codex", got)
 	}
+	if got := persistedText(t, messages.persisted[1].Content); got != "done from codex" {
+		t.Fatalf("persisted assistant text = %q, want done from codex", got)
+	}
 
 	events := drainAgentEvents(t, eventCh)
 	if !containsStreamEvent(events, agentpkg.EventStart) || !containsStreamEvent(events, agentpkg.EventEnd) {
@@ -107,6 +111,17 @@ func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 	}
 	if !containsTextDelta(events, "streamed from acp") {
 		t.Fatalf("events = %#v, want ACP stream delta", events)
+	}
+	end := requireStreamEvent(t, events, agentpkg.EventEnd)
+	if got := terminalAssistantText(t, end); got != "done from codex" {
+		t.Fatalf("terminal assistant text = %q, want done from codex", got)
+	}
+	var usage sdk.Usage
+	if err := json.Unmarshal(end.Usage, &usage); err != nil {
+		t.Fatalf("decode terminal usage: %v", err)
+	}
+	if usage.InputTokens != 3 || usage.OutputTokens != 5 || usage.TotalTokens != 8 {
+		t.Fatalf("terminal usage = %+v, want input=3 output=5 total=8", usage)
 	}
 }
 
@@ -281,6 +296,10 @@ func TestStreamChatRoutesACPAgentSessionToACPPool(t *testing.T) {
 	if !containsTextDelta(events, "streamed from acp") {
 		t.Fatalf("events = %#v, want ACP stream delta", events)
 	}
+	end := requireStreamEvent(t, events, agentpkg.EventEnd)
+	if got := terminalAssistantText(t, end); got != "done from codex" {
+		t.Fatalf("terminal assistant text = %q, want done from codex", got)
+	}
 }
 
 func TestStreamChatRoutesDiscussACPRuntimeSessionToACPPool(t *testing.T) {
@@ -338,6 +357,29 @@ func TestStreamChatRoutesDiscussACPRuntimeSessionToACPPool(t *testing.T) {
 	}
 	if !containsTextDelta(events, "streamed from acp") {
 		t.Fatalf("events = %#v, want ACP stream delta", events)
+	}
+}
+
+func TestACPTerminalStreamEventFallsBackToTranscriptEvents(t *testing.T) {
+	t.Parallel()
+
+	ev := acpTerminalStreamEvent(agentpkg.EventEnd, acpclient.PromptResult{
+		Events: []event.StreamEvent{{Type: event.TextDelta, Delta: "from transcript"}},
+		Usage:  &sdk.Usage{InputTokens: 2, OutputTokens: 4, TotalTokens: 6},
+	})
+
+	if ev.Type != agentpkg.EventEnd {
+		t.Fatalf("terminal event type = %s, want %s", ev.Type, agentpkg.EventEnd)
+	}
+	if got := terminalAssistantText(t, ev); got != "from transcript" {
+		t.Fatalf("terminal assistant text = %q, want from transcript", got)
+	}
+	var usage sdk.Usage
+	if err := json.Unmarshal(ev.Usage, &usage); err != nil {
+		t.Fatalf("decode terminal usage: %v", err)
+	}
+	if usage.InputTokens != 2 || usage.OutputTokens != 4 || usage.TotalTokens != 6 {
+		t.Fatalf("terminal usage = %+v, want input=2 output=4 total=6", usage)
 	}
 }
 
@@ -1155,8 +1197,9 @@ func TestStreamACPAgentWSFailurePersistsRoundAndSkipsMemory(t *testing.T) {
 		t.Fatalf("assistant error code metadata = %#v", messages.persisted[1].Metadata)
 	}
 	events := drainAgentEvents(t, eventCh)
-	if !containsStreamEvent(events, agentpkg.EventAbort) {
-		t.Fatalf("events = %#v, want agent abort", events)
+	abort := requireStreamEvent(t, events, agentpkg.EventAbort)
+	if got := terminalAssistantText(t, abort); got != "ACP agent failed to complete the turn. Please retry." {
+		t.Fatalf("terminal abort assistant text = %q, want sanitized failure", got)
 	}
 	select {
 	case got := <-memory.afterChat:
@@ -1705,6 +1748,32 @@ func containsStreamEvent(events []agentpkg.StreamEvent, eventType agentpkg.Strea
 		}
 	}
 	return false
+}
+
+func requireStreamEvent(t *testing.T, events []agentpkg.StreamEvent, eventType agentpkg.StreamEventType) agentpkg.StreamEvent {
+	t.Helper()
+	for _, event := range events {
+		if event.Type == eventType {
+			return event
+		}
+	}
+	t.Fatalf("events = %#v, want %s", events, eventType)
+	return agentpkg.StreamEvent{}
+}
+
+func terminalAssistantText(t *testing.T, event agentpkg.StreamEvent) string {
+	t.Helper()
+	var messages []conversation.ModelMessage
+	if err := json.Unmarshal(event.Messages, &messages); err != nil {
+		t.Fatalf("decode terminal messages: %v", err)
+	}
+	for _, msg := range messages {
+		if msg.Role == "assistant" {
+			return strings.TrimSpace(msg.TextContent())
+		}
+	}
+	t.Fatalf("terminal messages = %#v, want assistant message", messages)
+	return ""
 }
 
 func containsTextDelta(events []agentpkg.StreamEvent, delta string) bool {

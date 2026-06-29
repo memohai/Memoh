@@ -797,12 +797,13 @@ func TestDraftMode_ToolCallStartSendsPermanentMessage(t *testing.T) {
 func TestDraftMode_FinalEmptyBufferSkipsDuplicate(t *testing.T) {
 	adapter := NewTelegramAdapter(nil)
 	s := &telegramOutboundStream{
-		adapter:       adapter,
-		cfg:           channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
-		target:        "123",
-		isPrivateChat: true,
-		draftID:       1,
-		streamChatID:  123,
+		adapter:            adapter,
+		cfg:                channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		target:             "123",
+		isPrivateChat:      true,
+		draftID:            1,
+		streamChatID:       123,
+		draftPermanentSent: true,
 	}
 	ctx := context.Background()
 
@@ -830,6 +831,50 @@ func TestDraftMode_FinalEmptyBufferSkipsDuplicate(t *testing.T) {
 	}))
 	if err != nil {
 		t.Fatalf("StreamEventFinal with empty buffer in draft mode should succeed: %v", err)
+	}
+}
+
+func TestDraftMode_FinalOnlyPayloadSendsPermanentMessage(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	s := &telegramOutboundStream{
+		adapter:       adapter,
+		cfg:           channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		target:        "123",
+		isPrivateChat: true,
+		draftID:       1,
+		streamChatID:  123,
+	}
+	ctx := context.Background()
+
+	origGetBot := getOrCreateBotForTest
+	origSendText := sendTextForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return &tele.Bot{Token: "fake"}, nil
+	}
+	var sentText string
+	sendTextForTest = func(_ *tele.Bot, _ string, text string, _ int, _ string) (int64, int, error) {
+		sentText = text
+		return 123, 1, nil
+	}
+	defer func() {
+		getOrCreateBotForTest = origGetBot
+		sendTextForTest = origSendText
+	}()
+
+	err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{
+		Type: channel.StreamEventFinal,
+		Final: &channel.StreamFinalizePayload{
+			Message: channel.Message{Text: "final answer"},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("StreamEventFinal with final-only payload should succeed: %v", err)
+	}
+	if sentText != "final answer" {
+		t.Fatalf("expected final-only payload to be sent permanently, got %q", sentText)
+	}
+	if !s.draftPermanentSent {
+		t.Fatal("draftPermanentSent should be marked after final-only permanent send")
 	}
 }
 

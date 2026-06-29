@@ -2557,22 +2557,48 @@ func TestMapStreamChunkToChannelEvents_UserInputRequest(t *testing.T) {
 func TestMapStreamChunkToChannelEvents_FinalMessages(t *testing.T) {
 	t.Parallel()
 
-	chunk := `{"type":"agent_end","messages":[{"role":"assistant","content":"done"}]}`
-	events, messages, err := mapStreamChunkToChannelEvents(conversation.StreamChunk([]byte(chunk)))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	tests := []struct {
+		name      string
+		chunk     string
+		eventType channel.StreamEventType
+		wantEvent bool
+	}{
+		{
+			name:      "agent_end",
+			chunk:     `{"type":"agent_end","messages":[{"role":"assistant","content":"done"}]}`,
+			eventType: channel.StreamEventAgentEnd,
+			wantEvent: true,
+		},
+		{
+			name:  "agent_abort",
+			chunk: `{"type":"agent_abort","messages":[{"role":"assistant","content":"partial failure"}]}`,
+		},
 	}
-	if len(events) != 1 {
-		t.Fatalf("expected 1 event, got %d", len(events))
-	}
-	if events[0].Type != channel.StreamEventAgentEnd {
-		t.Fatalf("expected event type %q, got %q", channel.StreamEventAgentEnd, events[0].Type)
-	}
-	if len(messages) != 1 {
-		t.Fatalf("expected 1 final message, got %d", len(messages))
-	}
-	if messages[0].Role != "assistant" {
-		t.Fatalf("expected role assistant, got %q", messages[0].Role)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			events, messages, err := mapStreamChunkToChannelEvents(conversation.StreamChunk([]byte(tt.chunk)))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.wantEvent {
+				if len(events) != 1 {
+					t.Fatalf("expected 1 event, got %d", len(events))
+				}
+				if events[0].Type != tt.eventType {
+					t.Fatalf("expected event type %q, got %q", tt.eventType, events[0].Type)
+				}
+			} else if len(events) != 0 {
+				t.Fatalf("expected no channel event, got %d", len(events))
+			}
+			if len(messages) != 1 {
+				t.Fatalf("expected 1 final message, got %d", len(messages))
+			}
+			if messages[0].Role != "assistant" {
+				t.Fatalf("expected role assistant, got %q", messages[0].Role)
+			}
+		})
 	}
 }
 
