@@ -243,7 +243,7 @@
             <div class="shrink-0">
               <Select
                 :model-value="mermaidTheme"
-                @update:model-value="(value) => value && setMermaidTheme(value as MermaidTheme)"
+                @update:model-value="(value) => isMermaidTheme(value) && setMermaidTheme(value)"
               >
                 <SelectTrigger
                   size="sm"
@@ -298,7 +298,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@memohai/ui'
-import { useDark } from '@vueuse/core'
 import { Monitor, Moon, Sun } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref, watch } from 'vue'
@@ -315,6 +314,7 @@ import type { SearchableSelectOption } from '@/components/searchable-select-popo
 import ThemedMermaidBlock from '@/components/themed-mermaid-block/index.vue'
 import { colorSchemes, type ColorSchemeId, type ColorSchemeOption } from '@/constants/color-schemes'
 import { MERMAID_THEMES, type MermaidTheme, useSettingsStore, type ThemePreference } from '@/store/settings'
+import { isMermaidTheme } from '@/store/settings/mermaid'
 import { listBundledShikiThemes } from '@/store/settings/shiki-theme'
 import { cssFontFamilyDeclaration, DEFAULT_CODE_FONT_FAMILY, DEFAULT_CODE_FONT_SIZE_PX, DEFAULT_UI_FONT_SIZE_PX, normalizeCodeFontSizePx } from '@/store/settings/typography'
 
@@ -344,9 +344,8 @@ const MERMAID_PREVIEW_PROPS = {
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
-const { language, theme, colorScheme, uiFontFamily, codeFontFamily, uiFontSizePx, codeFontSizePx, shikiThemeLight, shikiThemeDark, mermaidTheme, defaultUiFontFamily, defaultCodeFontFamily } = storeToRefs(settingsStore)
+const { language, theme, colorScheme, uiFontFamily, codeFontFamily, uiFontSizePx, codeFontSizePx, shikiThemeLight, shikiThemeDark, mermaidTheme, defaultUiFontFamily, defaultCodeFontFamily, isDark } = storeToRefs(settingsStore)
 const { setLanguage, setTheme, setColorScheme, setUiFontFamily, setCodeFontFamily, setUiFontSizePx, setCodeFontSizePx, setShikiTheme, setMermaidTheme } = settingsStore
-const isDark = useDark()
 
 const mermaidThemeLabels: Record<MermaidTheme, string> = {
   auto: 'Auto',
