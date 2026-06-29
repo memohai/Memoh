@@ -1,7 +1,7 @@
 <template>
   <div
     ref="rootEl"
-    class="group/tab relative z-[1] flex h-full min-w-0 items-center overflow-visible pr-[1.6875rem] pb-[3.5px] pl-2"
+    class="group/tab relative z-[1] flex h-full min-w-0 items-center overflow-visible pr-[var(--tab-close-reserve)] pb-[var(--tab-inset)] pl-[var(--tab-pad-inline)]"
     @auxclick.middle.prevent="close"
   >
     <svg
@@ -26,9 +26,10 @@
       />
     </svg>
     <!-- Active state is signalled by text colour, fill, and the connected chip
-         shape, not by weight or size. Every tab is the same height. The tab's
-         reserved top border plus this bottom padding parks label and close on
-         the same optical center for active and inactive states. -->
+         shape, not by weight or size. Every tab is the same height. Label and
+         close share the strip's one optical centre (see the geometry contract in
+         dockview-theme.css): the tab's top inset plus this bottom padding give
+         both the same centred box, so neither needs a per-control nudge. -->
     <span
       class="relative z-[1] min-w-0 flex-1 truncate text-label leading-[1.3] tracking-normal transition-colors"
       :class="[
@@ -41,7 +42,7 @@
          it instead of colliding with the glyph. -->
     <div
       v-if="isDirty"
-      class="close-fade pointer-events-none absolute right-[0.1875rem] z-[2] flex items-center pl-6 pr-[0.1875rem] opacity-100 group-hover/tab:opacity-0"
+      class="close-fade pointer-events-none absolute right-[var(--tab-close-edge)] z-[2] flex items-center pl-6 pr-0 opacity-100 group-hover/tab:opacity-0"
     >
       <span class="flex size-5 items-center justify-center">
         <span
@@ -57,7 +58,7 @@
          button. The fade layer is click-through; only the button takes pointer
          events. Keyboard focus reveals it for a11y; middle-click closes without it. -->
     <div
-      class="close-fade pointer-events-none absolute right-[0.1875rem] z-[2] flex items-center pl-6 pr-[0.1875rem] opacity-0 group-hover/tab:opacity-100 focus-within:opacity-100"
+      class="close-fade pointer-events-none absolute right-[var(--tab-close-edge)] z-[2] flex items-center pl-6 pr-0 opacity-0 group-hover/tab:opacity-100 focus-within:opacity-100"
     >
       <!-- No own hover fill: the close affordance is read through the left→right
            fade (which already paints the chip's hover surface) plus the icon
@@ -65,7 +66,7 @@
            double-stacks chrome, so the ghost hover background is suppressed. -->
       <Button
         variant="ghost"
-        class="pointer-events-auto size-5 shrink-0 translate-y-[-0.5px] rounded-sm p-0 text-muted-foreground [--btn-ghost-hover:transparent] hover:text-foreground"
+        class="pointer-events-auto size-5 shrink-0 rounded-sm p-0 text-muted-foreground [--btn-ghost-hover:transparent] hover:text-foreground"
         :aria-label="t('chat.tabMenu.close')"
         @pointerdown.stop
         @mousedown.stop
@@ -102,9 +103,14 @@ const rootEl = ref<HTMLElement | null>(null)
 const panelId = props.params.api.id
 const title = ref(props.params.api.title ?? '')
 const isActive = ref(props.params.api.isActive)
+// First-paint placeholder ONLY — these mirror the CSS contract (200≈12.5rem tab,
+// 35 = 40px strip − 5px inset, 8 = --tab-radius, 1px stroke) just so the active
+// SVG has a sane shape for the one frame before onMounted measures the real DOM.
+// updateActiveTabShape() overwrites all of it; do NOT treat these as a source of
+// truth — the CSS tokens are. They exist because the path can't be empty pre-mount.
 const initialTabShape = buildActiveTabShape({
   width: 200,
-  height: 31,
+  height: 35,
   radius: 8,
   strokeWidth: 1,
 })
@@ -115,7 +121,7 @@ const activeTabShapeStyle = ref<Record<string, string>>({
   left: '-8px',
   top: '0px',
   width: '216px',
-  height: '31px',
+  height: '35px',
 })
 let resizeObserver: ResizeObserver | null = null
 let pendingShapeFrame = 0
@@ -299,37 +305,34 @@ function fmt(value: number) {
   pointer-events: none;
 }
 
-/* The close affordance blots out the title with the chip's own opaque hover colour:
- * transparent on the left so the text dissolves into the chip, fully opaque by the
- * button so NOTHING is legible underneath. --tab-hover-bg is inherited from .dv-tab
- * (the editor surface for the active tab, the hover tint otherwise), so the fade is
- * seamless with whatever the chip is wearing. Absolutely positioned, so painting it
- * never reserves a slot or resizes the chip. */
-/* Two stacked fades so the blot is ALWAYS opaque. --tab-hover-bg is the surface a
- * tab wears (opaque --surface-editor when active; the TRANSLUCENT hover overlay
- * otherwise), so painting it alone left the title legible under the close button on
- * a hovered tab. Layering the opaque --surface-chrome base UNDER that overlay
- * composites to exactly what the tab shows — chrome+overlay on hover, plain editor
- * when active (the opaque top layer hides the base) — but never see-through. */
+/* Close-fade: a left→right blot that paints the chip's own surface so the title
+ * dissolves under the close button and nothing stays legible beneath the glyph.
+ * It is TWO stacked gradients on purpose: --tab-hover-bg is the surface the tab
+ * wears (opaque --surface-editor when active, but the TRANSLUCENT hover overlay
+ * otherwise), so painting it alone left the title readable on a hovered tab.
+ * Layering an opaque --surface-chrome base UNDER it composites to exactly what the
+ * tab shows — chrome+overlay on hover, plain editor when active — but never
+ * see-through. Absolutely positioned, so it never reserves a slot or resizes the
+ * chip. (Geometry — why it's a centred band, not the full box — is on the rule.) */
 .close-fade {
-  /* Span the tab's content box (1px top via the border / 3.5px bottom) so the
-   * close affordance centres on the label. top:0 — the root is already below
-   * the 1px top border. */
-  top: 0;
-  bottom: 3.5px;
+  /* A band centred on the 20px lane — NOT the full tab box. On an active tab this
+   * paints the editor fill, so a full-height band with a straight top edge would
+   * spill editor colour ABOVE the rounded crown onto the chrome strip (the "close
+   * fill overflows" bug). The tab box floats --tab-inset below the strip top but
+   * its bottom meets the pane, so to stay centred on the lane the bottom inset is
+   * the top inset + --tab-inset. top:--tab-inset drops the band clear of the crown
+   * arc while still covering the label; bottom:2×--tab-inset keeps it centred. */
+  top: var(--tab-inset);
+  bottom: calc(var(--tab-inset) * 2);
   /* Instant hide when hover ends — avoids white/grey close-fade lingering on a tab
    * you just switched away from. Fade-in only while the tab group is hovered. */
   transition: none;
   background:
     linear-gradient(to right, transparent, var(--tab-hover-bg, var(--surface-editor)) 1rem),
     linear-gradient(to right, transparent, var(--surface-chrome) 1rem);
-  /* Both right corners follow the hover rectangle's radius so the fade does not
-   * square off the fill. */
-  border-radius:
-    0
-    var(--tab-hover-right-radius, var(--tab-hover-radius, 0.3125rem))
-    var(--tab-hover-right-radius, var(--tab-hover-radius, 0.3125rem))
-    0;
+  /* Right corners follow the hover pill radius so the fade never squares off the
+   * fill on an inactive hovered tab. */
+  border-radius: 0 var(--tab-hover-radius) var(--tab-hover-radius) 0;
 }
 
 .group\/tab:hover .close-fade,

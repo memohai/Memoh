@@ -18,7 +18,7 @@
         <Button
           variant="ghost"
           size="icon-sm"
-          class="size-7 shrink-0 translate-y-[0.75px] rounded-full p-0 text-muted-foreground hover:text-foreground data-[state=open]:text-foreground"
+          class="size-7 shrink-0 rounded-full p-0 text-muted-foreground hover:text-foreground data-[state=open]:text-foreground"
           :title="t('chat.tabBarToolkit.openMenu')"
           :aria-label="t('chat.tabBarToolkit.openMenu')"
         >
