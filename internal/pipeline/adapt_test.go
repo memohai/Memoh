@@ -54,6 +54,37 @@ func TestAdaptInbound_PreservesMention_FromParts(t *testing.T) {
 	}
 }
 
+func TestAdaptInbound_PreservesAddressingMetadata(t *testing.T) {
+	msg := channel.InboundMessage{
+		Channel: channel.ChannelTypeTelegram,
+		Message: channel.Message{ID: "m1", Text: "@akazwz_bot hi"},
+		Metadata: map[string]any{
+			"is_mentioned":    true,
+			"is_reply_to_bot": "true",
+		},
+		ReceivedAt: time.Unix(1700000000, 0).UTC(),
+	}
+	me := AdaptInbound(msg, "sess", "ci-user", "Alice").(MessageEvent)
+	if !me.MentionsMe {
+		t.Fatal("expected is_mentioned metadata to set MessageEvent.MentionsMe")
+	}
+	if !me.RepliesToMe {
+		t.Fatal("expected is_reply_to_bot metadata to set MessageEvent.RepliesToMe")
+	}
+
+	ic := Reduce(NewEmptyIC("sess"), me)
+	rc := Render(ic, RenderParams{})
+	if len(rc) != 1 {
+		t.Fatalf("expected one rendered segment, got %d", len(rc))
+	}
+	if !rc[0].MentionsMe {
+		t.Fatal("expected rendered segment to preserve MentionsMe without BotUserID")
+	}
+	if !rc[0].RepliesToMe {
+		t.Fatal("expected rendered segment to preserve RepliesToMe without BotUserID")
+	}
+}
+
 func TestAdaptInbound_PreservesLink_FromParts(t *testing.T) {
 	msg := channel.InboundMessage{
 		Message: channel.Message{

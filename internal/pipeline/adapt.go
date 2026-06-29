@@ -68,6 +68,8 @@ func adaptMessage(msg channel.InboundMessage, sessionID, channelIdentityID, disp
 		ReplyToPreview:   replyToPreview,
 		ForwardInfo:      forwardInfo,
 		Attachments:      attachments,
+		MentionsMe:       metadataBool(msg.Metadata, "is_mentioned"),
+		RepliesToMe:      metadataBool(msg.Metadata, "is_reply_to_bot"),
 		Conversation: ConversationMeta{
 			Channel:          msg.Channel.String(),
 			ConversationName: strings.TrimSpace(msg.Conversation.Name),
