@@ -22,6 +22,8 @@ export interface FileTreeContext {
   isSelected: (path: string) => boolean
   toggleSelect: (entry: HandlersFsFileInfo, selected: boolean) => void
   openFile: (entry: HandlersFsFileInfo) => void
+  openFilePinned: (entry: HandlersFsFileInfo) => void
+  openFileToSide: (entry: HandlersFsFileInfo) => void
   requestDownload: (entry: HandlersFsFileInfo) => void
   requestRename: (entry: HandlersFsFileInfo) => void
   requestDelete: (entry: HandlersFsFileInfo) => void

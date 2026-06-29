@@ -608,33 +608,41 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     return hasBotPermission(currentBot.value?.current_user_permissions, permission)
   }
 
-  // Resolve a group an EDITOR-class panel may join. A terminal-only group is
-  // exclusive, so we never let a non-terminal panel land in one: prefer the
-  // caller's group (if not a terminal group), then the active group, then the
-  // last editor group to hold focus, then any non-terminal group. If only
-  // terminal groups exist, open ABOVE one so the panel gets its own group
-  // instead of joining the terminals. Undefined → let dockview create the first
-  // group (empty dock).
+  // Resolve a non-terminal group to anchor against. A terminal-only group is
+  // exclusive, so we never let an editor panel land in / split off one: prefer
+  // the caller's group (if not terminal), then the active group, then the last
+  // editor group to hold focus, then any non-terminal group. Undefined → there is
+  // no editor group to anchor against (empty dock, or only terminal groups exist).
+  // This is the single source of the candidate-priority order; nonTerminalTarget
+  // wraps it for the "join a group" case, openFileToSide uses the group directly
+  // for the "split beside a group" case.
+  function nonTerminalAnchorGroup(
+    dock: DockviewApi,
+    groupId?: string,
+  ): DockviewGroupPanel | undefined {
+    const explicit = groupId ? dock.getGroup(groupId) : undefined
+    if (explicit && !isTerminalOnlyGroup(explicit)) return explicit
+    const active = dock.activeGroup
+    if (active && !isTerminalOnlyGroup(active)) return active
+    if (lastNonTerminalGroupId) {
+      const last = dock.getGroup(lastNonTerminalGroupId)
+      if (last && !isTerminalOnlyGroup(last)) return last
+    }
+    return dock.groups.find(g => !isTerminalOnlyGroup(g))
+  }
+
+  // Resolve a group an EDITOR-class panel may JOIN. Reuses nonTerminalAnchorGroup
+  // for the candidate priority (caller → active → last editor → any non-terminal),
+  // then returns it as a 'within' target. When no non-terminal group exists but
+  // terminal groups do, open ABOVE the first group so the panel gets its own group
+  // instead of joining the terminals. Undefined → empty dock (let dockview create
+  // the first group).
   function nonTerminalTarget(
     dock: DockviewApi,
     groupId?: string,
   ): { referenceGroup: string, direction: 'within' | 'above' } | undefined {
-    const explicit = groupId ? dock.getGroup(groupId) : undefined
-    if (explicit && !isTerminalOnlyGroup(explicit)) {
-      return { referenceGroup: explicit.id, direction: 'within' }
-    }
-    const active = dock.activeGroup
-    if (active && !isTerminalOnlyGroup(active)) {
-      return { referenceGroup: active.id, direction: 'within' }
-    }
-    if (lastNonTerminalGroupId) {
-      const last = dock.getGroup(lastNonTerminalGroupId)
-      if (last && !isTerminalOnlyGroup(last)) {
-        return { referenceGroup: last.id, direction: 'within' }
-      }
-    }
-    const other = dock.groups.find(g => !isTerminalOnlyGroup(g))
-    if (other) return { referenceGroup: other.id, direction: 'within' }
+    const anchor = nonTerminalAnchorGroup(dock, groupId)
+    if (anchor) return { referenceGroup: anchor.id, direction: 'within' }
     const fallback = dock.groups[0]
     if (fallback) return { referenceGroup: fallback.id, direction: 'above' }
     return undefined
@@ -876,6 +884,41 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     })
   }
 
+  /** Open a session as a PINNED chat tab. This is the sidebar right-click "Open
+   * in New Tab": a single click (openSessionChat) reuses the group's ephemeral
+   * chat slot so browsing the sidebar swaps one preview tab, but an explicit
+   * right-click means "give me a separate tab" — so it lands as a pinned chat
+   * tab the preview slot can never evict. Stays in ONE group (chat split is
+   * disabled — a single global messages array means two visible chat panels
+   * would both render the active session), and tabs are mutually exclusive, so
+   * a pinned chat tab is safe: activating it renders its session. An already-open
+   * tab for the session is promoted to pinned + focused. */
+  function openSessionChatPinned(opts: { sessionId: string, title?: string, groupId?: string }) {
+    const dock = api.value
+    if (!dock) return
+    const sid = opts.sessionId.trim()
+    if (!sid) return
+    const bid = (currentBotId.value ?? '').trim()
+    if (!bid) return
+    const title = opts.title?.trim() || chatTitleFallbackFor(sid)
+    const existing = chatPanelForSession(sid)
+    if (existing) {
+      existing.api.setTitle(title)
+      pinPanel(existing.id)
+      focusPanel(existing)
+      return
+    }
+    const target = nonTerminalTarget(dock, opts.groupId)
+    dock.addPanel({
+      id: nextChatPanelId(bid),
+      component: 'chat',
+      title,
+      params: { sessionId: sid },
+      renderer: 'always',
+      ...(target ? { position: target } : {}),
+    })
+  }
+
   /** Open or focus the single draft chat tab (no session yet). */
   function openDraftChat(opts?: { title?: string, groupId?: string }) {
     const dock = api.value
@@ -997,6 +1040,82 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       component: 'file',
       title: fileBaseName(path),
       params: { filePath: path },
+    })
+  }
+
+  // Open a file as a PINNED tab in the active editor group. This is the
+  // right-click "Open": a single click opens an ephemeral preview (replaced by
+  // the next preview open), but an explicit right-click → Open means "keep this
+  // one" — so it lands as a normal pinned tab that the preview slot can never
+  // evict. Same group as a preview (no split — that is Open to the Side), it
+  // just skips the ephemeral mark. A file already open is promoted to pinned +
+  // focused rather than duplicated.
+  function openFilePinned(filePath: string, groupId?: string) {
+    if (!hasCurrentPermission('workspace_read')) return
+    const path = (filePath ?? '').trim()
+    if (!path) return
+    const dock = api.value
+    if (!dock) return
+    const id = `file:${path}`
+    const existing = dock.getPanel(id)
+    if (existing) {
+      pinPanel(existing.id)
+      focusPanel(existing)
+      return
+    }
+    const target = nonTerminalTarget(dock, groupId)
+    dock.addPanel({
+      id,
+      component: 'file',
+      title: fileBaseName(path),
+      params: { filePath: path },
+      renderer: 'always',
+      ...(target ? { position: target } : {}),
+    })
+  }
+
+  // "Open to the Side": show a file as a PINNED panel in a group to the RIGHT of
+  // the active editor group. dockview enforces ONE panel per id (a file can't be
+  // opened twice), so this is an ACTION not a duplicate-open: if the file is
+  // already open anywhere, the existing panel is MOVED to a fresh right-side group
+  // (api.moveTo) rather than focused in place — so right-clicking "Open to the
+  // Side" always lands the file beside its neighbour, even when it was sitting in
+  // the active group as a tab. Pinned from the start (never in ephemeralPanels) so
+  // the preview slot can't evict it. A brand-new file is added split-right.
+  function openFileToSide(filePath: string, groupId?: string) {
+    if (!hasCurrentPermission('workspace_read')) return
+    const path = (filePath ?? '').trim()
+    if (!path) return
+    const dock = api.value
+    if (!dock) return
+    const id = `file:${path}`
+    // Anchor the split off an EDITOR group, never the terminal strip (matches
+    // openFilePinned's terminal-exclusion).
+    const anchor = nonTerminalAnchorGroup(dock, groupId)
+    const existing = dock.getPanel(id)
+    if (existing) {
+      pinPanel(existing.id)
+      // Already alone in its own group → it's effectively "to the side" already,
+      // so just focus it instead of moving (which would nest another group and
+      // shuffle the layout on every repeat). Otherwise pull it out beside the
+      // anchor (or its own group when there is no editor anchor to split from).
+      const alreadyAlone = existing.group.panels.length === 1
+      if (!alreadyAlone) {
+        existing.api.moveTo({ group: anchor ?? existing.group, position: 'right' })
+      }
+      focusPanel(existing)
+      return
+    }
+    const position = anchor
+      ? { referenceGroup: anchor.id, direction: 'right' as const }
+      : undefined
+    dock.addPanel({
+      id,
+      component: 'file',
+      title: fileBaseName(path),
+      params: { filePath: path },
+      renderer: 'always',
+      ...(position ? { position } : {}),
     })
   }
 
@@ -1658,8 +1777,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     showWorkbench,
     hideWorkbench,
     openSessionChat,
+    openSessionChatPinned,
     openDraftChat,
     openFile,
+    openFilePinned,
+    openFileToSide,
     openPreview,
     openAsset,
     openFilesAt,
