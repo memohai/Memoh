@@ -218,6 +218,12 @@ func (s *Service) Export(ctx context.Context, botID string, opts ExportOptions, 
 		if err := writer.writeJSON("history/sessions.json", "bot_sessions", data.History.Sessions, opts); err != nil {
 			return err
 		}
+		if err := writer.writeJSON("history/turns.json", "bot_history_turns", data.History.Turns, opts); err != nil {
+			return err
+		}
+		if err := writer.writeJSON("history/turn_heads.json", "bot_session_turn_heads", data.History.TurnHeads, opts); err != nil {
+			return err
+		}
 		if err := writer.writeJSON("history/messages.json", "bot_messages", data.History.Messages, opts); err != nil {
 			return err
 		}
@@ -481,6 +487,49 @@ func (s *Service) collectHistory(ctx context.Context, botID string, includeAsset
 	var history backupHistory
 	if sessions, err := s.queries.ListSessionsByBot(ctx, pgBotID); err == nil {
 		history.Sessions = sessions
+		turnsByID := map[string]dbsqlc.BotHistoryTurn{}
+		turnHeads := make([]dbsqlc.BotSessionTurnHead, 0, len(sessions))
+		for _, session := range sessions {
+			sessionTurns, turnErr := s.queries.ListSessionTurnGraphTurns(ctx, session.ID)
+			if turnErr != nil {
+				warnings = append(warnings, "session turns export failed: "+turnErr.Error())
+				continue
+			}
+			for _, turn := range sessionTurns {
+				turnsByID[turn.ID.String()] = turn
+			}
+			sessionHeads, headsErr := s.queries.ListSessionTurnHeads(ctx, session.ID)
+			if headsErr != nil {
+				warnings = append(warnings, "session turn heads export failed: "+headsErr.Error())
+				continue
+			}
+			turnHeads = append(turnHeads, sessionHeads...)
+		}
+		turns := make([]dbsqlc.BotHistoryTurn, 0, len(turnsByID))
+		for _, turn := range turnsByID {
+			turns = append(turns, turn)
+		}
+		sort.SliceStable(turns, func(i, j int) bool {
+			left := turns[i]
+			right := turns[j]
+			if left.CreatedAt.Time.Equal(right.CreatedAt.Time) {
+				return left.ID.String() < right.ID.String()
+			}
+			return left.CreatedAt.Time.Before(right.CreatedAt.Time)
+		})
+		sort.SliceStable(turnHeads, func(i, j int) bool {
+			left := turnHeads[i]
+			right := turnHeads[j]
+			if left.CreatedAt.Time.Equal(right.CreatedAt.Time) {
+				if left.SessionID == right.SessionID {
+					return left.HeadTurnID.String() < right.HeadTurnID.String()
+				}
+				return left.SessionID.String() < right.SessionID.String()
+			}
+			return left.CreatedAt.Time.Before(right.CreatedAt.Time)
+		})
+		history.Turns = turns
+		history.TurnHeads = turnHeads
 	} else {
 		warnings = append(warnings, "sessions export failed: "+err.Error())
 	}

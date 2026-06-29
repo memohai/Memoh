@@ -50,6 +50,7 @@ func (h *SessionHandler) Register(e *echo.Echo) {
 	g.POST("", h.CreateSession)
 	g.GET("", h.ListSessions)
 	g.GET("/:session_id", h.GetSession)
+	g.POST("/:session_id/fork", h.ForkSession)
 	g.PATCH("/:session_id", h.UpdateSession)
 	g.DELETE("/:session_id", h.DeleteSession)
 }
@@ -69,6 +70,11 @@ type updateSessionRequest struct {
 	Title    *string        `json:"title,omitempty"`
 	Type     *string        `json:"type,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+type forkSessionRequest struct {
+	MessageID      string `json:"message_id" validate:"required"`
+	BaseHeadTurnID string `json:"base_head_turn_id,omitempty"`
 }
 
 // CreateSession godoc
@@ -143,6 +149,64 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 	return c.JSON(http.StatusCreated, sess)
 }
 
+// ForkSession godoc
+// @Summary Fork a chat session from an assistant reply
+// @Tags sessions
+// @Param bot_id path string true "Bot ID"
+// @Param session_id path string true "Source session ID"
+// @Param body body forkSessionRequest true "Fork source message"
+// @Success 201 {object} session.Session
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Router /bots/{bot_id}/sessions/{session_id}/fork [post].
+func (h *SessionHandler) ForkSession(c echo.Context) error {
+	channelIdentityID, err := RequireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	sessionID := strings.TrimSpace(c.Param("session_id"))
+	if sessionID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
+	}
+	bot, _, source, err := h.authorizeSession(c, channelIdentityID, botID, sessionID)
+	if err != nil {
+		return err
+	}
+	if source.Type != session.TypeChat {
+		return echo.NewHTTPError(http.StatusConflict, "only chat sessions can be forked")
+	}
+
+	var req forkSessionRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	messageID := strings.TrimSpace(req.MessageID)
+	if messageID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "message_id is required")
+	}
+	if _, err := uuid.Parse(messageID); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid message_id")
+	}
+
+	forked, err := h.sessionService.ForkFromAssistantMessage(c.Request().Context(), session.ForkFromAssistantInput{
+		BotID:           bot.ID,
+		SessionID:       source.ID,
+		MessageID:       messageID,
+		BaseHeadTurnID:  strings.TrimSpace(req.BaseHeadTurnID),
+		CreatedByUserID: channelIdentityID,
+	})
+	if err != nil {
+		return sessionForkError(err)
+	}
+	return c.JSON(http.StatusCreated, forked)
+}
+
 // ListSessions godoc
 // @Summary List bot sessions
 // @Tags sessions
@@ -190,10 +254,16 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 		return err
 	}
 	filter := session.ListFilter{ParentSessionID: parentSessionID}
+	if !bots.HasPermission(perms, bots.PermissionManage) {
+		types = filterSessionTypesForPermissions(types, perms)
+	}
 
 	// Initialize to an empty slice so an empty page serializes as `"items": []`
 	// rather than `"items": null`, sparing clients a null check.
 	sessions := []session.Session{}
+	if len(types) == 0 {
+		return c.JSON(http.StatusOK, listSessionsResponse{Items: sessions})
+	}
 	var (
 		nextCursor   session.SessionCursor
 		hasMorePages bool
@@ -606,6 +676,16 @@ func canAccessSession(sess session.Session, userID string, perms []string) bool 
 	return bots.HasPermission(perms, requiredReadPermissionForSessionType(sess.Type))
 }
 
+func filterSessionTypesForPermissions(types []string, perms []string) []string {
+	out := make([]string, 0, len(types))
+	for _, typ := range types {
+		if bots.HasPermission(perms, requiredReadPermissionForSessionType(typ)) {
+			out = append(out, typ)
+		}
+	}
+	return out
+}
+
 func filterSessionsForPermissions(items []session.Session, userID string, perms []string) []session.Session {
 	if bots.HasPermission(perms, bots.PermissionManage) {
 		return items
@@ -646,6 +726,19 @@ func sessionServiceError(err error) error {
 		return echo.NewHTTPError(http.StatusForbidden, err.Error())
 	default:
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+}
+
+func sessionForkError(err error) error {
+	switch {
+	case errors.Is(err, session.ErrForkSourceNotFound):
+		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+	case errors.Is(err, session.ErrForkSourceNotReply):
+		return echo.NewHTTPError(http.StatusConflict, "message is not a visible assistant reply")
+	case errors.Is(err, session.ErrForkSourceNotChat):
+		return echo.NewHTTPError(http.StatusConflict, "only chat sessions can be forked")
+	default:
+		return sessionServiceError(err)
 	}
 }
 

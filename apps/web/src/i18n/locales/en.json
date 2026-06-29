@@ -383,6 +383,11 @@
     "thinkingDone": "Thinking complete",
     "showMore": "Show more",
     "showLess": "Show less",
+    "errors": {
+      "forkFailed": "Failed to fork session",
+      "loadVariantFailed": "Failed to switch response",
+      "sessionDeleted": "This session has been deleted"
+    },
     "actions": {
       "copy": "Copy",
       "copied": "Copied",
@@ -390,7 +395,18 @@
       "share": "Share",
       "retry": "Try again",
       "fork": "Fork",
+      "createFork": "Create fork",
       "more": "More",
+      "requestVariant": {
+        "previous": "Previous request",
+        "next": "Next request",
+        "label": "Request {current} of {total}"
+      },
+      "responseVariant": {
+        "previous": "Previous response",
+        "next": "Next response",
+        "label": "Response {current} of {total}"
+      },
       "readAloud": "Read aloud"
     },
     "process": {

@@ -246,6 +246,8 @@ type ChatRequest struct {
 	ForwardSender             string           `json:"-"`
 	ForwardDate               int64            `json:"-"`
 	UserMessagePersisted      bool             `json:"-"`
+	RewriteTargetMessageID    string           `json:"-"`
+	BaseHeadTurnID            string           `json:"-"`
 	EventID                   string           `json:"-"`
 	RawQuery                  string           `json:"-"`
 	ToolHTTPURL               string           `json:"-"`
@@ -285,6 +287,23 @@ type InjectedMessageRecord struct {
 	// this injection. Used to determine the correct insertion position when
 	// interleaving injected messages into the persisted round.
 	InsertAfter int
+}
+
+type TurnAnchorRole string
+
+const (
+	TurnAnchorRoleUser      TurnAnchorRole = "user"
+	TurnAnchorRoleAssistant TurnAnchorRole = "assistant"
+)
+
+// TurnAnchor is the boundary object that maps a clicked UI message to the turn
+// it belongs to under a specific session head.
+type TurnAnchor struct {
+	Role           TurnAnchorRole
+	MessageID      string
+	TurnID         string
+	ParentTurnID   string
+	BaseHeadTurnID string
 }
 
 // ChatResponse is the output of a non-streaming chat call.

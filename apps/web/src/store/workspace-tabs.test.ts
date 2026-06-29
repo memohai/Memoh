@@ -1,5 +1,5 @@
-import { nextTick, reactive } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { nextTick, reactive, ref } from 'vue'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatSelectionStore } from './chat-selection'
 import { useWorkspaceTabsStore } from './workspace-tabs'
@@ -18,6 +18,7 @@ const chatStoreMock = vi.hoisted(() => ({
   createNewSession: vi.fn(async () => {}),
   selectSession: vi.fn(async () => {}),
   selectDraft: vi.fn(() => {}),
+  deletedSession: undefined as unknown as ReturnType<typeof ref<{ id: string, botId: string, seq: number } | null>>,
   knownSessionSummary: vi.fn((sessionId: string) =>
     chatStoreMock.knownSessions.find(session => session.id === sessionId)
     ?? chatStoreMock.sessions.find(session => session.id === sessionId)
@@ -25,14 +26,21 @@ const chatStoreMock = vi.hoisted(() => ({
   ),
 }))
 
+const chatStoreReturn = vi.hoisted(() => ({
+  value: null as Record<string, unknown> | null,
+}))
+
 vi.mock('@/store/chat-list', () => ({
-  useChatStore: () => ({
+  useChatStore: () => chatStoreReturn.value ?? (chatStoreReturn.value = {
     sessionId: null,
     sessions: chatStoreMock.sessions,
     knownSessions: chatStoreMock.knownSessions,
     loadingChats: false,
     activeSession: null,
     userSentInSession: null,
+    get deletedSession() {
+      return chatStoreMock.deletedSession.value
+    },
     bots: [
       {
         id: 'bot-1',
@@ -56,12 +64,7 @@ interface FakePanel {
   component: string
   params: Record<string, unknown>
   title: string
-  group?: {
-    api: {
-      setActivePanel: (panel: FakePanel) => void
-      setActive: () => void
-    }
-  }
+  group?: FakeGroup
   api: {
     setActive: () => void
     close: () => void
@@ -71,11 +74,55 @@ interface FakePanel {
   }
 }
 
+interface FakeGroup {
+  id: string
+  element: HTMLElement
+  api: {
+    getHeaderPosition: () => 'top' | 'bottom'
+    setHeaderPosition: ReturnType<typeof vi.fn>
+    setActivePanel: (panel: FakePanel) => void
+    setActive: () => void
+    setSize: ReturnType<typeof vi.fn>
+  }
+  readonly panels: FakePanel[]
+  readonly activePanel: FakePanel | null
+}
+
 function createFakeDock() {
   const panels: FakePanel[] = []
   const removeListeners: Array<(panel: FakePanel) => void> = []
+  const activePanelListeners: Array<(panel: FakePanel | null) => void> = []
+  const layoutListeners: Array<() => void> = []
+  const closeVetoPanelIds = new Set<string>()
   let activePanel: FakePanel | null = null
+  const setActivePanel = (panel: FakePanel | null) => {
+    activePanel = panel
+    activePanelListeners.forEach(listener => listener(panel))
+  }
   const noopDisposable = () => ({ dispose: () => {} })
+  const layoutDisposable = (listener: () => void) => {
+    layoutListeners.push(listener)
+    return {
+      dispose: () => {
+        const idx = layoutListeners.indexOf(listener)
+        if (idx >= 0) layoutListeners.splice(idx, 1)
+      },
+    }
+  }
+  const emitLayoutChange = () => {
+    queueMicrotask(() => {
+      layoutListeners.forEach(listener => listener())
+    })
+  }
+  const activePanelDisposable = (listener: (panel: FakePanel | null) => void) => {
+    activePanelListeners.push(listener)
+    return {
+      dispose: () => {
+        const idx = activePanelListeners.indexOf(listener)
+        if (idx >= 0) activePanelListeners.splice(idx, 1)
+      },
+    }
+  }
   const removeDisposable = (listener: (panel: FakePanel) => void) => {
     removeListeners.push(listener)
     return {
@@ -96,6 +143,9 @@ function createFakeDock() {
     api: {
       getHeaderPosition: () => 'top' as const,
       setHeaderPosition: vi.fn(),
+      setActivePanel: (panel: FakePanel) => setActivePanel(panel),
+      setActive: () => {},
+      setSize: vi.fn(),
     },
     get panels() {
       return panels
@@ -111,8 +161,11 @@ function createFakeDock() {
     get activePanel() {
       return activePanel
     },
-    onDidActivePanelChange: noopDisposable,
-    onDidLayoutChange: noopDisposable,
+    get activeGroup() {
+      return activePanel?.group ?? group
+    },
+    onDidActivePanelChange: activePanelDisposable,
+    onDidLayoutChange: layoutDisposable,
     onDidRemovePanel: removeDisposable,
     onDidAddPanel: noopDisposable,
     onDidMovePanel: noopDisposable,
@@ -140,13 +193,15 @@ function createFakeDock() {
         title: options.title ?? '',
         api: {
           setActive: () => {
-            activePanel = panel
+            setActivePanel(panel)
           },
           close: () => {
+            if (closeVetoPanelIds.has(panel.id)) return
             const idx = panels.indexOf(panel)
             if (idx >= 0) panels.splice(idx, 1)
-            if (activePanel === panel) activePanel = panels[0] ?? null
             removeListeners.forEach(listener => listener(panel))
+            if (activePanel === panel) setActivePanel(panels[0] ?? null)
+            emitLayoutChange()
           },
           setTitle: (title: string) => {
             panel.title = title
@@ -159,24 +214,39 @@ function createFakeDock() {
           },
         },
       }
-      panel.group = {
-        api: {
-          setActivePanel: (nextPanel: FakePanel) => {
-            activePanel = nextPanel
-          },
-          setActive: () => {},
-        },
-      }
+      panel.group = group
       panels.push(panel)
-      activePanel = panel
+      setActivePanel(panel)
+      emitLayoutChange()
       return panel
     },
     clear() {
       panels.splice(0, panels.length)
-      activePanel = null
+      setActivePanel(null)
+      emitLayoutChange()
+    },
+    vetoCloseUntilAllowed(id: string) {
+      closeVetoPanelIds.add(id)
+    },
+    allowClose(id: string) {
+      closeVetoPanelIds.delete(id)
+    },
+    activePanelListenerCount() {
+      return activePanelListeners.length
     },
     toJSON() {
-      return { fake: true }
+      return {
+        grid: { root: { type: 'leaf', data: {} } },
+        panels: Object.fromEntries(panels.map(panel => [
+          panel.id,
+          {
+            id: panel.id,
+            contentComponent: panel.component,
+            title: panel.title,
+            params: { ...panel.params },
+          },
+        ])),
+      }
     },
     fromJSON(data?: {
       panels?: Record<string, {
@@ -206,6 +276,10 @@ async function flushDraftChatFallback() {
 }
 
 describe('workspace layout store', () => {
+  afterEach(() => {
+    useWorkspaceTabsStore().releaseApi()
+  })
+
   beforeEach(() => {
     const storage = new Map<string, string>()
     vi.stubGlobal('localStorage', {
@@ -217,8 +291,10 @@ describe('workspace layout store', () => {
     chatStoreMock.createNewSession.mockClear()
     chatStoreMock.selectSession.mockClear()
     chatStoreMock.selectDraft.mockClear()
+    chatStoreMock.deletedSession = ref(null)
     chatStoreMock.sessions = reactive([]) as typeof chatStoreMock.sessions
     chatStoreMock.knownSessions = reactive([]) as typeof chatStoreMock.knownSessions
+    chatStoreReturn.value = null
     chatStoreMock.knownSessionSummary.mockImplementation((sessionId: string) =>
       chatStoreMock.knownSessions.find(session => session.id === sessionId)
       ?? chatStoreMock.sessions.find(session => session.id === sessionId)
@@ -226,7 +302,18 @@ describe('workspace layout store', () => {
     )
     setActivePinia(createPinia())
     useChatSelectionStore().setBot('bot-1')
+    chatStoreMock.selectSession.mockImplementation(async (sessionId: string) => {
+      useChatSelectionStore().setSession(sessionId)
+    })
+    chatStoreMock.selectDraft.mockImplementation(() => {
+      useChatSelectionStore().setSession(null)
+    })
   })
+
+  function emitDeletedSession(id: string, botId = 'bot-1') {
+    const prevSeq = chatStoreMock.deletedSession.value?.seq ?? 0
+    chatStoreMock.deletedSession.value = { id, botId, seq: prevSeq + 1 }
+  }
 
   it('opens browser panels and updates their address', () => {
     const store = useWorkspaceTabsStore()
@@ -317,6 +404,10 @@ describe('workspace layout store', () => {
   })
 
   it('opens one chat tab per session and reuses the ephemeral slot', () => {
+    chatStoreMock.sessions.push(
+      { id: 's1', title: 'S1' },
+      { id: 's2', title: 'S2' },
+    )
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()
     store.registerApi(dock as never)
@@ -330,6 +421,23 @@ describe('workspace layout store', () => {
 
     // Different session: repoint the group's ephemeral chat slot in place.
     store.openSessionChat({ sessionId: 's2', title: 'S2' })
+    const chatPanels = dock.panels.filter((p) => p.component === 'chat')
+    expect(chatPanels).toHaveLength(1)
+    expect(chatPanels[0]!.id).toBe(firstId)
+    expect(chatPanels[0]!.params.sessionId).toBe('s2')
+  })
+
+  it('reuses an ephemeral chat tab even when its session is off the current page', () => {
+    chatStoreMock.sessions.push({ id: 's2', title: 'S2' })
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 'older-session', title: 'Older' })
+    const firstId = dock.panels.find((p) => p.component === 'chat')!.id
+
+    store.openSessionChat({ sessionId: 's2', title: 'S2' })
+
     const chatPanels = dock.panels.filter((p) => p.component === 'chat')
     expect(chatPanels).toHaveLength(1)
     expect(chatPanels[0]!.id).toBe(firstId)
@@ -399,6 +507,261 @@ describe('workspace layout store', () => {
 
     expect(dock.getPanel(chatPanel.id)?.params.sessionId).toBe('subagent-1')
     expect(chatStoreMock.selectDraft).not.toHaveBeenCalled()
+  })
+
+  it('closes the active deleted chat tab and opens the newly selected session', async () => {
+    const selection = useChatSelectionStore()
+    selection.setSession('s1')
+    chatStoreMock.sessions.push(
+      { id: 's1', title: 'Deleted session' },
+      { id: 's2', title: 'Next session' },
+    )
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
+    const chatPanel = dock.panels.find(panel => panel.component === 'chat')!
+
+    emitDeletedSession('s1')
+    chatStoreMock.sessions.splice(0, chatStoreMock.sessions.length, { id: 's2', title: 'Next session' })
+    selection.setSession('s2')
+    await nextTick()
+
+    expect(dock.getPanel(chatPanel.id)).toBeUndefined()
+    const nextChatPanel = dock.panels.find(panel => panel.component === 'chat')
+    expect(nextChatPanel?.params.sessionId).toBe('s2')
+    expect(nextChatPanel?.title).toBe('Next session')
+    expect(chatStoreMock.selectDraft).not.toHaveBeenCalled()
+  })
+
+  it('does not let deleted-tab auto-activation override the fallback session', async () => {
+    const selection = useChatSelectionStore()
+    selection.setSession('s1')
+    chatStoreMock.sessions.push(
+      { id: 's1', title: 'Deleted session' },
+      { id: 's2', title: 'Fallback session' },
+      { id: 's3', title: 'Neighbor session' },
+    )
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
+    const deletedPanel = dock.panels.find(panel => panel.component === 'chat' && panel.params.sessionId === 's1')!
+    store.pinPanel(deletedPanel.id)
+    store.openSessionChat({ sessionId: 's3', title: 'Neighbor session' })
+    deletedPanel.api.setActive()
+    expect(selection.sessionId).toBe('s1')
+    chatStoreMock.selectSession.mockClear()
+
+    chatStoreMock.sessions.splice(0, chatStoreMock.sessions.length,
+      { id: 's2', title: 'Fallback session' },
+      { id: 's3', title: 'Neighbor session' },
+    )
+    emitDeletedSession('s1')
+    selection.setSession('s2')
+    await nextTick()
+    await nextTick()
+
+    expect(dock.getPanel(deletedPanel.id)).toBeUndefined()
+    expect(selection.sessionId).toBe('s2')
+    expect(chatStoreMock.selectSession).not.toHaveBeenCalledWith('s3')
+    expect(dock.activePanel?.params.sessionId).toBe('s2')
+    expect(chatStoreMock.selectDraft).not.toHaveBeenCalled()
+  })
+
+  it('keeps open chat tabs when a paginated session list refresh drops their id', async () => {
+    const selection = useChatSelectionStore()
+    selection.setSession('s1')
+    chatStoreMock.sessions.push(
+      { id: 's1', title: 'Open older session' },
+      { id: 's2', title: 'Other session' },
+    )
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 's1', title: 'Open older session' })
+    const openPanel = dock.panels.find(panel => panel.component === 'chat')!
+
+    chatStoreMock.sessions.splice(0, chatStoreMock.sessions.length,
+      { id: 's2', title: 'Other session' },
+      { id: 's3', title: 'Replacement page item' },
+    )
+    await nextTick()
+
+    expect(dock.getPanel(openPanel.id)?.params.sessionId).toBe('s1')
+    expect(chatStoreMock.selectDraft).not.toHaveBeenCalled()
+  })
+
+  it('buffers deleted-session signals for inactive bots and applies them after switching back', async () => {
+    const selection = useChatSelectionStore()
+    selection.setSession('s1')
+    chatStoreMock.sessions.push({ id: 's1', title: 'Deleted session' })
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
+    const deletedPanel = dock.panels.find(panel => panel.component === 'chat')!
+
+    selection.setBot('bot-without-layout')
+    emitDeletedSession('s1', 'bot-1')
+    await nextTick()
+    expect(dock.getPanel(deletedPanel.id)).toBeUndefined()
+
+    selection.setBot('bot-1')
+    await nextTick()
+    await nextTick()
+
+    expect(dock.getPanel(deletedPanel.id)).toBeUndefined()
+    expect(dock.panels.some(panel => panel.component === 'chat' && panel.params.sessionId === 's1')).toBe(false)
+  })
+
+  it('keeps buffered delete reconciliation across dock api re-registration', async () => {
+    const selection = useChatSelectionStore()
+    selection.setSession('s1')
+    chatStoreMock.sessions.push({ id: 's1', title: 'Deleted session' })
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
+    const deletedPanel = dock.panels.find(panel => panel.component === 'chat')!
+
+    selection.setBot('bot-without-layout')
+    emitDeletedSession('s1', 'bot-1')
+    await nextTick()
+    store.releaseApi()
+    expect(dock.activePanelListenerCount()).toBe(0)
+
+    const nextDock = createFakeDock()
+    store.registerApi(nextDock as never)
+    selection.setBot('bot-1')
+    await nextTick()
+    await nextTick()
+
+    expect(nextDock.getPanel(deletedPanel.id)).toBeUndefined()
+    expect(nextDock.panels.some(panel => panel.component === 'chat' && panel.params.sessionId === 's1')).toBe(false)
+  })
+
+  it('reconciles buffered deletes when the same bot dock api re-registers', async () => {
+    const selection = useChatSelectionStore()
+    selection.setSession('s1')
+    chatStoreMock.sessions.push({ id: 's1', title: 'Deleted session' })
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
+    const deletedPanel = dock.panels.find(panel => panel.component === 'chat')!
+    await nextTick()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    store.releaseApi()
+    emitDeletedSession('s1', 'bot-1')
+    await nextTick()
+
+    chatStoreMock.selectSession.mockClear()
+    const nextDock = createFakeDock()
+    store.registerApi(nextDock as never)
+    await nextTick()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(nextDock.getPanel(deletedPanel.id)).toBeUndefined()
+    expect(nextDock.panels.some(panel => panel.component === 'chat' && panel.params.sessionId === 's1')).toBe(false)
+    expect(chatStoreMock.selectSession).not.toHaveBeenCalledWith('s1')
+  })
+
+  it('opens the selected fallback session after re-registering a layout with deleted chat and other panels', async () => {
+    const selection = useChatSelectionStore()
+    selection.setSession('s1')
+    chatStoreMock.sessions.push(
+      { id: 's1', title: 'Deleted session' },
+      { id: 's2', title: 'Fallback session' },
+    )
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
+    const deletedPanel = dock.panels.find(panel => panel.component === 'chat')!
+    store.openFile('/data/notes.md')
+    await nextTick()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    store.releaseApi()
+    selection.setSession('s2')
+    emitDeletedSession('s1', 'bot-1')
+    await nextTick()
+
+    const nextDock = createFakeDock()
+    store.registerApi(nextDock as never)
+    await nextTick()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await nextTick()
+
+    expect(nextDock.getPanel(deletedPanel.id)).toBeUndefined()
+    expect(nextDock.panels.some(panel => panel.component === 'file')).toBe(true)
+    expect(nextDock.panels.some(panel => panel.component === 'chat' && panel.params.sessionId === 's2')).toBe(true)
+    expect(nextDock.panels.some(panel => panel.component === 'chat' && panel.params.sessionId === 's1')).toBe(false)
+  })
+
+  it('does not reopen a tombstoned chat session from a stale caller', async () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    emitDeletedSession('s1', 'bot-1')
+    await nextTick()
+
+    store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
+
+    expect(dock.panels.some(panel => panel.component === 'chat' && panel.params.sessionId === 's1')).toBe(false)
+    expect(chatStoreMock.selectSession).not.toHaveBeenCalledWith('s1')
+  })
+
+  it('keeps older tombstones available to block stale opens after reconciliation', async () => {
+    const selection = useChatSelectionStore()
+    selection.setSession('s1')
+    chatStoreMock.sessions.push(
+      { id: 's1', title: 'Deleted session' },
+      { id: 's2', title: 'Existing session' },
+    )
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
+    const deletedPanel = dock.panels.find(panel => panel.component === 'chat')!
+    store.pinPanel(deletedPanel.id)
+    store.openSessionChat({ sessionId: 's2', title: 'Existing session' })
+    emitDeletedSession('missing-session')
+    await nextTick()
+    emitDeletedSession('s1')
+    selection.setSession('s2')
+    await nextTick()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(dock.getPanel(deletedPanel.id)).toBeUndefined()
+
+    selection.setBot('bot-without-layout')
+    await nextTick()
+    selection.setBot('bot-1')
+    await nextTick()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    chatStoreMock.selectSession.mockClear()
+    store.openSessionChat({ sessionId: 'missing-session', title: 'Missing deleted session' })
+    expect(dock.panels.some(panel => panel.component === 'chat' && panel.params.sessionId === 'missing-session')).toBe(false)
+
+    store.openSessionChat({ sessionId: 's2', title: 'Existing session' })
+    const s2Panel = dock.panels.find(panel => panel.component === 'chat' && panel.params.sessionId === 's2')
+    expect(s2Panel).toBeTruthy()
+    s2Panel?.api.setActive()
+
+    expect(chatStoreMock.selectSession).toHaveBeenCalledWith('s2')
   })
 
   it('opens files into the ephemeral slot and replaces until pinned', () => {

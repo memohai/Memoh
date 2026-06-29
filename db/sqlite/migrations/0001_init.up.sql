@@ -446,6 +446,9 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   type TEXT NOT NULL DEFAULT 'chat' CHECK (type IN ('chat', 'heartbeat', 'schedule', 'subagent', 'discuss', 'acp_agent')),
   title TEXT NOT NULL DEFAULT '',
   metadata TEXT NOT NULL DEFAULT '{}',
+  default_head_turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
+  forked_from_session_id TEXT REFERENCES bot_sessions(id) ON DELETE SET NULL,
+  forked_from_turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
   parent_session_id TEXT REFERENCES bot_sessions(id) ON DELETE SET NULL,
   created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -463,9 +466,13 @@ CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_id ON bot_sessions(bot_id);
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_route_id ON bot_sessions(route_id);
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_active ON bot_sessions(bot_id, deleted_at);
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_parent ON bot_sessions(parent_session_id) WHERE parent_session_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_bot_sessions_default_head_turn ON bot_sessions(default_head_turn_id) WHERE default_head_turn_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_bot_sessions_forked_from_session ON bot_sessions(forked_from_session_id) WHERE forked_from_session_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_bot_sessions_forked_from_turn ON bot_sessions(forked_from_turn_id) WHERE forked_from_turn_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_created_by_user_id ON bot_sessions(created_by_user_id) WHERE created_by_user_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_created_by ON bot_sessions(bot_id, created_by_user_id, deleted_at);
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_active_updated ON bot_sessions(bot_id, updated_at DESC, id DESC) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_sessions_id_bot_unique ON bot_sessions(id, bot_id);
 
 -- bot_session_events: DCP pipeline event store for cold-start replay.
 CREATE TABLE IF NOT EXISTS bot_session_events (
@@ -486,11 +493,112 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_session_events_dedup
   ON bot_session_events (session_id, event_kind, external_message_id)
   WHERE external_message_id IS NOT NULL AND external_message_id != '';
 
+-- bot_history_turns: immutable lifecycle units for user requests and assistant replies.
+CREATE TABLE IF NOT EXISTS bot_history_turns (
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  owner_session_id TEXT REFERENCES bot_sessions(id) ON DELETE SET NULL,
+  parent_turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
+  request_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
+  final_assistant_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_history_turns_bot_created
+  ON bot_history_turns(bot_id, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_bot_history_turns_owner_session
+  ON bot_history_turns(owner_session_id, created_at, id)
+  WHERE owner_session_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_bot_history_turns_parent
+  ON bot_history_turns(parent_turn_id)
+  WHERE parent_turn_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_bot_history_turns_request
+  ON bot_history_turns(request_message_id) WHERE request_message_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_bot_history_turns_assistant
+  ON bot_history_turns(final_assistant_message_id) WHERE final_assistant_message_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_history_turns_id_bot_unique ON bot_history_turns(id, bot_id);
+
+CREATE TRIGGER IF NOT EXISTS bot_sessions_default_head_same_bot_insert
+BEFORE INSERT ON bot_sessions
+FOR EACH ROW
+WHEN NEW.default_head_turn_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM bot_history_turns t
+    WHERE t.id = NEW.default_head_turn_id
+      AND t.bot_id = NEW.bot_id
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'bot_sessions.default_head_turn_id must reference a turn from the same bot');
+END;
+
+CREATE TRIGGER IF NOT EXISTS bot_sessions_default_head_same_bot_update
+BEFORE UPDATE OF default_head_turn_id, bot_id ON bot_sessions
+FOR EACH ROW
+WHEN NEW.default_head_turn_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM bot_history_turns t
+    WHERE t.id = NEW.default_head_turn_id
+      AND t.bot_id = NEW.bot_id
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'bot_sessions.default_head_turn_id must reference a turn from the same bot');
+END;
+
+CREATE TRIGGER IF NOT EXISTS bot_sessions_forked_from_turn_same_bot_insert
+BEFORE INSERT ON bot_sessions
+FOR EACH ROW
+WHEN NEW.forked_from_turn_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM bot_history_turns t
+    WHERE t.id = NEW.forked_from_turn_id
+      AND t.bot_id = NEW.bot_id
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'bot_sessions.forked_from_turn_id must reference a turn from the same bot');
+END;
+
+CREATE TRIGGER IF NOT EXISTS bot_sessions_forked_from_turn_same_bot_update
+BEFORE UPDATE OF forked_from_turn_id, bot_id ON bot_sessions
+FOR EACH ROW
+WHEN NEW.forked_from_turn_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM bot_history_turns t
+    WHERE t.id = NEW.forked_from_turn_id
+      AND t.bot_id = NEW.bot_id
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'bot_sessions.forked_from_turn_id must reference a turn from the same bot');
+END;
+
+-- bot_session_turn_heads: switchable leaf heads for a session turn graph.
+CREATE TABLE IF NOT EXISTS bot_session_turn_heads (
+  session_id TEXT NOT NULL,
+  head_turn_id TEXT NOT NULL,
+  bot_id TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (session_id, head_turn_id),
+  FOREIGN KEY (session_id, bot_id) REFERENCES bot_sessions(id, bot_id) ON DELETE CASCADE,
+  FOREIGN KEY (head_turn_id, bot_id) REFERENCES bot_history_turns(id, bot_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_session_turn_heads_head
+  ON bot_session_turn_heads(head_turn_id);
+CREATE INDEX IF NOT EXISTS idx_bot_session_turn_heads_bot
+  ON bot_session_turn_heads(bot_id);
+
 -- bot_history_messages: unified message history under bot scope.
 CREATE TABLE IF NOT EXISTS bot_history_messages (
   id TEXT PRIMARY KEY,
   bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   session_id TEXT REFERENCES bot_sessions(id) ON DELETE SET NULL,
+  turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
+  turn_message_seq INTEGER,
   sender_channel_identity_id TEXT REFERENCES channel_identities(id),
   sender_account_user_id TEXT REFERENCES users(id),
   source_message_id TEXT,
@@ -510,6 +618,12 @@ CREATE INDEX IF NOT EXISTS idx_bot_history_messages_bot_created ON bot_history_m
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_compact ON bot_history_messages(compact_id);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session
   ON bot_history_messages(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_turn
+  ON bot_history_messages(turn_id, turn_message_seq, created_at)
+  WHERE turn_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_history_messages_turn_seq_unique
+  ON bot_history_messages(turn_id, turn_message_seq)
+  WHERE turn_id IS NOT NULL AND turn_message_seq IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_source
   ON bot_history_messages(session_id, source_message_id);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_reply
@@ -532,6 +646,7 @@ CREATE TABLE IF NOT EXISTS tool_approval_requests (
   decided_by_channel_identity_id TEXT REFERENCES channel_identities(id) ON DELETE SET NULL,
   requested_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
   prompt_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
+  persist_turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
   prompt_external_message_id TEXT NOT NULL DEFAULT '',
   source_platform TEXT NOT NULL DEFAULT '',
   reply_target TEXT NOT NULL DEFAULT '',
@@ -541,13 +656,22 @@ CREATE TABLE IF NOT EXISTS tool_approval_requests (
   CONSTRAINT tool_approval_operation_check CHECK (operation IN ('read', 'write', 'exec')),
   CONSTRAINT tool_approval_status_check CHECK (status IN ('pending', 'approved', 'rejected', 'expired', 'cancelled')),
   CONSTRAINT tool_approval_short_id_unique UNIQUE (session_id, short_id),
-  CONSTRAINT tool_approval_tool_call_unique UNIQUE (session_id, tool_call_id)
+  FOREIGN KEY (session_id, bot_id) REFERENCES bot_sessions(id, bot_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_tool_approval_bot_status_created
   ON tool_approval_requests(bot_id, status, created_at);
 CREATE INDEX IF NOT EXISTS idx_tool_approval_session_status_created
   ON tool_approval_requests(session_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_tool_approval_persist_turn
+  ON tool_approval_requests(persist_turn_id)
+  WHERE persist_turn_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS tool_approval_tool_call_legacy_unique
+  ON tool_approval_requests(session_id, tool_call_id)
+  WHERE persist_turn_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS tool_approval_tool_call_turn_unique
+  ON tool_approval_requests(session_id, tool_call_id, persist_turn_id)
+  WHERE persist_turn_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_tool_approval_prompt_external
   ON tool_approval_requests(prompt_external_message_id)
   WHERE prompt_external_message_id != '';
@@ -571,6 +695,7 @@ CREATE TABLE IF NOT EXISTS user_input_requests (
   assistant_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
   tool_result_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
   prompt_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
+  persist_turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
   prompt_external_message_id TEXT NOT NULL DEFAULT '',
   source_platform TEXT NOT NULL DEFAULT '',
   reply_target TEXT NOT NULL DEFAULT '',
@@ -582,18 +707,86 @@ CREATE TABLE IF NOT EXISTS user_input_requests (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT user_input_tool_name_check CHECK (tool_name = 'ask_user'),
   CONSTRAINT user_input_status_check CHECK (status IN ('pending', 'submitted', 'canceled', 'expired', 'failed')),
-  CONSTRAINT user_input_short_id_unique UNIQUE (session_id, short_id)
+  CONSTRAINT user_input_short_id_unique UNIQUE (session_id, short_id),
+  FOREIGN KEY (session_id, bot_id) REFERENCES bot_sessions(id, bot_id) ON DELETE CASCADE
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS user_input_tool_call_unique
-  ON user_input_requests(session_id, tool_call_id);
+CREATE UNIQUE INDEX IF NOT EXISTS user_input_tool_call_legacy_unique
+  ON user_input_requests(session_id, tool_call_id)
+  WHERE persist_turn_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS user_input_tool_call_turn_unique
+  ON user_input_requests(session_id, tool_call_id, persist_turn_id)
+  WHERE persist_turn_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_user_input_bot_status_created
   ON user_input_requests(bot_id, status, created_at);
 CREATE INDEX IF NOT EXISTS idx_user_input_session_status_created
   ON user_input_requests(session_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_user_input_persist_turn
+  ON user_input_requests(persist_turn_id)
+  WHERE persist_turn_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_user_input_prompt_external
   ON user_input_requests(prompt_external_message_id)
   WHERE prompt_external_message_id != '';
+
+CREATE TRIGGER IF NOT EXISTS tool_approval_persist_turn_owner_insert
+BEFORE INSERT ON tool_approval_requests
+FOR EACH ROW
+WHEN NEW.persist_turn_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM bot_history_turns t
+    WHERE t.id = NEW.persist_turn_id
+      AND t.bot_id = NEW.bot_id
+      AND t.owner_session_id = NEW.session_id
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'persist_turn_id must reference a turn from the same bot session');
+END;
+
+CREATE TRIGGER IF NOT EXISTS tool_approval_persist_turn_owner_update
+BEFORE UPDATE OF persist_turn_id, bot_id, session_id ON tool_approval_requests
+FOR EACH ROW
+WHEN NEW.persist_turn_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM bot_history_turns t
+    WHERE t.id = NEW.persist_turn_id
+      AND t.bot_id = NEW.bot_id
+      AND t.owner_session_id = NEW.session_id
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'persist_turn_id must reference a turn from the same bot session');
+END;
+
+CREATE TRIGGER IF NOT EXISTS user_input_persist_turn_owner_insert
+BEFORE INSERT ON user_input_requests
+FOR EACH ROW
+WHEN NEW.persist_turn_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM bot_history_turns t
+    WHERE t.id = NEW.persist_turn_id
+      AND t.bot_id = NEW.bot_id
+      AND t.owner_session_id = NEW.session_id
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'persist_turn_id must reference a turn from the same bot session');
+END;
+
+CREATE TRIGGER IF NOT EXISTS user_input_persist_turn_owner_update
+BEFORE UPDATE OF persist_turn_id, bot_id, session_id ON user_input_requests
+FOR EACH ROW
+WHEN NEW.persist_turn_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM bot_history_turns t
+    WHERE t.id = NEW.persist_turn_id
+      AND t.bot_id = NEW.bot_id
+      AND t.owner_session_id = NEW.session_id
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'persist_turn_id must reference a turn from the same bot session');
+END;
 
 CREATE TABLE IF NOT EXISTS containers (
   id TEXT PRIMARY KEY,

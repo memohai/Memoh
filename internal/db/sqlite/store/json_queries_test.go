@@ -36,14 +36,25 @@ CREATE TABLE bot_sessions (
   id TEXT PRIMARY KEY,
   bot_id TEXT NOT NULL,
   type TEXT NOT NULL,
+  default_head_turn_id TEXT,
   parent_session_id TEXT,
   deleted_at TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE bot_history_turns (
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL,
+  owner_session_id TEXT,
+  parent_turn_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE bot_history_messages (
   id TEXT PRIMARY KEY,
   bot_id TEXT NOT NULL,
   session_id TEXT,
+  turn_id TEXT,
+  turn_message_seq INTEGER,
   role TEXT NOT NULL,
   content TEXT NOT NULL DEFAULT '{}',
   usage TEXT,
@@ -56,6 +67,7 @@ CREATE TABLE bot_history_messages (
 	sessionID := "00000000-0000-0000-0000-000000000002"
 	modelID := "00000000-0000-0000-0000-000000000003"
 	providerID := "00000000-0000-0000-0000-000000000004"
+	turnID := "00000000-0000-0000-0000-000000000008"
 	_, err = conn.ExecContext(ctx, `INSERT INTO providers (id, name) VALUES (?, ?)`, providerID, "Test Provider")
 	if err != nil {
 		t.Fatalf("insert provider: %v", err)
@@ -64,14 +76,20 @@ CREATE TABLE bot_history_messages (
 	if err != nil {
 		t.Fatalf("insert model: %v", err)
 	}
-	_, err = conn.ExecContext(ctx, `INSERT INTO bot_sessions (id, bot_id, type, updated_at) VALUES (?, ?, ?, ?)`, sessionID, botID, "chat", "2026-05-01 01:00:00")
+	_, err = conn.ExecContext(ctx, `INSERT INTO bot_sessions (id, bot_id, type, default_head_turn_id, updated_at) VALUES (?, ?, ?, ?, ?)`, sessionID, botID, "chat", turnID, "2026-05-01 01:00:00")
 	if err != nil {
 		t.Fatalf("insert session: %v", err)
 	}
-	_, err = conn.ExecContext(ctx, `INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, usage, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err = conn.ExecContext(ctx, `INSERT INTO bot_history_turns (id, bot_id, owner_session_id) VALUES (?, ?, ?)`, turnID, botID, sessionID)
+	if err != nil {
+		t.Fatalf("insert turn: %v", err)
+	}
+	_, err = conn.ExecContext(ctx, `INSERT INTO bot_history_messages (id, bot_id, session_id, turn_id, turn_message_seq, role, content, usage, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		"00000000-0000-0000-0000-000000000005",
 		botID,
 		sessionID,
+		turnID,
+		1,
 		"assistant",
 		`{"role":"assistant","content":[{"type":"tool-call","toolName":"use_skill","input":{"skillName":"alpha"}}]}`,
 		`{"inputTokens":10,"outputTokens":5,"inputTokenDetails":{"cacheReadTokens":3,"cacheWriteTokens":2},"outputTokenDetails":{"reasoningTokens":1}}`,
@@ -97,10 +115,12 @@ CREATE TABLE bot_history_messages (
 			content: `{"role":"tool","content":[{"type":"tool-result","toolName":"use_skill","result":{}}]}`,
 		},
 	} {
-		_, err = conn.ExecContext(ctx, `INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, usage, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		_, err = conn.ExecContext(ctx, `INSERT INTO bot_history_messages (id, bot_id, session_id, turn_id, turn_message_seq, role, content, usage, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			item.id,
 			botID,
 			sessionID,
+			turnID,
+			2,
 			item.role,
 			item.content,
 			"",
@@ -247,13 +267,18 @@ CREATE TABLE bots (
   id TEXT PRIMARY KEY
 );
 CREATE TABLE bot_sessions (
-  id TEXT PRIMARY KEY
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE
 );
 CREATE TABLE bot_channel_routes (
   id TEXT PRIMARY KEY
 );
 CREATE TABLE channel_identities (
   id TEXT PRIMARY KEY
+);
+CREATE TABLE bot_history_turns (
+  id TEXT PRIMARY KEY,
+  parent_turn_id TEXT
 );
 CREATE TABLE bot_history_messages (
   id TEXT PRIMARY KEY
@@ -277,6 +302,7 @@ CREATE TABLE user_input_requests (
   assistant_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
   tool_result_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
   prompt_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
+  persist_turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
   prompt_external_message_id TEXT NOT NULL DEFAULT '',
   source_platform TEXT NOT NULL DEFAULT '',
   reply_target TEXT NOT NULL DEFAULT '',
@@ -290,8 +316,12 @@ CREATE TABLE user_input_requests (
 	  CONSTRAINT user_input_status_check CHECK (status IN ('pending', 'submitted', 'canceled', 'expired', 'failed')),
 	  CONSTRAINT user_input_short_id_unique UNIQUE (session_id, short_id)
 	);
-	CREATE UNIQUE INDEX user_input_tool_call_unique
-	  ON user_input_requests(session_id, tool_call_id);
+	CREATE UNIQUE INDEX user_input_tool_call_legacy_unique
+	  ON user_input_requests(session_id, tool_call_id)
+	  WHERE persist_turn_id IS NULL;
+	CREATE UNIQUE INDEX user_input_tool_call_turn_unique
+	  ON user_input_requests(session_id, tool_call_id, persist_turn_id)
+	  WHERE persist_turn_id IS NOT NULL;
 	`)
 
 	botID := "00000000-0000-0000-0000-000000001001"
@@ -300,7 +330,7 @@ CREATE TABLE user_input_requests (
 	if _, err := conn.ExecContext(ctx, `INSERT INTO bots (id) VALUES (?)`, botID); err != nil {
 		t.Fatalf("insert bot: %v", err)
 	}
-	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id) VALUES (?)`, sessionID); err != nil {
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id, bot_id) VALUES (?, ?)`, sessionID, botID); err != nil {
 		t.Fatalf("insert session: %v", err)
 	}
 	if _, err := conn.ExecContext(ctx, `INSERT INTO channel_identities (id) VALUES (?)`, actorID); err != nil {

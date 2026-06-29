@@ -10,6 +10,17 @@ import (
 	"database/sql"
 )
 
+const clearRouteActiveSessionsByBot = `-- name: ClearRouteActiveSessionsByBot :exec
+UPDATE bot_channel_routes
+SET active_session_id = NULL, updated_at = CURRENT_TIMESTAMP
+WHERE bot_id = ?1
+`
+
+func (q *Queries) ClearRouteActiveSessionsByBot(ctx context.Context, botID string) error {
+	_, err := q.db.ExecContext(ctx, clearRouteActiveSessionsByBot, botID)
+	return err
+}
+
 const createChatRoute = `-- name: CreateChatRoute :one
 INSERT INTO bot_channel_routes (
   id, bot_id, channel_type, channel_config_id, external_conversation_id, external_thread_id,

@@ -9,21 +9,26 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@memohai/sdk', () => ({
   getBotsByBotIdSessionsBySessionIdMessagesEvents: vi.fn(),
   getBotsByBotIdSessionsEvents: vi.fn(),
-  getBotsByBotIdMessages: vi.fn(),
   getBotsByBotIdMessagesLocate: vi.fn(),
-  postBotsByBotIdLocalMessages: vi.fn(),
+  postBotsByBotIdWebMessages: vi.fn(),
 }))
 
 vi.mock('@memohai/sdk/client', () => ({
-  client: { setConfig: vi.fn() },
+  client: { get: vi.fn(), setConfig: vi.fn() },
 }))
 
 import {
+  getBotsByBotIdMessagesLocate,
+  postBotsByBotIdWebMessages,
   getBotsByBotIdSessionsBySessionIdMessagesEvents,
   getBotsByBotIdSessionsEvents,
 } from '@memohai/sdk'
+import { client } from '@memohai/sdk/client'
 
 import {
+  fetchMessagesUI,
+  locateMessageUI,
+  sendLocalChannelMessage,
   streamBotSessionsActivityEvents,
   streamSessionMessageEvents,
 } from './useChat.message-api'
@@ -31,6 +36,86 @@ import {
 async function* singleEventStream(event: unknown) {
   yield event
 }
+
+describe('fetchMessagesUI', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('requests UI-formatted message pages so the backend keeps turn boundaries intact', async () => {
+    vi.mocked(client.get).mockResolvedValue({ data: { items: [] } } as never)
+
+    await fetchMessagesUI('bot-1', ' session-1 ', {
+      limit: 12,
+      before: ' 2026-06-20T00:00:00Z ',
+      beforeId: ' message-1 ',
+    })
+
+    expect(client.get).toHaveBeenCalledWith({
+      url: '/bots/{bot_id}/messages',
+      path: { bot_id: 'bot-1' },
+      query: {
+        session_id: 'session-1',
+        format: 'ui',
+        limit: 12,
+        before: '2026-06-20T00:00:00Z',
+        before_id: 'message-1',
+      },
+      throwOnError: true,
+    })
+  })
+
+  it('requests the turn graph only when explicitly asked', async () => {
+    vi.mocked(client.get).mockResolvedValue({ data: { items: [] } } as never)
+
+    await fetchMessagesUI('bot-1', 'session-1', {
+      limit: 12,
+      includeGraph: true,
+      headTurnId: ' turn-selected ',
+    })
+
+    expect(client.get).toHaveBeenCalledWith({
+      url: '/bots/{bot_id}/messages',
+      path: { bot_id: 'bot-1' },
+      query: {
+        session_id: 'session-1',
+        format: 'ui',
+        limit: 12,
+        include_graph: '1',
+        head_turn_id: 'turn-selected',
+      },
+      throwOnError: true,
+    })
+  })
+})
+
+describe('locateMessageUI', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('passes the selected session head to the locate endpoint', async () => {
+    vi.mocked(getBotsByBotIdMessagesLocate).mockResolvedValue({
+      data: { items: [], target_id: 'message-1' },
+    } as never)
+
+    await locateMessageUI('bot-1', 'session-1', 'external-1', 4, 5, {
+      headTurnId: ' turn-c ',
+    })
+
+    expect(getBotsByBotIdMessagesLocate).toHaveBeenCalledWith({
+      path: { bot_id: 'bot-1' },
+      query: {
+        session_id: 'session-1',
+        external_message_id: 'external-1',
+        before: 4,
+        after: 5,
+        head_turn_id: 'turn-c',
+      },
+      throwOnError: true,
+    })
+  })
+})
 
 describe('streamSessionMessageEvents', () => {
   beforeEach(() => {
@@ -49,6 +134,25 @@ describe('streamSessionMessageEvents', () => {
 
     expect(onEvent).toHaveBeenCalledTimes(1)
     expect(onEvent).toHaveBeenCalledWith(event)
+  })
+
+  it('passes the selected session head to the per-session stream', async () => {
+    vi.mocked(getBotsByBotIdSessionsBySessionIdMessagesEvents).mockResolvedValue({
+      stream: singleEventStream({ type: 'ping' }),
+    } as never)
+
+    await streamSessionMessageEvents(
+      'bot-1',
+      'session-1',
+      new AbortController().signal,
+      vi.fn(),
+      'turn-selected',
+    )
+
+    expect(getBotsByBotIdSessionsBySessionIdMessagesEvents).toHaveBeenCalledWith(expect.objectContaining({
+      path: { bot_id: 'bot-1', session_id: 'session-1' },
+      query: { head_turn_id: 'turn-selected' },
+    }))
   })
 
   it('waits for the SDK promise to resolve before iterating, even when resolution is deferred', async () => {
@@ -89,5 +193,32 @@ describe('streamBotSessionsActivityEvents', () => {
 
     expect(onEvent).toHaveBeenCalledTimes(1)
     expect(onEvent).toHaveBeenCalledWith(event)
+  })
+})
+
+describe('sendLocalChannelMessage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('posts to the web local-channel endpoint with the base turn head', async () => {
+    vi.mocked(postBotsByBotIdWebMessages).mockResolvedValue({} as never)
+
+    await sendLocalChannelMessage('bot-1', ' hello ', undefined, {
+      modelId: 'model-1',
+      reasoningEffort: 'high',
+      baseHeadTurnId: 'turn-1',
+    })
+
+    expect(postBotsByBotIdWebMessages).toHaveBeenCalledWith({
+      path: { bot_id: 'bot-1' },
+      body: {
+        message: { text: 'hello' },
+        model_id: 'model-1',
+        reasoning_effort: 'high',
+        base_head_turn_id: 'turn-1',
+      },
+      throwOnError: true,
+    })
   })
 })

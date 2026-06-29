@@ -15,7 +15,7 @@ import (
 )
 
 func TestSQLiteACPAgentSessionTypeMigration(t *testing.T) {
-	migrations := sqliteMigrationsFS(t)
+	migrations := sqliteMigrationsFSUpTo(t, 7)
 
 	t.Run("down succeeds without acp agent rows", func(t *testing.T) {
 		dsn := tempSQLiteMigrationDSN(t)
@@ -180,7 +180,7 @@ func insertSQLiteACPAgentSession(t *testing.T, db *sql.DB) {
 	t.Helper()
 	statements := []string{
 		`INSERT INTO users(id,email,role) VALUES('00000000-0000-0000-0000-000000000001','acp@example.com','member')`,
-		`INSERT INTO bots(id,owner_user_id,type,name,display_name) VALUES('00000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000001','personal','acp-bot','ACP Bot')`,
+		`INSERT INTO bots(id,owner_user_id,type,display_name) VALUES('00000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000001','personal','ACP Bot')`,
 		`INSERT INTO bot_sessions(id,bot_id,type,title,metadata) VALUES('00000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000002','acp_agent','Codex','{}')`,
 	}
 	for _, stmt := range statements {

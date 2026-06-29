@@ -20,18 +20,22 @@ func (f fakeHistorySessionLister) ListByBot(_ context.Context, _ string) ([]sess
 }
 
 type fakeHistoryMessageReader struct {
-	latestSessionID string
-	beforeSessionID string
-	before          time.Time
-	latestMessages  []messagepkg.Message
-	beforeMessages  []messagepkg.Message
+	latestSessionID     string
+	beforeSessionID     string
+	latestHeadSessionID string
+	beforeHeadSessionID string
+	latestHeadTurnID    string
+	beforeHeadTurnID    string
+	before              time.Time
+	latestMessages      []messagepkg.Message
+	beforeMessages      []messagepkg.Message
 }
 
 func (f *fakeHistoryMessageReader) ListLatest(_ context.Context, _ string, _ int32) ([]messagepkg.Message, error) {
 	return f.latestMessages, nil
 }
 
-func (f *fakeHistoryMessageReader) ListBefore(_ context.Context, _ string, before time.Time, _ int32) ([]messagepkg.Message, error) {
+func (f *fakeHistoryMessageReader) ListBefore(_ context.Context, _ string, before time.Time, _ string, _ int32) ([]messagepkg.Message, error) {
 	f.before = before
 	return f.beforeMessages, nil
 }
@@ -41,8 +45,21 @@ func (f *fakeHistoryMessageReader) ListLatestBySession(_ context.Context, sessio
 	return f.latestMessages, nil
 }
 
-func (f *fakeHistoryMessageReader) ListBeforeBySession(_ context.Context, sessionID string, before time.Time, _ int32) ([]messagepkg.Message, error) {
+func (f *fakeHistoryMessageReader) ListBeforeBySession(_ context.Context, sessionID string, before time.Time, _ string, _ int32) ([]messagepkg.Message, error) {
 	f.beforeSessionID = sessionID
+	f.before = before
+	return f.beforeMessages, nil
+}
+
+func (f *fakeHistoryMessageReader) ListLatestBySessionHead(_ context.Context, sessionID string, headTurnID string, _ int32) ([]messagepkg.Message, error) {
+	f.latestHeadSessionID = sessionID
+	f.latestHeadTurnID = headTurnID
+	return f.latestMessages, nil
+}
+
+func (f *fakeHistoryMessageReader) ListBeforeBySessionHead(_ context.Context, sessionID string, headTurnID string, before time.Time, _ string, _ int32) ([]messagepkg.Message, error) {
+	f.beforeHeadSessionID = sessionID
+	f.beforeHeadTurnID = headTurnID
 	f.before = before
 	return f.beforeMessages, nil
 }
@@ -76,6 +93,62 @@ func TestHistoryProviderGetMessagesDefaultsToCurrentSession(t *testing.T) {
 	}
 	if messages[1]["id"] != "msg-2" || messages[1]["text"] != "hi there" {
 		t.Fatalf("second message = %#v, want newest message text", messages[1])
+	}
+}
+
+func TestHistoryProviderGetMessagesUsesSelectedHeadForCurrentSession(t *testing.T) {
+	t.Parallel()
+
+	reader := &fakeHistoryMessageReader{latestMessages: []messagepkg.Message{
+		historyTestMessage(t, "msg-selected", "session-current", "assistant", "selected head", time.Date(2026, 6, 14, 9, 0, 0, 0, time.UTC)),
+	}}
+	provider := NewHistoryProvider(nil, nil, reader, nil)
+
+	got, err := provider.execGetMessages(context.Background(), SessionContext{
+		BotID:          "bot-1",
+		SessionID:      "session-current",
+		ViewHeadTurnID: "turn-selected",
+	}, map[string]any{"limit": 1})
+	if err != nil {
+		t.Fatalf("execGetMessages() error = %v", err)
+	}
+	if reader.latestHeadSessionID != "session-current" || reader.latestHeadTurnID != "turn-selected" {
+		t.Fatalf("selected head read = %q/%q, want session-current/turn-selected", reader.latestHeadSessionID, reader.latestHeadTurnID)
+	}
+	if reader.latestSessionID != "" {
+		t.Fatalf("default-head read was used for session %q", reader.latestSessionID)
+	}
+	messages := got.(map[string]any)["messages"].([]map[string]any)
+	if messages[0]["text"] != "selected head" {
+		t.Fatalf("message text = %v, want selected head", messages[0]["text"])
+	}
+}
+
+func TestHistoryProviderGetMessagesUsesDefaultHeadForOtherSession(t *testing.T) {
+	t.Parallel()
+
+	reader := &fakeHistoryMessageReader{latestMessages: []messagepkg.Message{
+		historyTestMessage(t, "msg-other", "session-other", "assistant", "other default", time.Date(2026, 6, 14, 9, 0, 0, 0, time.UTC)),
+	}}
+	provider := NewHistoryProvider(nil, fakeHistorySessionLister{
+		sessions: []session.Session{{ID: "session-other", BotID: "bot-1"}},
+	}, reader, nil)
+
+	_, err := provider.execGetMessages(context.Background(), SessionContext{
+		BotID:          "bot-1",
+		SessionID:      "session-current",
+		ViewHeadTurnID: "turn-selected",
+	}, map[string]any{
+		"session_id": "session-other",
+	})
+	if err != nil {
+		t.Fatalf("execGetMessages() error = %v", err)
+	}
+	if reader.latestSessionID != "session-other" {
+		t.Fatalf("latest session id = %q, want session-other", reader.latestSessionID)
+	}
+	if reader.latestHeadTurnID != "" {
+		t.Fatalf("selected head turn id = %q, want empty for other session", reader.latestHeadTurnID)
 	}
 }
 

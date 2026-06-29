@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
 	"time"
@@ -26,31 +27,7 @@ func TestSQLiteListSessionsByBotPagedRespectsCursorAndTypes(t *testing.T) {
 	}
 	defer func() { _ = conn.Close() }()
 
-	// Hand-rolled minimal schema rather than the full SQLite migration
-	// baseline — see the comment in TestSQLiteListSessionsByBotPagedTiesOnUpdatedAt
-	// for the rationale; schema drift on the queried columns surfaces via
-	// the integration test path.
-	execAll(t, conn, `
-CREATE TABLE bot_channel_routes (
-  id TEXT PRIMARY KEY,
-  metadata TEXT,
-  conversation_type TEXT
-);
-CREATE TABLE bot_sessions (
-  id TEXT PRIMARY KEY,
-  bot_id TEXT NOT NULL,
-  route_id TEXT REFERENCES bot_channel_routes(id),
-  channel_type TEXT,
-  type TEXT NOT NULL,
-  title TEXT NOT NULL DEFAULT '',
-  metadata TEXT NOT NULL DEFAULT '{}',
-  parent_session_id TEXT,
-  created_by_user_id TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted_at TEXT
-);
-`)
+	createPagedSessionSchema(t, conn)
 
 	botID := "11111111-1111-1111-1111-111111111111"
 
@@ -206,32 +183,7 @@ func TestSQLiteListSessionsByBotPagedTiesOnUpdatedAt(t *testing.T) {
 	}
 	defer func() { _ = conn.Close() }()
 
-	// Hand-rolled minimal schema — matches the pattern in the rest of this
-	// package's tests; running the full SQLite migration baseline (895+
-	// lines, plus 20+ incremental files) for one unit test is not worth the
-	// infra weight, and schema drift on the columns this query touches will
-	// surface in the integration test path.
-	execAll(t, conn, `
-CREATE TABLE bot_channel_routes (
-  id TEXT PRIMARY KEY,
-  metadata TEXT,
-  conversation_type TEXT
-);
-CREATE TABLE bot_sessions (
-  id TEXT PRIMARY KEY,
-  bot_id TEXT NOT NULL,
-  route_id TEXT REFERENCES bot_channel_routes(id),
-  channel_type TEXT,
-  type TEXT NOT NULL,
-  title TEXT NOT NULL DEFAULT '',
-  metadata TEXT NOT NULL DEFAULT '{}',
-  parent_session_id TEXT,
-  created_by_user_id TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted_at TEXT
-);
-`)
+	createPagedSessionSchema(t, conn)
 
 	botID := "22222222-2222-2222-2222-222222222222"
 	sharedTS := "2026-06-19 00:00:00"
@@ -312,27 +264,7 @@ func TestSQLiteListSessionsByBotPagedWithinOneSecond(t *testing.T) {
 	}
 	defer func() { _ = conn.Close() }()
 
-	execAll(t, conn, `
-CREATE TABLE bot_channel_routes (
-  id TEXT PRIMARY KEY,
-  metadata TEXT,
-  conversation_type TEXT
-);
-CREATE TABLE bot_sessions (
-  id TEXT PRIMARY KEY,
-  bot_id TEXT NOT NULL,
-  route_id TEXT REFERENCES bot_channel_routes(id),
-  channel_type TEXT,
-  type TEXT NOT NULL,
-  title TEXT NOT NULL DEFAULT '',
-  metadata TEXT NOT NULL DEFAULT '{}',
-  parent_session_id TEXT,
-  created_by_user_id TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted_at TEXT
-);
-`)
+	createPagedSessionSchema(t, conn)
 
 	botID := "33333333-3333-3333-3333-333333333333"
 	ids := []string{
@@ -403,8 +335,8 @@ CREATE TABLE bot_sessions (
 }
 
 // TestSQLiteListSessionsByBotPagedSurfacesRouteJoinColumns guards the column
-// ordering in scanSessionPagedRows. The query selects 14 positional columns
-// including the two LEFT JOIN'd route columns; a regression that swaps two
+// ordering in scanSessionPagedRows. The query selects positional columns
+// including turn-head metadata and the two LEFT JOIN'd route columns; a regression that swaps two
 // fields would not fail the basic listing tests because most fields are
 // independently asserted as scalars on a single row. Forcing a non-null
 // route_metadata + route_conversation_type round-trip catches that class of
@@ -417,31 +349,14 @@ func TestSQLiteListSessionsByBotPagedSurfacesRouteJoinColumns(t *testing.T) {
 	}
 	defer func() { _ = conn.Close() }()
 
-	execAll(t, conn, `
-CREATE TABLE bot_channel_routes (
-  id TEXT PRIMARY KEY,
-  metadata TEXT,
-  conversation_type TEXT
-);
-CREATE TABLE bot_sessions (
-  id TEXT PRIMARY KEY,
-  bot_id TEXT NOT NULL,
-  route_id TEXT REFERENCES bot_channel_routes(id),
-  channel_type TEXT,
-  type TEXT NOT NULL,
-  title TEXT NOT NULL DEFAULT '',
-  metadata TEXT NOT NULL DEFAULT '{}',
-  parent_session_id TEXT,
-  created_by_user_id TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted_at TEXT
-);
-`)
+	createPagedSessionSchema(t, conn)
 
 	botID := "44444444-4444-4444-4444-444444444444"
 	routeID := "55555555-5555-5555-5555-555555555555"
 	sessionID := "66666666-6666-6666-6666-666666666666"
+	headTurnID := "77777777-7777-7777-7777-777777777777"
+	forkedFromSessionID := "88888888-8888-8888-8888-888888888888"
+	forkedFromTurnID := "99999999-9999-9999-9999-999999999999"
 	if _, err := conn.ExecContext(ctx,
 		`INSERT INTO bot_channel_routes (id, metadata, conversation_type) VALUES (?, ?, ?)`,
 		routeID, `{"channel":"telegram"}`, "group",
@@ -449,9 +364,10 @@ CREATE TABLE bot_sessions (
 		t.Fatalf("insert route: %v", err)
 	}
 	if _, err := conn.ExecContext(ctx,
-		`INSERT INTO bot_sessions (id, bot_id, route_id, type, updated_at, created_at)
-         VALUES (?, ?, ?, 'chat', '2026-06-19 12:00:00', '2026-06-19 12:00:00')`,
-		sessionID, botID, routeID,
+		`INSERT INTO bot_sessions (
+		  id, bot_id, route_id, type, default_head_turn_id, forked_from_session_id, forked_from_turn_id, updated_at, created_at
+		) VALUES (?, ?, ?, 'chat', ?, ?, ?, '2026-06-19 12:00:00', '2026-06-19 12:00:00')`,
+		sessionID, botID, routeID, headTurnID, forkedFromSessionID, forkedFromTurnID,
 	); err != nil {
 		t.Fatalf("insert session: %v", err)
 	}
@@ -480,10 +396,49 @@ CREATE TABLE bot_sessions (
 	if row.RouteID.String() != routeID {
 		t.Fatalf("row route_id = %s, want %s", row.RouteID.String(), routeID)
 	}
+	if row.DefaultHeadTurnID.String() != headTurnID {
+		t.Fatalf("DefaultHeadTurnID = %s, want %s", row.DefaultHeadTurnID.String(), headTurnID)
+	}
+	if row.ForkedFromSessionID.String() != forkedFromSessionID {
+		t.Fatalf("ForkedFromSessionID = %s, want %s", row.ForkedFromSessionID.String(), forkedFromSessionID)
+	}
+	if row.ForkedFromTurnID.String() != forkedFromTurnID {
+		t.Fatalf("ForkedFromTurnID = %s, want %s", row.ForkedFromTurnID.String(), forkedFromTurnID)
+	}
 	if string(row.RouteMetadata) != `{"channel":"telegram"}` {
 		t.Fatalf("RouteMetadata = %q, want telegram payload", string(row.RouteMetadata))
 	}
 	if !row.RouteConversationType.Valid || row.RouteConversationType.String != "group" {
 		t.Fatalf("RouteConversationType = %#v, want group", row.RouteConversationType)
 	}
+}
+
+func createPagedSessionSchema(t *testing.T, conn *sql.DB) {
+	t.Helper()
+	// Hand-rolled minimal schema rather than the full SQLite migration baseline:
+	// these tests pin bind order and scan order for the SQLite-only paged shim.
+	execAll(t, conn, `
+CREATE TABLE bot_channel_routes (
+  id TEXT PRIMARY KEY,
+  metadata TEXT,
+  conversation_type TEXT
+);
+CREATE TABLE bot_sessions (
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL,
+  route_id TEXT REFERENCES bot_channel_routes(id),
+  channel_type TEXT,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  metadata TEXT NOT NULL DEFAULT '{}',
+  default_head_turn_id TEXT,
+  forked_from_session_id TEXT,
+  forked_from_turn_id TEXT,
+  parent_session_id TEXT,
+  created_by_user_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted_at TEXT
+);
+`)
 }

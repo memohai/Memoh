@@ -381,7 +381,8 @@ func (r *Resolver) persistACPRound(ctx context.Context, req conversation.ChatReq
 		}
 	}
 	skipMemory := promptErr != nil || req.UserMessagePersisted
-	err := r.storeRoundWithOptions(ctx, req, round, "", storeRoundOptions{
+	run := legacyTurnRun(req)
+	err := r.storeRoundWithOptions(ctx, req, &run, round, "", storeRoundOptions{
 		SkipMemory:              skipMemory,
 		AllowEmptyAssistantText: true,
 		MessageMetadataByIndex:  metadataByIndex,

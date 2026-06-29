@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -33,6 +34,156 @@ const sessionMessageStreamBuffer = 128
 // 30s proxy idle cut.
 const sseHeartbeatInterval = 20 * time.Second
 
+const invalidRequestedHeadTurnID = "\x00invalid-requested-head"
+
+func sessionTurnGraphHeadSet(graph messagepkg.SessionTurnGraph) map[string]struct{} {
+	heads := make(map[string]struct{}, len(graph.HeadTurnIDs))
+	for _, candidate := range graph.HeadTurnIDs {
+		head := strings.TrimSpace(candidate)
+		if head != "" {
+			heads[head] = struct{}{}
+		}
+	}
+	return heads
+}
+
+func resolvedHeadTurnIDForGraph(graph messagepkg.SessionTurnGraph, requestedHeadTurnID string) string {
+	heads := sessionTurnGraphHeadSet(graph)
+	nodes := make(map[string]messagepkg.SessionTurnGraphNode, len(graph.Nodes))
+	for _, node := range graph.Nodes {
+		turnID := strings.TrimSpace(node.TurnID)
+		if turnID == "" {
+			continue
+		}
+		nodes[turnID] = node
+	}
+	head := strings.TrimSpace(requestedHeadTurnID)
+	if head != "" {
+		if _, ok := heads[head]; ok && nodes[head].TurnID != "" {
+			return head
+		}
+		return ""
+	}
+	if head == "" || nodes[head].TurnID == "" {
+		head = strings.TrimSpace(graph.DefaultHeadTurnID)
+	}
+	if head == "" || nodes[head].TurnID == "" {
+		for _, candidate := range graph.HeadTurnIDs {
+			candidate = strings.TrimSpace(candidate)
+			if candidate != "" && nodes[candidate].TurnID != "" {
+				head = candidate
+				break
+			}
+		}
+	}
+	return head
+}
+
+func visibleTurnIDSetForHead(graph messagepkg.SessionTurnGraph, requestedHeadTurnID string) map[string]struct{} {
+	nodes := make(map[string]messagepkg.SessionTurnGraphNode, len(graph.Nodes))
+	for _, node := range graph.Nodes {
+		turnID := strings.TrimSpace(node.TurnID)
+		if turnID == "" {
+			continue
+		}
+		nodes[turnID] = node
+	}
+	visible := make(map[string]struct{})
+	if requested := strings.TrimSpace(requestedHeadTurnID); requested != "" {
+		if _, ok := sessionTurnGraphHeadSet(graph)[requested]; !ok {
+			visible[invalidRequestedHeadTurnID] = struct{}{}
+			return visible
+		}
+		if nodes[requested].TurnID == "" {
+			visible[invalidRequestedHeadTurnID] = struct{}{}
+			return visible
+		}
+	}
+	head := resolvedHeadTurnIDForGraph(graph, requestedHeadTurnID)
+	seen := make(map[string]struct{})
+	for head != "" {
+		if _, ok := seen[head]; ok {
+			break
+		}
+		node, ok := nodes[head]
+		if !ok {
+			break
+		}
+		seen[head] = struct{}{}
+		visible[head] = struct{}{}
+		head = strings.TrimSpace(node.ParentTurnID)
+	}
+	return visible
+}
+
+func messageVisibleInTurnSet(message messagepkg.Message, visibleTurnIDs map[string]struct{}) bool {
+	if len(visibleTurnIDs) == 0 {
+		return true
+	}
+	turnID := strings.TrimSpace(message.TurnID)
+	if turnID == "" {
+		return false
+	}
+	_, ok := visibleTurnIDs[turnID]
+	return ok
+}
+
+type liveTurnVisibility int
+
+const (
+	liveTurnHidden liveTurnVisibility = iota
+	liveTurnVisible
+	liveTurnStale
+)
+
+func addVisibleDescendantPathFromGraph(visibleTurnIDs map[string]struct{}, liveHeadTurnIDs map[string]struct{}, graph messagepkg.SessionTurnGraph, turnID string) liveTurnVisibility {
+	if len(visibleTurnIDs) == 0 {
+		return liveTurnVisible
+	}
+	turnID = strings.TrimSpace(turnID)
+	if turnID == "" {
+		return liveTurnHidden
+	}
+	if _, ok := visibleTurnIDs[turnID]; ok {
+		return liveTurnVisible
+	}
+
+	nodes := make(map[string]messagepkg.SessionTurnGraphNode, len(graph.Nodes))
+	for _, node := range graph.Nodes {
+		id := strings.TrimSpace(node.TurnID)
+		if id != "" {
+			nodes[id] = node
+		}
+	}
+	var path []string
+	seen := make(map[string]struct{})
+	for current := turnID; current != ""; {
+		if _, ok := liveHeadTurnIDs[current]; ok {
+			for _, id := range path {
+				visibleTurnIDs[id] = struct{}{}
+			}
+			liveHeadTurnIDs[turnID] = struct{}{}
+			return liveTurnVisible
+		}
+		if _, ok := seen[current]; ok {
+			return liveTurnHidden
+		}
+		seen[current] = struct{}{}
+		node, ok := nodes[current]
+		if !ok {
+			// Message persistence publishes before the session head transition
+			// is applied in the conversation flow. During that short window the
+			// refreshed graph may still be stale. Do not emit the raw message:
+			// ancestry is not proven yet, so sending it can leak another selected
+			// head's sibling content. Ask the client to refresh instead.
+			return liveTurnStale
+		}
+		path = append(path, current)
+		current = strings.TrimSpace(node.ParentTurnID)
+	}
+	return liveTurnHidden
+}
+
 // StreamSessionMessageEvents godoc
 // @Summary Stream message events for one session
 // @Description SSE stream that pushes a server-fixed backlog of the last 50
@@ -42,6 +193,7 @@ const sseHeartbeatInterval = 20 * time.Second
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
+// @Param head_turn_id query string false "Selected session head turn ID"
 // @Success 200 {string} string "SSE stream"
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
@@ -68,11 +220,24 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "message events not configured")
 	}
 
-	bot, _, _, err := h.authorizeMessageSession(c, channelIdentityID, botID, sessionID)
+	bot, _, sess, err := h.authorizeMessageSession(c, channelIdentityID, botID, sessionID)
 	if err != nil {
 		return err
 	}
 	botID = bot.ID
+	headTurnID := strings.TrimSpace(c.QueryParam("head_turn_id"))
+	headTurnID = sessionHeadTurnIDForVariantCapableSession(sess, headTurnID)
+	graph, err := h.messageService.GetSessionTurnGraph(c.Request().Context(), sessionID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	selectedHeadTurnID := resolvedHeadTurnIDForGraph(graph, headTurnID)
+	requestedHeadMissing := headTurnID != "" && selectedHeadTurnID == ""
+	visibleTurnIDs := visibleTurnIDSetForHead(graph, headTurnID)
+	liveHeadTurnIDs := make(map[string]struct{}, 1)
+	if selectedHeadTurnID != "" {
+		liveHeadTurnIDs[selectedHeadTurnID] = struct{}{}
+	}
 
 	// Subscribe BEFORE the backlog read so any message persisted during the
 	// DB call lands in the live channel. We then dedup against the backlog
@@ -84,7 +249,7 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 	sub, cancel := h.messageEvents.Subscribe(botID, sessionMessageStreamBuffer)
 	defer cancel()
 
-	backlog, err := h.messageService.ListLatestBySession(c.Request().Context(), sessionID, sessionMessageBacklogSize)
+	backlog, err := h.latestSessionMessagesForStreamBacklog(c.Request().Context(), sessionID, selectedHeadTurnID, requestedHeadMissing, sessionMessageBacklogSize)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -94,7 +259,15 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 		return err
 	}
 
-	reverseMessages(backlog)
+	if requestedHeadMissing {
+		if err := writeSSEJSON(writer, flusher, map[string]any{
+			"type":       "stale",
+			"session_id": sessionID,
+		}); err != nil {
+			return nil
+		}
+	}
+
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, backlog)
 	backlogIDs := make(map[string]struct{}, len(backlog))
 	for _, message := range backlog {
@@ -146,6 +319,30 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 				}
 				if message.SessionID != sessionID {
 					continue
+				}
+				if !messageVisibleInTurnSet(message, visibleTurnIDs) {
+					nextGraph, err := h.messageService.GetSessionTurnGraph(c.Request().Context(), sessionID)
+					if err != nil {
+						h.logger.Warn("refresh session turn graph for live message failed",
+							slog.String("session_id", sessionID),
+							slog.String("turn_id", message.TurnID),
+							slog.Any("error", err),
+						)
+						continue
+					}
+					switch addVisibleDescendantPathFromGraph(visibleTurnIDs, liveHeadTurnIDs, nextGraph, message.TurnID) {
+					case liveTurnVisible:
+					case liveTurnStale:
+						if err := writeSSEJSON(writer, flusher, map[string]any{
+							"type":       "stale",
+							"session_id": sessionID,
+						}); err != nil {
+							return nil
+						}
+						continue
+					default:
+						continue
+					}
 				}
 				// Skip messages already delivered as part of the backlog —
 				// the Subscribe-before-backlog ordering keeps the seam
@@ -202,6 +399,21 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 			}
 		}
 	}
+}
+
+func (h *MessageHandler) latestSessionMessagesForStreamBacklog(ctx context.Context, sessionID, selectedHeadTurnID string, requestedHeadMissing bool, limit int) ([]messagepkg.Message, error) {
+	if requestedHeadMissing || limit <= 0 {
+		return nil, nil
+	}
+	if limit > math.MaxInt32 {
+		limit = math.MaxInt32
+	}
+	messages, err := h.listLatestBySessionHead(ctx, sessionID, selectedHeadTurnID, int32(limit))
+	if err != nil {
+		return nil, err
+	}
+	reverseMessages(messages)
+	return messages, nil
 }
 
 // StreamSessionsActivityEvents godoc

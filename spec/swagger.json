@@ -3595,159 +3595,6 @@
                 }
             }
         },
-        "/bots/{bot_id}/local/messages": {
-            "post": {
-                "description": "Post a user message (with optional attachments) through the local channel pipeline.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "local-channel"
-                ],
-                "summary": "Send a message to a local channel",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Message payload",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.LocalChannelMessageRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/local/stream": {
-            "get": {
-                "description": "Open a persistent SSE connection to receive real-time stream events for the given bot.",
-                "produces": [
-                    "text/event-stream"
-                ],
-                "tags": [
-                    "local-channel"
-                ],
-                "summary": "Subscribe to local channel events via SSE",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "SSE stream",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/local/ws": {
-            "get": {
-                "description": "Upgrade to WebSocket for bidirectional chat streaming with abort support.",
-                "tags": [
-                    "local-channel"
-                ],
-                "summary": "WebSocket chat endpoint",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "101": {
-                        "description": "Switching Protocols",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/bots/{bot_id}/mcp": {
             "get": {
                 "description": "List MCP connections for a bot",
@@ -5075,19 +4922,31 @@
                         "description": "Before",
                         "name": "before",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Message ID at the pagination boundary",
+                        "name": "before_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Selected session head turn ID",
+                        "name": "head_turn_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Include session turn graph metadata",
+                        "name": "include_graph",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "array",
-                                "items": {
-                                    "$ref": "#/definitions/message.Message"
-                                }
-                            }
+                            "$ref": "#/definitions/handlers.messageUIListResponse"
                         }
                     },
                     "400": {
@@ -5990,7 +5849,7 @@
                     },
                     {
                         "type": "string",
-                        "description": "Comma-separated session types to include. Defaults to user-facing types (chat,discuss,acp_agent).",
+                        "description": "Comma-separated session types to include. Defaults to user-facing types (chat,discuss,acp_agent), or subagent when parent_session_id is set.",
                         "name": "types",
                         "in": "query"
                     },
@@ -6474,6 +6333,71 @@
                 }
             }
         },
+        "/bots/{bot_id}/sessions/{session_id}/fork": {
+            "post": {
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Fork a chat session from an assistant reply",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Source session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Fork source message",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.forkSessionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/session.Session"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/sessions/{session_id}/messages/events": {
             "get": {
                 "description": "SSE stream that pushes a server-fixed backlog of the last 50\nmessages, then streams future message_created and\nsession_title_updated events scoped to this session only.",
@@ -6498,6 +6422,12 @@
                         "name": "session_id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Selected session head turn ID",
+                        "name": "head_turn_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -7467,6 +7397,159 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/web/messages": {
+            "post": {
+                "description": "Post a user message (with optional attachments) through the local channel pipeline.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "local-channel"
+                ],
+                "summary": "Send a message to a local channel",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Message payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.LocalChannelMessageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/web/stream": {
+            "get": {
+                "description": "Open a persistent SSE connection to receive real-time stream events for the given bot.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "local-channel"
+                ],
+                "summary": "Subscribe to local channel events via SSE",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/web/ws": {
+            "get": {
+                "description": "Upgrade to WebSocket for bidirectional chat streaming with abort support.",
+                "tags": [
+                    "local-channel"
+                ],
+                "summary": "WebSocket chat endpoint",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "101": {
+                        "description": "Switching Protocols",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -14923,6 +15006,290 @@
                 "usage": {}
             }
         },
+        "conversation.UIAttachment": {
+            "type": "object",
+            "properties": {
+                "base64": {
+                    "type": "string"
+                },
+                "bot_id": {
+                    "type": "string"
+                },
+                "content_hash": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "mime": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                },
+                "storage_key": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "conversation.UIBackgroundTask": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string"
+                },
+                "agent_session_id": {
+                    "type": "string"
+                },
+                "chunk": {
+                    "type": "string"
+                },
+                "command": {
+                    "type": "string"
+                },
+                "duration": {
+                    "type": "string"
+                },
+                "exit_code": {
+                    "type": "integer"
+                },
+                "output_file": {
+                    "type": "string"
+                },
+                "output_tail": {
+                    "type": "string"
+                },
+                "stalled": {
+                    "type": "boolean"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "stream": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "conversation.UIForwardRef": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "integer"
+                },
+                "from_conversation_id": {
+                    "type": "string"
+                },
+                "from_user_id": {
+                    "type": "string"
+                },
+                "message_id": {
+                    "type": "string"
+                },
+                "sender": {
+                    "type": "string"
+                }
+            }
+        },
+        "conversation.UIMessage": {
+            "type": "object",
+            "properties": {
+                "approval": {
+                    "$ref": "#/definitions/conversation.UIToolApproval"
+                },
+                "attachments": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/conversation.UIAttachment"
+                    }
+                },
+                "background_task": {
+                    "$ref": "#/definitions/conversation.UIBackgroundTask"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "input": {},
+                "name": {
+                    "type": "string"
+                },
+                "output": {},
+                "progress": {
+                    "type": "array",
+                    "items": {}
+                },
+                "running": {
+                    "type": "boolean"
+                },
+                "tool_call_id": {
+                    "type": "string"
+                },
+                "type": {
+                    "$ref": "#/definitions/conversation.UIMessageType"
+                },
+                "user_input": {
+                    "$ref": "#/definitions/conversation.UIUserInput"
+                }
+            }
+        },
+        "conversation.UIMessageType": {
+            "type": "string",
+            "enum": [
+                "text",
+                "reasoning",
+                "tool",
+                "attachments"
+            ],
+            "x-enum-varnames": [
+                "UIMessageText",
+                "UIMessageReasoning",
+                "UIMessageTool",
+                "UIMessageAttachments"
+            ]
+        },
+        "conversation.UIReplyRef": {
+            "type": "object",
+            "properties": {
+                "attachments": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/conversation.UIAttachment"
+                    }
+                },
+                "message_id": {
+                    "type": "string"
+                },
+                "preview": {
+                    "type": "string"
+                },
+                "sender": {
+                    "type": "string"
+                }
+            }
+        },
+        "conversation.UIToolApproval": {
+            "type": "object",
+            "properties": {
+                "approval_id": {
+                    "type": "string"
+                },
+                "can_approve": {
+                    "type": "boolean"
+                },
+                "decision_reason": {
+                    "type": "string"
+                },
+                "short_id": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "conversation.UITurn": {
+            "type": "object",
+            "properties": {
+                "attachments": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/conversation.UIAttachment"
+                    }
+                },
+                "background_task": {
+                    "$ref": "#/definitions/conversation.UIBackgroundTask"
+                },
+                "external_message_id": {
+                    "type": "string"
+                },
+                "forward": {
+                    "$ref": "#/definitions/conversation.UIForwardRef"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "messages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/conversation.UIMessage"
+                    }
+                },
+                "platform": {
+                    "type": "string"
+                },
+                "reply": {
+                    "$ref": "#/definitions/conversation.UIReplyRef"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "sender_avatar_url": {
+                    "type": "string"
+                },
+                "sender_display_name": {
+                    "type": "string"
+                },
+                "sender_user_id": {
+                    "type": "string"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                },
+                "turn_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "conversation.UIUserInput": {
+            "type": "object",
+            "properties": {
+                "can_respond": {
+                    "type": "boolean"
+                },
+                "questions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/userinput.UIQuestion"
+                    }
+                },
+                "short_id": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "user_input_id": {
+                    "type": "string"
+                }
+            }
+        },
         "display.SessionInfo": {
             "type": "object",
             "properties": {
@@ -16137,7 +16504,13 @@
         },
         "handlers.LocalChannelMessageRequest": {
             "type": "object",
+            "required": [
+                "message"
+            ],
             "properties": {
+                "base_head_turn_id": {
+                    "type": "string"
+                },
                 "message": {
                     "$ref": "#/definitions/channel.Message"
                 },
@@ -16659,7 +17032,13 @@
         "handlers.ToolApprovalDecisionRequest": {
             "type": "object",
             "properties": {
+                "base_head_turn_id": {
+                    "type": "string"
+                },
                 "reason": {
+                    "type": "string"
+                },
+                "session_id": {
                     "type": "string"
                 }
             }
@@ -16886,6 +17265,20 @@
                 }
             }
         },
+        "handlers.forkSessionRequest": {
+            "type": "object",
+            "required": [
+                "message_id"
+            ],
+            "properties": {
+                "base_head_turn_id": {
+                    "type": "string"
+                },
+                "message_id": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.fsOpResponse": {
             "type": "object",
             "properties": {
@@ -16997,6 +17390,32 @@
                 }
             }
         },
+        "handlers.messageUIListResponse": {
+            "type": "object",
+            "properties": {
+                "default_head_turn_id": {
+                    "type": "string"
+                },
+                "head_turn_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/conversation.UITurn"
+                    }
+                },
+                "nodes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.sessionTurnGraphUINode"
+                    }
+                }
+            }
+        },
         "handlers.oauthAuthorizeRequest": {
             "type": "object",
             "properties": {
@@ -17026,6 +17445,29 @@
                     "type": "string"
                 },
                 "state": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.sessionTurnGraphUINode": {
+            "type": "object",
+            "properties": {
+                "has_assistant": {
+                    "type": "boolean"
+                },
+                "has_user": {
+                    "type": "boolean"
+                },
+                "parent_turn_id": {
+                    "type": "string"
+                },
+                "request_key": {
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                },
+                "turn_id": {
                     "type": "string"
                 }
             }
@@ -17399,108 +17841,6 @@
                     "type": "string"
                 },
                 "url": {
-                    "type": "string"
-                }
-            }
-        },
-        "message.Message": {
-            "type": "object",
-            "properties": {
-                "assets": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/message.MessageAsset"
-                    }
-                },
-                "bot_id": {
-                    "type": "string"
-                },
-                "compact_id": {
-                    "type": "string"
-                },
-                "content": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "display_content": {
-                    "type": "string"
-                },
-                "event_id": {
-                    "type": "string"
-                },
-                "external_message_id": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "platform": {
-                    "type": "string"
-                },
-                "role": {
-                    "type": "string"
-                },
-                "sender_avatar_url": {
-                    "type": "string"
-                },
-                "sender_channel_identity_id": {
-                    "type": "string"
-                },
-                "sender_display_name": {
-                    "type": "string"
-                },
-                "sender_user_id": {
-                    "type": "string"
-                },
-                "session_id": {
-                    "type": "string"
-                },
-                "source_reply_to_message_id": {
-                    "type": "string"
-                },
-                "usage": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                }
-            }
-        },
-        "message.MessageAsset": {
-            "type": "object",
-            "properties": {
-                "content_hash": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "mime": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "ordinal": {
-                    "type": "integer"
-                },
-                "role": {
-                    "type": "string"
-                },
-                "size_bytes": {
-                    "type": "integer"
-                },
-                "storage_key": {
                     "type": "string"
                 }
             }
@@ -18554,6 +18894,15 @@
                 "created_by_user_id": {
                     "type": "string"
                 },
+                "default_head_turn_id": {
+                    "type": "string"
+                },
+                "forked_from_session_id": {
+                    "type": "string"
+                },
+                "forked_from_turn_id": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -18830,6 +19179,46 @@
                     "type": "string"
                 },
                 "video_model_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "userinput.UIOption": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                }
+            }
+        },
+        "userinput.UIQuestion": {
+            "type": "object",
+            "properties": {
+                "allow_custom": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/userinput.UIOption"
+                    }
+                },
+                "placeholder": {
+                    "type": "string"
+                },
+                "text": {
                     "type": "string"
                 }
             }

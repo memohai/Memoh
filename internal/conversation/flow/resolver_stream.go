@@ -24,26 +24,26 @@ type terminalSnapshot struct {
 	sdkMessages    []sdk.Message
 	usage          json.RawMessage
 	deferredToolID string
+	aborted        bool
+	visibleOutput  bool
 }
 
-func isVisibleAgentStreamEvent(event agentpkg.StreamEvent) bool {
+func hasVisibleAgentStreamOutput(event agentpkg.StreamEvent) bool {
 	switch event.Type {
-	case agentpkg.EventTextStart,
-		agentpkg.EventTextDelta,
-		agentpkg.EventTextEnd,
-		agentpkg.EventReasoningStart,
-		agentpkg.EventReasoningDelta,
-		agentpkg.EventReasoningEnd,
-		agentpkg.EventToolCallInputStart,
+	case agentpkg.EventTextDelta,
+		agentpkg.EventReasoningDelta:
+		return strings.TrimSpace(event.Delta) != ""
+	case agentpkg.EventToolCallInputStart,
 		agentpkg.EventToolCallStart,
 		agentpkg.EventToolCallProgress,
 		agentpkg.EventToolCallEnd,
 		agentpkg.EventToolApprovalRequest,
 		agentpkg.EventUserInputRequest,
-		agentpkg.EventAttachment,
 		agentpkg.EventReaction,
 		agentpkg.EventSpeech:
 		return true
+	case agentpkg.EventAttachment:
+		return len(event.Attachments) > 0
 	default:
 		return false
 	}
@@ -73,6 +73,7 @@ func extractTerminalSnapshot(data []byte) (terminalSnapshot, bool) {
 		sdkMessages:    sdkMsgs,
 		usage:          envelope.Usage,
 		deferredToolID: strings.TrimSpace(envelope.ApprovalID),
+		aborted:        envelope.Type == string(agentpkg.EventAgentAbort),
 	}, true
 }
 
@@ -87,10 +88,21 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		doneTurn := r.enterSessionTurn(ctx, streamReq.BotID, streamReq.SessionID)
 		defer doneTurn()
 
+		var err error
+		run, err := r.prepareTurnRun(ctx, streamReq)
+		if err != nil {
+			r.logger.Error("agent stream prepare turn run failed",
+				slog.String("bot_id", streamReq.BotID),
+				slog.String("chat_id", streamReq.ChatID),
+				slog.Any("error", err),
+			)
+			errCh <- err
+			return
+		}
 		if streamReq.RawQuery == "" {
 			streamReq.RawQuery = strings.TrimSpace(streamReq.Query)
 		}
-		streamReq, err := r.applyUserMessageHook(ctx, streamReq)
+		streamReq, err = r.applyUserMessageHook(ctx, streamReq)
 		if err != nil {
 			r.logger.Error("agent stream user message hook failed",
 				slog.String("bot_id", streamReq.BotID),
@@ -100,7 +112,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 			errCh <- err
 			return
 		}
-		rc, err := r.resolve(ctx, streamReq)
+		rc, err := r.resolve(ctx, streamReq, &run)
 		if err != nil {
 			r.logger.Error("agent stream resolve failed",
 				slog.String("bot_id", streamReq.BotID),
@@ -147,7 +159,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 					slog.String("error", event.Error),
 				)
 			}
-			if isVisibleAgentStreamEvent(event) {
+			if hasVisibleAgentStreamOutput(event) {
 				hasVisibleOutput = true
 			}
 
@@ -157,13 +169,14 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 			}
 			if event.IsTerminal() && len(event.Messages) > 0 {
 				if snap, ok := extractTerminalSnapshot(data); ok {
+					snap.visibleOutput = hasVisibleOutput
 					lastSnapshot = snap
 					hasSnapshot = true
 					if !stored {
 						// Use WithoutCancel so persistence still succeeds even
 						// when the parent ctx has already been cancelled by a
 						// client disconnect or idle timeout.
-						if storeErr := r.persistTerminalSnapshot(context.WithoutCancel(ctx), streamReq, rc, snap); storeErr != nil {
+						if storeErr := r.persistTerminalSnapshot(context.WithoutCancel(ctx), streamReq, &run, rc, snap); storeErr != nil {
 							r.logger.Error("stream persist failed", slog.Any("error", storeErr))
 						} else {
 							stored = true
@@ -192,7 +205,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		if !stored {
 			switch {
 			case hasSnapshot:
-				r.persistPartialResult(ctx, streamReq, rc, lastSnapshot.sdkMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
+				r.persistPartialResult(ctx, streamReq, &run, rc, lastSnapshot.sdkMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
 			default:
 				r.logger.Info("skip persisting failed startup stream",
 					slog.String("bot_id", streamReq.BotID),
@@ -234,6 +247,16 @@ func (r *Resolver) StreamChatWS(
 	eventCh chan<- WSStreamEvent,
 	abortCh <-chan struct{},
 ) error {
+	return r.streamChatWSWithRewriteAnchor(ctx, req, nil, eventCh, abortCh)
+}
+
+func (r *Resolver) streamChatWSWithRewriteAnchor(
+	ctx context.Context,
+	req conversation.ChatRequest,
+	rewriteAnchor *conversation.TurnAnchor,
+	eventCh chan<- WSStreamEvent,
+	abortCh <-chan struct{},
+) error {
 	if ok, err := r.isACPAgentSession(ctx, req); err != nil {
 		r.logger.Error("StreamChatWS: ACP session check failed",
 			slog.String("bot_id", req.BotID),
@@ -248,10 +271,18 @@ func (r *Resolver) StreamChatWS(
 	doneTurn := r.enterSessionTurn(ctx, req.BotID, req.SessionID)
 	defer doneTurn()
 
+	var err error
+	run, err := r.prepareTurnRunWithRewriteAnchor(ctx, req, rewriteAnchor)
+	if err != nil {
+		r.logger.Error("StreamChatWS: prepare turn run failed",
+			slog.String("bot_id", req.BotID),
+			slog.Any("error", err),
+		)
+		return err
+	}
 	if req.RawQuery == "" {
 		req.RawQuery = strings.TrimSpace(req.Query)
 	}
-	var err error
 	req, err = r.applyUserMessageHook(ctx, req)
 	if err != nil {
 		r.logger.Error("StreamChatWS: user message hook failed",
@@ -260,7 +291,7 @@ func (r *Resolver) StreamChatWS(
 		)
 		return err
 	}
-	rc, err := r.resolve(ctx, req)
+	rc, err := r.resolve(ctx, req, &run)
 	if err != nil {
 		r.logger.Error("StreamChatWS: resolve failed",
 			slog.String("bot_id", req.BotID),
@@ -317,7 +348,7 @@ func (r *Resolver) StreamChatWS(
 				slog.String("error", event.Error),
 			)
 		}
-		if isVisibleAgentStreamEvent(event) {
+		if hasVisibleAgentStreamOutput(event) {
 			hasVisibleOutput = true
 		}
 
@@ -328,10 +359,11 @@ func (r *Resolver) StreamChatWS(
 
 		if event.IsTerminal() && len(event.Messages) > 0 {
 			if snap, ok := extractTerminalSnapshot(data); ok {
+				snap.visibleOutput = hasVisibleOutput
 				lastSnapshot = snap
 				hasSnapshot = true
 				if !stored {
-					if storeErr := r.persistTerminalSnapshot(context.WithoutCancel(ctx), req, rc, snap); storeErr != nil {
+					if storeErr := r.persistTerminalSnapshot(context.WithoutCancel(ctx), req, &run, rc, snap); storeErr != nil {
 						r.logger.Error("ws persist failed", slog.Any("error", storeErr))
 					} else {
 						stored = true
@@ -353,7 +385,7 @@ func (r *Resolver) StreamChatWS(
 	if !stored {
 		switch {
 		case hasSnapshot:
-			r.persistPartialResult(ctx, req, rc, lastSnapshot.sdkMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
+			r.persistPartialResult(ctx, req, &run, rc, lastSnapshot.sdkMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
 		default:
 			r.logger.Info("skip persisting failed startup ws stream",
 				slog.String("bot_id", req.BotID),
@@ -390,8 +422,16 @@ func (r *Resolver) StreamChatWS(
 // persistTerminalSnapshot stores the SDK messages produced by an agent run
 // (or partial run) into bot history. Triggers compaction when usage data
 // indicates the context is large.
-func (r *Resolver) persistTerminalSnapshot(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, snap terminalSnapshot) error {
+func (r *Resolver) persistTerminalSnapshot(ctx context.Context, req conversation.ChatRequest, run *TurnRun, rc resolvedContext, snap terminalSnapshot) error {
 	outputMessages := sdkMessagesToModelMessages(snap.sdkMessages)
+	if snap.aborted && !snap.visibleOutput {
+		r.logger.Info("skip persisting aborted terminal snapshot before visible output",
+			slog.String("bot_id", req.BotID),
+			slog.String("chat_id", req.ChatID),
+			slog.Int("messages", len(outputMessages)),
+		)
+		return nil
+	}
 	if !hasPersistableAssistantOutput(outputMessages) {
 		r.logger.Info("skip persisting terminal snapshot without assistant output",
 			slog.String("bot_id", req.BotID),
@@ -411,7 +451,7 @@ func (r *Resolver) persistTerminalSnapshot(ctx context.Context, req conversation
 		roundMessages = interleaveInjectedMessages(roundMessages, *rc.injectedRecords)
 	}
 
-	if err := r.storeRoundWithOptions(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
+	if _, err := r.storeRoundAndApplyVariantTransition(ctx, storeReq, run, roundMessages, rc.model.ID, storeRoundOptions{
 		AllowPendingToolCalls: snap.deferredToolID != "",
 	}); err != nil {
 		return err
@@ -445,6 +485,7 @@ func hasPersistableAssistantOutput(messages []conversation.ModelMessage) bool {
 func (r *Resolver) persistPartialResult(
 	ctx context.Context,
 	req conversation.ChatRequest,
+	run *TurnRun,
 	rc resolvedContext,
 	partialMessages []sdk.Message,
 	toolCallCount int,
@@ -458,8 +499,10 @@ func (r *Resolver) persistPartialResult(
 		// synthetic error tool_results for any tool_calls that never received
 		// a real result, preserving the assistant ↔ tool pairing required by
 		// downstream provider serializers (especially Anthropic).
-		err := r.persistTerminalSnapshot(persistCtx, req, rc, terminalSnapshot{
-			sdkMessages: partialMessages,
+		err := r.persistTerminalSnapshot(persistCtx, req, run, rc, terminalSnapshot{
+			sdkMessages:   partialMessages,
+			aborted:       !hasVisibleOutput,
+			visibleOutput: hasVisibleOutput,
 		})
 		if err == nil {
 			r.logger.Info("persisted partial agent result",

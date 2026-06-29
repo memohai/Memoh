@@ -159,18 +159,50 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 		UiPayloadJson:                uiPayloadJSON,
 		ProviderMetadata:             providerMetadata,
 		RequestedByChannelIdentityID: requestedByID,
+		PersistTurnID:                optionalUUID(input.PersistTurnID),
 		SourcePlatform:               strings.TrimSpace(input.SourcePlatform),
 		ReplyTarget:                  strings.TrimSpace(input.ReplyTarget),
 		ConversationType:             strings.TrimSpace(input.ConversationType),
 		ExpiresAt:                    optionalTime(input.ExpiresAt),
 	}
-	row, err := s.queries.CreateUserInputRequest(ctx, params)
+	var row sqlc.UserInputRequest
+	if params.PersistTurnID.Valid {
+		row, err = s.queries.CreateUserInputRequestForTurn(ctx, sqlc.CreateUserInputRequestForTurnParams{
+			BotID:                        params.BotID,
+			SessionID:                    params.SessionID,
+			RouteID:                      params.RouteID,
+			ChannelIdentityID:            params.ChannelIdentityID,
+			ToolCallID:                   params.ToolCallID,
+			ToolName:                     params.ToolName,
+			InputJson:                    params.InputJson,
+			UiPayloadJson:                params.UiPayloadJson,
+			ProviderMetadata:             params.ProviderMetadata,
+			RequestedByChannelIdentityID: params.RequestedByChannelIdentityID,
+			SourcePlatform:               params.SourcePlatform,
+			ReplyTarget:                  params.ReplyTarget,
+			ConversationType:             params.ConversationType,
+			ExpiresAt:                    params.ExpiresAt,
+			PersistTurnID:                params.PersistTurnID,
+		})
+	} else {
+		row, err = s.queries.CreateUserInputRequest(ctx, params)
+	}
 	if err != nil {
 		if errors.Is(mapLookupErr(err), ErrNotFound) {
-			existing, getErr := s.queries.GetUserInputRequestBySessionToolCall(ctx, sqlc.GetUserInputRequestBySessionToolCallParams{
-				SessionID:  sessionID,
-				ToolCallID: toolCallID,
-			})
+			var existing sqlc.UserInputRequest
+			var getErr error
+			if params.PersistTurnID.Valid {
+				existing, getErr = s.queries.GetUserInputRequestBySessionToolCallTurn(ctx, sqlc.GetUserInputRequestBySessionToolCallTurnParams{
+					SessionID:     sessionID,
+					ToolCallID:    toolCallID,
+					PersistTurnID: params.PersistTurnID,
+				})
+			} else {
+				existing, getErr = s.queries.GetUserInputRequestBySessionToolCall(ctx, sqlc.GetUserInputRequestBySessionToolCallParams{
+					SessionID:  sessionID,
+					ToolCallID: toolCallID,
+				})
+			}
 			if getErr == nil {
 				existingReq := requestFromRow(existing)
 				if existingReq.Status != StatusPending {
@@ -221,15 +253,29 @@ func (s *Service) ResolveTarget(ctx context.Context, input ResolveInput) (Reques
 			return requestFromRowOrErr(row, err)
 		}
 		if parsed, err := db.ParseUUID(explicit); err == nil {
-			row, err := s.queries.GetUserInputRequest(ctx, parsed)
+			baseHeadTurnID, err := parseOptionalUUID(input.BaseHeadTurnID)
+			if err != nil {
+				return Request{}, err
+			}
+			var row sqlc.UserInputRequest
+			if baseHeadTurnID.Valid {
+				row, err = s.queries.GetPendingUserInputByBaseHeadRequestID(ctx, sqlc.GetPendingUserInputByBaseHeadRequestIDParams{
+					ID:             parsed,
+					BotID:          botID,
+					SessionID:      sessionID,
+					BaseHeadTurnID: baseHeadTurnID,
+				})
+			} else {
+				row, err = s.queries.GetPendingUserInputByVisibleRequestID(ctx, sqlc.GetPendingUserInputByVisibleRequestIDParams{
+					ID:        parsed,
+					BotID:     botID,
+					SessionID: sessionID,
+				})
+			}
 			if err != nil {
 				return Request{}, mapLookupErr(err)
 			}
-			req := requestFromRow(row)
-			if req.BotID != uuid.UUID(botID.Bytes).String() || req.SessionID != uuid.UUID(sessionID.Bytes).String() || req.Status != StatusPending {
-				return Request{}, ErrNotFound
-			}
-			return req, nil
+			return requestFromRow(row), nil
 		}
 		return Request{}, ErrNotFound
 	}
@@ -470,6 +516,29 @@ func (s *Service) ListBySession(ctx context.Context, botID, sessionID string) ([
 	return s.listBySession(ctx, botID, sessionID, false)
 }
 
+func (s *Service) ListBySessionTurnGraph(ctx context.Context, botID, sessionID string) ([]Request, error) {
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return nil, err
+	}
+	pgSessionID, err := db.ParseUUID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListUserInputsBySessionTurnGraph(ctx, sqlc.ListUserInputsBySessionTurnGraphParams{
+		BotID:     pgBotID,
+		SessionID: pgSessionID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]Request, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, requestFromRow(row))
+	}
+	return result, nil
+}
+
 func (s *Service) listBySession(ctx context.Context, botID, sessionID string, pendingOnly bool) ([]Request, error) {
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -503,13 +572,14 @@ func (s *Service) listBySession(ctx context.Context, botID, sessionID string, pe
 
 func DeferredMetadata(req Request) map[string]any {
 	return map[string]any{
-		"kind":          DeferredKind,
-		"user_input_id": req.ID,
-		"short_id":      req.ShortID,
-		"status":        req.Status,
-		"tool_call_id":  req.ToolCallID,
-		"tool_name":     req.ToolName,
-		"ui_payload":    req.UIPayload,
+		"kind":            DeferredKind,
+		"user_input_id":   req.ID,
+		"short_id":        req.ShortID,
+		"status":          req.Status,
+		"tool_call_id":    req.ToolCallID,
+		"tool_name":       req.ToolName,
+		"ui_payload":      req.UIPayload,
+		"persist_turn_id": req.PersistTurnID,
 	}
 }
 
@@ -680,6 +750,9 @@ func requestFromRow(row sqlc.UserInputRequest) Request {
 	if row.ChannelIdentityID.Valid {
 		req.ChannelIdentityID = uuid.UUID(row.ChannelIdentityID.Bytes).String()
 	}
+	if row.PersistTurnID.Valid {
+		req.PersistTurnID = uuid.UUID(row.PersistTurnID.Bytes).String()
+	}
 	if row.RespondedAt.Valid {
 		responded := row.RespondedAt.Time
 		req.RespondedAt = &responded
@@ -741,6 +814,14 @@ func optionalUUID(value string) pgtype.UUID {
 		return pgtype.UUID{}
 	}
 	return parsed
+}
+
+func parseOptionalUUID(value string) (pgtype.UUID, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return pgtype.UUID{}, nil
+	}
+	return db.ParseUUID(trimmed)
 }
 
 func optionalTime(value *time.Time) pgtype.Timestamptz {

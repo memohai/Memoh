@@ -362,13 +362,31 @@
     "thinking": "考えています…",
     "thinkingInProgress": "考え…",
     "thinkingDone": "思考完了",
+    "errors": {
+      "forkFailed": "セッションのフォークに失敗しました",
+      "loadVariantFailed": "バージョンの切り替えに失敗しました",
+      "sessionDeleted": "このセッションは削除されています"
+    },
     "actions": {
       "copy": "コピー",
       "copied": "コピーされました",
       "edit": "編集",
       "share": "共有",
       "retry": "もう一度試す",
-      "fork": "フォーク"
+      "fork": "フォーク",
+      "createFork": "フォークを作成",
+      "more": "その他",
+      "requestVariant": {
+        "previous": "前のリクエスト",
+        "next": "次のリクエスト",
+        "label": "{current}/{total} 件目のリクエスト"
+      },
+      "responseVariant": {
+        "previous": "前の返信",
+        "next": "次の返信",
+        "label": "{current}/{total} 件目の返信"
+      },
+      "readAloud": "読み上げ"
     },
     "process": {
       "browse": "{count} ファイルを読み取る",

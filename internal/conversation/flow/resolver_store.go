@@ -3,6 +3,7 @@ package flow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 
@@ -10,11 +11,13 @@ import (
 
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/conversation"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
 func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string) error {
-	return r.storeRoundWithOptions(ctx, req, messages, modelID, storeRoundOptions{})
+	run := legacyTurnRun(req)
+	return r.storeRoundWithOptions(ctx, req, &run, messages, modelID, storeRoundOptions{})
 }
 
 type storeRoundOptions struct {
@@ -22,9 +25,25 @@ type storeRoundOptions struct {
 	SkipMemory              bool
 	AllowEmptyAssistantText bool
 	MessageMetadataByIndex  map[int]map[string]any
+	Queries                 dbstore.Queries
 }
 
-func (r *Resolver) storeRoundWithOptions(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) error {
+type txMessageWriter interface {
+	PersistWithQueries(ctx context.Context, queries dbstore.Queries, input messagepkg.PersistInput) (messagepkg.Message, error)
+}
+
+type storedRoundContext struct {
+	TurnID         string
+	Messages       []messagepkg.Message
+	MemoryMessages []conversation.ModelMessage
+}
+
+func (r *Resolver) storeRoundWithOptions(ctx context.Context, req conversation.ChatRequest, run *TurnRun, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) error {
+	_, err := r.storeRoundWithContext(ctx, req, run, messages, modelID, opts)
+	return err
+}
+
+func (r *Resolver) storeRoundWithContext(ctx context.Context, req conversation.ChatRequest, run *TurnRun, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) (storedRoundContext, error) {
 	fullRound := make([]conversation.ModelMessage, 0, len(messages))
 
 	// When the user message was already persisted by a channel adapter, skip
@@ -58,15 +77,19 @@ func (r *Resolver) storeRoundWithOptions(ctx context.Context, req conversation.C
 	}
 
 	if len(filtered) == 0 {
-		return nil
+		return storedRoundContext{}, nil
 	}
 
-	r.storeMessages(ctx, req, filtered, modelID, opts)
+	stored, err := r.storeMessages(ctx, req, run, filtered, modelID, opts)
+	if err != nil {
+		return storedRoundContext{}, err
+	}
+	stored.MemoryMessages = filtered
 	if !opts.SkipMemory {
 		go r.storeMemory(context.WithoutCancel(ctx), req, filtered)
 	}
 
-	return nil
+	return stored, nil
 }
 
 // isEmptyAssistantMessage returns true if an assistant message has no
@@ -105,13 +128,20 @@ func (r *Resolver) StoreRound(ctx context.Context, botID, sessionID, channelIden
 	return r.storeRound(ctx, req, modelMessages, modelID)
 }
 
-func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) {
+func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatRequest, run *TurnRun, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) (storedRoundContext, error) {
 	if r.messageService == nil {
-		return
+		return storedRoundContext{}, nil
 	}
 	if strings.TrimSpace(req.BotID) == "" {
-		return
+		return storedRoundContext{}, nil
 	}
+	turnID, err := r.ensurePersistTurnWithQueries(ctx, opts.Queries, run)
+	if err != nil {
+		return storedRoundContext{}, err
+	}
+	turnID = strings.TrimSpace(turnID)
+	storedAny := false
+	storedMessages := make([]messagepkg.Message, 0, len(messages))
 
 	// Check bot setting for full tool result persistence.
 	pruneToolResults := true
@@ -208,9 +238,10 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 		if extraMeta := opts.MessageMetadataByIndex[i]; len(extraMeta) > 0 {
 			persistMeta = mergeMetadata(persistMeta, extraMeta)
 		}
-		if _, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
+		persistInput := messagepkg.PersistInput{
 			BotID:                   req.BotID,
 			SessionID:               req.SessionID,
+			TurnID:                  turnID,
 			SenderChannelIdentityID: messageSenderChannelIdentityID,
 			SenderUserID:            messageSenderUserID,
 			ExternalMessageID:       externalMessageID,
@@ -223,9 +254,107 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 			ModelID:                 modelID,
 			EventID:                 messageEventID,
 			DisplayText:             displayText,
-		}); err != nil {
-			r.logger.Warn("persist message failed", slog.Any("error", err))
 		}
+		persisted, err := r.persistMessage(ctx, opts.Queries, persistInput)
+		if err != nil {
+			return storedRoundContext{}, err
+		}
+		if turnID == "" {
+			turnID = strings.TrimSpace(persisted.TurnID)
+		}
+		storedMessages = append(storedMessages, persisted)
+		storedAny = true
+	}
+	if !storedAny {
+		return storedRoundContext{}, nil
+	}
+	return storedRoundContext{TurnID: turnID, Messages: storedMessages}, nil
+}
+
+func (r *Resolver) persistMessage(ctx context.Context, queries dbstore.Queries, input messagepkg.PersistInput) (messagepkg.Message, error) {
+	if queries != nil {
+		if txWriter, ok := r.messageService.(txMessageWriter); ok {
+			return txWriter.PersistWithQueries(ctx, queries, input)
+		}
+		return messagepkg.Message{}, errors.New("message service does not support transaction-bound persist")
+	}
+	return r.messageService.Persist(ctx, input)
+}
+
+func (r *Resolver) storeRoundAndApplyVariantTransition(ctx context.Context, req conversation.ChatRequest, run *TurnRun, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) (storedRoundContext, error) {
+	if runRequiresVariantTransition(run) {
+		if !r.canPersistRoundAndTransitionAtomically(run) {
+			return storedRoundContext{}, errors.New("store round: transaction-bound turn persistence is required")
+		}
+		runner := r.queries.(turnTxRunner)
+		txOpts := opts
+		txOpts.SkipMemory = true
+		var stored storedRoundContext
+		previousPersistTurnID := strings.TrimSpace(run.PersistTurnID)
+		if err := runner.RunInTx(ctx, func(q dbstore.Queries) error {
+			txOpts.Queries = q
+			var err error
+			stored, err = r.storeRoundWithContext(ctx, req, run, messages, modelID, txOpts)
+			if err != nil {
+				return err
+			}
+			return r.applyVariantTransitionWithQueries(ctx, q, run, stored.TurnID)
+		}); err != nil {
+			if previousPersistTurnID == "" {
+				run.PersistTurnID = ""
+			}
+			return storedRoundContext{}, err
+		}
+		r.publishStoredMessages(stored.Messages)
+		if !opts.SkipMemory && len(stored.MemoryMessages) > 0 {
+			go r.storeMemory(context.WithoutCancel(ctx), req, stored.MemoryMessages)
+		}
+		return stored, nil
+	}
+
+	stored, err := r.storeRoundWithContext(ctx, req, run, messages, modelID, opts)
+	if err != nil {
+		return storedRoundContext{}, err
+	}
+	return stored, nil
+}
+
+func (r *Resolver) canPersistRoundAndTransitionAtomically(run *TurnRun) bool {
+	if r == nil || r.queries == nil || r.messageService == nil || !runRequiresVariantTransition(run) {
+		return false
+	}
+	runner, ok := r.queries.(turnTxRunner)
+	if !ok || runner == nil {
+		return false
+	}
+	if _, ok = r.messageService.(txMessageWriter); !ok {
+		return false
+	}
+	_, ok = r.messageService.(messageCreatedPublisher)
+	return ok
+}
+
+func runRequiresVariantTransition(run *TurnRun) bool {
+	if run == nil {
+		return false
+	}
+	return normalizeVariantTransitionAction(run.Variant.Action) != VariantTransitionNone
+}
+
+type messageCreatedPublisher interface {
+	PublishMessageCreated(messagepkg.Message)
+}
+
+func (r *Resolver) publishStoredMessages(messages []messagepkg.Message) {
+	if len(messages) == 0 || r == nil || r.messageService == nil {
+		return
+	}
+	publisher, ok := r.messageService.(messageCreatedPublisher)
+	if !ok {
+		return
+	}
+	for _, msg := range messages {
+		publisher.PublishMessageCreated(msg)
 	}
 }
 

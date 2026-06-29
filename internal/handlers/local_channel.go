@@ -28,6 +28,7 @@ import (
 	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/userinput"
 )
 
@@ -50,6 +51,7 @@ type LocalChannelHandler struct {
 	routeHub            *local.RouteHub
 	botService          *bots.Service
 	accountService      *accounts.Service
+	sessionService      *sessionpkg.Service
 	resolver            *flow.Resolver
 	mediaService        *media.Service
 	speechService       localSpeechSynthesizer
@@ -58,7 +60,7 @@ type LocalChannelHandler struct {
 }
 
 // NewLocalChannelHandler creates a local channel handler.
-func NewLocalChannelHandler(channelType channel.ChannelType, channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, routeHub *local.RouteHub, botService *bots.Service, accountService *accounts.Service) *LocalChannelHandler {
+func NewLocalChannelHandler(channelType channel.ChannelType, channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, routeHub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, sessionService *sessionpkg.Service) *LocalChannelHandler {
 	return &LocalChannelHandler{
 		channelType:    channelType,
 		channelManager: channelManager,
@@ -67,6 +69,7 @@ func NewLocalChannelHandler(channelType channel.ChannelType, channelManager *cha
 		routeHub:       routeHub,
 		botService:     botService,
 		accountService: accountService,
+		sessionService: sessionService,
 		logger:         slog.Default().With(slog.String("handler", "local_channel")),
 	}
 }
@@ -106,7 +109,7 @@ func (h *LocalChannelHandler) Register(e *echo.Echo) {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/local/stream [get].
+// @Router /bots/{bot_id}/web/stream [get].
 func (h *LocalChannelHandler) StreamMessages(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -166,9 +169,10 @@ func formatLocalStreamEvent(event channel.StreamEvent) ([]byte, error) {
 
 // LocalChannelMessageRequest is the request body for posting a local channel message.
 type LocalChannelMessageRequest struct {
-	Message         channel.Message `json:"message"`
+	Message         channel.Message `json:"message" validate:"required"`
 	ModelID         string          `json:"model_id,omitempty"`
 	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
+	BaseHeadTurnID  string          `json:"base_head_turn_id,omitempty"`
 }
 
 // PostMessage godoc
@@ -183,7 +187,7 @@ type LocalChannelMessageRequest struct {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/local/messages [post].
+// @Router /bots/{bot_id}/web/messages [post].
 func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -245,6 +249,12 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 		}
 		msg.Metadata["reasoning_effort"] = re
 	}
+	if head := strings.TrimSpace(req.BaseHeadTurnID); head != "" {
+		if msg.Metadata == nil {
+			msg.Metadata = make(map[string]any)
+		}
+		msg.Metadata["base_head_turn_id"] = head
+	}
 	if err := h.channelManager.HandleInbound(c.Request().Context(), cfg, msg); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -260,6 +270,9 @@ type wsClientMessage struct {
 	StreamID        string                     `json:"stream_id,omitempty"`
 	Text            string                     `json:"text,omitempty"`
 	SessionID       string                     `json:"session_id,omitempty"`
+	RetryMessageID  string                     `json:"retry_message_id,omitempty"`
+	EditMessageID   string                     `json:"edit_message_id,omitempty"`
+	BaseHeadTurnID  string                     `json:"base_head_turn_id,omitempty"`
 	Attachments     []json.RawMessage          `json:"attachments,omitempty"`
 	ModelID         string                     `json:"model_id,omitempty"`
 	ReasoningEffort string                     `json:"reasoning_effort,omitempty"`
@@ -557,7 +570,7 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, ac
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/local/ws [get].
+// @Router /bots/{bot_id}/web/ws [get].
 func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -567,11 +580,14 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
+	_, perms, err := h.authorizeBotSessionAccess(c.Request().Context(), channelIdentityID, botID)
+	if err != nil {
 		return err
 	}
-	if err := h.ensureBotParticipant(c.Request().Context(), botID, channelIdentityID); err != nil {
-		return err
+	if !canOpenLocalWebSocket(perms) {
+		if err := h.ensureBotParticipant(c.Request().Context(), botID, channelIdentityID); err != nil {
+			return err
+		}
 	}
 	if h.resolver == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "resolver not configured")
@@ -635,6 +651,10 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSError(writer, "", sessionID, "stream_id is required")
 				continue
 			}
+			if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
+				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+				continue
+			}
 			explicitID := strings.TrimSpace(msg.ApprovalID)
 			if explicitID == "" && msg.ShortID > 0 {
 				explicitID = strconv.Itoa(msg.ShortID)
@@ -649,6 +669,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						ActorChannelIdentityID:     channelIdentityID,
 						ApprovalID:                 strings.TrimSpace(msg.ApprovalID),
 						ExplicitID:                 explicitID,
+						BaseHeadTurnID:             strings.TrimSpace(msg.BaseHeadTurnID),
 						Decision:                   strings.TrimSpace(msg.Decision),
 						Reason:                     strings.TrimSpace(msg.Reason),
 						ChatToken:                  bearerToken,
@@ -668,6 +689,10 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSError(writer, "", sessionID, "stream_id is required")
 				continue
 			}
+			if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
+				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+				continue
+			}
 			explicitID := strings.TrimSpace(msg.UserInputID)
 			if explicitID == "" && msg.ShortID > 0 {
 				explicitID = strconv.Itoa(msg.ShortID)
@@ -682,6 +707,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						ActorChannelIdentityID:     channelIdentityID,
 						UserInputID:                strings.TrimSpace(msg.UserInputID),
 						ExplicitID:                 explicitID,
+						BaseHeadTurnID:             strings.TrimSpace(msg.BaseHeadTurnID),
 						Answers:                    msg.Answers,
 						Canceled:                   msg.Canceled,
 						Reason:                     strings.TrimSpace(msg.Reason),
@@ -710,6 +736,10 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSError(writer, streamID, sessionID, "message text or attachments required")
 				continue
 			}
+			if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
+				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+				continue
+			}
 
 			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws stream error",
 				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}) error {
@@ -722,6 +752,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						BotID:                   botID,
 						ChatID:                  botID,
 						SessionID:               sessionID,
+						BaseHeadTurnID:          strings.TrimSpace(msg.BaseHeadTurnID),
 						StreamID:                streamID,
 						Token:                   bearerToken,
 						UserID:                  channelIdentityID,
@@ -737,6 +768,104 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						ToolHTTPURL:             buildACPMCPToolsURL(c, botID),
 					}
 					return h.resolver.StreamChatWS(ctx, req, eventCh, abortCh)
+				},
+			)
+
+		case "retry_message":
+			sessionID := strings.TrimSpace(msg.SessionID)
+			streamID := strings.TrimSpace(msg.StreamID)
+			retryMessageID := strings.TrimSpace(msg.RetryMessageID)
+			if streamID == "" {
+				sendWSError(writer, "", sessionID, "stream_id is required")
+				continue
+			}
+			if sessionID == "" {
+				sendWSError(writer, streamID, "", "session_id is required")
+				continue
+			}
+			if retryMessageID == "" {
+				sendWSError(writer, streamID, sessionID, "retry_message_id is required")
+				continue
+			}
+			if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
+				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+				continue
+			}
+
+			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws retry stream error",
+				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}) error {
+					req := conversation.ChatRequest{
+						BotID:                   botID,
+						ChatID:                  botID,
+						SessionID:               sessionID,
+						BaseHeadTurnID:          strings.TrimSpace(msg.BaseHeadTurnID),
+						StreamID:                streamID,
+						Token:                   bearerToken,
+						UserID:                  channelIdentityID,
+						SourceChannelIdentityID: channelIdentityID,
+						ConversationType:        channel.ConversationTypePrivate,
+						CurrentChannel:          h.channelType.String(),
+						ReplyTarget:             botID,
+						Channels:                []string{h.channelType.String()},
+						Model:                   strings.TrimSpace(msg.ModelID),
+						ReasoningEffort:         strings.TrimSpace(msg.ReasoningEffort),
+						ToolHTTPURL:             buildACPMCPToolsURL(c, botID),
+					}
+					return h.resolver.StreamRetryWS(ctx, req, retryMessageID, eventCh, abortCh)
+				},
+			)
+
+		case "edit_message":
+			text := strings.TrimSpace(msg.Text)
+			sessionID := strings.TrimSpace(msg.SessionID)
+			streamID := strings.TrimSpace(msg.StreamID)
+			editMessageID := strings.TrimSpace(msg.EditMessageID)
+			if streamID == "" {
+				sendWSError(writer, "", sessionID, "stream_id is required")
+				continue
+			}
+			if sessionID == "" {
+				sendWSError(writer, streamID, "", "session_id is required")
+				continue
+			}
+			if editMessageID == "" {
+				sendWSError(writer, streamID, sessionID, "edit_message_id is required")
+				continue
+			}
+			if text == "" {
+				sendWSError(writer, streamID, sessionID, "message text is required")
+				continue
+			}
+			if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
+				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+				continue
+			}
+
+			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws edit stream error",
+				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}) error {
+					req := conversation.ChatRequest{
+						BotID:                   botID,
+						ChatID:                  botID,
+						SessionID:               sessionID,
+						BaseHeadTurnID:          strings.TrimSpace(msg.BaseHeadTurnID),
+						StreamID:                streamID,
+						Token:                   bearerToken,
+						UserID:                  channelIdentityID,
+						SourceChannelIdentityID: channelIdentityID,
+						ConversationType:        channel.ConversationTypePrivate,
+						Query:                   text,
+						RawQuery:                text,
+						CurrentChannel:          h.channelType.String(),
+						ReplyTarget:             botID,
+						Channels:                []string{h.channelType.String()},
+						Model:                   strings.TrimSpace(msg.ModelID),
+						ReasoningEffort:         strings.TrimSpace(msg.ReasoningEffort),
+						ToolHTTPURL:             buildACPMCPToolsURL(c, botID),
+					}
+					return h.resolver.StreamRewriteWS(ctx, req, flow.RewriteSource{
+						TargetMessageID: editMessageID,
+						Query:           text,
+					}, eventCh, abortCh)
 				},
 			)
 
@@ -761,12 +890,80 @@ func (h *LocalChannelHandler) ensureBotParticipant(ctx context.Context, botID, c
 	return nil
 }
 
+func canOpenLocalWebSocket(perms []string) bool {
+	return bots.HasPermission(perms, bots.PermissionWorkspaceExec) || bots.HasPermission(perms, bots.PermissionManage)
+}
+
 func (*LocalChannelHandler) requireChannelIdentityID(c echo.Context) (string, error) {
 	return RequireChannelIdentityID(c)
 }
 
 func (h *LocalChannelHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
 	return AuthorizeBotAccessWithPermission(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.PermissionChat)
+}
+
+func (h *LocalChannelHandler) authorizeWSSession(c echo.Context, channelIdentityID, botID, sessionID string) error {
+	if h.sessionService == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "session service not configured")
+	}
+	bot, perms, err := h.authorizeBotSessionAccess(c.Request().Context(), channelIdentityID, botID)
+	if err != nil {
+		return err
+	}
+	sess, err := h.sessionService.Get(c.Request().Context(), sessionID)
+	if err != nil || sess.BotID != bot.ID {
+		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+	}
+	if !canAccessSession(sess, channelIdentityID, perms) {
+		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+	}
+	return nil
+}
+
+func (h *LocalChannelHandler) authorizeBotSessionAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, []string, error) {
+	bot, err := AuthorizeBotAccessWithPermission(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.PermissionChat)
+	if err != nil {
+		bot, err = AuthorizeBotAccessWithPermission(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.PermissionWorkspaceExec)
+		if err != nil {
+			return bots.Bot{}, nil, err
+		}
+	}
+	perms, err := h.resolveCurrentUserPermissions(ctx, channelIdentityID, bot.ID)
+	if err != nil {
+		return bots.Bot{}, nil, err
+	}
+	return bot, perms, nil
+}
+
+func (h *LocalChannelHandler) resolveCurrentUserPermissions(ctx context.Context, channelIdentityID, botID string) ([]string, error) {
+	if h.botService == nil || h.accountService == nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
+	}
+	isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	perms, err := h.botService.ResolveUserPermissions(ctx, botID, channelIdentityID, isAdmin)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return perms, nil
+}
+
+func wsErrorMessage(err error) string {
+	if err == nil {
+		return "unknown error"
+	}
+	var httpErr *echo.HTTPError
+	if errors.As(err, &httpErr) {
+		if msg, ok := httpErr.Message.(string); ok && strings.TrimSpace(msg) != "" {
+			return msg
+		}
+		if text := http.StatusText(httpErr.Code); text != "" {
+			return strings.ToLower(text)
+		}
+	}
+	return err.Error()
 }
 
 // ---------------------------------------------------------------------------

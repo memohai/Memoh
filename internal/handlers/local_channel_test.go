@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,10 +16,17 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/labstack/echo/v4"
 
+	"github.com/memohai/memoh/internal/accounts"
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
+	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/media"
+	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/storage"
 )
 
@@ -232,6 +240,135 @@ func TestWSStreamRegistry_HasSessionTracksActiveStreams(t *testing.T) {
 	if !registry.hasSession("session-2") {
 		t.Fatal("session-2 should remain active")
 	}
+}
+
+func TestCanOpenLocalWebSocketAllowsWorkspaceOrManage(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		perms []string
+		want  bool
+	}{
+		{name: "workspace exec", perms: []string{bots.PermissionWorkspaceExec}, want: true},
+		{name: "manage", perms: []string{bots.PermissionManage}, want: true},
+		{name: "chat only", perms: []string{bots.PermissionChat}, want: false},
+		{name: "none", perms: nil, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := canOpenLocalWebSocket(tt.perms); got != tt.want {
+				t.Fatalf("canOpenLocalWebSocket(%v) = %v, want %v", tt.perms, got, tt.want)
+			}
+		})
+	}
+}
+
+type localChannelSessionAuthQueries struct {
+	dbstore.Queries
+	bot     sqlc.GetBotByIDRow
+	session sqlc.BotSession
+	grants  []sqlc.ListBotUserGrantsForUserRow
+}
+
+func (q localChannelSessionAuthQueries) GetBotByID(_ context.Context, _ pgtype.UUID) (sqlc.GetBotByIDRow, error) {
+	return q.bot, nil
+}
+
+func (q localChannelSessionAuthQueries) GetSessionByID(_ context.Context, _ pgtype.UUID) (sqlc.BotSession, error) {
+	return q.session, nil
+}
+
+func (q localChannelSessionAuthQueries) ListBotUserGrantsForUser(_ context.Context, _ sqlc.ListBotUserGrantsForUserParams) ([]sqlc.ListBotUserGrantsForUserRow, error) {
+	return q.grants, nil
+}
+
+func TestLocalChannelAuthorizeWSSessionScopesChatToCreator(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID       = "11111111-1111-1111-1111-111111111111"
+		sessionID   = "22222222-2222-2222-2222-222222222222"
+		currentUser = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+		otherUser   = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+	)
+	queries := localChannelSessionAuthQueries{
+		bot: testBotRow(botID, map[string]any{}),
+		session: sqlc.BotSession{
+			ID:              testUUID(sessionID),
+			BotID:           testUUID(botID),
+			Type:            sessionpkg.TypeChat,
+			CreatedByUserID: testUUID(otherUser),
+			Metadata:        []byte(`{}`),
+		},
+		grants: []sqlc.ListBotUserGrantsForUserRow{
+			{
+				ID:          testUUID("dddddddd-dddd-dddd-dddd-dddddddddddd"),
+				BotID:       testUUID(botID),
+				SubjectType: bots.GrantSubjectUser,
+				UserID:      testUUID(currentUser),
+				Permissions: []byte(`["chat"]`),
+			},
+		},
+	}
+	handler := &LocalChannelHandler{
+		botService:     bots.NewService(nil, queries),
+		accountService: accounts.NewService(nil, testAdminAccountStore{role: "user"}),
+		sessionService: sessionpkg.NewService(nil, queries, nil),
+	}
+
+	err := handler.authorizeWSSession(testEchoContext(currentUser), currentUser, botID, sessionID)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusNotFound {
+		t.Fatalf("authorizeWSSession() error = %v, want HTTP 404", err)
+	}
+}
+
+func TestLocalChannelAuthorizeWSSessionAllowsManageAccess(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID       = "11111111-1111-1111-1111-111111111111"
+		sessionID   = "22222222-2222-2222-2222-222222222222"
+		currentUser = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+		otherUser   = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+	)
+	queries := localChannelSessionAuthQueries{
+		bot: testBotRow(botID, map[string]any{}),
+		session: sqlc.BotSession{
+			ID:              testUUID(sessionID),
+			BotID:           testUUID(botID),
+			Type:            sessionpkg.TypeChat,
+			CreatedByUserID: testUUID(otherUser),
+			Metadata:        []byte(`{}`),
+		},
+		grants: []sqlc.ListBotUserGrantsForUserRow{
+			{
+				ID:          testUUID("dddddddd-dddd-dddd-dddd-dddddddddddd"),
+				BotID:       testUUID(botID),
+				SubjectType: bots.GrantSubjectUser,
+				UserID:      testUUID(currentUser),
+				Permissions: []byte(`["manage"]`),
+			},
+		},
+	}
+	handler := &LocalChannelHandler{
+		botService:     bots.NewService(nil, queries),
+		accountService: accounts.NewService(nil, testAdminAccountStore{role: "user"}),
+		sessionService: sessionpkg.NewService(nil, queries, nil),
+	}
+
+	if err := handler.authorizeWSSession(testEchoContext(currentUser), currentUser, botID, sessionID); err != nil {
+		t.Fatalf("authorizeWSSession() error = %v, want nil", err)
+	}
+}
+
+func testEchoContext(userID string) echo.Context {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	rec := httptest.NewRecorder()
+	return testAuthContext(e, req, rec, userID)
 }
 
 func TestWSIngestAttachments_RewritesContainerPathToAssetRef(t *testing.T) {

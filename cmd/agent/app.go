@@ -219,7 +219,7 @@ func provideDBQueries(cfg config.Config, postgresStore *postgresstore.Store, sql
 		if postgresStore == nil {
 			return nil, errors.New("postgres store not configured")
 		}
-		return postgresstore.NewQueries(postgresStore.SQLC()), nil
+		return postgresStore.QueriesAdapter(), nil
 	case db.DriverSQLite:
 		if sqliteStore == nil {
 			return nil, errors.New("sqlite store not configured")
@@ -846,8 +846,8 @@ func provideProviderOAuthHandler(providersService *providers.Service, acpCodexOA
 	return handler
 }
 
-func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, resolver *flow.Resolver, mediaService *media.Service, audioService *audiopkg.Service, settingsService *settings.Service) *handlers.LocalChannelHandler {
-	h := handlers.NewLocalChannelHandler(local.WebType, channelManager, channelStore, chatService, hub, botService, accountService)
+func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, sessionService *sessionpkg.Service, resolver *flow.Resolver, mediaService *media.Service, audioService *audiopkg.Service, settingsService *settings.Service) *handlers.LocalChannelHandler {
+	h := handlers.NewLocalChannelHandler(local.WebType, channelManager, channelStore, chatService, hub, botService, accountService, sessionService)
 	h.SetResolver(resolver)
 	h.SetMediaService(mediaService)
 	h.SetSpeechService(audioService, &settingsSpeechModelResolver{settings: settingsService})

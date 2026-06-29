@@ -28,6 +28,8 @@ DROP TABLE IF EXISTS containers;
 DROP TABLE IF EXISTS user_input_requests;
 DROP TABLE IF EXISTS tool_approval_requests;
 DROP TABLE IF EXISTS bot_history_messages;
+DROP TABLE IF EXISTS bot_session_turn_heads;
+DROP TABLE IF EXISTS bot_history_turns;
 DROP TABLE IF EXISTS bot_session_events;
 DROP TABLE IF EXISTS bot_sessions;
 DROP TABLE IF EXISTS bot_channel_routes;

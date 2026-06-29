@@ -44,7 +44,7 @@ func TestSQLiteModelEnableMigrationPreservesExistingModels(t *testing.T) {
 	if err := RunMigrateTarget(nil, MigrationTarget{Driver: DriverSQLite, DSN: dsn}, sqliteMigrationsFS(t), "force", []string{"21"}); err != nil {
 		t.Fatalf("force migration version 21: %v", err)
 	}
-	if err := RunMigrateTarget(nil, MigrationTarget{Driver: DriverSQLite, DSN: dsn}, sqliteMigrationsFS(t), "up", nil); err != nil {
+	if err := RunMigrateTarget(nil, MigrationTarget{Driver: DriverSQLite, DSN: dsn}, sqliteMigrationsFSUpTo(t, 22), "up", nil); err != nil {
 		t.Fatalf("migrate through 0022_model_enable: %v", err)
 	}
 

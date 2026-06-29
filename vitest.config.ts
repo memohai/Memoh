@@ -3,15 +3,17 @@ import vue from '@vitejs/plugin-vue'
 import dotenv from 'dotenv'
 import { fileURLToPath } from 'url'
 
-dotenv.config()
+dotenv.config({ quiet: true })
 
 const webRoot = fileURLToPath(new URL('./apps/web', import.meta.url))
 const desktopRoot = fileURLToPath(new URL('./apps/desktop', import.meta.url))
+const setupFiles = [fileURLToPath(new URL('./vitest.setup.ts', import.meta.url))]
 
 export default defineConfig({
   test: {
     globals: true,
     env: process.env,
+    setupFiles,
     testTimeout: Infinity,
     projects: [
       {
@@ -28,6 +30,7 @@ export default defineConfig({
           globals: true,
           include: ['src/**/*.test.ts'],
           env: process.env,
+          setupFiles,
           testTimeout: Infinity,
         },
       },
@@ -38,6 +41,7 @@ export default defineConfig({
           globals: true,
           include: ['src/**/*.test.ts'],
           env: process.env,
+          setupFiles,
           testTimeout: Infinity,
         },
       },

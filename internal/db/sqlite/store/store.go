@@ -10,6 +10,7 @@ import (
 type Store struct {
 	db      *sql.DB
 	queries *sqlitesqlc.Queries
+	inTx    bool
 }
 
 func New(db *sql.DB) (*Store, error) {

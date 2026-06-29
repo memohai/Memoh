@@ -172,6 +172,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // reordered or stacked. Reset on drag end.
   let dragSourceTerminal = false
   let draftChatQueued = false
+  const reconcilingDeletedChatPanelIds = new Set<string>()
+  const deletedSessionIdsByBot = new Map<string, Set<string>>()
+  let suppressReconcileActivation = false
+  let reconcileActivationReleaseToken = 0
+  let reconcileActivationReleaseTimer: ReturnType<typeof setTimeout> | null = null
   // The most recent NON-terminal group to hold focus. A terminal group is
   // exclusive — opening a file/browser/etc. while it is the active group must
   // land in an editor group, not contaminate the terminals — so we remember the
@@ -421,8 +426,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
           lastNonTerminalGroupId = group.id
         }
         // Activating a chat tab makes its session the live one. Strictly gated so
-        // file/terminal activation never touches chat state.
-        if (panel && panelComponentOf(panel.id) === 'chat') {
+        // file/terminal activation never touches chat state. During deleted-tab
+        // reconciliation dockview may auto-activate a neighboring tab; ignore that
+        // transient activation so it cannot override chat-list's chosen fallback
+        // session.
+        if (!suppressReconcileActivation && panel && panelComponentOf(panel.id) === 'chat') {
           activateChatSession(panel)
         }
       }),
@@ -443,11 +451,18 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
           const bid = loadedBotId
           void nextTick(() => deleteTerminalSnapshot(terminalCacheKey(bid, panel.id)))
         }
+        const closingDeletedChat = reconcilingDeletedChatPanelIds.delete(panel.id)
+        if (closingDeletedChat && reconcilingDeletedChatPanelIds.size === 0) {
+          releaseDeletedChatActivationAfterRemove()
+        }
         // Closing the LAST chat tab resets the global view to a fresh draft, so the
         // dock respawns a "New Session" page instead of reopening the session that
-        // was just closed (its id is still the global one until we clear it).
+        // was just closed (its id is still the global one until we clear it). A
+        // reconcile-driven close is different: chat-list has already selected the
+        // next valid session, so do not clear that selection back to draft.
         if (
-          panelComponentOf(panel.id) === 'chat'
+          !closingDeletedChat
+          && panelComponentOf(panel.id) === 'chat'
           && !dock.panels.some(p => panelComponentOf(p.id) === 'chat')
         ) {
           chatStore.selectDraft()
@@ -504,7 +519,66 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     ]
     const bid = (currentBotId.value ?? '').trim()
     if (bid) {
+      if (deletedSessionIdsByBot.get(bid)?.size) holdDeletedChatActivation()
       restoreLayout(bid)
+      reconcileDeletedChatPanels()
+    }
+  }
+
+  function holdDeletedChatActivation() {
+    suppressReconcileActivation = true
+    reconcileActivationReleaseToken++
+    if (reconcileActivationReleaseTimer) {
+      clearTimeout(reconcileActivationReleaseTimer)
+      reconcileActivationReleaseTimer = null
+    }
+  }
+
+  function releaseDeletedChatActivationAfterRemove() {
+    const token = ++reconcileActivationReleaseToken
+    if (reconcileActivationReleaseTimer) clearTimeout(reconcileActivationReleaseTimer)
+    reconcileActivationReleaseTimer = setTimeout(() => {
+      reconcileActivationReleaseTimer = null
+      if (token === reconcileActivationReleaseToken && reconcilingDeletedChatPanelIds.size === 0) {
+        suppressReconcileActivation = false
+        const active = api.value?.activePanel
+        const activeSid = active ? panelSessionId(active) : null
+        if (active && panelComponentOf(active.id) === 'chat' && activeSid && !isDeletedSessionForCurrentBot(activeSid)) {
+          activateChatSession(active)
+        }
+      }
+    }, 0)
+  }
+
+  function releaseDeletedChatActivationNow() {
+    reconcileActivationReleaseToken++
+    if (reconcileActivationReleaseTimer) {
+      clearTimeout(reconcileActivationReleaseTimer)
+      reconcileActivationReleaseTimer = null
+    }
+    if (reconcilingDeletedChatPanelIds.size !== 0) return
+    suppressReconcileActivation = false
+    const active = api.value?.activePanel
+    const activeSid = active ? panelSessionId(active) : null
+    if (active && panelComponentOf(active.id) === 'chat' && activeSid && !isDeletedSessionForCurrentBot(activeSid)) {
+      activateChatSession(active)
+    }
+  }
+
+  function ensureSelectedChatPanel() {
+    const sid = (selection.sessionId ?? '').trim()
+    if (!sid || isDeletedSessionForCurrentBot(sid)) return
+    if (chatPanelForSession(sid)) return
+    const bid = (currentBotId.value ?? '').trim()
+    if (!bid) return
+    const id = nextChatPanelId(bid)
+    if (focusOrAdd({
+      id,
+      component: 'chat',
+      title: chatTitleFallbackFor(sid),
+      params: { sessionId: sid },
+    })) {
+      markEphemeral(id)
     }
   }
 
@@ -517,6 +591,13 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     panelDragging.value = false
     dragSourceTerminal = false
     draftChatQueued = false
+    reconcilingDeletedChatPanelIds.clear()
+    suppressReconcileActivation = false
+    reconcileActivationReleaseToken++
+    if (reconcileActivationReleaseTimer) {
+      clearTimeout(reconcileActivationReleaseTimer)
+      reconcileActivationReleaseTimer = null
+    }
   }
 
   // ---- panel operations ----------------------------------------------------
@@ -729,6 +810,14 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     )
   }
 
+  function isDeletedSessionForCurrentBot(sid: string | null): boolean {
+    const bid = (currentBotId.value ?? '').trim()
+    if (!bid || !sid) return false
+    const latestDeleted = chatStore.deletedSession
+    if (latestDeleted?.botId === bid && latestDeleted.id === sid) return true
+    return Boolean(deletedSessionIdsByBot.get(bid)?.has(sid))
+  }
+
   function nextChatPanelId(bid: string): string {
     const state = ensureBotLayout(bid)
     const next = (state?.chatCounter ?? 0) + 1
@@ -747,6 +836,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!sid) return
     const bid = (currentBotId.value ?? '').trim()
     if (!bid) return
+    if (isDeletedSessionForCurrentBot(sid)) return
     const title = opts.title?.trim() || chatTitleFallbackFor(sid)
     const existing = chatPanelForSession(sid)
     if (existing) {
@@ -761,7 +851,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const targetGroupId = target?.direction === 'within' ? target.referenceGroup : undefined
     const reusable = targetGroupId
       ? dock.getGroup(targetGroupId)?.panels.find(
-          p => ephemeralPanels.value[p.id] && panelComponentOf(p.id) === 'chat',
+          (p) => {
+            if (!ephemeralPanels.value[p.id] || panelComponentOf(p.id) !== 'chat') return false
+            const existingSid = panelSessionId(p)
+            return !isDeletedSessionForCurrentBot(existingSid)
+          },
         )
       : undefined
     if (reusable) {
@@ -829,24 +923,45 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     }
   }
 
-  // Drop chat tabs whose session no longer exists (deleted server-side). Run after
-  // the sessions list has loaded. The active orphan becomes a fresh draft so the
-  // user lands somewhere usable; inactive orphans close.
-  function reconcileChatPanels() {
+  // Drop chat tabs for sessions whose delete request has actually succeeded.
+  // Do not infer this from the paginated sessions list: an open older tab may be
+  // valid even when it is not present in the current sidebar page.
+  function reconcileDeletedChatPanels() {
     const dock = api.value
-    if (!dock || chatStore.loadingChats) return
+    const bid = (currentBotId.value ?? '').trim()
+    if (!dock || !bid) return
+    const deletedSessionIds = deletedSessionIdsByBot.get(bid)
+    if (!deletedSessionIds || deletedSessionIds.size === 0) return
+    const closingPanels: Array<{ id: string }> = []
     for (const panel of [...dock.panels]) {
       if (panelComponentOf(panel.id) !== 'chat') continue
       const sid = panelSessionId(panel)
-      if (!sid || chatStore.knownSessionSummary(sid)) continue
-      if (panel.id === dock.activePanel?.id) {
-        panel.api.updateParameters({ sessionId: null })
-        panel.api.setTitle(DEFAULT_CHAT_TITLE)
-        pinPanel(panel.id)
-        chatStore.selectDraft()
-      } else {
-        panel.api.close()
-      }
+      if (!sid || !deletedSessionIds.has(sid)) continue
+      reconcilingDeletedChatPanelIds.add(panel.id)
+      closingPanels.push({ id: panel.id })
+      holdDeletedChatActivation()
+      panel.api.close()
+    }
+    if (closingPanels.length === 0) {
+      releaseDeletedChatActivationNow()
+      ensureSelectedChatPanel()
+      return
+    }
+    for (const { id } of closingPanels) {
+      void nextTick(() => {
+        if (api.value?.getPanel(id)) {
+          reconcilingDeletedChatPanelIds.delete(id)
+          if (reconcilingDeletedChatPanelIds.size === 0) {
+            releaseDeletedChatActivationAfterRemove()
+          }
+          return
+        }
+        reconcilingDeletedChatPanelIds.delete(id)
+        if (reconcilingDeletedChatPanelIds.size === 0) {
+          releaseDeletedChatActivationAfterRemove()
+          void nextTick(() => ensureSelectedChatPanel())
+        }
+      })
     }
   }
 
@@ -867,8 +982,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       if (!(currentBotId.value ?? '').trim()) return
       // The active session's tab if one is selected, else a fresh draft (its
       // activation resets the global view via selectDraft).
-      const sid = (chatStore.sessionId ?? '').trim()
-      if (sid) openSessionChat({ sessionId: sid })
+      const sid = (selection.sessionId ?? '').trim()
+      if (sid && !isDeletedSessionForCurrentBot(sid)) openSessionChat({ sessionId: sid })
       else openDraftChat()
     })
   }
@@ -1455,7 +1570,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     }
     ensureBotLayout(next)
     if (api.value && loadedBotId !== next) {
+      if (deletedSessionIdsByBot.get(next)?.size) holdDeletedChatActivation()
       restoreLayout(next)
+      reconcileDeletedChatPanels()
     }
   }, { immediate: true })
 
@@ -1489,11 +1606,12 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // created, a session deleted). Declared AFTER the userSentInSession watch so a
   // send-promotion has already repointed the draft tab by the time this runs —
   // chatPanelForSession then finds it and this just focuses (no duplicate tab).
-  watch(() => chatStore.sessionId, (sid) => {
+  watch(() => selection.sessionId, (sid) => {
     const dock = api.value
     if (!dock || suppressPersist) return
     const trimmed = (sid ?? '').trim()
     if (!trimmed) return
+    if (isDeletedSessionForCurrentBot(trimmed)) return
     const existing = chatPanelForSession(trimmed)
     if (existing) {
       focusPanel(existing)
@@ -1511,11 +1629,13 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     () => syncChatTitles(),
   )
 
-  // Once the sessions list has loaded (or changed), drop tabs for deleted sessions.
-  watch(
-    () => [chatStore.loadingChats, chatStore.sessions.length, currentBotId.value] as const,
-    () => { if (!chatStore.loadingChats) reconcileChatPanels() },
-  )
+  watch(() => chatStore.deletedSession, (deleted) => {
+    if (!deleted) return
+    const deletedIds = deletedSessionIdsByBot.get(deleted.botId) ?? new Set<string>()
+    deletedIds.add(deleted.id)
+    deletedSessionIdsByBot.set(deleted.botId, deletedIds)
+    reconcileDeletedChatPanels()
+  })
 
   return {
     api,
