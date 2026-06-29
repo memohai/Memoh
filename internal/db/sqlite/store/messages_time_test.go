@@ -58,6 +58,8 @@ CREATE TABLE bot_history_messages (
   content TEXT NOT NULL DEFAULT '{}',
   metadata TEXT NOT NULL DEFAULT '{}',
   usage TEXT,
+  session_mode TEXT NOT NULL DEFAULT 'chat',
+  runtime_type TEXT NOT NULL DEFAULT 'model',
   event_id TEXT,
   display_text TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP

@@ -24,6 +24,7 @@ import (
 type sessionCreateQueries struct {
 	dbstore.Queries
 	bot          sqlc.GetBotByIDRow
+	permissions  []byte
 	createCalled bool
 	createParams sqlc.CreateSessionParams
 }
@@ -32,12 +33,16 @@ func (q *sessionCreateQueries) GetBotByID(_ context.Context, _ pgtype.UUID) (sql
 	return q.bot, nil
 }
 
-func (*sessionCreateQueries) ListBotUserGrantsForUser(_ context.Context, _ sqlc.ListBotUserGrantsForUserParams) ([]sqlc.ListBotUserGrantsForUserRow, error) {
-	return []sqlc.ListBotUserGrantsForUserRow{{Permissions: []byte(`["chat"]`)}}, nil
-}
-
 func (*sessionCreateQueries) ListSessionsByBot(_ context.Context, _ pgtype.UUID) ([]sqlc.ListSessionsByBotRow, error) {
 	return nil, nil
+}
+
+func (q *sessionCreateQueries) ListBotUserGrantsForUser(_ context.Context, _ sqlc.ListBotUserGrantsForUserParams) ([]sqlc.ListBotUserGrantsForUserRow, error) {
+	permissions := q.permissions
+	if permissions == nil {
+		permissions = []byte(`["chat"]`)
+	}
+	return []sqlc.ListBotUserGrantsForUserRow{{Permissions: permissions}}, nil
 }
 
 func (q *sessionCreateQueries) CreateSession(_ context.Context, arg sqlc.CreateSessionParams) (sqlc.BotSession, error) {
@@ -78,13 +83,37 @@ func TestCreateSessionRejectsUnknownTypeAsBadRequest(t *testing.T) {
 	}
 }
 
+func TestCreateSessionAuthorizesFinalDescriptor(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	queries := &sessionCreateQueries{
+		bot:         testBotRow(botID, map[string]any{}),
+		permissions: []byte(`["chat"]`),
+	}
+	handler := NewSessionHandler(
+		slog.Default(),
+		session.NewService(nil, queries, nil),
+		nil,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("user"),
+	)
+
+	err := callCreateSession(handler, botID, `{"type":"chat","session_mode":"discuss","title":"discuss"}`)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
+		t.Fatalf("CreateSession() error = %v, want HTTP 403", err)
+	}
+	if queries.createCalled {
+		t.Fatal("CreateSession should authorize the final session descriptor before insert")
+	}
+}
+
 func TestCreateSessionAcceptsACPAgentType(t *testing.T) {
 	botID := "11111111-1111-1111-1111-111111111111"
 	queries := &sessionCreateQueries{
 		bot: testBotRow(botID, map[string]any{
 			acpprofile.MetadataKeyACP: map[string]any{
 				"agents": map[string]any{
-					acpprofile.AgentCodexID: map[string]any{"enabled": true},
+					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
 				},
 			},
 		}),
@@ -97,7 +126,7 @@ func TestCreateSessionAcceptsACPAgentType(t *testing.T) {
 		newTestAdminAccountService("admin"),
 	)
 
-	body := `{"type":"acp_agent","title":"Codex","metadata":{"acp_agent_id":"codex","project_path":"/data/app"}}`
+	body := `{"type":"acp_agent","title":"Codex","metadata":{"acp_agent_id":"codex","project_path":"/data/app","runtime_owner_account_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}`
 	if err := callCreateSession(handler, botID, body); err != nil {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
@@ -109,6 +138,51 @@ func TestCreateSessionAcceptsACPAgentType(t *testing.T) {
 	}
 	if got := string(queries.createParams.Metadata); !strings.Contains(got, `"acp_agent_id":"codex"`) || !strings.Contains(got, `"project_path":"/data/app"`) {
 		t.Fatalf("CreateSession metadata = %s", got)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(queries.createParams.Metadata, &metadata); err != nil {
+		t.Fatalf("metadata json = %v", err)
+	}
+	if metadata["runtime_owner_account_id"] != "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" {
+		t.Fatalf("runtime owner = %#v, want authenticated user", metadata["runtime_owner_account_id"])
+	}
+	var runtimeMetadata map[string]any
+	if err := json.Unmarshal(queries.createParams.RuntimeMetadata, &runtimeMetadata); err != nil {
+		t.Fatalf("runtime metadata json = %v", err)
+	}
+	if runtimeMetadata["runtime_owner_account_id"] != "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" {
+		t.Fatalf("runtime metadata owner = %#v, want authenticated user", runtimeMetadata["runtime_owner_account_id"])
+	}
+}
+
+func TestCreateSessionRejectsSystemACPRuntime(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	queries := &sessionCreateQueries{
+		bot: testBotRow(botID, map[string]any{
+			acpprofile.MetadataKeyACP: map[string]any{
+				"agents": map[string]any{
+					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
+				},
+			},
+		}),
+		permissions: []byte(`["workspace_exec"]`),
+	}
+	handler := NewSessionHandler(
+		slog.Default(),
+		session.NewService(nil, queries, nil),
+		nil,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("user"),
+	)
+
+	body := `{"type":"schedule","runtime_type":"acp_agent","metadata":{"acp_agent_id":"codex"}}`
+	err := callCreateSession(handler, botID, body)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
+		t.Fatalf("CreateSession() error = %v, want HTTP 400", err)
+	}
+	if queries.createCalled {
+		t.Fatal("CreateSession should not insert system ACP sessions")
 	}
 }
 
@@ -141,7 +215,7 @@ func TestCreateSessionDefaultsACPProjectPath(t *testing.T) {
 		bot: testBotRow(botID, map[string]any{
 			acpprofile.MetadataKeyACP: map[string]any{
 				"agents": map[string]any{
-					acpprofile.AgentCodexID: map[string]any{"enabled": true},
+					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
 				},
 			},
 		}),
@@ -174,8 +248,8 @@ type recordingRuntimeBinder struct {
 
 func (*recordingRuntimeBinder) CloseSession(string) error { return nil }
 
-func (b *recordingRuntimeBinder) BindRuntime(botID, runtimeID, sessionID, agentID, projectPath string) error {
-	b.bindArgs = []string{botID, runtimeID, sessionID, agentID, projectPath}
+func (b *recordingRuntimeBinder) BindRuntime(botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID string) error {
+	b.bindArgs = []string{botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID}
 	return b.bindErr
 }
 
@@ -185,7 +259,7 @@ func TestCreateSessionBindsWarmACPRuntime(t *testing.T) {
 		bot: testBotRow(botID, map[string]any{
 			acpprofile.MetadataKeyACP: map[string]any{
 				"agents": map[string]any{
-					acpprofile.AgentCodexID: map[string]any{"enabled": true},
+					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
 				},
 			},
 		}),
@@ -203,7 +277,7 @@ func TestCreateSessionBindsWarmACPRuntime(t *testing.T) {
 	if err := callCreateSession(handler, botID, body); err != nil {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
-	want := []string{botID, "rt_warm", "22222222-2222-2222-2222-222222222222", "codex", session.DefaultACPProjectPath}
+	want := []string{botID, "rt_warm", "22222222-2222-2222-2222-222222222222", "codex", session.DefaultACPProjectPath, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"}
 	if len(binder.bindArgs) != len(want) {
 		t.Fatalf("bind args = %#v, want %#v", binder.bindArgs, want)
 	}
@@ -220,7 +294,7 @@ func TestCreateSessionToleratesFailedRuntimeBind(t *testing.T) {
 		bot: testBotRow(botID, map[string]any{
 			acpprofile.MetadataKeyACP: map[string]any{
 				"agents": map[string]any{
-					acpprofile.AgentCodexID: map[string]any{"enabled": true},
+					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
 				},
 			},
 		}),

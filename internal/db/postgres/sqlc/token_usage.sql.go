@@ -23,10 +23,31 @@ WHERE m.bot_id = $1
   AND ($4::uuid IS NULL OR m.model_id = $4::uuid)
   AND (
     $5::text IS NULL
-    OR COALESCE(
-      CASE WHEN s.type = 'subagent' THEN COALESCE(ps.type, 'chat') ELSE s.type END,
+    OR ($5::text = 'acp_agent' AND COALESCE(
+      NULLIF(m.runtime_type, ''),
+      CASE
+        WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN NULLIF(ps.runtime_type, '')
+        ELSE NULLIF(s.runtime_type, '')
+      END,
+      CASE WHEN s.type = 'acp_agent' THEN 'acp_agent' ELSE '' END
+    ) = 'acp_agent')
+    OR ($5::text <> 'acp_agent' AND COALESCE(
+      NULLIF(m.runtime_type, ''),
+      CASE
+        WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN NULLIF(ps.runtime_type, '')
+        ELSE NULLIF(s.runtime_type, '')
+      END,
+      CASE WHEN s.type = 'acp_agent' THEN 'acp_agent' ELSE '' END
+    ) <> 'acp_agent' AND COALESCE(
+      COALESCE(
+        NULLIF(m.session_mode, ''),
+        CASE
+          WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN COALESCE(NULLIF(ps.session_mode, ''), NULLIF(ps.type, ''), 'chat')
+          ELSE COALESCE(NULLIF(s.session_mode, ''), NULLIF(s.type, ''), 'chat')
+        END
+      ),
       'chat'
-    ) = $5::text
+    ) = $5::text)
   )
 `
 
@@ -53,10 +74,26 @@ func (q *Queries) CountTokenUsageRecords(ctx context.Context, arg CountTokenUsag
 
 const getTokenUsageByDayAndType = `-- name: GetTokenUsageByDayAndType :many
 SELECT
-  COALESCE(
-    CASE WHEN s.type = 'subagent' THEN COALESCE(ps.type, 'chat') ELSE s.type END,
-    'chat'
-  )::text AS session_type,
+  CASE
+    WHEN COALESCE(
+      NULLIF(m.runtime_type, ''),
+      CASE
+        WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN NULLIF(ps.runtime_type, '')
+        ELSE NULLIF(s.runtime_type, '')
+      END,
+      CASE WHEN s.type = 'acp_agent' THEN 'acp_agent' ELSE '' END
+    ) = 'acp_agent' THEN 'acp_agent'
+    ELSE COALESCE(
+      COALESCE(
+        NULLIF(m.session_mode, ''),
+        CASE
+          WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN COALESCE(NULLIF(ps.session_mode, ''), NULLIF(ps.type, ''), 'chat')
+          ELSE COALESCE(NULLIF(s.session_mode, ''), NULLIF(s.type, ''), 'chat')
+        END
+      ),
+      'chat'
+    )
+  END::text AS session_type,
   date_trunc('day', m.created_at)::date AS day,
   COALESCE(SUM((m.usage->>'inputTokens')::bigint), 0)::bigint AS input_tokens,
   COALESCE(SUM((m.usage->>'outputTokens')::bigint), 0)::bigint AS output_tokens,
@@ -70,15 +107,44 @@ WHERE m.bot_id = $1
   AND m.created_at >= $2
   AND m.created_at < $3
   AND ($4::uuid IS NULL OR m.model_id = $4::uuid)
+  AND (
+    $5::text IS NULL
+    OR ($5::text = 'acp_agent' AND COALESCE(
+      NULLIF(m.runtime_type, ''),
+      CASE
+        WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN NULLIF(ps.runtime_type, '')
+        ELSE NULLIF(s.runtime_type, '')
+      END,
+      CASE WHEN s.type = 'acp_agent' THEN 'acp_agent' ELSE '' END
+    ) = 'acp_agent')
+    OR ($5::text <> 'acp_agent' AND COALESCE(
+      NULLIF(m.runtime_type, ''),
+      CASE
+        WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN NULLIF(ps.runtime_type, '')
+        ELSE NULLIF(s.runtime_type, '')
+      END,
+      CASE WHEN s.type = 'acp_agent' THEN 'acp_agent' ELSE '' END
+    ) <> 'acp_agent' AND COALESCE(
+      COALESCE(
+        NULLIF(m.session_mode, ''),
+        CASE
+          WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN COALESCE(NULLIF(ps.session_mode, ''), NULLIF(ps.type, ''), 'chat')
+          ELSE COALESCE(NULLIF(s.session_mode, ''), NULLIF(s.type, ''), 'chat')
+        END
+      ),
+      'chat'
+    ) = $5::text)
+  )
 GROUP BY session_type, day
 ORDER BY day, session_type
 `
 
 type GetTokenUsageByDayAndTypeParams struct {
-	BotID    pgtype.UUID        `json:"bot_id"`
-	FromTime pgtype.Timestamptz `json:"from_time"`
-	ToTime   pgtype.Timestamptz `json:"to_time"`
-	ModelID  pgtype.UUID        `json:"model_id"`
+	BotID       pgtype.UUID        `json:"bot_id"`
+	FromTime    pgtype.Timestamptz `json:"from_time"`
+	ToTime      pgtype.Timestamptz `json:"to_time"`
+	ModelID     pgtype.UUID        `json:"model_id"`
+	SessionType pgtype.Text        `json:"session_type"`
 }
 
 type GetTokenUsageByDayAndTypeRow struct {
@@ -96,6 +162,7 @@ func (q *Queries) GetTokenUsageByDayAndType(ctx context.Context, arg GetTokenUsa
 		arg.FromTime,
 		arg.ToTime,
 		arg.ModelID,
+		arg.SessionType,
 	)
 	if err != nil {
 		return nil, err
@@ -131,20 +198,51 @@ SELECT
   COALESCE(SUM((m.usage->>'inputTokens')::bigint), 0)::bigint AS input_tokens,
   COALESCE(SUM((m.usage->>'outputTokens')::bigint), 0)::bigint AS output_tokens
 FROM bot_history_messages m
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+LEFT JOIN bot_sessions ps ON ps.id = s.parent_session_id
 LEFT JOIN models mo ON mo.id = m.model_id
 LEFT JOIN providers lp ON lp.id = mo.provider_id
 WHERE m.bot_id = $1
   AND m.usage IS NOT NULL
   AND m.created_at >= $2
   AND m.created_at < $3
+  AND (
+    $4::text IS NULL
+    OR ($4::text = 'acp_agent' AND COALESCE(
+      NULLIF(m.runtime_type, ''),
+      CASE
+        WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN NULLIF(ps.runtime_type, '')
+        ELSE NULLIF(s.runtime_type, '')
+      END,
+      CASE WHEN s.type = 'acp_agent' THEN 'acp_agent' ELSE '' END
+    ) = 'acp_agent')
+    OR ($4::text <> 'acp_agent' AND COALESCE(
+      NULLIF(m.runtime_type, ''),
+      CASE
+        WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN NULLIF(ps.runtime_type, '')
+        ELSE NULLIF(s.runtime_type, '')
+      END,
+      CASE WHEN s.type = 'acp_agent' THEN 'acp_agent' ELSE '' END
+    ) <> 'acp_agent' AND COALESCE(
+      COALESCE(
+        NULLIF(m.session_mode, ''),
+        CASE
+          WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN COALESCE(NULLIF(ps.session_mode, ''), NULLIF(ps.type, ''), 'chat')
+          ELSE COALESCE(NULLIF(s.session_mode, ''), NULLIF(s.type, ''), 'chat')
+        END
+      ),
+      'chat'
+    ) = $4::text)
+  )
 GROUP BY m.model_id, mo.model_id, mo.name, lp.name
 ORDER BY input_tokens DESC
 `
 
 type GetTokenUsageByModelParams struct {
-	BotID    pgtype.UUID        `json:"bot_id"`
-	FromTime pgtype.Timestamptz `json:"from_time"`
-	ToTime   pgtype.Timestamptz `json:"to_time"`
+	BotID       pgtype.UUID        `json:"bot_id"`
+	FromTime    pgtype.Timestamptz `json:"from_time"`
+	ToTime      pgtype.Timestamptz `json:"to_time"`
+	SessionType pgtype.Text        `json:"session_type"`
 }
 
 type GetTokenUsageByModelRow struct {
@@ -157,7 +255,12 @@ type GetTokenUsageByModelRow struct {
 }
 
 func (q *Queries) GetTokenUsageByModel(ctx context.Context, arg GetTokenUsageByModelParams) ([]GetTokenUsageByModelRow, error) {
-	rows, err := q.db.Query(ctx, getTokenUsageByModel, arg.BotID, arg.FromTime, arg.ToTime)
+	rows, err := q.db.Query(ctx, getTokenUsageByModel,
+		arg.BotID,
+		arg.FromTime,
+		arg.ToTime,
+		arg.SessionType,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -188,10 +291,26 @@ SELECT
   m.id,
   m.created_at,
   m.session_id,
-  COALESCE(
-    CASE WHEN s.type = 'subagent' THEN COALESCE(ps.type, 'chat') ELSE s.type END,
-    'chat'
-  )::text AS session_type,
+  CASE
+    WHEN COALESCE(
+      NULLIF(m.runtime_type, ''),
+      CASE
+        WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN NULLIF(ps.runtime_type, '')
+        ELSE NULLIF(s.runtime_type, '')
+      END,
+      CASE WHEN s.type = 'acp_agent' THEN 'acp_agent' ELSE '' END
+    ) = 'acp_agent' THEN 'acp_agent'
+    ELSE COALESCE(
+      COALESCE(
+        NULLIF(m.session_mode, ''),
+        CASE
+          WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN COALESCE(NULLIF(ps.session_mode, ''), NULLIF(ps.type, ''), 'chat')
+          ELSE COALESCE(NULLIF(s.session_mode, ''), NULLIF(s.type, ''), 'chat')
+        END
+      ),
+      'chat'
+    )
+  END::text AS session_type,
   m.model_id,
   COALESCE(mo.model_id, 'unknown')::text AS model_slug,
   COALESCE(mo.name, 'Unknown')::text AS model_name,
@@ -212,10 +331,31 @@ WHERE m.bot_id = $1
   AND ($4::uuid IS NULL OR m.model_id = $4::uuid)
   AND (
     $5::text IS NULL
-    OR COALESCE(
-      CASE WHEN s.type = 'subagent' THEN COALESCE(ps.type, 'chat') ELSE s.type END,
+    OR ($5::text = 'acp_agent' AND COALESCE(
+      NULLIF(m.runtime_type, ''),
+      CASE
+        WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN NULLIF(ps.runtime_type, '')
+        ELSE NULLIF(s.runtime_type, '')
+      END,
+      CASE WHEN s.type = 'acp_agent' THEN 'acp_agent' ELSE '' END
+    ) = 'acp_agent')
+    OR ($5::text <> 'acp_agent' AND COALESCE(
+      NULLIF(m.runtime_type, ''),
+      CASE
+        WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN NULLIF(ps.runtime_type, '')
+        ELSE NULLIF(s.runtime_type, '')
+      END,
+      CASE WHEN s.type = 'acp_agent' THEN 'acp_agent' ELSE '' END
+    ) <> 'acp_agent' AND COALESCE(
+      COALESCE(
+        NULLIF(m.session_mode, ''),
+        CASE
+          WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN COALESCE(NULLIF(ps.session_mode, ''), NULLIF(ps.type, ''), 'chat')
+          ELSE COALESCE(NULLIF(s.session_mode, ''), NULLIF(s.type, ''), 'chat')
+        END
+      ),
       'chat'
-    ) = $5::text
+    ) = $5::text)
   )
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT $7

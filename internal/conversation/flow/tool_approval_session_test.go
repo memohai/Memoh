@@ -117,6 +117,40 @@ func TestResolveRunConfigSessionTypeFallsBackToChat(t *testing.T) {
 	}
 }
 
+func TestResolveRunConfigSkipsModelResolutionForACPRuntime(t *testing.T) {
+	t.Parallel()
+
+	resolver := &Resolver{
+		sessionService: &fakeBackgroundSessionService{
+			getFn: func(_ context.Context, sessionID string) (session.Session, error) {
+				if sessionID != "session-1" {
+					t.Fatalf("unexpected session id: %s", sessionID)
+				}
+				return session.Session{
+					ID:          sessionID,
+					Type:        session.TypeDiscuss,
+					SessionMode: session.TypeDiscuss,
+					RuntimeType: session.RuntimeACPAgent,
+				}, nil
+			},
+		},
+	}
+
+	got, err := resolver.ResolveRunConfig(context.Background(), "bot-1", "session-1", "user-1", "telegram", "", "group", "")
+	if err != nil {
+		t.Fatalf("ResolveRunConfig() error = %v", err)
+	}
+	if got.RuntimeType != session.RuntimeACPAgent {
+		t.Fatalf("runtime type = %q, want %q", got.RuntimeType, session.RuntimeACPAgent)
+	}
+	if got.RunConfig.SessionType != session.TypeDiscuss {
+		t.Fatalf("run config session type = %q, want %q", got.RunConfig.SessionType, session.TypeDiscuss)
+	}
+	if got.ModelID != "" || got.RunConfig.Model != nil {
+		t.Fatalf("ACP runtime should not resolve a model, model_id=%q model=%#v", got.ModelID, got.RunConfig.Model)
+	}
+}
+
 func TestApprovalResultMetadata(t *testing.T) {
 	t.Parallel()
 

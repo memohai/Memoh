@@ -40,7 +40,12 @@ type telegramOutboundStream struct {
 	streamMsgID   int
 	lastEdited    string
 	lastEditedAt  time.Time
-	toolMessages  map[string]telegramToolCallMessage
+	// In private chats, deltas are sent as Telegram drafts and only final text is
+	// posted as a real message. Track whether this stream already committed a
+	// permanent message so empty-buffer final events can skip duplicates without
+	// dropping final-only responses.
+	draftPermanentSent bool
+	toolMessages       map[string]telegramToolCallMessage
 }
 
 // telegramToolCallMessage tracks the message posted for a tool call's
@@ -301,10 +306,25 @@ func (s *telegramOutboundStream) sendPermanentMessage(ctx context.Context, text 
 	if err != nil {
 		return err
 	}
+	var sendErr error
 	if parseMode == "" && runeLenTelegramText(text) > telegramMaxMessageLength {
-		return sendTelegramTextChunksWithActions(bot, s.target, text, replyTo, parseMode, nil)
+		sendErr = sendTelegramTextChunksWithActions(bot, s.target, text, replyTo, parseMode, nil)
+	} else {
+		sendErr = sendTelegramText(bot, s.target, text, replyTo, parseMode)
 	}
-	return sendTelegramText(bot, s.target, text, replyTo, parseMode)
+	if sendErr != nil {
+		return sendErr
+	}
+	s.markDraftPermanentSent()
+	return nil
+}
+
+func (s *telegramOutboundStream) markDraftPermanentSent() {
+	if s.isPrivateChat {
+		s.mu.Lock()
+		s.draftPermanentSent = true
+		s.mu.Unlock()
+	}
 }
 
 // resetStreamState clears the streaming message state so a fresh message will
@@ -347,7 +367,11 @@ func (s *telegramOutboundStream) deliverFinalTextWithActions(ctx context.Context
 	}
 	if s.isPrivateChat {
 		s.resetStreamState()
-		return sendTelegramTextWithActions(bot, s.target, text, replyTo, parseMode, actions)
+		if err := sendTelegramTextWithActions(bot, s.target, text, replyTo, parseMode, actions); err != nil {
+			return err
+		}
+		s.markDraftPermanentSent()
+		return nil
 	}
 	if parseMode != "" {
 		s.mu.Lock()
@@ -601,6 +625,7 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.Pr
 	// (one per assistant output in multi-tool-call responses).
 	s.mu.Lock()
 	bufText := strings.TrimSpace(s.buf.String())
+	draftPermanentSent := s.draftPermanentSent
 	if s.isPrivateChat {
 		s.buf.Reset()
 	}
@@ -639,7 +664,7 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.Pr
 
 	finalText := bufText
 	if authoritative := strings.TrimSpace(msg.Message.PlainText()); authoritative != "" {
-		if !s.isPrivateChat || bufText != "" || (finalText == "" && len(msg.Message.Actions) > 0) {
+		if !s.isPrivateChat || bufText != "" || !draftPermanentSent || (finalText == "" && len(msg.Message.Actions) > 0) {
 			finalText = authoritative
 		}
 	}
@@ -661,6 +686,7 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.Pr
 			if err := sendTelegramTextWithActions(bot, s.target, finalText, replyTo, s.parseMode, msg.Message.Actions); err != nil {
 				return err
 			}
+			s.markDraftPermanentSent()
 		} else if err := s.deliverFinalText(ctx, finalText, s.parseMode); err != nil {
 			return err
 		}
@@ -739,6 +765,7 @@ func (s *telegramOutboundStream) pushFinalRich(ctx context.Context, msg channel.
 	if _, _, err := sendTelegramRichMessageReturnMessage(bot, s.target, rich, replyTo, msg.Message.Actions); err != nil {
 		return s.deliverFinalTextWithActions(ctx, fallbackText, fallbackParseMode, msg.Message.Actions)
 	}
+	s.markDraftPermanentSent()
 	s.resetStreamState()
 	return nil
 }
@@ -779,7 +806,11 @@ func (s *telegramOutboundStream) deliverLongPlainFallback(ctx context.Context, t
 	if !replyToFirstChunk {
 		replyTo = 0
 	}
-	return sendTelegramTextChunkListWithActions(bot, s.target, chunks, replyTo, "", actions)
+	if err := sendTelegramTextChunkListWithActions(bot, s.target, chunks, replyTo, "", actions); err != nil {
+		return err
+	}
+	s.markDraftPermanentSent()
+	return nil
 }
 
 func (s *telegramOutboundStream) editStreamMessageFinalWithParseMode(ctx context.Context, text string, parseMode string) error {

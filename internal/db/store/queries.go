@@ -16,6 +16,7 @@ type Queries interface {
 	CancelPendingToolApprovalsBySession(ctx context.Context, arg dbsqlc.CancelPendingToolApprovalsBySessionParams) ([]dbsqlc.ToolApprovalRequest, error)
 	CancelPendingUserInputsBySession(ctx context.Context, arg dbsqlc.CancelPendingUserInputsBySessionParams) ([]dbsqlc.UserInputRequest, error)
 	CancelUserInputRequest(ctx context.Context, arg dbsqlc.CancelUserInputRequestParams) (dbsqlc.UserInputRequest, error)
+	ClearRouteActiveSessionsByBot(ctx context.Context, botID pgtype.UUID) error
 	ClearMCPOAuthTokens(ctx context.Context, connectionID pgtype.UUID) error
 	CompleteCompactionLog(ctx context.Context, arg dbsqlc.CompleteCompactionLogParams) (dbsqlc.BotHistoryMessageCompact, error)
 	CompleteHeartbeatLog(ctx context.Context, arg dbsqlc.CompleteHeartbeatLogParams) (dbsqlc.BotHeartbeatLog, error)
@@ -89,7 +90,6 @@ type Queries interface {
 	CreateUserInputRequest(ctx context.Context, arg dbsqlc.CreateUserInputRequestParams) (dbsqlc.UserInputRequest, error)
 	CreateUserInputRequestForTurn(ctx context.Context, arg dbsqlc.CreateUserInputRequestForTurnParams) (dbsqlc.UserInputRequest, error)
 	CreateUser(ctx context.Context, arg dbsqlc.CreateUserParams) (dbsqlc.User, error)
-	ClearRouteActiveSessionsByBot(ctx context.Context, botID pgtype.UUID) error
 	ClearSessionTurnPointersByBot(ctx context.Context, botID pgtype.UUID) error
 	DeleteBotACLRuleByID(ctx context.Context, id pgtype.UUID) error
 	DeleteBotByID(ctx context.Context, id pgtype.UUID) error
@@ -118,6 +118,8 @@ type Queries interface {
 	DeleteMessagesBySession(ctx context.Context, sessionID pgtype.UUID) error
 	DeleteModel(ctx context.Context, id pgtype.UUID) error
 	DeleteModelByModelID(ctx context.Context, modelID string) error
+	DeleteSessionDiscussCursorsByBot(ctx context.Context, botID pgtype.UUID) error
+	DeleteSessionEventsByBot(ctx context.Context, botID pgtype.UUID) error
 	DeleteModelByProviderAndType(ctx context.Context, arg dbsqlc.DeleteModelByProviderAndTypeParams) error
 	DeleteModelByProviderIDAndModelID(ctx context.Context, arg dbsqlc.DeleteModelByProviderIDAndModelIDParams) error
 	DeleteProvider(ctx context.Context, id pgtype.UUID) error
@@ -198,6 +200,7 @@ type Queries interface {
 	GetSearchProviderByID(ctx context.Context, id pgtype.UUID) (dbsqlc.SearchProvider, error)
 	GetSearchProviderByName(ctx context.Context, name string) (dbsqlc.SearchProvider, error)
 	GetSessionByID(ctx context.Context, id pgtype.UUID) (dbsqlc.BotSession, error)
+	GetSessionDiscussCursor(ctx context.Context, arg dbsqlc.GetSessionDiscussCursorParams) (dbsqlc.BotSessionDiscussCursor, error)
 	GetSessionCacheStats(ctx context.Context, sessionID pgtype.UUID) (dbsqlc.GetSessionCacheStatsRow, error)
 	GetSessionTurnHead(ctx context.Context, arg dbsqlc.GetSessionTurnHeadParams) (dbsqlc.BotSessionTurnHead, error)
 	GetSessionUsedSkills(ctx context.Context, sessionID pgtype.UUID) ([]string, error)
@@ -287,10 +290,12 @@ type Queries interface {
 	ListSchedulesByBot(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.Schedule, error)
 	ListSearchProviders(ctx context.Context) ([]dbsqlc.SearchProvider, error)
 	ListSearchProvidersByProvider(ctx context.Context, provider string) ([]dbsqlc.SearchProvider, error)
+	ListSessionEventsByBot(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.BotSessionEvent, error)
 	ListSessionEventsBySession(ctx context.Context, sessionID pgtype.UUID) ([]dbsqlc.BotSessionEvent, error)
 	ListSessionEventsBySessionAfter(ctx context.Context, arg dbsqlc.ListSessionEventsBySessionAfterParams) ([]dbsqlc.BotSessionEvent, error)
 	ListSessionTurnGraphTurns(ctx context.Context, sessionID pgtype.UUID) ([]dbsqlc.BotHistoryTurn, error)
 	ListSessionTurnHeads(ctx context.Context, sessionID pgtype.UUID) ([]dbsqlc.BotSessionTurnHead, error)
+	ListSessionDiscussCursorsByBot(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.BotSessionDiscussCursor, error)
 	ListSessionsByBot(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.ListSessionsByBotRow, error)
 	ListSessionsByBotAndCreatedByUser(ctx context.Context, arg dbsqlc.ListSessionsByBotAndCreatedByUserParams) ([]dbsqlc.ListSessionsByBotAndCreatedByUserRow, error)
 	ListSessionsByBotAndCreatedByUserPaged(ctx context.Context, arg dbsqlc.ListSessionsByBotAndCreatedByUserPagedParams) ([]dbsqlc.ListSessionsByBotAndCreatedByUserPagedRow, error)
@@ -401,6 +406,7 @@ type Queries interface {
 	UpsertProviderOAuthToken(ctx context.Context, arg dbsqlc.UpsertProviderOAuthTokenParams) (dbsqlc.ProviderOauthToken, error)
 	UpsertRegistryModel(ctx context.Context, arg dbsqlc.UpsertRegistryModelParams) (dbsqlc.Model, error)
 	UpsertRegistryProvider(ctx context.Context, arg dbsqlc.UpsertRegistryProviderParams) (dbsqlc.Provider, error)
+	UpsertSessionDiscussCursor(ctx context.Context, arg dbsqlc.UpsertSessionDiscussCursorParams) (dbsqlc.BotSessionDiscussCursor, error)
 	UpsertSnapshot(ctx context.Context, arg dbsqlc.UpsertSnapshotParams) (dbsqlc.Snapshot, error)
 	UpsertUserChannelBinding(ctx context.Context, arg dbsqlc.UpsertUserChannelBindingParams) (dbsqlc.UserChannelBinding, error)
 	UpsertUserProviderOAuthToken(ctx context.Context, arg dbsqlc.UpsertUserProviderOAuthTokenParams) (dbsqlc.UserProviderOauthToken, error)

@@ -175,6 +175,36 @@ describe('acp-metadata', () => {
     }, 'api_key')?.id).toBe('api_key')
   })
 
+  it('marks missing setup_mode as legacy when reading agent config', () => {
+    const legacy = readACPAgentConfig({
+      acp: {
+        agents: {
+          codex: {
+            enabled: true,
+            managed: {},
+          },
+        },
+      },
+    }, 'codex')
+    expect(legacy.setupMode).toBe('api_key')
+    expect(legacy.setupModeSet).toBe(false)
+
+    const explicit = readACPAgentConfig({
+      acp: {
+        agents: {
+          codex: {
+            enabled: true,
+            setup_mode: 'api_key',
+            managed: {},
+          },
+        },
+      },
+    }, 'codex')
+    expect(explicit.setupMode).toBe('api_key')
+    expect(explicit.setupModeSet).toBe(true)
+    expect(findMissingRequiredManagedField(codexProfile, explicit.managed, explicit.setupMode)?.id).toBe('api_key')
+  })
+
   it('validates Claude Code setup mode required fields', () => {
     expect(findMissingRequiredManagedField(claudeCodeProfile, {
       api_key: '',
@@ -397,6 +427,7 @@ describe('acp-metadata', () => {
 
     expect(config).toEqual({
       setupMode: 'api_key',
+      setupModeSet: true,
       managed: {
         api_key: 'sk-...cret',
       },

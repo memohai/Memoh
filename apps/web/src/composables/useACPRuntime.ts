@@ -1,4 +1,4 @@
-import { computed, toValue, watch, type MaybeRefOrGetter } from 'vue'
+import { computed, toValue, type MaybeRefOrGetter } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useChatStore } from '@/store/chat-list'
 import type { AcpclientModelInfo } from '@memohai/sdk'
@@ -36,24 +36,6 @@ export function useACPRuntime(options: UseACPRuntimeOptions) {
     const sid = toValue(options.sessionId)?.trim() || ''
     return chatStore.setACPRuntimeModel(modelId, sid)
   }
-
-  watch(
-    () => [toValue(options.enabled), toValue(options.botId), toValue(options.sessionId)] as const,
-    async ([enabled, botId, sessionId], _previous, onCleanup) => {
-      const sid = sessionId?.trim() ?? ''
-      if (!enabled || !botId?.trim() || !sid) return
-      let cancelled = false
-      onCleanup(() => {
-        cancelled = true
-      })
-      try {
-        await chatStore.ensureACPRuntime(sid)
-      } catch (error) {
-        if (!cancelled) options.onError?.(error)
-      }
-    },
-    { immediate: true },
-  )
 
   return {
     runtime,

@@ -27,6 +27,15 @@ SELECT * FROM bot_session_events
 WHERE session_id = sqlc.arg(session_id) AND received_at_ms >= sqlc.arg(received_at_ms)
 ORDER BY received_at_ms ASC;
 
+-- name: ListSessionEventsByBot :many
+SELECT * FROM bot_session_events
+WHERE bot_id = sqlc.arg(bot_id)
+ORDER BY received_at_ms ASC, id ASC;
+
 -- name: CountSessionEvents :one
 SELECT COUNT(*) FROM bot_session_events
 WHERE session_id = sqlc.arg(session_id);
+
+-- name: DeleteSessionEventsByBot :exec
+DELETE FROM bot_session_events
+WHERE bot_id = sqlc.arg(bot_id);

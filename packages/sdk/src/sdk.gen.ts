@@ -1256,14 +1256,14 @@ export const getBotsByBotIdSessionsBySessionIdStatus = <ThrowOnError extends boo
  *
  * Remove agent settings for current user
  */
-export const deleteBotsByBotIdSettings = <ThrowOnError extends boolean = false>(options?: Options<DeleteBotsByBotIdSettingsData, ThrowOnError>) => (options?.client ?? client).delete<DeleteBotsByBotIdSettingsResponses, DeleteBotsByBotIdSettingsErrors, ThrowOnError>({ url: '/bots/{bot_id}/settings', ...options });
+export const deleteBotsByBotIdSettings = <ThrowOnError extends boolean = false>(options: Options<DeleteBotsByBotIdSettingsData, ThrowOnError>) => (options.client ?? client).delete<DeleteBotsByBotIdSettingsResponses, DeleteBotsByBotIdSettingsErrors, ThrowOnError>({ url: '/bots/{bot_id}/settings', ...options });
 
 /**
  * Get user settings
  *
  * Get agent settings for current user
  */
-export const getBotsByBotIdSettings = <ThrowOnError extends boolean = false>(options?: Options<GetBotsByBotIdSettingsData, ThrowOnError>) => (options?.client ?? client).get<GetBotsByBotIdSettingsResponses, GetBotsByBotIdSettingsErrors, ThrowOnError>({ url: '/bots/{bot_id}/settings', ...options });
+export const getBotsByBotIdSettings = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdSettingsData, ThrowOnError>) => (options.client ?? client).get<GetBotsByBotIdSettingsResponses, GetBotsByBotIdSettingsErrors, ThrowOnError>({ url: '/bots/{bot_id}/settings', ...options });
 
 /**
  * Update user settings
@@ -1320,7 +1320,7 @@ export const postBotsByBotIdSupermarketInstallSkill = <ThrowOnError extends bool
 /**
  * Get token usage statistics
  *
- * Get daily aggregated token usage for a bot, split by chat, heartbeat, and schedule session types, with optional model filter and per-model breakdown
+ * Get daily aggregated token usage for a bot, split by chat, discuss, heartbeat, and schedule session types, with optional model filter and per-model breakdown
  */
 export const getBotsByBotIdTokenUsage = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdTokenUsageData, ThrowOnError>) => (options.client ?? client).get<GetBotsByBotIdTokenUsageResponses, GetBotsByBotIdTokenUsageErrors, ThrowOnError>({ url: '/bots/{bot_id}/token-usage', ...options });
 

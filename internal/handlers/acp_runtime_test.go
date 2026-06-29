@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/memohai/memoh/internal/acpagent"
 	"github.com/memohai/memoh/internal/acpclient"
+	"github.com/memohai/memoh/internal/acpfeedback"
 	"github.com/memohai/memoh/internal/acpprofile"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
@@ -23,8 +25,9 @@ import (
 
 type acpRuntimeQueries struct {
 	dbstore.Queries
-	bot     sqlc.GetBotByIDRow
-	session sqlc.BotSession
+	bot         sqlc.GetBotByIDRow
+	session     sqlc.BotSession
+	permissions []byte
 }
 
 type fakeACPRuntimePool struct {
@@ -97,19 +100,28 @@ func (q acpRuntimeQueries) GetSessionByID(_ context.Context, _ pgtype.UUID) (sql
 	return q.session, nil
 }
 
+func (q acpRuntimeQueries) ListBotUserGrantsForUser(_ context.Context, _ sqlc.ListBotUserGrantsForUserParams) ([]sqlc.ListBotUserGrantsForUserRow, error) {
+	permissions := q.permissions
+	if permissions == nil {
+		permissions = []byte(`["chat"]`)
+	}
+	return []sqlc.ListBotUserGrantsForUserRow{{Permissions: permissions}}, nil
+}
+
 func TestACPRuntimeHandlerReturnsIdleStatus(t *testing.T) {
 	botID := "11111111-1111-1111-1111-111111111111"
 	sessionID := "22222222-2222-2222-2222-222222222222"
 	queries := acpRuntimeQueries{
-		bot: testBotRow(botID, map[string]any{}),
+		bot: testBotRow(botID, acpEnabledBotMetadata()),
 		session: sqlc.BotSession{
 			ID:    testUUID(sessionID),
 			BotID: testUUID(botID),
 			Type:  session.TypeACPAgent,
 			Title: "Codex",
-			Metadata: testJSON(map[string]any{
-				"acp_agent_id": acpprofile.AgentCodexID,
-				"project_path": "/data/app",
+			RuntimeMetadata: testJSON(map[string]any{
+				"acp_agent_id":             acpprofile.AgentCodexID,
+				"project_path":             "/data/app",
+				"runtime_owner_account_id": "user-1",
 			}),
 		},
 	}
@@ -158,15 +170,16 @@ func TestACPRuntimeHandlerEnsureStartsRuntimeAndReturnsModels(t *testing.T) {
 	botID := "11111111-1111-1111-1111-111111111111"
 	sessionID := "44444444-4444-4444-4444-444444444444"
 	queries := acpRuntimeQueries{
-		bot: testBotRow(botID, map[string]any{}),
+		bot: testBotRow(botID, acpEnabledBotMetadata()),
 		session: sqlc.BotSession{
 			ID:    testUUID(sessionID),
 			BotID: testUUID(botID),
 			Type:  session.TypeACPAgent,
 			Title: "Codex",
-			Metadata: testJSON(map[string]any{
-				"acp_agent_id": acpprofile.AgentCodexID,
-				"project_path": "/data/app",
+			RuntimeMetadata: testJSON(map[string]any{
+				"acp_agent_id":             acpprofile.AgentCodexID,
+				"project_path":             "/data/app",
+				"runtime_owner_account_id": "user-1",
 			}),
 		},
 	}
@@ -227,13 +240,11 @@ func TestACPRuntimeHandlerEnsureStartsRuntimeAndReturnsModels(t *testing.T) {
 	}
 }
 
-func TestACPRuntimeHandlerSetModel(t *testing.T) {
-	t.Setenv("MEMOH_ACP_MCP_HTTP_BASE_URL", "http://example.com")
-
+func TestACPRuntimeHandlerEnsureRejectsMissingRuntimeOwner(t *testing.T) {
 	botID := "11111111-1111-1111-1111-111111111111"
-	sessionID := "55555555-5555-5555-5555-555555555555"
+	sessionID := "66666666-6666-6666-6666-666666666666"
 	queries := acpRuntimeQueries{
-		bot: testBotRow(botID, map[string]any{}),
+		bot: testBotRow(botID, acpEnabledBotMetadata()),
 		session: sqlc.BotSession{
 			ID:    testUUID(sessionID),
 			BotID: testUUID(botID),
@@ -242,6 +253,150 @@ func TestACPRuntimeHandlerSetModel(t *testing.T) {
 			Metadata: testJSON(map[string]any{
 				"acp_agent_id": acpprofile.AgentCodexID,
 				"project_path": "/data/app",
+			}),
+		},
+	}
+	pool := &fakeACPRuntimePool{}
+	handler := newACPRuntimeHandler(
+		pool,
+		session.NewService(nil, queries, nil),
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("admin"),
+	)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/bots/"+botID+"/sessions/"+sessionID+"/acp-runtime", nil)
+	rec := httptest.NewRecorder()
+	ctx := testAuthContext(e, req, rec, "user-1")
+	ctx.SetPath("/bots/:bot_id/sessions/:session_id/acp-runtime")
+	ctx.SetParamNames("bot_id", "session_id")
+	ctx.SetParamValues(botID, sessionID)
+
+	err := handler.EnsureRuntime(ctx)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusConflict {
+		t.Fatalf("EnsureRuntime() error = %v, want %d", err, http.StatusConflict)
+	}
+	feedback, ok := httpErr.Message.(*acpfeedback.Error)
+	if !ok || feedback.Code != acpfeedback.CodeRuntimeOwnerMissing {
+		t.Fatalf("feedback = %#v, want runtime owner missing", httpErr.Message)
+	}
+	if pool.ensureInput.BotID != "" {
+		t.Fatalf("pool should not be called without runtime owner: %#v", pool.ensureInput)
+	}
+}
+
+func TestACPRuntimeHandlerEnsureRejectsDifferentRuntimeOwner(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	sessionID := "77777777-7777-7777-7777-777777777777"
+	actorUserID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	runtimeOwnerID := "cccccccc-cccc-cccc-cccc-cccccccccccc"
+	queries := acpRuntimeQueries{
+		bot: testBotRow(botID, acpEnabledBotMetadata()),
+		session: sqlc.BotSession{
+			ID:    testUUID(sessionID),
+			BotID: testUUID(botID),
+			Type:  session.TypeACPAgent,
+			Title: "Codex",
+			RuntimeMetadata: testJSON(map[string]any{
+				"acp_agent_id":             acpprofile.AgentCodexID,
+				"project_path":             "/data/app",
+				"runtime_owner_account_id": runtimeOwnerID,
+			}),
+		},
+		permissions: []byte(`["workspace_exec"]`),
+	}
+	pool := &fakeACPRuntimePool{}
+	handler := newACPRuntimeHandler(
+		pool,
+		session.NewService(nil, queries, nil),
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("user"),
+	)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/bots/"+botID+"/sessions/"+sessionID+"/acp-runtime", nil)
+	rec := httptest.NewRecorder()
+	ctx := testAuthContext(e, req, rec, actorUserID)
+	ctx.SetPath("/bots/:bot_id/sessions/:session_id/acp-runtime")
+	ctx.SetParamNames("bot_id", "session_id")
+	ctx.SetParamValues(botID, sessionID)
+
+	err := handler.EnsureRuntime(ctx)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
+		t.Fatalf("EnsureRuntime() error = %v, want HTTP 403", err)
+	}
+	if pool.ensureInput.BotID != "" {
+		t.Fatalf("pool should not be called for a different runtime owner: %#v", pool.ensureInput)
+	}
+}
+
+func TestAuthorizeACPRuntimeSessionAccess(t *testing.T) {
+	t.Run("owner with workspace exec", func(t *testing.T) {
+		err := authorizeACPRuntimeSessionAccess(
+			"user-1",
+			[]string{bots.PermissionWorkspaceExec},
+			"user-1",
+		)
+		if err != nil {
+			t.Fatalf("authorizeACPRuntimeSessionAccess() error = %v", err)
+		}
+	})
+
+	t.Run("manage cannot bypass owner mismatch", func(t *testing.T) {
+		err := authorizeACPRuntimeSessionAccess(
+			"user-1",
+			[]string{bots.PermissionManage},
+			"user-2",
+		)
+		var httpErr *echo.HTTPError
+		if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
+			t.Fatalf("authorizeACPRuntimeSessionAccess() error = %v, want HTTP 403", err)
+		}
+	})
+
+	t.Run("owner still needs workspace exec", func(t *testing.T) {
+		err := authorizeACPRuntimeSessionAccess(
+			"user-1",
+			[]string{bots.PermissionChat},
+			"user-1",
+		)
+		var httpErr *echo.HTTPError
+		if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
+			t.Fatalf("authorizeACPRuntimeSessionAccess() error = %v, want HTTP 403", err)
+		}
+	})
+
+	t.Run("different owner is forbidden", func(t *testing.T) {
+		err := authorizeACPRuntimeSessionAccess(
+			"user-1",
+			[]string{bots.PermissionWorkspaceExec},
+			"user-2",
+		)
+		var httpErr *echo.HTTPError
+		if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
+			t.Fatalf("authorizeACPRuntimeSessionAccess() error = %v, want HTTP 403", err)
+		}
+	})
+}
+
+func TestACPRuntimeHandlerSetModel(t *testing.T) {
+	t.Setenv("MEMOH_ACP_MCP_HTTP_BASE_URL", "http://example.com")
+
+	botID := "11111111-1111-1111-1111-111111111111"
+	sessionID := "55555555-5555-5555-5555-555555555555"
+	queries := acpRuntimeQueries{
+		bot: testBotRow(botID, acpEnabledBotMetadata()),
+		session: sqlc.BotSession{
+			ID:    testUUID(sessionID),
+			BotID: testUUID(botID),
+			Type:  session.TypeACPAgent,
+			Title: "Codex",
+			RuntimeMetadata: testJSON(map[string]any{
+				"acp_agent_id":             acpprofile.AgentCodexID,
+				"project_path":             "/data/app",
+				"runtime_owner_account_id": "user-1",
 			}),
 		},
 	}
@@ -311,7 +466,7 @@ func acpEnabledBotMetadata() map[string]any {
 	return map[string]any{
 		acpprofile.MetadataKeyACP: map[string]any{
 			"agents": map[string]any{
-				acpprofile.AgentCodexID: map[string]any{"enabled": true},
+				acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
 			},
 		},
 	}
@@ -371,6 +526,9 @@ func TestACPRuntimeHandlerCreateRuntime(t *testing.T) {
 	if pool.createInput.BotID != botID || pool.createInput.AgentID != acpprofile.AgentCodexID || pool.createInput.ProjectPath != "/data" {
 		t.Fatalf("CreateRuntime input = %#v", pool.createInput)
 	}
+	if pool.createInput.RuntimeOwnerAccountID != "user-1" {
+		t.Fatalf("CreateRuntime owner = %q, want authenticated user", pool.createInput.RuntimeOwnerAccountID)
+	}
 	if pool.createInput.ToolHTTPURL != "http://example.com/bots/"+botID+"/tools" {
 		t.Fatalf("CreateRuntime tool context = %#v", pool.createInput)
 	}
@@ -380,6 +538,51 @@ func TestACPRuntimeHandlerCreateRuntime(t *testing.T) {
 	}
 	if got["runtime_id"] != "rt_warm" || got["default_model_id"] != "gpt-5.1-codex" {
 		t.Fatalf("CreateRuntime response = %#v", got)
+	}
+}
+
+func TestACPRuntimeHandlerSetRuntimeModelRejectsDifferentRuntimeOwner(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	queries := acpRuntimeQueries{
+		bot:         testBotRow(botID, acpEnabledBotMetadata()),
+		permissions: []byte(`["workspace_exec"]`),
+	}
+	pool := &fakeACPRuntimePool{
+		status: acpagent.RuntimeStatus{
+			RuntimeID:             "rt_warm",
+			AgentID:               acpprofile.AgentCodexID,
+			ProjectPath:           "/data",
+			RuntimeOwnerAccountID: "owner-1",
+			State:                 "idle",
+		},
+	}
+	handler := newACPRuntimeHandler(
+		pool,
+		session.NewService(nil, queries, nil),
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("user"),
+	)
+
+	e := echo.New()
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		"/bots/"+botID+"/acp-runtimes/rt_warm/model",
+		bytes.NewBufferString(`{"model_id":"gpt-5.1-codex-high"}`),
+	)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := testAuthContext(e, req, rec, "user-1")
+	ctx.SetPath("/bots/:bot_id/acp-runtimes/:runtime_id/model")
+	ctx.SetParamNames("bot_id", "runtime_id")
+	ctx.SetParamValues(botID, "rt_warm")
+
+	err := handler.SetRuntimeModel(ctx)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
+		t.Fatalf("SetRuntimeModel() error = %v, want HTTP 403", err)
+	}
+	if pool.modelID != "" {
+		t.Fatalf("pool should not be called for a different runtime owner: model=%q", pool.modelID)
 	}
 }
 
@@ -411,11 +614,57 @@ func TestACPRuntimeHandlerCreateRuntimeRejectsDisabledAgent(t *testing.T) {
 
 	err := handler.CreateRuntime(ctx)
 	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("CreateRuntime() error = %v, want %d", err, http.StatusBadRequest)
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
+		t.Fatalf("CreateRuntime() error = %v, want %d", err, http.StatusForbidden)
 	}
 	if pool.createInput.BotID != "" {
 		t.Fatalf("pool should not be called for a disabled agent: %#v", pool.createInput)
+	}
+}
+
+func TestACPRuntimeHandlerCreateRuntimeRejectsUnconfiguredAgent(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	queries := acpRuntimeQueries{
+		bot: testBotRow(botID, map[string]any{
+			acpprofile.MetadataKeyACP: map[string]any{
+				"agents": map[string]any{
+					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "api_key"},
+				},
+			},
+		}),
+	}
+	pool := &fakeACPRuntimePool{}
+	handler := newACPRuntimeHandler(
+		pool,
+		session.NewService(nil, queries, nil),
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("admin"),
+	)
+
+	e := echo.New()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/bots/"+botID+"/acp-runtimes",
+		bytes.NewBufferString(`{"acp_agent_id":"codex"}`),
+	)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := testAuthContext(e, req, rec, "user-1")
+	ctx.SetPath("/bots/:bot_id/acp-runtimes")
+	ctx.SetParamNames("bot_id")
+	ctx.SetParamValues(botID)
+
+	err := handler.CreateRuntime(ctx)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
+		t.Fatalf("CreateRuntime() error = %v, want %d", err, http.StatusBadRequest)
+	}
+	feedback, ok := httpErr.Message.(*acpfeedback.Error)
+	if !ok || feedback.Code != acpfeedback.CodeAgentNotConfigured {
+		t.Fatalf("feedback = %#v, want code %s", httpErr.Message, acpfeedback.CodeAgentNotConfigured)
+	}
+	if pool.createInput.BotID != "" {
+		t.Fatalf("pool should not be called for an unconfigured agent: %#v", pool.createInput)
 	}
 }
 
@@ -452,6 +701,46 @@ func TestACPRuntimeHandlerCreateRuntimeMapsCapToTooManyRequests(t *testing.T) {
 	}
 }
 
+func TestACPRuntimeHandlerCreateRuntimeRedactsStartFailure(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	queries := acpRuntimeQueries{
+		bot: testBotRow(botID, acpEnabledBotMetadata()),
+	}
+	pool := &fakeACPRuntimePool{createErr: errors.New("start /Users/alice/.codex/auth.json failed with token sk-secret")}
+	handler := newACPRuntimeHandler(
+		pool,
+		session.NewService(nil, queries, nil),
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("admin"),
+	)
+
+	e := echo.New()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/bots/"+botID+"/acp-runtimes",
+		bytes.NewBufferString(`{"acp_agent_id":"codex"}`),
+	)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := testAuthContext(e, req, rec, "user-1")
+	ctx.SetPath("/bots/:bot_id/acp-runtimes")
+	ctx.SetParamNames("bot_id")
+	ctx.SetParamValues(botID)
+
+	err := handler.CreateRuntime(ctx)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusInternalServerError {
+		t.Fatalf("CreateRuntime() error = %v, want %d", err, http.StatusInternalServerError)
+	}
+	feedback, ok := httpErr.Message.(*acpfeedback.Error)
+	if !ok || feedback.Code != acpfeedback.CodeRuntimeStartFailed {
+		t.Fatalf("feedback = %#v, want code %s", httpErr.Message, acpfeedback.CodeRuntimeStartFailed)
+	}
+	if strings.Contains(feedback.Message, "/Users/alice") || strings.Contains(feedback.Message, "sk-secret") {
+		t.Fatalf("runtime start feedback leaked raw error: %q", feedback.Message)
+	}
+}
+
 func TestACPRuntimeHandlerSetRuntimeModelAllowsReset(t *testing.T) {
 	botID := "11111111-1111-1111-1111-111111111111"
 	queries := acpRuntimeQueries{
@@ -459,9 +748,10 @@ func TestACPRuntimeHandlerSetRuntimeModelAllowsReset(t *testing.T) {
 	}
 	pool := &fakeACPRuntimePool{
 		status: acpagent.RuntimeStatus{
-			RuntimeID: "rt_warm",
-			AgentID:   acpprofile.AgentCodexID,
-			State:     "idle",
+			RuntimeID:             "rt_warm",
+			AgentID:               acpprofile.AgentCodexID,
+			State:                 "idle",
+			RuntimeOwnerAccountID: "user-1",
 		},
 	}
 	handler := newACPRuntimeHandler(
@@ -531,7 +821,15 @@ func TestACPRuntimeHandlerCloseRuntimeToleratesMissingRuntime(t *testing.T) {
 	queries := acpRuntimeQueries{
 		bot: testBotRow(botID, acpEnabledBotMetadata()),
 	}
-	pool := &fakeACPRuntimePool{closeErr: acpagent.ErrRuntimeNotFound}
+	pool := &fakeACPRuntimePool{
+		status: acpagent.RuntimeStatus{
+			RuntimeID:             "rt_gone",
+			AgentID:               acpprofile.AgentCodexID,
+			State:                 "idle",
+			RuntimeOwnerAccountID: "user-1",
+		},
+		closeErr: acpagent.ErrRuntimeNotFound,
+	}
 	handler := newACPRuntimeHandler(
 		pool,
 		session.NewService(nil, queries, nil),

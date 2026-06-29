@@ -5,6 +5,9 @@ WITH input AS (
     sqlc.narg(route_id)::uuid AS route_id,
     sqlc.narg(channel_type)::text AS channel_type,
     sqlc.arg(type)::text AS session_type,
+    sqlc.arg(session_mode)::text AS session_mode,
+    sqlc.arg(runtime_type)::text AS runtime_type,
+    sqlc.arg(runtime_metadata)::jsonb AS runtime_metadata,
     sqlc.arg(title)::text AS title,
     sqlc.arg(metadata)::jsonb AS metadata,
     sqlc.narg(default_head_turn_id)::uuid AS default_head_turn_id,
@@ -14,7 +17,7 @@ WITH input AS (
     sqlc.narg(created_by_user_id)::uuid AS created_by_user_id
 )
 INSERT INTO bot_sessions (
-  bot_id, route_id, channel_type, type, title, metadata,
+  bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata,
   default_head_turn_id, forked_from_session_id, forked_from_turn_id,
   parent_session_id, created_by_user_id
 )
@@ -23,6 +26,9 @@ SELECT
   route_id,
   channel_type,
   session_type,
+  session_mode,
+  runtime_type,
+  runtime_metadata,
   title,
   metadata,
   default_head_turn_id,
@@ -82,7 +88,7 @@ WHERE id = $1;
 
 -- name: ListSessionsByBot :many
 SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
+  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
   s.default_head_turn_id, s.forked_from_session_id, s.forked_from_turn_id,
   s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
   r.metadata AS route_metadata,
@@ -95,7 +101,7 @@ ORDER BY s.updated_at DESC;
 
 -- name: ListSessionsByBotAndCreatedByUser :many
 SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
+  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
   s.default_head_turn_id, s.forked_from_session_id, s.forked_from_turn_id,
   s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
   r.metadata AS route_metadata,
@@ -112,7 +118,7 @@ ORDER BY s.updated_at DESC;
 -- updated_at. Callers always pass an explicit types filter; to opt out of
 -- filtering, pass every known type.
 SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
+  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
   s.default_head_turn_id, s.forked_from_session_id, s.forked_from_turn_id,
   s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
   r.metadata AS route_metadata,
@@ -135,7 +141,7 @@ LIMIT sqlc.arg(limit_count)::int;
 
 -- name: ListSessionsByBotAndCreatedByUserPaged :many
 SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
+  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
   s.default_head_turn_id, s.forked_from_session_id, s.forked_from_turn_id,
   s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
   r.metadata AS route_metadata,
@@ -178,7 +184,12 @@ RETURNING *;
 
 -- name: UpdateSessionTypeAndMetadata :one
 UPDATE bot_sessions
-SET type = sqlc.arg(type), metadata = sqlc.arg(metadata), updated_at = now()
+SET type = sqlc.arg(type),
+    session_mode = sqlc.arg(session_mode),
+    runtime_type = sqlc.arg(runtime_type),
+    runtime_metadata = sqlc.arg(runtime_metadata),
+    metadata = sqlc.arg(metadata),
+    updated_at = now()
 WHERE id = sqlc.arg(id) AND deleted_at IS NULL
 RETURNING *;
 
@@ -308,6 +319,45 @@ WHERE id = sqlc.arg(id)
       AND h.bot_id = bot_sessions.bot_id
       AND h.head_turn_id = sqlc.arg(default_head_turn_id)
   )
+RETURNING *;
+
+-- name: GetSessionDiscussCursor :one
+SELECT *
+FROM bot_session_discuss_cursors
+WHERE session_id = sqlc.arg(session_id)
+  AND scope_key = sqlc.arg(scope_key);
+
+-- name: ListSessionDiscussCursorsByBot :many
+SELECT c.*
+FROM bot_session_discuss_cursors c
+JOIN bot_sessions s ON s.id = c.session_id
+WHERE s.bot_id = sqlc.arg(bot_id)
+ORDER BY c.updated_at ASC, c.session_id ASC, c.scope_key ASC;
+
+-- name: DeleteSessionDiscussCursorsByBot :exec
+DELETE FROM bot_session_discuss_cursors
+WHERE session_id IN (
+  SELECT id
+  FROM bot_sessions
+  WHERE bot_id = sqlc.arg(bot_id)
+);
+
+-- name: UpsertSessionDiscussCursor :one
+INSERT INTO bot_session_discuss_cursors (
+  session_id, scope_key, route_id, source, consumed_cursor
+)
+VALUES (
+  sqlc.arg(session_id),
+  sqlc.arg(scope_key),
+  sqlc.narg(route_id)::uuid,
+  sqlc.arg(source),
+  sqlc.arg(consumed_cursor)
+)
+ON CONFLICT (session_id, scope_key) DO UPDATE
+SET route_id = COALESCE(EXCLUDED.route_id, bot_session_discuss_cursors.route_id),
+    source = EXCLUDED.source,
+    consumed_cursor = GREATEST(bot_session_discuss_cursors.consumed_cursor, EXCLUDED.consumed_cursor),
+    updated_at = now()
 RETURNING *;
 
 -- name: GetActiveSessionForRoute :one

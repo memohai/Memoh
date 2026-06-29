@@ -26,6 +26,15 @@ func (*persistAtomicQueries) GetNextTurnMessageSeq(context.Context, pgtype.UUID)
 	return 1, nil
 }
 
+func (*persistAtomicQueries) GetSessionByID(_ context.Context, id pgtype.UUID) (sqlc.BotSession, error) {
+	return sqlc.BotSession{
+		ID:          id,
+		Type:        "chat",
+		SessionMode: "chat",
+		RuntimeType: "model",
+	}, nil
+}
+
 func (*persistAtomicQueries) CreateMessage(_ context.Context, arg sqlc.CreateMessageParams) (sqlc.CreateMessageRow, error) {
 	return sqlc.CreateMessageRow{
 		ID:             testMessageUUID("33333333-3333-3333-3333-333333333333"),
@@ -37,6 +46,8 @@ func (*persistAtomicQueries) CreateMessage(_ context.Context, arg sqlc.CreateMes
 		Content:        arg.Content,
 		Metadata:       arg.Metadata,
 		Usage:          arg.Usage,
+		SessionMode:    arg.SessionMode,
+		RuntimeType:    arg.RuntimeType,
 		CreatedAt:      pgtype.Timestamptz{Valid: true},
 	}, nil
 }

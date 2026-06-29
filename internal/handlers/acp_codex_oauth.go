@@ -4,12 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"html/template"
 	"log/slog"
 	"net/http"
-	"path"
 	"strings"
 	"sync"
 	"time"
@@ -179,11 +177,10 @@ func (h *ACPCodexOAuthHandler) Status(c echo.Context) error {
 	if !acpclient.IsCodexManagedOAuthConfig(c.Request().Context(), client) {
 		return c.JSON(http.StatusOK, status)
 	}
-	resp, err := client.ReadFile(c.Request().Context(), path.Join(acpclient.CodexManagedConfigDir, "auth.json"), 0, 0)
+	auth, err := acpclient.CheckCodexManagedOAuthAuth(c.Request().Context(), client)
 	if err != nil {
 		return c.JSON(http.StatusOK, status)
 	}
-	auth := parseCodexOAuthAuth(resp.GetContent())
 	status.HasToken = auth.Valid
 	status.AccountID = auth.AccountID
 	return c.JSON(http.StatusOK, status)
@@ -318,38 +315,6 @@ func (h *ACPCodexOAuthHandler) pruneExpiredLocked(now time.Time) {
 		if !session.ExpiresAt.IsZero() && now.After(session.ExpiresAt) {
 			expireDeviceSessionLocked(session, now)
 		}
-	}
-}
-
-type codexOAuthAuthStatus struct {
-	Valid     bool
-	AccountID string
-}
-
-func parseCodexOAuthAuth(content string) codexOAuthAuthStatus {
-	var auth struct {
-		AuthMode string `json:"auth_mode"`
-		Tokens   struct {
-			IDToken      string `json:"id_token"`
-			AccessToken  string `json:"access_token"`  //nolint:gosec // Codex auth status parses existing runtime token material.
-			RefreshToken string `json:"refresh_token"` //nolint:gosec // Codex auth status parses existing runtime token material.
-			AccountID    string `json:"account_id"`
-		} `json:"tokens"`
-	}
-	if err := json.Unmarshal([]byte(content), &auth); err != nil {
-		return codexOAuthAuthStatus{}
-	}
-	idToken := strings.TrimSpace(auth.Tokens.IDToken)
-	accessToken := strings.TrimSpace(auth.Tokens.AccessToken)
-	refreshToken := strings.TrimSpace(auth.Tokens.RefreshToken)
-	accountID := strings.TrimSpace(auth.Tokens.AccountID)
-	return codexOAuthAuthStatus{
-		Valid: strings.EqualFold(strings.TrimSpace(auth.AuthMode), "chatgpt") &&
-			idToken != "" &&
-			accessToken != "" &&
-			refreshToken != "" &&
-			idToken != accessToken,
-		AccountID: accountID,
 	}
 }
 

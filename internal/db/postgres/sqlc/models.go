@@ -22,6 +22,10 @@ type Bot struct {
 	ReasoningEnabled       bool               `json:"reasoning_enabled"`
 	ReasoningEffort        string             `json:"reasoning_effort"`
 	ChatModelID            pgtype.UUID        `json:"chat_model_id"`
+	ChatRuntime            string             `json:"chat_runtime"`
+	ChatAcpAgentID         pgtype.Text        `json:"chat_acp_agent_id"`
+	ChatAcpProjectPath     string             `json:"chat_acp_project_path"`
+	ChatAcpProjectMode     string             `json:"chat_acp_project_mode"`
 	SearchProviderID       pgtype.UUID        `json:"search_provider_id"`
 	FetchProviderID        pgtype.UUID        `json:"fetch_provider_id"`
 	MemoryProviderID       pgtype.UUID        `json:"memory_provider_id"`
@@ -150,6 +154,8 @@ type BotHistoryMessage struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
 	ModelID                 pgtype.UUID        `json:"model_id"`
 	CompactID               pgtype.UUID        `json:"compact_id"`
 	EventID                 pgtype.UUID        `json:"event_id"`
@@ -226,6 +232,9 @@ type BotSession struct {
 	RouteID             pgtype.UUID        `json:"route_id"`
 	ChannelType         pgtype.Text        `json:"channel_type"`
 	Type                string             `json:"type"`
+	SessionMode         string             `json:"session_mode"`
+	RuntimeType         string             `json:"runtime_type"`
+	RuntimeMetadata     []byte             `json:"runtime_metadata"`
 	Title               string             `json:"title"`
 	Metadata            []byte             `json:"metadata"`
 	DefaultHeadTurnID   pgtype.UUID        `json:"default_head_turn_id"`
@@ -236,6 +245,15 @@ type BotSession struct {
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 	DeletedAt           pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type BotSessionDiscussCursor struct {
+	SessionID      pgtype.UUID        `json:"session_id"`
+	ScopeKey       string             `json:"scope_key"`
+	RouteID        pgtype.UUID        `json:"route_id"`
+	Source         string             `json:"source"`
+	ConsumedCursor int64              `json:"consumed_cursor"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 type BotSessionEvent struct {

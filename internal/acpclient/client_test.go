@@ -2584,14 +2584,25 @@ func TestPinSessionModeSkipsWhenNotNeeded(t *testing.T) {
 	if err := pinSessionMode(context.Background(), nil, acp.SessionId("s1"), modes, "", nil, "claude-code"); err != nil {
 		t.Fatalf("empty desired mode: %v", err)
 	}
-	if err := pinSessionMode(context.Background(), nil, acp.SessionId("s1"), nil, "default", nil, "claude-code"); err != nil {
-		t.Fatalf("nil modes: %v", err)
-	}
 	if err := pinSessionMode(context.Background(), nil, acp.SessionId("s1"), modes, "default", nil, "claude-code"); err != nil {
 		t.Fatalf("already in desired mode: %v", err)
 	}
-	if err := pinSessionMode(context.Background(), nil, acp.SessionId("s1"), modes, "nonexistent", nil, "claude-code"); err != nil {
-		t.Fatalf("unavailable mode should be skipped, got %v", err)
+}
+
+func TestPinSessionModeFailsWhenRequiredModeCannotBeVerified(t *testing.T) {
+	t.Parallel()
+
+	if err := pinSessionMode(context.Background(), nil, acp.SessionId("s1"), nil, "default", nil, "claude-code"); err == nil {
+		t.Fatal("nil modes returned nil error")
+	}
+	modes := &acp.SessionModeState{
+		CurrentModeId: acp.SessionModeId("acceptEdits"),
+		AvailableModes: []acp.SessionMode{
+			{Id: acp.SessionModeId("acceptEdits"), Name: "Accept Edits"},
+		},
+	}
+	if err := pinSessionMode(context.Background(), nil, acp.SessionId("s1"), modes, "default", nil, "claude-code"); err == nil {
+		t.Fatal("unavailable pinned mode returned nil error")
 	}
 }
 

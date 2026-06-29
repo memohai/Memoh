@@ -76,8 +76,8 @@ func RCToXML(rc RenderedContext) string {
 
 func renderMessage(msg *ICMessage, params RenderParams) RenderedSegment {
 	isMyself := params.BotUserID != "" && msg.Sender != nil && msg.Sender.ID == params.BotUserID
-	mentionsMe := params.BotUserID != "" && hasMention(msg.Content, params.BotUserID)
-	repliesToMe := params.BotUserID != "" && msg.ReplyToSender != nil && msg.ReplyToSender.ID == params.BotUserID
+	mentionsMe := msg.MentionsMe || (params.BotUserID != "" && hasMention(msg.Content, params.BotUserID))
+	repliesToMe := msg.RepliesToMe || (params.BotUserID != "" && msg.ReplyToSender != nil && msg.ReplyToSender.ID == params.BotUserID)
 
 	attrs := []string{}
 	attrs = append(attrs, fmt.Sprintf("id=%q", escapeXMLAttrValue(msg.MessageID)))

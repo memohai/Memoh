@@ -85,10 +85,25 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		defer close(chunkCh)
 		defer close(errCh)
 		streamReq := req
+		if streamReq.RawQuery == "" {
+			streamReq.RawQuery = strings.TrimSpace(streamReq.Query)
+		}
+		if ok, err := r.isACPAgentSession(ctx, streamReq); err != nil {
+			r.logger.Error("StreamChat: ACP session check failed",
+				slog.String("bot_id", streamReq.BotID),
+				slog.String("session_id", streamReq.SessionID),
+				slog.Any("error", err),
+			)
+			errCh <- err
+			return
+		} else if ok {
+			r.streamACPAgentChunks(ctx, streamReq, chunkCh, errCh)
+			return
+		}
+
 		doneTurn := r.enterSessionTurn(ctx, streamReq.BotID, streamReq.SessionID)
 		defer doneTurn()
 
-		var err error
 		run, err := r.prepareTurnRun(ctx, streamReq)
 		if err != nil {
 			r.logger.Error("agent stream prepare turn run failed",
@@ -98,9 +113,6 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 			)
 			errCh <- err
 			return
-		}
-		if streamReq.RawQuery == "" {
-			streamReq.RawQuery = strings.TrimSpace(streamReq.Query)
 		}
 		streamReq, err = r.applyUserMessageHook(ctx, streamReq)
 		if err != nil {

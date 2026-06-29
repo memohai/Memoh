@@ -51,6 +51,10 @@ type Bot struct {
 	CreatedAt              string         `json:"created_at"`
 	UpdatedAt              string         `json:"updated_at"`
 	VideoModelID           sql.NullString `json:"video_model_id"`
+	ChatRuntime            string         `json:"chat_runtime"`
+	ChatAcpAgentID         sql.NullString `json:"chat_acp_agent_id"`
+	ChatAcpProjectPath     string         `json:"chat_acp_project_path"`
+	ChatAcpProjectMode     string         `json:"chat_acp_project_mode"`
 }
 
 type BotAclRule struct {
@@ -151,6 +155,8 @@ type BotHistoryMessage struct {
 	Content                 string         `json:"content"`
 	Metadata                string         `json:"metadata"`
 	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
 	ModelID                 sql.NullString `json:"model_id"`
 	CompactID               sql.NullString `json:"compact_id"`
 	EventID                 sql.NullString `json:"event_id"`
@@ -237,6 +243,18 @@ type BotSession struct {
 	CreatedAt           string         `json:"created_at"`
 	UpdatedAt           string         `json:"updated_at"`
 	DeletedAt           sql.NullString `json:"deleted_at"`
+	SessionMode         string         `json:"session_mode"`
+	RuntimeType         string         `json:"runtime_type"`
+	RuntimeMetadata     string         `json:"runtime_metadata"`
+}
+
+type BotSessionDiscussCursor struct {
+	SessionID      string         `json:"session_id"`
+	ScopeKey       string         `json:"scope_key"`
+	RouteID        sql.NullString `json:"route_id"`
+	Source         string         `json:"source"`
+	ConsumedCursor int64          `json:"consumed_cursor"`
+	UpdatedAt      string         `json:"updated_at"`
 }
 
 type BotSessionEvent struct {

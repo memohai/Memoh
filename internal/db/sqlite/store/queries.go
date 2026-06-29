@@ -434,6 +434,18 @@ func (q *Queries) CountSessionEvents(ctx context.Context, sessionID pgtype.UUID)
 	return result, nil
 }
 
+func (q *Queries) DeleteSessionEventsByBot(ctx context.Context, botID pgtype.UUID) error {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return errSQLiteQueriesNotConfigured
+	}
+	var sqliteBotID string
+	if err := convertValue(botID, &sqliteBotID); err != nil {
+		return err
+	}
+	err := q.store.queries.DeleteSessionEventsByBot(ctx, sqliteBotID)
+	return mapQueryErr(err)
+}
+
 func (q *Queries) CountTokenUsageRecords(ctx context.Context, arg pgsqlc.CountTokenUsageRecordsParams) (int64, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return 0, errSQLiteQueriesNotConfigured
@@ -4589,6 +4601,25 @@ func (q *Queries) ListSearchProvidersByProvider(ctx context.Context, provider st
 	return result, nil
 }
 
+func (q *Queries) ListSessionEventsByBot(ctx context.Context, botID pgtype.UUID) ([]pgsqlc.BotSessionEvent, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteBotID string
+	if err := convertValue(botID, &sqliteBotID); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListSessionEventsByBot(ctx, sqliteBotID)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.BotSessionEvent
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (q *Queries) ListSessionEventsBySession(ctx context.Context, sessionID pgtype.UUID) ([]pgsqlc.BotSessionEvent, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured
@@ -6958,4 +6989,73 @@ func (q *Queries) DeleteMCPConnectionsByPlugin(ctx context.Context, arg pgsqlc.D
 		return err
 	}
 	return mapQueryErr(q.store.queries.DeleteMCPConnectionsByPlugin(ctx, sqliteArg))
+}
+
+func (q *Queries) GetSessionDiscussCursor(ctx context.Context, arg pgsqlc.GetSessionDiscussCursorParams) (pgsqlc.BotSessionDiscussCursor, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.BotSessionDiscussCursor{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.GetSessionDiscussCursorParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.BotSessionDiscussCursor{}, err
+	}
+	out, err := q.store.queries.GetSessionDiscussCursor(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.BotSessionDiscussCursor{}, mapQueryErr(err)
+	}
+	var result pgsqlc.BotSessionDiscussCursor
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.BotSessionDiscussCursor{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListSessionDiscussCursorsByBot(ctx context.Context, botID pgtype.UUID) ([]pgsqlc.BotSessionDiscussCursor, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteBotID string
+	if err := convertValue(botID, &sqliteBotID); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListSessionDiscussCursorsByBot(ctx, sqliteBotID)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.BotSessionDiscussCursor
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) DeleteSessionDiscussCursorsByBot(ctx context.Context, botID pgtype.UUID) error {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return errSQLiteQueriesNotConfigured
+	}
+	var sqliteBotID string
+	if err := convertValue(botID, &sqliteBotID); err != nil {
+		return err
+	}
+	err := q.store.queries.DeleteSessionDiscussCursorsByBot(ctx, sqliteBotID)
+	return mapQueryErr(err)
+}
+
+func (q *Queries) UpsertSessionDiscussCursor(ctx context.Context, arg pgsqlc.UpsertSessionDiscussCursorParams) (pgsqlc.BotSessionDiscussCursor, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.BotSessionDiscussCursor{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.UpsertSessionDiscussCursorParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.BotSessionDiscussCursor{}, err
+	}
+	out, err := q.store.queries.UpsertSessionDiscussCursor(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.BotSessionDiscussCursor{}, mapQueryErr(err)
+	}
+	var result pgsqlc.BotSessionDiscussCursor
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.BotSessionDiscussCursor{}, err
+	}
+	return result, nil
 }

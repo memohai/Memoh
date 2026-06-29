@@ -13,11 +13,21 @@
     @keydown.enter.prevent="handleSelect"
     @keydown.space.prevent="handleSelect"
   >
-    <!-- Session rows are text-only: the title carries the whole row. No leading
-         type glyph and no trailing timestamp — the list is a single
-         human-conversation stream (chat/discuss/agent) ordered by recency, so
-         per-row type icons and clock stamps only added noise. The title runs to
-         the trailing edge; the actions button overlays its tail on hover. -->
+    <!-- Native session rows stay text-only. ACP rows carry only the agent icon
+         because Recent now mixes local model chats with external-agent chats. -->
+    <span
+      v-if="isACPSession"
+      class="mr-2 flex size-4 shrink-0 items-center justify-center text-muted-foreground"
+      role="img"
+      :aria-label="acpAgentLabel"
+    >
+      <component
+        :is="acpAgentIcon(acpAgentId, true)"
+        class="size-4"
+        aria-hidden="true"
+      />
+    </span>
+
     <!-- Title runs are split CJK vs Latin so the title renders with the SAME
          per-script treatment as the chat body (.sidebar-cjk / .sidebar-latin reuse
          the --chat-*-body weight + Latin size/tracking). The only thing dropped vs
@@ -100,8 +110,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '@memohai/ui'
-import { acpAgentDisplayName, normalizeACPAgentID } from '@/utils/acp'
+import { acpAgentDisplayName, acpAgentIcon, normalizeACPAgentID } from '@/utils/acp'
 import { splitScriptRuns } from '@/utils/script-runs'
+import { normalizedRuntimeType } from '@/store/chat-list.utils'
 
 const props = defineProps<{
   session: SessionSummary
@@ -136,7 +147,11 @@ const isIMSession = computed(() => {
   return ct !== '' && !WEB_CHANNELS.has(ct)
 })
 
-const acpAgentId = computed(() => normalizeACPAgentID(props.session.metadata?.acp_agent_id))
+const acpAgentId = computed(() => normalizeACPAgentID(
+  props.session.runtime_metadata?.acp_agent_id ?? props.session.metadata?.acp_agent_id,
+))
+const isACPSession = computed(() => normalizedRuntimeType(props.session) === 'acp_agent')
+const acpAgentLabel = computed(() => acpAgentDisplayName(acpAgentId.value, t('chat.sessionTypeACPAgent')))
 
 function routeMeta(): Record<string, unknown> {
   return props.session.route_metadata ?? {}
@@ -154,8 +169,8 @@ const displayLabel = computed(() => {
 // for IM sessions, agent name for ACP sessions.
 const hoverTitle = computed(() => {
   const title = props.session.title || t('chat.untitledSession')
-  if (props.session.type === 'acp_agent') {
-    return `${title} — ${acpAgentDisplayName(acpAgentId.value, t('chat.sessionTypeACPAgent'))}`
+  if (isACPSession.value) {
+    return `${title} — ${acpAgentLabel.value}`
   }
   if (!isIMSession.value) return title
   const meta = routeMeta()

@@ -12,6 +12,7 @@ import type {
   UIUserInput,
 } from '@/composables/api/useChat'
 import { REASONING_EFFORT_DISABLE } from '@/pages/bots/components/reasoning-effort'
+import { useChatSelectionStore } from './chat-selection'
 import { useChatStore } from './chat-list'
 
 const api = vi.hoisted(() => ({
@@ -39,7 +40,24 @@ const toast = vi.hoisted(() => ({
   error: vi.fn(),
 }))
 
+const sdk = vi.hoisted(() => ({
+  getBotsByBotIdSettings: vi.fn(),
+}))
+
+vi.hoisted(() => {
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {},
+      clear: () => {},
+    },
+  })
+})
+
 vi.mock('@/composables/api/useChat', () => api)
+vi.mock('@memohai/sdk', () => ({ getBotsByBotIdSettings: sdk.getBotsByBotIdSettings }))
 vi.mock('vue-sonner', () => ({ toast }))
 vi.mock('@memohai/ui', async (importOriginal) => {
   const original = await importOriginal<typeof import('@memohai/ui')>()
@@ -244,6 +262,7 @@ describe('chat-list store', () => {
     })
     api.closeACPRuntime.mockResolvedValue(undefined)
     api.fetchMessagesUI.mockResolvedValue(messagesPayload())
+    sdk.getBotsByBotIdSettings.mockRejectedValue(new Error('settings unavailable'))
     api.streamSessionMessageEvents.mockImplementation((_botId: string, _sessionId: string, signal: AbortSignal, onEvent: (event: SessionMessageStreamEvent) => void) => new Promise<void>((resolve) => {
       _sessionMessageHandler = onEvent
       signal.addEventListener('abort', () => resolve(), { once: true })
@@ -400,6 +419,257 @@ describe('chat-list store', () => {
       error: 'model failed',
       restoreInput: 'hello',
     })
+  })
+
+  it('uses structured API feedback for startup send failures', async () => {
+    api.createSession.mockRejectedValueOnce({
+      body: {
+        i18n_key: 'chat.acp.agentNotConfigured',
+        message: 'raw backend message',
+      },
+    })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const result = await store.sendMessage('hello')
+
+    expect(result).toMatchObject({
+      ok: false,
+      stage: 'startup',
+      error: 'External agent setup is incomplete for this bot.',
+      restoreInput: 'hello',
+    })
+    expect(store.startupSendFailure).toMatchObject({
+      error: 'External agent setup is incomplete for this bot.',
+      restoreInput: 'hello',
+    })
+  })
+
+  it('handles /new codex in WebUI without sending it to the model', async () => {
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const result = await store.sendMessage('/new codex')
+
+    expect(result.ok).toBe(true)
+    expect(api.createSession).not.toHaveBeenCalled()
+    expect(sentWSMessages).toHaveLength(0)
+    expect(store.sessionId).toBeNull()
+    expect(store.pendingACPSessionMetadata).toEqual({
+      acp_agent_id: 'codex',
+      project_path: '/data',
+      acp_project_mode: 'project',
+    })
+  })
+
+  it('handles /new codex from an existing session as a fresh ACP composer', async () => {
+    sendEvents = [{ type: 'end' } as UIStreamEvent]
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Existing', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.createSession.mockResolvedValueOnce({
+      id: 'acp-session-1',
+      bot_id: 'bot-1',
+      title: '',
+      type: 'acp_agent',
+      runtime_type: 'acp_agent',
+      runtime_metadata: {
+        acp_agent_id: 'codex',
+        project_path: '/data',
+        acp_project_mode: 'project',
+      },
+    })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    store.messages.push({
+      id: 'existing-user',
+      role: 'user',
+      text: 'old message',
+      attachments: [],
+      timestamp: new Date().toISOString(),
+      streaming: false,
+      isSelf: true,
+    })
+
+    const commandResult = await store.sendMessage('/new codex')
+
+    expect(commandResult.ok).toBe(true)
+    expect(store.sessionId).toBeNull()
+    expect(store.messages).toHaveLength(0)
+    expect(store.pendingACPSessionMetadata?.acp_agent_id).toBe('codex')
+
+    const sendResult = await store.sendMessage('hello codex')
+
+    expect(sendResult.ok).toBe(true)
+    expect(api.createSession).toHaveBeenCalledWith('bot-1', expect.objectContaining({
+      type: 'chat',
+      sessionMode: 'chat',
+      runtimeType: 'acp_agent',
+      runtimeMetadata: expect.objectContaining({ acp_agent_id: 'codex' }),
+    }))
+    expect(sentWSMessages.at(-1)).toMatchObject({
+      session_id: 'acp-session-1',
+      text: 'hello codex',
+    })
+  })
+
+  it('handles /new chat codex in WebUI as a fresh ACP chat composer', async () => {
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const result = await store.sendMessage('/new chat codex')
+
+    expect(result.ok).toBe(true)
+    expect(sentWSMessages).toHaveLength(0)
+    expect(store.sessionId).toBeNull()
+    expect(store.pendingACPSessionMetadata?.acp_agent_id).toBe('codex')
+    expect(store.activeChatTarget).toMatchObject({
+      kind: 'draft-acp',
+      runtimeType: 'acp_agent',
+      isACP: true,
+      isPendingACP: true,
+      metadata: expect.objectContaining({ acp_agent_id: 'codex' }),
+    })
+  })
+
+  it('keeps draft activation eligible for default ACP without clearing staged ACP', async () => {
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    store.stageDefaultACPSession({ agentId: 'codex', projectPath: '/data', projectMode: 'project' })
+    store.selectDraft({ explicitSelection: false })
+
+    expect(store.sessionId).toBeNull()
+    expect(store.pendingACPSessionMetadata?.acp_agent_id).toBe('codex')
+    expect(store.hasExplicitSessionSelection).toBe(false)
+    expect(store.activeChatTarget).toMatchObject({
+      kind: 'draft-acp',
+      explicitSelection: false,
+      runtimeType: 'acp_agent',
+    })
+  })
+
+  it('restages the bot default ACP when opening a non-explicit draft after an ACP session', async () => {
+    sdk.getBotsByBotIdSettings.mockResolvedValue({
+      data: {
+        chat_runtime: 'acp_agent',
+        chat_acp_agent_id: 'codex',
+        chat_acp_project_path: '/data',
+        chat_acp_project_mode: 'project',
+      },
+    })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await store.createACPSession({ agentId: 'codex' })
+
+    expect(store.sessionId).toBe('session-1')
+    expect(store.pendingACPSessionMetadata).toBeNull()
+    expect(store.hasExplicitSessionSelection).toBe(true)
+    sdk.getBotsByBotIdSettings.mockClear()
+
+    store.selectDraft({ explicitSelection: false })
+
+    expect(store.sessionId).toBeNull()
+    expect(store.pendingACPSessionMetadata).toEqual({
+      acp_agent_id: 'codex',
+      project_path: '/data',
+      acp_project_mode: 'project',
+    })
+    expect(store.hasExplicitSessionSelection).toBe(false)
+    expect(sdk.getBotsByBotIdSettings).not.toHaveBeenCalled()
+    expect(store.activeChatTarget).toMatchObject({
+      kind: 'draft-acp',
+      explicitSelection: false,
+      metadata: expect.objectContaining({ acp_agent_id: 'codex' }),
+    })
+  })
+
+  it('keeps an explicit draft as Memoh even when the bot default runtime is ACP', async () => {
+    sdk.getBotsByBotIdSettings.mockResolvedValue({
+      data: {
+        chat_runtime: 'acp_agent',
+        chat_acp_agent_id: 'codex',
+      },
+    })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await store.createACPSession({ agentId: 'codex' })
+    sdk.getBotsByBotIdSettings.mockClear()
+
+    store.selectDraft({ explicitSelection: true })
+    await flushPromises()
+
+    expect(sdk.getBotsByBotIdSettings).not.toHaveBeenCalled()
+    expect(store.sessionId).toBeNull()
+    expect(store.pendingACPSessionMetadata).toBeNull()
+    expect(store.hasExplicitSessionSelection).toBe(true)
+    expect(store.activeChatTarget).toMatchObject({
+      kind: 'draft-native',
+      explicitSelection: true,
+      runtimeType: 'model',
+      isACP: false,
+    })
+  })
+
+  it('treats bare /new as an explicit empty composer override', async () => {
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    store.stageDefaultACPSession({ agentId: 'codex', projectPath: '/data', projectMode: 'project' })
+    const result = await store.sendMessage('/new')
+
+    expect(result.ok).toBe(true)
+    expect(store.sessionId).toBeNull()
+    expect(store.pendingACPSessionMetadata).toBeNull()
+    expect(store.hasExplicitSessionSelection).toBe(true)
+  })
+
+  it('uses matching default ACP project settings for /new codex', async () => {
+    sdk.getBotsByBotIdSettings.mockResolvedValue({
+      data: {
+        chat_runtime: 'acp_agent',
+        chat_acp_agent_id: 'codex',
+        chat_acp_project_path: '/data/custom',
+        chat_acp_project_mode: 'project',
+      },
+    })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const result = await store.sendMessage('/new codex')
+
+    expect(result.ok).toBe(true)
+    expect(store.pendingACPSessionMetadata).toMatchObject({
+      acp_agent_id: 'codex',
+      project_path: '/data/custom',
+      acp_project_mode: 'project',
+    })
+  })
+
+  it('handles /new discuss codex in WebUI as a fresh ACP discuss composer', async () => {
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const result = await store.sendMessage('/new discuss codex')
+
+    expect(result.ok).toBe(true)
+    expect(sentWSMessages).toHaveLength(0)
+    expect(store.sessionId).toBeNull()
+    expect(store.pendingACPSessionMetadata?.acp_agent_id).toBe('codex')
+
+    sendEvents = [{ type: 'end' } as UIStreamEvent]
+    const sendResult = await store.sendMessage('start discuss')
+
+    expect(sendResult.ok).toBe(true)
+    expect(api.createSession).toHaveBeenCalledWith('bot-1', expect.objectContaining({
+      type: 'discuss',
+      sessionMode: 'discuss',
+      runtimeType: 'acp_agent',
+    }))
   })
 
   it('merges ACP approval tool messages into the existing tool block by call id', async () => {
@@ -791,7 +1061,15 @@ describe('chat-list store', () => {
 
     expect(api.createSession).toHaveBeenLastCalledWith('bot-1', expect.objectContaining({
       title: '',
-      type: 'acp_agent',
+      type: 'chat',
+      sessionMode: 'chat',
+      runtimeType: 'acp_agent',
+      metadata: {},
+      runtimeMetadata: {
+        acp_agent_id: 'codex',
+        project_path: '/data/app',
+        acp_project_mode: 'project',
+      },
     }))
   })
 
@@ -815,8 +1093,11 @@ describe('chat-list store', () => {
     })
 
     expect(api.createSession).toHaveBeenLastCalledWith('bot-1', expect.objectContaining({
-      type: 'acp_agent',
-      metadata: {
+      type: 'chat',
+      sessionMode: 'chat',
+      runtimeType: 'acp_agent',
+      metadata: {},
+      runtimeMetadata: {
         acp_agent_id: 'codex',
         project_path: '/data',
         acp_project_mode: 'project',
@@ -855,8 +1136,11 @@ describe('chat-list store', () => {
     expect(result.ok).toBe(true)
     expect(api.createSession).toHaveBeenCalledTimes(1)
     expect(api.createSession).toHaveBeenCalledWith('bot-1', expect.objectContaining({
-      type: 'acp_agent',
-      metadata: {
+      type: 'chat',
+      sessionMode: 'chat',
+      runtimeType: 'acp_agent',
+      metadata: {},
+      runtimeMetadata: {
         acp_agent_id: 'codex',
         project_path: '/data',
         acp_project_mode: 'project',
@@ -868,6 +1152,287 @@ describe('chat-list store', () => {
       session_id: 'acp-session-1',
       text: 'hello codex',
     })
+  })
+
+  it('keeps a pending default ACP stage across session list initialization refreshes', async () => {
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    store.stageDefaultACPSession({ agentId: 'codex', projectPath: '/data', projectMode: 'project' })
+
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{
+        id: 'history-session-1',
+        bot_id: 'bot-1',
+        title: 'History',
+        type: 'chat',
+      }],
+      nextCursor: null,
+    })
+
+    await store.initialize()
+
+    expect(store.sessionId).toBeNull()
+    expect(store.pendingACPSessionMetadata).toEqual({
+      acp_agent_id: 'codex',
+      project_path: '/data',
+      acp_project_mode: 'project',
+    })
+    expect(store.hasExplicitSessionSelection).toBe(false)
+    expect(api.createACPRuntime).not.toHaveBeenCalled()
+  })
+
+  it('allows default ACP staging to override a restored historical session selection', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{
+        id: 'history-session-1',
+        bot_id: 'bot-1',
+        title: 'History',
+        type: 'chat',
+      }],
+      nextCursor: null,
+    })
+    const selection = useChatSelectionStore()
+    selection.setBot('bot-1')
+    selection.setSession('history-session-1')
+    const store = useChatStore()
+
+    await store.initialize()
+
+    expect(store.sessionId).toBe('history-session-1')
+    expect(store.hasExplicitSessionSelection).toBe(false)
+
+    store.stageDefaultACPSession({ agentId: 'codex', projectPath: '/data', projectMode: 'project' })
+
+    expect(store.sessionId).toBeNull()
+    expect(store.pendingACPSessionMetadata).toEqual({
+      acp_agent_id: 'codex',
+      project_path: '/data',
+      acp_project_mode: 'project',
+    })
+    expect(store.hasExplicitSessionSelection).toBe(false)
+  })
+
+  it('does not restore an auto-picked historical session when default chat runtime is ACP', async () => {
+    api.fetchSessions.mockResolvedValue({
+      items: [{
+        id: 'history-session-1',
+        bot_id: 'bot-1',
+        title: 'History',
+        type: 'chat',
+      }],
+      nextCursor: null,
+    })
+    sdk.getBotsByBotIdSettings.mockResolvedValue({
+      data: {
+        chat_runtime: 'acp_agent',
+        chat_acp_agent_id: 'codex',
+      },
+    })
+    const selection = useChatSelectionStore()
+    selection.setBot('bot-1')
+    selection.setSession('history-session-1')
+    const store = useChatStore()
+
+    await store.initialize()
+    await flushPromises()
+
+    expect(sdk.getBotsByBotIdSettings).toHaveBeenCalled()
+    expect(store.sessionId).toBeNull()
+    expect(store.hasExplicitSessionSelection).toBe(false)
+    expect(store.messages).toEqual([])
+    expect(api.fetchMessagesUI).not.toHaveBeenCalled()
+  })
+
+  it('restores an explicitly selected historical session when default chat runtime is ACP', async () => {
+    api.fetchSessions.mockResolvedValue({
+      items: [{
+        id: 'history-session-1',
+        bot_id: 'bot-1',
+        title: 'History',
+        type: 'chat',
+      }],
+      nextCursor: null,
+    })
+    sdk.getBotsByBotIdSettings.mockResolvedValue({
+      data: {
+        chat_runtime: 'acp_agent',
+        chat_acp_agent_id: 'codex',
+      },
+    })
+    const selection = useChatSelectionStore()
+    selection.setBot('bot-1')
+    selection.setSession('history-session-1', { explicitSelection: true })
+    const store = useChatStore()
+
+    await store.initialize()
+
+    expect(sdk.getBotsByBotIdSettings).toHaveBeenCalled()
+    expect(store.sessionId).toBe('history-session-1')
+    expect(store.hasExplicitSessionSelection).toBe(true)
+    expect(store.pendingACPSessionMetadata).toBeNull()
+  })
+
+  it('hydrates an explicitly restored ACP session that is outside the first session page', async () => {
+    api.fetchSessions.mockImplementation(async () => ({
+      items: [{
+        id: 'visible-session-1',
+        bot_id: 'bot-1',
+        title: 'Visible',
+        type: 'chat',
+        session_mode: 'chat',
+        runtime_type: 'model',
+      }],
+      nextCursor: 'next-page',
+    }))
+    api.fetchSession.mockResolvedValueOnce({
+      id: 'acp-session-hidden',
+      bot_id: 'bot-1',
+      title: 'Codex',
+      type: 'chat',
+      session_mode: 'chat',
+      runtime_type: 'acp_agent',
+      runtime_metadata: {
+        acp_agent_id: 'codex',
+        project_path: '/data',
+        acp_project_mode: 'project',
+      },
+    })
+    sdk.getBotsByBotIdSettings.mockResolvedValue({
+      data: {
+        chat_runtime: 'acp_agent',
+        chat_acp_agent_id: 'codex',
+      },
+    })
+    const selection = useChatSelectionStore()
+    selection.setBot('bot-1')
+    selection.setSession('acp-session-hidden', { explicitSelection: true })
+    const store = useChatStore()
+
+    await store.initialize()
+    await flushPromises()
+
+    expect(store.sessionId).toBe('acp-session-hidden')
+    expect(api.fetchSession).toHaveBeenCalledWith('bot-1', 'acp-session-hidden')
+    expect(store.hasExplicitSessionSelection).toBe(true)
+    expect(store.activeSession).toMatchObject({
+      id: 'acp-session-hidden',
+      runtime_type: 'acp_agent',
+      runtime_metadata: expect.objectContaining({ acp_agent_id: 'codex' }),
+    })
+    expect(store.activeChatTarget).toMatchObject({
+      kind: 'session',
+      sessionId: 'acp-session-hidden',
+      runtimeType: 'acp_agent',
+      isACP: true,
+      metadata: expect.objectContaining({ acp_agent_id: 'codex' }),
+    })
+    expect(store.pendingACPSessionMetadata).toBeNull()
+  })
+
+  it('updates an early-read active target when a restored ACP session arrives in the first page', async () => {
+    const sessionsResponse = {
+      items: [{
+        id: 'acp-session-visible',
+        bot_id: 'bot-1',
+        title: 'Codex visible',
+        type: 'chat',
+        session_mode: 'chat',
+        runtime_type: 'acp_agent',
+        runtime_metadata: {
+          acp_agent_id: 'codex',
+          project_path: '/data',
+          acp_project_mode: 'project',
+        },
+      }],
+      nextCursor: null,
+    }
+    let resolveSessions!: (value: typeof sessionsResponse) => void
+    api.fetchSessions.mockImplementation(() => new Promise(resolve => {
+      resolveSessions = resolve
+    }))
+    const selection = useChatSelectionStore()
+    selection.setBot('bot-1')
+    selection.setSession('acp-session-visible', { explicitSelection: true })
+    const store = useChatStore()
+
+    expect(store.activeChatTarget).toMatchObject({
+      kind: 'session',
+      sessionId: 'acp-session-visible',
+      runtimeType: 'unknown',
+      isACP: false,
+    })
+
+    await flushPromises()
+    resolveSessions(sessionsResponse)
+    await flushPromises()
+    await flushPromises()
+
+    expect(store.activeSession).toMatchObject({
+      id: 'acp-session-visible',
+      runtime_type: 'acp_agent',
+    })
+    expect(store.activeChatTarget).toMatchObject({
+      kind: 'session',
+      sessionId: 'acp-session-visible',
+      runtimeType: 'acp_agent',
+      isACP: true,
+      metadata: expect.objectContaining({ acp_agent_id: 'codex' }),
+    })
+  })
+
+  it('keeps an explicit empty Memoh composer across session list initialization refreshes', async () => {
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    store.stageDefaultACPSession({ agentId: 'codex', projectPath: '/data', projectMode: 'project' })
+    store.resetToEmptyComposer({ explicitSelection: true })
+
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{
+        id: 'history-session-1',
+        bot_id: 'bot-1',
+        title: 'History',
+        type: 'chat',
+      }],
+      nextCursor: null,
+    })
+
+    await store.initialize()
+
+    expect(store.sessionId).toBeNull()
+    expect(store.pendingACPSessionMetadata).toBeNull()
+    expect(store.hasExplicitSessionSelection).toBe(true)
+    expect(api.createACPRuntime).not.toHaveBeenCalled()
+  })
+
+  it('keeps a manually staged ACP agent explicit so the default stage cannot reclaim it', async () => {
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    store.stageDefaultACPSession({ agentId: 'codex', projectPath: '/data', projectMode: 'project' })
+    store.stageACPSession({ agentId: 'claude-code', projectPath: '/data/other', projectMode: 'project' })
+
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{
+        id: 'history-session-1',
+        bot_id: 'bot-1',
+        title: 'History',
+        type: 'chat',
+      }],
+      nextCursor: null,
+    })
+
+    await store.initialize()
+
+    expect(store.sessionId).toBeNull()
+    expect(store.pendingACPSessionMetadata).toEqual({
+      acp_agent_id: 'claude-code',
+      project_path: '/data/other',
+      acp_project_mode: 'project',
+    })
+    expect(store.hasExplicitSessionSelection).toBe(true)
+    expect(api.createACPRuntime).not.toHaveBeenCalled()
   })
 
   it('creates a warm runtime for the staged agent and binds it on first send', async () => {
@@ -915,7 +1480,9 @@ describe('chat-list store', () => {
     expect(result.ok).toBe(true)
     expect(api.createSession).toHaveBeenCalledTimes(1)
     expect(api.createSession).toHaveBeenLastCalledWith('bot-1', expect.objectContaining({
-      type: 'acp_agent',
+      type: 'chat',
+      sessionMode: 'chat',
+      runtimeType: 'acp_agent',
       acpRuntimeId: 'rt_warm',
     }))
     expect(api.setACPRuntimeModel).not.toHaveBeenCalled()
@@ -3266,6 +3833,38 @@ describe('chat-list store', () => {
     })
   })
 
+  it('hydrates a missing summary even when selecting the already-persisted session id', async () => {
+    api.fetchSession.mockResolvedValueOnce({
+      id: 'acp-session-hidden',
+      bot_id: 'bot-1',
+      title: 'Codex',
+      type: 'chat',
+      session_mode: 'chat',
+      runtime_type: 'acp_agent',
+      runtime_metadata: {
+        acp_agent_id: 'codex',
+        project_path: '/data',
+        acp_project_mode: 'project',
+      },
+    })
+    api.fetchMessagesUI.mockResolvedValue([])
+    const selection = useChatSelectionStore()
+    selection.setBot('bot-1')
+    selection.setSession('acp-session-hidden', { explicitSelection: true })
+
+    const store = useChatStore()
+    await store.selectSession('acp-session-hidden')
+
+    expect(api.fetchSession).toHaveBeenCalledWith('bot-1', 'acp-session-hidden')
+    expect(store.sessionId).toBe('acp-session-hidden')
+    expect(store.hasExplicitSessionSelection).toBe(true)
+    expect(store.activeSession).toMatchObject({
+      id: 'acp-session-hidden',
+      runtime_type: 'acp_agent',
+      runtime_metadata: expect.objectContaining({ acp_agent_id: 'codex' }),
+    })
+  })
+
   it('switches to hidden sessions before their summary hydration resolves', async () => {
     api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-visible', bot_id: 'bot-1', title: 'Visible', type: 'chat' },
@@ -3879,6 +4478,49 @@ describe('chat-list store', () => {
     })
     expect(store.sessions.map(session => session.id)).toEqual(['session-1'])
     expect(store.sessionId).toBe('session-1')
+  })
+
+  it('does not fall back to a hidden schedule session after deleting the active recent session', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'schedule-1', bot_id: 'bot-1', title: 'Morning run', type: 'schedule' },
+        { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    expect(store.sessionId).toBe('session-1')
+
+    api.deleteSession.mockResolvedValueOnce(undefined)
+    await store.removeSession('session-1')
+
+    expect(store.sessions.map(session => session.id)).toEqual(['schedule-1'])
+    expect(store.sessionId).toBeNull()
+    expect(store.messages).toEqual([])
+  })
+
+  it('falls back within the schedule sidebar mode when deleting an active schedule session', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'schedule-1', bot_id: 'bot-1', title: 'Morning run', type: 'schedule' },
+        { id: 'schedule-2', bot_id: 'bot-1', title: 'Evening run', type: 'schedule' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    expect(store.sessionId).toBe('schedule-1')
+
+    api.deleteSession.mockResolvedValueOnce(undefined)
+    await store.removeSession('schedule-1', { fallbackMode: 'schedule' })
+
+    expect(store.sessions.map(session => session.id)).toEqual(['schedule-2'])
+    expect(store.sessionId).toBe('schedule-2')
   })
 
   it('does not mutate the active bot state when a delete resolves after switching bots', async () => {

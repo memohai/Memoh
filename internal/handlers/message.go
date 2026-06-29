@@ -470,7 +470,7 @@ func (h *MessageHandler) toolApprovalCanApproveFn(ctx context.Context, sessionID
 		return defaultFn
 	}
 	sess, err := h.sessionService.Get(ctx, sessionID)
-	if err != nil || sess.Type != session.TypeACPAgent {
+	if err != nil || !session.IsACPRuntime(sess) {
 		return defaultFn
 	}
 	return h.toolApproval.CanRespond

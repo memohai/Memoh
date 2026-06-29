@@ -286,7 +286,7 @@ func TestFormatStartWelcomeMessage(t *testing.T) {
 }
 
 func TestFormatNewSessionMessage(t *testing.T) {
-	got := formatNewSessionMessage(i18n.New("en"), "newSession.modeChat", command.CurrentContext{
+	got := formatNewSessionMessage(i18n.New("en"), "chat", command.CurrentContext{
 		ChatModel: "Claude Opus 4.7 (Anthropic)", HeartbeatModel: "DeepSeek V4 (DeepSeek)",
 		ReasoningEnabled: true, ReasoningEffort: "medium", ContextWindow: "128.0K",
 	})
@@ -319,7 +319,7 @@ func TestFormatNewSessionMessage(t *testing.T) {
 
 	// Reasoning off is still shown (it sets expectations on a fresh start); no
 	// heartbeat and no known context window are omitted.
-	off := formatNewSessionMessage(i18n.New("en"), "newSession.modeDiscussion", command.CurrentContext{ChatModel: "(none)", HeartbeatModel: "(none)", ReasoningEnabled: false})
+	off := formatNewSessionMessage(i18n.New("en"), "discussion", command.CurrentContext{ChatModel: "(none)", HeartbeatModel: "(none)", ReasoningEnabled: false})
 	if !strings.Contains(off, "Reasoning: off") {
 		t.Errorf("reasoning state should be confirmed on the fresh-start card: %s", off)
 	}

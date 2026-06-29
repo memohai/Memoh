@@ -39,6 +39,45 @@ func TestSupportsTurnVariantsOnlyForChat(t *testing.T) {
 	}
 }
 
+func TestResolveDescriptorRejectsConflictingACPRuntime(t *testing.T) {
+	// type=acp_agent unambiguously means an ACP runtime, so an explicit non-ACP
+	// runtime_type is contradictory and must error rather than silently
+	// downgrade to a plain model chat session.
+	if _, _, _, err := ResolveDescriptor(TypeACPAgent, "", RuntimeModel); err == nil {
+		t.Fatal("ResolveDescriptor(acp_agent, model) = nil error, want a conflict error")
+	} else if !strings.Contains(err.Error(), "conflicts with runtime_type") {
+		t.Fatalf("error = %v, want a 'conflicts with runtime_type' message", err)
+	}
+	if _, _, _, err := ResolveDescriptor(TypeSchedule, "", RuntimeACPAgent); err == nil {
+		t.Fatal("ResolveDescriptor(schedule, acp_agent) = nil error, want an unsupported combination error")
+	} else if !strings.Contains(err.Error(), "only supported") {
+		t.Fatalf("error = %v, want an 'only supported' message", err)
+	}
+
+	// Legitimate combinations must still resolve cleanly.
+	cases := []struct {
+		name                            string
+		legacyType, mode, runtime       string
+		wantType, wantMode, wantRuntime string
+	}{
+		{"acp_agent alone -> chat ACP", TypeACPAgent, "", "", TypeACPAgent, TypeChat, RuntimeACPAgent},
+		{"concordant acp_agent+acp_agent", TypeACPAgent, "", RuntimeACPAgent, TypeACPAgent, TypeChat, RuntimeACPAgent},
+		{"chat + acp_agent -> chat ACP", TypeChat, "", RuntimeACPAgent, TypeACPAgent, TypeChat, RuntimeACPAgent},
+		{"discuss + acp_agent -> discuss ACP", TypeDiscuss, "", RuntimeACPAgent, TypeDiscuss, TypeDiscuss, RuntimeACPAgent},
+		{"plain chat", TypeChat, "", "", TypeChat, TypeChat, RuntimeModel},
+	}
+	for _, c := range cases {
+		gotType, gotMode, gotRuntime, err := ResolveDescriptor(c.legacyType, c.mode, c.runtime)
+		if err != nil {
+			t.Fatalf("%s: ResolveDescriptor(%q,%q,%q) error = %v", c.name, c.legacyType, c.mode, c.runtime, err)
+		}
+		if gotType != c.wantType || gotMode != c.wantMode || gotRuntime != c.wantRuntime {
+			t.Fatalf("%s: ResolveDescriptor(%q,%q,%q) = (%q,%q,%q), want (%q,%q,%q)",
+				c.name, c.legacyType, c.mode, c.runtime, gotType, gotMode, gotRuntime, c.wantType, c.wantMode, c.wantRuntime)
+		}
+	}
+}
+
 func TestValidateACPMetadata(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -47,7 +86,7 @@ func TestValidateACPMetadata(t *testing.T) {
 	}{
 		{
 			name: "valid acp_agent_id",
-			meta: map[string]any{"acp_agent_id": "codex", "project_path": "/data"},
+			meta: map[string]any{"acp_agent_id": "codex", "project_path": "/data", "runtime_owner_account_id": "owner-1"},
 		},
 		{
 			name:    "missing agent",
@@ -56,8 +95,13 @@ func TestValidateACPMetadata(t *testing.T) {
 		},
 		{
 			name:    "missing project path",
-			meta:    map[string]any{"acp_agent_id": "codex"},
+			meta:    map[string]any{"acp_agent_id": "codex", "runtime_owner_account_id": "owner-1"},
 			wantErr: "project_path is required",
+		},
+		{
+			name:    "missing runtime owner",
+			meta:    map[string]any{"acp_agent_id": "codex", "project_path": "/data"},
+			wantErr: "runtime_owner_account_id is required",
 		},
 	}
 
@@ -84,7 +128,7 @@ func TestValidateACPCreatePolicy(t *testing.T) {
 		Metadata: mustSessionJSON(map[string]any{
 			acpprofile.MetadataKeyACP: map[string]any{
 				"agents": map[string]any{
-					acpprofile.AgentCodexID: map[string]any{"enabled": true},
+					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
 				},
 			},
 		}),
@@ -109,6 +153,21 @@ func TestValidateACPCreatePolicy(t *testing.T) {
 			name: "enabled",
 			bot:  enabledBot,
 			meta: map[string]any{"acp_agent_id": "codex", "project_path": "/data"},
+		},
+		{
+			name: "enabled but missing managed configuration",
+			bot: sqlc.GetBotByIDRow{
+				ID: botID,
+				Metadata: mustSessionJSON(map[string]any{
+					acpprofile.MetadataKeyACP: map[string]any{
+						"agents": map[string]any{
+							acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "api_key"},
+						},
+					},
+				}),
+			},
+			meta:    map[string]any{"acp_agent_id": "codex", "project_path": "/data"},
+			wantErr: "is not configured",
 		},
 		{
 			name:    "unknown agent",
@@ -153,7 +212,7 @@ func TestCreateACPAgentSessionRunsValidationAndPersistsType(t *testing.T) {
 			Metadata: mustSessionJSON(map[string]any{
 				acpprofile.MetadataKeyACP: map[string]any{
 					"agents": map[string]any{
-						acpprofile.AgentCodexID: map[string]any{"enabled": true},
+						acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
 					},
 				},
 			}),
@@ -162,12 +221,14 @@ func TestCreateACPAgentSessionRunsValidationAndPersistsType(t *testing.T) {
 	svc := NewService(nil, queries, nil)
 
 	created, err := svc.Create(context.Background(), CreateInput{
-		BotID: botID,
-		Type:  TypeACPAgent,
-		Title: "Codex",
+		BotID:           botID,
+		Type:            TypeACPAgent,
+		Title:           "Codex",
+		CreatedByUserID: "00000000-0000-0000-0000-000000000003",
 		Metadata: map[string]any{
-			"acp_agent_id": acpprofile.AgentCodexID,
-			"project_path": "/data/app",
+			"acp_agent_id":             acpprofile.AgentCodexID,
+			"project_path":             "/data/app",
+			"runtime_owner_account_id": "00000000-0000-0000-0000-000000000099",
 		},
 	})
 	if err != nil {
@@ -179,8 +240,20 @@ func TestCreateACPAgentSessionRunsValidationAndPersistsType(t *testing.T) {
 	if created.Type != TypeACPAgent {
 		t.Fatalf("created type = %q, want %q", created.Type, TypeACPAgent)
 	}
+	if queries.createParams.SessionMode != TypeChat || queries.createParams.RuntimeType != RuntimeACPAgent {
+		t.Fatalf("CreateSession descriptor = %q/%q, want chat/acp_agent", queries.createParams.SessionMode, queries.createParams.RuntimeType)
+	}
+	if created.SessionMode != TypeChat || created.RuntimeType != RuntimeACPAgent {
+		t.Fatalf("created descriptor = %q/%q, want chat/acp_agent", created.SessionMode, created.RuntimeType)
+	}
 	if got := created.Metadata["acp_agent_id"]; got != acpprofile.AgentCodexID {
 		t.Fatalf("created metadata acp_agent_id = %#v", got)
+	}
+	if got := created.RuntimeMetadata["acp_agent_id"]; got != acpprofile.AgentCodexID {
+		t.Fatalf("created runtime metadata acp_agent_id = %#v", got)
+	}
+	if got := created.RuntimeMetadata["runtime_owner_account_id"]; got != "00000000-0000-0000-0000-000000000003" {
+		t.Fatalf("created runtime owner = %#v, want server owner", got)
 	}
 }
 
@@ -193,7 +266,7 @@ func TestCreateACPAgentSessionDefaultsProjectPath(t *testing.T) {
 			Metadata: mustSessionJSON(map[string]any{
 				acpprofile.MetadataKeyACP: map[string]any{
 					"agents": map[string]any{
-						acpprofile.AgentCodexID: map[string]any{"enabled": true},
+						acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
 					},
 				},
 			}),
@@ -202,9 +275,10 @@ func TestCreateACPAgentSessionDefaultsProjectPath(t *testing.T) {
 	svc := NewService(nil, queries, nil)
 
 	created, err := svc.Create(context.Background(), CreateInput{
-		BotID: botID,
-		Type:  TypeACPAgent,
-		Title: "Codex",
+		BotID:           botID,
+		Type:            TypeACPAgent,
+		Title:           "Codex",
+		CreatedByUserID: "00000000-0000-0000-0000-000000000003",
 		Metadata: map[string]any{
 			"acp_agent_id": acpprofile.AgentCodexID,
 		},
@@ -260,7 +334,7 @@ func TestUpdateTypeAndMetadataACPAgentRunsPolicy(t *testing.T) {
 			Metadata: mustSessionJSON(map[string]any{
 				acpprofile.MetadataKeyACP: map[string]any{
 					"agents": map[string]any{
-						acpprofile.AgentCodexID: map[string]any{"enabled": true},
+						acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
 					},
 				},
 			}),
@@ -273,10 +347,11 @@ func TestUpdateTypeAndMetadataACPAgentRunsPolicy(t *testing.T) {
 	}
 	svc := NewService(nil, queries, nil)
 
-	updated, err := svc.UpdateTypeAndMetadata(context.Background(), sessionID, TypeACPAgent, map[string]any{
-		"acp_agent_id": acpprofile.AgentCodexID,
-		"project_path": "/data/app",
-	})
+	updated, err := svc.UpdateTypeAndMetadataWithOwner(context.Background(), sessionID, TypeACPAgent, map[string]any{
+		"acp_agent_id":             acpprofile.AgentCodexID,
+		"project_path":             "/data/app",
+		"runtime_owner_account_id": "00000000-0000-0000-0000-000000000099",
+	}, "00000000-0000-0000-0000-000000000003")
 	if err != nil {
 		t.Fatalf("UpdateTypeAndMetadata(acp_agent) error = %v", err)
 	}
@@ -285,6 +360,30 @@ func TestUpdateTypeAndMetadataACPAgentRunsPolicy(t *testing.T) {
 	}
 	if updated.Type != TypeACPAgent {
 		t.Fatalf("updated type = %q, want %q", updated.Type, TypeACPAgent)
+	}
+	if queries.updateParams.SessionMode != TypeChat || queries.updateParams.RuntimeType != RuntimeACPAgent {
+		t.Fatalf("UpdateSessionTypeAndMetadata descriptor = %q/%q, want chat/acp_agent", queries.updateParams.SessionMode, queries.updateParams.RuntimeType)
+	}
+	if updated.SessionMode != TypeChat || updated.RuntimeType != RuntimeACPAgent {
+		t.Fatalf("updated descriptor = %q/%q, want chat/acp_agent", updated.SessionMode, updated.RuntimeType)
+	}
+	if updated.RuntimeMetadata["runtime_owner_account_id"] != "00000000-0000-0000-0000-000000000003" {
+		t.Fatalf("updated runtime owner = %#v, want server owner", updated.RuntimeMetadata["runtime_owner_account_id"])
+	}
+}
+
+func TestNormalizeDescriptorAllowsDiscussACP(t *testing.T) {
+	t.Parallel()
+
+	desc, err := normalizeDescriptor(TypeDiscuss, TypeDiscuss, RuntimeACPAgent, map[string]any{
+		"acp_agent_id": acpprofile.AgentCodexID,
+		"project_path": "/data/group",
+	}, nil)
+	if err != nil {
+		t.Fatalf("normalizeDescriptor(discuss/acp) error = %v", err)
+	}
+	if desc.LegacyType != TypeDiscuss || desc.SessionMode != TypeDiscuss || desc.RuntimeType != RuntimeACPAgent {
+		t.Fatalf("descriptor = %#v, want legacy discuss, mode discuss, runtime acp_agent", desc)
 	}
 }
 
@@ -359,9 +458,13 @@ func (q *createACPQueries) CreateSession(_ context.Context, params sqlc.CreateSe
 		RouteID:         params.RouteID,
 		ChannelType:     params.ChannelType,
 		Type:            params.Type,
+		SessionMode:     params.SessionMode,
+		RuntimeType:     params.RuntimeType,
+		RuntimeMetadata: params.RuntimeMetadata,
 		Title:           params.Title,
 		Metadata:        params.Metadata,
 		ParentSessionID: params.ParentSessionID,
+		CreatedByUserID: params.CreatedByUserID,
 	}, nil
 }
 
@@ -389,6 +492,9 @@ func (q *updateACPQueries) UpdateSessionTypeAndMetadata(_ context.Context, param
 	q.updateParams = params
 	updated := q.session
 	updated.Type = params.Type
+	updated.SessionMode = params.SessionMode
+	updated.RuntimeType = params.RuntimeType
+	updated.RuntimeMetadata = params.RuntimeMetadata
 	updated.Metadata = params.Metadata
 	return updated, nil
 }

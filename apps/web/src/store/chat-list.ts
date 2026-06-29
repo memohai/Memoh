@@ -9,7 +9,7 @@ import { useUserStore } from '@/store/user'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { provisionalSessionTitle, shouldRefreshFromMessageCreated, upsertById } from './chat-list.utils'
+import { isSessionVisibleInSidebarMode, normalizedRuntimeType, provisionalSessionTitle, shouldRefreshFromMessageCreated, sortByRecency, upsertById, type SidebarSessionMode } from './chat-list.utils'
 import {
   createSession,
   deleteSession as requestDeleteSession,
@@ -56,6 +56,7 @@ import {
   locateMessageUI,
 } from '@/composables/api/useChat'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH } from '@/utils/acp'
+import { getBotsByBotIdSettings } from '@memohai/sdk'
 import type { AcpagentRuntimeStatus } from '@memohai/sdk'
 
 export type TextBlock = UITextMessage
@@ -98,6 +99,38 @@ export interface FsChangeEvent {
   editOldText?: string
   editNewText?: string
 }
+
+export type ActiveChatTarget =
+  | {
+      kind: 'session'
+      sessionId: string
+      session: SessionSummary | null
+      runtimeType: string
+      isACP: boolean
+      isPendingACP: false
+      metadata: Record<string, unknown>
+      explicitSelection: boolean
+    }
+  | {
+      kind: 'draft-acp'
+      sessionId: null
+      session: null
+      runtimeType: 'acp_agent'
+      isACP: true
+      isPendingACP: true
+      metadata: Record<string, unknown>
+      explicitSelection: boolean
+    }
+  | {
+      kind: 'draft-native'
+      sessionId: null
+      session: null
+      runtimeType: 'model'
+      isACP: false
+      isPendingACP: false
+      metadata: Record<string, unknown>
+      explicitSelection: boolean
+    }
 
 export interface ChatUserTurn {
   id: string
@@ -238,6 +271,12 @@ function isSessionNotFoundError(error: unknown): boolean {
   return typeof payload.message === 'string' && /\bsession not found\b/i.test(payload.message)
 }
 
+function sendFailedMessage() {
+  const locale = currentLocale()
+  const messages = locale === 'zh' ? zhMessages : locale === 'ja' ? jaMessages : enMessages
+  return messages.chat.sendFailed
+}
+
 interface PendingAssistantStream {
   streamId: string
   contextTurns: ChatMessage[]
@@ -271,8 +310,28 @@ export interface SendMessageResult {
   restoreAttachments?: ChatAttachment[]
 }
 
+type WebNewCommandResult =
+  | { kind: 'none' }
+  | { kind: 'handled' }
+  | { kind: 'error'; message: string }
+
+function parseWebNewCommand(text: string): { mode: 'chat' | 'discuss' | ''; agentId: string } | null {
+  const input = text.trim()
+  if (!input.startsWith('/new')) return null
+  const parts = input.split(/\s+/)
+  if (parts[0] !== '/new') return null
+  const positional = parts.slice(1).filter(part => part && !part.startsWith('-'))
+  const first = positional[0]?.toLowerCase() ?? ''
+  const second = positional[1]?.toLowerCase() ?? ''
+  if (first === 'chat' || first === 'discuss') {
+    return { mode: first, agentId: second }
+  }
+  return { mode: '', agentId: first }
+}
+
 export interface ACPAgentSessionInput {
   agentId: string
+  sessionMode?: 'chat' | 'discuss'
   projectPath?: string
   projectMode?: string
   modelId?: string
@@ -345,7 +404,7 @@ type TurnVariantOption = {
 
 export const useChatStore = defineStore('chat', () => {
   const selectionStore = useChatSelectionStore()
-  const { currentBotId, sessionId, draftIntent } = storeToRefs(selectionStore)
+  const { currentBotId, sessionId, draftIntent, explicitSelection: explicitSessionSelection } = storeToRefs(selectionStore)
 
   const messages = reactive<ChatMessage[]>([])
   const pendingAssistantStreams = reactive(new Map<string, PendingAssistantStream>())
@@ -577,6 +636,7 @@ export const useChatStore = defineStore('chat', () => {
   // O(1) lookup keeps event handlers off the list scan that previously
   // blocked the UI on bots with thousands of heartbeat sessions.
   const sessionById = new Map<string, SessionSummary>()
+  const sessionLookupRevision = ref(0)
   const rememberedSessions = ref<Record<string, SessionSummary>>({})
   const deletedSessionIdsByBot = new Map<string, Set<string>>()
   const sessionsCursor = ref<string | null>(null)
@@ -586,6 +646,7 @@ export const useChatStore = defineStore('chat', () => {
   const acpRuntimePending = ref<Record<string, boolean>>({})
   const acpRuntimeRequests = new Map<string, Promise<AcpagentRuntimeStatus>>()
   const pendingACPSessionInput = ref<ACPAgentSessionInput | null>(null)
+  const defaultACPInputsByBot = new Map<string, ACPAgentSessionInput | null>()
   // Server-generated ID of the staged runtime; the client never invents
   // runtime identifiers.
   const pendingACPRuntimeId = ref('')
@@ -596,6 +657,7 @@ export const useChatStore = defineStore('chat', () => {
   let selectSessionRequestId = 0
 
   const activeSession = computed(() => knownSessionSummary(sessionId.value ?? ''))
+  const hasExplicitSessionSelection = computed(() => explicitSessionSelection.value)
   const knownSessions = computed<SessionSummary[]>(() => {
     const byId = new Map<string, SessionSummary>()
     for (const session of sessions.value) byId.set(session.id, session)
@@ -604,6 +666,14 @@ export const useChatStore = defineStore('chat', () => {
     }
     return [...byId.values()]
   })
+
+  function markSessionLookupChanged() {
+    sessionLookupRevision.value++
+  }
+
+  function trackSessionLookupRevision() {
+    return sessionLookupRevision.value
+  }
 
   function replaceSessions(items: SessionSummary[]): SessionSummary[] {
     const currentDeleted = deletedSessionIdsByBot.get((currentBotId.value ?? '').trim())
@@ -627,6 +697,7 @@ export const useChatStore = defineStore('chat', () => {
     sessions.value = merged
     sessionById.clear()
     for (const s of merged) sessionById.set(s.id, s)
+    markSessionLookupChanged()
     return merged
   }
 
@@ -637,6 +708,7 @@ export const useChatStore = defineStore('chat', () => {
     if (fresh.length === 0) return
     sessions.value = [...sessions.value, ...fresh]
     for (const s of fresh) sessionById.set(s.id, s)
+    markSessionLookupChanged()
   }
 
   function upsertSession(updated: SessionSummary) {
@@ -650,6 +722,7 @@ export const useChatStore = defineStore('chat', () => {
       sessions.value = [updated, ...sessions.value]
     }
     sessionById.set(updated.id, updated)
+    markSessionLookupChanged()
     if (rememberedSessions.value[updated.id]) rememberSession(updated)
   }
 
@@ -658,6 +731,7 @@ export const useChatStore = defineStore('chat', () => {
       ...rememberedSessions.value,
       [updated.id]: updated,
     }
+    markSessionLookupChanged()
   }
 
   function forgetRememberedSession(id: string) {
@@ -665,12 +739,35 @@ export const useChatStore = defineStore('chat', () => {
     const next = { ...rememberedSessions.value }
     delete next[id]
     rememberedSessions.value = next
+    markSessionLookupChanged()
   }
 
   function knownSessionSummary(targetSessionId: string): SessionSummary | null {
     const sid = targetSessionId.trim()
     if (!sid) return null
+    // `sessionById` is intentionally a non-reactive O(1) lookup. Tie computed
+    // consumers such as activeChatTarget to a tiny revision so an early null
+    // read is invalidated when the session list/hydration later fills the map.
+    trackSessionLookupRevision()
     return sessionById.get(sid) ?? rememberedSessions.value[sid] ?? null
+  }
+
+  async function ensureSessionSummary(targetBotId: string, targetSessionId: string, requestId?: number): Promise<SessionSummary | null> {
+    const bid = targetBotId.trim()
+    const sid = targetSessionId.trim()
+    if (!bid || !sid) return null
+    const known = knownSessionSummary(sid)
+    if (known) return known
+
+    try {
+      const fetched = await fetchSession(bid, sid)
+      if (requestId !== undefined && requestId !== selectSessionRequestId) return null
+      if ((currentBotId.value ?? '').trim() !== bid || (sessionId.value ?? '').trim() !== sid) return null
+      rememberSession(fetched)
+      return fetched
+    } catch {
+      return null
+    }
   }
 
   function isRecentsSession(session: SessionSummary): boolean {
@@ -693,15 +790,22 @@ export const useChatStore = defineStore('chat', () => {
     const next = { ...existing, ...patch }
     sessionById.set(id, next)
     sessions.value = sessions.value.map(session => (session.id === id ? next : session))
+    markSessionLookupChanged()
   }
 
   function removeSessionFromList(id: string) {
     if (!sessionById.has(id) && !rememberedSessions.value[id]) return
     sessions.value = sessions.value.filter(session => session.id !== id)
     sessionById.delete(id)
+    markSessionLookupChanged()
     forgetRememberedSession(id)
     turnGraphs.delete(id)
     selectedHeadTurnIds.delete(id)
+  }
+
+  function fallbackSessionAfterDelete(mode: SidebarSessionMode): SessionSummary | null {
+    const visibleSessions = sessions.value.filter(session => isSessionVisibleInSidebarMode(session, mode))
+    return sortByRecency(visibleSessions)[0] ?? null
   }
 
   function markSessionDeleted(botId: string, targetSessionId: string) {
@@ -2217,7 +2321,7 @@ export const useChatStore = defineStore('chat', () => {
       if (event.type === 'end' || event.type === 'error') {
         if (event.type === 'error') {
           rollbackApprovalResponse(streamId)
-          toast.error(event.message || 'tool approval failed')
+          toast.error(resolveApiErrorMessage(event, event.message || 'tool approval failed'))
         }
         approvalResponseStreams.delete(streamId)
         loading.value = isSessionStreaming(sessionId.value)
@@ -2264,7 +2368,7 @@ export const useChatStore = defineStore('chat', () => {
         break
       case 'error': {
         const session = getAssistantStream(streamId) ?? ensureDiscussStream(streamId, sid)
-        const message = event.message || 'stream error'
+        const message = resolveApiErrorMessage(event, event.message || 'stream error')
         const stage: SendMessageStage = session.committed && hasVisibleAssistantBlocks(session.assistantTurn) ? 'stream' : 'startup'
         rollbackApprovalResponse(streamId)
         approvalResponseStreams.delete(streamId)
@@ -2302,6 +2406,7 @@ export const useChatStore = defineStore('chat', () => {
     loadingMoreSessions.value = false
     bots.value = []
     sessionId.value = null
+    explicitSessionSelection.value = false
     if (options.clearSelection && currentBotId.value) {
       currentBotId.value = null
     }
@@ -2853,9 +2958,60 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function sessionMetadata(session: SessionSummary | null): Record<string, unknown> {
+    if (!session) return {}
+    return {
+      ...(session.metadata && typeof session.metadata === 'object' ? session.metadata : {}),
+      ...(session.runtime_metadata && typeof session.runtime_metadata === 'object' ? session.runtime_metadata : {}),
+    }
+  }
+
   const pendingACPSessionMetadata = computed<Record<string, unknown> | null>(() =>
     pendingACPSessionInput.value ? acpSessionMetadata(pendingACPSessionInput.value) : null,
   )
+  const activeChatTarget = computed<ActiveChatTarget>(() => {
+    const explicitSelection = explicitSessionSelection.value
+    const sid = (sessionId.value ?? '').trim()
+    if (sid) {
+      const session = activeSession.value
+      const runtimeType = session ? normalizedRuntimeType(session) : 'unknown'
+      return {
+        kind: 'session',
+        sessionId: sid,
+        session,
+        runtimeType,
+        isACP: runtimeType === 'acp_agent',
+        isPendingACP: false,
+        metadata: sessionMetadata(session),
+        explicitSelection,
+      }
+    }
+
+    const metadata = pendingACPSessionMetadata.value
+    if (metadata) {
+      return {
+        kind: 'draft-acp',
+        sessionId: null,
+        session: null,
+        runtimeType: 'acp_agent',
+        isACP: true,
+        isPendingACP: true,
+        metadata,
+        explicitSelection,
+      }
+    }
+
+    return {
+      kind: 'draft-native',
+      sessionId: null,
+      session: null,
+      runtimeType: 'model',
+      isACP: false,
+      isPendingACP: false,
+      metadata: {},
+      explicitSelection,
+    }
+  })
   const pendingACPModelId = computed(() => pendingACPSessionInput.value?.modelId?.trim() ?? '')
   const pendingACPRuntimeStatus = computed(() => {
     const bid = currentBotId.value ?? ''
@@ -2865,8 +3021,29 @@ export const useChatStore = defineStore('chat', () => {
   })
   const pendingACPRuntimeEnsuring = computed(() => pendingACPCreating.value)
 
+  function cloneACPInput(input: ACPAgentSessionInput): ACPAgentSessionInput {
+    return { ...input }
+  }
+
+  function rememberDefaultACPInput(botId: string, input: ACPAgentSessionInput | null) {
+    const bid = botId.trim()
+    if (!bid) return
+    defaultACPInputsByBot.set(bid, input ? cloneACPInput(input) : null)
+  }
+
+  function cachedDefaultACPInput(botId: string): { loaded: boolean, input: ACPAgentSessionInput | null } {
+    const bid = botId.trim()
+    if (!defaultACPInputsByBot.has(bid)) return { loaded: false, input: null }
+    const input = defaultACPInputsByBot.get(bid) ?? null
+    return { loaded: true, input: input ? cloneACPInput(input) : null }
+  }
+
+  function cacheDefaultACPSession(input: ACPAgentSessionInput | null) {
+    rememberDefaultACPInput(currentBotId.value ?? '', input)
+  }
+
   function pendingACPIdentityKey(botId: string, input: ACPAgentSessionInput): string {
-    return [botId, input.agentId, input.projectPath ?? '', input.projectMode ?? ''].join('\u0000')
+    return [botId, input.sessionMode ?? 'chat', input.agentId, input.projectPath ?? '', input.projectMode ?? ''].join('\u0000')
   }
 
   function pendingACPStagingKey(snapshot: Pick<PendingACPStageSnapshot, 'identityKey' | 'generation'>): string {
@@ -2913,11 +3090,12 @@ export const useChatStore = defineStore('chat', () => {
       && (modelId === undefined || current.modelId === modelId)
   }
 
-  function stageACPSession(input: ACPAgentSessionInput) {
+  function stageACPSession(input: ACPAgentSessionInput, options: { explicitSelection?: boolean } = {}) {
     const metadata = acpSessionMetadata(input)
     const existing = pendingACPSessionInput.value
     const samePendingAgent = Boolean(existing
       && existing.agentId === metadata.acp_agent_id
+      && (existing.sessionMode || 'chat') === (input.sessionMode || 'chat')
       && (existing.projectPath || ACP_DEFAULT_PROJECT_PATH) === metadata.project_path
       && (existing.projectMode || ACP_DEFAULT_PROJECT_MODE) === metadata.acp_project_mode)
     if (!samePendingAgent) {
@@ -2937,6 +3115,48 @@ export const useChatStore = defineStore('chat', () => {
       pendingACPRuntimeId.value = ''
       closeStagedRuntime(bid, runtimeId)
     }
+    explicitSessionSelection.value = options.explicitSelection !== false
+  }
+
+  function stageDefaultACPSession(input: ACPAgentSessionInput) {
+    rememberDefaultACPInput(currentBotId.value ?? '', input)
+    selectSessionRequestId++
+    explicitSessionSelection.value = false
+    draftIntent.value = false
+    sessionId.value = null
+    sessionMessagesStream.stop()
+    replaceMessages([])
+    hasMoreOlder.value = false
+    hasLoadedOlder.value = false
+    stageACPSession(input, { explicitSelection: false })
+  }
+
+  function stageNewACPSession(input: ACPAgentSessionInput) {
+    cancelVariantSelectionLoad()
+    selectSessionRequestId++
+    clearPendingACPSession()
+    sessionId.value = null
+    draftIntent.value = true
+    sessionMessagesStream.stop()
+    replaceMessages([])
+    hasMoreOlder.value = false
+    hasLoadedOlder.value = false
+    stageACPSession(input, { explicitSelection: true })
+  }
+
+  function resetToEmptyComposer(options: { clearPendingACP?: boolean; explicitSelection?: boolean; draftIntent?: boolean } = {}) {
+    cancelVariantSelectionLoad()
+    selectSessionRequestId++
+    if (options.clearPendingACP !== false) {
+      clearPendingACPSession()
+    }
+    sessionId.value = null
+    explicitSessionSelection.value = options.explicitSelection === true
+    draftIntent.value = options.draftIntent ?? options.explicitSelection === true
+    sessionMessagesStream.stop()
+    replaceMessages([])
+    hasMoreOlder.value = false
+    hasLoadedOlder.value = false
   }
 
   async function ensurePendingACPRuntime(): Promise<AcpagentRuntimeStatus | undefined> {
@@ -3080,16 +3300,22 @@ export const useChatStore = defineStore('chat', () => {
     if (!bid) throw new Error('Bot not ready')
     const metadata = acpSessionMetadata(input)
     const runtimeId = input.runtimeId?.trim() ?? ''
+    const sessionMode = input.sessionMode === 'discuss' ? 'discuss' : 'chat'
     // The warm staged runtime is bound server-side inside session creation;
     // no separate adopt/bind round trip and nothing for a watcher to race.
     const created = await createSession(bid, {
       title: input.title ?? '',
-      type: 'acp_agent',
-      metadata,
+      type: sessionMode,
+      sessionMode,
+      runtimeType: 'acp_agent',
+      metadata: {},
+      runtimeMetadata: metadata,
       acpRuntimeId: runtimeId || undefined,
     })
     upsertSession(created)
     sessionId.value = created.id
+    explicitSessionSelection.value = true
+    draftIntent.value = false
     replaceMessages([])
     clearSessionTurnGraph(created.id)
     hasMoreOlder.value = false
@@ -3112,8 +3338,17 @@ export const useChatStore = defineStore('chat', () => {
     const sid = sessionId.value
     if (!bid) throw new Error('Bot not selected')
     const metadata = acpSessionMetadata(input)
-    const updated = await requestUpdateSessionAgent(bid, sid, 'acp_agent', metadata)
+    const sessionMode = activeSession.value?.session_mode || (activeSession.value?.type === 'discuss' ? 'discuss' : 'chat')
+    const updated = await requestUpdateSessionAgent(bid, sid, {
+      type: sessionMode === 'discuss' ? 'discuss' : 'acp_agent',
+      sessionMode,
+      runtimeType: 'acp_agent',
+      metadata,
+      runtimeMetadata: metadata,
+    })
     upsertSession(updated)
+    explicitSessionSelection.value = true
+    draftIntent.value = false
     clearPendingACPSession()
     clearACPRuntimeStatus(bid, sid)
     const runtime = input.startRuntime ? await ensureACPRuntime(sid) : undefined
@@ -3125,8 +3360,17 @@ export const useChatStore = defineStore('chat', () => {
     const bid = currentBotId.value ?? ''
     const sid = sessionId.value ?? ''
     if (!bid || !sid) return null
-    const updated = await requestUpdateSessionAgent(bid, sid, 'chat', {})
+    const sessionMode = activeSession.value?.session_mode || (activeSession.value?.type === 'discuss' ? 'discuss' : 'chat')
+    const updated = await requestUpdateSessionAgent(bid, sid, {
+      type: sessionMode === 'discuss' ? 'discuss' : 'chat',
+      sessionMode,
+      runtimeType: 'model',
+      metadata: {},
+      runtimeMetadata: {},
+    })
     upsertSession(updated)
+    explicitSessionSelection.value = true
+    draftIntent.value = false
     clearACPRuntimeStatus(bid, sid)
     return updated
   }
@@ -3219,10 +3463,102 @@ export const useChatStore = defineStore('chat', () => {
     upsertSession(created)
     sessionId.value = created.id
     draftIntent.value = false
+    explicitSessionSelection.value = true
     replaceMessages([])
     clearSessionTurnGraph(created.id)
     hasMoreOlder.value = false
     hasLoadedOlder.value = false
+  }
+
+  // defaultRuntimeIsACP reports whether the bot's default chat runtime is an
+  // external ACP agent. It is a lightweight precheck (runtime/agent presence
+  // only); full eligibility (workspace_exec, agent enabled, managed fields) is
+  // still decided by the chat-pane default-ACP initializer. Used to keep the
+  // history-vs-default-ACP decision inside the init chain instead of letting
+  // initialize() auto-select a history session that a late watcher then drops.
+  async function defaultRuntimeIsACP(botId: string): Promise<boolean> {
+    const input = await defaultACPSessionInputFromSettings(botId)
+    return input !== null
+  }
+
+  async function defaultACPSettingsForAgent(botId: string, agentId: string): Promise<Partial<ACPAgentSessionInput>> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data } = await (getBotsByBotIdSettings as any)({ path: { bot_id: botId }, throwOnError: true })
+      const settings = data as {
+        chat_runtime?: string
+        chat_acp_agent_id?: string | null
+        chat_acp_project_path?: string | null
+        chat_acp_project_mode?: string | null
+      } | undefined
+      if (settings?.chat_runtime !== 'acp_agent') return {}
+      if ((settings.chat_acp_agent_id ?? '').trim() !== agentId) return {}
+      return {
+        projectPath: settings.chat_acp_project_path?.trim() || undefined,
+        projectMode: settings.chat_acp_project_mode?.trim() || undefined,
+      }
+    } catch {
+      return {}
+    }
+  }
+
+  async function defaultACPSessionInputFromSettings(botId: string): Promise<ACPAgentSessionInput | null> {
+    const bid = botId.trim()
+    if (!bid) return null
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data } = await (getBotsByBotIdSettings as any)({ path: { bot_id: bid }, throwOnError: true })
+      const settings = data as {
+        chat_runtime?: string
+        chat_acp_agent_id?: string | null
+        chat_acp_project_path?: string | null
+        chat_acp_project_mode?: string | null
+      } | undefined
+      if (settings?.chat_runtime !== 'acp_agent') {
+        rememberDefaultACPInput(bid, null)
+        return null
+      }
+      const agentId = settings.chat_acp_agent_id?.trim() ?? ''
+      if (!agentId) {
+        rememberDefaultACPInput(bid, null)
+        return null
+      }
+      const input = {
+        agentId,
+        projectPath: settings.chat_acp_project_path?.trim() || ACP_DEFAULT_PROJECT_PATH,
+        projectMode: settings.chat_acp_project_mode?.trim() || ACP_DEFAULT_PROJECT_MODE,
+      }
+      rememberDefaultACPInput(bid, input)
+      return input
+    } catch {
+      return null
+    }
+  }
+
+  function pendingACPMatchesInput(input: ACPAgentSessionInput): boolean {
+    const pending = pendingACPSessionInput.value
+    if (!pending || sessionId.value) return false
+    const metadata = acpSessionMetadata(input)
+    return pending.agentId === metadata.acp_agent_id
+      && (pending.sessionMode || 'chat') === (input.sessionMode || 'chat')
+      && (pending.projectPath || ACP_DEFAULT_PROJECT_PATH) === metadata.project_path
+      && (pending.projectMode || ACP_DEFAULT_PROJECT_MODE) === metadata.acp_project_mode
+  }
+
+  async function stageDefaultACPFromSettings(requestId: number) {
+    const bid = (currentBotId.value ?? '').trim()
+    if (!bid || sessionId.value || explicitSessionSelection.value) return
+    const cached = cachedDefaultACPInput(bid)
+    if (cached.loaded) {
+      if (cached.input && !pendingACPMatchesInput(cached.input)) stageDefaultACPSession(cached.input)
+      return
+    }
+    const input = await defaultACPSessionInputFromSettings(bid)
+    if (!input) return
+    if (requestId !== selectSessionRequestId) return
+    if ((currentBotId.value ?? '').trim() !== bid || sessionId.value || explicitSessionSelection.value) return
+    if (pendingACPMatchesInput(input)) return
+    stageDefaultACPSession(input)
   }
 
   async function initialize() {
@@ -3267,8 +3603,12 @@ export const useChatStore = defineStore('chat', () => {
           initializingBotId = bid
 
           let response: Awaited<ReturnType<typeof fetchSessions>>
+          let defaultIsACP = false
           try {
-            response = await fetchSessions(bid)
+            ;[response, defaultIsACP] = await Promise.all([
+              fetchSessions(bid),
+              defaultRuntimeIsACP(bid),
+            ])
           } catch (error) {
             if ((currentBotId.value ?? '').trim() !== bid) {
               initializeRerunRequested = true
@@ -3284,8 +3624,46 @@ export const useChatStore = defineStore('chat', () => {
           sessionsCursor.value = response.nextCursor
           hasMoreSessions.value = response.nextCursor !== null
 
-          if (!visibleSessions.length) {
+          const restoredSessionId = (sessionId.value ?? '').trim()
+          const restoredExplicitSession = restoredSessionId && explicitSessionSelection.value
+            ? await ensureSessionSummary(bid, restoredSessionId)
+            : null
+          if ((currentBotId.value ?? '').trim() !== bid) {
+            initializeRerunRequested = true
+            continue
+          }
+          const preservePendingACPStage = !!pendingACPSessionInput.value && !sessionId.value
+          const preserveExplicitEmptyComposer = explicitSessionSelection.value && !sessionId.value
+          // When the default runtime is an external ACP agent and nothing was
+          // explicitly selected, keep a blank composer so the default-ACP staging
+          // path can own the runtime target instead of flashing a native history
+          // session first.
+          const preferDefaultACP = defaultIsACP
+            && !preservePendingACPStage
+            && !preserveExplicitEmptyComposer
+            && !explicitSessionSelection.value
+
+          if (preservePendingACPStage) {
             sessionId.value = null
+            hasMoreOlder.value = false
+            hasLoadedOlder.value = false
+          } else if (preserveExplicitEmptyComposer) {
+            sessionId.value = null
+            replaceMessages([])
+            hasMoreOlder.value = false
+            hasLoadedOlder.value = false
+          } else if (preferDefaultACP) {
+            sessionId.value = null
+            explicitSessionSelection.value = false
+            draftIntent.value = false
+            replaceMessages([])
+            hasMoreOlder.value = false
+            hasLoadedOlder.value = false
+          } else if (restoredExplicitSession) {
+            draftIntent.value = false
+          } else if (!visibleSessions.length) {
+            sessionId.value = null
+            explicitSessionSelection.value = false
             replaceMessages([])
             hasMoreOlder.value = false
             hasLoadedOlder.value = false
@@ -3309,6 +3687,7 @@ export const useChatStore = defineStore('chat', () => {
             } else {
               const firstConversation = visibleSessions.find(s => (s.type ?? 'chat') !== 'schedule')
               sessionId.value = (firstConversation ?? visibleSessions[0]!).id
+              explicitSessionSelection.value = false
             }
           }
 
@@ -3368,66 +3747,85 @@ export const useChatStore = defineStore('chat', () => {
     currentBotId.value = targetBotId
     sessionId.value = null
     rememberedSessions.value = {}
+    explicitSessionSelection.value = false
+    draftIntent.value = false
     await initialize()
   }
 
-  async function selectSession(targetSessionId: string) {
+  async function selectSession(targetSessionId: string, options: { explicitSelection?: boolean } = {}) {
     const sid = targetSessionId.trim()
-    if (!sid || sid === sessionId.value) return
-    if (messageActionLoading.value) return
+    if (!sid) return
+    const sameSession = sid === sessionId.value
+    if (messageActionLoading.value && !sameSession) return
     const requestId = ++selectSessionRequestId
     const bid = (currentBotId.value ?? '').trim()
     clearPendingACPSession()
     sessionId.value = sid
     draftIntent.value = false
-    switchActiveSession(sid)
-    if (!bid || knownSessionSummary(sid)) return
-
-    try {
-      const fetched = await fetchSession(bid, sid)
-      if (requestId !== selectSessionRequestId) return
-      if ((currentBotId.value ?? '').trim() !== bid || sessionId.value !== sid) return
-      rememberSession(fetched)
-    } catch {
-      // The target can disappear between a tab activation and hydration. Keep
-      // selection behavior consistent; the session stream/message load will
-      // surface the missing-session state through the existing path.
-    }
+    explicitSessionSelection.value = options.explicitSelection !== false
+    if (!sameSession) switchActiveSession(sid)
+    // Even when `sid` is already the persisted selection, a page refresh may
+    // have no summary for it yet (for example an ACP session outside the first
+    // sidebar page). Hydrate before consumers branch on runtime_type.
+    await ensureSessionSummary(bid, sid, requestId)
   }
 
-  async function createNewSession() {
+  async function createNewSession(options: { explicitSelection?: boolean } = {}) {
     const bid = await ensureBot()
     if (!bid) return
-    selectSessionRequestId++
-    cancelVariantSelectionLoad()
-    clearPendingACPSession()
-    sessionId.value = null
-    draftIntent.value = true
-    sessionMessagesStream.stop()
-    replaceMessages([])
-    hasMoreOlder.value = false
-    hasLoadedOlder.value = false
+    resetToEmptyComposer({
+      explicitSelection: options.explicitSelection === true,
+      draftIntent: true,
+    })
   }
 
   // Switch the global view to the draft (no real session yet). Unlike
   // createNewSession this assumes the bot is already active and only resets the
   // view, so per-session chat tabs can activate their draft tab without minting a
-  // session. selectSession early-returns on an empty id, so a draft needs this.
-  function selectDraft() {
-    selectSessionRequestId++
+  // session. Keep any staged ACP draft intact; explicit reset actions such as
+  // /new or switching back to Memoh use resetToEmptyComposer directly.
+  function selectDraft(options: { explicitSelection?: boolean } = {}) {
     if (messageActionLoading.value) return
-    cancelVariantSelectionLoad()
-    draftIntent.value = true
-    if (!sessionId.value) return
-    clearPendingACPSession()
-    sessionId.value = null
-    sessionMessagesStream.stop()
-    replaceMessages([])
-    hasMoreOlder.value = false
-    hasLoadedOlder.value = false
+    const explicitSelection = options.explicitSelection === true
+    resetToEmptyComposer({
+      clearPendingACP: false,
+      explicitSelection,
+      draftIntent: true,
+    })
+    if (!explicitSelection) {
+      void stageDefaultACPFromSettings(selectSessionRequestId)
+    }
   }
 
-  async function removeSession(targetSessionId: string) {
+  async function handleWebNewCommand(text: string, attachments?: ChatAttachment[]): Promise<WebNewCommandResult> {
+    const parsed = parseWebNewCommand(text)
+    if (!parsed) return { kind: 'none' }
+    if (attachments?.length) {
+      return { kind: 'error', message: 'Attachments are not supported with /new' }
+    }
+    const agentId = parsed.agentId.trim()
+    if (!agentId) {
+      if (parsed.mode === 'discuss') {
+        return { kind: 'error', message: 'Discuss ACP sessions require an agent, for example /new discuss codex' }
+      }
+      await createNewSession({ explicitSelection: true })
+      return { kind: 'handled' }
+    }
+    if (agentId !== 'codex' && agentId !== 'claude-code') {
+      return { kind: 'error', message: `Unknown ACP agent "${agentId}"` }
+    }
+    const bid = await ensureBot()
+    if (!bid) return { kind: 'error', message: 'Bot not ready' }
+    const defaults = await defaultACPSettingsForAgent(bid, agentId)
+    stageNewACPSession({
+      agentId,
+      sessionMode: parsed.mode === 'discuss' ? 'discuss' : 'chat',
+      ...defaults,
+    })
+    return { kind: 'handled' }
+  }
+
+  async function removeSession(targetSessionId: string, options: { fallbackMode?: SidebarSessionMode } = {}) {
     const delId = targetSessionId.trim()
     if (!delId) return
     const bid = currentBotId.value ?? ''
@@ -3438,20 +3836,25 @@ export const useChatStore = defineStore('chat', () => {
     if ((currentBotId.value ?? '').trim() !== bid) return
     clearACPRuntimeStatus(bid, delId)
     removeSessionFromList(delId)
-    if (sessionId.value === delId) {
-      if (sessions.value.length === 0) {
-        cancelVariantSelectionLoad()
-        sessionId.value = null
-        sessionMessagesStream.stop()
-        replaceMessages([])
-        hasMoreOlder.value = false
-        hasLoadedOlder.value = false
-      } else {
-        const next = sessions.value[0]!.id
-        sessionId.value = next
-        switchActiveSession(next)
-      }
+    if (sessionId.value !== delId) return
+    const fallbackMode = options.fallbackMode ?? 'recent'
+    const nextSession = fallbackSessionAfterDelete(fallbackMode)
+    if (!nextSession) {
+      cancelVariantSelectionLoad()
+      sessionId.value = null
+      explicitSessionSelection.value = false
+      draftIntent.value = false
+      sessionMessagesStream.stop()
+      replaceMessages([])
+      hasMoreOlder.value = false
+      hasLoadedOlder.value = false
+      return
     }
+    const next = nextSession.id
+    sessionId.value = next
+    explicitSessionSelection.value = false
+    draftIntent.value = false
+    switchActiveSession(next)
   }
 
   async function renameSession(targetSessionId: string, title: string): Promise<SessionSummary> {
@@ -3601,7 +4004,15 @@ export const useChatStore = defineStore('chat', () => {
 
   async function sendMessage(text: string, attachments?: ChatAttachment[]): Promise<SendMessageResult> {
     const trimmed = text.trim()
-    if ((!trimmed && !attachments?.length) || streaming.value || loadingMessages.value || isMessageActionLoading(sessionId.value) || !currentBotId.value) return { ok: false, stage: 'startup' }
+    if (!trimmed && !attachments?.length) return { ok: false, stage: 'startup' }
+
+    const newCommand = await handleWebNewCommand(trimmed, attachments)
+    if (newCommand.kind === 'handled') return { ok: true }
+    if (newCommand.kind === 'error') {
+      return { ok: false, stage: 'startup', error: newCommand.message, restoreInput: text, restoreAttachments: attachments }
+    }
+    if (streaming.value || loadingMessages.value || isMessageActionLoading(sessionId.value)) return { ok: false, stage: 'startup' }
+    if (!currentBotId.value) return { ok: false, stage: 'startup' }
 
     loading.value = true
     let assistantTurn: ChatAssistantTurn | null = null
@@ -3666,7 +4077,7 @@ export const useChatStore = defineStore('chat', () => {
     } catch (error) {
       const err = error instanceof Error ? error : new Error('Unknown error')
       const isAbort = err.name === 'AbortError'
-      const reason = err.message
+      const reason = resolveApiErrorMessage(error, err.message || sendFailedMessage())
       const stage: SendMessageStage = err instanceof StreamFailureError
         ? err.stage
         : (assistantTurn && hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
@@ -3843,10 +4254,12 @@ export const useChatStore = defineStore('chat', () => {
     chats,
     chatId,
     sessionId,
+    hasExplicitSessionSelection,
     currentBotId,
     bots,
     activeSession,
     activeSessionSupportsTurnVariants,
+    activeChatTarget,
     activeChatReadOnly,
     knownSessions,
     knownSessionSummary,
@@ -3875,6 +4288,9 @@ export const useChatStore = defineStore('chat', () => {
     selectSession,
     selectChat: selectSession,
     stageACPSession,
+    stageDefaultACPSession,
+    cacheDefaultACPSession,
+    resetToEmptyComposer,
     ensurePendingACPRuntime,
     setPendingACPModel,
     clearPendingACPSession,

@@ -37,6 +37,8 @@ type Message struct {
 	Content                 json.RawMessage `json:"content"`
 	Metadata                map[string]any  `json:"metadata,omitempty"`
 	Usage                   json.RawMessage `json:"usage,omitempty"`
+	SessionMode             string          `json:"session_mode,omitempty"`
+	RuntimeType             string          `json:"runtime_type,omitempty"`
 	Assets                  []MessageAsset  `json:"assets,omitempty"`
 	CompactID               string          `json:"compact_id,omitempty"`
 	EventID                 string          `json:"event_id,omitempty"`
@@ -71,6 +73,8 @@ type PersistInput struct {
 	Content                 json.RawMessage
 	Metadata                map[string]any
 	Usage                   json.RawMessage
+	SessionMode             string
+	RuntimeType             string
 	Assets                  []AssetRef
 	ModelID                 string
 	EventID                 string

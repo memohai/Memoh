@@ -130,6 +130,63 @@ func (s *EventStore) HasEvents(ctx context.Context, sessionID string) (bool, err
 	return count > 0, nil
 }
 
+func (s *EventStore) GetDiscussConsumedCursor(ctx context.Context, sessionID, scopeKey string) (int64, error) {
+	if s == nil || s.queries == nil {
+		return 0, nil
+	}
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return 0, fmt.Errorf("invalid session id: %w", err)
+	}
+	row, err := s.queries.GetSessionDiscussCursor(ctx, sqlc.GetSessionDiscussCursorParams{
+		SessionID: pgSessionID,
+		ScopeKey:  normalizeDiscussCursorScope(scopeKey),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("get discuss cursor: %w", err)
+	}
+	return row.ConsumedCursor, nil
+}
+
+func (s *EventStore) UpsertDiscussConsumedCursor(ctx context.Context, sessionID, scopeKey, routeID, source string, cursor int64) error {
+	if s == nil || s.queries == nil || cursor <= 0 {
+		return nil
+	}
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return fmt.Errorf("invalid session id: %w", err)
+	}
+	pgRouteID := pgtype.UUID{}
+	if strings.TrimSpace(routeID) != "" {
+		parsed, parseErr := dbpkg.ParseUUID(routeID)
+		if parseErr != nil {
+			return fmt.Errorf("invalid route id: %w", parseErr)
+		}
+		pgRouteID = parsed
+	}
+	_, err = s.queries.UpsertSessionDiscussCursor(ctx, sqlc.UpsertSessionDiscussCursorParams{
+		SessionID:      pgSessionID,
+		ScopeKey:       normalizeDiscussCursorScope(scopeKey),
+		RouteID:        pgRouteID,
+		Source:         strings.TrimSpace(source),
+		ConsumedCursor: cursor,
+	})
+	if err != nil {
+		return fmt.Errorf("upsert discuss cursor: %w", err)
+	}
+	return nil
+}
+
+func normalizeDiscussCursorScope(scopeKey string) string {
+	if strings.TrimSpace(scopeKey) == "" {
+		return "default"
+	}
+	return strings.TrimSpace(scopeKey)
+}
+
 func parseEventData(kind string, data []byte) (CanonicalEvent, error) {
 	switch EventKind(kind) {
 	case EventMessage:

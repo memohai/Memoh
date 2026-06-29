@@ -74,6 +74,10 @@ type botChannelConfigReader interface {
 	ListBotConfigs(ctx context.Context, botID string) ([]channel.ChannelConfig, error)
 }
 
+type botPermissionChecker interface {
+	HasBotPermission(ctx context.Context, botID, accountID, permission string) (bool, error)
+}
+
 // Resolver orchestrates chat with the internal agent.
 type Resolver struct {
 	agent             *agentpkg.Agent
@@ -91,6 +95,7 @@ type Resolver struct {
 	skillLoader       SkillLoader
 	assetLoader       gatewayAssetLoader
 	channelStore      botChannelConfigReader
+	botPermissions    botPermissionChecker
 	pipeline          *pipelinepkg.Pipeline
 	streamHTTPClient  *http.Client
 	bgManager         *background.Manager
@@ -103,7 +108,8 @@ type Resolver struct {
 	// response; nil means storeUserInputResultAndContinue. Test seam.
 	continueUserInputFn func(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error
 	sessionTurnMu       sync.Mutex
-	sessionTurnLocks    map[string]*sync.Mutex // key: "botID:sessionID" → turn write lock
+	sessionTurnLocks    map[string]*sync.Mutex
+	sessionTurnRefs     map[string]int // key: "botID:sessionID" → active turn refcount
 	persistTurnMu       sync.Mutex
 	timeout             time.Duration
 	clockLocation       *time.Location
@@ -158,6 +164,7 @@ func NewResolver(
 		accountService:   accountService,
 		streamHTTPClient: streamHTTPClient,
 		sessionTurnLocks: make(map[string]*sync.Mutex),
+		sessionTurnRefs:  make(map[string]int),
 		timeout:          timeout,
 		clockLocation:    clockLocation,
 		logger:           log.With(slog.String("service", "conversation_resolver")),
@@ -178,6 +185,10 @@ func (r *Resolver) SetSkillLoader(sl SkillLoader) {
 // attachments before calling the agent gateway.
 func (r *Resolver) SetGatewayAssetLoader(loader gatewayAssetLoader) {
 	r.assetLoader = loader
+}
+
+func (r *Resolver) SetBotPermissionChecker(checker botPermissionChecker) {
+	r.botPermissions = checker
 }
 
 // SetChannelStore configures the bot channel config store used to load
@@ -1000,10 +1011,10 @@ func isInteractiveApprovalSession(sessionType string) bool {
 	return sessionmode.IsInteractive(sessionType)
 }
 
-func (r *Resolver) resolveRunConfigSessionType(ctx context.Context, sessionID string) string {
+func (r *Resolver) resolveRunConfigSessionDescriptor(ctx context.Context, sessionID string) (string, string) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" || r == nil || r.sessionService == nil {
-		return sessionpkg.TypeChat
+		return sessionpkg.TypeChat, sessionpkg.RuntimeModel
 	}
 	sess, err := r.sessionService.Get(ctx, sessionID)
 	if err != nil {
@@ -1013,12 +1024,26 @@ func (r *Resolver) resolveRunConfigSessionType(ctx context.Context, sessionID st
 				slog.Any("error", err),
 			)
 		}
-		return sessionpkg.TypeChat
+		return sessionpkg.TypeChat, sessionpkg.RuntimeModel
 	}
-	if typ := strings.TrimSpace(sess.Type); typ != "" {
-		return typ
+	typ := strings.TrimSpace(sess.Type)
+	if typ == "" {
+		typ = sessionpkg.TypeChat
 	}
-	return sessionpkg.TypeChat
+	runtimeType := strings.TrimSpace(sess.RuntimeType)
+	if runtimeType == "" {
+		if sessionpkg.IsACPRuntime(sess) {
+			runtimeType = sessionpkg.RuntimeACPAgent
+		} else {
+			runtimeType = sessionpkg.RuntimeModel
+		}
+	}
+	return typ, runtimeType
+}
+
+func (r *Resolver) resolveRunConfigSessionType(ctx context.Context, sessionID string) string {
+	typ, _ := r.resolveRunConfigSessionDescriptor(ctx, sessionID)
+	return typ
 }
 
 func buildModelSelectionRequest(p baseRunConfigParams, chatID string) conversation.ChatRequest {
@@ -1053,8 +1078,19 @@ func (r *Resolver) resolveRunConfig(ctx context.Context, p baseRunConfigParams) 
 		return pipelinepkg.ResolveRunConfigResult{}, errors.New("bot id is required")
 	}
 
-	if strings.TrimSpace(p.SessionType) == "" {
-		p.SessionType = r.resolveRunConfigSessionType(ctx, p.SessionID)
+	sessionType := strings.TrimSpace(p.SessionType)
+	var runtimeType string
+	if sessionType == "" {
+		sessionType, runtimeType = r.resolveRunConfigSessionDescriptor(ctx, p.SessionID)
+	} else {
+		_, runtimeType = r.resolveRunConfigSessionDescriptor(ctx, p.SessionID)
+	}
+	p.SessionType = sessionType
+	if runtimeType == sessionpkg.RuntimeACPAgent {
+		return pipelinepkg.ResolveRunConfigResult{
+			RunConfig:   agentpkg.RunConfig{SessionType: sessionType},
+			RuntimeType: runtimeType,
+		}, nil
 	}
 
 	cfg, chatModel, _, err := r.buildBaseRunConfig(ctx, p)
@@ -1064,8 +1100,9 @@ func (r *Resolver) resolveRunConfig(ctx context.Context, p baseRunConfigParams) 
 
 	cfg = r.prepareRunConfig(ctx, cfg)
 	return pipelinepkg.ResolveRunConfigResult{
-		RunConfig: cfg,
-		ModelID:   chatModel.ID,
+		RunConfig:   cfg,
+		ModelID:     chatModel.ID,
+		RuntimeType: runtimeType,
 	}, nil
 }
 

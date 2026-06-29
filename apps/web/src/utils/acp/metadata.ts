@@ -17,6 +17,7 @@ export interface ACPForm {
 
 export interface ACPAgentConfig {
   setupMode: string
+  setupModeSet: boolean
   managed: Record<string, unknown>
 }
 
@@ -169,6 +170,7 @@ export function readACPAgentConfig(metadata: Record<string, unknown> | undefined
   const managed = isRecord(record.managed) ? record.managed : {}
   return {
     setupMode: normalizeSetupMode(typeof record.setup_mode === 'string' ? record.setup_mode : '', managed),
+    setupModeSet: typeof record.setup_mode === 'string' && record.setup_mode.trim() !== '',
     managed,
   }
 }

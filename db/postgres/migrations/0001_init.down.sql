@@ -31,6 +31,7 @@ DROP TABLE IF EXISTS bot_history_messages CASCADE;
 DROP TABLE IF EXISTS bot_session_turn_heads CASCADE;
 DROP TABLE IF EXISTS bot_history_turns CASCADE;
 DROP TABLE IF EXISTS bot_session_events CASCADE;
+DROP TABLE IF EXISTS bot_session_discuss_cursors CASCADE;
 DROP TABLE IF EXISTS bot_sessions CASCADE;
 DROP TABLE IF EXISTS bot_channel_routes CASCADE;
 DROP TABLE IF EXISTS channel_identity_bind_codes CASCADE;

@@ -124,6 +124,27 @@ func TestParseAgentSetupNormalizesLegacyManagedMode(t *testing.T) {
 	}
 }
 
+func TestMissingRequiredManagedFieldForPreflightSkipsLegacyMode(t *testing.T) {
+	profile, ok := Lookup(AgentCodexID)
+	if !ok {
+		t.Fatal("Codex profile not registered")
+	}
+	setup := AgentSetup{
+		AgentID: AgentCodexID,
+		Enabled: true,
+		Mode:    setupModeAPIKey,
+		ModeSet: false,
+		Managed: map[string]string{},
+	}
+	if field, missing := MissingRequiredManagedFieldForPreflight(profile, setup); missing {
+		t.Fatalf("legacy preflight missing field = %#v, want none", field)
+	}
+	setup.ModeSet = true
+	if field, missing := MissingRequiredManagedFieldForPreflight(profile, setup); !missing || field.ID != "api_key" {
+		t.Fatalf("explicit api_key preflight = %#v, %v; want missing api_key", field, missing)
+	}
+}
+
 func TestSensitiveMergeAndScrub(t *testing.T) {
 	existing := map[string]any{
 		MetadataKeyACP: map[string]any{

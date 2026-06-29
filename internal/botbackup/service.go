@@ -224,7 +224,13 @@ func (s *Service) Export(ctx context.Context, botID string, opts ExportOptions, 
 		if err := writer.writeJSON("history/turn_heads.json", "bot_session_turn_heads", data.History.TurnHeads, opts); err != nil {
 			return err
 		}
+		if err := writer.writeJSON("history/session_events.json", "bot_session_events", data.History.SessionEvents, opts); err != nil {
+			return err
+		}
 		if err := writer.writeJSON("history/messages.json", "bot_messages", data.History.Messages, opts); err != nil {
+			return err
+		}
+		if err := writer.writeJSON("history/discuss_cursors.json", "bot_session_discuss_cursors", data.History.DiscussCursors, opts); err != nil {
 			return err
 		}
 	}
@@ -532,6 +538,16 @@ func (s *Service) collectHistory(ctx context.Context, botID string, includeAsset
 		history.TurnHeads = turnHeads
 	} else {
 		warnings = append(warnings, "sessions export failed: "+err.Error())
+	}
+	if cursors, err := s.queries.ListSessionDiscussCursorsByBot(ctx, pgBotID); err == nil {
+		history.DiscussCursors = cursors
+	} else {
+		warnings = append(warnings, "discuss cursors export failed: "+err.Error())
+	}
+	if events, err := s.queries.ListSessionEventsByBot(ctx, pgBotID); err == nil {
+		history.SessionEvents = events
+	} else {
+		warnings = append(warnings, "session events export failed: "+err.Error())
 	}
 	if messages, err := s.queries.ListMessages(ctx, pgBotID); err == nil {
 		history.Messages = messages

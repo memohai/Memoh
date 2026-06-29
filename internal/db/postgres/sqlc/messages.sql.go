@@ -108,9 +108,11 @@ WITH input AS (
     $10::jsonb AS content,
     $11::jsonb AS metadata,
     $12::jsonb AS usage,
-    $13::uuid AS model_id,
-    $14::uuid AS event_id,
-    $15::text AS display_text
+    $13::text AS session_mode,
+    $14::text AS runtime_type,
+    $15::uuid AS model_id,
+    $16::uuid AS event_id,
+    $17::text AS display_text
 )
 INSERT INTO bot_history_messages (
   bot_id,
@@ -125,6 +127,8 @@ INSERT INTO bot_history_messages (
   content,
   metadata,
   usage,
+  session_mode,
+  runtime_type,
   model_id,
   event_id,
   display_text
@@ -142,6 +146,8 @@ SELECT
   content,
   metadata,
   usage,
+  session_mode,
+  runtime_type,
   model_id,
   event_id,
   display_text
@@ -178,6 +184,8 @@ RETURNING
   content,
   metadata,
   usage,
+  session_mode,
+  runtime_type,
   event_id,
   display_text,
   created_at
@@ -196,6 +204,8 @@ type CreateMessageParams struct {
 	Content                 []byte      `json:"content"`
 	Metadata                []byte      `json:"metadata"`
 	Usage                   []byte      `json:"usage"`
+	SessionMode             string      `json:"session_mode"`
+	RuntimeType             string      `json:"runtime_type"`
 	ModelID                 pgtype.UUID `json:"model_id"`
 	EventID                 pgtype.UUID `json:"event_id"`
 	DisplayText             pgtype.Text `json:"display_text"`
@@ -215,6 +225,8 @@ type CreateMessageRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
@@ -234,6 +246,8 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (C
 		arg.Content,
 		arg.Metadata,
 		arg.Usage,
+		arg.SessionMode,
+		arg.RuntimeType,
 		arg.ModelID,
 		arg.EventID,
 		arg.DisplayText,
@@ -253,6 +267,8 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (C
 		&i.Content,
 		&i.Metadata,
 		&i.Usage,
+		&i.SessionMode,
+		&i.RuntimeType,
 		&i.EventID,
 		&i.DisplayText,
 		&i.CreatedAt,
@@ -371,6 +387,8 @@ SELECT
   m.content,
   m.metadata,
   m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id,
   m.display_text,
   m.created_at,
@@ -406,6 +424,8 @@ type GetMessageByExternalIDBySessionRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
@@ -431,6 +451,8 @@ func (q *Queries) GetMessageByExternalIDBySession(ctx context.Context, arg GetMe
 		&i.Content,
 		&i.Metadata,
 		&i.Usage,
+		&i.SessionMode,
+		&i.RuntimeType,
 		&i.EventID,
 		&i.DisplayText,
 		&i.CreatedAt,
@@ -629,6 +651,8 @@ SELECT
   m.content,
   m.metadata,
   m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id,
   m.display_text,
   m.compact_id,
@@ -664,6 +688,8 @@ type ListActiveMessagesSinceRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CompactID               pgtype.UUID        `json:"compact_id"`
@@ -696,6 +722,8 @@ func (q *Queries) ListActiveMessagesSince(ctx context.Context, arg ListActiveMes
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CompactID,
@@ -741,6 +769,8 @@ SELECT
   m.content,
   m.metadata,
   m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id,
   m.display_text,
   m.compact_id,
@@ -776,6 +806,8 @@ type ListActiveMessagesSinceBySessionRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CompactID               pgtype.UUID        `json:"compact_id"`
@@ -808,6 +840,8 @@ func (q *Queries) ListActiveMessagesSinceBySession(ctx context.Context, arg List
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CompactID,
@@ -850,6 +884,8 @@ SELECT
   m.content,
   m.metadata,
   m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id,
   m.display_text,
   m.compact_id,
@@ -885,6 +921,8 @@ type ListActiveMessagesSinceByTurnRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CompactID               pgtype.UUID        `json:"compact_id"`
@@ -917,6 +955,8 @@ func (q *Queries) ListActiveMessagesSinceByTurn(ctx context.Context, arg ListAct
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CompactID,
@@ -996,6 +1036,8 @@ SELECT
   m.content,
   m.metadata,
   m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id,
   m.display_text,
   m.created_at,
@@ -1024,6 +1066,8 @@ type ListMessagesRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
@@ -1055,6 +1099,8 @@ func (q *Queries) ListMessages(ctx context.Context, botID pgtype.UUID) ([]ListMe
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CreatedAt,
@@ -1111,6 +1157,8 @@ SELECT
   m.content,
   m.metadata,
   m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id,
   m.display_text,
   m.created_at,
@@ -1163,6 +1211,8 @@ type ListMessagesAfterBySessionRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
@@ -1200,6 +1250,8 @@ func (q *Queries) ListMessagesAfterBySession(ctx context.Context, arg ListMessag
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CreatedAt,
@@ -1232,6 +1284,8 @@ SELECT
   m.content,
   m.metadata,
   m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id,
   m.display_text,
   m.created_at,
@@ -1267,6 +1321,8 @@ type ListMessagesBeforeRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
@@ -1298,6 +1354,8 @@ func (q *Queries) ListMessagesBefore(ctx context.Context, arg ListMessagesBefore
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CreatedAt,
@@ -1354,6 +1412,8 @@ SELECT
   m.content,
   m.metadata,
   m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id,
   m.display_text,
   m.created_at,
@@ -1406,6 +1466,8 @@ type ListMessagesBeforeBySessionRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
@@ -1443,6 +1505,8 @@ func (q *Queries) ListMessagesBeforeBySession(ctx context.Context, arg ListMessa
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CreatedAt,
@@ -1487,6 +1551,8 @@ SELECT
   m.content,
   m.metadata,
   m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id,
   m.display_text,
   m.created_at,
@@ -1515,6 +1581,8 @@ type ListMessagesBySessionRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
@@ -1546,6 +1614,8 @@ func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID pgtype.UU
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CreatedAt,
@@ -1578,6 +1648,8 @@ SELECT
   m.content,
   m.metadata,
   m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id,
   m.display_text,
   m.created_at,
@@ -1611,6 +1683,8 @@ type ListMessagesLatestRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
@@ -1642,6 +1716,8 @@ func (q *Queries) ListMessagesLatest(ctx context.Context, arg ListMessagesLatest
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CreatedAt,
@@ -1698,6 +1774,8 @@ SELECT
   m.content,
   m.metadata,
   m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id,
   m.display_text,
   m.created_at,
@@ -1732,6 +1810,8 @@ type ListMessagesLatestBySessionRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
@@ -1763,6 +1843,8 @@ func (q *Queries) ListMessagesLatestBySession(ctx context.Context, arg ListMessa
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CreatedAt,
@@ -1795,6 +1877,8 @@ SELECT
   m.content,
   m.metadata,
   m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id,
   m.display_text,
   m.created_at,
@@ -1828,6 +1912,8 @@ type ListMessagesSinceRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
@@ -1859,6 +1945,8 @@ func (q *Queries) ListMessagesSince(ctx context.Context, arg ListMessagesSincePa
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CreatedAt,
@@ -1903,6 +1991,8 @@ SELECT
   m.content,
   m.metadata,
   m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id,
   m.display_text,
   m.created_at,
@@ -1936,6 +2026,8 @@ type ListMessagesSinceBySessionRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
@@ -1967,6 +2059,8 @@ func (q *Queries) ListMessagesSinceBySession(ctx context.Context, arg ListMessag
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CreatedAt,
@@ -2285,7 +2379,7 @@ JOIN bot_history_turns t ON t.id = gt.id
 LEFT JOIN bot_history_messages m ON m.turn_id = gt.id
 LEFT JOIN bot_history_messages rm ON rm.id = t.request_message_id
 LEFT JOIN request_assets ra ON ra.message_id = t.request_message_id
-GROUP BY gt.id, t.created_at, rm.content, rm.display_text, ra.request_asset_key
+GROUP BY gt.id, t.created_at, t.request_message_id, rm.content, rm.display_text, ra.request_asset_key
 ORDER BY COALESCE(MIN(m.created_at), t.created_at) ASC, gt.id ASC
 `
 

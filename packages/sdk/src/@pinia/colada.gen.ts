@@ -2290,14 +2290,14 @@ export const deleteBotsByBotIdSettingsMutation = (options?: Partial<Options<Dele
     }
 });
 
-export const getBotsByBotIdSettingsQueryKey = (options?: Options<GetBotsByBotIdSettingsData>) => createQueryKey('getBotsByBotIdSettings', options);
+export const getBotsByBotIdSettingsQueryKey = (options: Options<GetBotsByBotIdSettingsData>) => createQueryKey('getBotsByBotIdSettings', options);
 
 /**
  * Get user settings
  *
  * Get agent settings for current user
  */
-export const getBotsByBotIdSettingsQuery = defineQueryOptions((options?: Options<GetBotsByBotIdSettingsData>) => ({
+export const getBotsByBotIdSettingsQuery = defineQueryOptions((options: Options<GetBotsByBotIdSettingsData>) => ({
     key: getBotsByBotIdSettingsQueryKey(options),
     query: async (context) => {
         const { data } = await getBotsByBotIdSettings({
@@ -2374,7 +2374,7 @@ export const getBotsByBotIdTokenUsageQueryKey = (options: Options<GetBotsByBotId
 /**
  * Get token usage statistics
  *
- * Get daily aggregated token usage for a bot, split by chat, heartbeat, and schedule session types, with optional model filter and per-model breakdown
+ * Get daily aggregated token usage for a bot, split by chat, discuss, heartbeat, and schedule session types, with optional model filter and per-model breakdown
  */
 export const getBotsByBotIdTokenUsageQuery = defineQueryOptions((options: Options<GetBotsByBotIdTokenUsageData>) => ({
     key: getBotsByBotIdTokenUsageQueryKey(options),

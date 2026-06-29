@@ -99,7 +99,7 @@ const createMessage = `-- name: CreateMessage :one
 INSERT INTO bot_history_messages (
   id, bot_id, session_id, turn_id, turn_message_seq, sender_channel_identity_id, sender_account_user_id,
   source_message_id, source_reply_to_message_id, role, content, metadata,
-  usage, model_id, event_id, display_text
+  usage, session_mode, runtime_type, model_id, event_id, display_text
 )
 SELECT
   lower(hex(randomblob(4))) || '-' ||
@@ -121,7 +121,9 @@ SELECT
   ?12,
   ?13,
   ?14,
-  ?15
+  ?15,
+  ?16,
+  ?17
 WHERE (
     ?2 IS NULL
     OR EXISTS (
@@ -144,7 +146,7 @@ RETURNING
   id, bot_id, session_id, turn_id, turn_message_seq, sender_channel_identity_id,
   sender_account_user_id AS sender_user_id,
   source_message_id AS external_message_id,
-  source_reply_to_message_id, role, content, metadata, usage,
+  source_reply_to_message_id, role, content, metadata, usage, session_mode, runtime_type,
   event_id, display_text, created_at
 `
 
@@ -161,6 +163,8 @@ type CreateMessageParams struct {
 	Content                 string         `json:"content"`
 	Metadata                string         `json:"metadata"`
 	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
 	ModelID                 sql.NullString `json:"model_id"`
 	EventID                 sql.NullString `json:"event_id"`
 	DisplayText             sql.NullString `json:"display_text"`
@@ -180,6 +184,8 @@ type CreateMessageRow struct {
 	Content                 string         `json:"content"`
 	Metadata                string         `json:"metadata"`
 	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
 	EventID                 sql.NullString `json:"event_id"`
 	DisplayText             sql.NullString `json:"display_text"`
 	CreatedAt               string         `json:"created_at"`
@@ -199,6 +205,8 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (C
 		arg.Content,
 		arg.Metadata,
 		arg.Usage,
+		arg.SessionMode,
+		arg.RuntimeType,
 		arg.ModelID,
 		arg.EventID,
 		arg.DisplayText,
@@ -218,6 +226,8 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (C
 		&i.Content,
 		&i.Metadata,
 		&i.Usage,
+		&i.SessionMode,
+		&i.RuntimeType,
 		&i.EventID,
 		&i.DisplayText,
 		&i.CreatedAt,
@@ -327,6 +337,8 @@ SELECT
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id, m.display_text, m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -360,6 +372,8 @@ type GetMessageByExternalIDBySessionRow struct {
 	Content                 string         `json:"content"`
 	Metadata                string         `json:"metadata"`
 	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
 	EventID                 sql.NullString `json:"event_id"`
 	DisplayText             sql.NullString `json:"display_text"`
 	CreatedAt               string         `json:"created_at"`
@@ -385,6 +399,8 @@ func (q *Queries) GetMessageByExternalIDBySession(ctx context.Context, arg GetMe
 		&i.Content,
 		&i.Metadata,
 		&i.Usage,
+		&i.SessionMode,
+		&i.RuntimeType,
 		&i.EventID,
 		&i.DisplayText,
 		&i.CreatedAt,
@@ -574,6 +590,8 @@ SELECT
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id, m.display_text, m.compact_id, m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -606,6 +624,8 @@ type ListActiveMessagesSinceRow struct {
 	Content                 string         `json:"content"`
 	Metadata                string         `json:"metadata"`
 	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
 	EventID                 sql.NullString `json:"event_id"`
 	DisplayText             sql.NullString `json:"display_text"`
 	CompactID               sql.NullString `json:"compact_id"`
@@ -638,6 +658,8 @@ func (q *Queries) ListActiveMessagesSince(ctx context.Context, arg ListActiveMes
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CompactID,
@@ -677,6 +699,8 @@ SELECT
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id, m.display_text, m.compact_id, m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -709,6 +733,8 @@ type ListActiveMessagesSinceBySessionRow struct {
 	Content                 string         `json:"content"`
 	Metadata                string         `json:"metadata"`
 	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
 	EventID                 sql.NullString `json:"event_id"`
 	DisplayText             sql.NullString `json:"display_text"`
 	CompactID               sql.NullString `json:"compact_id"`
@@ -741,6 +767,8 @@ func (q *Queries) ListActiveMessagesSinceBySession(ctx context.Context, arg List
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CompactID,
@@ -777,6 +805,8 @@ SELECT
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id, m.display_text, m.compact_id, m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -809,6 +839,8 @@ type ListActiveMessagesSinceByTurnRow struct {
 	Content                 string         `json:"content"`
 	Metadata                string         `json:"metadata"`
 	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
 	EventID                 sql.NullString `json:"event_id"`
 	DisplayText             sql.NullString `json:"display_text"`
 	CompactID               sql.NullString `json:"compact_id"`
@@ -841,6 +873,8 @@ func (q *Queries) ListActiveMessagesSinceByTurn(ctx context.Context, arg ListAct
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CompactID,
@@ -945,6 +979,8 @@ SELECT
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id, m.display_text, m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -971,6 +1007,8 @@ type ListMessagesRow struct {
 	Content                 string         `json:"content"`
 	Metadata                string         `json:"metadata"`
 	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
 	EventID                 sql.NullString `json:"event_id"`
 	DisplayText             sql.NullString `json:"display_text"`
 	CreatedAt               string         `json:"created_at"`
@@ -1002,6 +1040,8 @@ func (q *Queries) ListMessages(ctx context.Context, botID string) ([]ListMessage
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CreatedAt,
@@ -1052,6 +1092,8 @@ SELECT
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id, m.display_text, m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -1104,6 +1146,8 @@ type ListMessagesAfterBySessionRow struct {
 	Content                 string         `json:"content"`
 	Metadata                string         `json:"metadata"`
 	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
 	EventID                 sql.NullString `json:"event_id"`
 	DisplayText             sql.NullString `json:"display_text"`
 	CreatedAt               string         `json:"created_at"`
@@ -1141,6 +1185,8 @@ func (q *Queries) ListMessagesAfterBySession(ctx context.Context, arg ListMessag
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CreatedAt,
@@ -1167,6 +1213,8 @@ SELECT
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id, m.display_text, m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -1200,6 +1248,8 @@ type ListMessagesBeforeRow struct {
 	Content                 string         `json:"content"`
 	Metadata                string         `json:"metadata"`
 	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
 	EventID                 sql.NullString `json:"event_id"`
 	DisplayText             sql.NullString `json:"display_text"`
 	CreatedAt               string         `json:"created_at"`
@@ -1231,6 +1281,8 @@ func (q *Queries) ListMessagesBefore(ctx context.Context, arg ListMessagesBefore
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CreatedAt,
@@ -1281,6 +1333,8 @@ SELECT
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id, m.display_text, m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -1333,6 +1387,8 @@ type ListMessagesBeforeBySessionRow struct {
 	Content                 string         `json:"content"`
 	Metadata                string         `json:"metadata"`
 	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
 	EventID                 sql.NullString `json:"event_id"`
 	DisplayText             sql.NullString `json:"display_text"`
 	CreatedAt               string         `json:"created_at"`
@@ -1370,6 +1426,8 @@ func (q *Queries) ListMessagesBeforeBySession(ctx context.Context, arg ListMessa
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CreatedAt,
@@ -1408,6 +1466,8 @@ SELECT
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id, m.display_text, m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -1434,6 +1494,8 @@ type ListMessagesBySessionRow struct {
 	Content                 string         `json:"content"`
 	Metadata                string         `json:"metadata"`
 	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
 	EventID                 sql.NullString `json:"event_id"`
 	DisplayText             sql.NullString `json:"display_text"`
 	CreatedAt               string         `json:"created_at"`
@@ -1465,6 +1527,8 @@ func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID string) (
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CreatedAt,
@@ -1491,6 +1555,8 @@ SELECT
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id, m.display_text, m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -1522,6 +1588,8 @@ type ListMessagesLatestRow struct {
 	Content                 string         `json:"content"`
 	Metadata                string         `json:"metadata"`
 	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
 	EventID                 sql.NullString `json:"event_id"`
 	DisplayText             sql.NullString `json:"display_text"`
 	CreatedAt               string         `json:"created_at"`
@@ -1553,6 +1621,8 @@ func (q *Queries) ListMessagesLatest(ctx context.Context, arg ListMessagesLatest
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CreatedAt,
@@ -1603,6 +1673,8 @@ SELECT
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id, m.display_text, m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -1635,6 +1707,8 @@ type ListMessagesLatestBySessionRow struct {
 	Content                 string         `json:"content"`
 	Metadata                string         `json:"metadata"`
 	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
 	EventID                 sql.NullString `json:"event_id"`
 	DisplayText             sql.NullString `json:"display_text"`
 	CreatedAt               string         `json:"created_at"`
@@ -1666,6 +1740,8 @@ func (q *Queries) ListMessagesLatestBySession(ctx context.Context, arg ListMessa
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CreatedAt,
@@ -1692,6 +1768,8 @@ SELECT
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id, m.display_text, m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -1723,6 +1801,8 @@ type ListMessagesSinceRow struct {
 	Content                 string         `json:"content"`
 	Metadata                string         `json:"metadata"`
 	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
 	EventID                 sql.NullString `json:"event_id"`
 	DisplayText             sql.NullString `json:"display_text"`
 	CreatedAt               string         `json:"created_at"`
@@ -1754,6 +1834,8 @@ func (q *Queries) ListMessagesSince(ctx context.Context, arg ListMessagesSincePa
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CreatedAt,
@@ -1792,6 +1874,8 @@ SELECT
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.session_mode,
+  m.runtime_type,
   m.event_id, m.display_text, m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -1823,6 +1907,8 @@ type ListMessagesSinceBySessionRow struct {
 	Content                 string         `json:"content"`
 	Metadata                string         `json:"metadata"`
 	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
 	EventID                 sql.NullString `json:"event_id"`
 	DisplayText             sql.NullString `json:"display_text"`
 	CreatedAt               string         `json:"created_at"`
@@ -1854,6 +1940,8 @@ func (q *Queries) ListMessagesSinceBySession(ctx context.Context, arg ListMessag
 			&i.Content,
 			&i.Metadata,
 			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
 			&i.CreatedAt,
@@ -2170,7 +2258,7 @@ JOIN bot_history_turns t ON t.id = gt.id
 LEFT JOIN bot_history_messages m ON m.turn_id = gt.id
 LEFT JOIN bot_history_messages rm ON rm.id = t.request_message_id
 LEFT JOIN request_assets ra ON ra.message_id = t.request_message_id
-GROUP BY gt.id, t.created_at, rm.content, rm.display_text, ra.request_asset_key
+GROUP BY gt.id, t.created_at, t.request_message_id, rm.content, rm.display_text, ra.request_asset_key
 ORDER BY COALESCE(MIN(m.created_at), t.created_at) ASC, gt.id ASC
 `
 

@@ -48,7 +48,7 @@ func TestGenerateACPCodexOAuthStateUsesCallbackPrefix(t *testing.T) {
 }
 
 func TestParseCodexOAuthAuthRequiresDistinctIDToken(t *testing.T) {
-	valid := parseCodexOAuthAuth(`{
+	valid := acpclient.ParseCodexOAuthAuth(`{
   "auth_mode": "chatgpt",
   "tokens": {
     "id_token": "id.jwt.fixture",
@@ -64,7 +64,7 @@ func TestParseCodexOAuthAuthRequiresDistinctIDToken(t *testing.T) {
 		t.Fatalf("account id = %q, want account-123", valid.AccountID)
 	}
 
-	invalidSameToken := parseCodexOAuthAuth(`{
+	invalidSameToken := acpclient.ParseCodexOAuthAuth(`{
   "auth_mode": "chatgpt",
   "tokens": {
     "id_token": "same.jwt.fixture",
@@ -77,7 +77,7 @@ func TestParseCodexOAuthAuthRequiresDistinctIDToken(t *testing.T) {
 		t.Fatalf("auth.json with id_token equal to access_token should not be accepted")
 	}
 
-	validWithoutAccountID := parseCodexOAuthAuth(`{
+	invalidWithoutAccountID := acpclient.ParseCodexOAuthAuth(`{
   "auth_mode": "chatgpt",
   "tokens": {
     "id_token": "id.jwt.fixture",
@@ -85,11 +85,8 @@ func TestParseCodexOAuthAuthRequiresDistinctIDToken(t *testing.T) {
     "refresh_token": "refresh-fixture"
   }
 }`)
-	if !validWithoutAccountID.Valid {
-		t.Fatalf("auth.json without account_id should be accepted")
-	}
-	if validWithoutAccountID.AccountID != "" {
-		t.Fatalf("account id = %q, want empty", validWithoutAccountID.AccountID)
+	if invalidWithoutAccountID.Valid {
+		t.Fatalf("auth.json without account_id should not be accepted")
 	}
 }
 

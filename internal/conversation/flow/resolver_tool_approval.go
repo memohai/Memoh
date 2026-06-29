@@ -10,6 +10,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/contextlimit"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/models"
@@ -22,6 +23,7 @@ type ToolApprovalResponseInput struct {
 	SessionID                  string
 	BaseHeadTurnID             string
 	ActorChannelIdentityID     string
+	ActorUserID                string
 	ApprovalID                 string
 	ExplicitID                 string
 	ReplyExternalMessageID     string
@@ -115,10 +117,13 @@ func (r *Resolver) isACPToolApprovalSession(ctx context.Context, sessionID strin
 	if err != nil {
 		return false, err
 	}
-	return sess.Type == sessionpkg.TypeACPAgent, nil
+	return sessionpkg.IsACPRuntime(sess), nil
 }
 
 func (r *Resolver) respondACPToolApproval(ctx context.Context, target toolapproval.Request, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) error {
+	if err := r.authorizeACPToolApprovalResponse(ctx, target, input); err != nil {
+		return err
+	}
 	if !r.toolApproval.CanRespond(target) {
 		_, err := r.toolApproval.Reject(ctx, target.ID, "", "tool approval expired: the requesting tool call is no longer waiting")
 		if err != nil && !errors.Is(err, toolapproval.ErrAlreadyDecided) {
@@ -161,6 +166,45 @@ func (r *Resolver) respondACPToolApproval(ctx context.Context, target toolapprov
 		})
 	}
 	return emitApprovalAck(ctx, eventCh)
+}
+
+func (r *Resolver) authorizeACPToolApprovalResponse(ctx context.Context, target toolapproval.Request, input ToolApprovalResponseInput) error {
+	if r == nil || r.sessionService == nil {
+		return errors.New("session service not configured")
+	}
+	if r.botPermissions == nil {
+		return errors.New("bot permission checker not configured")
+	}
+	sessionID := firstNonEmpty(target.SessionID, input.SessionID)
+	sess, err := r.sessionService.Get(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if !sessionpkg.IsACPRuntime(sess) {
+		return nil
+	}
+	botID := firstNonEmpty(target.BotID, input.BotID)
+	if strings.TrimSpace(sess.BotID) != "" && strings.TrimSpace(botID) != "" && sess.BotID != botID {
+		return toolapproval.ErrForbidden
+	}
+	if strings.TrimSpace(botID) == "" {
+		botID = sess.BotID
+	}
+	actorID := firstNonEmpty(input.ActorUserID, input.ActorChannelIdentityID)
+	if actorID == "" {
+		return toolapproval.ErrForbidden
+	}
+	acpMeta := mergeACPRuntimeMetadata(sess.Metadata, sess.RuntimeMetadata)
+	runtimeOwnerID := metadataString(acpMeta, "runtime_owner_account_id")
+	if runtimeOwnerID == "" || runtimeOwnerID != actorID {
+		return toolapproval.ErrForbidden
+	}
+	if ok, err := r.botPermissions.HasBotPermission(ctx, botID, actorID, bots.PermissionWorkspaceExec); err != nil {
+		return err
+	} else if !ok {
+		return toolapproval.ErrForbidden
+	}
+	return nil
 }
 
 func emitApprovalAck(ctx context.Context, eventCh chan<- WSStreamEvent) error {

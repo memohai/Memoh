@@ -32,16 +32,19 @@ WITH input AS (
     $2::uuid AS route_id,
     $3::text AS channel_type,
     $4::text AS session_type,
-    $5::text AS title,
-    $6::jsonb AS metadata,
-    $7::uuid AS default_head_turn_id,
-    $8::uuid AS forked_from_session_id,
-    $9::uuid AS forked_from_turn_id,
-    $10::uuid AS parent_session_id,
-    $11::uuid AS created_by_user_id
+    $5::text AS session_mode,
+    $6::text AS runtime_type,
+    $7::jsonb AS runtime_metadata,
+    $8::text AS title,
+    $9::jsonb AS metadata,
+    $10::uuid AS default_head_turn_id,
+    $11::uuid AS forked_from_session_id,
+    $12::uuid AS forked_from_turn_id,
+    $13::uuid AS parent_session_id,
+    $14::uuid AS created_by_user_id
 )
 INSERT INTO bot_sessions (
-  bot_id, route_id, channel_type, type, title, metadata,
+  bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata,
   default_head_turn_id, forked_from_session_id, forked_from_turn_id,
   parent_session_id, created_by_user_id
 )
@@ -50,6 +53,9 @@ SELECT
   route_id,
   channel_type,
   session_type,
+  session_mode,
+  runtime_type,
+  runtime_metadata,
   title,
   metadata,
   default_head_turn_id,
@@ -94,7 +100,7 @@ WHERE (
         AND s.bot_id = input.bot_id
     )
   )
-RETURNING id, bot_id, route_id, channel_type, type, title, metadata, default_head_turn_id, forked_from_session_id, forked_from_turn_id, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
+RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, default_head_turn_id, forked_from_session_id, forked_from_turn_id, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
 `
 
 type CreateSessionParams struct {
@@ -102,6 +108,9 @@ type CreateSessionParams struct {
 	RouteID             pgtype.UUID `json:"route_id"`
 	ChannelType         pgtype.Text `json:"channel_type"`
 	Type                string      `json:"type"`
+	SessionMode         string      `json:"session_mode"`
+	RuntimeType         string      `json:"runtime_type"`
+	RuntimeMetadata     []byte      `json:"runtime_metadata"`
 	Title               string      `json:"title"`
 	Metadata            []byte      `json:"metadata"`
 	DefaultHeadTurnID   pgtype.UUID `json:"default_head_turn_id"`
@@ -117,6 +126,9 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (B
 		arg.RouteID,
 		arg.ChannelType,
 		arg.Type,
+		arg.SessionMode,
+		arg.RuntimeType,
+		arg.RuntimeMetadata,
 		arg.Title,
 		arg.Metadata,
 		arg.DefaultHeadTurnID,
@@ -132,6 +144,9 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (B
 		&i.RouteID,
 		&i.ChannelType,
 		&i.Type,
+		&i.SessionMode,
+		&i.RuntimeType,
+		&i.RuntimeMetadata,
 		&i.Title,
 		&i.Metadata,
 		&i.DefaultHeadTurnID,
@@ -178,6 +193,20 @@ func (q *Queries) CreateSessionTurnHead(ctx context.Context, arg CreateSessionTu
 	return i, err
 }
 
+const deleteSessionDiscussCursorsByBot = `-- name: DeleteSessionDiscussCursorsByBot :exec
+DELETE FROM bot_session_discuss_cursors
+WHERE session_id IN (
+  SELECT id
+  FROM bot_sessions
+  WHERE bot_id = $1
+)
+`
+
+func (q *Queries) DeleteSessionDiscussCursorsByBot(ctx context.Context, botID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteSessionDiscussCursorsByBot, botID)
+	return err
+}
+
 const deleteSessionTurnHeads = `-- name: DeleteSessionTurnHeads :exec
 DELETE FROM bot_session_turn_heads
 WHERE session_id = $1
@@ -203,7 +232,7 @@ func (q *Queries) DeleteSessionTurnHeadsByBot(ctx context.Context, botID pgtype.
 }
 
 const getActiveSessionForRoute = `-- name: GetActiveSessionForRoute :one
-SELECT s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata, s.default_head_turn_id, s.forked_from_session_id, s.forked_from_turn_id, s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
+SELECT s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata, s.default_head_turn_id, s.forked_from_session_id, s.forked_from_turn_id, s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
 JOIN bot_channel_routes r ON r.active_session_id = s.id
 WHERE r.id = $1
@@ -219,6 +248,9 @@ func (q *Queries) GetActiveSessionForRoute(ctx context.Context, routeID pgtype.U
 		&i.RouteID,
 		&i.ChannelType,
 		&i.Type,
+		&i.SessionMode,
+		&i.RuntimeType,
+		&i.RuntimeMetadata,
 		&i.Title,
 		&i.Metadata,
 		&i.DefaultHeadTurnID,
@@ -234,7 +266,7 @@ func (q *Queries) GetActiveSessionForRoute(ctx context.Context, routeID pgtype.U
 }
 
 const getSessionByID = `-- name: GetSessionByID :one
-SELECT id, bot_id, route_id, channel_type, type, title, metadata, default_head_turn_id, forked_from_session_id, forked_from_turn_id, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
+SELECT id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, default_head_turn_id, forked_from_session_id, forked_from_turn_id, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
 FROM bot_sessions
 WHERE id = $1
   AND deleted_at IS NULL
@@ -249,6 +281,9 @@ func (q *Queries) GetSessionByID(ctx context.Context, id pgtype.UUID) (BotSessio
 		&i.RouteID,
 		&i.ChannelType,
 		&i.Type,
+		&i.SessionMode,
+		&i.RuntimeType,
+		&i.RuntimeMetadata,
 		&i.Title,
 		&i.Metadata,
 		&i.DefaultHeadTurnID,
@@ -264,7 +299,7 @@ func (q *Queries) GetSessionByID(ctx context.Context, id pgtype.UUID) (BotSessio
 }
 
 const getSessionByIDIncludingDeleted = `-- name: GetSessionByIDIncludingDeleted :one
-SELECT id, bot_id, route_id, channel_type, type, title, metadata, default_head_turn_id, forked_from_session_id, forked_from_turn_id, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
+SELECT id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, default_head_turn_id, forked_from_session_id, forked_from_turn_id, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
 FROM bot_sessions
 WHERE id = $1
 `
@@ -278,6 +313,9 @@ func (q *Queries) GetSessionByIDIncludingDeleted(ctx context.Context, id pgtype.
 		&i.RouteID,
 		&i.ChannelType,
 		&i.Type,
+		&i.SessionMode,
+		&i.RuntimeType,
+		&i.RuntimeMetadata,
 		&i.Title,
 		&i.Metadata,
 		&i.DefaultHeadTurnID,
@@ -288,6 +326,32 @@ func (q *Queries) GetSessionByIDIncludingDeleted(ctx context.Context, id pgtype.
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const getSessionDiscussCursor = `-- name: GetSessionDiscussCursor :one
+SELECT session_id, scope_key, route_id, source, consumed_cursor, updated_at
+FROM bot_session_discuss_cursors
+WHERE session_id = $1
+  AND scope_key = $2
+`
+
+type GetSessionDiscussCursorParams struct {
+	SessionID pgtype.UUID `json:"session_id"`
+	ScopeKey  string      `json:"scope_key"`
+}
+
+func (q *Queries) GetSessionDiscussCursor(ctx context.Context, arg GetSessionDiscussCursorParams) (BotSessionDiscussCursor, error) {
+	row := q.db.QueryRow(ctx, getSessionDiscussCursor, arg.SessionID, arg.ScopeKey)
+	var i BotSessionDiscussCursor
+	err := row.Scan(
+		&i.SessionID,
+		&i.ScopeKey,
+		&i.RouteID,
+		&i.Source,
+		&i.ConsumedCursor,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -315,6 +379,41 @@ func (q *Queries) GetSessionTurnHead(ctx context.Context, arg GetSessionTurnHead
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listSessionDiscussCursorsByBot = `-- name: ListSessionDiscussCursorsByBot :many
+SELECT c.session_id, c.scope_key, c.route_id, c.source, c.consumed_cursor, c.updated_at
+FROM bot_session_discuss_cursors c
+JOIN bot_sessions s ON s.id = c.session_id
+WHERE s.bot_id = $1
+ORDER BY c.updated_at ASC, c.session_id ASC, c.scope_key ASC
+`
+
+func (q *Queries) ListSessionDiscussCursorsByBot(ctx context.Context, botID pgtype.UUID) ([]BotSessionDiscussCursor, error) {
+	rows, err := q.db.Query(ctx, listSessionDiscussCursorsByBot, botID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BotSessionDiscussCursor
+	for rows.Next() {
+		var i BotSessionDiscussCursor
+		if err := rows.Scan(
+			&i.SessionID,
+			&i.ScopeKey,
+			&i.RouteID,
+			&i.Source,
+			&i.ConsumedCursor,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listSessionTurnHeads = `-- name: ListSessionTurnHeads :many
@@ -352,7 +451,7 @@ func (q *Queries) ListSessionTurnHeads(ctx context.Context, sessionID pgtype.UUI
 
 const listSessionsByBot = `-- name: ListSessionsByBot :many
 SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
+  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
   s.default_head_turn_id, s.forked_from_session_id, s.forked_from_turn_id,
   s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
   r.metadata AS route_metadata,
@@ -370,6 +469,9 @@ type ListSessionsByBotRow struct {
 	RouteID               pgtype.UUID        `json:"route_id"`
 	ChannelType           pgtype.Text        `json:"channel_type"`
 	Type                  string             `json:"type"`
+	SessionMode           string             `json:"session_mode"`
+	RuntimeType           string             `json:"runtime_type"`
+	RuntimeMetadata       []byte             `json:"runtime_metadata"`
 	Title                 string             `json:"title"`
 	Metadata              []byte             `json:"metadata"`
 	DefaultHeadTurnID     pgtype.UUID        `json:"default_head_turn_id"`
@@ -399,6 +501,9 @@ func (q *Queries) ListSessionsByBot(ctx context.Context, botID pgtype.UUID) ([]L
 			&i.RouteID,
 			&i.ChannelType,
 			&i.Type,
+			&i.SessionMode,
+			&i.RuntimeType,
+			&i.RuntimeMetadata,
 			&i.Title,
 			&i.Metadata,
 			&i.DefaultHeadTurnID,
@@ -424,7 +529,7 @@ func (q *Queries) ListSessionsByBot(ctx context.Context, botID pgtype.UUID) ([]L
 
 const listSessionsByBotAndCreatedByUser = `-- name: ListSessionsByBotAndCreatedByUser :many
 SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
+  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
   s.default_head_turn_id, s.forked_from_session_id, s.forked_from_turn_id,
   s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
   r.metadata AS route_metadata,
@@ -448,6 +553,9 @@ type ListSessionsByBotAndCreatedByUserRow struct {
 	RouteID               pgtype.UUID        `json:"route_id"`
 	ChannelType           pgtype.Text        `json:"channel_type"`
 	Type                  string             `json:"type"`
+	SessionMode           string             `json:"session_mode"`
+	RuntimeType           string             `json:"runtime_type"`
+	RuntimeMetadata       []byte             `json:"runtime_metadata"`
 	Title                 string             `json:"title"`
 	Metadata              []byte             `json:"metadata"`
 	DefaultHeadTurnID     pgtype.UUID        `json:"default_head_turn_id"`
@@ -477,6 +585,9 @@ func (q *Queries) ListSessionsByBotAndCreatedByUser(ctx context.Context, arg Lis
 			&i.RouteID,
 			&i.ChannelType,
 			&i.Type,
+			&i.SessionMode,
+			&i.RuntimeType,
+			&i.RuntimeMetadata,
 			&i.Title,
 			&i.Metadata,
 			&i.DefaultHeadTurnID,
@@ -502,7 +613,7 @@ func (q *Queries) ListSessionsByBotAndCreatedByUser(ctx context.Context, arg Lis
 
 const listSessionsByBotAndCreatedByUserPaged = `-- name: ListSessionsByBotAndCreatedByUserPaged :many
 SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
+  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
   s.default_head_turn_id, s.forked_from_session_id, s.forked_from_turn_id,
   s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
   r.metadata AS route_metadata,
@@ -543,6 +654,9 @@ type ListSessionsByBotAndCreatedByUserPagedRow struct {
 	RouteID               pgtype.UUID        `json:"route_id"`
 	ChannelType           pgtype.Text        `json:"channel_type"`
 	Type                  string             `json:"type"`
+	SessionMode           string             `json:"session_mode"`
+	RuntimeType           string             `json:"runtime_type"`
+	RuntimeMetadata       []byte             `json:"runtime_metadata"`
 	Title                 string             `json:"title"`
 	Metadata              []byte             `json:"metadata"`
 	DefaultHeadTurnID     pgtype.UUID        `json:"default_head_turn_id"`
@@ -582,6 +696,9 @@ func (q *Queries) ListSessionsByBotAndCreatedByUserPaged(ctx context.Context, ar
 			&i.RouteID,
 			&i.ChannelType,
 			&i.Type,
+			&i.SessionMode,
+			&i.RuntimeType,
+			&i.RuntimeMetadata,
 			&i.Title,
 			&i.Metadata,
 			&i.DefaultHeadTurnID,
@@ -607,7 +724,7 @@ func (q *Queries) ListSessionsByBotAndCreatedByUserPaged(ctx context.Context, ar
 
 const listSessionsByBotPaged = `-- name: ListSessionsByBotPaged :many
 SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
+  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
   s.default_head_turn_id, s.forked_from_session_id, s.forked_from_turn_id,
   s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
   r.metadata AS route_metadata,
@@ -646,6 +763,9 @@ type ListSessionsByBotPagedRow struct {
 	RouteID               pgtype.UUID        `json:"route_id"`
 	ChannelType           pgtype.Text        `json:"channel_type"`
 	Type                  string             `json:"type"`
+	SessionMode           string             `json:"session_mode"`
+	RuntimeType           string             `json:"runtime_type"`
+	RuntimeMetadata       []byte             `json:"runtime_metadata"`
 	Title                 string             `json:"title"`
 	Metadata              []byte             `json:"metadata"`
 	DefaultHeadTurnID     pgtype.UUID        `json:"default_head_turn_id"`
@@ -687,6 +807,9 @@ func (q *Queries) ListSessionsByBotPaged(ctx context.Context, arg ListSessionsBy
 			&i.RouteID,
 			&i.ChannelType,
 			&i.Type,
+			&i.SessionMode,
+			&i.RuntimeType,
+			&i.RuntimeMetadata,
 			&i.Title,
 			&i.Metadata,
 			&i.DefaultHeadTurnID,
@@ -711,7 +834,7 @@ func (q *Queries) ListSessionsByBotPaged(ctx context.Context, arg ListSessionsBy
 }
 
 const listSessionsByRoute = `-- name: ListSessionsByRoute :many
-SELECT id, bot_id, route_id, channel_type, type, title, metadata, default_head_turn_id, forked_from_session_id, forked_from_turn_id, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
+SELECT id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, default_head_turn_id, forked_from_session_id, forked_from_turn_id, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
 FROM bot_sessions
 WHERE route_id = $1
   AND deleted_at IS NULL
@@ -733,6 +856,9 @@ func (q *Queries) ListSessionsByRoute(ctx context.Context, routeID pgtype.UUID) 
 			&i.RouteID,
 			&i.ChannelType,
 			&i.Type,
+			&i.SessionMode,
+			&i.RuntimeType,
+			&i.RuntimeMetadata,
 			&i.Title,
 			&i.Metadata,
 			&i.DefaultHeadTurnID,
@@ -755,7 +881,7 @@ func (q *Queries) ListSessionsByRoute(ctx context.Context, routeID pgtype.UUID) 
 }
 
 const listSubagentSessionsByParent = `-- name: ListSubagentSessionsByParent :many
-SELECT id, bot_id, route_id, channel_type, type, title, metadata, default_head_turn_id, forked_from_session_id, forked_from_turn_id, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
+SELECT id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, default_head_turn_id, forked_from_session_id, forked_from_turn_id, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
 FROM bot_sessions
 WHERE parent_session_id = $1
   AND deleted_at IS NULL
@@ -777,6 +903,9 @@ func (q *Queries) ListSubagentSessionsByParent(ctx context.Context, parentSessio
 			&i.RouteID,
 			&i.ChannelType,
 			&i.Type,
+			&i.SessionMode,
+			&i.RuntimeType,
+			&i.RuntimeMetadata,
 			&i.Title,
 			&i.Metadata,
 			&i.DefaultHeadTurnID,
@@ -905,7 +1034,7 @@ WHERE s.id = input.id
         AND h.head_turn_id = input.default_head_turn_id
     )
   )
-RETURNING s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata, s.default_head_turn_id, s.forked_from_session_id, s.forked_from_turn_id, s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
+RETURNING s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata, s.default_head_turn_id, s.forked_from_session_id, s.forked_from_turn_id, s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
 `
 
 type UpdateSessionDefaultHeadTurnParams struct {
@@ -922,6 +1051,9 @@ func (q *Queries) UpdateSessionDefaultHeadTurn(ctx context.Context, arg UpdateSe
 		&i.RouteID,
 		&i.ChannelType,
 		&i.Type,
+		&i.SessionMode,
+		&i.RuntimeType,
+		&i.RuntimeMetadata,
 		&i.Title,
 		&i.Metadata,
 		&i.DefaultHeadTurnID,
@@ -949,7 +1081,7 @@ WHERE id = $2
       AND h.bot_id = bot_sessions.bot_id
       AND h.head_turn_id = $1
   )
-RETURNING id, bot_id, route_id, channel_type, type, title, metadata, default_head_turn_id, forked_from_session_id, forked_from_turn_id, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
+RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, default_head_turn_id, forked_from_session_id, forked_from_turn_id, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
 `
 
 type UpdateSessionDefaultHeadTurnIfValidParams struct {
@@ -966,6 +1098,9 @@ func (q *Queries) UpdateSessionDefaultHeadTurnIfValid(ctx context.Context, arg U
 		&i.RouteID,
 		&i.ChannelType,
 		&i.Type,
+		&i.SessionMode,
+		&i.RuntimeType,
+		&i.RuntimeMetadata,
 		&i.Title,
 		&i.Metadata,
 		&i.DefaultHeadTurnID,
@@ -984,7 +1119,7 @@ const updateSessionMetadata = `-- name: UpdateSessionMetadata :one
 UPDATE bot_sessions
 SET metadata = $1, updated_at = now()
 WHERE id = $2 AND deleted_at IS NULL
-RETURNING id, bot_id, route_id, channel_type, type, title, metadata, default_head_turn_id, forked_from_session_id, forked_from_turn_id, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
+RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, default_head_turn_id, forked_from_session_id, forked_from_turn_id, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
 `
 
 type UpdateSessionMetadataParams struct {
@@ -1001,6 +1136,9 @@ func (q *Queries) UpdateSessionMetadata(ctx context.Context, arg UpdateSessionMe
 		&i.RouteID,
 		&i.ChannelType,
 		&i.Type,
+		&i.SessionMode,
+		&i.RuntimeType,
+		&i.RuntimeMetadata,
 		&i.Title,
 		&i.Metadata,
 		&i.DefaultHeadTurnID,
@@ -1023,7 +1161,7 @@ SET parent_session_id = $1::uuid,
     default_head_turn_id = $4::uuid,
     updated_at = now()
 WHERE id = $5 AND deleted_at IS NULL
-RETURNING id, bot_id, route_id, channel_type, type, title, metadata, default_head_turn_id, forked_from_session_id, forked_from_turn_id, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
+RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, default_head_turn_id, forked_from_session_id, forked_from_turn_id, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
 `
 
 type UpdateSessionRestoredLinksParams struct {
@@ -1049,6 +1187,9 @@ func (q *Queries) UpdateSessionRestoredLinks(ctx context.Context, arg UpdateSess
 		&i.RouteID,
 		&i.ChannelType,
 		&i.Type,
+		&i.SessionMode,
+		&i.RuntimeType,
+		&i.RuntimeMetadata,
 		&i.Title,
 		&i.Metadata,
 		&i.DefaultHeadTurnID,
@@ -1067,7 +1208,7 @@ const updateSessionTitle = `-- name: UpdateSessionTitle :one
 UPDATE bot_sessions
 SET title = $1, updated_at = now()
 WHERE id = $2 AND deleted_at IS NULL
-RETURNING id, bot_id, route_id, channel_type, type, title, metadata, default_head_turn_id, forked_from_session_id, forked_from_turn_id, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
+RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, default_head_turn_id, forked_from_session_id, forked_from_turn_id, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
 `
 
 type UpdateSessionTitleParams struct {
@@ -1084,6 +1225,9 @@ func (q *Queries) UpdateSessionTitle(ctx context.Context, arg UpdateSessionTitle
 		&i.RouteID,
 		&i.ChannelType,
 		&i.Type,
+		&i.SessionMode,
+		&i.RuntimeType,
+		&i.RuntimeMetadata,
 		&i.Title,
 		&i.Metadata,
 		&i.DefaultHeadTurnID,
@@ -1100,19 +1244,34 @@ func (q *Queries) UpdateSessionTitle(ctx context.Context, arg UpdateSessionTitle
 
 const updateSessionTypeAndMetadata = `-- name: UpdateSessionTypeAndMetadata :one
 UPDATE bot_sessions
-SET type = $1, metadata = $2, updated_at = now()
-WHERE id = $3 AND deleted_at IS NULL
-RETURNING id, bot_id, route_id, channel_type, type, title, metadata, default_head_turn_id, forked_from_session_id, forked_from_turn_id, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
+SET type = $1,
+    session_mode = $2,
+    runtime_type = $3,
+    runtime_metadata = $4,
+    metadata = $5,
+    updated_at = now()
+WHERE id = $6 AND deleted_at IS NULL
+RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, default_head_turn_id, forked_from_session_id, forked_from_turn_id, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
 `
 
 type UpdateSessionTypeAndMetadataParams struct {
-	Type     string      `json:"type"`
-	Metadata []byte      `json:"metadata"`
-	ID       pgtype.UUID `json:"id"`
+	Type            string      `json:"type"`
+	SessionMode     string      `json:"session_mode"`
+	RuntimeType     string      `json:"runtime_type"`
+	RuntimeMetadata []byte      `json:"runtime_metadata"`
+	Metadata        []byte      `json:"metadata"`
+	ID              pgtype.UUID `json:"id"`
 }
 
 func (q *Queries) UpdateSessionTypeAndMetadata(ctx context.Context, arg UpdateSessionTypeAndMetadataParams) (BotSession, error) {
-	row := q.db.QueryRow(ctx, updateSessionTypeAndMetadata, arg.Type, arg.Metadata, arg.ID)
+	row := q.db.QueryRow(ctx, updateSessionTypeAndMetadata,
+		arg.Type,
+		arg.SessionMode,
+		arg.RuntimeType,
+		arg.RuntimeMetadata,
+		arg.Metadata,
+		arg.ID,
+	)
 	var i BotSession
 	err := row.Scan(
 		&i.ID,
@@ -1120,6 +1279,9 @@ func (q *Queries) UpdateSessionTypeAndMetadata(ctx context.Context, arg UpdateSe
 		&i.RouteID,
 		&i.ChannelType,
 		&i.Type,
+		&i.SessionMode,
+		&i.RuntimeType,
+		&i.RuntimeMetadata,
 		&i.Title,
 		&i.Metadata,
 		&i.DefaultHeadTurnID,
@@ -1130,6 +1292,53 @@ func (q *Queries) UpdateSessionTypeAndMetadata(ctx context.Context, arg UpdateSe
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const upsertSessionDiscussCursor = `-- name: UpsertSessionDiscussCursor :one
+INSERT INTO bot_session_discuss_cursors (
+  session_id, scope_key, route_id, source, consumed_cursor
+)
+VALUES (
+  $1,
+  $2,
+  $3::uuid,
+  $4,
+  $5
+)
+ON CONFLICT (session_id, scope_key) DO UPDATE
+SET route_id = COALESCE(EXCLUDED.route_id, bot_session_discuss_cursors.route_id),
+    source = EXCLUDED.source,
+    consumed_cursor = GREATEST(bot_session_discuss_cursors.consumed_cursor, EXCLUDED.consumed_cursor),
+    updated_at = now()
+RETURNING session_id, scope_key, route_id, source, consumed_cursor, updated_at
+`
+
+type UpsertSessionDiscussCursorParams struct {
+	SessionID      pgtype.UUID `json:"session_id"`
+	ScopeKey       string      `json:"scope_key"`
+	RouteID        pgtype.UUID `json:"route_id"`
+	Source         string      `json:"source"`
+	ConsumedCursor int64       `json:"consumed_cursor"`
+}
+
+func (q *Queries) UpsertSessionDiscussCursor(ctx context.Context, arg UpsertSessionDiscussCursorParams) (BotSessionDiscussCursor, error) {
+	row := q.db.QueryRow(ctx, upsertSessionDiscussCursor,
+		arg.SessionID,
+		arg.ScopeKey,
+		arg.RouteID,
+		arg.Source,
+		arg.ConsumedCursor,
+	)
+	var i BotSessionDiscussCursor
+	err := row.Scan(
+		&i.SessionID,
+		&i.ScopeKey,
+		&i.RouteID,
+		&i.Source,
+		&i.ConsumedCursor,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
+	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/adapters/local"
@@ -57,6 +58,8 @@ type LocalChannelHandler struct {
 	speechService       localSpeechSynthesizer
 	speechModelResolver localSpeechModelResolver
 	logger              *slog.Logger
+	jwtSecret           string
+	tokenTTL            time.Duration
 }
 
 // NewLocalChannelHandler creates a local channel handler.
@@ -77,6 +80,12 @@ func NewLocalChannelHandler(channelType channel.ChannelType, channelManager *cha
 // SetResolver sets the flow resolver for WebSocket streaming.
 func (h *LocalChannelHandler) SetResolver(resolver *flow.Resolver) {
 	h.resolver = resolver
+}
+
+// SetAuthTokenConfig configures runtime token minting for ACP-backed local WS streams.
+func (h *LocalChannelHandler) SetAuthTokenConfig(jwtSecret string, ttl time.Duration) {
+	h.jwtSecret = strings.TrimSpace(jwtSecret)
+	h.tokenTTL = ttl
 }
 
 // SetMediaService sets the media service for WebSocket attachment ingestion.
@@ -292,6 +301,7 @@ type wsOutboundEvent struct {
 	SessionID string `json:"session_id,omitempty"`
 	Data      any    `json:"data,omitempty"`
 	Message   string `json:"message,omitempty"`
+	Feedback  any    `json:"feedback,omitempty"`
 }
 
 type activeWSStream struct {
@@ -456,12 +466,42 @@ func extractRawBearerToken(c echo.Context) string {
 	return strings.TrimSpace(c.QueryParam("token"))
 }
 
+func (h *LocalChannelHandler) issueRuntimeOwnerBearerToken(runtimeOwnerAccountID, fallbackBearerToken string) string {
+	runtimeOwnerAccountID = strings.TrimSpace(runtimeOwnerAccountID)
+	if h == nil || strings.TrimSpace(h.jwtSecret) == "" || runtimeOwnerAccountID == "" || h.tokenTTL <= 0 {
+		return fallbackBearerToken
+	}
+	signed, _, err := auth.GenerateToken(runtimeOwnerAccountID, h.jwtSecret, h.tokenTTL)
+	if err != nil {
+		if h.logger != nil {
+			h.logger.Warn("issue ACP runtime token failed", slog.Any("error", err))
+		}
+		return fallbackBearerToken
+	}
+	return "Bearer " + signed
+}
+
 func sendWSError(writer *wsWriter, streamID, sessionID, message string) {
 	writer.SendJSON(wsOutboundEvent{
 		Type:      "error",
 		StreamID:  strings.TrimSpace(streamID),
 		SessionID: strings.TrimSpace(sessionID),
 		Message:   message,
+	})
+}
+
+func sendWSErrorFromError(writer *wsWriter, streamID, sessionID string, err error) {
+	feedback := acpFeedbackError(err)
+	if feedback == nil {
+		sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+		return
+	}
+	writer.SendJSON(wsOutboundEvent{
+		Type:      "error",
+		StreamID:  strings.TrimSpace(streamID),
+		SessionID: strings.TrimSpace(sessionID),
+		Message:   strings.TrimSpace(feedback.Message),
+		Feedback:  feedback,
 	})
 }
 
@@ -554,7 +594,7 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, ac
 		}()
 		if err != nil && connCtx.Err() == nil {
 			h.logger.Error("ws stream error", slog.String("operation", logLabel), slog.Any("error", err), slog.String("bot_id", botID), slog.String("session_id", sessionID))
-			sendWSError(writer, streamID, sessionID, err.Error())
+			sendWSErrorFromError(writer, streamID, sessionID, err)
 		}
 	}()
 
@@ -667,6 +707,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						BotID:                      botID,
 						SessionID:                  sessionID,
 						ActorChannelIdentityID:     channelIdentityID,
+						ActorUserID:                channelIdentityID,
 						ApprovalID:                 strings.TrimSpace(msg.ApprovalID),
 						ExplicitID:                 explicitID,
 						BaseHeadTurnID:             strings.TrimSpace(msg.BaseHeadTurnID),
@@ -705,6 +746,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						BotID:                      botID,
 						SessionID:                  sessionID,
 						ActorChannelIdentityID:     channelIdentityID,
+						ActorUserID:                channelIdentityID,
 						UserInputID:                strings.TrimSpace(msg.UserInputID),
 						ExplicitID:                 explicitID,
 						BaseHeadTurnID:             strings.TrimSpace(msg.BaseHeadTurnID),
@@ -740,6 +782,15 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
 				continue
 			}
+			acpInfo, err := h.authorizeWSACPExecution(c.Request().Context(), channelIdentityID, botID, sessionID)
+			if err != nil {
+				sendWSErrorFromError(writer, streamID, sessionID, err)
+				continue
+			}
+			streamToken := bearerToken
+			if acpInfo.IsACP {
+				streamToken = h.issueRuntimeOwnerBearerToken(acpInfo.RuntimeOwnerAccountID, bearerToken)
+			}
 
 			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws stream error",
 				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}) error {
@@ -754,11 +805,12 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						SessionID:               sessionID,
 						BaseHeadTurnID:          strings.TrimSpace(msg.BaseHeadTurnID),
 						StreamID:                streamID,
-						Token:                   bearerToken,
 						UserID:                  channelIdentityID,
 						SourceChannelIdentityID: channelIdentityID,
 						ConversationType:        channel.ConversationTypePrivate,
 						Query:                   text,
+						Token:                   streamToken,
+						ChatToken:               bearerToken,
 						CurrentChannel:          h.channelType.String(),
 						ReplyTarget:             botID,
 						Channels:                []string{h.channelType.String()},
@@ -791,6 +843,15 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
 				continue
 			}
+			acpInfo, err := h.authorizeWSACPExecution(c.Request().Context(), channelIdentityID, botID, sessionID)
+			if err != nil {
+				sendWSErrorFromError(writer, streamID, sessionID, err)
+				continue
+			}
+			streamToken := bearerToken
+			if acpInfo.IsACP {
+				streamToken = h.issueRuntimeOwnerBearerToken(acpInfo.RuntimeOwnerAccountID, bearerToken)
+			}
 
 			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws retry stream error",
 				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}) error {
@@ -800,7 +861,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						SessionID:               sessionID,
 						BaseHeadTurnID:          strings.TrimSpace(msg.BaseHeadTurnID),
 						StreamID:                streamID,
-						Token:                   bearerToken,
+						Token:                   streamToken,
 						UserID:                  channelIdentityID,
 						SourceChannelIdentityID: channelIdentityID,
 						ConversationType:        channel.ConversationTypePrivate,
@@ -840,6 +901,15 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
 				continue
 			}
+			acpInfo, err := h.authorizeWSACPExecution(c.Request().Context(), channelIdentityID, botID, sessionID)
+			if err != nil {
+				sendWSErrorFromError(writer, streamID, sessionID, err)
+				continue
+			}
+			streamToken := bearerToken
+			if acpInfo.IsACP {
+				streamToken = h.issueRuntimeOwnerBearerToken(acpInfo.RuntimeOwnerAccountID, bearerToken)
+			}
 
 			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws edit stream error",
 				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}) error {
@@ -849,7 +919,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						SessionID:               sessionID,
 						BaseHeadTurnID:          strings.TrimSpace(msg.BaseHeadTurnID),
 						StreamID:                streamID,
-						Token:                   bearerToken,
+						Token:                   streamToken,
 						UserID:                  channelIdentityID,
 						SourceChannelIdentityID: channelIdentityID,
 						ConversationType:        channel.ConversationTypePrivate,
@@ -874,6 +944,56 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 		}
 	}
 	return nil
+}
+
+func (h *LocalChannelHandler) authorizeWSACPExecution(ctx context.Context, channelIdentityID, botID, sessionID string) (flow.ACPSessionExecutionInfo, error) {
+	if h == nil || h.resolver == nil {
+		return flow.ACPSessionExecutionInfo{}, nil
+	}
+	info, err := h.resolver.ACPSessionExecutionInfo(ctx, sessionID)
+	if err != nil || !info.IsACP {
+		return info, err
+	}
+	if strings.TrimSpace(info.RuntimeOwnerAccountID) == "" {
+		feedback := acpRuntimeOwnerMissingFeedback()
+		return info, echo.NewHTTPError(feedback.HTTPStatus, feedback)
+	}
+	bot, err := AuthorizeBotAccessWithPermission(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.PermissionWorkspaceExec)
+	if err != nil {
+		if isHTTPStatus(err, http.StatusForbidden) {
+			feedback := acpNoWorkspaceExecFeedback("missing_workspace_exec", "You do not have permission to run workspace commands for this bot.")
+			return info, echo.NewHTTPError(feedback.HTTPStatus, feedback)
+		}
+		return info, err
+	}
+	if strings.TrimSpace(info.BotID) != "" && info.BotID != bot.ID {
+		return info, echo.NewHTTPError(http.StatusNotFound, "session not found")
+	}
+	perms, err := h.resolveCurrentUserPermissions(ctx, channelIdentityID, bot.ID)
+	if err != nil {
+		return info, err
+	}
+	if err := authorizeACPRuntimeSessionAccess(channelIdentityID, perms, info.RuntimeOwnerAccountID); err != nil {
+		return info, err
+	}
+	return info, nil
+}
+
+func wsErrorMessage(err error) string {
+	var httpErr *echo.HTTPError
+	if errors.As(err, &httpErr) {
+		switch msg := httpErr.Message.(type) {
+		case interface{ Error() string }:
+			return msg.Error()
+		case string:
+			return msg
+		default:
+			if msg != nil {
+				return fmt.Sprint(msg)
+			}
+		}
+	}
+	return err.Error()
 }
 
 func (h *LocalChannelHandler) ensureBotParticipant(ctx context.Context, botID, channelIdentityID string) error {
@@ -948,22 +1068,6 @@ func (h *LocalChannelHandler) resolveCurrentUserPermissions(ctx context.Context,
 		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return perms, nil
-}
-
-func wsErrorMessage(err error) string {
-	if err == nil {
-		return "unknown error"
-	}
-	var httpErr *echo.HTTPError
-	if errors.As(err, &httpErr) {
-		if msg, ok := httpErr.Message.(string); ok && strings.TrimSpace(msg) != "" {
-			return msg
-		}
-		if text := http.StatusText(httpErr.Code); text != "" {
-			return strings.ToLower(text)
-		}
-	}
-	return err.Error()
 }
 
 // ---------------------------------------------------------------------------

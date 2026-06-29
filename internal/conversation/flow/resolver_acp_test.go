@@ -14,8 +14,10 @@ import (
 
 	"github.com/memohai/memoh/internal/acpagent"
 	"github.com/memohai/memoh/internal/acpclient"
+	"github.com/memohai/memoh/internal/acpfeedback"
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/agent/event"
+	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -40,11 +42,13 @@ func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 		result: acpclient.PromptResult{
 			Text:       "done from codex",
 			StopReason: "end_turn",
+			Usage:      &sdk.Usage{InputTokens: 3, OutputTokens: 5, TotalTokens: 8},
 		},
 	}
 	resolver := &Resolver{
 		messageService: messages,
 		acpPool:        pool,
+		botPermissions: allowWorkspaceExecFor("user-1"),
 		sessionService: &fakeBackgroundSessionService{
 			getFn: func(_ context.Context, sessionID string) (session.Session, error) {
 				if sessionID != "session-1" {
@@ -55,8 +59,9 @@ func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 					BotID: "bot-1",
 					Type:  session.TypeACPAgent,
 					Metadata: map[string]any{
-						"acp_agent_id": "codex",
-						"project_path": "/data/app",
+						"acp_agent_id":             "codex",
+						"project_path":             "/data/app",
+						"runtime_owner_account_id": "user-1",
 					},
 				}, nil
 			},
@@ -96,6 +101,9 @@ func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 	if got := messages.persisted[1].Metadata["acp_agent_id"]; got != "codex" {
 		t.Fatalf("assistant acp_agent_id = %#v, want codex", got)
 	}
+	if got := persistedText(t, messages.persisted[1].Content); got != "done from codex" {
+		t.Fatalf("persisted assistant text = %q, want done from codex", got)
+	}
 
 	events := drainAgentEvents(t, eventCh)
 	if !containsStreamEvent(events, agentpkg.EventStart) || !containsStreamEvent(events, agentpkg.EventEnd) {
@@ -103,6 +111,311 @@ func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 	}
 	if !containsTextDelta(events, "streamed from acp") {
 		t.Fatalf("events = %#v, want ACP stream delta", events)
+	}
+	end := requireStreamEvent(t, events, agentpkg.EventEnd)
+	if got := terminalAssistantText(t, end); got != "done from codex" {
+		t.Fatalf("terminal assistant text = %q, want done from codex", got)
+	}
+	var usage sdk.Usage
+	if err := json.Unmarshal(end.Usage, &usage); err != nil {
+		t.Fatalf("decode terminal usage: %v", err)
+	}
+	if usage.InputTokens != 3 || usage.OutputTokens != 5 || usage.TotalTokens != 8 {
+		t.Fatalf("terminal usage = %+v, want input=3 output=5 total=8", usage)
+	}
+}
+
+func TestStreamChatWSRejectsACPBotMismatchBeforePersistence(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	pool := &recordingACPPrompter{}
+	resolver := &Resolver{
+		messageService: messages,
+		acpPool:        pool,
+		botPermissions: allowWorkspaceExecFor("user-1"),
+		sessionService: &fakeBackgroundSessionService{
+			getFn: func(_ context.Context, sessionID string) (session.Session, error) {
+				if sessionID != "session-1" {
+					t.Fatalf("unexpected session id: %s", sessionID)
+				}
+				return session.Session{
+					ID:    "session-1",
+					BotID: "bot-2",
+					Type:  session.TypeACPAgent,
+					Metadata: map[string]any{
+						"acp_agent_id":             "codex",
+						"project_path":             "/data/app",
+						"runtime_owner_account_id": "user-1",
+					},
+				}, nil
+			},
+		},
+		logger: slog.New(slog.DiscardHandler),
+	}
+
+	err := resolver.StreamChatWS(
+		context.Background(),
+		conversation.ChatRequest{
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			Query:     "inspect the app",
+		},
+		make(chan WSStreamEvent, 8),
+		make(chan struct{}),
+	)
+	if err == nil {
+		t.Fatal("StreamChatWS() error = nil, want bot mismatch")
+	}
+	if pool.calls != 0 {
+		t.Fatalf("ACP pool calls = %d, want 0", pool.calls)
+	}
+	if len(messages.persisted) != 0 {
+		t.Fatalf("persisted %d messages, want 0", len(messages.persisted))
+	}
+}
+
+func TestStreamChatWSRejectsConcurrentACPPromptForSameSession(t *testing.T) {
+	t.Parallel()
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	pool := &recordingACPPrompter{
+		result: acpclient.PromptResult{Text: "done", StopReason: "end_turn"},
+		onPrompt: func() {
+			close(started)
+			<-release
+		},
+	}
+	resolver := &Resolver{
+		messageService: &recordingMessageService{},
+		acpPool:        pool,
+		botPermissions: allowWorkspaceExecFor("user-1"),
+		sessionService: &fakeBackgroundSessionService{
+			getFn: func(_ context.Context, sessionID string) (session.Session, error) {
+				return session.Session{
+					ID:    sessionID,
+					BotID: "bot-1",
+					Type:  session.TypeACPAgent,
+					Metadata: map[string]any{
+						"acp_agent_id":             "codex",
+						"project_path":             "/data/app",
+						"runtime_owner_account_id": "user-1",
+					},
+				}, nil
+			},
+		},
+		logger: slog.New(slog.DiscardHandler),
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- resolver.StreamChatWS(
+			context.Background(),
+			conversation.ChatRequest{BotID: "bot-1", SessionID: "session-1", Query: "first"},
+			make(chan WSStreamEvent, 8),
+			make(chan struct{}),
+		)
+	}()
+	<-started
+
+	err := resolver.StreamChatWS(
+		context.Background(),
+		conversation.ChatRequest{BotID: "bot-1", SessionID: "session-1", Query: "second"},
+		make(chan WSStreamEvent, 8),
+		make(chan struct{}),
+	)
+	if err == nil {
+		t.Fatal("second StreamChatWS() error = nil, want busy feedback")
+	}
+	var feedback *acpfeedback.Error
+	if !errors.As(err, &feedback) || feedback.Code != acpfeedback.CodeRuntimeBusy || feedback.HTTPStatus != 409 {
+		t.Fatalf("second StreamChatWS() error = %v, want runtime busy feedback", err)
+	}
+
+	close(release)
+	if err := <-errCh; err != nil {
+		t.Fatalf("first StreamChatWS() error = %v", err)
+	}
+	if pool.calls != 1 {
+		t.Fatalf("ACP pool calls = %d, want only first prompt to reach pool", pool.calls)
+	}
+}
+
+func TestStreamChatRoutesACPAgentSessionToACPPool(t *testing.T) {
+	t.Parallel()
+
+	pool := &recordingACPPrompter{
+		result: acpclient.PromptResult{
+			Text:       "done from codex",
+			StopReason: "end_turn",
+		},
+	}
+	resolver := &Resolver{
+		messageService: &recordingMessageService{},
+		acpPool:        pool,
+		botPermissions: allowWorkspaceExecFor("user-1"),
+		sessionService: &fakeBackgroundSessionService{
+			getFn: func(_ context.Context, sessionID string) (session.Session, error) {
+				if sessionID != "session-1" {
+					t.Fatalf("unexpected session id: %s", sessionID)
+				}
+				return session.Session{
+					ID:    "session-1",
+					BotID: "bot-1",
+					Type:  session.TypeACPAgent,
+					Metadata: map[string]any{
+						"acp_agent_id":             "codex",
+						"project_path":             "/data/app",
+						"runtime_owner_account_id": "user-1",
+					},
+				}, nil
+			},
+		},
+		logger: slog.New(slog.DiscardHandler),
+	}
+
+	chunks, errs := resolver.StreamChat(context.Background(), conversation.ChatRequest{
+		BotID:     "bot-1",
+		SessionID: "session-1",
+		Query:     "inspect the app",
+	})
+	events := drainStreamChunks(t, chunks)
+	if err := <-errs; err != nil {
+		t.Fatalf("StreamChat() error = %v", err)
+	}
+	if pool.calls != 1 {
+		t.Fatalf("ACP pool calls = %d, want 1", pool.calls)
+	}
+	if pool.input.BotID != "bot-1" || pool.input.SessionID != "session-1" || pool.input.AgentID != "codex" || pool.input.ProjectPath != "/data/app" {
+		t.Fatalf("ACP prompt input = %#v", pool.input)
+	}
+	if !containsStreamEvent(events, agentpkg.EventStart) || !containsStreamEvent(events, agentpkg.EventEnd) {
+		t.Fatalf("events = %#v, want agent start/end", events)
+	}
+	if !containsTextDelta(events, "streamed from acp") {
+		t.Fatalf("events = %#v, want ACP stream delta", events)
+	}
+	end := requireStreamEvent(t, events, agentpkg.EventEnd)
+	if got := terminalAssistantText(t, end); got != "done from codex" {
+		t.Fatalf("terminal assistant text = %q, want done from codex", got)
+	}
+}
+
+func TestStreamChatRoutesDiscussACPRuntimeSessionToACPPool(t *testing.T) {
+	t.Parallel()
+
+	pool := &recordingACPPrompter{
+		result: acpclient.PromptResult{
+			Text:       "done from codex",
+			StopReason: "end_turn",
+		},
+	}
+	resolver := &Resolver{
+		messageService: &recordingMessageService{},
+		acpPool:        pool,
+		botPermissions: allowWorkspaceExecFor("user-1"),
+		sessionService: &fakeBackgroundSessionService{
+			getFn: func(_ context.Context, sessionID string) (session.Session, error) {
+				if sessionID != "session-1" {
+					t.Fatalf("unexpected session id: %s", sessionID)
+				}
+				return session.Session{
+					ID:          "session-1",
+					BotID:       "bot-1",
+					Type:        session.TypeDiscuss,
+					SessionMode: session.TypeDiscuss,
+					RuntimeType: session.RuntimeACPAgent,
+					RuntimeMetadata: map[string]any{
+						"acp_agent_id":             "codex",
+						"project_path":             "/data/app",
+						"runtime_owner_account_id": "user-1",
+					},
+				}, nil
+			},
+		},
+		logger: slog.New(slog.DiscardHandler),
+	}
+
+	chunks, errs := resolver.StreamChat(context.Background(), conversation.ChatRequest{
+		BotID:     "bot-1",
+		SessionID: "session-1",
+		Query:     "inspect the group thread",
+	})
+	events := drainStreamChunks(t, chunks)
+	if err := <-errs; err != nil {
+		t.Fatalf("StreamChat() error = %v", err)
+	}
+	if pool.calls != 1 {
+		t.Fatalf("ACP pool calls = %d, want 1", pool.calls)
+	}
+	if pool.input.BotID != "bot-1" || pool.input.SessionID != "session-1" || pool.input.AgentID != "codex" || pool.input.ProjectPath != "/data/app" {
+		t.Fatalf("ACP prompt input = %#v", pool.input)
+	}
+	if !containsStreamEvent(events, agentpkg.EventStart) || !containsStreamEvent(events, agentpkg.EventEnd) {
+		t.Fatalf("events = %#v, want agent start/end", events)
+	}
+	if !containsTextDelta(events, "streamed from acp") {
+		t.Fatalf("events = %#v, want ACP stream delta", events)
+	}
+}
+
+func TestACPTerminalStreamEventFallsBackToTranscriptEvents(t *testing.T) {
+	t.Parallel()
+
+	ev := acpTerminalStreamEvent(agentpkg.EventEnd, acpclient.PromptResult{
+		Events: []event.StreamEvent{{Type: event.TextDelta, Delta: "from transcript"}},
+		Usage:  &sdk.Usage{InputTokens: 2, OutputTokens: 4, TotalTokens: 6},
+	})
+
+	if ev.Type != agentpkg.EventEnd {
+		t.Fatalf("terminal event type = %s, want %s", ev.Type, agentpkg.EventEnd)
+	}
+	if got := terminalAssistantText(t, ev); got != "from transcript" {
+		t.Fatalf("terminal assistant text = %q, want from transcript", got)
+	}
+	var usage sdk.Usage
+	if err := json.Unmarshal(ev.Usage, &usage); err != nil {
+		t.Fatalf("decode terminal usage: %v", err)
+	}
+	if usage.InputTokens != 2 || usage.OutputTokens != 4 || usage.TotalTokens != 6 {
+		t.Fatalf("terminal usage = %+v, want input=2 output=4 total=6", usage)
+	}
+}
+
+func TestStreamACPAgentWSRechecksRuntimeOwnerWorkspaceExecBeforePrompt(t *testing.T) {
+	t.Parallel()
+
+	pool := &recordingACPPrompter{
+		result: acpclient.PromptResult{
+			Text:       "should not run",
+			StopReason: "end_turn",
+		},
+	}
+	resolver := &Resolver{
+		messageService: &recordingMessageService{},
+		acpPool:        pool,
+		botPermissions: &fakeBotPermissionChecker{values: map[string]bool{}},
+		sessionService: acpRuntimeSessionServiceForTest("user-1"),
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	err := resolver.streamACPAgentWS(
+		context.Background(),
+		conversation.ChatRequest{
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			Query:     "inspect the app",
+		},
+		make(chan WSStreamEvent, 8),
+		make(chan struct{}),
+	)
+	var feedback *acpfeedback.Error
+	if !errors.As(err, &feedback) || feedback.Code != acpfeedback.CodeNoWorkspaceExec || feedback.HTTPStatus != 403 {
+		t.Fatalf("streamACPAgentWS() error = %v, want no_workspace_exec feedback", err)
+	}
+	if pool.calls != 0 {
+		t.Fatalf("ACP pool calls = %d, want 0 when runtime owner lost workspace_exec", pool.calls)
 	}
 }
 
@@ -221,6 +534,7 @@ func TestStreamChatWSPersistsACPUserInputProjectionBeforePromptReturns(t *testin
 	resolver := &Resolver{
 		messageService: messages,
 		acpPool:        pool,
+		botPermissions: allowWorkspaceExecFor("user-1"),
 		sessionService: &fakeBackgroundSessionService{
 			getFn: func(_ context.Context, sessionID string) (session.Session, error) {
 				return session.Session{
@@ -228,8 +542,9 @@ func TestStreamChatWSPersistsACPUserInputProjectionBeforePromptReturns(t *testin
 					BotID: "bot-1",
 					Type:  session.TypeACPAgent,
 					Metadata: map[string]any{
-						"acp_agent_id": "codex",
-						"project_path": "/data/app",
+						"acp_agent_id":             "codex",
+						"project_path":             "/data/app",
+						"runtime_owner_account_id": "user-1",
 					},
 				}, nil
 			},
@@ -253,6 +568,11 @@ func TestStreamChatWSPersistsACPUserInputProjectionBeforePromptReturns(t *testin
 
 	if len(messages.persisted) != 4 {
 		t.Fatalf("persisted %d messages, want user + pending projection + terminal projection + final assistant", len(messages.persisted))
+	}
+	for i := 1; i < len(messages.persisted); i++ {
+		if messages.persisted[i].TurnID != "33333333-3333-3333-3333-333333333333" {
+			t.Fatalf("persisted[%d].TurnID = %q, want ACP turn id", i, messages.persisted[i].TurnID)
+		}
 	}
 	pendingProjection := persistedModelMessage(t, messages.persisted[1].Content)
 	pendingCalls := extractAssistantToolCallParts(pendingProjection)
@@ -340,6 +660,7 @@ func TestStreamChatWSPersistsACPApprovalProjectionTerminalState(t *testing.T) {
 	resolver := &Resolver{
 		messageService: messages,
 		acpPool:        pool,
+		botPermissions: allowWorkspaceExecFor("user-1"),
 		sessionService: &fakeBackgroundSessionService{
 			getFn: func(_ context.Context, sessionID string) (session.Session, error) {
 				return session.Session{
@@ -347,8 +668,9 @@ func TestStreamChatWSPersistsACPApprovalProjectionTerminalState(t *testing.T) {
 					BotID: "bot-1",
 					Type:  session.TypeACPAgent,
 					Metadata: map[string]any{
-						"acp_agent_id": "codex",
-						"project_path": "/data/app",
+						"acp_agent_id":             "codex",
+						"project_path":             "/data/app",
+						"runtime_owner_account_id": "user-1",
 					},
 				}, nil
 			},
@@ -372,6 +694,11 @@ func TestStreamChatWSPersistsACPApprovalProjectionTerminalState(t *testing.T) {
 
 	if len(messages.persisted) != 4 {
 		t.Fatalf("persisted %d messages, want user + pending approval projection + terminal approval projection + final assistant", len(messages.persisted))
+	}
+	for i := 1; i < len(messages.persisted); i++ {
+		if messages.persisted[i].TurnID != "33333333-3333-3333-3333-333333333333" {
+			t.Fatalf("persisted[%d].TurnID = %q, want ACP turn id", i, messages.persisted[i].TurnID)
+		}
 	}
 	pendingProjection := persistedModelMessage(t, messages.persisted[1].Content)
 	pendingCalls := extractAssistantToolCallParts(pendingProjection)
@@ -415,6 +742,108 @@ func TestStreamChatWSPersistsACPApprovalProjectionTerminalState(t *testing.T) {
 	}
 }
 
+func TestAuthorizeACPToolApprovalRequiresRuntimeOwnerOrManage(t *testing.T) {
+	t.Parallel()
+
+	const (
+		ownerID   = "owner-user"
+		otherID   = "other-user"
+		managerID = "manager-user"
+	)
+	perms := &fakeBotPermissionChecker{
+		values: map[string]bool{
+			"bot-1:" + ownerID + ":" + bots.PermissionWorkspaceExec: true,
+			"bot-1:" + otherID + ":" + bots.PermissionWorkspaceExec: true,
+			"bot-1:" + managerID + ":" + bots.PermissionManage:      true,
+		},
+	}
+	resolver := &Resolver{
+		botPermissions: perms,
+		sessionService: &fakeBackgroundSessionService{
+			getFn: func(_ context.Context, sessionID string) (session.Session, error) {
+				return session.Session{
+					ID:          sessionID,
+					BotID:       "bot-1",
+					Type:        session.TypeACPAgent,
+					RuntimeType: session.RuntimeACPAgent,
+					RuntimeMetadata: map[string]any{
+						"runtime_owner_account_id": ownerID,
+					},
+				}, nil
+			},
+		},
+	}
+	target := toolapproval.Request{BotID: "bot-1", SessionID: "session-1"}
+
+	if err := resolver.authorizeACPToolApprovalResponse(context.Background(), target, ToolApprovalResponseInput{ActorUserID: ownerID}); err != nil {
+		t.Fatalf("owner authorization error = %v", err)
+	}
+	if err := resolver.authorizeACPToolApprovalResponse(context.Background(), target, ToolApprovalResponseInput{ActorUserID: managerID}); !errors.Is(err, toolapproval.ErrForbidden) {
+		t.Fatalf("manager authorization error = %v, want forbidden", err)
+	}
+	if err := resolver.authorizeACPToolApprovalResponse(context.Background(), target, ToolApprovalResponseInput{ActorUserID: otherID}); !errors.Is(err, toolapproval.ErrForbidden) {
+		t.Fatalf("other user authorization error = %v, want forbidden", err)
+	}
+}
+
+func TestAuthorizeACPUserInputAllowsChatResponderWhenRuntimeOwnerStillAuthorized(t *testing.T) {
+	t.Parallel()
+
+	const (
+		ownerID      = "owner-user"
+		chatMemberID = "chat-member-user"
+		otherID      = "other-user"
+		managerID    = "manager-user"
+		workspaceID  = "workspace-user"
+	)
+	perms := &fakeBotPermissionChecker{
+		values: map[string]bool{
+			"bot-1:" + ownerID + ":" + bots.PermissionWorkspaceExec:     true,
+			"bot-1:" + chatMemberID + ":" + bots.PermissionChat:         true,
+			"bot-1:" + workspaceID + ":" + bots.PermissionWorkspaceExec: true,
+			"bot-1:" + managerID + ":" + bots.PermissionManage:          true,
+		},
+	}
+	resolver := &Resolver{
+		botPermissions: perms,
+		sessionService: &fakeBackgroundSessionService{
+			getFn: func(_ context.Context, sessionID string) (session.Session, error) {
+				return session.Session{
+					ID:          sessionID,
+					BotID:       "bot-1",
+					Type:        session.TypeACPAgent,
+					RuntimeType: session.RuntimeACPAgent,
+					RuntimeMetadata: map[string]any{
+						"runtime_owner_account_id": ownerID,
+					},
+				}, nil
+			},
+		},
+	}
+	target := userinput.Request{BotID: "bot-1", SessionID: "session-1"}
+
+	if err := resolver.authorizeACPUserInputResponse(context.Background(), target, UserInputResponseInput{ActorUserID: ownerID}); err != nil {
+		t.Fatalf("owner authorization error = %v", err)
+	}
+	if err := resolver.authorizeACPUserInputResponse(context.Background(), target, UserInputResponseInput{ActorUserID: managerID}); !errors.Is(err, userinput.ErrForbidden) {
+		t.Fatalf("manager authorization error = %v, want forbidden", err)
+	}
+	if err := resolver.authorizeACPUserInputResponse(context.Background(), target, UserInputResponseInput{ActorUserID: chatMemberID}); !errors.Is(err, userinput.ErrForbidden) {
+		t.Fatalf("chat member authorization error = %v, want forbidden", err)
+	}
+	if err := resolver.authorizeACPUserInputResponse(context.Background(), target, UserInputResponseInput{ActorUserID: workspaceID}); !errors.Is(err, userinput.ErrForbidden) {
+		t.Fatalf("workspace-only user authorization error = %v, want forbidden", err)
+	}
+	if err := resolver.authorizeACPUserInputResponse(context.Background(), target, UserInputResponseInput{ActorUserID: otherID}); !errors.Is(err, userinput.ErrForbidden) {
+		t.Fatalf("other user authorization error = %v, want forbidden", err)
+	}
+
+	delete(perms.values, "bot-1:"+ownerID+":"+bots.PermissionWorkspaceExec)
+	if err := resolver.authorizeACPUserInputResponse(context.Background(), target, UserInputResponseInput{ActorUserID: ownerID}); !errors.Is(err, userinput.ErrForbidden) {
+		t.Fatalf("owner authorization with revoked workspace_exec error = %v, want forbidden", err)
+	}
+}
+
 func TestStreamACPAgentWSRequestsAutoTitle(t *testing.T) {
 	t.Parallel()
 
@@ -429,6 +858,7 @@ func TestStreamACPAgentWSRequestsAutoTitle(t *testing.T) {
 	resolver := &Resolver{
 		messageService: messages,
 		acpPool:        pool,
+		botPermissions: allowWorkspaceExecFor("user-1"),
 		sessionService: &fakeBackgroundSessionService{
 			getFn: func(_ context.Context, sessionID string) (session.Session, error) {
 				recordSessionGet(sessionGets, sessionID)
@@ -437,8 +867,9 @@ func TestStreamACPAgentWSRequestsAutoTitle(t *testing.T) {
 					BotID: "bot-1",
 					Type:  session.TypeACPAgent,
 					Metadata: map[string]any{
-						"acp_agent_id": "codex",
-						"project_path": "/data/app",
+						"acp_agent_id":             "codex",
+						"project_path":             "/data/app",
+						"runtime_owner_account_id": "user-1",
 					},
 				}, nil
 			},
@@ -683,6 +1114,41 @@ func TestPersistACPRoundEmptyTextLeavesAssistantBlank(t *testing.T) {
 	}
 }
 
+func TestPersistACPRoundEmptyOutputKeepsUsage(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+	if err := resolver.persistACPRound(
+		context.Background(),
+		conversation.ChatRequest{BotID: "bot-1", SessionID: "session-1", Query: "run"},
+		"codex",
+		"/data/app",
+		acpclient.PromptResult{
+			Usage: &sdk.Usage{
+				InputTokens:  9,
+				OutputTokens: 4,
+			},
+		},
+		nil,
+	); err != nil {
+		t.Fatalf("persistACPRound() error = %v", err)
+	}
+	if len(messages.persisted) != 2 {
+		t.Fatalf("persisted %d messages, want 2", len(messages.persisted))
+	}
+	var usage sdk.Usage
+	if err := json.Unmarshal(messages.persisted[1].Usage, &usage); err != nil {
+		t.Fatalf("decode usage: %v", err)
+	}
+	if usage.InputTokens != 9 || usage.OutputTokens != 4 {
+		t.Fatalf("usage = %+v, want input=9 output=4", usage)
+	}
+}
+
 func TestStreamACPAgentWSFailurePersistsRoundAndSkipsMemory(t *testing.T) {
 	t.Parallel()
 
@@ -696,6 +1162,7 @@ func TestStreamACPAgentWSFailurePersistsRoundAndSkipsMemory(t *testing.T) {
 		memoryRegistry:  registry,
 		settingsService: settings.NewService(slog.New(slog.DiscardHandler), &storeRoundSettingsQueries{}, nil, nil),
 		acpPool:         pool,
+		botPermissions:  allowWorkspaceExecForBot(storeRoundBotID, "user-1"),
 		sessionService: &fakeBackgroundSessionService{
 			getFn: func(_ context.Context, sessionID string) (session.Session, error) {
 				return session.Session{
@@ -703,8 +1170,9 @@ func TestStreamACPAgentWSFailurePersistsRoundAndSkipsMemory(t *testing.T) {
 					BotID: storeRoundBotID,
 					Type:  session.TypeACPAgent,
 					Metadata: map[string]any{
-						"acp_agent_id": "codex",
-						"project_path": "/data/app",
+						"acp_agent_id":             "codex",
+						"project_path":             "/data/app",
+						"runtime_owner_account_id": "user-1",
 					},
 				}, nil
 			},
@@ -729,20 +1197,84 @@ func TestStreamACPAgentWSFailurePersistsRoundAndSkipsMemory(t *testing.T) {
 	if len(messages.persisted) != 2 {
 		t.Fatalf("persisted %d messages, want user + assistant", len(messages.persisted))
 	}
-	if got := persistedText(t, messages.persisted[1].Content); !strings.Contains(got, "missing codex-acp") {
-		t.Fatalf("assistant failure text = %q, want raw upstream error", got)
+	if got := persistedText(t, messages.persisted[1].Content); got != "ACP agent failed to complete the turn. Please retry." {
+		t.Fatalf("assistant failure text = %q, want sanitized user-facing error", got)
 	}
-	if got, _ := messages.persisted[1].Metadata["error"].(string); !strings.Contains(got, "missing codex-acp") {
-		t.Fatalf("assistant error metadata = %#v", messages.persisted[1].Metadata)
+	if got, _ := messages.persisted[1].Metadata["error"].(string); got != "ACP agent failed to complete the turn. Please retry." {
+		t.Fatalf("assistant error metadata = %#v, want sanitized message", messages.persisted[1].Metadata)
+	}
+	if got, _ := messages.persisted[1].Metadata["error_code"].(string); got != "acp_runtime_prompt_failed" {
+		t.Fatalf("assistant error code metadata = %#v", messages.persisted[1].Metadata)
 	}
 	events := drainAgentEvents(t, eventCh)
-	if !containsStreamEvent(events, agentpkg.EventAbort) {
-		t.Fatalf("events = %#v, want agent abort", events)
+	abort := requireStreamEvent(t, events, agentpkg.EventAbort)
+	if got := terminalAssistantText(t, abort); got != "ACP agent failed to complete the turn. Please retry." {
+		t.Fatalf("terminal abort assistant text = %q, want sanitized failure", got)
 	}
 	select {
 	case got := <-memory.afterChat:
 		t.Fatalf("memory was called for ACP stream despite SkipMemory=true: %#v", got)
 	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestStreamACPAgentWSFeedbackErrorSkipsPersistence(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	feedback := acpfeedback.New(
+		acpfeedback.CodeAgentNotConfigured,
+		"agent_not_configured",
+		400,
+		"chat.acp.agentNotConfigured",
+		"External agent setup is incomplete for this bot.",
+		nil,
+	)
+	pool := &recordingACPPrompter{err: feedback}
+	resolver := &Resolver{
+		messageService: messages,
+		acpPool:        pool,
+		botPermissions: allowWorkspaceExecFor("user-1"),
+		sessionService: &fakeBackgroundSessionService{
+			getFn: func(_ context.Context, sessionID string) (session.Session, error) {
+				return session.Session{
+					ID:    sessionID,
+					BotID: "bot-1",
+					Type:  session.TypeACPAgent,
+					Metadata: map[string]any{
+						"acp_agent_id":             "codex",
+						"project_path":             "/data/app",
+						"runtime_owner_account_id": "user-1",
+					},
+				}, nil
+			},
+		},
+		logger: slog.New(slog.DiscardHandler),
+	}
+
+	eventCh := make(chan WSStreamEvent, 8)
+	err := resolver.streamACPAgentWS(
+		context.Background(),
+		conversation.ChatRequest{
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			Query:     "inspect",
+		},
+		eventCh,
+		make(chan struct{}),
+	)
+	if !errors.Is(err, feedback) {
+		t.Fatalf("streamACPAgentWS() error = %v, want feedback error", err)
+	}
+	if len(messages.persisted) > 1 {
+		t.Fatalf("persisted %d messages, want at most the user turn for feedback error", len(messages.persisted))
+	}
+	if len(messages.persisted) == 1 && messages.persisted[0].Role != "user" {
+		t.Fatalf("persisted role = %q, want no assistant failure text for feedback error", messages.persisted[0].Role)
+	}
+	events := drainAgentEvents(t, eventCh)
+	if !containsStreamEvent(events, agentpkg.EventStart) || containsStreamEvent(events, agentpkg.EventAbort) {
+		t.Fatalf("events = %#v, want only startup event before feedback return", events)
 	}
 }
 
@@ -763,6 +1295,7 @@ func TestStreamACPAgentWSSuccessStoresMemory(t *testing.T) {
 		memoryRegistry:  registry,
 		settingsService: settings.NewService(slog.New(slog.DiscardHandler), &storeRoundSettingsQueries{}, nil, nil),
 		acpPool:         pool,
+		botPermissions:  allowWorkspaceExecForBot(storeRoundBotID, "user-1"),
 		sessionService: &fakeBackgroundSessionService{
 			getFn: func(_ context.Context, sessionID string) (session.Session, error) {
 				return session.Session{
@@ -770,8 +1303,9 @@ func TestStreamACPAgentWSSuccessStoresMemory(t *testing.T) {
 					BotID: storeRoundBotID,
 					Type:  session.TypeACPAgent,
 					Metadata: map[string]any{
-						"acp_agent_id": "codex",
-						"project_path": "/data/app",
+						"acp_agent_id":             "codex",
+						"project_path":             "/data/app",
+						"runtime_owner_account_id": "user-1",
 					},
 				}, nil
 			},
@@ -808,29 +1342,29 @@ func TestStreamACPAgentWSSuccessStoresMemory(t *testing.T) {
 	}
 }
 
-func TestACPFailureResultPreservesPartialOutput(t *testing.T) {
+func TestACPFailureResultSanitizesGenericRuntimeErrors(t *testing.T) {
 	t.Parallel()
 
 	partial := acpclient.PromptResult{
 		Text: "partial answer",
 	}
 	got, delta := acpFailureResult(partial, errors.New("adapter crashed"))
-	if !strings.Contains(got.Text, "partial answer") || !strings.Contains(got.Text, "adapter crashed") {
-		t.Fatalf("acpFailureResult() = %#v, want partial output preserved", got)
+	if !strings.Contains(got.Text, "partial answer") || !strings.Contains(got.Text, "ACP agent failed to complete the turn. Please retry.") {
+		t.Fatalf("acpFailureResult() = %#v, want partial output plus sanitized failure", got)
 	}
-	if !strings.Contains(delta, "adapter crashed") {
-		t.Fatalf("failure delta = %q, want raw upstream error", delta)
+	if strings.Contains(got.Text, "adapter crashed") || strings.Contains(delta, "adapter crashed") {
+		t.Fatalf("generic failure leaked raw upstream error: text=%q delta=%q", got.Text, delta)
 	}
 
 	empty, delta := acpFailureResult(acpclient.PromptResult{}, errors.New("missing codex-acp"))
 	if empty.Text == "" {
-		t.Fatalf("empty failure result should contain the upstream error text")
+		t.Fatalf("empty failure result should contain a user-facing error")
 	}
 	if empty.Text != delta {
 		t.Fatalf("empty failure result text = %q, delta = %q; want same visible text", empty.Text, delta)
 	}
-	if empty.Text != "missing codex-acp" {
-		t.Fatalf("empty failure result text = %q, want exact upstream error", empty.Text)
+	if empty.Text != "ACP agent failed to complete the turn. Please retry." {
+		t.Fatalf("empty failure result text = %q, want sanitized error", empty.Text)
 	}
 }
 
@@ -1139,7 +1673,7 @@ func (p *recordingACPPrompter) Prompt(_ context.Context, input acpagent.PromptIn
 	}
 	if input.Sink != nil {
 		events := p.streamEvents
-		if len(events) == 0 {
+		if len(events) == 0 && p.err == nil {
 			events = []event.StreamEvent{{Type: event.TextDelta, Delta: "streamed from acp"}}
 		}
 		for _, ev := range events {
@@ -1150,6 +1684,45 @@ func (p *recordingACPPrompter) Prompt(_ context.Context, input acpagent.PromptIn
 		p.afterEvents()
 	}
 	return p.result, p.err
+}
+
+type fakeBotPermissionChecker struct {
+	values map[string]bool
+	err    error
+}
+
+func allowWorkspaceExecFor(accountID string) *fakeBotPermissionChecker {
+	return allowWorkspaceExecForBot("bot-1", accountID)
+}
+
+func allowWorkspaceExecForBot(botID, accountID string) *fakeBotPermissionChecker {
+	return &fakeBotPermissionChecker{values: map[string]bool{
+		strings.TrimSpace(botID) + ":" + strings.TrimSpace(accountID) + ":" + bots.PermissionWorkspaceExec: true,
+	}}
+}
+
+func (f *fakeBotPermissionChecker) HasBotPermission(_ context.Context, botID, accountID, permission string) (bool, error) {
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.values[strings.TrimSpace(botID)+":"+strings.TrimSpace(accountID)+":"+strings.TrimSpace(permission)], nil
+}
+
+func acpRuntimeSessionServiceForTest(runtimeOwnerAccountID string) *fakeBackgroundSessionService {
+	return &fakeBackgroundSessionService{
+		getFn: func(_ context.Context, sessionID string) (session.Session, error) {
+			return session.Session{
+				ID:    sessionID,
+				BotID: "bot-1",
+				Type:  session.TypeACPAgent,
+				Metadata: map[string]any{
+					"acp_agent_id":             "codex",
+					"project_path":             "/data/app",
+					"runtime_owner_account_id": strings.TrimSpace(runtimeOwnerAccountID),
+				},
+			}, nil
+		},
+	}
 }
 
 func drainAgentEvents(t *testing.T, eventCh <-chan WSStreamEvent) []agentpkg.StreamEvent {
@@ -1165,6 +1738,19 @@ func drainAgentEvents(t *testing.T, eventCh <-chan WSStreamEvent) []agentpkg.Str
 	return events
 }
 
+func drainStreamChunks(t *testing.T, chunkCh <-chan conversation.StreamChunk) []agentpkg.StreamEvent {
+	t.Helper()
+	var events []agentpkg.StreamEvent
+	for chunk := range chunkCh {
+		var event agentpkg.StreamEvent
+		if err := json.Unmarshal(chunk, &event); err != nil {
+			t.Fatalf("decode stream chunk: %v", err)
+		}
+		events = append(events, event)
+	}
+	return events
+}
+
 func containsStreamEvent(events []agentpkg.StreamEvent, eventType agentpkg.StreamEventType) bool {
 	for _, event := range events {
 		if event.Type == eventType {
@@ -1172,6 +1758,32 @@ func containsStreamEvent(events []agentpkg.StreamEvent, eventType agentpkg.Strea
 		}
 	}
 	return false
+}
+
+func requireStreamEvent(t *testing.T, events []agentpkg.StreamEvent, eventType agentpkg.StreamEventType) agentpkg.StreamEvent {
+	t.Helper()
+	for _, event := range events {
+		if event.Type == eventType {
+			return event
+		}
+	}
+	t.Fatalf("events = %#v, want %s", events, eventType)
+	return agentpkg.StreamEvent{}
+}
+
+func terminalAssistantText(t *testing.T, event agentpkg.StreamEvent) string {
+	t.Helper()
+	var messages []conversation.ModelMessage
+	if err := json.Unmarshal(event.Messages, &messages); err != nil {
+		t.Fatalf("decode terminal messages: %v", err)
+	}
+	for _, msg := range messages {
+		if msg.Role == "assistant" {
+			return strings.TrimSpace(msg.TextContent())
+		}
+	}
+	t.Fatalf("terminal messages = %#v, want assistant message", messages)
+	return ""
 }
 
 func containsTextDelta(events []agentpkg.StreamEvent, delta string) bool {

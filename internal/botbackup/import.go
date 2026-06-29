@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -32,6 +33,7 @@ import (
 	providerpkg "github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/schedule"
 	searchpkg "github.com/memohai/memoh/internal/searchproviders"
+	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
 )
 
@@ -631,7 +633,7 @@ func (s *Service) applyRestore(ctx context.Context, actorUserID, targetBotID str
 	if opts.wants(SectionHistory) {
 		replace := opts.strategyFor(SectionHistory) == StrategyReplace
 		if err := restore("history import failed", func() error {
-			return s.restoreHistory(ctx, targetBotID, state, opts.wants(SectionAssets), replace)
+			return s.restoreHistory(ctx, actorUserID, targetBotID, state, opts.wants(SectionAssets), replace)
 		}); err != nil {
 			return err
 		}
@@ -903,6 +905,10 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 				eff.Language = current.Language
 				eff.AclDefaultEffect = current.AclDefaultEffect
 				eff.Timezone = current.Timezone
+				eff.ChatRuntime = current.ChatRuntime
+				eff.ChatACPAgentID = current.ChatACPAgentID
+				eff.ChatACPProjectPath = current.ChatACPProjectPath
+				eff.ChatACPProjectMode = current.ChatACPProjectMode
 				eff.ReasoningEnabled = current.ReasoningEnabled
 				eff.ReasoningEffort = current.ReasoningEffort
 				eff.HeartbeatEnabled = current.HeartbeatEnabled
@@ -947,6 +953,10 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 	fetchProviderID := modelID(eff.FetchProviderID, deps.fetchProviders)
 	_, err := s.settings.UpsertBot(ctx, botID, settings.UpsertRequest{
 		ChatModelID:            modelID(eff.ChatModelID, deps.models),
+		ChatRuntime:            ptrStringAllowEmpty(eff.ChatRuntime),
+		ChatACPAgentID:         ptrStringAllowEmpty(eff.ChatACPAgentID),
+		ChatACPProjectPath:     ptrStringAllowEmpty(eff.ChatACPProjectPath),
+		ChatACPProjectMode:     ptrStringAllowEmpty(eff.ChatACPProjectMode),
 		ImageModelID:           modelID(eff.ImageModelID, deps.models),
 		SearchProviderID:       modelID(eff.SearchProviderID, deps.searchProviders),
 		FetchProviderID:        &fetchProviderID,
@@ -1155,7 +1165,7 @@ func (s *Service) restoreEmailBindings(ctx context.Context, botID string, state 
 // partial history (on SQLite the pool is nil and writes degrade to best-effort,
 // matching the rest of the codebase). When replace is set, existing messages are
 // deleted inside the same transaction so the swap is atomic.
-func (s *Service) restoreHistory(ctx context.Context, botID string, state *importState, includeAssets, replace bool) error {
+func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string, state *importState, includeAssets, replace bool) error {
 	if s.queries == nil {
 		return nil
 	}
@@ -1189,6 +1199,12 @@ func (s *Service) restoreHistory(ctx context.Context, botID string, state *impor
 		if err := historyQueries.ClearHistoryTurnMessagePointersByBot(ctx, pgBotID); err != nil {
 			return fmt.Errorf("clear history turn message pointers: %w", err)
 		}
+		if err := q.DeleteSessionDiscussCursorsByBot(ctx, pgBotID); err != nil {
+			return fmt.Errorf("clear discuss cursors: %w", err)
+		}
+		if err := q.DeleteSessionEventsByBot(ctx, pgBotID); err != nil {
+			return fmt.Errorf("clear session events: %w", err)
+		}
 		if err := historyQueries.DeleteMessagesByBot(ctx, pgBotID); err != nil {
 			return fmt.Errorf("clear history messages: %w", err)
 		}
@@ -1196,28 +1212,126 @@ func (s *Service) restoreHistory(ctx context.Context, botID string, state *impor
 			return fmt.Errorf("clear history turns: %w", err)
 		}
 		if err := historyQueries.SoftDeleteSessionsByBot(ctx, pgBotID); err != nil {
-			return fmt.Errorf("clear history sessions: %w", err)
+			return fmt.Errorf("clear sessions: %w", err)
 		}
 	}
 
 	sessionMap := map[string]pgtype.UUID{}
+	sessionDescriptors := map[string]restoredHistoryDescriptor{}
 	sessions, err := readEntry[[]sqlc.ListSessionsByBotRow](state, "history/sessions.json")
 	if err != nil {
 		return err
 	}
-	for i := len(sessions) - 1; i >= 0; i-- {
-		item := sessions[i]
+	createRestoredSession := func(item sqlc.ListSessionsByBotRow, parentSessionID pgtype.UUID) error {
+		legacyType, sessionMode, runtimeType, err := restoredSessionDescriptor(item.Type, item.SessionMode, item.RuntimeType)
+		if err != nil {
+			return fmt.Errorf("session descriptor: %w", err)
+		}
+		metadata := defaultJSONMap(item.Metadata)
+		runtimeMetadata := defaultJSONMap(item.RuntimeMetadata)
+		if runtimeType == sessionpkg.RuntimeACPAgent {
+			metadata = rebindRestoredRuntimeOwner(metadata, actorUserID)
+			runtimeMetadata = rebindRestoredRuntimeOwner(runtimeMetadata, actorUserID)
+		}
 		created, err := q.CreateSession(ctx, sqlc.CreateSessionParams{
-			BotID:       pgBotID,
-			ChannelType: item.ChannelType,
-			Type:        item.Type,
-			Title:       item.Title,
-			Metadata:    item.Metadata,
+			BotID:           pgBotID,
+			ChannelType:     item.ChannelType,
+			Type:            legacyType,
+			SessionMode:     sessionMode,
+			RuntimeType:     runtimeType,
+			RuntimeMetadata: runtimeMetadata,
+			Title:           item.Title,
+			Metadata:        metadata,
+			ParentSessionID: parentSessionID,
+			CreatedByUserID: optionalUUID(actorUserID),
 		})
 		if err != nil {
 			return fmt.Errorf("session: %w", err)
 		}
 		sessionMap[item.ID.String()] = created.ID
+		sessionDescriptors[item.ID.String()] = restoredHistoryDescriptor{sessionMode: sessionMode, runtimeType: runtimeType}
+		return nil
+	}
+	pendingSessions := append([]sqlc.ListSessionsByBotRow(nil), sessions...)
+	for len(pendingSessions) > 0 {
+		progressed := false
+		next := make([]sqlc.ListSessionsByBotRow, 0, len(pendingSessions))
+		for i := len(pendingSessions) - 1; i >= 0; i-- {
+			item := pendingSessions[i]
+			parentSessionID := pgtype.UUID{}
+			if item.ParentSessionID.Valid {
+				parentSessionID = sessionMap[item.ParentSessionID.String()]
+				if !parentSessionID.Valid {
+					next = append(next, item)
+					continue
+				}
+			}
+			if err := createRestoredSession(item, parentSessionID); err != nil {
+				return err
+			}
+			progressed = true
+		}
+		if !progressed {
+			for i := len(next) - 1; i >= 0; i-- {
+				if err := createRestoredSession(next[i], pgtype.UUID{}); err != nil {
+					return err
+				}
+			}
+			break
+		}
+		pendingSessions = next
+	}
+
+	if hasEntry(state.entries, "history/discuss_cursors.json") {
+		cursors, err := readEntry[[]sqlc.BotSessionDiscussCursor](state, "history/discuss_cursors.json")
+		if err != nil {
+			return err
+		}
+		for _, cursor := range cursors {
+			sessionID := sessionMap[cursor.SessionID.String()]
+			if !sessionID.Valid || strings.TrimSpace(cursor.ScopeKey) == "" {
+				continue
+			}
+			if _, err := q.UpsertSessionDiscussCursor(ctx, sqlc.UpsertSessionDiscussCursorParams{
+				SessionID:      sessionID,
+				ScopeKey:       cursor.ScopeKey,
+				RouteID:        pgtype.UUID{},
+				Source:         cursor.Source,
+				ConsumedCursor: cursor.ConsumedCursor,
+			}); err != nil {
+				return fmt.Errorf("discuss cursor: %w", err)
+			}
+		}
+	}
+
+	eventMap := map[string]pgtype.UUID{}
+	if hasEntry(state.entries, "history/session_events.json") {
+		events, err := readEntry[[]sqlc.BotSessionEvent](state, "history/session_events.json")
+		if err != nil {
+			return err
+		}
+		for _, item := range events {
+			sessionID := pgtype.UUID{}
+			if item.SessionID.Valid {
+				sessionID = sessionMap[item.SessionID.String()]
+			}
+			if !sessionID.Valid {
+				continue
+			}
+			created, err := q.CreateSessionEvent(ctx, sqlc.CreateSessionEventParams{
+				BotID:                   pgBotID,
+				SessionID:               sessionID,
+				EventKind:               item.EventKind,
+				EventData:               defaultJSONMap(item.EventData),
+				ExternalMessageID:       item.ExternalMessageID,
+				SenderChannelIdentityID: pgtype.UUID{},
+				ReceivedAtMs:            item.ReceivedAtMs,
+			})
+			if err != nil {
+				return fmt.Errorf("session event: %w", err)
+			}
+			eventMap[item.ID.String()] = created
+		}
 	}
 	if err := restoreSessionRelationships(ctx, historyQueries, sessions, sessionMap, nil); err != nil {
 		return err
@@ -1246,8 +1360,28 @@ func (s *Service) restoreHistory(ctx context.Context, botID string, state *impor
 	messageMap := map[string]pgtype.UUID{}
 	for _, item := range messages {
 		sessionID := pgtype.UUID{}
+		var descriptor restoredHistoryDescriptor
 		if item.SessionID.Valid {
 			sessionID = sessionMap[item.SessionID.String()]
+			descriptor = sessionDescriptors[item.SessionID.String()]
+		}
+		sessionMode := strings.TrimSpace(item.SessionMode)
+		if sessionMode == "" {
+			sessionMode = descriptor.sessionMode
+		}
+		if sessionMode == "" {
+			sessionMode = sessionpkg.TypeChat
+		}
+		runtimeType := strings.TrimSpace(item.RuntimeType)
+		if runtimeType == "" {
+			runtimeType = descriptor.runtimeType
+		}
+		if runtimeType == "" {
+			runtimeType = sessionpkg.RuntimeModel
+		}
+		eventID := pgtype.UUID{}
+		if item.EventID.Valid {
+			eventID = eventMap[item.EventID.String()]
 		}
 		turnID := pgtype.UUID{}
 		turnSeq := pgtype.Int8{}
@@ -1269,9 +1403,11 @@ func (s *Service) restoreHistory(ctx context.Context, botID string, state *impor
 			SourceReplyToMessageID:  item.SourceReplyToMessageID,
 			Role:                    item.Role,
 			Content:                 item.Content,
-			Metadata:                item.Metadata,
+			Metadata:                defaultJSONMap(item.Metadata),
 			Usage:                   item.Usage,
-			EventID:                 pgtype.UUID{},
+			SessionMode:             sessionMode,
+			RuntimeType:             runtimeType,
+			EventID:                 eventID,
 			DisplayText:             item.DisplayText,
 		})
 		if err != nil {
@@ -1772,6 +1908,54 @@ func ptrString(value string) *string {
 		return nil
 	}
 	return &value
+}
+
+func ptrStringAllowEmpty(value string) *string {
+	return &value
+}
+
+type restoredHistoryDescriptor struct {
+	sessionMode string
+	runtimeType string
+}
+
+func restoredSessionDescriptor(legacyType, sessionMode, runtimeType string) (string, string, string, error) {
+	sessionMode = strings.TrimSpace(sessionMode)
+	runtimeType = strings.TrimSpace(runtimeType)
+	if !sessionpkg.IsKnownSessionMode(sessionMode) || !sessionpkg.IsKnownRuntimeType(runtimeType) {
+		derivedMode, derivedRuntime := sessionpkg.DescriptorFromLegacyType(legacyType)
+		if !sessionpkg.IsKnownSessionMode(sessionMode) {
+			sessionMode = derivedMode
+		}
+		if !sessionpkg.IsKnownRuntimeType(runtimeType) {
+			runtimeType = derivedRuntime
+		}
+	}
+	return sessionpkg.ResolveDescriptor(legacyType, sessionMode, runtimeType)
+}
+
+func defaultJSONMap(raw []byte) []byte {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return []byte(`{}`)
+	}
+	return raw
+}
+
+func rebindRestoredRuntimeOwner(raw []byte, ownerUserID string) []byte {
+	raw = defaultJSONMap(raw)
+	var meta map[string]any
+	if err := json.Unmarshal(raw, &meta); err != nil || meta == nil {
+		return []byte(`{}`)
+	}
+	delete(meta, "runtime_owner_account_id")
+	if ownerUserID = strings.TrimSpace(ownerUserID); ownerUserID != "" {
+		meta["runtime_owner_account_id"] = ownerUserID
+	}
+	out, err := json.Marshal(meta)
+	if err != nil {
+		return []byte(`{}`)
+	}
+	return out
 }
 
 func mcpRequestFromConnection(conn mcp.Connection) mcp.UpsertRequest {

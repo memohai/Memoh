@@ -178,6 +178,32 @@ func (s *Service) ListCanonicalChannelIdentities(ctx context.Context, channelIde
 	return []ChannelIdentity{toChannelIdentity(row)}, nil
 }
 
+// ListUserIDsByChannelIdentity returns account user IDs currently linked to a
+// channel identity. Callers that need a runtime owner should require exactly one
+// result; an unbound or ambiguously bound channel identity cannot safely own a
+// workspace runtime.
+func (s *Service) ListUserIDsByChannelIdentity(ctx context.Context, channelIdentityID string) ([]string, error) {
+	if s.queries == nil {
+		return nil, errors.New("channel identity queries not configured")
+	}
+	pgChannelIdentityID, err := db.ParseUUID(channelIdentityID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListUserIDsByChannelIdentity(ctx, pgChannelIdentityID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(rows))
+	for _, id := range rows {
+		userID := strings.TrimSpace(id.String())
+		if userID != "" {
+			out = append(out, userID)
+		}
+	}
+	return out, nil
+}
+
 // Search returns locally observed channel identities for UI search.
 func (s *Service) Search(ctx context.Context, query string, limit int) ([]SearchResult, error) {
 	if s.queries == nil {

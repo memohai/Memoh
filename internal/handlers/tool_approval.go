@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/conversation/flow"
+	"github.com/memohai/memoh/internal/toolapproval"
 )
 
 type ToolApprovalHandler struct {
@@ -81,9 +83,6 @@ func (h *ToolApprovalHandler) respond(c echo.Context, decision string) error {
 	if botID == "" || approvalID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot_id and approval_id are required")
 	}
-	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID); err != nil {
-		return err
-	}
 	var req ToolApprovalDecisionRequest
 	_ = c.Bind(&req)
 	if err := h.resolver.RespondToolApproval(context.WithoutCancel(c.Request().Context()), flow.ToolApprovalResponseInput{
@@ -91,11 +90,25 @@ func (h *ToolApprovalHandler) respond(c echo.Context, decision string) error {
 		SessionID:              strings.TrimSpace(req.SessionID),
 		BaseHeadTurnID:         strings.TrimSpace(req.BaseHeadTurnID),
 		ActorChannelIdentityID: channelIdentityID,
+		ActorUserID:            channelIdentityID,
 		ApprovalID:             approvalID,
 		Decision:               decision,
 		Reason:                 strings.TrimSpace(req.Reason),
 	}, nil); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return toolApprovalHTTPError(err)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"status": decision})
+}
+
+func toolApprovalHTTPError(err error) *echo.HTTPError {
+	switch {
+	case errors.Is(err, toolapproval.ErrForbidden):
+		return echo.NewHTTPError(http.StatusForbidden, err.Error())
+	case errors.Is(err, toolapproval.ErrNotFound):
+		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+	case errors.Is(err, toolapproval.ErrAlreadyDecided), errors.Is(err, toolapproval.ErrAmbiguous):
+		return echo.NewHTTPError(http.StatusConflict, err.Error())
+	default:
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
 }

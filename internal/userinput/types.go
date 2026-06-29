@@ -35,6 +35,7 @@ const (
 var (
 	ErrNotFound       = errors.New("user input request not found")
 	ErrAlreadyDecided = errors.New("user input request already decided")
+	ErrForbidden      = errors.New("user input forbidden")
 )
 
 type CreatePendingInput struct {

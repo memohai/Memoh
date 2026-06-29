@@ -167,6 +167,10 @@ CREATE TABLE IF NOT EXISTS bots (
   reasoning_enabled INTEGER NOT NULL DEFAULT 0,
   reasoning_effort TEXT NOT NULL DEFAULT 'medium',
   chat_model_id TEXT REFERENCES models(id) ON DELETE SET NULL,
+  chat_runtime TEXT NOT NULL DEFAULT 'model' CHECK (chat_runtime IN ('model', 'acp_agent')),
+  chat_acp_agent_id TEXT,
+  chat_acp_project_path TEXT NOT NULL DEFAULT '/data',
+  chat_acp_project_mode TEXT NOT NULL DEFAULT 'project' CHECK (chat_acp_project_mode IN ('project', 'none')),
   search_provider_id TEXT REFERENCES search_providers(id) ON DELETE SET NULL,
   fetch_provider_id TEXT REFERENCES fetch_providers(id) ON DELETE SET NULL,
   memory_provider_id TEXT REFERENCES memory_providers(id) ON DELETE SET NULL,
@@ -444,6 +448,9 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   route_id TEXT REFERENCES bot_channel_routes(id) ON DELETE SET NULL,
   channel_type TEXT,
   type TEXT NOT NULL DEFAULT 'chat' CHECK (type IN ('chat', 'heartbeat', 'schedule', 'subagent', 'discuss', 'acp_agent')),
+  session_mode TEXT NOT NULL DEFAULT 'chat' CHECK (session_mode IN ('chat', 'discuss', 'heartbeat', 'schedule', 'subagent')),
+  runtime_type TEXT NOT NULL DEFAULT 'model' CHECK (runtime_type IN ('model', 'acp_agent')),
+  runtime_metadata TEXT NOT NULL DEFAULT '{}',
   title TEXT NOT NULL DEFAULT '',
   metadata TEXT NOT NULL DEFAULT '{}',
   default_head_turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
@@ -473,6 +480,9 @@ CREATE INDEX IF NOT EXISTS idx_bot_sessions_created_by_user_id ON bot_sessions(c
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_created_by ON bot_sessions(bot_id, created_by_user_id, deleted_at);
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_active_updated ON bot_sessions(bot_id, updated_at DESC, id DESC) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_sessions_id_bot_unique ON bot_sessions(id, bot_id);
+CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_mode_runtime_active_updated
+  ON bot_sessions(bot_id, session_mode, runtime_type, updated_at DESC, id DESC)
+  WHERE deleted_at IS NULL;
 
 -- bot_session_events: DCP pipeline event store for cold-start replay.
 CREATE TABLE IF NOT EXISTS bot_session_events (
@@ -607,6 +617,8 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   content TEXT NOT NULL,
   metadata TEXT NOT NULL DEFAULT '{}',
   usage TEXT,
+  session_mode TEXT NOT NULL DEFAULT 'chat' CHECK (session_mode IN ('chat', 'discuss', 'heartbeat', 'schedule', 'subagent')),
+  runtime_type TEXT NOT NULL DEFAULT 'model' CHECK (runtime_type IN ('model', 'acp_agent')),
   model_id TEXT REFERENCES models(id) ON DELETE SET NULL,
   compact_id TEXT,
   event_id TEXT REFERENCES bot_session_events(id) ON DELETE SET NULL,
@@ -628,6 +640,20 @@ CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_source
   ON bot_history_messages(session_id, source_message_id);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_reply
   ON bot_history_messages(session_id, source_reply_to_message_id);
+
+CREATE TABLE IF NOT EXISTS bot_session_discuss_cursors (
+  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
+  scope_key TEXT NOT NULL DEFAULT 'default',
+  route_id TEXT REFERENCES bot_channel_routes(id) ON DELETE SET NULL,
+  source TEXT NOT NULL DEFAULT '',
+  consumed_cursor INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (session_id, scope_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_session_discuss_cursors_route
+  ON bot_session_discuss_cursors(route_id)
+  WHERE route_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS tool_approval_requests (
   id TEXT PRIMARY KEY,
