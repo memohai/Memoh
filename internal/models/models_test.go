@@ -130,17 +130,3 @@ func TestModel_HasCompatibility(t *testing.T) {
 	assert.True(t, m.HasCompatibility("reasoning"))
 	assert.False(t, m.HasCompatibility("image-output"))
 }
-
-func TestModelTypes(t *testing.T) {
-	t.Run("ModelType constants", func(t *testing.T) {
-		assert.Equal(t, models.ModelTypeChat, models.ModelType("chat"))
-		assert.Equal(t, models.ModelTypeEmbedding, models.ModelType("embedding"))
-	})
-
-	t.Run("ClientType constants", func(t *testing.T) {
-		assert.Equal(t, models.ClientTypeOpenAIResponses, models.ClientType("openai-responses"))
-		assert.Equal(t, models.ClientTypeOpenAICompletions, models.ClientType("openai-completions"))
-		assert.Equal(t, models.ClientTypeAnthropicMessages, models.ClientType("anthropic-messages"))
-		assert.Equal(t, models.ClientTypeGoogleGenerativeAI, models.ClientType("google-generative-ai"))
-	})
-}

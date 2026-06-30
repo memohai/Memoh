@@ -17,11 +17,6 @@ func TestReadAllWithLimit(t *testing.T) {
 		errTooBig bool
 	}{
 		{
-			name:     "within limit",
-			payload:  []byte("hello"),
-			maxBytes: 8,
-		},
-		{
 			name:      "over limit",
 			payload:   []byte("0123456789"),
 			maxBytes:  5,

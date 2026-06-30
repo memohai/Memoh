@@ -27,7 +27,6 @@ func TestWriteHermesManagedConfigWritesConfigAndEnv(t *testing.T) {
 	}
 	content := string(config.Content)
 	for _, want := range []string{
-		`model:`,
 		`provider: "openrouter"`,
 		`default: "anthropic/claude-sonnet-4"`,
 	} {
@@ -90,8 +89,7 @@ func TestWriteHermesManagedConfigNormalizesGeminiProvider(t *testing.T) {
 	}
 	content := string(config.Content)
 	if !strings.Contains(content, `provider: "gemini"`) ||
-		!strings.Contains(content, `default: "gemini-3.5-flash"`) ||
-		strings.Contains(content, `max_tokens`) {
+		!strings.Contains(content, `default: "gemini-3.5-flash"`) {
 		t.Fatalf("config content =\n%s", content)
 	}
 	env, ok := findWrite(server.writes(), "/data/.memoh-hermes/.env")

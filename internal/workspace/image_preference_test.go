@@ -2,7 +2,7 @@ package workspace
 
 import "testing"
 
-func TestWorkspaceImageMetadataRoundTrip(t *testing.T) {
+func TestWorkspaceBasicMetadataPreferencesRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	metadata := map[string]any{
@@ -12,72 +12,19 @@ func TestWorkspaceImageMetadataRoundTrip(t *testing.T) {
 		},
 	}
 
-	updated := withWorkspaceImagePreference(metadata, "alpine:3.20")
+	updated := withWorkspaceImagePreference(metadata, " alpine:3.20 ")
+	updated = withWorkspaceBackendPreference(updated, " local ", " /Users/example/.memoh/workspaces/bot ")
 
 	if got := workspaceImageFromMetadata(updated); got != "alpine:3.20" {
-		t.Fatalf("expected image preference to round-trip, got %q", got)
+		t.Fatalf("image preference = %q, want alpine:3.20", got)
 	}
-	workspace, ok := updated[workspaceMetadataKey].(map[string]any)
-	if !ok {
-		t.Fatal("expected workspace metadata section")
-	}
-	if workspace["keep"] != "value" {
-		t.Fatalf("expected existing workspace metadata to be preserved, got %#v", workspace)
-	}
-	if _, exists := metadata[workspaceMetadataKey].(map[string]any)[workspaceImageMetadataKey]; exists {
-		t.Fatal("expected original metadata map to remain unchanged")
-	}
-}
-
-func TestWithoutWorkspaceImagePreferenceRemovesOnlyImageKey(t *testing.T) {
-	t.Parallel()
-
-	metadata := map[string]any{
-		workspaceMetadataKey: map[string]any{
-			workspaceImageMetadataKey: "debian:bookworm-slim",
-			"keep":                    true,
-		},
-	}
-
-	updated := withoutWorkspaceImagePreference(metadata)
-	if got := workspaceImageFromMetadata(updated); got != "" {
-		t.Fatalf("expected image preference to be cleared, got %q", got)
-	}
-	workspace, ok := updated[workspaceMetadataKey].(map[string]any)
-	if !ok {
-		t.Fatal("expected workspace metadata section to remain")
-	}
-	if workspace["keep"] != true {
-		t.Fatalf("expected unrelated workspace metadata to remain, got %#v", workspace)
-	}
-}
-
-func TestWorkspaceBackendMetadataRoundTrip(t *testing.T) {
-	t.Parallel()
-
-	metadata := map[string]any{
-		workspaceMetadataKey: map[string]any{
-			"keep": "value",
-		},
-	}
-	updated := withWorkspaceBackendPreference(metadata, "local", "/Users/example/.memoh/workspaces/bot")
-
 	if got := workspaceBackendFromMetadata(updated); got != "local" {
 		t.Fatalf("workspace backend = %q, want local", got)
 	}
 	if got := localWorkspacePathFromMetadata(updated); got != "/Users/example/.memoh/workspaces/bot" {
 		t.Fatalf("local workspace path = %q", got)
 	}
-	workspace, ok := updated[workspaceMetadataKey].(map[string]any)
-	if !ok {
-		t.Fatal("expected workspace metadata section")
-	}
-	if workspace["keep"] != "value" {
-		t.Fatalf("expected existing workspace metadata to be preserved, got %#v", workspace)
-	}
-	if _, exists := metadata[workspaceMetadataKey].(map[string]any)[workspaceBackendMetadataKey]; exists {
-		t.Fatal("expected original metadata map to remain unchanged")
-	}
+	assertWorkspaceMetadataKeepsValue(t, updated)
 }
 
 func TestWorkspaceGPUMetadataRoundTrip(t *testing.T) {
@@ -97,55 +44,8 @@ func TestWorkspaceGPUMetadataRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("expected gpu preference to be present")
 	}
-	if got, want := gpu.Devices, []string{"nvidia.com/gpu=0", "amd.com/gpu=1"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("expected normalized gpu devices %v, got %v", want, got)
-	}
-	workspace, ok := updated[workspaceMetadataKey].(map[string]any)
-	if !ok {
-		t.Fatal("expected workspace metadata section")
-	}
-	if workspace["keep"] != "value" {
-		t.Fatalf("expected existing workspace metadata to be preserved, got %#v", workspace)
-	}
-}
-
-func TestWorkspaceGPUExplicitDisableRemainsPresent(t *testing.T) {
-	t.Parallel()
-
-	metadata := withWorkspaceGPUPreference(map[string]any{}, WorkspaceGPUConfig{})
-
-	gpu, ok := workspaceGPUFromMetadata(metadata)
-	if !ok {
-		t.Fatal("expected gpu preference key to remain present")
-	}
-	if len(gpu.Devices) != 0 {
-		t.Fatalf("expected explicit disable with no devices, got %#v", gpu.Devices)
-	}
-}
-
-func TestWithoutWorkspaceGPUPreferenceRemovesOnlyGPUKey(t *testing.T) {
-	t.Parallel()
-
-	metadata := map[string]any{
-		workspaceMetadataKey: map[string]any{
-			workspaceGPUMetadataKey: map[string]any{
-				workspaceGPUDevicesKey: []any{"nvidia.com/gpu=all"},
-			},
-			"keep": true,
-		},
-	}
-
-	updated := withoutWorkspaceGPUPreference(metadata)
-	if _, ok := workspaceGPUFromMetadata(updated); ok {
-		t.Fatal("expected gpu preference to be cleared")
-	}
-	workspace, ok := updated[workspaceMetadataKey].(map[string]any)
-	if !ok {
-		t.Fatal("expected workspace metadata section to remain")
-	}
-	if workspace["keep"] != true {
-		t.Fatalf("expected unrelated workspace metadata to remain, got %#v", workspace)
-	}
+	assertStringSlice(t, gpu.Devices, []string{"nvidia.com/gpu=0", "amd.com/gpu=1"})
+	assertWorkspaceMetadataKeepsValue(t, updated)
 }
 
 func TestWorkspaceSkillDiscoveryRootsMetadataRoundTrip(t *testing.T) {
@@ -171,54 +71,131 @@ func TestWorkspaceSkillDiscoveryRootsMetadataRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("expected skill discovery roots preference to be present")
 	}
-	if got, want := roots, []string{"/custom/skills", "/root/.openclaw/skills"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("expected normalized skill discovery roots %v, got %v", want, got)
-	}
-	workspace, ok := updated[workspaceMetadataKey].(map[string]any)
-	if !ok {
-		t.Fatal("expected workspace metadata section")
-	}
-	if workspace["keep"] != "value" {
-		t.Fatalf("expected existing workspace metadata to be preserved, got %#v", workspace)
-	}
+	assertStringSlice(t, roots, []string{"/custom/skills", "/root/.openclaw/skills"})
+	assertWorkspaceMetadataKeepsValue(t, updated)
 }
 
-func TestWorkspaceSkillDiscoveryRootsExplicitDisableRemainsPresent(t *testing.T) {
+func TestWorkspaceExplicitDisablePreferencesRemainPresent(t *testing.T) {
 	t.Parallel()
 
-	metadata := withWorkspaceSkillDiscoveryRoots(map[string]any{}, []string{})
+	t.Run("gpu", func(t *testing.T) {
+		metadata := withWorkspaceGPUPreference(map[string]any{}, WorkspaceGPUConfig{})
 
-	roots, ok := workspaceSkillDiscoveryRootsFromMetadata(metadata)
-	if !ok {
-		t.Fatal("expected skill discovery roots key to remain present")
-	}
-	if roots == nil {
-		t.Fatal("expected explicit disable to return a non-nil empty slice")
-	}
-	if len(roots) != 0 {
-		t.Fatalf("expected explicit disable with no roots, got %#v", roots)
-	}
+		gpu, ok := workspaceGPUFromMetadata(metadata)
+		if !ok {
+			t.Fatal("expected gpu preference key to remain present")
+		}
+		if len(gpu.Devices) != 0 {
+			t.Fatalf("expected explicit disable with no devices, got %#v", gpu.Devices)
+		}
+	})
+
+	t.Run("skill_discovery_roots", func(t *testing.T) {
+		metadata := withWorkspaceSkillDiscoveryRoots(map[string]any{}, []string{})
+
+		roots, ok := workspaceSkillDiscoveryRootsFromMetadata(metadata)
+		if !ok {
+			t.Fatal("expected skill discovery roots key to remain present")
+		}
+		if roots == nil {
+			t.Fatal("expected explicit disable to return a non-nil empty slice")
+		}
+		if len(roots) != 0 {
+			t.Fatalf("expected explicit disable with no roots, got %#v", roots)
+		}
+	})
 }
 
-func TestWithoutWorkspaceSkillDiscoveryRootsRemovesOnlyThatKey(t *testing.T) {
+func TestWithoutWorkspacePreferencesRemovesOnlySelectedKey(t *testing.T) {
 	t.Parallel()
 
-	metadata := map[string]any{
-		workspaceMetadataKey: map[string]any{
-			workspaceSkillDiscoveryRootsMetadataKey: []any{"/data/.agents/skills"},
-			"keep":                                  true,
+	for _, tc := range []struct {
+		name       string
+		metadata   map[string]any
+		clear      func(map[string]any) map[string]any
+		isPresent  func(map[string]any) bool
+		wantAbsent string
+	}{
+		{
+			name: "image",
+			metadata: map[string]any{
+				workspaceMetadataKey: map[string]any{
+					workspaceImageMetadataKey: "debian:bookworm-slim",
+					"keep":                    true,
+				},
+			},
+			clear:      withoutWorkspaceImagePreference,
+			isPresent:  func(metadata map[string]any) bool { return workspaceImageFromMetadata(metadata) != "" },
+			wantAbsent: "image preference",
 		},
+		{
+			name: "gpu",
+			metadata: map[string]any{
+				workspaceMetadataKey: map[string]any{
+					workspaceGPUMetadataKey: map[string]any{
+						workspaceGPUDevicesKey: []any{"nvidia.com/gpu=all"},
+					},
+					"keep": true,
+				},
+			},
+			clear: withoutWorkspaceGPUPreference,
+			isPresent: func(metadata map[string]any) bool {
+				_, ok := workspaceGPUFromMetadata(metadata)
+				return ok
+			},
+			wantAbsent: "gpu preference",
+		},
+		{
+			name: "skill_discovery_roots",
+			metadata: map[string]any{
+				workspaceMetadataKey: map[string]any{
+					workspaceSkillDiscoveryRootsMetadataKey: []any{"/data/.agents/skills"},
+					"keep":                                  true,
+				},
+			},
+			clear: withoutWorkspaceSkillDiscoveryRoots,
+			isPresent: func(metadata map[string]any) bool {
+				_, ok := workspaceSkillDiscoveryRootsFromMetadata(metadata)
+				return ok
+			},
+			wantAbsent: "skill discovery roots preference",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			updated := tc.clear(tc.metadata)
+			if tc.isPresent(updated) {
+				t.Fatalf("expected %s to be cleared", tc.wantAbsent)
+			}
+			if got := workspaceKeepValue(updated); got != true {
+				t.Fatalf("expected unrelated workspace metadata to remain, got %#v", got)
+			}
+		})
 	}
+}
 
-	updated := withoutWorkspaceSkillDiscoveryRoots(metadata)
-	if _, ok := workspaceSkillDiscoveryRootsFromMetadata(updated); ok {
-		t.Fatal("expected skill discovery roots preference to be cleared")
+func assertWorkspaceMetadataKeepsValue(t *testing.T, metadata map[string]any) {
+	t.Helper()
+	if got := workspaceKeepValue(metadata); got != "value" {
+		t.Fatalf("expected existing workspace metadata to be preserved, got %#v", got)
 	}
-	workspace, ok := updated[workspaceMetadataKey].(map[string]any)
+}
+
+func workspaceKeepValue(metadata map[string]any) any {
+	workspace, ok := metadata[workspaceMetadataKey].(map[string]any)
 	if !ok {
-		t.Fatal("expected workspace metadata section to remain")
+		return nil
 	}
-	if workspace["keep"] != true {
-		t.Fatalf("expected unrelated workspace metadata to remain, got %#v", workspace)
+	return workspace["keep"]
+}
+
+func assertStringSlice(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected %v, got %v", want, got)
+		}
 	}
 }

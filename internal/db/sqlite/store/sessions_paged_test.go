@@ -169,13 +169,11 @@ func pageIDs(rows []pgsqlc.ListSessionsByBotPagedRow) []string {
 	return out
 }
 
-// TestSQLiteListSessionsByBotPagedTiesOnUpdatedAt exercises the
-// (updated_at = ? AND id < ?) tiebreak branch of the cursor SQL. The cursor
-// timestamp is bound at second precision against TEXT storage, so two rows
-// inserted in the same second collide on the timestamp and only the id
-// comparison can separate them. The other paged test seeds rows a minute
-// apart and so never touches this branch.
-func TestSQLiteListSessionsByBotPagedTiesOnUpdatedAt(t *testing.T) {
+// TestSQLiteListSessionsByBotPagedWalksSameSecondRows pins down the second-
+// precision cursor invariant. Rows sharing the same SQLite timestamp must be
+// separated by the `(updated_at = ? AND id < ?)` tiebreak so pagination neither
+// revisits nor skips rows.
+func TestSQLiteListSessionsByBotPagedWalksSameSecondRows(t *testing.T) {
 	ctx := context.Background()
 	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
 	if err != nil {
@@ -191,6 +189,8 @@ func TestSQLiteListSessionsByBotPagedTiesOnUpdatedAt(t *testing.T) {
 		"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb01",
 		"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb02",
 		"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb03",
+		"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb04",
+		"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb05",
 	}
 	for _, id := range ids {
 		if _, err := conn.ExecContext(ctx,
@@ -199,94 +199,6 @@ func TestSQLiteListSessionsByBotPagedTiesOnUpdatedAt(t *testing.T) {
 		); err != nil {
 			t.Fatalf("insert seed %s: %v", id, err)
 		}
-	}
-
-	st, err := New(conn)
-	if err != nil {
-		t.Fatalf("new store: %v", err)
-	}
-	queries := NewQueries(st)
-	pgBotID := mustUUID(t, botID)
-
-	page1, err := queries.ListSessionsByBotPaged(ctx, pgsqlc.ListSessionsByBotPagedParams{
-		BotID:      pgBotID,
-		Types:      []string{"chat"},
-		UseCursor:  false,
-		LimitCount: 2,
-	})
-	if err != nil {
-		t.Fatalf("page1: %v", err)
-	}
-	if len(page1) != 2 {
-		t.Fatalf("page1 len = %d, want 2 (ids %v)", len(page1), pageIDs(page1))
-	}
-	// id DESC within the same timestamp: 03 then 02.
-	if got := page1[0].ID.String(); got != ids[2] {
-		t.Fatalf("page1[0] = %s, want %s", got, ids[2])
-	}
-	if got := page1[1].ID.String(); got != ids[1] {
-		t.Fatalf("page1[1] = %s, want %s", got, ids[1])
-	}
-
-	// Build the cursor exactly the way the handler does — from the last row.
-	last := page1[1]
-	page2, err := queries.ListSessionsByBotPaged(ctx, pgsqlc.ListSessionsByBotPagedParams{
-		BotID:           pgBotID,
-		Types:           []string{"chat"},
-		UseCursor:       true,
-		CursorUpdatedAt: pgtype.Timestamptz{Time: last.UpdatedAt.Time, Valid: true},
-		CursorID:        last.ID,
-		LimitCount:      10,
-	})
-	if err != nil {
-		t.Fatalf("page2: %v", err)
-	}
-	if len(page2) != 1 {
-		t.Fatalf("page2 len = %d, want 1 (ids %v)", len(page2), pageIDs(page2))
-	}
-	if got := page2[0].ID.String(); got != ids[0] {
-		t.Fatalf("page2[0] = %s, want %s (no duplicate, no skip)", got, ids[0])
-	}
-}
-
-// TestSQLiteListSessionsByBotPagedWithinOneSecond pins down the second-
-// precision invariant between SQLite's CURRENT_TIMESTAMP storage and the
-// cursor formatter in pagedCursorBindings. Several rows inserted inside the
-// same wall-clock second collide on `updated_at` after CURRENT_TIMESTAMP
-// truncation; only the (updated_at = ? AND id < ?) tiebreak in the cursor SQL
-// can separate them. A regression that lets sub-second precision leak into
-// either side of the compare would either revisit or skip rows here.
-func TestSQLiteListSessionsByBotPagedWithinOneSecond(t *testing.T) {
-	ctx := context.Background()
-	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	defer func() { _ = conn.Close() }()
-
-	createPagedSessionSchema(t, conn)
-
-	botID := "33333333-3333-3333-3333-333333333333"
-	ids := []string{
-		"cccccccc-cccc-cccc-cccc-cccccccccc01",
-		"cccccccc-cccc-cccc-cccc-cccccccccc02",
-		"cccccccc-cccc-cccc-cccc-cccccccccc03",
-		"cccccccc-cccc-cccc-cccc-cccccccccc04",
-		"cccccccc-cccc-cccc-cccc-cccccccccc05",
-	}
-	// Insert each row with a fresh CURRENT_TIMESTAMP read with no explicit
-	// updated_at; sleeping a few hundred microseconds between inserts gives
-	// SQLite distinct sub-second wall times that all collapse to the same
-	// second after CURRENT_TIMESTAMP truncation. That is exactly the state
-	// the cursor must navigate without revisiting or skipping rows.
-	for _, id := range ids {
-		if _, err := conn.ExecContext(ctx,
-			`INSERT INTO bot_sessions (id, bot_id, type) VALUES (?, ?, 'chat')`,
-			id, botID,
-		); err != nil {
-			t.Fatalf("insert seed %s: %v", id, err)
-		}
-		time.Sleep(500 * time.Microsecond)
 	}
 
 	st, err := New(conn)

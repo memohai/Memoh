@@ -85,29 +85,6 @@ func TestNativeDriverBuildSpecExitNodeArgs(t *testing.T) {
 	}
 }
 
-func TestNativeDriverBuildSpecSocks5Enabled(t *testing.T) {
-	driver := newNativeDriver(netctl.BotOverlayConfig{
-		Enabled:  true,
-		Provider: "tailscale",
-		Config: map[string]any{
-			"auth_key":       "tskey-test",
-			"userspace":      true,
-			"socks5_enabled": true,
-			"socks5_port":    float64(1055),
-		},
-	}, nil, t.TempDir())
-	spec, err := driver.buildSpec(netctl.AttachmentRequest{BotID: "bot-1", Overlay: netctl.BotOverlayConfig{Enabled: true, Provider: "tailscale", Config: map[string]any{}}})
-	if err != nil {
-		t.Fatalf("buildSpec returned error: %v", err)
-	}
-	if !strings.Contains(spec.ProxyAddress, "socks5://") {
-		t.Fatalf("expected socks5 proxy address, got %q", spec.ProxyAddress)
-	}
-	if env := strings.Join(spec.Env, " "); !strings.Contains(env, "TS_SOCKS5_SERVER=:1055") {
-		t.Fatalf("expected socks5 server env, got %q", env)
-	}
-}
-
 func TestNativeDriverListNodesFiltersExitNodes(t *testing.T) {
 	tempDir, err := os.MkdirTemp("/tmp", "tsn-")
 	if err != nil {

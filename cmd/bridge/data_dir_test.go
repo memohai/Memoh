@@ -33,43 +33,37 @@ func TestInitDataDirAtMigratesLegacyIdentity(t *testing.T) {
 	}
 }
 
-func TestInitDataDirAtCreatesAgentsWhenNoLegacyIdentity(t *testing.T) {
+func TestInitDataDirAtSeedsMissingTemplateFiles(t *testing.T) {
 	t.Parallel()
 
 	dataDir := t.TempDir()
 	templatesDir := t.TempDir()
-	template := []byte("# AGENTS.md\n")
-	if err := os.WriteFile(filepath.Join(templatesDir, agentsFileName), template, 0o600); err != nil {
+	agentsTemplate := []byte("# AGENTS.md\n")
+	hooksTemplate := []byte("hooks template\n")
+	if err := os.WriteFile(filepath.Join(templatesDir, agentsFileName), agentsTemplate, 0o600); err != nil {
 		t.Fatalf("write agents template: %v", err)
 	}
+	writeTestFile(t, templatesDir, ".memoh/hooks.json", hooksTemplate)
 
 	initDataDirAt(dataDir, templatesDir)
 
-	data, err := os.ReadFile(filepath.Join(dataDir, agentsFileName)) //nolint:gosec // test path is under t.TempDir.
-	if err != nil {
-		t.Fatalf("read seeded agents file: %v", err)
-	}
-	if string(data) != string(template) {
-		t.Fatalf("AGENTS.md = %q, want template content %q", data, template)
-	}
-}
-
-func TestInitDataDirAtCreatesHooksConfigWhenMissing(t *testing.T) {
-	t.Parallel()
-
-	dataDir := t.TempDir()
-	templatesDir := t.TempDir()
-	template := []byte("{\n  \"version\": 1,\n  \"enabled\": true,\n  \"hooks\": []\n}\n")
-	writeTestFile(t, templatesDir, ".memoh/hooks.json", template)
-
-	initDataDirAt(dataDir, templatesDir)
-
-	data, err := os.ReadFile(filepath.Join(dataDir, ".memoh", "hooks.json")) //nolint:gosec // test path is under t.TempDir.
-	if err != nil {
-		t.Fatalf("read seeded hooks config: %v", err)
-	}
-	if string(data) != string(template) {
-		t.Fatalf("hooks.json = %q, want template content %q", data, template)
+	for _, tt := range []struct {
+		name string
+		rel  string
+		want []byte
+	}{
+		{name: "root template", rel: agentsFileName, want: agentsTemplate},
+		{name: "nested template", rel: ".memoh/hooks.json", want: hooksTemplate},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join(dataDir, filepath.FromSlash(tt.rel))) //nolint:gosec // test path is under t.TempDir.
+			if err != nil {
+				t.Fatalf("read seeded %s: %v", tt.rel, err)
+			}
+			if string(data) != string(tt.want) {
+				t.Fatalf("%s = %q, want template content %q", tt.rel, data, tt.want)
+			}
+		})
 	}
 }
 

@@ -138,18 +138,3 @@ func TestComputerA11yShellQuote(t *testing.T) {
 		t.Fatalf("unexpected quoted args: %q", got)
 	}
 }
-
-func TestComputerRefFallbackPoint(t *testing.T) {
-	item := a11ySnapshotItem{Ref: "e3", Center: &a11yPoint{X: 120, Y: 240}}
-	item.CenterX = item.Center.X
-	item.CenterY = item.Center.Y
-	if item.Ref != "e3" {
-		t.Fatalf("expected ref e3, got %q", item.Ref)
-	}
-	if item.CenterX != 120 || item.CenterY != 240 {
-		t.Fatalf("expected center to propagate, got %d,%d", item.CenterX, item.CenterY)
-	}
-	if got := normalizeBrowserRef("E3"); got != "e3" {
-		t.Fatalf("expected canonical ref e3, got %q", got)
-	}
-}

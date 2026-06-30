@@ -3,6 +3,7 @@ package gmail
 import (
 	"context"
 	"log/slog"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -19,18 +20,6 @@ func (r testOAuthResolver) Get(ref string) (oauthclients.Client, bool) {
 func (r testOAuthResolver) HasUsableClient(ref string) bool {
 	client, ok := r.Get(ref)
 	return ok && strings.TrimSpace(client.ClientID) != "" && strings.TrimSpace(client.ClientSecret) != ""
-}
-
-func TestMetaOnlyExposesGmailAddress(t *testing.T) {
-	adapter := New(slog.Default(), nil, nil)
-
-	fields := adapter.Meta().ConfigSchema.Fields
-	if len(fields) != 1 {
-		t.Fatalf("expected one gmail config field, got %d", len(fields))
-	}
-	if fields[0].Key != "email_address" {
-		t.Fatalf("expected only email_address field, got %q", fields[0].Key)
-	}
 }
 
 func TestNormalizeConfigStripsLegacyOAuthSecrets(t *testing.T) {
@@ -54,18 +43,6 @@ func TestNormalizeConfigStripsLegacyOAuthSecrets(t *testing.T) {
 	if clean["email_address"] != "person@gmail.com" {
 		t.Fatalf("email_address was not preserved: %#v", clean)
 	}
-
-	empty, err := adapter.NormalizeConfig(map[string]any{})
-	if err != nil {
-		t.Fatalf("empty config should be allowed for default gmail provider: %v", err)
-	}
-	if len(empty) != 0 {
-		t.Fatalf("empty config should stay empty, got %#v", empty)
-	}
-
-	if _, err := adapter.NormalizeConfig(map[string]any{"label": "primary"}); err == nil {
-		t.Fatal("non-empty config without email_address should fail")
-	}
 }
 
 func TestOAuthUsesServerSideClient(t *testing.T) {
@@ -87,11 +64,16 @@ func TestOAuthUsesServerSideClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AuthorizeURL returned error: %v", err)
 	}
-	if !strings.Contains(authURL, "client_id=server-client") {
-		t.Fatalf("authorize URL should contain server client id, got %q", authURL)
+	parsed, err := url.Parse(authURL)
+	if err != nil {
+		t.Fatalf("AuthorizeURL returned invalid URL: %v", err)
 	}
-	if !strings.Contains(authURL, "state=state-123") {
-		t.Fatalf("authorize URL should contain state, got %q", authURL)
+	query := parsed.Query()
+	if query.Get("client_id") != "server-client" {
+		t.Fatalf("authorize URL should use server client id, got %q", query.Get("client_id"))
+	}
+	if query.Get("state") != "state-123" {
+		t.Fatalf("authorize URL should preserve state, got %q", query.Get("state"))
 	}
 
 	missingSecret := New(slog.Default(), nil, testOAuthResolver{

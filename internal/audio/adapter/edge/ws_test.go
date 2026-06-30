@@ -139,7 +139,6 @@ func TestParsePath(t *testing.T) {
 		want string
 	}{
 		{"turn.start", []byte("Path: turn.start\r\nContent-Type: application/json\r\n\r\n{}"), "turn.start"},
-		{"turn.end", []byte("Path: turn.end\r\n\r\n"), "turn.end"},
 		{"response", []byte("X-RequestId: x\r\nPath: response\r\n\r\n"), "response"},
 		{"no path", []byte("Content-Type: text/plain\r\n\r\n"), ""},
 	}

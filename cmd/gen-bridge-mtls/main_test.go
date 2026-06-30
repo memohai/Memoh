@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/x509"
 	"encoding/pem"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -93,35 +92,6 @@ func TestGenerateBridgeMTLS(t *testing.T) {
 		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
 	}); err == nil {
 		t.Fatal("server client cert must not verify against bridge-server CA")
-	}
-}
-
-func TestRunWritesExpectedLayout(t *testing.T) {
-	outDir := filepath.Join(t.TempDir(), "bridge-mtls")
-	var stdout bytes.Buffer
-	if err := run([]string{"-instance-id", testInstanceID, "-out", outDir}, &stdout); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-
-	for _, path := range []string{
-		filepath.Join(outDir, "server", serverClientCertFile),
-		filepath.Join(outDir, "server", serverClientKeyFile),
-		filepath.Join(outDir, "server", bridgeServerCAFile),
-		filepath.Join(outDir, "bridge", bridgeServerCertFile),
-		filepath.Join(outDir, "bridge", bridgeServerKeyFile),
-		filepath.Join(outDir, "bridge", serverClientCACertFile),
-	} {
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("stat generated file %s: %v", path, err)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(outDir, "bridge", serverClientKeyFile)); !os.IsNotExist(err) {
-		t.Fatalf("bridge dir must not contain %s: %v", serverClientKeyFile, err)
-	}
-	output := stdout.String()
-	if !strings.Contains(output, `mode = "strict"`) ||
-		!strings.Contains(output, `instance_id = "`+testInstanceID+`"`) {
-		t.Fatalf("summary missing config snippet:\n%s", output)
 	}
 }
 

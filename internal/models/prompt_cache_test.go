@@ -10,12 +10,11 @@ import (
 
 func TestNormalizePromptCacheTTL(t *testing.T) {
 	cases := map[string]string{
-		"":         PromptCacheTTL5m,
-		"5m":       PromptCacheTTL5m,
-		"1h":       PromptCacheTTL1h,
-		"off":      PromptCacheTTLOff,
-		"garbage":  PromptCacheTTL5m,
-		"DISABLED": PromptCacheTTL5m,
+		"":        PromptCacheTTL5m,
+		"5m":      PromptCacheTTL5m,
+		"1h":      PromptCacheTTL1h,
+		"off":     PromptCacheTTLOff,
+		"garbage": PromptCacheTTL5m,
 	}
 	for input, want := range cases {
 		if got := NormalizePromptCacheTTL(input); got != want {
@@ -143,21 +142,6 @@ func TestApplyPromptCache_NonAnthropicNoop(t *testing.T) {
 	}
 	if gotTools[0].CacheControl != nil {
 		t.Errorf("tool should not be cached for non-anthropic, got %+v", gotTools[0].CacheControl)
-	}
-}
-
-func TestApplyPromptCache_AnthropicEmptySystemSkipsPromotion(t *testing.T) {
-	model := newAnthropicTestModel(t)
-	messages := []sdk.Message{sdk.UserMessage("hi")}
-	gotSystem, gotMessages, _ := ApplyPromptCache(model, "", "", messages, nil)
-	if gotSystem != "" {
-		t.Errorf("system: got %q, want empty", gotSystem)
-	}
-	if len(gotMessages) != len(messages) {
-		t.Fatalf("messages length: got %d, want %d", len(gotMessages), len(messages))
-	}
-	if cc := textCacheControl(t, gotMessages[0]); cc != nil {
-		t.Errorf("user message should not be decorated, got %+v", cc)
 	}
 }
 

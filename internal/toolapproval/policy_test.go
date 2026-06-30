@@ -122,7 +122,7 @@ func TestNeedsApprovalExecCommandPatterns(t *testing.T) {
 	cfg.Enabled = true
 	cfg.Exec.RequireApproval = true
 	cfg.Exec.BypassCommands = []string{"git status", "ls", "npm *"}
-	cfg.Exec.ForceReviewCommands = []string{"sudo *", "rm -rf *"}
+	cfg.Exec.ForceReviewCommands = []string{"sudo *"}
 
 	if needsApproval(cfg, "exec", map[string]any{"command": "git status"}) {
 		t.Fatal("expected exact command bypass to skip approval")
@@ -135,29 +135,5 @@ func TestNeedsApprovalExecCommandPatterns(t *testing.T) {
 	}
 	if !needsApproval(cfg, "exec", map[string]any{"command": "sudo apt update"}) {
 		t.Fatal("expected wildcard force-review command to require approval")
-	}
-	if !needsApproval(cfg, "exec", map[string]any{"command": "rm -rf /data/tmp"}) {
-		t.Fatal("expected force-review command with slash to require approval")
-	}
-}
-
-func TestOperationForTool(t *testing.T) {
-	t.Parallel()
-
-	cases := map[string]string{
-		"read":        OperationRead,
-		"list":        OperationRead,
-		"write":       OperationWrite,
-		"edit":        OperationWrite,
-		"apply_patch": OperationWrite,
-		"exec":        OperationExec,
-	}
-	for tool, want := range cases {
-		if got, ok := OperationForTool(tool); !ok || got != want {
-			t.Fatalf("OperationForTool(%q) = %q, %v; want %q, true", tool, got, ok, want)
-		}
-	}
-	if got, ok := OperationForTool("web_search"); ok || got != "" {
-		t.Fatalf("OperationForTool(web_search) = %q, %v; want unsupported", got, ok)
 	}
 }

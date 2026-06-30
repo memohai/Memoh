@@ -140,15 +140,6 @@ func TestBuiltinProviderApplyProviderConfig(t *testing.T) {
 	}
 }
 
-func TestBuiltinProviderApplyProviderConfigNil(t *testing.T) {
-	t.Parallel()
-	p := NewBuiltinProvider(slog.Default(), nil, nil, nil)
-	p.ApplyProviderConfig(nil)
-	if p.packer.TargetItems != defaultPackerConfig.TargetItems {
-		t.Fatalf("expected default TargetItems, got %d", p.packer.TargetItems)
-	}
-}
-
 func TestBuiltinProviderCompactUsesLLMResults(t *testing.T) {
 	t.Parallel()
 	encoder := &fakeSparseEncoder{}

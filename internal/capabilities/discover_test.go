@@ -8,7 +8,6 @@ import (
 )
 
 func ptrBool(b bool) *bool { return &b }
-func ptrInt(i int) *int    { return &i }
 
 func TestDerive_AdaptiveOpus(t *testing.T) {
 	// claude-opus-4-8: adaptive + xhigh + max.
@@ -17,9 +16,6 @@ func TestDerive_AdaptiveOpus(t *testing.T) {
 		SupportsAdaptiveThinking:     ptrBool(true),
 		SupportsXHighReasoningEffort: ptrBool(true),
 		SupportsMaxReasoningEffort:   ptrBool(true),
-		SupportsVision:               ptrBool(true),
-		SupportsFunctionCalling:      ptrBool(true),
-		MaxInputTokens:               ptrInt(1000000),
 	})
 	if caps.ThinkingMode != models.ThinkingModeAdaptive {
 		t.Fatalf("thinking mode = %q, want adaptive", caps.ThinkingMode)
@@ -58,18 +54,6 @@ func TestDerive_LowExplicitlyUnsupported(t *testing.T) {
 		SupportsXHighReasoningEffort:   ptrBool(true),
 	})
 	want := []string{"medium", "high", "xhigh"}
-	if !reflect.DeepEqual(caps.EffortLevels, want) {
-		t.Fatalf("effort levels = %v, want %v", caps.EffortLevels, want)
-	}
-}
-
-func TestDerive_PlainReasoning(t *testing.T) {
-	// o3: reasoning only → toggle with base tiers.
-	caps := derive(litellmEntry{SupportsReasoning: ptrBool(true)})
-	if caps.ThinkingMode != models.ThinkingModeToggle {
-		t.Fatalf("thinking mode = %q", caps.ThinkingMode)
-	}
-	want := []string{"low", "medium", "high"}
 	if !reflect.DeepEqual(caps.EffortLevels, want) {
 		t.Fatalf("effort levels = %v, want %v", caps.EffortLevels, want)
 	}

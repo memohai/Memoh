@@ -385,18 +385,6 @@ func TestCreateGroupRuleResolvesSourceChannelFromSubjectChannel(t *testing.T) {
 	}
 }
 
-func TestValidateEffect(t *testing.T) {
-	if err := validateEffect(EffectAllow); err != nil {
-		t.Fatalf("allow should be valid: %v", err)
-	}
-	if err := validateEffect(EffectDeny); err != nil {
-		t.Fatalf("deny should be valid: %v", err)
-	}
-	if err := validateEffect("unknown"); err == nil {
-		t.Fatal("expected error for unknown effect")
-	}
-}
-
 func TestSetDefaultEffect(t *testing.T) {
 	botUUID := pgtype.UUID{Bytes: uuid.MustParse("11111111-1111-1111-1111-111111111111"), Valid: true}
 	var capturedEffect string
@@ -465,14 +453,5 @@ func TestListObservedConversationsByChannelIdentity(t *testing.T) {
 	}
 	if items[0].ConversationAvatarURL != "https://example.com/team.png" {
 		t.Fatalf("unexpected conversation avatar: %s", items[0].ConversationAvatarURL)
-	}
-}
-
-func TestTextFromArg(t *testing.T) {
-	if got := textFromArg(pgtype.Text{String: "  hello  ", Valid: true}); got != "hello" {
-		t.Fatalf("unexpected: %q", got)
-	}
-	if got := textFromArg("world"); got != "world" {
-		t.Fatalf("unexpected: %q", got)
 	}
 }

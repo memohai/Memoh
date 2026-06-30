@@ -14,56 +14,47 @@ import (
 	skillset "github.com/memohai/memoh/internal/skills"
 )
 
-func TestMissingRequiredVariablesTreatsSelfTemplateDefaultAsMissing(t *testing.T) {
+func TestUserSecretTemplateConfigRequiresProvidedVariable(t *testing.T) {
 	manifest := Manifest{
 		Variables: []ConfigVar{
 			{Key: "NOTION_TOKEN", Required: true, Secret: true},
 		},
+		AuthRequirements: []AuthRequirement{
+			{Key: "notion", Type: "user_secret", Variables: []string{"NOTION_TOKEN"}},
+		},
 	}
 	resource := MCPResource{
+		AuthRef: "notion",
 		Env: []ConfigVar{
 			{Key: "NOTION_TOKEN", DefaultValue: "${NOTION_TOKEN}", Required: true, Secret: true},
 		},
-	}
-	authReq := AuthRequirement{
-		Type:      "user_secret",
-		Variables: []string{"NOTION_TOKEN"},
-	}
-
-	if !missingRequiredVariables(manifest, resource, authReq, map[string]string{}) {
-		t.Fatal("expected missing user secret when the only value is a self-template default")
-	}
-	if !missingResourceConfig(manifest, resource, map[string]string{}) {
-		t.Fatal("expected missing resource config when the only value is a self-template default")
-	}
-}
-
-func TestResolveConfigValueExpandsTemplateWhenVariableIsProvided(t *testing.T) {
-	manifest := Manifest{
-		Variables: []ConfigVar{
-			{Key: "TOKEN", Required: true, Secret: true},
-		},
-	}
-	resource := MCPResource{
 		Headers: []ConfigVar{
-			{Key: "Authorization", DefaultValue: "Bearer ${TOKEN}", Required: true, Secret: true},
+			{Key: "Authorization", DefaultValue: "Bearer ${NOTION_TOKEN}", Required: true, Secret: true},
 		},
 	}
-	resolved := resolveVariables(manifest, resource, map[string]string{"TOKEN": "abc123"})
 
-	if got := resolveConfigValue(resource.Headers[0], resolved); got != "Bearer abc123" {
-		t.Fatalf("expected expanded authorization header, got %q", got)
+	if status := (&Service{}).evaluateInitialStatus(Manifest{
+		Variables:        manifest.Variables,
+		AuthRequirements: manifest.AuthRequirements,
+		MCPs:             []MCPResource{resource},
+	}, map[string]string{}); status != StatusNeedsConfig {
+		t.Fatalf("status = %q, want %q", status, StatusNeedsConfig)
 	}
-	if missingResourceConfig(manifest, resource, map[string]string{"TOKEN": "abc123"}) {
-		t.Fatal("expected resource config to be present when template variable is provided")
+
+	authReq := manifest.AuthRequirements[0]
+	req := buildMCPConnectionRequest(manifest, resource, authReq, map[string]string{"NOTION_TOKEN": "abc123"})
+	if got := req.Env["NOTION_TOKEN"]; got != "abc123" {
+		t.Fatalf("env NOTION_TOKEN = %q, want abc123", got)
 	}
-}
-
-func TestResolveConfigValueDropsUnresolvedTemplate(t *testing.T) {
-	item := ConfigVar{Key: "Authorization", DefaultValue: "Bearer ${TOKEN}", Required: true}
-
-	if got := resolveConfigValue(item, map[string]string{}); got != "" {
-		t.Fatalf("expected unresolved template to resolve to empty string, got %q", got)
+	if got := req.Headers["Authorization"]; got != "Bearer abc123" {
+		t.Fatalf("authorization header = %q, want Bearer abc123", got)
+	}
+	if status := (&Service{}).evaluateInitialStatus(Manifest{
+		Variables:        manifest.Variables,
+		AuthRequirements: manifest.AuthRequirements,
+		MCPs:             []MCPResource{resource},
+	}, map[string]string{"NOTION_TOKEN": "abc123"}); status != StatusReady {
+		t.Fatalf("status = %q, want %q", status, StatusReady)
 	}
 }
 

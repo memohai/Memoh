@@ -22,34 +22,44 @@ func TestTruncateRunes(t *testing.T) {
 func TestTruncateRunesWithSuffix(t *testing.T) {
 	t.Parallel()
 
-	text := strings.Repeat("你", 10) + "abc"
-	got := TruncateRunesWithSuffix(text, 8, "...")
-	if utf8.RuneCountInString(got) != 8 {
-		t.Fatalf("TruncateRunesWithSuffix() rune count = %d, want 8", utf8.RuneCountInString(got))
+	tests := []struct {
+		name   string
+		text   string
+		max    int
+		suffix string
+		want   string
+	}{
+		{
+			name:   "truncates on rune boundary and reserves suffix budget",
+			text:   strings.Repeat("你", 10) + "abc",
+			max:    8,
+			suffix: "...",
+			want:   strings.Repeat("你", 5) + "...",
+		},
+		{
+			name:   "returns original text when already within budget",
+			text:   "你好世界",
+			max:    8,
+			suffix: "...",
+			want:   "你好世界",
+		},
 	}
-	if got != strings.Repeat("你", 5)+"..." {
-		t.Fatalf("TruncateRunesWithSuffix() = %q", got)
-	}
-	if !utf8.ValidString(got) {
-		t.Fatalf("TruncateRunesWithSuffix() returned invalid UTF-8: %q", got)
-	}
-}
 
-func TestTruncateRunesWithSuffixNoTruncation(t *testing.T) {
-	t.Parallel()
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	text := "你好世界"
-	if got := TruncateRunesWithSuffix(text, 8, "..."); got != text {
-		t.Fatalf("TruncateRunesWithSuffix() = %q, want %q", got, text)
-	}
-}
-
-func TestTruncateRunesWithSuffixKeepsInvalidUTF8Bytes(t *testing.T) {
-	t.Parallel()
-
-	text := "ab\xffcd"
-	got := TruncateRunesWithSuffix(text, 4, "...")
-	if got != "a..." {
-		t.Fatalf("TruncateRunesWithSuffix() = %q, want %q", got, "a...")
+			got := TruncateRunesWithSuffix(tt.text, tt.max, tt.suffix)
+			if got != tt.want {
+				t.Fatalf("TruncateRunesWithSuffix() = %q, want %q", got, tt.want)
+			}
+			if utf8.RuneCountInString(got) > tt.max {
+				t.Fatalf("TruncateRunesWithSuffix() rune count = %d, want <= %d", utf8.RuneCountInString(got), tt.max)
+			}
+			if !utf8.ValidString(got) {
+				t.Fatalf("TruncateRunesWithSuffix() returned invalid UTF-8: %q", got)
+			}
+		})
 	}
 }

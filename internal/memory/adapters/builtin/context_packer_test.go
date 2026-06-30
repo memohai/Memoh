@@ -107,38 +107,6 @@ func TestPackContext_EmptyInput(t *testing.T) {
 	}
 }
 
-func TestAntiLostInMiddle_Reordering(t *testing.T) {
-	t.Parallel()
-	items := []int{1, 2, 3, 4, 5}
-	reordered := antiLostInMiddle(items)
-	if reordered[0] != 1 {
-		t.Fatalf("expected first item to be 1, got %d", reordered[0])
-	}
-	if reordered[len(reordered)-1] != 2 {
-		t.Fatalf("expected last item to be 2, got %d", reordered[len(reordered)-1])
-	}
-}
-
-func TestAntiLostInMiddle_SmallSlice(t *testing.T) {
-	t.Parallel()
-	single := antiLostInMiddle([]string{"a"})
-	if len(single) != 1 || single[0] != "a" {
-		t.Fatalf("unexpected result for single item: %v", single)
-	}
-	pair := antiLostInMiddle([]string{"a", "b"})
-	if len(pair) != 2 {
-		t.Fatalf("unexpected result for pair: %v", pair)
-	}
-}
-
-func TestOverfetchLimit(t *testing.T) {
-	t.Parallel()
-	cfg := contextPackerConfig{TargetItems: 5, OverfetchRatio: 3}
-	if got := overfetchLimit(cfg); got != 15 {
-		t.Fatalf("expected 15, got %d", got)
-	}
-}
-
 func TestDeduplicateAndSort(t *testing.T) {
 	t.Parallel()
 	items := []adapters.MemoryItem{

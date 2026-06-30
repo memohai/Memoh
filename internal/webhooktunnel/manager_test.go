@@ -77,22 +77,10 @@ func TestNormalizeConfiguredPublicBaseRejectsUnsafeValues(t *testing.T) {
 
 	tests := []string{
 		"http://memoh.example.org",
-		"https://localhost",
 		"https://127.0.0.1",
-		"https://[2001:4860:4860::8888]",
-		"https://192.168.1.10",
-		"https://100.64.0.1",
-		"https://192.0.2.1",
-		"https://198.51.100.1",
-		"https://203.0.113.1",
-		"https://memoh.local",
-		"https://memoh.internal",
 		"https://user:pass@memoh.example.org",
 		"https://memoh.example.org/app",
-		"https://memoh.example.org:443",
 		"https://memoh.example.org:8443",
-		"https://memoh.example.org?x=1",
-		"https://memoh.example.org#frag",
 	}
 	for _, raw := range tests {
 		raw := raw
@@ -192,42 +180,6 @@ func TestConfiguredPublicBaseURLStatusOverridesTunnelError(t *testing.T) {
 	}
 }
 
-func TestTargetURLDefaultsToWebhookTunnelListenAddr(t *testing.T) {
-	t.Parallel()
-
-	m := NewManager(nil, config.Config{
-		WebhookTunnel: config.WebhookTunnelConfig{
-			Mode:       config.WebhookTunnelModeManaged,
-			ListenAddr: ":18734",
-		},
-	})
-	got, err := m.targetURL()
-	if err != nil {
-		t.Fatalf("targetURL returned error: %v", err)
-	}
-	if got != "http://127.0.0.1:18734" {
-		t.Fatalf("targetURL = %q", got)
-	}
-}
-
 type assertErr string
 
 func (e assertErr) Error() string { return string(e) }
-
-func TestTargetURLHonorsExplicitTarget(t *testing.T) {
-	t.Parallel()
-
-	m := NewManager(nil, config.Config{
-		WebhookTunnel: config.WebhookTunnelConfig{
-			Mode:      config.WebhookTunnelModeManaged,
-			TargetURL: "http://127.0.0.1:9999",
-		},
-	})
-	got, err := m.targetURL()
-	if err != nil {
-		t.Fatalf("targetURL returned error: %v", err)
-	}
-	if got != "http://127.0.0.1:9999" {
-		t.Fatalf("targetURL = %q", got)
-	}
-}

@@ -4,69 +4,63 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strings"
 	"testing"
 )
 
-func TestResolve(t *testing.T) {
+func TestLocaleResolutionAndSupport(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		in   string
-		want string
+		in            string
+		wantResolve   string
+		wantSupported bool
 	}{
-		{"en", "en"},
-		{"zh", "zh"},
-		{"ja", "ja"},
-		{"ZH", "zh"},    // case-insensitive
-		{"JA", "ja"},    // case-insensitive
-		{" en ", "en"},  // trimmed
-		{"auto", "en"},  // auto → default
-		{"", "en"},      // empty → default
-		{"fr", "en"},    // unsupported → default
-		{"zh-CN", "en"}, // not an exact match → default (chat-language values don't leak in)
+		{in: "en", wantResolve: "en", wantSupported: true},
+		{in: "ZH", wantResolve: "zh", wantSupported: true},
+		{in: " ja ", wantResolve: "ja", wantSupported: true},
+		{in: "auto", wantResolve: DefaultLocale, wantSupported: false},
+		{in: "", wantResolve: DefaultLocale, wantSupported: false},
+		{in: "fr", wantResolve: DefaultLocale, wantSupported: false},
+		{in: "zh-CN", wantResolve: DefaultLocale, wantSupported: false},
 	}
 	for _, tc := range cases {
-		if got := Resolve(tc.in); got != tc.want {
-			t.Errorf("Resolve(%q) = %q, want %q", tc.in, got, tc.want)
+		if got := Resolve(tc.in); got != tc.wantResolve {
+			t.Errorf("Resolve(%q) = %q, want %q", tc.in, got, tc.wantResolve)
+		}
+		if got := IsSupported(tc.in); got != tc.wantSupported {
+			t.Errorf("IsSupported(%q) = %v, want %v", tc.in, got, tc.wantSupported)
 		}
 	}
 }
 
-func TestLocalizerTLookupAndFallback(t *testing.T) {
+func TestLocalizerTLookupFallbackAndSubstitution(t *testing.T) {
 	t.Parallel()
 
-	// Direct hit in zh.
-	if got := New("zh").T("cmd.settings.title"); got != "⚙️ 机器人设置" {
-		t.Errorf("zh title = %q", got)
+	translatedKey := "cmd.settings.title"
+	if got, en := New("zh").T(translatedKey), New("en").T(translatedKey); got == translatedKey || got == en {
+		t.Errorf("zh lookup should use its locale catalog, got %q (en %q)", got, en)
 	}
-	// auto resolves to en.
-	if got := New("auto").T("cmd.settings.title"); got != "⚙️ Bot Settings" {
-		t.Errorf("auto title = %q", got)
+
+	if got, want := New("auto").T(translatedKey), New(DefaultLocale).T(translatedKey); got != want {
+		t.Errorf("auto lookup = %q, want default locale %q", got, want)
 	}
-	// A key missing in zh would fall back to en; a key missing everywhere
-	// returns the key verbatim (visible-but-safe).
+
 	if got := New("zh").T("totally.missing.key"); got != "totally.missing.key" {
 		t.Errorf("missing key = %q, want the key itself", got)
 	}
-}
 
-func TestLocalizerTParams(t *testing.T) {
-	t.Parallel()
-	got := New("en").T("chrome.currentModel", map[string]any{"model": "Claude Opus"})
-	if got != "Current model: Claude Opus" {
-		t.Errorf("param substitution = %q", got)
-	}
-	// Numeric params stringify.
-	zh := New("zh").T("cmd.settings.heartbeatOnEvery", map[string]any{"minutes": 30})
-	if zh != "开 · 每 30 分钟" {
-		t.Errorf("zh heartbeat = %q", zh)
+	got := New("en").T("cmd.settings.heartbeatOnEvery", map[string]any{"minutes": 30})
+	if !strings.Contains(got, "30") || strings.Contains(got, "{minutes}") {
+		t.Errorf("numeric placeholder substitution = %q", got)
 	}
 }
 
 func TestNilLocalizerIsSafe(t *testing.T) {
 	t.Parallel()
 	var l *Localizer
-	if got := l.T("cmd.settings.title"); got != "⚙️ Bot Settings" {
-		t.Errorf("nil localizer should render default locale, got %q", got)
+	key := "cmd.settings.title"
+	if got, want := l.T(key), New(DefaultLocale).T(key); got != want {
+		t.Errorf("nil localizer should render default locale, got %q, want %q", got, want)
 	}
 	if got := l.Locale(); got != DefaultLocale {
 		t.Errorf("nil localizer Locale() = %q, want %q", got, DefaultLocale)
@@ -100,20 +94,6 @@ func TestSupportedCatalogsParity(t *testing.T) {
 			if _, ok := en[key]; !ok {
 				t.Errorf("locale %q has key %q absent from en (en is the fallback source)", loc, key)
 			}
-		}
-	}
-}
-
-func TestIsSupported(t *testing.T) {
-	t.Parallel()
-	for _, ok := range []string{"en", "zh", "ja", "ZH", "JA", " en "} {
-		if !IsSupported(ok) {
-			t.Errorf("IsSupported(%q) = false, want true", ok)
-		}
-	}
-	for _, no := range []string{"auto", "", "fr", "zh-CN"} {
-		if IsSupported(no) {
-			t.Errorf("IsSupported(%q) = true, want false", no)
 		}
 	}
 }

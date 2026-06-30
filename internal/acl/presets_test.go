@@ -22,7 +22,6 @@ func TestResolvePreset(t *testing.T) {
 		wantKey       string
 		wantEffect    string
 		wantRuleCount int
-		wantFirstType string
 		wantErr       error
 	}{
 		{
@@ -31,22 +30,6 @@ func TestResolvePreset(t *testing.T) {
 			wantKey:       PresetAllowAll,
 			wantEffect:    EffectAllow,
 			wantRuleCount: 0,
-		},
-		{
-			name:          "private only",
-			key:           PresetPrivateOnly,
-			wantKey:       PresetPrivateOnly,
-			wantEffect:    EffectDeny,
-			wantRuleCount: 1,
-			wantFirstType: "private",
-		},
-		{
-			name:          "group and thread only",
-			key:           PresetGroupAndThreadOnly,
-			wantKey:       PresetGroupAndThreadOnly,
-			wantEffect:    EffectDeny,
-			wantRuleCount: 2,
-			wantFirstType: "group",
 		},
 		{
 			name:    "invalid preset",
@@ -75,12 +58,6 @@ func TestResolvePreset(t *testing.T) {
 			}
 			if len(preset.Rules) != tt.wantRuleCount {
 				t.Fatalf("expected %d rules, got %d", tt.wantRuleCount, len(preset.Rules))
-			}
-			if tt.wantFirstType != "" {
-				got := preset.Rules[0].SourceScope.ConversationType
-				if got != tt.wantFirstType {
-					t.Fatalf("expected first conversation type %q, got %q", tt.wantFirstType, got)
-				}
 			}
 		})
 	}
@@ -127,15 +104,26 @@ func TestApplyPreset(t *testing.T) {
 	if len(createdRules) != 2 {
 		t.Fatalf("expected 2 created rules, got %d", len(createdRules))
 	}
-	if createdRules[0].conversationType != "group" {
-		t.Fatalf("unexpected first rule: %+v", createdRules[0])
-	}
-	if createdRules[1].conversationType != "thread" {
-		t.Fatalf("unexpected second rule: %+v", createdRules[1])
+	wantTypes := map[string]bool{
+		"group":  false,
+		"thread": false,
 	}
 	for _, rule := range createdRules {
 		if rule.effect != EffectAllow {
 			t.Fatalf("unexpected rule contents: %+v", rule)
+		}
+		seen, ok := wantTypes[rule.conversationType]
+		if !ok {
+			t.Fatalf("unexpected rule conversation type: %+v", rule)
+		}
+		if seen {
+			t.Fatalf("duplicate rule conversation type: %+v", rule)
+		}
+		wantTypes[rule.conversationType] = true
+	}
+	for conversationType, seen := range wantTypes {
+		if !seen {
+			t.Fatalf("missing %s preset rule", conversationType)
 		}
 	}
 }

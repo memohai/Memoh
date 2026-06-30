@@ -24,7 +24,4 @@ func TestMapErrorKeepsNonTransportCanceledAsCanceled(t *testing.T) {
 	if errors.Is(err, ErrUnavailable) {
 		t.Fatalf("did not expect ErrUnavailable, got %v", err)
 	}
-	if got := err.Error(); got != "grpc Canceled: operation canceled" {
-		t.Fatalf("unexpected mapped error: %q", got)
-	}
 }

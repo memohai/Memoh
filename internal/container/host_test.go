@@ -34,6 +34,38 @@ func TestResolveConfSourceFallbackCreatesReadableFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveConfSource returned error: %v", err)
 	}
+	if path != filepath.Join(dataDir, "resolv.conf") {
+		t.Fatalf("expected fallback path, got %q", path)
+	}
+	content, err := os.ReadFile(path) // #nosec G304 -- test reads a temp file returned by resolveConfSource.
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != fallbackResolv {
+		t.Fatalf("unexpected fallback resolv.conf contents: %q", string(content))
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != fallbackResolvPerm {
+		t.Fatalf("expected mode %o, got %o", fallbackResolvPerm, info.Mode().Perm())
+	}
+}
+
+func TestResolveConfSourceFallbackFixesExistingPermissions(t *testing.T) {
+	dataDir := t.TempDir()
+	fallbackPath := filepath.Join(dataDir, "resolv.conf")
+	if err := os.WriteFile(fallbackPath, []byte(fallbackResolv), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path, err := resolveConfSource(dataDir, filepath.Join(dataDir, "missing-resolv.conf"))
+	if err != nil {
+		t.Fatalf("resolveConfSource returned error: %v", err)
+	}
+	if path != fallbackPath {
+		t.Fatalf("expected fallback path, got %q", path)
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)

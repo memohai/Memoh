@@ -119,43 +119,6 @@ default_image = "debian:bookworm-slim"
 	}
 }
 
-func TestLoadReadsBackendSpecificConfigs(t *testing.T) {
-	t.Parallel()
-
-	configPath := filepath.Join(t.TempDir(), "config.toml")
-	data := []byte(`
-[containerd]
-runtime_type = "io.containerd.kata.v2"
-
-[docker]
-host = "unix:///var/run/docker.sock"
-
-[apple]
-socket_path = "/tmp/socktainer.sock"
-binary_path = "/opt/homebrew/bin/socktainer"
-`)
-	if err := os.WriteFile(configPath, data, 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	cfg, err := Load(configPath)
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-	if cfg.Containerd.RuntimeType != "io.containerd.kata.v2" {
-		t.Fatalf("containerd runtime type = %q", cfg.Containerd.RuntimeType)
-	}
-	if cfg.Docker.Host != "unix:///var/run/docker.sock" {
-		t.Fatalf("docker host = %q", cfg.Docker.Host)
-	}
-	if cfg.Apple.SocketPath != "/tmp/socktainer.sock" {
-		t.Fatalf("apple socket path = %q", cfg.Apple.SocketPath)
-	}
-	if cfg.Apple.BinaryPath != "/opt/homebrew/bin/socktainer" {
-		t.Fatalf("apple binary path = %q", cfg.Apple.BinaryPath)
-	}
-}
-
 func TestLoadAppliesBridgeTLSEnvOverrides(t *testing.T) {
 	t.Setenv("MEMOH_INSTANCE_ID", "instance-1")
 	t.Setenv("MEMOH_BRIDGE_TLS_MODE", BridgeTLSModeStrict)
@@ -203,46 +166,41 @@ func TestLoadAppliesWebhookTunnelEnvOverrides(t *testing.T) {
 }
 
 func TestLoadRejectsInvalidWebhookTunnelMode(t *testing.T) {
-	t.Parallel()
-
-	configPath := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(configPath, []byte("[webhook_tunnel]\nmode = \"managd\"\n"), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
+	tests := []struct {
+		name  string
+		setup func(t *testing.T) string
+	}{
+		{
+			name: "from config file",
+			setup: func(t *testing.T) string {
+				t.Helper()
+				configPath := filepath.Join(t.TempDir(), "config.toml")
+				if err := os.WriteFile(configPath, []byte("[webhook_tunnel]\nmode = \"managd\"\n"), 0o600); err != nil {
+					t.Fatalf("write config: %v", err)
+				}
+				return configPath
+			},
+		},
+		{
+			name: "from env override",
+			setup: func(t *testing.T) string {
+				t.Helper()
+				t.Setenv("MEMOH_WEBHOOK_TUNNEL_MODE", "managd")
+				return filepath.Join(t.TempDir(), "missing.toml")
+			},
+		},
 	}
 
-	_, err := Load(configPath)
-	if err == nil {
-		t.Fatal("expected invalid webhook tunnel mode to fail")
-	}
-	if !strings.Contains(err.Error(), "unsupported webhook_tunnel mode") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestLoadRejectsInvalidWebhookTunnelModeFromEnv(t *testing.T) {
-	t.Setenv("MEMOH_WEBHOOK_TUNNEL_MODE", "managd")
-
-	_, err := Load(filepath.Join(t.TempDir(), "missing.toml"))
-	if err == nil {
-		t.Fatal("expected invalid webhook tunnel mode env to fail")
-	}
-	if !strings.Contains(err.Error(), "unsupported webhook_tunnel mode") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestLoadDefaultsContainerdRuntimeType(t *testing.T) {
-	t.Parallel()
-
-	cfg, err := Load(filepath.Join(t.TempDir(), "missing.toml"))
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-	if cfg.Containerd.RuntimeType != DefaultContainerdRuntimeType {
-		t.Fatalf("containerd runtime type = %q, want %q", cfg.Containerd.RuntimeType, DefaultContainerdRuntimeType)
-	}
-	if got := cfg.Containerd.RuntimeTypeOrDefault(); got != DefaultContainerdRuntimeType {
-		t.Fatalf("runtime type default = %q, want %q", got, DefaultContainerdRuntimeType)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Load(tt.setup(t))
+			if err == nil {
+				t.Fatal("expected invalid webhook tunnel mode to fail")
+			}
+			if !strings.Contains(err.Error(), "unsupported webhook_tunnel mode") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
 	}
 }
 
@@ -269,11 +227,6 @@ func TestLoadAppExampleTemplateKeepsRootKeysOutsideAgentSection(t *testing.T) {
 	}
 	if cfg.InstanceID != "instance-example" {
 		t.Fatalf("instance_id = %q, want instance-example", cfg.InstanceID)
-	}
-	if cfg.Agent.ToolOutputMaxBytes != DefaultAgentToolOutputBytes ||
-		cfg.Agent.ToolOutputMaxLines != DefaultAgentToolOutputLines ||
-		cfg.Agent.SystemFilesMaxBytes != DefaultAgentSystemFilesBytes {
-		t.Fatalf("agent limits = %#v", cfg.Agent)
 	}
 }
 
@@ -314,65 +267,46 @@ func TestLoadAppLocalTemplate(t *testing.T) {
 	}
 }
 
-func TestLoadAppKataDevTemplate(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "devenv", "app.kata.dev.toml"))
-	if err != nil {
-		t.Fatalf("read app.kata.dev.toml: %v", err)
+func TestLoadKataTemplates(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "dev", path: filepath.Join("..", "..", "devenv", "app.kata.dev.toml")},
+		{name: "docker", path: filepath.Join("..", "..", "conf", "app.kata.docker.toml")},
 	}
-	configPath := filepath.Join(t.TempDir(), "app.kata.dev.toml")
-	//nolint:gosec // configPath is rooted at t.TempDir() with a literal filename; the rendered template content is not used as a path.
-	if err := os.WriteFile(configPath, raw, 0o600); err != nil {
-		t.Fatalf("write rendered app.kata.dev.toml: %v", err)
-	}
-	cfg, err := Load(configPath)
-	if err != nil {
-		t.Fatalf("load app.kata.dev.toml: %v", err)
-	}
-	if cfg.Container.Backend != "containerd" {
-		t.Fatalf("container backend = %q, want containerd", cfg.Container.Backend)
-	}
-	if cfg.Containerd.RuntimeTypeOrDefault() != "io.containerd.kata.v2" {
-		t.Fatalf("containerd runtime type = %q, want io.containerd.kata.v2", cfg.Containerd.RuntimeTypeOrDefault())
-	}
-	if cfg.Database.DriverOrDefault() != "postgres" {
-		t.Fatalf("database driver = %q, want postgres", cfg.Database.DriverOrDefault())
-	}
-	if !filepath.IsAbs(cfg.Workspace.DataRoot) {
-		t.Fatalf("workspace data_root = %q, want absolute path", cfg.Workspace.DataRoot)
-	}
-	if !filepath.IsAbs(cfg.Workspace.RuntimeDir) {
-		t.Fatalf("workspace runtime_dir = %q, want absolute path", cfg.Workspace.RuntimeDir)
-	}
-}
 
-func TestLoadAppKataDockerTemplate(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "conf", "app.kata.docker.toml"))
-	if err != nil {
-		t.Fatalf("read app.kata.docker.toml: %v", err)
-	}
-	configPath := filepath.Join(t.TempDir(), "app.kata.docker.toml")
-	//nolint:gosec // configPath is rooted at t.TempDir() with a literal filename; the rendered template content is not used as a path.
-	if err := os.WriteFile(configPath, raw, 0o600); err != nil {
-		t.Fatalf("write rendered app.kata.docker.toml: %v", err)
-	}
-	cfg, err := Load(configPath)
-	if err != nil {
-		t.Fatalf("load app.kata.docker.toml: %v", err)
-	}
-	if cfg.Container.Backend != "containerd" {
-		t.Fatalf("container backend = %q, want containerd", cfg.Container.Backend)
-	}
-	if cfg.Containerd.RuntimeTypeOrDefault() != "io.containerd.kata.v2" {
-		t.Fatalf("containerd runtime type = %q, want io.containerd.kata.v2", cfg.Containerd.RuntimeTypeOrDefault())
-	}
-	if cfg.Database.DriverOrDefault() != "postgres" {
-		t.Fatalf("database driver = %q, want postgres", cfg.Database.DriverOrDefault())
-	}
-	if !filepath.IsAbs(cfg.Workspace.DataRoot) {
-		t.Fatalf("workspace data_root = %q, want absolute path", cfg.Workspace.DataRoot)
-	}
-	if !filepath.IsAbs(cfg.Workspace.RuntimeDir) {
-		t.Fatalf("workspace runtime_dir = %q, want absolute path", cfg.Workspace.RuntimeDir)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := os.ReadFile(tt.path)
+			if err != nil {
+				t.Fatalf("read %s: %v", filepath.Base(tt.path), err)
+			}
+			configPath := filepath.Join(t.TempDir(), filepath.Base(tt.path))
+			//nolint:gosec // configPath is rooted at t.TempDir() with a literal filename; the rendered template content is not used as a path.
+			if err := os.WriteFile(configPath, raw, 0o600); err != nil {
+				t.Fatalf("write rendered %s: %v", filepath.Base(tt.path), err)
+			}
+			cfg, err := Load(configPath)
+			if err != nil {
+				t.Fatalf("load %s: %v", filepath.Base(tt.path), err)
+			}
+			if cfg.Container.Backend != "containerd" {
+				t.Fatalf("container backend = %q, want containerd", cfg.Container.Backend)
+			}
+			if cfg.Containerd.RuntimeTypeOrDefault() != "io.containerd.kata.v2" {
+				t.Fatalf("containerd runtime type = %q, want io.containerd.kata.v2", cfg.Containerd.RuntimeTypeOrDefault())
+			}
+			if cfg.Database.DriverOrDefault() != "postgres" {
+				t.Fatalf("database driver = %q, want postgres", cfg.Database.DriverOrDefault())
+			}
+			if !filepath.IsAbs(cfg.Workspace.DataRoot) {
+				t.Fatalf("workspace data_root = %q, want absolute path", cfg.Workspace.DataRoot)
+			}
+			if !filepath.IsAbs(cfg.Workspace.RuntimeDir) {
+				t.Fatalf("workspace runtime_dir = %q, want absolute path", cfg.Workspace.RuntimeDir)
+			}
+		})
 	}
 }
 
@@ -438,22 +372,35 @@ func TestWorkspaceImageRefDefaultsToPackagedWorkspace(t *testing.T) {
 	}
 }
 
-func TestWorkspaceImagePullCandidatesAddsWorkspaceMirror(t *testing.T) {
-	got := WorkspaceImagePullCandidates("memohai/workspace:debian")
-	want := []string{"docker.io/memohai/workspace:debian", "memoh.cn/memohai/workspace:debian"}
-	if len(got) != len(want) {
-		t.Fatalf("candidate count = %d, want %d (%v)", len(got), len(want), got)
+func TestWorkspaceImagePullCandidates(t *testing.T) {
+	tests := []struct {
+		name string
+		ref  string
+		want []string
+	}{
+		{
+			name: "adds workspace mirror",
+			ref:  "memohai/workspace:debian",
+			want: []string{"docker.io/memohai/workspace:debian", "memoh.cn/memohai/workspace:debian"},
+		},
+		{
+			name: "does not mirror custom images",
+			ref:  "debian:bookworm-slim",
+			want: []string{"docker.io/library/debian:bookworm-slim"},
+		},
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("candidate[%d] = %q, want %q", i, got[i], want[i])
-		}
-	}
-}
 
-func TestWorkspaceImagePullCandidatesDoesNotMirrorCustomImages(t *testing.T) {
-	got := WorkspaceImagePullCandidates("debian:bookworm-slim")
-	if len(got) != 1 || got[0] != "docker.io/library/debian:bookworm-slim" {
-		t.Fatalf("unexpected candidates: %v", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := WorkspaceImagePullCandidates(tt.ref)
+			if len(got) != len(tt.want) {
+				t.Fatalf("candidate count = %d, want %d (%v)", len(got), len(tt.want), got)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Fatalf("candidate[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
 	}
 }

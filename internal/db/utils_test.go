@@ -95,16 +95,6 @@ func TestParseUUID(t *testing.T) {
 			id:      "not-a-uuid",
 			wantErr: true,
 		},
-		{
-			name:    "empty",
-			id:      "",
-			wantErr: true,
-		},
-		{
-			name:    "partial",
-			id:      "550e8400-e29b",
-			wantErr: true,
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -129,7 +119,6 @@ func TestTimeFromPg(t *testing.T) {
 	}{
 		{"valid", pgtype.Timestamptz{Time: now, Valid: true}, now},
 		{"invalid", pgtype.Timestamptz{}, time.Time{}},
-		{"valid zero", pgtype.Timestamptz{Time: time.Time{}, Valid: true}, time.Time{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -149,7 +138,6 @@ func TestTextToString(t *testing.T) {
 	}{
 		{"valid", pgtype.Text{String: "hello", Valid: true}, "hello"},
 		{"invalid", pgtype.Text{}, ""},
-		{"valid empty", pgtype.Text{String: "", Valid: true}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

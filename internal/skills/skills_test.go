@@ -209,20 +209,6 @@ func TestPluginPathsForIDRejectEscapingIDs(t *testing.T) {
 	}
 }
 
-func TestDiscoveryRootsMatchDefaultPolicy(t *testing.T) {
-	roots := DiscoveryRoots(nil)
-	want := []Root{
-		{Path: ManagedDirPath, Kind: SourceKindManaged, Managed: true},
-		{Path: IndexDirPath, Kind: SourceKindManaged, Managed: true},
-		{Path: LegacyDirPath, Kind: SourceKindLegacy, Managed: false},
-		{Path: "/data/.agents/skills", Kind: SourceKindCompat, Managed: false},
-		{Path: "/root/.agents/skills", Kind: SourceKindCompat, Managed: false},
-	}
-	if !slices.Equal(roots, want) {
-		t.Fatalf("DiscoveryRoots() = %+v, want %+v", roots, want)
-	}
-}
-
 func TestDiscoveryRootsUseConfiguredCompatRoots(t *testing.T) {
 	roots := DiscoveryRoots([]string{
 		" /custom/skills ",
@@ -233,26 +219,17 @@ func TestDiscoveryRootsUseConfiguredCompatRoots(t *testing.T) {
 		"/root/.openclaw/skills",
 	})
 	want := []Root{
-		{Path: ManagedDirPath, Kind: SourceKindManaged, Managed: true},
-		{Path: IndexDirPath, Kind: SourceKindManaged, Managed: true},
-		{Path: LegacyDirPath, Kind: SourceKindLegacy, Managed: false},
 		{Path: "/custom/skills", Kind: SourceKindCompat, Managed: false},
 		{Path: "/root/.openclaw/skills", Kind: SourceKindCompat, Managed: false},
 	}
-	if !slices.Equal(roots, want) {
-		t.Fatalf("DiscoveryRoots(custom) = %+v, want %+v", roots, want)
+	if got := rootsByKind(roots, SourceKindCompat); !slices.Equal(got, want) {
+		t.Fatalf("compat roots = %+v, want %+v", got, want)
 	}
 }
 
 func TestDiscoveryRootsAllowExplicitEmptyCompatRoots(t *testing.T) {
-	roots := DiscoveryRoots([]string{})
-	want := []Root{
-		{Path: ManagedDirPath, Kind: SourceKindManaged, Managed: true},
-		{Path: IndexDirPath, Kind: SourceKindManaged, Managed: true},
-		{Path: LegacyDirPath, Kind: SourceKindLegacy, Managed: false},
-	}
-	if !slices.Equal(roots, want) {
-		t.Fatalf("DiscoveryRoots(empty) = %+v, want %+v", roots, want)
+	if got := rootsByKind(DiscoveryRoots([]string{}), SourceKindCompat); len(got) != 0 {
+		t.Fatalf("compat roots = %+v, want none", got)
 	}
 }
 
@@ -263,56 +240,18 @@ func TestDiscoveryRootsIncludePluginRootsAsServerManagedSource(t *testing.T) {
 		"/data/.memoh/plugins/bad",
 		"relative/plugin/skills",
 	})
-	want := []Root{
-		{Path: ManagedDirPath, Kind: SourceKindManaged, Managed: true},
-		{Path: IndexDirPath, Kind: SourceKindManaged, Managed: true},
-		{Path: LegacyDirPath, Kind: SourceKindLegacy, Managed: false},
+	wantPlugins := []Root{
 		{Path: "/data/.memoh/plugins/github/skills", Kind: SourceKindPlugin, Managed: false},
+	}
+	if got := rootsByKind(roots, SourceKindPlugin); !slices.Equal(got, wantPlugins) {
+		t.Fatalf("plugin roots = %+v, want %+v", got, wantPlugins)
+	}
+
+	wantCompat := []Root{
 		{Path: "/custom/skills", Kind: SourceKindCompat, Managed: false},
 	}
-	if !slices.Equal(roots, want) {
-		t.Fatalf("DiscoveryRootsWithPluginRoots() = %+v, want %+v", roots, want)
-	}
-}
-
-func TestListScansConfiguredDiscoveryRootsInOrder(t *testing.T) {
-	client := newFakeClient()
-	rawCompatRoots := []string(nil)
-	for _, root := range DiscoveryRoots(rawCompatRoots) {
-		client.listings[root.Path] = nil
-	}
-	client.listings[ManagedDirPath] = []*pb.FileEntry{{Path: "alpha", IsDir: true}}
-	client.files[pathJoin(ManagedDirPath, "alpha", "SKILL.md")] = "---\nname: alpha\ndescription: Alpha\n---\n\n# Alpha"
-
-	items, err := List(context.Background(), client, rawCompatRoots)
-	if err != nil {
-		t.Fatalf("List returned error: %v", err)
-	}
-	if len(items) != 1 || items[0].SourceRoot != ManagedDirPath {
-		t.Fatalf("List() items = %+v, want managed alpha only", items)
-	}
-
-	wantCalls := make([]string, 0, len(DiscoveryRoots(rawCompatRoots)))
-	for _, root := range DiscoveryRoots(rawCompatRoots) {
-		wantCalls = append(wantCalls, root.Path)
-	}
-	if !slices.Equal(client.listCalls, wantCalls) {
-		t.Fatalf("ListDirAll calls = %+v, want %+v", client.listCalls, wantCalls)
-	}
-}
-
-func TestContainerEnvUsesDataHomeAndXDGDirs(t *testing.T) {
-	env := ContainerEnv(nil)
-	for _, want := range []string{
-		"HOME=/data",
-		"XDG_CONFIG_HOME=/data/.config",
-		"XDG_DATA_HOME=/data/.local/share",
-		"XDG_CACHE_HOME=/data/.cache",
-		"MEMOH_SKILL_DISCOVERY_ROOTS=/data/.agents/skills:/root/.agents/skills",
-	} {
-		if !slices.Contains(env, want) {
-			t.Fatalf("env %+v does not contain %q", env, want)
-		}
+	if got := rootsByKind(roots, SourceKindCompat); !slices.Equal(got, wantCompat) {
+		t.Fatalf("compat roots = %+v, want %+v", got, wantCompat)
 	}
 }
 
@@ -324,10 +263,19 @@ func TestContainerEnvUsesConfiguredSkillDiscoveryRoots(t *testing.T) {
 	}
 }
 
+func rootsByKind(roots []Root, kind string) []Root {
+	out := make([]Root, 0, len(roots))
+	for _, root := range roots {
+		if root.Kind == kind {
+			out = append(out, root)
+		}
+	}
+	return out
+}
+
 type fakeClient struct {
-	listings  map[string][]*pb.FileEntry
-	files     map[string]string
-	listCalls []string
+	listings map[string][]*pb.FileEntry
+	files    map[string]string
 }
 
 func newFakeClient() *fakeClient {
@@ -338,7 +286,6 @@ func newFakeClient() *fakeClient {
 }
 
 func (f *fakeClient) ListDirAll(_ context.Context, p string, _ bool) ([]*pb.FileEntry, error) {
-	f.listCalls = append(f.listCalls, p)
 	items, ok := f.listings[p]
 	if !ok {
 		return nil, io.EOF

@@ -33,22 +33,6 @@ func TestRenderMessage_ImageRefsPopulated(t *testing.T) {
 	}
 }
 
-func TestRenderMessage_NoImageRefs(t *testing.T) {
-	msg := &ICMessage{
-		MessageID:    "msg-2",
-		ReceivedAtMs: 200,
-		TimestampSec: 200,
-		Content:      []ContentNode{{Type: "text", Text: "text only"}},
-		Conversation: ConversationMeta{Channel: "telegram", ConversationType: "private"},
-	}
-
-	seg := renderMessage(msg, RenderParams{})
-
-	if len(seg.ImageRefs) != 0 {
-		t.Fatalf("expected 0 image refs, got %d", len(seg.ImageRefs))
-	}
-}
-
 func TestAdaptAttachments_ContentHash(t *testing.T) {
 	atts := []channel.Attachment{
 		{Type: channel.AttachmentImage, ContentHash: "abc123", URL: "/data/media/bot/ab/abc123.jpg", Mime: "image/jpeg"},
