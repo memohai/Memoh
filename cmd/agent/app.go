@@ -1145,8 +1145,8 @@ func provideEmailRegistry(log *slog.Logger, tokenStore *emailpkg.DBOAuthTokenSto
 	return reg
 }
 
-func provideProvidersService(log *slog.Logger, queries dbstore.Queries, _ config.Config) *providers.Service {
-	return providers.NewService(log, queries, defaultProviderOAuthCallbackURL())
+func provideProvidersService(log *slog.Logger, queries dbstore.Queries, cfg config.Config) *providers.Service {
+	return providers.NewService(log, queries, defaultProviderOAuthCallbackURL(), cfg.Registry.ProvidersPath())
 }
 
 func defaultProviderOAuthCallbackURL() string {
@@ -1235,14 +1235,7 @@ func startRegistrySync(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, que
 }
 
 func providerBootstrapDefinitions(defs []registry.ProviderDefinition) []registry.ProviderDefinition {
-	filtered := make([]registry.ProviderDefinition, 0, len(defs))
-	for _, def := range defs {
-		if models.IsLLMClientType(models.ClientType(def.ClientType)) {
-			continue
-		}
-		filtered = append(filtered, def)
-	}
-	return filtered
+	return defs
 }
 
 func startAudioProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, queries dbstore.Queries, registry *audiopkg.Registry) {

@@ -4,36 +4,37 @@ import (
 	"testing"
 
 	"github.com/memohai/memoh/internal/channel/inbound"
-	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/registry"
 )
 
-func TestProviderBootstrapDefinitionsSkipsLLMTemplates(t *testing.T) {
+func TestProviderBootstrapDefinitionsKeepsAllProviderFiles(t *testing.T) {
 	defs := []registry.ProviderDefinition{
 		{
 			Name:       "DeepSeek",
-			ClientType: string(models.ClientTypeOpenAICompletions),
+			ClientType: "openai-completions",
 		},
 		{
-			Name:       "OpenAI Codex",
-			ClientType: string(models.ClientTypeOpenAICodex),
+			Name:       "OpenAI",
+			ClientType: "openai-responses",
 		},
 		{
 			Name:       "OpenAI Speech",
-			ClientType: string(models.ClientTypeOpenAISpeech),
+			ClientType: "openai-speech",
 		},
 		{
 			Name:       "Google Transcription",
-			ClientType: string(models.ClientTypeGoogleTranscription),
+			ClientType: "google-transcription",
 		},
 	}
 
 	got := providerBootstrapDefinitions(defs)
-	if len(got) != 2 {
-		t.Fatalf("definition count = %d, want 2", len(got))
+	if len(got) != len(defs) {
+		t.Fatalf("definition count = %d, want %d", len(got), len(defs))
 	}
-	if got[0].Name != "OpenAI Speech" || got[1].Name != "Google Transcription" {
-		t.Fatalf("definitions = %#v, want only non-LLM provider templates", got)
+	for i := range defs {
+		if got[i].Name != defs[i].Name {
+			t.Fatalf("definition %d = %#v, want %#v", i, got[i], defs[i])
+		}
 	}
 }
 

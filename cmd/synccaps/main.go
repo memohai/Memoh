@@ -31,13 +31,16 @@ import (
 
 const defaultLitellmURL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
 
-// firstPartyProviders are the templates whose model ids are canonical enough
-// for a safe litellm match. Catalog/local providers are excluded because
-// matching their unstructured identifiers is unreliable.
+// firstPartyProviders are the templates whose model ids are concrete enough for
+// a safe LiteLLM match after reseller entries are pruned. Catalog/local
+// providers are excluded because matching their unstructured identifiers is
+// unreliable.
 var firstPartyProviders = []string{
 	"anthropic", "openai", "google", "xai",
 	"deepseek", "mistral", "moonshot", "qwen", "minimax",
 	"openrouter",
+	"azure-openai", "cerebras", "cloudflare", "fireworks",
+	"perplexity", "together", "zai",
 }
 
 func main() {

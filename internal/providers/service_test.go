@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -49,6 +51,52 @@ func TestMaskAPIKey(t *testing.T) {
 			t.Fatalf("expected empty, got %q", got)
 		}
 	})
+}
+
+func TestFetchTemplateModelsUsesPresetSource(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "zai.yaml")
+	if err := os.WriteFile(path, []byte(`
+name: Z.AI GLM
+client_type: openai-completions
+icon: zhipu-color
+base_url: https://api.z.ai/api/paas/v4
+
+models:
+  - model_id: glm-5
+    name: GLM 5
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 200000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
+`), 0o600); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+
+	svc := NewService(nil, nil, "", dir)
+	models, ok := svc.fetchTemplateModels(sqlc.Provider{
+		Metadata: []byte(`{"preset":{"source":"zai.yaml"}}`),
+	})
+	if !ok {
+		t.Fatal("expected template models")
+	}
+	if len(models) != 1 {
+		t.Fatalf("models = %d, want 1", len(models))
+	}
+	model := models[0]
+	if model.ID != "glm-5" || model.Name != "GLM 5" || model.Type != "chat" {
+		t.Fatalf("unexpected model: %#v", model)
+	}
+	if got := strings.Join(model.Compatibilities, ","); got != "tool-call,reasoning" {
+		t.Fatalf("compatibilities = %q", got)
+	}
+	if model.ContextWindow == nil || *model.ContextWindow != 200000 {
+		t.Fatalf("context window = %#v", model.ContextWindow)
+	}
 }
 
 func TestNormalizeProviderConfig(t *testing.T) {

@@ -20,26 +20,33 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/registry"
 )
 
 // Service handles provider operations.
 type Service struct {
-	queries     dbstore.Queries
-	logger      *slog.Logger
-	httpClient  *http.Client
-	callbackURL string
+	queries      dbstore.Queries
+	logger       *slog.Logger
+	httpClient   *http.Client
+	callbackURL  string
+	templatesDir string
 }
 
 // NewService creates a new provider service.
-func NewService(log *slog.Logger, queries dbstore.Queries, callbackURL string) *Service {
+func NewService(log *slog.Logger, queries dbstore.Queries, callbackURL string, templatesDir ...string) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
+	var dir string
+	if len(templatesDir) > 0 {
+		dir = templatesDir[0]
+	}
 	return &Service{
-		queries:     queries,
-		logger:      log.With(slog.String("service", "providers")),
-		httpClient:  &http.Client{Timeout: providerOAuthHTTPTimeout},
-		callbackURL: callbackURL,
+		queries:      queries,
+		logger:       log.With(slog.String("service", "providers")),
+		httpClient:   &http.Client{Timeout: providerOAuthHTTPTimeout},
+		callbackURL:  callbackURL,
+		templatesDir: dir,
 	}
 }
 
@@ -328,6 +335,10 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		return nil, fmt.Errorf("get provider: %w", err)
 	}
 
+	if models, ok := s.fetchTemplateModels(provider); ok {
+		return models, nil
+	}
+
 	var remoteModels []RemoteModel
 	switch {
 	case models.ClientType(provider.ClientType) == models.ClientTypeGitHubCopilot:
@@ -342,6 +353,53 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 	}
 
 	return remoteModels, nil
+}
+
+func (s *Service) fetchTemplateModels(provider sqlc.Provider) ([]RemoteModel, bool) {
+	source := metadataSectionSource(providerMetadata(provider.Metadata), "preset")
+	if source == "" {
+		return nil, false
+	}
+	source = strings.ToLower(strings.TrimSpace(source))
+	if strings.TrimSpace(s.templatesDir) == "" {
+		return nil, false
+	}
+
+	defs, err := registry.Load(s.logger, s.templatesDir)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to load provider template models", slog.String("template_source", source), slog.Any("error", err))
+		}
+		return nil, false
+	}
+	for _, def := range defs {
+		if strings.EqualFold(def.Source, source) {
+			return remoteModelsFromTemplate(def), true
+		}
+	}
+	return nil, false
+}
+
+func remoteModelsFromTemplate(def registry.ProviderDefinition) []RemoteModel {
+	out := make([]RemoteModel, 0, len(def.Models))
+	for _, model := range def.Models {
+		modelType := strings.TrimSpace(model.Type)
+		if modelType == "" {
+			modelType = string(models.ModelTypeChat)
+		}
+		cfg := model.Config
+		out = append(out, RemoteModel{
+			ID:               model.ModelID,
+			Name:             model.Name,
+			Type:             modelType,
+			Compatibilities:  configStringSlice(cfg, "compatibilities"),
+			ReasoningEfforts: configStringSlice(cfg, "reasoning_efforts"),
+			ThinkingMode:     configString(cfg, "thinking_mode"),
+			ContextWindow:    configIntPtr(cfg, "context_window"),
+			Dimensions:       configIntPtr(cfg, "dimensions"),
+		})
+	}
+	return out
 }
 
 func (s *Service) fetchGitHubCopilotModels(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, error) {
@@ -511,6 +569,49 @@ func configString(cfg map[string]any, key string) string {
 	}
 	v, _ := cfg[key].(string)
 	return v
+}
+
+func configStringSlice(cfg map[string]any, key string) []string {
+	if cfg == nil {
+		return nil
+	}
+	switch value := cfg[key].(type) {
+	case []string:
+		return append([]string(nil), value...)
+	case []any:
+		out := make([]string, 0, len(value))
+		for _, item := range value {
+			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func configIntPtr(cfg map[string]any, key string) *int {
+	if cfg == nil {
+		return nil
+	}
+	switch value := cfg[key].(type) {
+	case int:
+		if value > 0 {
+			return &value
+		}
+	case int64:
+		if value > 0 {
+			out := int(value)
+			return &out
+		}
+	case float64:
+		if value > 0 {
+			out := int(value)
+			return &out
+		}
+	}
+	return nil
 }
 
 // ProviderConfigString is a public helper for extracting a string from the config JSONB.

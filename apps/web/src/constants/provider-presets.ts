@@ -4,7 +4,7 @@ export interface ProviderPreset {
   registryName?: string
   clientType: string
   baseUrl: string
-  icon: string
+  icon?: string
   source: string
   requiresApiKey?: boolean
   requiresBaseUrl?: boolean
@@ -35,6 +35,62 @@ export const providerPresets: ProviderPreset[] = [
     baseUrl: 'https://openrouter.ai/api/v1',
     icon: 'openrouter',
     source: 'openrouter.yaml',
+  },
+  {
+    id: 'zai',
+    name: 'Z.AI GLM',
+    clientType: 'openai-completions',
+    baseUrl: 'https://api.z.ai/api/paas/v4',
+    icon: 'zhipu-color',
+    source: 'zai.yaml',
+  },
+  {
+    id: 'together',
+    name: 'Together AI',
+    clientType: 'openai-completions',
+    baseUrl: 'https://api.together.xyz/v1',
+    icon: 'together-color',
+    source: 'together.yaml',
+  },
+  {
+    id: 'fireworks',
+    name: 'Fireworks AI',
+    clientType: 'openai-completions',
+    baseUrl: 'https://api.fireworks.ai/inference/v1',
+    icon: 'fireworks-color',
+    source: 'fireworks.yaml',
+  },
+  {
+    id: 'perplexity',
+    name: 'Perplexity',
+    clientType: 'openai-completions',
+    baseUrl: 'https://api.perplexity.ai',
+    icon: 'perplexity-color',
+    source: 'perplexity.yaml',
+  },
+  {
+    id: 'cerebras',
+    name: 'Cerebras',
+    clientType: 'openai-completions',
+    baseUrl: 'https://api.cerebras.ai/v1',
+    icon: 'cerebras-color',
+    source: 'cerebras.yaml',
+  },
+  {
+    id: 'cloudflare',
+    name: 'Cloudflare Workers AI',
+    clientType: 'openai-completions',
+    baseUrl: 'https://api.cloudflare.com/client/v4/accounts/<account_id>/ai/v1',
+    icon: 'cloudflare',
+    source: 'cloudflare.yaml',
+  },
+  {
+    id: 'azure-openai',
+    name: 'Azure OpenAI',
+    clientType: 'openai-completions',
+    baseUrl: 'https://<resource>.openai.azure.com/openai/v1',
+    icon: 'azure-color',
+    source: 'azure-openai.yaml',
   },
   {
     id: 'google',
@@ -324,6 +380,8 @@ const onboardingPresetIds = new Set([
   'google',
   'deepseek',
   'moonshot',
+  'minimax',
+  'xai',
 ])
 
 export const onboardingProviderPresets = providerPresets.filter(preset =>
