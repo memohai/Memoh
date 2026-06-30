@@ -1211,6 +1211,7 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 			if !injected {
 				cfg.Messages = append(cfg.Messages, sdk.UserMessage("", imageParts...))
 			}
+			cfg.ContextQueryMaterialized = true
 		}
 	}
 

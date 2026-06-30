@@ -1,7 +1,10 @@
 package flow
 
 import (
+	"context"
 	"testing"
+
+	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/contextfrag"
@@ -82,10 +85,45 @@ func TestBuildContextFragScopeDoesNotInferDirectedReplyFromAnyReplyID(t *testing
 	}
 }
 
+func TestPrepareRunConfigDoesNotDoubleCountPipelineInlineImages(t *testing.T) {
+	t.Parallel()
+
+	image := sdk.ImagePart{Image: "data:image/png;base64,abc", MediaType: "image/png"}
+	resolver := &Resolver{}
+	cfg := agent.RunConfig{
+		Messages:     []sdk.Message{sdk.UserMessage("pipeline current user")},
+		InlineImages: []sdk.ImagePart{image},
+	}
+
+	got := resolver.prepareRunConfig(context.Background(), cfg)
+
+	if got.ContextManifest.Counts.Images != 1 {
+		t.Fatalf("manifest image count = %d, want only image injected into SDK message: %#v", got.ContextManifest.Counts.Images, got.ContextManifest.Items)
+	}
+	rendered := contextfrag.Render(got.ContextFrags)
+	if len(rendered.InlineImages) != 0 {
+		t.Fatalf("rendered inline images = %#v, want images only inside pipeline SDK message", rendered.InlineImages)
+	}
+	if !messagesContainImage(got.Messages) {
+		t.Fatalf("prepared messages do not contain injected image: %#v", got.Messages)
+	}
+}
+
 func hasAttention(reasons []contextfrag.AttentionReason, want contextfrag.AttentionReason) bool {
 	for _, reason := range reasons {
 		if reason == want {
 			return true
+		}
+	}
+	return false
+}
+
+func messagesContainImage(messages []sdk.Message) bool {
+	for _, message := range messages {
+		for _, part := range message.Content {
+			if _, ok := part.(sdk.ImagePart); ok {
+				return true
+			}
 		}
 	}
 	return false
