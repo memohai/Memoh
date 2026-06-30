@@ -270,7 +270,6 @@
           </div>
           <div class="appearance-mermaid-preview pointer-events-none mt-3">
             <MarkdownRender
-              :key="mermaidPreviewKey"
               :content="MERMAID_PREVIEW_CONTENT"
               :is-dark="isDark"
               :typewriter="false"
@@ -354,10 +353,6 @@ const mermaidThemeLabels: Record<MermaidTheme, string> = {
   forest: 'Forest',
   neutral: 'Neutral',
 }
-
-// Mermaid renders to SVG once per source+theme; force a remount when either
-// changes so the preview reflects the picked theme immediately.
-const mermaidPreviewKey = computed(() => `${mermaidTheme.value}:${isDark.value ? 'dark' : 'light'}`)
 
 const allShikiThemes = listBundledShikiThemes()
 const lightShikiThemeOptions = computed<SearchableSelectOption[]>(() =>
