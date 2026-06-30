@@ -30,6 +30,29 @@ func TestRefreshContextFragOmitsMaterializedQuery(t *testing.T) {
 	}
 }
 
+func TestRefreshContextFragOmitsMaterializedInlineImages(t *testing.T) {
+	t.Parallel()
+
+	image := sdk.ImagePart{Image: "data:image/png;base64,abc", MediaType: "image/png"}
+	cfg := RunConfig{
+		System:                   "base system",
+		Query:                    "current user",
+		Messages:                 []sdk.Message{sdk.UserMessage("current user", image)},
+		InlineImages:             []sdk.ImagePart{image},
+		ContextQueryMaterialized: true,
+	}
+
+	cfg = cfg.RefreshContextFrag()
+
+	if cfg.ContextManifest.Counts.Images != 1 {
+		t.Fatalf("manifest image count = %d, want only materialized message image: %#v", cfg.ContextManifest.Counts.Images, cfg.ContextManifest.Items)
+	}
+	rendered := contextfrag.Render(cfg.ContextFrags)
+	if len(rendered.InlineImages) != 0 {
+		t.Fatalf("rendered inline images = %#v, want images only inside materialized message", rendered.InlineImages)
+	}
+}
+
 func TestRefreshContextFragMarksToolUsageBeforeWorkspaceInstructions(t *testing.T) {
 	t.Parallel()
 

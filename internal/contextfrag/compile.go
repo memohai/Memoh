@@ -38,11 +38,17 @@ func Compile(input CompileInput) AssembledContext {
 
 	explicit := preserveExplicit(input.Existing)
 	frags := make([]ContextFrag, 0, len(explicit)+len(input.Messages)+4)
+	derivedMessageIDs := make(map[string]struct{}, len(input.Messages))
+	for i := range input.Messages {
+		derivedMessageIDs[fmt.Sprintf("message.%03d", i)] = struct{}{}
+	}
 	messageOverrides := make(map[string]ContextFrag, len(explicit))
 	for _, frag := range explicit {
 		if id := strings.TrimSpace(frag.ID); id != "" && overridesDerivedMessage(frag) {
-			messageOverrides[id] = frag
-			continue
+			if _, ok := derivedMessageIDs[id]; ok {
+				messageOverrides[id] = frag
+				continue
+			}
 		}
 		frags = append(frags, frag)
 	}

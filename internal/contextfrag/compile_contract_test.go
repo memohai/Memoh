@@ -257,3 +257,37 @@ func TestCompilePreservesExplicitMessageFragAtSourcePosition(t *testing.T) {
 		t.Fatalf("explicit message ref was not preserved: %#v", assembled.Manifest.Items[1].Ref)
 	}
 }
+
+func TestCompilePreservesUnmatchedExplicitMessageFrag(t *testing.T) {
+	t.Parallel()
+
+	summary := sdk.UserMessage("<summary>\ncondensed\n</summary>")
+	summaryRef := ContextRef{Namespace: "compaction_log", ID: "log-1", Schema: SchemaContextRef, Durability: RefDurable}
+	summaryFrag := MessageFrag(MessageFragInput{
+		ID:      "summary.log-1",
+		Message: summary,
+		Kind:    KindConversationSummary,
+		Slot:    SlotHistory,
+		Source:  "compaction_log",
+	})
+	summaryFrag.Ref = summaryRef
+
+	assembled := Compile(CompileInput{
+		Source:   SourceRunConfig,
+		Messages: []sdk.Message{sdk.UserMessage("after summary")},
+		Existing: []ContextFrag{summaryFrag},
+	})
+
+	if len(assembled.Messages) != 2 {
+		t.Fatalf("messages = %d, want explicit summary plus derived message: %#v", len(assembled.Messages), assembled.Messages)
+	}
+	if len(assembled.Manifest.Items) != 2 {
+		t.Fatalf("manifest items = %d, want explicit summary plus derived message: %#v", len(assembled.Manifest.Items), assembled.Manifest.Items)
+	}
+	if assembled.Manifest.Items[0].Kind != KindConversationSummary {
+		t.Fatalf("first manifest item kind = %q, want %q", assembled.Manifest.Items[0].Kind, KindConversationSummary)
+	}
+	if !assembled.Manifest.Items[0].Ref.EqualIdentity(summaryRef) {
+		t.Fatalf("unmatched explicit message ref was not preserved: %#v", assembled.Manifest.Items[0].Ref)
+	}
+}
