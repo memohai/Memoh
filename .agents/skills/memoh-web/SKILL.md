@@ -38,6 +38,17 @@ the *how*; these are the *must*.
    drifts out of the token contract and reads inconsistent page to page. If a layout repeats,
    extract it into one shared component instead of pasting it twice. A genuinely new component
    is a last resort — clear it with the developer *before* building it.
+   **The component system is not modelling clay.** `SettingsSection` / `SettingsRow` / the cards
+   are not a blank canvas you reshape to taste — each has *one* sanctioned use, and you compose
+   *with* them, you do not knead them into a new shape. The tell that you've started treating the
+   system as clay: you're putting a hand-rolled `grid` / multi-column layout / freeform `<div>`
+   stack **inside** a `SettingsSection` to "arrange things nicer" (a 2-col stat grid jammed into
+   the white card is the canonical offence — see `reference.md` dirty→clean). When the shape you
+   want isn't one the primitives already give you, that is **not** license to deform a card from
+   the inside — it means you've picked the wrong primitive. Stop, find the component whose *one*
+   job is that shape (a value-in-a-card is a `SettingsRow`; a label-on-top/number-below readout
+   is a **section-level stat tile**, never a grid inside a card), or clear a real new component
+   with the developer. Squeezing the clay is always the wrong move, even when it renders fine.
 6. **Earn every word and every block.** Cut copy that doesn't guide; hide blocks that aren't
    actionable; empty *and* loading states must still draw their frame (no layout jump).
    **No stray fragments:** every visible piece must sit in a named region (PageShell
@@ -896,6 +907,14 @@ seeing it rendered is:
 - **Reuse audit:** did you reuse every component you could — or hand-write / duplicate something
   a primitive or a shared composition already covers? Is any brand-new component cleared with
   the developer? Was a repeated arrangement extracted, not pasted?
+- **Import audit — a `@memohai/ui` tag you forgot to import silently degrades to a native
+  element, and *nothing flags it*.** Vue resolves an unimported PascalCase tag against the DOM:
+  `<Progress>` falls back to the native `<progress>` (a chunky grey OS bar, `model-value` inert),
+  `<Switch>`/`<Dialog>` to unknown/native elements — eslint and `vue-tsc` both pass, so it only
+  shows up in the *rendered* page (the canonical bug: a billing meter that shipped as a fat grey
+  block instead of the thin token bar). For every `@memohai/ui` component the template uses,
+  confirm it's in the `import { … } from '@memohai/ui'` list — and trust the rendered pixels over
+  "I wrote `<Progress>`, so it's the Progress component."
 - **Forms & sizing:** do forms match the New Task standard, and is every button sized on purpose
   (default h-9 for primaries / footers, `sm` only where genuinely tight)? No squat `sm` footers.
 
