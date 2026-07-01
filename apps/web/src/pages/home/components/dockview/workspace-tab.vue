@@ -137,7 +137,7 @@ const isDirty = computed(() => !!workspaceTabs.fileDirty[panelId])
 // reserved gap never looks accidental. A dirty active tab keeps showing the unsaved
 // dot at rest instead (the X still fades in on hover over the same slot), so the two
 // signals never fight for the slot.
-const showResidentClose = computed(() => isTabSelected.value && !isDirty.value)
+const showResidentClose = computed(() => isActive.value && !isDirty.value)
 // Ephemeral preview tabs still get replaced in place when another
 // preview-eligible tab opens into the same group (see workspace-tabs store), but
 // the state is no longer surfaced visually — there is no italic or other marker.

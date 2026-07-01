@@ -17,6 +17,7 @@
       :disable-floating-groups="true"
       :disable-tabs-overflow-list="true"
       :disable-auto-resizing="true"
+      :scrollbars="'native'"
       :get-tab-context-menu-items="getTabContextMenuItems"
       @ready="onReady"
     />

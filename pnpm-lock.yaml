@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   dockview-core@7.0.2:
-    hash: f22f8ace97b6d1601ce61af7038966d0eb646a0c49e589fb02a22811780cd1a7
+    hash: 90e51af6eadd1ff1a7edaeaafc3f154c6cdf3a75ed1e962e55cdd3f8d9b58f59
     path: patches/dockview-core@7.0.2.patch
   dockview-vue@7.0.2:
     hash: ed0eefdb14161c24622f84cfcd1f3470577cc96fd973705c7e09d1c643452b07
@@ -8852,7 +8852,7 @@ snapshots:
       verror: 1.10.1
     optional: true
 
-  dockview-core@7.0.2(patch_hash=f22f8ace97b6d1601ce61af7038966d0eb646a0c49e589fb02a22811780cd1a7): {}
+  dockview-core@7.0.2(patch_hash=90e51af6eadd1ff1a7edaeaafc3f154c6cdf3a75ed1e962e55cdd3f8d9b58f59): {}
 
   dockview-vue@7.0.2(patch_hash=ed0eefdb14161c24622f84cfcd1f3470577cc96fd973705c7e09d1c643452b07)(vue@3.5.26(typescript@5.9.3)):
     dependencies:
@@ -8861,7 +8861,7 @@ snapshots:
 
   dockview@7.0.2:
     dependencies:
-      dockview-core: 7.0.2(patch_hash=f22f8ace97b6d1601ce61af7038966d0eb646a0c49e589fb02a22811780cd1a7)
+      dockview-core: 7.0.2(patch_hash=90e51af6eadd1ff1a7edaeaafc3f154c6cdf3a75ed1e962e55cdd3f8d9b58f59)
 
   doctypes@1.1.0: {}
 

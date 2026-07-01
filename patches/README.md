@@ -40,11 +40,27 @@ bundler may resolve:
 The multi-panel/group drag ghosts keep upstream's `offsetX: 30` and default
 renderers.
 
+A second, independent change moves the "+" (left-actions) container INTO
+`.dv-tabs-container` at construction time — `this.tabs.element.appendChild(
+this.leftActionsContainer)` instead of `this._element.appendChild(...)` — so the
+"+" rides with the tabs and stays flush after the last tab instead of being shoved
+to the strip's far right by the tab strip's `flex:1 1 auto` grow. The same move is
+applied to all four entries above plus `dist/{esm,cjs}/dockview/components/titlebar/
+tabsContainer.js`. The tab strip CSS in `apps/web/src/styles/dockview-theme.css`
+depends on this DOM change: the "+" is the container's first DOM child (ordered
+visually last via `order:1`), and its lead divider (`::before`) sits on the seam at
+the last tab's right edge. The inter-tab seam and first-tab hide rules there use
+adjacency selectors (not `:first-child`) precisely because this patch makes the "+"
+the first DOM child.
+
 Remove when:
 
 `dockview-core` exposes single-tab drag ghost customization/offset options, or
 upstream stops cloning the docked tab for the single-tab ghost and no longer
-bleeds the chip left of the pointer.
+bleeds the chip left of the pointer; and dockview-core lets the "+" actions
+container ride with the tabs (or Memoh stops growing the tab strip with
+`flex:1 1 auto`), so the relocate patch is no longer needed to keep the "+"
+flush after the last tab.
 
 Upgrade checklist:
 
@@ -67,6 +83,7 @@ Useful checks:
 ```bash
 grep -n "offsetX" patches/dockview-core@7.0.2.patch
 grep -n "cloneNode\\|dv-tab-ghost-label" patches/dockview-core@7.0.2.patch
+grep -n "leftActionsContainer" patches/dockview-core@7.0.2.patch
 find node_modules/.pnpm -maxdepth 1 -type d -name 'dockview-core@7.0.2*'
 rg -n "offsetX: 0|offsetX: 30|cloneNode|dv-tab-ghost-label|_buildGhostElement|buildMultiPanelsGhost" \
   node_modules/.pnpm/dockview-core@7.0.2*/node_modules/dockview-core/dist/package/main.esm.mjs \

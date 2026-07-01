@@ -124,19 +124,26 @@
    *   1. Inter-tab seam: each tab paints a divider on ITS OWN LEFT edge (::after),
    *      i.e. the seam to its left. It belongs to the right-hand tab of the seam,
    *      so "previous sibling is active" is expressible without :has(). It HIDES
-   *      (--tab-divider:transparent) in exactly three cases — first tab (nothing to
-   *      its left), the active tab itself, and the tab right AFTER the active one
-   *      (the active side-stroke is already that seam's boundary). It does NOT hide
+   *      (--tab-divider:transparent) in exactly three cases — a tab with no left
+   *      neighbour (the strip's left edge), the active tab itself, and the tab right
+   *      AFTER the active one (the active side-stroke is already that seam's
+   *      boundary). The no-left-neighbour case is matched by adjacency (a .dv-tab
+   *      not preceded by another .dv-tab), NOT :first-child — a dockview-core patch
+   *      makes the "+" the container's first DOM child, so .dv-tab is never
+   *      :first-child here. It does NOT hide
    *      on hover: the hover pill is inset --tab-hover-inset from the seam, so the
    *      two never touch — which is why no hover adjacency rule is needed.
    *   2. Action-bar lead: the "+" cluster is its own action bar. Its divider is
    *      really "the seam to the right of the LAST tab", so it is treated IDENTICALLY
-   *      to an inter-tab seam — it sits AT that seam (the container margin claws back
-   *      the full --tab-edge-pad), so the last tab's hover pill clears it by
+   *      to an inter-tab seam — it sits AT that seam (the cluster's margin-left:0
+   *      keeps it flush against the last tab's right edge), so the last tab's hover pill clears it by
    *      --tab-hover-inset on both sides, exactly like a middle tab. padding-left
    *      sets the gap from the seam to the "+". And it hides by the SAME rule: when
-   *      the last tab is active, the active side-stroke is the boundary (via :has(),
-   *      since tabs and "+" sit in sibling containers a sibling selector can't span). */
+   *      the last tab is active, the active side-stroke is the boundary. The same
+   *      dockview-core patch moves the "+" INTO .dv-tabs-container (appended as its
+   *      first DOM child, ordered visually last), so the "+" is not a later sibling
+   *      of the last tab — the hide condition uses :has() as "an active tab with no
+   *      .dv-tab to its right", DOM-order-independent and not relying on :last-child. */
   /* VERTICAL lane */
   --tab-inset: 0.3125rem;
   /* The active crown/foot is a 1px stroke; single-sourced here so the hover-top
@@ -156,7 +163,7 @@
    * equi-proportionally — once that void is exhausted and N tabs would overflow, so
    * "add a tab" does nothing to the others until the strip is genuinely full. No
    * floor (min-width:0 on the tab). One knob, tune in dev. */
-  --tab-rest-width: 15.625rem;
+  --tab-rest-width: 10.9375rem;
   /* The ONE knob for label/close breathing room (they mirror each other). Label
    * left x = hover-inset + this; close glyph right x = the same. So both read as
    * `gutter` to the hover pill and `gutter + inset` to the active fill. Move both
@@ -238,12 +245,14 @@
    * arrow. dockview defaults .dv-tab to cursor:pointer;
    * the close button re-enables the pointer on itself only. */
   cursor: default;
-  /* Editor-tab measure: tabs REST at --tab-rest-width (the static upper bound) but
-   * SHRINK together, equi-proportionally, with NO floor — flex-shrink:1 and
-   * min-width:0, so however many tabs open they all stay on the strip, each one
-   * narrower, label truncating to a few glyphs (then the ellipsis) at the extreme
-   * rather than scrolling any off-screen. No fixed width/min-width any more: those
-   * pinned the tab and forced the old scroll-immediately-instead-of-shrink. */
+  /* Editor-tab measure: rest at --tab-rest-width, shrink together when full.
+   * flex: 0 1 rest — the tab's ideal size IS the rest width (basis), it never
+   * grows past it (grow:0), and it shrinks equi-proportionally with min-width:0
+   * when the strip can't fit every tab at rest width. This only works because the
+   * tab-strip containers below drop their overflow clipping (see .dv-scrollable /
+   * .dv-tabs-container rule): with overflow:visible their flex-basis:auto tracks
+   * the real content width (N × rest) instead of collapsing to 0, so the void
+   * can't steal space and crush the tabs while the strip is nowhere near full. */
   flex: 0 1 var(--tab-rest-width);
   min-width: 0;
   max-width: var(--tab-rest-width);
@@ -314,10 +323,18 @@
   z-index: 0;
   pointer-events: none;
 }
-/* Hide it where a boundary already reads: first tab (nothing to its left), the
- * active tab itself, and the tab right after the active one (the active side
- * stroke is that seam). */
-.dockview-theme-memoh .dv-tab:first-child::after,
+/* Hide it where a boundary already reads: a tab with no left neighbour (the
+ * strip's left edge — nothing to its left), the active tab itself, and the tab
+ * right after the active one (the active side-stroke is that seam).
+ *
+ * The no-left-neighbour case uses an additive adjacency selector — a ".dv-tab"
+ * NOT preceded by another ".dv-tab" — instead of :first-child. The dockview-core
+ * patch that moves the "+" into .dv-tabs-container appends it as the container's
+ * FIRST DOM child, so .dv-tab is never :first-child here; :first-child would never
+ * match and the first tab's seam would stay painted as a stray line at the strip's
+ * left edge. The adjacency form is DOM-order-independent: it just asks "is there a
+ * tab to my left", which is exactly the seam's presence condition. */
+.dockview-theme-memoh .dv-tab:not(.dv-tab + .dv-tab)::after,
 .dockview-theme-memoh .dv-tab.dv-active-tab::after,
 .dockview-theme-memoh .dv-tab.dv-active-tab + .dv-tab::after {
   --tab-divider: transparent;
@@ -331,15 +348,38 @@
   padding-inline: var(--tab-edge-pad);
 }
 
-/* The scroll container hugs its content while tabs rest at full width (so the "+"
- * lands right after the last tab and void fills the rest); it shrinks as the strip
- * fills up, letting the tabs inside shrink with it. min-width:0 lets that shrink
- * actually propagate to the tabs (which themselves have no floor), so the strip
- * absorbs any tab count by narrowing rather than scrolling. */
-.dockview-theme-memoh .dv-tabs-and-actions-container > .dv-scrollable,
-.dockview-theme-memoh .dv-scrollable > .dv-tabs-container {
-  flex: 0 1 auto;
+/* The tab strip GROWS to claim the available header width (flex:1 1 auto), so only
+ * the real overflow goes to the void. This is the fix for the two-tabs-crushed bug:
+ * with the strip at flex:0 1 ... (grow:0) its basis:auto sized to the tabs' natural
+ * (text) width, not N × rest-width, so the void (flex-grow:1) grabbed the slack and
+ * the tabs, floored at min-width:0, collapsed even when the strip was nowhere near
+ * full. Growing the strip gives it the real available width; the tabs hold rest
+ * width while there's room and shrink together (no scroll) once they'd overflow.
+ *
+ * scrollbars:'native' (set in chat-workspace.vue) makes .dv-tabs-container the
+ * header's direct flex child — there's no .dv-scrollable layer — so this rule
+ * targets it directly. The dockview-core patch moves the "+" (left-actions) INTO
+ * .dv-tabs-container, so it rides with the tabs and stays flush after the last one
+ * instead of being shoved to the far right by the strip's grow. overflow:visible
+ * drops upstream's scroll clip (disableTabsOverflowList is on, no scroll to clip). */
+.dockview-theme-memoh .dv-tabs-and-actions-container > .dv-tabs-container {
+  flex: 1 1 auto;
   min-width: 0;
+  overflow: visible;
+}
+
+/* Single tab locks to the rest width and does NOT shrink. Shrinking is a
+ * multi-tab affordance — when several tabs fill the strip they narrow together.
+ * A lone tab has nothing to make room for, so it must hold --tab-rest-width even
+ * with a short title (that IS the rest width's purpose); the empty void fills the
+ * rest of the strip. dockview adds .dv-single-tab to the header only while exactly
+ * one tab is present, so this reverts to the shrinking rule the moment a second
+ * tab opens. flex-shrink:0 + basis lets the tabs-container (basis:auto) hug it and
+ * the void (flex-grow:1) claim the slack, instead of the tab being compressed.
+ * Terminal chips are excluded — they keep their own narrower file-row measure. */
+.dockview-theme-memoh .dv-tabs-and-actions-container.dv-single-tab .dv-tab:not(:has(.memoh-terminal-tab)) {
+  flex: 0 0 var(--tab-rest-width);
+  min-width: var(--tab-rest-width);
 }
 
 /* No native/dockview horizontal scrollbar on the tab row (it clashed with the
@@ -425,16 +465,31 @@
   flex: 0 0 auto;
 }
 
-/* The "+" cluster (leftActions, header-add-actions.vue) is its own action bar: it
- * renders right after the tabs and carries a leading divider so it reads as a
- * separate zone, not another tab. The divider sits at the LAST TAB'S RIGHT SEAM
- * (margin claws back the full --tab-edge-pad), exactly like an inter-tab seam — so
- * the last tab's hover pill clears it by --tab-hover-inset on BOTH sides, same as a
- * middle tab. padding-left then sets the gap from that seam to the "+" button. */
+/* The "+" cluster (leftActions, header-add-actions.vue) is its own action bar,
+ * rendered as a separate zone after the tabs.
+ *
+ * A dockview-core patch moves this container INTO .dv-tabs-container (so it rides
+ * with the tabs and stays flush after the last one instead of being shoved right by
+ * the strip's flex-grow). The patch appends it at construction time, before any tab
+ * exists, so in DOM order it lands FIRST; order:1 (tabs default to order:0) sorts it
+ * visually AFTER every tab regardless of DOM position. flex:0 0 auto keeps it from
+ * joining the tabs' shrink when the strip overflows — the "+" keeps its size and the
+ * tabs narrow around it.
+ *
+ * margin-left:0 keeps the "+" flush against the LAST tab's right edge, so its lead
+ * divider (::before, painted at the container's left:0) lands exactly ON the seam —
+ * the same boundary the inter-tab ::after seams and the active tab's side-stroke
+ * sit on. The seam is the single geometric reference for the whole strip: every
+ * divider and every active edge aligns to it. A positive margin would push this
+ * divider off the seam and out of line with the active tab's edge (the "tail line
+ * sits too far right" symptom); a negative one would pull the "+" into the active
+ * tab's box. padding-left adds the breathing room from the seam to the "+" glyph. */
 .dockview-theme-memoh .dv-left-actions-container {
   position: relative;
-  margin-left: calc(-1 * var(--tab-edge-pad));
-  padding-left: calc(var(--tab-action-gap) + var(--tab-divider-width));
+  flex: 0 0 auto;
+  order: 1;
+  margin-left: 0;
+  padding-left: var(--tab-action-gap);
 }
 .dockview-theme-memoh .dv-left-actions-container::before {
   content: '';
@@ -448,11 +503,16 @@
   background-color: var(--dock-stroke);
   pointer-events: none;
 }
-/* Same rule as an inter-tab seam: when the LAST tab is active, its side stroke is
- * the boundary, so the lead divider hides. The padding-left stays, so the "+" does
- * NOT jump left when you select the last tab. :has() because the tabs and the "+"
- * sit in sibling containers no sibling selector can bridge. */
-.dockview-theme-memoh .dv-tabs-and-actions-container:has(.dv-tab:last-child.dv-active-tab) .dv-left-actions-container::before {
+/* Same rule as an inter-tab seam: when the LAST tab is active, its side-stroke is
+ * the boundary, so the lead divider hides. padding-left stays, so the "+" does NOT
+ * jump left when you select the last tab. The condition is "the active tab has no
+ * tab to its right" — expressed as :has(.dv-tab.dv-active-tab NOT followed by
+ * another .dv-tab) — which is DOM-order-independent and does not rely on
+ * :last-child (the patch appends the "+" as the first child, and dockview may also
+ * append non-tab children, so :last-child is fragile here). A plain sibling
+ * selector can't bridge the "+" and the last tab either, since the "+" sits at the
+ * FRONT of the container, not after the last tab — so :has() is the only reach. */
+.dockview-theme-memoh .dv-tabs-and-actions-container:has(.dv-tab.dv-active-tab):not(:has(.dv-tab.dv-active-tab ~ .dv-tab)) .dv-left-actions-container::before {
   content: none;
 }
 

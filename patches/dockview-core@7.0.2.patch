@@ -1,5 +1,5 @@
 diff --git a/dist/cjs/dockview/components/tab/tab.js b/dist/cjs/dockview/components/tab/tab.js
-index 5ef6b36c6f9122cf6ab20d7ebf7be48713fef42c..70d9b827f8e2c5e196a243b212e618ceef2d9b1c 100644
+index 5ef6b36c6f9122cf6ab20d7ebf7be48713fef42c..af028bfead0413a5578a30af3f8016dacb2088ec 100644
 --- a/dist/cjs/dockview/components/tab/tab.js
 +++ b/dist/cjs/dockview/components/tab/tab.js
 @@ -120,7 +120,7 @@ var Tab = /** @class */ (function (_super) {
@@ -65,8 +65,21 @@ index 5ef6b36c6f9122cf6ab20d7ebf7be48713fef42c..70d9b827f8e2c5e196a243b212e618ce
          newNode.style.position = 'absolute';
          newNode.classList.add('dv-tab-ghost-drag');
          return newNode;
+diff --git a/dist/cjs/dockview/components/titlebar/tabsContainer.js b/dist/cjs/dockview/components/titlebar/tabsContainer.js
+index fc86b4df69c9da5a4c8c554a61865dd8bec38b84..0d37da98817990dac066a7d1bf97ff59ed4e174c 100644
+--- a/dist/cjs/dockview/components/titlebar/tabsContainer.js
++++ b/dist/cjs/dockview/components/titlebar/tabsContainer.js
+@@ -70,7 +70,7 @@ var TabsContainer = /** @class */ (function (_super) {
+         _this.tabs.voidContainer = _this.voidContainer.element;
+         _this._element.appendChild(_this.preActionsContainer);
+         _this._element.appendChild(_this.tabs.element);
+-        _this._element.appendChild(_this.leftActionsContainer);
++        _this.tabs.element.appendChild(_this.leftActionsContainer);
+         _this._element.appendChild(_this.voidContainer.element);
+         _this._element.appendChild(_this.rightActionsContainer);
+         _this.tabs.setExtendedDropZone(_this._element);
 diff --git a/dist/esm/dockview/components/tab/tab.js b/dist/esm/dockview/components/tab/tab.js
-index 36e6dac68b89160a6fae84d06823a9b0b14531fc..407e077e30fd8d7351d8f26ce03b2b3e994dda32 100644
+index 36e6dac68b89160a6fae84d06823a9b0b14531fc..f80c40358e239b95eda072d42d374f968b0e9f5c 100644
 --- a/dist/esm/dockview/components/tab/tab.js
 +++ b/dist/esm/dockview/components/tab/tab.js
 @@ -93,7 +93,7 @@ export class Tab extends CompositeDisposable {
@@ -132,8 +145,21 @@ index 36e6dac68b89160a6fae84d06823a9b0b14531fc..407e077e30fd8d7351d8f26ce03b2b3e
          newNode.style.position = 'absolute';
          newNode.classList.add('dv-tab-ghost-drag');
          return newNode;
+diff --git a/dist/esm/dockview/components/titlebar/tabsContainer.js b/dist/esm/dockview/components/titlebar/tabsContainer.js
+index eb22fffb3a2482d27dfb4cc99abbbbef93e43d8a..a88b8bc384c63791aa5d821edca4de87354a3e59 100644
+--- a/dist/esm/dockview/components/titlebar/tabsContainer.js
++++ b/dist/esm/dockview/components/titlebar/tabsContainer.js
+@@ -75,7 +75,7 @@ export class TabsContainer extends CompositeDisposable {
+         this.tabs.voidContainer = this.voidContainer.element;
+         this._element.appendChild(this.preActionsContainer);
+         this._element.appendChild(this.tabs.element);
+-        this._element.appendChild(this.leftActionsContainer);
++        this.tabs.element.appendChild(this.leftActionsContainer);
+         this._element.appendChild(this.voidContainer.element);
+         this._element.appendChild(this.rightActionsContainer);
+         this.tabs.setExtendedDropZone(this._element);
 diff --git a/dist/package/main.cjs.js b/dist/package/main.cjs.js
-index 3fcff2589d724e46832c1105c674aaf69f37f5b2..8f2aa335fa8e28687f82ab214212c6e7570fd2ae 100644
+index 3fcff2589d724e46832c1105c674aaf69f37f5b2..a285400707803a38537a8e1d4de0726a7fc0a5c6 100644
 --- a/dist/package/main.cjs.js
 +++ b/dist/package/main.cjs.js
 @@ -6274,7 +6274,7 @@ class Tab extends CompositeDisposable {
@@ -199,8 +225,17 @@ index 3fcff2589d724e46832c1105c674aaf69f37f5b2..8f2aa335fa8e28687f82ab214212c6e7
          newNode.style.position = 'absolute';
          newNode.classList.add('dv-tab-ghost-drag');
          return newNode;
+@@ -9728,7 +9708,7 @@ class TabsContainer extends CompositeDisposable {
+         this.tabs.voidContainer = this.voidContainer.element;
+         this._element.appendChild(this.preActionsContainer);
+         this._element.appendChild(this.tabs.element);
+-        this._element.appendChild(this.leftActionsContainer);
++        this.tabs.element.appendChild(this.leftActionsContainer);
+         this._element.appendChild(this.voidContainer.element);
+         this._element.appendChild(this.rightActionsContainer);
+         this.tabs.setExtendedDropZone(this._element);
 diff --git a/dist/package/main.esm.mjs b/dist/package/main.esm.mjs
-index 47d091027d89b9da241bdbc53d72f32c1e173719..9a3d2cb837695a7955db9c073f1ca2a86b730235 100644
+index 47d091027d89b9da241bdbc53d72f32c1e173719..8b67dfa14b38fc62659c1ae5c86e5543835627f2 100644
 --- a/dist/package/main.esm.mjs
 +++ b/dist/package/main.esm.mjs
 @@ -6268,9 +6268,12 @@ class Tab extends CompositeDisposable {
@@ -271,3 +306,12 @@ index 47d091027d89b9da241bdbc53d72f32c1e173719..9a3d2cb837695a7955db9c073f1ca2a8
          newNode.style.position = 'absolute';
          newNode.classList.add('dv-tab-ghost-drag');
          return newNode;
+@@ -9724,7 +9707,7 @@ class TabsContainer extends CompositeDisposable {
+         this.tabs.voidContainer = this.voidContainer.element;
+         this._element.appendChild(this.preActionsContainer);
+         this._element.appendChild(this.tabs.element);
+-        this._element.appendChild(this.leftActionsContainer);
++        this.tabs.element.appendChild(this.leftActionsContainer);
+         this._element.appendChild(this.voidContainer.element);
+         this._element.appendChild(this.rightActionsContainer);
+         this.tabs.setExtendedDropZone(this._element);
