@@ -455,7 +455,59 @@ Packaged macOS and Windows x64 builds prepare and include the display
 GStreamer runtime under `Resources/gstreamer`. Linux builds currently rely on
 system GStreamer when available.
 
-## Bundled CLI
+## macOS DMG installer (double-click self-install)
+
+The macOS DMG is styled as a **double-click-to-install** disk image, not a
+drag-to-Applications one. What a mounted DMG shows is a **Finder window**, not
+an installer program — the only customizable surface is a background image plus
+icon size/position. The traffic lights, title bar (= volume name), and status
+bar belong to Finder and cannot be changed.
+
+### Design source and background pipeline (`dmg/`)
+
+The background is generated, not hand-drawn, mirroring the `icon-tools/` pattern
+(checked-in source + script → output into `build/`):
+
+- `dmg/prototype.html` — single-file, inline-CSS design source. Renders **only
+  decoration**: title, subtitle, brand glow. It deliberately leaves the icon
+  slot empty — the app icon is a Finder **live icon** placed by
+  `electron-builder.yml` `dmg.contents`; drawing it into the background would
+  double it. A `?export` query param hides the alignment placeholder.
+- `dmg/render.swift` — HTML→PNG via the system WebKit (`swift`, zero third-party
+  deps; same engine family as the Electron renderer, so it is high-fidelity and
+  more reliable here than headless Chrome). Has a 15s timeout guard.
+- `dmg/make-preview-dmg.sh` — builds a throwaway preview DMG with **system tools
+  only** (`hdiutil` + Finder AppleScript layout) so you can eyeball the real
+  mounted window (background + icon position + Finder chrome) without a full
+  app build. The placeholder `.app` inside is an unsigned bash-script shell —
+  Gatekeeper will reject launching it; that is expected, it exists only to prove
+  the **layout**. Its `330/286` icon coordinates are the source of truth mirrored
+  into `dmg.contents`.
+- `build/background.png` (660×440) + `build/background@2x.png` (1320×880) —
+  generated outputs consumed by electron-builder. To regenerate after editing
+  `prototype.html`, re-render at native 660×440 then `sips`-resize to the exact
+  1× / 2× sizes.
+
+### electron-builder `dmg` block
+
+`dmg.contents` lists **only the app icon** (`type: file`). Supplying explicit
+contents suppresses electron-builder's default `/Applications` symlink — a
+double-click DMG has no drag target. `title` sets the volume/window title;
+`window` matches the background's logical size.
+
+### Self-install startup-order constraint (critical)
+
+`src/main/self-install.ts::maybeSelfInstallMacOS()` runs as **step 0** inside
+`app.whenReady()`, **before** `ensureLocalServer()` / Qdrant / window / tray.
+On first launch the app runs from the read-only DMG volume (possibly an App
+Translocation random path). If it returns `true` (a move+relaunch was
+triggered), `whenReady` must `return` immediately — otherwise the dying DMG
+instance would spawn the local server/Qdrant from the mounted volume and leave
+orphan processes after the relaunch. Guards: darwin + packaged + not already in
+`/Applications`; any failure/cancel degrades to running in place, never blocks
+launch. **If you reorder `whenReady`, keep self-install first.**
+
+
 
 The Memoh CLI (Go, source at `cmd/memoh/`) ships inside the desktop
 app bundle alongside the server. It is the **desktop edition** of the
