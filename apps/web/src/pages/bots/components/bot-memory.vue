@@ -132,30 +132,24 @@
       </Button>
     </template>
 
-    <!-- Stat tiles: two standalone cards, same row. Each carries its own
-         border so there's no divider-line visual-weight bias. -->
+    <!-- Stat tiles: two framed metric readouts, same row. The caller owns the
+         grid; each tile carries its own border so there's no divider-line
+         visual-weight bias. `—` while a cold load has no data yet. -->
     <section class="mb-8 grid grid-cols-2 gap-3">
-      <div class="rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3.5">
-        <p class="text-body text-muted-foreground">
-          {{ $t('bots.memory.totalCount') }}
-        </p>
-        <p class="mt-1 text-xl font-semibold tabular-nums text-foreground">
-          {{ loading && memories.length === 0 ? '—' : stats.totalCount }}
-        </p>
-      </div>
-      <div class="rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3.5">
-        <p class="text-body text-muted-foreground">
-          {{ $t('bots.memory.lastUpdated') }}
-        </p>
-        <p class="mt-1 text-xl font-semibold tabular-nums text-foreground">
+      <MetricReadout
+        :label="$t('bots.memory.totalCount')"
+        :value="String(loading && memories.length === 0 ? '—' : stats.totalCount)"
+      />
+      <MetricReadout :label="$t('bots.memory.lastUpdated')">
+        <template #value>
           <template v-if="stats.lastUpdatedAt">
             {{ formatRelativeTime(stats.lastUpdatedAt, { locale }) }}
           </template>
           <template v-else>
             —
           </template>
-        </p>
-      </div>
+        </template>
+      </MetricReadout>
     </section>
 
     <!-- Loading skeleton: matches the card shape so the swap does not jump. -->
@@ -201,30 +195,28 @@
         :key="group.date"
         :title="group.label"
       >
-        <div
-          v-for="(item, idx) in group.items"
+        <SettingsRow
+          v-for="item in group.items"
           :key="item.id"
-          class="mx-4 flex min-h-[3.75rem] items-center gap-4 border-b border-border py-3 last:border-b-0"
-          :class="{ 'border-b-0': idx === group.items.length - 1 }"
         >
-          <div class="min-w-0 flex-1">
+          <template #content>
             <p class="truncate text-sm text-foreground">
               {{ item.memory }}
             </p>
             <p class="mt-0.5 truncate text-caption text-muted-foreground">
               {{ formatRelativeTime(item.created_at, { locale }) }}
             </p>
-          </div>
+          </template>
           <Button
             variant="ghost"
             size="icon-sm"
-            class="shrink-0 text-muted-foreground hover:text-foreground"
+            class="text-muted-foreground hover:text-foreground"
             :aria-label="$t('bots.memory.editMemory')"
             @click="openEditDialog(item)"
           >
             <Pencil class="size-4" />
           </Button>
-        </div>
+        </SettingsRow>
       </SettingsSection>
     </div>
 
@@ -364,6 +356,8 @@ import { formatRelativeTime } from '@/utils/date-time'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import PageShell from '@/components/page-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
+import SettingsRow from '@/components/settings/row.vue'
+import MetricReadout from '@/components/settings/metric-readout.vue'
 import { useMemoryGroups } from './use-memory-groups'
 
 interface MemoryItem {
