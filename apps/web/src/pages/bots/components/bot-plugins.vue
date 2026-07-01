@@ -428,7 +428,7 @@ import PageShell from '@/components/page-shell/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { mcpConnectionErrorMessage, resolvePluginActionErrorMessage } from '@/utils/mcp-error-message'
 import { BOT_PLUGINS_UPDATED_EVENT, emitBotPluginsUpdated, isBotPluginsUpdatedEvent } from '@/utils/bot-plugin-events'
-import { isPluginInstallationNotFoundError, openPluginOAuthURL, waitForPluginOAuth } from '@/utils/plugin-oauth-flow'
+import { isPluginInstallationNotFoundError, isPluginOAuthAuthorized, openPluginOAuthURL, waitForPluginOAuth } from '@/utils/plugin-oauth-flow'
 import type { OAuthPopupFlowController } from '@/utils/oauth/popup-flow'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
@@ -1066,12 +1066,18 @@ async function startOAuth(plugin: PluginsInstallation) {
       if (waitResult === 'timeout') {
         throw new Error(t('mcp.oauth.authFailed'))
       }
+      if (waitResult === 'needs_config' || waitResult === 'admin_required') {
+        throw new Error(`plugin is not ready: ${waitResult}`)
+      }
       if (waitResult !== 'authorized') {
         await loadPlugins()
         return
       }
       const synced = await syncOAuthStatus(plugin)
-      if (synced.status !== 'ready' && !synced.enabled) throw new Error(t('mcp.oauth.authFailed'))
+      if (synced.status === 'needs_config' || synced.status === 'admin_required') {
+        throw new Error(`plugin is not ready: ${synced.status}`)
+      }
+      if (!isPluginOAuthAuthorized(synced)) throw new Error(t('mcp.oauth.authFailed'))
       toast.success(t('mcp.oauth.authSuccess'))
       await loadPlugins()
     } catch (error) {
@@ -1089,7 +1095,7 @@ async function startOAuth(plugin: PluginsInstallation) {
           return
         }
       }
-      if (synced?.status === 'ready' || synced?.enabled) {
+      if (isPluginOAuthAuthorized(synced)) {
         toast.success(t('mcp.oauth.authSuccess'))
         await loadPlugins()
         return

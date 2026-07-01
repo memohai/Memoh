@@ -754,6 +754,130 @@ VALUES('00000000-0000-0000-0000-000000000126', ?, 'https://auth.example/authoriz
 	}
 }
 
+func TestRefreshOAuthStatusKeepsMissingConfigDespiteValidToken(t *testing.T) {
+	ctx := context.Background()
+	conn, svc := newPluginServiceTestDB(t, ctx)
+	botID := "00000000-0000-0000-0000-000000000102"
+	installationID := "00000000-0000-0000-0000-000000000227"
+	connectionID := "00000000-0000-0000-0000-000000000228"
+	manifest := Manifest{
+		ID:   "github",
+		Name: "GitHub",
+		Variables: []ConfigVar{{
+			Key:      "GITHUB_DOMAIN",
+			Required: true,
+		}},
+		AuthRequirements: []AuthRequirement{{
+			Key:  "oauth",
+			Type: "managed_oauth",
+		}},
+		MCPs: []MCPResource{{
+			Key:     "api",
+			URL:     "${GITHUB_DOMAIN}/mcp",
+			AuthRef: "oauth",
+		}},
+	}
+	insertPluginFixture(t, ctx, conn, botID, installationID, manifest, StatusNeedsConfig, false, map[string]string{})
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO mcp_connections(id, bot_id, name, type, config, is_active, auth_type, managed_by_plugin_installation_id, managed_resource_key)
+VALUES(?, ?, 'github_api', 'http', '{"url":"https://api.github.example/mcp"}', 1, 'oauth', ?, 'api')
+`, connectionID, botID, installationID); err != nil {
+		t.Fatalf("insert mcp connection: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO bot_plugin_resources(id, installation_id, resource_type, resource_key, resource_id, status, metadata)
+VALUES('00000000-0000-0000-0000-000000000229', ?, 'mcp', 'api', ?, 'needs_auth', '{}')
+`, installationID, connectionID); err != nil {
+		t.Fatalf("insert plugin resource: %v", err)
+	}
+	expiresAt := time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO mcp_oauth_tokens(id, connection_id, authorization_endpoint, token_endpoint, access_token, expires_at)
+VALUES('00000000-0000-0000-0000-000000000230', ?, 'https://auth.example/authorize', 'https://auth.example/token', 'valid-token', ?)
+`, connectionID, expiresAt); err != nil {
+		t.Fatalf("insert oauth token: %v", err)
+	}
+
+	updated, err := svc.RefreshOAuthStatus(ctx, botID, installationID)
+	if err != nil {
+		t.Fatalf("RefreshOAuthStatus() error = %v", err)
+	}
+	if updated.Status != StatusNeedsConfig {
+		t.Fatalf("status = %q, want %q", updated.Status, StatusNeedsConfig)
+	}
+	if updated.Enabled {
+		t.Fatal("plugin should be disabled when required config is missing")
+	}
+	var active int
+	if err := conn.QueryRowContext(ctx, `SELECT is_active FROM mcp_connections WHERE id = ?`, connectionID).Scan(&active); err != nil {
+		t.Fatalf("select active: %v", err)
+	}
+	if active != 0 {
+		t.Fatalf("mcp is_active = %d, want 0", active)
+	}
+}
+
+func TestRefreshOAuthStatusWithValidationSkipsProbeWhenConfigMissing(t *testing.T) {
+	ctx := context.Background()
+	conn, svc := newPluginServiceTestDB(t, ctx)
+	botID := "00000000-0000-0000-0000-000000000102"
+	installationID := "00000000-0000-0000-0000-000000000231"
+	connectionID := "00000000-0000-0000-0000-000000000232"
+	manifest := Manifest{
+		ID:   "github",
+		Name: "GitHub",
+		AuthRequirements: []AuthRequirement{{
+			Key:  "oauth",
+			Type: "managed_oauth",
+		}},
+		MCPs: []MCPResource{{
+			Key:     "api",
+			URL:     "https://api.github.example/mcp",
+			AuthRef: "oauth",
+			Headers: []ConfigVar{{
+				Key:          "X-GitHub-Org",
+				DefaultValue: "${GITHUB_ORG}",
+				Required:     true,
+			}},
+		}},
+	}
+	insertPluginFixture(t, ctx, conn, botID, installationID, manifest, StatusNeedsAuth, true, map[string]string{})
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO mcp_connections(id, bot_id, name, type, config, is_active, auth_type, managed_by_plugin_installation_id, managed_resource_key)
+VALUES(?, ?, 'github_api', 'http', '{"url":"https://api.github.example/mcp"}', 1, 'oauth', ?, 'api')
+`, connectionID, botID, installationID); err != nil {
+		t.Fatalf("insert mcp connection: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO bot_plugin_resources(id, installation_id, resource_type, resource_key, resource_id, status, metadata)
+VALUES('00000000-0000-0000-0000-000000000233', ?, 'mcp', 'api', ?, 'needs_auth', '{}')
+`, installationID, connectionID); err != nil {
+		t.Fatalf("insert plugin resource: %v", err)
+	}
+	expiresAt := time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO mcp_oauth_tokens(id, connection_id, authorization_endpoint, token_endpoint, access_token, expires_at)
+VALUES('00000000-0000-0000-0000-000000000234', ?, 'https://auth.example/authorize', 'https://auth.example/token', 'valid-token', ?)
+`, connectionID, expiresAt); err != nil {
+		t.Fatalf("insert oauth token: %v", err)
+	}
+	probed := false
+
+	updated, err := svc.RefreshOAuthStatusWithValidation(ctx, botID, installationID, func(context.Context, Installation) error {
+		probed = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("RefreshOAuthStatusWithValidation() error = %v", err)
+	}
+	if probed {
+		t.Fatal("probe should not run while required config is missing")
+	}
+	if updated.Status != StatusNeedsConfig || updated.Enabled {
+		t.Fatalf("updated = status %q enabled %v, want needs_config disabled", updated.Status, updated.Enabled)
+	}
+}
+
 func TestRefreshOAuthStatusWithValidationActivatesNeedsAuthPluginAfterProbe(t *testing.T) {
 	ctx := context.Background()
 	conn, svc := newPluginServiceTestDB(t, ctx)

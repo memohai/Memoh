@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { waitForPluginOAuth } from './plugin-oauth-flow'
+import { isPluginOAuthAuthorized, waitForPluginOAuth } from './plugin-oauth-flow'
 import type { OAuthPopupFlowController } from './oauth/popup-flow'
 import type { PluginsInstallation } from '@memohai/sdk'
 
@@ -11,6 +11,14 @@ function readyInstallation(): PluginsInstallation {
 
 function pendingInstallation(): PluginsInstallation {
   return { id: 'install-1', status: 'needs_auth', enabled: false }
+}
+
+function needsConfigInstallation(): PluginsInstallation {
+  return { id: 'install-1', status: 'needs_config', enabled: false }
+}
+
+function adminRequiredInstallation(): PluginsInstallation {
+  return { id: 'install-1', status: 'admin_required', enabled: false }
 }
 
 function messageEvent(data: unknown, source?: MessageEventSource | null): MessageEvent {
@@ -149,5 +157,72 @@ describe('waitForPluginOAuth', () => {
       fetchStatus,
       t,
     })).resolves.toBe('authorized')
+  })
+
+  it('does not authorize explicit non-ready statuses even when enabled is stale', async () => {
+    let controller: OAuthPopupFlowController | undefined
+    const fetchStatus = vi.fn(async (): Promise<PluginsInstallation> => ({
+      id: 'install-1',
+      status: 'needs_auth',
+      enabled: true,
+    }))
+
+    const result = waitForPluginOAuth({
+      botId: 'bot-1',
+      installationId: 'install-1',
+      popup: null,
+      external: true,
+      fetchStatus,
+      t,
+      onController: value => {
+        controller = value
+      },
+    })
+
+    await vi.advanceTimersByTimeAsync(2_000)
+
+    expect(fetchStatus).toHaveBeenCalledTimes(2)
+    expect(isPluginOAuthAuthorized({ id: 'install-1', enabled: true })).toBe(true)
+    expect(isPluginOAuthAuthorized({ id: 'install-1', status: 'needs_auth', enabled: true })).toBe(false)
+    await expect(Promise.race([
+      result,
+      Promise.resolve('still-pending'),
+    ])).resolves.toBe('still-pending')
+    controller?.cancel()
+    await expect(result).resolves.toBe('cancelled')
+  })
+
+  it('stops external waits when polling returns needs_config', async () => {
+    const fetchStatus = vi.fn(async () => needsConfigInstallation())
+
+    await expect(waitForPluginOAuth({
+      botId: 'bot-1',
+      installationId: 'install-1',
+      popup: null,
+      external: true,
+      fetchStatus,
+      t,
+    })).resolves.toBe('needs_config')
+    expect(fetchStatus).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops popup waits when polling returns admin_required', async () => {
+    const popup = { closed: false, close: vi.fn(() => { popup.closed = true }) }
+    const fetchStatus = vi.fn(async () => adminRequiredInstallation())
+
+    const result = waitForPluginOAuth({
+      botId: 'bot-1',
+      installationId: 'install-1',
+      popup: popup as unknown as Window,
+      external: false,
+      fetchStatus,
+      t,
+    })
+
+    await vi.advanceTimersByTimeAsync(2_000)
+
+    await expect(result).resolves.toBe('admin_required')
+    expect(fetchStatus).toHaveBeenCalledTimes(1)
+    expect(popup.close).toHaveBeenCalledTimes(1)
   })
 })

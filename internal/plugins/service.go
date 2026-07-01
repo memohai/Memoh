@@ -559,6 +559,16 @@ func (s *Service) RefreshOAuthStatus(ctx context.Context, botID, installationID 
 	if err := validateConfigVariables(manifest, variables); err != nil {
 		return Installation{}, err
 	}
+	if missingPluginConfig(manifest, variables) {
+		if err := s.mcpService.SetPluginConnectionsActive(ctx, botID, installationID, false); err != nil {
+			return Installation{}, err
+		}
+		updated, err := s.updateStatus(ctx, botID, installationID, StatusNeedsConfig, false)
+		if err != nil {
+			return Installation{}, err
+		}
+		return s.normalizeInstallation(ctx, updated)
+	}
 	status, err := s.refreshOAuthStatus(ctx, botID, row, manifest)
 	if err != nil {
 		return Installation{}, err

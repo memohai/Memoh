@@ -165,7 +165,7 @@ import {
 import { client } from '@memohai/sdk/client'
 import { emitBotPluginsUpdated } from '@/utils/bot-plugin-events'
 import { resolvePluginActionErrorMessage } from '@/utils/mcp-error-message'
-import { isPluginInstallationNotFoundError, openPluginOAuthURL, waitForPluginOAuth } from '@/utils/plugin-oauth-flow'
+import { isPluginInstallationNotFoundError, isPluginOAuthAuthorized, openPluginOAuthURL, waitForPluginOAuth } from '@/utils/plugin-oauth-flow'
 import BotSelect from '@/components/bot-select/index.vue'
 import FieldStack from '@/components/settings/field-stack.vue'
 import { pluginConfigRows, templateVariableKeys } from '../plugin-config-rows'
@@ -336,13 +336,19 @@ async function startOAuthAfterInstall(botId: string, installation: PluginsInstal
     if (waitResult === 'timeout') {
       throw new Error(t('mcp.oauth.authFailed'))
     }
+    if (waitResult === 'needs_config' || waitResult === 'admin_required') {
+      throw new Error(`plugin is not ready: ${waitResult}`)
+    }
     if (waitResult !== 'authorized') {
       emitBotPluginsUpdated(botId)
       popup?.close()
       return
     }
     const synced = await syncOAuthStatus(botId, installation.id!)
-    if (synced.status !== 'ready' && !synced.enabled) throw new Error(t('mcp.oauth.authFailed'))
+    if (synced.status === 'needs_config' || synced.status === 'admin_required') {
+      throw new Error(`plugin is not ready: ${synced.status}`)
+    }
+    if (!isPluginOAuthAuthorized(synced)) throw new Error(t('mcp.oauth.authFailed'))
     emitBotPluginsUpdated(botId)
     toast.success(t('mcp.oauth.authSuccess'))
   } catch (error) {
@@ -362,7 +368,7 @@ async function startOAuthAfterInstall(botId: string, installation: PluginsInstal
       }
     }
     if (synced) emitBotPluginsUpdated(botId)
-    if (synced?.status === 'ready' || synced?.enabled) {
+    if (isPluginOAuthAuthorized(synced)) {
       toast.success(t('mcp.oauth.authSuccess'))
       return
     }

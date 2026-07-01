@@ -2,7 +2,7 @@ import type { PluginsInstallation } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { startOAuthPopupFlow, type OAuthPopupFlowController } from '@/utils/oauth/popup-flow'
 
-export type PluginOAuthWaitResult = 'authorized' | 'cancelled' | 'uninstalled' | 'timeout'
+export type PluginOAuthWaitResult = 'authorized' | 'cancelled' | 'uninstalled' | 'timeout' | 'needs_config' | 'admin_required'
 
 type Translate = (key: string) => string
 const PLUGIN_OAUTH_POLL_ERROR_LIMIT = 3
@@ -52,13 +52,28 @@ export async function waitForPluginOAuth(options: PluginOAuthWaitOptions): Promi
   if (!options.popup) {
     throw new Error(options.t('mcp.oauth.flowInitFailed'))
   }
-  return waitForPluginOAuthPopup(options)
+  return waitForPluginOAuthPopup({ ...options, popup: options.popup })
+}
+
+export function isPluginOAuthAuthorized(status: PluginsInstallation | null | undefined): boolean {
+  const value = status?.status?.trim()
+  if (value) return value === 'ready'
+  return !!status?.enabled
+}
+
+function pluginOAuthWaitResult(status: PluginsInstallation | null | undefined): PluginOAuthWaitResult | null {
+  if (status?.status === 'needs_config') return 'needs_config'
+  if (status?.status === 'admin_required') return 'admin_required'
+  if (status?.status === 'uninstalled') return 'uninstalled'
+  if (isPluginOAuthAuthorized(status)) return 'authorized'
+  return null
 }
 
 function waitForPluginOAuthPopup(options: PluginOAuthWaitOptions & { popup: Window }): Promise<PluginOAuthWaitResult> {
   return new Promise((resolve, reject) => {
     const cleanup = () => options.onCleanup?.()
     let pollErrorCount = 0
+    let latestPollResult: PluginOAuthWaitResult | null = null
     const flow = startOAuthPopupFlow<PluginsInstallation>({
       popup: options.popup,
       target: window,
@@ -71,7 +86,11 @@ function waitForPluginOAuthPopup(options: PluginOAuthWaitOptions & { popup: Wind
       pollIntervalMs: 2_000,
       timeoutMs: 120_000,
       pollStatus: () => options.fetchStatus(options.botId, options.installationId),
-      isAuthorized: status => status?.status === 'ready' || !!status?.enabled,
+      isAuthorized: (status) => {
+        pollErrorCount = 0
+        latestPollResult = pluginOAuthWaitResult(status)
+        return latestPollResult !== null
+      },
       abortOnPollError: error => isPluginInstallationNotFoundError(error) ? 'cancelled' : false,
       failOnPollError: (error) => {
         pollErrorCount += 1
@@ -79,7 +98,7 @@ function waitForPluginOAuthPopup(options: PluginOAuthWaitOptions & { popup: Wind
       },
       onAuthorized: () => {
         cleanup()
-        resolve('authorized')
+        resolve(latestPollResult ?? 'authorized')
       },
       onAborted: (reason) => {
         cleanup()
@@ -101,16 +120,16 @@ function waitForPluginOAuthWithoutPopup(options: PluginOAuthWaitOptions): Promis
   return new Promise((resolve, reject) => {
     let completed = false
     let pollErrorCount = 0
-    let pollTimer: ReturnType<typeof window.setTimeout> | undefined
-    let timeoutTimer: ReturnType<typeof window.setTimeout> | undefined
+    let pollTimer: ReturnType<typeof globalThis.setTimeout> | undefined
+    let timeoutTimer: ReturnType<typeof globalThis.setTimeout> | undefined
 
     const cleanup = () => {
       if (pollTimer) {
-        window.clearTimeout(pollTimer)
+        globalThis.clearTimeout(pollTimer)
         pollTimer = undefined
       }
       if (timeoutTimer) {
-        window.clearTimeout(timeoutTimer)
+        globalThis.clearTimeout(timeoutTimer)
         timeoutTimer = undefined
       }
       options.onCleanup?.()
@@ -129,12 +148,13 @@ function waitForPluginOAuthWithoutPopup(options: PluginOAuthWaitOptions): Promis
         .then(() => options.fetchStatus(options.botId, options.installationId))
         .then((status) => {
           if (completed) return
-          if (status.status === 'ready' || status.enabled) {
-            finish('authorized')
+          const result = pluginOAuthWaitResult(status)
+          if (result) {
+            finish(result)
             return
           }
           pollErrorCount = 0
-          pollTimer = window.setTimeout(poll, 2_000)
+          pollTimer = globalThis.setTimeout(poll, 2_000)
         })
         .catch((error: unknown) => {
           if (completed) return
@@ -149,11 +169,11 @@ function waitForPluginOAuthWithoutPopup(options: PluginOAuthWaitOptions): Promis
             reject(error)
             return
           }
-          pollTimer = window.setTimeout(poll, 2_000)
+          pollTimer = globalThis.setTimeout(poll, 2_000)
         })
     }
 
-    timeoutTimer = window.setTimeout(() => finish('timeout'), 120_000)
+    timeoutTimer = globalThis.setTimeout(() => finish('timeout'), 120_000)
     options.onController?.({
       cancel: () => finish('cancelled'),
       dispose: () => finish('cancelled'),
