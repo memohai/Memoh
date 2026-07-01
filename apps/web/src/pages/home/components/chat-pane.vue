@@ -1086,20 +1086,28 @@ const agentChanging = ref(false)
 const acpModelChanging = ref(false)
 const inputDrafts = useStorage<Record<string, string>>('chat-input-drafts', {})
 
+// props.sessionId is the pane's session (null = unsaved draft). The pane reads
+// the store's global focused-session state directly (single-pane: the pane's
+// session IS the focused one). paneSessionId is still tracked below solely to
+// hold the session's view ref via syncSessionViewHold — the per-session
+// ref-count lifecycle stays live for future split surfaces, but the reads
+// themselves are global again.
+const paneSessionId = computed(() => props.sessionId ?? null)
+
 const {
   messages,
   streaming,
-  currentBotId,
-  bots,
-  activeSession,
-  activeSessionSupportsTurnVariants,
-  activeChatTarget,
-  activeChatReadOnly,
   messageActionLoading,
   loadingOlder,
-  loadingChats,
   loadingMessages,
   hasMoreOlder,
+  activeSession,
+  activeChatTarget,
+  activeChatReadOnly,
+  activeSessionSupportsTurnVariants,
+  currentBotId,
+  bots,
+  loadingChats,
   overrideModelId,
   overrideReasoningEffort,
   startupSendFailure,
@@ -1110,6 +1118,33 @@ const {
 } = storeToRefs(chatStore)
 
 const isActive = computed(() => props.active !== false)
+
+// This pane holds a reference on its session's view for as long as it renders a
+// real session, so the store keeps that session's transcript + SSE stream alive
+// (ref-counted: two panes on one session share it). A draft (null) has no view
+// to hold. The reference moves when the pane's session changes (draft→real
+// promotion, or a tab re-pointed to another session) and releases on unmount.
+let heldSessionViewId: string | null = null
+function syncSessionViewHold() {
+  const bid = (currentBotId.value ?? '').trim()
+  const sid = paneSessionId.value
+  if (sid === heldSessionViewId) return
+  if (heldSessionViewId) {
+    chatStore.releaseSessionView(heldSessionViewId)
+    heldSessionViewId = null
+  }
+  if (sid && bid) {
+    chatStore.openSessionView(bid, sid)
+    heldSessionViewId = sid
+  }
+}
+watch([paneSessionId, currentBotId], syncSessionViewHold, { immediate: true })
+onBeforeUnmount(() => {
+  if (heldSessionViewId) {
+    chatStore.releaseSessionView(heldSessionViewId)
+    heldSessionViewId = null
+  }
+})
 const canRunMessageAction = computed(() =>
   activeSessionSupportsTurnVariants.value
   && !streaming.value
@@ -1340,7 +1375,7 @@ async function onChooseProjectFolder() {
 const composerMenuHasItems = computed(() =>
   (canChangeAgent.value && enabledACPProfiles.value.length > 0) || !activeIsACP.value,
 )
-const activeSessionId = computed(() => activeSession.value?.id ?? '')
+const activeSessionId = computed(() => paneSessionId.value ?? '')
 const {
   runtime: acpRuntime,
   models: acpModels,
@@ -2070,13 +2105,13 @@ watch(inputText, (text) => {
 watch([
   startupSendFailure,
   currentBotId,
-  () => chatStore.sessionId,
+  paneSessionId,
   () => props.tabId,
   isActive,
 ], ([failure]) => {
   if (!failure || !isActive.value) return
   if (failure.botId && failure.botId !== currentBotId.value) return
-  if (failure.sessionId && failure.sessionId !== chatStore.sessionId) return
+  if (failure.sessionId && failure.sessionId !== (paneSessionId.value ?? '')) return
   // This pane carries the session it renders directly now (was derived from tabId
   // which is the stable panel id, not the session). A draft pane (null) still
   // accepts the restore for the send it just attempted.
@@ -2274,7 +2309,7 @@ function isActiveEl(isActive: boolean, item: { id: string, top: number }) {
 // element from the new session's load). Scroll position restoration is
 // preserved across route activation but reset across cross-session
 // switches.
-watch(() => chatStore.sessionId, () => {
+watch(paneSessionId, () => {
   elId.clear()
 })
 
