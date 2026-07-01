@@ -17,8 +17,8 @@
          web/Windows start at the normal pl-3 indent and the switcher goes
          full-width (right edge aligns with the search row below). -->
     <header
-      class="flex h-11 shrink-0 items-center bg-sidebar pr-2 py-1.5 [-webkit-app-region:drag]"
-      :class="macTrafficReserve ? 'pl-[76px]' : 'pl-3'"
+      class="flex h-11 shrink-0 items-center bg-sidebar pr-2 [-webkit-app-region:drag]"
+      :class="macTrafficReserve ? 'pl-[88px]' : 'pl-3'"
     >
       <!-- ui-allow-px: macOS traffic-light reserve is OS-pixel-precise, cannot be rem -->
       <div class="min-w-0 flex-1">
@@ -71,7 +71,7 @@
             class="size-[18px] shrink-0"
           />
           <!-- Unsaved files live on the Files view, so a count here surfaces them
-               even while the user is in Chat (mirrors VS Code's explorer badge). -->
+               even while the user is in Chat. -->
           <BadgeCount
             v-if="view.id === 'files' && dirtyFileCount > 0"
             :count="dirtyFileCount"

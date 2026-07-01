@@ -1,12 +1,12 @@
 <template>
   <!-- No vertical seam against the first tab: separation is the gap + the strip's
        own outline (the bottom hairline, plus the active tab's crown/foot stroke),
-       not a divider between the nav cluster and the tabs. pr-2 keeps the buttons
+       not a divider between the nav cluster and the tabs. The right padding keeps the buttons
        off the first tab; the tab's own pl-4 keeps its title off the gap. -->
   <div
     v-if="isFirstGroup"
-    class="flex h-full items-center gap-0.5 pr-2 [-webkit-app-region:drag] transition-[padding] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
-    :class="shouldReserveTrafficLight ? 'pl-[76px]' : 'pl-2'"
+    class="flex h-full items-center gap-0.5 pr-0 [-webkit-app-region:drag] transition-[padding] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+    :class="shouldReserveTrafficLight ? 'pl-[88px]' : 'pl-2'"
   >
     <Button
       variant="ghost"

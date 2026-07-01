@@ -629,7 +629,10 @@ function macWindowChromeOptions(tabbingIdentifier: string): Partial<Electron.Bro
   if (process.platform !== 'darwin') return {}
   return {
     titleBarStyle: 'hidden',
-    trafficLightPosition: { x: 14, y: 12 },
+    // Electron 42 renders the macOS traffic lights slightly larger than the
+    // previous runtime. y is the lights' top-left; y=13 keeps their visual
+    // center aligned with the 40px chrome strip's midline.
+    trafficLightPosition: { x: 14, y: 13 },
     transparent: true,
     backgroundColor: '#00000000',
     tabbingIdentifier,

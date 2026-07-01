@@ -13,7 +13,7 @@
            hover fill. No color transition: the fill snaps on hover/open. -->
       <button
         type="button"
-        class="group flex h-8 items-center text-xs text-foreground outline-none hover:bg-[color:var(--sidebar-hover)] focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-[color:var(--sidebar-hover)] [-webkit-app-region:no-drag]"
+        class="group flex h-8 items-center translate-y-[-2px] text-xs text-foreground outline-none hover:bg-[color:var(--sidebar-hover)] focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-[color:var(--sidebar-hover)] [-webkit-app-region:no-drag]"
         :class="fullWidth
           ? 'w-[calc(100%+3px)] -ml-[3px] gap-1.5 rounded-full pl-2 pr-2.5'
           : 'max-w-full gap-2 rounded-md px-1.5'"
