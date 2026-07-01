@@ -18898,11 +18898,31 @@ const docTemplate = `{
                 "key": {
                     "type": "string"
                 },
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/plugins.ConfigVarOption"
+                    }
+                },
                 "required": {
                     "type": "boolean"
                 },
                 "secret": {
                     "type": "boolean"
+                }
+            }
+        },
+        "plugins.ConfigVarOption": {
+            "type": "object",
+            "required": [
+                "value"
+            ],
+            "properties": {
+                "label": {
+                    "type": "string"
+                },
+                "value": {
+                    "type": "string"
                 }
             }
         },

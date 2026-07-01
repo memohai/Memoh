@@ -3921,10 +3921,23 @@ definitions:
         type: string
       key:
         type: string
+      options:
+        items:
+          $ref: '#/definitions/plugins.ConfigVarOption'
+        type: array
       required:
         type: boolean
       secret:
         type: boolean
+    type: object
+  plugins.ConfigVarOption:
+    properties:
+      label:
+        type: string
+      value:
+        type: string
+    required:
+    - value
     type: object
   plugins.Icon:
     properties:

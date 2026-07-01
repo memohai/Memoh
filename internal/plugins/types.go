@@ -34,11 +34,17 @@ type Author struct {
 }
 
 type ConfigVar struct {
-	Key          string `json:"key"`
-	Description  string `json:"description,omitempty"`
-	DefaultValue string `json:"defaultValue,omitempty"`
-	Required     bool   `json:"required,omitempty"`
-	Secret       bool   `json:"secret,omitempty"`
+	Key          string            `json:"key"`
+	Description  string            `json:"description,omitempty"`
+	DefaultValue string            `json:"defaultValue,omitempty"`
+	Required     bool              `json:"required,omitempty"`
+	Secret       bool              `json:"secret,omitempty"`
+	Options      []ConfigVarOption `json:"options,omitempty"`
+}
+
+type ConfigVarOption struct {
+	Label string `json:"label,omitempty"`
+	Value string `json:"value" validate:"required"`
 }
 
 type AuthRequirement struct {

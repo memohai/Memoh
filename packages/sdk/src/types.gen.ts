@@ -2342,8 +2342,14 @@ export type PluginsConfigVar = {
     defaultValue?: string;
     description?: string;
     key?: string;
+    options?: Array<PluginsConfigVarOption>;
     required?: boolean;
     secret?: boolean;
+};
+
+export type PluginsConfigVarOption = {
+    label?: string;
+    value: string;
 };
 
 export type PluginsIcon = {

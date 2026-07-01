@@ -212,7 +212,32 @@
                 :label="item.key"
               >
                 <FormItem class="w-48 sm:w-80">
+                  <Select
+                    v-if="item.options.length"
+                    :model-value="configInputValue(item)"
+                    @update:model-value="value => updateSelectConfig(item.key, value)"
+                  >
+                    <SelectTrigger
+                      size="sm"
+                      class="w-full"
+                    >
+                      <SelectValue :placeholder="item.placeholder || item.key" />
+                    </SelectTrigger>
+                    <SelectContent
+                      size="sm"
+                      class="w-[--reka-select-trigger-width]"
+                    >
+                      <SelectItem
+                        v-for="option in item.options"
+                        :key="option.value"
+                        :value="option.value"
+                      >
+                        {{ option.label || option.value }}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
                   <Input
+                    v-else
                     :id="configInputId(item.key)"
                     class="w-full"
                     :name="item.key"
@@ -379,7 +404,11 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { ChevronLeft, ChevronRight, ExternalLink, PackageOpen, Store, Trash2 } from 'lucide-vue-next'
-import { Badge, Button, Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle, FormItem, Input, Skeleton, Spinner, Switch, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, toast } from '@memohai/ui'
+import {
+  Badge, Button, Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle,
+  FormItem, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Skeleton, Spinner, Switch, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, toast,
+} from '@memohai/ui'
 import {
   getBotsByBotIdPlugins,
   getBotsByBotIdPluginsByIdOauthStatus,
@@ -398,7 +427,9 @@ import { client } from '@memohai/sdk/client'
 import PageShell from '@/components/page-shell/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { mcpConnectionErrorMessage, resolvePluginActionErrorMessage } from '@/utils/mcp-error-message'
-import { BOT_PLUGINS_UPDATED_EVENT, isBotPluginsUpdatedEvent } from '@/utils/bot-plugin-events'
+import { BOT_PLUGINS_UPDATED_EVENT, emitBotPluginsUpdated, isBotPluginsUpdatedEvent } from '@/utils/bot-plugin-events'
+import { isPluginInstallationNotFoundError, openPluginOAuthURL, waitForPluginOAuth } from '@/utils/plugin-oauth-flow'
+import type { OAuthPopupFlowController } from '@/utils/oauth/popup-flow'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
@@ -418,6 +449,7 @@ type PluginConfigRow = {
   secret: boolean
   value: string
   placeholder: string
+  options: Array<{ label?: string, value: string }>
 }
 
 type PluginMCPDetailRow = {
@@ -450,6 +482,7 @@ const configSavePromise = ref<Promise<void> | null>(null)
 const configDraft = reactive<Record<string, string>>({})
 const locallyConfiguredKeys = reactive<Record<string, boolean>>({})
 const { view, direction, openDetail, backToList } = useViewSwap()
+const oauthFlows = new Map<string, OAuthPopupFlowController>()
 
 const pluginGroups = computed<PluginGroup[]>(() => [
   {
@@ -474,11 +507,13 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  cancelAllPluginOAuth()
   void flushConfigSave()
   window.removeEventListener(BOT_PLUGINS_UPDATED_EVENT, handleBotPluginsUpdated)
 })
 
 watch(() => props.botId, async () => {
+  cancelAllPluginOAuth()
   await flushConfigSave()
   backToList()
   resetConfigDraft()
@@ -546,6 +581,8 @@ function syncSelectedPlugin() {
   if (!current) return
   const updated = plugins.value.find(item => item.id === current.id)
   if (!updated) {
+    selectedPlugin.value = null
+    resetConfigDraft()
     backToList()
     return
   }
@@ -561,9 +598,14 @@ function configInputId(key: string): string {
   return `plugin-config-${selectedPlugin.value?.id || 'plugin'}-${key}`
 }
 
-function setConfigDraft(key: string, value: string | number) {
-  configDraft[key] = String(value)
+function setConfigDraft(key: string, value: unknown) {
+  configDraft[key] = value === undefined || value === null ? '' : String(value)
   configDirty.value = true
+}
+
+function updateSelectConfig(key: string, value: unknown) {
+  setConfigDraft(key, value)
+  void flushConfigSave()
 }
 
 function configInputValue(item: PluginConfigRow): string {
@@ -572,12 +614,22 @@ function configInputValue(item: PluginConfigRow): string {
 
 function configPayload(): Record<string, string> {
   const out: Record<string, string> = {}
+  const rowByKey = new Map(selectedPluginConfigRows.value.map(row => [row.key, row]))
   for (const [key, value] of Object.entries(configDraft)) {
     const trimmedKey = key.trim()
-    const trimmedValue = value.trim()
-    if (trimmedKey) out[trimmedKey] = trimmedValue
+    if (!trimmedKey) continue
+    const row = rowByKey.get(trimmedKey)
+    out[trimmedKey] = row?.options.length ? value : value.trim()
   }
   return out
+}
+
+function clearSavedDraft(saved: Record<string, string>) {
+  const currentPayload = configPayload()
+  for (const [key, value] of Object.entries(saved)) {
+    if (currentPayload[key] === value) delete configDraft[key]
+  }
+  configDirty.value = Object.keys(configDraft).length > 0
 }
 
 function rememberSavedConfig(pluginId: string, saved: Record<string, string>) {
@@ -634,6 +686,7 @@ function pluginConfigRows(plugin: PluginsInstallation): PluginConfigRow[] {
       existing.secret ||= !!item.secret
       if (!existing.value) existing.value = variableInputValue(item, configured)
       if (!existing.placeholder) existing.placeholder = variablePlaceholder(plugin, item, configured)
+      if (!existing.options.length) existing.options = configOptions(item)
       return
     }
     const row = {
@@ -641,6 +694,7 @@ function pluginConfigRows(plugin: PluginsInstallation): PluginConfigRow[] {
       secret: !!item.secret,
       value: variableInputValue(item, configured),
       placeholder: variablePlaceholder(plugin, item, configured),
+      options: configOptions(item),
     }
     rows.push(row)
     rowByKey.set(key, row)
@@ -687,6 +741,15 @@ function variablePlaceholder(plugin: PluginsInstallation, item: PluginsConfigVar
     return isConfigured ? t('bots.plugins.configuredValue') : ''
   }
   return ''
+}
+
+function configOptions(item: PluginsConfigVar): Array<{ label?: string, value: string }> {
+  return (item.options ?? [])
+    .flatMap((option) => {
+      const value = option.value
+      if (!value) return []
+      return [{ label: option.label, value }]
+    })
 }
 
 function pluginConfigStateKey(pluginId: string, key: string): string {
@@ -859,11 +922,12 @@ function mcpOAuthCallbackUrl() {
 
 async function withPending(plugin: PluginsInstallation, action: string, task: () => Promise<void>) {
   if (!plugin.id) return
-  pendingKey.value = `${plugin.id}:${action}`
+  const key = `${plugin.id}:${action}`
+  pendingKey.value = key
   try {
     await task()
   } finally {
-    pendingKey.value = ''
+    if (pendingKey.value === key) pendingKey.value = ''
   }
 }
 
@@ -905,10 +969,12 @@ async function uninstallPlugin(plugin: PluginsInstallation) {
   await flushConfigSave()
   await withPending(plugin, 'uninstall', async () => {
     try {
+      if (plugin.id) cancelPluginOAuth(plugin.id)
       await deleteBotsByBotIdPluginsById({
         path: { bot_id: props.botId, id: plugin.id! },
         throwOnError: true,
       })
+      emitBotPluginsUpdated(props.botId)
       toast.success(t('bots.plugins.uninstallSuccess'))
       await loadPlugins()
       backToList()
@@ -923,25 +989,32 @@ async function savePluginConfig(botId = props.botId, pluginId = selectedPlugin.v
   if (!botId || !pluginId) return
   if (configSaving.value) {
     await (configSavePromise.value ?? Promise.resolve())
+    if (configDirty.value) {
+      await savePluginConfig(botId, pluginId, configPayload())
+    }
     return
   }
   if (!Object.keys(variables).length) return
   configSaving.value = true
   pendingKey.value = `${pluginId}:config`
   const run = (async () => {
-    const { data } = await putBotsByBotIdPluginsByIdConfig({
-      path: { bot_id: botId, id: pluginId },
-      body: { variables },
-      throwOnError: true,
-    })
-    rememberSavedConfig(pluginId, variables)
-    configDirty.value = false
-    for (const key of Object.keys(configDraft)) delete configDraft[key]
-    plugins.value = plugins.value.map(item => item.id === data.id ? data : item)
-    if (selectedPlugin.value?.id === pluginId) {
-      selectedPlugin.value = data
+    let nextVariables = variables
+    while (Object.keys(nextVariables).length) {
+      const { data } = await putBotsByBotIdPluginsByIdConfig({
+        path: { bot_id: botId, id: pluginId },
+        body: { variables: nextVariables },
+        throwOnError: true,
+      })
+      rememberSavedConfig(pluginId, nextVariables)
+      clearSavedDraft(nextVariables)
+      plugins.value = plugins.value.map(item => item.id === data.id ? data : item)
+      if (selectedPlugin.value?.id === pluginId) {
+        selectedPlugin.value = data
+      }
+      await loadPlugins()
+      if (!configDirty.value) break
+      nextVariables = configPayload()
     }
-    await loadPlugins()
   })()
   configSavePromise.value = run
   try {
@@ -958,6 +1031,16 @@ async function savePluginConfig(botId = props.botId, pluginId = selectedPlugin.v
 
 async function startOAuth(plugin: PluginsInstallation) {
   await withPending(plugin, 'oauth', async () => {
+    const pluginId = plugin.id
+    if (!pluginId) return
+    cancelAllPluginOAuth(false)
+    const popup = !window.api?.desktop?.openExternalUrl
+      ? window.open('', 'mcp-oauth', 'width=600,height=700')
+      : null
+    if (!window.api?.desktop?.openExternalUrl && !popup) {
+      toast.error(t('mcp.oauth.flowInitFailed'))
+      return
+    }
     try {
       const { data } = await postBotsByBotIdPluginsByIdOauthAuthorize({
         path: { bot_id: props.botId, id: plugin.id! },
@@ -966,14 +1049,46 @@ async function startOAuth(plugin: PluginsInstallation) {
       })
       if (!data.authorization_url) throw new Error(t('mcp.oauth.flowInitFailed'))
 
-      const popup = window.open(data.authorization_url, 'mcp-oauth', 'width=600,height=700')
-      await waitForMCPOAuth(plugin, popup)
+      const opened = await openPluginOAuthURL(data.authorization_url, popup)
+      const waitResult = await waitForPluginOAuth({
+        botId: props.botId,
+        installationId: pluginId,
+        popup: opened.popup,
+        external: opened.external,
+        fetchStatus: fetchOAuthStatus,
+        t,
+        onController: flow => {
+          cancelAllPluginOAuth(false)
+          oauthFlows.set(pluginId, flow)
+        },
+        onCleanup: () => oauthFlows.delete(pluginId),
+      })
+      if (waitResult === 'timeout') {
+        throw new Error(t('mcp.oauth.authFailed'))
+      }
+      if (waitResult !== 'authorized') {
+        await loadPlugins()
+        return
+      }
       const synced = await syncOAuthStatus(plugin)
       if (synced.status !== 'ready' && !synced.enabled) throw new Error(t('mcp.oauth.authFailed'))
       toast.success(t('mcp.oauth.authSuccess'))
       await loadPlugins()
     } catch (error) {
-      const synced = await syncOAuthStatus(plugin).catch(() => null)
+      popup?.close()
+      if (isPluginInstallationNotFoundError(error)) {
+        await loadPlugins()
+        return
+      }
+      let synced: PluginsInstallation | null = null
+      try {
+        synced = await syncOAuthStatus(plugin)
+      } catch (syncError) {
+        if (isPluginInstallationNotFoundError(syncError)) {
+          await loadPlugins()
+          return
+        }
+      }
       if (synced?.status === 'ready' || synced?.enabled) {
         toast.success(t('mcp.oauth.authSuccess'))
         await loadPlugins()
@@ -985,55 +1100,29 @@ async function startOAuth(plugin: PluginsInstallation) {
   })
 }
 
-function waitForMCPOAuth(plugin: PluginsInstallation, popup: Window | null): Promise<void> {
-  return new Promise((resolve, reject) => {
-    let completed = false
-    const startedAt = Date.now()
-    let pollTimer: ReturnType<typeof setInterval> | undefined
+function cancelPluginOAuth(pluginId: string, notify = true) {
+  const flow = oauthFlows.get(pluginId)
+  if (!flow) return
+  oauthFlows.delete(pluginId)
+  if (notify) {
+    flow.cancel()
+    return
+  }
+  flow.dispose()
+}
 
-    const finish = (status: 'success' | 'error', error?: string) => {
-      if (completed) return
-      completed = true
-      if (pollTimer) clearInterval(pollTimer)
-      window.removeEventListener('message', onMessage)
-      if (status === 'success') {
-        resolve()
-      } else {
-        reject(new Error(error || t('mcp.oauth.authFailed')))
-      }
-    }
-
-    const onMessage = (event: MessageEvent) => {
-      if (event.data?.type !== 'mcp-oauth-callback') return
-      finish(event.data.status === 'success' ? 'success' : 'error', event.data.error)
-    }
-
-    window.addEventListener('message', onMessage)
-    pollTimer = setInterval(() => {
-      getBotsByBotIdPluginsByIdOauthStatus({
-        path: { bot_id: props.botId, id: plugin.id! },
-        throwOnError: true,
-      }).then(({ data }) => {
-        if (completed) return
-        if (data.status === 'ready' || data.enabled) {
-          finish('success')
-          return
-        }
-        if (popup?.closed || Date.now() - startedAt > 120_000) {
-          finish('error')
-        }
-      }).catch(() => {
-        if (!completed && (popup?.closed || Date.now() - startedAt > 120_000)) {
-          finish('error')
-        }
-      })
-    }, 2000)
-  })
+function cancelAllPluginOAuth(notify = true) {
+  for (const pluginId of oauthFlows.keys()) cancelPluginOAuth(pluginId, notify)
 }
 
 async function syncOAuthStatus(plugin: PluginsInstallation): Promise<PluginsInstallation> {
+  if (!plugin.id) throw new Error(t('mcp.oauth.authFailed'))
+  return fetchOAuthStatus(props.botId, plugin.id)
+}
+
+async function fetchOAuthStatus(botId: string, installationId: string): Promise<PluginsInstallation> {
   const { data } = await getBotsByBotIdPluginsByIdOauthStatus({
-    path: { bot_id: props.botId, id: plugin.id! },
+    path: { bot_id: botId, id: installationId },
     throwOnError: true,
   })
   plugins.value = plugins.value.map(item => item.id === data.id ? data : item)

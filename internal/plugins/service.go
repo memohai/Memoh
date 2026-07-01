@@ -130,6 +130,9 @@ func (s *Service) prepareConfigUpdate(ctx context.Context, botID, installationID
 	if err != nil {
 		return Installation{}, configUpdateSnapshot{}, err
 	}
+	if err := validateConfigDefaults(manifest); err != nil {
+		return Installation{}, configUpdateSnapshot{}, err
+	}
 	variables, err := variablesFromConfig(row.Config)
 	if err != nil {
 		return Installation{}, configUpdateSnapshot{}, err
@@ -139,7 +142,8 @@ func (s *Service) prepareConfigUpdate(ctx context.Context, botID, installationID
 		manifest:  manifest,
 		variables: cloneStringMap(variables),
 	}
-	for key, value := range req.Variables {
+	requestedVariables := normalizeVariableMap(req.Variables)
+	for key, value := range requestedVariables {
 		key = strings.TrimSpace(key)
 		if key == "" {
 			continue
@@ -149,6 +153,9 @@ func (s *Service) prepareConfigUpdate(ctx context.Context, botID, installationID
 			continue
 		}
 		variables[key] = value
+	}
+	if err := validateConfigVariables(manifest, variables); err != nil {
+		return Installation{}, configUpdateSnapshot{}, err
 	}
 
 	status := s.evaluateInitialStatus(manifest, variables)
@@ -194,6 +201,9 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 	if manifest.Name == "" {
 		manifest.Name = manifest.ID
 	}
+	if err := validateConfigDefaults(manifest); err != nil {
+		return Installation{}, err
+	}
 	existingInstallationID, err := s.existingInstallationIDForPlugin(ctx, botUUID, manifest.ID)
 	if err != nil {
 		return Installation{}, err
@@ -212,11 +222,15 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 	if err := s.ensureManagedMCPNamesAvailable(ctx, botID, existingInstallationID, manifest); err != nil {
 		return Installation{}, err
 	}
-	status := s.evaluateInitialStatus(manifest, req.Variables)
+	variables := normalizeVariableMap(req.Variables)
+	if err := validateConfigVariables(manifest, variables); err != nil {
+		return Installation{}, err
+	}
+	status := s.evaluateInitialStatus(manifest, variables)
 	enabled := false
 
 	configPayload, err := encodeJSON(map[string]any{
-		"variables": req.Variables,
+		"variables": variables,
 	})
 	if err != nil {
 		return Installation{}, err
@@ -256,7 +270,7 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 		}
 	}
 
-	if err := s.ensureMCPResources(ctx, botID, row.ID, manifest, req.Variables, status, enabled); err != nil {
+	if err := s.ensureMCPResources(ctx, botID, row.ID, manifest, variables, status, enabled); err != nil {
 		s.cleanupFailedInstall(ctx, botID, row.ID, deleteInstallationOnFailure)
 		return Installation{}, err
 	}
@@ -323,12 +337,18 @@ func (s *Service) SetEnabled(ctx context.Context, botID, installationID string, 
 	if err != nil {
 		return Installation{}, err
 	}
+	if err := validateConfigDefaults(manifest); err != nil {
+		return Installation{}, err
+	}
 	if row.Status == StatusUninstalled {
 		return Installation{}, errors.New("plugin is uninstalled")
 	}
 	variables, configErr := variablesFromConfig(row.Config)
 	if configErr != nil {
 		return Installation{}, configErr
+	}
+	if err := validateConfigVariables(manifest, variables); err != nil {
+		return Installation{}, err
 	}
 	status := s.evaluateInitialStatus(manifest, variables)
 	if status == StatusNeedsAuth {
@@ -360,6 +380,23 @@ func (s *Service) Activate(ctx context.Context, botID, installationID string) (I
 	}
 	if row.Enabled {
 		return s.normalizeInstallation(ctx, row)
+	}
+	manifest, err := decodeManifest(row.Manifest)
+	if err != nil {
+		return Installation{}, err
+	}
+	if err := validateConfigDefaults(manifest); err != nil {
+		return Installation{}, err
+	}
+	variables, err := variablesFromConfig(row.Config)
+	if err != nil {
+		return Installation{}, err
+	}
+	if err := validateConfigVariables(manifest, variables); err != nil {
+		return Installation{}, err
+	}
+	if missingPluginConfig(manifest, variables) {
+		return Installation{}, fmt.Errorf("plugin is not ready: %s", StatusNeedsConfig)
 	}
 	if err := s.mcpService.SetPluginConnectionsActive(ctx, botID, installationID, true); err != nil {
 		return Installation{}, err
@@ -431,6 +468,19 @@ func (s *Service) StartOAuth(ctx context.Context, botID, installationID, callbac
 	if err != nil {
 		return nil, err
 	}
+	if err := validateConfigDefaults(manifest); err != nil {
+		return nil, err
+	}
+	variables, err := variablesFromConfig(row.Config)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateConfigVariables(manifest, variables); err != nil {
+		return nil, err
+	}
+	if missingPluginConfig(manifest, variables) {
+		return nil, fmt.Errorf("plugin is not ready: %s", StatusNeedsConfig)
+	}
 	resources, err := s.queries.ListBotPluginResources(ctx, row.ID)
 	if err != nil {
 		return nil, err
@@ -461,18 +511,22 @@ func (s *Service) StartOAuth(ctx context.Context, botID, installationID, callbac
 		if strings.TrimSpace(callbackURL) == "" {
 			callbackURL = client.RedirectURI
 		}
+		resolvedResource := buildMCPConnectionRequest(manifest, resource, authReq, variables)
+		if strings.TrimSpace(resolvedResource.URL) == "" {
+			return nil, fmt.Errorf("OAuth MCP resource %q URL is not configured", resource.Key)
+		}
 		if strings.TrimSpace(client.AuthorizationEndpoint) != "" && strings.TrimSpace(client.TokenEndpoint) != "" {
 			if err := s.oauthService.SaveDiscovery(ctx, connID, &mcp.DiscoveryResult{
 				AuthorizationServerURL: authorizationServerFromEndpoint(client.AuthorizationEndpoint),
 				AuthorizationEndpoint:  client.AuthorizationEndpoint,
 				TokenEndpoint:          client.TokenEndpoint,
 				ScopesSupported:        authReq.Scopes,
-				ResourceURI:            strings.TrimSpace(resource.URL),
+				ResourceURI:            strings.TrimSpace(resolvedResource.URL),
 			}); err != nil {
 				return nil, err
 			}
 		} else {
-			result, err := s.oauthService.Discover(ctx, resource.URL)
+			result, err := s.oauthService.Discover(ctx, resolvedResource.URL)
 			if err != nil {
 				return nil, err
 			}
@@ -493,6 +547,16 @@ func (s *Service) RefreshOAuthStatus(ctx context.Context, botID, installationID 
 	}
 	manifest, err := decodeManifest(row.Manifest)
 	if err != nil {
+		return Installation{}, err
+	}
+	if err := validateConfigDefaults(manifest); err != nil {
+		return Installation{}, err
+	}
+	variables, err := variablesFromConfig(row.Config)
+	if err != nil {
+		return Installation{}, err
+	}
+	if err := validateConfigVariables(manifest, variables); err != nil {
 		return Installation{}, err
 	}
 	status, err := s.refreshOAuthStatus(ctx, botID, row, manifest)
@@ -1071,6 +1135,9 @@ func normalizeMetadataMap(value map[string]any) map[string]any {
 
 func (s *Service) evaluateInitialStatus(manifest Manifest, variables map[string]string) string {
 	status := StatusReady
+	if missingPluginConfig(manifest, variables) {
+		status = StatusNeedsConfig
+	}
 	for _, resource := range manifest.MCPs {
 		authReq := manifestAuthForResource(manifest, resource)
 		switch strings.TrimSpace(strings.ToLower(authReq.Type)) {
@@ -1078,7 +1145,9 @@ func (s *Service) evaluateInitialStatus(manifest Manifest, variables map[string]
 			if strings.TrimSpace(authReq.ClientRef) != "" && !s.oauthClients.HasUsableClient(authReq.ClientRef) {
 				return StatusAdminRequired
 			}
-			status = StatusNeedsAuth
+			if status != StatusNeedsConfig {
+				status = StatusNeedsAuth
+			}
 		case "user_secret":
 			if missingRequiredVariables(manifest, resource, authReq, variables) {
 				return StatusNeedsConfig
@@ -1089,6 +1158,22 @@ func (s *Service) evaluateInitialStatus(manifest Manifest, variables map[string]
 		}
 	}
 	return status
+}
+
+func missingPluginConfig(manifest Manifest, variables map[string]string) bool {
+	if missingRequiredConfig(manifest, variables) {
+		return true
+	}
+	for _, resource := range manifest.MCPs {
+		authReq := manifestAuthForResource(manifest, resource)
+		if strings.TrimSpace(strings.ToLower(authReq.Type)) == "user_secret" && missingRequiredVariables(manifest, resource, authReq, variables) {
+			return true
+		}
+		if missingResourceConfig(manifest, resource, variables) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) refreshOAuthStatus(ctx context.Context, botID string, row sqlc.BotPluginInstallation, manifest Manifest) (string, error) {
@@ -1385,6 +1470,99 @@ func redactConfig(manifest Manifest, config map[string]any) map[string]any {
 	return map[string]any{"variables": variableStatus}
 }
 
+func validateConfigVariables(manifest Manifest, variables map[string]string) error {
+	resolved := resolveManifestConfigRows(manifest, variables)
+	for _, item := range manifestConfigRows(manifest) {
+		key := strings.TrimSpace(item.Key)
+		if key == "" || len(item.Options) == 0 {
+			continue
+		}
+		if value, ok := variables[key]; ok {
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("plugin variable %s is required to be one of the configured options", key)
+			}
+			if strings.TrimSpace(value) != value {
+				return fmt.Errorf("plugin variable %s must not contain leading or trailing whitespace", key)
+			}
+			if !configVarOptionContains(item.Options, value) {
+				return fmt.Errorf("plugin variable %s has unsupported value %q", key, value)
+			}
+		}
+		value := strings.TrimSpace(resolveConfigValue(item, resolved))
+		if value == "" {
+			continue
+		}
+		if !configVarOptionContains(item.Options, value) {
+			return fmt.Errorf("plugin variable %s has unsupported value %q", key, value)
+		}
+	}
+	return nil
+}
+
+func validateConfigDefaults(manifest Manifest) error {
+	for _, item := range manifestConfigRows(manifest) {
+		key := strings.TrimSpace(item.Key)
+		if key == "" || len(item.Options) == 0 {
+			continue
+		}
+		for _, option := range item.Options {
+			if strings.TrimSpace(option.Value) == "" {
+				return fmt.Errorf("plugin variable %s option value is required", key)
+			}
+			if strings.TrimSpace(option.Value) != option.Value {
+				return fmt.Errorf("plugin variable %s option value must not contain leading or trailing whitespace", key)
+			}
+		}
+		defaultValue := strings.TrimSpace(item.DefaultValue)
+		if defaultValue == "" || len(templateVariableKeys(defaultValue)) > 0 {
+			continue
+		}
+		if item.DefaultValue != defaultValue {
+			return fmt.Errorf("plugin variable %s default value must not contain leading or trailing whitespace", key)
+		}
+		if !configVarOptionContains(item.Options, item.DefaultValue) {
+			return fmt.Errorf("plugin variable %s has unsupported default value %q", key, item.DefaultValue)
+		}
+	}
+	return nil
+}
+
+func missingRequiredConfig(manifest Manifest, variables map[string]string) bool {
+	resolved := resolveManifestConfigRows(manifest, variables)
+	for _, item := range manifestConfigRows(manifest) {
+		if !item.Required {
+			continue
+		}
+		if strings.TrimSpace(resolveConfigValue(item, resolved)) == "" {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveManifestConfigRows(manifest Manifest, variables map[string]string) map[string]string {
+	resolved := map[string]string{}
+	for key, value := range variables {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			resolved[key] = value
+		}
+	}
+	for _, item := range manifestConfigRows(manifest) {
+		seedDefaultVariable(resolved, item)
+	}
+	return resolved
+}
+
+func configVarOptionContains(options []ConfigVarOption, value string) bool {
+	for _, option := range options {
+		if option.Value == value {
+			return true
+		}
+	}
+	return false
+}
+
 func manifestConfigRows(manifest Manifest) []ConfigVar {
 	rows := make([]ConfigVar, 0, len(manifest.Variables))
 	rowByKey := map[string]int{}
@@ -1403,6 +1581,9 @@ func manifestConfigRows(manifest Manifest) []ConfigVar {
 			}
 			if rows[index].DefaultValue == "" {
 				rows[index].DefaultValue = item.DefaultValue
+			}
+			if len(rows[index].Options) == 0 {
+				rows[index].Options = item.Options
 			}
 			return
 		}
@@ -1449,6 +1630,17 @@ func shouldRenderResourceConfig(item ConfigVar, manifestVariableKeys map[string]
 		}
 	}
 	return true
+}
+
+func normalizeVariableMap(variables map[string]string) map[string]string {
+	out := make(map[string]string, len(variables))
+	for key, value := range variables {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			out[key] = value
+		}
+	}
+	return out
 }
 
 func variablesFromConfig(raw []byte) (map[string]string, error) {

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"path"
 	"strings"
 	"testing"
@@ -198,6 +200,498 @@ func TestUpdateConfigClearsStoredVariable(t *testing.T) {
 	}
 	if stored.Variables["HOST"] != "example.test" {
 		t.Fatalf("HOST = %q, want preserved value", stored.Variables["HOST"])
+	}
+}
+
+func TestInstallRejectsInvalidConfigOption(t *testing.T) {
+	ctx := context.Background()
+	_, svc := newPluginServiceTestDB(t, ctx)
+	botID := "00000000-0000-0000-0000-000000000102"
+	manifest := Manifest{
+		ID:   "lark",
+		Name: "Lark",
+		Variables: []ConfigVar{{
+			Key:          "LARK_DOMAIN",
+			DefaultValue: "https://open.larksuite.com",
+			Options: []ConfigVarOption{
+				{Label: "Lark", Value: "https://open.larksuite.com"},
+				{Label: "Feishu", Value: "https://open.feishu.cn"},
+			},
+		}},
+		MCPs: []MCPResource{{
+			Key:     "lark",
+			Command: "lark-mcp",
+			Args:    []string{"--domain", "${LARK_DOMAIN}"},
+		}},
+	}
+
+	for _, tc := range []struct {
+		name  string
+		value string
+	}{
+		{name: "unsupported", value: "https://example.com"},
+		{name: "leading space", value: " https://open.feishu.cn"},
+		{name: "trailing space", value: "https://open.feishu.cn "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.Install(ctx, botID, InstallRequest{
+				Manifest:  manifest,
+				Variables: map[string]string{"LARK_DOMAIN": tc.value},
+			})
+			if err == nil {
+				t.Fatal("Install() error = nil, want invalid option error")
+			}
+		})
+	}
+}
+
+func TestInstallRejectsInvalidConfigOptionDefault(t *testing.T) {
+	ctx := context.Background()
+	_, svc := newPluginServiceTestDB(t, ctx)
+	botID := "00000000-0000-0000-0000-000000000102"
+	_, err := svc.Install(ctx, botID, InstallRequest{
+		Manifest: Manifest{
+			ID:   "lark",
+			Name: "Lark",
+			Variables: []ConfigVar{{
+				Key:          "LARK_DOMAIN",
+				DefaultValue: "https://example.com",
+				Options: []ConfigVarOption{
+					{Label: "Lark", Value: "https://open.larksuite.com"},
+					{Label: "Feishu", Value: "https://open.feishu.cn"},
+				},
+			}},
+			MCPs: []MCPResource{{
+				Key:     "lark",
+				Command: "lark-mcp",
+				Args:    []string{"--domain", "${LARK_DOMAIN}"},
+			}},
+		},
+	})
+	if err == nil {
+		t.Fatal("Install() error = nil, want invalid default option error")
+	}
+}
+
+func TestInstallRejectsTemplatedConfigOptionDefaultOutsideAllowList(t *testing.T) {
+	ctx := context.Background()
+	_, svc := newPluginServiceTestDB(t, ctx)
+	botID := "00000000-0000-0000-0000-000000000102"
+	_, err := svc.Install(ctx, botID, InstallRequest{
+		Manifest: Manifest{
+			ID:   "lark",
+			Name: "Lark",
+			Variables: []ConfigVar{
+				{Key: "BASE_URL", DefaultValue: "https://example.com"},
+				{
+					Key:          "LARK_DOMAIN",
+					DefaultValue: "${BASE_URL}",
+					Options: []ConfigVarOption{
+						{Label: "Lark", Value: "https://open.larksuite.com"},
+						{Label: "Feishu", Value: "https://open.feishu.cn"},
+					},
+				},
+			},
+			MCPs: []MCPResource{{
+				Key:     "lark",
+				Command: "lark-mcp",
+				Args:    []string{"--domain", "${LARK_DOMAIN}"},
+			}},
+		},
+	})
+	if err == nil {
+		t.Fatal("Install() error = nil, want templated default option error")
+	}
+}
+
+func TestInstallAllowsValidConfigOption(t *testing.T) {
+	ctx := context.Background()
+	_, svc := newPluginServiceTestDB(t, ctx)
+	botID := "00000000-0000-0000-0000-000000000102"
+	installed, err := svc.Install(ctx, botID, InstallRequest{
+		Manifest: Manifest{
+			ID:   "lark",
+			Name: "Lark",
+			Variables: []ConfigVar{{
+				Key: "LARK_DOMAIN",
+				Options: []ConfigVarOption{
+					{Label: "Lark", Value: "https://open.larksuite.com"},
+					{Label: "Feishu", Value: "https://open.feishu.cn"},
+				},
+			}},
+			MCPs: []MCPResource{{
+				Key:     "lark",
+				Command: "lark-mcp",
+				Args:    []string{"--domain", "${LARK_DOMAIN}"},
+			}},
+		},
+		Variables: map[string]string{"LARK_DOMAIN": "https://open.feishu.cn"},
+	})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if installed.Status != StatusReady {
+		t.Fatalf("status = %q, want %q", installed.Status, StatusReady)
+	}
+}
+
+func TestInstallAllowsValidConfigOptionDefault(t *testing.T) {
+	ctx := context.Background()
+	_, svc := newPluginServiceTestDB(t, ctx)
+	botID := "00000000-0000-0000-0000-000000000102"
+	installed, err := svc.Install(ctx, botID, InstallRequest{
+		Manifest: Manifest{
+			ID:   "lark",
+			Name: "Lark",
+			Variables: []ConfigVar{{
+				Key:          "LARK_DOMAIN",
+				DefaultValue: "https://open.larksuite.com",
+				Options: []ConfigVarOption{
+					{Label: "Lark", Value: "https://open.larksuite.com"},
+					{Label: "Feishu", Value: "https://open.feishu.cn"},
+				},
+			}},
+			MCPs: []MCPResource{{
+				Key:     "lark",
+				Command: "lark-mcp",
+				Args:    []string{"--domain", "${LARK_DOMAIN}"},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if installed.Status != StatusReady {
+		t.Fatalf("status = %q, want %q", installed.Status, StatusReady)
+	}
+}
+
+func TestInstallTreatsMissingRequiredManifestVariableAsNeedsConfig(t *testing.T) {
+	ctx := context.Background()
+	_, svc := newPluginServiceTestDB(t, ctx)
+	botID := "00000000-0000-0000-0000-000000000102"
+	installed, err := svc.Install(ctx, botID, InstallRequest{
+		Manifest: Manifest{
+			ID:   "docs",
+			Name: "Docs",
+			Variables: []ConfigVar{{
+				Key:      "DOCS_TOKEN",
+				Required: true,
+				Secret:   true,
+			}},
+			MCPs: []MCPResource{{
+				Key:     "docs",
+				Command: "docs-mcp",
+				Args:    []string{"--token", "${DOCS_TOKEN}"},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if installed.Status != StatusNeedsConfig {
+		t.Fatalf("status = %q, want %q", installed.Status, StatusNeedsConfig)
+	}
+}
+
+func TestUpdateConfigRejectsInvalidConfigOption(t *testing.T) {
+	ctx := context.Background()
+	conn, svc := newPluginServiceTestDB(t, ctx)
+	botID := "00000000-0000-0000-0000-000000000102"
+	installationID := "00000000-0000-0000-0000-000000000183"
+	manifest := Manifest{
+		ID:   "lark",
+		Name: "Lark",
+		Variables: []ConfigVar{{
+			Key: "LARK_DOMAIN",
+			Options: []ConfigVarOption{
+				{Label: "Lark", Value: "https://open.larksuite.com"},
+				{Label: "Feishu", Value: "https://open.feishu.cn"},
+			},
+		}},
+		MCPs: []MCPResource{{
+			Key:     "lark",
+			Command: "lark-mcp",
+			Args:    []string{"--domain", "${LARK_DOMAIN}"},
+		}},
+	}
+	insertPluginFixture(t, ctx, conn, botID, installationID, manifest, StatusReady, true, map[string]string{
+		"LARK_DOMAIN": "https://open.larksuite.com",
+	})
+
+	for _, tc := range []struct {
+		name  string
+		value string
+	}{
+		{name: "unsupported", value: "https://example.com"},
+		{name: "leading space", value: " https://open.feishu.cn"},
+		{name: "trailing space", value: "https://open.feishu.cn "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.UpdateConfig(ctx, botID, installationID, UpdateConfigRequest{
+				Variables: map[string]string{"LARK_DOMAIN": tc.value},
+			})
+			if err == nil {
+				t.Fatal("UpdateConfig() error = nil, want invalid option error")
+			}
+		})
+	}
+}
+
+func TestUpdateConfigClearsConfigOption(t *testing.T) {
+	ctx := context.Background()
+	conn, svc := newPluginServiceTestDB(t, ctx)
+	botID := "00000000-0000-0000-0000-000000000102"
+	installationID := "00000000-0000-0000-0000-000000000184"
+	manifest := Manifest{
+		ID:   "lark",
+		Name: "Lark",
+		Variables: []ConfigVar{{
+			Key: "LARK_DOMAIN",
+			Options: []ConfigVarOption{
+				{Label: "Lark", Value: "https://open.larksuite.com"},
+				{Label: "Feishu", Value: "https://open.feishu.cn"},
+			},
+		}},
+		MCPs: []MCPResource{{
+			Key:     "lark",
+			Command: "lark-mcp",
+			Args:    []string{"--domain", "${LARK_DOMAIN}"},
+		}},
+	}
+	insertPluginFixture(t, ctx, conn, botID, installationID, manifest, StatusReady, true, map[string]string{
+		"LARK_DOMAIN": "https://open.larksuite.com",
+	})
+
+	updated, err := svc.UpdateConfig(ctx, botID, installationID, UpdateConfigRequest{
+		Variables: map[string]string{"LARK_DOMAIN": ""},
+	})
+	if err != nil {
+		t.Fatalf("UpdateConfig() error = %v", err)
+	}
+	if updated.Enabled {
+		t.Fatal("plugin should be disabled after config update")
+	}
+	row, err := svc.getRow(ctx, botID, installationID)
+	if err != nil {
+		t.Fatalf("get row: %v", err)
+	}
+	stored, err := variablesFromConfig(row.Config)
+	if err != nil {
+		t.Fatalf("variablesFromConfig: %v", err)
+	}
+	if _, ok := stored["LARK_DOMAIN"]; ok {
+		t.Fatalf("LARK_DOMAIN should be removed from stored variables: %#v", stored)
+	}
+}
+
+func TestSetEnabledRejectsStoredInvalidConfigOption(t *testing.T) {
+	ctx := context.Background()
+	conn, svc := newPluginServiceTestDB(t, ctx)
+	botID := "00000000-0000-0000-0000-000000000102"
+	installationID := "00000000-0000-0000-0000-000000000185"
+	manifest := Manifest{
+		ID:   "lark",
+		Name: "Lark",
+		Variables: []ConfigVar{{
+			Key: "LARK_DOMAIN",
+			Options: []ConfigVarOption{
+				{Label: "Lark", Value: "https://open.larksuite.com"},
+				{Label: "Feishu", Value: "https://open.feishu.cn"},
+			},
+		}},
+		MCPs: []MCPResource{{
+			Key:     "lark",
+			Command: "lark-mcp",
+			Args:    []string{"--domain", "${LARK_DOMAIN}"},
+		}},
+	}
+	insertPluginFixture(t, ctx, conn, botID, installationID, manifest, StatusReady, false, map[string]string{
+		"LARK_DOMAIN": "https://example.com",
+	})
+
+	if _, err := svc.SetEnabled(ctx, botID, installationID, true); err == nil {
+		t.Fatal("SetEnabled() error = nil, want invalid stored option error")
+	}
+}
+
+func TestActivateRejectsStoredInvalidConfigOption(t *testing.T) {
+	ctx := context.Background()
+	conn, svc := newPluginServiceTestDB(t, ctx)
+	botID := "00000000-0000-0000-0000-000000000102"
+	installationID := "00000000-0000-0000-0000-000000000190"
+	connectionID := "00000000-0000-0000-0000-000000000191"
+	manifest := Manifest{
+		ID:   "lark",
+		Name: "Lark",
+		Variables: []ConfigVar{{
+			Key: "LARK_DOMAIN",
+			Options: []ConfigVarOption{
+				{Label: "Lark", Value: "https://open.larksuite.com"},
+				{Label: "Feishu", Value: "https://open.feishu.cn"},
+			},
+		}},
+		MCPs: []MCPResource{{
+			Key:     "lark",
+			Command: "lark-mcp",
+			Args:    []string{"--domain", "${LARK_DOMAIN}"},
+		}},
+	}
+	insertPluginFixture(t, ctx, conn, botID, installationID, manifest, StatusReady, false, map[string]string{
+		"LARK_DOMAIN": "https://example.com",
+	})
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO mcp_connections(id, bot_id, name, type, config, is_active, managed_by_plugin_installation_id, managed_resource_key)
+VALUES(?, ?, 'lark_lark', 'stdio', '{"command":"lark-mcp"}', 0, ?, 'lark')
+`, connectionID, botID, installationID); err != nil {
+		t.Fatalf("insert mcp connection: %v", err)
+	}
+
+	if _, err := svc.Activate(ctx, botID, installationID); err == nil {
+		t.Fatal("Activate() error = nil, want invalid stored option error")
+	}
+}
+
+func TestRefreshOAuthStatusRejectsStoredInvalidConfigOption(t *testing.T) {
+	ctx := context.Background()
+	conn, svc := newPluginServiceTestDB(t, ctx)
+	botID := "00000000-0000-0000-0000-000000000102"
+	installationID := "00000000-0000-0000-0000-000000000186"
+	connectionID := "00000000-0000-0000-0000-000000000187"
+	manifest := Manifest{
+		ID:   "github",
+		Name: "GitHub",
+		Variables: []ConfigVar{{
+			Key: "GITHUB_DOMAIN",
+			Options: []ConfigVarOption{
+				{Label: "GitHub", Value: "https://github.com"},
+				{Label: "Enterprise", Value: "https://github.example.com"},
+			},
+		}},
+		AuthRequirements: []AuthRequirement{{
+			Key:  "oauth",
+			Type: "managed_oauth",
+		}},
+		MCPs: []MCPResource{{
+			Key:     "api",
+			URL:     "${GITHUB_DOMAIN}/mcp",
+			AuthRef: "oauth",
+		}},
+	}
+	insertPluginFixture(t, ctx, conn, botID, installationID, manifest, StatusNeedsAuth, false, map[string]string{
+		"GITHUB_DOMAIN": "https://example.com",
+	})
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO mcp_connections(id, bot_id, name, type, config, is_active, auth_type, managed_by_plugin_installation_id, managed_resource_key)
+VALUES(?, ?, 'github_api', 'http', '{"url":"https://api.github.example/mcp"}', 0, 'oauth', ?, 'api')
+`, connectionID, botID, installationID); err != nil {
+		t.Fatalf("insert mcp connection: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO bot_plugin_resources(id, installation_id, resource_type, resource_key, resource_id, status, metadata)
+VALUES('00000000-0000-0000-0000-000000000188', ?, 'mcp', 'api', ?, 'needs_auth', '{}')
+`, installationID, connectionID); err != nil {
+		t.Fatalf("insert plugin resource: %v", err)
+	}
+	expiresAt := time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO mcp_oauth_tokens(id, connection_id, authorization_endpoint, token_endpoint, access_token, expires_at)
+VALUES('00000000-0000-0000-0000-000000000189', ?, 'https://auth.example/authorize', 'https://auth.example/token', 'valid-token', ?)
+`, connectionID, expiresAt); err != nil {
+		t.Fatalf("insert oauth token: %v", err)
+	}
+
+	if _, err := svc.RefreshOAuthStatus(ctx, botID, installationID); err == nil {
+		t.Fatal("RefreshOAuthStatus() error = nil, want invalid stored option error")
+	}
+}
+
+func TestStartOAuthUsesResolvedResourceURL(t *testing.T) {
+	ctx := context.Background()
+	conn, svc := newPluginServiceTestDB(t, ctx)
+	botID := "00000000-0000-0000-0000-000000000102"
+	installationID := "00000000-0000-0000-0000-000000000192"
+	connectionID := "00000000-0000-0000-0000-000000000193"
+	var probedPath string
+	origin := func(r *http.Request) string {
+		return "http://" + r.Host
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/mcp":
+			probedPath = r.URL.Path
+			w.Header().Set("WWW-Authenticate", `Bearer scope="mcp:connect"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		case "/.well-known/oauth-protected-resource/mcp":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"authorization_servers": []string{origin(r)},
+				"scopes_supported":      []string{"mcp:connect"},
+			})
+		case "/.well-known/oauth-authorization-server":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"issuer":                 origin(r),
+				"authorization_endpoint": origin(r) + "/authorize",
+				"token_endpoint":         origin(r) + "/token",
+				"registration_endpoint":  origin(r) + "/register",
+			})
+		case "/register":
+			_ = json.NewEncoder(w).Encode(map[string]any{"client_id": "client-1"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	manifest := Manifest{
+		ID:   "github",
+		Name: "GitHub",
+		Variables: []ConfigVar{{
+			Key: "GITHUB_DOMAIN",
+			Options: []ConfigVarOption{
+				{Label: "Local", Value: server.URL},
+			},
+		}},
+		AuthRequirements: []AuthRequirement{{
+			Key:  "oauth",
+			Type: "managed_oauth",
+		}},
+		MCPs: []MCPResource{{
+			Key:     "api",
+			URL:     "${GITHUB_DOMAIN}/mcp",
+			AuthRef: "oauth",
+		}},
+	}
+	insertPluginFixture(t, ctx, conn, botID, installationID, manifest, StatusNeedsAuth, false, map[string]string{
+		"GITHUB_DOMAIN": server.URL,
+	})
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO mcp_connections(id, bot_id, name, type, config, is_active, auth_type, managed_by_plugin_installation_id, managed_resource_key)
+VALUES(?, ?, 'github_api', 'http', ?, 0, 'oauth', ?, 'api')
+`, connectionID, botID, `{"url":"`+server.URL+`/mcp"}`, installationID); err != nil {
+		t.Fatalf("insert mcp connection: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO bot_plugin_resources(id, installation_id, resource_type, resource_key, resource_id, status, metadata)
+VALUES('00000000-0000-0000-0000-000000000194', ?, 'mcp', 'api', ?, 'needs_auth', '{}')
+`, installationID, connectionID); err != nil {
+		t.Fatalf("insert plugin resource: %v", err)
+	}
+
+	auth, err := svc.StartOAuth(ctx, botID, installationID, "https://memoh.example/oauth/mcp/callback")
+	if err != nil {
+		t.Fatalf("StartOAuth() error = %v", err)
+	}
+	if auth.AuthorizationURL == "" {
+		t.Fatal("authorization URL is empty")
+	}
+	if probedPath != "/mcp" {
+		t.Fatalf("probed path = %q, want resolved /mcp", probedPath)
+	}
+	var resourceURI string
+	if err := conn.QueryRowContext(ctx, `SELECT resource_uri FROM mcp_oauth_tokens WHERE connection_id = ?`, connectionID).Scan(&resourceURI); err != nil {
+		t.Fatalf("select resource uri: %v", err)
+	}
+	if resourceURI != server.URL+"/mcp" {
+		t.Fatalf("resource_uri = %q, want resolved server URL", resourceURI)
 	}
 }
 
