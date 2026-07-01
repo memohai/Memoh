@@ -1395,9 +1395,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         })
         break
       }
-      // No 'chat' case: the single global messages array means two chat panels in
-      // separate groups would both render the ACTIVE session (wrong data, not just
-      // stale). Splitting chat is disabled until per-session message state exists.
+      // No 'chat' case: chat is intentionally single-copy in the UI — one live
+      // chat pane at a time, no split. The per-session SessionView architecture
+      // in store/chat-list remains available for future split surfaces (e.g. a
+      // subagent rendering pane), but chat itself does not split.
     }
   }
 

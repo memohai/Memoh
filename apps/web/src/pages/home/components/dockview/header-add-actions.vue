@@ -119,10 +119,11 @@ onBeforeUnmount(() => activePanelSub.dispose())
 // (trusted-host) workspace exposes neither, so its menu is terminal + split only.
 const canSplitExtras = computed(() => canManage.value && !isLocalWorkspace.value)
 
-// Splitting duplicates the active tab into a second pane. Chat keeps its stable
-// primary id for routing/title sync, but split copies use generated ids.
+// Splitting duplicates the active tab into a second pane. Chat is intentionally
+// single-copy (one live chat pane at a time), so split is hidden when the active
+// tab is a chat panel; other panel types split normally.
 const canSplit = computed(() => {
-  return !!activePanelId.value
+  return !!activePanelId.value && !activePanelId.value.startsWith('chat')
 })
 
 const hasAnyAction = computed(() =>
