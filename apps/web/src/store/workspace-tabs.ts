@@ -441,7 +441,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     for (const d of apiDisposables) d.dispose()
     api.value = dock
     apiDisposables = [
-      dock.onDidActivePanelChange((panel) => {
+      dock.onDidActivePanelChange((event) => {
+        const panel = event.activePanel
         activePanelId.value = panel?.id ?? null
         const group = panel?.group
         if (group && !isTerminalOnlyGroup(group)) {

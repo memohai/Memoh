@@ -150,6 +150,13 @@
   --tab-edge-pad: var(--tab-flare);
   /* HORIZONTAL rhythm */
   --tab-hover-inset: var(--tab-inset);
+  /* WIDTH — the rest measure (static upper bound). A tab rests at --tab-rest-width
+   * and HOLDS it as long as the strip has room: the void (flex-grow) eats the
+   * right-side slack, tabs don't grow. They only shrink — all together,
+   * equi-proportionally — once that void is exhausted and N tabs would overflow, so
+   * "add a tab" does nothing to the others until the strip is genuinely full. No
+   * floor (min-width:0 on the tab). One knob, tune in dev. */
+  --tab-rest-width: 15.625rem;
   /* The ONE knob for label/close breathing room (they mirror each other). Label
    * left x = hover-inset + this; close glyph right x = the same. So both read as
    * `gutter` to the hover pill and `gutter + inset` to the active fill. Move both
@@ -167,6 +174,13 @@
   /* Trailing room the label must clear: it stops a hair before the glyph's left
    * edge (glyph right is --tab-pad-inline, glyph is --tab-close-glyph wide). */
   --tab-close-reserve: calc(var(--tab-pad-inline) + var(--tab-close-glyph) + 0.125rem);
+  --tab-drop-line: var(--brand);
+  --tab-drop-line-width: 0.125rem;
+  --tab-drop-line-height: 1.25rem;
+  --tab-drop-line-top: calc(50% - var(--tab-inset) / 2 - var(--tab-drop-line-height) / 2);
+  --tab-void-drop-line-top: calc(50% - var(--tab-drop-line-height) / 2);
+  --tab-drop-line-left-offset: calc(-1 * var(--tab-drop-line-width) / 2);
+  --tab-drop-line-right-offset: calc(4px - var(--tab-drop-line-width) / 2);
   /* DIVIDERS — one stroke, one width, one HEIGHT for both the inter-tab seam and
    * the action-bar lead. Height = the close/“+” glyph height so the bar reads the
    * same extent as the icons it sits between (NOT taller — a taller bar reads as
@@ -224,13 +238,15 @@
    * arrow. dockview defaults .dv-tab to cursor:pointer;
    * the close button re-enables the pointer on itself only. */
   cursor: default;
-  /* Fixed editor-tab measure keeps title truncation, close placement, and the
-   * hover fill stable from tab to tab. Overflow scrolls instead of shrinking, so
-   * the tab geometry never changes under pointer movement. */
-  flex: 0 0 12.5rem;
-  width: 12.5rem;
-  min-width: 12.5rem;
-  max-width: 12.5rem;
+  /* Editor-tab measure: tabs REST at --tab-rest-width (the static upper bound) but
+   * SHRINK together, equi-proportionally, with NO floor — flex-shrink:1 and
+   * min-width:0, so however many tabs open they all stay on the strip, each one
+   * narrower, label truncating to a few glyphs (then the ellipsis) at the extreme
+   * rather than scrolling any off-screen. No fixed width/min-width any more: those
+   * pinned the tab and forced the old scroll-immediately-instead-of-shrink. */
+  flex: 0 1 var(--tab-rest-width);
+  min-width: 0;
+  max-width: var(--tab-rest-width);
   /* Rounded crown on EVERY tab, always — radius is state-independent so it can
    * never flash square for a frame while dockview swaps active/hover classes (it
    * only used to live on the active/hover rules). Invisible on a transparent
@@ -246,6 +262,10 @@
   margin-top: var(--tab-inset);
   height: calc(100% - var(--tab-inset));
   --tab-hover-bg: var(--surface-chrome-hover);
+}
+
+.dockview-theme-memoh .dv-tab.dv-drop-target {
+  z-index: calc(var(--dv-overlay-z-index, 999) + 1);
 }
 
 .dockview-theme-memoh .dv-tab:not(.dv-active-tab)::before {
@@ -311,9 +331,11 @@
   padding-inline: var(--tab-edge-pad);
 }
 
-/* The tab row hugs its content, so the "+" actions land right after the last tab.
- * It may still shrink as a scroll container so overflowing fixed-width tabs clip
- * and scroll rather than pushing the "+" off-screen. */
+/* The scroll container hugs its content while tabs rest at full width (so the "+"
+ * lands right after the last tab and void fills the rest); it shrinks as the strip
+ * fills up, letting the tabs inside shrink with it. min-width:0 lets that shrink
+ * actually propagate to the tabs (which themselves have no floor), so the strip
+ * absorbs any tab count by narrowing rather than scrolling. */
 .dockview-theme-memoh .dv-tabs-and-actions-container > .dv-scrollable,
 .dockview-theme-memoh .dv-scrollable > .dv-tabs-container {
   flex: 0 1 auto;
@@ -321,9 +343,9 @@
 }
 
 /* No native/dockview horizontal scrollbar on the tab row (it clashed with the
- * hairline), and no edge shadow either. When there are more tabs
- * than fit they've already shrunk to their min-width floor, then scroll via
- * wheel/trackpad. */
+ * hairline), and no edge shadow either. Editor tabs have no min-width floor, so the
+ * strip absorbs more tabs by shrinking them rather than overflowing — the hidden bar
+ * is just belt-and-suspenders against a transient overflow frame. */
 .dockview-theme-memoh .dv-tabs-container {
   scrollbar-width: none;
 }
@@ -434,6 +456,19 @@
   content: none;
 }
 
+/* Dockview renders the "+" actions after the tabs, so its static divider normally
+ * paints over a tab-edge drop line. During header drops, lift the source layer of
+ * the caret above the actions layer instead of hiding the divider. */
+.dockview-theme-memoh .dv-tabs-and-actions-container > .dv-scrollable,
+.dockview-theme-memoh .dv-void-container {
+  position: relative;
+}
+
+.dockview-theme-memoh .dv-tabs-and-actions-container > .dv-scrollable:has(.dv-drop-target),
+.dockview-theme-memoh .dv-void-container.dv-drop-target {
+  z-index: calc(var(--dv-overlay-z-index, 999) + 1);
+}
+
 /* Continuous bottom hairline for the WHOLE strip, drawn as an inset box-shadow so it
  * adds NO height — a real border-bottom would shrink the tab layer by 1px and break
  * the active tab's punch-through, which is why this used to be painted per-cell (nav,
@@ -471,6 +506,79 @@
 .dockview-theme-memoh .dv-groupview:focus,
 .dockview-theme-memoh .dv-groupview:focus-visible {
   outline: none !important;
+}
+
+/* Drop affordance: content-pane edge drops keep dockview's broad preview fill
+ * (the split-right half-panel in screenshots). Header/tab-bar drops are insertion
+ * decisions, so they should read as a short insertion caret between tabs. Dockview
+ * writes those line targets inline as 4px blocks inside the target edge. The
+ * theme trims them to 2px and re-centres each side on the actual seam so the
+ * previous tab's right target and the next tab's left target collapse to one
+ * visual line instead of twitching between two near-neighbour pixels. */
+.dockview-theme-memoh .dv-void-container.dv-drop-target > .dv-drop-target-dropzone > .dv-drop-target-selection.dv-drop-target-center {
+  top: var(--tab-void-drop-line-top) !important;
+  left: 0 !important;
+  width: var(--tab-drop-line-width) !important;
+  height: var(--tab-drop-line-height) !important;
+  min-width: var(--tab-drop-line-width) !important;
+  max-width: var(--tab-drop-line-width) !important;
+  border: none !important;
+  border-radius: 999px;
+  background-color: var(--tab-drop-line);
+  opacity: 1;
+  transform: translateX(var(--tab-drop-line-left-offset));
+}
+
+.dockview-theme-memoh .dv-drop-target > .dv-drop-target-dropzone > .dv-drop-target-selection.dv-drop-target-selection-line,
+.dockview-theme-memoh .dv-drop-target-container .dv-drop-target-anchor.dv-drop-target-anchor-line {
+  z-index: calc(var(--dv-overlay-z-index, 999) + 1);
+  border: none !important;
+  border-radius: 999px;
+  background-color: var(--tab-drop-line);
+  opacity: 1;
+  transition: none !important;
+  will-change: auto;
+}
+
+.dockview-theme-memoh .dv-drop-target > .dv-drop-target-dropzone > .dv-drop-target-selection.dv-drop-target-selection-line.dv-drop-target-left,
+.dockview-theme-memoh .dv-drop-target > .dv-drop-target-dropzone > .dv-drop-target-selection.dv-drop-target-selection-line.dv-drop-target-right,
+.dockview-theme-memoh .dv-drop-target-container .dv-drop-target-anchor.dv-drop-target-anchor-line.dv-drop-target-left,
+.dockview-theme-memoh .dv-drop-target-container .dv-drop-target-anchor.dv-drop-target-anchor-line.dv-drop-target-right {
+  top: var(--tab-drop-line-top) !important;
+  width: var(--tab-drop-line-width) !important;
+  height: var(--tab-drop-line-height) !important;
+  min-width: var(--tab-drop-line-width) !important;
+  max-width: var(--tab-drop-line-width) !important;
+  transform: none !important;
+}
+
+.dockview-theme-memoh .dv-drop-target > .dv-drop-target-dropzone > .dv-drop-target-selection.dv-drop-target-selection-line.dv-drop-target-left,
+.dockview-theme-memoh .dv-drop-target-container .dv-drop-target-anchor.dv-drop-target-anchor-line.dv-drop-target-left {
+  transform: translateX(var(--tab-drop-line-left-offset)) !important;
+}
+
+.dockview-theme-memoh .dv-drop-target > .dv-drop-target-dropzone > .dv-drop-target-selection.dv-drop-target-selection-line.dv-drop-target-right,
+.dockview-theme-memoh .dv-drop-target-container .dv-drop-target-anchor.dv-drop-target-anchor-line.dv-drop-target-right {
+  transform: translateX(var(--tab-drop-line-right-offset)) !important;
+}
+
+.dockview-theme-memoh .dv-drop-target > .dv-drop-target-dropzone > .dv-drop-target-selection.dv-drop-target-selection-line.dv-drop-target-top,
+.dockview-theme-memoh .dv-drop-target > .dv-drop-target-dropzone > .dv-drop-target-selection.dv-drop-target-selection-line.dv-drop-target-bottom,
+.dockview-theme-memoh .dv-drop-target-container .dv-drop-target-anchor.dv-drop-target-anchor-line.dv-drop-target-top,
+.dockview-theme-memoh .dv-drop-target-container .dv-drop-target-anchor.dv-drop-target-anchor-line.dv-drop-target-bottom {
+  width: calc(100% - 0.75rem) !important;
+  height: 0.125rem !important;
+  transform: translateX(0.375rem) !important;
+}
+
+.dockview-theme-memoh .dv-drop-target > .dv-drop-target-dropzone > .dv-drop-target-selection.dv-drop-target-selection-line.dv-drop-target-top,
+.dockview-theme-memoh .dv-drop-target-container .dv-drop-target-anchor.dv-drop-target-anchor-line.dv-drop-target-top {
+  transform: translate(0.375rem, -0.0625rem) !important;
+}
+
+.dockview-theme-memoh .dv-drop-target > .dv-drop-target-dropzone > .dv-drop-target-selection.dv-drop-target-selection-line.dv-drop-target-bottom,
+.dockview-theme-memoh .dv-drop-target-container .dv-drop-target-anchor.dv-drop-target-anchor-line.dv-drop-target-bottom {
+  transform: translate(0.375rem, 0.1875rem) !important;
 }
 
 /* ---- Terminal groups: bottom tab strip, file-list chips -------------------
@@ -580,4 +688,33 @@
 
 .dockview-theme-memoh .memoh-terminal-group .dv-pre-actions-container {
   display: none;
+}
+
+/* ---- Drag ghost: the floating chip that follows the pointer ------------------
+ * Memoh patches dockview-core's single-tab ghost builder to create this minimal
+ * title-only chip instead of cloneNode(true) on the docked tab. The docked tab's
+ * DOM carries strip-only structure (active SVG, close slot, dirty dot, lane
+ * padding), and cloning that structure is exactly what made the ghost impossible
+ * to centre cleanly. This rule only paints the independent drag chip. */
+.dv-tab-ghost-drag {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  margin-top: 0 !important;
+  padding: 0 0.875rem;
+  overflow: hidden;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-md) !important;
+  background: var(--surface-editor) !important;
+  box-shadow: var(--shadow-dropdown) !important;
+}
+
+.dv-tab-ghost-drag .dv-tab-ghost-label {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--foreground);
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

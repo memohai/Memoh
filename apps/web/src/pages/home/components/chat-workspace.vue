@@ -150,7 +150,7 @@ const memohTheme: DockviewTheme = {
   name: 'memoh',
   className: 'dockview-theme-memoh',
   gap: 0,
-  dndTabIndicator: 'fill',
+  dndTabIndicator: 'line',
 }
 
 // Closes route through the store guard so dirty files prompt to save instead of

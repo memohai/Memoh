@@ -51,14 +51,17 @@
         />
       </span>
     </div>
-    <!-- Close affordance: hover-only, absolutely positioned so it never reserves a
-         slot or resizes the chip (geometry is identical hovered or not). It paints
-         the chip's own OPAQUE hover colour (--tab-hover-bg) as a left→right fade, so
-         the title dissolves into the chip and nothing stays legible under the
-         button. The fade layer is click-through; only the button takes pointer
-         events. Keyboard focus reveals it for a11y; middle-click closes without it. -->
+    <!-- Close affordance: RESIDENT on the active tab (fills the reserved slot so it
+         never reads as an empty gap), hover/focus-only on inactive tabs. Absolutely
+         positioned so it never reserves a slot or resizes the chip (geometry is
+         identical hovered or not). It paints the chip's own OPAQUE hover colour
+         (--tab-hover-bg) as a left→right fade, so the title dissolves into the chip
+         and nothing stays legible under the button. The fade layer is click-through;
+         only the button takes pointer events. Keyboard focus reveals it for a11y;
+         middle-click closes without it. -->
     <div
-      class="close-fade pointer-events-none absolute right-[var(--tab-close-edge)] z-[2] flex items-center pl-6 pr-0 opacity-0 group-hover/tab:opacity-100 focus-within:opacity-100"
+      class="close-fade pointer-events-none absolute right-[var(--tab-close-edge)] z-[2] flex items-center pl-6 pr-0 group-hover/tab:opacity-100 focus-within:opacity-100"
+      :class="showResidentClose ? 'opacity-100' : 'opacity-0'"
     >
       <!-- No own hover fill: the close affordance is read through the left→right
            fade (which already paints the chip's hover surface) plus the icon
@@ -128,6 +131,13 @@ let pendingShapeFrame = 0
 // Unsaved-changes flag for file panels — read from the store's reactive map, so
 // the dot, the sidebar badge and the close dialog never drift apart.
 const isDirty = computed(() => !!workspaceTabs.fileDirty[panelId])
+// The close slot is reserved on every tab (the right inset), so on an inactive tab
+// at rest it just reads as empty space. The ACTIVE tab fills that slot with a
+// resident X — its close affordance is always there, not hover-only, so the
+// reserved gap never looks accidental. A dirty active tab keeps showing the unsaved
+// dot at rest instead (the X still fades in on hover over the same slot), so the two
+// signals never fight for the slot.
+const showResidentClose = computed(() => isTabSelected.value && !isDirty.value)
 // Ephemeral preview tabs still get replaced in place when another
 // preview-eligible tab opens into the same group (see workspace-tabs store), but
 // the state is no longer surfaced visually — there is no italic or other marker.

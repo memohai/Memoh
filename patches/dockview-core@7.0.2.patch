@@ -1,0 +1,273 @@
+diff --git a/dist/cjs/dockview/components/tab/tab.js b/dist/cjs/dockview/components/tab/tab.js
+index 5ef6b36c6f9122cf6ab20d7ebf7be48713fef42c..70d9b827f8e2c5e196a243b212e618ceef2d9b1c 100644
+--- a/dist/cjs/dockview/components/tab/tab.js
++++ b/dist/cjs/dockview/components/tab/tab.js
+@@ -120,7 +120,7 @@ var Tab = /** @class */ (function (_super) {
+             // HTML5 backend feeds into setDragImage.
+             createGhost: function () { return ({
+                 element: _this._buildGhostElement(),
+-                offsetX: 30,
++                offsetX: 0,
+                 offsetY: -10,
+             }); },
+             onDragStart: function (event) {
+@@ -238,40 +238,20 @@ var Tab = /** @class */ (function (_super) {
+      */
+     Tab.prototype._buildGhostElement = function () {
+         var style = getComputedStyle(this.element);
+-        var newNode = this.element.cloneNode(true);
++        var rect = this.element.getBoundingClientRect();
+         var isVertical = this._direction === 'vertical';
+-        var verticalSkip = new Set([
+-            'writing-mode',
+-            'inline-size',
+-            'block-size',
+-            'min-inline-size',
+-            'min-block-size',
+-            'max-inline-size',
+-            'max-block-size',
+-            'margin-inline',
+-            'margin-inline-start',
+-            'margin-inline-end',
+-            'margin-block',
+-            'margin-block-start',
+-            'margin-block-end',
+-            'padding-inline',
+-            'padding-inline-start',
+-            'padding-inline-end',
+-            'padding-block',
+-            'padding-block-start',
+-            'padding-block-end',
+-        ]);
+-        Array.from(style).forEach(function (key) {
+-            if (isVertical && verticalSkip.has(key)) {
+-                return;
+-            }
+-            newNode.style.setProperty(key, style.getPropertyValue(key), style.getPropertyPriority(key));
+-        });
+-        if (isVertical) {
+-            newNode.style.setProperty('writing-mode', 'horizontal-tb');
+-            newNode.style.setProperty('width', style.height);
+-            newNode.style.setProperty('height', style.width);
+-        }
++        var newNode = document.createElement('div');
++        var label = document.createElement('span');
++        label.className = 'dv-tab-ghost-label';
++        label.textContent = this.panel.title;
++        newNode.appendChild(label);
++        newNode.style.width = 'max-content';
++        newNode.style.maxWidth = "".concat(Math.round(isVertical ? rect.height : rect.width), "px");
++        newNode.style.height = "".concat(Math.round(isVertical ? rect.width : rect.height), "px");
++        newNode.style.fontFamily = style.fontFamily;
++        newNode.style.fontSize = style.fontSize;
++        newNode.style.fontWeight = style.fontWeight;
++        newNode.style.lineHeight = style.lineHeight;
+         newNode.style.position = 'absolute';
+         newNode.classList.add('dv-tab-ghost-drag');
+         return newNode;
+diff --git a/dist/esm/dockview/components/tab/tab.js b/dist/esm/dockview/components/tab/tab.js
+index 36e6dac68b89160a6fae84d06823a9b0b14531fc..407e077e30fd8d7351d8f26ce03b2b3e994dda32 100644
+--- a/dist/esm/dockview/components/tab/tab.js
++++ b/dist/esm/dockview/components/tab/tab.js
+@@ -93,7 +93,7 @@ export class Tab extends CompositeDisposable {
+             // HTML5 backend feeds into setDragImage.
+             createGhost: () => ({
+                 element: this._buildGhostElement(),
+-                offsetX: 30,
++                offsetX: 0,
+                 offsetY: -10,
+             }),
+             onDragStart: (event) => {
+@@ -201,40 +201,20 @@ export class Tab extends CompositeDisposable {
+      */
+     _buildGhostElement() {
+         const style = getComputedStyle(this.element);
+-        const newNode = this.element.cloneNode(true);
++        const rect = this.element.getBoundingClientRect();
+         const isVertical = this._direction === 'vertical';
+-        const verticalSkip = new Set([
+-            'writing-mode',
+-            'inline-size',
+-            'block-size',
+-            'min-inline-size',
+-            'min-block-size',
+-            'max-inline-size',
+-            'max-block-size',
+-            'margin-inline',
+-            'margin-inline-start',
+-            'margin-inline-end',
+-            'margin-block',
+-            'margin-block-start',
+-            'margin-block-end',
+-            'padding-inline',
+-            'padding-inline-start',
+-            'padding-inline-end',
+-            'padding-block',
+-            'padding-block-start',
+-            'padding-block-end',
+-        ]);
+-        Array.from(style).forEach((key) => {
+-            if (isVertical && verticalSkip.has(key)) {
+-                return;
+-            }
+-            newNode.style.setProperty(key, style.getPropertyValue(key), style.getPropertyPriority(key));
+-        });
+-        if (isVertical) {
+-            newNode.style.setProperty('writing-mode', 'horizontal-tb');
+-            newNode.style.setProperty('width', style.height);
+-            newNode.style.setProperty('height', style.width);
+-        }
++        const newNode = document.createElement('div');
++        const label = document.createElement('span');
++        label.className = 'dv-tab-ghost-label';
++        label.textContent = this.panel.title;
++        newNode.appendChild(label);
++        newNode.style.width = 'max-content';
++        newNode.style.maxWidth = `${Math.round(isVertical ? rect.height : rect.width)}px`;
++        newNode.style.height = `${Math.round(isVertical ? rect.width : rect.height)}px`;
++        newNode.style.fontFamily = style.fontFamily;
++        newNode.style.fontSize = style.fontSize;
++        newNode.style.fontWeight = style.fontWeight;
++        newNode.style.lineHeight = style.lineHeight;
+         newNode.style.position = 'absolute';
+         newNode.classList.add('dv-tab-ghost-drag');
+         return newNode;
+diff --git a/dist/package/main.cjs.js b/dist/package/main.cjs.js
+index 3fcff2589d724e46832c1105c674aaf69f37f5b2..8f2aa335fa8e28687f82ab214212c6e7570fd2ae 100644
+--- a/dist/package/main.cjs.js
++++ b/dist/package/main.cjs.js
+@@ -6274,7 +6274,7 @@ class Tab extends CompositeDisposable {
+             // HTML5 backend feeds into setDragImage.
+             createGhost: () => ({
+                 element: this._buildGhostElement(),
+-                offsetX: 30,
++                offsetX: 0,
+                 offsetY: -10,
+             }),
+             onDragStart: (event) => {
+@@ -6382,40 +6382,20 @@ class Tab extends CompositeDisposable {
+      */
+     _buildGhostElement() {
+         const style = getComputedStyle(this.element);
+-        const newNode = this.element.cloneNode(true);
++        const rect = this.element.getBoundingClientRect();
+         const isVertical = this._direction === 'vertical';
+-        const verticalSkip = new Set([
+-            'writing-mode',
+-            'inline-size',
+-            'block-size',
+-            'min-inline-size',
+-            'min-block-size',
+-            'max-inline-size',
+-            'max-block-size',
+-            'margin-inline',
+-            'margin-inline-start',
+-            'margin-inline-end',
+-            'margin-block',
+-            'margin-block-start',
+-            'margin-block-end',
+-            'padding-inline',
+-            'padding-inline-start',
+-            'padding-inline-end',
+-            'padding-block',
+-            'padding-block-start',
+-            'padding-block-end',
+-        ]);
+-        Array.from(style).forEach((key) => {
+-            if (isVertical && verticalSkip.has(key)) {
+-                return;
+-            }
+-            newNode.style.setProperty(key, style.getPropertyValue(key), style.getPropertyPriority(key));
+-        });
+-        if (isVertical) {
+-            newNode.style.setProperty('writing-mode', 'horizontal-tb');
+-            newNode.style.setProperty('width', style.height);
+-            newNode.style.setProperty('height', style.width);
+-        }
++        const newNode = document.createElement('div');
++        const label = document.createElement('span');
++        label.className = 'dv-tab-ghost-label';
++        label.textContent = this.panel.title;
++        newNode.appendChild(label);
++        newNode.style.width = 'max-content';
++        newNode.style.maxWidth = `${Math.round(isVertical ? rect.height : rect.width)}px`;
++        newNode.style.height = `${Math.round(isVertical ? rect.width : rect.height)}px`;
++        newNode.style.fontFamily = style.fontFamily;
++        newNode.style.fontSize = style.fontSize;
++        newNode.style.fontWeight = style.fontWeight;
++        newNode.style.lineHeight = style.lineHeight;
+         newNode.style.position = 'absolute';
+         newNode.classList.add('dv-tab-ghost-drag');
+         return newNode;
+diff --git a/dist/package/main.esm.mjs b/dist/package/main.esm.mjs
+index 47d091027d89b9da241bdbc53d72f32c1e173719..9a3d2cb837695a7955db9c073f1ca2a86b730235 100644
+--- a/dist/package/main.esm.mjs
++++ b/dist/package/main.esm.mjs
+@@ -6268,9 +6268,12 @@ class Tab extends CompositeDisposable {
+             // 30/-10 matches the HTML5 setDragImage offset that has been
+             // shipped for years; pointer backend wraps in PointerGhost,
+             // HTML5 backend feeds into setDragImage.
++            // Memoh patch: align the single-tab drag chip with the pointer
++            // horizontally. dockview-core hard-codes this value and does not expose
++            // a single-tab ghost offset option.
+             createGhost: () => ({
+                 element: this._buildGhostElement(),
+-                offsetX: 30,
++                offsetX: 0,
+                 offsetY: -10,
+             }),
+             onDragStart: (event) => {
+@@ -6378,40 +6381,20 @@ class Tab extends CompositeDisposable {
+      */
+     _buildGhostElement() {
+         const style = getComputedStyle(this.element);
+-        const newNode = this.element.cloneNode(true);
++        const rect = this.element.getBoundingClientRect();
+         const isVertical = this._direction === 'vertical';
+-        const verticalSkip = new Set([
+-            'writing-mode',
+-            'inline-size',
+-            'block-size',
+-            'min-inline-size',
+-            'min-block-size',
+-            'max-inline-size',
+-            'max-block-size',
+-            'margin-inline',
+-            'margin-inline-start',
+-            'margin-inline-end',
+-            'margin-block',
+-            'margin-block-start',
+-            'margin-block-end',
+-            'padding-inline',
+-            'padding-inline-start',
+-            'padding-inline-end',
+-            'padding-block',
+-            'padding-block-start',
+-            'padding-block-end',
+-        ]);
+-        Array.from(style).forEach((key) => {
+-            if (isVertical && verticalSkip.has(key)) {
+-                return;
+-            }
+-            newNode.style.setProperty(key, style.getPropertyValue(key), style.getPropertyPriority(key));
+-        });
+-        if (isVertical) {
+-            newNode.style.setProperty('writing-mode', 'horizontal-tb');
+-            newNode.style.setProperty('width', style.height);
+-            newNode.style.setProperty('height', style.width);
+-        }
++        const newNode = document.createElement('div');
++        const label = document.createElement('span');
++        label.className = 'dv-tab-ghost-label';
++        label.textContent = this.panel.title;
++        newNode.appendChild(label);
++        newNode.style.width = 'max-content';
++        newNode.style.maxWidth = `${Math.round(isVertical ? rect.height : rect.width)}px`;
++        newNode.style.height = `${Math.round(isVertical ? rect.width : rect.height)}px`;
++        newNode.style.fontFamily = style.fontFamily;
++        newNode.style.fontSize = style.fontSize;
++        newNode.style.fontWeight = style.fontWeight;
++        newNode.style.lineHeight = style.lineHeight;
+         newNode.style.position = 'absolute';
+         newNode.classList.add('dv-tab-ghost-drag');
+         return newNode;
