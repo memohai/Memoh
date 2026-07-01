@@ -30,6 +30,18 @@ client_secret = "${GMAIL_OAUTH_CLIENT_SECRET}"
 redirect_uri = ""
 allowed_scopes = ["https://mail.google.com/"]
 
+[clients.google]
+display_name = "Google Workspace"
+client_id = "${GOOGLE_OAUTH_CLIENT_ID}"
+client_secret = "${GOOGLE_OAUTH_CLIENT_SECRET}"
+redirect_uri = ""
+allowed_scopes = [
+  "https://www.googleapis.com/auth/drive",
+  "https://www.googleapis.com/auth/calendar",
+  "https://www.googleapis.com/auth/gmail.modify",
+  "https://www.googleapis.com/auth/gmail.compose",
+]
+
 [clients.hubspot]
 display_name = "HubSpot"
 client_id = "${HUBSPOT_OAUTH_CLIENT_ID}"
@@ -38,3 +50,59 @@ authorization_endpoint = "https://mcp.hubspot.com/oauth/authorize/user"
 token_endpoint = "https://mcp.hubspot.com/oauth/v3/token"
 redirect_uri = ""
 allowed_scopes = []
+
+[clients.slack]
+display_name = "Slack"
+client_id = "${SLACK_OAUTH_CLIENT_ID}"
+client_secret = "${SLACK_OAUTH_CLIENT_SECRET}"
+redirect_uri = ""
+allowed_scopes = [
+  "search:read.public",
+  "search:read.private",
+  "search:read.mpim",
+  "search:read.im",
+  "search:read.files",
+  "files:read",
+  "emoji:read",
+  "search:read.users",
+  "channels:history",
+  "groups:history",
+  "mpim:history",
+  "im:history",
+  "channels:read",
+  "groups:read",
+  "mpim:read",
+  "users:read",
+  "users:read.email",
+]
+
+[clients.figma]
+display_name = "Figma"
+client_id = "${FIGMA_OAUTH_CLIENT_ID}"
+client_secret = "${FIGMA_OAUTH_CLIENT_SECRET}"
+redirect_uri = ""
+allowed_scopes = ["mcp:connect"]
+
+[clients.asana]
+display_name = "Asana"
+client_id = "${ASANA_OAUTH_CLIENT_ID}"
+client_secret = "${ASANA_OAUTH_CLIENT_SECRET}"
+redirect_uri = ""
+allowed_scopes = []
+
+[clients.microsoft]
+display_name = "Microsoft"
+client_id = "${MICROSOFT_OAUTH_CLIENT_ID}"
+client_secret = "${MICROSOFT_OAUTH_CLIENT_SECRET}"
+redirect_uri = ""
+allowed_scopes = [
+  "MCP.User.Read.All",
+  "MCP.Group.Read.All",
+  "MCP.GroupMember.Read.All",
+  "MCP.Application.Read.All",
+  "MCP.Device.Read.All",
+  "MCP.Organization.Read.All",
+  "MCP.Reports.Read.All",
+  "MCP.AuditLog.Read.All",
+  "MCP.DirectoryRecommendations.Read.All",
+]
