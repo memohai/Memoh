@@ -7,7 +7,9 @@ import (
 )
 
 func TestProvideRuntimeConfig_DefaultTimezone(t *testing.T) {
-	t.Parallel()
+	// Isolate the ambient TZ so a developer's shell TZ does not override the
+	// configured default. Can't use t.Parallel() alongside t.Setenv.
+	t.Setenv("TZ", "")
 
 	cfg := config.Config{
 		Auth: config.AuthConfig{
