@@ -40,27 +40,35 @@ bundler may resolve:
 The multi-panel/group drag ghosts keep upstream's `offsetX: 30` and default
 renderers.
 
-A second, independent change moves the "+" (left-actions) container INTO
-`.dv-tabs-container` at construction time — `this.tabs.element.appendChild(
-this.leftActionsContainer)` instead of `this._element.appendChild(...)` — so the
-"+" rides with the tabs and stays flush after the last tab instead of being shoved
-to the strip's far right by the tab strip's `flex:1 1 auto` grow. The same move is
-applied to all four entries above plus `dist/{esm,cjs}/dockview/components/titlebar/
-tabsContainer.js`. The tab strip CSS in `apps/web/src/styles/dockview-theme.css`
-depends on this DOM change: the "+" is the container's first DOM child (ordered
-visually last via `order:1`), and its lead divider (`::before`) sits on the seam at
-the last tab's right edge. The inter-tab seam and first-tab hide rules there use
-adjacency selectors (not `:first-child`) precisely because this patch makes the "+"
-the first DOM child.
+A second, independent change moves BOTH the "+" (left-actions) container AND the
+void (header empty-space drop region) INTO `.dv-tabs-container` at construction
+time — `this.tabs.element.appendChild(this.leftActionsContainer)` and
+`this.tabs.element.appendChild(this.voidContainer.element)` instead of
+`this._element.appendChild(...)`. The tab strip grows (`flex:1 1 auto`) to fill the
+header; with the "+" and void inside it, the strip's children are `[+, tab1..tabN,
+void]`. The "+" stays flush after the last tab, and the void (flex-grow:1) claims
+all the strip's grown slack — so the whole blank stretch to the right of the last
+tab is the droppable void (dockview paints its default drop wash over it), not a
+dead non-droppable gap. Before the move that slack belonged to the tabs-container
+itself and the void was pinned to a sliver at the far right, so dropping a tab on
+the blank header area gave no feedback. The same move is applied to all four
+entries above plus `dist/{esm,cjs}/dockview/components/titlebar/tabsContainer.js`.
+
+The tab strip CSS in `apps/web/src/styles/dockview-theme.css` depends on this DOM
+change: the "+" and void are the container's first DOM children (both appended
+before any tab), ordered visually last via `order:1`/`order:2`; the "+"'s lead
+divider (`::before`) sits on the seam at the last tab's right edge. The inter-tab
+seam and first-tab hide rules there use adjacency selectors (not `:first-child`)
+precisely because this patch makes the "+" the first DOM child.
 
 Remove when:
 
 `dockview-core` exposes single-tab drag ghost customization/offset options, or
 upstream stops cloning the docked tab for the single-tab ghost and no longer
-bleeds the chip left of the pointer; and dockview-core lets the "+" actions
-container ride with the tabs (or Memoh stops growing the tab strip with
-`flex:1 1 auto`), so the relocate patch is no longer needed to keep the "+"
-flush after the last tab.
+bleeds the chip left of the pointer; and dockview-core lets the "+" actions and
+void ride with the tabs (or Memoh stops growing the tab strip with `flex:1 1
+auto`), so the relocate patch is no longer needed to keep the "+" flush after the
+last tab and the void spanning the blank header stretch.
 
 Upgrade checklist:
 

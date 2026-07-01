@@ -66,18 +66,20 @@ index 5ef6b36c6f9122cf6ab20d7ebf7be48713fef42c..af028bfead0413a5578a30af3f8016da
          newNode.classList.add('dv-tab-ghost-drag');
          return newNode;
 diff --git a/dist/cjs/dockview/components/titlebar/tabsContainer.js b/dist/cjs/dockview/components/titlebar/tabsContainer.js
-index fc86b4df69c9da5a4c8c554a61865dd8bec38b84..0d37da98817990dac066a7d1bf97ff59ed4e174c 100644
+index fc86b4df69c9da5a4c8c554a61865dd8bec38b84..3b330387a13ba4c5e48ace97e2bad6e501a391e9 100644
 --- a/dist/cjs/dockview/components/titlebar/tabsContainer.js
 +++ b/dist/cjs/dockview/components/titlebar/tabsContainer.js
-@@ -70,7 +70,7 @@ var TabsContainer = /** @class */ (function (_super) {
+@@ -70,8 +70,8 @@ var TabsContainer = /** @class */ (function (_super) {
          _this.tabs.voidContainer = _this.voidContainer.element;
          _this._element.appendChild(_this.preActionsContainer);
          _this._element.appendChild(_this.tabs.element);
 -        _this._element.appendChild(_this.leftActionsContainer);
+-        _this._element.appendChild(_this.voidContainer.element);
 +        _this.tabs.element.appendChild(_this.leftActionsContainer);
-         _this._element.appendChild(_this.voidContainer.element);
++        _this.tabs.element.appendChild(_this.voidContainer.element);
          _this._element.appendChild(_this.rightActionsContainer);
          _this.tabs.setExtendedDropZone(_this._element);
+         _this.addDisposables(_this.tabs.onDrop(function (e) { return _this._onDrop.fire(e); }), _this.tabs.onWillShowOverlay(function (e) { return _this._onWillShowOverlay.fire(e); }), accessor.onDidOptionsChange(function () {
 diff --git a/dist/esm/dockview/components/tab/tab.js b/dist/esm/dockview/components/tab/tab.js
 index 36e6dac68b89160a6fae84d06823a9b0b14531fc..f80c40358e239b95eda072d42d374f968b0e9f5c 100644
 --- a/dist/esm/dockview/components/tab/tab.js
@@ -146,20 +148,22 @@ index 36e6dac68b89160a6fae84d06823a9b0b14531fc..f80c40358e239b95eda072d42d374f96
          newNode.classList.add('dv-tab-ghost-drag');
          return newNode;
 diff --git a/dist/esm/dockview/components/titlebar/tabsContainer.js b/dist/esm/dockview/components/titlebar/tabsContainer.js
-index eb22fffb3a2482d27dfb4cc99abbbbef93e43d8a..a88b8bc384c63791aa5d821edca4de87354a3e59 100644
+index eb22fffb3a2482d27dfb4cc99abbbbef93e43d8a..c288c898c3c3c0e44165ce0e290542464d68c893 100644
 --- a/dist/esm/dockview/components/titlebar/tabsContainer.js
 +++ b/dist/esm/dockview/components/titlebar/tabsContainer.js
-@@ -75,7 +75,7 @@ export class TabsContainer extends CompositeDisposable {
+@@ -75,8 +75,8 @@ export class TabsContainer extends CompositeDisposable {
          this.tabs.voidContainer = this.voidContainer.element;
          this._element.appendChild(this.preActionsContainer);
          this._element.appendChild(this.tabs.element);
 -        this._element.appendChild(this.leftActionsContainer);
+-        this._element.appendChild(this.voidContainer.element);
 +        this.tabs.element.appendChild(this.leftActionsContainer);
-         this._element.appendChild(this.voidContainer.element);
++        this.tabs.element.appendChild(this.voidContainer.element);
          this._element.appendChild(this.rightActionsContainer);
          this.tabs.setExtendedDropZone(this._element);
+         this.addDisposables(this.tabs.onDrop((e) => this._onDrop.fire(e)), this.tabs.onWillShowOverlay((e) => this._onWillShowOverlay.fire(e)), accessor.onDidOptionsChange(() => {
 diff --git a/dist/package/main.cjs.js b/dist/package/main.cjs.js
-index 3fcff2589d724e46832c1105c674aaf69f37f5b2..a285400707803a38537a8e1d4de0726a7fc0a5c6 100644
+index 3fcff2589d724e46832c1105c674aaf69f37f5b2..c68038c5230f242f13fc21bbf14fbaa7e421c3d0 100644
 --- a/dist/package/main.cjs.js
 +++ b/dist/package/main.cjs.js
 @@ -6274,7 +6274,7 @@ class Tab extends CompositeDisposable {
@@ -225,17 +229,19 @@ index 3fcff2589d724e46832c1105c674aaf69f37f5b2..a285400707803a38537a8e1d4de0726a
          newNode.style.position = 'absolute';
          newNode.classList.add('dv-tab-ghost-drag');
          return newNode;
-@@ -9728,7 +9708,7 @@ class TabsContainer extends CompositeDisposable {
+@@ -9728,8 +9708,8 @@ class TabsContainer extends CompositeDisposable {
          this.tabs.voidContainer = this.voidContainer.element;
          this._element.appendChild(this.preActionsContainer);
          this._element.appendChild(this.tabs.element);
 -        this._element.appendChild(this.leftActionsContainer);
+-        this._element.appendChild(this.voidContainer.element);
 +        this.tabs.element.appendChild(this.leftActionsContainer);
-         this._element.appendChild(this.voidContainer.element);
++        this.tabs.element.appendChild(this.voidContainer.element);
          this._element.appendChild(this.rightActionsContainer);
          this.tabs.setExtendedDropZone(this._element);
+         this.addDisposables(this.tabs.onDrop((e) => this._onDrop.fire(e)), this.tabs.onWillShowOverlay((e) => this._onWillShowOverlay.fire(e)), accessor.onDidOptionsChange(() => {
 diff --git a/dist/package/main.esm.mjs b/dist/package/main.esm.mjs
-index 47d091027d89b9da241bdbc53d72f32c1e173719..8b67dfa14b38fc62659c1ae5c86e5543835627f2 100644
+index 47d091027d89b9da241bdbc53d72f32c1e173719..2e121eae968abea7b58f1a9d376f1e7e1fc07bb8 100644
 --- a/dist/package/main.esm.mjs
 +++ b/dist/package/main.esm.mjs
 @@ -6268,9 +6268,12 @@ class Tab extends CompositeDisposable {
@@ -306,12 +312,14 @@ index 47d091027d89b9da241bdbc53d72f32c1e173719..8b67dfa14b38fc62659c1ae5c86e5543
          newNode.style.position = 'absolute';
          newNode.classList.add('dv-tab-ghost-drag');
          return newNode;
-@@ -9724,7 +9707,7 @@ class TabsContainer extends CompositeDisposable {
+@@ -9724,8 +9707,8 @@ class TabsContainer extends CompositeDisposable {
          this.tabs.voidContainer = this.voidContainer.element;
          this._element.appendChild(this.preActionsContainer);
          this._element.appendChild(this.tabs.element);
 -        this._element.appendChild(this.leftActionsContainer);
+-        this._element.appendChild(this.voidContainer.element);
 +        this.tabs.element.appendChild(this.leftActionsContainer);
-         this._element.appendChild(this.voidContainer.element);
++        this.tabs.element.appendChild(this.voidContainer.element);
          this._element.appendChild(this.rightActionsContainer);
          this.tabs.setExtendedDropZone(this._element);
+         this.addDisposables(this.tabs.onDrop((e) => this._onDrop.fire(e)), this.tabs.onWillShowOverlay((e) => this._onWillShowOverlay.fire(e)), accessor.onDidOptionsChange(() => {

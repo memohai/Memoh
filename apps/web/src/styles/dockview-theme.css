@@ -44,8 +44,14 @@
   --dv-sash-color: transparent;
   --dv-active-sash-color: var(--ring);
 
-  --dv-drag-over-background-color: var(--sidebar-accent);
-  --dv-drag-over-border-color: var(--ring);
+  /* Drop indicator fill: dockview's grey, toned down from the base 0.5 opacity
+   * (which reads too dark on Memoh's chrome). The base theme defines this per
+   * .dockview-theme-dark/light, which .dockview-theme-memoh does NOT extend, so
+   * it must be re-declared here. The void/pane centre drop is rendered entirely
+   * by dockview's default anchor/selection styles using this colour — no custom
+   * override below. Only the tab-to-tab insertion line is themed (brand colour). */
+  --dv-drag-over-background-color: rgba(83, 89, 93, 0.3);
+  --dv-drag-over-border-color: transparent;
 
   --dv-icon-hover-background-color: var(--ui-hover);
   --dv-scrollbar-background-color: var(--border);
@@ -181,13 +187,22 @@
   /* Trailing room the label must clear: it stops a hair before the glyph's left
    * edge (glyph right is --tab-pad-inline, glyph is --tab-close-glyph wide). */
   --tab-close-reserve: calc(var(--tab-pad-inline) + var(--tab-close-glyph) + 0.125rem);
-  --tab-drop-line: var(--brand);
+  /* Drop insertion line: a SOFTENED brand — the raw --brand (chroma ~0.22) reads as
+   * a loud violet stripe for what is only a transient "insert here" hint. Muting the
+   * chroma toward the chrome keeps it recognisably brand-tinted without shouting.
+   * color-mix over the chrome surface drops saturation and lightens it a touch; the
+   * line is a thin caret, so it stays legible. Not --brand directly (that stays for
+   * real brand accents like buttons). */
+  --tab-drop-line: color-mix(in oklab, var(--brand) 55%, var(--surface-chrome));
   --tab-drop-line-width: 0.125rem;
   --tab-drop-line-height: 1.25rem;
   --tab-drop-line-top: calc(50% - var(--tab-inset) / 2 - var(--tab-drop-line-height) / 2);
-  --tab-void-drop-line-top: calc(50% - var(--tab-drop-line-height) / 2);
   --tab-drop-line-left-offset: calc(-1 * var(--tab-drop-line-width) / 2);
   --tab-drop-line-right-offset: calc(4px - var(--tab-drop-line-width) / 2);
+  /* How long the drop caret glides from one seam to the next as the cursor moves
+   * between tabs. The v7 anchor is a single reused element, so this is a real
+   * position transition, not a fade. One knob for the whole animation. */
+  --tab-drop-line-slide: 120ms;
   /* DIVIDERS — one stroke, one width, one HEIGHT for both the inter-tab seam and
    * the action-bar lead. Height = the close/“+” glyph height so the bar reads the
    * same extent as the icons it sits between (NOT taller — a taller bar reads as
@@ -277,7 +292,7 @@
   z-index: calc(var(--dv-overlay-z-index, 999) + 1);
 }
 
-.dockview-theme-memoh .dv-tab:not(.dv-active-tab)::before {
+.dockview-theme-memoh .dv-tab:not(.memoh-tab-active)::before {
   content: '';
   position: absolute;
   /* Box coords: the tab box is already top-offset by margin-top:--tab-inset, so
@@ -298,7 +313,7 @@
   pointer-events: none;
 }
 
-.dockview-theme-memoh .dv-tab:not(.dv-active-tab):hover::before {
+.dockview-theme-memoh .dv-tab:not(.memoh-tab-active):hover::before {
   opacity: 1;
   transition: none;
 }
@@ -335,8 +350,8 @@
  * left edge. The adjacency form is DOM-order-independent: it just asks "is there a
  * tab to my left", which is exactly the seam's presence condition. */
 .dockview-theme-memoh .dv-tab:not(.dv-tab + .dv-tab)::after,
-.dockview-theme-memoh .dv-tab.dv-active-tab::after,
-.dockview-theme-memoh .dv-tab.dv-active-tab + .dv-tab::after {
+.dockview-theme-memoh .dv-tab.memoh-tab-active::after,
+.dockview-theme-memoh .dv-tab.memoh-tab-active + .dv-tab::after {
   --tab-divider: transparent;
 }
 
@@ -348,39 +363,30 @@
   padding-inline: var(--tab-edge-pad);
 }
 
-/* The tab strip GROWS to claim the available header width (flex:1 1 auto), so only
- * the real overflow goes to the void. This is the fix for the two-tabs-crushed bug:
- * with the strip at flex:0 1 ... (grow:0) its basis:auto sized to the tabs' natural
- * (text) width, not N × rest-width, so the void (flex-grow:1) grabbed the slack and
- * the tabs, floored at min-width:0, collapsed even when the strip was nowhere near
- * full. Growing the strip gives it the real available width; the tabs hold rest
- * width while there's room and shrink together (no scroll) once they'd overflow.
+/* The tab strip GROWS to claim the available header width (flex:1 1 auto). The
+ * patch moves BOTH the "+" and the void inside it, so the strip's own children are
+ * [+, tab1..tabN, void]; the void (flex-grow:1) eats all the grown slack. Tabs hold
+ * their flex-basis (--tab-rest-width) while there's room and shrink together (no
+ * scroll) only once they'd overflow — the void, not the tabs, absorbs the strip's
+ * extra width. This is the fix for both the two-tabs-crushed bug (a grow:0 strip
+ * sized to the tabs' natural text width, letting an outside void grab the slack and
+ * collapse min-width:0 tabs) AND the dead-gap bug (the blank stretch right of the
+ * last tab used to belong to this container with no drop target; now it's the void).
  *
  * scrollbars:'native' (set in chat-workspace.vue) makes .dv-tabs-container the
  * header's direct flex child — there's no .dv-scrollable layer — so this rule
- * targets it directly. The dockview-core patch moves the "+" (left-actions) INTO
- * .dv-tabs-container, so it rides with the tabs and stays flush after the last one
- * instead of being shoved to the far right by the strip's grow. overflow:visible
- * drops upstream's scroll clip (disableTabsOverflowList is on, no scroll to clip). */
+ * targets it directly. overflow:visible drops upstream's scroll clip
+ * (disableTabsOverflowList is on, no scroll to clip). */
 .dockview-theme-memoh .dv-tabs-and-actions-container > .dv-tabs-container {
   flex: 1 1 auto;
   min-width: 0;
   overflow: visible;
 }
 
-/* Single tab locks to the rest width and does NOT shrink. Shrinking is a
- * multi-tab affordance — when several tabs fill the strip they narrow together.
- * A lone tab has nothing to make room for, so it must hold --tab-rest-width even
- * with a short title (that IS the rest width's purpose); the empty void fills the
- * rest of the strip. dockview adds .dv-single-tab to the header only while exactly
- * one tab is present, so this reverts to the shrinking rule the moment a second
- * tab opens. flex-shrink:0 + basis lets the tabs-container (basis:auto) hug it and
- * the void (flex-grow:1) claim the slack, instead of the tab being compressed.
- * Terminal chips are excluded — they keep their own narrower file-row measure. */
-.dockview-theme-memoh .dv-tabs-and-actions-container.dv-single-tab .dv-tab:not(:has(.memoh-terminal-tab)) {
-  flex: 0 0 var(--tab-rest-width);
-  min-width: var(--tab-rest-width);
-}
+/* No single-tab special case is needed: the void (moved inside the tabs-container
+ * by the patch, flex-grow:1) claims all the grown slack, so a lone tab holds its
+ * flex-basis (--tab-rest-width) instead of being stretched or compressed — the
+ * same mechanism that keeps multi-tab widths at rest until the strip is full. */
 
 /* No native/dockview horizontal scrollbar on the tab row (it clashed with the
  * hairline), and no edge shadow either. Editor tabs have no min-width floor, so the
@@ -400,7 +406,7 @@
  * keeps the same box metrics as inactive tabs, but it no longer paints its own
  * fill/border/foot pieces; otherwise separate raster models meet at the lower
  * turns and produce doubled pixels. */
-.dockview-theme-memoh .dv-tab.dv-active-tab {
+.dockview-theme-memoh .dv-tab.memoh-tab-active {
   background-color: transparent !important;
   /* The active tab never takes the hover lift, so its blot-out colour is the
    * editor surface it already wears. */
@@ -410,16 +416,16 @@
 /* Hover on an UNSELECTED tab: the tab box stays transparent at rest; the
  * chrome-hover fill is painted by ::before as a rounded rectangle centred on the
  * label. Text does not move. */
-.dockview-theme-memoh .dv-tab:not(.dv-active-tab):hover {
+.dockview-theme-memoh .dv-tab:not(.memoh-tab-active):hover {
   background-color: transparent !important;
 }
 
 /* Active tab paint is owned by the SVG shape in workspace-tab.vue (fill + 1px
  * stroke crown/foot). dockview's built-in `:not(:first-child)::before` divider also
  * targets the active tab as a transparent no-op at z-5; kill it so nothing can sit
- * over the SVG. (Our hover-pill ::before is `:not(.dv-active-tab)`, so it never
+ * over the SVG. (Our hover-pill ::before is `:not(.memoh-tab-active)`, so it never
  * applies here — this only silences dockview's own pseudo.) */
-.dockview-theme-memoh .dv-tab.dv-active-tab::before {
+.dockview-theme-memoh .dv-tab.memoh-tab-active::before {
   content: none;
 }
 
@@ -440,10 +446,17 @@
 
 /* The void is dockview's droppable empty-header region — it owns the
  * `header_space` drop target, so a tab dragged onto the blank part of a header
- * lands in that group. It MUST grow to have any area (dockview only binds the
- * HTML5 dragover to the tab strip + this void, not to the actions slots). It
- * fills from just after the "+" cluster (leftActions) to the far-right Preview
- * (rightActions).
+ * lands in that group, and dockview paints its default drop wash over it.
+ *
+ * A dockview-core patch moves this container INTO .dv-tabs-container, after the
+ * "+" (both are appended at construction, so in DOM order they land before the
+ * tabs; order:1 on "+" and order:2 here sort them visually AFTER every tab). This
+ * is what makes the whole blank stretch to the right of the last tab a real drop
+ * zone: the tabs-container GROWS to fill the header (flex:1 1 auto), and the void
+ * (flex-grow:1) claims all of that grown slack, so it spans flush from just after
+ * the "+" to the far-right actions. Before the move the same slack belonged to the
+ * tabs-container itself (a dead non-droppable gap) and the void was pinned to a
+ * sliver at the far right — a tab dropped on the blank area got no feedback.
  *
  * On the desktop shell the same blank strip doubles as the window-drag handle,
  * so we claim it with -webkit-app-region: drag. While a panel/group is being
@@ -452,7 +465,14 @@
  * this the window-move region would swallow them. (-webkit-app-region is a no-op
  * on web, where the void is simply always droppable + the group-drag handle.) */
 .dockview-theme-memoh .dv-void-container {
+  order: 2;
   flex: 1 1 auto;
+  /* The tabs-container carries padding-inline:--tab-edge-pad (active-flare geometry
+   * protection for the tabs). The void inherits that as an 8px non-droppable gap on
+   * its right, before the far-right actions. Cancel it so the void's drop zone (and
+   * dockview's drop wash) reaches flush to the actions — the whole blank stretch is
+   * droppable, no dead sliver. */
+  margin-right: calc(-1 * var(--tab-edge-pad));
   -webkit-app-region: drag;
 }
 .memoh-dock-dragging .dockview-theme-memoh .dv-void-container {
@@ -506,13 +526,13 @@
 /* Same rule as an inter-tab seam: when the LAST tab is active, its side-stroke is
  * the boundary, so the lead divider hides. padding-left stays, so the "+" does NOT
  * jump left when you select the last tab. The condition is "the active tab has no
- * tab to its right" — expressed as :has(.dv-tab.dv-active-tab NOT followed by
+ * tab to its right" — expressed as :has(.dv-tab.memoh-tab-active NOT followed by
  * another .dv-tab) — which is DOM-order-independent and does not rely on
  * :last-child (the patch appends the "+" as the first child, and dockview may also
  * append non-tab children, so :last-child is fragile here). A plain sibling
  * selector can't bridge the "+" and the last tab either, since the "+" sits at the
  * FRONT of the container, not after the last tab — so :has() is the only reach. */
-.dockview-theme-memoh .dv-tabs-and-actions-container:has(.dv-tab.dv-active-tab):not(:has(.dv-tab.dv-active-tab ~ .dv-tab)) .dv-left-actions-container::before {
+.dockview-theme-memoh .dv-tabs-and-actions-container:has(.dv-tab.memoh-tab-active):not(:has(.dv-tab.memoh-tab-active ~ .dv-tab)) .dv-left-actions-container::before {
   content: none;
 }
 
@@ -568,27 +588,15 @@
   outline: none !important;
 }
 
-/* Drop affordance: content-pane edge drops keep dockview's broad preview fill
- * (the split-right half-panel in screenshots). Header/tab-bar drops are insertion
- * decisions, so they should read as a short insertion caret between tabs. Dockview
- * writes those line targets inline as 4px blocks inside the target edge. The
- * theme trims them to 2px and re-centres each side on the actual seam so the
- * previous tab's right target and the next tab's left target collapse to one
- * visual line instead of twitching between two near-neighbour pixels. */
-.dockview-theme-memoh .dv-void-container.dv-drop-target > .dv-drop-target-dropzone > .dv-drop-target-selection.dv-drop-target-center {
-  top: var(--tab-void-drop-line-top) !important;
-  left: 0 !important;
-  width: var(--tab-drop-line-width) !important;
-  height: var(--tab-drop-line-height) !important;
-  min-width: var(--tab-drop-line-width) !important;
-  max-width: var(--tab-drop-line-width) !important;
-  border: none !important;
-  border-radius: 999px;
-  background-color: var(--tab-drop-line);
-  opacity: 1;
-  transform: translateX(var(--tab-drop-line-left-offset));
-}
+/* Header void / pane centre drop: NO custom override — let dockview render its own
+ * default broad translucent wash (--dv-drag-over-background-color, a grey
+ * rgba(83,89,93,0.5) by default) over the whole target. Only the tab-to-tab
+ * insertion caret below is themed (brand colour). */
 
+/* Insertion line (tab-to-tab): both dockview's legacy in-place selection DOM and
+ * the v7 anchor DOM paint a thin brand-coloured caret at the seam between two tabs
+ * (left/right of the target tab). This is the ONLY brand-coloured drop affordance:
+ * it marks a precise insertion index, not a whole-target accept. */
 .dockview-theme-memoh .dv-drop-target > .dv-drop-target-dropzone > .dv-drop-target-selection.dv-drop-target-selection-line,
 .dockview-theme-memoh .dv-drop-target-container .dv-drop-target-anchor.dv-drop-target-anchor-line {
   z-index: calc(var(--dv-overlay-z-index, 999) + 1);
@@ -596,9 +604,43 @@
   border-radius: 999px;
   background-color: var(--tab-drop-line);
   opacity: 1;
-  transition: none !important;
   will-change: auto;
 }
+
+/* Legacy in-place selection DOM is re-created on every hovered target, so a
+ * transition would just fade a brand-new node in — keep it instant. */
+.dockview-theme-memoh .dv-drop-target > .dv-drop-target-dropzone > .dv-drop-target-selection.dv-drop-target-selection-line {
+  transition: none !important;
+}
+
+/* The v7 anchor is a SINGLE reused element whose position dockview rewrites as the
+ * cursor moves between tabs, so animating it makes the caret GLIDE from seam to
+ * seam instead of blinking out and redrawing (the "moves, not re-created" feel).
+ * We animate left/top/width AND transform: the theme nudges the caret onto the seam
+ * with transform: translateX(offset), and dockview swaps the left/right class as the
+ * cursor crosses a tab midpoint, so transform must transition too or that half-step
+ * would jump. opacity stays un-transitioned so appear/disappear is instant. */
+.dockview-theme-memoh .dv-drop-target-container .dv-drop-target-anchor.dv-drop-target-anchor-line {
+  transition:
+    left var(--tab-drop-line-slide) ease-out,
+    top var(--tab-drop-line-slide) ease-out,
+    width var(--tab-drop-line-slide) ease-out,
+    transform var(--tab-drop-line-slide) ease-out !important;
+}
+
+/* Cross-group jump: dockview marks the anchor .dv-drop-target-anchor-container-changed
+ * for one frame when the drop moves to a DIFFERENT group, so the caret should SNAP to
+ * the new group instead of gliding across the gap between groups. Upstream ships this
+ * snap as an opacity:0 flash, but only under .dockview-theme-dark/light/etc. —
+ * .dockview-theme-memoh does not extend those, so without this rule the glide
+ * transition above would animate the caret flying across the layout. Kill the
+ * transition for that one marked frame so the move is instant. */
+.dockview-theme-memoh .dv-drop-target-container .dv-drop-target-anchor.dv-drop-target-anchor-container-changed {
+  transition: none !important;
+}
+
+/* v7 anchor centre drop: also rendered by dockview's default anchor style — no
+ * override (see the void comment above). */
 
 .dockview-theme-memoh .dv-drop-target > .dv-drop-target-dropzone > .dv-drop-target-selection.dv-drop-target-selection-line.dv-drop-target-left,
 .dockview-theme-memoh .dv-drop-target > .dv-drop-target-dropzone > .dv-drop-target-selection.dv-drop-target-selection-line.dv-drop-target-right,

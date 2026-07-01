@@ -5,7 +5,7 @@
     @auxclick.middle.prevent="close"
   >
     <svg
-      v-if="isActive"
+      v-if="isVisible"
       class="active-tab-shape z-0"
       :viewBox="activeTabViewBox"
       :style="activeTabShapeStyle"
@@ -106,6 +106,14 @@ const rootEl = ref<HTMLElement | null>(null)
 const panelId = props.params.api.id
 const title = ref(props.params.api.title ?? '')
 const isActive = ref(props.params.api.isActive)
+// Per-group active: this tab is its group's visible panel (every group has one).
+// Drives the active SHAPE (SVG), the resident close slot, and the seam/hover CSS
+// via the .memoh-tab-active class toggled on the .dv-tab wrapper. isActive is
+// layout-level (only the focused group's active tab) and is kept ONLY for label
+// colour — the focused group's active tab reads brighter, inactive groups' active
+// tabs stay dim. dockview's own .dv-active-tab is isActive-scoped, so it can't
+// carry this per-group signal the shape needs.
+const isVisible = ref(props.params.api.isVisible)
 // First-paint placeholder ONLY — these mirror the CSS contract (200≈12.5rem tab,
 // 35 = 40px strip − 5px inset, 8 = --tab-radius, 1px stroke) just so the active
 // SVG has a sane shape for the one frame before onMounted measures the real DOM.
@@ -137,7 +145,7 @@ const isDirty = computed(() => !!workspaceTabs.fileDirty[panelId])
 // reserved gap never looks accidental. A dirty active tab keeps showing the unsaved
 // dot at rest instead (the X still fades in on hover over the same slot), so the two
 // signals never fight for the slot.
-const showResidentClose = computed(() => isActive.value && !isDirty.value)
+const showResidentClose = computed(() => isVisible.value && !isDirty.value)
 // Ephemeral preview tabs still get replaced in place when another
 // preview-eligible tab opens into the same group (see workspace-tabs store), but
 // the state is no longer surfaced visually — there is no italic or other marker.
@@ -148,9 +156,21 @@ const disposables = [
   }),
   props.params.api.onDidActiveChange((event) => {
     isActive.value = event.isActive
-    if (event.isActive) scheduleActiveTabShapeUpdate()
+  }),
+  props.params.api.onDidVisibilityChange((event) => {
+    isVisible.value = event.isVisible
+    if (event.isVisible) scheduleActiveTabShapeUpdate()
   }),
   props.params.containerApi.onDidLayoutChange(() => {
+    // Re-tag on every layout change, not just visibility flips. When a tab is
+    // MOVED or SPLIT into another group, dockview reuses this component's tab
+    // element inside a brand-new .dv-tab wrapper (tabs.js setContent) without
+    // remounting the Vue instance; and if the tab was active in both the old and
+    // new group, isVisible stays true→true so onDidVisibilityChange never fires.
+    // Without this, the moved active tab would render its SVG shape (v-if still
+    // true) on a wrapper the CSS reads as inactive — doubled hover/divider pixels.
+    // Layout change covers move/split/reorder and re-resolves the current wrapper.
+    syncGroupActiveClass()
     scheduleActiveTabShapeUpdate()
   }),
 ]
@@ -160,8 +180,12 @@ const disposables = [
 onMounted(() => {
   title.value = props.params.api.title ?? title.value
   isActive.value = props.params.api.isActive
+  isVisible.value = props.params.api.isVisible
   nextTick(() => {
     installShapeObserver()
+    // Set the group-active class only after the tab's .dv-tab ancestor exists;
+    // closest() returns null before the wrapper is in the DOM.
+    syncGroupActiveClass()
     window.addEventListener('resize', scheduleActiveTabShapeUpdate)
     scheduleActiveTabShapeUpdate()
   })
@@ -177,12 +201,26 @@ onBeforeUnmount(() => {
   if (pendingShapeFrame) cancelAnimationFrame(pendingShapeFrame)
   resizeObserver?.disconnect()
   window.removeEventListener('resize', scheduleActiveTabShapeUpdate)
+  // Clear the imperatively-set class so it can't linger on a .dv-tab wrapper that
+  // dockview later reuses for a different (e.g. terminal) tab component that never
+  // sets it — otherwise a stale active style could survive the swap.
+  rootEl.value?.closest('.dv-tab')?.classList.remove('memoh-tab-active')
   for (const d of disposables) d.dispose()
 })
 
-watch(isActive, (active) => {
+watch(isVisible, (active) => {
+  syncGroupActiveClass()
   if (active) nextTick(scheduleActiveTabShapeUpdate)
 })
+
+// Mirror isVisible onto the .dv-tab wrapper as a class the theme CSS can target.
+// dockview's own .dv-active-tab is isActive-scoped (layout-level, one tab total),
+// so it can't express "this tab is its group's active panel" — which is what the
+// seam/hover/shape rules need, since every group's active tab wears the shape.
+function syncGroupActiveClass() {
+  const tab = rootEl.value?.closest<HTMLElement>('.dv-tab')
+  if (tab) tab.classList.toggle('memoh-tab-active', isVisible.value)
+}
 
 function installShapeObserver() {
   const root = rootEl.value
@@ -196,7 +234,7 @@ function installShapeObserver() {
 }
 
 function scheduleActiveTabShapeUpdate() {
-  if (!isActive.value || pendingShapeFrame) return
+  if (!isVisible.value || pendingShapeFrame) return
 
   pendingShapeFrame = requestAnimationFrame(() => {
     pendingShapeFrame = 0
