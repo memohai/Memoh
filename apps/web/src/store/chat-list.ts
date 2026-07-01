@@ -2558,6 +2558,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function resetUserScopedState(options: { clearSelection?: boolean } = {}) {
     stopStreams()
+    clearAllSessionViews()
     abortAllAssistantStreams()
     stopWebSocket()
 
@@ -2941,13 +2942,20 @@ export const useChatStore = defineStore('chat', () => {
     view?.messagesStream.stop()
   }
 
-  // Stop every open session's message SSE AND drop the persisted views. Used
-  // when tearing down all chat state (bot switch, user reset) — a different
-  // bot's sessions are not ours to keep, so their transcripts are discarded.
-  // Session switches do NOT go through here: they stop only the departing
-  // session's SSE (releaseSessionView) and keep its view for background WS.
+  // Stop every open session's message SSE. Does NOT drop the views — a session
+  // switch keeps the departing session's view (and its transcript) alive for
+  // background WS. Views are dropped only on real teardown (bot switch / user
+  // reset via clearAllSessionViews), never here: this is also called by
+  // initialize()'s stopStreams(), and clearing views there would wipe a session
+  // that was set up before initialize's async body runs.
   function stopAllMessageStreams() {
     for (const view of sessionViews.values()) view.messagesStream.stop()
+  }
+
+  // Stop all message SSE AND drop every view. Only for bot switch / user reset,
+  // where a different bot's transcripts are not ours to keep.
+  function clearAllSessionViews() {
+    stopAllMessageStreams()
     sessionViews.clear()
   }
 
@@ -3940,6 +3948,10 @@ export const useChatStore = defineStore('chat', () => {
     selectSessionRequestId++
     abort()
     abortAllAssistantStreams()
+    // Switching bots: the previous bot's session transcripts are not ours to
+    // keep. Drop all views here (initialize's stopStreams no longer clears
+    // them, so a background-persisted view would otherwise leak across bots).
+    clearAllSessionViews()
     clearPendingACPSession()
     cancelPendingFsBump()
     lastFsChange.value = null
