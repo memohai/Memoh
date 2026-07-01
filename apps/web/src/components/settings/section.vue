@@ -14,6 +14,17 @@
     </div>
     <div class="overflow-hidden rounded-[var(--radius-menu-shell)] border border-border bg-card">
       <slot />
+      <!-- Footer: a right-aligned action bar (Save/Cancel) or a pagination strip.
+           Lives INSIDE the card, after the rows, so its top hairline meets both
+           card edges — the same inset logic as a row divider, but full-bleed
+           because it splits the card body from its action band. Only rendered
+           when a caller fills it, so a plain section is untouched. -->
+      <div
+        v-if="$slots.footer"
+        class="flex items-center justify-end gap-2 border-t border-border px-4 py-3"
+      >
+        <slot name="footer" />
+      </div>
     </div>
   </section>
 </template>

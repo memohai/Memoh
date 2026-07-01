@@ -172,79 +172,71 @@
         </Empty>
 
         <div v-else>
-          <div
+          <ExpandableSettingsRow
             v-for="log in filteredLogs"
             :key="log.id"
-            class="mx-4 border-b border-border py-3 last:border-b-0"
+            :open="!!log.id && expandedIds.has(log.id)"
+            @update:open="toggleExpand(log.id)"
           >
-            <button
-              type="button"
-              class="flex w-full items-center justify-between gap-3 text-left"
-              @click="toggleExpand(log.id)"
-            >
-              <div class="min-w-0">
-                <div class="flex items-center gap-2">
-                  <Badge
-                    :variant="statusVariant(log.status)"
-                    size="sm"
+            <template #content>
+              <div class="flex items-center gap-2">
+                <Badge
+                  :variant="statusVariant(log.status)"
+                  size="sm"
+                >
+                  {{ statusLabel(log.status) }}
+                </Badge>
+                <span class="text-xs tabular-nums text-muted-foreground">
+                  {{ formatDateTime(log.started_at) }}
+                </span>
+              </div>
+              <!-- Preview line only while collapsed; the expanded panel shows the
+                   full result, so the truncated echo would be redundant. -->
+              <p
+                v-if="!expandedIds.has(log.id!)"
+                class="mt-1 truncate text-xs"
+                :class="log.status === 'error' ? 'text-destructive' : 'text-muted-foreground'"
+              >
+                {{ log.status === 'error' ? (log.error_message || $t('bots.heartbeat.noResult')) : (truncateText(log.result_text) || $t('bots.heartbeat.noResult')) }}
+              </p>
+            </template>
+
+            <template #trailing>
+              <span class="text-xs tabular-nums text-muted-foreground">
+                {{ formatDuration(log.started_at, log.completed_at) }}
+              </span>
+            </template>
+
+            <template #expanded>
+              <div class="space-y-3">
+                <div class="overflow-hidden rounded-md border border-border bg-card p-3">
+                  <pre class="whitespace-pre-wrap break-all font-mono text-xs leading-relaxed text-foreground">{{ log.result_text || $t('bots.heartbeat.noResult') }}</pre>
+                </div>
+
+                <div
+                  v-if="log.error_message"
+                  class="rounded-md border border-border bg-card p-3"
+                >
+                  <p class="font-mono text-xs leading-normal text-destructive">
+                    {{ log.error_message }}
+                  </p>
+                </div>
+
+                <div
+                  v-if="log.usage"
+                  class="flex flex-wrap gap-2"
+                >
+                  <span
+                    v-for="(val, key) in (log.usage as any)"
+                    :key="key"
+                    class="rounded-sm border border-border px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground"
                   >
-                    {{ statusLabel(log.status) }}
-                  </Badge>
-                  <span class="text-xs tabular-nums text-muted-foreground">
-                    {{ formatDateTime(log.started_at) }}
+                    {{ key }}: {{ val }}
                   </span>
                 </div>
-                <p
-                  v-if="!expandedIds.has(log.id!)"
-                  class="mt-1 truncate text-xs"
-                  :class="log.status === 'error' ? 'text-destructive' : 'text-muted-foreground'"
-                >
-                  {{ log.status === 'error' ? (log.error_message || $t('bots.heartbeat.noResult')) : (truncateText(log.result_text) || $t('bots.heartbeat.noResult')) }}
-                </p>
               </div>
-
-              <div class="flex shrink-0 items-center gap-3">
-                <span class="text-xs tabular-nums text-muted-foreground">
-                  {{ formatDuration(log.started_at, log.completed_at) }}
-                </span>
-                <ChevronDown
-                  class="size-4 text-muted-foreground transition-transform"
-                  :class="{ 'rotate-180': log.id && expandedIds.has(log.id) }"
-                />
-              </div>
-            </button>
-
-            <div
-              v-if="log.id && expandedIds.has(log.id)"
-              class="mt-3 space-y-3"
-            >
-              <div class="overflow-hidden rounded-md border border-border bg-card p-3">
-                <pre class="whitespace-pre-wrap break-all font-mono text-xs leading-relaxed text-foreground">{{ log.result_text || $t('bots.heartbeat.noResult') }}</pre>
-              </div>
-
-              <div
-                v-if="log.error_message"
-                class="rounded-md border border-border bg-card p-3"
-              >
-                <p class="font-mono text-xs leading-normal text-destructive">
-                  {{ log.error_message }}
-                </p>
-              </div>
-
-              <div
-                v-if="log.usage"
-                class="flex flex-wrap gap-2"
-              >
-                <span
-                  v-for="(val, key) in (log.usage as any)"
-                  :key="key"
-                  class="rounded-sm border border-border px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground"
-                >
-                  {{ key }}: {{ val }}
-                </span>
-              </div>
-            </div>
-          </div>
+            </template>
+          </ExpandableSettingsRow>
         </div>
 
         <div
@@ -323,7 +315,7 @@
 </template>
 
 <script setup lang="ts">
-import { Trash2, ChevronDown, ChevronRight } from 'lucide-vue-next'
+import { Trash2, ChevronRight } from 'lucide-vue-next'
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
@@ -347,6 +339,7 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import ExpandableSettingsRow from '@/components/settings/expandable-row.vue'
 import type { Ref } from 'vue'
 
 const props = defineProps<{

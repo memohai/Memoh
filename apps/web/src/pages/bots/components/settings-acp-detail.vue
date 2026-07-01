@@ -195,87 +195,81 @@
             </div>
           </div>
 
-          <div
-            v-for="field in visibleManagedFields"
-            :key="field.id"
-            class="space-y-1.5"
-          >
-            <Label class="text-sm font-medium text-foreground">
-              {{ field.label || field.id }}
-            </Label>
-            <Select
-              v-if="isHermesProviderField(field)"
-              :model-value="hermesProvider"
-              @update:model-value="(value) => setHermesProvider(String(value))"
+          <FormStack>
+            <FieldStack
+              v-for="field in visibleManagedFields"
+              :key="field.id"
+              :label="field.label || field.id"
+              :help="managedFieldHelp(field)"
             >
-              <SelectTrigger class="w-full">
-                <SelectValue :placeholder="$t('bots.settings.acpHermesProviderPlaceholder')" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem
-                  v-for="provider in HERMES_PROVIDER_PRESETS"
-                  :key="provider.value"
-                  :value="provider.value"
-                >
-                  {{ $t(provider.labelKey) }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            <template v-else-if="isHermesModelField(field)">
               <Select
-                :model-value="hermesModelSelect"
-                @update:model-value="(value) => setHermesModel(String(value))"
+                v-if="isHermesProviderField(field)"
+                :model-value="hermesProvider"
+                @update:model-value="(value) => setHermesProvider(String(value))"
               >
                 <SelectTrigger class="w-full">
-                  <SelectValue :placeholder="$t('bots.settings.acpHermesModelPlaceholder')" />
+                  <SelectValue :placeholder="$t('bots.settings.acpHermesProviderPlaceholder')" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem
-                    v-for="model in hermesModelOptions"
-                    :key="model.value"
-                    :value="model.value"
+                    v-for="provider in HERMES_PROVIDER_PRESETS"
+                    :key="provider.value"
+                    :value="provider.value"
                   >
-                    {{ model.label }}
-                  </SelectItem>
-                  <SelectItem :value="HERMES_CUSTOM_MODEL_VALUE">
-                    {{ $t('bots.settings.acpHermesCustomModel') }}
+                    {{ $t(provider.labelKey) }}
                   </SelectItem>
                 </SelectContent>
               </Select>
+              <template v-else-if="isHermesModelField(field)">
+                <Select
+                  :model-value="hermesModelSelect"
+                  @update:model-value="(value) => setHermesModel(String(value))"
+                >
+                  <SelectTrigger class="w-full">
+                    <SelectValue :placeholder="$t('bots.settings.acpHermesModelPlaceholder')" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem
+                      v-for="model in hermesModelOptions"
+                      :key="model.value"
+                      :value="model.value"
+                    >
+                      {{ model.label }}
+                    </SelectItem>
+                    <SelectItem :value="HERMES_CUSTOM_MODEL_VALUE">
+                      {{ $t('bots.settings.acpHermesCustomModel') }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input
+                  v-if="hermesUsingCustomModel"
+                  class="mt-2"
+                  :model-value="agent.managed.model || ''"
+                  :name="managedFieldName(field)"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  autocorrect="off"
+                  spellcheck="false"
+                  :placeholder="$t('bots.settings.acpHermesCustomModelPlaceholder')"
+                  @update:model-value="(val) => setManagedField(field.id, String(val ?? ''))"
+                  @change="commitForm"
+                />
+              </template>
               <Input
-                v-if="hermesUsingCustomModel"
-                class="mt-2"
-                :model-value="agent.managed.model || ''"
+                v-else
+                :model-value="agent.managed[field.id || ''] || ''"
+                :type="inputType(field.type)"
                 :name="managedFieldName(field)"
-                autocomplete="off"
+                :autocomplete="managedFieldAutocomplete(field)"
                 autocapitalize="off"
                 autocorrect="off"
                 spellcheck="false"
-                :placeholder="$t('bots.settings.acpHermesCustomModelPlaceholder')"
+                :placeholder="managedFieldPlaceholder(field)"
                 @update:model-value="(val) => setManagedField(field.id, String(val ?? ''))"
                 @change="commitForm"
               />
-            </template>
-            <Input
-              v-else
-              :model-value="agent.managed[field.id || ''] || ''"
-              :type="inputType(field.type)"
-              :name="managedFieldName(field)"
-              :autocomplete="managedFieldAutocomplete(field)"
-              autocapitalize="off"
-              autocorrect="off"
-              spellcheck="false"
-              :placeholder="managedFieldPlaceholder(field)"
-              @update:model-value="(val) => setManagedField(field.id, String(val ?? ''))"
-              @change="commitForm"
-            />
-            <p
-              v-if="field.help && !isHermesProviderField(field) && !isHermesModelField(field)"
-              class="text-sm text-muted-foreground"
-            >
-              {{ field.help }}
-            </p>
-          </div>
+            </FieldStack>
+          </FormStack>
         </template>
 
         <p
@@ -305,7 +299,6 @@ import { useQueryCache } from '@pinia/colada'
 import {
   Button,
   Input,
-  Label,
   SegmentedControl,
   Select,
   SelectContent,
@@ -343,6 +336,8 @@ import {
 } from '@/utils/acp'
 import { oauthStatusTextKey } from '@/utils/oauth/status-text'
 import SettingsSection from '@/components/settings/section.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
+import FormStack from '@/components/settings/form-stack.vue'
 
 const props = defineProps<{
   botId: string
@@ -466,6 +461,13 @@ function managedFieldPlaceholder(field: AcpprofileManagedField): string | undefi
     return hermesAPIKeyPlaceholder(hermesProvider.value, field.placeholder)
   }
   return field.placeholder
+}
+
+// Hermes provider/model fields render their own preset selects and never carry
+// help text; every other managed field surfaces its schema-provided help.
+function managedFieldHelp(field: AcpprofileManagedField): string {
+  if (isHermesProviderField(field) || isHermesModelField(field)) return ''
+  return field.help || ''
 }
 
 function setManagedField(fieldID: string | undefined, value: string) {

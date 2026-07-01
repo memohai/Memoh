@@ -88,104 +88,77 @@
         </div>
 
         <template v-else-if="statusCardData">
-          <div class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[4.375rem]">
-            <p class="text-caption text-muted-foreground tracking-tight">
-              {{ $t('bots.settings.memorySourceDir') }}
-            </p>
-            <p class="mt-1 text-xs font-mono font-medium text-foreground break-all leading-snug">
-              {{ statusCardData.source_dir || '-' }}
-            </p>
-          </div>
+          <MetricReadout :label="$t('bots.settings.memorySourceDir')">
+            <template #value>
+              <span class="text-xs font-mono font-medium text-foreground break-all leading-snug">
+                {{ statusCardData.source_dir || '-' }}
+              </span>
+            </template>
+          </MetricReadout>
 
-          <div class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[4.375rem]">
-            <p class="text-caption text-muted-foreground tracking-tight">
-              {{ $t('bots.settings.memoryOverviewPath') }}
-            </p>
-            <p class="mt-1 text-xs font-mono font-medium text-foreground break-all leading-snug">
-              {{ statusCardData.overview_path || '-' }}
-            </p>
-          </div>
+          <MetricReadout :label="$t('bots.settings.memoryOverviewPath')">
+            <template #value>
+              <span class="text-xs font-mono font-medium text-foreground break-all leading-snug">
+                {{ statusCardData.overview_path || '-' }}
+              </span>
+            </template>
+          </MetricReadout>
 
-          <div class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[4.375rem]">
-            <p class="text-caption text-muted-foreground tracking-tight">
-              {{ $t('bots.settings.memoryMarkdownFiles') }}
-            </p>
-            <p class="mt-1 text-base font-mono font-semibold text-foreground leading-none">
-              {{ statusCardData.markdown_file_count ?? 0 }}
-            </p>
-          </div>
+          <MetricReadout :label="$t('bots.settings.memoryMarkdownFiles')">
+            <template #value>
+              <span class="text-base font-mono font-semibold text-foreground leading-none">
+                {{ statusCardData.markdown_file_count ?? 0 }}
+              </span>
+            </template>
+          </MetricReadout>
 
-          <div class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[4.375rem]">
-            <p class="text-caption text-muted-foreground tracking-tight">
-              {{ $t('bots.settings.memorySourceEntries') }}
-            </p>
-            <p class="mt-1 text-base font-mono font-semibold text-foreground leading-none">
-              {{ statusCardData.source_count ?? 0 }}
-            </p>
-          </div>
+          <MetricReadout :label="$t('bots.settings.memorySourceEntries')">
+            <template #value>
+              <span class="text-base font-mono font-semibold text-foreground leading-none">
+                {{ statusCardData.source_count ?? 0 }}
+              </span>
+            </template>
+          </MetricReadout>
 
-          <div class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[4.375rem]">
-            <p class="text-caption text-muted-foreground tracking-tight">
-              {{ $t('bots.settings.memoryIndexedEntries') }}
-            </p>
-            <p class="mt-1 text-base font-mono font-semibold text-foreground leading-none">
-              {{ statusCardData.indexed_count ?? 0 }}
-            </p>
-          </div>
+          <MetricReadout :label="$t('bots.settings.memoryIndexedEntries')">
+            <template #value>
+              <span class="text-base font-mono font-semibold text-foreground leading-none">
+                {{ statusCardData.indexed_count ?? 0 }}
+              </span>
+            </template>
+          </MetricReadout>
 
-          <div
+          <MetricReadout
             v-if="showQdrantDetails"
-            class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[4.375rem] sm:col-span-1"
+            :label="$t('bots.settings.memoryQdrantCollection')"
+            class="sm:col-span-1"
           >
-            <p class="text-caption text-muted-foreground tracking-tight">
-              {{ $t('bots.settings.memoryQdrantCollection') }}
-            </p>
-            <p class="mt-1 text-xs font-mono font-medium text-foreground break-all leading-snug">
-              {{ statusCardData.qdrant_collection || '-' }}
-            </p>
-          </div>
+            <template #value>
+              <span class="text-xs font-mono font-medium text-foreground break-all leading-snug">
+                {{ statusCardData.qdrant_collection || '-' }}
+              </span>
+            </template>
+          </MetricReadout>
 
-          <div
+          <MetricReadout
             v-if="showEncoderHealth"
-            class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[4.375rem]"
+            :label="encoderHealthLabel"
+            :status="statusCardData.encoder?.ok ? 'ok' : 'error'"
           >
-            <p class="text-caption text-muted-foreground tracking-tight">
-              {{ encoderHealthLabel }}
-            </p>
-            <div class="flex items-center gap-1.5 mt-1">
-              <div
-                class="size-1.5 rounded-full"
-                :class="statusCardData.encoder?.ok ? 'bg-foreground' : 'bg-destructive'"
-              />
-              <p
-                class="text-xs font-medium leading-none"
-                :class="healthTextClass(statusCardData.encoder?.ok)"
-              >
-                {{ healthLabel(statusCardData.encoder?.ok, statusCardData.encoder?.error) }}
-              </p>
-            </div>
-          </div>
+            <template #value>
+              {{ healthLabel(statusCardData.encoder?.ok, statusCardData.encoder?.error) }}
+            </template>
+          </MetricReadout>
 
-          <div
+          <MetricReadout
             v-if="showQdrantHealth"
-            class="rounded-[var(--radius-menu-shell)] border border-border bg-card p-3 flex flex-col justify-between min-h-[4.375rem]"
+            :label="$t('bots.settings.memoryQdrantHealth')"
+            :status="statusCardData.qdrant?.ok ? 'ok' : 'error'"
           >
-            <p class="text-caption text-muted-foreground tracking-tight">
-              {{ $t('bots.settings.memoryQdrantHealth') }}
-            </p>
-            <div class="flex items-center gap-1.5 mt-1">
-              <div
-                class="size-1.5 rounded-full"
-                :class="statusCardData.qdrant?.ok ? 'bg-foreground' : 'bg-destructive'"
-              />
-              <p
-                class="text-xs font-medium leading-none"
-                :class="healthTextClass(statusCardData.qdrant?.ok)"
-              >
-                {{ healthLabel(statusCardData.qdrant?.ok, statusCardData.qdrant?.error) }}
-              </p>
-            </div>
-          </div>
+            <template #value>
+              {{ healthLabel(statusCardData.qdrant?.ok, statusCardData.qdrant?.error) }}
+            </template>
+          </MetricReadout>
         </template>
       </div>
     </div>
@@ -202,6 +175,7 @@ import FetchProviderSelect from './fetch-provider-select.vue'
 import MemoryProviderSelect from './memory-provider-select.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import MetricReadout from '@/components/settings/metric-readout.vue'
 import type {
   SettingsSettings,
   AdaptersProviderGetResponse,
@@ -277,10 +251,6 @@ const encoderHealthLabel = computed(() =>
     ? t('bots.settings.memoryDenseEmbeddingHealth')
     : t('bots.settings.memoryEncoderHealth'),
 )
-
-function healthTextClass(ok: boolean | undefined) {
-  return ok ? 'text-foreground' : 'text-destructive'
-}
 
 function healthLabel(ok: boolean | undefined, error?: string) {
   if (ok) return t('bots.settings.memoryHealthOk')

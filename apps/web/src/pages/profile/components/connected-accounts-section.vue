@@ -2,18 +2,11 @@
   <SettingsSection :title="$t('settings.connectedAccounts.title')">
     <!-- No linkable IM bot: linking needs a bot that can receive /link, so the
          only useful action here is going to set one up. -->
-    <div
+    <SettingsRow
       v-if="!checkingImBot && !hasLinkableImBot"
-      class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 py-3"
+      :label="$t('settings.connectedAccounts.noImBotTitle')"
+      :description="$t('settings.connectedAccounts.noImBotHint')"
     >
-      <div class="min-w-0">
-        <div class="text-sm font-medium text-foreground">
-          {{ $t('settings.connectedAccounts.noImBotTitle') }}
-        </div>
-        <p class="mt-0.5 text-xs text-muted-foreground">
-          {{ $t('settings.connectedAccounts.noImBotHint') }}
-        </p>
-      </div>
       <Button
         variant="outline"
         size="sm"
@@ -23,7 +16,7 @@
         {{ $t('settings.connectedAccounts.goToBots') }}
         <ArrowRight class="ml-1.5 size-3.5" />
       </Button>
-    </div>
+    </SettingsRow>
 
     <!-- Loading bound identities -->
     <div
@@ -35,21 +28,22 @@
 
     <template v-else>
       <!-- Bound identities -->
-      <div
+      <SettingsRow
         v-for="binding in bindings"
         :key="binding.id"
-        class="mx-4 flex min-h-[3.75rem] items-center gap-3 border-b border-border py-3 last:border-b-0"
       >
-        <Avatar class="size-8 shrink-0">
-          <AvatarImage
-            :src="binding.channel_identity_avatar_url || ''"
-            :alt="bindingLabel(binding)"
-          />
-          <AvatarFallback class="text-xs">
-            {{ bindingLabel(binding).slice(0, 2).toUpperCase() }}
-          </AvatarFallback>
-        </Avatar>
-        <div class="min-w-0 flex-1">
+        <template #leading>
+          <Avatar class="size-8">
+            <AvatarImage
+              :src="binding.channel_identity_avatar_url || ''"
+              :alt="bindingLabel(binding)"
+            />
+            <AvatarFallback class="text-xs">
+              {{ bindingLabel(binding).slice(0, 2).toUpperCase() }}
+            </AvatarFallback>
+          </Avatar>
+        </template>
+        <template #content>
           <div class="truncate text-sm font-medium text-foreground">
             {{ bindingLabel(binding) }}
           </div>
@@ -63,7 +57,7 @@
             />
             <span>{{ channelTypeDisplayName(t, binding.channel_type) }}</span>
           </div>
-        </div>
+        </template>
         <ConfirmPopover
           :message="$t('settings.connectedAccounts.disconnectConfirm')"
           :confirm-text="$t('settings.connectedAccounts.disconnect')"
@@ -80,18 +74,13 @@
             </Button>
           </template>
         </ConfirmPopover>
-      </div>
+      </SettingsRow>
 
       <!-- Link action: empty-state title when none yet, otherwise "link another" -->
-      <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
-        <div class="min-w-0">
-          <div class="text-sm font-medium text-foreground">
-            {{ bindings.length === 0 ? $t('settings.connectedAccounts.empty') : $t('settings.connectedAccounts.linkAnother') }}
-          </div>
-          <p class="mt-0.5 text-xs text-muted-foreground">
-            {{ $t('settings.connectedAccounts.subtitle') }}
-          </p>
-        </div>
+      <SettingsRow
+        :label="bindings.length === 0 ? $t('settings.connectedAccounts.empty') : $t('settings.connectedAccounts.linkAnother')"
+        :description="$t('settings.connectedAccounts.subtitle')"
+      >
         <Button
           variant="outline"
           size="sm"
@@ -109,7 +98,7 @@
           />
           {{ $t('settings.connectedAccounts.connect') }}
         </Button>
-      </div>
+      </SettingsRow>
 
       <!-- Active link code with live countdown -->
       <div
@@ -193,6 +182,7 @@ import {
   Input,
 } from '@memohai/ui'
 import SettingsSection from '@/components/settings/section.vue'
+import SettingsRow from '@/components/settings/row.vue'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'

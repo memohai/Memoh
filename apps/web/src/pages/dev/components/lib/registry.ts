@@ -6,6 +6,7 @@ import { markRaw, type Component } from 'vue'
 import SectionTokens from '../sections/SectionTokens.vue'
 import SectionType from '../sections/SectionType.vue'
 import SectionAccents from '../sections/SectionAccents.vue'
+import SectionSpacing from '../sections/SectionSpacing.vue'
 import SectionAtoms from '../sections/SectionAtoms.vue'
 import SectionInputsForms from '../sections/SectionInputsForms.vue'
 import SectionOverlays from '../sections/SectionOverlays.vue'
@@ -24,6 +25,7 @@ export const wallSections: WallSection[] = [
   { id: 'tokens', label: 'Design tokens', component: markRaw(SectionTokens) },
   { id: 'type', label: 'Typography', component: markRaw(SectionType) },
   { id: 'accents', label: 'Accent palette', component: markRaw(SectionAccents) },
+  { id: 'spacing', label: 'Spacing', component: markRaw(SectionSpacing) },
   { id: 'atoms', label: 'Atoms', component: markRaw(SectionAtoms) },
   { id: 'inputs-forms', label: 'Inputs & Forms', component: markRaw(SectionInputsForms) },
   { id: 'overlays', label: 'Overlays', component: markRaw(SectionOverlays) },

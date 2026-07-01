@@ -49,6 +49,7 @@ import ContainerCreateProgress from './container-create-progress.vue'
 import PageShell from '@/components/page-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import CalloutBanner from '@/components/callout-banner/index.vue'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import { useCapabilitiesStore } from '@/store/capabilities'
@@ -1032,21 +1033,12 @@ watch([activeTab, botId], ([tab]) => {
           class="space-y-3"
         >
           <!-- Legacy architecture -->
-          <div
+          <CalloutBanner
             v-if="isLegacy"
-            class="flex flex-col gap-3 rounded-[var(--radius-menu-shell)] border border-warning-border bg-warning-soft px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+            tone="warning"
+            :title="$t('bots.container.refactored.issueLegacyTitle')"
+            :description="$t('bots.container.refactored.issueLegacyHint')"
           >
-            <div class="flex min-w-0 items-start gap-3">
-              <AlertCircle class="mt-0.5 size-4 shrink-0 text-warning-foreground" />
-              <div class="min-w-0">
-                <p class="text-sm font-medium text-foreground">
-                  {{ $t('bots.container.refactored.issueLegacyTitle') }}
-                </p>
-                <p class="mt-0.5 text-xs text-muted-foreground">
-                  {{ $t('bots.container.refactored.issueLegacyHint') }}
-                </p>
-              </div>
-            </div>
             <Button
               variant="outline"
               size="sm"
@@ -1060,7 +1052,7 @@ watch([activeTab, botId], ([tab]) => {
               />
               {{ $t('bots.container.legacyRecreate') }}
             </Button>
-          </div>
+          </CalloutBanner>
 
           <!-- Recreate progress -->
           <ContainerCreateProgress
@@ -1071,50 +1063,42 @@ watch([activeTab, botId], ([tab]) => {
           />
 
           <!-- Resource-limits pending-rebuild -->
-          <div
+          <CalloutBanner
             v-if="resourceLimitApplyPromptVisible"
-            class="flex flex-col gap-3 rounded-[var(--radius-menu-shell)] border border-warning-border bg-warning-soft px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+            tone="warning"
+            :title="$t('bots.container.refactored.issueRecreateTitle')"
+            :description="$t('bots.container.refactored.issueRecreateHint')"
           >
-            <div class="min-w-0">
-              <p class="text-sm font-medium text-foreground">
-                {{ $t('bots.container.refactored.issueRecreateTitle') }}
-              </p>
-              <p class="mt-0.5 text-xs text-muted-foreground">
-                {{ $t('bots.container.refactored.issueRecreateHint') }}
-              </p>
-            </div>
-            <div class="flex shrink-0 items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                :disabled="containerBusy || botLifecyclePending"
-                @click="resourceLimitApplyPromptVisible = false"
-              >
-                {{ $t('bots.container.resourceLimits.saveForLater') }}
-              </Button>
-              <ConfirmPopover
-                :title="$t('bots.container.resourceLimits.recreateConfirmTitle')"
-                :message="$t('bots.container.resourceLimits.recreateConfirm')"
-                :confirm-text="$t('bots.container.resourceLimits.recreateNow')"
-                :loading="containerAction === 'recreate'"
-                @confirm="handleApplyResourceLimitsNow"
-              >
-                <template #trigger>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    :disabled="containerBusy || botLifecyclePending"
-                  >
-                    <Spinner
-                      v-if="containerAction === 'recreate'"
-                      class="size-4"
-                    />
-                    {{ $t('bots.container.resourceLimits.recreateNow') }}
-                  </Button>
-                </template>
-              </ConfirmPopover>
-            </div>
-          </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              :disabled="containerBusy || botLifecyclePending"
+              @click="resourceLimitApplyPromptVisible = false"
+            >
+              {{ $t('bots.container.resourceLimits.saveForLater') }}
+            </Button>
+            <ConfirmPopover
+              :title="$t('bots.container.resourceLimits.recreateConfirmTitle')"
+              :message="$t('bots.container.resourceLimits.recreateConfirm')"
+              :confirm-text="$t('bots.container.resourceLimits.recreateNow')"
+              :loading="containerAction === 'recreate'"
+              @confirm="handleApplyResourceLimitsNow"
+            >
+              <template #trigger>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  :disabled="containerBusy || botLifecyclePending"
+                >
+                  <Spinner
+                    v-if="containerAction === 'recreate'"
+                    class="size-4"
+                  />
+                  {{ $t('bots.container.resourceLimits.recreateNow') }}
+                </Button>
+              </template>
+            </ConfirmPopover>
+          </CalloutBanner>
 
           <!-- Storage soft-limit exceeded -->
           <div
