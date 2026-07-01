@@ -16,46 +16,48 @@
         <DialogTitle>{{ $t('settings.changePassword') }}</DialogTitle>
       </DialogHeader>
 
-      <div class="space-y-4">
-        <div class="space-y-1.5">
-          <Label for="pw-current">
-            {{ $t('settings.currentPassword') }}
-          </Label>
+      <FormStack>
+        <FieldStack
+          :label="$t('settings.currentPassword')"
+          for="pw-current"
+        >
           <PasswordInput
             id="pw-current"
             v-model="currentPassword"
             autocomplete="current-password"
           />
-        </div>
-        <div class="space-y-1.5">
-          <Label for="pw-new">
-            {{ $t('settings.newPassword') }}
-          </Label>
+        </FieldStack>
+        <FieldStack
+          :label="$t('settings.newPassword')"
+          for="pw-new"
+        >
           <PasswordInput
             id="pw-new"
             v-model="newPassword"
             autocomplete="new-password"
             :aria-invalid="isMismatch || undefined"
           />
-        </div>
-        <div class="space-y-1.5">
-          <Label for="pw-confirm">
-            {{ $t('settings.confirmPassword') }}
-          </Label>
+        </FieldStack>
+        <FieldStack
+          :label="$t('settings.confirmPassword')"
+          for="pw-confirm"
+        >
           <PasswordInput
             id="pw-confirm"
             v-model="confirmPassword"
             autocomplete="new-password"
             :aria-invalid="isMismatch || undefined"
           />
+          <!-- Validation error rides in the control column, shown only on submit-time
+               mismatch — inline field feedback, not FieldStack's static muted help. -->
           <p
             v-if="isMismatch"
             class="text-xs text-destructive"
           >
             {{ $t('settings.passwordNotMatch') }}
           </p>
-        </div>
-      </div>
+        </FieldStack>
+      </FormStack>
 
       <DialogFooter>
         <DialogClose as-child>
@@ -89,9 +91,10 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-  Label,
   Spinner,
 } from '@memohai/ui'
+import FieldStack from '@/components/settings/field-stack.vue'
+import FormStack from '@/components/settings/form-stack.vue'
 import PasswordInput from '@/components/password-input/index.vue'
 
 const props = defineProps<{

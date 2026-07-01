@@ -1,7 +1,9 @@
 <template>
   <div class="space-y-4">
-    <div class="space-y-2">
-      <Label>{{ $t('bots.schedule.form.mode') }}</Label>
+    <FieldStack
+      :label="$t('bots.schedule.form.mode')"
+      :help="modeHint"
+    >
       <NativeSelect
         v-model="modeModel"
         class="h-9 text-xs"
@@ -28,17 +30,13 @@
           {{ $t('bots.schedule.mode.advanced') }}
         </option>
       </NativeSelect>
-      <p class="text-xs text-muted-foreground">
-        {{ modeHint }}
-      </p>
-    </div>
+    </FieldStack>
 
     <!-- minutes -->
-    <div
+    <FieldStack
       v-if="state.mode === 'minutes'"
-      class="space-y-2"
+      :label="$t('bots.schedule.form.everyMinutes')"
     >
-      <Label>{{ $t('bots.schedule.form.everyMinutes') }}</Label>
       <Input
         :model-value="state.intervalMinutes"
         type="number"
@@ -46,14 +44,13 @@
         :max="59"
         @update:model-value="(v) => update({ intervalMinutes: clampInt(v, 1, 59, 1) })"
       />
-    </div>
+    </FieldStack>
 
     <!-- hourly -->
-    <div
+    <FieldStack
       v-else-if="state.mode === 'hourly'"
-      class="space-y-2"
+      :label="$t('bots.schedule.form.atMinute')"
     >
-      <Label>{{ $t('bots.schedule.form.atMinute') }}</Label>
       <Input
         :model-value="state.minute"
         type="number"
@@ -61,7 +58,7 @@
         :max="59"
         @update:model-value="(v) => update({ minute: clampInt(v, 0, 59, 0) })"
       />
-    </div>
+    </FieldStack>
 
     <!-- daily -->
     <div
@@ -124,8 +121,7 @@
           </div>
         </div>
       </div>
-      <div class="space-y-2">
-        <Label>{{ $t('bots.schedule.form.minute') }}</Label>
+      <FieldStack :label="$t('bots.schedule.form.minute')">
         <Input
           :model-value="state.minute"
           type="number"
@@ -133,7 +129,7 @@
           :max="59"
           @update:model-value="(v) => update({ minute: clampInt(v, 0, 59, 0) })"
         />
-      </div>
+      </FieldStack>
     </div>
 
     <!-- weekly -->
@@ -141,8 +137,7 @@
       v-else-if="state.mode === 'weekly'"
       class="space-y-3"
     >
-      <div class="space-y-2">
-        <Label>{{ $t('bots.schedule.form.weekdays') }}</Label>
+      <FieldStack :label="$t('bots.schedule.form.weekdays')">
         <div class="grid grid-cols-7 gap-1.5">
           <button
             v-for="(key, idx) in WEEKDAY_KEYS"
@@ -157,10 +152,9 @@
             {{ $t(`bots.schedule.weekday.${key}`) }}
           </button>
         </div>
-      </div>
+      </FieldStack>
       <div class="grid grid-cols-2 gap-2">
-        <div class="space-y-2">
-          <Label>{{ $t('bots.schedule.form.hour') }}</Label>
+        <FieldStack :label="$t('bots.schedule.form.hour')">
           <Input
             :model-value="singleHour"
             type="number"
@@ -168,9 +162,8 @@
             :max="23"
             @update:model-value="(v) => setSingleHour(clampInt(v, 0, 23, 0))"
           />
-        </div>
-        <div class="space-y-2">
-          <Label>{{ $t('bots.schedule.form.minute') }}</Label>
+        </FieldStack>
+        <FieldStack :label="$t('bots.schedule.form.minute')">
           <Input
             :model-value="state.minute"
             type="number"
@@ -178,7 +171,7 @@
             :max="59"
             @update:model-value="(v) => update({ minute: clampInt(v, 0, 59, 0) })"
           />
-        </div>
+        </FieldStack>
       </div>
     </div>
 
@@ -187,8 +180,7 @@
       v-else-if="state.mode === 'monthly'"
       class="space-y-3"
     >
-      <div class="space-y-2">
-        <Label>{{ $t('bots.schedule.form.monthDays') }}</Label>
+      <FieldStack :label="$t('bots.schedule.form.monthDays')">
         <div class="grid grid-cols-7 gap-1.5">
           <button
             v-for="d in 31"
@@ -203,10 +195,9 @@
             {{ d }}
           </button>
         </div>
-      </div>
+      </FieldStack>
       <div class="grid grid-cols-2 gap-2">
-        <div class="space-y-2">
-          <Label>{{ $t('bots.schedule.form.hour') }}</Label>
+        <FieldStack :label="$t('bots.schedule.form.hour')">
           <Input
             :model-value="singleHour"
             type="number"
@@ -214,9 +205,8 @@
             :max="23"
             @update:model-value="(v) => setSingleHour(clampInt(v, 0, 23, 0))"
           />
-        </div>
-        <div class="space-y-2">
-          <Label>{{ $t('bots.schedule.form.minute') }}</Label>
+        </FieldStack>
+        <FieldStack :label="$t('bots.schedule.form.minute')">
           <Input
             :model-value="state.minute"
             type="number"
@@ -224,7 +214,7 @@
             :max="59"
             @update:model-value="(v) => update({ minute: clampInt(v, 0, 59, 0) })"
           />
-        </div>
+        </FieldStack>
       </div>
     </div>
 
@@ -234,8 +224,7 @@
       class="space-y-3"
     >
       <div class="grid grid-cols-2 gap-2">
-        <div class="space-y-2">
-          <Label>{{ $t('bots.schedule.form.month') }}</Label>
+        <FieldStack :label="$t('bots.schedule.form.month')">
           <NativeSelect
             v-model="yearlyMonthModel"
             class="h-9 text-xs"
@@ -248,9 +237,8 @@
               {{ $t(`bots.schedule.month.${key}`) }}
             </option>
           </NativeSelect>
-        </div>
-        <div class="space-y-2">
-          <Label>{{ $t('bots.schedule.form.monthDay') }}</Label>
+        </FieldStack>
+        <FieldStack :label="$t('bots.schedule.form.monthDay')">
           <Input
             :model-value="state.monthDay"
             type="number"
@@ -258,11 +246,10 @@
             :max="31"
             @update:model-value="(v) => update({ monthDay: clampInt(v, 1, 31, 1) })"
           />
-        </div>
+        </FieldStack>
       </div>
       <div class="grid grid-cols-2 gap-2">
-        <div class="space-y-2">
-          <Label>{{ $t('bots.schedule.form.hour') }}</Label>
+        <FieldStack :label="$t('bots.schedule.form.hour')">
           <Input
             :model-value="singleHour"
             type="number"
@@ -270,9 +257,8 @@
             :max="23"
             @update:model-value="(v) => setSingleHour(clampInt(v, 0, 23, 0))"
           />
-        </div>
-        <div class="space-y-2">
-          <Label>{{ $t('bots.schedule.form.minute') }}</Label>
+        </FieldStack>
+        <FieldStack :label="$t('bots.schedule.form.minute')">
           <Input
             :model-value="state.minute"
             type="number"
@@ -280,16 +266,18 @@
             :max="59"
             @update:model-value="(v) => update({ minute: clampInt(v, 0, 59, 0) })"
           />
-        </div>
+        </FieldStack>
       </div>
     </div>
 
     <!-- advanced -->
-    <div
+    <FieldStack
       v-else-if="state.mode === 'advanced'"
-      class="space-y-2"
+      :label="$t('bots.schedule.form.advancedPattern')"
     >
-      <Label>{{ $t('bots.schedule.form.advancedPattern') }}</Label>
+      <!-- Hint sits ABOVE the raw-cron input on purpose: it orients the user
+           before they type an expression, so it lives in the default slot rather
+           than FieldStack's help prop (which renders below the control). -->
       <p class="text-xs text-muted-foreground">
         {{ $t('bots.schedule.form.advancedHint') }}
       </p>
@@ -299,7 +287,7 @@
         :placeholder="'0 9 * * *'"
         @update:model-value="(v) => update({ advancedPattern: String(v) })"
       />
-    </div>
+    </FieldStack>
 
     <!-- preview -->
     <div class="rounded-md border bg-muted/30 px-3 py-2 space-y-1.5">
@@ -352,6 +340,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Sun, Moon } from 'lucide-vue-next'
 import { Input, Label, NativeSelect } from '@memohai/ui'
+import FieldStack from '@/components/settings/field-stack.vue'
 import {
   describeCron,
   nextRuns,

@@ -1,8 +1,9 @@
 <template>
-  <!-- Label on the left, control on the right; stacks only when the pane is too
-       narrow to hold both on one line. -->
-  <div class="mx-4 flex flex-col gap-2 border-b border-border py-3 last:border-b-0 sm:min-h-[3.75rem] sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-    <div class="min-w-0">
+  <!-- Horizontal label|control settings row; stacks on a narrow pane. The label
+       keeps a #content slot (not the default :label prop) so the <Label :for>
+       association to each field's input survives the migration. -->
+  <SettingsRow stack="sm">
+    <template #content>
       <Label
         :for="fieldId"
         class="text-sm font-medium text-foreground"
@@ -15,9 +16,10 @@
       >
         {{ field.description }}
       </p>
-    </div>
+    </template>
 
-    <div class="w-full shrink-0 sm:w-80">
+    <!-- Fixed control width so every field type lines up down the card. -->
+    <div class="w-full sm:w-80">
       <InputGroup v-if="field.type === 'secret'">
         <InputGroupInput
           :id="fieldId"
@@ -92,7 +94,7 @@
         @update:model-value="(v: string) => emit('update:modelValue', v)"
       />
     </div>
-  </div>
+  </SettingsRow>
 </template>
 
 <script setup lang="ts">
@@ -105,6 +107,7 @@ import {
 } from '@memohai/ui'
 import { Eye, EyeOff } from 'lucide-vue-next'
 import type { ChannelFieldSchema } from '@memohai/sdk'
+import SettingsRow from '@/components/settings/row.vue'
 
 const props = defineProps<{
   field: ChannelFieldSchema

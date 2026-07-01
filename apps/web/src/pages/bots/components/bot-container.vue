@@ -49,6 +49,7 @@ import ContainerCreateProgress from './container-create-progress.vue'
 import PageShell from '@/components/page-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import MetricReadout from '@/components/settings/metric-readout.vue'
 import CalloutBanner from '@/components/callout-banner/index.vue'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
@@ -1100,16 +1101,12 @@ watch([activeTab, botId], ([tab]) => {
             </ConfirmPopover>
           </CalloutBanner>
 
-          <!-- Storage soft-limit exceeded -->
-          <div
+          <!-- Storage soft-limit exceeded: a title-only warning, no action -->
+          <CalloutBanner
             v-if="storageSoftLimitExceeded"
-            class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-warning-border bg-warning-soft px-4 py-3"
-          >
-            <AlertCircle class="size-4 shrink-0 text-warning-foreground" />
-            <p class="text-sm text-warning-foreground">
-              {{ $t('bots.container.resourceLimits.storageSoftExceeded') }}
-            </p>
-          </div>
+            tone="warning"
+            :title="$t('bots.container.resourceLimits.storageSoftExceeded')"
+          />
         </div>
 
         <!-- ─── Container: status + usage, the one thing a glance comes for ─── -->
@@ -1134,30 +1131,20 @@ watch([activeTab, botId], ([tab]) => {
             </span>
           </div>
 
-          <!-- Three sibling cards with breathing room — calmer than hairline-joined
-               tiles for a three-value readout. -->
+          <!-- Three sibling tiles with breathing room — calmer than hairline-joined
+               tiles for a three-value readout. Caller owns the grid; each cell is a
+               framed MetricReadout. -->
           <div
             v-if="runtimeHasMetrics"
             class="grid grid-cols-3 gap-3"
           >
-            <div
+            <MetricReadout
               v-for="m in runtimeMetricCards"
               :key="m.key"
-              class="min-w-0 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3.5"
-            >
-              <p class="text-xs text-muted-foreground">
-                {{ m.label }}
-              </p>
-              <p class="mt-1 text-xl font-semibold tabular-nums text-foreground">
-                {{ m.value }}
-              </p>
-              <p
-                v-if="m.sub"
-                class="mt-0.5 truncate text-caption tabular-nums text-muted-foreground"
-              >
-                {{ m.sub }}
-              </p>
-            </div>
+              :label="m.label"
+              :value="m.value"
+              :sub="m.sub"
+            />
           </div>
           <div
             v-else

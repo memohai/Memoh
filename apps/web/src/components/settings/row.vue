@@ -58,10 +58,13 @@ const props = withDefaults(defineProps<{
   // rhythm; 'start' top-aligns when the body is tall (multi-line object rows) so
   // a leading avatar and a trailing control pin to the first line.
   align?: 'center' | 'start'
-  // Responsive stacking. 'never' keeps the row horizontal at every width (the
-  // default). 'sm' drops to a column below the sm breakpoint so a label and its
-  // control don't cramp on a narrow pane, then rejoins one line at sm.
-  stack?: 'never' | 'sm'
+  // Stacking of body vs. control. 'never' keeps the row horizontal at every
+  // width (the default). 'sm' drops to a column below the sm breakpoint so a
+  // label and its control don't cramp on a narrow pane, then rejoins one line
+  // at sm. 'always' stays a column at every width — the shape a multi-line
+  // field (a full-width Textarea under its label) needs, where the control is
+  // never a beside-the-label affordance.
+  stack?: 'never' | 'sm' | 'always'
 }>(), {
   label: '',
   description: '',
@@ -72,6 +75,13 @@ const props = withDefaults(defineProps<{
 const rootClass = computed(() => {
   // Full literal class strings only — Tailwind scans source text, so a runtime
   // `sm:${align}` concat would never be generated. Enumerate every combination.
+  if (props.stack === 'always') {
+    // A permanently stacked field: label row over a full-width control. gap-3
+    // is the label→control rhythm the house form column uses when a field
+    // stacks, wider than the sm-collapse gap-2 because here it's the resting
+    // state, not a narrow-screen fallback.
+    return 'flex-col gap-3'
+  }
   if (props.stack === 'sm') {
     return props.align === 'start'
       ? 'flex-col gap-2 sm:flex-row sm:items-start'
@@ -80,10 +90,15 @@ const rootClass = computed(() => {
   return props.align === 'start' ? 'items-start' : 'items-center'
 })
 
-// When stacked, the trailing control sits on its own line with no left inset;
-// ml-4 only makes sense once it's beside the body (sm and up).
-const trailingClass = computed(() =>
-  props.stack === 'sm' ? 'sm:ml-4' : 'ml-4',
-)
+// When stacked, the trailing control sits on its own line: no left inset, and
+// it spans the body's full width so a Textarea/Input fills the row instead of
+// hugging its content. ml-4 only makes sense once it's beside the body.
+const trailingClass = computed(() => {
+  switch (props.stack) {
+    case 'always': return 'w-full'
+    case 'sm': return 'sm:ml-4'
+    default: return 'ml-4'
+  }
+})
 </script>
 
