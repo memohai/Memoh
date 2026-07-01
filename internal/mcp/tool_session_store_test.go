@@ -26,17 +26,15 @@ func TestToolSessionContextStoreMergesLatestPromptContext(t *testing.T) {
 	}
 }
 
-func TestToolSessionContextMergePreservesSupportsImageInput(t *testing.T) {
+func TestToolSessionContextMergePreservesCapabilityFlags(t *testing.T) {
 	base := ToolSessionContext{BotID: "bot-1"}
-	merged := MergeToolSessionContext(base, ToolSessionContext{SupportsImageInput: true})
+	merged := MergeToolSessionContext(base, ToolSessionContext{
+		SupportsImageInput:  true,
+		CanRequestUserInput: true,
+	})
 	if !merged.SupportsImageInput {
 		t.Fatalf("SupportsImageInput = false, want true")
 	}
-}
-
-func TestToolSessionContextMergePreservesUserInputCapability(t *testing.T) {
-	base := ToolSessionContext{BotID: "bot-1"}
-	merged := MergeToolSessionContext(base, ToolSessionContext{CanRequestUserInput: true})
 	if !merged.CanRequestUserInput {
 		t.Fatalf("CanRequestUserInput = false, want true")
 	}

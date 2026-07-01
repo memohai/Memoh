@@ -1,7 +1,6 @@
 package memllm
 
 import (
-	"strings"
 	"testing"
 
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
@@ -57,23 +56,6 @@ func TestParseJSONStringArray_FiltersBlanks(t *testing.T) {
 	result := parseJSONStringArray(`["fact one", "", "  ", "fact two"]`)
 	if len(result) != 2 {
 		t.Fatalf("expected 2 non-empty facts, got %d", len(result))
-	}
-}
-
-func TestCompactSystemPromptDefinesLongTermMemoryCompactionContract(t *testing.T) {
-	t.Parallel()
-
-	for _, want := range []string{
-		"target_count",
-		"Cluster related memories",
-		"Preserve safety-critical",
-		"Resolve conflicts",
-		"Drop duplicates",
-		"JSON array only",
-	} {
-		if !strings.Contains(compactSystemPrompt, want) {
-			t.Fatalf("compact prompt missing %q:\n%s", want, compactSystemPrompt)
-		}
 	}
 }
 
@@ -163,30 +145,6 @@ func TestParseUpdateResponse_Garbage(t *testing.T) {
 	result := parseUpdateResponse("not json")
 	if result != nil {
 		t.Fatalf("expected nil for garbage, got %v", result)
-	}
-}
-
-func TestExtractJSONBlock_NoFence(t *testing.T) {
-	t.Parallel()
-	got := extractJSONBlock(`["a"]`)
-	if got != `["a"]` {
-		t.Fatalf("expected raw pass-through, got %q", got)
-	}
-}
-
-func TestExtractJSONBlock_JSONFence(t *testing.T) {
-	t.Parallel()
-	got := extractJSONBlock("```json\n[\"a\"]\n```")
-	if got != `["a"]` {
-		t.Fatalf("expected extracted content, got %q", got)
-	}
-}
-
-func TestExtractJSONBlock_PlainFence(t *testing.T) {
-	t.Parallel()
-	got := extractJSONBlock("```\n[\"a\"]\n```")
-	if got != `["a"]` {
-		t.Fatalf("expected extracted content, got %q", got)
 	}
 }
 

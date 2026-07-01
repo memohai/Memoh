@@ -5,49 +5,32 @@ import (
 	"unicode/utf8"
 )
 
-func TestTruncateSnippet_ASCII(t *testing.T) {
+func TestTruncateSnippet(t *testing.T) {
 	t.Parallel()
-	got := TruncateSnippet("hello world", 5)
-	if got != "hello..." {
-		t.Fatalf("expected %q, got %q", "hello...", got)
+	cases := []struct {
+		name     string
+		input    string
+		limit    int
+		want     string
+		utf8Safe bool
+	}{
+		{name: "ascii", input: "hello world", limit: 5, want: "hello..."},
+		{name: "no_truncation", input: "short", limit: 100, want: "short"},
+		{name: "cjk", input: "你好世界啊", limit: 3, want: "你好世...", utf8Safe: true},
+		{name: "trim_whitespace", input: "  hello  ", limit: 100, want: "hello"},
 	}
-}
-
-func TestTruncateSnippet_NoTruncation(t *testing.T) {
-	t.Parallel()
-	got := TruncateSnippet("short", 100)
-	if got != "short" {
-		t.Fatalf("expected %q, got %q", "short", got)
-	}
-}
-
-func TestTruncateSnippet_CJK(t *testing.T) {
-	t.Parallel()
-	got := TruncateSnippet("你好世界啊", 3)
-	if !utf8.ValidString(got) {
-		t.Fatalf("result is not valid UTF-8: %q", got)
-	}
-	if got != "你好世..." {
-		t.Fatalf("expected %q, got %q", "你好世...", got)
-	}
-}
-
-func TestTruncateSnippet_Emoji(t *testing.T) {
-	t.Parallel()
-	got := TruncateSnippet("😀😁😂🤣😃", 2)
-	if !utf8.ValidString(got) {
-		t.Fatalf("result is not valid UTF-8: %q", got)
-	}
-	if got != "😀😁..." {
-		t.Fatalf("expected %q, got %q", "😀😁...", got)
-	}
-}
-
-func TestTruncateSnippet_TrimWhitespace(t *testing.T) {
-	t.Parallel()
-	got := TruncateSnippet("  hello  ", 100)
-	if got != "hello" {
-		t.Fatalf("expected %q, got %q", "hello", got)
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := TruncateSnippet(tc.input, tc.limit)
+			if tc.utf8Safe && !utf8.ValidString(got) {
+				t.Fatalf("result is not valid UTF-8: %q", got)
+			}
+			if got != tc.want {
+				t.Fatalf("expected %q, got %q", tc.want, got)
+			}
+		})
 	}
 }
 

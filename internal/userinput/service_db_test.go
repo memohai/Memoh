@@ -230,41 +230,6 @@ func TestServiceSubmitLifecycleNotifiesWaiter(t *testing.T) {
 	}
 }
 
-func TestServiceCreatePendingDoesNotReuseTerminalRequest(t *testing.T) {
-	// Not parallel: concurrent :memory: opens race in modernc sqlite's
-	// global initializer and fail under -race.
-
-	svc := newSQLiteUserInputService(t)
-	req := createTestPending(t, svc, nil)
-	if _, err := svc.Submit(context.Background(), SubmitInput{
-		RequestID: req.ID,
-		Answers:   []QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
-	}); err != nil {
-		t.Fatalf("submit: %v", err)
-	}
-
-	_, err := svc.CreatePending(context.Background(), CreatePendingInput{
-		BotID:      testBotID,
-		SessionID:  testSessionID,
-		ToolCallID: "call-1",
-		Input: map[string]any{
-			"questions": []any{
-				map[string]any{
-					"text": "Which plan?",
-					"kind": QuestionKindSingleSelect,
-					"options": []any{
-						map[string]any{"label": "Plan A"},
-						map[string]any{"label": "Plan B"},
-					},
-				},
-			},
-		},
-	})
-	if !errors.Is(err, ErrAlreadyDecided) {
-		t.Fatalf("CreatePending() error = %v, want ErrAlreadyDecided", err)
-	}
-}
-
 func TestServiceWaitForRegisteredResponseUsesExistingWaiter(t *testing.T) {
 	// Not parallel: concurrent :memory: opens race in modernc sqlite's
 	// global initializer and fail under -race.

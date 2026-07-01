@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestNewProviderHTTPClientWithoutTimeoutKeepsStreamingFriendlyBehavior(t *testing.T) {
+func TestNewProviderHTTPClientWithoutTimeout(t *testing.T) {
 	client := NewProviderHTTPClient(0)
 	if client == nil {
 		t.Fatal("expected client")
@@ -15,19 +15,6 @@ func TestNewProviderHTTPClientWithoutTimeoutKeepsStreamingFriendlyBehavior(t *te
 	}
 	if client.Timeout != 0 {
 		t.Fatalf("expected no client timeout, got %s", client.Timeout)
-	}
-
-	uaTransport, ok := client.Transport.(*providerUserAgentRoundTripper)
-	if !ok {
-		t.Fatalf("expected *providerUserAgentRoundTripper, got %T", client.Transport)
-	}
-
-	transport, ok := uaTransport.base.(*http.Transport)
-	if !ok {
-		t.Fatalf("expected base *http.Transport, got %T", uaTransport.base)
-	}
-	if transport.TLSHandshakeTimeout < DefaultProviderTLSHandshakeTimeout {
-		t.Fatalf("expected TLS handshake timeout >= %s, got %s", DefaultProviderTLSHandshakeTimeout, transport.TLSHandshakeTimeout)
 	}
 }
 

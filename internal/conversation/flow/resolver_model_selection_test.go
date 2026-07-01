@@ -36,55 +36,31 @@ func TestOffEffortFor(t *testing.T) {
 	}
 }
 
-func TestMatchesModelReference_ModelID(t *testing.T) {
+func TestMatchesModelReference(t *testing.T) {
 	t.Parallel()
 
 	model := models.GetResponse{
 		ID:      "a55f0d2d-1547-49a0-b085-ec4ab778f4b8",
 		ModelID: "gpt-4o",
 	}
-
-	if !matchesModelReference(model, "gpt-4o") {
-		t.Fatal("expected model slug to match")
-	}
-}
-
-func TestMatchesModelReference_UUID(t *testing.T) {
-	t.Parallel()
-
-	model := models.GetResponse{
-		ID:      "a55f0d2d-1547-49a0-b085-ec4ab778f4b8",
-		ModelID: "gpt-4o",
+	tests := []struct {
+		name string
+		ref  string
+		want bool
+	}{
+		{name: "model id", ref: "gpt-4o", want: true},
+		{name: "uuid", ref: "a55f0d2d-1547-49a0-b085-ec4ab778f4b8", want: true},
+		{name: "trimmed input", ref: "  gpt-4o  ", want: true},
+		{name: "no match", ref: "gpt-4.1", want: false},
 	}
 
-	if !matchesModelReference(model, "a55f0d2d-1547-49a0-b085-ec4ab778f4b8") {
-		t.Fatal("expected model UUID to match")
-	}
-}
-
-func TestMatchesModelReference_NoMatch(t *testing.T) {
-	t.Parallel()
-
-	model := models.GetResponse{
-		ID:      "a55f0d2d-1547-49a0-b085-ec4ab778f4b8",
-		ModelID: "gpt-4o",
-	}
-
-	if matchesModelReference(model, "gpt-4.1") {
-		t.Fatal("expected non-matching model reference to fail")
-	}
-}
-
-func TestMatchesModelReference_TrimmedInput(t *testing.T) {
-	t.Parallel()
-
-	model := models.GetResponse{
-		ID:      "a55f0d2d-1547-49a0-b085-ec4ab778f4b8",
-		ModelID: "gpt-4o",
-	}
-
-	if !matchesModelReference(model, "  gpt-4o  ") {
-		t.Fatal("expected trimmed model slug to match")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := matchesModelReference(model, tt.ref); got != tt.want {
+				t.Fatalf("matchesModelReference(%q) = %v, want %v", tt.ref, got, tt.want)
+			}
+		})
 	}
 }
 

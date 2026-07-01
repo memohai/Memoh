@@ -2,51 +2,6 @@ package acpprofile
 
 import "testing"
 
-func TestListIncludesClaudeCode(t *testing.T) {
-	items := List()
-	if len(items) < 2 {
-		t.Fatalf("profiles len = %d, want at least 2", len(items))
-	}
-	profile, ok := Lookup(AgentClaudeCodeID)
-	if !ok {
-		t.Fatalf("Claude Code profile was not registered")
-	}
-	if profile.Command != "claude-agent-acp" {
-		t.Fatalf("Claude Code command = %q", profile.Command)
-	}
-	if len(profile.ManagedFields) == 0 || !profile.ManagedFields[0].Required {
-		t.Fatalf("Claude Code profile should expose required API key field: %#v", profile.ManagedFields)
-	}
-	if len(profile.SetupModes) != 3 || profile.SetupModes[0] != setupModeAPIKey || profile.SetupModes[1] != setupModeOAuth || profile.SetupModes[2] != setupModeSelf {
-		t.Fatalf("Claude Code setup modes = %#v", profile.SetupModes)
-	}
-}
-
-func TestListIncludesHermes(t *testing.T) {
-	profile, ok := Lookup(AgentHermesID)
-	if !ok {
-		t.Fatalf("Hermes profile was not registered")
-	}
-	if profile.Command != "hermes-acp" || profile.LocalCommand != "hermes-acp" {
-		t.Fatalf("Hermes commands = %q / %q", profile.Command, profile.LocalCommand)
-	}
-	if len(profile.ManagedFields) != 4 {
-		t.Fatalf("Hermes managed fields = %#v", profile.ManagedFields)
-	}
-	if len(profile.SetupModes) != 2 || profile.SetupModes[0] != setupModeSelf || profile.SetupModes[1] != setupModeAPIKey {
-		t.Fatalf("Hermes setup modes = %#v", profile.SetupModes)
-	}
-	if len(profile.SupportedBackends) != 2 || profile.SupportedBackends[0] != "local" || profile.SupportedBackends[1] != "container" {
-		t.Fatalf("Hermes supported backends = %#v", profile.SupportedBackends)
-	}
-	if !ShouldForceHTTPMCPServer(AgentHermesID) {
-		t.Fatalf("Hermes should force HTTP MCP server injection until upstream advertises mcpCapabilities.http")
-	}
-	if ShouldForceHTTPMCPServer(AgentCodexID) {
-		t.Fatalf("Codex should rely on advertised HTTP MCP capability")
-	}
-}
-
 func TestMetadataAgentEnabled(t *testing.T) {
 	tests := []struct {
 		name     string

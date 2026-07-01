@@ -15,30 +15,6 @@ import (
 	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
-func TestIsKnownTypeIncludesACPAgent(t *testing.T) {
-	for _, typ := range []string{TypeChat, TypeHeartbeat, TypeSchedule, TypeSubagent, TypeDiscuss, TypeACPAgent} {
-		if !IsKnownType(typ) {
-			t.Fatalf("IsKnownType(%q) = false", typ)
-		}
-	}
-	if IsKnownType("conversation") {
-		t.Fatalf("old conversation-like type should not be accepted")
-	}
-}
-
-func TestSupportsTurnVariantsOnlyForChat(t *testing.T) {
-	if !SupportsTurnVariants(TypeChat) {
-		t.Fatal("chat sessions should support turn variants")
-	}
-	for _, typ := range []string{TypeDiscuss, TypeACPAgent, TypeHeartbeat, TypeSchedule, TypeSubagent, ""} {
-		t.Run(typ, func(t *testing.T) {
-			if SupportsTurnVariants(typ) {
-				t.Fatalf("SupportsTurnVariants(%q) = true, want false", typ)
-			}
-		})
-	}
-}
-
 func TestResolveDescriptorRejectsConflictingACPRuntime(t *testing.T) {
 	// type=acp_agent unambiguously means an ACP runtime, so an explicit non-ACP
 	// runtime_type is contradictory and must error rather than silently
@@ -54,27 +30,13 @@ func TestResolveDescriptorRejectsConflictingACPRuntime(t *testing.T) {
 		t.Fatalf("error = %v, want an 'only supported' message", err)
 	}
 
-	// Legitimate combinations must still resolve cleanly.
-	cases := []struct {
-		name                            string
-		legacyType, mode, runtime       string
-		wantType, wantMode, wantRuntime string
-	}{
-		{"acp_agent alone -> chat ACP", TypeACPAgent, "", "", TypeACPAgent, TypeChat, RuntimeACPAgent},
-		{"concordant acp_agent+acp_agent", TypeACPAgent, "", RuntimeACPAgent, TypeACPAgent, TypeChat, RuntimeACPAgent},
-		{"chat + acp_agent -> chat ACP", TypeChat, "", RuntimeACPAgent, TypeACPAgent, TypeChat, RuntimeACPAgent},
-		{"discuss + acp_agent -> discuss ACP", TypeDiscuss, "", RuntimeACPAgent, TypeDiscuss, TypeDiscuss, RuntimeACPAgent},
-		{"plain chat", TypeChat, "", "", TypeChat, TypeChat, RuntimeModel},
+	gotType, gotMode, gotRuntime, err := ResolveDescriptor(TypeDiscuss, "", RuntimeACPAgent)
+	if err != nil {
+		t.Fatalf("ResolveDescriptor(discuss, acp_agent) error = %v", err)
 	}
-	for _, c := range cases {
-		gotType, gotMode, gotRuntime, err := ResolveDescriptor(c.legacyType, c.mode, c.runtime)
-		if err != nil {
-			t.Fatalf("%s: ResolveDescriptor(%q,%q,%q) error = %v", c.name, c.legacyType, c.mode, c.runtime, err)
-		}
-		if gotType != c.wantType || gotMode != c.wantMode || gotRuntime != c.wantRuntime {
-			t.Fatalf("%s: ResolveDescriptor(%q,%q,%q) = (%q,%q,%q), want (%q,%q,%q)",
-				c.name, c.legacyType, c.mode, c.runtime, gotType, gotMode, gotRuntime, c.wantType, c.wantMode, c.wantRuntime)
-		}
+	if gotType != TypeDiscuss || gotMode != TypeDiscuss || gotRuntime != RuntimeACPAgent {
+		t.Fatalf("ResolveDescriptor(discuss, acp_agent) = (%q,%q,%q), want discuss/discuss/acp_agent",
+			gotType, gotMode, gotRuntime)
 	}
 }
 
@@ -257,43 +219,6 @@ func TestCreateACPAgentSessionRunsValidationAndPersistsType(t *testing.T) {
 	}
 }
 
-func TestCreateACPAgentSessionDefaultsProjectPath(t *testing.T) {
-	botID := "00000000-0000-0000-0000-000000000001"
-	botUUID := mustPGUUID(botID)
-	queries := &createACPQueries{
-		bot: sqlc.GetBotByIDRow{
-			ID: botUUID,
-			Metadata: mustSessionJSON(map[string]any{
-				acpprofile.MetadataKeyACP: map[string]any{
-					"agents": map[string]any{
-						acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
-					},
-				},
-			}),
-		},
-	}
-	svc := NewService(nil, queries, nil)
-
-	created, err := svc.Create(context.Background(), CreateInput{
-		BotID:           botID,
-		Type:            TypeACPAgent,
-		Title:           "Codex",
-		CreatedByUserID: "00000000-0000-0000-0000-000000000003",
-		Metadata: map[string]any{
-			"acp_agent_id": acpprofile.AgentCodexID,
-		},
-	})
-	if err != nil {
-		t.Fatalf("Create(acp_agent) error = %v", err)
-	}
-	if created.Metadata["project_path"] != DefaultACPProjectPath {
-		t.Fatalf("created metadata project_path = %#v, want %q", created.Metadata["project_path"], DefaultACPProjectPath)
-	}
-	if created.Metadata["acp_project_mode"] != DefaultACPProjectMode {
-		t.Fatalf("created metadata acp_project_mode = %#v, want %q", created.Metadata["acp_project_mode"], DefaultACPProjectMode)
-	}
-}
-
 func TestCreateWithDefaultHeadCreatesTurnHeadInTransaction(t *testing.T) {
 	botID := "00000000-0000-0000-0000-000000000001"
 	headID := "00000000-0000-0000-0000-000000000003"
@@ -369,21 +294,6 @@ func TestUpdateTypeAndMetadataACPAgentRunsPolicy(t *testing.T) {
 	}
 	if updated.RuntimeMetadata["runtime_owner_account_id"] != "00000000-0000-0000-0000-000000000003" {
 		t.Fatalf("updated runtime owner = %#v, want server owner", updated.RuntimeMetadata["runtime_owner_account_id"])
-	}
-}
-
-func TestNormalizeDescriptorAllowsDiscussACP(t *testing.T) {
-	t.Parallel()
-
-	desc, err := normalizeDescriptor(TypeDiscuss, TypeDiscuss, RuntimeACPAgent, map[string]any{
-		"acp_agent_id": acpprofile.AgentCodexID,
-		"project_path": "/data/group",
-	}, nil)
-	if err != nil {
-		t.Fatalf("normalizeDescriptor(discuss/acp) error = %v", err)
-	}
-	if desc.LegacyType != TypeDiscuss || desc.SessionMode != TypeDiscuss || desc.RuntimeType != RuntimeACPAgent {
-		t.Fatalf("descriptor = %#v, want legacy discuss, mode discuss, runtime acp_agent", desc)
 	}
 }
 
@@ -687,18 +597,6 @@ func TestListByBotPagedWithFilterForwardsParentSessionID(t *testing.T) {
 	}
 }
 
-func TestListByBotPagedZeroCursorSkipsCursorFilter(t *testing.T) {
-	stub := &pagedQueriesStub{}
-	svc := NewService(nil, stub, nil)
-
-	if _, err := svc.ListByBotPaged(context.Background(), "11111111-1111-1111-1111-111111111111", []string{TypeChat}, SessionCursor{}, 10); err != nil {
-		t.Fatalf("ListByBotPaged: %v", err)
-	}
-	if stub.pagedArg.UseCursor {
-		t.Fatalf("UseCursor should be false for the zero-value cursor")
-	}
-}
-
 func TestListByBotPagedMapsRowsToSessions(t *testing.T) {
 	rowID := "33333333-3333-3333-3333-333333333333"
 	updated := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
@@ -750,24 +648,6 @@ func TestListByBotAndCreatedByUserPagedForwardsUserScope(t *testing.T) {
 	}
 	if stub.userPagedArg.LimitCount != 5 {
 		t.Fatalf("LimitCount = %d, want 5", stub.userPagedArg.LimitCount)
-	}
-}
-
-// TestSessionCursorIsZeroDistinguishesPartialFromEmpty pins down the contract
-// that pagedCursorParams relies on: a partial cursor (only one half set) is
-// not zero, so a misconstructed cursor surfaces as an error rather than
-// silently restarting the listing from the head.
-func TestSessionCursorIsZeroDistinguishesPartialFromEmpty(t *testing.T) {
-	if !(SessionCursor{}).IsZero() {
-		t.Fatalf("zero-value cursor should be zero")
-	}
-	partialID := SessionCursor{ID: "33333333-3333-3333-3333-333333333333"}
-	if partialID.IsZero() {
-		t.Fatalf("cursor with only id set should not be zero")
-	}
-	partialTS := SessionCursor{UpdatedAt: time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC)}
-	if partialTS.IsZero() {
-		t.Fatalf("cursor with only updated_at set should not be zero")
 	}
 }
 

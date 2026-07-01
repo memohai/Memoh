@@ -12,41 +12,12 @@ import (
 	sqlitestore "github.com/memohai/memoh/internal/db/sqlite/store"
 )
 
-func TestEnsureDefaultsCreatesFetchProviders(t *testing.T) {
+func TestNativeFetchProviderIsManagedAndKeptEnabled(t *testing.T) {
 	ctx := context.Background()
 	conn, svc := newFetchProviderTestService(t, ctx)
 
 	if err := svc.EnsureDefaults(ctx); err != nil {
 		t.Fatalf("EnsureDefaults() error = %v", err)
-	}
-
-	list, err := svc.List(ctx, "")
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
-	}
-	byProvider := map[string]GetResponse{}
-	for _, item := range list {
-		byProvider[item.Provider] = item
-	}
-
-	if len(byProvider) != 3 {
-		t.Fatalf("providers len = %d, want 3", len(byProvider))
-	}
-	if got := byProvider[string(ProviderNative)]; got.Name != "Native" || !got.Enable {
-		t.Fatalf("native = %+v, want enabled Native", got)
-	}
-	if got := byProvider[string(ProviderJina)]; got.Name != "Jina Reader" || got.Enable {
-		t.Fatalf("jina = %+v, want disabled Jina Reader", got)
-	}
-	if got := byProvider[string(ProviderCloudflareMarkdown)]; got.Name != "Cloudflare Markdown" || got.Enable {
-		t.Fatalf("cloudflare = %+v, want disabled Cloudflare Markdown", got)
-	}
-
-	if _, err := conn.ExecContext(ctx, `UPDATE fetch_providers SET enable = 0 WHERE provider = ?`, string(ProviderNative)); err != nil {
-		t.Fatalf("disable native directly: %v", err)
-	}
-	if err := svc.EnsureDefaults(ctx); err != nil {
-		t.Fatalf("EnsureDefaults() re-enable error = %v", err)
 	}
 	nativeRows, err := svc.List(ctx, string(ProviderNative))
 	if err != nil {
@@ -55,24 +26,26 @@ func TestEnsureDefaultsCreatesFetchProviders(t *testing.T) {
 	if len(nativeRows) != 1 || !nativeRows[0].Enable {
 		t.Fatalf("native rows = %+v, want one enabled native", nativeRows)
 	}
-}
-
-func TestNativeFetchProviderIsManaged(t *testing.T) {
-	ctx := context.Background()
-	_, svc := newFetchProviderTestService(t, ctx)
-
-	if err := svc.EnsureDefaults(ctx); err != nil {
-		t.Fatalf("EnsureDefaults() error = %v", err)
-	}
-	nativeRows, err := svc.List(ctx, string(ProviderNative))
-	if err != nil {
-		t.Fatalf("List(native) error = %v", err)
-	}
 	nativeID := nativeRows[0].ID
 
 	if _, err := svc.Create(ctx, CreateRequest{Name: "Another Native", Provider: ProviderNative}); !errors.Is(err, ErrManagedNativeProvider) {
 		t.Fatalf("Create(native) error = %v, want ErrManagedNativeProvider", err)
 	}
+
+	if _, err := conn.ExecContext(ctx, `UPDATE fetch_providers SET enable = 0 WHERE provider = ?`, string(ProviderNative)); err != nil {
+		t.Fatalf("disable native directly: %v", err)
+	}
+	if err := svc.EnsureDefaults(ctx); err != nil {
+		t.Fatalf("EnsureDefaults() re-enable error = %v", err)
+	}
+	nativeRows, err = svc.List(ctx, string(ProviderNative))
+	if err != nil {
+		t.Fatalf("List(native) error = %v", err)
+	}
+	if len(nativeRows) != 1 || !nativeRows[0].Enable {
+		t.Fatalf("native rows = %+v, want one enabled native", nativeRows)
+	}
+
 	disabled := false
 	if _, err := svc.Update(ctx, nativeID, UpdateRequest{Enable: &disabled}); !errors.Is(err, ErrManagedNativeProvider) {
 		t.Fatalf("Update(native disable) error = %v, want ErrManagedNativeProvider", err)

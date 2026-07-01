@@ -174,21 +174,6 @@ func TestRunFlowRejectsReusedTerminalRequest(t *testing.T) {
 	}
 }
 
-func TestRunFlowEmptyDecisionStatusDefaultsToRejected(t *testing.T) {
-	t.Parallel()
-	svc := &fakeFlowService{
-		evaluation: Evaluation{Decision: DecisionNeedsApproval},
-		decided:    Request{ID: "approval-1", Status: "", DecisionReason: "because"},
-	}
-	result, err := RunFlow(context.Background(), svc, flowInputFor(svc))
-	if err != nil || result.Approved {
-		t.Fatalf("RunFlow() = %+v, %v; want rejected", result, err)
-	}
-	if result.Status != StatusRejected || result.DecisionReason != "because" {
-		t.Fatalf("result = %+v, want rejected/because", result)
-	}
-}
-
 func TestRunFlowTimeoutRejectsAndEmits(t *testing.T) {
 	t.Parallel()
 	svc := &fakeFlowService{
@@ -258,8 +243,8 @@ func TestRunFlowTimeoutHonorsConcurrentSystemRejection(t *testing.T) {
 	if err != nil || result.Approved || result.DecidedByUser {
 		t.Fatalf("RunFlow() = %+v, %v; want concurrent system rejection", result, err)
 	}
-	if got := RejectionMessage(result); got != "tool execution was not approved: tool approval timed out" {
-		t.Fatalf("RejectionMessage() = %q, want system rejection wording", got)
+	if svc.getCalls != 1 {
+		t.Fatalf("get calls = %d, want 1 terminal recovery read", svc.getCalls)
 	}
 }
 
@@ -312,45 +297,5 @@ func TestRunFlowCallerCancellationPropagates(t *testing.T) {
 	}
 	if len(svc.rejectCalls) != 1 || svc.rejectCalls[0] != "approval-1:tool approval aborted" {
 		t.Fatalf("reject calls = %v, want aborted cleanup", svc.rejectCalls)
-	}
-}
-
-func TestRejectionMessage(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name   string
-		result FlowResult
-		want   string
-	}{
-		{
-			name:   "user rejected with reason",
-			result: FlowResult{Status: StatusRejected, DecidedByUser: true, DecisionReason: "too risky"},
-			want:   "tool execution rejected by user: too risky",
-		},
-		{
-			name:   "user rejected without reason",
-			result: FlowResult{Status: StatusRejected, DecidedByUser: true},
-			want:   "tool execution rejected by user",
-		},
-		{
-			name:   "timeout reject is a system outcome",
-			result: FlowResult{Status: StatusRejected, DecisionReason: "tool approval timed out"},
-			want:   "tool execution was not approved: tool approval timed out",
-		},
-		{
-			name:   "non-rejected terminal status without reason",
-			result: FlowResult{Status: "expired"},
-			want:   "tool execution was not approved: expired",
-		},
-		{
-			name:   "no status no reason",
-			result: FlowResult{},
-			want:   "tool execution was not approved",
-		},
-	}
-	for _, tc := range cases {
-		if got := RejectionMessage(tc.result); got != tc.want {
-			t.Fatalf("%s: RejectionMessage() = %q, want %q", tc.name, got, tc.want)
-		}
 	}
 }

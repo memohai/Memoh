@@ -66,110 +66,71 @@ func (p *gatewayTestProvider) CallTool(_ context.Context, _ ToolSessionContext, 
 	return nil, ErrToolNotFound
 }
 
-func TestToolGatewayServiceCacheSeparatesSessionID(t *testing.T) {
-	provider := &countingGatewayTestProvider{}
-	service := NewToolGatewayService(slog.Default(), []ToolSource{provider})
-	session := ToolSessionContext{
-		BotID:             "bot-1",
-		SessionID:         "session-1",
-		SessionType:       "acp_agent",
-		ChannelIdentityID: "user-1",
+func TestToolGatewayServiceCacheSeparatesPromptContext(t *testing.T) {
+	tests := []struct {
+		name    string
+		session ToolSessionContext
+		mutate  func(*ToolSessionContext)
+	}{
+		{
+			name: "session id",
+			session: ToolSessionContext{
+				BotID:             "bot-1",
+				SessionID:         "session-1",
+				SessionType:       "acp_agent",
+				ChannelIdentityID: "user-1",
+			},
+			mutate: func(session *ToolSessionContext) {
+				session.SessionID = "session-2"
+			},
+		},
+		{
+			name:    "stream id",
+			session: ToolSessionContext{BotID: "bot-1", SessionID: "session-1", SessionType: "chat"},
+			mutate: func(session *ToolSessionContext) {
+				session.StreamID = "stream-1"
+			},
+		},
+		{
+			name:    "session type",
+			session: ToolSessionContext{BotID: "bot-1", SessionID: "session-1", SessionType: "chat"},
+			mutate: func(session *ToolSessionContext) {
+				session.SessionType = "schedule"
+			},
+		},
+		{
+			name:    "user input capability",
+			session: ToolSessionContext{BotID: "bot-1", SessionID: "session-1", StreamID: "stream-1", SessionType: "chat"},
+			mutate: func(session *ToolSessionContext) {
+				session.CanRequestUserInput = true
+			},
+		},
+		{
+			name:    "image capability",
+			session: ToolSessionContext{BotID: "bot-1", SessionID: "session-1", SessionType: "chat"},
+			mutate: func(session *ToolSessionContext) {
+				session.SupportsImageInput = true
+			},
+		},
 	}
 
-	if _, err := service.ListTools(context.Background(), session); err != nil {
-		t.Fatalf("list tools failed: %v", err)
-	}
-	session.SessionID = "session-2"
-	if _, err := service.ListTools(context.Background(), session); err != nil {
-		t.Fatalf("list tools failed: %v", err)
-	}
-	if provider.calls != 2 {
-		t.Fatalf("ListTools calls = %d, want separate cache entries by session ID", provider.calls)
-	}
-}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := &countingGatewayTestProvider{}
+			service := NewToolGatewayService(slog.Default(), []ToolSource{provider})
+			session := tc.session
 
-func TestToolGatewayServiceCacheSeparatesStreamID(t *testing.T) {
-	provider := &countingGatewayTestProvider{}
-	service := NewToolGatewayService(slog.Default(), []ToolSource{provider})
-	session := ToolSessionContext{
-		BotID:       "bot-1",
-		SessionID:   "session-1",
-		SessionType: "chat",
-	}
-
-	if _, err := service.ListTools(context.Background(), session); err != nil {
-		t.Fatalf("list tools failed: %v", err)
-	}
-	session.StreamID = "stream-1"
-	if _, err := service.ListTools(context.Background(), session); err != nil {
-		t.Fatalf("list tools after stream change failed: %v", err)
-	}
-	if provider.calls != 2 {
-		t.Fatalf("ListTools calls = %d, want separate cache entries by stream ID", provider.calls)
-	}
-}
-
-func TestToolGatewayServiceCacheSeparatesSessionType(t *testing.T) {
-	provider := &countingGatewayTestProvider{}
-	service := NewToolGatewayService(slog.Default(), []ToolSource{provider})
-	session := ToolSessionContext{
-		BotID:       "bot-1",
-		SessionID:   "session-1",
-		SessionType: "chat",
-	}
-
-	if _, err := service.ListTools(context.Background(), session); err != nil {
-		t.Fatalf("list tools failed: %v", err)
-	}
-	session.SessionType = "schedule"
-	if _, err := service.ListTools(context.Background(), session); err != nil {
-		t.Fatalf("list tools after session type change failed: %v", err)
-	}
-	if provider.calls != 2 {
-		t.Fatalf("ListTools calls = %d, want separate cache entries by session type", provider.calls)
-	}
-}
-
-func TestToolGatewayServiceCacheSeparatesUserInputCapability(t *testing.T) {
-	provider := &countingGatewayTestProvider{}
-	service := NewToolGatewayService(slog.Default(), []ToolSource{provider})
-	session := ToolSessionContext{
-		BotID:       "bot-1",
-		SessionID:   "session-1",
-		StreamID:    "stream-1",
-		SessionType: "chat",
-	}
-
-	if _, err := service.ListTools(context.Background(), session); err != nil {
-		t.Fatalf("list tools failed: %v", err)
-	}
-	session.CanRequestUserInput = true
-	if _, err := service.ListTools(context.Background(), session); err != nil {
-		t.Fatalf("list tools after user input capability change failed: %v", err)
-	}
-	if provider.calls != 2 {
-		t.Fatalf("ListTools calls = %d, want separate cache entries by user input capability", provider.calls)
-	}
-}
-
-func TestToolGatewayServiceCacheSeparatesImageCapability(t *testing.T) {
-	provider := &countingGatewayTestProvider{}
-	service := NewToolGatewayService(slog.Default(), []ToolSource{provider})
-	session := ToolSessionContext{
-		BotID:       "bot-1",
-		SessionID:   "session-1",
-		SessionType: "chat",
-	}
-
-	if _, err := service.ListTools(context.Background(), session); err != nil {
-		t.Fatalf("list tools failed: %v", err)
-	}
-	session.SupportsImageInput = true
-	if _, err := service.ListTools(context.Background(), session); err != nil {
-		t.Fatalf("list tools after image capability change failed: %v", err)
-	}
-	if provider.calls != 2 {
-		t.Fatalf("ListTools calls = %d, want separate cache entries by image capability", provider.calls)
+			if _, err := service.ListTools(context.Background(), session); err != nil {
+				t.Fatalf("list tools failed: %v", err)
+			}
+			tc.mutate(&session)
+			if _, err := service.ListTools(context.Background(), session); err != nil {
+				t.Fatalf("list tools after context change failed: %v", err)
+			}
+			if provider.calls != 2 {
+				t.Fatalf("ListTools calls = %d, want separate cache entries", provider.calls)
+			}
+		})
 	}
 }
 

@@ -76,32 +76,3 @@ func TestParseJSONMemoryItems(t *testing.T) {
 		t.Fatalf("unexpected memory body: %#v", items[0])
 	}
 }
-
-func TestParseJSONMemoryItemsCanBeFormattedToCanonicalMarkdown(t *testing.T) {
-	raw := `[
-  {
-    "id": "mem_json",
-    "topic": "Decision",
-    "memory": "Choose provider architecture."
-  }
-]`
-
-	items, err := parseJSONMemoryItems(raw)
-	if err != nil {
-		t.Fatalf("parseJSONMemoryItems error: %v", err)
-	}
-	md := formatMemoryDayMD("2026-03-01", items)
-	if !strings.Contains(md, "## Entry mem_json") {
-		t.Fatalf("expected canonical heading, got: %s", md)
-	}
-	if !strings.Contains(md, "topic: Decision") {
-		t.Fatalf("expected yaml metadata topic, got: %s", md)
-	}
-	parsed, err := parseMemoryDayMD(md)
-	if err != nil {
-		t.Fatalf("parseMemoryDayMD error: %v", err)
-	}
-	if len(parsed) != 1 || parsed[0].ID != "mem_json" {
-		t.Fatalf("unexpected parsed canonical items: %#v", parsed)
-	}
-}

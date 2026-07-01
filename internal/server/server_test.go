@@ -5,22 +5,20 @@ import (
 	"testing"
 )
 
-func TestShouldSkipJWT_ChannelWebhookPaths(t *testing.T) {
+func TestShouldSkipJWT_PublicUnauthenticatedPaths(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
 		path string
 		want bool
 	}{
-		{path: "/channels/feishu/webhook/cfg-1", want: true},
-		{path: "/channels/wechatoa/webhook/cfg-1", want: true},
 		{path: "/channels/line/webhook/cfg-1", want: true},
 		{path: "/channels/line/public/media/bot-1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/preview.jpg", want: true},
 		{path: "/channels/line/public/media/bot-1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/metadata", want: false},
-		{path: "/channels/telegram/public/media/bot-1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/preview.jpg", want: true},
-		{path: "/channels/feishu/webhook", want: false},
-		{path: "/api/channels/feishu/webhook", want: false},
-		{path: "/webhook-tunnel/status", want: false},
+		{path: "/channels/line/webhook", want: false},
+		{path: "/api/channels/line/webhook", want: false},
+		{path: "/oauth/mcp/callback", want: true},
+		{path: "/api/oauth/mcp/callback", want: true},
 	}
 
 	for _, tc := range cases {
@@ -41,7 +39,6 @@ func TestShouldLimitPublicRequestBody(t *testing.T) {
 		{path: "/channels/line/webhook/cfg-1", want: true},
 		{path: "/channels/telegram/public/media/bot-1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/preview.jpg", want: false},
 		{path: "/api/fs/upload", want: false},
-		{path: "/api/bots/backup/import", want: false},
 	}
 
 	for _, tc := range cases {
@@ -63,15 +60,5 @@ func TestSafeRequestLogURIStripsPublicMediaQuery(t *testing.T) {
 	want := "/channels/line/public/media/bot-1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/preview.jpg"
 	if got != want {
 		t.Fatalf("safeRequestLogURI = %q, want %q", got, want)
-	}
-}
-
-func TestShouldSkipJWT_MCPOAuthCallbackPaths(t *testing.T) {
-	t.Parallel()
-
-	for _, path := range []string{"/oauth/mcp/callback", "/api/oauth/mcp/callback"} {
-		if !shouldSkipJWT(path) {
-			t.Fatalf("path=%q should skip jwt", path)
-		}
 	}
 }

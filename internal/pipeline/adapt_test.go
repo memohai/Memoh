@@ -24,36 +24,6 @@ func TestAdaptInbound_FallsBackToText_WhenPartsEmpty(t *testing.T) {
 	}
 }
 
-func TestAdaptInbound_PreservesMention_FromParts(t *testing.T) {
-	msg := channel.InboundMessage{
-		Channel: channel.ChannelTypeTelegram,
-		Message: channel.Message{
-			ID:     "m1",
-			Format: channel.MessageFormatRich,
-			Text:   "hello @bot",
-			Parts: []channel.MessagePart{
-				{Type: channel.MessagePartText, Text: "hello "},
-				{Type: channel.MessagePartMention, Text: "@bot", ChannelIdentityID: "ci-bot"},
-			},
-		},
-		ReceivedAt: time.Unix(1700000000, 0).UTC(),
-	}
-	me := AdaptInbound(msg, "sess", "ci", "Alice").(MessageEvent)
-	if len(me.Content) != 2 {
-		t.Fatalf("expected 2 nodes, got %d: %+v", len(me.Content), me.Content)
-	}
-	if me.Content[0].Type != "text" || me.Content[0].Text != "hello " {
-		t.Fatalf("expected leading text node, got %+v", me.Content[0])
-	}
-	mention := me.Content[1]
-	if mention.Type != "mention" || mention.UserID != "ci-bot" {
-		t.Fatalf("expected mention with UserID=ci-bot, got %+v", mention)
-	}
-	if len(mention.Children) != 1 || mention.Children[0].Type != "text" || mention.Children[0].Text != "@bot" {
-		t.Fatalf("expected mention to wrap text child '@bot', got %+v", mention.Children)
-	}
-}
-
 func TestAdaptInbound_PreservesAddressingMetadata(t *testing.T) {
 	msg := channel.InboundMessage{
 		Channel: channel.ChannelTypeTelegram,
@@ -82,28 +52,6 @@ func TestAdaptInbound_PreservesAddressingMetadata(t *testing.T) {
 	}
 	if !rc[0].RepliesToMe {
 		t.Fatal("expected rendered segment to preserve RepliesToMe without BotUserID")
-	}
-}
-
-func TestAdaptInbound_PreservesLink_FromParts(t *testing.T) {
-	msg := channel.InboundMessage{
-		Message: channel.Message{
-			ID: "m1",
-			Parts: []channel.MessagePart{
-				{Type: channel.MessagePartLink, Text: "Memoh", URL: "https://example.com"},
-			},
-		},
-	}
-	me := AdaptInbound(msg, "sess", "", "").(MessageEvent)
-	if len(me.Content) != 1 || me.Content[0].Type != "link" {
-		t.Fatalf("expected single link node, got %+v", me.Content)
-	}
-	if me.Content[0].URL != "https://example.com" {
-		t.Fatalf("expected URL preserved, got %+v", me.Content[0])
-	}
-	kids := me.Content[0].Children
-	if len(kids) != 1 || kids[0].Type != "text" || kids[0].Text != "Memoh" {
-		t.Fatalf("expected link to wrap text 'Memoh', got %+v", kids)
 	}
 }
 

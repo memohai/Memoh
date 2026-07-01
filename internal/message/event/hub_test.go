@@ -42,33 +42,29 @@ func TestHubCancelUnsubscribe(t *testing.T) {
 	}
 }
 
-func TestHubSlowSubscriberDoesNotBlockPublish(t *testing.T) {
-	hub := NewHub()
-	sub, cancel := hub.Subscribe("bot-a", 1)
-	defer cancel()
-
-	hub.Publish(Event{Type: EventTypeMessageCreated, BotID: "bot-a"})
-	hub.Publish(Event{Type: EventTypeMessageCreated, BotID: "bot-a"})
-	hub.Publish(Event{Type: EventTypeMessageCreated, BotID: "bot-a"})
-
-	select {
-	case <-sub.Events:
-	case <-time.After(200 * time.Millisecond):
-		t.Fatalf("expected at least one event in buffer")
-	}
-}
-
-// TestHubSubscriptionDroppedCounter pins the per-subscription drop accounting
-// the SSE writers rely on to emit a `dropped` frame to the client. Sending
-// 5 events into a buffer-2 subscription yields 3 drops; reading the counter
-// resets it so the next read starts fresh.
-func TestHubSubscriptionDroppedCounter(t *testing.T) {
+func TestHubSlowSubscriberDropsEventsWithoutBlocking(t *testing.T) {
 	hub := NewHub()
 	sub, cancel := hub.Subscribe("bot-a", 2)
 	defer cancel()
 
-	for i := 0; i < 5; i++ {
-		hub.Publish(Event{Type: EventTypeMessageCreated, BotID: "bot-a"})
+	published := make(chan struct{})
+	go func() {
+		defer close(published)
+		for i := 0; i < 5; i++ {
+			hub.Publish(Event{Type: EventTypeMessageCreated, BotID: "bot-a"})
+		}
+	}()
+
+	select {
+	case <-published:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatalf("Publish blocked on full subscriber buffer")
+	}
+
+	select {
+	case <-sub.Events:
+	default:
+		t.Fatalf("expected at least one event in buffer")
 	}
 
 	if got := sub.DroppedSinceLastRead(); got != 3 {

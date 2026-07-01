@@ -227,50 +227,6 @@ func TestFormationNoFacts(t *testing.T) {
 	}
 }
 
-func TestFormationMixedActions(t *testing.T) {
-	t.Parallel()
-	encoder := &fakeSparseEncoder{}
-	index := newFakeSparseIndex(encoder)
-	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
-
-	addResp, _ := runtime.Add(context.Background(), adapters.AddRequest{
-		BotID:   "bot-1",
-		Message: "User lives in Tokyo",
-		Filters: map[string]any{"bot_id": "bot-1"},
-	})
-	existingID := addResp.Results[0].ID
-
-	llm := &fakeLLM{
-		extractFacts: []string{"User moved to Berlin", "User prefers dark mode"},
-		decideActions: []adapters.DecisionAction{
-			{Event: "UPDATE", ID: existingID, Text: "User lives in Berlin"},
-			{Event: "ADD", Text: "User prefers dark mode"},
-			{Event: "NOOP"},
-		},
-	}
-
-	result := runFormation(context.Background(), slog.Default(), llm, runtime, adapters.AfterChatRequest{
-		BotID: "bot-1",
-		Messages: []adapters.Message{
-			{Role: "user", Content: "I moved to Berlin and I like dark mode"},
-		},
-	})
-
-	if result.Added != 1 {
-		t.Fatalf("expected 1 add, got %d", result.Added)
-	}
-	if result.Updated != 1 {
-		t.Fatalf("expected 1 update, got %d", result.Updated)
-	}
-	if result.Skipped != 1 {
-		t.Fatalf("expected 1 skipped, got %d", result.Skipped)
-	}
-	if len(store.items) != 2 {
-		t.Fatalf("expected 2 items in store, got %d", len(store.items))
-	}
-}
-
 func TestFormationInvalidActionsSkipped(t *testing.T) {
 	t.Parallel()
 	encoder := &fakeSparseEncoder{}

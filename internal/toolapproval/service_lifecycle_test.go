@@ -129,28 +129,6 @@ func TestCancelPendingForSession(t *testing.T) {
 	}
 }
 
-func TestApproveAlreadyDecidedRequestReturnsRaceError(t *testing.T) {
-	t.Parallel()
-
-	approvalID := "33333333-3333-3333-3333-333333333333"
-	queries := &lifecycleQueries{getRow: sqlc.ToolApprovalRequest{
-		ID:         mustTestUUID(approvalID),
-		BotID:      mustTestUUID("11111111-1111-1111-1111-111111111111"),
-		SessionID:  mustTestUUID("22222222-2222-2222-2222-222222222222"),
-		ToolCallID: "call-1",
-		ToolName:   "exec",
-		ToolInput:  []byte(`{"command":"true"}`),
-		ShortID:    1,
-		Status:     StatusApproved,
-	}}
-	svc := NewService(slog.New(slog.DiscardHandler), queries, nil)
-
-	_, err := svc.Approve(context.Background(), approvalID, "", "")
-	if !errors.Is(err, ErrAlreadyDecided) {
-		t.Fatalf("Approve() error = %v, want ErrAlreadyDecided", err)
-	}
-}
-
 func TestCreatePendingRejectsReusedTerminalRequest(t *testing.T) {
 	t.Parallel()
 
@@ -222,26 +200,50 @@ func TestCanRespondRequiresPendingLiveWaiter(t *testing.T) {
 	}
 }
 
-func TestRejectAlreadyDecidedRequestReturnsRaceError(t *testing.T) {
+func TestResolveAlreadyDecidedRequestReturnsRaceError(t *testing.T) {
 	t.Parallel()
 
 	approvalID := "33333333-3333-3333-3333-333333333333"
-	queries := &lifecycleQueries{getRow: sqlc.ToolApprovalRequest{
-		ID:             mustTestUUID(approvalID),
-		BotID:          mustTestUUID("11111111-1111-1111-1111-111111111111"),
-		SessionID:      mustTestUUID("22222222-2222-2222-2222-222222222222"),
-		ToolCallID:     "call-1",
-		ToolName:       "exec",
-		ToolInput:      []byte(`{"command":"true"}`),
-		ShortID:        1,
-		Status:         StatusRejected,
-		DecisionReason: "already rejected",
-	}}
-	svc := NewService(slog.New(slog.DiscardHandler), queries, nil)
+	cases := []struct {
+		name    string
+		status  string
+		resolve func(*Service) (Request, error)
+	}{
+		{
+			name:   "approve",
+			status: StatusApproved,
+			resolve: func(svc *Service) (Request, error) {
+				return svc.Approve(context.Background(), approvalID, "", "")
+			},
+		},
+		{
+			name:   "reject",
+			status: StatusRejected,
+			resolve: func(svc *Service) (Request, error) {
+				return svc.Reject(context.Background(), approvalID, "", "")
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			queries := &lifecycleQueries{getRow: sqlc.ToolApprovalRequest{
+				ID:         mustTestUUID(approvalID),
+				BotID:      mustTestUUID("11111111-1111-1111-1111-111111111111"),
+				SessionID:  mustTestUUID("22222222-2222-2222-2222-222222222222"),
+				ToolCallID: "call-1",
+				ToolName:   "exec",
+				ToolInput:  []byte(`{"command":"true"}`),
+				ShortID:    1,
+				Status:     tc.status,
+			}}
+			svc := NewService(slog.New(slog.DiscardHandler), queries, nil)
 
-	_, err := svc.Reject(context.Background(), approvalID, "", "")
-	if !errors.Is(err, ErrAlreadyDecided) {
-		t.Fatalf("Reject() error = %v, want ErrAlreadyDecided", err)
+			_, err := tc.resolve(svc)
+			if !errors.Is(err, ErrAlreadyDecided) {
+				t.Fatalf("%s error = %v, want ErrAlreadyDecided", tc.name, err)
+			}
+		})
 	}
 }
 

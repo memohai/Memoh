@@ -10,88 +10,64 @@ import (
 	ctr "github.com/memohai/memoh/internal/container"
 )
 
-func TestPrepareImageForCreateIfNotPresentSkipsExistingImage(t *testing.T) {
-	svc := &legacyRouteTestService{}
-	m := newLegacyRouteTestManager(t, svc, config.WorkspaceConfig{
-		ImagePullPolicy: config.ImagePullPolicyIfNotPresent,
-	})
+func TestPrepareImageForCreatePolicies(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		policy       string
+		getImageErr  error
+		wantMode     ImagePrepareMode
+		wantGetCalls int
+		wantPulls    int
+	}{
+		{
+			name:         "if_not_present_skips_existing_image",
+			policy:       config.ImagePullPolicyIfNotPresent,
+			wantMode:     ImagePrepareSkipped,
+			wantGetCalls: 1,
+		},
+		{
+			name:         "if_not_present_pulls_missing_image",
+			policy:       config.ImagePullPolicyIfNotPresent,
+			getImageErr:  ctr.ErrNotFound,
+			wantMode:     ImagePreparePulled,
+			wantGetCalls: 1,
+			wantPulls:    1,
+		},
+		{
+			name:      "always_pulls",
+			policy:    config.ImagePullPolicyAlways,
+			wantMode:  ImagePreparePulled,
+			wantPulls: 1,
+		},
+		{
+			name:     "never_skips",
+			policy:   config.ImagePullPolicyNever,
+			wantMode: ImagePrepareSkipped,
+		},
+		{
+			name:         "delegates_when_image_service_unsupported",
+			getImageErr:  ctr.ErrNotSupported,
+			wantMode:     ImagePrepareDelegated,
+			wantGetCalls: 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &legacyRouteTestService{getImageErr: tc.getImageErr}
+			m := newLegacyRouteTestManager(t, svc, config.WorkspaceConfig{
+				ImagePullPolicy: tc.policy,
+			})
 
-	result, err := m.PrepareImageForCreate(context.Background(), "debian:bookworm-slim", nil)
-	if err != nil {
-		t.Fatalf("PrepareImageForCreate returned error: %v", err)
-	}
-	if result.Mode != ImagePrepareSkipped {
-		t.Fatalf("expected skipped, got %s", result.Mode)
-	}
-	if svc.getImageCalls != 1 || svc.pullCalls != 0 {
-		t.Fatalf("unexpected calls: get=%d pull=%d", svc.getImageCalls, svc.pullCalls)
-	}
-}
-
-func TestPrepareImageForCreateIfNotPresentPullsMissingImage(t *testing.T) {
-	svc := &legacyRouteTestService{getImageErr: ctr.ErrNotFound}
-	m := newLegacyRouteTestManager(t, svc, config.WorkspaceConfig{
-		ImagePullPolicy: config.ImagePullPolicyIfNotPresent,
-	})
-
-	result, err := m.PrepareImageForCreate(context.Background(), "debian:bookworm-slim", nil)
-	if err != nil {
-		t.Fatalf("PrepareImageForCreate returned error: %v", err)
-	}
-	if result.Mode != ImagePreparePulled {
-		t.Fatalf("expected pulled, got %s", result.Mode)
-	}
-	if svc.getImageCalls != 1 || svc.pullCalls != 1 {
-		t.Fatalf("unexpected calls: get=%d pull=%d", svc.getImageCalls, svc.pullCalls)
-	}
-}
-
-func TestPrepareImageForCreateAlwaysPulls(t *testing.T) {
-	svc := &legacyRouteTestService{}
-	m := newLegacyRouteTestManager(t, svc, config.WorkspaceConfig{
-		ImagePullPolicy: config.ImagePullPolicyAlways,
-	})
-
-	result, err := m.PrepareImageForCreate(context.Background(), "debian:bookworm-slim", nil)
-	if err != nil {
-		t.Fatalf("PrepareImageForCreate returned error: %v", err)
-	}
-	if result.Mode != ImagePreparePulled {
-		t.Fatalf("expected pulled, got %s", result.Mode)
-	}
-	if svc.getImageCalls != 0 || svc.pullCalls != 1 {
-		t.Fatalf("unexpected calls: get=%d pull=%d", svc.getImageCalls, svc.pullCalls)
-	}
-}
-
-func TestPrepareImageForCreateNeverSkips(t *testing.T) {
-	svc := &legacyRouteTestService{}
-	m := newLegacyRouteTestManager(t, svc, config.WorkspaceConfig{
-		ImagePullPolicy: config.ImagePullPolicyNever,
-	})
-
-	result, err := m.PrepareImageForCreate(context.Background(), "debian:bookworm-slim", nil)
-	if err != nil {
-		t.Fatalf("PrepareImageForCreate returned error: %v", err)
-	}
-	if result.Mode != ImagePrepareSkipped {
-		t.Fatalf("expected skipped, got %s", result.Mode)
-	}
-	if svc.getImageCalls != 0 || svc.pullCalls != 0 {
-		t.Fatalf("unexpected calls: get=%d pull=%d", svc.getImageCalls, svc.pullCalls)
-	}
-}
-
-func TestPrepareImageForCreateDelegatesWhenImageServiceUnsupported(t *testing.T) {
-	svc := &legacyRouteTestService{getImageErr: ctr.ErrNotSupported}
-	m := newLegacyRouteTestManager(t, svc, config.WorkspaceConfig{})
-
-	result, err := m.PrepareImageForCreate(context.Background(), "debian:bookworm-slim", nil)
-	if err != nil {
-		t.Fatalf("PrepareImageForCreate returned error: %v", err)
-	}
-	if result.Mode != ImagePrepareDelegated {
-		t.Fatalf("expected delegated, got %s", result.Mode)
+			result, err := m.PrepareImageForCreate(context.Background(), "debian:bookworm-slim", nil)
+			if err != nil {
+				t.Fatalf("PrepareImageForCreate returned error: %v", err)
+			}
+			if result.Mode != tc.wantMode {
+				t.Fatalf("mode = %s, want %s", result.Mode, tc.wantMode)
+			}
+			if svc.getImageCalls != tc.wantGetCalls || svc.pullCalls != tc.wantPulls {
+				t.Fatalf("unexpected calls: get=%d pull=%d", svc.getImageCalls, svc.pullCalls)
+			}
+		})
 	}
 }
 

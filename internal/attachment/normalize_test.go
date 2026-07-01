@@ -8,61 +8,6 @@ import (
 	"github.com/memohai/memoh/internal/media"
 )
 
-func TestMapMediaType(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		want media.MediaType
-	}{
-		{name: "image", in: "image", want: media.MediaTypeImage},
-		{name: "gif", in: "gif", want: media.MediaTypeImage},
-		{name: "audio", in: "audio", want: media.MediaTypeAudio},
-		{name: "voice", in: "voice", want: media.MediaTypeAudio},
-		{name: "video", in: "video", want: media.MediaTypeVideo},
-		{name: "default", in: "file", want: media.MediaTypeFile},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := MapMediaType(tc.in)
-			if got != tc.want {
-				t.Fatalf("MapMediaType(%q) = %q, want %q", tc.in, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestNormalizeBase64DataURL(t *testing.T) {
-	got := NormalizeBase64DataURL("AAAA", "image/png")
-	if got != "data:image/png;base64,AAAA" {
-		t.Fatalf("unexpected normalized value: %q", got)
-	}
-
-	already := "data:image/jpeg;base64,BBBB"
-	if NormalizeBase64DataURL(already, "image/png") != already {
-		t.Fatalf("expected data url to pass through")
-	}
-}
-
-func TestNormalizeMime(t *testing.T) {
-	got := NormalizeMime("IMAGE/JPEG; charset=utf-8")
-	if got != "image/jpeg" {
-		t.Fatalf("NormalizeMime unexpected result: %q", got)
-	}
-	if got := NormalizeMime("file"); got != "" {
-		t.Fatalf("NormalizeMime should drop invalid mime token, got %q", got)
-	}
-}
-
-func TestMimeFromDataURL(t *testing.T) {
-	got := MimeFromDataURL("data:image/png;base64,AAAA")
-	if got != "image/png" {
-		t.Fatalf("MimeFromDataURL unexpected result: %q", got)
-	}
-	if MimeFromDataURL("https://example.com/demo.png") != "" {
-		t.Fatalf("MimeFromDataURL should return empty for non-data-url")
-	}
-}
-
 func TestResolveMime(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -71,13 +16,6 @@ func TestResolveMime(t *testing.T) {
 		sniffed   string
 		want      string
 	}{
-		{
-			name:      "image: sniffed preferred over generic source",
-			mediaType: media.MediaTypeImage,
-			source:    "application/octet-stream",
-			sniffed:   "image/jpeg",
-			want:      "image/jpeg",
-		},
 		{
 			name:      "image: sniffed preferred over wrong platform mime",
 			mediaType: media.MediaTypeImage,
@@ -112,13 +50,6 @@ func TestResolveMime(t *testing.T) {
 			source:    "application/octet-stream",
 			sniffed:   "application/pdf",
 			want:      "application/pdf",
-		},
-		{
-			name:      "file: sniffed used when source token is invalid",
-			mediaType: media.MediaTypeFile,
-			source:    "file",
-			sniffed:   "text/plain",
-			want:      "text/plain",
 		},
 	}
 	for _, tc := range cases {

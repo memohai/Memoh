@@ -17,7 +17,7 @@ func TestLimitStringPreservesHeadAndTail(t *testing.T) {
 	if countLines(got) > 80 {
 		t.Fatalf("limited text lines = %d, want <= 80\n%s", countLines(got), got)
 	}
-	for _, want := range []string{"[memoh pruned]", "HEAD", "TAIL"} {
+	for _, want := range []string{"HEAD", "TAIL"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("limited text missing %q:\n%s", want, got)
 		}

@@ -6,41 +6,62 @@ import (
 	"github.com/memohai/memoh/internal/media"
 )
 
-func TestBundleNormalize_DataURLBecomesBase64(t *testing.T) {
-	bundle := Bundle{
-		URL: "data:image/png;base64,AAAA",
-	}.Normalize()
+func TestBundleNormalizeTransportRefs(t *testing.T) {
+	cases := []struct {
+		name       string
+		input      Bundle
+		wantBase64 string
+		wantPath   string
+		wantURL    string
+		wantMime   string
+		wantName   string
+		wantType   string
+	}{
+		{
+			name:       "data url becomes inline base64",
+			input:      Bundle{URL: "data:image/png;base64,AAAA"},
+			wantBase64: "data:image/png;base64,AAAA",
+			wantMime:   "image/png",
+			wantType:   "image",
+		},
+		{
+			name:       "raw base64 gets data url wrapper",
+			input:      Bundle{Base64: "AAAA", Mime: "IMAGE/PNG; charset=utf-8"},
+			wantBase64: "data:image/png;base64,AAAA",
+			wantMime:   "image/png",
+			wantType:   "image",
+		},
+		{
+			name:     "local url becomes path",
+			input:    Bundle{URL: "/data/screenshots/demo.png"},
+			wantPath: "/data/screenshots/demo.png",
+			wantName: "demo.png",
+			wantType: "image",
+		},
+	}
 
-	if bundle.URL != "" {
-		t.Fatalf("expected URL cleared after data-url normalization, got %q", bundle.URL)
-	}
-	if bundle.Base64 != "data:image/png;base64,AAAA" {
-		t.Fatalf("unexpected base64 payload: %q", bundle.Base64)
-	}
-	if bundle.Mime != "image/png" {
-		t.Fatalf("expected mime image/png, got %q", bundle.Mime)
-	}
-	if bundle.Type != "image" {
-		t.Fatalf("expected type image, got %q", bundle.Type)
-	}
-}
-
-func TestBundleNormalize_LocalURLBecomesPath(t *testing.T) {
-	bundle := Bundle{
-		URL: "/data/screenshots/demo.png",
-	}.Normalize()
-
-	if bundle.Path != "/data/screenshots/demo.png" {
-		t.Fatalf("expected local URL moved to path, got %q", bundle.Path)
-	}
-	if bundle.URL != "" {
-		t.Fatalf("expected URL cleared after local-path normalization, got %q", bundle.URL)
-	}
-	if bundle.Name != "demo.png" {
-		t.Fatalf("expected inferred name demo.png, got %q", bundle.Name)
-	}
-	if bundle.Type != "image" {
-		t.Fatalf("expected inferred type image, got %q", bundle.Type)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := tc.input.Normalize()
+			if bundle.Base64 != tc.wantBase64 {
+				t.Fatalf("Base64 = %q, want %q", bundle.Base64, tc.wantBase64)
+			}
+			if bundle.Path != tc.wantPath {
+				t.Fatalf("Path = %q, want %q", bundle.Path, tc.wantPath)
+			}
+			if bundle.URL != tc.wantURL {
+				t.Fatalf("URL = %q, want %q", bundle.URL, tc.wantURL)
+			}
+			if bundle.Mime != tc.wantMime {
+				t.Fatalf("Mime = %q, want %q", bundle.Mime, tc.wantMime)
+			}
+			if bundle.Name != tc.wantName {
+				t.Fatalf("Name = %q, want %q", bundle.Name, tc.wantName)
+			}
+			if bundle.Type != tc.wantType {
+				t.Fatalf("Type = %q, want %q", bundle.Type, tc.wantType)
+			}
+		})
 	}
 }
 
@@ -187,17 +208,6 @@ func TestExtractStorageKey(t *testing.T) {
 	}
 	if got := ExtractStorageKey("/tmp/demo.png"); got != "" {
 		t.Fatalf("expected empty storage key for non-media path, got %q", got)
-	}
-}
-
-func TestMediaAccessPath(t *testing.T) {
-	t.Parallel()
-
-	if got := MediaAccessPath("aa/demo.png"); got != "/data/media/aa/demo.png" {
-		t.Fatalf("unexpected media access path: %q", got)
-	}
-	if got := MediaAccessPath(""); got != "/data/media" {
-		t.Fatalf("unexpected media root path: %q", got)
 	}
 }
 

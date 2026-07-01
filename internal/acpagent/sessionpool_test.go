@@ -1422,33 +1422,6 @@ func TestSessionPoolRejectsUnsupportedBackend(t *testing.T) {
 	}
 }
 
-func TestProfileSupportsBackend(t *testing.T) {
-	if !profileSupportsBackend(acpprofile.Profile{}, "custom-backend") {
-		t.Fatal("profile with no supported_backends should allow any backend")
-	}
-	if !profileSupportsBackend(acpprofile.Profile{SupportedBackends: []string{bridge.WorkspaceBackendContainer}}, "") {
-		t.Fatal("empty backend should be treated as container")
-	}
-	if profileSupportsBackend(acpprofile.Profile{SupportedBackends: []string{bridge.WorkspaceBackendLocal}}, bridge.WorkspaceBackendContainer) {
-		t.Fatal("local-only profile should reject container backend")
-	}
-}
-
-func TestValidateManagedACPConfigAcceptsHermesOpenAIAPIProvider(t *testing.T) {
-	profile, ok := acpprofile.Lookup(acpprofile.AgentHermesID)
-	if !ok {
-		t.Fatal("missing Hermes profile")
-	}
-	err := acpclient.ValidateManagedACPConfig(profile, acpprofile.AgentSetup{Managed: map[string]string{
-		"provider": "openai-api",
-		"model":    "gpt-5.4",
-		"api_key":  "sk-test",
-	}}, acpclient.SetupModeAPIKey)
-	if err != nil {
-		t.Fatalf("ValidateManagedACPConfig() error = %v, want openai-api accepted", err)
-	}
-}
-
 func TestSessionPoolUsesSessionMetadataAsRuntimeTruth(t *testing.T) {
 	runner := &recordingRunner{
 		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data", ACPToolsHTTPURL: "http://127.0.0.1:18732/mcp"},

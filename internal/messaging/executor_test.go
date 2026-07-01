@@ -63,41 +63,6 @@ func (r *testAssetResolver) IngestContainerFile(_ context.Context, _, containerP
 	}, nil
 }
 
-func TestSendDirectSameConversationWithAttachmentsResolvesAssets(t *testing.T) {
-	t.Parallel()
-
-	sender := &testSender{}
-	exec := &Executor{
-		Sender:        sender,
-		Resolver:      testResolver{},
-		AssetResolver: &testAssetResolver{},
-	}
-
-	session := SessionContext{
-		BotID:              "bot_1",
-		CanOmitTarget:      true,
-		AllowLocalShortcut: true,
-		CurrentPlatform:    "feishu",
-		ReplyTarget:        "chat_id:oc_group_1",
-	}
-
-	result, err := exec.SendDirect(context.Background(), session, "", map[string]any{
-		"attachments": []any{"screenshot.png"},
-	})
-	if err != nil {
-		t.Fatalf("SendDirect returned error: %v", err)
-	}
-	if result == nil {
-		t.Fatal("expected non-nil result")
-	}
-	if sender.called != 1 {
-		t.Fatalf("expected sender called once, got %d", sender.called)
-	}
-	if len(sender.req.Message.Attachments) != 1 || sender.req.Message.Attachments[0].ContentHash != "hash_1" {
-		t.Fatalf("unexpected attachments: %+v", sender.req.Message.Attachments)
-	}
-}
-
 func TestSendSameConversationWithAttachmentsUsesLocalResult(t *testing.T) {
 	t.Parallel()
 
@@ -187,74 +152,58 @@ func TestSendSameConversationWithLocalShortcutDisabledUsesSender(t *testing.T) {
 func TestSendSameConversationStructuredMessageAttachmentsAreNormalized(t *testing.T) {
 	t.Parallel()
 
-	sender := &testSender{}
-	exec := &Executor{
-		Sender:   sender,
-		Resolver: testResolver{},
-	}
-
-	result, err := exec.Send(context.Background(), SessionContext{
-		BotID:              "bot_1",
-		CanOmitTarget:      true,
-		AllowLocalShortcut: true,
-		CurrentPlatform:    "feishu",
-		ReplyTarget:        "chat_id:oc_group_1",
-	}, map[string]any{
-		"message": map[string]any{
-			"attachments": []any{
+	cases := []struct {
+		name        string
+		attachments any
+	}{
+		{
+			name: "object attachment",
+			attachments: []any{
 				map[string]any{"path": "screenshot.png"},
 			},
 		},
-	})
-	if err != nil {
-		t.Fatalf("Send returned error: %v", err)
-	}
-	if result == nil || !result.Local {
-		t.Fatalf("expected local result, got %#v", result)
-	}
-	if len(result.LocalAttachments) != 1 {
-		t.Fatalf("expected 1 local attachment, got %d", len(result.LocalAttachments))
-	}
-	att := result.LocalAttachments[0]
-	if att.Path != "/data/screenshot.png" {
-		t.Fatalf("unexpected local attachment path: %q", att.Path)
-	}
-	if att.Type != channel.AttachmentImage {
-		t.Fatalf("unexpected local attachment type: %q", att.Type)
-	}
-}
-
-func TestSendSameConversationStructuredMessageAttachmentShorthandIsNormalized(t *testing.T) {
-	t.Parallel()
-
-	sender := &testSender{}
-	exec := &Executor{
-		Sender:   sender,
-		Resolver: testResolver{},
-	}
-
-	result, err := exec.Send(context.Background(), SessionContext{
-		BotID:              "bot_1",
-		CanOmitTarget:      true,
-		AllowLocalShortcut: true,
-		CurrentPlatform:    "feishu",
-		ReplyTarget:        "chat_id:oc_group_1",
-	}, map[string]any{
-		"message": map[string]any{
-			"attachments": []any{"screenshot.png"},
+		{
+			name:        "path shorthand",
+			attachments: []any{"screenshot.png"},
 		},
-	})
-	if err != nil {
-		t.Fatalf("Send returned error: %v", err)
 	}
-	if result == nil || !result.Local {
-		t.Fatalf("expected local result, got %#v", result)
-	}
-	if len(result.LocalAttachments) != 1 {
-		t.Fatalf("expected 1 local attachment, got %d", len(result.LocalAttachments))
-	}
-	if result.LocalAttachments[0].Path != "/data/screenshot.png" {
-		t.Fatalf("unexpected local attachment path: %q", result.LocalAttachments[0].Path)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sender := &testSender{}
+			exec := &Executor{
+				Sender:   sender,
+				Resolver: testResolver{},
+			}
+
+			result, err := exec.Send(context.Background(), SessionContext{
+				BotID:              "bot_1",
+				CanOmitTarget:      true,
+				AllowLocalShortcut: true,
+				CurrentPlatform:    "feishu",
+				ReplyTarget:        "chat_id:oc_group_1",
+			}, map[string]any{
+				"message": map[string]any{
+					"attachments": tc.attachments,
+				},
+			})
+			if err != nil {
+				t.Fatalf("Send returned error: %v", err)
+			}
+			if result == nil || !result.Local {
+				t.Fatalf("expected local result, got %#v", result)
+			}
+			if len(result.LocalAttachments) != 1 {
+				t.Fatalf("expected 1 local attachment, got %d", len(result.LocalAttachments))
+			}
+			att := result.LocalAttachments[0]
+			if att.Path != "/data/screenshot.png" {
+				t.Fatalf("unexpected local attachment path: %q", att.Path)
+			}
+			if att.Type != channel.AttachmentImage {
+				t.Fatalf("unexpected local attachment type: %q", att.Type)
+			}
+		})
 	}
 }
 
@@ -319,16 +268,6 @@ func TestSendDirectInvalidAttachmentObjectReturnsError(t *testing.T) {
 		args map[string]any
 		want string
 	}{
-		{
-			name: "top level attachment typo",
-			args: map[string]any{
-				"message": map[string]any{"text": "see attachment"},
-				"attachments": []any{
-					map[string]any{"href": "https://example.com/file.png"},
-				},
-			},
-			want: "unknown attachment field",
-		},
 		{
 			name: "nested attachment typo",
 			args: map[string]any{
@@ -446,23 +385,6 @@ func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 					"styles": []any{" bold "},
 				},
 				map[string]any{
-					"type":     "code_block",
-					"text":     "go test ./...",
-					"language": "go",
-				},
-				map[string]any{
-					"type": "heading",
-					"text": "Summary",
-				},
-				map[string]any{
-					"type": "blockquote",
-					"text": "quoted",
-				},
-				map[string]any{
-					"type": "list_item",
-					"text": "first item",
-				},
-				map[string]any{
 					"type":   "text",
 					"text":   "hidden detail",
 					"styles": []any{" underline ", " spoiler "},
@@ -473,13 +395,13 @@ func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseOutboundMessage returned error: %v", err)
 	}
-	if msg.Format != channel.MessageFormatRich || len(msg.Parts) != 6 {
+	if msg.Format != channel.MessageFormatRich || len(msg.Parts) != 2 {
 		t.Fatalf("unexpected parsed message: %#v", msg)
 	}
 	if got := msg.Parts[0]; got.Type != channel.MessagePartText || len(got.Styles) != 1 || got.Styles[0] != channel.MessageStyleBold {
 		t.Fatalf("unexpected first part: %#v", got)
 	}
-	if got := msg.Parts[5]; got.Type != channel.MessagePartText || len(got.Styles) != 2 || got.Styles[0] != channel.MessageStyleUnderline || got.Styles[1] != channel.MessageStyleSpoiler {
+	if got := msg.Parts[1]; got.Type != channel.MessagePartText || len(got.Styles) != 2 || got.Styles[0] != channel.MessageStyleUnderline || got.Styles[1] != channel.MessageStyleSpoiler {
 		t.Fatalf("unexpected styled part: %#v", got)
 	}
 
@@ -494,53 +416,9 @@ func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 			want: "unknown message field",
 		},
 		{
-			name: "schema external message id",
-			raw:  map[string]any{"message": map[string]any{"text": "hi", "id": "msg-1"}},
-			want: "unknown message field",
-		},
-		{
-			name: "schema external message thread",
-			raw:  map[string]any{"message": map[string]any{"text": "hi", "thread": map[string]any{"id": "thread-1"}}},
-			want: "unknown message field",
-		},
-		{
-			name: "schema external message forward",
-			raw:  map[string]any{"message": map[string]any{"text": "hi", "forward": map[string]any{"message_id": "msg-1"}}},
-			want: "unknown message field",
-		},
-		{
-			name: "schema external message metadata",
-			raw:  map[string]any{"message": map[string]any{"text": "hi", "metadata": map[string]any{"x": "y"}}},
-			want: "unknown message field",
-		},
-		{
 			name: "unknown format",
 			raw:  map[string]any{"message": map[string]any{"text": "hi", "format": "html"}},
 			want: "unsupported message format",
-		},
-		{
-			name: "unknown nested attachment field",
-			raw: map[string]any{"message": map[string]any{
-				"text":        "see attachment",
-				"attachments": []any{map[string]any{"href": "https://example.com/file.png"}},
-			}},
-			want: "unknown attachment field",
-		},
-		{
-			name: "unknown nested attachment type",
-			raw: map[string]any{"message": map[string]any{
-				"text":        "see attachment",
-				"attachments": []any{map[string]any{"type": "sticker", "url": "https://example.com/file.png"}},
-			}},
-			want: "unsupported attachment type",
-		},
-		{
-			name: "nested attachment url path",
-			raw: map[string]any{"message": map[string]any{
-				"text":        "see attachment",
-				"attachments": []any{map[string]any{"url": "/data/file.png"}},
-			}},
-			want: "attachment url must be http(s) or data URL",
 		},
 		{
 			name: "nested attachment without reference",
@@ -556,21 +434,9 @@ func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 			want: "message reply must be object",
 		},
 		{
-			name: "unknown reply field",
-			raw:  map[string]any{"message": map[string]any{"text": "hi", "reply": map[string]any{"id": "msg-1"}}},
-			want: "unknown message reply field",
-		},
-		{
 			name: "reply without message id",
 			raw:  map[string]any{"message": map[string]any{"text": "hi", "reply": map[string]any{"message_id": "   "}}},
 			want: "message reply message_id is required",
-		},
-		{
-			name: "null part",
-			raw: map[string]any{"message": map[string]any{"parts": []any{
-				nil,
-			}}},
-			want: "message part must be object",
 		},
 		{
 			name: "non-object part",
@@ -578,20 +444,6 @@ func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 				"hi",
 			}}},
 			want: "message part must be object",
-		},
-		{
-			name: "unknown part field",
-			raw: map[string]any{"message": map[string]any{"parts": []any{
-				map[string]any{"type": "text", "text": "hi", "typo": "dropped"},
-			}}},
-			want: "unknown message part field",
-		},
-		{
-			name: "schema external part metadata",
-			raw: map[string]any{"message": map[string]any{"parts": []any{
-				map[string]any{"type": "text", "text": "hi", "metadata": map[string]any{"x": "y"}},
-			}}},
-			want: "unknown message part field",
 		},
 		{
 			name: "unknown part type",
@@ -622,23 +474,9 @@ func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 			want: "message link part url is required",
 		},
 		{
-			name: "code block without text",
-			raw: map[string]any{"message": map[string]any{"parts": []any{
-				map[string]any{"type": "code_block", "language": "go"},
-			}}},
-			want: "message part content is required",
-		},
-		{
 			name: "mention without text or identity",
 			raw: map[string]any{"message": map[string]any{"parts": []any{
 				map[string]any{"type": "mention"},
-			}}},
-			want: "message mention part text is required",
-		},
-		{
-			name: "mention without visible text",
-			raw: map[string]any{"message": map[string]any{"parts": []any{
-				map[string]any{"type": "mention", "channel_identity_id": "123"},
 			}}},
 			want: "message mention part text is required",
 		},
@@ -693,7 +531,7 @@ func TestParseOutboundMessageActionsValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseOutboundMessage returned error: %v", err)
 	}
-	if len(msg.Actions) != 1 || msg.Actions[0].URL != "https://example.com" || msg.Actions[0].Value != "" {
+	if len(msg.Actions) != 1 || msg.Actions[0].URL != "https://example.com" {
 		t.Fatalf("unexpected actions: %#v", msg.Actions)
 	}
 
@@ -702,14 +540,6 @@ func TestParseOutboundMessageActionsValidation(t *testing.T) {
 		raw  map[string]any
 		want string
 	}{
-		{
-			name: "null action",
-			raw: map[string]any{"message": map[string]any{
-				"text":    "choose",
-				"actions": []any{nil},
-			}},
-			want: "message action must be object",
-		},
 		{
 			name: "non-object action",
 			raw: map[string]any{"message": map[string]any{

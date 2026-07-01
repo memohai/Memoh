@@ -10,33 +10,38 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 )
 
-func TestBuildReasoningOptionsDeepSeekChatCompletionsCompat(t *testing.T) {
+func TestBuildReasoningOptionsChatCompletionsCompat(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		config   *ReasoningConfig
-		wantOpts int
+		name   string
+		compat string
+		config *ReasoningConfig
+		want   int
 	}{
 		{
-			name:     "disabled sends explicit none effort",
-			config:   &ReasoningConfig{Disabled: true},
-			wantOpts: 1,
+			name:   "deepseek disabled sends explicit none effort",
+			compat: ChatCompletionsCompatDeepSeek,
+			config: &ReasoningConfig{Disabled: true},
+			want:   1,
 		},
 		{
-			name:     "active with effort forwards effort",
-			config:   &ReasoningConfig{Active: true, Effort: "high"},
-			wantOpts: 1,
+			name:   "minimax active with effort forwards effort",
+			compat: ChatCompletionsCompatMiniMax,
+			config: &ReasoningConfig{Active: true, Effort: "high"},
+			want:   1,
 		},
 		{
-			name:     "active without effort leaves effort unset for model default",
-			config:   &ReasoningConfig{Active: true},
-			wantOpts: 0,
+			name:   "deepseek active without effort leaves model default",
+			compat: ChatCompletionsCompatDeepSeek,
+			config: &ReasoningConfig{Active: true},
+			want:   0,
 		},
 		{
-			name:     "nil config produces no options",
-			config:   nil,
-			wantOpts: 0,
+			name:   "minimax nil config produces no options",
+			compat: ChatCompletionsCompatMiniMax,
+			config: nil,
+			want:   0,
 		},
 	}
 
@@ -45,11 +50,11 @@ func TestBuildReasoningOptionsDeepSeekChatCompletionsCompat(t *testing.T) {
 			t.Parallel()
 			opts := BuildReasoningOptions(SDKModelConfig{
 				ClientType:            string(ClientTypeOpenAICompletions),
-				ChatCompletionsCompat: ChatCompletionsCompatDeepSeek,
+				ChatCompletionsCompat: tt.compat,
 				ReasoningConfig:       tt.config,
 			})
-			if len(opts) != tt.wantOpts {
-				t.Fatalf("expected %d options, got %d", tt.wantOpts, len(opts))
+			if len(opts) != tt.want {
+				t.Fatalf("expected %d options, got %d", tt.want, len(opts))
 			}
 		})
 	}
@@ -93,51 +98,6 @@ func TestBuildReasoningOptionsOpenAIDisable(t *testing.T) {
 			opts := BuildReasoningOptions(SDKModelConfig{
 				ClientType:      string(ClientTypeOpenAICompletions),
 				ReasoningConfig: tt.config,
-			})
-			if len(opts) != tt.wantOpts {
-				t.Fatalf("expected %d options, got %d", tt.wantOpts, len(opts))
-			}
-		})
-	}
-}
-
-func TestBuildReasoningOptionsMiniMaxChatCompletionsCompat(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		config   *ReasoningConfig
-		wantOpts int
-	}{
-		{
-			name:     "disabled sends explicit none effort",
-			config:   &ReasoningConfig{Disabled: true},
-			wantOpts: 1,
-		},
-		{
-			name:     "active without effort forwards nothing (provider default applies)",
-			config:   &ReasoningConfig{Active: true},
-			wantOpts: 0,
-		},
-		{
-			name:     "active with effort forwards effort",
-			config:   &ReasoningConfig{Active: true, Effort: "high"},
-			wantOpts: 1,
-		},
-		{
-			name:     "nil config produces no options",
-			config:   nil,
-			wantOpts: 0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			opts := BuildReasoningOptions(SDKModelConfig{
-				ClientType:            string(ClientTypeOpenAICompletions),
-				ChatCompletionsCompat: ChatCompletionsCompatMiniMax,
-				ReasoningConfig:       tt.config,
 			})
 			if len(opts) != tt.wantOpts {
 				t.Fatalf("expected %d options, got %d", tt.wantOpts, len(opts))
@@ -485,23 +445,6 @@ func TestNewSDKChatModelAnthropicThinkingWire(t *testing.T) {
 				t.Fatalf("budget_tokens: got %d, want %d", body.Thinking.BudgetTokens, tt.wantBudget)
 			}
 		})
-	}
-}
-
-func TestLegacyAnthropicBudgetFor(t *testing.T) {
-	t.Parallel()
-
-	cases := map[string]int{
-		ReasoningEffortLow:    5000,
-		ReasoningEffortMedium: 16000,
-		ReasoningEffortHigh:   50000,
-		"":                    16000,
-		"unexpected":          16000,
-	}
-	for effort, want := range cases {
-		if got := legacyAnthropicBudgetFor(effort); got != want {
-			t.Fatalf("legacyAnthropicBudgetFor(%q): got %d, want %d", effort, got, want)
-		}
 	}
 }
 

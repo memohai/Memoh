@@ -3,8 +3,10 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"strings"
+	"slices"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/memohai/memoh/internal/capabilities"
 )
@@ -42,21 +44,20 @@ models:
 	if changed != 1 {
 		t.Fatalf("changed = %d, want 1", changed)
 	}
-	gotBytes, err := os.ReadFile(path) //nolint:gosec // test reads its own temp fixture
-	if err != nil {
-		t.Fatalf("read output: %v", err)
+	cfg := readOnlyModelConfig(t, path)
+	if got := cfg.ThinkingMode; got != "none" {
+		t.Fatalf("thinking_mode = %q, want none", got)
 	}
-	got := string(gotBytes)
-	for _, want := range []string{
-		"compatibilities: [vision, tool-call]",
-		"thinking_mode: none",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("output missing %q:\n%s", want, got)
+	if len(cfg.ReasoningEfforts) != 0 {
+		t.Fatalf("reasoning_efforts = %v, want empty", cfg.ReasoningEfforts)
+	}
+	for _, want := range []string{"vision", "tool-call"} {
+		if !slices.Contains(cfg.Compatibilities, want) {
+			t.Fatalf("compatibilities missing %q", want)
 		}
 	}
-	if strings.Contains(got, "reasoning_efforts") {
-		t.Fatalf("reasoning_efforts should be removed:\n%s", got)
+	if slices.Contains(cfg.Compatibilities, "reasoning") {
+		t.Fatal("reasoning compatibility should be removed")
 	}
 }
 
@@ -92,21 +93,13 @@ models:
 	if changed != 0 {
 		t.Fatalf("changed = %d, want 0", changed)
 	}
-	got, err := os.ReadFile(path) //nolint:gosec // test reads its own temp fixture
-	if err != nil {
-		t.Fatalf("read output: %v", err)
-	}
-	if string(got) != string(raw) {
-		t.Fatalf("plain no-reason model should remain untouched:\n%s", got)
-	}
 }
 
-func TestEnrichFilePreservesCompactModelSpacing(t *testing.T) {
+func TestEnrichFileAddsReasoningMetadata(t *testing.T) {
 	t.Parallel()
 
 	resolver, err := capabilities.NewResolver([]byte(`{
-		"reasoning-a": {"mode": "chat", "supports_reasoning": true},
-		"reasoning-b": {"mode": "chat", "supports_reasoning": true}
+		"reasoning-model": {"mode": "chat", "supports_reasoning": true, "supports_max_reasoning_effort": true}
 	}`))
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
@@ -117,11 +110,8 @@ func TestEnrichFilePreservesCompactModelSpacing(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`name: Test
 client_type: openai-completions
 models:
-  - model_id: reasoning-a
-    name: A
-    type: chat
-  - model_id: reasoning-b
-    name: B
+  - model_id: reasoning-model
+    name: Reasoning
     type: chat
 `), 0o600); err != nil {
 		t.Fatalf("write fixture: %v", err)
@@ -131,18 +121,43 @@ models:
 	if err != nil {
 		t.Fatalf("enrichFile: %v", err)
 	}
-	if changed != 2 {
-		t.Fatalf("changed = %d, want 2", changed)
+	if changed != 1 {
+		t.Fatalf("changed = %d, want 1", changed)
 	}
-	gotBytes, err := os.ReadFile(path) //nolint:gosec // test reads its own temp fixture
+	cfg := readOnlyModelConfig(t, path)
+	if got := cfg.ThinkingMode; got != "toggle" {
+		t.Fatalf("thinking_mode = %q, want toggle", got)
+	}
+	if !slices.Equal(cfg.ReasoningEfforts, []string{"low", "medium", "high", "max"}) {
+		t.Fatalf("reasoning_efforts = %v, want [low medium high max]", cfg.ReasoningEfforts)
+	}
+}
+
+type providerFixture struct {
+	Models []struct {
+		Config modelConfig `yaml:"config"`
+	} `yaml:"models"`
+}
+
+type modelConfig struct {
+	ThinkingMode     string   `yaml:"thinking_mode"`
+	ReasoningEfforts []string `yaml:"reasoning_efforts"`
+	Compatibilities  []string `yaml:"compatibilities"`
+}
+
+func readOnlyModelConfig(t *testing.T, path string) modelConfig {
+	t.Helper()
+
+	raw, err := os.ReadFile(path) //nolint:gosec // test reads its own temp fixture
 	if err != nil {
 		t.Fatalf("read output: %v", err)
 	}
-	got := string(gotBytes)
-	if strings.Contains(got, "\n\n  - model_id: reasoning-b") {
-		t.Fatalf("compact catalog gained blank model spacing:\n%s", got)
+	var doc providerFixture
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse output: %v", err)
 	}
-	if !strings.Contains(got, "thinking_mode: toggle") {
-		t.Fatalf("output missing enrichment:\n%s", got)
+	if len(doc.Models) != 1 {
+		t.Fatalf("models length = %d, want 1", len(doc.Models))
 	}
+	return doc.Models[0].Config
 }

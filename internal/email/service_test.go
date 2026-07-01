@@ -2,34 +2,52 @@ package email
 
 import "testing"
 
-func TestSanitizeProviderConfigRemovesGmailOAuthSecrets(t *testing.T) {
-	clean := sanitizeProviderConfig("gmail", map[string]any{
-		"email_address": "person@gmail.com",
-		"client_id":     "legacy-client",
-		"client_secret": "legacy-secret",
-	})
+func TestSanitizeProviderConfig(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		config   map[string]any
+		want     map[string]any
+	}{
+		{
+			name:     "removes legacy gmail oauth secrets",
+			provider: "gmail",
+			config: map[string]any{
+				"email_address": "person@gmail.com",
+				"client_id":     "legacy-client",
+				"client_secret": "legacy-secret",
+			},
+			want: map[string]any{
+				"email_address": "person@gmail.com",
+			},
+		},
+		{
+			name:     "keeps oauth-shaped fields for other providers",
+			provider: "smtp",
+			config: map[string]any{
+				"client_id":     "smtp-client",
+				"client_secret": "smtp-secret",
+			},
+			want: map[string]any{
+				"client_id":     "smtp-client",
+				"client_secret": "smtp-secret",
+			},
+		},
+	}
 
-	if _, ok := clean["client_id"]; ok {
-		t.Fatal("client_id should not be returned for gmail providers")
-	}
-	if _, ok := clean["client_secret"]; ok {
-		t.Fatal("client_secret should not be returned for gmail providers")
-	}
-	if clean["email_address"] != "person@gmail.com" {
-		t.Fatalf("email_address was not preserved: %#v", clean)
-	}
-}
-
-func TestSanitizeProviderConfigKeepsNonGmailSecrets(t *testing.T) {
-	clean := sanitizeProviderConfig("smtp", map[string]any{
-		"client_id":     "smtp-client",
-		"client_secret": "smtp-secret",
-	})
-
-	if clean["client_id"] != "smtp-client" {
-		t.Fatalf("client_id should be preserved for non-gmail providers: %#v", clean)
-	}
-	if clean["client_secret"] != "smtp-secret" {
-		t.Fatalf("client_secret should be preserved for non-gmail providers: %#v", clean)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clean := sanitizeProviderConfig(tt.provider, tt.config)
+			for key, value := range tt.want {
+				if clean[key] != value {
+					t.Fatalf("%s was not preserved: %#v", key, clean)
+				}
+			}
+			for key := range clean {
+				if _, ok := tt.want[key]; !ok {
+					t.Fatalf("unexpected key %s in sanitized config: %#v", key, clean)
+				}
+			}
+		})
 	}
 }

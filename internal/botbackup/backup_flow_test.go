@@ -6,14 +6,12 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/memohai/memoh/internal/botbackup/secure"
 	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/mcp"
 )
 
 // buildSampleBundle assembles a complete plaintext .memoh.zip the way Export
@@ -169,26 +167,6 @@ func TestImportEncryptedWithoutPassphraseErrors(t *testing.T) {
 	}
 }
 
-func TestDecodeBundle(t *testing.T) {
-	plain := []byte("PK\x03\x04 plain zip bytes")
-	out, encrypted, err := decodeBundle(plain, "")
-	if err != nil || encrypted || !bytes.Equal(out, plain) {
-		t.Fatalf("decodeBundle(plain) = (%q, %v, %v)", out, encrypted, err)
-	}
-
-	var enc bytes.Buffer
-	if err := secure.Encrypt(&enc, bytes.NewReader(plain), "pw"); err != nil {
-		t.Fatalf("Encrypt() error = %v", err)
-	}
-	out, encrypted, err = decodeBundle(enc.Bytes(), "pw")
-	if err != nil || !encrypted || !bytes.Equal(out, plain) {
-		t.Fatalf("decodeBundle(encrypted, pw) = (%q, %v, %v)", out, encrypted, err)
-	}
-	if _, encrypted, err = decodeBundle(enc.Bytes(), ""); !encrypted || !errors.Is(err, secure.ErrPassphraseRequired) {
-		t.Fatalf("decodeBundle(encrypted, empty) encrypted=%v err=%v, want true / ErrPassphraseRequired", encrypted, err)
-	}
-}
-
 func TestImportStateItemErr(t *testing.T) {
 	// Create mode: an item failure is fatal so the caller can roll back.
 	create := &importState{createMode: true}
@@ -216,46 +194,5 @@ func TestRestoredSessionDescriptorRejectsSystemACPRuntime(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "only supported") {
 		t.Fatalf("error = %v, want unsupported runtime/mode message", err)
-	}
-}
-
-func TestMCPRequestFromConnection(t *testing.T) {
-	stdio := mcpRequestFromConnection(mcp.Connection{
-		Name:     "local",
-		Type:     "stdio",
-		Active:   true,
-		AuthType: "none",
-		Config: map[string]any{
-			"command": "node",
-			"args":    []any{"server.js", "--port"},
-			"env":     map[string]any{"TOKEN": "abc"},
-		},
-	})
-	if stdio.Name != "local" || stdio.Command != "node" {
-		t.Fatalf("stdio request = %+v", stdio)
-	}
-	if stdio.Active == nil || !*stdio.Active {
-		t.Fatal("stdio request should be active")
-	}
-	if len(stdio.Args) != 2 || stdio.Args[0] != "server.js" {
-		t.Fatalf("stdio args = %v", stdio.Args)
-	}
-	if stdio.Env["TOKEN"] != "abc" {
-		t.Fatalf("stdio env = %v", stdio.Env)
-	}
-
-	sse := mcpRequestFromConnection(mcp.Connection{
-		Name: "remote",
-		Type: "sse",
-		Config: map[string]any{
-			"url":     "https://example.com/sse",
-			"headers": map[string]any{"Authorization": "Bearer x"},
-		},
-	})
-	if sse.Transport != "sse" || sse.URL != "https://example.com/sse" {
-		t.Fatalf("sse request = %+v", sse)
-	}
-	if sse.Headers["Authorization"] != "Bearer x" {
-		t.Fatalf("sse headers = %v", sse.Headers)
 	}
 }

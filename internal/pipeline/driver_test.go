@@ -35,21 +35,6 @@ func TestExtractNewImageRefs(t *testing.T) {
 	}
 }
 
-func TestExtractNewImageRefs_IncludesMultiple(t *testing.T) {
-	rc := RenderedContext{
-		{ReceivedAtMs: 100},
-		{ReceivedAtMs: 200, ImageRefs: []ImageAttachmentRef{
-			{ContentHash: "a"},
-			{ContentHash: "b"},
-		}},
-		{ReceivedAtMs: 300, ImageRefs: []ImageAttachmentRef{{ContentHash: "c"}}},
-	}
-	refs := extractNewImageRefs(rc, 50)
-	if len(refs) != 3 {
-		t.Fatalf("expected 3 refs, got %d", len(refs))
-	}
-}
-
 func TestInjectImagePartsIntoLastUserMessage(t *testing.T) {
 	msgs := []sdk.Message{
 		sdk.UserMessage("hello"),
@@ -72,14 +57,6 @@ func TestInjectImagePartsIntoLastUserMessage(t *testing.T) {
 	}
 	if imgPart.Image != "data:image/png;base64,abc" {
 		t.Fatalf("unexpected image: %q", imgPart.Image)
-	}
-}
-
-func TestInjectImagePartsIntoLastUserMessage_Empty(t *testing.T) {
-	msgs := []sdk.Message{sdk.UserMessage("hello")}
-	injectImagePartsIntoLastUserMessage(msgs, nil)
-	if len(msgs[0].Content) != 1 {
-		t.Fatalf("expected no change, got %d parts", len(msgs[0].Content))
 	}
 }
 

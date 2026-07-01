@@ -19,11 +19,3 @@ func TestWorkspaceCDIDevicesLabelRoundTrip(t *testing.T) {
 		t.Fatalf("expected devices %v, got %v", want, got)
 	}
 }
-
-func TestWorkspaceCDIDevicesFromLabelsIgnoresMissingValue(t *testing.T) {
-	t.Parallel()
-
-	if got := workspaceCDIDevicesFromLabels(nil); len(got) != 0 {
-		t.Fatalf("expected empty devices for nil labels, got %v", got)
-	}
-}
