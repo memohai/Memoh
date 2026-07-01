@@ -1,14 +1,9 @@
 <template>
   <SettingsSection>
-    <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3">
-      <div class="min-w-0">
-        <div class="text-sm font-medium text-foreground">
-          {{ $t('bots.access.userAccess.title') }}
-        </div>
-        <p class="mt-0.5 text-xs text-muted-foreground">
-          {{ $t('bots.access.userAccess.subtitle') }}
-        </p>
-      </div>
+    <SettingsRow
+      :label="$t('bots.access.userAccess.title')"
+      :description="$t('bots.access.userAccess.subtitle')"
+    >
       <Button
         v-if="!formVisible"
         size="sm"
@@ -19,81 +14,92 @@
         <Plus class="size-4" />
         {{ $t('bots.access.userAccess.addMember') }}
       </Button>
-    </div>
+    </SettingsRow>
 
+    <!-- Inline add-member form: a one-off disclosure that opens in place inside
+         the card. The border-b + py-4 band is the disclosure frame; its fields
+         are the house form column (FormStack → FieldStack). -->
     <div
       v-if="formVisible"
-      class="mx-4 space-y-4 border-b border-border py-4"
+      class="mx-4 border-b border-border py-4"
     >
-      <div class="space-y-2">
-        <Label class="text-xs font-medium text-muted-foreground">
-          {{ $t('bots.access.userAccess.subjectQuestion') }}
-        </Label>
-        <SegmentedControl
-          :model-value="formSubjectType"
-          :items="subjectTypeItems"
-          :aria-label="$t('bots.access.userAccess.subjectQuestion')"
-          class="w-full sm:w-fit"
-          @update:model-value="(value) => formSubjectType = value as 'user' | 'everyone'"
-        />
-      </div>
-
-      <div
-        v-if="formSubjectType === 'user'"
-        class="space-y-2"
-      >
-        <Label class="text-xs font-medium text-muted-foreground">
-          {{ $t('bots.access.userAccess.memberQuestion') }}
-        </Label>
-        <SearchableSelectPopover
-          v-model="formUserId"
-          :options="candidateOptions"
-          :placeholder="$t('bots.access.userAccess.selectMember')"
-          :search-placeholder="$t('bots.access.userAccess.searchMember')"
-          :empty-text="$t('bots.access.userAccess.noMemberCandidates')"
-          :show-group-headers="false"
-        />
-      </div>
-
-      <div class="space-y-2">
-        <Label class="text-xs font-medium text-muted-foreground">
-          {{ $t('bots.access.userAccess.permissionsQuestion') }}
-        </Label>
-        <div class="flex flex-wrap gap-4">
-          <label
-            v-for="permission in permissionOptions"
-            :key="permission"
-            class="flex items-center gap-2 text-xs cursor-pointer"
-          >
-            <Checkbox
-              :model-value="formPermissions[permission]"
-              @update:model-value="(v) => setFormPermission(permission, v === true)"
-            />
-            {{ permissionLabel(permission) }}
-          </label>
-        </div>
-      </div>
-
-      <div class="flex items-center justify-end gap-2 pt-1">
-        <Button
-          variant="ghost"
-          size="sm"
-          @click="closeForm"
-        >
-          {{ $t('common.cancel') }}
-        </Button>
-        <Button
-          size="sm"
-          :disabled="!canSubmit || isSaving"
-          @click="handleCreate"
-        >
-          <Spinner
-            v-if="isSaving"
-            class="mr-1.5 size-3.5"
+      <FormStack>
+        <!-- Muted question-style labels are this form's own voice, so they ride
+             the #label slot to keep their exact styling rather than the default
+             field label. -->
+        <FieldStack>
+          <template #label>
+            <Label class="text-xs font-medium text-muted-foreground">
+              {{ $t('bots.access.userAccess.subjectQuestion') }}
+            </Label>
+          </template>
+          <SegmentedControl
+            :model-value="formSubjectType"
+            :items="subjectTypeItems"
+            :aria-label="$t('bots.access.userAccess.subjectQuestion')"
+            class="w-full sm:w-fit"
+            @update:model-value="(value) => formSubjectType = value as 'user' | 'everyone'"
           />
-          {{ $t('common.save') }}
-        </Button>
-      </div>
+        </FieldStack>
+
+        <FieldStack v-if="formSubjectType === 'user'">
+          <template #label>
+            <Label class="text-xs font-medium text-muted-foreground">
+              {{ $t('bots.access.userAccess.memberQuestion') }}
+            </Label>
+          </template>
+          <SearchableSelectPopover
+            v-model="formUserId"
+            :options="candidateOptions"
+            :placeholder="$t('bots.access.userAccess.selectMember')"
+            :search-placeholder="$t('bots.access.userAccess.searchMember')"
+            :empty-text="$t('bots.access.userAccess.noMemberCandidates')"
+            :show-group-headers="false"
+          />
+        </FieldStack>
+
+        <FieldStack>
+          <template #label>
+            <Label class="text-xs font-medium text-muted-foreground">
+              {{ $t('bots.access.userAccess.permissionsQuestion') }}
+            </Label>
+          </template>
+          <div class="flex flex-wrap gap-4">
+            <label
+              v-for="permission in permissionOptions"
+              :key="permission"
+              class="flex items-center gap-2 text-xs cursor-pointer"
+            >
+              <Checkbox
+                :model-value="formPermissions[permission]"
+                @update:model-value="(v) => setFormPermission(permission, v === true)"
+              />
+              {{ permissionLabel(permission) }}
+            </label>
+          </div>
+        </FieldStack>
+
+        <div class="flex items-center justify-end gap-2 pt-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            @click="closeForm"
+          >
+            {{ $t('common.cancel') }}
+          </Button>
+          <Button
+            size="sm"
+            :disabled="!canSubmit || isSaving"
+            @click="handleCreate"
+          >
+            <Spinner
+              v-if="isSaving"
+              class="mr-1.5 size-3.5"
+            />
+            {{ $t('common.save') }}
+          </Button>
+        </div>
+      </FormStack>
     </div>
 
     <!-- Loading -->
@@ -115,16 +121,12 @@
       </EmptyHeader>
     </Empty>
 
-    <div
-      v-else
-      class="divide-y divide-border"
-    >
-      <div
+    <template v-else>
+      <SettingsRow
         v-for="grant in grants"
         :key="grant.id || grant.subject_type + (grant.user_id || 'everyone')"
-        class="mx-4 flex min-h-[3.75rem] items-center gap-3 py-3"
       >
-        <div class="flex min-w-0 flex-1 items-center gap-2.5">
+        <template #leading>
           <Avatar class="size-7 shrink-0">
             <AvatarImage
               v-if="grant.subject_type === 'user' && grant.user_avatar_url"
@@ -141,29 +143,30 @@
               >{{ initials(grant) }}</span>
             </AvatarFallback>
           </Avatar>
-          <div class="min-w-0">
-            <div class="flex items-center gap-1.5">
-              <span class="truncate text-xs font-medium text-foreground">
-                {{ grantLabel(grant) }}
-              </span>
-              <Badge
-                v-if="grant.is_owner"
-                variant="secondary"
-                size="sm"
-              >
-                {{ $t('bots.access.userAccess.ownerBadge') }}
-              </Badge>
-            </div>
-            <p
-              v-if="grant.subject_type === 'user' && grant.user_username"
-              class="truncate text-xs text-muted-foreground"
-            >
-              @{{ grant.user_username }}
-            </p>
-          </div>
-        </div>
+        </template>
 
-        <div class="flex items-center gap-3 shrink-0">
+        <template #content>
+          <div class="flex items-center gap-1.5">
+            <span class="truncate text-xs font-medium text-foreground">
+              {{ grantLabel(grant) }}
+            </span>
+            <Badge
+              v-if="grant.is_owner"
+              variant="secondary"
+              size="sm"
+            >
+              {{ $t('bots.access.userAccess.ownerBadge') }}
+            </Badge>
+          </div>
+          <p
+            v-if="grant.subject_type === 'user' && grant.user_username"
+            class="truncate text-xs text-muted-foreground"
+          >
+            @{{ grant.user_username }}
+          </p>
+        </template>
+
+        <div class="flex items-center gap-3">
           <label
             v-for="permission in permissionOptions"
             :key="permission"
@@ -195,8 +198,8 @@
             </template>
           </ConfirmPopover>
         </div>
-      </div>
-    </div>
+      </SettingsRow>
+    </template>
   </SettingsSection>
 </template>
 
@@ -227,6 +230,9 @@ import type { SearchableSelectOption } from '@/components/searchable-select-popo
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { BOT_PERMISSION_ORDER, expandBotPermissions, type BotPermission } from '@/utils/bot-permissions'
 import SettingsSection from '@/components/settings/section.vue'
+import SettingsRow from '@/components/settings/row.vue'
+import FormStack from '@/components/settings/form-stack.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
 import {
   getBotsByBotIdUserAccess,
   getBotsByBotIdUserAccessCandidates,

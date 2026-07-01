@@ -136,11 +136,11 @@
         </section>
 
         <template v-if="hasData">
-          <ChartCard
+          <SettingsSection
             v-if="byModelData.length > 0"
             :title="$t('usage.modelDistribution')"
           >
-            <template #action>
+            <template #actions>
               <Select v-model="modelChartType">
                 <SelectTrigger
                   size="sm"
@@ -160,35 +160,39 @@
             </template>
             <VChart
               :key="modelChartType"
+              class="p-4"
               style="height: 300px; width: 100%"
               :option="modelChartOption"
               autoresize
             />
-          </ChartCard>
+          </SettingsSection>
 
-          <ChartCard :title="$t('usage.dailyTokens')">
+          <SettingsSection :title="$t('usage.dailyTokens')">
             <VChart
+              class="p-4"
               style="height: 300px; width: 100%"
               :option="dailyTokensOption"
               autoresize
             />
-          </ChartCard>
+          </SettingsSection>
 
-          <ChartCard :title="$t('usage.cacheBreakdown')">
+          <SettingsSection :title="$t('usage.cacheBreakdown')">
             <VChart
+              class="p-4"
               style="height: 300px; width: 100%"
               :option="cacheBreakdownOption"
               autoresize
             />
-          </ChartCard>
+          </SettingsSection>
 
-          <ChartCard :title="$t('usage.cacheHitRate')">
+          <SettingsSection :title="$t('usage.cacheHitRate')">
             <VChart
+              class="p-4"
               style="height: 300px; width: 100%"
               :option="cacheHitRateOption"
               autoresize
             />
-          </ChartCard>
+          </SettingsSection>
         </template>
 
         <p
@@ -357,7 +361,6 @@ import { getBotsByBotIdTokenUsage, getBotsByBotIdTokenUsageRecords } from '@memo
 import BotSelect from '@/components/bot-select/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import { useChatSelectionStore } from '@/store/chat-selection'
-import ChartCard from './components/chart-card.vue'
 import type { HandlersDailyTokenUsage, HandlersModelTokenUsage, HandlersTokenUsageRecord } from '@memohai/sdk'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { formatDateTimeShort } from '@/utils/date-time'

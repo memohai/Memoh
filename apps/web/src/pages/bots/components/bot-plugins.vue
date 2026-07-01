@@ -45,12 +45,15 @@
         </EmptyContent>
       </Empty>
 
-      <div
+      <!-- Dense object-list row: a plugin's icon, name+link+description, and its
+           status/toggle controls. align="start" top-pins the icon and controls to
+           the title line since the description can wrap to two lines. -->
+      <SettingsRow
         v-for="plugin in plugins"
         :key="plugin.id"
-        class="mx-4 flex items-start justify-between gap-4 border-b border-border py-4 last:border-b-0"
+        align="start"
       >
-        <div class="flex min-w-0 flex-1 items-start gap-3">
+        <template #leading>
           <div class="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md bg-accent">
             <ProviderIcon
               v-if="pluginIcon(plugin)"
@@ -65,31 +68,32 @@
               class="size-4 text-muted-foreground"
             />
           </div>
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-1.5">
-              <h3
-                class="truncate text-sm font-medium text-foreground"
-                :title="pluginManifest(plugin).name"
-              >
-                {{ pluginManifest(plugin).name }}
-              </h3>
-              <a
-                v-if="pluginManifest(plugin).homepage"
-                :href="pluginManifest(plugin).homepage"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
-              >
-                <ExternalLink class="size-3" />
-              </a>
-            </div>
-            <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">
-              {{ pluginManifest(plugin).description }}
-            </p>
-          </div>
-        </div>
+        </template>
 
-        <div class="flex shrink-0 items-center gap-2">
+        <template #content>
+          <div class="flex items-center gap-1.5">
+            <h3
+              class="truncate text-sm font-medium text-foreground"
+              :title="pluginManifest(plugin).name"
+            >
+              {{ pluginManifest(plugin).name }}
+            </h3>
+            <a
+              v-if="pluginManifest(plugin).homepage"
+              :href="pluginManifest(plugin).homepage"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ExternalLink class="size-3" />
+            </a>
+          </div>
+          <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">
+            {{ pluginManifest(plugin).description }}
+          </p>
+        </template>
+
+        <div class="flex items-center gap-2">
           <Badge
             variant="outline"
             size="sm"
@@ -120,7 +124,7 @@
             />
           </div>
         </div>
-      </div>
+      </SettingsRow>
     </SettingsSection>
   </PageShell>
 </template>
@@ -145,6 +149,7 @@ import PageShell from '@/components/page-shell/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { BOT_PLUGINS_UPDATED_EVENT, isBotPluginsUpdatedEvent } from '@/utils/bot-plugin-events'
 import SettingsSection from '@/components/settings/section.vue'
+import SettingsRow from '@/components/settings/row.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 
 const props = defineProps<{

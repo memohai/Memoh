@@ -6,15 +6,10 @@
   >
     <div class="space-y-8">
       <SettingsSection :title="$t('bots.email.bindings')">
-        <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3">
-          <div class="min-w-0">
-            <div class="text-sm font-medium text-foreground">
-              {{ $t('bots.email.bindings') }}
-            </div>
-            <p class="mt-0.5 text-xs text-muted-foreground">
-              {{ $t('bots.email.bindingsDescription') }}
-            </p>
-          </div>
+        <SettingsRow
+          :label="$t('bots.email.bindings')"
+          :description="$t('bots.email.bindingsDescription')"
+        >
           <Popover>
             <PopoverTrigger as-child>
               <Button
@@ -53,7 +48,7 @@
               </button>
             </PopoverContent>
           </Popover>
-        </div>
+        </SettingsRow>
 
         <div
           v-if="bindingsLoading"
@@ -230,6 +225,7 @@ import {
 import type { EmailProviderResponse, EmailBindingResponse, EmailOutboxItemResponse } from '@memohai/sdk'
 import { formatDateTime } from '@/utils/date-time'
 import SettingsSection from '@/components/settings/section.vue'
+import SettingsRow from '@/components/settings/row.vue'
 import PageShell from '@/components/page-shell/index.vue'
 import EmailProviderIcon from '@/components/email-provider-icon/index.vue'
 

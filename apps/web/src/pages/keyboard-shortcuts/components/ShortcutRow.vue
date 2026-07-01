@@ -6,6 +6,7 @@ import { RotateCcw } from 'lucide-vue-next'
 import { comboFromBinding, displayKeyCombo } from '@/lib/keyboard-combo'
 import { detectPlatform, type KeyboardBinding } from '@/lib/keyboard-bindings'
 import { useKeyboardShortcutsStore } from '@/store/keyboard-shortcuts'
+import SettingsRow from '@/components/settings/row.vue'
 
 const props = defineProps<{
   binding: KeyboardBinding
@@ -24,15 +25,10 @@ const overridden = computed(() => store.isOverridden(props.binding.command))
 </script>
 
 <template>
-  <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
-    <div class="min-w-0">
-      <div class="text-sm font-medium text-foreground">
-        {{ t(`settings.keyboard.commands.${binding.i18nKey}.label`) }}
-      </div>
-      <p class="mt-0.5 text-xs text-muted-foreground">
-        {{ t(`settings.keyboard.commands.${binding.i18nKey}.description`) }}
-      </p>
-    </div>
+  <SettingsRow
+    :label="t(`settings.keyboard.commands.${binding.i18nKey}.label`)"
+    :description="t(`settings.keyboard.commands.${binding.i18nKey}.description`)"
+  >
     <div class="flex shrink-0 items-center gap-2">
       <KbdGroup>
         <Kbd
@@ -60,5 +56,5 @@ const overridden = computed(() => store.isOverridden(props.binding.command))
         {{ t('common.edit') }}
       </Button>
     </div>
-  </div>
+  </SettingsRow>
 </template>

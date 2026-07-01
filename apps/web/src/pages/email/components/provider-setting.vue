@@ -134,7 +134,7 @@
             </SettingsRow>
           </div>
 
-          <div class="mx-4 flex items-center justify-end border-t border-border py-3">
+          <template #footer>
             <LoadingButton
               type="submit"
               size="sm"
@@ -142,7 +142,7 @@
             >
               {{ $t('provider.saveChanges') }}
             </LoadingButton>
-          </div>
+          </template>
         </SettingsSection>
 
         <!-- Gmail OAuth authorization -->
