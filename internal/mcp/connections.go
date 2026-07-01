@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/memohai/memoh/internal/db"
@@ -83,10 +84,15 @@ type ManagedConnectionRequest struct {
 	Metadata       map[string]any
 }
 
+var ErrManagedConnection = errors.New("plugin-managed MCP connections are managed from plugin settings")
+
 // ConnectionService handles CRUD operations for MCP connections.
 type ConnectionService struct {
 	queries dbstore.Queries
 	logger  *slog.Logger
+
+	mu              sync.RWMutex
+	changeListeners []func(botID string)
 }
 
 // NewConnectionService creates a ConnectionService backed by sqlc queries.
@@ -97,6 +103,37 @@ func NewConnectionService(log *slog.Logger, queries dbstore.Queries) *Connection
 	return &ConnectionService{
 		queries: queries,
 		logger:  log.With(slog.String("service", "mcp_connections")),
+	}
+}
+
+// AddChangeListener registers a callback that is called after connection rows
+// affecting a bot are created, updated, deleted, or reactivated/deactivated.
+func (s *ConnectionService) AddChangeListener(fn func(botID string)) {
+	if s == nil || fn == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.changeListeners = append(s.changeListeners, fn)
+}
+
+func (s *ConnectionService) NotifyChanged(botID string) {
+	s.notifyChanged(botID)
+}
+
+func (s *ConnectionService) notifyChanged(botID string) {
+	if s == nil {
+		return
+	}
+	botID = strings.TrimSpace(botID)
+	if botID == "" {
+		return
+	}
+	s.mu.RLock()
+	listeners := append([]func(string){}, s.changeListeners...)
+	s.mu.RUnlock()
+	for _, listener := range listeners {
+		listener(botID)
 	}
 }
 
@@ -202,7 +239,12 @@ func (s *ConnectionService) Create(ctx context.Context, botID string, req Upsert
 	if err != nil {
 		return Connection{}, err
 	}
-	return normalizeMCPConnection(row)
+	conn, err := normalizeMCPConnection(row)
+	if err != nil {
+		return Connection{}, err
+	}
+	s.notifyChanged(botID)
+	return conn, nil
 }
 
 func (s *ConnectionService) CreateManaged(ctx context.Context, botID string, req UpsertRequest, managed ManagedConnectionRequest) (Connection, error) {
@@ -260,7 +302,12 @@ func (s *ConnectionService) CreateManaged(ctx context.Context, botID string, req
 	if err != nil {
 		return Connection{}, err
 	}
-	return normalizeMCPConnection(row)
+	conn, err := normalizeMCPConnection(row)
+	if err != nil {
+		return Connection{}, err
+	}
+	s.notifyChanged(botID)
+	return conn, nil
 }
 
 // Update modifies an existing MCP connection.
@@ -275,6 +322,13 @@ func (s *ConnectionService) Update(ctx context.Context, botID, id string, req Up
 	connUUID, err := db.ParseUUID(id)
 	if err != nil {
 		return Connection{}, err
+	}
+	existingConn, err := s.Get(ctx, botID, id)
+	if err != nil {
+		return Connection{}, err
+	}
+	if existingConn.ManagedByPluginInstallationID != "" {
+		return Connection{}, ErrManagedConnection
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
@@ -308,7 +362,12 @@ func (s *ConnectionService) Update(ctx context.Context, botID, id string, req Up
 	if err != nil {
 		return Connection{}, err
 	}
-	return normalizeMCPConnection(row)
+	conn, err := normalizeMCPConnection(row)
+	if err != nil {
+		return Connection{}, err
+	}
+	s.notifyChanged(botID)
+	return conn, nil
 }
 
 // Import performs a declarative sync from a standard mcpServers dict.
@@ -326,11 +385,22 @@ func (s *ConnectionService) Import(ctx context.Context, botID string, req Import
 	if len(req.MCPServers) == 0 {
 		return []Connection{}, nil
 	}
+	existingItems, err := s.ListByBot(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	existingByName := make(map[string]Connection, len(existingItems))
+	for _, item := range existingItems {
+		existingByName[item.Name] = item
+	}
 	results := make([]Connection, 0, len(req.MCPServers))
 	for name, entry := range req.MCPServers {
 		name = strings.TrimSpace(name)
 		if name == "" {
 			continue
+		}
+		if existing := existingByName[name]; existing.ManagedByPluginInstallationID != "" {
+			return nil, fmt.Errorf("server %q: %w", name, ErrManagedConnection)
 		}
 		upsert := entryToUpsertRequest(name, entry)
 		mcpType, config, err := inferTypeAndConfig(upsert)
@@ -356,6 +426,7 @@ func (s *ConnectionService) Import(ctx context.Context, botID string, req Import
 		}
 		results = append(results, conn)
 	}
+	s.notifyChanged(botID)
 	return results, nil
 }
 
@@ -381,14 +452,25 @@ func (s *ConnectionService) Delete(ctx context.Context, botID, id string) error 
 	if err != nil {
 		return err
 	}
+	existingConn, err := s.Get(ctx, botID, id)
+	if err != nil {
+		return err
+	}
+	if existingConn.ManagedByPluginInstallationID != "" {
+		return ErrManagedConnection
+	}
 	connUUID, err := db.ParseUUID(id)
 	if err != nil {
 		return err
 	}
-	return s.queries.DeleteMCPConnection(ctx, sqlc.DeleteMCPConnectionParams{
+	if err := s.queries.DeleteMCPConnection(ctx, sqlc.DeleteMCPConnectionParams{
 		BotID: botUUID,
 		ID:    connUUID,
-	})
+	}); err != nil {
+		return err
+	}
+	s.notifyChanged(botID)
+	return nil
 }
 
 func (s *ConnectionService) SetPluginConnectionsActive(ctx context.Context, botID, installationID string, active bool) error {
@@ -403,11 +485,15 @@ func (s *ConnectionService) SetPluginConnectionsActive(ctx context.Context, botI
 	if err != nil {
 		return err
 	}
-	return s.queries.UpdateMCPConnectionsActiveByPlugin(ctx, sqlc.UpdateMCPConnectionsActiveByPluginParams{
+	if err := s.queries.UpdateMCPConnectionsActiveByPlugin(ctx, sqlc.UpdateMCPConnectionsActiveByPluginParams{
 		BotID:                         botUUID,
 		ManagedByPluginInstallationID: installationUUID,
 		IsActive:                      active,
-	})
+	}); err != nil {
+		return err
+	}
+	s.notifyChanged(botID)
+	return nil
 }
 
 func (s *ConnectionService) DeleteByPlugin(ctx context.Context, botID, installationID string) error {
@@ -422,10 +508,14 @@ func (s *ConnectionService) DeleteByPlugin(ctx context.Context, botID, installat
 	if err != nil {
 		return err
 	}
-	return s.queries.DeleteMCPConnectionsByPlugin(ctx, sqlc.DeleteMCPConnectionsByPluginParams{
+	if err := s.queries.DeleteMCPConnectionsByPlugin(ctx, sqlc.DeleteMCPConnectionsByPluginParams{
 		BotID:                         botUUID,
 		ManagedByPluginInstallationID: installationUUID,
-	})
+	}); err != nil {
+		return err
+	}
+	s.notifyChanged(botID)
+	return nil
 }
 
 // BatchDelete removes multiple MCP connections by IDs. Invalid IDs are skipped; at least one must succeed for no error.
@@ -517,13 +607,17 @@ func (s *ConnectionService) UpdateProbeResult(ctx context.Context, botID, id, st
 	if err != nil {
 		return err
 	}
-	return s.queries.UpdateMCPConnectionProbeResult(ctx, sqlc.UpdateMCPConnectionProbeResultParams{
+	if err := s.queries.UpdateMCPConnectionProbeResult(ctx, sqlc.UpdateMCPConnectionProbeResultParams{
 		BotID:         pgBotID,
 		ID:            pgID,
 		Status:        status,
 		ToolsCache:    toolsPayload,
 		StatusMessage: message,
-	})
+	}); err != nil {
+		return err
+	}
+	s.notifyChanged(botID)
+	return nil
 }
 
 func decodeMCPConfig(raw []byte) (map[string]any, error) {

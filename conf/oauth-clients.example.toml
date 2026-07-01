@@ -29,3 +29,12 @@ client_id = "${GMAIL_OAUTH_CLIENT_ID}"
 client_secret = "${GMAIL_OAUTH_CLIENT_SECRET}"
 redirect_uri = ""
 allowed_scopes = ["https://mail.google.com/"]
+
+[clients.hubspot]
+display_name = "HubSpot"
+client_id = "${HUBSPOT_OAUTH_CLIENT_ID}"
+client_secret = "${HUBSPOT_OAUTH_CLIENT_SECRET}"
+authorization_endpoint = "https://mcp.hubspot.com/oauth/authorize/user"
+token_endpoint = "https://mcp.hubspot.com/oauth/v3/token"
+redirect_uri = ""
+allowed_scopes = []

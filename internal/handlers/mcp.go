@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
@@ -197,6 +198,9 @@ func (h *MCPHandler) Update(c echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "mcp connection not found")
 		}
+		if errors.Is(err, mcp.ErrManagedConnection) {
+			return echo.NewHTTPError(http.StatusConflict, mcp.ErrManagedConnection.Error())
+		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	return c.JSON(http.StatusOK, resp)
@@ -230,6 +234,12 @@ func (h *MCPHandler) Delete(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
 	}
 	if err := h.service.Delete(c.Request().Context(), botID, id); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "mcp connection not found")
+		}
+		if errors.Is(err, mcp.ErrManagedConnection) {
+			return echo.NewHTTPError(http.StatusConflict, mcp.ErrManagedConnection.Error())
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -277,11 +287,15 @@ func (h *MCPHandler) Probe(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+	if conn.ManagedByPluginInstallationID != "" {
+		return echo.NewHTTPError(http.StatusConflict, "plugin-managed MCP connections are managed from plugin settings")
+	}
 	if h.fedGateway == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "federation gateway not configured")
 	}
 
-	ctx := c.Request().Context()
+	ctx, cancel := context.WithTimeout(c.Request().Context(), pluginMCPProbeTimeout)
+	defer cancel()
 	var tools []mcp.ToolDescriptor
 	var probeErr error
 
@@ -303,14 +317,19 @@ func (h *MCPHandler) Probe(c echo.Context) error {
 		resp.Tools = []mcp.ToolDescriptor{}
 		authRequired := strings.Contains(probeErr.Error(), "401") || strings.Contains(strings.ToLower(probeErr.Error()), "unauthorized")
 		resp.AuthRequired = authRequired
-		_ = h.service.UpdateProbeResult(ctx, botID, id, "error", []mcp.ToolDescriptor{}, probeErr.Error())
+		recordCtx, recordCancel := context.WithTimeout(context.WithoutCancel(c.Request().Context()), 5*time.Second)
+		defer recordCancel()
+		_ = h.service.UpdateProbeResult(recordCtx, botID, id, "error", []mcp.ToolDescriptor{}, probeErr.Error())
 	} else {
 		resp.Status = "connected"
 		if tools == nil {
 			tools = []mcp.ToolDescriptor{}
 		}
+		tools = mcp.FilterToolsByMetadata(tools, conn.Metadata)
 		resp.Tools = tools
-		_ = h.service.UpdateProbeResult(ctx, botID, id, "connected", tools, "")
+		recordCtx, recordCancel := context.WithTimeout(context.WithoutCancel(c.Request().Context()), 5*time.Second)
+		defer recordCancel()
+		_ = h.service.UpdateProbeResult(recordCtx, botID, id, "connected", tools, "")
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -343,6 +362,9 @@ func (h *MCPHandler) Import(c echo.Context) error {
 	}
 	items, err := h.service.Import(c.Request().Context(), botID, req)
 	if err != nil {
+		if errors.Is(err, mcp.ErrManagedConnection) {
+			return echo.NewHTTPError(http.StatusConflict, mcp.ErrManagedConnection.Error())
+		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	return c.JSON(http.StatusOK, mcp.ListResponse{Items: items})
@@ -383,6 +405,9 @@ func (h *MCPHandler) BatchDelete(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "ids are required")
 	}
 	if err := h.service.BatchDelete(c.Request().Context(), botID, req.IDs); err != nil {
+		if errors.Is(err, mcp.ErrManagedConnection) {
+			return echo.NewHTTPError(http.StatusConflict, mcp.ErrManagedConnection.Error())
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.NoContent(http.StatusNoContent)

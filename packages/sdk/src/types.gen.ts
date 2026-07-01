@@ -2377,6 +2377,7 @@ export type PluginsListResponse = {
 };
 
 export type PluginsMcpResource = {
+    allowed_tools?: Array<string>;
     args?: Array<string>;
     auth_ref?: string;
     capabilities?: Array<string>;
@@ -2444,6 +2445,12 @@ export type PluginsSkillResource = {
     key?: string;
     name?: string;
     path?: string;
+};
+
+export type PluginsUpdateConfigRequest = {
+    variables?: {
+        [key: string]: string;
+    };
 };
 
 export type ProvidersCountResponse = {
@@ -7362,6 +7369,59 @@ export type GetBotsByBotIdPluginsByIdResponses = {
 
 export type GetBotsByBotIdPluginsByIdResponse = GetBotsByBotIdPluginsByIdResponses[keyof GetBotsByBotIdPluginsByIdResponses];
 
+export type PutBotsByBotIdPluginsByIdConfigData = {
+    /**
+     * Plugin configuration update
+     */
+    body: PluginsUpdateConfigRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Plugin installation ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/plugins/{id}/config';
+};
+
+export type PutBotsByBotIdPluginsByIdConfigErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutBotsByBotIdPluginsByIdConfigError = PutBotsByBotIdPluginsByIdConfigErrors[keyof PutBotsByBotIdPluginsByIdConfigErrors];
+
+export type PutBotsByBotIdPluginsByIdConfigResponses = {
+    /**
+     * OK
+     */
+    200: PluginsInstallation;
+};
+
+export type PutBotsByBotIdPluginsByIdConfigResponse = PutBotsByBotIdPluginsByIdConfigResponses[keyof PutBotsByBotIdPluginsByIdConfigResponses];
+
 export type PostBotsByBotIdPluginsByIdDisableData = {
     body?: never;
     path: {
@@ -7391,6 +7451,10 @@ export type PostBotsByBotIdPluginsByIdDisableErrors = {
      * Not Found
      */
     404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
 };
 
 export type PostBotsByBotIdPluginsByIdDisableError = PostBotsByBotIdPluginsByIdDisableErrors[keyof PostBotsByBotIdPluginsByIdDisableErrors];
@@ -7433,6 +7497,14 @@ export type PostBotsByBotIdPluginsByIdEnableErrors = {
      * Not Found
      */
     404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
 };
 
 export type PostBotsByBotIdPluginsByIdEnableError = PostBotsByBotIdPluginsByIdEnableErrors[keyof PostBotsByBotIdPluginsByIdEnableErrors];
@@ -7478,6 +7550,10 @@ export type PostBotsByBotIdPluginsByIdOauthAuthorizeErrors = {
      * Not Found
      */
     404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
 };
 
 export type PostBotsByBotIdPluginsByIdOauthAuthorizeError = PostBotsByBotIdPluginsByIdOauthAuthorizeErrors[keyof PostBotsByBotIdPluginsByIdOauthAuthorizeErrors];
@@ -7520,6 +7596,10 @@ export type GetBotsByBotIdPluginsByIdOauthStatusErrors = {
      * Not Found
      */
     404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
 };
 
 export type GetBotsByBotIdPluginsByIdOauthStatusError = GetBotsByBotIdPluginsByIdOauthStatusErrors[keyof GetBotsByBotIdPluginsByIdOauthStatusErrors];
@@ -7568,12 +7648,10 @@ export type PostBotsByBotIdPluginsByIdUninstallError = PostBotsByBotIdPluginsByI
 
 export type PostBotsByBotIdPluginsByIdUninstallResponses = {
     /**
-     * OK
+     * No Content
      */
-    200: PluginsInstallation;
+    204: unknown;
 };
-
-export type PostBotsByBotIdPluginsByIdUninstallResponse = PostBotsByBotIdPluginsByIdUninstallResponses[keyof PostBotsByBotIdPluginsByIdUninstallResponses];
 
 export type PostBotsByBotIdQuickActionsExecuteData = {
     /**
@@ -8670,6 +8748,14 @@ export type PostBotsByBotIdSupermarketInstallPluginErrors = {
      * Not Found
      */
     404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
     /**
      * Bad Gateway
      */

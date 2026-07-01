@@ -24,6 +24,22 @@ INSERT INTO mcp_connections (
   managed_by_plugin_installation_id, managed_resource_key, visible, metadata
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (bot_id, name)
+DO UPDATE SET type = EXCLUDED.type,
+              config = EXCLUDED.config,
+              is_active = EXCLUDED.is_active,
+              auth_type = EXCLUDED.auth_type,
+              managed_by_plugin_installation_id = EXCLUDED.managed_by_plugin_installation_id,
+              managed_resource_key = EXCLUDED.managed_resource_key,
+              visible = EXCLUDED.visible,
+              metadata = EXCLUDED.metadata,
+              status = 'unknown',
+              tools_cache = '[]'::jsonb,
+              last_probed_at = NULL,
+              status_message = '',
+              updated_at = now()
+WHERE mcp_connections.managed_by_plugin_installation_id = EXCLUDED.managed_by_plugin_installation_id
+  AND mcp_connections.managed_resource_key = EXCLUDED.managed_resource_key
 RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
           managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at;
 

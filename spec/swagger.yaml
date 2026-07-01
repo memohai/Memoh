@@ -3977,6 +3977,10 @@ definitions:
     type: object
   plugins.MCPResource:
     properties:
+      allowed_tools:
+        items:
+          type: string
+        type: array
       args:
         items:
           type: string
@@ -4116,6 +4120,13 @@ definitions:
         type: string
       path:
         type: string
+    type: object
+  plugins.UpdateConfigRequest:
+    properties:
+      variables:
+        additionalProperties:
+          type: string
+        type: object
     type: object
   providers.CountResponse:
     properties:
@@ -8391,6 +8402,53 @@ paths:
       summary: Get bot plugin installation
       tags:
       - plugins
+  /bots/{bot_id}/plugins/{id}/config:
+    put:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Plugin installation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Plugin configuration update
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/plugins.UpdateConfigRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/plugins.Installation'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update bot plugin configuration
+      tags:
+      - plugins
   /bots/{bot_id}/plugins/{id}/disable:
     post:
       parameters:
@@ -8419,6 +8477,10 @@ paths:
             $ref: '#/definitions/handlers.ErrorResponse'
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Disable bot plugin
@@ -8452,6 +8514,14 @@ paths:
             $ref: '#/definitions/handlers.ErrorResponse'
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Enable bot plugin
@@ -8492,6 +8562,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
       summary: Start managed OAuth for a bot plugin
       tags:
       - plugins
@@ -8525,6 +8599,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
       summary: Refresh managed OAuth status for a bot plugin
       tags:
       - plugins
@@ -8542,10 +8620,8 @@ paths:
         required: true
         type: string
       responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/plugins.Installation'
+        "204":
+          description: No Content
         "400":
           description: Bad Request
           schema:
@@ -9448,6 +9524,14 @@ paths:
             $ref: '#/definitions/handlers.ErrorResponse'
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
         "502":

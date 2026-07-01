@@ -8082,6 +8082,25 @@ func (q *Queries) ListBotPluginInstallations(ctx context.Context, botID pgtype.U
 	return result, nil
 }
 
+func (q *Queries) UpdateBotPluginInstallationConfig(ctx context.Context, arg pgsqlc.UpdateBotPluginInstallationConfigParams) (pgsqlc.BotPluginInstallation, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.BotPluginInstallation{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.UpdateBotPluginInstallationConfigParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.BotPluginInstallation{}, err
+	}
+	out, err := q.store.queries.UpdateBotPluginInstallationConfig(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.BotPluginInstallation{}, mapQueryErr(err)
+	}
+	var result pgsqlc.BotPluginInstallation
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.BotPluginInstallation{}, err
+	}
+	return result, nil
+}
+
 func (q *Queries) UpdateBotPluginInstallationStatus(ctx context.Context, arg pgsqlc.UpdateBotPluginInstallationStatusParams) (pgsqlc.BotPluginInstallation, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return pgsqlc.BotPluginInstallation{}, errSQLiteQueriesNotConfigured

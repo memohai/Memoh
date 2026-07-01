@@ -139,6 +139,33 @@ func (s *ToolGatewayService) limitResult(toolName string, result map[string]any)
 	return LimitToolResult(result, "tool result ("+toolName+")", limit)
 }
 
+func (s *ToolGatewayService) InvalidateBot(botID string) {
+	if s == nil {
+		return
+	}
+	botID = strings.TrimSpace(botID)
+	if botID == "" {
+		return
+	}
+	prefix := botID + "\x00"
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key := range s.cache {
+		if key == botID || strings.HasPrefix(key, prefix) {
+			delete(s.cache, key)
+		}
+	}
+}
+
+func (s *ToolGatewayService) InvalidateAll() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cache = map[string]cachedToolRegistry{}
+}
+
 func (s *ToolGatewayService) getRegistry(ctx context.Context, session ToolSessionContext, force bool) (*ToolRegistry, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" {

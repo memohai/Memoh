@@ -139,10 +139,11 @@ import {
   type PluginsSkillResource,
 } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
-import { resolveApiErrorMessage } from '@/utils/api-error'
 import { emitBotPluginsUpdated } from '@/utils/bot-plugin-events'
+import { resolvePluginActionErrorMessage } from '@/utils/mcp-error-message'
 import BotSelect from '@/components/bot-select/index.vue'
 import FieldStack from '@/components/settings/field-stack.vue'
+import { pluginConfigRows, templateVariableKeys } from '../plugin-config-rows'
 
 const props = defineProps<{
   open: boolean
@@ -161,7 +162,7 @@ const selectedBotId = ref('')
 const installing = ref(false)
 const variableValues = reactive<Record<string, string>>({})
 
-const variables = computed<PluginsConfigVar[]>(() => props.plugin?.variables ?? [])
+const variables = computed<PluginsConfigVar[]>(() => props.plugin ? pluginConfigRows(props.plugin) : [])
 type PluginSkill = PluginsSkillEntry | PluginsSkillResource
 
 const pluginSkills = computed<PluginSkill[]>(() => [
@@ -203,10 +204,26 @@ watch(() => props.open, (open) => {
     for (const key of Object.keys(variableValues)) delete variableValues[key]
     return
   }
-  for (const item of props.plugin?.variables ?? []) {
-    if (item.key) variableValues[item.key] = item.defaultValue || ''
+  for (const item of variables.value) {
+    if (item.key) variableValues[item.key] = initialVariableValue(item)
   }
 })
+
+watch(variables, (items) => {
+  for (const key of Object.keys(variableValues)) {
+    if (!items.some(item => item.key === key)) delete variableValues[key]
+  }
+  for (const item of items) {
+    const key = (item.key || '').trim()
+    if (!key || Object.hasOwn(variableValues, key)) continue
+    variableValues[key] = initialVariableValue(item)
+  }
+})
+
+function initialVariableValue(item: PluginsConfigVar): string {
+  const value = String(item.defaultValue || '').trim()
+  return templateVariableKeys(value).length ? '' : value
+}
 
 async function handleInstall() {
   if (!selectedBotId.value || !props.plugin?.id) return
@@ -242,7 +259,8 @@ async function handleInstall() {
     }
   } catch (error) {
     oauthPopup?.close()
-    toast.error(resolveApiErrorMessage(error, t('supermarket.installFailed')))
+    emitBotPluginsUpdated(botId)
+    toast.error(resolvePluginActionErrorMessage(error, t('supermarket.installFailed'), t))
   } finally {
     installing.value = false
   }
@@ -287,8 +305,9 @@ async function startOAuthAfterInstall(botId: string, installation: PluginsInstal
       emit('installed')
       return
     }
+    emitBotPluginsUpdated(botId)
     popup?.close()
-    toast.error(resolveApiErrorMessage(error, t('mcp.oauth.flowInitFailed')))
+    toast.error(resolvePluginActionErrorMessage(error, t('mcp.oauth.flowInitFailed'), t))
   }
 }
 

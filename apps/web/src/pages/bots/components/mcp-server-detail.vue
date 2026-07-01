@@ -422,6 +422,7 @@ import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import KeyValueEditor from '@/components/key-value-editor/index.vue'
 import type { KeyValuePair } from '@/components/key-value-editor/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { resolveMCPOAuthErrorMessage } from '@/utils/mcp-error-message'
 import { useClipboard } from '@/composables/useClipboard'
 import { formatRelativeTime } from '@/utils/date-time'
 import type { McpItem } from './mcp-types'
@@ -623,7 +624,7 @@ async function handleSave() {
   try {
     const body = buildRequestBody()
     if (!serverId.value) {
-      const { data } = await postBotsByBotIdMcp({ path: { bot_id: props.botId } as unknown as { bot_id: string }, body, throwOnError: true })
+      const { data } = await postBotsByBotIdMcp({ path: { bot_id: props.botId } as never, body, throwOnError: true })
       const id = data?.id ?? ''
       serverId.value = id
       toast.success(t('mcp.createSuccess'))
@@ -789,7 +790,7 @@ async function handleOAuthFlow() {
         toast.success(t('mcp.oauth.authSuccess'))
         void handleProbe(serverId.value)
       } else {
-        toast.error(error || t('mcp.oauth.authFailed'))
+        toast.error(resolveMCPOAuthErrorMessage(error || '', t('mcp.oauth.authFailed'), t))
       }
     }
     const onMessage = async (event: MessageEvent) => {
@@ -823,7 +824,7 @@ async function handleOAuthFlow() {
         })
     }, 2000)
   } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('mcp.oauth.flowInitFailed')))
+    toast.error(resolveMCPOAuthErrorMessage(error, t('mcp.oauth.flowInitFailed'), t))
     oauthAuthorizing.value = false
   }
 }

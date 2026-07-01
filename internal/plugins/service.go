@@ -24,6 +24,14 @@ import (
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
+type ProbeFunc func(context.Context, Installation) error
+
+type configUpdateSnapshot struct {
+	row       sqlc.BotPluginInstallation
+	manifest  Manifest
+	variables map[string]string
+}
+
 type BridgeProvider struct {
 	Provider bridge.Provider
 }
@@ -79,6 +87,98 @@ func (s *Service) Get(ctx context.Context, botID, installationID string) (Instal
 	return s.normalizeInstallation(ctx, row)
 }
 
+func (s *Service) UpdateConfig(ctx context.Context, botID, installationID string, req UpdateConfigRequest) (Installation, error) {
+	updated, _, err := s.prepareConfigUpdate(ctx, botID, installationID, req)
+	return updated, err
+}
+
+func (s *Service) UpdateConfigWithValidation(ctx context.Context, botID, installationID string, req UpdateConfigRequest, probe ProbeFunc) (Installation, error) {
+	prepared, snapshot, err := s.prepareConfigUpdate(ctx, botID, installationID, req)
+	if err != nil {
+		return Installation{}, err
+	}
+	if prepared.Status == StatusReady && probe != nil {
+		if err := probe(ctx, prepared); err != nil {
+			if restoreErr := s.restoreConfigSnapshot(ctx, botID, installationID, snapshot); restoreErr != nil {
+				s.logger.Warn("failed to restore plugin configuration after probe failure",
+					slog.String("bot_id", botID),
+					slog.String("installation_id", installationID),
+					slog.Any("probe_error", err),
+					slog.Any("restore_error", restoreErr))
+			}
+			return Installation{}, fmt.Errorf("%w: %w", ErrPluginMCPProbeFailed, err)
+		}
+	}
+	if prepared.Status == StatusReady && snapshot.row.Enabled {
+		return s.Activate(ctx, botID, installationID)
+	}
+	return s.Get(ctx, botID, installationID)
+}
+
+func (s *Service) prepareConfigUpdate(ctx context.Context, botID, installationID string, req UpdateConfigRequest) (Installation, configUpdateSnapshot, error) {
+	if s.queries == nil || s.mcpService == nil {
+		return Installation{}, configUpdateSnapshot{}, errors.New("plugin service is not configured")
+	}
+	row, err := s.getRow(ctx, botID, installationID)
+	if err != nil {
+		return Installation{}, configUpdateSnapshot{}, err
+	}
+	if row.Status == StatusUninstalled {
+		return Installation{}, configUpdateSnapshot{}, errors.New("plugin is uninstalled")
+	}
+	manifest, err := decodeManifest(row.Manifest)
+	if err != nil {
+		return Installation{}, configUpdateSnapshot{}, err
+	}
+	variables, err := variablesFromConfig(row.Config)
+	if err != nil {
+		return Installation{}, configUpdateSnapshot{}, err
+	}
+	snapshot := configUpdateSnapshot{
+		row:       row,
+		manifest:  manifest,
+		variables: cloneStringMap(variables),
+	}
+	for key, value := range req.Variables {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if strings.TrimSpace(value) == "" {
+			delete(variables, key)
+			continue
+		}
+		variables[key] = value
+	}
+
+	status := s.evaluateInitialStatus(manifest, variables)
+	if status == StatusNeedsAuth {
+		status, err = s.refreshOAuthStatus(ctx, botID, row, manifest)
+		if err != nil {
+			return Installation{}, configUpdateSnapshot{}, err
+		}
+	}
+	enabled := false
+	if err := s.ensureManagedMCPNamesAvailable(ctx, botID, row.ID.String(), manifest); err != nil {
+		return Installation{}, configUpdateSnapshot{}, err
+	}
+	if err := s.ensureMCPResources(ctx, botID, row.ID, manifest, variables, status, enabled); err != nil {
+		return Installation{}, configUpdateSnapshot{}, err
+	}
+	configPayload, err := encodeJSON(map[string]any{
+		"variables": variables,
+	})
+	if err != nil {
+		return Installation{}, configUpdateSnapshot{}, err
+	}
+	updated, err := s.updateConfig(ctx, botID, installationID, status, enabled, configPayload)
+	if err != nil {
+		return Installation{}, configUpdateSnapshot{}, err
+	}
+	out, err := s.normalizeInstallation(ctx, updated)
+	return out, snapshot, err
+}
+
 func (s *Service) Install(ctx context.Context, botID string, req InstallRequest) (Installation, error) {
 	if s.queries == nil || s.mcpService == nil {
 		return Installation{}, errors.New("plugin service is not configured")
@@ -94,8 +194,26 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 	if manifest.Name == "" {
 		manifest.Name = manifest.ID
 	}
+	existingInstallationID, err := s.existingInstallationIDForPlugin(ctx, botUUID, manifest.ID)
+	if err != nil {
+		return Installation{}, err
+	}
+	reinstallingUninstalled := false
+	if strings.TrimSpace(existingInstallationID) != "" {
+		existing, err := s.getRow(ctx, botID, existingInstallationID)
+		if err != nil {
+			return Installation{}, err
+		}
+		if existing.Status != StatusUninstalled {
+			return Installation{}, fmt.Errorf("%w: %s", ErrPluginAlreadyInstalled, manifest.ID)
+		}
+		reinstallingUninstalled = true
+	}
+	if err := s.ensureManagedMCPNamesAvailable(ctx, botID, existingInstallationID, manifest); err != nil {
+		return Installation{}, err
+	}
 	status := s.evaluateInitialStatus(manifest, req.Variables)
-	enabled := status == StatusReady
+	enabled := false
 
 	configPayload, err := encodeJSON(map[string]any{
 		"variables": req.Variables,
@@ -126,39 +244,21 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 	if err != nil {
 		return Installation{}, err
 	}
-
-	installationID := row.ID.String()
-	if err := s.mcpService.DeleteByPlugin(ctx, botID, installationID); err != nil {
-		return Installation{}, err
-	}
-	if err := s.queries.DeleteBotPluginResources(ctx, row.ID); err != nil {
-		return Installation{}, err
-	}
-
-	for _, resource := range manifest.MCPs {
-		authReq := manifestAuthForResource(manifest, resource)
-		connReq := buildMCPConnectionRequest(manifest, resource, authReq, req.Variables)
-		active := enabled && strings.TrimSpace(strings.ToLower(authReq.Type)) != "managed_oauth"
-		connReq.Active = &active
-		conn, err := s.mcpService.CreateManaged(ctx, botID, connReq, mcp.ManagedConnectionRequest{
-			InstallationID: installationID,
-			ResourceKey:    resource.Key,
-			Visible:        strings.TrimSpace(strings.ToLower(resource.Visibility)) == "visible",
-			Metadata:       mcpResourceMetadata(manifest, resource, authReq),
-		})
-		if err != nil {
-			return Installation{}, fmt.Errorf("create plugin MCP resource %q: %w", resource.Key, err)
-		}
-		if _, err := s.queries.UpsertBotPluginResource(ctx, sqlc.UpsertBotPluginResourceParams{
-			InstallationID: row.ID,
-			ResourceType:   "mcp",
-			ResourceKey:    resource.Key,
-			ResourceID:     conn.ID,
-			Status:         resourceStatus(status, authReq),
-			Metadata:       mustJSON(mcpResourceMetadata(manifest, resource, authReq)),
-		}); err != nil {
+	deleteInstallationOnFailure := existingInstallationID == "" || reinstallingUninstalled
+	if strings.TrimSpace(existingInstallationID) != "" {
+		if err := s.mcpService.DeleteByPlugin(ctx, botID, row.ID.String()); err != nil {
+			s.cleanupFailedInstall(ctx, botID, row.ID, deleteInstallationOnFailure)
 			return Installation{}, err
 		}
+		if err := s.queries.DeleteBotPluginResources(ctx, row.ID); err != nil {
+			s.cleanupFailedInstall(ctx, botID, row.ID, deleteInstallationOnFailure)
+			return Installation{}, err
+		}
+	}
+
+	if err := s.ensureMCPResources(ctx, botID, row.ID, manifest, req.Variables, status, enabled); err != nil {
+		s.cleanupFailedInstall(ctx, botID, row.ID, deleteInstallationOnFailure)
+		return Installation{}, err
 	}
 
 	for _, resource := range manifest.Skills {
@@ -170,6 +270,7 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 			Status:         "bundled",
 			Metadata:       mustJSON(map[string]any{"name": resource.Name}),
 		}); err != nil {
+			s.cleanupFailedInstall(ctx, botID, row.ID, deleteInstallationOnFailure)
 			return Installation{}, err
 		}
 	}
@@ -190,10 +291,12 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 			Status:         "bundled",
 			Metadata:       mustJSON(map[string]any{"name": name, "skill_id": skill.ID}),
 		}); err != nil {
+			s.cleanupFailedInstall(ctx, botID, row.ID, deleteInstallationOnFailure)
 			return Installation{}, err
 		}
 	}
 	if err := s.installBundledSkills(ctx, botID, row, manifest); err != nil {
+		s.cleanupFailedInstall(ctx, botID, row.ID, deleteInstallationOnFailure)
 		return Installation{}, err
 	}
 
@@ -237,49 +340,45 @@ func (s *Service) SetEnabled(ctx context.Context, botID, installationID string, 
 	if status != StatusReady {
 		return Installation{}, fmt.Errorf("plugin is not ready: %s", status)
 	}
+	if err := s.mcpService.SetPluginConnectionsActive(ctx, botID, installationID, false); err != nil {
+		return Installation{}, err
+	}
+	updated, err := s.updateStatus(ctx, botID, installationID, StatusReady, false)
+	if err != nil {
+		return Installation{}, err
+	}
+	return s.normalizeInstallation(ctx, updated)
+}
+
+func (s *Service) Activate(ctx context.Context, botID, installationID string) (Installation, error) {
+	row, err := s.getRow(ctx, botID, installationID)
+	if err != nil {
+		return Installation{}, err
+	}
+	if row.Status != StatusReady {
+		return Installation{}, fmt.Errorf("plugin is not ready: %s", row.Status)
+	}
+	if row.Enabled {
+		return s.normalizeInstallation(ctx, row)
+	}
 	if err := s.mcpService.SetPluginConnectionsActive(ctx, botID, installationID, true); err != nil {
 		return Installation{}, err
 	}
 	updated, err := s.updateStatus(ctx, botID, installationID, StatusReady, true)
 	if err != nil {
+		_ = s.mcpService.SetPluginConnectionsActive(ctx, botID, installationID, false)
 		return Installation{}, err
 	}
 	return s.normalizeInstallation(ctx, updated)
 }
 
-func (s *Service) Uninstall(ctx context.Context, botID, installationID string) (Installation, error) {
-	row, err := s.getRow(ctx, botID, installationID)
-	if err != nil {
-		return Installation{}, err
-	}
-	if err := s.mcpService.DeleteByPlugin(ctx, botID, installationID); err != nil {
-		return Installation{}, err
-	}
-	if err := s.uninstallBundledSkills(ctx, botID, row); err != nil {
-		return Installation{}, err
-	}
-	if err := s.queries.DeleteBotPluginResources(ctx, row.ID); err != nil {
-		return Installation{}, err
-	}
-	updated, err := s.updateStatus(ctx, botID, installationID, StatusUninstalled, false)
-	if err != nil {
-		return Installation{}, err
-	}
-	return s.normalizeInstallation(ctx, updated)
+func (s *Service) Uninstall(ctx context.Context, botID, installationID string) error {
+	return s.Purge(ctx, botID, installationID)
 }
 
 func (s *Service) Purge(ctx context.Context, botID, installationID string) error {
 	row, err := s.getRow(ctx, botID, installationID)
 	if err != nil {
-		return err
-	}
-	if err := s.mcpService.DeleteByPlugin(ctx, botID, installationID); err != nil {
-		return err
-	}
-	if err := s.uninstallBundledSkills(ctx, botID, row); err != nil {
-		return err
-	}
-	if err := s.queries.DeleteBotPluginResources(ctx, row.ID); err != nil {
 		return err
 	}
 	botUUID, err := db.ParseUUID(botID)
@@ -290,10 +389,37 @@ func (s *Service) Purge(ctx context.Context, botID, installationID string) error
 	if err != nil {
 		return err
 	}
-	return s.queries.DeleteBotPluginInstallation(ctx, sqlc.DeleteBotPluginInstallationParams{
+	if err := s.queries.DeleteMCPConnectionsByPlugin(ctx, sqlc.DeleteMCPConnectionsByPluginParams{
+		BotID:                         botUUID,
+		ManagedByPluginInstallationID: installationUUID,
+	}); err != nil {
+		return err
+	}
+	if err := s.queries.DeleteBotPluginResources(ctx, row.ID); err != nil {
+		return err
+	}
+	if err := s.queries.DeleteBotPluginInstallation(ctx, sqlc.DeleteBotPluginInstallationParams{
 		BotID: botUUID,
 		ID:    installationUUID,
-	})
+	}); err != nil {
+		return err
+	}
+	if s.mcpService != nil {
+		s.mcpService.NotifyChanged(botID)
+	}
+	if err := s.uninstallBundledSkills(ctx, botID, row); err != nil {
+		s.logger.Warn("failed to clean up bundled plugin skills after purge",
+			slog.String("bot_id", botID),
+			slog.String("installation_id", installationID),
+			slog.Any("error", err))
+	}
+	if err := s.deletePluginBundleAssets(ctx, botID, row.PluginID); err != nil {
+		s.logger.Warn("failed to clean up plugin bundle assets after purge",
+			slog.String("bot_id", botID),
+			slog.String("plugin_id", row.PluginID),
+			slog.Any("error", err))
+	}
+	return nil
 }
 
 func (s *Service) StartOAuth(ctx context.Context, botID, installationID, callbackURL string) (*mcp.AuthorizeResult, error) {
@@ -373,15 +499,41 @@ func (s *Service) RefreshOAuthStatus(ctx context.Context, botID, installationID 
 	if err != nil {
 		return Installation{}, err
 	}
-	enabled := status == StatusReady
-	if err := s.mcpService.SetPluginConnectionsActive(ctx, botID, installationID, enabled); err != nil {
+	if err := s.mcpService.SetPluginConnectionsActive(ctx, botID, installationID, false); err != nil {
 		return Installation{}, err
 	}
-	updated, err := s.updateStatus(ctx, botID, installationID, status, enabled)
+	updated, err := s.updateStatus(ctx, botID, installationID, status, false)
 	if err != nil {
 		return Installation{}, err
 	}
 	return s.normalizeInstallation(ctx, updated)
+}
+
+func (s *Service) RefreshOAuthStatusWithValidation(ctx context.Context, botID, installationID string, probe ProbeFunc) (Installation, error) {
+	row, err := s.getRow(ctx, botID, installationID)
+	if err != nil {
+		return Installation{}, err
+	}
+	wasEnabled := row.Enabled || row.Status == StatusNeedsAuth
+	refreshed, err := s.RefreshOAuthStatus(ctx, botID, installationID)
+	if err != nil {
+		return Installation{}, err
+	}
+	if refreshed.Status != StatusReady || !wasEnabled {
+		return refreshed, nil
+	}
+	if probe != nil {
+		if err := probe(ctx, refreshed); err != nil {
+			if _, disableErr := s.SetEnabled(ctx, botID, installationID, false); disableErr != nil {
+				s.logger.Warn("failed to disable plugin after OAuth probe failure",
+					slog.String("bot_id", botID),
+					slog.String("installation_id", installationID),
+					slog.Any("error", disableErr))
+			}
+			return Installation{}, fmt.Errorf("%w: %w", ErrPluginMCPProbeFailed, err)
+		}
+	}
+	return s.Activate(ctx, botID, installationID)
 }
 
 func (s *Service) getRow(ctx context.Context, botID, installationID string) (sqlc.BotPluginInstallation, error) {
@@ -416,6 +568,174 @@ func (s *Service) updateStatus(ctx context.Context, botID, installationID, statu
 	})
 }
 
+func (s *Service) updateConfig(ctx context.Context, botID, installationID, status string, enabled bool, config []byte) (sqlc.BotPluginInstallation, error) {
+	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		return sqlc.BotPluginInstallation{}, err
+	}
+	installationUUID, err := db.ParseUUID(installationID)
+	if err != nil {
+		return sqlc.BotPluginInstallation{}, err
+	}
+	return s.queries.UpdateBotPluginInstallationConfig(ctx, sqlc.UpdateBotPluginInstallationConfigParams{
+		BotID:   botUUID,
+		ID:      installationUUID,
+		Status:  status,
+		Enabled: enabled,
+		Config:  config,
+	})
+}
+
+func (s *Service) restoreConfigSnapshot(ctx context.Context, botID, installationID string, snapshot configUpdateSnapshot) error {
+	if snapshot.row.ID.String() == "" {
+		return errors.New("plugin configuration snapshot is empty")
+	}
+	if err := s.ensureMCPResources(ctx, botID, snapshot.row.ID, snapshot.manifest, snapshot.variables, snapshot.row.Status, snapshot.row.Enabled); err != nil {
+		return err
+	}
+	_, err := s.updateConfig(ctx, botID, installationID, snapshot.row.Status, snapshot.row.Enabled, snapshot.row.Config)
+	return err
+}
+
+func (s *Service) existingInstallationIDForPlugin(ctx context.Context, botID pgtype.UUID, pluginID string) (string, error) {
+	rows, err := s.queries.ListBotPluginInstallations(ctx, botID)
+	if err != nil {
+		return "", err
+	}
+	pluginID = strings.TrimSpace(pluginID)
+	for _, row := range rows {
+		if strings.TrimSpace(row.PluginID) == pluginID {
+			return row.ID.String(), nil
+		}
+	}
+	return "", nil
+}
+
+func (s *Service) cleanupFailedInstall(ctx context.Context, botID string, installationID pgtype.UUID, deleteInstallation bool) {
+	if !deleteInstallation {
+		s.logger.Warn("plugin reinstall failed after persistent state was updated; leaving existing installation for manual retry",
+			slog.String("bot_id", botID),
+			slog.String("installation_id", installationID.String()))
+		return
+	}
+	installationIDString := installationID.String()
+	if s.mcpService != nil {
+		if err := s.mcpService.DeleteByPlugin(ctx, botID, installationIDString); err != nil {
+			s.logger.Warn("failed to clean up MCP resources after plugin install failure",
+				slog.String("bot_id", botID),
+				slog.String("installation_id", installationIDString),
+				slog.Any("error", err))
+		}
+	}
+	if row, err := s.getRow(ctx, botID, installationIDString); err == nil {
+		if err := s.uninstallBundledSkills(ctx, botID, row); err != nil {
+			s.logger.Warn("failed to clean up bundled plugin skills after plugin install failure",
+				slog.String("bot_id", botID),
+				slog.String("installation_id", installationIDString),
+				slog.Any("error", err))
+		}
+		if err := s.deletePluginBundleAssets(ctx, botID, row.PluginID); err != nil {
+			s.logger.Warn("failed to clean up plugin bundle assets after plugin install failure",
+				slog.String("bot_id", botID),
+				slog.String("plugin_id", row.PluginID),
+				slog.Any("error", err))
+		}
+	}
+	if err := s.queries.DeleteBotPluginResources(ctx, installationID); err != nil {
+		s.logger.Warn("failed to clean up plugin resources after plugin install failure",
+			slog.String("bot_id", botID),
+			slog.String("installation_id", installationIDString),
+			slog.Any("error", err))
+	}
+	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		s.logger.Warn("failed to parse bot id while cleaning up plugin install failure",
+			slog.String("bot_id", botID),
+			slog.String("installation_id", installationIDString),
+			slog.Any("error", err))
+		return
+	}
+	if err := s.queries.DeleteBotPluginInstallation(ctx, sqlc.DeleteBotPluginInstallationParams{
+		BotID: botUUID,
+		ID:    installationID,
+	}); err != nil {
+		s.logger.Warn("failed to clean up plugin installation after install failure",
+			slog.String("bot_id", botID),
+			slog.String("installation_id", installationIDString),
+			slog.Any("error", err))
+	}
+}
+
+func (s *Service) ensureManagedMCPNamesAvailable(ctx context.Context, botID, installationID string, manifest Manifest) error {
+	if len(manifest.MCPs) == 0 {
+		return nil
+	}
+	connections, err := s.mcpService.ListByBot(ctx, botID)
+	if err != nil {
+		return err
+	}
+	installationID = strings.TrimSpace(installationID)
+	for _, resource := range manifest.MCPs {
+		name := stableResourceName(manifest.ID, resource.Key)
+		for _, conn := range connections {
+			if strings.TrimSpace(conn.Name) != name {
+				continue
+			}
+			if strings.TrimSpace(conn.ManagedByPluginInstallationID) == installationID &&
+				strings.TrimSpace(conn.ManagedResourceKey) == strings.TrimSpace(resource.Key) {
+				continue
+			}
+			return fmt.Errorf("create plugin MCP resource %q: %w", resource.Key, managedMCPNameConflict(name))
+		}
+	}
+	return nil
+}
+
+func (s *Service) ensureMCPResources(ctx context.Context, botID string, installationID pgtype.UUID, manifest Manifest, variables map[string]string, installationStatus string, enabled bool) error {
+	installationIDString := installationID.String()
+	for _, resource := range manifest.MCPs {
+		authReq := manifestAuthForResource(manifest, resource)
+		connReq := buildMCPConnectionRequest(manifest, resource, authReq, variables)
+		active := enabled && installationStatus == StatusReady
+		connReq.Active = &active
+		metadata := mcpResourceMetadata(manifest, resource, authReq)
+		conn, err := s.mcpService.CreateManaged(ctx, botID, connReq, mcp.ManagedConnectionRequest{
+			InstallationID: installationIDString,
+			ResourceKey:    resource.Key,
+			Visible:        strings.TrimSpace(strings.ToLower(resource.Visibility)) == "visible",
+			Metadata:       metadata,
+		})
+		if err != nil {
+			return fmt.Errorf("create plugin MCP resource %q: %w", resource.Key, managedMCPResourceError(err, connReq.Name))
+		}
+		if _, err := s.queries.UpsertBotPluginResource(ctx, sqlc.UpsertBotPluginResourceParams{
+			InstallationID: installationID,
+			ResourceType:   "mcp",
+			ResourceKey:    resource.Key,
+			ResourceID:     conn.ID,
+			Status:         resourceStatus(installationStatus, authReq),
+			Metadata:       mustJSON(metadata),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func managedMCPResourceError(err error, name string) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return managedMCPNameConflict(name)
+	}
+	return err
+}
+
+func managedMCPNameConflict(name string) error {
+	return fmt.Errorf("%w: MCP connection name %q is already used by another connection", ErrManagedMCPNameConflict, strings.TrimSpace(name))
+}
+
 func (s *Service) normalizeInstallation(ctx context.Context, row sqlc.BotPluginInstallation) (Installation, error) {
 	manifest, err := decodeManifest(row.Manifest)
 	if err != nil {
@@ -439,6 +759,9 @@ func (s *Service) normalizeInstallation(ctx context.Context, row sqlc.BotPluginI
 		if err != nil {
 			return Installation{}, err
 		}
+		if row.Enabled && row.Status == StatusReady {
+			item = s.decorateMCPResource(ctx, row.BotID.String(), item)
+		}
 		outResources = append(outResources, item)
 	}
 	return Installation{
@@ -456,6 +779,108 @@ func (s *Service) normalizeInstallation(ctx context.Context, row sqlc.BotPluginI
 		InstalledAt: timeFromPg(row.InstalledAt),
 		UpdatedAt:   timeFromPg(row.UpdatedAt),
 	}, nil
+}
+
+func (s *Service) RecordMCPResourceProbeResult(ctx context.Context, botID, installationID, resourceKey, resourceID, status string, tools []mcp.ToolDescriptor, message string) error {
+	if s.queries == nil || s.mcpService == nil {
+		return errors.New("plugin service is not configured")
+	}
+	status = strings.TrimSpace(status)
+	message = strings.TrimSpace(message)
+	resourceID = strings.TrimSpace(resourceID)
+	if resourceID != "" {
+		if err := s.mcpService.UpdateProbeResult(ctx, botID, resourceID, status, tools, message); err != nil {
+			return err
+		}
+	}
+
+	row, err := s.getRow(ctx, botID, installationID)
+	if err != nil {
+		return err
+	}
+	resources, err := s.queries.ListBotPluginResources(ctx, row.ID)
+	if err != nil {
+		return err
+	}
+	for _, resource := range resources {
+		if strings.TrimSpace(resource.ResourceType) != "mcp" {
+			continue
+		}
+		if strings.TrimSpace(resource.ResourceKey) != strings.TrimSpace(resourceKey) && strings.TrimSpace(resource.ResourceID) != resourceID {
+			continue
+		}
+		metadata, err := decodeJSONMap(resource.Metadata)
+		if err != nil {
+			return err
+		}
+		metadata = withMCPProbeMetadata(metadata, status, tools, message)
+		_, err = s.queries.UpsertBotPluginResource(ctx, sqlc.UpsertBotPluginResourceParams{
+			InstallationID: row.ID,
+			ResourceType:   resource.ResourceType,
+			ResourceKey:    resource.ResourceKey,
+			ResourceID:     resource.ResourceID,
+			Status:         mcpResourceProbeStatus(resource.Status, status),
+			Metadata:       mustJSON(metadata),
+		})
+		return err
+	}
+	return nil
+}
+
+func (s *Service) decorateMCPResource(ctx context.Context, botID string, resource Resource) Resource {
+	if strings.TrimSpace(resource.Type) != "mcp" || s.mcpService == nil || strings.TrimSpace(resource.ResourceID) == "" {
+		return resource
+	}
+	conn, err := s.mcpService.Get(ctx, botID, resource.ResourceID)
+	if err != nil {
+		return resource
+	}
+	status := strings.TrimSpace(conn.Status)
+	if status == "" || status == "unknown" {
+		return resource
+	}
+	if resource.Metadata == nil {
+		resource.Metadata = map[string]any{}
+	}
+	resource.Metadata = withMCPProbeMetadata(resource.Metadata, status, conn.ToolsCache, conn.StatusMessage)
+	resource.Status = mcpResourceProbeStatus(resource.Status, status)
+	return resource
+}
+
+func withMCPProbeMetadata(metadata map[string]any, status string, tools []mcp.ToolDescriptor, message string) map[string]any {
+	out := map[string]any{}
+	for key, value := range metadata {
+		out[key] = value
+	}
+	status = strings.TrimSpace(status)
+	message = strings.TrimSpace(message)
+	if status != "" {
+		out["probe_status"] = status
+	}
+	switch {
+	case status == "connected":
+		out["tools_count"] = len(tools)
+		delete(out, "probe_error")
+	case status == "error":
+		out["tools_count"] = 0
+		if message != "" {
+			out["probe_error"] = message
+		}
+	case message != "":
+		out["probe_message"] = message
+	}
+	return out
+}
+
+func mcpResourceProbeStatus(current, probeStatus string) string {
+	switch strings.TrimSpace(probeStatus) {
+	case "connected":
+		return StatusReady
+	case "error":
+		return "error"
+	default:
+		return strings.TrimSpace(current)
+	}
 }
 
 func (s *Service) installBundledSkills(ctx context.Context, botID string, row sqlc.BotPluginInstallation, manifest Manifest) error {
@@ -480,11 +905,11 @@ func (s *Service) installBundledSkills(ctx context.Context, botID string, row sq
 		if err != nil {
 			return fmt.Errorf("plugin skill %q has an invalid name", parsed.Name)
 		}
+		if err := ensurePluginSkillWritable(ctx, client, dirPath, row.ID.String(), parsed.Name); err != nil {
+			return err
+		}
 		if err := client.Mkdir(ctx, dirPath); err != nil {
 			return fmt.Errorf("create plugin skill %q directory: %w", parsed.Name, err)
-		}
-		if err := client.WriteFile(ctx, path.Join(dirPath, "SKILL.md"), []byte(raw)); err != nil {
-			return fmt.Errorf("write plugin skill %q: %w", parsed.Name, err)
 		}
 		owner, err := encodeJSON(pluginSkillOwner(row, manifest, skill, parsed.Name))
 		if err != nil {
@@ -493,6 +918,27 @@ func (s *Service) installBundledSkills(ctx context.Context, botID string, row sq
 		if err := client.WriteFile(ctx, path.Join(dirPath, ".memoh-plugin-owner.json"), owner); err != nil {
 			return fmt.Errorf("write plugin skill %q owner marker: %w", parsed.Name, err)
 		}
+		if err := client.WriteFile(ctx, path.Join(dirPath, "SKILL.md"), []byte(raw)); err != nil {
+			return fmt.Errorf("write plugin skill %q: %w", parsed.Name, err)
+		}
+	}
+	return nil
+}
+
+func (s *Service) deletePluginBundleAssets(ctx context.Context, botID, pluginID string) error {
+	if s.bridges == nil {
+		return nil
+	}
+	pluginRoot, err := skillset.PluginDirForID(pluginID)
+	if err != nil {
+		return err
+	}
+	client, err := s.bridges.MCPClient(ctx, botID)
+	if err != nil {
+		return fmt.Errorf("delete plugin bundle assets: container not reachable: %w", err)
+	}
+	if err := client.DeleteFile(ctx, pluginRoot, true); err != nil && !errors.Is(err, bridge.ErrNotFound) {
+		return err
 	}
 	return nil
 }
@@ -536,6 +982,32 @@ func (s *Service) uninstallBundledSkills(ctx context.Context, botID string, row 
 
 type skillFileClient interface {
 	ReadRaw(ctx context.Context, path string) (io.ReadCloser, error)
+}
+
+func ensurePluginSkillWritable(ctx context.Context, client skillFileClient, dirPath, installationID, skillName string) error {
+	rc, err := client.ReadRaw(ctx, path.Join(dirPath, ".memoh-plugin-owner.json"))
+	if err != nil {
+		skillRC, skillErr := client.ReadRaw(ctx, path.Join(dirPath, "SKILL.md"))
+		if skillErr == nil {
+			_ = skillRC.Close()
+			return fmt.Errorf("plugin skill %q conflicts with an existing managed skill", skillName)
+		}
+		if errors.Is(skillErr, bridge.ErrNotFound) {
+			return nil
+		}
+		return fmt.Errorf("inspect plugin skill %q: %w", skillName, err)
+	}
+	defer func() { _ = rc.Close() }()
+	var owner struct {
+		InstallationID string `json:"installation_id"`
+	}
+	if err := json.NewDecoder(rc).Decode(&owner); err != nil {
+		return fmt.Errorf("plugin skill %q has an unreadable owner marker", skillName)
+	}
+	if strings.TrimSpace(owner.InstallationID) != strings.TrimSpace(installationID) {
+		return fmt.Errorf("plugin skill %q is owned by another plugin installation", skillName)
+	}
+	return nil
 }
 
 func canDeletePluginSkill(ctx context.Context, client skillFileClient, dirPath, installationID string) bool {
@@ -879,30 +1351,104 @@ func manifestMetadata(manifest Manifest) map[string]any {
 
 func mcpResourceMetadata(manifest Manifest, resource MCPResource, authReq AuthRequirement) map[string]any {
 	return map[string]any{
-		"plugin_id":    manifest.ID,
-		"plugin_name":  manifest.Name,
-		"plugin_icon":  manifest.Icon,
-		"resource_key": resource.Key,
-		"display_name": resource.DisplayName,
-		"capabilities": resource.Capabilities,
-		"auth_type":    authReq.Type,
-		"client_ref":   authReq.ClientRef,
-		"tool_prefix":  stableResourceName(manifest.ID, resource.Key),
-		"visibility":   resource.Visibility,
+		"plugin_id":     manifest.ID,
+		"plugin_name":   manifest.Name,
+		"plugin_icon":   manifest.Icon,
+		"resource_key":  resource.Key,
+		"display_name":  resource.DisplayName,
+		"capabilities":  resource.Capabilities,
+		"auth_type":     authReq.Type,
+		"client_ref":    authReq.ClientRef,
+		"tool_prefix":   stableResourceName(manifest.ID, resource.Key),
+		"visibility":    resource.Visibility,
+		"allowed_tools": resource.AllowedTools,
 	}
 }
 
 func redactConfig(manifest Manifest, config map[string]any) map[string]any {
 	rawVariables, _ := config["variables"].(map[string]any)
 	variableStatus := map[string]any{}
-	for _, item := range manifest.Variables {
-		if item.Key == "" {
+	for _, item := range manifestConfigRows(manifest) {
+		key := strings.TrimSpace(item.Key)
+		if key == "" {
 			continue
 		}
-		_, configured := rawVariables[item.Key]
-		variableStatus[item.Key] = map[string]bool{"configured": configured}
+		rawValue, configured := rawVariables[key]
+		status := map[string]any{"configured": configured}
+		if configured && !item.Secret && rawValue != nil {
+			if value := strings.TrimSpace(fmt.Sprint(rawValue)); value != "" {
+				status["value"] = value
+			}
+		}
+		variableStatus[key] = status
 	}
 	return map[string]any{"variables": variableStatus}
+}
+
+func manifestConfigRows(manifest Manifest) []ConfigVar {
+	rows := make([]ConfigVar, 0, len(manifest.Variables))
+	rowByKey := map[string]int{}
+	manifestVariableKeys := map[string]struct{}{}
+	addRow := func(item ConfigVar) {
+		key := strings.TrimSpace(item.Key)
+		if key == "" {
+			return
+		}
+		item.Key = key
+		if index, ok := rowByKey[key]; ok {
+			rows[index].Secret = rows[index].Secret || item.Secret
+			rows[index].Required = rows[index].Required || item.Required
+			if rows[index].Description == "" {
+				rows[index].Description = item.Description
+			}
+			if rows[index].DefaultValue == "" {
+				rows[index].DefaultValue = item.DefaultValue
+			}
+			return
+		}
+		rowByKey[key] = len(rows)
+		rows = append(rows, item)
+	}
+	for _, item := range manifest.Variables {
+		key := strings.TrimSpace(item.Key)
+		if key != "" {
+			manifestVariableKeys[key] = struct{}{}
+		}
+		addRow(item)
+	}
+	for _, resource := range manifest.MCPs {
+		for _, item := range resource.Env {
+			if shouldRenderResourceConfig(item, manifestVariableKeys) {
+				addRow(item)
+			}
+		}
+		for _, item := range resource.Headers {
+			if shouldRenderResourceConfig(item, manifestVariableKeys) {
+				addRow(item)
+			}
+		}
+	}
+	return rows
+}
+
+func shouldRenderResourceConfig(item ConfigVar, manifestVariableKeys map[string]struct{}) bool {
+	key := strings.TrimSpace(item.Key)
+	if key == "" {
+		return false
+	}
+	references := templateVariableKeys(item.DefaultValue)
+	if len(references) == 0 {
+		return true
+	}
+	for _, reference := range references {
+		if reference == key {
+			continue
+		}
+		if _, ok := manifestVariableKeys[reference]; ok {
+			return false
+		}
+	}
+	return true
 }
 
 func variablesFromConfig(raw []byte) (map[string]string, error) {
@@ -934,6 +1480,14 @@ func variablesFromConfig(raw []byte) (map[string]string, error) {
 		}
 	}
 	return out, nil
+}
+
+func cloneStringMap(value map[string]string) map[string]string {
+	out := make(map[string]string, len(value))
+	for key, item := range value {
+		out[key] = item
+	}
+	return out
 }
 
 func encodeJSON(value any) ([]byte, error) {
@@ -1018,6 +1572,17 @@ func expandTemplateVars(value string, vars map[string]string) string {
 
 func hasUnresolvedTemplateVars(value string) bool {
 	return templateVarPattern.MatchString(value)
+}
+
+func templateVariableKeys(value string) []string {
+	matches := templateVarPattern.FindAllStringSubmatch(value, -1)
+	out := make([]string, 0, len(matches))
+	for _, match := range matches {
+		if len(match) > 1 {
+			out = append(out, match[1])
+		}
+	}
+	return out
 }
 
 func authorizationServerFromEndpoint(endpoint string) string {

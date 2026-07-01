@@ -21,6 +21,7 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/config"
+	"github.com/memohai/memoh/internal/mcp"
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace/bridge"
@@ -30,6 +31,8 @@ type SupermarketHandler struct {
 	baseURL        string
 	httpClient     *http.Client
 	pluginService  pluginInstaller
+	mcpService     *mcp.ConnectionService
+	fedGateway     *MCPFederationGateway
 	containers     bridge.Provider
 	botService     *bots.Service
 	accountService *accounts.Service
@@ -37,7 +40,11 @@ type SupermarketHandler struct {
 }
 
 type pluginInstaller interface {
+	Activate(ctx context.Context, botID, installationID string) (pluginspkg.Installation, error)
+	Get(ctx context.Context, botID, installationID string) (pluginspkg.Installation, error)
 	Install(ctx context.Context, botID string, req pluginspkg.InstallRequest) (pluginspkg.Installation, error)
+	Purge(ctx context.Context, botID, installationID string) error
+	RecordMCPResourceProbeResult(ctx context.Context, botID, installationID, resourceKey, resourceID, status string, tools []mcp.ToolDescriptor, message string) error
 }
 
 type pluginBundleWriter interface {
@@ -86,6 +93,8 @@ func NewSupermarketHandler(
 	log *slog.Logger,
 	cfg config.Config,
 	pluginService *pluginspkg.Service,
+	mcpService *mcp.ConnectionService,
+	fedGateway *MCPFederationGateway,
 	containers bridge.Provider,
 	botService *bots.Service,
 	accountService *accounts.Service,
@@ -94,6 +103,8 @@ func NewSupermarketHandler(
 		baseURL:        cfg.Supermarket.GetBaseURL(),
 		httpClient:     &http.Client{Timeout: 30 * time.Second},
 		pluginService:  pluginService,
+		mcpService:     mcpService,
+		fedGateway:     fedGateway,
 		containers:     containers,
 		botService:     botService,
 		accountService: accountService,
@@ -237,6 +248,8 @@ type InstallSkillRequest struct {
 // @Success 200 {object} plugins.Installation
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
 // @Failure 502 {object} ErrorResponse
 // @Router /bots/{bot_id}/supermarket/install-plugin [post].
 func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
@@ -263,25 +276,76 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	bundleResult, err := h.installPluginBundle(ctx, botID, req.PluginID, manifest.ID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
-	}
-	scriptsResult, err := h.runPluginInstallScripts(ctx, botID, manifest.ID, manifest.Install)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
-	}
-
 	installation, err := h.pluginService.Install(ctx, botID, pluginspkg.InstallRequest{
 		Manifest:  manifest,
 		Variables: req.Variables,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return pluginServiceError(err)
+	}
+
+	bundleResult, err := h.installPluginBundle(ctx, botID, req.PluginID, manifest.ID)
+	if err != nil {
+		h.cleanupFailedSupermarketPluginInstall(ctx, botID, installation.ID, manifest.ID)
+		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
+	}
+	scriptsResult, err := h.runPluginInstallScripts(ctx, botID, manifest.ID, manifest.Install)
+	if err != nil {
+		h.cleanupFailedSupermarketPluginInstall(ctx, botID, installation.ID, manifest.ID)
+		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
+	}
+
+	if installation.Status == pluginspkg.StatusReady {
+		if err := h.probeReadyPluginMCPs(ctx, botID, installation); err != nil {
+			h.logger.Warn("plugin MCP probe failed after install",
+				slog.String("bot_id", botID),
+				slog.String("installation_id", installation.ID),
+				slog.Any("error", err))
+			h.cleanupFailedSupermarketPluginInstall(ctx, botID, installation.ID, manifest.ID)
+			return pluginMCPProbeError(err)
+		}
+		installation, err = h.pluginService.Activate(ctx, botID, installation.ID)
+		if err != nil {
+			h.cleanupFailedSupermarketPluginInstall(ctx, botID, installation.ID, manifest.ID)
+			return pluginServiceError(err)
+		}
+	}
+	if refreshed, err := h.pluginService.Get(ctx, botID, installation.ID); err == nil {
+		installation = refreshed
 	}
 	installation = withPluginBundleInstallMetadata(installation, bundleResult, nil)
 	installation = withPluginInstallScriptsMetadata(installation, scriptsResult, nil)
 	return c.JSON(http.StatusOK, installation)
+}
+
+func (h *SupermarketHandler) cleanupFailedSupermarketPluginInstall(ctx context.Context, botID, installationID, pluginID string) {
+	if purgeErr := h.pluginService.Purge(ctx, botID, installationID); purgeErr != nil {
+		h.logger.Warn("failed to purge plugin after install failure",
+			slog.String("bot_id", botID),
+			slog.String("installation_id", installationID),
+			slog.Any("error", purgeErr))
+	}
+	if err := h.deletePluginBundleAssets(ctx, botID, pluginID); err != nil {
+		h.logger.Warn("failed to delete plugin bundle assets after install failure",
+			slog.String("bot_id", botID),
+			slog.String("plugin_id", pluginID),
+			slog.Any("error", err))
+	}
+}
+
+func (h *SupermarketHandler) deletePluginBundleAssets(ctx context.Context, botID, pluginID string) error {
+	if h.containers == nil {
+		return errors.New("container provider is not configured")
+	}
+	client, err := h.containers.MCPClient(ctx, botID)
+	if err != nil {
+		return fmt.Errorf("container not reachable: %w", err)
+	}
+	pluginRoot, err := skillset.PluginDirForID(pluginID)
+	if err != nil {
+		return err
+	}
+	return client.DeleteFile(ctx, pluginRoot, true)
 }
 
 // InstallSkill godoc
