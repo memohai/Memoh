@@ -169,7 +169,7 @@ func (*fakeAgentMessageService) ListLatest(context.Context, string, int32) ([]me
 	return nil, nil
 }
 
-func (*fakeAgentMessageService) ListBefore(context.Context, string, time.Time, int32) ([]messagepkg.Message, error) {
+func (*fakeAgentMessageService) ListBefore(context.Context, string, time.Time, string, int32) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
@@ -181,12 +181,20 @@ func (*fakeAgentMessageService) ListActiveSinceBySession(context.Context, string
 	return nil, nil
 }
 
+func (*fakeAgentMessageService) ListActiveSinceByTurn(context.Context, string, time.Time) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
 func (*fakeAgentMessageService) ListLatestBySession(context.Context, string, int32) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
-func (*fakeAgentMessageService) ListBeforeBySession(context.Context, string, time.Time, int32) ([]messagepkg.Message, error) {
+func (*fakeAgentMessageService) ListBeforeBySession(context.Context, string, time.Time, string, int32) ([]messagepkg.Message, error) {
 	return nil, nil
+}
+
+func (*fakeAgentMessageService) GetSessionTurnGraph(context.Context, string) (messagepkg.SessionTurnGraph, error) {
+	return messagepkg.SessionTurnGraph{}, nil
 }
 
 func (*fakeAgentMessageService) LocateByExternalIDBySession(context.Context, string, string, int32, int32) (messagepkg.LocateResult, error) {

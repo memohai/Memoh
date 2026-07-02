@@ -219,7 +219,7 @@ func provideDBQueries(cfg config.Config, postgresStore *postgresstore.Store, sql
 		if postgresStore == nil {
 			return nil, errors.New("postgres store not configured")
 		}
-		return postgresstore.NewQueries(postgresStore.SQLC()), nil
+		return postgresStore.QueriesAdapter(), nil
 	case db.DriverSQLite:
 		if sqliteStore == nil {
 			return nil, errors.New("sqlite store not configured")

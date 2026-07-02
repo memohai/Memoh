@@ -12,6 +12,7 @@ import (
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/bots"
+	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/userinput"
 )
@@ -22,6 +23,7 @@ type fakeUserInputService struct {
 	target   userinput.Request
 	resolved userinput.Request
 
+	resolvedInput userinput.ResolveInput
 	submitCalls   int
 	cancelCalls   int
 	createCalls   int
@@ -39,7 +41,8 @@ func (f *fakeUserInputService) CreatePending(context.Context, userinput.CreatePe
 	return userinput.Request{}, errors.New("unexpected CreatePending")
 }
 
-func (f *fakeUserInputService) ResolveTarget(context.Context, userinput.ResolveInput) (userinput.Request, error) {
+func (f *fakeUserInputService) ResolveTarget(_ context.Context, input userinput.ResolveInput) (userinput.Request, error) {
+	f.resolvedInput = input
 	return f.target, nil
 }
 
@@ -330,6 +333,62 @@ func TestRespondUserInputLimitsChatToolResult(t *testing.T) {
 	}
 	if !strings.Contains(text, "[memoh pruned]") {
 		t.Fatalf("answer text missing prune marker:\n%s", text)
+	}
+}
+
+func TestRespondUserInputRejectsStaleSelectedHeadBeforeSubmitting(t *testing.T) {
+	t.Parallel()
+
+	botID := testUUID(1)
+	sessionID := testUUID(2)
+	persistTurnID := testUUID(3)
+	staleHeadID := testUUID(4)
+	fake := &fakeUserInputService{
+		target: userinput.Request{
+			ID:            testUUID(5).String(),
+			BotID:         botID.String(),
+			SessionID:     sessionID.String(),
+			PersistTurnID: persistTurnID.String(),
+			Status:        userinput.StatusPending,
+		},
+		resolved: chatResolvedRequest(),
+	}
+	resolver := &Resolver{
+		userInput: fake,
+		queries: &fakeTurnStore{
+			session: dbsqlc.BotSession{ID: sessionID, BotID: botID, Type: "chat"},
+			historyTurn: dbsqlc.BotHistoryTurn{
+				ID:             persistTurnID,
+				BotID:          botID,
+				OwnerSessionID: sessionID,
+			},
+			turnPath: []dbsqlc.BotHistoryTurn{
+				{ID: staleHeadID, BotID: botID, OwnerSessionID: sessionID},
+			},
+		},
+		continueUserInputFn: func(context.Context, userinput.Request, UserInputResponseInput, sdk.ToolResultPart, chan<- WSStreamEvent) error {
+			t.Error("stale base head must not continue the session")
+			return nil
+		},
+	}
+
+	err := resolver.RespondUserInput(context.Background(), UserInputResponseInput{
+		BotID:          botID.String(),
+		SessionID:      sessionID.String(),
+		BaseHeadTurnID: staleHeadID.String(),
+		Answers:        []userinput.QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
+	}, nil)
+	if err == nil {
+		t.Fatal("RespondUserInput() error = nil, want stale base head error")
+	}
+	if !strings.Contains(err.Error(), "user input turn is no longer active for the requested conversation version") {
+		t.Fatalf("RespondUserInput() error = %v, want stale selected head error", err)
+	}
+	if fake.resolvedInput.BaseHeadTurnID != staleHeadID.String() {
+		t.Fatalf("ResolveTarget BaseHeadTurnID = %q, want %q", fake.resolvedInput.BaseHeadTurnID, staleHeadID.String())
+	}
+	if fake.submitCalls != 0 || fake.cancelCalls != 0 {
+		t.Fatalf("submit/cancel calls = %d/%d, want 0/0", fake.submitCalls, fake.cancelCalls)
 	}
 }
 

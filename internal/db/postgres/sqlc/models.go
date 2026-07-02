@@ -144,6 +144,8 @@ type BotHistoryMessage struct {
 	ID                      pgtype.UUID        `json:"id"`
 	BotID                   pgtype.UUID        `json:"bot_id"`
 	SessionID               pgtype.UUID        `json:"session_id"`
+	TurnID                  pgtype.UUID        `json:"turn_id"`
+	TurnMessageSeq          pgtype.Int8        `json:"turn_message_seq"`
 	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
 	SenderAccountUserID     pgtype.UUID        `json:"sender_account_user_id"`
 	SourceMessageID         pgtype.Text        `json:"source_message_id"`
@@ -186,6 +188,17 @@ type BotHistoryMessageCompact struct {
 	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
 }
 
+type BotHistoryTurn struct {
+	ID                      pgtype.UUID        `json:"id"`
+	BotID                   pgtype.UUID        `json:"bot_id"`
+	OwnerSessionID          pgtype.UUID        `json:"owner_session_id"`
+	ParentTurnID            pgtype.UUID        `json:"parent_turn_id"`
+	RequestMessageID        pgtype.UUID        `json:"request_message_id"`
+	FinalAssistantMessageID pgtype.UUID        `json:"final_assistant_message_id"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+}
+
 type BotPluginInstallation struct {
 	ID          pgtype.UUID        `json:"id"`
 	BotID       pgtype.UUID        `json:"bot_id"`
@@ -214,21 +227,24 @@ type BotPluginResource struct {
 }
 
 type BotSession struct {
-	ID              pgtype.UUID        `json:"id"`
-	BotID           pgtype.UUID        `json:"bot_id"`
-	RouteID         pgtype.UUID        `json:"route_id"`
-	ChannelType     pgtype.Text        `json:"channel_type"`
-	Type            string             `json:"type"`
-	SessionMode     string             `json:"session_mode"`
-	RuntimeType     string             `json:"runtime_type"`
-	RuntimeMetadata []byte             `json:"runtime_metadata"`
-	Title           string             `json:"title"`
-	Metadata        []byte             `json:"metadata"`
-	ParentSessionID pgtype.UUID        `json:"parent_session_id"`
-	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	ID                  pgtype.UUID        `json:"id"`
+	BotID               pgtype.UUID        `json:"bot_id"`
+	RouteID             pgtype.UUID        `json:"route_id"`
+	ChannelType         pgtype.Text        `json:"channel_type"`
+	Type                string             `json:"type"`
+	SessionMode         string             `json:"session_mode"`
+	RuntimeType         string             `json:"runtime_type"`
+	RuntimeMetadata     []byte             `json:"runtime_metadata"`
+	Title               string             `json:"title"`
+	Metadata            []byte             `json:"metadata"`
+	DefaultHeadTurnID   pgtype.UUID        `json:"default_head_turn_id"`
+	ForkedFromSessionID pgtype.UUID        `json:"forked_from_session_id"`
+	ForkedFromTurnID    pgtype.UUID        `json:"forked_from_turn_id"`
+	ParentSessionID     pgtype.UUID        `json:"parent_session_id"`
+	CreatedByUserID     pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt           pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type BotSessionDiscussCursor struct {
@@ -250,6 +266,14 @@ type BotSessionEvent struct {
 	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
 	ReceivedAtMs            int64              `json:"received_at_ms"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+}
+
+type BotSessionTurnHead struct {
+	SessionID  pgtype.UUID        `json:"session_id"`
+	HeadTurnID pgtype.UUID        `json:"head_turn_id"`
+	BotID      pgtype.UUID        `json:"bot_id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
 type BotStorageBinding struct {
@@ -591,6 +615,7 @@ type ToolApprovalRequest struct {
 	DecidedByChannelIdentityID   pgtype.UUID        `json:"decided_by_channel_identity_id"`
 	RequestedMessageID           pgtype.UUID        `json:"requested_message_id"`
 	PromptMessageID              pgtype.UUID        `json:"prompt_message_id"`
+	PersistTurnID                pgtype.UUID        `json:"persist_turn_id"`
 	PromptExternalMessageID      string             `json:"prompt_external_message_id"`
 	SourcePlatform               string             `json:"source_platform"`
 	ReplyTarget                  string             `json:"reply_target"`
@@ -672,6 +697,7 @@ type UserInputRequest struct {
 	AssistantMessageID           pgtype.UUID        `json:"assistant_message_id"`
 	ToolResultMessageID          pgtype.UUID        `json:"tool_result_message_id"`
 	PromptMessageID              pgtype.UUID        `json:"prompt_message_id"`
+	PersistTurnID                pgtype.UUID        `json:"persist_turn_id"`
 	PromptExternalMessageID      string             `json:"prompt_external_message_id"`
 	SourcePlatform               string             `json:"source_platform"`
 	ReplyTarget                  string             `json:"reply_target"`

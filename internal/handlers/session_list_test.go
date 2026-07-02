@@ -293,28 +293,15 @@ func TestListSessionsRejectsCursorWithBadUUID(t *testing.T) {
 	}
 }
 
-// TestListSessionsCursorNotTruncatedByPermissionFilter pins down that
-// `next_cursor` reflects the database's resume position rather than the
-// post-filter survivorship. If the permission filter drops every row on a
-// full DB page, pagination must still surface a cursor — otherwise the
-// caller would silently stop walking at the first inaccessible page even
-// though older accessible rows remain on disk.
-func TestListSessionsCursorNotTruncatedByPermissionFilter(t *testing.T) {
+func TestListSessionsNonManageFiltersTypesBeforeQuery(t *testing.T) {
 	botID := "11111111-1111-1111-1111-111111111111"
 	userID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 	rowUpdated := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 	keptID := "22222222-2222-2222-2222-222222222222"
-	droppedID := "33333333-3333-3333-3333-333333333333"
 
 	queries := &sessionListQueries{bot: testBotRow(botID, nil)}
-	// limit=2 page where the first row is the user's chat session and the
-	// second row is a discuss session created by the same user that the
-	// permission filter discards. The third row is the has-more probe — its
-	// id is what the cursor must surface so pagination resumes from the DB
-	// position rather than the post-filter survivorship.
 	queries.userPagedRows = []sqlc.ListSessionsByBotAndCreatedByUserPagedRow{
 		userPagedRow(keptID, userID, session.TypeChat, rowUpdated.Add(2*time.Minute)),
-		userPagedRow(droppedID, userID, session.TypeDiscuss, rowUpdated),
 		userPagedRow("44444444-4444-4444-4444-444444444444", userID, session.TypeChat, rowUpdated.Add(-time.Minute)),
 	}
 
@@ -330,24 +317,43 @@ func TestListSessionsCursorNotTruncatedByPermissionFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessions() error = %v", err)
 	}
+	if queries.userPagedCallCount != 1 {
+		t.Fatalf("ListSessionsByBotAndCreatedByUserPaged called %d times, want 1", queries.userPagedCallCount)
+	}
+	if got := strings.Join(queries.userPagedCall.Types, ","); got != session.TypeChat {
+		t.Fatalf("query types = %q, want %q", got, session.TypeChat)
+	}
 	resp := decodeListResponse(t, rec)
-	if len(resp.Items) != 1 || resp.Items[0].ID != keptID {
+	if len(resp.Items) != 2 || resp.Items[0].ID != keptID {
 		ids := make([]string, len(resp.Items))
 		for i, item := range resp.Items {
 			ids[i] = item.ID
 		}
-		t.Fatalf("filtered items = %v, want only %s", ids, keptID)
+		t.Fatalf("items = %v, want two chat rows", ids)
 	}
-	if resp.NextCursor == "" {
-		t.Fatalf("expected next_cursor when DB returned a full page, even though the filter trimmed it")
-	}
-	decoded, err := base64.RawURLEncoding.DecodeString(resp.NextCursor)
+}
+
+func TestListSessionsNonManageReturnsEmptyWhenNoRequestedTypeIsAllowed(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	queries := &sessionListQueries{bot: testBotRow(botID, nil)}
+	handler := NewSessionHandler(
+		slog.Default(),
+		session.NewService(nil, queries, nil),
+		nil,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("user"),
+	)
+
+	rec, err := callListSessions(handler, botID, "types=discuss")
 	if err != nil {
-		t.Fatalf("decode cursor: %v", err)
+		t.Fatalf("ListSessions() error = %v", err)
 	}
-	parts := strings.SplitN(string(decoded), "|", 2)
-	if len(parts) != 2 || parts[1] != droppedID {
-		t.Fatalf("cursor payload = %q, want trailing dropped row id %s", string(decoded), droppedID)
+	if queries.userPagedCallCount != 0 {
+		t.Fatalf("query should not run when requested types are not allowed")
+	}
+	resp := decodeListResponse(t, rec)
+	if len(resp.Items) != 0 || resp.NextCursor != "" {
+		t.Fatalf("response = %+v, want empty page without cursor", resp)
 	}
 }
 

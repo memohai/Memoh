@@ -34,7 +34,8 @@ func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, payload sc
 		Token:       token,
 		SessionType: sessionmode.Schedule,
 	}
-	rc, err := r.resolve(ctx, req)
+	run := legacyTurnRun(req)
+	rc, err := r.resolve(ctx, req, &run)
 	if err != nil {
 		return schedule.TriggerResult{}, err
 	}
@@ -94,7 +95,8 @@ func (r *Resolver) TriggerHeartbeat(ctx context.Context, botID string, payload h
 		Model:       heartbeatModel,
 		SessionType: sessionmode.Heartbeat,
 	}
-	rc, err := r.resolve(ctx, req)
+	run := legacyTurnRun(req)
+	rc, err := r.resolve(ctx, req, &run)
 	if err != nil {
 		return heartbeat.TriggerResult{}, err
 	}

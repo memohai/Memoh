@@ -845,6 +845,7 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 		BotID:               cfg.Identity.BotID,
 		ChatID:              cfg.Identity.ChatID,
 		SessionID:           cfg.Identity.SessionID,
+		ViewHeadTurnID:      cfg.Identity.ViewHeadTurnID,
 		SessionType:         cfg.SessionType,
 		ChannelIdentityID:   cfg.Identity.ChannelIdentityID,
 		SessionToken:        cfg.Identity.SessionToken,

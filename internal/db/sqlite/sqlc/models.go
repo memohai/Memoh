@@ -145,6 +145,8 @@ type BotHistoryMessage struct {
 	ID                      string         `json:"id"`
 	BotID                   string         `json:"bot_id"`
 	SessionID               sql.NullString `json:"session_id"`
+	TurnID                  sql.NullString `json:"turn_id"`
+	TurnMessageSeq          sql.NullInt64  `json:"turn_message_seq"`
 	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
 	SenderAccountUserID     sql.NullString `json:"sender_account_user_id"`
 	SourceMessageID         sql.NullString `json:"source_message_id"`
@@ -187,6 +189,17 @@ type BotHistoryMessageCompact struct {
 	CompletedAt  sql.NullString `json:"completed_at"`
 }
 
+type BotHistoryTurn struct {
+	ID                      string         `json:"id"`
+	BotID                   string         `json:"bot_id"`
+	OwnerSessionID          sql.NullString `json:"owner_session_id"`
+	ParentTurnID            sql.NullString `json:"parent_turn_id"`
+	RequestMessageID        sql.NullString `json:"request_message_id"`
+	FinalAssistantMessageID sql.NullString `json:"final_assistant_message_id"`
+	CreatedAt               string         `json:"created_at"`
+	UpdatedAt               string         `json:"updated_at"`
+}
+
 type BotPluginInstallation struct {
 	ID          string `json:"id"`
 	BotID       string `json:"bot_id"`
@@ -215,21 +228,24 @@ type BotPluginResource struct {
 }
 
 type BotSession struct {
-	ID              string         `json:"id"`
-	BotID           string         `json:"bot_id"`
-	RouteID         sql.NullString `json:"route_id"`
-	ChannelType     sql.NullString `json:"channel_type"`
-	Type            string         `json:"type"`
-	Title           string         `json:"title"`
-	Metadata        string         `json:"metadata"`
-	ParentSessionID sql.NullString `json:"parent_session_id"`
-	CreatedAt       string         `json:"created_at"`
-	UpdatedAt       string         `json:"updated_at"`
-	DeletedAt       sql.NullString `json:"deleted_at"`
-	CreatedByUserID sql.NullString `json:"created_by_user_id"`
-	SessionMode     string         `json:"session_mode"`
-	RuntimeType     string         `json:"runtime_type"`
-	RuntimeMetadata string         `json:"runtime_metadata"`
+	ID                  string         `json:"id"`
+	BotID               string         `json:"bot_id"`
+	RouteID             sql.NullString `json:"route_id"`
+	ChannelType         sql.NullString `json:"channel_type"`
+	Type                string         `json:"type"`
+	Title               string         `json:"title"`
+	Metadata            string         `json:"metadata"`
+	DefaultHeadTurnID   sql.NullString `json:"default_head_turn_id"`
+	ForkedFromSessionID sql.NullString `json:"forked_from_session_id"`
+	ForkedFromTurnID    sql.NullString `json:"forked_from_turn_id"`
+	ParentSessionID     sql.NullString `json:"parent_session_id"`
+	CreatedByUserID     sql.NullString `json:"created_by_user_id"`
+	CreatedAt           string         `json:"created_at"`
+	UpdatedAt           string         `json:"updated_at"`
+	DeletedAt           sql.NullString `json:"deleted_at"`
+	SessionMode         string         `json:"session_mode"`
+	RuntimeType         string         `json:"runtime_type"`
+	RuntimeMetadata     string         `json:"runtime_metadata"`
 }
 
 type BotSessionDiscussCursor struct {
@@ -251,6 +267,14 @@ type BotSessionEvent struct {
 	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
 	ReceivedAtMs            int64          `json:"received_at_ms"`
 	CreatedAt               string         `json:"created_at"`
+}
+
+type BotSessionTurnHead struct {
+	SessionID  string `json:"session_id"`
+	HeadTurnID string `json:"head_turn_id"`
+	BotID      string `json:"bot_id"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
 }
 
 type BotStorageBinding struct {
@@ -563,6 +587,7 @@ type ToolApprovalRequest struct {
 	DecidedByChannelIdentityID   sql.NullString `json:"decided_by_channel_identity_id"`
 	RequestedMessageID           sql.NullString `json:"requested_message_id"`
 	PromptMessageID              sql.NullString `json:"prompt_message_id"`
+	PersistTurnID                sql.NullString `json:"persist_turn_id"`
 	PromptExternalMessageID      string         `json:"prompt_external_message_id"`
 	SourcePlatform               string         `json:"source_platform"`
 	ReplyTarget                  string         `json:"reply_target"`
@@ -624,6 +649,7 @@ type UserInputRequest struct {
 	AssistantMessageID           sql.NullString `json:"assistant_message_id"`
 	ToolResultMessageID          sql.NullString `json:"tool_result_message_id"`
 	PromptMessageID              sql.NullString `json:"prompt_message_id"`
+	PersistTurnID                sql.NullString `json:"persist_turn_id"`
 	PromptExternalMessageID      string         `json:"prompt_external_message_id"`
 	SourcePlatform               string         `json:"source_platform"`
 	ReplyTarget                  string         `json:"reply_target"`

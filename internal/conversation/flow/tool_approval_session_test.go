@@ -155,16 +155,18 @@ func TestApprovalResultMetadata(t *testing.T) {
 	t.Parallel()
 
 	got := approvalResultMetadata(toolapproval.Request{
-		ShortID:    7,
-		Status:     toolapproval.StatusRejected,
-		ToolName:   "exec",
-		ToolCallID: "call-1",
+		ShortID:       7,
+		Status:        toolapproval.StatusRejected,
+		ToolName:      "exec",
+		ToolCallID:    "call-1",
+		PersistTurnID: "turn-1",
 	})
 
 	if got["short_id"] != 7 ||
 		got["status"] != toolapproval.StatusRejected ||
 		got["tool_name"] != "exec" ||
-		got["tool_call_id"] != "call-1" {
+		got["tool_call_id"] != "call-1" ||
+		got["persist_turn_id"] != "turn-1" {
 		t.Fatalf("unexpected metadata: %#v", got)
 	}
 }

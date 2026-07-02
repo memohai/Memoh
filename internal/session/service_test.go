@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +23,19 @@ func TestIsKnownTypeIncludesACPAgent(t *testing.T) {
 	}
 	if IsKnownType("conversation") {
 		t.Fatalf("old conversation-like type should not be accepted")
+	}
+}
+
+func TestSupportsTurnVariantsOnlyForChat(t *testing.T) {
+	if !SupportsTurnVariants(TypeChat) {
+		t.Fatal("chat sessions should support turn variants")
+	}
+	for _, typ := range []string{TypeDiscuss, TypeACPAgent, TypeHeartbeat, TypeSchedule, TypeSubagent, ""} {
+		t.Run(typ, func(t *testing.T) {
+			if SupportsTurnVariants(typ) {
+				t.Fatalf("SupportsTurnVariants(%q) = true, want false", typ)
+			}
+		})
 	}
 }
 
@@ -280,6 +294,35 @@ func TestCreateACPAgentSessionDefaultsProjectPath(t *testing.T) {
 	}
 }
 
+func TestCreateWithDefaultHeadCreatesTurnHeadInTransaction(t *testing.T) {
+	botID := "00000000-0000-0000-0000-000000000001"
+	headID := "00000000-0000-0000-0000-000000000003"
+	queries := &createTurnHeadQueries{}
+	svc := NewService(nil, queries, nil)
+
+	created, err := svc.Create(context.Background(), CreateInput{
+		BotID:             botID,
+		Type:              TypeChat,
+		Title:             "Fork",
+		DefaultHeadTurnID: headID,
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if !queries.inTx {
+		t.Fatal("Create() did not use transaction")
+	}
+	if created.DefaultHeadTurnID != headID {
+		t.Fatalf("DefaultHeadTurnID = %q, want %q", created.DefaultHeadTurnID, headID)
+	}
+	if queries.createdHead.SessionID != queries.createdSessionID {
+		t.Fatalf("turn head session = %v, want created session %v", queries.createdHead.SessionID, queries.createdSessionID)
+	}
+	if queries.createdHead.HeadTurnID.String() != headID {
+		t.Fatalf("turn head = %s, want %s", queries.createdHead.HeadTurnID.String(), headID)
+	}
+}
+
 func TestUpdateTypeAndMetadataACPAgentRunsPolicy(t *testing.T) {
 	botID := "00000000-0000-0000-0000-000000000001"
 	sessionID := "00000000-0000-0000-0000-000000000002"
@@ -365,6 +408,40 @@ type createACPQueries struct {
 	createParams sqlc.CreateSessionParams
 }
 
+type createTurnHeadQueries struct {
+	dbstore.Queries
+	inTx             bool
+	createdSessionID pgtype.UUID
+	createdHead      sqlc.CreateSessionTurnHeadParams
+}
+
+func (q *createTurnHeadQueries) RunInTx(_ context.Context, fn func(dbstore.Queries) error) error {
+	q.inTx = true
+	return fn(q)
+}
+
+func (q *createTurnHeadQueries) CreateSession(_ context.Context, params sqlc.CreateSessionParams) (sqlc.BotSession, error) {
+	q.createdSessionID = mustPGUUID("00000000-0000-0000-0000-000000000002")
+	return sqlc.BotSession{
+		ID:                q.createdSessionID,
+		BotID:             params.BotID,
+		Type:              params.Type,
+		Title:             params.Title,
+		Metadata:          params.Metadata,
+		DefaultHeadTurnID: params.DefaultHeadTurnID,
+		CreatedAt:         pgtype.Timestamptz{Valid: true},
+		UpdatedAt:         pgtype.Timestamptz{Valid: true},
+	}, nil
+}
+
+func (q *createTurnHeadQueries) CreateSessionTurnHead(_ context.Context, params sqlc.CreateSessionTurnHeadParams) (sqlc.BotSessionTurnHead, error) {
+	q.createdHead = params
+	return sqlc.BotSessionTurnHead{
+		SessionID:  params.SessionID,
+		HeadTurnID: params.HeadTurnID,
+	}, nil
+}
+
 func (q *createACPQueries) GetBotByID(context.Context, pgtype.UUID) (sqlc.GetBotByIDRow, error) {
 	return q.bot, nil
 }
@@ -436,6 +513,107 @@ func mustSessionJSON(value map[string]any) []byte {
 		panic(err)
 	}
 	return data
+}
+
+func TestSoftDeleteCleansOnlyUnsharedVisibleTurns(t *testing.T) {
+	sessionID := "00000000-0000-0000-0000-000000000010"
+	sharedTurnID := mustPGUUID("00000000-0000-0000-0000-000000000011")
+	privateTurnID := mustPGUUID("00000000-0000-0000-0000-000000000012")
+	ancestorTurnID := mustPGUUID("00000000-0000-0000-0000-000000000013")
+	queries := &softDeleteCleanupQueries{
+		ownedTurns: []sqlc.BotHistoryTurn{
+			{ID: privateTurnID},
+			{ID: sharedTurnID},
+			{ID: ancestorTurnID},
+		},
+		sharedTurnIDs: []pgtype.UUID{sharedTurnID},
+	}
+	svc := NewService(nil, queries, nil)
+
+	if err := svc.SoftDelete(context.Background(), sessionID); err != nil {
+		t.Fatalf("SoftDelete() error = %v", err)
+	}
+	if !queries.softDeleted {
+		t.Fatal("session was not soft deleted")
+	}
+	if !queries.deletedHeads {
+		t.Fatal("session turn heads were not deleted")
+	}
+	wantDeleted := []pgtype.UUID{privateTurnID, ancestorTurnID}
+	if !sameUUIDSlice(queries.deletedMessageTurns, wantDeleted) {
+		t.Fatalf("deleted message turns = %v, want %v", queries.deletedMessageTurns, wantDeleted)
+	}
+	if !sameUUIDSlice(queries.deletedTurns, wantDeleted) {
+		t.Fatalf("deleted turns = %v, want %v", queries.deletedTurns, wantDeleted)
+	}
+}
+
+func TestSoftDeletePropagatesTurnCleanupFailure(t *testing.T) {
+	sessionID := "00000000-0000-0000-0000-000000000010"
+	cleanupErr := errors.New("cleanup failed")
+	queries := &softDeleteCleanupQueries{
+		deleteHeadsErr: cleanupErr,
+	}
+	svc := NewService(nil, queries, nil)
+
+	err := svc.SoftDelete(context.Background(), sessionID)
+	if err == nil || !strings.Contains(err.Error(), "delete session turn heads") {
+		t.Fatalf("SoftDelete() error = %v, want cleanup failure", err)
+	}
+	if !queries.softDeleted {
+		t.Fatal("session was not soft deleted before cleanup")
+	}
+}
+
+type softDeleteCleanupQueries struct {
+	dbstore.Queries
+	softDeleted         bool
+	deletedHeads        bool
+	ownedTurns          []sqlc.BotHistoryTurn
+	sharedTurnIDs       []pgtype.UUID
+	deletedMessageTurns []pgtype.UUID
+	deletedTurns        []pgtype.UUID
+	deleteHeadsErr      error
+}
+
+func (q *softDeleteCleanupQueries) SoftDeleteSession(context.Context, pgtype.UUID) error {
+	q.softDeleted = true
+	return nil
+}
+
+func (q *softDeleteCleanupQueries) DeleteSessionTurnHeads(context.Context, pgtype.UUID) error {
+	q.deletedHeads = true
+	return q.deleteHeadsErr
+}
+
+func (q *softDeleteCleanupQueries) ListSessionOwnedTurnsForCleanup(context.Context, pgtype.UUID) ([]sqlc.BotHistoryTurn, error) {
+	return q.ownedTurns, nil
+}
+
+func (q *softDeleteCleanupQueries) ListOtherActiveSessionVisibleTurnIDs(context.Context, pgtype.UUID) ([]pgtype.UUID, error) {
+	return q.sharedTurnIDs, nil
+}
+
+func (q *softDeleteCleanupQueries) DeleteMessagesByTurnID(_ context.Context, id pgtype.UUID) error {
+	q.deletedMessageTurns = append(q.deletedMessageTurns, id)
+	return nil
+}
+
+func (q *softDeleteCleanupQueries) DeleteHistoryTurnByID(_ context.Context, id pgtype.UUID) error {
+	q.deletedTurns = append(q.deletedTurns, id)
+	return nil
+}
+
+func sameUUIDSlice(got, want []pgtype.UUID) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // pagedQueriesStub captures the params handed to the paged session queries so

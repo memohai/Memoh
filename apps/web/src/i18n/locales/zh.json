@@ -383,6 +383,11 @@
     "thinkingDone": "思考完成",
     "showMore": "展开",
     "showLess": "收起",
+    "errors": {
+      "forkFailed": "分叉会话失败",
+      "loadVariantFailed": "切换版本失败",
+      "sessionDeleted": "这个会话已被删除"
+    },
     "actions": {
       "copy": "复制",
       "copied": "已复制",
@@ -390,7 +395,18 @@
       "share": "分享",
       "retry": "重试",
       "fork": "分叉",
+      "createFork": "创建分叉",
       "more": "更多",
+      "requestVariant": {
+        "previous": "上一请求",
+        "next": "下一请求",
+        "label": "第 {current}/{total} 个请求"
+      },
+      "responseVariant": {
+        "previous": "上一回复",
+        "next": "下一回复",
+        "label": "第 {current}/{total} 个回复"
+      },
       "readAloud": "朗读"
     },
     "process": {

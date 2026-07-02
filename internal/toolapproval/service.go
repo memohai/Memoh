@@ -106,7 +106,7 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 	if err := s.runApprovalHook(ctx, hooks.EventBeforeApprovalCreate, input, Request{}, true); err != nil {
 		return Request{}, err
 	}
-	row, err := s.queries.CreateToolApprovalRequest(ctx, sqlc.CreateToolApprovalRequestParams{
+	params := sqlc.CreateToolApprovalRequestParams{
 		BotID:                        botID,
 		SessionID:                    sessionID,
 		RouteID:                      optionalUUID(input.RouteID),
@@ -117,12 +117,34 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 		ToolInput:                    toolInput,
 		RequestedByChannelIdentityID: requestedByID,
 		RequestedMessageID:           optionalUUID(input.RequestedMessageID),
+		PersistTurnID:                optionalUUID(input.PersistTurnID),
 		SourcePlatform:               strings.TrimSpace(input.SourcePlatform),
 		ReplyTarget:                  strings.TrimSpace(input.ReplyTarget),
 		ConversationType:             strings.TrimSpace(input.ConversationType),
-	})
+	}
+	var row sqlc.ToolApprovalRequest
+	if params.PersistTurnID.Valid {
+		row, err = s.queries.CreateToolApprovalRequestForTurn(ctx, sqlc.CreateToolApprovalRequestForTurnParams{
+			BotID:                        params.BotID,
+			SessionID:                    params.SessionID,
+			RouteID:                      params.RouteID,
+			ChannelIdentityID:            params.ChannelIdentityID,
+			ToolCallID:                   params.ToolCallID,
+			ToolName:                     params.ToolName,
+			Operation:                    params.Operation,
+			ToolInput:                    params.ToolInput,
+			RequestedByChannelIdentityID: params.RequestedByChannelIdentityID,
+			RequestedMessageID:           params.RequestedMessageID,
+			SourcePlatform:               params.SourcePlatform,
+			ReplyTarget:                  params.ReplyTarget,
+			ConversationType:             params.ConversationType,
+			PersistTurnID:                params.PersistTurnID,
+		})
+	} else {
+		row, err = s.queries.CreateToolApprovalRequest(ctx, params)
+	}
 	if err != nil {
-		return Request{}, err
+		return Request{}, mapLookupErr(err)
 	}
 	req := requestFromRow(row)
 	if req.Status != StatusPending {
@@ -166,15 +188,29 @@ func (s *Service) ResolveTarget(ctx context.Context, input ResolveInput) (Reques
 			return requestFromRowOrErr(row, err)
 		}
 		if parsed, err := db.ParseUUID(explicit); err == nil {
-			row, err := s.queries.GetToolApprovalRequest(ctx, parsed)
+			baseHeadTurnID, err := parseOptionalUUID(input.BaseHeadTurnID)
+			if err != nil {
+				return Request{}, err
+			}
+			var row sqlc.ToolApprovalRequest
+			if baseHeadTurnID.Valid {
+				row, err = s.queries.GetPendingToolApprovalByBaseHeadRequestID(ctx, sqlc.GetPendingToolApprovalByBaseHeadRequestIDParams{
+					ID:             parsed,
+					BotID:          botID,
+					SessionID:      sessionID,
+					BaseHeadTurnID: baseHeadTurnID,
+				})
+			} else {
+				row, err = s.queries.GetPendingToolApprovalByVisibleRequestID(ctx, sqlc.GetPendingToolApprovalByVisibleRequestIDParams{
+					ID:        parsed,
+					BotID:     botID,
+					SessionID: sessionID,
+				})
+			}
 			if err != nil {
 				return Request{}, mapLookupErr(err)
 			}
-			req := requestFromRow(row)
-			if req.BotID != uuid.UUID(botID.Bytes).String() || req.SessionID != uuid.UUID(sessionID.Bytes).String() || req.Status != StatusPending {
-				return Request{}, ErrNotFound
-			}
-			return req, nil
+			return requestFromRow(row), nil
 		}
 		return Request{}, ErrNotFound
 	}
@@ -455,6 +491,29 @@ func (s *Service) ListBySession(ctx context.Context, botID, sessionID string) ([
 	return s.listBySession(ctx, botID, sessionID, false)
 }
 
+func (s *Service) ListBySessionTurnGraph(ctx context.Context, botID, sessionID string) ([]Request, error) {
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return nil, err
+	}
+	pgSessionID, err := db.ParseUUID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListToolApprovalsBySessionTurnGraph(ctx, sqlc.ListToolApprovalsBySessionTurnGraphParams{
+		BotID:     pgBotID,
+		SessionID: pgSessionID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]Request, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, requestFromRow(row))
+	}
+	return result, nil
+}
+
 func (s *Service) listBySession(ctx context.Context, botID, sessionID string, pendingOnly bool) ([]Request, error) {
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -512,6 +571,14 @@ func optionalUUID(value string) pgtype.UUID {
 	return parsed
 }
 
+func parseOptionalUUID(value string) (pgtype.UUID, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return pgtype.UUID{}, nil
+	}
+	return db.ParseUUID(trimmed)
+}
+
 func (s *Service) optionalChannelIdentityUUID(ctx context.Context, value string) (pgtype.UUID, error) {
 	id := optionalUUID(value)
 	if !id.Valid {
@@ -557,6 +624,9 @@ func requestFromRow(row sqlc.ToolApprovalRequest) Request {
 	}
 	if row.ChannelIdentityID.Valid {
 		req.ChannelIdentityID = uuid.UUID(row.ChannelIdentityID.Bytes).String()
+	}
+	if row.PersistTurnID.Valid {
+		req.PersistTurnID = uuid.UUID(row.PersistTurnID.Bytes).String()
 	}
 	if row.DecidedByChannelIdentityID.Valid {
 		req.DecidedByUser = true

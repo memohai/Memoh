@@ -18,6 +18,7 @@ type SessionContext struct {
 	BotID             string
 	ChatID            string
 	SessionID         string
+	ViewHeadTurnID    string
 	ChannelIdentityID string
 	CurrentPlatform   string
 	ReplyTarget       string

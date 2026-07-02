@@ -14,6 +14,9 @@ export interface SessionSummary {
   metadata?: Record<string, unknown>
   runtime_metadata?: Record<string, unknown>
   parent_session_id?: string
+  default_head_turn_id?: string
+  forked_from_session_id?: string
+  forked_from_turn_id?: string
   created_at?: string
   updated_at?: string
   route_metadata?: Record<string, unknown>
@@ -35,6 +38,7 @@ export interface Message {
   id: string
   bot_id: string
   session_id?: string
+  turn_id?: string
   sender_channel_identity_id?: string
   sender_user_id?: string
   sender_display_name?: string
@@ -53,8 +57,8 @@ export interface Message {
 // Per-session SSE: `/bots/{bot_id}/sessions/{session_id}/messages/events`.
 // Server pushes a small backlog of `message_created` events followed by live
 // `message_created` / `session_title_updated` events scoped to this session
-// only. `ping` is a server heartbeat; `dropped` asks the client to refresh
-// because the server-side subscriber buffer overflowed.
+// only. `ping` is a server heartbeat; `stale` / `dropped` ask the client to
+// refresh without carrying message bodies.
 export interface SessionMessageCreatedEvent {
   type: 'message_created'
   bot_id?: string
@@ -68,8 +72,14 @@ export interface SessionTitleUpdatedEvent {
   title: string
 }
 
-export interface SessionPingEvent {
-  type: 'ping'
+export interface SessionBackgroundTaskEvent extends UIBackgroundTask {
+  type: 'background_task'
+  task?: UIBackgroundTask
+}
+
+export interface SessionStaleEvent {
+  type: 'stale'
+  session_id?: string
 }
 
 export interface SessionDroppedEvent {
@@ -77,15 +87,15 @@ export interface SessionDroppedEvent {
   count?: number
 }
 
-export interface SessionBackgroundTaskEvent extends UIBackgroundTask {
-  type: 'background_task'
-  task?: UIBackgroundTask
+export interface SessionPingEvent {
+  type: 'ping'
 }
 
 export type SessionMessageStreamEvent =
   | SessionMessageCreatedEvent
   | SessionTitleUpdatedEvent
   | SessionBackgroundTaskEvent
+  | SessionStaleEvent
   | SessionDroppedEvent
   | SessionPingEvent
 
@@ -116,13 +126,15 @@ export type BotSessionActivityEvent =
   | SessionTouchedEvent
   | SessionTitleChangedEvent
   | SessionCreatedEvent
-  | SessionDroppedEvent
   | SessionPingEvent
 
 export interface FetchMessagesOptions {
   limit?: number
   before?: string
+  beforeId?: string
   session_id?: string
+  includeGraph?: boolean
+  headTurnId?: string
 }
 
 export interface ChatAttachment {
@@ -213,6 +225,7 @@ export interface UIToolApproval {
   status: string
   decision_reason?: string
   can_approve?: boolean
+  persist_turn_id?: string
 }
 
 export interface UIUserInput {
@@ -221,6 +234,7 @@ export interface UIUserInput {
   status: string
   questions?: UIUserInputQuestion[]
   can_respond?: boolean
+  persist_turn_id?: string
 }
 
 export interface UIUserInputQuestion {
@@ -254,6 +268,7 @@ export type UIMessage = UITextMessage | UIReasoningMessage | UIToolMessage | UIA
 
 export interface UIUserTurn {
   role: 'user'
+  turn_id?: string
   text: string
   attachments?: UIAttachment[]
   reply?: UIReplyRef
@@ -269,6 +284,7 @@ export interface UIUserTurn {
 
 export interface UIAssistantTurn {
   role: 'assistant'
+  turn_id?: string
   messages: UIMessage[]
   timestamp: string
   platform?: string
@@ -278,6 +294,7 @@ export interface UIAssistantTurn {
 
 export interface UISystemTurn {
   role: 'system'
+  turn_id?: string
   kind?: 'background_task' | string
   background_task?: UIBackgroundTask
   timestamp: string
@@ -286,6 +303,22 @@ export interface UISystemTurn {
 }
 
 export type UITurn = UIUserTurn | UIAssistantTurn | UISystemTurn
+
+export interface UITurnGraphNode {
+  turn_id: string
+  parent_turn_id?: string
+  timestamp?: string
+  request_key?: string
+  has_user?: boolean
+  has_assistant?: boolean
+}
+
+export interface FetchMessagesUIResult {
+  items: UITurn[]
+  default_head_turn_id?: string
+  head_turn_ids?: string[]
+  nodes?: UITurnGraphNode[]
+}
 
 export interface UIStreamStartEvent {
   type: 'start'

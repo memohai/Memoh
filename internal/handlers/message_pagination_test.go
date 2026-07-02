@@ -12,11 +12,10 @@ import (
 
 // stubMessageService mirrors the production ordering contract of the message
 // service: ListLatestBySession returns DESC (newest-first, as the DB rows come
-// back), while ListBeforeBySession returns ASC (oldest-first, because its
-// converter reverses the DESC rows). Tests exercise the handler against this
-// real wire shape rather than a hand-constructed slice. It embeds the interface
-// so the other (unused) methods satisfy it without boilerplate; calling them
-// panics.
+// back), while ListBeforeBySession returns ASC (oldest-first — its converter
+// reverses the DESC rows). Tests exercise the handler against this real wire
+// shape rather than a hand-constructed slice. It embeds the interface so the
+// other (unused) methods satisfy it without boilerplate; calling them panics.
 type stubMessageService struct {
 	messagepkg.Service
 	bySession map[string][]messagepkg.Message
@@ -40,6 +39,9 @@ func (s *stubMessageService) before(sid string, t time.Time, limit int) []messag
 			older = append(older, m)
 		}
 	}
+	// Mirror production: the query selects the `limit` rows closest to the
+	// cursor (ORDER BY created_at DESC LIMIT n), then the converter reverses
+	// them to oldest-first. So truncate on the DESC side, return ASC.
 	sort.Slice(older, func(i, j int) bool { return older[i].CreatedAt.After(older[j].CreatedAt) })
 	if len(older) > limit {
 		older = older[:limit]
@@ -52,7 +54,7 @@ func (s *stubMessageService) ListLatestBySession(_ context.Context, sid string, 
 	return s.latest(sid, int(limit)), nil
 }
 
-func (s *stubMessageService) ListBeforeBySession(_ context.Context, sid string, before time.Time, limit int32) ([]messagepkg.Message, error) {
+func (s *stubMessageService) ListBeforeBySession(_ context.Context, sid string, before time.Time, _ string, limit int32) ([]messagepkg.Message, error) {
 	return s.before(sid, before, int(limit)), nil
 }
 
@@ -71,7 +73,7 @@ func userMsg(t time.Time, text string) messagepkg.Message {
 // TestExtendToUITurnHead_PreservesMonotonicOrder is the regression test for the
 // before-page double-reverse bug: ListBeforeBySession already returns
 // oldest-first (ASC), so extendToUITurnHead must prepend each fetched older
-// batch as-is to keep the combined slice monotonic - the ordering
+// batch as-is to keep the combined slice monotonic — the ordering
 // ConvertMessagesToUITurns depends on. The bug reversed the already-ASC batch a
 // second time, producing a scrambled, non-monotonic slice that split one turn
 // into several and duplicated turns.
@@ -93,7 +95,7 @@ func TestExtendToUITurnHead_PreservesMonotonicOrder(t *testing.T) {
 	latest := svc.latest(sessionID, 30)
 	reverseMessages(latest) // mirrors the handler's latest-page branch
 	before := len(latest)
-	got := h.extendToUITurnHead(context.Background(), sessionID, latest)
+	got := h.extendToUITurnHead(context.Background(), sessionID, "", latest)
 
 	if len(got) <= before {
 		t.Fatalf("extendToUITurnHead did not pull back the turn head: got %d, had %d", len(got), before)
@@ -128,7 +130,7 @@ func TestExtendToUITurnHead_StopsAtBoundary(t *testing.T) {
 
 	latest := svc.latest(sessionID, 5) // 5 newest = all assistant, no boundary
 	reverseMessages(latest)
-	got := h.extendToUITurnHead(context.Background(), sessionID, latest)
+	got := h.extendToUITurnHead(context.Background(), sessionID, "", latest)
 	// Must pull back exactly the one user boundary and stop — 6 total, not more.
 	if len(got) != 6 {
 		t.Fatalf("expected exactly the user boundary + 5 assistant = 6, got %d (over-pulled?)", len(got))

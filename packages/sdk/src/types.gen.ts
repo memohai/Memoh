@@ -1064,6 +1064,7 @@ export type ConversationUiToolApproval = {
     approval_id?: string;
     can_approve?: boolean;
     decision_reason?: string;
+    persist_turn_id?: string;
     short_id?: number;
     status?: string;
 };
@@ -1084,10 +1085,12 @@ export type ConversationUiTurn = {
     sender_user_id?: string;
     text?: string;
     timestamp?: string;
+    turn_id?: string;
 };
 
 export type ConversationUiUserInput = {
     can_respond?: boolean;
+    persist_turn_id?: string;
     questions?: Array<UserinputUiQuestion>;
     short_id?: number;
     status?: string;
@@ -1636,6 +1639,7 @@ export type HandlersListSnapshotsResponse = {
 };
 
 export type HandlersLocalChannelMessageRequest = {
+    base_head_turn_id?: string;
     message: ChannelMessage;
     model_id?: string;
     reasoning_effort?: string;
@@ -1833,7 +1837,9 @@ export type HandlersTokenUsageResponse = {
 };
 
 export type HandlersToolApprovalDecisionRequest = {
+    base_head_turn_id?: string;
     reason?: string;
+    session_id?: string;
 };
 
 export type HandlersTriggerCompactResponse = {
@@ -1939,6 +1945,11 @@ export type HandlersEmailOAuthStatusResponse = {
     provider?: string;
 };
 
+export type HandlersForkSessionRequest = {
+    base_head_turn_id?: string;
+    message_id: string;
+};
+
 export type HandlersFsOpResponse = {
     ok?: boolean;
     revision?: string;
@@ -1985,6 +1996,13 @@ export type HandlersMemorySearchPayload = {
     sources?: Array<string>;
 };
 
+export type HandlersMessageUiListResponse = {
+    default_head_turn_id?: string;
+    head_turn_ids?: Array<string>;
+    items?: Array<ConversationUiTurn>;
+    nodes?: Array<HandlersSessionTurnGraphUiNode>;
+};
+
 export type HandlersOauthAuthorizeRequest = {
     callback_url?: string;
     client_id?: string;
@@ -1998,6 +2016,15 @@ export type HandlersOauthDiscoverRequest = {
 export type HandlersOauthExchangeRequest = {
     code?: string;
     state?: string;
+};
+
+export type HandlersSessionTurnGraphUiNode = {
+    has_assistant?: boolean;
+    has_user?: boolean;
+    parent_turn_id?: string;
+    request_key?: string;
+    timestamp?: string;
+    turn_id?: string;
 };
 
 export type HandlersSkillsOpResponse = {
@@ -2162,45 +2189,6 @@ export type McpUpsertRequest = {
     name?: string;
     transport?: string;
     url?: string;
-};
-
-export type MessageMessage = {
-    assets?: Array<MessageMessageAsset>;
-    bot_id?: string;
-    compact_id?: string;
-    content?: Array<number>;
-    created_at?: string;
-    display_content?: string;
-    event_id?: string;
-    external_message_id?: string;
-    id?: string;
-    metadata?: {
-        [key: string]: unknown;
-    };
-    platform?: string;
-    role?: string;
-    runtime_type?: string;
-    sender_avatar_url?: string;
-    sender_channel_identity_id?: string;
-    sender_display_name?: string;
-    sender_user_id?: string;
-    session_id?: string;
-    session_mode?: string;
-    source_reply_to_message_id?: string;
-    usage?: Array<number>;
-};
-
-export type MessageMessageAsset = {
-    content_hash?: string;
-    metadata?: {
-        [key: string]: unknown;
-    };
-    mime?: string;
-    name?: string;
-    ordinal?: number;
-    role?: string;
-    size_bytes?: number;
-    storage_key?: string;
 };
 
 export type ModelsAddRequest = {
@@ -2591,6 +2579,9 @@ export type SessionSession = {
     channel_type?: string;
     created_at?: string;
     created_by_user_id?: string;
+    default_head_turn_id?: string;
+    forked_from_session_id?: string;
+    forked_from_turn_id?: string;
     id?: string;
     metadata?: {
         [key: string]: unknown;
@@ -5973,116 +5964,6 @@ export type PostBotsByBotIdHooksTestResponses = {
 
 export type PostBotsByBotIdHooksTestResponse = PostBotsByBotIdHooksTestResponses[keyof PostBotsByBotIdHooksTestResponses];
 
-export type PostBotsByBotIdLocalMessagesData = {
-    /**
-     * Message payload
-     */
-    body: HandlersLocalChannelMessageRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/local/messages';
-};
-
-export type PostBotsByBotIdLocalMessagesErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PostBotsByBotIdLocalMessagesError = PostBotsByBotIdLocalMessagesErrors[keyof PostBotsByBotIdLocalMessagesErrors];
-
-export type PostBotsByBotIdLocalMessagesResponses = {
-    /**
-     * OK
-     */
-    200: {
-        [key: string]: string;
-    };
-};
-
-export type PostBotsByBotIdLocalMessagesResponse = PostBotsByBotIdLocalMessagesResponses[keyof PostBotsByBotIdLocalMessagesResponses];
-
-export type GetBotsByBotIdLocalStreamData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/local/stream';
-};
-
-export type GetBotsByBotIdLocalStreamErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdLocalStreamError = GetBotsByBotIdLocalStreamErrors[keyof GetBotsByBotIdLocalStreamErrors];
-
-export type GetBotsByBotIdLocalStreamResponses = {
-    /**
-     * SSE stream
-     */
-    200: string;
-};
-
-export type GetBotsByBotIdLocalStreamResponse = GetBotsByBotIdLocalStreamResponses[keyof GetBotsByBotIdLocalStreamResponses];
-
-export type GetBotsByBotIdLocalWsData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/local/ws';
-};
-
-export type GetBotsByBotIdLocalWsErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdLocalWsError = GetBotsByBotIdLocalWsErrors[keyof GetBotsByBotIdLocalWsErrors];
-
 export type GetBotsByBotIdMcpData = {
     body?: never;
     path?: never;
@@ -7166,9 +7047,17 @@ export type GetBotsByBotIdMessagesData = {
          */
         before?: string;
         /**
-         * Response format: ui returns normalized chat UI turns
+         * Message ID at the pagination boundary
          */
-        format?: string;
+        before_id?: string;
+        /**
+         * Selected session head turn ID
+         */
+        head_turn_id?: string;
+        /**
+         * Include session turn graph metadata
+         */
+        include_graph?: boolean;
     };
     url: '/bots/{bot_id}/messages';
 };
@@ -7196,11 +7085,9 @@ export type GetBotsByBotIdMessagesError = GetBotsByBotIdMessagesErrors[keyof Get
 
 export type GetBotsByBotIdMessagesResponses = {
     /**
-     * when format=ui
+     * OK
      */
-    200: {
-        [key: string]: Array<ConversationUiTurn>;
-    };
+    200: HandlersMessageUiListResponse;
 };
 
 export type GetBotsByBotIdMessagesResponse = GetBotsByBotIdMessagesResponses[keyof GetBotsByBotIdMessagesResponses];
@@ -7230,6 +7117,10 @@ export type GetBotsByBotIdMessagesLocateData = {
          * Messages after target
          */
         after?: number;
+        /**
+         * Selected session head turn ID
+         */
+        head_turn_id?: string;
     };
     url: '/bots/{bot_id}/messages/locate';
 };
@@ -8309,6 +8200,55 @@ export type PostBotsByBotIdSessionsBySessionIdCompactResponses = {
 
 export type PostBotsByBotIdSessionsBySessionIdCompactResponse = PostBotsByBotIdSessionsBySessionIdCompactResponses[keyof PostBotsByBotIdSessionsBySessionIdCompactResponses];
 
+export type PostBotsByBotIdSessionsBySessionIdForkData = {
+    /**
+     * Fork source message
+     */
+    body: HandlersForkSessionRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Source session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/fork';
+};
+
+export type PostBotsByBotIdSessionsBySessionIdForkErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdSessionsBySessionIdForkError = PostBotsByBotIdSessionsBySessionIdForkErrors[keyof PostBotsByBotIdSessionsBySessionIdForkErrors];
+
+export type PostBotsByBotIdSessionsBySessionIdForkResponses = {
+    /**
+     * Created
+     */
+    201: SessionSession;
+};
+
+export type PostBotsByBotIdSessionsBySessionIdForkResponse = PostBotsByBotIdSessionsBySessionIdForkResponses[keyof PostBotsByBotIdSessionsBySessionIdForkResponses];
+
 export type GetBotsByBotIdSessionsBySessionIdMessagesEventsData = {
     body?: never;
     path: {
@@ -8321,7 +8261,12 @@ export type GetBotsByBotIdSessionsBySessionIdMessagesEventsData = {
          */
         session_id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Selected session head turn ID
+         */
+        head_turn_id?: string;
+    };
     url: '/bots/{bot_id}/sessions/{session_id}/messages/events';
 };
 
@@ -9142,6 +9087,116 @@ export type PutBotsByBotIdUserAccessByGrantIdResponses = {
 };
 
 export type PutBotsByBotIdUserAccessByGrantIdResponse = PutBotsByBotIdUserAccessByGrantIdResponses[keyof PutBotsByBotIdUserAccessByGrantIdResponses];
+
+export type PostBotsByBotIdWebMessagesData = {
+    /**
+     * Message payload
+     */
+    body: HandlersLocalChannelMessageRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/web/messages';
+};
+
+export type PostBotsByBotIdWebMessagesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdWebMessagesError = PostBotsByBotIdWebMessagesErrors[keyof PostBotsByBotIdWebMessagesErrors];
+
+export type PostBotsByBotIdWebMessagesResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: string;
+    };
+};
+
+export type PostBotsByBotIdWebMessagesResponse = PostBotsByBotIdWebMessagesResponses[keyof PostBotsByBotIdWebMessagesResponses];
+
+export type GetBotsByBotIdWebStreamData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/web/stream';
+};
+
+export type GetBotsByBotIdWebStreamErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdWebStreamError = GetBotsByBotIdWebStreamErrors[keyof GetBotsByBotIdWebStreamErrors];
+
+export type GetBotsByBotIdWebStreamResponses = {
+    /**
+     * SSE stream
+     */
+    200: string;
+};
+
+export type GetBotsByBotIdWebStreamResponse = GetBotsByBotIdWebStreamResponses[keyof GetBotsByBotIdWebStreamResponses];
+
+export type GetBotsByBotIdWebWsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/web/ws';
+};
+
+export type GetBotsByBotIdWebWsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdWebWsError = GetBotsByBotIdWebWsErrors[keyof GetBotsByBotIdWebWsErrors];
 
 export type DeleteBotsByIdData = {
     body?: never;

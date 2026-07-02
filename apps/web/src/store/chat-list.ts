@@ -9,15 +9,7 @@ import { useUserStore } from '@/store/user'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import {
-  isSessionVisibleInSidebarMode,
-  normalizedRuntimeType,
-  provisionalSessionTitle,
-  shouldRefreshFromMessageCreated,
-  sortByRecency,
-  upsertById,
-  type SidebarSessionMode,
-} from './chat-list.utils'
+import { isSessionVisibleInSidebarMode, normalizedRuntimeType, provisionalSessionTitle, shouldRefreshFromMessageCreated, sortByRecency, upsertById, type SidebarSessionMode } from './chat-list.utils'
 import {
   createSession,
   deleteSession as requestDeleteSession,
@@ -50,11 +42,13 @@ import {
   type UIToolMessage,
   type UIUserInput,
   type WSUserInputAnswer,
+  type FetchMessagesUIResult,
+  type UITurnGraphNode,
   type UITurn,
-  type UIUserTurn,
   type UIStreamEvent,
   fetchBots,
   fetchMessagesUI,
+  forkSessionFromMessage as requestForkSessionFromMessage,
   sendLocalChannelMessage,
   streamBotSessionsActivityEvents,
   streamSessionMessageEvents,
@@ -141,6 +135,7 @@ export type ActiveChatTarget =
 export interface ChatUserTurn {
   id: string
   serverId?: string
+  turnId?: string
   role: 'user'
   text: string
   attachments: AttachmentItem[]
@@ -165,6 +160,7 @@ export interface ChatUserTurn {
 export interface ChatAssistantTurn {
   id: string
   serverId?: string
+  turnId?: string
   role: 'assistant'
   messages: ContentBlock[]
   timestamp: string
@@ -178,11 +174,6 @@ export interface ChatAssistantTurn {
 interface UserInputStateSnapshot {
   block: ToolCallBlock
   userInput: UIUserInput
-}
-
-interface ToolApprovalStateSnapshot {
-  block: ToolCallBlock
-  approval: UIToolApproval
 }
 
 export interface BackgroundTask {
@@ -206,6 +197,7 @@ export interface BackgroundTask {
 export interface ChatSystemTurn {
   id: string
   serverId?: string
+  turnId?: string
   role: 'system'
   kind: 'background_task'
   backgroundTask: BackgroundTask
@@ -224,10 +216,59 @@ function currentLocale() {
   return locale === 'zh' || locale === 'ja' ? locale : 'en'
 }
 
-function userInputConnectionLostMessage() {
+function localizedMessages() {
   const locale = currentLocale()
-  const messages = locale === 'zh' ? zhMessages : locale === 'ja' ? jaMessages : enMessages
-  return messages.chat.tools.userInputConnectionLost
+  return locale === 'zh' ? zhMessages : locale === 'ja' ? jaMessages : enMessages
+}
+
+function userInputConnectionLostMessage() {
+  return localizedMessages().chat.tools.userInputConnectionLost
+}
+
+function forkSourceSessionDeletedMessage() {
+  return localizedMessages().chat.errors.sessionDeleted
+}
+
+function forkFailedMessage() {
+	return localizedMessages().chat.errors.forkFailed
+}
+
+function variantLoadFailedMessage() {
+	return localizedMessages().chat.errors.loadVariantFailed
+}
+
+function isStaleSessionHeadError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const payload = error as {
+    status?: unknown
+    statusCode?: unknown
+    response?: { status?: unknown }
+    message?: unknown
+    error?: unknown
+    detail?: unknown
+  }
+  const status = payload.status ?? payload.statusCode ?? payload.response?.status
+  if (status !== undefined && status !== 409) return false
+  for (const value of [payload.message, payload.error, payload.detail]) {
+    if (typeof value === 'string' && /^\s*stale session head\s*$/i.test(value)) {
+      return true
+    }
+  }
+  return false
+}
+
+function isSessionNotFoundError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const payload = error as {
+    status?: unknown
+    statusCode?: unknown
+    response?: { status?: unknown }
+    message?: unknown
+  }
+  if (payload.status === 404 || payload.statusCode === 404 || payload.response?.status === 404) {
+    return true
+  }
+  return typeof payload.message === 'string' && /\bsession not found\b/i.test(payload.message)
 }
 
 function sendFailedMessage() {
@@ -238,9 +279,17 @@ function sendFailedMessage() {
 
 interface PendingAssistantStream {
   streamId: string
+  contextTurns: ChatMessage[]
   assistantTurn: ChatAssistantTurn
   botId: string
   sessionId: string
+  refreshOnEnd: boolean
+  commitOnFirstVisibleOutput?: () => void
+  committed: boolean
+  visiblyAttached: boolean
+  pendingUserTurn?: ChatUserTurn | null
+  pendingReplaceFromTurn?: ChatMessage | null
+  pendingReplacedTurns?: ChatMessage[]
   done: boolean
   resolve: () => void
   reject: (err: Error) => void
@@ -325,6 +374,34 @@ interface EphemeralAssistantError {
   userText?: string
 }
 
+interface SessionTurnGraphNodeState {
+  turnId: string
+  parentTurnId?: string
+  timestamp?: string
+  requestKey?: string
+  hasUser: boolean
+  hasAssistant: boolean
+}
+
+interface SessionTurnGraphState {
+  defaultHeadTurnId: string
+  headTurnIds: string[]
+  nodes: Map<string, SessionTurnGraphNodeState>
+}
+
+export interface TurnVariantState {
+  turnId: string
+  index: number
+  total: number
+  previousHeadTurnId?: string
+  nextHeadTurnId?: string
+}
+
+type TurnVariantOption = {
+  turnId: string
+  headTurnId: string
+}
+
 export const useChatStore = defineStore('chat', () => {
   const selectionStore = useChatSelectionStore()
   const { currentBotId, sessionId, draftIntent, explicitSelection: explicitSessionSelection } = storeToRefs(selectionStore)
@@ -349,6 +426,8 @@ export const useChatStore = defineStore('chat', () => {
   const streaming = computed(() => isSessionStreaming(sessionId.value))
   const sessions = ref<SessionSummary[]>([])
   const loading = ref(false)
+  const messageActionSessionIds = reactive(new Set<string>())
+  const messageActionLoading = computed(() => isMessageActionLoading(sessionId.value))
   // `loadingChats` covers the bot-level boot path (sessions list fetch), so
   // the sidebar can show its skeleton + suppress its empty-state placeholder
   // exactly while the sessions list is in flight.
@@ -357,6 +436,7 @@ export const useChatStore = defineStore('chat', () => {
   // placeholders hidden while a fresh transcript is on its way.
   const loadingChats = ref(false)
   const loadingMessages = ref(false)
+  const variantSelectionLoading = ref(false)
   const loadingOlder = ref(false)
   const hasMoreOlder = ref(true)
   // Tracks whether the user has scrolled back and loaded at least one page of
@@ -387,6 +467,21 @@ export const useChatStore = defineStore('chat', () => {
   // tab can fall off the current page without being deleted.
   const deletedSession = ref<{ id: string, botId: string, seq: number } | null>(null)
   let deletedSessionSeq = 0
+
+  function isMessageActionLoading(targetSessionId?: string | null): boolean {
+    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
+    return Boolean(sid && messageActionSessionIds.has(sid))
+  }
+
+  function setMessageActionLoading(targetSessionId: string, loading: boolean) {
+    const sid = targetSessionId.trim()
+    if (!sid) return
+    if (loading) {
+      messageActionSessionIds.add(sid)
+    } else {
+      messageActionSessionIds.delete(sid)
+    }
+  }
 
   // Bumps every time a fs-mutating tool call (write/edit/apply_patch/exec) finishes for the
   // current bot. File-manager components watch this to refresh their listings
@@ -523,9 +618,12 @@ export const useChatStore = defineStore('chat', () => {
   let activeWs: ChatWebSocket | null = null
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
   let refreshPromise: { key: string; promise: Promise<void> } | null = null
+  let variantSelectionRequestId = 0
   let sessionListRefreshPromise: { botId: string; promise: Promise<void> } | null = null
   const latestBackgroundTasks = new Map<string, BackgroundTask>()
   const ephemeralAssistantErrors = new Map<string, EphemeralAssistantError[]>()
+  const turnGraphs = reactive(new Map<string, SessionTurnGraphState>())
+  const selectedHeadTurnIds = reactive(new Map<string, string>())
   // Two independent streams replace the deleted bot-wide messages SSE:
   // - sessionMessagesStream follows the active sessionId and feeds the
   //   transcript (server pushes a small backlog + live messages for that
@@ -685,10 +783,10 @@ export const useChatStore = defineStore('chat', () => {
   // triggers `sessions.value`, so the UI stays stale until a full REST refresh
   // (the Cmd+R symptom).
   function patchSessionInList(id: string, patch: Partial<SessionSummary>) {
+    const currentDeleted = deletedSessionIdsByBot.get((currentBotId.value ?? '').trim())
+    if (currentDeleted?.has(id)) return
     const existing = sessionById.get(id)
     if (!existing) return
-    const currentDeleted = deletedSessionIdsByBot.get((existing.bot_id ?? currentBotId.value ?? '').trim())
-    if (currentDeleted?.has(id)) return
     const next = { ...existing, ...patch }
     sessionById.set(id, next)
     sessions.value = sessions.value.map(session => (session.id === id ? next : session))
@@ -701,6 +799,8 @@ export const useChatStore = defineStore('chat', () => {
     sessionById.delete(id)
     markSessionLookupChanged()
     forgetRememberedSession(id)
+    turnGraphs.delete(id)
+    selectedHeadTurnIds.delete(id)
   }
 
   function fallbackSessionAfterDelete(mode: SidebarSessionMode): SessionSummary | null {
@@ -726,6 +826,7 @@ export const useChatStore = defineStore('chat', () => {
     if (ct && ct !== 'local') return true
     return false
   })
+  const activeSessionSupportsTurnVariants = computed(() => sessionSupportsTurnVariants(sessionId.value))
 
   function acpRuntimeKey(botId: string, targetSessionId: string) {
     const bid = botId.trim()
@@ -1016,6 +1117,7 @@ export const useChatStore = defineStore('chat', () => {
     if (turn.role === 'user') {
       return {
         id: String(turn.id ?? nextId()),
+        turnId: (turn.turn_id ?? '').trim() || undefined,
         role: 'user',
         text: turn.text ?? '',
         attachments: (turn.attachments ?? []).map(normalizeAttachment),
@@ -1040,6 +1142,7 @@ export const useChatStore = defineStore('chat', () => {
       const latest = rememberBackgroundTask(task)
       return {
         id: String(turn.id ?? `system-${latest.taskId}`),
+        turnId: (turn.turn_id ?? '').trim() || undefined,
         role: 'system',
         kind: 'background_task',
         backgroundTask: latest,
@@ -1051,6 +1154,7 @@ export const useChatStore = defineStore('chat', () => {
 
     return {
       id: String(turn.id ?? nextId()),
+      turnId: (turn.turn_id ?? '').trim() || undefined,
       role: 'assistant',
       messages: (turn.messages ?? []).map(normalizeUIMessage),
       timestamp: normalizeTimestamp(turn.timestamp),
@@ -1228,6 +1332,301 @@ export const useChatStore = defineStore('chat', () => {
     messages.splice(0, messages.length, ...next)
   }
 
+  function normalizeGraphNode(node: UITurnGraphNode): SessionTurnGraphNodeState | null {
+    const turnId = node.turn_id?.trim()
+    if (!turnId) return null
+    return {
+      turnId,
+      parentTurnId: node.parent_turn_id?.trim() || undefined,
+      timestamp: node.timestamp?.trim() || undefined,
+      requestKey: node.request_key?.trim() || undefined,
+      hasUser: node.has_user === true,
+      hasAssistant: node.has_assistant === true,
+    }
+  }
+
+  function graphPathTurnIds(graph: SessionTurnGraphState, headTurnId: string): string[] {
+    const path: string[] = []
+    const seen = new Set<string>()
+    for (let turnId = headTurnId.trim(); turnId;) {
+      if (seen.has(turnId)) break
+      const node = graph.nodes.get(turnId)
+      if (!node) break
+      seen.add(turnId)
+      path.push(turnId)
+      turnId = node.parentTurnId ?? ''
+    }
+    return path.reverse()
+  }
+
+  function selectedHeadForSession(targetSessionId?: string | null): string {
+    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
+    if (!sid) return ''
+    return selectedHeadTurnIds.get(sid)?.trim() || turnGraphs.get(sid)?.defaultHeadTurnId || ''
+  }
+
+  function sessionSupportsTurnVariants(targetSessionId?: string | null): boolean {
+    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
+    return knownSessionSummary(sid)?.type === 'chat'
+  }
+
+  function baseHeadForRequest(targetSessionId?: string | null): string | undefined {
+    if (!sessionSupportsTurnVariants(targetSessionId)) return undefined
+    return selectedHeadForSession(targetSessionId).trim() || undefined
+  }
+
+  function baseHeadPayload(targetSessionId?: string | null): { base_head_turn_id: string } | Record<string, never> {
+    const baseHeadTurnId = baseHeadForRequest(targetSessionId)
+    return baseHeadTurnId ? { base_head_turn_id: baseHeadTurnId } : {}
+  }
+
+  function explicitSelectedHeadForSession(targetSessionId?: string | null): string {
+    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
+    if (!sid) return ''
+    return selectedHeadTurnIds.get(sid)?.trim() || ''
+  }
+
+  function viewHeadFetchOption(targetSessionId?: string | null): { headTurnId: string } | Record<string, never> {
+    if (!sessionSupportsTurnVariants(targetSessionId)) return {}
+    const headTurnId = explicitSelectedHeadForSession(targetSessionId)
+    return headTurnId ? { headTurnId } : {}
+  }
+
+  function currentViewHeadKey(targetSessionId?: string | null, useSelectedView = true): string {
+    if (!useSelectedView || !sessionSupportsTurnVariants(targetSessionId)) return 'default'
+    return explicitSelectedHeadForSession(targetSessionId) || 'default'
+  }
+
+  function isCurrentViewHead(targetSessionId: string, expectedHeadKey: string, useSelectedView = true): boolean {
+    return currentViewHeadKey(targetSessionId, useSelectedView) === expectedHeadKey
+  }
+
+  function resetSelectedHeadForSession(targetSessionId?: string | null) {
+    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
+    if (!sid) return
+    selectedHeadTurnIds.delete(sid)
+  }
+
+  function applySessionTurnGraph(targetSessionId: string, payload: FetchMessagesUIResult) {
+    const sid = targetSessionId.trim()
+    if (!sid) return
+    const nodes = new Map<string, SessionTurnGraphNodeState>()
+    for (const rawNode of payload.nodes ?? []) {
+      const node = normalizeGraphNode(rawNode)
+      if (node) nodes.set(node.turnId, node)
+    }
+    const headTurnIds = (payload.head_turn_ids ?? [])
+      .map(id => id.trim())
+      .filter(id => id && nodes.has(id))
+    const rawDefaultHead = payload.default_head_turn_id?.trim() || ''
+    const defaultHead = rawDefaultHead && headTurnIds.includes(rawDefaultHead)
+      ? rawDefaultHead
+      : headTurnIds[0] || ''
+    const graph: SessionTurnGraphState = {
+      defaultHeadTurnId: defaultHead,
+      headTurnIds,
+      nodes,
+    }
+    turnGraphs.set(sid, graph)
+    const selected = selectedHeadTurnIds.get(sid)?.trim() ?? ''
+    if (selected && headTurnIds.includes(selected)) {
+      selectedHeadTurnIds.set(sid, selected)
+    } else {
+      selectedHeadTurnIds.delete(sid)
+    }
+  }
+
+  function clearSessionTurnGraph(targetSessionId?: string | null) {
+    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
+    if (!sid) return
+    turnGraphs.delete(sid)
+    selectedHeadTurnIds.delete(sid)
+  }
+
+  function headPathSet(graph: SessionTurnGraphState, headTurnId: string): Set<string> {
+    return new Set(graphPathTurnIds(graph, headTurnId))
+  }
+
+  function turnTimestamp(graph: SessionTurnGraphState, turnId: string): string {
+    const node = graph.nodes.get(turnId)
+    return node?.timestamp ?? ''
+  }
+
+  function sortTurnIdsByTimestamp(graph: SessionTurnGraphState, turnIds: string[]): string[] {
+    return [...turnIds].sort((a, b) => {
+      const left = turnTimestamp(graph, a)
+      const right = turnTimestamp(graph, b)
+      if (left !== right) return left.localeCompare(right)
+      return a.localeCompare(b)
+    })
+  }
+
+  function siblingTurnIdsForNode(graph: SessionTurnGraphState, node: SessionTurnGraphNodeState): string[] {
+    return sortTurnIdsByTimestamp(
+      graph,
+      [...graph.nodes.values()]
+        .filter(candidate => (candidate.parentTurnId ?? '') === (node.parentTurnId ?? ''))
+        .map(candidate => candidate.turnId),
+    )
+  }
+
+  function optionForTurn(
+    graph: SessionTurnGraphState,
+    turnId: string,
+    selectedHead: string,
+    getHeadPath: (headId: string) => Set<string>,
+  ): TurnVariantOption | null {
+    const headTurnId = getHeadPath(selectedHead).has(turnId)
+      ? selectedHead
+      : graph.headTurnIds.find(headId => getHeadPath(headId).has(turnId))
+    return headTurnId ? { turnId, headTurnId } : null
+  }
+
+  function buildVariantState(turnId: string, options: TurnVariantOption[]): TurnVariantState | null {
+    if (options.length <= 1) return null
+    const index = options.findIndex(item => item.turnId === turnId)
+    if (index < 0) return null
+    return {
+      turnId,
+      index,
+      total: options.length,
+      previousHeadTurnId: index > 0 ? options[index - 1]?.headTurnId : undefined,
+      nextHeadTurnId: index + 1 < options.length ? options[index + 1]?.headTurnId : undefined,
+    }
+  }
+
+  function variantContextForMessage(messageId: string) {
+    const sid = (sessionId.value ?? '').trim()
+    if (!sessionSupportsTurnVariants(sid)) return null
+    const graph = turnGraphs.get(sid)
+    if (!sid || !graph) return null
+    const message = messages.find(item => item.id === messageId)
+    const turnId = message?.turnId?.trim()
+    if (!turnId) return null
+    const node = graph.nodes.get(turnId)
+    if (!node) return null
+
+    const pathByHead = new Map<string, Set<string>>()
+    const selectedHead = selectedHeadForSession(sid)
+    const getHeadPath = (headId: string) => {
+      let path = pathByHead.get(headId)
+      if (!path) {
+        path = headPathSet(graph, headId)
+        pathByHead.set(headId, path)
+      }
+      return path
+    }
+
+    return { graph, message, node, turnId, selectedHead, getHeadPath }
+  }
+
+  function requestVariantStateForMessage(messageId: string): TurnVariantState | null {
+    const ctx = variantContextForMessage(messageId)
+    if (!ctx || ctx.message?.role !== 'user') return null
+
+    const siblings = siblingTurnIdsForNode(ctx.graph, ctx.node)
+    if (siblings.length <= 1) return null
+
+    const requestGroups = new Map<string, string>()
+    for (const siblingTurnId of siblings) {
+      const siblingNode = ctx.graph.nodes.get(siblingTurnId)
+      if (!siblingNode) continue
+      const key = siblingNode.requestKey ?? ''
+      if (!key) continue
+      const existing = requestGroups.get(key)
+      if (existing && !ctx.getHeadPath(ctx.selectedHead).has(siblingTurnId)) continue
+      requestGroups.set(key, siblingTurnId)
+    }
+
+    const targetKey = ctx.node.requestKey ?? ''
+    const targetTurnId = targetKey ? requestGroups.get(targetKey) : undefined
+    if (!targetTurnId) return null
+
+    const siblingOptions = [...requestGroups.values()]
+      .map(siblingTurnId => optionForTurn(ctx.graph, siblingTurnId, ctx.selectedHead, ctx.getHeadPath))
+      .filter((item): item is { turnId: string; headTurnId: string } => item !== null)
+    return buildVariantState(targetTurnId, siblingOptions)
+  }
+
+  function responseVariantStateForMessage(messageId: string): TurnVariantState | null {
+    const ctx = variantContextForMessage(messageId)
+    if (!ctx || ctx.message?.role !== 'assistant') return null
+    if (!ctx.node.hasAssistant) return null
+
+    const requestKey = ctx.node.requestKey ?? ''
+    if (!requestKey) return null
+    const siblings = siblingTurnIdsForNode(ctx.graph, ctx.node)
+      .filter((siblingTurnId) => {
+        const siblingNode = ctx.graph.nodes.get(siblingTurnId)
+        return siblingNode ? siblingNode.requestKey === requestKey : false
+      })
+    if (siblings.length <= 1) return null
+
+    const siblingOptions = siblings
+      .map(siblingTurnId => optionForTurn(ctx.graph, siblingTurnId, ctx.selectedHead, ctx.getHeadPath))
+      .filter((item): item is { turnId: string; headTurnId: string } => item !== null)
+    return buildVariantState(ctx.turnId, siblingOptions)
+  }
+
+  async function selectTurnVariant(headTurnId: string): Promise<boolean> {
+    const sid = (sessionId.value ?? '').trim()
+    if (!sessionSupportsTurnVariants(sid)) return false
+    if (streaming.value || loadingMessages.value || isMessageActionLoading(sid)) return false
+    const head = headTurnId.trim()
+    const graph = turnGraphs.get(sid)
+    if (!sid || !head || !graph || !graph.headTurnIds.includes(head)) return false
+    const bid = (currentBotId.value ?? '').trim()
+    if (!bid) return false
+    const previousExplicitHead = explicitSelectedHeadForSession(sid)
+    const previousHasLoadedOlder = hasLoadedOlder.value
+    const previousHasMoreOlder = hasMoreOlder.value
+    const requestId = ++variantSelectionRequestId
+    hasLoadedOlder.value = false
+    hasMoreOlder.value = true
+    variantSelectionLoading.value = true
+    loadingMessages.value = true
+    try {
+      const payload = await fetchMessagesUI(bid, sid, {
+        limit: PAGE_SIZE,
+        headTurnId: head,
+      })
+      if (
+        requestId !== variantSelectionRequestId
+        || (currentBotId.value ?? '').trim() !== bid
+        || (sessionId.value ?? '').trim() !== sid
+      ) return false
+      selectedHeadTurnIds.set(sid, head)
+      replaceMessages(payload.items, sid)
+      reattachPendingAssistantStreams(sid)
+      startSessionMessagesStream(bid, sid, { skipInitialRefreshOnce: true })
+    } catch (error) {
+      if (requestId === variantSelectionRequestId && (currentBotId.value ?? '').trim() === bid && (sessionId.value ?? '').trim() === sid) {
+        if (previousExplicitHead) selectedHeadTurnIds.set(sid, previousExplicitHead)
+        else selectedHeadTurnIds.delete(sid)
+        hasLoadedOlder.value = previousHasLoadedOlder
+        hasMoreOlder.value = previousHasMoreOlder
+      }
+      console.error('Failed to load selected turn variant:', error)
+      toast.error(resolveApiErrorMessage(error, variantLoadFailedMessage()))
+      return false
+    } finally {
+      if (requestId === variantSelectionRequestId) {
+        variantSelectionLoading.value = false
+      }
+      if (requestId === variantSelectionRequestId && (currentBotId.value ?? '').trim() === bid && (sessionId.value ?? '').trim() === sid) {
+        loadingMessages.value = false
+      }
+    }
+    return true
+  }
+
+  function cancelVariantSelectionLoad() {
+    if (!variantSelectionLoading.value) return
+    variantSelectionRequestId++
+    variantSelectionLoading.value = false
+    loadingMessages.value = false
+  }
+
   function sortChatMessages(items: ChatMessage[]): ChatMessage[] {
     return [...items].sort((a, b) => {
       const at = Date.parse(a.timestamp)
@@ -1327,7 +1726,14 @@ export const useChatStore = defineStore('chat', () => {
     return activeIds.length === 1 ? activeIds[0]! : fallbackStreamId(sid)
   }
 
-  function trackAssistantStream(streamId: string, assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string): Promise<void> {
+  function trackAssistantStream(
+    streamId: string,
+    assistantTurn: ChatAssistantTurn,
+    botId: string,
+    targetSessionId: string,
+    contextTurns: ChatMessage[] = [],
+    options: { refreshOnEnd?: boolean, commitOnFirstVisibleOutput?: () => void } = {},
+  ): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const id = streamId.trim()
       if (!id) {
@@ -1340,9 +1746,14 @@ export const useChatStore = defineStore('chat', () => {
       }
       pendingAssistantStreams.set(id, {
         streamId: id,
+        contextTurns,
         assistantTurn,
         botId,
         sessionId: targetSessionId.trim(),
+        refreshOnEnd: options.refreshOnEnd !== false,
+        commitOnFirstVisibleOutput: options.commitOnFirstVisibleOutput,
+        committed: !options.commitOnFirstVisibleOutput,
+        visiblyAttached: !options.commitOnFirstVisibleOutput,
         done: false,
         resolve,
         reject,
@@ -1376,10 +1787,9 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   // Append/remove operate only on the active session's `messages` array.
-  // Optimistic turns belonging to a now-stale session (the user switched away
-  // before the assistant stream finished) are silently dropped from the view;
-  // the server keeps recording the conversation and the next REST refresh on
-  // that session will surface the response.
+  // Optimistic turns belonging to a background session keep receiving stream
+  // deltas off-screen; when that session becomes active again, the REST refresh
+  // rebuilds `messages`, so the pending turn must be reattached to the new array.
 
   function appendTurnToSession(botId: string, targetSessionId: string, turn: ChatMessage) {
     const bid = botId.trim()
@@ -1390,9 +1800,118 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function hasVisibleTurn(turn: ChatMessage): boolean {
+    return messages.some(message =>
+      message === turn
+      || message.id === turn.id
+      || isSameLogicalTurn(message, turn),
+    )
+  }
+
+  function hasVisibleStreamAssistantTurn(turn: ChatAssistantTurn): boolean {
+    return messages.some(message =>
+      message === turn
+      || (message.__optimistic === true && message.id === turn.id),
+    )
+  }
+
+  function reattachPendingAssistantStreams(targetSessionId: string) {
+    const sid = targetSessionId.trim()
+    const bid = (currentBotId.value ?? '').trim()
+    if (!bid || !sid || sid !== (sessionId.value ?? '').trim()) return
+    for (const stream of pendingStreams()) {
+      if (stream.botId !== bid || stream.sessionId !== sid) continue
+      if (!stream.visiblyAttached) continue
+      if (stream.commitOnFirstVisibleOutput) {
+        if (stream.committed) {
+          stream.commitOnFirstVisibleOutput()
+        } else {
+          const replacedTurns = attachPendingRewriteToSession(
+            stream.botId,
+            stream.sessionId,
+            stream.pendingUserTurn ?? null,
+            stream.assistantTurn,
+            stream.pendingReplaceFromTurn ?? null,
+          )
+          if (replacedTurns !== undefined) stream.pendingReplacedTurns = replacedTurns
+        }
+        continue
+      }
+      for (const turn of stream.contextTurns) {
+        if (!hasVisibleTurn(turn)) messages.push(turn)
+      }
+      if (hasVisibleStreamAssistantTurn(stream.assistantTurn)) continue
+      messages.push(stream.assistantTurn)
+    }
+  }
+
   function removeTurnFromSession(_botId: string, _targetSessionId: string, turn: ChatMessage) {
     const idx = messages.indexOf(turn)
     if (idx >= 0) messages.splice(idx, 1)
+  }
+
+  function findMessageIndexForReplacement(turn: ChatMessage): number {
+    const referenceIndex = messages.indexOf(turn)
+    if (referenceIndex >= 0) return referenceIndex
+    const id = turn.id.trim()
+    if (id) {
+      const idIndex = messages.findIndex(message => message.id === id)
+      if (idIndex >= 0) return idIndex
+    }
+    const turnId = turn.turnId?.trim()
+    if (!turnId) return -1
+    return messages.findIndex(message => message.role === turn.role && message.turnId === turnId)
+  }
+
+  function replaceTailFromTurn(turn: ChatMessage, replacements: ChatMessage[]) {
+    const idx = findMessageIndexForReplacement(turn)
+    if (idx < 0) {
+      messages.push(...replacements)
+      return
+    }
+    messages.splice(idx, messages.length - idx, ...replacements)
+  }
+
+  function attachPendingRewriteToSession(
+    botId: string,
+    targetSessionId: string,
+    userTurn: ChatUserTurn | null,
+    assistantTurn: ChatAssistantTurn,
+    replaceFromTurn?: ChatMessage | null,
+  ): ChatMessage[] | undefined {
+    const pendingTurns = userTurn ? [userTurn, assistantTurn] : [assistantTurn]
+    if (pendingTurns.some(hasVisibleTurn)) return undefined
+    if (replaceFromTurn && currentBotId.value === botId.trim() && sessionId.value === targetSessionId.trim()) {
+      const idx = findMessageIndexForReplacement(replaceFromTurn)
+      if (idx >= 0) {
+        const replaced = messages.slice(idx)
+        messages.splice(idx, messages.length - idx, ...pendingTurns)
+        return replaced
+      }
+    }
+    for (const turn of pendingTurns) appendTurnToSession(botId, targetSessionId, turn)
+    return []
+  }
+
+  function removePendingRewriteFromSession(userTurn: ChatUserTurn | null, assistantTurn: ChatAssistantTurn) {
+    removeTurnFromSession('', '', assistantTurn)
+    if (userTurn) removeTurnFromSession('', '', userTurn)
+  }
+
+  function restorePendingRewriteInSession(
+    userTurn: ChatUserTurn | null,
+    assistantTurn: ChatAssistantTurn,
+    replacedTurns: ChatMessage[] = [],
+  ) {
+    const anchor = userTurn ?? assistantTurn
+    const idx = findMessageIndexForReplacement(anchor)
+    if (idx >= 0) {
+      const deleteCount = userTurn ? 2 : 1
+      messages.splice(idx, deleteCount, ...replacedTurns)
+      return
+    }
+    removePendingRewriteFromSession(userTurn, assistantTurn)
+    if (replacedTurns.length > 0) messages.push(...replacedTurns)
   }
 
   function createOptimisticAssistantTurn(): ChatAssistantTurn {
@@ -1404,10 +1923,6 @@ export const useChatStore = defineStore('chat', () => {
       streaming: true,
       __optimistic: true,
     }
-  }
-
-  function cloneToolApprovalState(approval: UIToolApproval): UIToolApproval {
-    return { ...approval }
   }
 
   function createOptimisticUserTurn(text: string, attachments?: ChatAttachment[]): ChatUserTurn {
@@ -1425,6 +1940,155 @@ export const useChatStore = defineStore('chat', () => {
       streaming: false,
       isSelf: true,
       __optimistic: true,
+    }
+  }
+
+  function cloneUserTurnForRetry(source: ChatUserTurn): ChatUserTurn {
+    return {
+      ...createOptimisticUserTurn(source.text, []),
+      attachments: source.attachments.map(attachment => ({ ...attachment })),
+    }
+  }
+
+  function cloneUserTurnForEdit(source: ChatUserTurn, text: string): ChatUserTurn {
+    return {
+      ...createOptimisticUserTurn(text, []),
+      attachments: source.attachments.map(attachment => ({ ...attachment })),
+    }
+  }
+
+  function chatAttachmentsFromTurn(turn: ChatUserTurn): ChatAttachment[] | undefined {
+    if (!turn.attachments.length) return undefined
+    return turn.attachments.map(attachment => ({
+      type: attachment.type,
+      base64: attachment.base64,
+      name: attachment.name ?? '',
+      mime: attachment.mime ?? '',
+    }))
+  }
+
+  function isErrorOnlyAssistantTurn(turn: ChatAssistantTurn): boolean {
+    return turn.messages.length > 0 && !hasVisibleAssistantBlocks(turn)
+  }
+
+  function hasVisibleAssistantBlock(block: ContentBlock): boolean {
+    if (block.type === 'error') return false
+    if (block.type === 'text' || block.type === 'reasoning') return block.content.trim().length > 0
+    if (block.type === 'attachments') return block.attachments.length > 0
+    return true
+  }
+
+  interface RewriteMessageInput {
+    botId: string
+    sessionId: string
+    sourceUserTurn: ChatUserTurn | null
+    optimisticUserTurn: ChatUserTurn | null
+    pendingUserTurn?: ChatUserTurn | null
+    replaceFromTurn?: ChatMessage | null
+    pendingReplaceFromTurn?: ChatMessage | null
+    send: (ws: ChatWebSocket, streamId: string, modelId?: string, reasoningEffort?: string) => void
+  }
+
+  async function runRewriteMessage(input: RewriteMessageInput): Promise<SendMessageResult> {
+    const bid = input.botId.trim()
+    const sid = input.sessionId.trim()
+    if (!bid || !sid) return { ok: false, stage: 'startup' }
+
+    setMessageActionLoading(sid, true)
+    const streamId = createStreamId()
+    const modelId = overrideModelId.value || undefined
+    const effort = overrideReasoningEffort.value
+    const reasoningEffort = effort || undefined
+    const ws = ensureWebSocket(bid)
+    let assistantTurn: ChatAssistantTurn | null = null
+    let streamStarted = false
+    let pendingReplacedTurns: ChatMessage[] = []
+    try {
+      if (!ws?.connected) {
+        throw new StreamFailureError('WebSocket is not connected', 'startup')
+      }
+      assistantTurn = createOptimisticAssistantTurn()
+      const pendingUserTurn = input.pendingUserTurn === undefined
+        ? input.optimisticUserTurn
+        : input.pendingUserTurn
+      const contextTurns = pendingUserTurn
+        ? [pendingUserTurn]
+        : (input.sourceUserTurn?.__optimistic ? [input.sourceUserTurn] : [])
+      const replaceFromTurn = input.replaceFromTurn ?? (input.sourceUserTurn && input.optimisticUserTurn ? input.sourceUserTurn : null)
+      const pendingReplaceFromTurn = input.pendingReplaceFromTurn ?? replaceFromTurn
+      const pendingUsesCommitPlacement = Boolean(
+        pendingReplaceFromTurn
+        && replaceFromTurn
+        && pendingReplaceFromTurn === replaceFromTurn
+        && (pendingUserTurn === input.optimisticUserTurn || !input.optimisticUserTurn),
+      )
+      const commitRewrite = () => {
+        if ((currentBotId.value ?? '').trim() !== bid || (sessionId.value ?? '').trim() !== sid) return
+        if (assistantTurn && pendingUsesCommitPlacement && hasVisibleStreamAssistantTurn(assistantTurn)) {
+          return
+        }
+        if (pendingUserTurn) removeTurnFromSession(bid, sid, pendingUserTurn)
+        if (assistantTurn) removeTurnFromSession(bid, sid, assistantTurn)
+        if (assistantTurn && hasVisibleStreamAssistantTurn(assistantTurn)) return
+        if (replaceFromTurn) {
+          replaceTailFromTurn(replaceFromTurn, input.optimisticUserTurn ? [
+            input.optimisticUserTurn,
+            assistantTurn!,
+          ] : [assistantTurn!])
+        } else {
+          appendTurnToSession(bid, sid, assistantTurn!)
+        }
+      }
+      const completion = trackAssistantStream(streamId, assistantTurn, bid, sid, contextTurns, {
+        refreshOnEnd: false,
+        commitOnFirstVisibleOutput: commitRewrite,
+      })
+      input.send(ws, streamId, modelId, reasoningEffort)
+      const stream = getAssistantStream(streamId)
+      pendingReplacedTurns = attachPendingRewriteToSession(bid, sid, pendingUserTurn, assistantTurn, pendingReplaceFromTurn) ?? pendingReplacedTurns
+      if (stream) {
+        stream.visiblyAttached = true
+        stream.pendingUserTurn = pendingUserTurn
+        stream.pendingReplaceFromTurn = pendingReplaceFromTurn
+        stream.pendingReplacedTurns = pendingReplacedTurns
+      }
+      streamStarted = true
+      setMessageActionLoading(sid, false)
+      loading.value = true
+      await completion
+      resetSelectedHeadForSession(sid)
+      await refreshCurrentSession(bid, sid, { useSelectedView: false })
+      assistantTurn.streaming = false
+      loading.value = false
+      return { ok: true }
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error('Unknown error')
+      const isAbort = err.name === 'AbortError'
+      const stage: SendMessageStage = err instanceof StreamFailureError
+        ? err.stage
+        : (streamStarted && assistantTurn && hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
+      if (assistantTurn && hasVisibleStreamAssistantTurn(assistantTurn)) {
+        assistantTurn.streaming = false
+        if (!isAbort && !assistantTurn.messages.some(block => block.type === 'error')) {
+          if (stage === 'startup') {
+            const stream = getAssistantStream(streamId)
+            restorePendingRewriteInSession(
+              input.pendingUserTurn === undefined ? input.optimisticUserTurn : input.pendingUserTurn,
+              assistantTurn,
+              stream?.pendingReplacedTurns ?? pendingReplacedTurns,
+            )
+          } else {
+            appendAssistantError(assistantTurn, bid, sid, err.message)
+          }
+        }
+      }
+      forgetAssistantStream(streamId)
+      loading.value = isSessionStreaming(sessionId.value)
+      if (isAbort) return { ok: false, stage: 'stream', error: err.message }
+      if (stage === 'startup') toast.error(err.message)
+      return { ok: false, stage, error: err.message }
+    } finally {
+      setMessageActionLoading(sid, false)
     }
   }
 
@@ -1502,12 +2166,18 @@ export const useChatStore = defineStore('chat', () => {
     bumpFsChangedAtIfFsMutation(message)
   }
 
+  function commitAssistantStreamOnVisibleOutput(stream: PendingAssistantStream, block: ContentBlock) {
+    if (stream.committed || !hasVisibleAssistantBlock(block)) return
+    stream.commitOnFirstVisibleOutput?.()
+    stream.committed = true
+  }
+
   function nextAssistantMessageId(turn: ChatAssistantTurn): number {
     return turn.messages.reduce((maxId, message) => Math.max(maxId, message.id), -1) + 1
   }
 
   function hasVisibleAssistantBlocks(turn: ChatAssistantTurn): boolean {
-    return turn.messages.some(block => block.type !== 'error')
+    return turn.messages.some(hasVisibleAssistantBlock)
   }
 
   function cloneUserInputState(userInput: UIUserInput): UIUserInput {
@@ -1517,31 +2187,6 @@ export const useChatStore = defineStore('chat', () => {
         ...question,
         options: question.options?.map(option => ({ ...option })),
       })),
-    }
-  }
-
-  function snapshotToolApprovalStates(approvalId: string): ToolApprovalStateSnapshot[] {
-    const id = approvalId.trim()
-    if (!id) return []
-    const snapshots: ToolApprovalStateSnapshot[] = []
-    for (const message of messages) {
-      if (message.role !== 'assistant') continue
-      for (const block of message.messages) {
-        if (block.type === 'tool' && block.approval?.approval_id === id) {
-          snapshots.push({
-            block,
-            approval: cloneToolApprovalState(block.approval),
-          })
-        }
-      }
-    }
-    return snapshots
-  }
-
-  function restoreToolApprovalStates(snapshots: ToolApprovalStateSnapshot[]) {
-    for (const snapshot of snapshots) {
-      if (snapshot.block.approval?.approval_id !== snapshot.approval.approval_id) continue
-      snapshot.block.approval = cloneToolApprovalState(snapshot.approval)
     }
   }
 
@@ -1688,9 +2333,13 @@ export const useChatStore = defineStore('chat', () => {
       case 'start':
         ensureDiscussStream(streamId, sid)
         break
-      case 'message':
-        upsertAssistantUIMessage(ensureDiscussStream(streamId, sid).assistantTurn, event.data)
+      case 'message': {
+        const session = ensureDiscussStream(streamId, sid)
+        const block = normalizeUIMessage(event.data)
+        commitAssistantStreamOnVisibleOutput(session, block)
+        upsertAssistantUIMessage(session.assistantTurn, event.data)
         break
+      }
       case 'end':
         const endedSession = getAssistantStream(streamId)
         const endedBotId = endedSession?.botId ?? currentBotId.value ?? ''
@@ -1705,6 +2354,7 @@ export const useChatStore = defineStore('chat', () => {
         if (
           endedSessionId
           && !isSessionStreaming(endedSessionId)
+          && endedSession?.refreshOnEnd !== false
           && endedSessionId === (sessionId.value ?? '').trim()
           && endedBotId === (currentBotId.value ?? '').trim()
         ) {
@@ -1718,8 +2368,8 @@ export const useChatStore = defineStore('chat', () => {
         break
       case 'error': {
         const session = getAssistantStream(streamId) ?? ensureDiscussStream(streamId, sid)
-        const message = event.message || 'stream error'
-        const stage: SendMessageStage = hasVisibleAssistantBlocks(session.assistantTurn) ? 'stream' : 'startup'
+        const message = resolveApiErrorMessage(event, event.message || 'stream error')
+        const stage: SendMessageStage = session.committed && hasVisibleAssistantBlocks(session.assistantTurn) ? 'stream' : 'startup'
         rollbackApprovalResponse(streamId)
         approvalResponseStreams.delete(streamId)
         rejectAssistantStream(streamId, new StreamFailureError(message, stage))
@@ -1749,7 +2399,8 @@ export const useChatStore = defineStore('chat', () => {
     sessionListRefreshPromise = null
 
     replaceSessions([])
-    deletedSessionIdsByBot.clear()
+    turnGraphs.clear()
+    selectedHeadTurnIds.clear()
     sessionsCursor.value = null
     hasMoreSessions.value = false
     loadingMoreSessions.value = false
@@ -1764,6 +2415,7 @@ export const useChatStore = defineStore('chat', () => {
     hasLoadedOlder.value = false
     loading.value = false
     loadingChats.value = false
+    messageActionSessionIds.clear()
     loadingOlder.value = false
     initializing.value = false
     initializeRerunRequested = false
@@ -1801,11 +2453,42 @@ export const useChatStore = defineStore('chat', () => {
     return activeWs
   }
 
-  async function refreshCurrentSession(targetBotId?: string, targetSessionId?: string) {
+  function applyFetchedMessagesPayload(targetSessionId: string, payload: FetchMessagesUIResult) {
+    const sid = targetSessionId.trim()
+    if (!sid) return
+    if (payload.nodes !== undefined) {
+      applySessionTurnGraph(sid, payload)
+    }
+    if (hasLoadedOlder.value) {
+      mergeMessages(payload.items, sid)
+    } else {
+      replaceMessages(payload.items, sid)
+      // We cannot infer end-of-history from `turns.length < PAGE_SIZE`: the
+      // server pages by raw `bot_history_messages` rows but returns merged
+      // UI turns (multi-row user/assistant groups collapsed into one). A 30-
+      // row page collapses to ~28 turns even when the session has thousands
+      // more rows behind it, so trusting that count truncates real history.
+      // Leave `hasMoreOlder` at the optimistic default and let the first
+      // scroll-to-top call `loadOlderMessages`, whose authoritative
+      // empty-server-response handling settles the flag correctly.
+      hasMoreOlder.value = true
+    }
+    reattachPendingAssistantStreams(sid)
+    const latest = messages[messages.length - 1]?.timestamp
+    touchSessionInList(sid, latest)
+  }
+
+  async function refreshCurrentSession(
+    targetBotId?: string,
+    targetSessionId?: string,
+    options: { useSelectedView?: boolean } = {},
+  ) {
     const bid = (targetBotId ?? currentBotId.value ?? '').trim()
     const sid = (targetSessionId ?? sessionId.value ?? '').trim()
     if (!bid || !sid) return
-    const key = `${bid}:${sid}`
+    const useSelectedView = options.useSelectedView !== false
+    let expectedHeadKey = currentViewHeadKey(sid, useSelectedView)
+    const key = `${bid}:${sid}:${useSelectedView ? 'selected' : 'default'}:${expectedHeadKey}`
 
     if (refreshPromise) {
       if (refreshPromise.key === key) {
@@ -1816,10 +2499,29 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     const promise = (async () => {
-      const turns = await fetchMessagesUI(bid, sid, { limit: PAGE_SIZE })
+      let payload: FetchMessagesUIResult
+      try {
+        payload = await fetchMessagesUI(bid, sid, {
+          limit: PAGE_SIZE,
+          includeGraph: true,
+          ...(useSelectedView ? viewHeadFetchOption(sid) : {}),
+        })
+      } catch (error) {
+        if (useSelectedView && expectedHeadKey !== 'default' && isStaleSessionHeadError(error)) {
+          resetSelectedHeadForSession(sid)
+          expectedHeadKey = currentViewHeadKey(sid, useSelectedView)
+          payload = await fetchMessagesUI(bid, sid, {
+            limit: PAGE_SIZE,
+            includeGraph: true,
+          })
+        } else {
+          throw error
+        }
+      }
       // The user may have switched away while the request was in flight. Drop
       // the result silently — the new session has its own load underway.
       if (currentBotId.value !== bid || sessionId.value !== sid) return
+      if (!isCurrentViewHead(sid, expectedHeadKey, useSelectedView)) return
       // Pick replace vs merge by whether the user has scrolled back to load
       // older history. When older pages are present we MUST preserve them
       // (otherwise an SSE-triggered refresh wipes the prepended history).
@@ -1829,22 +2531,7 @@ export const useChatStore = defineStore('chat', () => {
       // comparison, because client/server clock skew on a fresh session's
       // first send could otherwise flip the decision and duplicate the user
       // turn.
-      if (hasLoadedOlder.value) {
-        mergeMessages(turns, sid)
-      } else {
-        replaceMessages(turns, sid)
-        // We cannot infer end-of-history from `turns.length < PAGE_SIZE`: the
-        // server pages by raw `bot_history_messages` rows but returns merged
-        // UI turns (multi-row user/assistant groups collapsed into one). A 30-
-        // row page collapses to ~28 turns even when the session has thousands
-        // more rows behind it, so trusting that count truncates real history.
-        // Leave `hasMoreOlder` at the optimistic default and let the first
-        // scroll-to-top call `loadOlderMessages`, whose authoritative
-        // empty-server-response handling settles the flag correctly.
-        hasMoreOlder.value = true
-      }
-      const latest = messages[messages.length - 1]?.timestamp
-      touchSessionInList(sid, latest)
+      applyFetchedMessagesPayload(sid, payload)
     })().finally(() => {
       if (refreshPromise?.promise === promise) {
         refreshPromise = null
@@ -1855,15 +2542,24 @@ export const useChatStore = defineStore('chat', () => {
     await promise
   }
 
-  function refreshSessionsList(targetBotId: string): Promise<void> {
+  function refreshSessionsList(targetBotId: string, options: { keep?: SessionSummary[] } = {}): Promise<void> {
     const bid = targetBotId.trim()
     if (!bid) return Promise.resolve()
-    if (sessionListRefreshPromise?.botId === bid) return sessionListRefreshPromise.promise
+    if (sessionListRefreshPromise?.botId === bid) {
+      return sessionListRefreshPromise.promise.finally(() => {
+        if ((currentBotId.value ?? '').trim() !== bid) return
+        for (const keep of options.keep ?? []) upsertSession(keep)
+      })
+    }
 
     const promise = fetchSessions(bid)
       .then((response) => {
         if ((currentBotId.value ?? '').trim() !== bid) return
-        replaceSessions(response.items)
+        const items = [...response.items]
+        for (const keep of options.keep ?? []) {
+          if (!items.some(item => item.id === keep.id)) items.unshift(keep)
+        }
+        replaceSessions(items)
         sessionsCursor.value = response.nextCursor
         hasMoreSessions.value = response.nextCursor !== null
       })
@@ -1916,10 +2612,6 @@ export const useChatStore = defineStore('chat', () => {
 
   function handleSessionMessageEvent(targetBotId: string, targetSessionId: string, event: SessionMessageStreamEvent) {
     if (event.type === 'ping') return
-    if (event.type === 'dropped') {
-      void refreshCurrentSession(targetBotId, targetSessionId)
-      return
-    }
 
     if (event.type === 'background_task') {
       const eventSessionId = event.session_id?.trim()
@@ -1928,6 +2620,13 @@ export const useChatStore = defineStore('chat', () => {
       if (!task) return
       mergeBackgroundTaskIntoMatchingTools(rememberBackgroundTask(task))
       if (eventSessionId) touchSessionInList(eventSessionId)
+      return
+    }
+
+    if (event.type === 'stale' || event.type === 'dropped') {
+      const eventSessionId = event.type === 'stale' ? event.session_id?.trim() : ''
+      if (eventSessionId && eventSessionId !== targetSessionId) return
+      scheduleRefreshCurrentSession(targetSessionId)
       return
     }
 
@@ -1960,10 +2659,6 @@ export const useChatStore = defineStore('chat', () => {
 
   function handleBotSessionsActivityEvent(targetBotId: string, event: BotSessionActivityEvent) {
     if (event.type === 'ping') return
-    if (event.type === 'dropped') {
-      void refreshSessionsList(targetBotId)
-      return
-    }
 
     if (event.type === 'session_touched') {
       const sid = event.session_id.trim()
@@ -2015,7 +2710,11 @@ export const useChatStore = defineStore('chat', () => {
   // owns the flag now.
   let loadingMessagesVersion = 0
 
-  function startSessionMessagesStream(targetBotId: string, targetSessionId: string) {
+  function startSessionMessagesStream(
+    targetBotId: string,
+    targetSessionId: string,
+    options: { skipInitialRefreshOnce?: boolean } = {},
+  ) {
     sessionMessagesStream.stop()
     const bid = targetBotId.trim()
     const sid = targetSessionId.trim()
@@ -2025,19 +2724,28 @@ export const useChatStore = defineStore('chat', () => {
     // placeholders (e.g. "system session has no records") while a fresh
     // transcript is on its way. The sidebar deliberately ignores it — only
     // `loadingChats` (sessions-list boot) makes the sidebar spin.
-    loadingMessages.value = true
+    let skipInitialRefresh = options.skipInitialRefreshOnce === true
+    loadingMessages.value = !skipInitialRefresh
     const myVersion = ++loadingMessagesVersion
     sessionMessagesStream.start(async (signal) => {
       try {
-        await refreshCurrentSession(bid, sid)
+        if (skipInitialRefresh) {
+          skipInitialRefresh = false
+        } else {
+          await refreshCurrentSession(bid, sid)
+        }
       } catch (error) {
         console.error('Failed to load session messages:', error)
+        if ((currentBotId.value ?? '').trim() === bid && (sessionId.value ?? '').trim() === sid) {
+          reattachPendingAssistantStreams(sid)
+          loading.value = isSessionStreaming(sid)
+        }
       } finally {
         if (myVersion === loadingMessagesVersion) loadingMessages.value = false
       }
       await streamSessionMessageEvents(bid, sid, signal, (event) => {
         handleSessionMessageEvent(bid, sid, event)
-      })
+      }, explicitSelectedHeadForSession(sid))
     })
   }
 
@@ -2136,11 +2844,15 @@ export const useChatStore = defineStore('chat', () => {
       // never moves and we'd terminate prematurely).
       const MAX_DEDUP_HOPS = 4
       let cursor = first.timestamp
+      let cursorId = first.id
       for (let hop = 0; hop < MAX_DEDUP_HOPS; hop++) {
-        const turns = await fetchMessagesUI(bid, sid, {
+        const payload = await fetchMessagesUI(bid, sid, {
           limit: PAGE_SIZE,
+          ...viewHeadFetchOption(sid),
           before: cursor,
+          beforeId: cursorId,
         })
+        const turns = payload.items
 
         if (turns.length === 0) {
           hasMoreOlder.value = false
@@ -2165,18 +2877,21 @@ export const useChatStore = defineStore('chat', () => {
 
         // All returned turns were already present locally. Advance the cursor
         // past the earliest one we just saw and try again on the next hop.
-        const earliest = normalized.reduce<string | null>((acc, turn) => {
+        const earliest = normalized.reduce<{ timestamp: string; id: string } | null>((acc, turn) => {
           const ts = turn.timestamp?.trim()
           if (!ts) return acc
-          if (!acc || ts < acc) return ts
+          const id = turn.id?.trim()
+          if (!id) return acc
+          if (!acc || ts < acc.timestamp || (ts === acc.timestamp && id < acc.id)) return { timestamp: ts, id }
           return acc
         }, null)
-        if (!earliest || earliest === cursor) {
+        if (!earliest || (earliest.timestamp === cursor && earliest.id === cursorId)) {
           // Pagination cursor cannot advance; bail out to avoid a request loop.
           hasMoreOlder.value = false
           return 0
         }
-        cursor = earliest
+        cursor = earliest.timestamp
+        cursorId = earliest.id
       }
       // Exhausted hop budget without finding net-new turns; treat as end of
       // history rather than spinning indefinitely.
@@ -2210,7 +2925,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!bid || !sid || !target) return null
 
     try {
-      const result = await locateMessageUI(bid, sid, target, PAGE_SIZE, PAGE_SIZE)
+      const result = await locateMessageUI(bid, sid, target, PAGE_SIZE, PAGE_SIZE, viewHeadFetchOption(sid))
       if (!result.items.length) return null
       mergeMessages(result.items, sid)
       hasMoreOlder.value = true
@@ -2417,6 +3132,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function stageNewACPSession(input: ACPAgentSessionInput) {
+    cancelVariantSelectionLoad()
     selectSessionRequestId++
     clearPendingACPSession()
     sessionId.value = null
@@ -2429,6 +3145,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function resetToEmptyComposer(options: { clearPendingACP?: boolean; explicitSelection?: boolean; draftIntent?: boolean } = {}) {
+    cancelVariantSelectionLoad()
     selectSessionRequestId++
     if (options.clearPendingACP !== false) {
       clearPendingACPSession()
@@ -2600,6 +3317,7 @@ export const useChatStore = defineStore('chat', () => {
     explicitSessionSelection.value = true
     draftIntent.value = false
     replaceMessages([])
+    clearSessionTurnGraph(created.id)
     hasMoreOlder.value = false
     hasLoadedOlder.value = false
     if (runtimeId) {
@@ -2747,6 +3465,7 @@ export const useChatStore = defineStore('chat', () => {
     draftIntent.value = false
     explicitSessionSelection.value = true
     replaceMessages([])
+    clearSessionTurnGraph(created.id)
     hasMoreOlder.value = false
     hasLoadedOlder.value = false
   }
@@ -2901,7 +3620,6 @@ export const useChatStore = defineStore('chat', () => {
             initializeRerunRequested = true
             continue
           }
-
           const visibleSessions = replaceSessions(response.items)
           sessionsCursor.value = response.nextCursor
           hasMoreSessions.value = response.nextCursor !== null
@@ -2916,6 +3634,10 @@ export const useChatStore = defineStore('chat', () => {
           }
           const preservePendingACPStage = !!pendingACPSessionInput.value && !sessionId.value
           const preserveExplicitEmptyComposer = explicitSessionSelection.value && !sessionId.value
+          // When the default runtime is an external ACP agent and nothing was
+          // explicitly selected, keep a blank composer so the default-ACP staging
+          // path can own the runtime target instead of flashing a native history
+          // session first.
           const preferDefaultACP = defaultIsACP
             && !preservePendingACPStage
             && !preserveExplicitEmptyComposer
@@ -3001,6 +3723,7 @@ export const useChatStore = defineStore('chat', () => {
   // already gated on `sessionId.value === <stream's sessionId>`, so the
   // orphan does not bleed into B's view).
   function switchActiveSession(sid: string) {
+    cancelVariantSelectionLoad()
     sessionMessagesStream.stop()
     replaceMessages([])
     hasMoreOlder.value = false
@@ -3011,6 +3734,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function selectBot(targetBotId: string) {
+    if (messageActionLoading.value) return
     if (currentBotId.value === targetBotId) return
     selectSessionRequestId++
     abort()
@@ -3032,6 +3756,7 @@ export const useChatStore = defineStore('chat', () => {
     const sid = targetSessionId.trim()
     if (!sid) return
     const sameSession = sid === sessionId.value
+    if (messageActionLoading.value && !sameSession) return
     const requestId = ++selectSessionRequestId
     const bid = (currentBotId.value ?? '').trim()
     clearPendingACPSession()
@@ -3057,8 +3782,10 @@ export const useChatStore = defineStore('chat', () => {
   // Switch the global view to the draft (no real session yet). Unlike
   // createNewSession this assumes the bot is already active and only resets the
   // view, so per-session chat tabs can activate their draft tab without minting a
-  // session. selectSession early-returns on an empty id, so a draft needs this.
+  // session. Keep any staged ACP draft intact; explicit reset actions such as
+  // /new or switching back to Memoh use resetToEmptyComposer directly.
   function selectDraft(options: { explicitSelection?: boolean } = {}) {
+    if (messageActionLoading.value) return
     const explicitSelection = options.explicitSelection === true
     resetToEmptyComposer({
       clearPendingACP: false,
@@ -3113,6 +3840,7 @@ export const useChatStore = defineStore('chat', () => {
     const fallbackMode = options.fallbackMode ?? 'recent'
     const nextSession = fallbackSessionAfterDelete(fallbackMode)
     if (!nextSession) {
+      cancelVariantSelectionLoad()
       sessionId.value = null
       explicitSessionSelection.value = false
       draftIntent.value = false
@@ -3142,6 +3870,138 @@ export const useChatStore = defineStore('chat', () => {
     return updated
   }
 
+  async function forkMessage(messageId: string): Promise<boolean> {
+    const bid = (currentBotId.value ?? '').trim()
+    const sid = (sessionId.value ?? '').trim()
+    const mid = messageId.trim()
+    if (!bid || !sid || !mid || !sessionSupportsTurnVariants(sid) || activeChatReadOnly.value || streaming.value || loadingMessages.value || isMessageActionLoading(sid)) return false
+    const previousMessages = [...messages]
+    const previousHasMoreOlder = hasMoreOlder.value
+    const previousHasLoadedOlder = hasLoadedOlder.value
+    let switchedToForkedSessionId = ''
+    setMessageActionLoading(sid, true)
+    try {
+      const forked = await requestForkSessionFromMessage(bid, sid, mid, baseHeadForRequest(sid))
+      upsertSession(forked)
+      void refreshSessionsList(bid, { keep: [forked] })
+      const payload = await fetchMessagesUI(bid, forked.id, { limit: PAGE_SIZE, includeGraph: true })
+      if ((currentBotId.value ?? '').trim() !== bid || (sessionId.value ?? '').trim() !== sid) {
+        return false
+      }
+      draftIntent.value = false
+      sessionMessagesStream.stop()
+      sessionId.value = forked.id
+      switchedToForkedSessionId = forked.id
+      hasMoreOlder.value = false
+      hasLoadedOlder.value = false
+      applyFetchedMessagesPayload(forked.id, payload)
+      startSessionMessagesStream(bid, forked.id, { skipInitialRefreshOnce: true })
+      return true
+    } catch (error) {
+      if (switchedToForkedSessionId && sessionId.value === switchedToForkedSessionId) {
+        sessionId.value = sid
+        messages.splice(0, messages.length, ...previousMessages)
+        hasMoreOlder.value = previousHasMoreOlder
+        hasLoadedOlder.value = previousHasLoadedOlder
+        startSessionMessagesStream(bid, sid)
+      }
+      toast.error(isSessionNotFoundError(error)
+        ? forkSourceSessionDeletedMessage()
+        : error instanceof Error && error.message.trim()
+          ? error.message
+          : forkFailedMessage())
+      return false
+    } finally {
+      setMessageActionLoading(sid, false)
+    }
+  }
+
+  async function retryMessage(messageId: string): Promise<SendMessageResult> {
+    const mid = messageId.trim()
+    const bid = (currentBotId.value ?? '').trim()
+    const sid = (sessionId.value ?? '').trim()
+    if (!mid || !bid || !sid || !sessionSupportsTurnVariants(sid) || streaming.value || loadingMessages.value || activeChatReadOnly.value || isMessageActionLoading(sid)) {
+      return { ok: false, stage: 'startup' }
+    }
+    const target = messages.find((message): message is ChatAssistantTurn => message.role === 'assistant' && message.id === mid)
+    if (!target) return { ok: false, stage: 'startup' }
+    if (isErrorOnlyAssistantTurn(target)) {
+      const sourceUserTurn = findUserTurnBeforeAssistant(target)
+      if (!sourceUserTurn) return { ok: false, stage: 'startup' }
+      return runRewriteMessage({
+        botId: bid,
+        sessionId: sid,
+        sourceUserTurn,
+        optimisticUserTurn: null,
+        replaceFromTurn: target,
+        pendingReplaceFromTurn: target,
+        send(ws, streamId, modelId, reasoningEffort) {
+          ws.send({
+            type: 'message',
+            stream_id: streamId,
+            text: sourceUserTurn.text,
+            session_id: sid,
+            ...baseHeadPayload(sid),
+            attachments: chatAttachmentsFromTurn(sourceUserTurn),
+            model_id: modelId,
+            reasoning_effort: reasoningEffort,
+          })
+        },
+      })
+    }
+    const sourceUserTurn = findUserTurnBeforeAssistant(target)
+    if (!sourceUserTurn) return { ok: false, stage: 'startup' }
+    return runRewriteMessage({
+      botId: bid,
+      sessionId: sid,
+      sourceUserTurn,
+      optimisticUserTurn: cloneUserTurnForRetry(sourceUserTurn),
+      pendingUserTurn: null,
+      pendingReplaceFromTurn: target,
+      send(ws, streamId, modelId, reasoningEffort) {
+        ws.send({
+          type: 'retry_message',
+          stream_id: streamId,
+          session_id: sid,
+          ...baseHeadPayload(sid),
+          retry_message_id: mid,
+          model_id: modelId,
+          reasoning_effort: reasoningEffort,
+        })
+      },
+    })
+  }
+
+  async function editMessage(messageId: string, text: string): Promise<SendMessageResult> {
+    const mid = messageId.trim()
+    const trimmed = text.trim()
+    const bid = (currentBotId.value ?? '').trim()
+    const sid = (sessionId.value ?? '').trim()
+    if (!mid || !trimmed || !bid || !sid || !sessionSupportsTurnVariants(sid) || streaming.value || loadingMessages.value || activeChatReadOnly.value || isMessageActionLoading(sid)) {
+      return { ok: false, stage: 'startup' }
+    }
+    const target = messages.find((message): message is ChatUserTurn => message.role === 'user' && message.id === mid)
+    if (!target || target.__optimistic === true) return { ok: false, stage: 'startup' }
+    return runRewriteMessage({
+      botId: bid,
+      sessionId: sid,
+      sourceUserTurn: target,
+      optimisticUserTurn: cloneUserTurnForEdit(target, trimmed),
+      send(ws, streamId, modelId, reasoningEffort) {
+        ws.send({
+          type: 'edit_message',
+          stream_id: streamId,
+          session_id: sid,
+          ...baseHeadPayload(sid),
+          edit_message_id: mid,
+          text: trimmed,
+          model_id: modelId,
+          reasoning_effort: reasoningEffort,
+        })
+      },
+    })
+  }
+
   async function sendMessage(text: string, attachments?: ChatAttachment[]): Promise<SendMessageResult> {
     const trimmed = text.trim()
     if (!trimmed && !attachments?.length) return { ok: false, stage: 'startup' }
@@ -3151,7 +4011,8 @@ export const useChatStore = defineStore('chat', () => {
     if (newCommand.kind === 'error') {
       return { ok: false, stage: 'startup', error: newCommand.message, restoreInput: text, restoreAttachments: attachments }
     }
-    if (streaming.value || loadingMessages.value || !currentBotId.value) return { ok: false, stage: 'startup' }
+    if (streaming.value || loadingMessages.value || isMessageActionLoading(sessionId.value)) return { ok: false, stage: 'startup' }
+    if (!currentBotId.value) return { ok: false, stage: 'startup' }
 
     loading.value = true
     let assistantTurn: ChatAssistantTurn | null = null
@@ -3186,21 +4047,28 @@ export const useChatStore = defineStore('chat', () => {
         if (!ws.connected) {
           throw new StreamFailureError('WebSocket is not connected', 'startup')
         }
-        const completion = trackAssistantStream(sendStreamId, assistantTurn, bid, sid)
+        const completion = trackAssistantStream(sendStreamId, assistantTurn, bid, sid, userTurn ? [userTurn] : [], { refreshOnEnd: false })
         ws.send({
           type: 'message',
           stream_id: sendStreamId,
           text: trimmed,
           session_id: sid,
+          ...baseHeadPayload(sid),
           attachments,
           model_id: modelId,
           reasoning_effort: reasoningEffort,
         })
         await completion
-        await refreshCurrentSession(bid, sid)
+        resetSelectedHeadForSession(sid)
+        await refreshCurrentSession(bid, sid, { useSelectedView: false })
       } else {
-        await sendLocalChannelMessage(bid, trimmed, attachments, { modelId, reasoningEffort })
-        await refreshCurrentSession(bid, sid)
+        await sendLocalChannelMessage(bid, trimmed, attachments, {
+          modelId,
+          reasoningEffort,
+          baseHeadTurnId: baseHeadForRequest(sid),
+        })
+        resetSelectedHeadForSession(sid)
+        await refreshCurrentSession(bid, sid, { useSelectedView: false })
       }
 
       assistantTurn.streaming = false
@@ -3238,6 +4106,7 @@ export const useChatStore = defineStore('chat', () => {
     const sid = sessionId.value ?? ''
     const approvalId = approval.approval_id?.trim()
     if (!bid || !sid || !approvalId) return false
+    if (variantSelectionLoading.value) return false
     if (approval.status !== 'pending' || approval.can_approve === false) return false
     if (hasPendingApprovalResponse(approvalId)) return false
     const ws = ensureWebSocket(bid)
@@ -3248,10 +4117,8 @@ export const useChatStore = defineStore('chat', () => {
     const streamId = createStreamId()
     const silent = isSessionStreaming(sid)
     approvalResponseStreams.set(streamId, { approvalId, silent, at: Date.now() })
-    const previousApprovalStates = snapshotToolApprovalStates(approvalId)
-    let assistantTurn: ChatAssistantTurn | null = null
     if (!silent) {
-      assistantTurn = createOptimisticAssistantTurn()
+      const assistantTurn = createOptimisticAssistantTurn()
       messages.push(assistantTurn)
       void trackAssistantStream(streamId, assistantTurn, bid, sid).catch((error: Error) => {
         finalizeStreamFailure(assistantTurn, bid, sid, error)
@@ -3266,22 +4133,20 @@ export const useChatStore = defineStore('chat', () => {
         type: 'tool_approval_response',
         stream_id: streamId,
         session_id: sid,
+        ...baseHeadPayload(sid),
         approval_id: approvalId,
         short_id: approval.short_id,
         decision,
       })
     } catch (error) {
-      restoreToolApprovalStates(previousApprovalStates)
       approvalResponseStreams.delete(streamId)
-      if (!silent) {
-        forgetAssistantStream(streamId)
-        if (assistantTurn) {
-          const idx = messages.indexOf(assistantTurn)
-          if (idx >= 0) messages.splice(idx, 1)
-        }
-      }
-      loading.value = false
-      toast.error(resolveApiErrorMessage(error, 'Failed to send tool approval response.'))
+      markToolApprovalDecision(approvalId, 'pending')
+      pruneEmptyAssistantTurnIfPending(streamId)
+      resolveAssistantStream(streamId)
+      loading.value = isSessionStreaming(sessionId.value)
+      toast.error(error instanceof Error && error.message.trim()
+        ? error.message
+        : userInputConnectionLostMessage())
       return false
     }
     return true
@@ -3294,6 +4159,7 @@ export const useChatStore = defineStore('chat', () => {
     const bid = currentBotId.value ?? ''
     const sid = sessionId.value ?? ''
     if (!bid || !sid || !userInput.user_input_id) return
+    if (variantSelectionLoading.value) return false
     const ws = ensureWebSocket(bid)
     if (!ws?.connected) {
       toast.error(userInputConnectionLostMessage())
@@ -3337,6 +4203,7 @@ export const useChatStore = defineStore('chat', () => {
         type: 'user_input_response',
         stream_id: streamId,
         session_id: sid,
+        ...baseHeadPayload(sid),
         user_input_id: userInput.user_input_id,
         short_id: userInput.short_id,
         answers: payload.answers,
@@ -3345,17 +4212,20 @@ export const useChatStore = defineStore('chat', () => {
       })
     } catch (error) {
       restoreUserInputStates(previousUserInputStates)
-      forgetAssistantStream(streamId)
-      const idx = messages.indexOf(assistantTurn)
-      if (idx >= 0) messages.splice(idx, 1)
-      loading.value = false
-      toast.error(resolveApiErrorMessage(error, 'Failed to send user input response.'))
+      pruneEmptyAssistantTurnIfPending(streamId)
+      resolveAssistantStream(streamId)
+      loading.value = isSessionStreaming(sessionId.value)
+      toast.error(error instanceof Error && error.message.trim()
+        ? error.message
+        : userInputConnectionLostMessage())
     }
   }
 
   function clearMessages() {
     abort()
+    cancelVariantSelectionLoad()
     replaceMessages([])
+    clearSessionTurnGraph()
     hasMoreOlder.value = false
     hasLoadedOlder.value = false
   }
@@ -3367,6 +4237,7 @@ export const useChatStore = defineStore('chat', () => {
     messages,
     streaming,
     streamingSessionId,
+    messageActionLoading,
     sessions,
     sessionsCursor,
     hasMoreSessions,
@@ -3387,6 +4258,7 @@ export const useChatStore = defineStore('chat', () => {
     currentBotId,
     bots,
     activeSession,
+    activeSessionSupportsTurnVariants,
     activeChatTarget,
     activeChatReadOnly,
     knownSessions,
@@ -3437,6 +4309,12 @@ export const useChatStore = defineStore('chat', () => {
     removeChat: removeSession,
     deleteChat: removeSession,
     renameSession,
+    forkMessage,
+    retryMessage,
+    editMessage,
+    requestVariantStateForMessage,
+    responseVariantStateForMessage,
+    selectTurnVariant,
     sendMessage,
     respondToolApproval,
     respondUserInput,

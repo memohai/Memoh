@@ -421,7 +421,7 @@ func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req convers
 		return req
 	}
 	senderChannelIdentityID, senderUserID := r.resolvePersistSenderIDs(ctx, req)
-	_, err = r.messageService.Persist(ctx, messagepkg.PersistInput{
+	persisted, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
 		BotID:                   req.BotID,
 		SessionID:               req.SessionID,
 		SenderChannelIdentityID: senderChannelIdentityID,
@@ -443,11 +443,16 @@ func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req convers
 		return req
 	}
 	req.UserMessagePersisted = true
+	req.PersistTurnID = strings.TrimSpace(persisted.TurnID)
 	return req
 }
 
 func (r *Resolver) persistACPDecisionProjection(ctx context.Context, req conversation.ChatRequest, ev agentpkg.StreamEvent) bool {
 	if r == nil || r.messageService == nil || strings.TrimSpace(req.BotID) == "" || strings.TrimSpace(req.SessionID) == "" {
+		return false
+	}
+	persistTurnID := strings.TrimSpace(req.PersistTurnID)
+	if persistTurnID == "" {
 		return false
 	}
 	output := sdkMessagesToModelMessages(acpclient.TranscriptFromEvents([]event.StreamEvent{ev}, ""))
@@ -465,6 +470,7 @@ func (r *Resolver) persistACPDecisionProjection(ctx context.Context, req convers
 		if _, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
 			BotID:                   req.BotID,
 			SessionID:               req.SessionID,
+			TurnID:                  persistTurnID,
 			SenderChannelIdentityID: "",
 			Role:                    "assistant",
 			Content:                 content,
@@ -588,7 +594,11 @@ func (r *Resolver) persistACPRound(ctx context.Context, req conversation.ChatReq
 		}
 	}
 	skipMemory := promptErr != nil || req.UserMessagePersisted || req.SkipMemoryExtraction
-	err := r.storeRoundWithOptions(ctx, req, round, "", storeRoundOptions{
+	run := legacyTurnRun(req)
+	if req.UserMessagePersisted && strings.TrimSpace(req.PersistTurnID) != "" {
+		run = continuationTurnRun(req.SessionID, req.PersistTurnID)
+	}
+	err := r.storeRoundWithOptions(ctx, req, &run, round, "", storeRoundOptions{
 		SkipMemory:              skipMemory,
 		AllowEmptyAssistantText: true,
 		MessageMetadataByIndex:  metadataByIndex,

@@ -29,9 +29,14 @@ type SessionLister interface {
 // HistoryMessageReader is the minimal interface for reading persisted messages.
 type HistoryMessageReader interface {
 	ListLatest(ctx context.Context, botID string, limit int32) ([]messagepkg.Message, error)
-	ListBefore(ctx context.Context, botID string, before time.Time, limit int32) ([]messagepkg.Message, error)
+	ListBefore(ctx context.Context, botID string, before time.Time, beforeID string, limit int32) ([]messagepkg.Message, error)
 	ListLatestBySession(ctx context.Context, sessionID string, limit int32) ([]messagepkg.Message, error)
-	ListBeforeBySession(ctx context.Context, sessionID string, before time.Time, limit int32) ([]messagepkg.Message, error)
+	ListBeforeBySession(ctx context.Context, sessionID string, before time.Time, beforeID string, limit int32) ([]messagepkg.Message, error)
+}
+
+type historySessionHeadPager interface {
+	ListLatestBySessionHead(ctx context.Context, sessionID string, headTurnID string, limit int32) ([]messagepkg.Message, error)
+	ListBeforeBySessionHead(ctx context.Context, sessionID string, headTurnID string, before time.Time, beforeID string, limit int32) ([]messagepkg.Message, error)
 }
 
 // HistoryProvider exposes list_sessions, get_messages, and search_messages tools.
@@ -294,20 +299,45 @@ func (p *HistoryProvider) execGetMessages(ctx context.Context, sess SessionConte
 		err      error
 		before   time.Time
 	)
-	if rawBefore := StringArg(args, "before"); rawBefore != "" {
+	currentSessionID := strings.TrimSpace(sess.SessionID)
+	selectedHeadTurnID := strings.TrimSpace(sess.ViewHeadTurnID)
+	readSelectedHead := sessionID != "" && sessionID == currentSessionID && selectedHeadTurnID != ""
+
+	switch rawBefore := StringArg(args, "before"); {
+	case rawBefore != "":
 		before, err = parseFlexibleTime(rawBefore)
 		if err != nil {
 			return nil, err
 		}
-		if sessionID != "" {
-			messages, err = p.messages.ListBeforeBySession(ctx, sessionID, before, limit)
-		} else {
-			messages, err = p.messages.ListBefore(ctx, botID, before, limit)
+		switch {
+		case readSelectedHead:
+			pager, ok := p.messages.(historySessionHeadPager)
+			if !ok {
+				return nil, errors.New("selected session head history is not supported")
+			}
+			messages, err = pager.ListBeforeBySessionHead(ctx, sessionID, selectedHeadTurnID, before, "", limit)
+		case sessionID != "":
+			// Cross-session agent tool reads do not carry another client's
+			// transient selected-head state, so they intentionally follow the
+			// server-canonical default head.
+			messages, err = p.messages.ListBeforeBySession(ctx, sessionID, before, "", limit)
+		default:
+			messages, err = p.messages.ListBefore(ctx, botID, before, "", limit)
 		}
-	} else if sessionID != "" {
+	case readSelectedHead:
+		pager, ok := p.messages.(historySessionHeadPager)
+		if !ok {
+			return nil, errors.New("selected session head history is not supported")
+		}
+		messages, err = pager.ListLatestBySessionHead(ctx, sessionID, selectedHeadTurnID, limit)
+		reverseHistoryMessages(messages)
+	case sessionID != "":
+		// Cross-session agent tool reads do not carry another client's transient
+		// selected-head state, so they intentionally follow the server-canonical
+		// default head.
 		messages, err = p.messages.ListLatestBySession(ctx, sessionID, limit)
 		reverseHistoryMessages(messages)
-	} else {
+	default:
 		messages, err = p.messages.ListLatest(ctx, botID, limit)
 		reverseHistoryMessages(messages)
 	}

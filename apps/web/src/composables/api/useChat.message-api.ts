@@ -1,46 +1,25 @@
 import { client } from '@memohai/sdk/client'
 import {
-  getBotsByBotIdMessages,
   getBotsByBotIdMessagesLocate,
   getBotsByBotIdSessionsBySessionIdMessagesEvents,
   getBotsByBotIdSessionsEvents,
-  postBotsByBotIdLocalMessages,
+  postBotsByBotIdWebMessages,
 } from '@memohai/sdk'
 import type { ChannelAttachment, ChannelMessage } from '@memohai/sdk'
 import type {
   BotSessionActivityEvent,
   ChatAttachment,
   FetchMessagesOptions,
-  Message,
+  FetchMessagesUIResult,
   SessionMessageStreamEvent,
   UITurn,
 } from './useChat.types'
-
-export async function fetchMessages(
-  botId: string,
-  sessionId: string,
-  options?: FetchMessagesOptions,
-): Promise<Message[]> {
-  const sid = sessionId.trim()
-  if (!sid) throw new Error('session id is required')
-  const { data } = await getBotsByBotIdMessages({
-    path: { bot_id: botId },
-    query: {
-      session_id: sid,
-      limit: options?.limit ?? 30,
-      ...(options?.before?.trim() ? { before: options.before.trim() } : {}),
-    },
-    throwOnError: true,
-  })
-
-  return (data as unknown as { items?: Message[] })?.items ?? []
-}
 
 export async function fetchMessagesUI(
   botId: string,
   sessionId: string,
   options?: FetchMessagesOptions,
-): Promise<UITurn[]> {
+): Promise<FetchMessagesUIResult> {
   const sid = sessionId.trim()
   if (!sid) throw new Error('session id is required')
   const response = await client.get({
@@ -48,14 +27,24 @@ export async function fetchMessagesUI(
     path: { bot_id: botId },
     query: {
       session_id: sid,
-      limit: options?.limit ?? 30,
       format: 'ui',
+      limit: options?.limit ?? 30,
+      ...(options?.includeGraph ? { include_graph: '1' } : {}),
+      ...(options?.headTurnId?.trim() ? { head_turn_id: options.headTurnId.trim() } : {}),
       ...(options?.before?.trim() ? { before: options.before.trim() } : {}),
+      ...(options?.beforeId?.trim() ? { before_id: options.beforeId.trim() } : {}),
     },
     throwOnError: true,
   })
 
-  return (response.data as { items?: UITurn[] } | undefined)?.items ?? []
+  const data = response.data as FetchMessagesUIResult | undefined
+  const result: FetchMessagesUIResult = {
+    items: data?.items ?? [],
+  }
+  if (data && 'default_head_turn_id' in data) result.default_head_turn_id = data.default_head_turn_id
+  if (data && 'head_turn_ids' in data) result.head_turn_ids = data.head_turn_ids ?? []
+  if (data && 'nodes' in data) result.nodes = data.nodes ?? []
+  return result
 }
 
 export interface LocateMessageResult {
@@ -70,6 +59,7 @@ export async function locateMessageUI(
   externalMessageId: string,
   before = 30,
   after = 30,
+  options?: { headTurnId?: string },
 ): Promise<LocateMessageResult> {
   const response = await getBotsByBotIdMessagesLocate({
     path: { bot_id: botId },
@@ -78,6 +68,7 @@ export async function locateMessageUI(
       external_message_id: externalMessageId,
       before,
       after,
+      ...(options?.headTurnId?.trim() ? { head_turn_id: options.headTurnId.trim() } : {}),
     },
     throwOnError: true,
   })
@@ -93,6 +84,7 @@ export async function locateMessageUI(
 export interface SendMessageOverrides {
   modelId?: string
   reasoningEffort?: string
+  baseHeadTurnId?: string
 }
 
 export async function sendLocalChannelMessage(
@@ -117,9 +109,10 @@ export async function sendLocalChannelMessage(
   const body: Record<string, unknown> = { message: msg }
   if (overrides?.modelId) body.model_id = overrides.modelId
   if (overrides?.reasoningEffort) body.reasoning_effort = overrides.reasoningEffort
-  await postBotsByBotIdLocalMessages({
+  if (overrides?.baseHeadTurnId) body.base_head_turn_id = overrides.baseHeadTurnId
+  await postBotsByBotIdWebMessages({
     path: { bot_id: botId },
-    body: body as { message: ChannelMessage; model_id?: string; reasoning_effort?: string },
+    body: body as { message: ChannelMessage; model_id?: string; reasoning_effort?: string; base_head_turn_id?: string },
     throwOnError: true,
   })
 }
@@ -148,6 +141,7 @@ export async function streamSessionMessageEvents(
   sessionId: string,
   signal: AbortSignal,
   onEvent: (event: SessionMessageStreamEvent) => void,
+  headTurnId?: string,
 ): Promise<void> {
   const bid = botId.trim()
   const sid = sessionId.trim()
@@ -156,6 +150,9 @@ export async function streamSessionMessageEvents(
 
   const { stream } = await getBotsByBotIdSessionsBySessionIdMessagesEvents({
     path: { bot_id: bid, session_id: sid },
+    query: {
+      ...(headTurnId?.trim() ? { head_turn_id: headTurnId.trim() } : {}),
+    },
     signal,
     // The SDK's built-in reconnect would race the store's per-session
     // lifecycle; we drive retries from the caller via useRetryingStream.

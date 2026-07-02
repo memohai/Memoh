@@ -3,6 +3,8 @@ package flow
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -27,17 +29,28 @@ type messageWithUsage struct {
 	CompactID         string
 }
 
-func (r *Resolver) loadMessages(ctx context.Context, chatID string, sessionID string, maxContextMinutes int) ([]messageWithUsage, error) {
+func (r *Resolver) loadMessagesForTurnRun(ctx context.Context, req conversation.ChatRequest, run TurnRun, maxContextMinutes int) ([]messageWithUsage, error) {
 	if r.messageService == nil {
 		return nil, nil
 	}
 	since := time.Now().UTC().Add(-time.Duration(maxContextMinutes) * time.Minute)
 	var msgs []messagepkg.Message
 	var err error
-	if strings.TrimSpace(sessionID) != "" {
-		msgs, err = r.messageService.ListActiveSinceBySession(ctx, sessionID, since)
-	} else {
-		msgs, err = r.messageService.ListActiveSince(ctx, chatID, since)
+	switch run.Context.Kind {
+	case ContextScopeEmpty:
+		return nil, nil
+	case ContextScopeTurnHead:
+		headTurnID := strings.TrimSpace(run.Context.TurnID)
+		if headTurnID == "" {
+			return nil, errors.New("turn context requires turn id")
+		}
+		msgs, err = r.messageService.ListActiveSinceByTurn(ctx, headTurnID, since)
+	case ContextScopeSessionHead:
+		msgs, err = r.messageService.ListActiveSinceBySession(ctx, req.SessionID, since)
+	case ContextScopeBotHistory:
+		msgs, err = r.messageService.ListActiveSince(ctx, req.ChatID, since)
+	default:
+		return nil, fmt.Errorf("unknown turn context scope %q", run.Context.Kind)
 	}
 	if err != nil {
 		return nil, err
@@ -47,7 +60,7 @@ func (r *Resolver) loadMessages(ctx context.Context, chatID string, sessionID st
 		var mm conversation.ModelMessage
 		if err := json.Unmarshal(m.Content, &mm); err != nil {
 			r.logger.Warn("loadMessages: content unmarshal failed, treating as raw text",
-				slog.String("chat_id", chatID), slog.Any("error", err))
+				slog.String("chat_id", req.ChatID), slog.Any("error", err))
 			mm = conversation.ModelMessage{Role: m.Role, Content: m.Content}
 		} else {
 			mm.Role = m.Role

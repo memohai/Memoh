@@ -86,7 +86,16 @@
                   :on-reply-click="handleReplyJump"
                   :is-scrolling="isScrolling"
                   :is-last-message="index === messages.length - 1"
+                  :show-message-actions="showMessageActions"
+                  :can-run-message-action="canRunMessageAction"
+                  :can-select-variant="canSelectVariant"
+                  :request-variant-state="chatStore.requestVariantStateForMessage(msg.id)"
+                  :response-variant-state="chatStore.responseVariantStateForMessage(msg.id)"
                   @active="isActiveEl"
+                  @edit-message="handleEditMessage"
+                  @fork-message="handleForkMessage"
+                  @retry-message="handleRetryMessage"
+                  @select-variant="handleSelectVariant"
                 />
               </div>
             </div>
@@ -439,7 +448,7 @@
                   v-model="inputText"
                   rows="1"
                   :placeholder="activeChatReadOnly ? $t('chat.readonlyHint') : $t('chat.inputPlaceholder')"
-                  :disabled="!currentBotId || activeChatReadOnly || loadingMessages"
+                  :disabled="!currentBotId || activeChatReadOnly || loadingMessages || messageActionLoading"
                   class="field-sizing-content resize-none break-words bg-transparent text-base leading-[var(--chat-leading)] text-foreground outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
                   :class="isMultiline
                     ? 'order-none w-full basis-full pl-2 pr-1 pt-2 pb-1.5 max-h-52'
@@ -513,7 +522,7 @@
                     <template v-if="!activeIsACP">
                       <DropdownMenuSeparator v-if="canChangeAgent && enabledACPProfiles.length" />
                       <DropdownMenuItem
-                        :disabled="!currentBotId || activeChatReadOnly || streaming || loadingMessages"
+                        :disabled="!currentBotId || activeChatReadOnly || streaming || loadingMessages || messageActionLoading"
                         @select="fileInput?.click()"
                       >
                         <Paperclip />
@@ -750,7 +759,7 @@
                     <Button
                       type="button"
                       variant="brand"
-                      :disabled="streaming ? false : (!showSend || !currentBotId || activeChatReadOnly || loadingMessages)"
+                      :disabled="streaming ? false : (!showSend || !currentBotId || activeChatReadOnly || loadingMessages || messageActionLoading)"
                       :aria-label="streaming ? 'Stop generating response' : 'Send message'"
                       class="absolute inset-0 size-9 rounded-full transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
                       :class="(sendButtonVisible || streaming) ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
@@ -1083,8 +1092,10 @@ const {
   currentBotId,
   bots,
   activeSession,
+  activeSessionSupportsTurnVariants,
   activeChatTarget,
   activeChatReadOnly,
+  messageActionLoading,
   loadingOlder,
   loadingChats,
   loadingMessages,
@@ -1099,6 +1110,24 @@ const {
 } = storeToRefs(chatStore)
 
 const isActive = computed(() => props.active !== false)
+const canRunMessageAction = computed(() =>
+  activeSessionSupportsTurnVariants.value
+  && !streaming.value
+  && !loadingMessages.value
+  && !activeChatReadOnly.value
+  && !messageActionLoading.value,
+)
+const canSelectVariant = computed(() =>
+  activeSessionSupportsTurnVariants.value
+  && !streaming.value
+  && !loadingMessages.value
+  && !messageActionLoading.value,
+)
+const showMessageActions = computed(() =>
+  activeSessionSupportsTurnVariants.value
+  && !streaming.value
+  && !activeChatReadOnly.value,
+)
 
 // A fresh, writable chat opens with the composer centred and a greeting above
 // it. Read-only sessions (subagent / system / synced channel threads) hide the
@@ -2447,6 +2476,26 @@ async function handleReplyJump(messageId: string) {
   }
 }
 
+function handleForkMessage(messageId: string) {
+  void chatStore.forkMessage(messageId)
+}
+
+function handleRetryMessage(messageId: string) {
+  void chatStore.retryMessage(messageId)
+}
+
+function handleSelectVariant(headTurnId: string) {
+  void chatStore.selectTurnVariant(headTurnId)
+}
+
+function handleEditMessage(messageId: string, text: string, done: (started: boolean) => void) {
+  void chatStore.editMessage(messageId, text).then((result) => {
+    done(result.ok || result.stage === 'stream')
+  }).catch(() => {
+    done(false)
+  })
+}
+
 function handleKeydown(e: KeyboardEvent) {
   if (e.isComposing || e.keyCode === 229) return
   e.preventDefault()
@@ -2611,7 +2660,7 @@ async function handleSend() {
   // isAutoScroll.value = true
   const text = inputText.value.trim()
   const files = [...pendingFiles.value]
-  if ((!text && !files.length) || streaming.value || loadingMessages.value || activeChatReadOnly.value) return
+  if ((!text && !files.length) || streaming.value || loadingMessages.value || activeChatReadOnly.value || messageActionLoading.value) return
   const isNewCommand = /^\/new(?:\s|$)/i.test(text)
   if (defaultACPComposerError.value && !hasExplicitSessionSelection.value && !isNewCommand) {
     composerError.value = defaultACPComposerError.value

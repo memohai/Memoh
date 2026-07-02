@@ -1824,6 +1824,8 @@ definitions:
         type: boolean
       decision_reason:
         type: string
+      persist_turn_id:
+        type: string
       short_id:
         type: integer
       status:
@@ -1865,11 +1867,15 @@ definitions:
         type: string
       timestamp:
         type: string
+      turn_id:
+        type: string
     type: object
   conversation.UIUserInput:
     properties:
       can_respond:
         type: boolean
+      persist_turn_id:
+        type: string
       questions:
         items:
           $ref: '#/definitions/userinput.UIQuestion'
@@ -2742,6 +2748,8 @@ definitions:
     type: object
   handlers.LocalChannelMessageRequest:
     properties:
+      base_head_turn_id:
+        type: string
       message:
         $ref: '#/definitions/channel.Message'
       model_id:
@@ -3091,7 +3099,11 @@ definitions:
     type: object
   handlers.ToolApprovalDecisionRequest:
     properties:
+      base_head_turn_id:
+        type: string
       reason:
+        type: string
+      session_id:
         type: string
     type: object
   handlers.TriggerCompactResponse:
@@ -3248,6 +3260,15 @@ definitions:
       provider:
         type: string
     type: object
+  handlers.forkSessionRequest:
+    properties:
+      base_head_turn_id:
+        type: string
+      message_id:
+        type: string
+    required:
+    - message_id
+    type: object
   handlers.fsOpResponse:
     properties:
       ok:
@@ -3321,6 +3342,23 @@ definitions:
           type: string
         type: array
     type: object
+  handlers.messageUIListResponse:
+    properties:
+      default_head_turn_id:
+        type: string
+      head_turn_ids:
+        items:
+          type: string
+        type: array
+      items:
+        items:
+          $ref: '#/definitions/conversation.UITurn'
+        type: array
+      nodes:
+        items:
+          $ref: '#/definitions/handlers.sessionTurnGraphUINode'
+        type: array
+    type: object
   handlers.oauthAuthorizeRequest:
     properties:
       callback_url:
@@ -3340,6 +3378,21 @@ definitions:
       code:
         type: string
       state:
+        type: string
+    type: object
+  handlers.sessionTurnGraphUINode:
+    properties:
+      has_assistant:
+        type: boolean
+      has_user:
+        type: boolean
+      parent_turn_id:
+        type: string
+      request_key:
+        type: string
+      timestamp:
+        type: string
+      turn_id:
         type: string
     type: object
   handlers.skillsOpResponse:
@@ -3592,78 +3645,6 @@ definitions:
       transport:
         type: string
       url:
-        type: string
-    type: object
-  message.Message:
-    properties:
-      assets:
-        items:
-          $ref: '#/definitions/message.MessageAsset'
-        type: array
-      bot_id:
-        type: string
-      compact_id:
-        type: string
-      content:
-        items:
-          type: integer
-        type: array
-      created_at:
-        type: string
-      display_content:
-        type: string
-      event_id:
-        type: string
-      external_message_id:
-        type: string
-      id:
-        type: string
-      metadata:
-        additionalProperties: {}
-        type: object
-      platform:
-        type: string
-      role:
-        type: string
-      runtime_type:
-        type: string
-      sender_avatar_url:
-        type: string
-      sender_channel_identity_id:
-        type: string
-      sender_display_name:
-        type: string
-      sender_user_id:
-        type: string
-      session_id:
-        type: string
-      session_mode:
-        type: string
-      source_reply_to_message_id:
-        type: string
-      usage:
-        items:
-          type: integer
-        type: array
-    type: object
-  message.MessageAsset:
-    properties:
-      content_hash:
-        type: string
-      metadata:
-        additionalProperties: {}
-        type: object
-      mime:
-        type: string
-      name:
-        type: string
-      ordinal:
-        type: integer
-      role:
-        type: string
-      size_bytes:
-        type: integer
-      storage_key:
         type: string
     type: object
   models.AddRequest:
@@ -4369,6 +4350,12 @@ definitions:
       created_at:
         type: string
       created_by_user_id:
+        type: string
+      default_head_turn_id:
+        type: string
+      forked_from_session_id:
+        type: string
+      forked_from_turn_id:
         type: string
       id:
         type: string
@@ -7157,110 +7144,6 @@ paths:
       summary: Run bot hooks for a synthetic event
       tags:
       - hooks
-  /bots/{bot_id}/local/messages:
-    post:
-      consumes:
-      - application/json
-      description: Post a user message (with optional attachments) through the local
-        channel pipeline.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Message payload
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.LocalChannelMessageRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Send a message to a local channel
-      tags:
-      - local-channel
-  /bots/{bot_id}/local/stream:
-    get:
-      description: Open a persistent SSE connection to receive real-time stream events
-        for the given bot.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      produces:
-      - text/event-stream
-      responses:
-        "200":
-          description: SSE stream
-          schema:
-            type: string
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Subscribe to local channel events via SSE
-      tags:
-      - local-channel
-  /bots/{bot_id}/local/ws:
-    get:
-      description: Upgrade to WebSocket for bidirectional chat streaming with abort
-        support.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      responses:
-        "101":
-          description: Switching Protocols
-          schema:
-            type: string
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: WebSocket chat endpoint
-      tags:
-      - local-channel
   /bots/{bot_id}/mcp:
     get:
       description: List MCP connections for a bot
@@ -8180,21 +8063,25 @@ paths:
         in: query
         name: before
         type: string
-      - description: 'Response format: ui returns normalized chat UI turns'
+      - description: Message ID at the pagination boundary
         in: query
-        name: format
+        name: before_id
         type: string
+      - description: Selected session head turn ID
+        in: query
+        name: head_turn_id
+        type: string
+      - description: Include session turn graph metadata
+        in: query
+        name: include_graph
+        type: boolean
       produces:
       - application/json
       responses:
         "200":
-          description: when format=ui
+          description: OK
           schema:
-            additionalProperties:
-              items:
-                $ref: '#/definitions/conversation.UITurn'
-              type: array
-            type: object
+            $ref: '#/definitions/handlers.messageUIListResponse'
         "400":
           description: Bad Request
           schema:
@@ -8242,6 +8129,10 @@ paths:
         in: query
         name: after
         type: integer
+      - description: Selected session head turn ID
+        in: query
+        name: head_turn_id
+        type: string
       produces:
       - application/json
       responses:
@@ -9057,6 +8948,49 @@ paths:
       summary: Trigger immediate context compaction
       tags:
       - compaction
+  /bots/{bot_id}/sessions/{session_id}/fork:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Source session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Fork source message
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.forkSessionRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/session.Session'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Fork a chat session from an assistant reply
+      tags:
+      - sessions
   /bots/{bot_id}/sessions/{session_id}/messages/events:
     get:
       description: |-
@@ -9073,6 +9007,10 @@ paths:
         in: path
         name: session_id
         required: true
+        type: string
+      - description: Selected session head turn ID
+        in: query
+        name: head_turn_id
         type: string
       produces:
       - text/event-stream
@@ -9797,6 +9735,110 @@ paths:
       summary: List grantable workspace members
       tags:
       - bots
+  /bots/{bot_id}/web/messages:
+    post:
+      consumes:
+      - application/json
+      description: Post a user message (with optional attachments) through the local
+        channel pipeline.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Message payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.LocalChannelMessageRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Send a message to a local channel
+      tags:
+      - local-channel
+  /bots/{bot_id}/web/stream:
+    get:
+      description: Open a persistent SSE connection to receive real-time stream events
+        for the given bot.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Subscribe to local channel events via SSE
+      tags:
+      - local-channel
+  /bots/{bot_id}/web/ws:
+    get:
+      description: Upgrade to WebSocket for bidirectional chat streaming with abort
+        support.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "101":
+          description: Switching Protocols
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: WebSocket chat endpoint
+      tags:
+      - local-channel
   /bots/{id}:
     delete:
       description: Delete a bot user (owner/admin only)

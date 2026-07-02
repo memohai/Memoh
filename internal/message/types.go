@@ -24,6 +24,8 @@ type Message struct {
 	ID                      string          `json:"id"`
 	BotID                   string          `json:"bot_id"`
 	SessionID               string          `json:"session_id,omitempty"`
+	TurnID                  string          `json:"turn_id,omitempty"`
+	TurnMessageSeq          int64           `json:"turn_message_seq,omitempty"`
 	SenderChannelIdentityID string          `json:"sender_channel_identity_id,omitempty"`
 	SenderUserID            string          `json:"sender_user_id,omitempty"`
 	SenderDisplayName       string          `json:"sender_display_name,omitempty"`
@@ -61,6 +63,8 @@ type AssetRef struct {
 type PersistInput struct {
 	BotID                   string
 	SessionID               string
+	TurnID                  string
+	TurnMessageSeq          int64
 	SenderChannelIdentityID string
 	SenderUserID            string
 	ExternalMessageID       string
@@ -82,6 +86,21 @@ type LocateResult struct {
 	TargetID string
 }
 
+type SessionTurnGraphNode struct {
+	TurnID       string `json:"turn_id"`
+	ParentTurnID string `json:"parent_turn_id,omitempty"`
+	Timestamp    string `json:"timestamp,omitempty"`
+	RequestKey   string `json:"request_key,omitempty"`
+	HasUser      bool   `json:"has_user,omitempty"`
+	HasAssistant bool   `json:"has_assistant,omitempty"`
+}
+
+type SessionTurnGraph struct {
+	DefaultHeadTurnID string                 `json:"default_head_turn_id,omitempty"`
+	HeadTurnIDs       []string               `json:"head_turn_ids"`
+	Nodes             []SessionTurnGraphNode `json:"nodes"`
+}
+
 // Writer defines write behavior needed by the inbound router.
 type Writer interface {
 	Persist(ctx context.Context, input PersistInput) (Message, error)
@@ -94,14 +113,30 @@ type Service interface {
 	ListSince(ctx context.Context, botID string, since time.Time) ([]Message, error)
 	ListActiveSince(ctx context.Context, botID string, since time.Time) ([]Message, error)
 	ListLatest(ctx context.Context, botID string, limit int32) ([]Message, error)
-	ListBefore(ctx context.Context, botID string, before time.Time, limit int32) ([]Message, error)
+	ListBefore(ctx context.Context, botID string, before time.Time, beforeID string, limit int32) ([]Message, error)
 	ListBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
 	ListActiveSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
+	ListActiveSinceByTurn(ctx context.Context, headTurnID string, since time.Time) ([]Message, error)
 	ListLatestBySession(ctx context.Context, sessionID string, limit int32) ([]Message, error)
-	ListBeforeBySession(ctx context.Context, sessionID string, before time.Time, limit int32) ([]Message, error)
+	ListBeforeBySession(ctx context.Context, sessionID string, before time.Time, beforeID string, limit int32) ([]Message, error)
+	GetSessionTurnGraph(ctx context.Context, sessionID string) (SessionTurnGraph, error)
 	LocateByExternalIDBySession(ctx context.Context, sessionID string, externalMessageID string, beforeLimit int32, afterLimit int32) (LocateResult, error)
 	DeleteByBot(ctx context.Context, botID string) error
 	DeleteBySession(ctx context.Context, sessionID string) error
 	LinkAssets(ctx context.Context, messageID string, assets []AssetRef) error
+}
+
+// SessionHeadPager reads a session transcript from an explicitly selected leaf
+// head. The ordinary Service methods intentionally keep the server default head
+// contract for older tools and maintenance paths.
+type SessionHeadPager interface {
+	ListLatestBySessionHead(ctx context.Context, sessionID string, headTurnID string, limit int32) ([]Message, error)
+	ListBeforeBySessionHead(ctx context.Context, sessionID string, headTurnID string, before time.Time, beforeID string, limit int32) ([]Message, error)
+}
+
+// SessionHeadLocator locates a message inside an explicitly selected session
+// leaf head. Empty headTurnID keeps the server default-head view.
+type SessionHeadLocator interface {
+	LocateByExternalIDBySessionHead(ctx context.Context, sessionID string, headTurnID string, externalMessageID string, beforeLimit int32, afterLimit int32) (LocateResult, error)
 }
