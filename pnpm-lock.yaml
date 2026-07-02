@@ -121,12 +121,21 @@ importers:
       markstream-vue:
         specifier: 1.0.1-beta.5
         version: 1.0.1-beta.5(katex@0.16.37)(mermaid@11.12.3)(stream-markdown@0.0.15(react@19.2.7)(shiki@3.23.0)(vue@3.5.26(typescript@5.9.3)))(stream-monaco@0.0.41(monaco-editor@0.52.2))(vue-i18n@11.2.8(vue@3.5.26(typescript@5.9.3)))(vue@3.5.26(typescript@5.9.3))
+      monaco-editor:
+        specifier: ^0.52.2
+        version: 0.52.2
       pinia:
         specifier: ^3.0.4
         version: 3.0.4(typescript@5.9.3)(vue@3.5.26(typescript@5.9.3))
       pinia-plugin-persistedstate:
         specifier: ^4.7.1
         version: 4.7.1(pinia@3.0.4(typescript@5.9.3)(vue@3.5.26(typescript@5.9.3)))
+      shiki:
+        specifier: ^3.23.0
+        version: 3.23.0
+      stream-monaco:
+        specifier: ^0.0.41
+        version: 0.0.41(monaco-editor@0.52.2)
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
