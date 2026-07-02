@@ -365,14 +365,19 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		if contextTokenBudget > 0 {
 			compactionThreshold = contextTokenBudget * 70 / 100
 		}
-		if compactionThreshold > 0 && estimatedTokens >= compactionThreshold {
+		// The trigger only counts raw (compactable) rows: active summaries can
+		// never be compacted away, so including them would make the trigger
+		// self-sustaining once accumulated summaries cross the threshold.
+		compactableTokens := totalCompactableHistoryTokens(loaded)
+		if compactionThreshold > 0 && compactableTokens >= compactionThreshold {
 			r.logger.Warn("resolve: context reached compaction threshold, running synchronous compaction",
 				slog.String("bot_id", req.BotID),
 				slog.Int("estimated_tokens", estimatedTokens),
+				slog.Int("compactable_tokens", compactableTokens),
 				slog.Int("context_token_budget", contextTokenBudget),
 				slog.Int("compaction_threshold", compactionThreshold),
 			)
-			r.runCompactionSync(ctx, req, estimatedTokens)
+			r.runCompactionSync(ctx, req, compactableTokens)
 			// Reload messages after compaction.
 			loaded, loadErr = r.loadHistoryRecords(ctx, historyFallback, req.SessionID, defaultMaxContextMinutes)
 			if loadErr != nil {

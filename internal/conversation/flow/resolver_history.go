@@ -133,6 +133,21 @@ func trimMessagesByTokens(log *slog.Logger, messages []historyfrag.HistoryRecord
 	return trimmed, totalTokens
 }
 
+// totalCompactableHistoryTokens estimates the tokens held by raw history rows
+// only. Active summaries are excluded: compaction can never shrink them, so
+// counting them toward the compaction trigger would re-fire it on every
+// request once accumulated summaries alone cross the threshold.
+func totalCompactableHistoryTokens(records []historyfrag.HistoryRecord) int {
+	total := 0
+	for _, record := range records {
+		if record.Kind == contextfrag.KindConversationSummary || record.Lifecycle == historyfrag.LifecycleActiveSummary {
+			continue
+		}
+		total += estimateMessageTokens(record.ModelMessage)
+	}
+	return total
+}
+
 func trimMessagesAndRecordsByTokens(log *slog.Logger, messages []historyfrag.HistoryRecord, maxTokens int) ([]conversation.ModelMessage, []historyfrag.HistoryRecord, int) {
 	if maxTokens == 0 || len(messages) == 0 {
 		totalTokens := 0
@@ -234,12 +249,58 @@ func sameModelMessage(a conversation.ModelMessage, b conversation.ModelMessage) 
 }
 
 func (r *Resolver) replaceCompactedMessages(ctx context.Context, sessionID string, scope contextfrag.Scope, messages []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
-	messages = r.replaceRecentCompactedMessages(ctx, messages)
-	sessionSummaries := r.loadSessionCompactionSummaries(ctx, sessionID, scope)
+	if r.queries == nil {
+		return messages
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		// Sessionless (chat-scoped) loads have no session log list to draw from;
+		// resolve each in-window compact group individually.
+		return r.replaceRecentCompactedMessages(ctx, messages)
+	}
+	logs := r.listSessionCompactionLogs(ctx, sessionID)
+	if len(logs) == 0 {
+		return messages
+	}
+	summaries := make(map[string]string, len(logs))
+	for _, log := range logs {
+		if log.Status != "ok" || strings.TrimSpace(log.Summary) == "" {
+			continue
+		}
+		if id := pgUUIDString(log.ID); id != "" {
+			summaries[id] = log.Summary
+		}
+	}
+	messages = replaceCompactedHistoryRecords(messages, summaries)
+	sessionSummaries := r.summaryRecordsFromCompactionLogs(ctx, missingCompactionLogs(messages, logs), scope)
 	if len(sessionSummaries) == 0 {
 		return messages
 	}
 	return prependMissingCompactionSummaries(messages, sessionSummaries)
+}
+
+// missingCompactionLogs filters the session logs down to those not already
+// represented in the loaded records, so covered-ref lookups only run for
+// summaries whose raw rows aged out of the load window.
+func missingCompactionLogs(messages []historyfrag.HistoryRecord, logs []sqlc.BotHistoryMessageCompact) []sqlc.BotHistoryMessageCompact {
+	seen := make(map[string]struct{}, len(messages))
+	for _, record := range messages {
+		if id := strings.TrimSpace(record.CompactID); id != "" {
+			seen[id] = struct{}{}
+		}
+		if record.SourceKind == historyfrag.SourceCompactionLog {
+			if id := strings.TrimSpace(record.Ref.ID); id != "" {
+				seen[id] = struct{}{}
+			}
+		}
+	}
+	missing := make([]sqlc.BotHistoryMessageCompact, 0, len(logs))
+	for _, log := range logs {
+		if _, ok := seen[pgUUIDString(log.ID)]; ok {
+			continue
+		}
+		missing = append(missing, log)
+	}
+	return missing
 }
 
 func (r *Resolver) replaceRecentCompactedMessages(ctx context.Context, messages []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
@@ -276,25 +337,22 @@ func (r *Resolver) replaceRecentCompactedMessages(ctx context.Context, messages 
 	return replaceCompactedHistoryRecords(messages, summaries)
 }
 
-func (r *Resolver) loadSessionCompactionSummaries(ctx context.Context, sessionID string, scope contextfrag.Scope) []historyfrag.HistoryRecord {
-	if r.queries == nil || strings.TrimSpace(sessionID) == "" {
-		return nil
-	}
+func (r *Resolver) listSessionCompactionLogs(ctx context.Context, sessionID string) []sqlc.BotHistoryMessageCompact {
 	sessionUUID, err := db.ParseUUID(sessionID)
 	if err != nil {
 		if r.logger != nil {
-			r.logger.Warn("loadSessionCompactionSummaries: invalid session id", slog.String("session_id", sessionID), slog.Any("error", err))
+			r.logger.Warn("listSessionCompactionLogs: invalid session id", slog.String("session_id", sessionID), slog.Any("error", err))
 		}
 		return nil
 	}
 	logs, err := r.queries.ListCompactionLogsBySession(ctx, sessionUUID)
 	if err != nil {
 		if r.logger != nil {
-			r.logger.Warn("loadSessionCompactionSummaries: failed to load compaction logs", slog.String("session_id", sessionID), slog.Any("error", err))
+			r.logger.Warn("listSessionCompactionLogs: failed to load compaction logs", slog.String("session_id", sessionID), slog.Any("error", err))
 		}
 		return nil
 	}
-	return r.summaryRecordsFromCompactionLogs(ctx, logs, scope)
+	return logs
 }
 
 func (r *Resolver) summaryRecordsFromCompactionLogs(ctx context.Context, logs []sqlc.BotHistoryMessageCompact, scope contextfrag.Scope) []historyfrag.HistoryRecord {
