@@ -79,7 +79,6 @@ func markSelectionPolicies(items []CompactionCandidate) {
 				continue
 			}
 			if items[i].HasPolicy(CompactPolicyMustKeep) {
-				items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyPreserveRecent)
 				continue
 			}
 			items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyCanDrop)
@@ -89,12 +88,10 @@ func markSelectionPolicies(items []CompactionCandidate) {
 
 	start := recentProtectedStart(items)
 	for i := range items {
-		if items[i].HasPolicy(CompactPolicyMustKeep) {
-			items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyPreserveRecent)
-			continue
-		}
 		if i < start {
-			items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyCanDrop)
+			if !items[i].HasPolicy(CompactPolicyMustKeep) {
+				items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyCanDrop)
+			}
 			continue
 		}
 		items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyPreserveRecent)
@@ -184,7 +181,6 @@ func candidatePolicies(record historyfrag.HistoryRecord) []CompactPolicy {
 	}
 	if isAskUserRecord(record) {
 		policies = appendPolicy(policies, CompactPolicyMustKeep)
-		policies = appendPolicy(policies, CompactPolicyPreserveRecent)
 		policies = appendPolicy(policies, CompactPolicyPreserveToolClosure)
 	}
 	return policies
@@ -345,7 +341,7 @@ func guardedCompactionItems(items []CompactionCandidate, cutoff int) []Compactio
 	if cutoff <= 0 {
 		return nil
 	}
-	return items[:cutoff]
+	return dropMustKeepItems(items[:cutoff])
 }
 
 func guardedCurrentTurnCompactionItems(items []CompactionCandidate, cutoff int) []CompactionCandidate {
@@ -366,7 +362,23 @@ func guardedCurrentTurnCompactionItems(items []CompactionCandidate, cutoff int) 
 	if cutoff > protectedTailStart {
 		return nil
 	}
-	return items[1:cutoff]
+	return dropMustKeepItems(items[1:cutoff])
+}
+
+// dropMustKeepItems removes must-keep rows from a compact span so they stay in
+// raw history without capping how much of the surrounding span can compact.
+func dropMustKeepItems(items []CompactionCandidate) []CompactionCandidate {
+	kept := make([]CompactionCandidate, 0, len(items))
+	for _, item := range items {
+		if item.HasPolicy(CompactPolicyMustKeep) {
+			continue
+		}
+		kept = append(kept, item)
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return kept
 }
 
 func firstPolicyStart(items []CompactionCandidate, policy CompactPolicy) int {
