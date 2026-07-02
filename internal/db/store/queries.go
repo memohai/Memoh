@@ -242,6 +242,7 @@ type Queries interface {
 	ListMessagesAfterBySession(ctx context.Context, arg dbsqlc.ListMessagesAfterBySessionParams) ([]dbsqlc.ListMessagesAfterBySessionRow, error)
 	ListMessagesBefore(ctx context.Context, arg dbsqlc.ListMessagesBeforeParams) ([]dbsqlc.ListMessagesBeforeRow, error)
 	ListMessagesBeforeBySession(ctx context.Context, arg dbsqlc.ListMessagesBeforeBySessionParams) ([]dbsqlc.ListMessagesBeforeBySessionRow, error)
+	ListMessagesByCompactID(ctx context.Context, compactID pgtype.UUID) ([]dbsqlc.ListMessagesByCompactIDRow, error)
 	ListMessagesBySession(ctx context.Context, sessionID pgtype.UUID) ([]dbsqlc.ListMessagesBySessionRow, error)
 	ListMessagesLatest(ctx context.Context, arg dbsqlc.ListMessagesLatestParams) ([]dbsqlc.ListMessagesLatestRow, error)
 	ListMessagesLatestBySession(ctx context.Context, arg dbsqlc.ListMessagesLatestBySessionParams) ([]dbsqlc.ListMessagesLatestBySessionRow, error)

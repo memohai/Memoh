@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -21,14 +22,37 @@ type Service struct {
 	queries     dbstore.Queries
 	hookService *hooks.Service
 	logger      *slog.Logger
+
+	inflightMu sync.Mutex
+	inflight   map[string]struct{}
 }
 
 // NewService creates a new compaction Service.
 func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 	return &Service{
-		queries: queries,
-		logger:  log,
+		queries:  queries,
+		logger:   log,
+		inflight: make(map[string]struct{}),
 	}
+}
+
+// beginSessionCompaction marks a session as having a compaction in flight.
+// Overlapping runs would select overlapping candidate sets and race
+// MarkMessagesCompacted, so only one compaction may run per session at a time.
+func (s *Service) beginSessionCompaction(sessionID string) bool {
+	s.inflightMu.Lock()
+	defer s.inflightMu.Unlock()
+	if _, busy := s.inflight[sessionID]; busy {
+		return false
+	}
+	s.inflight[sessionID] = struct{}{}
+	return true
+}
+
+func (s *Service) endSessionCompaction(sessionID string) {
+	s.inflightMu.Lock()
+	defer s.inflightMu.Unlock()
+	delete(s.inflight, sessionID)
 }
 
 func (s *Service) SetHookService(h *hooks.Service) {
@@ -56,6 +80,15 @@ func (s *Service) RunCompactionSync(ctx context.Context, cfg TriggerConfig) erro
 }
 
 func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) error {
+	if !s.beginSessionCompaction(cfg.SessionID) {
+		s.logger.Info("compaction: already in flight for session, skipping",
+			slog.String("bot_id", cfg.BotID),
+			slog.String("session_id", cfg.SessionID),
+		)
+		return nil
+	}
+	defer s.endSessionCompaction(cfg.SessionID)
+
 	if err := s.runCompactionHook(ctx, hooks.EventPreCompact, cfg, nil); err != nil {
 		return err
 	}
@@ -80,19 +113,7 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) error {
 		return compactErr
 	}
 
-	logRow, err := s.queries.CreateCompactionLog(ctx, sqlc.CreateCompactionLogParams{
-		BotID:     botUUID,
-		SessionID: sessionUUID,
-	})
-	if err != nil {
-		compactErr = err
-		return compactErr
-	}
-
-	compactErr = s.doCompaction(ctx, logRow.ID, sessionUUID, cfg)
-	if compactErr != nil {
-		s.completeLog(ctx, logRow.ID, "error", "", compactErr.Error(), 0, nil, pgtype.UUID{})
-	}
+	compactErr = s.doCompaction(ctx, botUUID, sessionUUID, cfg)
 	return compactErr
 }
 
@@ -129,17 +150,27 @@ func (s *Service) runCompactionHook(ctx context.Context, eventName string, cfg T
 	return nil
 }
 
-func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUUID pgtype.UUID, cfg TriggerConfig) error {
-	messages, err := s.queries.ListUncompactedMessagesBySession(ctx, sessionUUID)
+func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, sessionUUID pgtype.UUID, cfg TriggerConfig) error {
+	rows, err := s.queries.ListUncompactedMessagesBySession(ctx, sessionUUID)
 	if err != nil {
 		return err
 	}
-	if len(messages) == 0 {
-		s.completeLog(ctx, logID, "ok", "", "", 0, nil, pgtype.UUID{})
+	if len(rows) == 0 {
 		return nil
 	}
 
-	var toCompact []sqlc.ListUncompactedMessagesBySessionRow
+	messages, skipped := itemsFromRows(rows)
+	if skipped > 0 {
+		s.logger.Warn("compaction: skipped unparseable history rows",
+			slog.Int("skipped", skipped),
+			slog.String("session_id", cfg.SessionID),
+		)
+	}
+	if len(messages) == 0 {
+		return nil
+	}
+
+	var toCompact []CompactionCandidate
 	if cfg.TargetTokens > 0 {
 		// Sync compaction: compress enough messages to bring context
 		// down to TargetTokens. Calculate how many tokens to keep
@@ -149,7 +180,6 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 		toCompact = splitByRatio(messages, cfg.TotalInputTokens, cfg.Ratio)
 	}
 	if len(toCompact) == 0 {
-		s.completeLog(ctx, logID, "ok", "", "", 0, nil, pgtype.UUID{})
 		return nil
 	}
 
@@ -181,14 +211,11 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 		}
 	}
 
-	entries := make([]messageEntry, 0, len(toCompact))
-	messageIDs := make([]pgtype.UUID, 0, len(toCompact))
-	for _, m := range toCompact {
-		entries = append(entries, messageEntry{
-			Role:    m.Role,
-			Content: string(m.Content),
-		})
-		messageIDs = append(messageIDs, m.ID)
+	entries, messageIDs := buildEntriesAndIDs(toCompact)
+	if len(entries) == 0 {
+		// Every selected message rendered empty (e.g. reasoning-only): summarizing
+		// nothing would destroy them for a junk summary. Leave them in history.
+		return nil
 	}
 
 	userPrompt := buildUserPrompt(priorSummaries, entries)
@@ -207,12 +234,27 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 		systemPrompt, []sdk.Message{sdk.UserMessage(userPrompt)}, nil,
 	)
 
+	// The log row is created only once a real attempt starts, so no-op runs do
+	// not accumulate rows. Persistence uses a non-cancellable context: a client
+	// disconnect mid-run must not strand rows marked compacted without a
+	// completed summary.
+	persistCtx := context.WithoutCancel(ctx)
+	logRow, err := s.queries.CreateCompactionLog(persistCtx, sqlc.CreateCompactionLogParams{
+		BotID:     botUUID,
+		SessionID: sessionUUID,
+	})
+	if err != nil {
+		return err
+	}
+	logID := logRow.ID
+
 	result, err := sdk.GenerateTextResult(ctx,
 		sdk.WithModel(model),
 		sdk.WithSystem(systemPromptDecorated),
 		sdk.WithMessages(sdkMessages),
 	)
 	if err != nil {
+		s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{})
 		return err
 	}
 
@@ -220,14 +262,15 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 
 	modelUUID := db.ParseUUIDOrEmpty(cfg.ModelID)
 
-	if err := s.queries.MarkMessagesCompacted(ctx, sqlc.MarkMessagesCompactedParams{
+	if err := s.queries.MarkMessagesCompacted(persistCtx, sqlc.MarkMessagesCompactedParams{
 		CompactID: logID,
 		Column2:   messageIDs,
 	}); err != nil {
+		s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{})
 		return err
 	}
 
-	s.completeLog(ctx, logID, "ok", result.Text, "", len(messageIDs), usageJSON, modelUUID)
+	s.completeLog(persistCtx, logID, "ok", result.Text, "", len(messageIDs), usageJSON, modelUUID)
 	return nil
 }
 
@@ -319,106 +362,4 @@ func formatUUID(id pgtype.UUID) string {
 		return ""
 	}
 	return uuid.UUID(id.Bytes).String()
-}
-
-// splitByRatio splits messages so that roughly the first ratio% (by token weight)
-// are returned for compaction, and the rest are kept as-is.
-// When ratio >= 100, all messages are returned for compaction.
-// When ratio <= 0 or totalInputTokens <= 0 or messages is empty, nil is returned (no compaction).
-func splitByRatio(messages []sqlc.ListUncompactedMessagesBySessionRow, totalInputTokens, ratio int) []sqlc.ListUncompactedMessagesBySessionRow {
-	if ratio <= 0 || totalInputTokens <= 0 || len(messages) == 0 {
-		return nil
-	}
-	if ratio >= 100 {
-		return messages
-	}
-
-	keepTokens := totalInputTokens * (100 - ratio) / 100
-	if keepTokens <= 0 {
-		return messages
-	}
-
-	accumulated := 0
-	cutoff := len(messages)
-	for i := len(messages) - 1; i >= 0; i-- {
-		accumulated += estimateRowTokens(messages[i])
-		if accumulated >= keepTokens {
-			cutoff = i + 1
-			break
-		}
-	}
-
-	if cutoff <= 0 {
-		return nil
-	}
-	if cutoff >= len(messages) {
-		return messages
-	}
-	return messages[:cutoff]
-}
-
-// splitByTarget returns the oldest messages to compact so that the remaining
-// newest messages fit within targetTokens. This is used for synchronous
-// compaction where the goal is to reduce context to a specific size.
-func splitByTarget(messages []sqlc.ListUncompactedMessagesBySessionRow, targetTokens int) []sqlc.ListUncompactedMessagesBySessionRow {
-	if targetTokens <= 0 || len(messages) == 0 {
-		return nil
-	}
-	// Scan from newest to oldest, keeping messages that fit within target.
-	accumulated := 0
-	cutoff := 0
-	for i := len(messages) - 1; i >= 0; i-- {
-		accumulated += estimateRowTokens(messages[i])
-		if accumulated > targetTokens {
-			cutoff = i + 1
-			break
-		}
-	}
-	if cutoff <= 0 {
-		return nil
-	}
-	return messages[:cutoff]
-}
-
-type usagePayload struct {
-	OutputTokens *int `json:"output_tokens"`
-}
-
-func estimateRowTokens(m sqlc.ListUncompactedMessagesBySessionRow) int {
-	if len(m.Usage) > 0 {
-		var u usagePayload
-		if json.Unmarshal(m.Usage, &u) == nil && u.OutputTokens != nil && *u.OutputTokens > 0 {
-			return *u.OutputTokens
-		}
-	}
-	return len(m.Content) / 4
-}
-
-// trimCompactMessages trims the compaction input from the tail (oldest)
-// so the total estimated tokens stay within maxTokens.
-func trimCompactMessages(messages []sqlc.ListUncompactedMessagesBySessionRow, maxTokens int) []sqlc.ListUncompactedMessagesBySessionRow {
-	if len(messages) == 0 || maxTokens <= 0 {
-		return messages
-	}
-	total := 0
-	for _, m := range messages {
-		total += estimateRowTokens(m)
-	}
-	if total <= maxTokens {
-		return messages
-	}
-	// Drop oldest messages from the tail until within budget.
-	accumulated := 0
-	cutoff := len(messages)
-	for i := len(messages) - 1; i >= 0; i-- {
-		accumulated += estimateRowTokens(messages[i])
-		if accumulated > maxTokens {
-			cutoff = i + 1
-			break
-		}
-	}
-	if cutoff >= len(messages) {
-		return messages
-	}
-	return messages[cutoff:]
 }

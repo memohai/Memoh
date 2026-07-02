@@ -3742,6 +3742,25 @@ func (q *Queries) ListMessagesBeforeBySession(ctx context.Context, arg pgsqlc.Li
 	return result, nil
 }
 
+func (q *Queries) ListMessagesByCompactID(ctx context.Context, compactID pgtype.UUID) ([]pgsqlc.ListMessagesByCompactIDRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteCompactID sql.NullString
+	if err := convertValue(compactID, &sqliteCompactID); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListMessagesByCompactID(ctx, sqliteCompactID)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ListMessagesByCompactIDRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID pgtype.UUID) ([]pgsqlc.ListMessagesBySessionRow, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured

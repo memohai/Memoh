@@ -3,31 +3,27 @@ package flow
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/memohai/memoh/internal/historyfrag"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
+	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
 )
 
-type messageWithUsage struct {
-	Message           conversation.ModelMessage
-	UsageInputTokens  *int
-	UsageOutputTokens *int
-	SessionID         string
-	ExternalMessageID string
-	Platform          string
-	SenderChannelID   string
-	CompactID         string
-}
-
-func (r *Resolver) loadMessages(ctx context.Context, chatID string, sessionID string, maxContextMinutes int) ([]messageWithUsage, error) {
+func (r *Resolver) loadHistoryRecords(ctx context.Context, fallback historyfrag.ScopeFallback, sessionID string, maxContextMinutes int) ([]historyfrag.HistoryRecord, error) {
 	if r.messageService == nil {
 		return nil, nil
 	}
@@ -37,45 +33,57 @@ func (r *Resolver) loadMessages(ctx context.Context, chatID string, sessionID st
 	if strings.TrimSpace(sessionID) != "" {
 		msgs, err = r.messageService.ListActiveSinceBySession(ctx, sessionID, since)
 	} else {
-		msgs, err = r.messageService.ListActiveSince(ctx, chatID, since)
+		msgs, err = r.messageService.ListActiveSince(ctx, fallback.ChatID, since)
 	}
 	if err != nil {
 		return nil, err
 	}
-	var result []messageWithUsage
+	result := make([]historyfrag.HistoryRecord, 0, len(msgs))
 	for _, m := range msgs {
-		var mm conversation.ModelMessage
-		if err := json.Unmarshal(m.Content, &mm); err != nil {
-			r.logger.Warn("loadMessages: content unmarshal failed, treating as raw text",
-				slog.String("chat_id", chatID), slog.Any("error", err))
-			mm = conversation.ModelMessage{Role: m.Role, Content: m.Content}
-		} else {
-			mm.Role = m.Role
+		record, err := historyfrag.FromDBMessageWithLogger(r.logger, m, fallback)
+		if err != nil {
+			return nil, err
 		}
-		var inputTokens *int
-		var outputTokens *int
-		if len(m.Usage) > 0 {
-			var u usageInfo
-			if json.Unmarshal(m.Usage, &u) == nil {
-				inputTokens = u.InputTokens
-				outputTokens = u.OutputTokens
-			}
-		}
-		result = append(result, messageWithUsage{
-			Message:           mm,
-			UsageInputTokens:  inputTokens,
-			UsageOutputTokens: outputTokens,
-			SessionID:         strings.TrimSpace(m.SessionID),
-			ExternalMessageID: strings.TrimSpace(m.ExternalMessageID),
-			Platform:          strings.TrimSpace(m.Platform),
-			SenderChannelID:   strings.TrimSpace(m.SenderChannelIdentityID),
-			CompactID:         strings.TrimSpace(m.CompactID),
-		})
+		result = append(result, record)
 	}
 	return result, nil
 }
 
-func dedupePersistedCurrentUserMessage(messages []messageWithUsage, req conversation.ChatRequest) []messageWithUsage {
+func historyScopeFallbackFromChatRequest(req conversation.ChatRequest) historyfrag.ScopeFallback {
+	return historyfrag.ScopeFallback{
+		ChatID:           strings.TrimSpace(req.ChatID),
+		ConversationType: strings.TrimSpace(req.ConversationType),
+		ConversationName: strings.TrimSpace(req.ConversationName),
+		ReplyTarget:      strings.TrimSpace(req.ReplyTarget),
+	}
+}
+
+func historyScopeFallbackFromUserInputRequest(req userinput.Request) historyfrag.ScopeFallback {
+	return historyfrag.ScopeFallback{
+		ConversationType: strings.TrimSpace(req.ConversationType),
+		ReplyTarget:      strings.TrimSpace(req.ReplyTarget),
+	}
+}
+
+func historyScopeFallbackFromToolApprovalRequest(req toolapproval.Request) historyfrag.ScopeFallback {
+	return historyfrag.ScopeFallback{
+		ConversationType: strings.TrimSpace(req.ConversationType),
+		ReplyTarget:      strings.TrimSpace(req.ReplyTarget),
+	}
+}
+
+func compactionSummaryScope(botID, chatID, sessionID, conversationType, conversationName, replyTarget string) contextfrag.Scope {
+	return contextfrag.Scope{
+		BotID:            strings.TrimSpace(botID),
+		ChatID:           strings.TrimSpace(chatID),
+		SessionID:        strings.TrimSpace(sessionID),
+		ConversationType: strings.TrimSpace(conversationType),
+		ConversationName: strings.TrimSpace(conversationName),
+		ReplyTarget:      strings.TrimSpace(replyTarget),
+	}
+}
+
+func dedupePersistedCurrentUserMessage(messages []historyfrag.HistoryRecord, req conversation.ChatRequest) []historyfrag.HistoryRecord {
 	if !req.UserMessagePersisted || len(messages) == 0 {
 		return messages
 	}
@@ -90,7 +98,7 @@ func dedupePersistedCurrentUserMessage(messages []messageWithUsage, req conversa
 
 	for i := len(messages) - 1; i >= 0; i-- {
 		item := messages[i]
-		if !strings.EqualFold(strings.TrimSpace(item.Message.Role), "user") {
+		if !strings.EqualFold(strings.TrimSpace(item.ModelMessage.Role), "user") {
 			continue
 		}
 		if strings.TrimSpace(item.ExternalMessageID) != targetExternalID {
@@ -102,7 +110,7 @@ func dedupePersistedCurrentUserMessage(messages []messageWithUsage, req conversa
 		if targetPlatform != "" && item.Platform != "" && !strings.EqualFold(item.Platform, targetPlatform) {
 			continue
 		}
-		if targetSenderChannelID != "" && item.SenderChannelID != "" && item.SenderChannelID != targetSenderChannelID {
+		if targetSenderChannelID != "" && item.SenderChannelIdentityID != "" && item.SenderChannelIdentityID != targetSenderChannelID {
 			continue
 		}
 		return append(messages[:i], messages[i+1:]...)
@@ -120,17 +128,33 @@ func estimateMessageTokens(msg conversation.ModelMessage) int {
 	return len(text) / 4
 }
 
-func trimMessagesByTokens(log *slog.Logger, messages []messageWithUsage, maxTokens int) ([]conversation.ModelMessage, int) {
-	if maxTokens == 0 || len(messages) == 0 {
-		result := make([]conversation.ModelMessage, len(messages))
-		for i, m := range messages {
-			result[i] = m.Message
+func trimMessagesByTokens(log *slog.Logger, messages []historyfrag.HistoryRecord, maxTokens int) ([]conversation.ModelMessage, int) {
+	trimmed, _, totalTokens := trimMessagesAndRecordsByTokens(log, messages, maxTokens)
+	return trimmed, totalTokens
+}
+
+// totalCompactableHistoryTokens estimates the tokens held by raw history rows
+// only. Active summaries are excluded: compaction can never shrink them, so
+// counting them toward the compaction trigger would re-fire it on every
+// request once accumulated summaries alone cross the threshold.
+func totalCompactableHistoryTokens(records []historyfrag.HistoryRecord) int {
+	total := 0
+	for _, record := range records {
+		if record.Kind == contextfrag.KindConversationSummary || record.Lifecycle == historyfrag.LifecycleActiveSummary {
+			continue
 		}
+		total += estimateMessageTokens(record.ModelMessage)
+	}
+	return total
+}
+
+func trimMessagesAndRecordsByTokens(log *slog.Logger, messages []historyfrag.HistoryRecord, maxTokens int) ([]conversation.ModelMessage, []historyfrag.HistoryRecord, int) {
+	if maxTokens == 0 || len(messages) == 0 {
 		totalTokens := 0
 		for _, m := range messages {
-			totalTokens += estimateMessageTokens(m.Message)
+			totalTokens += estimateMessageTokens(m.ModelMessage)
 		}
-		return result, totalTokens
+		return historyfrag.ToModelMessages(messages), messages, totalTokens
 	}
 
 	// Scan from newest to oldest, accumulating per-message estimated context
@@ -140,7 +164,7 @@ func trimMessagesByTokens(log *slog.Logger, messages []messageWithUsage, maxToke
 	totalTokens := 0
 	cutoff := 0
 	for i := len(messages) - 1; i >= 0; i-- {
-		totalTokens += estimateMessageTokens(messages[i].Message)
+		totalTokens += estimateMessageTokens(messages[i].ModelMessage)
 		if totalTokens > maxTokens {
 			cutoff = i + 1
 			break
@@ -150,7 +174,7 @@ func trimMessagesByTokens(log *slog.Logger, messages []messageWithUsage, maxToke
 	// Keep provider-valid message order: a "tool" message must follow a preceding
 	// assistant tool call. When history is head-trimmed, a leading tool message
 	// may become orphaned and cause provider 400 errors.
-	for cutoff < len(messages) && strings.EqualFold(strings.TrimSpace(messages[cutoff].Message.Role), "tool") {
+	for cutoff < len(messages) && strings.EqualFold(strings.TrimSpace(messages[cutoff].ModelMessage.Role), "tool") {
 		cutoff++
 	}
 
@@ -164,7 +188,8 @@ func trimMessagesByTokens(log *slog.Logger, messages []messageWithUsage, maxToke
 		)
 	}
 
-	result := make([]conversation.ModelMessage, 0, len(messages)-cutoff)
+	retained := messages[cutoff:]
+	result := make([]conversation.ModelMessage, 0, len(retained))
 	if cutoff > 0 {
 		// Add a truncation notice at the beginning so the LLM knows earlier
 		// context was trimmed and it can use tools (memory, search) to look up
@@ -178,13 +203,107 @@ func trimMessagesByTokens(log *slog.Logger, messages []messageWithUsage, maxToke
 			),
 		})
 	}
-	for _, m := range messages[cutoff:] {
-		result = append(result, m.Message)
+	for _, m := range retained {
+		result = append(result, m.ModelMessage)
 	}
-	return result, totalTokens
+	return result, retained, totalTokens
 }
 
-func (r *Resolver) replaceCompactedMessages(ctx context.Context, messages []messageWithUsage) []messageWithUsage {
+func historyContextFragsForMessages(messages []conversation.ModelMessage, records []historyfrag.HistoryRecord) []contextfrag.ContextFrag {
+	if len(messages) == 0 || len(records) == 0 {
+		return nil
+	}
+	frags := make([]contextfrag.ContextFrag, 0)
+	recordStart := 0
+	for i, msg := range messages {
+		if !looksLikeSummaryMessage(msg) {
+			continue
+		}
+		for j := recordStart; j < len(records); j++ {
+			record := records[j]
+			if record.Kind != contextfrag.KindConversationSummary || record.Coverage == nil {
+				continue
+			}
+			if !sameModelMessage(record.ModelMessage, msg) {
+				continue
+			}
+			frag := historyfrag.ToFrag(record)
+			frag.ID = fmt.Sprintf("message.%03d", i)
+			frag.Provenance.Index = i
+			frags = append(frags, frag)
+			recordStart = j + 1
+			break
+		}
+	}
+	return frags
+}
+
+func looksLikeSummaryMessage(msg conversation.ModelMessage) bool {
+	return strings.EqualFold(strings.TrimSpace(msg.Role), "user") &&
+		strings.HasPrefix(strings.TrimSpace(msg.TextContent()), "<summary>")
+}
+
+func sameModelMessage(a conversation.ModelMessage, b conversation.ModelMessage) bool {
+	return strings.EqualFold(strings.TrimSpace(a.Role), strings.TrimSpace(b.Role)) &&
+		string(a.Content) == string(b.Content)
+}
+
+func (r *Resolver) replaceCompactedMessages(ctx context.Context, sessionID string, scope contextfrag.Scope, messages []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
+	if r.queries == nil {
+		return messages
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		// Sessionless (chat-scoped) loads have no session log list to draw from;
+		// resolve each in-window compact group individually.
+		return r.replaceRecentCompactedMessages(ctx, messages)
+	}
+	logs := r.listSessionCompactionLogs(ctx, sessionID)
+	if len(logs) == 0 {
+		return messages
+	}
+	summaries := make(map[string]string, len(logs))
+	for _, log := range logs {
+		if log.Status != "ok" || strings.TrimSpace(log.Summary) == "" {
+			continue
+		}
+		if id := pgUUIDString(log.ID); id != "" {
+			summaries[id] = log.Summary
+		}
+	}
+	messages = replaceCompactedHistoryRecords(messages, summaries)
+	sessionSummaries := r.summaryRecordsFromCompactionLogs(ctx, missingCompactionLogs(messages, logs), scope)
+	if len(sessionSummaries) == 0 {
+		return messages
+	}
+	return prependMissingCompactionSummaries(messages, sessionSummaries)
+}
+
+// missingCompactionLogs filters the session logs down to those not already
+// represented in the loaded records, so covered-ref lookups only run for
+// summaries whose raw rows aged out of the load window.
+func missingCompactionLogs(messages []historyfrag.HistoryRecord, logs []sqlc.BotHistoryMessageCompact) []sqlc.BotHistoryMessageCompact {
+	seen := make(map[string]struct{}, len(messages))
+	for _, record := range messages {
+		if id := strings.TrimSpace(record.CompactID); id != "" {
+			seen[id] = struct{}{}
+		}
+		if record.SourceKind == historyfrag.SourceCompactionLog {
+			if id := strings.TrimSpace(record.Ref.ID); id != "" {
+				seen[id] = struct{}{}
+			}
+		}
+	}
+	missing := make([]sqlc.BotHistoryMessageCompact, 0, len(logs))
+	for _, log := range logs {
+		if _, ok := seen[pgUUIDString(log.ID)]; ok {
+			continue
+		}
+		missing = append(missing, log)
+	}
+	return missing
+}
+
+func (r *Resolver) replaceRecentCompactedMessages(ctx context.Context, messages []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
 	if r.queries == nil {
 		return messages
 	}
@@ -215,7 +334,170 @@ func (r *Resolver) replaceCompactedMessages(ctx context.Context, messages []mess
 		}
 	}
 
-	var result []messageWithUsage
+	return replaceCompactedHistoryRecords(messages, summaries)
+}
+
+func (r *Resolver) listSessionCompactionLogs(ctx context.Context, sessionID string) []sqlc.BotHistoryMessageCompact {
+	sessionUUID, err := db.ParseUUID(sessionID)
+	if err != nil {
+		if r.logger != nil {
+			r.logger.Warn("listSessionCompactionLogs: invalid session id", slog.String("session_id", sessionID), slog.Any("error", err))
+		}
+		return nil
+	}
+	logs, err := r.queries.ListCompactionLogsBySession(ctx, sessionUUID)
+	if err != nil {
+		if r.logger != nil {
+			r.logger.Warn("listSessionCompactionLogs: failed to load compaction logs", slog.String("session_id", sessionID), slog.Any("error", err))
+		}
+		return nil
+	}
+	return logs
+}
+
+func (r *Resolver) summaryRecordsFromCompactionLogs(ctx context.Context, logs []sqlc.BotHistoryMessageCompact, scope contextfrag.Scope) []historyfrag.HistoryRecord {
+	if len(logs) == 0 {
+		return nil
+	}
+	records := make([]historyfrag.HistoryRecord, 0, len(logs))
+	for _, log := range logs {
+		if log.Status != "ok" || strings.TrimSpace(log.Summary) == "" {
+			continue
+		}
+		compactID := pgUUIDString(log.ID)
+		if compactID == "" {
+			continue
+		}
+		logScope := scope
+		if logScope.BotID == "" {
+			logScope.BotID = pgUUIDString(log.BotID)
+		}
+		if logScope.SessionID == "" {
+			logScope.SessionID = pgUUIDString(log.SessionID)
+		}
+		coveredRefs := r.coveredRefsForCompact(ctx, log.ID, logScope)
+		records = append(records, historyfrag.SummaryRecord(compactID, log.Summary, coveredRefs, logScope))
+	}
+	return records
+}
+
+func (r *Resolver) coveredRefsForCompact(ctx context.Context, compactID pgtype.UUID, scope contextfrag.Scope) []contextfrag.ContextRef {
+	if r.queries == nil || !compactID.Valid {
+		return nil
+	}
+	rows, err := r.queries.ListMessagesByCompactID(ctx, compactID)
+	if err != nil {
+		if r.logger != nil {
+			r.logger.Warn("loadSessionCompactionSummaries: failed to load compacted message refs", slog.String("compact_id", pgUUIDString(compactID)), slog.Any("error", err))
+		}
+		return nil
+	}
+	refs := make([]contextfrag.ContextRef, 0, len(rows))
+	for _, row := range rows {
+		record, err := historyfrag.FromDBMessage(messageFromCompactRow(row), historyfrag.ScopeFallback{
+			ConversationType: scope.ConversationType,
+			ConversationName: scope.ConversationName,
+			ReplyTarget:      scope.ReplyTarget,
+		})
+		if err != nil {
+			if r.logger != nil {
+				r.logger.Warn("loadSessionCompactionSummaries: skipped compacted message ref", slog.String("compact_id", pgUUIDString(compactID)), slog.Any("error", err))
+			}
+			continue
+		}
+		refs = append(refs, record.Ref)
+	}
+	return refs
+}
+
+func messageFromCompactRow(row sqlc.ListMessagesByCompactIDRow) messagepkg.Message {
+	return messagepkg.Message{
+		ID:                      pgUUIDString(row.ID),
+		BotID:                   pgUUIDString(row.BotID),
+		SessionID:               pgUUIDString(row.SessionID),
+		SenderChannelIdentityID: pgUUIDString(row.SenderChannelIdentityID),
+		SenderUserID:            pgUUIDString(row.SenderUserID),
+		ExternalMessageID:       pgTextString(row.ExternalMessageID),
+		SourceReplyToMessageID:  pgTextString(row.SourceReplyToMessageID),
+		Role:                    strings.TrimSpace(row.Role),
+		Content:                 json.RawMessage(row.Content),
+		Usage:                   json.RawMessage(row.Usage),
+		CompactID:               pgUUIDString(row.CompactID),
+		EventID:                 pgUUIDString(row.EventID),
+		DisplayContent:          pgTextString(row.DisplayText),
+		CreatedAt:               row.CreatedAt.Time,
+	}
+}
+
+func prependMissingCompactionSummaries(messages []historyfrag.HistoryRecord, summaries []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
+	if len(summaries) == 0 {
+		return messages
+	}
+	seen := make(map[string]struct{}, len(messages))
+	for _, record := range messages {
+		if id := strings.TrimSpace(record.CompactID); id != "" {
+			seen[id] = struct{}{}
+		}
+		if record.SourceKind == historyfrag.SourceCompactionLog {
+			if id := strings.TrimSpace(record.Ref.ID); id != "" {
+				seen[id] = struct{}{}
+			}
+		}
+	}
+	missing := make([]historyfrag.HistoryRecord, 0, len(summaries))
+	for _, summary := range summaries {
+		id := strings.TrimSpace(summary.CompactID)
+		if id == "" {
+			id = strings.TrimSpace(summary.Ref.ID)
+		}
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		missing = append(missing, summary)
+	}
+	if len(missing) == 0 {
+		return messages
+	}
+	out := make([]historyfrag.HistoryRecord, 0, len(missing)+len(messages))
+	out = append(out, missing...)
+	out = append(out, messages...)
+	return out
+}
+
+func pgUUIDString(value pgtype.UUID) string {
+	if !value.Valid {
+		return ""
+	}
+	parsed, err := uuid.FromBytes(value.Bytes[:])
+	if err != nil {
+		return ""
+	}
+	return parsed.String()
+}
+
+func pgTextString(value pgtype.Text) string {
+	if !value.Valid {
+		return ""
+	}
+	return strings.TrimSpace(value.String)
+}
+
+func replaceCompactedHistoryRecords(messages []historyfrag.HistoryRecord, summaries map[string]string) []historyfrag.HistoryRecord {
+	compactGroups := make(map[string][]int)
+	for i, m := range messages {
+		if m.CompactID != "" {
+			compactGroups[m.CompactID] = append(compactGroups[m.CompactID], i)
+		}
+	}
+	if len(compactGroups) == 0 {
+		return messages
+	}
+
+	var result []historyfrag.HistoryRecord
 	replaced := make(map[string]bool)
 	for _, m := range messages {
 		if m.CompactID == "" {
@@ -233,12 +515,11 @@ func (r *Resolver) replaceCompactedMessages(ctx context.Context, messages []mess
 			}
 			continue
 		}
-		result = append(result, messageWithUsage{
-			Message: conversation.ModelMessage{
-				Role:    "user",
-				Content: json.RawMessage(`"<summary>\n` + summary + `\n</summary>"`),
-			},
-		})
+		coveredRefs := make([]contextfrag.ContextRef, 0, len(compactGroups[m.CompactID]))
+		for _, idx := range compactGroups[m.CompactID] {
+			coveredRefs = append(coveredRefs, messages[idx].Ref)
+		}
+		result = append(result, historyfrag.SummaryRecord(m.CompactID, summary, coveredRefs, m.Scope))
 	}
 	return result
 }

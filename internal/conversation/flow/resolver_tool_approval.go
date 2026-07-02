@@ -272,16 +272,18 @@ func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval too
 		return err
 	}
 
-	loaded, err := r.loadMessages(ctx, input.BotID, approval.SessionID, defaultMaxContextMinutes)
+	loaded, err := r.loadHistoryRecords(ctx, historyScopeFallbackFromToolApprovalRequest(approval), approval.SessionID, defaultMaxContextMinutes)
 	if err != nil {
 		return err
 	}
 	loaded = pruneHistoryForGateway(loaded)
-	loaded = r.replaceCompactedMessages(ctx, loaded)
-	messages, _ := trimMessagesByTokens(r.logger, loaded, 0)
+	loaded = r.replaceCompactedMessages(ctx, approval.SessionID, compactionSummaryScope(firstNonEmpty(approval.BotID, input.BotID), "", approval.SessionID, approval.ConversationType, "", approval.ReplyTarget), loaded)
+	messages, retained, _ := trimMessagesAndRecordsByTokens(r.logger, loaded, 0)
+	messages = sanitizeMessages(messages)
 
 	cfg := resolved.RunConfig
-	cfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(sanitizeMessages(messages)))
+	cfg.ContextFrags = historyContextFragsForMessages(messages, retained)
+	cfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(messages))
 	cfg.Query = ""
 	cfg.LiveToolStream = eventCh != nil
 	cfg.CanRequestUserInput = r.canDeliverUserInputWS(eventCh)
