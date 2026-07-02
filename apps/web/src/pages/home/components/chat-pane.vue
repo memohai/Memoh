@@ -2546,13 +2546,13 @@ const loadMoreSentinel = useTemplateRef<HTMLElement>('loadMoreSentinel')
 
 const {
   isScrolling,
-  isAutoScroll,
-  isInstant,
   highlightedMessageId,
   showJumpToBottom: showJumpToBottomFromScroll,
   scrollToBottom,
   scrollToMessage,
   suppressAutoScrollForPrepend,
+  markEscaped,
+  followBottom,
   onActivatedRestoreScroll,
   onDeactivatedResetScroll,
   onMessageActive,
@@ -2650,8 +2650,7 @@ function scrollToRailSegment(seg: ScrollRailSegment) {
     const root = scrollEl.value
     const target = findMessageElement(seg.id)
     if (!root || !target) return
-    isAutoScroll.value = false
-    isInstant.value = false
+    markEscaped()
     const scrollMargin = Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0
     startScrollTween(root, () => {
       const el = findMessageElement(seg.id)
@@ -2796,7 +2795,7 @@ function handleComposerKeydown(e: KeyboardEvent) {
     return
   }
   e.preventDefault()
-  isAutoScroll.value = true
+  followBottom()
   handleSend()
 }
 
@@ -2996,7 +2995,6 @@ async function handleEditMessage(messageId: string, text: string, done?: (starte
 
 async function handleSend() {
   if (!isActive.value) return
-  // isAutoScroll.value = true
   if (!skillSlashEnabled.value && requestedSkills.value.length) {
     requestedSkills.value = []
   }
