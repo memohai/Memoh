@@ -91,6 +91,10 @@ type messageUIListResponse struct {
 	Nodes             []sessionTurnGraphUINode `json:"nodes,omitempty"`
 }
 
+type messageRawListResponse struct {
+	Items []messagepkg.Message `json:"items"`
+}
+
 const staleSessionHeadMessage = "stale session head"
 
 // Register registers all conversation routes.
@@ -209,11 +213,15 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+	if format != "ui" {
+		h.fillAssetMimeFromStorage(c.Request().Context(), botID, messages)
+		return c.JSON(http.StatusOK, messageRawListResponse{Items: messages})
+	}
 	// format=ui converts each page independently, so a page that begins mid
 	// assistant turn (its earlier rows on the previous page) would render one
 	// reply as several turns/action bars. Extend the head back to a real turn
 	// boundary so a turn is never split across pages.
-	if format == "ui" && sessionID != "" && len(messages) > 0 {
+	if sessionID != "" && len(messages) > 0 {
 		messages = h.extendToUITurnHead(c.Request().Context(), sessionID, headTurnID, messages)
 	}
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, messages)
