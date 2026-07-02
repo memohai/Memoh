@@ -540,8 +540,9 @@ func replaceCompactedHistoryRecords(messages []historyfrag.HistoryRecord, summar
 }
 
 type pipelineContextBuild struct {
-	Messages       []conversation.ModelMessage
-	HistoryRecords []historyfrag.HistoryRecord
+	Messages        []conversation.ModelMessage
+	HistoryRecords  []historyfrag.HistoryRecord
+	EstimatedTokens int
 }
 
 // buildPipelineContext assembles chat context from the DCP pipeline's
@@ -584,9 +585,14 @@ func (r *Resolver) buildPipelineContext(ctx context.Context, req conversation.Ch
 		messages = trimPipelineMessagesByTokens(r.logger, messages, contextTokenBudget)
 	}
 
+	estimatedTokens := 0
+	for _, msg := range messages {
+		estimatedTokens += estimateMessageTokens(msg)
+	}
 	return pipelineContextBuild{
-		Messages:       messages,
-		HistoryRecords: compactContext.HistoryRecords,
+		Messages:        messages,
+		HistoryRecords:  compactContext.HistoryRecords,
+		EstimatedTokens: estimatedTokens,
 	}
 }
 

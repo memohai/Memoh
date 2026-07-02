@@ -336,7 +336,10 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 	}
 	runConfig := resolved.RunConfig
 
-	runConfig.Messages = contextMessagesToSDK(composed.Messages)
+	// Coverage filtering can orphan one side of a tool exchange (a covered
+	// call whose result stayed raw, or vice versa); repair before the provider
+	// sees the messages — the discuss path has no chat-flow repair behind it.
+	runConfig.Messages = repairSDKToolClosures(contextMessagesToSDK(composed.Messages))
 	runConfig.SessionType = sessionpkg.TypeDiscuss
 	runConfig.Query = ""
 

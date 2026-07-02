@@ -344,6 +344,10 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		built := r.buildPipelineContext(ctx, req, contextTokenBudget)
 		messages = built.Messages
 		historyRecords = built.HistoryRecords
+		// Feeds the failure-path compaction trigger: without it, a pipeline
+		// session whose context outgrew the provider window could never
+		// compact (no usage is reported when every call fails).
+		estimatedTokens = built.EstimatedTokens
 	} else if r.conversationSvc != nil {
 		historyFallback := historyScopeFallbackFromChatRequest(req)
 		loaded, loadErr := r.loadHistoryRecords(ctx, historyFallback, req.SessionID, defaultMaxContextMinutes)
