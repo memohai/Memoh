@@ -23,6 +23,10 @@ type ConnectionLister interface {
 	ListActiveByBot(ctx context.Context, botID string) ([]mcpgw.Connection, error)
 }
 
+type ProbeResultRecorder interface {
+	UpdateProbeResult(ctx context.Context, botID, id, status string, tools []mcpgw.ToolDescriptor, message string) error
+}
+
 type Gateway interface {
 	ListHTTPConnectionTools(ctx context.Context, connection mcpgw.Connection) ([]mcpgw.ToolDescriptor, error)
 	CallHTTPConnectionTool(ctx context.Context, connection mcpgw.Connection, toolName string, args map[string]any) (map[string]any, error)
@@ -47,10 +51,11 @@ type cacheEntry struct {
 }
 
 type Source struct {
-	logger      *slog.Logger
-	gateway     Gateway
-	connections ConnectionLister
-	reserved    func(string) bool
+	logger       *slog.Logger
+	gateway      Gateway
+	connections  ConnectionLister
+	probeResults ProbeResultRecorder
+	reserved     func(string) bool
 
 	mu    sync.Mutex
 	cache map[string]cacheEntry
@@ -69,10 +74,11 @@ func NewSource(log *slog.Logger, gateway Gateway, connections ConnectionLister, 
 		log = slog.Default()
 	}
 	source := &Source{
-		logger:      log.With(slog.String("tool_source", "federated_mcp_tool")),
-		gateway:     gateway,
-		connections: connections,
-		cache:       map[string]cacheEntry{},
+		logger:       log.With(slog.String("tool_source", "federated_mcp_tool")),
+		gateway:      gateway,
+		connections:  connections,
+		probeResults: probeResultRecorder(connections),
+		cache:        map[string]cacheEntry{},
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -80,6 +86,28 @@ func NewSource(log *slog.Logger, gateway Gateway, connections ConnectionLister, 
 		}
 	}
 	return source
+}
+
+func (s *Source) InvalidateBot(botID string) {
+	if s == nil {
+		return
+	}
+	botID = strings.TrimSpace(botID)
+	if botID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.cache, botID)
+}
+
+func (s *Source) InvalidateAll() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cache = map[string]cacheEntry{}
 }
 
 func (s *Source) ListTools(ctx context.Context, session mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
@@ -121,6 +149,10 @@ func (s *Source) CallTool(ctx context.Context, session mcpgw.ToolSessionContext,
 	}
 	if arguments == nil {
 		arguments = map[string]any{}
+	}
+	if !mcpgw.ToolAllowed(route.originalName, mcpgw.AllowedToolSet(route.connection.Metadata)) {
+		s.InvalidateBot(botID)
+		return nil, mcpgw.ErrToolNotFound
 	}
 
 	callCtx, callCancel := context.WithTimeout(ctx, mcpCallTimeout)
@@ -210,8 +242,11 @@ func (s *Source) buildToolsAndRoutes(ctx context.Context, botID string) ([]mcpgw
 				listCancel()
 				if err != nil {
 					s.logger.Warn("list tools from connection failed", slog.String("connection_id", connection.ID), slog.String("name", connection.Name), slog.Any("error", err))
+					s.recordProbeResult(ctx, botID, connection.ID, "error", []mcpgw.ToolDescriptor{}, err.Error())
 					continue
 				}
+				connTools = mcpgw.FilterToolsByMetadata(connTools, connection.Metadata)
+				s.recordProbeResult(ctx, botID, connection.ID, "connected", connTools, "")
 				prefix := sanitizePrefix(connection.Name)
 				for _, tool := range connTools {
 					origin := strings.TrimSpace(tool.Name)
@@ -235,6 +270,23 @@ func (s *Source) buildToolsAndRoutes(ctx context.Context, botID string) ([]mcpgw
 		}
 	}
 	return tools, routes
+}
+
+func probeResultRecorder(connections ConnectionLister) ProbeResultRecorder {
+	recorder, _ := connections.(ProbeResultRecorder)
+	return recorder
+}
+
+func (s *Source) recordProbeResult(ctx context.Context, botID, connectionID, status string, tools []mcpgw.ToolDescriptor, message string) {
+	if s == nil || s.probeResults == nil || strings.TrimSpace(connectionID) == "" {
+		return
+	}
+	if tools == nil {
+		tools = []mcpgw.ToolDescriptor{}
+	}
+	if err := s.probeResults.UpdateProbeResult(ctx, botID, connectionID, status, tools, strings.TrimSpace(message)); err != nil {
+		s.logger.Warn("record mcp probe result failed", slog.String("connection_id", connectionID), slog.Any("error", err))
+	}
 }
 
 func (s *Source) isReservedToolName(name string) bool {

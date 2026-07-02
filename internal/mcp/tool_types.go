@@ -47,6 +47,64 @@ type ToolSource interface {
 	CallTool(ctx context.Context, session ToolSessionContext, toolName string, arguments map[string]any) (map[string]any, error)
 }
 
+// AllowedToolSet returns a normalized allowlist from connection metadata.
+// A nil map means all upstream tools are allowed.
+func AllowedToolSet(metadata map[string]any) map[string]struct{} {
+	if len(metadata) == 0 {
+		return nil
+	}
+	raw, ok := metadata["allowed_tools"]
+	if !ok || raw == nil {
+		return nil
+	}
+	out := map[string]struct{}{}
+	switch value := raw.(type) {
+	case []string:
+		for _, item := range value {
+			if item = strings.TrimSpace(item); item != "" {
+				out[item] = struct{}{}
+			}
+		}
+	case []any:
+		for _, item := range value {
+			if text := strings.TrimSpace(fmt.Sprint(item)); text != "" {
+				out[text] = struct{}{}
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// ToolAllowed reports whether an upstream MCP tool is allowed by an allowlist.
+func ToolAllowed(name string, allowed map[string]struct{}) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	_, ok := allowed[strings.TrimSpace(name)]
+	return ok
+}
+
+// FilterToolsByMetadata applies a connection metadata allowlist to tool descriptors.
+func FilterToolsByMetadata(tools []ToolDescriptor, metadata map[string]any) []ToolDescriptor {
+	allowed := AllowedToolSet(metadata)
+	if len(allowed) == 0 {
+		if tools == nil {
+			return []ToolDescriptor{}
+		}
+		return tools
+	}
+	filtered := make([]ToolDescriptor, 0, len(tools))
+	for _, tool := range tools {
+		if ToolAllowed(tool.Name, allowed) {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
+}
+
 // ToolCallPayload is the MCP tools/call params payload.
 type ToolCallPayload struct {
 	Name      string         `json:"name"`

@@ -15,6 +15,7 @@ interface OAuthPopupFlowOptions<TStatus> {
   target: Pick<EventTarget, 'addEventListener' | 'removeEventListener'>
   messageType: string
   messageMatches?: (event: MessageEvent) => boolean
+  messageError?: (event: MessageEvent) => unknown
   // When set, success messages must originate from this window (the popup we
   // opened). Guards against unrelated tabs/scripts spoofing the success message.
   expectedSource?: MessageEventSource | null
@@ -25,8 +26,11 @@ interface OAuthPopupFlowOptions<TStatus> {
   timeoutMs: number
   pollStatus: () => Promise<TStatus | null>
   isAuthorized: (status: TStatus | null) => boolean
+  abortOnPollError?: (error: unknown) => OAuthPopupFlowAbortReason | false
+  failOnPollError?: (error: unknown) => unknown | false
   onAuthorized: () => Promise<void> | void
   onAborted?: (reason: OAuthPopupFlowAbortReason) => void
+  onFailed?: (error: unknown) => void
   onError?: (error: unknown) => void
 }
 
@@ -63,7 +67,9 @@ export function startOAuthPopupFlow<TStatus>(options: OAuthPopupFlowOptions<TSta
     completed = true
     cleanup()
     closePopup()
-    void Promise.resolve(options.onAuthorized()).catch((error: unknown) => {
+    void Promise.resolve()
+      .then(() => options.onAuthorized())
+      .catch((error: unknown) => {
       options.onError?.(error)
     })
   }
@@ -73,7 +79,24 @@ export function startOAuthPopupFlow<TStatus>(options: OAuthPopupFlowOptions<TSta
     completed = true
     cleanup()
     closePopup()
-    options.onAborted?.(reason)
+    try {
+      options.onAborted?.(reason)
+    } catch (error) {
+      options.onError?.(error)
+    }
+  }
+
+  const finishFailed = (error: unknown) => {
+    if (completed) return
+    completed = true
+    cleanup()
+    closePopup()
+    try {
+      options.onFailed?.(error)
+    } catch (failedError) {
+      options.onError?.(failedError)
+    }
+    options.onError?.(error)
   }
 
   const schedulePoll = () => {
@@ -86,7 +109,8 @@ export function startOAuthPopupFlow<TStatus>(options: OAuthPopupFlowOptions<TSta
       // cancelled — the token may already be stored. Poll one final time before
       // concluding, and only abort as cancelled if it is still unauthorized.
       const popupClosed = options.popup.closed === true
-      void options.pollStatus()
+      void Promise.resolve()
+        .then(() => options.pollStatus())
         .then((status) => {
           if (completed) return
           if (options.isAuthorized(status)) {
@@ -101,6 +125,26 @@ export function startOAuthPopupFlow<TStatus>(options: OAuthPopupFlowOptions<TSta
         })
         .catch((error: unknown) => {
           if (completed) return
+          let abortReason: OAuthPopupFlowAbortReason | false = false
+          try {
+            abortReason = options.abortOnPollError?.(error) ?? false
+          } catch (abortError) {
+            options.onError?.(abortError)
+          }
+          if (abortReason) {
+            finishAborted(abortReason)
+            return
+          }
+          let failure: unknown | false = false
+          try {
+            failure = options.failOnPollError?.(error) ?? false
+          } catch (failureError) {
+            options.onError?.(failureError)
+          }
+          if (failure) {
+            finishFailed(failure)
+            return
+          }
           options.onError?.(error)
           if (popupClosed) {
             finishAborted('cancelled')
@@ -116,6 +160,17 @@ export function startOAuthPopupFlow<TStatus>(options: OAuthPopupFlowOptions<TSta
     if (message.data?.type !== options.messageType) return
     if (options.expectedSource !== undefined && message.source !== options.expectedSource) return
     if (options.originMatches && !options.originMatches(message)) return
+    let messageError: unknown
+    try {
+      messageError = options.messageError?.(message)
+    } catch (error) {
+      finishFailed(error)
+      return
+    }
+    if (messageError) {
+      finishFailed(messageError)
+      return
+    }
     if (options.messageMatches && !options.messageMatches(message)) return
     finishAuthorized()
   }

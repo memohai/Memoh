@@ -1,7 +1,7 @@
 <template>
   <Select
     :model-value="modelValue"
-    @update:model-value="$emit('update:modelValue', $event)"
+    @update:model-value="emitModelValue"
   >
     <SelectTrigger :class="triggerClass">
       <SelectValue :placeholder="placeholder || $t('supermarket.selectBotPlaceholder')">
@@ -63,7 +63,7 @@ const props = defineProps<{
   triggerClass?: string
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   'update:modelValue': [value: string]
 }>()
 
@@ -73,6 +73,10 @@ const bots = computed<BotsBot[]>(() => botsData.value?.items ?? [])
 const selectedBot = computed(() =>
   bots.value.find((b) => b.id === props.modelValue),
 )
+
+function emitModelValue(value: unknown) {
+  emit('update:modelValue', typeof value === 'string' ? value : String(value ?? ''))
+}
 
 function initials(name: string): string {
   return name

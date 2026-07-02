@@ -89,7 +89,31 @@
                 class="text-destructive"
               >*</span>
             </label>
+            <Select
+              v-if="configOptions(item).length"
+              v-model="variableValues[item.key || '']"
+            >
+              <SelectTrigger
+                size="sm"
+                class="w-full"
+              >
+                <SelectValue :placeholder="item.description || item.key" />
+              </SelectTrigger>
+              <SelectContent
+                size="sm"
+                class="w-[--reka-select-trigger-width]"
+              >
+                <SelectItem
+                  v-for="option in configOptions(item)"
+                  :key="option.value"
+                  :value="option.value"
+                >
+                  {{ option.label || option.value }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
             <Input
+              v-else
               v-model="variableValues[item.key || '']"
               :type="item.secret ? 'password' : 'text'"
               class="h-8 text-xs"
@@ -129,7 +153,7 @@ import { useRouter } from 'vue-router'
 import { Boxes } from 'lucide-vue-next'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
-  Button, Spinner, Badge, Input, toast,
+  Button, Spinner, Badge, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, toast,
 } from '@memohai/ui'
 import {
   getBotsByBotIdPluginsByIdOauthStatus,
@@ -142,9 +166,11 @@ import {
   type PluginsSkillResource,
 } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
-import { resolveApiErrorMessage } from '@/utils/api-error'
 import { emitBotPluginsUpdated } from '@/utils/bot-plugin-events'
+import { resolvePluginActionErrorMessage } from '@/utils/mcp-error-message'
+import { isPluginInstallationNotFoundError, isPluginOAuthAuthorized, openPluginOAuthURL, waitForPluginOAuth } from '@/utils/plugin-oauth-flow'
 import BotSelect from '@/components/bot-select/index.vue'
+import { pluginConfigRows, templateVariableKeys } from '../plugin-config-rows'
 
 const props = defineProps<{
   open: boolean
@@ -163,7 +189,7 @@ const selectedBotId = ref('')
 const installing = ref(false)
 const variableValues = reactive<Record<string, string>>({})
 
-const variables = computed<PluginsConfigVar[]>(() => props.plugin?.variables ?? [])
+const variables = computed<PluginsConfigVar[]>(() => props.plugin ? pluginConfigRows(props.plugin) : [])
 type PluginSkill = PluginsSkillEntry | PluginsSkillResource
 
 const pluginSkills = computed<PluginSkill[]>(() => [
@@ -205,10 +231,35 @@ watch(() => props.open, (open) => {
     for (const key of Object.keys(variableValues)) delete variableValues[key]
     return
   }
-  for (const item of props.plugin?.variables ?? []) {
-    if (item.key) variableValues[item.key] = item.defaultValue || ''
+  for (const item of variables.value) {
+    if (item.key) variableValues[item.key] = initialVariableValue(item)
   }
 })
+
+watch(variables, (items) => {
+  for (const key of Object.keys(variableValues)) {
+    if (!items.some(item => item.key === key)) delete variableValues[key]
+  }
+  for (const item of items) {
+    const key = (item.key || '').trim()
+    if (!key || Object.hasOwn(variableValues, key)) continue
+    variableValues[key] = initialVariableValue(item)
+  }
+})
+
+function initialVariableValue(item: PluginsConfigVar): string {
+  const value = String(item.defaultValue || '').trim()
+  return templateVariableKeys(value).length ? '' : value
+}
+
+function configOptions(item: PluginsConfigVar): Array<{ label?: string, value: string }> {
+  return (item.options ?? [])
+    .flatMap((option) => {
+      const value = option.value
+      if (!value) return []
+      return [{ label: option.label, value }]
+    })
+}
 
 async function handleInstall() {
   if (!selectedBotId.value || !props.plugin?.id) return
@@ -216,6 +267,10 @@ async function handleInstall() {
   const oauthPopup = requiresManagedOAuth.value && !canOpenOAuthExternally()
     ? window.open('', 'mcp-oauth', 'width=600,height=700')
     : null
+  if (requiresManagedOAuth.value && !canOpenOAuthExternally() && !oauthPopup) {
+    toast.error(t('mcp.oauth.flowInitFailed'))
+    return
+  }
   installing.value = true
   try {
     const { data } = await postBotsByBotIdSupermarketInstallPlugin({
@@ -244,7 +299,8 @@ async function handleInstall() {
     }
   } catch (error) {
     oauthPopup?.close()
-    toast.error(resolveApiErrorMessage(error, t('supermarket.installFailed')))
+    emitBotPluginsUpdated(botId)
+    toast.error(resolvePluginActionErrorMessage(error, t('supermarket.installFailed'), t))
   } finally {
     installing.value = false
   }
@@ -269,28 +325,58 @@ async function startOAuthAfterInstall(botId: string, installation: PluginsInstal
     })
     if (!data.authorization_url) throw new Error(t('mcp.oauth.flowInitFailed'))
 
-    if (popup && !popup.closed) {
-      popup.location.href = data.authorization_url
-    } else {
-      popup = await openOAuthURL(data.authorization_url)
+    const opened = await openPluginOAuthURL(data.authorization_url, popup)
+    popup = opened.popup
+    const waitResult = await waitForPluginOAuth({
+      botId,
+      installationId: installation.id!,
+      popup: opened.popup,
+      external: opened.external,
+      fetchStatus: fetchOAuthStatus,
+      t,
+    })
+    if (waitResult === 'timeout') {
+      throw new Error(t('mcp.oauth.authFailed'))
     }
-
-    await waitForMCPOAuth(botId, installation.id!, popup)
-    const synced = await syncOAuthStatus(botId, installation.id!)
-    if (synced.status !== 'ready' && !synced.enabled) throw new Error(t('mcp.oauth.authFailed'))
-    emitBotPluginsUpdated(botId)
-    toast.success(t('mcp.oauth.authSuccess'))
-    emit('installed')
-  } catch (error) {
-    const synced = await syncOAuthStatus(botId, installation.id!).catch(() => null)
-    if (synced) emitBotPluginsUpdated(botId)
-    if (synced?.status === 'ready' || synced?.enabled) {
-      toast.success(t('mcp.oauth.authSuccess'))
-      emit('installed')
+    if (waitResult === 'needs_config' || waitResult === 'admin_required') {
+      throw new Error(`plugin is not ready: ${waitResult}`)
+    }
+    if (waitResult !== 'authorized') {
+      emitBotPluginsUpdated(botId)
+      popup?.close()
       return
     }
+    const synced = await syncOAuthStatus(botId, installation.id!)
+    if (synced.status === 'needs_config' || synced.status === 'admin_required') {
+      throw new Error(`plugin is not ready: ${synced.status}`)
+    }
+    if (!isPluginOAuthAuthorized(synced)) throw new Error(t('mcp.oauth.authFailed'))
+    emitBotPluginsUpdated(botId)
+    toast.success(t('mcp.oauth.authSuccess'))
+  } catch (error) {
+    if (isPluginInstallationNotFoundError(error)) {
+      emitBotPluginsUpdated(botId)
+      popup?.close()
+      return
+    }
+    let synced: PluginsInstallation | null = null
+    try {
+      synced = await syncOAuthStatus(botId, installation.id!)
+    } catch (syncError) {
+      if (isPluginInstallationNotFoundError(syncError)) {
+        emitBotPluginsUpdated(botId)
+        popup?.close()
+        return
+      }
+    }
+    if (synced) emitBotPluginsUpdated(botId)
+    if (isPluginOAuthAuthorized(synced)) {
+      toast.success(t('mcp.oauth.authSuccess'))
+      return
+    }
+    emitBotPluginsUpdated(botId)
     popup?.close()
-    toast.error(resolveApiErrorMessage(error, t('mcp.oauth.flowInitFailed')))
+    toast.error(resolvePluginActionErrorMessage(error, t('mcp.oauth.flowInitFailed'), t))
   }
 }
 
@@ -298,66 +384,15 @@ function canOpenOAuthExternally(): boolean {
   return Boolean(window.api?.desktop?.openExternalUrl)
 }
 
-async function openOAuthURL(url: string): Promise<Window | null> {
-  const desktopOpenExternal = window.api?.desktop?.openExternalUrl
-  if (desktopOpenExternal) {
-    await desktopOpenExternal(url)
-    return null
-  }
-  return window.open(url, 'mcp-oauth', 'width=600,height=700')
-}
-
-function waitForMCPOAuth(botId: string, installationId: string, popup: Window | null): Promise<void> {
-  return new Promise((resolve, reject) => {
-    let completed = false
-    const startedAt = Date.now()
-    let pollTimer: ReturnType<typeof setInterval> | undefined
-
-    const finish = (status: 'success' | 'error', error?: string) => {
-      if (completed) return
-      completed = true
-      if (pollTimer) clearInterval(pollTimer)
-      window.removeEventListener('message', onMessage)
-      if (status === 'success') {
-        resolve()
-      } else {
-        reject(new Error(error || t('mcp.oauth.authFailed')))
-      }
-    }
-
-    const onMessage = (event: MessageEvent) => {
-      if (event.data?.type !== 'mcp-oauth-callback') return
-      finish(event.data.status === 'success' ? 'success' : 'error', event.data.error)
-    }
-
-    window.addEventListener('message', onMessage)
-    pollTimer = setInterval(() => {
-      getBotsByBotIdPluginsByIdOauthStatus({
-        path: { bot_id: botId, id: installationId },
-        throwOnError: true,
-      }).then(({ data }) => {
-        if (completed) return
-        if (data.status === 'ready' || data.enabled) {
-          finish('success')
-          return
-        }
-        if ((popup && popup.closed) || Date.now() - startedAt > 120_000) {
-          finish('error')
-        }
-      }).catch(() => {
-        if (!completed && ((popup && popup.closed) || Date.now() - startedAt > 120_000)) {
-          finish('error')
-        }
-      })
-    }, 2000)
-  })
-}
-
-async function syncOAuthStatus(botId: string, installationId: string): Promise<PluginsInstallation> {
+async function fetchOAuthStatus(botId: string, installationId: string): Promise<PluginsInstallation> {
   const { data } = await getBotsByBotIdPluginsByIdOauthStatus({
     path: { bot_id: botId, id: installationId },
     throwOnError: true,
   })
   return data
+}
+
+async function syncOAuthStatus(botId: string, installationId: string): Promise<PluginsInstallation> {
+  return fetchOAuthStatus(botId, installationId)
 }
 </script>

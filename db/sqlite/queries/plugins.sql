@@ -49,6 +49,15 @@ SET status = sqlc.arg(status),
 WHERE bot_id = sqlc.arg(bot_id) AND id = sqlc.arg(id)
 RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at;
 
+-- name: UpdateBotPluginInstallationConfig :one
+UPDATE bot_plugin_installations
+SET status = sqlc.arg(status),
+    enabled = sqlc.arg(enabled),
+    config = sqlc.arg(config),
+    updated_at = CURRENT_TIMESTAMP
+WHERE bot_id = sqlc.arg(bot_id) AND id = sqlc.arg(id)
+RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at;
+
 -- name: DeleteBotPluginInstallation :exec
 DELETE FROM bot_plugin_installations
 WHERE bot_id = sqlc.arg(bot_id) AND id = sqlc.arg(id);

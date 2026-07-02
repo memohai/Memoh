@@ -204,6 +204,50 @@ func (q *Queries) ListBotPluginResources(ctx context.Context, installationID pgt
 	return items, nil
 }
 
+const updateBotPluginInstallationConfig = `-- name: UpdateBotPluginInstallationConfig :one
+UPDATE bot_plugin_installations
+SET status = $3,
+    enabled = $4,
+    config = $5,
+    updated_at = now()
+WHERE bot_id = $1 AND id = $2
+RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at
+`
+
+type UpdateBotPluginInstallationConfigParams struct {
+	BotID   pgtype.UUID `json:"bot_id"`
+	ID      pgtype.UUID `json:"id"`
+	Status  string      `json:"status"`
+	Enabled bool        `json:"enabled"`
+	Config  []byte      `json:"config"`
+}
+
+func (q *Queries) UpdateBotPluginInstallationConfig(ctx context.Context, arg UpdateBotPluginInstallationConfigParams) (BotPluginInstallation, error) {
+	row := q.db.QueryRow(ctx, updateBotPluginInstallationConfig,
+		arg.BotID,
+		arg.ID,
+		arg.Status,
+		arg.Enabled,
+		arg.Config,
+	)
+	var i BotPluginInstallation
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.PluginID,
+		&i.PluginName,
+		&i.Version,
+		&i.Status,
+		&i.Enabled,
+		&i.Config,
+		&i.Metadata,
+		&i.Manifest,
+		&i.InstalledAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateBotPluginInstallationStatus = `-- name: UpdateBotPluginInstallationStatus :one
 UPDATE bot_plugin_installations
 SET status = $3,

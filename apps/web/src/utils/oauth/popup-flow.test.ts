@@ -238,6 +238,105 @@ describe('startOAuthPopupFlow', () => {
     expect(onAuthorized).toHaveBeenCalledTimes(1)
   })
 
+  it('aborts when a status poll error matches an abort condition', async () => {
+    const onError = vi.fn()
+    const onAborted = vi.fn()
+    const pollStatus = vi.fn(async () => {
+      throw new Error('installation not found')
+    })
+
+    startOAuthPopupFlow({
+      popup,
+      target,
+      messageType: 'memoh-oauth-success',
+      pollIntervalMs: 1_000,
+      timeoutMs: 60_000,
+      pollStatus,
+      isAuthorized: () => false,
+      abortOnPollError: error => error instanceof Error && error.message.includes('not found') ? 'cancelled' : false,
+      onAuthorized: vi.fn(),
+      onAborted,
+      onError,
+    })
+
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(onAborted).toHaveBeenCalledWith('cancelled')
+    expect(onError).not.toHaveBeenCalled()
+    expect(closePopup).toHaveBeenCalledTimes(1)
+    expect(removeEventListenerSpy).toHaveBeenCalledWith('message', expect.any(Function))
+  })
+
+  it('routes callback error messages to onError and stops the popup flow', async () => {
+    const onError = vi.fn()
+    const onFailed = vi.fn()
+    const onAuthorized = vi.fn(async () => {})
+    const onAborted = vi.fn()
+    const pollStatus = vi.fn(async () => null)
+
+    startOAuthPopupFlow({
+      popup,
+      target,
+      messageType: 'memoh-oauth-success',
+      messageMatches: event => event.data?.status === 'success',
+      messageError: event => event.data?.status === 'error'
+        ? new Error(String(event.data?.error || 'Authorization failed'))
+        : null,
+      pollIntervalMs: 1_000,
+      timeoutMs: 5_000,
+      pollStatus,
+      isAuthorized: () => false,
+      onAuthorized,
+      onAborted,
+      onFailed,
+      onError,
+    })
+
+    target.dispatchEvent(messageEvent({ type: 'memoh-oauth-success', status: 'error', error: 'access denied' }))
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    expect(onAuthorized).not.toHaveBeenCalled()
+    expect(onAborted).not.toHaveBeenCalled()
+    expect(onError).toHaveBeenCalledTimes(1)
+    expect(onFailed).toHaveBeenCalledTimes(1)
+    expect(onError.mock.calls[0]?.[0]).toMatchObject({ message: 'access denied' })
+    expect(pollStatus).not.toHaveBeenCalled()
+    expect(closePopup).toHaveBeenCalledTimes(1)
+    expect(removeEventListenerSpy).toHaveBeenCalledWith('message', expect.any(Function))
+  })
+
+  it('reports throwing abort classifiers and keeps polling', async () => {
+    const onError = vi.fn()
+    const onAuthorized = vi.fn(async () => {})
+    const pollStatus = vi.fn<() => Promise<{ has_token: boolean } | null>>()
+    pollStatus.mockRejectedValueOnce(new Error('poll failed'))
+    pollStatus.mockResolvedValue({ has_token: true })
+
+    startOAuthPopupFlow({
+      popup,
+      target,
+      messageType: 'memoh-oauth-success',
+      pollIntervalMs: 1_000,
+      timeoutMs: 60_000,
+      pollStatus,
+      isAuthorized: status => Boolean(status?.has_token),
+      abortOnPollError: () => {
+        throw new Error('classifier failed')
+      },
+      onAuthorized,
+      onAborted: vi.fn(),
+      onError,
+    })
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(onError).toHaveBeenCalledTimes(2)
+    expect(onAuthorized).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(pollStatus).toHaveBeenCalledTimes(2)
+    expect(onAuthorized).toHaveBeenCalledTimes(1)
+  })
+
   it('routes onAuthorized failures to onError', async () => {
     const onError = vi.fn()
     const onAuthorized = vi.fn(async () => {
@@ -261,6 +360,90 @@ describe('startOAuthPopupFlow', () => {
     await vi.runAllTimersAsync()
 
     expect(onAuthorized).toHaveBeenCalledTimes(1)
+    expect(onError).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes synchronous onAuthorized throws to onError', async () => {
+    const onError = vi.fn()
+
+    startOAuthPopupFlow({
+      popup,
+      target,
+      messageType: 'memoh-oauth-success',
+      pollIntervalMs: 1_000,
+      timeoutMs: 5_000,
+      pollStatus: vi.fn(async () => null),
+      isAuthorized: () => false,
+      onAuthorized: () => {
+        throw new Error('save failed')
+      },
+      onAborted: vi.fn(),
+      onError,
+    })
+
+    target.dispatchEvent(messageEvent({ type: 'memoh-oauth-success' }))
+    await vi.runAllTimersAsync()
+
+    expect(onError).toHaveBeenCalledTimes(1)
+    expect(onError.mock.calls[0]?.[0]).toMatchObject({ message: 'save failed' })
+  })
+
+  it('routes synchronous pollStatus throws to onError and keeps polling', async () => {
+    const onError = vi.fn()
+    const onAuthorized = vi.fn(async () => {})
+    const pollStatus = vi.fn<() => Promise<{ has_token: boolean } | null> | { has_token: boolean } | null>()
+    pollStatus.mockImplementationOnce(() => {
+      throw new Error('poll failed')
+    })
+    pollStatus.mockResolvedValue({ has_token: true })
+
+    startOAuthPopupFlow({
+      popup,
+      target,
+      messageType: 'memoh-oauth-success',
+      pollIntervalMs: 1_000,
+      timeoutMs: 60_000,
+      pollStatus: pollStatus as () => Promise<{ has_token: boolean } | null>,
+      isAuthorized: status => Boolean(status?.has_token),
+      onAuthorized,
+      onAborted: vi.fn(),
+      onError,
+    })
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(onError).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(pollStatus).toHaveBeenCalledTimes(2)
+    expect(onAuthorized).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes synchronous callback classifier throws to onFailed', async () => {
+    const onError = vi.fn()
+    const onFailed = vi.fn()
+
+    startOAuthPopupFlow({
+      popup,
+      target,
+      messageType: 'memoh-oauth-success',
+      messageError: () => {
+        throw new Error('classifier failed')
+      },
+      pollIntervalMs: 1_000,
+      timeoutMs: 5_000,
+      pollStatus: vi.fn(async () => null),
+      isAuthorized: () => false,
+      onAuthorized: vi.fn(),
+      onAborted: vi.fn(),
+      onFailed,
+      onError,
+    })
+
+    target.dispatchEvent(messageEvent({ type: 'memoh-oauth-success' }))
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    expect(onFailed).toHaveBeenCalledTimes(1)
+    expect(onFailed.mock.calls[0]?.[0]).toMatchObject({ message: 'classifier failed' })
     expect(onError).toHaveBeenCalledTimes(1)
   })
 })

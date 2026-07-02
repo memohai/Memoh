@@ -16,6 +16,12 @@ const (
 	StatusUninstalled   = "uninstalled"
 )
 
+var (
+	ErrManagedMCPNameConflict = errors.New("managed MCP name conflict")
+	ErrPluginAlreadyInstalled = errors.New("plugin is already installed")
+	ErrPluginMCPProbeFailed   = errors.New("plugin MCP probe failed")
+)
+
 type Icon struct {
 	Kind string `json:"kind,omitempty"`
 	Name string `json:"name,omitempty"`
@@ -28,11 +34,17 @@ type Author struct {
 }
 
 type ConfigVar struct {
-	Key          string `json:"key"`
-	Description  string `json:"description,omitempty"`
-	DefaultValue string `json:"defaultValue,omitempty"`
-	Required     bool   `json:"required,omitempty"`
-	Secret       bool   `json:"secret,omitempty"`
+	Key          string            `json:"key"`
+	Description  string            `json:"description,omitempty"`
+	DefaultValue string            `json:"defaultValue,omitempty"`
+	Required     bool              `json:"required,omitempty"`
+	Secret       bool              `json:"secret,omitempty"`
+	Options      []ConfigVarOption `json:"options,omitempty"`
+}
+
+type ConfigVarOption struct {
+	Label string `json:"label,omitempty"`
+	Value string `json:"value" validate:"required"`
 }
 
 type AuthRequirement struct {
@@ -58,6 +70,7 @@ type MCPResource struct {
 	AuthRef      string      `json:"auth_ref,omitempty"`
 	Visibility   string      `json:"visibility,omitempty"`
 	Capabilities []string    `json:"capabilities,omitempty"`
+	AllowedTools []string    `json:"allowed_tools,omitempty"`
 }
 
 type SkillResource struct {
@@ -127,6 +140,10 @@ type Manifest struct {
 
 type InstallRequest struct {
 	Manifest  Manifest          `json:"manifest"`
+	Variables map[string]string `json:"variables,omitempty"`
+}
+
+type UpdateConfigRequest struct {
 	Variables map[string]string `json:"variables,omitempty"`
 }
 

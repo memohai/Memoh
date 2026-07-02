@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -256,8 +257,17 @@ func stringValue(value reflect.Value) string {
 		if !value.FieldByName("Valid").Bool() {
 			return ""
 		}
-		if stringer, ok := value.Interface().(fmt.Stringer); ok {
-			return stringer.String()
+		bytes := value.FieldByName("Bytes")
+		if bytes.IsValid() && bytes.Kind() == reflect.Array && bytes.Len() == 16 {
+			var id uuid.UUID
+			for i := 0; i < 16; i++ {
+				byteValue := bytes.Index(i).Uint()
+				if byteValue > 255 {
+					return ""
+				}
+				id[i] = byte(byteValue)
+			}
+			return id.String()
 		}
 	}
 	if isPGTimestamptz(value.Type()) {

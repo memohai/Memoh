@@ -34,6 +34,15 @@ SET status = $3,
 WHERE bot_id = $1 AND id = $2
 RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at;
 
+-- name: UpdateBotPluginInstallationConfig :one
+UPDATE bot_plugin_installations
+SET status = $3,
+    enabled = $4,
+    config = $5,
+    updated_at = now()
+WHERE bot_id = $1 AND id = $2
+RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at;
+
 -- name: DeleteBotPluginInstallation :exec
 DELETE FROM bot_plugin_installations
 WHERE bot_id = $1 AND id = $2;

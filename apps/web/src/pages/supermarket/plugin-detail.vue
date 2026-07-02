@@ -86,16 +86,16 @@
       </p>
 
       <section
-        v-if="plugin.mcps?.length"
+        v-if="pluginMcps.length"
         class="mt-8"
       >
         <h2 class="text-lg font-semibold">
           {{ $t('supermarket.mcps') }}
-          <span class="ml-1 text-muted-foreground">{{ plugin.mcps.length }}</span>
+          <span class="ml-1 text-muted-foreground">{{ pluginMcps.length }}</span>
         </h2>
         <div class="mt-4 divide-y divide-border/60">
           <div
-            v-for="mcp in plugin.mcps"
+            v-for="mcp in pluginMcps"
             :key="mcp.key || mcp.name"
             class="flex min-w-0 items-center gap-3 py-4"
           >
@@ -111,11 +111,11 @@
                   {{ mcp.display_name || mcp.name || mcp.key }}
                 </p>
                 <Badge
-                  v-if="authTypeForMcp(mcp.key)"
+                  v-if="mcp.authType"
                   variant="secondary"
                   size="sm"
                 >
-                  {{ authTypeLabel(authTypeForMcp(mcp.key)) }}
+                  {{ authTypeLabel(mcp.authType) }}
                 </Badge>
               </div>
               <p class="mt-1 break-words text-sm text-muted-foreground">
@@ -217,7 +217,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ArrowLeft, Boxes, Download, ExternalLink, PackageOpen, Plug } from 'lucide-vue-next'
 import { Badge, Button, Spinner, toast } from '@memohai/ui'
-import { getSupermarketPluginsById, type PluginsManifest, type PluginsSkillEntry, type PluginsSkillResource } from '@memohai/sdk'
+import { getSupermarketPluginsById, type PluginsManifest, type PluginsMcpResource, type PluginsSkillEntry, type PluginsSkillResource } from '@memohai/sdk'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import InstallPluginDialog from './components/install-plugin-dialog.vue'
@@ -260,8 +260,15 @@ const pluginSkills = computed<PluginSkill[]>(() => [
   ...(plugin.value?.skills ?? []),
 ])
 
+const pluginMcps = computed(() => (plugin.value?.mcps ?? []).map(mcp => ({
+  ...mcp,
+  authType: authTypeForMcp(mcp),
+})))
+
 function skillKey(skill: PluginSkill) {
-  return 'id' in skill ? skill.id : skill.key
+  if ('id' in skill && skill.id) return skill.id
+  if ('key' in skill && skill.key) return skill.key
+  return skillName(skill)
 }
 
 function skillName(skill: PluginSkill) {
@@ -277,9 +284,14 @@ function skillDescription(skill: PluginSkill) {
   return t('supermarket.noDescription')
 }
 
-function authTypeForMcp(key?: string) {
-  if (!key) return ''
-  return plugin.value?.auth_requirements?.find(item => item.key === key)?.type || ''
+function authTypeForMcp(mcp: PluginsMcpResource) {
+  const authKey = mcp.auth_ref || mcp.key
+  const requirements = plugin.value?.auth_requirements ?? []
+  if (authKey) {
+    const exact = requirements.find(item => item.key === authKey)
+    if (exact?.type) return exact.type
+  }
+  return requirements.length === 1 ? requirements[0]?.type || '' : ''
 }
 
 function authTypeLabel(type?: string) {

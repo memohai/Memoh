@@ -736,8 +736,14 @@ func injectACPToolProviders(source *agenttools.NativeToolSource, toolProviders [
 func provideToolGatewayService(log *slog.Logger, fedGateway *handlers.MCPFederationGateway, oauthService *mcp.OAuthService, mcpConnService *mcp.ConnectionService, containerdHandler *handlers.ContainerdHandler, nativeSource *agenttools.NativeToolSource, toolContexts *mcp.ToolSessionContextStore, cfg config.Config) *mcp.ToolGatewayService {
 	fedGateway.SetOAuthService(oauthService)
 	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService, mcpfederation.WithReservedToolName(agenttools.IsBuiltInToolName))
+	if mcpConnService != nil {
+		mcpConnService.AddChangeListener(fedSource.InvalidateBot)
+	}
 	limits := agentLimitsFromConfig(cfg.Agent)
 	svc := mcp.NewToolGatewayService(log, []mcp.ToolSource{nativeSource, fedSource}, mcp.WithToolOutputLimit(limits.ToolOutputLimit()))
+	if mcpConnService != nil {
+		mcpConnService.AddChangeListener(svc.InvalidateBot)
+	}
 	containerdHandler.SetToolGatewayService(svc)
 	containerdHandler.SetToolSessionContextStore(toolContexts)
 	return svc
@@ -767,6 +773,9 @@ func provideToolProviders(log *slog.Logger, channelManager *channel.Manager, reg
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
 	}
 	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService, mcpfederation.WithReservedToolName(agenttools.IsBuiltInToolName))
+	if mcpConnService != nil {
+		mcpConnService.AddChangeListener(fedSource.InvalidateBot)
+	}
 	return []agenttools.ToolProvider{
 		agenttools.NewAskUserProvider(log),
 		agenttools.NewMessageProvider(log, channelManager, channelManager, registry, assetResolver),

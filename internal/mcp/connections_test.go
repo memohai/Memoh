@@ -1,7 +1,15 @@
 package mcp
 
 import (
+	"context"
+	"database/sql"
+	"errors"
+	"log/slog"
 	"testing"
+
+	"github.com/memohai/memoh/internal/config"
+	"github.com/memohai/memoh/internal/db"
+	sqlitestore "github.com/memohai/memoh/internal/db/sqlite/store"
 )
 
 func TestInferTypeAndConfig_Stdio(t *testing.T) {
@@ -171,3 +179,158 @@ func TestEntryToUpsertRequest(t *testing.T) {
 		t.Fatalf("expected 2 args, got %v", req.Args)
 	}
 }
+
+func TestUpdateProbeResultNotifiesChangeListeners(t *testing.T) {
+	ctx := context.Background()
+	conn, service := newConnectionServiceTestDB(t, ctx)
+	botID := "00000000-0000-0000-0000-000000000202"
+	connectionID := "00000000-0000-0000-0000-000000000203"
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO users(id, email, role) VALUES('00000000-0000-0000-0000-000000000201', 'mcp-test@example.com', 'member');
+INSERT INTO bots(id, owner_user_id, type, name, display_name)
+VALUES(?, '00000000-0000-0000-0000-000000000201', 'personal', 'mcp-test-bot', 'MCP Test Bot');
+INSERT INTO mcp_connections(id, bot_id, name, type, config)
+VALUES(?, ?, 'docs', 'http', '{"url":"https://example.test/mcp"}');
+`, botID, connectionID, botID); err != nil {
+		t.Fatalf("insert fixture: %v", err)
+	}
+
+	var notified []string
+	service.AddChangeListener(func(botID string) {
+		notified = append(notified, botID)
+	})
+
+	err := service.UpdateProbeResult(ctx, botID, connectionID, "connected", []ToolDescriptor{
+		{Name: "search", InputSchema: map[string]any{"type": "object"}},
+	}, "")
+	if err != nil {
+		t.Fatalf("UpdateProbeResult() error = %v", err)
+	}
+	if len(notified) != 1 || notified[0] != botID {
+		t.Fatalf("change notifications = %#v, want [%s]", notified, botID)
+	}
+}
+
+func TestManagedConnectionRejectsDirectUpdateDeleteAndImport(t *testing.T) {
+	ctx := context.Background()
+	conn, service := newConnectionServiceTestDB(t, ctx)
+	botID := "00000000-0000-0000-0000-000000000202"
+	installationID := "00000000-0000-0000-0000-000000000214"
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO users(id, email, role) VALUES('00000000-0000-0000-0000-000000000211', 'mcp-managed-test@example.com', 'member');
+INSERT INTO bots(id, owner_user_id, type, name, display_name)
+VALUES(?, '00000000-0000-0000-0000-000000000211', 'personal', 'mcp-managed-test-bot', 'MCP Managed Test Bot');
+CREATE TABLE bot_plugin_installations (
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  plugin_id TEXT NOT NULL,
+  plugin_name TEXT NOT NULL DEFAULT '',
+  version TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'ready',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  config TEXT NOT NULL DEFAULT '{}',
+  metadata TEXT NOT NULL DEFAULT '{}',
+  manifest TEXT NOT NULL DEFAULT '{}',
+  installed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+INSERT INTO bot_plugin_installations(id, bot_id, plugin_id, plugin_name, manifest)
+VALUES(?, ?, 'stripe', 'Stripe', '{}');
+`, botID, installationID, botID); err != nil {
+		t.Fatalf("insert fixture: %v", err)
+	}
+	managed, err := service.CreateManaged(ctx, botID, UpsertRequest{
+		Name: "stripe_stripe",
+		URL:  "https://mcp.stripe.com",
+	}, ManagedConnectionRequest{
+		InstallationID: installationID,
+		ResourceKey:    "stripe",
+	})
+	if err != nil {
+		t.Fatalf("CreateManaged() error = %v", err)
+	}
+	connectionID := managed.ID
+
+	_, err = service.Update(ctx, botID, connectionID, UpsertRequest{
+		Name: "stripe_stripe",
+		URL:  "https://example.test/mcp",
+	})
+	if !errors.Is(err, ErrManagedConnection) {
+		t.Fatalf("Update() error = %v, want ErrManagedConnection", err)
+	}
+	if err := service.Delete(ctx, botID, connectionID); !errors.Is(err, ErrManagedConnection) {
+		t.Fatalf("Delete() error = %v, want ErrManagedConnection", err)
+	}
+	_, err = service.Import(ctx, botID, ImportRequest{MCPServers: map[string]MCPServerEntry{
+		"stripe_stripe": {URL: "https://example.test/mcp"},
+	}})
+	if !errors.Is(err, ErrManagedConnection) {
+		t.Fatalf("Import() error = %v, want ErrManagedConnection", err)
+	}
+
+	var url string
+	if err := conn.QueryRowContext(ctx, `SELECT json_extract(config, '$.url') FROM mcp_connections WHERE id = ?`, connectionID).Scan(&url); err != nil {
+		t.Fatalf("select managed mcp config: %v", err)
+	}
+	if url != "https://mcp.stripe.com" {
+		t.Fatalf("managed MCP URL = %q, want original URL", url)
+	}
+}
+
+func newConnectionServiceTestDB(t *testing.T, ctx context.Context) (*sql.DB, *ConnectionService) {
+	t.Helper()
+	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	if _, err := conn.ExecContext(ctx, connectionServiceTestSchema); err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+	store, err := sqlitestore.New(conn)
+	if err != nil {
+		t.Fatalf("new sqlite store: %v", err)
+	}
+	queries := sqlitestore.NewQueries(store)
+	logger := slog.New(slog.DiscardHandler)
+	return conn, NewConnectionService(logger, queries)
+}
+
+const connectionServiceTestSchema = `
+CREATE TABLE users (
+  id TEXT PRIMARY KEY,
+  email TEXT,
+  role TEXT NOT NULL DEFAULT 'member'
+);
+
+CREATE TABLE bots (
+  id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL DEFAULT 'personal',
+  name TEXT NOT NULL,
+  display_name TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE mcp_connections (
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  config TEXT NOT NULL DEFAULT '{}',
+  is_active INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'unknown',
+  tools_cache TEXT NOT NULL DEFAULT '[]',
+  last_probed_at TEXT,
+  status_message TEXT NOT NULL DEFAULT '',
+  auth_type TEXT NOT NULL DEFAULT 'none',
+  managed_by_plugin_installation_id TEXT,
+  managed_resource_key TEXT NOT NULL DEFAULT '',
+  visible INTEGER NOT NULL DEFAULT 1,
+  metadata TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT mcp_connections_type_check CHECK (type IN ('stdio', 'http', 'sse')),
+  CONSTRAINT mcp_connections_unique UNIQUE (bot_id, name)
+);
+`

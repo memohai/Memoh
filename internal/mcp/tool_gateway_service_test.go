@@ -88,6 +88,44 @@ func TestToolGatewayServiceCacheSeparatesSessionID(t *testing.T) {
 	}
 }
 
+func TestToolGatewayServiceInvalidateBotClearsRegistryCache(t *testing.T) {
+	provider := &mutableGatewayTestProvider{
+		tools: []ToolDescriptor{{Name: "old_tool", InputSchema: map[string]any{"type": "object"}}},
+	}
+	service := NewToolGatewayService(slog.Default(), []ToolSource{provider})
+	session := ToolSessionContext{
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		SessionType: "chat",
+	}
+
+	tools, err := service.ListTools(context.Background(), session)
+	if err != nil {
+		t.Fatalf("list tools failed: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name != "old_tool" {
+		t.Fatalf("tools = %#v, want old_tool", tools)
+	}
+
+	provider.tools = []ToolDescriptor{{Name: "new_tool", InputSchema: map[string]any{"type": "object"}}}
+	tools, err = service.ListTools(context.Background(), session)
+	if err != nil {
+		t.Fatalf("list cached tools failed: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name != "old_tool" {
+		t.Fatalf("tools = %#v, want stale old_tool before invalidation", tools)
+	}
+
+	service.InvalidateBot("bot-1")
+	tools, err = service.ListTools(context.Background(), session)
+	if err != nil {
+		t.Fatalf("list tools after invalidation failed: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name != "new_tool" {
+		t.Fatalf("tools = %#v, want new_tool after invalidation", tools)
+	}
+}
+
 func TestToolGatewayServiceCacheSeparatesStreamID(t *testing.T) {
 	provider := &countingGatewayTestProvider{}
 	service := NewToolGatewayService(slog.Default(), []ToolSource{provider})
