@@ -50,16 +50,22 @@ func selectHistoryRecordsForBudget(records []historyfrag.HistoryRecord, maxToken
 	if totalTokens <= maxTokens && !historyBudgetGroupsHaveOverflowDrop(groups) {
 		return records, false, totalTokens
 	}
-	selected := make(map[int]historyfrag.HistoryRecord, len(records))
+	forceKeep := make([]historyBudgetGroup, 0, len(groups))
 	usedTokens := 0
 	for _, group := range groups {
 		if !group.forceKeep {
 			continue
 		}
+		forceKeep = append(forceKeep, group)
+		usedTokens += group.tokens
+	}
+	forceKeep, usedTokens = demoteOldestSummariesOverBudget(forceKeep, usedTokens, maxTokens)
+
+	selected := make(map[int]historyfrag.HistoryRecord, len(records))
+	for _, group := range forceKeep {
 		for _, item := range group.items {
 			selected[item.index] = item.record
 		}
-		usedTokens += group.tokens
 	}
 
 	remaining := maxTokens - usedTokens
@@ -97,6 +103,48 @@ func selectHistoryRecordsForBudget(records []historyfrag.HistoryRecord, maxToken
 	}
 	retained = dropOrphanToolRecords(retained)
 	return retained, len(retained) != len(records), totalTokens
+}
+
+// demoteOldestSummariesOverBudget bounds the force-keep set: when accumulated
+// summaries exceed maxTokens the oldest are demoted first, but the newest
+// summary always survives so the session keeps at least one condensed view of
+// its earlier history. Non-summary force-keeps (tool closures, the current
+// trigger) are never demoted.
+func demoteOldestSummariesOverBudget(forceKeep []historyBudgetGroup, usedTokens, maxTokens int) ([]historyBudgetGroup, int) {
+	if usedTokens <= maxTokens {
+		return forceKeep, usedTokens
+	}
+	summaryOldestFirst := make([]int, 0, len(forceKeep))
+	for gi, group := range forceKeep {
+		if len(group.items) == 1 && summaryMessageKey(group.items[0].record) != "" {
+			summaryOldestFirst = append(summaryOldestFirst, gi)
+		}
+	}
+	if len(summaryOldestFirst) < 2 {
+		return forceKeep, usedTokens
+	}
+	sort.SliceStable(summaryOldestFirst, func(i, j int) bool {
+		return forceKeep[summaryOldestFirst[i]].newest < forceKeep[summaryOldestFirst[j]].newest
+	})
+	demoted := make(map[int]struct{})
+	for _, gi := range summaryOldestFirst[:len(summaryOldestFirst)-1] {
+		if usedTokens <= maxTokens {
+			break
+		}
+		demoted[gi] = struct{}{}
+		usedTokens -= forceKeep[gi].tokens
+	}
+	if len(demoted) == 0 {
+		return forceKeep, usedTokens
+	}
+	kept := make([]historyBudgetGroup, 0, len(forceKeep))
+	for gi, group := range forceKeep {
+		if _, ok := demoted[gi]; ok {
+			continue
+		}
+		kept = append(kept, group)
+	}
+	return kept, usedTokens
 }
 
 func contextSourceTokenBudget(maxTokens int, reserve contextSourceReserve) int {

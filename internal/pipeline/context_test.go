@@ -717,3 +717,93 @@ func messageContents(messages []ContextMessage) []string {
 	}
 	return out
 }
+
+func TestBudgetSourceGroupsKeepInterleavedResultsGrouped(t *testing.T) {
+	t.Parallel()
+
+	trs := []TurnResponseEntry{
+		{
+			RequestedAtMs: 100,
+			Role:          "assistant",
+			Content:       "call x",
+			RawContent:    []byte(`[{"type":"tool-call","toolCallId":"call-x","toolName":"lookup","input":{}}]`),
+		},
+		{
+			RequestedAtMs: 110,
+			Role:          "assistant",
+			Content:       "call a and b",
+			RawContent:    []byte(`[{"type":"tool-call","toolCallId":"call-a","toolName":"lookup","input":{}},{"type":"tool-call","toolCallId":"call-b","toolName":"lookup","input":{}}]`),
+		},
+		{
+			RequestedAtMs: 120,
+			Role:          "tool",
+			Content:       "result a",
+			RawContent:    []byte(`[{"type":"tool-result","toolCallId":"call-a","toolName":"lookup","output":{"ok":true}}]`),
+		},
+		{
+			RequestedAtMs: 130,
+			Role:          "tool",
+			Content:       "result x",
+			RawContent:    []byte(`[{"type":"tool-result","toolCallId":"call-x","toolName":"lookup","output":{"ok":true}}]`),
+		},
+		{
+			RequestedAtMs: 140,
+			Role:          "tool",
+			Content:       "result b",
+			RawContent:    []byte(`[{"type":"tool-result","toolCallId":"call-b","toolName":"lookup","output":{"ok":true}}]`),
+		},
+	}
+
+	groups := budgetSourceGroups(nil, trs, CompactSummary{})
+
+	grouped := make(map[int]int)
+	for gi, group := range groups {
+		for _, idx := range group.trIndices {
+			if prev, dup := grouped[idx]; dup {
+				t.Fatalf("tr %d belongs to groups %d and %d", idx, prev, gi)
+			}
+			grouped[idx] = gi
+		}
+	}
+	for i := range trs {
+		if _, ok := grouped[i]; !ok {
+			t.Fatalf("tr %d (%s) belongs to no group and would always be dropped under budget", i, trs[i].Content)
+		}
+	}
+	if grouped[3] != grouped[0] {
+		t.Fatalf("interleaved result x must group with its call: groups %#v", grouped)
+	}
+	if grouped[2] != grouped[1] || grouped[4] != grouped[1] {
+		t.Fatalf("results a/b must group with their call: groups %#v", grouped)
+	}
+}
+
+func TestDropOrphanTurnResponseToolsKeepsResultsAcrossInterveningRows(t *testing.T) {
+	t.Parallel()
+
+	trs := []TurnResponseEntry{
+		{
+			RequestedAtMs: 100,
+			Role:          "assistant",
+			Content:       "ask user",
+			RawContent:    []byte(`[{"type":"tool-call","toolCallId":"call-ask","toolName":"ask_user","input":{}}]`),
+		},
+		{
+			RequestedAtMs: 110,
+			Role:          "assistant",
+			Content:       "interim note",
+		},
+		{
+			RequestedAtMs: 120,
+			Role:          "tool",
+			Content:       "user answered",
+			RawContent:    []byte(`[{"type":"tool-result","toolCallId":"call-ask","toolName":"ask_user","result":{"status":"submitted"}}]`),
+		},
+	}
+
+	kept := dropOrphanTurnResponseTools(trs)
+
+	if len(kept) != 3 {
+		t.Fatalf("result separated from its call by another assistant row must be kept, got %#v", kept)
+	}
+}

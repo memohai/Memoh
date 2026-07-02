@@ -335,7 +335,11 @@ func budgetSourceGroups(rc RenderedContext, trs []TurnResponseEntry, compactSumm
 			forceKeep: isPostCompactRenderedSegment(seg, compactSummary) || i == latestTriggerIndex,
 		})
 	}
+	groupedToolIndices := make(map[int]struct{})
 	for i := 0; i < len(trs); i++ {
+		if _, ok := groupedToolIndices[i]; ok {
+			continue
+		}
 		group := budgetSourceGroup{
 			trIndices: []int{i},
 			tokens:    estimateTurnResponseTokens(trs[i]),
@@ -343,7 +347,10 @@ func budgetSourceGroups(rc RenderedContext, trs []TurnResponseEntry, compactSumm
 			time:      trs[i].RequestedAtMs,
 		}
 		if callIDs := turnResponseToolCallIDs(trs[i]); len(callIDs) > 0 {
-			for j := i + 1; j < len(trs) && strings.EqualFold(strings.TrimSpace(trs[j].Role), "tool"); j++ {
+			for j := i + 1; j < len(trs) && len(callIDs) > 0; j++ {
+				if !strings.EqualFold(strings.TrimSpace(trs[j].Role), "tool") {
+					continue
+				}
 				matchedIDs := turnResponseMatchingToolResultIDs(trs[j], callIDs)
 				if len(matchedIDs) == 0 {
 					continue
@@ -351,10 +358,10 @@ func budgetSourceGroups(rc RenderedContext, trs []TurnResponseEntry, compactSumm
 				group.trIndices = append(group.trIndices, j)
 				group.tokens += estimateTurnResponseTokens(trs[j])
 				group.time = max(group.time, trs[j].RequestedAtMs)
+				groupedToolIndices[j] = struct{}{}
 				for _, id := range matchedIDs {
 					delete(callIDs, id)
 				}
-				i = j
 			}
 		}
 		groups = append(groups, group)
@@ -457,10 +464,6 @@ func turnResponseToolCallIDs(tr TurnResponseEntry) map[string]struct{} {
 	return ids
 }
 
-func turnResponseHasMatchingToolResult(tr TurnResponseEntry, callIDs map[string]struct{}) bool {
-	return len(turnResponseMatchingToolResultIDs(tr, callIDs)) > 0
-}
-
 func turnResponseMatchingToolResultIDs(tr TurnResponseEntry, callIDs map[string]struct{}) []string {
 	if len(callIDs) == 0 || !strings.EqualFold(strings.TrimSpace(tr.Role), "tool") {
 		return nil
@@ -483,25 +486,35 @@ func turnResponseMatchingToolResultIDs(tr TurnResponseEntry, callIDs map[string]
 	return matched
 }
 
-func deleteTurnResponseToolResultIDs(callIDs map[string]struct{}, tr TurnResponseEntry) {
-	for _, id := range turnResponseMatchingToolResultIDs(tr, callIDs) {
-		delete(callIDs, id)
-	}
-}
-
+// dropOrphanTurnResponseTools mirrors the flow path's dropOrphanToolRecords:
+// call ids are collected across the whole slice so a result separated from its
+// call by other rows is still recognized, and duplicate results for an already
+// consumed call id are dropped.
 func dropOrphanTurnResponseTools(trs []TurnResponseEntry) []TurnResponseEntry {
 	out := trs[:0]
-	pendingToolCallIDs := map[string]struct{}{}
+	assistantCallIDs := make(map[string]struct{})
+	for _, tr := range trs {
+		for id := range turnResponseToolCallIDs(tr) {
+			assistantCallIDs[id] = struct{}{}
+		}
+	}
+	keptResultIDs := make(map[string]struct{})
 	for _, tr := range trs {
 		if strings.EqualFold(strings.TrimSpace(tr.Role), "tool") {
-			if turnResponseHasMatchingToolResult(tr, pendingToolCallIDs) {
+			keep := false
+			for _, id := range turnResponseMatchingToolResultIDs(tr, assistantCallIDs) {
+				if _, consumed := keptResultIDs[id]; consumed {
+					continue
+				}
+				keptResultIDs[id] = struct{}{}
+				keep = true
+			}
+			if keep {
 				out = append(out, tr)
-				deleteTurnResponseToolResultIDs(pendingToolCallIDs, tr)
 			}
 			continue
 		}
 		out = append(out, tr)
-		pendingToolCallIDs = turnResponseToolCallIDs(tr)
 	}
 	return out
 }

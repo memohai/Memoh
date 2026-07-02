@@ -809,3 +809,47 @@ func TestStripToolMessages_PreservesAskUserInteraction(t *testing.T) {
 		t.Fatalf("ask_user tool result was not preserved: %#v", resultParts)
 	}
 }
+
+func TestSelectHistoryRecordsForBudgetDemotesOldestSummariesWhenForceKeepOverflows(t *testing.T) {
+	t.Parallel()
+
+	oldest := historyfrag.SummaryRecord("compact-oldest", strings.Repeat("o", 2000), nil, contextfrag.Scope{})
+	middle := historyfrag.SummaryRecord("compact-middle", strings.Repeat("m", 2000), nil, contextfrag.Scope{})
+	newest := historyfrag.SummaryRecord("compact-newest", strings.Repeat("n", 2000), nil, contextfrag.Scope{})
+	raw := historyRecord("row-current", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("current question")}, nil)
+	records := []historyfrag.HistoryRecord{oldest, middle, newest, raw}
+
+	// Each summary is ~503 tokens; budget fits one summary plus the raw row.
+	retained, trimmed, _ := selectHistoryRecordsForBudget(records, 600)
+
+	if !trimmed {
+		t.Fatal("over-budget force-keep set must report trimming")
+	}
+	total := 0
+	for _, record := range retained {
+		total += estimateMessageTokens(record.ModelMessage)
+	}
+	if total > 600 {
+		t.Fatalf("retained %d tokens, want within the 600 budget", total)
+	}
+	keptSummaries := make(map[string]bool)
+	keptRaw := false
+	for _, record := range retained {
+		if record.Kind == contextfrag.KindConversationSummary {
+			keptSummaries[record.CompactID] = true
+			continue
+		}
+		if record.DBMessageID == "row-current" {
+			keptRaw = true
+		}
+	}
+	if !keptSummaries["compact-newest"] {
+		t.Fatalf("newest summary must survive demotion, kept %#v", keptSummaries)
+	}
+	if keptSummaries["compact-oldest"] || keptSummaries["compact-middle"] {
+		t.Fatalf("older summaries must be demoted first, kept %#v", keptSummaries)
+	}
+	if !keptRaw {
+		t.Fatal("raw current row should still fit after demotion")
+	}
+}
