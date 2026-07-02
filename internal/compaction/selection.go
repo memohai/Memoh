@@ -1,0 +1,476 @@
+package compaction
+
+import (
+	"encoding/json"
+	"strings"
+
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/memohai/memoh/internal/historyfrag"
+	messagepkg "github.com/memohai/memoh/internal/message"
+	"github.com/memohai/memoh/internal/userinput"
+)
+
+type CompactPolicy string
+
+const (
+	CompactPolicyCanDrop             CompactPolicy = "can_drop"
+	CompactPolicyPreserveRecent      CompactPolicy = "preserve_recent"
+	CompactPolicyPreserveToolClosure CompactPolicy = "preserve_tool_closure"
+	CompactPolicyMustKeep            CompactPolicy = "must_keep"
+)
+
+// CompactionCandidate is the typed view of one uncompacted history row used
+// during candidate selection. RawContent and RawUsage retain the raw row payload
+// so token estimation stays byte-identical to the legacy path; Record carries the
+// typed classifier output used for policies, tool-aware boundaries, and
+// summarizer rendering.
+type CompactionCandidate struct {
+	ID         pgtype.UUID
+	RawContent []byte
+	RawUsage   []byte
+	Record     historyfrag.HistoryRecord
+	Policies   []CompactPolicy
+}
+
+func (c CompactionCandidate) HasPolicy(policy CompactPolicy) bool {
+	for _, p := range c.Policies {
+		if p == policy {
+			return true
+		}
+	}
+	return false
+}
+
+// itemsFromRows classifies each uncompacted row into a typed CompactionCandidate.
+// A row that cannot be classified is skipped (and counted) rather than aborting
+// the whole compaction: it simply stays in active history to be retried, which
+// matches the legacy path's inability to fail at selection time.
+func itemsFromRows(rows []sqlc.ListUncompactedMessagesBySessionRow) ([]CompactionCandidate, int) {
+	items := make([]CompactionCandidate, 0, len(rows))
+	skipped := 0
+	for _, row := range rows {
+		record, err := historyfrag.FromDBMessage(rowToMessage(row), rowScopeFallback(row))
+		if err != nil {
+			skipped++
+			continue
+		}
+		items = append(items, CompactionCandidate{
+			ID:         row.ID,
+			RawContent: row.Content,
+			RawUsage:   row.Usage,
+			Record:     record,
+			Policies:   candidatePolicies(record),
+		})
+	}
+	if len(items) > 0 {
+		markSelectionPolicies(items)
+	}
+	return items, skipped
+}
+
+func markSelectionPolicies(items []CompactionCandidate) {
+	if latestUser := latestUserIndex(items); latestUser == 0 && len(items) > 1 {
+		tailStart := recentTailProtectedStart(items, 1)
+		for i := range items {
+			if i == 0 || i >= tailStart {
+				items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyPreserveRecent)
+				continue
+			}
+			if items[i].HasPolicy(CompactPolicyMustKeep) {
+				continue
+			}
+			items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyCanDrop)
+		}
+		return
+	}
+
+	start := recentProtectedStart(items)
+	for i := range items {
+		if i < start {
+			if !items[i].HasPolicy(CompactPolicyMustKeep) {
+				items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyCanDrop)
+			}
+			continue
+		}
+		items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyPreserveRecent)
+	}
+}
+
+func recentProtectedStart(items []CompactionCandidate) int {
+	if len(items) == 0 {
+		return 0
+	}
+	if latestUser := latestUserIndex(items); latestUser >= 0 {
+		return latestUser
+	}
+	return recentTailProtectedStart(items, 0)
+}
+
+func latestUserIndex(items []CompactionCandidate) int {
+	for i := len(items) - 1; i >= 0; i-- {
+		if strings.EqualFold(strings.TrimSpace(items[i].Record.ModelMessage.Role), "user") {
+			return i
+		}
+	}
+	return -1
+}
+
+func recentTailProtectedStart(items []CompactionCandidate, minStart int) int {
+	start := len(items) - 1
+	for start > minStart && isToolClosureResultItem(items[start]) {
+		start--
+	}
+	return start
+}
+
+func rowToMessage(row sqlc.ListUncompactedMessagesBySessionRow) messagepkg.Message {
+	return messagepkg.Message{
+		ID:                      formatUUID(row.ID),
+		BotID:                   formatUUID(row.BotID),
+		SessionID:               formatUUID(row.SessionID),
+		SenderChannelIdentityID: formatUUID(row.SenderChannelIdentityID),
+		SenderUserID:            formatUUID(row.SenderUserID),
+		SenderDisplayName:       textValue(row.SenderDisplayName),
+		SenderAvatarURL:         textValue(row.SenderAvatarUrl),
+		Platform:                textValue(row.Platform),
+		ExternalMessageID:       textValue(row.ExternalMessageID),
+		SourceReplyToMessageID:  textValue(row.SourceReplyToMessageID),
+		Role:                    row.Role,
+		Content:                 row.Content,
+		Metadata:                metadataMap(row.Metadata),
+		Usage:                   row.Usage,
+		CompactID:               formatUUID(row.CompactID),
+		EventID:                 formatUUID(row.EventID),
+		DisplayContent:          textValue(row.DisplayText),
+		CreatedAt:               row.CreatedAt.Time,
+	}
+}
+
+func rowScopeFallback(row sqlc.ListUncompactedMessagesBySessionRow) historyfrag.ScopeFallback {
+	return historyfrag.ScopeFallback{
+		ConversationType: textValue(row.ConversationType),
+		ConversationName: strings.TrimSpace(row.ConversationName),
+		ReplyTarget:      textValue(row.ReplyTarget),
+	}
+}
+
+func textValue(value pgtype.Text) string {
+	if !value.Valid {
+		return ""
+	}
+	return strings.TrimSpace(value.String)
+}
+
+func metadataMap(raw []byte) map[string]any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var out map[string]any
+	if json.Unmarshal(raw, &out) != nil {
+		return nil
+	}
+	return out
+}
+
+func candidatePolicies(record historyfrag.HistoryRecord) []CompactPolicy {
+	var policies []CompactPolicy
+	if isToolExchangeRecord(record) {
+		policies = appendPolicy(policies, CompactPolicyPreserveToolClosure)
+	}
+	if isAskUserRecord(record) {
+		policies = appendPolicy(policies, CompactPolicyMustKeep)
+		policies = appendPolicy(policies, CompactPolicyPreserveToolClosure)
+	}
+	return policies
+}
+
+func appendPolicy(policies []CompactPolicy, policy CompactPolicy) []CompactPolicy {
+	for _, p := range policies {
+		if p == policy {
+			return policies
+		}
+	}
+	return append(policies, policy)
+}
+
+func isToolExchangeRecord(record historyfrag.HistoryRecord) bool {
+	mm := record.ModelMessage
+	if strings.EqualFold(strings.TrimSpace(mm.Role), "tool") {
+		return true
+	}
+	if len(mm.ToolCalls) > 0 {
+		return true
+	}
+	for _, p := range parseEntryParts(mm.Content) {
+		if strings.Contains(p.Type, "tool-call") ||
+			strings.Contains(p.Type, "tool_call") ||
+			strings.Contains(p.Type, "tool-result") ||
+			strings.Contains(p.Type, "tool_result") {
+			return true
+		}
+	}
+	return false
+}
+
+func isAskUserRecord(record historyfrag.HistoryRecord) bool {
+	mm := record.ModelMessage
+	if isAskUserToolName(mm.Name) {
+		return true
+	}
+	for _, call := range mm.ToolCalls {
+		if isAskUserToolName(call.Function.Name) {
+			return true
+		}
+	}
+	for _, p := range parseEntryParts(mm.Content) {
+		if isAskUserToolName(p.ToolName) {
+			return true
+		}
+	}
+	return false
+}
+
+func isAskUserToolName(name string) bool {
+	return strings.EqualFold(strings.TrimSpace(name), userinput.ToolNameAskUser)
+}
+
+type usagePayload struct {
+	OutputTokens      *int `json:"outputTokens"`
+	OutputTokensSnake *int `json:"output_tokens"`
+}
+
+func estimateItemTokens(item CompactionCandidate) int {
+	if len(item.RawUsage) > 0 {
+		var u usagePayload
+		if json.Unmarshal(item.RawUsage, &u) == nil {
+			if u.OutputTokens != nil && *u.OutputTokens > 0 {
+				return *u.OutputTokens
+			}
+			if u.OutputTokensSnake != nil && *u.OutputTokensSnake > 0 {
+				return *u.OutputTokensSnake
+			}
+		}
+	}
+	return len(item.RawContent) / 4
+}
+
+func estimateCompactPromptTokens(item CompactionCandidate) int {
+	tokens := estimateItemTokens(item)
+	if header := renderEntryHeader(item.Record); header != "" {
+		tokens += estimateBytesAsTokens(header)
+	}
+	return tokens
+}
+
+func estimateBytesAsTokens(value string) int {
+	if value == "" {
+		return 0
+	}
+	return (len(value) + 3) / 4
+}
+
+// splitByRatio splits items so that roughly the first ratio% (by token weight)
+// are returned for compaction, and the rest are kept as-is.
+func splitByRatio(items []CompactionCandidate, totalInputTokens, ratio int) []CompactionCandidate {
+	if ratio <= 0 || totalInputTokens <= 0 || len(items) == 0 {
+		return nil
+	}
+	if ratio >= 100 {
+		return guardedCompactionItems(items, len(items))
+	}
+
+	keepTokens := totalInputTokens * (100 - ratio) / 100
+	if keepTokens <= 0 {
+		return guardedCompactionItems(items, len(items))
+	}
+
+	accumulated := 0
+	cutoff := len(items)
+	for i := len(items) - 1; i >= 0; i-- {
+		accumulated += estimateItemTokens(items[i])
+		if accumulated >= keepTokens {
+			cutoff = i + 1
+			break
+		}
+	}
+
+	if cutoff <= 0 {
+		return nil
+	}
+	return guardedCompactionItems(items, cutoff)
+}
+
+// splitByTarget returns the oldest items to compact so that the remaining newest
+// items fit within targetTokens. Used by synchronous compaction.
+func splitByTarget(items []CompactionCandidate, targetTokens int) []CompactionCandidate {
+	if targetTokens <= 0 || len(items) == 0 {
+		return nil
+	}
+	accumulated := 0
+	cutoff := 0
+	for i := len(items) - 1; i >= 0; i-- {
+		accumulated += estimateItemTokens(items[i])
+		if accumulated > targetTokens {
+			cutoff = i + 1
+			break
+		}
+	}
+	if cutoff <= 0 {
+		return nil
+	}
+	return guardedCompactionItems(items, cutoff)
+}
+
+func guardedCompactionItems(items []CompactionCandidate, cutoff int) []CompactionCandidate {
+	if cutoff <= 0 || len(items) == 0 {
+		return nil
+	}
+	protectedStart := firstPolicyStart(items, CompactPolicyPreserveRecent)
+	if protectedStart <= 0 {
+		return guardedCurrentTurnCompactionItems(items, cutoff)
+	}
+	if cutoff > protectedStart {
+		cutoff = protectedStart
+	}
+	cutoff = adjustForToolBoundary(items, cutoff)
+	if cutoff > protectedStart {
+		return nil
+	}
+	if cutoff <= 0 {
+		return nil
+	}
+	return dropMustKeepItems(items[:cutoff])
+}
+
+func guardedCurrentTurnCompactionItems(items []CompactionCandidate, cutoff int) []CompactionCandidate {
+	if len(items) <= 1 {
+		return nil
+	}
+	protectedTailStart := firstPolicyStartAfter(items, CompactPolicyPreserveRecent, 1)
+	if protectedTailStart <= 1 {
+		return nil
+	}
+	if cutoff > protectedTailStart {
+		cutoff = protectedTailStart
+	}
+	if cutoff <= 1 {
+		return nil
+	}
+	cutoff = adjustForToolBoundary(items, cutoff)
+	if cutoff > protectedTailStart {
+		return nil
+	}
+	return dropMustKeepItems(items[1:cutoff])
+}
+
+// dropMustKeepItems removes must-keep rows from a compact span so they stay in
+// raw history without capping how much of the surrounding span can compact.
+func dropMustKeepItems(items []CompactionCandidate) []CompactionCandidate {
+	kept := make([]CompactionCandidate, 0, len(items))
+	for _, item := range items {
+		if item.HasPolicy(CompactPolicyMustKeep) {
+			continue
+		}
+		kept = append(kept, item)
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return kept
+}
+
+func firstPolicyStart(items []CompactionCandidate, policy CompactPolicy) int {
+	return firstPolicyStartAfter(items, policy, 0)
+}
+
+func firstPolicyStartAfter(items []CompactionCandidate, policy CompactPolicy, start int) int {
+	if start < 0 {
+		start = 0
+	}
+	for i, item := range items {
+		if i < start {
+			continue
+		}
+		if item.HasPolicy(policy) {
+			return i
+		}
+	}
+	return len(items)
+}
+
+// adjustForToolBoundary moves the compact/keep cutoff forward so the kept
+// (newest) side never begins with an orphan tool result whose tool call is
+// being compacted. Tool results are pulled into the compact set so each tool
+// exchange stays intact on one side of the boundary.
+func adjustForToolBoundary(items []CompactionCandidate, cutoff int) int {
+	for cutoff > 0 && cutoff < len(items) && isToolClosureResultItem(items[cutoff]) {
+		cutoff++
+	}
+	return cutoff
+}
+
+func isToolClosureResultItem(item CompactionCandidate) bool {
+	return item.HasPolicy(CompactPolicyPreserveToolClosure) && isToolResultItem(item)
+}
+
+func isToolResultItem(item CompactionCandidate) bool {
+	return strings.EqualFold(strings.TrimSpace(item.Record.ModelMessage.Role), "tool")
+}
+
+// buildEntriesAndIDs renders the summarizer entries and the ids to mark
+// compacted from the selected items. Entries that render empty (e.g.
+// reasoning-only messages) are skipped from the prompt to avoid bare "role:"
+// noise. If every selected item renders empty, all ids are still returned so the
+// caller can detect the all-empty no-op case.
+func buildEntriesAndIDs(items []CompactionCandidate) ([]messageEntry, []pgtype.UUID) {
+	entries := make([]messageEntry, 0, len(items))
+	allIDs := make([]pgtype.UUID, 0, len(items))
+	renderedIDs := make([]pgtype.UUID, 0, len(items))
+	for _, it := range items {
+		allIDs = append(allIDs, it.ID)
+		content := renderCandidateEntry(it.Record)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		renderedIDs = append(renderedIDs, it.ID)
+		entries = append(entries, messageEntry{
+			Role:    it.Record.ModelMessage.Role,
+			Content: content,
+		})
+	}
+	if len(entries) == 0 {
+		return entries, allIDs
+	}
+	return entries, renderedIDs
+}
+
+// trimCompactMessages trims the compaction input from the tail (oldest) so the
+// total estimated tokens stay within maxTokens.
+func trimCompactMessages(items []CompactionCandidate, maxTokens int) []CompactionCandidate {
+	if len(items) == 0 || maxTokens <= 0 {
+		return items
+	}
+	total := 0
+	for _, it := range items {
+		total += estimateCompactPromptTokens(it)
+	}
+	if total <= maxTokens {
+		return items
+	}
+	accumulated := 0
+	cutoff := len(items)
+	for i := len(items) - 1; i >= 0; i-- {
+		accumulated += estimateCompactPromptTokens(items[i])
+		if accumulated > maxTokens {
+			cutoff = i + 1
+			break
+		}
+	}
+	cutoff = adjustForToolBoundary(items, cutoff)
+	if cutoff >= len(items) {
+		return items
+	}
+	return items[cutoff:]
+}

@@ -30,12 +30,18 @@ func TestDecodeTurnResponseEntryUsesVisibleText(t *testing.T) {
 	}
 
 	entry, ok := DecodeTurnResponseEntry(messagepkg.Message{
-		Role:      "assistant",
-		Content:   modelMessage,
-		CreatedAt: time.Unix(1710000000, 0).UTC(),
+		ID:                "row-1",
+		Role:              "assistant",
+		Content:           modelMessage,
+		ExternalMessageID: "external-1",
+		CompactID:         "compact-1",
+		CreatedAt:         time.Unix(1710000000, 0).UTC(),
 	})
 	if !ok {
 		t.Fatal("expected turn response entry")
+	}
+	if entry.SourceMessageID != "row-1" || entry.ExternalMessageID != "external-1" || entry.CompactID != "compact-1" {
+		t.Fatalf("source identity mismatch: %#v", entry)
 	}
 	if entry.Content != "任务完成" {
 		t.Fatalf("content = %q, want %q", entry.Content, "任务完成")

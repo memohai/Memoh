@@ -29,6 +29,7 @@ type ResolveRunConfigResult struct {
 type RunConfigResolver interface {
 	ResolveRunConfig(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error)
 	InlineImageAttachments(ctx context.Context, botID string, refs []ImageAttachmentRef) []sdk.ImagePart
+	LoadCompactionSummary(ctx context.Context, messages []messagepkg.Message) CompactSummary
 	StoreRound(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform string, messages []sdk.Message, modelID string) error
 }
 
@@ -257,7 +258,7 @@ func (d *DiscussDriver) handleReply(ctx context.Context, sess *discussSession, r
 func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussSession, rc RenderedContext, log *slog.Logger, agent discussStreamer) {
 	cfg := d.sessionConfigSnapshot(sess)
 
-	trs := d.loadTurnResponses(ctx, cfg.SessionID)
+	trs, historyMessages := d.loadTurnResponsesWithMessages(ctx, cfg.SessionID)
 
 	// Cold-start / post-idle initialisation: if we haven't processed anything
 	// in this goroutine's lifetime yet, anchor `lastProcessedMs` to the most
@@ -270,15 +271,24 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 		sess.lastProcessedMs = maxInt64(anchorFromTRs(trs), d.loadDiscussCursor(ctx, cfg, log))
 	}
 
+	compactSummary := CompactSummary{}
+	if d.deps.Resolver != nil {
+		compactSummary = d.deps.Resolver.LoadCompactionSummary(ctx, historyMessages)
+	}
+	activeRC := filterCoveredRenderedContext(rc, compactSummary)
+
 	// Re-evaluate the trigger condition now that lastProcessedMs is anchored.
 	// The outer loop used lastProcessedMs=0 to allow first-time dispatch into
 	// this function; after initialisation, we must verify there's actually a
 	// new external event past the anchor before spending an LLM call.
-	if LatestExternalEventMs(rc, sess.lastProcessedMs) == 0 {
+	if LatestExternalEventMs(activeRC, sess.lastProcessedMs) == 0 {
+		if LatestExternalEventMs(rc, sess.lastProcessedMs) > 0 {
+			d.advanceDiscussCursor(ctx, sess, cfg, latestRCReceivedAtMs(rc), log)
+		}
 		return
 	}
 
-	composed := ComposeContext(rc, trs, "")
+	composed := ComposeContextWithSummary(rc, trs, compactSummary)
 	if composed == nil {
 		return
 	}
@@ -326,7 +336,10 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 	}
 	runConfig := resolved.RunConfig
 
-	runConfig.Messages = contextMessagesToSDK(composed.Messages)
+	// Coverage filtering can orphan one side of a tool exchange (a covered
+	// call whose result stayed raw, or vice versa); repair before the provider
+	// sees the messages — the discuss path has no chat-flow repair behind it.
+	runConfig.Messages = repairSDKToolClosures(contextMessagesToSDK(composed.Messages))
 	runConfig.SessionType = sessionpkg.TypeDiscuss
 	runConfig.Query = ""
 
@@ -334,14 +347,14 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 	// them as native vision input (ImagePart) on the first encounter.
 	// Subsequent turns only see the file path in the XML rendering.
 	if runConfig.SupportsImageInput && d.deps.Resolver != nil {
-		imageRefs := extractNewImageRefs(rc, sess.lastProcessedMs)
+		imageRefs := extractNewImageRefs(activeRC, sess.lastProcessedMs)
 		if len(imageRefs) > 0 {
 			imageParts := d.deps.Resolver.InlineImageAttachments(ctx, cfg.BotID, imageRefs)
 			injectImagePartsIntoLastUserMessage(runConfig.Messages, imageParts)
 		}
 	}
 
-	isMentioned := wasRecentlyMentioned(rc, sess.lastProcessedMs)
+	isMentioned := wasRecentlyMentioned(activeRC, sess.lastProcessedMs)
 	lateBinding := buildLateBindingPrompt(isMentioned)
 	runConfig.Messages = append(runConfig.Messages, sdk.UserMessage(lateBinding))
 	runConfig = runConfig.RefreshContextFrag()
@@ -474,13 +487,13 @@ func discussACPFullContextPrompt(messages []ContextMessage, lateBinding string) 
 	return strings.TrimSpace(b.String())
 }
 
-// latestRCReceivedAtMs returns the maximum ReceivedAtMs across all segments
+// latestRCReceivedAtMs returns the maximum event timestamp across all segments
 // in the given RC, or 0 if the RC is empty.
 func latestRCReceivedAtMs(rc RenderedContext) int64 {
 	var latest int64
 	for _, seg := range rc {
-		if seg.ReceivedAtMs > latest {
-			latest = seg.ReceivedAtMs
+		if eventAtMs := seg.eventAtMs(); eventAtMs > latest {
+			latest = eventAtMs
 		}
 	}
 	return latest
@@ -640,15 +653,12 @@ func agentEventToChannelEvent(e agentpkg.StreamEvent) (channel.StreamEvent, bool
 	}
 }
 
-// loadTurnResponses loads every assistant/tool message ever persisted for
-// this session and decodes them into TR entries. There is no time-based cut
-// off on purpose: truncating TRs while RC is replayed in full from the events
-// table creates an asymmetric context (user messages visible, the bot's own
-// earlier replies missing) that confuses both the LLM and loop-detection.
-// Any size-bound trimming should happen later via compaction, not here.
-func (d *DiscussDriver) loadTurnResponses(ctx context.Context, sessionID string) []TurnResponseEntry {
+// loadTurnResponsesWithMessages loads active session history from the epoch,
+// decodes assistant/tool turn-response entries, and returns the raw messages so
+// compact-summary coverage can be reconstructed from the same active history.
+func (d *DiscussDriver) loadTurnResponsesWithMessages(ctx context.Context, sessionID string) ([]TurnResponseEntry, []messagepkg.Message) {
 	if d.deps.MessageService == nil {
-		return nil
+		return nil, nil
 	}
 
 	// time.Unix(0, 0) is the Unix epoch; the underlying query uses
@@ -656,7 +666,7 @@ func (d *DiscussDriver) loadTurnResponses(ctx context.Context, sessionID string)
 	msgs, err := d.deps.MessageService.ListActiveSinceBySession(ctx, sessionID, time.Unix(0, 0).UTC())
 	if err != nil {
 		d.logger.Warn("load TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
-		return nil
+		return nil, nil
 	}
 
 	var trs []TurnResponseEntry
@@ -667,7 +677,7 @@ func (d *DiscussDriver) loadTurnResponses(ctx context.Context, sessionID string)
 		}
 		trs = append(trs, entry)
 	}
-	return trs
+	return trs, msgs
 }
 
 // extractNewImageRefs collects ImageAttachmentRef entries from RC segments
@@ -675,7 +685,7 @@ func (d *DiscussDriver) loadTurnResponses(ctx context.Context, sessionID string)
 func extractNewImageRefs(rc RenderedContext, afterMs int64) []ImageAttachmentRef {
 	var refs []ImageAttachmentRef
 	for _, seg := range rc {
-		if seg.ReceivedAtMs > afterMs && !seg.IsMyself {
+		if seg.eventAtMs() > afterMs && isExternalSegment(seg) {
 			refs = append(refs, seg.ImageRefs...)
 		}
 	}
@@ -707,7 +717,7 @@ func injectImagePartsIntoLastUserMessage(msgs []sdk.Message, parts []sdk.ImagePa
 
 func wasRecentlyMentioned(rc RenderedContext, afterMs int64) bool {
 	for _, seg := range rc {
-		if seg.ReceivedAtMs > afterMs && (seg.MentionsMe || seg.RepliesToMe) {
+		if seg.eventAtMs() > afterMs && isExternalSegment(seg) && (seg.MentionsMe || seg.RepliesToMe) {
 			return true
 		}
 	}

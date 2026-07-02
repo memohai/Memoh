@@ -38,10 +38,13 @@ func DecodeTurnResponseEntry(msg messagepkg.Message) (TurnResponseEntry, bool) {
 	}
 
 	return TurnResponseEntry{
-		RequestedAtMs: msg.CreatedAt.UnixMilli(),
-		Role:          role,
-		Content:       debugContent(rawContent),
-		RawContent:    rawContent,
+		RequestedAtMs:     msg.CreatedAt.UnixMilli(),
+		Role:              role,
+		Content:           debugContent(rawContent),
+		RawContent:        rawContent,
+		SourceMessageID:   strings.TrimSpace(msg.ID),
+		ExternalMessageID: strings.TrimSpace(msg.ExternalMessageID),
+		CompactID:         strings.TrimSpace(msg.CompactID),
 	}, true
 }
 
