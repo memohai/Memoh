@@ -38,6 +38,7 @@ import {
 import { acceleratorForCommand, appKeyboardCommands, type AppKeyboardCommand } from '../shared/keyboard-commands'
 import { dispatchFocusedWindowCommand } from './window-commands'
 import { dispatchRendererNavigate } from './window-navigation'
+import { maybeSelfInstallMacOS } from './self-install'
 
 type DesktopRuntimeMode = 'local' | 'remote'
 
@@ -959,6 +960,11 @@ async function rebuildAppMenu(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  // 第 0 步:macOS 双击自安装。若从 DMG 触发了搬家 + 重启,立即 return,
+  // 绝不让将死的 DMG 实例继续拉起本地 server / Qdrant(否则留孤儿进程)。
+  // 必须早于 ensureLocalServer / 建窗口 / tray。
+  if (maybeSelfInstallMacOS()) return
+
   electronApp.setAppUserModelId(isRemoteMode() ? 'ai.memoh.desktop.online' : 'ai.memoh.desktop')
   if (!isRemoteMode()) {
     await ensureLocalServer()
