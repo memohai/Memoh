@@ -900,6 +900,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!sid) return
     const bid = (currentBotId.value ?? '').trim()
     if (!bid) return
+    // Same guard as openSessionChat: a row mid-deletion can still be visible in
+    // the sidebar, so refuse to (re)open a session being deleted for this bot.
+    if (isDeletedSessionForCurrentBot(sid)) return
     const title = opts.title?.trim() || chatTitleFallbackFor(sid)
     const existing = chatPanelForSession(sid)
     if (existing) {
@@ -1106,9 +1109,14 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       focusPanel(existing)
       return
     }
+    // New file: split RIGHT off the editor anchor. When there is no editor group
+    // to split from (empty dock, or only terminal groups), fall back to
+    // nonTerminalTarget so the file lands in its OWN group ('above' the terminal
+    // strip) instead of defaulting into the active terminal group — matches
+    // openFilePinned's terminal-exclusion.
     const position = anchor
       ? { referenceGroup: anchor.id, direction: 'right' as const }
-      : undefined
+      : nonTerminalTarget(dock, groupId)
     dock.addPanel({
       id,
       component: 'file',
