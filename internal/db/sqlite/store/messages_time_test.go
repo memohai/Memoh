@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -142,6 +143,10 @@ CREATE TABLE bot_history_messages (
   compact_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE bot_history_message_compacts (
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL DEFAULT 'pending'
+);
 `)
 
 	botID := "00000000-0000-0000-0000-000000003001"
@@ -149,6 +154,9 @@ CREATE TABLE bot_history_messages (
 	compactedID := "00000000-0000-0000-0000-0000000030ff"
 	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id, channel_type) VALUES (?, ?)`, sessionID, "local"); err != nil {
 		t.Fatalf("insert session: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_history_message_compacts (id, status) VALUES (?, 'ok')`, compactedID); err != nil {
+		t.Fatalf("insert compact log: %v", err)
 	}
 	for _, item := range []struct {
 		id        string
@@ -201,6 +209,102 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 	for _, row := range rows {
 		if row.CompactID.Valid {
 			t.Fatalf("compact id should be normalized to null for uncompacted row: %#v", row.CompactID)
+		}
+	}
+}
+
+func TestSQLiteListUncompactedMessagesReclaimsRowsWithoutCompletedLog(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	execAll(t, conn, `
+CREATE TABLE channel_identities (
+  id TEXT PRIMARY KEY,
+  display_name TEXT,
+  avatar_url TEXT
+);
+CREATE TABLE bot_channel_routes (
+  id TEXT PRIMARY KEY,
+  conversation_type TEXT,
+  metadata TEXT NOT NULL DEFAULT '{}',
+  default_reply_target TEXT
+);
+CREATE TABLE bot_sessions (
+  id TEXT PRIMARY KEY,
+  route_id TEXT,
+  channel_type TEXT
+);
+CREATE TABLE bot_history_messages (
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL,
+  session_id TEXT,
+  sender_channel_identity_id TEXT,
+  sender_account_user_id TEXT,
+  source_message_id TEXT,
+  source_reply_to_message_id TEXT,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL DEFAULT '{}',
+  metadata TEXT NOT NULL DEFAULT '{}',
+  usage TEXT,
+  event_id TEXT,
+  display_text TEXT,
+  compact_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE bot_history_message_compacts (
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL DEFAULT 'pending'
+);
+`)
+
+	botID := "00000000-0000-0000-0000-000000005001"
+	sessionID := "00000000-0000-0000-0000-000000005002"
+	okLog := "00000000-0000-0000-0000-0000000050aa"
+	pendingLog := "00000000-0000-0000-0000-0000000050bb"
+	errorLog := "00000000-0000-0000-0000-0000000050cc"
+	missingLog := "00000000-0000-0000-0000-0000000050dd"
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id, channel_type) VALUES (?, ?)`, sessionID, "local"); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	for _, log := range []struct{ id, status string }{
+		{okLog, "ok"}, {pendingLog, "pending"}, {errorLog, "error"},
+	} {
+		if _, err := conn.ExecContext(ctx, `INSERT INTO bot_history_message_compacts (id, status) VALUES (?, ?)`, log.id, log.status); err != nil {
+			t.Fatalf("insert compact log %s: %v", log.id, err)
+		}
+	}
+	for i, compactID := range []string{okLog, pendingLog, errorLog, missingLog} {
+		id := "00000000-0000-0000-0000-00000000510" + strconv.Itoa(i)
+		_, err := conn.ExecContext(ctx, `
+INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, compact_id, created_at)
+VALUES (?, ?, ?, 'user', '"hello"', ?, ?)`,
+			id, botID, sessionID, compactID, "2026-06-13 19:53:5"+strconv.Itoa(i),
+		)
+		if err != nil {
+			t.Fatalf("insert message %s: %v", id, err)
+		}
+	}
+
+	store, err := New(conn)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	q := NewQueries(store)
+
+	rows, err := q.ListUncompactedMessagesBySession(ctx, mustUUID(t, sessionID))
+	if err != nil {
+		t.Fatalf("list uncompacted messages: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("rows = %d, want pending/error/missing-log rows reclaimed and ok-log row excluded", len(rows))
+	}
+	for _, row := range rows {
+		if row.CompactID == mustUUID(t, okLog) {
+			t.Fatal("row compacted by a completed log must stay excluded")
 		}
 	}
 }

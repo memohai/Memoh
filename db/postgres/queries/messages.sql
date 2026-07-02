@@ -562,6 +562,11 @@ LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 LEFT JOIN bot_channel_routes r ON r.id = s.route_id
 WHERE m.session_id = $1
-  AND m.compact_id IS NULL
+  -- Rows whose compact log never completed ok (crash between mark and
+  -- complete, deleted logs) stay eligible so their content is not lost.
+  AND (m.compact_id IS NULL OR NOT EXISTS (
+    SELECT 1 FROM bot_history_message_compacts c
+    WHERE c.id = m.compact_id AND c.status = 'ok'
+  ))
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.created_at ASC, m.id ASC;
