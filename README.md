@@ -131,3 +131,5 @@ A native client for macOS, Windows, and Linux. [Download Memoh Desktop](https://
 Made with ❤️ by MemohAI Team,
 
 Copyright (C) 2026 MemohAI (memoh.ai). All rights reserved.
+
+[//]: # (ref: issue #620)
