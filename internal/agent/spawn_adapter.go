@@ -9,6 +9,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/tools"
+	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/models"
 )
 
@@ -24,36 +25,7 @@ func NewSpawnAdapter(a *Agent) *SpawnAdapter {
 }
 
 func (s *SpawnAdapter) Generate(ctx context.Context, cfg tools.SpawnRunConfig) (*tools.SpawnResult, error) {
-	messages := cfg.Messages
-	if cfg.Query != "" {
-		messages = append(messages, sdk.Message{
-			Role:    sdk.MessageRoleUser,
-			Content: []sdk.MessagePart{sdk.TextPart{Text: cfg.Query}},
-		})
-	}
-
-	rc := RunConfig{
-		Model:            cfg.Model,
-		System:           cfg.System,
-		Query:            cfg.Query,
-		SessionType:      cfg.SessionType,
-		Messages:         messages,
-		ReasoningEffort:  cfg.ReasoningEffort,
-		PromptCacheTTL:   cfg.PromptCacheTTL,
-		SupportsToolCall: true,
-		Identity: SessionContext{
-			BotID:             cfg.Identity.BotID,
-			ChatID:            cfg.Identity.ChatID,
-			SessionID:         cfg.Identity.SessionID,
-			ChannelIdentityID: cfg.Identity.ChannelIdentityID,
-			CurrentPlatform:   cfg.Identity.CurrentPlatform,
-			SessionToken:      cfg.Identity.SessionToken,
-			IsSubagent:        cfg.Identity.IsSubagent,
-		},
-		LoopDetection: LoopDetectionConfig{
-			Enabled: cfg.LoopDetection.Enabled,
-		},
-	}
+	rc := runConfigFromSpawnRunConfig(cfg)
 
 	result, err := s.agent.Generate(ctx, rc)
 	if err != nil {
@@ -67,11 +39,7 @@ func (s *SpawnAdapter) Generate(ctx context.Context, cfg tools.SpawnRunConfig) (
 	}, nil
 }
 
-// GenerateWithWatchdog runs the agent in streaming mode, touching the
-// provided touchFn on every stream event (token, tool progress, etc.).
-// It collects the full result and returns it in the same shape as Generate.
-// This enables activity-based watchdog monitoring for subagent execution.
-func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.SpawnRunConfig, touchFn func()) (*tools.SpawnResult, error) {
+func runConfigFromSpawnRunConfig(cfg tools.SpawnRunConfig) RunConfig {
 	messages := cfg.Messages
 	if cfg.Query != "" {
 		messages = append(messages, sdk.Message{
@@ -80,28 +48,45 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 		})
 	}
 
-	rc := RunConfig{
-		Model:            cfg.Model,
-		System:           cfg.System,
-		Query:            cfg.Query,
-		SessionType:      cfg.SessionType,
-		Messages:         messages,
-		ReasoningEffort:  cfg.ReasoningEffort,
-		PromptCacheTTL:   cfg.PromptCacheTTL,
-		SupportsToolCall: true,
-		Identity: SessionContext{
-			BotID:             cfg.Identity.BotID,
-			ChatID:            cfg.Identity.ChatID,
-			SessionID:         cfg.Identity.SessionID,
-			ChannelIdentityID: cfg.Identity.ChannelIdentityID,
-			CurrentPlatform:   cfg.Identity.CurrentPlatform,
-			SessionToken:      cfg.Identity.SessionToken,
-			IsSubagent:        cfg.Identity.IsSubagent,
+	identity := SessionContext{
+		BotID:             cfg.Identity.BotID,
+		ChatID:            cfg.Identity.ChatID,
+		SessionID:         cfg.Identity.SessionID,
+		ChannelIdentityID: cfg.Identity.ChannelIdentityID,
+		CurrentPlatform:   cfg.Identity.CurrentPlatform,
+		SessionToken:      cfg.Identity.SessionToken,
+		IsSubagent:        cfg.Identity.IsSubagent,
+	}
+	return RunConfig{
+		Model:                    cfg.Model,
+		System:                   cfg.System,
+		Query:                    cfg.Query,
+		ContextQueryMaterialized: cfg.Query != "",
+		SessionType:              cfg.SessionType,
+		Messages:                 messages,
+		ReasoningEffort:          cfg.ReasoningEffort,
+		PromptCacheTTL:           cfg.PromptCacheTTL,
+		SupportsToolCall:         true,
+		Identity:                 identity,
+		ContextScope: contextfrag.Scope{
+			BotID:             identity.BotID,
+			ChatID:            identity.ChatID,
+			SessionID:         identity.SessionID,
+			ChannelIdentityID: identity.ChannelIdentityID,
+			Platform:          identity.CurrentPlatform,
 		},
 		LoopDetection: LoopDetectionConfig{
 			Enabled: cfg.LoopDetection.Enabled,
 		},
 	}
+}
+
+// GenerateWithWatchdog runs the agent in streaming mode, touching the
+// provided touchFn on every stream event (token, tool progress, etc.).
+// It collects the full result and returns it in the same shape as Generate.
+// This enables activity-based watchdog monitoring for subagent execution.
+func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.SpawnRunConfig, touchFn func()) (*tools.SpawnResult, error) {
+	rc := runConfigFromSpawnRunConfig(cfg)
 
 	// Use Stream instead of Generate to get per-token/per-tool activity signals.
 	eventCh := s.agent.Stream(ctx, rc)

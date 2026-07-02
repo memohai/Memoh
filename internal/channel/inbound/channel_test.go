@@ -1601,6 +1601,9 @@ func TestChannelInboundProcessorGroupMentionTriggersReply(t *testing.T) {
 	if gateway.gotReq.UserMessagePersisted {
 		t.Fatalf("expected UserMessagePersisted=false: user message persistence is deferred to storeRound")
 	}
+	if !gateway.gotReq.MentionsBot {
+		t.Fatalf("expected is_mentioned metadata to be carried into ChatRequest")
+	}
 }
 
 type failingOpenStreamSender struct {

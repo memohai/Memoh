@@ -166,10 +166,12 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			// Must run before buildGenerateOptions so prompt caching and
 			// background task summaries see the usage-augmented text.
 			cfg.System = appendToolUsageToSystem(cfg.System, toolUsage)
+			cfg.ContextToolUsage = toolUsage
 		}
 	}
 	limit := a.Limits().ToolOutputLimit()
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
+	cfg = cfg.RefreshContextFragWithDynamicMutators(readMediaState != nil, a != nil && a.hookService != nil, true)
 	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 	approvalTools := append([]sdk.Tool(nil), sdkTools...)
 	sdkTools = a.wrapToolsWithHooks(ctx, cfg, sdkTools)
@@ -260,6 +262,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
 		return
 	}
+	cfg = cfg.RefreshContextFragWithDynamicMutators(readMediaState != nil, a != nil && a.hookService != nil, true)
 	opts := a.buildGenerateOptions(cfg, sdkTools, approvalTools, prepareStep)
 	modelStepIndex := 0
 	opts = append(opts, sdk.WithOnStep(func(step *sdk.StepResult) *sdk.GenerateParams {
@@ -640,10 +643,12 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 			// Must run before buildGenerateOptions so prompt caching and
 			// background task summaries see the usage-augmented text.
 			cfg.System = appendToolUsageToSystem(cfg.System, toolUsage)
+			cfg.ContextToolUsage = toolUsage
 		}
 	}
 	limit := a.Limits().ToolOutputLimit()
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
+	cfg = cfg.RefreshContextFragWithDynamicMutators(readMediaState != nil, a != nil && a.hookService != nil, false)
 	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 	approvalTools := append([]sdk.Tool(nil), sdkTools...)
 	sdkTools = a.wrapToolsWithHooks(ctx, cfg, sdkTools)
@@ -671,6 +676,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	if err != nil {
 		return nil, err
 	}
+	cfg = cfg.RefreshContextFragWithDynamicMutators(readMediaState != nil, a != nil && a.hookService != nil, false)
 	opts := a.buildGenerateOptions(cfg, sdkTools, approvalTools, prepareStep)
 	modelStepIndex := 0
 	opts = append(opts,
@@ -1329,6 +1335,7 @@ func (a *Agent) runMidStreamRetry(
 		// media resolution, and other prepare-step logic — same as initial stream.
 		retryCfgCopy := cfg
 		retryCfgCopy.Messages = prevResult.Messages
+		retryCfgCopy = retryCfgCopy.RefreshContextFrag()
 		retryOpts := a.buildGenerateOptions(retryCfgCopy, sdkTools, approvalTools, prepareStep)
 
 		retryResult, retryErr := a.client.StreamText(streamCtx, retryOpts...)

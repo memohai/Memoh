@@ -25,6 +25,7 @@ import (
 	"github.com/memohai/memoh/internal/agent/sessionmode"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/compaction"
+	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -436,6 +437,8 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		runCfg.Query = headerifiedQuery
 	}
 	runCfg.InlineImages = extractNativeImageParts(mergedAttachments)
+	runCfg.ContextScope = buildContextFragScope(req, displayName, runCfg.Identity)
+	runCfg = runCfg.RefreshContextFrag()
 
 	var injectedRecords *[]conversation.InjectedMessageRecord
 	if req.InjectCh != nil {
@@ -648,6 +651,15 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 		Skills:            agentSkills,
 		LoopDetection:     agentpkg.LoopDetectionConfig{Enabled: loopDetectionEnabled},
 		BackgroundManager: r.bgManager,
+		ContextScope: contextfrag.Scope{
+			BotID:             p.BotID,
+			ChatID:            chatID,
+			SessionID:         p.SessionID,
+			ChannelIdentityID: strings.TrimSpace(p.ChannelIdentityID),
+			Platform:          strings.TrimSpace(p.CurrentPlatform),
+			ConversationType:  strings.TrimSpace(p.ConversationType),
+			ReplyTarget:       strings.TrimSpace(p.ReplyTarget),
+		},
 	}
 	if r.toolApproval != nil || r.userInput != nil {
 		cfg.ToolApprovalHandler = r.buildToolApprovalHandler(p)
@@ -1133,6 +1145,7 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 			}
 		}
 		cfg.Messages = append(cfg.Messages, sdk.UserMessage(cfg.Query, extra...))
+		cfg.ContextQueryMaterialized = true
 	} else if len(cfg.InlineImages) > 0 {
 		// Pipeline path: the user query is already embedded in the RC messages,
 		// but image parts are not rendered by the pipeline renderer. Inject the
@@ -1155,10 +1168,11 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 			if !injected {
 				cfg.Messages = append(cfg.Messages, sdk.UserMessage("", imageParts...))
 			}
+			cfg.ContextQueryMaterialized = true
 		}
 	}
 
-	return cfg
+	return cfg.RefreshContextFrag()
 }
 
 func normalizeGatewaySkill(entry SkillEntry) (agentpkg.SkillEntry, bool) {

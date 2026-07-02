@@ -240,6 +240,8 @@ type ChatRequest struct {
 	ReplySender               string           `json:"-"`
 	ReplyPreview              string           `json:"-"`
 	ReplyAttachments          []ChatAttachment `json:"-"`
+	MentionsBot               bool             `json:"-"`
+	RepliesToBot              bool             `json:"-"`
 	ForwardMessageID          string           `json:"-"`
 	ForwardFromUserID         string           `json:"-"`
 	ForwardFromConversationID string           `json:"-"`
