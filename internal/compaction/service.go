@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -21,14 +22,37 @@ type Service struct {
 	queries     dbstore.Queries
 	hookService *hooks.Service
 	logger      *slog.Logger
+
+	inflightMu sync.Mutex
+	inflight   map[string]struct{}
 }
 
 // NewService creates a new compaction Service.
 func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 	return &Service{
-		queries: queries,
-		logger:  log,
+		queries:  queries,
+		logger:   log,
+		inflight: make(map[string]struct{}),
 	}
+}
+
+// beginSessionCompaction marks a session as having a compaction in flight.
+// Overlapping runs would select overlapping candidate sets and race
+// MarkMessagesCompacted, so only one compaction may run per session at a time.
+func (s *Service) beginSessionCompaction(sessionID string) bool {
+	s.inflightMu.Lock()
+	defer s.inflightMu.Unlock()
+	if _, busy := s.inflight[sessionID]; busy {
+		return false
+	}
+	s.inflight[sessionID] = struct{}{}
+	return true
+}
+
+func (s *Service) endSessionCompaction(sessionID string) {
+	s.inflightMu.Lock()
+	defer s.inflightMu.Unlock()
+	delete(s.inflight, sessionID)
 }
 
 func (s *Service) SetHookService(h *hooks.Service) {
@@ -56,6 +80,15 @@ func (s *Service) RunCompactionSync(ctx context.Context, cfg TriggerConfig) erro
 }
 
 func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) error {
+	if !s.beginSessionCompaction(cfg.SessionID) {
+		s.logger.Info("compaction: already in flight for session, skipping",
+			slog.String("bot_id", cfg.BotID),
+			slog.String("session_id", cfg.SessionID),
+		)
+		return nil
+	}
+	defer s.endSessionCompaction(cfg.SessionID)
+
 	if err := s.runCompactionHook(ctx, hooks.EventPreCompact, cfg, nil); err != nil {
 		return err
 	}
@@ -80,19 +113,7 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) error {
 		return compactErr
 	}
 
-	logRow, err := s.queries.CreateCompactionLog(ctx, sqlc.CreateCompactionLogParams{
-		BotID:     botUUID,
-		SessionID: sessionUUID,
-	})
-	if err != nil {
-		compactErr = err
-		return compactErr
-	}
-
-	compactErr = s.doCompaction(ctx, logRow.ID, sessionUUID, cfg)
-	if compactErr != nil {
-		s.completeLog(ctx, logRow.ID, "error", "", compactErr.Error(), 0, nil, pgtype.UUID{})
-	}
+	compactErr = s.doCompaction(ctx, botUUID, sessionUUID, cfg)
 	return compactErr
 }
 
@@ -129,13 +150,12 @@ func (s *Service) runCompactionHook(ctx context.Context, eventName string, cfg T
 	return nil
 }
 
-func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUUID pgtype.UUID, cfg TriggerConfig) error {
+func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, sessionUUID pgtype.UUID, cfg TriggerConfig) error {
 	rows, err := s.queries.ListUncompactedMessagesBySession(ctx, sessionUUID)
 	if err != nil {
 		return err
 	}
 	if len(rows) == 0 {
-		s.completeLog(ctx, logID, "ok", "", "", 0, nil, pgtype.UUID{})
 		return nil
 	}
 
@@ -147,7 +167,6 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 		)
 	}
 	if len(messages) == 0 {
-		s.completeLog(ctx, logID, "ok", "", "", 0, nil, pgtype.UUID{})
 		return nil
 	}
 
@@ -161,7 +180,6 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 		toCompact = splitByRatio(messages, cfg.TotalInputTokens, cfg.Ratio)
 	}
 	if len(toCompact) == 0 {
-		s.completeLog(ctx, logID, "ok", "", "", 0, nil, pgtype.UUID{})
 		return nil
 	}
 
@@ -197,7 +215,6 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 	if len(entries) == 0 {
 		// Every selected message rendered empty (e.g. reasoning-only): summarizing
 		// nothing would destroy them for a junk summary. Leave them in history.
-		s.completeLog(ctx, logID, "ok", "", "", 0, nil, pgtype.UUID{})
 		return nil
 	}
 
@@ -217,12 +234,27 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 		systemPrompt, []sdk.Message{sdk.UserMessage(userPrompt)}, nil,
 	)
 
+	// The log row is created only once a real attempt starts, so no-op runs do
+	// not accumulate rows. Persistence uses a non-cancellable context: a client
+	// disconnect mid-run must not strand rows marked compacted without a
+	// completed summary.
+	persistCtx := context.WithoutCancel(ctx)
+	logRow, err := s.queries.CreateCompactionLog(persistCtx, sqlc.CreateCompactionLogParams{
+		BotID:     botUUID,
+		SessionID: sessionUUID,
+	})
+	if err != nil {
+		return err
+	}
+	logID := logRow.ID
+
 	result, err := sdk.GenerateTextResult(ctx,
 		sdk.WithModel(model),
 		sdk.WithSystem(systemPromptDecorated),
 		sdk.WithMessages(sdkMessages),
 	)
 	if err != nil {
+		s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{})
 		return err
 	}
 
@@ -230,14 +262,15 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 
 	modelUUID := db.ParseUUIDOrEmpty(cfg.ModelID)
 
-	if err := s.queries.MarkMessagesCompacted(ctx, sqlc.MarkMessagesCompactedParams{
+	if err := s.queries.MarkMessagesCompacted(persistCtx, sqlc.MarkMessagesCompactedParams{
 		CompactID: logID,
 		Column2:   messageIDs,
 	}); err != nil {
+		s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{})
 		return err
 	}
 
-	s.completeLog(ctx, logID, "ok", result.Text, "", len(messageIDs), usageJSON, modelUUID)
+	s.completeLog(persistCtx, logID, "ok", result.Text, "", len(messageIDs), usageJSON, modelUUID)
 	return nil
 }
 
