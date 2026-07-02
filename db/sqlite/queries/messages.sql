@@ -391,7 +391,7 @@ request_assets AS (
     FROM graph_turns gt
     JOIN bot_history_turns t ON t.id = gt.id
     JOIN bot_history_message_assets a ON a.message_id = t.request_message_id
-    ORDER BY content_hash, name, role, ordinal, id
+    ORDER BY a.content_hash, a.name, a.role, a.ordinal, a.id
   ) a
   GROUP BY a.message_id
 )

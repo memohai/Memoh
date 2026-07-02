@@ -2082,7 +2082,10 @@ export const useChatStore = defineStore('chat', () => {
       loading.value = false
       return { ok: true }
     } catch (error) {
-      const err = error instanceof Error ? error : new Error('Unknown error')
+      // SDK calls can reject with plain `{message}` payloads rather than Error
+      // instances — resolve those too so the user sees the real server error.
+      const err = error instanceof Error ? error : new Error(resolveApiErrorMessage(error, 'Unknown error'))
+      const reason = resolveApiErrorMessage(error, err.message)
       const isAbort = err.name === 'AbortError'
       const stage: SendMessageStage = err instanceof StreamFailureError
         ? err.stage
@@ -2098,15 +2101,15 @@ export const useChatStore = defineStore('chat', () => {
               stream?.pendingReplacedTurns ?? pendingReplacedTurns,
             )
           } else {
-            appendAssistantError(assistantTurn, bid, sid, err.message)
+            appendAssistantError(assistantTurn, bid, sid, reason)
           }
         }
       }
       forgetAssistantStream(streamId)
       loading.value = isSessionStreaming(sessionId.value)
-      if (isAbort) return { ok: false, stage: 'stream', error: err.message }
-      if (stage === 'startup') toast.error(err.message)
-      return { ok: false, stage, error: err.message }
+      if (isAbort) return { ok: false, stage: 'stream', error: reason }
+      if (stage === 'startup') toast.error(reason)
+      return { ok: false, stage, error: reason }
     } finally {
       setMessageActionLoading(sid, false)
     }

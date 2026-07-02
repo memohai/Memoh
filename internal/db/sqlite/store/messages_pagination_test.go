@@ -239,6 +239,80 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 	}
 }
 
+// Regression: after a retry the session has two heads and the frontend
+// refreshes with include_graph, which runs the full graph metadata query.
+// The SQLite variant once had an ambiguous `id` in the request_assets
+// subquery ORDER BY, turning every post-retry refresh into a 500.
+func TestSQLiteListSessionTurnGraphNodeMetadataMultiHead(t *testing.T) {
+	ctx := context.Background()
+	conn := openPaginationDB(t, ctx)
+	botID := pageUUID(1500)
+	sessionID := pageUUID(1501)
+	base := time.Date(2026, 7, 2, 14, 0, 0, 0, time.UTC)
+
+	turnA := pageTurnID(1)
+	turnB := pageTurnID(2)
+	requestA := pageMessageID(1, 1)
+	requestB := pageMessageID(2, 1)
+	for i, item := range []struct {
+		turnID, requestID, assistantID string
+	}{
+		{turnA, requestA, pageMessageID(1, 2)},
+		{turnB, requestB, pageMessageID(2, 2)},
+	} {
+		for seq, msg := range []struct {
+			id, role string
+		}{
+			{item.requestID, "user"},
+			{item.assistantID, "assistant"},
+		} {
+			createdAt := base.Add(time.Duration(i*10+seq) * time.Second).Format("2006-01-02 15:04:05")
+			if _, err := conn.ExecContext(ctx, `
+INSERT INTO bot_history_messages (id, bot_id, session_id, turn_id, turn_message_seq, role, content, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+				msg.id, botID, sessionID, item.turnID, seq+1, msg.role,
+				fmt.Sprintf(`{"role":%q,"content":%q}`, msg.role, msg.id), createdAt,
+			); err != nil {
+				t.Fatalf("insert message %s: %v", msg.id, err)
+			}
+		}
+		if _, err := conn.ExecContext(ctx, `
+INSERT INTO bot_history_turns (id, bot_id, parent_turn_id, request_message_id, final_assistant_message_id, created_at)
+VALUES (?, ?, NULL, ?, ?, ?)`,
+			item.turnID, botID, item.requestID, item.assistantID,
+			base.Add(time.Duration(i*10)*time.Second).Format("2006-01-02 15:04:05"),
+		); err != nil {
+			t.Fatalf("insert turn %s: %v", item.turnID, err)
+		}
+	}
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_history_message_assets (id, message_id, role, ordinal, content_hash, name)
+VALUES (?, ?, 'attachment', 0, 'hash-a', 'a.png')`, pageUUID(1502), requestA); err != nil {
+		t.Fatalf("insert asset: %v", err)
+	}
+	insertPaginationSession(t, ctx, conn, botID, sessionID, turnA)
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_session_turn_heads (session_id, head_turn_id, bot_id) VALUES (?, ?, ?)`, sessionID, turnB, botID); err != nil {
+		t.Fatalf("insert second head: %v", err)
+	}
+	q := newPaginationQueries(t, conn)
+
+	rows, err := q.ListSessionTurnGraphNodeMetadata(ctx, mustUUID(t, sessionID))
+	if err != nil {
+		t.Fatalf("list graph node metadata: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("graph nodes = %d, want 2", len(rows))
+	}
+	if rows[0].TurnID.String() != turnA || rows[1].TurnID.String() != turnB {
+		t.Fatalf("graph node order = [%s %s], want [%s %s]", rows[0].TurnID, rows[1].TurnID, turnA, turnB)
+	}
+	if !rows[0].HasUser || !rows[0].HasAssistant {
+		t.Fatalf("first node flags = user:%v assistant:%v, want both true", rows[0].HasUser, rows[0].HasAssistant)
+	}
+	if rows[0].RequestAssetKey == "" {
+		t.Fatalf("first node request asset key is empty, want asset fingerprint")
+	}
+}
+
 func openPaginationDB(t *testing.T, ctx context.Context) *sql.DB {
 	t.Helper()
 	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
@@ -262,7 +336,20 @@ CREATE TABLE bot_sessions (
 CREATE TABLE bot_history_turns (
   id TEXT PRIMARY KEY,
   bot_id TEXT,
-  parent_turn_id TEXT
+  parent_turn_id TEXT,
+  request_message_id TEXT,
+  final_assistant_message_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE bot_history_message_assets (
+  id TEXT PRIMARY KEY,
+  message_id TEXT NOT NULL,
+  role TEXT,
+  ordinal INTEGER,
+  content_hash TEXT,
+  name TEXT,
+  metadata TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE bot_session_turn_heads (
   session_id TEXT NOT NULL,
