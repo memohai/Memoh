@@ -55,9 +55,6 @@ page_size = 20
 	if cfg.Workload.HTTPFormat != "ui" {
 		t.Fatalf("http_format = %q", cfg.Workload.HTTPFormat)
 	}
-	if !cfg.Workload.HTTPIncludeGraph {
-		t.Fatal("expected default http_include_graph")
-	}
 	if !cfg.Workload.HTTPDecodeJSON {
 		t.Fatal("expected default http_decode_json")
 	}
@@ -134,7 +131,7 @@ concurrency = 0
 func TestHTTPRunnerRejectsUnsupportedSingleScenario(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.Workload.Runner = runnerHTTP
-	cfg.Workload.Scenario = queryGraphMetadata
+	cfg.Workload.Scenario = queryTurnSiblings
 	if err := cfg.validate(); err == nil {
 		t.Fatal("expected unsupported http scenario error")
 	}
@@ -145,8 +142,8 @@ func TestHTTPRunnerRejectsUnsupportedMixedScenario(t *testing.T) {
 	cfg.Workload.Runner = runnerHTTP
 	cfg.Workload.Scenario = "mixed_saas_read"
 	cfg.Workload.QueryWeights = map[string]int{
-		queryLatestPage:    1,
-		queryGraphMetadata: 1,
+		queryLatestPage:   1,
+		queryTurnSiblings: 1,
 	}
 	if err := cfg.validate(); err == nil {
 		t.Fatal("expected unsupported http mixed query error")

@@ -52,8 +52,14 @@ func (e *sqlTemplateExecutor) execQuery(ctx context.Context, queryName string, s
 		args = []any{s.SessionID, nilUUID(headID), nilUUID(cursorID), cursorTime, e.cfg.Workload.PageSize}
 	case queryExternalLookup:
 		args = []any{s.SessionID, nilUUID(headID), s.ExternalMessageID}
-	case queryTurnGraph, queryGraphMetadata:
+	case queryTurnGraph:
 		args = []any{s.SessionID}
+	case queryHeadResolve:
+		args = []any{s.SessionID, variantResolveTarget(queryName, s)}
+	case queryTurnSiblings:
+		args = []any{s.SessionID, variantPageTurnIDs(s)}
+	case queryTurnPath:
+		args = []any{variantPathHead(e.cfg, s, rng)}
 	case queryApprovalPendingList, queryApprovalGraphList, queryApprovalLatest:
 		args = []any{s.BotID, s.SessionID}
 	case queryApprovalShortID:

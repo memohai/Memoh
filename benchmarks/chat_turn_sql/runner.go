@@ -183,6 +183,36 @@ func selectedHeadForBase(s SessionSeed) uuid.UUID {
 	return s.DefaultHeadTurnID
 }
 
+// The head_resolve scenario needs a non-head turn: production resolves via
+// the cheap heads-table lookup first and only recurses for non-heads, so
+// benchmarking with a head id would measure the wrong shape.
+func variantResolveTarget(queryName string, s SessionSeed) any {
+	if s.MidPathTurnID == uuid.Nil {
+		return queryArgError(fmt.Sprintf("%s requires mid_path_turn_id in seed catalog; reseed or reload catalog", queryName))
+	}
+	return s.MidPathTurnID
+}
+
+// Turn ids standing in for one latest transcript page. Catalogs written
+// before page_turn_ids existed fall back to the default head alone — a
+// valid, single-turn page.
+func variantPageTurnIDs(s SessionSeed) []uuid.UUID {
+	if len(s.PageTurnIDs) > 0 {
+		return s.PageTurnIDs
+	}
+	if s.DefaultHeadTurnID != uuid.Nil {
+		return []uuid.UUID{s.DefaultHeadTurnID}
+	}
+	return nil
+}
+
+func variantPathHead(cfg Config, s SessionSeed, rng *rand.Rand) uuid.UUID {
+	if headID := selectedHead(cfg, s, rng); headID != uuid.Nil {
+		return headID
+	}
+	return s.DefaultHeadTurnID
+}
+
 func selectedCursor(s SessionSeed, rng *rand.Rand) (uuid.UUID, time.Time) {
 	if len(s.CursorMessageIDs) == 0 {
 		return s.LatestMessageID, time.Now().UTC()
@@ -255,7 +285,9 @@ func writeExplainPlans(ctx context.Context, pool *pgxpool.Pool, cfg Config, quer
 		queryAfterPage:                {s.SessionID, nilUUID(headID), nilUUID(cursorID), cursorTime, cfg.Workload.PageSize},
 		queryExternalLookup:           {s.SessionID, nilUUID(headID), s.ExternalMessageID},
 		queryTurnGraph:                {s.SessionID},
-		queryGraphMetadata:            {s.SessionID},
+		queryHeadResolve:              {s.SessionID, variantResolveTarget(queryHeadResolve, s)},
+		queryTurnSiblings:             {s.SessionID, variantPageTurnIDs(s)},
+		queryTurnPath:                 {variantPathHead(cfg, s, explainRNG)},
 		queryApprovalPendingList:      {s.BotID, s.SessionID},
 		queryApprovalGraphList:        {s.BotID, s.SessionID},
 		queryApprovalLatest:           {s.BotID, s.SessionID},

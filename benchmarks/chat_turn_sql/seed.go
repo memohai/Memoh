@@ -28,6 +28,8 @@ type SessionSeed struct {
 	SessionID          uuid.UUID   `json:"session_id"`
 	DefaultHeadTurnID  uuid.UUID   `json:"default_head_turn_id"`
 	HeadTurnIDs        []uuid.UUID `json:"head_turn_ids"`
+	MidPathTurnID      uuid.UUID   `json:"mid_path_turn_id"`
+	PageTurnIDs        []uuid.UUID `json:"page_turn_ids"`
 	LatestMessageID    uuid.UUID   `json:"latest_message_id"`
 	CursorMessageIDs   []uuid.UUID `json:"cursor_message_ids"`
 	CursorCreatedAts   []time.Time `json:"cursor_created_ats"`
@@ -233,7 +235,14 @@ func seedBenchmarkData(ctx context.Context, pool *pgxpool.Pool, cfg Config) (See
 				if turnIdx == cfg.Seed.TurnsPerSession-1 {
 					sessionSeed.DefaultHeadTurnID = turn.id
 				}
+				// A mid-path (non-head) turn: the realistic input for the
+				// head_resolve scenario, whose production caller only runs
+				// after the cheap head-table lookup missed.
+				if turnIdx == cfg.Seed.TurnsPerSession/2 {
+					sessionSeed.MidPathTurnID = turn.id
+				}
 			}
+			sessionSeed.PageTurnIDs = latestPageTurnIDs(cfg.Seed, turns)
 			if err := turnBatch.flush(); err != nil {
 				return SeedCatalog{}, err
 			}
@@ -556,6 +565,26 @@ func loadSeedCatalog(ctx context.Context, pool *pgxpool.Pool, cfg Config) (SeedC
 	         WHERE uir.session_id = s.id AND uir.status = 'pending'
 	         ORDER BY uir.created_at DESC, uir.short_id DESC LIMIT 1
 	       ), '') AS user_input_prompt_external_id,
+	       COALESCE((
+	         SELECT mt.id FROM bot_history_turns mt
+	         WHERE mt.owner_session_id = s.id
+	         ORDER BY mt.created_at ASC, mt.id ASC
+	         OFFSET (SELECT COUNT(*) / 2 FROM bot_history_turns tc WHERE tc.owner_session_id = s.id)
+	         LIMIT 1
+	       ), '00000000-0000-0000-0000-000000000000'::uuid) AS mid_path_turn_id,
+	       COALESCE((
+	         WITH RECURSIVE default_path AS (
+	           SELECT t.id, t.parent_turn_id, 1 AS depth
+	           FROM bot_history_turns t
+	           WHERE t.id = s.default_head_turn_id
+	           UNION ALL
+	           SELECT p.id, p.parent_turn_id, dp.depth + 1
+	           FROM bot_history_turns p
+	           JOIN default_path dp ON dp.parent_turn_id = p.id
+	           WHERE dp.depth < 16
+	         )
+	         SELECT array_agg(dp.id) FROM default_path dp
+	       ), ARRAY[]::uuid[]) AS page_turn_ids,
 	       COALESCE((s.metadata->>'hot')::boolean, false) AS hot
 	FROM benchmark_sessions s
 	LEFT JOIN bot_session_turn_heads h ON h.session_id = s.id AND h.bot_id = s.bot_id
@@ -570,7 +599,7 @@ func loadSeedCatalog(ctx context.Context, pool *pgxpool.Pool, cfg Config) (SeedC
 	for rows.Next() {
 		var s SessionSeed
 		var hot bool
-		if err := rows.Scan(&s.BotID, &s.OwnerUserID, &s.RouteID, &s.SessionID, &s.DefaultHeadTurnID, &s.HeadTurnIDs, &s.LatestMessageID, &s.CursorMessageIDs, &s.CursorCreatedAts, &s.ExternalMessageID, &s.ApprovalRequestID, &s.ApprovalBaseReqID, &s.ApprovalShortID, &s.ApprovalPromptID, &s.UserInputRequestID, &s.UserInputBaseReqID, &s.UserInputShortID, &s.UserInputPromptID, &hot); err != nil {
+		if err := rows.Scan(&s.BotID, &s.OwnerUserID, &s.RouteID, &s.SessionID, &s.DefaultHeadTurnID, &s.HeadTurnIDs, &s.LatestMessageID, &s.CursorMessageIDs, &s.CursorCreatedAts, &s.ExternalMessageID, &s.ApprovalRequestID, &s.ApprovalBaseReqID, &s.ApprovalShortID, &s.ApprovalPromptID, &s.UserInputRequestID, &s.UserInputBaseReqID, &s.UserInputShortID, &s.UserInputPromptID, &s.MidPathTurnID, &s.PageTurnIDs, &hot); err != nil {
 			return SeedCatalog{}, err
 		}
 		if !botSeen[s.BotID] {
@@ -641,6 +670,28 @@ func buildSessionTurns(seed SeedConfig, sessionIdx int, start time.Time) []turnS
 		}
 	}
 	return turns
+}
+
+// The number of default-path tail turns recorded per session for the
+// turn_siblings scenario — a stand-in for the turn ids on one latest
+// transcript page.
+const variantPageTurnSeedCount = 16
+
+// latestPageTurnIDs returns the tail of the base (default-head) path, the
+// turn ids a latest transcript page would hand to ListSessionTurnSiblings.
+func latestPageTurnIDs(seed SeedConfig, turns []turnSeed) []uuid.UUID {
+	base := turns
+	if len(base) > seed.TurnsPerSession {
+		base = base[:seed.TurnsPerSession]
+	}
+	if len(base) > variantPageTurnSeedCount {
+		base = base[len(base)-variantPageTurnSeedCount:]
+	}
+	ids := make([]uuid.UUID, 0, len(base))
+	for _, turn := range base {
+		ids = append(ids, turn.id)
+	}
+	return ids
 }
 
 func collectHeadTurns(seed SeedConfig, turns []turnSeed) []uuid.UUID {

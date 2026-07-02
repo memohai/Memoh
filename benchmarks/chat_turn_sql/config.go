@@ -54,7 +54,6 @@ type WorkloadConfig struct {
 	SelectedHeadRatio float64        `toml:"selected_head_ratio"`
 	HotTrafficRatio   float64        `toml:"hot_traffic_ratio"`
 	HTTPFormat        string         `toml:"http_format"`
-	HTTPIncludeGraph  bool           `toml:"http_include_graph"`
 	HTTPDecodeJSON    bool           `toml:"http_decode_json"`
 	QueryWeights      map[string]int `toml:"query_weights"`
 }
@@ -111,7 +110,6 @@ func defaultConfig() Config {
 			SelectedHeadRatio: 0.25,
 			HotTrafficRatio:   0.9,
 			HTTPFormat:        "ui",
-			HTTPIncludeGraph:  true,
 			HTTPDecodeJSON:    true,
 			QueryWeights: map[string]int{
 				queryLatestPage:               40,
@@ -119,7 +117,9 @@ func defaultConfig() Config {
 				queryAfterPage:                4,
 				queryExternalLookup:           3,
 				queryTurnGraph:                0,
-				queryGraphMetadata:            16,
+				queryHeadResolve:              4,
+				queryTurnSiblings:             8,
+				queryTurnPath:                 4,
 				queryApprovalPendingList:      4,
 				queryApprovalGraphList:        2,
 				queryApprovalLatest:           4,
@@ -252,9 +252,6 @@ func (c *Config) applyDefaults(meta *toml.MetaData) {
 	}
 	if !isDefined(meta, "workload", "http_format") {
 		c.Workload.HTTPFormat = d.Workload.HTTPFormat
-	}
-	if !isDefined(meta, "workload", "http_include_graph") {
-		c.Workload.HTTPIncludeGraph = d.Workload.HTTPIncludeGraph
 	}
 	if !isDefined(meta, "workload", "http_decode_json") {
 		c.Workload.HTTPDecodeJSON = d.Workload.HTTPDecodeJSON

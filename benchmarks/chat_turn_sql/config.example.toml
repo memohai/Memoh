@@ -35,7 +35,7 @@ runner = "sqlc"
 
 # One of:
 # mixed_saas_read, latest_page, before_page, after_page, external_lookup,
-# turn_graph, graph_metadata, approval_*, user_input_*
+# turn_graph, head_resolve, turn_siblings, turn_path, approval_*, user_input_*
 scenario = "mixed_saas_read"
 duration = "30s"
 warmup = "5s"
@@ -47,9 +47,9 @@ selected_head_ratio = 0.25
 hot_traffic_ratio = 0.90
 
 # HTTP runner only. Default measures the chat UI first-page shape:
-# GET /bots/:bot_id/messages?format=ui&include_graph=1
+# GET /bots/:bot_id/messages?format=ui (turn variant metadata rides along
+# automatically for chat sessions)
 http_format = "ui"
-http_include_graph = true
 http_decode_json = true
 
 [workload.query_weights]
@@ -58,7 +58,9 @@ before_page = 18
 after_page = 4
 external_lookup = 3
 turn_graph = 0
-graph_metadata = 16
+head_resolve = 4
+turn_siblings = 8
+turn_path = 4
 approval_pending_list = 4
 approval_graph_list = 2
 approval_latest = 4

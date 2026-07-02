@@ -14,7 +14,9 @@ const (
 	queryAfterPage                = "after_page"
 	queryExternalLookup           = "external_lookup"
 	queryTurnGraph                = "turn_graph"
-	queryGraphMetadata            = "graph_metadata"
+	queryHeadResolve              = "head_resolve"
+	queryTurnSiblings             = "turn_siblings"
+	queryTurnPath                 = "turn_path"
 	queryApprovalPendingList      = "approval_pending_list"
 	queryApprovalGraphList        = "approval_graph_list"
 	queryApprovalLatest           = "approval_latest"
@@ -44,7 +46,9 @@ var queryDefinitions = []QueryDefinition{
 	{Name: queryAfterPage, SourceFile: "db/postgres/queries/messages.sql", SourceName: "ListMessagesAfterBySession", Args: []string{"session_id", "head_turn_id", "after_id", "created_at", "max_count"}},
 	{Name: queryExternalLookup, SourceFile: "db/postgres/queries/messages.sql", SourceName: "GetMessageByExternalIDBySession", Args: []string{"session_id", "head_turn_id", "external_message_id"}},
 	{Name: queryTurnGraph, SourceFile: "db/postgres/queries/messages.sql", SourceName: "ListSessionTurnGraphTurns", Args: []string{"session_id"}},
-	{Name: queryGraphMetadata, SourceFile: "db/postgres/queries/messages.sql", SourceName: "ListSessionTurnGraphNodeMetadata", Args: []string{"session_id"}},
+	{Name: queryHeadResolve, SourceFile: "db/postgres/queries/messages.sql", SourceName: "ResolveSessionTurnHead", Args: []string{"session_id", "target_turn_id"}},
+	{Name: queryTurnSiblings, SourceFile: "db/postgres/queries/messages.sql", SourceName: "ListSessionTurnSiblings", Args: []string{"session_id", "turn_ids"}},
+	{Name: queryTurnPath, SourceFile: "db/postgres/queries/messages.sql", SourceName: "ListSessionTurnPathIDs", Args: []string{"head_turn_id"}},
 	{Name: queryApprovalPendingList, SourceFile: "db/postgres/queries/tool_approval.sql", SourceName: "ListPendingToolApprovalsBySession", Args: []string{"bot_id", "session_id"}},
 	{Name: queryApprovalGraphList, SourceFile: "db/postgres/queries/tool_approval.sql", SourceName: "ListToolApprovalsBySessionTurnGraph", Args: []string{"bot_id", "session_id"}},
 	{Name: queryApprovalLatest, SourceFile: "db/postgres/queries/tool_approval.sql", SourceName: "GetLatestPendingToolApprovalBySession", Args: []string{"bot_id", "session_id"}},

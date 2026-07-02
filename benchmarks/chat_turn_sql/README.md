@@ -59,9 +59,8 @@ Important knobs:
 - `workload.runner`: `sqlc` for production-path benchmark, `sql` for SQL templates.
 - `workload.random_seed`: reproducible sampling.
 - `workload.fail_on_error`: returns non-zero if measured query errors occur.
-- `workload.query_weights`: query mix for `mixed_saas_read`. The default mix sets `turn_graph = 0` because current production graph loading no longer calls that query separately; keep it as a standalone scenario for old-path or candidate-SQL microbenchmarks.
-- `workload.http_format`: HTTP runner query `format`. Use `"ui"` for chat UI shape or `""` for raw message REST shape.
-- `workload.http_include_graph`: HTTP runner adds `include_graph=1` for latest-page UI loads when true.
+- `workload.query_weights`: query mix for `mixed_saas_read`. The default mix sets `turn_graph = 0` because production no longer loads a full graph; per-page variant metadata reads (`head_resolve`, `turn_siblings`, `turn_path`) replaced it. Keep `turn_graph` as a standalone scenario for old-path or candidate-SQL microbenchmarks.
+- `workload.http_format`: HTTP runner query `format`. Use `"ui"` for chat UI shape or `""` for raw message REST shape. UI pages of chat sessions carry per-turn variant metadata automatically.
 - `workload.http_decode_json`: HTTP runner decodes the JSON response and counts `items` when true; disabling it counts response bytes only.
 - `output.explain`: writes `EXPLAIN (ANALYZE, BUFFERS, WAL, FORMAT JSON)` per hot query.
 
@@ -74,8 +73,10 @@ Config parsing is strict. Unknown keys and invalid explicit values fail early in
 - `after_page`: cursor pagination toward newer messages.
 - `external_lookup`: locate a visible message by external message id.
 - `runner=http` supports `latest_page`, `before_page`, `after_page`, and `external_lookup`. `latest_page` and `before_page` call `ListMessages`; `after_page` and `external_lookup` call `LocateMessage`.
-- `turn_graph`: full visible turn graph from active heads. This is no longer part of the default mixed production-path workload after graph loading was collapsed into metadata reads.
-- `graph_metadata`: graph node metadata and request asset aggregation. Current production graph loading is represented by this scenario.
+- `turn_graph`: full visible turn graph from active heads. This is no longer part of the default mixed production-path workload; production replaced graph loading with the per-page variant metadata scenarios below.
+- `head_resolve`: resolve a non-head turn id to the newest active head containing it (variant switching with a pinned mid-path turn). Uses the seeded `mid_path_turn_id`; reseed or reload the catalog after upgrading.
+- `turn_siblings`: per-page sibling variant metadata aggregation — the query every UI transcript page of a chat session now runs. Uses the seeded `page_turn_ids` (falls back to the default head for old catalogs).
+- `turn_path`: single-head ancestor path ids, the SSE live-filter read.
 - `approval_pending_list`, `approval_graph_list`, `approval_latest`, `approval_short_id`, `approval_visible_request`, `approval_base_head_request`, `approval_reply_message`: production tool approval read paths.
 - `user_input_pending_list`, `user_input_graph_list`, `user_input_latest`, `user_input_short_id`, `user_input_visible_request`, `user_input_base_head_request`, `user_input_reply_message`: production user input read paths.
 - `mixed_saas_read`: weighted mix of the configured scenarios.

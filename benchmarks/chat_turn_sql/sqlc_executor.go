@@ -74,8 +74,24 @@ func (e *sqlcExecutor) execQuery(ctx context.Context, queryName string, s Sessio
 	case queryTurnGraph:
 		items, err := e.queries.ListSessionTurnGraphTurns(ctx, pgUUID(s.SessionID))
 		return int64(len(items)), err
-	case queryGraphMetadata:
-		items, err := e.queries.ListSessionTurnGraphNodeMetadata(ctx, pgUUID(s.SessionID))
+	case queryHeadResolve:
+		target := variantResolveTarget(queryName, s)
+		if argErr, ok := target.(queryArgError); ok {
+			return 0, argErr
+		}
+		_, err := e.queries.ResolveSessionTurnHead(ctx, postgresqlc.ResolveSessionTurnHeadParams{
+			SessionID:    pgUUID(s.SessionID),
+			TargetTurnID: pgUUID(target.(uuid.UUID)),
+		})
+		return rowsForOne(err)
+	case queryTurnSiblings:
+		items, err := e.queries.ListSessionTurnSiblings(ctx, postgresqlc.ListSessionTurnSiblingsParams{
+			SessionID: pgUUID(s.SessionID),
+			TurnIds:   pgUUIDs(variantPageTurnIDs(s)),
+		})
+		return int64(len(items)), err
+	case queryTurnPath:
+		items, err := e.queries.ListSessionTurnPathIDs(ctx, pgUUID(variantPathHead(e.cfg, s, rng)))
 		return int64(len(items)), err
 	case queryApprovalPendingList:
 		items, err := e.queries.ListPendingToolApprovalsBySession(ctx, postgresqlc.ListPendingToolApprovalsBySessionParams{
@@ -233,6 +249,14 @@ func pgUUID(id uuid.UUID) pgtype.UUID {
 		return pgtype.UUID{}
 	}
 	return pgtype.UUID{Bytes: id, Valid: true}
+}
+
+func pgUUIDs(ids []uuid.UUID) []pgtype.UUID {
+	out := make([]pgtype.UUID, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, pgUUID(id))
+	}
+	return out
 }
 
 func pgText(value string) pgtype.Text {

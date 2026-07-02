@@ -103,9 +103,6 @@ func (e *httpExecutor) execListMessages(ctx context.Context, s SessionSeed, rng 
 	if format := strings.TrimSpace(e.cfg.Workload.HTTPFormat); format != "" {
 		values.Set("format", format)
 	}
-	if e.cfg.Workload.HTTPIncludeGraph && mode == httpListMessagesLatest {
-		values.Set("include_graph", "1")
-	}
 	if headID := selectedHead(e.cfg, s, rng); headID != uuid.Nil {
 		values.Set("head_turn_id", headID.String())
 	}

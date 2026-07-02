@@ -27,6 +27,8 @@ func TestSQLCExecutorConstructsParamsForKnownQueries(t *testing.T) {
 		SessionID:          uuid.New(),
 		DefaultHeadTurnID:  uuid.New(),
 		HeadTurnIDs:        []uuid.UUID{uuid.New()},
+		MidPathTurnID:      uuid.New(),
+		PageTurnIDs:        []uuid.UUID{uuid.New(), uuid.New()},
 		LatestMessageID:    uuid.New(),
 		CursorMessageIDs:   []uuid.UUID{uuid.New()},
 		CursorCreatedAts:   []time.Time{time.Now().UTC()},
