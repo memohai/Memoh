@@ -1303,7 +1303,10 @@ func forceVP8FromEnv() bool {
 func gstreamerArgs(codec string, rfbPort, rtpPort int) []string {
 	base := []string{
 		"-q",
-		"rfbsrc", "host=127.0.0.1", fmt.Sprintf("port=%d", rfbPort), "shared=true", "incremental=true", "use-copyrect=true", "do-timestamp=true",
+		// Request a full framebuffer on startup. With incremental updates only,
+		// a quiet desktop can produce no RFB update and session.start will time
+		// out waiting for the first RTP packet.
+		"rfbsrc", "host=127.0.0.1", fmt.Sprintf("port=%d", rfbPort), "shared=true", "incremental=false", "use-copyrect=true", "do-timestamp=true",
 		"!", "videoconvert",
 		"!", "videorate",
 		"!", fmt.Sprintf("video/x-raw,framerate=%d/1", videoFrameRate),

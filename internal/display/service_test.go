@@ -167,8 +167,8 @@ func TestSessionWaitsForInFlightStart(t *testing.T) {
 
 func TestGStreamerArgsH264UsesX264AndH264Pay(t *testing.T) {
 	args := gstreamerArgs(CodecH264, 5901, 5004)
-	if !containsString(args, "incremental=true") {
-		t.Fatal("live rfbsrc must request incremental updates")
+	if !containsString(args, "incremental=false") {
+		t.Fatal("live rfbsrc must request a full initial framebuffer")
 	}
 	if !containsString(args, "use-copyrect=true") {
 		t.Fatal("live rfbsrc must allow copyrect updates")
