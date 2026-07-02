@@ -165,9 +165,45 @@ func TestItemsFromRowsKeepsAskUserToolExchange(t *testing.T) {
 
 	for _, idx := range []int{1, 2} {
 		assertPolicy(t, items[idx], CompactPolicy("must_keep"))
-		assertPolicy(t, items[idx], CompactPolicyPreserveRecent)
 		assertPolicy(t, items[idx], CompactPolicyPreserveToolClosure)
 		assertNoPolicy(t, items[idx], CompactPolicyCanDrop)
+	}
+}
+
+func TestGuardedSelectionCompactsAroundMustKeepAskExchange(t *testing.T) {
+	t.Parallel()
+
+	askCall := mkRow(t, "assistant", `[{"type":"tool-call","toolName":"`+userinput.ToolNameAskUser+`","toolCallId":"ask-1","input":{"questions":[]}}]`, 100)
+	askResult := mkRow(t, "tool", `[{"type":"tool-result","toolName":"`+userinput.ToolNameAskUser+`","toolCallId":"ask-1","result":{"status":"submitted"}}]`, 100)
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		askCall,
+		askResult,
+		mkRow(t, "user", `"question 2"`, 100),
+		mkRow(t, "assistant", `"answer 2"`, 100),
+		mkRow(t, "user", `"question 3"`, 100),
+		mkRow(t, "assistant", `"answer 3"`, 100),
+		mkRow(t, "user", `"current question"`, 100),
+		mkRow(t, "assistant", `"current answer"`, 100),
+	}
+	items, _ := itemsFromRows(rows)
+
+	toCompact := splitByTarget(items, 200)
+	if len(toCompact) == 0 {
+		t.Fatal("a must-keep ask exchange at the window head must not starve compaction of newer history")
+	}
+	for _, item := range toCompact {
+		if item.ID == askCall.ID || item.ID == askResult.ID {
+			t.Fatalf("must-keep ask_user row was selected for compaction")
+		}
+		for _, protected := range []pgtype.UUID{rows[6].ID, rows[7].ID} {
+			if item.ID == protected {
+				t.Fatalf("current turn row was selected for compaction")
+			}
+		}
+	}
+
+	if ratioCompact := splitByRatio(items, 800, 80); len(ratioCompact) == 0 {
+		t.Fatal("ratio-based selection must also compact around the must-keep island")
 	}
 }
 
