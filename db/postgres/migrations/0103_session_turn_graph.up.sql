@@ -1,42 +1,6 @@
 -- 0103_session_turn_graph
 -- Add immutable turn chains and session-level fork pointers for session history.
 
-ALTER TABLE IF EXISTS bot_history_messages
-  DROP CONSTRAINT IF EXISTS fk_bot_history_messages_turn;
-ALTER TABLE IF EXISTS bot_history_messages
-  DROP CONSTRAINT IF EXISTS bot_history_messages_turn_id_fkey;
-ALTER TABLE IF EXISTS bot_sessions
-  DROP CONSTRAINT IF EXISTS fk_bot_sessions_default_head_turn;
-ALTER TABLE IF EXISTS bot_sessions
-  DROP CONSTRAINT IF EXISTS fk_bot_sessions_forked_from_turn;
-ALTER TABLE IF EXISTS tool_approval_requests
-  DROP CONSTRAINT IF EXISTS fk_tool_approval_persist_turn;
-ALTER TABLE IF EXISTS tool_approval_requests
-  DROP CONSTRAINT IF EXISTS tool_approval_requests_persist_turn_id_fkey;
-ALTER TABLE IF EXISTS user_input_requests
-  DROP CONSTRAINT IF EXISTS fk_user_input_persist_turn;
-ALTER TABLE IF EXISTS user_input_requests
-  DROP CONSTRAINT IF EXISTS user_input_requests_persist_turn_id_fkey;
-
-DROP VIEW IF EXISTS bot_branch_visible_messages;
-
-DROP INDEX IF EXISTS idx_bot_history_turns_request;
-DROP INDEX IF EXISTS idx_bot_history_turns_assistant;
-DROP INDEX IF EXISTS idx_bot_history_turns_bot_created;
-DROP INDEX IF EXISTS idx_bot_history_turns_owner_session;
-DROP INDEX IF EXISTS idx_bot_history_turns_parent;
-DROP INDEX IF EXISTS idx_bot_history_turns_session_branch;
-DROP INDEX IF EXISTS idx_bot_history_turns_branch_seq;
-DROP INDEX IF EXISTS idx_bot_history_messages_turn;
-DROP INDEX IF EXISTS idx_bot_history_messages_turn_seq_unique;
-DROP INDEX IF EXISTS idx_bot_history_messages_branch;
-DROP INDEX IF EXISTS idx_bot_history_messages_branch_seq;
-DROP INDEX IF EXISTS idx_bot_session_turn_heads_head;
-DROP INDEX IF EXISTS idx_bot_session_turn_heads_bot;
-DROP INDEX IF EXISTS idx_bot_session_branches_parent;
-DROP INDEX IF EXISTS idx_bot_session_branches_session;
-DROP INDEX IF EXISTS idx_bot_session_branches_root;
-
 CREATE TABLE IF NOT EXISTS bot_history_turns (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
@@ -56,12 +20,6 @@ CREATE TABLE IF NOT EXISTS bot_history_turns (
   request_group_id UUID
 );
 
--- Guard for databases where an earlier iteration already created the table:
--- make sure the provenance columns exist either way.
-ALTER TABLE bot_history_turns ADD COLUMN IF NOT EXISTS origin_kind TEXT;
-ALTER TABLE bot_history_turns ADD COLUMN IF NOT EXISTS origin_turn_id UUID REFERENCES bot_history_turns(id) ON DELETE SET NULL;
-ALTER TABLE bot_history_turns ADD COLUMN IF NOT EXISTS request_group_id UUID;
-
 CREATE TABLE IF NOT EXISTS bot_session_turn_heads (
   session_id UUID NOT NULL,
   head_turn_id UUID NOT NULL,
@@ -80,137 +38,6 @@ ALTER TABLE bot_history_messages ADD COLUMN IF NOT EXISTS turn_message_seq BIGIN
 
 ALTER TABLE tool_approval_requests ADD COLUMN IF NOT EXISTS persist_turn_id UUID;
 ALTER TABLE user_input_requests ADD COLUMN IF NOT EXISTS persist_turn_id UUID;
-
-DO $$
-DECLARE
-  has_legacy_turns BOOLEAN;
-BEGIN
-  SELECT EXISTS (
-    SELECT 1
-    FROM information_schema.columns
-    WHERE table_schema = 'public'
-      AND table_name = 'bot_history_turns'
-      AND column_name = 'turn_seq'
-  ) INTO has_legacy_turns;
-
-  IF has_legacy_turns THEN
-    ALTER TABLE IF EXISTS bot_session_branches
-      DROP CONSTRAINT IF EXISTS fk_bot_session_branches_fork_from_turn;
-    ALTER TABLE bot_history_turns DROP CONSTRAINT IF EXISTS bot_history_turns_session_id_fkey;
-    ALTER TABLE bot_history_turns DROP CONSTRAINT IF EXISTS bot_history_turns_branch_id_fkey;
-    ALTER TABLE bot_history_turns DROP CONSTRAINT IF EXISTS bot_history_turns_request_message_id_fkey;
-    ALTER TABLE bot_history_turns DROP CONSTRAINT IF EXISTS bot_history_turns_final_assistant_message_id_fkey;
-    ALTER TABLE bot_history_turns DROP CONSTRAINT IF EXISTS bot_history_turns_status_check;
-
-    ALTER TABLE bot_history_turns ADD COLUMN IF NOT EXISTS bot_id UUID;
-    ALTER TABLE bot_history_turns ADD COLUMN IF NOT EXISTS owner_session_id UUID;
-    ALTER TABLE bot_history_turns ADD COLUMN IF NOT EXISTS parent_turn_id UUID;
-
-    UPDATE bot_history_turns t
-    SET bot_id = s.bot_id,
-        owner_session_id = COALESCE(t.owner_session_id, t.session_id)
-    FROM bot_sessions s
-    WHERE t.session_id = s.id
-      AND (t.bot_id IS NULL OR t.owner_session_id IS NULL);
-
-    UPDATE bot_history_turns t
-    SET parent_turn_id = previous.id
-    FROM bot_history_turns previous
-    WHERE previous.branch_id = t.branch_id
-      AND previous.turn_seq = t.turn_seq - 1
-      AND t.parent_turn_id IS NULL;
-
-    UPDATE bot_history_turns t
-    SET parent_turn_id = b.fork_from_turn_id
-    FROM bot_session_branches b
-    WHERE b.id = t.branch_id
-      AND b.parent_branch_id IS NOT NULL
-      AND t.parent_turn_id IS NULL;
-
-    IF EXISTS (SELECT 1 FROM bot_history_turns WHERE bot_id IS NULL) THEN
-      RAISE EXCEPTION 'legacy bot_history_turns contains rows without a resolvable bot_id';
-    END IF;
-
-    ALTER TABLE bot_history_turns ALTER COLUMN bot_id SET NOT NULL;
-
-    IF NOT EXISTS (
-      SELECT 1 FROM pg_constraint
-      WHERE conname = 'bot_history_turns_bot_id_fkey'
-        AND conrelid = 'bot_history_turns'::regclass
-    ) THEN
-      ALTER TABLE bot_history_turns
-        ADD CONSTRAINT bot_history_turns_bot_id_fkey
-        FOREIGN KEY (bot_id) REFERENCES bots(id) ON DELETE CASCADE;
-    END IF;
-    IF NOT EXISTS (
-      SELECT 1 FROM pg_constraint
-      WHERE conname = 'bot_history_turns_owner_session_id_fkey'
-        AND conrelid = 'bot_history_turns'::regclass
-    ) THEN
-      ALTER TABLE bot_history_turns
-        ADD CONSTRAINT bot_history_turns_owner_session_id_fkey
-        FOREIGN KEY (owner_session_id) REFERENCES bot_sessions(id) ON DELETE SET NULL;
-    END IF;
-    IF NOT EXISTS (
-      SELECT 1 FROM pg_constraint
-      WHERE conname = 'bot_history_turns_parent_turn_id_fkey'
-        AND conrelid = 'bot_history_turns'::regclass
-    ) THEN
-      ALTER TABLE bot_history_turns
-        ADD CONSTRAINT bot_history_turns_parent_turn_id_fkey
-        FOREIGN KEY (parent_turn_id) REFERENCES bot_history_turns(id) ON DELETE SET NULL;
-    END IF;
-
-    UPDATE bot_sessions s
-    SET default_head_turn_id = branch_head.id
-    FROM (
-      SELECT DISTINCT ON (session_row.id)
-        session_row.id AS session_id,
-        t.id
-      FROM bot_sessions session_row
-      JOIN bot_history_turns t
-        ON t.owner_session_id = session_row.id
-      ORDER BY
-        session_row.id,
-        CASE
-          WHEN session_row.active_branch_id IS NOT NULL
-           AND t.branch_id = session_row.active_branch_id THEN 0
-          ELSE 1
-        END,
-        t.turn_seq DESC,
-        t.created_at DESC,
-        t.id DESC
-    ) branch_head
-    WHERE s.id = branch_head.session_id
-      AND s.default_head_turn_id IS NULL;
-
-    INSERT INTO bot_session_turn_heads (session_id, head_turn_id, bot_id, created_at, updated_at)
-    SELECT DISTINCT ON (t.branch_id)
-      t.owner_session_id,
-      t.id,
-      t.bot_id,
-      t.created_at,
-      t.updated_at
-    FROM bot_history_turns t
-    WHERE t.branch_id IS NOT NULL
-      AND t.owner_session_id IS NOT NULL
-    ORDER BY t.branch_id, t.turn_seq DESC, t.created_at DESC, t.id DESC
-    ON CONFLICT (session_id, head_turn_id) DO NOTHING;
-
-    ALTER TABLE tool_approval_requests DROP COLUMN IF EXISTS persist_branch_id;
-    ALTER TABLE user_input_requests DROP COLUMN IF EXISTS persist_branch_id;
-    ALTER TABLE bot_history_messages DROP COLUMN IF EXISTS branch_seq;
-    ALTER TABLE bot_history_messages DROP COLUMN IF EXISTS branch_id;
-    ALTER TABLE bot_sessions DROP COLUMN IF EXISTS active_branch_id;
-    DROP TABLE IF EXISTS bot_session_branches;
-    ALTER TABLE bot_history_turns DROP COLUMN IF EXISTS completed_at;
-    ALTER TABLE bot_history_turns DROP COLUMN IF EXISTS title;
-    ALTER TABLE bot_history_turns DROP COLUMN IF EXISTS status;
-    ALTER TABLE bot_history_turns DROP COLUMN IF EXISTS turn_seq;
-    ALTER TABLE bot_history_turns DROP COLUMN IF EXISTS branch_id;
-    ALTER TABLE bot_history_turns DROP COLUMN IF EXISTS session_id;
-  END IF;
-END $$;
 
 WITH ordered AS (
   SELECT
@@ -414,38 +241,6 @@ CREATE INDEX IF NOT EXISTS idx_user_input_persist_turn ON user_input_requests(pe
 
 ALTER TABLE tool_approval_requests DROP CONSTRAINT IF EXISTS tool_approval_tool_call_unique;
 ALTER TABLE user_input_requests DROP CONSTRAINT IF EXISTS user_input_tool_call_unique;
-DROP INDEX IF EXISTS tool_approval_tool_call_turn_unique;
-DROP INDEX IF EXISTS tool_approval_tool_call_legacy_unique;
-DROP INDEX IF EXISTS user_input_tool_call_turn_unique;
-DROP INDEX IF EXISTS user_input_tool_call_legacy_unique;
-
-WITH ranked_tool_approvals AS (
-  SELECT
-    id,
-    ROW_NUMBER() OVER (
-      PARTITION BY session_id, tool_call_id, persist_turn_id
-      ORDER BY created_at DESC, id DESC
-    ) AS row_num
-  FROM tool_approval_requests
-)
-DELETE FROM tool_approval_requests request
-USING ranked_tool_approvals ranked
-WHERE request.id = ranked.id
-  AND ranked.row_num > 1;
-
-WITH ranked_user_inputs AS (
-  SELECT
-    id,
-    ROW_NUMBER() OVER (
-      PARTITION BY session_id, tool_call_id, persist_turn_id
-      ORDER BY created_at DESC, id DESC
-    ) AS row_num
-  FROM user_input_requests
-)
-DELETE FROM user_input_requests request
-USING ranked_user_inputs ranked
-WHERE request.id = ranked.id
-  AND ranked.row_num > 1;
 
 DO $$
 BEGIN

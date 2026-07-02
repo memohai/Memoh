@@ -82,21 +82,3 @@ func TestPostgresSessionTurnPointerConstraintsUseBotBoundary(t *testing.T) {
 		})
 	}
 }
-
-func TestPostgresSessionTurnGraphMigrationHandlesLegacyBranchSchema(t *testing.T) {
-	sql := readEmbeddedMigration(t, "postgres/migrations/0103_session_turn_graph.up.sql")
-	for _, want := range []string{
-		"column_name = 'turn_seq'",
-		"DROP VIEW IF EXISTS bot_branch_visible_messages",
-		"ALTER TABLE bot_history_turns ADD COLUMN IF NOT EXISTS bot_id UUID",
-		"SET parent_turn_id = previous.id",
-		"DROP COLUMN IF EXISTS persist_branch_id",
-		"DROP TABLE IF EXISTS bot_session_branches",
-		"ALTER TABLE bot_history_messages DROP COLUMN IF EXISTS branch_id",
-		"ALTER TABLE bot_history_turns DROP COLUMN IF EXISTS session_id",
-	} {
-		if !strings.Contains(sql, want) {
-			t.Fatalf("postgres 0103 migration missing legacy branch handling fragment %q", want)
-		}
-	}
-}
