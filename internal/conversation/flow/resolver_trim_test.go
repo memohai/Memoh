@@ -5,51 +5,50 @@ import (
 	"testing"
 
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/historyfrag"
 	"github.com/memohai/memoh/internal/userinput"
 )
 
 func intPtr(v int) *int { return &v }
 
+func trimRecord(msg conversation.ModelMessage, mutate func(*historyfrag.HistoryRecord)) historyfrag.HistoryRecord {
+	return historyRecord("trim-row", msg, mutate)
+}
+
 func TestTrimMessagesByTokens_DropsLeadingOrphanTool(t *testing.T) {
 	t.Parallel()
 
-	messages := []messageWithUsage{
-		{
-			Message: conversation.ModelMessage{
-				Role:    "user",
-				Content: conversation.NewTextContent("1111"),
-			},
-		},
-		{
-			Message: conversation.ModelMessage{
-				Role: "assistant",
-				ToolCalls: []conversation.ToolCall{
-					{
-						ID:   "call-1",
-						Type: "function",
-						Function: conversation.ToolCallFunction{
-							Name:      "calc",
-							Arguments: `{"x":1}`,
-						},
+	messages := []historyfrag.HistoryRecord{
+		trimRecord(conversation.ModelMessage{
+			Role:    "user",
+			Content: conversation.NewTextContent("1111"),
+		}, nil),
+		trimRecord(conversation.ModelMessage{
+			Role: "assistant",
+			ToolCalls: []conversation.ToolCall{
+				{
+					ID:   "call-1",
+					Type: "function",
+					Function: conversation.ToolCallFunction{
+						Name:      "calc",
+						Arguments: `{"x":1}`,
 					},
 				},
 			},
-			UsageOutputTokens: intPtr(50),
-		},
-		{
-			Message: conversation.ModelMessage{
-				Role:       "tool",
-				ToolCallID: "call-1",
-				Content:    conversation.NewTextContent("2"),
-			},
-		},
-		{
-			Message: conversation.ModelMessage{
-				Role:    "assistant",
-				Content: conversation.NewTextContent("done"),
-			},
-			UsageOutputTokens: intPtr(60),
-		},
+		}, func(record *historyfrag.HistoryRecord) {
+			record.UsageOutputTokens = intPtr(50)
+		}),
+		trimRecord(conversation.ModelMessage{
+			Role:       "tool",
+			ToolCallID: "call-1",
+			Content:    conversation.NewTextContent("2"),
+		}, nil),
+		trimRecord(conversation.ModelMessage{
+			Role:    "assistant",
+			Content: conversation.NewTextContent("done"),
+		}, func(record *historyfrag.HistoryRecord) {
+			record.UsageOutputTokens = intPtr(60)
+		}),
 	}
 
 	// Budget 70: assistant(60) fits, adding assistant-tool-call(50) exceeds →
@@ -69,30 +68,27 @@ func TestTrimMessagesByTokens_DropsLeadingOrphanTool(t *testing.T) {
 func TestTrimMessagesByTokens_KeepsToolWhenPaired(t *testing.T) {
 	t.Parallel()
 
-	messages := []messageWithUsage{
-		{
-			Message: conversation.ModelMessage{
-				Role: "assistant",
-				ToolCalls: []conversation.ToolCall{
-					{
-						ID:   "call-1",
-						Type: "function",
-						Function: conversation.ToolCallFunction{
-							Name:      "calc",
-							Arguments: `{"x":1}`,
-						},
+	messages := []historyfrag.HistoryRecord{
+		trimRecord(conversation.ModelMessage{
+			Role: "assistant",
+			ToolCalls: []conversation.ToolCall{
+				{
+					ID:   "call-1",
+					Type: "function",
+					Function: conversation.ToolCallFunction{
+						Name:      "calc",
+						Arguments: `{"x":1}`,
 					},
 				},
 			},
-			UsageOutputTokens: intPtr(10),
-		},
-		{
-			Message: conversation.ModelMessage{
-				Role:       "tool",
-				ToolCallID: "call-1",
-				Content:    conversation.NewTextContent("2"),
-			},
-		},
+		}, func(record *historyfrag.HistoryRecord) {
+			record.UsageOutputTokens = intPtr(10)
+		}),
+		trimRecord(conversation.ModelMessage{
+			Role:       "tool",
+			ToolCallID: "call-1",
+			Content:    conversation.NewTextContent("2"),
+		}, nil),
 	}
 
 	trimmed, _ := trimMessagesByTokens(nil, messages, 100)
@@ -107,9 +103,9 @@ func TestTrimMessagesByTokens_KeepsToolWhenPaired(t *testing.T) {
 func TestTrimMessagesByTokens_NoUsage_KeepsAll(t *testing.T) {
 	t.Parallel()
 
-	messages := []messageWithUsage{
-		{Message: conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("hello")}},
-		{Message: conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("hi")}},
+	messages := []historyfrag.HistoryRecord{
+		trimRecord(conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("hello")}, nil),
+		trimRecord(conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("hi")}, nil),
 	}
 
 	trimmed, _ := trimMessagesByTokens(nil, messages, 10)
@@ -121,9 +117,13 @@ func TestTrimMessagesByTokens_NoUsage_KeepsAll(t *testing.T) {
 func TestTrimMessagesByTokens_ZeroMeansNoLimit(t *testing.T) {
 	t.Parallel()
 
-	messages := []messageWithUsage{
-		{Message: conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("hello")}, UsageOutputTokens: intPtr(10000)},
-		{Message: conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("world")}, UsageOutputTokens: intPtr(10000)},
+	messages := []historyfrag.HistoryRecord{
+		trimRecord(conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("hello")}, func(record *historyfrag.HistoryRecord) {
+			record.UsageOutputTokens = intPtr(10000)
+		}),
+		trimRecord(conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("world")}, func(record *historyfrag.HistoryRecord) {
+			record.UsageOutputTokens = intPtr(10000)
+		}),
 	}
 
 	// maxTokens = 0 means "no limit configured", should keep all messages.
@@ -136,11 +136,19 @@ func TestTrimMessagesByTokens_ZeroMeansNoLimit(t *testing.T) {
 func TestTrimMessagesByTokens_SmallBudgetTrims(t *testing.T) {
 	t.Parallel()
 
-	messages := []messageWithUsage{
-		{Message: conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("old message")}, UsageOutputTokens: intPtr(100)},
-		{Message: conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("old reply")}, UsageOutputTokens: intPtr(200)},
-		{Message: conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("new message")}, UsageOutputTokens: intPtr(50)},
-		{Message: conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("new reply")}, UsageOutputTokens: intPtr(60)},
+	messages := []historyfrag.HistoryRecord{
+		trimRecord(conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("old message")}, func(record *historyfrag.HistoryRecord) {
+			record.UsageOutputTokens = intPtr(100)
+		}),
+		trimRecord(conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("old reply")}, func(record *historyfrag.HistoryRecord) {
+			record.UsageOutputTokens = intPtr(200)
+		}),
+		trimRecord(conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("new message")}, func(record *historyfrag.HistoryRecord) {
+			record.UsageOutputTokens = intPtr(50)
+		}),
+		trimRecord(conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("new reply")}, func(record *historyfrag.HistoryRecord) {
+			record.UsageOutputTokens = intPtr(60)
+		}),
 	}
 
 	// Budget of 1: should trim aggressively, NOT return all messages.
@@ -158,9 +166,11 @@ func TestTrimMessagesByTokens_EstimatesFallback(t *testing.T) {
 	for i := range longText {
 		longText[i] = 'x'
 	}
-	messages := []messageWithUsage{
-		{Message: conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent(string(longText))}},
-		{Message: conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("ok")}, UsageOutputTokens: intPtr(10)},
+	messages := []historyfrag.HistoryRecord{
+		trimRecord(conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent(string(longText))}, nil),
+		trimRecord(conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("ok")}, func(record *historyfrag.HistoryRecord) {
+			record.UsageOutputTokens = intPtr(10)
+		}),
 	}
 
 	// Budget of 50: user message is ~100 estimated tokens (400/4), should be trimmed.
