@@ -512,7 +512,10 @@ CREATE TABLE IF NOT EXISTS bot_history_turns (
   request_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
   final_assistant_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  origin_kind TEXT,
+  origin_turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
+  request_group_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_bot_history_turns_bot_created

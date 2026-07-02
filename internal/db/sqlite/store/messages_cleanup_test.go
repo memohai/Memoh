@@ -88,7 +88,10 @@ CREATE TABLE bot_history_turns (
   request_message_id TEXT,
   final_assistant_message_id TEXT,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  origin_kind TEXT,
+  origin_turn_id TEXT,
+  request_group_id TEXT
 );
 CREATE TABLE bot_session_turn_heads (
   session_id TEXT NOT NULL,

@@ -1466,6 +1466,13 @@ func restoreHistoryTurnsFromBackup(
 ) error {
 	fallbackOwners := fallbackTurnOwners(turns, turnHeads, sessionMap)
 	pending := append([]sqlc.BotHistoryTurn(nil), turns...)
+	// Request-group leaders (turns that are their own group) must be created
+	// before group members so member rows can remap request_group_id to the
+	// leader's new id. Leaders and members share a parent, so they always
+	// land in the same dependency wave; a stable partition is enough.
+	sort.SliceStable(pending, func(i, j int) bool {
+		return isOwnRequestGroup(pending[i]) && !isOwnRequestGroup(pending[j])
+	})
 	for len(pending) > 0 {
 		progressed := false
 		next := pending[:0]
@@ -1485,10 +1492,24 @@ func restoreHistoryTurnsFromBackup(
 			if !ownerSessionID.Valid {
 				ownerSessionID = fallbackOwners[item.ID.String()]
 			}
+			// Provenance pointers are remapped best-effort: an unmapped
+			// request group falls back to NULL (own group) and an unmapped
+			// origin turn is dropped, which only loosens variant grouping.
+			requestGroupID := pgtype.UUID{}
+			if item.RequestGroupID.Valid && item.RequestGroupID != item.ID {
+				requestGroupID = turnMap[item.RequestGroupID.String()]
+			}
+			originTurnID := pgtype.UUID{}
+			if item.OriginTurnID.Valid {
+				originTurnID = turnMap[item.OriginTurnID.String()]
+			}
 			created, err := queries.CreateHistoryTurn(ctx, sqlc.CreateHistoryTurnParams{
 				BotID:          botID,
 				OwnerSessionID: ownerSessionID,
 				ParentTurnID:   parentTurnID,
+				OriginKind:     item.OriginKind,
+				OriginTurnID:   originTurnID,
+				RequestGroupID: requestGroupID,
 			})
 			if err != nil {
 				return fmt.Errorf("history turn: %w", err)
@@ -1502,6 +1523,12 @@ func restoreHistoryTurnsFromBackup(
 		pending = next
 	}
 	return nil
+}
+
+// isOwnRequestGroup reports whether the backup turn is its own request group
+// (no request_group_id, or a backfilled leader that points at itself).
+func isOwnRequestGroup(turn sqlc.BotHistoryTurn) bool {
+	return !turn.RequestGroupID.Valid || turn.RequestGroupID == turn.ID
 }
 
 func fallbackTurnOwners(

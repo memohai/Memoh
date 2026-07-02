@@ -90,6 +90,10 @@ type SessionTurnGraphNode struct {
 	TurnID       string `json:"turn_id"`
 	ParentTurnID string `json:"parent_turn_id,omitempty"`
 	Timestamp    string `json:"timestamp,omitempty"`
+	// RequestKey is an opaque token grouping sibling turns that carry the
+	// same logical request: retry siblings share it, edits get a new one.
+	// Backed by bot_history_turns.request_group_id (falls back to the turn's
+	// own id when unset).
 	RequestKey   string `json:"request_key,omitempty"`
 	HasUser      bool   `json:"has_user,omitempty"`
 	HasAssistant bool   `json:"has_assistant,omitempty"`

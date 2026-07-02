@@ -109,6 +109,8 @@ func (r *Resolver) StreamRetryWS(
 		TurnID:         row.TurnID.String(),
 		ParentTurnID:   uuidString(row.ParentTurnID),
 		BaseHeadTurnID: pgBaseHeadTurnID.String(),
+		OriginKind:     conversation.TurnOriginRetry,
+		RequestGroupID: uuidString(row.RequestGroupID),
 	}
 	retryReq := req
 	retryReq.Attachments = attachments

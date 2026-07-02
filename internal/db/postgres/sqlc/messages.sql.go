@@ -41,14 +41,20 @@ WITH input AS (
   SELECT
     $1::uuid AS bot_id,
     $2::uuid AS owner_session_id,
-    $3::uuid AS parent_turn_id
+    $3::uuid AS parent_turn_id,
+    $4::text AS origin_kind,
+    $5::uuid AS origin_turn_id,
+    $6::uuid AS request_group_id
 )
 INSERT INTO bot_history_turns (
   bot_id,
   owner_session_id,
-  parent_turn_id
+  parent_turn_id,
+  origin_kind,
+  origin_turn_id,
+  request_group_id
 )
-SELECT bot_id, owner_session_id, parent_turn_id
+SELECT bot_id, owner_session_id, parent_turn_id, origin_kind, origin_turn_id, request_group_id
 FROM input
 WHERE (
     owner_session_id IS NULL
@@ -68,17 +74,27 @@ WHERE (
         AND parent.bot_id = input.bot_id
     )
   )
-RETURNING id, bot_id, owner_session_id, parent_turn_id, request_message_id, final_assistant_message_id, created_at, updated_at
+RETURNING id, bot_id, owner_session_id, parent_turn_id, request_message_id, final_assistant_message_id, created_at, updated_at, origin_kind, origin_turn_id, request_group_id
 `
 
 type CreateHistoryTurnParams struct {
 	BotID          pgtype.UUID `json:"bot_id"`
 	OwnerSessionID pgtype.UUID `json:"owner_session_id"`
 	ParentTurnID   pgtype.UUID `json:"parent_turn_id"`
+	OriginKind     pgtype.Text `json:"origin_kind"`
+	OriginTurnID   pgtype.UUID `json:"origin_turn_id"`
+	RequestGroupID pgtype.UUID `json:"request_group_id"`
 }
 
 func (q *Queries) CreateHistoryTurn(ctx context.Context, arg CreateHistoryTurnParams) (BotHistoryTurn, error) {
-	row := q.db.QueryRow(ctx, createHistoryTurn, arg.BotID, arg.OwnerSessionID, arg.ParentTurnID)
+	row := q.db.QueryRow(ctx, createHistoryTurn,
+		arg.BotID,
+		arg.OwnerSessionID,
+		arg.ParentTurnID,
+		arg.OriginKind,
+		arg.OriginTurnID,
+		arg.RequestGroupID,
+	)
 	var i BotHistoryTurn
 	err := row.Scan(
 		&i.ID,
@@ -89,6 +105,9 @@ func (q *Queries) CreateHistoryTurn(ctx context.Context, arg CreateHistoryTurnPa
 		&i.FinalAssistantMessageID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OriginKind,
+		&i.OriginTurnID,
+		&i.RequestGroupID,
 	)
 	return i, err
 }
@@ -327,7 +346,7 @@ func (q *Queries) DeleteMessagesByTurnID(ctx context.Context, turnID pgtype.UUID
 }
 
 const getHistoryTurnByID = `-- name: GetHistoryTurnByID :one
-SELECT id, bot_id, owner_session_id, parent_turn_id, request_message_id, final_assistant_message_id, created_at, updated_at
+SELECT id, bot_id, owner_session_id, parent_turn_id, request_message_id, final_assistant_message_id, created_at, updated_at, origin_kind, origin_turn_id, request_group_id
 FROM bot_history_turns
 WHERE id = $1
 `
@@ -344,6 +363,9 @@ func (q *Queries) GetHistoryTurnByID(ctx context.Context, id pgtype.UUID) (BotHi
 		&i.FinalAssistantMessageID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OriginKind,
+		&i.OriginTurnID,
+		&i.RequestGroupID,
 	)
 	return i, err
 }
@@ -548,6 +570,7 @@ SELECT
   assistant.id AS assistant_message_id,
   assistant.turn_id,
   t.parent_turn_id,
+  COALESCE(t.request_group_id, t.id) AS request_group_id,
   request.id AS request_message_id,
   request.content AS request_content,
   request.display_text AS request_display_text
@@ -571,6 +594,7 @@ type GetVisibleAssistantTurnForRetryRow struct {
 	AssistantMessageID pgtype.UUID `json:"assistant_message_id"`
 	TurnID             pgtype.UUID `json:"turn_id"`
 	ParentTurnID       pgtype.UUID `json:"parent_turn_id"`
+	RequestGroupID     pgtype.UUID `json:"request_group_id"`
 	RequestMessageID   pgtype.UUID `json:"request_message_id"`
 	RequestContent     []byte      `json:"request_content"`
 	RequestDisplayText pgtype.Text `json:"request_display_text"`
@@ -583,6 +607,7 @@ func (q *Queries) GetVisibleAssistantTurnForRetry(ctx context.Context, arg GetVi
 		&i.AssistantMessageID,
 		&i.TurnID,
 		&i.ParentTurnID,
+		&i.RequestGroupID,
 		&i.RequestMessageID,
 		&i.RequestContent,
 		&i.RequestDisplayText,
@@ -977,16 +1002,16 @@ func (q *Queries) ListActiveMessagesSinceByTurn(ctx context.Context, arg ListAct
 
 const listHistoryTurnPathFromHead = `-- name: ListHistoryTurnPathFromHead :many
 WITH RECURSIVE visible_turns AS (
-  SELECT t.id, t.bot_id, t.owner_session_id, t.parent_turn_id, t.request_message_id, t.final_assistant_message_id, t.created_at, t.updated_at, 0::bigint AS depth
+  SELECT t.id, t.bot_id, t.owner_session_id, t.parent_turn_id, t.request_message_id, t.final_assistant_message_id, t.created_at, t.updated_at, t.origin_kind, t.origin_turn_id, t.request_group_id, 0::bigint AS depth
   FROM bot_history_turns t
   WHERE t.id = $1
   UNION ALL
-  SELECT p.id, p.bot_id, p.owner_session_id, p.parent_turn_id, p.request_message_id, p.final_assistant_message_id, p.created_at, p.updated_at, vt.depth + 1
+  SELECT p.id, p.bot_id, p.owner_session_id, p.parent_turn_id, p.request_message_id, p.final_assistant_message_id, p.created_at, p.updated_at, p.origin_kind, p.origin_turn_id, p.request_group_id, vt.depth + 1
   FROM bot_history_turns p
   JOIN visible_turns vt ON vt.parent_turn_id = p.id
 )
 SELECT
-  t.id, t.bot_id, t.owner_session_id, t.parent_turn_id, t.request_message_id, t.final_assistant_message_id, t.created_at, t.updated_at
+  t.id, t.bot_id, t.owner_session_id, t.parent_turn_id, t.request_message_id, t.final_assistant_message_id, t.created_at, t.updated_at, t.origin_kind, t.origin_turn_id, t.request_group_id
 FROM visible_turns vt
 JOIN bot_history_turns t ON t.id = vt.id
 ORDER BY vt.depth ASC
@@ -1010,6 +1035,9 @@ func (q *Queries) ListHistoryTurnPathFromHead(ctx context.Context, headTurnID pg
 			&i.FinalAssistantMessageID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.OriginKind,
+			&i.OriginTurnID,
+			&i.RequestGroupID,
 		); err != nil {
 			return nil, err
 		}
@@ -2384,7 +2412,7 @@ func (q *Queries) ListOtherActiveSessionVisibleTurnIDs(ctx context.Context, sess
 }
 
 const listSessionOwnedTurnsForCleanup = `-- name: ListSessionOwnedTurnsForCleanup :many
-SELECT t.id, t.bot_id, t.owner_session_id, t.parent_turn_id, t.request_message_id, t.final_assistant_message_id, t.created_at, t.updated_at
+SELECT t.id, t.bot_id, t.owner_session_id, t.parent_turn_id, t.request_message_id, t.final_assistant_message_id, t.created_at, t.updated_at, t.origin_kind, t.origin_turn_id, t.request_group_id
 FROM bot_history_turns t
 WHERE t.owner_session_id = $1
 ORDER BY t.created_at DESC, t.id DESC
@@ -2408,6 +2436,9 @@ func (q *Queries) ListSessionOwnedTurnsForCleanup(ctx context.Context, sessionID
 			&i.FinalAssistantMessageID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.OriginKind,
+			&i.OriginTurnID,
+			&i.RequestGroupID,
 		); err != nil {
 			return nil, err
 		}
@@ -2432,51 +2463,26 @@ WITH RECURSIVE graph_turns AS (
   SELECT p.id, p.parent_turn_id
   FROM bot_history_turns p
   JOIN graph_turns gt ON gt.parent_turn_id = p.id
-),
-request_assets AS (
-  SELECT
-    a.message_id,
-    string_agg(
-      concat_ws(
-        ':',
-        COALESCE(a.content_hash, ''),
-        COALESCE(a.name, ''),
-        COALESCE(a.role, ''),
-        COALESCE(a.ordinal::text, '')
-      ),
-      '|'
-      ORDER BY a.content_hash, a.name, a.role, a.ordinal, a.id
-    ) AS request_asset_key
-  FROM graph_turns gt
-  JOIN bot_history_turns t ON t.id = gt.id
-  JOIN bot_history_message_assets a ON a.message_id = t.request_message_id
-  GROUP BY a.message_id
 )
 SELECT
   gt.id AS turn_id,
   gt.parent_turn_id,
-  COALESCE(rm.created_at, t.created_at)::timestamptz AS node_created_at,
-  COALESCE(rm.content, 'null'::jsonb) AS request_content,
-  COALESCE(rm.display_text, '')::text AS request_display_text,
-  COALESCE(ra.request_asset_key, '')::text AS request_asset_key,
+  t.created_at AS node_created_at,
+  COALESCE(t.request_group_id, t.id) AS request_group_id,
   (t.request_message_id IS NOT NULL)::boolean AS has_user,
   (t.final_assistant_message_id IS NOT NULL)::boolean AS has_assistant
 FROM graph_turns gt
 JOIN bot_history_turns t ON t.id = gt.id
-LEFT JOIN bot_history_messages rm ON rm.id = t.request_message_id
-LEFT JOIN request_assets ra ON ra.message_id = t.request_message_id
-ORDER BY COALESCE(rm.created_at, t.created_at)::timestamptz ASC, gt.id ASC
+ORDER BY t.created_at ASC, gt.id ASC
 `
 
 type ListSessionTurnGraphNodeMetadataRow struct {
-	TurnID             pgtype.UUID        `json:"turn_id"`
-	ParentTurnID       pgtype.UUID        `json:"parent_turn_id"`
-	NodeCreatedAt      pgtype.Timestamptz `json:"node_created_at"`
-	RequestContent     []byte             `json:"request_content"`
-	RequestDisplayText string             `json:"request_display_text"`
-	RequestAssetKey    string             `json:"request_asset_key"`
-	HasUser            bool               `json:"has_user"`
-	HasAssistant       bool               `json:"has_assistant"`
+	TurnID         pgtype.UUID        `json:"turn_id"`
+	ParentTurnID   pgtype.UUID        `json:"parent_turn_id"`
+	NodeCreatedAt  pgtype.Timestamptz `json:"node_created_at"`
+	RequestGroupID pgtype.UUID        `json:"request_group_id"`
+	HasUser        bool               `json:"has_user"`
+	HasAssistant   bool               `json:"has_assistant"`
 }
 
 func (q *Queries) ListSessionTurnGraphNodeMetadata(ctx context.Context, sessionID pgtype.UUID) ([]ListSessionTurnGraphNodeMetadataRow, error) {
@@ -2492,9 +2498,7 @@ func (q *Queries) ListSessionTurnGraphNodeMetadata(ctx context.Context, sessionI
 			&i.TurnID,
 			&i.ParentTurnID,
 			&i.NodeCreatedAt,
-			&i.RequestContent,
-			&i.RequestDisplayText,
-			&i.RequestAssetKey,
+			&i.RequestGroupID,
 			&i.HasUser,
 			&i.HasAssistant,
 		); err != nil {
@@ -2522,7 +2526,7 @@ WITH RECURSIVE graph_turns AS (
   FROM bot_history_turns p
   JOIN graph_turns gt ON gt.parent_turn_id = p.id
 )
-SELECT t.id, t.bot_id, t.owner_session_id, t.parent_turn_id, t.request_message_id, t.final_assistant_message_id, t.created_at, t.updated_at
+SELECT t.id, t.bot_id, t.owner_session_id, t.parent_turn_id, t.request_message_id, t.final_assistant_message_id, t.created_at, t.updated_at, t.origin_kind, t.origin_turn_id, t.request_group_id
 FROM graph_turns gt
 JOIN bot_history_turns t ON t.id = gt.id
 ORDER BY t.created_at ASC, t.id ASC
@@ -2546,6 +2550,9 @@ func (q *Queries) ListSessionTurnGraphTurns(ctx context.Context, sessionID pgtyp
 			&i.FinalAssistantMessageID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.OriginKind,
+			&i.OriginTurnID,
+			&i.RequestGroupID,
 		); err != nil {
 			return nil, err
 		}
@@ -2764,7 +2771,7 @@ WHERE bot_history_turns.id = $2
         AND m.role = 'assistant'
     )
   )
-RETURNING id, bot_id, owner_session_id, parent_turn_id, request_message_id, final_assistant_message_id, created_at, updated_at
+RETURNING id, bot_id, owner_session_id, parent_turn_id, request_message_id, final_assistant_message_id, created_at, updated_at, origin_kind, origin_turn_id, request_group_id
 `
 
 type UpdateHistoryTurnFinalAssistantMessageParams struct {
@@ -2784,6 +2791,9 @@ func (q *Queries) UpdateHistoryTurnFinalAssistantMessage(ctx context.Context, ar
 		&i.FinalAssistantMessageID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OriginKind,
+		&i.OriginTurnID,
+		&i.RequestGroupID,
 	)
 	return i, err
 }
@@ -2803,7 +2813,7 @@ WHERE bot_history_turns.id = $2
         AND m.role = 'user'
     )
   )
-RETURNING id, bot_id, owner_session_id, parent_turn_id, request_message_id, final_assistant_message_id, created_at, updated_at
+RETURNING id, bot_id, owner_session_id, parent_turn_id, request_message_id, final_assistant_message_id, created_at, updated_at, origin_kind, origin_turn_id, request_group_id
 `
 
 type UpdateHistoryTurnRequestMessageParams struct {
@@ -2823,6 +2833,9 @@ func (q *Queries) UpdateHistoryTurnRequestMessage(ctx context.Context, arg Updat
 		&i.FinalAssistantMessageID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OriginKind,
+		&i.OriginTurnID,
+		&i.RequestGroupID,
 	)
 	return i, err
 }

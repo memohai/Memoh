@@ -3,7 +3,10 @@ INSERT INTO bot_history_turns (
   id,
   bot_id,
   owner_session_id,
-  parent_turn_id
+  parent_turn_id,
+  origin_kind,
+  origin_turn_id,
+  request_group_id
 )
 SELECT
   lower(hex(randomblob(4))) || '-' ||
@@ -13,7 +16,10 @@ SELECT
   lower(hex(randomblob(6))),
   sqlc.arg(bot_id),
   sqlc.narg(owner_session_id),
-  sqlc.narg(parent_turn_id)
+  sqlc.narg(parent_turn_id),
+  sqlc.narg(origin_kind),
+  sqlc.narg(origin_turn_id),
+  sqlc.narg(request_group_id)
 WHERE (
     sqlc.narg(owner_session_id) IS NULL
     OR EXISTS (
@@ -220,6 +226,7 @@ SELECT
   assistant.id AS assistant_message_id,
   assistant.turn_id,
   t.parent_turn_id,
+  COALESCE(t.request_group_id, t.id) AS request_group_id,
   request.id AS request_message_id,
   request.content AS request_content,
   request.display_text AS request_display_text
@@ -375,40 +382,17 @@ WITH RECURSIVE graph_turns(id, parent_turn_id) AS (
   SELECT p.id, p.parent_turn_id
   FROM bot_history_turns p
   JOIN graph_turns gt ON gt.parent_turn_id = p.id
-),
-request_assets AS (
-  SELECT
-    a.message_id,
-    GROUP_CONCAT(
-      COALESCE(a.content_hash, '') || ':' ||
-      COALESCE(a.name, '') || ':' ||
-      COALESCE(a.role, '') || ':' ||
-      COALESCE(CAST(a.ordinal AS TEXT), ''),
-      '|'
-    ) AS request_asset_key
-  FROM (
-    SELECT a.id, a.message_id, a.role, a.ordinal, a.content_hash, a.name, a.metadata, a.created_at
-    FROM graph_turns gt
-    JOIN bot_history_turns t ON t.id = gt.id
-    JOIN bot_history_message_assets a ON a.message_id = t.request_message_id
-    ORDER BY a.content_hash, a.name, a.role, a.ordinal, a.id
-  ) a
-  GROUP BY a.message_id
 )
 SELECT
   gt.id AS turn_id,
   gt.parent_turn_id,
-  COALESCE(rm.created_at, t.created_at) AS node_created_at,
-  COALESCE(rm.content, 'null') AS request_content,
-  COALESCE(rm.display_text, '') AS request_display_text,
-  COALESCE(ra.request_asset_key, '') AS request_asset_key,
+  t.created_at AS node_created_at,
+  COALESCE(t.request_group_id, t.id) AS request_group_id,
   t.request_message_id IS NOT NULL AS has_user,
   t.final_assistant_message_id IS NOT NULL AS has_assistant
 FROM graph_turns gt
 JOIN bot_history_turns t ON t.id = gt.id
-LEFT JOIN bot_history_messages rm ON rm.id = t.request_message_id
-LEFT JOIN request_assets ra ON ra.message_id = t.request_message_id
-ORDER BY COALESCE(rm.created_at, t.created_at) ASC, gt.id ASC;
+ORDER BY t.created_at ASC, gt.id ASC;
 
 -- name: ListMessagesSince :many
 SELECT

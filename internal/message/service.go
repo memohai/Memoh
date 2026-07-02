@@ -2,15 +2,11 @@ package message
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"math"
-	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -522,7 +518,7 @@ func (s *DBService) GetSessionTurnGraph(ctx context.Context, sessionID string) (
 			TurnID:       turnID,
 			ParentTurnID: uuidToString(row.ParentTurnID),
 			Timestamp:    formatSessionTurnGraphTimestamp(row.NodeCreatedAt.Time),
-			RequestKey:   buildSessionTurnRequestKey(row.RequestContent, row.RequestDisplayText, row.RequestAssetKey),
+			RequestKey:   uuidToString(row.RequestGroupID),
 			HasUser:      row.HasUser,
 			HasAssistant: row.HasAssistant,
 		})
@@ -584,137 +580,6 @@ func formatSessionTurnGraphTimestamp(t time.Time) string {
 		return ""
 	}
 	return t.UTC().Format(time.RFC3339Nano)
-}
-
-func buildSessionTurnRequestKey(content json.RawMessage, displayText string, assetKey string) string {
-	text := normalizeSessionTurnRequestText(extractSessionTurnRequestText(content, displayText))
-	assetKey = normalizeSessionTurnRequestAssetKey(assetKey)
-	if text == "" && assetKey == "" {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(text + "\x00" + assetKey))
-	return hex.EncodeToString(sum[:])
-}
-
-func normalizeSessionTurnRequestAssetKey(assetKey string) string {
-	parts := strings.Split(assetKey, "|")
-	kept := parts[:0]
-	for _, part := range parts {
-		if trimmed := strings.TrimSpace(part); trimmed != "" {
-			kept = append(kept, trimmed)
-		}
-	}
-	sort.Strings(kept)
-	return strings.Join(kept, "|")
-}
-
-func extractSessionTurnRequestText(content json.RawMessage, displayText string) string {
-	if text := strings.TrimSpace(displayText); text != "" {
-		return text
-	}
-	if len(content) == 0 {
-		return ""
-	}
-	var wrapped struct {
-		Content json.RawMessage `json:"content"`
-	}
-	if err := json.Unmarshal(content, &wrapped); err == nil && len(wrapped.Content) > 0 {
-		return extractTextFromPersistedJSON(wrapped.Content)
-	}
-	return extractTextFromPersistedJSON(content)
-}
-
-func extractTextFromPersistedJSON(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var text string
-	if err := json.Unmarshal(raw, &text); err == nil {
-		return strings.TrimSpace(text)
-	}
-	var parts []struct {
-		Type  string `json:"type"`
-		Text  string `json:"text,omitempty"`
-		URL   string `json:"url,omitempty"`
-		Emoji string `json:"emoji,omitempty"`
-	}
-	if err := json.Unmarshal(raw, &parts); err == nil {
-		lines := make([]string, 0, len(parts))
-		for _, part := range parts {
-			partType := strings.ToLower(strings.TrimSpace(part.Type))
-			if partType == "reasoning" {
-				continue
-			}
-			switch {
-			case partType == "text" && strings.TrimSpace(part.Text) != "":
-				lines = append(lines, strings.TrimSpace(part.Text))
-			case partType == "link" && strings.TrimSpace(part.URL) != "":
-				lines = append(lines, strings.TrimSpace(part.URL))
-			case partType == "emoji" && strings.TrimSpace(part.Emoji) != "":
-				lines = append(lines, strings.TrimSpace(part.Emoji))
-			case strings.TrimSpace(part.Text) != "":
-				lines = append(lines, strings.TrimSpace(part.Text))
-			}
-		}
-		return strings.TrimSpace(strings.Join(lines, "\n"))
-	}
-	var object map[string]any
-	if err := json.Unmarshal(raw, &object); err == nil {
-		if value, ok := object["text"].(string); ok {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
-}
-
-var sessionTurnYAMLHeaderRe = regexp.MustCompile(`(?s)\A---\n.*?\n---\n?`)
-
-func normalizeSessionTurnRequestText(text string) string {
-	text = strings.TrimSpace(sessionTurnYAMLHeaderRe.ReplaceAllString(text, ""))
-	text = stripSessionTurnMessageEnvelope(text)
-	lines := strings.Split(text, "\n")
-	kept := lines[:0]
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			kept = append(kept, line)
-			continue
-		}
-		if strings.HasPrefix(trimmed, "[attachment:") {
-			continue
-		}
-		if strings.HasPrefix(trimmed, "<attachment ") && strings.HasSuffix(trimmed, "/>") {
-			continue
-		}
-		if strings.HasPrefix(trimmed, "<image ") && strings.HasSuffix(trimmed, "</image>") {
-			continue
-		}
-		if strings.HasPrefix(trimmed, "<in-reply-to ") && strings.HasSuffix(trimmed, "</in-reply-to>") {
-			continue
-		}
-		kept = append(kept, line)
-	}
-	return strings.TrimSpace(strings.Join(kept, "\n"))
-}
-
-func stripSessionTurnMessageEnvelope(text string) string {
-	text = strings.TrimSpace(text)
-	if !strings.HasPrefix(text, "<message") {
-		return text
-	}
-	openEnd := strings.IndexByte(text, '>')
-	if openEnd < 0 {
-		return text
-	}
-	openTag := strings.TrimSpace(text[:openEnd+1])
-	if strings.HasSuffix(openTag, "/>") {
-		return ""
-	}
-	body := strings.TrimSpace(text[openEnd+1:])
-	if !strings.HasSuffix(body, "</message>") {
-		return text
-	}
-	return strings.TrimSpace(strings.TrimSuffix(body, "</message>"))
 }
 
 func (s *DBService) LocateByExternalIDBySession(ctx context.Context, sessionID string, externalMessageID string, beforeLimit int32, afterLimit int32) (LocateResult, error) {
@@ -881,6 +746,9 @@ func createFallbackTurn(ctx context.Context, q dbstore.Queries, botID, sessionID
 			BotID:          botID,
 			OwnerSessionID: sessionID,
 			ParentTurnID:   baseHeadTurnID,
+			// Matches conversation.TurnOriginMessage; the literal avoids a
+			// message -> conversation import cycle.
+			OriginKind: pgtype.Text{String: "message", Valid: true},
 		})
 		if err != nil {
 			return pgtype.UUID{}, fmt.Errorf("create history turn: %w", err)

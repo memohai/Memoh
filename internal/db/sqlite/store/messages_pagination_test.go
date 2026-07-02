@@ -241,8 +241,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 
 // Regression: after a retry the session has two heads and the frontend
 // refreshes with include_graph, which runs the full graph metadata query.
-// The SQLite variant once had an ambiguous `id` in the request_assets
-// subquery ORDER BY, turning every post-retry refresh into a 500.
+// The query now reads request grouping straight from the turn row:
+// request_group_id falls back to the turn's own id when NULL and passes
+// through the stored group when set (retry siblings share a group).
 func TestSQLiteListSessionTurnGraphNodeMetadataMultiHead(t *testing.T) {
 	ctx := context.Background()
 	conn := openPaginationDB(t, ctx)
@@ -255,10 +256,11 @@ func TestSQLiteListSessionTurnGraphNodeMetadataMultiHead(t *testing.T) {
 	requestA := pageMessageID(1, 1)
 	requestB := pageMessageID(2, 1)
 	for i, item := range []struct {
-		turnID, requestID, assistantID string
+		turnID, requestID, assistantID, requestGroupID string
 	}{
-		{turnA, requestA, pageMessageID(1, 2)},
-		{turnB, requestB, pageMessageID(2, 2)},
+		{turnA, requestA, pageMessageID(1, 2), ""},
+		// turnB simulates a retry sibling that inherited turnA's group.
+		{turnB, requestB, pageMessageID(2, 2), turnA},
 	} {
 		for seq, msg := range []struct {
 			id, role string
@@ -276,18 +278,15 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 				t.Fatalf("insert message %s: %v", msg.id, err)
 			}
 		}
+		requestGroupID := sql.NullString{String: item.requestGroupID, Valid: item.requestGroupID != ""}
 		if _, err := conn.ExecContext(ctx, `
-INSERT INTO bot_history_turns (id, bot_id, parent_turn_id, request_message_id, final_assistant_message_id, created_at)
-VALUES (?, ?, NULL, ?, ?, ?)`,
-			item.turnID, botID, item.requestID, item.assistantID,
+INSERT INTO bot_history_turns (id, bot_id, parent_turn_id, request_message_id, final_assistant_message_id, request_group_id, created_at)
+VALUES (?, ?, NULL, ?, ?, ?, ?)`,
+			item.turnID, botID, item.requestID, item.assistantID, requestGroupID,
 			base.Add(time.Duration(i*10)*time.Second).Format("2006-01-02 15:04:05"),
 		); err != nil {
 			t.Fatalf("insert turn %s: %v", item.turnID, err)
 		}
-	}
-	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_history_message_assets (id, message_id, role, ordinal, content_hash, name)
-VALUES (?, ?, 'attachment', 0, 'hash-a', 'a.png')`, pageUUID(1502), requestA); err != nil {
-		t.Fatalf("insert asset: %v", err)
 	}
 	insertPaginationSession(t, ctx, conn, botID, sessionID, turnA)
 	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_session_turn_heads (session_id, head_turn_id, bot_id) VALUES (?, ?, ?)`, sessionID, turnB, botID); err != nil {
@@ -308,8 +307,11 @@ VALUES (?, ?, 'attachment', 0, 'hash-a', 'a.png')`, pageUUID(1502), requestA); e
 	if !rows[0].HasUser || !rows[0].HasAssistant {
 		t.Fatalf("first node flags = user:%v assistant:%v, want both true", rows[0].HasUser, rows[0].HasAssistant)
 	}
-	if rows[0].RequestAssetKey == "" {
-		t.Fatalf("first node request asset key is empty, want asset fingerprint")
+	if rows[0].RequestGroupID.String() != turnA {
+		t.Fatalf("first node request group = %s, want self group %s", rows[0].RequestGroupID, turnA)
+	}
+	if rows[1].RequestGroupID.String() != turnA {
+		t.Fatalf("second node request group = %s, want inherited group %s", rows[1].RequestGroupID, turnA)
 	}
 }
 
@@ -339,6 +341,9 @@ CREATE TABLE bot_history_turns (
   parent_turn_id TEXT,
   request_message_id TEXT,
   final_assistant_message_id TEXT,
+  origin_kind TEXT,
+  origin_turn_id TEXT,
+  request_group_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE bot_history_message_assets (

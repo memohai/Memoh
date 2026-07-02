@@ -79,6 +79,14 @@ type TurnPersistencePlan struct {
 	BotID          string
 	OwnerSessionID string
 	ParentTurnID   string
+	// OriginKind, OriginTurnID and RequestGroupID are provenance metadata
+	// persisted on the created turn row. OriginTurnID points at the turn a
+	// retry/edit was anchored on; RequestGroupID is inherited from the retry
+	// source so sibling turns that carry the same logical request share a
+	// group (empty means the turn is its own group).
+	OriginKind     conversation.TurnOriginKind
+	OriginTurnID   string
+	RequestGroupID string
 }
 
 func sessionTurnKey(botID, sessionID string) string {
@@ -353,7 +361,7 @@ func (r *Resolver) prepareTurnRunWithRewriteAnchor(ctx context.Context, req conv
 	if err != nil {
 		return TurnRun{}, fmt.Errorf("prepare turn run: invalid session id: %w", err)
 	}
-	mode, parentTurnID, baseHead, err := r.resolveTurnRunParent(ctx, store, pgSessionID, req, rewriteAnchor)
+	mode, parentTurnID, baseHead, origin, err := r.resolveTurnRunParent(ctx, store, pgSessionID, req, rewriteAnchor)
 	if err != nil {
 		return TurnRun{}, err
 	}
@@ -368,6 +376,9 @@ func (r *Resolver) prepareTurnRunWithRewriteAnchor(ctx context.Context, req conv
 			BotID:          botID,
 			OwnerSessionID: sessionID,
 			ParentTurnID:   uuidString(parentTurnID),
+			OriginKind:     origin.Kind,
+			OriginTurnID:   origin.TurnID,
+			RequestGroupID: origin.RequestGroupID,
 		},
 		Variant: VariantTransition{
 			Action:         variantTransitionActionForTurnRun(mode, sessionID),
@@ -377,32 +388,51 @@ func (r *Resolver) prepareTurnRunWithRewriteAnchor(ctx context.Context, req conv
 	}, nil
 }
 
-func (*Resolver) resolveTurnRunParent(ctx context.Context, store turnStore, sessionID pgtype.UUID, req conversation.ChatRequest, rewriteAnchor *conversation.TurnAnchor) (TurnRunMode, pgtype.UUID, resolvedBaseHead, error) {
+// turnOrigin captures provenance for the turn a run is about to create.
+type turnOrigin struct {
+	Kind           conversation.TurnOriginKind
+	TurnID         string
+	RequestGroupID string
+}
+
+func originFromAnchor(anchor conversation.TurnAnchor) turnOrigin {
+	kind := anchor.OriginKind
+	if kind == "" {
+		kind = conversation.TurnOriginEdit
+	}
+	return turnOrigin{
+		Kind:           kind,
+		TurnID:         strings.TrimSpace(anchor.TurnID),
+		RequestGroupID: strings.TrimSpace(anchor.RequestGroupID),
+	}
+}
+
+func (*Resolver) resolveTurnRunParent(ctx context.Context, store turnStore, sessionID pgtype.UUID, req conversation.ChatRequest, rewriteAnchor *conversation.TurnAnchor) (TurnRunMode, pgtype.UUID, resolvedBaseHead, turnOrigin, error) {
 	sess, err := store.GetSessionByID(ctx, sessionID)
 	if err != nil {
-		return "", pgtype.UUID{}, resolvedBaseHead{}, fmt.Errorf("prepare turn run: get session: %w", err)
+		return "", pgtype.UUID{}, resolvedBaseHead{}, turnOrigin{}, fmt.Errorf("prepare turn run: get session: %w", err)
 	}
 	variantsEnabled := sessionpkg.SupportsTurnVariants(sess.Type)
 
 	if rewriteAnchor != nil {
 		if !variantsEnabled {
-			return "", pgtype.UUID{}, resolvedBaseHead{}, errors.New("turn variants are only supported for chat sessions")
+			return "", pgtype.UUID{}, resolvedBaseHead{}, turnOrigin{}, errors.New("turn variants are only supported for chat sessions")
 		}
 		if rewriteAnchor.Role != conversation.TurnAnchorRoleUser {
-			return "", pgtype.UUID{}, resolvedBaseHead{}, errors.New("prepare turn run: rewrite anchor is not a user message")
+			return "", pgtype.UUID{}, resolvedBaseHead{}, turnOrigin{}, errors.New("prepare turn run: rewrite anchor is not a user message")
 		}
 		if strings.TrimSpace(rewriteAnchor.BaseHeadTurnID) == "" {
-			return "", pgtype.UUID{}, resolvedBaseHead{}, errors.New("prepare turn run: rewrite anchor base head turn id is required")
+			return "", pgtype.UUID{}, resolvedBaseHead{}, turnOrigin{}, errors.New("prepare turn run: rewrite anchor base head turn id is required")
 		}
 		baseHead, err := resolveBaseSessionHead(ctx, store, sessionID, rewriteAnchor.BaseHeadTurnID)
 		if err != nil {
-			return "", pgtype.UUID{}, resolvedBaseHead{}, fmt.Errorf("prepare turn run: validate rewrite anchor base head: %w", err)
+			return "", pgtype.UUID{}, resolvedBaseHead{}, turnOrigin{}, fmt.Errorf("prepare turn run: validate rewrite anchor base head: %w", err)
 		}
 		parentTurnID, err := parseOptionalUUID(rewriteAnchor.ParentTurnID)
 		if err != nil {
-			return "", pgtype.UUID{}, resolvedBaseHead{}, fmt.Errorf("prepare turn run: invalid rewrite anchor parent turn id: %w", err)
+			return "", pgtype.UUID{}, resolvedBaseHead{}, turnOrigin{}, fmt.Errorf("prepare turn run: invalid rewrite anchor parent turn id: %w", err)
 		}
-		return TurnRunModeRewrite, parentTurnID, baseHead, nil
+		return TurnRunModeRewrite, parentTurnID, baseHead, originFromAnchor(*rewriteAnchor), nil
 	}
 
 	requestedBaseHeadTurnID := req.BaseHeadTurnID
@@ -411,26 +441,26 @@ func (*Resolver) resolveTurnRunParent(ctx context.Context, store turnStore, sess
 	}
 	baseHead, err := resolveBaseSessionHeadFromSession(ctx, store, sessionID, sess, requestedBaseHeadTurnID)
 	if err != nil {
-		return "", pgtype.UUID{}, resolvedBaseHead{}, err
+		return "", pgtype.UUID{}, resolvedBaseHead{}, turnOrigin{}, err
 	}
 
 	rewriteTargetID := strings.TrimSpace(req.RewriteTargetMessageID)
 	if rewriteTargetID != "" {
 		if !variantsEnabled {
-			return "", pgtype.UUID{}, resolvedBaseHead{}, errors.New("turn variants are only supported for chat sessions")
+			return "", pgtype.UUID{}, resolvedBaseHead{}, turnOrigin{}, errors.New("turn variants are only supported for chat sessions")
 		}
 		anchor, err := resolveVisibleUserTurnAnchor(ctx, store, sessionID, baseHead.HeadTurnID, rewriteTargetID)
 		if err != nil {
-			return "", pgtype.UUID{}, resolvedBaseHead{}, err
+			return "", pgtype.UUID{}, resolvedBaseHead{}, turnOrigin{}, err
 		}
 		parentTurnID, err := parseOptionalUUID(anchor.ParentTurnID)
 		if err != nil {
-			return "", pgtype.UUID{}, resolvedBaseHead{}, fmt.Errorf("prepare turn run: invalid rewrite anchor parent turn id: %w", err)
+			return "", pgtype.UUID{}, resolvedBaseHead{}, turnOrigin{}, fmt.Errorf("prepare turn run: invalid rewrite anchor parent turn id: %w", err)
 		}
-		return TurnRunModeRewrite, parentTurnID, baseHead, nil
+		return TurnRunModeRewrite, parentTurnID, baseHead, originFromAnchor(anchor), nil
 	}
 
-	return TurnRunModeNormal, baseHead.HeadTurnID, baseHead, nil
+	return TurnRunModeNormal, baseHead.HeadTurnID, baseHead, turnOrigin{Kind: conversation.TurnOriginMessage}, nil
 }
 
 func resolveBaseSessionHead(ctx context.Context, store sessionHeadStore, sessionID pgtype.UUID, requestedHeadTurnID string) (resolvedBaseHead, error) {
@@ -494,6 +524,7 @@ func resolveVisibleUserTurnAnchor(ctx context.Context, store turnStore, sessionI
 		TurnID:         row.TurnID.String(),
 		ParentTurnID:   uuidString(row.ParentTurnID),
 		BaseHeadTurnID: baseHeadTurnID.String(),
+		OriginKind:     conversation.TurnOriginEdit,
 	}, nil
 }
 
@@ -579,10 +610,25 @@ func (r *Resolver) ensurePersistTurnWithQueries(ctx context.Context, queries dbs
 	if err != nil {
 		return "", fmt.Errorf("ensure persist turn: invalid parent turn id: %w", err)
 	}
+	originTurnID, err := parseOptionalUUID(plan.OriginTurnID)
+	if err != nil {
+		return "", fmt.Errorf("ensure persist turn: invalid origin turn id: %w", err)
+	}
+	requestGroupID, err := parseOptionalUUID(plan.RequestGroupID)
+	if err != nil {
+		return "", fmt.Errorf("ensure persist turn: invalid request group id: %w", err)
+	}
+	originKind := pgtype.Text{}
+	if kind := strings.TrimSpace(string(plan.OriginKind)); kind != "" {
+		originKind = pgtype.Text{String: kind, Valid: true}
+	}
 	turn, err := store.CreateHistoryTurn(ctx, dbsqlc.CreateHistoryTurnParams{
 		BotID:          pgBotID,
 		OwnerSessionID: pgSessionID,
 		ParentTurnID:   parentTurnID,
+		OriginKind:     originKind,
+		OriginTurnID:   originTurnID,
+		RequestGroupID: requestGroupID,
 	})
 	if err != nil {
 		return "", fmt.Errorf("ensure persist turn: create history turn: %w", err)

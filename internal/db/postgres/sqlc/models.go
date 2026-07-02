@@ -197,6 +197,9 @@ type BotHistoryTurn struct {
 	FinalAssistantMessageID pgtype.UUID        `json:"final_assistant_message_id"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+	OriginKind              pgtype.Text        `json:"origin_kind"`
+	OriginTurnID            pgtype.UUID        `json:"origin_turn_id"`
+	RequestGroupID          pgtype.UUID        `json:"request_group_id"`
 }
 
 type BotPluginInstallation struct {

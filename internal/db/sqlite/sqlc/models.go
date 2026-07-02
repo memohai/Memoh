@@ -198,6 +198,9 @@ type BotHistoryTurn struct {
 	FinalAssistantMessageID sql.NullString `json:"final_assistant_message_id"`
 	CreatedAt               string         `json:"created_at"`
 	UpdatedAt               string         `json:"updated_at"`
+	OriginKind              sql.NullString `json:"origin_kind"`
+	OriginTurnID            sql.NullString `json:"origin_turn_id"`
+	RequestGroupID          sql.NullString `json:"request_group_id"`
 }
 
 type BotPluginInstallation struct {

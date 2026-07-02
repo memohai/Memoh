@@ -3,14 +3,20 @@ WITH input AS (
   SELECT
     sqlc.arg(bot_id)::uuid AS bot_id,
     sqlc.narg(owner_session_id)::uuid AS owner_session_id,
-    sqlc.narg(parent_turn_id)::uuid AS parent_turn_id
+    sqlc.narg(parent_turn_id)::uuid AS parent_turn_id,
+    sqlc.narg(origin_kind)::text AS origin_kind,
+    sqlc.narg(origin_turn_id)::uuid AS origin_turn_id,
+    sqlc.narg(request_group_id)::uuid AS request_group_id
 )
 INSERT INTO bot_history_turns (
   bot_id,
   owner_session_id,
-  parent_turn_id
+  parent_turn_id,
+  origin_kind,
+  origin_turn_id,
+  request_group_id
 )
-SELECT bot_id, owner_session_id, parent_turn_id
+SELECT bot_id, owner_session_id, parent_turn_id, origin_kind, origin_turn_id, request_group_id
 FROM input
 WHERE (
     owner_session_id IS NULL
@@ -190,6 +196,7 @@ SELECT
   assistant.id AS assistant_message_id,
   assistant.turn_id,
   t.parent_turn_id,
+  COALESCE(t.request_group_id, t.id) AS request_group_id,
   request.id AS request_message_id,
   request.content AS request_content,
   request.display_text AS request_display_text
@@ -410,40 +417,17 @@ WITH RECURSIVE graph_turns AS (
   SELECT p.id, p.parent_turn_id
   FROM bot_history_turns p
   JOIN graph_turns gt ON gt.parent_turn_id = p.id
-),
-request_assets AS (
-  SELECT
-    a.message_id,
-    string_agg(
-      concat_ws(
-        ':',
-        COALESCE(a.content_hash, ''),
-        COALESCE(a.name, ''),
-        COALESCE(a.role, ''),
-        COALESCE(a.ordinal::text, '')
-      ),
-      '|'
-      ORDER BY a.content_hash, a.name, a.role, a.ordinal, a.id
-    ) AS request_asset_key
-  FROM graph_turns gt
-  JOIN bot_history_turns t ON t.id = gt.id
-  JOIN bot_history_message_assets a ON a.message_id = t.request_message_id
-  GROUP BY a.message_id
 )
 SELECT
   gt.id AS turn_id,
   gt.parent_turn_id,
-  COALESCE(rm.created_at, t.created_at)::timestamptz AS node_created_at,
-  COALESCE(rm.content, 'null'::jsonb) AS request_content,
-  COALESCE(rm.display_text, '')::text AS request_display_text,
-  COALESCE(ra.request_asset_key, '')::text AS request_asset_key,
+  t.created_at AS node_created_at,
+  COALESCE(t.request_group_id, t.id) AS request_group_id,
   (t.request_message_id IS NOT NULL)::boolean AS has_user,
   (t.final_assistant_message_id IS NOT NULL)::boolean AS has_assistant
 FROM graph_turns gt
 JOIN bot_history_turns t ON t.id = gt.id
-LEFT JOIN bot_history_messages rm ON rm.id = t.request_message_id
-LEFT JOIN request_assets ra ON ra.message_id = t.request_message_id
-ORDER BY COALESCE(rm.created_at, t.created_at)::timestamptz ASC, gt.id ASC;
+ORDER BY t.created_at ASC, gt.id ASC;
 
 -- name: ListMessagesSince :many
 SELECT

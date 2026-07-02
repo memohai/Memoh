@@ -301,6 +301,21 @@ const (
 	TurnAnchorRoleAssistant TurnAnchorRole = "assistant"
 )
 
+// TurnOriginKind records how a turn came to exist. It is persisted on the turn
+// row (bot_history_turns.origin_kind) as provenance metadata.
+type TurnOriginKind string
+
+const (
+	// TurnOriginMessage is an ordinary send extending the current head.
+	TurnOriginMessage TurnOriginKind = "message"
+	// TurnOriginRetry is a sibling turn regenerating the same request; it
+	// inherits the source turn's request group.
+	TurnOriginRetry TurnOriginKind = "retry"
+	// TurnOriginEdit is a sibling turn carrying an edited request; it starts
+	// a new request group.
+	TurnOriginEdit TurnOriginKind = "edit"
+)
+
 // TurnAnchor is the boundary object that maps a clicked UI message to the turn
 // it belongs to under a specific session head.
 type TurnAnchor struct {
@@ -309,6 +324,12 @@ type TurnAnchor struct {
 	TurnID         string
 	ParentTurnID   string
 	BaseHeadTurnID string
+	// OriginKind describes why the new sibling turn is being created
+	// (retry or edit). The persisted turn copies this value.
+	OriginKind TurnOriginKind
+	// RequestGroupID carries the source turn's effective request group for
+	// retry so the sibling joins the same group. Empty for edit (new group).
+	RequestGroupID string
 }
 
 // ChatResponse is the output of a non-streaming chat call.

@@ -216,7 +216,7 @@ func TestResolveTurnRunParentNormalFirstTurnUsesEmptyContext(t *testing.T) {
 	t.Parallel()
 
 	store := &fakeTurnStore{}
-	mode, parent, baseHead, err := (*Resolver)(nil).resolveTurnRunParent(context.Background(), store, testUUID(1), conversation.ChatRequest{}, nil)
+	mode, parent, baseHead, origin, err := (*Resolver)(nil).resolveTurnRunParent(context.Background(), store, testUUID(1), conversation.ChatRequest{}, nil)
 	if err != nil {
 		t.Fatalf("resolveTurnRunParent() error = %v", err)
 	}
@@ -225,6 +225,9 @@ func TestResolveTurnRunParentNormalFirstTurnUsesEmptyContext(t *testing.T) {
 	}
 	if parent.Valid || baseHead.HeadTurnID.Valid {
 		t.Fatalf("parent=%v baseHead=%v, want both invalid", parent, baseHead)
+	}
+	if origin.Kind != conversation.TurnOriginMessage || origin.TurnID != "" || origin.RequestGroupID != "" {
+		t.Fatalf("origin = %#v, want plain message origin", origin)
 	}
 	if scope := contextScopeFromParentTurn(parent); scope.Kind != ContextScopeEmpty {
 		t.Fatalf("scope = %#v, want empty", scope)
@@ -236,7 +239,7 @@ func TestResolveTurnRunParentNormalLaterTurnUsesSessionHead(t *testing.T) {
 
 	head := testUUID(9)
 	store := &fakeTurnStore{session: dbsqlc.BotSession{Type: "chat", DefaultHeadTurnID: head}}
-	mode, parent, baseHead, err := (*Resolver)(nil).resolveTurnRunParent(context.Background(), store, testUUID(1), conversation.ChatRequest{}, nil)
+	mode, parent, baseHead, _, err := (*Resolver)(nil).resolveTurnRunParent(context.Background(), store, testUUID(1), conversation.ChatRequest{}, nil)
 	if err != nil {
 		t.Fatalf("resolveTurnRunParent() error = %v", err)
 	}
@@ -258,7 +261,7 @@ func TestResolveTurnRunParentNonChatIgnoresRequestedVariantHead(t *testing.T) {
 	defaultHead := testUUID(9)
 	requestedHead := testUUID(10)
 	store := &fakeTurnStore{session: dbsqlc.BotSession{Type: sessionpkg.TypeDiscuss, DefaultHeadTurnID: defaultHead}}
-	mode, parent, baseHead, err := (*Resolver)(nil).resolveTurnRunParent(context.Background(), store, testUUID(1), conversation.ChatRequest{
+	mode, parent, baseHead, _, err := (*Resolver)(nil).resolveTurnRunParent(context.Background(), store, testUUID(1), conversation.ChatRequest{
 		BaseHeadTurnID: requestedHead.String(),
 	}, nil)
 	if err != nil {
@@ -284,7 +287,7 @@ func TestResolveTurnRunParentRewriteFirstTurnUsesEmptyContext(t *testing.T) {
 			ParentTurnID: pgtype.UUID{},
 		},
 	}
-	mode, parent, baseHead, err := (*Resolver)(nil).resolveTurnRunParent(context.Background(), store, testUUID(1), conversation.ChatRequest{
+	mode, parent, baseHead, origin, err := (*Resolver)(nil).resolveTurnRunParent(context.Background(), store, testUUID(1), conversation.ChatRequest{
 		RewriteTargetMessageID: "00000000-0000-0000-0000-000000000123",
 	}, nil)
 	if err != nil {
@@ -292,6 +295,9 @@ func TestResolveTurnRunParentRewriteFirstTurnUsesEmptyContext(t *testing.T) {
 	}
 	if mode != TurnRunModeRewrite {
 		t.Fatalf("mode = %q, want %q", mode, TurnRunModeRewrite)
+	}
+	if origin.Kind != conversation.TurnOriginEdit {
+		t.Fatalf("origin kind = %q, want %q", origin.Kind, conversation.TurnOriginEdit)
 	}
 	if parent.Valid {
 		t.Fatalf("parent = %v, want invalid for first-turn rewrite", parent)
@@ -314,7 +320,7 @@ func TestResolveTurnRunParentNonChatRejectsRewrite(t *testing.T) {
 			ParentTurnID: testUUID(4),
 		},
 	}
-	_, _, _, err := (*Resolver)(nil).resolveTurnRunParent(context.Background(), store, testUUID(1), conversation.ChatRequest{
+	_, _, _, _, err := (*Resolver)(nil).resolveTurnRunParent(context.Background(), store, testUUID(1), conversation.ChatRequest{
 		RewriteTargetMessageID: "00000000-0000-0000-0000-000000000123",
 	}, nil)
 	if err == nil {
@@ -336,7 +342,7 @@ func TestResolveTurnRunParentRewriteMiddleTurnUsesTargetParent(t *testing.T) {
 			ParentTurnID: targetParent,
 		},
 	}
-	mode, parent, baseHead, err := (*Resolver)(nil).resolveTurnRunParent(context.Background(), store, testUUID(1), conversation.ChatRequest{
+	mode, parent, baseHead, origin, err := (*Resolver)(nil).resolveTurnRunParent(context.Background(), store, testUUID(1), conversation.ChatRequest{
 		RewriteTargetMessageID: "00000000-0000-0000-0000-000000000123",
 	}, nil)
 	if err != nil {
@@ -344,6 +350,9 @@ func TestResolveTurnRunParentRewriteMiddleTurnUsesTargetParent(t *testing.T) {
 	}
 	if mode != TurnRunModeRewrite {
 		t.Fatalf("mode = %q, want %q", mode, TurnRunModeRewrite)
+	}
+	if origin.Kind != conversation.TurnOriginEdit {
+		t.Fatalf("origin kind = %q, want %q", origin.Kind, conversation.TurnOriginEdit)
 	}
 	if parent != targetParent {
 		t.Fatalf("parent = %v, want target parent %v", parent, targetParent)
@@ -368,7 +377,7 @@ func TestResolveTurnRunParentRewriteUsesResolvedTurnAnchor(t *testing.T) {
 			ParentTurnID: testUUID(99),
 		},
 	}
-	mode, parent, baseHead, err := (*Resolver)(nil).resolveTurnRunParent(context.Background(), store, testUUID(1), conversation.ChatRequest{}, &conversation.TurnAnchor{
+	mode, parent, baseHead, origin, err := (*Resolver)(nil).resolveTurnRunParent(context.Background(), store, testUUID(1), conversation.ChatRequest{}, &conversation.TurnAnchor{
 		Role:           conversation.TurnAnchorRoleUser,
 		MessageID:      "message-1",
 		TurnID:         testUUID(3).String(),
@@ -387,6 +396,42 @@ func TestResolveTurnRunParentRewriteUsesResolvedTurnAnchor(t *testing.T) {
 	if baseHead.HeadTurnID != currentHead {
 		t.Fatalf("baseHead = %v, want anchor base head %v", baseHead, currentHead)
 	}
+	// An anchor without an explicit origin kind defaults to edit and records
+	// the anchored turn as the origin turn.
+	if origin.Kind != conversation.TurnOriginEdit || origin.TurnID != testUUID(3).String() {
+		t.Fatalf("origin = %#v, want edit origin anchored on %s", origin, testUUID(3).String())
+	}
+}
+
+func TestResolveTurnRunParentRetryAnchorKeepsRequestGroup(t *testing.T) {
+	t.Parallel()
+
+	currentHead := testUUID(8)
+	targetParent := testUUID(4)
+	store := &fakeTurnStore{
+		session: dbsqlc.BotSession{Type: "chat", DefaultHeadTurnID: currentHead},
+	}
+	_, _, _, origin, err := (*Resolver)(nil).resolveTurnRunParent(context.Background(), store, testUUID(1), conversation.ChatRequest{}, &conversation.TurnAnchor{
+		Role:           conversation.TurnAnchorRoleUser,
+		MessageID:      "message-1",
+		TurnID:         testUUID(3).String(),
+		ParentTurnID:   targetParent.String(),
+		BaseHeadTurnID: currentHead.String(),
+		OriginKind:     conversation.TurnOriginRetry,
+		RequestGroupID: testUUID(5).String(),
+	})
+	if err != nil {
+		t.Fatalf("resolveTurnRunParent() error = %v", err)
+	}
+	if origin.Kind != conversation.TurnOriginRetry {
+		t.Fatalf("origin kind = %q, want %q", origin.Kind, conversation.TurnOriginRetry)
+	}
+	if origin.TurnID != testUUID(3).String() {
+		t.Fatalf("origin turn = %q, want %q", origin.TurnID, testUUID(3).String())
+	}
+	if origin.RequestGroupID != testUUID(5).String() {
+		t.Fatalf("origin request group = %q, want %q", origin.RequestGroupID, testUUID(5).String())
+	}
 }
 
 func TestResolveTurnRunParentRewriteAnchorRejectsInvalidBaseHead(t *testing.T) {
@@ -398,7 +443,7 @@ func TestResolveTurnRunParentRewriteAnchorRejectsInvalidBaseHead(t *testing.T) {
 		session:        dbsqlc.BotSession{Type: "chat", DefaultHeadTurnID: currentHead},
 		sessionHeadErr: pgx.ErrNoRows,
 	}
-	_, _, _, err := (*Resolver)(nil).resolveTurnRunParent(context.Background(), store, testUUID(1), conversation.ChatRequest{}, &conversation.TurnAnchor{
+	_, _, _, _, err := (*Resolver)(nil).resolveTurnRunParent(context.Background(), store, testUUID(1), conversation.ChatRequest{}, &conversation.TurnAnchor{
 		Role:           conversation.TurnAnchorRoleUser,
 		MessageID:      "message-1",
 		TurnID:         testUUID(3).String(),
