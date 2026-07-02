@@ -52,8 +52,6 @@ CREATE TABLE bot_history_messages_new (
   id TEXT PRIMARY KEY,
   bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   session_id TEXT REFERENCES bot_sessions(id) ON DELETE SET NULL,
-  turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
-  turn_message_seq INTEGER,
   sender_channel_identity_id TEXT REFERENCES channel_identities(id),
   sender_account_user_id TEXT REFERENCES users(id),
   source_message_id TEXT,
@@ -72,7 +70,7 @@ CREATE TABLE bot_history_messages_new (
 );
 
 INSERT INTO bot_history_messages_new (
-  id, bot_id, session_id, turn_id, turn_message_seq,
+  id, bot_id, session_id,
   sender_channel_identity_id, sender_account_user_id, source_message_id, source_reply_to_message_id, role, content, metadata,
   usage, session_mode, runtime_type, model_id, compact_id, event_id, display_text, created_at
 )
@@ -80,8 +78,6 @@ SELECT
   m.id,
   m.bot_id,
   m.session_id,
-  m.turn_id,
-  m.turn_message_seq,
   m.sender_channel_identity_id,
   m.sender_account_user_id,
   m.source_message_id,
@@ -108,12 +104,6 @@ CREATE INDEX IF NOT EXISTS idx_bot_history_messages_bot_created ON bot_history_m
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_compact ON bot_history_messages(compact_id);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session
   ON bot_history_messages(session_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_bot_history_messages_turn
-  ON bot_history_messages(turn_id, turn_message_seq, created_at)
-  WHERE turn_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_history_messages_turn_seq_unique
-  ON bot_history_messages(turn_id, turn_message_seq)
-  WHERE turn_id IS NOT NULL AND turn_message_seq IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_source
   ON bot_history_messages(session_id, source_message_id);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_reply

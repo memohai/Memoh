@@ -1,4 +1,4 @@
--- 0101_session_turn_graph
+-- 0103_session_turn_graph
 -- Add immutable turn chains and session-level fork pointers for session history.
 
 ALTER TABLE IF EXISTS bot_history_messages

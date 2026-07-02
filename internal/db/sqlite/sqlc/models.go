@@ -235,6 +235,9 @@ type BotSession struct {
 	Type                string         `json:"type"`
 	Title               string         `json:"title"`
 	Metadata            string         `json:"metadata"`
+	SessionMode         string         `json:"session_mode"`
+	RuntimeType         string         `json:"runtime_type"`
+	RuntimeMetadata     string         `json:"runtime_metadata"`
 	DefaultHeadTurnID   sql.NullString `json:"default_head_turn_id"`
 	ForkedFromSessionID sql.NullString `json:"forked_from_session_id"`
 	ForkedFromTurnID    sql.NullString `json:"forked_from_turn_id"`
@@ -243,9 +246,6 @@ type BotSession struct {
 	CreatedAt           string         `json:"created_at"`
 	UpdatedAt           string         `json:"updated_at"`
 	DeletedAt           sql.NullString `json:"deleted_at"`
-	SessionMode         string         `json:"session_mode"`
-	RuntimeType         string         `json:"runtime_type"`
-	RuntimeMetadata     string         `json:"runtime_metadata"`
 }
 
 type BotSessionDiscussCursor struct {

@@ -65,7 +65,7 @@ func TestSQLiteSessionTurnPointersRequireSameBot(t *testing.T) {
 func TestPostgresSessionTurnPointerConstraintsUseBotBoundary(t *testing.T) {
 	for _, path := range []string{
 		"postgres/migrations/0001_init.up.sql",
-		"postgres/migrations/0101_session_turn_graph.up.sql",
+		"postgres/migrations/0103_session_turn_graph.up.sql",
 	} {
 		t.Run(path, func(t *testing.T) {
 			sql := readEmbeddedMigration(t, path)
@@ -84,7 +84,7 @@ func TestPostgresSessionTurnPointerConstraintsUseBotBoundary(t *testing.T) {
 }
 
 func TestPostgresSessionTurnGraphMigrationHandlesLegacyBranchSchema(t *testing.T) {
-	sql := readEmbeddedMigration(t, "postgres/migrations/0101_session_turn_graph.up.sql")
+	sql := readEmbeddedMigration(t, "postgres/migrations/0103_session_turn_graph.up.sql")
 	for _, want := range []string{
 		"column_name = 'turn_seq'",
 		"DROP VIEW IF EXISTS bot_branch_visible_messages",
@@ -96,7 +96,7 @@ func TestPostgresSessionTurnGraphMigrationHandlesLegacyBranchSchema(t *testing.T
 		"ALTER TABLE bot_history_turns DROP COLUMN IF EXISTS session_id",
 	} {
 		if !strings.Contains(sql, want) {
-			t.Fatalf("postgres 0101 migration missing legacy branch handling fragment %q", want)
+			t.Fatalf("postgres 0103 migration missing legacy branch handling fragment %q", want)
 		}
 	}
 }
