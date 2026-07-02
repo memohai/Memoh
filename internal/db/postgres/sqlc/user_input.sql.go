@@ -1120,6 +1120,84 @@ func (q *Queries) ListUserInputsBySession(ctx context.Context, arg ListUserInput
 	return items, nil
 }
 
+const listUserInputsBySessionToolCalls = `-- name: ListUserInputsBySessionToolCalls :many
+SELECT uir.id, uir.bot_id, uir.session_id, uir.route_id, uir.channel_identity_id, uir.tool_call_id, uir.tool_name, uir.short_id, uir.status, uir.input_json, uir.ui_payload_json, uir.result_json, uir.provider_metadata, uir.requested_by_channel_identity_id, uir.responded_by_channel_identity_id, uir.assistant_message_id, uir.tool_result_message_id, uir.prompt_message_id, uir.persist_turn_id, uir.prompt_external_message_id, uir.source_platform, uir.reply_target, uir.conversation_type, uir.expires_at, uir.created_at, uir.responded_at, uir.canceled_at, uir.updated_at
+FROM user_input_requests uir
+JOIN bot_sessions s ON s.id = uir.session_id
+  AND s.bot_id = uir.bot_id
+  AND s.deleted_at IS NULL
+WHERE uir.bot_id = $1
+  AND uir.session_id = $2
+  AND uir.tool_call_id = ANY($3::text[])
+  AND (uir.expires_at IS NULL OR uir.expires_at > now())
+  AND (
+    uir.persist_turn_id IS NULL
+    OR uir.persist_turn_id = ANY($4::uuid[])
+  )
+ORDER BY uir.created_at ASC, uir.short_id ASC
+`
+
+type ListUserInputsBySessionToolCallsParams struct {
+	BotID       pgtype.UUID   `json:"bot_id"`
+	SessionID   pgtype.UUID   `json:"session_id"`
+	ToolCallIds []string      `json:"tool_call_ids"`
+	TurnIds     []pgtype.UUID `json:"turn_ids"`
+}
+
+func (q *Queries) ListUserInputsBySessionToolCalls(ctx context.Context, arg ListUserInputsBySessionToolCallsParams) ([]UserInputRequest, error) {
+	rows, err := q.db.Query(ctx, listUserInputsBySessionToolCalls,
+		arg.BotID,
+		arg.SessionID,
+		arg.ToolCallIds,
+		arg.TurnIds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []UserInputRequest
+	for rows.Next() {
+		var i UserInputRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.RouteID,
+			&i.ChannelIdentityID,
+			&i.ToolCallID,
+			&i.ToolName,
+			&i.ShortID,
+			&i.Status,
+			&i.InputJson,
+			&i.UiPayloadJson,
+			&i.ResultJson,
+			&i.ProviderMetadata,
+			&i.RequestedByChannelIdentityID,
+			&i.RespondedByChannelIdentityID,
+			&i.AssistantMessageID,
+			&i.ToolResultMessageID,
+			&i.PromptMessageID,
+			&i.PersistTurnID,
+			&i.PromptExternalMessageID,
+			&i.SourcePlatform,
+			&i.ReplyTarget,
+			&i.ConversationType,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.RespondedAt,
+			&i.CanceledAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUserInputsBySessionTurnGraph = `-- name: ListUserInputsBySessionTurnGraph :many
 WITH RECURSIVE visible_turns AS (
   SELECT t.id, t.parent_turn_id

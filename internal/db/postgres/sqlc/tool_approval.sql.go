@@ -875,6 +875,78 @@ func (q *Queries) ListToolApprovalsBySession(ctx context.Context, arg ListToolAp
 	return items, nil
 }
 
+const listToolApprovalsBySessionToolCalls = `-- name: ListToolApprovalsBySessionToolCalls :many
+SELECT tar.id, tar.bot_id, tar.session_id, tar.route_id, tar.channel_identity_id, tar.tool_call_id, tar.tool_name, tar.operation, tar.tool_input, tar.short_id, tar.status, tar.decision_reason, tar.requested_by_channel_identity_id, tar.decided_by_channel_identity_id, tar.requested_message_id, tar.prompt_message_id, tar.persist_turn_id, tar.prompt_external_message_id, tar.source_platform, tar.reply_target, tar.conversation_type, tar.created_at, tar.decided_at
+FROM tool_approval_requests tar
+JOIN bot_sessions s ON s.id = tar.session_id
+  AND s.bot_id = tar.bot_id
+  AND s.deleted_at IS NULL
+WHERE tar.bot_id = $1
+  AND tar.session_id = $2
+  AND tar.tool_call_id = ANY($3::text[])
+  AND (
+    tar.persist_turn_id IS NULL
+    OR tar.persist_turn_id = ANY($4::uuid[])
+  )
+ORDER BY tar.created_at ASC, tar.short_id ASC
+`
+
+type ListToolApprovalsBySessionToolCallsParams struct {
+	BotID       pgtype.UUID   `json:"bot_id"`
+	SessionID   pgtype.UUID   `json:"session_id"`
+	ToolCallIds []string      `json:"tool_call_ids"`
+	TurnIds     []pgtype.UUID `json:"turn_ids"`
+}
+
+func (q *Queries) ListToolApprovalsBySessionToolCalls(ctx context.Context, arg ListToolApprovalsBySessionToolCallsParams) ([]ToolApprovalRequest, error) {
+	rows, err := q.db.Query(ctx, listToolApprovalsBySessionToolCalls,
+		arg.BotID,
+		arg.SessionID,
+		arg.ToolCallIds,
+		arg.TurnIds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ToolApprovalRequest
+	for rows.Next() {
+		var i ToolApprovalRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.RouteID,
+			&i.ChannelIdentityID,
+			&i.ToolCallID,
+			&i.ToolName,
+			&i.Operation,
+			&i.ToolInput,
+			&i.ShortID,
+			&i.Status,
+			&i.DecisionReason,
+			&i.RequestedByChannelIdentityID,
+			&i.DecidedByChannelIdentityID,
+			&i.RequestedMessageID,
+			&i.PromptMessageID,
+			&i.PersistTurnID,
+			&i.PromptExternalMessageID,
+			&i.SourcePlatform,
+			&i.ReplyTarget,
+			&i.ConversationType,
+			&i.CreatedAt,
+			&i.DecidedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listToolApprovalsBySessionTurnGraph = `-- name: ListToolApprovalsBySessionTurnGraph :many
 WITH RECURSIVE visible_turns AS (
   SELECT t.id, t.parent_turn_id

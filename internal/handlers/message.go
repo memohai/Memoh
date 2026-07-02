@@ -467,16 +467,54 @@ func (h *MessageHandler) decorateUITurns(ctx context.Context, botID, sessionID s
 	if h.bgManager != nil {
 		conversation.ApplyBackgroundTaskSnapshots(items, h.backgroundTaskSnapshots(botID, sessionID))
 	}
+	toolCallIDs, turnIDs := pageToolCallDecorators(items)
+	if len(toolCallIDs) == 0 {
+		return
+	}
 	if h.toolApproval != nil {
-		if approvals, err := h.toolApproval.ListBySession(ctx, botID, sessionID); err == nil {
+		if approvals, err := h.toolApproval.ListBySessionToolCalls(ctx, botID, sessionID, toolCallIDs, turnIDs); err == nil {
 			mergeToolApprovals(items, approvals, h.toolApprovalCanApproveFn(ctx, sessionID))
 		}
 	}
 	if h.userInput != nil {
-		if requests, err := h.userInput.ListBySession(ctx, botID, sessionID); err == nil {
+		if requests, err := h.userInput.ListBySessionToolCalls(ctx, botID, sessionID, toolCallIDs, turnIDs); err == nil {
 			mergeUserInputs(items, requests, h.userInput.CanRespond)
 		}
 	}
+}
+
+func pageToolCallDecorators(turns []conversation.UITurn) ([]string, []string) {
+	toolCallSeen := make(map[string]struct{})
+	turnSeen := make(map[string]struct{})
+	toolCallIDs := make([]string, 0)
+	turnIDs := make([]string, 0)
+	for _, turn := range turns {
+		turnID := strings.TrimSpace(turn.TurnID)
+		if turnID != "" {
+			if _, ok := turnSeen[turnID]; !ok {
+				turnSeen[turnID] = struct{}{}
+				turnIDs = append(turnIDs, turnID)
+			}
+		}
+		if turn.Role != "assistant" {
+			continue
+		}
+		for _, message := range turn.Messages {
+			if message.Type != conversation.UIMessageTool {
+				continue
+			}
+			toolCallID := strings.TrimSpace(message.ToolCallID)
+			if toolCallID == "" {
+				continue
+			}
+			if _, ok := toolCallSeen[toolCallID]; ok {
+				continue
+			}
+			toolCallSeen[toolCallID] = struct{}{}
+			toolCallIDs = append(toolCallIDs, toolCallID)
+		}
+	}
+	return toolCallIDs, turnIDs
 }
 
 func (h *MessageHandler) toolApprovalCanApproveFn(ctx context.Context, sessionID string) func(toolapproval.Request) bool {

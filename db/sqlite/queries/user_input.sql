@@ -400,6 +400,22 @@ WHERE uir.bot_id = sqlc.arg(bot_id)
   AND (uir.persist_turn_id IS NULL OR uir.persist_turn_id IN (SELECT visible_turns.id FROM visible_turns))
 ORDER BY uir.created_at ASC, uir.short_id ASC;
 
+-- name: ListUserInputsBySessionToolCalls :many
+SELECT uir.*
+FROM user_input_requests uir
+JOIN bot_sessions s ON s.id = uir.session_id
+  AND s.bot_id = uir.bot_id
+  AND s.deleted_at IS NULL
+WHERE uir.bot_id = sqlc.arg(bot_id)
+  AND uir.session_id = sqlc.arg(session_id)
+  AND uir.tool_call_id IN (sqlc.slice(tool_call_ids))
+  AND (uir.expires_at IS NULL OR uir.expires_at = '' OR julianday(uir.expires_at) > julianday('now'))
+  AND (
+    uir.persist_turn_id IS NULL
+    OR uir.persist_turn_id IN (sqlc.slice(turn_ids))
+  )
+ORDER BY uir.created_at ASC, uir.short_id ASC;
+
 -- name: ListUserInputsBySessionTurnGraph :many
 WITH RECURSIVE visible_turns(id, parent_turn_id) AS (
   SELECT t.id, t.parent_turn_id

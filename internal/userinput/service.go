@@ -516,6 +516,42 @@ func (s *Service) ListBySession(ctx context.Context, botID, sessionID string) ([
 	return s.listBySession(ctx, botID, sessionID, false)
 }
 
+func (s *Service) ListBySessionToolCalls(ctx context.Context, botID, sessionID string, toolCallIDs []string, turnIDs []string) ([]Request, error) {
+	toolCallIDs = compactNonEmptyStrings(toolCallIDs)
+	if len(toolCallIDs) == 0 {
+		return nil, nil
+	}
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return nil, err
+	}
+	pgSessionID, err := db.ParseUUID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	pgTurnIDs, err := parseUUIDList(turnIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(pgTurnIDs) == 0 {
+		pgTurnIDs = []pgtype.UUID{{Valid: false}}
+	}
+	rows, err := s.queries.ListUserInputsBySessionToolCalls(ctx, sqlc.ListUserInputsBySessionToolCallsParams{
+		BotID:       pgBotID,
+		SessionID:   pgSessionID,
+		ToolCallIds: toolCallIDs,
+		TurnIds:     pgTurnIDs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]Request, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, requestFromRow(row))
+	}
+	return result, nil
+}
+
 func (s *Service) ListBySessionTurnGraph(ctx context.Context, botID, sessionID string) ([]Request, error) {
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -581,6 +617,36 @@ func DeferredMetadata(req Request) map[string]any {
 		"ui_payload":      req.UIPayload,
 		"persist_turn_id": req.PersistTurnID,
 	}
+}
+
+func compactNonEmptyStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
+}
+
+func parseUUIDList(values []string) ([]pgtype.UUID, error) {
+	values = compactNonEmptyStrings(values)
+	result := make([]pgtype.UUID, 0, len(values))
+	for _, value := range values {
+		id, err := db.ParseUUID(value)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, id)
+	}
+	return result, nil
 }
 
 // submittedResult validates the user's answers against the stored payload and

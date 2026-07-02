@@ -8,6 +8,7 @@ package sqlc
 import (
 	"context"
 	"database/sql"
+	"strings"
 )
 
 const cancelPendingUserInputsBySession = `-- name: CancelPendingUserInputsBySession :many
@@ -1072,6 +1073,102 @@ type ListUserInputsBySessionParams struct {
 
 func (q *Queries) ListUserInputsBySession(ctx context.Context, arg ListUserInputsBySessionParams) ([]UserInputRequest, error) {
 	rows, err := q.db.QueryContext(ctx, listUserInputsBySession, arg.BotID, arg.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []UserInputRequest
+	for rows.Next() {
+		var i UserInputRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.RouteID,
+			&i.ChannelIdentityID,
+			&i.ToolCallID,
+			&i.ToolName,
+			&i.ShortID,
+			&i.Status,
+			&i.InputJson,
+			&i.UiPayloadJson,
+			&i.ResultJson,
+			&i.ProviderMetadata,
+			&i.RequestedByChannelIdentityID,
+			&i.RespondedByChannelIdentityID,
+			&i.AssistantMessageID,
+			&i.ToolResultMessageID,
+			&i.PromptMessageID,
+			&i.PersistTurnID,
+			&i.PromptExternalMessageID,
+			&i.SourcePlatform,
+			&i.ReplyTarget,
+			&i.ConversationType,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.RespondedAt,
+			&i.CanceledAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserInputsBySessionToolCalls = `-- name: ListUserInputsBySessionToolCalls :many
+SELECT uir.id, uir.bot_id, uir.session_id, uir.route_id, uir.channel_identity_id, uir.tool_call_id, uir.tool_name, uir.short_id, uir.status, uir.input_json, uir.ui_payload_json, uir.result_json, uir.provider_metadata, uir.requested_by_channel_identity_id, uir.responded_by_channel_identity_id, uir.assistant_message_id, uir.tool_result_message_id, uir.prompt_message_id, uir.persist_turn_id, uir.prompt_external_message_id, uir.source_platform, uir.reply_target, uir.conversation_type, uir.expires_at, uir.created_at, uir.responded_at, uir.canceled_at, uir.updated_at
+FROM user_input_requests uir
+JOIN bot_sessions s ON s.id = uir.session_id
+  AND s.bot_id = uir.bot_id
+  AND s.deleted_at IS NULL
+WHERE uir.bot_id = ?1
+  AND uir.session_id = ?2
+  AND uir.tool_call_id IN (/*SLICE:tool_call_ids*/?)
+  AND (uir.expires_at IS NULL OR uir.expires_at = '' OR julianday(uir.expires_at) > julianday('now'))
+  AND (
+    uir.persist_turn_id IS NULL
+    OR uir.persist_turn_id IN (/*SLICE:turn_ids*/?)
+  )
+ORDER BY uir.created_at ASC, uir.short_id ASC
+`
+
+type ListUserInputsBySessionToolCallsParams struct {
+	BotID       string           `json:"bot_id"`
+	SessionID   string           `json:"session_id"`
+	ToolCallIds []string         `json:"tool_call_ids"`
+	TurnIds     []sql.NullString `json:"turn_ids"`
+}
+
+func (q *Queries) ListUserInputsBySessionToolCalls(ctx context.Context, arg ListUserInputsBySessionToolCallsParams) ([]UserInputRequest, error) {
+	query := listUserInputsBySessionToolCalls
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.BotID)
+	queryParams = append(queryParams, arg.SessionID)
+	if len(arg.ToolCallIds) > 0 {
+		for _, v := range arg.ToolCallIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:tool_call_ids*/?", strings.Repeat(",?", len(arg.ToolCallIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:tool_call_ids*/?", "NULL", 1)
+	}
+	if len(arg.TurnIds) > 0 {
+		for _, v := range arg.TurnIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:turn_ids*/?", strings.Repeat(",?", len(arg.TurnIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:turn_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
 	if err != nil {
 		return nil, err
 	}

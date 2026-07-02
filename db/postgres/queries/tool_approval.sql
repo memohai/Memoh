@@ -335,6 +335,21 @@ WHERE tar.bot_id = sqlc.arg(bot_id)
   AND (tar.persist_turn_id IS NULL OR tar.persist_turn_id IN (SELECT visible_turns.id FROM visible_turns))
 ORDER BY tar.created_at ASC, tar.short_id ASC;
 
+-- name: ListToolApprovalsBySessionToolCalls :many
+SELECT tar.*
+FROM tool_approval_requests tar
+JOIN bot_sessions s ON s.id = tar.session_id
+  AND s.bot_id = tar.bot_id
+  AND s.deleted_at IS NULL
+WHERE tar.bot_id = sqlc.arg(bot_id)
+  AND tar.session_id = sqlc.arg(session_id)
+  AND tar.tool_call_id = ANY(sqlc.arg(tool_call_ids)::text[])
+  AND (
+    tar.persist_turn_id IS NULL
+    OR tar.persist_turn_id = ANY(sqlc.arg(turn_ids)::uuid[])
+  )
+ORDER BY tar.created_at ASC, tar.short_id ASC;
+
 -- name: ListToolApprovalsBySessionTurnGraph :many
 WITH RECURSIVE visible_turns AS (
   SELECT t.id, t.parent_turn_id

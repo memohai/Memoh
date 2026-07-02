@@ -4939,6 +4939,25 @@ func (q *Queries) ListToolApprovalsBySession(ctx context.Context, arg pgsqlc.Lis
 	return result, nil
 }
 
+func (q *Queries) ListToolApprovalsBySessionToolCalls(ctx context.Context, arg pgsqlc.ListToolApprovalsBySessionToolCallsParams) ([]pgsqlc.ToolApprovalRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListToolApprovalsBySessionToolCallsParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListToolApprovalsBySessionToolCalls(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ToolApprovalRequest
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (q *Queries) ListToolApprovalsBySessionTurnGraph(ctx context.Context, arg pgsqlc.ListToolApprovalsBySessionTurnGraphParams) ([]pgsqlc.ToolApprovalRequest, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured
@@ -6698,6 +6717,25 @@ func (q *Queries) ListUserInputsBySession(ctx context.Context, arg pgsqlc.ListUs
 		return nil, err
 	}
 	out, err := q.store.queries.ListUserInputsBySession(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.UserInputRequest
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListUserInputsBySessionToolCalls(ctx context.Context, arg pgsqlc.ListUserInputsBySessionToolCallsParams) ([]pgsqlc.UserInputRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListUserInputsBySessionToolCallsParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListUserInputsBySessionToolCalls(ctx, sqliteArg)
 	if err != nil {
 		return nil, mapQueryErr(err)
 	}

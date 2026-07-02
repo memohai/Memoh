@@ -3,10 +3,12 @@ package handlers
 import (
 	"context"
 	"log/slog"
+	"reflect"
 	"sort"
 	"testing"
 	"time"
 
+	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
@@ -137,5 +139,40 @@ func TestExtendToUITurnHead_StopsAtBoundary(t *testing.T) {
 	}
 	if got[0].Role != "user" {
 		t.Fatalf("expected head to be the user boundary, got role %q", got[0].Role)
+	}
+}
+
+func TestPageToolCallDecoratorsScopesToCurrentPage(t *testing.T) {
+	t.Parallel()
+
+	turns := []conversation.UITurn{
+		{
+			Role:   "user",
+			TurnID: "turn-user",
+		},
+		{
+			Role:   "assistant",
+			TurnID: "turn-a",
+			Messages: []conversation.UIMessage{
+				{Type: conversation.UIMessageTool, ToolCallID: " call-a "},
+				{Type: conversation.UIMessageTool, ToolCallID: "call-a"},
+				{Type: conversation.UIMessageText, ToolCallID: "not-a-tool"},
+				{Type: conversation.UIMessageTool},
+			},
+		},
+		{
+			Role:   "assistant",
+			TurnID: "turn-b",
+			Messages: []conversation.UIMessage{
+				{Type: conversation.UIMessageTool, ToolCallID: "call-b"},
+			},
+		},
+	}
+	toolCallIDs, turnIDs := pageToolCallDecorators(turns)
+	if want := []string{"call-a", "call-b"}; !reflect.DeepEqual(toolCallIDs, want) {
+		t.Fatalf("toolCallIDs = %#v, want %#v", toolCallIDs, want)
+	}
+	if want := []string{"turn-user", "turn-a", "turn-b"}; !reflect.DeepEqual(turnIDs, want) {
+		t.Fatalf("turnIDs = %#v, want %#v", turnIDs, want)
 	}
 }

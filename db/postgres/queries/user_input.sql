@@ -406,6 +406,22 @@ WHERE uir.bot_id = sqlc.arg(bot_id)
   AND (uir.persist_turn_id IS NULL OR uir.persist_turn_id IN (SELECT visible_turns.id FROM visible_turns))
 ORDER BY uir.created_at ASC, uir.short_id ASC;
 
+-- name: ListUserInputsBySessionToolCalls :many
+SELECT uir.*
+FROM user_input_requests uir
+JOIN bot_sessions s ON s.id = uir.session_id
+  AND s.bot_id = uir.bot_id
+  AND s.deleted_at IS NULL
+WHERE uir.bot_id = sqlc.arg(bot_id)
+  AND uir.session_id = sqlc.arg(session_id)
+  AND uir.tool_call_id = ANY(sqlc.arg(tool_call_ids)::text[])
+  AND (uir.expires_at IS NULL OR uir.expires_at > now())
+  AND (
+    uir.persist_turn_id IS NULL
+    OR uir.persist_turn_id = ANY(sqlc.arg(turn_ids)::uuid[])
+  )
+ORDER BY uir.created_at ASC, uir.short_id ASC;
+
 -- name: ListUserInputsBySessionTurnGraph :many
 WITH RECURSIVE visible_turns AS (
   SELECT t.id, t.parent_turn_id
