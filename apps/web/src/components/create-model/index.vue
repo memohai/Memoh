@@ -25,10 +25,7 @@
             v-slot="{ componentField }"
             name="type"
           >
-            <FormItem>
-              <Label class="mb-2">
-                {{ $t('common.type') }}
-              </Label>
+            <FieldStack :label="$t('common.type')">
               <FormControl>
                 <Select v-bind="componentField">
                   <SelectTrigger
@@ -50,7 +47,7 @@
                   </SelectContent>
                 </Select>
               </FormControl>
-            </FormItem>
+            </FieldStack>
           </FormField>
 
           <!-- Model -->
@@ -58,18 +55,19 @@
             v-slot="{ componentField }"
             name="model_id"
           >
-            <FormItem>
-              <Label class="mb-2">
-                {{ $t('models.model') }}
-              </Label>
+            <FieldStack
+              :label="$t('models.model')"
+              for="create-model-model-id"
+            >
               <FormControl>
                 <Input
+                  id="create-model-model-id"
                   type="text"
                   :placeholder="$t('models.modelPlaceholder')"
                   v-bind="componentField"
                 />
               </FormControl>
-            </FormItem>
+            </FieldStack>
           </FormField>
 
           <!-- Display Name: optional, empty by default. We deliberately do NOT
@@ -79,19 +77,22 @@
             v-slot="{ componentField }"
             name="name"
           >
-            <FormItem>
-              <Label class="mb-2">
-                {{ $t('models.displayName') }}
-                <span class="text-muted-foreground text-xs ml-1">({{ $t('common.optional') }})</span>
-              </Label>
+            <FieldStack for="create-model-name">
+              <template #label>
+                <Label for="create-model-name">
+                  {{ $t('models.displayName') }}
+                  <span class="text-muted-foreground text-xs ml-1">({{ $t('common.optional') }})</span>
+                </Label>
+              </template>
               <FormControl>
                 <Input
+                  id="create-model-name"
                   type="text"
                   :placeholder="$t('models.displayNamePlaceholder')"
                   v-bind="componentField"
                 />
               </FormControl>
-            </FormItem>
+            </FieldStack>
           </FormField>
 
           <!-- Dimensions (embedding only) -->
@@ -100,26 +101,27 @@
             v-slot="{ componentField }"
             name="dimensions"
           >
-            <FormItem>
-              <Label class="mb-2">
-                {{ $t('models.dimensions') }}
-              </Label>
+            <FieldStack
+              :label="$t('models.dimensions')"
+              for="create-model-dimensions"
+            >
               <FormControl>
                 <Input
+                  id="create-model-dimensions"
                   type="number"
                   :placeholder="$t('models.dimensionsPlaceholder')"
                   v-bind="componentField"
                 />
               </FormControl>
-            </FormItem>
+            </FieldStack>
           </FormField>
 
           <!-- Compatibilities (chat only) -->
-          <div v-if="selectedType === 'chat'">
-            <Label class="mb-4">
-              {{ $t('models.compatibilities') }}
-            </Label>
-            <div class="flex flex-wrap gap-3 mt-2">
+          <FieldStack
+            v-if="selectedType === 'chat'"
+            :label="$t('models.compatibilities')"
+          >
+            <div class="flex flex-wrap gap-3">
               <label
                 v-for="opt in COMPATIBILITY_OPTIONS"
                 :key="opt.value"
@@ -132,7 +134,7 @@
                 {{ $t(`models.compatibility.${opt.value}`) }}
               </label>
             </div>
-          </div>
+          </FieldStack>
 
           <!-- Context Window (optional) -->
           <FormField
@@ -140,19 +142,22 @@
             v-slot="{ componentField }"
             name="context_window"
           >
-            <FormItem>
-              <Label class="mb-2">
-                {{ $t('models.contextWindow') }}
-                <span class="text-muted-foreground text-xs ml-1">({{ $t('common.optional') }})</span>
-              </Label>
+            <FieldStack for="create-model-context-window">
+              <template #label>
+                <Label for="create-model-context-window">
+                  {{ $t('models.contextWindow') }}
+                  <span class="text-muted-foreground text-xs ml-1">({{ $t('common.optional') }})</span>
+                </Label>
+              </template>
               <FormControl>
                 <Input
+                  id="create-model-context-window"
                   type="number"
                   :placeholder="$t('models.contextWindowPlaceholder')"
                   v-bind="componentField"
                 />
               </FormControl>
-            </FormItem>
+            </FieldStack>
           </FormField>
         </div>
       </template>
@@ -172,7 +177,6 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  FormItem,
   Checkbox,
   Label,
 } from '@memohai/ui'
@@ -187,6 +191,7 @@ import type { ModelsGetResponse, ModelsAddRequest, ModelsUpdateRequest } from '@
 import { useI18n } from 'vue-i18n'
 import { COMPATIBILITY_OPTIONS } from '@/constants/compatibilities'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 
 interface ModelTypeOption {
@@ -199,11 +204,11 @@ const { t } = useI18n()
 const { run } = useDialogMutation()
 
 const formSchema = toTypedSchema(z.object({
-  type: z.string().min(1),
-  model_id: z.string().min(1),
+  type: z.string().min(1, t('models.typeRequired')),
+  model_id: z.string().min(1, t('models.modelIdRequired')),
   name: z.string().optional(),
-  dimensions: z.coerce.number().min(1).optional(),
-  context_window: z.coerce.number().min(1).optional(),
+  dimensions: z.coerce.number().min(1, t('models.dimensionsMin')).optional(),
+  context_window: z.coerce.number().min(1, t('models.contextWindowMin')).optional(),
 }))
 
 const props = withDefaults(defineProps<{
