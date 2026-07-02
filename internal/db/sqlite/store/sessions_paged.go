@@ -24,8 +24,7 @@ import (
 // it compares lexicographically against `updated_at`, which SQLite stores in
 // that same text form via CURRENT_TIMESTAMP.
 
-const sessionPagedColumns = `s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
-  s.default_head_turn_id, s.forked_from_session_id, s.forked_from_turn_id,
+const sessionPagedColumns = `s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
   s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
   r.metadata AS route_metadata,
   r.conversation_type AS route_conversation_type`
@@ -112,9 +111,8 @@ func (q *Queries) listSessionsByBotPaged(ctx context.Context, arg pgsqlc.ListSes
 	return scanSessionPagedRows(rows, func(r sessionPagedScan) pgsqlc.ListSessionsByBotPagedRow {
 		return pgsqlc.ListSessionsByBotPagedRow{
 			ID: r.ID, BotID: r.BotID, RouteID: r.RouteID, ChannelType: r.ChannelType, Type: r.Type,
-			Title: r.Title, Metadata: r.Metadata,
-			DefaultHeadTurnID: r.DefaultHeadTurnID, ForkedFromSessionID: r.ForkedFromSessionID, ForkedFromTurnID: r.ForkedFromTurnID,
-			ParentSessionID: r.ParentSessionID, CreatedByUserID: r.CreatedByUserID,
+			SessionMode: r.SessionMode, RuntimeType: r.RuntimeType, RuntimeMetadata: r.RuntimeMetadata,
+			Title: r.Title, Metadata: r.Metadata, ParentSessionID: r.ParentSessionID, CreatedByUserID: r.CreatedByUserID,
 			CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, DeletedAt: r.DeletedAt,
 			RouteMetadata: r.RouteMetadata, RouteConversationType: r.RouteConversationType,
 		}
@@ -150,9 +148,8 @@ func (q *Queries) listSessionsByBotAndCreatedByUserPaged(ctx context.Context, ar
 	return scanSessionPagedRows(rows, func(r sessionPagedScan) pgsqlc.ListSessionsByBotAndCreatedByUserPagedRow {
 		return pgsqlc.ListSessionsByBotAndCreatedByUserPagedRow{
 			ID: r.ID, BotID: r.BotID, RouteID: r.RouteID, ChannelType: r.ChannelType, Type: r.Type,
-			Title: r.Title, Metadata: r.Metadata,
-			DefaultHeadTurnID: r.DefaultHeadTurnID, ForkedFromSessionID: r.ForkedFromSessionID, ForkedFromTurnID: r.ForkedFromTurnID,
-			ParentSessionID: r.ParentSessionID, CreatedByUserID: r.CreatedByUserID,
+			SessionMode: r.SessionMode, RuntimeType: r.RuntimeType, RuntimeMetadata: r.RuntimeMetadata,
+			Title: r.Title, Metadata: r.Metadata, ParentSessionID: r.ParentSessionID, CreatedByUserID: r.CreatedByUserID,
 			CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, DeletedAt: r.DeletedAt,
 			RouteMetadata: r.RouteMetadata, RouteConversationType: r.RouteConversationType,
 		}
@@ -200,11 +197,11 @@ type sessionPagedScan struct {
 	RouteID               pgtype.UUID
 	ChannelType           pgtype.Text
 	Type                  string
+	SessionMode           string
+	RuntimeType           string
+	RuntimeMetadata       []byte
 	Title                 string
 	Metadata              []byte
-	DefaultHeadTurnID     pgtype.UUID
-	ForkedFromSessionID   pgtype.UUID
-	ForkedFromTurnID      pgtype.UUID
 	ParentSessionID       pgtype.UUID
 	CreatedByUserID       pgtype.UUID
 	CreatedAt             pgtype.Timestamptz
@@ -218,21 +215,18 @@ func scanSessionPagedRows[T any](rows *sql.Rows, conv func(sessionPagedScan) T) 
 	var out []T
 	for rows.Next() {
 		var (
-			id, botID                      string
-			routeID, channelType           sql.NullString
-			typ, title, metadata           string
-			defaultHeadTurnID              sql.NullString
-			forkedFromSessionID            sql.NullString
-			forkedFromTurnID               sql.NullString
-			parentSessionID, createdByUser sql.NullString
-			createdAt, updatedAt           string
-			deletedAt                      sql.NullString
-			routeMetadata                  sql.NullString
-			routeConversationType          sql.NullString
+			id, botID                        string
+			routeID, channelType             sql.NullString
+			typ, sessionMode, runtimeType    string
+			runtimeMetadata, title, metadata string
+			parentSessionID, createdByUser   sql.NullString
+			createdAt, updatedAt             string
+			deletedAt                        sql.NullString
+			routeMetadata                    sql.NullString
+			routeConversationType            sql.NullString
 		)
 		if err := rows.Scan(
-			&id, &botID, &routeID, &channelType, &typ, &title, &metadata,
-			&defaultHeadTurnID, &forkedFromSessionID, &forkedFromTurnID,
+			&id, &botID, &routeID, &channelType, &typ, &sessionMode, &runtimeType, &runtimeMetadata, &title, &metadata,
 			&parentSessionID, &createdByUser, &createdAt, &updatedAt, &deletedAt,
 			&routeMetadata, &routeConversationType,
 		); err != nil {
@@ -240,6 +234,9 @@ func scanSessionPagedRows[T any](rows *sql.Rows, conv func(sessionPagedScan) T) 
 		}
 		row := sessionPagedScan{
 			Type:                  typ,
+			SessionMode:           sessionMode,
+			RuntimeType:           runtimeType,
+			RuntimeMetadata:       []byte(runtimeMetadata),
 			Title:                 title,
 			Metadata:              []byte(metadata),
 			ChannelType:           textFromNullString(channelType),
@@ -253,21 +250,6 @@ func scanSessionPagedRows[T any](rows *sql.Rows, conv func(sessionPagedScan) T) 
 		}
 		if routeID.Valid {
 			if err := row.RouteID.Scan(routeID.String); err != nil {
-				return nil, err
-			}
-		}
-		if defaultHeadTurnID.Valid {
-			if err := row.DefaultHeadTurnID.Scan(defaultHeadTurnID.String); err != nil {
-				return nil, err
-			}
-		}
-		if forkedFromSessionID.Valid {
-			if err := row.ForkedFromSessionID.Scan(forkedFromSessionID.String); err != nil {
-				return nil, err
-			}
-		}
-		if forkedFromTurnID.Valid {
-			if err := row.ForkedFromTurnID.Scan(forkedFromTurnID.String); err != nil {
 				return nil, err
 			}
 		}

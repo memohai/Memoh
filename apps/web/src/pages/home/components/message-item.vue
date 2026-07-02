@@ -153,46 +153,7 @@
           :on-open-media="onOpenMedia"
         />
         <div
-          v-if="isEditingUserMessage"
-          class="w-[min(100%,42rem)] bg-muted px-4 py-3 text-foreground"
-          :class="userBubbleRadiusClass"
-        >
-          <Textarea
-            ref="editTextarea"
-            v-model="editDraft"
-            size="lg"
-            class="max-h-52 min-h-20 resize-none rounded-none border-0 bg-transparent p-0 text-foreground shadow-none placeholder:text-muted-foreground focus-visible:ring-0"
-            :aria-label="t('chat.actions.edit')"
-            @keydown.enter.meta.prevent="submitEdit"
-            @keydown.enter.ctrl.prevent="submitEdit"
-            @keydown.escape.stop.prevent="cancelEdit"
-          />
-          <div class="mt-2 flex justify-end gap-1.5">
-            <Button
-              type="button"
-              variant="outline"
-              size="text"
-              class="px-1"
-              :disabled="editSubmitting"
-              @click="cancelEdit"
-            >
-              {{ t('common.cancel') }}
-            </Button>
-            <Button
-              type="button"
-              variant="primary"
-              size="text"
-              class="px-1"
-              :loading="editSubmitting"
-              :disabled="!canSubmitEdit"
-              @click="submitEdit"
-            >
-              {{ t('chat.send') }}
-            </Button>
-          </div>
-        </div>
-        <div
-          v-else-if="cleanUserText(message.text) || message.forward || message.reply"
+          v-if="cleanUserText(message.text) || message.forward || message.reply"
           :lang="contentLang(cleanUserText(message.text))"
           class="chat-user-bubble w-fit max-w-full bg-chat-user-bubble px-4 py-3 text-chat-user-bubble-fg whitespace-pre-wrap break-words"
           :class="userBubbleRadiusClass"
@@ -248,17 +209,10 @@
           />
         </div>
         <MessageActions
-          v-if="!isEditingUserMessage"
           class="-mt-1"
           role="user"
           :copy-text="userCopyText"
           :align="bubbleSelf ? 'end' : 'start'"
-          :can-edit="canEditUserMessage"
-          :can-select-variant="canSelectVariant"
-          :variant-state="showMessageActions ? requestVariantState : null"
-          variant-kind="request"
-          @edit="startEdit"
-          @select-variant="emit('selectVariant', $event)"
         />
       </div>
 
@@ -355,17 +309,8 @@
           :menu-time="calendarTimestamp"
           :full-time="fullTimestamp"
           align="start"
-          :can-select-variant="canSelectVariant"
-          :show-fork="canShowAssistantMessageAction"
-          :show-retry="canShowAssistantMessageAction"
-          :can-fork="canForkAssistantMessage"
-          :can-retry="canRetryAssistantMessage"
-          :variant-state="showMessageActions ? responseVariantState : null"
-          variant-kind="response"
+          :persistent="true"
           :streaming="message.streaming"
-          @fork="emit('forkMessage', message.id)"
-          @retry="emit('retryMessage', message.id)"
-          @select-variant="emit('selectVariant', $event)"
         />
       </div>
     </div>
@@ -392,10 +337,10 @@ setCustomComponents({ mermaid: ThemedMermaidBlock })
 </script>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, toRef, useTemplateRef, watch } from 'vue'
+import { computed, toRef, useTemplateRef, watch } from 'vue'
 import { CircleAlert } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime, formatCalendarTime } from '@/utils/date-time'
-import { Avatar, AvatarImage, AvatarFallback, Button, Textarea } from '@memohai/ui'
+import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
 import ToolCallGroup from './tool-call-group.vue'
@@ -415,7 +360,6 @@ import type {
   AttachmentItem,
   ChatMessage,
   ContentBlock,
-  TurnVariantState,
   ToolCallBlock as ToolCallBlockType,
   ThinkingBlock as ThinkingBlockType,
   AttachmentBlock as AttachmentBlockType,
@@ -439,10 +383,6 @@ const codeBlockTheme = computed(() => ({
 const messageEl = useTemplateRef('messageItem')
 const emit = defineEmits<{
   active: [isActive: boolean, { id: string, top: number,  }]
-  editMessage: [messageId: string, text: string, done: (started: boolean) => void]
-  forkMessage: [messageId: string]
-  retryMessage: [messageId: string]
-  selectVariant: [headTurnId: string]
 }>()
 
 const props = defineProps<{
@@ -459,11 +399,6 @@ const props = defineProps<{
   onReplyClick?: (messageId: string) => void
   isScrolling: boolean
   isLastMessage?: boolean
-  showMessageActions?: boolean
-  canRunMessageAction?: boolean
-  canSelectVariant?: boolean
-  requestVariantState?: TurnVariantState | null
-  responseVariantState?: TurnVariantState | null
 }>()
 
 const userStore = useUserStore()
@@ -485,10 +420,6 @@ const isSelf = computed(() =>
 
 
 const { t, tm, rt, locale } = useI18n()
-const editTextarea = ref<InstanceType<typeof Textarea> | null>(null)
-const isEditingUserMessage = ref(false)
-const editDraft = ref('')
-const editSubmitting = ref(false)
 
 // The pre-stream "running" line picks one phrase and holds it for the turn:
 // seeded by the message id so it stays put across re-renders/refetches instead
@@ -558,57 +489,6 @@ function cleanUserText(content?: string): string {
     .trim()
 }
 
-const cleanCurrentUserText = computed(() =>
-  props.message.role === 'user' ? cleanUserText(props.message.text) : '',
-)
-
-const canEditUserMessage = computed(() =>
-  props.message.role === 'user'
-  && !props.message.streaming
-  && props.message.__optimistic !== true
-  && props.canRunMessageAction === true
-  && !isSpecialUserMessage.value
-  && cleanCurrentUserText.value.length > 0
-  && bubbleSelf.value,
-)
-
-const canSubmitEdit = computed(() =>
-  props.message.role === 'user'
-  && props.canRunMessageAction === true
-  && editDraft.value.trim().length > 0
-  && editDraft.value.trim() !== cleanCurrentUserText.value.trim()
-  && !editSubmitting.value,
-)
-
-function startEdit() {
-  if (!canEditUserMessage.value || props.message.role !== 'user') return
-  editDraft.value = cleanCurrentUserText.value
-  isEditingUserMessage.value = true
-  void nextTick(() => {
-    const textarea = editTextarea.value?.$el as HTMLTextAreaElement | undefined
-    textarea?.focus()
-    textarea?.setSelectionRange(textarea.value.length, textarea.value.length)
-  })
-}
-
-function cancelEdit() {
-  if (editSubmitting.value) return
-  isEditingUserMessage.value = false
-  editDraft.value = ''
-}
-
-async function submitEdit() {
-  if (!canSubmitEdit.value || props.message.role !== 'user') return
-  editSubmitting.value = true
-  emit('editMessage', props.message.id, editDraft.value.trim(), (started) => {
-    editSubmitting.value = false
-    if (started) {
-      isEditingUserMessage.value = false
-      editDraft.value = ''
-    }
-  })
-}
-
 // Element-level script tag for BLOCK typography only — leading (CJK packs
 // tighter, so it loosens) and the ~3% Latin size shave. Per-glyph WEIGHT in mixed
 // runs is NOT done here (one font-weight can't split a run); that lives in the
@@ -626,7 +506,6 @@ const isSpecialUserMessage = computed(() =>
 
 const contentClass = computed(() => {
   if (isSpecialUserMessage.value) return 'flex-1 max-w-full'
-  if (props.message.role === 'user' && isEditingUserMessage.value) return 'w-full max-w-full'
   // The user bubble caps a little tighter than the assistant column so a long
   // prompt doesn't sprawl most of the width before wrapping. `w-full` makes the
   // wrapper actually OCCUPY that capped column instead of shrinking to the
@@ -833,22 +712,5 @@ const assistantPlainText = computed(() => {
     .map(block => block.content)
     .join('\n\n')
 })
-
-const canActOnAssistantTurn = computed(() =>
-  props.message.role === 'assistant'
-  && !props.message.streaming
-  && props.message.__optimistic !== true
-  && props.showMessageActions === true
-)
-
-const canShowAssistantMessageAction = computed(() => canActOnAssistantTurn.value)
-const canForkAssistantMessage = computed(() =>
-  canActOnAssistantTurn.value
-  && props.canRunMessageAction === true
-)
-const canRetryAssistantMessage = computed(() =>
-  canActOnAssistantTurn.value
-  && props.canRunMessageAction === true
-)
 
 </script>

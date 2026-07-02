@@ -24,6 +24,7 @@
     "title": "✨ New {mode} started.",
     "modeChat": "chat",
     "modeDiscussion": "discussion",
+    "modeWithRuntime": "{mode} with {runtime}",
     "usage": "Couldn't read that — use /new for a chat, or /new discuss for a discussion.",
     "confirmTitle": "⚠️ Confirm /new",
     "confirmBody": "This starts a fresh {mode} session and discards the current conversation history.",
@@ -37,6 +38,26 @@
     "labelContext": "Context",
     "contextUnit": "tokens",
     "tip": "Tip: adjust anytime with {model} or {reasoning}."
+  },
+  "chat": {
+    "acp": {
+      "agentNotConfigured": "External agent setup is incomplete for this bot.",
+      "agentNotFound": "The selected external agent is unavailable.",
+      "agentNotEnabled": "The selected external agent is disabled for this bot.",
+      "codexOAuthIncomplete": "Codex ChatGPT sign-in is not complete for this bot workspace.",
+      "codexAuthTokenMissing": "Codex authentication is missing or incomplete for this bot workspace.",
+      "agentAuthInvalid": "External agent authentication is invalid. Update the agent setup and try again.",
+      "noWorkspaceExec": "You do not have permission to run workspace commands for this bot.",
+      "runtimeOwnerMissing": "This external-agent session has no runtime owner. Start a new session to continue.",
+      "discussUnsupported": "This external agent cannot run in discuss mode.",
+      "groupChatUnsupported": "Group chats cannot create a chat-mode external-agent session. Use /new codex or /new discuss codex.",
+      "projectModeInvalid": "The external agent project mode is invalid.",
+      "projectPathInvalid": "The external agent project path must be absolute.",
+      "displayArgsInvalid": "The external agent display arguments are invalid.",
+      "runtimeStartFailed": "External agent runtime failed to start.",
+      "runtimeBusy": "External agent runtime is already processing a turn for this session.",
+      "invalidChatRuntime": "The selected chat runtime is invalid."
+    }
   },
   "ops": {
     "template": "⚠️ Couldn't {verb} right now. Try again in a moment.",
@@ -414,6 +435,7 @@
       "summaryTitle": "Token usage ({range})",
       "byModelTitle": "Token usage by model ({range})",
       "bucketChat": "Chat",
+      "bucketDiscuss": "Discuss",
       "bucketHeartbeat": "Heartbeat",
       "bucketSchedule": "Schedule",
       "inOut": "{in} in · {out} out",
@@ -435,6 +457,10 @@
     "toolApproval": {
       "unavailable": "⚠️ Approvals aren't available here right now.",
       "parseFailed": "Couldn't read that. Reply to the request with /approve or /reject, or tap a button."
+    },
+    "userInput": {
+      "unavailable": "⚠️ User input responses aren't available here right now.",
+      "parseFailed": "Couldn't read that. Reply with /respond <request> <answer>."
     },
     "fallback": {
       "switch": "Switch with {command}.",

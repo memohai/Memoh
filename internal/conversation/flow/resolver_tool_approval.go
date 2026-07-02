@@ -10,6 +10,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/contextlimit"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/models"
@@ -20,8 +21,8 @@ import (
 type ToolApprovalResponseInput struct {
 	BotID                      string
 	SessionID                  string
-	BaseHeadTurnID             string
 	ActorChannelIdentityID     string
+	ActorUserID                string
 	ApprovalID                 string
 	ExplicitID                 string
 	ReplyExternalMessageID     string
@@ -38,14 +39,10 @@ func (r *Resolver) RespondToolApproval(ctx context.Context, input ToolApprovalRe
 	target, err := r.toolApproval.ResolveTarget(ctx, toolapproval.ResolveInput{
 		BotID:                  input.BotID,
 		SessionID:              input.SessionID,
-		BaseHeadTurnID:         input.BaseHeadTurnID,
 		ExplicitID:             firstNonEmpty(input.ExplicitID, input.ApprovalID),
 		ReplyExternalMessageID: input.ReplyExternalMessageID,
 	})
 	if err != nil {
-		return err
-	}
-	if err := r.validateBaseContinuationTurnHead(ctx, target.SessionID, target.PersistTurnID, input.BaseHeadTurnID, "tool approval"); err != nil {
 		return err
 	}
 	if isACP, err := r.isACPToolApprovalSession(ctx, target.SessionID); err != nil {
@@ -115,10 +112,13 @@ func (r *Resolver) isACPToolApprovalSession(ctx context.Context, sessionID strin
 	if err != nil {
 		return false, err
 	}
-	return sess.Type == sessionpkg.TypeACPAgent, nil
+	return sessionpkg.IsACPRuntime(sess), nil
 }
 
 func (r *Resolver) respondACPToolApproval(ctx context.Context, target toolapproval.Request, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) error {
+	if err := r.authorizeACPToolApprovalResponse(ctx, target, input); err != nil {
+		return err
+	}
 	if !r.toolApproval.CanRespond(target) {
 		_, err := r.toolApproval.Reject(ctx, target.ID, "", "tool approval expired: the requesting tool call is no longer waiting")
 		if err != nil && !errors.Is(err, toolapproval.ErrAlreadyDecided) {
@@ -163,6 +163,45 @@ func (r *Resolver) respondACPToolApproval(ctx context.Context, target toolapprov
 	return emitApprovalAck(ctx, eventCh)
 }
 
+func (r *Resolver) authorizeACPToolApprovalResponse(ctx context.Context, target toolapproval.Request, input ToolApprovalResponseInput) error {
+	if r == nil || r.sessionService == nil {
+		return errors.New("session service not configured")
+	}
+	if r.botPermissions == nil {
+		return errors.New("bot permission checker not configured")
+	}
+	sessionID := firstNonEmpty(target.SessionID, input.SessionID)
+	sess, err := r.sessionService.Get(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if !sessionpkg.IsACPRuntime(sess) {
+		return nil
+	}
+	botID := firstNonEmpty(target.BotID, input.BotID)
+	if strings.TrimSpace(sess.BotID) != "" && strings.TrimSpace(botID) != "" && sess.BotID != botID {
+		return toolapproval.ErrForbidden
+	}
+	if strings.TrimSpace(botID) == "" {
+		botID = sess.BotID
+	}
+	actorID := firstNonEmpty(input.ActorUserID, input.ActorChannelIdentityID)
+	if actorID == "" {
+		return toolapproval.ErrForbidden
+	}
+	acpMeta := mergeACPRuntimeMetadata(sess.Metadata, sess.RuntimeMetadata)
+	runtimeOwnerID := metadataString(acpMeta, "runtime_owner_account_id")
+	if runtimeOwnerID == "" || runtimeOwnerID != actorID {
+		return toolapproval.ErrForbidden
+	}
+	if ok, err := r.botPermissions.HasBotPermission(ctx, botID, actorID, bots.PermissionWorkspaceExec); err != nil {
+		return err
+	} else if !ok {
+		return toolapproval.ErrForbidden
+	}
+	return nil
+}
+
 func emitApprovalAck(ctx context.Context, eventCh chan<- WSStreamEvent) error {
 	if eventCh == nil {
 		return nil
@@ -180,17 +219,15 @@ func emitApprovalAck(ctx context.Context, eventCh chan<- WSStreamEvent) error {
 
 func (r *Resolver) executeApprovedTool(ctx context.Context, req toolapproval.Request, input ToolApprovalResponseInput) (sdk.ToolResultPart, error) {
 	req = withLocalWebReplyTarget(req)
-	resolved, err := r.resolveRunConfig(ctx, baseRunConfigParams{
-		BotID:             input.BotID,
-		SessionID:         req.SessionID,
-		ChannelIdentityID: firstNonEmpty(req.ChannelIdentityID, input.ActorChannelIdentityID),
-		CurrentPlatform:   req.SourcePlatform,
-		ReplyTarget:       req.ReplyTarget,
-		ConversationType:  req.ConversationType,
-		SessionToken:      input.ChatToken,
-		PersistTurnID:     req.PersistTurnID,
-		BaseHeadTurnID:    input.BaseHeadTurnID,
-	})
+	resolved, err := r.ResolveRunConfig(ctx,
+		input.BotID,
+		req.SessionID,
+		firstNonEmpty(req.ChannelIdentityID, input.ActorChannelIdentityID),
+		req.SourcePlatform,
+		req.ReplyTarget,
+		req.ConversationType,
+		input.ChatToken,
+	)
 	if err != nil {
 		return sdk.ToolResultPart{}, err
 	}
@@ -203,13 +240,7 @@ func (r *Resolver) executeApprovedTool(ctx context.Context, req toolapproval.Req
 
 func (r *Resolver) storeToolResultAndContinue(ctx context.Context, approval toolapproval.Request, input ToolApprovalResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error {
 	approval = withLocalWebReplyTarget(approval)
-	doneTurn := r.enterSessionTurn(ctx, input.BotID, approval.SessionID)
-	defer doneTurn()
-	if err := r.validateBaseContinuationTurnHead(ctx, approval.SessionID, approval.PersistTurnID, input.BaseHeadTurnID, "tool approval"); err != nil {
-		return err
-	}
 	modelMessages := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(result)})
-	run := continuationTurnRun(approval.SessionID, approval.PersistTurnID)
 	storeReq := conversation.ChatRequest{
 		BotID:                   input.BotID,
 		ChatID:                  input.BotID,
@@ -220,7 +251,7 @@ func (r *Resolver) storeToolResultAndContinue(ctx context.Context, approval tool
 		ConversationType:        approval.ConversationType,
 		UserMessagePersisted:    true,
 	}
-	if err := r.storeRoundWithOptions(ctx, storeReq, &run, modelMessages, "", storeRoundOptions{AllowPendingToolCalls: true}); err != nil {
+	if err := r.storeRoundWithOptions(ctx, storeReq, modelMessages, "", storeRoundOptions{AllowPendingToolCalls: true}); err != nil {
 		return err
 	}
 	return r.continueToolApprovalSession(ctx, approval, input, eventCh)
@@ -228,28 +259,20 @@ func (r *Resolver) storeToolResultAndContinue(ctx context.Context, approval tool
 
 func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval toolapproval.Request, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) error {
 	approval = withLocalWebReplyTarget(approval)
-	resolved, err := r.resolveRunConfig(ctx, baseRunConfigParams{
-		BotID:             input.BotID,
-		SessionID:         approval.SessionID,
-		ChannelIdentityID: firstNonEmpty(approval.ChannelIdentityID, input.ActorChannelIdentityID),
-		CurrentPlatform:   approval.SourcePlatform,
-		ReplyTarget:       approval.ReplyTarget,
-		ConversationType:  approval.ConversationType,
-		SessionToken:      input.ChatToken,
-		PersistTurnID:     approval.PersistTurnID,
-		BaseHeadTurnID:    input.BaseHeadTurnID,
-	})
+	resolved, err := r.ResolveRunConfig(ctx,
+		input.BotID,
+		approval.SessionID,
+		firstNonEmpty(approval.ChannelIdentityID, input.ActorChannelIdentityID),
+		approval.SourcePlatform,
+		approval.ReplyTarget,
+		approval.ConversationType,
+		input.ChatToken,
+	)
 	if err != nil {
 		return err
 	}
 
-	run := continuationTurnRun(approval.SessionID, approval.PersistTurnID)
-	contextReq := conversation.ChatRequest{
-		BotID:     input.BotID,
-		ChatID:    input.BotID,
-		SessionID: approval.SessionID,
-	}
-	loaded, err := r.loadMessagesForTurnRun(ctx, contextReq, run, defaultMaxContextMinutes)
+	loaded, err := r.loadMessages(ctx, input.BotID, approval.SessionID, defaultMaxContextMinutes)
 	if err != nil {
 		return err
 	}
@@ -287,7 +310,6 @@ func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval too
 				if storeErr := r.persistTerminalSnapshot(
 					context.WithoutCancel(ctx),
 					req,
-					&run,
 					resolvedContext{model: models.GetResponse{ID: resolved.ModelID}},
 					snap,
 				); storeErr != nil {

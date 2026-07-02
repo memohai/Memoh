@@ -1,5 +1,7 @@
 package command
 
+import "github.com/memohai/memoh/internal/acpfeedback"
+
 // InteractiveKind discriminates the structured payload carried by a Result.
 type InteractiveKind string
 
@@ -25,9 +27,10 @@ const (
 // (Close/Prev/Next/…) so the whole reply stays in one language. Empty means the
 // server default (English).
 type Result struct {
-	Text        string
-	Interactive *Interactive
-	Locale      string
+	Text          string
+	Interactive   *Interactive
+	Locale        string
+	FeedbackError *acpfeedback.Error
 }
 
 // Interactive carries optional structured data for rich rendering. Exactly one

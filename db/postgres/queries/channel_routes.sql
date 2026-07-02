@@ -101,11 +101,6 @@ UPDATE bot_channel_routes
 SET active_session_id = sqlc.narg(active_session_id)::uuid, updated_at = now()
 WHERE id = sqlc.arg(id);
 
--- name: ClearRouteActiveSessionsByBot :exec
-UPDATE bot_channel_routes
-SET active_session_id = NULL, updated_at = now()
-WHERE bot_id = sqlc.arg(bot_id);
-
 -- name: DeleteChatRoute :exec
 DELETE FROM bot_channel_routes
 WHERE id = $1;

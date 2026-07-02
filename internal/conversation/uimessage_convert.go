@@ -271,7 +271,6 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 
 			turn := UITurn{
 				Role:              "user",
-				TurnID:            strings.TrimSpace(raw.TurnID),
 				Text:              text,
 				Attachments:       attachments,
 				Reply:             reply,
@@ -360,7 +359,6 @@ func newPendingAssistantTurn(raw messagepkg.Message) *uiPendingAssistantTurn {
 	return &uiPendingAssistantTurn{
 		Turn: UITurn{
 			Role:              "assistant",
-			TurnID:            strings.TrimSpace(raw.TurnID),
 			Timestamp:         raw.CreatedAt,
 			Platform:          resolveUIPersistencePlatform(raw),
 			ExternalMessageID: strings.TrimSpace(raw.ExternalMessageID),
@@ -445,19 +443,6 @@ func extractPersistedMessageText(raw messagepkg.Message, message ModelMessage) s
 		return strings.TrimSpace(stripPersistedUserStructuredContext(text))
 	}
 	return strings.TrimSpace(stripPersistedAgentTags(text))
-}
-
-// ExtractDisplayUserText returns the same cleaned user-facing text used by
-// ConvertMessagesToUITurns. It is shared by retry/rewrite flows that need to
-// replay an existing persisted user request without leaking persistence
-// wrappers into the new prompt.
-func ExtractDisplayUserText(content json.RawMessage, displayContent string) string {
-	raw := messagepkg.Message{
-		Role:           "user",
-		Content:        content,
-		DisplayContent: displayContent,
-	}
-	return extractPersistedMessageText(raw, decodePersistedModelMessage(raw))
 }
 
 func stripPersistedUserStructuredContext(text string) string {
@@ -640,7 +625,6 @@ func extractApprovalMetadata(metadata map[string]any) *UIToolApproval {
 		Status:         status,
 		DecisionReason: stringFromAny(obj["decision_reason"]),
 		CanApprove:     boolFromAny(obj["can_approve"], true),
-		PersistTurnID:  stringFromAny(obj["persist_turn_id"]),
 	}
 }
 
@@ -670,7 +654,6 @@ func extractUserInputMetadata(metadata map[string]any) *UIUserInput {
 		status,
 		obj["ui_payload"],
 		status == "pending",
-		stringFromAny(obj["persist_turn_id"]),
 	)
 }
 

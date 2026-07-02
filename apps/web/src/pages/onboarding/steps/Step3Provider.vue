@@ -410,6 +410,7 @@ onMounted(() => {
             @click="openForm(preset)"
           >
             <ProviderIcon
+              v-if="preset.icon"
               :icon="preset.icon"
               size="22"
             />
@@ -473,7 +474,7 @@ onMounted(() => {
           <ArrowLeft class="size-4" />
         </button>
         <ProviderIcon
-          v-if="selectedPreset"
+          v-if="selectedPreset?.icon"
           :icon="selectedPreset.icon"
           size="28"
         />

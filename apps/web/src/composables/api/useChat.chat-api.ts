@@ -7,7 +7,6 @@ import {
   getBotsByBotIdSessionsBySessionIdAcpRuntime,
   postBotsByBotIdAcpRuntimes,
   postBotsByBotIdSessions,
-  postBotsByBotIdSessionsBySessionIdFork,
   postBotsByBotIdSessionsBySessionIdAcpRuntime,
   deleteBotsByBotIdSessionsBySessionId,
   patchBotsByBotIdAcpRuntimesByRuntimeIdModel,
@@ -20,7 +19,10 @@ import type { Bot, SessionSummary } from './useChat.types'
 export interface CreateSessionOptions {
   title?: string
   type?: string
+  sessionMode?: string
+  runtimeType?: string
   metadata?: Record<string, unknown>
+  runtimeMetadata?: Record<string, unknown>
   /** Warm pre-session ACP runtime to bind at creation time. */
   acpRuntimeId?: string
 }
@@ -90,30 +92,15 @@ export async function createSession(botId: string, options?: string | CreateSess
         title: options?.title ?? '',
         channel_type: 'local',
         type: options?.type,
+        session_mode: options?.sessionMode,
+        runtime_type: options?.runtimeType,
         metadata: options?.metadata,
+        runtime_metadata: options?.runtimeMetadata,
         acp_runtime_id: options?.acpRuntimeId?.trim() || undefined,
       }
   const { data } = await postBotsByBotIdSessions({
     path: { bot_id: id },
     body,
-    throwOnError: true,
-  })
-  return data as SessionSummary
-}
-
-export async function forkSessionFromMessage(botId: string, sessionId: string, messageId: string, baseHeadTurnId?: string): Promise<SessionSummary> {
-  const bid = botId.trim()
-  const sid = sessionId.trim()
-  const mid = messageId.trim()
-  if (!bid) throw new Error('bot id is required')
-  if (!sid) throw new Error('session id is required')
-  if (!mid) throw new Error('message id is required')
-  const { data } = await postBotsByBotIdSessionsBySessionIdFork({
-    path: { bot_id: bid, session_id: sid },
-    body: {
-      message_id: mid,
-      base_head_turn_id: baseHeadTurnId?.trim() || undefined,
-    },
     throwOnError: true,
   })
   return data as SessionSummary
@@ -128,10 +115,24 @@ export async function updateSessionTitle(botId: string, sessionId: string, title
   return data as SessionSummary
 }
 
-export async function updateSessionAgent(botId: string, sessionId: string, type: string, metadata: Record<string, unknown>): Promise<SessionSummary> {
+export interface UpdateSessionAgentOptions {
+  type?: string
+  sessionMode?: string
+  runtimeType?: string
+  metadata?: Record<string, unknown>
+  runtimeMetadata?: Record<string, unknown>
+}
+
+export async function updateSessionAgent(botId: string, sessionId: string, options: UpdateSessionAgentOptions): Promise<SessionSummary> {
   const { data } = await patchBotsByBotIdSessionsBySessionId({
     path: { bot_id: botId.trim(), session_id: sessionId.trim() },
-    body: { type, metadata },
+    body: {
+      type: options.type,
+      session_mode: options.sessionMode,
+      runtime_type: options.runtimeType,
+      metadata: options.metadata,
+      runtime_metadata: options.runtimeMetadata,
+    },
     throwOnError: true,
   })
   return data as SessionSummary

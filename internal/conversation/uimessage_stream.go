@@ -150,11 +150,10 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		}
 		state.Message.Running = uiBoolPtr(false)
 		state.Message.Approval = &UIToolApproval{
-			ApprovalID:    strings.TrimSpace(event.ApprovalID),
-			ShortID:       event.ShortID,
-			Status:        status,
-			CanApprove:    strings.EqualFold(status, "pending"),
-			PersistTurnID: firstNonEmptyString(event.PersistTurnID, stringFromAny(event.Metadata["persist_turn_id"])),
+			ApprovalID: strings.TrimSpace(event.ApprovalID),
+			ShortID:    event.ShortID,
+			Status:     status,
+			CanApprove: strings.EqualFold(status, "pending"),
 		}
 		return []UIMessage{cloneToolStreamMessage(state.Message)}
 
@@ -199,7 +198,6 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 			status,
 			event.Metadata["ui_payload"],
 			status == "pending",
-			firstNonEmptyString(event.PersistTurnID, stringFromAny(event.Metadata["persist_turn_id"])),
 		)
 		return []UIMessage{cloneToolStreamMessage(state.Message)}
 

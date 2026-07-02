@@ -40,7 +40,6 @@ type CreatePendingInput struct {
 	SourcePlatform               string
 	ReplyTarget                  string
 	ConversationType             string
-	PersistTurnID                string
 }
 
 type Evaluation struct {
@@ -51,7 +50,6 @@ type Evaluation struct {
 type ResolveInput struct {
 	BotID                  string
 	SessionID              string
-	BaseHeadTurnID         string
 	ExplicitID             string
 	ReplyExternalMessageID string
 }
@@ -73,7 +71,6 @@ type Request struct {
 	SourcePlatform          string         `json:"source_platform,omitempty"`
 	ReplyTarget             string         `json:"reply_target,omitempty"`
 	ConversationType        string         `json:"conversation_type,omitempty"`
-	PersistTurnID           string         `json:"persist_turn_id,omitempty"`
 	CreatedAt               time.Time      `json:"created_at"`
 	DecidedAt               *time.Time     `json:"decided_at,omitempty"`
 	DecidedByUser           bool           `json:"decided_by_user,omitempty"`

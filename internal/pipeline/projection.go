@@ -20,6 +20,8 @@ type ICMessage struct {
 	EditUTCOffsetMin int              `json:"edit_utc_offset_min,omitempty"`
 	Deleted          bool             `json:"deleted,omitempty"`
 	IsSelfSent       bool             `json:"is_self_sent,omitempty"`
+	MentionsMe       bool             `json:"mentions_me,omitempty"`
+	RepliesToMe      bool             `json:"replies_to_me,omitempty"`
 	Conversation     ConversationMeta `json:"conversation"`
 }
 
@@ -167,6 +169,12 @@ func reduceMessage(ic *IntermediateContext, event MessageEvent) {
 		if event.IsSelfSent && ic.Nodes[existingIdx].Message != nil {
 			ic.Nodes[existingIdx].Message.IsSelfSent = true
 		}
+		if event.MentionsMe && ic.Nodes[existingIdx].Message != nil {
+			ic.Nodes[existingIdx].Message.MentionsMe = true
+		}
+		if event.RepliesToMe && ic.Nodes[existingIdx].Message != nil {
+			ic.Nodes[existingIdx].Message.RepliesToMe = true
+		}
 		return
 	}
 
@@ -197,6 +205,8 @@ func reduceMessage(ic *IntermediateContext, event MessageEvent) {
 		Content:      event.Content,
 		Attachments:  event.Attachments,
 		IsSelfSent:   event.IsSelfSent,
+		MentionsMe:   event.MentionsMe,
+		RepliesToMe:  event.RepliesToMe,
 		Conversation: event.Conversation,
 	}
 

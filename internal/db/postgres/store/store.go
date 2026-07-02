@@ -46,10 +46,3 @@ func (s *Store) SQLC() *dbsqlc.Queries {
 	}
 	return s.queries
 }
-
-func (s *Store) QueriesAdapter() *Queries {
-	if s == nil {
-		return nil
-	}
-	return NewQueriesWithPool(s.pool, s.queries)
-}

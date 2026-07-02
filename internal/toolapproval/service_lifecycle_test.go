@@ -178,24 +178,6 @@ func TestCreatePendingRejectsReusedTerminalRequest(t *testing.T) {
 	}
 }
 
-func TestCreatePendingMapsMissingSessionOrTurnToNotFound(t *testing.T) {
-	t.Parallel()
-
-	queries := &lifecycleQueries{createErr: pgx.ErrNoRows}
-	svc := NewService(slog.New(slog.DiscardHandler), queries, nil)
-
-	_, err := svc.CreatePending(context.Background(), CreatePendingInput{
-		BotID:      "11111111-1111-1111-1111-111111111111",
-		SessionID:  "22222222-2222-2222-2222-222222222222",
-		ToolCallID: "call-1",
-		ToolName:   "exec",
-		ToolInput:  map[string]any{"command": "true"},
-	})
-	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("CreatePending() error = %v, want ErrNotFound", err)
-	}
-}
-
 func TestCanRespondRequiresPendingLiveWaiter(t *testing.T) {
 	t.Parallel()
 

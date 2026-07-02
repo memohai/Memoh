@@ -4,11 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"html/template"
+	"log/slog"
 	"net/http"
-	"path"
 	"strings"
 	"sync"
 	"time"
@@ -22,13 +21,20 @@ import (
 )
 
 const (
-	acpCodexOAuthStateTTL    = 10 * time.Minute
-	acpCodexOAuthStatePrefix = "acp_codex_"
+	acpCodexOAuthStateTTL           = 10 * time.Minute
+	acpCodexOAuthStatePrefix        = "acp_codex_"
+	acpCodexDeviceAuthTTL           = 15 * time.Minute
+	acpCodexDeviceAuthTerminalTTL   = 2 * time.Minute
+	acpCodexDeviceAuthMinInterval   = 5 * time.Second
+	acpCodexDeviceAuthSessionPrefix = "codex_device_"
 )
 
 type acpCodexOAuthProvider interface {
 	StartOpenAICodexACPAuthorization(ctx context.Context, redirectURI, state string) (*providers.OAuthAuthorizeResponse, string, error)
 	ExchangeOpenAICodexACPCode(ctx context.Context, redirectURI, code, codeVerifier string) (providers.OpenAICodexOAuthCredentials, error)
+	StartOpenAICodexACPDeviceAuthorization(ctx context.Context) (providers.OpenAICodexACPDeviceAuthorization, error)
+	PollOpenAICodexACPDeviceAuthorization(ctx context.Context, deviceAuthID, userCode string) (providers.OpenAICodexACPDevicePollResult, error)
+	ExchangeOpenAICodexACPDeviceCode(ctx context.Context, authorizationCode, codeVerifier string) (providers.OpenAICodexOAuthCredentials, error)
 }
 
 type ACPCodexOAuthAuthorizeResponse struct {
@@ -48,9 +54,11 @@ type ACPCodexOAuthHandler struct {
 	accountService *accounts.Service
 	acpWorkspace   acpWorkspaceConfigProvider
 	callbackURL    string
+	logger         *slog.Logger
 
-	mu     sync.Mutex
-	states map[string]acpCodexOAuthState
+	mu             sync.Mutex
+	states         map[string]acpCodexOAuthState
+	deviceSessions map[string]*acpCodexDeviceAuthSession
 }
 
 type acpCodexOAuthState struct {
@@ -67,19 +75,32 @@ func NewACPCodexOAuthHandler(provider *providers.Service, botService *bots.Servi
 		accountService: accountService,
 		acpWorkspace:   acpWorkspace,
 		callbackURL:    strings.TrimSpace(callbackURL),
+		logger:         slog.Default().With(slog.String("handler", "acp_codex_oauth")),
 		states:         map[string]acpCodexOAuthState{},
+		deviceSessions: map[string]*acpCodexDeviceAuthSession{},
 	}
 }
 
 func (h *ACPCodexOAuthHandler) Register(e *echo.Echo) {
 	e.GET("/bots/:bot_id/acp/codex/oauth/authorize", h.Authorize)
 	e.GET("/bots/:bot_id/acp/codex/oauth/status", h.Status)
+	e.POST("/bots/:bot_id/acp/codex/oauth/device/authorize", h.AuthorizeDevice)
+	e.POST("/bots/:bot_id/acp/codex/oauth/device/poll", h.PollDevice)
+	e.POST("/bots/:bot_id/acp/codex/oauth/device/cancel", h.CancelDevice)
 }
 
 func (*ACPCodexOAuthHandler) HandlesCallbackState(state string) bool {
 	return strings.HasPrefix(strings.TrimSpace(state), acpCodexOAuthStatePrefix)
 }
 
+// Authorize godoc
+// @Summary Start Codex ACP OAuth authorization
+// @Tags acp
+// @Param bot_id path string true "Bot ID"
+// @Success 200 {object} ACPCodexOAuthAuthorizeResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /bots/{bot_id}/acp/codex/oauth/authorize [get].
 func (h *ACPCodexOAuthHandler) Authorize(c echo.Context) error {
 	botID, channelIdentityID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -120,6 +141,14 @@ func (h *ACPCodexOAuthHandler) Authorize(c echo.Context) error {
 	return c.JSON(http.StatusOK, ACPCodexOAuthAuthorizeResponse{AuthURL: resp.AuthURL})
 }
 
+// Status godoc
+// @Summary Get Codex ACP OAuth status
+// @Tags acp
+// @Param bot_id path string true "Bot ID"
+// @Success 200 {object} ACPCodexOAuthStatus
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /bots/{bot_id}/acp/codex/oauth/status [get].
 func (h *ACPCodexOAuthHandler) Status(c echo.Context) error {
 	botID, _, err := h.requireBotAccess(c)
 	if err != nil {
@@ -145,11 +174,13 @@ func (h *ACPCodexOAuthHandler) Status(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusOK, status)
 	}
-	resp, err := client.ReadFile(c.Request().Context(), path.Join(acpclient.CodexManagedConfigDir, "auth.json"), 0, 0)
+	if !acpclient.IsCodexManagedOAuthConfig(c.Request().Context(), client) {
+		return c.JSON(http.StatusOK, status)
+	}
+	auth, err := acpclient.CheckCodexManagedOAuthAuth(c.Request().Context(), client)
 	if err != nil {
 		return c.JSON(http.StatusOK, status)
 	}
-	auth := parseCodexOAuthAuth(resp.GetContent())
 	status.HasToken = auth.Valid
 	status.AccountID = auth.AccountID
 	return c.JSON(http.StatusOK, status)
@@ -270,38 +301,20 @@ func (h *ACPCodexOAuthHandler) pruneExpiredLocked(now time.Time) {
 			delete(h.states, state)
 		}
 	}
-}
-
-type codexOAuthAuthStatus struct {
-	Valid     bool
-	AccountID string
-}
-
-func parseCodexOAuthAuth(content string) codexOAuthAuthStatus {
-	var auth struct {
-		AuthMode string `json:"auth_mode"`
-		Tokens   struct {
-			IDToken      string `json:"id_token"`
-			AccessToken  string `json:"access_token"`  //nolint:gosec // Codex auth status parses existing runtime token material.
-			RefreshToken string `json:"refresh_token"` //nolint:gosec // Codex auth status parses existing runtime token material.
-			AccountID    string `json:"account_id"`
-		} `json:"tokens"`
-	}
-	if err := json.Unmarshal([]byte(content), &auth); err != nil {
-		return codexOAuthAuthStatus{}
-	}
-	idToken := strings.TrimSpace(auth.Tokens.IDToken)
-	accessToken := strings.TrimSpace(auth.Tokens.AccessToken)
-	refreshToken := strings.TrimSpace(auth.Tokens.RefreshToken)
-	accountID := strings.TrimSpace(auth.Tokens.AccountID)
-	return codexOAuthAuthStatus{
-		Valid: strings.EqualFold(strings.TrimSpace(auth.AuthMode), "chatgpt") &&
-			idToken != "" &&
-			accessToken != "" &&
-			refreshToken != "" &&
-			accountID != "" &&
-			idToken != accessToken,
-		AccountID: accountID,
+	for sessionID, session := range h.deviceSessions {
+		if session == nil {
+			delete(h.deviceSessions, sessionID)
+			continue
+		}
+		if session.isTerminal() {
+			if !session.TerminalExpiresAt.IsZero() && now.After(session.TerminalExpiresAt) {
+				delete(h.deviceSessions, sessionID)
+			}
+			continue
+		}
+		if !session.ExpiresAt.IsZero() && now.After(session.ExpiresAt) {
+			expireDeviceSessionLocked(session, now)
+		}
 	}
 }
 

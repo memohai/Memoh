@@ -11,11 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/acpprofile"
-	"github.com/memohai/memoh/internal/conversation"
 	dbpkg "github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -30,11 +28,11 @@ type Session struct {
 	RouteID               string         `json:"route_id,omitempty"`
 	ChannelType           string         `json:"channel_type,omitempty"`
 	Type                  string         `json:"type"`
+	SessionMode           string         `json:"session_mode"`
+	RuntimeType           string         `json:"runtime_type"`
+	RuntimeMetadata       map[string]any `json:"runtime_metadata,omitempty"`
 	Title                 string         `json:"title"`
 	Metadata              map[string]any `json:"metadata,omitempty"`
-	DefaultHeadTurnID     string         `json:"default_head_turn_id,omitempty"`
-	ForkedFromSessionID   string         `json:"forked_from_session_id,omitempty"`
-	ForkedFromTurnID      string         `json:"forked_from_turn_id,omitempty"`
 	ParentSessionID       string         `json:"parent_session_id,omitempty"`
 	CreatedByUserID       string         `json:"created_by_user_id,omitempty"`
 	CreatedAt             time.Time      `json:"created_at"`
@@ -50,6 +48,8 @@ const (
 	TypeSubagent          = "subagent"
 	TypeDiscuss           = "discuss"
 	TypeACPAgent          = "acp_agent"
+	RuntimeModel          = "model"
+	RuntimeACPAgent       = "acp_agent"
 	DefaultACPProjectMode = "project"
 	DefaultACPProjectPath = "/data"
 )
@@ -69,13 +69,13 @@ func UserFacingSessionTypes() []string {
 }
 
 var (
-	ErrACPAgentIDRequired    = errors.New("acp_agent_id is required for acp_agent sessions")
-	ErrACPProjectPathMissing = errors.New("project_path is required for acp_agent sessions")
-	ErrACPUnknownAgent       = errors.New("unknown ACP agent")
-	ErrACPAgentNotEnabled    = errors.New("ACP agent is not enabled for this bot")
-	ErrForkSourceNotFound    = errors.New("fork source session not found")
-	ErrForkSourceNotReply    = errors.New("fork source must be an assistant reply")
-	ErrForkSourceNotChat     = errors.New("fork source must be a chat session")
+	ErrACPAgentIDRequired     = errors.New("acp_agent_id is required for acp_agent sessions")
+	ErrACPProjectPathMissing  = errors.New("project_path is required for acp_agent sessions")
+	ErrACPUnknownAgent        = errors.New("unknown ACP agent")
+	ErrACPAgentNotEnabled     = errors.New("ACP agent is not enabled for this bot")
+	ErrACPAgentNotConfigured  = errors.New("ACP agent is not configured for this bot")
+	ErrACPRuntimeOwnerMissing = errors.New("runtime_owner_account_id is required for acp_agent sessions")
+	ErrACPProjectModeInvalid  = errors.New("unknown ACP project mode")
 )
 
 func IsKnownType(typ string) bool {
@@ -93,35 +93,18 @@ func IsUserFacingType(typ string) bool {
 	return slices.Contains(userFacingSessionTypes, strings.TrimSpace(typ))
 }
 
-// SupportsTurnVariants reports whether a session type may expose multiple
-// selectable turn heads and history rewrite actions. Non-chat sessions still use
-// the turn graph as storage, but they must remain linear at the product layer.
-func SupportsTurnVariants(typ string) bool {
-	return strings.TrimSpace(typ) == TypeChat
-}
-
 // CreateInput holds input for creating a new session.
 type CreateInput struct {
-	BotID               string
-	RouteID             string
-	ChannelType         string
-	Type                string
-	Title               string
-	Metadata            map[string]any
-	DefaultHeadTurnID   string
-	ForkedFromSessionID string
-	ForkedFromTurnID    string
-	ParentSessionID     string
-	CreatedByUserID     string
-}
-
-// ForkFromAssistantInput creates a new session whose head points at the turn
-// that produced a visible assistant reply in the source session.
-type ForkFromAssistantInput struct {
 	BotID           string
-	SessionID       string
-	MessageID       string
-	BaseHeadTurnID  string
+	RouteID         string
+	ChannelType     string
+	Type            string
+	SessionMode     string
+	RuntimeType     string
+	Title           string
+	Metadata        map[string]any
+	RuntimeMetadata map[string]any
+	ParentSessionID string
 	CreatedByUserID string
 }
 
@@ -131,10 +114,6 @@ type Service struct {
 	hookService *hooks.Service
 	publisher   event.Publisher
 	logger      *slog.Logger
-}
-
-type sessionTxRunner interface {
-	RunInTx(ctx context.Context, fn func(dbstore.Queries) error) error
 }
 
 // NewService creates a session service. publisher may be nil — session
@@ -165,6 +144,11 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 	if err != nil {
 		return Session{}, fmt.Errorf("invalid route id: %w", err)
 	}
+	pgCreatedByUserID, err := parseOptionalUUID(input.CreatedByUserID)
+	if err != nil {
+		return Session{}, fmt.Errorf("invalid created by user id: %w", err)
+	}
+	runtimeOwnerUserID := strings.TrimSpace(input.CreatedByUserID)
 
 	channelType := pgtype.Text{}
 	if ct := strings.TrimSpace(input.ChannelType); ct != "" {
@@ -182,8 +166,20 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 	if !IsKnownType(sessionType) {
 		return Session{}, fmt.Errorf("unknown session type %q", sessionType)
 	}
-	if sessionType == TypeACPAgent {
+	desc, err := normalizeDescriptor(sessionType, input.SessionMode, input.RuntimeType, meta, input.RuntimeMetadata)
+	if err != nil {
+		return Session{}, err
+	}
+	sessionType = desc.LegacyType
+	meta = desc.Metadata
+	runtimeMeta := desc.RuntimeMetadata
+	if desc.RuntimeType == RuntimeACPAgent {
 		meta = ApplyACPMetadataDefaults(meta)
+		runtimeMeta = ApplyACPMetadataDefaults(runtimeMeta)
+		meta = setACPRuntimeOwner(meta, runtimeOwnerUserID)
+		runtimeMeta = setACPRuntimeOwner(runtimeMeta, runtimeOwnerUserID)
+		meta = mergeACPMetadata(meta, runtimeMeta)
+		runtimeMeta = mergeACPMetadata(runtimeMeta, meta)
 		if err := validateACPMetadata(meta); err != nil {
 			return Session{}, err
 		}
@@ -195,166 +191,36 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 	if err != nil {
 		return Session{}, fmt.Errorf("marshal metadata: %w", err)
 	}
+	runtimeMetaBytes, err := json.Marshal(nonNilMap(runtimeMeta))
+	if err != nil {
+		return Session{}, fmt.Errorf("marshal runtime metadata: %w", err)
+	}
 
 	pgParentSessionID, err := parseOptionalUUID(input.ParentSessionID)
 	if err != nil {
 		return Session{}, fmt.Errorf("invalid parent session id: %w", err)
 	}
-	pgCreatedByUserID, err := parseOptionalUUID(input.CreatedByUserID)
-	if err != nil {
-		return Session{}, fmt.Errorf("invalid created by user id: %w", err)
-	}
-	pgDefaultHeadTurnID, err := parseOptionalUUID(input.DefaultHeadTurnID)
-	if err != nil {
-		return Session{}, fmt.Errorf("invalid default head turn id: %w", err)
-	}
-	pgForkedFromSessionID, err := parseOptionalUUID(input.ForkedFromSessionID)
-	if err != nil {
-		return Session{}, fmt.Errorf("invalid forked from session id: %w", err)
-	}
-	pgForkedFromTurnID, err := parseOptionalUUID(input.ForkedFromTurnID)
-	if err != nil {
-		return Session{}, fmt.Errorf("invalid forked from turn id: %w", err)
-	}
 
-	createParams := sqlc.CreateSessionParams{
-		BotID:               pgBotID,
-		RouteID:             pgRouteID,
-		ChannelType:         channelType,
-		Type:                sessionType,
-		Title:               input.Title,
-		Metadata:            metaBytes,
-		DefaultHeadTurnID:   pgDefaultHeadTurnID,
-		ForkedFromSessionID: pgForkedFromSessionID,
-		ForkedFromTurnID:    pgForkedFromTurnID,
-		ParentSessionID:     pgParentSessionID,
-		CreatedByUserID:     pgCreatedByUserID,
-	}
-
-	create := func(queries dbstore.Queries) (sqlc.BotSession, error) {
-		row, err := queries.CreateSession(ctx, createParams)
-		if err != nil {
-			return sqlc.BotSession{}, err
-		}
-		if pgDefaultHeadTurnID.Valid {
-			if _, err := queries.CreateSessionTurnHead(ctx, sqlc.CreateSessionTurnHeadParams{
-				SessionID:  row.ID,
-				HeadTurnID: pgDefaultHeadTurnID,
-			}); err != nil {
-				return sqlc.BotSession{}, fmt.Errorf("create session turn head: %w", err)
-			}
-		}
-		return row, nil
-	}
-
-	var row sqlc.BotSession
-	if runner, ok := s.queries.(sessionTxRunner); ok && runner != nil {
-		if err := runner.RunInTx(ctx, func(queries dbstore.Queries) error {
-			created, err := create(queries)
-			if err != nil {
-				return err
-			}
-			row = created
-			return nil
-		}); err != nil {
-			return Session{}, err
-		}
-	} else {
-		var err error
-		row, err = create(s.queries)
-		if err != nil {
-			return Session{}, err
-		}
+	row, err := s.queries.CreateSession(ctx, sqlc.CreateSessionParams{
+		BotID:           pgBotID,
+		RouteID:         pgRouteID,
+		ChannelType:     channelType,
+		Type:            sessionType,
+		SessionMode:     desc.SessionMode,
+		RuntimeType:     desc.RuntimeType,
+		RuntimeMetadata: runtimeMetaBytes,
+		Title:           input.Title,
+		Metadata:        metaBytes,
+		ParentSessionID: pgParentSessionID,
+		CreatedByUserID: pgCreatedByUserID,
+	})
+	if err != nil {
+		return Session{}, err
 	}
 	sess := toSession(row)
 	s.publishSessionCreated(sess)
 	s.runSessionStartHook(context.WithoutCancel(ctx), sess)
 	return sess, nil
-}
-
-func (s *Service) ForkFromAssistantMessage(ctx context.Context, input ForkFromAssistantInput) (Session, error) {
-	pgBotID, err := dbpkg.ParseUUID(input.BotID)
-	if err != nil {
-		return Session{}, fmt.Errorf("invalid bot id: %w", err)
-	}
-	pgSessionID, err := dbpkg.ParseUUID(input.SessionID)
-	if err != nil {
-		return Session{}, fmt.Errorf("invalid session id: %w", err)
-	}
-	pgMessageID, err := dbpkg.ParseUUID(input.MessageID)
-	if err != nil {
-		return Session{}, fmt.Errorf("invalid message id: %w", err)
-	}
-	pgBaseHeadTurnID, err := parseOptionalUUID(input.BaseHeadTurnID)
-	if err != nil {
-		return Session{}, fmt.Errorf("invalid base head turn id: %w", err)
-	}
-
-	sourceRow, err := s.queries.GetSessionByID(ctx, pgSessionID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Session{}, ErrForkSourceNotFound
-		}
-		return Session{}, err
-	}
-	source := toSession(sourceRow)
-	if source.BotID != pgBotID.String() {
-		return Session{}, ErrForkSourceNotFound
-	}
-	if source.Type != TypeChat {
-		return Session{}, ErrForkSourceNotChat
-	}
-	if !pgBaseHeadTurnID.Valid {
-		pgBaseHeadTurnID = sourceRow.DefaultHeadTurnID
-	}
-	if !pgBaseHeadTurnID.Valid {
-		return Session{}, ErrForkSourceNotReply
-	}
-
-	anchor, err := s.resolveForkTurnAnchor(ctx, pgSessionID, pgBaseHeadTurnID, pgMessageID)
-	if err != nil {
-		return Session{}, err
-	}
-
-	title := strings.TrimSpace(source.Title)
-	if title == "" {
-		title = "Untitled"
-	}
-	return s.Create(ctx, CreateInput{
-		BotID:               source.BotID,
-		ChannelType:         source.ChannelType,
-		Type:                TypeChat,
-		Title:               title + " fork",
-		Metadata:            cloneMetadata(source.Metadata),
-		DefaultHeadTurnID:   anchor.TurnID,
-		ForkedFromSessionID: source.ID,
-		ForkedFromTurnID:    anchor.TurnID,
-		CreatedByUserID:     input.CreatedByUserID,
-	})
-}
-
-func (s *Service) resolveForkTurnAnchor(ctx context.Context, sessionID, baseHeadTurnID, messageID pgtype.UUID) (conversation.TurnAnchor, error) {
-	turn, err := s.queries.GetVisibleAssistantMessageTurnForFork(ctx, sqlc.GetVisibleAssistantMessageTurnForForkParams{
-		MessageID:      messageID,
-		BaseHeadTurnID: baseHeadTurnID,
-		SessionID:      sessionID,
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return conversation.TurnAnchor{}, ErrForkSourceNotReply
-		}
-		return conversation.TurnAnchor{}, err
-	}
-	if !turn.TurnID.Valid {
-		return conversation.TurnAnchor{}, ErrForkSourceNotReply
-	}
-	return conversation.TurnAnchor{
-		Role:           conversation.TurnAnchorRoleAssistant,
-		MessageID:      turn.MessageID.String(),
-		TurnID:         turn.TurnID.String(),
-		ParentTurnID:   uuidString(turn.ParentTurnID),
-		BaseHeadTurnID: baseHeadTurnID.String(),
-	}, nil
 }
 
 // publishSessionCreated emits a session_created event for the new session.
@@ -411,6 +277,28 @@ func (s *Service) runSessionStartHook(ctx context.Context, sess Session) {
 // UpdateTypeAndMetadata updates a session's runtime type and metadata in one
 // statement so callers don't expose a half-updated agent selection.
 func (s *Service) UpdateTypeAndMetadata(ctx context.Context, sessionID, typ string, metadata map[string]any) (Session, error) {
+	return s.updateTypeAndMetadata(ctx, sessionID, typ, metadata, "")
+}
+
+// UpdateTypeAndMetadataWithOwner updates a session descriptor and binds any
+// ACP runtime ownership to a server-confirmed account id. The metadata owner
+// field is never trusted from callers.
+func (s *Service) UpdateTypeAndMetadataWithOwner(ctx context.Context, sessionID, typ string, metadata map[string]any, runtimeOwnerUserID string) (Session, error) {
+	return s.updateTypeAndMetadata(ctx, sessionID, typ, metadata, strings.TrimSpace(runtimeOwnerUserID))
+}
+
+func (s *Service) updateTypeAndMetadata(ctx context.Context, sessionID, typ string, metadata map[string]any, runtimeOwnerUserID string) (Session, error) {
+	return s.updateDescriptorAndMetadata(ctx, sessionID, typ, "", "", metadata, nil, strings.TrimSpace(runtimeOwnerUserID))
+}
+
+// UpdateDescriptorAndMetadataWithOwner updates the session mode/runtime
+// descriptor directly. Callers that only patch metadata for a Phase 3 session
+// must pass the existing descriptor so discuss+ACP sessions keep their runtime.
+func (s *Service) UpdateDescriptorAndMetadataWithOwner(ctx context.Context, sessionID, typ, sessionMode, runtimeType string, metadata, runtimeMetadata map[string]any, runtimeOwnerUserID string) (Session, error) {
+	return s.updateDescriptorAndMetadata(ctx, sessionID, typ, sessionMode, runtimeType, metadata, runtimeMetadata, strings.TrimSpace(runtimeOwnerUserID))
+}
+
+func (s *Service) updateDescriptorAndMetadata(ctx context.Context, sessionID, typ, sessionMode, runtimeType string, metadata, runtimeMetadata map[string]any, runtimeOwnerUserID string) (Session, error) {
 	pgID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
 		return Session{}, fmt.Errorf("invalid session id: %w", err)
@@ -429,8 +317,37 @@ func (s *Service) UpdateTypeAndMetadata(ctx context.Context, sessionID, typ stri
 	if err != nil {
 		return Session{}, err
 	}
-	if sessionType == TypeACPAgent {
+	existingRuntimeMeta := parseJSONMap(existing.RuntimeMetadata)
+	existingMeta := parseJSONMap(existing.Metadata)
+	if normalizeRuntimeType(existing.RuntimeType, existing.Type) == RuntimeACPAgent {
+		existingRuntimeOwnerUserID := metadataString(existingRuntimeMeta, "runtime_owner_account_id")
+		if existingRuntimeOwnerUserID == "" {
+			existingRuntimeOwnerUserID = metadataString(existingMeta, "runtime_owner_account_id")
+		}
+		if existingRuntimeOwnerUserID != "" {
+			runtimeOwnerUserID = existingRuntimeOwnerUserID
+		}
+	}
+	if runtimeMetadata == nil {
+		runtimeMetadata = existingRuntimeMeta
+	}
+	desc, err := normalizeDescriptor(sessionType, sessionMode, runtimeType, metadata, runtimeMetadata)
+	if err != nil {
+		return Session{}, err
+	}
+	sessionType = desc.LegacyType
+	metadata = desc.Metadata
+	runtimeMeta := desc.RuntimeMetadata
+	if desc.RuntimeType != RuntimeACPAgent {
+		runtimeMeta = map[string]any{}
+	}
+	if desc.RuntimeType == RuntimeACPAgent {
 		metadata = ApplyACPMetadataDefaults(metadata)
+		runtimeMeta = ApplyACPMetadataDefaults(runtimeMeta)
+		metadata = setACPRuntimeOwner(metadata, runtimeOwnerUserID)
+		runtimeMeta = setACPRuntimeOwner(runtimeMeta, runtimeOwnerUserID)
+		metadata = mergeACPMetadata(metadata, runtimeMeta)
+		runtimeMeta = mergeACPMetadata(runtimeMeta, metadata)
 		if err := validateACPMetadata(metadata); err != nil {
 			return Session{}, err
 		}
@@ -442,10 +359,17 @@ func (s *Service) UpdateTypeAndMetadata(ctx context.Context, sessionID, typ stri
 	if err != nil {
 		return Session{}, fmt.Errorf("marshal metadata: %w", err)
 	}
+	runtimeMetaBytes, err := json.Marshal(nonNilMap(runtimeMeta))
+	if err != nil {
+		return Session{}, fmt.Errorf("marshal runtime metadata: %w", err)
+	}
 	row, err := s.queries.UpdateSessionTypeAndMetadata(ctx, sqlc.UpdateSessionTypeAndMetadataParams{
-		ID:       pgID,
-		Type:     sessionType,
-		Metadata: metaBytes,
+		ID:              pgID,
+		Type:            sessionType,
+		SessionMode:     desc.SessionMode,
+		RuntimeType:     desc.RuntimeType,
+		RuntimeMetadata: runtimeMetaBytes,
+		Metadata:        metaBytes,
 	})
 	if err != nil {
 		return Session{}, err
@@ -753,66 +677,7 @@ func (s *Service) SoftDelete(ctx context.Context, sessionID string) error {
 	if err != nil {
 		return fmt.Errorf("invalid session id: %w", err)
 	}
-	deleteSession := func(queries dbstore.Queries) error {
-		if err := queries.SoftDeleteSession(ctx, pgID); err != nil {
-			return err
-		}
-		return s.cleanupDeletedSessionTurns(ctx, queries, pgID)
-	}
-	if runner, ok := s.queries.(sessionTxRunner); ok && runner != nil {
-		return runner.RunInTx(ctx, deleteSession)
-	}
-	return deleteSession(s.queries)
-}
-
-type sessionTurnCleanupQueries interface {
-	DeleteSessionTurnHeads(context.Context, pgtype.UUID) error
-	ListSessionOwnedTurnsForCleanup(context.Context, pgtype.UUID) ([]sqlc.BotHistoryTurn, error)
-	ListOtherActiveSessionVisibleTurnIDs(context.Context, pgtype.UUID) ([]pgtype.UUID, error)
-	DeleteMessagesByTurnID(context.Context, pgtype.UUID) error
-	DeleteHistoryTurnByID(context.Context, pgtype.UUID) error
-}
-
-func (*Service) cleanupDeletedSessionTurns(ctx context.Context, rawQueries dbstore.Queries, sessionID pgtype.UUID) error {
-	queries, ok := rawQueries.(sessionTurnCleanupQueries)
-	if !ok {
-		return nil
-	}
-	candidates, err := queries.ListSessionOwnedTurnsForCleanup(ctx, sessionID)
-	if err != nil {
-		return fmt.Errorf("list owned history turns for deleted session: %w", err)
-	}
-	if err := queries.DeleteSessionTurnHeads(ctx, sessionID); err != nil {
-		return fmt.Errorf("delete session turn heads: %w", err)
-	}
-	if len(candidates) == 0 {
-		return nil
-	}
-	sharedRows, err := queries.ListOtherActiveSessionVisibleTurnIDs(ctx, sessionID)
-	if err != nil {
-		return fmt.Errorf("list shared history turns for deleted session: %w", err)
-	}
-	shared := make(map[pgtype.UUID]struct{}, len(sharedRows))
-	for _, id := range sharedRows {
-		if id.Valid {
-			shared[id] = struct{}{}
-		}
-	}
-	for _, turn := range candidates {
-		if !turn.ID.Valid {
-			continue
-		}
-		if _, ok := shared[turn.ID]; ok {
-			continue
-		}
-		if err := queries.DeleteMessagesByTurnID(ctx, turn.ID); err != nil {
-			return fmt.Errorf("delete messages for session history turn %s: %w", turn.ID.String(), err)
-		}
-		if err := queries.DeleteHistoryTurnByID(ctx, turn.ID); err != nil {
-			return fmt.Errorf("delete session history turn %s: %w", turn.ID.String(), err)
-		}
-	}
-	return nil
+	return s.queries.SoftDeleteSession(ctx, pgID)
 }
 
 func (s *Service) MessageCount(ctx context.Context, sessionID string) (int64, error) {
@@ -855,17 +720,27 @@ func (s *Service) CreateNewSession(ctx context.Context, botID, routeID, channelT
 	if strings.TrimSpace(sessionType) == "" {
 		sessionType = TypeChat
 	}
-	sess, err := s.Create(ctx, CreateInput{
+	return s.CreateNewSessionWithInput(ctx, CreateInput{
 		BotID:       botID,
 		RouteID:     routeID,
 		ChannelType: channelType,
 		Type:        sessionType,
 	})
+}
+
+// CreateNewSessionWithInput creates a fresh active route session from a full
+// CreateInput. The route and bot identity are taken from input, so callers can
+// pass ACP metadata and descriptor fields without overloading the legacy type.
+func (s *Service) CreateNewSessionWithInput(ctx context.Context, input CreateInput) (Session, error) {
+	if strings.TrimSpace(input.Type) == "" {
+		input.Type = TypeChat
+	}
+	sess, err := s.Create(ctx, input)
 	if err != nil {
 		return Session{}, fmt.Errorf("create new session: %w", err)
 	}
 
-	if err := s.SetRouteActiveSession(ctx, routeID, sess.ID); err != nil {
+	if err := s.SetRouteActiveSession(ctx, input.RouteID, sess.ID); err != nil {
 		s.logger.Warn("failed to set active session on route", slog.Any("error", err))
 	}
 	return sess, nil
@@ -894,18 +769,6 @@ func (s *Service) EnsureActiveSession(ctx context.Context, botID, routeID, chann
 }
 
 func toSession(row sqlc.BotSession) Session {
-	defaultHeadTurnID := ""
-	if row.DefaultHeadTurnID.Valid {
-		defaultHeadTurnID = row.DefaultHeadTurnID.String()
-	}
-	forkedFromSessionID := ""
-	if row.ForkedFromSessionID.Valid {
-		forkedFromSessionID = row.ForkedFromSessionID.String()
-	}
-	forkedFromTurnID := ""
-	if row.ForkedFromTurnID.Valid {
-		forkedFromTurnID = row.ForkedFromTurnID.String()
-	}
 	parentID := ""
 	if row.ParentSessionID.Valid {
 		parentID = row.ParentSessionID.String()
@@ -915,20 +778,20 @@ func toSession(row sqlc.BotSession) Session {
 		createdByUserID = row.CreatedByUserID.String()
 	}
 	return Session{
-		ID:                  row.ID.String(),
-		BotID:               row.BotID.String(),
-		RouteID:             row.RouteID.String(),
-		ChannelType:         dbpkg.TextToString(row.ChannelType),
-		Type:                row.Type,
-		Title:               row.Title,
-		Metadata:            parseJSONMap(row.Metadata),
-		DefaultHeadTurnID:   defaultHeadTurnID,
-		ForkedFromSessionID: forkedFromSessionID,
-		ForkedFromTurnID:    forkedFromTurnID,
-		ParentSessionID:     parentID,
-		CreatedByUserID:     createdByUserID,
-		CreatedAt:           row.CreatedAt.Time,
-		UpdatedAt:           row.UpdatedAt.Time,
+		ID:              row.ID.String(),
+		BotID:           row.BotID.String(),
+		RouteID:         row.RouteID.String(),
+		ChannelType:     dbpkg.TextToString(row.ChannelType),
+		Type:            row.Type,
+		SessionMode:     normalizeSessionMode(row.SessionMode, row.Type),
+		RuntimeType:     normalizeRuntimeType(row.RuntimeType, row.Type),
+		RuntimeMetadata: parseJSONMap(row.RuntimeMetadata),
+		Title:           row.Title,
+		Metadata:        parseJSONMap(row.Metadata),
+		ParentSessionID: parentID,
+		CreatedByUserID: createdByUserID,
+		CreatedAt:       row.CreatedAt.Time,
+		UpdatedAt:       row.UpdatedAt.Time,
 	}
 }
 
@@ -938,6 +801,14 @@ func validateACPMetadata(meta map[string]any) error {
 	}
 	if strings.TrimSpace(metadataString(meta, "project_path")) == "" {
 		return ErrACPProjectPathMissing
+	}
+	if strings.TrimSpace(metadataString(meta, "runtime_owner_account_id")) == "" {
+		return ErrACPRuntimeOwnerMissing
+	}
+	switch strings.TrimSpace(metadataString(meta, "acp_project_mode")) {
+	case "", DefaultACPProjectMode, "none":
+	default:
+		return fmt.Errorf("%w %q", ErrACPProjectModeInvalid, metadataString(meta, "acp_project_mode"))
 	}
 	return nil
 }
@@ -957,9 +828,183 @@ func ApplyACPMetadataDefaults(meta map[string]any) map[string]any {
 	return out
 }
 
+type descriptor struct {
+	LegacyType      string
+	SessionMode     string
+	RuntimeType     string
+	Metadata        map[string]any
+	RuntimeMetadata map[string]any
+}
+
+// ResolveDescriptor returns the normalized compatibility type plus split
+// session-mode/runtime descriptor without applying metadata side effects.
+func ResolveDescriptor(legacyType, sessionMode, runtimeType string) (string, string, string, error) {
+	// Reject a contradictory request body up front: the legacy acp_agent type
+	// unambiguously means an ACP runtime, so an explicit non-ACP runtime_type
+	// alongside it must fail loudly rather than silently degrade to a plain
+	// model chat session.
+	if rt := strings.TrimSpace(runtimeType); strings.TrimSpace(legacyType) == TypeACPAgent && rt != "" && rt != RuntimeACPAgent {
+		return "", "", "", fmt.Errorf("session type %q conflicts with runtime_type %q", TypeACPAgent, rt)
+	}
+	desc, err := normalizeDescriptor(legacyType, sessionMode, runtimeType, nil, nil)
+	if err != nil {
+		return "", "", "", err
+	}
+	return desc.LegacyType, desc.SessionMode, desc.RuntimeType, nil
+}
+
+func normalizeDescriptor(legacyType, sessionMode, runtimeType string, metadata, runtimeMetadata map[string]any) (descriptor, error) {
+	legacyType = strings.TrimSpace(legacyType)
+	sessionMode = strings.TrimSpace(sessionMode)
+	runtimeType = strings.TrimSpace(runtimeType)
+	if legacyType == "" {
+		legacyType = TypeChat
+	}
+	if sessionMode == "" || runtimeType == "" {
+		derivedMode, derivedRuntime := descriptorFromLegacyType(legacyType)
+		if sessionMode == "" {
+			sessionMode = derivedMode
+		}
+		if runtimeType == "" {
+			runtimeType = derivedRuntime
+		}
+	}
+	if !IsKnownSessionMode(sessionMode) {
+		return descriptor{}, fmt.Errorf("unknown session mode %q", sessionMode)
+	}
+	if !IsKnownRuntimeType(runtimeType) {
+		return descriptor{}, fmt.Errorf("unknown runtime type %q", runtimeType)
+	}
+	if runtimeType == RuntimeACPAgent && sessionMode != TypeChat && sessionMode != TypeDiscuss {
+		return descriptor{}, fmt.Errorf("runtime type %q is only supported for %s or %s session modes", RuntimeACPAgent, TypeChat, TypeDiscuss)
+	}
+	out := descriptor{
+		LegacyType:      legacyTypeForDescriptor(sessionMode, runtimeType),
+		SessionMode:     sessionMode,
+		RuntimeType:     runtimeType,
+		Metadata:        nonNilMap(metadata),
+		RuntimeMetadata: nonNilMap(runtimeMetadata),
+	}
+	if runtimeType == RuntimeACPAgent {
+		out.RuntimeMetadata = mergeACPMetadata(out.RuntimeMetadata, out.Metadata)
+		out.Metadata = mergeACPMetadata(out.Metadata, out.RuntimeMetadata)
+	}
+	return out, nil
+}
+
+func descriptorFromLegacyType(typ string) (string, string) {
+	switch strings.TrimSpace(typ) {
+	case TypeACPAgent:
+		return TypeChat, RuntimeACPAgent
+	case TypeDiscuss:
+		return TypeDiscuss, RuntimeModel
+	case TypeHeartbeat:
+		return TypeHeartbeat, RuntimeModel
+	case TypeSchedule:
+		return TypeSchedule, RuntimeModel
+	case TypeSubagent:
+		return TypeSubagent, RuntimeModel
+	default:
+		return TypeChat, RuntimeModel
+	}
+}
+
+// DescriptorFromLegacyType maps the legacy single type column to the split
+// session mode/runtime descriptor used by new code paths.
+func DescriptorFromLegacyType(typ string) (string, string) {
+	return descriptorFromLegacyType(typ)
+}
+
+func legacyTypeForDescriptor(sessionMode, runtimeType string) string {
+	if runtimeType == RuntimeACPAgent && sessionMode == TypeChat {
+		return TypeACPAgent
+	}
+	return sessionMode
+}
+
+// LegacyTypeForDescriptor returns the compatibility type value for a split
+// session descriptor.
+func LegacyTypeForDescriptor(sessionMode, runtimeType string) string {
+	return legacyTypeForDescriptor(sessionMode, runtimeType)
+}
+
+func IsKnownSessionMode(mode string) bool {
+	switch strings.TrimSpace(mode) {
+	case TypeChat, TypeDiscuss, TypeHeartbeat, TypeSchedule, TypeSubagent:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsKnownRuntimeType(runtimeType string) bool {
+	switch strings.TrimSpace(runtimeType) {
+	case RuntimeModel, RuntimeACPAgent:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsACPRuntime reports whether a session is backed by an ACP runtime. It keeps
+// legacy chat ACP sessions (`type=acp_agent`) working while allowing newer
+// descriptors such as `session_mode=discuss` + `runtime_type=acp_agent`.
+func IsACPRuntime(sess Session) bool {
+	return normalizeRuntimeType(sess.RuntimeType, sess.Type) == RuntimeACPAgent
+}
+
+func normalizeSessionMode(mode, legacyType string) string {
+	if IsKnownSessionMode(mode) {
+		return strings.TrimSpace(mode)
+	}
+	derived, _ := descriptorFromLegacyType(legacyType)
+	return derived
+}
+
+func normalizeRuntimeType(runtimeType, legacyType string) string {
+	if IsKnownRuntimeType(runtimeType) {
+		return strings.TrimSpace(runtimeType)
+	}
+	_, derived := descriptorFromLegacyType(legacyType)
+	return derived
+}
+
+func mergeACPMetadata(base, overlay map[string]any) map[string]any {
+	out := nonNilMap(base)
+	for _, key := range []string{"acp_agent_id", "project_path", "acp_project_mode", "runtime_owner_account_id"} {
+		if value, ok := overlay[key]; ok {
+			out[key] = value
+		}
+	}
+	return out
+}
+
+func setACPRuntimeOwner(metadata map[string]any, ownerUserID string) map[string]any {
+	out := nonNilMap(metadata)
+	ownerUserID = strings.TrimSpace(ownerUserID)
+	if ownerUserID == "" {
+		delete(out, "runtime_owner_account_id")
+		return out
+	}
+	out["runtime_owner_account_id"] = ownerUserID
+	return out
+}
+
+func nonNilMap(in map[string]any) map[string]any {
+	if in == nil {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
 func (s *Service) validateACPCreatePolicy(ctx context.Context, botID pgtype.UUID, meta map[string]any) error {
 	agentID := metadataString(meta, "acp_agent_id")
-	if _, ok := acpprofile.Lookup(agentID); !ok {
+	profile, ok := acpprofile.Lookup(agentID)
+	if !ok {
 		return fmt.Errorf("%w: %s", ErrACPUnknownAgent, agentID)
 	}
 	bot, err := s.queries.GetBotByID(ctx, botID)
@@ -967,8 +1012,12 @@ func (s *Service) validateACPCreatePolicy(ctx context.Context, botID pgtype.UUID
 		return err
 	}
 	botMeta := parseJSONMap(bot.Metadata)
-	if !acpprofile.MetadataAgentEnabled(botMeta, agentID) {
+	setup := acpprofile.ParseAgentSetup(botMeta, agentID)
+	if !setup.Enabled {
 		return fmt.Errorf("%w: %s", ErrACPAgentNotEnabled, agentID)
+	}
+	if field, missing := acpprofile.MissingRequiredManagedFieldForPreflight(profile, setup); missing {
+		return fmt.Errorf("%w: %s missing %s", ErrACPAgentNotConfigured, agentID, field.ID)
 	}
 	return nil
 }
@@ -979,17 +1028,6 @@ func metadataString(meta map[string]any, key string) string {
 	}
 	value, _ := meta[key].(string)
 	return strings.TrimSpace(value)
-}
-
-func cloneMetadata(meta map[string]any) map[string]any {
-	if len(meta) == 0 {
-		return nil
-	}
-	out := make(map[string]any, len(meta))
-	for key, value := range meta {
-		out[key] = value
-	}
-	return out
 }
 
 func parseOptionalUUID(id string) (pgtype.UUID, error) {
@@ -1009,18 +1047,6 @@ func parseJSONMap(data []byte) map[string]any {
 }
 
 func toSessionFromListRow(row sqlc.ListSessionsByBotRow) Session {
-	defaultHeadTurnID := ""
-	if row.DefaultHeadTurnID.Valid {
-		defaultHeadTurnID = row.DefaultHeadTurnID.String()
-	}
-	forkedFromSessionID := ""
-	if row.ForkedFromSessionID.Valid {
-		forkedFromSessionID = row.ForkedFromSessionID.String()
-	}
-	forkedFromTurnID := ""
-	if row.ForkedFromTurnID.Valid {
-		forkedFromTurnID = row.ForkedFromTurnID.String()
-	}
 	parentID := ""
 	if row.ParentSessionID.Valid {
 		parentID = row.ParentSessionID.String()
@@ -1035,11 +1061,11 @@ func toSessionFromListRow(row sqlc.ListSessionsByBotRow) Session {
 		RouteID:               row.RouteID.String(),
 		ChannelType:           dbpkg.TextToString(row.ChannelType),
 		Type:                  row.Type,
+		SessionMode:           normalizeSessionMode(row.SessionMode, row.Type),
+		RuntimeType:           normalizeRuntimeType(row.RuntimeType, row.Type),
+		RuntimeMetadata:       parseJSONMap(row.RuntimeMetadata),
 		Title:                 row.Title,
 		Metadata:              parseJSONMap(row.Metadata),
-		DefaultHeadTurnID:     defaultHeadTurnID,
-		ForkedFromSessionID:   forkedFromSessionID,
-		ForkedFromTurnID:      forkedFromTurnID,
 		ParentSessionID:       parentID,
 		CreatedByUserID:       createdByUserID,
 		CreatedAt:             row.CreatedAt.Time,
@@ -1050,18 +1076,6 @@ func toSessionFromListRow(row sqlc.ListSessionsByBotRow) Session {
 }
 
 func toSessionFromUserListRow(row sqlc.ListSessionsByBotAndCreatedByUserRow) Session {
-	defaultHeadTurnID := ""
-	if row.DefaultHeadTurnID.Valid {
-		defaultHeadTurnID = row.DefaultHeadTurnID.String()
-	}
-	forkedFromSessionID := ""
-	if row.ForkedFromSessionID.Valid {
-		forkedFromSessionID = row.ForkedFromSessionID.String()
-	}
-	forkedFromTurnID := ""
-	if row.ForkedFromTurnID.Valid {
-		forkedFromTurnID = row.ForkedFromTurnID.String()
-	}
 	parentID := ""
 	if row.ParentSessionID.Valid {
 		parentID = row.ParentSessionID.String()
@@ -1076,11 +1090,11 @@ func toSessionFromUserListRow(row sqlc.ListSessionsByBotAndCreatedByUserRow) Ses
 		RouteID:               row.RouteID.String(),
 		ChannelType:           dbpkg.TextToString(row.ChannelType),
 		Type:                  row.Type,
+		SessionMode:           normalizeSessionMode(row.SessionMode, row.Type),
+		RuntimeType:           normalizeRuntimeType(row.RuntimeType, row.Type),
+		RuntimeMetadata:       parseJSONMap(row.RuntimeMetadata),
 		Title:                 row.Title,
 		Metadata:              parseJSONMap(row.Metadata),
-		DefaultHeadTurnID:     defaultHeadTurnID,
-		ForkedFromSessionID:   forkedFromSessionID,
-		ForkedFromTurnID:      forkedFromTurnID,
 		ParentSessionID:       parentID,
 		CreatedByUserID:       createdByUserID,
 		CreatedAt:             row.CreatedAt.Time,
@@ -1093,8 +1107,8 @@ func toSessionFromUserListRow(row sqlc.ListSessionsByBotAndCreatedByUserRow) Ses
 func toSessionFromPagedRow(row sqlc.ListSessionsByBotPagedRow) Session {
 	return sessionFromPagedColumns(pagedColumns{
 		ID: row.ID, BotID: row.BotID, RouteID: row.RouteID, ChannelType: row.ChannelType,
-		Type: row.Type, Title: row.Title, Metadata: row.Metadata,
-		DefaultHeadTurnID: row.DefaultHeadTurnID, ForkedFromSessionID: row.ForkedFromSessionID, ForkedFromTurnID: row.ForkedFromTurnID,
+		Type: row.Type, SessionMode: row.SessionMode, RuntimeType: row.RuntimeType, RuntimeMetadata: row.RuntimeMetadata,
+		Title: row.Title, Metadata: row.Metadata,
 		ParentSessionID: row.ParentSessionID, CreatedByUserID: row.CreatedByUserID,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 		RouteMetadata: row.RouteMetadata, RouteConversationType: row.RouteConversationType,
@@ -1104,8 +1118,8 @@ func toSessionFromPagedRow(row sqlc.ListSessionsByBotPagedRow) Session {
 func toSessionFromUserPagedRow(row sqlc.ListSessionsByBotAndCreatedByUserPagedRow) Session {
 	return sessionFromPagedColumns(pagedColumns{
 		ID: row.ID, BotID: row.BotID, RouteID: row.RouteID, ChannelType: row.ChannelType,
-		Type: row.Type, Title: row.Title, Metadata: row.Metadata,
-		DefaultHeadTurnID: row.DefaultHeadTurnID, ForkedFromSessionID: row.ForkedFromSessionID, ForkedFromTurnID: row.ForkedFromTurnID,
+		Type: row.Type, SessionMode: row.SessionMode, RuntimeType: row.RuntimeType, RuntimeMetadata: row.RuntimeMetadata,
+		Title: row.Title, Metadata: row.Metadata,
 		ParentSessionID: row.ParentSessionID, CreatedByUserID: row.CreatedByUserID,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 		RouteMetadata: row.RouteMetadata, RouteConversationType: row.RouteConversationType,
@@ -1122,6 +1136,9 @@ type pagedColumns struct {
 	RouteID               pgtype.UUID
 	ChannelType           pgtype.Text
 	Type                  string
+	SessionMode           string
+	RuntimeType           string
+	RuntimeMetadata       []byte
 	Title                 string
 	Metadata              []byte
 	ParentSessionID       pgtype.UUID
@@ -1130,9 +1147,6 @@ type pagedColumns struct {
 	UpdatedAt             pgtype.Timestamptz
 	RouteMetadata         []byte
 	RouteConversationType pgtype.Text
-	DefaultHeadTurnID     pgtype.UUID
-	ForkedFromSessionID   pgtype.UUID
-	ForkedFromTurnID      pgtype.UUID
 }
 
 func sessionFromPagedColumns(c pagedColumns) Session {
@@ -1150,11 +1164,11 @@ func sessionFromPagedColumns(c pagedColumns) Session {
 		RouteID:               c.RouteID.String(),
 		ChannelType:           dbpkg.TextToString(c.ChannelType),
 		Type:                  c.Type,
+		SessionMode:           normalizeSessionMode(c.SessionMode, c.Type),
+		RuntimeType:           normalizeRuntimeType(c.RuntimeType, c.Type),
+		RuntimeMetadata:       parseJSONMap(c.RuntimeMetadata),
 		Title:                 c.Title,
 		Metadata:              parseJSONMap(c.Metadata),
-		DefaultHeadTurnID:     uuidString(c.DefaultHeadTurnID),
-		ForkedFromSessionID:   uuidString(c.ForkedFromSessionID),
-		ForkedFromTurnID:      uuidString(c.ForkedFromTurnID),
 		ParentSessionID:       parentID,
 		CreatedByUserID:       createdByUserID,
 		CreatedAt:             c.CreatedAt.Time,
@@ -1162,11 +1176,4 @@ func sessionFromPagedColumns(c pagedColumns) Session {
 		RouteMetadata:         parseJSONMap(c.RouteMetadata),
 		RouteConversationType: dbpkg.TextToString(c.RouteConversationType),
 	}
-}
-
-func uuidString(id pgtype.UUID) string {
-	if !id.Valid {
-		return ""
-	}
-	return id.String()
 }

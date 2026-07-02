@@ -10,11 +10,13 @@ import (
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
-// stubMessageService fakes the DB ordering (DESC newest-first) that
-// ListBeforeBySession / ListLatestBySession return in production, so the
-// handler's reverse logic is exercised against the real wire shape rather than
-// a hand-constructed ASC slice. It embeds the interface so the other (unused)
-// methods satisfy the interface without boilerplate; calling them panics.
+// stubMessageService mirrors the production ordering contract of the message
+// service: ListLatestBySession returns DESC (newest-first, as the DB rows come
+// back), while ListBeforeBySession returns ASC (oldest-first, because its
+// converter reverses the DESC rows). Tests exercise the handler against this
+// real wire shape rather than a hand-constructed slice. It embeds the interface
+// so the other (unused) methods satisfy it without boilerplate; calling them
+// panics.
 type stubMessageService struct {
 	messagepkg.Service
 	bySession map[string][]messagepkg.Message
@@ -42,6 +44,7 @@ func (s *stubMessageService) before(sid string, t time.Time, limit int) []messag
 	if len(older) > limit {
 		older = older[:limit]
 	}
+	reverseMessages(older)
 	return older
 }
 
@@ -49,7 +52,7 @@ func (s *stubMessageService) ListLatestBySession(_ context.Context, sid string, 
 	return s.latest(sid, int(limit)), nil
 }
 
-func (s *stubMessageService) ListBeforeBySession(_ context.Context, sid string, before time.Time, _ string, limit int32) ([]messagepkg.Message, error) {
+func (s *stubMessageService) ListBeforeBySession(_ context.Context, sid string, before time.Time, limit int32) ([]messagepkg.Message, error) {
 	return s.before(sid, before, int(limit)), nil
 }
 
@@ -66,12 +69,12 @@ func userMsg(t time.Time, text string) messagepkg.Message {
 }
 
 // TestExtendToUITurnHead_PreservesMonotonicOrder is the regression test for the
-// DESC-pagination bug: extendToUITurnHead must reverse each fetched older batch
-// (ListBeforeBySession returns newest-first) before prepending, so the combined
-// slice stays oldest-first — the ordering ConvertMessagesToUITurns depends on.
-// Before the fix the DESC older fragment was prepended as-is, producing a
-// V-shaped non-monotonic slice that split one turn into several and reordered
-// messages.
+// before-page double-reverse bug: ListBeforeBySession already returns
+// oldest-first (ASC), so extendToUITurnHead must prepend each fetched older
+// batch as-is to keep the combined slice monotonic - the ordering
+// ConvertMessagesToUITurns depends on. The bug reversed the already-ASC batch a
+// second time, producing a scrambled, non-monotonic slice that split one turn
+// into several and duplicated turns.
 func TestExtendToUITurnHead_PreservesMonotonicOrder(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2026, 6, 24, 12, 0, 0, 0, time.UTC)
@@ -90,7 +93,7 @@ func TestExtendToUITurnHead_PreservesMonotonicOrder(t *testing.T) {
 	latest := svc.latest(sessionID, 30)
 	reverseMessages(latest) // mirrors the handler's latest-page branch
 	before := len(latest)
-	got := h.extendToUITurnHead(context.Background(), sessionID, "", latest)
+	got := h.extendToUITurnHead(context.Background(), sessionID, latest)
 
 	if len(got) <= before {
 		t.Fatalf("extendToUITurnHead did not pull back the turn head: got %d, had %d", len(got), before)
@@ -109,8 +112,8 @@ func TestExtendToUITurnHead_PreservesMonotonicOrder(t *testing.T) {
 // once a real turn boundary is at messages[0]. The session has 1 user + 5
 // assistant; the latest page (limit 5) returns the 5 newest (all assistant),
 // so extendToUITurnHead pulls exactly the one older user row and stops — it
-// must NOT keep pulling past the boundary (the DESC-direction bug pulled until
-// maxRows because it misread messages[0]).
+// must NOT keep pulling past the boundary (the double-reverse bug mis-ordered
+// the batch so messages[0] was no longer the true oldest row).
 func TestExtendToUITurnHead_StopsAtBoundary(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2026, 6, 24, 12, 0, 0, 0, time.UTC)
@@ -125,7 +128,7 @@ func TestExtendToUITurnHead_StopsAtBoundary(t *testing.T) {
 
 	latest := svc.latest(sessionID, 5) // 5 newest = all assistant, no boundary
 	reverseMessages(latest)
-	got := h.extendToUITurnHead(context.Background(), sessionID, "", latest)
+	got := h.extendToUITurnHead(context.Background(), sessionID, latest)
 	// Must pull back exactly the one user boundary and stop — 6 total, not more.
 	if len(got) != 6 {
 		t.Fatalf("expected exactly the user boundary + 5 assistant = 6, got %d (over-pulled?)", len(got))

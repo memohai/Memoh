@@ -209,6 +209,16 @@ func TestImportStateItemErr(t *testing.T) {
 	}
 }
 
+func TestRestoredSessionDescriptorRejectsSystemACPRuntime(t *testing.T) {
+	_, _, _, err := restoredSessionDescriptor("schedule", "schedule", "acp_agent")
+	if err == nil {
+		t.Fatal("restoredSessionDescriptor(schedule/acp_agent) = nil error, want unsupported combination")
+	}
+	if !strings.Contains(err.Error(), "only supported") {
+		t.Fatalf("error = %v, want unsupported runtime/mode message", err)
+	}
+}
+
 func TestMCPRequestFromConnection(t *testing.T) {
 	stdio := mcpRequestFromConnection(mcp.Connection{
 		Name:     "local",

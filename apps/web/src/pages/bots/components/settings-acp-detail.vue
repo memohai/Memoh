@@ -29,35 +29,114 @@
         <template v-if="agent.setup_mode !== 'self'">
           <div
             v-if="isCodex && agent.setup_mode === 'oauth'"
-            class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+            class="space-y-3"
           >
-            <p
-              class="min-w-0 flex-1 text-sm"
-              :class="codexOAuthTextClass()"
+            <div
+              class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
             >
-              {{ codexOAuthStatusText() }}
-            </p>
-            <div class="flex shrink-0 items-center gap-2">
-              <Button
-                v-if="codexOAuthFlow"
-                type="button"
-                variant="ghost"
-                @click="cancelCodexOAuthAuthorization"
+              <p
+                class="min-w-0 flex-1 text-sm"
+                :class="codexOAuthTextClass()"
               >
-                {{ $t('common.cancel') }}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                :disabled="authorizingCodexOAuth"
-                @click="handleAuthorize"
+                {{ codexOAuthStatusText() }}
+              </p>
+              <div class="flex shrink-0 flex-wrap items-center gap-2">
+                <Button
+                  v-if="codexDevicePending"
+                  type="button"
+                  variant="ghost"
+                  @click="handleCancelCodexDeviceAuthorization"
+                >
+                  {{ $t('common.cancel') }}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  :disabled="codexAuthorizing"
+                  @click="handleAuthorize"
+                >
+                  <LoaderCircle
+                    v-if="authorizingCodexOAuth"
+                    class="size-4 animate-spin"
+                  />
+                  {{ $t('bots.settings.acpOAuthAuthorizeCodex') }}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  :disabled="codexAuthorizing"
+                  @click="handleAuthorizeDevice"
+                >
+                  <LoaderCircle
+                    v-if="authorizingCodexDevice"
+                    class="size-4 animate-spin"
+                  />
+                  {{ $t('bots.settings.acpCodexDeviceAuthorize') }}
+                </Button>
+              </div>
+            </div>
+
+            <div
+              v-if="codexDevicePanelSession"
+              class="space-y-3 rounded-md bg-accent p-3"
+            >
+              <p class="text-sm text-muted-foreground">
+                {{ $t('bots.settings.acpCodexDeviceHint') }}
+              </p>
+              <div
+                v-if="codexDeviceVerificationReady"
+                class="space-y-1"
               >
-                <LoaderCircle
-                  v-if="authorizingCodexOAuth"
-                  class="size-4 animate-spin"
-                />
-                {{ $t('bots.settings.acpOAuthAuthorizeCodex') }}
-              </Button>
+                <div class="text-sm font-medium">
+                  {{ $t('provider.oauth.deviceVerificationUri') }}
+                </div>
+                <code class="block break-all rounded-md bg-background px-2 py-1 text-sm select-all">{{ codexDevicePanelSession?.verification_url }}</code>
+              </div>
+              <div
+                v-if="codexDeviceVerificationReady"
+                class="space-y-1"
+              >
+                <div class="text-sm font-medium">
+                  {{ $t('provider.oauth.deviceUserCode') }}
+                </div>
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <code class="block min-w-0 flex-1 rounded-md bg-background px-2 py-1 font-mono text-sm select-all">{{ codexDevicePanelSession?.user_code }}</code>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    class="shrink-0"
+                    @click="handleOpenCodexDeviceVerification"
+                  >
+                    <Copy class="size-4" />
+                    {{ $t('bots.settings.acpCodexDeviceCopyOpen') }}
+                  </Button>
+                </div>
+              </div>
+              <div
+                v-if="codexDevicePanelSession?.expires_at"
+                class="text-xs text-muted-foreground"
+              >
+                {{ $t('provider.oauth.deviceExpiresAt') }}: {{ codexDevicePanelSession.expires_at }}
+              </div>
+              <div
+                v-if="codexDevicePending"
+                class="flex items-center gap-2 text-sm text-foreground"
+              >
+                <LoaderCircle class="size-4 animate-spin" />
+                <span>{{ $t('provider.oauth.status.pendingDevice') }}</span>
+              </div>
+              <p
+                v-else-if="codexDevicePanelSession?.status === 'error' && codexDevicePanelSession.error"
+                class="text-sm text-destructive"
+              >
+                {{ codexDevicePanelSession.error }}
+              </p>
+              <p
+                v-else-if="codexDevicePanelSession?.status === 'expired'"
+                class="text-sm text-destructive"
+              >
+                {{ $t('bots.settings.acpCodexDeviceExpired') }}
+              </p>
             </div>
           </div>
 
@@ -219,7 +298,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
 import { useQueryCache } from '@pinia/colada'
@@ -235,12 +314,13 @@ import {
   SelectValue,
   type SegmentedItem,
 } from '@memohai/ui'
-import { LoaderCircle } from 'lucide-vue-next'
-import { client } from '@memohai/sdk/client'
+import { Copy, LoaderCircle } from 'lucide-vue-next'
 import {
   type AcpprofileManagedField,
   type AcpprofilePublicProfile,
 } from '@memohai/sdk'
+import { useACPOAuth } from '@/composables/useACPOAuth'
+import { useClipboard } from '@/composables/useClipboard'
 import {
   HERMES_CUSTOM_MODEL_VALUE,
   HERMES_PROVIDER_PRESETS,
@@ -261,7 +341,6 @@ import {
   type ACPAgentForm,
   type ACPForm,
 } from '@/utils/acp'
-import { startOAuthPopupFlow, type OAuthPopupFlowController } from '@/utils/oauth/popup-flow'
 import { oauthStatusTextKey } from '@/utils/oauth/status-text'
 import SettingsSection from '@/components/settings/section.vue'
 
@@ -282,43 +361,32 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
-const codexOAuthStatus = ref<ACPCodexOAuthStatus | null>(null)
-const codexOAuthStatusLoading = ref(false)
-const authorizingCodexOAuth = ref(false)
-const codexOAuthFlow = ref<OAuthPopupFlowController | null>(null)
-const claudeOAuthStatus = ref<ACPClaudeCodeOAuthStatus | null>(null)
-const claudeOAuthStatusLoading = ref(false)
-const authorizingClaudeOAuth = ref(false)
-const exchangingClaudeOAuth = ref(false)
-const claudeOAuthSessionId = ref('')
+const { copyText } = useClipboard()
 const claudeOAuthCode = ref('')
-const codexOAuthPollIntervalMs = 1500
-const codexOAuthPollTimeoutMs = 5 * 60 * 1000
-
-interface ACPCodexOAuthStatus {
-  configured: boolean
-  has_token: boolean
-  callback_url: string
-  account_id?: string
-}
-
-interface ACPCodexOAuthAuthorizeResponse {
-  auth_url: string
-}
-
-interface ACPClaudeCodeOAuthStatus {
-  configured: boolean
-  has_token: boolean
-}
-
-interface ACPClaudeCodeOAuthAuthorizeResponse {
-  auth_url: string
-  session_id: string
-}
-
-interface OAuthStatusLoadOptions {
-  silent?: boolean
-}
+const {
+  codexStatus: codexOAuthStatus,
+  codexStatusLoading: codexOAuthStatusLoading,
+  authorizingCodex: authorizingCodexOAuth,
+  authorizingCodexDevice,
+  codexAuthorizing,
+  codexDeviceSession,
+  codexDevicePending,
+  codexDeviceVerificationReady,
+  claudeStatus: claudeOAuthStatus,
+  claudeStatusLoading: claudeOAuthStatusLoading,
+  authorizingClaude: authorizingClaudeOAuth,
+  exchangingClaude: exchangingClaudeOAuth,
+  claudeSessionId: claudeOAuthSessionId,
+  loadCodexStatus: loadOAuthStatus,
+  loadClaudeStatus: loadClaudeOAuthStatus,
+  authorizeCodex,
+  authorizeCodexDevice,
+  cancelCodexDeviceAuthorization,
+  clearCodexDeviceAuthorization,
+  openCodexDeviceVerification,
+  authorizeClaude,
+  exchangeClaude,
+} = useACPOAuth(() => props.botId)
 
 const agent = computed<ACPAgentForm>(() => ensureACPAgentForm(props.form, props.profile))
 const isCodex = computed(() => isCodexAgent(props.profile.id))
@@ -374,6 +442,7 @@ function setSetupMode(mode: string) {
   agent.value.setup_mode = mode
   if (isHermes.value && mode === 'api_key') ensureHermesManagedDefaults(agent.value.managed)
   if (isCodex.value && mode === 'oauth') void loadOAuthStatus()
+  if (isCodex.value && mode !== 'oauth') clearCodexDeviceAuthorization()
   if (isClaude.value && mode === 'oauth') void loadClaudeOAuthStatus()
   commitForm()
 }
@@ -449,8 +518,17 @@ const visibleManagedFields = computed<AcpprofileManagedField[]>(() => {
 
 const codexOAuthActive = computed(() => isCodex.value && !!agent.value.enabled && agent.value.setup_mode === 'oauth')
 const claudeOAuthActive = computed(() => isClaude.value && !!agent.value.enabled && agent.value.setup_mode === 'oauth')
+const currentCodexDeviceSession = computed(() => {
+  const session = codexDeviceSession.value
+  return session?.bot_id === props.botId ? session : null
+})
+const codexDevicePanelSession = computed(() => {
+  const session = currentCodexDeviceSession.value
+  if (!session || session.has_token || session.status === 'success') return null
+  return session
+})
 
-const codexOAuthPending = computed(() => authorizingCodexOAuth.value || Boolean(codexOAuthFlow.value))
+const codexOAuthPending = computed(() => codexAuthorizing.value)
 const claudeOAuthPending = computed(() => {
   if (authorizingClaudeOAuth.value || exchangingClaudeOAuth.value) return true
   return Boolean(claudeOAuthSessionId.value && !claudeOAuthStatus.value?.has_token)
@@ -464,14 +542,35 @@ watch([() => props.botId, () => props.profile.id, () => agent.value.setup_mode],
   if (claudeOAuthActive.value || (isClaude.value && agent.value.setup_mode === 'oauth')) void loadClaudeOAuthStatus()
 }, { immediate: true })
 
-onBeforeUnmount(() => {
-  cancelCodexOAuthAuthorization()
+watch(claudeOAuthStatus, (status) => {
+  if (status?.has_token) {
+    agent.value.managed.oauth_token = agent.value.managed.oauth_token || '***'
+  }
+}, { immediate: true })
+
+watch(() => codexDeviceSession.value?.status, (status, previousStatus) => {
+  if (!status || status === previousStatus) return
+  if (status === 'success') {
+    markCodexOAuthAuthorized()
+    toast.success(t('provider.oauth.authorizeSuccess'))
+    return
+  }
+  if (status === 'expired') {
+    toast.error(t('bots.settings.acpCodexDeviceExpired'))
+    return
+  }
+  if (status === 'error') {
+    toast.error(codexDeviceSession.value?.error || t('bots.settings.acpCodexDeviceFailed'))
+  }
 })
 
 function codexOAuthStatusText(): string {
+  if (currentCodexDeviceSession.value?.status === 'expired') return t('bots.settings.acpCodexDeviceExpired')
+  if (currentCodexDeviceSession.value?.status === 'error') return t('bots.settings.acpCodexDeviceFailed')
+  if (codexDevicePending.value) return t('provider.oauth.status.pendingDevice')
   return t(oauthStatusTextKey({
     loading: codexOAuthStatusLoading.value,
-    authorizing: codexOAuthPending.value,
+    authorizing: authorizingCodexOAuth.value || authorizingCodexDevice.value,
     status: codexOAuthStatus.value,
     unavailableKey: 'bots.settings.acpOAuthUnavailable',
   }))
@@ -498,116 +597,60 @@ function claudeOAuthTextClass(): string {
     : 'text-destructive'
 }
 
-async function loadOAuthStatus(options: OAuthStatusLoadOptions = {}): Promise<ACPCodexOAuthStatus | null> {
-  if (!props.botId) return null
-  if (!options.silent) codexOAuthStatusLoading.value = true
-  try {
-    const { data } = await client.get<{ 200: ACPCodexOAuthStatus }, unknown, true>({
-      url: '/bots/{bot_id}/acp/codex/oauth/status',
-      path: { bot_id: props.botId },
-      throwOnError: true,
-    })
-    codexOAuthStatus.value = data ?? null
-    return codexOAuthStatus.value
-  } catch {
-    if (!options.silent) codexOAuthStatus.value = null
-    return null
-  } finally {
-    if (!options.silent) codexOAuthStatusLoading.value = false
-  }
+function invalidateOAuthQueries() {
+  void queryCache.invalidateQueries({ key: ['bot', props.botId] })
+  void queryCache.invalidateQueries({ key: ['bots'] })
 }
 
-async function loadClaudeOAuthStatus(): Promise<ACPClaudeCodeOAuthStatus | null> {
-  if (!props.botId) return null
-  claudeOAuthStatusLoading.value = true
-  try {
-    const { data } = await client.get<{ 200: ACPClaudeCodeOAuthStatus }, unknown, true>({
-      url: '/bots/{bot_id}/acp/claude-code/oauth/status',
-      path: { bot_id: props.botId },
-      throwOnError: true,
-    })
-    claudeOAuthStatus.value = data ?? null
-    if (data?.has_token) {
-      agent.value.managed.oauth_token = agent.value.managed.oauth_token || '***'
-    }
-    return claudeOAuthStatus.value
-  } catch {
-    claudeOAuthStatus.value = null
-    return null
-  } finally {
-    claudeOAuthStatusLoading.value = false
-  }
-}
-
-function cancelCodexOAuthAuthorization() {
-  codexOAuthFlow.value?.cancel()
+function markCodexOAuthAuthorized() {
+  agent.value.enabled = true
+  agent.value.setup_mode = 'oauth'
+  commitForm()
+  invalidateOAuthQueries()
 }
 
 async function handleAuthorize() {
-  try {
-    if (!props.botId) return
-    // Supersede any in-flight popup silently: dispose() (not cancel()) so the
-    // previous flow's onAborted doesn't fight the new attempt's loading state.
-    codexOAuthFlow.value?.dispose()
-    agent.value.setup_mode = 'oauth'
-    authorizingCodexOAuth.value = true
-    const { data } = await client.get<{ 200: ACPCodexOAuthAuthorizeResponse }, unknown, true>({
-      url: '/bots/{bot_id}/acp/codex/oauth/authorize',
-      path: { bot_id: props.botId },
-      throwOnError: true,
-    })
-    if (!data?.auth_url) throw new Error(t('provider.oauth.authorizeFailed'))
-    const popup = window.open(data.auth_url, 'acp-codex-oauth', 'width=600,height=720')
-    if (!popup) throw new Error(t('provider.oauth.authorizeFailed'))
-    codexOAuthFlow.value = startOAuthPopupFlow<ACPCodexOAuthStatus>({
-      popup,
-      target: window,
-      expectedSource: popup,
-      messageType: 'memoh-acp-codex-oauth-success',
-      messageMatches: event => event.data?.botId === props.botId,
-      pollIntervalMs: codexOAuthPollIntervalMs,
-      timeoutMs: codexOAuthPollTimeoutMs,
-      pollStatus: () => loadOAuthStatus({ silent: true }),
-      isAuthorized: status => Boolean(status?.has_token),
-      onAuthorized: async () => {
-        codexOAuthFlow.value = null
-        await loadOAuthStatus({ silent: true })
-        toast.success(t('provider.oauth.authorizeSuccess'))
-        authorizingCodexOAuth.value = false
-      },
-      onAborted: (reason) => {
-        codexOAuthFlow.value = null
-        authorizingCodexOAuth.value = false
-        if (reason === 'timeout') {
-          toast.error(t('provider.oauth.authorizeTimedOut'))
-        }
-      },
-    })
-  } catch (error) {
-    cancelCodexOAuthAuthorization()
-    authorizingCodexOAuth.value = false
-    toast.error(error instanceof Error ? error.message : t('provider.oauth.authorizeFailed'))
+  if (!props.botId) return
+  const botId = props.botId
+  agent.value.setup_mode = 'oauth'
+  const ok = await authorizeCodex({ timeoutMs: 300_000 })
+  if (ok && botId === props.botId) {
+    markCodexOAuthAuthorized()
+    toast.success(t('provider.oauth.authorizeSuccess'))
+  } else if (botId === props.botId) {
+    toast.error(t('provider.oauth.authorizeFailed'))
   }
 }
 
-async function handleAuthorizeClaude() {
-  try {
-    agent.value.setup_mode = 'oauth'
-    authorizingClaudeOAuth.value = true
-    const { data } = await client.get<{ 200: ACPClaudeCodeOAuthAuthorizeResponse }, unknown, true>({
-      url: '/bots/{bot_id}/acp/claude-code/oauth/authorize',
-      path: { bot_id: props.botId },
-      throwOnError: true,
-    })
-    if (!data?.auth_url || !data.session_id) throw new Error(t('provider.oauth.authorizeFailed'))
-    claudeOAuthSessionId.value = data.session_id
-    claudeOAuthCode.value = ''
-    window.open(data.auth_url, 'acp-claude-code-oauth', 'width=600,height=720')
-  } catch (error) {
-    toast.error(error instanceof Error ? error.message : t('provider.oauth.authorizeFailed'))
-  } finally {
-    authorizingClaudeOAuth.value = false
+async function handleAuthorizeDevice() {
+  if (!props.botId) return
+  agent.value.setup_mode = 'oauth'
+  const ok = await authorizeCodexDevice()
+  if (!ok) {
+    toast.error(t('provider.oauth.authorizeFailed'))
   }
+}
+
+async function handleOpenCodexDeviceVerification() {
+  const result = await openCodexDeviceVerification(copyText)
+  if (result === 'opened') {
+    toast.success(t('common.copied'))
+  } else if (result === 'popup_blocked') {
+    toast.error(t('bots.settings.acpCodexDevicePopupBlocked'))
+  } else {
+    toast.error(t('provider.oauth.copyFailed'))
+  }
+}
+
+async function handleCancelCodexDeviceAuthorization() {
+  await cancelCodexDeviceAuthorization()
+}
+
+async function handleAuthorizeClaude() {
+  agent.value.setup_mode = 'oauth'
+  claudeOAuthCode.value = ''
+  const ok = await authorizeClaude()
+  if (!ok) toast.error(t('provider.oauth.authorizeFailed'))
 }
 
 async function handleExchangeClaudeOAuth() {
@@ -616,31 +659,17 @@ async function handleExchangeClaudeOAuth() {
     toast.error(t('bots.settings.acpClaudeOAuthCodeRequired'))
     return
   }
-  try {
-    exchangingClaudeOAuth.value = true
-    const { data } = await client.post<{ 200: ACPClaudeCodeOAuthStatus }, unknown, true>({
-      url: '/bots/{bot_id}/acp/claude-code/oauth/exchange',
-      path: { bot_id: props.botId },
-      body: {
-        session_id: claudeOAuthSessionId.value,
-        code,
-      },
-      throwOnError: true,
-    })
-    claudeOAuthStatus.value = data ?? { configured: true, has_token: true }
+  const ok = await exchangeClaude(code)
+  if (ok) {
     agent.value.enabled = true
     agent.value.setup_mode = 'oauth'
     agent.value.managed.oauth_token = '***'
-    claudeOAuthSessionId.value = ''
     claudeOAuthCode.value = ''
     commitForm()
-    void queryCache.invalidateQueries({ key: ['bot', props.botId] })
-    void queryCache.invalidateQueries({ key: ['bots'] })
+    invalidateOAuthQueries()
     toast.success(t('provider.oauth.authorizeSuccess'))
-  } catch (error) {
-    toast.error(error instanceof Error ? error.message : t('bots.settings.acpClaudeOAuthExchangeFailed'))
-  } finally {
-    exchangingClaudeOAuth.value = false
+  } else {
+    toast.error(t('bots.settings.acpClaudeOAuthExchangeFailed'))
   }
 }
 </script>

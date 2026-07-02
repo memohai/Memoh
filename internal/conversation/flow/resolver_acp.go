@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -12,8 +13,10 @@ import (
 
 	"github.com/memohai/memoh/internal/acpagent"
 	"github.com/memohai/memoh/internal/acpclient"
+	"github.com/memohai/memoh/internal/acpfeedback"
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/agent/event"
+	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/session"
@@ -23,8 +26,43 @@ type acpPrompter interface {
 	Prompt(ctx context.Context, input acpagent.PromptInput) (acpclient.PromptResult, error)
 }
 
+type ACPSessionExecutionInfo struct {
+	IsACP                 bool
+	BotID                 string
+	Type                  string
+	RuntimeType           string
+	CreatedByUserID       string
+	AgentID               string
+	ProjectPath           string
+	RuntimeOwnerAccountID string
+}
+
 func (r *Resolver) SetACPSessionPool(pool acpPrompter) {
 	r.acpPool = pool
+}
+
+func (r *Resolver) ACPSessionExecutionInfo(ctx context.Context, sessionID string) (ACPSessionExecutionInfo, error) {
+	if r == nil || r.sessionService == nil || strings.TrimSpace(sessionID) == "" {
+		return ACPSessionExecutionInfo{}, nil
+	}
+	sess, err := r.sessionService.Get(ctx, sessionID)
+	if err != nil {
+		return ACPSessionExecutionInfo{}, err
+	}
+	if !session.IsACPRuntime(sess) {
+		return ACPSessionExecutionInfo{}, nil
+	}
+	acpMeta := mergeACPRuntimeMetadata(sess.Metadata, sess.RuntimeMetadata)
+	return ACPSessionExecutionInfo{
+		IsACP:                 true,
+		BotID:                 sess.BotID,
+		Type:                  sess.Type,
+		RuntimeType:           sess.RuntimeType,
+		CreatedByUserID:       sess.CreatedByUserID,
+		AgentID:               metadataString(acpMeta, "acp_agent_id"),
+		ProjectPath:           metadataString(acpMeta, "project_path"),
+		RuntimeOwnerAccountID: metadataString(acpMeta, "runtime_owner_account_id"),
+	}, nil
 }
 
 func (r *Resolver) isACPAgentSession(ctx context.Context, req conversation.ChatRequest) (bool, error) {
@@ -35,7 +73,10 @@ func (r *Resolver) isACPAgentSession(ctx context.Context, req conversation.ChatR
 	if err != nil {
 		return false, err
 	}
-	return sess.Type == session.TypeACPAgent, nil
+	if err := validateSessionBot(req.BotID, req.SessionID, sess.BotID); err != nil {
+		return false, err
+	}
+	return session.IsACPRuntime(sess), nil
 }
 
 func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRequest, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) error {
@@ -46,11 +87,39 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 	if err != nil {
 		return err
 	}
-	agentID := metadataString(sess.Metadata, "acp_agent_id")
-	projectPath := metadataString(sess.Metadata, "project_path")
+	if err := validateSessionBot(req.BotID, req.SessionID, sess.BotID); err != nil {
+		return err
+	}
+	acpMeta := mergeACPRuntimeMetadata(sess.Metadata, sess.RuntimeMetadata)
+	agentID := metadataString(acpMeta, "acp_agent_id")
+	projectPath := metadataString(acpMeta, "project_path")
+	runtimeOwnerAccountID := metadataString(acpMeta, "runtime_owner_account_id")
+	if runtimeOwnerAccountID == "" {
+		return acpfeedback.New(
+			acpfeedback.CodeRuntimeOwnerMissing,
+			"missing_runtime_owner",
+			409,
+			"chat.acp.runtimeOwnerMissing",
+			"ACP runtime owner is missing; recreate or reauthorize the ACP session",
+			nil,
+		)
+	}
+	if err := r.requireACPRuntimeOwnerWorkspaceExec(ctx, req.BotID, runtimeOwnerAccountID); err != nil {
+		return err
+	}
 	contextMarkdown := r.buildACPContextMarkdown(ctx, req, agentID, projectPath)
 
-	doneTurn := r.enterSessionTurn(ctx, req.BotID, req.SessionID)
+	doneTurn, entered := r.tryEnterIdleSessionTurn(ctx, req.BotID, req.SessionID)
+	if !entered {
+		return acpfeedback.New(
+			acpfeedback.CodeRuntimeBusy,
+			"runtime_busy",
+			409,
+			"chat.acp.runtimeBusy",
+			"External agent runtime is already processing a turn for this session.",
+			nil,
+		)
+	}
 	defer doneTurn()
 
 	if req.RawQuery == "" {
@@ -155,12 +224,14 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		// ACP/native MCP does not yet have the in-process read-media decoration
 		// path that turns read image bytes into model-native image input. Keep
 		// this false until ACP model capability and image transport are wired.
-		SupportsImageInput: false,
-		ToolOutputLimit:    r.toolOutputLimit(),
-		ToolHTTPURL:        req.ToolHTTPURL,
-		ContextURI:         acpContextURI,
-		ContextMarkdown:    contextMarkdown,
-		Sink:               acpclient.EventSinkFunc(emit),
+		SupportsImageInput:    false,
+		ToolOutputLimit:       r.toolOutputLimit(),
+		ToolHTTPURL:           req.ToolHTTPURL,
+		ContextURI:            acpContextURI,
+		ContextMarkdown:       contextMarkdown,
+		RuntimeOwnerAccountID: runtimeOwnerAccountID,
+		ForceFreshRuntime:     req.ForceFreshRuntime,
+		Sink:                  acpclient.EventSinkFunc(emit),
 	})
 	if err != nil {
 		r.logger.Error("ACP prompt failed",
@@ -169,6 +240,11 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 			slog.Any("error", err),
 		)
 		r.cancelPendingACPApprovals(context.WithoutCancel(ctx), req, "tool approval cancelled: the turn ended before a decision arrived")
+		var feedbackErr *acpfeedback.Error
+		if errors.As(err, &feedbackErr) {
+			return err
+		}
+		result = ensureACPPromptOutput(result)
 		failedResult, failureDelta := acpFailureResult(result, err)
 		projected := projectedSnapshot()
 		failedResult.Output = filterACPProjectedOutput(failedResult.Output, projected)
@@ -177,18 +253,131 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		}
 		_ = r.persistACPRound(context.WithoutCancel(ctx), req, agentID, projectPath, failedResult, err)
 		emit(agentpkg.StreamEvent{Type: agentpkg.EventTextEnd})
-		emit(agentpkg.StreamEvent{Type: agentpkg.EventAbort})
+		emit(acpTerminalStreamEvent(agentpkg.EventAbort, failedResult))
 		return nil
 	}
 
 	emit(agentpkg.StreamEvent{Type: agentpkg.EventTextEnd})
 	projected := projectedSnapshot()
+	result = ensureACPPromptOutput(result)
 	result.Output = filterACPProjectedOutput(result.Output, projected)
 	if err := r.persistACPRound(context.WithoutCancel(ctx), req, agentID, projectPath, result, nil); err != nil {
 		r.logger.Error("ACP persist failed", slog.Any("error", err), slog.String("session_id", req.SessionID))
 	}
-	emit(agentpkg.StreamEvent{Type: agentpkg.EventEnd})
+	emit(acpTerminalStreamEvent(agentpkg.EventEnd, result))
 	return nil
+}
+
+func ensureACPPromptOutput(result acpclient.PromptResult) acpclient.PromptResult {
+	if len(result.Output) == 0 {
+		result.Output = acpclient.TranscriptFromEvents(result.Events, result.Text)
+	}
+	return result
+}
+
+func acpTerminalStreamEvent(eventType agentpkg.StreamEventType, result acpclient.PromptResult) agentpkg.StreamEvent {
+	result = ensureACPPromptOutput(result)
+	ev := agentpkg.StreamEvent{Type: eventType}
+	if data, err := json.Marshal(result.Output); err == nil {
+		ev.Messages = data
+	}
+	if result.Usage != nil {
+		if data, err := json.Marshal(result.Usage); err == nil {
+			ev.Usage = data
+		}
+	}
+	return ev
+}
+
+func validateSessionBot(botID, sessionID, sessionBotID string) error {
+	bid := strings.TrimSpace(botID)
+	sid := strings.TrimSpace(sessionID)
+	sb := strings.TrimSpace(sessionBotID)
+	if bid == "" || sb == "" || bid == sb {
+		return nil
+	}
+	return fmt.Errorf("session %s belongs to bot %s, not %s", sid, sb, bid)
+}
+
+func (r *Resolver) requireACPRuntimeOwnerWorkspaceExec(ctx context.Context, botID, runtimeOwnerAccountID string) error {
+	if r == nil || r.botPermissions == nil {
+		return errors.New("bot permission checker not configured")
+	}
+	runtimeOwnerAccountID = strings.TrimSpace(runtimeOwnerAccountID)
+	if runtimeOwnerAccountID == "" {
+		return acpfeedback.New(
+			acpfeedback.CodeRuntimeOwnerMissing,
+			"missing_runtime_owner",
+			409,
+			"chat.acp.runtimeOwnerMissing",
+			"ACP runtime owner is missing; recreate or reauthorize the ACP session",
+			nil,
+		)
+	}
+	ok, err := r.botPermissions.HasBotPermission(ctx, strings.TrimSpace(botID), runtimeOwnerAccountID, bots.PermissionWorkspaceExec)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+	return acpfeedback.New(
+		acpfeedback.CodeNoWorkspaceExec,
+		"missing_workspace_exec",
+		403,
+		"chat.acp.missingWorkspaceExec",
+		"ACP runtime owner no longer has workspace execution permission for this bot.",
+		nil,
+	)
+}
+
+func mergeACPRuntimeMetadata(metadata, runtimeMetadata map[string]any) map[string]any {
+	out := make(map[string]any, len(metadata)+len(runtimeMetadata))
+	for key, value := range metadata {
+		out[key] = value
+	}
+	for _, key := range []string{"acp_agent_id", "project_path", "acp_project_mode", "runtime_owner_account_id"} {
+		if value, ok := runtimeMetadata[key]; ok {
+			out[key] = value
+		}
+	}
+	return out
+}
+
+func (r *Resolver) streamACPAgentChunks(ctx context.Context, req conversation.ChatRequest, chunkCh chan<- conversation.StreamChunk, errCh chan<- error) {
+	eventCh := make(chan WSStreamEvent)
+	done := make(chan error, 1)
+	go func() {
+		defer close(eventCh)
+		done <- r.streamACPAgentWS(ctx, req, eventCh, nil)
+		close(done)
+	}()
+	for eventCh != nil || done != nil {
+		select {
+		case event, ok := <-eventCh:
+			if !ok {
+				eventCh = nil
+				continue
+			}
+			select {
+			case chunkCh <- event:
+			case <-ctx.Done():
+				errCh <- ctx.Err()
+				return
+			}
+		case err, ok := <-done:
+			if !ok {
+				done = nil
+				continue
+			}
+			if err != nil {
+				errCh <- err
+			}
+		case <-ctx.Done():
+			errCh <- ctx.Err()
+			return
+		}
+	}
 }
 
 func isACPDecisionProjectionEvent(ev agentpkg.StreamEvent) bool {
@@ -232,7 +421,7 @@ func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req convers
 		return req
 	}
 	senderChannelIdentityID, senderUserID := r.resolvePersistSenderIDs(ctx, req)
-	if _, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
+	_, err = r.messageService.Persist(ctx, messagepkg.PersistInput{
 		BotID:                   req.BotID,
 		SessionID:               req.SessionID,
 		SenderChannelIdentityID: senderChannelIdentityID,
@@ -245,7 +434,8 @@ func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req convers
 		Assets:                  chatAttachmentsToAssetRefs(req.Attachments),
 		EventID:                 req.EventID,
 		DisplayText:             displayText,
-	}); err != nil {
+	})
+	if err != nil {
 		r.logger.Warn("persist ACP leading user message failed",
 			slog.String("bot_id", req.BotID),
 			slog.String("session_id", req.SessionID),
@@ -358,13 +548,30 @@ func (r *Resolver) persistACPRound(ctx context.Context, req conversation.ChatReq
 		"stop_reason":  result.StopReason,
 	}
 	if promptErr != nil {
-		meta["error"] = promptErr.Error()
+		meta["error"] = acpUserFacingFailureMessage(promptErr)
+		var feedbackErr *acpfeedback.Error
+		if errors.As(promptErr, &feedbackErr) {
+			meta["error_code"] = feedbackErr.Code
+			meta["error_reason"] = feedbackErr.Reason
+			meta["i18n_key"] = feedbackErr.I18nKey
+		} else {
+			meta["error_code"] = "acp_runtime_prompt_failed"
+		}
 	}
 	// result.Output is already assembled by the ACP client; the resolver only
 	// converts and stores it.
 	output := sdkMessagesToModelMessages(result.Output)
 	if len(output) == 0 {
 		output = []conversation.ModelMessage{{Role: "assistant", Content: conversation.NewTextContent("")}}
+	}
+	if result.Usage != nil {
+		for idx := len(output) - 1; idx >= 0; idx-- {
+			if output[idx].Role == "assistant" {
+				usage, _ := json.Marshal(result.Usage)
+				output[idx].Usage = usage
+				break
+			}
+		}
 	}
 	round := make([]conversation.ModelMessage, 0, 1+len(output))
 	round = append(round, conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent(req.Query)})
@@ -380,25 +587,23 @@ func (r *Resolver) persistACPRound(ctx context.Context, req conversation.ChatReq
 			metadataByIndex[idx+metadataOffset] = meta
 		}
 	}
-	skipMemory := promptErr != nil || req.UserMessagePersisted
-	run := legacyTurnRun(req)
-	err := r.storeRoundWithOptions(ctx, req, &run, round, "", storeRoundOptions{
+	skipMemory := promptErr != nil || req.UserMessagePersisted || req.SkipMemoryExtraction
+	err := r.storeRoundWithOptions(ctx, req, round, "", storeRoundOptions{
 		SkipMemory:              skipMemory,
 		AllowEmptyAssistantText: true,
 		MessageMetadataByIndex:  metadataByIndex,
 	})
-	if err == nil && promptErr == nil && req.UserMessagePersisted {
+	if err == nil && promptErr == nil && req.UserMessagePersisted && !req.SkipMemoryExtraction {
 		go r.storeMemory(context.WithoutCancel(ctx), req, round)
 	}
 	return err
 }
 
-// acpFailureResult appends the raw upstream error (truncated, single-line) to
-// the partial result so users see what went wrong inline. The frontend is
-// responsible for any i18n "ACP agent failed" prefix; the backend only
-// surfaces the technical detail.
+// acpFailureResult appends a short, sanitized failure marker to the partial
+// result. Detailed upstream errors can include local paths or auth file names,
+// so they stay in logs instead of user-visible chat history.
 func acpFailureResult(result acpclient.PromptResult, err error) (acpclient.PromptResult, string) {
-	message := truncateOneLineError(err)
+	message := acpUserFacingFailureMessage(err)
 	if message == "" {
 		return result, ""
 	}
@@ -415,28 +620,15 @@ func acpFailureResult(result acpclient.PromptResult, err error) (acpclient.Promp
 	return result, message
 }
 
-func truncateOneLineError(err error) string {
+func acpUserFacingFailureMessage(err error) string {
 	if err == nil {
 		return ""
 	}
-	message := oneLine(err.Error())
-	if message == "" {
-		return ""
+	var feedback *acpfeedback.Error
+	if errors.As(err, &feedback) {
+		return strings.TrimSpace(feedback.Message)
 	}
-	const maxRunes = 500
-	runes := []rune(message)
-	if len(runes) > maxRunes {
-		message = string(runes[:maxRunes]) + "..."
-	}
-	return message
-}
-
-func oneLine(value string) string {
-	fields := strings.Fields(value)
-	if len(fields) == 0 {
-		return ""
-	}
-	return strings.Join(fields, " ")
+	return "ACP agent failed to complete the turn. Please retry."
 }
 
 func metadataString(metadata map[string]any, key string) string {

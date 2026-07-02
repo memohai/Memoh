@@ -119,6 +119,92 @@ func TestTelegramDescriptorIncludesStreaming(t *testing.T) {
 	}
 }
 
+func TestParseTelegramUserInputCallback(t *testing.T) {
+	t.Parallel()
+
+	id, ok := parseTelegramUserInputCallback("respond:input-1")
+	if !ok || id != "input-1" {
+		t.Fatalf("parseTelegramUserInputCallback() = %q, %v", id, ok)
+	}
+	if _, ok := parseTelegramUserInputCallback("approve:input-1"); ok {
+		t.Fatal("approval callback should not parse as user input")
+	}
+	if _, ok := parseTelegramUserInputCallback("respond: "); ok {
+		t.Fatal("empty user input id should not parse")
+	}
+}
+
+func TestTelegramUserInputCallbackHintUsesReplyMode(t *testing.T) {
+	t.Parallel()
+
+	hint := telegramUserInputCallbackHint("input-1")
+	if !strings.Contains(hint, "/respond <answer>") {
+		t.Fatalf("hint = %q, want reply-mode respond usage", hint)
+	}
+	if strings.Contains(hint, "input-1") {
+		t.Fatalf("hint = %q, should not include request id when asking the user to reply to the request message", hint)
+	}
+}
+
+func TestHandleTelegramUserInputCallbackShowsHintWithoutDispatch(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewTelegramAdapter(nil)
+	bot := newStubTelegramBot(t)
+	dispatched := false
+	update := &tele.Update{
+		ID: 99,
+		Callback: &tele.Callback{
+			ID:     "callback-1",
+			Data:   "respond:input-1",
+			Sender: &tele.User{ID: 123, Username: "alice"},
+			Message: &tele.Message{
+				ID:   456,
+				Text: "Question",
+				Chat: &tele.Chat{ID: -10001, Type: tele.ChatGroup, Title: "Test Group"},
+			},
+		},
+	}
+
+	adapter.handleTelegramCallback(context.Background(), channel.ChannelConfig{}, func(context.Context, channel.ChannelConfig, channel.InboundMessage) error {
+		dispatched = true
+		return nil
+	}, bot, update)
+	if dispatched {
+		t.Fatal("respond callback without answer text should not dispatch an inbound /respond command")
+	}
+}
+
+func TestBuildTelegramRespondCallbackInboundMessageMarksDirected(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewTelegramAdapter(nil)
+	update := &tele.Update{
+		ID: 100,
+		Callback: &tele.Callback{
+			ID:     "callback-2",
+			Data:   "respond:input-1",
+			Sender: &tele.User{ID: 123, Username: "alice"},
+			Message: &tele.Message{
+				ID:   456,
+				Text: "Question",
+				Chat: &tele.Chat{ID: -10001, Type: tele.ChatGroup, Title: "Test Group"},
+			},
+		},
+	}
+
+	msg, ok := adapter.buildTelegramCallbackInboundMessage(channel.ChannelConfig{}, update)
+	if !ok {
+		t.Fatal("expected callback inbound message")
+	}
+	if got := msg.Message.PlainText(); got != "/respond input-1" {
+		t.Fatalf("callback text = %q", got)
+	}
+	if mentioned, _ := msg.Metadata["is_mentioned"].(bool); !mentioned {
+		t.Fatalf("metadata = %#v, want directed callback", msg.Metadata)
+	}
+}
+
 func TestBuildTelegramAttachmentIncludesPlatformReference(t *testing.T) {
 	t.Parallel()
 

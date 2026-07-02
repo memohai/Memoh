@@ -11,17 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const clearRouteActiveSessionsByBot = `-- name: ClearRouteActiveSessionsByBot :exec
-UPDATE bot_channel_routes
-SET active_session_id = NULL, updated_at = now()
-WHERE bot_id = $1
-`
-
-func (q *Queries) ClearRouteActiveSessionsByBot(ctx context.Context, botID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, clearRouteActiveSessionsByBot, botID)
-	return err
-}
-
 const createChatRoute = `-- name: CreateChatRoute :one
 INSERT INTO bot_channel_routes (
   bot_id, channel_type, channel_config_id, external_conversation_id, external_thread_id, conversation_type, default_reply_target, metadata

@@ -118,7 +118,7 @@
 
       <SettingsAcpDetail
         v-if="selectedProfile"
-        :key="selectedProfile.id"
+        :key="`${botId}:${selectedProfile.id}`"
         :bot-id="botId"
         :profile="selectedProfile"
         :form="form"
@@ -155,6 +155,7 @@ import {
   type ACPAgentForm,
   type ACPForm,
 } from '@/utils/acp'
+import { useChatStore } from '@/store/chat-list'
 
 const props = defineProps<{
   botId: string
@@ -162,6 +163,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
+const chatStore = useChatStore()
 const botIdRef = computed(() => props.botId) as Ref<string>
 
 const form = reactive<ACPForm>({
@@ -213,6 +215,7 @@ const { mutateAsync: updateBot } = useMutation({
   onSettled: () => {
     queryCache.invalidateQueries({ key: ['bot', botIdRef.value] })
     queryCache.invalidateQueries({ key: ['bots'] })
+    void chatStore.refreshBots().catch(() => {})
   },
 })
 

@@ -44,11 +44,17 @@
             >
               <template #option-icon="{ option }">
                 <ProviderIcon
-                  v-if="getPresetById(option.value)"
+                  v-if="getPresetById(option.value)?.icon"
                   :icon="getPresetById(option.value)?.icon ?? ''"
                   size="1em"
                   class="size-4 shrink-0"
                 />
+                <span
+                  v-else-if="getPresetById(option.value)"
+                  class="flex size-4 shrink-0 items-center justify-center text-xs font-medium text-muted-foreground"
+                >
+                  {{ getPresetById(option.value)?.name?.slice(0, 1) }}
+                </span>
                 <Plus
                   v-else
                   class="size-4 shrink-0 text-muted-foreground"
@@ -291,7 +297,9 @@ const { mutateAsync: createProviderMutation, isLoading } = useMutation({
     }
     const preset = selectedPreset.value
     if (preset) {
-      payload.icon = preset.icon
+      if (preset.icon) {
+        payload.icon = preset.icon
+      }
       payload.metadata = {
         preset: {
           id: preset.id,

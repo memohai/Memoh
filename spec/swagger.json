@@ -1153,6 +1153,245 @@
                 }
             }
         },
+        "/bots/{bot_id}/acp/codex/oauth/authorize": {
+            "get": {
+                "tags": [
+                    "acp"
+                ],
+                "summary": "Start Codex ACP OAuth authorization",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ACPCodexOAuthAuthorizeResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/acp/codex/oauth/device/authorize": {
+            "post": {
+                "tags": [
+                    "acp"
+                ],
+                "summary": "Start Codex ACP device code authorization",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ACPCodexOAuthDeviceAuthorizeResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/acp/codex/oauth/device/cancel": {
+            "post": {
+                "tags": [
+                    "acp"
+                ],
+                "summary": "Cancel Codex ACP device code authorization",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Device authorization session",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ACPCodexOAuthDeviceSessionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ACPCodexOAuthDeviceStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/acp/codex/oauth/device/poll": {
+            "post": {
+                "tags": [
+                    "acp"
+                ],
+                "summary": "Poll Codex ACP device code authorization",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Device authorization session",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ACPCodexOAuthDeviceSessionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ACPCodexOAuthDeviceStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/acp/codex/oauth/status": {
+            "get": {
+                "tags": [
+                    "acp"
+                ],
+                "summary": "Get Codex ACP OAuth status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ACPCodexOAuthStatus"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/backup/export": {
             "post": {
                 "consumes": [
@@ -3595,6 +3834,159 @@
                 }
             }
         },
+        "/bots/{bot_id}/local/messages": {
+            "post": {
+                "description": "Post a user message (with optional attachments) through the local channel pipeline.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "local-channel"
+                ],
+                "summary": "Send a message to a local channel",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Message payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.LocalChannelMessageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/local/stream": {
+            "get": {
+                "description": "Open a persistent SSE connection to receive real-time stream events for the given bot.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "local-channel"
+                ],
+                "summary": "Subscribe to local channel events via SSE",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/local/ws": {
+            "get": {
+                "description": "Upgrade to WebSocket for bidirectional chat streaming with abort support.",
+                "tags": [
+                    "local-channel"
+                ],
+                "summary": "WebSocket chat endpoint",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "101": {
+                        "description": "Switching Protocols",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/mcp": {
             "get": {
                 "description": "List MCP connections for a bot",
@@ -4925,28 +5317,22 @@
                     },
                     {
                         "type": "string",
-                        "description": "Message ID at the pagination boundary",
-                        "name": "before_id",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "Selected session head turn ID",
-                        "name": "head_turn_id",
-                        "in": "query"
-                    },
-                    {
-                        "type": "boolean",
-                        "description": "Include session turn graph metadata",
-                        "name": "include_graph",
+                        "description": "Response format: ui returns normalized chat UI turns",
+                        "name": "format",
                         "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK",
+                        "description": "when format=ui",
                         "schema": {
-                            "$ref": "#/definitions/handlers.messageUIListResponse"
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/definitions/conversation.UITurn"
+                                }
+                            }
                         }
                     },
                     "400": {
@@ -6333,71 +6719,6 @@
                 }
             }
         },
-        "/bots/{bot_id}/sessions/{session_id}/fork": {
-            "post": {
-                "tags": [
-                    "sessions"
-                ],
-                "summary": "Fork a chat session from an assistant reply",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Source session ID",
-                        "name": "session_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Fork source message",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.forkSessionRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/session.Session"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/bots/{bot_id}/sessions/{session_id}/messages/events": {
             "get": {
                 "description": "SSE stream that pushes a server-fixed backlog of the last 50\nmessages, then streams future message_created and\nsession_title_updated events scoped to this session only.",
@@ -6422,12 +6743,6 @@
                         "name": "session_id",
                         "in": "path",
                         "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Selected session head turn ID",
-                        "name": "head_turn_id",
-                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -6528,6 +6843,15 @@
                     "settings"
                 ],
                 "summary": "Get user settings",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -6556,6 +6880,13 @@
                 ],
                 "summary": "Update user settings",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "description": "Settings payload",
                         "name": "payload",
@@ -6595,6 +6926,13 @@
                 "summary": "Update user settings",
                 "parameters": [
                     {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
                         "description": "Settings payload",
                         "name": "payload",
                         "in": "body",
@@ -6631,6 +6969,15 @@
                     "settings"
                 ],
                 "summary": "Delete user settings",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "204": {
                         "description": "No Content"
@@ -6759,7 +7106,7 @@
         },
         "/bots/{bot_id}/token-usage": {
             "get": {
-                "description": "Get daily aggregated token usage for a bot, split by chat, heartbeat, and schedule session types, with optional model filter and per-model breakdown",
+                "description": "Get daily aggregated token usage for a bot, split by chat, discuss, heartbeat, and schedule session types, with optional model filter and per-model breakdown",
                 "tags": [
                     "token-usage"
                 ],
@@ -6790,6 +7137,12 @@
                         "type": "string",
                         "description": "Optional model UUID to filter by",
                         "name": "model_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional session type: chat, discuss, heartbeat, schedule, or acp_agent. acp_agent filters by runtime.",
+                        "name": "session_type",
                         "in": "query"
                     }
                 ],
@@ -6861,7 +7214,7 @@
                     },
                     {
                         "type": "string",
-                        "description": "Optional session type: chat, heartbeat, schedule, or acp_agent",
+                        "description": "Optional session type: chat, discuss, heartbeat, schedule, or acp_agent. acp_agent filters by runtime.",
                         "name": "session_type",
                         "in": "query"
                     },
@@ -7397,159 +7750,6 @@
                     },
                     "404": {
                         "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/web/messages": {
-            "post": {
-                "description": "Post a user message (with optional attachments) through the local channel pipeline.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "local-channel"
-                ],
-                "summary": "Send a message to a local channel",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Message payload",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.LocalChannelMessageRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/web/stream": {
-            "get": {
-                "description": "Open a persistent SSE connection to receive real-time stream events for the given bot.",
-                "produces": [
-                    "text/event-stream"
-                ],
-                "tags": [
-                    "local-channel"
-                ],
-                "summary": "Subscribe to local channel events via SSE",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "SSE stream",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/web/ws": {
-            "get": {
-                "description": "Upgrade to WebSocket for bidirectional chat streaming with abort support.",
-                "tags": [
-                    "local-channel"
-                ],
-                "summary": "WebSocket chat endpoint",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "101": {
-                        "description": "Switching Protocols",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -15261,9 +15461,6 @@
                 },
                 "timestamp": {
                     "type": "string"
-                },
-                "turn_id": {
-                    "type": "string"
                 }
             }
         },
@@ -15767,6 +15964,88 @@
                 }
             }
         },
+        "handlers.ACPCodexOAuthAuthorizeResponse": {
+            "type": "object",
+            "properties": {
+                "auth_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.ACPCodexOAuthDeviceAuthorizeResponse": {
+            "type": "object",
+            "properties": {
+                "expires_at": {
+                    "type": "string"
+                },
+                "interval_seconds": {
+                    "type": "integer"
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "user_code": {
+                    "type": "string"
+                },
+                "verification_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.ACPCodexOAuthDeviceSessionRequest": {
+            "type": "object",
+            "required": [
+                "session_id"
+            ],
+            "properties": {
+                "session_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.ACPCodexOAuthDeviceStatusResponse": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "has_token": {
+                    "type": "boolean"
+                },
+                "interval_seconds": {
+                    "type": "integer"
+                },
+                "next_poll_after": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.ACPCodexOAuthStatus": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string"
+                },
+                "callback_url": {
+                    "type": "string"
+                },
+                "configured": {
+                    "type": "boolean"
+                },
+                "has_token": {
+                    "type": "boolean"
+                }
+            }
+        },
         "handlers.BatchDeleteRequest": {
             "type": "object",
             "properties": {
@@ -16126,7 +16405,25 @@
         "handlers.ErrorResponse": {
             "type": "object",
             "properties": {
+                "args": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "code": {
+                    "type": "string"
+                },
+                "http_status": {
+                    "type": "integer"
+                },
+                "i18n_key": {
+                    "type": "string"
+                },
                 "message": {
+                    "type": "string"
+                },
+                "reason": {
                     "type": "string"
                 }
             }
@@ -16508,9 +16805,6 @@
                 "message"
             ],
             "properties": {
-                "base_head_turn_id": {
-                    "type": "string"
-                },
                 "message": {
                     "$ref": "#/definitions/channel.Message"
                 },
@@ -17003,6 +17297,12 @@
         "handlers.TokenUsageResponse": {
             "type": "object",
             "properties": {
+                "acp_agent": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.DailyTokenUsage"
+                    }
+                },
                 "by_model": {
                     "type": "array",
                     "items": {
@@ -17010,6 +17310,12 @@
                     }
                 },
                 "chat": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.DailyTokenUsage"
+                    }
+                },
+                "discuss": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/handlers.DailyTokenUsage"
@@ -17032,13 +17338,7 @@
         "handlers.ToolApprovalDecisionRequest": {
             "type": "object",
             "properties": {
-                "base_head_turn_id": {
-                    "type": "string"
-                },
                 "reason": {
-                    "type": "string"
-                },
-                "session_id": {
                     "type": "string"
                 }
             }
@@ -17147,6 +17447,16 @@
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
+                },
+                "runtime_metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "runtime_type": {
+                    "type": "string"
+                },
+                "session_mode": {
+                    "type": "string"
                 },
                 "title": {
                     "type": "string"
@@ -17265,20 +17575,6 @@
                 }
             }
         },
-        "handlers.forkSessionRequest": {
-            "type": "object",
-            "required": [
-                "message_id"
-            ],
-            "properties": {
-                "base_head_turn_id": {
-                    "type": "string"
-                },
-                "message_id": {
-                    "type": "string"
-                }
-            }
-        },
         "handlers.fsOpResponse": {
             "type": "object",
             "properties": {
@@ -17390,32 +17686,6 @@
                 }
             }
         },
-        "handlers.messageUIListResponse": {
-            "type": "object",
-            "properties": {
-                "default_head_turn_id": {
-                    "type": "string"
-                },
-                "head_turn_ids": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/conversation.UITurn"
-                    }
-                },
-                "nodes": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/handlers.sessionTurnGraphUINode"
-                    }
-                }
-            }
-        },
         "handlers.oauthAuthorizeRequest": {
             "type": "object",
             "properties": {
@@ -17445,29 +17715,6 @@
                     "type": "string"
                 },
                 "state": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.sessionTurnGraphUINode": {
-            "type": "object",
-            "properties": {
-                "has_assistant": {
-                    "type": "boolean"
-                },
-                "has_user": {
-                    "type": "boolean"
-                },
-                "parent_turn_id": {
-                    "type": "string"
-                },
-                "request_key": {
-                    "type": "string"
-                },
-                "timestamp": {
-                    "type": "string"
-                },
-                "turn_id": {
                     "type": "string"
                 }
             }
@@ -17519,6 +17766,16 @@
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
+                },
+                "runtime_metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "runtime_type": {
+                    "type": "string"
+                },
+                "session_mode": {
+                    "type": "string"
                 },
                 "title": {
                     "type": "string"
@@ -17841,6 +18098,114 @@
                     "type": "string"
                 },
                 "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "message.Message": {
+            "type": "object",
+            "properties": {
+                "assets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/message.MessageAsset"
+                    }
+                },
+                "bot_id": {
+                    "type": "string"
+                },
+                "compact_id": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "display_content": {
+                    "type": "string"
+                },
+                "event_id": {
+                    "type": "string"
+                },
+                "external_message_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "platform": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "runtime_type": {
+                    "type": "string"
+                },
+                "sender_avatar_url": {
+                    "type": "string"
+                },
+                "sender_channel_identity_id": {
+                    "type": "string"
+                },
+                "sender_display_name": {
+                    "type": "string"
+                },
+                "sender_user_id": {
+                    "type": "string"
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "session_mode": {
+                    "type": "string"
+                },
+                "source_reply_to_message_id": {
+                    "type": "string"
+                },
+                "usage": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
+        "message.MessageAsset": {
+            "type": "object",
+            "properties": {
+                "content_hash": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "mime": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "ordinal": {
+                    "type": "integer"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "size_bytes": {
+                    "type": "integer"
+                },
+                "storage_key": {
                     "type": "string"
                 }
             }
@@ -18894,15 +19259,6 @@
                 "created_by_user_id": {
                     "type": "string"
                 },
-                "default_head_turn_id": {
-                    "type": "string"
-                },
-                "forked_from_session_id": {
-                    "type": "string"
-                },
-                "forked_from_turn_id": {
-                    "type": "string"
-                },
                 "id": {
                     "type": "string"
                 },
@@ -18923,6 +19279,16 @@
                     "type": "object",
                     "additionalProperties": {}
                 },
+                "runtime_metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "runtime_type": {
+                    "type": "string"
+                },
+                "session_mode": {
+                    "type": "string"
+                },
                 "title": {
                     "type": "string"
                 },
@@ -18940,7 +19306,19 @@
                 "acl_default_effect": {
                     "type": "string"
                 },
+                "chat_acp_agent_id": {
+                    "type": "string"
+                },
+                "chat_acp_project_mode": {
+                    "type": "string"
+                },
+                "chat_acp_project_path": {
+                    "type": "string"
+                },
                 "chat_model_id": {
+                    "type": "string"
+                },
+                "chat_runtime": {
                     "type": "string"
                 },
                 "command_ui_language": {
@@ -19093,7 +19471,19 @@
                 "acl_default_effect": {
                     "type": "string"
                 },
+                "chat_acp_agent_id": {
+                    "type": "string"
+                },
+                "chat_acp_project_mode": {
+                    "type": "string"
+                },
+                "chat_acp_project_path": {
+                    "type": "string"
+                },
                 "chat_model_id": {
+                    "type": "string"
+                },
+                "chat_runtime": {
                     "type": "string"
                 },
                 "command_ui_language": {

@@ -77,7 +77,6 @@ type SessionContext struct {
 	BotID               string
 	ChatID              string
 	SessionID           string
-	ViewHeadTurnID      string
 	SessionType         string
 	ChannelIdentityID   string
 	SessionToken        string //nolint:gosec // carries session credential material at runtime

@@ -34,8 +34,7 @@ func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, payload sc
 		Token:       token,
 		SessionType: sessionmode.Schedule,
 	}
-	run := legacyTurnRun(req)
-	rc, err := r.resolve(ctx, req, &run)
+	rc, err := r.resolve(ctx, req)
 	if err != nil {
 		return schedule.TriggerResult{}, err
 	}
@@ -43,6 +42,7 @@ func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, payload sc
 	cfg := rc.runConfig
 	cfg.SessionType = sessionmode.Schedule
 	cfg.Identity.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
+	cfg.ContextScope.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
 
 	schedulePrompt := agentpkg.GenerateSchedulePrompt(agentpkg.Schedule{
 		ID:          payload.ID,
@@ -94,8 +94,7 @@ func (r *Resolver) TriggerHeartbeat(ctx context.Context, botID string, payload h
 		Model:       heartbeatModel,
 		SessionType: sessionmode.Heartbeat,
 	}
-	run := legacyTurnRun(req)
-	rc, err := r.resolve(ctx, req, &run)
+	rc, err := r.resolve(ctx, req)
 	if err != nil {
 		return heartbeat.TriggerResult{}, err
 	}
@@ -103,6 +102,7 @@ func (r *Resolver) TriggerHeartbeat(ctx context.Context, botID string, payload h
 	cfg := rc.runConfig
 	cfg.SessionType = sessionmode.Heartbeat
 	cfg.Identity.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
+	cfg.ContextScope.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
 
 	var checklist string
 	if r.agent != nil {

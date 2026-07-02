@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -32,6 +33,7 @@ import (
 	providerpkg "github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/schedule"
 	searchpkg "github.com/memohai/memoh/internal/searchproviders"
+	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
 )
 
@@ -46,25 +48,6 @@ type importState struct {
 	// failure is fatal (the caller compensates by deleting the bot); in
 	// overwrite mode item failures degrade to warnings.
 	createMode bool
-}
-
-type historyRestoreQueries interface {
-	ClearRouteActiveSessionsByBot(context.Context, pgtype.UUID) error
-	DeleteSessionTurnHeadsByBot(context.Context, pgtype.UUID) error
-	ClearSessionTurnPointersByBot(context.Context, pgtype.UUID) error
-	ClearHistoryTurnMessagePointersByBot(context.Context, pgtype.UUID) error
-	DeleteMessagesByBot(context.Context, pgtype.UUID) error
-	DeleteHistoryTurnsByBot(context.Context, pgtype.UUID) error
-	SoftDeleteSessionsByBot(context.Context, pgtype.UUID) error
-	CreateSession(context.Context, sqlc.CreateSessionParams) (sqlc.BotSession, error)
-	CreateHistoryTurn(context.Context, sqlc.CreateHistoryTurnParams) (sqlc.BotHistoryTurn, error)
-	CreateSessionTurnHead(context.Context, sqlc.CreateSessionTurnHeadParams) (sqlc.BotSessionTurnHead, error)
-	UpdateSessionDefaultHeadTurn(context.Context, sqlc.UpdateSessionDefaultHeadTurnParams) (sqlc.BotSession, error)
-	UpdateSessionRestoredLinks(context.Context, sqlc.UpdateSessionRestoredLinksParams) (sqlc.BotSession, error)
-	CreateMessage(context.Context, sqlc.CreateMessageParams) (sqlc.CreateMessageRow, error)
-	UpdateHistoryTurnRequestMessage(context.Context, sqlc.UpdateHistoryTurnRequestMessageParams) (sqlc.BotHistoryTurn, error)
-	UpdateHistoryTurnFinalAssistantMessage(context.Context, sqlc.UpdateHistoryTurnFinalAssistantMessageParams) (sqlc.BotHistoryTurn, error)
-	CreateMessageAsset(context.Context, sqlc.CreateMessageAssetParams) (sqlc.BotHistoryMessageAsset, error)
 }
 
 const (
@@ -631,7 +614,7 @@ func (s *Service) applyRestore(ctx context.Context, actorUserID, targetBotID str
 	if opts.wants(SectionHistory) {
 		replace := opts.strategyFor(SectionHistory) == StrategyReplace
 		if err := restore("history import failed", func() error {
-			return s.restoreHistory(ctx, targetBotID, state, opts.wants(SectionAssets), replace)
+			return s.restoreHistory(ctx, actorUserID, targetBotID, state, opts.wants(SectionAssets), replace)
 		}); err != nil {
 			return err
 		}
@@ -903,6 +886,10 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 				eff.Language = current.Language
 				eff.AclDefaultEffect = current.AclDefaultEffect
 				eff.Timezone = current.Timezone
+				eff.ChatRuntime = current.ChatRuntime
+				eff.ChatACPAgentID = current.ChatACPAgentID
+				eff.ChatACPProjectPath = current.ChatACPProjectPath
+				eff.ChatACPProjectMode = current.ChatACPProjectMode
 				eff.ReasoningEnabled = current.ReasoningEnabled
 				eff.ReasoningEffort = current.ReasoningEffort
 				eff.HeartbeatEnabled = current.HeartbeatEnabled
@@ -947,6 +934,10 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 	fetchProviderID := modelID(eff.FetchProviderID, deps.fetchProviders)
 	_, err := s.settings.UpsertBot(ctx, botID, settings.UpsertRequest{
 		ChatModelID:            modelID(eff.ChatModelID, deps.models),
+		ChatRuntime:            ptrStringAllowEmpty(eff.ChatRuntime),
+		ChatACPAgentID:         ptrStringAllowEmpty(eff.ChatACPAgentID),
+		ChatACPProjectPath:     ptrStringAllowEmpty(eff.ChatACPProjectPath),
+		ChatACPProjectMode:     ptrStringAllowEmpty(eff.ChatACPProjectMode),
 		ImageModelID:           modelID(eff.ImageModelID, deps.models),
 		SearchProviderID:       modelID(eff.SearchProviderID, deps.searchProviders),
 		FetchProviderID:        &fetchProviderID,
@@ -1153,9 +1144,9 @@ func (s *Service) restoreEmailBindings(ctx context.Context, botID string, state 
 // restoreHistory recreates sessions, messages and (optionally) assets. The whole
 // batch runs inside a single transaction on PostgreSQL so a failure leaves no
 // partial history (on SQLite the pool is nil and writes degrade to best-effort,
-// matching the rest of the codebase). When replace is set, existing messages are
-// deleted inside the same transaction so the swap is atomic.
-func (s *Service) restoreHistory(ctx context.Context, botID string, state *importState, includeAssets, replace bool) error {
+// matching the rest of the codebase). When replace is set, existing conversation
+// state is cleared first so the import is a real replacement, not a partial append.
+func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string, state *importState, includeAssets, replace bool) error {
 	if s.queries == nil {
 		return nil
 	}
@@ -1172,71 +1163,149 @@ func (s *Service) restoreHistory(ctx context.Context, botID string, state *impor
 	}
 
 	pgBotID := optionalUUID(botID)
-	historyQueries, ok := q.(historyRestoreQueries)
-	if !ok {
-		return errors.New("history restore queries not configured")
-	}
 	if replace {
-		if err := historyQueries.ClearRouteActiveSessionsByBot(ctx, pgBotID); err != nil {
-			return fmt.Errorf("clear route active sessions: %w", err)
+		routes, err := q.ListChatRoutes(ctx, pgBotID)
+		if err != nil {
+			return fmt.Errorf("list routes for history replace: %w", err)
 		}
-		if err := historyQueries.ClearSessionTurnPointersByBot(ctx, pgBotID); err != nil {
-			return fmt.Errorf("clear session turn pointers: %w", err)
+		for _, route := range routes {
+			if err := q.SetRouteActiveSession(ctx, sqlc.SetRouteActiveSessionParams{
+				ID:              route.ID,
+				ActiveSessionID: pgtype.UUID{},
+			}); err != nil {
+				return fmt.Errorf("clear active route session: %w", err)
+			}
 		}
-		if err := historyQueries.DeleteSessionTurnHeadsByBot(ctx, pgBotID); err != nil {
-			return fmt.Errorf("clear history turn heads: %w", err)
+		if err := q.DeleteSessionDiscussCursorsByBot(ctx, pgBotID); err != nil {
+			return fmt.Errorf("clear discuss cursors: %w", err)
 		}
-		if err := historyQueries.ClearHistoryTurnMessagePointersByBot(ctx, pgBotID); err != nil {
-			return fmt.Errorf("clear history turn message pointers: %w", err)
+		if err := q.DeleteSessionEventsByBot(ctx, pgBotID); err != nil {
+			return fmt.Errorf("clear session events: %w", err)
 		}
-		if err := historyQueries.DeleteMessagesByBot(ctx, pgBotID); err != nil {
-			return fmt.Errorf("clear history messages: %w", err)
+		if err := q.DeleteMessagesByBot(ctx, pgBotID); err != nil {
+			return fmt.Errorf("clear history: %w", err)
 		}
-		if err := historyQueries.DeleteHistoryTurnsByBot(ctx, pgBotID); err != nil {
-			return fmt.Errorf("clear history turns: %w", err)
-		}
-		if err := historyQueries.SoftDeleteSessionsByBot(ctx, pgBotID); err != nil {
-			return fmt.Errorf("clear history sessions: %w", err)
+		if err := q.SoftDeleteSessionsByBot(ctx, pgBotID); err != nil {
+			return fmt.Errorf("clear sessions: %w", err)
 		}
 	}
 
 	sessionMap := map[string]pgtype.UUID{}
+	sessionDescriptors := map[string]restoredHistoryDescriptor{}
 	sessions, err := readEntry[[]sqlc.ListSessionsByBotRow](state, "history/sessions.json")
 	if err != nil {
 		return err
 	}
-	for i := len(sessions) - 1; i >= 0; i-- {
-		item := sessions[i]
+	createRestoredSession := func(item sqlc.ListSessionsByBotRow, parentSessionID pgtype.UUID) error {
+		legacyType, sessionMode, runtimeType, err := restoredSessionDescriptor(item.Type, item.SessionMode, item.RuntimeType)
+		if err != nil {
+			return fmt.Errorf("session descriptor: %w", err)
+		}
+		metadata := defaultJSONMap(item.Metadata)
+		runtimeMetadata := defaultJSONMap(item.RuntimeMetadata)
+		if runtimeType == sessionpkg.RuntimeACPAgent {
+			metadata = rebindRestoredRuntimeOwner(metadata, actorUserID)
+			runtimeMetadata = rebindRestoredRuntimeOwner(runtimeMetadata, actorUserID)
+		}
 		created, err := q.CreateSession(ctx, sqlc.CreateSessionParams{
-			BotID:       pgBotID,
-			ChannelType: item.ChannelType,
-			Type:        item.Type,
-			Title:       item.Title,
-			Metadata:    item.Metadata,
+			BotID:           pgBotID,
+			ChannelType:     item.ChannelType,
+			Type:            legacyType,
+			SessionMode:     sessionMode,
+			RuntimeType:     runtimeType,
+			RuntimeMetadata: runtimeMetadata,
+			Title:           item.Title,
+			Metadata:        metadata,
+			ParentSessionID: parentSessionID,
+			CreatedByUserID: optionalUUID(actorUserID),
 		})
 		if err != nil {
 			return fmt.Errorf("session: %w", err)
 		}
 		sessionMap[item.ID.String()] = created.ID
+		sessionDescriptors[item.ID.String()] = restoredHistoryDescriptor{sessionMode: sessionMode, runtimeType: runtimeType}
+		return nil
 	}
-	if err := restoreSessionRelationships(ctx, historyQueries, sessions, sessionMap, nil); err != nil {
-		return err
+	pendingSessions := append([]sqlc.ListSessionsByBotRow(nil), sessions...)
+	for len(pendingSessions) > 0 {
+		progressed := false
+		next := make([]sqlc.ListSessionsByBotRow, 0, len(pendingSessions))
+		for i := len(pendingSessions) - 1; i >= 0; i-- {
+			item := pendingSessions[i]
+			parentSessionID := pgtype.UUID{}
+			if item.ParentSessionID.Valid {
+				parentSessionID = sessionMap[item.ParentSessionID.String()]
+				if !parentSessionID.Valid {
+					next = append(next, item)
+					continue
+				}
+			}
+			if err := createRestoredSession(item, parentSessionID); err != nil {
+				return err
+			}
+			progressed = true
+		}
+		if !progressed {
+			for i := len(next) - 1; i >= 0; i-- {
+				if err := createRestoredSession(next[i], pgtype.UUID{}); err != nil {
+					return err
+				}
+			}
+			break
+		}
+		pendingSessions = next
 	}
 
-	turnMap := map[string]pgtype.UUID{}
-	turns, err := readEntry[[]sqlc.BotHistoryTurn](state, "history/turns.json")
-	if err != nil {
-		return err
+	if hasEntry(state.entries, "history/discuss_cursors.json") {
+		cursors, err := readEntry[[]sqlc.BotSessionDiscussCursor](state, "history/discuss_cursors.json")
+		if err != nil {
+			return err
+		}
+		for _, cursor := range cursors {
+			sessionID := sessionMap[cursor.SessionID.String()]
+			if !sessionID.Valid || strings.TrimSpace(cursor.ScopeKey) == "" {
+				continue
+			}
+			if _, err := q.UpsertSessionDiscussCursor(ctx, sqlc.UpsertSessionDiscussCursorParams{
+				SessionID:      sessionID,
+				ScopeKey:       cursor.ScopeKey,
+				RouteID:        pgtype.UUID{},
+				Source:         cursor.Source,
+				ConsumedCursor: cursor.ConsumedCursor,
+			}); err != nil {
+				return fmt.Errorf("discuss cursor: %w", err)
+			}
+		}
 	}
-	turnHeads, err := readEntry[[]sqlc.BotSessionTurnHead](state, "history/turn_heads.json")
-	if err != nil {
-		return err
-	}
-	if len(turns) == 0 {
-		return errors.New("history backup is missing turn graph data")
-	}
-	if err := restoreHistoryTurnsFromBackup(ctx, historyQueries, pgBotID, turns, turnHeads, sessionMap, turnMap); err != nil {
-		return err
+
+	eventMap := map[string]pgtype.UUID{}
+	if hasEntry(state.entries, "history/session_events.json") {
+		events, err := readEntry[[]sqlc.BotSessionEvent](state, "history/session_events.json")
+		if err != nil {
+			return err
+		}
+		for _, item := range events {
+			sessionID := pgtype.UUID{}
+			if item.SessionID.Valid {
+				sessionID = sessionMap[item.SessionID.String()]
+			}
+			if !sessionID.Valid {
+				continue
+			}
+			created, err := q.CreateSessionEvent(ctx, sqlc.CreateSessionEventParams{
+				BotID:                   pgBotID,
+				SessionID:               sessionID,
+				EventKind:               item.EventKind,
+				EventData:               defaultJSONMap(item.EventData),
+				ExternalMessageID:       item.ExternalMessageID,
+				SenderChannelIdentityID: pgtype.UUID{},
+				ReceivedAtMs:            item.ReceivedAtMs,
+			})
+			if err != nil {
+				return fmt.Errorf("session event: %w", err)
+			}
+			eventMap[item.ID.String()] = created
+		}
 	}
 
 	messages, err := readEntry[[]sqlc.ListMessagesRow](state, "history/messages.json")
@@ -1246,45 +1315,48 @@ func (s *Service) restoreHistory(ctx context.Context, botID string, state *impor
 	messageMap := map[string]pgtype.UUID{}
 	for _, item := range messages {
 		sessionID := pgtype.UUID{}
+		var descriptor restoredHistoryDescriptor
 		if item.SessionID.Valid {
 			sessionID = sessionMap[item.SessionID.String()]
+			descriptor = sessionDescriptors[item.SessionID.String()]
 		}
-		turnID := pgtype.UUID{}
-		turnSeq := pgtype.Int8{}
-		if item.TurnID.Valid {
-			turnID = turnMap[item.TurnID.String()]
-			turnSeq = item.TurnMessageSeq
+		sessionMode := strings.TrimSpace(item.SessionMode)
+		if sessionMode == "" {
+			sessionMode = descriptor.sessionMode
 		}
-		if !turnID.Valid {
-			return fmt.Errorf("message %s references missing turn %s", item.ID.String(), item.TurnID.String())
+		if sessionMode == "" {
+			sessionMode = sessionpkg.TypeChat
 		}
-		created, err := historyQueries.CreateMessage(ctx, sqlc.CreateMessageParams{
-			BotID:                   pgBotID,
-			SessionID:               sessionID,
-			TurnID:                  turnID,
-			TurnMessageSeq:          turnSeq,
-			SenderChannelIdentityID: pgtype.UUID{},
-			SenderUserID:            pgtype.UUID{},
-			ExternalMessageID:       item.ExternalMessageID,
-			SourceReplyToMessageID:  item.SourceReplyToMessageID,
-			Role:                    item.Role,
-			Content:                 item.Content,
-			Metadata:                item.Metadata,
-			Usage:                   item.Usage,
-			EventID:                 pgtype.UUID{},
-			DisplayText:             item.DisplayText,
+		runtimeType := strings.TrimSpace(item.RuntimeType)
+		if runtimeType == "" {
+			runtimeType = descriptor.runtimeType
+		}
+		if runtimeType == "" {
+			runtimeType = sessionpkg.RuntimeModel
+		}
+		eventID := pgtype.UUID{}
+		if item.EventID.Valid {
+			eventID = eventMap[item.EventID.String()]
+		}
+		created, err := q.CreateMessage(ctx, sqlc.CreateMessageParams{
+			BotID:                  pgBotID,
+			SessionID:              sessionID,
+			ExternalMessageID:      item.ExternalMessageID,
+			SourceReplyToMessageID: item.SourceReplyToMessageID,
+			Role:                   item.Role,
+			Content:                item.Content,
+			Metadata:               item.Metadata,
+			Usage:                  item.Usage,
+			SessionMode:            sessionMode,
+			RuntimeType:            runtimeType,
+			EventID:                eventID,
+			DisplayText:            item.DisplayText,
 		})
 		if err != nil {
 			return fmt.Errorf("message: %w", err)
 		}
 		messageMap[item.ID.String()] = created.ID
 		state.counts[SectionHistory]++
-	}
-	if err := finalizeRestoredTurnGraph(ctx, historyQueries, turns, turnHeads, sessions, sessionMap, turnMap, messageMap); err != nil {
-		return err
-	}
-	if err := restoreSessionRelationships(ctx, historyQueries, sessions, sessionMap, turnMap); err != nil {
-		return err
 	}
 
 	if includeAssets {
@@ -1297,7 +1369,7 @@ func (s *Service) restoreHistory(ctx context.Context, botID string, state *impor
 			if !messageID.Valid {
 				continue
 			}
-			if _, err := historyQueries.CreateMessageAsset(ctx, sqlc.CreateMessageAssetParams{
+			if _, err := q.CreateMessageAsset(ctx, sqlc.CreateMessageAssetParams{
 				MessageID:   messageID,
 				Role:        asset.Role,
 				Ordinal:     asset.Ordinal,
@@ -1314,206 +1386,6 @@ func (s *Service) restoreHistory(ctx context.Context, botID string, state *impor
 	if tx != nil {
 		if err := tx.Commit(ctx); err != nil {
 			return fmt.Errorf("commit history tx: %w", err)
-		}
-	}
-	return nil
-}
-
-func restoreHistoryTurnsFromBackup(
-	ctx context.Context,
-	queries historyRestoreQueries,
-	botID pgtype.UUID,
-	turns []sqlc.BotHistoryTurn,
-	turnHeads []sqlc.BotSessionTurnHead,
-	sessionMap map[string]pgtype.UUID,
-	turnMap map[string]pgtype.UUID,
-) error {
-	fallbackOwners := fallbackTurnOwners(turns, turnHeads, sessionMap)
-	pending := append([]sqlc.BotHistoryTurn(nil), turns...)
-	for len(pending) > 0 {
-		progressed := false
-		next := pending[:0]
-		for _, item := range pending {
-			parentTurnID := pgtype.UUID{}
-			if item.ParentTurnID.Valid {
-				parentTurnID = turnMap[item.ParentTurnID.String()]
-				if !parentTurnID.Valid {
-					next = append(next, item)
-					continue
-				}
-			}
-			ownerSessionID := pgtype.UUID{}
-			if item.OwnerSessionID.Valid {
-				ownerSessionID = sessionMap[item.OwnerSessionID.String()]
-			}
-			if !ownerSessionID.Valid {
-				ownerSessionID = fallbackOwners[item.ID.String()]
-			}
-			created, err := queries.CreateHistoryTurn(ctx, sqlc.CreateHistoryTurnParams{
-				BotID:          botID,
-				OwnerSessionID: ownerSessionID,
-				ParentTurnID:   parentTurnID,
-			})
-			if err != nil {
-				return fmt.Errorf("history turn: %w", err)
-			}
-			turnMap[item.ID.String()] = created.ID
-			progressed = true
-		}
-		if !progressed {
-			return errors.New("history turn graph contains unresolved parent references")
-		}
-		pending = next
-	}
-	return nil
-}
-
-func fallbackTurnOwners(
-	turns []sqlc.BotHistoryTurn,
-	turnHeads []sqlc.BotSessionTurnHead,
-	sessionMap map[string]pgtype.UUID,
-) map[string]pgtype.UUID {
-	parentByTurn := make(map[string]string, len(turns))
-	for _, turn := range turns {
-		turnID := turn.ID.String()
-		if !turn.ID.Valid || turnID == "" {
-			continue
-		}
-		if turn.ParentTurnID.Valid {
-			parentByTurn[turnID] = turn.ParentTurnID.String()
-		}
-	}
-	out := map[string]pgtype.UUID{}
-	for _, head := range turnHeads {
-		sessionID := sessionMap[head.SessionID.String()]
-		if !sessionID.Valid || !head.HeadTurnID.Valid {
-			continue
-		}
-		seen := map[string]struct{}{}
-		for turnID := head.HeadTurnID.String(); turnID != ""; turnID = parentByTurn[turnID] {
-			if _, ok := seen[turnID]; ok {
-				break
-			}
-			seen[turnID] = struct{}{}
-			if !out[turnID].Valid {
-				out[turnID] = sessionID
-			}
-		}
-	}
-	return out
-}
-
-func restoreSessionRelationships(
-	ctx context.Context,
-	queries historyRestoreQueries,
-	sessions []sqlc.ListSessionsByBotRow,
-	sessionMap map[string]pgtype.UUID,
-	turnMap map[string]pgtype.UUID,
-) error {
-	for _, item := range sessions {
-		sessionID := sessionMap[item.ID.String()]
-		if !sessionID.Valid {
-			continue
-		}
-		parentSessionID := pgtype.UUID{}
-		if item.ParentSessionID.Valid {
-			parentSessionID = sessionMap[item.ParentSessionID.String()]
-		}
-		forkedFromSessionID := pgtype.UUID{}
-		if item.ForkedFromSessionID.Valid {
-			forkedFromSessionID = sessionMap[item.ForkedFromSessionID.String()]
-		}
-		forkedFromTurnID := pgtype.UUID{}
-		if item.ForkedFromTurnID.Valid && turnMap != nil {
-			forkedFromTurnID = turnMap[item.ForkedFromTurnID.String()]
-		}
-		defaultHeadTurnID := pgtype.UUID{}
-		if item.DefaultHeadTurnID.Valid && turnMap != nil {
-			defaultHeadTurnID = turnMap[item.DefaultHeadTurnID.String()]
-		}
-		if _, err := queries.UpdateSessionRestoredLinks(ctx, sqlc.UpdateSessionRestoredLinksParams{
-			ID:                  sessionID,
-			ParentSessionID:     parentSessionID,
-			ForkedFromSessionID: forkedFromSessionID,
-			ForkedFromTurnID:    forkedFromTurnID,
-			DefaultHeadTurnID:   defaultHeadTurnID,
-		}); err != nil {
-			return fmt.Errorf("session restored links: %w", err)
-		}
-	}
-	return nil
-}
-
-func finalizeRestoredTurnGraph(
-	ctx context.Context,
-	queries historyRestoreQueries,
-	turns []sqlc.BotHistoryTurn,
-	heads []sqlc.BotSessionTurnHead,
-	sessions []sqlc.ListSessionsByBotRow,
-	sessionMap map[string]pgtype.UUID,
-	turnMap map[string]pgtype.UUID,
-	messageMap map[string]pgtype.UUID,
-) error {
-	for _, turn := range turns {
-		restoredTurnID := turnMap[turn.ID.String()]
-		if !restoredTurnID.Valid {
-			continue
-		}
-		if turn.RequestMessageID.Valid {
-			requestMessageID := messageMap[turn.RequestMessageID.String()]
-			if requestMessageID.Valid {
-				if _, err := queries.UpdateHistoryTurnRequestMessage(ctx, sqlc.UpdateHistoryTurnRequestMessageParams{
-					ID:               restoredTurnID,
-					RequestMessageID: requestMessageID,
-				}); err != nil {
-					return fmt.Errorf("history turn request pointer: %w", err)
-				}
-			}
-		}
-		if turn.FinalAssistantMessageID.Valid {
-			assistantMessageID := messageMap[turn.FinalAssistantMessageID.String()]
-			if assistantMessageID.Valid {
-				if _, err := queries.UpdateHistoryTurnFinalAssistantMessage(ctx, sqlc.UpdateHistoryTurnFinalAssistantMessageParams{
-					ID:                      restoredTurnID,
-					FinalAssistantMessageID: assistantMessageID,
-				}); err != nil {
-					return fmt.Errorf("history turn assistant pointer: %w", err)
-				}
-			}
-		}
-	}
-
-	for _, head := range heads {
-		sessionID := sessionMap[head.SessionID.String()]
-		headTurnID := turnMap[head.HeadTurnID.String()]
-		if !sessionID.Valid || !headTurnID.Valid {
-			continue
-		}
-		if _, err := queries.CreateSessionTurnHead(ctx, sqlc.CreateSessionTurnHeadParams{
-			SessionID:  sessionID,
-			HeadTurnID: headTurnID,
-		}); err != nil {
-			return fmt.Errorf("session turn head: %w", err)
-		}
-	}
-
-	for _, session := range sessions {
-		sessionID := sessionMap[session.ID.String()]
-		defaultHeadTurnID := turnMap[session.DefaultHeadTurnID.String()]
-		if !sessionID.Valid || !defaultHeadTurnID.Valid {
-			continue
-		}
-		if _, err := queries.CreateSessionTurnHead(ctx, sqlc.CreateSessionTurnHeadParams{
-			SessionID:  sessionID,
-			HeadTurnID: defaultHeadTurnID,
-		}); err != nil {
-			return fmt.Errorf("session default turn head: %w", err)
-		}
-		if _, err := queries.UpdateSessionDefaultHeadTurn(ctx, sqlc.UpdateSessionDefaultHeadTurnParams{
-			ID:                sessionID,
-			DefaultHeadTurnID: defaultHeadTurnID,
-		}); err != nil {
-			return fmt.Errorf("session default head turn: %w", err)
 		}
 	}
 	return nil
@@ -1772,6 +1644,54 @@ func ptrString(value string) *string {
 		return nil
 	}
 	return &value
+}
+
+func ptrStringAllowEmpty(value string) *string {
+	return &value
+}
+
+type restoredHistoryDescriptor struct {
+	sessionMode string
+	runtimeType string
+}
+
+func restoredSessionDescriptor(legacyType, sessionMode, runtimeType string) (string, string, string, error) {
+	sessionMode = strings.TrimSpace(sessionMode)
+	runtimeType = strings.TrimSpace(runtimeType)
+	if !sessionpkg.IsKnownSessionMode(sessionMode) || !sessionpkg.IsKnownRuntimeType(runtimeType) {
+		derivedMode, derivedRuntime := sessionpkg.DescriptorFromLegacyType(legacyType)
+		if !sessionpkg.IsKnownSessionMode(sessionMode) {
+			sessionMode = derivedMode
+		}
+		if !sessionpkg.IsKnownRuntimeType(runtimeType) {
+			runtimeType = derivedRuntime
+		}
+	}
+	return sessionpkg.ResolveDescriptor(legacyType, sessionMode, runtimeType)
+}
+
+func defaultJSONMap(raw []byte) []byte {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return []byte(`{}`)
+	}
+	return raw
+}
+
+func rebindRestoredRuntimeOwner(raw []byte, ownerUserID string) []byte {
+	raw = defaultJSONMap(raw)
+	var meta map[string]any
+	if err := json.Unmarshal(raw, &meta); err != nil || meta == nil {
+		return []byte(`{}`)
+	}
+	delete(meta, "runtime_owner_account_id")
+	if ownerUserID = strings.TrimSpace(ownerUserID); ownerUserID != "" {
+		meta["runtime_owner_account_id"] = ownerUserID
+	}
+	out, err := json.Marshal(meta)
+	if err != nil {
+		return []byte(`{}`)
+	}
+	return out
 }
 
 func mcpRequestFromConnection(conn mcp.Connection) mcp.UpsertRequest {

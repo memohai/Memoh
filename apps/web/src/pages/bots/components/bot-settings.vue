@@ -75,6 +75,8 @@
         :form="form"
         :models="models"
         :providers="providers"
+        :acp-profiles="acpProfiles"
+        :bot-metadata="botMetadata"
       />
 
       <SettingsContextCard
@@ -145,10 +147,11 @@ import PageShell from '@/components/page-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getBotsById, putBotsById, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getFetchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getVideoProviders, getVideoModels, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild, getBotsNameAvailability } from '@memohai/sdk'
-import type { SettingsSettings } from '@memohai/sdk'
+import { getAcpProfiles, getBotsById, putBotsById, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getFetchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getVideoProviders, getVideoModels, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild, getBotsNameAvailability } from '@memohai/sdk'
+import type { AcpprofilePublicProfile, SettingsSettings } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { useChatStore } from '@/store/chat-list'
 
 const props = defineProps<{
   botId: string
@@ -157,6 +160,7 @@ const props = defineProps<{
 const { t } = useI18n()
 const router = useRouter()
 const route = useRoute()
+const chatStore = useChatStore()
 
 // Deep-link scroll: another surface (e.g. the Overview "choose a model"
 // reminder) can navigate here with ?section=<anchor-id> to land on a specific
@@ -218,6 +222,14 @@ const { data: providerData } = useQuery({
   key: ['all-providers'],
   query: async () => {
     const { data } = await getProviders({ throwOnError: true })
+    return data
+  },
+})
+
+const { data: acpProfileData } = useQuery({
+  key: ['acp-profiles'],
+  query: async () => {
+    const { data } = await getAcpProfiles({ throwOnError: true })
     return data
   },
 })
@@ -303,7 +315,10 @@ const { mutateAsync: updateSettings, isLoading } = useMutation({
     })
     return data
   },
-  onSettled: () => queryCache.invalidateQueries({ key: ['bot-settings', botIdRef.value] }),
+  onSettled: () => {
+    queryCache.invalidateQueries({ key: ['bot-settings', botIdRef.value] })
+    void chatStore.refreshBots().catch(() => {})
+  },
 })
 
 const { mutateAsync: updateBot, isLoading: isUpdatingBot } = useMutation({
@@ -320,6 +335,7 @@ const { mutateAsync: updateBot, isLoading: isUpdatingBot } = useMutation({
     queryCache.invalidateQueries({ key: ['bot', botIdRef.value] })
     queryCache.invalidateQueries({ key: ['bot-settings', botIdRef.value] })
     queryCache.invalidateQueries({ key: ['bots'] })
+    void chatStore.refreshBots().catch(() => {})
   },
 })
 
@@ -392,6 +408,8 @@ const { mutateAsync: deleteBot, isLoading: deleteLoading } = useMutation({
 
 const models = computed(() => modelData.value ?? [])
 const providers = computed(() => providerData.value ?? [])
+const acpProfiles = computed<AcpprofilePublicProfile[]>(() => acpProfileData.value?.items ?? [])
+const botMetadata = computed(() => bot.value?.metadata as Record<string, unknown> | undefined)
 const imageCapableModels = computed(() =>
   models.value.filter((m) => m.config?.compatibilities?.includes('image-output')),
 )
@@ -413,8 +431,20 @@ const videoModels = computed(() =>
 )
 
 // ---- Form ----
-const form = reactive({
+type SettingsForm = SettingsSettings & {
+  chat_runtime: string
+  chat_acp_agent_id: string
+  chat_acp_project_path: string
+  chat_acp_project_mode: string
+  timezone: string
+}
+
+const form = reactive<SettingsForm>({
   chat_model_id: '',
+  chat_runtime: 'model',
+  chat_acp_agent_id: '',
+  chat_acp_project_path: '/data',
+  chat_acp_project_mode: 'project',
   title_model_id: '',
   image_model_id: '',
   search_provider_id: '',
@@ -462,6 +492,11 @@ const memoryStatus = computed(() => memoryStatusData.value ?? null)
 watch(settings, (val) => {
   if (val) {
     form.chat_model_id = val.chat_model_id ?? ''
+    const next = val as SettingsForm
+    form.chat_runtime = next.chat_runtime === 'acp_agent' ? 'acp_agent' : 'model'
+    form.chat_acp_agent_id = next.chat_acp_agent_id ?? ''
+    form.chat_acp_project_path = next.chat_acp_project_path || '/data'
+    form.chat_acp_project_mode = next.chat_acp_project_mode || 'project'
     form.title_model_id = val.title_model_id ?? ''
     form.image_model_id = val.image_model_id ?? ''
     form.search_provider_id = val.search_provider_id ?? ''
@@ -486,6 +521,10 @@ const hasSettingsChanges = computed(() => {
   const s = settings.value
   return (
     form.chat_model_id !== (s.chat_model_id ?? '')
+    || form.chat_runtime !== (((s as SettingsForm).chat_runtime === 'acp_agent') ? 'acp_agent' : 'model')
+    || form.chat_acp_agent_id !== ((s as SettingsForm).chat_acp_agent_id ?? '')
+    || form.chat_acp_project_path !== (((s as SettingsForm).chat_acp_project_path || '/data'))
+    || form.chat_acp_project_mode !== (((s as SettingsForm).chat_acp_project_mode || 'project'))
     || form.title_model_id !== (s.title_model_id ?? '')
     || form.image_model_id !== (s.image_model_id ?? '')
     || form.search_provider_id !== (s.search_provider_id ?? '')
@@ -514,6 +553,10 @@ function isNameConflict(error: unknown): boolean {
 async function handleSave() {
   if (!nameValid.value) {
     toast.error(nameStatusMessage.value || t('bots.nameStatus.invalid'))
+    return
+  }
+  if (form.chat_runtime === 'acp_agent' && !form.chat_model_id) {
+    toast.error(t('bots.settings.externalAgentChatModelRequired'))
     return
   }
   try {

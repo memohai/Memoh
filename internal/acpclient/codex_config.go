@@ -49,6 +49,11 @@ var codexConfigTemplate = template.Must(template.New("codex-managed-config").
 	Funcs(template.FuncMap{"tomlString": strconv.Quote}).
 	Parse(codexManagedConfigTemplate))
 
+var (
+	ErrCodexOAuthIncomplete  = errors.New("codex OAuth is incomplete")
+	ErrCodexAuthTokenMissing = errors.New("codex auth token is missing")
+)
+
 type codexManagedConfigData struct {
 	ProviderID         string
 	ProviderName       string
@@ -72,6 +77,11 @@ type CodexOAuthCredentials struct {
 	LastRefresh  time.Time
 }
 
+type CodexOAuthAuthStatus struct {
+	Valid     bool
+	AccountID string
+}
+
 // WriteCodexManagedConfig writes the fixed Codex config.toml and auth.json
 // used by Memoh-managed Codex ACP sessions.
 func WriteCodexManagedConfig(ctx context.Context, client *bridge.Client, managed map[string]string) error {
@@ -93,11 +103,11 @@ func WriteCodexManagedConfigWithAuth(ctx context.Context, client *bridge.Client,
 	if err != nil {
 		return fmt.Errorf("render Codex config: %w", err)
 	}
-	if err := client.WriteFile(ctx, path.Join(CodexManagedConfigDir, "config.toml"), content); err != nil {
-		return fmt.Errorf("write Codex config: %w", err)
-	}
 	if err := client.WriteFile(ctx, path.Join(CodexManagedConfigDir, "auth.json"), auth); err != nil {
 		return fmt.Errorf("write Codex auth: %w", err)
+	}
+	if err := client.WriteFile(ctx, path.Join(CodexManagedConfigDir, "config.toml"), content); err != nil {
+		return fmt.Errorf("write Codex config: %w", err)
 	}
 	return nil
 }
@@ -126,34 +136,92 @@ func WriteCodexManagedConfigFile(ctx context.Context, client *bridge.Client, cfg
 	return nil
 }
 
+// IsCodexManagedOAuthConfig reports whether config.toml currently points at
+// Memoh's managed ChatGPT OAuth provider.
+func IsCodexManagedOAuthConfig(ctx context.Context, client *bridge.Client) bool {
+	return readCodexManagedConfig(ctx, client).ProviderID == codexManagedOAuthProviderID
+}
+
+func CheckCodexManagedOAuthAuth(ctx context.Context, client *bridge.Client) (CodexOAuthAuthStatus, error) {
+	if client == nil {
+		return CodexOAuthAuthStatus{}, errors.New("workspace bridge client is required")
+	}
+	resp, err := client.ReadFile(ctx, path.Join(CodexManagedConfigDir, "auth.json"), 0, 0)
+	if err != nil {
+		return CodexOAuthAuthStatus{}, ErrCodexOAuthIncomplete
+	}
+	status := ParseCodexOAuthAuth(resp.GetContent())
+	if !status.Valid {
+		return status, ErrCodexAuthTokenMissing
+	}
+	return status, nil
+}
+
+func ParseCodexOAuthAuth(content string) CodexOAuthAuthStatus {
+	var auth struct {
+		AuthMode string `json:"auth_mode"`
+		Tokens   struct {
+			IDToken      string `json:"id_token"`
+			AccessToken  string `json:"access_token"`  //nolint:gosec // Codex auth status parses existing runtime token material.
+			RefreshToken string `json:"refresh_token"` //nolint:gosec // Codex auth status parses existing runtime token material.
+			AccountID    string `json:"account_id"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal([]byte(content), &auth); err != nil {
+		return CodexOAuthAuthStatus{}
+	}
+	idToken := strings.TrimSpace(auth.Tokens.IDToken)
+	accessToken := strings.TrimSpace(auth.Tokens.AccessToken)
+	refreshToken := strings.TrimSpace(auth.Tokens.RefreshToken)
+	accountID := strings.TrimSpace(auth.Tokens.AccountID)
+	return CodexOAuthAuthStatus{
+		Valid: strings.EqualFold(strings.TrimSpace(auth.AuthMode), "chatgpt") &&
+			idToken != "" &&
+			accessToken != "" &&
+			refreshToken != "" &&
+			accountID != "" &&
+			idToken != accessToken,
+		AccountID: accountID,
+	}
+}
+
 // readCodexManagedOAuthBaseURL extracts the provider base_url from an existing
 // managed config.toml, but only when that config was rendered for the OAuth
 // provider — an api_key-mode leftover must not leak its OpenAI URL into an
 // OAuth refresh.
 func readCodexManagedOAuthBaseURL(ctx context.Context, client *bridge.Client) string {
+	config := readCodexManagedConfig(ctx, client)
+	if config.ProviderID != codexManagedOAuthProviderID {
+		return ""
+	}
+	return config.BaseURL
+}
+
+type codexManagedConfigSummary struct {
+	ProviderID string
+	BaseURL    string
+}
+
+func readCodexManagedConfig(ctx context.Context, client *bridge.Client) codexManagedConfigSummary {
 	rc, err := client.ReadRaw(ctx, path.Join(CodexManagedConfigDir, "config.toml"))
 	if err != nil {
-		return ""
+		return codexManagedConfigSummary{}
 	}
 	defer func() { _ = rc.Close() }()
 	data, err := io.ReadAll(io.LimitReader(rc, 64*1024))
 	if err != nil {
-		return ""
+		return codexManagedConfigSummary{}
 	}
-	var baseURL string
-	var oauthProvider bool
+	var out codexManagedConfigSummary
 	for _, line := range strings.Split(string(data), "\n") {
 		switch key, value := parseCodexConfigStringLine(line); key {
 		case "model_provider":
-			oauthProvider = value == codexManagedOAuthProviderID
+			out.ProviderID = value
 		case "base_url":
-			baseURL = value
+			out.BaseURL = value
 		}
 	}
-	if !oauthProvider {
-		return ""
-	}
-	return baseURL
+	return out
 }
 
 // parseCodexConfigStringLine parses a `key = "quoted value"` line from a
@@ -248,21 +316,21 @@ func renderCodexManagedOAuthAuth(creds *CodexOAuthCredentials) ([]byte, error) {
 		return nil, errors.New("oauth id token is required")
 	}
 	accountID := strings.TrimSpace(creds.AccountID)
-	if accountID == "" {
-		return nil, errors.New("oauth account id is required")
+	tokens := map[string]string{
+		"id_token":      idToken,
+		"access_token":  accessToken,
+		"refresh_token": strings.TrimSpace(creds.RefreshToken),
+	}
+	if accountID != "" {
+		tokens["account_id"] = accountID
 	}
 	lastRefresh := creds.LastRefresh
 	if lastRefresh.IsZero() {
 		lastRefresh = time.Now().UTC()
 	}
 	content, err := json.MarshalIndent(map[string]any{
-		"auth_mode": "chatgpt",
-		"tokens": map[string]string{
-			"id_token":      idToken,
-			"access_token":  accessToken,
-			"refresh_token": strings.TrimSpace(creds.RefreshToken),
-			"account_id":    accountID,
-		},
+		"auth_mode":    "chatgpt",
+		"tokens":       tokens,
 		"last_refresh": lastRefresh.UTC().Format(time.RFC3339Nano),
 	}, "", "  ")
 	if err != nil {

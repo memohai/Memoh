@@ -35,6 +35,7 @@ const (
 var (
 	ErrNotFound       = errors.New("user input request not found")
 	ErrAlreadyDecided = errors.New("user input request already decided")
+	ErrForbidden      = errors.New("user input forbidden")
 )
 
 type CreatePendingInput struct {
@@ -51,13 +52,11 @@ type CreatePendingInput struct {
 	ReplyTarget                  string
 	ConversationType             string
 	ExpiresAt                    *time.Time
-	PersistTurnID                string
 }
 
 type ResolveInput struct {
 	BotID                  string
 	SessionID              string
-	BaseHeadTurnID         string
 	ExplicitID             string
 	ReplyExternalMessageID string
 }
@@ -101,7 +100,6 @@ type Request struct {
 	SourcePlatform          string         `json:"source_platform,omitempty"`
 	ReplyTarget             string         `json:"reply_target,omitempty"`
 	ConversationType        string         `json:"conversation_type,omitempty"`
-	PersistTurnID           string         `json:"persist_turn_id,omitempty"`
 	ExpiresAt               *time.Time     `json:"expires_at,omitempty"`
 	CreatedAt               time.Time      `json:"created_at"`
 	RespondedAt             *time.Time     `json:"responded_at,omitempty"`

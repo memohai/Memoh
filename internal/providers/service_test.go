@@ -3,9 +3,13 @@ package providers
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,6 +51,52 @@ func TestMaskAPIKey(t *testing.T) {
 			t.Fatalf("expected empty, got %q", got)
 		}
 	})
+}
+
+func TestFetchTemplateModelsUsesPresetSource(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "zai.yaml")
+	if err := os.WriteFile(path, []byte(`
+name: Z.AI GLM
+client_type: openai-completions
+icon: zhipu-color
+base_url: https://api.z.ai/api/paas/v4
+
+models:
+  - model_id: glm-5
+    name: GLM 5
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 200000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
+`), 0o600); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+
+	svc := NewService(nil, nil, "", dir)
+	models, ok := svc.fetchTemplateModels(sqlc.Provider{
+		Metadata: []byte(`{"preset":{"source":"zai.yaml"}}`),
+	})
+	if !ok {
+		t.Fatal("expected template models")
+	}
+	if len(models) != 1 {
+		t.Fatalf("models = %d, want 1", len(models))
+	}
+	model := models[0]
+	if model.ID != "glm-5" || model.Name != "GLM 5" || model.Type != "chat" {
+		t.Fatalf("unexpected model: %#v", model)
+	}
+	if got := strings.Join(model.Compatibilities, ","); got != "tool-call,reasoning" {
+		t.Fatalf("compatibilities = %q", got)
+	}
+	if model.ContextWindow == nil || *model.ContextWindow != 200000 {
+		t.Fatalf("context window = %#v", model.ContextWindow)
+	}
 }
 
 func TestNormalizeProviderConfig(t *testing.T) {
@@ -354,6 +404,354 @@ func TestOAuthConfigForGitHubCopilotUsesFixedDeviceFlowSettings(t *testing.T) {
 	if cfg.Scopes != "read:user user:email" {
 		t.Fatalf("expected fixed scope, got %q", cfg.Scopes)
 	}
+}
+
+func TestOpenAICodexACPDeviceAuthorizationRequestsUserCode(t *testing.T) {
+	restore := overrideOpenAICodexDeviceAuthTestHooks(t, "")
+	defer restore()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/accounts/deviceauth/usercode" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method %q", r.Method)
+		}
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if body["client_id"] != defaultOpenAICodexClientID {
+			t.Fatalf("client_id = %q", body["client_id"])
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"device_auth_id": "device-auth-123",
+			"usercode":       "CODE-123",
+			"interval":       0,
+		})
+	}))
+	defer server.Close()
+	openAICodexACPAuthIssuer = server.URL
+
+	service := &Service{httpClient: server.Client()}
+	device, err := service.StartOpenAICodexACPDeviceAuthorization(context.Background())
+	if err != nil {
+		t.Fatalf("start device auth: %v", err)
+	}
+	if device.DeviceAuthID != "device-auth-123" {
+		t.Fatalf("device auth id = %q", device.DeviceAuthID)
+	}
+	if device.UserCode != "CODE-123" {
+		t.Fatalf("user code = %q", device.UserCode)
+	}
+	if device.VerificationURL != server.URL+"/codex/device" {
+		t.Fatalf("verification url = %q", device.VerificationURL)
+	}
+	if device.IntervalSeconds != 5 {
+		t.Fatalf("interval = %d, want 5", device.IntervalSeconds)
+	}
+}
+
+func TestOpenAICodexACPDeviceAuthorizationAcceptsStringInterval(t *testing.T) {
+	restore := overrideOpenAICodexDeviceAuthTestHooks(t, "")
+	defer restore()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/accounts/deviceauth/usercode" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"device_auth_id": "device-auth-123",
+			"user_code":      "CODE-123",
+			"interval":       "7",
+		})
+	}))
+	defer server.Close()
+	openAICodexACPAuthIssuer = server.URL
+
+	service := &Service{httpClient: server.Client()}
+	device, err := service.StartOpenAICodexACPDeviceAuthorization(context.Background())
+	if err != nil {
+		t.Fatalf("start device auth: %v", err)
+	}
+	if device.IntervalSeconds != 7 {
+		t.Fatalf("interval = %d, want 7", device.IntervalSeconds)
+	}
+}
+
+func TestOpenAICodexACPDeviceAuthorizationSanitizesNon404FailureBody(t *testing.T) {
+	restore := overrideOpenAICodexDeviceAuthTestHooks(t, "")
+	defer restore()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/accounts/deviceauth/usercode" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"sensitive-body"}`))
+	}))
+	defer server.Close()
+	openAICodexACPAuthIssuer = server.URL
+
+	service := &Service{httpClient: server.Client()}
+	_, err := service.StartOpenAICodexACPDeviceAuthorization(context.Background())
+	if err == nil {
+		t.Fatal("expected user code failure")
+	}
+	if strings.Contains(err.Error(), "sensitive-body") {
+		t.Fatalf("error should not expose upstream body: %v", err)
+	}
+	if !strings.Contains(err.Error(), "status 401") {
+		t.Fatalf("error should keep status code context: %v", err)
+	}
+}
+
+func TestOpenAICodexACPDevicePollPendingAndSuccess(t *testing.T) {
+	restore := overrideOpenAICodexDeviceAuthTestHooks(t, "")
+	defer restore()
+
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/accounts/deviceauth/token" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method %q", r.Method)
+		}
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if body["device_auth_id"] != "device-auth-123" {
+			t.Fatalf("device_auth_id = %q", body["device_auth_id"])
+		}
+		if body["user_code"] != "CODE-123" {
+			t.Fatalf("user_code = %q", body["user_code"])
+		}
+		attempts++
+		if attempts == 1 {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		if attempts == 2 {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"authorization_code": "auth-code-123",
+			"code_challenge":     "challenge-123",
+			"code_verifier":      "verifier-123",
+		})
+	}))
+	defer server.Close()
+	openAICodexACPAuthIssuer = server.URL
+
+	service := &Service{httpClient: server.Client()}
+	pending, err := service.PollOpenAICodexACPDeviceAuthorization(context.Background(), "device-auth-123", "CODE-123")
+	if err != nil {
+		t.Fatalf("poll pending: %v", err)
+	}
+	if !pending.Pending {
+		t.Fatalf("expected forbidden pending result")
+	}
+	pending, err = service.PollOpenAICodexACPDeviceAuthorization(context.Background(), "device-auth-123", "CODE-123")
+	if err != nil {
+		t.Fatalf("poll pending: %v", err)
+	}
+	if !pending.Pending {
+		t.Fatalf("expected not found pending result")
+	}
+	success, err := service.PollOpenAICodexACPDeviceAuthorization(context.Background(), "device-auth-123", "CODE-123")
+	if err != nil {
+		t.Fatalf("poll success: %v", err)
+	}
+	if success.Pending {
+		t.Fatalf("success result should not be pending")
+	}
+	if success.AuthorizationCode != "auth-code-123" || success.CodeVerifier != "verifier-123" {
+		t.Fatalf("unexpected success result: %#v", success)
+	}
+}
+
+func TestOpenAICodexACPDevicePollRequiresCodeChallenge(t *testing.T) {
+	restore := overrideOpenAICodexDeviceAuthTestHooks(t, "")
+	defer restore()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/accounts/deviceauth/token" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"authorization_code": "auth-code-123",
+			"code_verifier":      "verifier-123",
+		})
+	}))
+	defer server.Close()
+	openAICodexACPAuthIssuer = server.URL
+
+	service := &Service{httpClient: server.Client()}
+	_, err := service.PollOpenAICodexACPDeviceAuthorization(context.Background(), "device-auth-123", "CODE-123")
+	if err == nil {
+		t.Fatal("expected incomplete poll response failure")
+	}
+	if !strings.Contains(err.Error(), "incomplete") {
+		t.Fatalf("error = %v, want incomplete response", err)
+	}
+}
+
+func TestOpenAICodexACPDevicePollSanitizesHardFailureBody(t *testing.T) {
+	restore := overrideOpenAICodexDeviceAuthTestHooks(t, "")
+	defer restore()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/accounts/deviceauth/token" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"sensitive-body"}`))
+	}))
+	defer server.Close()
+	openAICodexACPAuthIssuer = server.URL
+
+	service := &Service{httpClient: server.Client()}
+	_, err := service.PollOpenAICodexACPDeviceAuthorization(context.Background(), "device-auth-123", "CODE-123")
+	if err == nil {
+		t.Fatal("expected poll failure")
+	}
+	if strings.Contains(err.Error(), "sensitive-body") {
+		t.Fatalf("error should not expose upstream body: %v", err)
+	}
+	if !strings.Contains(err.Error(), "status 401") {
+		t.Fatalf("error should keep status code context: %v", err)
+	}
+}
+
+func TestCodexAccountIDFromTokensPrefersIDToken(t *testing.T) {
+	accessToken := testCodexJWT(t, "account-from-access-token")
+	idToken := testCodexJWT(t, "account-from-id-token")
+
+	accountID := codexAccountIDFromTokens(accessToken, idToken)
+	if accountID != "account-from-id-token" {
+		t.Fatalf("account id = %q, want id token account", accountID)
+	}
+}
+
+func TestOpenAICodexACPDeviceExchangeUsesDeviceCallbackAndIDTokenFallback(t *testing.T) {
+	restore := overrideOpenAICodexDeviceAuthTestHooks(t, "")
+	defer restore()
+
+	idToken := testCodexJWT(t, "account-from-id-token")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/oauth/token" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		if got := r.Form.Get("redirect_uri"); got != serverURL(r)+"/deviceauth/callback" {
+			t.Fatalf("redirect_uri = %q", got)
+		}
+		if got := r.Form.Get("code_verifier"); got != "verifier-123" {
+			t.Fatalf("code_verifier = %q", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "opaque-access-token",
+			"id_token":      idToken,
+			"refresh_token": "refresh-token-123",
+		})
+	}))
+	defer server.Close()
+	openAICodexACPAuthIssuer = server.URL
+
+	service := &Service{httpClient: server.Client()}
+	creds, err := service.ExchangeOpenAICodexACPDeviceCode(context.Background(), "auth-code-123", "verifier-123")
+	if err != nil {
+		t.Fatalf("exchange device code: %v", err)
+	}
+	if creds.AccountID != "account-from-id-token" {
+		t.Fatalf("account id = %q", creds.AccountID)
+	}
+	if creds.AccessToken != "opaque-access-token" || creds.RefreshToken != "refresh-token-123" {
+		t.Fatalf("unexpected creds: %#v", creds)
+	}
+}
+
+func TestOpenAICodexACPDeviceExchangeAllowsMissingAccountID(t *testing.T) {
+	restore := overrideOpenAICodexDeviceAuthTestHooks(t, "")
+	defer restore()
+
+	emptyIDToken := testCodexJWT(t, "")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/oauth/token" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  emptyIDToken,
+			"id_token":      emptyIDToken,
+			"refresh_token": "refresh-token-123",
+		})
+	}))
+	defer server.Close()
+	openAICodexACPAuthIssuer = server.URL
+
+	service := &Service{httpClient: server.Client()}
+	creds, err := service.ExchangeOpenAICodexACPDeviceCode(context.Background(), "auth-code-123", "verifier-123")
+	if err != nil {
+		t.Fatalf("exchange device code: %v", err)
+	}
+	if creds.AccountID != "" {
+		t.Fatalf("account id = %q, want empty", creds.AccountID)
+	}
+	if creds.AccessToken == "" || creds.IDToken == "" || creds.RefreshToken == "" {
+		t.Fatalf("tokens should still be preserved: %#v", creds)
+	}
+}
+
+func overrideOpenAICodexDeviceAuthTestHooks(t *testing.T, issuer string) func() {
+	t.Helper()
+	previousIssuer := openAICodexACPAuthIssuer
+	previousValidateTokenURL := validateOAuthTokenURLFunc
+	previousValidateDeviceURL := validateOpenAICodexACPAuthURLFunc
+	if issuer != "" {
+		openAICodexACPAuthIssuer = issuer
+	}
+	validateOAuthTokenURLFunc = func(models.ClientType, string) error { return nil }
+	validateOpenAICodexACPAuthURLFunc = func(string) error { return nil }
+	return func() {
+		openAICodexACPAuthIssuer = previousIssuer
+		validateOAuthTokenURLFunc = previousValidateTokenURL
+		validateOpenAICodexACPAuthURLFunc = previousValidateDeviceURL
+	}
+}
+
+func testCodexJWT(t *testing.T, accountID string) string {
+	t.Helper()
+	encode := func(v any) string {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatalf("marshal jwt segment: %v", err)
+		}
+		return base64.RawURLEncoding.EncodeToString(raw)
+	}
+	authClaims := map[string]string{}
+	if accountID != "" {
+		authClaims["chatgpt_account_id"] = accountID
+	}
+	return strings.Join([]string{
+		encode(map[string]string{"alg": "none"}),
+		encode(map[string]any{
+			openAIAuthClaimPath: authClaims,
+		}),
+		"sig",
+	}, ".")
+}
+
+func serverURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
 }
 
 func TestFetchRemoteModelsViaSDK(t *testing.T) {

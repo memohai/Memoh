@@ -53,7 +53,7 @@ func (c *recordingACPSessionCloser) CloseSession(sessionID string) error {
 	return nil
 }
 
-func (*recordingACPSessionCloser) BindRuntime(_, _, _, _, _ string) error {
+func (*recordingACPSessionCloser) BindRuntime(_, _, _, _, _, _ string) error {
 	return nil
 }
 

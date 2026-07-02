@@ -38,6 +38,7 @@ func TestToolCallDroppingStreamFiltersToolEvents(t *testing.T) {
 	events := []StreamEvent{
 		{Type: StreamEventDelta, Delta: "hi"},
 		{Type: StreamEventToolCallStart, ToolCall: &StreamToolCall{Name: "read", CallID: "c1"}},
+		{Type: StreamEventToolCallStart, ToolCall: &StreamToolCall{Name: "ask_user", CallID: "c2", Actions: []Action{{Type: "user_input", Value: "respond:input-1"}}}},
 		{Type: StreamEventToolCallEnd, ToolCall: &StreamToolCall{Name: "read", CallID: "c1"}},
 		{Type: StreamEventStatus, Status: StreamStatusCompleted},
 	}
@@ -46,14 +47,17 @@ func TestToolCallDroppingStreamFiltersToolEvents(t *testing.T) {
 			t.Fatalf("push %s: %v", e.Type, err)
 		}
 	}
-	if len(sink.events) != 2 {
-		t.Fatalf("expected 2 forwarded events, got %d: %+v", len(sink.events), sink.events)
+	if len(sink.events) != 3 {
+		t.Fatalf("expected 3 forwarded events, got %d: %+v", len(sink.events), sink.events)
 	}
 	if sink.events[0].Type != StreamEventDelta {
 		t.Fatalf("expected delta first, got %s", sink.events[0].Type)
 	}
-	if sink.events[1].Type != StreamEventStatus {
-		t.Fatalf("expected status second, got %s", sink.events[1].Type)
+	if sink.events[1].Type != StreamEventToolCallStart || sink.events[1].ToolCall == nil || sink.events[1].ToolCall.Name != "ask_user" {
+		t.Fatalf("expected ask_user user-input tool call second, got %#v", sink.events[1])
+	}
+	if sink.events[2].Type != StreamEventStatus {
+		t.Fatalf("expected status third, got %s", sink.events[2].Type)
 	}
 
 	if err := stream.Close(ctx); err != nil {

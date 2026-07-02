@@ -117,7 +117,7 @@ func shouldGenerateSessionTitle(sess session.Session) bool {
 	if title == "" {
 		return true
 	}
-	if sess.Type != session.TypeACPAgent {
+	if !session.IsACPRuntime(sess) {
 		return false
 	}
 

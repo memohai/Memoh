@@ -86,6 +86,8 @@ type MessageEvent struct {
 	ForwardInfo      *ForwardInfo     `json:"forward_info,omitempty"`
 	Attachments      []Attachment     `json:"attachments"`
 	IsSelfSent       bool             `json:"is_self_sent,omitempty"`
+	MentionsMe       bool             `json:"mentions_me,omitempty"`
+	RepliesToMe      bool             `json:"replies_to_me,omitempty"`
 	Conversation     ConversationMeta `json:"conversation"`
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/memohai/memoh/internal/acpfeedback"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/i18n"
@@ -74,11 +75,10 @@ func formatStartWelcomeMessage(t *i18n.Localizer) string {
 // which model (and its provider) will answer, whether reasoning is on, and how
 // much context budget they have. These are not "defaults to hide"; on this
 // surface they reassure and inform. Markdown markers are authored unconditionally
-// and stripped later for non-markdown channels. modeKey is an i18n key under
-// "newSession.*" naming the session mode (e.g. newSession.modeChat).
-func formatNewSessionMessage(t *i18n.Localizer, modeKey string, cc command.CurrentContext) string {
+// and stripped later for non-markdown channels.
+func formatNewSessionMessage(t *i18n.Localizer, modeLabel string, cc command.CurrentContext) string {
 	var b strings.Builder
-	b.WriteString(command.MdBold(t.T("newSession.title", map[string]any{"mode": t.T(modeKey)})))
+	b.WriteString(command.MdBold(t.T("newSession.title", map[string]any{"mode": modeLabel})))
 	appendCurrentContextLines(&b, t, cc)
 	fmt.Fprintf(&b, "\n\n%s", t.T("newSession.tip", map[string]any{
 		"model":     command.CmdRef("model"),
@@ -128,6 +128,9 @@ func renderResult(result *command.Result, rc RenderContext) channel.Message {
 		return channel.Message{}
 	}
 	t := rc.localizerFor(result)
+	if result.FeedbackError != nil {
+		return applyMessageFormat(channel.Message{Text: renderACPFeedbackText(result.FeedbackError, t)}, rc.Caps)
+	}
 	var msg channel.Message
 	if result.Interactive == nil || !rc.Caps.Buttons {
 		msg = channel.Message{Text: appendFallbackTrailer(result.Text, result.Interactive, rc.Caps, t)}
@@ -146,6 +149,27 @@ func renderResult(result *command.Result, rc RenderContext) channel.Message {
 		}
 	}
 	return applyMessageFormat(msg, rc.Caps)
+}
+
+func renderACPFeedbackText(feedback *acpfeedback.Error, t *i18n.Localizer) string {
+	if feedback == nil {
+		return ""
+	}
+	text := strings.TrimSpace(feedback.Message)
+	if key := strings.TrimSpace(feedback.I18nKey); key != "" && t != nil {
+		params := make(map[string]any, len(feedback.Args))
+		for name, value := range feedback.Args {
+			params[name] = value
+		}
+		localized := t.T(key, params)
+		if strings.TrimSpace(localized) != "" && localized != key {
+			text = localized
+		}
+	}
+	if text == "" {
+		text = strings.TrimSpace(feedback.Code)
+	}
+	return text
 }
 
 // appendFallbackTrailer adds a typeable-command guide derived from Interactive

@@ -219,7 +219,7 @@ func provideDBQueries(cfg config.Config, postgresStore *postgresstore.Store, sql
 		if postgresStore == nil {
 			return nil, errors.New("postgres store not configured")
 		}
-		return postgresStore.QueriesAdapter(), nil
+		return postgresstore.NewQueries(postgresStore.SQLC()), nil
 	case db.DriverSQLite:
 		if sqliteStore == nil {
 			return nil, errors.New("sqlite store not configured")
@@ -336,6 +336,7 @@ func provideDiscussDriver(log *slog.Logger, pipeline *pipelinepkg.Pipeline, even
 		EventStore:     eventStore,
 		Agent:          agent,
 		MessageService: msgService,
+		CursorStore:    eventStore,
 		Logger:         log,
 	})
 }
@@ -440,8 +441,9 @@ func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.
 	return pool
 }
 
-func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries dbstore.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *pipelinepkg.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, hookService *hookspkg.Service) *flow.Resolver {
+func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries dbstore.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, botService *bots.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *pipelinepkg.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, hookService *hookspkg.Service) *flow.Resolver {
 	resolver := flow.NewResolver(log, modelsService, queries, chatService, msgService, settingsService, accountService, a, rc.TimezoneLocation, 120*time.Second)
+	resolver.SetBotPermissionChecker(&botPermissionCheckerAdapter{bots: botService, accounts: accountService})
 	resolver.SetHookService(hookService)
 	if sessionService != nil {
 		sessionService.SetHookService(hookService)
@@ -574,6 +576,7 @@ func provideChannelRouter(
 	resolver *flow.Resolver,
 	identityService *identities.Service,
 	botService *bots.Service,
+	accountService *accounts.Service,
 	aclService *acl.Service,
 	channelAccessService *channelaccess.Service,
 	policyService *policy.Service,
@@ -613,6 +616,7 @@ func provideChannelRouter(
 	processor.SetSessionEnsurer(&sessionEnsurerAdapter{svc: sessionService})
 	processor.SetPipeline(pipeline, eventStore, discussDriver)
 	discussDriver.SetResolver(resolver)
+	discussDriver.SetRuntimeStreamer(resolver)
 	discussDriver.SetBroadcaster(hub)
 	processor.SetACLService(aclService)
 	processor.SetMediaService(mediaService)
@@ -621,6 +625,9 @@ func provideChannelRouter(
 	processor.SetSpeechService(audioService, &settingsSpeechModelResolver{settings: settingsService})
 	processor.SetTranscriptionService(&settingsTranscriptionAdapter{audio: audioService}, &settingsTranscriptionModelResolver{settings: settingsService})
 	processor.SetIMDisplayOptions(&settingsIMDisplayOptions{settings: settingsService})
+	processor.SetDefaultChatRuntime(&settingsDefaultChatRuntime{settings: settingsService})
+	processor.SetACPAgentSetupReader(&botACPAgentSetupReader{bots: botService})
+	processor.SetBotPermissionChecker(&botPermissionCheckerAdapter{bots: botService, accounts: accountService})
 	cmdHandler := command.NewHandler(
 		log,
 		&command.BotMemberRoleAdapter{BotService: botService, ManageResolver: channelAccessService},
@@ -846,9 +853,10 @@ func provideProviderOAuthHandler(providersService *providers.Service, acpCodexOA
 	return handler
 }
 
-func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, sessionService *sessionpkg.Service, resolver *flow.Resolver, mediaService *media.Service, audioService *audiopkg.Service, settingsService *settings.Service) *handlers.LocalChannelHandler {
+func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, sessionService *sessionpkg.Service, resolver *flow.Resolver, mediaService *media.Service, audioService *audiopkg.Service, settingsService *settings.Service, rc *boot.RuntimeConfig) *handlers.LocalChannelHandler {
 	h := handlers.NewLocalChannelHandler(local.WebType, channelManager, channelStore, chatService, hub, botService, accountService, sessionService)
 	h.SetResolver(resolver)
+	h.SetAuthTokenConfig(rc.JwtSecret, rc.JwtExpiresIn)
 	h.SetMediaService(mediaService)
 	h.SetSpeechService(audioService, &settingsSpeechModelResolver{settings: settingsService})
 	return h
@@ -960,7 +968,7 @@ func (a *sessionEnsurerAdapter) EnsureActiveSession(ctx context.Context, botID, 
 	if err != nil {
 		return inbound.SessionResult{}, err
 	}
-	return inbound.SessionResult{ID: sess.ID, Type: sess.Type}, nil
+	return inboundSessionResult(sess), nil
 }
 
 func (a *sessionEnsurerAdapter) GetActiveSession(ctx context.Context, routeID string) (inbound.SessionResult, error) {
@@ -968,15 +976,59 @@ func (a *sessionEnsurerAdapter) GetActiveSession(ctx context.Context, routeID st
 	if err != nil {
 		return inbound.SessionResult{}, err
 	}
-	return inbound.SessionResult{ID: sess.ID, Type: sess.Type}, nil
+	return inboundSessionResult(sess), nil
 }
 
-func (a *sessionEnsurerAdapter) CreateNewSession(ctx context.Context, botID, routeID, channelType, sessionType string) (inbound.SessionResult, error) {
-	sess, err := a.svc.CreateNewSession(ctx, botID, routeID, channelType, sessionType)
+func (a *sessionEnsurerAdapter) CreateNewSession(ctx context.Context, botID, routeID, channelType string, spec inbound.NewSessionSpec) (inbound.SessionResult, error) {
+	createdByUserID := newSessionCreatedByUserID(spec)
+	sess, err := a.svc.CreateNewSessionWithInput(ctx, sessionpkg.CreateInput{
+		BotID:           botID,
+		RouteID:         routeID,
+		ChannelType:     channelType,
+		Type:            spec.Type,
+		SessionMode:     spec.Mode,
+		RuntimeType:     spec.Runtime,
+		Metadata:        spec.Metadata,
+		RuntimeMetadata: spec.Metadata,
+		Title:           spec.Title,
+		CreatedByUserID: createdByUserID,
+	})
 	if err != nil {
 		return inbound.SessionResult{}, err
 	}
-	return inbound.SessionResult{ID: sess.ID, Type: sess.Type}, nil
+	return inboundSessionResult(sess), nil
+}
+
+func newSessionCreatedByUserID(spec inbound.NewSessionSpec) string {
+	if userID := strings.TrimSpace(spec.CreatedByUserID); userID != "" {
+		return userID
+	}
+	return strings.TrimSpace(spec.RuntimeOwnerAccountID)
+}
+
+func inboundSessionResult(sess sessionpkg.Session) inbound.SessionResult {
+	return inbound.SessionResult{
+		ID:                    sess.ID,
+		Type:                  sess.Type,
+		Mode:                  sess.SessionMode,
+		Runtime:               sess.RuntimeType,
+		RuntimeOwnerAccountID: sessionRuntimeOwnerAccountID(sess),
+	}
+}
+
+func sessionRuntimeOwnerAccountID(sess sessionpkg.Session) string {
+	if value := runtimeMetadataString(sess.RuntimeMetadata, "runtime_owner_account_id"); value != "" {
+		return value
+	}
+	return runtimeMetadataString(sess.Metadata, "runtime_owner_account_id")
+}
+
+func runtimeMetadataString(metadata map[string]any, key string) string {
+	if metadata == nil {
+		return ""
+	}
+	value, _ := metadata[key].(string)
+	return strings.TrimSpace(value)
 }
 
 type settingsSpeechModelResolver struct {
@@ -1001,6 +1053,58 @@ func (r *settingsIMDisplayOptions) ShowToolCallsInIM(ctx context.Context, botID 
 		return false, err
 	}
 	return s.ShowToolCallsInIM, nil
+}
+
+type settingsDefaultChatRuntime struct {
+	settings *settings.Service
+}
+
+func (r *settingsDefaultChatRuntime) DefaultChatRuntime(ctx context.Context, botID string) (inbound.DefaultChatRuntimeSettings, error) {
+	s, err := r.settings.GetBot(ctx, botID)
+	if err != nil {
+		return inbound.DefaultChatRuntimeSettings{}, err
+	}
+	return inbound.DefaultChatRuntimeSettings{
+		Runtime:     s.ChatRuntime,
+		ACPAgentID:  s.ChatACPAgentID,
+		ProjectPath: s.ChatACPProjectPath,
+		ProjectMode: s.ChatACPProjectMode,
+	}, nil
+}
+
+type botACPAgentSetupReader struct {
+	bots *bots.Service
+}
+
+func (r *botACPAgentSetupReader) ACPAgentSetupMetadata(ctx context.Context, botID string) (map[string]any, error) {
+	if r == nil || r.bots == nil {
+		return nil, errors.New("bot setup reader not configured")
+	}
+	bot, err := r.bots.Get(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	return bot.Metadata, nil
+}
+
+type botPermissionCheckerAdapter struct {
+	bots     *bots.Service
+	accounts *accounts.Service
+}
+
+func (a *botPermissionCheckerAdapter) HasBotPermission(ctx context.Context, botID, accountID, permission string) (bool, error) {
+	if a == nil || a.bots == nil || a.accounts == nil {
+		return false, errors.New("bot permission services not configured")
+	}
+	isAdmin, err := a.accounts.IsAdmin(ctx, accountID)
+	if err != nil {
+		return false, err
+	}
+	perms, err := a.bots.ResolveUserPermissions(ctx, botID, accountID, isAdmin)
+	if err != nil {
+		return false, err
+	}
+	return bots.HasPermission(perms, permission), nil
 }
 
 type settingsTranscriptionModelResolver struct {
@@ -1041,8 +1145,8 @@ func provideEmailRegistry(log *slog.Logger, tokenStore *emailpkg.DBOAuthTokenSto
 	return reg
 }
 
-func provideProvidersService(log *slog.Logger, queries dbstore.Queries, _ config.Config) *providers.Service {
-	return providers.NewService(log, queries, defaultProviderOAuthCallbackURL())
+func provideProvidersService(log *slog.Logger, queries dbstore.Queries, cfg config.Config) *providers.Service {
+	return providers.NewService(log, queries, defaultProviderOAuthCallbackURL(), cfg.Registry.ProvidersPath())
 }
 
 func defaultProviderOAuthCallbackURL() string {
@@ -1131,14 +1235,7 @@ func startRegistrySync(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, que
 }
 
 func providerBootstrapDefinitions(defs []registry.ProviderDefinition) []registry.ProviderDefinition {
-	filtered := make([]registry.ProviderDefinition, 0, len(defs))
-	for _, def := range defs {
-		if models.IsLLMClientType(models.ClientType(def.ClientType)) {
-			continue
-		}
-		filtered = append(filtered, def)
-	}
-	return filtered
+	return defs
 }
 
 func startAudioProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, queries dbstore.Queries, registry *audiopkg.Registry) {

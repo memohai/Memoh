@@ -1865,8 +1865,6 @@ definitions:
         type: string
       timestamp:
         type: string
-      turn_id:
-        type: string
     type: object
   conversation.UIUserInput:
     properties:
@@ -2200,6 +2198,59 @@ definitions:
       has_token:
         type: boolean
     type: object
+  handlers.ACPCodexOAuthAuthorizeResponse:
+    properties:
+      auth_url:
+        type: string
+    type: object
+  handlers.ACPCodexOAuthDeviceAuthorizeResponse:
+    properties:
+      expires_at:
+        type: string
+      interval_seconds:
+        type: integer
+      session_id:
+        type: string
+      user_code:
+        type: string
+      verification_url:
+        type: string
+    type: object
+  handlers.ACPCodexOAuthDeviceSessionRequest:
+    properties:
+      session_id:
+        type: string
+    required:
+    - session_id
+    type: object
+  handlers.ACPCodexOAuthDeviceStatusResponse:
+    properties:
+      account_id:
+        type: string
+      error:
+        type: string
+      expires_at:
+        type: string
+      has_token:
+        type: boolean
+      interval_seconds:
+        type: integer
+      next_poll_after:
+        type: string
+      status:
+        type: string
+    type: object
+  handlers.ACPCodexOAuthStatus:
+    properties:
+      account_id:
+        type: string
+      callback_url:
+        type: string
+      configured:
+        type: boolean
+      has_token:
+        type: boolean
+    type: object
   handlers.BatchDeleteRequest:
     properties:
       ids:
@@ -2432,7 +2483,19 @@ definitions:
     type: object
   handlers.ErrorResponse:
     properties:
+      args:
+        additionalProperties:
+          type: string
+        type: object
+      code:
+        type: string
+      http_status:
+        type: integer
+      i18n_key:
+        type: string
       message:
+        type: string
+      reason:
         type: string
     type: object
   handlers.FSArchiveRequest:
@@ -2679,8 +2742,6 @@ definitions:
     type: object
   handlers.LocalChannelMessageRequest:
     properties:
-      base_head_turn_id:
-        type: string
       message:
         $ref: '#/definitions/channel.Message'
       model_id:
@@ -3003,11 +3064,19 @@ definitions:
     type: object
   handlers.TokenUsageResponse:
     properties:
+      acp_agent:
+        items:
+          $ref: '#/definitions/handlers.DailyTokenUsage'
+        type: array
       by_model:
         items:
           $ref: '#/definitions/handlers.ModelTokenUsage'
         type: array
       chat:
+        items:
+          $ref: '#/definitions/handlers.DailyTokenUsage'
+        type: array
+      discuss:
         items:
           $ref: '#/definitions/handlers.DailyTokenUsage'
         type: array
@@ -3022,11 +3091,7 @@ definitions:
     type: object
   handlers.ToolApprovalDecisionRequest:
     properties:
-      base_head_turn_id:
-        type: string
       reason:
-        type: string
-      session_id:
         type: string
     type: object
   handlers.TriggerCompactResponse:
@@ -3100,6 +3165,13 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
+      runtime_metadata:
+        additionalProperties: {}
+        type: object
+      runtime_type:
+        type: string
+      session_mode:
+        type: string
       title:
         type: string
       type:
@@ -3176,15 +3248,6 @@ definitions:
       provider:
         type: string
     type: object
-  handlers.forkSessionRequest:
-    properties:
-      base_head_turn_id:
-        type: string
-      message_id:
-        type: string
-    required:
-    - message_id
-    type: object
   handlers.fsOpResponse:
     properties:
       ok:
@@ -3258,23 +3321,6 @@ definitions:
           type: string
         type: array
     type: object
-  handlers.messageUIListResponse:
-    properties:
-      default_head_turn_id:
-        type: string
-      head_turn_ids:
-        items:
-          type: string
-        type: array
-      items:
-        items:
-          $ref: '#/definitions/conversation.UITurn'
-        type: array
-      nodes:
-        items:
-          $ref: '#/definitions/handlers.sessionTurnGraphUINode'
-        type: array
-    type: object
   handlers.oauthAuthorizeRequest:
     properties:
       callback_url:
@@ -3294,21 +3340,6 @@ definitions:
       code:
         type: string
       state:
-        type: string
-    type: object
-  handlers.sessionTurnGraphUINode:
-    properties:
-      has_assistant:
-        type: boolean
-      has_user:
-        type: boolean
-      parent_turn_id:
-        type: string
-      request_key:
-        type: string
-      timestamp:
-        type: string
-      turn_id:
         type: string
     type: object
   handlers.skillsOpResponse:
@@ -3342,6 +3373,13 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
+      runtime_metadata:
+        additionalProperties: {}
+        type: object
+      runtime_type:
+        type: string
+      session_mode:
+        type: string
       title:
         type: string
       type:
@@ -3554,6 +3592,78 @@ definitions:
       transport:
         type: string
       url:
+        type: string
+    type: object
+  message.Message:
+    properties:
+      assets:
+        items:
+          $ref: '#/definitions/message.MessageAsset'
+        type: array
+      bot_id:
+        type: string
+      compact_id:
+        type: string
+      content:
+        items:
+          type: integer
+        type: array
+      created_at:
+        type: string
+      display_content:
+        type: string
+      event_id:
+        type: string
+      external_message_id:
+        type: string
+      id:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      platform:
+        type: string
+      role:
+        type: string
+      runtime_type:
+        type: string
+      sender_avatar_url:
+        type: string
+      sender_channel_identity_id:
+        type: string
+      sender_display_name:
+        type: string
+      sender_user_id:
+        type: string
+      session_id:
+        type: string
+      session_mode:
+        type: string
+      source_reply_to_message_id:
+        type: string
+      usage:
+        items:
+          type: integer
+        type: array
+    type: object
+  message.MessageAsset:
+    properties:
+      content_hash:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      mime:
+        type: string
+      name:
+        type: string
+      ordinal:
+        type: integer
+      role:
+        type: string
+      size_bytes:
+        type: integer
+      storage_key:
         type: string
     type: object
   models.AddRequest:
@@ -4260,12 +4370,6 @@ definitions:
         type: string
       created_by_user_id:
         type: string
-      default_head_turn_id:
-        type: string
-      forked_from_session_id:
-        type: string
-      forked_from_turn_id:
-        type: string
       id:
         type: string
       metadata:
@@ -4280,6 +4384,13 @@ definitions:
       route_metadata:
         additionalProperties: {}
         type: object
+      runtime_metadata:
+        additionalProperties: {}
+        type: object
+      runtime_type:
+        type: string
+      session_mode:
+        type: string
       title:
         type: string
       type:
@@ -4291,7 +4402,15 @@ definitions:
     properties:
       acl_default_effect:
         type: string
+      chat_acp_agent_id:
+        type: string
+      chat_acp_project_mode:
+        type: string
+      chat_acp_project_path:
+        type: string
       chat_model_id:
+        type: string
+      chat_runtime:
         type: string
       command_ui_language:
         type: string
@@ -4392,7 +4511,15 @@ definitions:
     properties:
       acl_default_effect:
         type: string
+      chat_acp_agent_id:
+        type: string
+      chat_acp_project_mode:
+        type: string
+      chat_acp_project_path:
+        type: string
       chat_model_id:
+        type: string
+      chat_runtime:
         type: string
       command_ui_language:
         type: string
@@ -5255,6 +5382,162 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Get Claude Code ACP OAuth status
+      tags:
+      - acp
+  /bots/{bot_id}/acp/codex/oauth/authorize:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ACPCodexOAuthAuthorizeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Start Codex ACP OAuth authorization
+      tags:
+      - acp
+  /bots/{bot_id}/acp/codex/oauth/device/authorize:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ACPCodexOAuthDeviceAuthorizeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Start Codex ACP device code authorization
+      tags:
+      - acp
+  /bots/{bot_id}/acp/codex/oauth/device/cancel:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Device authorization session
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ACPCodexOAuthDeviceSessionRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ACPCodexOAuthDeviceStatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Cancel Codex ACP device code authorization
+      tags:
+      - acp
+  /bots/{bot_id}/acp/codex/oauth/device/poll:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Device authorization session
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ACPCodexOAuthDeviceSessionRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ACPCodexOAuthDeviceStatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Poll Codex ACP device code authorization
+      tags:
+      - acp
+  /bots/{bot_id}/acp/codex/oauth/status:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ACPCodexOAuthStatus'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get Codex ACP OAuth status
       tags:
       - acp
   /bots/{bot_id}/backup/export:
@@ -6874,6 +7157,110 @@ paths:
       summary: Run bot hooks for a synthetic event
       tags:
       - hooks
+  /bots/{bot_id}/local/messages:
+    post:
+      consumes:
+      - application/json
+      description: Post a user message (with optional attachments) through the local
+        channel pipeline.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Message payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.LocalChannelMessageRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Send a message to a local channel
+      tags:
+      - local-channel
+  /bots/{bot_id}/local/stream:
+    get:
+      description: Open a persistent SSE connection to receive real-time stream events
+        for the given bot.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Subscribe to local channel events via SSE
+      tags:
+      - local-channel
+  /bots/{bot_id}/local/ws:
+    get:
+      description: Upgrade to WebSocket for bidirectional chat streaming with abort
+        support.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "101":
+          description: Switching Protocols
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: WebSocket chat endpoint
+      tags:
+      - local-channel
   /bots/{bot_id}/mcp:
     get:
       description: List MCP connections for a bot
@@ -7793,25 +8180,21 @@ paths:
         in: query
         name: before
         type: string
-      - description: Message ID at the pagination boundary
+      - description: 'Response format: ui returns normalized chat UI turns'
         in: query
-        name: before_id
+        name: format
         type: string
-      - description: Selected session head turn ID
-        in: query
-        name: head_turn_id
-        type: string
-      - description: Include session turn graph metadata
-        in: query
-        name: include_graph
-        type: boolean
       produces:
       - application/json
       responses:
         "200":
-          description: OK
+          description: when format=ui
           schema:
-            $ref: '#/definitions/handlers.messageUIListResponse'
+            additionalProperties:
+              items:
+                $ref: '#/definitions/conversation.UITurn'
+              type: array
+            type: object
         "400":
           description: Bad Request
           schema:
@@ -8674,49 +9057,6 @@ paths:
       summary: Trigger immediate context compaction
       tags:
       - compaction
-  /bots/{bot_id}/sessions/{session_id}/fork:
-    post:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Source session ID
-        in: path
-        name: session_id
-        required: true
-        type: string
-      - description: Fork source message
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.forkSessionRequest'
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/session.Session'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Fork a chat session from an assistant reply
-      tags:
-      - sessions
   /bots/{bot_id}/sessions/{session_id}/messages/events:
     get:
       description: |-
@@ -8733,10 +9073,6 @@ paths:
         in: path
         name: session_id
         required: true
-        type: string
-      - description: Selected session head turn ID
-        in: query
-        name: head_turn_id
         type: string
       produces:
       - text/event-stream
@@ -8841,6 +9177,12 @@ paths:
   /bots/{bot_id}/settings:
     delete:
       description: Remove agent settings for current user
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
       responses:
         "204":
           description: No Content
@@ -8857,6 +9199,12 @@ paths:
       - settings
     get:
       description: Get agent settings for current user
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
       responses:
         "200":
           description: OK
@@ -8876,6 +9224,11 @@ paths:
     post:
       description: Update or create agent settings for current user
       parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
       - description: Settings payload
         in: body
         name: payload
@@ -8901,6 +9254,11 @@ paths:
     put:
       description: Update or create agent settings for current user
       parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
       - description: Settings payload
         in: body
         name: payload
@@ -8995,8 +9353,9 @@ paths:
       - supermarket
   /bots/{bot_id}/token-usage:
     get:
-      description: Get daily aggregated token usage for a bot, split by chat, heartbeat,
-        and schedule session types, with optional model filter and per-model breakdown
+      description: Get daily aggregated token usage for a bot, split by chat, discuss,
+        heartbeat, and schedule session types, with optional model filter and per-model
+        breakdown
       parameters:
       - description: Bot ID
         in: path
@@ -9016,6 +9375,11 @@ paths:
       - description: Optional model UUID to filter by
         in: query
         name: model_id
+        type: string
+      - description: 'Optional session type: chat, discuss, heartbeat, schedule, or
+          acp_agent. acp_agent filters by runtime.'
+        in: query
+        name: session_type
         type: string
       responses:
         "200":
@@ -9061,7 +9425,8 @@ paths:
         in: query
         name: model_id
         type: string
-      - description: 'Optional session type: chat, heartbeat, schedule, or acp_agent'
+      - description: 'Optional session type: chat, discuss, heartbeat, schedule, or
+          acp_agent. acp_agent filters by runtime.'
         in: query
         name: session_type
         type: string
@@ -9432,110 +9797,6 @@ paths:
       summary: List grantable workspace members
       tags:
       - bots
-  /bots/{bot_id}/web/messages:
-    post:
-      consumes:
-      - application/json
-      description: Post a user message (with optional attachments) through the local
-        channel pipeline.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Message payload
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.LocalChannelMessageRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Send a message to a local channel
-      tags:
-      - local-channel
-  /bots/{bot_id}/web/stream:
-    get:
-      description: Open a persistent SSE connection to receive real-time stream events
-        for the given bot.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      produces:
-      - text/event-stream
-      responses:
-        "200":
-          description: SSE stream
-          schema:
-            type: string
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Subscribe to local channel events via SSE
-      tags:
-      - local-channel
-  /bots/{bot_id}/web/ws:
-    get:
-      description: Upgrade to WebSocket for bidirectional chat streaming with abort
-        support.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      responses:
-        "101":
-          description: Switching Protocols
-          schema:
-            type: string
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: WebSocket chat endpoint
-      tags:
-      - local-channel
   /bots/{id}:
     delete:
       description: Delete a bot user (owner/admin only)

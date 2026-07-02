@@ -61,6 +61,8 @@ type ModelTokenUsage struct {
 // TokenUsageResponse is the response body for GET /bots/:bot_id/token-usage.
 type TokenUsageResponse struct {
 	Chat      []DailyTokenUsage `json:"chat"`
+	Discuss   []DailyTokenUsage `json:"discuss"`
+	ACPAgent  []DailyTokenUsage `json:"acp_agent"`
 	Heartbeat []DailyTokenUsage `json:"heartbeat"`
 	Schedule  []DailyTokenUsage `json:"schedule"`
 	ByModel   []ModelTokenUsage `json:"by_model"`
@@ -90,12 +92,13 @@ type TokenUsageRecordsResponse struct {
 
 // GetTokenUsage godoc
 // @Summary Get token usage statistics
-// @Description Get daily aggregated token usage for a bot, split by chat, heartbeat, and schedule session types, with optional model filter and per-model breakdown
+// @Description Get daily aggregated token usage for a bot, split by chat, discuss, heartbeat, and schedule session types, with optional model filter and per-model breakdown
 // @Tags token-usage
 // @Param bot_id path string true "Bot ID"
 // @Param from query string true "Start date (YYYY-MM-DD)"
 // @Param to query string true "End date exclusive (YYYY-MM-DD)"
 // @Param model_id query string false "Optional model UUID to filter by"
+// @Param session_type query string false "Optional session type: chat, discuss, heartbeat, schedule, or acp_agent. acp_agent filters by runtime."
 // @Success 200 {object} TokenUsageResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
@@ -143,19 +146,23 @@ func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid model_id")
 		}
 	}
+	pgSessionType, err := parseTokenUsageSessionType(c)
+	if err != nil {
+		return err
+	}
 
 	fromTS := pgtype.Timestamptz{Time: fromDate, Valid: true}
 	toTS := pgtype.Timestamptz{Time: toDate, Valid: true}
 
 	ctx := c.Request().Context()
 
-	chat, heartbeat, schedule, err := h.fetchUsageByDay(ctx, pgBotID, fromTS, toTS, pgModelID)
+	chat, discuss, acpAgent, heartbeat, schedule, err := h.fetchUsageByDay(ctx, pgBotID, fromTS, toTS, pgModelID, pgSessionType)
 	if err != nil {
 		h.logger.Error("fetch token usage failed", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch token usage")
 	}
 
-	byModel, err := h.fetchUsageByModel(ctx, pgBotID, fromTS, toTS)
+	byModel, err := h.fetchUsageByModel(ctx, pgBotID, fromTS, toTS, pgSessionType)
 	if err != nil {
 		h.logger.Error("fetch token usage by model failed", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch token usage by model")
@@ -163,6 +170,8 @@ func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 
 	resp := TokenUsageResponse{
 		Chat:      chat,
+		Discuss:   discuss,
+		ACPAgent:  acpAgent,
 		Heartbeat: heartbeat,
 		Schedule:  schedule,
 		ByModel:   byModel,
@@ -170,15 +179,16 @@ func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
-func (h *TokenUsageHandler) fetchUsageByDay(ctx context.Context, botID pgtype.UUID, from, to pgtype.Timestamptz, modelID pgtype.UUID) (chat, heartbeat, schedule []DailyTokenUsage, err error) {
+func (h *TokenUsageHandler) fetchUsageByDay(ctx context.Context, botID pgtype.UUID, from, to pgtype.Timestamptz, modelID pgtype.UUID, sessionType pgtype.Text) (chat, discuss, acpAgent, heartbeat, schedule []DailyTokenUsage, err error) {
 	rows, err := h.queries.GetTokenUsageByDayAndType(ctx, sqlc.GetTokenUsageByDayAndTypeParams{
-		BotID:    botID,
-		FromTime: from,
-		ToTime:   to,
-		ModelID:  modelID,
+		BotID:       botID,
+		FromTime:    from,
+		ToTime:      to,
+		ModelID:     modelID,
+		SessionType: sessionType,
 	})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 
 	for _, r := range rows {
@@ -190,6 +200,10 @@ func (h *TokenUsageHandler) fetchUsageByDay(ctx context.Context, botID pgtype.UU
 			ReasoningTokens: r.ReasoningTokens,
 		}
 		switch r.SessionType {
+		case session.TypeDiscuss:
+			discuss = append(discuss, d)
+		case session.TypeACPAgent:
+			acpAgent = append(acpAgent, d)
 		case "heartbeat":
 			heartbeat = append(heartbeat, d)
 		case "schedule":
@@ -198,14 +212,15 @@ func (h *TokenUsageHandler) fetchUsageByDay(ctx context.Context, botID pgtype.UU
 			chat = append(chat, d)
 		}
 	}
-	return chat, heartbeat, schedule, nil
+	return chat, discuss, acpAgent, heartbeat, schedule, nil
 }
 
-func (h *TokenUsageHandler) fetchUsageByModel(ctx context.Context, botID pgtype.UUID, from, to pgtype.Timestamptz) ([]ModelTokenUsage, error) {
+func (h *TokenUsageHandler) fetchUsageByModel(ctx context.Context, botID pgtype.UUID, from, to pgtype.Timestamptz, sessionType pgtype.Text) ([]ModelTokenUsage, error) {
 	rows, err := h.queries.GetTokenUsageByModel(ctx, sqlc.GetTokenUsageByModelParams{
-		BotID:    botID,
-		FromTime: from,
-		ToTime:   to,
+		BotID:       botID,
+		FromTime:    from,
+		ToTime:      to,
+		SessionType: sessionType,
 	})
 	if err != nil {
 		return nil, err
@@ -253,7 +268,7 @@ const (
 // @Param from query string true "Start date (YYYY-MM-DD)"
 // @Param to query string true "End date exclusive (YYYY-MM-DD)"
 // @Param model_id query string false "Optional model UUID to filter by"
-// @Param session_type query string false "Optional session type: chat, heartbeat, schedule, or acp_agent"
+// @Param session_type query string false "Optional session type: chat, discuss, heartbeat, schedule, or acp_agent. acp_agent filters by runtime."
 // @Param limit query int false "Page size (default 20, max 100)"
 // @Param offset query int false "Offset" default(0)
 // @Success 200 {object} TokenUsageRecordsResponse
@@ -304,13 +319,9 @@ func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 		}
 	}
 
-	var pgSessionType pgtype.Text
-	switch sessionType := strings.TrimSpace(c.QueryParam("session_type")); sessionType {
-	case "":
-	case session.TypeChat, session.TypeHeartbeat, session.TypeSchedule, session.TypeACPAgent:
-		pgSessionType = pgtype.Text{String: sessionType, Valid: true}
-	default:
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid session_type, expected one of: chat, heartbeat, schedule, acp_agent")
+	pgSessionType, err := parseTokenUsageSessionType(c)
+	if err != nil {
+		return err
 	}
 
 	limit, err := parseInt32Query(c.QueryParam("limit"), tokenUsageRecordsDefaultLimit)
@@ -381,6 +392,17 @@ func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 		Items: items,
 		Total: total,
 	})
+}
+
+func parseTokenUsageSessionType(c echo.Context) (pgtype.Text, error) {
+	switch sessionType := strings.TrimSpace(c.QueryParam("session_type")); sessionType {
+	case "":
+		return pgtype.Text{}, nil
+	case session.TypeChat, session.TypeDiscuss, session.TypeHeartbeat, session.TypeSchedule, session.TypeACPAgent:
+		return pgtype.Text{String: sessionType, Valid: true}, nil
+	default:
+		return pgtype.Text{}, echo.NewHTTPError(http.StatusBadRequest, "invalid session_type, expected one of: chat, discuss, heartbeat, schedule, acp_agent")
+	}
 }
 
 func formatPgTime(t pgtype.Timestamptz) string {

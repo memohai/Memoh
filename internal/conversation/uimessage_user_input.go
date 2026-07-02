@@ -6,7 +6,7 @@ import (
 	"github.com/memohai/memoh/internal/userinput"
 )
 
-func uiUserInputFromPayload(userInputID string, shortID int, status string, payload any, canRespond bool, persistTurnID ...string) *UIUserInput {
+func uiUserInputFromPayload(userInputID string, shortID int, status string, payload any, canRespond bool) *UIUserInput {
 	userInputID = strings.TrimSpace(userInputID)
 	if userInputID == "" {
 		return nil
@@ -15,18 +15,10 @@ func uiUserInputFromPayload(userInputID string, shortID int, status string, payl
 		status = userinput.StatusPending
 	}
 	return &UIUserInput{
-		UserInputID:   userInputID,
-		ShortID:       shortID,
-		Status:        status,
-		Questions:     userinput.PayloadFromStored(payload).Questions,
-		CanRespond:    canRespond,
-		PersistTurnID: firstOptionalString(persistTurnID),
+		UserInputID: userInputID,
+		ShortID:     shortID,
+		Status:      status,
+		Questions:   userinput.PayloadFromStored(payload).Questions,
+		CanRespond:  canRespond,
 	}
-}
-
-func firstOptionalString(values []string) string {
-	if len(values) == 0 {
-		return ""
-	}
-	return strings.TrimSpace(values[0])
 }

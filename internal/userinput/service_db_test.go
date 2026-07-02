@@ -20,12 +20,6 @@ const (
 
 func newSQLiteUserInputService(t *testing.T) *Service {
 	t.Helper()
-	svc, _ := newSQLiteUserInputServiceWithDB(t)
-	return svc
-}
-
-func newSQLiteUserInputServiceWithDB(t *testing.T) (*Service, *sql.DB) {
-	t.Helper()
 	ctx := context.Background()
 	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
 	if err != nil {
@@ -41,29 +35,13 @@ CREATE TABLE bots (
   id TEXT PRIMARY KEY
 );
 CREATE TABLE bot_sessions (
-  id TEXT PRIMARY KEY,
-  bot_id TEXT,
-  default_head_turn_id TEXT,
-  deleted_at TEXT
+  id TEXT PRIMARY KEY
 );
-CREATE UNIQUE INDEX bot_sessions_id_bot_unique ON bot_sessions(id, bot_id);
 CREATE TABLE bot_channel_routes (
   id TEXT PRIMARY KEY
 );
 CREATE TABLE channel_identities (
   id TEXT PRIMARY KEY
-);
-CREATE TABLE bot_history_turns (
-  id TEXT PRIMARY KEY,
-  bot_id TEXT,
-  owner_session_id TEXT,
-  parent_turn_id TEXT
-);
-CREATE TABLE bot_session_turn_heads (
-  session_id TEXT NOT NULL,
-  head_turn_id TEXT NOT NULL,
-  bot_id TEXT NOT NULL,
-  PRIMARY KEY (session_id, head_turn_id)
 );
 CREATE TABLE bot_history_messages (
   id TEXT PRIMARY KEY
@@ -87,7 +65,6 @@ CREATE TABLE user_input_requests (
   assistant_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
   tool_result_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
   prompt_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
-  persist_turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
   prompt_external_message_id TEXT NOT NULL DEFAULT '',
   source_platform TEXT NOT NULL DEFAULT '',
   reply_target TEXT NOT NULL DEFAULT '',
@@ -97,22 +74,17 @@ CREATE TABLE user_input_requests (
   responded_at TEXT,
   canceled_at TEXT,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (session_id, bot_id) REFERENCES bot_sessions(id, bot_id) ON DELETE CASCADE,
   CONSTRAINT user_input_tool_name_check CHECK (tool_name = 'ask_user'),
   CONSTRAINT user_input_status_check CHECK (status IN ('pending', 'submitted', 'canceled', 'expired', 'failed')),
   CONSTRAINT user_input_short_id_unique UNIQUE (session_id, short_id)
 );
-CREATE UNIQUE INDEX user_input_tool_call_legacy_unique
-  ON user_input_requests(session_id, tool_call_id)
-  WHERE persist_turn_id IS NULL;
-CREATE UNIQUE INDEX user_input_tool_call_turn_unique
-  ON user_input_requests(session_id, tool_call_id, persist_turn_id)
-  WHERE persist_turn_id IS NOT NULL;
+CREATE UNIQUE INDEX user_input_tool_call_unique
+  ON user_input_requests(session_id, tool_call_id);
 `)
 	if _, err := conn.ExecContext(ctx, `INSERT INTO bots (id) VALUES (?)`, testBotID); err != nil {
 		t.Fatalf("insert bot: %v", err)
 	}
-	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id, bot_id) VALUES (?, ?)`, testSessionID, testBotID); err != nil {
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id) VALUES (?)`, testSessionID); err != nil {
 		t.Fatalf("insert session: %v", err)
 	}
 
@@ -120,7 +92,7 @@ CREATE UNIQUE INDEX user_input_tool_call_turn_unique
 	if err != nil {
 		t.Fatalf("new store: %v", err)
 	}
-	return NewService(nil, sqlitestore.NewQueries(store)), conn
+	return NewService(nil, sqlitestore.NewQueries(store))
 }
 
 func execTestSchema(t *testing.T, conn *sql.DB, statement string) {
@@ -402,87 +374,6 @@ func TestServiceCreatePendingIsIdempotentPerToolCall(t *testing.T) {
 	})
 	if !errors.Is(err, ErrAlreadyDecided) {
 		t.Fatalf("create duplicate after submit error = %v, want ErrAlreadyDecided", err)
-	}
-}
-
-func TestServiceResolveTargetChecksSelectedHeadPath(t *testing.T) {
-	// Not parallel: concurrent :memory: opens race in modernc sqlite's
-	// global initializer and fail under -race.
-
-	svc, conn := newSQLiteUserInputServiceWithDB(t)
-
-	pendingTurnID := "00000000-0000-0000-0000-000000002101"
-	selectedHeadID := "00000000-0000-0000-0000-000000002102"
-	otherHeadID := "00000000-0000-0000-0000-000000002103"
-	ctx := context.Background()
-	insertTurn := func(id, parentID string) {
-		t.Helper()
-		var err error
-		if parentID == "" {
-			_, err = conn.ExecContext(ctx,
-				`INSERT INTO bot_history_turns (id, bot_id, owner_session_id, parent_turn_id) VALUES (?, ?, ?, NULL)`,
-				id, testBotID, testSessionID,
-			)
-		} else {
-			_, err = conn.ExecContext(ctx,
-				`INSERT INTO bot_history_turns (id, bot_id, owner_session_id, parent_turn_id) VALUES (?, ?, ?, ?)`,
-				id, testBotID, testSessionID, parentID,
-			)
-		}
-		if err != nil {
-			t.Fatalf("insert turn %s: %v", id, err)
-		}
-	}
-	insertHead := func(id string) {
-		t.Helper()
-		if _, err := conn.ExecContext(ctx,
-			`INSERT INTO bot_session_turn_heads (session_id, head_turn_id, bot_id) VALUES (?, ?, ?)`,
-			testSessionID, id, testBotID,
-		); err != nil {
-			t.Fatalf("insert head %s: %v", id, err)
-		}
-	}
-	insertTurn(pendingTurnID, "")
-	insertTurn(selectedHeadID, pendingTurnID)
-	insertTurn(otherHeadID, "")
-	insertHead(selectedHeadID)
-	insertHead(otherHeadID)
-
-	req, err := svc.CreatePending(context.Background(), CreatePendingInput{
-		BotID:         testBotID,
-		SessionID:     testSessionID,
-		ToolCallID:    "path-call",
-		PersistTurnID: pendingTurnID,
-		Input: map[string]any{
-			"questions": []any{
-				map[string]any{"text": "Proceed?", "kind": QuestionKindText},
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("create path pending: %v", err)
-	}
-
-	resolved, err := svc.ResolveTarget(context.Background(), ResolveInput{
-		BotID:          testBotID,
-		SessionID:      testSessionID,
-		BaseHeadTurnID: selectedHeadID,
-		ExplicitID:     req.ID,
-	})
-	if err != nil {
-		t.Fatalf("resolve selected path: %v", err)
-	}
-	if resolved.ID != req.ID {
-		t.Fatalf("resolved ID = %q, want %q", resolved.ID, req.ID)
-	}
-
-	if _, err := svc.ResolveTarget(context.Background(), ResolveInput{
-		BotID:          testBotID,
-		SessionID:      testSessionID,
-		BaseHeadTurnID: otherHeadID,
-		ExplicitID:     req.ID,
-	}); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("resolve outside selected path error = %v, want ErrNotFound", err)
 	}
 }
 

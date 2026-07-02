@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 
 const (
 	defaultOpenAICodexClientID    = "app_EMoamEEZ73f0CkXaXp7hrann"
+	defaultOpenAIAuthIssuer       = "https://auth.openai.com"
 	defaultOpenAIAuthorizeURL     = "https://auth.openai.com/oauth/authorize"
 	defaultOpenAITokenURL         = "https://auth.openai.com/oauth/token" //nolint:gosec // OAuth endpoint URL, not a credential
 	defaultOpenAICallbackURL      = "http://localhost:1455/auth/callback"
@@ -58,6 +60,14 @@ const (
 	metadataAccountAvatarURLKey   = "account_avatar_url"
 	metadataAccountProfileURLKey  = "account_profile_url"
 	configOAuthClientSecretKey    = "oauth_client_secret" //nolint:gosec // Metadata key name, not a credential literal.
+)
+
+var (
+	openAICodexACPAuthIssuer          = defaultOpenAIAuthIssuer
+	validateOAuthTokenURLFunc         = validateOAuthTokenURL
+	validateOpenAICodexACPAuthURLFunc = func(raw string) error {
+		return validateOAuthTokenURLFunc(models.ClientTypeOpenAICodex, raw)
+	}
 )
 
 type oauthTokenRecord struct {
@@ -95,6 +105,53 @@ type deviceAuthorizationResponse struct {
 	Interval        int64  `json:"interval"`
 	Error           string `json:"error"`
 	Description     string `json:"error_description"`
+}
+
+type OpenAICodexACPDeviceAuthorization struct {
+	DeviceAuthID    string
+	UserCode        string
+	VerificationURL string
+	IntervalSeconds int64
+}
+
+type OpenAICodexACPDevicePollResult struct {
+	Pending           bool
+	AuthorizationCode string
+	CodeChallenge     string
+	CodeVerifier      string
+}
+
+type openAICodexACPDeviceInterval int64
+
+func (i *openAICodexACPDeviceInterval) UnmarshalJSON(data []byte) error {
+	raw := strings.TrimSpace(string(data))
+	if raw == "" || raw == "null" {
+		*i = 0
+		return nil
+	}
+	if strings.HasPrefix(raw, `"`) {
+		var value string
+		if err := json.Unmarshal(data, &value); err != nil {
+			return err
+		}
+		value = strings.TrimSpace(value)
+		if value == "" {
+			*i = 0
+			return nil
+		}
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return fmt.Errorf("parse device interval: %w", err)
+		}
+		*i = openAICodexACPDeviceInterval(parsed)
+		return nil
+	}
+	var parsed int64
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return err
+	}
+	*i = openAICodexACPDeviceInterval(parsed)
+	return nil
 }
 
 func providerMetadata(raw []byte) map[string]any {
@@ -314,15 +371,186 @@ func (s *Service) ExchangeOpenAICodexACPCode(ctx context.Context, redirectURI, c
 	if refreshToken == "" {
 		return OpenAICodexOAuthCredentials{}, errors.New("oauth response missing refresh token")
 	}
-	accountID, err := codexAccountIDFromToken(accessToken)
+	return OpenAICodexOAuthCredentials{
+		AccessToken:  accessToken,
+		IDToken:      idToken,
+		RefreshToken: refreshToken,
+		AccountID:    codexAccountIDFromTokens(accessToken, idToken),
+		ExpiresAt:    expiresAtFromNow(resp.ExpiresIn),
+		LastRefresh:  time.Now().UTC(),
+	}, nil
+}
+
+func (s *Service) StartOpenAICodexACPDeviceAuthorization(ctx context.Context) (OpenAICodexACPDeviceAuthorization, error) {
+	issuer := openAICodexACPAuthIssuerBase()
+	userCodeURL := issuer + "/api/accounts/deviceauth/usercode"
+	if err := validateOpenAICodexACPAuthURLFunc(userCodeURL); err != nil {
+		return OpenAICodexACPDeviceAuthorization{}, err
+	}
+
+	payload, err := json.Marshal(map[string]string{
+		"client_id": defaultOpenAICodexClientID,
+	})
+	if err != nil {
+		return OpenAICodexACPDeviceAuthorization{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, userCodeURL, strings.NewReader(string(payload)))
+	if err != nil {
+		return OpenAICodexACPDeviceAuthorization{}, fmt.Errorf("create codex device user code request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	client := s.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req) //nolint:gosec // URL is validated by validateOpenAICodexACPAuthURLFunc before request execution.
+	if err != nil {
+		return OpenAICodexACPDeviceAuthorization{}, fmt.Errorf("execute codex device user code request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return OpenAICodexACPDeviceAuthorization{}, fmt.Errorf("read codex device user code response: %w", err)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		if resp.StatusCode == http.StatusNotFound {
+			return OpenAICodexACPDeviceAuthorization{}, errors.New("device code login is not enabled for this Codex server; use browser login or verify the server URL")
+		}
+		return OpenAICodexACPDeviceAuthorization{}, fmt.Errorf("codex device user code request failed with status %d", resp.StatusCode)
+	}
+
+	var decoded struct {
+		DeviceAuthID string                       `json:"device_auth_id"`
+		UserCode     string                       `json:"user_code"`
+		UserCodeAlt  string                       `json:"usercode"`
+		Interval     openAICodexACPDeviceInterval `json:"interval"`
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return OpenAICodexACPDeviceAuthorization{}, fmt.Errorf("decode codex device user code response: %w", err)
+	}
+	userCode := strings.TrimSpace(firstNonEmpty(decoded.UserCode, decoded.UserCodeAlt))
+	deviceAuthID := strings.TrimSpace(decoded.DeviceAuthID)
+	if deviceAuthID == "" || userCode == "" {
+		return OpenAICodexACPDeviceAuthorization{}, errors.New("codex device user code response was incomplete")
+	}
+	interval := int64(decoded.Interval)
+	if interval <= 0 {
+		interval = 5
+	}
+	return OpenAICodexACPDeviceAuthorization{
+		DeviceAuthID:    deviceAuthID,
+		UserCode:        userCode,
+		VerificationURL: issuer + "/codex/device",
+		IntervalSeconds: interval,
+	}, nil
+}
+
+func (s *Service) PollOpenAICodexACPDeviceAuthorization(ctx context.Context, deviceAuthID, userCode string) (OpenAICodexACPDevicePollResult, error) {
+	deviceAuthID = strings.TrimSpace(deviceAuthID)
+	userCode = strings.TrimSpace(userCode)
+	if deviceAuthID == "" {
+		return OpenAICodexACPDevicePollResult{}, errors.New("device_auth_id is required")
+	}
+	if userCode == "" {
+		return OpenAICodexACPDevicePollResult{}, errors.New("user_code is required")
+	}
+
+	issuer := openAICodexACPAuthIssuerBase()
+	tokenURL := issuer + "/api/accounts/deviceauth/token"
+	if err := validateOpenAICodexACPAuthURLFunc(tokenURL); err != nil {
+		return OpenAICodexACPDevicePollResult{}, err
+	}
+	payload, err := json.Marshal(map[string]string{
+		"device_auth_id": deviceAuthID,
+		"user_code":      userCode,
+	})
+	if err != nil {
+		return OpenAICodexACPDevicePollResult{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(string(payload)))
+	if err != nil {
+		return OpenAICodexACPDevicePollResult{}, fmt.Errorf("create codex device poll request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	client := s.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req) //nolint:gosec // URL is validated by validateOpenAICodexACPAuthURLFunc before request execution.
+	if err != nil {
+		return OpenAICodexACPDevicePollResult{}, fmt.Errorf("execute codex device poll request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return OpenAICodexACPDevicePollResult{}, fmt.Errorf("read codex device poll response: %w", err)
+	}
+	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound {
+		return OpenAICodexACPDevicePollResult{Pending: true}, nil
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return OpenAICodexACPDevicePollResult{}, fmt.Errorf("codex device auth failed with status %d", resp.StatusCode)
+	}
+
+	var decoded struct {
+		AuthorizationCode string `json:"authorization_code"`
+		CodeChallenge     string `json:"code_challenge"`
+		CodeVerifier      string `json:"code_verifier"`
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return OpenAICodexACPDevicePollResult{}, fmt.Errorf("decode codex device poll response: %w", err)
+	}
+	out := OpenAICodexACPDevicePollResult{
+		AuthorizationCode: strings.TrimSpace(decoded.AuthorizationCode),
+		CodeChallenge:     strings.TrimSpace(decoded.CodeChallenge),
+		CodeVerifier:      strings.TrimSpace(decoded.CodeVerifier),
+	}
+	if out.AuthorizationCode == "" || out.CodeChallenge == "" || out.CodeVerifier == "" {
+		return OpenAICodexACPDevicePollResult{}, errors.New("codex device poll response was incomplete")
+	}
+	return out, nil
+}
+
+func (s *Service) ExchangeOpenAICodexACPDeviceCode(ctx context.Context, authorizationCode, codeVerifier string) (OpenAICodexOAuthCredentials, error) {
+	authorizationCode = strings.TrimSpace(authorizationCode)
+	codeVerifier = strings.TrimSpace(codeVerifier)
+	if authorizationCode == "" {
+		return OpenAICodexOAuthCredentials{}, errors.New("authorization code is required")
+	}
+	if codeVerifier == "" {
+		return OpenAICodexOAuthCredentials{}, errors.New("code verifier is required")
+	}
+
+	issuer := openAICodexACPAuthIssuerBase()
+	cfg := openAICodexACPOAuthConfig(issuer + "/deviceauth/callback")
+	cfg.TokenURL = issuer + "/oauth/token"
+	resp, err := s.exchangeCode(ctx, cfg, authorizationCode, codeVerifier)
 	if err != nil {
 		return OpenAICodexOAuthCredentials{}, err
+	}
+	accessToken := strings.TrimSpace(resp.AccessToken)
+	idToken := strings.TrimSpace(resp.IDToken)
+	refreshToken := strings.TrimSpace(resp.RefreshToken)
+	if accessToken == "" {
+		return OpenAICodexOAuthCredentials{}, errors.New("oauth response missing access token")
+	}
+	if idToken == "" {
+		return OpenAICodexOAuthCredentials{}, errors.New("oauth response missing id token")
+	}
+	if refreshToken == "" {
+		return OpenAICodexOAuthCredentials{}, errors.New("oauth response missing refresh token")
 	}
 	return OpenAICodexOAuthCredentials{
 		AccessToken:  accessToken,
 		IDToken:      idToken,
 		RefreshToken: refreshToken,
-		AccountID:    accountID,
+		AccountID:    codexAccountIDFromTokens(accessToken, idToken),
 		ExpiresAt:    expiresAtFromNow(resp.ExpiresIn),
 		LastRefresh:  time.Now().UTC(),
 	}, nil
@@ -386,6 +614,14 @@ func openAICodexACPOAuthConfig(redirectURI string) oauthConfig {
 		UsePKCE:                 true,
 		IDTokenAddOrganizations: true,
 	}
+}
+
+func openAICodexACPAuthIssuerBase() string {
+	issuer := strings.TrimRight(strings.TrimSpace(openAICodexACPAuthIssuer), "/")
+	if issuer == "" {
+		return defaultOpenAIAuthIssuer
+	}
+	return issuer
 }
 
 func (s *Service) handleUserScopedOAuthCallback(ctx context.Context, token *oauthTokenRecord, code string) (string, error) {
@@ -1150,7 +1386,7 @@ func (s *Service) fetchGitHubPrimaryEmail(ctx context.Context, accessToken strin
 }
 
 func (s *Service) requestDeviceAuthorization(ctx context.Context, cfg oauthConfig) (*deviceAuthorizationResponse, error) {
-	if err := validateOAuthTokenURL(cfg.ClientType, cfg.DeviceCodeURL); err != nil {
+	if err := validateOAuthTokenURLFunc(cfg.ClientType, cfg.DeviceCodeURL); err != nil {
 		return nil, err
 	}
 
@@ -1199,7 +1435,7 @@ func (s *Service) requestDeviceAuthorization(ctx context.Context, cfg oauthConfi
 }
 
 func (s *Service) exchangeDeviceCode(ctx context.Context, cfg oauthConfig, deviceCode string) (*oauthTokenResponse, error) {
-	if err := validateOAuthTokenURL(cfg.ClientType, cfg.TokenURL); err != nil {
+	if err := validateOAuthTokenURLFunc(cfg.ClientType, cfg.TokenURL); err != nil {
 		return nil, err
 	}
 
@@ -1272,7 +1508,7 @@ func (s *Service) refreshAccessToken(ctx context.Context, cfg oauthConfig, refre
 }
 
 func (s *Service) postTokenRequest(ctx context.Context, cfg oauthConfig, body url.Values) (*oauthTokenResponse, error) {
-	if err := validateOAuthTokenURL(cfg.ClientType, cfg.TokenURL); err != nil {
+	if err := validateOAuthTokenURLFunc(cfg.ClientType, cfg.TokenURL); err != nil {
 		return nil, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.TokenURL, strings.NewReader(body.Encode()))

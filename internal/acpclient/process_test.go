@@ -577,6 +577,9 @@ func TestWriteCodexManagedConfigWritesFixedContainerConfig(t *testing.T) {
 	if len(writes) != 2 {
 		t.Fatalf("managed writes len = %d, want config.toml + auth.json: %#v", len(writes), writes)
 	}
+	if writes[0].Path != CodexManagedConfigDir+"/auth.json" || writes[1].Path != CodexManagedConfigDir+"/config.toml" {
+		t.Fatalf("managed writes order = %#v, want auth.json then config.toml", writes)
+	}
 	configWrite, ok := findWrite(writes, CodexManagedConfigDir+"/config.toml")
 	if !ok {
 		t.Fatalf("missing Codex config.toml write: %#v", writes)
@@ -634,6 +637,9 @@ func TestWriteCodexManagedConfigWritesOAuthAuth(t *testing.T) { //nolint:gosec /
 	if len(writes) != 2 {
 		t.Fatalf("managed writes len = %d, want config.toml + auth.json: %#v", len(writes), writes)
 	}
+	if writes[0].Path != CodexManagedConfigDir+"/auth.json" || writes[1].Path != CodexManagedConfigDir+"/config.toml" {
+		t.Fatalf("managed writes order = %#v, want auth.json then config.toml", writes)
+	}
 	configWrite, ok := findWrite(writes, CodexManagedConfigDir+"/config.toml")
 	if !ok {
 		t.Fatalf("missing Codex config.toml write: %#v", writes)
@@ -684,6 +690,37 @@ func TestWriteCodexManagedConfigWritesOAuthAuth(t *testing.T) { //nolint:gosec /
 	}
 	if auth["last_refresh"] != lastRefresh.Format(time.RFC3339Nano) {
 		t.Fatalf("last_refresh = %#v, want %q", auth["last_refresh"], lastRefresh.Format(time.RFC3339Nano))
+	}
+}
+
+func TestWriteCodexManagedConfigWritesOAuthAuthWithoutAccountID(t *testing.T) { //nolint:gosec // test fixture validates token-shaped Codex auth JSON.
+	client, server := newRecordingBridgeClient(t)
+	err := WriteCodexManagedConfigWithAuth(context.Background(), client, CodexManagedConfig{
+		Mode: SetupModeOAuth,
+		OAuth: &CodexOAuthCredentials{ //nolint:gosec // test fixture token-shaped values
+			AccessToken:  "access.jwt.token",
+			IDToken:      "id.jwt.token",
+			RefreshToken: "refresh-token",
+		},
+	})
+	if err != nil {
+		t.Fatalf("WriteCodexManagedConfigWithAuth() error = %v", err)
+	}
+	writes := server.writes()
+	authWrite, ok := findWrite(writes, CodexManagedConfigDir+"/auth.json")
+	if !ok {
+		t.Fatalf("missing Codex auth.json write: %#v", writes)
+	}
+	var auth map[string]any
+	if err := json.Unmarshal(authWrite.Content, &auth); err != nil {
+		t.Fatalf("invalid auth json: %v\n%s", err, string(authWrite.Content))
+	}
+	tokens, ok := auth["tokens"].(map[string]any)
+	if !ok {
+		t.Fatalf("tokens missing from auth json: %#v", auth)
+	}
+	if _, ok := tokens["account_id"]; ok {
+		t.Fatalf("auth json should omit empty account_id: %#v", tokens)
 	}
 }
 

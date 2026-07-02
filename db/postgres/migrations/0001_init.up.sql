@@ -171,6 +171,10 @@ CREATE TABLE IF NOT EXISTS bots (
   reasoning_enabled BOOLEAN NOT NULL DEFAULT false,
   reasoning_effort TEXT NOT NULL DEFAULT 'medium',
   chat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  chat_runtime TEXT NOT NULL DEFAULT 'model' CHECK (chat_runtime IN ('model', 'acp_agent')),
+  chat_acp_agent_id TEXT,
+  chat_acp_project_path TEXT NOT NULL DEFAULT '/data',
+  chat_acp_project_mode TEXT NOT NULL DEFAULT 'project' CHECK (chat_acp_project_mode IN ('project', 'none')),
   search_provider_id UUID REFERENCES search_providers(id) ON DELETE SET NULL,
   fetch_provider_id UUID REFERENCES fetch_providers(id) ON DELETE SET NULL,
   memory_provider_id UUID REFERENCES memory_providers(id) ON DELETE SET NULL,
@@ -448,11 +452,11 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   route_id UUID REFERENCES bot_channel_routes(id) ON DELETE SET NULL,
   channel_type TEXT,
   type TEXT NOT NULL DEFAULT 'chat' CHECK (type IN ('chat', 'heartbeat', 'schedule', 'subagent', 'discuss', 'acp_agent')),
+  session_mode TEXT NOT NULL DEFAULT 'chat' CHECK (session_mode IN ('chat', 'discuss', 'heartbeat', 'schedule', 'subagent')),
+  runtime_type TEXT NOT NULL DEFAULT 'model' CHECK (runtime_type IN ('model', 'acp_agent')),
+  runtime_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   title TEXT NOT NULL DEFAULT '',
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-  default_head_turn_id UUID,
-  forked_from_session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
-  forked_from_turn_id UUID,
   parent_session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
   created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -464,13 +468,12 @@ CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_id ON bot_sessions(bot_id);
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_route_id ON bot_sessions(route_id);
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_active ON bot_sessions(bot_id, deleted_at);
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_parent ON bot_sessions(parent_session_id) WHERE parent_session_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_bot_sessions_default_head_turn ON bot_sessions(default_head_turn_id) WHERE default_head_turn_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_bot_sessions_forked_from_session ON bot_sessions(forked_from_session_id) WHERE forked_from_session_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_bot_sessions_forked_from_turn ON bot_sessions(forked_from_turn_id) WHERE forked_from_turn_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_created_by_user_id ON bot_sessions(created_by_user_id) WHERE created_by_user_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_created_by ON bot_sessions(bot_id, created_by_user_id, deleted_at);
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_active_updated ON bot_sessions(bot_id, updated_at DESC, id DESC) WHERE deleted_at IS NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_sessions_id_bot_unique ON bot_sessions(id, bot_id);
+CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_mode_runtime_active_updated
+  ON bot_sessions(bot_id, session_mode, runtime_type, updated_at DESC, id DESC)
+  WHERE deleted_at IS NULL;
 
 -- Add FK from routes to sessions (deferred to avoid circular dependency during CREATE).
 ALTER TABLE bot_channel_routes
@@ -496,56 +499,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_session_events_dedup
   ON bot_session_events (session_id, event_kind, external_message_id)
   WHERE external_message_id IS NOT NULL AND external_message_id != '';
 
--- bot_history_turns: immutable lifecycle units for user requests and assistant replies.
-CREATE TABLE IF NOT EXISTS bot_history_turns (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  owner_session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
-  parent_turn_id UUID REFERENCES bot_history_turns(id) ON DELETE SET NULL,
-  request_message_id UUID,
-  final_assistant_message_id UUID,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_bot_history_turns_bot_created
-  ON bot_history_turns(bot_id, created_at, id);
-CREATE INDEX IF NOT EXISTS idx_bot_history_turns_owner_session
-  ON bot_history_turns(owner_session_id, created_at, id)
-  WHERE owner_session_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_bot_history_turns_parent
-  ON bot_history_turns(parent_turn_id)
-  WHERE parent_turn_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_bot_history_turns_request
-  ON bot_history_turns(request_message_id) WHERE request_message_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_bot_history_turns_assistant
-  ON bot_history_turns(final_assistant_message_id) WHERE final_assistant_message_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_history_turns_id_bot_unique ON bot_history_turns(id, bot_id);
-
--- bot_session_turn_heads: switchable leaf heads for a session turn graph.
-CREATE TABLE IF NOT EXISTS bot_session_turn_heads (
-  session_id UUID NOT NULL,
-  head_turn_id UUID NOT NULL,
-  bot_id UUID NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (session_id, head_turn_id),
-  FOREIGN KEY (session_id, bot_id) REFERENCES bot_sessions(id, bot_id) ON DELETE CASCADE,
-  FOREIGN KEY (head_turn_id, bot_id) REFERENCES bot_history_turns(id, bot_id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_bot_session_turn_heads_head
-  ON bot_session_turn_heads(head_turn_id);
-CREATE INDEX IF NOT EXISTS idx_bot_session_turn_heads_bot
-  ON bot_session_turn_heads(bot_id);
-
 -- bot_history_messages: unified message history under bot scope.
 CREATE TABLE IF NOT EXISTS bot_history_messages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
-  turn_id UUID REFERENCES bot_history_turns(id) ON DELETE SET NULL,
-  turn_message_seq BIGINT,
   sender_channel_identity_id UUID REFERENCES channel_identities(id),
   sender_account_user_id UUID REFERENCES users(id),
   source_message_id TEXT,
@@ -554,6 +512,8 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   content JSONB NOT NULL,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   usage JSONB,
+  session_mode TEXT NOT NULL DEFAULT 'chat' CHECK (session_mode IN ('chat', 'discuss', 'heartbeat', 'schedule', 'subagent')),
+  runtime_type TEXT NOT NULL DEFAULT 'model' CHECK (runtime_type IN ('model', 'acp_agent')),
   model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   compact_id UUID,
   event_id UUID REFERENCES bot_session_events(id) ON DELETE SET NULL,
@@ -565,31 +525,24 @@ CREATE INDEX IF NOT EXISTS idx_bot_history_messages_bot_created ON bot_history_m
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_compact ON bot_history_messages(compact_id);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session
   ON bot_history_messages(session_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_bot_history_messages_turn
-  ON bot_history_messages(turn_id, turn_message_seq, created_at)
-  WHERE turn_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_history_messages_turn_seq_unique
-  ON bot_history_messages(turn_id, turn_message_seq)
-  WHERE turn_id IS NOT NULL AND turn_message_seq IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_source
   ON bot_history_messages(session_id, source_message_id);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_reply
   ON bot_history_messages(session_id, source_reply_to_message_id);
 
-ALTER TABLE bot_sessions
-  ADD CONSTRAINT fk_bot_sessions_default_head_turn
-  FOREIGN KEY (default_head_turn_id, bot_id) REFERENCES bot_history_turns(id, bot_id)
-  ON DELETE SET NULL (default_head_turn_id);
-ALTER TABLE bot_sessions
-  ADD CONSTRAINT fk_bot_sessions_forked_from_turn
-  FOREIGN KEY (forked_from_turn_id, bot_id) REFERENCES bot_history_turns(id, bot_id)
-  ON DELETE SET NULL (forked_from_turn_id);
-ALTER TABLE bot_history_turns
-  ADD CONSTRAINT fk_bot_history_turns_request_message
-  FOREIGN KEY (request_message_id) REFERENCES bot_history_messages(id) ON DELETE SET NULL;
-ALTER TABLE bot_history_turns
-  ADD CONSTRAINT fk_bot_history_turns_final_assistant_message
-  FOREIGN KEY (final_assistant_message_id) REFERENCES bot_history_messages(id) ON DELETE SET NULL;
+CREATE TABLE IF NOT EXISTS bot_session_discuss_cursors (
+  session_id UUID NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
+  scope_key TEXT NOT NULL DEFAULT 'default',
+  route_id UUID REFERENCES bot_channel_routes(id) ON DELETE SET NULL,
+  source TEXT NOT NULL DEFAULT '',
+  consumed_cursor BIGINT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (session_id, scope_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_session_discuss_cursors_route
+  ON bot_session_discuss_cursors(route_id)
+  WHERE route_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS tool_approval_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -608,7 +561,6 @@ CREATE TABLE IF NOT EXISTS tool_approval_requests (
   decided_by_channel_identity_id UUID REFERENCES channel_identities(id) ON DELETE SET NULL,
   requested_message_id UUID REFERENCES bot_history_messages(id) ON DELETE SET NULL,
   prompt_message_id UUID REFERENCES bot_history_messages(id) ON DELETE SET NULL,
-  persist_turn_id UUID REFERENCES bot_history_turns(id) ON DELETE SET NULL,
   prompt_external_message_id TEXT NOT NULL DEFAULT '',
   source_platform TEXT NOT NULL DEFAULT '',
   reply_target TEXT NOT NULL DEFAULT '',
@@ -618,23 +570,13 @@ CREATE TABLE IF NOT EXISTS tool_approval_requests (
   CONSTRAINT tool_approval_operation_check CHECK (operation IN ('read', 'write', 'exec')),
   CONSTRAINT tool_approval_status_check CHECK (status IN ('pending', 'approved', 'rejected', 'expired', 'cancelled')),
   CONSTRAINT tool_approval_short_id_unique UNIQUE (session_id, short_id),
-  CONSTRAINT fk_tool_approval_session_bot
-    FOREIGN KEY (session_id, bot_id) REFERENCES bot_sessions(id, bot_id) ON DELETE CASCADE
+  CONSTRAINT tool_approval_tool_call_unique UNIQUE (session_id, tool_call_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_tool_approval_bot_status_created
   ON tool_approval_requests(bot_id, status, created_at);
 CREATE INDEX IF NOT EXISTS idx_tool_approval_session_status_created
   ON tool_approval_requests(session_id, status, created_at);
-CREATE INDEX IF NOT EXISTS idx_tool_approval_persist_turn
-  ON tool_approval_requests(persist_turn_id)
-  WHERE persist_turn_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS tool_approval_tool_call_legacy_unique
-  ON tool_approval_requests(session_id, tool_call_id)
-  WHERE persist_turn_id IS NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS tool_approval_tool_call_turn_unique
-  ON tool_approval_requests(session_id, tool_call_id, persist_turn_id)
-  WHERE persist_turn_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_tool_approval_prompt_external
   ON tool_approval_requests(prompt_external_message_id)
   WHERE prompt_external_message_id != '';
@@ -658,7 +600,6 @@ CREATE TABLE IF NOT EXISTS user_input_requests (
   assistant_message_id UUID REFERENCES bot_history_messages(id) ON DELETE SET NULL,
   tool_result_message_id UUID REFERENCES bot_history_messages(id) ON DELETE SET NULL,
   prompt_message_id UUID REFERENCES bot_history_messages(id) ON DELETE SET NULL,
-  persist_turn_id UUID REFERENCES bot_history_turns(id) ON DELETE SET NULL,
   prompt_external_message_id TEXT NOT NULL DEFAULT '',
   source_platform TEXT NOT NULL DEFAULT '',
   reply_target TEXT NOT NULL DEFAULT '',
@@ -671,55 +612,16 @@ CREATE TABLE IF NOT EXISTS user_input_requests (
   CONSTRAINT user_input_tool_name_check CHECK (tool_name = 'ask_user'),
   CONSTRAINT user_input_status_check CHECK (status IN ('pending', 'submitted', 'canceled', 'expired', 'failed')),
   CONSTRAINT user_input_short_id_unique UNIQUE (session_id, short_id),
-  CONSTRAINT fk_user_input_session_bot
-    FOREIGN KEY (session_id, bot_id) REFERENCES bot_sessions(id, bot_id) ON DELETE CASCADE
+  CONSTRAINT user_input_tool_call_unique UNIQUE (session_id, tool_call_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_input_bot_status_created
   ON user_input_requests(bot_id, status, created_at);
 CREATE INDEX IF NOT EXISTS idx_user_input_session_status_created
   ON user_input_requests(session_id, status, created_at);
-CREATE INDEX IF NOT EXISTS idx_user_input_persist_turn
-  ON user_input_requests(persist_turn_id)
-  WHERE persist_turn_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS user_input_tool_call_legacy_unique
-  ON user_input_requests(session_id, tool_call_id)
-  WHERE persist_turn_id IS NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS user_input_tool_call_turn_unique
-  ON user_input_requests(session_id, tool_call_id, persist_turn_id)
-  WHERE persist_turn_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_user_input_prompt_external
   ON user_input_requests(prompt_external_message_id)
   WHERE prompt_external_message_id != '';
-
-CREATE OR REPLACE FUNCTION enforce_request_persist_turn_owner()
-RETURNS trigger AS $$
-BEGIN
-  IF NEW.persist_turn_id IS NULL THEN
-    RETURN NEW;
-  END IF;
-  IF NOT EXISTS (
-    SELECT 1
-    FROM bot_history_turns t
-    WHERE t.id = NEW.persist_turn_id
-      AND t.bot_id = NEW.bot_id
-      AND t.owner_session_id = NEW.session_id
-  ) THEN
-    RAISE EXCEPTION 'persist_turn_id must reference a turn from the same bot session';
-  END IF;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS tool_approval_persist_turn_owner_guard ON tool_approval_requests;
-CREATE TRIGGER tool_approval_persist_turn_owner_guard
-BEFORE INSERT OR UPDATE OF persist_turn_id, bot_id, session_id ON tool_approval_requests
-FOR EACH ROW EXECUTE FUNCTION enforce_request_persist_turn_owner();
-
-DROP TRIGGER IF EXISTS user_input_persist_turn_owner_guard ON user_input_requests;
-CREATE TRIGGER user_input_persist_turn_owner_guard
-BEFORE INSERT OR UPDATE OF persist_turn_id, bot_id, session_id ON user_input_requests
-FOR EACH ROW EXECUTE FUNCTION enforce_request_persist_turn_owner();
 
 CREATE TABLE IF NOT EXISTS containers (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

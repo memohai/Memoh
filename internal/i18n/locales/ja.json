@@ -24,6 +24,7 @@
     "title": "✨新しい{mode}が始まりました。",
     "modeChat": "チャット",
     "modeDiscussion": "議論",
+    "modeWithRuntime": "{runtime} の{mode}",
     "usage": "読めませんでした。チャットには /new を使用し、ディスカッションには /newDiscussion を使用してください。",
     "confirmTitle": "⚠️確認/新規",
     "confirmBody": "これにより、新しい {mode} Sessionが開始され、現在の会話履歴が破棄されます。",
@@ -37,6 +38,26 @@
     "labelContext": "コンテクスト",
     "contextUnit": "Token",
     "tip": "ヒント: {model} または {reasoning} でいつでも調整できます。"
+  },
+  "chat": {
+    "acp": {
+      "agentNotConfigured": "このBotの外部Agent設定が完了していません。",
+      "agentNotFound": "選択された外部Agentは利用できません。",
+      "agentNotEnabled": "選択された外部AgentはこのBotで無効になっています。",
+      "codexOAuthIncomplete": "このBotワークスペースではCodexのChatGPTサインインが完了していません。",
+      "codexAuthTokenMissing": "このBotワークスペースのCodex認証が不足しているか不完全です。",
+      "agentAuthInvalid": "外部Agentの認証が無効です。Agent設定を更新してからもう一度お試しください。",
+      "noWorkspaceExec": "このBotのWorkspaceコマンドを実行する権限がありません。",
+      "runtimeOwnerMissing": "この外部Agent Sessionには実行所有者がありません。新しいSessionを開始してください。",
+      "discussUnsupported": "この外部Agentはディスカッションモードでは実行できません。",
+      "groupChatUnsupported": "グループチャットではチャットモードの外部Agent Sessionを作成できません。/new codex または /new discuss codex を使用してください。",
+      "projectModeInvalid": "外部Agentのプロジェクトモードが無効です。",
+      "projectPathInvalid": "外部Agentのプロジェクトパスは絶対パスである必要があります。",
+      "displayArgsInvalid": "外部Agentの表示引数が無効です。",
+      "runtimeStartFailed": "外部Agent runtimeの起動に失敗しました。",
+      "runtimeBusy": "外部Agent runtimeはこのSessionの前のターンを処理中です。",
+      "invalidChatRuntime": "選択されたチャットruntimeが無効です。"
+    }
   },
   "ops": {
     "template": "⚠️ 現在 {verb} できませんでした。しばらくしてからもう一度試してください。",
@@ -414,6 +435,7 @@
       "summaryTitle": "Tokenの使用状況 ({range})",
       "byModelTitle": "Model別のToken使用量 ({range})",
       "bucketChat": "チャット",
+      "bucketDiscuss": "ディスカッション",
       "bucketHeartbeat": "ハートビート",
       "bucketSchedule": "スケジュール",
       "inOut": "{in} 入力 · {out} 出力",
@@ -435,6 +457,10 @@
     "toolApproval": {
       "unavailable": "⚠️ 現在、ここでは承認を取得できません。",
       "parseFailed": "それは読めませんでした。 /approve または /reject を使用してリクエストに返信するか、ボタンをタップします。"
+    },
+    "userInput": {
+      "unavailable": "⚠️ 現在、ここではユーザー入力の返信を利用できません。",
+      "parseFailed": "読み取れませんでした。/respond <request> <answer> で返信してください。"
     },
     "fallback": {
       "switch": "{command}で切り替えます。",

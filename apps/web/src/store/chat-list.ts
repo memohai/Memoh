@@ -9,7 +9,15 @@ import { useUserStore } from '@/store/user'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { provisionalSessionTitle, shouldRefreshFromMessageCreated, upsertById } from './chat-list.utils'
+import {
+  isSessionVisibleInSidebarMode,
+  normalizedRuntimeType,
+  provisionalSessionTitle,
+  shouldRefreshFromMessageCreated,
+  sortByRecency,
+  upsertById,
+  type SidebarSessionMode,
+} from './chat-list.utils'
 import {
   createSession,
   deleteSession as requestDeleteSession,
@@ -42,13 +50,11 @@ import {
   type UIToolMessage,
   type UIUserInput,
   type WSUserInputAnswer,
-  type FetchMessagesUIResult,
-  type UITurnGraphNode,
   type UITurn,
+  type UIUserTurn,
   type UIStreamEvent,
   fetchBots,
   fetchMessagesUI,
-  forkSessionFromMessage as requestForkSessionFromMessage,
   sendLocalChannelMessage,
   streamBotSessionsActivityEvents,
   streamSessionMessageEvents,
@@ -56,6 +62,7 @@ import {
   locateMessageUI,
 } from '@/composables/api/useChat'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH } from '@/utils/acp'
+import { getBotsByBotIdSettings } from '@memohai/sdk'
 import type { AcpagentRuntimeStatus } from '@memohai/sdk'
 
 export type TextBlock = UITextMessage
@@ -99,10 +106,41 @@ export interface FsChangeEvent {
   editNewText?: string
 }
 
+export type ActiveChatTarget =
+  | {
+      kind: 'session'
+      sessionId: string
+      session: SessionSummary | null
+      runtimeType: string
+      isACP: boolean
+      isPendingACP: false
+      metadata: Record<string, unknown>
+      explicitSelection: boolean
+    }
+  | {
+      kind: 'draft-acp'
+      sessionId: null
+      session: null
+      runtimeType: 'acp_agent'
+      isACP: true
+      isPendingACP: true
+      metadata: Record<string, unknown>
+      explicitSelection: boolean
+    }
+  | {
+      kind: 'draft-native'
+      sessionId: null
+      session: null
+      runtimeType: 'model'
+      isACP: false
+      isPendingACP: false
+      metadata: Record<string, unknown>
+      explicitSelection: boolean
+    }
+
 export interface ChatUserTurn {
   id: string
   serverId?: string
-  turnId?: string
   role: 'user'
   text: string
   attachments: AttachmentItem[]
@@ -127,7 +165,6 @@ export interface ChatUserTurn {
 export interface ChatAssistantTurn {
   id: string
   serverId?: string
-  turnId?: string
   role: 'assistant'
   messages: ContentBlock[]
   timestamp: string
@@ -141,6 +178,11 @@ export interface ChatAssistantTurn {
 interface UserInputStateSnapshot {
   block: ToolCallBlock
   userInput: UIUserInput
+}
+
+interface ToolApprovalStateSnapshot {
+  block: ToolCallBlock
+  approval: UIToolApproval
 }
 
 export interface BackgroundTask {
@@ -164,7 +206,6 @@ export interface BackgroundTask {
 export interface ChatSystemTurn {
   id: string
   serverId?: string
-  turnId?: string
   role: 'system'
   kind: 'background_task'
   backgroundTask: BackgroundTask
@@ -183,74 +224,23 @@ function currentLocale() {
   return locale === 'zh' || locale === 'ja' ? locale : 'en'
 }
 
-function localizedMessages() {
-  const locale = currentLocale()
-  return locale === 'zh' ? zhMessages : locale === 'ja' ? jaMessages : enMessages
-}
-
 function userInputConnectionLostMessage() {
-  return localizedMessages().chat.tools.userInputConnectionLost
+  const locale = currentLocale()
+  const messages = locale === 'zh' ? zhMessages : locale === 'ja' ? jaMessages : enMessages
+  return messages.chat.tools.userInputConnectionLost
 }
 
-function forkSourceSessionDeletedMessage() {
-  return localizedMessages().chat.errors.sessionDeleted
-}
-
-function forkFailedMessage() {
-	return localizedMessages().chat.errors.forkFailed
-}
-
-function variantLoadFailedMessage() {
-	return localizedMessages().chat.errors.loadVariantFailed
-}
-
-function isStaleSessionHeadError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false
-  const payload = error as {
-    status?: unknown
-    statusCode?: unknown
-    response?: { status?: unknown }
-    message?: unknown
-    error?: unknown
-    detail?: unknown
-  }
-  const status = payload.status ?? payload.statusCode ?? payload.response?.status
-  if (status !== undefined && status !== 409) return false
-  for (const value of [payload.message, payload.error, payload.detail]) {
-    if (typeof value === 'string' && /^\s*stale session head\s*$/i.test(value)) {
-      return true
-    }
-  }
-  return false
-}
-
-function isSessionNotFoundError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false
-  const payload = error as {
-    status?: unknown
-    statusCode?: unknown
-    response?: { status?: unknown }
-    message?: unknown
-  }
-  if (payload.status === 404 || payload.statusCode === 404 || payload.response?.status === 404) {
-    return true
-  }
-  return typeof payload.message === 'string' && /\bsession not found\b/i.test(payload.message)
+function sendFailedMessage() {
+  const locale = currentLocale()
+  const messages = locale === 'zh' ? zhMessages : locale === 'ja' ? jaMessages : enMessages
+  return messages.chat.sendFailed
 }
 
 interface PendingAssistantStream {
   streamId: string
-  contextTurns: ChatMessage[]
   assistantTurn: ChatAssistantTurn
   botId: string
   sessionId: string
-  refreshOnEnd: boolean
-  commitOnFirstVisibleOutput?: () => void
-  committed: boolean
-  visiblyAttached: boolean
-  pendingUserTurn?: ChatUserTurn | null
-  pendingReplaceFromTurn?: ChatMessage | null
-  pendingReplacedTurns?: ChatMessage[]
   done: boolean
   resolve: () => void
   reject: (err: Error) => void
@@ -271,8 +261,28 @@ export interface SendMessageResult {
   restoreAttachments?: ChatAttachment[]
 }
 
+type WebNewCommandResult =
+  | { kind: 'none' }
+  | { kind: 'handled' }
+  | { kind: 'error'; message: string }
+
+function parseWebNewCommand(text: string): { mode: 'chat' | 'discuss' | ''; agentId: string } | null {
+  const input = text.trim()
+  if (!input.startsWith('/new')) return null
+  const parts = input.split(/\s+/)
+  if (parts[0] !== '/new') return null
+  const positional = parts.slice(1).filter(part => part && !part.startsWith('-'))
+  const first = positional[0]?.toLowerCase() ?? ''
+  const second = positional[1]?.toLowerCase() ?? ''
+  if (first === 'chat' || first === 'discuss') {
+    return { mode: first, agentId: second }
+  }
+  return { mode: '', agentId: first }
+}
+
 export interface ACPAgentSessionInput {
   agentId: string
+  sessionMode?: 'chat' | 'discuss'
   projectPath?: string
   projectMode?: string
   modelId?: string
@@ -315,37 +325,9 @@ interface EphemeralAssistantError {
   userText?: string
 }
 
-interface SessionTurnGraphNodeState {
-  turnId: string
-  parentTurnId?: string
-  timestamp?: string
-  requestKey?: string
-  hasUser: boolean
-  hasAssistant: boolean
-}
-
-interface SessionTurnGraphState {
-  defaultHeadTurnId: string
-  headTurnIds: string[]
-  nodes: Map<string, SessionTurnGraphNodeState>
-}
-
-export interface TurnVariantState {
-  turnId: string
-  index: number
-  total: number
-  previousHeadTurnId?: string
-  nextHeadTurnId?: string
-}
-
-type TurnVariantOption = {
-  turnId: string
-  headTurnId: string
-}
-
 export const useChatStore = defineStore('chat', () => {
   const selectionStore = useChatSelectionStore()
-  const { currentBotId, sessionId, draftIntent } = storeToRefs(selectionStore)
+  const { currentBotId, sessionId, draftIntent, explicitSelection: explicitSessionSelection } = storeToRefs(selectionStore)
 
   const messages = reactive<ChatMessage[]>([])
   const pendingAssistantStreams = reactive(new Map<string, PendingAssistantStream>())
@@ -367,8 +349,6 @@ export const useChatStore = defineStore('chat', () => {
   const streaming = computed(() => isSessionStreaming(sessionId.value))
   const sessions = ref<SessionSummary[]>([])
   const loading = ref(false)
-  const messageActionSessionIds = reactive(new Set<string>())
-  const messageActionLoading = computed(() => isMessageActionLoading(sessionId.value))
   // `loadingChats` covers the bot-level boot path (sessions list fetch), so
   // the sidebar can show its skeleton + suppress its empty-state placeholder
   // exactly while the sessions list is in flight.
@@ -377,7 +357,6 @@ export const useChatStore = defineStore('chat', () => {
   // placeholders hidden while a fresh transcript is on its way.
   const loadingChats = ref(false)
   const loadingMessages = ref(false)
-  const variantSelectionLoading = ref(false)
   const loadingOlder = ref(false)
   const hasMoreOlder = ref(true)
   // Tracks whether the user has scrolled back and loaded at least one page of
@@ -408,21 +387,6 @@ export const useChatStore = defineStore('chat', () => {
   // tab can fall off the current page without being deleted.
   const deletedSession = ref<{ id: string, botId: string, seq: number } | null>(null)
   let deletedSessionSeq = 0
-
-  function isMessageActionLoading(targetSessionId?: string | null): boolean {
-    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
-    return Boolean(sid && messageActionSessionIds.has(sid))
-  }
-
-  function setMessageActionLoading(targetSessionId: string, loading: boolean) {
-    const sid = targetSessionId.trim()
-    if (!sid) return
-    if (loading) {
-      messageActionSessionIds.add(sid)
-    } else {
-      messageActionSessionIds.delete(sid)
-    }
-  }
 
   // Bumps every time a fs-mutating tool call (write/edit/apply_patch/exec) finishes for the
   // current bot. File-manager components watch this to refresh their listings
@@ -559,12 +523,9 @@ export const useChatStore = defineStore('chat', () => {
   let activeWs: ChatWebSocket | null = null
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
   let refreshPromise: { key: string; promise: Promise<void> } | null = null
-  let variantSelectionRequestId = 0
   let sessionListRefreshPromise: { botId: string; promise: Promise<void> } | null = null
   const latestBackgroundTasks = new Map<string, BackgroundTask>()
   const ephemeralAssistantErrors = new Map<string, EphemeralAssistantError[]>()
-  const turnGraphs = reactive(new Map<string, SessionTurnGraphState>())
-  const selectedHeadTurnIds = reactive(new Map<string, string>())
   // Two independent streams replace the deleted bot-wide messages SSE:
   // - sessionMessagesStream follows the active sessionId and feeds the
   //   transcript (server pushes a small backlog + live messages for that
@@ -577,6 +538,7 @@ export const useChatStore = defineStore('chat', () => {
   // O(1) lookup keeps event handlers off the list scan that previously
   // blocked the UI on bots with thousands of heartbeat sessions.
   const sessionById = new Map<string, SessionSummary>()
+  const sessionLookupRevision = ref(0)
   const rememberedSessions = ref<Record<string, SessionSummary>>({})
   const deletedSessionIdsByBot = new Map<string, Set<string>>()
   const sessionsCursor = ref<string | null>(null)
@@ -586,6 +548,7 @@ export const useChatStore = defineStore('chat', () => {
   const acpRuntimePending = ref<Record<string, boolean>>({})
   const acpRuntimeRequests = new Map<string, Promise<AcpagentRuntimeStatus>>()
   const pendingACPSessionInput = ref<ACPAgentSessionInput | null>(null)
+  const defaultACPInputsByBot = new Map<string, ACPAgentSessionInput | null>()
   // Server-generated ID of the staged runtime; the client never invents
   // runtime identifiers.
   const pendingACPRuntimeId = ref('')
@@ -596,6 +559,7 @@ export const useChatStore = defineStore('chat', () => {
   let selectSessionRequestId = 0
 
   const activeSession = computed(() => knownSessionSummary(sessionId.value ?? ''))
+  const hasExplicitSessionSelection = computed(() => explicitSessionSelection.value)
   const knownSessions = computed<SessionSummary[]>(() => {
     const byId = new Map<string, SessionSummary>()
     for (const session of sessions.value) byId.set(session.id, session)
@@ -604,6 +568,14 @@ export const useChatStore = defineStore('chat', () => {
     }
     return [...byId.values()]
   })
+
+  function markSessionLookupChanged() {
+    sessionLookupRevision.value++
+  }
+
+  function trackSessionLookupRevision() {
+    return sessionLookupRevision.value
+  }
 
   function replaceSessions(items: SessionSummary[]): SessionSummary[] {
     const currentDeleted = deletedSessionIdsByBot.get((currentBotId.value ?? '').trim())
@@ -627,6 +599,7 @@ export const useChatStore = defineStore('chat', () => {
     sessions.value = merged
     sessionById.clear()
     for (const s of merged) sessionById.set(s.id, s)
+    markSessionLookupChanged()
     return merged
   }
 
@@ -637,6 +610,7 @@ export const useChatStore = defineStore('chat', () => {
     if (fresh.length === 0) return
     sessions.value = [...sessions.value, ...fresh]
     for (const s of fresh) sessionById.set(s.id, s)
+    markSessionLookupChanged()
   }
 
   function upsertSession(updated: SessionSummary) {
@@ -650,6 +624,7 @@ export const useChatStore = defineStore('chat', () => {
       sessions.value = [updated, ...sessions.value]
     }
     sessionById.set(updated.id, updated)
+    markSessionLookupChanged()
     if (rememberedSessions.value[updated.id]) rememberSession(updated)
   }
 
@@ -658,6 +633,7 @@ export const useChatStore = defineStore('chat', () => {
       ...rememberedSessions.value,
       [updated.id]: updated,
     }
+    markSessionLookupChanged()
   }
 
   function forgetRememberedSession(id: string) {
@@ -665,12 +641,35 @@ export const useChatStore = defineStore('chat', () => {
     const next = { ...rememberedSessions.value }
     delete next[id]
     rememberedSessions.value = next
+    markSessionLookupChanged()
   }
 
   function knownSessionSummary(targetSessionId: string): SessionSummary | null {
     const sid = targetSessionId.trim()
     if (!sid) return null
+    // `sessionById` is intentionally a non-reactive O(1) lookup. Tie computed
+    // consumers such as activeChatTarget to a tiny revision so an early null
+    // read is invalidated when the session list/hydration later fills the map.
+    trackSessionLookupRevision()
     return sessionById.get(sid) ?? rememberedSessions.value[sid] ?? null
+  }
+
+  async function ensureSessionSummary(targetBotId: string, targetSessionId: string, requestId?: number): Promise<SessionSummary | null> {
+    const bid = targetBotId.trim()
+    const sid = targetSessionId.trim()
+    if (!bid || !sid) return null
+    const known = knownSessionSummary(sid)
+    if (known) return known
+
+    try {
+      const fetched = await fetchSession(bid, sid)
+      if (requestId !== undefined && requestId !== selectSessionRequestId) return null
+      if ((currentBotId.value ?? '').trim() !== bid || (sessionId.value ?? '').trim() !== sid) return null
+      rememberSession(fetched)
+      return fetched
+    } catch {
+      return null
+    }
   }
 
   function isRecentsSession(session: SessionSummary): boolean {
@@ -686,22 +685,27 @@ export const useChatStore = defineStore('chat', () => {
   // triggers `sessions.value`, so the UI stays stale until a full REST refresh
   // (the Cmd+R symptom).
   function patchSessionInList(id: string, patch: Partial<SessionSummary>) {
-    const currentDeleted = deletedSessionIdsByBot.get((currentBotId.value ?? '').trim())
-    if (currentDeleted?.has(id)) return
     const existing = sessionById.get(id)
     if (!existing) return
+    const currentDeleted = deletedSessionIdsByBot.get((existing.bot_id ?? currentBotId.value ?? '').trim())
+    if (currentDeleted?.has(id)) return
     const next = { ...existing, ...patch }
     sessionById.set(id, next)
     sessions.value = sessions.value.map(session => (session.id === id ? next : session))
+    markSessionLookupChanged()
   }
 
   function removeSessionFromList(id: string) {
     if (!sessionById.has(id) && !rememberedSessions.value[id]) return
     sessions.value = sessions.value.filter(session => session.id !== id)
     sessionById.delete(id)
+    markSessionLookupChanged()
     forgetRememberedSession(id)
-    turnGraphs.delete(id)
-    selectedHeadTurnIds.delete(id)
+  }
+
+  function fallbackSessionAfterDelete(mode: SidebarSessionMode): SessionSummary | null {
+    const visibleSessions = sessions.value.filter(session => isSessionVisibleInSidebarMode(session, mode))
+    return sortByRecency(visibleSessions)[0] ?? null
   }
 
   function markSessionDeleted(botId: string, targetSessionId: string) {
@@ -722,7 +726,6 @@ export const useChatStore = defineStore('chat', () => {
     if (ct && ct !== 'local') return true
     return false
   })
-  const activeSessionSupportsTurnVariants = computed(() => sessionSupportsTurnVariants(sessionId.value))
 
   function acpRuntimeKey(botId: string, targetSessionId: string) {
     const bid = botId.trim()
@@ -1013,7 +1016,6 @@ export const useChatStore = defineStore('chat', () => {
     if (turn.role === 'user') {
       return {
         id: String(turn.id ?? nextId()),
-        turnId: (turn.turn_id ?? '').trim() || undefined,
         role: 'user',
         text: turn.text ?? '',
         attachments: (turn.attachments ?? []).map(normalizeAttachment),
@@ -1038,7 +1040,6 @@ export const useChatStore = defineStore('chat', () => {
       const latest = rememberBackgroundTask(task)
       return {
         id: String(turn.id ?? `system-${latest.taskId}`),
-        turnId: (turn.turn_id ?? '').trim() || undefined,
         role: 'system',
         kind: 'background_task',
         backgroundTask: latest,
@@ -1050,7 +1051,6 @@ export const useChatStore = defineStore('chat', () => {
 
     return {
       id: String(turn.id ?? nextId()),
-      turnId: (turn.turn_id ?? '').trim() || undefined,
       role: 'assistant',
       messages: (turn.messages ?? []).map(normalizeUIMessage),
       timestamp: normalizeTimestamp(turn.timestamp),
@@ -1228,301 +1228,6 @@ export const useChatStore = defineStore('chat', () => {
     messages.splice(0, messages.length, ...next)
   }
 
-  function normalizeGraphNode(node: UITurnGraphNode): SessionTurnGraphNodeState | null {
-    const turnId = node.turn_id?.trim()
-    if (!turnId) return null
-    return {
-      turnId,
-      parentTurnId: node.parent_turn_id?.trim() || undefined,
-      timestamp: node.timestamp?.trim() || undefined,
-      requestKey: node.request_key?.trim() || undefined,
-      hasUser: node.has_user === true,
-      hasAssistant: node.has_assistant === true,
-    }
-  }
-
-  function graphPathTurnIds(graph: SessionTurnGraphState, headTurnId: string): string[] {
-    const path: string[] = []
-    const seen = new Set<string>()
-    for (let turnId = headTurnId.trim(); turnId;) {
-      if (seen.has(turnId)) break
-      const node = graph.nodes.get(turnId)
-      if (!node) break
-      seen.add(turnId)
-      path.push(turnId)
-      turnId = node.parentTurnId ?? ''
-    }
-    return path.reverse()
-  }
-
-  function selectedHeadForSession(targetSessionId?: string | null): string {
-    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
-    if (!sid) return ''
-    return selectedHeadTurnIds.get(sid)?.trim() || turnGraphs.get(sid)?.defaultHeadTurnId || ''
-  }
-
-  function sessionSupportsTurnVariants(targetSessionId?: string | null): boolean {
-    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
-    return knownSessionSummary(sid)?.type === 'chat'
-  }
-
-  function baseHeadForRequest(targetSessionId?: string | null): string | undefined {
-    if (!sessionSupportsTurnVariants(targetSessionId)) return undefined
-    return selectedHeadForSession(targetSessionId).trim() || undefined
-  }
-
-  function baseHeadPayload(targetSessionId?: string | null): { base_head_turn_id: string } | Record<string, never> {
-    const baseHeadTurnId = baseHeadForRequest(targetSessionId)
-    return baseHeadTurnId ? { base_head_turn_id: baseHeadTurnId } : {}
-  }
-
-  function explicitSelectedHeadForSession(targetSessionId?: string | null): string {
-    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
-    if (!sid) return ''
-    return selectedHeadTurnIds.get(sid)?.trim() || ''
-  }
-
-  function viewHeadFetchOption(targetSessionId?: string | null): { headTurnId: string } | Record<string, never> {
-    if (!sessionSupportsTurnVariants(targetSessionId)) return {}
-    const headTurnId = explicitSelectedHeadForSession(targetSessionId)
-    return headTurnId ? { headTurnId } : {}
-  }
-
-  function currentViewHeadKey(targetSessionId?: string | null, useSelectedView = true): string {
-    if (!useSelectedView || !sessionSupportsTurnVariants(targetSessionId)) return 'default'
-    return explicitSelectedHeadForSession(targetSessionId) || 'default'
-  }
-
-  function isCurrentViewHead(targetSessionId: string, expectedHeadKey: string, useSelectedView = true): boolean {
-    return currentViewHeadKey(targetSessionId, useSelectedView) === expectedHeadKey
-  }
-
-  function resetSelectedHeadForSession(targetSessionId?: string | null) {
-    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
-    if (!sid) return
-    selectedHeadTurnIds.delete(sid)
-  }
-
-  function applySessionTurnGraph(targetSessionId: string, payload: FetchMessagesUIResult) {
-    const sid = targetSessionId.trim()
-    if (!sid) return
-    const nodes = new Map<string, SessionTurnGraphNodeState>()
-    for (const rawNode of payload.nodes ?? []) {
-      const node = normalizeGraphNode(rawNode)
-      if (node) nodes.set(node.turnId, node)
-    }
-    const headTurnIds = (payload.head_turn_ids ?? [])
-      .map(id => id.trim())
-      .filter(id => id && nodes.has(id))
-    const rawDefaultHead = payload.default_head_turn_id?.trim() || ''
-    const defaultHead = rawDefaultHead && headTurnIds.includes(rawDefaultHead)
-      ? rawDefaultHead
-      : headTurnIds[0] || ''
-    const graph: SessionTurnGraphState = {
-      defaultHeadTurnId: defaultHead,
-      headTurnIds,
-      nodes,
-    }
-    turnGraphs.set(sid, graph)
-    const selected = selectedHeadTurnIds.get(sid)?.trim() ?? ''
-    if (selected && headTurnIds.includes(selected)) {
-      selectedHeadTurnIds.set(sid, selected)
-    } else {
-      selectedHeadTurnIds.delete(sid)
-    }
-  }
-
-  function clearSessionTurnGraph(targetSessionId?: string | null) {
-    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
-    if (!sid) return
-    turnGraphs.delete(sid)
-    selectedHeadTurnIds.delete(sid)
-  }
-
-  function headPathSet(graph: SessionTurnGraphState, headTurnId: string): Set<string> {
-    return new Set(graphPathTurnIds(graph, headTurnId))
-  }
-
-  function turnTimestamp(graph: SessionTurnGraphState, turnId: string): string {
-    const node = graph.nodes.get(turnId)
-    return node?.timestamp ?? ''
-  }
-
-  function sortTurnIdsByTimestamp(graph: SessionTurnGraphState, turnIds: string[]): string[] {
-    return [...turnIds].sort((a, b) => {
-      const left = turnTimestamp(graph, a)
-      const right = turnTimestamp(graph, b)
-      if (left !== right) return left.localeCompare(right)
-      return a.localeCompare(b)
-    })
-  }
-
-  function siblingTurnIdsForNode(graph: SessionTurnGraphState, node: SessionTurnGraphNodeState): string[] {
-    return sortTurnIdsByTimestamp(
-      graph,
-      [...graph.nodes.values()]
-        .filter(candidate => (candidate.parentTurnId ?? '') === (node.parentTurnId ?? ''))
-        .map(candidate => candidate.turnId),
-    )
-  }
-
-  function optionForTurn(
-    graph: SessionTurnGraphState,
-    turnId: string,
-    selectedHead: string,
-    getHeadPath: (headId: string) => Set<string>,
-  ): TurnVariantOption | null {
-    const headTurnId = getHeadPath(selectedHead).has(turnId)
-      ? selectedHead
-      : graph.headTurnIds.find(headId => getHeadPath(headId).has(turnId))
-    return headTurnId ? { turnId, headTurnId } : null
-  }
-
-  function buildVariantState(turnId: string, options: TurnVariantOption[]): TurnVariantState | null {
-    if (options.length <= 1) return null
-    const index = options.findIndex(item => item.turnId === turnId)
-    if (index < 0) return null
-    return {
-      turnId,
-      index,
-      total: options.length,
-      previousHeadTurnId: index > 0 ? options[index - 1]?.headTurnId : undefined,
-      nextHeadTurnId: index + 1 < options.length ? options[index + 1]?.headTurnId : undefined,
-    }
-  }
-
-  function variantContextForMessage(messageId: string) {
-    const sid = (sessionId.value ?? '').trim()
-    if (!sessionSupportsTurnVariants(sid)) return null
-    const graph = turnGraphs.get(sid)
-    if (!sid || !graph) return null
-    const message = messages.find(item => item.id === messageId)
-    const turnId = message?.turnId?.trim()
-    if (!turnId) return null
-    const node = graph.nodes.get(turnId)
-    if (!node) return null
-
-    const pathByHead = new Map<string, Set<string>>()
-    const selectedHead = selectedHeadForSession(sid)
-    const getHeadPath = (headId: string) => {
-      let path = pathByHead.get(headId)
-      if (!path) {
-        path = headPathSet(graph, headId)
-        pathByHead.set(headId, path)
-      }
-      return path
-    }
-
-    return { graph, message, node, turnId, selectedHead, getHeadPath }
-  }
-
-  function requestVariantStateForMessage(messageId: string): TurnVariantState | null {
-    const ctx = variantContextForMessage(messageId)
-    if (!ctx || ctx.message?.role !== 'user') return null
-
-    const siblings = siblingTurnIdsForNode(ctx.graph, ctx.node)
-    if (siblings.length <= 1) return null
-
-    const requestGroups = new Map<string, string>()
-    for (const siblingTurnId of siblings) {
-      const siblingNode = ctx.graph.nodes.get(siblingTurnId)
-      if (!siblingNode) continue
-      const key = siblingNode.requestKey ?? ''
-      if (!key) continue
-      const existing = requestGroups.get(key)
-      if (existing && !ctx.getHeadPath(ctx.selectedHead).has(siblingTurnId)) continue
-      requestGroups.set(key, siblingTurnId)
-    }
-
-    const targetKey = ctx.node.requestKey ?? ''
-    const targetTurnId = targetKey ? requestGroups.get(targetKey) : undefined
-    if (!targetTurnId) return null
-
-    const siblingOptions = [...requestGroups.values()]
-      .map(siblingTurnId => optionForTurn(ctx.graph, siblingTurnId, ctx.selectedHead, ctx.getHeadPath))
-      .filter((item): item is { turnId: string; headTurnId: string } => item !== null)
-    return buildVariantState(targetTurnId, siblingOptions)
-  }
-
-  function responseVariantStateForMessage(messageId: string): TurnVariantState | null {
-    const ctx = variantContextForMessage(messageId)
-    if (!ctx || ctx.message?.role !== 'assistant') return null
-    if (!ctx.node.hasAssistant) return null
-
-    const requestKey = ctx.node.requestKey ?? ''
-    if (!requestKey) return null
-    const siblings = siblingTurnIdsForNode(ctx.graph, ctx.node)
-      .filter((siblingTurnId) => {
-        const siblingNode = ctx.graph.nodes.get(siblingTurnId)
-        return siblingNode ? siblingNode.requestKey === requestKey : false
-      })
-    if (siblings.length <= 1) return null
-
-    const siblingOptions = siblings
-      .map(siblingTurnId => optionForTurn(ctx.graph, siblingTurnId, ctx.selectedHead, ctx.getHeadPath))
-      .filter((item): item is { turnId: string; headTurnId: string } => item !== null)
-    return buildVariantState(ctx.turnId, siblingOptions)
-  }
-
-  async function selectTurnVariant(headTurnId: string): Promise<boolean> {
-    const sid = (sessionId.value ?? '').trim()
-    if (!sessionSupportsTurnVariants(sid)) return false
-    if (streaming.value || loadingMessages.value || isMessageActionLoading(sid)) return false
-    const head = headTurnId.trim()
-    const graph = turnGraphs.get(sid)
-    if (!sid || !head || !graph || !graph.headTurnIds.includes(head)) return false
-    const bid = (currentBotId.value ?? '').trim()
-    if (!bid) return false
-    const previousExplicitHead = explicitSelectedHeadForSession(sid)
-    const previousHasLoadedOlder = hasLoadedOlder.value
-    const previousHasMoreOlder = hasMoreOlder.value
-    const requestId = ++variantSelectionRequestId
-    hasLoadedOlder.value = false
-    hasMoreOlder.value = true
-    variantSelectionLoading.value = true
-    loadingMessages.value = true
-    try {
-      const payload = await fetchMessagesUI(bid, sid, {
-        limit: PAGE_SIZE,
-        headTurnId: head,
-      })
-      if (
-        requestId !== variantSelectionRequestId
-        || (currentBotId.value ?? '').trim() !== bid
-        || (sessionId.value ?? '').trim() !== sid
-      ) return false
-      selectedHeadTurnIds.set(sid, head)
-      replaceMessages(payload.items, sid)
-      reattachPendingAssistantStreams(sid)
-      startSessionMessagesStream(bid, sid, { skipInitialRefreshOnce: true })
-    } catch (error) {
-      if (requestId === variantSelectionRequestId && (currentBotId.value ?? '').trim() === bid && (sessionId.value ?? '').trim() === sid) {
-        if (previousExplicitHead) selectedHeadTurnIds.set(sid, previousExplicitHead)
-        else selectedHeadTurnIds.delete(sid)
-        hasLoadedOlder.value = previousHasLoadedOlder
-        hasMoreOlder.value = previousHasMoreOlder
-      }
-      console.error('Failed to load selected turn variant:', error)
-      toast.error(resolveApiErrorMessage(error, variantLoadFailedMessage()))
-      return false
-    } finally {
-      if (requestId === variantSelectionRequestId) {
-        variantSelectionLoading.value = false
-      }
-      if (requestId === variantSelectionRequestId && (currentBotId.value ?? '').trim() === bid && (sessionId.value ?? '').trim() === sid) {
-        loadingMessages.value = false
-      }
-    }
-    return true
-  }
-
-  function cancelVariantSelectionLoad() {
-    if (!variantSelectionLoading.value) return
-    variantSelectionRequestId++
-    variantSelectionLoading.value = false
-    loadingMessages.value = false
-  }
-
   function sortChatMessages(items: ChatMessage[]): ChatMessage[] {
     return [...items].sort((a, b) => {
       const at = Date.parse(a.timestamp)
@@ -1622,14 +1327,7 @@ export const useChatStore = defineStore('chat', () => {
     return activeIds.length === 1 ? activeIds[0]! : fallbackStreamId(sid)
   }
 
-  function trackAssistantStream(
-    streamId: string,
-    assistantTurn: ChatAssistantTurn,
-    botId: string,
-    targetSessionId: string,
-    contextTurns: ChatMessage[] = [],
-    options: { refreshOnEnd?: boolean, commitOnFirstVisibleOutput?: () => void } = {},
-  ): Promise<void> {
+  function trackAssistantStream(streamId: string, assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const id = streamId.trim()
       if (!id) {
@@ -1642,14 +1340,9 @@ export const useChatStore = defineStore('chat', () => {
       }
       pendingAssistantStreams.set(id, {
         streamId: id,
-        contextTurns,
         assistantTurn,
         botId,
         sessionId: targetSessionId.trim(),
-        refreshOnEnd: options.refreshOnEnd !== false,
-        commitOnFirstVisibleOutput: options.commitOnFirstVisibleOutput,
-        committed: !options.commitOnFirstVisibleOutput,
-        visiblyAttached: !options.commitOnFirstVisibleOutput,
         done: false,
         resolve,
         reject,
@@ -1683,9 +1376,10 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   // Append/remove operate only on the active session's `messages` array.
-  // Optimistic turns belonging to a background session keep receiving stream
-  // deltas off-screen; when that session becomes active again, the REST refresh
-  // rebuilds `messages`, so the pending turn must be reattached to the new array.
+  // Optimistic turns belonging to a now-stale session (the user switched away
+  // before the assistant stream finished) are silently dropped from the view;
+  // the server keeps recording the conversation and the next REST refresh on
+  // that session will surface the response.
 
   function appendTurnToSession(botId: string, targetSessionId: string, turn: ChatMessage) {
     const bid = botId.trim()
@@ -1696,118 +1390,9 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function hasVisibleTurn(turn: ChatMessage): boolean {
-    return messages.some(message =>
-      message === turn
-      || message.id === turn.id
-      || isSameLogicalTurn(message, turn),
-    )
-  }
-
-  function hasVisibleStreamAssistantTurn(turn: ChatAssistantTurn): boolean {
-    return messages.some(message =>
-      message === turn
-      || (message.__optimistic === true && message.id === turn.id),
-    )
-  }
-
-  function reattachPendingAssistantStreams(targetSessionId: string) {
-    const sid = targetSessionId.trim()
-    const bid = (currentBotId.value ?? '').trim()
-    if (!bid || !sid || sid !== (sessionId.value ?? '').trim()) return
-    for (const stream of pendingStreams()) {
-      if (stream.botId !== bid || stream.sessionId !== sid) continue
-      if (!stream.visiblyAttached) continue
-      if (stream.commitOnFirstVisibleOutput) {
-        if (stream.committed) {
-          stream.commitOnFirstVisibleOutput()
-        } else {
-          const replacedTurns = attachPendingRewriteToSession(
-            stream.botId,
-            stream.sessionId,
-            stream.pendingUserTurn ?? null,
-            stream.assistantTurn,
-            stream.pendingReplaceFromTurn ?? null,
-          )
-          if (replacedTurns !== undefined) stream.pendingReplacedTurns = replacedTurns
-        }
-        continue
-      }
-      for (const turn of stream.contextTurns) {
-        if (!hasVisibleTurn(turn)) messages.push(turn)
-      }
-      if (hasVisibleStreamAssistantTurn(stream.assistantTurn)) continue
-      messages.push(stream.assistantTurn)
-    }
-  }
-
   function removeTurnFromSession(_botId: string, _targetSessionId: string, turn: ChatMessage) {
     const idx = messages.indexOf(turn)
     if (idx >= 0) messages.splice(idx, 1)
-  }
-
-  function findMessageIndexForReplacement(turn: ChatMessage): number {
-    const referenceIndex = messages.indexOf(turn)
-    if (referenceIndex >= 0) return referenceIndex
-    const id = turn.id.trim()
-    if (id) {
-      const idIndex = messages.findIndex(message => message.id === id)
-      if (idIndex >= 0) return idIndex
-    }
-    const turnId = turn.turnId?.trim()
-    if (!turnId) return -1
-    return messages.findIndex(message => message.role === turn.role && message.turnId === turnId)
-  }
-
-  function replaceTailFromTurn(turn: ChatMessage, replacements: ChatMessage[]) {
-    const idx = findMessageIndexForReplacement(turn)
-    if (idx < 0) {
-      messages.push(...replacements)
-      return
-    }
-    messages.splice(idx, messages.length - idx, ...replacements)
-  }
-
-  function attachPendingRewriteToSession(
-    botId: string,
-    targetSessionId: string,
-    userTurn: ChatUserTurn | null,
-    assistantTurn: ChatAssistantTurn,
-    replaceFromTurn?: ChatMessage | null,
-  ): ChatMessage[] | undefined {
-    const pendingTurns = userTurn ? [userTurn, assistantTurn] : [assistantTurn]
-    if (pendingTurns.some(hasVisibleTurn)) return undefined
-    if (replaceFromTurn && currentBotId.value === botId.trim() && sessionId.value === targetSessionId.trim()) {
-      const idx = findMessageIndexForReplacement(replaceFromTurn)
-      if (idx >= 0) {
-        const replaced = messages.slice(idx)
-        messages.splice(idx, messages.length - idx, ...pendingTurns)
-        return replaced
-      }
-    }
-    for (const turn of pendingTurns) appendTurnToSession(botId, targetSessionId, turn)
-    return []
-  }
-
-  function removePendingRewriteFromSession(userTurn: ChatUserTurn | null, assistantTurn: ChatAssistantTurn) {
-    removeTurnFromSession('', '', assistantTurn)
-    if (userTurn) removeTurnFromSession('', '', userTurn)
-  }
-
-  function restorePendingRewriteInSession(
-    userTurn: ChatUserTurn | null,
-    assistantTurn: ChatAssistantTurn,
-    replacedTurns: ChatMessage[] = [],
-  ) {
-    const anchor = userTurn ?? assistantTurn
-    const idx = findMessageIndexForReplacement(anchor)
-    if (idx >= 0) {
-      const deleteCount = userTurn ? 2 : 1
-      messages.splice(idx, deleteCount, ...replacedTurns)
-      return
-    }
-    removePendingRewriteFromSession(userTurn, assistantTurn)
-    if (replacedTurns.length > 0) messages.push(...replacedTurns)
   }
 
   function createOptimisticAssistantTurn(): ChatAssistantTurn {
@@ -1819,6 +1404,10 @@ export const useChatStore = defineStore('chat', () => {
       streaming: true,
       __optimistic: true,
     }
+  }
+
+  function cloneToolApprovalState(approval: UIToolApproval): UIToolApproval {
+    return { ...approval }
   }
 
   function createOptimisticUserTurn(text: string, attachments?: ChatAttachment[]): ChatUserTurn {
@@ -1836,155 +1425,6 @@ export const useChatStore = defineStore('chat', () => {
       streaming: false,
       isSelf: true,
       __optimistic: true,
-    }
-  }
-
-  function cloneUserTurnForRetry(source: ChatUserTurn): ChatUserTurn {
-    return {
-      ...createOptimisticUserTurn(source.text, []),
-      attachments: source.attachments.map(attachment => ({ ...attachment })),
-    }
-  }
-
-  function cloneUserTurnForEdit(source: ChatUserTurn, text: string): ChatUserTurn {
-    return {
-      ...createOptimisticUserTurn(text, []),
-      attachments: source.attachments.map(attachment => ({ ...attachment })),
-    }
-  }
-
-  function chatAttachmentsFromTurn(turn: ChatUserTurn): ChatAttachment[] | undefined {
-    if (!turn.attachments.length) return undefined
-    return turn.attachments.map(attachment => ({
-      type: attachment.type,
-      base64: attachment.base64,
-      name: attachment.name ?? '',
-      mime: attachment.mime ?? '',
-    }))
-  }
-
-  function isErrorOnlyAssistantTurn(turn: ChatAssistantTurn): boolean {
-    return turn.messages.length > 0 && !hasVisibleAssistantBlocks(turn)
-  }
-
-  function hasVisibleAssistantBlock(block: ContentBlock): boolean {
-    if (block.type === 'error') return false
-    if (block.type === 'text' || block.type === 'reasoning') return block.content.trim().length > 0
-    if (block.type === 'attachments') return block.attachments.length > 0
-    return true
-  }
-
-  interface RewriteMessageInput {
-    botId: string
-    sessionId: string
-    sourceUserTurn: ChatUserTurn | null
-    optimisticUserTurn: ChatUserTurn | null
-    pendingUserTurn?: ChatUserTurn | null
-    replaceFromTurn?: ChatMessage | null
-    pendingReplaceFromTurn?: ChatMessage | null
-    send: (ws: ChatWebSocket, streamId: string, modelId?: string, reasoningEffort?: string) => void
-  }
-
-  async function runRewriteMessage(input: RewriteMessageInput): Promise<SendMessageResult> {
-    const bid = input.botId.trim()
-    const sid = input.sessionId.trim()
-    if (!bid || !sid) return { ok: false, stage: 'startup' }
-
-    setMessageActionLoading(sid, true)
-    const streamId = createStreamId()
-    const modelId = overrideModelId.value || undefined
-    const effort = overrideReasoningEffort.value
-    const reasoningEffort = effort || undefined
-    const ws = ensureWebSocket(bid)
-    let assistantTurn: ChatAssistantTurn | null = null
-    let streamStarted = false
-    let pendingReplacedTurns: ChatMessage[] = []
-    try {
-      if (!ws?.connected) {
-        throw new StreamFailureError('WebSocket is not connected', 'startup')
-      }
-      assistantTurn = createOptimisticAssistantTurn()
-      const pendingUserTurn = input.pendingUserTurn === undefined
-        ? input.optimisticUserTurn
-        : input.pendingUserTurn
-      const contextTurns = pendingUserTurn
-        ? [pendingUserTurn]
-        : (input.sourceUserTurn?.__optimistic ? [input.sourceUserTurn] : [])
-      const replaceFromTurn = input.replaceFromTurn ?? (input.sourceUserTurn && input.optimisticUserTurn ? input.sourceUserTurn : null)
-      const pendingReplaceFromTurn = input.pendingReplaceFromTurn ?? replaceFromTurn
-      const pendingUsesCommitPlacement = Boolean(
-        pendingReplaceFromTurn
-        && replaceFromTurn
-        && pendingReplaceFromTurn === replaceFromTurn
-        && (pendingUserTurn === input.optimisticUserTurn || !input.optimisticUserTurn),
-      )
-      const commitRewrite = () => {
-        if ((currentBotId.value ?? '').trim() !== bid || (sessionId.value ?? '').trim() !== sid) return
-        if (assistantTurn && pendingUsesCommitPlacement && hasVisibleStreamAssistantTurn(assistantTurn)) {
-          return
-        }
-        if (pendingUserTurn) removeTurnFromSession(bid, sid, pendingUserTurn)
-        if (assistantTurn) removeTurnFromSession(bid, sid, assistantTurn)
-        if (assistantTurn && hasVisibleStreamAssistantTurn(assistantTurn)) return
-        if (replaceFromTurn) {
-          replaceTailFromTurn(replaceFromTurn, input.optimisticUserTurn ? [
-            input.optimisticUserTurn,
-            assistantTurn!,
-          ] : [assistantTurn!])
-        } else {
-          appendTurnToSession(bid, sid, assistantTurn!)
-        }
-      }
-      const completion = trackAssistantStream(streamId, assistantTurn, bid, sid, contextTurns, {
-        refreshOnEnd: false,
-        commitOnFirstVisibleOutput: commitRewrite,
-      })
-      input.send(ws, streamId, modelId, reasoningEffort)
-      const stream = getAssistantStream(streamId)
-      pendingReplacedTurns = attachPendingRewriteToSession(bid, sid, pendingUserTurn, assistantTurn, pendingReplaceFromTurn) ?? pendingReplacedTurns
-      if (stream) {
-        stream.visiblyAttached = true
-        stream.pendingUserTurn = pendingUserTurn
-        stream.pendingReplaceFromTurn = pendingReplaceFromTurn
-        stream.pendingReplacedTurns = pendingReplacedTurns
-      }
-      streamStarted = true
-      setMessageActionLoading(sid, false)
-      loading.value = true
-      await completion
-      resetSelectedHeadForSession(sid)
-      await refreshCurrentSession(bid, sid, { useSelectedView: false })
-      assistantTurn.streaming = false
-      loading.value = false
-      return { ok: true }
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error('Unknown error')
-      const isAbort = err.name === 'AbortError'
-      const stage: SendMessageStage = err instanceof StreamFailureError
-        ? err.stage
-        : (streamStarted && assistantTurn && hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
-      if (assistantTurn && hasVisibleStreamAssistantTurn(assistantTurn)) {
-        assistantTurn.streaming = false
-        if (!isAbort && !assistantTurn.messages.some(block => block.type === 'error')) {
-          if (stage === 'startup') {
-            const stream = getAssistantStream(streamId)
-            restorePendingRewriteInSession(
-              input.pendingUserTurn === undefined ? input.optimisticUserTurn : input.pendingUserTurn,
-              assistantTurn,
-              stream?.pendingReplacedTurns ?? pendingReplacedTurns,
-            )
-          } else {
-            appendAssistantError(assistantTurn, bid, sid, err.message)
-          }
-        }
-      }
-      forgetAssistantStream(streamId)
-      loading.value = isSessionStreaming(sessionId.value)
-      if (isAbort) return { ok: false, stage: 'stream', error: err.message }
-      if (stage === 'startup') toast.error(err.message)
-      return { ok: false, stage, error: err.message }
-    } finally {
-      setMessageActionLoading(sid, false)
     }
   }
 
@@ -2062,18 +1502,12 @@ export const useChatStore = defineStore('chat', () => {
     bumpFsChangedAtIfFsMutation(message)
   }
 
-  function commitAssistantStreamOnVisibleOutput(stream: PendingAssistantStream, block: ContentBlock) {
-    if (stream.committed || !hasVisibleAssistantBlock(block)) return
-    stream.commitOnFirstVisibleOutput?.()
-    stream.committed = true
-  }
-
   function nextAssistantMessageId(turn: ChatAssistantTurn): number {
     return turn.messages.reduce((maxId, message) => Math.max(maxId, message.id), -1) + 1
   }
 
   function hasVisibleAssistantBlocks(turn: ChatAssistantTurn): boolean {
-    return turn.messages.some(hasVisibleAssistantBlock)
+    return turn.messages.some(block => block.type !== 'error')
   }
 
   function cloneUserInputState(userInput: UIUserInput): UIUserInput {
@@ -2083,6 +1517,31 @@ export const useChatStore = defineStore('chat', () => {
         ...question,
         options: question.options?.map(option => ({ ...option })),
       })),
+    }
+  }
+
+  function snapshotToolApprovalStates(approvalId: string): ToolApprovalStateSnapshot[] {
+    const id = approvalId.trim()
+    if (!id) return []
+    const snapshots: ToolApprovalStateSnapshot[] = []
+    for (const message of messages) {
+      if (message.role !== 'assistant') continue
+      for (const block of message.messages) {
+        if (block.type === 'tool' && block.approval?.approval_id === id) {
+          snapshots.push({
+            block,
+            approval: cloneToolApprovalState(block.approval),
+          })
+        }
+      }
+    }
+    return snapshots
+  }
+
+  function restoreToolApprovalStates(snapshots: ToolApprovalStateSnapshot[]) {
+    for (const snapshot of snapshots) {
+      if (snapshot.block.approval?.approval_id !== snapshot.approval.approval_id) continue
+      snapshot.block.approval = cloneToolApprovalState(snapshot.approval)
     }
   }
 
@@ -2217,7 +1676,7 @@ export const useChatStore = defineStore('chat', () => {
       if (event.type === 'end' || event.type === 'error') {
         if (event.type === 'error') {
           rollbackApprovalResponse(streamId)
-          toast.error(event.message || 'tool approval failed')
+          toast.error(resolveApiErrorMessage(event, event.message || 'tool approval failed'))
         }
         approvalResponseStreams.delete(streamId)
         loading.value = isSessionStreaming(sessionId.value)
@@ -2229,13 +1688,9 @@ export const useChatStore = defineStore('chat', () => {
       case 'start':
         ensureDiscussStream(streamId, sid)
         break
-      case 'message': {
-        const session = ensureDiscussStream(streamId, sid)
-        const block = normalizeUIMessage(event.data)
-        commitAssistantStreamOnVisibleOutput(session, block)
-        upsertAssistantUIMessage(session.assistantTurn, event.data)
+      case 'message':
+        upsertAssistantUIMessage(ensureDiscussStream(streamId, sid).assistantTurn, event.data)
         break
-      }
       case 'end':
         const endedSession = getAssistantStream(streamId)
         const endedBotId = endedSession?.botId ?? currentBotId.value ?? ''
@@ -2250,7 +1705,6 @@ export const useChatStore = defineStore('chat', () => {
         if (
           endedSessionId
           && !isSessionStreaming(endedSessionId)
-          && endedSession?.refreshOnEnd !== false
           && endedSessionId === (sessionId.value ?? '').trim()
           && endedBotId === (currentBotId.value ?? '').trim()
         ) {
@@ -2265,7 +1719,7 @@ export const useChatStore = defineStore('chat', () => {
       case 'error': {
         const session = getAssistantStream(streamId) ?? ensureDiscussStream(streamId, sid)
         const message = event.message || 'stream error'
-        const stage: SendMessageStage = session.committed && hasVisibleAssistantBlocks(session.assistantTurn) ? 'stream' : 'startup'
+        const stage: SendMessageStage = hasVisibleAssistantBlocks(session.assistantTurn) ? 'stream' : 'startup'
         rollbackApprovalResponse(streamId)
         approvalResponseStreams.delete(streamId)
         rejectAssistantStream(streamId, new StreamFailureError(message, stage))
@@ -2295,13 +1749,13 @@ export const useChatStore = defineStore('chat', () => {
     sessionListRefreshPromise = null
 
     replaceSessions([])
-    turnGraphs.clear()
-    selectedHeadTurnIds.clear()
+    deletedSessionIdsByBot.clear()
     sessionsCursor.value = null
     hasMoreSessions.value = false
     loadingMoreSessions.value = false
     bots.value = []
     sessionId.value = null
+    explicitSessionSelection.value = false
     if (options.clearSelection && currentBotId.value) {
       currentBotId.value = null
     }
@@ -2310,7 +1764,6 @@ export const useChatStore = defineStore('chat', () => {
     hasLoadedOlder.value = false
     loading.value = false
     loadingChats.value = false
-    messageActionSessionIds.clear()
     loadingOlder.value = false
     initializing.value = false
     initializeRerunRequested = false
@@ -2348,42 +1801,11 @@ export const useChatStore = defineStore('chat', () => {
     return activeWs
   }
 
-  function applyFetchedMessagesPayload(targetSessionId: string, payload: FetchMessagesUIResult) {
-    const sid = targetSessionId.trim()
-    if (!sid) return
-    if (payload.nodes !== undefined) {
-      applySessionTurnGraph(sid, payload)
-    }
-    if (hasLoadedOlder.value) {
-      mergeMessages(payload.items, sid)
-    } else {
-      replaceMessages(payload.items, sid)
-      // We cannot infer end-of-history from `turns.length < PAGE_SIZE`: the
-      // server pages by raw `bot_history_messages` rows but returns merged
-      // UI turns (multi-row user/assistant groups collapsed into one). A 30-
-      // row page collapses to ~28 turns even when the session has thousands
-      // more rows behind it, so trusting that count truncates real history.
-      // Leave `hasMoreOlder` at the optimistic default and let the first
-      // scroll-to-top call `loadOlderMessages`, whose authoritative
-      // empty-server-response handling settles the flag correctly.
-      hasMoreOlder.value = true
-    }
-    reattachPendingAssistantStreams(sid)
-    const latest = messages[messages.length - 1]?.timestamp
-    touchSessionInList(sid, latest)
-  }
-
-  async function refreshCurrentSession(
-    targetBotId?: string,
-    targetSessionId?: string,
-    options: { useSelectedView?: boolean } = {},
-  ) {
+  async function refreshCurrentSession(targetBotId?: string, targetSessionId?: string) {
     const bid = (targetBotId ?? currentBotId.value ?? '').trim()
     const sid = (targetSessionId ?? sessionId.value ?? '').trim()
     if (!bid || !sid) return
-    const useSelectedView = options.useSelectedView !== false
-    let expectedHeadKey = currentViewHeadKey(sid, useSelectedView)
-    const key = `${bid}:${sid}:${useSelectedView ? 'selected' : 'default'}:${expectedHeadKey}`
+    const key = `${bid}:${sid}`
 
     if (refreshPromise) {
       if (refreshPromise.key === key) {
@@ -2394,29 +1816,10 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     const promise = (async () => {
-      let payload: FetchMessagesUIResult
-      try {
-        payload = await fetchMessagesUI(bid, sid, {
-          limit: PAGE_SIZE,
-          includeGraph: true,
-          ...(useSelectedView ? viewHeadFetchOption(sid) : {}),
-        })
-      } catch (error) {
-        if (useSelectedView && expectedHeadKey !== 'default' && isStaleSessionHeadError(error)) {
-          resetSelectedHeadForSession(sid)
-          expectedHeadKey = currentViewHeadKey(sid, useSelectedView)
-          payload = await fetchMessagesUI(bid, sid, {
-            limit: PAGE_SIZE,
-            includeGraph: true,
-          })
-        } else {
-          throw error
-        }
-      }
+      const turns = await fetchMessagesUI(bid, sid, { limit: PAGE_SIZE })
       // The user may have switched away while the request was in flight. Drop
       // the result silently — the new session has its own load underway.
       if (currentBotId.value !== bid || sessionId.value !== sid) return
-      if (!isCurrentViewHead(sid, expectedHeadKey, useSelectedView)) return
       // Pick replace vs merge by whether the user has scrolled back to load
       // older history. When older pages are present we MUST preserve them
       // (otherwise an SSE-triggered refresh wipes the prepended history).
@@ -2426,7 +1829,22 @@ export const useChatStore = defineStore('chat', () => {
       // comparison, because client/server clock skew on a fresh session's
       // first send could otherwise flip the decision and duplicate the user
       // turn.
-      applyFetchedMessagesPayload(sid, payload)
+      if (hasLoadedOlder.value) {
+        mergeMessages(turns, sid)
+      } else {
+        replaceMessages(turns, sid)
+        // We cannot infer end-of-history from `turns.length < PAGE_SIZE`: the
+        // server pages by raw `bot_history_messages` rows but returns merged
+        // UI turns (multi-row user/assistant groups collapsed into one). A 30-
+        // row page collapses to ~28 turns even when the session has thousands
+        // more rows behind it, so trusting that count truncates real history.
+        // Leave `hasMoreOlder` at the optimistic default and let the first
+        // scroll-to-top call `loadOlderMessages`, whose authoritative
+        // empty-server-response handling settles the flag correctly.
+        hasMoreOlder.value = true
+      }
+      const latest = messages[messages.length - 1]?.timestamp
+      touchSessionInList(sid, latest)
     })().finally(() => {
       if (refreshPromise?.promise === promise) {
         refreshPromise = null
@@ -2437,24 +1855,15 @@ export const useChatStore = defineStore('chat', () => {
     await promise
   }
 
-  function refreshSessionsList(targetBotId: string, options: { keep?: SessionSummary[] } = {}): Promise<void> {
+  function refreshSessionsList(targetBotId: string): Promise<void> {
     const bid = targetBotId.trim()
     if (!bid) return Promise.resolve()
-    if (sessionListRefreshPromise?.botId === bid) {
-      return sessionListRefreshPromise.promise.finally(() => {
-        if ((currentBotId.value ?? '').trim() !== bid) return
-        for (const keep of options.keep ?? []) upsertSession(keep)
-      })
-    }
+    if (sessionListRefreshPromise?.botId === bid) return sessionListRefreshPromise.promise
 
     const promise = fetchSessions(bid)
       .then((response) => {
         if ((currentBotId.value ?? '').trim() !== bid) return
-        const items = [...response.items]
-        for (const keep of options.keep ?? []) {
-          if (!items.some(item => item.id === keep.id)) items.unshift(keep)
-        }
-        replaceSessions(items)
+        replaceSessions(response.items)
         sessionsCursor.value = response.nextCursor
         hasMoreSessions.value = response.nextCursor !== null
       })
@@ -2507,6 +1916,10 @@ export const useChatStore = defineStore('chat', () => {
 
   function handleSessionMessageEvent(targetBotId: string, targetSessionId: string, event: SessionMessageStreamEvent) {
     if (event.type === 'ping') return
+    if (event.type === 'dropped') {
+      void refreshCurrentSession(targetBotId, targetSessionId)
+      return
+    }
 
     if (event.type === 'background_task') {
       const eventSessionId = event.session_id?.trim()
@@ -2515,13 +1928,6 @@ export const useChatStore = defineStore('chat', () => {
       if (!task) return
       mergeBackgroundTaskIntoMatchingTools(rememberBackgroundTask(task))
       if (eventSessionId) touchSessionInList(eventSessionId)
-      return
-    }
-
-    if (event.type === 'stale' || event.type === 'dropped') {
-      const eventSessionId = event.type === 'stale' ? event.session_id?.trim() : ''
-      if (eventSessionId && eventSessionId !== targetSessionId) return
-      scheduleRefreshCurrentSession(targetSessionId)
       return
     }
 
@@ -2554,6 +1960,10 @@ export const useChatStore = defineStore('chat', () => {
 
   function handleBotSessionsActivityEvent(targetBotId: string, event: BotSessionActivityEvent) {
     if (event.type === 'ping') return
+    if (event.type === 'dropped') {
+      void refreshSessionsList(targetBotId)
+      return
+    }
 
     if (event.type === 'session_touched') {
       const sid = event.session_id.trim()
@@ -2605,11 +2015,7 @@ export const useChatStore = defineStore('chat', () => {
   // owns the flag now.
   let loadingMessagesVersion = 0
 
-  function startSessionMessagesStream(
-    targetBotId: string,
-    targetSessionId: string,
-    options: { skipInitialRefreshOnce?: boolean } = {},
-  ) {
+  function startSessionMessagesStream(targetBotId: string, targetSessionId: string) {
     sessionMessagesStream.stop()
     const bid = targetBotId.trim()
     const sid = targetSessionId.trim()
@@ -2619,28 +2025,19 @@ export const useChatStore = defineStore('chat', () => {
     // placeholders (e.g. "system session has no records") while a fresh
     // transcript is on its way. The sidebar deliberately ignores it — only
     // `loadingChats` (sessions-list boot) makes the sidebar spin.
-    let skipInitialRefresh = options.skipInitialRefreshOnce === true
-    loadingMessages.value = !skipInitialRefresh
+    loadingMessages.value = true
     const myVersion = ++loadingMessagesVersion
     sessionMessagesStream.start(async (signal) => {
       try {
-        if (skipInitialRefresh) {
-          skipInitialRefresh = false
-        } else {
-          await refreshCurrentSession(bid, sid)
-        }
+        await refreshCurrentSession(bid, sid)
       } catch (error) {
         console.error('Failed to load session messages:', error)
-        if ((currentBotId.value ?? '').trim() === bid && (sessionId.value ?? '').trim() === sid) {
-          reattachPendingAssistantStreams(sid)
-          loading.value = isSessionStreaming(sid)
-        }
       } finally {
         if (myVersion === loadingMessagesVersion) loadingMessages.value = false
       }
       await streamSessionMessageEvents(bid, sid, signal, (event) => {
         handleSessionMessageEvent(bid, sid, event)
-      }, explicitSelectedHeadForSession(sid))
+      })
     })
   }
 
@@ -2739,15 +2136,11 @@ export const useChatStore = defineStore('chat', () => {
       // never moves and we'd terminate prematurely).
       const MAX_DEDUP_HOPS = 4
       let cursor = first.timestamp
-      let cursorId = first.id
       for (let hop = 0; hop < MAX_DEDUP_HOPS; hop++) {
-        const payload = await fetchMessagesUI(bid, sid, {
+        const turns = await fetchMessagesUI(bid, sid, {
           limit: PAGE_SIZE,
-          ...viewHeadFetchOption(sid),
           before: cursor,
-          beforeId: cursorId,
         })
-        const turns = payload.items
 
         if (turns.length === 0) {
           hasMoreOlder.value = false
@@ -2772,21 +2165,18 @@ export const useChatStore = defineStore('chat', () => {
 
         // All returned turns were already present locally. Advance the cursor
         // past the earliest one we just saw and try again on the next hop.
-        const earliest = normalized.reduce<{ timestamp: string; id: string } | null>((acc, turn) => {
+        const earliest = normalized.reduce<string | null>((acc, turn) => {
           const ts = turn.timestamp?.trim()
           if (!ts) return acc
-          const id = turn.id?.trim()
-          if (!id) return acc
-          if (!acc || ts < acc.timestamp || (ts === acc.timestamp && id < acc.id)) return { timestamp: ts, id }
+          if (!acc || ts < acc) return ts
           return acc
         }, null)
-        if (!earliest || (earliest.timestamp === cursor && earliest.id === cursorId)) {
+        if (!earliest || earliest === cursor) {
           // Pagination cursor cannot advance; bail out to avoid a request loop.
           hasMoreOlder.value = false
           return 0
         }
-        cursor = earliest.timestamp
-        cursorId = earliest.id
+        cursor = earliest
       }
       // Exhausted hop budget without finding net-new turns; treat as end of
       // history rather than spinning indefinitely.
@@ -2820,7 +2210,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!bid || !sid || !target) return null
 
     try {
-      const result = await locateMessageUI(bid, sid, target, PAGE_SIZE, PAGE_SIZE, viewHeadFetchOption(sid))
+      const result = await locateMessageUI(bid, sid, target, PAGE_SIZE, PAGE_SIZE)
       if (!result.items.length) return null
       mergeMessages(result.items, sid)
       hasMoreOlder.value = true
@@ -2853,9 +2243,60 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function sessionMetadata(session: SessionSummary | null): Record<string, unknown> {
+    if (!session) return {}
+    return {
+      ...(session.metadata && typeof session.metadata === 'object' ? session.metadata : {}),
+      ...(session.runtime_metadata && typeof session.runtime_metadata === 'object' ? session.runtime_metadata : {}),
+    }
+  }
+
   const pendingACPSessionMetadata = computed<Record<string, unknown> | null>(() =>
     pendingACPSessionInput.value ? acpSessionMetadata(pendingACPSessionInput.value) : null,
   )
+  const activeChatTarget = computed<ActiveChatTarget>(() => {
+    const explicitSelection = explicitSessionSelection.value
+    const sid = (sessionId.value ?? '').trim()
+    if (sid) {
+      const session = activeSession.value
+      const runtimeType = session ? normalizedRuntimeType(session) : 'unknown'
+      return {
+        kind: 'session',
+        sessionId: sid,
+        session,
+        runtimeType,
+        isACP: runtimeType === 'acp_agent',
+        isPendingACP: false,
+        metadata: sessionMetadata(session),
+        explicitSelection,
+      }
+    }
+
+    const metadata = pendingACPSessionMetadata.value
+    if (metadata) {
+      return {
+        kind: 'draft-acp',
+        sessionId: null,
+        session: null,
+        runtimeType: 'acp_agent',
+        isACP: true,
+        isPendingACP: true,
+        metadata,
+        explicitSelection,
+      }
+    }
+
+    return {
+      kind: 'draft-native',
+      sessionId: null,
+      session: null,
+      runtimeType: 'model',
+      isACP: false,
+      isPendingACP: false,
+      metadata: {},
+      explicitSelection,
+    }
+  })
   const pendingACPModelId = computed(() => pendingACPSessionInput.value?.modelId?.trim() ?? '')
   const pendingACPRuntimeStatus = computed(() => {
     const bid = currentBotId.value ?? ''
@@ -2865,8 +2306,29 @@ export const useChatStore = defineStore('chat', () => {
   })
   const pendingACPRuntimeEnsuring = computed(() => pendingACPCreating.value)
 
+  function cloneACPInput(input: ACPAgentSessionInput): ACPAgentSessionInput {
+    return { ...input }
+  }
+
+  function rememberDefaultACPInput(botId: string, input: ACPAgentSessionInput | null) {
+    const bid = botId.trim()
+    if (!bid) return
+    defaultACPInputsByBot.set(bid, input ? cloneACPInput(input) : null)
+  }
+
+  function cachedDefaultACPInput(botId: string): { loaded: boolean, input: ACPAgentSessionInput | null } {
+    const bid = botId.trim()
+    if (!defaultACPInputsByBot.has(bid)) return { loaded: false, input: null }
+    const input = defaultACPInputsByBot.get(bid) ?? null
+    return { loaded: true, input: input ? cloneACPInput(input) : null }
+  }
+
+  function cacheDefaultACPSession(input: ACPAgentSessionInput | null) {
+    rememberDefaultACPInput(currentBotId.value ?? '', input)
+  }
+
   function pendingACPIdentityKey(botId: string, input: ACPAgentSessionInput): string {
-    return [botId, input.agentId, input.projectPath ?? '', input.projectMode ?? ''].join('\u0000')
+    return [botId, input.sessionMode ?? 'chat', input.agentId, input.projectPath ?? '', input.projectMode ?? ''].join('\u0000')
   }
 
   function pendingACPStagingKey(snapshot: Pick<PendingACPStageSnapshot, 'identityKey' | 'generation'>): string {
@@ -2913,11 +2375,12 @@ export const useChatStore = defineStore('chat', () => {
       && (modelId === undefined || current.modelId === modelId)
   }
 
-  function stageACPSession(input: ACPAgentSessionInput) {
+  function stageACPSession(input: ACPAgentSessionInput, options: { explicitSelection?: boolean } = {}) {
     const metadata = acpSessionMetadata(input)
     const existing = pendingACPSessionInput.value
     const samePendingAgent = Boolean(existing
       && existing.agentId === metadata.acp_agent_id
+      && (existing.sessionMode || 'chat') === (input.sessionMode || 'chat')
       && (existing.projectPath || ACP_DEFAULT_PROJECT_PATH) === metadata.project_path
       && (existing.projectMode || ACP_DEFAULT_PROJECT_MODE) === metadata.acp_project_mode)
     if (!samePendingAgent) {
@@ -2937,6 +2400,46 @@ export const useChatStore = defineStore('chat', () => {
       pendingACPRuntimeId.value = ''
       closeStagedRuntime(bid, runtimeId)
     }
+    explicitSessionSelection.value = options.explicitSelection !== false
+  }
+
+  function stageDefaultACPSession(input: ACPAgentSessionInput) {
+    rememberDefaultACPInput(currentBotId.value ?? '', input)
+    selectSessionRequestId++
+    explicitSessionSelection.value = false
+    draftIntent.value = false
+    sessionId.value = null
+    sessionMessagesStream.stop()
+    replaceMessages([])
+    hasMoreOlder.value = false
+    hasLoadedOlder.value = false
+    stageACPSession(input, { explicitSelection: false })
+  }
+
+  function stageNewACPSession(input: ACPAgentSessionInput) {
+    selectSessionRequestId++
+    clearPendingACPSession()
+    sessionId.value = null
+    draftIntent.value = true
+    sessionMessagesStream.stop()
+    replaceMessages([])
+    hasMoreOlder.value = false
+    hasLoadedOlder.value = false
+    stageACPSession(input, { explicitSelection: true })
+  }
+
+  function resetToEmptyComposer(options: { clearPendingACP?: boolean; explicitSelection?: boolean; draftIntent?: boolean } = {}) {
+    selectSessionRequestId++
+    if (options.clearPendingACP !== false) {
+      clearPendingACPSession()
+    }
+    sessionId.value = null
+    explicitSessionSelection.value = options.explicitSelection === true
+    draftIntent.value = options.draftIntent ?? options.explicitSelection === true
+    sessionMessagesStream.stop()
+    replaceMessages([])
+    hasMoreOlder.value = false
+    hasLoadedOlder.value = false
   }
 
   async function ensurePendingACPRuntime(): Promise<AcpagentRuntimeStatus | undefined> {
@@ -3080,18 +2583,23 @@ export const useChatStore = defineStore('chat', () => {
     if (!bid) throw new Error('Bot not ready')
     const metadata = acpSessionMetadata(input)
     const runtimeId = input.runtimeId?.trim() ?? ''
+    const sessionMode = input.sessionMode === 'discuss' ? 'discuss' : 'chat'
     // The warm staged runtime is bound server-side inside session creation;
     // no separate adopt/bind round trip and nothing for a watcher to race.
     const created = await createSession(bid, {
       title: input.title ?? '',
-      type: 'acp_agent',
-      metadata,
+      type: sessionMode,
+      sessionMode,
+      runtimeType: 'acp_agent',
+      metadata: {},
+      runtimeMetadata: metadata,
       acpRuntimeId: runtimeId || undefined,
     })
     upsertSession(created)
     sessionId.value = created.id
+    explicitSessionSelection.value = true
+    draftIntent.value = false
     replaceMessages([])
-    clearSessionTurnGraph(created.id)
     hasMoreOlder.value = false
     hasLoadedOlder.value = false
     if (runtimeId) {
@@ -3112,8 +2620,17 @@ export const useChatStore = defineStore('chat', () => {
     const sid = sessionId.value
     if (!bid) throw new Error('Bot not selected')
     const metadata = acpSessionMetadata(input)
-    const updated = await requestUpdateSessionAgent(bid, sid, 'acp_agent', metadata)
+    const sessionMode = activeSession.value?.session_mode || (activeSession.value?.type === 'discuss' ? 'discuss' : 'chat')
+    const updated = await requestUpdateSessionAgent(bid, sid, {
+      type: sessionMode === 'discuss' ? 'discuss' : 'acp_agent',
+      sessionMode,
+      runtimeType: 'acp_agent',
+      metadata,
+      runtimeMetadata: metadata,
+    })
     upsertSession(updated)
+    explicitSessionSelection.value = true
+    draftIntent.value = false
     clearPendingACPSession()
     clearACPRuntimeStatus(bid, sid)
     const runtime = input.startRuntime ? await ensureACPRuntime(sid) : undefined
@@ -3125,8 +2642,17 @@ export const useChatStore = defineStore('chat', () => {
     const bid = currentBotId.value ?? ''
     const sid = sessionId.value ?? ''
     if (!bid || !sid) return null
-    const updated = await requestUpdateSessionAgent(bid, sid, 'chat', {})
+    const sessionMode = activeSession.value?.session_mode || (activeSession.value?.type === 'discuss' ? 'discuss' : 'chat')
+    const updated = await requestUpdateSessionAgent(bid, sid, {
+      type: sessionMode === 'discuss' ? 'discuss' : 'chat',
+      sessionMode,
+      runtimeType: 'model',
+      metadata: {},
+      runtimeMetadata: {},
+    })
     upsertSession(updated)
+    explicitSessionSelection.value = true
+    draftIntent.value = false
     clearACPRuntimeStatus(bid, sid)
     return updated
   }
@@ -3219,10 +2745,101 @@ export const useChatStore = defineStore('chat', () => {
     upsertSession(created)
     sessionId.value = created.id
     draftIntent.value = false
+    explicitSessionSelection.value = true
     replaceMessages([])
-    clearSessionTurnGraph(created.id)
     hasMoreOlder.value = false
     hasLoadedOlder.value = false
+  }
+
+  // defaultRuntimeIsACP reports whether the bot's default chat runtime is an
+  // external ACP agent. It is a lightweight precheck (runtime/agent presence
+  // only); full eligibility (workspace_exec, agent enabled, managed fields) is
+  // still decided by the chat-pane default-ACP initializer. Used to keep the
+  // history-vs-default-ACP decision inside the init chain instead of letting
+  // initialize() auto-select a history session that a late watcher then drops.
+  async function defaultRuntimeIsACP(botId: string): Promise<boolean> {
+    const input = await defaultACPSessionInputFromSettings(botId)
+    return input !== null
+  }
+
+  async function defaultACPSettingsForAgent(botId: string, agentId: string): Promise<Partial<ACPAgentSessionInput>> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data } = await (getBotsByBotIdSettings as any)({ path: { bot_id: botId }, throwOnError: true })
+      const settings = data as {
+        chat_runtime?: string
+        chat_acp_agent_id?: string | null
+        chat_acp_project_path?: string | null
+        chat_acp_project_mode?: string | null
+      } | undefined
+      if (settings?.chat_runtime !== 'acp_agent') return {}
+      if ((settings.chat_acp_agent_id ?? '').trim() !== agentId) return {}
+      return {
+        projectPath: settings.chat_acp_project_path?.trim() || undefined,
+        projectMode: settings.chat_acp_project_mode?.trim() || undefined,
+      }
+    } catch {
+      return {}
+    }
+  }
+
+  async function defaultACPSessionInputFromSettings(botId: string): Promise<ACPAgentSessionInput | null> {
+    const bid = botId.trim()
+    if (!bid) return null
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data } = await (getBotsByBotIdSettings as any)({ path: { bot_id: bid }, throwOnError: true })
+      const settings = data as {
+        chat_runtime?: string
+        chat_acp_agent_id?: string | null
+        chat_acp_project_path?: string | null
+        chat_acp_project_mode?: string | null
+      } | undefined
+      if (settings?.chat_runtime !== 'acp_agent') {
+        rememberDefaultACPInput(bid, null)
+        return null
+      }
+      const agentId = settings.chat_acp_agent_id?.trim() ?? ''
+      if (!agentId) {
+        rememberDefaultACPInput(bid, null)
+        return null
+      }
+      const input = {
+        agentId,
+        projectPath: settings.chat_acp_project_path?.trim() || ACP_DEFAULT_PROJECT_PATH,
+        projectMode: settings.chat_acp_project_mode?.trim() || ACP_DEFAULT_PROJECT_MODE,
+      }
+      rememberDefaultACPInput(bid, input)
+      return input
+    } catch {
+      return null
+    }
+  }
+
+  function pendingACPMatchesInput(input: ACPAgentSessionInput): boolean {
+    const pending = pendingACPSessionInput.value
+    if (!pending || sessionId.value) return false
+    const metadata = acpSessionMetadata(input)
+    return pending.agentId === metadata.acp_agent_id
+      && (pending.sessionMode || 'chat') === (input.sessionMode || 'chat')
+      && (pending.projectPath || ACP_DEFAULT_PROJECT_PATH) === metadata.project_path
+      && (pending.projectMode || ACP_DEFAULT_PROJECT_MODE) === metadata.acp_project_mode
+  }
+
+  async function stageDefaultACPFromSettings(requestId: number) {
+    const bid = (currentBotId.value ?? '').trim()
+    if (!bid || sessionId.value || explicitSessionSelection.value) return
+    const cached = cachedDefaultACPInput(bid)
+    if (cached.loaded) {
+      if (cached.input && !pendingACPMatchesInput(cached.input)) stageDefaultACPSession(cached.input)
+      return
+    }
+    const input = await defaultACPSessionInputFromSettings(bid)
+    if (!input) return
+    if (requestId !== selectSessionRequestId) return
+    if ((currentBotId.value ?? '').trim() !== bid || sessionId.value || explicitSessionSelection.value) return
+    if (pendingACPMatchesInput(input)) return
+    stageDefaultACPSession(input)
   }
 
   async function initialize() {
@@ -3267,8 +2884,12 @@ export const useChatStore = defineStore('chat', () => {
           initializingBotId = bid
 
           let response: Awaited<ReturnType<typeof fetchSessions>>
+          let defaultIsACP = false
           try {
-            response = await fetchSessions(bid)
+            ;[response, defaultIsACP] = await Promise.all([
+              fetchSessions(bid),
+              defaultRuntimeIsACP(bid),
+            ])
           } catch (error) {
             if ((currentBotId.value ?? '').trim() !== bid) {
               initializeRerunRequested = true
@@ -3280,12 +2901,47 @@ export const useChatStore = defineStore('chat', () => {
             initializeRerunRequested = true
             continue
           }
+
           const visibleSessions = replaceSessions(response.items)
           sessionsCursor.value = response.nextCursor
           hasMoreSessions.value = response.nextCursor !== null
 
-          if (!visibleSessions.length) {
+          const restoredSessionId = (sessionId.value ?? '').trim()
+          const restoredExplicitSession = restoredSessionId && explicitSessionSelection.value
+            ? await ensureSessionSummary(bid, restoredSessionId)
+            : null
+          if ((currentBotId.value ?? '').trim() !== bid) {
+            initializeRerunRequested = true
+            continue
+          }
+          const preservePendingACPStage = !!pendingACPSessionInput.value && !sessionId.value
+          const preserveExplicitEmptyComposer = explicitSessionSelection.value && !sessionId.value
+          const preferDefaultACP = defaultIsACP
+            && !preservePendingACPStage
+            && !preserveExplicitEmptyComposer
+            && !explicitSessionSelection.value
+
+          if (preservePendingACPStage) {
             sessionId.value = null
+            hasMoreOlder.value = false
+            hasLoadedOlder.value = false
+          } else if (preserveExplicitEmptyComposer) {
+            sessionId.value = null
+            replaceMessages([])
+            hasMoreOlder.value = false
+            hasLoadedOlder.value = false
+          } else if (preferDefaultACP) {
+            sessionId.value = null
+            explicitSessionSelection.value = false
+            draftIntent.value = false
+            replaceMessages([])
+            hasMoreOlder.value = false
+            hasLoadedOlder.value = false
+          } else if (restoredExplicitSession) {
+            draftIntent.value = false
+          } else if (!visibleSessions.length) {
+            sessionId.value = null
+            explicitSessionSelection.value = false
             replaceMessages([])
             hasMoreOlder.value = false
             hasLoadedOlder.value = false
@@ -3309,6 +2965,7 @@ export const useChatStore = defineStore('chat', () => {
             } else {
               const firstConversation = visibleSessions.find(s => (s.type ?? 'chat') !== 'schedule')
               sessionId.value = (firstConversation ?? visibleSessions[0]!).id
+              explicitSessionSelection.value = false
             }
           }
 
@@ -3344,7 +3001,6 @@ export const useChatStore = defineStore('chat', () => {
   // already gated on `sessionId.value === <stream's sessionId>`, so the
   // orphan does not bleed into B's view).
   function switchActiveSession(sid: string) {
-    cancelVariantSelectionLoad()
     sessionMessagesStream.stop()
     replaceMessages([])
     hasMoreOlder.value = false
@@ -3355,7 +3011,6 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function selectBot(targetBotId: string) {
-    if (messageActionLoading.value) return
     if (currentBotId.value === targetBotId) return
     selectSessionRequestId++
     abort()
@@ -3368,66 +3023,82 @@ export const useChatStore = defineStore('chat', () => {
     currentBotId.value = targetBotId
     sessionId.value = null
     rememberedSessions.value = {}
+    explicitSessionSelection.value = false
+    draftIntent.value = false
     await initialize()
   }
 
-  async function selectSession(targetSessionId: string) {
+  async function selectSession(targetSessionId: string, options: { explicitSelection?: boolean } = {}) {
     const sid = targetSessionId.trim()
-    if (!sid || sid === sessionId.value) return
-    if (messageActionLoading.value) return
+    if (!sid) return
+    const sameSession = sid === sessionId.value
     const requestId = ++selectSessionRequestId
     const bid = (currentBotId.value ?? '').trim()
     clearPendingACPSession()
     sessionId.value = sid
     draftIntent.value = false
-    switchActiveSession(sid)
-    if (!bid || knownSessionSummary(sid)) return
-
-    try {
-      const fetched = await fetchSession(bid, sid)
-      if (requestId !== selectSessionRequestId) return
-      if ((currentBotId.value ?? '').trim() !== bid || sessionId.value !== sid) return
-      rememberSession(fetched)
-    } catch {
-      // The target can disappear between a tab activation and hydration. Keep
-      // selection behavior consistent; the session stream/message load will
-      // surface the missing-session state through the existing path.
-    }
+    explicitSessionSelection.value = options.explicitSelection !== false
+    if (!sameSession) switchActiveSession(sid)
+    // Even when `sid` is already the persisted selection, a page refresh may
+    // have no summary for it yet (for example an ACP session outside the first
+    // sidebar page). Hydrate before consumers branch on runtime_type.
+    await ensureSessionSummary(bid, sid, requestId)
   }
 
-  async function createNewSession() {
+  async function createNewSession(options: { explicitSelection?: boolean } = {}) {
     const bid = await ensureBot()
     if (!bid) return
-    selectSessionRequestId++
-    cancelVariantSelectionLoad()
-    clearPendingACPSession()
-    sessionId.value = null
-    draftIntent.value = true
-    sessionMessagesStream.stop()
-    replaceMessages([])
-    hasMoreOlder.value = false
-    hasLoadedOlder.value = false
+    resetToEmptyComposer({
+      explicitSelection: options.explicitSelection === true,
+      draftIntent: true,
+    })
   }
 
   // Switch the global view to the draft (no real session yet). Unlike
   // createNewSession this assumes the bot is already active and only resets the
   // view, so per-session chat tabs can activate their draft tab without minting a
   // session. selectSession early-returns on an empty id, so a draft needs this.
-  function selectDraft() {
-    selectSessionRequestId++
-    if (messageActionLoading.value) return
-    cancelVariantSelectionLoad()
-    draftIntent.value = true
-    if (!sessionId.value) return
-    clearPendingACPSession()
-    sessionId.value = null
-    sessionMessagesStream.stop()
-    replaceMessages([])
-    hasMoreOlder.value = false
-    hasLoadedOlder.value = false
+  function selectDraft(options: { explicitSelection?: boolean } = {}) {
+    const explicitSelection = options.explicitSelection === true
+    resetToEmptyComposer({
+      clearPendingACP: false,
+      explicitSelection,
+      draftIntent: true,
+    })
+    if (!explicitSelection) {
+      void stageDefaultACPFromSettings(selectSessionRequestId)
+    }
   }
 
-  async function removeSession(targetSessionId: string) {
+  async function handleWebNewCommand(text: string, attachments?: ChatAttachment[]): Promise<WebNewCommandResult> {
+    const parsed = parseWebNewCommand(text)
+    if (!parsed) return { kind: 'none' }
+    if (attachments?.length) {
+      return { kind: 'error', message: 'Attachments are not supported with /new' }
+    }
+    const agentId = parsed.agentId.trim()
+    if (!agentId) {
+      if (parsed.mode === 'discuss') {
+        return { kind: 'error', message: 'Discuss ACP sessions require an agent, for example /new discuss codex' }
+      }
+      await createNewSession({ explicitSelection: true })
+      return { kind: 'handled' }
+    }
+    if (agentId !== 'codex' && agentId !== 'claude-code') {
+      return { kind: 'error', message: `Unknown ACP agent "${agentId}"` }
+    }
+    const bid = await ensureBot()
+    if (!bid) return { kind: 'error', message: 'Bot not ready' }
+    const defaults = await defaultACPSettingsForAgent(bid, agentId)
+    stageNewACPSession({
+      agentId,
+      sessionMode: parsed.mode === 'discuss' ? 'discuss' : 'chat',
+      ...defaults,
+    })
+    return { kind: 'handled' }
+  }
+
+  async function removeSession(targetSessionId: string, options: { fallbackMode?: SidebarSessionMode } = {}) {
     const delId = targetSessionId.trim()
     if (!delId) return
     const bid = currentBotId.value ?? ''
@@ -3438,20 +3109,24 @@ export const useChatStore = defineStore('chat', () => {
     if ((currentBotId.value ?? '').trim() !== bid) return
     clearACPRuntimeStatus(bid, delId)
     removeSessionFromList(delId)
-    if (sessionId.value === delId) {
-      if (sessions.value.length === 0) {
-        cancelVariantSelectionLoad()
-        sessionId.value = null
-        sessionMessagesStream.stop()
-        replaceMessages([])
-        hasMoreOlder.value = false
-        hasLoadedOlder.value = false
-      } else {
-        const next = sessions.value[0]!.id
-        sessionId.value = next
-        switchActiveSession(next)
-      }
+    if (sessionId.value !== delId) return
+    const fallbackMode = options.fallbackMode ?? 'recent'
+    const nextSession = fallbackSessionAfterDelete(fallbackMode)
+    if (!nextSession) {
+      sessionId.value = null
+      explicitSessionSelection.value = false
+      draftIntent.value = false
+      sessionMessagesStream.stop()
+      replaceMessages([])
+      hasMoreOlder.value = false
+      hasLoadedOlder.value = false
+      return
     }
+    const next = nextSession.id
+    sessionId.value = next
+    explicitSessionSelection.value = false
+    draftIntent.value = false
+    switchActiveSession(next)
   }
 
   async function renameSession(targetSessionId: string, title: string): Promise<SessionSummary> {
@@ -3467,141 +3142,16 @@ export const useChatStore = defineStore('chat', () => {
     return updated
   }
 
-  async function forkMessage(messageId: string): Promise<boolean> {
-    const bid = (currentBotId.value ?? '').trim()
-    const sid = (sessionId.value ?? '').trim()
-    const mid = messageId.trim()
-    if (!bid || !sid || !mid || !sessionSupportsTurnVariants(sid) || activeChatReadOnly.value || streaming.value || loadingMessages.value || isMessageActionLoading(sid)) return false
-    const previousMessages = [...messages]
-    const previousHasMoreOlder = hasMoreOlder.value
-    const previousHasLoadedOlder = hasLoadedOlder.value
-    let switchedToForkedSessionId = ''
-    setMessageActionLoading(sid, true)
-    try {
-      const forked = await requestForkSessionFromMessage(bid, sid, mid, baseHeadForRequest(sid))
-      upsertSession(forked)
-      void refreshSessionsList(bid, { keep: [forked] })
-      const payload = await fetchMessagesUI(bid, forked.id, { limit: PAGE_SIZE, includeGraph: true })
-      if ((currentBotId.value ?? '').trim() !== bid || (sessionId.value ?? '').trim() !== sid) {
-        return false
-      }
-      draftIntent.value = false
-      sessionMessagesStream.stop()
-      sessionId.value = forked.id
-      switchedToForkedSessionId = forked.id
-      hasMoreOlder.value = false
-      hasLoadedOlder.value = false
-      applyFetchedMessagesPayload(forked.id, payload)
-      startSessionMessagesStream(bid, forked.id, { skipInitialRefreshOnce: true })
-      return true
-    } catch (error) {
-      if (switchedToForkedSessionId && sessionId.value === switchedToForkedSessionId) {
-        sessionId.value = sid
-        messages.splice(0, messages.length, ...previousMessages)
-        hasMoreOlder.value = previousHasMoreOlder
-        hasLoadedOlder.value = previousHasLoadedOlder
-        startSessionMessagesStream(bid, sid)
-      }
-      toast.error(isSessionNotFoundError(error)
-        ? forkSourceSessionDeletedMessage()
-        : error instanceof Error && error.message.trim()
-          ? error.message
-          : forkFailedMessage())
-      return false
-    } finally {
-      setMessageActionLoading(sid, false)
-    }
-  }
-
-  async function retryMessage(messageId: string): Promise<SendMessageResult> {
-    const mid = messageId.trim()
-    const bid = (currentBotId.value ?? '').trim()
-    const sid = (sessionId.value ?? '').trim()
-    if (!mid || !bid || !sid || !sessionSupportsTurnVariants(sid) || streaming.value || loadingMessages.value || activeChatReadOnly.value || isMessageActionLoading(sid)) {
-      return { ok: false, stage: 'startup' }
-    }
-    const target = messages.find((message): message is ChatAssistantTurn => message.role === 'assistant' && message.id === mid)
-    if (!target) return { ok: false, stage: 'startup' }
-    if (isErrorOnlyAssistantTurn(target)) {
-      const sourceUserTurn = findUserTurnBeforeAssistant(target)
-      if (!sourceUserTurn) return { ok: false, stage: 'startup' }
-      return runRewriteMessage({
-        botId: bid,
-        sessionId: sid,
-        sourceUserTurn,
-        optimisticUserTurn: null,
-        replaceFromTurn: target,
-        pendingReplaceFromTurn: target,
-        send(ws, streamId, modelId, reasoningEffort) {
-          ws.send({
-            type: 'message',
-            stream_id: streamId,
-            text: sourceUserTurn.text,
-            session_id: sid,
-            ...baseHeadPayload(sid),
-            attachments: chatAttachmentsFromTurn(sourceUserTurn),
-            model_id: modelId,
-            reasoning_effort: reasoningEffort,
-          })
-        },
-      })
-    }
-    const sourceUserTurn = findUserTurnBeforeAssistant(target)
-    if (!sourceUserTurn) return { ok: false, stage: 'startup' }
-    return runRewriteMessage({
-      botId: bid,
-      sessionId: sid,
-      sourceUserTurn,
-      optimisticUserTurn: cloneUserTurnForRetry(sourceUserTurn),
-      pendingUserTurn: null,
-      pendingReplaceFromTurn: target,
-      send(ws, streamId, modelId, reasoningEffort) {
-        ws.send({
-          type: 'retry_message',
-          stream_id: streamId,
-          session_id: sid,
-          ...baseHeadPayload(sid),
-          retry_message_id: mid,
-          model_id: modelId,
-          reasoning_effort: reasoningEffort,
-        })
-      },
-    })
-  }
-
-  async function editMessage(messageId: string, text: string): Promise<SendMessageResult> {
-    const mid = messageId.trim()
-    const trimmed = text.trim()
-    const bid = (currentBotId.value ?? '').trim()
-    const sid = (sessionId.value ?? '').trim()
-    if (!mid || !trimmed || !bid || !sid || !sessionSupportsTurnVariants(sid) || streaming.value || loadingMessages.value || activeChatReadOnly.value || isMessageActionLoading(sid)) {
-      return { ok: false, stage: 'startup' }
-    }
-    const target = messages.find((message): message is ChatUserTurn => message.role === 'user' && message.id === mid)
-    if (!target || target.__optimistic === true) return { ok: false, stage: 'startup' }
-    return runRewriteMessage({
-      botId: bid,
-      sessionId: sid,
-      sourceUserTurn: target,
-      optimisticUserTurn: cloneUserTurnForEdit(target, trimmed),
-      send(ws, streamId, modelId, reasoningEffort) {
-        ws.send({
-          type: 'edit_message',
-          stream_id: streamId,
-          session_id: sid,
-          ...baseHeadPayload(sid),
-          edit_message_id: mid,
-          text: trimmed,
-          model_id: modelId,
-          reasoning_effort: reasoningEffort,
-        })
-      },
-    })
-  }
-
   async function sendMessage(text: string, attachments?: ChatAttachment[]): Promise<SendMessageResult> {
     const trimmed = text.trim()
-    if ((!trimmed && !attachments?.length) || streaming.value || loadingMessages.value || isMessageActionLoading(sessionId.value) || !currentBotId.value) return { ok: false, stage: 'startup' }
+    if (!trimmed && !attachments?.length) return { ok: false, stage: 'startup' }
+
+    const newCommand = await handleWebNewCommand(trimmed, attachments)
+    if (newCommand.kind === 'handled') return { ok: true }
+    if (newCommand.kind === 'error') {
+      return { ok: false, stage: 'startup', error: newCommand.message, restoreInput: text, restoreAttachments: attachments }
+    }
+    if (streaming.value || loadingMessages.value || !currentBotId.value) return { ok: false, stage: 'startup' }
 
     loading.value = true
     let assistantTurn: ChatAssistantTurn | null = null
@@ -3636,28 +3186,21 @@ export const useChatStore = defineStore('chat', () => {
         if (!ws.connected) {
           throw new StreamFailureError('WebSocket is not connected', 'startup')
         }
-        const completion = trackAssistantStream(sendStreamId, assistantTurn, bid, sid, userTurn ? [userTurn] : [], { refreshOnEnd: false })
+        const completion = trackAssistantStream(sendStreamId, assistantTurn, bid, sid)
         ws.send({
           type: 'message',
           stream_id: sendStreamId,
           text: trimmed,
           session_id: sid,
-          ...baseHeadPayload(sid),
           attachments,
           model_id: modelId,
           reasoning_effort: reasoningEffort,
         })
         await completion
-        resetSelectedHeadForSession(sid)
-        await refreshCurrentSession(bid, sid, { useSelectedView: false })
+        await refreshCurrentSession(bid, sid)
       } else {
-        await sendLocalChannelMessage(bid, trimmed, attachments, {
-          modelId,
-          reasoningEffort,
-          baseHeadTurnId: baseHeadForRequest(sid),
-        })
-        resetSelectedHeadForSession(sid)
-        await refreshCurrentSession(bid, sid, { useSelectedView: false })
+        await sendLocalChannelMessage(bid, trimmed, attachments, { modelId, reasoningEffort })
+        await refreshCurrentSession(bid, sid)
       }
 
       assistantTurn.streaming = false
@@ -3666,7 +3209,7 @@ export const useChatStore = defineStore('chat', () => {
     } catch (error) {
       const err = error instanceof Error ? error : new Error('Unknown error')
       const isAbort = err.name === 'AbortError'
-      const reason = err.message
+      const reason = resolveApiErrorMessage(error, err.message || sendFailedMessage())
       const stage: SendMessageStage = err instanceof StreamFailureError
         ? err.stage
         : (assistantTurn && hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
@@ -3695,7 +3238,6 @@ export const useChatStore = defineStore('chat', () => {
     const sid = sessionId.value ?? ''
     const approvalId = approval.approval_id?.trim()
     if (!bid || !sid || !approvalId) return false
-    if (variantSelectionLoading.value) return false
     if (approval.status !== 'pending' || approval.can_approve === false) return false
     if (hasPendingApprovalResponse(approvalId)) return false
     const ws = ensureWebSocket(bid)
@@ -3706,8 +3248,10 @@ export const useChatStore = defineStore('chat', () => {
     const streamId = createStreamId()
     const silent = isSessionStreaming(sid)
     approvalResponseStreams.set(streamId, { approvalId, silent, at: Date.now() })
+    const previousApprovalStates = snapshotToolApprovalStates(approvalId)
+    let assistantTurn: ChatAssistantTurn | null = null
     if (!silent) {
-      const assistantTurn = createOptimisticAssistantTurn()
+      assistantTurn = createOptimisticAssistantTurn()
       messages.push(assistantTurn)
       void trackAssistantStream(streamId, assistantTurn, bid, sid).catch((error: Error) => {
         finalizeStreamFailure(assistantTurn, bid, sid, error)
@@ -3722,20 +3266,22 @@ export const useChatStore = defineStore('chat', () => {
         type: 'tool_approval_response',
         stream_id: streamId,
         session_id: sid,
-        ...baseHeadPayload(sid),
         approval_id: approvalId,
         short_id: approval.short_id,
         decision,
       })
     } catch (error) {
+      restoreToolApprovalStates(previousApprovalStates)
       approvalResponseStreams.delete(streamId)
-      markToolApprovalDecision(approvalId, 'pending')
-      pruneEmptyAssistantTurnIfPending(streamId)
-      resolveAssistantStream(streamId)
-      loading.value = isSessionStreaming(sessionId.value)
-      toast.error(error instanceof Error && error.message.trim()
-        ? error.message
-        : userInputConnectionLostMessage())
+      if (!silent) {
+        forgetAssistantStream(streamId)
+        if (assistantTurn) {
+          const idx = messages.indexOf(assistantTurn)
+          if (idx >= 0) messages.splice(idx, 1)
+        }
+      }
+      loading.value = false
+      toast.error(resolveApiErrorMessage(error, 'Failed to send tool approval response.'))
       return false
     }
     return true
@@ -3748,7 +3294,6 @@ export const useChatStore = defineStore('chat', () => {
     const bid = currentBotId.value ?? ''
     const sid = sessionId.value ?? ''
     if (!bid || !sid || !userInput.user_input_id) return
-    if (variantSelectionLoading.value) return false
     const ws = ensureWebSocket(bid)
     if (!ws?.connected) {
       toast.error(userInputConnectionLostMessage())
@@ -3792,7 +3337,6 @@ export const useChatStore = defineStore('chat', () => {
         type: 'user_input_response',
         stream_id: streamId,
         session_id: sid,
-        ...baseHeadPayload(sid),
         user_input_id: userInput.user_input_id,
         short_id: userInput.short_id,
         answers: payload.answers,
@@ -3801,20 +3345,17 @@ export const useChatStore = defineStore('chat', () => {
       })
     } catch (error) {
       restoreUserInputStates(previousUserInputStates)
-      pruneEmptyAssistantTurnIfPending(streamId)
-      resolveAssistantStream(streamId)
-      loading.value = isSessionStreaming(sessionId.value)
-      toast.error(error instanceof Error && error.message.trim()
-        ? error.message
-        : userInputConnectionLostMessage())
+      forgetAssistantStream(streamId)
+      const idx = messages.indexOf(assistantTurn)
+      if (idx >= 0) messages.splice(idx, 1)
+      loading.value = false
+      toast.error(resolveApiErrorMessage(error, 'Failed to send user input response.'))
     }
   }
 
   function clearMessages() {
     abort()
-    cancelVariantSelectionLoad()
     replaceMessages([])
-    clearSessionTurnGraph()
     hasMoreOlder.value = false
     hasLoadedOlder.value = false
   }
@@ -3826,7 +3367,6 @@ export const useChatStore = defineStore('chat', () => {
     messages,
     streaming,
     streamingSessionId,
-    messageActionLoading,
     sessions,
     sessionsCursor,
     hasMoreSessions,
@@ -3843,10 +3383,11 @@ export const useChatStore = defineStore('chat', () => {
     chats,
     chatId,
     sessionId,
+    hasExplicitSessionSelection,
     currentBotId,
     bots,
     activeSession,
-    activeSessionSupportsTurnVariants,
+    activeChatTarget,
     activeChatReadOnly,
     knownSessions,
     knownSessionSummary,
@@ -3875,6 +3416,9 @@ export const useChatStore = defineStore('chat', () => {
     selectSession,
     selectChat: selectSession,
     stageACPSession,
+    stageDefaultACPSession,
+    cacheDefaultACPSession,
+    resetToEmptyComposer,
     ensurePendingACPRuntime,
     setPendingACPModel,
     clearPendingACPSession,
@@ -3893,12 +3437,6 @@ export const useChatStore = defineStore('chat', () => {
     removeChat: removeSession,
     deleteChat: removeSession,
     renameSession,
-    forkMessage,
-    retryMessage,
-    editMessage,
-    requestVariantStateForMessage,
-    responseVariantStateForMessage,
-    selectTurnVariant,
     sendMessage,
     respondToolApproval,
     respondUserInput,

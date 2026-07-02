@@ -53,6 +53,43 @@ export function sortByRecency<T extends { updated_at?: string; created_at?: stri
   })
 }
 
+export type SidebarSessionMode = 'recent' | 'schedule' | 'agent'
+
+interface SessionDescriptorShape {
+  type?: string
+  session_mode?: string
+  runtime_type?: string
+}
+
+export function normalizedSessionMode(session: SessionDescriptorShape): string {
+  const mode = (session.session_mode ?? '').trim()
+  if (mode) return mode
+  const legacyType = (session.type ?? '').trim()
+  if (legacyType === 'acp_agent') return 'chat'
+  return legacyType || 'chat'
+}
+
+export function normalizedRuntimeType(session: SessionDescriptorShape): string {
+  const runtimeType = (session.runtime_type ?? '').trim()
+  if (runtimeType) return runtimeType
+  return (session.type ?? '').trim() === 'acp_agent' ? 'acp_agent' : 'model'
+}
+
+export function isSessionVisibleInSidebarMode(session: SessionDescriptorShape, mode: SidebarSessionMode): boolean {
+  switch (mode) {
+    case 'recent': {
+      const sessionMode = normalizedSessionMode(session)
+      return sessionMode === 'chat' || sessionMode === 'discuss'
+    }
+    case 'schedule':
+      return normalizedSessionMode(session) === 'schedule'
+    case 'agent':
+      return normalizedRuntimeType(session) === 'acp_agent'
+    default:
+      return false
+  }
+}
+
 export function latestOutputLine(tail?: string): string {
   if (!tail) return ''
   for (const line of tail.split('\n').reverse()) {

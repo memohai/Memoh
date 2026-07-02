@@ -13,26 +13,33 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/acl"
+	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/identities"
 	"github.com/memohai/memoh/internal/channel/route"
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/conversation/flow"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	"github.com/memohai/memoh/internal/schedule"
+	sessionpkg "github.com/memohai/memoh/internal/session"
 )
 
 type fakeChatGateway struct {
-	resp   conversation.ChatResponse
-	err    error
-	gotReq conversation.ChatRequest
-	onChat func(conversation.ChatRequest)
+	resp           conversation.ChatResponse
+	err            error
+	gotReq         conversation.ChatRequest
+	onChat         func(conversation.ChatRequest)
+	userInputCalls int
+	userInputInput flow.UserInputResponseInput
+	userInputErr   error
 }
 
 func (f *fakeChatGateway) Chat(_ context.Context, req conversation.ChatRequest) (conversation.ChatResponse, error) {
@@ -71,6 +78,15 @@ func (f *fakeChatGateway) StreamChat(_ context.Context, req conversation.ChatReq
 
 func (*fakeChatGateway) TriggerSchedule(_ context.Context, _ string, _ schedule.TriggerPayload, _ string) (schedule.TriggerResult, error) {
 	return schedule.TriggerResult{}, nil
+}
+
+func (f *fakeChatGateway) RespondUserInput(_ context.Context, input flow.UserInputResponseInput, eventCh chan<- flow.WSStreamEvent) error {
+	f.userInputCalls++
+	f.userInputInput = input
+	if eventCh != nil {
+		eventCh <- flow.WSStreamEvent(`{"type":"agent_end"}`)
+	}
+	return f.userInputErr
 }
 
 type fakeReplySender struct {
@@ -205,7 +221,9 @@ func (f *fakeCommandRoleResolver) GetMemberRole(_ context.Context, _, _ string) 
 type fakeSessionEnsurer struct {
 	activeSession SessionResult
 	activeErr     error
+	createErr     error
 	lastRouteID   string
+	lastSpec      NewSessionSpec
 }
 
 func (f *fakeSessionEnsurer) EnsureActiveSession(_ context.Context, _, routeID, _ string) (SessionResult, error) {
@@ -224,12 +242,84 @@ func (f *fakeSessionEnsurer) GetActiveSession(_ context.Context, routeID string)
 	return f.activeSession, nil
 }
 
-func (f *fakeSessionEnsurer) CreateNewSession(_ context.Context, _, routeID, _, _ string) (SessionResult, error) {
+func (f *fakeSessionEnsurer) CreateNewSession(_ context.Context, _, routeID, _ string, spec NewSessionSpec) (SessionResult, error) {
 	f.lastRouteID = routeID
-	if f.activeErr != nil {
-		return SessionResult{}, f.activeErr
+	f.lastSpec = spec
+	if f.createErr != nil {
+		return SessionResult{}, f.createErr
+	}
+	if strings.TrimSpace(f.activeSession.ID) == "" {
+		return SessionResult{
+			ID:                    "created-session",
+			Type:                  spec.Type,
+			Mode:                  spec.Mode,
+			Runtime:               spec.Runtime,
+			RuntimeOwnerAccountID: spec.RuntimeOwnerAccountID,
+		}, nil
 	}
 	return f.activeSession, nil
+}
+
+type fakeDefaultChatRuntimeReader struct {
+	settings DefaultChatRuntimeSettings
+	err      error
+}
+
+func (f fakeDefaultChatRuntimeReader) DefaultChatRuntime(_ context.Context, _ string) (DefaultChatRuntimeSettings, error) {
+	if f.err != nil {
+		return DefaultChatRuntimeSettings{}, f.err
+	}
+	return f.settings, nil
+}
+
+type fakeACPAgentSetupReader struct {
+	metadata map[string]any
+	err      error
+}
+
+func (f fakeACPAgentSetupReader) ACPAgentSetupMetadata(_ context.Context, _ string) (map[string]any, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.metadata, nil
+}
+
+type fakeBotPermissionChecker struct {
+	allowed bool
+	err     error
+	account string
+	values  map[string]bool
+}
+
+func (f *fakeBotPermissionChecker) HasBotPermission(_ context.Context, botID, accountID, permission string) (bool, error) {
+	f.account = accountID
+	if f.err != nil {
+		return false, f.err
+	}
+	if f.values != nil {
+		return f.values[botID+":"+accountID+":"+permission], nil
+	}
+	return f.allowed, nil
+}
+
+func jwtBearerSubject(t *testing.T, bearerToken, secret string) string {
+	t.Helper()
+	raw := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(bearerToken), "Bearer "))
+	if raw == "" {
+		t.Fatal("bearer token is empty")
+	}
+	parsed, err := jwt.Parse(raw, func(_ *jwt.Token) (any, error) {
+		return []byte(secret), nil
+	})
+	if err != nil {
+		t.Fatalf("parse jwt: %v", err)
+	}
+	claims, ok := parsed.Claims.(jwt.MapClaims)
+	if !ok || !parsed.Valid {
+		t.Fatalf("invalid jwt claims: %#v", parsed.Claims)
+	}
+	sub, _ := claims["sub"].(string)
+	return sub
 }
 
 type fakeCommandQueries struct {
@@ -488,6 +578,442 @@ func TestChannelInboundProcessorWithIdentity(t *testing.T) {
 	}
 	if len(sender.sent) != 1 || sender.sent[0].Message.PlainText() != "AI reply" {
 		t.Fatalf("expected AI reply, got: %+v", sender.sent)
+	}
+}
+
+func TestChannelInboundProcessorRespondCommandRoutesUserInput(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{
+		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"},
+		linkedUserIDs: map[string][]string{
+			"channelIdentity-1": {"user-1"},
+		},
+	}
+	policySvc := &fakePolicyService{}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}
+	gateway := &fakeChatGateway{}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, "", 0)
+	processor.SetACLService(&fakeChatACL{allowed: true})
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1", Type: sessionpkg.TypeACPAgent}})
+	sender := &fakeReplySender{}
+
+	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}
+	msg := channel.InboundMessage{
+		BotID:       "bot-1",
+		Channel:     channel.ChannelType("feishu"),
+		Message:     channel.Message{ID: "msg-1", Text: "/respond input-1 Plan B"},
+		ReplyTarget: "target-id",
+		Sender:      channel.Identity{SubjectID: "ext-1", DisplayName: "User1"},
+		Conversation: channel.Conversation{
+			ID:   "chat-1",
+			Type: channel.ConversationTypePrivate,
+		},
+	}
+
+	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
+		t.Fatalf("HandleInbound() error = %v", err)
+	}
+	if gateway.userInputCalls != 1 {
+		t.Fatalf("RespondUserInput calls = %d, want 1", gateway.userInputCalls)
+	}
+	got := gateway.userInputInput
+	if got.BotID != "bot-1" || got.SessionID != "session-1" || got.ExplicitID != "input-1" || got.TextAnswer != "Plan B" {
+		t.Fatalf("user input input = %#v", got)
+	}
+	if got.ActorChannelIdentityID != "channelIdentity-1" || got.ActorUserID != "user-1" {
+		t.Fatalf("actor fields = %#v", got)
+	}
+	if gateway.gotReq.BotID != "" {
+		t.Fatalf("ordinary chat should not run, got request %#v", gateway.gotReq)
+	}
+}
+
+func TestChannelInboundProcessorRespondReplyUsesReplyTargetAndPreservesAnswer(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{
+		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"},
+		linkedUserIDs: map[string][]string{
+			"channelIdentity-1": {"user-1"},
+		},
+	}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}
+	gateway := &fakeChatGateway{}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, &fakePolicyService{}, "", 0)
+	processor.SetACLService(&fakeChatACL{allowed: true})
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1", Type: sessionpkg.TypeACPAgent}})
+	sender := &fakeReplySender{}
+
+	msg := channel.InboundMessage{
+		BotID:       "bot-1",
+		Channel:     channel.ChannelType("feishu"),
+		Message:     channel.Message{ID: "msg-1", Text: "/respond Plan B", Reply: &channel.ReplyRef{MessageID: "ask-msg-1"}},
+		ReplyTarget: "target-id",
+		Sender:      channel.Identity{SubjectID: "ext-1", DisplayName: "User1"},
+		Conversation: channel.Conversation{
+			ID:   "chat-1",
+			Type: channel.ConversationTypePrivate,
+		},
+	}
+	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}
+
+	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
+		t.Fatalf("HandleInbound() error = %v", err)
+	}
+	got := gateway.userInputInput
+	if got.ExplicitID != "" {
+		t.Fatalf("ExplicitID = %q, want empty so reply lookup can run", got.ExplicitID)
+	}
+	if got.ReplyExternalMessageID != "ask-msg-1" {
+		t.Fatalf("ReplyExternalMessageID = %q, want ask-msg-1", got.ReplyExternalMessageID)
+	}
+	if got.TextAnswer != "Plan B" {
+		t.Fatalf("TextAnswer = %q, want original-case answer", got.TextAnswer)
+	}
+}
+
+func TestChannelInboundProcessorAutoCreatesDefaultACPSession(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{
+		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-acp"},
+		linkedUserIDs:   map[string][]string{"channelIdentity-acp": {"account-user-acp"}},
+	}
+	policySvc := &fakePolicyService{}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-acp", RouteID: "route-acp"}}
+	gateway := &fakeChatGateway{
+		resp: conversation.ChatResponse{
+			Messages: []conversation.ModelMessage{
+				{Role: "assistant", Content: conversation.NewTextContent("ACP reply")},
+			},
+		},
+	}
+	ensurer := &fakeSessionEnsurer{activeErr: errors.New("no active session")}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, "", 0)
+	processor.SetSessionEnsurer(ensurer)
+	processor.SetDefaultChatRuntime(fakeDefaultChatRuntimeReader{settings: DefaultChatRuntimeSettings{
+		Runtime:     sessionpkg.RuntimeACPAgent,
+		ACPAgentID:  "codex",
+		ProjectPath: "/data/app",
+		ProjectMode: sessionpkg.DefaultACPProjectMode,
+	}})
+	permChecker := &fakeBotPermissionChecker{allowed: true}
+	processor.SetBotPermissionChecker(permChecker)
+	sender := &fakeReplySender{}
+
+	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("web")}
+	msg := channel.InboundMessage{
+		BotID:       "bot-1",
+		Channel:     channel.ChannelType("web"),
+		Message:     channel.Message{Text: "hello"},
+		ReplyTarget: "target-id",
+		Sender:      channel.Identity{SubjectID: "ext-1", DisplayName: "User1"},
+		Conversation: channel.Conversation{
+			ID:   "chat-acp",
+			Type: channel.ConversationTypePrivate,
+		},
+	}
+
+	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ensurer.lastSpec.Runtime != sessionpkg.RuntimeACPAgent || ensurer.lastSpec.Type != sessionpkg.TypeACPAgent {
+		t.Fatalf("created spec = %#v, want ACP runtime session", ensurer.lastSpec)
+	}
+	if ensurer.lastSpec.RuntimeOwnerAccountID != "account-user-acp" {
+		t.Fatalf("runtime owner = %q, want account user", ensurer.lastSpec.RuntimeOwnerAccountID)
+	}
+	if ensurer.lastSpec.CreatedByUserID != "account-user-acp" {
+		t.Fatalf("created_by_user_id = %q, want account user", ensurer.lastSpec.CreatedByUserID)
+	}
+	if permChecker.account != "account-user-acp" {
+		t.Fatalf("permission principal = %q, want account user", permChecker.account)
+	}
+	if got := newSessionMetadataString(ensurer.lastSpec.Metadata, "acp_agent_id"); got != "codex" {
+		t.Fatalf("acp_agent_id = %q, want codex", got)
+	}
+	if gateway.gotReq.SessionID != "created-session" {
+		t.Fatalf("StreamChat session = %q, want created-session", gateway.gotReq.SessionID)
+	}
+}
+
+func TestChannelInboundProcessorDefaultACPRequiresWorkspaceExec(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{
+		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-no-exec"},
+		linkedUserIDs:   map[string][]string{"channelIdentity-no-exec": {"account-user-no-exec"}},
+	}
+	policySvc := &fakePolicyService{}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-acp", RouteID: "route-acp"}}
+	gateway := &fakeChatGateway{}
+	ensurer := &fakeSessionEnsurer{activeErr: errors.New("no active session")}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, "", 0)
+	processor.SetSessionEnsurer(ensurer)
+	processor.SetDefaultChatRuntime(fakeDefaultChatRuntimeReader{settings: DefaultChatRuntimeSettings{
+		Runtime:    sessionpkg.RuntimeACPAgent,
+		ACPAgentID: "codex",
+	}})
+	processor.SetBotPermissionChecker(&fakeBotPermissionChecker{allowed: false})
+	sender := &fakeReplySender{}
+
+	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("web")}
+	msg := channel.InboundMessage{
+		BotID:       "bot-1",
+		Channel:     channel.ChannelType("web"),
+		Message:     channel.Message{ID: "msg-1", Text: "hello"},
+		ReplyTarget: "target-id",
+		Sender:      channel.Identity{SubjectID: "ext-1", DisplayName: "User1"},
+		Conversation: channel.Conversation{
+			ID:   "chat-acp",
+			Type: channel.ConversationTypePrivate,
+		},
+	}
+
+	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ensurer.lastSpec.Runtime != "" {
+		t.Fatalf("session should not be created when workspace_exec is missing, got spec %#v", ensurer.lastSpec)
+	}
+	if gateway.gotReq.Query != "" {
+		t.Fatalf("chat should not run, got query %q", gateway.gotReq.Query)
+	}
+	if len(sender.sent) != 1 || !strings.Contains(sender.sent[0].Message.PlainText(), "permission to run workspace commands") {
+		t.Fatalf("expected workspace_exec feedback, got %+v", sender.sent)
+	}
+}
+
+func TestChannelInboundProcessorActiveACPRequiresRuntimeOwner(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{
+		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-acp"},
+		linkedUserIDs:   map[string][]string{"channelIdentity-acp": {"account-user-acp"}},
+	}
+	policySvc := &fakePolicyService{}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-acp", RouteID: "route-acp"}}
+	gateway := &fakeChatGateway{}
+	ensurer := &fakeSessionEnsurer{activeSession: SessionResult{
+		ID:      "active-acp-session",
+		Type:    sessionpkg.TypeACPAgent,
+		Runtime: sessionpkg.RuntimeACPAgent,
+	}}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, "", 0)
+	processor.SetSessionEnsurer(ensurer)
+	processor.SetBotPermissionChecker(&fakeBotPermissionChecker{allowed: true})
+	sender := &fakeReplySender{}
+
+	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("web")}
+	msg := channel.InboundMessage{
+		BotID:       "bot-1",
+		Channel:     channel.ChannelType("web"),
+		Message:     channel.Message{ID: "msg-1", Text: "hello"},
+		ReplyTarget: "target-id",
+		Sender:      channel.Identity{SubjectID: "ext-1", DisplayName: "User1"},
+		Conversation: channel.Conversation{
+			ID:   "chat-acp",
+			Type: channel.ConversationTypePrivate,
+		},
+	}
+
+	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gateway.gotReq.Query != "" {
+		t.Fatalf("chat should not run without runtime owner, got query %q", gateway.gotReq.Query)
+	}
+	if len(sender.sent) != 1 || !strings.Contains(sender.sent[0].Message.PlainText(), "runtime owner") {
+		t.Fatalf("expected runtime owner feedback, got %+v", sender.sent)
+	}
+}
+
+func TestChannelInboundProcessorActiveACPRequiresCurrentActorOwnerOrManage(t *testing.T) {
+	const (
+		ownerID   = "account-owner"
+		actorID   = "account-other"
+		managerID = "account-manager"
+	)
+
+	t.Run("workspace exec non-owner cannot drive runtime", func(t *testing.T) {
+		channelIdentitySvc := &fakeChannelIdentityService{
+			channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-other"},
+			linkedUserIDs:   map[string][]string{"channelIdentity-other": {actorID}},
+		}
+		chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-acp", RouteID: "route-acp"}}
+		gateway := &fakeChatGateway{}
+		ensurer := &fakeSessionEnsurer{activeSession: SessionResult{
+			ID:                    "active-acp-session",
+			Type:                  sessionpkg.TypeACPAgent,
+			Runtime:               sessionpkg.RuntimeACPAgent,
+			RuntimeOwnerAccountID: ownerID,
+		}}
+		processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, &fakePolicyService{}, "", 0)
+		processor.SetSessionEnsurer(ensurer)
+		processor.SetBotPermissionChecker(&fakeBotPermissionChecker{values: map[string]bool{
+			"bot-1:" + ownerID + ":" + bots.PermissionWorkspaceExec: true,
+			"bot-1:" + actorID + ":" + bots.PermissionWorkspaceExec: true,
+		}})
+		sender := &fakeReplySender{}
+
+		cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("web")}
+		msg := channel.InboundMessage{
+			BotID:       "bot-1",
+			Channel:     channel.ChannelType("web"),
+			Message:     channel.Message{ID: "msg-1", Text: "hello"},
+			ReplyTarget: "target-id",
+			Sender:      channel.Identity{SubjectID: "ext-1", DisplayName: "User1"},
+			Conversation: channel.Conversation{
+				ID:   "chat-acp",
+				Type: channel.ConversationTypePrivate,
+			},
+		}
+
+		if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if gateway.gotReq.Query != "" {
+			t.Fatalf("chat should not run for non-owner actor, got query %q", gateway.gotReq.Query)
+		}
+		if len(sender.sent) != 1 {
+			t.Fatalf("expected ACP feedback, got %+v", sender.sent)
+		}
+	})
+
+	t.Run("manager cannot drive another user's runtime", func(t *testing.T) {
+		channelIdentitySvc := &fakeChannelIdentityService{
+			channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-manager"},
+			linkedUserIDs:   map[string][]string{"channelIdentity-manager": {managerID}},
+		}
+		chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-acp", RouteID: "route-acp"}}
+		gateway := &fakeChatGateway{
+			resp: conversation.ChatResponse{Messages: []conversation.ModelMessage{
+				{Role: "assistant", Content: conversation.NewTextContent("ok")},
+			}},
+		}
+		ensurer := &fakeSessionEnsurer{activeSession: SessionResult{
+			ID:                    "active-acp-session",
+			Type:                  sessionpkg.TypeACPAgent,
+			Runtime:               sessionpkg.RuntimeACPAgent,
+			RuntimeOwnerAccountID: ownerID,
+		}}
+		processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, &fakePolicyService{}, "", 0)
+		processor.SetSessionEnsurer(ensurer)
+		processor.SetBotPermissionChecker(&fakeBotPermissionChecker{values: map[string]bool{
+			"bot-1:" + ownerID + ":" + bots.PermissionWorkspaceExec: true,
+			"bot-1:" + managerID + ":" + bots.PermissionManage:      true,
+		}})
+		sender := &fakeReplySender{}
+
+		cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("web")}
+		msg := channel.InboundMessage{
+			BotID:       "bot-1",
+			Channel:     channel.ChannelType("web"),
+			Message:     channel.Message{ID: "msg-1", Text: "hello"},
+			ReplyTarget: "target-id",
+			Sender:      channel.Identity{SubjectID: "ext-1", DisplayName: "Manager"},
+			Conversation: channel.Conversation{
+				ID:   "chat-acp",
+				Type: channel.ConversationTypePrivate,
+			},
+		}
+
+		if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if gateway.gotReq.Query != "" {
+			t.Fatalf("chat should not run for manager on another user's runtime, got query %q", gateway.gotReq.Query)
+		}
+		if len(sender.sent) != 1 {
+			t.Fatalf("expected ACP feedback, got %+v", sender.sent)
+		}
+	})
+}
+
+func TestChannelInboundProcessorDiscussACPAllowsNonOwnerMemberThroughACL(t *testing.T) {
+	const (
+		ownerID = "account-owner"
+		actorID = "account-member"
+	)
+	channelIdentitySvc := &fakeChannelIdentityService{
+		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-member"},
+		linkedUserIDs:   map[string][]string{"channelIdentity-member": {actorID}},
+	}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-discuss", RouteID: "route-discuss"}}
+	gateway := &fakeChatGateway{}
+	ensurer := &fakeSessionEnsurer{activeSession: SessionResult{
+		ID:                    "active-discuss-acp-session",
+		Type:                  sessionpkg.TypeDiscuss,
+		Runtime:               sessionpkg.RuntimeACPAgent,
+		RuntimeOwnerAccountID: ownerID,
+	}}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, &fakePolicyService{}, "", 0)
+	processor.SetSessionEnsurer(ensurer)
+	processor.SetBotPermissionChecker(&fakeBotPermissionChecker{values: map[string]bool{
+		"bot-1:" + ownerID + ":" + bots.PermissionWorkspaceExec: true,
+		"bot-1:" + actorID + ":" + bots.PermissionWorkspaceExec: true,
+	}})
+	pipeline := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
+	driver := pipelinepkg.NewDiscussDriver(pipelinepkg.DiscussDriverDeps{Pipeline: pipeline})
+	defer driver.StopAll()
+	processor.SetPipeline(pipeline, nil, driver)
+	sender := &fakeReplySender{}
+
+	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}
+	msg := channel.InboundMessage{
+		BotID:       "bot-1",
+		Channel:     channel.ChannelType("feishu"),
+		Message:     channel.Message{ID: "msg-1", Text: "@bot hello"},
+		ReplyTarget: "group-target",
+		Sender:      channel.Identity{SubjectID: "ext-member", DisplayName: "Member"},
+		Conversation: channel.Conversation{
+			ID:   "group-discuss",
+			Type: channel.ConversationTypeGroup,
+			Name: "Group",
+		},
+		Metadata: map[string]any{
+			"is_mentioned": true,
+		},
+	}
+
+	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sender.sent) != 0 {
+		t.Fatalf("non-owner group member should not receive ACP owner feedback in discuss mode, got %+v", sender.sent)
+	}
+	if !driver.HasSession("active-discuss-acp-session") {
+		t.Fatalf("discuss driver did not receive the ACP discuss session")
+	}
+	if gateway.gotReq.Query != "" {
+		t.Fatalf("discuss mode should not run the regular chat gateway, got query %q", gateway.gotReq.Query)
+	}
+}
+
+func TestChannelInboundProcessorIssueRuntimeBearerTokenUsesRuntimeOwner(t *testing.T) {
+	const secret = "runtime-token-secret"
+	processor := NewChannelInboundProcessor(
+		slog.Default(),
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		&fakePolicyService{ownerUserID: "bot-owner"},
+		secret,
+		0,
+	)
+	identity := InboundIdentity{BotID: "bot-1", UserID: "caller-user"}
+
+	channelToken := processor.issueChannelBearerToken(context.Background(), identity, "")
+	if got := jwtBearerSubject(t, channelToken, secret); got != "bot-owner" {
+		t.Fatalf("channel token subject = %q, want bot-owner", got)
+	}
+
+	runtimeToken := processor.issueRuntimeBearerToken(context.Background(), identity, "runtime-owner", "")
+	if got := jwtBearerSubject(t, runtimeToken, secret); got != "runtime-owner" {
+		t.Fatalf("runtime token subject = %q, want runtime-owner", got)
+	}
+
+	modelSessionToken := processor.issueSessionBearerToken(context.Background(), identity, SessionResult{Type: sessionpkg.TypeDiscuss, Runtime: sessionpkg.RuntimeModel}, "", "")
+	if got := jwtBearerSubject(t, modelSessionToken, secret); got != "bot-owner" {
+		t.Fatalf("model discuss session token subject = %q, want bot-owner", got)
+	}
+
+	acpSessionToken := processor.issueSessionBearerToken(context.Background(), identity, SessionResult{Type: sessionpkg.TypeDiscuss, Runtime: sessionpkg.RuntimeACPAgent}, "runtime-owner", "")
+	if got := jwtBearerSubject(t, acpSessionToken, secret); got != "runtime-owner" {
+		t.Fatalf("ACP discuss session token subject = %q, want runtime-owner", got)
 	}
 }
 
@@ -1074,6 +1600,9 @@ func TestChannelInboundProcessorGroupMentionTriggersReply(t *testing.T) {
 	}
 	if gateway.gotReq.UserMessagePersisted {
 		t.Fatalf("expected UserMessagePersisted=false: user message persistence is deferred to storeRound")
+	}
+	if !gateway.gotReq.MentionsBot {
+		t.Fatalf("expected is_mentioned metadata to be carried into ChatRequest")
 	}
 }
 
@@ -2001,25 +2530,81 @@ func TestMapStreamChunkToChannelEvents_ToolCallFields(t *testing.T) {
 	}
 }
 
-func TestMapStreamChunkToChannelEvents_FinalMessages(t *testing.T) {
+func TestMapStreamChunkToChannelEvents_UserInputRequest(t *testing.T) {
 	t.Parallel()
 
-	chunk := `{"type":"agent_end","messages":[{"role":"assistant","content":"done"}]}`
-	events, messages, err := mapStreamChunkToChannelEvents(conversation.StreamChunk([]byte(chunk)))
+	chunk := `{"type":"user_input_request","toolName":"ask_user","toolCallId":"ask-1","userInputId":"input-1","shortId":7,"status":"pending","input":{"questions":[{"text":"Pick one"}]}}`
+	events, _, err := mapStreamChunkToChannelEvents(conversation.StreamChunk([]byte(chunk)))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
 	}
-	if events[0].Type != channel.StreamEventAgentEnd {
-		t.Fatalf("expected event type %q, got %q", channel.StreamEventAgentEnd, events[0].Type)
+	tc := events[0].ToolCall
+	if events[0].Type != channel.StreamEventToolCallStart || tc == nil {
+		t.Fatalf("event = %#v, want tool call start", events[0])
 	}
-	if len(messages) != 1 {
-		t.Fatalf("expected 1 final message, got %d", len(messages))
+	if tc.Name != "ask_user" || tc.CallID != "ask-1" || tc.ShortID != 7 {
+		t.Fatalf("tool call = %#v", tc)
 	}
-	if messages[0].Role != "assistant" {
-		t.Fatalf("expected role assistant, got %q", messages[0].Role)
+	input, ok := tc.Input.(map[string]any)
+	if !ok {
+		t.Fatalf("input = %#v, want map", tc.Input)
+	}
+	if input["user_input_id"] != "input-1" || input["status"] != "pending" {
+		t.Fatalf("input = %#v", input)
+	}
+	if len(tc.Actions) != 1 || tc.Actions[0].Type != "user_input" || tc.Actions[0].Value != "respond:input-1" {
+		t.Fatalf("actions = %#v", tc.Actions)
+	}
+}
+
+func TestMapStreamChunkToChannelEvents_FinalMessages(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		chunk     string
+		eventType channel.StreamEventType
+		wantEvent bool
+	}{
+		{
+			name:      "agent_end",
+			chunk:     `{"type":"agent_end","messages":[{"role":"assistant","content":"done"}]}`,
+			eventType: channel.StreamEventAgentEnd,
+			wantEvent: true,
+		},
+		{
+			name:  "agent_abort",
+			chunk: `{"type":"agent_abort","messages":[{"role":"assistant","content":"partial failure"}]}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			events, messages, err := mapStreamChunkToChannelEvents(conversation.StreamChunk([]byte(tt.chunk)))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.wantEvent {
+				if len(events) != 1 {
+					t.Fatalf("expected 1 event, got %d", len(events))
+				}
+				if events[0].Type != tt.eventType {
+					t.Fatalf("expected event type %q, got %q", tt.eventType, events[0].Type)
+				}
+			} else if len(events) != 0 {
+				t.Fatalf("expected no channel event, got %d", len(events))
+			}
+			if len(messages) != 1 {
+				t.Fatalf("expected 1 final message, got %d", len(messages))
+			}
+			if messages[0].Role != "assistant" {
+				t.Fatalf("expected role assistant, got %q", messages[0].Role)
+			}
+		})
 	}
 }
 
