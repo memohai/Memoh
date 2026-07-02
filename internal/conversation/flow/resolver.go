@@ -282,6 +282,7 @@ type resolvedContext struct {
 	userMessageAlreadyInContext bool
 	injectedRecords             *[]conversation.InjectedMessageRecord
 	estimatedTokens             int // estimated input token count for compaction
+	contextTokenBudget          int // token budget used to clamp compaction triggers
 }
 
 func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (resolvedContext, error) {
@@ -376,14 +377,13 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		}
 		loaded = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
 		messages, historyRecords, estimatedTokens = trimMessagesAndRecordsByTokens(r.logger, loaded, contextTokenBudget)
-		// When context reaches 70% of the contextTokenBudget (the user-configured
-		// budget cap), run synchronous compaction before sending the request.
-		// contextTokenBudget is the authoritative limit for how much context
-		// the user wants to send to the LLM. We compact at 70% to keep the
-		// context healthy and avoid edge-case timeouts.
+		// When context reaches the shared budget share, run synchronous
+		// compaction before sending the request. contextTokenBudget is the
+		// authoritative limit for how much context the user wants to send
+		// to the LLM.
 		compactionThreshold := 0
 		if contextTokenBudget > 0 {
-			compactionThreshold = contextTokenBudget * 70 / 100
+			compactionThreshold = contextTokenBudget * compactionBudgetThresholdPercent / 100
 		}
 		// The trigger only counts raw (compactable) rows: active summaries can
 		// never be compacted away, so including them would make the trigger
@@ -429,7 +429,6 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 				messages = stripToolMessages(messages)
 			}
 		}
-		_ = estimatedTokens
 	}
 	if memoryMsg != nil {
 		messages = append(messages, *memoryMsg)
@@ -529,6 +528,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		userMessageAlreadyInContext: usePipeline,
 		injectedRecords:             injectedRecords,
 		estimatedTokens:             estimatedTokens,
+		contextTokenBudget:          contextTokenBudget,
 	}, nil
 }
 

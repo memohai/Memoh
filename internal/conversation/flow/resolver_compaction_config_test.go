@@ -92,6 +92,30 @@ func TestBuildCompactionConfigKeepsRatioSelection(t *testing.T) {
 	}
 }
 
+func TestEffectiveCompactionThreshold(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		threshold int
+		budget    int
+		want      int
+	}{
+		{name: "clamps to budget share when user threshold exceeds it", threshold: 100000, budget: 10000, want: 7000},
+		{name: "keeps lower user threshold", threshold: 5000, budget: 200000, want: 5000},
+		{name: "keeps threshold when budget unknown", threshold: 100000, budget: 0, want: 100000},
+		{name: "zero threshold stays disabled", threshold: 0, budget: 200000, want: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := effectiveCompactionThreshold(tc.threshold, tc.budget); got != tc.want {
+				t.Fatalf("effectiveCompactionThreshold(%d, %d) = %d, want %d", tc.threshold, tc.budget, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSyncCompactionTargetTokens(t *testing.T) {
 	t.Parallel()
 

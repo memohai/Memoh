@@ -12,7 +12,28 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 )
 
-func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatRequest, _ resolvedContext, inputTokens int) {
+// compactionBudgetThresholdPercent is the shared budget share at which
+// compaction triggers: the pre-send synchronous backstop fires when
+// compactable history reaches it, and async triggers clamp the user
+// threshold to it so they fire before the blocking backstop does.
+const compactionBudgetThresholdPercent = 70
+
+// effectiveCompactionThreshold clamps the user-configured absolute threshold
+// to the budget share, so an absolute default (e.g. 100000) still fires on
+// models whose context window never reaches it. A non-positive threshold
+// keeps async compaction disabled.
+func effectiveCompactionThreshold(threshold, contextTokenBudget int) int {
+	if threshold <= 0 || contextTokenBudget <= 0 {
+		return threshold
+	}
+	budgetThreshold := contextTokenBudget * compactionBudgetThresholdPercent / 100
+	if budgetThreshold > 0 && budgetThreshold < threshold {
+		return budgetThreshold
+	}
+	return threshold
+}
+
+func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, inputTokens int) {
 	if r.compactionService == nil || r.settingsService == nil {
 		r.logger.Info("compaction: skipped, service or settings nil")
 		return
@@ -29,10 +50,11 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 		)
 		return
 	}
-	if !compaction.ShouldCompact(inputTokens, botSettings.CompactionThreshold) {
+	threshold := effectiveCompactionThreshold(botSettings.CompactionThreshold, rc.contextTokenBudget)
+	if !compaction.ShouldCompact(inputTokens, threshold) {
 		r.logger.Info("compaction: skipped, below threshold",
 			slog.Int("input_tokens", inputTokens),
-			slog.Int("threshold", botSettings.CompactionThreshold),
+			slog.Int("threshold", threshold),
 		)
 		return
 	}
@@ -41,7 +63,7 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 		slog.String("bot_id", req.BotID),
 		slog.String("session_id", req.SessionID),
 		slog.Int("input_tokens", inputTokens),
-		slog.Int("threshold", botSettings.CompactionThreshold),
+		slog.Int("threshold", threshold),
 		slog.Int("ratio", botSettings.CompactionRatio),
 	)
 
