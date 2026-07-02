@@ -7,7 +7,9 @@ import (
 	"strings"
 )
 
-const charsPerToken = 2
+// charsPerToken matches the flow path's estimateCharsAsTokens so the same
+// token budget means the same amount of context on both paths.
+const charsPerToken = 4
 
 // TurnResponseEntry represents an assistant or tool message from bot_history_messages,
 // used as the "TR" stream in context composition.

@@ -682,17 +682,17 @@ func TestTrimContextSourcesByBudgetAccountsForMergedRCSeparators(t *testing.T) {
 		{
 			MessageID:    "external-old-1",
 			ReceivedAtMs: 100,
-			Content:      []RenderedContentPiece{{Type: "text", Text: "aa"}},
+			Content:      []RenderedContentPiece{{Type: "text", Text: "aaaaaaa"}},
 		},
 		{
 			MessageID:    "external-old-2",
 			ReceivedAtMs: 200,
-			Content:      []RenderedContentPiece{{Type: "text", Text: "bb"}},
+			Content:      []RenderedContentPiece{{Type: "text", Text: "bbbbbbb"}},
 		},
 		{
 			MessageID:    "external-trigger",
 			ReceivedAtMs: 300,
-			Content:      []RenderedContentPiece{{Type: "text", Text: "cc"}},
+			Content:      []RenderedContentPiece{{Type: "text", Text: "ccccccc"}},
 		},
 	}
 
@@ -702,7 +702,7 @@ func TestTrimContextSourcesByBudgetAccountsForMergedRCSeparators(t *testing.T) {
 		t.Fatal("expected composed context")
 	}
 	got := messageContents(composed.Messages)
-	if len(got) != 1 || got[0] != "cc" {
+	if len(got) != 1 || got[0] != "ccccccc" {
 		t.Fatalf("budget should only retain latest trigger after RC merge overhead, got %#v", got)
 	}
 	if composed.EstimatedTokens > 2 {
