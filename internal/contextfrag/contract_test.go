@@ -216,6 +216,47 @@ func TestWithContextRefPreservesExplicitSourcePayloadHash(t *testing.T) {
 	}
 }
 
+func TestWithContextRefRecomputesCanonicalFragmentHash(t *testing.T) {
+	t.Parallel()
+
+	frag := TextFrag(TextFragInput{
+		ID:         "history.001",
+		Kind:       KindConversationEvent,
+		Role:       sdk.MessageRoleUser,
+		Slot:       SlotHistory,
+		Text:       "hello",
+		Priority:   70,
+		CacheClass: CacheNever,
+		Trust:      TrustExternal,
+		Source:     "history",
+		SourceID:   "row-1",
+		Collector:  "test",
+	})
+	normalized := WithContextRef(frag, ContextRef{
+		Namespace:  "history",
+		ID:         "row-1",
+		Version:    1,
+		Schema:     SchemaContextRef,
+		Durability: RefDurable,
+	})
+	mutated := frag
+	mutated.Parts = append([]Part(nil), frag.Parts...)
+	mutated.Parts[0].Text = "hello again"
+	expected, err := CanonicalFragmentHash(mutated)
+	if err != nil {
+		t.Fatalf("canonical hash for mutated frag: %v", err)
+	}
+
+	got := WithContextRef(mutated, normalized.Ref)
+
+	if got.Ref.HashScope != HashScopeCanonicalFragment || got.Ref.HashAlgo != HashAlgoSHA256 {
+		t.Fatalf("canonical hash metadata should be refreshed: %#v", got.Ref)
+	}
+	if got.Ref.ContentHash != expected.Value {
+		t.Fatalf("canonical hash should be recomputed from current fragment: got %q want %q", got.Ref.ContentHash, expected.Value)
+	}
+}
+
 func TestWithContextRefRepairsIncompleteExplicitHash(t *testing.T) {
 	t.Parallel()
 

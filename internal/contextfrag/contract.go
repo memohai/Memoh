@@ -179,7 +179,7 @@ func WithContextRef(frag ContextFrag, ref ContextRef) ContextFrag {
 			ref.Durability = RefDebug
 		}
 	}
-	if hashErr == nil && !hasValidExplicitHash(ref) {
+	if hashErr == nil && !hasPreservedSourcePayloadHash(ref) {
 		ref.HashAlgo = hash.Algo
 		ref.HashScope = hash.Scope
 		ref.ContentHash = hash.Value
@@ -203,10 +203,10 @@ func knownHashScope(scope string) bool {
 	}
 }
 
-func hasValidExplicitHash(ref ContextRef) bool {
+func hasPreservedSourcePayloadHash(ref ContextRef) bool {
 	return strings.TrimSpace(ref.ContentHash) != "" &&
 		strings.TrimSpace(ref.HashAlgo) == HashAlgoSHA256 &&
-		knownHashScope(strings.TrimSpace(ref.HashScope))
+		strings.TrimSpace(ref.HashScope) == HashScopeSourcePayload
 }
 
 func ContextRefWarnings(ref ContextRef) []ValidationWarning {
