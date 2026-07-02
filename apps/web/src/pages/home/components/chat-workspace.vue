@@ -17,6 +17,7 @@
       :disable-floating-groups="true"
       :disable-tabs-overflow-list="true"
       :disable-auto-resizing="true"
+      :scrollbars="'native'"
       :get-tab-context-menu-items="getTabContextMenuItems"
       @ready="onReady"
     />
@@ -150,7 +151,7 @@ const memohTheme: DockviewTheme = {
   name: 'memoh',
   className: 'dockview-theme-memoh',
   gap: 0,
-  dndTabIndicator: 'fill',
+  dndTabIndicator: 'line',
 }
 
 // Closes route through the store guard so dirty files prompt to save instead of

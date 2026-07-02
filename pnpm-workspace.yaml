@@ -2,8 +2,17 @@ packages:
   - 'packages/*'
   - 'apps/*'
 
+allowBuilds:
+  electron-winstaller: true
+  esbuild: true
+  vue-demi: true
+
 onlyBuiltDependencies:
   - sqlite3
   - electron
   - electron-winstaller
   - esbuild
+
+patchedDependencies:
+  dockview-core@7.0.2: patches/dockview-core@7.0.2.patch
+  dockview-vue@7.0.2: patches/dockview-vue@7.0.2.patch

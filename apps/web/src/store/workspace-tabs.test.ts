@@ -172,14 +172,14 @@ interface FakeGroup {
 function createFakeDock() {
   const panels: FakePanel[] = []
   const removeListeners: Array<(panel: FakePanel) => void> = []
-  const activePanelListeners: Array<(panel: FakePanel | null) => void> = []
+  const activePanelListeners: Array<(event: { activePanel: FakePanel | undefined }) => void> = []
   const layoutListeners: Array<() => void> = []
   const closeVetoPanelIds = new Set<string>()
   let activePanel: FakePanel | null = null
   const setActivePanel = (panel: FakePanel | null) => {
     if (activePanel === panel) return
     activePanel = panel
-    activePanelListeners.forEach(listener => listener(panel))
+    activePanelListeners.forEach(listener => listener({ activePanel: panel ?? undefined }))
   }
   const noopDisposable = () => ({ dispose: () => {} })
   const layoutDisposable = (listener: () => void) => {
@@ -196,7 +196,7 @@ function createFakeDock() {
       layoutListeners.forEach(listener => listener())
     })
   }
-  const activePanelDisposable = (listener: (panel: FakePanel | null) => void) => {
+  const activePanelDisposable = (listener: (event: { activePanel: FakePanel | undefined }) => void) => {
     activePanelListeners.push(listener)
     return {
       dispose: () => {
@@ -219,7 +219,7 @@ function createFakeDock() {
       toggle: vi.fn(),
     },
   } as unknown as HTMLElement
-  const group = {
+  const group: FakeGroup = {
     id: 'group-1',
     element: groupElement,
     api: {
