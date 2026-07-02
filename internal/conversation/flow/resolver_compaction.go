@@ -64,7 +64,7 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 // A noop (failure cooldown, another compaction in flight, or nothing to
 // compact) leaves this turn's context untouched: the request proceeds as-is,
 // possibly still above the threshold, and the next turn re-evaluates.
-func (r *Resolver) runCompactionSync(ctx context.Context, req conversation.ChatRequest, inputTokens int) compaction.Result {
+func (r *Resolver) runCompactionSync(ctx context.Context, req conversation.ChatRequest, inputTokens, contextTokenBudget int) compaction.Result {
 	if r.compactionService == nil || r.settingsService == nil {
 		r.logger.Warn("compaction sync: skipped, service or settings nil")
 		return compaction.Result{}
@@ -89,6 +89,7 @@ func (r *Resolver) runCompactionSync(ctx context.Context, req conversation.ChatR
 		// disabled means there is nothing to compact.
 		return compaction.Result{}
 	}
+	cfg.TargetTokens = syncCompactionTargetTokens(contextTokenBudget, cfg.Ratio)
 
 	r.logger.Info("compaction sync: running synchronously",
 		slog.String("bot_id", req.BotID),
@@ -164,10 +165,16 @@ func (r *Resolver) buildCompactionConfig(ctx context.Context, req conversation.C
 	if compactModel.Config.ContextWindow != nil && *compactModel.Config.ContextWindow > 0 {
 		cfg.MaxCompactTokens = *compactModel.Config.ContextWindow * 90 / 100
 	}
-	// For sync compaction: keep only the last few messages (~2000 tokens ≈ 3 messages).
-	// The summary provides reference context; if the LLM needs details,
-	// it will use tools (memory_read, search) to look them up.
-	cfg.TargetTokens = 2000
 
 	return cfg, nil
+}
+
+// syncCompactionTargetTokens derives the synchronous-compaction goal from the
+// context budget: after compaction the kept tail should be the (100-ratio)%
+// share the user asked to preserve, instead of a fixed absolute size.
+func syncCompactionTargetTokens(contextTokenBudget, ratio int) int {
+	if contextTokenBudget <= 0 || ratio >= 100 {
+		return 0
+	}
+	return contextTokenBudget * (100 - ratio) / 100
 }

@@ -401,7 +401,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			// summary. A noop (cooldown, in-flight, nothing markable) keeps
 			// this turn's context untouched — possibly still above the
 			// threshold — and the next turn re-evaluates.
-			if res := r.runCompactionSync(ctx, req, compactableTokens); res.Status == compaction.StatusOK {
+			if res := r.runCompactionSync(ctx, req, compactableTokens, contextTokenBudget); res.Status == compaction.StatusOK {
 				loaded, loadErr = r.loadHistoryRecords(ctx, historyFallback, req.SessionID, defaultMaxContextMinutes)
 				if loadErr != nil {
 					r.logger.Error("resolve: reload messages after compaction failed",
