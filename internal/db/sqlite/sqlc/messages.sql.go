@@ -1317,16 +1317,89 @@ WITH RECURSIVE selected_head(session_id, head_turn_id) AS (
     AND h.head_turn_id = ?4
   WHERE bs.id = ?5
     AND bs.deleted_at IS NULL
-), visible_turns(id, parent_turn_id, depth) AS (
-  SELECT t.id, t.parent_turn_id, 0
+), head_path(id, parent_turn_id, depth, found_cursor) AS (
+  SELECT
+    t.id,
+    t.parent_turn_id,
+    0 AS depth,
+    (
+      ?1 IS NOT NULL
+      AND t.id = cursor_message.turn_id
+    ) AS found_cursor
   FROM selected_head sh
   JOIN bot_history_turns t ON t.id = sh.head_turn_id
   JOIN bot_sessions bs ON bs.id = sh.session_id
     AND bs.bot_id = t.bot_id
+  LEFT JOIN bot_history_messages cursor_message ON cursor_message.id = ?1
   UNION ALL
-  SELECT p.id, p.parent_turn_id, vt.depth + 1
+  SELECT
+    p.id,
+    p.parent_turn_id,
+    hp.depth + 1 AS depth,
+    (
+      ?1 IS NOT NULL
+      AND p.id = cursor_message.turn_id
+    ) AS found_cursor
+  FROM bot_history_turns p
+  JOIN head_path hp ON hp.parent_turn_id = p.id
+  LEFT JOIN bot_history_messages cursor_message ON cursor_message.id = ?1
+  WHERE ?1 IS NOT NULL
+    AND NOT hp.found_cursor
+), cursor_turn(id, parent_turn_id, depth) AS (
+  SELECT hp.id, hp.parent_turn_id, hp.depth
+  FROM head_path hp
+  JOIN bot_history_messages cursor_message ON cursor_message.id = ?1
+    AND cursor_message.turn_id = hp.id
+  WHERE ?1 IS NOT NULL
+), visible_turns(id, parent_turn_id, depth, covered_messages) AS (
+  SELECT
+    hp.id,
+    hp.parent_turn_id,
+    hp.depth,
+    (
+      SELECT COUNT(*)
+      FROM bot_history_messages count_m
+      WHERE count_m.turn_id = hp.id
+        AND count_m.created_at < strftime('%Y-%m-%d %H:%M:%S', ?2)
+    )
+  FROM head_path hp
+  WHERE ?1 IS NULL
+    AND hp.depth = 0
+  UNION ALL
+  SELECT
+    ct.id,
+    ct.parent_turn_id,
+    ct.depth,
+    (
+      SELECT COUNT(*)
+      FROM bot_history_messages count_m
+      JOIN bot_history_messages cursor_message ON cursor_message.id = ?1
+      WHERE count_m.turn_id = ct.id
+        AND (
+          COALESCE(count_m.turn_message_seq, 0) < COALESCE(cursor_message.turn_message_seq, 0)
+          OR (COALESCE(count_m.turn_message_seq, 0) = COALESCE(cursor_message.turn_message_seq, 0) AND count_m.created_at < cursor_message.created_at)
+          OR (COALESCE(count_m.turn_message_seq, 0) = COALESCE(cursor_message.turn_message_seq, 0) AND count_m.created_at = cursor_message.created_at AND count_m.id < cursor_message.id)
+        )
+    )
+  FROM cursor_turn ct
+  WHERE ?1 IS NOT NULL
+  UNION ALL
+  SELECT
+    p.id,
+    p.parent_turn_id,
+    vt.depth + 1,
+    vt.covered_messages + (
+      SELECT COUNT(*)
+      FROM bot_history_messages count_m
+      WHERE count_m.turn_id = p.id
+        AND (
+          ?1 IS NOT NULL
+          OR count_m.created_at < strftime('%Y-%m-%d %H:%M:%S', ?2)
+        )
+    )
   FROM bot_history_turns p
   JOIN visible_turns vt ON vt.parent_turn_id = p.id
+  WHERE vt.covered_messages < ?3
 )
 SELECT
   m.id, m.bot_id, m.session_id, m.turn_id, m.turn_message_seq, m.sender_channel_identity_id,
@@ -1342,7 +1415,7 @@ SELECT
 FROM visible_turns vt
 JOIN bot_history_messages m ON m.turn_id = vt.id
 LEFT JOIN bot_history_messages cursor_message ON cursor_message.id = ?1
-LEFT JOIN visible_turns cursor_turn ON cursor_turn.id = cursor_message.turn_id
+LEFT JOIN cursor_turn ON cursor_turn.id = cursor_message.turn_id
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE (
@@ -1657,16 +1730,33 @@ WITH RECURSIVE selected_head(session_id, head_turn_id) AS (
     AND h.head_turn_id = ?2
   WHERE bs.id = ?3
     AND bs.deleted_at IS NULL
-), visible_turns(id, parent_turn_id, depth) AS (
-  SELECT t.id, t.parent_turn_id, 0
+), visible_turns(id, parent_turn_id, depth, covered_messages) AS (
+  SELECT
+    t.id,
+    t.parent_turn_id,
+    0,
+    (
+      SELECT COUNT(*)
+      FROM bot_history_messages count_m
+      WHERE count_m.turn_id = t.id
+    )
   FROM selected_head sh
   JOIN bot_history_turns t ON t.id = sh.head_turn_id
   JOIN bot_sessions bs ON bs.id = sh.session_id
     AND bs.bot_id = t.bot_id
   UNION ALL
-  SELECT p.id, p.parent_turn_id, vt.depth + 1
+  SELECT
+    p.id,
+    p.parent_turn_id,
+    vt.depth + 1,
+    vt.covered_messages + (
+      SELECT COUNT(*)
+      FROM bot_history_messages count_m
+      WHERE count_m.turn_id = p.id
+    )
   FROM bot_history_turns p
   JOIN visible_turns vt ON vt.parent_turn_id = p.id
+  WHERE vt.covered_messages < ?1
 )
 SELECT
   m.id, m.bot_id, m.session_id, m.turn_id, m.turn_message_seq, m.sender_channel_identity_id,

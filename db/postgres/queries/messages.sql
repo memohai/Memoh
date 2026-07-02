@@ -679,16 +679,88 @@ WITH RECURSIVE selected_head AS (
     AND h.head_turn_id = sqlc.narg(head_turn_id)::uuid
   WHERE bs.id = sqlc.arg(session_id)
     AND bs.deleted_at IS NULL
-), visible_turns AS (
-  SELECT t.id, t.parent_turn_id, 0::bigint AS depth
+), head_path AS (
+  SELECT
+    t.id,
+    t.parent_turn_id,
+    0::bigint AS depth,
+    (
+      sqlc.narg(before_id)::uuid IS NOT NULL
+      AND t.id = cursor_message.turn_id
+    ) AS found_cursor
   FROM selected_head sh
   JOIN bot_history_turns t ON t.id = sh.head_turn_id
   JOIN bot_sessions bs ON bs.id = sh.session_id
     AND bs.bot_id = t.bot_id
+  LEFT JOIN bot_history_messages cursor_message ON cursor_message.id = sqlc.narg(before_id)::uuid
   UNION ALL
-  SELECT p.id, p.parent_turn_id, vt.depth + 1
+  SELECT
+    p.id,
+    p.parent_turn_id,
+    hp.depth + 1,
+    (
+      sqlc.narg(before_id)::uuid IS NOT NULL
+      AND p.id = cursor_message.turn_id
+    ) AS found_cursor
+  FROM bot_history_turns p
+  JOIN head_path hp ON hp.parent_turn_id = p.id
+  LEFT JOIN bot_history_messages cursor_message ON cursor_message.id = sqlc.narg(before_id)::uuid
+  WHERE sqlc.narg(before_id)::uuid IS NOT NULL
+    AND NOT hp.found_cursor
+), cursor_turn AS (
+  SELECT hp.id, hp.parent_turn_id, hp.depth
+  FROM head_path hp
+  JOIN bot_history_messages cursor_message ON cursor_message.id = sqlc.narg(before_id)::uuid
+    AND cursor_message.turn_id = hp.id
+  WHERE sqlc.narg(before_id)::uuid IS NOT NULL
+), visible_turns AS (
+  SELECT
+    hp.id,
+    hp.parent_turn_id,
+    hp.depth,
+    (
+      SELECT COUNT(*)::bigint
+      FROM bot_history_messages count_m
+      WHERE count_m.turn_id = hp.id
+        AND count_m.created_at < sqlc.arg(created_at)
+    ) AS covered_messages
+  FROM head_path hp
+  WHERE sqlc.narg(before_id)::uuid IS NULL
+    AND hp.depth = 0
+  UNION ALL
+  SELECT
+    ct.id,
+    ct.parent_turn_id,
+    ct.depth,
+    (
+      SELECT COUNT(*)::bigint
+      FROM bot_history_messages count_m
+      JOIN bot_history_messages cursor_message ON cursor_message.id = sqlc.narg(before_id)::uuid
+      WHERE count_m.turn_id = ct.id
+        AND (
+          (COALESCE(count_m.turn_message_seq, 0)::bigint, count_m.created_at, count_m.id)
+          < (COALESCE(cursor_message.turn_message_seq, 0)::bigint, cursor_message.created_at, cursor_message.id)
+        )
+    ) AS covered_messages
+  FROM cursor_turn ct
+  WHERE sqlc.narg(before_id)::uuid IS NOT NULL
+  UNION ALL
+  SELECT
+    p.id,
+    p.parent_turn_id,
+    vt.depth + 1,
+    vt.covered_messages + (
+      SELECT COUNT(*)::bigint
+      FROM bot_history_messages count_m
+      WHERE count_m.turn_id = p.id
+        AND (
+          sqlc.narg(before_id)::uuid IS NOT NULL
+          OR count_m.created_at < sqlc.arg(created_at)
+        )
+    )
   FROM bot_history_turns p
   JOIN visible_turns vt ON vt.parent_turn_id = p.id
+  WHERE vt.covered_messages < sqlc.arg(max_count)
 )
 SELECT
   m.id,
@@ -715,7 +787,7 @@ SELECT
 FROM visible_turns vt
 JOIN bot_history_messages m ON m.turn_id = vt.id
 LEFT JOIN bot_history_messages cursor_message ON cursor_message.id = sqlc.narg(before_id)::uuid
-LEFT JOIN visible_turns cursor_turn ON cursor_turn.id = cursor_message.turn_id
+LEFT JOIN cursor_turn ON cursor_turn.id = cursor_message.turn_id
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE (
@@ -780,15 +852,32 @@ WITH RECURSIVE selected_head AS (
   WHERE bs.id = sqlc.arg(session_id)
     AND bs.deleted_at IS NULL
 ), visible_turns AS (
-  SELECT t.id, t.parent_turn_id, 0::bigint AS depth
+  SELECT
+    t.id,
+    t.parent_turn_id,
+    0::bigint AS depth,
+    (
+      SELECT COUNT(*)::bigint
+      FROM bot_history_messages count_m
+      WHERE count_m.turn_id = t.id
+    ) AS covered_messages
   FROM selected_head sh
   JOIN bot_history_turns t ON t.id = sh.head_turn_id
   JOIN bot_sessions bs ON bs.id = sh.session_id
     AND bs.bot_id = t.bot_id
   UNION ALL
-  SELECT p.id, p.parent_turn_id, vt.depth + 1
+  SELECT
+    p.id,
+    p.parent_turn_id,
+    vt.depth + 1,
+    vt.covered_messages + (
+      SELECT COUNT(*)::bigint
+      FROM bot_history_messages count_m
+      WHERE count_m.turn_id = p.id
+    )
   FROM bot_history_turns p
   JOIN visible_turns vt ON vt.parent_turn_id = p.id
+  WHERE vt.covered_messages < sqlc.arg(max_count)
 )
 SELECT
   m.id,
