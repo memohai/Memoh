@@ -1,0 +1,81 @@
+[db]
+# You can also override this with -dsn or MEMOH_BENCH_DSN in your shell wrapper.
+dsn = "postgres://memoh:memoh123@127.0.0.1:15432/memoh?sslmode=disable"
+max_open_conns = 16
+statement_timeout = "30s"
+
+[seed]
+# All benchmark-owned rows include this marker in metadata and cleanup deletes by it.
+marker = "local-chat-turn-sql"
+cleanup_before = true
+
+# SaaS shape: many sessions, a small hot subset, and deep turn chains.
+bots = 4
+sessions_per_bot = 25
+hot_session_ratio = 0.10
+turns_per_session = 1000
+
+# Variants: base head plus up to active_heads_per_session - 1 branch heads.
+branch_factor = 2
+branch_depth = 64
+active_heads_per_session = 2
+
+# At least two messages per turn gives user + assistant messages.
+messages_per_turn = 2
+approval_every_n_turns = 50
+user_input_every_n_turns = 80
+asset_every_n_messages = 200
+pending_ratio = 0.50
+
+[workload]
+# sqlc = generated Postgres sqlc methods, closest to the production Go hot path.
+# sql = runnable SQL templates, useful for EXPLAIN and candidate SQL microbenchmarks.
+# http = Echo httptest handler path for ListMessages/LocateMessage.
+runner = "sqlc"
+
+# One of:
+# mixed_saas_read, latest_page, before_page, after_page, external_lookup,
+# turn_graph, graph_metadata, approval_*, user_input_*
+scenario = "mixed_saas_read"
+duration = "30s"
+warmup = "5s"
+concurrency = 8
+page_size = 50
+random_seed = 1
+fail_on_error = true
+selected_head_ratio = 0.25
+hot_traffic_ratio = 0.90
+
+# HTTP runner only. Default measures the chat UI first-page shape:
+# GET /bots/:bot_id/messages?format=ui&include_graph=1
+http_format = "ui"
+http_include_graph = true
+http_decode_json = true
+
+[workload.query_weights]
+latest_page = 40
+before_page = 18
+after_page = 4
+external_lookup = 3
+turn_graph = 0
+graph_metadata = 16
+approval_pending_list = 4
+approval_graph_list = 2
+approval_latest = 4
+approval_short_id = 3
+approval_visible_request = 1
+approval_base_head_request = 1
+approval_reply_message = 1
+user_input_pending_list = 3
+user_input_graph_list = 2
+user_input_latest = 3
+user_input_short_id = 2
+user_input_visible_request = 1
+user_input_base_head_request = 1
+user_input_reply_message = 1
+
+[output]
+json_path = "benchmarks/chat_turn_sql/out/results.json"
+csv_path = "benchmarks/chat_turn_sql/out/results.csv"
+explain = false
+explain_dir = "benchmarks/chat_turn_sql/out/explain"

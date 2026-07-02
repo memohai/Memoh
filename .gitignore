@@ -111,6 +111,7 @@ config.toml
 conf/oauth-clients.toml
 
 .workdocs/
+benchmarks/chat_turn_sql/out/
 data
 _main-ref/
 .toolkit/

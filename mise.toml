@@ -52,6 +52,10 @@ depends = [
 description = "Generate SQL code"
 run = "sqlc generate"
 
+[tasks."bench:chat-turn-sql"]
+description = "Run the chat turn PostgreSQL SQL benchmark"
+run = "go run ./benchmarks/chat_turn_sql $@"
+
 [tasks.icons-generate]
 description = "Generate icon Vue components from SVG sources"
 run = "pnpm --filter @memohai/icon generate"
