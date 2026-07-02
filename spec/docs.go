@@ -5179,14 +5179,8 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Selected session head turn ID",
+                        "description": "Any turn ID selecting the session view; resolved server-side to a head",
                         "name": "head_turn_id",
-                        "in": "query"
-                    },
-                    {
-                        "type": "boolean",
-                        "description": "Include session turn graph metadata",
-                        "name": "include_graph",
                         "in": "query"
                     }
                 ],
@@ -5312,7 +5306,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Selected session head turn ID",
+                        "description": "Any turn ID selecting the session view; resolved server-side to a head",
                         "name": "head_turn_id",
                         "in": "query"
                     }
@@ -17816,11 +17810,9 @@ const docTemplate = `{
                 "default_head_turn_id": {
                     "type": "string"
                 },
-                "head_turn_ids": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
+                "head_turn_id": {
+                    "description": "HeadTurnID is the head actually backing this page after server-side\nresolution; clients pin follow-up sends and SSE subscriptions to it.",
+                    "type": "string"
                 },
                 "items": {
                     "type": "array",
@@ -17828,10 +17820,10 @@ const docTemplate = `{
                         "$ref": "#/definitions/conversation.UITurn"
                     }
                 },
-                "nodes": {
+                "turns": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/handlers.sessionTurnGraphUINode"
+                        "$ref": "#/definitions/handlers.sessionTurnMetaUI"
                     }
                 }
             }
@@ -17869,7 +17861,7 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.sessionTurnGraphUINode": {
+        "handlers.sessionTurnMetaUI": {
             "type": "object",
             "properties": {
                 "has_assistant": {
@@ -17881,11 +17873,14 @@ const docTemplate = `{
                 "parent_turn_id": {
                     "type": "string"
                 },
-                "request_key": {
+                "request_group_id": {
                     "type": "string"
                 },
-                "timestamp": {
-                    "type": "string"
+                "sibling_turn_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "turn_id": {
                     "type": "string"

@@ -479,51 +479,110 @@ func (s *DBService) ListBeforeBySessionHead(ctx context.Context, sessionID strin
 	return msgs, nil
 }
 
-func (s *DBService) GetSessionTurnGraph(ctx context.Context, sessionID string) (SessionTurnGraph, error) {
+// ListSessionTurnMeta returns variant metadata for the given transcript-page
+// turns: each page turn plus every sibling variant reachable from the
+// session's active heads, with per-parent ordered sibling lists precomputed
+// so clients can render variant switchers without a full-graph fetch.
+func (s *DBService) ListSessionTurnMeta(ctx context.Context, sessionID string, turnIDs []string) ([]SessionTurnMeta, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
-		return SessionTurnGraph{}, err
+		return nil, err
 	}
-
-	sess, err := s.queries.GetSessionByID(ctx, pgSessionID)
-	if err != nil {
-		return SessionTurnGraph{}, err
-	}
-	headRows, err := s.queries.ListSessionTurnHeads(ctx, pgSessionID)
-	if err != nil {
-		return SessionTurnGraph{}, err
-	}
-	metadataRows, err := s.queries.ListSessionTurnGraphNodeMetadata(ctx, pgSessionID)
-	if err != nil {
-		return SessionTurnGraph{}, err
-	}
-
-	graph := SessionTurnGraph{
-		DefaultHeadTurnID: uuidToString(sess.DefaultHeadTurnID),
-		HeadTurnIDs:       make([]string, 0, len(headRows)),
-		Nodes:             make([]SessionTurnGraphNode, 0, len(metadataRows)),
-	}
-	for _, head := range headRows {
-		if id := uuidToString(head.HeadTurnID); id != "" {
-			graph.HeadTurnIDs = append(graph.HeadTurnIDs, id)
+	pgTurnIDs := make([]pgtype.UUID, 0, len(turnIDs))
+	for _, turnID := range turnIDs {
+		pgTurnID, err := parseOptionalUUID(turnID)
+		if err != nil {
+			return nil, err
+		}
+		if pgTurnID.Valid {
+			pgTurnIDs = append(pgTurnIDs, pgTurnID)
 		}
 	}
-
-	for _, row := range metadataRows {
+	if len(pgTurnIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := s.queries.ListSessionTurnSiblings(ctx, sqlc.ListSessionTurnSiblingsParams{
+		SessionID: pgSessionID,
+		TurnIds:   pgTurnIDs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Rows arrive ordered oldest-first, so per-parent sibling lists keep that
+	// order (the empty key groups reachable root turns).
+	siblingsByParent := make(map[string][]string, len(rows))
+	for _, row := range rows {
+		parentID := uuidToString(row.ParentTurnID)
+		siblingsByParent[parentID] = append(siblingsByParent[parentID], uuidToString(row.TurnID))
+	}
+	metas := make([]SessionTurnMeta, 0, len(rows))
+	for _, row := range rows {
 		turnID := uuidToString(row.TurnID)
 		if turnID == "" {
 			continue
 		}
-		graph.Nodes = append(graph.Nodes, SessionTurnGraphNode{
-			TurnID:       turnID,
-			ParentTurnID: uuidToString(row.ParentTurnID),
-			Timestamp:    formatSessionTurnGraphTimestamp(row.NodeCreatedAt.Time),
-			RequestKey:   uuidToString(row.RequestGroupID),
-			HasUser:      row.HasUser,
-			HasAssistant: row.HasAssistant,
+		parentID := uuidToString(row.ParentTurnID)
+		metas = append(metas, SessionTurnMeta{
+			TurnID:         turnID,
+			ParentTurnID:   parentID,
+			RequestGroupID: uuidToString(row.RequestGroupID),
+			SiblingTurnIDs: siblingsByParent[parentID],
+			HasUser:        row.HasUser,
+			HasAssistant:   row.HasAssistant,
 		})
 	}
-	return graph, nil
+	return metas, nil
+}
+
+// ResolveSessionTurnHead maps any turn id to the session head whose ancestor
+// path contains it, preferring the most recently updated head. Returns ""
+// when no active head contains the turn.
+func (s *DBService) ResolveSessionTurnHead(ctx context.Context, sessionID string, turnID string) (string, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return "", err
+	}
+	pgTurnID, err := parseOptionalUUID(turnID)
+	if err != nil {
+		return "", err
+	}
+	if !pgTurnID.Valid {
+		return "", nil
+	}
+	head, err := s.queries.ResolveSessionTurnHead(ctx, sqlc.ResolveSessionTurnHeadParams{
+		SessionID:    pgSessionID,
+		TargetTurnID: pgTurnID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+	return uuidToString(head), nil
+}
+
+// ListSessionTurnPathIDs returns the ancestor path turn ids (self included)
+// of one head turn.
+func (s *DBService) ListSessionTurnPathIDs(ctx context.Context, headTurnID string) ([]string, error) {
+	pgHeadTurnID, err := parseOptionalUUID(headTurnID)
+	if err != nil {
+		return nil, err
+	}
+	if !pgHeadTurnID.Valid {
+		return nil, nil
+	}
+	rows, err := s.queries.ListSessionTurnPathIDs(ctx, pgHeadTurnID)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if id := uuidToString(row); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
 }
 
 // ListSessionTurnHeadIDs returns the session's active head turn ids without
@@ -573,13 +632,6 @@ func (s *DBService) IsSessionTurnHead(ctx context.Context, sessionID string, hea
 		return false, nil
 	}
 	return false, err
-}
-
-func formatSessionTurnGraphTimestamp(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.UTC().Format(time.RFC3339Nano)
 }
 
 func (s *DBService) LocateByExternalIDBySession(ctx context.Context, sessionID string, externalMessageID string, beforeLimit int32, afterLimit int32) (LocateResult, error) {

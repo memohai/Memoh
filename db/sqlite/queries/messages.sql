@@ -369,30 +369,86 @@ LEFT JOIN bot_sessions s ON s.id = m.session_id
 ORDER BY vt.depth DESC, COALESCE(m.turn_message_seq, 0) ASC, m.created_at ASC, m.id ASC
 LIMIT 10000;
 
--- name: ListSessionTurnGraphNodeMetadata :many
-WITH RECURSIVE graph_turns(id, parent_turn_id) AS (
+-- name: ResolveSessionTurnHead :one
+-- Resolve any turn id to a session head whose ancestor path contains it
+-- (a head contains the turn exactly when the head is one of the turn's
+-- descendants, self included), preferring the most recently updated head.
+-- Used when a client pages with a non-head turn id (variant switching);
+-- true heads short-circuit through the cheap heads-table lookup before this
+-- recursion runs.
+WITH RECURSIVE descendant_turns(id) AS (
+  SELECT t.id
+  FROM bot_history_turns t
+  WHERE t.id = sqlc.arg(target_turn_id)
+  UNION ALL
+  SELECT c.id
+  FROM bot_history_turns c
+  JOIN descendant_turns dt ON c.parent_turn_id = dt.id
+)
+SELECT h.head_turn_id
+FROM bot_session_turn_heads h
+WHERE h.session_id = sqlc.arg(session_id)
+  AND h.head_turn_id IN (SELECT dt.id FROM descendant_turns dt)
+ORDER BY h.updated_at DESC, h.head_turn_id DESC
+LIMIT 1;
+
+-- name: ListSessionTurnSiblings :many
+-- Variant metadata for one transcript page: every turn reachable from the
+-- session's active heads that shares a parent with one of the page turns
+-- (root page turns pair with the other reachable roots). Restricting
+-- candidates to the reachable set keeps forks made in other sessions out of
+-- the variant switcher.
+WITH RECURSIVE session_turns(id, parent_turn_id) AS (
   SELECT t.id, t.parent_turn_id
-  FROM bot_sessions bs
-  JOIN bot_session_turn_heads h ON h.session_id = bs.id
-    AND h.bot_id = bs.bot_id
+  FROM bot_session_turn_heads h
   JOIN bot_history_turns t ON t.id = h.head_turn_id
-  WHERE bs.id = sqlc.arg(session_id)
-    AND bs.deleted_at IS NULL
+  WHERE h.session_id = sqlc.arg(session_id)
   UNION
   SELECT p.id, p.parent_turn_id
   FROM bot_history_turns p
-  JOIN graph_turns gt ON gt.parent_turn_id = p.id
+  JOIN session_turns st ON st.parent_turn_id = p.id
+),
+page_parents(parent_turn_id) AS (
+  SELECT DISTINCT t.parent_turn_id
+  FROM bot_history_turns t
+  WHERE t.id IN (sqlc.slice(turn_ids))
 )
 SELECT
-  gt.id AS turn_id,
-  gt.parent_turn_id,
-  t.created_at AS node_created_at,
+  t.id AS turn_id,
+  t.parent_turn_id,
   COALESCE(t.request_group_id, t.id) AS request_group_id,
   t.request_message_id IS NOT NULL AS has_user,
   t.final_assistant_message_id IS NOT NULL AS has_assistant
-FROM graph_turns gt
-JOIN bot_history_turns t ON t.id = gt.id
-ORDER BY t.created_at ASC, gt.id ASC;
+FROM bot_history_turns t
+JOIN session_turns st ON st.id = t.id
+WHERE (
+    t.parent_turn_id IS NOT NULL
+    AND t.parent_turn_id IN (
+      SELECT pp.parent_turn_id FROM page_parents pp WHERE pp.parent_turn_id IS NOT NULL
+    )
+  )
+  OR (
+    t.parent_turn_id IS NULL
+    AND EXISTS (
+      SELECT 1 FROM page_parents pp WHERE pp.parent_turn_id IS NULL
+    )
+  )
+ORDER BY t.created_at ASC, t.id ASC;
+
+-- name: ListSessionTurnPathIDs :many
+-- Ancestor path ids (self included) of one head turn. Used by the SSE stream
+-- to decide whether a live message belongs to the subscribed head path.
+WITH RECURSIVE path_turns(id, parent_turn_id) AS (
+  SELECT t.id, t.parent_turn_id
+  FROM bot_history_turns t
+  WHERE t.id = sqlc.arg(head_turn_id)
+  UNION ALL
+  SELECT p.id, p.parent_turn_id
+  FROM bot_history_turns p
+  JOIN path_turns pt ON pt.parent_turn_id = p.id
+)
+SELECT pt.id
+FROM path_turns pt;
 
 -- name: ListMessagesSince :many
 SELECT

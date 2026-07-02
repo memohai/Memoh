@@ -43,7 +43,7 @@ import {
   type UIUserInput,
   type WSUserInputAnswer,
   type FetchMessagesUIResult,
-  type UITurnGraphNode,
+  type UITurnMeta,
   type UITurn,
   type UIStreamEvent,
   fetchBots,
@@ -237,26 +237,6 @@ function variantLoadFailedMessage() {
 	return localizedMessages().chat.errors.loadVariantFailed
 }
 
-function isStaleSessionHeadError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false
-  const payload = error as {
-    status?: unknown
-    statusCode?: unknown
-    response?: { status?: unknown }
-    message?: unknown
-    error?: unknown
-    detail?: unknown
-  }
-  const status = payload.status ?? payload.statusCode ?? payload.response?.status
-  if (status !== undefined && status !== 409) return false
-  for (const value of [payload.message, payload.error, payload.detail]) {
-    if (typeof value === 'string' && /^\s*stale session head\s*$/i.test(value)) {
-      return true
-    }
-  }
-  return false
-}
-
 function isSessionNotFoundError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false
   const payload = error as {
@@ -374,19 +354,16 @@ interface EphemeralAssistantError {
   userText?: string
 }
 
-interface SessionTurnGraphNodeState {
+// Per-turn variant metadata mirrored from page responses (`turns[]`). Every
+// page turn arrives with its full sibling set, so the map holds entries for
+// siblings that are not on the current page too.
+interface SessionTurnMetaState {
   turnId: string
   parentTurnId?: string
-  timestamp?: string
-  requestKey?: string
+  requestGroupId: string
+  siblingTurnIds: string[]
   hasUser: boolean
   hasAssistant: boolean
-}
-
-interface SessionTurnGraphState {
-  defaultHeadTurnId: string
-  headTurnIds: string[]
-  nodes: Map<string, SessionTurnGraphNodeState>
 }
 
 export interface TurnVariantState {
@@ -622,8 +599,18 @@ export const useChatStore = defineStore('chat', () => {
   let sessionListRefreshPromise: { botId: string; promise: Promise<void> } | null = null
   const latestBackgroundTasks = new Map<string, BackgroundTask>()
   const ephemeralAssistantErrors = new Map<string, EphemeralAssistantError[]>()
-  const turnGraphs = reactive(new Map<string, SessionTurnGraphState>())
+  // sessionId -> turnId -> variant metadata, merged from every page response.
+  const turnMeta = reactive(new Map<string, Map<string, SessionTurnMetaState>>())
+  // Explicit variant selection pin, per session. Set when the user switches
+  // to a variant and refreshed from each response's resolved `head_turn_id`
+  // so it always names a real head. Absent = follow the session default view.
   const selectedHeadTurnIds = reactive(new Map<string, string>())
+  // Small LRU of first pages keyed by `${sessionId}:${turnId}` for instant
+  // variant switching. Entries expire quickly — they only need to survive the
+  // few seconds between rendering a variant switcher and the user clicking it.
+  const VARIANT_PAGE_CACHE_MAX = 8
+  const VARIANT_PAGE_CACHE_TTL_MS = 30_000
+  const variantPageCache = new Map<string, { payload: FetchMessagesUIResult; at: number }>()
   // Two independent streams replace the deleted bot-wide messages SSE:
   // - sessionMessagesStream follows the active sessionId and feeds the
   //   transcript (server pushes a small backlog + live messages for that
@@ -799,8 +786,7 @@ export const useChatStore = defineStore('chat', () => {
     sessionById.delete(id)
     markSessionLookupChanged()
     forgetRememberedSession(id)
-    turnGraphs.delete(id)
-    selectedHeadTurnIds.delete(id)
+    clearSessionTurnMeta(id)
   }
 
   function fallbackSessionAfterDelete(mode: SidebarSessionMode): SessionSummary | null {
@@ -1332,66 +1318,19 @@ export const useChatStore = defineStore('chat', () => {
     messages.splice(0, messages.length, ...next)
   }
 
-  function normalizeGraphNode(node: UITurnGraphNode): SessionTurnGraphNodeState | null {
-    const turnId = node.turn_id?.trim()
-    if (!turnId) return null
-    return {
-      turnId,
-      parentTurnId: node.parent_turn_id?.trim() || undefined,
-      timestamp: node.timestamp?.trim() || undefined,
-      requestKey: node.request_key?.trim() || undefined,
-      hasUser: node.has_user === true,
-      hasAssistant: node.has_assistant === true,
-    }
-  }
-
-  function graphPathTurnIds(graph: SessionTurnGraphState, headTurnId: string): string[] {
-    const path: string[] = []
-    const seen = new Set<string>()
-    for (let turnId = headTurnId.trim(); turnId;) {
-      if (seen.has(turnId)) break
-      const node = graph.nodes.get(turnId)
-      if (!node) break
-      seen.add(turnId)
-      path.push(turnId)
-      turnId = node.parentTurnId ?? ''
-    }
-    return path.reverse()
-  }
-
-  function selectedHeadForSession(targetSessionId?: string | null): string {
-    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
-    if (!sid) return ''
-    return selectedHeadTurnIds.get(sid)?.trim() || turnGraphs.get(sid)?.defaultHeadTurnId || ''
-  }
-
   function sessionSupportsTurnVariants(targetSessionId?: string | null): boolean {
     const sid = (targetSessionId ?? sessionId.value ?? '').trim()
     return knownSessionSummary(sid)?.type === 'chat'
   }
 
-  // Whether the cached graph shows real branching. Single-head sessions never
-  // render variant arrows and their cached graph is allowed to go stale (see
-  // refreshCurrentSession), so callers must not rely on cached graph data for
-  // them.
-  function sessionGraphHasVariants(targetSessionId?: string | null): boolean {
-    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
-    if (!sid) return false
-    return (turnGraphs.get(sid)?.headTurnIds.length ?? 0) > 1
-  }
-
+  // The send pin. An explicit variant selection must anchor follow-up sends
+  // to the viewed branch; it is refreshed from each response's resolved
+  // `head_turn_id`, so it always names a real head. Without a selection the
+  // pin is omitted and the server extends its own default head — safer for
+  // linear sessions whose head may have moved since our last fetch.
   function baseHeadForRequest(targetSessionId?: string | null): string | undefined {
     if (!sessionSupportsTurnVariants(targetSessionId)) return undefined
-    const explicit = explicitSelectedHeadForSession(targetSessionId)
-    if (explicit) return explicit
-    // Pin the send to the viewed default head only when the session actually
-    // branches (its cached head is kept current by graph refreshes and by
-    // reconcileCachedGraphAfterPlainFetch after graph-less refreshes). For
-    // linear sessions the cached default head may be stale — omit it and let
-    // the server resolve the session's own default head.
-    if (!sessionGraphHasVariants(targetSessionId)) return undefined
-    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
-    return turnGraphs.get(sid)?.defaultHeadTurnId?.trim() || undefined
+    return explicitSelectedHeadForSession(targetSessionId) || undefined
   }
 
   function baseHeadPayload(targetSessionId?: string | null): { base_head_turn_id: string } | Record<string, never> {
@@ -1426,162 +1365,73 @@ export const useChatStore = defineStore('chat', () => {
     selectedHeadTurnIds.delete(sid)
   }
 
-  function applySessionTurnGraph(targetSessionId: string, payload: FetchMessagesUIResult) {
+  // Merges one page response's `turns[]` into the session's turn metadata.
+  // Entries are keyed by turn id; a newer page for the same turn replaces the
+  // older entry (its sibling list is the fresher one).
+  function applySessionTurnMeta(targetSessionId: string, turns: UITurnMeta[] | undefined) {
     const sid = targetSessionId.trim()
-    if (!sid) return
-    const nodes = new Map<string, SessionTurnGraphNodeState>()
-    for (const rawNode of payload.nodes ?? []) {
-      const node = normalizeGraphNode(rawNode)
-      if (node) nodes.set(node.turnId, node)
+    if (!sid || !turns?.length) return
+    let metaMap = turnMeta.get(sid)
+    if (!metaMap) {
+      metaMap = new Map<string, SessionTurnMetaState>()
+      turnMeta.set(sid, metaMap)
     }
-    const headTurnIds = (payload.head_turn_ids ?? [])
-      .map(id => id.trim())
-      .filter(id => id && nodes.has(id))
-    const rawDefaultHead = payload.default_head_turn_id?.trim() || ''
-    const defaultHead = rawDefaultHead && headTurnIds.includes(rawDefaultHead)
-      ? rawDefaultHead
-      : headTurnIds[0] || ''
-    const graph: SessionTurnGraphState = {
-      defaultHeadTurnId: defaultHead,
-      headTurnIds,
-      nodes,
-    }
-    turnGraphs.set(sid, graph)
-    const selected = selectedHeadTurnIds.get(sid)?.trim() ?? ''
-    if (selected && headTurnIds.includes(selected)) {
-      selectedHeadTurnIds.set(sid, selected)
-    } else {
-      selectedHeadTurnIds.delete(sid)
+    for (const raw of turns) {
+      const turnId = raw.turn_id?.trim()
+      if (!turnId) continue
+      metaMap.set(turnId, {
+        turnId,
+        parentTurnId: raw.parent_turn_id?.trim() || undefined,
+        requestGroupId: raw.request_group_id?.trim() || turnId,
+        siblingTurnIds: (raw.sibling_turn_ids ?? []).map(id => id.trim()).filter(Boolean),
+        hasUser: raw.has_user === true,
+        hasAssistant: raw.has_assistant === true,
+      })
     }
   }
 
-  function clearSessionTurnGraph(targetSessionId?: string | null) {
+  function clearSessionTurnMeta(targetSessionId?: string | null) {
     const sid = (targetSessionId ?? sessionId.value ?? '').trim()
     if (!sid) return
-    turnGraphs.delete(sid)
+    turnMeta.delete(sid)
     selectedHeadTurnIds.delete(sid)
+    invalidateVariantPageCache(sid)
   }
 
-  // Keep the cached graph usable across graph-less refreshes. A plain refresh
-  // of the default view still reveals head movement: its last turn IS the
-  // session's current default head. A normal send only extends the head
-  // linearly (no sibling groups change), so appending the unseen page turns as
-  // a parent chain onto the last cached turn we recognize — and swapping that
-  // head for the new one — reproduces exactly what a full graph refetch would
-  // report. Anything the page cannot explain (an unseen sibling head created
-  // by another client, or more than a page of unseen turns) drops the cache
-  // and schedules one graph-inclusive refresh to re-discover.
-  function reconcileCachedGraphAfterPlainFetch(targetSessionId: string, payload: FetchMessagesUIResult) {
-    const sid = targetSessionId.trim()
-    if (!sid) return
-    const graph = turnGraphs.get(sid)
-    if (!graph) return
-    // An explicitly selected head is pinned: a fetch for it either matches the
-    // cache or fails with "stale session head", which already forces a
-    // graph-inclusive refetch (see refreshCurrentSession).
-    if (explicitSelectedHeadForSession(sid)) return
+  function variantPageCacheKey(sid: string, turnId: string): string {
+    return `${sid}:${turnId}`
+  }
 
-    // Ordered distinct turn ids of the fetched page (oldest → newest).
-    const pageTurnIds: string[] = []
-    const pageInfo = new Map<string, { timestamp: string; hasUser: boolean; hasAssistant: boolean }>()
-    for (const turn of payload.items) {
-      const turnId = turn.turn_id?.trim()
-      if (!turnId) continue
-      let info = pageInfo.get(turnId)
-      if (!info) {
-        info = { timestamp: turn.timestamp ?? '', hasUser: false, hasAssistant: false }
-        pageInfo.set(turnId, info)
-        pageTurnIds.push(turnId)
-      }
-      if (turn.role === 'user') info.hasUser = true
-      if (turn.role === 'assistant') info.hasAssistant = true
+  function variantPageCacheGet(sid: string, turnId: string): FetchMessagesUIResult | null {
+    const key = variantPageCacheKey(sid, turnId)
+    const entry = variantPageCache.get(key)
+    if (!entry) return null
+    if (Date.now() - entry.at > VARIANT_PAGE_CACHE_TTL_MS) {
+      variantPageCache.delete(key)
+      return null
     }
-    const newHead = pageTurnIds[pageTurnIds.length - 1] ?? ''
-    if (!newHead || newHead === graph.defaultHeadTurnId) return
+    // Refresh LRU position.
+    variantPageCache.delete(key)
+    variantPageCache.set(key, entry)
+    return entry.payload
+  }
 
-    // Collect the unseen tail of the page and the cached turn it hangs off.
-    let anchor = ''
-    let anchorIndex = -1
-    for (let i = pageTurnIds.length - 1; i >= 0; i -= 1) {
-      const candidate = pageTurnIds[i]
-      if (candidate && graph.nodes.has(candidate)) {
-        anchor = candidate
-        anchorIndex = i
-        break
-      }
+  function variantPageCachePut(sid: string, turnId: string, payload: FetchMessagesUIResult) {
+    const key = variantPageCacheKey(sid, turnId)
+    variantPageCache.delete(key)
+    variantPageCache.set(key, { payload, at: Date.now() })
+    while (variantPageCache.size > VARIANT_PAGE_CACHE_MAX) {
+      const oldest = variantPageCache.keys().next().value
+      if (oldest === undefined) break
+      variantPageCache.delete(oldest)
     }
-    const missing = pageTurnIds.slice(anchorIndex + 1)
-    // A session opened while still empty has a cached-but-empty graph; its
-    // first turns chain from the root.
-    const emptySessionFirstTurns = !anchor && graph.nodes.size === 0 && graph.headTurnIds.length === 0
-    // Reconcilable only when the unseen turns extend a currently active head
-    // (the plain default-view refresh after a send, or another client
-    // extending the default branch) or start an empty session. Everything
-    // else — sibling heads created elsewhere, or a gap wider than one page —
-    // needs a real graph refetch.
-    if (missing.length === 0 || (!emptySessionFirstTurns && (!anchor || !graph.headTurnIds.includes(anchor)))) {
-      turnGraphs.delete(sid)
-      void refreshCurrentSession(undefined, sid).catch(() => {})
-      return
+  }
+
+  function invalidateVariantPageCache(targetSessionId: string) {
+    const prefix = `${targetSessionId.trim()}:`
+    for (const key of [...variantPageCache.keys()]) {
+      if (key.startsWith(prefix)) variantPageCache.delete(key)
     }
-
-    let parentTurnId = anchor
-    for (const turnId of missing) {
-      const info = pageInfo.get(turnId)
-      graph.nodes.set(turnId, {
-        turnId,
-        parentTurnId: parentTurnId || undefined,
-        timestamp: info?.timestamp || undefined,
-        // requestKey stays unknown: a freshly appended turn has no siblings,
-        // and any sibling-creating action forces a graph-inclusive refresh.
-        hasUser: info?.hasUser ?? false,
-        hasAssistant: info?.hasAssistant ?? false,
-      })
-      parentTurnId = turnId
-    }
-    graph.headTurnIds = emptySessionFirstTurns
-      ? [newHead]
-      : graph.headTurnIds.map(id => (id === anchor ? newHead : id))
-    graph.defaultHeadTurnId = newHead
-  }
-
-  function headPathSet(graph: SessionTurnGraphState, headTurnId: string): Set<string> {
-    return new Set(graphPathTurnIds(graph, headTurnId))
-  }
-
-  function turnTimestamp(graph: SessionTurnGraphState, turnId: string): string {
-    const node = graph.nodes.get(turnId)
-    return node?.timestamp ?? ''
-  }
-
-  function sortTurnIdsByTimestamp(graph: SessionTurnGraphState, turnIds: string[]): string[] {
-    return [...turnIds].sort((a, b) => {
-      const left = turnTimestamp(graph, a)
-      const right = turnTimestamp(graph, b)
-      if (left !== right) return left.localeCompare(right)
-      return a.localeCompare(b)
-    })
-  }
-
-  function siblingTurnIdsForNode(graph: SessionTurnGraphState, node: SessionTurnGraphNodeState): string[] {
-    return sortTurnIdsByTimestamp(
-      graph,
-      [...graph.nodes.values()]
-        .filter(candidate => (candidate.parentTurnId ?? '') === (node.parentTurnId ?? ''))
-        .map(candidate => candidate.turnId),
-    )
-  }
-
-  function optionForTurn(
-    graph: SessionTurnGraphState,
-    turnId: string,
-    selectedHead: string,
-    getHeadPath: (headId: string) => Set<string>,
-  ): TurnVariantOption | null {
-    const headTurnId = getHeadPath(selectedHead).has(turnId)
-      ? selectedHead
-      : graph.headTurnIds.find(headId => getHeadPath(headId).has(turnId))
-    return headTurnId ? { turnId, headTurnId } : null
   }
 
   function buildVariantState(turnId: string, options: TurnVariantOption[]): TurnVariantState | null {
@@ -1599,84 +1449,118 @@ export const useChatStore = defineStore('chat', () => {
 
   function variantContextForMessage(messageId: string) {
     const sid = (sessionId.value ?? '').trim()
-    if (!sessionSupportsTurnVariants(sid)) return null
-    const graph = turnGraphs.get(sid)
-    if (!sid || !graph) return null
+    if (!sid || !sessionSupportsTurnVariants(sid)) return null
+    const metaMap = turnMeta.get(sid)
+    if (!metaMap) return null
     const message = messages.find(item => item.id === messageId)
     const turnId = message?.turnId?.trim()
     if (!turnId) return null
-    const node = graph.nodes.get(turnId)
-    if (!node) return null
+    const meta = metaMap.get(turnId)
+    if (!meta) return null
+    return { metaMap, message, meta, turnId }
+  }
 
-    const pathByHead = new Map<string, Set<string>>()
-    const selectedHead = selectedHeadForSession(sid)
-    const getHeadPath = (headId: string) => {
-      let path = pathByHead.get(headId)
-      if (!path) {
-        path = headPathSet(graph, headId)
-        pathByHead.set(headId, path)
-      }
-      return path
+  // Distinct request groups among the turn's siblings, in sibling order.
+  // Representative per group: the current turn for its own group (it is the
+  // one on the viewed path), otherwise the newest sibling in that group.
+  function requestGroupOptions(
+    metaMap: Map<string, SessionTurnMetaState>,
+    meta: SessionTurnMetaState,
+  ): TurnVariantOption[] {
+    const representatives = new Map<string, string>()
+    for (const siblingTurnId of meta.siblingTurnIds) {
+      const sibling = metaMap.get(siblingTurnId)
+      if (!sibling) continue
+      const existing = representatives.get(sibling.requestGroupId)
+      if (existing === meta.turnId) continue
+      representatives.set(sibling.requestGroupId, siblingTurnId)
     }
-
-    return { graph, message, node, turnId, selectedHead, getHeadPath }
+    return [...representatives.values()].map(turnId => ({ turnId, headTurnId: turnId }))
   }
 
   function requestVariantStateForMessage(messageId: string): TurnVariantState | null {
     const ctx = variantContextForMessage(messageId)
     if (!ctx || ctx.message?.role !== 'user') return null
-
-    const siblings = siblingTurnIdsForNode(ctx.graph, ctx.node)
-    if (siblings.length <= 1) return null
-
-    const requestGroups = new Map<string, string>()
-    for (const siblingTurnId of siblings) {
-      const siblingNode = ctx.graph.nodes.get(siblingTurnId)
-      if (!siblingNode) continue
-      const key = siblingNode.requestKey ?? ''
-      if (!key) continue
-      const existing = requestGroups.get(key)
-      if (existing && !ctx.getHeadPath(ctx.selectedHead).has(siblingTurnId)) continue
-      requestGroups.set(key, siblingTurnId)
-    }
-
-    const targetKey = ctx.node.requestKey ?? ''
-    const targetTurnId = targetKey ? requestGroups.get(targetKey) : undefined
+    if (ctx.meta.siblingTurnIds.length <= 1) return null
+    const options = requestGroupOptions(ctx.metaMap, ctx.meta)
+    const targetTurnId = options.find((option) => {
+      const optionMeta = ctx.metaMap.get(option.turnId)
+      return optionMeta?.requestGroupId === ctx.meta.requestGroupId
+    })?.turnId
     if (!targetTurnId) return null
-
-    const siblingOptions = [...requestGroups.values()]
-      .map(siblingTurnId => optionForTurn(ctx.graph, siblingTurnId, ctx.selectedHead, ctx.getHeadPath))
-      .filter((item): item is { turnId: string; headTurnId: string } => item !== null)
-    return buildVariantState(targetTurnId, siblingOptions)
+    const state = buildVariantState(targetTurnId, options)
+    prefetchVariantStateTargets(state)
+    return state
   }
 
   function responseVariantStateForMessage(messageId: string): TurnVariantState | null {
     const ctx = variantContextForMessage(messageId)
     if (!ctx || ctx.message?.role !== 'assistant') return null
-    if (!ctx.node.hasAssistant) return null
-
-    const requestKey = ctx.node.requestKey ?? ''
-    if (!requestKey) return null
-    const siblings = siblingTurnIdsForNode(ctx.graph, ctx.node)
-      .filter((siblingTurnId) => {
-        const siblingNode = ctx.graph.nodes.get(siblingTurnId)
-        return siblingNode ? siblingNode.requestKey === requestKey : false
-      })
-    if (siblings.length <= 1) return null
-
-    const siblingOptions = siblings
-      .map(siblingTurnId => optionForTurn(ctx.graph, siblingTurnId, ctx.selectedHead, ctx.getHeadPath))
-      .filter((item): item is { turnId: string; headTurnId: string } => item !== null)
-    return buildVariantState(ctx.turnId, siblingOptions)
+    if (!ctx.meta.hasAssistant) return null
+    // Retry siblings share the turn's request group; the arrows page through
+    // them (each answers the same request).
+    const groupSiblings = ctx.meta.siblingTurnIds.filter((siblingTurnId) => {
+      const sibling = ctx.metaMap.get(siblingTurnId)
+      return sibling?.requestGroupId === ctx.meta.requestGroupId
+    })
+    if (groupSiblings.length <= 1) return null
+    const options = groupSiblings.map(turnId => ({ turnId, headTurnId: turnId }))
+    const state = buildVariantState(ctx.turnId, options)
+    prefetchVariantStateTargets(state)
+    return state
   }
 
+  // Applies one already-fetched variant page: pins the resolved head, swaps
+  // the transcript and re-attaches the live stream to the new view.
+  function applySelectedVariantPage(bid: string, sid: string, requestedTurnId: string, payload: FetchMessagesUIResult) {
+    selectedHeadTurnIds.set(sid, payload.head_turn_id?.trim() || requestedTurnId)
+    applySessionTurnMeta(sid, payload.turns)
+    replaceMessages(payload.items, sid)
+    reattachPendingAssistantStreams(sid)
+    startSessionMessagesStream(bid, sid, { skipInitialRefreshOnce: true })
+  }
+
+  const variantPagePrefetchInFlight = new Set<string>()
+
+  // A rendered variant switcher warms the pages its arrows can navigate to,
+  // so switching is a cache hit with zero perceived latency. The page cache
+  // is a plain (non-reactive) Map, so this is safe to trigger from the
+  // variant-state getters during render.
+  function prefetchVariantStateTargets(state: TurnVariantState | null) {
+    if (!state || streaming.value) return
+    prefetchTurnVariantPage(state.previousHeadTurnId)
+    prefetchTurnVariantPage(state.nextHeadTurnId)
+  }
+
+  // Background prefetch of one variant's first page.
+  function prefetchTurnVariantPage(turnId?: string | null) {
+    const sid = (sessionId.value ?? '').trim()
+    const bid = (currentBotId.value ?? '').trim()
+    const target = (turnId ?? '').trim()
+    if (!bid || !sid || !target || !sessionSupportsTurnVariants(sid)) return
+    const key = variantPageCacheKey(sid, target)
+    if (variantPagePrefetchInFlight.has(key) || variantPageCacheGet(sid, target)) return
+    variantPagePrefetchInFlight.add(key)
+    void Promise.resolve(fetchMessagesUI(bid, sid, { limit: PAGE_SIZE, headTurnId: target }))
+      .then((payload) => {
+        if (!payload || (currentBotId.value ?? '').trim() !== bid) return
+        variantPageCachePut(sid, target, payload)
+        if (payload.head_turn_id?.trim()) variantPageCachePut(sid, payload.head_turn_id.trim(), payload)
+      })
+      .catch(() => {})
+      .finally(() => {
+        variantPagePrefetchInFlight.delete(key)
+      })
+  }
+
+  // `headTurnId` accepts any turn id on the desired branch (the sibling turn
+  // itself); the server resolves it to the newest head containing it.
   async function selectTurnVariant(headTurnId: string): Promise<boolean> {
     const sid = (sessionId.value ?? '').trim()
     if (!sessionSupportsTurnVariants(sid)) return false
     if (streaming.value || loadingMessages.value || isMessageActionLoading(sid)) return false
-    const head = headTurnId.trim()
-    const graph = turnGraphs.get(sid)
-    if (!sid || !head || !graph || !graph.headTurnIds.includes(head)) return false
+    const target = headTurnId.trim()
+    if (!sid || !target) return false
     const bid = (currentBotId.value ?? '').trim()
     if (!bid) return false
     const previousExplicitHead = explicitSelectedHeadForSession(sid)
@@ -1685,22 +1569,28 @@ export const useChatStore = defineStore('chat', () => {
     const requestId = ++variantSelectionRequestId
     hasLoadedOlder.value = false
     hasMoreOlder.value = true
+
+    const cached = variantPageCacheGet(sid, target)
+    if (cached) {
+      applySelectedVariantPage(bid, sid, target, cached)
+      return true
+    }
+
     variantSelectionLoading.value = true
     loadingMessages.value = true
     try {
       const payload = await fetchMessagesUI(bid, sid, {
         limit: PAGE_SIZE,
-        headTurnId: head,
+        headTurnId: target,
       })
       if (
         requestId !== variantSelectionRequestId
         || (currentBotId.value ?? '').trim() !== bid
         || (sessionId.value ?? '').trim() !== sid
       ) return false
-      selectedHeadTurnIds.set(sid, head)
-      replaceMessages(payload.items, sid)
-      reattachPendingAssistantStreams(sid)
-      startSessionMessagesStream(bid, sid, { skipInitialRefreshOnce: true })
+      variantPageCachePut(sid, target, payload)
+      if (payload.head_turn_id?.trim()) variantPageCachePut(sid, payload.head_turn_id.trim(), payload)
+      applySelectedVariantPage(bid, sid, target, payload)
     } catch (error) {
       if (requestId === variantSelectionRequestId && (currentBotId.value ?? '').trim() === bid && (sessionId.value ?? '').trim() === sid) {
         if (previousExplicitHead) selectedHeadTurnIds.set(sid, previousExplicitHead)
@@ -2159,9 +2049,11 @@ export const useChatStore = defineStore('chat', () => {
       loading.value = true
       await completion
       resetSelectedHeadForSession(sid)
-      // Retry/rewrite forks the turn chain, which can turn a linear session
-      // into a branching one — force a graph refresh so variant arrows appear.
-      await refreshCurrentSession(bid, sid, { useSelectedView: false, includeGraph: true })
+      // Retry/rewrite forks the turn chain: cached sibling pages are stale
+      // and the default-view refresh below returns the new variant metadata
+      // (per-turn sibling lists), which makes the arrows appear.
+      invalidateVariantPageCache(sid)
+      await refreshCurrentSession(bid, sid, { useSelectedView: false })
       assistantTurn.streaming = false
       loading.value = false
       return { ok: true }
@@ -2506,8 +2398,9 @@ export const useChatStore = defineStore('chat', () => {
     sessionListRefreshPromise = null
 
     replaceSessions([])
-    turnGraphs.clear()
+    turnMeta.clear()
     selectedHeadTurnIds.clear()
+    variantPageCache.clear()
     sessionsCursor.value = null
     hasMoreSessions.value = false
     loadingMoreSessions.value = false
@@ -2563,10 +2456,12 @@ export const useChatStore = defineStore('chat', () => {
   function applyFetchedMessagesPayload(targetSessionId: string, payload: FetchMessagesUIResult) {
     const sid = targetSessionId.trim()
     if (!sid) return
-    if (payload.nodes !== undefined) {
-      applySessionTurnGraph(sid, payload)
-    } else {
-      reconcileCachedGraphAfterPlainFetch(sid, payload)
+    applySessionTurnMeta(sid, payload.turns)
+    // Refresh the explicit variant pin from the server-resolved head so it
+    // keeps naming a real head as the viewed branch extends. Sessions without
+    // a selection keep following the server default view (no pin).
+    if (explicitSelectedHeadForSession(sid) && payload.head_turn_id?.trim()) {
+      selectedHeadTurnIds.set(sid, payload.head_turn_id.trim())
     }
     if (hasLoadedOlder.value) {
       mergeMessages(payload.items, sid)
@@ -2587,38 +2482,17 @@ export const useChatStore = defineStore('chat', () => {
     touchSessionInList(sid, latest)
   }
 
-  // The turn graph is the most expensive part of a `ListMessages` call.
-  // Request it only when it can matter:
-  // - first load of a session (no cached graph yet) — discover branching;
-  // - the caller just ran an action that can create a branch (retry/rewrite),
-  //   signalled via `includeGraph: true`;
-  // - stale-head recovery in refreshCurrentSession (forced there).
-  // Ordinary refreshes (post-turn, SSE-triggered) skip the graph even for
-  // branching sessions: a plain append only moves one head forward, which
-  // reconcileCachedGraphAfterPlainFetch replays onto the cached graph from
-  // the fetched page itself; anything it cannot explain drops the cache and
-  // re-enters the discovery path here.
-  function shouldIncludeGraphOnRefresh(sid: string): boolean {
-    // Non-chat sessions (discuss, acp_agent, ...) never render variants nor
-    // pin heads; their graph is dead weight. Unknown type falls through to
-    // the discovery path below.
-    const type = knownSessionSummary(sid)?.type?.trim()
-    if (type && type !== 'chat') return false
-    return !turnGraphs.has(sid)
-  }
-
   async function refreshCurrentSession(
     targetBotId?: string,
     targetSessionId?: string,
-    options: { useSelectedView?: boolean; includeGraph?: boolean } = {},
+    options: { useSelectedView?: boolean } = {},
   ) {
     const bid = (targetBotId ?? currentBotId.value ?? '').trim()
     const sid = (targetSessionId ?? sessionId.value ?? '').trim()
     if (!bid || !sid) return
     const useSelectedView = options.useSelectedView !== false
-    const includeGraph = options.includeGraph === true || shouldIncludeGraphOnRefresh(sid)
-    let expectedHeadKey = currentViewHeadKey(sid, useSelectedView)
-    const key = `${bid}:${sid}:${useSelectedView ? 'selected' : 'default'}:${expectedHeadKey}:${includeGraph ? 'graph' : 'plain'}`
+    const expectedHeadKey = currentViewHeadKey(sid, useSelectedView)
+    const key = `${bid}:${sid}:${useSelectedView ? 'selected' : 'default'}:${expectedHeadKey}`
 
     if (refreshPromise) {
       if (refreshPromise.key === key) {
@@ -2629,25 +2503,13 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     const promise = (async () => {
-      let payload: FetchMessagesUIResult
-      try {
-        payload = await fetchMessagesUI(bid, sid, {
-          limit: PAGE_SIZE,
-          ...(includeGraph ? { includeGraph: true } : {}),
-          ...(useSelectedView ? viewHeadFetchOption(sid) : {}),
-        })
-      } catch (error) {
-        if (useSelectedView && expectedHeadKey !== 'default' && isStaleSessionHeadError(error)) {
-          resetSelectedHeadForSession(sid)
-          expectedHeadKey = currentViewHeadKey(sid, useSelectedView)
-          payload = await fetchMessagesUI(bid, sid, {
-            limit: PAGE_SIZE,
-            includeGraph: true,
-          })
-        } else {
-          throw error
-        }
-      }
+      // A pinned head that went stale (branch trimmed elsewhere) no longer
+      // 409s: the server resolves any turn id to the newest head containing
+      // it, or silently falls back to the session default view.
+      const payload = await fetchMessagesUI(bid, sid, {
+        limit: PAGE_SIZE,
+        ...(useSelectedView ? viewHeadFetchOption(sid) : {}),
+      })
       // The user may have switched away while the request was in flight. Drop
       // the result silently — the new session has its own load underway.
       if (currentBotId.value !== bid || sessionId.value !== sid) return
@@ -2783,6 +2645,9 @@ export const useChatStore = defineStore('chat', () => {
     const messageSessionId = String(raw.session_id ?? '').trim()
     if (messageSessionId && messageSessionId !== targetSessionId) return
     if (messageSessionId) touchSessionInList(messageSessionId, raw.created_at)
+    // A new message extends some branch of this session; prefetched variant
+    // pages may now be stale, so drop them and let the refresh re-prefetch.
+    invalidateVariantPageCache(targetSessionId)
     if (!shouldRefreshFromMessageCreated(targetBotId, sessionId.value, streamingSessionId.value, event)) return
     scheduleRefreshCurrentSession(messageSessionId)
   }
@@ -3057,6 +2922,7 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const result = await locateMessageUI(bid, sid, target, PAGE_SIZE, PAGE_SIZE, viewHeadFetchOption(sid))
       if (!result.items.length) return null
+      applySessionTurnMeta(sid, result.turns)
       mergeMessages(result.items, sid)
       hasMoreOlder.value = true
       // locateMessage merges an older slice into the view; treat this as
@@ -3447,7 +3313,7 @@ export const useChatStore = defineStore('chat', () => {
     explicitSessionSelection.value = true
     draftIntent.value = false
     replaceMessages([])
-    clearSessionTurnGraph(created.id)
+    clearSessionTurnMeta(created.id)
     hasMoreOlder.value = false
     hasLoadedOlder.value = false
     if (runtimeId) {
@@ -3595,7 +3461,7 @@ export const useChatStore = defineStore('chat', () => {
     draftIntent.value = false
     explicitSessionSelection.value = true
     replaceMessages([])
-    clearSessionTurnGraph(created.id)
+    clearSessionTurnMeta(created.id)
     hasMoreOlder.value = false
     hasLoadedOlder.value = false
   }
@@ -3855,11 +3721,12 @@ export const useChatStore = defineStore('chat', () => {
   function switchActiveSession(sid: string) {
     cancelVariantSelectionLoad()
     sessionMessagesStream.stop()
-    // Drop the cached graph (but keep the user's selected head) so opening a
-    // session always re-discovers branching once; refreshes while it stays
-    // open skip the graph and keep the cache current locally instead (see
-    // shouldIncludeGraphOnRefresh / reconcileCachedGraphAfterPlainFetch).
-    if (sid) turnGraphs.delete(sid)
+    // Drop cached turn metadata (but keep the user's selected head) so
+    // opening a session always re-discovers variants from its first page.
+    if (sid) {
+      turnMeta.delete(sid)
+      invalidateVariantPageCache(sid)
+    }
     replaceMessages([])
     hasMoreOlder.value = false
     hasLoadedOlder.value = false
@@ -4019,7 +3886,7 @@ export const useChatStore = defineStore('chat', () => {
       const forked = await requestForkSessionFromMessage(bid, sid, mid, baseHeadForRequest(sid))
       upsertSession(forked)
       void refreshSessionsList(bid, { keep: [forked] })
-      const payload = await fetchMessagesUI(bid, forked.id, { limit: PAGE_SIZE, includeGraph: true })
+      const payload = await fetchMessagesUI(bid, forked.id, { limit: PAGE_SIZE })
       if ((currentBotId.value ?? '').trim() !== bid || (sessionId.value ?? '').trim() !== sid) {
         return false
       }
@@ -4360,7 +4227,7 @@ export const useChatStore = defineStore('chat', () => {
     abort()
     cancelVariantSelectionLoad()
     replaceMessages([])
-    clearSessionTurnGraph()
+    clearSessionTurnMeta()
     hasMoreOlder.value = false
     hasLoadedOlder.value = false
   }

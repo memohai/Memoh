@@ -8,7 +8,7 @@ import type {
   UIStreamEventHandler,
   UIToolApproval,
   UITurn,
-  UITurnGraphNode,
+  UITurnMeta,
   UIUserInput,
 } from '@/composables/api/useChat'
 import { REASONING_EFFORT_DISABLE } from '@/pages/bots/components/reasoning-effort'
@@ -69,34 +69,37 @@ function flushPromises() {
 }
 
 function messagesPayload(items: UITurn[] = [], options: {
+  headTurnId?: string
   defaultHeadTurnId?: string
-  headTurnIds?: string[]
-  nodes?: UITurnGraphNode[]
+  turns?: UITurnMeta[]
 } = {}): FetchMessagesUIResult {
   const payload: FetchMessagesUIResult = {
     items,
   }
+  if ('headTurnId' in options) payload.head_turn_id = options.headTurnId
   if ('defaultHeadTurnId' in options) payload.default_head_turn_id = options.defaultHeadTurnId
-  if ('headTurnIds' in options) payload.head_turn_ids = options.headTurnIds ?? []
-  if ('nodes' in options) payload.nodes = options.nodes ?? []
+  if ('turns' in options) payload.turns = options.turns ?? []
   return payload
 }
 
-function graphNode(
+// Per-turn variant metadata as the pagination endpoint returns it. The
+// request group defaults to the turn's own id (a distinct request → edit
+// variant); retries share an explicit requestGroupId.
+function turnMetaEntry(
   turnId: string,
   options: {
     parentTurnId?: string
-    timestamp?: string
-    requestKey?: string
+    requestGroupId?: string
+    siblingTurnIds?: string[]
     hasUser?: boolean
     hasAssistant?: boolean
   } = {},
-): UITurnGraphNode {
+): UITurnMeta {
   return {
     turn_id: turnId,
     parent_turn_id: options.parentTurnId,
-    timestamp: options.timestamp,
-    request_key: options.requestKey,
+    request_group_id: options.requestGroupId ?? turnId,
+    sibling_turn_ids: options.siblingTurnIds ?? [turnId],
     has_user: options.hasUser ?? true,
     has_assistant: options.hasAssistant ?? true,
   }
@@ -1936,11 +1939,11 @@ describe('chat-list store', () => {
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
     ], nextCursor: null })
     api.fetchMessagesUI.mockResolvedValueOnce(messagesPayload([], {
+      headTurnId: 'turn-b',
       defaultHeadTurnId: 'turn-b',
-      headTurnIds: ['turn-b', 'turn-c'],
-      nodes: [
-        graphNode('turn-b', { timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'old-request', hasAssistant: false }),
-        graphNode('turn-c', { timestamp: '2026-06-19T00:02:00.000Z', requestKey: 'selected-request', hasAssistant: false }),
+      turns: [
+        turnMetaEntry('turn-b', { siblingTurnIds: ['turn-b', 'turn-c'], hasAssistant: false }),
+        turnMetaEntry('turn-c', { siblingTurnIds: ['turn-b', 'turn-c'], hasAssistant: false }),
       ],
     }))
     api.fetchMessagesUI.mockResolvedValueOnce(messagesPayload([
@@ -1978,11 +1981,11 @@ describe('chat-list store', () => {
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
     ], nextCursor: null })
     api.fetchMessagesUI.mockResolvedValueOnce(messagesPayload([], {
+      headTurnId: 'turn-b',
       defaultHeadTurnId: 'turn-b',
-      headTurnIds: ['turn-b', 'turn-c'],
-      nodes: [
-        graphNode('turn-b', { timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'old-request', hasAssistant: false }),
-        graphNode('turn-c', { timestamp: '2026-06-19T00:02:00.000Z', requestKey: 'selected-request', hasAssistant: false }),
+      turns: [
+        turnMetaEntry('turn-b', { siblingTurnIds: ['turn-b', 'turn-c'], hasAssistant: false }),
+        turnMetaEntry('turn-c', { siblingTurnIds: ['turn-b', 'turn-c'], hasAssistant: false }),
       ],
     }))
     api.fetchMessagesUI.mockResolvedValueOnce(messagesPayload([
@@ -2033,11 +2036,11 @@ describe('chat-list store', () => {
         timestamp: '2026-06-19T00:01:01.000Z',
       },
     ], {
+      headTurnId: 'turn-b',
       defaultHeadTurnId: 'turn-b',
-      headTurnIds: ['turn-b', 'turn-c'],
-      nodes: [
-        graphNode('turn-b', { timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'current-request' }),
-        graphNode('turn-c', { timestamp: '2026-06-19T00:02:00.000Z', requestKey: 'other-request' }),
+      turns: [
+        turnMetaEntry('turn-b', { siblingTurnIds: ['turn-b', 'turn-c'] }),
+        turnMetaEntry('turn-c', { siblingTurnIds: ['turn-b', 'turn-c'] }),
       ],
     }))
     sendEvents = [{ type: 'end' } as UIStreamEvent]
@@ -2061,8 +2064,8 @@ describe('chat-list store', () => {
       expect(store._hasLoadedOlder).toBe(true)
       expect(store.hasMoreOlder).toBe(true)
 
-      // Ordinary refreshes skip the graph even for branching sessions; the
-      // cached graph from the initial load stays authoritative.
+      // The failed selection left no explicit pin, so refreshes keep
+      // following the server default view.
       api.fetchMessagesUI.mockResolvedValueOnce(messagesPayload([
         { id: 'user-b-refresh', turn_id: 'turn-b', role: 'user', text: 'refreshed request', timestamp: '2026-06-19T00:01:02.000Z' },
       ]))
@@ -2073,14 +2076,16 @@ describe('chat-list store', () => {
         limit: 30,
       })
 
+      // Without an explicit selection the send carries no base head pin;
+      // the server extends its own default head.
       const result = await store.sendMessage('continue from current')
       expect(result).toMatchObject({ ok: true })
       expect(sentWSMessages.at(-1)).toMatchObject({
         type: 'message',
         session_id: 'session-1',
         text: 'continue from current',
-        base_head_turn_id: 'turn-b',
       })
+      expect(sentWSMessages.at(-1)).not.toHaveProperty('base_head_turn_id')
     } finally {
       consoleError.mockRestore()
     }
@@ -2100,11 +2105,11 @@ describe('chat-list store', () => {
         timestamp: '2026-06-19T00:01:01.000Z',
       },
     ], {
+      headTurnId: 'turn-b',
       defaultHeadTurnId: 'turn-b',
-      headTurnIds: ['turn-b', 'turn-c'],
-      nodes: [
-        graphNode('turn-b', { timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'same-request' }),
-        graphNode('turn-c', { timestamp: '2026-06-19T00:02:00.000Z', requestKey: 'same-request' }),
+      turns: [
+        turnMetaEntry('turn-b', { requestGroupId: 'same-request', siblingTurnIds: ['turn-b', 'turn-c'] }),
+        turnMetaEntry('turn-c', { requestGroupId: 'same-request', siblingTurnIds: ['turn-b', 'turn-c'] }),
       ],
     }))
     sendEvents = [{ type: 'end' } as UIStreamEvent]
@@ -2141,11 +2146,11 @@ describe('chat-list store', () => {
     api.fetchMessagesUI.mockResolvedValueOnce(messagesPayload([
       { id: 'user-b', turn_id: 'turn-b', role: 'user', text: 'current request', timestamp: '2026-06-19T00:01:00.000Z' },
     ], {
+      headTurnId: 'turn-b',
       defaultHeadTurnId: 'turn-b',
-      headTurnIds: ['turn-b', 'turn-c'],
-      nodes: [
-        graphNode('turn-b', { timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'current-request', hasAssistant: false }),
-        graphNode('turn-c', { timestamp: '2026-06-19T00:02:00.000Z', requestKey: 'other-request', hasAssistant: false }),
+      turns: [
+        turnMetaEntry('turn-b', { siblingTurnIds: ['turn-b', 'turn-c'], hasAssistant: false }),
+        turnMetaEntry('turn-c', { siblingTurnIds: ['turn-b', 'turn-c'], hasAssistant: false }),
       ],
     }))
     sendEvents = [{ type: 'end' } as UIStreamEvent]
@@ -2188,11 +2193,11 @@ describe('chat-list store', () => {
     api.fetchMessagesUI.mockResolvedValueOnce(messagesPayload([
       { id: 'user-b', turn_id: 'turn-b', role: 'user', text: 'current request', timestamp: '2026-06-19T00:01:00.000Z' },
     ], {
+      headTurnId: 'turn-b',
       defaultHeadTurnId: 'turn-b',
-      headTurnIds: ['turn-b', 'turn-c'],
-      nodes: [
-        graphNode('turn-b', { timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'current-request', hasAssistant: false }),
-        graphNode('turn-c', { timestamp: '2026-06-19T00:02:00.000Z', requestKey: 'other-request', hasAssistant: false }),
+      turns: [
+        turnMetaEntry('turn-b', { siblingTurnIds: ['turn-b', 'turn-c'], hasAssistant: false }),
+        turnMetaEntry('turn-c', { siblingTurnIds: ['turn-b', 'turn-c'], hasAssistant: false }),
       ],
     }))
     const store = useChatStore()
@@ -2229,11 +2234,11 @@ describe('chat-list store', () => {
     api.fetchMessagesUI.mockResolvedValueOnce(messagesPayload([
       { id: 'user-b', turn_id: 'turn-b', role: 'user', text: 'current request', timestamp: '2026-06-19T00:01:00.000Z' },
     ], {
+      headTurnId: 'turn-b',
       defaultHeadTurnId: 'turn-b',
-      headTurnIds: ['turn-b', 'turn-c'],
-      nodes: [
-        graphNode('turn-b', { timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'current-request', hasAssistant: false }),
-        graphNode('turn-c', { timestamp: '2026-06-19T00:02:00.000Z', requestKey: 'other-request', hasAssistant: false }),
+      turns: [
+        turnMetaEntry('turn-b', { siblingTurnIds: ['turn-b', 'turn-c'], hasAssistant: false }),
+        turnMetaEntry('turn-c', { siblingTurnIds: ['turn-b', 'turn-c'], hasAssistant: false }),
       ],
     }))
     sendEvents = []
@@ -2268,11 +2273,11 @@ describe('chat-list store', () => {
           timestamp: '2026-06-19T00:01:01.000Z',
         },
       ], {
+        headTurnId: 'turn-b',
         defaultHeadTurnId: 'turn-b',
-        headTurnIds: ['turn-b', 'turn-c'],
-        nodes: [
-          graphNode('turn-b', { timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'current-request' }),
-          graphNode('turn-c', { timestamp: '2026-06-19T00:02:00.000Z', requestKey: 'other-request', hasAssistant: false }),
+        turns: [
+          turnMetaEntry('turn-b', { siblingTurnIds: ['turn-b', 'turn-c'] }),
+          turnMetaEntry('turn-c', { siblingTurnIds: ['turn-b', 'turn-c'], hasAssistant: false }),
         ],
       }))
     let resolveFork: ((value: unknown) => void) | undefined
@@ -2305,7 +2310,7 @@ describe('chat-list store', () => {
     expect(store.sessionId).toBe('session-fork')
   })
 
-  it('falls back when the server default head is missing from the graph', async () => {
+  it('renders the server page even when its heads are absent from the turn metadata', async () => {
     api.fetchSessions.mockResolvedValueOnce({
       items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
       nextCursor: null,
@@ -2320,10 +2325,10 @@ describe('chat-list store', () => {
         timestamp: '2026-06-19T00:01:01.000Z',
       },
     ], {
+      headTurnId: 'turn-missing',
       defaultHeadTurnId: 'turn-missing',
-      headTurnIds: ['turn-b'],
-      nodes: [
-        graphNode('turn-b', { timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'fallback-request' }),
+      turns: [
+        turnMetaEntry('turn-b'),
       ],
     }))
     const store = useChatStore()
@@ -2365,7 +2370,7 @@ describe('chat-list store', () => {
     expect(store.messages.map(message => message.id)).toEqual(['user-c'])
   })
 
-  it('requests the turn graph once for linear sessions and skips it on later refreshes', async () => {
+  it('fetches plain pages and follows the server default view without an explicit selection', async () => {
     api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
     ], nextCursor: null })
@@ -2373,9 +2378,9 @@ describe('chat-list store', () => {
       .mockResolvedValueOnce(messagesPayload([
         { id: 'user-a', turn_id: 'turn-a', role: 'user', text: 'A request', timestamp: '2026-06-19T00:01:00.000Z' },
       ], {
+        headTurnId: 'turn-a',
         defaultHeadTurnId: 'turn-a',
-        headTurnIds: ['turn-a'],
-        nodes: [graphNode('turn-a', { timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'a' })],
+        turns: [turnMetaEntry('turn-a')],
       }))
       .mockResolvedValueOnce(messagesPayload([
         { id: 'user-a', turn_id: 'turn-a', role: 'user', text: 'A request', timestamp: '2026-06-19T00:01:00.000Z' },
@@ -2385,14 +2390,13 @@ describe('chat-list store', () => {
 
     await store.selectBot('bot-1')
     await flushPromises()
-    // First load discovers branching, so the graph is requested.
+    // No graph flag and no head pin: the server resolves its default view.
     expect(api.fetchMessagesUI).toHaveBeenNthCalledWith(1, 'bot-1', 'session-1', {
       limit: 30,
-      includeGraph: true,
     })
 
-    // Later refreshes skip the graph query entirely; the fetched page itself
-    // advances the cached head (turn-a → turn-b) without a graph refetch.
+    // Refreshes stay pin-free too; the fetched page itself reflects the head
+    // movement (turn-a → turn-b) with no extra metadata request.
     _sessionMessageHandler?.({ type: 'stale', session_id: 'session-1' })
     await new Promise(r => setTimeout(r, 150))
     await flushPromises()
@@ -2401,22 +2405,6 @@ describe('chat-list store', () => {
     })
     expect(api.fetchMessagesUI).toHaveBeenCalledTimes(2)
     expect(store.messages.map(message => message.id)).toEqual(['user-a', 'user-b'])
-  })
-
-  it('never requests the turn graph for non-chat sessions', async () => {
-    api.fetchSessions.mockResolvedValueOnce({ items: [
-      { id: 'session-1', bot_id: 'bot-1', title: 'Discuss', type: 'discuss' },
-    ], nextCursor: null })
-    api.fetchMessagesUI.mockResolvedValueOnce(messagesPayload([
-      { id: 'user-a', turn_id: 'turn-a', role: 'user', text: 'A request', timestamp: '2026-06-19T00:01:00.000Z' },
-    ]))
-    const store = useChatStore()
-
-    await store.selectBot('bot-1')
-    await flushPromises()
-    expect(api.fetchMessagesUI).toHaveBeenNthCalledWith(1, 'bot-1', 'session-1', {
-      limit: 30,
-    })
   })
 
   it('does not optimistically submit user input while websocket is disconnected', async () => {
@@ -3108,12 +3096,12 @@ describe('chat-list store', () => {
         timestamp: '2026-06-19T00:01:01.000Z',
       },
     ], {
+      headTurnId: 'turn-b',
       defaultHeadTurnId: 'turn-b',
-      headTurnIds: ['turn-b', 'turn-c'],
-      nodes: [
-        graphNode('turn-a', { timestamp: '2026-06-19T00:00:00.000Z', requestKey: 'a' }),
-        graphNode('turn-b', { parentTurnId: 'turn-a', timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'b' }),
-        graphNode('turn-c', { parentTurnId: 'turn-a', timestamp: '2026-06-19T00:02:00.000Z', requestKey: 'c' }),
+      turns: [
+        turnMetaEntry('turn-a'),
+        turnMetaEntry('turn-b', { parentTurnId: 'turn-a', siblingTurnIds: ['turn-b', 'turn-c'] }),
+        turnMetaEntry('turn-c', { parentTurnId: 'turn-a', siblingTurnIds: ['turn-b', 'turn-c'] }),
       ],
     }))
     api.fetchMessagesUI.mockResolvedValueOnce(messagesPayload([
@@ -3133,7 +3121,7 @@ describe('chat-list store', () => {
         messages: [{ id: 1, type: 'text', content: 'C reply' }],
         timestamp: '2026-06-19T00:02:01.000Z',
       },
-    ]))
+    ], { headTurnId: 'turn-c' }))
     const sent: Array<Record<string, unknown>> = []
     api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
       streamHandler = onStreamEvent
@@ -3159,7 +3147,7 @@ describe('chat-list store', () => {
     await flushPromises()
 
     expect(store.messages.map(message => message.id)).toEqual(['user-a', 'assistant-a', 'user-b', 'assistant-b'])
-    expect(api.fetchMessagesUI).toHaveBeenCalledWith('bot-1', 'session-1', { limit: 30, includeGraph: true })
+    expect(api.fetchMessagesUI).toHaveBeenCalledWith('bot-1', 'session-1', { limit: 30 })
     const callsAfterLoad = api.fetchMessagesUI.mock.calls.length
 
     await expect(store.selectTurnVariant('turn-c')).resolves.toBe(true)
@@ -3179,9 +3167,9 @@ describe('chat-list store', () => {
       beforeId: 'user-a',
     })
 
-    // The post-send refresh skips the graph; the plain page itself explains
-    // the head movement (turn-c → turn-new) and the cached graph is advanced
-    // locally instead of refetched.
+    // A successful send merges the pinned branch into the server default
+    // view (its head is now the most recently updated), so the pin is
+    // dropped and the post-send refresh follows the default view again.
     api.fetchMessagesUI.mockResolvedValueOnce(messagesPayload([
       { id: 'user-a', turn_id: 'turn-a', role: 'user', text: 'A request', timestamp: '2026-06-19T00:00:00.000Z' },
       {
@@ -3207,7 +3195,7 @@ describe('chat-list store', () => {
         messages: [{ id: 1, type: 'text', content: 'continued' }],
         timestamp: '2026-06-19T00:03:01.000Z',
       },
-    ]))
+    ], { headTurnId: 'turn-new' }))
     const result = await store.sendMessage('continue from C')
 
     expect(result).toMatchObject({ ok: true })
@@ -3221,7 +3209,8 @@ describe('chat-list store', () => {
       limit: 30,
     })
 
-    // The locally advanced head is what the next send pins as its base.
+    // With the pin gone, follow-up sends carry no base head; the server
+    // extends its own default head (the branch the send just advanced).
     api.fetchMessagesUI.mockResolvedValueOnce(messagesPayload([
       { id: 'user-new', turn_id: 'turn-new', role: 'user', text: 'continue from C', timestamp: '2026-06-19T00:03:00.000Z' },
       { id: 'user-new-2', turn_id: 'turn-new-2', role: 'user', text: 'and again', timestamp: '2026-06-19T00:04:00.000Z' },
@@ -3231,8 +3220,8 @@ describe('chat-list store', () => {
       type: 'message',
       session_id: 'session-1',
       text: 'and again',
-      base_head_turn_id: 'turn-new',
     })
+    expect(sent.at(-1)).not.toHaveProperty('base_head_turn_id')
   })
 
   it('shows retry variants on the assistant reply only', async () => {
@@ -3250,11 +3239,11 @@ describe('chat-list store', () => {
         timestamp: '2026-06-19T00:02:01.000Z',
       },
     ], {
+      headTurnId: 'turn-b2',
       defaultHeadTurnId: 'turn-b2',
-      headTurnIds: ['turn-b1', 'turn-b2'],
-      nodes: [
-        graphNode('turn-b1', { timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'same-request' }),
-        graphNode('turn-b2', { timestamp: '2026-06-19T00:02:00.000Z', requestKey: 'same-request' }),
+      turns: [
+        turnMetaEntry('turn-b1', { requestGroupId: 'same-request', siblingTurnIds: ['turn-b1', 'turn-b2'] }),
+        turnMetaEntry('turn-b2', { requestGroupId: 'same-request', siblingTurnIds: ['turn-b1', 'turn-b2'] }),
       ],
     }))
 
@@ -3303,11 +3292,11 @@ describe('chat-list store', () => {
         timestamp: '2026-06-19T00:01:01.000Z',
       },
     ], {
+      headTurnId: 'turn-b1',
       defaultHeadTurnId: 'turn-b1',
-      headTurnIds: ['turn-b1'],
-      nodes: [
-        graphNode('turn-a', { timestamp: '2026-06-19T00:00:00.000Z', requestKey: 'a' }),
-        graphNode('turn-b1', { parentTurnId: 'turn-a', timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'same-request' }),
+      turns: [
+        turnMetaEntry('turn-a'),
+        turnMetaEntry('turn-b1', { parentTurnId: 'turn-a', requestGroupId: 'same-request' }),
       ],
     }))
 
@@ -3334,12 +3323,12 @@ describe('chat-list store', () => {
         timestamp: '2026-06-19T00:02:01.000Z',
       },
     ], {
+      headTurnId: 'turn-b2',
       defaultHeadTurnId: 'turn-b2',
-      headTurnIds: ['turn-b1', 'turn-b2'],
-      nodes: [
-        graphNode('turn-a', { timestamp: '2026-06-19T00:00:00.000Z', requestKey: 'a' }),
-        graphNode('turn-b1', { parentTurnId: 'turn-a', timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'same-request' }),
-        graphNode('turn-b2', { parentTurnId: 'turn-a', timestamp: '2026-06-19T00:02:00.000Z', requestKey: 'same-request' }),
+      turns: [
+        turnMetaEntry('turn-a'),
+        turnMetaEntry('turn-b1', { parentTurnId: 'turn-a', requestGroupId: 'same-request', siblingTurnIds: ['turn-b1', 'turn-b2'] }),
+        turnMetaEntry('turn-b2', { parentTurnId: 'turn-a', requestGroupId: 'same-request', siblingTurnIds: ['turn-b1', 'turn-b2'] }),
       ],
     }))
 
@@ -3355,11 +3344,10 @@ describe('chat-list store', () => {
     // Single-head session: no explicit base head is pinned; the server
     // resolves its own default head.
     expect(sentWSMessages.at(-1)).not.toHaveProperty('base_head_turn_id')
-    // Retry can fork the chain, so its completion refresh must force the
-    // graph even though the cached graph was still single-head.
+    // The completion refresh is a plain page fetch; its per-turn metadata
+    // already carries the new sibling pair.
     expect(api.fetchMessagesUI).toHaveBeenNthCalledWith(2, 'bot-1', 'session-1', {
       limit: 30,
-      includeGraph: true,
     })
     expect(store.messages.map(message => message.id)).toEqual(['user-a', 'assistant-a', 'user-b2', 'assistant-b2'])
     expect(store.responseVariantStateForMessage('assistant-b2')).toMatchObject({
@@ -3423,10 +3411,10 @@ describe('chat-list store', () => {
         timestamp: '2026-06-19T00:01:01.000Z',
       },
     ], {
+      headTurnId: 'turn-b1',
       defaultHeadTurnId: 'turn-b1',
-      headTurnIds: ['turn-b1'],
-      nodes: [
-        graphNode('turn-b1', { timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'same-request' }),
+      turns: [
+        turnMetaEntry('turn-b1', { requestGroupId: 'same-request' }),
       ],
     }))
 
@@ -3445,10 +3433,10 @@ describe('chat-list store', () => {
         timestamp: '2026-06-19T00:01:01.000Z',
       },
     ], {
+      headTurnId: 'turn-b1',
       defaultHeadTurnId: 'turn-b1',
-      headTurnIds: ['turn-b1'],
-      nodes: [
-        graphNode('turn-b1', { timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'same-request' }),
+      turns: [
+        turnMetaEntry('turn-b1', { requestGroupId: 'same-request' }),
       ],
     }))
 
@@ -3492,11 +3480,11 @@ describe('chat-list store', () => {
         timestamp: '2026-06-19T00:01:01.000Z',
       },
     ], {
+      headTurnId: 'turn-b1',
       defaultHeadTurnId: 'turn-b1',
-      headTurnIds: ['turn-b1'],
-      nodes: [
-        graphNode('turn-a', { timestamp: '2026-06-19T00:00:00.000Z', requestKey: 'a' }),
-        graphNode('turn-b1', { parentTurnId: 'turn-a', timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'same-request' }),
+      turns: [
+        turnMetaEntry('turn-a'),
+        turnMetaEntry('turn-b1', { parentTurnId: 'turn-a', requestGroupId: 'same-request' }),
       ],
     }))
 
@@ -3586,11 +3574,11 @@ describe('chat-list store', () => {
         timestamp: '2026-06-19T00:01:01.000Z',
       },
     ], {
+      headTurnId: 'turn-b1',
       defaultHeadTurnId: 'turn-b1',
-      headTurnIds: ['turn-b1'],
-      nodes: [
-        graphNode('turn-a', { timestamp: '2026-06-19T00:00:00.000Z', requestKey: 'a' }),
-        graphNode('turn-b1', { parentTurnId: 'turn-a', timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'same-request' }),
+      turns: [
+        turnMetaEntry('turn-a'),
+        turnMetaEntry('turn-b1', { parentTurnId: 'turn-a', requestGroupId: 'same-request' }),
       ],
     }))
 
@@ -3666,11 +3654,11 @@ describe('chat-list store', () => {
         timestamp: '2026-06-19T00:02:01.000Z',
       },
     ], {
+      headTurnId: 'turn-c',
       defaultHeadTurnId: 'turn-c',
-      headTurnIds: ['turn-b', 'turn-c'],
-      nodes: [
-        graphNode('turn-b', { timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'old-request' }),
-        graphNode('turn-c', { timestamp: '2026-06-19T00:02:00.000Z', requestKey: 'edited-request' }),
+      turns: [
+        turnMetaEntry('turn-b', { siblingTurnIds: ['turn-b', 'turn-c'] }),
+        turnMetaEntry('turn-c', { siblingTurnIds: ['turn-b', 'turn-c'] }),
       ],
     }))
 
@@ -4217,12 +4205,12 @@ describe('chat-list store', () => {
       { id: 'user-a', turn_id: 'turn-a', role: 'user', text: 'A request', timestamp: '2026-06-19T00:00:00.000Z' },
       { id: 'user-b', turn_id: 'turn-b', role: 'user', text: 'B request', timestamp: '2026-06-19T00:01:00.000Z' },
     ], {
+      headTurnId: 'turn-b',
       defaultHeadTurnId: 'turn-b',
-      headTurnIds: ['turn-b', 'turn-c'],
-      nodes: [
-        graphNode('turn-a', { timestamp: '2026-06-19T00:00:00.000Z', requestKey: 'root', hasAssistant: false }),
-        graphNode('turn-b', { parentTurnId: 'turn-a', timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'b', hasAssistant: false }),
-        graphNode('turn-c', { parentTurnId: 'turn-a', timestamp: '2026-06-19T00:02:00.000Z', requestKey: 'c', hasAssistant: false }),
+      turns: [
+        turnMetaEntry('turn-a', { hasAssistant: false }),
+        turnMetaEntry('turn-b', { parentTurnId: 'turn-a', siblingTurnIds: ['turn-b', 'turn-c'], hasAssistant: false }),
+        turnMetaEntry('turn-c', { parentTurnId: 'turn-a', siblingTurnIds: ['turn-b', 'turn-c'], hasAssistant: false }),
       ],
     }))
     const store = useChatStore()
@@ -4258,12 +4246,12 @@ describe('chat-list store', () => {
       { id: 'user-a', turn_id: 'turn-a', role: 'user', text: 'A request', timestamp: '2026-06-19T00:00:00.000Z' },
       { id: 'user-b', turn_id: 'turn-b', role: 'user', text: 'late B request', timestamp: '2026-06-19T00:01:00.000Z' },
     ], {
+      headTurnId: 'turn-b',
       defaultHeadTurnId: 'turn-b',
-      headTurnIds: ['turn-b', 'turn-c'],
-      nodes: [
-        graphNode('turn-a', { timestamp: '2026-06-19T00:00:00.000Z', requestKey: 'root', hasAssistant: false }),
-        graphNode('turn-b', { parentTurnId: 'turn-a', timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'b', hasAssistant: false }),
-        graphNode('turn-c', { parentTurnId: 'turn-a', timestamp: '2026-06-19T00:02:00.000Z', requestKey: 'c', hasAssistant: false }),
+      turns: [
+        turnMetaEntry('turn-a', { hasAssistant: false }),
+        turnMetaEntry('turn-b', { parentTurnId: 'turn-a', siblingTurnIds: ['turn-b', 'turn-c'], hasAssistant: false }),
+        turnMetaEntry('turn-c', { parentTurnId: 'turn-a', siblingTurnIds: ['turn-b', 'turn-c'], hasAssistant: false }),
       ],
     }))
     await flushPromises()
@@ -4271,7 +4259,7 @@ describe('chat-list store', () => {
     expect(store.messages.map(message => message.id)).toEqual(['user-a', 'user-c'])
   })
 
-  it('clears a stale selected head and reloads the server default view', async () => {
+  it('follows the server-resolved head when a pinned branch is superseded', async () => {
     api.fetchSessions.mockResolvedValueOnce({
       items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
       nextCursor: null,
@@ -4280,12 +4268,12 @@ describe('chat-list store', () => {
       { id: 'user-a', turn_id: 'turn-a', role: 'user', text: 'A request', timestamp: '2026-06-19T00:00:00.000Z' },
       { id: 'user-b', turn_id: 'turn-b', role: 'user', text: 'B request', timestamp: '2026-06-19T00:01:00.000Z' },
     ], {
+      headTurnId: 'turn-b',
       defaultHeadTurnId: 'turn-b',
-      headTurnIds: ['turn-b', 'turn-c'],
-      nodes: [
-        graphNode('turn-a', { timestamp: '2026-06-19T00:00:00.000Z', requestKey: 'root', hasAssistant: false }),
-        graphNode('turn-b', { parentTurnId: 'turn-a', timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'b', hasAssistant: false }),
-        graphNode('turn-c', { parentTurnId: 'turn-a', timestamp: '2026-06-19T00:02:00.000Z', requestKey: 'c', hasAssistant: false }),
+      turns: [
+        turnMetaEntry('turn-a', { hasAssistant: false }),
+        turnMetaEntry('turn-b', { parentTurnId: 'turn-a', siblingTurnIds: ['turn-b', 'turn-c'], hasAssistant: false }),
+        turnMetaEntry('turn-c', { parentTurnId: 'turn-a', siblingTurnIds: ['turn-b', 'turn-c'], hasAssistant: false }),
       ],
     }))
     api.fetchMessagesUI.mockResolvedValueOnce(messagesPayload([
@@ -4300,17 +4288,18 @@ describe('chat-list store', () => {
     await expect(store.selectTurnVariant('turn-c')).resolves.toBe(true)
     expect(store.messages.map(message => message.id)).toEqual(['user-a', 'user-c'])
 
-    const staleHeadError = { message: 'stale session head' }
-    api.fetchMessagesUI.mockRejectedValueOnce(staleHeadError)
+    // The pinned branch was superseded elsewhere. A stale pin no longer
+    // errors: the server resolves any turn id to the newest head containing
+    // it (or falls back to the default view) and reports the resolved head.
     api.fetchMessagesUI.mockResolvedValueOnce(messagesPayload([
       { id: 'user-a', turn_id: 'turn-a', role: 'user', text: 'A request', timestamp: '2026-06-19T00:00:00.000Z' },
       { id: 'user-d', turn_id: 'turn-d', role: 'user', text: 'D request', timestamp: '2026-06-19T00:03:00.000Z' },
     ], {
+      headTurnId: 'turn-d',
       defaultHeadTurnId: 'turn-d',
-      headTurnIds: ['turn-d'],
-      nodes: [
-        graphNode('turn-a', { timestamp: '2026-06-19T00:00:00.000Z', requestKey: 'root', hasAssistant: false }),
-        graphNode('turn-d', { parentTurnId: 'turn-a', timestamp: '2026-06-19T00:03:00.000Z', requestKey: 'd', hasAssistant: false }),
+      turns: [
+        turnMetaEntry('turn-a', { hasAssistant: false }),
+        turnMetaEntry('turn-d', { parentTurnId: 'turn-a', hasAssistant: false }),
       ],
     }))
 
@@ -4322,22 +4311,17 @@ describe('chat-list store', () => {
       limit: 30,
       headTurnId: 'turn-c',
     })
-    // Stale-head recovery must re-discover the head set, so it forces the
-    // graph even though a graph is cached.
-    expect(api.fetchMessagesUI).toHaveBeenNthCalledWith(4, 'bot-1', 'session-1', {
-      limit: 30,
-      includeGraph: true,
-    })
+    expect(api.fetchMessagesUI).toHaveBeenCalledTimes(3)
     expect(store.messages.map(message => message.id)).toEqual(['user-a', 'user-d'])
 
+    api.fetchMessagesUI.mockResolvedValueOnce(messagesPayload())
     await store.sendMessage('continue default')
     expect(sentWSMessages.at(-1)).toMatchObject({
       type: 'message',
       text: 'continue default',
+      // The pin followed the server-resolved head, so the send anchors to it.
+      base_head_turn_id: 'turn-d',
     })
-    // After recovery the fresh graph has a single head again: no explicit
-    // base head is pinned; the server resolves its own default head.
-    expect(sentWSMessages.at(-1)).not.toHaveProperty('base_head_turn_id')
   })
 
   it('preserves scrolled-back history when an SSE refresh fires', async () => {

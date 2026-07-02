@@ -34,88 +34,6 @@ const sessionMessageStreamBuffer = 128
 // 30s proxy idle cut.
 const sseHeartbeatInterval = 20 * time.Second
 
-const invalidRequestedHeadTurnID = "\x00invalid-requested-head"
-
-func sessionTurnGraphHeadSet(graph messagepkg.SessionTurnGraph) map[string]struct{} {
-	heads := make(map[string]struct{}, len(graph.HeadTurnIDs))
-	for _, candidate := range graph.HeadTurnIDs {
-		head := strings.TrimSpace(candidate)
-		if head != "" {
-			heads[head] = struct{}{}
-		}
-	}
-	return heads
-}
-
-func resolvedHeadTurnIDForGraph(graph messagepkg.SessionTurnGraph, requestedHeadTurnID string) string {
-	heads := sessionTurnGraphHeadSet(graph)
-	nodes := make(map[string]messagepkg.SessionTurnGraphNode, len(graph.Nodes))
-	for _, node := range graph.Nodes {
-		turnID := strings.TrimSpace(node.TurnID)
-		if turnID == "" {
-			continue
-		}
-		nodes[turnID] = node
-	}
-	head := strings.TrimSpace(requestedHeadTurnID)
-	if head != "" {
-		if _, ok := heads[head]; ok && nodes[head].TurnID != "" {
-			return head
-		}
-		return ""
-	}
-	if head == "" || nodes[head].TurnID == "" {
-		head = strings.TrimSpace(graph.DefaultHeadTurnID)
-	}
-	if head == "" || nodes[head].TurnID == "" {
-		for _, candidate := range graph.HeadTurnIDs {
-			candidate = strings.TrimSpace(candidate)
-			if candidate != "" && nodes[candidate].TurnID != "" {
-				head = candidate
-				break
-			}
-		}
-	}
-	return head
-}
-
-func visibleTurnIDSetForHead(graph messagepkg.SessionTurnGraph, requestedHeadTurnID string) map[string]struct{} {
-	nodes := make(map[string]messagepkg.SessionTurnGraphNode, len(graph.Nodes))
-	for _, node := range graph.Nodes {
-		turnID := strings.TrimSpace(node.TurnID)
-		if turnID == "" {
-			continue
-		}
-		nodes[turnID] = node
-	}
-	visible := make(map[string]struct{})
-	if requested := strings.TrimSpace(requestedHeadTurnID); requested != "" {
-		if _, ok := sessionTurnGraphHeadSet(graph)[requested]; !ok {
-			visible[invalidRequestedHeadTurnID] = struct{}{}
-			return visible
-		}
-		if nodes[requested].TurnID == "" {
-			visible[invalidRequestedHeadTurnID] = struct{}{}
-			return visible
-		}
-	}
-	head := resolvedHeadTurnIDForGraph(graph, requestedHeadTurnID)
-	seen := make(map[string]struct{})
-	for head != "" {
-		if _, ok := seen[head]; ok {
-			break
-		}
-		node, ok := nodes[head]
-		if !ok {
-			break
-		}
-		seen[head] = struct{}{}
-		visible[head] = struct{}{}
-		head = strings.TrimSpace(node.ParentTurnID)
-	}
-	return visible
-}
-
 func messageVisibleInTurnSet(message messagepkg.Message, visibleTurnIDs map[string]struct{}) bool {
 	if len(visibleTurnIDs) == 0 {
 		return true
@@ -128,60 +46,70 @@ func messageVisibleInTurnSet(message messagepkg.Message, visibleTurnIDs map[stri
 	return ok
 }
 
-type liveTurnVisibility int
-
-const (
-	liveTurnHidden liveTurnVisibility = iota
-	liveTurnVisible
-	liveTurnStale
-)
-
-func addVisibleDescendantPathFromGraph(visibleTurnIDs map[string]struct{}, liveHeadTurnIDs map[string]struct{}, graph messagepkg.SessionTurnGraph, turnID string) liveTurnVisibility {
+// addVisibleDescendantPath decides whether a live message on an unseen turn
+// belongs to the subscribed view: it does when one of the live heads is an
+// ancestor of (or equal to) the message's turn, i.e. the turn linearly
+// extends the followed branch. Sibling variants created by retries or other
+// clients fail the check and stay hidden. On success the turn's ancestor
+// path joins the visible set and the turn becomes the new live head.
+func (h *MessageHandler) addVisibleDescendantPath(ctx context.Context, visibleTurnIDs map[string]struct{}, liveHeadTurnIDs map[string]struct{}, turnID string) (bool, error) {
 	if len(visibleTurnIDs) == 0 {
-		return liveTurnVisible
+		return true, nil
 	}
 	turnID = strings.TrimSpace(turnID)
 	if turnID == "" {
-		return liveTurnHidden
+		return false, nil
 	}
 	if _, ok := visibleTurnIDs[turnID]; ok {
-		return liveTurnVisible
+		return true, nil
 	}
+	lister, ok := h.messageService.(messagepkg.SessionTurnPathLister)
+	if !ok {
+		return false, nil
+	}
+	pathIDs, err := lister.ListSessionTurnPathIDs(ctx, turnID)
+	if err != nil {
+		return false, err
+	}
+	onFollowedBranch := false
+	for _, id := range pathIDs {
+		if _, ok := liveHeadTurnIDs[id]; ok {
+			onFollowedBranch = true
+			break
+		}
+	}
+	if !onFollowedBranch {
+		return false, nil
+	}
+	for _, id := range pathIDs {
+		visibleTurnIDs[id] = struct{}{}
+	}
+	liveHeadTurnIDs[turnID] = struct{}{}
+	return true, nil
+}
 
-	nodes := make(map[string]messagepkg.SessionTurnGraphNode, len(graph.Nodes))
-	for _, node := range graph.Nodes {
-		id := strings.TrimSpace(node.TurnID)
-		if id != "" {
-			nodes[id] = node
+// resolveSessionViewHead maps the client-requested turn id to the head that
+// should back the view: a real head passes through unchanged, any other turn
+// resolves to the most recently updated head whose path contains it, and ""
+// (or a turn no head contains) falls back to the session default view.
+func (h *MessageHandler) resolveSessionViewHead(ctx context.Context, sessionID, requestedTurnID string) (string, error) {
+	requested := strings.TrimSpace(requestedTurnID)
+	if requested == "" {
+		return "", nil
+	}
+	if validator, ok := h.messageService.(messagepkg.SessionHeadValidator); ok {
+		isHead, err := validator.IsSessionTurnHead(ctx, sessionID, requested)
+		if err != nil {
+			return "", err
+		}
+		if isHead {
+			return requested, nil
 		}
 	}
-	var path []string
-	seen := make(map[string]struct{})
-	for current := turnID; current != ""; {
-		if _, ok := liveHeadTurnIDs[current]; ok {
-			for _, id := range path {
-				visibleTurnIDs[id] = struct{}{}
-			}
-			liveHeadTurnIDs[turnID] = struct{}{}
-			return liveTurnVisible
-		}
-		if _, ok := seen[current]; ok {
-			return liveTurnHidden
-		}
-		seen[current] = struct{}{}
-		node, ok := nodes[current]
-		if !ok {
-			// Message persistence publishes before the session head transition
-			// is applied in the conversation flow. During that short window the
-			// refreshed graph may still be stale. Do not emit the raw message:
-			// ancestry is not proven yet, so sending it can leak another selected
-			// head's sibling content. Ask the client to refresh instead.
-			return liveTurnStale
-		}
-		path = append(path, current)
-		current = strings.TrimSpace(node.ParentTurnID)
+	if resolver, ok := h.messageService.(messagepkg.SessionTurnHeadResolver); ok {
+		return resolver.ResolveSessionTurnHead(ctx, sessionID, requested)
 	}
-	return liveTurnHidden
+	return "", nil
 }
 
 // StreamSessionMessageEvents godoc
@@ -227,13 +155,29 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 	botID = bot.ID
 	headTurnID := strings.TrimSpace(c.QueryParam("head_turn_id"))
 	headTurnID = sessionHeadTurnIDForVariantCapableSession(sess, headTurnID)
-	graph, err := h.messageService.GetSessionTurnGraph(c.Request().Context(), sessionID)
+	selectedHeadTurnID, err := h.resolveSessionViewHead(c.Request().Context(), sessionID, headTurnID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	selectedHeadTurnID := resolvedHeadTurnIDForGraph(graph, headTurnID)
+	// A requested view that no active head contains means the client's pinned
+	// head went stale (e.g. trimmed by another client). Tell it to refresh and
+	// fall back to the session default view.
 	requestedHeadMissing := headTurnID != "" && selectedHeadTurnID == ""
-	visibleTurnIDs := visibleTurnIDSetForHead(graph, headTurnID)
+	if selectedHeadTurnID == "" {
+		selectedHeadTurnID = strings.TrimSpace(sess.DefaultHeadTurnID)
+	}
+	visibleTurnIDs := make(map[string]struct{})
+	if selectedHeadTurnID != "" {
+		if lister, ok := h.messageService.(messagepkg.SessionTurnPathLister); ok {
+			pathIDs, err := lister.ListSessionTurnPathIDs(c.Request().Context(), selectedHeadTurnID)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+			}
+			for _, id := range pathIDs {
+				visibleTurnIDs[id] = struct{}{}
+			}
+		}
+	}
 	liveHeadTurnIDs := make(map[string]struct{}, 1)
 	if selectedHeadTurnID != "" {
 		liveHeadTurnIDs[selectedHeadTurnID] = struct{}{}
@@ -321,26 +265,16 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 					continue
 				}
 				if !messageVisibleInTurnSet(message, visibleTurnIDs) {
-					nextGraph, err := h.messageService.GetSessionTurnGraph(c.Request().Context(), sessionID)
+					visible, err := h.addVisibleDescendantPath(c.Request().Context(), visibleTurnIDs, liveHeadTurnIDs, message.TurnID)
 					if err != nil {
-						h.logger.Warn("refresh session turn graph for live message failed",
+						h.logger.Warn("resolve live message turn path failed",
 							slog.String("session_id", sessionID),
 							slog.String("turn_id", message.TurnID),
 							slog.Any("error", err),
 						)
 						continue
 					}
-					switch addVisibleDescendantPathFromGraph(visibleTurnIDs, liveHeadTurnIDs, nextGraph, message.TurnID) {
-					case liveTurnVisible:
-					case liveTurnStale:
-						if err := writeSSEJSON(writer, flusher, map[string]any{
-							"type":       "stale",
-							"session_id": sessionID,
-						}); err != nil {
-							return nil
-						}
-						continue
-					default:
+					if !visible {
 						continue
 					}
 				}

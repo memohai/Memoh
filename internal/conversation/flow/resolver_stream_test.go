@@ -83,10 +83,6 @@ func (*recordingMessageService) ListBeforeBySession(context.Context, string, tim
 	return nil, nil
 }
 
-func (*recordingMessageService) GetSessionTurnGraph(context.Context, string) (messagepkg.SessionTurnGraph, error) {
-	return messagepkg.SessionTurnGraph{}, nil
-}
-
 func (*recordingMessageService) LocateByExternalIDBySession(context.Context, string, string, int32, int32) (messagepkg.LocateResult, error) {
 	return messagepkg.LocateResult{}, nil
 }

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -239,79 +240,184 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 	}
 }
 
-// Regression: after a retry the session has two heads and the frontend
-// refreshes with include_graph, which runs the full graph metadata query.
-// The query now reads request grouping straight from the turn row:
-// request_group_id falls back to the turn's own id when NULL and passes
-// through the stored group when set (retry siblings share a group).
-func TestSQLiteListSessionTurnGraphNodeMetadataMultiHead(t *testing.T) {
-	ctx := context.Background()
-	conn := openPaginationDB(t, ctx)
-	botID := pageUUID(1500)
-	sessionID := pageUUID(1501)
+// seedVariantFixture builds the retry fixture shared by the view-by-turn
+// query tests: two root turns where turnB is a retry sibling of turnA
+// (inherited request group), plus turnC extending turnA. Active heads are
+// turnC (session default, most recently updated) and turnB.
+//
+//	turnA (root) ── turnC   [head, default]
+//	turnB (root, group=turnA)   [head]
+func seedVariantFixture(t *testing.T, ctx context.Context, conn *sql.DB, botID, sessionID string) (turnA, turnB, turnC string) {
+	t.Helper()
 	base := time.Date(2026, 7, 2, 14, 0, 0, 0, time.UTC)
-
-	turnA := pageTurnID(1)
-	turnB := pageTurnID(2)
-	requestA := pageMessageID(1, 1)
-	requestB := pageMessageID(2, 1)
+	turnA = pageTurnID(1)
+	turnB = pageTurnID(2)
+	turnC = pageTurnID(3)
 	for i, item := range []struct {
-		turnID, requestID, assistantID, requestGroupID string
+		turnID, parentID, requestGroupID string
+		hasAssistant                     bool
 	}{
-		{turnA, requestA, pageMessageID(1, 2), ""},
-		// turnB simulates a retry sibling that inherited turnA's group.
-		{turnB, requestB, pageMessageID(2, 2), turnA},
+		{turnA, "", "", true},
+		// turnB simulates a retry sibling that inherited turnA's group and
+		// has no final assistant message yet.
+		{turnB, "", turnA, false},
+		{turnC, turnA, "", true},
 	} {
-		for seq, msg := range []struct {
-			id, role string
-		}{
-			{item.requestID, "user"},
-			{item.assistantID, "assistant"},
-		} {
-			createdAt := base.Add(time.Duration(i*10+seq) * time.Second).Format("2006-01-02 15:04:05")
-			if _, err := conn.ExecContext(ctx, `
-INSERT INTO bot_history_messages (id, bot_id, session_id, turn_id, turn_message_seq, role, content, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-				msg.id, botID, sessionID, item.turnID, seq+1, msg.role,
-				fmt.Sprintf(`{"role":%q,"content":%q}`, msg.role, msg.id), createdAt,
-			); err != nil {
-				t.Fatalf("insert message %s: %v", msg.id, err)
-			}
-		}
-		requestGroupID := sql.NullString{String: item.requestGroupID, Valid: item.requestGroupID != ""}
+		parent := sql.NullString{String: item.parentID, Valid: item.parentID != ""}
+		group := sql.NullString{String: item.requestGroupID, Valid: item.requestGroupID != ""}
+		assistant := sql.NullString{String: pageMessageID(i+1, 2), Valid: item.hasAssistant}
 		if _, err := conn.ExecContext(ctx, `
 INSERT INTO bot_history_turns (id, bot_id, parent_turn_id, request_message_id, final_assistant_message_id, request_group_id, created_at)
-VALUES (?, ?, NULL, ?, ?, ?, ?)`,
-			item.turnID, botID, item.requestID, item.assistantID, requestGroupID,
+VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			item.turnID, botID, parent, pageMessageID(i+1, 1), assistant, group,
 			base.Add(time.Duration(i*10)*time.Second).Format("2006-01-02 15:04:05"),
 		); err != nil {
 			t.Fatalf("insert turn %s: %v", item.turnID, err)
 		}
 	}
-	insertPaginationSession(t, ctx, conn, botID, sessionID, turnA)
-	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_session_turn_heads (session_id, head_turn_id, bot_id) VALUES (?, ?, ?)`, sessionID, turnB, botID); err != nil {
+	insertPaginationSession(t, ctx, conn, botID, sessionID, turnC)
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO bot_session_turn_heads (session_id, head_turn_id, bot_id, updated_at)
+VALUES (?, ?, ?, ?)`,
+		sessionID, turnB, botID, base.Add(-time.Hour).Format("2006-01-02 15:04:05"),
+	); err != nil {
 		t.Fatalf("insert second head: %v", err)
 	}
+	return turnA, turnB, turnC
+}
+
+// TestSQLiteListSessionTurnSiblingsRootPage pins the page-level variant
+// metadata query: a page containing a root turn aggregates every reachable
+// root as its sibling set, request_group_id falls back to the turn's own id
+// when NULL and passes through the stored group for retry siblings.
+func TestSQLiteListSessionTurnSiblingsRootPage(t *testing.T) {
+	ctx := context.Background()
+	conn := openPaginationDB(t, ctx)
+	botID := pageUUID(1500)
+	sessionID := pageUUID(1501)
+	turnA, turnB, _ := seedVariantFixture(t, ctx, conn, botID, sessionID)
 	q := newPaginationQueries(t, conn)
 
-	rows, err := q.ListSessionTurnGraphNodeMetadata(ctx, mustUUID(t, sessionID))
+	rows, err := q.ListSessionTurnSiblings(ctx, pgsqlc.ListSessionTurnSiblingsParams{
+		SessionID: mustUUID(t, sessionID),
+		TurnIds:   []pgtype.UUID{mustUUID(t, turnA)},
+	})
 	if err != nil {
-		t.Fatalf("list graph node metadata: %v", err)
+		t.Fatalf("list turn siblings: %v", err)
 	}
 	if len(rows) != 2 {
-		t.Fatalf("graph nodes = %d, want 2", len(rows))
+		t.Fatalf("sibling rows = %d, want 2", len(rows))
 	}
 	if rows[0].TurnID.String() != turnA || rows[1].TurnID.String() != turnB {
-		t.Fatalf("graph node order = [%s %s], want [%s %s]", rows[0].TurnID, rows[1].TurnID, turnA, turnB)
+		t.Fatalf("sibling order = [%s %s], want [%s %s]", rows[0].TurnID, rows[1].TurnID, turnA, turnB)
 	}
 	if !rows[0].HasUser || !rows[0].HasAssistant {
-		t.Fatalf("first node flags = user:%v assistant:%v, want both true", rows[0].HasUser, rows[0].HasAssistant)
+		t.Fatalf("first row flags = user:%v assistant:%v, want both true", rows[0].HasUser, rows[0].HasAssistant)
+	}
+	if rows[1].HasAssistant {
+		t.Fatal("retry sibling without final assistant message reported has_assistant=true")
 	}
 	if rows[0].RequestGroupID.String() != turnA {
-		t.Fatalf("first node request group = %s, want self group %s", rows[0].RequestGroupID, turnA)
+		t.Fatalf("first row request group = %s, want self group %s", rows[0].RequestGroupID, turnA)
 	}
 	if rows[1].RequestGroupID.String() != turnA {
-		t.Fatalf("second node request group = %s, want inherited group %s", rows[1].RequestGroupID, turnA)
+		t.Fatalf("second row request group = %s, want inherited group %s", rows[1].RequestGroupID, turnA)
+	}
+}
+
+// TestSQLiteListSessionTurnSiblingsChildPage verifies a non-root page turn
+// only aggregates children of the same parent — the sibling root fork stays
+// out of the result.
+func TestSQLiteListSessionTurnSiblingsChildPage(t *testing.T) {
+	ctx := context.Background()
+	conn := openPaginationDB(t, ctx)
+	botID := pageUUID(1510)
+	sessionID := pageUUID(1511)
+	_, _, turnC := seedVariantFixture(t, ctx, conn, botID, sessionID)
+	q := newPaginationQueries(t, conn)
+
+	rows, err := q.ListSessionTurnSiblings(ctx, pgsqlc.ListSessionTurnSiblingsParams{
+		SessionID: mustUUID(t, sessionID),
+		TurnIds:   []pgtype.UUID{mustUUID(t, turnC)},
+	})
+	if err != nil {
+		t.Fatalf("list turn siblings: %v", err)
+	}
+	if len(rows) != 1 || rows[0].TurnID.String() != turnC {
+		t.Fatalf("sibling rows = %#v, want only %s", rows, turnC)
+	}
+}
+
+// TestSQLiteResolveSessionTurnHead pins head resolution for variant
+// switching: a non-head turn resolves to the head whose path contains it, a
+// head resolves to itself, and a turn outside every head path resolves to
+// nothing.
+func TestSQLiteResolveSessionTurnHead(t *testing.T) {
+	ctx := context.Background()
+	conn := openPaginationDB(t, ctx)
+	botID := pageUUID(1520)
+	sessionID := pageUUID(1521)
+	turnA, turnB, turnC := seedVariantFixture(t, ctx, conn, botID, sessionID)
+	q := newPaginationQueries(t, conn)
+
+	resolved, err := q.ResolveSessionTurnHead(ctx, pgsqlc.ResolveSessionTurnHeadParams{
+		SessionID:    mustUUID(t, sessionID),
+		TargetTurnID: mustUUID(t, turnA),
+	})
+	if err != nil {
+		t.Fatalf("resolve ancestor turn: %v", err)
+	}
+	if resolved.String() != turnC {
+		t.Fatalf("resolved head for %s = %s, want %s", turnA, resolved, turnC)
+	}
+
+	resolved, err = q.ResolveSessionTurnHead(ctx, pgsqlc.ResolveSessionTurnHeadParams{
+		SessionID:    mustUUID(t, sessionID),
+		TargetTurnID: mustUUID(t, turnB),
+	})
+	if err != nil {
+		t.Fatalf("resolve head turn: %v", err)
+	}
+	if resolved.String() != turnB {
+		t.Fatalf("resolved head for %s = %s, want itself", turnB, resolved)
+	}
+
+	if _, err := q.ResolveSessionTurnHead(ctx, pgsqlc.ResolveSessionTurnHeadParams{
+		SessionID:    mustUUID(t, sessionID),
+		TargetTurnID: mustUUID(t, pageTurnID(99)),
+	}); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("resolve unknown turn err = %v, want sql.ErrNoRows", err)
+	}
+}
+
+// TestSQLiteListSessionTurnPathIDs pins the SSE path query: the head's
+// ancestor chain, self included, and nothing from sibling branches.
+func TestSQLiteListSessionTurnPathIDs(t *testing.T) {
+	ctx := context.Background()
+	conn := openPaginationDB(t, ctx)
+	botID := pageUUID(1530)
+	sessionID := pageUUID(1531)
+	turnA, turnB, turnC := seedVariantFixture(t, ctx, conn, botID, sessionID)
+	q := newPaginationQueries(t, conn)
+
+	ids, err := q.ListSessionTurnPathIDs(ctx, mustUUID(t, turnC))
+	if err != nil {
+		t.Fatalf("list path ids: %v", err)
+	}
+	got := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		got[id.String()] = struct{}{}
+	}
+	if len(got) != 2 {
+		t.Fatalf("path ids = %v, want {%s %s}", ids, turnC, turnA)
+	}
+	for _, want := range []string{turnA, turnC} {
+		if _, ok := got[want]; !ok {
+			t.Fatalf("path ids = %v, missing %s", ids, want)
+		}
+	}
+	if _, ok := got[turnB]; ok {
+		t.Fatalf("path ids leaked sibling branch turn %s: %v", turnB, ids)
 	}
 }
 
@@ -360,6 +466,7 @@ CREATE TABLE bot_session_turn_heads (
   session_id TEXT NOT NULL,
   head_turn_id TEXT NOT NULL,
   bot_id TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (session_id, head_turn_id)
 );
 CREATE TABLE bot_history_messages (

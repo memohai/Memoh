@@ -86,23 +86,19 @@ type LocateResult struct {
 	TargetID string
 }
 
-type SessionTurnGraphNode struct {
-	TurnID       string `json:"turn_id"`
-	ParentTurnID string `json:"parent_turn_id,omitempty"`
-	Timestamp    string `json:"timestamp,omitempty"`
-	// RequestKey is an opaque token grouping sibling turns that carry the
-	// same logical request: retry siblings share it, edits get a new one.
-	// Backed by bot_history_turns.request_group_id (falls back to the turn's
-	// own id when unset).
-	RequestKey   string `json:"request_key,omitempty"`
-	HasUser      bool   `json:"has_user,omitempty"`
-	HasAssistant bool   `json:"has_assistant,omitempty"`
-}
-
-type SessionTurnGraph struct {
-	DefaultHeadTurnID string                 `json:"default_head_turn_id,omitempty"`
-	HeadTurnIDs       []string               `json:"head_turn_ids"`
-	Nodes             []SessionTurnGraphNode `json:"nodes"`
+// SessionTurnMeta carries variant metadata for one transcript-page turn (or
+// one of its sibling variants). Siblings are the turns reachable from the
+// session's active heads that share the turn's parent, ordered oldest-first.
+// RequestGroupID groups siblings carrying the same logical request: retry
+// siblings share it, edits get a new one (backed by
+// bot_history_turns.request_group_id, falling back to the turn's own id).
+type SessionTurnMeta struct {
+	TurnID         string   `json:"turn_id"`
+	ParentTurnID   string   `json:"parent_turn_id,omitempty"`
+	RequestGroupID string   `json:"request_group_id,omitempty"`
+	SiblingTurnIDs []string `json:"sibling_turn_ids,omitempty"`
+	HasUser        bool     `json:"has_user,omitempty"`
+	HasAssistant   bool     `json:"has_assistant,omitempty"`
 }
 
 // Writer defines write behavior needed by the inbound router.
@@ -124,7 +120,6 @@ type Service interface {
 	ListActiveSinceByTurn(ctx context.Context, headTurnID string, since time.Time) ([]Message, error)
 	ListLatestBySession(ctx context.Context, sessionID string, limit int32) ([]Message, error)
 	ListBeforeBySession(ctx context.Context, sessionID string, before time.Time, beforeID string, limit int32) ([]Message, error)
-	GetSessionTurnGraph(ctx context.Context, sessionID string) (SessionTurnGraph, error)
 	LocateByExternalIDBySession(ctx context.Context, sessionID string, externalMessageID string, beforeLimit int32, afterLimit int32) (LocateResult, error)
 	DeleteByBot(ctx context.Context, botID string) error
 	DeleteBySession(ctx context.Context, sessionID string) error
@@ -151,9 +146,27 @@ type SessionHeadValidator interface {
 	IsSessionTurnHead(ctx context.Context, sessionID string, headTurnID string) (bool, error)
 }
 
-// SessionHeadLister lists a session's active head turn ids without loading
-// full turn graph node metadata. Handlers use it to short-circuit graph
-// loading for sessions that cannot have variants (zero or one head).
+// SessionHeadLister lists a session's active head turn ids.
 type SessionHeadLister interface {
 	ListSessionTurnHeadIDs(ctx context.Context, sessionID string) ([]string, error)
+}
+
+// SessionTurnMetaLister returns variant metadata for the turns on one
+// transcript page: each requested turn plus every sibling variant reachable
+// from the session's active heads.
+type SessionTurnMetaLister interface {
+	ListSessionTurnMeta(ctx context.Context, sessionID string, turnIDs []string) ([]SessionTurnMeta, error)
+}
+
+// SessionTurnHeadResolver maps an arbitrary turn id to the session head whose
+// ancestor path contains it (empty result when no head contains the turn).
+type SessionTurnHeadResolver interface {
+	ResolveSessionTurnHead(ctx context.Context, sessionID string, turnID string) (string, error)
+}
+
+// SessionTurnPathLister lists the ancestor path turn ids (self included) of
+// one head turn. The SSE stream uses it to filter live messages to the
+// subscribed head path.
+type SessionTurnPathLister interface {
+	ListSessionTurnPathIDs(ctx context.Context, headTurnID string) ([]string, error)
 }

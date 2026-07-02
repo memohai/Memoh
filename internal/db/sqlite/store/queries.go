@@ -4161,21 +4161,59 @@ func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID pgtype.UU
 	return result, nil
 }
 
-func (q *Queries) ListSessionTurnGraphNodeMetadata(ctx context.Context, sessionID pgtype.UUID) ([]pgsqlc.ListSessionTurnGraphNodeMetadataRow, error) {
+func (q *Queries) ListSessionTurnPathIDs(ctx context.Context, headTurnID pgtype.UUID) ([]pgtype.UUID, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured
 	}
-	var sqliteSessionID string
-	if err := convertValue(sessionID, &sqliteSessionID); err != nil {
+	var sqliteHeadTurnID string
+	if err := convertValue(headTurnID, &sqliteHeadTurnID); err != nil {
 		return nil, err
 	}
-	out, err := q.store.queries.ListSessionTurnGraphNodeMetadata(ctx, sqliteSessionID)
+	out, err := q.store.queries.ListSessionTurnPathIDs(ctx, sqliteHeadTurnID)
 	if err != nil {
 		return nil, mapQueryErr(err)
 	}
-	var result []pgsqlc.ListSessionTurnGraphNodeMetadataRow
+	var result []pgtype.UUID
 	if err := convertValue(out, &result); err != nil {
 		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListSessionTurnSiblings(ctx context.Context, arg pgsqlc.ListSessionTurnSiblingsParams) ([]pgsqlc.ListSessionTurnSiblingsRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListSessionTurnSiblingsParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListSessionTurnSiblings(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ListSessionTurnSiblingsRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ResolveSessionTurnHead(ctx context.Context, arg pgsqlc.ResolveSessionTurnHeadParams) (pgtype.UUID, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgtype.UUID{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ResolveSessionTurnHeadParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgtype.UUID{}, err
+	}
+	out, err := q.store.queries.ResolveSessionTurnHead(ctx, sqliteArg)
+	if err != nil {
+		return pgtype.UUID{}, mapQueryErr(err)
+	}
+	var result pgtype.UUID
+	if err := convertValue(out, &result); err != nil {
+		return pgtype.UUID{}, err
 	}
 	return result, nil
 }

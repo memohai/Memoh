@@ -3346,17 +3346,18 @@ definitions:
     properties:
       default_head_turn_id:
         type: string
-      head_turn_ids:
-        items:
-          type: string
-        type: array
+      head_turn_id:
+        description: |-
+          HeadTurnID is the head actually backing this page after server-side
+          resolution; clients pin follow-up sends and SSE subscriptions to it.
+        type: string
       items:
         items:
           $ref: '#/definitions/conversation.UITurn'
         type: array
-      nodes:
+      turns:
         items:
-          $ref: '#/definitions/handlers.sessionTurnGraphUINode'
+          $ref: '#/definitions/handlers.sessionTurnMetaUI'
         type: array
     type: object
   handlers.oauthAuthorizeRequest:
@@ -3380,7 +3381,7 @@ definitions:
       state:
         type: string
     type: object
-  handlers.sessionTurnGraphUINode:
+  handlers.sessionTurnMetaUI:
     properties:
       has_assistant:
         type: boolean
@@ -3388,10 +3389,12 @@ definitions:
         type: boolean
       parent_turn_id:
         type: string
-      request_key:
+      request_group_id:
         type: string
-      timestamp:
-        type: string
+      sibling_turn_ids:
+        items:
+          type: string
+        type: array
       turn_id:
         type: string
     type: object
@@ -8067,14 +8070,11 @@ paths:
         in: query
         name: before_id
         type: string
-      - description: Selected session head turn ID
+      - description: Any turn ID selecting the session view; resolved server-side
+          to a head
         in: query
         name: head_turn_id
         type: string
-      - description: Include session turn graph metadata
-        in: query
-        name: include_graph
-        type: boolean
       produces:
       - application/json
       responses:
@@ -8129,7 +8129,8 @@ paths:
         in: query
         name: after
         type: integer
-      - description: Selected session head turn ID
+      - description: Any turn ID selecting the session view; resolved server-side
+          to a head
         in: query
         name: head_turn_id
         type: string

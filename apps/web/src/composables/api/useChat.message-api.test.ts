@@ -65,12 +65,11 @@ describe('fetchMessagesUI', () => {
     })
   })
 
-  it('requests the turn graph only when explicitly asked', async () => {
+  it('passes the requested view head so the server resolves that branch', async () => {
     vi.mocked(client.get).mockResolvedValue({ data: { items: [] } } as never)
 
     await fetchMessagesUI('bot-1', 'session-1', {
       limit: 12,
-      includeGraph: true,
       headTurnId: ' turn-selected ',
     })
 
@@ -81,7 +80,6 @@ describe('fetchMessagesUI', () => {
         session_id: 'session-1',
         format: 'ui',
         limit: 12,
-        include_graph: '1',
         head_turn_id: 'turn-selected',
       },
       throwOnError: true,

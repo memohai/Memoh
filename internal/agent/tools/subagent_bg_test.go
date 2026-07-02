@@ -193,10 +193,6 @@ func (*fakeAgentMessageService) ListBeforeBySession(context.Context, string, tim
 	return nil, nil
 }
 
-func (*fakeAgentMessageService) GetSessionTurnGraph(context.Context, string) (messagepkg.SessionTurnGraph, error) {
-	return messagepkg.SessionTurnGraph{}, nil
-}
-
 func (*fakeAgentMessageService) LocateByExternalIDBySession(context.Context, string, string, int32, int32) (messagepkg.LocateResult, error) {
 	return messagepkg.LocateResult{}, nil
 }

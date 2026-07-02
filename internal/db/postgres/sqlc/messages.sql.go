@@ -2450,68 +2450,6 @@ func (q *Queries) ListSessionOwnedTurnsForCleanup(ctx context.Context, sessionID
 	return items, nil
 }
 
-const listSessionTurnGraphNodeMetadata = `-- name: ListSessionTurnGraphNodeMetadata :many
-WITH RECURSIVE graph_turns AS (
-  SELECT t.id, t.parent_turn_id
-  FROM bot_sessions bs
-  JOIN bot_session_turn_heads h ON h.session_id = bs.id
-    AND h.bot_id = bs.bot_id
-  JOIN bot_history_turns t ON t.id = h.head_turn_id
-  WHERE bs.id = $1
-    AND bs.deleted_at IS NULL
-  UNION
-  SELECT p.id, p.parent_turn_id
-  FROM bot_history_turns p
-  JOIN graph_turns gt ON gt.parent_turn_id = p.id
-)
-SELECT
-  gt.id AS turn_id,
-  gt.parent_turn_id,
-  t.created_at AS node_created_at,
-  COALESCE(t.request_group_id, t.id) AS request_group_id,
-  (t.request_message_id IS NOT NULL)::boolean AS has_user,
-  (t.final_assistant_message_id IS NOT NULL)::boolean AS has_assistant
-FROM graph_turns gt
-JOIN bot_history_turns t ON t.id = gt.id
-ORDER BY t.created_at ASC, gt.id ASC
-`
-
-type ListSessionTurnGraphNodeMetadataRow struct {
-	TurnID         pgtype.UUID        `json:"turn_id"`
-	ParentTurnID   pgtype.UUID        `json:"parent_turn_id"`
-	NodeCreatedAt  pgtype.Timestamptz `json:"node_created_at"`
-	RequestGroupID pgtype.UUID        `json:"request_group_id"`
-	HasUser        bool               `json:"has_user"`
-	HasAssistant   bool               `json:"has_assistant"`
-}
-
-func (q *Queries) ListSessionTurnGraphNodeMetadata(ctx context.Context, sessionID pgtype.UUID) ([]ListSessionTurnGraphNodeMetadataRow, error) {
-	rows, err := q.db.Query(ctx, listSessionTurnGraphNodeMetadata, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListSessionTurnGraphNodeMetadataRow
-	for rows.Next() {
-		var i ListSessionTurnGraphNodeMetadataRow
-		if err := rows.Scan(
-			&i.TurnID,
-			&i.ParentTurnID,
-			&i.NodeCreatedAt,
-			&i.RequestGroupID,
-			&i.HasUser,
-			&i.HasAssistant,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listSessionTurnGraphTurns = `-- name: ListSessionTurnGraphTurns :many
 WITH RECURSIVE graph_turns AS (
   SELECT t.id, t.parent_turn_id
@@ -2553,6 +2491,125 @@ func (q *Queries) ListSessionTurnGraphTurns(ctx context.Context, sessionID pgtyp
 			&i.OriginKind,
 			&i.OriginTurnID,
 			&i.RequestGroupID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSessionTurnPathIDs = `-- name: ListSessionTurnPathIDs :many
+WITH RECURSIVE path_turns AS (
+  SELECT t.id, t.parent_turn_id
+  FROM bot_history_turns t
+  WHERE t.id = $1
+  UNION ALL
+  SELECT p.id, p.parent_turn_id
+  FROM bot_history_turns p
+  JOIN path_turns pt ON pt.parent_turn_id = p.id
+)
+SELECT pt.id
+FROM path_turns pt
+`
+
+// Ancestor path ids (self included) of one head turn. Used by the SSE stream
+// to decide whether a live message belongs to the subscribed head path.
+func (q *Queries) ListSessionTurnPathIDs(ctx context.Context, headTurnID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listSessionTurnPathIDs, headTurnID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSessionTurnSiblings = `-- name: ListSessionTurnSiblings :many
+WITH RECURSIVE session_turns AS (
+  SELECT t.id, t.parent_turn_id
+  FROM bot_session_turn_heads h
+  JOIN bot_history_turns t ON t.id = h.head_turn_id
+  WHERE h.session_id = $1
+  UNION
+  SELECT p.id, p.parent_turn_id
+  FROM bot_history_turns p
+  JOIN session_turns st ON st.parent_turn_id = p.id
+),
+page_parents AS (
+  SELECT DISTINCT t.parent_turn_id
+  FROM bot_history_turns t
+  WHERE t.id = ANY($2::uuid[])
+)
+SELECT
+  t.id AS turn_id,
+  t.parent_turn_id,
+  COALESCE(t.request_group_id, t.id) AS request_group_id,
+  (t.request_message_id IS NOT NULL)::boolean AS has_user,
+  (t.final_assistant_message_id IS NOT NULL)::boolean AS has_assistant
+FROM bot_history_turns t
+JOIN session_turns st ON st.id = t.id
+WHERE (
+    t.parent_turn_id IS NOT NULL
+    AND t.parent_turn_id IN (
+      SELECT pp.parent_turn_id FROM page_parents pp WHERE pp.parent_turn_id IS NOT NULL
+    )
+  )
+  OR (
+    t.parent_turn_id IS NULL
+    AND EXISTS (
+      SELECT 1 FROM page_parents pp WHERE pp.parent_turn_id IS NULL
+    )
+  )
+ORDER BY t.created_at ASC, t.id ASC
+`
+
+type ListSessionTurnSiblingsParams struct {
+	SessionID pgtype.UUID   `json:"session_id"`
+	TurnIds   []pgtype.UUID `json:"turn_ids"`
+}
+
+type ListSessionTurnSiblingsRow struct {
+	TurnID         pgtype.UUID `json:"turn_id"`
+	ParentTurnID   pgtype.UUID `json:"parent_turn_id"`
+	RequestGroupID pgtype.UUID `json:"request_group_id"`
+	HasUser        bool        `json:"has_user"`
+	HasAssistant   bool        `json:"has_assistant"`
+}
+
+// Variant metadata for one transcript page: every turn reachable from the
+// session's active heads that shares a parent with one of the page turns
+// (root page turns pair with the other reachable roots). Restricting
+// candidates to the reachable set keeps forks made in other sessions out of
+// the variant switcher.
+func (q *Queries) ListSessionTurnSiblings(ctx context.Context, arg ListSessionTurnSiblingsParams) ([]ListSessionTurnSiblingsRow, error) {
+	rows, err := q.db.Query(ctx, listSessionTurnSiblings, arg.SessionID, arg.TurnIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSessionTurnSiblingsRow
+	for rows.Next() {
+		var i ListSessionTurnSiblingsRow
+		if err := rows.Scan(
+			&i.TurnID,
+			&i.ParentTurnID,
+			&i.RequestGroupID,
+			&i.HasUser,
+			&i.HasAssistant,
 		); err != nil {
 			return nil, err
 		}
@@ -2642,6 +2699,42 @@ type MarkMessagesCompactedParams struct {
 func (q *Queries) MarkMessagesCompacted(ctx context.Context, arg MarkMessagesCompactedParams) error {
 	_, err := q.db.Exec(ctx, markMessagesCompacted, arg.CompactID, arg.Column2)
 	return err
+}
+
+const resolveSessionTurnHead = `-- name: ResolveSessionTurnHead :one
+WITH RECURSIVE descendant_turns AS (
+  SELECT t.id
+  FROM bot_history_turns t
+  WHERE t.id = $2
+  UNION ALL
+  SELECT c.id
+  FROM bot_history_turns c
+  JOIN descendant_turns dt ON c.parent_turn_id = dt.id
+)
+SELECT h.head_turn_id
+FROM bot_session_turn_heads h
+WHERE h.session_id = $1
+  AND h.head_turn_id IN (SELECT dt.id FROM descendant_turns dt)
+ORDER BY h.updated_at DESC, h.head_turn_id DESC
+LIMIT 1
+`
+
+type ResolveSessionTurnHeadParams struct {
+	SessionID    pgtype.UUID `json:"session_id"`
+	TargetTurnID pgtype.UUID `json:"target_turn_id"`
+}
+
+// Resolve any turn id to a session head whose ancestor path contains it
+// (a head contains the turn exactly when the head is one of the turn's
+// descendants, self included), preferring the most recently updated head.
+// Used when a client pages with a non-head turn id (variant switching);
+// true heads short-circuit through the cheap heads-table lookup before this
+// recursion runs.
+func (q *Queries) ResolveSessionTurnHead(ctx context.Context, arg ResolveSessionTurnHeadParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, resolveSessionTurnHead, arg.SessionID, arg.TargetTurnID)
+	var head_turn_id pgtype.UUID
+	err := row.Scan(&head_turn_id)
+	return head_turn_id, err
 }
 
 const searchMessages = `-- name: SearchMessages :many

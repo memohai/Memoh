@@ -133,7 +133,6 @@ export interface FetchMessagesOptions {
   before?: string
   beforeId?: string
   session_id?: string
-  includeGraph?: boolean
   headTurnId?: string
 }
 
@@ -304,20 +303,24 @@ export interface UISystemTurn {
 
 export type UITurn = UIUserTurn | UIAssistantTurn | UISystemTurn
 
-export interface UITurnGraphNode {
+// Per-turn variant metadata carried by every UI page response: each page
+// turn plus every sibling variant reachable from the session's active heads.
+export interface UITurnMeta {
   turn_id: string
   parent_turn_id?: string
-  timestamp?: string
-  request_key?: string
+  request_group_id?: string
+  sibling_turn_ids?: string[]
   has_user?: boolean
   has_assistant?: boolean
 }
 
 export interface FetchMessagesUIResult {
   items: UITurn[]
+  // Head actually backing this page after server-side resolution; the
+  // client pins follow-up sends and SSE subscriptions to it.
+  head_turn_id?: string
   default_head_turn_id?: string
-  head_turn_ids?: string[]
-  nodes?: UITurnGraphNode[]
+  turns?: UITurnMeta[]
 }
 
 export interface UIStreamStartEvent {

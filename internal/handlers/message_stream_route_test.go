@@ -225,328 +225,200 @@ func TestLiveMessageVisibilityUsesSelectedHeadPath(t *testing.T) {
 	}
 }
 
-func TestLiveMessageVisibilityAllowsDescendantsOfSelectedHead(t *testing.T) {
+// TestAddVisibleDescendantPathAllowsLinearExtension pins the live-filter
+// contract: a message on an unseen turn is visible only when one of the
+// followed live heads sits on the turn's ancestor path (the turn linearly
+// extends the followed branch). Sibling variants stay hidden.
+//
+// Fixture paths (child -> root): a <- b <- d <- e, plus sibling c <- a.
+func TestAddVisibleDescendantPathAllowsLinearExtension(t *testing.T) {
 	t.Parallel()
 
+	svc := &turnPathMessageService{paths: map[string][]string{
+		"turn-d": {"turn-d", "turn-b", "turn-a"},
+		"turn-e": {"turn-e", "turn-d", "turn-b", "turn-a"},
+		"turn-c": {"turn-c", "turn-a"},
+	}}
+	h := &MessageHandler{messageService: svc}
 	visible := map[string]struct{}{
 		"turn-a": {},
 		"turn-b": {},
 	}
 	liveHeads := map[string]struct{}{"turn-b": {}}
-	graph := messagepkg.SessionTurnGraph{
-		DefaultHeadTurnID: "turn-e",
-		HeadTurnIDs:       []string{"turn-c", "turn-e"},
-		Nodes: []messagepkg.SessionTurnGraphNode{
-			{TurnID: "turn-a"},
-			{TurnID: "turn-b", ParentTurnID: "turn-a"},
-			{TurnID: "turn-c", ParentTurnID: "turn-a"},
-			{TurnID: "turn-d", ParentTurnID: "turn-b"},
-			{TurnID: "turn-e", ParentTurnID: "turn-d"},
-		},
-	}
 
-	if got := addVisibleDescendantPathFromGraph(visible, liveHeads, graph, "turn-d"); got != liveTurnVisible {
+	visibleGot, err := h.addVisibleDescendantPath(context.Background(), visible, liveHeads, "turn-d")
+	if err != nil {
+		t.Fatalf("addVisibleDescendantPath(turn-d) error = %v", err)
+	}
+	if !visibleGot {
 		t.Fatal("descendant of selected head was filtered")
 	}
 	if _, ok := visible["turn-d"]; !ok {
 		t.Fatalf("descendant was not added to visible set: %#v", visible)
 	}
-	if got := addVisibleDescendantPathFromGraph(visible, liveHeads, graph, "turn-e"); got != liveTurnVisible {
+
+	// turn-e extends turn-d, which just became a live head.
+	visibleGot, err = h.addVisibleDescendantPath(context.Background(), visible, liveHeads, "turn-e")
+	if err != nil {
+		t.Fatalf("addVisibleDescendantPath(turn-e) error = %v", err)
+	}
+	if !visibleGot {
 		t.Fatal("descendant of previously accepted live head was filtered")
 	}
 	if _, ok := visible["turn-e"]; !ok {
 		t.Fatalf("second descendant was not added to visible set: %#v", visible)
 	}
-	if got := addVisibleDescendantPathFromGraph(visible, liveHeads, graph, "turn-c"); got != liveTurnHidden {
+
+	visibleGot, err = h.addVisibleDescendantPath(context.Background(), visible, liveHeads, "turn-c")
+	if err != nil {
+		t.Fatalf("addVisibleDescendantPath(turn-c) error = %v", err)
+	}
+	if visibleGot {
 		t.Fatal("sibling branch was treated as selected-path descendant")
 	}
-	if got := addVisibleDescendantPathFromGraph(visible, liveHeads, graph, "turn-pending"); got != liveTurnStale {
-		t.Fatalf("pending live turn missing from graph = %v, want stale", got)
+	if _, ok := visible["turn-c"]; ok {
+		t.Fatalf("sibling branch leaked into visible set: %#v", visible)
 	}
 }
 
-func TestVisibleTurnIDSetForHeadRejectsInvalidRequestedHead(t *testing.T) {
+// TestAddVisibleDescendantPathLegacyAllVisible covers sessions without a
+// selected path: an empty visible set means "no head filtering", so every
+// live message passes.
+func TestAddVisibleDescendantPathLegacyAllVisible(t *testing.T) {
 	t.Parallel()
 
-	graph := messagepkg.SessionTurnGraph{
-		DefaultHeadTurnID: "turn-b",
-		HeadTurnIDs:       []string{"turn-b"},
-		Nodes: []messagepkg.SessionTurnGraphNode{
-			{TurnID: "turn-a"},
-			{TurnID: "turn-b", ParentTurnID: "turn-a"},
-		},
+	h := &MessageHandler{messageService: &turnPathMessageService{}}
+	visibleGot, err := h.addVisibleDescendantPath(context.Background(), map[string]struct{}{}, map[string]struct{}{}, "turn-x")
+	if err != nil {
+		t.Fatalf("addVisibleDescendantPath() error = %v", err)
 	}
-	visible := visibleTurnIDSetForHead(graph, "missing")
-	if len(visible) == 0 {
-		t.Fatalf("invalid requested head must not fall through to legacy all-visible mode")
-	}
-	if _, ok := visible["turn-a"]; ok {
-		t.Fatalf("visible included parent from default head after invalid request: %#v", visible)
-	}
-	if _, ok := visible["turn-b"]; ok {
-		t.Fatalf("visible included default head after invalid request: %#v", visible)
-	}
-	if _, ok := visible["missing"]; ok {
-		t.Fatalf("visible included invalid requested head: %#v", visible)
+	if !visibleGot {
+		t.Fatal("legacy session without selected path filtered a live message")
 	}
 }
 
-func TestVisibleTurnIDSetForHeadRejectsNonLeafRequestedHead(t *testing.T) {
+// TestAddVisibleDescendantPathRejectsBlankTurn pins that a live message
+// without a turn id stays hidden once a selected path exists.
+func TestAddVisibleDescendantPathRejectsBlankTurn(t *testing.T) {
 	t.Parallel()
 
-	graph := messagepkg.SessionTurnGraph{
-		DefaultHeadTurnID: "turn-c",
-		HeadTurnIDs:       []string{"turn-c"},
-		Nodes: []messagepkg.SessionTurnGraphNode{
-			{TurnID: "turn-a"},
-			{TurnID: "turn-b", ParentTurnID: "turn-a"},
-			{TurnID: "turn-c", ParentTurnID: "turn-b"},
-		},
+	h := &MessageHandler{messageService: &turnPathMessageService{}}
+	visible := map[string]struct{}{"turn-a": {}}
+	visibleGot, err := h.addVisibleDescendantPath(context.Background(), visible, map[string]struct{}{"turn-a": {}}, "  ")
+	if err != nil {
+		t.Fatalf("addVisibleDescendantPath() error = %v", err)
 	}
-	if got := resolvedHeadTurnIDForGraph(graph, "turn-b"); got != "" {
-		t.Fatalf("resolved stale requested head = %q, want empty", got)
-	}
-	visible := visibleTurnIDSetForHead(graph, "turn-b")
-	if len(visible) == 0 {
-		t.Fatalf("stale requested head must not fall through to legacy all-visible mode")
-	}
-	for _, turnID := range []string{"turn-a", "turn-b", "turn-c"} {
-		if _, ok := visible[turnID]; ok {
-			t.Fatalf("visible included %s after stale requested head: %#v", turnID, visible)
-		}
+	if visibleGot {
+		t.Fatal("blank turn id passed the selected-path filter")
 	}
 }
 
-func TestVisibleTurnIDSetForHeadUsesDefaultWhenUnspecified(t *testing.T) {
+// TestResolveSessionViewHeadPassesThroughRealHead verifies the cheap path: a
+// requested turn that IS an active head short-circuits through the heads
+// table check and never runs the descendant recursion.
+func TestResolveSessionViewHeadPassesThroughRealHead(t *testing.T) {
 	t.Parallel()
 
-	graph := messagepkg.SessionTurnGraph{
-		DefaultHeadTurnID: "turn-b",
-		HeadTurnIDs:       []string{"turn-b"},
-		Nodes: []messagepkg.SessionTurnGraphNode{
-			{TurnID: "turn-a"},
-			{TurnID: "turn-b", ParentTurnID: "turn-a"},
-		},
-	}
-	visible := visibleTurnIDSetForHead(graph, "")
-	if _, ok := visible["turn-a"]; !ok {
-		t.Fatalf("visible did not include parent turn: %#v", visible)
-	}
-	if _, ok := visible["turn-b"]; !ok {
-		t.Fatalf("visible did not include default head turn: %#v", visible)
-	}
-}
-
-func TestValidatedSessionTurnGraphRejectsStaleExplicitHead(t *testing.T) {
-	t.Parallel()
-
-	h := &MessageHandler{messageService: &graphOnlyMessageService{
-		graph: messagepkg.SessionTurnGraph{
-			DefaultHeadTurnID: "turn-c",
-			HeadTurnIDs:       []string{"turn-c"},
-			Nodes: []messagepkg.SessionTurnGraphNode{
-				{TurnID: "turn-a"},
-				{TurnID: "turn-b", ParentTurnID: "turn-a"},
-				{TurnID: "turn-c", ParentTurnID: "turn-b"},
-			},
-		},
-	}}
-	_, err := h.validatedSessionTurnGraph(context.Background(), "session-1", "turn-b", "", false)
-	if err == nil {
-		t.Fatal("validatedSessionTurnGraph() err = nil, want stale HTTP error")
-	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) {
-		t.Fatalf("error type = %T, want *echo.HTTPError", err)
-	}
-	if httpErr.Code != http.StatusConflict {
-		t.Fatalf("HTTPError.Code = %d, want 409", httpErr.Code)
-	}
-}
-
-func TestValidatedSessionTurnGraphUsesHeadValidator(t *testing.T) {
-	t.Parallel()
-
-	svc := &headValidatorMessageService{ok: true}
+	svc := &viewHeadMessageService{isHead: true}
 	h := &MessageHandler{messageService: svc}
-	if _, err := h.validatedSessionTurnGraph(context.Background(), "session-1", "turn-b", "", false); err != nil {
-		t.Fatalf("validatedSessionTurnGraph() error = %v", err)
+	got, err := h.resolveSessionViewHead(context.Background(), "session-1", "turn-b")
+	if err != nil {
+		t.Fatalf("resolveSessionViewHead() error = %v", err)
+	}
+	if got != "turn-b" {
+		t.Fatalf("resolved head = %q, want turn-b", got)
 	}
 	if svc.validatorCalls != 1 {
 		t.Fatalf("validator calls = %d, want 1", svc.validatorCalls)
 	}
-	if svc.graphCalls != 0 {
-		t.Fatalf("graph calls = %d, want 0", svc.graphCalls)
+	if svc.resolverCalls != 0 {
+		t.Fatalf("resolver calls = %d, want 0", svc.resolverCalls)
 	}
 }
 
-func TestValidatedSessionTurnGraphValidatorRejectsStaleHead(t *testing.T) {
+// TestResolveSessionViewHeadResolvesNonHeadTurn verifies variant switching:
+// a non-head turn resolves to the head whose path contains it.
+func TestResolveSessionViewHeadResolvesNonHeadTurn(t *testing.T) {
 	t.Parallel()
 
-	svc := &headValidatorMessageService{ok: false}
+	svc := &viewHeadMessageService{isHead: false, resolved: "turn-e"}
 	h := &MessageHandler{messageService: svc}
-	_, err := h.validatedSessionTurnGraph(context.Background(), "session-1", "turn-b", "", false)
-	if err == nil {
-		t.Fatal("validatedSessionTurnGraph() err = nil, want stale HTTP error")
-	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) {
-		t.Fatalf("error type = %T, want *echo.HTTPError", err)
-	}
-	if httpErr.Code != http.StatusConflict {
-		t.Fatalf("HTTPError.Code = %d, want 409", httpErr.Code)
-	}
-	if svc.graphCalls != 0 {
-		t.Fatalf("graph calls = %d, want 0", svc.graphCalls)
-	}
-}
-
-// TestValidatedSessionTurnGraphSkipsFullGraphForSingleHead verifies the
-// include_graph gate: a session with one active head cannot have variants, so
-// the handler answers from the cheap heads lookup and never runs the graph
-// metadata recursion.
-func TestValidatedSessionTurnGraphSkipsFullGraphForSingleHead(t *testing.T) {
-	t.Parallel()
-
-	svc := &headListerMessageService{headIDs: []string{"turn-b"}}
-	h := &MessageHandler{messageService: svc}
-	graph, err := h.validatedSessionTurnGraph(context.Background(), "session-1", "", "turn-b", true)
+	got, err := h.resolveSessionViewHead(context.Background(), "session-1", "turn-b")
 	if err != nil {
-		t.Fatalf("validatedSessionTurnGraph() error = %v", err)
+		t.Fatalf("resolveSessionViewHead() error = %v", err)
 	}
-	if svc.graphCalls != 0 {
-		t.Fatalf("graph calls = %d, want 0", svc.graphCalls)
+	if got != "turn-e" {
+		t.Fatalf("resolved head = %q, want turn-e", got)
 	}
-	if svc.listerCalls != 1 {
-		t.Fatalf("lister calls = %d, want 1", svc.listerCalls)
-	}
-	if graph.DefaultHeadTurnID != "turn-b" {
-		t.Fatalf("DefaultHeadTurnID = %q, want turn-b", graph.DefaultHeadTurnID)
-	}
-	if len(graph.HeadTurnIDs) != 1 || graph.HeadTurnIDs[0] != "turn-b" {
-		t.Fatalf("HeadTurnIDs = %#v, want [turn-b]", graph.HeadTurnIDs)
-	}
-	if len(graph.Nodes) != 1 || graph.Nodes[0].TurnID != "turn-b" {
-		t.Fatalf("Nodes = %#v, want single head node turn-b", graph.Nodes)
+	if svc.resolverCalls != 1 {
+		t.Fatalf("resolver calls = %d, want 1", svc.resolverCalls)
 	}
 }
 
-// TestValidatedSessionTurnGraphLoadsFullGraphForMultiHead verifies branching
-// sessions still load the full graph after the heads pre-check.
-func TestValidatedSessionTurnGraphLoadsFullGraphForMultiHead(t *testing.T) {
+// TestResolveSessionViewHeadEmptyRequestKeepsDefaultView verifies "" means
+// "use the session default view" and issues no lookups.
+func TestResolveSessionViewHeadEmptyRequestKeepsDefaultView(t *testing.T) {
 	t.Parallel()
 
-	svc := &headListerMessageService{
-		headIDs: []string{"turn-b", "turn-c"},
-		graph: messagepkg.SessionTurnGraph{
-			DefaultHeadTurnID: "turn-c",
-			HeadTurnIDs:       []string{"turn-b", "turn-c"},
-			Nodes: []messagepkg.SessionTurnGraphNode{
-				{TurnID: "turn-a"},
-				{TurnID: "turn-b", ParentTurnID: "turn-a"},
-				{TurnID: "turn-c", ParentTurnID: "turn-a"},
-			},
-		},
-	}
+	svc := &viewHeadMessageService{}
 	h := &MessageHandler{messageService: svc}
-	graph, err := h.validatedSessionTurnGraph(context.Background(), "session-1", "", "turn-c", true)
+	got, err := h.resolveSessionViewHead(context.Background(), "session-1", "  ")
 	if err != nil {
-		t.Fatalf("validatedSessionTurnGraph() error = %v", err)
+		t.Fatalf("resolveSessionViewHead() error = %v", err)
 	}
-	if svc.graphCalls != 1 {
-		t.Fatalf("graph calls = %d, want 1", svc.graphCalls)
+	if got != "" {
+		t.Fatalf("resolved head = %q, want empty", got)
 	}
-	if len(graph.Nodes) != 3 {
-		t.Fatalf("Nodes = %#v, want full graph", graph.Nodes)
-	}
-}
-
-// TestValidatedSessionTurnGraphHeadsPreCheckRejectsStaleHead verifies the
-// heads pre-check also enforces the stale-head contract without touching the
-// full graph.
-func TestValidatedSessionTurnGraphHeadsPreCheckRejectsStaleHead(t *testing.T) {
-	t.Parallel()
-
-	svc := &headListerMessageService{headIDs: []string{"turn-b"}}
-	h := &MessageHandler{messageService: svc}
-	_, err := h.validatedSessionTurnGraph(context.Background(), "session-1", "turn-stale", "turn-b", true)
-	if err == nil {
-		t.Fatal("validatedSessionTurnGraph() err = nil, want stale HTTP error")
-	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) {
-		t.Fatalf("error type = %T, want *echo.HTTPError", err)
-	}
-	if httpErr.Code != http.StatusConflict {
-		t.Fatalf("HTTPError.Code = %d, want 409", httpErr.Code)
-	}
-	if svc.graphCalls != 0 {
-		t.Fatalf("graph calls = %d, want 0", svc.graphCalls)
+	if svc.validatorCalls != 0 || svc.resolverCalls != 0 {
+		t.Fatalf("lookups = %d/%d, want 0/0", svc.validatorCalls, svc.resolverCalls)
 	}
 }
 
-// TestValidatedSessionTurnGraphEmptyHeadsReturnsEmptyGraph covers brand-new
-// sessions: no heads yet, so include_graph responds with an empty graph and
-// skips the recursion.
-func TestValidatedSessionTurnGraphEmptyHeadsReturnsEmptyGraph(t *testing.T) {
+// TestResolveSessionViewHeadUnresolvedFallsBackEmpty covers stale pins: a
+// turn no active head contains resolves to "" so callers fall back to the
+// session default head (the 409 stale-head contract is gone).
+func TestResolveSessionViewHeadUnresolvedFallsBackEmpty(t *testing.T) {
 	t.Parallel()
 
-	svc := &headListerMessageService{headIDs: nil}
+	svc := &viewHeadMessageService{isHead: false, resolved: ""}
 	h := &MessageHandler{messageService: svc}
-	graph, err := h.validatedSessionTurnGraph(context.Background(), "session-1", "", "", true)
+	got, err := h.resolveSessionViewHead(context.Background(), "session-1", "turn-gone")
 	if err != nil {
-		t.Fatalf("validatedSessionTurnGraph() error = %v", err)
+		t.Fatalf("resolveSessionViewHead() error = %v", err)
 	}
-	if svc.graphCalls != 0 {
-		t.Fatalf("graph calls = %d, want 0", svc.graphCalls)
+	if got != "" {
+		t.Fatalf("resolved head = %q, want empty", got)
 	}
-	if len(graph.HeadTurnIDs) != 0 || len(graph.Nodes) != 0 {
-		t.Fatalf("graph = %#v, want empty", graph)
+	if svc.resolverCalls != 1 {
+		t.Fatalf("resolver calls = %d, want 1", svc.resolverCalls)
 	}
 }
 
-type graphOnlyMessageService struct {
+type turnPathMessageService struct {
 	messagepkg.Service
-	graph messagepkg.SessionTurnGraph
+	paths map[string][]string
 }
 
-func (s *graphOnlyMessageService) GetSessionTurnGraph(context.Context, string) (messagepkg.SessionTurnGraph, error) {
-	return s.graph, nil
+func (s *turnPathMessageService) ListSessionTurnPathIDs(_ context.Context, headTurnID string) ([]string, error) {
+	return append([]string(nil), s.paths[headTurnID]...), nil
 }
 
-type headValidatorMessageService struct {
+type viewHeadMessageService struct {
 	messagepkg.Service
-	ok             bool
+	isHead         bool
+	resolved       string
 	validatorCalls int
-	graphCalls     int
+	resolverCalls  int
 }
 
-func (s *headValidatorMessageService) IsSessionTurnHead(context.Context, string, string) (bool, error) {
+func (s *viewHeadMessageService) IsSessionTurnHead(context.Context, string, string) (bool, error) {
 	s.validatorCalls++
-	return s.ok, nil
+	return s.isHead, nil
 }
 
-func (s *headValidatorMessageService) GetSessionTurnGraph(context.Context, string) (messagepkg.SessionTurnGraph, error) {
-	s.graphCalls++
-	return messagepkg.SessionTurnGraph{}, nil
-}
-
-type headListerMessageService struct {
-	messagepkg.Service
-	headIDs     []string
-	graph       messagepkg.SessionTurnGraph
-	listerCalls int
-	graphCalls  int
-}
-
-func (s *headListerMessageService) ListSessionTurnHeadIDs(context.Context, string) ([]string, error) {
-	s.listerCalls++
-	return s.headIDs, nil
-}
-
-func (s *headListerMessageService) GetSessionTurnGraph(context.Context, string) (messagepkg.SessionTurnGraph, error) {
-	s.graphCalls++
-	return s.graph, nil
+func (s *viewHeadMessageService) ResolveSessionTurnHead(context.Context, string, string) (string, error) {
+	s.resolverCalls++
+	return s.resolved, nil
 }
 
 // TestStreamSessionMessageEventsRequiresSessionPath confirms the per-session

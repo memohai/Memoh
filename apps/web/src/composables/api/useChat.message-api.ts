@@ -13,6 +13,7 @@ import type {
   FetchMessagesUIResult,
   SessionMessageStreamEvent,
   UITurn,
+  UITurnMeta,
 } from './useChat.types'
 
 export async function fetchMessagesUI(
@@ -29,7 +30,6 @@ export async function fetchMessagesUI(
       session_id: sid,
       format: 'ui',
       limit: options?.limit ?? 30,
-      ...(options?.includeGraph ? { include_graph: '1' } : {}),
       ...(options?.headTurnId?.trim() ? { head_turn_id: options.headTurnId.trim() } : {}),
       ...(options?.before?.trim() ? { before: options.before.trim() } : {}),
       ...(options?.beforeId?.trim() ? { before_id: options.beforeId.trim() } : {}),
@@ -41,9 +41,9 @@ export async function fetchMessagesUI(
   const result: FetchMessagesUIResult = {
     items: data?.items ?? [],
   }
+  if (data?.head_turn_id) result.head_turn_id = data.head_turn_id
   if (data && 'default_head_turn_id' in data) result.default_head_turn_id = data.default_head_turn_id
-  if (data && 'head_turn_ids' in data) result.head_turn_ids = data.head_turn_ids ?? []
-  if (data && 'nodes' in data) result.nodes = data.nodes ?? []
+  if (data?.turns) result.turns = data.turns
   return result
 }
 
@@ -51,6 +51,8 @@ export interface LocateMessageResult {
   items: UITurn[]
   target_id?: string
   target_external_message_id?: string
+  head_turn_id?: string
+  turns?: UITurnMeta[]
 }
 
 export async function locateMessageUI(
@@ -78,6 +80,8 @@ export async function locateMessageUI(
     items: data?.items ?? [],
     target_id: data?.target_id,
     target_external_message_id: data?.target_external_message_id,
+    head_turn_id: data?.head_turn_id,
+    turns: data?.turns,
   }
 }
 

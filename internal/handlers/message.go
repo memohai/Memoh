@@ -75,27 +75,27 @@ func (h *MessageHandler) SetBackgroundManager(mgr *background.Manager) {
 	h.bgManager = mgr
 }
 
-type sessionTurnGraphUINode struct {
-	TurnID       string `json:"turn_id"`
-	ParentTurnID string `json:"parent_turn_id,omitempty"`
-	Timestamp    string `json:"timestamp,omitempty"`
-	RequestKey   string `json:"request_key,omitempty"`
-	HasUser      bool   `json:"has_user,omitempty"`
-	HasAssistant bool   `json:"has_assistant,omitempty"`
+type sessionTurnMetaUI struct {
+	TurnID         string   `json:"turn_id"`
+	ParentTurnID   string   `json:"parent_turn_id,omitempty"`
+	RequestGroupID string   `json:"request_group_id,omitempty"`
+	SiblingTurnIDs []string `json:"sibling_turn_ids,omitempty"`
+	HasUser        bool     `json:"has_user,omitempty"`
+	HasAssistant   bool     `json:"has_assistant,omitempty"`
 }
 
 type messageUIListResponse struct {
-	Items             []conversation.UITurn    `json:"items"`
-	DefaultHeadTurnID string                   `json:"default_head_turn_id,omitempty"`
-	HeadTurnIDs       []string                 `json:"head_turn_ids,omitempty"`
-	Nodes             []sessionTurnGraphUINode `json:"nodes,omitempty"`
+	Items []conversation.UITurn `json:"items"`
+	// HeadTurnID is the head actually backing this page after server-side
+	// resolution; clients pin follow-up sends and SSE subscriptions to it.
+	HeadTurnID        string              `json:"head_turn_id,omitempty"`
+	DefaultHeadTurnID string              `json:"default_head_turn_id,omitempty"`
+	Turns             []sessionTurnMetaUI `json:"turns,omitempty"`
 }
 
 type messageRawListResponse struct {
 	Items []messagepkg.Message `json:"items"`
 }
-
-const staleSessionHeadMessage = "stale session head"
 
 // Register registers all conversation routes.
 func (h *MessageHandler) Register(e *echo.Echo) {
@@ -148,8 +148,7 @@ func writeSSEJSON(writer io.Writer, flusher http.Flusher, payload any) error {
 // @Param limit query int false "Limit"
 // @Param before query string false "Before"
 // @Param before_id query string false "Message ID at the pagination boundary"
-// @Param head_turn_id query string false "Selected session head turn ID"
-// @Param include_graph query bool false "Include session turn graph metadata"
+// @Param head_turn_id query string false "Any turn ID selecting the session view; resolved server-side to a head"
 // @Success 200 {object} messageUIListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
@@ -184,7 +183,6 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	beforeID := strings.TrimSpace(c.QueryParam("before_id"))
 	format := strings.TrimSpace(c.QueryParam("format"))
 	headTurnID := strings.TrimSpace(c.QueryParam("head_turn_id"))
-	includeGraph := parseBoolQuery(c.QueryParam("include_graph"))
 
 	bot, _, sess, err := h.authorizeMessageSession(c, channelIdentityID, botID, sessionID)
 	if err != nil {
@@ -192,9 +190,13 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	}
 	botID = bot.ID
 	headTurnID = sessionHeadTurnIDForVariantCapableSession(sess, headTurnID)
-	graph, err := h.validatedSessionTurnGraph(c.Request().Context(), sessionID, headTurnID, sess.DefaultHeadTurnID, format == "ui" && includeGraph && !hasBefore)
+	// head_turn_id accepts any turn on the session graph: a real head is used
+	// as-is, any other turn resolves to the newest head containing it, and an
+	// unresolvable turn falls back to the session default view instead of
+	// failing (a stale pinned head self-heals on the next fetch).
+	headTurnID, err = h.resolveSessionViewHead(c.Request().Context(), sessionID, headTurnID)
 	if err != nil {
-		return err
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
 	var messages []messagepkg.Message
@@ -227,93 +229,75 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, messages)
 	items := conversation.ConvertMessagesToUITurns(messages)
 	h.decorateUITurns(c.Request().Context(), botID, sessionID, items)
-	resp := messageUIListResponse{Items: items}
-	if format == "ui" && includeGraph && !hasBefore {
-		graphResp := h.sessionTurnGraphUIResponse(graph)
-		resp.DefaultHeadTurnID = graphResp.DefaultHeadTurnID
-		resp.HeadTurnIDs = graphResp.HeadTurnIDs
-		resp.Nodes = graphResp.Nodes
+	resp := messageUIListResponse{
+		Items:             items,
+		HeadTurnID:        h.resolvedViewHeadForResponse(sess, headTurnID),
+		DefaultHeadTurnID: strings.TrimSpace(sess.DefaultHeadTurnID),
+		Turns:             h.sessionTurnMetaForPage(c.Request().Context(), sess, sessionID, items),
 	}
 	return c.JSON(http.StatusOK, resp)
 }
 
-func (h *MessageHandler) validatedSessionTurnGraph(ctx context.Context, sessionID, headTurnID, defaultHeadTurnID string, needGraph bool) (messagepkg.SessionTurnGraph, error) {
-	head := strings.TrimSpace(headTurnID)
-	if head == "" && !needGraph {
-		return messagepkg.SessionTurnGraph{}, nil
+// resolvedViewHeadForResponse reports the head backing the returned page so
+// clients can pin follow-up sends and SSE subscriptions to it. The default
+// view resolves to the session's default head.
+func (*MessageHandler) resolvedViewHeadForResponse(sess session.Session, resolvedHeadTurnID string) string {
+	if !session.SupportsTurnVariants(sess.Type) {
+		return ""
 	}
-	if head != "" && !needGraph {
-		if validator, ok := h.messageService.(messagepkg.SessionHeadValidator); ok {
-			ok, err := validator.IsSessionTurnHead(ctx, sessionID, head)
-			if err != nil {
-				return messagepkg.SessionTurnGraph{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-			}
-			if !ok {
-				return messagepkg.SessionTurnGraph{}, echo.NewHTTPError(http.StatusConflict, staleSessionHeadMessage)
-			}
-			return messagepkg.SessionTurnGraph{}, nil
-		}
+	if head := strings.TrimSpace(resolvedHeadTurnID); head != "" {
+		return head
 	}
-	// Variants require at least two active heads (a fork keeps the old head
-	// row and adds a new one; a plain append replaces the head in place).
-	// For zero- or single-head sessions the full graph metadata recursion —
-	// the most expensive part of this endpoint — can never surface variants,
-	// so answer from the cheap heads lookup instead.
-	if needGraph {
-		if lister, ok := h.messageService.(messagepkg.SessionHeadLister); ok {
-			headIDs, err := lister.ListSessionTurnHeadIDs(ctx, sessionID)
-			if err != nil {
-				return messagepkg.SessionTurnGraph{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-			}
-			if head != "" && !containsTurnHead(headIDs, head) {
-				return messagepkg.SessionTurnGraph{}, echo.NewHTTPError(http.StatusConflict, staleSessionHeadMessage)
-			}
-			if len(headIDs) <= 1 {
-				return linearSessionTurnGraph(defaultHeadTurnID, headIDs), nil
-			}
-			// Multi-head session: fall through to the full graph load below.
-		}
-	}
-	graph, err := h.messageService.GetSessionTurnGraph(ctx, sessionID)
-	if err != nil {
-		return messagepkg.SessionTurnGraph{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	if head != "" && !sessionTurnGraphHasHead(graph, head) {
-		return messagepkg.SessionTurnGraph{}, echo.NewHTTPError(http.StatusConflict, staleSessionHeadMessage)
-	}
-	return graph, nil
+	return strings.TrimSpace(sess.DefaultHeadTurnID)
 }
 
-func containsTurnHead(headIDs []string, head string) bool {
-	for _, candidate := range headIDs {
-		if strings.TrimSpace(candidate) == head {
-			return true
-		}
+// sessionTurnMetaForPage assembles per-turn variant metadata for one UI page:
+// each page turn plus every sibling variant reachable from the session's
+// active heads. Sessions that cannot branch skip the lookup.
+func (h *MessageHandler) sessionTurnMetaForPage(ctx context.Context, sess session.Session, sessionID string, items []conversation.UITurn) []sessionTurnMetaUI {
+	if !session.SupportsTurnVariants(sess.Type) {
+		return nil
 	}
-	return false
-}
-
-// linearSessionTurnGraph builds the include_graph response for a session that
-// cannot have variants (zero or one active head) without running the graph
-// metadata recursion. Each head gets a minimal node so clients that index
-// heads by node presence still see the head; node metadata (parent chain,
-// timestamps, request keys) is only meaningful for variant navigation, which
-// a linear session never renders.
-func linearSessionTurnGraph(defaultHeadTurnID string, headIDs []string) messagepkg.SessionTurnGraph {
-	graph := messagepkg.SessionTurnGraph{
-		DefaultHeadTurnID: strings.TrimSpace(defaultHeadTurnID),
-		HeadTurnIDs:       make([]string, 0, len(headIDs)),
-		Nodes:             make([]messagepkg.SessionTurnGraphNode, 0, len(headIDs)),
+	lister, ok := h.messageService.(messagepkg.SessionTurnMetaLister)
+	if !ok {
+		return nil
 	}
-	for _, headID := range headIDs {
-		headID = strings.TrimSpace(headID)
-		if headID == "" {
+	seen := make(map[string]struct{}, len(items))
+	turnIDs := make([]string, 0, len(items))
+	for _, item := range items {
+		turnID := strings.TrimSpace(item.TurnID)
+		if turnID == "" {
 			continue
 		}
-		graph.HeadTurnIDs = append(graph.HeadTurnIDs, headID)
-		graph.Nodes = append(graph.Nodes, messagepkg.SessionTurnGraphNode{TurnID: headID})
+		if _, dup := seen[turnID]; dup {
+			continue
+		}
+		seen[turnID] = struct{}{}
+		turnIDs = append(turnIDs, turnID)
 	}
-	return graph
+	if len(turnIDs) == 0 {
+		return nil
+	}
+	metas, err := lister.ListSessionTurnMeta(ctx, sessionID, turnIDs)
+	if err != nil {
+		h.logger.Warn("list session turn meta failed",
+			slog.String("session_id", sessionID),
+			slog.Any("error", err),
+		)
+		return nil
+	}
+	out := make([]sessionTurnMetaUI, 0, len(metas))
+	for _, meta := range metas {
+		out = append(out, sessionTurnMetaUI{
+			TurnID:         meta.TurnID,
+			ParentTurnID:   meta.ParentTurnID,
+			RequestGroupID: meta.RequestGroupID,
+			SiblingTurnIDs: meta.SiblingTurnIDs,
+			HasUser:        meta.HasUser,
+			HasAssistant:   meta.HasAssistant,
+		})
+	}
+	return out
 }
 
 func sessionHeadTurnIDForVariantCapableSession(sess session.Session, headTurnID string) string {
@@ -321,19 +305,6 @@ func sessionHeadTurnIDForVariantCapableSession(sess session.Session, headTurnID 
 		return ""
 	}
 	return strings.TrimSpace(headTurnID)
-}
-
-func sessionTurnGraphHasHead(graph messagepkg.SessionTurnGraph, headTurnID string) bool {
-	head := strings.TrimSpace(headTurnID)
-	if head == "" {
-		return false
-	}
-	for _, candidate := range graph.HeadTurnIDs {
-		if strings.TrimSpace(candidate) == head {
-			return true
-		}
-	}
-	return false
 }
 
 func (h *MessageHandler) listLatestBySessionHead(ctx context.Context, sessionID, headTurnID string, limit int32) ([]messagepkg.Message, error) {
@@ -350,15 +321,6 @@ func (h *MessageHandler) listBeforeBySessionHead(ctx context.Context, sessionID,
 	return h.messageService.ListBeforeBySession(ctx, sessionID, before, beforeID, limit)
 }
 
-func parseBoolQuery(raw string) bool {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "1", "true", "t", "yes", "y", "on":
-		return true
-	default:
-		return false
-	}
-}
-
 // LocateMessage godoc
 // @Summary Locate a bot history message
 // @Description Locate a session message by external message ID and return nearby UI turns
@@ -369,7 +331,7 @@ func parseBoolQuery(raw string) bool {
 // @Param external_message_id query string true "External message ID"
 // @Param before query int false "Messages before target"
 // @Param after query int false "Messages after target"
-// @Param head_turn_id query string false "Selected session head turn ID"
+// @Param head_turn_id query string false "Any turn ID selecting the session view; resolved server-side to a head"
 // @Success 200 {object} map[string]any
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
@@ -399,8 +361,9 @@ func (h *MessageHandler) LocateMessage(c echo.Context) error {
 	}
 	botID = bot.ID
 	headTurnID := sessionHeadTurnIDForVariantCapableSession(sess, strings.TrimSpace(c.QueryParam("head_turn_id")))
-	if _, err := h.validatedSessionTurnGraph(c.Request().Context(), sessionID, headTurnID, sess.DefaultHeadTurnID, false); err != nil {
-		return err
+	headTurnID, err = h.resolveSessionViewHead(c.Request().Context(), sessionID, headTurnID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	externalMessageID := strings.TrimSpace(c.QueryParam("external_message_id"))
 	if externalMessageID == "" {
@@ -423,11 +386,18 @@ func (h *MessageHandler) LocateMessage(c echo.Context) error {
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, located.Messages)
 	items := conversation.ConvertMessagesToUITurns(located.Messages)
 	h.decorateUITurns(c.Request().Context(), botID, sessionID, items)
-	return c.JSON(http.StatusOK, map[string]any{
+	response := map[string]any{
 		"items":                      items,
 		"target_id":                  located.TargetID,
 		"target_external_message_id": externalMessageID,
-	})
+	}
+	if head := h.resolvedViewHeadForResponse(sess, headTurnID); head != "" {
+		response["head_turn_id"] = head
+	}
+	if turns := h.sessionTurnMetaForPage(c.Request().Context(), sess, sessionID, items); len(turns) > 0 {
+		response["turns"] = turns
+	}
+	return c.JSON(http.StatusOK, response)
 }
 
 func (h *MessageHandler) locateByExternalIDBySessionHead(ctx context.Context, sessionID, headTurnID, externalMessageID string, before, after int32) (messagepkg.LocateResult, error) {
@@ -492,27 +462,6 @@ func firstNonEmptyString(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func (*MessageHandler) sessionTurnGraphUIResponse(graph messagepkg.SessionTurnGraph) messageUIListResponse {
-	nodes := make([]sessionTurnGraphUINode, 0, len(graph.Nodes))
-
-	for _, node := range graph.Nodes {
-		nodes = append(nodes, sessionTurnGraphUINode{
-			TurnID:       strings.TrimSpace(node.TurnID),
-			ParentTurnID: strings.TrimSpace(node.ParentTurnID),
-			Timestamp:    strings.TrimSpace(node.Timestamp),
-			RequestKey:   strings.TrimSpace(node.RequestKey),
-			HasUser:      node.HasUser,
-			HasAssistant: node.HasAssistant,
-		})
-	}
-
-	return messageUIListResponse{
-		DefaultHeadTurnID: graph.DefaultHeadTurnID,
-		HeadTurnIDs:       graph.HeadTurnIDs,
-		Nodes:             nodes,
-	}
 }
 
 func (h *MessageHandler) decorateUITurns(ctx context.Context, botID, sessionID string, items []conversation.UITurn) {

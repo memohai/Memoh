@@ -1998,9 +1998,13 @@ export type HandlersMemorySearchPayload = {
 
 export type HandlersMessageUiListResponse = {
     default_head_turn_id?: string;
-    head_turn_ids?: Array<string>;
+    /**
+     * HeadTurnID is the head actually backing this page after server-side
+     * resolution; clients pin follow-up sends and SSE subscriptions to it.
+     */
+    head_turn_id?: string;
     items?: Array<ConversationUiTurn>;
-    nodes?: Array<HandlersSessionTurnGraphUiNode>;
+    turns?: Array<HandlersSessionTurnMetaUi>;
 };
 
 export type HandlersOauthAuthorizeRequest = {
@@ -2018,12 +2022,12 @@ export type HandlersOauthExchangeRequest = {
     state?: string;
 };
 
-export type HandlersSessionTurnGraphUiNode = {
+export type HandlersSessionTurnMetaUi = {
     has_assistant?: boolean;
     has_user?: boolean;
     parent_turn_id?: string;
-    request_key?: string;
-    timestamp?: string;
+    request_group_id?: string;
+    sibling_turn_ids?: Array<string>;
     turn_id?: string;
 };
 
@@ -7051,13 +7055,9 @@ export type GetBotsByBotIdMessagesData = {
          */
         before_id?: string;
         /**
-         * Selected session head turn ID
+         * Any turn ID selecting the session view; resolved server-side to a head
          */
         head_turn_id?: string;
-        /**
-         * Include session turn graph metadata
-         */
-        include_graph?: boolean;
     };
     url: '/bots/{bot_id}/messages';
 };
@@ -7118,7 +7118,7 @@ export type GetBotsByBotIdMessagesLocateData = {
          */
         after?: number;
         /**
-         * Selected session head turn ID
+         * Any turn ID selecting the session view; resolved server-side to a head
          */
         head_turn_id?: string;
     };
